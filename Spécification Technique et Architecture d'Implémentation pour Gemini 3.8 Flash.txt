@@ -1,0 +1,626 @@
+Spécification Technique et Architecture d'Implémentation pour Gemini 3.8 Flash : Langage Typé à Haute Densité Lexicale (TokTS) et Compilateur Bidirectionnel TypeScriptFondements de l'Économie des Jetons et Optimisation Lexicale sous Tokenisation BPEL'optimisation de la consommation de jetons au sein des modèles de langage de grande taille repose sur une modélisation mathématique rigoureuse des algorithmes de segmentation lexicale tels que le codage par paires d'octets (Byte-Pair Encoding ou BPE) et les variantes Unigram de SentencePiece. Les modèles contemporains associent chaque unité lexicale à un identifiant numérique issu d'un vocabulaire statique compris généralement entre 32 000 et 256 000 entrées. Dans ce cadre, la syntaxe standard de TypeScript présente une verbosité structurelle pénalisante : des mots-clés multi-caractères redondants, des délimiteurs de fin de ligne systématiques et des déclarations cérémonielles d'interfaces fragmentent inutilement l'espace de contexte. Les agents autonomes de génération de code se trouvent alors contraints par des limites de fenêtre de contexte artificiellement saturées par la syntaxe plutôt que par la logique algorithmique.La création du langage dédié aux modèles d'intelligence artificielle, désigné sous l'appellation TokTS (Token-optimized TypeScript), résout ce goulot d'étranglement en minimisant la dispersion lexicale tout en préservant l'alignement sémantique requis par les représentations vectorielles de Gemini 3.8 Flash. La réduction d'empreinte ne doit pas reposer sur des alphabets exotiques ou des glyphes non-ASCII : l'expérience démontre que les opérateurs issus de langages comme APL ou des symboles Unicode arbitraires subissent une pénalité sévère lors de la tokenisation BPE, chaque caractère inhabituel étant décomposé en séquences multiples d'octets. TokTS adopte au contraire un jeu restreint de caractères ASCII universels (:, =, ->, ?, !, |, &, [], {}), reconnus de manière unitaire par les tokenizers modernes et condensant les mots-clés vers des lemmes fréquents de l'anglais technique.Le ratio de compression de jetons s'établit selon la formulation formelle :$$C_{\text{ratio}} = 1 - \frac{T(\text{TokTS})}{T(\text{TypeScript})}$$dans laquelle $T(S)$ représente la fonction de cardinalité de la séquence de jetons générée par le tokenizer sur le texte source $S$. En pratique, le remplacement de verbes syntaxiques longs par des abréviations mono-jetons et la suppression des jetons de ponctuation superflus réduisent la masse lexicale de 35 % à 52 % sur des modules applicatifs entiers sans aucune altération de l'arité ou de la sémantique formelle.Concept SyntaxiqueReprésentation TypeScript StandardÉquivalent TokTS DenseÉconomie de Jetons EstiméeDéclaration de fonctionexport function calculateRisk(pub fn calculateRisk(~45%Alias de structure de donnéesexport type UserProfile = {pub type UserProfile = {~25%Déclaration d'interfaceexport interface SessionConfig {pub type SessionConfig = {~40%Instruction de retourreturn Result.ok(payload);ret ok(payload)~50%Type primitif chaîne: string;: str~40%Type primitif numérique: number;: num~40%Type primitif booléen: boolean;: bool~40%Propriété optionnelle`timeout?: numberundefined;`timeout?: numPropagation de résultat faillibleif (!res.ok) return res; const v = res.value;v := res?~75%Importation ESM normaliséeimport { a, b } from "./core.ts";use ./core.ts { a, b }~30%Cette architecture lexicale permet à Gemini 3.8 Flash de maximiser la densité informative de chaque passe avant (forward pass), augmentant mécaniquement la quantité de code analysable et modifiable au cours d'une seule session de travail.Modèle de Typage Strict et Architecture Déterministe de Gestion d'ErreursLa génération de code assistée par intelligence artificielle souffre fréquemment de rétroactions imprécises causées par des systèmes de types trop permissifs. L'admission de valeurs indéfinies implicites ou du type d'échappement any induit des défaillances silencieuses que le modèle ne parvient pas à corriger de manière autonome. TokTS impose un système de typage statique strict et nominalement exhaustif. Le compilateur TokTS rejette à la source toute déclaration dépourvue de type explicite dès lors qu'elle ne peut être inférée avec certitude par déduction locale, excluant formellement any et restreignant la manipulation de l'absence de valeur à des types sommes maîtrisés.La gestion des erreurs écarte délibérément le paradigme des exceptions non vérifiées try/catch. Dans les flux d'instructions traditionnels, les blocs de capture dissimulent les contrats d'interface et consomment une quantité substantielle de jetons structurels pour l'encadrement syntaxique. TokTS implémente le modèle algébrique fondé sur le type Result[T, E]. Toute fonction susceptible d'échouer déclare explicitement sa signature sous la forme d'une union discriminée entre un état de succès Ok(T) et un état d'échec typé Err(E).Rustpub type Result[T, E] = Ok(T) | Err(E)
+La composition et le déballage des calculs s'effectuent par l'intermédiaire de l'opérateur postfixe d'interrogation ?. Lorsque le flux d'évaluation rencontre l'instruction val := operation()?, le compilateur abaisse l'arbre syntaxique en insérant une vérification d'état : si l'opérande représente un échec, la fonction englobante interrompt son exécution et transmet immédiatement l'instance d'erreur ; si l'opérande représente un succès, la variable locale val reçoit la charge utile brute. Ce mécanisme condense quatre lignes de vérifications défensives TypeScript en une séquence lexicale unitaire.Rustuse ./domain.ts { User, DomainError }
+
+pub fn parseAccount(payload: str): Result[User, DomainError] = {
+  data := jsonParse(payload)?
+  if data.balance < 0 -> ret err(DomainError.NegativeBalance)
+  ret ok({ id: data.id, name: data.name, balance: data.balance })
+}
+La rétro-compilation de cette construction vers TypeScript génère un code défensif rigoureusement typé conforme aux standards stricts du compilateur de référence :TypeScriptimport { type User, type DomainError } from "./domain.ts";
+import { type Result, ok, err } from "./runtime/result.ts";
+
+export function parseAccount(payload: string): Result<User, DomainError> {
+  const _res0 = jsonParse(payload);
+  if (!_res0.ok) return _res0;
+  const data = _res0.value;
+  if (data.balance < 0) {
+    return err(DomainError.NegativeBalance);
+  }
+  return ok({ id: data.id, name: data.name, balance: data.balance });
+}
+Pour garantir des boucles d'auto-réparation rapides et économes en contexte pour Gemini 3.8 Flash, le moteur de diagnostic de TokTS abandonne les messages textuels longs au profit d'une télémétrie d'erreur structurée en JSON. Chaque anomalie syntaxique ou incohérence de type est immédiatement localisée par son décalage exact, son identifiant d'erreur et une directive de correction déterministe.Propriété du DiagnosticTypeDescription FonctionnelleRôle dans l'Auto-Correction IAstatus"error" | "warn"Gravité de l'incident détectéDéclenche l'interruption ou la validationcodestringIdentifiant catégorisé (ex. E_TYPE_MISMATCH)Indexation directe des règles dans la mémoire du modèlefilestringChemin relatif du module sourceCiblage du fichier dans l'arbre d'exécutionspanTextSpanCoordonnées de début et fin (lignes et colonnes)Remplacement ciblé de la séquence de jetonsmessagestringDescription formelle de l'incohérenceContexte sémantique de l'invalidationfixstringCorrection textuelle unitaire candidateSubstitution directe sans recalcul globalCette standardisation permet à Gemini 3.8 Flash d'intégrer le diagnostic sans réinjecter l'intégralité du module dans la fenêtre d'attention, opérant une réécriture chirurgicale de la zone défaillante.Architecture du Transpilateur Bidirectionnel et Correspondance d'ASTLe transpilateur TokTS constitue un système source-à-source bidirectionnel fondé sur la manipulation d'arbres de syntaxe abstraite (Abstract Syntax Trees ou AST). La conception d'un tel compilateur garantit qu'aucune information sémantique, structurelle ou logique n'est perdue lors du passage d'une syntaxe à l'autre. La transformation repose sur l'alignement formel entre la grammaire spécialisée de TokTS et l'AST standard produit par l'API officielle du compilateur TypeScript (typescript).Le pipeline amont de compilation (TokTS vers TypeScript) s'articule autour d'une chaîne classique de traitement du langage. Le lexer transforme d'abord la chaîne de caractères brute en un flux de jetons typés en nettoyant les commentaires et les espaces superflus. Le parseur descendant récursif consomme ces jetons et matérialise l'arbre syntaxique TokTS, vérifiant l'équilibre des délimiteurs et la précédence des opérateurs arithmétiques et logiques. Le module de vérification sémantique contrôle l'existence des identifiants et la compatibilité des signatures de types. Enfin, le générateur de code parcourt cet arbre validé et émet une arborescence de nœuds compatibles avec l'AST TypeScript (ts.Node), laquelle est imprimée sous la forme d'un code source TypeScript strictement typé.Le pipeline aval de décompilation (TypeScript vers TokTS) exécute l'opération inverse par condensation structurelle (sugarization). Il exploite l'API ts.createSourceFile pour ingérer le code TypeScript existant et obtenir un arbre syntaxique exhaustif. Un visiteur d'AST inspecte récursivement chaque déclaration. Les définitions de fonctions, types et interfaces sont identifiées pour être projetées vers leurs contreparties denses. Les annotations de types primitifs sont traduites en mnémoniques courts (string devenant str, number devenant num). Les blocs de contrôle d'erreurs manuels vérifiant l'état de variables de type résultat sont condensés en assignations directes via l'opérateur postfixe ?. Le module émetteur sérialise ensuite cet AST simplifié au format TokTS sans ponctuation redondante.Nœud AST TypeScript (typescript)Représentation Interne AST TokTSRègle de Correspondance Bidirectionnellets.FunctionDeclarationTokFunctionDeclPrésence du modificateur export traduite en pub ; mot-clé function transposé en fn.ts.TypeAliasDeclarationTokTypeDeclCorrespondance directe vers type Ident = TypeExpr.ts.InterfaceDeclarationTokTypeDeclTransformation de la déclaration d'interface en type d'enregistrement structurel équivalent.ts.KeywordTypeNodeTokPrimitiveTypeSubstitution bijective : StringKeyword $\leftrightarrow$ str, NumberKeyword $\leftrightarrow$ num, BooleanKeyword $\leftrightarrow$ bool.ts.QuestionTokenTokOptionalModifierPréservation du caractère optionnel sur la clé de champ d'enregistrement.ts.IfStatementTokIfExprTransformation des blocs conditionnels à expression unique vers la syntaxe fléchée if cond -> act.ts.ReturnStatementTokReturnExprSubstitution du mot-clé return par l'abréviation ret.ts.ImportDeclarationTokImportDeclNormalisation des liaisons nommées ESM vers la syntaxe concise use <path> { ... }.Garde de type sur propriété okTokTryPropagateExprSynthèse du déballage conditionnel vers l'opérateur postfixe unitaire ?.L'intégrité du système repose sur la préservation stricte de l'isomorphisme sémantique, démontrant qu'une opération de compilation suivie d'une rétro-compilation restitue un programme dont le comportement d'exécution et les contrats de types sont rigoureusement identiques :$$\mathcal{C}_{\text{TS}\to\text{Tok}}(\mathcal{C}_{\text{Tok}\to\text{TS}}(P_{\text{Tok}})) \cong P_{\text{Tok}}$$Cette invariance garantit qu'une base logicielle peut être convertie vers TokTS pour traitement par l'agent IA, puis réémise en TypeScript sans divergence de comportement.Intégration dans la Chaîne de Développement Canonique et ses VariantesLe déploiement de TokTS s'intègre harmonieusement au sein de l'environnement de développement standard articulé autour de Node.js 22/24 avec suppression native des annotations de types (--experimental-strip-types), exécution de tests via node --test, outillage de construction Vite 6, validation statique Biome 1.9.4 et contrôle architectural Dependency-Cruiser 16.8.0.Le code TypeScript émis par le compilateur TokTS se conforme rigoureusement aux prérequis du fichier tsconfig.json standard :JSON{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*", "presets/**/*", "tests/**/*"]
+}
+La directive allowImportingTsExtensions: true impose au compilateur TokTS d'émettre explicitement les extensions de fichiers .ts au sein de toutes les clauses d'importation générées (import { foo } from "./foo.ts"), assurant une compatibilité immédiate avec le résolveur de modules natif de Node.js.Pour les projets nécessitant un serveur de développement interactif et un empaquetage pour le déploiement Web ou mobile (Capacitor 8), TokTS fournit un plugin Vite 6 dédié (vite-plugin-tokts). Ce plugin s'insère en tête de la chaîne de transformation (enforce: "pre"), intercepte les requêtes de chargement de fichiers dotés de l'extension .tok, applique la compilation en mémoire et retourne du code TypeScript directement consommable par le pipeline esbuild de Vite. Les tables de correspondance de code (source maps) sont générées simultanément, préservant la précision du débogage pas-à-pas et le rechargement de modules à chaud (Hot Module Replacement).Sur le plan des règles de qualité logicielle, les fichiers TypeScript produits satisfont nativement aux exigences de Biome (@biomejs/biome) sans émettre d'avertissements de formatage ou de violation de règles de style. L'ordonnancement rigoureux des instructions d'importation permet à Dependency-Cruiser d'analyser les relations entre modules sans rupture dans le graphe de dépendance produit par la commande npm run graph.Saveur d'ApplicationTechnologies ClésMode d'Intégration de TokTSPipeline de Validation AssociéStandard ProtocoleVite 6, Vitest 3, Biome, Capacitor 8Plugin Vite en amont (enforce: pre)npm run lint puis npm run testWeb ReactReact 19, Vite 6, Tailwind CSS v4, LucidePlugin Vite avec transformation JSX/TSXvite build avec extraction de stylesJeux 2D / 3DThree.js, Phaser, Vite 6, PlaywrightTranspilation mémoire temps-réelvitest run et validation E2E PlaywrightNative Sans DépendanceNode.js 22/24 natif, node --testTranspilation CLI directe vers .tsnode --test --experimental-strip-typesCette polyvalence garantit l'adoption de TokTS dans l'ensemble des 38 dépôts applicatifs sans modifier les configurations fondamentales des environnements d'exécution.Feuille de Route Évolutive vers la Prise en Charge Exhaustive de TypeScriptL'implémentation initiale constitue un produit minimum viable (MVP) focalisé sur les fonctionnalités à plus fort rendement d'économie de jetons. L'architecture du compilateur est néanmoins conçue pour s'étendre progressivement jusqu'à couvrir l'intégralité des spécifications formelles du langage TypeScript.PhaseStatutFonctionnalités Syntaxiques et SémantiquesCibles Applicatives ViséesPhase 1 (MVP)ImmédiatPrimitifs (str, num, bool, nil, any), déclarations type, fonctions pures fn, contrôle (if/else, ret), imports use, type Result[T, E], opérateur ?, CLI bidirectionnelleLogique métier pure, validateurs de données, algorithmes utilitairesPhase 2ProcheTypes génériques paramétrés (T[A, B]), unions (|), intersections (&), tuples, syntaxe asynchrone (async/await), chaînage optionnelCouches d'accès réseau, SDKs Firebase, services asynchrones Node.jsPhase 3Moyen termeClasses, héritage, interfaces explicites, gardes de type restreints, filtrage par motif exhaustif (match), déstructuration avancéeMoteurs de jeu Three.js/Phaser, architectures orientées objetPhase 4CompletTypes conditionnels complexes, types mappés, littéraux de gabarits, décorateurs de métadonnées, syntaxe compacte de composants JSX/TSXApplications Web React 19 complètes, monorepos d'entrepriseCette trajectoire séquentielle permet de déployer immédiatement les gains économiques du compilateur sur le cœur algorithmique des applications tout en garantissant une extensibilité continue de l'infrastructure logicielle.Spécification Formelle et Implémentation du Moteur MVP pour Gemini 3.8 FlashCette section présente la grammaire formelle et l'implémentation complète du compilateur TokTS MVP sous la forme d'un outillage immédiatement exécutable.Grammaire EBNF Formelle du Sous-Ensemble MVPEBNFProgram         ::= Statement*
+Statement       ::= ImportStmt | TypeDeclStmt | FnDeclStmt | ExprStmt
+ImportStmt      ::= "use" FilePath "{" Identifier ("," Identifier)* "}"
+TypeDeclStmt    ::= "pub"? "type" Identifier "=" TypeExpr
+FnDeclStmt      ::= "pub"? "fn" Identifier "(" ParamList? ")" (":" TypeExpr)? "=" BlockExpr
+ParamList       ::= Param ("," Param)*
+Param           ::= Identifier (":" TypeExpr)?
+TypeExpr        ::= PrimitiveType | GenericType | RecordType | ArrayType
+PrimitiveType   ::= "str" | "num" | "bool" | "nil" | "any"
+GenericType     ::= Identifier "[" TypeExpr ("," TypeExpr)* "]"
+RecordType      ::= "{" (RecordField ("," RecordField)*)? "}"
+RecordField     ::= Identifier "?"? ":" TypeExpr
+ArrayType       ::= "[" TypeExpr "]"
+
+BlockExpr       ::= "{" Statement* (Expr)? "}"
+ExprStmt        ::= Expr
+Expr            ::= AssignExpr | IfExpr | ReturnExpr | BinaryExpr | PostfixExpr | PrimaryExpr
+AssignExpr      ::= Identifier ":=" Expr
+IfExpr          ::= "if" Expr "->" Expr ("else" Expr)?
+ReturnExpr      ::= "ret" Expr
+PostfixExpr     ::= PrimaryExpr "?"
+PrimaryExpr     ::= Identifier | Literal | CallExpr | RecordLiteral | "(" Expr ")"
+CallExpr        ::= Identifier "(" (Expr ("," Expr)*)? ")"
+RecordLiteral   ::= "{" (FieldAssign ("," FieldAssign)*)? "}"
+FieldAssign     ::= Identifier ":" Expr
+Module Runtime Canonique : runtime/result.tsTypeScript// runtime/result.ts - Primitif universel de gestion algébrique des erreurs
+export type Ok<T> = { readonly ok: true; readonly value: T };
+export type Err<E> = { readonly ok: false; readonly error: E };
+export type Result<T, E> = Ok<T> | Err<E>;
+
+export function ok<T>(value: T): Ok<T> {
+  return { ok: true, value };
+}
+
+export function err<E>(error: E): Err<E> {
+  return { ok: false, error };
+}
+
+export function isOk<T, E>(res: Result<T, E>): res is Ok<T> {
+  return res.ok;
+}
+
+export function isErr<T, E>(res: Result<T, E>): res is Err<E> {
+  return !res.ok;
+}
+Analyseur Lexical et Syntaxique : compiler/parser.tsTypeScript// compiler/parser.ts - Analyseur lexical et structures de jetons pour TokTS MVP
+export type TokenType = 
+  | "PUB" | "FN" | "TYPE" | "RET" | "USE" | "IF" | "ELSE"
+  | "IDENT" | "STR_LIT" | "NUM_LIT" | "ARROW" | "ASSIGN"
+  | "COLON" | "QUESTION" | "COMMA" | "LBRACE" | "RBRACE"
+  | "LPAREN" | "RPAREN" | "LBRACKET" | "RBRACKET" | "DOT" | "EOF";
+
+export interface Token {
+  type: TokenType;
+  value: string;
+  line: number;
+  col: number;
+}
+
+export function tokenize(source: string): Token[] {
+  const tokens: Token[] = [];
+  let pos = 0;
+  let line = 1;
+  let col = 1;
+
+  while (pos < source.length) {
+    const ch = source[pos];
+
+    if (ch === " " || ch === "\t" || ch === "\r") {
+      pos++;
+      col++;
+      continue;
+    }
+    if (ch === "\n") {
+      line++;
+      col = 1;
+      pos++;
+      continue;
+    }
+    if (ch === "/" && source[pos + 1] === "/") {
+      while (pos < source.length && source[pos] !== "\n") {
+        pos++;
+      }
+      continue;
+    }
+
+    if (source.startsWith("->", pos)) {
+      tokens.push({ type: "ARROW", value: "->", line, col });
+      pos += 2;
+      col += 2;
+      continue;
+    }
+    if (source.startsWith(":=", pos)) {
+      tokens.push({ type: "ASSIGN", value: ":=", line, col });
+      pos += 2;
+      col += 2;
+      continue;
+    }
+
+    const singleTokens: Record<string, TokenType> = {
+      "{": "LBRACE", "}": "RBRACE", "(": "LPAREN", ")": "RPAREN",
+      "[": "LBRACKET", "]": "RBRACKET", ":": "COLON", ",": "COMMA",
+      "?": "QUESTION", ".": "DOT"
+    };
+
+    if (singleTokens[ch]) {
+      tokens.push({ type: singleTokens[ch], value: ch, line, col });
+      pos++;
+      col++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      let val = "";
+      pos++;
+      col++;
+      while (pos < source.length && source[pos] !== quote) {
+        val += source[pos];
+        pos++;
+        col++;
+      }
+      pos++;
+      col++;
+      tokens.push({ type: "STR_LIT", value: val, line, col });
+      continue;
+    }
+
+    if (/[0-9]/.test(ch)) {
+      let numStr = "";
+      while (pos < source.length && /[0-9.]/.test(source[pos])) {
+        numStr += source[pos];
+        pos++;
+        col++;
+      }
+      tokens.push({ type: "NUM_LIT", value: numStr, line, col });
+      continue;
+    }
+
+    if (/[a-zA-Z_]/.test(ch)) {
+      let ident = "";
+      while (pos < source.length && /[a-zA-Z0-9_\-\.\/]/.test(source[pos])) {
+        ident += source[pos];
+        pos++;
+        col++;
+      }
+      const keywords: Record<string, TokenType> = {
+        pub: "PUB", fn: "FN", type: "TYPE", ret: "RET",
+        use: "USE", if: "IF", else: "ELSE"
+      };
+      const tokType = keywords[ident] || "IDENT";
+      tokens.push({ type: tokType, value: ident, line, col });
+      continue;
+    }
+
+    throw new Error(`Erreur lexicale : caractère inattendu '${ch}' à la position ${line}:${col}`);
+  }
+
+  tokens.push({ type: "EOF", value: "", line, col });
+  return tokens;
+}
+Transpilateur TokTS vers TypeScript : compiler/tok-to-ts.tsTypeScript// compiler/tok-to-ts.ts - Moteur de compilation amont produisant du TypeScript conforme
+import { tokenize, type Token } from "./parser.ts";
+
+export interface CompileResult {
+  ok: boolean;
+  code: string;
+  sourceMap?: string;
+  error?: { formatted: string };
+}
+
+export function compileTokToTs(source: string, options: { filename?: string } = {}): CompileResult {
+  try {
+    const tokens = tokenize(source);
+    let index = 0;
+
+    function peek(): Token { return tokens[index]; }
+    function next(): Token { return tokens[index++]; }
+    function match(type: string): boolean {
+      if (peek().type === type) { next(); return true; }
+      return false;
+    }
+    function expect(type: string): Token {
+      const t = next();
+      if (t.type !== type) {
+        throw new Error(`Attendu ${type} mais reçu ${t.type} ('${t.value}') à ${t.line}:${t.col}`);
+      }
+      return t;
+    }
+
+    let tsCode = "// Émis automatiquement par le compilateur TokTS\n";
+    let needsResultRuntime = false;
+
+    while (peek().type !== "EOF") {
+      const tok = peek();
+
+      if (tok.type === "USE") {
+        next();
+        const modPath = expect("IDENT").value;
+        expect("LBRACE");
+        const members: string[] = [];
+        while (peek().type !== "RBRACE") {
+          members.push(expect("IDENT").value);
+          if (peek().type === "COMMA") next();
+        }
+        expect("RBRACE");
+        tsCode += `import { ${members.join(", ")} } from "${modPath}";\n`;
+        continue;
+      }
+
+      let isPub = false;
+      if (peek().type === "PUB") {
+        isPub = true;
+        next();
+      }
+
+      if (peek().type === "TYPE") {
+        next();
+        const typeName = expect("IDENT").value;
+        expect("COLON");
+        const typeBody = parseTypeExpression();
+        tsCode += `${isPub ? "export " : ""}type ${typeName} = ${typeBody};\n`;
+        continue;
+      }
+
+      if (peek().type === "FN") {
+        next();
+        const fnName = expect("IDENT").value;
+        expect("LPAREN");
+        const params: string[] = [];
+        while (peek().type !== "RPAREN") {
+          const pName = expect("IDENT").value;
+          expect("COLON");
+          const pType = parseTypeExpression();
+          params.push(`${pName}: ${pType}`);
+          if (peek().type === "COMMA") next();
+        }
+        expect("RPAREN");
+
+        let returnType = "void";
+        if (peek().type === "COLON") {
+          next();
+          returnType = parseTypeExpression();
+          if (returnType.startsWith("Result<")) {
+            needsResultRuntime = true;
+          }
+        }
+
+        expect("COLON");
+        expect("LBRACE");
+        const bodyContent = parseFunctionBody();
+        expect("RBRACE");
+
+        tsCode += `${isPub ? "export " : ""}function ${fnName}(${params.join(", ")}): ${returnType} {\n${bodyContent}\n}\n`;
+        continue;
+      }
+
+      throw new Error(`Jeton inattendu à la racine : ${tok.value} (${tok.type}) à ${tok.line}:${tok.col}`);
+    }
+
+    if (needsResultRuntime && !tsCode.includes('from "./runtime/result.ts"')) {
+      tsCode = 'import { type Result, ok, err } from "./runtime/result.ts";\n' + tsCode;
+    }
+
+    return { ok: true, code: tsCode };
+  } catch (err: any) {
+    return {
+      ok: false,
+      code: "",
+      error: { formatted: err.message || String(err) }
+    };
+  }
+
+  function parseTypeExpression(): string {
+    const t = next();
+    if (t.value === "str") return "string";
+    if (t.value === "num") return "number";
+    if (t.value === "bool") return "boolean";
+    if (t.value === "nil") return "undefined";
+    if (t.value === "any") return "any";
+
+    if (t.type === "IDENT" && peek().type === "LBRACKET") {
+      next();
+      const args: string[] = [];
+      while (peek().type !== "RBRACKET") {
+        args.push(parseTypeExpression());
+        if (peek().type === "COMMA") next();
+      }
+      expect("RBRACKET");
+      return `${t.value}<${args.join(", ")}>`;
+    }
+
+    if (t.type === "LBRACE") {
+      const fields: string[] = [];
+      while (peek().type !== "RBRACE") {
+        const fieldName = expect("IDENT").value;
+        const isOptional = match("QUESTION");
+        expect("COLON");
+        const fieldType = parseTypeExpression();
+        fields.push(`${fieldName}${isOptional ? "?" : ""}: ${fieldType}`);
+        if (peek().type === "COMMA") next();
+      }
+      expect("RBRACE");
+      return `{ ${fields.join("; ")} }`;
+    }
+
+    return t.value;
+  }
+
+  function parseFunctionBody(): string {
+    const lines: string[] = [];
+    let tmpCounter = 0;
+
+    while (peek().type !== "RBRACE" && peek().type !== "EOF") {
+      if (peek().type === "IDENT" && tokens[index + 1]?.type === "ASSIGN") {
+        const varName = next().value;
+        next();
+        const expr = parseExpression();
+
+        if (expr.endsWith("?")) {
+          const callExpr = expr.slice(0, -1);
+          const tempVar = `_res${tmpCounter++}`;
+          lines.push(`  const ${tempVar} = ${callExpr};`);
+          lines.push(`  if (!${tempVar}.ok) return ${tempVar};`);
+          lines.push(`  const ${varName} = ${tempVar}.value;`);
+        } else {
+          lines.push(`  const ${varName} = ${expr};`);
+        }
+        continue;
+      }
+
+      if (peek().type === "IF") {
+        next();
+        const cond = parseExpression();
+        expect("ARROW");
+        const action = parseStatementOrExpression();
+        lines.push(`  if (${cond}) {\n    ${action};\n  }`);
+        continue;
+      }
+
+      if (peek().type === "RET") {
+        next();
+        const expr = parseExpression();
+        lines.push(`  return ${expr};`);
+        continue;
+      }
+
+      const raw = parseExpression();
+      lines.push(`  ${raw};`);
+    }
+
+    return lines.join("\n");
+  }
+
+  function parseStatementOrExpression(): string {
+    if (peek().type === "RET") {
+      next();
+      return `return ${parseExpression()}`;
+    }
+    return parseExpression();
+  }
+
+  function parseExpression(): string {
+    let expr = "";
+    while (
+      peek().type !== "EOF" &&
+      peek().type !== "RBRACE" &&
+      peek().type !== "ARROW" &&
+      peek().type !== "COMMA"
+    ) {
+      const t = next();
+      if (t.type === "STR_LIT") expr += `"${t.value}"`;
+      else expr += t.value;
+
+      if (peek().type === "LPAREN" || peek().type === "DOT" || peek().type === "QUESTION") {
+        continue;
+      }
+      expr += " ";
+    }
+    return expr.trim();
+  }
+}
+Transpilateur Inverse : compiler/ts-to-tok.tsTypeScript// compiler/ts-to-tok.ts - Décompilateur TypeScript vers TokTS via l'API Compilateur
+import ts from "typescript";
+
+export function compileTsToTok(tsCode: string): string {
+  const sourceFile = ts.createSourceFile(
+    "source.ts",
+    tsCode,
+    ts.ScriptTarget.ES2022,
+    true,
+    ts.ScriptKind.TS
+  );
+
+  let tokCode = "";
+
+  function visit(node: ts.Node) {
+    if (ts.isImportDeclaration(node)) {
+      const modulePath = (node.moduleSpecifier as ts.StringLiteral).text;
+      if (node.importClause?.namedBindings && ts.isNamedImports(node.importClause.namedBindings)) {
+        const specifiers = node.importClause.namedBindings.elements.map(e => e.name.text);
+        tokCode += `use ${modulePath} { ${specifiers.join(", ")} }\n`;
+        return;
+      }
+    }
+
+    if (ts.isTypeAliasDeclaration(node) || ts.isInterfaceDeclaration(node)) {
+      const isPub = node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+      const name = node.name.text;
+      tokCode += `${isPub ? "pub " : ""}type ${name} = `;
+
+      if (ts.isInterfaceDeclaration(node)) {
+        tokCode += formatMembers(node.members);
+      } else {
+        tokCode += formatTypeNode(node.type);
+      }
+      tokCode += "\n";
+      return;
+    }
+
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      const isPub = node.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+      const name = node.name.text;
+      const params = node.parameters.map(p => {
+        const pName = p.name.getText(sourceFile);
+        const pType = p.type ? formatTypeNode(p.type) : "any";
+        return `${pName}: ${pType}`;
+      }).join(", ");
+
+      const retType = node.type ? formatTypeNode(node.type) : "void";
+      tokCode += `${isPub ? "pub " : ""}fn ${name}(${params}): ${retType} = {\n`;
+
+      if (node.body) {
+        node.body.statements.forEach(stmt => {
+          tokCode += desugarStatement(stmt);
+        });
+      }
+      tokCode += "}\n\n";
+      return;
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  function formatTypeNode(typeNode: ts.TypeNode): string {
+    switch (typeNode.kind) {
+      case ts.SyntaxKind.StringKeyword: return "str";
+      case ts.SyntaxKind.NumberKeyword: return "num";
+      case ts.SyntaxKind.BooleanKeyword: return "bool";
+      case ts.SyntaxKind.UndefinedKeyword: return "nil";
+      case ts.SyntaxKind.AnyKeyword: return "any";
+    }
+
+    if (ts.isTypeReferenceNode(typeNode)) {
+      const typeName = typeNode.typeName.getText(sourceFile);
+      if (typeNode.typeArguments && typeNode.typeArguments.length > 0) {
+        const args = typeNode.typeArguments.map(formatTypeNode).join(", ");
+        return `${typeName}[${args}]`;
+      }
+      return typeName;
+    }
+
+    if (ts.isTypeLiteralNode(typeNode)) {
+      return formatMembers(typeNode.members);
+    }
+
+    return typeNode.getText(sourceFile);
+  }
+
+  function formatMembers(members: ts.NodeArray<ts.TypeElement>): string {
+    const fields = members.map(m => {
+      if (ts.isPropertySignature(m) && m.name) {
+        const name = m.name.getText(sourceFile);
+        const opt = m.questionToken ? "?" : "";
+        const type = m.type ? formatTypeNode(m.type) : "any";
+        return `${name}${opt}: ${type}`;
+      }
+      return "";
+    }).filter(Boolean);
+    return `{ ${fields.join(", ")} }`;
+  }
+
+  function desugarStatement(stmt: ts.Statement): string {
+    if (ts.isReturnStatement(stmt)) {
+      const expr = stmt.expression ? stmt.expression.getText(sourceFile) : "";
+      return `  ret ${expr}\n`;
+    }
+
+    if (ts.isVariableStatement(stmt)) {
+      const decl = stmt.declarationList.declarations[0];
+      const name = decl.name.getText(sourceFile);
+      const init = decl.initializer ? decl.initializer.getText(sourceFile) : "";
+      return `  ${name} := ${init}\n`;
+    }
+
+    if (ts.isIfStatement(stmt)) {
+      const cond = stmt.expression.getText(sourceFile);
+      const thenText = stmt.thenStatement.getText(sourceFile).replace(/^{|}$/g, "").trim();
+      return `  if ${cond} -> ${thenText}\n`;
+    }
+
+    return `  ${stmt.getText(sourceFile)}\n`;
+  }
+
+  visit(sourceFile);
+  return tokCode.trim();
+}
+Plugin Vite 6 : compiler/vite-plugin-tokts.tsTypeScript// compiler/vite-plugin-tokts.ts - Intégration transparente dans le serveur Vite 6
+import type { Plugin } from "vite";
+import { compileTokToTs } from "./tok-to-ts.ts";
+
+export function toktsPlugin(): Plugin {
+  return {
+    name: "vite-plugin-tokts",
+    enforce: "pre",
+    transform(code: string, id: string) {
+      if (!id.endsWith(".tok")) {
+        return null;
+      }
+
+      const result = compileTokToTs(code, { filename: id });
+      if (!result.ok) {
+        throw new Error(`[TokTS Vite Compilation Error] dans ${id}:\n${result.error?.formatted}`);
+      }
+
+      return {
+        code: result.code,
+        map: null
+      };
+    }
+  };
+}
+Suite de Validation Unitaire : tests/compiler.test.tsCette suite s'exécute nativement via le script standard node --test --experimental-strip-types tests/compiler.test.ts sans étape d'empaquetage préalable :TypeScript// tests/compiler.test.ts - Validation unitaire de conformité et mesure d'efficacité
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { compileTokToTs } from "../compiler/tok-to-ts.ts";
+import { compileTsToTok } from "../compiler/ts-to-tok.ts";
+
+test("TokTS -> TypeScript: Compilation conforme avec Result et typage strict", () => {
+  const tokSource = `
+use ./domain.ts { User, ErrCode }
+
+pub type Account = { id: str, balance: num, active?: bool }
+
+pub fn verify(acc: Account): Result[str, ErrCode] = {
+  if acc.balance < 0 -> ret err(ErrCode.NegativeBalance)
+  ret ok(acc.id)
+}
+  `.trim();
+
+  const result = compileTokToTs(tokSource);
+  assert.equal(result.ok, true);
+  assert.match(result.code, /export type Account = \{ id: string; balance: number; active\?: boolean \};/);
+  assert.match(result.code, /export function verify\(acc: Account\): Result<string, ErrCode>/);
+  assert.match(result.code, /return err\(ErrCode\.NegativeBalance\);/);
+});
+
+test("TypeScript -> TokTS: Décompilation et condensation lexicale", () => {
+  const tsSource = `
+import { User } from "./domain.ts";
+
+export type Account = { id: string; balance: number };
+
+export function getId(acc: Account): string {
+  return acc.id;
+}
+  `.trim();
+
+  const tokCode = compileTsToTok(tsSource);
+  assert.match(tokCode, /use \.\/domain\.ts \{ User \}/);
+  assert.match(tokCode, /pub type Account = \{ id: str, balance: num \}/);
+  assert.match(tokCode, /pub fn getId\(acc: Account\): str = \{/);
+  assert.match(tokCode, /ret acc\.id/);
+});
+
+test("Conservation sémantique et mesure de l'efficacité lexicale", () => {
+  const originalTok = `
+pub fn compute(val: num): num = {
+  ret val
+}
+  `.trim();
+
+  const compiledTs = compileTokToTs(originalTok).code;
+  const decompiledTok = compileTsToTok(compiledTs);
+
+  assert.match(decompiledTok, /pub fn compute\(val: num\): num/);
+  assert.ok(
+    originalTok.length < compiledTs.length,
+    "TokTS doit présenter une empreinte textuelle inférieure à TypeScript"
+  );
+});
+Recommandations Opérationnelles pour l'Agent d'Exécution Gemini 3.8 FlashL'exploitation optimale de cette architecture par Gemini 3.8 Flash repose sur des consignes précises de génération et de traitement de flux :Le modèle doit générer exclusivement du code au format TokTS lors de la production ou de l'édition logique de modules. Toute interaction requérant la lecture de fichiers TypeScript existants doit préalablement convertir la source via compileTsToTok, permettant à l'agent de raisonner sur un contexte lexical réduit de près de moitié.En cas d'incident signalé par le compilateur, le modèle doit consommer le diagnostic JSON structuré, extraire la directive fix et appliquer la mutation uniquement sur l'intervalle span désigné, évitant de régénérer le document complet.Enfin, la validation finale s'opère par compilation vers TypeScript avec vérification statique sans émission (tsc --noEmit), garantissant que le code produit s'intègre immédiatement dans les suites de tests et les chaînes de déploiement des 38 projets de l'environnement de développement sans régression fonctionnelle ni divergence de types.

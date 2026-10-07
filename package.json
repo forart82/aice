@@ -1,0 +1,32 @@
+{
+  "name": "ail",
+  "version": "0.1.0",
+  "description": "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
+  "type": "module",
+  "main": "./src/index.ts",
+  "bin": {
+    "ail": "./bin/ail.mjs"
+  },
+  "scripts": {
+    "ail": "tsx ./bin/ail.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit",
+    "format": "biome format --write .",
+    "lint": "biome check ."
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "parse5": "^8.0.1",
+    "postcss": "^8.5.29",
+    "typescript": "^5.8.2",
+    "yaml": "^2.9.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@types/node": "^22.14.0",
+    "@types/parse5": "^7.0.0",
+    "tsx": "^4.23.15",
+    "vitest": "^5.0.3"
+  }
+}
