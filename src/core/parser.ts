@@ -416,6 +416,10 @@ export function parseAil(source: string, file?: string): ParseResult {
       next(); // skip '['
       typeArgs = [];
       while (peek().type !== "RBRACKET" && peek().type !== "EOF") {
+        if (peek().value === ",") {
+          next();
+          continue;
+        }
         typeArgs.push(parseTypeExpr());
       }
       expect("RBRACKET", "closing type arguments");

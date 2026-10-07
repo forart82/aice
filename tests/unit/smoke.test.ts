@@ -3,7 +3,7 @@ import { AIL_EXTENSION, AIL_VERSION } from "../../src/index.ts";
 
 describe("AIL Compiler Smoke Test", () => {
   it("exports correct version and extension constants", () => {
-    expect(AIL_VERSION).toBe("0.1.2");
+    expect(AIL_VERSION).toBe("0.1.3");
     expect(AIL_EXTENSION).toBe(".ail");
   });
 });
