@@ -603,6 +603,41 @@ export function parseAil(source: string, file?: string): ParseResult {
   function parseExpr(): AilExprNode {
     const tok = peek();
 
+    // Comparison '<' in expression context: (< arg1 arg2 ...)
+    if (tok.type === "LAYOUT_OPEN") {
+      let isLayoutTag = false;
+      let offsetAhead = 1;
+      while (index + offsetAhead < tokens.length) {
+        const ahead = peek(offsetAhead);
+        if (ahead.type === "LAYOUT_CLOSE") {
+          isLayoutTag = true;
+          break;
+        }
+        if (ahead.type === "RPAREN") {
+          isLayoutTag = false;
+          break;
+        }
+        if (ahead.type === "EOF") break;
+        offsetAhead++;
+      }
+
+      if (!isLayoutTag) {
+        const startTok = next();
+        const args: AilExprNode[] = [];
+        while (peek().type !== "RPAREN" && peek().type !== "EOF") {
+          args.push(parseExpr());
+        }
+        const endTok = expect("RPAREN", "closing '<' comparison expression");
+        return {
+          kind: "ApplyExpr",
+          nodeId: nextNodeId("apply"),
+          operator: "<",
+          args,
+          span: createSpan(startTok.span.start, endTok.span.end, file),
+        };
+      }
+    }
+
     // Assignment: (:= var expr)
     if (tok.type === "ASSIGN") {
       const startTok = next();

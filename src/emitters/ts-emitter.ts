@@ -349,7 +349,9 @@ export class TypeScriptEmitter {
       )}\n\n`;
     }
 
-    const param = node.propContract ? `props: ${propsTypeName}` : "";
+    const param = node.propContract
+      ? `{ ${node.propContract.fields.map((f) => f.name).join(", ")} }: ${propsTypeName}`
+      : "";
     const layoutCode = ctx.withIndent(() => ctx.indentLine(this.emitLayout(node.layout, ctx)));
 
     return `${commentPrefix}${propsDecl}export function ${node.name}(${param}) {\n${ctx.indentUnit}return (\n${layoutCode}\n${ctx.indentUnit});\n}`;

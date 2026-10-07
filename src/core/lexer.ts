@@ -60,11 +60,14 @@ export function tokenizeAil(source: string, options: LexerOptions = {}): LexResu
     const startPos = currentPos();
 
     // 1. Whitespace & Newlines
-    if (ch === " " || ch === "\t" || ch === "\r") {
+    if (ch === " " || ch === "\t" || ch === "\r" || ch === ",") {
       let ws = "";
       while (
         offset < len &&
-        (source[offset] === " " || source[offset] === "\t" || source[offset] === "\r")
+        (source[offset] === " " ||
+          source[offset] === "\t" ||
+          source[offset] === "\r" ||
+          source[offset] === ",")
       ) {
         ws += source[offset];
         advance();
@@ -263,6 +266,7 @@ export function tokenizeAil(source: string, options: LexerOptions = {}): LexResu
           cur === "]" ||
           cur === "{" ||
           cur === "}" ||
+          cur === "," ||
           cur === '"' ||
           cur === "'"
         ) {

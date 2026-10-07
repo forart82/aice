@@ -100,7 +100,7 @@ describe("AIL Multi-Target Forward Emitters & Lowering (Step 5)", () => {
 
       expect(code).toContain("export interface CardProps {");
       expect(code).toContain("title: string;");
-      expect(code).toContain("export function Card(props: CardProps) {");
+      expect(code).toContain("export function Card({ title }: CardProps) {");
       expect(code).toContain('className="card shadow-sm"');
       expect(code).toContain("<h2>Header</h2>");
       expect(code).toContain('<p id="title-p">{title}</p>');

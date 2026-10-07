@@ -387,6 +387,24 @@ export function typecheckAil(document: AilDocumentNode): TypeCheckResult {
         }
 
         // Canonical primitives lookup
+        // Parametric array primitives
+        if (expr.operator === "arr:append" || expr.operator === "arr:slice") {
+          if (expr.args.length > 0) {
+            const arrType = inferExpr(expr.args[0], env);
+            if (arrType.kind === "Array") {
+              return arrType;
+            }
+          }
+        }
+        if (expr.operator === "arr:get") {
+          if (expr.args.length > 0) {
+            const arrType = inferExpr(expr.args[0], env);
+            if (arrType.kind === "Array") {
+              return { kind: "Option", valueType: arrType.elementType };
+            }
+          }
+        }
+
         if (CANONICAL_PRIMITIVES[expr.operator]) {
           const prim = CANONICAL_PRIMITIVES[expr.operator];
           return prim.returnType;

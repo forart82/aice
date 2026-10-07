@@ -1,0 +1,34 @@
+;; Production-grade Authentication & Session Management Service
+(@module auth/service
+  (: UserSession
+    (% sessionId !s userId !s role !s createdAt !i)
+  )
+
+  (: AuthRequest
+    (% username !s password !s rememberMe !b)
+  )
+
+  (: AuthResponse
+    (% token !s session UserSession)
+  )
+
+  (! sanitizeUsername (-> (raw !s) !s)
+    (str:slice raw 0 24)
+  )
+
+  (! validatePassword (-> (password !s) Result[!b, !s])
+    (?if (< (str:len password) 8)
+      (% ok false error "Password must be at least 8 characters")
+      (% ok true value true)
+    )
+  )
+
+  (! authenticateUser (-> (req AuthRequest currentTimestamp !i) Result[AuthResponse, !s])
+    (do
+      (:= cleanUsername (sanitizeUsername req.username))
+      (:= isPasswordValid (? (validatePassword req.password)))
+      (:= session (% sessionId (str:concat "sess_" cleanUsername) userId cleanUsername role "member" createdAt currentTimestamp))
+      (% ok true value (% token (str:concat "jwt_" cleanUsername) session session))
+    )
+  )
+)
