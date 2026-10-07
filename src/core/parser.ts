@@ -544,9 +544,8 @@ export function parseAil(source: string, file?: string): ParseResult {
       };
     }
 
-    if (tok.type === "LPAREN" && peek(1).value === "!val") {
+    if (tok.type === "VAL_TEXT") {
       const startTok = next();
-      next(); // skip '!val'
       const exprVal = parseExpr();
       const endTok = expect("RPAREN", "closing !val text node");
       return {

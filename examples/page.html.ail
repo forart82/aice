@@ -1,0 +1,15 @@
+;; Marketing landing page
+(@module examples/page
+  (# LandingPage
+    (< html (. lang "en" .)
+      (< head
+        (< meta (. charset "UTF-8" .) >)
+        (< title !str "AIL: Next-Gen Language" >)
+      >)
+      (< body
+        (< h1 !str "Welcome to AIL" >)
+        (< p !str "Homoiconic, token-efficient, zero hallucinations." >)
+      >)
+    >)
+  )
+)

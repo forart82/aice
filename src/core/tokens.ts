@@ -24,6 +24,7 @@ export type TokenType =
   | "MANIFEST_END" // *)
   | "TYPE_DECL" // (:
   | "FN_DECL" // (!
+  | "VAL_TEXT" // (!val
   | "COMPONENT_DECL" // (#
   | "LAYOUT_OPEN" // (<
   | "LAYOUT_CLOSE" // >)

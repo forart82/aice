@@ -1,0 +1,10 @@
+;; High-performance Python backend service
+(@module examples/server
+  (: TaskItem
+    (% id !s title !s done !b)
+  )
+
+  (! formatTitle (-> (title !s) !s)
+    (str:slice title 0 50)
+  )
+)

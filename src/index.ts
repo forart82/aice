@@ -5,7 +5,7 @@
  * AIL (AI Language) - Core Compiler Engine Entrypoint
  */
 
-export const AIL_VERSION = "0.1.3";
+export const AIL_VERSION = "0.1.4";
 export const AIL_EXTENSION = ".ail";
 
 export * from "./core/ast.ts";
@@ -14,6 +14,7 @@ export * from "./core/parser.ts";
 export * from "./core/span.ts";
 export * from "./core/tokens.ts";
 export * from "./core/trivia.ts";
+export * from "./emitters/index.ts";
 export * from "./typechecker/checker.ts";
 export * from "./typechecker/diagnostics.ts";
 export * from "./typechecker/primitives.ts";

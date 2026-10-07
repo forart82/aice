@@ -1,0 +1,14 @@
+;; Mathematical and string transformation service
+(@module examples/math-service
+  (: UserProfile
+    (% id !s username !s score !i)
+  )
+
+  (! sanitizeUsername (-> (raw !s) !s)
+    (str:slice raw 0 10)
+  )
+
+  (! computeTotal (-> (base !i bonus !i) !i)
+    (+ base bonus)
+  )
+)

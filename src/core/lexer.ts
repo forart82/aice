@@ -139,6 +139,7 @@ export function tokenizeAil(source: string, options: LexerOptions = {}): LexResu
       { prefix: "(:=", type: "ASSIGN" },
       { prefix: "(:", type: "TYPE_DECL" },
       { prefix: "(!^", type: "EFFECT_DECL" },
+      { prefix: "(!val", type: "VAL_TEXT" },
       { prefix: "(!", type: "FN_DECL" },
       { prefix: "(#", type: "COMPONENT_DECL" },
       { prefix: "(<", type: "LAYOUT_OPEN" },
