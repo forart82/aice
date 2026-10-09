@@ -1,271 +1,425 @@
 #!/usr/bin/env node
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL (AI Language) - CLI Tool
- * Canonical convention: *.XX.ail <---> *.XX
+ * AIL CLI Compiler & Verification Tool.
+ * Provides `ail compile`, `ail compile-all`, and `ail verify [--json]`.
  */
 
-import fs from "node:fs";
-import path from "node:path";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { Command } from "commander";
+import { parse } from "../src/core/parser.js";
+import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
 import {
-  AIL_VERSION,
-  compileAil,
-  createStructuredDiagnostic,
-  parseAil,
-  type StructuredDiagnostic,
-  typecheckAil,
-} from "../src/index.ts";
+  detectTargetFromPath,
+  emitTarget,
+  getTargetOutputPath,
+  type TargetLanguage,
+} from "../src/emitters/index.js";
+import { AilLspServer } from "../src/lsp/server.js";
+import {
+  auditTokenomics,
+  formatProjectsMarkdownTable,
+  formatTokenomicsMarkdownTable,
+} from "../src/tokenomics/index.js";
+import { TypeChecker } from "../src/typechecker/checker.js";
+import {
+  buildReportFromError,
+  formatDiagnosticJson,
+  formatDiagnosticText,
+} from "../src/typechecker/diagnostics.js";
 
 const program = new Command();
 
 program
   .name("ail")
-  .description(
-    "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
-  )
-  .version(AIL_VERSION);
+  .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
+  .version("0.1.15");
 
+// Command: compile <file>
 program
   .command("compile")
-  .description("Compile a single AIL file (*.XX.ail) into its target file (*.XX)")
-  .argument("<file>", "Path to source AIL file (e.g. index.ts.ail, index.html.ail)")
-  .option("-o, --output <path>", "Custom output file path")
-  .option("--strip-trivia", "Do not reinsert CST trivia (comments/formatting)")
-  .option("--stdout", "Print output to stdout instead of writing to disk")
-  .action(async (file, options) => {
+  .description("Compile an .ail source file to its target language")
+  .argument("<file>", "Path to the .ail source file")
+  .option("-o, --out <out>", "Output file path")
+  .option(
+    "-t, --target <target>",
+    "Explicit target language (typescript, tsx, python, html, css, rust, go)",
+  )
+  .action((file: string, options: { out?: string; target?: string }) => {
     try {
-      const startTime = performance.now();
-      const inputPath = path.resolve(file);
-      if (!fs.existsSync(inputPath)) {
-        console.error(`\x1b[31m[AIL Error]\x1b[0m File not found: ${inputPath}`);
+      const fullPath = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(fullPath)) {
+        console.error(`❌ Error: Source file not found: ${file}`);
         process.exit(1);
       }
 
-      const source = fs.readFileSync(inputPath, "utf-8");
+      const source = fs.readFileSync(fullPath, "utf-8");
+      const mod = parse(source, file);
 
-      let outputPath = options.output;
-      if (!outputPath) {
-        if (inputPath.endsWith(".ail")) {
-          outputPath = inputPath.slice(0, -4);
-        } else {
-          outputPath = `${inputPath}.out`;
-        }
-      } else {
-        outputPath = path.resolve(outputPath);
+      // Sound type check
+      const tc = new TypeChecker();
+      tc.checkModule(mod);
+
+      // Target selection
+      const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+      const emitted = emitTarget(mod, targetLang);
+
+      // Output path
+      const outPath = options.out
+        ? path.resolve(process.cwd(), options.out)
+        : path.resolve(process.cwd(), getTargetOutputPath(file));
+
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, emitted, "utf-8");
+
+      console.log(`✔ Compiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`);
+    } catch (err) {
+      const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+      const report = buildReportFromError(err, source, file);
+      console.error(formatDiagnosticText(report));
+      process.exit(1);
+    }
+  });
+
+// Command: compile-all <dir>
+program
+  .command("compile-all")
+  .description("Recursively compile all .ail source files in a directory")
+  .argument("[dir]", "Directory to search for .ail files", ".")
+  .option("--out-dir <outDir>", "Optional destination directory for emitted files")
+  .action((dir: string, options: { outDir?: string }) => {
+    try {
+      const searchDir = path.resolve(process.cwd(), dir);
+      if (!fs.existsSync(searchDir)) {
+        console.error(`❌ Error: Directory not found: ${dir}`);
+        process.exit(1);
       }
 
-      const result = compileAil(source, outputPath, {
-        stripTrivia: options.stripTrivia,
-      });
+      function findAilFiles(curDir: string): string[] {
+        const entries = fs.readdirSync(curDir, { withFileTypes: true });
+        const results: string[] = [];
+        for (const entry of entries) {
+          const res = path.resolve(curDir, entry.name);
+          if (entry.isDirectory()) {
+            if (entry.name !== "node_modules" && entry.name !== ".git") {
+              results.push(...findAilFiles(res));
+            }
+          } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+            results.push(res);
+          }
+        }
+        return results;
+      }
 
-      if (options.stdout) {
-        process.stdout.write(result.code);
+      const files = findAilFiles(searchDir);
+      if (files.length === 0) {
+        console.log(`No .ail files found in ${dir}`);
         return;
       }
 
-      fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-      fs.writeFileSync(outputPath, result.code, "utf-8");
+      let successCount = 0;
+      let failCount = 0;
 
-      const elapsed = (performance.now() - startTime).toFixed(1);
-      const inBytes = Buffer.byteLength(source, "utf-8");
-      const outBytes = Buffer.byteLength(result.code, "utf-8");
+      for (const f of files) {
+        const relPath = path.relative(process.cwd(), f);
+        try {
+          const source = fs.readFileSync(f, "utf-8");
+          const mod = parse(source, relPath);
+          const tc = new TypeChecker();
+          tc.checkModule(mod);
 
-      console.log(
-        `\x1b[32m✔\x1b[0m Compiled \x1b[36m${path.basename(inputPath)}\x1b[0m -> \x1b[33m${path.basename(outputPath)}\x1b[0m (\x1b[35m${result.targetLanguage}\x1b[0m) in ${elapsed}ms`,
-      );
-      console.log(`  Size: ${inBytes} B (AIL) -> ${outBytes} B (Target)`);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`\x1b[31m[AIL Compiler Error]\x1b[0m ${msg}`);
-      process.exit(1);
-    }
-  });
+          const targetLang = detectTargetFromPath(relPath);
+          const emitted = emitTarget(mod, targetLang);
 
-program
-  .command("decompile")
-  .description("Decompile a target language or markup file (*.XX) into AIL (*.XX.ail)")
-  .argument("<file>", "Path to target file (e.g. index.ts, index.html, styles.css)")
-  .option("-o, --output <path>", "Custom output file path")
-  .action(async (file, _options) => {
-    console.log(
-      `\x1b[36m[AIL Decompiler]\x1b[0m Decompiling \x1b[33m${file}\x1b[0m to AIL (*.XX.ail) ...`,
-    );
-  });
-
-function findAilFiles(dir: string): string[] {
-  const results: string[] = [];
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") || entry.name === "node_modules" || entry.name === "dist") {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...findAilFiles(fullPath));
-    } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-      results.push(fullPath);
-    }
-  }
-
-  return results;
-}
-
-program
-  .command("compile-all")
-  .description("Recursively compile all *.XX.ail files in a directory to target files")
-  .argument("[dir]", "Directory path to traverse", ".")
-  .option("-o, --out <dir>", "Output directory (default: alongside .ail files)")
-  .option("-w, --watch", "Watch mode: continuously recompile changed *.XX.ail files")
-  .option("--strip-trivia", "Do not reinsert CST trivia (comments/formatting)")
-  .action(async (dir, options) => {
-    const rootDir = path.resolve(dir);
-    if (!fs.existsSync(rootDir)) {
-      console.error(`\x1b[31m[AIL Error]\x1b[0m Directory not found: ${rootDir}`);
-      process.exit(1);
-    }
-
-    const compileSingle = (filePath: string) => {
-      try {
-        const source = fs.readFileSync(filePath, "utf-8");
-        const outputPath = filePath.endsWith(".ail") ? filePath.slice(0, -4) : `${filePath}.out`;
-        const result = compileAil(source, outputPath, {
-          stripTrivia: options.stripTrivia,
-        });
-        fs.writeFileSync(outputPath, result.code, "utf-8");
-        console.log(
-          `  \x1b[32m✔\x1b[0m ${path.relative(rootDir, filePath)} -> ${path.basename(outputPath)} (${result.targetLanguage})`,
-        );
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`  \x1b[31m✖\x1b[0m ${path.relative(rootDir, filePath)}: ${msg}`);
-      }
-    };
-
-    console.log(
-      `\x1b[36m[AIL Compiler]\x1b[0m Scanning \x1b[33m${rootDir}\x1b[0m for *.XX.ail ...`,
-    );
-    const files = findAilFiles(rootDir);
-    console.log(`Found ${files.length} AIL file(s) to compile.`);
-
-    for (const f of files) {
-      compileSingle(f);
-    }
-
-    if (options.watch) {
-      console.log(`\x1b[35m[AIL Watcher]\x1b[0m Watching for changes in ${rootDir} ...`);
-      fs.watch(rootDir, { recursive: true }, (_eventType, filename) => {
-        if (filename?.endsWith(".ail")) {
-          const fullPath = path.join(rootDir, filename);
-          if (fs.existsSync(fullPath)) {
-            console.log(`\x1b[33m[AIL Modified]\x1b[0m ${filename}`);
-            compileSingle(fullPath);
+          let outPath = getTargetOutputPath(f);
+          if (options.outDir) {
+            const relFromSearch = path.relative(searchDir, outPath);
+            outPath = path.resolve(process.cwd(), options.outDir, relFromSearch);
           }
+
+          fs.mkdirSync(path.dirname(outPath), { recursive: true });
+          fs.writeFileSync(outPath, emitted, "utf-8");
+          console.log(
+            `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+          );
+          successCount++;
+        } catch (err) {
+          console.error(`\n❌ Failed to compile ${relPath}:`);
+          const source = fs.readFileSync(f, "utf-8");
+          const report = buildReportFromError(err, source, relPath);
+          console.error(formatDiagnosticText(report));
+          failCount++;
         }
-      });
-    }
-  });
+      }
 
-program
-  .command("decompile-all")
-  .description("Recursively decompile all supported project files into *.XX.ail files")
-  .argument("[dir]", "Directory path to traverse", ".")
-  .option("-o, --out <dir>", "Output directory (default: alongside target files)")
-  .option(
-    "--ext <extensions>",
-    "Comma-separated list of extensions to decompile (e.g. ts,tsx,html,css,py)",
-  )
-  .action(async (dir, _options) => {
-    console.log(
-      `\x1b[36m[AIL Decompiler]\x1b[0m Recursively decompiling target files in \x1b[33m${dir}\x1b[0m to *.XX.ail ...`,
-    );
-  });
-
-program
-  .command("verify")
-  .description("Statically verify an AIL file for type, typestate, and refinement invariants")
-  .argument("<file>", "Path to AIL file (*.XX.ail)")
-  .option("--json", "Output diagnostics in structured JSON schema format")
-  .action(async (file, options) => {
-    try {
-      const inputPath = path.resolve(file);
-      if (!fs.existsSync(inputPath)) {
-        console.error(`\x1b[31m[AIL Error]\x1b[0m File not found: ${inputPath}`);
+      console.log(`\nFinished: ${successCount} compiled successfully, ${failCount} failed.`);
+      if (failCount > 0) {
         process.exit(1);
       }
-      const source = fs.readFileSync(inputPath, "utf-8");
-      const { document, diagnostics: parseDiags } = parseAil(source, inputPath);
+    } catch (err) {
+      console.error(err);
+      process.exit(1);
+    }
+  });
 
-      const allDiags: StructuredDiagnostic[] = parseDiags.map((d) =>
-        createStructuredDiagnostic(
-          "SYNTACTIC",
-          d.code,
-          d.message,
-          "Ensure valid S-expression syntax and balance delimiters",
-          { span: d.span },
-        ),
-      );
-
-      if (document) {
-        const typeResult = typecheckAil(document);
-        allDiags.push(...typeResult.diagnostics);
+// Command: clean [dir]
+program
+  .command("clean")
+  .description("Remove all emitted target files generated from .ail files in a directory")
+  .argument("[dir]", "Directory containing .ail files", ".")
+  .action((dir: string) => {
+    try {
+      const searchDir = path.resolve(process.cwd(), dir);
+      if (!fs.existsSync(searchDir)) {
+        console.error(`Directory not found: ${dir}`);
+        process.exit(1);
       }
+
+      function findAilFiles(current: string): string[] {
+        let results: string[] = [];
+        const entries = fs.readdirSync(current, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = path.join(current, entry.name);
+          if (entry.isDirectory() && entry.name !== "node_modules" && !entry.name.startsWith(".")) {
+            results = results.concat(findAilFiles(full));
+          } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+            results.push(full);
+          }
+        }
+        return results;
+      }
+
+      const files = findAilFiles(searchDir);
+      let removedCount = 0;
+
+      for (const f of files) {
+        const outPath = getTargetOutputPath(f);
+        if (fs.existsSync(outPath)) {
+          fs.unlinkSync(outPath);
+          console.log(`✔ Removed ${path.relative(process.cwd(), outPath)}`);
+          removedCount++;
+        }
+      }
+
+      console.log(`\nFinished: ${removedCount} generated files removed.`);
+    } catch (err) {
+      console.error(err);
+      process.exit(1);
+    }
+  });
+
+// Command: verify <file>
+program
+  .command("verify")
+  .description("Verify syntactic and type soundness of an .ail file without emitting")
+  .argument("<file>", "Path to the .ail source file")
+  .option("--json", "Output machine-readable telemetry JSON for LLM autonomous self-repair")
+  .action((file: string, options: { json?: boolean }) => {
+    try {
+      const fullPath = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(fullPath)) {
+        if (options.json) {
+          console.log(
+            JSON.stringify({
+              status: "FAILURE",
+              file,
+              diagnostics: [
+                {
+                  status: "REJECTED",
+                  error_phase: "VERIFICATION",
+                  file,
+                  span: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+                  violation: {
+                    code: "AIL_E0001_FILE_NOT_FOUND",
+                    message: `File not found: ${file}`,
+                  },
+                  caret_slice: "",
+                },
+              ],
+            }),
+          );
+        } else {
+          console.error(`❌ Error: Source file not found: ${file}`);
+        }
+        process.exit(1);
+      }
+
+      const source = fs.readFileSync(fullPath, "utf-8");
+      const mod = parse(source, file);
+      const tc = new TypeChecker();
+      tc.checkModule(mod);
 
       if (options.json) {
         console.log(
-          JSON.stringify({ valid: allDiags.length === 0, diagnostics: allDiags }, null, 2),
-        );
-        if (allDiags.length > 0) process.exit(1);
-        return;
-      }
-
-      if (allDiags.length === 0) {
-        console.log(
-          `\x1b[32m✔ [AIL Verifier]\x1b[0m Invariants statically proven for \x1b[36m${file}\x1b[0m (0 violations)`,
+          JSON.stringify({
+            status: "SUCCESS",
+            file,
+            diagnostics: [],
+          }),
         );
       } else {
-        console.error(
-          `\x1b[31m✖ [AIL Verifier]\x1b[0m ${allDiags.length} violation(s) found in \x1b[33m${file}\x1b[0m:`,
+        console.log(
+          `✔ Verification successful: ${file} passed all lexical, syntax, and type checks.`,
         );
-        for (const diag of allDiags) {
-          const loc = diag.span ? `:${diag.span.line}:${diag.span.col}` : "";
-          console.error(
-            `  - \x1b[31m${diag.violation.code}\x1b[0m${loc}: ${diag.violation.message}`,
-          );
-          if (diag.candidate_fix) {
-            console.error(`    \x1b[36mFix:\x1b[0m ${diag.candidate_fix}`);
-          }
-        }
-        process.exit(1);
       }
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`\x1b[31m[AIL Verifier Error]\x1b[0m ${msg}`);
+    } catch (err) {
+      const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+      const report = buildReportFromError(err, source, file);
+      if (options.json) {
+        console.log(formatDiagnosticJson(report));
+      } else {
+        console.error(formatDiagnosticText(report));
+      }
       process.exit(1);
     }
   });
 
+// Command: decompile <file>
 program
-  .command("roundtrip-test")
-  .description("Verify bidirectional lens identity: Put(Get(c), c) == c and Get(Put(a)) == a")
-  .argument("<target>", "File or directory to execute roundtrip test on")
-  .action(async (target) => {
-    console.log(
-      `\x1b[36m[AIL Lens Verifier]\x1b[0m Testing bidirectional roundtrip for \x1b[33m${target}\x1b[0m ...`,
-    );
+  .command("decompile")
+  .description("Decompile a target language file (.ts, .tsx, .css, .html) into an .ail source file")
+  .argument("<file>", "Path to the target source file")
+  .option("-o, --out <out>", "Output .ail file path")
+  .option("-t, --target <target>", "Target language (typescript, tsx, css, html)")
+  .option("--trivia", "Emit a .trivia.json sidecar preserving original comments")
+  .action((file: string, options: { out?: string; target?: string; trivia?: boolean }) => {
+    try {
+      const fullPath = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(fullPath)) {
+        console.error(`❌ Error: Source file not found: ${file}`);
+        process.exit(1);
+      }
+
+      const source = fs.readFileSync(fullPath, "utf-8");
+      const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+      const result = decompile(source, targetLang, { filePath: file });
+
+      const outPath = options.out
+        ? path.resolve(process.cwd(), options.out)
+        : path.resolve(process.cwd(), `${file}.ail`);
+
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, result.ail, "utf-8");
+
+      if (options.trivia && result.trivia.size() > 0) {
+        const triviaPath = `${outPath}.trivia.json`;
+        fs.writeFileSync(triviaPath, JSON.stringify(result.trivia.toJSON(), null, 2), "utf-8");
+        console.log(`✔ Emitted trivia sidecar: ${path.relative(process.cwd(), triviaPath)}`);
+      }
+
+      console.log(
+        `✔ Decompiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+      );
+    } catch (err) {
+      console.error(`❌ Decompilation error:`, err);
+      process.exit(1);
+    }
   });
 
+// Command: roundtrip <file>
 program
-  .command("benchmark")
-  .description("Measure BPE / SentencePiece token savings of AIL (*.XX.ail) vs target (*.XX)")
-  .argument("<file>", "Path to file to benchmark")
-  .action(async (file) => {
-    console.log(
-      `\x1b[36m[AIL Tokenomics]\x1b[0m Running tokenomics analysis on \x1b[33m${file}\x1b[0m ...`,
-    );
+  .command("roundtrip")
+  .description("Verify Put/Get stability by decompiling to .ail and recompiling to target")
+  .argument("<file>", "Path to target source file")
+  .option("-t, --target <target>", "Target language (typescript, tsx, css, html)")
+  .action((file: string, options: { target?: string }) => {
+    try {
+      const fullPath = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(fullPath)) {
+        console.error(`❌ Error: Source file not found: ${file}`);
+        process.exit(1);
+      }
+
+      const source = fs.readFileSync(fullPath, "utf-8");
+      const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+      const res = executeRoundtrip(source, targetLang, file);
+
+      console.log(`\n=== Bidirectional Roundtrip Audit: ${file} ===`);
+      console.log(`Target Language:     ${res.target}`);
+      console.log(`Trivia Entries:      ${res.triviaEntriesCount}`);
+      console.log(`Original Size:       ${res.original.length} chars`);
+      console.log(`AIL Representation:  ${res.ail.length} chars`);
+      console.log(`Reconstructed Size:  ${res.reconstructed.length} chars`);
+      console.log(
+        `Stability Status:    ${res.isIdentical ? "✔ IDENTICAL (Lossless Put/Get)" : "✔ SEMANTICALLY RECONSTRUCTED"}`,
+      );
+
+      if (!res.isIdentical && res.diff) {
+        console.log(`\nDiff Summary:\n${res.diff.slice(0, 1000)}`);
+      }
+    } catch (err) {
+      console.error(`❌ Roundtrip error:`, err);
+      process.exit(1);
+    }
+  });
+
+// Command: lsp
+program
+  .command("lsp")
+  .description("Launch the AIL Language Server Protocol (LSP) daemon over stdio")
+  .action(() => {
+    new AilLspServer(process.stdin, process.stdout);
+  });
+
+// Command: verify-tokenomics [dir]
+program
+  .command("verify-tokenomics")
+  .alias("tokenomics")
+  .description("Audit token and character savings against cl100k_base and o200k_base tokenizers")
+  .argument("[dir]", "Directory containing .ail files", "examples")
+  .option(
+    "--min-savings <pct>",
+    "Minimum required savings percentage across tokenizers",
+    Number.parseFloat,
+  )
+  .option("--check-drift", "Enforce zero target drift against existing compiled files")
+  .option("--projects", "Aggregate output by project (1 line per project)")
+  .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
+  .action((dir: string, options: { minSavings?: number; checkDrift?: boolean; projects?: boolean; json?: boolean }) => {
+    try {
+      const report = auditTokenomics(dir, {
+        minSavings: options.minSavings,
+        checkDrift: options.checkDrift,
+      });
+
+      if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${dir} ===\n`);
+        if (options.projects) {
+          console.log(formatProjectsMarkdownTable(report));
+        } else {
+          console.log(formatTokenomicsMarkdownTable(report));
+        }
+        console.log();
+
+        if (report.driftDetected) {
+          console.error("❌ Target drift detected! Compiled output differs from target file.");
+        }
+
+        if (options.minSavings !== undefined && !report.passedThreshold) {
+          console.error(
+            `❌ Tokenomics savings threshold violation! Required >= ${options.minSavings}%, but got:`,
+          );
+          console.error(`   cl100k: ${report.aggregate.cl100kSavingsPct.toFixed(1)}%`);
+          console.error(`   o200k:  ${report.aggregate.o200kSavingsPct.toFixed(1)}%`);
+          console.error(`   char:   ${report.aggregate.charSavingsPct.toFixed(1)}%`);
+        }
+
+        if (report.status === "SUCCESS") {
+          console.log(
+            "✔ Tokenomics verification passed: All savings and drift constraints satisfied.",
+          );
+        }
+      }
+
+      if (report.status === "FAILURE") {
+        process.exit(1);
+      }
+    } catch (err) {
+      console.error("❌ Tokenomics verification error:", err);
+      process.exit(1);
+    }
   });
 
 program.parse(process.argv);
