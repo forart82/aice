@@ -1,0 +1,443 @@
+# Grouped FX gallery — GEF_1000_ tier
+# 100 multi-effect shader compositions across 20 themes.
+GEF_1000_COUNT: 100
+
+# --- divine / holy (001-005) ---
+GEF_1000_001_NAME: divine_crown
+GEF_1000_001_DATA: ring8 0.14 0.40 0.32
+GEF_1000_001_OUTER: effect_ring 1.00 0.90 0.45 0.0 0.60 0.70
+GEF_1000_001_CENTER: effect_ring 1.00 1.00 0.95 3.0 1.00 0.80
+GEF_1000_002_NAME: holy_sparks_halo
+GEF_1000_002_DATA: ring10 0.16 0.42 0.34
+GEF_1000_002_OUTER: effect_spark 1.00 1.00 0.95 1.0 0.80 0.80
+GEF_1000_002_CENTER: effect_glow 1.00 0.95 0.70 4.0 1.20 0.90
+GEF_1000_003_NAME: seraph_radiance
+GEF_1000_003_DATA: ring12 0.18 0.44 0.36
+GEF_1000_003_OUTER: effect_glow 1.00 0.95 0.70 2.0 1.00 0.90
+GEF_1000_003_CENTER: effect_orb 1.00 0.90 0.45 5.0 0.70 1.00
+GEF_1000_004_NAME: sacred_judgment
+GEF_1000_004_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_004_OUTER: effect_bolt 1.00 1.00 0.95 3.0 1.20 1.00
+GEF_1000_004_CENTER: effect_ring 1.00 0.90 0.45 6.0 0.90 1.10
+GEF_1000_005_NAME: blessed_aegis
+GEF_1000_005_DATA: cross 0.22 0.41 0.40
+GEF_1000_005_OUTER: effect_ring 1.00 0.90 0.45 4.0 0.70 1.10
+GEF_1000_005_CENTER: effect_glow 1.00 1.00 0.95 7.0 1.10 1.20
+
+# --- fire / inferno (006-010) ---
+GEF_1000_006_NAME: inferno_burst
+GEF_1000_006_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_006_OUTER: effect_flame 1.00 0.45 0.10 5.0 0.90 1.20
+GEF_1000_006_CENTER: effect_ring 1.00 0.60 0.20 8.0 1.50 0.75
+GEF_1000_007_NAME: magma_eruption
+GEF_1000_007_DATA: star5 0.17 0.45 0.35
+GEF_1000_007_OUTER: effect_shatter 0.90 0.25 0.05 6.0 1.10 0.75
+GEF_1000_007_CENTER: effect_flame 1.00 0.45 0.10 9.0 0.50 0.85
+GEF_1000_008_NAME: phoenix_pyre
+GEF_1000_008_DATA: ring6 0.19 0.48 0.37
+GEF_1000_008_OUTER: effect_flame 1.00 0.60 0.20 7.0 1.50 0.85
+GEF_1000_008_CENTER: effect_orb 1.00 0.45 0.10 0.0 1.30 0.95
+GEF_1000_009_NAME: ember_ring
+GEF_1000_009_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_009_OUTER: effect_ring 1.00 0.45 0.10 8.0 0.50 0.95
+GEF_1000_009_CENTER: effect_spark 1.00 0.60 0.20 1.0 0.60 1.05
+GEF_1000_010_NAME: hellfire_storm
+GEF_1000_010_DATA: ring5 0.14 0.40 0.32
+GEF_1000_010_OUTER: effect_flame 0.90 0.25 0.05 9.0 1.30 1.05
+GEF_1000_010_CENTER: effect_vortex 1.00 0.45 0.10 2.0 0.80 0.70
+
+# --- ice / frost (011-015) ---
+GEF_1000_011_NAME: frost_shatter
+GEF_1000_011_DATA: ring8 0.14 0.40 0.32
+GEF_1000_011_OUTER: effect_shatter 0.60 0.85 1.00 0.0 0.60 0.70
+GEF_1000_011_CENTER: effect_glow 0.75 0.95 1.00 3.0 1.00 0.80
+GEF_1000_012_NAME: glacial_nova
+GEF_1000_012_DATA: ring10 0.16 0.42 0.34
+GEF_1000_012_OUTER: effect_ring 0.40 0.70 1.00 1.0 0.80 0.80
+GEF_1000_012_CENTER: effect_orb 0.60 0.85 1.00 4.0 1.20 0.90
+GEF_1000_013_NAME: blizzard_veil
+GEF_1000_013_DATA: ring12 0.18 0.44 0.36
+GEF_1000_013_OUTER: effect_smoke 0.75 0.95 1.00 2.0 1.00 0.90
+GEF_1000_013_CENTER: effect_shatter 0.60 0.85 1.00 5.0 0.70 1.00
+GEF_1000_014_NAME: frostbite_bolts
+GEF_1000_014_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_014_OUTER: effect_bolt 0.60 0.85 1.00 3.0 1.20 1.00
+GEF_1000_014_CENTER: effect_ring 0.75 0.95 1.00 6.0 0.90 1.10
+GEF_1000_015_NAME: crystal_aura
+GEF_1000_015_DATA: cross 0.22 0.41 0.40
+GEF_1000_015_OUTER: effect_glow 0.75 0.95 1.00 4.0 0.70 1.10
+GEF_1000_015_CENTER: effect_orb 0.40 0.70 1.00 7.0 1.10 1.20
+
+# --- lightning / storm (016-020) ---
+GEF_1000_016_NAME: thunder_cross
+GEF_1000_016_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_016_OUTER: effect_bolt 0.60 0.85 1.00 5.0 0.90 1.20
+GEF_1000_016_CENTER: effect_ring 0.80 0.90 1.00 8.0 1.50 0.75
+GEF_1000_017_NAME: static_discharge
+GEF_1000_017_DATA: star5 0.17 0.45 0.35
+GEF_1000_017_OUTER: effect_spark 1.00 0.95 0.50 6.0 1.10 0.75
+GEF_1000_017_CENTER: effect_glow 0.60 0.85 1.00 9.0 0.50 0.85
+GEF_1000_018_NAME: tempest_ring
+GEF_1000_018_DATA: ring6 0.19 0.48 0.37
+GEF_1000_018_OUTER: effect_ring 0.60 0.85 1.00 7.0 1.50 0.85
+GEF_1000_018_CENTER: effect_bolt 1.00 0.95 0.50 0.0 1.30 0.95
+GEF_1000_019_NAME: storm_vortex
+GEF_1000_019_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_019_OUTER: effect_vortex 0.80 0.90 1.00 8.0 0.50 0.95
+GEF_1000_019_CENTER: effect_bolt 0.60 0.85 1.00 1.0 0.60 1.05
+GEF_1000_020_NAME: chain_arc
+GEF_1000_020_DATA: ring5 0.14 0.40 0.32
+GEF_1000_020_OUTER: effect_bolt 1.00 0.95 0.50 9.0 1.30 1.05
+GEF_1000_020_CENTER: effect_spark 0.60 0.85 1.00 2.0 0.80 0.70
+
+# --- void / dark (021-025) ---
+GEF_1000_021_NAME: void_collapse
+GEF_1000_021_DATA: ring8 0.14 0.40 0.32
+GEF_1000_021_OUTER: effect_orb 0.30 0.10 0.40 0.0 0.60 0.70
+GEF_1000_021_CENTER: effect_vortex 0.20 0.15 0.30 3.0 1.00 0.80
+GEF_1000_022_NAME: shadow_shroud
+GEF_1000_022_DATA: ring10 0.16 0.42 0.34
+GEF_1000_022_OUTER: effect_smoke 0.20 0.15 0.30 1.0 0.80 0.80
+GEF_1000_022_CENTER: effect_orb 0.30 0.10 0.40 4.0 1.20 0.90
+GEF_1000_023_NAME: abyssal_ring
+GEF_1000_023_DATA: ring12 0.18 0.44 0.36
+GEF_1000_023_OUTER: effect_ring 0.45 0.20 0.60 2.0 1.00 0.90
+GEF_1000_023_CENTER: effect_orb 0.30 0.10 0.40 5.0 0.70 1.00
+GEF_1000_024_NAME: dark_implosion
+GEF_1000_024_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_024_OUTER: effect_vortex 0.30 0.10 0.40 3.0 1.20 1.00
+GEF_1000_024_CENTER: effect_glow 0.45 0.20 0.60 6.0 0.90 1.10
+GEF_1000_025_NAME: nether_pulse
+GEF_1000_025_DATA: cross 0.22 0.41 0.40
+GEF_1000_025_OUTER: effect_glow 0.20 0.15 0.30 4.0 0.70 1.10
+GEF_1000_025_CENTER: effect_ring 0.30 0.10 0.40 7.0 1.10 1.20
+
+# --- poison / toxic (026-030) ---
+GEF_1000_026_NAME: toxic_bloom
+GEF_1000_026_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_026_OUTER: effect_glow 0.40 0.90 0.20 5.0 0.90 1.20
+GEF_1000_026_CENTER: effect_ring 0.55 0.85 0.15 8.0 1.50 0.75
+GEF_1000_027_NAME: venom_ring
+GEF_1000_027_DATA: star5 0.17 0.45 0.35
+GEF_1000_027_OUTER: effect_ring 0.40 0.90 0.20 6.0 1.10 0.75
+GEF_1000_027_CENTER: effect_spark 0.55 0.85 0.15 9.0 0.50 0.85
+GEF_1000_028_NAME: plague_cloud
+GEF_1000_028_DATA: ring6 0.19 0.48 0.37
+GEF_1000_028_OUTER: effect_smoke 0.55 0.85 0.15 7.0 1.50 0.85
+GEF_1000_028_CENTER: effect_orb 0.40 0.90 0.20 0.0 1.30 0.95
+GEF_1000_029_NAME: corrosive_burst
+GEF_1000_029_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_029_OUTER: effect_shatter 0.30 0.80 0.25 8.0 0.50 0.95
+GEF_1000_029_CENTER: effect_glow 0.40 0.90 0.20 1.0 0.60 1.05
+GEF_1000_030_NAME: poison_sparks
+GEF_1000_030_DATA: ring5 0.14 0.40 0.32
+GEF_1000_030_OUTER: effect_spark 0.55 0.85 0.15 9.0 1.30 1.05
+GEF_1000_030_CENTER: effect_glow 0.30 0.80 0.25 2.0 0.80 0.70
+
+# --- blood / combat (031-035) ---
+GEF_1000_031_NAME: blood_slash
+GEF_1000_031_DATA: ring8 0.14 0.40 0.32
+GEF_1000_031_OUTER: effect_slash 0.85 0.10 0.10 0.0 0.60 0.70
+GEF_1000_031_CENTER: effect_ring 0.90 0.20 0.15 3.0 1.00 0.80
+GEF_1000_032_NAME: crit_burst
+GEF_1000_032_DATA: ring10 0.16 0.42 0.34
+GEF_1000_032_OUTER: effect_spark 1.00 0.25 0.20 1.0 0.80 0.80
+GEF_1000_032_CENTER: effect_slash 0.85 0.10 0.10 4.0 1.20 0.90
+GEF_1000_033_NAME: gore_ring
+GEF_1000_033_DATA: ring12 0.18 0.44 0.36
+GEF_1000_033_OUTER: effect_ring 0.85 0.10 0.10 2.0 1.00 0.90
+GEF_1000_033_CENTER: effect_spark 1.00 0.25 0.20 5.0 0.70 1.00
+GEF_1000_034_NAME: rend_flurry
+GEF_1000_034_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_034_OUTER: effect_slash 0.90 0.20 0.15 3.0 1.20 1.00
+GEF_1000_034_CENTER: effect_glow 0.85 0.10 0.10 6.0 0.90 1.10
+GEF_1000_035_NAME: savage_strike
+GEF_1000_035_DATA: cross 0.22 0.41 0.40
+GEF_1000_035_OUTER: effect_slash 1.00 0.25 0.20 4.0 0.70 1.10
+GEF_1000_035_CENTER: effect_shatter 0.85 0.10 0.10 7.0 1.10 1.20
+
+# --- magic / arcane (036-040) ---
+GEF_1000_036_NAME: arcane_vortex
+GEF_1000_036_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_036_OUTER: effect_vortex 0.70 0.40 1.00 5.0 0.90 1.20
+GEF_1000_036_CENTER: effect_orb 0.50 0.50 1.00 8.0 1.50 0.75
+GEF_1000_037_NAME: mana_orbit
+GEF_1000_037_DATA: star5 0.17 0.45 0.35
+GEF_1000_037_OUTER: effect_orb 0.50 0.50 1.00 6.0 1.10 0.75
+GEF_1000_037_CENTER: effect_ring 0.70 0.40 1.00 9.0 0.50 0.85
+GEF_1000_038_NAME: spellweave_ring
+GEF_1000_038_DATA: ring6 0.19 0.48 0.37
+GEF_1000_038_OUTER: effect_ring 0.60 0.30 0.90 7.0 1.50 0.85
+GEF_1000_038_CENTER: effect_vortex 0.70 0.40 1.00 0.0 1.30 0.95
+GEF_1000_039_NAME: arcane_mist
+GEF_1000_039_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_039_OUTER: effect_smoke 0.70 0.40 1.00 8.0 0.50 0.95
+GEF_1000_039_CENTER: effect_orb 0.50 0.50 1.00 1.0 0.60 1.05
+GEF_1000_040_NAME: eldritch_glyph
+GEF_1000_040_DATA: ring5 0.14 0.40 0.32
+GEF_1000_040_OUTER: effect_glow 0.60 0.30 0.90 9.0 1.30 1.05
+GEF_1000_040_CENTER: effect_ring 0.70 0.40 1.00 2.0 0.80 0.70
+
+# --- death / necro (041-045) ---
+GEF_1000_041_NAME: death_knell
+GEF_1000_041_DATA: ring8 0.14 0.40 0.32
+GEF_1000_041_OUTER: effect_glow 0.40 0.55 0.45 0.0 0.60 0.70
+GEF_1000_041_CENTER: effect_ring 0.50 0.50 0.55 3.0 1.00 0.80
+GEF_1000_042_NAME: grave_ring
+GEF_1000_042_DATA: ring10 0.16 0.42 0.34
+GEF_1000_042_OUTER: effect_ring 0.50 0.50 0.55 1.0 0.80 0.80
+GEF_1000_042_CENTER: effect_smoke 0.40 0.55 0.45 4.0 1.20 0.90
+GEF_1000_043_NAME: soul_vortex
+GEF_1000_043_DATA: ring12 0.18 0.44 0.36
+GEF_1000_043_OUTER: effect_vortex 0.40 0.55 0.45 2.0 1.00 0.90
+GEF_1000_043_CENTER: effect_orb 0.50 0.50 0.55 5.0 0.70 1.00
+GEF_1000_044_NAME: reaper_slash
+GEF_1000_044_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_044_OUTER: effect_slash 0.50 0.50 0.55 3.0 1.20 1.00
+GEF_1000_044_CENTER: effect_glow 0.40 0.55 0.45 6.0 0.90 1.10
+GEF_1000_045_NAME: undeath_pulse
+GEF_1000_045_DATA: cross 0.22 0.41 0.40
+GEF_1000_045_OUTER: effect_orb 0.40 0.55 0.45 4.0 0.70 1.10
+GEF_1000_045_CENTER: effect_ring 0.50 0.50 0.55 7.0 1.10 1.20
+
+# --- nature / earth (046-050) ---
+GEF_1000_046_NAME: earth_shatter
+GEF_1000_046_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_046_OUTER: effect_shatter 0.55 0.40 0.20 5.0 0.90 1.20
+GEF_1000_046_CENTER: effect_ring 0.40 0.75 0.30 8.0 1.50 0.75
+GEF_1000_047_NAME: verdant_aura
+GEF_1000_047_DATA: star5 0.17 0.45 0.35
+GEF_1000_047_OUTER: effect_glow 0.40 0.75 0.30 6.0 1.10 0.75
+GEF_1000_047_CENTER: effect_orb 0.30 0.80 0.25 9.0 0.50 0.85
+GEF_1000_048_NAME: thorn_burst
+GEF_1000_048_DATA: ring6 0.19 0.48 0.37
+GEF_1000_048_OUTER: effect_spark 0.30 0.80 0.25 7.0 1.50 0.85
+GEF_1000_048_CENTER: effect_glow 0.40 0.75 0.30 0.0 1.30 0.95
+GEF_1000_049_NAME: stone_ring
+GEF_1000_049_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_049_OUTER: effect_ring 0.55 0.40 0.20 8.0 0.50 0.95
+GEF_1000_049_CENTER: effect_shatter 0.40 0.75 0.30 1.0 0.60 1.05
+GEF_1000_050_NAME: grove_bloom
+GEF_1000_050_DATA: ring5 0.14 0.40 0.32
+GEF_1000_050_OUTER: effect_orb 0.40 0.75 0.30 9.0 1.30 1.05
+GEF_1000_050_CENTER: effect_glow 0.30 0.80 0.25 2.0 0.80 0.70
+
+# --- ice + fire (051-055) ---
+GEF_1000_051_NAME: frostfire_clash
+GEF_1000_051_DATA: ring8 0.14 0.40 0.32
+GEF_1000_051_OUTER: effect_flame 1.00 0.45 0.10 0.0 0.60 0.70
+GEF_1000_051_CENTER: effect_shatter 0.60 0.85 1.00 3.0 1.00 0.80
+GEF_1000_052_NAME: thermal_shock
+GEF_1000_052_DATA: ring10 0.16 0.42 0.34
+GEF_1000_052_OUTER: effect_shatter 0.60 0.85 1.00 1.0 0.80 0.80
+GEF_1000_052_CENTER: effect_flame 1.00 0.45 0.10 4.0 1.20 0.90
+GEF_1000_053_NAME: ember_frost_ring
+GEF_1000_053_DATA: ring12 0.18 0.44 0.36
+GEF_1000_053_OUTER: effect_ring 1.00 0.45 0.10 2.0 1.00 0.90
+GEF_1000_053_CENTER: effect_glow 0.60 0.85 1.00 5.0 0.70 1.00
+GEF_1000_054_NAME: steam_burst
+GEF_1000_054_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_054_OUTER: effect_smoke 0.75 0.95 1.00 3.0 1.20 1.00
+GEF_1000_054_CENTER: effect_flame 1.00 0.60 0.20 6.0 0.90 1.10
+GEF_1000_055_NAME: contrast_nova
+GEF_1000_055_DATA: cross 0.22 0.41 0.40
+GEF_1000_055_OUTER: effect_orb 0.60 0.85 1.00 4.0 0.70 1.10
+GEF_1000_055_CENTER: effect_flame 1.00 0.45 0.10 7.0 1.10 1.20
+
+# --- cosmic / space (056-060) ---
+GEF_1000_056_NAME: cosmic_swirl
+GEF_1000_056_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_056_OUTER: effect_vortex 0.40 0.50 0.95 5.0 0.90 1.20
+GEF_1000_056_CENTER: effect_orb 0.60 0.40 0.90 8.0 1.50 0.75
+GEF_1000_057_NAME: starfall
+GEF_1000_057_DATA: star5 0.17 0.45 0.35
+GEF_1000_057_OUTER: effect_spark 0.85 0.85 1.00 6.0 1.10 0.75
+GEF_1000_057_CENTER: effect_glow 0.40 0.50 0.95 9.0 0.50 0.85
+GEF_1000_058_NAME: nebula_ring
+GEF_1000_058_DATA: ring6 0.19 0.48 0.37
+GEF_1000_058_OUTER: effect_ring 0.60 0.40 0.90 7.0 1.50 0.85
+GEF_1000_058_CENTER: effect_vortex 0.40 0.50 0.95 0.0 1.30 0.95
+GEF_1000_059_NAME: galaxy_orb
+GEF_1000_059_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_059_OUTER: effect_orb 0.40 0.50 0.95 8.0 0.50 0.95
+GEF_1000_059_CENTER: effect_ring 0.85 0.85 1.00 1.0 0.60 1.05
+GEF_1000_060_NAME: astral_mist
+GEF_1000_060_DATA: ring5 0.14 0.40 0.32
+GEF_1000_060_OUTER: effect_smoke 0.60 0.40 0.90 9.0 1.30 1.05
+GEF_1000_060_CENTER: effect_orb 0.40 0.50 0.95 2.0 0.80 0.70
+
+# --- shield / defense (061-065) ---
+GEF_1000_061_NAME: ward_dome
+GEF_1000_061_DATA: ring8 0.14 0.40 0.32
+GEF_1000_061_OUTER: effect_glow 0.40 0.70 1.00 0.0 0.60 0.70
+GEF_1000_061_CENTER: effect_ring 0.50 0.75 1.00 3.0 1.00 0.80
+GEF_1000_062_NAME: barrier_ring
+GEF_1000_062_DATA: ring10 0.16 0.42 0.34
+GEF_1000_062_OUTER: effect_ring 0.40 0.70 1.00 1.0 0.80 0.80
+GEF_1000_062_CENTER: effect_orb 0.50 0.75 1.00 4.0 1.20 0.90
+GEF_1000_063_NAME: aegis_orb
+GEF_1000_063_DATA: ring12 0.18 0.44 0.36
+GEF_1000_063_OUTER: effect_orb 0.50 0.75 1.00 2.0 1.00 0.90
+GEF_1000_063_CENTER: effect_glow 0.40 0.70 1.00 5.0 0.70 1.00
+GEF_1000_064_NAME: bulwark_pulse
+GEF_1000_064_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_064_OUTER: effect_glow 0.50 0.75 1.00 3.0 1.20 1.00
+GEF_1000_064_CENTER: effect_ring 0.40 0.70 1.00 6.0 0.90 1.10
+GEF_1000_065_NAME: sentinel_field
+GEF_1000_065_DATA: cross 0.22 0.41 0.40
+GEF_1000_065_OUTER: effect_ring 0.50 0.75 1.00 4.0 0.70 1.10
+GEF_1000_065_CENTER: effect_glow 0.40 0.70 1.00 7.0 1.10 1.20
+
+# --- pickup / loot (066-070) ---
+GEF_1000_066_NAME: loot_glint
+GEF_1000_066_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_066_OUTER: effect_spark 1.00 0.85 0.40 5.0 0.90 1.20
+GEF_1000_066_CENTER: effect_glow 1.00 0.90 0.45 8.0 1.50 0.75
+GEF_1000_067_NAME: xp_orbit
+GEF_1000_067_DATA: star5 0.17 0.45 0.35
+GEF_1000_067_OUTER: effect_orb 0.50 0.90 1.00 6.0 1.10 0.75
+GEF_1000_067_CENTER: effect_ring 0.30 0.95 0.95 9.0 0.50 0.85
+GEF_1000_068_NAME: treasure_burst
+GEF_1000_068_DATA: ring6 0.19 0.48 0.37
+GEF_1000_068_OUTER: effect_spark 1.00 0.90 0.45 7.0 1.50 0.85
+GEF_1000_068_CENTER: effect_orb 1.00 0.85 0.40 0.0 1.30 0.95
+GEF_1000_069_NAME: item_glow_ring
+GEF_1000_069_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_069_OUTER: effect_ring 1.00 0.85 0.40 8.0 0.50 0.95
+GEF_1000_069_CENTER: effect_glow 1.00 0.90 0.45 1.0 0.60 1.05
+GEF_1000_070_NAME: reward_pulse
+GEF_1000_070_DATA: ring5 0.14 0.40 0.32
+GEF_1000_070_OUTER: effect_glow 1.00 0.85 0.40 9.0 1.30 1.05
+GEF_1000_070_CENTER: effect_spark 1.00 0.90 0.45 2.0 0.80 0.70
+
+# --- movement / speed (071-075) ---
+GEF_1000_071_NAME: dash_trail
+GEF_1000_071_DATA: ring8 0.14 0.40 0.32
+GEF_1000_071_OUTER: effect_smoke 0.30 0.95 0.95 0.0 0.60 0.70
+GEF_1000_071_CENTER: effect_vortex 0.40 0.90 0.85 3.0 1.00 0.80
+GEF_1000_072_NAME: teleport_vortex
+GEF_1000_072_DATA: ring10 0.16 0.42 0.34
+GEF_1000_072_OUTER: effect_vortex 0.30 0.95 0.95 1.0 0.80 0.80
+GEF_1000_072_CENTER: effect_ring 0.40 0.90 0.85 4.0 1.20 0.90
+GEF_1000_073_NAME: blink_ring
+GEF_1000_073_DATA: ring12 0.18 0.44 0.36
+GEF_1000_073_OUTER: effect_ring 0.40 0.90 0.85 2.0 1.00 0.90
+GEF_1000_073_CENTER: effect_smoke 0.30 0.95 0.95 5.0 0.70 1.00
+GEF_1000_074_NAME: slipstream
+GEF_1000_074_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_074_OUTER: effect_smoke 0.40 0.90 0.85 3.0 1.20 1.00
+GEF_1000_074_CENTER: effect_orb 0.30 0.95 0.95 6.0 0.90 1.10
+GEF_1000_075_NAME: swift_pulse
+GEF_1000_075_DATA: cross 0.22 0.41 0.40
+GEF_1000_075_OUTER: effect_glow 0.30 0.95 0.95 4.0 0.70 1.10
+GEF_1000_075_CENTER: effect_ring 0.40 0.90 0.85 7.0 1.10 1.20
+
+# --- boss / epic (076-080) ---
+GEF_1000_076_NAME: boss_cataclysm
+GEF_1000_076_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_076_OUTER: effect_ring 0.90 0.20 0.15 5.0 0.90 1.20
+GEF_1000_076_CENTER: effect_vortex 1.00 0.45 0.10 8.0 1.50 0.75
+GEF_1000_077_NAME: titan_wrath
+GEF_1000_077_DATA: star5 0.17 0.45 0.35
+GEF_1000_077_OUTER: effect_shatter 0.90 0.25 0.05 6.0 1.10 0.75
+GEF_1000_077_CENTER: effect_orb 1.00 0.45 0.10 9.0 0.50 0.85
+GEF_1000_078_NAME: overlord_nova
+GEF_1000_078_DATA: ring6 0.19 0.48 0.37
+GEF_1000_078_OUTER: effect_ring 0.60 0.30 0.90 7.0 1.50 0.85
+GEF_1000_078_CENTER: effect_orb 0.70 0.40 1.00 0.0 1.30 0.95
+GEF_1000_079_NAME: apex_storm
+GEF_1000_079_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_079_OUTER: effect_bolt 0.60 0.85 1.00 8.0 0.50 0.95
+GEF_1000_079_CENTER: effect_vortex 0.80 0.90 1.00 1.0 0.60 1.05
+GEF_1000_080_NAME: doom_crown
+GEF_1000_080_DATA: ring5 0.14 0.40 0.32
+GEF_1000_080_OUTER: effect_ring 0.30 0.10 0.40 9.0 1.30 1.05
+GEF_1000_080_CENTER: effect_orb 0.45 0.20 0.60 2.0 0.80 0.70
+
+# --- summon / portal (081-085) ---
+GEF_1000_081_NAME: summon_circle
+GEF_1000_081_DATA: ring8 0.14 0.40 0.32
+GEF_1000_081_OUTER: effect_vortex 0.60 0.30 0.90 0.0 0.60 0.70
+GEF_1000_081_CENTER: effect_ring 0.70 0.40 1.00 3.0 1.00 0.80
+GEF_1000_082_NAME: portal_grid
+GEF_1000_082_DATA: ring10 0.16 0.42 0.34
+GEF_1000_082_OUTER: effect_vortex 0.70 0.40 1.00 1.0 0.80 0.80
+GEF_1000_082_CENTER: effect_orb 0.60 0.30 0.90 4.0 1.20 0.90
+GEF_1000_083_NAME: conjure_ring
+GEF_1000_083_DATA: ring12 0.18 0.44 0.36
+GEF_1000_083_OUTER: effect_ring 0.50 0.50 1.00 2.0 1.00 0.90
+GEF_1000_083_CENTER: effect_vortex 0.60 0.30 0.90 5.0 0.70 1.00
+GEF_1000_084_NAME: rift_open
+GEF_1000_084_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_084_OUTER: effect_vortex 0.45 0.20 0.60 3.0 1.20 1.00
+GEF_1000_084_CENTER: effect_glow 0.70 0.40 1.00 6.0 0.90 1.10
+GEF_1000_085_NAME: invoke_glyph
+GEF_1000_085_DATA: cross 0.22 0.41 0.40
+GEF_1000_085_OUTER: effect_glow 0.70 0.40 1.00 4.0 0.70 1.10
+GEF_1000_085_CENTER: effect_vortex 0.60 0.30 0.90 7.0 1.10 1.20
+
+# --- poison + void (086-090) ---
+GEF_1000_086_NAME: blight_void
+GEF_1000_086_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_086_OUTER: effect_smoke 0.40 0.90 0.20 5.0 0.90 1.20
+GEF_1000_086_CENTER: effect_orb 0.30 0.10 0.40 8.0 1.50 0.75
+GEF_1000_087_NAME: toxic_abyss
+GEF_1000_087_DATA: star5 0.17 0.45 0.35
+GEF_1000_087_OUTER: effect_orb 0.30 0.10 0.40 6.0 1.10 0.75
+GEF_1000_087_CENTER: effect_glow 0.40 0.90 0.20 9.0 0.50 0.85
+GEF_1000_088_NAME: corruption_ring
+GEF_1000_088_DATA: ring6 0.19 0.48 0.37
+GEF_1000_088_OUTER: effect_ring 0.45 0.20 0.60 7.0 1.50 0.85
+GEF_1000_088_CENTER: effect_smoke 0.40 0.90 0.20 0.0 1.30 0.95
+GEF_1000_089_NAME: fester_vortex
+GEF_1000_089_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_089_OUTER: effect_vortex 0.30 0.10 0.40 8.0 0.50 0.95
+GEF_1000_089_CENTER: effect_glow 0.55 0.85 0.15 1.0 0.60 1.05
+GEF_1000_090_NAME: decay_pulse
+GEF_1000_090_DATA: ring5 0.14 0.40 0.32
+GEF_1000_090_OUTER: effect_glow 0.40 0.90 0.20 9.0 1.30 1.05
+GEF_1000_090_CENTER: effect_orb 0.30 0.10 0.40 2.0 0.80 0.70
+
+# --- lightning + ice (091-095) ---
+GEF_1000_091_NAME: frost_arc
+GEF_1000_091_DATA: ring8 0.14 0.40 0.32
+GEF_1000_091_OUTER: effect_bolt 0.60 0.85 1.00 0.0 0.60 0.70
+GEF_1000_091_CENTER: effect_shatter 0.60 0.85 1.00 3.0 1.00 0.80
+GEF_1000_092_NAME: glacier_storm
+GEF_1000_092_DATA: ring10 0.16 0.42 0.34
+GEF_1000_092_OUTER: effect_shatter 0.60 0.85 1.00 1.0 0.80 0.80
+GEF_1000_092_CENTER: effect_bolt 0.60 0.85 1.00 4.0 1.20 0.90
+GEF_1000_093_NAME: cryo_discharge
+GEF_1000_093_DATA: ring12 0.18 0.44 0.36
+GEF_1000_093_OUTER: effect_spark 0.75 0.95 1.00 2.0 1.00 0.90
+GEF_1000_093_CENTER: effect_bolt 0.60 0.85 1.00 5.0 0.70 1.00
+GEF_1000_094_NAME: shock_freeze_ring
+GEF_1000_094_DATA: grid3x3 0.20 0.46 0.38
+GEF_1000_094_OUTER: effect_ring 0.60 0.85 1.00 3.0 1.20 1.00
+GEF_1000_094_CENTER: effect_bolt 0.60 0.85 1.00 6.0 0.90 1.10
+GEF_1000_095_NAME: polar_storm
+GEF_1000_095_DATA: cross 0.22 0.41 0.40
+GEF_1000_095_OUTER: effect_vortex 0.75 0.95 1.00 4.0 0.70 1.10
+GEF_1000_095_CENTER: effect_bolt 0.60 0.85 1.00 7.0 1.10 1.20
+
+# --- holy + fire (096-100) ---
+GEF_1000_096_NAME: hallowed_flame
+GEF_1000_096_DATA: cross_diag 0.15 0.43 0.33
+GEF_1000_096_OUTER: effect_flame 1.00 0.90 0.45 5.0 0.90 1.20
+GEF_1000_096_CENTER: effect_ring 1.00 1.00 0.95 8.0 1.50 0.75
+GEF_1000_097_NAME: solar_judgment
+GEF_1000_097_DATA: star5 0.17 0.45 0.35
+GEF_1000_097_OUTER: effect_ring 1.00 0.90 0.45 6.0 1.10 0.75
+GEF_1000_097_CENTER: effect_flame 1.00 0.45 0.10 9.0 0.50 0.85
+GEF_1000_098_NAME: radiant_pyre
+GEF_1000_098_DATA: ring6 0.19 0.48 0.37
+GEF_1000_098_OUTER: effect_flame 1.00 1.00 0.95 7.0 1.50 0.85
+GEF_1000_098_CENTER: effect_glow 1.00 0.90 0.45 0.0 1.30 0.95
+GEF_1000_099_NAME: seraphic_blaze
+GEF_1000_099_DATA: grid2x3 0.21 0.42 0.39
+GEF_1000_099_OUTER: effect_glow 1.00 0.90 0.45 8.0 0.50 0.95
+GEF_1000_099_CENTER: effect_flame 1.00 0.45 0.10 1.0 0.60 1.05
+GEF_1000_100_NAME: celestial_inferno
+GEF_1000_100_DATA: ring5 0.14 0.40 0.32
+GEF_1000_100_OUTER: effect_orb 1.00 1.00 0.95 9.0 1.30 1.05
+GEF_1000_100_CENTER: effect_flame 1.00 0.90 0.45 2.0 0.80 0.70

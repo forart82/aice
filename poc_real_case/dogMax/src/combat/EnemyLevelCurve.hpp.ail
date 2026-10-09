@@ -1,0 +1,12 @@
+# dof.combat.EnemyLevelCurve.hpp
+
+class EnemyLevelCurve:
+  maxLevelValue: int = 99
+  cumulative: [float] = []
+
+  fn levelFromDistance(distance:float) -> int:
+    ret 1
+  fn cumulativeForLevel(level:int) -> float:
+    ret 0.0
+  fn maxLevel() -> int:
+    ret this.maxLevelValue

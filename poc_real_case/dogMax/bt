@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# One-shot build. Run from project root.
+# Usage:
+#   ./bt              — release build (build/) + stamp a dogmax-<ts> snapshot
+#   ./bt dev          — fast build (build-dev/, -O1 -g0), no snapshot
+#   ./bt dev <target> — fast build one target
+#   ./bt <target>     — release build one target only
+set -e
+
+JOBS=$(nproc)  # use all cores. Peak -O3 -g compile RSS is ~0.4 GB/TU, so even a
+               # full cold build (16 jobs) tops ~6.4 GB of 30 GB — no RAM pressure.
+               # ccache hits cost ~0 RAM, so warm rebuilds are lighter still.
+
+# ccache tuning. Hits were ~15% (22% errored) because PCH consumers and
+# split-dwarf objects were uncacheable without these. Depend mode + this
+# sloppiness make them cache; CCACHE_BASEDIR strips the absolute build path so
+# parallel worktrees (.claude/worktrees/*) share ONE cache instead of missing on
+# their differing paths. All no-ops when ccache is not installed.
+export CCACHE_DEPEND=1
+export CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime
+export CCACHE_BASEDIR="$PWD"
+
+# clangd / Claude-CLI LSP looks for compile_commands.json at the checkout root,
+# but CMake emits it into build/. Without a root link, LSP falls back to default
+# flags and reports bogus "no member" errors on every worktree. Self-heal it.
+[ -e compile_commands.json ] || ln -sf build/compile_commands.json compile_commands.json 2>/dev/null || true
+
+sync_runtime() {
+  local runtime_dest="${1:-build}"
+  case "$runtime_dest" in
+    build|build-dev) ;;
+    *) echo "bt: refusing unexpected runtime destination: $runtime_dest" >&2; return 1 ;;
+  esac
+
+  # Mirror source runtime data instead of merging it into stale build copies.
+  # Keep the generated release metadata, which CMake writes only in build/.
+  if [ -d "$runtime_dest/configs" ]; then
+    find "$runtime_dest/configs" -depth -mindepth 1 \
+      ! -name version_build.yaml -delete
+  fi
+  rm -rf "$runtime_dest/assets"
+  mkdir -p "$runtime_dest/configs" "$runtime_dest/assets"
+  cp -r configs/. "$runtime_dest/configs/"
+  cp -r assets/. "$runtime_dest/assets/"
+}
+
+# Build-artifact rotation. Each build of the game binary is copied to the repo
+# root as dogmax-<Europe/Paris timestamp> (for example
+# dogmax-YYYYMMDDHHMMSS). Only the 5 most recent copies are kept;
+# older ones are pruned. The runnable binary STAYS in build/ (it needs
+# build/configs + build/assets to launch) — the timestamped root copy is a rotating
+# snapshot for quick access/history. Launch the newest snapshot any time with the
+# root `./runGame` script (previously ./.runGame).
+stamp_build() {
+  [ -f build/dogmax ] || return 0
+  local stamp; stamp=$(TZ=Europe/Paris date +%Y%m%d%H%M%S)
+  cp -f build/dogmax "dogmax-${stamp}"
+  # Keep only the 5 newest snapshots; delete the rest.
+  # Snapshot names are controlled (`dogmax-YYYYMMDDHHMMSS`), so whitespace and
+  # newline ambiguity warned about by SC2012 cannot occur here.
+  # shellcheck disable=SC2012
+  ls -1t dogmax-* 2>/dev/null | tail -n +6 | xargs -r rm -f
+  # shellcheck disable=SC2012
+  echo "build artifact: dogmax-${stamp} (kept: $(ls -1t dogmax-* 2>/dev/null | tr '\n' ' '))"
+}
+
+launch_release() {
+  [ "${DOGMAX_NO_AUTORUN:-0}" = 1 ] && return 0
+  setsid -f ./runGame >/tmp/dogmax-autostart.log 2>&1
+  echo "launched newest release for testing"
+}
+
+case "${1:-}" in
+  "")
+    cmake --build build -j"$JOBS"
+    sync_runtime
+    stamp_build
+    launch_release
+    ;;
+  dev)
+    # Fast build in a separate dir (build-dev/, -O1 -g0). No snapshot stamp;
+    # same all-cores JOBS as release (-O1 -g0 is even lighter on RAM).
+    shift
+    DEV=build-dev
+    [ -f "$DEV/CMakeCache.txt" ] || cmake -S . -B "$DEV" -G Ninja -DDOGMAX_FAST=ON
+    case "${1:-}" in
+      ""|all)
+        cmake --build "$DEV" -j"$JOBS"
+        sync_runtime "$DEV"
+        ;;
+      *)
+        cmake --build "$DEV" --target "$1" -j"$JOBS"
+        ;;
+    esac
+    ;;
+  *)
+    cmake --build build --target "$1" -j"$JOBS"
+    if [ "$1" = dogmax ]; then
+      sync_runtime
+      stamp_build
+      launch_release
+    fi
+    ;;
+esac

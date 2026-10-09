@@ -1,0 +1,36 @@
+# Enemy unpredictable behavior tuning.
+# Four independent behaviors layered on top of base chase/attack AI.
+
+# Strafe — enemy circles laterally in the attack deadzone instead of freezing.
+ENEMY_STRAFE_SPEED_FRAC: 0.45
+ENEMY_STRAFE_MIN_DIST: 80.0
+ENEMY_STRAFE_MAX_DIST: 220.0
+ENEMY_STRAFE_DURATION: 1.8
+ENEMY_STRAFE_SWITCH_INTERVAL: 0.9
+
+# Berserk — speed and attack-rate boost when HP drops below threshold.
+ENEMY_BERSERK_HP_FRAC: 0.25
+ENEMY_BERSERK_SPEED_MULT: 1.55
+
+# Juke — brief angular detour during chase to break predictable approach paths.
+ENEMY_JUKE_CHANCE: 0.04
+ENEMY_JUKE_COOLDOWN: 2.2
+ENEMY_JUKE_DURATION: 0.38
+ENEMY_JUKE_ANGLE_DEG: 55.0
+
+# Jump — telegraph pause, then fast arc movement landing directly on hero.
+# Duration computed as dist/SPEED so the enemy always arrives on target.
+ENEMY_JUMP_CHANCE: 0.28
+ENEMY_JUMP_COOLDOWN: 4.0
+ENEMY_JUMP_RANGE_MIN: 620.0
+ENEMY_JUMP_RANGE_MAX: 1400.0
+ENEMY_JUMP_TELEGRAPH_DURATION: 0.35
+ENEMY_JUMP_SPEED: 1400.0
+ENEMY_JUMP_GHOST_DURATION: 0.4
+ENEMY_JUMP_GHOST_ALPHA: 210.0
+ENEMY_JUMP_LANDING_DURATION: 0.30
+
+# Dash/jump contact damage — dealt once per dash when the enemy body
+# overlaps the hero during the dash motion (5% of hero max HP).
+ENEMY_DASH_CONTACT_RADIUS: 110.0
+ENEMY_DASH_CONTACT_DAMAGE_FRAC: 0.05

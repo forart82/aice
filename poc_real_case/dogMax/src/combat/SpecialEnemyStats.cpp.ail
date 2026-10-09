@@ -1,0 +1,26 @@
+# dof.combat.SpecialEnemyStats.cpp
+
+enum SpecialEnemyKind:
+  None
+  Shocker
+  Glasswraith
+  Hexarchon
+  Voidcrawler
+  TassideanSentinel
+  PactWalker
+
+type SpecialEnemyStatOverride:
+  healthMultiplier: float
+  speedMultiplier: float
+  deadzoneFactor: float
+
+fn loadSpecialEnemyStatOverride(kind:SpecialEnemyKind, shockerHp:float, glasswraithHp:float, hexarchonHp:float, hexarchonDeadzone:float, voidcrawlerSpeed:float) -> SpecialEnemyStatOverride:
+  if kind == SpecialEnemyKind.Shocker:
+    ret SpecialEnemyStatOverride(shockerHp, 1.0, 0.0)
+  if kind == SpecialEnemyKind.Glasswraith:
+    ret SpecialEnemyStatOverride(glasswraithHp, 1.0, 0.0)
+  if kind == SpecialEnemyKind.Hexarchon:
+    ret SpecialEnemyStatOverride(hexarchonHp, 1.0, hexarchonDeadzone)
+  if kind == SpecialEnemyKind.Voidcrawler:
+    ret SpecialEnemyStatOverride(1.0, voidcrawlerSpeed, 0.0)
+  ret SpecialEnemyStatOverride(1.0, 1.0, 0.0)

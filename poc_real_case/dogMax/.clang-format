@@ -1,0 +1,55 @@
+# clang-format configuration for dogmax.
+#
+# Derived to match the existing hand-written style (4-space indent,
+# left-aligned pointers/references, attached K&R braces, ~80-column
+# wrap, call/parameter lists aligned under the open paren) so running
+# the formatter produces minimal churn against the current sources.
+#
+# Usage:
+#   clang-format -i src/render/UiRenderer.cpp        # format in place
+#   clang-format --dry-run --Werror src/**/*.cpp     # check only (CI gate)
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: c++20
+
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 80
+
+PointerAlignment: Left
+ReferenceAlignment: Left
+DerivePointerAlignment: false
+
+BreakBeforeBraces: Attach
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortBlocksOnASingleLine: Empty
+
+AlignAfterOpenBracket: Align
+BinPackParameters: true
+BinPackArguments: true
+SpaceAfterTemplateKeyword: true
+
+NamespaceIndentation: None
+FixNamespaceComments: false
+IndentCaseLabels: false
+
+# The sources align runs of struct-member / variable assignments into
+# columns (e.g. the UirStyle and config-load blocks), even past the
+# column limit — preserve that.
+AlignConsecutiveAssignments:
+  Enabled: true
+  AcrossEmptyLines: false
+  AcrossComments: false
+
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowAllArgumentsOnNextLine: true
+
+KeepEmptyLinesAtTheStartOfBlocks: false
+MaxEmptyLinesToKeep: 1
+
+IncludeBlocks: Preserve
+SortIncludes: Never

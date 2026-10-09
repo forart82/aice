@@ -1,0 +1,24 @@
+# Game version — drawn at the bottom-right of the HUD as `vMAJOR.MINOR.BUILD`.
+#
+# MAJOR/MINOR are authored by hand here. The BUILD number is NOT stored in this
+# file: it auto-increments on every relink, written by the CMake post-build step
+# into the dest-only `build/configs/version_build.yaml` (see cmake/
+# BumpBuildNumber.cmake). That keeps this tracked source file churn-free while
+# the live build counter lives only under build/. render::VersionOverlay reads
+# VERSION_BUILD from that generated file and falls back to 0 when it is absent
+# (a fresh/headless build before any bump).
+VERSION_MAJOR: 0
+VERSION_MINOR: 1
+
+# Bottom-right placement, in UI design-space pixels measured from the
+# bottom-right corner, plus text styling. Cyan-dim to sit quietly against the
+# dark HUD without competing with gameplay text.
+VERSION_HUD_MARGIN_X: 10
+VERSION_HUD_MARGIN_Y: 8
+VERSION_HUD_FONT_SIZE: 13
+VERSION_HUD_TIMESTAMP_FONT_SIZE: 10
+VERSION_HUD_LINE_SPACING: 4
+VERSION_HUD_COLOR_R: 120
+VERSION_HUD_COLOR_G: 205
+VERSION_HUD_COLOR_B: 215
+VERSION_HUD_COLOR_ALPHA: 170

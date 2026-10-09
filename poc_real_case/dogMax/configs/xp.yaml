@@ -1,0 +1,203 @@
+# Hero XP / leveling tunables. Read by Hero at construction.
+#
+# Spec: GameDesign.md §Leveling & XP + §Appendix A — XP Step Costs.
+# Step costs HERO_XP_LEVEL_N give the XP needed to advance from level N to
+# level N+1. Stored as int64 (late-game values from L90+ exceed 32-bit int max).
+#
+# XP grant formula on enemy kill:
+#   delta     = enemy.level - hero.level
+#   deltaMult = clamp(1 + delta * XP_DELTA_SCALE, XP_DELTA_MIN, XP_DELTA_MAX)
+#   xp        = floor(enemy.level^2 * qualityMult * deltaMult)
+#
+# card-mpo9q5ih — XP_DELTA_MIN now floors at 1.0 so the level-diff
+# modifier can only RAISE the grant above the per-level baseline,
+# never reduce it below. Players reported zero-XP kills when the
+# hero out-levelled the enemy by 10+ levels (deltaMult clamped to 0.1
+# made low-level enemies feel like a waste); the new floor pins the
+# Common-tier baseline (`enemy.level^2 * qualityMult`) as a hard
+# lower bound and keeps the [1.0, 2.0] window symmetric — the upside
+# is unchanged so high-level kills still grant 2× XP.
+
+XP_DELTA_SCALE: 0.1
+XP_DELTA_MIN: 1.0
+XP_DELTA_MAX: 2.0
+
+# card-mpl0eo9k — per-tier XP multiplier matches the enemy stat
+# multiplier ladder (ENEMY_TIER_STAT_MULT_* = 1.0 / 3.0 / 9.0). An
+# Uncommon enemy is 3× tougher than a Common; killing one should
+# reward 3× the XP. A Rare is 9× tougher and 9× as rewarding. This
+# replaces the earlier compressed 1.0 / 1.4 / 2.0 curve that left
+# Uncommon / Rare drops feeling like cosmetic upgrades instead of
+# the order-of-magnitude jumps the spec stat ladder implies.
+XP_QUALITY_MULT_COMMON: 1.0
+XP_QUALITY_MULT_UNCOMMON: 3.0
+XP_QUALITY_MULT_RARE: 9.0
+
+# card-mpl0eo9k — rolling-window kill-streak XP multiplier. Each
+# enemy killed within `WINDOW_SECONDS` of the previous kill bumps the
+# multiplier by `BONUS_PER_KILL`, capped at `MAX_MULT`. A gap longer
+# than the window resets the streak to 1× (single-kill baseline). The
+# boosted amount is what both the XP bar and the on-screen "+N XP"
+# float report, so the player gets immediate feedback on the combo.
+XP_KILL_STREAK_WINDOW_SECONDS: 3.0
+XP_KILL_STREAK_BONUS_PER_KILL: 0.25
+XP_KILL_STREAK_MAX_MULT: 3.0
+
+# Floating "+N XP" feedback. card-mpl8zfv4 moved the spawn position
+# from the hero to the dying enemy so the player reads the kill site
+# directly; the streak palette below colours chained kills (within
+# XP_KILL_STREAK_WINDOW_SECONDS) and bumps the font size per chain
+# step up to a configurable cap.
+XP_FLOAT_DURATION: 1.0
+XP_FLOAT_RISE_PIXELS: 80
+XP_FLOAT_FONT_SIZE: 20
+XP_FLOAT_COLOR_R: 120
+XP_FLOAT_COLOR_G: 210
+XP_FLOAT_COLOR_B: 255
+
+# card-mpl8zfv4 — streak visuals. When `XpFloatHub::spawnXp` is
+# called with `streakIndex >= 2`, the float renders in the streak
+# palette (gold) and the font size scales up by
+# `STREAK_FONT_SIZE_BUMP_PER_KILL` per chained kill, capped at
+# `STREAK_MAX_FONT_SIZE`. A streak of 1 (first kill / no chain)
+# falls back to the baseline colour + font size above.
+XP_FLOAT_STREAK_COLOR_R: 255
+XP_FLOAT_STREAK_COLOR_G: 215
+XP_FLOAT_STREAK_COLOR_B: 80
+XP_FLOAT_STREAK_FONT_SIZE_BUMP_PER_KILL: 3
+XP_FLOAT_STREAK_MAX_FONT_SIZE: 40
+
+# XP step table — 40-hour playthrough target. Spec §Appendix A L3823-3845.
+# The first three steps are intentionally hand-tuned below the long-run formula
+# so a new run reaches level 2 quickly and shows the level-up feedback early.
+# L4+ keeps the existing long-run pacing table.
+# Phase 1 (L1-39): kills(N) = 300 * 1.0705^(N-1); step(N) = round(kills * N^2).
+# Phase 2 (L40-99): step(N) = round(step(39) * 1.06^(N-39)) — a pure geometric
+# ramp ANCHORED at the Phase-1 endpoint so the two phases join without a cliff.
+#
+# card-P1.4 — fixed a discontinuous, non-monotonic pivot. The old Phase 2
+# restarted kills from a base of 400 (step(40) = 400 * 40^2 = 640 000), a 9.5x
+# DROP below step(39) = 6 074 968. That made L40 a brutal wall while L40->41 was
+# suddenly trivial. Phase 2 is now re-anchored at step(39) and grows geometrically
+# at g = 1.06/level, so step(40) >= step(39) (pivot ratio 1.06 — a gentle easing
+# from the 1.128 that precedes it, NOT a cliff) and step(n+1) >= step(n) for every
+# n up to 99. The N^2 shaping is intentionally DROPPED in Phase 2: with the 6.07M
+# anchor it would explode late-game grind far past the 40 h budget, and its absence
+# lets same-level kills/level taper (step/N^2 grows sub-geometrically) — exactly the
+# "gentler late-game than early" intent (Phase 1 step ratios run 4.28x -> 1.128x;
+# Phase 2 is a flat 1.06x, gentler than every Phase-1 step).
+#
+# Spot-check waypoints (opening ramp hand-tuned; Phase 2 re-tabled):
+#   L1   =          30
+#   L10  =      55 386
+#   L20  =     437 853
+#   L40  =   6 439 466 (phase pivot — now CONTINUOUS/monotonic; was 640 000 cliff)
+#   L60  =  20 652 240
+#   L80  =  66 234 532
+#   L99  = 200 399 166 (largest step; no dip anywhere in L1..L99; fits int64)
+#
+# Cumulative XP L1->L99 = 3 481 694 005. Same-level kills to L99 baseline ~596 600
+# (vs the old buggy ~460 000 — the cheap post-pivot shortcut is gone). At sustained
+# 2 kills/sec that's ~83 h pure same-level grinding; in practice the player walks
+# outward, enemies out-level the hero, deltaMult caps at 2.0 and qualityMult adds
+# ~1.4-2.0x -> effective ~40-45 h to L99 active combat, matching the 40-hour
+# playthrough budget (slack for loot churn / dron events / meta progression).
+HERO_XP_LEVEL_1: 30
+HERO_XP_LEVEL_2: 180
+HERO_XP_LEVEL_3: 420
+HERO_XP_LEVEL_4: 5888
+HERO_XP_LEVEL_5: 9849
+HERO_XP_LEVEL_6: 15183
+HERO_XP_LEVEL_7: 22123
+HERO_XP_LEVEL_8: 30932
+HERO_XP_LEVEL_9: 41908
+HERO_XP_LEVEL_10: 55386
+HERO_XP_LEVEL_11: 71742
+HERO_XP_LEVEL_12: 91398
+HERO_XP_LEVEL_13: 114828
+HERO_XP_LEVEL_14: 142562
+HERO_XP_LEVEL_15: 175193
+HERO_XP_LEVEL_16: 213384
+HERO_XP_LEVEL_17: 257873
+HERO_XP_LEVEL_18: 309485
+HERO_XP_LEVEL_19: 369138
+HERO_XP_LEVEL_20: 437853
+HERO_XP_LEVEL_21: 516765
+HERO_XP_LEVEL_22: 607137
+HERO_XP_LEVEL_23: 710369
+HERO_XP_LEVEL_24: 828013
+HERO_XP_LEVEL_25: 961793
+HERO_XP_LEVEL_26: 1113614
+HERO_XP_LEVEL_27: 1285589
+HERO_XP_LEVEL_28: 1480054
+HERO_XP_LEVEL_29: 1699590
+HERO_XP_LEVEL_30: 1947051
+HERO_XP_LEVEL_31: 2225588
+HERO_XP_LEVEL_32: 2538680
+HERO_XP_LEVEL_33: 2890165
+HERO_XP_LEVEL_34: 3284273
+HERO_XP_LEVEL_35: 3725668
+HERO_XP_LEVEL_36: 4219488
+HERO_XP_LEVEL_37: 4771390
+HERO_XP_LEVEL_38: 5387599
+HERO_XP_LEVEL_39: 6074968
+HERO_XP_LEVEL_40: 6439466
+HERO_XP_LEVEL_41: 6825834
+HERO_XP_LEVEL_42: 7235384
+HERO_XP_LEVEL_43: 7669507
+HERO_XP_LEVEL_44: 8129678
+HERO_XP_LEVEL_45: 8617458
+HERO_XP_LEVEL_46: 9134506
+HERO_XP_LEVEL_47: 9682576
+HERO_XP_LEVEL_48: 10263531
+HERO_XP_LEVEL_49: 10879342
+HERO_XP_LEVEL_50: 11532103
+HERO_XP_LEVEL_51: 12224029
+HERO_XP_LEVEL_52: 12957471
+HERO_XP_LEVEL_53: 13734919
+HERO_XP_LEVEL_54: 14559014
+HERO_XP_LEVEL_55: 15432555
+HERO_XP_LEVEL_56: 16358509
+HERO_XP_LEVEL_57: 17340019
+HERO_XP_LEVEL_58: 18380420
+HERO_XP_LEVEL_59: 19483245
+HERO_XP_LEVEL_60: 20652240
+HERO_XP_LEVEL_61: 21891374
+HERO_XP_LEVEL_62: 23204857
+HERO_XP_LEVEL_63: 24597148
+HERO_XP_LEVEL_64: 26072977
+HERO_XP_LEVEL_65: 27637356
+HERO_XP_LEVEL_66: 29295597
+HERO_XP_LEVEL_67: 31053333
+HERO_XP_LEVEL_68: 32916533
+HERO_XP_LEVEL_69: 34891525
+HERO_XP_LEVEL_70: 36985017
+HERO_XP_LEVEL_71: 39204118
+HERO_XP_LEVEL_72: 41556365
+HERO_XP_LEVEL_73: 44049747
+HERO_XP_LEVEL_74: 46692731
+HERO_XP_LEVEL_75: 49494295
+HERO_XP_LEVEL_76: 52463953
+HERO_XP_LEVEL_77: 55611790
+HERO_XP_LEVEL_78: 58948497
+HERO_XP_LEVEL_79: 62485407
+HERO_XP_LEVEL_80: 66234532
+HERO_XP_LEVEL_81: 70208604
+HERO_XP_LEVEL_82: 74421120
+HERO_XP_LEVEL_83: 78886387
+HERO_XP_LEVEL_84: 83619570
+HERO_XP_LEVEL_85: 88636745
+HERO_XP_LEVEL_86: 93954949
+HERO_XP_LEVEL_87: 99592246
+HERO_XP_LEVEL_88: 105567781
+HERO_XP_LEVEL_89: 111901848
+HERO_XP_LEVEL_90: 118615959
+HERO_XP_LEVEL_91: 125732916
+HERO_XP_LEVEL_92: 133276891
+HERO_XP_LEVEL_93: 141273505
+HERO_XP_LEVEL_94: 149749915
+HERO_XP_LEVEL_95: 158734910
+HERO_XP_LEVEL_96: 168259004
+HERO_XP_LEVEL_97: 178354545
+HERO_XP_LEVEL_98: 189055817
+HERO_XP_LEVEL_99: 200399166

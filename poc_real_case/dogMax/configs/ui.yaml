@@ -1,0 +1,13 @@
+# UI scale + element sizes (font sizes + FPS placement).
+# Hero/Enemy healthbar dims live in hero.yaml / enemy.yaml.
+# XP bar dims + colours live in xp.yaml.
+
+UI_FONT_PATH: assets/fonts/DejaVuSans.ttf
+UI_FONT_SIZE_FPS: 12
+UI_FONT_SIZE_SMALL: 12
+UI_FONT_SIZE_LABEL: 16
+
+UI_FPS_MARGIN: 12
+
+# FPS label colour pulls from theme.yaml UI_ACCENT_* (B-UX-11
+# single visual language).

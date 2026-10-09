@@ -1,0 +1,28 @@
+# Regular enemy — the baseline non-special foe. Per-tier overrides keep
+# the historical tier tint (Uncommon cyan, Rare gold) and the
+# 1.0 / 1.5 / 2.5x visual size cadence. Colours/size that a tier does
+# not override inherit this Common base. Edited live via the Ctrl+E
+# enemy editor; body shape indexes configs/enemy_shapes.yaml.
+ENEMY_TYPE_ID: regular
+ENEMY_TYPE_NAME: Regular
+ENEMY_SPECIAL_KIND: None
+
+ENEMY_BODY_SHAPE: 0
+ENEMY_BODY_SIZE: 50
+ENEMY_OUTLINE_R: 200
+ENEMY_OUTLINE_G: 40
+ENEMY_OUTLINE_B: 100
+ENEMY_FILL_R: 20
+ENEMY_FILL_G: 8
+ENEMY_FILL_B: 22
+ENEMY_LAYER_COUNT: 0
+
+ENEMY_UNCOMMON_BODY_SIZE: 75
+ENEMY_UNCOMMON_OUTLINE_R: 80
+ENEMY_UNCOMMON_OUTLINE_G: 200
+ENEMY_UNCOMMON_OUTLINE_B: 255
+
+ENEMY_RARE_BODY_SIZE: 125
+ENEMY_RARE_OUTLINE_R: 255
+ENEMY_RARE_OUTLINE_G: 215
+ENEMY_RARE_OUTLINE_B: 50

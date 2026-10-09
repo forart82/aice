@@ -1,0 +1,12 @@
+# dof.combat.HitStop.hpp
+
+class HitStop:
+  remainingSeconds: float = 0.0
+  fn request(seconds:float) -> void:
+    ret
+  fn advanceRealTime(realDeltaSeconds:float) -> void:
+    ret
+  fn isFrozen() -> bool:
+    ret this.remainingSeconds > 0.0
+  fn clear() -> void:
+    this.remainingSeconds = 0.0

@@ -1,0 +1,18 @@
+# dof.combat.KillStreak.cpp
+
+type KillStreakOutcome:
+  newStreak: int
+  multiplier: float
+
+fn computeKillStreakMultiplier(simTime:float, lastKillSimTime:float, currentStreak:int, windowSeconds:float, bonusPerKill:float, maxMultiplier:float) -> KillStreakOutcome:
+  if (lastKillSimTime < 0.0) or (windowSeconds <= 0.0):
+    ret KillStreakOutcome(1, 1.0)
+  let dt:float = simTime - lastKillSimTime
+  if dt > windowSeconds:
+    ret KillStreakOutcome(1, 1.0)
+  let boostedStreak:int = currentStreak + 1
+  let raw:float = 1.0 + ((boostedStreak - 1).toFloat() * bonusPerKill)
+  let floorMult:float = 1.0
+  let ceilMult:float = max(floorMult, maxMultiplier)
+  let multiplier:float = clamp(raw, floorMult, ceilMult)
+  ret KillStreakOutcome(boostedStreak, multiplier)

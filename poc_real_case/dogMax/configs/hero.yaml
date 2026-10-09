@@ -1,0 +1,307 @@
+# Hero entity. Read by Hero + HeroManager.
+HERO_HEALTH_MAX: 100
+HERO_MOVE_SPEED: 500
+HERO_COLLISION_RADIUS: 46
+HERO_PICKUP_RADIUS: 360
+HERO_START_X: 0
+HERO_START_Y: 0
+HERO_OUTLINE_R: 255
+HERO_OUTLINE_G: 120
+HERO_OUTLINE_B: 40
+HERO_FILL_R: 18
+HERO_FILL_G: 14
+HERO_FILL_B: 18
+
+# HERO_MAX_LEVEL: 100 is the hard cap the code uses. Stat curves use the
+# (level-1) exponent, so the top level L100 = base * multiplier^99 (NOT ^100).
+# The spec's "level cap 99" prose is the stale one — code + configs are
+# authoritative at 100. ("L100" in these comments therefore means exponent 99.)
+HERO_MAX_LEVEL: 100
+
+# Per-level Hero stat multipliers (spec §Level System): every stat scales as
+# stat(level) = base * multiplier^(level - 1). Level 1 = base, level 2 = base
+# x multiplier, level N = base x multiplier^(N-1). On level-up the hero is
+# fully healed to the new max HP (spec §Level-Up Effects).
+# HERO_HEALTH_PER_LEVEL lowered 1.15 -> 1.11 (endgame defense-drift fix). Hero
+# HP compounded at 1.15 while enemy damage compounds at 1.10 (enemy.yaml), so
+# hero survivability ran away as (1.15/1.10)^98 ~= 78x by L99 -- the reported
+# "78x survival advantage". At 1.11 that ratio is (1.11/1.10)^98 ≈ 2.4x, i.e.
+# hero HP growth roughly matches enemy damage growth. With the current 100 HP
+# opening, L100 hero max HP lands around 3.07 M instead of the old 30.7 M.
+HERO_HEALTH_PER_LEVEL: 1.11
+HERO_DAMAGE_PER_LEVEL: 1.10
+HERO_PICKUP_PER_LEVEL: 1.02
+HERO_MOVE_PER_LEVEL: 1.02
+
+# Hero Healthbar (world-space, drawn above Hero sprite). Spec §Hero Healthbar.
+HERO_HP_BAR_WIDTH: 200
+HERO_HP_BAR_HEIGHT: 18
+HERO_HP_BAR_OFFSET_Y: 24
+# A thin isometric locator ring anchors the dark hero without covering the
+# ground with the old stack of filled glow discs.
+HERO_LOCATOR_RADIUS_MULTIPLIER: 1.3
+HERO_LOCATOR_Y_SCALE: 0.45
+HERO_LOCATOR_ALPHA: 190
+
+# Hero Attack Flash (spec §Appendix J §Hero Attack Flash). Sets
+# `attackFlash = HERO_ATTACK_FLASH_INITIAL` on every landed hit;
+# decays at HERO_ATTACK_FLASH_DECAY_RATE * dt per frame so the
+# default 1.0 / 4.0 settings produce a ~0.25 s pulse.
+HERO_ATTACK_FLASH_INITIAL: 1.0
+HERO_ATTACK_FLASH_DECAY_RATE: 4.0
+
+# Hero Level-Up Flash (spec §Level-Up Effects).
+# card-mpl0vatr — slower decay + higher peak so the level-up moment
+# reads at a glance. Was 1.0 / 2.0 (~0.5 s lifespan); now 1.5 / 0.6
+# (~2.5 s lifespan) so the new concentric ring burst (see keys
+# below) has time to fan outward before the flash fades to zero.
+HERO_LEVEL_UP_FLASH_INITIAL: 1.5
+HERO_LEVEL_UP_FLASH_DECAY_RATE: 0.6
+
+# card-mpl0vatr — concentric ring burst painted on top of the hero
+# silhouette while the flash ramp is positive. Tunables for ring
+# count, base / step radii, expansion multiplier, outline thickness,
+# alpha peak, and RGB so a balance pass can dial the "glory" feel
+# without recompiling. Defaults: three gold rings starting at 1.4×
+# the hero radius and fanning out to ~3.6× by the time the flash
+# decays to zero.
+HERO_LEVEL_UP_RING_COUNT: 3
+HERO_LEVEL_UP_RING_BASE_RADIUS_MULT: 1.4
+HERO_LEVEL_UP_RING_STEP_RADIUS_MULT: 0.5
+HERO_LEVEL_UP_RING_EXPANSION_MULT: 2.2
+HERO_LEVEL_UP_RING_THICKNESS: 3.0
+HERO_LEVEL_UP_RING_ALPHA_PEAK: 220
+HERO_LEVEL_UP_RING_COLOR_R: 255
+HERO_LEVEL_UP_RING_COLOR_G: 240
+HERO_LEVEL_UP_RING_COLOR_B: 120
+
+# Hero Death State (spec §Hero Death, lines 477-480).
+# HERO_DEATH_FADE_DURATION = seconds for the desaturation overlay
+# to ramp from 0 alpha to HERO_DEATH_FADE_PEAK_ALPHA. The overlay
+# tint is a cold grey-blue per spec ("slow desaturation fade").
+HERO_DEATH_FADE_DURATION: 1.0
+HERO_DEATH_FADE_PEAK_ALPHA: 180
+HERO_DEATH_FADE_TINT_R: 30
+HERO_DEATH_FADE_TINT_G: 30
+HERO_DEATH_FADE_TINT_B: 40
+
+# Death recap — centred fatal-frame image plus immutable killer facts.
+# Width/height are UI-design pixels; capture dimensions leave room for the
+# title, restart prompt, and run details beneath the annotated image.
+HERO_DEATH_PANEL_WIDTH: 1080
+HERO_DEATH_PANEL_HEIGHT: 830
+HERO_DEATH_PANEL_BG_R: 12
+HERO_DEATH_PANEL_BG_G: 12
+HERO_DEATH_PANEL_BG_B: 20
+HERO_DEATH_PANEL_BG_A: 235
+HERO_DEATH_PANEL_OUTLINE_R: 255
+HERO_DEATH_PANEL_OUTLINE_G: 80
+HERO_DEATH_PANEL_OUTLINE_B: 80
+HERO_DEATH_PANEL_OUTLINE_THICKNESS: 3
+HERO_DEATH_CAPTURE_WIDTH: 1000
+HERO_DEATH_CAPTURE_HEIGHT: 562
+HERO_DEATH_CAPTURE_TOP_MARGIN: 88
+HERO_DEATH_CAPTURE_BORDER_THICKNESS: 2
+HERO_DEATH_CAPTURE_BORDER_R: 122
+HERO_DEATH_CAPTURE_BORDER_G: 138
+HERO_DEATH_CAPTURE_BORDER_B: 158
+HERO_DEATH_KILLER_MARKER_RADIUS: 30
+HERO_DEATH_KILLER_MARKER_THICKNESS: 5
+HERO_DEATH_KILLER_MARKER_INSET: 34
+HERO_DEATH_KILLER_MARKER_R: 255
+HERO_DEATH_KILLER_MARKER_G: 58
+HERO_DEATH_KILLER_MARKER_B: 58
+HERO_DEATH_CAPTION_BG_R: 5
+HERO_DEATH_CAPTION_BG_G: 7
+HERO_DEATH_CAPTION_BG_B: 12
+HERO_DEATH_CAPTION_BG_ALPHA: 220
+HERO_DEATH_CAPTION_HEIGHT: 44
+# Short red-white world-space confirmation when enemy damage actually removes
+# hero HP. Separate from the hero's offensive attack flash.
+HERO_INCOMING_HIT_FLASH_INITIAL: 1.0
+HERO_INCOMING_HIT_FLASH_DECAY_RATE: 6.0
+HERO_INCOMING_ATTACK_FLASH_INITIAL: 1.0
+HERO_INCOMING_ATTACK_FLASH_DECAY_RATE: 7.0
+HERO_AVOIDED_ATTACK_FLASH_INITIAL: 1.0
+HERO_AVOIDED_ATTACK_FLASH_DECAY_RATE: 7.0
+HERO_INCOMING_HIT_HEAVY_HP_FRACTION: 0.12
+HERO_INCOMING_HIT_HEAVY_STRENGTH: 1.35
+HERO_INCOMING_HIT_CRITICAL_STRENGTH: 1.65
+
+# ---------------------------------------------------------------------------
+# Build-reactive glow — the identity hook (visual_identity.md Step 6)
+# ---------------------------------------------------------------------------
+# The hero's halo heats up with the player's equipped build. This is the one
+# piece of the look that no other game can copy, because it is driven by
+# dogmax's own dice/luck system rather than by health, combat or time.
+#
+# Drive signal is LuckHub::luckTotal(), the summed luck of every slotted die.
+# That value is unbounded from the renderer's side, so it is normalised against
+# a reference and gamma-curved — the same shape loot.yaml already uses for
+# LUCK_DROP_REFERENCE and WEAPON_SLOT_COUNT_LUCK_GAMMA, so build-driven curves
+# stay consistent across the game.
+#
+# REFERENCE is the luck total that reads as a fully realised build; past it the
+# glow saturates rather than growing without limit. GAMMA below 1 front-loads
+# the curve so the first few good dice are visibly felt — the effect has to
+# reward early progress, not only an endgame build.
+HERO_BUILD_GLOW_ENABLE: 1
+HERO_BUILD_GLOW_LUCK_REFERENCE: 120
+HERO_BUILD_GLOW_GAMMA: 0.55
+
+# The hot end of the glow. Deliberately still inside the hero's own orange
+# lane, lifted toward white-hot rather than shifted to a new hue: the locked
+# palette gives the hero orange and only orange, and a hue that wandered toward
+# gold or cyan would start reading as an enemy tier or a world edge. Heat, not
+# a different colour, is what says "my build is strong".
+HERO_BUILD_GLOW_PEAK_R: 255
+HERO_BUILD_GLOW_PEAK_G: 210
+HERO_BUILD_GLOW_PEAK_B: 150
+
+# Extra halo alpha at a full build, as a multiplier on top of the base falloff.
+# Kept modest: the glow must stay readable as decoration behind the hero, never
+# bright enough to compete with damage feedback or hide the silhouette.
+HERO_BUILD_GLOW_INTENSITY_GAIN: 0.9
+
+# ---------------------------------------------------------------------------
+# Movement easing (visual_identity.md Step 7)
+# ---------------------------------------------------------------------------
+# The hero used to snap between zero and full speed on the frame an input
+# arrived, which reads as a sprite being teleported rather than a body moving.
+# These are per-second approach rates toward the target velocity, applied only
+# to the hero: enemies leave them at Moveable's 0 default, which means "assign
+# instantly", so attack wind-ups and stagger freezes still plant on the exact
+# frame they always did. Making enemies glide during a telegraph would be an
+# AI-readability regression wearing a visual-polish hat.
+#
+# Acceleration is faster than deceleration on purpose. Launch has to feel
+# responsive or the controls read as laggy; the stop is where the weight is
+# sold, so it glides a little longer.
+HERO_MOVE_ACCELERATION_RATE: 16.0
+HERO_MOVE_DECELERATION_RATE: 11.0
+
+# Speed below which a stop snaps to exactly zero. Exponential approach never
+# actually reaches zero, so without a cutoff the hero drifts at sub-pixel speed
+# forever and the walk animation never settles.
+HERO_MOVE_STOP_EPSILON: 5.0
+
+# Hit-reaction squash (visual_identity.md Step 10). Peak vertical compression
+# at a full-strength incoming hit, as a fraction of the hero's height.
+#
+# Driven off the existing incomingHitFlash decay rather than a new timer, so the
+# squash, the damage flash and the hit feedback share one clock and cannot drift
+# apart. The horizontal stretch is derived as 1/squash — volume-preserving — so
+# the hero reads as compressing under an impact instead of just being drawn
+# smaller. Kept small: dark-neon wants weight, not cartoon rubber.
+HERO_HIT_SQUASH_STRENGTH: 0.16
+
+# ---------------------------------------------------------------------------
+# Code-drawn hero body
+# ---------------------------------------------------------------------------
+# The hero was the last texture in the world/hero/enemy layer: an 8-direction
+# sprite atlas. It is now a silhouette from the SHARED shape catalog
+# (configs/enemy_shapes*.yaml) — the same alphabet enemy bodies and world props
+# are cut from — so every actor and object in the game is drawn, not painted.
+#
+# SHAPE_INDEX picks the silhouette. 13 is Kite: it has a clear point, which is
+# what lets the body show its heading. Any strongly directional form works
+# (12 Arrow, 15 Wedge); a rotationally symmetric one such as a polygon would
+# render the facing rotation invisible.
+HERO_BODY_SHAPE_INDEX: 13
+
+# The catalog's shapes point along -Y (up the screen), while a heading of 0
+# degrees points along +X (screen right). This offset reconciles the two, so
+# the hero's point actually leads its movement instead of lagging 90 degrees.
+HERO_BODY_ROTATION_OFFSET_DEG: 90
+
+# Body DIAMETER in world pixels. Carries the value the atlas cell height used
+# to define, so the healthbar layout and every other consumer of the hero's
+# visual extent keep the same number they were tuned against.
+HERO_BODY_SIZE: 150
+HERO_BODY_ORIGIN_Y_RATIO: 0.88
+
+# Walk cadence. Hero::movementAnimationCycle is distance-driven, so the gait
+# stays locked to ground speed exactly as it was with the atlas — it just drives
+# a continuous size pulse now instead of picking one of 8 frames. Small: this is
+# a body flexing as it strides, not a bouncing ball.
+HERO_BODY_WALK_PULSE: 0.05
+
+# Inward rim thickness as a fraction of body radius, matching how an enemy body
+# draws its neon edge. Inward so the silhouette stays the authored shape.
+HERO_BODY_RIM_RATIO: 0.08
+
+# ---------------------------------------------------------------------------
+# Hero figure — the hero is a LIVING FORM (visual_identity.md Step 2b)
+# ---------------------------------------------------------------------------
+# A single convex silhouette cannot be alive. It can point, and that is all —
+# which is why every abstract candidate read as a craft rather than a creature.
+# The hero is drawn as an articulated figure instead: head, tapered torso, two
+# arms and two legs, posed from the walk phase.
+#
+# Every value is a FRACTION of the hero's body radius, never a pixel count, so
+# the whole figure scales with HERO_BODY_SIZE and its proportions never drift.
+#
+# Local space: the hero faces +X, +Y is the hero's right.
+
+# Head. Sized to read as a head at gameplay zoom without becoming a lollipop —
+# it is the part the eye finds first, so it is drawn last, over everything.
+HERO_FIGURE_HEAD_RADIUS: 0.24
+HERO_FIGURE_HEAD_FORWARD: 0.05
+
+# Torso, tapered: wider at the shoulders than the hips. An even-width slab
+# reads as a box, and a body does not.
+HERO_FIGURE_TORSO_LENGTH: 0.82
+HERO_FIGURE_TORSO_HALF_WIDTH: 0.26
+HERO_FIGURE_SHOULDER_HALF_WIDTH: 0.30
+HERO_FIGURE_HIP_HALF_WIDTH: 0.20
+
+# Limbs. Drawn as thick lines with a disc at each end — the discs are what make
+# joints read as joints; bare rectangles give square, mechanical elbows that
+# fight the living read the figure exists for.
+HERO_FIGURE_LIMB_THICKNESS: 0.13
+HERO_FIGURE_ARM_LENGTH: 0.52
+HERO_FIGURE_LEG_LENGTH: 0.62
+
+# Swing amplitude in radians at full stride. Arms and legs swing in OPPOSITION
+# (right arm leads while left leg does) — one shared phase would read as a
+# puppet hopping rather than a person striding.
+HERO_FIGURE_ARM_SWING: 0.85
+HERO_FIGURE_LEG_SWING: 0.70
+
+# Idle breath. While standing, the torso still rises and falls. A figure frozen
+# solid reads as a prop the moment the player stops, and the hero is on screen
+# constantly — stillness is where "alive" is won or lost.
+HERO_FIGURE_BREATH_AMPLITUDE: 0.035
+HERO_FIGURE_BREATH_SPEED: 2.2
+
+# Body rise per FOOTFALL while running — twice per stride, not once. Getting
+# that frequency wrong is what makes a walk cycle read as a limp.
+HERO_FIGURE_BOUNCE_AMPLITUDE: 0.06
+
+# Lean toward or away from the camera as the heading turns. This is how a 3/4
+# view shows depth of direction: running "up" the screen tips the figure away
+# from the viewer, running "down" tips it toward them. The lean scales with
+# height, so the head travels and the feet stay planted.
+HERO_FIGURE_LEAN: 0.22
+
+# Feet held apart at rest. Both legs hanging from one point overlapped exactly
+# while standing, so the figure grew a single stalk instead of two legs and read
+# as a statue on a pedestal.
+HERO_FIGURE_STANCE_WIDTH: 0.16
+
+# Hands held clear of the torso silhouette. Arms hung straight down from the
+# shoulder vanished into the torso's own edge and a standing hero lost its arms.
+HERO_FIGURE_ARM_OUT: 0.10
+
+# Hero form quad size, as a multiple of HERO_BODY_SIZE. The hero shader draws
+# its corona all the way out to the quad edge, so the quad has to be larger than
+# the body itself or the glow is clipped into a hard square.
+HERO_FORM_SCALE: 2.2
+
+# Which hero form the shader draws. Four genuinely different directions, all in
+# the same rendering medium as the enemies:
+#   0 = OPERATIVE  armoured figure: pauldrons, back plate, visor bar
+#   1 = REVENANT   hooded coat with torn hem, one burning optic
+#   2 = RIG        hovering combat chassis, canted pods, wide optic
+#   3 = HOUND      hard-tech quadruped, bladed legs that bend at a knee
+HERO_FORM: 3

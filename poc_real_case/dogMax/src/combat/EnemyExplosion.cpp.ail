@@ -1,0 +1,29 @@
+# dof.combat.EnemyExplosion.cpp
+
+type ExplosionRing:
+  radius: float
+  alpha: float
+
+type ExplosionShard:
+  offsetX: float
+  offsetY: float
+  rotationDegrees: float
+  alpha: float
+
+fn computeExplosionRing(lifetimeRatio:float, startRadius:float, endRadius:float, startAlpha:float) -> ExplosionRing:
+  let t:float = clamp(lifetimeRatio, 0.0, 1.0)
+  let rad:float = startRadius + ((endRadius - startRadius) * t)
+  let alp:float = max(0.0, startAlpha * (1.0 - t))
+  ret ExplosionRing(rad, alp)
+
+fn computeExplosionShard(shardIndex:int, shardCount:int, lifetimeRatio:float, speed:float, startAlpha:float, spinDegPerLifetime:float) -> ExplosionShard:
+  if shardCount <= 0:
+    ret ExplosionShard(0.0, 0.0, 0.0, 0.0)
+  let t:float = clamp(lifetimeRatio, 0.0, 1.0)
+  let angle:float = 6.28318530718 * (shardIndex.toFloat() / shardCount.toFloat())
+  let distance:float = max(0.0, speed * t)
+  let offX:float = cos(angle) * distance
+  let offY:float = sin(angle) * distance
+  let rot:float = spinDegPerLifetime * t
+  let alp:float = max(0.0, startAlpha * (1.0 - t))
+  ret ExplosionShard(offX, offY, rot, alp)

@@ -1,0 +1,10 @@
+# dof.combat.EvasionCalculator.cpp
+
+fn evadeChance(evasionPerSlots:[float], cap:float) -> float:
+  let mut survivalProduct:float = 1.0
+  for dps in evasionPerSlots:
+    let clamped:float = clamp(dps, 0.0, 1.0)
+    survivalProduct = survivalProduct * (1.0 - clamped)
+  let raw:float = 1.0 - survivalProduct
+  let effectiveCap:float = clamp(cap, 0.0, 1.0)
+  ret clamp(raw, 0.0, effectiveCap)

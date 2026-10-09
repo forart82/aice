@@ -1,0 +1,5 @@
+# Vital Tank — run-local stored healing earned only from enemy deaths whose
+# complete loot outcome contains neither a weapon nor a die.
+VITAL_TANK_CAPACITY: 100.0
+VITAL_TANK_CHARGE_PER_EMPTY_KILL: 8.0
+VITAL_TANK_TRANSFER_HP_PER_SECOND: 40.0

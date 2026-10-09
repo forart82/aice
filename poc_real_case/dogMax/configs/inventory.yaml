@@ -1,0 +1,246 @@
+# Inventory panel: 8 rows x 7 columns = 56 cells. Dice occupy one cell;
+# weapons occupy two vertically adjacent cells in one column.
+INVENTORY_ROWS: 8
+INVENTORY_COLUMNS: 7
+# Slot=50 px matches the PDF reference grid — small enough for an 8-row
+# stack to fit the 1920×1080 design viewport with the 224 px right
+# sidebar and the 150 px powder rail, large enough that the SDF slot
+# plates + glyphs remain legible. Footprint at 1920 design width:
+# panel = 7*50 + 6*10 + 2*24 + 150 (powder col) = 608, leaving plenty
+# of slack within the 1920 − 224 (sidebar) − 80 (2× margin) = 1616 band.
+INVENTORY_SLOT_SIZE: 50
+INVENTORY_SLOT_PADDING: 10
+# Interior inset (px, scales with adaptiveScale) between the panel
+# edge and its content — the powder column on the left and the slot
+# grid. Applied symmetrically on all four sides via panelPaddingEff
+# in InventoryLayout. 24 px gives the grid comfortable breathing room
+# from the chamfered border and the top title/status chips.
+INVENTORY_PANEL_PADDING: 24
+INVENTORY_PANEL_TOP_OFFSET: 80
+# Minimum horizontal gap (window px) the panel must keep on each
+# side: between the window's left edge and the panel, and between
+# the panel's right edge and the weapon-slot sidebar. Fixed in
+# window pixels (does not scale with adaptiveScale), so the gap
+# stays legible at every window size.
+INVENTORY_PANEL_HORIZONTAL_MARGIN: 40
+INVENTORY_DEPLOY_OPEN_SECONDS: 0.32
+INVENTORY_DEPLOY_CLOSE_SECONDS: 0.22
+# Panel substrate colour is the shared THEME_PANEL_BG_* (theme.yaml);
+# render::InventoryRenderer reads it via resolvePanelBackground.
+# Slot well: slightly lighter than pure black for depth.
+INVENTORY_SLOT_BG_R: 8
+INVENTORY_SLOT_BG_G: 8
+INVENTORY_SLOT_BG_B: 8
+# Neon cyan outline for empty slots — solid stroke, transparent fill-read.
+INVENTORY_SLOT_OUTLINE_R: 0
+INVENTORY_SLOT_OUTLINE_G: 200
+INVENTORY_SLOT_OUTLINE_B: 230
+INVENTORY_SLOT_OUTLINE_A: 60
+
+# Panel border + sort-button accents are sourced from the canonical
+# `UI_ACCENT_*` keys in theme.config (B-UX-11 single visual language).
+# Do not redefine the accent triple here — every UI surface reads
+# `render::UiAccent::loadFromConfig` so the chrome stays unified.
+
+# Powder column geometry (Phase 5 / PDF design rewrite). Width 150 px
+# matches the PDF left rail and gives the three destroy-tier buttons +
+# the 11-row powder stash legible breathing room. Button height 34 px
+# stacks Common/Uncommon/Rare without crowding.
+INVENTORY_POWDER_COLUMN_WIDTH: 150
+
+# SA27 / spec §Inventory L2254-L2256 — sort button strip dimensions.
+# Three buttons sit above the slot grid, right-aligned to the grid.
+# Index 0 = sort-by-tier, 1 = sort-by-type, 2 = toggle auto-sort.
+# `STRIP_TOP_OFFSET` is the vertical gap between the bottom of the
+# button strip and the top of the slot grid. Translucent dark fill
+# matches the panel; the accent (above) drives the outline + active
+# state for a coherent strip-as-trim read.
+INVENTORY_SORT_BUTTON_BG_R: 0
+INVENTORY_SORT_BUTTON_BG_G: 0
+INVENTORY_SORT_BUTTON_BG_B: 0
+# Sort-button outline + active stroke pull from theme.config UI_ACCENT_*.
+
+POWDER_COLOR_RED_R: 255
+POWDER_COLOR_RED_G: 70
+POWDER_COLOR_RED_B: 70
+POWDER_COLOR_YELLOW_R: 240
+POWDER_COLOR_YELLOW_G: 200
+POWDER_COLOR_YELLOW_B: 70
+POWDER_COLOR_CYAN_R: 80
+POWDER_COLOR_CYAN_G: 220
+POWDER_COLOR_CYAN_B: 240
+POWDER_COLOR_GREEN_R: 80
+POWDER_COLOR_GREEN_G: 240
+POWDER_COLOR_GREEN_B: 120
+POWDER_COLOR_BLUE_R: 80
+POWDER_COLOR_BLUE_G: 140
+POWDER_COLOR_BLUE_B: 255
+POWDER_COLOR_MAGENTA_R: 255
+POWDER_COLOR_MAGENTA_G: 80
+POWDER_COLOR_MAGENTA_B: 220
+POWDER_COLOR_PURPLE_R: 180
+POWDER_COLOR_PURPLE_G: 80
+POWDER_COLOR_PURPLE_B: 240
+POWDER_COLOR_ORANGE_R: 255
+POWDER_COLOR_ORANGE_G: 160
+POWDER_COLOR_ORANGE_B: 40
+POWDER_COLOR_PINK_R: 255
+POWDER_COLOR_PINK_G: 130
+POWDER_COLOR_PINK_B: 200
+POWDER_COLOR_WHITE_R: 240
+POWDER_COLOR_WHITE_G: 240
+POWDER_COLOR_WHITE_B: 240
+POWDER_COLOR_BLACK_R: 40
+POWDER_COLOR_BLACK_G: 40
+POWDER_COLOR_BLACK_B: 60
+
+# Inventory Sort Buttons (SA27). Smaller, refined typography.
+
+# The white-marked grid bay in Screenshot_2026-07-11_20-44-57.png, measured
+# relative to the inventory cockpit frame. The complete 7x8 matrix is fitted
+# inside these bounds; cells use separate horizontal and vertical gaps so the
+# marked bay remains authoritative at every adaptive scale.
+INVENTORY_GRID_LEFT_RATIO: 0.2420
+INVENTORY_GRID_RIGHT_RATIO: 0.1010
+INVENTORY_GRID_TOP_RATIO: 0.1650
+INVENTORY_GRID_BOTTOM_RATIO: 0.1000
+INVENTORY_GRID_COLUMN_GAP: 9.0
+INVENTORY_GRID_ROW_GAP: 9.0
+INVENTORY_CONTROL_LEFT_RATIO: 0.077
+INVENTORY_CONTROL_RIGHT_RATIO: 0.077
+INVENTORY_CONTROL_TOP_RATIO: 0.065
+INVENTORY_CONTROL_HEIGHT_RATIO: 0.077
+INVENTORY_CONTROL_GAP_RATIO: 0.013
+INVENTORY_POWDER_LIST_LEFT_RATIO: 0.081
+INVENTORY_POWDER_LIST_WIDTH_RATIO: 0.116
+INVENTORY_POWDER_LIST_TOP_RATIO: 0.170
+INVENTORY_POWDER_LIST_BOTTOM_RATIO: 0.190
+
+# T-P5-destroy-buttons-hover-flash — the click-driven brightened-fill
+# pulse on the powder destroy buttons is configured in the component-
+# renderer section below (INVENTORY_DESTROY_FLASH_R/G/B +
+# INVENTORY_DESTROY_FLASH_SECONDS), consumed by render::InventoryRenderer.
+
+# T-INVRD-pdf-rewrite — additional design tokens for the PDF-conformant
+# rewrite (examples/designOne/inventory_example.cpp). Every magic number
+# the renderer reads lives here per CLAUDE.md Configuration rule.
+
+
+# Powder stash list (render::InventoryRenderer::drawPowderColumn, via ui::UiList).
+# TOTAL_* is the list's base text colour (every powder row tints from it);
+# HEADER_* is the tint applied to the "POWDER <count>" summary row. Both were
+# externalised from prior sf::Color literals ({210,216,230} / {150,165,180}) so
+# no colour literal remains in the renderer's draw code.
+INVENTORY_POWDER_HEADER_R: 150
+INVENTORY_POWDER_HEADER_G: 165
+INVENTORY_POWDER_HEADER_B: 180
+# Powder list base text colour collapsed onto THEME_UI_TEXT (theme.yaml);
+# the old INVENTORY_POWDER_TOTAL_R/G/B triple was removed (each powder row
+# still tints this base by its own gameplay colour).
+
+# T-INV-good-parity — vertical reserve above the powder column +
+# slot grid for the inline title row + sort-tab strip + count badge
+# row. Scales with adaptiveScale alongside every other layout dim.
+# Numeric basis: title row ~22 px + tab row (sortButtonHeight=16) +
+# 2 × sortButtonPadding gap + a 4 px terminal breath = 58 px at scale
+# 1.0. Pad to 60 for round numbers; the grid + powder column slide
+# down by this amount, and the panel height grows to compensate.
+INVENTORY_TOP_BAND_HEIGHT: 60
+
+# Weapons occupy this many vertically adjacent cells in one column.
+# Dice always occupy 1 cell. Must be >= 1 and fit within INVENTORY_ROWS.
+
+# Inventory panel (I) — component-based pixel-perfect renderer
+# (render::InventoryRenderer). Full colour/typography token set; these
+# values were the live VAULT_* palette before the Vault→Inventory rename
+# (single inventory UI). Every magic number the renderer reads lives here
+# per CLAUDE.md Configuration rule.
+# Panel body fill folded onto the shared THEME_PANEL_BG_* (theme.yaml,
+# LIFT PLAN step 7) — read via render::resolvePanelBackground. Re-add
+# INVENTORY_PANEL_BG_R/G/B/A here to override the theme swatch for this
+# panel only. The border reads the canonical UI_ACCENT (theme.yaml) — the
+# old INVENTORY_PANEL_BORDER_* teal keys were dead (always overwritten) and
+# have been removed.
+INVENTORY_SCRIM_R: 0
+INVENTORY_SCRIM_G: 0
+INVENTORY_SCRIM_B: 0
+INVENTORY_SCRIM_A: 0
+# Chrome colours collapsed onto the canonical single accent + theme tokens
+# (B UI-polish Phase B). The equipped-flag corner marker, cell/button borders
+# and all active/hover/highlight states now read render::UiAccent
+# (accent.full / accent.dim from UI_ACCENT_* in theme.yaml); button + list-row
+# body fills read the shared THEME_PANEL_BG. The old per-panel teal/green
+# triples (INVENTORY_ACCENT_*, INVENTORY_CELL_BORDER/HOVER_*,
+# INVENTORY_BUTTON_BG/HOVER/BORDER_*, INVENTORY_LIST_ROW_HIGHLIGHT_*) were
+# removed to kill hue drift. The cell well keeps its INVENTORY_CELL_BG override
+# swatch (slightly lifted from the panel body for depth).
+INVENTORY_CELL_BG_R: 18
+INVENTORY_CELL_BG_G: 18
+INVENTORY_CELL_BG_B: 26
+INVENTORY_CELL_BG_A: 255
+INVENTORY_CELL_BORDER_THICKNESS: 1
+# Cockpit frame language shared visually with the bottom infobar: near-black
+# metal, thin steel edges, restrained cyan rails, and copper fasteners.
+INVENTORY_COCKPIT_CHAMFER: 12
+INVENTORY_COCKPIT_TEXTURE: assets/textures/visual_spike/ui_inventory_cockpit_top_controls.png
+INVENTORY_COCKPIT_TEXTURE_ALPHA: 245
+INVENTORY_COCKPIT_EDGE_R: 86
+INVENTORY_COCKPIT_EDGE_G: 101
+INVENTORY_COCKPIT_EDGE_B: 106
+INVENTORY_COCKPIT_EDGE_A: 150
+INVENTORY_COCKPIT_RAIL_R: 30
+INVENTORY_COCKPIT_RAIL_G: 178
+INVENTORY_COCKPIT_RAIL_B: 202
+INVENTORY_COCKPIT_RAIL_A: 112
+INVENTORY_COCKPIT_COPPER_R: 176
+INVENTORY_COCKPIT_COPPER_G: 104
+INVENTORY_COCKPIT_COPPER_B: 48
+INVENTORY_COCKPIT_COPPER_A: 180
+INVENTORY_COCKPIT_CELL_EDGE_A: 72
+INVENTORY_ONE_CELL_FRAME_CHAMFER: 4
+INVENTORY_TWO_CELL_FRAME_CHAMFER: 6
+INVENTORY_CELL_FRAME_INNER_INSET: 3
+INVENTORY_CELL_FRAME_RAIL_LENGTH: 12
+INVENTORY_LABEL_FONT_SIZE: 11
+INVENTORY_LIST_ROW_BG_R: 14
+INVENTORY_LIST_ROW_BG_G: 14
+INVENTORY_LIST_ROW_BG_B: 20
+INVENTORY_LIST_ROW_ALT_R: 20
+INVENTORY_LIST_ROW_ALT_G: 20
+INVENTORY_LIST_ROW_ALT_B: 28
+INVENTORY_LIST_ROW_HEIGHT: 18
+INVENTORY_DESTROY_FLASH_R: 255
+INVENTORY_DESTROY_FLASH_G: 55
+INVENTORY_DESTROY_FLASH_B: 55
+INVENTORY_DESTROY_FLASH_SECONDS: 0.25
+
+# Item-glyph typography + translucency (render::InventoryRenderer draw paths).
+# ITEM_LABEL — weapon/dice name strip under each occupied cell; DICE_FACE — the
+# rolled value drawn on a dice glyph. The two *_FILL_ALPHA values set the
+# translucency of the dice-body glyph and the drag-ghost so the face colour
+# reads through. Externalised from prior literals (10 / 15 / 60 / 100).
+INVENTORY_ITEM_LABEL_FONT_SIZE: 10
+INVENTORY_DICE_FACE_FONT_SIZE: 15
+INVENTORY_DICE_GLYPH_FILL_ALPHA: 60
+INVENTORY_DRAG_GHOST_FILL_ALPHA: 100
+
+# Context hint footer. Guidance belongs inside the open panel, not as a
+# first-run overlay.
+INVENTORY_HINT_TEXT: "RMB/drag equip or slot   X powders hovered item   F filter   G craft"
+INVENTORY_HINT_HEIGHT: 18
+INVENTORY_HINT_PADDING_X: 12
+INVENTORY_HINT_FONT_SIZE: 10
+INVENTORY_HINT_BG_ALPHA: 90
+
+# Dice-glyph box geometry (render::InventoryRenderer::drawDiceGlyph). The
+# inventory die is now the canonical widgets::UiDiceCell (same widget as the
+# weapon-slot sidebar: shader die, or fallback hex, + centred face value). The
+# renderer hands the widget a square glyph box carved out of the 50 px cell so
+# the die keeps its established inventory size and leaves a bottom band clear
+# for the face-name ("D6") label. Box side = min(cellW,cellH) − 2·pad, where
+# pad = max(PAD_MIN, cellW·PAD_FACTOR); the box is centred CENTER_Y_OFFSET px
+# above the cell centre. Externalised from prior hard-coded literals (6 / 0.16
+# / 4) per the Configuration rule.
+INVENTORY_DICE_GLYPH_PAD_MIN: 6
+INVENTORY_DICE_GLYPH_PAD_FACTOR: 0.16
+INVENTORY_DICE_GLYPH_CENTER_Y_OFFSET: 4

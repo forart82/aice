@@ -1,0 +1,105 @@
+# Build artifacts
+build/
+build-dev/
+build-test/
+build_debug/
+build_asan/
+out/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+Makefile
+*.o
+*.dwo
+*.obj
+*.so
+*.so.*
+*.a
+*.dylib
+*.dll
+*.exe
+*.exp
+*.lib
+*.pdb
+*.ilk
+*.idb
+
+# In-tree build outputs (when CMake is run from the repo root)
+/dogmax
+
+# Rotating build artifacts: ./bt copies each game build to the root as
+# dogmax-<UTC timestamp> (last 5 kept). The binaries are transient, never tracked;
+# the ./runGame launcher (previously .runGame) IS tracked.
+/dogmax-*
+
+# Reference / scratch artifacts
+/test_shot.png
+
+# Crash-handler dumps written on abort/SIGABRT — transient debugging artifacts
+# from local runs, never build inputs or project content.
+crash-dumps/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Compile databases
+compile_commands.json
+.cache/
+.ccls-cache/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Claude local settings (per-machine)
+.claude/settings.local.json
+
+# Test / coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+Testing/
+
+# Logs / temp
+*.log
+tmp/
+
+# Aperant data directory
+.auto-claude/
+
+# graphify-ts generated knowledge graph. Regenerate SCOPED TO src/ (never `.` —
+# that pulls examples/designOne + third_party noise into the graph). The MCP reads
+# the root graphify-out/, so copy the src-scoped output up:
+#   graphify-ts generate src && rm -rf graphify-out && mv src/graphify-out graphify-out
+graphify-out/
+src/graphify-out/
+/dogmax_smoke.png
+
+# Merge-queue runtime coordination state (transient, never tracked)
+.claude/MERGE_QUEUE
+.claude/MERGE_QUEUE.tmp
+.claude/MERGE_QUEUE.lock
+
+# /cu deferred-snapshot coordination: a game-file merge flags SNAPSHOT_PENDING,
+# and whoever drains the queue stamps the -O3 dogmax-<ts> snapshot once under
+# SNAPSHOT.lock. Both transient, never tracked.
+.claude/SNAPSHOT_PENDING
+.claude/SNAPSHOT.lock
+
+# Agent worktrees live here (git worktree add .claude/worktrees/<name>). They are
+# transient per-agent checkouts, never committed — and being untracked they used
+# to make `git status` on the primary report dirty, which false-tripped the /cu
+# primary-clean safety gate. Ignore them.
+.claude/worktrees/
+
+# Obsidian editor workspace state for archived design drafts churns constantly
+# (open panes, scroll positions) and is not project content.
+archive/design-drafts/.obsidian/

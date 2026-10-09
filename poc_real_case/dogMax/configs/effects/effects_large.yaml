@@ -1,0 +1,416 @@
+# Composed large effects (1000px radius). 3 layers each.
+# Layer format: <small_effect_name> <sub_radius_px> <offset_x_px> <offset_y_px> <phase_delay_0to1>
+# Every _L<n> layer is drawn; the loop stops at the first missing index.
+# Sub-radius and offsets are pixels against LEF_NOMINAL_RADIUS_PX, which is what
+# maps them onto the catalog preview box (sub_radius / nominal = box fraction).
+LEF_COUNT: 100
+LEF_NOMINAL_RADIUS_PX: 1000
+# --- combat (001-020) ---
+LEF_001_NAME: mega_hit
+LEF_001_L0: shockwave 900 0 0 0.00
+LEF_001_L1: explosion_ring 700 0 0 0.08
+LEF_001_L2: crit_sparks 450 0 0 0.18
+LEF_002_NAME: titan_strike
+LEF_002_L0: explosion_ring 900 0 0 0.00
+LEF_002_L1: earth_crack 750 0 0 0.08
+LEF_002_L2: crit_sparks 500 0 0 0.18
+LEF_003_NAME: storm_of_blades
+LEF_003_L0: sword_slash 850 0 0 0.00
+LEF_003_L1: crit_sparks 700 0 0 0.10
+LEF_003_L2: electric_ring 500 0 0 0.20
+LEF_004_NAME: world_breaker
+LEF_004_L0: earth_crack 900 0 0 0.00
+LEF_004_L1: shockwave 800 0 0 0.08
+LEF_004_L2: dust_puff 600 0 0 0.18
+LEF_005_NAME: shadow_apocalypse
+LEF_005_L0: void_ring 900 0 0 0.00
+LEF_005_L1: void_shatter 750 0 0 0.10
+LEF_005_L2: shadow_burst 550 0 0 0.20
+LEF_006_NAME: rage_explosion
+LEF_006_L0: rage_aura 900 0 0 0.00
+LEF_006_L1: explosion_ring 780 0 0 0.08
+LEF_006_L2: crit_sparks 580 0 0 0.18
+LEF_007_NAME: titan_cleave
+LEF_007_L0: power_slash 880 0 0 0.00
+LEF_007_L1: shockwave 750 0 0 0.08
+LEF_007_L2: earth_crack 550 0 0 0.18
+LEF_008_NAME: perfect_counter
+LEF_008_L0: shockwave 900 0 0 0.00
+LEF_008_L1: electric_ring 720 0 0 0.08
+LEF_008_L2: sword_slash 500 0 0 0.18
+LEF_009_NAME: execution_order
+LEF_009_L0: explosion_ring 900 0 0 0.00
+LEF_009_L1: void_ring 750 0 0 0.10
+LEF_009_L2: blood_spray 500 0 0 0.20
+LEF_010_NAME: devastation
+LEF_010_L0: shockwave 900 0 0 0.00
+LEF_010_L1: explosion_ring 800 0 0 0.08
+LEF_010_L2: fire_cinders 600 0 0 0.18
+LEF_011_NAME: arcane_cataclysm
+LEF_011_L0: cosmic_rift 900 0 0 0.00
+LEF_011_L1: magic_sparks 780 0 0 0.10
+LEF_011_L2: dimension_tear 580 0 0 0.20
+LEF_012_NAME: void_annihilation
+LEF_012_L0: void_ring 900 0 0 0.00
+LEF_012_L1: void_lightning 800 0 0 0.08
+LEF_012_L2: void_shatter 600 0 0 0.18
+LEF_013_NAME: infernal_nova
+LEF_013_L0: inferno 900 0 0 0.00
+LEF_013_L1: explosion_ring 800 0 0 0.08
+LEF_013_L2: flame_burst 600 0 0 0.18
+LEF_014_NAME: absolute_zero
+LEF_014_L0: ice_aura 900 0 0 0.00
+LEF_014_L1: ice_shatter 800 0 0 0.10
+LEF_014_L2: freeze_mist 600 0 0 0.20
+LEF_015_NAME: grand_thunder
+LEF_015_L0: storm_arc 900 0 0 0.00
+LEF_015_L1: electric_ring 780 0 0 0.08
+LEF_015_L2: chain_lightning 580 0 0 0.18
+LEF_016_NAME: divine_judgment
+LEF_016_L0: divine_ring 900 0 0 0.00
+LEF_016_L1: holy_flame 780 0 0 0.10
+LEF_016_L2: holy_bolt 580 0 0 0.20
+LEF_017_NAME: plague_tide
+LEF_017_L0: toxic_cloud 900 0 0 0.00
+LEF_017_L1: poison_ring 780 0 0 0.10
+LEF_017_L2: acid_splash 580 0 0 0.20
+LEF_018_NAME: crystal_apocalypse
+LEF_018_L0: crystal_explode 900 0 0 0.00
+LEF_018_L1: ice_shatter 780 0 0 0.10
+LEF_018_L2: gem_burst 580 0 0 0.20
+LEF_019_NAME: dimensional_rift
+LEF_019_L0: dimension_tear 900 0 0 0.00
+LEF_019_L1: cosmic_rift 780 0 0 0.10
+LEF_019_L2: void_shatter 580 0 0 0.20
+LEF_020_NAME: chaos_apocalypse
+LEF_020_L0: cosmic_rift 900 0 0 0.00
+LEF_020_L1: explosion_ring 800 0 0 0.08
+LEF_020_L2: void_ring 600 0 0 0.18
+# --- healing (021-030) ---
+LEF_021_NAME: world_heal
+LEF_021_L0: divine_ring 900 0 0 0.00
+LEF_021_L1: health_aura 800 0 0 0.10
+LEF_021_L2: heal_ring 600 0 0 0.20
+LEF_022_NAME: mass_regeneration
+LEF_022_L0: heal_ring 900 0 0 0.00
+LEF_022_L1: health_aura 800 0 0 0.10
+LEF_022_L2: health_orb 600 0 0 0.20
+LEF_023_NAME: divine_miracle
+LEF_023_L0: divine_ring 900 0 0 0.00
+LEF_023_L1: holy_flame 800 0 0 0.10
+LEF_023_L2: heal_ring 600 0 0 0.20
+LEF_024_NAME: nature_blessing
+LEF_024_L0: health_aura 900 0 0 0.00
+LEF_024_L1: heal_ring 800 0 0 0.10
+LEF_024_L2: health_orb 600 0 0 0.20
+LEF_025_NAME: life_wave
+LEF_025_L0: health_aura 900 0 0 0.00
+LEF_025_L1: divine_ring 780 0 0 0.10
+LEF_025_L2: heal_ring 580 0 0 0.20
+LEF_026_NAME: holy_storm
+LEF_026_L0: divine_ring 900 0 0 0.00
+LEF_026_L1: holy_sparks 800 0 0 0.08
+LEF_026_L2: holy_flame 600 0 0 0.18
+LEF_027_NAME: mana_surge
+LEF_027_L0: xp_glow 900 0 0 0.00
+LEF_027_L1: mana_orb 780 0 0 0.10
+LEF_027_L2: shield_glow 580 0 0 0.20
+LEF_028_NAME: spirit_wave
+LEF_028_L0: will_o_wisp 900 0 0 0.00
+LEF_028_L1: health_aura 780 0 0 0.12
+LEF_028_L2: heal_ring 580 0 0 0.22
+LEF_029_NAME: fortress_blessing
+LEF_029_L0: shield_glow 900 0 0 0.00
+LEF_029_L1: divine_ring 780 0 0 0.10
+LEF_029_L2: health_aura 580 0 0 0.20
+LEF_030_NAME: total_restoration
+LEF_030_L0: divine_ring 900 0 0 0.00
+LEF_030_L1: health_aura 800 0 0 0.10
+LEF_030_L2: xp_glow 600 0 0 0.20
+# --- pickups/drops (031-040) ---
+LEF_031_NAME: mythic_drop
+LEF_031_L0: cosmic_rift 900 0 0 0.00
+LEF_031_L1: gold_shatter 800 0 0 0.10
+LEF_031_L2: gem_burst 600 0 0 0.20
+LEF_032_NAME: treasure_cascade
+LEF_032_L0: loot_portal 900 0 0 0.00
+LEF_032_L1: gold_shatter 800 0 0 0.10
+LEF_032_L2: gold_dust 600 0 0 0.20
+LEF_033_NAME: divine_loot
+LEF_033_L0: divine_ring 900 0 0 0.00
+LEF_033_L1: loot_portal 780 0 0 0.10
+LEF_033_L2: gold_shatter 580 0 0 0.20
+LEF_034_NAME: relic_uncover
+LEF_034_L0: divine_ring 900 0 0 0.00
+LEF_034_L1: gold_shatter 780 0 0 0.10
+LEF_034_L2: gem_burst 580 0 0 0.20
+LEF_035_NAME: hoard_explosion
+LEF_035_L0: loot_portal 900 0 0 0.00
+LEF_035_L1: gold_shatter 820 0 0 0.08
+LEF_035_L2: gold_dust 620 0 0 0.18
+LEF_036_NAME: mass_loot
+LEF_036_L0: gold_dust 900 0 0 0.00
+LEF_036_L1: item_pickup 800 0 0 0.10
+LEF_036_L2: pickup_sparkle 600 0 0 0.20
+LEF_037_NAME: grand_treasure
+LEF_037_L0: cosmic_rift 900 0 0 0.00
+LEF_037_L1: gold_shatter 800 0 0 0.10
+LEF_037_L2: loot_portal 600 0 0 0.20
+LEF_038_NAME: legendary_artifact
+LEF_038_L0: divine_ring 900 0 0 0.00
+LEF_038_L1: cosmic_rift 780 0 0 0.10
+LEF_038_L2: gold_shatter 580 0 0 0.20
+LEF_039_NAME: jackpot_mega
+LEF_039_L0: loot_portal 900 0 0 0.00
+LEF_039_L1: gold_shatter 820 0 0 0.08
+LEF_039_L2: gem_burst 620 0 0 0.18
+LEF_040_NAME: vault_open
+LEF_040_L0: cosmic_rift 900 0 0 0.00
+LEF_040_L1: loot_portal 800 0 0 0.10
+LEF_040_L2: gold_shatter 600 0 0 0.20
+# --- level up (041-050) ---
+LEF_041_NAME: great_ascension
+LEF_041_L0: cosmic_rift 900 0 0 0.00
+LEF_041_L1: level_up_ring 800 0 0 0.10
+LEF_041_L2: divine_ring 600 0 0 0.20
+LEF_042_NAME: power_transcendence
+LEF_042_L0: level_up_ring 900 0 0 0.00
+LEF_042_L1: cosmic_rift 800 0 0 0.10
+LEF_042_L2: holy_sparks 600 0 0 0.20
+LEF_043_NAME: titan_awakening
+LEF_043_L0: explosion_ring 900 0 0 0.00
+LEF_043_L1: level_up_ring 800 0 0 0.08
+LEF_043_L2: shockwave 600 0 0 0.18
+LEF_044_NAME: divine_ascension
+LEF_044_L0: divine_ring 900 0 0 0.00
+LEF_044_L1: level_up_ring 800 0 0 0.10
+LEF_044_L2: holy_flame 600 0 0 0.20
+LEF_045_NAME: cosmic_evolution
+LEF_045_L0: cosmic_rift 900 0 0 0.00
+LEF_045_L1: summon_portal 780 0 0 0.10
+LEF_045_L2: level_up_ring 580 0 0 0.20
+LEF_046_NAME: grand_breakthrough
+LEF_046_L0: shockwave 900 0 0 0.00
+LEF_046_L1: explosion_ring 800 0 0 0.08
+LEF_046_L2: level_up_ring 600 0 0 0.18
+LEF_047_NAME: ancient_awakening
+LEF_047_L0: summon_portal 900 0 0 0.00
+LEF_047_L1: cosmic_rift 800 0 0 0.10
+LEF_047_L2: level_up_ring 600 0 0 0.20
+LEF_048_NAME: divine_transcendence
+LEF_048_L0: divine_ring 900 0 0 0.00
+LEF_048_L1: holy_flame 800 0 0 0.10
+LEF_048_L2: cosmic_rift 600 0 0 0.20
+LEF_049_NAME: god_mode
+LEF_049_L0: cosmic_rift 900 0 0 0.00
+LEF_049_L1: divine_ring 820 0 0 0.08
+LEF_049_L2: holy_sparks 620 0 0 0.18
+LEF_050_NAME: final_form
+LEF_050_L0: phoenix_flame 900 0 0 0.00
+LEF_050_L1: cosmic_rift 800 0 0 0.10
+LEF_050_L2: divine_ring 600 0 0 0.20
+# --- enemy death (051-060) ---
+LEF_051_NAME: annihilation
+LEF_051_L0: explosion_ring 900 0 0 0.00
+LEF_051_L1: flame_burst 800 0 0 0.08
+LEF_051_L2: shockwave 600 0 0 0.18
+LEF_052_NAME: champion_death
+LEF_052_L0: explosion_ring 900 0 0 0.00
+LEF_052_L1: void_ring 800 0 0 0.10
+LEF_052_L2: fire_cinders 600 0 0 0.20
+LEF_053_NAME: world_boss_death
+LEF_053_L0: cosmic_rift 900 0 0 0.00
+LEF_053_L1: explosion_ring 820 0 0 0.08
+LEF_053_L2: flame_burst 620 0 0 0.18
+LEF_054_NAME: horde_wipe
+LEF_054_L0: shockwave 900 0 0 0.00
+LEF_054_L1: dust_puff 800 0 0 0.10
+LEF_054_L2: explosion_ring 600 0 0 0.20
+LEF_055_NAME: ice_titan_death
+LEF_055_L0: ice_shatter 900 0 0 0.00
+LEF_055_L1: ice_aura 800 0 0 0.10
+LEF_055_L2: freeze_mist 600 0 0 0.20
+LEF_056_NAME: fire_lord_death
+LEF_056_L0: inferno 900 0 0 0.00
+LEF_056_L1: explosion_ring 800 0 0 0.08
+LEF_056_L2: flame_burst 600 0 0 0.18
+LEF_057_NAME: plague_lord_death
+LEF_057_L0: toxic_cloud 900 0 0 0.00
+LEF_057_L1: poison_ring 800 0 0 0.10
+LEF_057_L2: acid_splash 600 0 0 0.20
+LEF_058_NAME: void_lord_death
+LEF_058_L0: void_ring 900 0 0 0.00
+LEF_058_L1: void_lightning 800 0 0 0.10
+LEF_058_L2: shadow_burst 600 0 0 0.20
+LEF_059_NAME: storm_lord_death
+LEF_059_L0: storm_arc 900 0 0 0.00
+LEF_059_L1: electric_ring 800 0 0 0.08
+LEF_059_L2: chain_lightning 600 0 0 0.18
+LEF_060_NAME: divine_enemy_purge
+LEF_060_L0: divine_ring 900 0 0 0.00
+LEF_060_L1: holy_flame 800 0 0 0.10
+LEF_060_L2: holy_sparks 600 0 0 0.20
+# --- movement (061-070) ---
+LEF_061_NAME: hyper_dash
+LEF_061_L0: stealth_shimmer 900 0 0 0.00
+LEF_061_L1: shockwave 800 0 0 0.08
+LEF_061_L2: dust_puff 600 0 0 0.18
+LEF_062_NAME: sonic_boom
+LEF_062_L0: shockwave 900 0 0 0.00
+LEF_062_L1: electric_ring 800 0 0 0.08
+LEF_062_L2: dust_puff 600 0 0 0.18
+LEF_063_NAME: grand_teleport
+LEF_063_L0: cosmic_rift 900 0 0 0.00
+LEF_063_L1: teleport_ring 800 0 0 0.10
+LEF_063_L2: teleport_smoke 600 0 0 0.20
+LEF_064_NAME: void_step
+LEF_064_L0: void_ring 900 0 0 0.00
+LEF_064_L1: shadow_step 780 0 0 0.10
+LEF_064_L2: smoke_bomb 580 0 0 0.20
+LEF_065_NAME: warp_charge
+LEF_065_L0: warp_rift 900 0 0 0.00
+LEF_065_L1: shockwave 800 0 0 0.08
+LEF_065_L2: crit_sparks 600 0 0 0.18
+LEF_066_NAME: titan_leap
+LEF_066_L0: earth_crack 900 0 0 0.00
+LEF_066_L1: shockwave 820 0 0 0.08
+LEF_066_L2: dust_puff 620 0 0 0.18
+LEF_067_NAME: dimension_blink
+LEF_067_L0: dimension_tear 900 0 0 0.00
+LEF_067_L1: electric_ring 780 0 0 0.10
+LEF_067_L2: teleport_smoke 580 0 0 0.20
+LEF_068_NAME: astral_phase
+LEF_068_L0: cosmic_rift 900 0 0 0.00
+LEF_068_L1: stealth_shimmer 780 0 0 0.10
+LEF_068_L2: void_ring 580 0 0 0.20
+LEF_069_NAME: shadow_realm
+LEF_069_L0: death_portal 900 0 0 0.00
+LEF_069_L1: shadow_shatter 780 0 0 0.10
+LEF_069_L2: void_ring 580 0 0 0.20
+LEF_070_NAME: time_warp
+LEF_070_L0: warp_rift 900 0 0 0.00
+LEF_070_L1: cosmic_rift 800 0 0 0.10
+LEF_070_L2: stealth_shimmer 600 0 0 0.20
+# --- status effects (071-080) ---
+LEF_071_NAME: hellfire_burning
+LEF_071_L0: hellfire 900 0 0 0.00
+LEF_071_L1: inferno 800 0 0 0.08
+LEF_071_L2: flame_burst 600 0 0 0.18
+LEF_072_NAME: deep_freeze
+LEF_072_L0: ice_aura 900 0 0 0.00
+LEF_072_L1: freeze_mist 820 0 0 0.08
+LEF_072_L2: ice_shatter 620 0 0 0.18
+LEF_073_NAME: plague
+LEF_073_L0: poison_ring 900 0 0 0.00
+LEF_073_L1: toxic_cloud 820 0 0 0.08
+LEF_073_L2: poison_cloud 620 0 0 0.18
+LEF_074_NAME: overcharge
+LEF_074_L0: electric_ring 900 0 0 0.00
+LEF_074_L1: storm_arc 820 0 0 0.08
+LEF_074_L2: chain_lightning 620 0 0 0.18
+LEF_075_NAME: damnation
+LEF_075_L0: death_glow 900 0 0 0.00
+LEF_075_L1: cursed_flame 800 0 0 0.10
+LEF_075_L2: void_ring 600 0 0 0.20
+LEF_076_NAME: holy_blessing
+LEF_076_L0: divine_ring 900 0 0 0.00
+LEF_076_L1: health_aura 820 0 0 0.08
+LEF_076_L2: holy_sparks 620 0 0 0.18
+LEF_077_NAME: paralysis
+LEF_077_L0: shockwave 900 0 0 0.00
+LEF_077_L1: electric_ring 820 0 0 0.08
+LEF_077_L2: ice_aura 620 0 0 0.18
+LEF_078_NAME: absolute_silence
+LEF_078_L0: smoke_bomb 900 0 0 0.00
+LEF_078_L1: void_ring 800 0 0 0.10
+LEF_078_L2: stealth_shimmer 600 0 0 0.20
+LEF_079_NAME: time_acceleration
+LEF_079_L0: cosmic_rift 900 0 0 0.00
+LEF_079_L1: electric_ring 800 0 0 0.08
+LEF_079_L2: stealth_shimmer 600 0 0 0.18
+LEF_080_NAME: time_stop
+LEF_080_L0: warp_rift 900 0 0 0.00
+LEF_080_L1: ice_aura 820 0 0 0.08
+LEF_080_L2: freeze_mist 620 0 0 0.18
+# --- environmental (081-090) ---
+LEF_081_NAME: cataclysm
+LEF_081_L0: explosion_ring 900 0 0 0.00
+LEF_081_L1: earth_crack 820 0 0 0.06
+LEF_081_L2: flame_burst 620 0 0 0.16
+LEF_082_NAME: mega_quake
+LEF_082_L0: earth_crack 900 0 0 0.00
+LEF_082_L1: shockwave 840 0 0 0.06
+LEF_082_L2: dust_puff 640 0 0 0.16
+LEF_083_NAME: ice_age
+LEF_083_L0: ice_aura 900 0 0 0.00
+LEF_083_L1: freeze_mist 840 0 0 0.08
+LEF_083_L2: ice_shatter 640 0 0 0.18
+LEF_084_NAME: great_storm
+LEF_084_L0: storm_arc 900 0 0 0.00
+LEF_084_L1: electric_ring 820 0 0 0.08
+LEF_084_L2: chain_lightning 620 0 0 0.18
+LEF_085_NAME: apocalypse_meteor
+LEF_085_L0: explosion_fire 900 0 0 0.00
+LEF_085_L1: earth_crack 820 0 0 0.08
+LEF_085_L2: magma_burst 620 0 0 0.18
+LEF_086_NAME: super_eruption
+LEF_086_L0: magma_burst 900 0 0 0.00
+LEF_086_L1: explosion_ring 840 0 0 0.06
+LEF_086_L2: hellfire 640 0 0 0.16
+LEF_087_NAME: great_flood
+LEF_087_L0: arcane_smoke 900 0 0 0.00
+LEF_087_L1: freeze_mist 840 0 0 0.08
+LEF_087_L2: ice_aura 640 0 0 0.18
+LEF_088_NAME: mega_tornado
+LEF_088_L0: cosmic_rift 900 0 0 0.00
+LEF_088_L1: binding_vortex 820 0 0 0.08
+LEF_088_L2: dust_puff 620 0 0 0.18
+LEF_089_NAME: great_earthquake
+LEF_089_L0: shockwave 900 0 0 0.00
+LEF_089_L1: earth_crack 840 0 0 0.06
+LEF_089_L2: explosion_ring 640 0 0 0.16
+LEF_090_NAME: void_apocalypse
+LEF_090_L0: cosmic_rift 900 0 0 0.00
+LEF_090_L1: void_ring 840 0 0 0.08
+LEF_090_L2: void_shatter 640 0 0 0.18
+# --- special (091-100) ---
+LEF_091_NAME: great_summon
+LEF_091_L0: cosmic_rift 900 0 0 0.00
+LEF_091_L1: summon_portal 800 0 0 0.10
+LEF_091_L2: dimension_tear 600 0 0 0.20
+LEF_092_NAME: world_death
+LEF_092_L0: death_portal 900 0 0 0.00
+LEF_092_L1: void_ring 820 0 0 0.08
+LEF_092_L2: death_glow 620 0 0 0.18
+LEF_093_NAME: true_resurrection
+LEF_093_L0: divine_ring 900 0 0 0.00
+LEF_093_L1: phoenix_flame 820 0 0 0.08
+LEF_093_L2: cosmic_rift 620 0 0 0.18
+LEF_094_NAME: blood_sacrifice
+LEF_094_L0: explosion_ring 900 0 0 0.00
+LEF_094_L1: void_ring 820 0 0 0.08
+LEF_094_L2: death_orb 620 0 0 0.18
+LEF_095_NAME: philosopher_stone
+LEF_095_L0: cosmic_rift 900 0 0 0.00
+LEF_095_L1: crystal_form 800 0 0 0.10
+LEF_095_L2: gold_shatter 600 0 0 0.20
+LEF_096_NAME: grand_dispel
+LEF_096_L0: divine_ring 900 0 0 0.00
+LEF_096_L1: shockwave 820 0 0 0.08
+LEF_096_L2: magic_sparks 620 0 0 0.18
+LEF_097_NAME: mana_overload
+LEF_097_L0: electric_burst 900 0 0 0.00
+LEF_097_L1: cosmic_rift 820 0 0 0.08
+LEF_097_L2: explosion_ring 620 0 0 0.18
+LEF_098_NAME: core_meltdown
+LEF_098_L0: inferno 900 0 0 0.00
+LEF_098_L1: magma_burst 840 0 0 0.06
+LEF_098_L2: explosion_fire 640 0 0 0.16
+LEF_099_NAME: star_explosion
+LEF_099_L0: cosmic_rift 900 0 0 0.00
+LEF_099_L1: explosion_ring 840 0 0 0.06
+LEF_099_L2: holy_flame 640 0 0 0.16
+LEF_100_NAME: universe_reset
+LEF_100_L0: cosmic_rift 900 0 0 0.00
+LEF_100_L1: void_ring 840 0 0 0.06
+LEF_100_L2: divine_ring 640 0 0 0.16

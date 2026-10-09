@@ -1,0 +1,44 @@
+# Enemy Dash System
+#
+# Two independent dash abilities per enemy:
+# - Offensive: dash TOWARD the hero when in [RANGE_MIN, RANGE_MAX] distance.
+#   30% chance fires once per cooldown cycle.
+# - Defensive: dash SIDEWAYS (perpendicular to attack axis) on incoming hero
+#   damage AFTER the enemy has been hit at least once. 30% chance per hit,
+#   once per cooldown cycle; negates the damage when it fires.
+#
+# Both dashes share the same cooldown duration (ENEMY_DASH_COOLDOWN) but
+# each has its own independent timer so they do not block each other.
+
+# Shared cooldown between triggering opportunities (seconds)
+ENEMY_DASH_COOLDOWN: 5.0
+
+# Offensive dash: triggers when hero distance is in [RANGE_MIN, RANGE_MAX] px.
+# 0.30 = 30% chance per cooldown window.
+ENEMY_DASH_OFFENSIVE_CHANCE: 0.30
+ENEMY_DASH_RANGE_MIN: 200.0
+ENEMY_DASH_RANGE_MAX: 600.0
+
+# Defensive dash: fires when a hit would land (post first-hit unlock).
+ENEMY_DASH_DEFENSIVE_CHANCE: 0.30
+
+# Offensive dash physics (lunge toward the hero)
+ENEMY_DASH_OFFENSIVE_SPEED: 800.0
+ENEMY_DASH_OFFENSIVE_DURATION: 0.30
+# Visible commitment before the generic offensive dash launches. The renderer
+# shows the exact travel lane and contact footprint throughout this window.
+ENEMY_DASH_OFFENSIVE_WINDUP_SECONDS: 0.30
+
+# Defensive dash physics (sidestep perpendicular to attack axis)
+ENEMY_DASH_DEFENSIVE_SPEED: 600.0
+ENEMY_DASH_DEFENSIVE_DURATION: 0.25
+
+# Ghost trail — visible pre-dash echo rendered at the dash origin so the
+# evade is clearly legible to the player.
+ENEMY_DASH_GHOST_DURATION: 0.4
+ENEMY_DASH_GHOST_INITIAL_ALPHA: 180.0
+
+# Ghost colour (orange = enemy dodge, distinct from the hero's cyan evasion)
+ENEMY_DASH_GHOST_COLOR_R: 255
+ENEMY_DASH_GHOST_COLOR_G: 140
+ENEMY_DASH_GHOST_COLOR_B: 0

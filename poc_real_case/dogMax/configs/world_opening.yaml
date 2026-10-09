@@ -1,0 +1,3 @@
+# The starting farm, paths, zones, and scenery are ordinary editable elements
+# persisted by Ctrl+M in world_editor.yaml / the generated override sidecar.
+OPENING_REGION_ENCOUNTER_COUNT: 0

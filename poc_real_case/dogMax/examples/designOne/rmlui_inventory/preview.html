@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>DogMax - Inventory (RmlUI preview)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="preview.css"/>
+</head>
+<body>
+  <div class="stage">
+    <div class="panel">
+      <div class="titlebar"><span class="ttext">INVENTORY</span></div>
+      <div class="pbody">
+      <div class="toolbar">
+        <div class="tabs">
+          <span class="tab on">BY TIER</span><span class="tab">BY TYPE</span><span class="tab">BY VALUE</span>
+        </div>
+        <span class="used">24 / 56</span>
+      </div>
+
+      <div class="main">
+        <div class="powder">
+          <span class="plabel">DESTROY -&gt; POWDER</span>
+          <button class="pbtn t-common">
+            <div class="shard"></div>
+            <div class="pbtext"><span class="pn">COMMON</span><span class="pd">destroy x4</span></div>
+          </button>
+          <button class="pbtn t-uncommon">
+            <div class="shard"></div>
+            <div class="pbtext"><span class="pn">UNCOMMON</span><span class="pd">destroy x6</span></div>
+          </button>
+          <button class="pbtn t-rare">
+            <div class="shard"></div>
+            <div class="pbtext"><span class="pn">RARE</span><span class="pd">destroy x4</span></div>
+          </button>
+          <div class="ptotal"><span class="plabel">POWDER</span><span class="ptotaln">803</span></div>
+          <div class="stash">
+            <div class="prow"><span class="pdot" style="background:#ff4646;"></span><span class="pname">RED</span><span class="pcount">240</span></div>
+            <div class="prow"><span class="pdot" style="background:#f0c846;"></span><span class="pname">YELLOW</span><span class="pcount">180</span></div>
+            <div class="prow"><span class="pdot" style="background:#50dcf0;"></span><span class="pname">CYAN</span><span class="pcount">70</span></div>
+            <div class="prow"><span class="pdot" style="background:#50f078;"></span><span class="pname">GREEN</span><span class="pcount">60</span></div>
+            <div class="prow"><span class="pdot" style="background:#5090ff;"></span><span class="pname">BLUE</span><span class="pcount">95</span></div>
+            <div class="prow"><span class="pdot" style="background:#ff50dc;"></span><span class="pname">MAGENTA</span><span class="pcount">45</span></div>
+            <div class="prow"><span class="pdot" style="background:#b450f0;"></span><span class="pname">PURPLE</span><span class="pcount">30</span></div>
+            <div class="prow"><span class="pdot" style="background:#ffa028;"></span><span class="pname">ORANGE</span><span class="pcount">18</span></div>
+            <div class="prow"><span class="pdot" style="background:#ff82c8;"></span><span class="pname">PINK</span><span class="pcount">22</span></div>
+            <div class="prow"><span class="pdot" style="background:#f0f0f0;"></span><span class="pname">WHITE</span><span class="pcount">12</span></div>
+            <div class="prow"><span class="pdot" style="border:1px #7a8296 solid;" style="background:#2c2c34;"></span><span class="pname">BLACK</span><span class="pcount">31</span></div>
+          </div>
+        </div>
+
+        <div class="grid">
+        <div class="col">
+          <div class="cell weapon t-rare selected"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/warhammer.svg"/></div><div class="corner"></div><div class="eq"></div></div>
+          <div class="cell t-rare"><div class="slot"><div class="die d-20"><span class="dn">20</span></div></div><div class="corner"></div></div>
+          <div class="cell t-common"><div class="slot"><div class="die d-6"><span class="dn">6</span></div></div><div class="corner"></div></div>
+          <div class="cell t-common"><div class="slot"><div class="die d-4"><span class="dn">4</span></div></div><div class="corner"></div></div>
+          <div class="cell t-uncommon"><div class="slot"><div class="die d-8"><span class="dn">8</span></div></div><div class="corner"></div></div>
+          <div class="cell t-uncommon"><div class="slot"><div class="die d-12"><span class="dn">12</span></div></div><div class="corner"></div></div>
+          <div class="cell t-rare"><div class="slot"><div class="die d-24"><span class="dn">24</span></div></div><div class="corner"></div></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-uncommon"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/big_axe.svg"/></div><div class="corner"></div><div class="eq"></div></div>
+          <div class="cell t-uncommon"><div class="slot"><div class="die d-30"><span class="dn">30</span></div></div><div class="corner"></div></div>
+          <div class="cell t-rare"><div class="slot"><div class="die d-42"><span class="dn">42</span></div></div><div class="corner"></div></div>
+          <div class="cell t-uncommon"><div class="slot"><div class="die d-60"><span class="dn">60</span></div></div><div class="corner"></div></div>
+          <div class="cell t-rare"><div class="slot"><div class="die d-100"><span class="dn">100</span></div></div><div class="corner"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-uncommon"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/great_sword.svg"/></div><div class="corner"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-rare"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/long_sword.svg"/></div><div class="corner"></div><div class="eq"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-common"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/mace.svg"/></div><div class="corner"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-uncommon"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/dagger.svg"/></div><div class="corner"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        <div class="col">
+          <div class="cell weapon t-common"><div class="slot"></div><div class="seam"></div><div class="wico"><img class="wpn" src="icons/halberd.svg"/></div><div class="corner"></div></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+          <div class="cell empty"></div>
+        </div>
+        </div>
+      </div>
+
+      <div class="footer">
+        <span class="fitem"><span class="fkey">[ ][ ]</span> Weapon &middot; 2 cells</span>
+        <span class="fitem"><span class="fkey">[ ]</span> Dice &middot; 1 cell</span>
+        <span class="fitem"><span class="fkey eqk">&#9670;</span> Equipped &middot; safe from destroy</span>
+      </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,19 @@
+# dof.combat.HitStop.cpp
+
+class HitStop:
+  remainingSeconds: float = 0.0
+  fn request(seconds:float) -> void:
+    if seconds <= 0.0:
+      ret
+    this.remainingSeconds = max(this.remainingSeconds, seconds)
+
+  fn advanceRealTime(realDeltaSeconds:float) -> void:
+    if this.remainingSeconds <= 0.0:
+      ret
+    this.remainingSeconds = max(0.0, this.remainingSeconds - realDeltaSeconds)
+
+  fn isFrozen() -> bool:
+    ret this.remainingSeconds > 0.0
+
+  fn clear() -> void:
+    this.remainingSeconds = 0.0

@@ -1,0 +1,18 @@
+# Generic opening-gate tuning is retained for a future approved combat slice.
+# The current farm-and-path world has zero authored encounters, so these values
+# do not spawn or gate enemies in a normal run.
+
+# Number of enemies in the follow-up group.
+WAVE_GROUP_SIZE: 3
+
+# The first defeated Scout drops exactly one required die. Its fixed roll time
+# teaches the socket rhythm without allowing a second recovery drop. Wave 2
+# remains gated until this die is placed in a weapon; there is no Wave-3 bypass.
+WAVE_REQUIRED_DICE_FACE_COUNT: 4
+WAVE_REQUIRED_DICE_ROLL_DURATION_SECONDS: 1.2
+# The first d4 introduces passive defense before the three-enemy group. One
+# such die gives exactly 10% evade chance under the independent-source formula.
+WAVE_REQUIRED_DICE_EVASION_PER_SLOT: 0.10
+
+# Authored encounter placement is currently empty. The opening-world config
+# keeps OPENING_REGION_ENCOUNTER_COUNT at zero until combat is approved.

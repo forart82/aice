@@ -1,0 +1,69 @@
+/* DogMax — sidebar.rcss · the WEAPON SLOTS rail (RmlUI). Pairs with theme.rcss.
+   Each row = tier strip | weapon zone | dice zone (+ charge bar) | dron flag.
+   RCSS: spacing via margins (no `gap`); straight neon borders (no clip-path). */
+
+/* ---- panel chrome ---- */
+.panel {
+  width: 360px;
+  decorator: linear-gradient(160deg, #0e131d, #0a0d15);
+  border: 1px #50e6ff59;
+  box-shadow: 0px 0px 40px #00000099;
+}
+.titlebar {
+  height: 28px; display: flex; align-items: center; padding: 0px 14px;
+  decorator: linear-gradient(0deg, #50e6ff00, #50e6ff1f);
+  border-bottom: 1px #50e6ff38;
+}
+.ttext {
+  font-family: "Chakra Petch"; font-weight: bold; font-size: 10px; letter-spacing: 2.6px;
+  color: #50e6ff; font-effect: glow(2px #50e6ff);
+}
+.pbody { padding: 9px; display: block; }
+.row { margin-bottom: 7px; }
+.row:last-child { margin-bottom: 0px; }
+
+/* ---- weapon-slot row ---- */
+.row {
+  position: relative; display: flex; height: 78px;
+  background-color: #0a0c12eb; border: 1px #50e6ff2e;
+}
+.row.ready {
+  border: 1px #ffd750d9; background-color: #ffd75010;
+  box-shadow: 0px 0px 16px #ffd75040;
+}
+
+/* tier strip (colour in theme.rcss) */
+.tier { width: 6px; }
+
+/* weapon zone */
+.wzone {
+  width: 78px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 0px 4px; border-right: 1px #50e6ff1a;
+}
+.wzone > * { margin-bottom: 3px; }
+.wpn { width: 30px; height: 30px; }
+.wname { font-family: "Chakra Petch"; font-weight: 600; font-size: 9.5px; color: #d6dce8;
+  white-space: nowrap; text-overflow: ellipsis; max-width: 70px; }
+.wlv { font-weight: 600; font-size: 7px; letter-spacing: 0.7px; color: #8b93a6; }
+
+/* dice zone */
+.dzone { display: flex; flex-direction: column; justify-content: center;
+  padding: 0px 6px; }
+.dice { display: block; margin-bottom: 5px; }
+.die { display: inline-block; width: 28px; height: 28px; margin-right: 3px;
+  transform: rotate(45deg); border: 2px #ffffff; background-color: #ffffff0f; }
+.dn { display: block; text-align: center; line-height: 26px; transform: rotate(-45deg);
+  font-weight: bold; font-size: 11px; color: #ffffff; }
+.die.empty { border: 1px #50e6ff38; background-color: #0c0e1699; }
+.die.disabled { border: 1px #50e6ff14; background-color: #080a1099; }
+
+/* charge / cooldown bar */
+.charge { height: 4px; background-color: #ffffff12; }
+.cfill { height: 4px; }
+
+/* dron / ready flag */
+.dron { width: 56px; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; border-left: 1px #50e6ff1a; }
+.dmult { font-weight: bold; font-size: 17px; color: #ffffff; margin-bottom: 2px; }
+.dlabel { font-weight: bold; font-size: 6.5px; letter-spacing: 0.3px; white-space: nowrap; }
+.rolling { font-weight: bold; font-size: 7px; letter-spacing: 0.6px; color: #8b93a6; }

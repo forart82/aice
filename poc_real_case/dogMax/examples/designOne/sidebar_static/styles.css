@@ -1,0 +1,71 @@
+/* DogMax — Weapon Slots sidebar · browser preview CSS (mirrors sidebar.rcss). */
+:root{ --cyan:#50e6ff; --ink:#d6dce8; --dim:#8b93a6; --gold:#ffd750; }
+*{box-sizing:border-box; margin:0; padding:0;}
+body{background:#070a10; font-family:'JetBrains Mono',monospace;}
+.stage{padding:40px; display:flex; justify-content:center; min-height:100vh;
+  background:radial-gradient(ellipse at 50% 0%,#11151f,#070a10 70%);}
+
+/* panel chrome */
+.panel{width:360px; background:linear-gradient(160deg,#0e131d,#0a0d15);
+  border:1px solid rgba(80,230,255,0.35);
+  clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);
+  box-shadow:0 0 40px rgba(0,0,0,0.6);}
+.titlebar{height:28px; display:flex; align-items:center; padding:0 14px;
+  background:linear-gradient(180deg,rgba(80,230,255,0.12),rgba(80,230,255,0));
+  border-bottom:1px solid rgba(80,230,255,0.22);}
+.ttext{font-family:'Chakra Petch'; font-weight:700; font-size:10px; letter-spacing:0.26em;
+  color:var(--cyan); text-shadow:0 0 8px rgba(80,230,255,0.6);}
+.pbody{padding:9px; display:flex; flex-direction:column; gap:7px;}
+
+/* ---- weapon-slot row ---- */
+.row{position:relative; display:flex; height:78px;
+  background:rgba(10,12,18,0.92); border:1px solid rgba(80,230,255,0.18);
+  clip-path:polygon(0 0,100% 0,100% 100%,10px 100%,0 calc(100% - 10px));}
+.row.ready{border-color:rgba(255,215,80,0.85); background:rgba(255,215,80,0.06);
+  box-shadow:0 0 16px rgba(255,215,80,0.25), inset 0 0 18px rgba(255,215,80,0.06);}
+
+/* tier strip */
+.tier{width:6px; flex:none;}
+.t-common  .tier{background:#b4b4c8; box-shadow:0 0 8px #b4b4c8;}
+.t-uncommon .tier{background:#50c8ff; box-shadow:0 0 8px #50c8ff;}
+.t-rare    .tier{background:#ffd732; box-shadow:0 0 8px #ffd732;}
+
+/* weapon zone */
+.wzone{width:78px; flex:none; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:3px; padding:0 4px; border-right:1px solid rgba(80,230,255,0.1);}
+.wpn{width:30px; height:30px;}
+.wname{font-family:'Chakra Petch'; font-weight:600; font-size:9.5px; color:var(--ink);
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:100%;}
+.wlv{font-weight:600; font-size:7px; letter-spacing:0.1em; color:var(--dim);}
+
+/* dice zone */
+.dzone{flex:1; display:flex; flex-direction:column; justify-content:center; gap:5px;
+  padding:0 6px; min-width:0; overflow:hidden;}
+.dice{display:flex; gap:3px; flex-wrap:nowrap;}
+.die{width:28px; height:28px; flex:none; transform:rotate(45deg);
+  display:flex; align-items:center; justify-content:center;
+  border:1.5px solid #fff; background:rgba(255,255,255,0.06);}
+.dn{transform:rotate(-45deg); font-weight:700; font-size:11px; color:#fff;}
+.die.empty{border:1px dashed rgba(80,230,255,0.22); background:rgba(12,14,22,0.6);}
+.die.disabled{border:1px dashed rgba(80,230,255,0.08); background:rgba(8,10,16,0.6);}
+.d-4{border-color:#ff4646;} .d-4 .dn{color:#ff4646;}
+.d-6{border-color:#f0c846;} .d-6 .dn{color:#f0c846;}
+.d-8{border-color:#50dcf0;} .d-8 .dn{color:#50dcf0;}
+.d-12{border-color:#50f078;} .d-12 .dn{color:#50f078;}
+.d-20{border-color:#5090ff;} .d-20 .dn{color:#5090ff;}
+
+/* charge / cooldown bar */
+.charge{height:4px; background:rgba(255,255,255,0.07);}
+.cfill{height:100%; box-shadow:0 0 5px currentColor;}
+.t-common  .cfill{background:#b4b4c8; color:#b4b4c8;}
+.t-uncommon .cfill{background:#50c8ff; color:#50c8ff;}
+.t-rare    .cfill{background:#ffd732; color:#ffd732;}
+.row.ready .cfill{background:var(--gold); color:var(--gold);}
+
+/* dron / ready flag */
+.dron{width:56px; flex:none; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:2px; border-left:1px solid rgba(80,230,255,0.1);}
+.dmult{font-weight:800; font-size:17px; color:#fff; text-shadow:0 0 10px currentColor;}
+.dlabel{font-weight:700; font-size:6.5px; letter-spacing:0.04em; white-space:nowrap;}
+.rolling{font-weight:700; font-size:7px; letter-spacing:0.08em; color:var(--dim);
+  writing-mode:vertical-rl; transform:rotate(180deg);}

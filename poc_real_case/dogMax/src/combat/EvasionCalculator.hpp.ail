@@ -1,0 +1,3 @@
+# dof.combat.EvasionCalculator.hpp
+
+fn evadeChance(evasionPerSlots:[float], cap:float) -> float = 0.0

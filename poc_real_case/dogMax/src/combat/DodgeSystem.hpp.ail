@@ -1,0 +1,16 @@
+# dof.combat.DodgeSystem.hpp
+
+class DodgeSystem:
+  maxChargesValue: int = 2
+  chargesAvailableValue: int = 2
+  cooldownSecondsValue: float = 2.0
+  cooldownRemainingValue: float = 0.0
+
+  fn maxCharges() -> int:
+    ret this.maxChargesValue
+  fn chargesAvailable() -> int:
+    ret this.chargesAvailableValue
+  fn cooldownSeconds() -> float:
+    ret this.cooldownSecondsValue
+  fn cooldownRemaining() -> float:
+    ret this.cooldownRemainingValue

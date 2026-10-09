@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Skip the (slow, SFML-from-source) build for doc/kanban/artifact-only pushes.
+    paths-ignore:
+      - 'kanban.yaml'
+      - '**.md'
+      - 'inGame/**'
+      - '.claude/**'
+  pull_request:
+
+# One run per ref; a newer push cancels an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # SFML 3 is not in apt; CMake fetches + builds it from source (the FetchContent
+      # fallback). These are SFML 3's X11 / GL / FreeType / audio build deps.
+      - name: Install build dependencies
+        # xvfb + the Mesa software-GL driver (llvmpipe) give the runner a virtual
+        # display + GL context, so SFML texture/font/RenderTexture creation works
+        # headless (otherwise even an empty placeholder texture SIGABRTs). The
+        # vorbis/flac/ogg -dev packages are SFML::Audio's codec build deps (MVP-AUDIO);
+        # playback itself falls back to a null device on the headless runner.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++-14 git xvfb \
+            libx11-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libudev-dev libgl1-mesa-dev libgl1-mesa-dri libfreetype-dev \
+            libvorbis-dev libflac-dev libogg-dev
+
+      - name: Configure (no local SFML on CI -> SFML 3 is fetched from source)
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      # Build the game binary — compiles all of dogcore + the executable, guarding
+      # compilation of every source file. The doctest/e2e suite was removed in the
+      # restart-4 rebuild, so CI now builds the game itself as the compile gate
+      # (the old `dogtests` target no longer exists).
+      - name: Build the game
+        run: cmake --build build -j"$(nproc)" --target dogmax

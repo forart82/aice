@@ -1,0 +1,213 @@
+# Effects catalog — 100 small (50px) named effects.
+# EFX_NNN_DATA format: <shader> <cr> <cg> <cb> <variant> <speed> <intensity> <duration_s> <category>
+EFX_COUNT: 100
+# --- ring effects (001-010) ---
+EFX_001_NAME: hit_flash
+EFX_001_DATA: effect_ring 1.0 0.4 0.1 0.0 1.5 1.2 0.35 combat
+EFX_002_NAME: explosion_ring
+EFX_002_DATA: effect_ring 1.0 0.55 0.05 1.0 1.2 1.0 0.45 combat
+EFX_003_NAME: heal_ring
+EFX_003_DATA: effect_ring 0.2 0.9 0.2 2.0 0.9 0.9 0.60 heal
+EFX_004_NAME: level_up_ring
+EFX_004_DATA: effect_ring 1.0 0.8 0.0 3.0 0.8 1.3 0.90 levelup
+EFX_005_NAME: teleport_ring
+EFX_005_DATA: effect_ring 0.0 0.9 1.0 4.0 1.3 1.0 0.40 movement
+EFX_006_NAME: shockwave
+EFX_006_DATA: effect_ring 1.0 1.0 1.0 5.0 1.8 1.0 0.30 combat
+EFX_007_NAME: divine_ring
+EFX_007_DATA: effect_ring 1.0 0.95 0.6 6.0 0.7 0.8 0.80 divine
+EFX_008_NAME: poison_ring
+EFX_008_DATA: effect_ring 0.5 1.0 0.0 7.0 1.0 0.9 0.55 status
+EFX_009_NAME: electric_ring
+EFX_009_DATA: effect_ring 1.0 0.95 0.1 8.0 1.6 1.1 0.35 combat
+EFX_010_NAME: void_ring
+EFX_010_DATA: effect_ring 0.4 0.0 0.7 9.0 1.1 0.8 0.50 dark
+# --- spark effects (011-020) ---
+EFX_011_NAME: crit_sparks
+EFX_011_DATA: effect_spark 1.0 0.4 0.1 0.0 1.4 1.2 0.40 combat
+EFX_012_NAME: gold_dust
+EFX_012_DATA: effect_spark 1.0 0.8 0.0 1.0 0.7 1.0 0.70 loot
+EFX_013_NAME: magic_sparks
+EFX_013_DATA: effect_spark 0.7 0.0 1.0 2.0 1.0 0.9 0.50 magic
+EFX_014_NAME: blood_spray
+EFX_014_DATA: effect_spark 0.6 0.0 0.0 3.0 1.3 0.8 0.40 combat
+EFX_015_NAME: acid_splash
+EFX_015_DATA: effect_spark 0.5 1.0 0.0 4.0 1.1 1.0 0.45 status
+EFX_016_NAME: holy_sparks
+EFX_016_DATA: effect_spark 1.0 1.0 0.9 5.0 0.8 0.8 0.55 divine
+EFX_017_NAME: shadow_burst
+EFX_017_DATA: effect_spark 0.1 0.05 0.2 6.0 1.2 0.7 0.40 dark
+EFX_018_NAME: fire_cinders
+EFX_018_DATA: effect_spark 0.9 0.5 0.05 7.0 0.9 1.0 0.65 fire
+EFX_019_NAME: lightning_sparks
+EFX_019_DATA: effect_spark 1.0 0.95 0.1 8.0 1.6 1.1 0.35 combat
+EFX_020_NAME: ice_chips
+EFX_020_DATA: effect_spark 0.7 0.95 1.0 9.0 1.3 0.9 0.40 ice
+# --- glow effects (021-030) ---
+EFX_021_NAME: health_aura
+EFX_021_DATA: effect_glow 0.2 0.9 0.2 0.0 0.6 1.0 0.80 heal
+EFX_022_NAME: xp_glow
+EFX_022_DATA: effect_glow 0.4 0.2 1.0 1.0 0.8 0.9 0.65 levelup
+EFX_023_NAME: pickup_sparkle
+EFX_023_DATA: effect_glow 1.0 0.8 0.0 2.0 1.1 1.1 0.45 pickup
+EFX_024_NAME: poison_cloud
+EFX_024_DATA: effect_glow 0.3 0.8 0.0 3.0 0.7 0.8 0.70 status
+EFX_025_NAME: fire_aura
+EFX_025_DATA: effect_glow 1.0 0.4 0.05 4.0 1.0 1.1 0.55 fire
+EFX_026_NAME: ice_aura
+EFX_026_DATA: effect_glow 0.0 0.9 1.0 5.0 0.8 0.9 0.65 ice
+EFX_027_NAME: shield_glow
+EFX_027_DATA: effect_glow 0.2 0.5 1.0 6.0 0.7 1.0 0.75 shield
+EFX_028_NAME: rage_aura
+EFX_028_DATA: effect_glow 0.8 0.0 0.0 7.0 1.2 1.2 0.50 combat
+EFX_029_NAME: stealth_shimmer
+EFX_029_DATA: effect_glow 0.3 0.4 0.7 8.0 0.9 0.6 0.70 movement
+EFX_030_NAME: death_glow
+EFX_030_DATA: effect_glow 0.3 0.0 0.4 9.0 0.6 0.7 0.85 death
+# --- slash effects (031-040) ---
+EFX_031_NAME: sword_slash
+EFX_031_DATA: effect_slash 1.0 1.0 1.0 0.0 2.0 1.0 0.25 combat
+EFX_032_NAME: fire_slash
+EFX_032_DATA: effect_slash 1.0 0.4 0.0 1.0 1.8 1.1 0.30 fire
+EFX_033_NAME: ice_slash
+EFX_033_DATA: effect_slash 0.7 0.95 1.0 2.0 1.7 0.9 0.30 ice
+EFX_034_NAME: shadow_slash
+EFX_034_DATA: effect_slash 0.2 0.0 0.3 3.0 2.0 0.8 0.25 dark
+EFX_035_NAME: lightning_slash
+EFX_035_DATA: effect_slash 1.0 0.95 0.1 4.0 2.2 1.2 0.20 combat
+EFX_036_NAME: poison_slash
+EFX_036_DATA: effect_slash 0.5 1.0 0.0 5.0 1.6 0.9 0.30 status
+EFX_037_NAME: holy_slash
+EFX_037_DATA: effect_slash 1.0 0.95 0.6 6.0 1.8 1.0 0.28 divine
+EFX_038_NAME: void_slash
+EFX_038_DATA: effect_slash 0.25 0.0 0.4 7.0 1.5 0.7 0.35 dark
+EFX_039_NAME: crit_slash
+EFX_039_DATA: effect_slash 1.0 0.1 0.0 8.0 2.5 1.3 0.20 combat
+EFX_040_NAME: power_slash
+EFX_040_DATA: effect_slash 1.0 1.0 0.9 9.0 1.4 1.0 0.35 combat
+# --- orb effects (041-050) ---
+EFX_041_NAME: item_pickup
+EFX_041_DATA: effect_orb 1.0 0.8 0.0 0.0 1.2 1.0 0.40 pickup
+EFX_042_NAME: health_orb
+EFX_042_DATA: effect_orb 0.9 0.1 0.1 1.0 0.9 1.0 0.50 heal
+EFX_043_NAME: mana_orb
+EFX_043_DATA: effect_orb 0.2 0.4 1.0 2.0 1.0 0.9 0.50 magic
+EFX_044_NAME: xp_orb
+EFX_044_DATA: effect_orb 0.5 0.0 0.9 3.0 1.1 1.0 0.45 levelup
+EFX_045_NAME: power_orb
+EFX_045_DATA: effect_orb 1.0 0.5 0.0 4.0 1.3 1.1 0.40 combat
+EFX_046_NAME: cool_orb
+EFX_046_DATA: effect_orb 0.0 0.85 1.0 5.0 1.0 0.9 0.50 ice
+EFX_047_NAME: shadow_orb
+EFX_047_DATA: effect_orb 0.1 0.0 0.2 6.0 0.8 0.7 0.55 dark
+EFX_048_NAME: holy_orb
+EFX_048_DATA: effect_orb 1.0 0.95 0.7 7.0 0.9 0.9 0.55 divine
+EFX_049_NAME: death_orb
+EFX_049_DATA: effect_orb 0.5 0.0 0.05 8.0 0.7 0.8 0.65 death
+EFX_050_NAME: bomb_orb
+EFX_050_DATA: effect_orb 1.0 0.4 0.05 9.0 1.6 1.3 0.35 combat
+# --- smoke effects (051-060) ---
+EFX_051_NAME: dust_puff
+EFX_051_DATA: effect_smoke 0.6 0.6 0.6 0.0 1.1 0.8 0.40 movement
+EFX_052_NAME: smoke_bomb
+EFX_052_DATA: effect_smoke 0.2 0.2 0.2 1.0 0.8 0.9 0.60 dark
+EFX_053_NAME: poison_puff
+EFX_053_DATA: effect_smoke 0.3 0.8 0.0 2.0 0.9 1.0 0.55 status
+EFX_054_NAME: fire_smoke
+EFX_054_DATA: effect_smoke 0.7 0.35 0.0 3.0 1.0 0.9 0.50 fire
+EFX_055_NAME: teleport_smoke
+EFX_055_DATA: effect_smoke 0.6 0.0 0.9 4.0 1.3 1.0 0.40 movement
+EFX_056_NAME: explosion_smoke
+EFX_056_DATA: effect_smoke 0.5 0.4 0.3 5.0 1.2 0.8 0.45 combat
+EFX_057_NAME: freeze_mist
+EFX_057_DATA: effect_smoke 0.8 0.95 1.0 6.0 0.7 0.8 0.65 ice
+EFX_058_NAME: shadow_step
+EFX_058_DATA: effect_smoke 0.1 0.1 0.4 7.0 1.4 0.9 0.35 movement
+EFX_059_NAME: toxic_cloud
+EFX_059_DATA: effect_smoke 0.6 1.0 0.1 8.0 0.8 0.9 0.70 status
+EFX_060_NAME: arcane_smoke
+EFX_060_DATA: effect_smoke 0.4 0.1 0.9 9.0 1.0 0.9 0.50 magic
+# --- bolt effects (061-070) ---
+EFX_061_NAME: lightning_strike
+EFX_061_DATA: effect_bolt 1.0 0.95 0.1 0.0 2.0 1.1 0.30 combat
+EFX_062_NAME: chain_lightning
+EFX_062_DATA: effect_bolt 0.3 0.6 1.0 1.0 1.8 1.0 0.35 combat
+EFX_063_NAME: electric_burst
+EFX_063_DATA: effect_bolt 1.0 1.0 0.6 2.0 1.6 1.2 0.30 combat
+EFX_064_NAME: storm_arc
+EFX_064_DATA: effect_bolt 0.6 0.8 1.0 3.0 1.3 1.0 0.40 combat
+EFX_065_NAME: plasma_bolt
+EFX_065_DATA: effect_bolt 0.0 0.95 1.0 4.0 1.7 1.1 0.28 magic
+EFX_066_NAME: static_discharge
+EFX_066_DATA: effect_bolt 1.0 0.95 0.7 5.0 2.2 0.9 0.25 combat
+EFX_067_NAME: void_lightning
+EFX_067_DATA: effect_bolt 0.5 0.0 0.8 6.0 1.4 0.8 0.35 dark
+EFX_068_NAME: blood_bolt
+EFX_068_DATA: effect_bolt 0.7 0.0 0.0 7.0 1.5 1.0 0.30 combat
+EFX_069_NAME: frost_bolt
+EFX_069_DATA: effect_bolt 0.5 0.9 1.0 8.0 1.6 0.9 0.30 ice
+EFX_070_NAME: holy_bolt
+EFX_070_DATA: effect_bolt 1.0 1.0 0.95 9.0 1.9 1.0 0.28 divine
+# --- shatter effects (071-080) ---
+EFX_071_NAME: ice_shatter
+EFX_071_DATA: effect_shatter 0.7 0.95 1.0 0.0 1.4 0.9 0.45 ice
+EFX_072_NAME: gem_burst
+EFX_072_DATA: effect_shatter 0.6 0.0 0.9 1.0 1.1 1.0 0.50 pickup
+EFX_073_NAME: glass_break
+EFX_073_DATA: effect_shatter 0.9 0.95 1.0 2.0 1.5 0.8 0.40 combat
+EFX_074_NAME: crystal_explode
+EFX_074_DATA: effect_shatter 1.0 0.4 0.8 3.0 1.3 1.0 0.45 magic
+EFX_075_NAME: earth_crack
+EFX_075_DATA: effect_shatter 0.6 0.4 0.2 4.0 0.9 0.8 0.55 combat
+EFX_076_NAME: void_shatter
+EFX_076_DATA: effect_shatter 0.25 0.0 0.5 5.0 1.2 0.7 0.50 dark
+EFX_077_NAME: gold_shatter
+EFX_077_DATA: effect_shatter 1.0 0.8 0.0 6.0 1.2 1.1 0.45 pickup
+EFX_078_NAME: fire_shatter
+EFX_078_DATA: effect_shatter 1.0 0.4 0.05 7.0 1.5 1.1 0.40 fire
+EFX_079_NAME: shadow_shatter
+EFX_079_DATA: effect_shatter 0.1 0.05 0.15 8.0 1.4 0.8 0.40 dark
+EFX_080_NAME: crystal_form
+EFX_080_DATA: effect_shatter 0.5 0.9 1.0 9.0 0.8 0.9 0.55 magic
+# --- flame effects (081-090) ---
+EFX_081_NAME: flame_burst
+EFX_081_DATA: effect_flame 1.0 0.4 0.05 0.0 1.0 1.1 0.50 fire
+EFX_082_NAME: explosion_fire
+EFX_082_DATA: effect_flame 1.0 0.7 0.0 1.0 1.4 1.2 0.40 combat
+EFX_083_NAME: magma_burst
+EFX_083_DATA: effect_flame 0.8 0.2 0.0 2.0 0.9 1.0 0.55 fire
+EFX_084_NAME: hellfire
+EFX_084_DATA: effect_flame 0.5 0.0 0.0 3.0 1.1 1.0 0.60 dark
+EFX_085_NAME: phoenix_flame
+EFX_085_DATA: effect_flame 1.0 0.7 0.0 4.0 0.8 1.1 0.70 fire
+EFX_086_NAME: will_o_wisp
+EFX_086_DATA: effect_flame 0.7 0.85 1.0 5.0 0.7 0.8 0.75 magic
+EFX_087_NAME: inferno
+EFX_087_DATA: effect_flame 0.85 0.0 0.0 6.0 1.2 1.2 0.50 fire
+EFX_088_NAME: cursed_flame
+EFX_088_DATA: effect_flame 0.5 0.0 0.5 7.0 1.0 0.9 0.55 dark
+EFX_089_NAME: ice_flame
+EFX_089_DATA: effect_flame 0.3 0.85 1.0 8.0 0.9 0.9 0.55 ice
+EFX_090_NAME: holy_flame
+EFX_090_DATA: effect_flame 1.0 0.95 0.6 9.0 0.8 1.0 0.65 divine
+# --- vortex effects (091-100) ---
+EFX_091_NAME: summon_portal
+EFX_091_DATA: effect_vortex 0.7 0.0 1.0 0.0 0.9 1.0 0.80 magic
+EFX_092_NAME: teleport_in
+EFX_092_DATA: effect_vortex 0.2 0.4 1.0 1.0 1.3 1.0 0.50 movement
+EFX_093_NAME: teleport_out
+EFX_093_DATA: effect_vortex 0.0 0.9 1.0 2.0 1.3 1.0 0.50 movement
+EFX_094_NAME: boss_spawn
+EFX_094_DATA: effect_vortex 0.9 0.0 0.0 3.0 0.7 1.2 1.00 dark
+EFX_095_NAME: loot_portal
+EFX_095_DATA: effect_vortex 1.0 0.8 0.0 4.0 1.0 1.1 0.70 pickup
+EFX_096_NAME: death_portal
+EFX_096_DATA: effect_vortex 0.05 0.0 0.1 5.0 0.6 0.8 0.90 death
+EFX_097_NAME: warp_rift
+EFX_097_DATA: effect_vortex 0.1 0.15 0.6 6.0 1.5 0.9 0.45 movement
+EFX_098_NAME: dimension_tear
+EFX_098_DATA: effect_vortex 0.8 0.6 1.0 7.0 1.1 1.0 0.60 magic
+EFX_099_NAME: binding_vortex
+EFX_099_DATA: effect_vortex 0.8 0.2 0.0 8.0 0.9 1.0 0.65 combat
+EFX_100_NAME: cosmic_rift
+EFX_100_DATA: effect_vortex 0.5 0.75 1.0 9.0 1.0 1.0 0.70 magic

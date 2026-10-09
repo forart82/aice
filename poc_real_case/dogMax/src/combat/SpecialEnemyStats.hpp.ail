@@ -1,0 +1,15 @@
+# dof.combat.SpecialEnemyStats.hpp
+
+enum SpecialEnemyKind:
+  None
+  Shocker
+  Glasswraith
+  Hexarchon
+  Voidcrawler
+  TassideanSentinel
+  PactWalker
+
+type SpecialEnemyStatOverride:
+  healthMultiplier: float
+  speedMultiplier: float
+  deadzoneFactor: float

@@ -1,0 +1,11 @@
+# dof.combat.EnemyExplosion.hpp
+
+type ExplosionRing:
+  radius: float
+  alpha: float
+
+type ExplosionShard:
+  offsetX: float
+  offsetY: float
+  rotationDegrees: float
+  alpha: float

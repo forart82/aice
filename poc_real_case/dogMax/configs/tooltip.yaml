@@ -1,0 +1,27 @@
+# Game tooltip — uses ui::UiTooltip (same component library as the Ctrl+H Gallery).
+# Panel background folded onto the shared THEME_PANEL_BG_* (theme.yaml,
+# LIFT PLAN step 7); read via render::resolvePanelBackground. Re-add
+# TOOLTIP_BG_R/G/B/ALPHA here to override the theme swatch for the tooltip.
+# Panel border now reads the canonical UI_ACCENT (theme.yaml) like every
+# framed panel — the old distinct TOOLTIP_BORDER_* blue keys were removed.
+# Title/body text colours collapsed onto the theme text tokens
+# (title→THEME_UI_TEXT, body→THEME_UI_DIM in theme.yaml) for a single,
+# cohesive chrome read. The title is overridden at runtime by the hovered
+# item's tier colour (gameplay), so the fallback lives in the theme text
+# token; the old distinct TOOLTIP_TITLE_*/TOOLTIP_BODY_* keys were removed.
+# Layout
+TOOLTIP_PADDING: 10
+TOOLTIP_MAX_W: 360
+TOOLTIP_TITLE_FONT_SIZE: 15
+TOOLTIP_LINE_FONT_SIZE: 12
+TOOLTIP_LINE_HEIGHT: 16
+TOOLTIP_TITLE_BODY_GAP: 6
+TOOLTIP_ROW_LABEL_WIDTH: 96
+TOOLTIP_BADGE_WIDTH: 24
+TOOLTIP_SECTION_GAP: 4
+TOOLTIP_EMPTY_LINE_HEIGHT: 6
+
+# Floor-item hover hit-radius (world px). FloorItem sprites are centred around
+# the item position; the tooltip appears whenever the world-mapped cursor is
+# within this radius of any visible (non-picked-up) FloorItem.
+FLOOR_ITEM_HOVER_RADIUS: 44

@@ -1,0 +1,43 @@
+# Weaponslot bar: 8 physical rows, unlocked over hero levels.
+WEAPONSLOT_ROWS: 8
+WEAPONSLOT_DICE_CELLS_PER_ROW: 6
+WEAPONSLOT_PROGRESS_BAR_HEIGHT: 6
+
+# Player-facing weapon-slot unlock curve. Row 1 is the starter weapon row.
+# Row 2 unlocks at hero level 3 so the first extra weapon arrives after the
+# player has seen a couple of level-up moments.
+WEAPONSLOT_UNLOCK_LEVEL_ROW_1: 1
+WEAPONSLOT_UNLOCK_LEVEL_ROW_2: 3
+WEAPONSLOT_UNLOCK_LEVEL_ROW_3: 6
+WEAPONSLOT_UNLOCK_LEVEL_ROW_4: 10
+WEAPONSLOT_UNLOCK_LEVEL_ROW_5: 15
+WEAPONSLOT_UNLOCK_LEVEL_ROW_6: 21
+WEAPONSLOT_UNLOCK_LEVEL_ROW_7: 28
+WEAPONSLOT_UNLOCK_LEVEL_ROW_8: 36
+
+# Secret-World aesthetic: translucent dark row body with a thin
+# accent border. Alpha matches the inventory panel so the two
+# surfaces read as the same UI material.
+WEAPONSLOT_ROW_BG_R: 10
+WEAPONSLOT_ROW_BG_G: 12
+WEAPONSLOT_ROW_BG_B: 18
+WEAPONSLOT_ROW_BG_ALPHA: 170
+# Row outline + thickness pull from theme.config UI_ACCENT_* using
+# the dim alpha band (tiled rows would stack into a loud frame at
+# the full alpha band, so this surface uses `UiAccent::dim()`).
+WEAPONSLOT_EMPTY_DICE_CELL_R: 20
+WEAPONSLOT_EMPTY_DICE_CELL_G: 28
+WEAPONSLOT_EMPTY_DICE_CELL_B: 45
+WEAPONSLOT_CHARGED_OUTLINE_R: 255
+WEAPONSLOT_CHARGED_OUTLINE_G: 215
+WEAPONSLOT_CHARGED_OUTLINE_B: 70
+# B-UX-10 — when the row is charged the dice cell outline bumps to
+# `WEAPONSLOT_CHARGED_DICE_OUTLINE_THICKNESS` (px) and the cell fill
+# alpha bumps by `WEAPONSLOT_CHARGED_DICE_FILL_ALPHA_BOOST` so the
+# ready-to-fire state pops at a glance from across the screen.
+WEAPONSLOT_CHARGED_DICE_OUTLINE_THICKNESS: 3.5
+WEAPONSLOT_CHARGED_DICE_FILL_ALPHA_BOOST: 120
+
+# Per-cell Countdown Bar (spec §Countdown Bar): thin left-to-right
+# depletion bar inside each Diceslot cell, tier-coloured.
+WEAPONSLOT_DICE_COUNTDOWN_BAR_HEIGHT: 3

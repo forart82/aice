@@ -1,0 +1,371 @@
+# Enemy + spawn tunables.
+# Directory (relative to the runtime CWD == build/) holding the per-enemy-type
+# design YAML files the body painter and the Ctrl+E editor read/write.
+ENEMY_TEMPLATE_DIR: configs/enemies
+ENEMY_BASE_HEALTH: 30
+# Global multiplier on damage dealt by enemies after their attack source is
+# resolved. Keeps enemy-held weapons and dash/jump contact in one balance lane
+# without weakening hero weapons or loot drops.
+ENEMY_ATTACK_DAMAGE_MULT: 0.92
+# Enemy-only absolute floor after the global multiplier. Early low-roll weapons
+# and unarmed contact must still make a surrounding starter swarm dangerous.
+ENEMY_ATTACK_MIN_DAMAGE: 8.0
+ENEMY_BASE_MOVE_SPEED: 330
+ENEMY_ATTACK_RANGE: 280
+ENEMY_CHASE_RANGE: 2600
+ENEMY_COLLISION_RADIUS: 50
+ENEMY_DEADZONE_FACTOR: 0.45
+
+# Spec §Appendix J §Spatial Grid: bucketed neighbour lookup for
+# Enemy resolution. Designer constraint: must equal
+# `2 * ENEMY_COLLISION_RADIUS` (50 * 2 = 100). The
+# `core::SpatialGrid` class does NOT validate this — it reads
+# whatever value lives here; we keep the two keys side by side
+# so a tuning pass touches both at once.
+SPATIAL_GRID_CELL_SIZE: 100
+
+# Enemy-vs-enemy collision (separation). When enabled, after the AI tick
+# each frame any two live, grounded enemies whose body centres are closer
+# than `2 * ENEMY_COLLISION_RADIUS` (100) are pushed symmetrically apart so
+# bodies stop overlapping into a single blob. Airborne enemies (jump/dash
+# arcs) are exempt so their trajectories are not disturbed. 1 = on, 0 = off.
+ENEMY_ENEMY_COLLISION_ENABLED: 1
+# Above this population, skip enemy-vs-enemy separation. Dense swarms read as
+# a crowd, and the full pair-resolution pass costs more than it adds visually.
+ENEMY_COLLISION_MAX_RESOLVE_COUNT: 2500
+
+# Per-level scaling factors — spec §Level by Distance L549 canonical
+# (40-hour pacing revision). HP 1.12 / damage 1.10 / speed 1.02. Was
+# 1.20 / 1.15 / 1.10 — old curve made L20+ enemies un-kitable and
+# crushed early-game DPS.
+# - HP 1.12 vs hero weapon-dmg per-level 1.10 (spec L1873): enemy
+#   slightly outpaces flat weapon dmg; the gap is filled by Quality *
+#   Level multiplier `m`, dice damageMultiplier, and dron stacks.
+# - Damage 1.10: at the L100 cap a common enemy deals
+#   1 * 1.10^99 ~= 12 500. Hero max HP = 100 * HERO_HEALTH_PER_LEVEL^99;
+#   at the current 1.11 (hero.yaml) that is about 3.07 M, so one melee removes
+#   roughly 0.4% HP -- swarms still kill fast, a single melee never one-shots.
+# - Speed 1.02: spec L550 explicitly mandates this so the world stays
+#   kitable at L99 (enemy speed = 330 * 1.02^98 ≈ 2 298 u/s, still
+#   under 5 * hero 500 = 2 500). 1.10 ramp had enemies outpacing the hero by L10.
+ENEMY_HEALTH_PER_LEVEL: 1.12
+ENEMY_SPEED_PER_LEVEL: 1.02
+
+# DEBUG-OVERLAY ONLY. `render::drawDebugWorldOverlays` is the sole consumer of
+# these two keys: it paints the inner/outer dim grey rings around the hero when
+# the debug panel is visible (spec L2833). They no longer drive any spawn.
+# The procedural ring spawner that once read them — interval timer, population
+# cap, rear-bias wedge — was deleted as unreachable code; every enemy that
+# exists in a run now comes from the authored region or the WorldEditor.
+# Do not delete these keys without also removing those two rings: ConfigLoader
+# throws on a missing key, so a stray debug-panel keypress would crash the game.
+ENEMY_SPAWN_MIN_RADIUS: 3000
+ENEMY_SPAWN_RADIUS: 5000
+
+# Spawn-exclusion FIFO — LIVE. An enemy's original spawn position is recorded
+# when it dies; `pickSpecialForSpawn` refuses to substitute a special enemy
+# inside one of these zones, and the debug overlay paints them as red discs.
+ENEMY_SPAWN_EXCLUSION_RADIUS: 1000
+ENEMY_SPAWN_EXCLUSION_FIFO_SIZE: 5000
+
+# Alert / call system — when a chasing enemy enters ENEMY_CHASE_RANGE,
+# it broadcasts an alert to idle enemies within this radius so they
+# converge on the caller's position.  Must exceed ENEMY_CHASE_RANGE so
+# the alert reaches enemies that are not yet in the chase bubble
+# (callers at the chase boundary can pull enemies up to
+# ENEMY_CHASE_RANGE + ENEMY_CALL_RANGE away from the hero).
+# Set to 0 to disable.
+ENEMY_CALL_RANGE: 3000
+# Caps redundant call broadcasts in huge swarms. 0 means unlimited.
+ENEMY_ALERT_MAX_BROADCASTS_PER_FRAME: 64
+
+# Above this many enemies, AI is updated in rotating slices. 0 means every
+# enemy updates every sim step. Dense swarms stay visually active while avoiding
+# one fixed-step doing 5000 full decision passes.
+ENEMY_AI_MAX_UPDATES_PER_FRAME: 2000
+
+# SE1 — distance-to-level curve moved to `configs/enemy_levels.yaml`
+# as a piecewise schedule (linear / exp / exp). `EnemyManager`
+# constructs `combat::EnemyLevelCurve` from that file; the old flat
+# `ENEMY_LEVEL_DISTANCE_STEP` key is gone (no consumers remain).
+
+# SE2 / spec L523-534 — distance-quintile tier cadence. The hero's
+# cumulative walked-distance progress (distance / cum[maxLevel])
+# falls into one of five quintiles Q0..Q4; each quintile picks
+# its own `(rareCadence, uncommonCadence)` pair. Tier roll fires
+# on `spawnCounter % rareCadence == 0` and
+# `spawnCounter % uncommonCadence == 0` so deeper quintiles roll
+# both tiers more frequently. Replaces the hard-coded 100/10
+# cadence that ignored hero progress entirely.
+ENEMY_TIER_CADENCE_Q0_RARE: 300
+ENEMY_TIER_CADENCE_Q0_UNCOMMON: 30
+ENEMY_TIER_CADENCE_Q1_RARE: 200
+ENEMY_TIER_CADENCE_Q1_UNCOMMON: 20
+ENEMY_TIER_CADENCE_Q2_RARE: 100
+ENEMY_TIER_CADENCE_Q2_UNCOMMON: 10
+ENEMY_TIER_CADENCE_Q3_RARE: 75
+ENEMY_TIER_CADENCE_Q3_UNCOMMON: 8
+ENEMY_TIER_CADENCE_Q4_RARE: 50
+ENEMY_TIER_CADENCE_Q4_UNCOMMON: 7
+
+ENEMY_DEATH_ANIM_DURATION: 0.55
+
+# Spawn animation VFX — a Stargate-style portal opens IN PLACE and the enemy
+# fades in from it over DURATION seconds. The portal (event-horizon disc +
+# rim, HORIZON colour) irises open (radius 0 -> RADIUS) up to OPEN_FRACTION of
+# the timeline, holds while the enemy fades in, then irises shut after
+# CLOSE_FRACTION. VERTICAL_SCALE squashes the disc so it lies on the ground.
+ENEMY_SPAWN_ANIM_DURATION: 0.90
+ENEMY_SPAWN_PORTAL_RADIUS: 115.0
+ENEMY_SPAWN_PORTAL_VERTICAL_SCALE: 0.7
+ENEMY_SPAWN_PORTAL_RIM_THICKNESS: 7.0
+ENEMY_SPAWN_PORTAL_RIM_ALPHA: 255.0
+ENEMY_SPAWN_PORTAL_HORIZON_ALPHA: 220.0
+ENEMY_SPAWN_PORTAL_OPEN_FRACTION: 0.30
+ENEMY_SPAWN_PORTAL_CLOSE_FRACTION: 0.82
+ENEMY_SPAWN_PORTAL_HORIZON_R: 80
+ENEMY_SPAWN_PORTAL_HORIZON_G: 190
+ENEMY_SPAWN_PORTAL_HORIZON_B: 255
+
+# Attack flash VFX — brief expanding ring emitted when an enemy strikes.
+# Radius expands from START to END over DURATION seconds; alpha fades
+# from START_ALPHA to 0. Ring is tier-coloured (same outline as body).
+ENEMY_ATTACK_FLASH_DURATION: 0.30
+ENEMY_ATTACK_FLASH_START_RADIUS: 55.0
+ENEMY_ATTACK_FLASH_END_RADIUS: 90.0
+ENEMY_ATTACK_FLASH_START_ALPHA: 200.0
+
+ENEMY_OUTLINE_R: 200
+ENEMY_OUTLINE_G: 40
+ENEMY_OUTLINE_B: 100
+ENEMY_FILL_R: 20
+ENEMY_FILL_G: 8
+ENEMY_FILL_B: 22
+
+ENEMY_OUTLINE_R_UNCOMMON: 80
+ENEMY_OUTLINE_G_UNCOMMON: 200
+ENEMY_OUTLINE_B_UNCOMMON: 255
+# Rare moved out of gold (was 255,215,50, ~48 deg) into the magenta family.
+# Gold sat in the hero's own orange hue family (~22 deg): once both were
+# blurred into glow they read alike, so the hero could not be picked out of a
+# Rare-heavy pack. It was also a fourth accent hue, which the three-hue
+# palette locked in Step 2 does not allow. Enemies now live on magenta +
+# cyan and the hero owns orange alone.
+#
+# Rare stays separable from Common (200,40,100) by being brighter and hotter
+# — a vivid hot pink against Common's deeper, darker magenta — on top of the
+# halo radius mult, body shape and brightness that already encode tier.
+ENEMY_OUTLINE_R_RARE: 255
+ENEMY_OUTLINE_G_RARE: 60
+ENEMY_OUTLINE_B_RARE: 160
+
+# Enemy Healthbar (world-space, drawn above Enemy sprite). Spec §Enemy Healthbar.
+ENEMY_HP_BAR_WIDTH: 82
+ENEMY_HP_BAR_HEIGHT: 6
+ENEMY_HP_BAR_OFFSET_Y: 30
+# B-UX-12 — `Lv N` label sits centred above the bar (was right-edge
+# aligned to the bar's left side). The offset is the vertical gap
+# between the top of the bar and the centre of the label.
+ENEMY_HP_BAR_LEVEL_LABEL_OFFSET_Y: 10
+
+# SA52 — Tier visual scale (spec §Quality System §Enemy Healthbar
+# L1751 + Tier Multiplier Reference). The enemy body radius + halo
+# + healthbar offset all scale by the tier-specific factor so a Rare
+# reads at a glance even at long range. Uncommon mid-size, Rare 2.5×.
+ENEMY_TIER_VISUAL_SCALE_COMMON: 1.0
+ENEMY_TIER_VISUAL_SCALE_UNCOMMON: 1.5
+ENEMY_TIER_VISUAL_SCALE_RARE: 2.5
+
+# Per-tier enemy stat multipliers (spec §Quality §Relationship to Enemy +
+# spec line 3760). Applied to both base health and base damage in
+# `EnemyManager::applyTierAndLevel`. Common = baseline; Uncommon and Rare
+# scale dramatically so a Rare in the same spawn zone is roughly an order
+# of magnitude tougher.
+ENEMY_TIER_STAT_MULT_COMMON: 1.0
+ENEMY_TIER_STAT_MULT_UNCOMMON: 3.0
+ENEMY_TIER_STAT_MULT_RARE: 9.0
+
+# Per-tier visual brightness + aura multipliers (spec §Quality).
+# `BODY_BRIGHTNESS_MULT_*` multiplies each RGB channel of the body fill
+# (clamped to 255) so Uncommon/Rare bodies look noticeably brighter than
+# the Common baseline. `AURA_RADIUS_MULT_*` scales the halo radius and
+# `AURA_ALPHA_MULT_*` scales the halo opacity — Common stays at the
+# baseline, Uncommon gets a soft cyan halo, Rare gets a brighter and
+# larger halo so it reads at a glance across the playfield.
+ENEMY_BODY_BRIGHTNESS_MULT_COMMON: 1.0
+ENEMY_BODY_BRIGHTNESS_MULT_UNCOMMON: 1.25
+ENEMY_BODY_BRIGHTNESS_MULT_RARE: 1.6
+ENEMY_AURA_RADIUS_MULT_COMMON: 1.0
+ENEMY_AURA_RADIUS_MULT_UNCOMMON: 1.4
+ENEMY_AURA_RADIUS_MULT_RARE: 2.0
+# Alpha mults pulled in (1.5 -> 1.25, 2.2 -> 1.5) alongside the
+# THEME_HALO_GLOW_ALPHA_BASE drop — see visual identity Step 3. Stacked on top
+# of the old base, Rare's 2.2x drove its halo fully opaque, so a handful of
+# Rare enemies became one solid gold field that swallowed both the lower tiers
+# and the hero. Tier still reads through the RADIUS mults below (unchanged)
+# plus body shape and brightness, so pulling alpha back costs no tier legibility.
+ENEMY_AURA_ALPHA_MULT_COMMON: 1.0
+ENEMY_AURA_ALPHA_MULT_UNCOMMON: 1.25
+ENEMY_AURA_ALPHA_MULT_RARE: 1.5
+
+# card-mpl8skw2 — silhouette side count is now driven by TIER (not
+# level) so the shape itself differentiates Common / Uncommon / Rare
+# enemies at a glance, independent of the brightness + halo aura.
+# Common stays a 3-sided triangle (familiar from earlier sessions);
+# Uncommon becomes a 5-sided pentagon; Rare becomes a 7-sided
+# heptagon. Side counts < 3 are clamped up at render time (SFML
+# CircleShape minimum), so a misconfigured value still renders.
+ENEMY_TIER_POLYGON_COMMON: 3
+ENEMY_TIER_POLYGON_UNCOMMON: 5
+ENEMY_TIER_POLYGON_RARE: 7
+
+# card-mplgs9wc — fragmental shard layer painted atop the three
+# rings. N small rotated quads fan out from the death position so the
+# explosion reads as a bursting body, not just concentric rings. Zero
+# count keeps the legacy ring-only look.
+ENEMY_DEATH_SHARD_COUNT: 6
+ENEMY_DEATH_SHARD_SPEED: 120.0
+ENEMY_DEATH_SHARD_SIZE: 8.0
+ENEMY_DEATH_SHARD_START_ALPHA: 220.0
+ENEMY_DEATH_SHARD_SPIN_DEGREES: 240.0
+
+# card-mpmzdla5 — body-fragment layer painted alongside the shards.
+# These read as the enemy BODY shattering: N tall isoceles triangles
+# fan out from the death position with the apex pointing along the
+# outward radial vector. The user asked for "many pieces" — bump
+# `COUNT` to taste; zero count disables the layer. LENGTH is the
+# apex-to-base depth of the triangle (px); WIDTH is the base width;
+# SPEED is the outward travel rate; SPIN is the per-lifetime
+# in-place rotation overlaid on top of the radial orientation.
+ENEMY_DEATH_BODY_FRAGMENT_COUNT: 14
+ENEMY_DEATH_BODY_FRAGMENT_SPEED: 170.0
+ENEMY_DEATH_BODY_FRAGMENT_LENGTH: 20.0
+ENEMY_DEATH_BODY_FRAGMENT_WIDTH: 11.0
+ENEMY_DEATH_BODY_FRAGMENT_START_ALPHA: 230.0
+ENEMY_DEATH_BODY_FRAGMENT_SPIN_DEGREES: 420.0
+
+# card-mpl8skw2 — level-band marker dots painted around the enemy
+# silhouette so the player reads the enemy's level band (0..4 → 1-19,
+# 20-39, 40-59, 60-79, 80+) without inspecting the healthbar number.
+# Zero dots for band 0 (low-level enemies stay clean); up to 4 dots
+# evenly spaced around the silhouette for the top band.
+# `DOT_RADIUS` is the dot's circle radius (px); `DISTANCE_MULT` is
+# the radial offset from the body centre as a multiple of the
+# enemy's scaled body radius (>1 puts the dot OUTSIDE the silhouette).
+ENEMY_LEVEL_MARKER_DOT_RADIUS: 2.0
+ENEMY_LEVEL_MARKER_DISTANCE_MULT: 1.35
+
+# Enemy Death explosion VFX (spec §Enemy Death). Three expanding rings
+# replace the body for ENEMY_DEATH_ANIM_DURATION seconds:
+# - Inner blob: bright, fades fast, expands modestly.
+# - Mid ring: medium radius growth, tier-tinted.
+# - Outer ring: largest growth, lowest opacity.
+ENEMY_DEATH_RING_INNER_START_RADIUS: 20
+ENEMY_DEATH_RING_INNER_END_RADIUS: 60
+ENEMY_DEATH_RING_INNER_START_ALPHA: 220
+ENEMY_DEATH_RING_MID_START_RADIUS: 30
+ENEMY_DEATH_RING_MID_END_RADIUS: 110
+ENEMY_DEATH_RING_MID_START_ALPHA: 170
+ENEMY_DEATH_RING_OUTER_START_RADIUS: 40
+ENEMY_DEATH_RING_OUTER_END_RADIUS: 170
+ENEMY_DEATH_RING_OUTER_START_ALPHA: 110
+ENEMY_DEATH_RING_OUTLINE_THICKNESS: 3
+
+# Phase 14 — Special Enemies (`GameDesign.md` L607-686). One block per
+# kind: spawn gate (frequency + Hero level threshold) plus per-kind
+# stat overrides applied on top of the baseline tier-driven HP/speed.
+# Every tunable lives here so future balance tweaks are config-only.
+
+# Shocker — spec L615-623
+SPECIAL_SHOCKER_EVERY_NTH_UNCOMMON: 7
+SPECIAL_SHOCKER_HERO_LEVEL_GATE: 3
+SPECIAL_SHOCKER_HEALTH_MULT: 1.15
+SPECIAL_SHOCKER_DEATH_AOE_RADIUS: 200.0
+# Friendly AOE deals (HERO_HP_FRACTION_DAMAGE × heroMaxHealth) damage
+# to every enemy in radius. 0.5 = 50 % of Hero max HP (spec L621).
+SPECIAL_SHOCKER_DEATH_AOE_HERO_HP_FRACTION: 0.5
+SPECIAL_SHOCKER_BODY_R: 180
+SPECIAL_SHOCKER_BODY_G: 240
+SPECIAL_SHOCKER_BODY_B: 255
+SPECIAL_SHOCKER_FILIGREE_R: 255
+SPECIAL_SHOCKER_FILIGREE_G: 60
+SPECIAL_SHOCKER_FILIGREE_B: 200
+
+# Hexarchon — spec L637-646
+SPECIAL_HEXARCHON_EVERY_NTH_RARE: 50
+SPECIAL_HEXARCHON_HERO_LEVEL_GATE: 15
+SPECIAL_HEXARCHON_HEALTH_MULT: 4.0
+# Deadzone factor — spec L642 widens the chase deadzone to 0.6 ×
+# attackRange so Hexarchon keeps distance. Replaces baseline
+# deadzoneFactor for this kind only.
+SPECIAL_HEXARCHON_DEADZONE_FACTOR: 0.6
+SPECIAL_HEXARCHON_BODY_R: 140
+SPECIAL_HEXARCHON_BODY_G: 80
+SPECIAL_HEXARCHON_BODY_B: 220
+# Doge counter — spec L1439: Hexarchon hits ignore Doge if Hero is
+# below 30 % HP. Threshold is a 0..1 fraction of Hero max HP.
+SPECIAL_HEXARCHON_DOGE_BYPASS_HERO_HP_FRACTION: 0.30
+
+# Voidcrawler — spec L658-667
+SPECIAL_VOIDCRAWLER_EVERY_NTH_RARE: 200
+SPECIAL_VOIDCRAWLER_HERO_LEVEL_GATE: 25
+SPECIAL_VOIDCRAWLER_SPEED_MULT: 0.75
+# Spec L666: every drop from a Voidcrawler skips the normal quality
+# roll and uses qFloor = 80 (Rare-floor) → rolled quality clamps to
+# [80, 100]. Override applied at loot drop time only for this kind.
+SPECIAL_VOIDCRAWLER_QUALITY_FLOOR: 80
+SPECIAL_VOIDCRAWLER_BODY_R: 20
+SPECIAL_VOIDCRAWLER_BODY_G: 20
+SPECIAL_VOIDCRAWLER_BODY_B: 20
+SPECIAL_VOIDCRAWLER_EYE_R: 80
+SPECIAL_VOIDCRAWLER_EYE_G: 240
+SPECIAL_VOIDCRAWLER_EYE_B: 255
+
+# Glasswraith — spec L625-635
+SPECIAL_GLASSWRAITH_ONE_IN: 1000
+SPECIAL_GLASSWRAITH_HERO_LEVEL_GATE: 5
+SPECIAL_GLASSWRAITH_HEALTH_MULT: 0.75
+# Spec L632: fracture into 3 mirror-copies at 50 % stats on parent
+# death. Mirror-copy multiplier applies to HP + damage + size of the
+# spawned child (mirror-copies do not themselves split).
+SPECIAL_GLASSWRAITH_BODY_R: 200
+SPECIAL_GLASSWRAITH_BODY_G: 230
+SPECIAL_GLASSWRAITH_BODY_B: 255
+SPECIAL_GLASSWRAITH_BODY_ALPHA: 150
+
+# Tassidean Sentinel — spec L648-656 (3-phase invuln + push pulse
+# state machine spec-deferred; tunables published so the body painter
+# + spawn substitution can pick the kind even before the FSM lands).
+SPECIAL_SENTINEL_BODY_R: 200
+SPECIAL_SENTINEL_BODY_G: 180
+SPECIAL_SENTINEL_BODY_B: 120
+
+# Pact-Walker — spec L669-677 (NPC wander + hostile-on-attack +
+# black powder drop). NPC behaviour spec-deferred; the kind still
+# exists so spawn substitution can pick it once the ruins-anchor
+# spawn pipeline lands.
+SPECIAL_PACTWALKER_BODY_R: 170
+SPECIAL_PACTWALKER_BODY_G: 140
+SPECIAL_PACTWALKER_BODY_B: 80
+
+# Enemy body shader palette (visual_identity.md Step 2 — palette discipline).
+#
+# assets/shaders/enemy.frag used to hard-code its highlights: the ring core was
+# mixed 65% toward pure white, corona peaks 85% toward white, and the wind-up
+# state washed the body toward a literal cyan (0.31,0.90,1.0). That put a fourth
+# and fifth colour on the most numerous object in the game, and it meant the
+# BRIGHTEST part of every enemy — the part the eye actually reads — was white
+# rather than the enemy's own tier hue. On screen they rendered as white rings.
+#
+# CORE_WHITE keeps a small specular lift so the ring still reads as emissive
+# rather than flat, without erasing the hue. PEAK_WHITE does the same for the
+# corona's hottest tendrils.
+ENEMY_SHADER_CORE_WHITE: 0.18
+ENEMY_SHADER_PEAK_WHITE: 0.30
+
+# Wind-up telegraph colour. Kept inside the palette's world/prop cyan rather
+# than the old near-white: a charging enemy must be unmistakable, but it must
+# not introduce a hue the game does not otherwise use.
+ENEMY_SHADER_CHARGED_R: 50
+ENEMY_SHADER_CHARGED_G: 225
+ENEMY_SHADER_CHARGED_B: 255

@@ -1,0 +1,34 @@
+# Shocker — electric special. Sunburst body (shape 10), pink-filigree
+# outline over a bright cyan body, with a single bolt effect orbiting in
+# FRONT of the body (z 1) to read as arcing electricity. Rarer Shockers
+# only grow in size here; the editor can add more layers per tier.
+ENEMY_TYPE_ID: shocker
+ENEMY_TYPE_NAME: Shocker
+ENEMY_SPECIAL_KIND: Shocker
+
+ENEMY_BODY_SHAPE: 10
+ENEMY_BODY_SIZE: 50
+ENEMY_OUTLINE_R: 255
+ENEMY_OUTLINE_G: 60
+ENEMY_OUTLINE_B: 200
+ENEMY_FILL_R: 180
+ENEMY_FILL_G: 240
+ENEMY_FILL_B: 255
+
+ENEMY_LAYER_COUNT: 1
+ENEMY_LAYER_00_SHADER: effect_bolt
+ENEMY_LAYER_00_MOTION: orbit
+ENEMY_LAYER_00_Z: 1
+ENEMY_LAYER_00_COLOR_R: 120
+ENEMY_LAYER_00_COLOR_G: 220
+ENEMY_LAYER_00_COLOR_B: 255
+ENEMY_LAYER_00_SIZE: 36
+ENEMY_LAYER_00_VARIANT: 0
+ENEMY_LAYER_00_SPEED: 1.4
+ENEMY_LAYER_00_INTENSITY: 1.2
+ENEMY_LAYER_00_ORBIT_RADIUS: 64
+ENEMY_LAYER_00_ORBIT_SPEED_DEG: 180
+ENEMY_LAYER_00_ORBIT_PHASE_DEG: 0
+
+ENEMY_UNCOMMON_BODY_SIZE: 75
+ENEMY_RARE_BODY_SIZE: 125

@@ -1,0 +1,29 @@
+# Powder calculation scales (SA5). These extract the previously-hard-coded
+# magic numbers from PowderCalculator. The formula sums every numeric stat
+# on a destroyed item (GameDesign §Powder Quantity); a few stats live on
+# different numeric scales than the rest and need a fixed normaliser:
+#
+#   weapon.range          (~ 300..600 px)  → scaled by POWDER_WEAPON_RANGE_SCALE
+#                                            so it contributes on the same
+#                                            order as damage (~ 5..40) and aps
+#                                            (~ 0.8..1.6).
+#   dice.critChance       (0.0..1.0)       → scaled by POWDER_DICE_CRIT_CHANCE_SCALE
+#                                            so a 10% chance contributes ~10
+#                                            powder, comparable to a 2x crit
+#                                            multiplier or a 4-luck roll.
+#
+# Multiplier-style values: PowderCalculator does `value * scale` (not divide),
+# so the *_SCALE numbers are forward multipliers.
+POWDER_WEAPON_RANGE_SCALE: 0.01
+POWDER_DICE_CRIT_CHANCE_SCALE: 100
+
+# SE8 / spec L2160-2167 — per-destroy yield gets a 0.5 stat factor
+# applied to the raw `Σ stat` sum and is then capped at
+# POWDER_PER_DESTROY_CAP. Stat factor halves the harvest so
+# late-game items with inflated stats don't generate 500+ powder in
+# a single destroy; the cap is a hard ceiling so the harvest stays
+# inside design budgets at maxed quality multipliers.
+#   powder = clamp(1, POWDER_PER_DESTROY_CAP,
+#                  round(POWDER_STAT_FACTOR * Σ stat))
+POWDER_STAT_FACTOR: 0.5
+POWDER_PER_DESTROY_CAP: 500

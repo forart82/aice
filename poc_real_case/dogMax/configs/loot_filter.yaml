@@ -1,0 +1,90 @@
+# Loot Filter popup dimensions and layout (UI design coordinates)
+LOOT_FILTER_POPUP_X: 180.0
+LOOT_FILTER_POPUP_Y: 80.0
+LOOT_FILTER_POPUP_WIDTH: 640.0
+# Raised 420 -> 480 so the FILTER THRESHOLD fields + their tier swatches get a
+# clear band. The UNSET button moved to the bottom-RIGHT corner (see
+# LootFilterLayout) so it no longer collides with the bottom-left swatches.
+LOOT_FILTER_POPUP_HEIGHT: 480.0
+
+LOOT_FILTER_TITLE_SIZE: 18
+LOOT_FILTER_SECTION_SIZE: 13
+LOOT_FILTER_CHIP_W: 90.0
+LOOT_FILTER_CHIP_H: 50.0
+LOOT_FILTER_CHIP_GAP: 6.0
+# Padding + section gap widened for breathing room between the weapon / dice
+# / threshold sections.
+LOOT_FILTER_PADDING: 18.0
+LOOT_FILTER_SECTION_GAP: 18.0
+LOOT_FILTER_INPUT_W: 80.0
+LOOT_FILTER_INPUT_H: 26.0
+
+# UNSET button — clears all chips + thresholds. Sits bottom-left of the popup.
+LOOT_FILTER_UNSET_W: 90.0
+LOOT_FILTER_UNSET_H: 26.0
+LOOT_FILTER_UNSET_MARGIN: 12.0
+
+# Popup chrome palette (render::LootFilterOverlay). Externalised from the
+# former namespace-scope constexpr sf::Color literals so no colour literal
+# lives in the draw code. Secret-World neon-on-charcoal aesthetic.
+# Popup body fill folded onto the shared THEME_PANEL_BG_* (theme.yaml,
+# LIFT PLAN step 7); read via render::resolvePanelBackground. Re-add
+# LOOT_FILTER_POPUP_BG_R/G/B/A here to override the theme swatch.
+# The accent (chip selection/highlight) reads the canonical UI_ACCENT
+# (theme.yaml) — the old distinct LOOT_FILTER_ACCENT_* cyan keys were removed.
+# Single-accent chrome collapse (Phase B): the unselected chip border and the
+# selected chip fill now read the dim UI accent in code (LootFilterOverlay), so
+# their former LOOT_FILTER_CHIP_BORDER_* / LOOT_FILTER_CHIP_SEL_FILL_* swatches
+# were removed. The unselected chip body (a neutral panel-bg variant) stays.
+LOOT_FILTER_CHIP_BG_FILL_R: 20
+LOOT_FILTER_CHIP_BG_FILL_G: 24
+LOOT_FILTER_CHIP_BG_FILL_B: 30
+LOOT_FILTER_CHIP_BG_FILL_A: 200
+LOOT_FILTER_TEXT_BRIGHT_R: 220
+LOOT_FILTER_TEXT_BRIGHT_G: 230
+LOOT_FILTER_TEXT_BRIGHT_B: 235
+LOOT_FILTER_TEXT_DIM_R: 100
+LOOT_FILTER_TEXT_DIM_G: 110
+LOOT_FILTER_TEXT_DIM_B: 120
+LOOT_FILTER_TEXT_DIM_A: 200
+LOOT_FILTER_SECTION_HDR_R: 160
+LOOT_FILTER_SECTION_HDR_G: 180
+LOOT_FILTER_SECTION_HDR_B: 190
+# Inactive quality-tier swatches (shown dimmed when a tier is out of the
+# current destroy ceiling).
+LOOT_FILTER_SWATCH_OFF_FILL_R: 40
+LOOT_FILTER_SWATCH_OFF_FILL_G: 44
+LOOT_FILTER_SWATCH_OFF_FILL_B: 52
+LOOT_FILTER_SWATCH_OFF_FILL_A: 140
+LOOT_FILTER_SWATCH_OFF_BORDER_R: 60
+LOOT_FILTER_SWATCH_OFF_BORDER_G: 65
+LOOT_FILTER_SWATCH_OFF_BORDER_B: 75
+LOOT_FILTER_SWATCH_OFF_BORDER_A: 120
+LOOT_FILTER_SWATCH_OFF_LABEL_R: 60
+LOOT_FILTER_SWATCH_OFF_LABEL_G: 65
+LOOT_FILTER_SWATCH_OFF_LABEL_B: 75
+LOOT_FILTER_SWATCH_OFF_LABEL_A: 140
+
+# Popup typography (render::LootFilterOverlay). CHIP — weapon/dice chip
+# labels, the dice face-count glyph, and the UNSET button; LABEL — the
+# MAX QUALITY / MAX LEVEL sublabels and the [F] CLOSE hint; INPUT — the
+# quality/level entry text; SWATCH_LABEL — the C/U/R tier letters. Section
+# headers reuse LOOT_FILTER_SECTION_SIZE (above) so the overlay text and the
+# space LootFilterLayout reserves for it stay in lock-step.
+LOOT_FILTER_CHIP_FONT_SIZE: 11
+LOOT_FILTER_LABEL_FONT_SIZE: 10
+LOOT_FILTER_INPUT_FONT_SIZE: 12
+LOOT_FILTER_SWATCH_LABEL_FONT_SIZE: 8
+LOOT_FILTER_HINT_TEXT: "chips auto-powder matches   max fields spare better loot   F closes"
+
+# Layout pixel pads extracted from LootFilterLayout (design coords). Each was a
+# bare additive literal in the row-height math. Row-height slack added to the
+# title-size / section-size font metrics to reserve the drawn row height; the
+# input-row extra gap clears the per-field MAX QUALITY / MAX LEVEL sublabels.
+LOOT_FILTER_TITLE_HEIGHT_PAD: 10.0
+LOOT_FILTER_SECTION_HEIGHT_PAD: 8.0
+LOOT_FILTER_INPUT_ROW_EXTRA_GAP: 8.0
+# X-axis gap between the quality field and the level field (added on top of
+# chipGap*4 in levelFieldRect()) — clears the quality-tier swatches drawn
+# under the MAX QUALITY field so the level field's box doesn't overlap them.
+LOOT_FILTER_LEVEL_FIELD_X_OFFSET: 80.0

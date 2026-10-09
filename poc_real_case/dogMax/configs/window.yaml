@@ -1,0 +1,142 @@
+# Window + camera tunables. Read by App + Camera at startup.
+WINDOW_WIDTH: 1920
+WINDOW_HEIGHT: 1080
+WINDOW_TITLE: dogmax
+WINDOW_VSYNC: 1
+WINDOW_FRAME_LIMIT: 0
+WINDOW_BG_R: 8
+WINDOW_BG_G: 8
+WINDOW_BG_B: 14
+
+# Default camera zoom. Lower = world view spans more units = camera
+# further away. 2.0 (the previous default) put the hero at ~half the
+# screen height and felt "inside" the character; 1.0 gives the hero
+# a comfortable ~5-6 % of the screen height at 1920x1080 and lets the
+# player read enemy spawn rings + ambient density before engagements.
+CAMERA_ZOOM_DEFAULT: 1.0
+CAMERA_ZOOM_MIN: 0.25
+CAMERA_ZOOM_MAX: 20.0
+CAMERA_ZOOM_STEP: 1.15
+# The movement atlas is registered at the hero's feet. Follow the stable visual
+# midpoint of the body instead, so changing animation frames cannot move the
+# camera and the visible hero remains centred rather than the ground contact.
+CAMERA_FOLLOW_VISUAL_OFFSET_Y: -64
+
+SIM_TICK_HZ: 60
+HEADLESS_TICK_SLEEP_MS: 12
+
+# Frame-time spiral-of-death clamp: the max real seconds accumulated per
+# frame before catch-up sim steps are dropped. A long stall (breakpoint,
+# window drag, GC hitch) would otherwise queue hundreds of catch-up steps
+# and freeze the game trying to "catch up"; clamping the accumulated real
+# delta caps how far behind a single frame can fall. Read into
+# Clock via setMaxDeltaSeconds and applied in Clock::accumulate.
+CLOCK_MAX_DELTA_SECONDS: 0.25
+
+# FPS cap applied to hidden offscreen windows (no display to vsync against).
+# A hidden window renders uncapped (thousands of fps), which pointlessly
+# burns CPU; cap at 60 to match the visible-window cadence.
+OFFSCREEN_FPS_CAP: 60
+
+# How many frames to keep calling requestFocus() after the window opens.
+# X11/Wayland tile-WMs map the window asynchronously — 3 frames (~50 ms at
+# 60 fps) was too short; 120 frames (2 s) covers even slow compositors.
+# The loop stops as soon as the game receives a FocusGained event.
+WINDOW_INITIAL_FOCUS_FRAMES: 120
+
+# SA38 / spec §Window L2742-L2749 — the design aspect is fixed
+# (cinematic 16:9 by way of `GLOBAL_SCREEN_WIDTH / GLOBAL_SCREEN_HEIGHT`).
+# When the user resizes the window to a different aspect, the world view
+# letterboxes — black bars on whichever axis has excess pixels — so the
+# UI never stretches and the world never crops.
+GLOBAL_SCREEN_WIDTH: 3840
+GLOBAL_SCREEN_HEIGHT: 2176
+
+# Uniform UI scale (Part 2) — every UI element (inventory, sidebar,
+# debug panel, tooltip, FPS label, XP bar, hero-death overlay, help
+# overlay) is authored at this design resolution. The UI view is
+# letterboxed to this aspect, so every UI draw uniformly scales with
+# the live window size while keeping the same on-screen ratio. Mouse
+# events are mapped from raw window pixels into this design space
+# before being passed to layout hit-tests.
+UI_DESIGN_WIDTH: 1920
+UI_DESIGN_HEIGHT: 1080
+
+# Minimum window size. Set to a small "still legible" floor so the
+# user can freely resize the window down. The UI is authored at
+# UI_DESIGN_WIDTH × UI_DESIGN_HEIGHT (see below) and rendered through
+# a letterbox-scaled SFML view, so every UI element shrinks
+# proportionally with the window — no overlap, no clipping, ratio
+# preserved at every window size at or above this floor. 640×360 is
+# a 1/3-scale 16:9 floor that keeps text legible on a typical
+# desktop pixel density; lower it further if a fully tiny window is
+# desired, raise it only if a specific build needs to refuse tiny
+# windows for QA reasons.
+WINDOW_MIN_WIDTH: 640
+WINDOW_MIN_HEIGHT: 360
+
+# SA33 / spec §Debug Mode L2873-L2880 — F1 help overlay. Translucent
+# centred panel listing every live keybinding.
+HELP_OVERLAY_WIDTH_FRAC: 0.60
+HELP_OVERLAY_HEIGHT_FRAC: 0.70
+HELP_OVERLAY_PADDING_X: 24
+HELP_OVERLAY_PADDING_Y: 18
+HELP_OVERLAY_TITLE_FONT_SIZE: 22
+HELP_OVERLAY_LINE_FONT_SIZE: 16
+HELP_OVERLAY_LINE_SPACING: 6
+HELP_OVERLAY_SHORTCUT_KEY_WIDTH: 300
+HELP_OVERLAY_SCROLLBAR_WIDTH: 3
+# Overlay body fill folded onto the shared THEME_PANEL_BG_* (theme.yaml,
+# LIFT PLAN step 7); read via render::resolvePanelBackground. Re-add
+# HELP_OVERLAY_BG_R/G/B/ALPHA here to override the theme swatch. The
+# outline below stays the help overlay's own lavender accent.
+HELP_OVERLAY_OUTLINE_R: 120
+HELP_OVERLAY_OUTLINE_G: 120
+HELP_OVERLAY_OUTLINE_B: 200
+# card-mpmzs1j5/SA33 — heading-style font sizes for the markdown-driven
+# help overlay (`assets/help.md`). One-level (`#`) headings use the larger
+# size; two-level (`##`) use the smaller. Body lines + spacers fall back to
+# LINE_FONT_SIZE above. The heading text + section dot read the canonical UI
+# accent (theme.yaml) after the single-accent chrome collapse (Phase B), so the
+# former distinct HELP_OVERLAY_HEADING_* lavender swatch was removed.
+HELP_OVERLAY_HEADING1_FONT_SIZE: 24
+HELP_OVERLAY_HEADING2_FONT_SIZE: 18
+
+# Screen shake on impact (visual_identity.md Step 10).
+#
+# Trauma model, not a per-hit offset: hits ADD trauma, trauma decays on its own,
+# and the shake amplitude is derived from it. That is what makes the swarm case
+# safe — twenty hits in one frame raise trauma to its ceiling instead of summing
+# twenty offsets into an unreadable screen.
+CAMERA_SHAKE_ENABLE: 1
+
+# Peak displacement in DESIGN pixels at full trauma. Converted to world units by
+# the live zoom, so shaking does not grow as the player zooms out.
+CAMERA_SHAKE_MAX_OFFSET_PIXELS: 14.0
+
+# Oscillation rate. High enough to read as a jolt rather than a wobble; the
+# offset uses two incommensurate frequencies so the motion never traces a
+# repeating ellipse the eye can lock onto.
+CAMERA_SHAKE_FREQUENCY_HZ: 26.0
+
+# Trauma lost per second. At 4.0 a single hit's shake is gone in ~0.25 s, so
+# shake punctuates an impact instead of lingering into the next one.
+CAMERA_SHAKE_DECAY_PER_SECOND: 4.0
+
+# Hard ceiling on accumulated trauma. Amplitude scales with trauma SQUARED, so
+# this is also the point past which extra simultaneous hits change nothing.
+CAMERA_SHAKE_TRAUMA_CEILING: 1.0
+
+# Trauma added per world-pixel of an impact burst's radius. Deriving shake from
+# the burst the impact already queued means impact size drives shake size for
+# free: a death ring shakes harder than a hit flash, with no per-call-site
+# shake value to keep in sync with the burst tuning.
+CAMERA_SHAKE_TRAUMA_PER_BURST_PIXEL: 0.006
+
+# Vertical axis of the shake, relative to the horizontal one. An irrational-ish
+# ratio (not 1.0, not a simple fraction) keeps the two axes from re-aligning, so
+# the camera path never settles into a repeating ellipse the eye can lock onto.
+# The phase offset stops both axes starting at zero together, which would make
+# the first frame of every shake a pure diagonal.
+CAMERA_SHAKE_FREQUENCY_RATIO_Y: 1.37
+CAMERA_SHAKE_PHASE_OFFSET_Y: 1.7

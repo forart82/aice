@@ -1,0 +1,37 @@
+# Dark-neon cockpit/world art assets. These generated bitmap textures are the
+# accepted art direction for the current HUD/world pass; live SFML widgets still
+# carry readable gameplay state over the textured frames.
+VISUAL_SPIKE_TEXTURES_ENABLED: 1
+WORLD_TEXTURE_ALPHA_DILATION_PASSES: 8
+
+# World floor: repeated under the camera before entities are drawn.
+
+# Starter Pitchfork pickup sprite. Drawn only for the starter floor weapon so
+# the opening screen gains one real item asset without replacing the whole
+# weapon-render path yet.
+
+# Generated cockpit HUD textures used by live SFML widgets.
+VISUAL_SPIKE_UI_PANEL_FRAME_TEXTURE: assets/textures/visual_spike/ui_panel_frame.png
+VISUAL_SPIKE_HUD_FRAME_TEXTURE: assets/textures/visual_spike/ui_bottom_hud_health_left_vital.png
+VISUAL_SPIKE_HUD_FRAME_ALPHA: 180
+VISUAL_SPIKE_VITAL_TANK_EMPTY_TEXTURE: assets/textures/visual_spike/vital_tank_empty.png
+VISUAL_SPIKE_VITAL_TANK_FLUID_TEXTURE: assets/textures/visual_spike/vital_tank_fluid.png
+VISUAL_SPIKE_BASIC_ENEMY_TEXTURE: assets/textures/visual_spike/basic_enemy.png
+
+# Hero atlas: eight isometric walk/jog frames across for each compass row,
+# ordered NW, W, SW, S, SE, E, NE, N. Animation remains distance-driven so
+# cadence matches ground speed through contact, recoil, passing, and high poses.
+VISUAL_SPIKE_HERO_MOVEMENT_TEXTURE: assets/textures/visual_spike/hero_movement_sheet.png
+VISUAL_SPIKE_HERO_SPRITE_SIZE: 180
+VISUAL_SPIKE_HERO_CYCLE_DISTANCE: 180
+VISUAL_SPIKE_HERO_FRAME_COLUMNS: 8
+VISUAL_SPIKE_HERO_DIRECTION_ROWS: 8
+# The supplied atlas uses one exact opaque near-black background color. Remove
+# only that color so the character's very dark armour remains intact. Each
+# frame is then registered to its opaque feet.
+VISUAL_SPIKE_HERO_CHROMA_KEY_R: 10
+VISUAL_SPIKE_HERO_CHROMA_KEY_G: 11
+VISUAL_SPIKE_HERO_CHROMA_KEY_B: 16
+VISUAL_SPIKE_HERO_CHROMA_TOLERANCE: 0
+VISUAL_SPIKE_HERO_ORIGIN_Y_RATIO: 0.88
+VISUAL_SPIKE_HERO_OUTLINE_PIXELS: 2

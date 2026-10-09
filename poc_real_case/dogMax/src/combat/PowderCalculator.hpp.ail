@@ -1,0 +1,3 @@
+# dof.combat.PowderCalculator.hpp
+
+fn finaliseHarvest(statSum:float, statFactor:float, perDestroyCap:int) -> int = 1

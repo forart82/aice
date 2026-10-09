@@ -1,0 +1,3 @@
+# Streamed gameplay music. sf::Music owns the stream and loops it indefinitely.
+BACKGROUND_MUSIC_PATH: assets/audio/background/The_Burden_of_Stone.mp3
+BACKGROUND_MUSIC_VOLUME: 35

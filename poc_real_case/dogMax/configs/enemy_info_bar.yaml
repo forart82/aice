@@ -1,0 +1,31 @@
+# Compact enemy combat facts below the health bar. The old stacked weapon
+# cards, dice labels, and cooldown bars duplicated inventory/debug information
+# and became unreadable in a normal swarm.
+ENEMY_INFO_BAR_OFFSET_Y: 3
+ENEMY_INFO_INDICATOR_SIZE: 12
+ENEMY_INFO_INDICATOR_GAP: 4
+
+# One yellow underline segment is drawn per ready weapon. The segment for the
+# weapon currently winding up turns red, so one versus two charged weapons and
+# the committed weapon remain readable without restoring the old cards.
+ENEMY_INFO_READINESS_HEIGHT: 2
+ENEMY_INFO_READINESS_R: 255
+ENEMY_INFO_READINESS_G: 215
+ENEMY_INFO_READINESS_B: 45
+
+# The separate violet square means at least one die is socketed.
+ENEMY_INFO_DICE_R: 190
+ENEMY_INFO_DICE_G: 95
+ENEMY_INFO_DICE_B: 255
+
+# The unarmed charge remains a real attack telegraph even though detailed
+# equipment cards are hidden. It fills left-to-right throughout the complete
+# wind-up and disappears only when the lunge launches.
+ENEMY_INFO_UNARMED_CHARGE_WIDTH: 54
+ENEMY_INFO_UNARMED_CHARGE_HEIGHT: 5
+ENEMY_INFO_UNARMED_CHARGE_TRACK_R: 28
+ENEMY_INFO_UNARMED_CHARGE_TRACK_G: 12
+ENEMY_INFO_UNARMED_CHARGE_TRACK_B: 12
+ENEMY_INFO_UNARMED_CHARGE_FILL_R: 255
+ENEMY_INFO_UNARMED_CHARGE_FILL_G: 95
+ENEMY_INFO_UNARMED_CHARGE_FILL_B: 30

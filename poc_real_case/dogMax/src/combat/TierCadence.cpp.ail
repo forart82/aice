@@ -1,0 +1,27 @@
+# dof.combat.TierCadence.cpp
+
+type TierCadencePair:
+  rare: int
+  uncommon: int
+
+class TierCadence:
+  bands: [TierCadencePair] = []
+
+  fn initBands(q0r:int, q0u:int, q1r:int, q1u:int, q2r:int, q2u:int, q3r:int, q3u:int, q4r:int, q4u:int) -> void:
+    this.bands.push(TierCadencePair(q0r, q0u))
+    this.bands.push(TierCadencePair(q1r, q1u))
+    this.bands.push(TierCadencePair(q2r, q2u))
+    this.bands.push(TierCadencePair(q3r, q3u))
+    this.bands.push(TierCadencePair(q4r, q4u))
+
+  fn quintileFor(progress:float) -> int:
+    if progress <= 0.0:
+      ret 0
+    if progress >= 1.0:
+      ret 4
+    let band:int = floor(progress * 5.0)
+    ret clamp(band, 0, 4)
+
+  fn cadenceFor(progress:float) -> TierCadencePair:
+    let idx:int = this.quintileFor(progress)
+    ret this.bands[idx]

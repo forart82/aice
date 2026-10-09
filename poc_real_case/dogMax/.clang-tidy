@@ -1,0 +1,40 @@
+# clang-tidy configuration for dogmax.
+#
+# Usage (compile_commands.json is emitted into build/ by CMake):
+#   clang-tidy -p build src/render/UiRenderer.cpp
+#   git diff --name-only main...HEAD -- '*.cpp' | xargs -r clang-tidy -p build
+#
+# Check selection rationale: keep the families that catch real defects
+# (bugprone, the clang static analyzer, performance, portability) and a
+# curated slice of readability. Stylistic/opinionated checks that produce
+# heavy noise against this codebase's conventions are explicitly disabled
+# below so the report stays signal-dense.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  performance-*,
+  portability-*,
+  misc-*,
+  readability-misleading-indentation,
+  readability-redundant-*,
+  readability-simplify-boolean-expr,
+  readability-inconsistent-declaration-parameter-name,
+  -bugprone-easily-swappable-parameters,
+  -misc-no-recursion,
+  -misc-non-private-member-variables-in-classes,
+  -misc-include-cleaner,
+  -misc-use-anonymous-namespace,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
+  -portability-avoid-pragma-once
+
+# Only report problems found in this project's own sources, never inside
+# third_party/ or system/SFML headers pulled in transitively.
+HeaderFilterRegex: '(^|/)src/.*\.(h|hpp)$'
+
+# Treat no checks as hard errors by default; surface everything as
+# warnings so a lint run never blocks a build. CI can opt into
+# `--warnings-as-errors=*` explicitly when it wants a gate.
+WarningsAsErrors: ''
+
+FormatStyle: none

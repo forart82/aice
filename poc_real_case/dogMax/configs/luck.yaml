@@ -1,0 +1,19 @@
+# Luck System tunables (spec §Luck System).
+# luck is summed across every equipped dice; the total drives both the
+# minimum quality floor for new drops and the minimum face a dice can roll.
+#
+#   qualityFloor       = clamp(floor(sqrt(luckTotal) * LUCK_QUALITY_FLOOR_SCALE), 0, 99)
+#   effectiveMinFace   = max(1, floor(luckTotal * LUCK_DICE_FLOOR_SCALE))
+#
+# SE9 / spec §Drop Floor L1914-1921 — sqrt curve replaces the prior
+# linear scaling. At scale 9.0 the reference points are:
+#   Luck 1   →  qFloor  9   (one Common dice barely lifts the floor)
+#   Luck 25  →  qFloor 45   (a few Rare dice gate every Common drop)
+#   Luck ~78 →  qFloor 79   (sits at the spec Rare drop floor)
+#   Luck 121 →  qFloor 99   (saturated; cap clamps here)
+#
+# The sqrt curve makes the FIRST few luck dice valuable while the
+# late-game stack saturates smoothly toward the 99 clamp instead of
+# hitting it the moment the player equips a second Rare-luck dice.
+LUCK_QUALITY_FLOOR_SCALE: 9.0
+LUCK_DICE_FLOOR_SCALE: 0.05

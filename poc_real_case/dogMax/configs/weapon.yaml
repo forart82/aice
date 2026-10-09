@@ -1,0 +1,408 @@
+# 10 weapon types: per-type base damage range, attacks-per-second, range,
+# drop weight (Stage 2a). Numeric values pulled from GameDesign spec sections.
+#
+# T-BALANCE-range-coherence — base RANGE values are now archetype-canonical
+# (every weapon inside one archetype shares the same base range so the
+# Lv100 sqrt-scaled cap stays coherent within the archetype). Archetype
+# basis is the per-weapon ATTACK_TYPE block further down (SA6). Mapping
+# and chosen base:
+#   Single       = ATTACK_TYPE SINGLE      -> 450 (Pitchfork keeps its
+#                                            original tuned baseline; the
+#                                            archetype is a singleton so
+#                                            no averaging applies)
+#   Multi        = SWIPE + MULTITARGET     -> 550 (avg of the prior tuned
+#                                            values 450/450/450/600/600/600
+#                                            = 525, rounded to the nearest
+#                                            50-px step so swipers/Knives
+#                                            share one base range)
+#   AoE          = AOE                     -> 450 (avg of prior 300/300/600/
+#                                            600 = 450 exactly — Mace/
+#                                            Warhammer gain reach, Axes
+#                                            tighten; AoE detonates at the
+#                                            hero's feet so the archetype
+#                                            now has uniform threat radius)
+#   Charged      = MULTISINGLE             -> 300 (Dagger is the only
+#                                            charged weapon; spec L1480-
+#                                            1486 keeps the burst short-
+#                                            range, base preserved)
+# WEAPON_RANGE_LEVEL_POWER (0.2) is intentionally left untouched; the
+# Lv100 cap stays at base * 100^0.2 ~= base * 2.51.
+
+# Pitchfork (Single archetype, base range 450)
+# Starter weapon: spec-neutral crit (no chance, plain damage) so the opening
+# encounter behaves identically to the pre-crit-stat-on-weapons build.
+PITCHFORK_BASE_DAMAGE_MIN: 5
+PITCHFORK_BASE_DAMAGE_MAX: 15
+PITCHFORK_STARTER_DAMAGE_MIN: 10
+PITCHFORK_STARTER_DAMAGE_MAX: 15
+PITCHFORK_APS: 0.8
+PITCHFORK_RANGE: 450
+PITCHFORK_CRIT_MULT: 1.0
+PITCHFORK_CRIT_CHANCE: 0.0
+DROP_WEIGHT_WEAPON_PITCHFORK: 5000
+
+# Long Sword (Multi archetype, base range 550)
+LONG_SWORD_BASE_DAMAGE_MIN: 10
+LONG_SWORD_BASE_DAMAGE_MAX: 22
+LONG_SWORD_APS: 1.2
+LONG_SWORD_RANGE: 550
+LONG_SWORD_CRIT_MULT: 1.5
+LONG_SWORD_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_LONG_SWORD: 1500
+
+# Great Sword (Multi archetype, base range 550)
+GREAT_SWORD_BASE_DAMAGE_MIN: 18
+GREAT_SWORD_BASE_DAMAGE_MAX: 40
+GREAT_SWORD_APS: 0.8
+GREAT_SWORD_RANGE: 550
+GREAT_SWORD_CRIT_MULT: 1.5
+GREAT_SWORD_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_GREAT_SWORD: 400
+
+# Halberd (Multi archetype, base range 550)
+HALBERD_BASE_DAMAGE_MIN: 12
+HALBERD_BASE_DAMAGE_MAX: 28
+HALBERD_APS: 1.2
+HALBERD_RANGE: 550
+HALBERD_CRIT_MULT: 1.5
+HALBERD_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_HALBERD: 800
+
+# Quarterstaff (Multi archetype, base range 550)
+QUARTERSTAFF_BASE_DAMAGE_MIN: 5
+QUARTERSTAFF_BASE_DAMAGE_MAX: 12
+QUARTERSTAFF_APS: 1.6
+QUARTERSTAFF_RANGE: 550
+QUARTERSTAFF_CRIT_MULT: 1.5
+QUARTERSTAFF_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_QUARTERSTAFF: 1800
+
+# Knives (Multi archetype, base range 550)
+KNIVES_BASE_DAMAGE_MIN: 2
+KNIVES_BASE_DAMAGE_MAX: 6
+KNIVES_APS: 0.8
+KNIVES_RANGE: 550
+KNIVES_CRIT_MULT: 1.5
+KNIVES_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_KNIVES: 1200
+
+# Dagger (Charged archetype, base range 300)
+DAGGER_BASE_DAMAGE_MIN: 3
+DAGGER_BASE_DAMAGE_MAX: 8
+DAGGER_APS: 0.8
+DAGGER_RANGE: 300
+DAGGER_CRIT_MULT: 1.5
+DAGGER_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_DAGGER: 2000
+
+# Mace (AoE archetype, base range 450)
+MACE_BASE_DAMAGE_MIN: 15
+MACE_BASE_DAMAGE_MAX: 30
+MACE_APS: 1.6
+MACE_RANGE: 450
+MACE_CRIT_MULT: 1.5
+MACE_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_MACE: 1300
+
+# Warhammer (AoE archetype, base range 450)
+WARHAMMER_BASE_DAMAGE_MIN: 20
+WARHAMMER_BASE_DAMAGE_MAX: 40
+WARHAMMER_APS: 1.6
+WARHAMMER_RANGE: 450
+WARHAMMER_CRIT_MULT: 1.5
+WARHAMMER_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_WARHAMMER: 500
+
+# Big Axe (AoE archetype, base range 450)
+BIG_AXE_BASE_DAMAGE_MIN: 20
+BIG_AXE_BASE_DAMAGE_MAX: 45
+BIG_AXE_APS: 1.2
+BIG_AXE_RANGE: 450
+BIG_AXE_CRIT_MULT: 1.5
+BIG_AXE_CRIT_CHANCE: 0.05
+DROP_WEIGHT_WEAPON_BIG_AXE: 300
+
+# Visual: outline + fill colours per weapon type. Spec text dictates the hue
+# of the outline ("yellow outline", "cyan outline", ...); fill is a dim
+# desaturated companion so the body reads as a neon-traced silhouette.
+PITCHFORK_OUTLINE_R: 255
+PITCHFORK_OUTLINE_G: 70
+PITCHFORK_OUTLINE_B: 10
+PITCHFORK_FILL_R: 24
+PITCHFORK_FILL_G: 10
+PITCHFORK_FILL_B: 8
+
+LONG_SWORD_OUTLINE_R: 80
+LONG_SWORD_OUTLINE_G: 220
+LONG_SWORD_OUTLINE_B: 240
+LONG_SWORD_FILL_R: 8
+LONG_SWORD_FILL_G: 22
+LONG_SWORD_FILL_B: 24
+
+GREAT_SWORD_OUTLINE_R: 180
+GREAT_SWORD_OUTLINE_G: 80
+GREAT_SWORD_OUTLINE_B: 240
+GREAT_SWORD_FILL_R: 20
+GREAT_SWORD_FILL_G: 8
+GREAT_SWORD_FILL_B: 26
+
+HALBERD_OUTLINE_R: 255
+HALBERD_OUTLINE_G: 170
+HALBERD_OUTLINE_B: 50
+HALBERD_FILL_R: 26
+HALBERD_FILL_G: 18
+HALBERD_FILL_B: 8
+
+QUARTERSTAFF_OUTLINE_R: 80
+QUARTERSTAFF_OUTLINE_G: 180
+QUARTERSTAFF_OUTLINE_B: 255
+QUARTERSTAFF_FILL_R: 8
+QUARTERSTAFF_FILL_G: 18
+QUARTERSTAFF_FILL_B: 26
+
+KNIVES_OUTLINE_R: 255
+KNIVES_OUTLINE_G: 240
+KNIVES_OUTLINE_B: 80
+KNIVES_FILL_R: 26
+KNIVES_FILL_G: 24
+KNIVES_FILL_B: 8
+
+DAGGER_OUTLINE_R: 240
+DAGGER_OUTLINE_G: 40
+DAGGER_OUTLINE_B: 70
+DAGGER_FILL_R: 24
+DAGGER_FILL_G: 8
+DAGGER_FILL_B: 12
+
+MACE_OUTLINE_R: 200
+MACE_OUTLINE_G: 130
+MACE_OUTLINE_B: 60
+MACE_FILL_R: 22
+MACE_FILL_G: 14
+MACE_FILL_B: 8
+
+WARHAMMER_OUTLINE_R: 220
+WARHAMMER_OUTLINE_G: 220
+WARHAMMER_OUTLINE_B: 235
+WARHAMMER_FILL_R: 20
+WARHAMMER_FILL_G: 20
+WARHAMMER_FILL_B: 24
+
+BIG_AXE_OUTLINE_R: 220
+BIG_AXE_OUTLINE_G: 40
+BIG_AXE_OUTLINE_B: 40
+BIG_AXE_FILL_R: 24
+BIG_AXE_FILL_G: 8
+BIG_AXE_FILL_B: 8
+
+# card-mpob7snv — additional buffer (world px) past ITEM_PICKUP_RADIUS
+# applied by the `SpawnLevelXWeapon` console cheat so the freshly
+# spawned floor item lands JUST outside the hero's auto-pickup ring.
+# Tuned so a single eastward step still brings the item within reach.
+CONSOLE_SPAWN_BAND_PX: 20
+
+ITEM_BLINK_CYCLE_SECONDS: 1.4
+ITEM_BLINK_ALPHA_BASE: 0.7
+ITEM_BLINK_ALPHA_AMP: 0.3
+ITEM_PICKUP_RADIUS: 360
+
+# SA6 — Attack Types per weapon type. Spec §Attack L1437-1582 +
+# §Weapons L782-1008. Values:
+#   SINGLE       — closest target only (Pitchfork)
+#   SWIPE        — arc sweep, hits enemies inside <TYPE>_SWIPE_ARC_DEG cone
+#   MULTITARGET  — N nearest enemies, independent crit rolls
+#   MULTISINGLE  — N hits stacked on closest, single summed damage text
+#   AOE          — every enemy inside range, single damage roll replicated
+# Pitchfork = Single. LongSword/GreatSword = Swipe (arc sweep).
+# Halberd/Quarterstaff = AOE (360° spin — distinct VFX from hammers).
+# Knives = MultiTarget(4). Dagger = MultiSingle(3).
+# Mace/Warhammer/BigAxe = AOE (smash or pulse VFX by weaponTypeHint).
+PITCHFORK_ATTACK_TYPE: SINGLE
+LONG_SWORD_ATTACK_TYPE: SWIPE
+GREAT_SWORD_ATTACK_TYPE: SWIPE
+HALBERD_ATTACK_TYPE: AOE
+QUARTERSTAFF_ATTACK_TYPE: AOE
+KNIVES_ATTACK_TYPE: MULTITARGET
+DAGGER_ATTACK_TYPE: MULTISINGLE
+MACE_ATTACK_TYPE: AOE
+WARHAMMER_ATTACK_TYPE: AOE
+BIG_AXE_ATTACK_TYPE: AOE
+
+# Swipe arc angles per spec L856-902 (full cone width in degrees, not
+# half-angle). Pitchfork has no swipe but key kept for symmetry; Knives
+# and Dagger and the 4 AOEs are not Swipe so their arc keys are unused
+# at runtime — included for completeness so a future config edit can
+# convert a weapon without code changes.
+PITCHFORK_SWIPE_ARC_DEG: 0
+LONG_SWORD_SWIPE_ARC_DEG: 90
+GREAT_SWORD_SWIPE_ARC_DEG: 180
+HALBERD_SWIPE_ARC_DEG: 180
+QUARTERSTAFF_SWIPE_ARC_DEG: 45
+KNIVES_SWIPE_ARC_DEG: 0
+DAGGER_SWIPE_ARC_DEG: 0
+MACE_SWIPE_ARC_DEG: 0
+WARHAMMER_SWIPE_ARC_DEG: 0
+BIG_AXE_SWIPE_ARC_DEG: 0
+
+# MultiTarget max hits per fire. Only Knives uses this today (spec
+# L477: max target = 4). Other weapons keep 1 so a future config-only
+# repurpose lands at a sane baseline.
+PITCHFORK_MULTI_TARGET_MAX: 1
+LONG_SWORD_MULTI_TARGET_MAX: 1
+GREAT_SWORD_MULTI_TARGET_MAX: 1
+HALBERD_MULTI_TARGET_MAX: 1
+QUARTERSTAFF_MULTI_TARGET_MAX: 1
+KNIVES_MULTI_TARGET_MAX: 4
+DAGGER_MULTI_TARGET_MAX: 1
+MACE_MULTI_TARGET_MAX: 1
+WARHAMMER_MULTI_TARGET_MAX: 1
+BIG_AXE_MULTI_TARGET_MAX: 1
+
+# MultiSingle max hits per fire. Only Dagger uses this today (spec
+# L483: max attack per action = 3).
+PITCHFORK_MULTI_SINGLE_MAX: 1
+LONG_SWORD_MULTI_SINGLE_MAX: 1
+GREAT_SWORD_MULTI_SINGLE_MAX: 1
+HALBERD_MULTI_SINGLE_MAX: 1
+QUARTERSTAFF_MULTI_SINGLE_MAX: 1
+KNIVES_MULTI_SINGLE_MAX: 1
+DAGGER_MULTI_SINGLE_MAX: 3
+MACE_MULTI_SINGLE_MAX: 1
+WARHAMMER_MULTI_SINGLE_MAX: 1
+BIG_AXE_MULTI_SINGLE_MAX: 1
+
+# Spec §Evasion Source L1397: "light weapons add baseline evasion". The
+# weapon-side bonus joins the per-dice contributions in the
+# `evasionPerSlots` aggregation that feeds EvasionHub::tryEvade. The spec
+# names "Dagger or Knives" as the canonical light examples; we set
+# Knives slightly higher than Dagger because spec L862 puts Knives at
+# the longer-range / squishier end of the light cluster. Every other
+# weapon type stays at 0.0 so a config edit (rather than a code edit)
+# is the path to broaden the bonus to more types.
+PITCHFORK_EVASION_BONUS: 0.0
+LONG_SWORD_EVASION_BONUS: 0.0
+GREAT_SWORD_EVASION_BONUS: 0.0
+HALBERD_EVASION_BONUS: 0.0
+QUARTERSTAFF_EVASION_BONUS: 0.0
+KNIVES_EVASION_BONUS: 0.05
+DAGGER_EVASION_BONUS: 0.04
+MACE_EVASION_BONUS: 0.0
+WARHAMMER_EVASION_BONUS: 0.0
+BIG_AXE_EVASION_BONUS: 0.0
+
+# Per-mode VFX durations. AOE (spin/smash/pulse) uses 0.50 s.
+ATTACK_VFX_DURATION_SINGLE: 0.28
+ATTACK_VFX_DURATION_SWIPE: 0.30
+ATTACK_VFX_DURATION_MULTITARGET: 0.22
+ATTACK_VFX_DURATION_MULTISINGLE: 0.45
+ATTACK_VFX_DURATION_AOE: 0.50
+ATTACK_VFX_WEAPON_SPRITE_SIZE: 112
+ATTACK_VFX_WEAPON_SPRITE_TRAVEL: 52
+ENEMY_ATTACK_VFX_DURATION_MULTIPLIER: 1.6
+ENEMY_ATTACK_VFX_WEAPON_SPRITE_SIZE: 220
+# Brief execution-only source-to-target confirmation. Unlike the wind-up
+# marker it exists only at fire time, underneath the preserved weapon VFX.
+ENEMY_ATTACK_TRACE_LIFE_FRACTION: 0.32
+ENEMY_ATTACK_TRACE_WIDTH: 6.0
+ENEMY_ATTACK_TRACE_IMPACT_RADIUS: 28.0
+ENEMY_ATTACK_TRACE_IMPACT_THICKNESS: 5.0
+ENEMY_ATTACK_TRACE_R: 255
+ENEMY_ATTACK_TRACE_G: 215
+ENEMY_ATTACK_TRACE_B: 120
+
+# Pitchfork — three-pronged fork thrust. Shaft + 3 diverging tine tips.
+ATTACK_VFX_FORK_TINE_ANGLE_DEG: 18.0
+ATTACK_VFX_FORK_TINE_LENGTH_FRAC: 0.18
+ATTACK_VFX_FORK_SHAFT_WIDTH: 5.0
+ATTACK_VFX_FORK_ALPHA_START: 0.80
+ATTACK_VFX_FORK_ALPHA_END: 0.00
+ATTACK_VFX_FORK_TINE_WIDTH_MULT: 0.65
+
+# Sword swipe arc — neon arc outline that sweeps from trailing to leading
+# edge. LongSword = 90 deg, GreatSword = 180 deg (set above in SWIPE_ARC_DEG).
+ATTACK_VFX_SWIPE_ARC_SEGMENTS: 28
+ATTACK_VFX_SWIPE_ARC_THICKNESS: 5.0
+ATTACK_VFX_SWIPE_ARC_ALPHA_START: 0.75
+ATTACK_VFX_SWIPE_ARC_ALPHA_END: 0.00
+ATTACK_VFX_SWIPE_ARC_RADIUS_FRAC: 0.85
+ATTACK_VFX_SWIPE_REVEAL_CURVE_MULT: 2.2
+ATTACK_VFX_SWIPE_EDGE_FADE_MULT: 0.4
+
+# Knives — thin lines toward targets + slash X marks at each target.
+ATTACK_VFX_KNIFE_SLASH_SIZE: 22.0
+ATTACK_VFX_KNIFE_SLASH_THICKNESS: 3.5
+ATTACK_VFX_KNIFE_LINE_THICKNESS: 2.5
+ATTACK_VFX_KNIFE_ALPHA_START: 0.80
+ATTACK_VFX_KNIFE_ALPHA_END: 0.00
+ATTACK_VFX_KNIFE_SLASH_ALPHA_MULT: 1.2
+ATTACK_VFX_KNIFE_SLASH_SIZE_DAMPING_MULT: 0.8
+
+# Dagger — rapid fanning burst of stabs at a single target.
+ATTACK_VFX_DAGGER_SPREAD_DEG: 20.0
+ATTACK_VFX_DAGGER_STAB_WIDTH: 4.0
+ATTACK_VFX_DAGGER_ALPHA_START: 0.90
+ATTACK_VFX_DAGGER_ALPHA_END: 0.00
+ATTACK_VFX_DAGGER_FADE_START_MULT: 1.0
+ATTACK_VFX_DAGGER_FADE_END_MULT: 0.4
+
+# Halberd / Quarterstaff — 360° spin: concentric rings + rotating spokes.
+ATTACK_VFX_SPIN_RING_COUNT: 2
+ATTACK_VFX_SPIN_SPOKE_COUNT: 8
+ATTACK_VFX_SPIN_INNER_RADIUS_FRAC: 0.30
+ATTACK_VFX_SPIN_ALPHA_START: 0.70
+ATTACK_VFX_SPIN_ALPHA_END: 0.00
+ATTACK_VFX_SPIN_RING_THICKNESS: 5.0
+ATTACK_VFX_SPIN_RING_ALPHA_INNER_MULT: 0.6
+ATTACK_VFX_SPIN_RING_ALPHA_OUTER_MULT: 1.0
+
+# Mace / Warhammer — ground smash: radial shockwave spokes + late ring.
+ATTACK_VFX_SMASH_SPOKE_COUNT: 8
+ATTACK_VFX_SMASH_SPOKE_LENGTH_FRAC: 0.65
+ATTACK_VFX_SMASH_SPOKE_WIDTH: 5.0
+ATTACK_VFX_SMASH_RING_THICKNESS: 5.0
+ATTACK_VFX_SMASH_ALPHA_START: 0.85
+ATTACK_VFX_SMASH_ALPHA_END: 0.00
+
+# BigAxe — expanding pulse circle (world-anchored thrown projectile).
+ATTACK_VFX_PULSE_RING_THICKNESS: 8.0
+ATTACK_VFX_PULSE_ALPHA_START: 0.80
+ATTACK_VFX_PULSE_ALPHA_END: 0.00
+
+# Neon glow halo — shared by all shapes. Each draw does two passes:
+# a wider dim copy then the sharp core. GLOW_ALPHA_MULT=0 disables.
+ATTACK_VFX_GLOW_THICKNESS_MULT: 2.5
+ATTACK_VFX_GLOW_ALPHA_MULT: 0.45
+
+# SA16 — Weapon per-level multipliers. Spec §Weapon Per-Level Multipliers
+# L1873-1877 canonical table (REVISED 40-hour pacing). Pulled from
+# 1.15 / 1.10 / 1.05 / 1.20 / 1.15 to spec 1.10 / 1.10 / 1.05 / 1.10 /
+# 1.15 — the previous 1.15 damage factor saturated too fast vs enemy
+# HP 1.12, letting hero L40+ one-shot through the late-game chase. Spec
+# 1.10 keeps the curve compounding through the universal `m` (quality
+# x level), dice damageMultiplier, and dron stacks, so endgame DPS
+# growth comes from gear acquisition (loot pipeline) rather than the
+# raw level-up tick. The 1.20 critChance ramp also saturated to 100 %
+# by L20 with any nonzero base — 1.10 keeps crit a meaningful build
+# dimension across the full 40 h.
+WEAPON_DAMAGE_PER_LEVEL: 1.10
+WEAPON_APS_PER_LEVEL: 1.10
+WEAPON_RANGE_PER_LEVEL: 1.05
+WEAPON_CRIT_CHANCE_PER_LEVEL: 1.10
+WEAPON_CRIT_MULT_PER_LEVEL: 1.15
+
+# World-space offset from the hero to the starter Pitchfork. It sits below the
+# farm well, remains outside ITEM_PICKUP_RADIUS (360), and must be picked up and
+# equipped manually rather than appearing in the Farmer's hands.
+STARTER_PITCHFORK_OFFSET_X: 430
+STARTER_PITCHFORK_OFFSET_Y: 230
+# V3 combat-item artwork used by every live weapon rendering path.
+WEAPON_SPRITE_PITCHFORK: assets/textures/weapons/pitchfork.png
+WEAPON_SPRITE_LONG_SWORD: assets/textures/weapons/long_sword.png
+WEAPON_SPRITE_GREAT_SWORD: assets/textures/weapons/great_sword.png
+WEAPON_SPRITE_HALBERD: assets/textures/weapons/halberd.png
+WEAPON_SPRITE_QUARTERSTAFF: assets/textures/weapons/quarterstaff.png
+WEAPON_SPRITE_KNIVES: assets/textures/weapons/knives.png
+WEAPON_SPRITE_DAGGER: assets/textures/weapons/dagger.png
+WEAPON_SPRITE_MACE: assets/textures/weapons/mace.png
+WEAPON_SPRITE_WARHAMMER: assets/textures/weapons/warhammer.png
+WEAPON_SPRITE_BIG_AXE: assets/textures/weapons/big_axe.png

@@ -1,0 +1,62 @@
+# DiceCrafter panel — costs and evolution probabilities.
+# DICE_CRAFTER_REFACE_COST: powder units spent per reface attempt (any tier).
+# DICE_CRAFTER_EVOLVE_COST: powder units of the NEXT tier spent per evolve attempt.
+# DICE_CRAFTER_EVOLVE_CHANCE_*: success probability (0.0–1.0) to gain a face tier.
+#   Odds drop steeply as the dice grows — retrying with more powder is the loop.
+DICE_CRAFTER_REFACE_COST: 1
+DICE_CRAFTER_EVOLVE_COST: 3
+DICE_CRAFTER_EVOLVE_CHANCE_D4: 0.15
+DICE_CRAFTER_EVOLVE_CHANCE_D6: 0.12
+DICE_CRAFTER_EVOLVE_CHANCE_D8: 0.10
+DICE_CRAFTER_EVOLVE_CHANCE_D12: 0.08
+DICE_CRAFTER_EVOLVE_CHANCE_D20: 0.06
+DICE_CRAFTER_EVOLVE_CHANCE_D24: 0.05
+DICE_CRAFTER_EVOLVE_CHANCE_D30: 0.04
+DICE_CRAFTER_EVOLVE_CHANCE_D42: 0.03
+DICE_CRAFTER_EVOLVE_CHANCE_D60: 0.02
+DICE_CRAFTER_EVOLVE_CHANCE_D100: 0.0
+# DiceCrafter panel position (UI design coords, top-left of the panel window).
+DICE_CRAFTER_PANEL_X: 440
+DICE_CRAFTER_PANEL_Y: 80
+DICE_CRAFTER_PANEL_WIDTH: 340
+DICE_CRAFTER_PANEL_HEIGHT: 420
+# Persistent bottom action footer; result feedback renders one row above it.
+DICE_CRAFTER_HINT_TEXT: "G closes   RMB dice to slot   REFACE/EVOLVE spend powder"
+DICE_CRAFTER_FOOTER_GAP: 4
+# ── Face-grid & button layout (UI design coords, pixels) ──────────────────────
+# The per-face value cells form a BOUNDED grid to the right of the dice slot. The
+# grid's cell size and column count ADAPT to the die's faceCount so that even a
+# d100 (100 faces) fits inside a fixed-height region and never overlaps the
+# REFACE/EVOLVE buttons — those always flow BELOW the grid. All values here are
+# consumed by DiceCrafterPanel::buildLayout so that no layout number is hard-coded
+# in source.
+# PANEL_PADDING: inner margin on every side of the panel.
+DICE_CRAFTER_PANEL_PADDING: 10
+# TITLE_ROW_HEIGHT: height of the title row and of the bottom result strip.
+DICE_CRAFTER_TITLE_ROW_HEIGHT: 22
+# TITLE_SLOT_GAP: vertical gap between the title row and the dice slot.
+DICE_CRAFTER_TITLE_SLOT_GAP: 4
+# SLOT_SIZE: the dice slot is a SLOT_SIZE x SLOT_SIZE square.
+DICE_CRAFTER_SLOT_SIZE: 52
+# FACE_GRID_LEFT_GAP: horizontal gap between the slot and the start of the grid.
+DICE_CRAFTER_FACE_GRID_LEFT_GAP: 8
+# FACE_PROMPT_CLEARANCE: vertical space reserved for the prompt header line that
+# sits above the first row of face cells.
+DICE_CRAFTER_FACE_PROMPT_CLEARANCE: 18
+# FACE_CELL_MAX_SIZE: cell edge used for low-face dice (most readable).
+DICE_CRAFTER_FACE_CELL_MAX_SIZE: 20
+# FACE_CELL_MIN_SIZE: smallest cell edge the grid may shrink to when faces are many.
+DICE_CRAFTER_FACE_CELL_MIN_SIZE: 12
+# FACE_CELL_GAP: gap between adjacent face cells (also the grid clip's bottom margin).
+DICE_CRAFTER_FACE_CELL_GAP: 2
+# FACE_REGION_MAX_HEIGHT: maximum height of the bounded face grid. The grid clips to
+# this height and cells shrink so every face fits; the buttons flow below it.
+DICE_CRAFTER_FACE_REGION_MAX_HEIGHT: 180
+# REGION_BUTTON_GAP: gap between the bottom of the face grid and the first button.
+DICE_CRAFTER_REGION_BUTTON_GAP: 6
+# BUTTON_HEIGHT: height of each REFACE button and the EVOLVE button.
+DICE_CRAFTER_BUTTON_HEIGHT: 24
+# BUTTON_GAP: vertical gap between stacked REFACE buttons.
+DICE_CRAFTER_BUTTON_GAP: 3
+# EVOLVE_GAP: extra vertical gap inserted before the EVOLVE button.
+DICE_CRAFTER_EVOLVE_GAP: 4

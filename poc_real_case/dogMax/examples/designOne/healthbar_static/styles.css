@@ -1,0 +1,37 @@
+/* DogMax — Health Bar · styles.css
+   Static replica of the hero HUD health bar: the HP ramp (green → yellow → red),
+   a centred HP label, glowing corner brackets, and the hero level number to its
+   left. Dark cyberpunk neon outline style. */
+:root{
+  --cyan:#50e6ff; --ink:#d6dce8; --dim:#8b93a6;
+  --hero:#ff7828; --hp-green:#50dc64; --hp-yellow:#f0d246; --hp-red:#eb4646;
+  --barbg:#202028; --disp:'Chakra Petch',sans-serif; --mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+  font-family:var(--mono);background:radial-gradient(ellipse at 50% 0%,#11151f,#070a10 70%);padding:48px 40px;}
+
+.panel{display:flex;flex-direction:column;gap:18px;padding:26px 30px;
+  background:linear-gradient(160deg,#0e131d,#0a0d15);border:1px solid rgba(80,230,255,0.3);
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);}
+.cap{font-weight:600;font-size:9px;letter-spacing:0.18em;color:var(--dim);text-transform:uppercase;}
+
+/* a HUD row = level number + health bar */
+.hudrow{display:flex;flex-direction:column;gap:5px;}
+.bar-line{display:flex;align-items:center;gap:12px;}
+.lvl{font-weight:800;font-size:24px;color:var(--hero);text-shadow:0 0 10px var(--hero);
+  width:34px;text-align:right;flex:none;}
+
+/* the health bar itself */
+.hp{position:relative;width:300px;height:20px;background:var(--barbg);
+  border:1px solid rgba(80,230,255,0.3);}
+.hp .fill{position:absolute;inset:0;transition:width .3s;}
+.hp.healthy  .fill{width:82%;background:var(--hp-green); box-shadow:0 0 12px var(--hp-green);}
+.hp.wounded  .fill{width:38%;background:var(--hp-yellow);box-shadow:0 0 12px var(--hp-yellow);}
+.hp.critical .fill{width:14%;background:var(--hp-red);   box-shadow:0 0 12px var(--hp-red);}
+.hp .label{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:9px;letter-spacing:0.08em;color:#fff;text-shadow:0 1px 2px #000;}
+/* glowing cyan corner brackets — filled L-legs (matches the UI kit) */
+.hp .leg{position:absolute;background:var(--cyan);box-shadow:0 0 6px var(--cyan);}
+.hp .leg.h{width:6px;height:2px;} .hp .leg.v{width:2px;height:6px;}
+.hp .leg.t{top:0;} .hp .leg.b{bottom:0;} .hp .leg.l{left:0;} .hp .leg.r{right:0;}

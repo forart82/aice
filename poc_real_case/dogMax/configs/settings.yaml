@@ -1,0 +1,91 @@
+# Player-facing Settings / Theme panel (Phase G, G-misc). Opened in-game
+# with the P key; renders render::SettingsPanel — a ui::UiWindow with a
+# vertical stack of setting rows (label + control) and a Save button.
+#
+# Every value here is consumed by src/render/SettingsPanel.cpp; nothing is
+# hard-coded in source. The panel's BODY FILL and its BORDER/TITLE accent
+# are deliberately NOT defined here — they read the canonical THEME_PANEL_BG_*
+# and UI_ACCENT_* keys (theme.yaml) so the accent + opacity sliders below
+# restyle this very window live (the whole point of the demo). Only the
+# control-specific chrome (sliders / toggle / button) is styled here.
+#
+# Flat YAML: one KEY: value per line, '#' full-line comments, colon + space.
+
+# ---- Window geometry (UI design coords, 1920x1080 letterboxed space) ----
+SETTINGS_PANEL_X: 1360
+SETTINGS_PANEL_Y: 130
+SETTINGS_PANEL_WIDTH: 470
+SETTINGS_PANEL_HEIGHT: 430
+SETTINGS_TITLE: UI SETTINGS
+SETTINGS_TITLE_BAR_HEIGHT: 34
+SETTINGS_CONTENT_PADDING: 20
+
+# ---- Row layout ----
+SETTINGS_ROW_HEIGHT: 40
+SETTINGS_ROW_GAP: 14
+SETTINGS_LABEL_WIDTH: 132
+SETTINGS_VALUE_WIDTH: 54
+SETTINGS_CONTROL_GAP: 14
+
+# ---- Save button ----
+SETTINGS_SAVE_BUTTON_WIDTH: 100
+SETTINGS_SAVE_BUTTON_HEIGHT: 32
+SETTINGS_SAVE_BUTTON_GAP: 16
+
+# ---- Font sizes ----
+SETTINGS_TITLE_FONT_SIZE: 15
+SETTINGS_LABEL_FONT_SIZE: 14
+SETTINGS_VALUE_FONT_SIZE: 14
+SETTINGS_BUTTON_FONT_SIZE: 14
+
+# ---- Text colours: all routed to the single-accent tokens in source ----
+# Labels + numeric readouts -> ColorTheme.uiText; the "Saved!" flash -> accent.
+# No per-panel colour quads here; the accent/text tokens own them now.
+
+# ---- Slider chrome (geometry only; colours route to accent-ladder tokens:
+#      track->panel-bg, fill->accent, knob->text, knobDragging/border->accent*) ----
+SETTINGS_SLIDER_TRACK_THICKNESS: 5
+SETTINGS_SLIDER_KNOB_WIDTH: 12
+SETTINGS_SLIDER_KNOB_HEIGHT: 22
+SETTINGS_SLIDER_BORDER_THICKNESS: 1.5
+
+# ---- Toggle chrome (geometry only; colours route to accent-ladder tokens:
+#      boxOff->panel-bg, boxOn->accent, boxHover/border->accent-dim, check->text) ----
+SETTINGS_TOGGLE_BOX_SIZE: 22
+SETTINGS_TOGGLE_BORDER_THICKNESS: 1.5
+SETTINGS_TOGGLE_LABEL_GAP: 8
+SETTINGS_TOGGLE_CHECK_INSET: 5
+
+# ---- Save button (geometry only; bg->panel-bg, hover->accent-dim,
+#      border->accent, label->text — all resolved in source) ----
+
+# ---- Settings list ----
+# Each row binds a display label to a config key edited via setOverride.
+# KIND is `slider` (drag over [MIN,MAX]) or `toggle` (0/1 boolean). The
+# per-frame dirty -> applyConfigToRenderers path makes every edit live.
+SETTINGS_ROW_COUNT: 5
+SETTINGS_ROW0_LABEL: Accent Red
+SETTINGS_ROW0_KEY: UI_ACCENT_R
+SETTINGS_ROW0_MIN: 0
+SETTINGS_ROW0_MAX: 255
+SETTINGS_ROW0_KIND: slider
+SETTINGS_ROW1_LABEL: Accent Green
+SETTINGS_ROW1_KEY: UI_ACCENT_G
+SETTINGS_ROW1_MIN: 0
+SETTINGS_ROW1_MAX: 255
+SETTINGS_ROW1_KIND: slider
+SETTINGS_ROW2_LABEL: Accent Blue
+SETTINGS_ROW2_KEY: UI_ACCENT_B
+SETTINGS_ROW2_MIN: 0
+SETTINGS_ROW2_MAX: 255
+SETTINGS_ROW2_KIND: slider
+SETTINGS_ROW3_LABEL: Panel Opacity
+SETTINGS_ROW3_KEY: THEME_PANEL_BG_A
+SETTINGS_ROW3_MIN: 0
+SETTINGS_ROW3_MAX: 255
+SETTINGS_ROW3_KIND: slider
+SETTINGS_ROW4_LABEL: Bloom Glow
+SETTINGS_ROW4_KEY: BLOOM_ENABLE
+SETTINGS_ROW4_MIN: 0
+SETTINGS_ROW4_MAX: 1
+SETTINGS_ROW4_KIND: toggle

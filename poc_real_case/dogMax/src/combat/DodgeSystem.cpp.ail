@@ -1,0 +1,58 @@
+# dof.combat.DodgeSystem.cpp
+
+class DodgeSystem:
+  maxChargesValue: int = 2
+  chargesAvailableValue: int = 2
+  cooldownSecondsValue: float = 2.0
+  cooldownRemainingValue: float = 0.0
+
+  fn init(maxC:int, cooldownSec:float) -> void:
+    this.maxChargesValue = max(0, maxC)
+    this.cooldownSecondsValue = max(0.0, cooldownSec)
+    this.chargesAvailableValue = this.maxChargesValue
+    this.cooldownRemainingValue = 0.0
+
+  fn tryConsumeCharge() -> bool:
+    if this.chargesAvailableValue <= 0:
+      ret false
+    this.chargesAvailableValue = this.chargesAvailableValue - 1
+    if this.cooldownRemainingValue <= 0.0:
+      this.cooldownRemainingValue = this.cooldownSecondsValue
+    ret true
+
+  fn update(dt:float) -> void:
+    if this.chargesAvailableValue >= this.maxChargesValue:
+      this.cooldownRemainingValue = 0.0
+      ret
+    if this.cooldownRemainingValue <= 0.0:
+      this.chargesAvailableValue = min(this.chargesAvailableValue + 1, this.maxChargesValue)
+      ret
+    this.cooldownRemainingValue = this.cooldownRemainingValue - dt
+    if this.cooldownRemainingValue <= 0.0:
+      this.chargesAvailableValue = min(this.chargesAvailableValue + 1, this.maxChargesValue)
+      if this.chargesAvailableValue < this.maxChargesValue:
+        this.cooldownRemainingValue = this.cooldownSecondsValue
+      else:
+        this.cooldownRemainingValue = 0.0
+
+  fn maxCharges() -> int:
+    ret this.maxChargesValue
+  fn chargesAvailable() -> int:
+    ret this.chargesAvailableValue
+  fn cooldownSeconds() -> float:
+    ret this.cooldownSecondsValue
+  fn cooldownRemaining() -> float:
+    ret this.cooldownRemainingValue
+
+  fn setMaxCharges(value:int) -> void:
+    this.maxChargesValue = max(0, value)
+    this.chargesAvailableValue = min(this.chargesAvailableValue, this.maxChargesValue)
+
+  fn setCooldownSeconds(seconds:float) -> void:
+    this.cooldownSecondsValue = max(0.0, seconds)
+    if this.cooldownRemainingValue > this.cooldownSecondsValue:
+      this.cooldownRemainingValue = this.cooldownSecondsValue
+
+  fn reset() -> void:
+    this.chargesAvailableValue = this.maxChargesValue
+    this.cooldownRemainingValue = 0.0

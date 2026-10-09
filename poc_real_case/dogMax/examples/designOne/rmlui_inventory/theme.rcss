@@ -1,0 +1,54 @@
+/* DogMax — theme.rcss  ·  shared tokens for RmlUI (RCSS dialect)
+   ---------------------------------------------------------------
+   RCSS differs from CSS: no clip-path, no `gap` (use margins), gradients via
+   the `decorator` property, text glow via `font-effect`, colours as #rrggbb or
+   #rrggbbaa. Register the fonts in C++ before loading the document, e.g.:
+       Rml::LoadFontFace("JetBrainsMono-Bold.ttf");   // family: "JetBrains Mono"
+       Rml::LoadFontFace("ChakraPetch-SemiBold.ttf"); // family: "Chakra Petch"
+*/
+
+body {
+  font-family: "JetBrains Mono";
+  color: #d6dce8;
+  background-color: transparent;
+}
+
+/* ---- quality-tier accents (slot frame + corner tab + powder shard) ---- */
+.t-common  .slot  { decorator: linear-gradient(160deg, #b4b4c81f, #0a0c128c); border: 1px #b4b4c88c; }
+.t-uncommon .slot { decorator: linear-gradient(160deg, #50c8ff1f, #0a0c128c); border: 1px #50c8ff8c; }
+.t-rare    .slot  { decorator: linear-gradient(160deg, #ffd7321f, #0a0c128c); border: 1px #ffd7328c; }
+
+.cell.selected .slot {
+  decorator: linear-gradient(160deg, #ffd73233, #0a0c128c);
+  border: 1px #ffd732;
+  box-shadow: 0px 0px 12px #ffd73266;   /* RmlUi 6.0+; ignored on older builds */
+}
+
+/* tier corner tab — a small triangle drawn with mitered borders */
+.corner {
+  position: absolute; top: 0px; left: 0px;
+  width: 0px; height: 0px;
+  border-top: 9px #50e6ff; border-right: 9px transparent;
+}
+.t-common  .corner { border-top-color: #b4b4c8; }
+.t-uncommon .corner { border-top-color: #50c8ff; }
+.t-rare    .corner { border-top-color: #ffd732; }
+
+.t-common  .shard { decorator: none; background-color: #b4b4c82e; border: 2px #b4b4c8; }
+.t-uncommon .shard { background-color: #50c8ff2e; border: 2px #50c8ff; }
+.t-rare    .shard { background-color: #ffd7322e; border: 2px #ffd732; }
+.pbtn.t-common  { border: 1px #b4b4c8; }  .pbtn.t-common  .pn { color: #b4b4c8; }
+.pbtn.t-uncommon { border: 1px #50c8ff; } .pbtn.t-uncommon .pn { color: #50c8ff; }
+.pbtn.t-rare    { border: 1px #ffd732; }  .pbtn.t-rare    .pn { color: #ffd732; }
+
+/* ---- dice colours (diamond border + upright number) ---- */
+.d-4   { border-color: #ff4646; } .d-4   .dn { color: #ff4646; }
+.d-6   { border-color: #f0c846; } .d-6   .dn { color: #f0c846; }
+.d-8   { border-color: #50dcf0; } .d-8   .dn { color: #50dcf0; }
+.d-12  { border-color: #50f078; } .d-12  .dn { color: #50f078; }
+.d-20  { border-color: #5090ff; } .d-20  .dn { color: #5090ff; }
+.d-24  { border-color: #ff50dc; } .d-24  .dn { color: #ff50dc; }
+.d-30  { border-color: #b450f0; } .d-30  .dn { color: #b450f0; }
+.d-42  { border-color: #ffa028; } .d-42  .dn { color: #ffa028; }
+.d-60  { border-color: #ff82c8; } .d-60  .dn { color: #ff82c8; }
+.d-100 { border-color: #f0f0f0; } .d-100 .dn { color: #f0f0f0; font-size: 9px; }

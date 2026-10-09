@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=dogMax
+Comment=Launch newest dogmax build snapshot
+Exec=bash -lc './runGame'
+Path=/home/forart/dev/dogMax
+Icon=applications-games
+Terminal=false
+Categories=Game;

@@ -1,0 +1,9 @@
+# dof.combat.QualityScale.hpp
+
+enum QualityTier:
+  Common
+  Uncommon
+  Rare
+
+fn qualityStatFactor(qualityScore:int, minimumFactor:float) -> float = 1.0
+fn universalMultiplier(qualityScore:int, itemLevel:int, minimumFactor:float) -> float = 1.0

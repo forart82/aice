@@ -1,0 +1,182 @@
+# weapon_shapes_gallery.yaml — gallery-only weapon silhouettes for Ctrl+H.
+#
+# These shapes are display-only (not tied to WeaponType gameplay).  Built from
+# the same polygon/star/lens/… forms as the enemy catalog so the existing
+# buildEnemyShapeOutline geometry engine powers them.
+#
+# Tab "Cyber"  = indices 00..09  — plasma / nano-tech / energy aesthetic
+# Tab "Void"   = indices 10..19  — void / dark magic / cosmic horror aesthetic
+#
+# Per-shape keys (NN = 00..19):
+#   WG_NN_NAME          display label
+#   WG_NN_FORM          polygon | star | cross | arrow | kite | shield |
+#                       wedge | hourglass | drop | lens | gem
+#   WG_NN_N             polygon side count / star point count
+#   WG_NN_INNER         star inner-radius ratio / cross arm thickness (0..1)
+#   WG_NN_ASPECT        bilateral vertical stretch (1 = none)
+#   WG_NN_ROTATION_DEG  radial phase offset in degrees
+#   WG_NN_CORE          accent core/eye radius fraction (0 = none)
+
+WEAPON_GALLERY_COUNT: 20
+
+# ── Tab "Cyber" — plasma / nano-tech / energy weapons ────────────────
+WG_00_NAME: PlasmaEdge
+WG_00_FORM: lens
+WG_00_N: 0
+WG_00_INNER: 0.0
+WG_00_ASPECT: 3.5
+WG_00_ROTATION_DEG: 0
+WG_00_CORE: 0.0
+
+WG_01_NAME: NanoLance
+WG_01_FORM: kite
+WG_01_N: 0
+WG_01_INNER: 0.0
+WG_01_ASPECT: 4.0
+WG_01_ROTATION_DEG: 0
+WG_01_CORE: 0.0
+
+WG_02_NAME: PulseAxe
+WG_02_FORM: wedge
+WG_02_N: 0
+WG_02_INNER: 0.0
+WG_02_ASPECT: 0.5
+WG_02_ROTATION_DEG: 0
+WG_02_CORE: 0.0
+
+WG_03_NAME: ArcBlade
+WG_03_FORM: star
+WG_03_N: 4
+WG_03_INNER: 0.55
+WG_03_ASPECT: 1.0
+WG_03_ROTATION_DEG: 45
+WG_03_CORE: 0.0
+
+WG_04_NAME: HexBarrel
+WG_04_FORM: polygon
+WG_04_N: 6
+WG_04_INNER: 0.0
+WG_04_ASPECT: 1.0
+WG_04_ROTATION_DEG: 0
+WG_04_CORE: 0.3
+
+WG_05_NAME: GridSpike
+WG_05_FORM: gem
+WG_05_N: 0
+WG_05_INNER: 0.0
+WG_05_ASPECT: 2.2
+WG_05_ROTATION_DEG: 0
+WG_05_CORE: 0.0
+
+WG_06_NAME: TeslaCross
+WG_06_FORM: cross
+WG_06_N: 4
+WG_06_INNER: 0.3
+WG_06_ASPECT: 1.0
+WG_06_ROTATION_DEG: 0
+WG_06_CORE: 0.12
+
+WG_07_NAME: CyberBow
+WG_07_FORM: hourglass
+WG_07_N: 0
+WG_07_INNER: 0.0
+WG_07_ASPECT: 1.4
+WG_07_ROTATION_DEG: 0
+WG_07_CORE: 0.0
+
+WG_08_NAME: StarShiv
+WG_08_FORM: star
+WG_08_N: 6
+WG_08_INNER: 0.4
+WG_08_ASPECT: 1.0
+WG_08_ROTATION_DEG: 0
+WG_08_CORE: 0.0
+
+WG_09_NAME: BoostBolt
+WG_09_FORM: arrow
+WG_09_N: 0
+WG_09_INNER: 0.0
+WG_09_ASPECT: 1.8
+WG_09_ROTATION_DEG: 0
+WG_09_CORE: 0.0
+
+# ── Tab "Void" — dark magic / cursed / cosmic horror weapons ─────────
+WG_10_NAME: SoulScythe
+WG_10_FORM: hourglass
+WG_10_N: 0
+WG_10_INNER: 0.0
+WG_10_ASPECT: 2.2
+WG_10_ROTATION_DEG: 0
+WG_10_CORE: 0.0
+
+WG_11_NAME: DreadSaber
+WG_11_FORM: lens
+WG_11_N: 0
+WG_11_INNER: 0.0
+WG_11_ASPECT: 2.0
+WG_11_ROTATION_DEG: 0
+WG_11_CORE: 0.0
+
+WG_12_NAME: VoidOrb
+WG_12_FORM: star
+WG_12_N: 3
+WG_12_INNER: 0.12
+WG_12_ASPECT: 1.0
+WG_12_ROTATION_DEG: -90
+WG_12_CORE: 0.3
+
+WG_13_NAME: DreadAxe
+WG_13_FORM: wedge
+WG_13_N: 0
+WG_13_INNER: 0.0
+WG_13_ASPECT: 0.3
+WG_13_ROTATION_DEG: 0
+WG_13_CORE: 0.0
+
+WG_14_NAME: AbyssalFang
+WG_14_FORM: kite
+WG_14_N: 0
+WG_14_INNER: 0.0
+WG_14_ASPECT: 1.8
+WG_14_ROTATION_DEG: 0
+WG_14_CORE: 0.0
+
+WG_15_NAME: VortexBlade
+WG_15_FORM: star
+WG_15_N: 7
+WG_15_INNER: 0.22
+WG_15_ASPECT: 1.0
+WG_15_ROTATION_DEG: -13
+WG_15_CORE: 0.0
+
+WG_16_NAME: CryptDagger
+WG_16_FORM: gem
+WG_16_N: 0
+WG_16_INNER: 0.0
+WG_16_ASPECT: 1.4
+WG_16_ROTATION_DEG: 0
+WG_16_CORE: 0.0
+
+WG_17_NAME: ShadowEdge
+WG_17_FORM: shield
+WG_17_N: 0
+WG_17_INNER: 0.0
+WG_17_ASPECT: 0.7
+WG_17_ROTATION_DEG: 0
+WG_17_CORE: 0.0
+
+WG_18_NAME: OmegaSword
+WG_18_FORM: star
+WG_18_N: 5
+WG_18_INNER: 0.08
+WG_18_ASPECT: 1.0
+WG_18_ROTATION_DEG: -90
+WG_18_CORE: 0.25
+
+WG_19_NAME: VoidSpear
+WG_19_FORM: arrow
+WG_19_N: 0
+WG_19_INNER: 0.0
+WG_19_ASPECT: 2.8
+WG_19_ROTATION_DEG: 0
+WG_19_CORE: 0.0

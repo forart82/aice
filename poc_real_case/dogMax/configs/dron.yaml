@@ -1,0 +1,95 @@
+# Dron multiplier system: 14 tiers + float text style.
+# Top-4 tiers pulled from over-tuned 100/50/30/25 to spec-canonical
+# 40/30/25/22 (§Tiers L1224, L1233, L1241, L1249). Rationale: at 100x
+# multiplier a Hexadron one-shots anything in late-game, collapsing
+# the 30+ hour endgame "chase the Hex" goal. Spec 40x keeps Hexadron
+# a celebrated jackpot without trivialising L99 Rare enemies (2 M HP).
+# The remaining 10 tiers already match spec — no change.
+DRON_MULT_HEXADRON: 40.0
+DRON_MULT_PENTADRON: 30.0
+DRON_MULT_TWIN_TRIDRON: 25.0
+DRON_MULT_QUAD_DUODRON: 22.0
+DRON_MULT_OMIDRON: 20.0
+DRON_MULT_HEMIDRON: 18.0
+DRON_MULT_TRIDUO_DRON: 15.0
+DRON_MULT_TETRADRON: 12.0
+DRON_MULT_LINEADRON: 10.0
+DRON_MULT_SPLIT_SEQDRON: 8.0
+DRON_MULT_MIXDRON: 5.0
+DRON_MULT_MINIDRON: 3.0
+DRON_MULT_TRIDRON: 2.5
+DRON_MULT_DUODRON: 2.0
+DRON_MULT_VOIDRON: 1.0
+
+DRON_FLOAT_TEXT_DURATION: 1.5
+DRON_FLOAT_FADE_IN: 0.2
+DRON_FLOAT_FADE_OUT: 0.3
+DRON_FLOAT_RISE_PIXELS: 24
+DRON_FLOAT_COLOR_R: 255
+DRON_FLOAT_COLOR_G: 215
+DRON_FLOAT_COLOR_B: 80
+DRON_FLOAT_FONT_SIZE_NAME: 20
+DRON_FLOAT_FONT_SIZE_MULT: 14
+
+# card-mpkwucg3 — every non-Voidron tier renders its float label in
+# the weapon-slot sidebar (user feedback: small Drons must show too;
+# only Voidron stays silent). Voidron suppression continues via the
+# DronResult::isSilent gate so it never lands here. Per-row dedup
+# (single-active label per row, higher-tier replaces, equal-tier
+# bumps the counter) still applies as before — the whitelist no
+# longer suppresses Hemidron .. Duodron.
+DRON_FLOAT_ALWAYS_SHOW_TIERS: Hexadron,Pentadron,TwinTridron,QuadDuodron,Omidron,Hemidron,TriduoDron,Tetradron,Lineadron,SplitSeqdron,Mixdron,Minidron,Tridron,Duodron
+
+# SA25 / spec §Dron L1237-L1331 — per-tier float-label palette. The
+# 14 tiers used to all render in the same gold (DRON_FLOAT_COLOR_*)
+# which made high-tier hits visually indistinguishable from common
+# Duodrons. Each tier now has its own RGB so the player can read the
+# tier at a glance. Hexadron stays hot-gold (highest value); higher-
+# rarity multi-face tiers shift toward magenta/cyan/blue; the bulk
+# tiers stay in the warm range. Voidron is silent (never rendered) so
+# its colour is cosmetic only.
+DRON_TIER_HEXADRON_COLOR_R: 255
+DRON_TIER_HEXADRON_COLOR_G: 215
+DRON_TIER_HEXADRON_COLOR_B: 80
+DRON_TIER_PENTADRON_COLOR_R: 255
+DRON_TIER_PENTADRON_COLOR_G: 120
+DRON_TIER_PENTADRON_COLOR_B: 255
+DRON_TIER_TWIN_TRIDRON_COLOR_R: 210
+DRON_TIER_TWIN_TRIDRON_COLOR_G: 150
+DRON_TIER_TWIN_TRIDRON_COLOR_B: 255
+DRON_TIER_QUAD_DUODRON_COLOR_R: 180
+DRON_TIER_QUAD_DUODRON_COLOR_G: 200
+DRON_TIER_QUAD_DUODRON_COLOR_B: 255
+DRON_TIER_OMIDRON_COLOR_R: 120
+DRON_TIER_OMIDRON_COLOR_G: 255
+DRON_TIER_OMIDRON_COLOR_B: 200
+DRON_TIER_HEMIDRON_COLOR_R: 100
+DRON_TIER_HEMIDRON_COLOR_G: 255
+DRON_TIER_HEMIDRON_COLOR_B: 255
+DRON_TIER_TRIDUO_DRON_COLOR_R: 140
+DRON_TIER_TRIDUO_DRON_COLOR_G: 240
+DRON_TIER_TRIDUO_DRON_COLOR_B: 180
+DRON_TIER_TETRADRON_COLOR_R: 180
+DRON_TIER_TETRADRON_COLOR_G: 240
+DRON_TIER_TETRADRON_COLOR_B: 120
+DRON_TIER_LINEADRON_COLOR_R: 240
+DRON_TIER_LINEADRON_COLOR_G: 240
+DRON_TIER_LINEADRON_COLOR_B: 120
+DRON_TIER_SPLIT_SEQDRON_COLOR_R: 240
+DRON_TIER_SPLIT_SEQDRON_COLOR_G: 200
+DRON_TIER_SPLIT_SEQDRON_COLOR_B: 120
+DRON_TIER_MIXDRON_COLOR_R: 240
+DRON_TIER_MIXDRON_COLOR_G: 180
+DRON_TIER_MIXDRON_COLOR_B: 120
+DRON_TIER_MINIDRON_COLOR_R: 230
+DRON_TIER_MINIDRON_COLOR_G: 160
+DRON_TIER_MINIDRON_COLOR_B: 110
+DRON_TIER_TRIDRON_COLOR_R: 225
+DRON_TIER_TRIDRON_COLOR_G: 155
+DRON_TIER_TRIDRON_COLOR_B: 100
+DRON_TIER_DUODRON_COLOR_R: 220
+DRON_TIER_DUODRON_COLOR_G: 150
+DRON_TIER_DUODRON_COLOR_B: 90
+DRON_TIER_VOIDRON_COLOR_R: 255
+DRON_TIER_VOIDRON_COLOR_G: 215
+DRON_TIER_VOIDRON_COLOR_B: 80

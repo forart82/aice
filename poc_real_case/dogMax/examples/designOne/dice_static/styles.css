@@ -1,0 +1,24 @@
+/* DogMax — The Ten Dice · styles.css
+   Static gallery of the 10 dice tokens. Each die is a faceted neon gem whose
+   silhouette gains sides with its face count (d4 triangle … d60 octagon, d100
+   apex nonagon), in its signature hue, with the rolled value + dN label. */
+:root{ --cyan:#50e6ff; --ink:#d6dce8; --dim:#8b93a6; --disp:'Chakra Petch',sans-serif; --mono:'JetBrains Mono',monospace; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{min-height:100vh;font-family:var(--mono);background:radial-gradient(ellipse at 50% 0%,#11151f,#070a10 70%);
+  display:flex;align-items:flex-start;justify-content:center;padding:48px 40px;}
+.panel{background:linear-gradient(160deg,#0e131d,#0a0d15);border:1px solid rgba(80,230,255,0.3);
+  clip-path:polygon(14px 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%,0 14px);padding:0;}
+.titlebar{height:32px;display:flex;align-items:center;padding:0 18px;
+  background:linear-gradient(180deg,rgba(80,230,255,0.12),rgba(80,230,255,0));border-bottom:1px solid rgba(80,230,255,0.22);}
+.ttext{font-weight:700;font-size:11px;letter-spacing:0.28em;color:var(--cyan);text-shadow:0 0 8px rgba(80,230,255,0.6);}
+.grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;padding:22px;}
+.card{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px 10px 16px;
+  background:rgba(8,10,16,0.5);border:1px solid rgba(80,230,255,0.12);
+  clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px);}
+.token{position:relative;display:inline-flex;align-items:center;justify-content:center;}
+.token .val{position:absolute;color:#fff;letter-spacing:-0.02em;}
+.token .lbl{position:absolute;opacity:0.85;}
+.meta{display:flex;flex-direction:column;align-items:center;gap:4px;line-height:1;}
+.dn{font-weight:800;font-size:13px;letter-spacing:0.04em;}
+.dfaces{font-weight:600;font-size:8.5px;letter-spacing:0.08em;color:var(--ink);white-space:nowrap;}
+.dweight{font-weight:500;font-size:7.5px;letter-spacing:0.06em;color:var(--dim);white-space:nowrap;}

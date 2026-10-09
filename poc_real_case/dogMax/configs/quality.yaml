@@ -1,0 +1,41 @@
+# Quality System (spec §Quality System).
+# Two thresholds split the rolled q ∈ [1,100] into three tiers.
+
+QUALITY_UNCOMMON_THRESHOLD: 40
+QUALITY_RARE_THRESHOLD: 80
+
+# Top of the quality score scale (q ∈ [1, QUALITY_MAX_SCORE]). Cheat-spawned
+# items are pinned to this max, and the loot-filter quality field clamps to it.
+QUALITY_MAX_SCORE: 100
+
+# Lowest fraction of a base stat retained by a quality roll. Quality now
+# interpolates from this playable baseline to 1.0 instead of allowing a
+# level-one item to retain only q/100 of its intended stats.
+QUALITY_STAT_FACTOR_MIN: 0.65
+
+# Tier palette — single source of truth.
+# Applied to item outlines, inventory slot tints, tooltip headers, and
+# (future) damage-text tints. Values mirror the previous INVENTORY_TIER_*
+# palette so the existing aesthetic is preserved.
+
+QUALITY_TIER_COMMON_R: 180
+QUALITY_TIER_COMMON_G: 180
+QUALITY_TIER_COMMON_B: 200
+QUALITY_TIER_UNCOMMON_R: 80
+QUALITY_TIER_UNCOMMON_G: 200
+QUALITY_TIER_UNCOMMON_B: 255
+QUALITY_TIER_RARE_R: 255
+QUALITY_TIER_RARE_G: 215
+QUALITY_TIER_RARE_B: 50
+
+# SE11 / spec L1788 — per-tier stat multiplier applied INDEPENDENTLY
+# of the quality-and-level multiplier `m` so a Rare drop reads as a strict
+# upgrade over an Uncommon of the same itemLevel:
+#   qualityFactor = MIN + (1 - MIN) * q/100
+#   finalStat = baseRoll * qualityFactor * itemLevel * qualityMult[tier]
+# Spec defaults: Common 1.0, Uncommon 1.4, Rare 2.0. These mirror
+# the XP per-tier mult (xp.config:21-22) by intent; the two tables
+# are kept separate so XP and stat balance can drift apart cleanly.
+QUALITY_STAT_MULT_COMMON: 1.0
+QUALITY_STAT_MULT_UNCOMMON: 1.4
+QUALITY_STAT_MULT_RARE: 2.0

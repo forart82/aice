@@ -1,0 +1,56 @@
+# Enemy weapon/dice combat — spawn-time equipment rolling.
+# Enemies fight with the same weapon+dice machinery as the hero. An armed
+# enemy carries 1-2 weapons (each with 0..N dice) and fires on the weapon
+# or dice cooldown; an unarmed enemy charges the hero (see enemy_charge.yaml).
+
+# Probability [0,1] that a spawned enemy is armed at all. Unarmed enemies
+# use the charge attack.
+ENEMY_ARMED_PROBABILITY: 0.5
+
+# Hard cap on weapons per enemy. The spawn roller never exceeds this.
+ENEMY_MAX_WEAPONS: 2
+
+# Relative weights for how many weapons an armed enemy carries (1 vs 2).
+ENEMY_WEAPON_COUNT_WEIGHT_1: 70
+ENEMY_WEAPON_COUNT_WEIGHT_2: 30
+
+# Per-weapon dice count is uniform in [MIN, MAX], then clamped to the
+# weapon's own slot count.
+ENEMY_DICE_COUNT_MIN: 0
+ENEMY_DICE_COUNT_MAX: 2
+
+# 0 = an armed enemy drops its real equipment AND still rolls the normal
+# random loot on top (the chosen economy). 1 = suppress the random roll
+# for armed enemies (equipment only).
+ENEMY_DROP_SUPPRESS_RANDOM_WHEN_ARMED: 0
+
+# Armed attacks commit to a short visible warning before applying damage.
+ENEMY_ARMED_ATTACK_WINDUP_SECONDS: 0.45
+
+# The authored Scout and three-enemy opening group may roll real weapons and
+# dice, but no single resolved hit may remove more than this fraction of the
+# hero's maximum HP. Later continuous spawning uses the full build formula.
+OPENING_ENEMY_HIT_MAX_HERO_HP_FRACTION: 0.20
+
+# Early non-special enemy protection. For enemies at or below MAX_LEVEL, one
+# resolved hit is capped to FRACTION of the hero's current HP only while the
+# hero remains above the attacking tier's threshold. At or below that threshold
+# the cap ends, so accumulated damage and follow-up hits can still kill.
+EARLY_ENEMY_HIT_CAP_MAX_LEVEL: 8
+EARLY_ENEMY_HIT_MAX_CURRENT_HP_FRACTION: 0.50
+EARLY_ENEMY_HIT_CAP_COMMON_MIN_HERO_HP: 10.0
+EARLY_ENEMY_HIT_CAP_UNCOMMON_MIN_HERO_HP: 40.0
+EARLY_ENEMY_HIT_CAP_RARE_MIN_HERO_HP: 50.0
+
+# Enemy-only reach by weapon identity. The carried item retains its real range
+# when dropped. Ranged-looking weapons project farther; heavy melee stays close.
+ENEMY_RANGE_MULT_PITCHFORK: 1.30
+ENEMY_RANGE_MULT_LONG_SWORD: 1.10
+ENEMY_RANGE_MULT_GREAT_SWORD: 1.10
+ENEMY_RANGE_MULT_HALBERD: 1.15
+ENEMY_RANGE_MULT_QUARTERSTAFF: 1.15
+ENEMY_RANGE_MULT_KNIVES: 1.35
+ENEMY_RANGE_MULT_DAGGER: 1.25
+ENEMY_RANGE_MULT_MACE: 1.10
+ENEMY_RANGE_MULT_WARHAMMER: 1.10
+ENEMY_RANGE_MULT_BIG_AXE: 1.20
