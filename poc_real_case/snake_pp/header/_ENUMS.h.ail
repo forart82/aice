@@ -1,0 +1,7 @@
+# snake_pp.header._ENUMS.h
+
+enum Direction:
+  Up
+  Left
+  Right
+  Down

@@ -1,0 +1,8 @@
+# snake_pp.header.Grid.h
+
+class Grid:
+  numCells: int = 475
+  fn createStartZone() -> void:
+    ret
+  fn update() -> void:
+    ret

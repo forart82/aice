@@ -1,0 +1,12 @@
+# snake_pp.source.Lost.cpp
+
+class Lost:
+  isActive: bool = false
+  isFontLoaded: bool = false
+
+  fn update(isDead:bool) -> void:
+    if isDead:
+      this.isActive = true
+
+  fn setIsActive(active:bool) -> void:
+    this.isActive = active

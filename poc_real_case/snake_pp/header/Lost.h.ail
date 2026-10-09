@@ -1,0 +1,10 @@
+# snake_pp.header.Lost.h
+
+class Lost:
+  isActive: bool = false
+  isFontLoaded: bool = false
+
+  fn update(isDead:bool) -> void:
+    ret
+  fn setIsActive(active:bool) -> void:
+    this.isActive = active

@@ -1,0 +1,4 @@
+# snake_pp.main.cpp
+
+fn main() -> int:
+  ret 0

@@ -1,0 +1,18 @@
+# snake_pp.source.Game.cpp
+
+class Game:
+  timePerFrame: float = 0.0166667
+  timeSinceLastUpdate: float = 0.0
+  isRunning: bool = true
+
+  fn update() -> void:
+    this.timeSinceLastUpdate = 0.0
+
+  fn handleInput(code:int) -> void:
+    if code == 1:
+      this.isRunning = false
+
+  fn run() -> void:
+    while this.isRunning:
+      this.update()
+      this.isRunning = false

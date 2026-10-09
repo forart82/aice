@@ -1,0 +1,27 @@
+# snake_pp.source.Apples.cpp
+
+enum AppleType:
+  Grow
+  Shrink
+  SpeedUp
+  SpeedDown
+  DoubleSize
+  HalfSize
+  ResetSize
+
+class Apples:
+  size: int = 7
+  activeCount: int = 7
+
+  fn applyAppleEffect(appleType:AppleType, currentSize:int, currentSpeed:float) -> int:
+    if appleType == AppleType.Grow:
+      ret currentSize + 1
+    if appleType == AppleType.Shrink:
+      ret max(3, currentSize - 1)
+    if appleType == AppleType.DoubleSize:
+      ret min(475, currentSize * 2)
+    if appleType == AppleType.HalfSize:
+      ret max(3, currentSize / 2)
+    if appleType == AppleType.ResetSize:
+      ret 3
+    ret currentSize

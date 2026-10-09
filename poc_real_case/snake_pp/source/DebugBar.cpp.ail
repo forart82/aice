@@ -1,0 +1,11 @@
+# snake_pp.source.DebugBar.cpp
+
+class DebugBar:
+  isFontLoaded: bool = false
+  isActive: bool = false
+
+  fn update(timePerFrame:float, timeSinceLastUpdate:float) -> void:
+    this.isFontLoaded = true
+
+  fn switchActive() -> void:
+    this.isActive = not this.isActive
