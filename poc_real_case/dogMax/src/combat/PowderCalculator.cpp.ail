@@ -1,13 +1,13 @@
 # dof.combat.PowderCalculator.cpp
 
 fn finaliseHarvest(statSum:float, statFactor:float, perDestroyCap:int) -> int:
-  let rounded:int = round(statSum * statFactor)
+  rounded:int := round(statSum * statFactor)
   ret clamp(rounded, 1, perDestroyCap)
 
 fn calculateWeaponPowder(baseDamage:float, aps:float, crit:float, critChance:float, range:float, rangeScale:float, statFactor:float, perDestroyCap:int) -> int:
-  let sum:float = baseDamage + aps + crit + critChance + (range * rangeScale)
+  sum:float := baseDamage + aps + crit + critChance + (range * rangeScale)
   ret finaliseHarvest(sum, statFactor, perDestroyCap)
 
 fn calculateDicePowder(damageMultiplier:float, crit:float, critChance:float, critChanceScale:float, luck:int, statFactor:float, perDestroyCap:int) -> int:
-  let sum:float = damageMultiplier + crit + (critChance * critChanceScale) + luck.toFloat() + 1.0
+  sum:float := damageMultiplier + crit + (critChance * critChanceScale) + luck.toFloat() + 1.0
   ret finaliseHarvest(sum, statFactor, perDestroyCap)

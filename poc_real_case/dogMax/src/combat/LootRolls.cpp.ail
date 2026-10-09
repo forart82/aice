@@ -1,14 +1,14 @@
 # dof.combat.LootRolls.cpp
 
 fn calculateQualityLowerBound(qFloor:int) -> int:
-  let clampedFloor:int = clamp(qFloor, 0, 99)
+  clampedFloor:int := clamp(qFloor, 0, 99)
   ret max(1, clampedFloor)
 
 fn calculateItemLevelBounds(enemyLevel:int) -> [int]:
-  let upper:int = max(1, enemyLevel)
-  let lower:int = max(1, (enemyLevel + 1) / 2)
+  upper:int := max(1, enemyLevel)
+  lower:int := max(1, (enemyLevel + 1) / 2)
   ret [lower, upper]
 
 fn calculateStatQualityLowerBound(biasFloor:int) -> int:
-  let floorVal:int = clamp(biasFloor, 0, 99)
+  floorVal:int := clamp(biasFloor, 0, 99)
   ret max(1, floorVal)

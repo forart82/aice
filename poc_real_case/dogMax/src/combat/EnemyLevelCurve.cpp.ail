@@ -6,33 +6,33 @@ class EnemyLevelCurve:
 
   fn init(linearStep:float, linearEnd:int, exp1Factor:float, exp1End:int, exp2Factor:float, maxLvl:int) -> void:
     this.maxLevelValue = max(1, maxLvl)
-    let mut i:int = 0
+    i:int ::= 0
     while i <= this.maxLevelValue:
       this.cumulative.push(0.0)
       i = i + 1
 
-    let mut lvl:int = 2
+    lvl:int ::= 2
     while (lvl <= linearEnd) and (lvl <= this.maxLevelValue):
       this.cumulative[lvl] = this.cumulative[lvl - 1] + linearStep
       lvl = lvl + 1
 
     while (lvl <= exp1End) and (lvl <= this.maxLevelValue):
-      let exponent:float = (lvl - linearEnd).toFloat()
-      let step:float = linearStep * pow(exp1Factor, exponent)
+      exponent:float := (lvl - linearEnd).toFloat()
+      step:float := linearStep * pow(exp1Factor, exponent)
       this.cumulative[lvl] = this.cumulative[lvl - 1] + step
       lvl = lvl + 1
 
-    let stepAtExp1End:float = linearStep * pow(exp1Factor, (exp1End - linearEnd).toFloat())
+    stepAtExp1End:float := linearStep * pow(exp1Factor, (exp1End - linearEnd).toFloat())
     while lvl <= this.maxLevelValue:
-      let exponent:float = (lvl - exp1End).toFloat()
-      let step:float = stepAtExp1End * pow(exp2Factor, exponent)
+      exponent:float := (lvl - exp1End).toFloat()
+      step:float := stepAtExp1End * pow(exp2Factor, exponent)
       this.cumulative[lvl] = this.cumulative[lvl - 1] + step
       lvl = lvl + 1
 
   fn levelFromDistance(distance:float) -> int:
     if distance <= 0.0:
       ret 1
-    let mut lvl:int = this.maxLevelValue
+    lvl:int ::= this.maxLevelValue
     while lvl >= 1:
       if distance >= this.cumulative[lvl]:
         ret lvl

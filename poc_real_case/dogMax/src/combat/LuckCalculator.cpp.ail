@@ -1,7 +1,7 @@
 # dof.combat.LuckCalculator.cpp
 
 fn sumLuck(luckPerDice:[int]) -> int:
-  let mut total:int = 0
+  total:int ::= 0
   for luck in luckPerDice:
     total = total + luck
   ret total
@@ -9,12 +9,12 @@ fn sumLuck(luckPerDice:[int]) -> int:
 fn qualityFloor(luckTotal:int, scale:float) -> int:
   if (luckTotal <= 0) or (scale <= 0.0):
     ret 0
-  let sqrtLuck:float = sqrt(luckTotal.toFloat())
-  let raw:int = floor(sqrtLuck * scale)
+  sqrtLuck:float := sqrt(luckTotal.toFloat())
+  raw:int := floor(sqrtLuck * scale)
   ret clamp(raw, 0, 99)
 
 fn effectiveMinFace(luckTotal:int, scale:float) -> int:
   if (luckTotal <= 0) or (scale <= 0.0):
     ret 1
-  let raw:int = floor(luckTotal.toFloat() * scale)
+  raw:int := floor(luckTotal.toFloat() * scale)
   ret max(1, raw)

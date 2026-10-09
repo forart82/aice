@@ -19,7 +19,7 @@ fn validatePassword(pass:str) -> unknown | unknown:
   { ok: true, value: true }
 
 fn authenticateUser(req:AuthRequest) -> unknown | unknown:
-  let valid = validatePassword(req.password).value
-  let cleanUser = sanitize(req.username)
-  let session = { sessionId: "sess_" + cleanUser, userId: cleanUser, role: "member", createdAt: 1711929600 }
+  valid := validatePassword(req.password).value
+  cleanUser := sanitize(req.username)
+  session := { sessionId: "sess_" + cleanUser, userId: cleanUser, role: "member", createdAt: 1711929600 }
   { ok: true, value: session }

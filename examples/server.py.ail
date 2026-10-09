@@ -15,8 +15,8 @@ fn checkStatus(healthy: bool) -> str:
     ret "DEGRADED"
 
 fn getSystemHealth(uptimeSeconds: int) -> HealthResponse:
-  let statusText = checkStatus(uptimeSeconds > 0)
-  let res = {
+  statusText := checkStatus(uptimeSeconds > 0)
+  res := {
     status: statusText,
     uptime: uptimeSeconds,
     version: "2.0.0"

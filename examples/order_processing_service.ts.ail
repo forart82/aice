@@ -17,7 +17,7 @@ type SlaEvaluationResult: orderId:!s, targetDispatchTimestamp:!i, isBreached:!b,
 type ReconciliationReport: reportId:!s, batchId:!s, expectedTotalCents:!i, settledTotalCents:!i, discrepancyCents:!i, isBalanced:!b
 
 fn createCheckoutSession(sessId: str, cart: ShoppingCart, shipAddr: Address, billAddr: Address, now: int) -> CheckoutSession:
-  let session = {
+  session := {
     sessionId: sessId,
     cartId: cart.cartId,
     customerId: cart.customerId,
@@ -44,19 +44,19 @@ fn validateCheckoutItems(items: [CartItem]) -> Result[bool, str]:
   Ok(true)
 
 fn validateSession(session: CheckoutSession, cart: ShoppingCart, now: int) -> OrderValidationResult:
-  let mut errors: [str] = []
-  let mut warnings: [str] = []
+  errors: [str]  ::= []
+  warnings: [str]  ::= []
   if isSessionExpired(session, now):
     errors = errors.append("Checkout session expired")
   if cart.items.len == 0:
     errors = errors.append("Shopping cart is empty")
-  let subtotal = calculateCartSubtotalCents(cart.items)
+  subtotal := calculateCartSubtotalCents(cart.items)
   if subtotal > 5000000:
     warnings = warnings.append("Large order requires secondary fraud review")
-  let mut valid = true
+  valid ::= true
   if errors.len > 0:
     valid = false
-  let res = {
+  res := {
     isValid: valid,
     blockingErrors: errors,
     warningNotes: warnings,
@@ -69,11 +69,11 @@ fn validateSession(session: CheckoutSession, cart: ShoppingCart, now: int) -> Or
   res
 
 fn resolveBestWarehouse(sku: str, requiredQty: int, warehouses: [WarehouseLocation]) -> Result[str, str]:
-  let mut bestWarehouse = ""
-  let mut lowestLoad = 1000
+  bestWarehouse ::= ""
+  lowestLoad ::= 1000
   for wh in warehouses:
     if not isWarehouseOverCapacity(wh):
-      let load = calculateWarehouseLoadPercent(wh)
+      load := calculateWarehouseLoadPercent(wh)
       if load < lowestLoad:
         lowestLoad = load
         bestWarehouse = wh.warehouseId
@@ -82,10 +82,10 @@ fn resolveBestWarehouse(sku: str, requiredQty: int, warehouses: [WarehouseLocati
   Ok(bestWarehouse)
 
 fn allocateOrderInventory(orderId: str, items: [CartItem], warehouses: [WarehouseLocation]) -> Result[[WarehouseAllocation], str]:
-  let mut allocations: [WarehouseAllocation] = []
+  allocations: [WarehouseAllocation]  ::= []
   for item in items:
-    let whId = resolveBestWarehouse(item.sku, item.quantity, warehouses)?
-    let alloc = {
+    whId := resolveBestWarehouse(item.sku, item.quantity, warehouses)?
+    alloc := {
       orderId: orderId,
       sku: item.sku,
       allocatedWarehouseId: whId,
@@ -98,7 +98,7 @@ fn allocateOrderInventory(orderId: str, items: [CartItem], warehouses: [Warehous
 fn processCardPayment(txId: str, orderId: str, provider: str, amountCents: int, now: int) -> Result[PaymentTransaction, str]:
   if amountCents <= 0:
     ret Err("Payment amount must be positive")
-  let tx = {
+  tx := {
     transactionId: txId,
     orderId,
     provider,
@@ -110,13 +110,13 @@ fn processCardPayment(txId: str, orderId: str, provider: str, amountCents: int, 
   Ok(tx)
 
 fn voidPayment(tx: PaymentTransaction) -> PaymentTransaction:
-  let updated = { ...tx, status: "VOIDED" }
+  updated := { ...tx, status: "VOIDED" }
   updated
 
 fn evaluateOrderRisk(profile: CustomerProfile, totalCents: int, isDomestic: bool) -> FraudScore = calculateRiskScore(profile, totalCents, not isDomestic)
 
 fn prepareFulfillmentBatch(batchId: str, whId: str, carrier: str, orders: [str], now: int) -> FulfillmentBatch:
-  let batch = {
+  batch := {
     batchId,
     warehouseId: whId,
     assignedCarrier: carrier,
@@ -128,11 +128,11 @@ fn prepareFulfillmentBatch(batchId: str, whId: str, carrier: str, orders: [str],
   batch
 
 fn dispatchFulfillmentBatch(batch: FulfillmentBatch, now: int) -> FulfillmentBatch:
-  let updated = { ...batch, isDispatched: true, dispatchedTimestamp: now }
+  updated := { ...batch, isDispatched: true, dispatchedTimestamp: now }
   updated
 
 fn createShippingManifest(manifestId: str, carrier: str, trackingNums: [str], weightGrams: int, hub: str, now: int) -> ShippingManifest:
-  let manifest = {
+  manifest := {
     manifestId,
     carrierCode: carrier,
     trackingNumbers: trackingNums,
@@ -143,11 +143,11 @@ fn createShippingManifest(manifestId: str, carrier: str, trackingNums: [str], we
   manifest
 
 fn processCustomerRefund(request: RefundRequest, isOpened: bool, now: int) -> RefundReceipt:
-  let mut fee = 0
+  fee ::= 0
   if request.isRestockingFeeApplied:
     fee = calculateRestockingFee(request.requestedAmountCents, isOpened)
-  let netRefund = computeNetRefundCents(request.requestedAmountCents, fee)
-  let receipt = {
+  netRefund := computeNetRefundCents(request.requestedAmountCents, fee)
+  receipt := {
     receiptId: "REC-" + request.refundId,
     orderId: request.orderId,
     refundedCents: netRefund,
@@ -158,9 +158,9 @@ fn processCustomerRefund(request: RefundRequest, isOpened: bool, now: int) -> Re
   receipt
 
 fn buildOrderConfirmationEmail(orderId: str, email: str, totalCents: int, trackingNumber: str) -> OrderNotification:
-  let dollars = (totalCents / 100).floor()
-  let body = "Thank you for your order #" + orderId + ". Total: $" + dollars.toString() + ". Tracking: " + trackingNumber
-  let notif = {
+  dollars := (totalCents / 100).floor()
+  body := "Thank you for your order #" + orderId + ". Total: $" + dollars.toString() + ". Tracking: " + trackingNumber
+  notif := {
     notificationId: "NOTIF-" + orderId,
     recipientEmail: email,
     subject: "Order Confirmation - #" + orderId,
@@ -171,8 +171,8 @@ fn buildOrderConfirmationEmail(orderId: str, email: str, totalCents: int, tracki
   notif
 
 fn buildShippingNotification(orderId: str, email: str, carrier: str, trackingUrl: str) -> OrderNotification:
-  let body = "Your order #" + orderId + " has shipped via " + carrier + ". Track package: " + trackingUrl
-  let notif = {
+  body := "Your order #" + orderId + " has shipped via " + carrier + ". Track package: " + trackingUrl
+  notif := {
     notificationId: "SHIP-NOTIF-" + orderId,
     recipientEmail: email,
     subject: "Your Package is on the Way - #" + orderId,
@@ -183,7 +183,7 @@ fn buildShippingNotification(orderId: str, email: str, carrier: str, trackingUrl
   notif
 
 fn recordAuditTrail(action: str, entityType: str, entityId: str, actorId: str, now: int) -> AuditEntry:
-  let entry = {
+  entry := {
     auditId: "AUDIT-" + entityId + "-" + now.toString(),
     action,
     entityType,
@@ -194,7 +194,7 @@ fn recordAuditTrail(action: str, entityType: str, entityId: str, actorId: str, n
   entry
 
 fn logDisputeFiled(disputeId: str, orderId: str, chargebackCents: int, reason: str, dueDate: int) -> DisputeRecord:
-  let disp = {
+  disp := {
     disputeId,
     orderId,
     chargebackCents,
@@ -205,11 +205,11 @@ fn logDisputeFiled(disputeId: str, orderId: str, chargebackCents: int, reason: s
   disp
 
 fn resolveDispute(dispute: DisputeRecord) -> DisputeRecord:
-  let updated = { ...dispute, isResolved: true }
+  updated := { ...dispute, isResolved: true }
   updated
 
 fn calculateDailyMetrics(dateKey: str, received: int, dispatched: int, delivered: int, revenue: int) -> DailyFulfillmentMetrics:
-  let m = {
+  m := {
     dateKey,
     ordersReceived: received,
     ordersDispatched: dispatched,
@@ -241,30 +241,30 @@ fn finalizeOrderCheckout(
   verifyCheckoutPreconditions(session, profile)?
   validateCheckoutItems(cart.items)?
 
-  let subtotal = calculateCartSubtotalCents(cart.items)
-  let weight = calculateCartWeightGrams(cart.items, 350)
-  let shippingMoney = calculateShippingCost(weight, 50, carrier)
+  subtotal := calculateCartSubtotalCents(cart.items)
+  weight := calculateCartWeightGrams(cart.items, 350)
+  shippingMoney := calculateShippingCost(weight, 50, carrier)
 
-  let risk = evaluateOrderRisk(profile, subtotal, isDomesticShipment(session.shippingAddress, "USA"))
+  risk := evaluateOrderRisk(profile, subtotal, isDomesticShipment(session.shippingAddress, "USA"))
   if risk.riskLevel == "CRITICAL":
     ret Err("Order rejected by automated risk engine")
 
-  let allocs = allocateOrderInventory(session.sessionId, cart.items, warehouses)?
-  let payment = processCardPayment("TX-" + session.sessionId, session.sessionId, "STRIPE", subtotal + shippingMoney.amountInCents, now)?
+  allocs := allocateOrderInventory(session.sessionId, cart.items, warehouses)?
+  payment := processCardPayment("TX-" + session.sessionId, session.sessionId, "STRIPE", subtotal + shippingMoney.amountInCents, now)?
 
-  let invNum = generateInvoiceNumber(session.sessionId, now)
-  let inv = buildInvoiceSummary(invNum, session.sessionId, subtotal, 0, shippingMoney.amountInCents, now)
+  invNum := generateInvoiceNumber(session.sessionId, now)
+  inv := buildInvoiceSummary(invNum, session.sessionId, subtotal, 0, shippingMoney.amountInCents, now)
   Ok(inv)
 
 fn cancelOrderSession(session: CheckoutSession, reason: str, now: int) -> AuditEntry:
-  let audit = recordAuditTrail("CANCEL_CHECKOUT", "CheckoutSession", session.sessionId, "SYSTEM", now)
+  audit := recordAuditTrail("CANCEL_CHECKOUT", "CheckoutSession", session.sessionId, "SYSTEM", now)
   audit
 
 fn computePackageVolumeCm3(lengthCm: int, widthCm: int, heightCm: int) -> int:
   lengthCm * widthCm * heightCm
 
 fn computeDimensionalWeightGrams(lengthCm: int, widthCm: int, heightCm: int, divisor: int) -> int:
-  let vol = computePackageVolumeCm3(lengthCm, widthCm, heightCm)
+  vol := computePackageVolumeCm3(lengthCm, widthCm, heightCm)
   ((vol * 1000) / divisor).floor()
 
 fn determineBillableWeightGrams(actualWeightGrams: int, dimWeightGrams: int) -> int:
@@ -278,8 +278,8 @@ fn formatCarrierTrackingUrl(config: CarrierConfig, trackingNum: str) -> str = ge
 fn shouldTriggerRestock(item: InventoryItem) -> bool = checkReorderNeeded(item)
 
 fn generateRestockOrderSummary(item: InventoryItem, targetStock: int) -> int:
-  let currentNet = item.availableQuantity - item.reservedQuantity
-  let needed = targetStock - currentNet
+  currentNet := item.availableQuantity - item.reservedQuantity
+  needed := targetStock - currentNet
   if needed < 0:
     0
   else:
@@ -288,7 +288,7 @@ fn generateRestockOrderSummary(item: InventoryItem, targetStock: int) -> int:
 fn computeGrossMarginBps(revenueCents: int, costCents: int) -> int:
   if revenueCents == 0:
     ret 0
-  let profit = revenueCents - costCents
+  profit := revenueCents - costCents
   ((profit * 10000) / revenueCents).floor()
 
 fn validateCarrierAccount(config: CarrierConfig) -> bool:
@@ -301,7 +301,7 @@ fn validateCarrierAccount(config: CarrierConfig) -> bool:
   true
 
 fn calculateBatchPostageCost(manifest: ShippingManifest, costPerKgCents: int) -> int:
-  let kg = (manifest.totalWeightGrams / 1000).floor()
+  kg := (manifest.totalWeightGrams / 1000).floor()
   kg * costPerKgCents
 
 fn isManifestFullyDelivered(manifest: ShippingManifest, deliveredTrackingCodes: [str]) -> bool:
@@ -311,7 +311,7 @@ fn isManifestFullyDelivered(manifest: ShippingManifest, deliveredTrackingCodes: 
   true
 
 fn createDefaultShippingRate(carrierName: str, basePriceCents: int) -> ShippingRate:
-  let rate = {
+  rate := {
     carrier: carrierName,
     serviceLevel: "EXPEDITED",
     baseCostCents: basePriceCents,
@@ -328,7 +328,7 @@ fn calculateEstimatedFulfillmentHours(distanceKm: int, isExpress: bool) -> int:
   72
 
 fn summarizeBatchShipment(batch: FulfillmentBatch, postageCents: int) -> BatchShipmentSummary:
-  let summary = {
+  summary := {
     batchId: batch.batchId,
     successfulCount: batch.totalPackages,
     failedCount: 0,
@@ -342,13 +342,13 @@ fn shouldAutoReconcileDispute(record: DisputeRecord, autoSettleMaxCents: int) ->
   record.chargebackCents <= autoSettleMaxCents
 
 fn computeTotalTaxOnCart(cart: ShoppingCart, rate: TaxRate) -> int:
-  let subtotal = calculateCartSubtotalCents(cart.items)
+  subtotal := calculateCartSubtotalCents(cart.items)
   ((subtotal * rate.basisPoints) / 10000).floor()
 
 fn formatNotificationPreview(notif: OrderNotification) -> str = "[" + notif.channel + "] To: " + notif.recipientEmail + " | " + notif.subject
 
 fn markNotificationSent(notif: OrderNotification) -> OrderNotification:
-  let updated = { ...notif, isSent: true }
+  updated := { ...notif, isSent: true }
   updated
 
 fn evaluateExpressEligibility(subtotalCents: int, customerTier: str) -> bool:
@@ -357,8 +357,8 @@ fn evaluateExpressEligibility(subtotalCents: int, customerTier: str) -> bool:
   subtotalCents >= 20000
 
 fn buildWarehouseStatusReport(warehouse: WarehouseLocation) -> str:
-  let load = calculateWarehouseLoadPercent(warehouse)
-  let mut status = "NORMAL"
+  load := calculateWarehouseLoadPercent(warehouse)
+  status ::= "NORMAL"
   if load >= 90:
     status = "OVERLOADED"
   elif load >= 75:
@@ -375,15 +375,15 @@ fn canProcessImmediateRefund(profile: CustomerProfile, refundCents: int) -> bool
   refundCents <= 10000
 
 fn calculateFulfillmentSla(orderId: str, createdAt: int, isExpress: bool, actualShippedAt: int) -> SlaEvaluationResult:
-  let mut allowedHours = 48
+  allowedHours ::= 48
   if isExpress:
     allowedHours = 24
-  let targetTimestamp = createdAt + (allowedHours * 3600)
-  let isBreached = actualShippedAt > targetTimestamp
-  let mut reason = "ON_TIME"
+  targetTimestamp := createdAt + (allowedHours * 3600)
+  isBreached := actualShippedAt > targetTimestamp
+  reason ::= "ON_TIME"
   if isBreached:
     reason = "PROCESSING_DELAY"
-  let res = {
+  res := {
     orderId: orderId,
     targetDispatchTimestamp: targetTimestamp,
     isBreached: isBreached,
@@ -392,9 +392,9 @@ fn calculateFulfillmentSla(orderId: str, createdAt: int, isExpress: bool, actual
   res
 
 fn reconcilePaymentBatch(reportId: str, batchId: str, expectedCents: int, settledCents: int) -> ReconciliationReport:
-  let diff = expectedCents - settledCents
-  let isBalanced = diff == 0
-  let rep = {
+  diff := expectedCents - settledCents
+  isBalanced := diff == 0
+  rep := {
     reportId: reportId,
     batchId: batchId,
     expectedTotalCents: expectedCents,
@@ -405,5 +405,5 @@ fn reconcilePaymentBatch(reportId: str, batchId: str, expectedCents: int, settle
   rep
 
 fn checkCarrierRateExpired(rate: ShippingRate, quoteTimestamp: int, currentTimestamp: int) -> bool:
-  let maxAgeSeconds = 86400
+  maxAgeSeconds := 86400
   (currentTimestamp - quoteTimestamp) > maxAgeSeconds

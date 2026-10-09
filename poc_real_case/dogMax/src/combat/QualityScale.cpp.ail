@@ -6,14 +6,14 @@ enum QualityTier:
   Rare
 
 fn qualityStatFactor(qualityScore:int, minimumFactor:float) -> float:
-  let clampedScore:int = clamp(qualityScore, 1, 100)
-  let qPart:float = clampedScore.toFloat() / 100.0
-  let minimum:float = clamp(minimumFactor, 0.0, 1.0)
+  clampedScore:int := clamp(qualityScore, 1, 100)
+  qPart:float := clampedScore.toFloat() / 100.0
+  minimum:float := clamp(minimumFactor, 0.0, 1.0)
   ret minimum + ((1.0 - minimum) * qPart)
 
 fn universalMultiplier(qualityScore:int, itemLevel:int, minimumFactor:float) -> float:
-  let factor:float = qualityStatFactor(qualityScore, minimumFactor)
-  let levelClamped:int = max(1, itemLevel)
+  factor:float := qualityStatFactor(qualityScore, minimumFactor)
+  levelClamped:int := max(1, itemLevel)
   ret factor * levelClamped.toFloat()
 
 fn qualityStatMultiplier(tier:QualityTier, uncommonMult:float, rareMult:float, commonMult:float) -> float:

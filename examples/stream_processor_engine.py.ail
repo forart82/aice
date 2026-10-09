@@ -15,19 +15,19 @@ type EnrichedSensorTelemetry: sensorId:!s, deviceType:!s, tempCelsius:!f, tempFa
 type StreamExecutionResult: statusMessage:!s, processedBatches:!i, emittedPoints:!i, anomaliesFlagged:!i, elapsedTimeMs:!i, isSuccessful:!b
 
 fn createStreamWindow(wId:!s, metric:!s, startNano:!i, endNano:!i) -> StreamProcessingWindow:
-  let window = StreamProcessingWindow(wId, metric, startNano, endNano, 0, 0.0, 9999999.0, -9999999.0, false)
+  window := StreamProcessingWindow(wId, metric, startNano, endNano, 0, 0.0, 9999999.0, -9999999.0, false)
   window
 
 fn addPointToWindow(w:StreamProcessingWindow, point:MetricPoint) -> StreamProcessingWindow:
   if w.isClosed:
     ret w
-  let mut minV = w.minimumValue
+  minV ::= w.minimumValue
   if point.metricValue < minV:
     minV = point.metricValue
-  let mut maxV = w.maximumValue
+  maxV ::= w.maximumValue
   if point.metricValue > maxV:
     maxV = point.metricValue
-  let updated = {
+  updated := {
     ...w,
     recordCount: w.recordCount + 1,
     sumTotal: w.sumTotal + point.metricValue,
@@ -37,7 +37,7 @@ fn addPointToWindow(w:StreamProcessingWindow, point:MetricPoint) -> StreamProces
   updated
 
 fn closeStreamWindow(w:StreamProcessingWindow) -> StreamProcessingWindow:
-  let closed = { ...w, isClosed: true }
+  closed := { ...w, isClosed: true }
   closed
 
 fn calculateWindowMean(w:StreamProcessingWindow) -> !f:
@@ -46,15 +46,15 @@ fn calculateWindowMean(w:StreamProcessingWindow) -> !f:
   w.sumTotal / (w.recordCount * 1.0)
 
 fn createWatermarkTracker(sId:!s, maxLatenessSec:!i, nowNano:!i) -> WatermarkTracker:
-  let tracker = WatermarkTracker(sId, nowNano, maxLatenessSec * 1000000000, 0, nowNano)
+  tracker := WatermarkTracker(sId, nowNano, maxLatenessSec * 1000000000, 0, nowNano)
   tracker
 
 fn advanceWatermark(tracker:WatermarkTracker, eventTimestampNano:!i) -> WatermarkTracker:
-  let candidateWatermark = eventTimestampNano - tracker.maxAllowedLatenessNano
-  let mut newWatermark = tracker.currentWatermarkNano
+  candidateWatermark := eventTimestampNano - tracker.maxAllowedLatenessNano
+  newWatermark ::= tracker.currentWatermarkNano
   if candidateWatermark > newWatermark:
     newWatermark = candidateWatermark
-  let updated = {
+  updated := {
     ...tracker,
     currentWatermarkNano: newWatermark,
     lastUpdatedTimestamp: eventTimestampNano
@@ -64,14 +64,14 @@ fn advanceWatermark(tracker:WatermarkTracker, eventTimestampNano:!i) -> Watermar
 fn isEventLate(tracker:WatermarkTracker, eventTimestampNano:!i) -> !b = eventTimestampNano < tracker.currentWatermarkNano
 
 fn recordLateEventDropped(tracker:WatermarkTracker) -> WatermarkTracker:
-  let updated = {
+  updated := {
     ...tracker,
     totalLateEventsDropped: tracker.totalLateEventsDropped + 1
   }
   updated
 
 fn createSlidingWindowConfig(durationSec:!i, slideSec:!i, latenessSec:!i) -> SlidingWindowConfig:
-  let cfg = SlidingWindowConfig(durationSec, slideSec, latenessSec, false)
+  cfg := SlidingWindowConfig(durationSec, slideSec, latenessSec, false)
   cfg
 
 fn validateSlidingWindowConfig(cfg: SlidingWindowConfig) -> bool:
@@ -91,7 +91,7 @@ fn calculateWindowCountInSpan(cfg: SlidingWindowConfig, spanSeconds: int) -> int
   (((spanSeconds - cfg.windowDurationSeconds) / cfg.slideIntervalSeconds).floor()) + 1
 
 fn createEmaState(alpha: float) -> EmaState:
-  let ema = {
+  ema := {
     alphaRate: alpha,
     currentEma: 0.0,
     sampleCount: 0,
@@ -102,13 +102,13 @@ fn createEmaState(alpha: float) -> EmaState:
 
 fn updateEma(ema:EmaState, newValue:!f, timestampNano:!i) -> EmaState:
   if ema.sampleCount == 0:
-    let initial = { ...ema, currentEma: newValue, sampleCount: 1, varianceEma: 0.0, lastTimestampNano: timestampNano }
+    initial := { ...ema, currentEma: newValue, sampleCount: 1, varianceEma: 0.0, lastTimestampNano: timestampNano }
     ret initial
-  let diff = newValue - ema.currentEma
-  let updatedEma = ema.currentEma + (ema.alphaRate * diff)
-  let diffSq = diff * diff
-  let updatedVar = ema.varianceEma + (ema.alphaRate * (diffSq - ema.varianceEma))
-  let updated = {
+  diff := newValue - ema.currentEma
+  updatedEma := ema.currentEma + (ema.alphaRate * diff)
+  diffSq := diff * diff
+  updatedVar := ema.varianceEma + (ema.alphaRate * (diffSq - ema.varianceEma))
+  updated := {
     ...ema,
     currentEma: updatedEma,
     sampleCount: ema.sampleCount + 1,
@@ -120,20 +120,20 @@ fn updateEma(ema:EmaState, newValue:!f, timestampNano:!i) -> EmaState:
 fn computeStandardDeviationFromVariance(varianceVal: float) -> float:
   if varianceVal <= 0.0:
     ret 0.0
-  let mut guess = varianceVal / 2.0
+  guess ::= varianceVal / 2.0
   if guess == 0.0:
     guess = 1.0
-  let mut iterCount = 0
-  let mut currentGuess = guess
+  iterCount ::= 0
+  currentGuess ::= guess
   while iterCount < 8:
-    let nextGuess = 0.5 * (currentGuess + (varianceVal / currentGuess))
+    nextGuess := 0.5 * (currentGuess + (varianceVal / currentGuess))
     currentGuess = nextGuess
     iterCount = iterCount + 1
   currentGuess
 
 fn detectZScoreAnomaly(metric: MetricPoint, ema: EmaState, sigmaMultiplier: float, nowMs: int) -> ZScoreAnomaly:
   if ema.sampleCount < 5:
-    let emptyResult = {
+    emptyResult := {
       metricName: metric.metricName,
       observedValue: metric.metricValue,
       meanReference: ema.currentEma,
@@ -143,9 +143,9 @@ fn detectZScoreAnomaly(metric: MetricPoint, ema: EmaState, sigmaMultiplier: floa
       detectionTimeMs: nowMs
     }
     ret emptyResult
-  let stdDev = computeStandardDeviationFromVariance(ema.varianceEma)
+  stdDev := computeStandardDeviationFromVariance(ema.varianceEma)
   if stdDev <= 0.0001:
-    let zeroDev = {
+    zeroDev := {
       metricName: metric.metricName,
       observedValue: metric.metricValue,
       meanReference: ema.currentEma,
@@ -155,13 +155,13 @@ fn detectZScoreAnomaly(metric: MetricPoint, ema: EmaState, sigmaMultiplier: floa
       detectionTimeMs: nowMs
     }
     ret zeroDev
-  let diff = metric.metricValue - ema.currentEma
-  let zScore = diff / stdDev
-  let mut absZ = zScore
+  diff := metric.metricValue - ema.currentEma
+  zScore := diff / stdDev
+  absZ ::= zScore
   if absZ < 0.0:
     absZ = 0.0 - absZ
-  let flagged = absZ >= sigmaMultiplier
-  let anomaly = {
+  flagged := absZ >= sigmaMultiplier
+  anomaly := {
     metricName: metric.metricName,
     observedValue: metric.metricValue,
     meanReference: ema.currentEma,
@@ -173,57 +173,57 @@ fn detectZScoreAnomaly(metric: MetricPoint, ema: EmaState, sigmaMultiplier: floa
   anomaly
 
 fn createAlertDispatchQueue(channel:!s, capacity:!i) -> AlertDispatchQueue:
-  let queue = AlertDispatchQueue(channel, 0, capacity, 0, false)
+  queue := AlertDispatchQueue(channel, 0, capacity, 0, false)
   queue
 
 fn enqueueAlert(q:AlertDispatchQueue) -> AlertDispatchQueue:
   if q.pendingAlertCount >= q.maxQueueCapacity:
-    let dropped = { ...q, droppedAlertCount: q.droppedAlertCount + 1, isThrottled: true }
+    dropped := { ...q, droppedAlertCount: q.droppedAlertCount + 1, isThrottled: true }
     ret dropped
-  let enqueued = { ...q, pendingAlertCount: q.pendingAlertCount + 1 }
+  enqueued := { ...q, pendingAlertCount: q.pendingAlertCount + 1 }
   enqueued
 
 fn drainAlertQueue(q:AlertDispatchQueue, countToDrain:!i) -> AlertDispatchQueue:
-  let mut remaining = q.pendingAlertCount - countToDrain
+  remaining ::= q.pendingAlertCount - countToDrain
   if remaining < 0:
     remaining = 0
-  let drained = { ...q, pendingAlertCount: remaining }
+  drained := { ...q, pendingAlertCount: remaining }
   drained
 
 fn createTokenBucketLimiter(capacity:!i, refillRatePerSec:!f, nowMs:!i) -> TokenBucketLimiter:
-  let limiter = TokenBucketLimiter(capacity, capacity * 1.0, refillRatePerSec, nowMs)
+  limiter := TokenBucketLimiter(capacity, capacity * 1.0, refillRatePerSec, nowMs)
   limiter
 
 fn refillTokenBucket(limiter:TokenBucketLimiter, nowMs:!i) -> TokenBucketLimiter:
-  let elapsedMs = nowMs - limiter.lastRefillTimestampMs
+  elapsedMs := nowMs - limiter.lastRefillTimestampMs
   if elapsedMs <= 0:
     ret limiter
-  let elapsedSeconds = elapsedMs / 1000.0
-  let tokensToAdd = elapsedSeconds * limiter.refillRatePerSec
-  let mut newTokens = limiter.tokensAvailable + tokensToAdd
-  let capFloat = limiter.bucketCapacity * 1.0
+  elapsedSeconds := elapsedMs / 1000.0
+  tokensToAdd := elapsedSeconds * limiter.refillRatePerSec
+  newTokens ::= limiter.tokensAvailable + tokensToAdd
+  capFloat := limiter.bucketCapacity * 1.0
   if newTokens > capFloat:
     newTokens = capFloat
-  let updated = { ...limiter, tokensAvailable: newTokens, lastRefillTimestampMs: nowMs }
+  updated := { ...limiter, tokensAvailable: newTokens, lastRefillTimestampMs: nowMs }
   updated
 
 fn tryConsumeTokens(limiter:TokenBucketLimiter, tokensRequested:!i) -> !b:
-  let reqFloat = tokensRequested * 1.0
+  reqFloat := tokensRequested * 1.0
   limiter.tokensAvailable >= reqFloat
 
 fn consumeTokensIfAvailable(limiter:TokenBucketLimiter, tokensRequested:!i) -> TokenBucketLimiter:
-  let reqFloat = tokensRequested * 1.0
+  reqFloat := tokensRequested * 1.0
   if limiter.tokensAvailable >= reqFloat:
-    let consumed = { ...limiter, tokensAvailable: limiter.tokensAvailable - reqFloat }
+    consumed := { ...limiter, tokensAvailable: limiter.tokensAvailable - reqFloat }
     ret consumed
   limiter
 
 fn computeCongestionLevel(availableTokens: float, capacity: int) -> int:
   if capacity <= 0:
     ret 100
-  let capFloat = capacity * 1.0
-  let usedTokens = capFloat - availableTokens
-  let pct = ((usedTokens * 100.0) / capFloat).floor()
+  capFloat := capacity * 1.0
+  usedTokens := capFloat - availableTokens
+  pct := ((usedTokens * 100.0) / capFloat).floor()
   if pct < 0:
     ret 0
   if pct > 100:
@@ -231,16 +231,16 @@ fn computeCongestionLevel(availableTokens: float, capacity: int) -> int:
   pct
 
 fn buildBackpressureSignal(sId: str, limiter: TokenBucketLimiter, nowMs: int) -> BackpressureSignal:
-  let congestion = computeCongestionLevel(limiter.tokensAvailable, limiter.bucketCapacity)
-  let mut delayMs = 0
-  let mut paused = false
+  congestion := computeCongestionLevel(limiter.tokensAvailable, limiter.bucketCapacity)
+  delayMs ::= 0
+  paused ::= false
   if congestion > 90:
     delayMs = 200
     paused = true
   else:
     if congestion > 70:
       delayMs = 50
-  let signal = {
+  signal := {
     streamId: sId,
     congestionLevelPercent: congestion,
     throttleDelayMs: delayMs,
@@ -250,15 +250,15 @@ fn buildBackpressureSignal(sId: str, limiter: TokenBucketLimiter, nowMs: int) ->
   signal
 
 fn createPartitionWorker(workerId:!s, partitionId:!i, nowMs:!i) -> PartitionWorkerState:
-  let worker = PartitionWorkerState(workerId, partitionId, 0, 0, 0, true, nowMs)
+  worker := PartitionWorkerState(workerId, partitionId, 0, 0, 0, true, nowMs)
   worker
 
 fn advanceWorkerOffset(worker:PartitionWorkerState, newHeadOffset:!i, commitOffset:!i) -> PartitionWorkerState:
-  let lag = newHeadOffset - commitOffset
-  let mut validLag = lag
+  lag := newHeadOffset - commitOffset
+  validLag ::= lag
   if validLag < 0:
     validLag = 0
-  let updated = {
+  updated := {
     ...worker,
     lastCommittedOffset: commitOffset,
     currentHeadOffset: newHeadOffset,
@@ -267,7 +267,7 @@ fn advanceWorkerOffset(worker:PartitionWorkerState, newHeadOffset:!i, commitOffs
   updated
 
 fn heartbeatWorker(worker:PartitionWorkerState, nowMs:!i) -> PartitionWorkerState:
-  let updated = {
+  updated := {
     ...worker,
     isWorkerAlive: true,
     lastHeartbeatTimeMs: nowMs
@@ -277,22 +277,22 @@ fn heartbeatWorker(worker:PartitionWorkerState, nowMs:!i) -> PartitionWorkerStat
 fn isWorkerHealthy(worker:PartitionWorkerState, nowMs:!i, maxHeartbeatTimeoutMs:!i) -> !b:
   if worker.isWorkerAlive == false:
     ret false
-  let elapsed = nowMs - worker.lastHeartbeatTimeMs
+  elapsed := nowMs - worker.lastHeartbeatTimeMs
   elapsed <= maxHeartbeatTimeoutMs
 
 fn createAccumulator(metricName:!s) -> AggregationAccumulator:
-  let acc = AggregationAccumulator(metricName, 0, 0.0, 9999999.0, -9999999.0, 0.0)
+  acc := AggregationAccumulator(metricName, 0, 0.0, 9999999.0, -9999999.0, 0.0)
   acc
 
 fn accumulateValue(acc:AggregationAccumulator, v:!f) -> AggregationAccumulator:
-  let mut minV = acc.minVal
+  minV ::= acc.minVal
   if v < minV:
     minV = v
-  let mut maxV = acc.maxVal
+  maxV ::= acc.maxVal
   if v > maxV:
     maxV = v
-  let sq = v * v
-  let updated = {
+  sq := v * v
+  updated := {
     ...acc,
     count: acc.count + 1,
     sumVal: acc.sumVal + v,
@@ -305,9 +305,9 @@ fn accumulateValue(acc:AggregationAccumulator, v:!f) -> AggregationAccumulator:
 fn computeAccumulatorVariance(acc:AggregationAccumulator) -> !f:
   if acc.count <= 1:
     ret 0.0
-  let countF = acc.count * 1.0
-  let mean = acc.sumVal / countF
-  let varianceVal = (acc.squaredSumVal / countF) - (mean * mean)
+  countF := acc.count * 1.0
+  mean := acc.sumVal / countF
+  varianceVal := (acc.squaredSumVal / countF) - (mean * mean)
   if varianceVal < 0.0:
     ret 0.0
   varianceVal
@@ -324,11 +324,11 @@ fn evaluateSensorQuality(reading:SensorReading) -> !s:
   "NOMINAL"
 
 fn enrichSensorReading(reading:SensorReading, nowSec:!i) -> EnrichedSensorTelemetry:
-  let fahrenheit = convertCelsiusToFahrenheit(reading.temperatureCelsius)
-  let overheating = reading.temperatureCelsius > 65.0
-  let lowBattery = reading.batteryVolts < 3.0
-  let quality = evaluateSensorQuality(reading)
-  let enriched = EnrichedSensorTelemetry(reading.sensorId, reading.deviceType, reading.temperatureCelsius, fahrenheit, overheating, lowBattery, quality, nowSec)
+  fahrenheit := convertCelsiusToFahrenheit(reading.temperatureCelsius)
+  overheating := reading.temperatureCelsius > 65.0
+  lowBattery := reading.batteryVolts < 3.0
+  quality := evaluateSensorQuality(reading)
+  enriched := EnrichedSensorTelemetry(reading.sensorId, reading.deviceType, reading.temperatureCelsius, fahrenheit, overheating, lowBattery, quality, nowSec)
   enriched
 
 fn shouldRouteToHighPrioritySink(enriched:EnrichedSensorTelemetry) -> !b:
@@ -346,14 +346,14 @@ fn calculateStreamingThroughput(pointsProcessed:!i, durationSeconds:!i) -> !i:
   (pointsProcessed / durationSeconds).floor()
 
 fn createTelemetryReport(engineId:!s, uptimeSec:!i, points:!i, anomalies:!i, drops:!i, sinks:!i) -> StreamProcessorTelemetry:
-  let rps = calculateStreamingThroughput(points, uptimeSec)
-  let telemetry = StreamProcessorTelemetry(engineId, uptimeSec, points, anomalies, drops, sinks, rps)
+  rps := calculateStreamingThroughput(points, uptimeSec)
+  telemetry := StreamProcessorTelemetry(engineId, uptimeSec, points, anomalies, drops, sinks, rps)
   telemetry
 
 fn formatPipelineStatusLine(telemetry: StreamProcessorTelemetry) -> str:
-  let part1 = "Engine=" + telemetry.engineId + " Ingested=" + telemetry.totalIngestedPoints.toString()
-  let part2 = " Anomalies=" + telemetry.totalAnomaliesDetected.toString() + " Drops=" + telemetry.totalLateEventsDropped.toString()
-  let part3 = " RPS=" + telemetry.averageThroughputRps.toString()
+  part1 := "Engine=" + telemetry.engineId + " Ingested=" + telemetry.totalIngestedPoints.toString()
+  part2 := " Anomalies=" + telemetry.totalAnomaliesDetected.toString() + " Drops=" + telemetry.totalLateEventsDropped.toString()
+  part3 := " RPS=" + telemetry.averageThroughputRps.toString()
   part1 + part2 + part3
 
 fn processMetricBatch(
@@ -363,22 +363,22 @@ fn processMetricBatch(
   sigma: !f,
   nowMs: !i
 ) -> StreamExecutionResult:
-  let mut processedCount = 0
-  let mut anomalyCount = 0
-  let mut currentEma = ema
-  let mut currentTracker = tracker
+  processedCount ::= 0
+  anomalyCount ::= 0
+  currentEma ::= ema
+  currentTracker ::= tracker
 
   for point in points:
-    let isLate = isEventLate(currentTracker, point.timestampNano)
+    isLate := isEventLate(currentTracker, point.timestampNano)
     if isLate:
       currentTracker = recordLateEventDropped(currentTracker)
     else:
       currentTracker = advanceWatermark(currentTracker, point.timestampNano)
       currentEma = updateEma(currentEma, point.metricValue, point.timestampNano)
-      let anomaly = detectZScoreAnomaly(point, currentEma, sigma, nowMs)
+      anomaly := detectZScoreAnomaly(point, currentEma, sigma, nowMs)
       if anomaly.isAnomaly:
         anomalyCount = anomalyCount + 1
       processedCount = processedCount + 1
 
-  let result = StreamExecutionResult("BATCH_PROCESSED_SUCCESSFULLY", 1, processedCount, anomalyCount, 12, true)
+  result := StreamExecutionResult("BATCH_PROCESSED_SUCCESSFULLY", 1, processedCount, anomalyCount, 12, true)
   result

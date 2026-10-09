@@ -3,10 +3,10 @@
 class Grid(numCells:int = 475):
 
   fn createStartZone() -> void:
-    let mut cellCounter:int = 0
-    let mut height:int = 32
+    cellCounter:int ::= 0
+    height:int ::= 32
     while height < 608:
-      let mut width:int = 0
+      width:int ::= 0
       while width < 800:
         cellCounter = cellCounter + 1
         width = width + 32

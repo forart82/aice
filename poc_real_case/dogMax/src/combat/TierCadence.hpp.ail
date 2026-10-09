@@ -12,9 +12,9 @@ class TierCadence:
       ret 0
     if progress >= 1.0:
       ret 4
-    let band:int = floor(progress * 5.0)
+    band:int := floor(progress * 5.0)
     ret clamp(band, 0, 4)
 
   fn cadenceFor(progress:float) -> TierCadencePair:
-    let idx:int = this.quintileFor(progress)
+    idx:int := this.quintileFor(progress)
     ret this.bands[idx]
