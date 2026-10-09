@@ -1,0 +1,109 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Bidirectional Roundtrip Transpilation & Lossless Lens Engine.
+ * Verifies Bancilhon & Spyratos Put/Get Law:
+ *   Put(Get(c), Omega) == c
+ */
+
+import { emitTarget, type TargetLanguage } from "../emitters/index.js";
+import { AilGenerator } from "./ail-generator.js";
+import { CssDecompiler } from "./css-decompiler.js";
+import { HtmlDecompiler } from "./html-decompiler.js";
+import { TsDecompiler } from "./ts-decompiler.js";
+
+export interface RoundtripResult {
+  target: TargetLanguage;
+  original: string;
+  ail: string;
+  reconstructed: string;
+  isIdentical: boolean;
+  diff?: string;
+  triviaEntriesCount: number;
+}
+
+export function executeRoundtrip(
+  source: string,
+  target: TargetLanguage,
+  filePath = "source",
+): RoundtripResult {
+  let decompileResult: ReturnType<TsDecompiler["decompile"]>;
+
+  switch (target) {
+    case "typescript":
+    case "tsx": {
+      const decompiler = new TsDecompiler(source, filePath, { isTsx: target === "tsx" });
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "css": {
+      const decompiler = new CssDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "html": {
+      const decompiler = new HtmlDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    default:
+      throw new Error(`Unsupported target language for roundtrip: ${target}`);
+  }
+
+  const { ast, trivia } = decompileResult;
+
+  // Generate AIL source code
+  const ailGenerator = new AilGenerator({ trivia });
+  const ail = ailGenerator.generate(ast);
+
+  // Put: Emit back to target language with trivia
+  const reconstructed = emitTarget(ast, target, { trivia });
+
+  // Normalize whitespace for diff comparison
+  const normOriginal = normalizeWhitespace(source);
+  const normReconstructed = normalizeWhitespace(reconstructed);
+  const isIdentical = normOriginal === normReconstructed;
+
+  let diff: string | undefined;
+  if (!isIdentical) {
+    diff = generateSimpleDiff(normOriginal, normReconstructed);
+  }
+
+  return {
+    target,
+    original: source,
+    ail,
+    reconstructed,
+    isIdentical,
+    diff,
+    triviaEntriesCount: trivia.size(),
+  };
+}
+
+function normalizeWhitespace(text: string): string {
+  return text
+    .trim()
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+$/gm, "");
+}
+
+function generateSimpleDiff(expected: string, actual: string): string {
+  const expLines = expected.split("\n");
+  const actLines = actual.split("\n");
+
+  const diffLines: string[] = [];
+  const max = Math.max(expLines.length, actLines.length);
+
+  for (let i = 0; i < max; i++) {
+    const exp = expLines[i] ?? "";
+    const act = actLines[i] ?? "";
+    if (exp !== act) {
+      diffLines.push(`Line ${i + 1}:`);
+      diffLines.push(`- ${exp}`);
+      diffLines.push(`+ ${act}`);
+    }
+  }
+
+  return diffLines.join("\n");
+}
