@@ -8,6 +8,7 @@ export * from "./decompiler/index.js";
 export * from "./emitters/index.js";
 export * from "./lsp/index.js";
 export * from "./runner/index.js";
+export * from "./shield/index.js";
 export * from "./tokenomics/index.js";
 export * from "./transpiler/index.js";
 export * from "./typechecker/index.js";
