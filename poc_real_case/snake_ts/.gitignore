@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production & Build outputs
+dist/
+dist-ssr/
+*.local
+*.apk
+ouroboros-galaxy.apk
+ouroboros-ascension.apk
+
+# Android Build artifacts
+android/app/build/
+android/.gradle/
+android/build/
+android/captures/
+android/.idea/
+android/*.iml
+android/app/*.iml
+android/local.properties
+
+# Logs and testing
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+coverage/
+*.lcov
+test-results/
+playwright-report/
+
+# IDE & OS
+.DS_Store
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+Thumbs.db

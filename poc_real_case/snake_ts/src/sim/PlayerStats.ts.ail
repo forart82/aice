@@ -1,0 +1,48 @@
+module poc_real_case/snake_ts/src/sim/PlayerStats
+
+pub class PlayerStats:
+  MaxHp = 100
+  Speed = 1
+  DashCooldown = 3
+  BitePower = 25
+  MagnetRadius = 70
+  CritChance = 0.05
+  CritMult = 1.5
+  Armor = 0
+  MaxShield = 0
+  XpGain = 1
+  ShardGain = 1
+  ComboWindow = 1
+  Thorns = 0
+  SkillCooldown = 20
+  HpRegen = 0
+  fn get_maxHp() -> int = this.MaxHp
+  fn set_maxHp(v:int) -> void = this.MaxHp = v
+  fn get_speed() -> int = this.Speed
+  fn set_speed(v:int) -> void = this.Speed = v
+  fn get_dashCooldown() -> int = this.DashCooldown
+  fn set_dashCooldown(v:int) -> void = this.DashCooldown = v
+  fn get_bitePower() -> int = this.BitePower
+  fn set_bitePower(v:int) -> void = this.BitePower = v
+  fn get_magnetRadius() -> int = this.MagnetRadius
+  fn set_magnetRadius(v:int) -> void = this.MagnetRadius = v
+  fn get_critChance() -> int = this.CritChance
+  fn set_critChance(v:int) -> void = this.CritChance = v
+  fn get_critMult() -> int = this.CritMult
+  fn set_critMult(v:int) -> void = this.CritMult = v
+  fn get_armor() -> int = this.Armor
+  fn set_armor(v:int) -> void = this.Armor = v
+  fn get_maxShield() -> int = this.MaxShield
+  fn set_maxShield(v:int) -> void = this.MaxShield = v
+  fn get_xpGain() -> int = this.XpGain
+  fn set_xpGain(v:int) -> void = this.XpGain = v
+  fn get_shardGain() -> int = this.ShardGain
+  fn set_shardGain(v:int) -> void = this.ShardGain = v
+  fn get_comboWindow() -> int = this.ComboWindow
+  fn set_comboWindow(v:int) -> void = this.ComboWindow = v
+  fn get_thorns() -> int = this.Thorns
+  fn set_thorns(v:int) -> void = this.Thorns = v
+  fn get_skillCooldown() -> int = this.SkillCooldown
+  fn set_skillCooldown(v:int) -> void = this.SkillCooldown = v
+  fn get_hpRegen() -> int = this.HpRegen
+  fn set_hpRegen(v:int) -> void = this.HpRegen = v

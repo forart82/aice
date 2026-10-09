@@ -1,0 +1,131 @@
+module poc_real_case/snake_ts/src/sim/CombatSkills
+
+from "../core/MathX" import MathX
+from "../core/Rng" import Rng
+from "../core/Services" import Services
+from "./FoodItem" import FoodItem
+from "./SnakePlayer" import Afterimage
+from "./CombatSystem" import CombatSystem
+from "./World" import World
+
+fn activateSkill(sys:CombatSystem, world:World) -> bool:
+  let player = World.getPlayer(world)
+  if not player or not player.alive ?? player.Alive:
+    ret false
+  if not player.skillReady and not player.SkillReady:
+    Services.sound.playError()
+    ret false
+  let stats = player.stats or player.Stats
+  let scooldown = stats.skillCooldown ?? stats.SkillCooldown ?? 20
+  player.skillCooldownTimer = scooldown
+  player.SkillCooldownTimer = scooldown
+  let classConfig = player.classConfig or player.ClassConfig
+  let skill = classConfig?.skill or { icon: "✨", name: "Skill", desc: "", cooldown: 20 }
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let pcol = classConfig?.color or classConfig?.Color or "#00f0b5"
+  Services.fx.addText(px, py - 56, nil, pcol, 18, true)
+  let classId = player.classId or player.ClassId
+  true
+
+fn skillVerdantBloom(_sys:CombatSystem, world:World) -> void:
+  let player = World.getPlayer(world)
+  if not player:
+    ret
+  let stats = player.stats or player.Stats
+  let maxHp = stats.maxHp ?? stats.MaxHp ?? 100
+  let healed = player.heal(maxHp * 0.2)
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let arenaW = world.arenaW ?? world.ArenaW ?? 1280
+  let arenaH = world.arenaH ?? world.ArenaH ?? 720
+  let foods = World.getFoods(world)
+  Services.fx.ringShockwave(px, py, "#10b981", 70, 0.02)
+  Services.fx.burst(px, py, "#10b981", 26, 5, 4)
+  if healed > 0:
+    Services.fx.addText(px, py - 22, nil, "#10b981", 17, true)
+  if foods != nil:
+    nil
+  Services.sound.playLevelUp()
+
+fn skillUmbralBlink(sys:CombatSystem, world:World) -> void:
+  let player = World.getPlayer(world)
+  if not player:
+    ret
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let pa = player.angle ?? player.Angle
+  let pr = player.headRadius ?? player.HeadRadius ?? 16
+  let arenaW = world.arenaW ?? world.ArenaW ?? 1280
+  let arenaH = world.arenaH ?? world.ArenaH ?? 720
+  let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+  let cx = px
+  let cy = py
+  let dist = 200
+  let nx = MathX.clamp(px + Math.cos(pa) * dist, pr, arenaW - pr)
+  let ny = MathX.clamp(py + Math.sin(pa) * dist, pr, arenaH - pr)
+  player.x = nx
+  player.X = nx
+  player.y = ny
+  player.Y = ny
+  player.invulnerableTimer = Math.max(player.invulnerableTimer ?? player.InvulnerableTimer ?? 0, 0.6)
+  player.InvulnerableTimer = player.invulnerableTimer
+  let afterimages = player.afterimages or player.Afterimages
+  if afterimages != nil:
+    nil
+  Services.fx.ringShockwave(cx, cy, "#a855f7", 40, 0.03)
+  Services.fx.ringShockwave(nx, ny, "#c77dff", 30, 0.03)
+  sys.explodeAt(world, cx, cy, 140, 130 * dmgBonus, "#a855f7")
+  Services.sound.playDash()
+
+fn skillTitanRoar(sys:CombatSystem, world:World) -> void:
+  let player = World.getPlayer(world)
+  if not player:
+    ret
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+  let radius = 230
+  player.armorBuffTimer = 5
+  player.ArmorBuffTimer = 5
+  Services.fx.ringShockwave(px, py, "#ef4444", radius * 0.6, 0.012)
+  Services.fx.flash("#ff4d6d", 0.2, 0.25)
+  Services.fx.shake(14, 18)
+  Services.sound.playExplosion(1)
+  let dmg = 85 * dmgBonus
+  let enemies = World.getEnemies(world)
+  if enemies != nil:
+    nil
+  let bosses = World.getBosses(world)
+
+fn skillChainStorm(sys:CombatSystem, world:World) -> void:
+  let player = World.getPlayer(world)
+  if not player:
+    ret
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let lvl = player.level ?? player.Level ?? 1
+  let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+  sys.chainLightning(world, px, py, 8, 110 + lvl * 12 * dmgBonus, 380, true)
+
+fn skillSupernova(sys:CombatSystem, world:World) -> void:
+  let player = World.getPlayer(world)
+  if not player:
+    ret
+  let px = player.x ?? player.X
+  let py = player.y ?? player.Y
+  let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+  let radius = 260
+  Services.fx.ringShockwave(px, py, "#f59e0b", radius * 0.6, 0.01)
+  Services.fx.flash("#ffb703", 0.35, 0.4)
+  Services.fx.burst(px, py, "#ffb703", 40, 8, 5)
+  Services.fx.shake(16, 20)
+  Services.sound.playExplosion(1)
+  let dmg = 120 * dmgBonus
+  let enemies = World.getEnemies(world)
+  if enemies != nil:
+    nil
+  let supernovaBosses = World.getBosses(world)
+  let foods = World.getFoods(world)
+  if foods != nil:
+    nil

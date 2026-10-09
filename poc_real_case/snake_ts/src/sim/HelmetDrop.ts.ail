@@ -1,0 +1,58 @@
+module poc_real_case/snake_ts/src/sim/HelmetDrop
+
+from "../core/MathX.js" import MathX
+from "../core/Rng.js" import Rng
+from "../data/Helmets.js" import HelmetDef, HelmetRarity, HELMET_RARITY_COLORS
+
+pub class HelmetDrop:
+  X: int
+  Y: int
+  Vx: int
+  Vy: int
+  Radius = 22
+  Helmet: HelmetDef
+  Rarity: HelmetRarity
+  Color: str
+  Pulse: int
+  SpawnScale = 0
+  Life = 0
+  Dead = false
+  fn get_x() -> int = this.X
+  fn set_x(v:int) -> void = this.X = v
+  fn get_y() -> int = this.Y
+  fn set_y(v:int) -> void = this.Y = v
+  fn get_radius() -> int = this.Radius
+  fn set_radius(v:int) -> void = this.Radius = v
+  fn get_helmet() -> HelmetDef = this.Helmet
+  fn set_helmet(v:HelmetDef) -> void = this.Helmet = v
+  fn get_rarity() -> HelmetRarity = this.Rarity
+  fn set_rarity(v:HelmetRarity) -> void = this.Rarity = v
+  fn get_color() -> str = this.Color
+  fn set_color(v:str) -> void = this.Color = v
+  fn get_dead() -> bool = this.Dead
+  fn set_dead(v:bool) -> void = this.Dead = v
+  fn get_pulse() -> int = this.Pulse
+  fn set_pulse(v:int) -> void = this.Pulse = v
+  fn get_spawnScale() -> int = this.SpawnScale
+  fn set_spawnScale(v:int) -> void = this.SpawnScale = v
+  fn constructor(x:int, y:int, helmet:HelmetDef):
+    this.X = x
+    this.Y = y
+    this.Helmet = helmet
+    this.Rarity = helmet.Rarity or helmet.rarity or "common".toLowerCase()
+    this.Color = HELMET_RARITY_COLORS[this.Rarity] or "#ffd166"
+    this.Vx = Rng.Shared.range(-35, 35)
+    this.Vy = Rng.Shared.range(-35, 35)
+    this.Pulse = Rng.Shared.angle()
+  fn Update(dt:int) -> void:
+    this.Pulse = this.Pulse + dt * 3.6
+    this.Life = this.Life + dt
+    if this.SpawnScale < 1:
+      this.SpawnScale = Math.min(1, this.SpawnScale + dt * 4)
+    this.X = this.X + this.Vx * dt
+    this.Y = this.Y + this.Vy * dt
+    let drag = MathX.decay(0.9, dt)
+    this.Vx = this.Vx * drag
+    this.Vy = this.Vy * drag
+  fn update(dt:int) -> void:
+    this.Update(dt)

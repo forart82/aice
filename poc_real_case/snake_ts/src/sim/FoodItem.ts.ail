@@ -1,0 +1,101 @@
+module poc_real_case/snake_ts/src/sim/FoodItem
+
+from "../core/MathX.js" import MathX
+from "../core/Rng.js" import Rng
+from "../data/GameData.js" import GameData
+
+pub class FoodItem:
+  X: int
+  Y: int
+  Type: str
+  Color: str
+  XpValue: int
+  ScoreValue: int
+  Radius: int
+  HealAmount: int
+  Vx: int
+  Vy: int
+  Pulse: int
+  SpawnScale: int
+  Life: int
+  Dead: bool
+  fn get_x() -> int = this.X
+  fn set_x(v:int) -> void = this.X = v
+  fn get_y() -> int = this.Y
+  fn set_y(v:int) -> void = this.Y = v
+  fn get_type() -> str = this.Type
+  fn set_type(v:str) -> void = this.Type = v
+  fn get_color() -> str = this.Color
+  fn set_color(v:str) -> void = this.Color = v
+  fn get_xpValue() -> int = this.XpValue
+  fn set_xpValue(v:int) -> void = this.XpValue = v
+  fn get_scoreValue() -> int = this.ScoreValue
+  fn set_scoreValue(v:int) -> void = this.ScoreValue = v
+  fn get_radius() -> int = this.Radius
+  fn set_radius(v:int) -> void = this.Radius = v
+  fn get_healAmount() -> int = this.HealAmount
+  fn set_healAmount(v:int) -> void = this.HealAmount = v
+  fn get_vx() -> int = this.Vx
+  fn set_vx(v:int) -> void = this.Vx = v
+  fn get_vy() -> int = this.Vy
+  fn set_vy(v:int) -> void = this.Vy = v
+  fn get_pulse() -> int = this.Pulse
+  fn set_pulse(v:int) -> void = this.Pulse = v
+  fn get_spawnScale() -> int = this.SpawnScale
+  fn set_spawnScale(v:int) -> void = this.SpawnScale = v
+  fn get_life() -> int = this.Life
+  fn set_life(v:int) -> void = this.Life = v
+  fn get_dead() -> bool = this.Dead
+  fn set_dead(v:bool) -> void = this.Dead = v
+  fn constructor(x:int, y:int, type:str):
+    this.X = x
+    this.Y = y
+    if GameData.Foods.Has(type):
+      this.Type = type
+    else:
+      this.Type = "apple"
+    let def = GameData.Foods.Get(this.Type) ?? GameData.Foods.Get("apple")
+    this.Color = def.Color
+    this.XpValue = def.Xp
+    this.ScoreValue = def.Score
+    this.Radius = def.Radius
+    this.HealAmount = def.Heal
+    this.Vx = Rng.Shared.range(-30, 30)
+    this.Vy = Rng.Shared.range(-30, 30)
+    this.Pulse = Rng.Shared.angle()
+    this.SpawnScale = 0
+    this.Life = 0
+    this.Dead = false
+  fn Cook() -> bool:
+    if this.Type != "apple":
+      ret false
+    this.Type = "golden"
+    let def = GameData.Foods.Get("golden")
+    this.Color = def.Color
+    this.XpValue = def.Xp
+    this.ScoreValue = def.Score
+    this.Radius = def.Radius
+    true
+  fn cook() -> bool = this.Cook()
+  fn Update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) -> void:
+    this.Pulse = this.Pulse + dt * 4.2
+    this.Life = this.Life + dt
+    if this.SpawnScale < 1:
+      this.SpawnScale = Math.min(1, this.SpawnScale + dt * 5)
+    let dx = px - this.X
+    let dy = py - this.Y
+    let dist = MathX.safeLen(dx, dy)
+    if dist < magnetRadius:
+      let force = 1 - dist / magnetRadius * 620
+      this.Vx = this.Vx + dx / dist * force * dt
+      this.Vy = this.Vy + dy / dist * force * dt
+    if extraPull > 0:
+      this.Vx = this.Vx + dx / dist * extraPull * dt
+      this.Vy = this.Vy + dy / dist * extraPull * dt
+    this.X = this.X + this.Vx * dt
+    this.Y = this.Y + this.Vy * dt
+    let drag = MathX.decay(0.92, dt)
+    this.Vx = this.Vx * drag
+    this.Vy = this.Vy * drag
+  fn update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) -> void:
+    this.Update(dt, px, py, magnetRadius, extraPull)

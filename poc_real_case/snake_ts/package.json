@@ -1,0 +1,47 @@
+{
+  "name": "ouroboros-galaxy-ts",
+  "version": "1.0.0",
+  "description": "Ouroboros Galaxy — High-Octane Cosmic Roguelike RPG Combo Snake (TypeScript + Vite + Canvas2D + WebAudio)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:parity": "vitest run src/tests/ParityTest.test.ts",
+    "test:selftest": "vitest run src/tests/SelfTest.test.ts",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "build:apk": "npm run build && npx cap sync android && (cd android && JAVA_HOME=${JAVA_HOME:-$HOME/.local/opt/jdk-21} ANDROID_HOME=${ANDROID_HOME:-$HOME/.local/opt/android-sdk} ./gradlew assembleDebug) && cp android/app/build/outputs/apk/debug/app-debug.apk ./ouroboros-galaxy.apk",
+    "verify": "./verify"
+  },
+  "keywords": [
+    "game",
+    "snake",
+    "roguelike",
+    "canvas2d",
+    "typescript",
+    "vitest",
+    "multiscreen",
+    "webaudio"
+  ],
+  "author": "Google DeepMind pair programming assistant & forart",
+  "license": "MIT",
+  "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@playwright/test": "^1.62.1",
+    "@types/node": "^26.2.0",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0",
+    "vitest": "^3.0.7"
+  },
+  "dependencies": {
+    "@capacitor/core": "^8.5.0"
+  }
+}

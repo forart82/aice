@@ -1,0 +1,171 @@
+module poc_real_case/snake_ts/src/sim/Projectile
+
+from "../core/MathX.js" import MathX
+from "../core/Vec2.js" import Vec2
+
+type ProjectileOpts:
+  Radius:Option[int]
+  Life:Option[int]
+  Homing:Option[int]
+  Pierce:Option[int]
+  Burn:Option[int]
+  Chill:Option[int]
+  Trail:Option[bool]
+  Wobble:Option[int]
+  radius:Option[int]
+  life:Option[int]
+  homing:Option[int]
+  pierce:Option[int]
+  burn:Option[int]
+  chill:Option[int]
+  trail:Option[bool]
+  wobble:Option[int]
+
+pub class Projectile:
+  static _projectileId = 0
+  static readonly BossHitId = -1
+  static readonly bossHitId = -1
+  Id: int
+  X: int
+  Y: int
+  Angle: int
+  Speed: int
+  Vx: int
+  Vy: int
+  Damage: int
+  Source: str
+  Radius: int
+  Color: str
+  Life: int
+  MaxLife: int
+  Homing: int
+  Pierce: int
+  Burn: int
+  Chill: int
+  Trail: bool
+  Wobble: int
+  Dead: bool
+  HitIds: Option[Set[int]] = nil
+  fn get_id() -> int = this.Id
+  fn set_id(v:int) -> void = this.Id = v
+  fn get_x() -> int = this.X
+  fn set_x(v:int) -> void = this.X = v
+  fn get_y() -> int = this.Y
+  fn set_y(v:int) -> void = this.Y = v
+  fn get_angle() -> int = this.Angle
+  fn set_angle(v:int) -> void = this.Angle = v
+  fn get_speed() -> int = this.Speed
+  fn set_speed(v:int) -> void = this.Speed = v
+  fn get_vx() -> int = this.Vx
+  fn set_vx(v:int) -> void = this.Vx = v
+  fn get_vy() -> int = this.Vy
+  fn set_vy(v:int) -> void = this.Vy = v
+  fn get_damage() -> int = this.Damage
+  fn set_damage(v:int) -> void = this.Damage = v
+  fn get_source() -> str = this.Source
+  fn set_source(v:str) -> void = this.Source = v
+  fn get_radius() -> int = this.Radius
+  fn set_radius(v:int) -> void = this.Radius = v
+  fn get_color() -> str = this.Color
+  fn set_color(v:str) -> void = this.Color = v
+  fn get_life() -> int = this.Life
+  fn set_life(v:int) -> void = this.Life = v
+  fn get_maxLife() -> int = this.MaxLife
+  fn set_maxLife(v:int) -> void = this.MaxLife = v
+  fn get_homing() -> int = this.Homing
+  fn set_homing(v:int) -> void = this.Homing = v
+  fn get_pierce() -> int = this.Pierce
+  fn set_pierce(v:int) -> void = this.Pierce = v
+  fn get_burn() -> int = this.Burn
+  fn set_burn(v:int) -> void = this.Burn = v
+  fn get_chill() -> int = this.Chill
+  fn set_chill(v:int) -> void = this.Chill = v
+  fn get_trail() -> bool = this.Trail
+  fn set_trail(v:bool) -> void = this.Trail = v
+  fn get_wobble() -> int = this.Wobble
+  fn set_wobble(v:int) -> void = this.Wobble = v
+  fn get_dead() -> bool = this.Dead
+  fn set_dead(v:bool) -> void = this.Dead = v
+  fn get_hitIds() -> Option[Set[int]] = this.HitIds
+  fn set_hitIds(v:Option[Set[int]]) -> void = this.HitIds = v
+  fn constructor(xOrOpts:int | unknown, y:unknown = 0, angle:unknown = 0, speed:unknown = 0, damage:unknown = 0, source:unknown = "player", color:str, opts:ProjectileOpts = {  }):
+    this.Id = -Projectile._projectileId
+    if typeof(xOrOpts) == "object" and xOrOpts != nil:
+      let o = xOrOpts
+      this.X = o.X ?? o.x ?? 0
+      this.Y = o.Y ?? o.y ?? 0
+      let spd = o.Speed ?? o.speed ?? o.Vx != undefined and o.Vy != undefined and MathX.hypot(o.Vx, o.Vy) or o.vx != undefined and o.vy != undefined and MathX.hypot(o.vx, o.vy) or 0
+      this.Speed = spd
+      let ang = o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and Math.atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and Math.atan2(o.vy, o.vx) or 0
+      this.Angle = ang
+      this.Vx = o.Vx ?? o.vx ?? Math.cos(this.Angle) * this.Speed
+      this.Vy = o.Vy ?? o.vy ?? Math.sin(this.Angle) * this.Speed
+      this.Damage = o.Damage ?? o.damage ?? 0
+      if o.Source ?? o.source == "player":
+        this.Source = "player"
+      else:
+        this.Source = "enemy"
+      this.Radius = Projectile.or(o.Radius ?? o.radius, this.Source == "player" and 5 or 6)
+      this.Color = o.Color ?? o.color or this.Source == "player" and "#00f0b5" or "#ff0054"
+      this.Life = Projectile.or(o.Life ?? o.life, 4)
+      this.MaxLife = this.Life
+      this.Homing = Projectile.or(o.Homing ?? o.homing, 0)
+      this.Pierce = Projectile.or(o.Pierce ?? o.pierce, 0)
+      this.Burn = Projectile.or(o.Burn ?? o.burn, 0)
+      this.Chill = Projectile.or(o.Chill ?? o.chill, 0)
+      let tr = o.Trail ?? o.trail
+      this.Trail = tr != false
+      this.Wobble = Projectile.or(o.Wobble ?? o.wobble, 0)
+    else:
+      this.X = xOrOpts
+      this.Y = y
+      this.Angle = angle
+      this.Speed = speed
+      this.Vx = Math.cos(angle) * speed
+      this.Vy = Math.sin(angle) * speed
+      this.Damage = damage
+      if source == "player":
+        this.Source = "player"
+      else:
+        this.Source = "enemy"
+      this.Radius = Projectile.or(opts.Radius ?? opts.radius, this.Source == "player" and 5 or 6)
+      if color != nil and color.length > 0:
+        this.Color = color
+      elif this.Source == "player":
+        this.Color = "#00f0b5"
+      this.Life = Projectile.or(opts.Life ?? opts.life, 4)
+      this.MaxLife = this.Life
+      this.Homing = Projectile.or(opts.Homing ?? opts.homing, 0)
+      this.Pierce = Projectile.or(opts.Pierce ?? opts.pierce, 0)
+      this.Burn = Projectile.or(opts.Burn ?? opts.burn, 0)
+      this.Chill = Projectile.or(opts.Chill ?? opts.chill, 0)
+      let tr = opts.Trail ?? opts.trail
+      this.Trail = tr != false
+      this.Wobble = Projectile.or(opts.Wobble ?? opts.wobble, 0)
+    this.Dead = false
+    this.HitIds = nil
+  static fn or(v:Option[int], fallback:int) -> int:
+    if v != undefined and not Number.isNaN(v):
+      v
+    else:
+      fallback
+  fn Update(dt:int, target:Option[Vec2]) -> void:
+    if this.Homing > 0 and target:
+      let tx = target.X ?? target.x
+      let ty = target.Y ?? target.y
+      if typeof(tx) == "number" and typeof(ty) == "number" and Number.isFinite(tx) and Number.isFinite(ty):
+        let desired = Math.atan2(ty - this.Y, tx - this.X)
+        this.Angle = this.Angle + MathX.clamp(MathX.angleDelta(this.Angle, desired), -this.Homing * dt, this.Homing * dt)
+        this.Vx = Math.cos(this.Angle) * this.Speed
+        this.Vy = Math.sin(this.Angle) * this.Speed
+    if this.Wobble > 0:
+      let off = Math.sin(this.MaxLife - this.Life * 12) * this.Wobble
+      this.X = this.X + Math.cos(this.Angle + Math.PI / 2) * off * dt
+      this.Y = this.Y + Math.sin(this.Angle + Math.PI / 2) * off * dt
+    this.X = this.X + this.Vx * dt
+    this.Y = this.Y + this.Vy * dt
+    this.Life = this.Life - dt
+    if this.Life <= 0:
+      this.Dead = true
+  fn update(dt:int, target:Option[Vec2]) -> void:
+    this.Update(dt, target)

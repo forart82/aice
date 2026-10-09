@@ -1,0 +1,978 @@
+module poc_real_case/snake_ts/src/sim/CombatSystem
+
+from "../core/Rng.js" import Rng
+from "../core/MathX.js" import MathX
+from "../core/Vec2.js" import Vec2
+from "../core/Services.js" import Services, IServiceContainer
+from "../data/GameData.js" import GameData
+from "../data/MetaProgression.js" import MetaProgression
+from "./FoodItem" import FoodItem
+from "./Hazard" import Hazard
+from "./Projectile" import Projectile
+from "./SnakePlayer" import Afterimage, SnakePlayer
+from "./SpatialHashGrid" import SegmentSpatialGrid, SpatialLayerMask
+from "./CombatModules" import executeHeadModules
+from "./CombatAuras" import updateAuras, updateRelicAttacks
+from "./CombatSkills" import activateSkill, skillVerdantBloom, skillUmbralBlink, skillTitanRoar, skillChainStorm, skillSupernova
+from "./Enemy" import Enemy
+from "./Boss" import Boss
+from "./World" import World
+from "./GameEngine" import GameEngine
+
+fn getActiveBosses(world:Option[World]) -> [Boss] = World.getBosses(world)
+
+type BurnSpec:
+  time:Option[int]
+  dps:Option[int]
+  Time:Option[int]
+  Dps:Option[int]
+
+type ChillSpec:
+  time:Option[int]
+  factor:Option[int]
+  Time:Option[int]
+  Factor:Option[int]
+
+type DamageOpts:
+  crit:Option[bool]
+  Crit:Option[bool]
+  silent:Option[bool]
+  Silent:Option[bool]
+  color:Option[str]
+  Color:Option[str]
+  burn:Option[BurnSpec]
+  Burn:Option[BurnSpec]
+  chill:Option[ChillSpec]
+  Chill:Option[ChillSpec]
+  freeze:Option[int]
+  Freeze:Option[int]
+  stun:Option[int]
+  Stun:Option[int]
+
+type BiteRoll:
+  damage:int
+  crit:bool
+  Damage:Option[int]
+  Crit:Option[bool]
+
+type HostileTarget:
+  Found:bool
+  IsBoss:bool
+  Enemy:Option[Enemy]
+  X:int
+  Y:int
+  found:bool
+  isBoss:bool
+  enemy:Option[Enemy]
+  x:int
+  y:int
+
+pub class CombatSystem:
+  comboCount = 0
+  comboMultiplier = 1
+  comboTimer = 0
+  meta: Option[MetaProgression]
+  services: Option[IServiceContainer]
+  engine: Option[GameEngine]
+  comboBaseWindow = 4
+  comboMaxTime = 4
+  frenzyActive = false
+  frenzyTimer = 0
+  frenzyMaxDuration = 8
+  score = 0
+  shardsEarned = 0
+  kills = 0
+  bossKills = 0
+  DefeatedBossTypes: [str] = []
+  BossKillsByType: Record[str, int] = {  }
+  KillsByType: Record[str, int] = {  }
+  FoodsEatenByType: Record[str, int] = {  }
+  foodsEaten = 0
+  highestRunCombo = 0
+  ClutchCatchCount = 0
+  TotalClutchBonusScore = 0
+  damageDealt = 0
+  runTime = 0
+  flameTimer = 0
+  thunderTimer = 0
+  frenzySparkTimer = 0
+  staticCoilCounter = 0
+  biteCooldowns: Map[str, int] = Map()
+  _staleBiteKeys: [str] = []
+  timeScale = 1
+  biteInterval = GameData.BiteInterval
+  static readonly BossHitId = -1
+  static readonly BossKey = "boss"
+  static readonly BossTailKey = "boss-tail"
+  _segmentGrid: SegmentSpatialGrid = SegmentSpatialGrid()
+  _polyX: Float64Array = Float64Array(2048)
+  _polyY: Float64Array = Float64Array(2048)
+  _homingTarget: Vec2 = Vec2(0, 0)
+  _gridBuiltThisTick = false
+  _lastGridSegCount = -1
+  _scratchSegBuffer = Int32Array(128)
+  readonly _cachedHostileTarget: HostileTarget = { found: false, isBoss: false, enemy: nil, x: 0, y: 0, Found: false, IsBoss: false, Enemy: nil, X: 0, Y: 0 }
+  readonly _cachedBiteRoll: BiteRoll = { damage: 0, crit: false, Damage: 0, Crit: false }
+  _lastSelfHitFxTime: int = 0
+  _constrictionCooldown = 0
+  get ComboCount() -> int = this.comboCount
+  set ComboCount(v:int) = this.comboCount = v
+  get ComboMultiplier() -> int = this.comboMultiplier
+  set ComboMultiplier(v:int) = this.comboMultiplier = v
+  get ComboTimer() -> int = this.comboTimer
+  set ComboTimer(v:int) = this.comboTimer = v
+  get Meta() -> Option[MetaProgression] = this.meta
+  set Meta(v:Option[MetaProgression]) = this.meta = v
+  get Services() -> Option[IServiceContainer] = this.services
+  set Services(v:Option[IServiceContainer]) = this.services = v
+  get Engine() -> Option[GameEngine] = this.engine
+  set Engine(v:Option[GameEngine]) = this.engine = v
+  get ComboBaseWindow() -> int = this.comboBaseWindow
+  set ComboBaseWindow(v:int) = this.comboBaseWindow = v
+  get ComboMaxTime() -> int = this.comboMaxTime
+  set ComboMaxTime(v:int) = this.comboMaxTime = v
+  get FrenzyActive() -> bool = this.frenzyActive
+  set FrenzyActive(v:bool) = this.frenzyActive = v
+  get FrenzyTimer() -> int = this.frenzyTimer
+  set FrenzyTimer(v:int) = this.frenzyTimer = v
+  get FrenzyMaxDuration() -> int = this.frenzyMaxDuration
+  set FrenzyMaxDuration(v:int) = this.frenzyMaxDuration = v
+  get Score() -> int = this.score
+  set Score(v:int) = this.score = v
+  get ShardsEarned() -> int = this.shardsEarned
+  set ShardsEarned(v:int) = this.shardsEarned = v
+  get Kills() -> int = this.kills
+  set Kills(v:int) = this.kills = v
+  get BossKills() -> int = this.bossKills
+  set BossKills(v:int) = this.bossKills = v
+  get defeatedBossTypes() -> [str] = this.DefeatedBossTypes
+  set defeatedBossTypes(v:[str]) = this.DefeatedBossTypes = v
+  get bossKillsByType() -> Record[str, int] = this.BossKillsByType
+  set bossKillsByType(v:Record[str, int]) = this.BossKillsByType = v
+  get killsByType() -> Record[str, int] = this.KillsByType
+  set killsByType(v:Record[str, int]) = this.KillsByType = v
+  get foodsEatenByType() -> Record[str, int] = this.FoodsEatenByType
+  set foodsEatenByType(v:Record[str, int]) = this.FoodsEatenByType = v
+  get FoodsEaten() -> int = this.foodsEaten
+  set FoodsEaten(v:int) = this.foodsEaten = v
+  get HighestRunCombo() -> int = this.highestRunCombo
+  set HighestRunCombo(v:int) = this.highestRunCombo = v
+  get highestCombo() -> int = this.highestRunCombo
+  set highestCombo(v:int) = this.highestRunCombo = v
+  get floorShardsEarned() -> int = this.shardsEarned
+  set floorShardsEarned(v:int) = this.shardsEarned = v
+  get clutchCatchCount() -> int = this.ClutchCatchCount
+  set clutchCatchCount(v:int) = this.ClutchCatchCount = v
+  get totalClutchBonusScore() -> int = this.TotalClutchBonusScore
+  set totalClutchBonusScore(v:int) = this.TotalClutchBonusScore = v
+  get DamageDealt() -> int = this.damageDealt
+  set DamageDealt(v:int) = this.damageDealt = v
+  get RunTime() -> int = this.runTime
+  set RunTime(v:int) = this.runTime = v
+  get FlameTimer() -> int = this.flameTimer
+  set FlameTimer(v:int) = this.flameTimer = v
+  get ThunderTimer() -> int = this.thunderTimer
+  set ThunderTimer(v:int) = this.thunderTimer = v
+  get FrenzySparkTimer() -> int = this.frenzySparkTimer
+  set FrenzySparkTimer(v:int) = this.frenzySparkTimer = v
+  get StaticCoilCounter() -> int = this.staticCoilCounter
+  set StaticCoilCounter(v:int) = this.staticCoilCounter = v
+  get BiteCooldowns() -> Map[str, int] = this.biteCooldowns
+  get TimeScale() -> int = this.timeScale
+  set TimeScale(v:int) = this.timeScale = v
+  get BiteInterval() -> int = this.biteInterval
+  set BiteInterval(v:int) = this.biteInterval = v
+  fn _ensurePolyCapacity(capacity:int) -> void:
+    if capacity > this._polyX.length:
+      let nextCap = Math.max(capacity * 2, this._polyX.length * 2)
+      this._polyX = Float64Array(nextCap)
+      this._polyY = Float64Array(nextCap)
+  fn constructor():
+    this.reset()
+  fn reset() -> void:
+    this.comboCount = 0
+    this.comboMultiplier = 1
+    this.comboTimer = 0
+    this.comboBaseWindow = 4
+    this.comboMaxTime = 4
+    this.frenzyActive = false
+    this.frenzyTimer = 0
+    this.frenzyMaxDuration = 8
+    this.score = 0
+    this.shardsEarned = 0
+    this.kills = 0
+    this.bossKills = 0
+    this.foodsEaten = 0
+    this.highestRunCombo = 0
+    this.clutchCatchCount = 0
+    this.totalClutchBonusScore = 0
+    this.damageDealt = 0
+    this.runTime = 0
+    this.DefeatedBossTypes = []
+    this.BossKillsByType = {  }
+    this.KillsByType = {  }
+    this.FoodsEatenByType = {  }
+    this.flameTimer = 0
+    this.thunderTimer = 0
+    this.frenzySparkTimer = 0
+    this.staticCoilCounter = 0
+    this.biteCooldowns.clear()
+    this.timeScale = 1
+    this.biteInterval = GameData.BiteInterval
+    this._gridBuiltThisTick = false
+    this._lastGridSegCount = -1
+    this._segmentGrid.clear()
+    Services.sound.setFrenzyState(false)
+  fn Reset() -> void:
+    this.reset()
+  fn ensureGrid(world:World, force:unknown = false) -> void:
+    let player = world != nil and world.player or world.Player or nil
+    if player != nil:
+      let segs = player.segments or player.Segments
+      if segs != nil and segs.length > 0:
+        if not force and this._gridBuiltThisTick and segs.length == this._lastGridSegCount:
+          ret
+        this._gridBuiltThisTick = true
+        this._lastGridSegCount = segs.length
+        this._segmentGrid.insertSegments(segs)
+        ret
+    this._gridBuiltThisTick = false
+    this._lastGridSegCount = -1
+    this._segmentGrid.clear()
+  fn resolveBites(dt:int, world:World) -> void:
+    this.resolveEnemies(dt, world)
+    this.resolveBoss(dt, world)
+  fn ResolveBites(dt:int, world:World) -> void:
+    this.resolveBites(dt, world)
+  fn update(dt:int, world:World) -> void:
+    let player = world.player or world.Player
+    this.runTime = this.runTime + dt
+    this._gridBuiltThisTick = false
+    this.ensureGrid(world)
+    let ts = world.timeScale or world.TimeScale
+    if ts != 0 and not Number.isNaN(ts):
+      this.timeScale = ts
+    else:
+      this.timeScale = 1
+    this.updateCombo(dt, player)
+    this.updateFrenzy(dt, player)
+    this.updateAuras(dt, world)
+    this.updateRelicAttacks(dt, world)
+    this.updateSegmentModules(dt, world)
+    this.updateHazards(dt, world)
+    this.updateProjectiles(dt, world)
+    this.resolveFood(world)
+    this.resolveEnemies(dt, world)
+    this.resolveBoss(dt, world)
+    this.resolveSelfCollision(world)
+    this.checkConstriction(world)
+    if player != nil and player.pendingRevive or player.PendingRevive:
+      player.pendingRevive = false
+      player.PendingRevive = false
+      this.phoenixNova(world)
+  fn Update(dt:int, world:World) -> void:
+    this.update(dt, world)
+  fn dilationScale(player:SnakePlayer) -> int:
+    let relics = player.relics or player.Relics or {  }
+    let stats = player.stats or player.Stats
+    let hp = player.hp ?? player.Hp
+    let maxHp = stats.maxHp ?? stats.MaxHp
+    if relics["timeDilation"] or 0 > 0 and hp < maxHp * 0.3:
+      0.55
+    else:
+      1
+  fn DilationScale(player:SnakePlayer) -> int = this.dilationScale(player)
+  fn updateCombo(dt:int, player:SnakePlayer) -> void:
+    if this.comboTimer > 0:
+      this.comboTimer = this.comboTimer - dt
+      if this.comboTimer <= 0:
+        this.breakCombo(player)
+  fn UpdateCombo(dt:int, player:SnakePlayer) -> void:
+    this.updateCombo(dt, player)
+  fn updateFrenzy(dt:int, player:SnakePlayer) -> void:
+    if not this.frenzyActive:
+      ret
+    this.frenzyTimer = this.frenzyTimer - dt
+    this.frenzySparkTimer = this.frenzySparkTimer + dt
+    if this.frenzySparkTimer >= 0.06:
+      this.frenzySparkTimer = 0
+      let px = player.x ?? player.X
+      let py = player.y ?? player.Y
+      Services.fx.burst(px, py, "#ff0054", 3, 3, 3)
+    if this.frenzyTimer <= 0:
+      this.frenzyActive = false
+      Services.sound.setFrenzyState(false)
+      let px = player.x ?? player.X
+      let py = player.y ?? player.Y
+      Services.fx.addText(px, py - 34, "FRENZY ENDED", "#94a3b8", 14)
+  fn UpdateFrenzy(dt:int, player:SnakePlayer) -> void:
+    this.updateFrenzy(dt, player)
+  fn incrementCombo(player:SnakePlayer, world:World) -> void:
+    this.comboCount = this.comboCount + 1
+    if this.comboCount > this.highestRunCombo:
+      this.highestRunCombo = this.comboCount
+    this.comboMultiplier = 1
+    for tier in GameData.ComboTiers:
+      if this.comboCount >= tier.at:
+        this.comboMultiplier = tier.mult
+    let stats = player.stats or player.Stats
+    let comboWin = stats.comboWindow ?? stats.ComboWindow ?? 1
+    let shrink = Math.min(1.9, this.comboCount * 0.045)
+    this.comboMaxTime = Math.max(1.9, this.comboBaseWindow - shrink * comboWin)
+    this.comboTimer = this.comboMaxTime
+    let classId = player.classId or player.ClassId
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let lvl = player.level ?? player.Level ?? 1
+    if classId == "storm":
+      this.staticCoilCounter = this.staticCoilCounter + 1
+      if this.staticCoilCounter >= 5:
+        this.staticCoilCounter = 0
+        this.chainLightning(world, px, py, 3, 46 + lvl * 4 * dmgBonus, 240, false)
+    let relics = player.relics or player.Relics or {  }
+    if relics["devourer"] or 0 > 0:
+      player.devourerCounter = player.devourerCounter ?? player.DevourerCounter ?? 0 + 1
+      player.DevourerCounter = player.devourerCounter
+      if player.devourerCounter >= 5:
+        player.devourerCounter = 0
+        player.DevourerCounter = 0
+        stats.maxHp = stats.maxHp ?? stats.MaxHp ?? 100 + 10
+        stats.MaxHp = stats.maxHp
+        player.heal(10)
+        player.devourerStacks = player.devourerStacks ?? 0 + 1
+        player.damageBonus = 1 + player.devourerStacks * 0.05
+        player.DamageBonus = player.damageBonus
+        Services.fx.addText(px, py - 46, "👑 DEVOURED", "#ffd166", 16, true)
+    let frenzyThreshold = relics["overdrive"] or 0 > 0 and 8 or 10
+    if this.comboCount >= frenzyThreshold and not this.frenzyActive:
+      this.frenzyActive = true
+      this.frenzyTimer = this.frenzyMaxDuration + relics["overdrive"] or 0 * 4
+      Services.sound.setFrenzyState(true)
+      Services.sound.playFrenzy()
+      Services.fx.addText(px, py - 52, "⚡ HYPER FRENZY ⚡", "#ff0054", 24, true)
+      Services.fx.ringShockwave(px, py, "#ff0054", 72, 0.035)
+      Services.fx.flash("#ff0054", 0.22, 0.25)
+      if world.game != nil:
+        world.game.banner("⚡ HYPER FRENZY OVERDRIVE ⚡", 1.4)
+    elif this.frenzyActive != nil:
+      this.frenzyTimer = Math.min(this.frenzyTimer + 0.35, this.frenzyMaxDuration + relics["overdrive"] or 0 * 4)
+    if this.comboCount == 5:
+      Services.fx.addText(px, py - 30, "🔥 5x STREAK", "#ffb703", 16)
+    elif this.comboCount == 15:
+      Services.fx.addText(px, py - 30, "⚡ 15x MEGA", "#00f0b5", 18, true)
+  fn IncrementCombo(player:SnakePlayer, world:World) -> void:
+    this.incrementCombo(player, world)
+  fn breakCombo(player:Option[SnakePlayer]) -> void:
+    if this.comboCount >= 5 and player:
+      let px = player.x ?? player.X
+      let py = player.y ?? player.Y
+      Services.fx.addText(px, py - 40, "COMBO LOST", "#64748b", 15)
+    this.comboCount = 0
+    this.comboMultiplier = 1
+    this.comboTimer = 0
+    this.staticCoilCounter = 0
+  fn BreakCombo(player:Option[SnakePlayer]) -> void:
+    this.breakCombo(player)
+  static fn enemyKey(id:int) -> str = String(id)
+  fn canBite(key:str) -> bool:
+    let next = this.biteCooldowns.at(key) ?? nil
+    next == undefined or next <= this.runTime
+  fn CanBite(key:str) -> bool = this.canBite(key)
+  fn markBite(key:str) -> void:
+    this.biteCooldowns.set(key, this.runTime + this.biteInterval)
+    if this.biteCooldowns.size > 64:
+      this._staleBiteKeys.length = 0
+      for [k, v] in this.biteCooldowns.entries():
+        if v <= this.runTime:
+          this._staleBiteKeys.push(k)
+  fn MarkBite(key:str) -> void:
+    this.markBite(key)
+  fn rollBite(player:SnakePlayer, multiplier:unknown = 1) -> BiteRoll:
+    let stats = player.stats or player.Stats
+    let critChance = stats.critChance ?? stats.CritChance ?? 0.05
+    let critMult = stats.critMult ?? stats.CritMult ?? 1.5
+    let power = player.bitePower ?? player.BitePower
+    let crit = Rng.Shared.rand() < critChance
+    let mut dmg = power * multiplier != 0 and multiplier or 1
+    if crit != nil:
+      dmg = dmg * critMult
+    if this.frenzyActive != nil:
+      dmg = dmg * 2
+    { damage: dmg, crit, Damage: dmg, Crit: crit }
+  fn RollBite(player:SnakePlayer, multiplier:unknown = 1) -> BiteRoll = this.rollBite(player, multiplier)
+  fn damageEnemy(enemy:Option[Enemy], amount:int, world:World, opts:DamageOpts = {  }) -> bool:
+    if not enemy or enemy.dead or enemy.Dead or not enemy.vulnerable and not enemy.Vulnerable:
+      ret false
+    let isCrit = opts.crit ?? opts.Crit ?? false
+    let isSilent = opts.silent ?? opts.Silent ?? false
+    let col = opts.color ?? opts.Color ?? "#ffffff"
+    let burn = opts.burn ?? opts.Burn
+    let chill = opts.chill ?? opts.Chill
+    let freeze = opts.freeze ?? opts.Freeze
+    let stun = opts.stun ?? opts.Stun
+    let killed = enemy.applyDamage != nil and enemy.applyDamage(amount) or enemy.ApplyDamage(amount)
+    this.damageDealt = this.damageDealt + amount
+    let ex = enemy.x ?? enemy.X
+    let ey = enemy.y ?? enemy.Y
+    let er = enemy.radius ?? enemy.Radius
+    if not isSilent:
+      Services.fx.addText(ex, ey - er - 8, MathX.roundJs(amount) + isCrit and " CRIT!" or "", isCrit != nil and "#ffb703" or col, isCrit != nil and 18 or 14, isCrit)
+      if isCrit != nil:
+        Services.sound.playCrit()
+    let st = enemy.status or enemy.Status
+    if burn != nil:
+      st.burn(burn.time ?? burn.Time ?? 1, burn.dps ?? burn.Dps ?? 10)
+    if chill != nil:
+      st.chill(chill.time ?? chill.Time ?? 1, chill.factor ?? chill.Factor ?? 0.5)
+    if freeze != nil:
+      st.freeze(freeze)
+    if stun != nil:
+      st.stun(stun)
+    if killed != nil:
+      this.handleEnemyKill(enemy, world)
+    killed
+  fn DamageEnemy(enemy:Option[Enemy], amount:int, world:World, opts:DamageOpts = {  }) -> bool = this.damageEnemy(enemy, amount, world, opts)
+  fn damageBoss(boss:Option[Boss], amount:int, world:World, opts:DamageOpts = {  }) -> bool:
+    if not boss or not boss.vulnerable and not boss.Vulnerable:
+      ret false
+    let wasPhase = boss.phase ?? boss.Phase
+    let isCrit = opts.crit ?? opts.Crit ?? false
+    let isSilent = opts.silent ?? opts.Silent ?? false
+    let burn = opts.burn ?? opts.Burn
+    let chill = opts.chill ?? opts.Chill
+    let killed = boss.applyDamage != nil and boss.applyDamage(amount) or boss.ApplyDamage(amount)
+    this.damageDealt = this.damageDealt + amount
+    let bx = boss.x ?? boss.X
+    let by = boss.y ?? boss.Y
+    let br = boss.radius ?? boss.Radius
+    if not isSilent:
+      Services.fx.addText(bx, by - br - 12, MathX.roundJs(amount) + isCrit and " CRIT!" or "", isCrit != nil and "#ffb703" or "#ffe08a", isCrit != nil and 19 or 15, true)
+      if isCrit != nil:
+        Services.sound.playCrit()
+    let st = boss.status or boss.Status
+    if burn != nil:
+      st.burn(burn.time ?? burn.Time ?? 1, burn.dps ?? burn.Dps ?? 10)
+    if chill != nil:
+      st.chill(chill.time ?? chill.Time ?? 1, chill.factor ?? chill.Factor ?? 0.5)
+    let curPhase = boss.phase ?? boss.Phase
+    if curPhase == 2 and wasPhase == 1:
+      Services.fx.ringShockwave(bx, by, "#ff0054", 90, 0.02)
+      Services.fx.flash("#ff0054", 0.25, 0.3)
+      Services.sound.playBossAlert()
+      let bname = boss.name or boss.Name
+      if world.game != nil:
+        world.game.banner(bname + " — PHASE 2", 1.6)
+    killed
+  fn DamageBoss(boss:Option[Boss], amount:int, world:World, opts:DamageOpts = {  }) -> bool = this.damageBoss(boss, amount, world, opts)
+  fn handleEnemyKill(enemy:Enemy, world:World) -> void:
+    if enemy._killHandled != nil:
+      ret
+    enemy._killHandled = true
+    let player = world.player or world.Player
+    this.kills = this.kills + 1
+    let ekey = enemy.type or enemy.key or enemy.Key or "swarmling"
+    this.KillsByType[ekey] = this.KillsByType[ekey] or 0 + 1
+    let scoreVal = enemy.scoreValue ?? enemy.ScoreValue
+    this.score = this.score + MathX.roundJs(scoreVal * this.comboMultiplier)
+    let ex = enemy.x ?? enemy.X
+    let ey = enemy.y ?? enemy.Y
+    let ecol = enemy.color or enemy.Color
+    let expVal = enemy.xpValue ?? enemy.XpValue
+    let isSwarmling = ekey == "swarmling" or enemy.color == "#fb7185" or enemy.Color == "#fb7185"
+    if isSwarmling != nil:
+      Services.sound.playEat(this.comboCount, false)
+      Services.fx.burst(ex, ey, ecol, 14, 4, 3)
+    else:
+      Services.sound.playExplosion(0.55)
+      let enemyR = enemy.radius ?? enemy.Radius ?? 16
+      if typeof(Services.fx.explosion) == "function":
+        Services.fx.explosion(ex, ey, ecol, enemyR * 1.5, 1)
+      elif typeof(Services.fx.Explosion) == "function":
+        Services.fx.Explosion(ex, ey, ecol, enemyR * 1.5, 1)
+      Services.fx.shake(4, 6)
+    let relics = player.relics or player.Relics or {  }
+    let killXp = expVal * 1 + 0.6 * relics["soulHarvest"] or 0
+    player.gainXp(killXp)
+    let foods = world.foods or world.Foods
+    foods.push(FoodItem(ex, ey, Rng.Shared.chance(0.28) and "golden" or "apple"))
+    let killHelm = player.equippedHelmet ?? player.EquippedHelmet ?? player.helmet
+    if killHelm != nil:
+      let isHivequeen = killHelm.id == "unique_helm_nanite_hivequeen" or killHelm.Id == "unique_helm_nanite_hivequeen"
+      let isOmni = Boolean(killHelm.isOmni or killHelm.IsOmni or killHelm.id == "unique_helm_celestial_ouroboros" or killHelm.Id == "unique_helm_celestial_ouroboros")
+      let spec = killHelm.specialCapacity or killHelm.SpecialCapacity or ""
+      let hasHarvestFeast = spec.includes("Harvest Feast")
+      if isHivequeen or isOmni or hasHarvestFeast:
+        let extraApples = Rng.Shared.int(2, 3)
+    if relics["soulHarvest"] or 0 > 0 and Rng.Shared.chance(0.5):
+      foods.push(FoodItem(ex + Rng.Shared.range(-14, 14), ey + Rng.Shared.range(-14, 14), "soul"))
+    if Rng.Shared.chance(0.3):
+      foods.push(FoodItem(ex + Rng.Shared.range(-16, 16), ey + Rng.Shared.range(-16, 16), "shard"))
+    if relics["vampiric"] or 0 > 0:
+      player.heal(relics["vampiric"])
+    if relics["chainReaction"] or 0 > 0:
+      let radius = 95
+      let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+      let dmg = 60 * relics["chainReaction"] * dmgBonus
+      Services.fx.ringShockwave(ex, ey, "#ff0054", radius * 0.55, 0.03)
+      Services.sound.playExplosion(0.4)
+      let enemies = world.enemies or world.Enemies
+      let bosses = getActiveBosses(world)
+    this.incrementCombo(player, world)
+  fn HandleEnemyKill(enemy:Enemy, world:World) -> void:
+    this.handleEnemyKill(enemy, world)
+  fn onEnemyKilled(enemy:Enemy, world:World) -> void:
+    this.handleEnemyKill(enemy, world)
+  fn OnEnemyKilled(enemy:Enemy, world:World) -> void:
+    this.handleEnemyKill(enemy, world)
+  fn updateSegmentModules(dt:int, world:World) -> void:
+    let player = world.player or world.Player
+    if not player or not (player.alive ?? player.Alive) or not (player.segments or player.Segments):
+      ret
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pa = player.angle ?? player.Angle
+    let projectiles = world.projectiles or world.Projectiles
+    let enemies = world.enemies or world.Enemies
+    if player.headAugment == "laser" and player.headAugmentLevel > 0:
+      player.headLaserTimer = player.headLaserTimer + dt
+      if player.headLaserTimer >= 1.2:
+        player.headLaserTimer = player.headLaserTimer - 1.2
+        let spd = 500
+        let dmg = 25 * player.headAugmentLevel * dmgBonus
+        if projectiles != nil:
+          projectiles.push(Projectile(px, py, pa, spd, dmg, "player", "#00f0b5", { radius: 7, life: 1.5 }))
+        Services.sound.playShoot()
+    elif player.headAugment == "crown" and player.headAugmentLevel > 0 and enemies:
+      let crownDmg = 15 * player.headAugmentLevel * dmgBonus * dt
+    executeHeadModules(this, dt, world)
+  fn updateAuras(dt:int, world:World) -> void:
+    updateAuras(this, dt, world)
+  fn UpdateAuras(dt:int, world:World) -> void:
+    this.updateAuras(dt, world)
+  fn updateRelicAttacks(dt:int, world:World) -> void:
+    updateRelicAttacks(this, dt, world)
+  fn UpdateRelicAttacks(dt:int, world:World) -> void:
+    this.updateRelicAttacks(dt, world)
+  fn updateHazards(dt:int, world:World) -> void:
+    let player = world.player or world.Player
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pr = player.headRadius ?? player.HeadRadius
+    let hazards = world.hazards or world.Hazards
+    let enemies = world.enemies or world.Enemies
+    let boss = world.boss or world.Boss
+  fn UpdateHazards(dt:int, world:World) -> void:
+    this.updateHazards(dt, world)
+  fn updateProjectiles(dt:int, world:World) -> void:
+    this.ensureGrid(world)
+    let player = world.player or world.Player
+    let arenaW = world.arenaW or world.ArenaW
+    let arenaH = world.arenaH or world.ArenaH
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pr = player.headRadius ?? player.HeadRadius
+    let projectiles = world.projectiles or world.Projectiles
+    let enemies = world.enemies or world.Enemies
+    let boss = world.boss or world.Boss
+    if not projectiles or projectiles.length == 0:
+      ret
+    let mut writeIdx = 0
+    let pCount = projectiles.length
+    projectiles.length = writeIdx
+  fn UpdateProjectiles(dt:int, world:World) -> void:
+    this.updateProjectiles(dt, world)
+  fn cookNearbyFood(world:World) -> void:
+    let player = world.player or world.Player
+    let cid = player.classId or player.ClassId
+    if cid != "solar":
+      ret
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let foods = world.foods or world.Foods
+    let rr = 92 * 92
+  fn resolveFood(world:World) -> void:
+    let player = world.player or world.Player
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pr = player.headRadius ?? player.HeadRadius
+    let foods = world.foods or world.Foods
+    this.cookNearbyFood(world)
+    let baseReach = pr + 2
+  fn ResolveFood(world:World) -> void:
+    this.resolveFood(world)
+  fn eatFood(food:FoodItem, world:World) -> void:
+    food.dead = true
+    food.Dead = true
+    let player = world.player or world.Player
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pcol = player.classConfig != nil and player.classConfig.color or player.ClassConfig != nil and player.ClassConfig.Color or "#00f0b5"
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let stats = player.stats or player.Stats
+    let relics = player.relics or player.Relics or {  }
+    this.foodsEaten = this.foodsEaten + 1
+    let ftype = food.type or "apple"
+    this.FoodsEatenByType[ftype] = this.FoodsEatenByType[ftype] or 0 + 1
+    player.foodsEaten = player.foodsEaten ?? player.FoodsEaten ?? 0 + 1
+    player.FoodsEaten = player.foodsEaten
+    let isClutchCatch = this.comboTimer > 0 and this.comboTimer <= 0.6
+    this.incrementCombo(player, world)
+    player.gainXp(food.xpValue)
+    if isClutchCatch != nil:
+      this.ClutchCatchCount = this.ClutchCatchCount + 1
+      let baseScore = MathX.roundJs(food.scoreValue * this.comboMultiplier)
+      let bonusScore = MathX.roundJs(baseScore * 0.5)
+      this.TotalClutchBonusScore = this.TotalClutchBonusScore + bonusScore
+      this.score = this.score + baseScore + bonusScore
+      Services.fx.addText(food.x, food.y - 24, "⚡ CLUTCH CATCH! +50%", "#ffd166", 15, true)
+    else:
+      this.score = this.score + MathX.roundJs(food.scoreValue * this.comboMultiplier)
+    player.addGrowth(1)
+    let equippedHelm = player.equippedHelmet ?? player.EquippedHelmet ?? player.helmet
+    if equippedHelm != nil:
+      let isLeviathan = equippedHelm.id == "unique_helm_abyssal_leviathan" or equippedHelm.Id == "unique_helm_abyssal_leviathan"
+      let isOmni = Boolean(equippedHelm.isOmni or equippedHelm.IsOmni or equippedHelm.id == "unique_helm_celestial_ouroboros" or equippedHelm.Id == "unique_helm_celestial_ouroboros")
+      let spec = equippedHelm.specialCapacity or equippedHelm.SpecialCapacity or ""
+      let hasTitanGorging = spec.includes("Titan Gorging")
+      if isLeviathan or isOmni or hasTitanGorging:
+        if typeof(player.triggerTitanGorging) == "function":
+          player.triggerTitanGorging(3)
+        elif typeof(player.TriggerTitanGorging) == "function":
+          player.TriggerTitanGorging(3)
+        Services.fx.addText(px, py - 20, "TITAN GORGING! 2X SIZE", "#ffd166", 16, true)
+    Services.sound.playEat(this.comboCount, food.type == "golden")
+    Services.fx.burst(food.x, food.y, food.color, 9, 3, 2.5)
+    if relics["vampiric"] or 0 > 0:
+      player.heal(relics["vampiric"])
+    if relics["gluttonGrowth"] or 0 > 0:
+      player.gluttonCounter = player.gluttonCounter ?? player.GluttonCounter ?? 0 + 1
+      player.GluttonCounter = player.gluttonCounter
+      if player.gluttonCounter >= 8:
+        player.gluttonCounter = 0
+        player.GluttonCounter = 0
+        stats.maxHp = stats.maxHp ?? stats.MaxHp ?? 100 + 10 * relics["gluttonGrowth"]
+        stats.MaxHp = stats.maxHp
+        player.heal(10 * relics["gluttonGrowth"])
+        Services.fx.addText(px, py - 40, "+MAX HP", "#10b981", 15, true)
+    if relics["explosiveAppetite"] or 0 > 0:
+      this.explodeAt(world, px, py, 90, 45 * relics["explosiveAppetite"] * dmgBonus, pcol)
+  fn EatFood(food:FoodItem, world:World) -> void:
+    this.eatFood(food, world)
+  fn resolveEnemies(_dt:int, world:World) -> void:
+    this.ensureGrid(world)
+    let player = world.player or world.Player
+    let heads = player.biteHeads != nil and player.biteHeads() or player.BiteHeads()
+    let enemies = world.enemies or world.Enemies
+    let isDashing = player.isDashing ?? player.IsDashing
+    let relics = player.relics or player.Relics or {  }
+    let segs = player.segments or player.Segments
+  fn ResolveEnemies(dt:int, world:World) -> void:
+    this.resolveEnemies(dt, world)
+  fn enemyTouchesPlayer(enemy:Enemy, world:World, scale:int) -> void:
+    let player = world.player or world.Player
+    let stats = player.stats or player.Stats
+    let thorns = stats.thorns ?? stats.Thorns ?? 0
+    let cdam = enemy.contactDamage ?? enemy.ContactDamage
+    let dealt = player.takeDamage(cdam * scale, "contact")
+    if dealt <= 0:
+      ret
+    this.onPlayerHurt(world, dealt)
+    if thorns > 0:
+      this.damageEnemy(enemy, dealt * thorns, world, { color: "#84cc16" })
+  fn EnemyTouchesPlayer(enemy:Enemy, world:World, scale:int) -> void:
+    this.enemyTouchesPlayer(enemy, world, scale)
+  fn onPlayerHurt(world:World, dealt:int) -> void:
+    let player = world.player or world.Player
+    let relics = player.relics or player.Relics or {  }
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    if world.game != nil:
+      world.game.onPlayerHurt(dealt)
+    if relics["cryoNova"] or 0 > 0:
+      let radius = 160
+      Services.fx.ringShockwave(px, py, "#7dd3fc", radius * 0.5, 0.03)
+      let enemies = world.enemies or world.Enemies
+      let cryoBosses = getActiveBosses(world)
+  fn OnPlayerHurt(world:World, dealt:int) -> void:
+    this.onPlayerHurt(world, dealt)
+  fn resolveBoss(_dt:int, world:World) -> void:
+    this.ensureGrid(world)
+    let bosses = getActiveBosses(world)
+    if not bosses or bosses.length == 0:
+      ret
+    let player = world.player or world.Player
+    if not player:
+      ret
+  fn ResolveBoss(dt:int, world:World) -> void:
+    this.resolveBoss(dt, world)
+  fn resolveSelfCollision(world:World) -> void:
+    this.ensureGrid(world)
+    let player = world.player or world.Player
+    if not player or not (player.alive ?? player.Alive):
+      ret
+    let relics = player.relics or player.Relics or {  }
+    let isDashing = player.isDashing ?? player.IsDashing
+    let segs = player.segments or player.Segments
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pr = player.headRadius ?? player.HeadRadius ?? 14
+    if relics["quantumPhase"] or 0 > 0 or isDashing:
+      ret
+    if not segs or segs.length < 4:
+      ret
+    let damageAmount = 8
+    let mut anyHit = false
+    let now = world.runTime or world.RunTime or this.runTime or 0
+    let s = this._segmentGrid.findFirstSegment(px, py, pr, 3)
+    if s >= 3 and s < segs.length:
+      let seg = segs[s]
+      if seg != nil:
+        let sx = seg.x ?? seg.X
+        let sy = seg.y ?? seg.Y
+        let sr = seg.r ?? seg.R ?? 11
+        let dx = px - sx
+        let dy = py - sy
+        let rr = pr + sr
+        if dx * dx + dy * dy < rr * rr:
+          let selfCd = seg.selfHitCooldown ?? seg.SelfHitCooldown ?? 0
+          if selfCd <= 0:
+            seg.selfHitCooldown = 0.8
+            seg.SelfHitCooldown = 0.8
+            let dealtSeg = player.damageSegment != nil and player.damageSegment(s, damageAmount, false, false, true) or player.DamageSegment(s, damageAmount, false, false, true)
+            let headCd = player.headSelfHitCooldown ?? player.HeadSelfHitCooldown ?? 0
+            if headCd <= 0:
+              player.headSelfHitCooldown = 0.8
+              player.HeadSelfHitCooldown = 0.8
+              let dealtHead = player.damageHead != nil and player.damageHead(damageAmount * 0.5, false, false, true) or player.DamageHead(damageAmount * 0.5, false, false, true)
+              if dealtHead > 0:
+                anyHit = true
+            if dealtSeg > 0:
+              anyHit = true
+              if now - this._lastSelfHitFxTime >= 0.12:
+                this._lastSelfHitFxTime = now
+                Services.fx.addText(sx, sy - 22, "SELF-BITE! -" + String(Math.floor(Math)), "#ff0054", 16, true)
+                Services.fx.burst(sx, sy, "#ff0054", 8, 3, 2)
+                Services.sound.playHit()
+                this.onPlayerHurt(world, dealtSeg)
+    let segCount = segs.length
+    let stride = segCount > 500 and Math.ceil(Math) or segCount > 150 and 2 or 1
+    if anyHit != nil:
+      this.breakCombo(player)
+  fn ResolveSelfCollision(world:World) -> void:
+    this.resolveSelfCollision(world)
+  fn _isPointInPoly(x:int, y:int, polyLen:int, minX:int, maxX:int, minY:int, maxY:int) -> bool:
+    if x < minX or x > maxX or y < minY or y > maxY:
+      ret false
+    let mut inside = false
+    inside
+  fn checkConstriction(world:World) -> void:
+    if this._constrictionCooldown > 0:
+      this._constrictionCooldown = this._constrictionCooldown - 1 / 120
+      ret
+    let player = world.player or world.Player
+    if not player or not (player.alive ?? player.Alive):
+      ret
+    let segs = player.segments or player.Segments
+    if not segs or segs.length < 4:
+      ret
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let pr = player.headRadius ?? player.HeadRadius ?? 14
+    let mut loopEndIndex = this._segmentGrid.findFirstSegment(px, py, pr + 11 + 16, 3)
+    if loopEndIndex < 3 or loopEndIndex >= segs.length:
+      if this._segmentGrid.getItemCount(SpatialLayerMask.Segments) == 0:
+        let snapDistSq = Math.pow(pr + 11 + 16, 2)
+    if loopEndIndex < 3 or loopEndIndex >= segs.length:
+      ret
+    let polyLen = loopEndIndex + 2
+    this._ensurePolyCapacity(polyLen)
+    this._polyX[0] = px
+    this._polyY[0] = py
+    let mut cx = px
+    let mut cy = py
+    let mut minX = this._polyX[0]
+    let mut maxX = minX
+    let mut minY = this._polyY[0]
+    let mut maxY = minY
+    cx = cx / polyLen
+    cy = cy / polyLen
+    let mut maxR = 0
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let crushDmg = 120 + segs.length * 15 * dmgBonus
+    let enemies = world.enemies or world.Enemies
+    let mut trapped = 0
+    if enemies != nil:
+      nil
+    let bosses = getActiveBosses(world)
+    this.fuseEncircledFoodIntoPrism(player, world, polyLen, minX, maxX, minY, maxY)
+    if trapped > 0:
+      this._constrictionCooldown = 0.5
+      Services.fx.ringShockwave(cx, cy, "#ffd166", Math.max(30, maxR * 0.85), 0.04)
+      Services.fx.addText(cx, cy - 20, "🐍 OUROBOROS CONSTRICTION! 🐍", "#ffd166", 16, true)
+      Services.sound.playExplosion(1)
+  fn CheckConstriction(world:World) -> void:
+    this.checkConstriction(world)
+  fn checkEncirclement(player:SnakePlayer, px:int, py:int) -> bool:
+    if not player:
+      ret false
+    let segs = player.segments or player.Segments
+    if not segs or segs.length < 3:
+      ret false
+    let count = segs.length + 1
+    this._ensurePolyCapacity(count)
+    this._polyX[0] = player.x ?? player.X
+    this._polyY[0] = player.y ?? player.Y
+    let mut minX = this._polyX[0]
+    let mut maxX = minX
+    let mut minY = this._polyY[0]
+    let mut maxY = minY
+    if px < minX or px > maxX or py < minY or py > maxY:
+      ret false
+    let mut inside = false
+    inside
+  fn CheckEncirclement(player:SnakePlayer, px:int, py:int) -> bool = this.checkEncirclement(player, px, py)
+  fn applyConstrictionDamage(player:SnakePlayer, world:World) -> void:
+    let enemies = World.getEnemies(world)
+    if enemies != nil:
+      for en in enemies:
+        if en.dead or en.Dead:
+          nil
+        let ex = en.x ?? en.X
+        let ey = en.y ?? en.Y
+        if this.checkEncirclement(player, ex, ey):
+          en.takeDamage(60, player)
+          en.stasisTimer = 2
+          en.StasisTimer = 2
+          Services.fx.burst(ex, ey, "#ffd166", 8, 4, 3)
+  fn ApplyConstrictionDamage(player:SnakePlayer, world:World) -> void:
+    this.applyConstrictionDamage(player, world)
+  fn fuseEncircledFoodIntoPrism(player:SnakePlayer, world:World, polyLen:int, minX:int, maxX:int, minY:int, maxY:int) -> void:
+    let foods = World.getFoods(world)
+    if not foods or foods.length == 0:
+      ret
+    let mut trappedCount = 0
+    let mut sumX = 0
+    let mut sumY = 0
+    let hasPoly = polyLen != undefined and minX != undefined and maxX != undefined and minY != undefined and maxY != undefined
+    if trappedCount >= 2:
+      let cx = sumX / trappedCount
+      let cy = sumY / trappedCount
+      let mut writeIdx = 0
+      foods.length = writeIdx
+      let prism = FoodItem(cx, cy, "prism")
+      foods.push(prism)
+      Services.fx.burst(cx, cy, "#ffffff", 24, 6, 4)
+      Services.fx.addText(cx, cy - 24, "🔮 ASTRAL PRISM FUSION! 🔮", "#ffffff", 18, true)
+      Services.sound.playLevelUp()
+    elif trappedCount == 1:
+      nil
+  fn FuseEncircledFoodIntoPrism(player:unknown, world:unknown) -> void:
+    this.fuseEncircledFoodIntoPrism(player, world)
+  fn phoenixNova(world:World) -> void:
+    let player = World.getPlayer(world)
+    let px = player.x ?? player.X
+    let py = player.y ?? player.Y
+    let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
+    let enemies = World.getEnemies(world)
+    Services.fx.ringShockwave(px, py, "#ffb703", 130, 0.008)
+    Services.fx.burst(px, py, "#ffd166", 48, 9, 6)
+    Services.fx.flash("#ffb703", 0.45, 0.5)
+    Services.fx.shake(22, 26)
+    world.projectiles = World.getProjectiles(world).filter(fn(p:Projectile) = p.source != "enemy")
+    if world.game != nil:
+      world.game.replaceProjectiles(world.projectiles)
+    let phoenixBosses = getActiveBosses(world)
+    if world.game != nil:
+      world.game.banner("🔥 PHOENIX REBIRTH 🔥", 1.8)
+  fn PhoenixNova(world:World) -> void:
+    this.phoenixNova(world)
+  fn explodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) -> void:
+    if not Number.isFinite(damage) or damage <= 0 or not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius <= 0:
+      ret
+    if typeof(Services.fx?.explosion) == "function":
+      Services.fx.explosion(x, y, color, radius, 1.2)
+    elif typeof(Services.fx?.Explosion) == "function":
+      Services.fx.Explosion(x, y, color, radius, 1.2)
+    Services.sound.playExplosion(0.7)
+    let enemies = world.enemies or world.Enemies
+    let bosses = getActiveBosses(world)
+    if enemies != nil:
+      nil
+  fn ExplodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) -> void:
+    this.explodeAt(world, x, y, radius, damage, color)
+  fn chainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) -> void:
+    if not Number.isFinite(damage) or damage <= 0 or not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(range) or range <= 0 or jumps <= 0:
+      ret
+    let hit = Set()
+    let mut fromX = x
+    let mut fromY = y
+    let mut dmg = damage
+    let enemies = world.enemies or world.Enemies
+    let bosses = getActiveBosses(world)
+    Services.sound.playThunder()
+  fn ChainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) -> void:
+    this.chainLightning(world, x, y, jumps, damage, range, escalating)
+  fn nearestHostile(world:World, x:int, y:int, maxDist:int) -> HostileTarget:
+    let mut bestEnemy:Option[Enemy] = nil
+    let mut bestBoss:Option[Boss] = nil
+    let mut bestD = maxDist
+    let enemies = world.enemies or world.Enemies
+    let bosses = getActiveBosses(world)
+    if enemies != nil:
+      nil
+    let res = this._cachedHostileTarget
+    if bestEnemy != nil:
+      let bx = bestEnemy.x ?? bestEnemy.X
+      let by = bestEnemy.y ?? bestEnemy.Y
+      res.found = true
+      res.isBoss = false
+      res.enemy = bestEnemy
+      res.x = bx
+      res.y = by
+      res.Found = true
+      res.IsBoss = false
+      res.Enemy = bestEnemy
+      res.X = bx
+      res.Y = by
+      ret res
+    if bestBoss != nil:
+      let bx = bestBoss.x ?? bestBoss.X
+      let by = bestBoss.y ?? bestBoss.Y
+      res.found = true
+      res.isBoss = true
+      res.enemy = nil
+      res.x = bx
+      res.y = by
+      res.Found = true
+      res.IsBoss = true
+      res.Enemy = nil
+      res.X = bx
+      res.Y = by
+      ret res
+    res.found = false
+    res.isBoss = false
+    res.enemy = nil
+    res.x = 0
+    res.y = 0
+    res.Found = false
+    res.IsBoss = false
+    res.Enemy = nil
+    res.X = 0
+    res.Y = 0
+    res
+  fn NearestHostile(world:World, x:int, y:int, maxDist:int) -> HostileTarget = this.nearestHostile(world, x, y, maxDist)
+  fn activateSkill(world:World) -> bool = activateSkill(this, world)
+  fn ActivateSkill(world:World) -> bool = this.activateSkill(world)
+  fn skillVerdantBloom(world:World) -> void:
+    skillVerdantBloom(this, world)
+  fn skillUmbralBlink(world:World) -> void:
+    skillUmbralBlink(this, world)
+  fn skillTitanRoar(world:World) -> void:
+    skillTitanRoar(this, world)
+  fn skillChainStorm(world:World) -> void:
+    skillChainStorm(this, world)
+  fn skillSupernova(world:World) -> void:
+    skillSupernova(this, world)

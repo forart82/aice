@@ -1,0 +1,43 @@
+{
+  "id": "music_boss",
+  "file": "snake_ts/05_music/music_boss.wav",
+  "format": {
+    "sample_rate": 44100,
+    "bit_depth": 16,
+    "channels": 2,
+    "duration_seconds": 37.354,
+    "samples_count": 1647311,
+    "num_samples": 1647311
+  },
+  "levels": {
+    "peak_dbfs": -1.0,
+    "rms_dbfs": -14.05,
+    "dc_offset": 0.0
+  },
+  "spatial": {
+    "mode": "stereo",
+    "pan": 0.0
+  },
+  "bus": "music",
+  "loop": {
+    "is_loopable": true,
+    "start_sample": 0,
+    "end_sample": 1647311,
+    "seam_score": 0.0245,
+    "seam_discontinuity_score": 0.0245,
+    "crossfade_duration_seconds": 4.0,
+    "crossfade_duration_s": 4.0,
+    "max_amplitude_step": 0.0,
+    "amplitude_step_db": -120.0,
+    "max_slope_step": 0.0,
+    "spectral_flux": 0.5808,
+    "has_transient_click": false,
+    "loop_start_sample": 0,
+    "loop_end_sample": 1647311
+  },
+  "playback_recommendations": {
+    "pitch_randomization_cents": 0,
+    "volume_randomization_db": 0.0,
+    "concurrency_limit": 1
+  }
+}

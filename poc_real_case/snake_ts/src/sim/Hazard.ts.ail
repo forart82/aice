@@ -1,0 +1,117 @@
+module poc_real_case/snake_ts/src/sim/Hazard
+
+from "../core/Rng.js" import Rng
+
+type HazardOpts:
+  Radius:Option[int]
+  Life:Option[int]
+  Dps:Option[int]
+  Owner:Option[str]
+  Telegraph:Option[int]
+  ImpactDamage:Option[int]
+  radius:Option[int]
+  life:Option[int]
+  dps:Option[int]
+  owner:Option[str]
+  telegraph:Option[int]
+  impactDamage:Option[int]
+
+pub class Hazard:
+  X: int
+  Y: int
+  Type: str
+  Radius: int
+  MaxLife: int
+  Life: int
+  Dps: int
+  Owner: str
+  Telegraph: int
+  ImpactDamage: int
+  Detonated: bool
+  Pulse: int
+  Dead: bool
+  TelegraphMax = 0
+  fn get_x() -> int = this.X
+  fn set_x(v:int) -> void = this.X = v
+  fn get_y() -> int = this.Y
+  fn set_y(v:int) -> void = this.Y = v
+  fn get_type() -> str = this.Type
+  fn set_type(v:str) -> void = this.Type = v
+  fn get_radius() -> int = this.Radius
+  fn set_radius(v:int) -> void = this.Radius = v
+  fn get_maxLife() -> int = this.MaxLife
+  fn set_maxLife(v:int) -> void = this.MaxLife = v
+  fn get_life() -> int = this.Life
+  fn set_life(v:int) -> void = this.Life = v
+  fn get_dps() -> int = this.Dps
+  fn set_dps(v:int) -> void = this.Dps = v
+  fn get_owner() -> str = this.Owner
+  fn set_owner(v:str) -> void = this.Owner = v
+  fn get_telegraph() -> int = this.Telegraph
+  fn set_telegraph(v:int) -> void = this.Telegraph = v
+  fn get_impactDamage() -> int = this.ImpactDamage
+  fn set_impactDamage(v:int) -> void = this.ImpactDamage = v
+  fn get_detonated() -> bool = this.Detonated
+  fn set_detonated(v:bool) -> void = this.Detonated = v
+  fn get_pulse() -> int = this.Pulse
+  fn set_pulse(v:int) -> void = this.Pulse = v
+  fn get_dead() -> bool = this.Dead
+  fn set_dead(v:bool) -> void = this.Dead = v
+  fn get_telegraphMax() -> int = this.TelegraphMax
+  fn set_telegraphMax(v:int) -> void = this.TelegraphMax = v
+  fn constructor(xOrOpts:int | unknown, y:unknown = 0, type:unknown = "magma", opts:HazardOpts = {  }):
+    if typeof(xOrOpts) == "object" and xOrOpts != nil:
+      let o = xOrOpts
+      this.X = o.X ?? o.x ?? 0
+      this.Y = o.Y ?? o.y ?? 0
+      this.Type = o.Type ?? o.type ?? "magma"
+      this.Radius = Hazard.or(o.Radius ?? o.radius, 26)
+      this.MaxLife = Hazard.or(o.Life ?? o.life, 3)
+      this.Life = this.MaxLife
+      this.Dps = Hazard.or(o.Dps ?? o.dps, 0)
+      let ow = o.Owner ?? o.owner
+      if ow != nil and ow.length > 0:
+        this.Owner = ow
+      else:
+        this.Owner = "enemy"
+      this.Telegraph = Hazard.or(o.Telegraph ?? o.telegraph, 0)
+      this.TelegraphMax = this.Telegraph
+      this.ImpactDamage = Hazard.or(o.ImpactDamage ?? o.impactDamage, 0)
+    else:
+      this.X = xOrOpts
+      this.Y = y
+      this.Type = type
+      this.Radius = Hazard.or(opts.Radius ?? opts.radius, 26)
+      this.MaxLife = Hazard.or(opts.Life ?? opts.life, 3)
+      this.Life = this.MaxLife
+      this.Dps = Hazard.or(opts.Dps ?? opts.dps, 0)
+      let ow = opts.Owner ?? opts.owner
+      if ow != nil and ow.length > 0:
+        this.Owner = ow
+      else:
+        this.Owner = "enemy"
+      this.Telegraph = Hazard.or(opts.Telegraph ?? opts.telegraph, 0)
+      this.TelegraphMax = this.Telegraph
+      this.ImpactDamage = Hazard.or(opts.ImpactDamage ?? opts.impactDamage, 0)
+    this.Detonated = false
+    this.Pulse = Rng.Shared.angle()
+    this.Dead = false
+  static fn or(v:Option[int], fallback:int) -> int:
+    if v != undefined and not Number.isNaN(v):
+      v
+    else:
+      fallback
+  fn get_Armed() -> bool = this.Telegraph <= 0
+  fn get_armed() -> bool = this.Armed
+  fn Update(dt:int) -> void:
+    this.Pulse = this.Pulse + dt * 5
+    if this.Telegraph > 0:
+      this.Telegraph = this.Telegraph - dt
+      if this.Telegraph <= 0:
+        this.Telegraph = 0
+      ret
+    this.Life = this.Life - dt
+    if this.Life <= 0:
+      this.Dead = true
+  fn update(dt:int) -> void:
+    this.Update(dt)

@@ -1,0 +1,175 @@
+module poc_real_case/snake_ts/src/sim/BossRushGauntlet
+
+from "./Boss.js" import Boss
+from "../data/GameData.js" import GameData
+from "../data/MetaProgression.js" import MetaProgression
+from "../data/Types.js" import HelmetDef, BossArchetypeDef
+from "./GameEngine.js" import GameEngine
+
+type BossRushGauntletState:
+  active:bool
+  waveIndex:int
+  waveTimer:int
+  bossesSpawned:int
+  bossesDefeated:int
+  totalBosses:int
+  allSpawned:bool
+  victory:bool
+  defeat:bool
+
+pub const GAUNTLET_BOSS_ARCHETYPES: [BossArchetypeDef] = [{ Type: "centipede", type: "centipede", Name: "Centipede Behemoth", name: "Centipede Behemoth", Color: "#ff3366", color: "#ff3366", Accent: "#ff4d6d", accent: "#ff4d6d", BaseHp: 450, baseHp: 450, HpPerFloor: 180, hpPerFloor: 180, Radius: 30, radius: 30, Title: "The rival coil that outgrew its arena", title: "The rival coil that outgrew its arena" }, { Type: "gorgon", type: "gorgon", Name: "Storm Gorgon", name: "Storm Gorgon", Color: "#00f0b5", color: "#00f0b5", Accent: "#38bdf8", accent: "#38bdf8", BaseHp: 650, baseHp: 650, HpPerFloor: 220, hpPerFloor: 220, Radius: 32, radius: 32, Title: "Volt sovereign of atmospheric tempests", title: "Volt sovereign of atmospheric tempests" }, { Type: "quantum_hydra", type: "quantum_hydra", Name: "Hydra Apex", name: "Hydra Apex", Color: "#c084fc", color: "#c084fc", Accent: "#e879f9", accent: "#e879f9", BaseHp: 1200, baseHp: 1200, HpPerFloor: 300, hpPerFloor: 300, Radius: 36, radius: 36, Title: "Multiverse serpent splitting into probabilistic reality coils", title: "Multiverse serpent splitting into probabilistic reality coils" }, { Type: "colossus", type: "colossus", Name: "Infernal Colossus", name: "Infernal Colossus", Color: "#ff9e00", color: "#ff9e00", Accent: "#ffb703", accent: "#ffb703", BaseHp: 900, baseHp: 900, HpPerFloor: 280, hpPerFloor: 280, Radius: 34, radius: 34, Title: "A furnace that learned to walk", title: "A furnace that learned to walk" }, { Type: "leviathan", type: "leviathan", Name: "Astral Leviathan", name: "Astral Leviathan", Color: "#9d4edd", color: "#9d4edd", Accent: "#c77dff", accent: "#c77dff", BaseHp: 1800, baseHp: 1800, HpPerFloor: 400, hpPerFloor: 400, Radius: 35, radius: 35, Title: "It writes spirals in the dark and calls them law", title: "It writes spirals in the dark and calls them law" }, { Type: "chronowyrm", type: "chronowyrm", Name: "Chrono Wyrm", name: "Chrono Wyrm", Color: "#a855f7", color: "#a855f7", Accent: "#e0aaff", accent: "#e0aaff", BaseHp: 1500, baseHp: 1500, HpPerFloor: 400, hpPerFloor: 400, Radius: 33, radius: 33, Title: "Master of temporal dilation and paradox clones", title: "Master of temporal dilation and paradox clones" }, { Type: "void_devourer", type: "void_devourer", Name: "Void Serpent", name: "Void Serpent", Color: "#7928ca", color: "#7928ca", Accent: "#b5179e", accent: "#b5179e", BaseHp: 2200, baseHp: 2200, HpPerFloor: 450, hpPerFloor: 450, Radius: 37, radius: 37, Title: "Abyssal gravity maw consuming arena matter and light", title: "Abyssal gravity maw consuming arena matter and light" }, { Type: "volcanic_chimera", type: "volcanic_chimera", Name: "Solar Chimera", name: "Solar Chimera", Color: "#dc2626", color: "#dc2626", Accent: "#f87171", accent: "#f87171", BaseHp: 2500, baseHp: 2500, HpPerFloor: 500, hpPerFloor: 500, Radius: 37, radius: 37, Title: "Tri-headed subterranean beast erupting magma fountains and solar pyres", title: "Tri-headed subterranean beast erupting magma fountains and solar pyres" }]
+
+pub const THE_NINTH_HELMET: unknown = { Id: "helm_ouroboros_ascension_9th", id: "helm_ouroboros_ascension_9th", CanonicalId: "unique_eternal_ouroboros_crown", canonicalId: "unique_eternal_ouroboros_crown", AliasId: "unique_helm_celestial_ouroboros", aliasId: "unique_helm_celestial_ouroboros", Name: "Crown of the Eternal Ouroboros", name: "Crown of the Eternal Ouroboros", Icon: "👑", icon: "👑", Rarity: "mythic", rarity: "mythic", Description: "The 9th cranial singularity forged from 8 conquered apex titan souls. Grants total transcendence.", description: "The 9th cranial singularity forged from 8 conquered apex titan souls. Grants total transcendence.", Floor: 9, floor: 9, BossType: "eternal_ouroboros", bossType: "eternal_ouroboros", Stats: { maxHp: 150, armor: 0.25, speed: 0.35, bitePower: 35, critChance: 0.3, critMult: 2, shield: 150, hpRegen: 8, thorns: 0.75 }, stats: { maxHp: 150, armor: 0.25, speed: 0.35, bitePower: 35, critChance: 0.3, critMult: 2, shield: 150, hpRegen: 8, thorns: 0.75 } }
+
+pub class BossRushGauntlet:
+  state: BossRushGauntletState
+  trackedBosses: [unknown] = []
+  fn get_State() -> BossRushGauntletState = this.state
+  fn get_active() -> bool = this.state.active
+  fn set_active(v:bool) -> void = this.state.active = v
+  fn get_Active() -> bool = this.state.active
+  fn set_Active(v:bool) -> void = this.state.active = v
+  fn get_waveIndex() -> int = this.state.waveIndex
+  fn set_waveIndex(v:int) -> void = this.state.waveIndex = v
+  fn get_WaveIndex() -> int = this.state.waveIndex
+  fn set_WaveIndex(v:int) -> void = this.state.waveIndex = v
+  fn get_waveTimer() -> int = this.state.waveTimer
+  fn set_waveTimer(v:int) -> void = this.state.waveTimer = v
+  fn get_WaveTimer() -> int = this.state.waveTimer
+  fn set_WaveTimer(v:int) -> void = this.state.waveTimer = v
+  fn get_bossesSpawned() -> int = this.state.bossesSpawned
+  fn set_bossesSpawned(v:int) -> void = this.state.bossesSpawned = v
+  fn get_BossesSpawned() -> int = this.state.bossesSpawned
+  fn set_BossesSpawned(v:int) -> void = this.state.bossesSpawned = v
+  fn get_bossesDefeated() -> int = this.state.bossesDefeated
+  fn set_bossesDefeated(v:int) -> void = this.state.bossesDefeated = v
+  fn get_BossesDefeated() -> int = this.state.bossesDefeated
+  fn set_BossesDefeated(v:int) -> void = this.state.bossesDefeated = v
+  fn get_totalBosses() -> int = this.state.totalBosses
+  fn set_totalBosses(v:int) -> void = this.state.totalBosses = v
+  fn get_TotalBosses() -> int = this.state.totalBosses
+  fn set_TotalBosses(v:int) -> void = this.state.totalBosses = v
+  fn get_allSpawned() -> bool = this.state.allSpawned
+  fn set_allSpawned(v:bool) -> void = this.state.allSpawned = v
+  fn get_AllSpawned() -> bool = this.state.allSpawned
+  fn set_AllSpawned(v:bool) -> void = this.state.allSpawned = v
+  fn get_victory() -> bool = this.state.victory
+  fn set_victory(v:bool) -> void = this.state.victory = v
+  fn get_Victory() -> bool = this.state.victory
+  fn set_Victory(v:bool) -> void = this.state.victory = v
+  fn get_defeat() -> bool = this.state.defeat
+  fn set_defeat(v:bool) -> void = this.state.defeat = v
+  fn get_Defeat() -> bool = this.state.defeat
+  fn set_Defeat(v:bool) -> void = this.state.defeat = v
+  fn constructor():
+    this.state = { active: false, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
+  fn start(engine:GameEngine) -> void:
+    this.state = { active: true, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
+    this.trackedBosses = []
+    if engine != nil:
+      if Array.isArray(engine.ActiveBosses):
+        engine.ActiveBosses.length = 0
+      this.spawnBossForWave(0, engine)
+      this.state.bossesSpawned = 1
+      this.state.waveIndex = 0
+      this.state.waveTimer = 8
+      if typeof(engine.Banner) == "function":
+        engine.Banner("⚡ ALL-BOSS GAUNTLET: WAVE 1/8 [CENTIPEDE] ⚡", 2.5)
+      if engine.Sound?.PlayBossAlert != nil:
+        engine.Sound.PlayBossAlert()
+        engine.Sound.SetBossMode(true)
+  fn Start(engine:GameEngine) -> void:
+    this.start(engine)
+  fn spawnBossForWave(waveIdx:int, engine:GameEngine) -> Boss:
+    let safeIdx = Math.max(0, Math.min(GAUNTLET_BOSS_ARCHETYPES.length - 1, waveIdx))
+    let arch = GAUNTLET_BOSS_ARCHETYPES[safeIdx]
+    let arenaW = engine?.ArenaW ?? engine?.arenaW ?? 1800
+    let arenaH = engine?.ArenaH ?? engine?.arenaH ?? 1800
+    let floor = engine?.CurrentFloor ?? engine?.currentFloor ?? 8
+    let spreadFraction = safeIdx + 1 / this.state.totalBosses + 1
+    let startX = arenaW * 0.15 + spreadFraction * 0.7
+    let startY = arenaH * 0.22 + safeIdx % 2 * 0.12
+    let boss = nil
+    if Array.isArray(engine?.ActiveBosses):
+      engine.ActiveBosses.push(boss)
+    this.trackedBosses.push({ boss, dead: false })
+    if engine?.Fx?.RingShockwave != nil:
+      engine.Fx.RingShockwave(boss.X, boss.Y, boss.Color, 90, 0.02)
+      engine.Fx.Flash(boss.Color, 0.25, 0.35)
+    if typeof(engine?.Banner) == "function":
+      engine.Banner(nil, 2)
+    if typeof(engine?.OnBossBox) == "function":
+      engine.OnBossBox(true, nil)
+    if engine?.Sound?.PlayBossAlert != nil:
+      engine.Sound.PlayBossAlert()
+    boss
+  fn update(dt:int, engine:GameEngine) -> void:
+    if not this.state.active or this.state.victory or this.state.defeat:
+      ret
+    let player = engine?.Player ?? engine?.player
+    if player != nil and player.Alive == false or player.alive == false or player.Hp <= 0 or player.hp <= 0:
+      this.triggerDefeat(engine)
+      ret
+    if this.state.bossesSpawned < this.state.totalBosses:
+      this.state.waveTimer = this.state.waveTimer - dt
+      if this.state.waveTimer <= 0:
+        let nextIdx = this.state.bossesSpawned
+        this.state.waveIndex = nextIdx
+        this.spawnBossForWave(nextIdx, engine)
+        this.state.bossesSpawned = this.state.bossesSpawned + 1
+        if this.state.bossesSpawned >= this.state.totalBosses:
+          this.state.allSpawned = true
+          this.state.waveTimer = 0
+        else:
+          this.state.waveTimer = 8
+    for tracked in this.trackedBosses:
+      if not tracked.dead:
+        if tracked.boss.Dead or tracked.boss.dead or tracked.boss.Hp <= 0 or tracked.boss.hp <= 0:
+          tracked.dead = true
+          tracked.boss.Dead = true
+          this.state.bossesDefeated = this.state.bossesDefeated + 1
+          if typeof(engine?.OnBossDefeated) == "function":
+            engine.OnBossDefeated(tracked.boss)
+    if this.state.bossesDefeated >= this.state.totalBosses:
+      this.triggerVictory(engine)
+  fn Update(dt:int, engine:GameEngine) -> void:
+    this.update(dt, engine)
+  fn triggerDefeat(engine:GameEngine) -> void:
+    this.state.defeat = true
+    this.state.active = false
+    let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
+    if meta != nil and typeof(meta.resetUniqueHelmets) == "function":
+      meta.resetUniqueHelmets()
+    if typeof(engine?.HandleGameOver) == "function":
+      engine.HandleGameOver(false)
+    if engine?.Sound?.PlayGameOver != nil:
+      engine.Sound.PlayGameOver()
+    if typeof(engine?.Banner) == "function":
+      engine.Banner("💀 GAUNTLET DEFEAT: ALL 8 HELMETS DESTROYED! RESTART FROM 0 💀", 5)
+  fn TriggerDefeat(engine:GameEngine) -> void:
+    this.triggerDefeat(engine)
+  fn triggerVictory(engine:GameEngine) -> void:
+    this.state.victory = true
+    this.state.active = false
+    let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
+    if meta != nil:
+      meta.Has9thHelmet = true
+      meta.has9thHelmet = true
+      if Array.isArray(meta.Helmets):
+        let hasNinth = meta.Helmets.some(fn(h:unknown) = h.id or h.Id == THE_NINTH_HELMET.id)
+        if not hasNinth and typeof(meta.AddHelmet) == "function":
+          meta.AddHelmet(THE_NINTH_HELMET)
+      if Array.isArray(meta.UniqueHelmets):
+        let hasNinthUnique = meta.UniqueHelmets.some(fn(h:unknown) = typeof(h) == "string" and h == THE_NINTH_HELMET.id or h.id or h.Id == THE_NINTH_HELMET.id)
+        if not hasNinthUnique:
+          meta.UniqueHelmets.push(THE_NINTH_HELMET.id)
+      if typeof(meta.Save) == "function":
+        meta.Save()
+    if typeof(engine?.HandleGameOver) == "function":
+      engine.HandleGameOver(true)
+    if engine?.Sound?.PlayVictory != nil:
+      engine.Sound.PlayVictory()
+    if typeof(engine?.Banner) == "function":
+      engine.Banner("🌟 ASCENSION ACHIEVED: ALL 8 BOSSES SLAIN! 9TH HELMET FORGED! 🌟", 6)
+  fn TriggerVictory(engine:GameEngine) -> void:
+    this.triggerVictory(engine)

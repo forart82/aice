@@ -1,0 +1,127 @@
+module poc_real_case/snake_ts/src/sim/World
+
+from "./SnakePlayer.js" import SnakePlayer
+from "./FoodItem.js" import FoodItem
+from "./Enemy.js" import Enemy
+from "./Projectile.js" import Projectile
+from "./Hazard.js" import Hazard
+from "./Boss.js" import Boss
+from "./GameEngine.js" import GameEngine
+from "./HelmetDrop.js" import HelmetDrop
+from "./CombatSystem.js" import CombatSystem
+
+pub class World:
+  Player: SnakePlayer
+  Foods: [FoodItem] = []
+  Enemies: [Enemy] = []
+  Projectiles: [Projectile] = []
+  Hazards: [Hazard] = []
+  ActiveBosses: [Boss] = []
+  HelmetDrops: [HelmetDrop] = []
+  ArenaW = 960
+  ArenaH = 640
+  TimeScale = 1
+  _vacuumTimer = 0
+  ChronoTimer = 0
+  NearestFood: Option[FoodItem] = nil
+  ChronoScale = 1
+  Game: GameEngine
+  _combat: Option[CombatSystem]
+  fn get_Boss() -> Option[Boss] = this.ActiveBosses[0] or nil
+  fn set_Boss(v:Option[Boss]) -> void:
+    if v != nil:
+      this.ActiveBosses = [v]
+    else:
+      this.ActiveBosses = []
+  fn get_Bosses() -> [Boss] = this.ActiveBosses
+  fn set_Bosses(v:[Boss]) -> void = this.ActiveBosses = v
+  fn get_VacuumTimer() -> int = this._vacuumTimer
+  fn set_VacuumTimer(v:int) -> void:
+    this._vacuumTimer = v
+    if this.Game != nil:
+      this.Game.VacuumTimer = v
+  fn get_player() -> SnakePlayer = this.Player
+  fn set_player(v:SnakePlayer) -> void = this.Player = v
+  fn get_foods() -> [FoodItem] = this.Foods
+  fn set_foods(v:[FoodItem]) -> void = this.Foods = v
+  fn get_enemies() -> [Enemy] = this.Enemies
+  fn set_enemies(v:[Enemy]) -> void = this.Enemies = v
+  fn get_projectiles() -> [Projectile] = this.Projectiles
+  fn set_projectiles(v:[Projectile]) -> void = this.Projectiles = v
+  fn get_hazards() -> [Hazard] = this.Hazards
+  fn set_hazards(v:[Hazard]) -> void = this.Hazards = v
+  fn get_boss() -> Option[Boss] = this.Boss
+  fn set_boss(v:Option[Boss]) -> void = this.Boss = v
+  fn get_activeBosses() -> [Boss] = this.ActiveBosses
+  fn set_activeBosses(v:[Boss]) -> void = this.ActiveBosses = v
+  fn get_bosses() -> [Boss] = this.Bosses
+  fn set_bosses(v:[Boss]) -> void = this.Bosses = v
+  fn get_arenaW() -> int = this.ArenaW
+  fn set_arenaW(v:int) -> void = this.ArenaW = v
+  fn get_arenaH() -> int = this.ArenaH
+  fn set_arenaH(v:int) -> void = this.ArenaH = v
+  fn get_timeScale() -> int = this.TimeScale
+  fn set_timeScale(v:int) -> void = this.TimeScale = v
+  fn get_vacuumTimer() -> int = this.VacuumTimer
+  fn set_vacuumTimer(v:int) -> void = this.VacuumTimer = v
+  fn get_chronoTimer() -> int = this.ChronoTimer
+  fn set_chronoTimer(v:int) -> void = this.ChronoTimer = v
+  fn get_nearestFood() -> Option[FoodItem] = this.NearestFood
+  fn set_nearestFood(v:Option[FoodItem]) -> void = this.NearestFood = v
+  fn get_chronoScale() -> int = this.ChronoScale
+  fn set_chronoScale(v:int) -> void = this.ChronoScale = v
+  fn get_game() -> GameEngine = this.Game
+  fn set_game(v:GameEngine) -> void = this.Game = v
+  fn get_helmetDrops() -> [HelmetDrop] = this.HelmetDrops
+  fn set_helmetDrops(v:[HelmetDrop]) -> void = this.HelmetDrops = v
+  fn get_combat() -> CombatSystem = this._combat or this.Game?.Combat
+  fn set_combat(v:CombatSystem) -> void = this._combat = v
+  fn get_Combat() -> CombatSystem = this._combat or this.Game?.Combat
+  fn set_Combat(v:CombatSystem) -> void = this._combat = v
+  static fn getPlayer(w:Option[World]) -> SnakePlayer:
+    if not w:
+      ret nil
+    w.Player ?? w.player
+  static fn GetPlayer(w:Option[World]) -> SnakePlayer = World.getPlayer(w)
+  static fn getFoods(w:Option[World]) -> [FoodItem]:
+    if not w:
+      ret []
+    w.Foods ?? w.foods ?? []
+  static fn GetFoods(w:Option[World]) -> [FoodItem] = World.getFoods(w)
+  static fn getEnemies(w:Option[World]) -> [Enemy]:
+    if not w:
+      ret []
+    w.Enemies ?? w.enemies ?? []
+  static fn GetEnemies(w:Option[World]) -> [Enemy] = World.getEnemies(w)
+  static fn getProjectiles(w:Option[World]) -> [Projectile]:
+    if not w:
+      ret []
+    w.Projectiles ?? w.projectiles ?? []
+  static fn GetProjectiles(w:Option[World]) -> [Projectile] = World.getProjectiles(w)
+  static fn getHazards(w:Option[World]) -> [Hazard]:
+    if not w:
+      ret []
+    w.Hazards ?? w.hazards ?? []
+  static fn GetHazards(w:Option[World]) -> [Hazard] = World.getHazards(w)
+  static fn getBosses(w:Option[World]) -> [Boss]:
+    if not w:
+      ret []
+    if w.ActiveBosses != nil and w.ActiveBosses.length > 0:
+      ret w.ActiveBosses
+    if w.activeBosses != nil and w.activeBosses.length > 0:
+      ret w.activeBosses
+    if w.Bosses != nil and w.Bosses.length > 0:
+      ret w.Bosses
+    if w.bosses != nil and w.bosses.length > 0:
+      ret w.bosses
+    if w.Boss != nil:
+      ret [w.Boss]
+    if w.boss != nil:
+      ret [w.boss]
+    []
+  static fn GetBosses(w:Option[World]) -> [Boss] = World.getBosses(w)
+  static fn getNearestFood(w:Option[World]) -> Option[FoodItem]:
+    if not w:
+      ret nil
+    w.NearestFood ?? w.nearestFood ?? nil
+  static fn GetNearestFood(w:Option[World]) -> Option[FoodItem] = World.getNearestFood(w)

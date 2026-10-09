@@ -1,0 +1,384 @@
+module poc_real_case/snake_ts/src/sim/SpatialHashGrid
+
+enum SpatialLayer:
+  Segments
+  Enemies
+  Projectiles
+  Hazards
+  Collectibles
+
+pub const SPATIAL_LAYER_COUNT = 5
+
+pub const SpatialLayerMask = { None: 0, Segments: 1 == SpatialLayer.Segments, Enemies: 1 == SpatialLayer.Enemies, Projectiles: 1 == SpatialLayer.Projectiles, Hazards: 1 == SpatialLayer.Hazards, Collectibles: 1 == SpatialLayer.Collectibles, All: 1 == SPATIAL_LAYER_COUNT - 1 }
+
+type SpatialLayerMaskValue = int
+
+type SpatialQueryResult:
+  id:int
+  layer:SpatialLayer
+  distSq:int
+  dist:int
+  x:int
+  y:int
+  radius:int
+
+pub class SpatialHashGrid:
+  _cellSize: int
+  _invCellSize: int
+  _cols: int
+  _rows: int
+  _maxCells: int
+  _gridHead: Int32Array
+  _capacities: Int32Array
+  _gridNext: [Int32Array]
+  _posX: [Float64Array]
+  _posY: [Float64Array]
+  _radius: [Float64Array]
+  _itemCount: Int32Array
+  _maxRadius: Float64Array
+  fn constructor(cellSize:unknown = 48, maxArenaW:unknown = 3200, maxArenaH:unknown = 2400):
+    this._cellSize = cellSize
+    this._invCellSize = 1 / cellSize
+    this._cols = Math.ceil(Math) + 2
+    this._rows = Math.ceil(Math) + 2
+    this._maxCells = this._cols * this._rows
+    this._gridHead = Int32Array(SPATIAL_LAYER_COUNT * this._maxCells)
+    this._gridHead.fill(-1)
+    this._capacities = Int32Array([2048, 512, 2048, 512, 1024])
+    this._itemCount = Int32Array(SPATIAL_LAYER_COUNT)
+    this._maxRadius = Float64Array(SPATIAL_LAYER_COUNT)
+    this._gridNext = Array(SPATIAL_LAYER_COUNT)
+    this._posX = Array(SPATIAL_LAYER_COUNT)
+    this._posY = Array(SPATIAL_LAYER_COUNT)
+    this._radius = Array(SPATIAL_LAYER_COUNT)
+  fn get_cellSize() -> int = this._cellSize
+  fn get_cols() -> int = this._cols
+  fn get_rows() -> int = this._rows
+  fn get_maxCells() -> int = this._maxCells
+  fn get_layerCount() -> int = SPATIAL_LAYER_COUNT
+  fn getCapacity(layer:SpatialLayer) -> int = this._capacities[layer] ?? 0
+  fn getItemCount(layer:SpatialLayer) -> int = this._itemCount[layer] ?? 0
+  fn getTotalItemCount() -> int:
+    let mut total = 0
+    total
+  fn getMaxRadius(layer:SpatialLayer) -> int = this._maxRadius[layer] ?? 0
+  fn clear() -> void:
+    this._gridHead.fill(-1)
+    this._itemCount.fill(0)
+    this._maxRadius.fill(0)
+  fn clearLayer(layer:SpatialLayer) -> void:
+    if layer < 0 or layer >= SPATIAL_LAYER_COUNT:
+      ret
+    let offset = layer * this._maxCells
+    this._gridHead.fill(-1, offset, offset + this._maxCells)
+    this._itemCount[layer] = 0
+    this._maxRadius[layer] = 0
+  fn _ensureCapacity(layer:int, minCapacity:int) -> void:
+    let current = this._capacities[layer]
+    if minCapacity <= current:
+      ret
+    let nextCap = Math.max(minCapacity * 2, current * 2)
+    this._capacities[layer] = nextCap
+    let newNext = Int32Array(nextCap)
+    newNext.set(this._gridNext[layer])
+    newNext.fill(-1, current)
+    this._gridNext[layer] = newNext
+    let newPosX = Float64Array(nextCap)
+    newPosX.set(this._posX[layer])
+    this._posX[layer] = newPosX
+    let newPosY = Float64Array(nextCap)
+    newPosY.set(this._posY[layer])
+    this._posY[layer] = newPosY
+    let newRad = Float64Array(nextCap)
+    newRad.set(this._radius[layer])
+    this._radius[layer] = newRad
+  fn insert(x:int, y:int, id:int) -> void:
+    pass
+  fn insert(layer:SpatialLayer, x:int, y:int, id:int, radius:int) -> void:
+    pass
+  fn insert(arg0:int, arg1:int, arg2:int, arg3:int, arg4:int) -> void:
+    let mut layer:int = undefined
+    let mut x:int = undefined
+    let mut y:int = undefined
+    let mut id:int = undefined
+    let mut radius:int = undefined
+    if arg3 == undefined:
+      layer = SpatialLayer.Segments
+      x = arg0
+      y = arg1
+      id = arg2
+      radius = 0
+    else:
+      layer = arg0
+      x = arg1
+      y = arg2
+      id = arg3
+      radius = arg4 ?? 0
+    if layer < 0 or layer >= SPATIAL_LAYER_COUNT or id < 0 or not Number.isFinite(id):
+      ret
+    if not Number.isFinite(x) or not Number.isFinite(y):
+      ret
+    if not Number.isFinite(radius) or radius < 0:
+      radius = 0
+    if id >= this._capacities[layer]:
+      this._ensureCapacity(layer, id + 1)
+    this._posX[layer][id] = x
+    this._posY[layer][id] = y
+    this._radius[layer][id] = radius
+    if radius > this._maxRadius[layer]:
+      this._maxRadius[layer] = radius
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let mut cx = Math.floor(Math)
+    let mut cy = Math.floor(Math)
+    if cx < 0:
+      cx = 0
+    elif cx >= cols:
+      cx = cols - 1
+    if cy < 0:
+      cy = 0
+    elif cy >= rows:
+      cy = rows - 1
+    let cellIdx = layer * this._maxCells + cy * cols + cx
+    this._gridNext[layer][id] = this._gridHead[cellIdx]
+    this._gridHead[cellIdx] = id
+    this._itemCount[layer] = this._itemCount[layer] + 1
+  fn insertSegments(segs:[unknown]) -> void:
+    let n = segs.length
+    this.clearLayer(SpatialLayer.Segments)
+    if n == 0:
+      ret
+    if n > this._capacities[SpatialLayer.Segments]:
+      this._ensureCapacity(SpatialLayer.Segments, n)
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let layer = SpatialLayer.Segments
+    let layerOffset = layer * this._maxCells
+    let gridHead = this._gridHead
+    let next = this._gridNext[layer]
+    let posX = this._posX[layer]
+    let posY = this._posY[layer]
+    let rad = this._radius[layer]
+    let mut maxR = 0
+    this._maxRadius[SpatialLayer.Segments] = maxR
+    this._itemCount[SpatialLayer.Segments] = n
+  fn queryRadius(x:int, y:int, radius:int, callback:(number) => boolean | void) -> bool:
+    pass
+  fn queryRadius(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int, callback:(number, SpatialLayer, number) => boolean | void) -> bool:
+    pass
+  fn queryRadius(arg0:int, arg1:int, arg2:int, arg3:int | (number) => boolean | void, arg4:(number, SpatialLayer, number) => boolean | void) -> bool:
+    let mut layerMask:int = undefined
+    let mut x:int = undefined
+    let mut y:int = undefined
+    let mut radius:int = undefined
+    let mut callback:(number, SpatialLayer, number) => boolean | void = undefined
+    if typeof(arg3) == "function":
+      layerMask = SpatialLayerMask.Segments
+      x = arg0
+      y = arg1
+      radius = arg2
+      callback = arg3
+    else:
+      layerMask = arg0
+      x = arg1
+      y = arg2
+      radius = arg3
+      callback = arg4
+    if layerMask == 0:
+      ret false
+    if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
+      ret false
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    false
+  fn findFirst(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int) -> int:
+    pass
+  fn findFirst(x:int, y:int, radius:int) -> int:
+    pass
+  fn findFirst(arg0:int, arg1:int, arg2:int, arg3:int) -> int:
+    let mut layerMask:int = undefined
+    let mut x:int = undefined
+    let mut y:int = undefined
+    let mut radius:int = undefined
+    if arg3 == undefined:
+      layerMask = SpatialLayerMask.Segments
+      x = arg0
+      y = arg1
+      radius = arg2
+    else:
+      layerMask = arg0
+      x = arg1
+      y = arg2
+      radius = arg3
+    if layerMask == 0:
+      ret -1
+    if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
+      ret -1
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    -1
+  fn findFirstSegment(x:int, y:int, radius:int, minIndex:unknown = 0) -> int:
+    if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
+      ret -1
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    let l = SpatialLayer.Segments
+    let layerMaxRad = this._maxRadius[l]
+    let searchR = radius + layerMaxRad
+    let mut minCx = Math.floor(Math)
+    if minCx < 0:
+      minCx = 0
+    let mut maxCx = Math.floor(Math)
+    if maxCx >= cols:
+      maxCx = cols - 1
+    let mut minCy = Math.floor(Math)
+    if minCy < 0:
+      minCy = 0
+    let mut maxCy = Math.floor(Math)
+    if maxCy >= rows:
+      maxCy = rows - 1
+    if minCx > maxCx or minCy > maxCy:
+      ret -1
+    let layerOffset = l * maxCells
+    let next = this._gridNext[l]
+    let posX = this._posX[l]
+    let posY = this._posY[l]
+    let rad = this._radius[l]
+    let maxLayerRSq = searchR * searchR
+    -1
+  fn queryRadiusBuffer(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int, outBuffer:Int32Array, maxHits:int = outBuffer.length) -> int:
+    if layerMask == 0 or maxHits <= 0:
+      ret 0
+    if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
+      ret 0
+    let mut hitCount = 0
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    hitCount
+  fn queryNearest(layerMask:SpatialLayerMaskValue, x:int, y:int, maxRadius:int) -> Option[SpatialQueryResult]:
+    pass
+  fn queryNearest(layerMask:SpatialLayerMaskValue, x:int, y:int, maxRadius:int, outResult:SpatialQueryResult) -> bool:
+    pass
+  fn queryNearest(layerMask:SpatialLayerMaskValue, x:int, y:int, maxRadius:unknown = Infinity, outResult:SpatialQueryResult) -> unknown | bool:
+    if layerMask == 0 or not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(maxRadius) or maxRadius <= 0:
+      if outResult != nil:
+        ret false
+      else:
+        ret nil
+    let cs = this._cellSize
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    let mut bestDistSq = maxRadius * maxRadius
+    let mut bestDist = maxRadius
+    let mut bestId = -1
+    let mut bestLayer = SpatialLayer.Segments
+    let mut bestX = 0
+    let mut bestY = 0
+    let mut bestRadius = 0
+    let centerCx = Math.floor(Math)
+    let centerCy = Math.floor(Math)
+    if centerCx >= 0 and centerCx < cols and centerCy >= 0 and centerCy < rows:
+      nil
+    let mut minCx = Math.floor(Math)
+    if minCx < 0:
+      minCx = 0
+    let mut maxCx = Math.floor(Math)
+    if maxCx >= cols:
+      maxCx = cols - 1
+    let mut minCy = Math.floor(Math)
+    if minCy < 0:
+      minCy = 0
+    let mut maxCy = Math.floor(Math)
+    if maxCy >= rows:
+      maxCy = rows - 1
+    if minCx > maxCx or minCy > maxCy:
+      if bestId == -1:
+        if outResult != nil:
+          ret false
+        else:
+          ret nil
+    else:
+      nil
+    if bestId == -1:
+      if outResult != nil:
+        ret false
+      else:
+        ret nil
+    if outResult != nil:
+      outResult.id = bestId
+      outResult.layer = bestLayer
+      outResult.distSq = bestDistSq
+      outResult.dist = bestDist
+      outResult.x = bestX
+      outResult.y = bestY
+      outResult.radius = bestRadius
+      ret true
+    { id: bestId, layer: bestLayer, distSq: bestDistSq, dist: bestDist, x: bestX, y: bestY, radius: bestRadius }
+  fn queryRay(layerMask:SpatialLayerMaskValue, startX:int, startY:int, dirX:int, dirY:int, maxDistance:int, callback:(number, SpatialLayer, number, number, number) => boolean | void) -> bool:
+    if layerMask == 0 or not Number.isFinite(maxDistance) or maxDistance <= 0:
+      ret false
+    if not Number.isFinite(startX) or not Number.isFinite(startY) or not Number.isFinite(dirX) or not Number.isFinite(dirY):
+      ret false
+    let len = Math.hypot(dirX, dirY)
+    if not Number.isFinite(len) or len <= 0.000001:
+      ret false
+    let dx = dirX / len
+    let dy = dirY / len
+    let cs = this._cellSize
+    let invCs = this._invCellSize
+    let cols = this._cols
+    let rows = this._rows
+    let maxCells = this._maxCells
+    let gridHead = this._gridHead
+    let gridW = cols * cs
+    let gridH = rows * cs
+    if startX < 0 and dx <= 0 or startX >= gridW and dx >= 0:
+      ret false
+    if startY < 0 and dy <= 0 or startY >= gridH and dy >= 0:
+      ret false
+    let mut cx = Math.floor(Math)
+    let mut cy = Math.floor(Math)
+    let stepX = dx > 0 and 1 or dx < 0 and -1 or 0
+    let stepY = dy > 0 and 1 or dy < 0 and -1 or 0
+    let mut tMaxX = dx > 0 and cx + 1 * cs - startX / dx or dx < 0 and cx * cs - startX / dx or Infinity
+    let mut tMaxY = dy > 0 and cy + 1 * cs - startY / dy or dy < 0 and cy * cs - startY / dy or Infinity
+    let tDeltaX = dx != 0 and Math.abs(cs / dx) or Infinity
+    let tDeltaY = dy != 0 and Math.abs(cs / dy) or Infinity
+    let mut tCurrent = 0
+    while tCurrent <= maxDistance:
+      if cx >= 0 and cx < cols and cy >= 0 and cy < rows:
+        nil
+      if tMaxX < tMaxY:
+        tCurrent = tMaxX
+        tMaxX = tMaxX + tDeltaX
+        cx = cx + stepX
+      else:
+        tCurrent = tMaxY
+        tMaxY = tMaxY + tDeltaY
+        cy = cy + stepY
+      if stepX > 0 and cx >= cols or stepX < 0 and cx < 0:
+        nil
+      if stepY > 0 and cy >= rows or stepY < 0 and cy < 0:
+        nil
+    false
+
+pub const SegmentSpatialGrid = SpatialHashGrid
+
+type SegmentSpatialGrid = SpatialHashGrid

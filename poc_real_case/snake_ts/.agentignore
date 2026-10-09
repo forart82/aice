@@ -1,0 +1,119 @@
+# ==============================================================================
+# AI Coding Agent Context Budget & Ignore Manifest (.agentignore)
+# ==============================================================================
+# Protocol 3.0 Context Economics: Filters out high-noise, large-payload,
+# binary, and auto-generated files from agent search, context windows, and tools.
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Package & Dependency Lockfiles (High Token Noise)
+# ------------------------------------------------------------------------------
+package-lock.json
+Cargo.lock
+yarn.lock
+pnpm-lock.yaml
+poetry.lock
+composer.lock
+Gemfile.lock
+flake.lock
+bun.lockb
+
+# ------------------------------------------------------------------------------
+# 2. Build Source Maps, Bundles & Declarations
+# ------------------------------------------------------------------------------
+*.map
+*.d.ts.map
+*.min.js
+*.bundle.js
+*.min.css
+*.bundle.css
+dist/
+build/
+target/
+out/
+bin/
+obj/
+.godot/
+
+# ------------------------------------------------------------------------------
+# 3. Test Coverage Reports, LCOV, Profiler Outputs, Telemetry & Logs
+# ------------------------------------------------------------------------------
+coverage/
+.nyc_output/
+reports/
+*.telemetry.json
+*.lcov
+*.log
+*.tmp
+*.temp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ------------------------------------------------------------------------------
+# 4. Binary Data, Media, Audio, 3D Assets & Packages
+# ------------------------------------------------------------------------------
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.svgz
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.aac
+*.m4a
+*.pck
+*.apk
+*.aab
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.glb
+*.gltf
+*.blend
+*.fbx
+*.obj
+*.bin
+*.wasm
+*.so
+*.dylib
+*.dll
+*.exe
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+
+# ------------------------------------------------------------------------------
+# 5. OS & IDE Caches / Metadata
+# ------------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.turbo/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.next/
+.nuxt/
+node_modules/
+.git/
+
+# ------------------------------------------------------------------------------
+# 6. Archived Skeleton TDD Historical Logs
+# ------------------------------------------------------------------------------
+docs/tdd/archive/
+

@@ -1,0 +1,31 @@
+{
+  "id": "sfx_eat_pop_02",
+  "file": "snake_ts/03_movement_and_pickups/sfx_eat_pop_02.wav",
+  "format": {
+    "sample_rate": 44100,
+    "bit_depth": 16,
+    "channels": 2,
+    "duration_seconds": 0.0399,
+    "samples_count": 1760
+  },
+  "levels": {
+    "peak_dbfs": -1.0,
+    "rms_dbfs": -11.07,
+    "dc_offset": 0.00042
+  },
+  "spatial": {
+    "mode": "stereo",
+    "pan": 0.0
+  },
+  "bus": "sfx",
+  "loop": {
+    "is_loopable": false,
+    "start_sample": 0,
+    "end_sample": 1760
+  },
+  "playback_recommendations": {
+    "pitch_randomization_cents": 50,
+    "volume_randomization_db": 1.5,
+    "concurrency_limit": 6
+  }
+}

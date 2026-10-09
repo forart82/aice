@@ -1,0 +1,1265 @@
+module poc_real_case/snake_ts/src/sim/GameEngine
+
+from "../core/MathX.js" import MathX
+from "../core/Rng.js" import Rng
+from "../core/Services.js" import Services, Caps, ServiceContainer, IServiceContainer
+from "../core/Contracts.js" import IFx, ISound, IInput, ISaveIO, IUiRoot
+from "../core/Vec2.js" import Vec2
+from "../data/GameData.js" import GameData
+from "../data/Types.js" import CardDef, GameModeDef, DailyCapacityState
+from "../data/Helmets.js" import generateBossHelmet, formatHelmetStatDescription
+from "../data/MetaProgression.js" import MetaProgression
+from "../data/CosmicCapacities.js" import CosmicCapacities
+from "./GameState.js" import GameState
+from "./FoodItem.js" import FoodItem
+from "./Hazard.js" import Hazard
+from "./Projectile.js" import Projectile
+from "./SnakePlayer.js" import SnakePlayer
+from "./Enemy.js" import Enemy
+from "./Boss.js" import Boss
+from "./HelmetDrop.js" import HelmetDrop
+from "./CombatSystem.js" import CombatSystem
+from "./World.js" import World
+from "./ai/AutonomousBotPlayer.js" import AutonomousBotPlayer
+from "./BossRushGauntlet.js" import BossRushGauntlet
+
+type Steering:
+  X:int
+  Y:int
+  Active:bool
+  x:Option[int]
+  y:Option[int]
+  active:Option[bool]
+
+type GameEngineOptions:
+  isolated:Option[bool]
+  services:Option[IServiceContainer]
+  meta:Option[MetaProgression]
+  fx:Option[IFx]
+  sound:Option[ISound]
+  input:Option[IInput]
+  saveIO:Option[ISaveIO]
+  headless:Option[bool]
+  rng:Option[Rng]
+
+pub class GameEngine:
+  static readonly FixedStep = 1 / 120
+  static readonly fixedStep = 1 / 120
+  static readonly MaxStepsPerFrame = 6
+  static readonly maxStepsPerFrame = 6
+  static readonly BaseArenaArea = 960 * 640
+  static readonly baseArenaArea = 960 * 640
+  OnShowScreen: (string, unknown) => void
+  OnHideModals: () => void
+  OnHudVisible: (boolean) => void
+  OnUpdateHud: () => void
+  OnBanner: (string, number) => void
+  OnBannerHide: () => void
+  OnToast: (string, number) => void
+  OnVignette: (number) => void
+  OnBossBox: (boolean, any) => void
+  OnPerksChanged: () => void
+  OnDraftChanged: () => void
+  OnRunSummary: (boolean, number) => void
+  onRunSummary: (boolean, number) => void
+  OnClearTransientUi: () => void
+  OnApplySettings: () => void
+  OnSaveSettings: () => void
+  OnSteered: (boolean) => void
+  OnCanvasResized: () => void
+  OnMenuNavigate: () => void
+  OnDraw: () => void
+  DailyKeyProvider: () => void
+  ArenaW = 960
+  ArenaH = 640
+  Dpr = 1
+  CssWidth = 960
+  CssHeight = 640
+  BackingWidth = 960
+  BackingHeight = 640
+  State: GameState = GameState.Menu
+  GameMode = "rogue"
+  SelectedClass = "emerald"
+  RunSeed = 0
+  CurrentFloor = 1
+  MaxFloors = 20
+  FoodTarget = 15
+  FloorFoodProgress = 0
+  FloorClearTimer = 0
+  InitialSegments = 2
+  GrowthOnEat = false
+  LabIntroSeen = false
+  RecoveryPityCounter = 0
+  Player: SnakePlayer
+  Foods: [FoodItem] = []
+  Enemies: [Enemy] = []
+  Projectiles: [Projectile] = []
+  Hazards: [Hazard] = []
+  ActiveBosses: [Boss] = []
+  HelmetDrops: [HelmetDrop] = []
+  Combat: CombatSystem = CombatSystem()
+  RerollsRemaining = 1
+  CurrentDraftCards: [CardDef] = []
+  ActivePerks: [CardDef] = []
+  FoodSpawnTimer = 0
+  WaveTimer = 3
+  VacuumTimer = 0
+  ChronoTimer = 0
+  TimeScale = 1
+  BannerTimer = 0
+  Vignette = 0
+  Accumulator = 0
+  Fps = 60
+  FpsSamples = 0
+  FpsAccum = 0
+  FrameCount = 0
+  SettingsReturnState: GameState = GameState.Menu
+  TouchScheme = "stick"
+  IsTouchDevice = false
+  HasSteered = false
+  RunActive = false
+  DailyMilestoneReached = 0
+  Gauntlet: Option[BossRushGauntlet] = nil
+  isBotEnabled = false
+  botPlayer = AutonomousBotPlayer()
+  _botDraftTimer = 0
+  _botFloorClearTimer = 0
+  _botGameOverTimer = 0
+  _floorBaseFloor = -1
+  _floorBaseEaten = 0
+  _storageWarned = false
+  readonly _world = World()
+  readonly _eligibleEnemies: [str] = []
+  readonly _reusableSteering: Steering = { X: 0, Y: 0, Active: false, x: 0, y: 0, active: false }
+  static readonly SkillHaptic: [int] = [12, 30, 24]
+  backdrop = {  }
+  _services: Option[IServiceContainer] = nil
+  _meta: Option[MetaProgression] = nil
+  static fn CalculateFoodTarget(floor:int, bossRush:unknown = false) -> int:
+    if bossRush != nil:
+      ret 0
+    Math.min(42, 16 + Math.floor(Math))
+  static fn calculateFoodTarget(floor:int, bossRush:unknown = false) -> int = GameEngine.CalculateFoodTarget(floor, bossRush)
+  get Bosses() -> [Boss] = this.ActiveBosses
+  set Bosses(v:[Boss]) = this.ActiveBosses = v ?? []
+  get bosses() -> [Boss] = this.ActiveBosses
+  set bosses(v:[Boss]) = this.ActiveBosses = v ?? []
+  get activeBosses() -> [Boss] = this.ActiveBosses
+  set activeBosses(v:[Boss]) = this.ActiveBosses = v ?? []
+  get Boss() -> Option[Boss] = this.ActiveBosses.length > 0 and this.ActiveBosses[0] or nil
+  set Boss(v:Option[Boss]):
+    if not v:
+      this.ActiveBosses.length = 0
+    else:
+      this.ActiveBosses = [v]
+  get arenaW() -> int = this.ArenaW
+  set arenaW(v:int) = this.ArenaW = v
+  get arenaH() -> int = this.ArenaH
+  set arenaH(v:int) = this.ArenaH = v
+  get dpr() -> int = this.Dpr
+  set dpr(v:int) = this.Dpr = v
+  get cssWidth() -> int = this.CssWidth
+  set cssWidth(v:int) = this.CssWidth = v
+  get cssHeight() -> int = this.CssHeight
+  set cssHeight(v:int) = this.CssHeight = v
+  get backingWidth() -> int = this.BackingWidth
+  set backingWidth(v:int) = this.BackingWidth = v
+  get backingHeight() -> int = this.BackingHeight
+  set backingHeight(v:int) = this.BackingHeight = v
+  get state() -> GameState = this.State
+  set state(v:GameState) = this.State = v
+  get gameMode() -> str = this.GameMode
+  set gameMode(v:str) = this.GameMode = v
+  get selectedClass() -> str = this.SelectedClass
+  set selectedClass(v:str) = this.SelectedClass = v
+  get runSeed() -> int = this.RunSeed
+  set runSeed(v:int) = this.RunSeed = v
+  get currentFloor() -> int = this.CurrentFloor
+  set currentFloor(v:int) = this.CurrentFloor = v
+  get maxFloors() -> int = this.MaxFloors
+  set maxFloors(v:int) = this.MaxFloors = v
+  get foodTarget() -> int = this.FoodTarget
+  set foodTarget(v:int) = this.FoodTarget = v
+  get recoveryPityCounter() -> int = this.RecoveryPityCounter
+  set recoveryPityCounter(v:int) = this.RecoveryPityCounter = v
+  get floorFoodProgress() -> int = this.FloorFoodProgress
+  set floorFoodProgress(v:int) = this.FloorFoodProgress = v
+  get floorClearTimer() -> int = this.FloorClearTimer
+  set floorClearTimer(v:int) = this.FloorClearTimer = v
+  get initialSegments() -> int = this.InitialSegments
+  set initialSegments(v:int) = this.InitialSegments = v
+  get growthOnEat() -> bool = this.GrowthOnEat
+  set growthOnEat(v:bool) = this.GrowthOnEat = v
+  get labIntroSeen() -> bool = this.LabIntroSeen
+  set labIntroSeen(v:bool) = this.LabIntroSeen = v
+  get player() -> SnakePlayer = this.Player
+  set player(v:SnakePlayer) = this.Player = v
+  get foods() -> [FoodItem] = this.Foods
+  set foods(v:[FoodItem]) = this.Foods = v
+  get foodItems() -> [FoodItem] = this.Foods
+  set foodItems(v:[FoodItem]) = this.Foods = v
+  get enemies() -> [Enemy] = this.Enemies
+  set enemies(v:[Enemy]) = this.Enemies = v
+  get projectiles() -> [Projectile] = this.Projectiles
+  set projectiles(v:[Projectile]) = this.Projectiles = v
+  get hazards() -> [Hazard] = this.Hazards
+  set hazards(v:[Hazard]) = this.Hazards = v
+  get boss() -> Option[Boss] = this.Boss
+  set boss(v:Option[Boss]) = this.Boss = v
+  get helmetDrops() -> [HelmetDrop] = this.HelmetDrops
+  set helmetDrops(v:[HelmetDrop]) = this.HelmetDrops = v
+  get combat() -> CombatSystem = this.Combat
+  set combat(v:CombatSystem) = this.Combat = v
+  get rerollsRemaining() -> int = this.RerollsRemaining
+  set rerollsRemaining(v:int) = this.RerollsRemaining = v
+  get currentDraftCards() -> [CardDef] = this.CurrentDraftCards
+  set currentDraftCards(v:[CardDef]) = this.CurrentDraftCards = v
+  get activePerks() -> [CardDef] = this.ActivePerks
+  set activePerks(v:[CardDef]) = this.ActivePerks = v
+  get foodSpawnTimer() -> int = this.FoodSpawnTimer
+  set foodSpawnTimer(v:int) = this.FoodSpawnTimer = v
+  get waveTimer() -> int = this.WaveTimer
+  set waveTimer(v:int) = this.WaveTimer = v
+  get vacuumTimer() -> int = this.VacuumTimer
+  set vacuumTimer(v:int) = this.VacuumTimer = v
+  get chronoTimer() -> int = this.ChronoTimer
+  set chronoTimer(v:int) = this.ChronoTimer = v
+  get timeScale() -> int = this.TimeScale
+  set timeScale(v:int) = this.TimeScale = v
+  get bannerTimer() -> int = this.BannerTimer
+  set bannerTimer(v:int) = this.BannerTimer = v
+  get vignette() -> int = this.Vignette
+  set vignette(v:int) = this.Vignette = v
+  get accumulator() -> int = this.Accumulator
+  set accumulator(v:int) = this.Accumulator = v
+  get fps() -> int = this.Fps
+  set fps(v:int) = this.Fps = v
+  get frameCount() -> int = this.FrameCount
+  set frameCount(v:int) = this.FrameCount = v
+  get hasSteered() -> bool = this.HasSteered
+  set hasSteered(v:bool) = this.HasSteered = v
+  get runActive() -> bool = this.RunActive
+  set runActive(v:bool) = this.RunActive = v
+  get dailyMilestoneReached() -> int = this.DailyMilestoneReached
+  set dailyMilestoneReached(v:int) = this.DailyMilestoneReached = v
+  get gauntlet() -> Option[BossRushGauntlet] = this.Gauntlet
+  set gauntlet(v:Option[BossRushGauntlet]) = this.Gauntlet = v
+  fn StartBossRushGauntlet() -> BossRushGauntlet:
+    this.Gauntlet = BossRushGauntlet()
+    this.Gauntlet.Start(this)
+    this.Gauntlet
+  fn startBossRushGauntlet() -> BossRushGauntlet = this.StartBossRushGauntlet()
+  fn toggleBot() -> bool:
+    this.isBotEnabled = not this.isBotEnabled
+    if this.isBotEnabled != nil:
+      this.Banner("🤖 SPECTATOR BOT: ENGAGED", 1.8)
+    else:
+      this.Banner("🎮 MANUAL CONTROL: RESTORED", 1.8)
+    this.isBotEnabled
+  fn setUiRoot(uiRoot:Option[IUiRoot]) -> void:
+    if not uiRoot:
+      ret
+    this.OnShowScreen = fn(id:str, payload:unknown) = uiRoot.showScreen(id, payload)
+    this.OnHideModals = fn() = uiRoot.closeAllModals()
+    this.OnHudVisible = fn(visible:bool) = uiRoot.hudView.setVisible(visible)
+    this.OnUpdateHud = fn() = uiRoot.hudView.update()
+    this.OnBanner = fn(text:str, seconds:int) = uiRoot.hudView.showBanner(text, seconds)
+    this.OnBannerHide = fn() = uiRoot.hudView.hideBanner()
+    this.OnToast = fn(message:str, seconds:int) = uiRoot.hudView.showToast(message, seconds)
+    this.OnVignette = fn(opacity:int) = uiRoot.hudView.setVignette(opacity)
+    this.OnBossBox = fn(visible:bool, name:Option[str]) = uiRoot.hudView.setBossBox(visible, name)
+    this.OnPerksChanged = fn() = uiRoot.hudView.updatePerks()
+    this.OnDraftChanged = fn() = nil
+  fn draw(_ctx:unknown) -> void:
+    this.OnDraw()
+  get services() -> IServiceContainer = this._services ?? typeof(Services) != "undefined" and Services.defaultContainer ?? Services or nil
+  set services(v:IServiceContainer) = this._services = v
+  get Services() -> IServiceContainer = this.services
+  set Services(v:IServiceContainer) = this.services = v
+  get meta() -> MetaProgression = this._meta ?? this.services?.Meta ?? typeof(MetaProgression) != "undefined" and MetaProgression.Instance or nil
+  set meta(v:MetaProgression) = this._meta = v
+  get Meta() -> MetaProgression = this.meta
+  set Meta(v:MetaProgression) = this.meta = v
+  get sound() -> ISound = this.services?.Sound ?? Services.Sound
+  get Sound() -> ISound = this.sound
+  get fx() -> IFx = this.services?.Fx ?? Services.Fx
+  get Fx() -> IFx = this.fx
+  get input() -> IInput = this.services?.Input ?? Services.Input
+  get Input() -> IInput = this.input
+  fn constructor(fxOrOptions:int | GameEngineOptions | unknown, options:int | GameEngineOptions | unknown):
+    if typeof(fxOrOptions) == "number":
+      this.ArenaW = fxOrOptions
+    if typeof(options) == "number":
+      this.ArenaH = options
+    let mut opts:Option[GameEngineOptions] = options != nil and typeof(options) == "object" and options or undefined
+    let isOptionsObject = fxOrOptions != nil and typeof(fxOrOptions) == "object" and "isolated" == fxOrOptions or "services" == fxOrOptions or "meta" == fxOrOptions or "headless" == fxOrOptions or "fx" == fxOrOptions or "sound" == fxOrOptions or "input" == fxOrOptions or "saveIO" == fxOrOptions or "rng" == fxOrOptions
+    if isOptionsObject != nil:
+      opts = fxOrOptions
+    if opts?.isolated or opts?.services or opts?.meta or opts?.headless:
+      this._services = opts?.services ?? Services.createIsolated()
+      this._meta = opts?.meta ?? MetaProgression.createIsolated({ engine: this, services: this._services })
+      this._services.engine = this
+      this._services.meta = this._meta
+      this._meta.engine = this
+      if opts?.fx != nil:
+        this._services.Fx = opts.fx
+      if opts?.sound != nil:
+        this._services.Sound = opts.sound
+      if opts?.input != nil:
+        this._services.Input = opts.input
+      if opts?.headless != undefined:
+        this._services.Headless = opts.headless
+    else:
+      this._services = nil
+      this._meta = nil
+      Services.registerEngineProvider(fn() = this)
+      let potentialFx = fxOrOptions
+      if potentialFx != nil and not (potentialFx == ServiceContainer) and not isOptionsObject and typeof(potentialFx.burst) == "function":
+        Services.Fx = potentialFx
+    this.Combat.Engine = this
+    this.Combat.Meta = this.meta
+    this.Combat.Services = this.services
+  get Cfg() -> GameModeDef = GameData.Modes.Get(this.GameMode) ?? GameData.Modes.Get("rogue")
+  fn SetupCanvas(cssWidth:int, cssHeight:int, dpr:int) -> void:
+    let mut w = cssWidth
+    let mut h = cssHeight
+    if not (w > 0) or not (h > 0):
+      w = 960
+      h = 640
+    w = Math.max(240, w)
+    h = Math.max(240, h)
+    let aspect = w / h
+    let mut arenaH = Math.sqrt(GameEngine.BaseArenaArea / aspect)
+    let mut arenaW = arenaH * aspect
+    arenaW = MathX.clamp(arenaW, 520, 1600)
+    arenaH = MathX.clamp(arenaH, 420, 1400)
+    let oldW = this.ArenaW
+    let oldH = this.ArenaH
+    this.ArenaW = MathX.roundJs(arenaW)
+    this.ArenaH = MathX.roundJs(arenaH)
+    this.CssWidth = w
+    this.CssHeight = h
+    this.Dpr = MathX.clamp(dpr > 0 and dpr or 1, 1, 2.5) * Math.min(1, w / arenaW)
+    this.BackingWidth = MathX.roundJs(this.ArenaW * this.Dpr)
+    this.BackingHeight = MathX.roundJs(this.ArenaH * this.Dpr)
+    if this.Player != nil and oldW > 0 and oldH > 0 and oldW != this.ArenaW or oldH != this.ArenaH:
+      this.RescaleWorld(this.ArenaW / oldW, this.ArenaH / oldH)
+    this.OnCanvasResized()
+  fn setupCanvas(cssWidth:int, cssHeight:int, dpr:int) -> void:
+    this.SetupCanvas(cssWidth, cssHeight, dpr)
+  fn RescaleWorld(sx:int, sy:int) -> void:
+    let hiX = this.ArenaW - 4
+    let hiY = this.ArenaH - 4
+    if this.Player != nil:
+      this.Player.X = MathX.clamp(this.Player.X * sx, 4, hiX)
+      this.Player.Y = MathX.clamp(this.Player.Y * sy, 4, hiY)
+  fn rescaleWorld(sx:int, sy:int) -> void:
+    this.RescaleWorld(sx, sy)
+  fn ScreenToWorld(normX:int, normY:int) -> Vec2 = Vec2(MathX.clamp(normX, 0, 1) * this.ArenaW, MathX.clamp(normY, 0, 1) * this.ArenaH)
+  fn screenToWorld(normX:int, normY:int) -> Vec2 = this.ScreenToWorld(normX, normY)
+  fn ShowMenu() -> void:
+    this.AbandonRun()
+    this.State = GameState.Menu
+    this.ClearTransientUi()
+    this.SetHudVisible(false)
+    this.OnShowScreen("modal-main-menu")
+    this.Sound.StopMusic()
+    this.Sound.SetBossMode(false)
+  fn showMenu() -> void:
+    this.ShowMenu()
+  fn SetHudVisible(visible:bool) -> void:
+    this.OnHudVisible(visible)
+  fn setHudVisible(visible:bool) -> void:
+    this.SetHudVisible(visible)
+  fn ChooseMode(mode:str) -> void:
+    if GameData.Modes.Has(mode):
+      this.GameMode = mode
+    else:
+      this.GameMode = "rogue"
+    this.ShowClassSelect()
+  fn chooseMode(mode:str) -> void:
+    this.ChooseMode(mode)
+  fn ShowClassSelect() -> void:
+    this.State = GameState.ClassSelect
+    this.SetHudVisible(false)
+    this.OnShowScreen("modal-class-select")
+  fn showClassSelect() -> void:
+    this.ShowClassSelect()
+  fn ShowSanctuary() -> void:
+    this.State = GameState.Sanctuary
+    this.SetHudVisible(false)
+    this.OnShowScreen("modal-sanctuary")
+  fn showSanctuary() -> void:
+    this.ShowSanctuary()
+  fn ShowRecords() -> void:
+    this.State = GameState.Records
+    this.SetHudVisible(false)
+    this.OnShowScreen("modal-records")
+  fn showRecords() -> void:
+    this.ShowRecords()
+  fn ShowStats(tab:"run" | "global" = "run") -> void:
+    if this.State == GameState.Playing:
+      this.State = GameState.Paused
+      this.Sound.SetPaused(true)
+    if tab == "run":
+      this.OnShowScreen("modal-snake-lab", { tab: "telemetry" })
+    else:
+      this.OnShowScreen("modal-stats", { mode: tab })
+  fn showStats(tab:"run" | "global" = "run") -> void:
+    this.ShowStats(tab)
+  fn ToggleStats() -> void:
+    if this.State == GameState.Playing:
+      this.ShowStats("run")
+    elif this.State == GameState.Paused:
+      this.Resume()
+  fn toggleStats() -> void:
+    this.ToggleStats()
+  fn ShowHelp() -> void:
+    if this.State == GameState.Playing:
+      this.State = GameState.Paused
+      this.Sound.SetPaused(true)
+    elif this.State != GameState.Paused:
+      this.State = GameState.Help
+    this.OnShowScreen("modal-help")
+  fn showHelp() -> void:
+    this.ShowHelp()
+  fn ToggleHelp() -> void:
+    if this.State == GameState.Playing:
+      this.ShowHelp()
+    elif this.State == GameState.Paused or this.State == GameState.Help:
+      this.Resume()
+  fn toggleHelp() -> void:
+    this.ToggleHelp()
+  fn OpenSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+    if this.State == GameState.Playing:
+      this.State = GameState.Paused
+      this.Sound.SetPaused(true)
+    this.OnShowScreen("modal-snake-lab", { tab })
+  fn openSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+    this.OpenSnakeLab(tab)
+  fn ShowSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+    this.OpenSnakeLab(tab)
+  fn showSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+    this.OpenSnakeLab(tab)
+  fn CloseSnakeLab() -> void:
+    if this.State == GameState.Paused and this.RunActive and this.Player and this.Player.Alive:
+      this.Resume()
+    this.OnHideModals()
+  fn closeSnakeLab() -> void:
+    this.CloseSnakeLab()
+  fn ShowSettings(returnState:GameState) -> void:
+    this.SettingsReturnState = returnState
+    this.State = GameState.Settings
+    this.SetHudVisible(false)
+    this.OnShowScreen("modal-settings")
+  fn showSettings(returnState:GameState) -> void:
+    this.ShowSettings(returnState)
+  fn CloseSettings() -> void:
+    this.OnSaveSettings()
+    if this.SettingsReturnState == GameState.Paused:
+      this.State = GameState.Paused
+      this.OnShowScreen("modal-pause")
+    else:
+      this.ShowMenu()
+  fn closeSettings() -> void:
+    this.CloseSettings()
+  fn TogglePause() -> void:
+    if this.State == GameState.Playing:
+      this.State = GameState.Paused
+      this.OnShowScreen("modal-pause")
+      this.Sound.SetPaused(true)
+    elif this.State == GameState.Paused:
+      if not this.RunActive or not this.Player or not this.Player.Alive:
+        ret
+      this.State = GameState.Playing
+      this.OnHideModals()
+      this.SetHudVisible(true)
+      this.Accumulator = 0
+      this.Sound.SetPaused(false)
+  fn Resume() -> void:
+    if not this.RunActive or not this.Player or not this.Player.Alive or this.State == GameState.GameOver or this.State == GameState.Victory:
+      ret
+    this.State = GameState.Playing
+    this.OnHideModals()
+    this.SetHudVisible(true)
+    this.Accumulator = 0
+    this.Sound.SetPaused(false)
+  fn resume() -> void:
+    this.Resume()
+  get paused() -> bool = this.State == GameState.Paused
+  get isPaused() -> bool = this.State == GameState.Paused
+  fn togglePause() -> void:
+    this.TogglePause()
+  fn OnVisibilityRestored() -> void = this.Accumulator = 0
+  fn onVisibilityRestored() -> void:
+    this.OnVisibilityRestored()
+  fn Banner(text:str, seconds:unknown = 0) -> void:
+    if seconds > 0:
+      this.BannerTimer = seconds
+    else:
+      this.BannerTimer = 1.5
+    this.OnBanner(text, this.BannerTimer)
+  fn banner(text:str, seconds:unknown = 0) -> void:
+    this.Banner(text, seconds)
+  fn Toast(message:str, seconds:unknown = 0) -> void:
+    this.OnToast(message, seconds > 0 and seconds or 2.6)
+  fn toast(message:str, seconds:unknown = 0) -> void:
+    this.Toast(message, seconds)
+  fn UpdateBanner(dt:int) -> void:
+    if this.BannerTimer <= 0:
+      ret
+    this.BannerTimer = this.BannerTimer - dt
+    if this.BannerTimer > 0:
+      ret
+    this.OnBannerHide()
+  fn updateBanner(dt:int) -> void:
+    this.UpdateBanner(dt)
+  fn UpdateVignette(dt:int) -> void:
+    if this.Vignette <= 0:
+      ret
+    this.Vignette = Math.max(0, this.Vignette - dt * 1.6)
+    this.OnVignette(MathX.roundJs(this.Vignette * 100) / 100 * 0.75)
+  fn updateVignette(dt:int) -> void:
+    this.UpdateVignette(dt)
+  fn ClearTransientUi() -> void:
+    this.BannerTimer = 0
+    this.Vignette = 0
+    this.OnClearTransientUi()
+  fn clearTransientUi() -> void:
+    this.ClearTransientUi()
+  fn StartRun(seed:int) -> void:
+    this.AbandonRun()
+    let cfg = this.Cfg
+    if seed != undefined:
+      this.RunSeed = seed
+      Rng.Shared.setSeed(seed)
+    elif cfg.Seeded != nil:
+      let key = this.DailyKeyProvider != nil and this.DailyKeyProvider() or GameEngine.defaultDailyKey()
+      this.RunSeed = Rng.hash("ouroboros-" + String(key))
+      Rng.Shared.setSeed(this.RunSeed)
+    let meta = this.meta
+    if meta != nil:
+      if typeof(meta.ResetRunUnlocks) == "function":
+        meta.ResetRunUnlocks()
+      if not meta.IsUnlocked(this.SelectedClass):
+        this.SelectedClass = "emerald"
+    this.State = GameState.Playing
+    this.OnHideModals()
+    this.SetHudVisible(true)
+    this.MaxFloors = cfg.Floors
+    this.CurrentFloor = 1
+    this.FloorFoodProgress = 0
+    this.FoodTarget = GameEngine.CalculateFoodTarget(this.CurrentFloor, cfg.BossRush)
+    this.RecoveryPityCounter = 0
+    this.FloorClearTimer = 0
+    this.LabIntroSeen = false
+    this.DailyMilestoneReached = 0
+    this.Player = SnakePlayer(this.SelectedClass, this.ArenaW, this.ArenaH, this.InitialSegments, { meta: this.meta, services: this.services })
+    this.Foods = []
+    this.Enemies = []
+    this.Projectiles = []
+    this.Hazards = []
+    this.HelmetDrops = []
+    this.Boss = nil
+    this.ActiveBosses = []
+    this.ActivePerks = []
+    this.CurrentDraftCards = []
+    this.Combat.Reset()
+    this.Combat.Engine = this
+    this.Combat.Meta = this.meta
+    this.Combat.Services = this.services
+    this.FoodSpawnTimer = 0
+    this.WaveTimer = 3
+    this.VacuumTimer = 0
+    this.ChronoTimer = 0
+    this.TimeScale = 1
+    this.Vignette = 0
+    this.HasSteered = false
+    this.OnSteered(false)
+    this.RunActive = true
+    this._floorBaseFloor = -1
+    this._floorBaseEaten = 0
+    this.FloorFoodProgress = 0
+    this.Gauntlet = nil
+    this.ClearTransientUi()
+    this.OnPerksChanged()
+    this.Fx.Clear()
+    this.Input.Reset()
+    this.RerollsRemaining = 1 + meta and meta.Level("rerolls") or 0
+    this.OnApplySettings()
+    if typeof(this.Sound.init) == "function":
+      this.Sound.init()
+    elif typeof(this.Sound.Init) == "function":
+      this.Sound.Init()
+    this.Sound.StopMusic()
+    this.Sound.SetBossMode(false)
+    this.Sound.SetFrenzyState(false)
+    this.Sound.SetMusicIntensity(0)
+    this.Sound.SetPaused(false)
+    this.Sound.StartMusic()
+    this.Banner("" + String(cfg.Label) + " — FLOOR 1", 1.8)
+    if cfg.BossRush != nil:
+      this.SpawnBoss()
+    this.Accumulator = 0
+  fn startRun(seed:int) -> void:
+    this.StartRun(seed)
+  fn restartRun(seed:int) -> void:
+    this.StartRun(seed)
+  fn StartGame(classIdOrSeed:str | int, seed:int) -> void:
+    if typeof(classIdOrSeed) == "string":
+      this.SelectedClass = classIdOrSeed
+      this.StartRun(seed)
+    else:
+      this.StartRun(classIdOrSeed)
+  fn startGame(classIdOrSeed:str | int, seed:int) -> void:
+    this.StartGame(classIdOrSeed, seed)
+  fn Reset() -> void:
+    this.StartRun()
+  fn reset() -> void:
+    this.StartRun()
+  fn Init() -> void:
+    this.StartRun()
+  fn init() -> void:
+    this.StartRun()
+  static fn defaultDailyKey() -> str:
+    let d = Date()
+    "" + String(d.getUTCFullYear()) + "-" + String(d.getUTCMonth() + 1) + "-" + String(d.getUTCDate())
+  get RunInProgress() -> bool = this.RunActive != nil and this.Player != nil and this.Player != undefined
+  get runInProgress() -> bool = this.RunInProgress
+  fn CommitRun(victory:bool) -> int:
+    if not this.RunActive or not this.Player:
+      ret 0
+    this.RunActive = false
+    let meta = this.meta
+    if not meta:
+      ret 0
+    let banked = meta.AddShards(this.Combat.ShardsEarned)
+    meta.CommitRun({ Score: Math.floor(Math), Floor: this.CurrentFloor, Combo: this.Combat.HighestRunCombo, Level: this.Player.Level, Kills: this.Combat.Kills, Foods: this.Combat.FoodsEaten, Bosses: this.Combat.BossKills, TimeSec: this.Combat.RunTime, Victory: victory })
+    meta.Save()
+    banked
+  fn commitRun(victory:bool) -> int = this.CommitRun(victory)
+  fn AbandonRun() -> void:
+    if not this.RunInProgress:
+      ret
+    let banked = this.CommitRun(false)
+    if banked > 0:
+      this.Toast("Run abandoned — banked " + String(banked) + " ⭐")
+  fn abandonRun() -> void:
+    this.AbandonRun()
+  fn WarnIfStorageBroken() -> void:
+    let meta = this.meta
+    if not meta or not meta.StorageBroken or this._storageWarned:
+      ret
+    this._storageWarned = true
+    this.Toast("⚠️ Progress cannot be saved on this browser — stars will not persist.", 6)
+  fn warnIfStorageBroken() -> void:
+    this.WarnIfStorageBroken()
+  fn HandleGameOver(victory:bool) -> void:
+    if this.State == GameState.GameOver or this.State == GameState.Victory:
+      ret
+    if not victory and this.Gauntlet and this.Gauntlet.Active:
+      this.Gauntlet.TriggerDefeat(this)
+    if victory != nil:
+      this.State = GameState.Victory
+    else:
+      this.State = GameState.GameOver
+    this.ClearTransientUi()
+    this.SetHudVisible(false)
+    this.Sound.StopMusic()
+    this.Sound.SetBossMode(false)
+    if victory != nil:
+      this.Sound.PlayVictory()
+    else:
+      this.Sound.PlayGameOver()
+    for drop in this.HelmetDrops:
+      if not drop.Dead:
+        this.CollectHelmetDrop(drop)
+    this.HelmetDrops.length = 0
+    let banked = this.CommitRun(victory)
+    this.OnRunSummary(victory, banked)
+    this.OnShowScreen("modal-summary")
+    this.WarnIfStorageBroken()
+  fn handleGameOver(victory:bool) -> void:
+    this.HandleGameOver(victory)
+  fn EndRun(victory:bool = false) -> void:
+    this.HandleGameOver(victory)
+  fn endRun(victory:bool = false) -> void:
+    this.HandleGameOver(victory)
+  fn TriggerLevelUp() -> void:
+    this.State = GameState.LevelUp
+    this.Sound.PlayLevelUp()
+    this.Sound.SetPaused(true)
+    let meta = this.meta
+    if meta != nil:
+      this.CurrentDraftCards = meta.GetRandomCardDraft(3, this.Player)
+    else:
+      this.CurrentDraftCards = []
+    if this.Player != nil:
+      this.Player.MutationPoints = this.Player.MutationPoints + 1
+      this.Fx.Burst(this.Player.X, this.Player.Y, "#ffd166", 26, 6, 4)
+    this.OnDraftChanged()
+    this.OnShowScreen("modal-snake-lab")
+  fn triggerLevelUp() -> void:
+    this.TriggerLevelUp()
+  fn ToggleLab() -> void:
+    if this.State == GameState.Playing:
+      this.TriggerLevelUp()
+    elif this.State == GameState.LevelUp:
+      this.CompleteLevelUp()
+  fn toggleLab() -> void:
+    this.ToggleLab()
+  fn CompleteLevelUp() -> void:
+    this.OnHideModals()
+    if this.GrowthOnEat != nil and this.Player and this.Player.PendingLevelUps > 0:
+      this.Player.PendingLevelUps = this.Player.PendingLevelUps - 1
+      this.TriggerLevelUp()
+      ret
+    this.State = GameState.Playing
+    this.Accumulator = 0
+    this.Sound.SetPaused(false)
+  fn completeLevelUp() -> void:
+    this.CompleteLevelUp()
+  fn RerollDraft() -> void:
+    if this.RerollsRemaining <= 0:
+      this.Sound.PlayError()
+      ret
+    this.RerollsRemaining = this.RerollsRemaining - 1
+    let meta = this.meta
+    if meta != nil:
+      this.CurrentDraftCards = meta.GetRandomCardDraft(3, this.Player)
+    else:
+      this.CurrentDraftCards = []
+    this.OnDraftChanged()
+    this.OnShowScreen("modal-level-up")
+  fn rerollDraft() -> void:
+    this.RerollDraft()
+  fn SkipDraft() -> void:
+    this.Player.Stats.MaxHp = this.Player.Stats.MaxHp + 25
+    this.Player.Heal(25)
+    this.Fx.AddText(this.Player.X, this.Player.Y - 30, "+25 MAX HP", "#10b981", 17, true)
+    this.ResumeFromDraft()
+  fn skipDraft() -> void:
+    this.SkipDraft()
+  fn SelectUpgradeCard(card:CardDef) -> void:
+    if not card or not this.Player:
+      ret
+    let cardId = card.Id or card.id
+    if not cardId:
+      ret
+    if this.CurrentDraftCards.length > 0:
+      let isOffered = this.CurrentDraftCards.some(fn(c:unknown) = c.Id or c.id == cardId)
+      if not isOffered:
+        Services.Sound.PlayError()
+        ret
+    let owned = this.Player.CardStacks[cardId] ?? 0
+    let max = card.MaxStacks or card.maxStacks ?? 1
+    if owned >= max:
+      Services.Sound.PlayError()
+      ret
+    this.Player.CardStacks[cardId] = owned + 1
+    if typeof(card.Apply) == "function":
+      card.Apply(this.Player)
+    elif typeof(card.apply) == "function":
+      card.apply(this.Player)
+    this.ActivePerks.push(card)
+    this.Sound.PlayEat(10, true)
+    let cardIcon = card.Icon or card.icon or "🧬"
+    let cardTitle = card.Title or card.title or card.Name or card.name or "Mutation"
+    this.Fx.AddText(this.Player.X, this.Player.Y - 34, "" + String(cardIcon) + " " + String(cardTitle), "#00f0b5", 18, true)
+    this.OnPerksChanged()
+    this.ResumeFromDraft()
+  fn selectUpgradeCard(card:CardDef) -> void:
+    this.SelectUpgradeCard(card)
+  fn ResumeFromDraft() -> void:
+    this.CurrentDraftCards = []
+    this.OnHideModals()
+    this.State = GameState.Playing
+    this.Accumulator = 0
+    this.Sound.SetPaused(false)
+  fn resumeFromDraft() -> void:
+    this.ResumeFromDraft()
+  fn RandomArenaPoint(margin:unknown = 0) -> Vec2:
+    let m = margin > 0 and margin or 50
+    let minX = Math.min(m, this.ArenaW * 0.5)
+    let maxX = Math.max(minX, this.ArenaW - minX)
+    let minY = Math.min(m, this.ArenaH * 0.5)
+    let maxY = Math.max(minY, this.ArenaH - minY)
+    Vec2(Rng.Shared.range(minX, maxX), Rng.Shared.range(minY, maxY))
+  fn randomArenaPoint(margin:unknown = 0) -> Vec2 = this.RandomArenaPoint(margin)
+  fn SpawnFood(type:Option[str] = nil) -> void:
+    let mut p = Vec2(0, 0)
+    let mut chosen = type
+    if not chosen:
+      let player = this.Player
+      let isLowHp = player != nil and player.MaxHp > 0 and player.Hp / player.MaxHp < 0.35
+      if isLowHp != nil:
+        if this.RecoveryPityCounter >= 7:
+          let rPity = Rng.Shared.rand()
+          if rPity < 0.22 / 0.34:
+            chosen = "potion"
+          else:
+            chosen = "shield"
+          this.RecoveryPityCounter = 0
+        else:
+          let r = Rng.Shared.rand()
+          if r < 0.22:
+            chosen = "potion"
+            this.RecoveryPityCounter = 0
+          elif r < 0.34:
+            chosen = "shield"
+            this.RecoveryPityCounter = 0
+      else:
+        this.RecoveryPityCounter = 0
+        let r = Rng.Shared.rand()
+        if r < 0.6:
+          chosen = "apple"
+        elif r < 0.75:
+          chosen = "golden"
+    this.Foods.push(FoodItem(p.X, p.Y, chosen))
+  fn spawnFood(type:Option[str] = nil) -> void:
+    this.SpawnFood(type)
+  fn SpawnEnemy(type:Option[str] = nil) -> void:
+    let margin = 26
+    let mut x = 0
+    let mut y = 0
+    let mut chosen = type
+    if not chosen:
+      this._eligibleEnemies.length = 0
+      let keys = GameData.Enemies.Keys
+      chosen = Rng.Shared.pick(this._eligibleEnemies) ?? "scarab"
+    this.Enemies.push(Enemy(x, y, chosen, this.CurrentFloor))
+  fn spawnEnemy(type:Option[str] = nil) -> void:
+    this.SpawnEnemy(type)
+  fn EnemyBudget() -> int = Math.min(24, 3 + MathX.roundJs(this.CurrentFloor * 2.5))
+  fn enemyBudget() -> int = this.EnemyBudget()
+  fn SpawnBoss(specificType:str | unknown, count:int) -> void:
+    let mut spawnCount = 1
+    if count != undefined:
+      spawnCount = Math.max(1, count)
+    elif Array.isArray(specificType):
+      spawnCount = Math.max(1, specificType.length)
+    let multiBossScale = spawnCount > 1 and 0.75 or 1
+    this.ActiveBosses.length = 0
+    this.Sound.PlayBossAlert()
+    this.Sound.SetBossMode(true)
+    if this.ActiveBosses.length == 1:
+      this.Banner("⚠️ " + String(this.ActiveBosses[0].Name.toUpperCase()) + " ⚠️", 2.2)
+      this.OnBossBox(true, this.ActiveBosses[0].Name)
+    elif this.ActiveBosses.length == 2:
+      this.Banner("⚠️ DUAL APEX THREAT: " + String(this.ActiveBosses[0].Name.toUpperCase()) + " & " + String(this.ActiveBosses[1].Name.toUpperCase()) + " ⚠️", 2.5)
+      this.OnBossBox(true, "" + String(this.ActiveBosses[0].Name) + " + " + String(this.ActiveBosses[1].Name))
+    this.Projectiles.length = 0
+    if this.Player != nil:
+      this.Player.InvulnerableTimer = Math.max(this.Player.InvulnerableTimer, 1.2)
+  fn spawnBoss(specificType:str | unknown, count:int) -> void:
+    this.SpawnBoss(specificType, count)
+  fn OnBossDefeated(defeatedBoss:Option[Boss]) -> void:
+    let boss = defeatedBoss or this.Boss
+    if not boss:
+      ret
+    this.Combat.BossKills = this.Combat.BossKills + 1
+    this.Combat.Score = this.Combat.Score + 2500 * this.CurrentFloor
+    if not this.Combat.DefeatedBossTypes:
+      this.Combat.DefeatedBossTypes = []
+    let bossType = boss.Type or boss.type or "centipede"
+    this.Combat.DefeatedBossTypes.push(bossType)
+    if not this.Combat.BossKillsByType:
+      this.Combat.BossKillsByType = {  }
+    this.Combat.BossKillsByType[bossType] = this.Combat.BossKillsByType[bossType] or 0 + 1
+    if this.Player != nil:
+      let relics = this.Player.Relics or this.Player.relics or {  }
+      let bossOuro = boss.XpValue ?? GameData.BossDefeatOuro * 1 + 0.6 * relics["soulHarvest"] or 0
+      this.Player.GainOuro(bossOuro)
+    this.Sound.PlayExplosion(1.6)
+    this.Fx.RingShockwave(boss.X, boss.Y, "#ffd166", 140, 0.01)
+    this.Fx.Burst(boss.X, boss.Y, "#ffb703", 46, 9, 6)
+    this.Fx.Flash("#ffd166", 0.35, 0.45)
+    this.Fx.Shake(18, 24)
+    let helmet = generateBossHelmet(this.CurrentFloor, bossType)
+    let drop = HelmetDrop(boss.X, boss.Y, helmet)
+    this.HelmetDrops.push(drop)
+    let rName = helmet.Rarity or helmet.rarity or "common".toUpperCase()
+    let hIcon = helmet.Icon or helmet.icon or "🪖"
+    let hName = helmet.Name or helmet.name or "Helmet"
+    let statSummary = formatHelmetStatDescription(helmet.Stats or helmet.stats or {  })
+    this.Banner("🏆 " + String(hIcon) + " " + String(hName) + " [" + String(rName) + "] DROPPED! (" + String(statSummary) + ")", 3.5)
+    let idx = this.ActiveBosses.indexOf(boss)
+    if idx >= 0:
+      this.ActiveBosses.splice(idx, 1)
+    else:
+      this.ActiveBosses = this.ActiveBosses.filter(fn(b:unknown) = not b.Dead and b != boss)
+    if this.ActiveBosses.length > 0:
+      let nextBoss = this.ActiveBosses[0]
+      this.OnBossBox(true, nextBoss.Name)
+      ret
+    if this.Gauntlet != nil and this.Gauntlet.Active:
+      ret
+    this.Sound.SetBossMode(false)
+    this.OnBossBox(false, nil)
+    if this.CurrentFloor >= this.MaxFloors:
+      this.HandleGameOver(true)
+      ret
+    this.State = GameState.FloorClear
+    this.FloorClearTimer = 2.6
+    this.Sound.PlayFloorClear()
+  fn onBossDefeated(defeatedBoss:Option[Boss]) -> void:
+    this.OnBossDefeated(defeatedBoss)
+  fn CollectHelmetDrop(drop:HelmetDrop) -> void:
+    if drop.Dead != nil:
+      ret
+    drop.Dead = true
+    if this.Player != nil and typeof(this.Player.EquipHelmet) == "function":
+      this.Player.EquipHelmet(drop.Helmet)
+    this.meta.AddHelmet(drop.Helmet)
+    this.Sound.PlayEat(10, true)
+    this.Sound.PlayLevelUp()
+    this.Fx.RingShockwave(drop.X, drop.Y, drop.Color, 90, 0.02)
+    this.Fx.Burst(drop.X, drop.Y, drop.Color, 32, 7.5, 5)
+    this.Fx.AddText(drop.X, drop.Y - 26, "🪖 LOOTED: " + String(drop.Helmet.Name) + "!", drop.Color, 16, true)
+    let rName = drop.Helmet.Rarity or drop.Helmet.rarity or "common".toUpperCase()
+    let hIcon = drop.Helmet.Icon or drop.Helmet.icon or "🪖"
+    let hName = drop.Helmet.Name or drop.Helmet.name or "Helmet"
+    let statSummary = formatHelmetStatDescription(drop.Helmet.Stats or drop.Helmet.stats or {  })
+    this.Banner("🏆 " + String(hIcon) + " " + String(hName) + " [" + String(rName) + "] LOOTED! (" + String(statSummary) + ")", 3.5)
+  fn collectHelmetDrop(drop:HelmetDrop) -> void:
+    this.CollectHelmetDrop(drop)
+  fn AdvanceFloor() -> void:
+    for drop in this.HelmetDrops:
+      if not drop.Dead:
+        this.CollectHelmetDrop(drop)
+    this.HelmetDrops.length = 0
+    this.CurrentFloor = this.CurrentFloor + 1
+    this.FloorFoodProgress = 0
+    let cfg = this.Cfg
+    this.FoodTarget = GameEngine.CalculateFoodTarget(this.CurrentFloor, cfg.BossRush)
+    this.RecoveryPityCounter = 0
+    this.Enemies.length = 0
+    this.Projectiles.length = 0
+    this.Hazards.length = 0
+    if this.Player != nil:
+      this.Player.IsDashing = false
+      this.Player.DashTimer = 0
+      this.Player.DashHitIds.clear()
+      this.Player.AgilitySurgeTimer = 0
+      let healed = this.Player.Heal(this.Player.Stats.MaxHp * 0.5)
+      if healed > 0:
+        this.Fx.AddText(this.Player.X, this.Player.Y - 30, "+" + String(MathX.roundJs(healed)) + " HP", "#10b981", 16, true)
+      this.Player.Shield = this.Player.Stats.MaxShield
+    this.State = GameState.Playing
+    this.WaveTimer = 2.5
+    if this.GameMode == "daily":
+      let meta = this.meta
+      if meta != nil and meta.IsDailyCapacityActive():
+        let mult = meta.EscalateDailyCapacityFloor(this.CurrentFloor)
+        let powerPercent = Math.round(Math)
+        let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+        this.Banner("⚡ " + String(capName) + " ESCALATED TO FLOOR " + String(this.CurrentFloor) + " (+" + String(powerPercent) + "% Power)!", 2.8)
+        this.Sound.PlayLevelUp()
+      else:
+        this.Banner("FLOOR " + String(this.CurrentFloor), 1.8)
+    else:
+      this.Banner("FLOOR " + String(this.CurrentFloor), 1.8)
+    this.Sound.SetMusicIntensity(Math.min(1, this.CurrentFloor - 1 / 6))
+    if cfg.BossRush != nil:
+      this.SpawnBoss()
+    this.Accumulator = 0
+  fn advanceFloor() -> void:
+    this.AdvanceFloor()
+  fn nextFloor() -> void:
+    this.AdvanceFloor()
+  fn GetTodaySpecialCapacity() -> Partial[DailyCapacityState]:
+    let key = this.DailyKeyProvider != nil and this.DailyKeyProvider() or GameEngine.defaultDailyKey()
+    let rolled = CosmicCapacities.rollDailyCapacity(key, this.CurrentFloor)
+    { id: rolled.Def.Id, name: rolled.Def.Name, icon: rolled.Def.Icon, desc: rolled.Def.Description, stateValues: {  }, rolledTiers: {  }, Id: rolled.Def.Id, Name: rolled.Def.Name, Icon: rolled.Def.Icon, Desc: rolled.Def.Description, StateValues: {  }, RolledTiers: {  } }
+  fn getTodaySpecialCapacity() -> Partial[DailyCapacityState] = this.GetTodaySpecialCapacity()
+  fn CheckDailyMilestones() -> bool:
+    if this.GameMode != "daily" or not this.Player:
+      ret false
+    let level = this.Player.Level
+    if level < 5:
+      ret false
+    let meta = this.meta
+    if not meta:
+      ret false
+    let mut triggered = false
+    if level >= 5 and this.DailyMilestoneReached < 5:
+      this.DailyMilestoneReached = 5
+      if not meta.IsDailyCapacityActive():
+        let template = this.GetTodaySpecialCapacity()
+        meta.UnlockDailySpecialCapacity(template)
+      meta.UpdateDailyMilestone(1, 5, 0)
+      meta.EscalateDailyCapacityFloor(this.CurrentFloor)
+      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      this.Banner("✨ COSMIC TRANSCENDENCE UNLOCKED: " + String(capName.toUpperCase()) + " (Tier 1 — Active for 24h)!", 4)
+      this.Sound.PlayLevelUp()
+      if this.Player != nil:
+        this.Fx.RingShockwave(this.Player.X, this.Player.Y, "#ffd166", 140, 0.03)
+        this.Fx.Burst(this.Player.X, this.Player.Y, "#ffd166", 45, 9, 6)
+        this.Fx.AddText(this.Player.X, this.Player.Y - 36, "✨ " + String(capName.toUpperCase()) + "!", "#ffd166", 20, true)
+      triggered = true
+    if level >= 10 and this.DailyMilestoneReached < 10:
+      this.DailyMilestoneReached = 10
+      meta.UpdateDailyMilestone(2, 10, 0.5)
+      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      this.Banner("⚡ MILESTONE ASCENSION: TIER 2 — " + String(capName.toUpperCase()) + " (+50% Bonus)!", 3.5)
+      this.Sound.PlayLevelUp()
+      if this.Player != nil:
+        this.Fx.RingShockwave(this.Player.X, this.Player.Y, "#38bdf8", 180, 0.025)
+        this.Fx.Burst(this.Player.X, this.Player.Y, "#38bdf8", 60, 11, 7)
+        this.Fx.AddText(this.Player.X, this.Player.Y - 40, "⚡ TIER 2: +50% POWER!", "#38bdf8", 22, true)
+      triggered = true
+    if level >= 15 and this.DailyMilestoneReached < 15:
+      this.DailyMilestoneReached = 15
+      meta.UpdateDailyMilestone(3, 15, 1)
+      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      this.Banner("🌟 MILESTONE ASCENSION: TIER 3 — " + String(capName.toUpperCase()) + " (+100% Bonus)!", 4)
+      this.Sound.PlayLevelUp()
+      if this.Player != nil:
+        this.Fx.RingShockwave(this.Player.X, this.Player.Y, "#f59e0b", 220, 0.02)
+        this.Fx.Burst(this.Player.X, this.Player.Y, "#f59e0b", 80, 13, 8)
+        this.Fx.AddText(this.Player.X, this.Player.Y - 44, "🌟 TIER 3: +100% POWER!", "#f59e0b", 24, true)
+      triggered = true
+    if level >= 20 and this.DailyMilestoneReached < 20:
+      this.DailyMilestoneReached = 20
+      meta.UpdateDailyMilestone(4, 20, 1.5)
+      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      this.Banner("👑 APEX SINGULARITY: TIER 4 — " + String(capName.toUpperCase()) + " (+150% Bonus)!", 5)
+      this.Sound.PlayLevelUp()
+      if this.Player != nil:
+        this.Fx.RingShockwave(this.Player.X, this.Player.Y, "#ff0054", 260, 0.015)
+        this.Fx.RingShockwave(this.Player.X, this.Player.Y, "#ffd166", 180, 0.02)
+        this.Fx.Burst(this.Player.X, this.Player.Y, "#ff0054", 120, 15, 10)
+        this.Fx.AddText(this.Player.X, this.Player.Y - 48, "👑 APEX SINGULARITY (+150%)!", "#ff0054", 26, true)
+      triggered = true
+    triggered
+  fn checkDailyMilestones() -> bool = this.CheckDailyMilestones()
+  fn CheckDailyLevel5CapacityUnlock() -> bool = this.CheckDailyMilestones()
+  fn checkDailyLevel5CapacityUnlock() -> bool = this.CheckDailyLevel5CapacityUnlock()
+  fn RequestDash() -> void:
+    if this.State != GameState.Playing or not this.Player:
+      ret
+    if this.Player.TryDash():
+      Services.Input.Vibrate(18)
+  fn requestDash() -> void:
+    this.RequestDash()
+  fn RequestSkill() -> void:
+    if this.State != GameState.Playing or not this.Player:
+      ret
+    if this.Combat.ActivateSkill(this.WorldBag()):
+      Services.Input.Vibrate(GameEngine.SkillHaptic)
+  fn requestSkill() -> void:
+    this.RequestSkill()
+  fn RequestAutotomy() -> int:
+    if this.State != GameState.Playing or not this.Player:
+      ret 0
+    let severed = this.Player.Autotomy(this.WorldBag())
+    if severed > 0:
+      Services.Input.Vibrate(GameEngine.SkillHaptic)
+      this.Banner("💥 TACTICAL AUTOTOMY! 💥", 1.2)
+    severed
+  fn requestAutotomy() -> int = this.RequestAutotomy()
+  fn ResolveSteering() -> Steering:
+    let im = Services.Input
+    let steer = this._reusableSteering
+    let pointerActive = im.PointerActive ?? im.PointerActive
+    let pointerSteers = pointerActive != nil and this.TouchScheme == "follow" or not this.IsTouchDevice
+    if pointerSteers != nil and this.Player:
+      let p = this.ScreenToWorld(im.PointerNormX, im.PointerNormY)
+      let dx = p.X - this.Player.X
+      let dy = p.Y - this.Player.Y
+      let d = MathX.hypot(dx, dy)
+      if d > 18:
+        let nx = dx / d
+        let ny = dy / d
+        steer.X = nx
+        steer.Y = ny
+        steer.Active = true
+        steer.x = nx
+        steer.y = ny
+        steer.active = true
+        ret steer
+      steer.X = 0
+      steer.Y = 0
+      steer.Active = false
+      steer.x = 0
+      steer.y = 0
+      steer.active = false
+      ret steer
+    let dx = im.DirX ?? im.dirX ?? 0
+    let dy = im.DirY ?? im.dirY ?? 0
+    let hasDir = im.HasDirection ?? im.hasDirection ?? dx != 0 or dy != 0
+    steer.X = dx
+    steer.Y = dy
+    steer.Active = hasDir
+    steer.x = dx
+    steer.y = dy
+    steer.active = hasDir
+    steer
+  fn resolveSteering() -> Steering = this.ResolveSteering()
+  fn WorldBag() -> World:
+    this._world.Player = this.Player
+    this._world.Foods = this.Foods
+    this._world.Enemies = this.Enemies
+    this._world.Projectiles = this.Projectiles
+    this._world.Hazards = this.Hazards
+    this._world.Boss = this.Boss
+    this._world.ActiveBosses = this.ActiveBosses
+    this._world.Bosses = this.ActiveBosses
+    this._world.HelmetDrops = this.HelmetDrops
+    this._world.ArenaW = this.ArenaW
+    this._world.ArenaH = this.ArenaH
+    this._world.TimeScale = this.TimeScale
+    this._world.VacuumTimer = this.VacuumTimer
+    this._world.ChronoTimer = this.ChronoTimer
+    this._world.NearestFood = nil
+    this._world.ChronoScale = 1
+    this._world.Game = this
+    this._world
+  fn worldBag() -> World = this.WorldBag()
+  get World() -> World = this.WorldBag()
+  get world() -> World = this.WorldBag()
+  fn ReplaceProjectiles(list:[Projectile]) -> void = this.Projectiles = list
+  fn replaceProjectiles(list:[Projectile]) -> void:
+    this.ReplaceProjectiles(list)
+  fn OnPlayerHurt(dealt:int) -> void:
+    this.Vignette = Math.min(1, this.Vignette + dealt / 60 + 0.25)
+    Services.Input.Vibrate(Math.min(90, 25 + dealt))
+  fn onPlayerHurt(dealt:int) -> void:
+    this.OnPlayerHurt(dealt)
+  fn Step(dt:int) -> void:
+    let player = this.Player
+    if not player:
+      ret
+    if this.GameMode == "daily" and player.Level >= 5:
+      this.CheckDailyMilestones()
+    if this.isBotEnabled != nil:
+      this.botPlayer.stepPolicy(this, this.Input)
+    Services.Input.PollGamepad()
+    if Services.Input.ConsumeJustConnected():
+      this.Banner("🎮 GAMEPAD CONNECTED", 1.6)
+      Services.Sound.PlayUi()
+    if Services.Input.ConsumeDash():
+      this.RequestDash()
+    if Services.Input.ConsumeSkill():
+      this.RequestSkill()
+    if not this.HasSteered and Services.Input.HasDirection or this.isBotEnabled:
+      this.HasSteered = true
+      this.OnSteered(true)
+    if this.ChronoTimer > 0:
+      this.ChronoTimer = Math.max(0, this.ChronoTimer - dt)
+    let chronoScale = this.ChronoTimer > 0 and 0.55 or 1
+    let mut nearestFood:Option[FoodItem] = nil
+    let mut nearestDist = Number.POSITIVE_INFINITY
+    let w = this.WorldBag()
+    w.NearestFood = nearestFood
+    w.ChronoScale = chronoScale
+    w.TimeScale = this.Combat.DilationScale(player) * chronoScale
+    this.TimeScale = w.TimeScale
+    player.Update(dt, this.ResolveSteering(), this.ArenaW, this.ArenaH, w)
+    let vacuumPull = this.VacuumTimer > 0 and 900 or 0
+    this.Combat.Update(dt, w)
+    this.VacuumTimer = w.VacuumTimer
+    this.ChronoTimer = Math.max(this.ChronoTimer, w.ChronoTimer)
+    if w.Projectiles != this.Projectiles:
+      this.Projectiles = w.Projectiles
+    if this.Gauntlet != nil and this.Gauntlet.Active:
+      this.Gauntlet.Update(dt, this)
+    if not player.Alive or player.Hp <= 0:
+      if this.Gauntlet != nil and this.Gauntlet.Active:
+        this.Gauntlet.TriggerDefeat(this)
+      this.HandleGameOver(false)
+      ret
+    if not this.GrowthOnEat and not this.LabIntroSeen and player.Xp >= 50:
+      this.LabIntroSeen = true
+      this.TriggerLevelUp()
+      ret
+    if this.GrowthOnEat != nil and player.PendingLevelUps > 0:
+      player.PendingLevelUps = player.PendingLevelUps - 1
+      this.TriggerLevelUp()
+      ret
+    this.UpdateSpawning(dt)
+    let cfg = this.Cfg
+    this.FloorFoodProgress = this.Combat.FoodsEaten - this.FloorFoodBase()
+    if not cfg.BossRush and this.ActiveBosses.length == 0 and this.FloorFoodProgress >= this.FoodTarget:
+      this.SpawnBoss()
+    Services.Fx.Update(dt)
+  fn step(dt:int) -> void:
+    this.Step(dt)
+  fn FloorFoodBase() -> int:
+    if this._floorBaseFloor != this.CurrentFloor:
+      this._floorBaseFloor = this.CurrentFloor
+      this._floorBaseEaten = this.Combat.FoodsEaten
+    this._floorBaseEaten
+  fn floorFoodBase() -> int = this.FloorFoodBase()
+  fn UpdateSpawning(dt:int) -> void:
+    this.FoodSpawnTimer = this.FoodSpawnTimer + dt
+    let foodCap = 9 + Math.min(6, this.CurrentFloor)
+    if this.FoodSpawnTimer >= 1.35 and this.Foods.length < foodCap:
+      this.FoodSpawnTimer = 0
+      this.SpawnFood()
+    if this.Foods.length == 0:
+      this.SpawnFood("apple")
+    let budget = this.EnemyBudget()
+    this.WaveTimer = this.WaveTimer - dt
+    if this.WaveTimer <= 0 and this.Enemies.length < budget:
+      let packSize = this.Boss != nil and 1 or MathX.clamp(1 + Math.floor(Math), 1, 4)
+      this.WaveTimer = Math.max(1.1, this.Boss != nil and 5.5 or 3.6 - this.CurrentFloor * 0.28)
+    if this.Projectiles.length > Caps.Projectiles:
+      this.Projectiles.splice(0, this.Projectiles.length - Caps.Projectiles)
+    if this.Hazards.length > Caps.Hazards:
+      this.Hazards.splice(0, this.Hazards.length - Caps.Hazards)
+    if this.Foods.length > Caps.Foods:
+      this.Foods.splice(0, this.Foods.length - Caps.Foods)
+  fn updateSpawning(dt:int) -> void:
+    this.UpdateSpawning(dt)
+  fn Tick(frameDt:int) -> void:
+    let dt = Math.min(0.25, Math.max(0, frameDt))
+    this.FrameCount = this.FrameCount + 1
+    this.FpsAccum = this.FpsAccum + dt
+    this.FpsSamples = this.FpsSamples + 1
+    if this.FpsAccum >= 0.5:
+      this.Fps = this.FpsSamples / this.FpsAccum
+      this.FpsAccum = 0
+      this.FpsSamples = 0
+    if Services.Input.ConsumePause():
+      if this.State == GameState.Playing or this.State == GameState.Paused:
+        this.TogglePause()
+      elif this.State == GameState.Settings:
+        this.CloseSettings()
+    if Services.Input.ConsumeLab():
+      this.ToggleLab()
+    if Services.Input.ConsumeHelp():
+      this.ToggleHelp()
+    if Services.Input.ConsumeStats():
+      this.ToggleStats()
+    if Services.Input.ConsumeBotToggle():
+      this.toggleBot()
+    this.UpdateBanner(dt)
+    this.UpdateVignette(dt)
+    if this.State == GameState.FloorClear:
+      this.FloorClearTimer = this.FloorClearTimer - dt
+      Services.Fx.Update(dt)
+      Services.Input.PollGamepad()
+      Services.Input.ConsumeDash()
+      Services.Input.ConsumeSkill()
+      if this.isBotEnabled != nil:
+        this._botFloorClearTimer = this._botFloorClearTimer + dt
+        if this._botFloorClearTimer >= 0.6:
+          this._botFloorClearTimer = 0
+          this.AdvanceFloor()
+      elif this.FloorClearTimer <= 0:
+        this.AdvanceFloor()
+    elif this.State == GameState.LevelUp:
+      this.Fx.Update(dt)
+      if this.isBotEnabled != nil:
+        this._botDraftTimer = this._botDraftTimer + dt
+        if this._botDraftTimer >= 0.2:
+          this._botDraftTimer = 0
+          this.botPlayer.handleLevelUp(this)
+    this.OnDraw()
+  fn tick(frameDt:int) -> void:
+    this.Tick(frameDt)
+  fn update(frameDt:int) -> void:
+    this.Tick(frameDt)
+  fn Update(frameDt:int) -> void:
+    this.Tick(frameDt)
