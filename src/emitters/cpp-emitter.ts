@@ -215,6 +215,18 @@ export class CppEmitter {
       this.emitMethodDecl(m);
     }
 
+    for (const p of c.properties) {
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      for (const alias of aliases) {
+        const hasExplicitMethod = c.methods.some((m) => m.name === alias);
+        if (!hasExplicitMethod) {
+          const typeStr = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "auto";
+          this.ctx.writeLine(`${typeStr}& ${alias}() { return ${p.name}; }`);
+          this.ctx.writeLine(`const ${typeStr}& ${alias}() const { return ${p.name}; }`);
+        }
+      }
+    }
+
     this.ctx.dedent();
 
     if (c.properties.length > 0) {

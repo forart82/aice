@@ -157,6 +157,8 @@ export interface ClassDecl {
 export interface PropertyDecl {
   kind: "PropertyDecl";
   name: string;
+  alias?: string;
+  aliases?: string[];
   isStatic: boolean;
   isReadonly: boolean;
   typeAnnotation?: TypeExpr;

@@ -40,21 +40,39 @@ type HostileTarget:
   found:bool, isBoss:bool, enemy:Option[Enemy], x:int, y:int
 
 pub class CombatSystem:
-  comboCount = 0, comboMultiplier = 1, comboTimer = 0
-  meta: Option[MetaProgression]
-  services: Option[IServiceContainer]
-  engine: Option[GameEngine]
-  comboBaseWindow = 4, comboMaxTime = 4, frenzyActive = false, frenzyTimer = 0, frenzyMaxDuration = 8
-  score = 0, shardsEarned = 0, kills = 0, bossKills = 0
-  DefeatedBossTypes: [str] = []
-  BossKillsByType: Record[str, int] = {  }
-  KillsByType: Record[str, int] = {  }
-  FoodsEatenByType: Record[str, int] = {  }
-  foodsEaten = 0, highestRunCombo = 0, ClutchCatchCount = 0, TotalClutchBonusScore = 0, damageDealt = 0
-  runTime = 0, flameTimer = 0, thunderTimer = 0, frenzySparkTimer = 0, staticCoilCounter = 0
-  biteCooldowns: Map[str, int] = Map()
+  prop comboCount, ComboCount = 0
+  prop comboMultiplier, ComboMultiplier = 1
+  prop comboTimer, ComboTimer = 0
+  prop meta, Meta: Option[MetaProgression]
+  prop services, Services: Option[IServiceContainer]
+  prop engine, Engine: Option[GameEngine]
+  prop comboBaseWindow, ComboBaseWindow = 4
+  prop comboMaxTime, ComboMaxTime = 4
+  prop frenzyActive, FrenzyActive = false
+  prop frenzyTimer, FrenzyTimer = 0
+  prop frenzyMaxDuration, FrenzyMaxDuration = 8
+  prop score, Score = 0
+  prop shardsEarned, ShardsEarned, floorShardsEarned = 0
+  prop kills, Kills = 0
+  prop bossKills, BossKills = 0
+  prop DefeatedBossTypes, defeatedBossTypes: [str] = []
+  prop BossKillsByType, bossKillsByType: Record[str, int] = {  }
+  prop KillsByType, killsByType: Record[str, int] = {  }
+  prop FoodsEatenByType, foodsEatenByType: Record[str, int] = {  }
+  prop foodsEaten, FoodsEaten = 0
+  prop highestRunCombo, HighestRunCombo, highestCombo = 0
+  prop ClutchCatchCount, clutchCatchCount = 0
+  prop TotalClutchBonusScore, totalClutchBonusScore = 0
+  prop damageDealt, DamageDealt = 0
+  prop runTime, RunTime = 0
+  prop flameTimer, FlameTimer = 0
+  prop thunderTimer, ThunderTimer = 0
+  prop frenzySparkTimer, FrenzySparkTimer = 0
+  prop staticCoilCounter, StaticCoilCounter = 0
+  prop biteCooldowns, BiteCooldowns: Map[str, int] = Map()
   _staleBiteKeys: [str] = []
-  timeScale = 1, biteInterval = GameData.BiteInterval
+  prop timeScale, TimeScale = 1
+  prop biteInterval, BiteInterval = GameData.BiteInterval
   static readonly BossHitId = -1
   static readonly BossKey = "boss"
   static readonly BossTailKey = "boss-tail"
@@ -66,40 +84,6 @@ pub class CombatSystem:
   readonly _cachedHostileTarget: HostileTarget = { found: false, isBoss: false, enemy: nil, x: 0, y: 0, Found: false, IsBoss: false, Enemy: nil, X: 0, Y: 0 }
   readonly _cachedBiteRoll: BiteRoll = { damage: 0, crit: false, Damage: 0, Crit: false }
   _lastSelfHitFxTime:int = 0, _constrictionCooldown = 0
-  get ComboCount = comboCount; set ComboCount(v) = comboCount = v
-  get ComboMultiplier = comboMultiplier; set ComboMultiplier(v) = comboMultiplier = v
-  get ComboTimer = comboTimer; set ComboTimer(v) = comboTimer = v
-  get Meta = meta; set Meta(v) = meta = v
-  get Services = services; set Services(v) = services = v
-  get Engine = engine; set Engine(v) = engine = v
-  get ComboBaseWindow = comboBaseWindow; set ComboBaseWindow(v) = comboBaseWindow = v
-  get ComboMaxTime = comboMaxTime; set ComboMaxTime(v) = comboMaxTime = v
-  get FrenzyActive = frenzyActive; set FrenzyActive(v) = frenzyActive = v
-  get FrenzyTimer = frenzyTimer; set FrenzyTimer(v) = frenzyTimer = v
-  get FrenzyMaxDuration = frenzyMaxDuration; set FrenzyMaxDuration(v) = frenzyMaxDuration = v
-  get Score = score; set Score(v) = score = v
-  get ShardsEarned = shardsEarned; set ShardsEarned(v) = shardsEarned = v
-  get Kills = kills; set Kills(v) = kills = v
-  get BossKills = bossKills; set BossKills(v) = bossKills = v
-  get defeatedBossTypes = DefeatedBossTypes; set defeatedBossTypes(v) = DefeatedBossTypes = v
-  get bossKillsByType = BossKillsByType; set bossKillsByType(v) = BossKillsByType = v
-  get killsByType = KillsByType; set killsByType(v) = KillsByType = v
-  get foodsEatenByType = FoodsEatenByType; set foodsEatenByType(v) = FoodsEatenByType = v
-  get FoodsEaten = foodsEaten; set FoodsEaten(v) = foodsEaten = v
-  get HighestRunCombo = highestRunCombo; set HighestRunCombo(v) = highestRunCombo = v
-  get highestCombo = highestRunCombo; set highestCombo(v) = highestRunCombo = v
-  get floorShardsEarned = shardsEarned; set floorShardsEarned(v) = shardsEarned = v
-  get clutchCatchCount = ClutchCatchCount; set clutchCatchCount(v) = ClutchCatchCount = v
-  get totalClutchBonusScore = TotalClutchBonusScore; set totalClutchBonusScore(v) = TotalClutchBonusScore = v
-  get DamageDealt = damageDealt; set DamageDealt(v) = damageDealt = v
-  get RunTime = runTime; set RunTime(v) = runTime = v
-  get FlameTimer = flameTimer; set FlameTimer(v) = flameTimer = v
-  get ThunderTimer = thunderTimer; set ThunderTimer(v) = thunderTimer = v
-  get FrenzySparkTimer = frenzySparkTimer; set FrenzySparkTimer(v) = frenzySparkTimer = v
-  get StaticCoilCounter = staticCoilCounter; set StaticCoilCounter(v) = staticCoilCounter = v
-  get BiteCooldowns = biteCooldowns
-  get TimeScale = timeScale; set TimeScale(v) = timeScale = v
-  get BiteInterval = biteInterval; set BiteInterval(v) = biteInterval = v
   fn _ensurePolyCapacity(capacity:int) :
     if capacity > _polyX.length:
       let nextCap = Math.max(capacity * 2, _polyX.length * 2)

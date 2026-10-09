@@ -32,17 +32,15 @@ type IHelmetLike:
 type HelmetLike = HelmetDef | IHelmetLike
 
 pub class SnakeSegment:
-  X:int, Y:int, Angle:int, R:int, Hp:int
-  MaxHp:int, HitFlash:int = 0, SelfHitCooldown:int = 0, BossHitCooldown:int = 0
-  get x = X; set x(v) = X = v
-  get y = Y; set y(v) = Y = v
-  get angle = Angle; set angle(v) = Angle = v
-  get r = R; set r(v) = R = v
-  get hp = Hp; set hp(v) = Hp = v
-  get maxHp = MaxHp; set maxHp(v) = MaxHp = v
-  get hitFlash = HitFlash; set hitFlash(v) = HitFlash = v
-  get selfHitCooldown = SelfHitCooldown; set selfHitCooldown(v) = SelfHitCooldown = v
-  get bossHitCooldown = BossHitCooldown; set bossHitCooldown(v) = BossHitCooldown = v
+  prop X, x: int
+  prop Y, y: int
+  prop Angle, angle: int
+  prop R, r: int
+  prop Hp, hp: int
+  prop MaxHp, maxHp: int
+  prop HitFlash, hitFlash: int = 0
+  prop SelfHitCooldown, selfHitCooldown: int = 0
+  prop BossHitCooldown, bossHitCooldown: int = 0
   fn constructor(x:int, y:int, angle:int, r:int, maxHp:unknown = 25):
     X = x
     Y = y
@@ -60,12 +58,11 @@ type Orbital:
   a:Option[int]
 
 pub class Afterimage:
-  X:int, Y:int, Angle:int, Life:int, Max:int
-  get x = X; set x(v) = X = v
-  get y = Y; set y(v) = Y = v
-  get angle = Angle; set angle(v) = Angle = v
-  get life = Life; set life(v) = Life = v
-  get max = Max; set max(v) = Max = v
+  prop X, x: int
+  prop Y, y: int
+  prop Angle, angle: int
+  prop Life, life: int
+  prop Max, max: int
   fn constructor(x:unknown = 0, y:unknown = 0, angle:unknown = 0, life:unknown = 0, max:unknown = 0):
     X = x
     Y = y
@@ -74,37 +71,81 @@ pub class Afterimage:
     Max = max
 
 pub class SnakePlayer:
-  ClassConfig: SnakeClassDef
-  ClassId:str
-  Stats: PlayerStats
-  Shield:int, Xp:int, TotalXpCollected = 0, Level = 1, XpToNext = 100
-  PendingLevelUps = 0, Alive = true, HeadRadius = 14, HeadRadiusMultiplier = 1, TitanGorgingTimer = 0
-  SegmentRadius = 11, SegmentSpacing = 15, BaseSpeed = 195, TurnSpeed = 9.5, X:int
-  Y:int, Angle:int, TargetAngle:int, VelocityX:int, VelocityY:int
-  MaxSegments = 12000
-  Segments: [SnakeSegment] = []
+  prop ClassConfig, classConfig: SnakeClassDef
+  prop ClassId, classId: str
+  prop Stats, stats: PlayerStats
+  prop Shield, shield: int
+  prop Xp, xp: int
+  prop TotalXpCollected, totalXpCollected = 0
+  prop Level, level = 1
+  prop XpToNext, xpToNext = 100
+  prop PendingLevelUps, pendingLevelUps = 0
+  prop Alive, alive = true
+  HeadRadius = 14
+  prop HeadRadiusMultiplier, headRadiusMultiplier = 1
+  prop TitanGorgingTimer, titanGorgingTimer = 0
+  prop SegmentRadius, segmentRadius = 11
+  prop SegmentSpacing, segmentSpacing = 15
+  prop BaseSpeed, baseSpeed = 195
+  prop TurnSpeed, turnSpeed = 9.5
+  prop X, x: int
+  prop Y, y: int
+  prop Angle, angle: int
+  prop TargetAngle, targetAngle: int
+  prop VelocityX, velocityX: int
+  prop VelocityY, velocityY: int
+  prop MaxSegments, maxSegments = 12000
+  prop Segments, segments: [SnakeSegment] = []
   HeadHp = 50, HeadMaxHp = 50, _cachedHp = -1, _hpDirty = true, _cachedMaxHp = -1
-  _maxHpDirty = true, _cachedSegCount = -1, DashDuration = 0.32, DashTimer = 0, DashCooldownTimer = 0
-  IsDashing = false, DashSpeedMultiplier = 2.5, InvulnerableTimer = 0
-  DashHitIds: Set[int] = Set()
-  SkillCooldownTimer = 0, SkillActiveTimer = 0, ArmorBuffTimer = 0
-  Relics: Record[str, int]
-  CardStacks: Record[str, int] = {  }
-  OrbitalAngle = 0, OrbitDistance = 54, SpitCooldown = 0, VortexTimer = 0, RegenTimer = 0
-  ShieldRechargeTimer = 0, ShieldBrokenTimer = 0, TrailTimer = 0, MagmaTimer = 0, GluttonCounter = 0
-  DevourerCounter = 0, DevourerStacks = 0, DamageBonus = 1, EyeBlinkTimer:int, EyeBlinking = false
-  MouthOpen = 0, BodyPulse = 0, HurtFlash = 0
-  Afterimages: [Afterimage] = []
-  EmberTimer = 0, FoodsEaten = 0, PendingRevive = false, MutationPoints = 1
-  HeadAugment: Option[str] = nil
-  HeadAugmentLevel = 0, HeadLaserTimer = 0, HeadCrownTimer = 0, AgilitySurgeTimer = 0, HeadSelfHitCooldown = 0
-  PeakLength = 0
-  HeadModules: Record[str, int] = {  }
-  HeadModuleTimers: Record[str, int] = {  }
-  HeadPurchaseCount = 0
-  EquippedHelmet: Option[HelmetLike] = nil
-  meta: Option[MetaProgression]
-  services: Option[IServiceContainer]
+  _maxHpDirty = true, _cachedSegCount = -1
+  prop DashDuration, dashDuration = 0.32
+  prop DashTimer, dashTimer, dashDurationTimer = 0
+  prop DashCooldownTimer, dashCooldownTimer = 0
+  prop IsDashing, isDashing = false
+  prop DashSpeedMultiplier, dashSpeedMultiplier = 2.5
+  prop InvulnerableTimer, invulnerableTimer = 0
+  prop DashHitIds, dashHitIds: Set[int] = Set()
+  prop SkillCooldownTimer, skillCooldownTimer = 0
+  prop SkillActiveTimer, skillActiveTimer = 0
+  prop ArmorBuffTimer, armorBuffTimer = 0
+  prop Relics, relics: Record[str, int]
+  prop CardStacks, cardStacks: Record[str, int] = {  }
+  prop OrbitalAngle, orbitalAngle = 0
+  prop OrbitDistance, orbitDistance = 54
+  prop SpitCooldown, spitCooldown = 0
+  prop VortexTimer, vortexTimer = 0
+  prop RegenTimer, regenTimer = 0
+  prop ShieldRechargeTimer, shieldRechargeTimer = 0
+  prop ShieldBrokenTimer, shieldBrokenTimer = 0
+  prop TrailTimer, trailTimer = 0
+  prop MagmaTimer, magmaTimer = 0
+  prop GluttonCounter, gluttonCounter = 0
+  prop DevourerCounter, devourerCounter = 0
+  prop DevourerStacks, devourerStacks = 0
+  prop DamageBonus, damageBonus = 1
+  prop EyeBlinkTimer, eyeBlinkTimer: int
+  prop EyeBlinking, eyeBlinking = false
+  prop MouthOpen, mouthOpen = 0
+  prop BodyPulse, bodyPulse = 0
+  prop HurtFlash, hurtFlash = 0
+  prop Afterimages, afterimages: [Afterimage] = []
+  prop EmberTimer, emberTimer = 0
+  prop FoodsEaten, foodsEaten = 0
+  prop PendingRevive, pendingRevive = false
+  prop MutationPoints, mutationPoints = 1
+  prop HeadAugment, headAugment: Option[str] = nil
+  prop HeadAugmentLevel, headAugmentLevel = 0
+  prop HeadLaserTimer, headLaserTimer = 0
+  prop HeadCrownTimer, headCrownTimer = 0
+  prop AgilitySurgeTimer, agilitySurgeTimer = 0
+  prop HeadSelfHitCooldown, headSelfHitCooldown = 0
+  prop PeakLength, peakLength = 0
+  prop HeadModules, headModules: Record[str, int] = {  }
+  prop HeadModuleTimers, headModuleTimers: Record[str, int] = {  }
+  prop HeadPurchaseCount, headPurchaseCount = 0
+  prop EquippedHelmet, equippedHelmet, helmet: Option[HelmetLike] = nil
+  prop meta, Meta: Option[MetaProgression]
+  prop services, Services: Option[IServiceContainer]
   readonly _biteHeads: [BiteHead] = []
   readonly _orbitalPositions: [Orbital] = []
   _head0: BiteHead = { X: 0, Y: 0, R: 14, Mult: 1, x: 0, y: 0, r: 14, mult: 1 }
@@ -180,12 +221,8 @@ pub class SnakePlayer:
       HeadHp = Math.min(HeadHp, HeadMaxHp)
     this.RecalculateMaxHp()
     this.RecalculateHp()
-  get classConfig = ClassConfig; set classConfig(v) = ClassConfig = v
-  get classId = ClassId; set classId(v) = ClassId = v
-  get stats = Stats; set stats(v) = Stats = v
   get hp = this.Hp; set hp(v) = this.Hp = v
   get maxHp = this.MaxHp; set maxHp(v) = this.MaxHp = v
-  get totalXpCollected = TotalXpCollected; set totalXpCollected(v) = TotalXpCollected = v
   get ouro = Xp; set ouro(v) = Xp = v
   get Ouro = Xp; set Ouro(v) = Xp = v
   get totalOuroCollected = TotalXpCollected; set totalOuroCollected(v) = TotalXpCollected = v
@@ -194,77 +231,9 @@ pub class SnakePlayer:
   get length = this.Length
   get TotalLength = Segments.length + 1
   get totalLength = this.TotalLength
-  get shield = Shield; set shield(v) = Shield = v
-  get xp = Xp; set xp(v) = Xp = v
-  get level = Level; set level(v) = Level = v
-  get xpToNext = XpToNext; set xpToNext(v) = XpToNext = v
-  get pendingLevelUps = PendingLevelUps; set pendingLevelUps(v) = PendingLevelUps = v
-  get alive = Alive; set alive(v) = Alive = v
   get headRadius = HeadRadius * HeadRadiusMultiplier; set headRadius(v) = HeadRadius = v
-  get headRadiusMultiplier = HeadRadiusMultiplier; set headRadiusMultiplier(v) = HeadRadiusMultiplier = v
-  get titanGorgingTimer = TitanGorgingTimer; set titanGorgingTimer(v) = TitanGorgingTimer = v
-  get segmentRadius = SegmentRadius; set segmentRadius(v) = SegmentRadius = v
-  get segmentSpacing = SegmentSpacing; set segmentSpacing(v) = SegmentSpacing = v
-  get baseSpeed = BaseSpeed; set baseSpeed(v) = BaseSpeed = v
-  get turnSpeed = TurnSpeed; set turnSpeed(v) = TurnSpeed = v
-  get agilitySurgeTimer = AgilitySurgeTimer; set agilitySurgeTimer(v) = AgilitySurgeTimer = v
-  get headSelfHitCooldown = HeadSelfHitCooldown; set headSelfHitCooldown(v) = HeadSelfHitCooldown = v
   get EffectiveTurnSpeed = AgilitySurgeTimer > 0 and TurnSpeed * 1.45 or TurnSpeed
   get effectiveTurnSpeed = this.EffectiveTurnSpeed
-  get x = X; set x(v) = X = v
-  get y = Y; set y(v) = Y = v
-  get angle = Angle; set angle(v) = Angle = v
-  get targetAngle = TargetAngle; set targetAngle(v) = TargetAngle = v
-  get velocityX = VelocityX; set velocityX(v) = VelocityX = v
-  get velocityY = VelocityY; set velocityY(v) = VelocityY = v
-  get maxSegments = MaxSegments; set maxSegments(v) = MaxSegments = v
-  get segments = Segments; set segments(v) = Segments = v
-  get dashDuration = DashDuration; set dashDuration(v) = DashDuration = v
-  get dashTimer = DashTimer; set dashTimer(v) = DashTimer = v
-  get dashDurationTimer = DashTimer; set dashDurationTimer(v) = DashTimer = v
-  get dashCooldownTimer = DashCooldownTimer; set dashCooldownTimer(v) = DashCooldownTimer = v
-  get isDashing = IsDashing; set isDashing(v) = IsDashing = v
-  get dashSpeedMultiplier = DashSpeedMultiplier; set dashSpeedMultiplier(v) = DashSpeedMultiplier = v
-  get invulnerableTimer = InvulnerableTimer; set invulnerableTimer(v) = InvulnerableTimer = v
-  get dashHitIds = DashHitIds; set dashHitIds(v) = DashHitIds = v
-  get skillCooldownTimer = SkillCooldownTimer; set skillCooldownTimer(v) = SkillCooldownTimer = v
-  get skillActiveTimer = SkillActiveTimer; set skillActiveTimer(v) = SkillActiveTimer = v
-  get armorBuffTimer = ArmorBuffTimer; set armorBuffTimer(v) = ArmorBuffTimer = v
-  get relics = Relics; set relics(v) = Relics = v
-  get cardStacks = CardStacks; set cardStacks(v) = CardStacks = v
-  get orbitalAngle = OrbitalAngle; set orbitalAngle(v) = OrbitalAngle = v
-  get orbitDistance = OrbitDistance; set orbitDistance(v) = OrbitDistance = v
-  get spitCooldown = SpitCooldown; set spitCooldown(v) = SpitCooldown = v
-  get vortexTimer = VortexTimer; set vortexTimer(v) = VortexTimer = v
-  get regenTimer = RegenTimer; set regenTimer(v) = RegenTimer = v
-  get shieldRechargeTimer = ShieldRechargeTimer; set shieldRechargeTimer(v) = ShieldRechargeTimer = v
-  get shieldBrokenTimer = ShieldBrokenTimer; set shieldBrokenTimer(v) = ShieldBrokenTimer = v
-  get trailTimer = TrailTimer; set trailTimer(v) = TrailTimer = v
-  get magmaTimer = MagmaTimer; set magmaTimer(v) = MagmaTimer = v
-  get gluttonCounter = GluttonCounter; set gluttonCounter(v) = GluttonCounter = v
-  get devourerCounter = DevourerCounter; set devourerCounter(v) = DevourerCounter = v
-  get devourerStacks = DevourerStacks; set devourerStacks(v) = DevourerStacks = v
-  get damageBonus = DamageBonus; set damageBonus(v) = DamageBonus = v
-  get eyeBlinkTimer = EyeBlinkTimer; set eyeBlinkTimer(v) = EyeBlinkTimer = v
-  get eyeBlinking = EyeBlinking; set eyeBlinking(v) = EyeBlinking = v
-  get mouthOpen = MouthOpen; set mouthOpen(v) = MouthOpen = v
-  get bodyPulse = BodyPulse; set bodyPulse(v) = BodyPulse = v
-  get hurtFlash = HurtFlash; set hurtFlash(v) = HurtFlash = v
-  get afterimages = Afterimages; set afterimages(v) = Afterimages = v
-  get emberTimer = EmberTimer; set emberTimer(v) = EmberTimer = v
-  get foodsEaten = FoodsEaten; set foodsEaten(v) = FoodsEaten = v
-  get pendingRevive = PendingRevive; set pendingRevive(v) = PendingRevive = v
-  get mutationPoints = MutationPoints; set mutationPoints(v) = MutationPoints = v
-  get peakLength = PeakLength; set peakLength(v) = PeakLength = v
-  get headAugment = HeadAugment; set headAugment(v) = HeadAugment = v
-  get headAugmentLevel = HeadAugmentLevel; set headAugmentLevel(v) = HeadAugmentLevel = v
-  get headLaserTimer = HeadLaserTimer; set headLaserTimer(v) = HeadLaserTimer = v
-  get headCrownTimer = HeadCrownTimer; set headCrownTimer(v) = HeadCrownTimer = v
-  get headModules = HeadModules; set headModules(v) = HeadModules = v
-  get headModuleTimers = HeadModuleTimers; set headModuleTimers(v) = HeadModuleTimers = v
-  get headPurchaseCount = HeadPurchaseCount; set headPurchaseCount(v) = HeadPurchaseCount = v
-  get equippedHelmet = EquippedHelmet; set equippedHelmet(v) = EquippedHelmet = v ?? nil
-  get helmet = EquippedHelmet; set helmet(v) = EquippedHelmet = v ?? nil
   fn EquipHelmet(v:Option[HelmetLike]) -> void = EquippedHelmet = v ?? nil
   fn equipHelmet(v:Option[HelmetLike]) :
     this.EquipHelmet(v)
@@ -317,8 +286,6 @@ pub class SnakePlayer:
     HeadPurchaseCount += 1
     next
   fn installHeadAugment(key:str) -> int = this.InstallHeadAugment(key)
-  get Meta = meta; set Meta(v) = meta = v
-  get Services = services; set Services(v) = services = v
   fn constructor(classId:Option[str] = "emerald", arenaW:unknown = 0, arenaH:unknown = 0, initialSegments:unknown = 2, metaOrOptions:MetaProgression | unknown):
     if metaOrOptions == MetaProgression:
       meta = metaOrOptions

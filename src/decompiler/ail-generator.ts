@@ -250,9 +250,12 @@ export class AilGenerator {
         this.emitLeadingTrivia(pNodeId);
         const st = p.isStatic ? "static " : "";
         const ro = p.isReadonly ? "readonly " : "";
+        const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+        const aliasStr = aliases.length > 0 ? `, ${aliases.join(", ")}` : "";
+        const propKw = aliases.length > 0 ? "prop " : "";
         const typeAnn = p.typeAnnotation ? `: ${this.formatTypeExpr(p.typeAnnotation)}` : "";
         const init = p.initialValue ? ` = ${this.formatExpr(p.initialValue)}` : "";
-        this.writeLine(`${st}${ro}${p.name}${typeAnn}${init}`, pNodeId);
+        this.writeLine(`${propKw}${st}${ro}${p.name}${aliasStr}${typeAnn}${init}`, pNodeId);
       }
 
       for (const m of c.methods) {

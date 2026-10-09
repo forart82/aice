@@ -37,6 +37,7 @@ export type TokenKind =
   | "READONLY"
   | "CONST"
   | "ASYNC"
+  | "PROP"
   // Control Flow Keywords
   | "IF"
   | "ELIF"
@@ -138,6 +139,7 @@ export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
   readonly: "READONLY",
   const: "CONST",
   async: "ASYNC",
+  prop: "PROP",
   // Control
   if: "IF",
   elif: "ELIF",

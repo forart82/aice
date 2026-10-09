@@ -59,29 +59,54 @@ pub class GameEngine:
   OnMenuNavigate: () => void
   OnDraw: () => void
   DailyKeyProvider: () => void
-  ArenaW = 960, ArenaH = 640, Dpr = 1, CssWidth = 960, CssHeight = 640
-  BackingWidth = 960, BackingHeight = 640
-  State: GameState = GameState.Menu
-  GameMode = "rogue", SelectedClass = "emerald", RunSeed = 0, CurrentFloor = 1, MaxFloors = 20
-  FoodTarget = 15, FloorFoodProgress = 0, FloorClearTimer = 0, InitialSegments = 2, GrowthOnEat = false
-  LabIntroSeen = false, RecoveryPityCounter = 0
-  Player: SnakePlayer
-  Foods: [FoodItem] = []
-  Enemies: [Enemy] = []
-  Projectiles: [Projectile] = []
-  Hazards: [Hazard] = []
+  prop ArenaW, arenaW = 960
+  prop ArenaH, arenaH = 640
+  prop Dpr, dpr = 1
+  prop CssWidth, cssWidth = 960
+  prop CssHeight, cssHeight = 640
+  prop BackingWidth, backingWidth = 960
+  prop BackingHeight, backingHeight = 640
+  prop State, state: GameState = GameState.Menu
+  prop GameMode, gameMode = "rogue"
+  prop SelectedClass, selectedClass = "emerald"
+  prop RunSeed, runSeed = 0
+  prop CurrentFloor, currentFloor = 1
+  prop MaxFloors, maxFloors = 20
+  prop FoodTarget, foodTarget = 15
+  prop FloorFoodProgress, floorFoodProgress = 0
+  prop FloorClearTimer, floorClearTimer = 0
+  prop InitialSegments, initialSegments = 2
+  prop GrowthOnEat, growthOnEat = false
+  prop LabIntroSeen, labIntroSeen = false
+  prop RecoveryPityCounter, recoveryPityCounter = 0
+  prop Player, player: SnakePlayer
+  prop Foods, foods, foodItems: [FoodItem] = []
+  prop Enemies, enemies: [Enemy] = []
+  prop Projectiles, projectiles: [Projectile] = []
+  prop Hazards, hazards: [Hazard] = []
   ActiveBosses: [Boss] = []
-  HelmetDrops: [HelmetDrop] = []
-  Combat: CombatSystem = CombatSystem()
-  RerollsRemaining = 1
-  CurrentDraftCards: [CardDef] = []
-  ActivePerks: [CardDef] = []
-  FoodSpawnTimer = 0, WaveTimer = 3, VacuumTimer = 0, ChronoTimer = 0, TimeScale = 1
-  BannerTimer = 0, Vignette = 0, Accumulator = 0, Fps = 60, FpsSamples = 0
-  FpsAccum = 0, FrameCount = 0
+  prop HelmetDrops, helmetDrops: [HelmetDrop] = []
+  prop Combat, combat: CombatSystem = CombatSystem()
+  prop RerollsRemaining, rerollsRemaining = 1
+  prop CurrentDraftCards, currentDraftCards: [CardDef] = []
+  prop ActivePerks, activePerks: [CardDef] = []
+  prop FoodSpawnTimer, foodSpawnTimer = 0
+  prop WaveTimer, waveTimer = 3
+  prop VacuumTimer, vacuumTimer = 0
+  prop ChronoTimer, chronoTimer = 0
+  prop TimeScale, timeScale = 1
+  prop BannerTimer, bannerTimer = 0
+  prop Vignette, vignette = 0
+  prop Accumulator, accumulator = 0
+  prop Fps, fps = 60
+  FpsSamples = 0, FpsAccum = 0
+  prop FrameCount, frameCount = 0
   SettingsReturnState: GameState = GameState.Menu
-  TouchScheme = "stick", IsTouchDevice = false, HasSteered = false, RunActive = false, DailyMilestoneReached = 0
-  Gauntlet: Option[BossRushGauntlet] = nil
+  TouchScheme = "stick", IsTouchDevice = false
+  prop HasSteered, hasSteered = false
+  prop RunActive, runActive = false
+  prop DailyMilestoneReached, dailyMilestoneReached = 0
+  prop Gauntlet, gauntlet: Option[BossRushGauntlet] = nil
   isBotEnabled = false, botPlayer = AutonomousBotPlayer(), _botDraftTimer = 0, _botFloorClearTimer = 0, _botGameOverTimer = 0
   _floorBaseFloor = -1, _floorBaseEaten = 0, _storageWarned = false
   readonly _world = World()
@@ -105,52 +130,7 @@ pub class GameEngine:
       ActiveBosses.length = 0
     else:
       ActiveBosses = [v]
-  get arenaW = ArenaW; set arenaW(v) = ArenaW = v
-  get arenaH = ArenaH; set arenaH(v) = ArenaH = v
-  get dpr = Dpr; set dpr(v) = Dpr = v
-  get cssWidth = CssWidth; set cssWidth(v) = CssWidth = v
-  get cssHeight = CssHeight; set cssHeight(v) = CssHeight = v
-  get backingWidth = BackingWidth; set backingWidth(v) = BackingWidth = v
-  get backingHeight = BackingHeight; set backingHeight(v) = BackingHeight = v
-  get state = State; set state(v) = State = v
-  get gameMode = GameMode; set gameMode(v) = GameMode = v
-  get selectedClass = SelectedClass; set selectedClass(v) = SelectedClass = v
-  get runSeed = RunSeed; set runSeed(v) = RunSeed = v
-  get currentFloor = CurrentFloor; set currentFloor(v) = CurrentFloor = v
-  get maxFloors = MaxFloors; set maxFloors(v) = MaxFloors = v
-  get foodTarget = FoodTarget; set foodTarget(v) = FoodTarget = v
-  get recoveryPityCounter = RecoveryPityCounter; set recoveryPityCounter(v) = RecoveryPityCounter = v
-  get floorFoodProgress = FloorFoodProgress; set floorFoodProgress(v) = FloorFoodProgress = v
-  get floorClearTimer = FloorClearTimer; set floorClearTimer(v) = FloorClearTimer = v
-  get initialSegments = InitialSegments; set initialSegments(v) = InitialSegments = v
-  get growthOnEat = GrowthOnEat; set growthOnEat(v) = GrowthOnEat = v
-  get labIntroSeen = LabIntroSeen; set labIntroSeen(v) = LabIntroSeen = v
-  get player = Player; set player(v) = Player = v
-  get foods = Foods; set foods(v) = Foods = v
-  get foodItems = Foods; set foodItems(v) = Foods = v
-  get enemies = Enemies; set enemies(v) = Enemies = v
-  get projectiles = Projectiles; set projectiles(v) = Projectiles = v
-  get hazards = Hazards; set hazards(v) = Hazards = v
   get boss = this.Boss; set boss(v) = this.Boss = v
-  get helmetDrops = HelmetDrops; set helmetDrops(v) = HelmetDrops = v
-  get combat = Combat; set combat(v) = Combat = v
-  get rerollsRemaining = RerollsRemaining; set rerollsRemaining(v) = RerollsRemaining = v
-  get currentDraftCards = CurrentDraftCards; set currentDraftCards(v) = CurrentDraftCards = v
-  get activePerks = ActivePerks; set activePerks(v) = ActivePerks = v
-  get foodSpawnTimer = FoodSpawnTimer; set foodSpawnTimer(v) = FoodSpawnTimer = v
-  get waveTimer = WaveTimer; set waveTimer(v) = WaveTimer = v
-  get vacuumTimer = VacuumTimer; set vacuumTimer(v) = VacuumTimer = v
-  get chronoTimer = ChronoTimer; set chronoTimer(v) = ChronoTimer = v
-  get timeScale = TimeScale; set timeScale(v) = TimeScale = v
-  get bannerTimer = BannerTimer; set bannerTimer(v) = BannerTimer = v
-  get vignette = Vignette; set vignette(v) = Vignette = v
-  get accumulator = Accumulator; set accumulator(v) = Accumulator = v
-  get fps = Fps; set fps(v) = Fps = v
-  get frameCount = FrameCount; set frameCount(v) = FrameCount = v
-  get hasSteered = HasSteered; set hasSteered(v) = HasSteered = v
-  get runActive = RunActive; set runActive(v) = RunActive = v
-  get dailyMilestoneReached = DailyMilestoneReached; set dailyMilestoneReached(v) = DailyMilestoneReached = v
-  get gauntlet = Gauntlet; set gauntlet(v) = Gauntlet = v
   fn StartBossRushGauntlet() -> BossRushGauntlet:
     Gauntlet = BossRushGauntlet()
     Gauntlet.Start(this)

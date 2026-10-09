@@ -256,7 +256,16 @@ export class TypeChecker {
         }
       }
       for (const p of item.properties) {
-        fields.set(p.name, p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, env) : TYPE_UNKNOWN);
+        const pType = p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, env) : TYPE_UNKNOWN;
+        fields.set(p.name, pType);
+        if (p.alias) {
+          fields.set(p.alias, pType);
+        }
+        if (p.aliases) {
+          for (const a of p.aliases) {
+            fields.set(a, pType);
+          }
+        }
       }
       for (const m of item.methods) {
         const mParams = m.params.map((p) => ({
@@ -334,7 +343,15 @@ export class TypeChecker {
       }
       for (const p of item.properties) {
         const pType = p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, classEnv) : TYPE_UNKNOWN;
-        classEnv.define(p.name, pType, true);
+        classEnv.define(p.name, pType, !p.isReadonly);
+        if (p.alias) {
+          classEnv.define(p.alias, pType, !p.isReadonly);
+        }
+        if (p.aliases) {
+          for (const a of p.aliases) {
+            classEnv.define(a, pType, !p.isReadonly);
+          }
+        }
       }
       for (const m of item.methods) {
         const retType = m.returnType

@@ -8,6 +8,7 @@ import {
   lowerMethodCall,
   lowerPropertyAccess,
 } from "../../src/emitters/index.js";
+import { TypeChecker } from "../../src/typechecker/checker.js";
 
 describe("Step 5: Multi-Language Forward Emitters & Lowering", () => {
   describe("Path & Target Detection", () => {
@@ -690,6 +691,104 @@ style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
 
       const goOut = emitTarget(mod, "go");
       expect(goOut).toContain("x += 10");
+    });
+  });
+
+  describe("Step 20: Dual-Case Property Compaction & Accessor Synthesizer", () => {
+    it("synthesizes TypeScript getters and setters for property aliases", () => {
+      const src = `class SnakeSegment:
+  prop X, x: int = 0
+  prop Y, y: int = 0
+  prop MaxHp, maxHp: int
+  readonly prop Id, id: str
+  prop Shield: int = 50`;
+
+      const mod = parse(src, "SnakeSegment.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("X: number = 0;");
+      expect(tsOut).toContain("get x() { return this.X; }");
+      expect(tsOut).toContain("set x(v: number) { this.X = v; }");
+
+      expect(tsOut).toContain("Y: number = 0;");
+      expect(tsOut).toContain("get y() { return this.Y; }");
+      expect(tsOut).toContain("set y(v: number) { this.Y = v; }");
+
+      expect(tsOut).toContain("MaxHp: number;");
+      expect(tsOut).toContain("get maxHp() { return this.MaxHp; }");
+      expect(tsOut).toContain("set maxHp(v: number) { this.MaxHp = v; }");
+
+      expect(tsOut).toContain("readonly Id: string;");
+      expect(tsOut).toContain("get id() { return this.Id; }");
+      expect(tsOut).not.toContain("set id(");
+
+      expect(tsOut).toContain("Shield: number = 50;");
+    });
+
+    it("respects explicit getter or setter overrides without duplication", () => {
+      const src = `class CustomPlayer:
+  prop Hp, hp: int = 100
+  get hp() -> int:
+    ret this.Hp * 2`;
+
+      const mod = parse(src, "CustomPlayer.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("Hp: number = 100;");
+      expect(tsOut).toContain("get hp(): number {");
+      expect(tsOut).toContain("return (this.Hp * 2);");
+      expect(tsOut).toContain("set hp(v: number) { this.Hp = v; }");
+    });
+
+    it("resolves implicit this. for aliases in TypeScript methods", () => {
+      const src = `class Mover:
+  prop X, x: int = 0
+  fn move(dx: int):
+    x += dx`;
+
+      const mod = parse(src, "Mover.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("this.x += dx;");
+    });
+
+    it("synthesizes static getters and setters with class qualifier", () => {
+      const src = `class Config:
+  static prop Version, version: str = "1.0.0"`;
+
+      const mod = parse(src, "Config.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain('static Version: string = "1.0.0";');
+      expect(tsOut).toContain("static get version() { return Config.Version; }");
+      expect(tsOut).toContain("static set version(v: string) { Config.Version = v; }");
+    });
+
+    it("emits idiomatic Python @property and setter for property aliases", () => {
+      const src = `class Player:
+  prop X, x: int = 0`;
+
+      const mod = parse(src, "Player.py.ail");
+      const pyOut = emitTarget(mod, "python");
+
+      expect(pyOut).toContain("self.X: int = 0");
+      expect(pyOut).toContain("@property");
+      expect(pyOut).toContain("def x(self):");
+      expect(pyOut).toContain("return self.X");
+      expect(pyOut).toContain("@x.setter");
+      expect(pyOut).toContain("def x(self, v):");
+      expect(pyOut).toContain("self.X = v");
+    });
+
+    it("typechecks class properties and aliases soundly", () => {
+      const src = `class Vector:
+  prop X, x: int = 0
+  fn getCoords() -> int:
+    ret this.x + this.X`;
+
+      const mod = parse(src, "Vector.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
     });
   });
 });

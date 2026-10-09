@@ -1074,21 +1074,29 @@ export class Parser {
         }
 
         let isStatic = false;
-        if (this.check("STATIC")) {
-          isStatic = true;
-          this.advance();
-        }
-
         let isReadonly = false;
-        if (this.check("READONLY")) {
-          isReadonly = true;
-          this.advance();
-        }
-
         let isAsync = false;
-        if (this.check("ASYNC")) {
-          isAsync = true;
-          this.advance();
+        let hasPropKeyword = false;
+
+        while (
+          this.check("STATIC") ||
+          this.check("READONLY") ||
+          this.check("ASYNC") ||
+          this.check("PROP")
+        ) {
+          if (this.check("STATIC")) {
+            isStatic = true;
+            this.advance();
+          } else if (this.check("READONLY")) {
+            isReadonly = true;
+            this.advance();
+          } else if (this.check("ASYNC")) {
+            isAsync = true;
+            this.advance();
+          } else if (this.check("PROP")) {
+            hasPropKeyword = true;
+            this.advance();
+          }
         }
 
         const isAccessor =
@@ -1101,6 +1109,7 @@ export class Parser {
           const method = this.parseMethodDecl(isStatic, isAsync, accessor);
           methods.push(method);
         } else if (
+          hasPropKeyword ||
           this.check("IDENT") ||
           this.check("STRING") ||
           this.check("STATE") ||
@@ -1109,11 +1118,11 @@ export class Parser {
           this.check("MUT") ||
           this.check("FROM")
         ) {
-          const prop = this.parsePropertyDecl(isStatic, isReadonly);
+          const prop = this.parsePropertyDecl(isStatic, isReadonly, hasPropKeyword);
           properties.push(prop);
           while (this.check("COMMA")) {
             this.advance();
-            const nextProp = this.parsePropertyDecl(isStatic, isReadonly);
+            const nextProp = this.parsePropertyDecl(isStatic, isReadonly, hasPropKeyword);
             properties.push(nextProp);
           }
         } else {
@@ -1147,26 +1156,78 @@ export class Parser {
     };
   }
 
-  private parsePropertyDecl(isStatic: boolean, isReadonly: boolean): PropertyDecl {
+  private parsePropertyDecl(
+    isStatic: boolean,
+    isReadonly: boolean,
+    hasPropKeyword: boolean = false,
+  ): PropertyDecl {
     const startSpan = this.current().span;
+    let lastSpan: Span = startSpan;
     const name = this.parseContextualIdentOrString("Expected property name");
+    let aliases: string[] | undefined;
     let typeAnnotation: TypeExpr | undefined;
     let initialValue: Expr | undefined;
+
+    // Check for alias: prop X, x: type = init or X, x: type = init
+    if (
+      this.check("COMMA") &&
+      (hasPropKeyword ||
+        (this.isIdentOrKeyword(this.peek()) &&
+          (this.peek(2).kind === "COLON" ||
+            this.peek(2).kind === "EQUAL" ||
+            this.peek(2).kind === "COMMA")))
+    ) {
+      this.advance();
+      const aliasName = this.parseContextualIdentOrString("Expected property alias");
+      lastSpan = this.previous().span;
+      (aliases ??= []).push(aliasName);
+      while (
+        this.check("COMMA") &&
+        (hasPropKeyword ||
+          (this.isIdentOrKeyword(this.peek()) &&
+            (this.peek(2).kind === "COLON" ||
+              this.peek(2).kind === "EQUAL" ||
+              this.peek(2).kind === "COMMA")))
+      ) {
+        this.advance();
+        const nextAlias = this.parseContextualIdentOrString("Expected property alias");
+        lastSpan = this.previous().span;
+        (aliases ??= []).push(nextAlias);
+      }
+    }
 
     if (this.check("COLON")) {
       this.advance();
       typeAnnotation = this.parseTypeExpr();
+      lastSpan = typeAnnotation.span;
+    }
+
+    // Also support: prop X: type, x
+    if (hasPropKeyword && !aliases && this.check("COMMA")) {
+      this.advance();
+      const aliasName = this.parseContextualIdentOrString("Expected property alias");
+      lastSpan = this.previous().span;
+      (aliases ??= []).push(aliasName);
+      while (this.check("COMMA")) {
+        this.advance();
+        const nextAlias = this.parseContextualIdentOrString("Expected property alias");
+        lastSpan = this.previous().span;
+        (aliases ??= []).push(nextAlias);
+      }
     }
 
     if (this.check("EQUAL")) {
       this.advance();
       initialValue = this.parseExpr();
+      lastSpan = initialValue.span;
     }
 
-    const endSpan = initialValue ? initialValue.span : typeAnnotation ? typeAnnotation.span : startSpan;
+    const endSpan = initialValue ? initialValue.span : typeAnnotation ? typeAnnotation.span : lastSpan;
     return {
       kind: "PropertyDecl",
       name,
+      alias: aliases && aliases.length > 0 ? aliases[0] : undefined,
+      aliases: aliases && aliases.length > 0 ? aliases : undefined,
       isStatic,
       isReadonly,
       typeAnnotation,

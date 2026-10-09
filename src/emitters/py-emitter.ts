@@ -195,6 +195,28 @@ export class PythonEmitter {
       }
     }
 
+    for (const p of c.properties) {
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      for (const alias of aliases) {
+        const hasExplicitMethod = c.methods.some((m) => m.name === alias);
+        if (!hasExplicitMethod) {
+          this.ctx.writeLine();
+          this.ctx.writeLine("@property");
+          this.ctx.writeLine(`def ${alias}(self):`);
+          this.ctx.indent();
+          this.ctx.writeLine(`return self.${p.name}`);
+          this.ctx.dedent();
+          if (!p.isReadonly) {
+            this.ctx.writeLine(`@${alias}.setter`);
+            this.ctx.writeLine(`def ${alias}(self, v):`);
+            this.ctx.indent();
+            this.ctx.writeLine(`self.${p.name} = v`);
+            this.ctx.dedent();
+          }
+        }
+      }
+    }
+
     this.ctx.dedent();
   }
 

@@ -681,6 +681,58 @@ fn test():
       expect(cls.methods).toHaveLength(0);
     });
 
+    it("Step 20: parses dual-case property compaction and property aliases", () => {
+      const src = `class Player:
+  prop X, x: int = 0
+  prop Y, y = 10
+  prop Angle, angle: int
+  prop Alive, alive
+  prop MaxSpeed: int = 200
+  prop Z: int, z
+  prop Multi, m1, m2: int = 42
+  Score, score: int = 100`;
+
+      const mod = parse(src, "player.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.properties).toHaveLength(8);
+
+      expect(cls.properties[0].name).toBe("X");
+      expect(cls.properties[0].alias).toBe("x");
+      expect(cls.properties[0].aliases).toEqual(["x"]);
+      expect(cls.properties[0].typeAnnotation).toBeDefined();
+      expect(cls.properties[0].initialValue).toBeDefined();
+
+      expect(cls.properties[1].name).toBe("Y");
+      expect(cls.properties[1].alias).toBe("y");
+      expect(cls.properties[1].initialValue).toBeDefined();
+
+      expect(cls.properties[2].name).toBe("Angle");
+      expect(cls.properties[2].alias).toBe("angle");
+      expect(cls.properties[2].typeAnnotation).toBeDefined();
+      expect(cls.properties[2].initialValue).toBeUndefined();
+
+      expect(cls.properties[3].name).toBe("Alive");
+      expect(cls.properties[3].alias).toBe("alive");
+      expect(cls.properties[3].typeAnnotation).toBeUndefined();
+      expect(cls.properties[3].initialValue).toBeUndefined();
+
+      expect(cls.properties[4].name).toBe("MaxSpeed");
+      expect(cls.properties[4].alias).toBeUndefined();
+      expect(cls.properties[4].aliases).toBeUndefined();
+
+      expect(cls.properties[5].name).toBe("Z");
+      expect(cls.properties[5].alias).toBe("z");
+      expect(cls.properties[5].typeAnnotation).toBeDefined();
+
+      expect(cls.properties[6].name).toBe("Multi");
+      expect(cls.properties[6].alias).toBe("m1");
+      expect(cls.properties[6].aliases).toEqual(["m1", "m2"]);
+
+      expect(cls.properties[7].name).toBe("Score");
+      expect(cls.properties[7].alias).toBe("score");
+      expect(cls.properties[7].initialValue).toBeDefined();
+    });
+
     it("parses top-level const and pub let module declarations", () => {
       const src = `const DEFAULT_LIVES: int = 3
 pub const MAX_HEALTH = 100

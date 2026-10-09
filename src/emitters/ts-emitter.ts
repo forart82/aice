@@ -279,6 +279,14 @@ export class TypeScriptEmitter {
     }
     for (const p of c.properties) {
       this.currentClassProperties.add(p.name);
+      if (p.alias) {
+        this.currentClassProperties.add(p.alias);
+      }
+      if (p.aliases) {
+        for (const a of p.aliases) {
+          this.currentClassProperties.add(a);
+        }
+      }
     }
     for (const m of c.methods) {
       this.currentClassMethods.add(m.name);
@@ -319,6 +327,20 @@ export class TypeScriptEmitter {
       const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
       this.ctx.writeLine(`${st}${ro}${p.name}${typeAnn}${init};`);
       this.ctx.emitTrailingTrivia(pNodeId);
+
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      for (const alias of aliases) {
+        const hasExplicitGetter = c.methods.some((m) => m.name === alias && (m.accessor === "get" || !m.accessor));
+        const hasExplicitSetter = c.methods.some((m) => m.name === alias && (m.accessor === "set" || !m.accessor));
+        const target = p.isStatic ? `${c.name}.${p.name}` : `this.${p.name}`;
+        const typeStr = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "any";
+        if (!hasExplicitGetter) {
+          this.ctx.writeLine(`${st}get ${alias}() { return ${target}; }`);
+        }
+        if (!p.isReadonly && !hasExplicitSetter) {
+          this.ctx.writeLine(`${st}set ${alias}(v: ${typeStr}) { ${target} = v; }`);
+        }
+      }
     }
 
     for (const m of c.methods) {
