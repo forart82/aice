@@ -1,0 +1,34 @@
+{
+  "name": "tree-sitter-ail",
+  "version": "1.0.0",
+  "description": "Tree-sitter grammar for AIL (Abstract Intermediate Language)",
+  "main": "bindings/node",
+  "keywords": [
+    "parser",
+    "lexer",
+    "tree-sitter",
+    "ail"
+  ],
+  "author": "Antigravity",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "nan": "^2.20.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.22.6"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.ail",
+      "file-types": [
+        "ail",
+        "ts.ail",
+        "tsx.ail",
+        "py.ail",
+        "html.ail",
+        "css.ail"
+      ],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}

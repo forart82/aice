@@ -1,0 +1,52 @@
+{
+  "name": "vscode-ail",
+  "displayName": "AIL Language Support",
+  "description": "Syntax highlighting, bracket matching, indentation rules, and language support for AIL (Abstract Intermediate Language)",
+  "version": "1.0.0",
+  "publisher": "antigravity",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "ail",
+    "compiler",
+    "bpe",
+    "tokenomics",
+    "transpiler"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "ail",
+        "aliases": ["AIL", "ail"],
+        "extensions": [
+          ".ail",
+          ".ts.ail",
+          ".tsx.ail",
+          ".py.ail",
+          ".html.ail",
+          ".css.ail"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ail",
+        "scopeName": "source.ail",
+        "path": "./syntaxes/ail.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "ail",
+        "path": "./snippets/ail.json"
+      }
+    ]
+  }
+}
