@@ -1,219 +1,254 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Canonical Intent Primitive Registry (Pillars 1 & 3)
- * Eliminates API redundancy & implicit type coercion by defining orthogonal semantic operations.
+ * Canonical Standard Library (CSL) primitive types and signature registry.
+ * Conforms to Section 2 of docs/AIL_SPEC.md.
  */
 
-import type { SemanticType } from "./types.ts";
+import {
+  makeArrayType,
+  makeFunctionType,
+  makeOptionType,
+  makeResultType,
+  TYPE_BOOL,
+  TYPE_FLOAT,
+  TYPE_INT,
+  TYPE_NEVER,
+  TYPE_NUM,
+  TYPE_STR,
+  TYPE_UNKNOWN,
+  TYPE_VOID,
+  type Type,
+} from "./types.js";
 
-export interface PrimitiveSignature {
-  name: string;
-  domain: "string" | "array" | "map" | "math" | "logic" | "system";
-  params: SemanticType[];
-  returnType: SemanticType;
-  description: string;
-  isPure: boolean;
+/**
+ * Returns the member property type (e.g. str.len -> int, list.len -> int).
+ */
+export function getPropertyType(receiver: Type, prop: string): Type | null {
+  if (receiver.kind === "str") {
+    if (prop === "len" || prop === "length") return TYPE_INT;
+  }
+
+  if (receiver.kind === "array") {
+    if (prop === "len" || prop === "length") return TYPE_INT;
+    const m = getMethodType(receiver, prop);
+    if (m) return m;
+  }
+
+  if (receiver.kind === "record") {
+    const direct = receiver.fields.get(prop);
+    if (direct) return direct;
+    const getter = receiver.fields.get(`get_${prop}`);
+    if (getter && getter.kind === "function") {
+      return getter.returnType;
+    }
+    return null;
+  }
+
+  if (
+    receiver.kind === "named" ||
+    receiver.kind === "unknown" ||
+    receiver.kind === "function"
+  ) {
+    return TYPE_UNKNOWN;
+  }
+
+  return null;
 }
 
-const T_INT: SemanticType = { kind: "Primitive", name: "!i" };
-const T_FLOAT: SemanticType = { kind: "Primitive", name: "!f" };
-const T_STRING: SemanticType = { kind: "Primitive", name: "!s" };
-const T_BOOL: SemanticType = { kind: "Primitive", name: "!b" };
-const _T_VOID: SemanticType = { kind: "Primitive", name: "!void" };
-const T_UNKNOWN: SemanticType = { kind: "Primitive", name: "!unknown" };
+/**
+ * Returns the canonical method type for a receiver and method name.
+ */
+export function getMethodType(receiver: Type, method: string): Type | null {
+  // String Canonical Methods
+  if (receiver.kind === "str") {
+    switch (method) {
+      case "slice":
+        return makeFunctionType(
+          [
+            { name: "start", type: TYPE_INT },
+            { name: "end", type: TYPE_INT, optional: true },
+          ],
+          TYPE_STR,
+        );
+      case "at":
+        return makeFunctionType([{ name: "index", type: TYPE_INT }], makeOptionType(TYPE_STR));
+      case "concat":
+        return makeFunctionType([{ name: "other", type: TYPE_STR }], TYPE_STR);
+      case "toInt":
+        return makeFunctionType([], makeResultType(TYPE_INT, TYPE_STR));
+      case "trim":
+        return makeFunctionType([], TYPE_STR);
+      case "split":
+        return makeFunctionType([{ name: "delim", type: TYPE_STR }], makeArrayType(TYPE_STR));
+      case "startsWith":
+        return makeFunctionType([{ name: "prefix", type: TYPE_STR }], TYPE_BOOL);
+      case "endsWith":
+        return makeFunctionType([{ name: "suffix", type: TYPE_STR }], TYPE_BOOL);
+      case "includes":
+      case "contains":
+        return makeFunctionType([{ name: "substr", type: TYPE_STR }], TYPE_BOOL);
+      case "isEmpty":
+        return makeFunctionType([], TYPE_BOOL);
+      case "toLowerCase":
+      case "toUpperCase":
+        return makeFunctionType([], TYPE_STR);
+      case "replace":
+        return makeFunctionType(
+          [
+            { name: "target", type: TYPE_STR },
+            { name: "replacement", type: TYPE_STR },
+          ],
+          TYPE_STR,
+        );
+      default:
+        return null;
+    }
+  }
 
-export const CANONICAL_PRIMITIVES: Record<string, PrimitiveSignature> = {
-  // --- String Canonical Operations (Pillar 1) ---
-  "str:slice": {
-    name: "str:slice",
-    domain: "string",
-    params: [T_STRING, T_INT, T_INT],
-    returnType: T_STRING,
-    description: "Extracts substring within strictly bounded range [from, to). Pure value return.",
-    isPure: true,
-  },
-  "str:at": {
-    name: "str:at",
-    domain: "string",
-    params: [T_STRING, T_INT],
-    returnType: T_STRING,
-    description: "Returns character at 0-based index. Supports negative indexing from end.",
-    isPure: true,
-  },
-  "str:len": {
-    name: "str:len",
-    domain: "string",
-    params: [T_STRING],
-    returnType: T_INT,
-    description: "Returns UTF-8 character length of string.",
-    isPure: true,
-  },
-  "str:concat": {
-    name: "str:concat",
-    domain: "string",
-    params: [T_STRING, T_STRING],
-    returnType: T_STRING,
-    description: "Concatenates two strings without implicit coercion.",
-    isPure: true,
-  },
-  "str:parse-int": {
-    name: "str:parse-int",
-    domain: "string",
-    params: [T_STRING],
-    returnType: { kind: "Result", okType: T_INT, errType: T_STRING },
-    description: "Parses integer from string. Returns fallible Result.",
-    isPure: true,
-  },
+  // Array / List Canonical Methods
+  if (receiver.kind === "array") {
+    const elemType = receiver.elementType;
+    switch (method) {
+      case "get":
+        return makeFunctionType([{ name: "index", type: TYPE_INT }], makeOptionType(elemType));
+      case "slice":
+        return makeFunctionType(
+          [
+            { name: "start", type: TYPE_INT },
+            { name: "end", type: TYPE_INT, optional: true },
+          ],
+          receiver,
+        );
+      case "append":
+        return makeFunctionType([{ name: "item", type: elemType }], receiver);
+      case "push":
+        return makeFunctionType([{ name: "item", type: elemType }], TYPE_INT);
+      case "pop":
+        return makeFunctionType([], makeOptionType(elemType));
+      case "shift":
+        return makeFunctionType([], makeOptionType(elemType));
+      case "unshift":
+        return makeFunctionType([{ name: "item", type: elemType }], TYPE_INT);
+      case "clear":
+        return makeFunctionType([], TYPE_VOID);
+      case "indexOf":
+        return makeFunctionType([{ name: "item", type: elemType }], TYPE_INT);
+      case "includes":
+      case "contains":
+        return makeFunctionType([{ name: "item", type: elemType }], TYPE_BOOL);
+      case "filter":
+        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], receiver);
+      case "map":
+        return makeFunctionType([{ name: "transform", type: TYPE_UNKNOWN }], makeArrayType(TYPE_UNKNOWN));
+      case "forEach":
+        return makeFunctionType([{ name: "callback", type: TYPE_UNKNOWN }], TYPE_VOID);
+      case "some":
+        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], TYPE_BOOL);
+      case "every":
+        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], TYPE_BOOL);
+      case "find":
+        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], makeOptionType(elemType));
+      case "findIndex":
+        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], TYPE_INT);
+      case "splice":
+        return makeFunctionType(
+          [
+            { name: "start", type: TYPE_INT },
+            { name: "deleteCount", type: TYPE_INT, optional: true },
+          ],
+          receiver,
+        );
+      case "concat":
+        return makeFunctionType([{ name: "other", type: receiver }], receiver);
+      case "reverse":
+        return makeFunctionType([], receiver);
+      case "sort":
+        return makeFunctionType([{ name: "compareFn", type: TYPE_UNKNOWN, optional: true }], receiver);
+      case "isEmpty":
+        return makeFunctionType([], TYPE_BOOL);
+      case "first":
+        return makeFunctionType([], makeOptionType(elemType));
+      case "last":
+        return makeFunctionType([], makeOptionType(elemType));
+      case "join":
+        return makeFunctionType([{ name: "sep", type: TYPE_STR }], TYPE_STR);
+      default:
+        return null;
+    }
+  }
 
-  // --- Collection Primitives (Pillar 3: Pure Immutability by Default) ---
-  "arr:len": {
-    name: "arr:len",
-    domain: "array",
-    params: [{ kind: "Array", elementType: T_UNKNOWN }],
-    returnType: T_INT,
-    description: "Returns length of array.",
-    isPure: true,
-  },
-  "arr:get": {
-    name: "arr:get",
-    domain: "array",
-    params: [{ kind: "Array", elementType: T_UNKNOWN }, T_INT],
-    returnType: { kind: "Option", valueType: T_UNKNOWN },
-    description: "Safely returns element at index wrapped in Option[T].",
-    isPure: true,
-  },
-  "arr:slice": {
-    name: "arr:slice",
-    domain: "array",
-    params: [{ kind: "Array", elementType: T_UNKNOWN }, T_INT, T_INT],
-    returnType: { kind: "Array", elementType: T_UNKNOWN },
-    description: "Returns pure immutable slice of array.",
-    isPure: true,
-  },
-  "arr:append": {
-    name: "arr:append",
-    domain: "array",
-    params: [{ kind: "Array", elementType: T_UNKNOWN }, T_UNKNOWN],
-    returnType: { kind: "Array", elementType: T_UNKNOWN },
-    description: "Returns new array with element appended (immutable pure transformation).",
-    isPure: true,
-  },
+  // Primitive Types Canonical Methods (int, float, num, bool)
+  if (
+    receiver.kind === "int" ||
+    receiver.kind === "float" ||
+    receiver.kind === "num" ||
+    receiver.kind === "bool"
+  ) {
+    if (method === "toString") {
+      return makeFunctionType([], TYPE_STR);
+    }
+  }
 
-  // --- Strict Math Operations (Pillar 3: Zero Implicit Coercion) ---
-  "+": {
-    name: "+",
-    domain: "math",
-    params: [T_FLOAT, T_FLOAT], // Also handles T_INT via polymorphism
-    returnType: T_FLOAT,
-    description: "Strict arithmetic addition. Rejects string concatenation.",
-    isPure: true,
-  },
-  "-": {
-    name: "-",
-    domain: "math",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_FLOAT,
-    description: "Strict arithmetic subtraction.",
-    isPure: true,
-  },
-  "*": {
-    name: "*",
-    domain: "math",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_FLOAT,
-    description: "Strict arithmetic multiplication.",
-    isPure: true,
-  },
-  "/": {
-    name: "/",
-    domain: "math",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_FLOAT,
-    description: "Strict arithmetic division.",
-    isPure: true,
-  },
-  "%": {
-    name: "%",
-    domain: "math",
-    params: [T_INT, T_INT],
-    returnType: T_INT,
-    description: "Modulo operation on integers.",
-    isPure: true,
-  },
+  if (receiver.kind === "int" || receiver.kind === "float" || receiver.kind === "num") {
+    if (method === "toInt" || method === "round" || method === "floor" || method === "ceil") {
+      return makeFunctionType([], TYPE_INT);
+    }
+    if (method === "toFloat") {
+      return makeFunctionType([], TYPE_FLOAT);
+    }
+  }
 
-  // --- Logical & Comparison Operations ---
-  "==": {
-    name: "==",
-    domain: "logic",
-    params: [T_UNKNOWN, T_UNKNOWN],
-    returnType: T_BOOL,
-    description: "Deep structural equality check.",
-    isPure: true,
-  },
-  "!=": {
-    name: "!=",
-    domain: "logic",
-    params: [T_UNKNOWN, T_UNKNOWN],
-    returnType: T_BOOL,
-    description: "Structural inequality check.",
-    isPure: true,
-  },
-  "<": {
-    name: "<",
-    domain: "logic",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_BOOL,
-    description: "Less than comparison.",
-    isPure: true,
-  },
-  ">": {
-    name: ">",
-    domain: "logic",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_BOOL,
-    description: "Greater than comparison.",
-    isPure: true,
-  },
-  "<=": {
-    name: "<=",
-    domain: "logic",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_BOOL,
-    description: "Less than or equal comparison.",
-    isPure: true,
-  },
-  ">=": {
-    name: ">=",
-    domain: "logic",
-    params: [T_FLOAT, T_FLOAT],
-    returnType: T_BOOL,
-    description: "Greater than or equal comparison.",
-    isPure: true,
-  },
-  and: {
-    name: "and",
-    domain: "logic",
-    params: [T_BOOL, T_BOOL],
-    returnType: T_BOOL,
-    description: "Short-circuit boolean AND.",
-    isPure: true,
-  },
-  or: {
-    name: "or",
-    domain: "logic",
-    params: [T_BOOL, T_BOOL],
-    returnType: T_BOOL,
-    description: "Short-circuit boolean OR.",
-    isPure: true,
-  },
-  not: {
-    name: "not",
-    domain: "logic",
-    params: [T_BOOL],
-    returnType: T_BOOL,
-    description: "Boolean negation.",
-    isPure: true,
-  },
+  return null;
+}
+
+/**
+ * Built-in global symbols and constructors (Ok, Err, Some, log, etc.).
+ */
+export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
+  print: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_VOID),
+  log: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_VOID),
+  abs: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_NUM),
+  min: makeFunctionType(
+    [
+      { name: "a", type: TYPE_NUM },
+      { name: "b", type: TYPE_NUM },
+    ],
+    TYPE_NUM,
+  ),
+  max: makeFunctionType(
+    [
+      { name: "a", type: TYPE_NUM },
+      { name: "b", type: TYPE_NUM },
+    ],
+    TYPE_NUM,
+  ),
+  clamp: makeFunctionType(
+    [
+      { name: "val", type: TYPE_NUM },
+      { name: "min", type: TYPE_NUM },
+      { name: "max", type: TYPE_NUM },
+    ],
+    TYPE_NUM,
+  ),
+  sqrt: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_FLOAT),
+  pow: makeFunctionType(
+    [
+      { name: "base", type: TYPE_NUM },
+      { name: "exp", type: TYPE_NUM },
+    ],
+    TYPE_FLOAT,
+  ),
+  floor: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_INT),
+  ceil: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_INT),
+  round: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_INT),
+  sin: makeFunctionType([{ name: "rad", type: TYPE_NUM }], TYPE_FLOAT),
+  cos: makeFunctionType([{ name: "rad", type: TYPE_NUM }], TYPE_FLOAT),
+  Ok: makeFunctionType(
+    [{ name: "value", type: TYPE_UNKNOWN }],
+    makeResultType(TYPE_UNKNOWN, TYPE_NEVER),
+  ),
+  Err: makeFunctionType(
+    [{ name: "error", type: TYPE_UNKNOWN }],
+    makeResultType(TYPE_NEVER, TYPE_UNKNOWN),
+  ),
+  Some: makeFunctionType([{ name: "value", type: TYPE_UNKNOWN }], makeOptionType(TYPE_UNKNOWN)),
 };
