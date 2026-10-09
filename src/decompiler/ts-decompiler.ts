@@ -103,10 +103,8 @@ export class TsDecompiler {
     const items: ModuleItem[] = [];
 
     // Derive module path from file name
-    const cleanModPath = this.filePath
-      .replace(/^(\.\/|\/)/, "")
-      .replace(/\.(tsx?|jsx?)$/, "")
-      .replace(/\.ail$/, "");
+    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.(tsx?|jsx?)$/, "").replace(/\.ail$/, "") ?? "main";
+    const cleanModPath = baseName;
 
     for (const stmt of this.sourceFile.statements) {
       const item = this.convertTopLevelStatement(stmt);

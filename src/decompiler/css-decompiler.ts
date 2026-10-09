@@ -26,10 +26,8 @@ export class CssDecompiler {
     const root = postcss.parse(this.source, { from: this.filePath });
     const items: (StyleDecl | ImportDecl)[] = [];
 
-    const cleanModPath = this.filePath
-      .replace(/^(\.\/|\/)/, "")
-      .replace(/\.css$/, "")
-      .replace(/\.ail$/, "");
+    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.css$/, "").replace(/\.ail$/, "") ?? "style";
+    const cleanModPath = baseName;
 
     let pendingComment: string | null = null;
 

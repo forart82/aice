@@ -45,13 +45,9 @@ export class HtmlDecompiler {
       }
     }
 
-    const cleanModPath = this.filePath
-      .replace(/^(\.\/|\/)/, "")
-      .replace(/\.html$/, "")
-      .replace(/\.ail$/, "");
-
     // Capitalize component name from file basename
-    const baseName = this.filePath.split("/").pop()?.replace(/\.html$/, "").replace(/\.ail$/, "") ?? "page";
+    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.html$/, "").replace(/\.ail$/, "") ?? "page";
+    const cleanModPath = baseName;
     const compName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
 
     const comp: ComponentDecl = {
