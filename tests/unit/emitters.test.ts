@@ -438,6 +438,40 @@ style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
       expect(out).toContain("border: 1px solid var(--color-indigo-400);");
       expect(out).toContain("box-shadow: var(--shadow-md);");
     });
+
+    it("Step 23: emits token unit deduplication and layout macros (fl-row, fl-col, fl-center)", () => {
+      const src = `tokens spacing[rem]: 1: 0.25, 2: 0.5
+style box: fl-row; gap: 1rem
+style stack: fl-col; gap: 0.5rem
+style center_box: fl-center; p: 2rem`;
+
+      const mod = parse(src, "test.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toContain(`:root {
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+}`);
+
+      expect(out).toContain(`.box {
+  display: flex;
+  flex-direction: row;
+  gap: 1rem;
+}`);
+
+      expect(out).toContain(`.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}`);
+
+      expect(out).toContain(`.center-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+}`);
+    });
   });
 
   describe("HTML & TSX Emmet Layout Emission", () => {

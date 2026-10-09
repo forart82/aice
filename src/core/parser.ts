@@ -2806,8 +2806,30 @@ export class Parser {
 
       const pSpan = this.current().span;
       const prop = this.parseCssPropertyName();
-      this.consume("COLON", "Expected ':' after CSS property name");
-      const val = this.parseCssPropertyValue();
+
+      const normalizedProp = prop
+        .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+        .replace(/_/g, "-")
+        .toLowerCase();
+      const isMacro =
+        normalizedProp === "fl-row" ||
+        normalizedProp === "fl-col" ||
+        normalizedProp === "fl-center";
+
+      let val = "";
+      if (this.check("COLON")) {
+        this.advance();
+        if (
+          !this.check("SEMICOLON") &&
+          !this.check("NEWLINE") &&
+          !this.check("DEDENT") &&
+          !this.check("EOF")
+        ) {
+          val = this.parseCssPropertyValue();
+        }
+      } else if (!isMacro) {
+        this.consume("COLON", "Expected ':' after CSS property name");
+      }
 
       properties.push({
         property: prop,
@@ -2879,6 +2901,7 @@ export class Parser {
     while (
       !this.check("COLON") &&
       !this.check("IN") &&
+      !this.check("LBRACKET") &&
       !this.check("EOF") &&
       (this.isIdentOrKeyword(this.current()) || this.check("DOT") || this.check("MINUS"))
     ) {
@@ -2892,11 +2915,33 @@ export class Parser {
     const nsRaw = nsTokens.map((t) => t.value).join("");
     const nsKebab = nsRaw.replace(/\./g, "-").replace(/_/g, "-").toLowerCase();
 
+    // Optional unit annotation on namespace: [unit] (e.g. [rem], [px])
+    let defaultUnit = "";
+    if (this.check("LBRACKET")) {
+      this.advance(); // consume '['
+      const unitTokens: Token[] = [];
+      while (!this.check("RBRACKET") && !this.check("EOF")) {
+        unitTokens.push(this.advance());
+      }
+      this.consume("RBRACKET", "Expected ']' after token unit annotation");
+      defaultUnit = unitTokens.map((t) => t.value).join("");
+    }
+
     // Optional: in <target>
     if (this.check("IN")) {
       this.advance(); // consume 'in'
       const targetName = this.parseStyleSelector();
       if (onTarget) onTarget(targetName);
+    }
+
+    if (!defaultUnit && this.check("LBRACKET")) {
+      this.advance(); // consume '['
+      const unitTokens: Token[] = [];
+      while (!this.check("RBRACKET") && !this.check("EOF")) {
+        unitTokens.push(this.advance());
+      }
+      this.consume("RBRACKET", "Expected ']' after token unit annotation");
+      defaultUnit = unitTokens.map((t) => t.value).join("");
     }
 
     this.consume("COLON", "Expected ':' after token namespace");
@@ -2911,15 +2956,19 @@ export class Parser {
       }
       this.consume("RBRACKET", "Expected ']' after token scale");
 
-      let unit = "";
+      let unit = defaultUnit;
       if (this.check("IDENT") || this.check("PERCENT")) {
         unit = this.advance().value;
       }
 
       for (const val of values) {
+        let finalVal = val;
+        if (unit && /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(val.trim())) {
+          finalVal = `${val.trim()}${unit}`;
+        }
         properties.push({
           property: `--${nsKebab}-${val}`,
-          value: `${val}${unit}`,
+          value: finalVal,
           span: startSpan,
         });
       }
@@ -2948,7 +2997,10 @@ export class Parser {
       const key = this.parseCssKebabIdent();
       this.consume("COLON", "Expected ':' after token key");
 
-      const val = this.parseTokenValue();
+      let val = this.parseTokenValue();
+      if (defaultUnit && /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(val.trim())) {
+        val = `${val.trim()}${defaultUnit}`;
+      }
 
       properties.push({
         property: `--${nsKebab}-${key}`,
@@ -3064,6 +3116,7 @@ export class Parser {
     const tokens: Token[] = [];
     while (
       !this.check("COLON") &&
+      !this.check("SEMICOLON") &&
       !this.check("NEWLINE") &&
       !this.check("DEDENT") &&
       !this.check("EOF")

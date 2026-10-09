@@ -139,6 +139,11 @@ export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
   gc: "grid-column",
   gr: "grid-row",
 
+  // Layout Macros (Step 23)
+  "fl-row": "display: flex; flex-direction: row",
+  "fl-col": "display: flex; flex-direction: column",
+  "fl-center": "display: flex; align-items: center; justify-content: center",
+
   // Overflow & Effects
   ov: "overflow",
   "ov-x": "overflow-x",
@@ -198,6 +203,22 @@ export function expandCssTokenValue(val: string): string {
   });
 }
 
+export const CSS_LAYOUT_MACROS: Readonly<Record<string, ReadonlyArray<[string, string]>>> = {
+  "fl-row": [
+    ["display", "flex"],
+    ["flex-direction", "row"],
+  ],
+  "fl-col": [
+    ["display", "flex"],
+    ["flex-direction", "column"],
+  ],
+  "fl-center": [
+    ["display", "flex"],
+    ["align-items", "center"],
+    ["justify-content", "center"],
+  ],
+};
+
 export function toCssProperty(prop: string): string {
   const kebab = prop
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
@@ -249,6 +270,19 @@ export class CssEmitter {
     this.ctx.indent();
 
     for (const prop of decl.properties) {
+      const normalizedProp = prop.property
+        .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+        .replace(/_/g, "-")
+        .toLowerCase();
+
+      const macro = CSS_LAYOUT_MACROS[normalizedProp];
+      if (macro) {
+        for (const [mProp, mVal] of macro) {
+          this.ctx.writeLine(`${mProp}: ${mVal};`);
+        }
+        continue;
+      }
+
       const cssProp = toCssProperty(prop.property);
       const cssVal = expandCssTokenValue(prop.value);
       this.ctx.writeLine(`${cssProp}: ${cssVal};`);

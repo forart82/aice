@@ -1,9 +1,9 @@
 import "./design_system_tokens.css"
 
-style app_shell: disp: flex; fld: column; min-h: 100vh; bg: $slate-950; c: $slate-100; ov-x: hidden
-style top_navbar: disp: flex; fld: row; ai: center; jc: space-between; h: 4.0rem; p: 0 1.5rem; bg: $slate-900; bb: 1px solid $slate-800; pos: sticky; t: 0; z: $z-nav; sh: $shadow-sm
-style navbar_brand_section: disp: flex; fld: row; ai: center; gap: 0.75rem
-style brand_logo_wrapper: disp: flex; fld: row; ai: center; gap: 0.5rem; cur: pointer
+style app_shell: fl-col; min-h: 100vh; bg: $slate-950; c: $slate-100; ov-x: hidden
+style top_navbar: fl-row; ai: center; jc: space-between; h: 4.0rem; p: 0 1.5rem; bg: $slate-900; bb: 1px solid $slate-800; pos: sticky; t: 0; z: $z-nav; sh: $shadow-sm
+style navbar_brand_section: fl-row; ai: center; gap: 0.75rem
+style brand_logo_wrapper: fl-row; ai: center; gap: 0.5rem; cur: pointer
 style brand_icon: fz: 1.25rem; lh: 1
 style brand_name: fz: 1.125rem; fw: 700; ls: -0.025em; c: $slate-50
 style badge_env_prod: bg: rgba(16, 185, 129, 0.15); c: $emerald-400; b: 1px solid rgba(16, 185, 129, 0.3); fz: 0.6875rem; fw: 700; p: 0.15rem 0.5rem; rad: $radius-full; ls: 0.05em
@@ -13,53 +13,53 @@ style search_input_wrapper: pos: relative; disp: flex; ai: center; w: 100%
 style search_icon: pos: absolute; l: 0.75rem; fz: 0.875rem; c: $slate-400; pe: none
 style search_input: w: 100%; p: 0.5rem 2.5rem 0.5rem 2.25rem; bg: $slate-950; b: 1px solid $slate-700; rad: $radius-md; c: $slate-100; fz: 0.875rem; out: none; trans: $transition-fast
 style shortcut_hint: pos: absolute; r: 0.75rem; f: $font-mono; fz: 0.6875rem; bg: $slate-800; b: 1px solid $slate-700; c: $slate-400; p: 0.1rem 0.35rem; rad: $radius-xs; pe: none
-style navbar_actions_section: disp: flex; fld: row; ai: center; gap: 0.75rem
+style navbar_actions_section: fl-row; ai: center; gap: 0.75rem
 style notification_bell: pos: relative
-style notification_count_badge: pos: absolute; t: -2px; r: -2px; bg: $rose-500; c: white; fz: 0.625rem; fw: 700; w: 16px; h: 16px; rad: $radius-full; disp: flex; ai: center; jc: center
-style cluster_selector_dropdown: disp: flex; fld: row; ai: center; gap: 0.5rem; bg: $slate-800; b: 1px solid $slate-700; p: 0.4rem 0.75rem; rad: $radius-md; fz: 0.75rem; cur: pointer; trans: $transition-fast
+style notification_count_badge: pos: absolute; t: -2px; r: -2px; bg: $rose-500; c: white; fz: 0.625rem; fw: 700; w: 16px; h: 16px; rad: $radius-full; fl-center
+style cluster_selector_dropdown: fl-row; ai: center; gap: 0.5rem; bg: $slate-800; b: 1px solid $slate-700; p: 0.4rem 0.75rem; rad: $radius-md; fz: 0.75rem; cur: pointer; trans: $transition-fast
 style cluster_status_dot: fz: 0.5rem; c: $emerald-400
 style cluster_label: f: $font-mono; c: $slate-200
 style dropdown_chevron: fz: 0.75rem; c: $slate-400
-style user_profile_widget: disp: flex; fld: row; ai: center; gap: 0.625rem; pl: 0.5rem; cur: pointer
-style avatar_circle: w: 32px; h: 32px; rad: $radius-full; background: linear-gradient(135deg, $indigo-500, $purple-500); c: white; fw: 700; fz: 0.75rem; disp: flex; ai: center; jc: center; sh: $shadow-sm
-style user_meta: disp: flex; fld: column
+style user_profile_widget: fl-row; ai: center; gap: 0.625rem; pl: 0.5rem; cur: pointer
+style avatar_circle: w: 32px; h: 32px; rad: $radius-full; background: linear-gradient(135deg, $indigo-500, $purple-500); c: white; fw: 700; fz: 0.75rem; fl-center; sh: $shadow-sm
+style user_meta: fl-col
 style user_display_name: fz: 0.75rem; fw: 600; c: $slate-100
 style tenant_badge: fz: 0.6875rem; c: $slate-400
 style layout_workspace: disp: flex; fl: 1 1 0%; min-h: calc(100vh - 4.0rem)
-style navigation_sidebar: w: 16.0rem; fls: 0; bg: $slate-900; br: 1px solid $slate-800; disp: flex; fld: column; jc: space-between; p: 1.25rem 0.75rem
+style navigation_sidebar: w: 16.0rem; fls: 0; bg: $slate-900; br: 1px solid $slate-800; fl-col; jc: space-between; p: 1.25rem 0.75rem
 style sidebar_section: mb: 1.5rem
 style section_heading: fz: 0.6875rem; fw: 700; ls: 0.08em; c: $slate-500; p: 0 0.75rem 0.5rem; disp: block
 style nav_menu: lst: none; m: 0; p: 0
-style nav_item: disp: flex; fld: row; ai: center; gap: 0.75rem; p: 0.55rem 0.75rem; rad: $radius-md; c: $slate-400; fz: 0.8125rem; fw: 500; cur: pointer; trans: $transition-fast
+style nav_item: fl-row; ai: center; gap: 0.75rem; p: 0.55rem 0.75rem; rad: $radius-md; c: $slate-400; fz: 0.8125rem; fw: 500; cur: pointer; trans: $transition-fast
 style nav_item_hover: bg: $slate-800; c: $slate-200
 style nav_item_active: bg: rgba(99, 102, 241, 0.15); c: $indigo-400; fw: 600; bl: 3px solid $indigo-500
 style nav_icon: fz: 0.9375rem; lh: 1
 style nav_label: fl: 1 1 0%
 style pill_badge_alert: bg: $rose-500; c: white; fz: 0.625rem; fw: 700; p: 0.1rem 0.45rem; rad: $radius-full
 style sidebar_footer: pt: 1.0rem; bt: 1px solid $slate-800
-style system_status_indicator: disp: flex; fld: row; ai: center; gap: 0.5rem; fz: 0.75rem; c: $slate-300; mb: 0.35rem
+style system_status_indicator: fl-row; ai: center; gap: 0.5rem; fz: 0.75rem; c: $slate-300; mb: 0.35rem
 style status_pulse_dot: c: $emerald-400; anim: pulse 2s infinite
 style agent_version: f: $font-mono; fz: 0.6875rem; c: $slate-500
 style main_content_viewport: fl: 1 1 0%; p: 1.75rem 2.0rem 4.0rem; ov-y: auto; bg: $slate-950
-style page_header_row: disp: flex; fld: row; ai: flex-start; jc: space-between; mb: 1.5rem
+style page_header_row: fl-row; ai: flex-start; jc: space-between; mb: 1.5rem
 style header_title_block: max-w: 48.0rem
 style page_heading: fz: 1.75rem; fw: 700; c: $slate-50; m: 0 0 0.35rem 0
 style page_subheading: fz: 0.875rem; c: $slate-400; m: 0
-style header_action_group: disp: flex; fld: row; gap: 0.75rem
+style header_action_group: fl-row; gap: 0.75rem
 style btn_primary: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-sm
 style btn_primary_hover: bg: $indigo-400
 style btn_secondary: bg: $slate-800; c: $slate-200; b: 1px solid $slate-700
 style btn_danger: bg: rgba(244, 63, 94, 0.15); c: $rose-400; b: 1px solid rgba(244, 63, 94, 0.4)
 style kpi_grid_container: disp: grid; gtc: repeat(4, 1fr); gap: 1.25rem; mb: 1.75rem
-style kpi_card: bg: $slate-900; b: 1px solid $slate-800; rad: $radius-lg; p: 1.25rem; disp: flex; fld: column; gap: 0.75rem; sh: $shadow-sm
-style kpi_top_row: disp: flex; fld: row; jc: space-between; ai: center
+style kpi_card: bg: $slate-900; b: 1px solid $slate-800; rad: $radius-lg; p: 1.25rem; fl-col; gap: 0.75rem; sh: $shadow-sm
+style kpi_top_row: fl-row; jc: space-between; ai: center
 style kpi_title: fz: 0.6875rem; fw: 700; ls: 0.06em; c: $slate-400
 style kpi_badge: fz: 0.6875rem; fw: 700; p: 0.15rem 0.45rem; rad: $radius-sm
 style badge_trend_up: bg: rgba(16, 185, 129, 0.15); c: $emerald-400
 style badge_trend_down: bg: rgba(59, 130, 246, 0.15); c: $indigo-400
 style badge_trend_stable: bg: rgba(100, 116, 139, 0.2); c: $slate-300
 style badge_nodes: bg: rgba(168, 85, 247, 0.15); c: $purple-400
-style kpi_value_row: disp: flex; fld: row; ai: baseline; gap: 0.5rem
+style kpi_value_row: fl-row; ai: baseline; gap: 0.5rem
 style kpi_metric_number: fz: 1.875rem; fw: 700; c: $slate-50; f: $font-mono
 style kpi_metric_unit: fz: 0.75rem; c: $slate-400
 style kpi_progress_bar_track: w: 100%; h: 6px; bg: $slate-800; rad: $radius-full; ov: hidden
@@ -67,25 +67,25 @@ style kpi_progress_fill: h: 100%; background: linear-gradient(90deg, $indigo-500
 style progress_fill_emerald: background: linear-gradient(90deg, $emerald-500, $emerald-400)
 style progress_fill_blue: background: linear-gradient(90deg, #3b82f6, #60a5fa)
 style progress_fill_purple: background: linear-gradient(90deg, $purple-500, $purple-400)
-style kpi_bottom_legend: disp: flex; fld: row; jc: space-between; ai: center; fz: 0.75rem
+style kpi_bottom_legend: fl-row; jc: space-between; ai: center; fz: 0.75rem
 style kpi_subtitle: c: $slate-500
 style kpi_status_ok: c: $emerald-400; fw: 600
-style toolbar_filter_section: disp: flex; fld: row; ai: center; jc: space-between; bg: $slate-900; b: 1px solid $slate-800; rad: $radius-md; p: 0.75rem 1.0rem; mb: 1.5rem
-style filter_control_group: disp: flex; fld: row; ai: center; gap: 0.5rem
+style toolbar_filter_section: fl-row; ai: center; jc: space-between; bg: $slate-900; b: 1px solid $slate-800; rad: $radius-md; p: 0.75rem 1.0rem; mb: 1.5rem
+style filter_control_group: fl-row; ai: center; gap: 0.5rem
 style filter_label: fz: 0.75rem; fw: 600; c: $slate-400
 style filter_select: bg: $slate-950; b: 1px solid $slate-700; c: $slate-200; fz: 0.8125rem; p: 0.35rem 0.75rem; rad: $radius-sm
-style button_toggle_group: disp: flex; fld: row; bg: $slate-950; b: 1px solid $slate-700; rad: $radius-sm; p: 2px
+style button_toggle_group: fl-row; bg: $slate-950; b: 1px solid $slate-700; rad: $radius-sm; p: 2px
 style btn_toggle: background: transparent; b: none; c: $slate-400; fz: 0.75rem; fw: 500; p: 0.25rem 0.6rem; rad: $radius-xs; cur: pointer
 style btn_toggle_active: bg: $indigo-500; c: white; fw: 600
 style data_table_container: bg: $slate-900; b: 1px solid $slate-800; rad: $radius-lg; ov: hidden; mb: 1.75rem; sh: $shadow-sm
-style table_header_bar: disp: flex; fld: row; jc: space-between; ai: center; p: 1.0rem 1.25rem; bb: 1px solid $slate-800
-style table_title_area: disp: flex; fld: column
+style table_header_bar: fl-row; jc: space-between; ai: center; p: 1.0rem 1.25rem; bb: 1px solid $slate-800
+style table_title_area: fl-col
 style table_title: fz: 1.0625rem; fw: 600; c: $slate-100; m: 0 0 0.2rem 0
 style table_subtitle: fz: 0.75rem; c: $slate-400
 style table_quick_search: bg: $slate-950; b: 1px solid $slate-700; rad: $radius-md; c: $slate-200; fz: 0.8125rem; p: 0.4rem 0.75rem; w: 14.0rem
 style table_responsive_wrapper: ov-x: auto
 style enterprise_table: w: 100%; bcp: collapse; fz: 0.8125rem
-style col_service_name: disp: flex; fld: column; gap: 0.15rem
+style col_service_name: fl-col; gap: 0.15rem
 style service_name_text: fw: 600; c: $slate-100
 style service_type_tag: f: $font-mono; fz: 0.6875rem; c: $slate-500
 style badge_tier_0: bg: rgba(244, 63, 94, 0.15); c: $rose-400; b: 1px solid rgba(244, 63, 94, 0.3)
@@ -96,11 +96,11 @@ style status_healthy: bg: rgba(16, 185, 129, 0.15); c: $emerald-400; b: 1px soli
 style btn_table_action: bg: $slate-800; c: $slate-300; b: 1px solid $slate-700; p: 0.25rem 0.6rem; rad: $radius-sm; fz: 0.75rem; cur: pointer
 style dashboard_dual_split_section: disp: grid; gtc: 1fr 1fr; gap: 1.25rem; mb: 1.75rem
 style panel_box: bg: $slate-900; b: 1px solid $slate-800; rad: $radius-lg; p: 1.25rem; sh: $shadow-sm
-style panel_header: disp: flex; fld: row; jc: space-between; ai: center; mb: 1.0rem; pb: 0.75rem; bb: 1px solid $slate-800
-style panel_title_group: disp: flex; fld: row; ai: center; gap: 0.5rem
+style panel_header: fl-row; jc: space-between; ai: center; mb: 1.0rem; pb: 0.75rem; bb: 1px solid $slate-800
+style panel_title_group: fl-row; ai: center; gap: 0.5rem
 style panel_icon: fz: 1.125rem
 style panel_title: fz: 0.9375rem; fw: 600; c: $slate-100; m: 0
-style anomaly_list: lst: none; m: 0; p: 0; disp: flex; fld: column; gap: 0.75rem
+style anomaly_list: lst: none; m: 0; p: 0; fl-col; gap: 0.75rem
 style anomaly_item: bg: $slate-950; b: 1px solid $slate-800; rad: $radius-md; p: 0.75rem 1.0rem
 style anomaly_meta: disp: flex; jc: space-between; ai: center; mb: 0.35rem
 style anomaly_time: f: $font-mono; fz: 0.6875rem; c: $slate-500
@@ -108,7 +108,7 @@ style anomaly_desc: fz: 0.8125rem; c: $slate-300; m: 0 0 0.5rem 0
 style anomaly_footer: disp: flex; jc: space-between; ai: center
 style trace_link: f: $font-mono; fz: 0.6875rem; c: $indigo-400; cur: pointer
 style btn_ack: background: transparent; b: 1px solid $slate-700; c: $slate-300; p: 0.2rem 0.5rem; rad: $radius-xs; fz: 0.6875rem; cur: pointer
-style incident_card_container: disp: flex; fld: column; gap: 0.75rem
+style incident_card_container: fl-col; gap: 0.75rem
 style incident_card: bg: $slate-950; b: 1px solid $slate-800; rad: $radius-md; p: 1.0rem
 style incident_card_top: disp: flex; ai: center; gap: 0.5rem; mb: 0.5rem
 style badge_sev_p3: bg: rgba(245, 158, 11, 0.15); c: $amber-400; fw: 700; fz: 0.6875rem; p: 0.15rem 0.45rem; rad: $radius-xs
@@ -117,7 +117,7 @@ style incident_duration: fz: 0.6875rem; c: $slate-500
 style incident_card_heading: fz: 0.875rem; fw: 600; c: $slate-100; m: 0 0 0.35rem 0
 style incident_card_body: fz: 0.8125rem; c: $slate-400; m: 0 0 0.75rem 0
 style incident_assignee: disp: flex; ai: center; gap: 0.5rem; mb: 0.75rem
-style assignee_avatar: w: 20px; h: 20px; rad: $radius-full; bg: $slate-700; c: $slate-200; fz: 0.625rem; fw: 700; disp: flex; ai: center; jc: center
+style assignee_avatar: w: 20px; h: 20px; rad: $radius-full; bg: $slate-700; c: $slate-200; fz: 0.625rem; fw: 700; fl-center
 style assignee_name: fz: 0.75rem; c: $slate-300
 style incident_action_row: disp: flex; gap: 0.5rem
 style partition_checkpoint_section: mb: 1.75rem
@@ -125,17 +125,17 @@ style checkpoint_badge: fz: 0.75rem; c: $indigo-400
 style partition_table_wrapper: ov-x: auto
 style partition_table: w: 100%; bcp: collapse; fz: 0.8125rem
 style tag_online: c: $emerald-400; fw: 700; fz: 0.6875rem
-style app_footer: disp: flex; fld: row; jc: space-between; ai: center; p: 1.5rem 2.0rem; bg: $slate-900; bt: 1px solid $slate-800; fz: 0.75rem; c: $slate-500
+style app_footer: fl-row; jc: space-between; ai: center; p: 1.5rem 2.0rem; bg: $slate-900; bt: 1px solid $slate-800; fz: 0.75rem; c: $slate-500
 style footer_left: disp: flex; ai: center; gap: 0.75rem
 style footer_divider: c: $slate-700
 style footer_right: disp: flex; ai: center; gap: 1.0rem; f: $font-mono
-style modal_backdrop: pos: fixed; t: 0; l: 0; w: 100vw; h: 100vh; bg: rgba(2, 6, 23, 0.75); bdf: blur(6px); disp: flex; ai: center; jc: center; z: $z-modal
+style modal_backdrop: pos: fixed; t: 0; l: 0; w: 100vw; h: 100vh; bg: rgba(2, 6, 23, 0.75); bdf: blur(6px); fl-center; z: $z-modal
 style modal_dialog: bg: $slate-900; b: 1px solid $slate-800; rad: $radius-xl; w: 100%; max-w: 32.0rem; sh: $shadow-xl
 style modal_header: disp: flex; jc: space-between; ai: center; p: 1.25rem 1.5rem; bb: 1px solid $slate-800
 style modal_title: fz: 1.0625rem; fw: 600; c: $slate-100; m: 0
 style modal_close_btn: background: transparent; b: none; c: $slate-400; fz: 1.125rem; cur: pointer
-style modal_body: p: 1.5rem; disp: flex; fld: column; gap: 1.0rem
-style form_group: disp: flex; fld: column; gap: 0.35rem
+style modal_body: p: 1.5rem; fl-col; gap: 1.0rem
+style form_group: fl-col; gap: 0.35rem
 style form_label: fz: 0.75rem; fw: 600; c: $slate-300
 style form_input: bg: $slate-950; b: 1px solid $slate-700; rad: $radius-md; p: 0.55rem 0.75rem; c: $slate-100; fz: 0.875rem
 style form_select: bg: $slate-950; b: 1px solid $slate-700; rad: $radius-md; p: 0.55rem 0.75rem; c: $slate-100; fz: 0.875rem

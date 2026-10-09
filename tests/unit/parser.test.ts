@@ -951,6 +951,61 @@ pub w: str ::= "mut_typed"`;
     });
   });
 
+  describe("Step 23: CSS Multi-Value Packs & Unit Deduplication", () => {
+    it("parses token sheets with unit annotation and auto-appends default unit to numeric values", () => {
+      const src = `style root_variables:
+  tokens spacing[rem]:
+    0: 0px, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1.0
+  tokens radius[px]: xs: 2, sm: 4, full: 9999px`;
+      const mod = parse(src, "tokens.css.ail");
+      const style = mod.items[0] as StyleDecl;
+      expect(style.kind).toBe("StyleDecl");
+      expect(style.properties).toHaveLength(8);
+
+      expect(style.properties[0]).toMatchObject({ property: "--spacing-0", value: "0px" });
+      expect(style.properties[1]).toMatchObject({ property: "--spacing-1", value: "0.25rem" });
+      expect(style.properties[2]).toMatchObject({ property: "--spacing-2", value: "0.5rem" });
+      expect(style.properties[3]).toMatchObject({ property: "--spacing-3", value: "0.75rem" });
+      expect(style.properties[4]).toMatchObject({ property: "--spacing-4", value: "1.0rem" });
+
+      expect(style.properties[5]).toMatchObject({ property: "--radius-xs", value: "2px" });
+      expect(style.properties[6]).toMatchObject({ property: "--radius-sm", value: "4px" });
+      expect(style.properties[7]).toMatchObject({ property: "--radius-full", value: "9999px" });
+    });
+
+    it("parses top-level single-line tokens with unit annotation: tokens spacing[rem]: 1: 0.25, 2: 0.5", () => {
+      const src = `tokens spacing[rem]: 1: 0.25, 2: 0.5`;
+      const mod = parse(src, "tokens.css.ail");
+      const style = mod.items[0] as StyleDecl;
+      expect(style.name).toBe(":root");
+      expect(style.properties).toHaveLength(2);
+      expect(style.properties[0]).toMatchObject({ property: "--spacing-1", value: "0.25rem" });
+      expect(style.properties[1]).toMatchObject({ property: "--spacing-2", value: "0.5rem" });
+    });
+
+    it("parses layout macro properties (fl-row, fl-col, fl-center) with or without semicolons", () => {
+      const src = `style box: fl-row; gap: 1rem
+style col: fl-col
+style center: fl-center; p: 1rem`;
+      const mod = parse(src, "layout.css.ail");
+      expect(mod.items).toHaveLength(3);
+
+      const box = mod.items[0] as StyleDecl;
+      expect(box.properties).toHaveLength(2);
+      expect(box.properties[0]).toMatchObject({ property: "fl-row", value: "" });
+      expect(box.properties[1]).toMatchObject({ property: "gap", value: "1rem" });
+
+      const col = mod.items[1] as StyleDecl;
+      expect(col.properties).toHaveLength(1);
+      expect(col.properties[0]).toMatchObject({ property: "fl-col", value: "" });
+
+      const center = mod.items[2] as StyleDecl;
+      expect(center.properties).toHaveLength(2);
+      expect(center.properties[0]).toMatchObject({ property: "fl-center", value: "" });
+      expect(center.properties[1]).toMatchObject({ property: "p", value: "1rem" });
+    });
+  });
+
   describe("Error Handling", () => {
     it("throws ParserError on unexpected tokens with exact span", () => {
       const src = `fn incomplete(`;
