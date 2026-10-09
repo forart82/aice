@@ -307,7 +307,7 @@ export class TypeChecker {
 
     if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       const type = item.typeAnnotation ? this.resolveTypeExpr(item.typeAnnotation, env) : TYPE_UNKNOWN;
-      env.define(item.name, type);
+      env.define(item.name, type, item.kind === "VarDecl" ? item.isMut : false);
     }
   }
 
@@ -408,7 +408,19 @@ export class TypeChecker {
         }
       }
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
-      this.checkExpr(item.value, env);
+      const valType = this.checkExpr(item.value, env);
+      if (item.typeAnnotation) {
+        const declType = this.resolveTypeExpr(item.typeAnnotation, env);
+        if (!isAssignable(declType, valType)) {
+          throw new TypeCheckError(
+            `Cannot assign value of type '${formatType(valType)}' to variable '${item.name}' of type '${formatType(declType)}'`,
+            item.span,
+            "AIL_E2002_TYPE_MISMATCH",
+            declType,
+            valType,
+          );
+        }
+      }
     }
   }
 

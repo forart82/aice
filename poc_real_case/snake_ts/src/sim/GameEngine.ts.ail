@@ -174,8 +174,8 @@ pub class GameEngine:
       ArenaW = fxOrOptions
     if typeof(options) == "number":
       ArenaH = options
-    let mut opts:Option[GameEngineOptions] = options != nil and typeof(options) == "object" and options or undefined
-    let isOptionsObject = fxOrOptions != nil and typeof(fxOrOptions) == "object" and "isolated" == fxOrOptions or "services" == fxOrOptions or "meta" == fxOrOptions or "headless" == fxOrOptions or "fx" == fxOrOptions or "sound" == fxOrOptions or "input" == fxOrOptions or "saveIO" == fxOrOptions or "rng" == fxOrOptions
+    opts:Option[GameEngineOptions] ::= options != nil and typeof(options) == "object" and options or undefined
+    isOptionsObject := fxOrOptions != nil and typeof(fxOrOptions) == "object" and "isolated" == fxOrOptions or "services" == fxOrOptions or "meta" == fxOrOptions or "headless" == fxOrOptions or "fx" == fxOrOptions or "sound" == fxOrOptions or "input" == fxOrOptions or "saveIO" == fxOrOptions or "rng" == fxOrOptions
     if isOptionsObject != nil:
       opts = fxOrOptions
     if opts?.isolated or opts?.services or opts?.meta or opts?.headless:
@@ -196,7 +196,7 @@ pub class GameEngine:
       _services = nil
       _meta = nil
       Services.registerEngineProvider(fn() = this)
-      let potentialFx = fxOrOptions
+      potentialFx := fxOrOptions
       if potentialFx != nil and not (potentialFx == ServiceContainer) and not isOptionsObject and typeof(potentialFx.burst) == "function":
         Services.Fx = potentialFx
     Combat.Engine = this
@@ -204,20 +204,20 @@ pub class GameEngine:
     Combat.Services = this.services
   get Cfg = GameData.Modes.Get(GameMode) ?? GameData.Modes.Get("rogue")
   fn SetupCanvas(cssWidth:int, cssHeight:int, dpr:int) :
-    let mut w = cssWidth
-    let mut h = cssHeight
+    w ::= cssWidth
+    h ::= cssHeight
     if not (w > 0) or not (h > 0):
       w = 960
       h = 640
     w = Math.max(240, w)
     h = Math.max(240, h)
-    let aspect = w / h
-    let mut arenaH = Math.sqrt(GameEngine.BaseArenaArea / aspect)
-    let mut arenaW = arenaH * aspect
+    aspect := w / h
+    arenaH ::= Math.sqrt(GameEngine.BaseArenaArea / aspect)
+    arenaW ::= arenaH * aspect
     arenaW = MathX.clamp(arenaW, 520, 1600)
     arenaH = MathX.clamp(arenaH, 420, 1400)
-    let oldW = ArenaW
-    let oldH = ArenaH
+    oldW := ArenaW
+    oldH := ArenaH
     ArenaW = MathX.roundJs(arenaW)
     ArenaH = MathX.roundJs(arenaH)
     CssWidth = w
@@ -231,8 +231,8 @@ pub class GameEngine:
   fn setupCanvas(cssWidth:int, cssHeight:int, dpr:int) :
     this.SetupCanvas(cssWidth, cssHeight, dpr)
   fn RescaleWorld(sx:int, sy:int) :
-    let hiX = ArenaW - 4
-    let hiY = ArenaH - 4
+    hiX := ArenaW - 4
+    hiY := ArenaH - 4
     if Player != nil:
       Player.X = MathX.clamp(Player.X * sx, 4, hiX)
       Player.Y = MathX.clamp(Player.Y * sy, 4, hiY)
@@ -412,15 +412,15 @@ pub class GameEngine:
     this.ClearTransientUi()
   fn StartRun(seed:int) :
     this.AbandonRun()
-    let cfg = this.Cfg
+    cfg := this.Cfg
     if seed != undefined:
       RunSeed = seed
       Rng.Shared.setSeed(seed)
     elif cfg.Seeded != nil:
-      let key = DailyKeyProvider != nil and DailyKeyProvider() or GameEngine.defaultDailyKey()
+      key := DailyKeyProvider != nil and DailyKeyProvider() or GameEngine.defaultDailyKey()
       RunSeed = Rng.hash("ouroboros-" + String(key))
       Rng.Shared.setSeed(RunSeed)
-    let meta = this.meta
+    meta := this.meta
     if meta != nil:
       if typeof(meta.ResetRunUnlocks) == "function":
         meta.ResetRunUnlocks()
@@ -505,7 +505,7 @@ pub class GameEngine:
   fn init() :
     this.StartRun()
   static fn defaultDailyKey() -> str:
-    let d = Date()
+    d := Date()
     "" + String(d.getUTCFullYear()) + "-" + String(d.getUTCMonth() + 1) + "-" + String(d.getUTCDate())
   get RunInProgress = RunActive != nil and Player != nil and Player != undefined
   get runInProgress = this.RunInProgress
@@ -513,10 +513,10 @@ pub class GameEngine:
     if not RunActive or not Player:
       ret 0
     RunActive = false
-    let meta = this.meta
+    meta := this.meta
     if not meta:
       ret 0
-    let banked = meta.AddShards(Combat.ShardsEarned)
+    banked := meta.AddShards(Combat.ShardsEarned)
     meta.CommitRun({ Score: Math.floor(Math), Floor: CurrentFloor, Combo: Combat.HighestRunCombo, Level: Player.Level, Kills: Combat.Kills, Foods: Combat.FoodsEaten, Bosses: Combat.BossKills, TimeSec: Combat.RunTime, Victory: victory })
     meta.Save()
     banked
@@ -524,13 +524,13 @@ pub class GameEngine:
   fn AbandonRun() :
     if not this.RunInProgress:
       ret
-    let banked = this.CommitRun(false)
+    banked := this.CommitRun(false)
     if banked > 0:
       this.Toast("Run abandoned — banked " + String(banked) + " ⭐")
   fn abandonRun() :
     this.AbandonRun()
   fn WarnIfStorageBroken() :
-    let meta = this.meta
+    meta := this.meta
     if not meta or not meta.StorageBroken or _storageWarned:
       ret
     _storageWarned = true
@@ -558,7 +558,7 @@ pub class GameEngine:
       if not drop.Dead:
         this.CollectHelmetDrop(drop)
     HelmetDrops.length = 0
-    let banked = this.CommitRun(victory)
+    banked := this.CommitRun(victory)
     OnRunSummary(victory, banked)
     OnShowScreen("modal-summary")
     this.WarnIfStorageBroken()
@@ -572,7 +572,7 @@ pub class GameEngine:
     State = GameState.LevelUp
     this.Sound.PlayLevelUp()
     this.Sound.SetPaused(true)
-    let meta = this.meta
+    meta := this.meta
     if meta != nil:
       CurrentDraftCards = meta.GetRandomCardDraft(3, Player)
     else:
@@ -607,7 +607,7 @@ pub class GameEngine:
       this.Sound.PlayError()
       ret
     RerollsRemaining -= 1
-    let meta = this.meta
+    meta := this.meta
     if meta != nil:
       CurrentDraftCards = meta.GetRandomCardDraft(3, Player)
     else:
@@ -626,16 +626,16 @@ pub class GameEngine:
   fn SelectUpgradeCard(card:CardDef) :
     if not card or not Player:
       ret
-    let cardId = card.Id or card.id
+    cardId := card.Id or card.id
     if not cardId:
       ret
     if CurrentDraftCards.length > 0:
-      let isOffered = CurrentDraftCards.some(fn(c:unknown) = c.Id or c.id == cardId)
+      isOffered := CurrentDraftCards.some(fn(c:unknown) = c.Id or c.id == cardId)
       if not isOffered:
         Services.Sound.PlayError()
         ret
-    let owned = Player.CardStacks[cardId] ?? 0
-    let max = card.MaxStacks or card.maxStacks ?? 1
+    owned := Player.CardStacks[cardId] ?? 0
+    max := card.MaxStacks or card.maxStacks ?? 1
     if owned >= max:
       Services.Sound.PlayError()
       ret
@@ -646,8 +646,8 @@ pub class GameEngine:
       card.apply(Player)
     ActivePerks.push(card)
     this.Sound.PlayEat(10, true)
-    let cardIcon = card.Icon or card.icon or "🧬"
-    let cardTitle = card.Title or card.title or card.Name or card.name or "Mutation"
+    cardIcon := card.Icon or card.icon or "🧬"
+    cardTitle := card.Title or card.title or card.Name or card.name or "Mutation"
     this.Fx.AddText(Player.X, Player.Y - 34, "" + String(cardIcon) + " " + String(cardTitle), "#00f0b5", 18, true)
     OnPerksChanged()
     this.ResumeFromDraft()
@@ -662,29 +662,29 @@ pub class GameEngine:
   fn resumeFromDraft() :
     this.ResumeFromDraft()
   fn RandomArenaPoint(margin:unknown = 0) -> Vec2:
-    let m = margin > 0 and margin or 50
-    let minX = Math.min(m, ArenaW * 0.5)
-    let maxX = Math.max(minX, ArenaW - minX)
-    let minY = Math.min(m, ArenaH * 0.5)
-    let maxY = Math.max(minY, ArenaH - minY)
+    m := margin > 0 and margin or 50
+    minX := Math.min(m, ArenaW * 0.5)
+    maxX := Math.max(minX, ArenaW - minX)
+    minY := Math.min(m, ArenaH * 0.5)
+    maxY := Math.max(minY, ArenaH - minY)
     Vec2(Rng.Shared.range(minX, maxX), Rng.Shared.range(minY, maxY))
   fn randomArenaPoint(margin:unknown = 0) -> Vec2 = this.RandomArenaPoint(margin)
   fn SpawnFood(type:Option[str] = nil) :
-    let mut p = Vec2(0, 0)
-    let mut chosen = type
+    p ::= Vec2(0, 0)
+    chosen ::= type
     if not chosen:
-      let player = Player
-      let isLowHp = player != nil and player.MaxHp > 0 and player.Hp / player.MaxHp < 0.35
+      player := Player
+      isLowHp := player != nil and player.MaxHp > 0 and player.Hp / player.MaxHp < 0.35
       if isLowHp != nil:
         if RecoveryPityCounter >= 7:
-          let rPity = Rng.Shared.rand()
+          rPity := Rng.Shared.rand()
           if rPity < 0.22 / 0.34:
             chosen = "potion"
           else:
             chosen = "shield"
           RecoveryPityCounter = 0
         else:
-          let r = Rng.Shared.rand()
+          r := Rng.Shared.rand()
           if r < 0.22:
             chosen = "potion"
             RecoveryPityCounter = 0
@@ -693,7 +693,7 @@ pub class GameEngine:
             RecoveryPityCounter = 0
       else:
         RecoveryPityCounter = 0
-        let r = Rng.Shared.rand()
+        r := Rng.Shared.rand()
         if r < 0.6:
           chosen = "apple"
         elif r < 0.75:
@@ -702,13 +702,13 @@ pub class GameEngine:
   fn spawnFood(type:Option[str] = nil) :
     this.SpawnFood(type)
   fn SpawnEnemy(type:Option[str] = nil) :
-    let margin = 26
-    let mut x = 0
-    let mut y = 0
-    let mut chosen = type
+    margin := 26
+    x ::= 0
+    y ::= 0
+    chosen ::= type
     if not chosen:
       _eligibleEnemies.length = 0
-      let keys = GameData.Enemies.Keys
+      keys := GameData.Enemies.Keys
       chosen = Rng.Shared.pick(_eligibleEnemies) ?? "scarab"
     Enemies.push(Enemy(x, y, chosen, CurrentFloor))
   fn spawnEnemy(type:Option[str] = nil) :
@@ -716,12 +716,12 @@ pub class GameEngine:
   fn EnemyBudget() -> int = Math.min(24, 3 + MathX.roundJs(CurrentFloor * 2.5))
   fn enemyBudget() -> int = this.EnemyBudget()
   fn SpawnBoss(specificType:str | unknown, count:int) :
-    let mut spawnCount = 1
+    spawnCount ::= 1
     if count != undefined:
       spawnCount = Math.max(1, count)
     elif Array.isArray(specificType):
       spawnCount = Math.max(1, specificType.length)
-    let multiBossScale = spawnCount > 1 and 0.75 or 1
+    multiBossScale := spawnCount > 1 and 0.75 or 1
     ActiveBosses.length = 0
     this.Sound.PlayBossAlert()
     this.Sound.SetBossMode(true)
@@ -737,42 +737,42 @@ pub class GameEngine:
   fn spawnBoss(specificType:str | unknown, count:int) :
     this.SpawnBoss(specificType, count)
   fn OnBossDefeated(defeatedBoss:Option[Boss]) :
-    let boss = defeatedBoss or this.Boss
+    boss := defeatedBoss or this.Boss
     if not boss:
       ret
     Combat.BossKills = Combat.BossKills + 1
     Combat.Score = Combat.Score + 2500 * CurrentFloor
     if not Combat.DefeatedBossTypes:
       Combat.DefeatedBossTypes = []
-    let bossType = boss.Type or boss.type or "centipede"
+    bossType := boss.Type or boss.type or "centipede"
     Combat.DefeatedBossTypes.push(bossType)
     if not Combat.BossKillsByType:
       Combat.BossKillsByType = {  }
     Combat.BossKillsByType[bossType] = Combat.BossKillsByType[bossType] or 0 + 1
     if Player != nil:
-      let relics = Player.Relics or Player.relics or {  }
-      let bossOuro = boss.XpValue ?? GameData.BossDefeatOuro * 1 + 0.6 * relics["soulHarvest"] or 0
+      relics := Player.Relics or Player.relics or {  }
+      bossOuro := boss.XpValue ?? GameData.BossDefeatOuro * 1 + 0.6 * relics["soulHarvest"] or 0
       Player.GainOuro(bossOuro)
     this.Sound.PlayExplosion(1.6)
     this.Fx.RingShockwave(boss.X, boss.Y, "#ffd166", 140, 0.01)
     this.Fx.Burst(boss.X, boss.Y, "#ffb703", 46, 9, 6)
     this.Fx.Flash("#ffd166", 0.35, 0.45)
     this.Fx.Shake(18, 24)
-    let helmet = generateBossHelmet(CurrentFloor, bossType)
-    let drop = HelmetDrop(boss.X, boss.Y, helmet)
+    helmet := generateBossHelmet(CurrentFloor, bossType)
+    drop := HelmetDrop(boss.X, boss.Y, helmet)
     HelmetDrops.push(drop)
-    let rName = helmet.Rarity or helmet.rarity or "common".toUpperCase()
-    let hIcon = helmet.Icon or helmet.icon or "🪖"
-    let hName = helmet.Name or helmet.name or "Helmet"
-    let statSummary = formatHelmetStatDescription(helmet.Stats or helmet.stats or {  })
+    rName := helmet.Rarity or helmet.rarity or "common".toUpperCase()
+    hIcon := helmet.Icon or helmet.icon or "🪖"
+    hName := helmet.Name or helmet.name or "Helmet"
+    statSummary := formatHelmetStatDescription(helmet.Stats or helmet.stats or {  })
     this.Banner("🏆 " + String(hIcon) + " " + String(hName) + " [" + String(rName) + "] DROPPED! (" + String(statSummary) + ")", 3.5)
-    let idx = ActiveBosses.indexOf(boss)
+    idx := ActiveBosses.indexOf(boss)
     if idx >= 0:
       ActiveBosses.splice(idx, 1)
     else:
       ActiveBosses = ActiveBosses.filter(fn(b:unknown) = not b.Dead and b != boss)
     if ActiveBosses.length > 0:
-      let nextBoss = ActiveBosses[0]
+      nextBoss := ActiveBosses[0]
       OnBossBox(true, nextBoss.Name)
       ret
     if Gauntlet != nil and Gauntlet.Active:
@@ -799,10 +799,10 @@ pub class GameEngine:
     this.Fx.RingShockwave(drop.X, drop.Y, drop.Color, 90, 0.02)
     this.Fx.Burst(drop.X, drop.Y, drop.Color, 32, 7.5, 5)
     this.Fx.AddText(drop.X, drop.Y - 26, "🪖 LOOTED: " + String(drop.Helmet.Name) + "!", drop.Color, 16, true)
-    let rName = drop.Helmet.Rarity or drop.Helmet.rarity or "common".toUpperCase()
-    let hIcon = drop.Helmet.Icon or drop.Helmet.icon or "🪖"
-    let hName = drop.Helmet.Name or drop.Helmet.name or "Helmet"
-    let statSummary = formatHelmetStatDescription(drop.Helmet.Stats or drop.Helmet.stats or {  })
+    rName := drop.Helmet.Rarity or drop.Helmet.rarity or "common".toUpperCase()
+    hIcon := drop.Helmet.Icon or drop.Helmet.icon or "🪖"
+    hName := drop.Helmet.Name or drop.Helmet.name or "Helmet"
+    statSummary := formatHelmetStatDescription(drop.Helmet.Stats or drop.Helmet.stats or {  })
     this.Banner("🏆 " + String(hIcon) + " " + String(hName) + " [" + String(rName) + "] LOOTED! (" + String(statSummary) + ")", 3.5)
   fn collectHelmetDrop(drop:HelmetDrop) :
     this.CollectHelmetDrop(drop)
@@ -813,7 +813,7 @@ pub class GameEngine:
     HelmetDrops.length = 0
     CurrentFloor += 1
     FloorFoodProgress = 0
-    let cfg = this.Cfg
+    cfg := this.Cfg
     FoodTarget = GameEngine.CalculateFoodTarget(CurrentFloor, cfg.BossRush)
     RecoveryPityCounter = 0
     Enemies.length = 0
@@ -824,18 +824,18 @@ pub class GameEngine:
       Player.DashTimer = 0
       Player.DashHitIds.clear()
       Player.AgilitySurgeTimer = 0
-      let healed = Player.Heal(Player.Stats.MaxHp * 0.5)
+      healed := Player.Heal(Player.Stats.MaxHp * 0.5)
       if healed > 0:
         this.Fx.AddText(Player.X, Player.Y - 30, "+" + String(MathX.roundJs(healed)) + " HP", "#10b981", 16, true)
       Player.Shield = Player.Stats.MaxShield
     State = GameState.Playing
     WaveTimer = 2.5
     if GameMode == "daily":
-      let meta = this.meta
+      meta := this.meta
       if meta != nil and meta.IsDailyCapacityActive():
-        let mult = meta.EscalateDailyCapacityFloor(CurrentFloor)
-        let powerPercent = Math.round(Math)
-        let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+        mult := meta.EscalateDailyCapacityFloor(CurrentFloor)
+        powerPercent := Math.round(Math)
+        capName := meta.DailyCapacityState?.name or "Cosmic Transcendence"
         this.Banner("⚡ " + String(capName) + " ESCALATED TO FLOOR " + String(CurrentFloor) + " (+" + String(powerPercent) + "% Power)!", 2.8)
         this.Sound.PlayLevelUp()
       else:
@@ -851,28 +851,28 @@ pub class GameEngine:
   fn nextFloor() :
     this.AdvanceFloor()
   fn GetTodaySpecialCapacity() -> Partial[DailyCapacityState]:
-    let key = DailyKeyProvider != nil and DailyKeyProvider() or GameEngine.defaultDailyKey()
-    let rolled = CosmicCapacities.rollDailyCapacity(key, CurrentFloor)
+    key := DailyKeyProvider != nil and DailyKeyProvider() or GameEngine.defaultDailyKey()
+    rolled := CosmicCapacities.rollDailyCapacity(key, CurrentFloor)
     { id: rolled.Def.Id, name: rolled.Def.Name, icon: rolled.Def.Icon, desc: rolled.Def.Description, stateValues: {  }, rolledTiers: {  }, Id: rolled.Def.Id, Name: rolled.Def.Name, Icon: rolled.Def.Icon, Desc: rolled.Def.Description, StateValues: {  }, RolledTiers: {  } }
   fn getTodaySpecialCapacity() -> Partial[DailyCapacityState] = this.GetTodaySpecialCapacity()
   fn CheckDailyMilestones() -> bool:
     if GameMode != "daily" or not Player:
       ret false
-    let level = Player.Level
+    level := Player.Level
     if level < 5:
       ret false
-    let meta = this.meta
+    meta := this.meta
     if not meta:
       ret false
-    let mut triggered = false
+    triggered ::= false
     if level >= 5 and DailyMilestoneReached < 5:
       DailyMilestoneReached = 5
       if not meta.IsDailyCapacityActive():
-        let template = this.GetTodaySpecialCapacity()
+        template := this.GetTodaySpecialCapacity()
         meta.UnlockDailySpecialCapacity(template)
       meta.UpdateDailyMilestone(1, 5, 0)
       meta.EscalateDailyCapacityFloor(CurrentFloor)
-      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      capName := meta.DailyCapacityState?.name or "Cosmic Transcendence"
       this.Banner("✨ COSMIC TRANSCENDENCE UNLOCKED: " + String(capName.toUpperCase()) + " (Tier 1 — Active for 24h)!", 4)
       this.Sound.PlayLevelUp()
       if Player != nil:
@@ -883,7 +883,7 @@ pub class GameEngine:
     if level >= 10 and DailyMilestoneReached < 10:
       DailyMilestoneReached = 10
       meta.UpdateDailyMilestone(2, 10, 0.5)
-      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      capName := meta.DailyCapacityState?.name or "Cosmic Transcendence"
       this.Banner("⚡ MILESTONE ASCENSION: TIER 2 — " + String(capName.toUpperCase()) + " (+50% Bonus)!", 3.5)
       this.Sound.PlayLevelUp()
       if Player != nil:
@@ -894,7 +894,7 @@ pub class GameEngine:
     if level >= 15 and DailyMilestoneReached < 15:
       DailyMilestoneReached = 15
       meta.UpdateDailyMilestone(3, 15, 1)
-      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      capName := meta.DailyCapacityState?.name or "Cosmic Transcendence"
       this.Banner("🌟 MILESTONE ASCENSION: TIER 3 — " + String(capName.toUpperCase()) + " (+100% Bonus)!", 4)
       this.Sound.PlayLevelUp()
       if Player != nil:
@@ -905,7 +905,7 @@ pub class GameEngine:
     if level >= 20 and DailyMilestoneReached < 20:
       DailyMilestoneReached = 20
       meta.UpdateDailyMilestone(4, 20, 1.5)
-      let capName = meta.DailyCapacityState?.name or "Cosmic Transcendence"
+      capName := meta.DailyCapacityState?.name or "Cosmic Transcendence"
       this.Banner("👑 APEX SINGULARITY: TIER 4 — " + String(capName.toUpperCase()) + " (+150% Bonus)!", 5)
       this.Sound.PlayLevelUp()
       if Player != nil:
@@ -935,25 +935,25 @@ pub class GameEngine:
   fn RequestAutotomy() -> int:
     if State != GameState.Playing or not Player:
       ret 0
-    let severed = Player.Autotomy(this.WorldBag())
+    severed := Player.Autotomy(this.WorldBag())
     if severed > 0:
       Services.Input.Vibrate(GameEngine.SkillHaptic)
       this.Banner("💥 TACTICAL AUTOTOMY! 💥", 1.2)
     severed
   fn requestAutotomy() -> int = this.RequestAutotomy()
   fn ResolveSteering() -> Steering:
-    let im = Services.Input
-    let steer = _reusableSteering
-    let pointerActive = im.PointerActive ?? im.PointerActive
-    let pointerSteers = pointerActive != nil and TouchScheme == "follow" or not IsTouchDevice
+    im := Services.Input
+    steer := _reusableSteering
+    pointerActive := im.PointerActive ?? im.PointerActive
+    pointerSteers := pointerActive != nil and TouchScheme == "follow" or not IsTouchDevice
     if pointerSteers != nil and Player:
-      let p = this.ScreenToWorld(im.PointerNormX, im.PointerNormY)
-      let dx = p.X - Player.X
-      let dy = p.Y - Player.Y
-      let d = MathX.hypot(dx, dy)
+      p := this.ScreenToWorld(im.PointerNormX, im.PointerNormY)
+      dx := p.X - Player.X
+      dy := p.Y - Player.Y
+      d := MathX.hypot(dx, dy)
       if d > 18:
-        let nx = dx / d
-        let ny = dy / d
+        nx := dx / d
+        ny := dy / d
         steer.X = nx
         steer.Y = ny
         steer.Active = true
@@ -968,9 +968,9 @@ pub class GameEngine:
       steer.y = 0
       steer.active = false
       ret steer
-    let dx = im.DirX ?? im.dirX ?? 0
-    let dy = im.DirY ?? im.dirY ?? 0
-    let hasDir = im.HasDirection ?? im.hasDirection ?? dx != 0 or dy != 0
+    dx := im.DirX ?? im.dirX ?? 0
+    dy := im.DirY ?? im.dirY ?? 0
+    hasDir := im.HasDirection ?? im.hasDirection ?? dx != 0 or dy != 0
     steer.X = dx
     steer.Y = dy
     steer.Active = hasDir
@@ -1010,7 +1010,7 @@ pub class GameEngine:
   fn onPlayerHurt(dealt:int) :
     this.OnPlayerHurt(dealt)
   fn Step(dt:int) :
-    let player = Player
+    player := Player
     if not player:
       ret
     if GameMode == "daily" and player.Level >= 5:
@@ -1030,16 +1030,16 @@ pub class GameEngine:
       OnSteered(true)
     if ChronoTimer > 0:
       ChronoTimer = Math.max(0, ChronoTimer - dt)
-    let chronoScale = ChronoTimer > 0 and 0.55 or 1
-    let mut nearestFood:Option[FoodItem] = nil
-    let mut nearestDist = Number.POSITIVE_INFINITY
-    let w = this.WorldBag()
+    chronoScale := ChronoTimer > 0 and 0.55 or 1
+    nearestFood:Option[FoodItem] ::= nil
+    nearestDist ::= Number.POSITIVE_INFINITY
+    w := this.WorldBag()
     w.NearestFood = nearestFood
     w.ChronoScale = chronoScale
     w.TimeScale = Combat.DilationScale(player) * chronoScale
     TimeScale = w.TimeScale
     player.Update(dt, this.ResolveSteering(), ArenaW, ArenaH, w)
-    let vacuumPull = VacuumTimer > 0 and 900 or 0
+    vacuumPull := VacuumTimer > 0 and 900 or 0
     Combat.Update(dt, w)
     VacuumTimer = w.VacuumTimer
     ChronoTimer = Math.max(ChronoTimer, w.ChronoTimer)
@@ -1061,7 +1061,7 @@ pub class GameEngine:
       this.TriggerLevelUp()
       ret
     this.UpdateSpawning(dt)
-    let cfg = this.Cfg
+    cfg := this.Cfg
     FloorFoodProgress = Combat.FoodsEaten - this.FloorFoodBase()
     if not cfg.BossRush and ActiveBosses.length == 0 and FloorFoodProgress >= FoodTarget:
       this.SpawnBoss()
@@ -1076,16 +1076,16 @@ pub class GameEngine:
   fn floorFoodBase() -> int = this.FloorFoodBase()
   fn UpdateSpawning(dt:int) :
     FoodSpawnTimer += dt
-    let foodCap = 9 + Math.min(6, CurrentFloor)
+    foodCap := 9 + Math.min(6, CurrentFloor)
     if FoodSpawnTimer >= 1.35 and Foods.length < foodCap:
       FoodSpawnTimer = 0
       this.SpawnFood()
     if Foods.length == 0:
       this.SpawnFood("apple")
-    let budget = this.EnemyBudget()
+    budget := this.EnemyBudget()
     WaveTimer -= dt
     if WaveTimer <= 0 and Enemies.length < budget:
-      let packSize = this.Boss != nil and 1 or MathX.clamp(1 + Math.floor(Math), 1, 4)
+      packSize := this.Boss != nil and 1 or MathX.clamp(1 + Math.floor(Math), 1, 4)
       WaveTimer = Math.max(1.1, this.Boss != nil and 5.5 or 3.6 - CurrentFloor * 0.28)
     if Projectiles.length > Caps.Projectiles:
       Projectiles.splice(0, Projectiles.length - Caps.Projectiles)
@@ -1096,7 +1096,7 @@ pub class GameEngine:
   fn updateSpawning(dt:int) :
     this.UpdateSpawning(dt)
   fn Tick(frameDt:int) :
-    let dt = Math.min(0.25, Math.max(0, frameDt))
+    dt := Math.min(0.25, Math.max(0, frameDt))
     FrameCount += 1
     FpsAccum += dt
     FpsSamples += 1

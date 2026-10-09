@@ -326,9 +326,9 @@ export class AilGenerator {
     const nodeId = `var:${v.name}`;
     this.emitLeadingTrivia(nodeId);
     const pub = v.isExported ? "pub " : "";
-    const kw = v.isMut ? "let mut" : "val";
-    const typeAnn = v.typeAnnotation ? `: ${this.formatTypeExpr(v.typeAnnotation)}` : "";
-    this.writeLine(`${pub}${kw} ${v.name}${typeAnn} = ${this.formatExpr(v.value)}`, nodeId);
+    const op = v.isMut ? "::=" : ":=";
+    const typeAnn = v.typeAnnotation ? `: ${this.formatTypeExpr(v.typeAnnotation)} ` : " ";
+    this.writeLine(`${pub}${v.name}${typeAnn}${op} ${this.formatExpr(v.value)}`, nodeId);
   }
 
   private emitFunctionDecl(fn: FunctionDecl): void {
@@ -371,9 +371,9 @@ export class AilGenerator {
   private emitStatement(stmt: Statement, isTail = false): void {
     switch (stmt.kind) {
       case "LetBinding": {
-        const mut = stmt.isMut ? "mut " : "";
-        const typeAnn = stmt.typeAnnotation ? `:${this.formatTypeExpr(stmt.typeAnnotation)}` : "";
-        this.writeLine(`let ${mut}${stmt.name}${typeAnn} = ${this.formatExpr(stmt.init)}`);
+        const op = stmt.isMut ? "::=" : ":=";
+        const typeAnn = stmt.typeAnnotation ? `: ${this.formatTypeExpr(stmt.typeAnnotation)} ` : " ";
+        this.writeLine(`${stmt.name}${typeAnn}${op} ${this.formatExpr(stmt.init)}`);
         break;
       }
       case "AssignStmt": {

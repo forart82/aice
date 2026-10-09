@@ -486,11 +486,26 @@ export function scanRawTokens(
       rawTokens.push({ kind: "FAT_ARROW", value: "=>", span: makeSpan(startPos) });
       continue;
     }
-    if (ch === ":" && peek(1) === ":") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "COLON_COLON", value: "::", span: makeSpan(startPos) });
-      continue;
+    if (ch === ":") {
+      if (peek(1) === ":") {
+        if (peek(2) === "=") {
+          advance();
+          advance();
+          advance();
+          rawTokens.push({ kind: "COLON_COLON_EQUAL", value: "::=", span: makeSpan(startPos) });
+          continue;
+        }
+        advance();
+        advance();
+        rawTokens.push({ kind: "COLON_COLON", value: "::", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "COLON_EQUAL", value: ":=", span: makeSpan(startPos) });
+        continue;
+      }
     }
     if (ch === "." && peek(1) === "." && peek(2) === ".") {
       advance();

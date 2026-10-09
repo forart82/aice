@@ -50,13 +50,13 @@ pub class Boss:
   fn get_MaxHp() -> int:
     if _targetTotalMaxHp > 0:
       ret _targetTotalMaxHp
-    let mut sum = HeadMaxHp
+    sum ::= HeadMaxHp
     sum
   fn set_MaxHp(v:int) :
     _targetTotalMaxHp = v
     this.InitSegmentHealth()
   fn get_Hp() -> int:
-    let mut sum = HeadHp
+    sum ::= HeadHp
     sum
   fn set_Hp(v:int) :
     if not Number.isFinite(v) or v <= 0:
@@ -66,7 +66,7 @@ pub class Boss:
       Segments.length = 0
       Dead = true
       ret
-    let mut remaining = v
+    remaining ::= v
     HeadHp = Math.min(HeadMaxHp, remaining)
     remaining -= HeadHp
   fn get_segmentSpacing() = SegmentSpacing; fn set_segmentSpacing(v) = SegmentSpacing = v
@@ -108,17 +108,17 @@ pub class Boss:
     ArenaW = arenaW
     ArenaH = arenaH
     MultiBossScale = multiBossScale
-    let mut arch = GameData.Bosses[Floor - 1 % GameData.Bosses.length]
+    arch ::= GameData.Bosses[Floor - 1 % GameData.Bosses.length]
     if specificTypeOrArchetype != nil:
       if typeof(specificTypeOrArchetype) == "object" and specificTypeOrArchetype != nil:
         arch = specificTypeOrArchetype
       elif typeof(specificTypeOrArchetype) == "string":
-        let str = specificTypeOrArchetype.toLowerCase()
-        let found = GameData.Bosses.find(fn(b:unknown) = b.Type.toLowerCase() == str or b.type.toLowerCase() == str or b.Name.toLowerCase() == str or b.name.toLowerCase() == str)
+        str := specificTypeOrArchetype.toLowerCase()
+        found := GameData.Bosses.find(fn(b:unknown) = b.Type.toLowerCase() == str or b.type.toLowerCase() == str or b.Name.toLowerCase() == str or b.name.toLowerCase() == str)
         if found != nil:
           arch = found
-    let cycle = Math.floor(Math)
-    let cycleFloor = cycle * GameData.Bosses.length
+    cycle := Math.floor(Math)
+    cycleFloor := cycle * GameData.Bosses.length
     Type = arch.Type
     if cycle > 0:
       Name = "" + String(arch.Name) + " " + String(Boss.RomanNumerals[Math.min(cycle, 4)]).trim()
@@ -128,7 +128,7 @@ pub class Boss:
     Color = arch.Color
     Accent = arch.Accent
     Radius = arch.Radius
-    let unscaledHp = MathX.roundJs(arch.BaseHp + arch.HpPerFloor * cycleFloor * 1 + cycle * 0.35)
+    unscaledHp := MathX.roundJs(arch.BaseHp + arch.HpPerFloor * cycleFloor * 1 + cycle * 0.35)
     if MultiBossScale != 1:
       _targetTotalMaxHp = MathX.roundJs(unscaledHp * MultiBossScale)
     else:
@@ -144,9 +144,9 @@ pub class Boss:
     Status = StatusSet()
     ContactDamage = 16 + Floor * 3
     WanderTarget = Vec2(X, arenaH * 0.3)
-    let mut segCount = 14
-    let mut baseRad = 15
-    let mut spacing = 20
+    segCount ::= 14
+    baseRad ::= 15
+    spacing ::= 20
     if Type == "centipede":
       segCount = 14 + Math.min(10, Floor * 2)
       baseRad = 15
@@ -158,15 +158,15 @@ pub class Boss:
     SegmentSpacing = spacing
     this.InitSegmentHealth()
   fn InitSegmentHealth() :
-    let total = _targetTotalMaxHp
-    let n = Segments.length
+    total := _targetTotalMaxHp
+    n := Segments.length
     if n == 0:
       HeadMaxHp = total
       HeadHp = total
       ret
-    let totalWeights = n + 2
-    let unitHp = Math.max(1, Math.floor(Math))
-    let headHp = total - unitHp * n
+    totalWeights := n + 2
+    unitHp := Math.max(1, Math.floor(Math))
+    headHp := total - unitHp * n
     HeadMaxHp = headHp
     HeadHp = headHp
   fn get_Vulnerable() = EntranceTimer <= 0 and not Dead
@@ -181,12 +181,12 @@ pub class Boss:
   fn ApplyDamage(amount:int) -> bool:
     if not this.Vulnerable or not (amount > 0):
       ret false
-    let effectiveDmg = amount * Status.DamageTakenMult
-    let mut toHp = effectiveDmg
+    effectiveDmg := amount * Status.DamageTakenMult
+    toHp ::= effectiveDmg
     HitFlash = 1
     while toHp > 0 and Segments.length > 0:
-      let lastIdx = Segments.length - 1
-      let lastSeg = Segments[lastIdx]
+      lastIdx := Segments.length - 1
+      lastSeg := Segments[lastIdx]
       if lastSeg.Hp > toHp:
         lastSeg.Hp = lastSeg.Hp - toHp
         lastSeg.HitFlash = 1
@@ -214,8 +214,8 @@ pub class Boss:
       ret false
     if not this.Vulnerable or not (amount > 0) or not Number.isFinite(amount):
       ret false
-    let effectiveDmg = amount * Status.DamageTakenMult
-    let seg = Segments[index]
+    effectiveDmg := amount * Status.DamageTakenMult
+    seg := Segments[index]
     seg.Hp = seg.Hp - effectiveDmg
     seg.HitFlash = 1
     HitFlash = 0.6
@@ -252,7 +252,7 @@ pub class Boss:
       Angle = 0
     if HitFlash > 0:
       HitFlash = Math.max(0, HitFlash - dt * 5)
-    let burn = Status.Update(dt)
+    burn := Status.Update(dt)
     if burn > 0:
       this.ApplyDamage(burn)
     if EntranceTimer > 0:
@@ -262,31 +262,31 @@ pub class Boss:
       ret
     if StasisTimer > 0:
       StasisTimer = Math.max(0, StasisTimer - dt)
-    let stasisMult = StasisTimer > 0 and 0.2 or 1
-    let worldScale = world != nil and world.TimeScale != undefined and world.TimeScale or 1
-    let scale = Status.SpeedMult * stasisMult * worldScale != 0 and worldScale or 1
-    let tx = target.X ?? target.x
-    let ty = target.Y ?? target.y
-    let dx = tx - X
-    let dy = ty - Y
-    let dist = MathX.safeLen(dx, dy)
+    stasisMult := StasisTimer > 0 and 0.2 or 1
+    worldScale := world != nil and world.TimeScale != undefined and world.TimeScale or 1
+    scale := Status.SpeedMult * stasisMult * worldScale != 0 and worldScale or 1
+    tx := target.X ?? target.x
+    ty := target.Y ?? target.y
+    dx := tx - X
+    dy := ty - Y
+    dist := MathX.safeLen(dx, dy)
     AttackTimer -= dt * scale
     if Type == "centipede":
       this.UpdateCentipede(dt * scale, dx, dy, dist, world)
     elif Type == "gorgon":
       this.UpdateGorgon(dt * scale, dx, dy, dist, target, world)
     this.UpdateSegments(dt * scale)
-    let aw = ArenaW or world.ArenaW or world.arenaW
-    let ah = ArenaH or world.ArenaH or world.arenaH
+    aw := ArenaW or world.ArenaW or world.arenaW
+    ah := ArenaH or world.ArenaH or world.arenaH
     X = MathX.clamp(X, Radius, aw - Radius)
     Y = MathX.clamp(Y, Radius, ah - Radius)
   fn update(dt:int, target:SnakePlayer, world:World) :
     this.Update(dt, target, world)
   fn UpdateSegments(_dt:int) :
-    let mut px = Number.isFinite(X) and X or ArenaW * 0.5
-    let mut py = Number.isFinite(Y) and Y or ArenaH * 0.5
-    let spacing = SegmentSpacing
-    let n = Segments.length
+    px ::= Number.isFinite(X) and X or ArenaW * 0.5
+    py ::= Number.isFinite(Y) and Y or ArenaH * 0.5
+    spacing := SegmentSpacing
+    n := Segments.length
   fn updateSegments(dt:int) :
     this.UpdateSegments(dt)
   fn stepIK(dt:int) :
@@ -294,11 +294,11 @@ pub class Boss:
   fn stepIk(dt:int) :
     this.UpdateSegments(dt)
   fn UpdateCentipede(dt:int, dx:int, dy:int, _dist:int, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6.5 or 4.5 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6.5 or 4.5 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 185 or 130
+    speed := Phase == 2 and 185 or 130
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -306,14 +306,14 @@ pub class Boss:
         AttackTimer = 1.4
       else:
         AttackTimer = 2.2
-      let spread = Phase == 2 and Boss.SpreadPhase2 or Boss.SpreadPhase1
+      spread := Phase == 2 and Boss.SpreadPhase2 or Boss.SpreadPhase1
       Services.Sound.PlayShoot()
   fn UpdateGorgon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6 or 4 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6 or 4 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 145 or 92
+    speed := Phase == 2 and 145 or 92
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -321,13 +321,13 @@ pub class Boss:
         AttackTimer = 1.3
       else:
         AttackTimer = 2
-      let count = Phase == 2 and 8 or 4
-      let baseAng = Angle
+      count := Phase == 2 and 8 or 4
+      baseAng := Angle
       Services.Fx.RingShockwave(X, Y, "#00f0b5", 28, 0.04)
       Services.Sound.PlayThunder()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "laser", { Radius: 40, Life: 1.2, ImpactDamage: 24 + Floor * 3, Telegraph: 0.9, Owner: "enemy" }))
   fn UpdateColossus(dt:int, target:SnakePlayer, _dist:int, world:World) :
     MoveTimer -= dt
@@ -335,31 +335,31 @@ pub class Boss:
       MoveTimer = Rng.Shared.range(2.4, 4.2)
       WanderTarget = Vec2(Rng.Shared.range(ArenaW * 0.2, ArenaW * 0.8), Rng.Shared.range(ArenaH * 0.18, ArenaH * 0.6))
     if WanderTarget != nil:
-      let wdx = WanderTarget.X - X
-      let wdy = WanderTarget.Y - Y
-      let wd = MathX.safeLen(wdx, wdy)
+      wdx := WanderTarget.X - X
+      wdy := WanderTarget.Y - Y
+      wd := MathX.safeLen(wdx, wdy)
       if wd > 8:
         X += wdx / wd * 62 * dt
         Y += wdy / wd * 62 * dt
     if AttackTimer <= 0:
-      let ringPhase = Phase == 2
+      ringPhase := Phase == 2
       if ringPhase != nil:
         AttackTimer = 1.6
       else:
         AttackTimer = 2.3
-      let count = ringPhase != nil and 22 or 15
-      let baseAngle = Rng.Shared.angle()
+      count := ringPhase != nil and 22 or 15
+      baseAngle := Rng.Shared.angle()
       Services.Fx.RingShockwave(X, Y, Accent, 34, 0.035)
       Services.Sound.PlayExplosion(0.8)
       if ringPhase != nil and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
   fn UpdateFrostwyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 5.5 or 3.8 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 5.5 or 3.8 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 138 or 78
+    speed := Phase == 2 and 138 or 78
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -367,21 +367,21 @@ pub class Boss:
         AttackTimer = 1.4
       else:
         AttackTimer = 2.2
-      let count = Phase == 2 and 12 or 8
-      let baseAng = Rng.Shared.angle()
+      count := Phase == 2 and 12 or 8
+      baseAng := Rng.Shared.angle()
       Services.Fx.RingShockwave(X, Y, "#38bdf8", 32, 0.03)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
   fn UpdateLeviathan(dt:int, target:SnakePlayer, _dist:int, world:World) :
     SpiralAngle += dt * Phase == 2 and 3.4 or 2.4
     MoveTimer -= dt
-    let cx = ArenaW * 0.5
-    let cy = ArenaH * 0.42
-    let orbitR = Math.min(ArenaW, ArenaH) * 0.22
-    let ox = cx + Math.cos(SpiralAngle * 0.35) * orbitR
-    let oy = cy + Math.sin(SpiralAngle * 0.55) * orbitR * 0.6
+    cx := ArenaW * 0.5
+    cy := ArenaH * 0.42
+    orbitR := Math.min(ArenaW, ArenaH) * 0.22
+    ox := cx + Math.cos(SpiralAngle * 0.35) * orbitR
+    oy := cy + Math.sin(SpiralAngle * 0.55) * orbitR * 0.6
     X += ox - X * Math.min(1, dt * 1.4)
     Y += oy - Y * Math.min(1, dt * 1.4)
     if AttackTimer <= 0:
@@ -389,22 +389,22 @@ pub class Boss:
         AttackTimer = 0.1
       else:
         AttackTimer = 0.16
-      let arms = Phase == 2 and 3 or 2
+      arms := Phase == 2 and 3 or 2
     if MoveTimer <= 0:
       if Phase == 2:
         MoveTimer = 3.4
       else:
         MoveTimer = 5
-      let n = Phase == 2 and 3 or 2
-      let tx = target.X ?? target.x
-      let ty = target.Y ?? target.y
+      n := Phase == 2 and 3 or 2
+      tx := target.X ?? target.x
+      ty := target.Y ?? target.y
       Services.Sound.PlayBossAlert()
   fn UpdateChronoWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6.2 or 4.2 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6.2 or 4.2 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 160 or 110
+    speed := Phase == 2 and 160 or 110
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -412,19 +412,19 @@ pub class Boss:
         AttackTimer = 1.2
       else:
         AttackTimer = 1.9
-      let count = Phase == 2 and 8 or 5
+      count := Phase == 2 and 8 or 5
       Services.Fx.RingShockwave(X, Y, "#a855f7", 30, 0.04)
       Services.Sound.PlayBossAlert()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "chrono", { Radius: 45, Life: 2.5, ImpactDamage: 18 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateHivemind(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 5.8 or 3.9 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 5.8 or 3.9 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 130 or 85
+    speed := Phase == 2 and 130 or 85
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -432,19 +432,19 @@ pub class Boss:
         AttackTimer = 1.1
       else:
         AttackTimer = 1.8
-      let count = Phase == 2 and 10 or 6
+      count := Phase == 2 and 10 or 6
       Services.Fx.RingShockwave(X, Y, "#84cc16", 28, 0.05)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "poison", { Radius: 50, Life: 3.5, Dps: 15 + Floor * 2, Telegraph: 0.85, Owner: "enemy" }))
   fn UpdateSuperconductor(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6.8 or 4.6 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6.8 or 4.6 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 180 or 125
+    speed := Phase == 2 and 180 or 125
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -452,19 +452,19 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.6
-      let count = Phase == 2 and 12 or 8
+      count := Phase == 2 and 12 or 8
       Services.Fx.RingShockwave(X, Y, "#06d6a0", 36, 0.03)
       Services.Sound.PlayThunder()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-90, 90), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-90, 90), 40, ArenaH - 40), "laser", { Radius: 42, Life: 1.5, ImpactDamage: 28 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateQuantumHydra(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 7.2 or 5 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 7.2 or 5 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 190 or 135
+    speed := Phase == 2 and 190 or 135
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -472,19 +472,19 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.7
-      let count = Phase == 2 and 10 or 5
+      count := Phase == 2 and 10 or 5
       Services.Fx.RingShockwave(X, Y, "#c084fc", 34, 0.035)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, ArenaH - 40), "laser", { Radius: 44, Life: 1.4, ImpactDamage: 26 + Floor * 3, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateMirrorWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 7.5 or 5.2 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 7.5 or 5.2 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 195 or 140
+    speed := Phase == 2 and 195 or 140
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -492,21 +492,21 @@ pub class Boss:
         AttackTimer = 0.95
       else:
         AttackTimer = 1.6
-      let count = Phase == 2 and 6 or 3
+      count := Phase == 2 and 6 or 3
       Services.Fx.RingShockwave(X, Y, "#f43f5e", 30, 0.04)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "poison", { Radius: 42, Life: 2.8, Dps: 18 + Floor * 2, Telegraph: 0.7, Owner: "enemy" }))
   fn UpdateVoidDevourer(dt:int, target:SnakePlayer, _dist:int, world:World) :
     SpiralAngle += dt * Phase == 2 and 3.8 or 2.6
     MoveTimer -= dt
-    let cx = ArenaW * 0.5
-    let cy = ArenaH * 0.45
-    let orbitR = Math.min(ArenaW, ArenaH) * 0.24
-    let ox = cx + Math.cos(SpiralAngle * 0.4) * orbitR
-    let oy = cy + Math.sin(SpiralAngle * 0.6) * orbitR * 0.65
+    cx := ArenaW * 0.5
+    cy := ArenaH * 0.45
+    orbitR := Math.min(ArenaW, ArenaH) * 0.24
+    ox := cx + Math.cos(SpiralAngle * 0.4) * orbitR
+    oy := cy + Math.sin(SpiralAngle * 0.6) * orbitR * 0.65
     X += ox - X * Math.min(1, dt * 1.5)
     Y += oy - Y * Math.min(1, dt * 1.5)
     if AttackTimer <= 0:
@@ -514,22 +514,22 @@ pub class Boss:
         AttackTimer = 0.12
       else:
         AttackTimer = 0.18
-      let arms = Phase == 2 and 4 or 3
+      arms := Phase == 2 and 4 or 3
     if MoveTimer <= 0:
       if Phase == 2:
         MoveTimer = 3
       else:
         MoveTimer = 4.5
-      let tx = target.X ?? target.x
-      let ty = target.Y ?? target.y
+      tx := target.X ?? target.x
+      ty := target.Y ?? target.y
       Services.Fx.RingShockwave(X, Y, "#7928ca", 45, 0.04)
       Services.Sound.PlayBossAlert()
   fn UpdateOrbitalDreadnought(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 5.2 or 3.6 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 5.2 or 3.6 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 140 or 95
+    speed := Phase == 2 and 140 or 95
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -543,8 +543,8 @@ pub class Boss:
       Services.Fx.RingShockwave(X, Y, "#06b6d4", 38, 0.03)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "laser", { Radius: 45, Life: 1.3, ImpactDamage: 28 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateIronJuggernaut(dt:int, target:SnakePlayer, _dist:int, world:World) :
     MoveTimer -= dt
@@ -552,31 +552,31 @@ pub class Boss:
       MoveTimer = Rng.Shared.range(2, 3.8)
       WanderTarget = Vec2(Rng.Shared.range(ArenaW * 0.2, ArenaW * 0.8), Rng.Shared.range(ArenaH * 0.2, ArenaH * 0.6))
     if WanderTarget != nil:
-      let wdx = WanderTarget.X - X
-      let wdy = WanderTarget.Y - Y
-      let wd = MathX.safeLen(wdx, wdy)
+      wdx := WanderTarget.X - X
+      wdy := WanderTarget.Y - Y
+      wd := MathX.safeLen(wdx, wdy)
       if wd > 8:
         X += wdx / wd * 80 * dt
         Y += wdy / wd * 80 * dt
     if AttackTimer <= 0:
-      let ringPhase = Phase == 2
+      ringPhase := Phase == 2
       if ringPhase != nil:
         AttackTimer = 1.5
       else:
         AttackTimer = 2.2
-      let count = ringPhase != nil and 24 or 16
-      let baseAngle = Rng.Shared.angle()
+      count := ringPhase != nil and 24 or 16
+      baseAngle := Rng.Shared.angle()
       Services.Fx.RingShockwave(X, Y, "#64748b", 42, 0.04)
       Services.Sound.PlayExplosion(0.9)
       if ringPhase != nil and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
   fn UpdateSolarArchon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6.2 or 4.4 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6.2 or 4.4 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 165 or 115
+    speed := Phase == 2 and 165 or 115
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -584,20 +584,20 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.7
-      let count = Phase == 2 and 14 or 8
-      let baseAng = Rng.Shared.angle()
+      count := Phase == 2 and 14 or 8
+      baseAng := Rng.Shared.angle()
       Services.Fx.RingShockwave(X, Y, "#f97316", 36, 0.035)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-130, 130), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-130, 130), 40, ArenaH - 40), "laser", { Radius: 48, Life: 1.6, ImpactDamage: 30 + Floor * 3, Telegraph: 0.7, Owner: "enemy" }))
   fn UpdateCrystalMonolith(dt:int, target:SnakePlayer, _dist:int, world:World) :
     SpiralAngle += dt * Phase == 2 and 3 or 2
     MoveTimer -= dt
-    let cx = ArenaW * 0.5
-    let cy = ArenaH * 0.4
-    let orbitR = Math.min(ArenaW, ArenaH) * 0.22
+    cx := ArenaW * 0.5
+    cy := ArenaH * 0.4
+    orbitR := Math.min(ArenaW, ArenaH) * 0.22
     X += cx + Math.cos(SpiralAngle * 0.5) * orbitR - X * Math.min(1, dt * 1.2)
     Y += cy + Math.sin(SpiralAngle * 0.5) * orbitR * 0.7 - Y * Math.min(1, dt * 1.2)
     if AttackTimer <= 0:
@@ -605,19 +605,19 @@ pub class Boss:
         AttackTimer = 1.1
       else:
         AttackTimer = 1.9
-      let count = Phase == 2 and 12 or 6
+      count := Phase == 2 and 12 or 6
       Services.Fx.RingShockwave(X, Y, "#f472b6", 32, 0.03)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "laser", { Radius: 40, Life: 1.4, ImpactDamage: 26 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateTempestSiren(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 6.5 or 4.5 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 6.5 or 4.5 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 175 or 120
+    speed := Phase == 2 and 175 or 120
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -625,19 +625,19 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.6
-      let count = Phase == 2 and 12 or 8
+      count := Phase == 2 and 12 or 8
       Services.Fx.RingShockwave(X, Y, "#67e8f9", 35, 0.03)
       Services.Sound.PlayThunder()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, ArenaH - 40), "laser", { Radius: 46, Life: 1.5, ImpactDamage: 28 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateNaniteTitan(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 5.8 or 4 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 5.8 or 4 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 145 or 100
+    speed := Phase == 2 and 145 or 100
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -645,12 +645,12 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.7
-      let count = Phase == 2 and 10 or 6
+      count := Phase == 2 and 10 or 6
       Services.Fx.RingShockwave(X, Y, "#34d399", 32, 0.04)
       Services.Sound.PlayShoot()
       if Phase == 2 and Segments.length < 24 and Rng.Shared.chance(0.35):
-        let lastSeg = Segments[Segments.length - 1]
-        let newSeg = BossSegment()
+        lastSeg := Segments[Segments.length - 1]
+        newSeg := BossSegment()
         if lastSeg != nil:
           newSeg.X = lastSeg.X
         else:
@@ -665,15 +665,15 @@ pub class Boss:
         Segments.push(newSeg)
         Services.Fx.Burst(newSeg.X, newSeg.Y, "#10b981", 8, 3, 2)
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "poison", { Radius: 48, Life: 3, Dps: 18 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdatePhaseSpecter(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    let targetAngle = Math.atan2(dy, dx)
-    let maxTurnRate = Phase == 2 and 7 or 4.8 * dt
-    let diff = MathX.angleDelta(Angle, targetAngle)
+    targetAngle := Math.atan2(dy, dx)
+    maxTurnRate := Phase == 2 and 7 or 4.8 * dt
+    diff := MathX.angleDelta(Angle, targetAngle)
     Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
-    let speed = Phase == 2 and 185 or 130
+    speed := Phase == 2 and 185 or 130
     X += Math.cos(Angle) * speed * dt
     Y += Math.sin(Angle) * speed * dt
     if AttackTimer <= 0:
@@ -681,12 +681,12 @@ pub class Boss:
         AttackTimer = 1
       else:
         AttackTimer = 1.7
-      let count = Phase == 2 and 12 or 6
+      count := Phase == 2 and 12 or 6
       Services.Fx.RingShockwave(X, Y, "#a78bfa", 32, 0.035)
       Services.Sound.PlayShoot()
       if Phase == 2 and world.Hazards.length < 70:
-        let tx = target.X ?? target.x
-        let ty = target.Y ?? target.y
+        tx := target.X ?? target.x
+        ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "laser", { Radius: 42, Life: 1.4, ImpactDamage: 26 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateVolcanicChimera(dt:int, target:SnakePlayer, _dist:int, world:World) :
     MoveTimer -= dt
@@ -694,22 +694,22 @@ pub class Boss:
       MoveTimer = Rng.Shared.range(2.2, 3.8)
       WanderTarget = Vec2(Rng.Shared.range(ArenaW * 0.25, ArenaW * 0.75), Rng.Shared.range(ArenaH * 0.2, ArenaH * 0.6))
     if WanderTarget != nil:
-      let wdx = WanderTarget.X - X
-      let wdy = WanderTarget.Y - Y
-      let wd = MathX.safeLen(wdx, wdy)
+      wdx := WanderTarget.X - X
+      wdy := WanderTarget.Y - Y
+      wd := MathX.safeLen(wdx, wdy)
       if wd > 8:
         X += wdx / wd * 85 * dt
         Y += wdy / wd * 85 * dt
     if AttackTimer <= 0:
-      let ringPhase = Phase == 2
+      ringPhase := Phase == 2
       if ringPhase != nil:
         AttackTimer = 1.4
       else:
         AttackTimer = 2
-      let tx = target.X ?? target.x
-      let ty = target.Y ?? target.y
-      let mainAng = Math.atan2(ty - Y, tx - X)
-      let angles = [mainAng - 0.45, mainAng, mainAng + 0.45]
+      tx := target.X ?? target.x
+      ty := target.Y ?? target.y
+      mainAng := Math.atan2(ty - Y, tx - X)
+      angles := [mainAng - 0.45, mainAng, mainAng + 0.45]
       for base in angles:
         nil
       Services.Fx.RingShockwave(X, Y, "#f87171", 38, 0.04)
@@ -719,9 +719,9 @@ pub class Boss:
   fn UpdateEternalOuroboros(dt:int, target:SnakePlayer, _dist:int, world:World) :
     SpiralAngle += dt * Phase == 2 and 4.2 or 3
     MoveTimer -= dt
-    let cx = ArenaW * 0.5
-    let cy = ArenaH * 0.45
-    let orbitR = Math.min(ArenaW, ArenaH) * 0.25
+    cx := ArenaW * 0.5
+    cy := ArenaH * 0.45
+    orbitR := Math.min(ArenaW, ArenaH) * 0.25
     X += cx + Math.cos(SpiralAngle * 0.45) * orbitR - X * Math.min(1, dt * 1.5)
     Y += cy + Math.sin(SpiralAngle * 0.45) * orbitR * 0.75 - Y * Math.min(1, dt * 1.5)
     if AttackTimer <= 0:
@@ -729,15 +729,15 @@ pub class Boss:
         AttackTimer = 0.12
       else:
         AttackTimer = 0.18
-      let arms = Phase == 2 and 4 or 3
+      arms := Phase == 2 and 4 or 3
     if MoveTimer <= 0:
       if Phase == 2:
         MoveTimer = 2.8
       else:
         MoveTimer = 4
-      let novaCount = Phase == 2 and 24 or 16
-      let tx = target.X ?? target.x
-      let ty = target.Y ?? target.y
+      novaCount := Phase == 2 and 24 or 16
+      tx := target.X ?? target.x
+      ty := target.Y ?? target.y
       Services.Fx.RingShockwave(X, Y, "#ffd166", 50, 0.035)
       Services.Sound.PlayBossAlert()
       if Phase == 2 and world.Hazards.length < 70:

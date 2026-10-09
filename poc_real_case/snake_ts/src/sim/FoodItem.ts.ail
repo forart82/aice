@@ -29,7 +29,7 @@ pub class FoodItem:
       Type = type
     else:
       Type = "apple"
-    let def = GameData.Foods.Get(Type) ?? GameData.Foods.Get("apple")
+    def := GameData.Foods.Get(Type) ?? GameData.Foods.Get("apple")
     Color = def.Color
     XpValue = def.Xp
     ScoreValue = def.Score
@@ -45,7 +45,7 @@ pub class FoodItem:
     if Type != "apple":
       ret false
     Type = "golden"
-    let def = GameData.Foods.Get("golden")
+    def := GameData.Foods.Get("golden")
     Color = def.Color
     XpValue = def.Xp
     ScoreValue = def.Score
@@ -57,11 +57,11 @@ pub class FoodItem:
     Life += dt
     if SpawnScale < 1:
       SpawnScale = Math.min(1, SpawnScale + dt * 5)
-    let dx = px - X
-    let dy = py - Y
-    let dist = MathX.safeLen(dx, dy)
+    dx := px - X
+    dy := py - Y
+    dist := MathX.safeLen(dx, dy)
     if dist < magnetRadius:
-      let force = 1 - dist / magnetRadius * 620
+      force := 1 - dist / magnetRadius * 620
       Vx += dx / dist * force * dt
       Vy += dy / dist * force * dt
     if extraPull > 0:
@@ -69,7 +69,7 @@ pub class FoodItem:
       Vy += dy / dist * extraPull * dt
     X += Vx * dt
     Y += Vy * dt
-    let drag = MathX.decay(0.92, dt)
+    drag := MathX.decay(0.92, dt)
     Vx *= drag
     Vy *= drag
   fn update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) :

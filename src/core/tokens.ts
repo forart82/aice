@@ -89,6 +89,8 @@ export type TokenKind =
   | "STAR_EQUAL" // *=
   | "SLASH_EQUAL" // /=
   | "PERCENT_EQUAL" // %=
+  | "COLON_EQUAL" // :=
+  | "COLON_COLON_EQUAL" // ::=
   | "ARROW" // ->
   | "FAT_ARROW" // =>
   | "COLON_COLON" // ::

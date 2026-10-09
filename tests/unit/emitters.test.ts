@@ -791,5 +791,66 @@ style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
   });
+
+  describe("Step 21: Keywordless Variable & Mutable Declaration Emission", () => {
+    it("emits TypeScript const and let for keywordless local bindings", () => {
+      const src = `fn process():
+  x := 42
+  y ::= "mutable"
+  z: int := 100
+  w: str ::= "mut_typed"`;
+
+      const mod = parse(src, "process.ts.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("const x = 42;");
+      expect(tsOut).toContain('let y = "mutable";');
+      expect(tsOut).toContain("const z: number = 100;");
+      expect(tsOut).toContain('let w: string = "mut_typed";');
+    });
+
+    it("emits TypeScript top-level declarations with export and const/let", () => {
+      const src = `x := 10
+pub y ::= "mutable"
+z: int := 100
+pub w: str ::= "mut_typed"`;
+
+      const mod = parse(src, "globals.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("const x = 10;");
+      expect(tsOut).toContain('export let y = "mutable";');
+      expect(tsOut).toContain("const z: number = 100;");
+      expect(tsOut).toContain('export let w: string = "mut_typed";');
+    });
+
+    it("emits Python, C++, Rust, and Go for keywordless declarations", () => {
+      const src = `fn compute() -> int:
+  x := 42
+  y ::= 10
+  ret x + y`;
+
+      const mod = parse(src, "compute.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+
+      const pyOut = emitTarget(mod, "python");
+      expect(pyOut).toContain("x = 42");
+      expect(pyOut).toContain("y = 10");
+
+      const cppOut = emitTarget(mod, "cpp");
+      expect(cppOut).toContain("const auto x = 42;");
+      expect(cppOut).toContain("auto y = 10;");
+
+      const rsOut = emitTarget(mod, "rust");
+      expect(rsOut).toContain("let x = 42;");
+      expect(rsOut).toContain("let mut y = 10;");
+
+      const goOut = emitTarget(mod, "go");
+      expect(goOut).toContain("x := 42");
+      expect(goOut).toContain("y := 10");
+    });
+  });
 });
 

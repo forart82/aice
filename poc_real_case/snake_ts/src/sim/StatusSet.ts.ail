@@ -61,9 +61,9 @@ pub class StatusSet:
       StunTimer = Math.max(0, StunTimer - dt)
     if MarkTimer > 0:
       MarkTimer = Math.max(0, MarkTimer - dt)
-    let mut burnDamage = 0
+    burnDamage ::= 0
     if BurnTimer > 0:
-      let step = Math.min(dt, BurnTimer)
+      step := Math.min(dt, BurnTimer)
       burnDamage = BurnDps * step
       BurnTimer -= dt
       if BurnTimer <= 0:

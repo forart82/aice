@@ -785,6 +785,106 @@ const ACTIVE: bool = true`;
     });
   });
 
+  describe("Step 21: Keywordless Variable & Mutable Declaration", () => {
+    it("parses immutable keywordless binding x := 42", () => {
+      const src = `fn test():
+  x := 42`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("LetBinding");
+      expect(stmt.name).toBe("x");
+      expect(stmt.isMut).toBe(false);
+      expect(stmt.typeAnnotation).toBeNull();
+    });
+
+    it("parses mutable keywordless binding y ::= \"mutable\"", () => {
+      const src = `fn test():
+  y ::= "mutable"`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("LetBinding");
+      expect(stmt.name).toBe("y");
+      expect(stmt.isMut).toBe(true);
+      expect(stmt.typeAnnotation).toBeNull();
+    });
+
+    it("parses typed immutable keywordless binding z: int := 100", () => {
+      const src = `fn test():
+  z: int := 100`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("LetBinding");
+      expect(stmt.name).toBe("z");
+      expect(stmt.isMut).toBe(false);
+      expect(stmt.typeAnnotation?.kind).toBe("PrimitiveType");
+    });
+
+    it("parses typed mutable keywordless binding w: string ::= \"mut_typed\"", () => {
+      const src = `fn test():
+  w: str ::= "mut_typed"`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("LetBinding");
+      expect(stmt.name).toBe("w");
+      expect(stmt.isMut).toBe(true);
+      expect(stmt.typeAnnotation?.kind).toBe("PrimitiveType");
+    });
+
+    it("parses top-level x := 10 and mutable declarations", () => {
+      const src = `x := 10
+pub y ::= "mutable"
+z: int := 100
+pub w: str ::= "mut_typed"`;
+      const mod = parse(src);
+      expect(mod.items).toHaveLength(4);
+
+      const v1 = mod.items[0] as VarDecl;
+      expect(v1.kind).toBe("VarDecl");
+      expect(v1.name).toBe("x");
+      expect(v1.isExported).toBe(false);
+      expect(v1.isMut).toBe(false);
+
+      const v2 = mod.items[1] as VarDecl;
+      expect(v2.kind).toBe("VarDecl");
+      expect(v2.name).toBe("y");
+      expect(v2.isExported).toBe(true);
+      expect(v2.isMut).toBe(true);
+
+      const v3 = mod.items[2] as VarDecl;
+      expect(v3.kind).toBe("VarDecl");
+      expect(v3.name).toBe("z");
+      expect(v3.isExported).toBe(false);
+      expect(v3.isMut).toBe(false);
+      expect(v3.typeAnnotation).toBeDefined();
+
+      const v4 = mod.items[3] as VarDecl;
+      expect(v4.kind).toBe("VarDecl");
+      expect(v4.name).toBe("w");
+      expect(v4.isExported).toBe(true);
+      expect(v4.isMut).toBe(true);
+      expect(v4.typeAnnotation).toBeDefined();
+    });
+
+    it("preserves backward compatibility for let and let mut", () => {
+      const src = `fn legacy():
+  let a = 1
+  let mut b: int = 2`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      expect(block.statements[0].isMut).toBe(false);
+      expect(block.statements[1].isMut).toBe(true);
+    });
+  });
+
   describe("Error Handling", () => {
     it("throws ParserError on unexpected tokens with exact span", () => {
       const src = `fn incomplete(`;

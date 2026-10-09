@@ -176,6 +176,31 @@ export class Parser {
     );
   }
 
+  private isTypedDeclarationAhead(): boolean {
+    if (!this.isIdentOrKeyword(this.current()) || this.peek(1).kind !== "COLON") {
+      return false;
+    }
+    let depth = 0;
+    let i = this.cursor + 2;
+    while (i < this.tokens.length) {
+      const k = this.tokens[i].kind;
+      if (k === "EOF" || (depth === 0 && (k === "NEWLINE" || k === "SEMICOLON"))) {
+        break;
+      }
+      if (k === "LPAREN" || k === "LBRACKET" || k === "LBRACE") {
+        depth++;
+      } else if (k === "RPAREN" || k === "RBRACKET" || k === "RBRACE") {
+        depth--;
+      } else if (depth === 0) {
+        if (k === "COLON_EQUAL" || k === "COLON_COLON_EQUAL" || k === "EQUAL") {
+          return true;
+        }
+      }
+      i++;
+    }
+    return false;
+  }
+
   private parseContextualIdentOrString(msg = "Expected identifier or property key"): string {
     const tok = this.current();
     if (tok.kind === "STRING") {
@@ -284,6 +309,14 @@ export class Parser {
       return this.parseVarDecl(isExported);
     }
     if (this.check("VAL")) {
+      return this.parseVarDecl(isExported);
+    }
+    if (
+      this.isIdentOrKeyword(this.current()) &&
+      (this.peek(1).kind === "COLON_EQUAL" ||
+        this.peek(1).kind === "COLON_COLON_EQUAL" ||
+        (this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead()))
+    ) {
       return this.parseVarDecl(isExported);
     }
     if (this.check("FN")) {
@@ -1371,27 +1404,66 @@ export class Parser {
   private parseVarDecl(isExported = false): VarDecl {
     const startSpan = this.current().span;
     let isMut = false;
+    let name: string;
+    let typeAnnotation: TypeExpr | undefined;
+
     if (this.check("LET")) {
       this.advance();
       if (this.check("MUT")) {
         this.advance();
         isMut = true;
       }
+      name = this.parseContextualIdentOrString("Expected variable identifier");
+      if (this.check("COLON")) {
+        this.advance();
+        typeAnnotation = this.parseTypeExpr();
+      }
+      this.consume("EQUAL", "Expected '=' in variable declaration");
     } else if (this.check("VAL")) {
       this.advance();
       isMut = false;
+      name = this.parseContextualIdentOrString("Expected variable identifier");
+      if (this.check("COLON")) {
+        this.advance();
+        typeAnnotation = this.parseTypeExpr();
+      }
+      this.consume("EQUAL", "Expected '=' in variable declaration");
+    } else {
+      name = this.parseContextualIdentOrString("Expected variable identifier");
+      if (this.check("COLON_EQUAL")) {
+        this.advance();
+        isMut = false;
+      } else if (this.check("COLON_COLON_EQUAL")) {
+        this.advance();
+        isMut = true;
+      } else if (this.check("COLON")) {
+        this.advance();
+        typeAnnotation = this.parseTypeExpr();
+        if (this.check("COLON_COLON_EQUAL")) {
+          this.advance();
+          isMut = true;
+        } else if (this.check("COLON_EQUAL")) {
+          this.advance();
+          isMut = false;
+        } else if (this.check("EQUAL")) {
+          this.advance();
+          isMut = false;
+        } else {
+          throw new ParserError(
+            "Expected ':=', '::=', or '=' after type annotation in variable declaration",
+            this.current().span,
+          );
+        }
+      } else {
+        throw new ParserError(
+          "Expected ':=', '::=', or ':' in variable declaration",
+          this.current().span,
+        );
+      }
     }
 
-    const name = this.parseContextualIdentOrString("Expected variable identifier");
-
-    let typeAnnotation: TypeExpr | undefined;
-    if (this.check("COLON")) {
-      this.advance();
-      typeAnnotation = this.parseTypeExpr();
-    }
-
-    this.consume("EQUAL", "Expected '=' in variable declaration");
     const value = this.parseExpr();
+    this.consumeStatementSeparator();
 
     return {
       kind: "VarDecl",
@@ -1484,6 +1556,71 @@ export class Parser {
       this.advance();
       this.consumeStatementSeparator();
       return null;
+    }
+
+    if (this.isIdentOrKeyword(this.current())) {
+      if (this.peek(1).kind === "COLON_EQUAL") {
+        const startSpan = this.current().span;
+        const name = this.advance().value;
+        this.advance(); // consume ':='
+        const init = this.parseExpr();
+        this.consumeStatementSeparator();
+        return {
+          kind: "LetBinding",
+          name,
+          isMut: false,
+          typeAnnotation: null,
+          init,
+          span: mergeSpans(startSpan, init.span),
+        };
+      }
+      if (this.peek(1).kind === "COLON_COLON_EQUAL") {
+        const startSpan = this.current().span;
+        const name = this.advance().value;
+        this.advance(); // consume '::='
+        const init = this.parseExpr();
+        this.consumeStatementSeparator();
+        return {
+          kind: "LetBinding",
+          name,
+          isMut: true,
+          typeAnnotation: null,
+          init,
+          span: mergeSpans(startSpan, init.span),
+        };
+      }
+      if (this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead()) {
+        const startSpan = this.current().span;
+        const name = this.advance().value;
+        this.advance(); // consume ':'
+        const typeAnnotation = this.parseTypeExpr();
+        let isMut = false;
+        if (this.check("COLON_COLON_EQUAL")) {
+          isMut = true;
+          this.advance();
+        } else if (this.check("COLON_EQUAL")) {
+          isMut = false;
+          this.advance();
+        } else if (this.check("EQUAL")) {
+          isMut = false;
+          this.advance();
+        } else {
+          throw new ParserError(
+            "Expected ':=', '::=', or '=' after type annotation in variable declaration",
+            this.current().span,
+          );
+        }
+        const init = this.parseExpr();
+        this.consumeStatementSeparator();
+        return {
+          kind: "LetBinding",
+          name,
+          isMut,
+          typeAnnotation,
+          init,
+          span: mergeSpans(startSpan, init.span),
+        };
+      }
     }
 
     // Expression statement or Assignment statement

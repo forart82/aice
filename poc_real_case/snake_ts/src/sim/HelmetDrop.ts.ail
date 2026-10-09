@@ -34,7 +34,7 @@ pub class HelmetDrop:
       SpawnScale = Math.min(1, SpawnScale + dt * 4)
     X += Vx * dt
     Y += Vy * dt
-    let drag = MathX.decay(0.9, dt)
+    drag := MathX.decay(0.9, dt)
     Vx *= drag
     Vy *= drag
   fn update(dt:int) :

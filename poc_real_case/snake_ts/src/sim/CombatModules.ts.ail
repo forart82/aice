@@ -24,14 +24,14 @@ type ModuleActionHandler = (ModuleActionContext) => void
 const _cachedNearestTarget: unknown = { x: 0, y: 0 }
 
 fn findNearestTarget(ctx:ModuleActionContext, maxRange:int) -> Option[unknown]:
-  let enemies = World.getEnemies(ctx.world)
-  let mut found = false
-  let mut bestX = 0
-  let mut bestY = 0
-  let mut minDist = maxRange
+  enemies := World.getEnemies(ctx.world)
+  found ::= false
+  bestX ::= 0
+  bestY ::= 0
+  minDist ::= maxRange
   if enemies != nil:
     nil
-  let bosses = World.getBosses(ctx.world)
+  bosses := World.getBosses(ctx.world)
   if found != nil:
     _cachedNearestTarget.x = bestX
     _cachedNearestTarget.y = bestY
@@ -46,25 +46,25 @@ pub class ModuleActionRegistry:
   static fn has(key:str) -> bool = _handlers.has(key)
   static fn getRegisteredKeys() -> [str] = Array.from(_handlers.keys())
   static fn execute(ctx:ModuleActionContext) :
-    let handler = _handlers.at(ctx.moduleType) ?? nil
+    handler := _handlers.at(ctx.moduleType) ?? nil
     if handler != nil:
       handler(ctx)
 
 fn executeHeadModules(sys:CombatSystem, dt:int, world:World) :
-  let player = World.getPlayer(world)
+  player := World.getPlayer(world)
   if not player or not (player.alive ?? player.Alive):
     ret
-  let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
-  let px = player.x ?? player.X
-  let py = player.y ?? player.Y
-  let pa = player.angle ?? player.Angle
-  let headMods = player.headModules or player.HeadModules
+  dmgBonus := player.damageBonus ?? player.DamageBonus ?? 1
+  px := player.x ?? player.X
+  py := player.y ?? player.Y
+  pa := player.angle ?? player.Angle
+  headMods := player.headModules or player.HeadModules
   if headMods != nil and typeof(headMods) == "object":
     if not player.headModuleTimers:
       player.headModuleTimers = {  }
-    let timers = player.headModuleTimers
+    timers := player.headModuleTimers
     for [mType, mLvl] in Object.entries(headMods):
       if not mType or typeof(mLvl) != "number" or mLvl <= 0:
         nil
-      let ctx:ModuleActionContext = { sys, dt, world, player, moduleType: mType, level: mLvl, isHead: true, originX: px, originY: py, angle: pa, dmgBonus, getTimer: fn() = timers[mType] or 0, setTimer: fn(val:unknown) = nil }
+      ctx:ModuleActionContext := { sys, dt, world, player, moduleType: mType, level: mLvl, isHead: true, originX: px, originY: py, angle: pa, dmgBonus, getTimer: fn() = timers[mType] or 0, setTimer: fn(val:unknown) = nil }
       ModuleActionRegistry.execute(ctx)

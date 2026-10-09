@@ -53,7 +53,7 @@ pub class Enemy:
       Type = type
     else:
       Type = "scarab"
-    let def = GameData.Enemies.Get(Type) ?? GameData.Enemies.Get("scarab")
+    def := GameData.Enemies.Get(Type) ?? GameData.Enemies.Get("scarab")
     if floor > 0:
       Floor = floor
     else:
@@ -81,7 +81,7 @@ pub class Enemy:
       ret
     if HitFlash > 0:
       HitFlash = Math.max(0, HitFlash - dt * 6)
-    let burn = Status.Update(dt)
+    burn := Status.Update(dt)
     if burn > 0:
       this.ApplyDamage(burn, false)
     if Dead != nil:
@@ -90,19 +90,19 @@ pub class Enemy:
       ret
     if StasisTimer > 0:
       StasisTimer = Math.max(0, StasisTimer - dt)
-    let stasisMult = StasisTimer > 0 and 0.2 or 1
-    let speedMult = Status.SpeedMult * stasisMult * world.TimeScale != 0 and world.TimeScale or 1
-    let tx = target.X ?? target.x
-    let ty = target.Y ?? target.y
-    let dx = tx - X
-    let dy = ty - Y
-    let dist = MathX.safeLen(dx, dy)
-    let ux = dx / dist
-    let uy = dy / dist
+    stasisMult := StasisTimer > 0 and 0.2 or 1
+    speedMult := Status.SpeedMult * stasisMult * world.TimeScale != 0 and world.TimeScale or 1
+    tx := target.X ?? target.x
+    ty := target.Y ?? target.y
+    dx := tx - X
+    dy := ty - Y
+    dist := MathX.safeLen(dx, dy)
+    ux := dx / dist
+    uy := dy / dist
     Angle = Math.atan2(dy, dx)
-    let pad = Radius
-    let aw = world.ArenaW ?? world.arenaW
-    let ah = world.ArenaH ?? world.arenaH
+    pad := Radius
+    aw := world.ArenaW ?? world.arenaW
+    ah := world.ArenaH ?? world.arenaH
     X = MathX.clamp(X, pad, aw - pad)
     Y = MathX.clamp(Y, pad, ah - pad)
   fn update(dt:int, target:SnakePlayer, world:World) :
@@ -110,7 +110,7 @@ pub class Enemy:
   fn ApplyDamage(amount:int, showFlash:unknown = true) -> bool:
     if Dead or SpawnTimer > 0:
       ret false
-    let dmg = amount * Status.DamageTakenMult
+    dmg := amount * Status.DamageTakenMult
     Hp -= dmg
     if showFlash != nil:
       HitFlash = 1
@@ -122,7 +122,7 @@ pub class Enemy:
   fn applyDamage(amount:int, showFlash:unknown = true) -> bool = this.ApplyDamage(amount, showFlash)
   fn TakeDamage(amount:int, _source:unknown) -> int:
     SpawnTimer = 0
-    let before = Hp
+    before := Hp
     this.ApplyDamage(amount, true)
     before - Hp
   fn takeDamage(amount:int, source:unknown) -> int = this.TakeDamage(amount, source)

@@ -56,15 +56,15 @@ pub class BossRushGauntlet:
   fn Start(engine:GameEngine) :
     this.start(engine)
   fn spawnBossForWave(waveIdx:int, engine:GameEngine) -> Boss:
-    let safeIdx = Math.max(0, Math.min(GAUNTLET_BOSS_ARCHETYPES.length - 1, waveIdx))
-    let arch = GAUNTLET_BOSS_ARCHETYPES[safeIdx]
-    let arenaW = engine?.ArenaW ?? engine?.arenaW ?? 1800
-    let arenaH = engine?.ArenaH ?? engine?.arenaH ?? 1800
-    let floor = engine?.CurrentFloor ?? engine?.currentFloor ?? 8
-    let spreadFraction = safeIdx + 1 / state.totalBosses + 1
-    let startX = arenaW * 0.15 + spreadFraction * 0.7
-    let startY = arenaH * 0.22 + safeIdx % 2 * 0.12
-    let boss = nil
+    safeIdx := Math.max(0, Math.min(GAUNTLET_BOSS_ARCHETYPES.length - 1, waveIdx))
+    arch := GAUNTLET_BOSS_ARCHETYPES[safeIdx]
+    arenaW := engine?.ArenaW ?? engine?.arenaW ?? 1800
+    arenaH := engine?.ArenaH ?? engine?.arenaH ?? 1800
+    floor := engine?.CurrentFloor ?? engine?.currentFloor ?? 8
+    spreadFraction := safeIdx + 1 / state.totalBosses + 1
+    startX := arenaW * 0.15 + spreadFraction * 0.7
+    startY := arenaH * 0.22 + safeIdx % 2 * 0.12
+    boss := nil
     if Array.isArray(engine?.ActiveBosses):
       engine.ActiveBosses.push(boss)
     trackedBosses.push({ boss, dead: false })
@@ -81,14 +81,14 @@ pub class BossRushGauntlet:
   fn update(dt:int, engine:GameEngine) :
     if not state.active or state.victory or state.defeat:
       ret
-    let player = engine?.Player ?? engine?.player
+    player := engine?.Player ?? engine?.player
     if player != nil and player.Alive == false or player.alive == false or player.Hp <= 0 or player.hp <= 0:
       this.triggerDefeat(engine)
       ret
     if state.bossesSpawned < state.totalBosses:
       state.waveTimer = state.waveTimer - dt
       if state.waveTimer <= 0:
-        let nextIdx = state.bossesSpawned
+        nextIdx := state.bossesSpawned
         state.waveIndex = nextIdx
         this.spawnBossForWave(nextIdx, engine)
         state.bossesSpawned = state.bossesSpawned + 1
@@ -112,7 +112,7 @@ pub class BossRushGauntlet:
   fn triggerDefeat(engine:GameEngine) :
     state.defeat = true
     state.active = false
-    let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
+    meta := engine?.meta ?? engine?.Meta ?? MetaProgression.instance
     if meta != nil and typeof(meta.resetUniqueHelmets) == "function":
       meta.resetUniqueHelmets()
     if typeof(engine?.HandleGameOver) == "function":
@@ -126,16 +126,16 @@ pub class BossRushGauntlet:
   fn triggerVictory(engine:GameEngine) :
     state.victory = true
     state.active = false
-    let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
+    meta := engine?.meta ?? engine?.Meta ?? MetaProgression.instance
     if meta != nil:
       meta.Has9thHelmet = true
       meta.has9thHelmet = true
       if Array.isArray(meta.Helmets):
-        let hasNinth = meta.Helmets.some(fn(h:unknown) = h.id or h.Id == THE_NINTH_HELMET.id)
+        hasNinth := meta.Helmets.some(fn(h:unknown) = h.id or h.Id == THE_NINTH_HELMET.id)
         if not hasNinth and typeof(meta.AddHelmet) == "function":
           meta.AddHelmet(THE_NINTH_HELMET)
       if Array.isArray(meta.UniqueHelmets):
-        let hasNinthUnique = meta.UniqueHelmets.some(fn(h:unknown) = typeof(h) == "string" and h == THE_NINTH_HELMET.id or h.id or h.Id == THE_NINTH_HELMET.id)
+        hasNinthUnique := meta.UniqueHelmets.some(fn(h:unknown) = typeof(h) == "string" and h == THE_NINTH_HELMET.id or h.id or h.Id == THE_NINTH_HELMET.id)
         if not hasNinthUnique:
           meta.UniqueHelmets.push(THE_NINTH_HELMET.id)
       if typeof(meta.Save) == "function":

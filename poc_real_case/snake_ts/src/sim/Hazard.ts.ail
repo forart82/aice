@@ -27,7 +27,7 @@ pub class Hazard:
   fn get_telegraphMax() = TelegraphMax; fn set_telegraphMax(v) = TelegraphMax = v
   fn constructor(xOrOpts:int | unknown, y:unknown = 0, type:unknown = "magma", opts:HazardOpts = {  }):
     if typeof(xOrOpts) == "object" and xOrOpts != nil:
-      let o = xOrOpts
+      o := xOrOpts
       X = o.X ?? o.x ?? 0
       Y = o.Y ?? o.y ?? 0
       Type = o.Type ?? o.type ?? "magma"
@@ -35,7 +35,7 @@ pub class Hazard:
       MaxLife = Hazard.or(o.Life ?? o.life, 3)
       Life = MaxLife
       Dps = Hazard.or(o.Dps ?? o.dps, 0)
-      let ow = o.Owner ?? o.owner
+      ow := o.Owner ?? o.owner
       if ow != nil and ow.length > 0:
         Owner = ow
       else:
@@ -51,7 +51,7 @@ pub class Hazard:
       MaxLife = Hazard.or(opts.Life ?? opts.life, 3)
       Life = MaxLife
       Dps = Hazard.or(opts.Dps ?? opts.dps, 0)
-      let ow = opts.Owner ?? opts.owner
+      ow := opts.Owner ?? opts.owner
       if ow != nil and ow.length > 0:
         Owner = ow
       else:

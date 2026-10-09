@@ -42,12 +42,12 @@ pub class Projectile:
   fn constructor(xOrOpts:int | unknown, y:unknown = 0, angle:unknown = 0, speed:unknown = 0, damage:unknown = 0, source:unknown = "player", color:str, opts:ProjectileOpts = {  }):
     Id = -Projectile._projectileId
     if typeof(xOrOpts) == "object" and xOrOpts != nil:
-      let o = xOrOpts
+      o := xOrOpts
       X = o.X ?? o.x ?? 0
       Y = o.Y ?? o.y ?? 0
-      let spd = o.Speed ?? o.speed ?? o.Vx != undefined and o.Vy != undefined and MathX.hypot(o.Vx, o.Vy) or o.vx != undefined and o.vy != undefined and MathX.hypot(o.vx, o.vy) or 0
+      spd := o.Speed ?? o.speed ?? o.Vx != undefined and o.Vy != undefined and MathX.hypot(o.Vx, o.Vy) or o.vx != undefined and o.vy != undefined and MathX.hypot(o.vx, o.vy) or 0
       Speed = spd
-      let ang = o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and Math.atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and Math.atan2(o.vy, o.vx) or 0
+      ang := o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and Math.atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and Math.atan2(o.vy, o.vx) or 0
       Angle = ang
       Vx = o.Vx ?? o.vx ?? Math.cos(Angle) * Speed
       Vy = o.Vy ?? o.vy ?? Math.sin(Angle) * Speed
@@ -64,7 +64,7 @@ pub class Projectile:
       Pierce = Projectile.or(o.Pierce ?? o.pierce, 0)
       Burn = Projectile.or(o.Burn ?? o.burn, 0)
       Chill = Projectile.or(o.Chill ?? o.chill, 0)
-      let tr = o.Trail ?? o.trail
+      tr := o.Trail ?? o.trail
       Trail = tr != false
       Wobble = Projectile.or(o.Wobble ?? o.wobble, 0)
     else:
@@ -90,7 +90,7 @@ pub class Projectile:
       Pierce = Projectile.or(opts.Pierce ?? opts.pierce, 0)
       Burn = Projectile.or(opts.Burn ?? opts.burn, 0)
       Chill = Projectile.or(opts.Chill ?? opts.chill, 0)
-      let tr = opts.Trail ?? opts.trail
+      tr := opts.Trail ?? opts.trail
       Trail = tr != false
       Wobble = Projectile.or(opts.Wobble ?? opts.wobble, 0)
     Dead = false
@@ -102,15 +102,15 @@ pub class Projectile:
       fallback
   fn Update(dt:int, target:Option[Vec2]) :
     if Homing > 0 and target:
-      let tx = target.X ?? target.x
-      let ty = target.Y ?? target.y
+      tx := target.X ?? target.x
+      ty := target.Y ?? target.y
       if typeof(tx) == "number" and typeof(ty) == "number" and Number.isFinite(tx) and Number.isFinite(ty):
-        let desired = Math.atan2(ty - Y, tx - X)
+        desired := Math.atan2(ty - Y, tx - X)
         Angle += MathX.clamp(MathX.angleDelta(Angle, desired), -Homing * dt, Homing * dt)
         Vx = Math.cos(Angle) * Speed
         Vy = Math.sin(Angle) * Speed
     if Wobble > 0:
-      let off = Math.sin(MaxLife - Life * 12) * Wobble
+      off := Math.sin(MaxLife - Life * 12) * Wobble
       X += Math.cos(Angle + Math.PI / 2) * off * dt
       Y += Math.sin(Angle + Math.PI / 2) * off * dt
     X += Vx * dt
