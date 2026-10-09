@@ -63,18 +63,18 @@ export interface TriviaItem {
 ### 2.2 Inline Trivia Manifest Representation
 For single-file compilation where external sidecar files are unwanted, AIL allows embedding the trivia table directly inside the module manifest:
 
-```lisp
-(@module app/service
-  (* trivia [
-    (% id "node_0" leading "// SPDX-License-Identifier: MIT\n// Core service definition")
-    (% id "node_1" trailing "// Inline explanation")
-  ] *)
+```text
+module app/service
 
-  (! startService (-> () !void)
-    (do (console.log "Service started"))
-  )
-)
+trivia:
+  "fn:startService":
+    leading: "// SPDX-License-Identifier: MIT\n// Core service definition"
+    trailing: "// Inline explanation"
+
+fn startService() -> void:
+  console.log("Service started")
 ```
+
 
 ---
 

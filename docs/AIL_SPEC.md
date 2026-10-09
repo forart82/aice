@@ -1,260 +1,231 @@
-# AIL (AI Language): Formal Language & Type Calculus Specification
+# AIL Language Specification (Version 2.0 - BPE-Tuned Standard)
 
-> **Version**: 1.0.0-PROD  
-> **Status**: Authoritative Architectural Standard  
-> **Target Models**: Gemini 3.8 Flash / Pro, Claude 3.7 Sonnet, GPT-4o  
-> **File Convention**: `*.XX.ail` $\iff$ `*.XX`
-
----
-
-## 1. Philosophical Foundations & Tokenomics
-
-Modern Large Language Models (LLMs) operate via subword tokenization algorithms (Byte-Pair Encoding and SentencePiece Unigram) using fixed vocabularies between 32,000 and 256,000 tokens. Conventional programming languages impose severe token fertility penalties on neural decoders due to **human-centric syntactic scaffolding**:
-- Redundant closing delimiters: `</div>`, `</section>`, `}`
-- Repetitive ceremonial keywords: `export function`, `interface`, `public static void`
-- Line and item separators: `;`, `,`
-- Syntactic ambiguity: multiple equivalent forms to express identical AST structures (e.g. `fn() vs () => {}`, inline types vs interfaces).
-
-### 1.1 The Token Compression Formulation
-The token efficiency ratio $C_{\text{ratio}}$ is defined as:
-$$C_{\text{ratio}} = 1 - \frac{T(\text{AIL})}{T(\text{Raw})}$$
-where $T(S)$ denotes the token length under the SentencePiece/BPE tokenizer. AIL systematically achieves:
-$$0.50 \le C_{\text{ratio}} \le 0.65$$
-across TypeScript, HTML5, CSS, Python, and JSON.
-
-### 1.2 Core Language Invariants
-1. **Homoiconic Prefix Tree**: All expressions are parenthesized prefix forms `(op arg1 arg2 ...)`. Code is represented as pure data.
-2. **Canonical Univalence**: There is exactly **one** valid AIL syntax per computational intent. This eliminates branching token entropy during autoregressive generation.
-3. **Sound Typing & Algebraic Error Handling**: No untyped `any` escapes. All fallible operations return algebraic `Result[T, E]` types with compile-time unwrap `?`.
-4. **Bidirectional Invertibility**: Any codebase can be losslessly compiled from or decompiled to AIL via mathematically proven lens transformations.
+> **Status**: Official Normative Specification  
+> **Theoretical Basis**: Intent-Based Intermediate Representation, BPE Token Economics, and Asymmetric Lens Calculus  
+> **Target Runtimes**: TypeScript (ES2022/NodeNext/TSX), Python (3.12+), Rust (2021), HTML5/CSS3  
 
 ---
 
-## 2. Canonical File Naming Standard: `*.XX.ail`
+## 1. Formal Grammar (EBNF)
 
-Every AIL file targeting compilation to target extension `XX` adheres to the strict bijective naming convention:
-
-$$\text{Source Target File } (*.XX) \iff \text{AIL Source File } (*.XX.ail)$$
-
-| Target Extension (`XX`) | AIL Source File | Target Domain & Framework |
-| :--- | :--- | :--- |
-| `*.ts` | `*.ts.ail` | Strict TypeScript ES2022 / NodeNext ESM |
-| `*.tsx` | `*.tsx.ail` | React 19 TypeScript JSX |
-| `*.html` | `*.html.ail` | HTML5 Document Structure & Semantic Web |
-| `*.css` | `*.css.ail` | Modern CSS3 & Tailwind CSS v4 |
-| `*.scss` | `*.scss.ail` | Sassy CSS Preprocessor |
-| `*.py` | `*.py.ail` | Python 3.12+ (FastAPI / Pydantic) |
-| `*.rs` | `*.rs.ail` | Rust (Axum / Actix memory-safe backend) |
-| `*.go` | `*.go.ail` | Go (Net/HTTP / Gin microservices) |
-| `*.php` | `*.php.ail` | Modern PHP 8.3+ classes & controllers |
-| `*.json` | `*.json.ail` | JSON Configuration & REST interchange |
-| `*.yaml`, `*.yml` | `*.yaml.ail` | OpenAPI 3.0 / Docker / CI specifications |
-| `*.graphql` | `*.graphql.ail` | GraphQL Schema Definition Language (SDL) |
-
----
-
-## 3. Formal EBNF Grammar
-
-The grammar of AIL is context-free, deterministic, and parsed in linear $O(N)$ time with zero lookahead backtracking:
+AIL uses an **Indentation-Delimited Surface Grammar** backed by a two-stage lexer that converts layout into logical `NEWLINE`, `INDENT`, and `DEDENT` tokens. The grammar is **permissive**: it optionally accepts curly braces `{}` and semicolons `;` when operating in whitespace-sensitive patch environments.
 
 ```ebnf
-AILDocument    ::= WorkspaceDecl | ModuleDecl
+(* Top-level Module *)
+Module          ::= "module" ModulePath NEWLINE ModuleItem*
+ModulePath      ::= IDENT ("/" IDENT)*
+ModuleItem      ::= ImportDecl | TypeDecl | FunctionDecl | ComponentDecl | StyleDecl
 
-WorkspaceDecl  ::= "(@" "workspace" StringLiteral Manifest? FileDecl* ")"
-FileDecl       ::= "(@" "file" StringLiteral ModuleDecl ")"
+(* Imports & Dependencies *)
+ImportDecl      ::= "from" STRING "import" (IDENT ("," IDENT)* | "*") NEWLINE
 
-ModuleDecl     ::= "(@" "module" Symbol Manifest? Entity* ")"
-Manifest       ::= "(*" ManifestItem* "*)"
-ManifestItem   ::= Symbol Value
+(* Type & Struct Declarations *)
+TypeDecl        ::= "type" IDENT TypeParams? ":" (NEWLINE INDENT FieldList DEDENT | InlineFieldList NEWLINE)
+                  | "enum" IDENT TypeParams? ":" NEWLINE INDENT EnumVariants DEDENT
+TypeParams      ::= "[" IDENT ("," IDENT)* "]"
+FieldList       ::= (FieldDecl NEWLINE)+
+InlineFieldList ::= FieldDecl ("," FieldDecl)*
+FieldDecl       ::= IDENT Sigil? (":" TypeExpr)? ("=" Expr)?
+Sigil           ::= "!s" | "!i" | "!f" | "!b" | "!" | "?"
+EnumVariants    ::= (IDENT ("(" (TypeExpr ("," TypeExpr)*)? ")")? NEWLINE)+
 
-Entity         ::= ImportDecl
-                 | TypeDecl
-                 | FunctionDecl
-                 | ComponentDecl
-                 | StyleDecl
-                 | AssetDecl
-                 | ConfigDecl
+(* Type Expressions *)
+TypeExpr        ::= PrimitiveType
+                  | ArrayType
+                  | RecordType
+                  | ResultType
+                  | OptionType
+                  | RefinementType
+                  | NamedType
 
-ImportDecl     ::= "(deps" "(" ImportBinding* ")" ")"
-ImportBinding  ::= "(" StringLiteral Symbol* ")"
+PrimitiveType   ::= "str" | "int" | "float" | "num" | "bool" | "byte" | "char" | "void" | "nil"
+ArrayType       ::= "[" TypeExpr "]"
+RecordType      ::= "{" (IDENT ":" TypeExpr ("," IDENT ":" TypeExpr)*)? "}"
+ResultType      ::= "Result" "[" TypeExpr "," TypeExpr "]"
+OptionType      ::= TypeExpr "?" | "Option" "[" TypeExpr "]"
+RefinementType  ::= "{" IDENT ":" PrimitiveType "|" Expr "}"
+NamedType       ::= IDENT ("[" TypeExpr ("," TypeExpr)* "]")?
 
-TypeDecl       ::= "(:" Symbol TypeExpr ")"
-TypeExpr       ::= PrimitiveType 
-                 | RefinementType 
-                 | UnionType 
-                 | RecordType 
-                 | TypestateType 
-                 | EffectType 
-                 | ArrayType
-                 | Symbol
+(* Function Declarations *)
+FunctionDecl    ::= "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? ":" NEWLINE Block
+                  | "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? "=" Expr NEWLINE
+ParamList       ::= Param ("," Param)*
+Param           ::= IDENT (":" TypeExpr)? ("=" Expr)?
 
-PrimitiveType  ::= "!u" | "!i" | "!f" | "!s" | "!b" | "!void" | "!unknown" | "!nil"
-ArrayType      ::= "[" TypeExpr "]"
-RefinementType ::= "(?:" Symbol PrimitiveType Expr ")"
-UnionType      ::= "(|" TypeExpr+ ")"
-RecordType     ::= "(%" (Symbol TypeExpr)* ")"
-TypestateType  ::= "(~" Symbol "->" Symbol ")"
-EffectType     ::= "(!^" TypeExpr "[" Symbol* "]" ")"
+(* Statements & Blocks *)
+Block           ::= INDENT Statement+ DEDENT
+Statement       ::= LetBinding
+                  | ValBinding
+                  | MutBinding
+                  | AssignStmt
+                  | ReturnStmt
+                  | ExprStmt
+                  | IfStmt
+                  | MatchStmt
+                  | ForStmt
 
-FunctionDecl   ::= "(!" Symbol Signatures Expr ")"
-Signatures     ::= "(->" "(" Param* ")" TypeExpr ")"
-Param          ::= Symbol TypeExpr
+LetBinding      ::= "let" IDENT (":" TypeExpr)? "=" Expr NEWLINE
+ValBinding      ::= "val" IDENT (":" TypeExpr)? "=" Expr NEWLINE
+MutBinding      ::= "mut" IDENT (":" TypeExpr)? "=" Expr NEWLINE
+AssignStmt      ::= IDENT "=" Expr NEWLINE
+ReturnStmt      ::= "ret" Expr? NEWLINE
+ExprStmt        ::= Expr NEWLINE  (* Trailing expression in block body acts as implicit return *)
 
-ComponentDecl  ::= "(#" Symbol PropContract LayoutNode ")"
-PropContract   ::= "(%" (Symbol TypeExpr)* ")"
+IfStmt          ::= "if" Expr ":" NEWLINE Block ("elif" Expr ":" NEWLINE Block)* ("else" ":" NEWLINE Block)?
+MatchStmt       ::= "match" Expr ":" NEWLINE INDENT (MatchCase)+ DEDENT
+MatchCase       ::= Pattern "=>" (Expr NEWLINE | NEWLINE Block)
+Pattern         ::= Literal | IDENT | IDENT "(" (Pattern ("," Pattern)*)? ")" | "_"
 
-LayoutNode     ::= TagNode | ConditionalLayout | LoopLayout | TextNode
-TagNode        ::= "(<" Symbol AttrMap LayoutNode* ">)"
-AttrMap        ::= "(." (Symbol Expr)* ".)"
-ConditionalLayout ::= "(?" Expr LayoutNode LayoutNode? ")"
-LoopLayout     ::= "(*" Expr Symbol LayoutNode ")"
-TextNode       ::= "!str" StringLiteral | "(!val" Expr ")"
+ForStmt         ::= "for" IDENT "in" Expr ":" NEWLINE Block
 
-StyleDecl      ::= "(&" Symbol RuleList ")"
-RuleList       ::= "(+" (Symbol Value)* "+)"
+(* Expressions (Infix Precedence via Pratt Parsing) *)
+Expr            ::= BinaryExpr | UnaryExpr | PostfixExpr | PrimaryExpr
+PostfixExpr     ::= PrimaryExpr "?"                  (* Try unwrap Result/Option *)
+                  | PrimaryExpr "(" ArgList? ")"     (* Call or Positional Struct Constructor *)
+                  | PrimaryExpr "." IDENT            (* Property Access *)
+                  | PrimaryExpr "[" Expr "]"         (* Indexing *)
 
-Expr           ::= Literal 
-                 | Symbol 
-                 | ApplyExpr 
-                 | MatchExpr 
-                 | AssignExpr 
-                 | BlockExpr 
-                 | TryUnpackExpr 
-                 | IfExpr
+BinaryExpr      ::= Expr BinaryOp Expr
+BinaryOp        ::= "+" | "-" | "*" | "/" | "%"
+                  | "==" | "!=" | "<" | "<=" | ">" | ">="
+                  | "and" | "or" | "??"
 
-ApplyExpr      ::= "(" Symbol Expr* ")"
-MatchExpr      ::= "(==" Expr CaseBlock+ ")"
-CaseBlock      ::= "(case" Pattern Expr ")"
-AssignExpr     ::= "(:=" Symbol Expr ")"
-BlockExpr      ::= "(do" Expr+ ")"
-TryUnpackExpr  ::= "(?" Expr ")"
-IfExpr         ::= "(?if" Expr Expr Expr? ")"
+UnaryExpr       ::= ("not" | "-") Expr
 
-Pattern        ::= Literal | Symbol | RecordPattern
-RecordPattern  ::= "(%" (Symbol Pattern)* ")"
+PrimaryExpr     ::= Literal
+                  | IDENT
+                  | "(" Expr ")"
+                  | "[" (Expr ("," Expr)*)? "]"      (* Array Literal *)
+                  | "{" (RecordEntry ("," RecordEntry)*)? "}" (* Record Literal with Spread & Shorthand *)
+                  | IDENT "(" (Expr ("," Expr)*)? ")" (* Positional Struct Constructor *)
+RecordEntry     ::= "..." Expr                       (* Record Spread & Structural Update *)
+                  | IDENT (":" Expr)?                (* Supports { key } punning shorthand *)
+Literal         ::= NUMBER | STRING | BOOLEAN | NIL | HEX_COLOR
 
-Literal        ::= Number | StringLiteral | Boolean | ArrayLiteral | RecordLiteral
-ArrayLiteral   ::= "[" Expr* "]"
-RecordLiteral  ::= "(%" (Symbol Expr)* ")"
+(* Declarative UI Component DSL (56% Token Reduction vs JSX) *)
+ComponentDecl   ::= "component" IDENT ("(" ParamList? ")")? ":" NEWLINE INDENT LayoutNode+ DEDENT
+LayoutNode      ::= IDENT ("(" AttrList? ")")? (":" (NEWLINE INDENT LayoutNode+ DEDENT | STRING))? NEWLINE
+AttrList        ::= Attr ("," Attr)*
+Attr            ::= IDENT ("=" Expr)?
 
-Symbol         ::= [a-zA-Z_][a-zA-Z0-9_\-\.\/:]*
-StringLiteral  ::= '"' [^"]* '"'
-Number         ::= "-"? [0-9]+ ("." [0-9]+)?
-Boolean        ::= "true" | "false"
+(* Style Declarations (Hyper-Dense CSS Property Aliases & Tokens) *)
+StyleDecl       ::= "style" StyleSelector ":" (NEWLINE INDENT StylePropList DEDENT | InlineStylePropList NEWLINE)
+StyleSelector   ::= IDENT | CLASS_NAME | ID_NAME | PSEUDO_CLASS | STRING
+StylePropList   ::= (StyleProperty NEWLINE)+
+InlineStylePropList ::= StyleProperty (";" StyleProperty)*
+StyleProperty   ::= StylePropName ":" StylePropValue
+StylePropName   ::= PropertyAlias | IDENT | CSS_VAR | STRING
+PropertyAlias   ::= "bg" | "bgc" | "bkg" | "rad" | "sh" | "disp" | "pos" | "p" | "m"
+                  | "w" | "h" | "min-w" | "max-w" | "min-h" | "max-h"
+                  | "f" | "fz" | "fw" | "lh" | "ls" | "ta" | "td" | "tt"
+                  | "c" | "cur" | "op" | "trans" | "anim" | "b" | "bb" | "bt" | "bl" | "br"
+                  | "fl" | "fld" | "flw" | "fls" | "flg" | "jc" | "ai" | "ac" | "gap" | "z"
+StylePropValue  ::= HEX_COLOR | NUMBER | IDENT | DIMENSION | COMPOUND_CSS | STRING
 ```
 
 ---
 
-## 4. Formal Type Calculus
+## 2. Canonical Intent Standard Library (CSL)
 
-The type system of AIL enforces static guarantees prior to target language code generation:
+To eliminate LLM API hallucinations (such as confusing JavaScript's `slice`, `substr`, and `substring`), AIL exposes univalent canonical operations that lower to verified target code:
 
-### 4.1 Base Primitives
-- `!u`: Unsigned 32-bit integer ($0 \le x < 2^{32}$)
-- `!i`: Signed 32-bit integer ($-2^{31} \le x < 2^{31}$)
-- `!f`: IEEE 754 64-bit floating-point value
-- `!s`: Immutable UTF-8 string
-- `!b`: Boolean (`true` / `false`)
-- `!void`: Unit / empty value
-- `!unknown`: Safe unknown (requires refinement before use)
-- `!nil`: Null / undefined representation
-
-### 4.2 Refinement Types
-Refinement types attach first-order logical predicates to base primitives:
-$$\tau = \{ x : B \mid \phi(x) \}$$
-
-```lisp
-;; Network Port constrained between 1 and 65535
-(: Port (?: p !i (and (>= p 1) (<= p 65535))))
-
-;; Non-empty identifier string
-(: NonEmptyId (?: id !s (> (id.length) 0)))
-```
-
-### 4.3 Linear Typestates
-Linear typestates prevent resource mismanagement (e.g. WebGL memory leaks, use-after-close of database connections or sockets):
-$$\frac{\Gamma \vdash x : \text{Resource}[\text{Init}]}{\Gamma \vdash (!\text{open} \; x) : \text{Resource}[\text{Active}]}$$
-$$\frac{\Gamma \vdash x : \text{Resource}[\text{Disposed}]}{\Gamma \vdash (!\text{use} \; x) \implies \mathbf{StaticError}(\text{UseAfterDisposal})}$$
-
-```lisp
-;; Connection lifecycle progression
-(: SocketState (~ Disconnected -> Connected -> Closed))
-```
-
-### 4.4 Algebraic Error Handling & Postfix `?`
-Unchecked exceptions (`throw` / `try-catch`) are forbidden in pure computational paths. Fallible functions return `Result[T, E]`:
-
-```lisp
-(: Result[T, E] (| (% ok true value T) (% ok false error E)))
-```
-
-The unwrap expression `(? expr)` compiles to defensive short-circuiting code:
-```lisp
-(:= user (? (fetchUser id)))
-```
-Compiles to TypeScript:
-```typescript
-const _res0 = await fetchUser(id);
-if (!_res0.ok) return _res0;
-const user = _res0.value;
-```
+| Canonical AIL Operation | Semantics | Emitted TypeScript (ES2022) | Emitted Python (3.12+) |
+| :--- | :--- | :--- | :--- |
+| `str.slice(start, end)` | Half-open $[start, end)$, negative index safe | `str.slice(start, end)` | `str[start:end]` |
+| `str.at(index)` | Character at 0-based offset | `str.at(index)` | `str[index]` |
+| `str.len` | UTF-8 codepoint length | `str.length` | `len(str)` |
+| `str.concat(other)` | Pure string concatenation | `str + other` | `str + other` |
+| `str.toInt()` | Fallible parse integer | `parseIntResult(str)` | `int(str)` (guarded) |
+| `list.len` | Element count | `list.length` | `len(list)` |
+| `list.get(index)` | Option-returning safe lookup | `list.at(index) ?? null` | `list[index] if ... else None` |
+| `list.slice(start, end)`| Pure immutable subarray | `list.slice(start, end)` | `list[start:end]` |
+| `list.append(item)` | Pure immutable append | `[...list, item]` | `[*list, item]` |
+| `list.isEmpty()` | True iff length is 0 | `list.length === 0` | `len(list) == 0` |
+| `val?` | Postfix unwrap early return | `if (!res.ok) return res; res.value` | `if not res.get("ok"): return res` |
 
 ---
 
-## 5. Bidirectional Lens Calculus
+## 3. Type Calculus & Sound Refinement Specifications
 
-AIL transpilation is governed by bidirectional asymmetric and symmetric lenses. A lens $L = (\text{Get}, \text{Put})$ mediates between the concrete syntax space $C$ (`*.XX`) and the abstract AIL syntax space $A$ (`*.XX.ail`):
+### 3.1 Base Types & Subtyping Lattice
+```
+                    Any / Unknown
+                          |
+         +----------------+----------------+
+         |                |                |
+        Num             String            Bool
+       /   \              |                |
+     Int   Float         Char             Unit
+      |      |
+      +------+
+         |
+        Nil
+```
+- **Zero Implicit Coercion**: `"5" + 2` is rejected at compile time. Strict explicit parsing `str.toInt()? + 2` is enforced.
+- **Strict Boolean Conditionals**: All `if` and `while` conditions must evaluate strictly to `bool`. Passing numbers, strings, or collections triggers compile-time rejection.
 
-$$\text{Get} : C \to A$$
-$$\text{Put} : A \times C \to C$$
-
-### Lens Laws:
-1. **Stability ($\text{GetPut}$)**: Decompiling concrete source code to AIL and immediately synthesizing it back yields the exact original source code without deviation:
-   $$\forall c \in C : \text{Put}(\text{Get}(c), c) = c$$
-2. **Well-Behavedness ($\text{PutGet}$)**: Synthesizing AIL code to target source and immediately decompiling it back yields the exact original AIL representation:
-   $$\forall a \in A, c \in C : \text{Get}(\text{Put}(a, c)) = a$$
+### 3.2 SMT-Backed Refinement Solving
+Refinements are restricted to **Quantifier-Free Linear Integer Arithmetic (QF-LIA)** and **Equality with Uninterpreted Functions (EUF)**:
+$$\tau \triangleq \{ v : B \mid \phi(v) \}$$
+Subtyping judgment:
+$$\frac{\text{UNSAT}\left( \llbracket \Gamma \rrbracket \wedge \phi_1(v) \wedge \neg \phi_2(v) \right)}{\Gamma \vdash \{ v : B \mid \phi_1(v) \} \le \{ v : B \mid \phi_2(v) \}}$$
+Compile-time bounds checking eliminates out-of-bounds indexing and division-by-zero panics before code generation.
 
 ---
 
-## 6. Concrete Syntax Tree (CST) Trivia Preservation
+## 4. Lossless Lens Theorems & CST Trivia Equations
 
-To satisfy the **Stability Law** without discarding comments, licenses, and whitespace formatting, the AIL compiler utilizes a **Trivia Preservation Table**. Trivia is decoupled from semantic AST nodes and indexed by structural node hashes:
+The bidirectional transpiler is governed by the Bancilhon-Spyratos Constant Complement Theorem:
+$$C \xrightarrow{\sim} A \times \Omega$$
+where $C$ is the target source file, $A$ is the AIL semantic AST, and $\Omega$ is the `CstTriviaTable`.
 
-```json
-{
-  "trivia_table": {
-    "node_#1": {
-      "leading_comments": ["// SPDX-License-Identifier: MIT", "// Main application entrypoint"],
-      "blank_lines_before": 1,
-      "indentation": 2
-    }
-  }
-}
-```
+### 4.1 The Lens Stability Law (GetPut)
+$$\forall c \in C, \quad \text{put}(\text{get}(c), \text{trivia}(c)) \equiv c$$
+An unmutated target file decompiled to AIL and re-emitted produces a **byte-for-byte identical file with 0 git diff**.
 
-When recompiling `*.XX.ail` back to `*.XX`, the emitter re-inserts comments and formatting into their original coordinates.
+### 4.2 The Lens Correctness Law (PutGet)
+$$\forall a \in A, \forall \omega \in \Omega, \quad \text{get}(\text{put}(a, \omega)) \equiv a$$
+Updating the AIL AST and emitting target code preserves all semantic edits when re-read into AIL.
 
 ---
 
-## 7. Machine-Readable Autonomous Diagnostic Schema
+## 5. Empirical Tokenomics Benchmarks
 
-When invariant validation fails, the compiler emits a zero-ambiguity JSON diagnostic payload:
+Empirical BPE token counts measured via `js-tiktoken` across OpenAI `cl100k_base` (GPT-4 / Claude-class) and `o200k_base` (GPT-4o / Gemini-class) subword vocabularies across all 14 real-world reference codebases:
 
-```json
-{
-  "status": "REJECTED",
-  "error_phase": "TYPECHECKING",
-  "file": "src/api/auth.ts.ail",
-  "span": { "line": 18, "col": 12, "symbol": "jwtVerify" },
-  "violation": {
-    "code": "AIL_E1004_UNHANDLED_RESULT",
-    "message": "Call to fallible function returns Result[Token, AuthError] but is not unpacked with (?).",
-    "context": {
-      "inferred_type": "Result[Token, AuthError]",
-      "expected_type": "Token"
-    }
-  },
-  "invariant_correction_rule": "Wrap call expression in (? ...) to unpack payload or return Result.",
-  "candidate_fix": "(:= token (? (jwtVerify rawToken secret)))"
-}
+| File | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `gateway_service.go` | Go | 514 | 250 | **-51.4%** | 523 | 257 | **-50.9%** | -51.7% |
+| `dashboard_card.tsx` | React TSX | 106 | 47 | **-55.7%** | 112 | 48 | **-57.1%** | -57.5% |
+| `auth_service.ts` | TypeScript | 300 | 176 | **-41.3%** | 311 | 182 | **-41.5%** | -47.9% |
+| `order_engine.rs` | Rust | 562 | 348 | **-38.1%** | 565 | 353 | **-37.5%** | -45.6% |
+| `ecommerce_domain.ts` | TypeScript | 5,429 | 3,594 | **-33.8%** | 5,438 | 3,676 | **-32.4%** | -39.4% |
+| `enterprise_portal.html` | HTML5 | 7,102 | 4,899 | **-31.0%** | 7,094 | 4,881 | **-31.2%** | -24.3% |
+| `order_processing_service.ts` | TypeScript | 5,834 | 4,299 | **-26.3%** | 5,799 | 4,347 | **-25.0%** | -32.6% |
+| `page.html` | HTML5 | 171 | 132 | **-22.8%** | 172 | 132 | **-23.3%** | -12.3% |
+| `data_pipeline_models.py` | Python | 4,096 | 3,452 | **-15.7%** | 4,093 | 3,655 | **-10.7%** | -22.5% |
+| `stream_processor_engine.py` | Python | 5,048 | 4,281 | **-15.2%** | 4,927 | 4,297 | **-12.8%** | -20.5% |
+| `enterprise_theme.css` | CSS3 | 6,297 | 5,380 | **-14.6%** | 6,299 | 5,443 | **-13.6%** | -27.4% |
+| `design_system_tokens.css` | CSS3 | 4,097 | 3,511 | **-14.3%** | 4,098 | 3,526 | **-14.0%** | -26.0% |
+| `style.css` | CSS3 | 67 | 59 | **-11.9%** | 67 | 59 | **-11.9%** | -31.9% |
+| `server.py` | Python | 143 | 130 | **-9.1%** | 146 | 131 | **-10.3%** | -19.3% |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TOTAL (All 14 Projects)** | **Aggregated** | **39,766** | **30,558** | **-23.2%** | **39,644** | **30,987** | **-21.8%** | **-28.7%** |
+
+---
+
+## 6. Automated Tokenomics CI Quality Gate & Regression Engine
+
+The AIL compiler toolchain provides first-class verification of token savings and target drift via `ail verify-tokenomics`:
+
+```bash
+# Verify savings and check for zero target drift:
+ail verify-tokenomics examples --check-drift
+
+# Enforce a minimum savings threshold in CI (exits with non-zero code on violation):
+ail verify-tokenomics examples --min-savings 20 --check-drift
+
+# Output machine-readable JSON telemetry for automated LLM self-repair:
+ail verify-tokenomics examples --json
 ```
+
