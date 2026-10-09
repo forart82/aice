@@ -164,6 +164,40 @@ export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
   sbw: "scrollbar-width",
 };
 
+const CSS_COLOR_PALETTES = new Set([
+  "slate",
+  "emerald",
+  "rose",
+  "amber",
+  "indigo",
+  "purple",
+  "blue",
+  "gray",
+  "red",
+  "green",
+]);
+
+export function expandCssTokenValue(val: string): string {
+  return val.replace(/\$([a-zA-Z0-9_.-]+)/g, (_match, tokenName: string) => {
+    const normalized = tokenName.replace(/\./g, "-");
+    const firstPart = normalized.split("-")[0];
+
+    if (CSS_COLOR_PALETTES.has(firstPart)) {
+      return `var(--color-${normalized})`;
+    }
+    if (normalized === "sans" || normalized === "mono") {
+      return `var(--font-${normalized})`;
+    }
+    if (normalized === "fast" || normalized === "normal" || normalized === "smooth") {
+      return `var(--transition-${normalized})`;
+    }
+    if (normalized.startsWith("color-")) {
+      return `var(--${normalized})`;
+    }
+    return `var(--${normalized})`;
+  });
+}
+
 export function toCssProperty(prop: string): string {
   const kebab = prop
     .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
@@ -216,7 +250,8 @@ export class CssEmitter {
 
     for (const prop of decl.properties) {
       const cssProp = toCssProperty(prop.property);
-      this.ctx.writeLine(`${cssProp}: ${prop.value};`);
+      const cssVal = expandCssTokenValue(prop.value);
+      this.ctx.writeLine(`${cssProp}: ${cssVal};`);
     }
 
     this.ctx.dedent();

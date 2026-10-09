@@ -518,6 +518,9 @@ export function scanRawTokens(
       case "#":
         rawTokens.push({ kind: "HASH", value: "#", span: makeSpan(startPos) });
         break;
+      case "$":
+        rawTokens.push({ kind: "DOLLAR", value: "$", span: makeSpan(startPos) });
+        break;
       case ";":
         rawTokens.push({ kind: "SEMICOLON", value: ";", span: makeSpan(startPos) });
         break;

@@ -101,6 +101,7 @@ export type TokenKind =
   | "QUESTION" // ?
   | "BANG" // !
   | "HASH" // #
+  | "DOLLAR" // $
   | "SEMICOLON"; // ;
 
 export interface Token {
@@ -142,6 +143,7 @@ export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
   in: "IN",
   while: "WHILE",
   ret: "RET",
+  return: "RET",
   // Word Operators
   and: "AND",
   or: "OR",
