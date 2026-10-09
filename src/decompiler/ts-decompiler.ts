@@ -1103,7 +1103,7 @@ export class TsDecompiler {
     }
 
     if (ts.isIfStatement(stmt)) {
-      const condition = this.ensureBooleanCondition(this.convertExpression(stmt.expression));
+      const condition = this.convertExpression(stmt.expression);
       let thenBranch: Block;
       if (ts.isBlock(stmt.thenStatement)) {
         thenBranch = this.convertBlock(stmt.thenStatement);
@@ -1119,35 +1119,37 @@ export class TsDecompiler {
       let elseBranch: Block | null = null;
       const elifBranches: { condition: Expr; body: Block; span: Span }[] = [];
 
-      if (stmt.elseStatement) {
-        if (ts.isIfStatement(stmt.elseStatement)) {
-          let elifBody: Block;
-          if (ts.isBlock(stmt.elseStatement.thenStatement)) {
-            elifBody = this.convertBlock(stmt.elseStatement.thenStatement);
-          } else {
-            const single = this.convertStatement(stmt.elseStatement.thenStatement);
-            elifBody = {
-              kind: "Block" as const,
-              statements: single ? [single] : [],
-              span: this.getSpan(stmt.elseStatement.thenStatement),
-            };
-          }
-          const elifCond = this.ensureBooleanCondition(
-            this.convertExpression(stmt.elseStatement.expression),
-          );
-          elifBranches.push({
-            condition: elifCond,
-            body: elifBody,
-            span: this.getSpan(stmt.elseStatement),
-          });
-        } else if (ts.isBlock(stmt.elseStatement)) {
-          elseBranch = this.convertBlock(stmt.elseStatement);
+      let currentElse: ts.Statement | undefined = stmt.elseStatement;
+      while (currentElse && ts.isIfStatement(currentElse)) {
+        let elifBody: Block;
+        if (ts.isBlock(currentElse.thenStatement)) {
+          elifBody = this.convertBlock(currentElse.thenStatement);
         } else {
-          const single = this.convertStatement(stmt.elseStatement);
+          const single = this.convertStatement(currentElse.thenStatement);
+          elifBody = {
+            kind: "Block" as const,
+            statements: single ? [single] : [],
+            span: this.getSpan(currentElse.thenStatement),
+          };
+        }
+        const elifCond = this.convertExpression(currentElse.expression);
+        elifBranches.push({
+          condition: elifCond,
+          body: elifBody,
+          span: this.getSpan(currentElse),
+        });
+        currentElse = currentElse.elseStatement;
+      }
+
+      if (currentElse) {
+        if (ts.isBlock(currentElse)) {
+          elseBranch = this.convertBlock(currentElse);
+        } else {
+          const single = this.convertStatement(currentElse);
           elseBranch = {
             kind: "Block" as const,
             statements: single ? [single] : [],
-            span: this.getSpan(stmt.elseStatement),
+            span: this.getSpan(currentElse),
           };
         }
       }
@@ -1266,21 +1268,6 @@ export class TsDecompiler {
   }
 
   private ensureBooleanCondition(cond: Expr): Expr {
-    if (cond.kind === "IdentifierExpr" || cond.kind === "MemberAccessExpr") {
-      return {
-        kind: "BinaryExpr",
-        operator: "!=",
-        left: cond,
-        right: {
-          kind: "LiteralExpr",
-          literalKind: "nil",
-          value: null,
-          rawValue: "nil",
-          span: cond.span,
-        },
-        span: cond.span,
-      };
-    }
     return cond;
   }
 
@@ -1582,26 +1569,10 @@ export class TsDecompiler {
     // Binary Expressions
     if (ts.isBinaryExpression(expr)) {
       if (expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
-        let leftExpr = this.convertExpression(expr.left);
-        if (leftExpr.kind === "IdentifierExpr" || leftExpr.kind === "MemberAccessExpr") {
-          leftExpr = {
-            kind: "BinaryExpr",
-            operator: "!=",
-            left: leftExpr,
-            right: {
-              kind: "LiteralExpr",
-              literalKind: "nil",
-              value: null,
-              rawValue: "nil",
-              span: leftExpr.span,
-            },
-            span: leftExpr.span,
-          };
-        }
         return {
           kind: "BinaryExpr",
           operator: "and",
-          left: leftExpr,
+          left: this.convertExpression(expr.left),
           right: this.convertExpression(expr.right),
           span: this.getSpan(expr),
         };
@@ -1736,6 +1707,19 @@ export class TsDecompiler {
 
     // Property Access (obj.prop or obj?.prop)
     if (ts.isPropertyAccessExpression(expr)) {
+      if (expr.name.text === "value") {
+        let inner: ts.Expression = expr.expression;
+        if (ts.isParenthesizedExpression(inner)) {
+          inner = inner.expression;
+        }
+        if (ts.isAsExpression(inner) && inner.type.kind === ts.SyntaxKind.AnyKeyword) {
+          return {
+            kind: "PostfixTryExpr",
+            operand: this.convertExpression(inner.expression),
+            span: this.getSpan(expr),
+          };
+        }
+      }
       return {
         kind: "MemberAccessExpr",
         object: this.convertExpression(expr.expression),
