@@ -5,7 +5,9 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { parse } from "../src/core/parser.js";
 import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
@@ -16,11 +18,20 @@ import {
   type TargetLanguage,
 } from "../src/emitters/index.js";
 import { AilLspServer } from "../src/lsp/server.js";
+import { MultiLineReporter } from "../src/runner/index.js";
+import {
+  applyAiShield,
+  checkAiShieldStatus,
+  lockProjectTargets,
+  removeAiShield,
+  unlockProjectTargets,
+} from "../src/shield/index.js";
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
   formatTokenomicsMarkdownTable,
 } from "../src/tokenomics/index.js";
+import { ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
   attemptSelfRepair,
@@ -28,13 +39,14 @@ import {
   formatDiagnosticJson,
   formatDiagnosticText,
 } from "../src/typechecker/diagnostics.js";
+import { watchProject } from "../src/watcher/index.js";
 
 const program = new Command();
 
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.5");
+  .version("0.3.6");
 
 // Command: compile <file>
 program
@@ -267,7 +279,9 @@ program
         if (repairRes.fixed && repairRes.modified) {
           fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
           if (!options.json) {
-            console.log(`💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`);
+            console.log(
+              `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
+            );
             for (const r of repairRes.repairs) {
               console.log(`  - ${r.description}`);
             }
@@ -470,51 +484,447 @@ program
   .option("--check-drift", "Enforce zero target drift against existing compiled files")
   .option("--projects", "Aggregate output by project (1 line per project)")
   .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
-  .action((dir: string, options: { minSavings?: number; checkDrift?: boolean; projects?: boolean; json?: boolean }) => {
-    try {
-      const report = auditTokenomics(dir, {
-        minSavings: options.minSavings,
-        checkDrift: options.checkDrift,
-      });
+  .action(
+    (
+      dir: string,
+      options: { minSavings?: number; checkDrift?: boolean; projects?: boolean; json?: boolean },
+    ) => {
+      try {
+        const report = auditTokenomics(dir, {
+          minSavings: options.minSavings,
+          checkDrift: options.checkDrift,
+        });
 
-      if (options.json) {
-        console.log(JSON.stringify(report, null, 2));
-      } else {
-        console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${dir} ===\n`);
-        if (options.projects) {
-          console.log(formatProjectsMarkdownTable(report));
+        if (options.json) {
+          console.log(JSON.stringify(report, null, 2));
         } else {
-          console.log(formatTokenomicsMarkdownTable(report));
-        }
-        console.log();
+          console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${dir} ===\n`);
+          if (options.projects) {
+            console.log(formatProjectsMarkdownTable(report));
+          } else {
+            console.log(formatTokenomicsMarkdownTable(report));
+          }
+          console.log();
 
-        if (report.driftDetected) {
-          console.error("❌ Target drift detected! Compiled output differs from target file.");
+          if (report.driftDetected) {
+            console.error("❌ Target drift detected! Compiled output differs from target file.");
+          }
+
+          if (options.minSavings !== undefined && !report.passedThreshold) {
+            console.error(
+              `❌ Tokenomics savings threshold violation! Required >= ${options.minSavings}%, but got:`,
+            );
+            console.error(`   cl100k: ${report.aggregate.cl100kSavingsPct.toFixed(1)}%`);
+            console.error(`   o200k:  ${report.aggregate.o200kSavingsPct.toFixed(1)}%`);
+            console.error(`   char:   ${report.aggregate.charSavingsPct.toFixed(1)}%`);
+          }
+
+          if (report.status === "SUCCESS") {
+            console.log(
+              "✔ Tokenomics verification passed: All savings and drift constraints satisfied.",
+            );
+          }
         }
 
-        if (options.minSavings !== undefined && !report.passedThreshold) {
-          console.error(
-            `❌ Tokenomics savings threshold violation! Required >= ${options.minSavings}%, but got:`,
-          );
-          console.error(`   cl100k: ${report.aggregate.cl100kSavingsPct.toFixed(1)}%`);
-          console.error(`   o200k:  ${report.aggregate.o200kSavingsPct.toFixed(1)}%`);
-          console.error(`   char:   ${report.aggregate.charSavingsPct.toFixed(1)}%`);
+        if (report.status === "FAILURE") {
+          process.exit(1);
         }
-
-        if (report.status === "SUCCESS") {
-          console.log(
-            "✔ Tokenomics verification passed: All savings and drift constraints satisfied.",
-          );
-        }
-      }
-
-      if (report.status === "FAILURE") {
+      } catch (err) {
+        console.error("❌ Tokenomics verification error:", err);
         process.exit(1);
       }
+    },
+  );
+
+// Helper to recursively delete .ail and .trivia.json files
+function removeAilAndTriviaFiles(curDir: string): number {
+  let count = 0;
+  if (!fs.existsSync(curDir)) return 0;
+  const entries = fs.readdirSync(curDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === "node_modules" || entry.name === ".git") continue;
+    const fullPath = path.join(curDir, entry.name);
+    if (entry.isDirectory()) {
+      count += removeAilAndTriviaFiles(fullPath);
+    } else if (entry.isFile()) {
+      const lower = entry.name.toLowerCase();
+      if (lower.endsWith(".ail") || lower.endsWith(".trivia.json")) {
+        try {
+          fs.unlinkSync(fullPath);
+          count++;
+        } catch {
+          try {
+            fs.chmodSync(fullPath, 0o644);
+            fs.unlinkSync(fullPath);
+            count++;
+          } catch {
+            // ignore unlink errors
+          }
+        }
+      }
+    }
+  }
+  return count;
+}
+
+// Command: adopt [dir]
+program
+  .command("adopt")
+  .description("Adopt an existing codebase into AIL side-by-side architecture")
+  .argument("[dir]", "Target codebase directory", ".")
+  .option("-c, --concurrency <number>", "Worker concurrency for parallel decompilation", (val) =>
+    Number.parseInt(val, 10),
+  )
+  .option("--no-shield", "Skip generating AI shield rules (.vscode, ignores, AGENTS.md)")
+  .option("--no-lock", "Skip locking target files as read-only (chmod 444)")
+  .option("--overwrite", "Force re-decompilation of existing .ail files")
+  .option("--dry-run", "Calculate plan and tokenomics metrics without mutating disk")
+  .action(
+    async (
+      dir: string,
+      options: {
+        concurrency?: number;
+        shield?: boolean;
+        lock?: boolean;
+        overwrite?: boolean;
+        dryRun?: boolean;
+      },
+    ) => {
+      try {
+        const targetDir = path.resolve(process.cwd(), dir);
+        if (!fs.existsSync(targetDir)) {
+          console.error(`❌ Error: Directory not found: ${dir}`);
+          process.exit(1);
+        }
+
+        const cpus = os.cpus?.().length ? os.cpus().length : 4;
+        const concurrency = Math.max(1, Math.floor(options.concurrency ?? cpus));
+
+        const reporter = new MultiLineReporter({ concurrency });
+
+        const summary = await ingestProjectSideBySide({
+          dir: targetDir,
+          concurrency,
+          reporter,
+          overwrite: Boolean(options.overwrite),
+          dryRun: Boolean(options.dryRun),
+        });
+
+        let shieldApplied = false;
+        let lockSummary = { totalLocked: 0, totalSkipped: 0, totalFailed: 0 };
+
+        if (!options.dryRun) {
+          if (options.shield !== false) {
+            await applyAiShield(targetDir);
+            shieldApplied = true;
+          }
+          if (options.lock !== false) {
+            lockSummary = await lockProjectTargets(targetDir);
+          }
+        }
+
+        console.log(`\n=== AIL Side-by-Side Adoption Summary ===`);
+        console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
+        console.log(
+          `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
+        );
+        console.log(
+          `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
+        );
+        console.log(
+          `AI Shield:           ${
+            options.dryRun
+              ? "💡 Simulated (--dry-run)"
+              : options.shield === false
+                ? "⊘ Skipped (--no-shield)"
+                : shieldApplied
+                  ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md)"
+                  : "✖ Inactive"
+          }`,
+        );
+        console.log(
+          `Permission Locks:    ${
+            options.dryRun
+              ? "💡 Simulated (--dry-run)"
+              : options.lock === false
+                ? "⊘ Skipped (--no-lock)"
+                : `✔ ${lockSummary.totalLocked} target file(s) locked (chmod 444)`
+          }`,
+        );
+
+        if (options.dryRun) {
+          console.log(`\n💡 [DRY-RUN] No changes were written to disk.`);
+        }
+
+        if (summary.totalFailed > 0) {
+          console.error(`\n❌ Failed to decompile ${summary.totalFailed} file(s).`);
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(`❌ Adoption error:`, err);
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: watch [dir] (alias: dev)
+program
+  .command("watch")
+  .alias("dev")
+  .description("Watch .ail files and incrementally recompile side-by-side on change")
+  .argument("[dir]", "Directory to watch for .ail files", ".")
+  .option("--no-lock", "Do not lock compiled target files")
+  .option(
+    "--debounce <ms>",
+    "Debounce time in ms before recompiling",
+    (val) => Number.parseInt(val, 10),
+    50,
+  )
+  .action(
+    async (
+      dir: string,
+      options: {
+        lock?: boolean;
+        debounce?: number;
+      },
+    ) => {
+      try {
+        const targetDir = path.resolve(process.cwd(), dir);
+        if (!fs.existsSync(targetDir)) {
+          console.error(`❌ Error: Directory not found: ${dir}`);
+          process.exit(1);
+        }
+
+        const lockTargets = options.lock !== false;
+        const debounceMs = options.debounce ?? 50;
+
+        console.log(
+          `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
+        );
+        console.log(
+          `   Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"}\n`,
+        );
+
+        const watcher = await watchProject(targetDir, {
+          debounceMs,
+          lockTargets,
+          onCompileSuccess: (ailFile, targetFile, durationMs) => {
+            const relAil = path.relative(process.cwd(), ailFile);
+            const relTarget = path.relative(process.cwd(), targetFile);
+            console.log(`✔ [COMPILE] ${relAil} -> ${relTarget} (${Math.round(durationMs)}ms)`);
+          },
+          onCompileError: (ailFile, error) => {
+            const relAil = path.relative(process.cwd(), ailFile);
+            console.error(`❌ [ERROR] Failed to compile ${relAil}: ${error.message}`);
+          },
+          onFileDeleted: (ailFile, targetFile) => {
+            const relAil = path.relative(process.cwd(), ailFile);
+            const relTarget = path.relative(process.cwd(), targetFile);
+            console.log(`ℹ [DELETE] Removed ${relAil} (target: ${relTarget})`);
+          },
+        });
+
+        const cleanup = async () => {
+          process.stdout.write("\x1B[?25h\n");
+          console.log("Stopping AIL watch daemon...");
+          await watcher.stop();
+          process.exit(0);
+        };
+
+        process.on("SIGINT", cleanup);
+        process.on("SIGTERM", cleanup);
+      } catch (err) {
+        process.stdout.write("\x1B[?25h\n");
+        console.error(`❌ Watcher error:`, err);
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: eject [dir]
+program
+  .command("eject")
+  .description("Eject AIL side-by-side mode: unlock target files and revert AI shields")
+  .argument("[dir]", "Target project directory", ".")
+  .option("--remove-ail", "Delete all .ail and .trivia.json source files")
+  .action(
+    async (
+      dir: string,
+      options: {
+        removeAil?: boolean;
+      },
+    ) => {
+      try {
+        const targetDir = path.resolve(process.cwd(), dir);
+        if (!fs.existsSync(targetDir)) {
+          console.error(`❌ Error: Directory not found: ${dir}`);
+          process.exit(1);
+        }
+
+        // 1. Unlock targets
+        const lockRes = await unlockProjectTargets(targetDir);
+
+        // 2. Remove AI shields
+        const shieldRes = await removeAiShield(targetDir);
+
+        // 3. Optionally remove .ail files
+        let removedAilCount = 0;
+        if (options.removeAil) {
+          removedAilCount = removeAilAndTriviaFiles(targetDir);
+        }
+
+        // 4. Print confirmation
+        console.log(`\n=== AIL Eject Complete ===`);
+        console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
+        console.log(`Unlocked Targets:    ${lockRes.totalUnlocked} file(s) restored to chmod 644`);
+        console.log(
+          `AI Shield:           Reverted (${shieldRes.removedFiles.length} removed, ${shieldRes.revertedFiles.length} restored)`,
+        );
+        console.log(
+          `AIL Source Files:    ${
+            options.removeAil
+              ? `Deleted ${removedAilCount} .ail/.trivia.json files`
+              : "Preserved on disk"
+          }`,
+        );
+        console.log(`Project successfully restored to standard toolchain state.`);
+      } catch (err) {
+        console.error(`❌ Eject error:`, err);
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: shield <action> [dir]
+program
+  .command("shield")
+  .description("Manage AI exclusion rules, cognitive shields, and filesystem locks")
+  .argument("<action>", "Action to perform: apply | remove | status | lock | unlock")
+  .argument("[dir]", "Target project directory", ".")
+  .action(async (action: string, dir: string) => {
+    try {
+      const targetDir = path.resolve(process.cwd(), dir);
+      if (!fs.existsSync(targetDir)) {
+        console.error(`❌ Error: Directory not found: ${dir}`);
+        process.exit(1);
+      }
+
+      switch (action.toLowerCase()) {
+        case "apply": {
+          const res = await applyAiShield(targetDir);
+          console.log(`✔ AI Shield applied to ${path.relative(process.cwd(), targetDir) || "."}:`);
+          console.log(`  - Created files:  ${res.createdFiles.length}`);
+          for (const f of res.createdFiles) {
+            console.log(`    + ${path.relative(process.cwd(), f)}`);
+          }
+          console.log(`  - Modified files: ${res.modifiedFiles.length}`);
+          for (const f of res.modifiedFiles) {
+            console.log(`    ~ ${path.relative(process.cwd(), f)}`);
+          }
+          console.log(`  - Active shields: ${res.activeShields.join(", ") || "none"}`);
+          break;
+        }
+        case "remove": {
+          const res = await removeAiShield(targetDir);
+          console.log(
+            `✔ AI Shield removed from ${path.relative(process.cwd(), targetDir) || "."}:`,
+          );
+          console.log(`  - Removed files:  ${res.removedFiles.length}`);
+          for (const f of res.removedFiles) {
+            console.log(`    - ${path.relative(process.cwd(), f)}`);
+          }
+          console.log(`  - Reverted files: ${res.revertedFiles.length}`);
+          for (const f of res.revertedFiles) {
+            console.log(`    ~ ${path.relative(process.cwd(), f)}`);
+          }
+          break;
+        }
+        case "status": {
+          const status = await checkAiShieldStatus(targetDir);
+          console.log(
+            `=== AI Shield Status: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          console.log(`Active:            ${status.isActive ? "✔ YES" : "✖ NO"}`);
+          console.log(
+            `IDE Settings:      ${status.ideSettingsConfigured ? "✔ Configured (.vscode/settings.json)" : "✖ Not configured"}`,
+          );
+          console.log(
+            `Agent Ignores:     ${status.agentIgnoresConfigured ? "✔ Configured (.cursorignore, etc.)" : "✖ Not configured"}`,
+          );
+          console.log(
+            `Cognitive Rules:   ${status.cognitiveRulesConfigured ? "✔ Configured (AGENTS.md, .cursorrules)" : "✖ Not configured"}`,
+          );
+          for (const [file, active] of Object.entries(status.details)) {
+            if (typeof active === "boolean") {
+              console.log(`  - ${file}: ${active ? "✔ active" : "✖ inactive"}`);
+            }
+          }
+          break;
+        }
+        case "lock": {
+          const res = await lockProjectTargets(targetDir);
+          console.log(
+            `✔ Locked ${res.totalLocked} target file(s) in ${path.relative(process.cwd(), targetDir) || "."} (chmod 444).`,
+          );
+          if (res.totalSkipped > 0) {
+            console.log(`  (${res.totalSkipped} file(s) were already locked)`);
+          }
+          if (res.totalFailed > 0) {
+            console.error(`❌ Failed to lock ${res.totalFailed} file(s).`);
+            process.exit(1);
+          }
+          break;
+        }
+        case "unlock": {
+          const res = await unlockProjectTargets(targetDir);
+          console.log(
+            `✔ Unlocked ${res.totalUnlocked} target file(s) in ${path.relative(process.cwd(), targetDir) || "."} (chmod 644).`,
+          );
+          if (res.totalSkipped > 0) {
+            console.log(`  (${res.totalSkipped} file(s) were already writable)`);
+          }
+          if (res.totalFailed > 0) {
+            console.error(`❌ Failed to unlock ${res.totalFailed} file(s).`);
+            process.exit(1);
+          }
+          break;
+        }
+        default: {
+          console.error(
+            `❌ Unknown shield action: '${action}'. Valid actions: apply, remove, status, lock, unlock`,
+          );
+          process.exit(1);
+        }
+      }
     } catch (err) {
-      console.error("❌ Tokenomics verification error:", err);
+      console.error(`❌ Shield error:`, err);
       process.exit(1);
     }
   });
 
-program.parse(process.argv);
+export { program };
+
+const isDirectCliRun = () => {
+  if (!process.argv[1]) return false;
+  try {
+    const thisFile = fileURLToPath(import.meta.url);
+    const invokedFile = fs.realpathSync(process.argv[1]);
+    if (thisFile === invokedFile) return true;
+  } catch {
+    // fallback
+  }
+  return Boolean(
+    (process.argv[1].endsWith("/bin/ail.ts") ||
+      process.argv[1].endsWith("/bin/ail.mjs") ||
+      process.argv[1].endsWith("/bin/ail.js") ||
+      process.argv[1].endsWith("/bin/ail") ||
+      process.argv[1].endsWith("/ail") ||
+      process.argv[1] === "ail") &&
+      !process.argv[1].includes("test") &&
+      !process.argv[1].includes("vitest"),
+  );
+};
+
+if (isDirectCliRun()) {
+  program.parse(process.argv);
+}
