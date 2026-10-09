@@ -391,61 +391,8 @@ export function auditTokenomics(
   };
 }
 
-export function formatSingleFileSummary(f: TokenomicsFileResult): string {
-  const clSign = f.cl100kSavingsPct >= 0 ? "-" : "+";
-  const o2Sign = f.o200kSavingsPct >= 0 ? "-" : "+";
-  const chSign = f.charSavingsPct >= 0 ? "-" : "+";
+export * from "./terminal-formatter.js";
 
-  const clRatio = f.ailCl100k > 0 ? (f.targetCl100k / f.ailCl100k).toFixed(2) : "1.00";
-  const o2Ratio = f.ailO200k > 0 ? (f.targetO200k / f.ailO200k).toFixed(2) : "1.00";
-  const charRatio = f.ailChars > 0 ? (f.targetChars / f.ailChars).toFixed(2) : "1.00";
-
-  let driftStr = "Not verified (run with --check-drift)";
-  if (f.driftChecked) {
-    driftStr = f.drift
-      ? `❌ DRIFT DETECTED (${f.diffSummary ?? "output differs"})`
-      : "✔ ZERO DRIFT (Lossless Bit-Identical)";
-  } else if (f.drift) {
-    driftStr = `❌ DRIFT DETECTED (${f.diffSummary ?? "output differs"})`;
-  }
-
-  const contentWidth = 76;
-  function boxLine(label: string, value: string): string {
-    const text = `  ${label.padEnd(24)} ${value}`;
-    const padding = Math.max(0, contentWidth - text.length);
-    return `│${text}${" ".repeat(padding)}│`;
-  }
-  function titleLine(title: string): string {
-    const text = `  ${title}`;
-    const padding = Math.max(0, contentWidth - text.length);
-    return `│${text}${" ".repeat(padding)}│`;
-  }
-
-  const topBorder = `┌${"─".repeat(contentWidth)}┐`;
-  const midBorder = `├${"─".repeat(contentWidth)}┤`;
-  const botBorder = `└${"─".repeat(contentWidth)}┘`;
-
-  return [
-    topBorder,
-    titleLine(`AIL Token Efficiency Audit: ${f.file}`),
-    midBorder,
-    boxLine("Target Language:", f.targetLang),
-    boxLine(
-      "Tokens (cl100k_base):",
-      `${f.targetCl100k.toLocaleString()} -> ${f.ailCl100k.toLocaleString()} (${clSign}${Math.abs(f.cl100kSavingsPct).toFixed(1)}% savings, ${clRatio}x density)`,
-    ),
-    boxLine(
-      "Tokens (o200k_base):",
-      `${f.targetO200k.toLocaleString()} -> ${f.ailO200k.toLocaleString()} (${o2Sign}${Math.abs(f.o200kSavingsPct).toFixed(1)}% savings, ${o2Ratio}x density)`,
-    ),
-    boxLine(
-      "Raw Characters:",
-      `${f.targetChars.toLocaleString()} -> ${f.ailChars.toLocaleString()} (${chSign}${Math.abs(f.charSavingsPct).toFixed(1)}% savings, ${charRatio}x density)`,
-    ),
-    boxLine("Drift Status:", driftStr),
-    botBorder,
-  ].join("\n");
-}
 
 export function formatTokenomicsMarkdownTable(report: TokenomicsAuditReport): string {
   const lines: string[] = [];

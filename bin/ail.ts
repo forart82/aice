@@ -29,8 +29,10 @@ import {
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
+  formatProjectsTerminalTable,
   formatSingleFileSummary,
   formatTokenomicsMarkdownTable,
+  formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
 import { ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
@@ -47,7 +49,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.12");
+  .version("0.3.13");
 
 // Command: compile <file>
 program
@@ -478,11 +480,18 @@ program
   )
   .option("--check-drift", "Enforce zero target drift against existing compiled files")
   .option("--projects", "Aggregate output by project (1 line per project)")
+  .option("--markdown", "Force standard markdown table output even in interactive terminal")
   .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
   .action(
     (
       targetPath: string,
-      options: { minSavings?: number; checkDrift?: boolean; projects?: boolean; json?: boolean },
+      options: {
+        minSavings?: number;
+        checkDrift?: boolean;
+        projects?: boolean;
+        markdown?: boolean;
+        json?: boolean;
+      },
     ) => {
       try {
         const fullTarget = path.resolve(process.cwd(), targetPath);
@@ -491,6 +500,8 @@ program
           process.exit(1);
         }
         const isFile = fs.statSync(fullTarget).isFile();
+        const isTTY = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
+        const terminalWidth = process.stdout.columns || 80;
 
         const report = auditTokenomics(targetPath, {
           minSavings: options.minSavings,
@@ -501,15 +512,46 @@ program
           console.log(JSON.stringify(report, null, 2));
         } else {
           if (isFile && report.files.length === 1 && !options.projects) {
-            console.log("\n" + formatSingleFileSummary(report.files[0]) + "\n");
+            console.log(
+              "\n" +
+                formatSingleFileSummary(report.files[0], {
+                  width: terminalWidth,
+                  useColor: isTTY,
+                }) +
+                "\n",
+            );
           } else {
-            console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`);
-            if (options.projects) {
-              console.log(formatProjectsMarkdownTable(report));
+            if (options.markdown || !process.stdout.isTTY) {
+              console.log(
+                `\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`,
+              );
+              if (options.projects) {
+                console.log(formatProjectsMarkdownTable(report));
+              } else {
+                console.log(formatTokenomicsMarkdownTable(report));
+              }
+              console.log();
             } else {
-              console.log(formatTokenomicsMarkdownTable(report));
+              console.log();
+              if (options.projects) {
+                console.log(
+                  formatProjectsTerminalTable(report, {
+                    width: terminalWidth,
+                    useColor: isTTY,
+                    title: targetPath,
+                  }),
+                );
+              } else {
+                console.log(
+                  formatTokenomicsTerminalTable(report, {
+                    width: terminalWidth,
+                    useColor: isTTY,
+                    title: targetPath,
+                  }),
+                );
+              }
+              console.log();
             }
-            console.log();
           }
 
           if (report.driftDetected) {

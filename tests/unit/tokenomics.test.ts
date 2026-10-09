@@ -9,8 +9,10 @@ import { describe, expect, it } from "vitest";
 import {
   auditTokenomics,
   calculateFileTokenomics,
+  formatProjectsTerminalTable,
   formatSingleFileSummary,
   formatTokenomicsMarkdownTable,
+  formatTokenomicsTerminalTable,
 } from "../../src/tokenomics/index.js";
 
 describe("Tokenomics CI Quality Gate & Regression Engine", () => {
@@ -143,7 +145,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     const report = auditTokenomics("examples/ecommerce_domain.ts", {
       checkDrift: true,
     });
-    const summary = formatSingleFileSummary(report.files[0]);
+    const summary = formatSingleFileSummary(report.files[0], { useColor: false });
 
     expect(summary).toContain("AIL Token Efficiency Audit: ecommerce_domain.ts");
     expect(summary).toContain("Target Language:         TypeScript");
@@ -153,5 +155,54 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     expect(summary).toContain("Drift Status:            ✔ ZERO DRIFT (Lossless Bit-Identical)");
     expect(summary).toContain("┌─");
     expect(summary).toContain("└─");
+  });
+
+  it("renders responsive terminal table across different widths without distortion", () => {
+    const report = auditTokenomics("examples");
+
+    // Standard width (80 cols)
+    const table80 = formatTokenomicsTerminalTable(report, { width: 80, useColor: false });
+    expect(table80).toContain("AIL 2.0 Token Efficiency Audit");
+    expect(table80).toContain("TOTAL (14 Files)");
+    const lines80 = table80.split("\n");
+    // Verify every line has the exact same visible length
+    const len80 = lines80[0].length;
+    for (const l of lines80) {
+      expect(l.length).toBe(len80);
+    }
+
+    // Wide width (120 cols)
+    const table120 = formatTokenomicsTerminalTable(report, { width: 120, useColor: false });
+    expect(table120).toContain("Char Sav");
+    const lines120 = table120.split("\n");
+    const len120 = lines120[0].length;
+    for (const l of lines120) {
+      expect(l.length).toBe(len120);
+    }
+
+    // Compact width (72 cols)
+    const table72 = formatTokenomicsTerminalTable(report, { width: 72, useColor: false });
+    const lines72 = table72.split("\n");
+    const len72 = lines72[0].length;
+    for (const l of lines72) {
+      expect(l.length).toBe(len72);
+    }
+  });
+
+  it("renders responsive projects terminal table", () => {
+    const report = auditTokenomics("poc_real_case");
+    const table = formatProjectsTerminalTable(report, { width: 90, useColor: false });
+
+    expect(table).toContain("AIL 2.0 Project Tokenomics Summary");
+    expect(table).toContain("dogMax");
+    expect(table).toContain("snake_pp");
+    expect(table).toContain("snake_ts");
+    expect(table).toContain("TOTAL (3)");
+
+    const lines = table.split("\n");
+    const firstLen = lines[0].length;
+    for (const l of lines) {
+      expect(l.length).toBe(firstLen);
+    }
   });
 });
