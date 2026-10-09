@@ -1,241 +1,460 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Pure Homoiconic Universal AST Definitions
+ * Universal Abstract Syntax Tree (AST) definitions for AIL 2.0.
+ * Conforms to the formal EBNF grammar in docs/AIL_SPEC.md.
  */
 
-import type { SourceSpan } from "./span.ts";
+import type { Span } from "./span.js";
 
-export interface AilNodeBase {
-  nodeId: string;
-  span?: SourceSpan;
-}
-
-export type AilDocumentNode = AilWorkspaceNode | AilModuleNode;
-
-export interface AilWorkspaceNode extends AilNodeBase {
-  kind: "Workspace";
-  name: string;
-  manifest?: AilManifestNode;
-  files: AilFileNode[];
-}
-
-export interface AilFileNode extends AilNodeBase {
-  kind: "File";
-  path: string;
-  module: AilModuleNode;
-}
-
-export interface AilModuleNode extends AilNodeBase {
+// Top-Level Module
+export interface Module {
   kind: "Module";
-  name: string;
-  manifest?: AilManifestNode;
-  entities: AilEntityNode[];
+  path: string;
+  items: ModuleItem[];
+  span: Span;
 }
 
-export interface AilManifestNode extends AilNodeBase {
-  kind: "Manifest";
-  entries: Record<string, string | number | boolean>;
-}
+export type ModuleItem =
+  | ImportDecl
+  | TypeDecl
+  | FunctionDecl
+  | ComponentDecl
+  | StyleDecl
+  | ClassDecl
+  | ConstDecl
+  | VarDecl;
 
-export type AilEntityNode =
-  | AilImportDeclNode
-  | AilTypeDeclNode
-  | AilFunctionDeclNode
-  | AilComponentDeclNode
-  | AilStyleDeclNode;
-
-export interface AilImportBinding {
-  modulePath: string;
-  symbols: string[];
-}
-
-export interface AilImportDeclNode extends AilNodeBase {
+// Imports & Dependencies
+export interface ImportDecl {
   kind: "ImportDecl";
-  imports: AilImportBinding[];
+  source: string;
+  specifiers: ImportSpecifier[];
+  span: Span;
 }
 
-export interface AilTypeDeclNode extends AilNodeBase {
+export interface ImportSpecifier {
+  name: string;
+  alias?: string;
+  isWildcard?: boolean;
+  span: Span;
+}
+
+// Type Declarations
+export interface TypeDecl {
   kind: "TypeDecl";
+  isEnum: boolean;
   name: string;
-  typeExpr: AilTypeExprNode;
+  typeParams: string[];
+  fields?: FieldDecl[];
+  variants?: EnumVariantDecl[];
+  aliasType?: TypeExpr;
+  span: Span;
 }
 
-export interface AilFunctionDeclNode extends AilNodeBase {
-  kind: "FunctionDecl";
+export interface FieldDecl {
   name: string;
-  signatures: AilSignatureNode;
-  body: AilExprNode;
+  typeAnnotation: TypeExpr;
+  defaultValue?: Expr;
+  span: Span;
 }
 
-export interface AilSignatureNode extends AilNodeBase {
-  kind: "Signature";
-  params: Array<{ name: string; type: AilTypeExprNode }>;
-  returnType: AilTypeExprNode;
-}
-
-export interface AilComponentDeclNode extends AilNodeBase {
-  kind: "ComponentDecl";
+export interface EnumVariantDecl {
   name: string;
-  propContract?: AilRecordTypeNode;
-  layout: AilLayoutNode;
+  payloadTypes?: TypeExpr[];
+  span: Span;
 }
 
-export interface AilStyleDeclNode extends AilNodeBase {
-  kind: "StyleDecl";
-  name: string;
-  rules: Array<{ prop: string; value: string }>;
-}
+// Type Expressions
+export type TypeExpr =
+  | PrimitiveType
+  | ArrayType
+  | RecordType
+  | ResultType
+  | OptionType
+  | RefinementType
+  | NamedType;
 
-export type AilTypeExprNode =
-  | AilPrimitiveTypeNode
-  | AilArrayTypeNode
-  | AilRecordTypeNode
-  | AilUnionTypeNode
-  | AilRefinementTypeNode
-  | AilTypestateNode
-  | AilEffectTypeNode
-  | AilNamedTypeNode;
-
-export type PrimitiveKind = "!u" | "!i" | "!f" | "!s" | "!b" | "!void" | "!unknown" | "!nil";
-
-export interface AilPrimitiveTypeNode extends AilNodeBase {
+export interface PrimitiveType {
   kind: "PrimitiveType";
-  name: PrimitiveKind;
+  primitive: "int" | "str" | "float" | "bool" | "num" | "byte" | "char" | "void" | "nil";
+  span: Span;
 }
 
-export interface AilArrayTypeNode extends AilNodeBase {
+export interface ArrayType {
   kind: "ArrayType";
-  elementType: AilTypeExprNode;
+  elementType: TypeExpr;
+  span: Span;
 }
 
-export interface AilRecordField {
-  name: string;
-  type: AilTypeExprNode;
-  optional?: boolean;
-}
-
-export interface AilRecordTypeNode extends AilNodeBase {
+export interface RecordType {
   kind: "RecordType";
-  fields: AilRecordField[];
+  fields: { name: string; type: TypeExpr; span: Span }[];
+  span: Span;
 }
 
-export interface AilUnionTypeNode extends AilNodeBase {
-  kind: "UnionType";
-  types: AilTypeExprNode[];
+export interface ResultType {
+  kind: "ResultType";
+  okType: TypeExpr;
+  errType: TypeExpr;
+  span: Span;
 }
 
-export interface AilRefinementTypeNode extends AilNodeBase {
+export interface OptionType {
+  kind: "OptionType";
+  innerType: TypeExpr;
+  span: Span;
+}
+
+export interface RefinementType {
   kind: "RefinementType";
   param: string;
-  baseType: AilPrimitiveTypeNode;
-  predicate: AilExprNode;
+  baseType: PrimitiveType;
+  predicate: Expr;
+  span: Span;
 }
 
-export interface AilTypestateNode extends AilNodeBase {
-  kind: "Typestate";
-  states: string[];
-}
-
-export interface AilEffectTypeNode extends AilNodeBase {
-  kind: "EffectType";
-  returnType: AilTypeExprNode;
-  effects: string[];
-}
-
-export interface AilNamedTypeNode extends AilNodeBase {
+export interface NamedType {
   kind: "NamedType";
   name: string;
-  typeArguments?: AilTypeExprNode[];
+  typeArgs?: TypeExpr[];
+  span: Span;
 }
 
-export type AilLayoutNode = AilTagNode | AilConditionalLayoutNode | AilLoopLayoutNode | AilTextNode;
-
-export interface AilTagNode extends AilNodeBase {
-  kind: "TagNode";
-  tag: string;
-  attributes: Record<string, AilExprNode>;
-  children: AilLayoutNode[];
-}
-
-export interface AilConditionalLayoutNode extends AilNodeBase {
-  kind: "ConditionalLayout";
-  condition: AilExprNode;
-  thenNode: AilLayoutNode;
-  elseNode?: AilLayoutNode;
-}
-
-export interface AilLoopLayoutNode extends AilNodeBase {
-  kind: "LoopLayout";
-  iterable: AilExprNode;
-  itemSymbol: string;
-  body: AilLayoutNode;
-}
-
-export interface AilTextNode extends AilNodeBase {
-  kind: "TextNode";
-  text?: string;
-  expr?: AilExprNode;
-}
-
-export type AilExprNode =
-  | AilLiteralNode
-  | AilSymbolNode
-  | AilApplyExprNode
-  | AilMatchExprNode
-  | AilAssignExprNode
-  | AilBlockExprNode
-  | AilTryUnpackExprNode
-  | AilIfExprNode;
-
-export interface AilLiteralNode extends AilNodeBase {
-  kind: "Literal";
-  valueType: "string" | "number" | "boolean" | "array" | "record";
-  value: string | number | boolean | AilExprNode[] | Record<string, AilExprNode>;
-}
-
-export interface AilSymbolNode extends AilNodeBase {
-  kind: "Symbol";
+// Function Declarations
+export interface FunctionDecl {
+  kind: "FunctionDecl";
   name: string;
+  params: ParamDecl[];
+  returnType: TypeExpr | null;
+  body: Block | Expr;
+  isExpressionBodied: boolean;
+  span: Span;
 }
 
-export interface AilApplyExprNode extends AilNodeBase {
-  kind: "ApplyExpr";
-  operator: string;
-  args: AilExprNode[];
+export interface ParamDecl {
+  name: string;
+  typeAnnotation: TypeExpr;
+  defaultValue?: Expr;
+  span: Span;
 }
 
-export interface AilMatchCase {
-  pattern: AilExprNode;
-  expr: AilExprNode;
+// Class Declarations
+export interface ClassDecl {
+  kind: "ClassDecl";
+  name: string;
+  isExported: boolean;
+  typeParams: string[];
+  extends?: string;
+  implements?: string[];
+  properties: PropertyDecl[];
+  methods: MethodDecl[];
+  span: Span;
 }
 
-export interface AilMatchExprNode extends AilNodeBase {
-  kind: "MatchExpr";
-  target: AilExprNode;
-  cases: AilMatchCase[];
+export interface PropertyDecl {
+  kind: "PropertyDecl";
+  name: string;
+  isStatic: boolean;
+  isReadonly: boolean;
+  typeAnnotation?: TypeExpr;
+  initialValue?: Expr;
+  span: Span;
 }
 
-export interface AilAssignExprNode extends AilNodeBase {
+export interface MethodDecl {
+  kind: "MethodDecl";
+  name: string;
+  isStatic: boolean;
+  isAsync: boolean;
+  accessor?: "get" | "set";
+  params: ParamDecl[];
+  returnType: TypeExpr | null;
+  body: Block | Expr;
+  isExpressionBodied: boolean;
+  span: Span;
+}
+
+// Module-Level Variable & Constant Declarations
+export interface ConstDecl {
+  kind: "ConstDecl";
+  name: string;
+  isExported: boolean;
+  typeAnnotation?: TypeExpr;
+  value: Expr;
+  span: Span;
+}
+
+export interface VarDecl {
+  kind: "VarDecl";
+  name: string;
+  isExported: boolean;
+  isMut: boolean;
+  typeAnnotation?: TypeExpr;
+  value: Expr;
+  span: Span;
+}
+
+// Statements & Blocks
+export interface Block {
+  kind: "Block";
+  statements: Statement[];
+  span: Span;
+}
+
+export type Statement =
+  | LetBinding
+  | AssignStmt
+  | ReturnStmt
+  | ExprStmt
+  | IfStmt
+  | MatchStmt
+  | ForStmt
+  | WhileStmt;
+
+export interface LetBinding {
+  kind: "LetBinding";
+  name: string;
+  isMut: boolean;
+  typeAnnotation: TypeExpr | null;
+  init: Expr;
+  span: Span;
+}
+
+export interface AssignStmt {
+  kind: "AssignStmt";
+  target: Expr;
+  value: Expr;
+  span: Span;
+}
+
+export interface ReturnStmt {
+  kind: "ReturnStmt";
+  value: Expr | null;
+  span: Span;
+}
+
+export interface ExprStmt {
+  kind: "ExprStmt";
+  expr: Expr;
+  span: Span;
+}
+
+export interface IfStmt {
+  kind: "IfStmt";
+  condition: Expr;
+  thenBranch: Block;
+  elifBranches: { condition: Expr; body: Block; span: Span }[];
+  elseBranch: Block | null;
+  span: Span;
+}
+
+export interface MatchStmt {
+  kind: "MatchStmt";
+  target: Expr;
+  cases: MatchCase[];
+  span: Span;
+}
+
+export interface MatchCase {
+  pattern: Pattern;
+  guard?: Expr;
+  body: Block | Expr;
+  span: Span;
+}
+
+export type Pattern = LiteralPattern | IdentifierPattern | ConstructorPattern | WildcardPattern;
+
+export interface LiteralPattern {
+  kind: "LiteralPattern";
+  value: LiteralExpr;
+  span: Span;
+}
+
+export interface IdentifierPattern {
+  kind: "IdentifierPattern";
+  name: string;
+  span: Span;
+}
+
+export interface ConstructorPattern {
+  kind: "ConstructorPattern";
+  name: string;
+  subPatterns: Pattern[];
+  span: Span;
+}
+
+export interface WildcardPattern {
+  kind: "WildcardPattern";
+  span: Span;
+}
+
+export interface ForStmt {
+  kind: "ForStmt";
+  variable: string;
+  iterable: Expr;
+  body: Block;
+  span: Span;
+}
+
+export interface WhileStmt {
+  kind: "WhileStmt";
+  condition: Expr;
+  body: Block;
+  span: Span;
+}
+
+// Expressions
+export type Expr =
+  | LiteralExpr
+  | IdentifierExpr
+  | BinaryExpr
+  | UnaryExpr
+  | PostfixTryExpr
+  | CallExpr
+  | MemberAccessExpr
+  | IndexExpr
+  | ArrayLiteralExpr
+  | RecordLiteralExpr
+  | ClosureExpr
+  | AssignExpr;
+
+export interface AssignExpr {
   kind: "AssignExpr";
-  target: string;
-  expr: AilExprNode;
+  target: Expr;
+  value: Expr;
+  span: Span;
 }
 
-export interface AilBlockExprNode extends AilNodeBase {
-  kind: "BlockExpr";
-  expressions: AilExprNode[];
+export interface LiteralExpr {
+  kind: "LiteralExpr";
+  literalKind: "number" | "string" | "boolean" | "nil";
+  value: string | number | boolean | null;
+  rawValue: string;
+  span: Span;
 }
 
-export interface AilTryUnpackExprNode extends AilNodeBase {
-  kind: "TryUnpackExpr";
-  expr: AilExprNode;
+export interface IdentifierExpr {
+  kind: "IdentifierExpr";
+  name: string;
+  span: Span;
 }
 
-export interface AilIfExprNode extends AilNodeBase {
-  kind: "IfExpr";
-  condition: AilExprNode;
-  thenExpr: AilExprNode;
-  elseExpr?: AilExprNode;
+export type BinaryOp =
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "=="
+  | "!="
+  | "<"
+  | "<="
+  | ">"
+  | ">="
+  | "and"
+  | "or"
+  | "??"
+  | "&&"
+  | "||";
+
+export interface BinaryExpr {
+  kind: "BinaryExpr";
+  operator: BinaryOp;
+  left: Expr;
+  right: Expr;
+  span: Span;
+}
+
+export interface UnaryExpr {
+  kind: "UnaryExpr";
+  operator: "not" | "-" | "!";
+  operand: Expr;
+  span: Span;
+}
+
+export interface PostfixTryExpr {
+  kind: "PostfixTryExpr";
+  operand: Expr;
+  span: Span;
+}
+
+export interface CallExpr {
+  kind: "CallExpr";
+  callee: Expr;
+  args: Expr[];
+  span: Span;
+}
+
+export interface MemberAccessExpr {
+  kind: "MemberAccessExpr";
+  object: Expr;
+  property: string;
+  isSafeNav: boolean;
+  span: Span;
+}
+
+export interface IndexExpr {
+  kind: "IndexExpr";
+  object: Expr;
+  index: Expr;
+  span: Span;
+}
+
+export interface ArrayLiteralExpr {
+  kind: "ArrayLiteralExpr";
+  elements: Expr[];
+  span: Span;
+}
+
+export interface RecordProperty {
+  key?: string;
+  value: Expr;
+  isSpread?: boolean;
+  span: Span;
+}
+
+export interface RecordLiteralExpr {
+  kind: "RecordLiteralExpr";
+  properties: RecordProperty[];
+  span: Span;
+}
+
+export interface ClosureExpr {
+  kind: "ClosureExpr";
+  params: ParamDecl[];
+  returnType: TypeExpr | null;
+  body: Block | Expr;
+  span: Span;
+}
+
+// Declarative UI Component DSL Nodes
+export interface ComponentDecl {
+  kind: "ComponentDecl";
+  name: string;
+  params: ParamDecl[];
+  layout: LayoutNode[];
+  span: Span;
+}
+
+export interface LayoutNode {
+  kind: "LayoutNode";
+  tag: string;
+  attributes: { name: string; value: Expr; span: Span }[];
+  textLiteral: string | null;
+  childExpr?: Expr | null;
+  children: LayoutNode[];
+  span: Span;
+}
+
+// Style Declarations
+export interface StyleDecl {
+  kind: "StyleDecl";
+  name: string;
+  properties: StyleProperty[];
+  span: Span;
+}
+
+export interface StyleProperty {
+  property: string;
+  value: string;
+  span: Span;
 }
