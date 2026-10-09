@@ -4,90 +4,41 @@ from "../core/MathX.js" import MathX
 from "../core/Vec2.js" import Vec2
 
 type ProjectileOpts:
-  Radius:Option[int]
-  Life:Option[int]
-  Homing:Option[int]
-  Pierce:Option[int]
-  Burn:Option[int]
-  Chill:Option[int]
-  Trail:Option[bool]
-  Wobble:Option[int]
-  radius:Option[int]
-  life:Option[int]
-  homing:Option[int]
-  pierce:Option[int]
-  burn:Option[int]
-  chill:Option[int]
-  trail:Option[bool]
+  Radius:Option[int], Life:Option[int], Homing:Option[int], Pierce:Option[int], Burn:Option[int]
+  Chill:Option[int], Trail:Option[bool], Wobble:Option[int], radius:Option[int], life:Option[int]
+  homing:Option[int], pierce:Option[int], burn:Option[int], chill:Option[int], trail:Option[bool]
   wobble:Option[int]
 
 pub class Projectile:
   static _projectileId = 0
   static readonly BossHitId = -1
   static readonly bossHitId = -1
-  Id: int
-  X: int
-  Y: int
-  Angle: int
-  Speed: int
-  Vx: int
-  Vy: int
-  Damage: int
-  Source: str
-  Radius: int
-  Color: str
-  Life: int
-  MaxLife: int
-  Homing: int
-  Pierce: int
-  Burn: int
-  Chill: int
-  Trail: bool
-  Wobble: int
-  Dead: bool
+  Id:int, X:int, Y:int, Angle:int, Speed:int
+  Vx:int, Vy:int, Damage:int, Source:str, Radius:int
+  Color:str, Life:int, MaxLife:int, Homing:int, Pierce:int
+  Burn:int, Chill:int, Trail:bool, Wobble:int, Dead:bool
   HitIds: Option[Set[int]] = nil
-  fn get_id() -> int = this.Id
-  fn set_id(v:int) -> void = this.Id = v
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_angle() -> int = this.Angle
-  fn set_angle(v:int) -> void = this.Angle = v
-  fn get_speed() -> int = this.Speed
-  fn set_speed(v:int) -> void = this.Speed = v
-  fn get_vx() -> int = this.Vx
-  fn set_vx(v:int) -> void = this.Vx = v
-  fn get_vy() -> int = this.Vy
-  fn set_vy(v:int) -> void = this.Vy = v
-  fn get_damage() -> int = this.Damage
-  fn set_damage(v:int) -> void = this.Damage = v
-  fn get_source() -> str = this.Source
-  fn set_source(v:str) -> void = this.Source = v
-  fn get_radius() -> int = this.Radius
-  fn set_radius(v:int) -> void = this.Radius = v
-  fn get_color() -> str = this.Color
-  fn set_color(v:str) -> void = this.Color = v
-  fn get_life() -> int = this.Life
-  fn set_life(v:int) -> void = this.Life = v
-  fn get_maxLife() -> int = this.MaxLife
-  fn set_maxLife(v:int) -> void = this.MaxLife = v
-  fn get_homing() -> int = this.Homing
-  fn set_homing(v:int) -> void = this.Homing = v
-  fn get_pierce() -> int = this.Pierce
-  fn set_pierce(v:int) -> void = this.Pierce = v
-  fn get_burn() -> int = this.Burn
-  fn set_burn(v:int) -> void = this.Burn = v
-  fn get_chill() -> int = this.Chill
-  fn set_chill(v:int) -> void = this.Chill = v
-  fn get_trail() -> bool = this.Trail
-  fn set_trail(v:bool) -> void = this.Trail = v
-  fn get_wobble() -> int = this.Wobble
-  fn set_wobble(v:int) -> void = this.Wobble = v
-  fn get_dead() -> bool = this.Dead
-  fn set_dead(v:bool) -> void = this.Dead = v
-  fn get_hitIds() -> Option[Set[int]] = this.HitIds
-  fn set_hitIds(v:Option[Set[int]]) -> void = this.HitIds = v
+  fn get_id() = this.Id; fn set_id(v) = this.Id = v
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
+  fn get_speed() = this.Speed; fn set_speed(v) = this.Speed = v
+  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
+  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
+  fn get_damage() = this.Damage; fn set_damage(v) = this.Damage = v
+  fn get_source() = this.Source; fn set_source(v) = this.Source = v
+  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
+  fn get_color() = this.Color; fn set_color(v) = this.Color = v
+  fn get_life() = this.Life; fn set_life(v) = this.Life = v
+  fn get_maxLife() = this.MaxLife; fn set_maxLife(v) = this.MaxLife = v
+  fn get_homing() = this.Homing; fn set_homing(v) = this.Homing = v
+  fn get_pierce() = this.Pierce; fn set_pierce(v) = this.Pierce = v
+  fn get_burn() = this.Burn; fn set_burn(v) = this.Burn = v
+  fn get_chill() = this.Chill; fn set_chill(v) = this.Chill = v
+  fn get_trail() = this.Trail; fn set_trail(v) = this.Trail = v
+  fn get_wobble() = this.Wobble; fn set_wobble(v) = this.Wobble = v
+  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
+  fn get_hitIds() = this.HitIds; fn set_hitIds(v) = this.HitIds = v
   fn constructor(xOrOpts:int | unknown, y:unknown = 0, angle:unknown = 0, speed:unknown = 0, damage:unknown = 0, source:unknown = "player", color:str, opts:ProjectileOpts = {  }):
     this.Id = -Projectile._projectileId
     if typeof(xOrOpts) == "object" and xOrOpts != nil:
@@ -149,7 +100,7 @@ pub class Projectile:
       v
     else:
       fallback
-  fn Update(dt:int, target:Option[Vec2]) -> void:
+  fn Update(dt:int, target:Option[Vec2]) :
     if this.Homing > 0 and target:
       let tx = target.X ?? target.x
       let ty = target.Y ?? target.y
@@ -167,5 +118,5 @@ pub class Projectile:
     this.Life = this.Life - dt
     if this.Life <= 0:
       this.Dead = true
-  fn update(dt:int, target:Option[Vec2]) -> void:
+  fn update(dt:int, target:Option[Vec2]) :
     this.Update(dt, target)

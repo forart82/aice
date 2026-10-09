@@ -11,21 +11,13 @@ from "./CombatSystem" import CombatSystem
 from "./World" import World
 
 type ModuleActionContext:
-  sys:CombatSystem
-  dt:int
-  world:World
-  player:SnakePlayer
+  sys:CombatSystem, dt:int, world:World, player:SnakePlayer
   moduleType:str
-  level:int
-  isHead:bool
-  originX:int
-  originY:int
-  angle:int
+  level:int, isHead:bool, originX:int, originY:int, angle:int
   dmgBonus:int
   getTimer:() => number
   setTimer:(number) => void
-  socket:Option[unknown]
-  slotIndex:Option[int]
+  socket:Option[unknown], slotIndex:Option[int]
 
 type ModuleActionHandler = (ModuleActionContext) => void
 
@@ -48,17 +40,17 @@ fn findNearestTarget(ctx:ModuleActionContext, maxRange:int) -> Option[unknown]:
 
 pub class ModuleActionRegistry:
   static readonly _handlers: Map[str, ModuleActionHandler] = Map()
-  static fn register(key:str, handler:ModuleActionHandler) -> void:
+  static fn register(key:str, handler:ModuleActionHandler) :
     this._handlers.set(key, handler)
   static fn get(key:str) -> Option[ModuleActionHandler] = this._handlers.at(key) ?? nil
   static fn has(key:str) -> bool = this._handlers.has(key)
   static fn getRegisteredKeys() -> [str] = Array.from(this._handlers.keys())
-  static fn execute(ctx:ModuleActionContext) -> void:
+  static fn execute(ctx:ModuleActionContext) :
     let handler = this._handlers.at(ctx.moduleType) ?? nil
     if handler != nil:
       handler(ctx)
 
-fn executeHeadModules(sys:CombatSystem, dt:int, world:World) -> void:
+fn executeHeadModules(sys:CombatSystem, dt:int, world:World) :
   let player = World.getPlayer(world)
   if not player or not (player.alive ?? player.Alive):
     ret

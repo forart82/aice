@@ -11,89 +11,42 @@ from "./World.js" import World
 
 pub class Enemy:
   static _enemyId = 0
-  static readonly DroneSpread: int = [-0.26, 0, 0.26]
+  static readonly DroneSpread:int = [-0.26, 0, 0.26]
   static readonly droneSpread = Enemy.DroneSpread
-  Id: int
-  Type: str
-  Floor: int
-  X: int
-  Y: int
-  Vx = 0
-  Vy = 0
-  Radius: int
-  Color: str
-  MaxHp: int
-  Hp: int
-  Speed: int
-  ContactDamage: int
-  XpValue: int
-  ScoreValue: int
+  Id:int, Type:str, Floor:int, X:int, Y:int
+  Vx = 0, Vy = 0, Radius:int, Color:str, MaxHp:int
+  Hp:int, Speed:int, ContactDamage:int, XpValue:int, ScoreValue:int
   Status: StatusSet
-  ShootTimer: int
-  StateTimer = 0
-  ChargeTimer = 0
-  Charging = false
-  ChargeAngle = 0
-  WobblePhase: int
-  SpawnTimer = 0.45
-  HitFlash = 0
-  StasisTimer = 0
-  Dead = false
+  ShootTimer:int, StateTimer = 0, ChargeTimer = 0, Charging = false, ChargeAngle = 0
+  WobblePhase:int, SpawnTimer = 0.45, HitFlash = 0, StasisTimer = 0, Dead = false
   Angle = 0
-  fn get_stasisTimer() -> int = this.StasisTimer
-  fn set_stasisTimer(v:int) -> void = this.StasisTimer = v
-  fn get_id() -> int = this.Id
-  fn set_id(v:int) -> void = this.Id = v
-  fn get_type() -> str = this.Type
-  fn set_type(v:str) -> void = this.Type = v
-  fn get_floor() -> int = this.Floor
-  fn set_floor(v:int) -> void = this.Floor = v
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_vx() -> int = this.Vx
-  fn set_vx(v:int) -> void = this.Vx = v
-  fn get_vy() -> int = this.Vy
-  fn set_vy(v:int) -> void = this.Vy = v
-  fn get_radius() -> int = this.Radius
-  fn set_radius(v:int) -> void = this.Radius = v
-  fn get_color() -> str = this.Color
-  fn set_color(v:str) -> void = this.Color = v
-  fn get_maxHp() -> int = this.MaxHp
-  fn set_maxHp(v:int) -> void = this.MaxHp = v
-  fn get_hp() -> int = this.Hp
-  fn set_hp(v:int) -> void = this.Hp = v
-  fn get_speed() -> int = this.Speed
-  fn set_speed(v:int) -> void = this.Speed = v
-  fn get_contactDamage() -> int = this.ContactDamage
-  fn set_contactDamage(v:int) -> void = this.ContactDamage = v
-  fn get_xpValue() -> int = this.XpValue
-  fn set_xpValue(v:int) -> void = this.XpValue = v
-  fn get_scoreValue() -> int = this.ScoreValue
-  fn set_scoreValue(v:int) -> void = this.ScoreValue = v
-  fn get_status() -> StatusSet = this.Status
-  fn set_status(v:StatusSet) -> void = this.Status = v
-  fn get_shootTimer() -> int = this.ShootTimer
-  fn set_shootTimer(v:int) -> void = this.ShootTimer = v
-  fn get_stateTimer() -> int = this.StateTimer
-  fn set_stateTimer(v:int) -> void = this.StateTimer = v
-  fn get_chargeTimer() -> int = this.ChargeTimer
-  fn set_chargeTimer(v:int) -> void = this.ChargeTimer = v
-  fn get_charging() -> bool = this.Charging
-  fn set_charging(v:bool) -> void = this.Charging = v
-  fn get_chargeAngle() -> int = this.ChargeAngle
-  fn set_chargeAngle(v:int) -> void = this.ChargeAngle = v
-  fn get_wobblePhase() -> int = this.WobblePhase
-  fn set_wobblePhase(v:int) -> void = this.WobblePhase = v
-  fn get_spawnTimer() -> int = this.SpawnTimer
-  fn set_spawnTimer(v:int) -> void = this.SpawnTimer = v
-  fn get_hitFlash() -> int = this.HitFlash
-  fn set_hitFlash(v:int) -> void = this.HitFlash = v
-  fn get_dead() -> bool = this.Dead
-  fn set_dead(v:bool) -> void = this.Dead = v
-  fn get_angle() -> int = this.Angle
-  fn set_angle(v:int) -> void = this.Angle = v
+  fn get_stasisTimer() = this.StasisTimer; fn set_stasisTimer(v) = this.StasisTimer = v
+  fn get_id() = this.Id; fn set_id(v) = this.Id = v
+  fn get_type() = this.Type; fn set_type(v) = this.Type = v
+  fn get_floor() = this.Floor; fn set_floor(v) = this.Floor = v
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
+  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
+  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
+  fn get_color() = this.Color; fn set_color(v) = this.Color = v
+  fn get_maxHp() = this.MaxHp; fn set_maxHp(v) = this.MaxHp = v
+  fn get_hp() = this.Hp; fn set_hp(v) = this.Hp = v
+  fn get_speed() = this.Speed; fn set_speed(v) = this.Speed = v
+  fn get_contactDamage() = this.ContactDamage; fn set_contactDamage(v) = this.ContactDamage = v
+  fn get_xpValue() = this.XpValue; fn set_xpValue(v) = this.XpValue = v
+  fn get_scoreValue() = this.ScoreValue; fn set_scoreValue(v) = this.ScoreValue = v
+  fn get_status() = this.Status; fn set_status(v) = this.Status = v
+  fn get_shootTimer() = this.ShootTimer; fn set_shootTimer(v) = this.ShootTimer = v
+  fn get_stateTimer() = this.StateTimer; fn set_stateTimer(v) = this.StateTimer = v
+  fn get_chargeTimer() = this.ChargeTimer; fn set_chargeTimer(v) = this.ChargeTimer = v
+  fn get_charging() = this.Charging; fn set_charging(v) = this.Charging = v
+  fn get_chargeAngle() = this.ChargeAngle; fn set_chargeAngle(v) = this.ChargeAngle = v
+  fn get_wobblePhase() = this.WobblePhase; fn set_wobblePhase(v) = this.WobblePhase = v
+  fn get_spawnTimer() = this.SpawnTimer; fn set_spawnTimer(v) = this.SpawnTimer = v
+  fn get_hitFlash() = this.HitFlash; fn set_hitFlash(v) = this.HitFlash = v
+  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
+  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
   fn constructor(x:int, y:int, type:Option[str] = "scarab", floor:unknown = 1):
     this.Id = -Enemy._enemyId
     if type != nil and GameData.Enemies.Has(type):
@@ -118,9 +71,9 @@ pub class Enemy:
     this.Status = nil
     this.ShootTimer = Rng.Shared.range(0.8, 2.6)
     this.WobblePhase = Rng.Shared.angle()
-  fn get_Vulnerable() -> bool = this.SpawnTimer <= 0 and not this.Dead
-  fn get_vulnerable() -> bool = this.Vulnerable
-  fn Update(dt:int, target:SnakePlayer, world:World) -> void:
+  fn get_Vulnerable() = this.SpawnTimer <= 0 and not this.Dead
+  fn get_vulnerable() = this.Vulnerable
+  fn Update(dt:int, target:SnakePlayer, world:World) :
     if not target or not world:
       ret
     if this.SpawnTimer > 0:
@@ -152,7 +105,7 @@ pub class Enemy:
     let ah = world.ArenaH ?? world.arenaH
     this.X = MathX.clamp(this.X, pad, aw - pad)
     this.Y = MathX.clamp(this.Y, pad, ah - pad)
-  fn update(dt:int, target:SnakePlayer, world:World) -> void:
+  fn update(dt:int, target:SnakePlayer, world:World) :
     this.Update(dt, target, world)
   fn ApplyDamage(amount:int, showFlash:unknown = true) -> bool:
     if this.Dead or this.SpawnTimer > 0:

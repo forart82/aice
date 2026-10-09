@@ -3,62 +3,28 @@ module poc_real_case/snake_ts/src/sim/Hazard
 from "../core/Rng.js" import Rng
 
 type HazardOpts:
-  Radius:Option[int]
-  Life:Option[int]
-  Dps:Option[int]
-  Owner:Option[str]
-  Telegraph:Option[int]
-  ImpactDamage:Option[int]
-  radius:Option[int]
-  life:Option[int]
-  dps:Option[int]
-  owner:Option[str]
-  telegraph:Option[int]
-  impactDamage:Option[int]
+  Radius:Option[int], Life:Option[int], Dps:Option[int], Owner:Option[str], Telegraph:Option[int]
+  ImpactDamage:Option[int], radius:Option[int], life:Option[int], dps:Option[int], owner:Option[str]
+  telegraph:Option[int], impactDamage:Option[int]
 
 pub class Hazard:
-  X: int
-  Y: int
-  Type: str
-  Radius: int
-  MaxLife: int
-  Life: int
-  Dps: int
-  Owner: str
-  Telegraph: int
-  ImpactDamage: int
-  Detonated: bool
-  Pulse: int
-  Dead: bool
-  TelegraphMax = 0
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_type() -> str = this.Type
-  fn set_type(v:str) -> void = this.Type = v
-  fn get_radius() -> int = this.Radius
-  fn set_radius(v:int) -> void = this.Radius = v
-  fn get_maxLife() -> int = this.MaxLife
-  fn set_maxLife(v:int) -> void = this.MaxLife = v
-  fn get_life() -> int = this.Life
-  fn set_life(v:int) -> void = this.Life = v
-  fn get_dps() -> int = this.Dps
-  fn set_dps(v:int) -> void = this.Dps = v
-  fn get_owner() -> str = this.Owner
-  fn set_owner(v:str) -> void = this.Owner = v
-  fn get_telegraph() -> int = this.Telegraph
-  fn set_telegraph(v:int) -> void = this.Telegraph = v
-  fn get_impactDamage() -> int = this.ImpactDamage
-  fn set_impactDamage(v:int) -> void = this.ImpactDamage = v
-  fn get_detonated() -> bool = this.Detonated
-  fn set_detonated(v:bool) -> void = this.Detonated = v
-  fn get_pulse() -> int = this.Pulse
-  fn set_pulse(v:int) -> void = this.Pulse = v
-  fn get_dead() -> bool = this.Dead
-  fn set_dead(v:bool) -> void = this.Dead = v
-  fn get_telegraphMax() -> int = this.TelegraphMax
-  fn set_telegraphMax(v:int) -> void = this.TelegraphMax = v
+  X:int, Y:int, Type:str, Radius:int, MaxLife:int
+  Life:int, Dps:int, Owner:str, Telegraph:int, ImpactDamage:int
+  Detonated:bool, Pulse:int, Dead:bool, TelegraphMax = 0
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_type() = this.Type; fn set_type(v) = this.Type = v
+  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
+  fn get_maxLife() = this.MaxLife; fn set_maxLife(v) = this.MaxLife = v
+  fn get_life() = this.Life; fn set_life(v) = this.Life = v
+  fn get_dps() = this.Dps; fn set_dps(v) = this.Dps = v
+  fn get_owner() = this.Owner; fn set_owner(v) = this.Owner = v
+  fn get_telegraph() = this.Telegraph; fn set_telegraph(v) = this.Telegraph = v
+  fn get_impactDamage() = this.ImpactDamage; fn set_impactDamage(v) = this.ImpactDamage = v
+  fn get_detonated() = this.Detonated; fn set_detonated(v) = this.Detonated = v
+  fn get_pulse() = this.Pulse; fn set_pulse(v) = this.Pulse = v
+  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
+  fn get_telegraphMax() = this.TelegraphMax; fn set_telegraphMax(v) = this.TelegraphMax = v
   fn constructor(xOrOpts:int | unknown, y:unknown = 0, type:unknown = "magma", opts:HazardOpts = {  }):
     if typeof(xOrOpts) == "object" and xOrOpts != nil:
       let o = xOrOpts
@@ -101,9 +67,9 @@ pub class Hazard:
       v
     else:
       fallback
-  fn get_Armed() -> bool = this.Telegraph <= 0
-  fn get_armed() -> bool = this.Armed
-  fn Update(dt:int) -> void:
+  fn get_Armed() = this.Telegraph <= 0
+  fn get_armed() = this.Armed
+  fn Update(dt:int) :
     this.Pulse = this.Pulse + dt * 5
     if this.Telegraph > 0:
       this.Telegraph = this.Telegraph - dt
@@ -113,5 +79,5 @@ pub class Hazard:
     this.Life = this.Life - dt
     if this.Life <= 0:
       this.Dead = true
-  fn update(dt:int) -> void:
+  fn update(dt:int) :
     this.Update(dt)

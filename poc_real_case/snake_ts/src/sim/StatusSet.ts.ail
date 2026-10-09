@@ -1,66 +1,54 @@
 module poc_real_case/snake_ts/src/sim/StatusSet
 
 pub class StatusSet:
-  SlowTimer = 0
-  SlowFactor = 1
-  FreezeTimer = 0
-  StunTimer = 0
-  BurnTimer = 0
-  BurnDps = 0
-  MarkTimer = 0
-  fn get_slowTimer() -> int = this.SlowTimer
-  fn set_slowTimer(v:int) -> void = this.SlowTimer = v
-  fn get_slowFactor() -> int = this.SlowFactor
-  fn set_slowFactor(v:int) -> void = this.SlowFactor = v
-  fn get_freezeTimer() -> int = this.FreezeTimer
-  fn set_freezeTimer(v:int) -> void = this.FreezeTimer = v
-  fn get_stunTimer() -> int = this.StunTimer
-  fn set_stunTimer(v:int) -> void = this.StunTimer = v
-  fn get_burnTimer() -> int = this.BurnTimer
-  fn set_burnTimer(v:int) -> void = this.BurnTimer = v
-  fn get_burnDps() -> int = this.BurnDps
-  fn set_burnDps(v:int) -> void = this.BurnDps = v
-  fn get_markTimer() -> int = this.MarkTimer
-  fn set_markTimer(v:int) -> void = this.MarkTimer = v
-  fn get_isFrozen() -> bool = this.FreezeTimer > 0
-  fn get_isStunned() -> bool = this.StunTimer > 0
-  fn get_isBurning() -> bool = this.BurnTimer > 0
-  fn get_isSlowed() -> bool = this.SlowTimer > 0
-  fn get_isChilled() -> bool = this.SlowTimer > 0
-  fn get_isMarked() -> bool = this.MarkTimer > 0
-  fn Chill(seconds:int, factor:int) -> void:
+  SlowTimer = 0, SlowFactor = 1, FreezeTimer = 0, StunTimer = 0, BurnTimer = 0
+  BurnDps = 0, MarkTimer = 0
+  fn get_slowTimer() = this.SlowTimer; fn set_slowTimer(v) = this.SlowTimer = v
+  fn get_slowFactor() = this.SlowFactor; fn set_slowFactor(v) = this.SlowFactor = v
+  fn get_freezeTimer() = this.FreezeTimer; fn set_freezeTimer(v) = this.FreezeTimer = v
+  fn get_stunTimer() = this.StunTimer; fn set_stunTimer(v) = this.StunTimer = v
+  fn get_burnTimer() = this.BurnTimer; fn set_burnTimer(v) = this.BurnTimer = v
+  fn get_burnDps() = this.BurnDps; fn set_burnDps(v) = this.BurnDps = v
+  fn get_markTimer() = this.MarkTimer; fn set_markTimer(v) = this.MarkTimer = v
+  fn get_isFrozen() = this.FreezeTimer > 0
+  fn get_isStunned() = this.StunTimer > 0
+  fn get_isBurning() = this.BurnTimer > 0
+  fn get_isSlowed() = this.SlowTimer > 0
+  fn get_isChilled() = this.SlowTimer > 0
+  fn get_isMarked() = this.MarkTimer > 0
+  fn Chill(seconds:int, factor:int) :
     this.SlowTimer = Math.max(this.SlowTimer, seconds)
     this.SlowFactor = Math.min(this.SlowFactor == 1 and factor or this.SlowFactor, factor)
-  fn chill(seconds:int, factor:int) -> void:
+  fn chill(seconds:int, factor:int) :
     this.Chill(seconds, factor)
   fn Freeze(seconds:int) -> void = this.FreezeTimer = Math.max(this.FreezeTimer, seconds)
-  fn freeze(seconds:int) -> void:
+  fn freeze(seconds:int) :
     this.Freeze(seconds)
   fn Stun(seconds:int) -> void = this.StunTimer = Math.max(this.StunTimer, seconds)
-  fn stun(seconds:int) -> void:
+  fn stun(seconds:int) :
     this.Stun(seconds)
   fn Mark(seconds:int) -> void = this.MarkTimer = Math.max(this.MarkTimer, seconds)
-  fn mark(seconds:int) -> void:
+  fn mark(seconds:int) :
     this.Mark(seconds)
-  fn Burn(seconds:int, dps:int) -> void:
+  fn Burn(seconds:int, dps:int) :
     this.BurnTimer = Math.max(this.BurnTimer, seconds)
     this.BurnDps = Math.max(this.BurnDps, dps)
-  fn burn(seconds:int, dps:int) -> void:
+  fn burn(seconds:int, dps:int) :
     this.Burn(seconds, dps)
-  fn get_Immobile() -> bool = this.FreezeTimer > 0 or this.StunTimer > 0
-  fn get_immobile() -> bool = this.Immobile
+  fn get_Immobile() = this.FreezeTimer > 0 or this.StunTimer > 0
+  fn get_immobile() = this.Immobile
   fn get_SpeedMult() -> int:
     if this.SlowTimer > 0:
       this.SlowFactor
     else:
       1
-  fn get_speedMult() -> int = this.SpeedMult
+  fn get_speedMult() = this.SpeedMult
   fn get_DamageTakenMult() -> int:
     if this.MarkTimer > 0:
       1.25
     else:
       1
-  fn get_damageTakenMult() -> int = this.DamageTakenMult
+  fn get_damageTakenMult() = this.DamageTakenMult
   fn Update(dt:int) -> int:
     if this.SlowTimer > 0:
       this.SlowTimer = this.SlowTimer - dt

@@ -7,7 +7,7 @@ from "./Projectile" import Projectile
 from "./CombatSystem" import CombatSystem
 from "./World" import World
 
-fn updateAuras(sys:CombatSystem, dt:int, world:World) -> void:
+fn updateAuras(sys:CombatSystem, dt:int, world:World) :
   let player = world.player or world.Player
   if not player or not player.alive ?? player.Alive:
     ret
@@ -47,7 +47,7 @@ fn updateAuras(sys:CombatSystem, dt:int, world:World) -> void:
       world.vacuumTimer = 0.7
       world.VacuumTimer = 0.7
 
-fn updateRelicAttacks(sys:CombatSystem, dt:int, world:World) -> void:
+fn updateRelicAttacks(sys:CombatSystem, dt:int, world:World) :
   let player = world.player or world.Player
   if not player or not player.alive ?? player.Alive:
     ret

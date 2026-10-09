@@ -28,7 +28,7 @@ fn activateSkill(sys:CombatSystem, world:World) -> bool:
   let classId = player.classId or player.ClassId
   true
 
-fn skillVerdantBloom(_sys:CombatSystem, world:World) -> void:
+fn skillVerdantBloom(_sys:CombatSystem, world:World) :
   let player = World.getPlayer(world)
   if not player:
     ret
@@ -48,7 +48,7 @@ fn skillVerdantBloom(_sys:CombatSystem, world:World) -> void:
     nil
   Services.sound.playLevelUp()
 
-fn skillUmbralBlink(sys:CombatSystem, world:World) -> void:
+fn skillUmbralBlink(sys:CombatSystem, world:World) :
   let player = World.getPlayer(world)
   if not player:
     ret
@@ -78,7 +78,7 @@ fn skillUmbralBlink(sys:CombatSystem, world:World) -> void:
   sys.explodeAt(world, cx, cy, 140, 130 * dmgBonus, "#a855f7")
   Services.sound.playDash()
 
-fn skillTitanRoar(sys:CombatSystem, world:World) -> void:
+fn skillTitanRoar(sys:CombatSystem, world:World) :
   let player = World.getPlayer(world)
   if not player:
     ret
@@ -98,7 +98,7 @@ fn skillTitanRoar(sys:CombatSystem, world:World) -> void:
     nil
   let bosses = World.getBosses(world)
 
-fn skillChainStorm(sys:CombatSystem, world:World) -> void:
+fn skillChainStorm(sys:CombatSystem, world:World) :
   let player = World.getPlayer(world)
   if not player:
     ret
@@ -108,7 +108,7 @@ fn skillChainStorm(sys:CombatSystem, world:World) -> void:
   let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
   sys.chainLightning(world, px, py, 8, 110 + lvl * 12 * dmgBonus, 380, true)
 
-fn skillSupernova(sys:CombatSystem, world:World) -> void:
+fn skillSupernova(sys:CombatSystem, world:World) :
   let player = World.getPlayer(world)
   if not player:
     ret

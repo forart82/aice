@@ -1105,6 +1105,11 @@ export class Parser {
         ) {
           const prop = this.parsePropertyDecl(isStatic, isReadonly);
           properties.push(prop);
+          while (this.check("COMMA")) {
+            this.advance();
+            const nextProp = this.parsePropertyDecl(isStatic, isReadonly);
+            properties.push(nextProp);
+          }
         } else {
           throw new ParserError(
             `Unexpected token '${this.current().kind}' (${this.current().value}) in class body`,
@@ -1184,8 +1189,15 @@ export class Parser {
       while (!this.check("RPAREN") && !this.check("EOF")) {
         const pSpan = this.current().span;
         const pName = this.parseContextualIdentOrString("Expected parameter name");
-        this.consume("COLON", "Expected ':' after parameter name");
-        const pType = this.parseTypeExpr();
+        let pType: TypeExpr = {
+          kind: "NamedType",
+          name: "any",
+          span: pSpan,
+        };
+        if (this.check("COLON")) {
+          this.advance();
+          pType = this.parseTypeExpr();
+        }
 
         let defaultValue: Expr | undefined;
         if (this.check("EQUAL")) {

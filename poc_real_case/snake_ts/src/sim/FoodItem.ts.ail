@@ -5,48 +5,23 @@ from "../core/Rng.js" import Rng
 from "../data/GameData.js" import GameData
 
 pub class FoodItem:
-  X: int
-  Y: int
-  Type: str
-  Color: str
-  XpValue: int
-  ScoreValue: int
-  Radius: int
-  HealAmount: int
-  Vx: int
-  Vy: int
-  Pulse: int
-  SpawnScale: int
-  Life: int
-  Dead: bool
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_type() -> str = this.Type
-  fn set_type(v:str) -> void = this.Type = v
-  fn get_color() -> str = this.Color
-  fn set_color(v:str) -> void = this.Color = v
-  fn get_xpValue() -> int = this.XpValue
-  fn set_xpValue(v:int) -> void = this.XpValue = v
-  fn get_scoreValue() -> int = this.ScoreValue
-  fn set_scoreValue(v:int) -> void = this.ScoreValue = v
-  fn get_radius() -> int = this.Radius
-  fn set_radius(v:int) -> void = this.Radius = v
-  fn get_healAmount() -> int = this.HealAmount
-  fn set_healAmount(v:int) -> void = this.HealAmount = v
-  fn get_vx() -> int = this.Vx
-  fn set_vx(v:int) -> void = this.Vx = v
-  fn get_vy() -> int = this.Vy
-  fn set_vy(v:int) -> void = this.Vy = v
-  fn get_pulse() -> int = this.Pulse
-  fn set_pulse(v:int) -> void = this.Pulse = v
-  fn get_spawnScale() -> int = this.SpawnScale
-  fn set_spawnScale(v:int) -> void = this.SpawnScale = v
-  fn get_life() -> int = this.Life
-  fn set_life(v:int) -> void = this.Life = v
-  fn get_dead() -> bool = this.Dead
-  fn set_dead(v:bool) -> void = this.Dead = v
+  X:int, Y:int, Type:str, Color:str, XpValue:int
+  ScoreValue:int, Radius:int, HealAmount:int, Vx:int, Vy:int
+  Pulse:int, SpawnScale:int, Life:int, Dead:bool
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_type() = this.Type; fn set_type(v) = this.Type = v
+  fn get_color() = this.Color; fn set_color(v) = this.Color = v
+  fn get_xpValue() = this.XpValue; fn set_xpValue(v) = this.XpValue = v
+  fn get_scoreValue() = this.ScoreValue; fn set_scoreValue(v) = this.ScoreValue = v
+  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
+  fn get_healAmount() = this.HealAmount; fn set_healAmount(v) = this.HealAmount = v
+  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
+  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
+  fn get_pulse() = this.Pulse; fn set_pulse(v) = this.Pulse = v
+  fn get_spawnScale() = this.SpawnScale; fn set_spawnScale(v) = this.SpawnScale = v
+  fn get_life() = this.Life; fn set_life(v) = this.Life = v
+  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
   fn constructor(x:int, y:int, type:str):
     this.X = x
     this.Y = y
@@ -77,7 +52,7 @@ pub class FoodItem:
     this.Radius = def.Radius
     true
   fn cook() -> bool = this.Cook()
-  fn Update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) -> void:
+  fn Update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) :
     this.Pulse = this.Pulse + dt * 4.2
     this.Life = this.Life + dt
     if this.SpawnScale < 1:
@@ -97,5 +72,5 @@ pub class FoodItem:
     let drag = MathX.decay(0.92, dt)
     this.Vx = this.Vx * drag
     this.Vy = this.Vy * drag
-  fn update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) -> void:
+  fn update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) :
     this.Update(dt, px, py, magnetRadius, extraPull)

@@ -22,85 +22,39 @@ from "./GameEngine" import GameEngine
 fn getActiveBosses(world:Option[World]) -> [Boss] = World.getBosses(world)
 
 type BurnSpec:
-  time:Option[int]
-  dps:Option[int]
-  Time:Option[int]
-  Dps:Option[int]
+  time:Option[int], dps:Option[int], Time:Option[int], Dps:Option[int]
 
 type ChillSpec:
-  time:Option[int]
-  factor:Option[int]
-  Time:Option[int]
-  Factor:Option[int]
+  time:Option[int], factor:Option[int], Time:Option[int], Factor:Option[int]
 
 type DamageOpts:
-  crit:Option[bool]
-  Crit:Option[bool]
-  silent:Option[bool]
-  Silent:Option[bool]
-  color:Option[str]
-  Color:Option[str]
-  burn:Option[BurnSpec]
-  Burn:Option[BurnSpec]
-  chill:Option[ChillSpec]
-  Chill:Option[ChillSpec]
-  freeze:Option[int]
-  Freeze:Option[int]
-  stun:Option[int]
-  Stun:Option[int]
+  crit:Option[bool], Crit:Option[bool], silent:Option[bool], Silent:Option[bool], color:Option[str]
+  Color:Option[str], burn:Option[BurnSpec], Burn:Option[BurnSpec], chill:Option[ChillSpec], Chill:Option[ChillSpec]
+  freeze:Option[int], Freeze:Option[int], stun:Option[int], Stun:Option[int]
 
 type BiteRoll:
-  damage:int
-  crit:bool
-  Damage:Option[int]
-  Crit:Option[bool]
+  damage:int, crit:bool, Damage:Option[int], Crit:Option[bool]
 
 type HostileTarget:
-  Found:bool
-  IsBoss:bool
-  Enemy:Option[Enemy]
-  X:int
-  Y:int
-  found:bool
-  isBoss:bool
-  enemy:Option[Enemy]
-  x:int
-  y:int
+  Found:bool, IsBoss:bool, Enemy:Option[Enemy], X:int, Y:int
+  found:bool, isBoss:bool, enemy:Option[Enemy], x:int, y:int
 
 pub class CombatSystem:
-  comboCount = 0
-  comboMultiplier = 1
-  comboTimer = 0
+  comboCount = 0, comboMultiplier = 1, comboTimer = 0
   meta: Option[MetaProgression]
   services: Option[IServiceContainer]
   engine: Option[GameEngine]
-  comboBaseWindow = 4
-  comboMaxTime = 4
-  frenzyActive = false
-  frenzyTimer = 0
-  frenzyMaxDuration = 8
-  score = 0
-  shardsEarned = 0
-  kills = 0
-  bossKills = 0
+  comboBaseWindow = 4, comboMaxTime = 4, frenzyActive = false, frenzyTimer = 0, frenzyMaxDuration = 8
+  score = 0, shardsEarned = 0, kills = 0, bossKills = 0
   DefeatedBossTypes: [str] = []
   BossKillsByType: Record[str, int] = {  }
   KillsByType: Record[str, int] = {  }
   FoodsEatenByType: Record[str, int] = {  }
-  foodsEaten = 0
-  highestRunCombo = 0
-  ClutchCatchCount = 0
-  TotalClutchBonusScore = 0
-  damageDealt = 0
-  runTime = 0
-  flameTimer = 0
-  thunderTimer = 0
-  frenzySparkTimer = 0
-  staticCoilCounter = 0
+  foodsEaten = 0, highestRunCombo = 0, ClutchCatchCount = 0, TotalClutchBonusScore = 0, damageDealt = 0
+  runTime = 0, flameTimer = 0, thunderTimer = 0, frenzySparkTimer = 0, staticCoilCounter = 0
   biteCooldowns: Map[str, int] = Map()
   _staleBiteKeys: [str] = []
-  timeScale = 1
-  biteInterval = GameData.BiteInterval
+  timeScale = 1, biteInterval = GameData.BiteInterval
   static readonly BossHitId = -1
   static readonly BossKey = "boss"
   static readonly BossTailKey = "boss-tail"
@@ -108,88 +62,52 @@ pub class CombatSystem:
   _polyX: Float64Array = Float64Array(2048)
   _polyY: Float64Array = Float64Array(2048)
   _homingTarget: Vec2 = Vec2(0, 0)
-  _gridBuiltThisTick = false
-  _lastGridSegCount = -1
-  _scratchSegBuffer = Int32Array(128)
+  _gridBuiltThisTick = false, _lastGridSegCount = -1, _scratchSegBuffer = Int32Array(128)
   readonly _cachedHostileTarget: HostileTarget = { found: false, isBoss: false, enemy: nil, x: 0, y: 0, Found: false, IsBoss: false, Enemy: nil, X: 0, Y: 0 }
   readonly _cachedBiteRoll: BiteRoll = { damage: 0, crit: false, Damage: 0, Crit: false }
-  _lastSelfHitFxTime: int = 0
-  _constrictionCooldown = 0
-  get ComboCount() -> int = this.comboCount
-  set ComboCount(v:int) = this.comboCount = v
-  get ComboMultiplier() -> int = this.comboMultiplier
-  set ComboMultiplier(v:int) = this.comboMultiplier = v
-  get ComboTimer() -> int = this.comboTimer
-  set ComboTimer(v:int) = this.comboTimer = v
-  get Meta() -> Option[MetaProgression] = this.meta
-  set Meta(v:Option[MetaProgression]) = this.meta = v
-  get Services() -> Option[IServiceContainer] = this.services
-  set Services(v:Option[IServiceContainer]) = this.services = v
-  get Engine() -> Option[GameEngine] = this.engine
-  set Engine(v:Option[GameEngine]) = this.engine = v
-  get ComboBaseWindow() -> int = this.comboBaseWindow
-  set ComboBaseWindow(v:int) = this.comboBaseWindow = v
-  get ComboMaxTime() -> int = this.comboMaxTime
-  set ComboMaxTime(v:int) = this.comboMaxTime = v
-  get FrenzyActive() -> bool = this.frenzyActive
-  set FrenzyActive(v:bool) = this.frenzyActive = v
-  get FrenzyTimer() -> int = this.frenzyTimer
-  set FrenzyTimer(v:int) = this.frenzyTimer = v
-  get FrenzyMaxDuration() -> int = this.frenzyMaxDuration
-  set FrenzyMaxDuration(v:int) = this.frenzyMaxDuration = v
-  get Score() -> int = this.score
-  set Score(v:int) = this.score = v
-  get ShardsEarned() -> int = this.shardsEarned
-  set ShardsEarned(v:int) = this.shardsEarned = v
-  get Kills() -> int = this.kills
-  set Kills(v:int) = this.kills = v
-  get BossKills() -> int = this.bossKills
-  set BossKills(v:int) = this.bossKills = v
-  get defeatedBossTypes() -> [str] = this.DefeatedBossTypes
-  set defeatedBossTypes(v:[str]) = this.DefeatedBossTypes = v
-  get bossKillsByType() -> Record[str, int] = this.BossKillsByType
-  set bossKillsByType(v:Record[str, int]) = this.BossKillsByType = v
-  get killsByType() -> Record[str, int] = this.KillsByType
-  set killsByType(v:Record[str, int]) = this.KillsByType = v
-  get foodsEatenByType() -> Record[str, int] = this.FoodsEatenByType
-  set foodsEatenByType(v:Record[str, int]) = this.FoodsEatenByType = v
-  get FoodsEaten() -> int = this.foodsEaten
-  set FoodsEaten(v:int) = this.foodsEaten = v
-  get HighestRunCombo() -> int = this.highestRunCombo
-  set HighestRunCombo(v:int) = this.highestRunCombo = v
-  get highestCombo() -> int = this.highestRunCombo
-  set highestCombo(v:int) = this.highestRunCombo = v
-  get floorShardsEarned() -> int = this.shardsEarned
-  set floorShardsEarned(v:int) = this.shardsEarned = v
-  get clutchCatchCount() -> int = this.ClutchCatchCount
-  set clutchCatchCount(v:int) = this.ClutchCatchCount = v
-  get totalClutchBonusScore() -> int = this.TotalClutchBonusScore
-  set totalClutchBonusScore(v:int) = this.TotalClutchBonusScore = v
-  get DamageDealt() -> int = this.damageDealt
-  set DamageDealt(v:int) = this.damageDealt = v
-  get RunTime() -> int = this.runTime
-  set RunTime(v:int) = this.runTime = v
-  get FlameTimer() -> int = this.flameTimer
-  set FlameTimer(v:int) = this.flameTimer = v
-  get ThunderTimer() -> int = this.thunderTimer
-  set ThunderTimer(v:int) = this.thunderTimer = v
-  get FrenzySparkTimer() -> int = this.frenzySparkTimer
-  set FrenzySparkTimer(v:int) = this.frenzySparkTimer = v
-  get StaticCoilCounter() -> int = this.staticCoilCounter
-  set StaticCoilCounter(v:int) = this.staticCoilCounter = v
-  get BiteCooldowns() -> Map[str, int] = this.biteCooldowns
-  get TimeScale() -> int = this.timeScale
-  set TimeScale(v:int) = this.timeScale = v
-  get BiteInterval() -> int = this.biteInterval
-  set BiteInterval(v:int) = this.biteInterval = v
-  fn _ensurePolyCapacity(capacity:int) -> void:
+  _lastSelfHitFxTime:int = 0, _constrictionCooldown = 0
+  get ComboCount = this.comboCount; set ComboCount(v) = this.comboCount = v
+  get ComboMultiplier = this.comboMultiplier; set ComboMultiplier(v) = this.comboMultiplier = v
+  get ComboTimer = this.comboTimer; set ComboTimer(v) = this.comboTimer = v
+  get Meta = this.meta; set Meta(v) = this.meta = v
+  get Services = this.services; set Services(v) = this.services = v
+  get Engine = this.engine; set Engine(v) = this.engine = v
+  get ComboBaseWindow = this.comboBaseWindow; set ComboBaseWindow(v) = this.comboBaseWindow = v
+  get ComboMaxTime = this.comboMaxTime; set ComboMaxTime(v) = this.comboMaxTime = v
+  get FrenzyActive = this.frenzyActive; set FrenzyActive(v) = this.frenzyActive = v
+  get FrenzyTimer = this.frenzyTimer; set FrenzyTimer(v) = this.frenzyTimer = v
+  get FrenzyMaxDuration = this.frenzyMaxDuration; set FrenzyMaxDuration(v) = this.frenzyMaxDuration = v
+  get Score = this.score; set Score(v) = this.score = v
+  get ShardsEarned = this.shardsEarned; set ShardsEarned(v) = this.shardsEarned = v
+  get Kills = this.kills; set Kills(v) = this.kills = v
+  get BossKills = this.bossKills; set BossKills(v) = this.bossKills = v
+  get defeatedBossTypes = this.DefeatedBossTypes; set defeatedBossTypes(v) = this.DefeatedBossTypes = v
+  get bossKillsByType = this.BossKillsByType; set bossKillsByType(v) = this.BossKillsByType = v
+  get killsByType = this.KillsByType; set killsByType(v) = this.KillsByType = v
+  get foodsEatenByType = this.FoodsEatenByType; set foodsEatenByType(v) = this.FoodsEatenByType = v
+  get FoodsEaten = this.foodsEaten; set FoodsEaten(v) = this.foodsEaten = v
+  get HighestRunCombo = this.highestRunCombo; set HighestRunCombo(v) = this.highestRunCombo = v
+  get highestCombo = this.highestRunCombo; set highestCombo(v) = this.highestRunCombo = v
+  get floorShardsEarned = this.shardsEarned; set floorShardsEarned(v) = this.shardsEarned = v
+  get clutchCatchCount = this.ClutchCatchCount; set clutchCatchCount(v) = this.ClutchCatchCount = v
+  get totalClutchBonusScore = this.TotalClutchBonusScore; set totalClutchBonusScore(v) = this.TotalClutchBonusScore = v
+  get DamageDealt = this.damageDealt; set DamageDealt(v) = this.damageDealt = v
+  get RunTime = this.runTime; set RunTime(v) = this.runTime = v
+  get FlameTimer = this.flameTimer; set FlameTimer(v) = this.flameTimer = v
+  get ThunderTimer = this.thunderTimer; set ThunderTimer(v) = this.thunderTimer = v
+  get FrenzySparkTimer = this.frenzySparkTimer; set FrenzySparkTimer(v) = this.frenzySparkTimer = v
+  get StaticCoilCounter = this.staticCoilCounter; set StaticCoilCounter(v) = this.staticCoilCounter = v
+  get BiteCooldowns = this.biteCooldowns
+  get TimeScale = this.timeScale; set TimeScale(v) = this.timeScale = v
+  get BiteInterval = this.biteInterval; set BiteInterval(v) = this.biteInterval = v
+  fn _ensurePolyCapacity(capacity:int) :
     if capacity > this._polyX.length:
       let nextCap = Math.max(capacity * 2, this._polyX.length * 2)
       this._polyX = Float64Array(nextCap)
       this._polyY = Float64Array(nextCap)
   fn constructor():
     this.reset()
-  fn reset() -> void:
+  fn reset() :
     this.comboCount = 0
     this.comboMultiplier = 1
     this.comboTimer = 0
@@ -223,9 +141,9 @@ pub class CombatSystem:
     this._lastGridSegCount = -1
     this._segmentGrid.clear()
     Services.sound.setFrenzyState(false)
-  fn Reset() -> void:
+  fn Reset() :
     this.reset()
-  fn ensureGrid(world:World, force:unknown = false) -> void:
+  fn ensureGrid(world:World, force:unknown = false) :
     let player = world != nil and world.player or world.Player or nil
     if player != nil:
       let segs = player.segments or player.Segments
@@ -239,12 +157,12 @@ pub class CombatSystem:
     this._gridBuiltThisTick = false
     this._lastGridSegCount = -1
     this._segmentGrid.clear()
-  fn resolveBites(dt:int, world:World) -> void:
+  fn resolveBites(dt:int, world:World) :
     this.resolveEnemies(dt, world)
     this.resolveBoss(dt, world)
-  fn ResolveBites(dt:int, world:World) -> void:
+  fn ResolveBites(dt:int, world:World) :
     this.resolveBites(dt, world)
-  fn update(dt:int, world:World) -> void:
+  fn update(dt:int, world:World) :
     let player = world.player or world.Player
     this.runTime = this.runTime + dt
     this._gridBuiltThisTick = false
@@ -270,7 +188,7 @@ pub class CombatSystem:
       player.pendingRevive = false
       player.PendingRevive = false
       this.phoenixNova(world)
-  fn Update(dt:int, world:World) -> void:
+  fn Update(dt:int, world:World) :
     this.update(dt, world)
   fn dilationScale(player:SnakePlayer) -> int:
     let relics = player.relics or player.Relics or {  }
@@ -282,14 +200,14 @@ pub class CombatSystem:
     else:
       1
   fn DilationScale(player:SnakePlayer) -> int = this.dilationScale(player)
-  fn updateCombo(dt:int, player:SnakePlayer) -> void:
+  fn updateCombo(dt:int, player:SnakePlayer) :
     if this.comboTimer > 0:
       this.comboTimer = this.comboTimer - dt
       if this.comboTimer <= 0:
         this.breakCombo(player)
-  fn UpdateCombo(dt:int, player:SnakePlayer) -> void:
+  fn UpdateCombo(dt:int, player:SnakePlayer) :
     this.updateCombo(dt, player)
-  fn updateFrenzy(dt:int, player:SnakePlayer) -> void:
+  fn updateFrenzy(dt:int, player:SnakePlayer) :
     if not this.frenzyActive:
       ret
     this.frenzyTimer = this.frenzyTimer - dt
@@ -305,9 +223,9 @@ pub class CombatSystem:
       let px = player.x ?? player.X
       let py = player.y ?? player.Y
       Services.fx.addText(px, py - 34, "FRENZY ENDED", "#94a3b8", 14)
-  fn UpdateFrenzy(dt:int, player:SnakePlayer) -> void:
+  fn UpdateFrenzy(dt:int, player:SnakePlayer) :
     this.updateFrenzy(dt, player)
-  fn incrementCombo(player:SnakePlayer, world:World) -> void:
+  fn incrementCombo(player:SnakePlayer, world:World) :
     this.comboCount = this.comboCount + 1
     if this.comboCount > this.highestRunCombo:
       this.highestRunCombo = this.comboCount
@@ -361,9 +279,9 @@ pub class CombatSystem:
       Services.fx.addText(px, py - 30, "🔥 5x STREAK", "#ffb703", 16)
     elif this.comboCount == 15:
       Services.fx.addText(px, py - 30, "⚡ 15x MEGA", "#00f0b5", 18, true)
-  fn IncrementCombo(player:SnakePlayer, world:World) -> void:
+  fn IncrementCombo(player:SnakePlayer, world:World) :
     this.incrementCombo(player, world)
-  fn breakCombo(player:Option[SnakePlayer]) -> void:
+  fn breakCombo(player:Option[SnakePlayer]) :
     if this.comboCount >= 5 and player:
       let px = player.x ?? player.X
       let py = player.y ?? player.Y
@@ -372,21 +290,21 @@ pub class CombatSystem:
     this.comboMultiplier = 1
     this.comboTimer = 0
     this.staticCoilCounter = 0
-  fn BreakCombo(player:Option[SnakePlayer]) -> void:
+  fn BreakCombo(player:Option[SnakePlayer]) :
     this.breakCombo(player)
   static fn enemyKey(id:int) -> str = String(id)
   fn canBite(key:str) -> bool:
     let next = this.biteCooldowns.at(key) ?? nil
     next == undefined or next <= this.runTime
   fn CanBite(key:str) -> bool = this.canBite(key)
-  fn markBite(key:str) -> void:
+  fn markBite(key:str) :
     this.biteCooldowns.set(key, this.runTime + this.biteInterval)
     if this.biteCooldowns.size > 64:
       this._staleBiteKeys.length = 0
       for [k, v] in this.biteCooldowns.entries():
         if v <= this.runTime:
           this._staleBiteKeys.push(k)
-  fn MarkBite(key:str) -> void:
+  fn MarkBite(key:str) :
     this.markBite(key)
   fn rollBite(player:SnakePlayer, multiplier:unknown = 1) -> BiteRoll:
     let stats = player.stats or player.Stats
@@ -465,7 +383,7 @@ pub class CombatSystem:
         world.game.banner(bname + " — PHASE 2", 1.6)
     killed
   fn DamageBoss(boss:Option[Boss], amount:int, world:World, opts:DamageOpts = {  }) -> bool = this.damageBoss(boss, amount, world, opts)
-  fn handleEnemyKill(enemy:Enemy, world:World) -> void:
+  fn handleEnemyKill(enemy:Enemy, world:World) :
     if enemy._killHandled != nil:
       ret
     enemy._killHandled = true
@@ -519,13 +437,13 @@ pub class CombatSystem:
       let enemies = world.enemies or world.Enemies
       let bosses = getActiveBosses(world)
     this.incrementCombo(player, world)
-  fn HandleEnemyKill(enemy:Enemy, world:World) -> void:
+  fn HandleEnemyKill(enemy:Enemy, world:World) :
     this.handleEnemyKill(enemy, world)
-  fn onEnemyKilled(enemy:Enemy, world:World) -> void:
+  fn onEnemyKilled(enemy:Enemy, world:World) :
     this.handleEnemyKill(enemy, world)
-  fn OnEnemyKilled(enemy:Enemy, world:World) -> void:
+  fn OnEnemyKilled(enemy:Enemy, world:World) :
     this.handleEnemyKill(enemy, world)
-  fn updateSegmentModules(dt:int, world:World) -> void:
+  fn updateSegmentModules(dt:int, world:World) :
     let player = world.player or world.Player
     if not player or not (player.alive ?? player.Alive) or not (player.segments or player.Segments):
       ret
@@ -547,15 +465,15 @@ pub class CombatSystem:
     elif player.headAugment == "crown" and player.headAugmentLevel > 0 and enemies:
       let crownDmg = 15 * player.headAugmentLevel * dmgBonus * dt
     executeHeadModules(this, dt, world)
-  fn updateAuras(dt:int, world:World) -> void:
+  fn updateAuras(dt:int, world:World) :
     updateAuras(this, dt, world)
-  fn UpdateAuras(dt:int, world:World) -> void:
+  fn UpdateAuras(dt:int, world:World) :
     this.updateAuras(dt, world)
-  fn updateRelicAttacks(dt:int, world:World) -> void:
+  fn updateRelicAttacks(dt:int, world:World) :
     updateRelicAttacks(this, dt, world)
-  fn UpdateRelicAttacks(dt:int, world:World) -> void:
+  fn UpdateRelicAttacks(dt:int, world:World) :
     this.updateRelicAttacks(dt, world)
-  fn updateHazards(dt:int, world:World) -> void:
+  fn updateHazards(dt:int, world:World) :
     let player = world.player or world.Player
     let px = player.x ?? player.X
     let py = player.y ?? player.Y
@@ -563,9 +481,9 @@ pub class CombatSystem:
     let hazards = world.hazards or world.Hazards
     let enemies = world.enemies or world.Enemies
     let boss = world.boss or world.Boss
-  fn UpdateHazards(dt:int, world:World) -> void:
+  fn UpdateHazards(dt:int, world:World) :
     this.updateHazards(dt, world)
-  fn updateProjectiles(dt:int, world:World) -> void:
+  fn updateProjectiles(dt:int, world:World) :
     this.ensureGrid(world)
     let player = world.player or world.Player
     let arenaW = world.arenaW or world.ArenaW
@@ -581,9 +499,9 @@ pub class CombatSystem:
     let mut writeIdx = 0
     let pCount = projectiles.length
     projectiles.length = writeIdx
-  fn UpdateProjectiles(dt:int, world:World) -> void:
+  fn UpdateProjectiles(dt:int, world:World) :
     this.updateProjectiles(dt, world)
-  fn cookNearbyFood(world:World) -> void:
+  fn cookNearbyFood(world:World) :
     let player = world.player or world.Player
     let cid = player.classId or player.ClassId
     if cid != "solar":
@@ -592,7 +510,7 @@ pub class CombatSystem:
     let py = player.y ?? player.Y
     let foods = world.foods or world.Foods
     let rr = 92 * 92
-  fn resolveFood(world:World) -> void:
+  fn resolveFood(world:World) :
     let player = world.player or world.Player
     let px = player.x ?? player.X
     let py = player.y ?? player.Y
@@ -600,9 +518,9 @@ pub class CombatSystem:
     let foods = world.foods or world.Foods
     this.cookNearbyFood(world)
     let baseReach = pr + 2
-  fn ResolveFood(world:World) -> void:
+  fn ResolveFood(world:World) :
     this.resolveFood(world)
-  fn eatFood(food:FoodItem, world:World) -> void:
+  fn eatFood(food:FoodItem, world:World) :
     food.dead = true
     food.Dead = true
     let player = world.player or world.Player
@@ -658,9 +576,9 @@ pub class CombatSystem:
         Services.fx.addText(px, py - 40, "+MAX HP", "#10b981", 15, true)
     if relics["explosiveAppetite"] or 0 > 0:
       this.explodeAt(world, px, py, 90, 45 * relics["explosiveAppetite"] * dmgBonus, pcol)
-  fn EatFood(food:FoodItem, world:World) -> void:
+  fn EatFood(food:FoodItem, world:World) :
     this.eatFood(food, world)
-  fn resolveEnemies(_dt:int, world:World) -> void:
+  fn resolveEnemies(_dt:int, world:World) :
     this.ensureGrid(world)
     let player = world.player or world.Player
     let heads = player.biteHeads != nil and player.biteHeads() or player.BiteHeads()
@@ -668,9 +586,9 @@ pub class CombatSystem:
     let isDashing = player.isDashing ?? player.IsDashing
     let relics = player.relics or player.Relics or {  }
     let segs = player.segments or player.Segments
-  fn ResolveEnemies(dt:int, world:World) -> void:
+  fn ResolveEnemies(dt:int, world:World) :
     this.resolveEnemies(dt, world)
-  fn enemyTouchesPlayer(enemy:Enemy, world:World, scale:int) -> void:
+  fn enemyTouchesPlayer(enemy:Enemy, world:World, scale:int) :
     let player = world.player or world.Player
     let stats = player.stats or player.Stats
     let thorns = stats.thorns ?? stats.Thorns ?? 0
@@ -681,9 +599,9 @@ pub class CombatSystem:
     this.onPlayerHurt(world, dealt)
     if thorns > 0:
       this.damageEnemy(enemy, dealt * thorns, world, { color: "#84cc16" })
-  fn EnemyTouchesPlayer(enemy:Enemy, world:World, scale:int) -> void:
+  fn EnemyTouchesPlayer(enemy:Enemy, world:World, scale:int) :
     this.enemyTouchesPlayer(enemy, world, scale)
-  fn onPlayerHurt(world:World, dealt:int) -> void:
+  fn onPlayerHurt(world:World, dealt:int) :
     let player = world.player or world.Player
     let relics = player.relics or player.Relics or {  }
     let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
@@ -696,9 +614,9 @@ pub class CombatSystem:
       Services.fx.ringShockwave(px, py, "#7dd3fc", radius * 0.5, 0.03)
       let enemies = world.enemies or world.Enemies
       let cryoBosses = getActiveBosses(world)
-  fn OnPlayerHurt(world:World, dealt:int) -> void:
+  fn OnPlayerHurt(world:World, dealt:int) :
     this.onPlayerHurt(world, dealt)
-  fn resolveBoss(_dt:int, world:World) -> void:
+  fn resolveBoss(_dt:int, world:World) :
     this.ensureGrid(world)
     let bosses = getActiveBosses(world)
     if not bosses or bosses.length == 0:
@@ -706,9 +624,9 @@ pub class CombatSystem:
     let player = world.player or world.Player
     if not player:
       ret
-  fn ResolveBoss(dt:int, world:World) -> void:
+  fn ResolveBoss(dt:int, world:World) :
     this.resolveBoss(dt, world)
-  fn resolveSelfCollision(world:World) -> void:
+  fn resolveSelfCollision(world:World) :
     this.ensureGrid(world)
     let player = world.player or world.Player
     if not player or not (player.alive ?? player.Alive):
@@ -761,14 +679,14 @@ pub class CombatSystem:
     let stride = segCount > 500 and Math.ceil(Math) or segCount > 150 and 2 or 1
     if anyHit != nil:
       this.breakCombo(player)
-  fn ResolveSelfCollision(world:World) -> void:
+  fn ResolveSelfCollision(world:World) :
     this.resolveSelfCollision(world)
   fn _isPointInPoly(x:int, y:int, polyLen:int, minX:int, maxX:int, minY:int, maxY:int) -> bool:
     if x < minX or x > maxX or y < minY or y > maxY:
       ret false
     let mut inside = false
     inside
-  fn checkConstriction(world:World) -> void:
+  fn checkConstriction(world:World) :
     if this._constrictionCooldown > 0:
       this._constrictionCooldown = this._constrictionCooldown - 1 / 120
       ret
@@ -813,7 +731,7 @@ pub class CombatSystem:
       Services.fx.ringShockwave(cx, cy, "#ffd166", Math.max(30, maxR * 0.85), 0.04)
       Services.fx.addText(cx, cy - 20, "🐍 OUROBOROS CONSTRICTION! 🐍", "#ffd166", 16, true)
       Services.sound.playExplosion(1)
-  fn CheckConstriction(world:World) -> void:
+  fn CheckConstriction(world:World) :
     this.checkConstriction(world)
   fn checkEncirclement(player:SnakePlayer, px:int, py:int) -> bool:
     if not player:
@@ -834,7 +752,7 @@ pub class CombatSystem:
     let mut inside = false
     inside
   fn CheckEncirclement(player:SnakePlayer, px:int, py:int) -> bool = this.checkEncirclement(player, px, py)
-  fn applyConstrictionDamage(player:SnakePlayer, world:World) -> void:
+  fn applyConstrictionDamage(player:SnakePlayer, world:World) :
     let enemies = World.getEnemies(world)
     if enemies != nil:
       for en in enemies:
@@ -847,9 +765,9 @@ pub class CombatSystem:
           en.stasisTimer = 2
           en.StasisTimer = 2
           Services.fx.burst(ex, ey, "#ffd166", 8, 4, 3)
-  fn ApplyConstrictionDamage(player:SnakePlayer, world:World) -> void:
+  fn ApplyConstrictionDamage(player:SnakePlayer, world:World) :
     this.applyConstrictionDamage(player, world)
-  fn fuseEncircledFoodIntoPrism(player:SnakePlayer, world:World, polyLen:int, minX:int, maxX:int, minY:int, maxY:int) -> void:
+  fn fuseEncircledFoodIntoPrism(player:SnakePlayer, world:World, polyLen:int, minX:int, maxX:int, minY:int, maxY:int) :
     let foods = World.getFoods(world)
     if not foods or foods.length == 0:
       ret
@@ -869,9 +787,9 @@ pub class CombatSystem:
       Services.sound.playLevelUp()
     elif trappedCount == 1:
       nil
-  fn FuseEncircledFoodIntoPrism(player:unknown, world:unknown) -> void:
+  fn FuseEncircledFoodIntoPrism(player:unknown, world:unknown) :
     this.fuseEncircledFoodIntoPrism(player, world)
-  fn phoenixNova(world:World) -> void:
+  fn phoenixNova(world:World) :
     let player = World.getPlayer(world)
     let px = player.x ?? player.X
     let py = player.y ?? player.Y
@@ -887,9 +805,9 @@ pub class CombatSystem:
     let phoenixBosses = getActiveBosses(world)
     if world.game != nil:
       world.game.banner("🔥 PHOENIX REBIRTH 🔥", 1.8)
-  fn PhoenixNova(world:World) -> void:
+  fn PhoenixNova(world:World) :
     this.phoenixNova(world)
-  fn explodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) -> void:
+  fn explodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) :
     if not Number.isFinite(damage) or damage <= 0 or not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius <= 0:
       ret
     if typeof(Services.fx?.explosion) == "function":
@@ -901,9 +819,9 @@ pub class CombatSystem:
     let bosses = getActiveBosses(world)
     if enemies != nil:
       nil
-  fn ExplodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) -> void:
+  fn ExplodeAt(world:World, x:int, y:int, radius:int, damage:int, color:str) :
     this.explodeAt(world, x, y, radius, damage, color)
-  fn chainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) -> void:
+  fn chainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) :
     if not Number.isFinite(damage) or damage <= 0 or not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(range) or range <= 0 or jumps <= 0:
       ret
     let hit = Set()
@@ -913,7 +831,7 @@ pub class CombatSystem:
     let enemies = world.enemies or world.Enemies
     let bosses = getActiveBosses(world)
     Services.sound.playThunder()
-  fn ChainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) -> void:
+  fn ChainLightning(world:World, x:int, y:int, jumps:int, damage:int, range:int, escalating:unknown = false) :
     this.chainLightning(world, x, y, jumps, damage, range, escalating)
   fn nearestHostile(world:World, x:int, y:int, maxDist:int) -> HostileTarget:
     let mut bestEnemy:Option[Enemy] = nil
@@ -966,13 +884,13 @@ pub class CombatSystem:
   fn NearestHostile(world:World, x:int, y:int, maxDist:int) -> HostileTarget = this.nearestHostile(world, x, y, maxDist)
   fn activateSkill(world:World) -> bool = activateSkill(this, world)
   fn ActivateSkill(world:World) -> bool = this.activateSkill(world)
-  fn skillVerdantBloom(world:World) -> void:
+  fn skillVerdantBloom(world:World) :
     skillVerdantBloom(this, world)
-  fn skillUmbralBlink(world:World) -> void:
+  fn skillUmbralBlink(world:World) :
     skillUmbralBlink(this, world)
-  fn skillTitanRoar(world:World) -> void:
+  fn skillTitanRoar(world:World) :
     skillTitanRoar(this, world)
-  fn skillChainStorm(world:World) -> void:
+  fn skillChainStorm(world:World) :
     skillChainStorm(this, world)
-  fn skillSupernova(world:World) -> void:
+  fn skillSupernova(world:World) :
     skillSupernova(this, world)

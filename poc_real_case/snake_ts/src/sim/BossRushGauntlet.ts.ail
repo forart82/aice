@@ -7,15 +7,8 @@ from "../data/Types.js" import HelmetDef, BossArchetypeDef
 from "./GameEngine.js" import GameEngine
 
 type BossRushGauntletState:
-  active:bool
-  waveIndex:int
-  waveTimer:int
-  bossesSpawned:int
-  bossesDefeated:int
-  totalBosses:int
-  allSpawned:bool
-  victory:bool
-  defeat:bool
+  active:bool, waveIndex:int, waveTimer:int, bossesSpawned:int, bossesDefeated:int
+  totalBosses:int, allSpawned:bool, victory:bool, defeat:bool
 
 pub const GAUNTLET_BOSS_ARCHETYPES: [BossArchetypeDef] = [{ Type: "centipede", type: "centipede", Name: "Centipede Behemoth", name: "Centipede Behemoth", Color: "#ff3366", color: "#ff3366", Accent: "#ff4d6d", accent: "#ff4d6d", BaseHp: 450, baseHp: 450, HpPerFloor: 180, hpPerFloor: 180, Radius: 30, radius: 30, Title: "The rival coil that outgrew its arena", title: "The rival coil that outgrew its arena" }, { Type: "gorgon", type: "gorgon", Name: "Storm Gorgon", name: "Storm Gorgon", Color: "#00f0b5", color: "#00f0b5", Accent: "#38bdf8", accent: "#38bdf8", BaseHp: 650, baseHp: 650, HpPerFloor: 220, hpPerFloor: 220, Radius: 32, radius: 32, Title: "Volt sovereign of atmospheric tempests", title: "Volt sovereign of atmospheric tempests" }, { Type: "quantum_hydra", type: "quantum_hydra", Name: "Hydra Apex", name: "Hydra Apex", Color: "#c084fc", color: "#c084fc", Accent: "#e879f9", accent: "#e879f9", BaseHp: 1200, baseHp: 1200, HpPerFloor: 300, hpPerFloor: 300, Radius: 36, radius: 36, Title: "Multiverse serpent splitting into probabilistic reality coils", title: "Multiverse serpent splitting into probabilistic reality coils" }, { Type: "colossus", type: "colossus", Name: "Infernal Colossus", name: "Infernal Colossus", Color: "#ff9e00", color: "#ff9e00", Accent: "#ffb703", accent: "#ffb703", BaseHp: 900, baseHp: 900, HpPerFloor: 280, hpPerFloor: 280, Radius: 34, radius: 34, Title: "A furnace that learned to walk", title: "A furnace that learned to walk" }, { Type: "leviathan", type: "leviathan", Name: "Astral Leviathan", name: "Astral Leviathan", Color: "#9d4edd", color: "#9d4edd", Accent: "#c77dff", accent: "#c77dff", BaseHp: 1800, baseHp: 1800, HpPerFloor: 400, hpPerFloor: 400, Radius: 35, radius: 35, Title: "It writes spirals in the dark and calls them law", title: "It writes spirals in the dark and calls them law" }, { Type: "chronowyrm", type: "chronowyrm", Name: "Chrono Wyrm", name: "Chrono Wyrm", Color: "#a855f7", color: "#a855f7", Accent: "#e0aaff", accent: "#e0aaff", BaseHp: 1500, baseHp: 1500, HpPerFloor: 400, hpPerFloor: 400, Radius: 33, radius: 33, Title: "Master of temporal dilation and paradox clones", title: "Master of temporal dilation and paradox clones" }, { Type: "void_devourer", type: "void_devourer", Name: "Void Serpent", name: "Void Serpent", Color: "#7928ca", color: "#7928ca", Accent: "#b5179e", accent: "#b5179e", BaseHp: 2200, baseHp: 2200, HpPerFloor: 450, hpPerFloor: 450, Radius: 37, radius: 37, Title: "Abyssal gravity maw consuming arena matter and light", title: "Abyssal gravity maw consuming arena matter and light" }, { Type: "volcanic_chimera", type: "volcanic_chimera", Name: "Solar Chimera", name: "Solar Chimera", Color: "#dc2626", color: "#dc2626", Accent: "#f87171", accent: "#f87171", BaseHp: 2500, baseHp: 2500, HpPerFloor: 500, hpPerFloor: 500, Radius: 37, radius: 37, Title: "Tri-headed subterranean beast erupting magma fountains and solar pyres", title: "Tri-headed subterranean beast erupting magma fountains and solar pyres" }]
 
@@ -24,46 +17,28 @@ pub const THE_NINTH_HELMET: unknown = { Id: "helm_ouroboros_ascension_9th", id: 
 pub class BossRushGauntlet:
   state: BossRushGauntletState
   trackedBosses: [unknown] = []
-  fn get_State() -> BossRushGauntletState = this.state
-  fn get_active() -> bool = this.state.active
-  fn set_active(v:bool) -> void = this.state.active = v
-  fn get_Active() -> bool = this.state.active
-  fn set_Active(v:bool) -> void = this.state.active = v
-  fn get_waveIndex() -> int = this.state.waveIndex
-  fn set_waveIndex(v:int) -> void = this.state.waveIndex = v
-  fn get_WaveIndex() -> int = this.state.waveIndex
-  fn set_WaveIndex(v:int) -> void = this.state.waveIndex = v
-  fn get_waveTimer() -> int = this.state.waveTimer
-  fn set_waveTimer(v:int) -> void = this.state.waveTimer = v
-  fn get_WaveTimer() -> int = this.state.waveTimer
-  fn set_WaveTimer(v:int) -> void = this.state.waveTimer = v
-  fn get_bossesSpawned() -> int = this.state.bossesSpawned
-  fn set_bossesSpawned(v:int) -> void = this.state.bossesSpawned = v
-  fn get_BossesSpawned() -> int = this.state.bossesSpawned
-  fn set_BossesSpawned(v:int) -> void = this.state.bossesSpawned = v
-  fn get_bossesDefeated() -> int = this.state.bossesDefeated
-  fn set_bossesDefeated(v:int) -> void = this.state.bossesDefeated = v
-  fn get_BossesDefeated() -> int = this.state.bossesDefeated
-  fn set_BossesDefeated(v:int) -> void = this.state.bossesDefeated = v
-  fn get_totalBosses() -> int = this.state.totalBosses
-  fn set_totalBosses(v:int) -> void = this.state.totalBosses = v
-  fn get_TotalBosses() -> int = this.state.totalBosses
-  fn set_TotalBosses(v:int) -> void = this.state.totalBosses = v
-  fn get_allSpawned() -> bool = this.state.allSpawned
-  fn set_allSpawned(v:bool) -> void = this.state.allSpawned = v
-  fn get_AllSpawned() -> bool = this.state.allSpawned
-  fn set_AllSpawned(v:bool) -> void = this.state.allSpawned = v
-  fn get_victory() -> bool = this.state.victory
-  fn set_victory(v:bool) -> void = this.state.victory = v
-  fn get_Victory() -> bool = this.state.victory
-  fn set_Victory(v:bool) -> void = this.state.victory = v
-  fn get_defeat() -> bool = this.state.defeat
-  fn set_defeat(v:bool) -> void = this.state.defeat = v
-  fn get_Defeat() -> bool = this.state.defeat
-  fn set_Defeat(v:bool) -> void = this.state.defeat = v
+  fn get_State() = this.state
+  fn get_active() = this.state.active; fn set_active(v) = this.state.active = v
+  fn get_Active() = this.state.active; fn set_Active(v) = this.state.active = v
+  fn get_waveIndex() = this.state.waveIndex; fn set_waveIndex(v) = this.state.waveIndex = v
+  fn get_WaveIndex() = this.state.waveIndex; fn set_WaveIndex(v) = this.state.waveIndex = v
+  fn get_waveTimer() = this.state.waveTimer; fn set_waveTimer(v) = this.state.waveTimer = v
+  fn get_WaveTimer() = this.state.waveTimer; fn set_WaveTimer(v) = this.state.waveTimer = v
+  fn get_bossesSpawned() = this.state.bossesSpawned; fn set_bossesSpawned(v) = this.state.bossesSpawned = v
+  fn get_BossesSpawned() = this.state.bossesSpawned; fn set_BossesSpawned(v) = this.state.bossesSpawned = v
+  fn get_bossesDefeated() = this.state.bossesDefeated; fn set_bossesDefeated(v) = this.state.bossesDefeated = v
+  fn get_BossesDefeated() = this.state.bossesDefeated; fn set_BossesDefeated(v) = this.state.bossesDefeated = v
+  fn get_totalBosses() = this.state.totalBosses; fn set_totalBosses(v) = this.state.totalBosses = v
+  fn get_TotalBosses() = this.state.totalBosses; fn set_TotalBosses(v) = this.state.totalBosses = v
+  fn get_allSpawned() = this.state.allSpawned; fn set_allSpawned(v) = this.state.allSpawned = v
+  fn get_AllSpawned() = this.state.allSpawned; fn set_AllSpawned(v) = this.state.allSpawned = v
+  fn get_victory() = this.state.victory; fn set_victory(v) = this.state.victory = v
+  fn get_Victory() = this.state.victory; fn set_Victory(v) = this.state.victory = v
+  fn get_defeat() = this.state.defeat; fn set_defeat(v) = this.state.defeat = v
+  fn get_Defeat() = this.state.defeat; fn set_Defeat(v) = this.state.defeat = v
   fn constructor():
     this.state = { active: false, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
-  fn start(engine:GameEngine) -> void:
+  fn start(engine:GameEngine) :
     this.state = { active: true, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
     this.trackedBosses = []
     if engine != nil:
@@ -78,7 +53,7 @@ pub class BossRushGauntlet:
       if engine.Sound?.PlayBossAlert != nil:
         engine.Sound.PlayBossAlert()
         engine.Sound.SetBossMode(true)
-  fn Start(engine:GameEngine) -> void:
+  fn Start(engine:GameEngine) :
     this.start(engine)
   fn spawnBossForWave(waveIdx:int, engine:GameEngine) -> Boss:
     let safeIdx = Math.max(0, Math.min(GAUNTLET_BOSS_ARCHETYPES.length - 1, waveIdx))
@@ -103,7 +78,7 @@ pub class BossRushGauntlet:
     if engine?.Sound?.PlayBossAlert != nil:
       engine.Sound.PlayBossAlert()
     boss
-  fn update(dt:int, engine:GameEngine) -> void:
+  fn update(dt:int, engine:GameEngine) :
     if not this.state.active or this.state.victory or this.state.defeat:
       ret
     let player = engine?.Player ?? engine?.player
@@ -132,9 +107,9 @@ pub class BossRushGauntlet:
             engine.OnBossDefeated(tracked.boss)
     if this.state.bossesDefeated >= this.state.totalBosses:
       this.triggerVictory(engine)
-  fn Update(dt:int, engine:GameEngine) -> void:
+  fn Update(dt:int, engine:GameEngine) :
     this.update(dt, engine)
-  fn triggerDefeat(engine:GameEngine) -> void:
+  fn triggerDefeat(engine:GameEngine) :
     this.state.defeat = true
     this.state.active = false
     let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
@@ -146,9 +121,9 @@ pub class BossRushGauntlet:
       engine.Sound.PlayGameOver()
     if typeof(engine?.Banner) == "function":
       engine.Banner("💀 GAUNTLET DEFEAT: ALL 8 HELMETS DESTROYED! RESTART FROM 0 💀", 5)
-  fn TriggerDefeat(engine:GameEngine) -> void:
+  fn TriggerDefeat(engine:GameEngine) :
     this.triggerDefeat(engine)
-  fn triggerVictory(engine:GameEngine) -> void:
+  fn triggerVictory(engine:GameEngine) :
     this.state.victory = true
     this.state.active = false
     let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
@@ -171,5 +146,5 @@ pub class BossRushGauntlet:
       engine.Sound.PlayVictory()
     if typeof(engine?.Banner) == "function":
       engine.Banner("🌟 ASCENSION ACHIEVED: ALL 8 BOSSES SLAIN! 9TH HELMET FORGED! 🌟", 6)
-  fn TriggerVictory(engine:GameEngine) -> void:
+  fn TriggerVictory(engine:GameEngine) :
     this.triggerVictory(engine)

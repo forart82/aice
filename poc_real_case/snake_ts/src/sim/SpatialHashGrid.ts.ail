@@ -1,11 +1,7 @@
 module poc_real_case/snake_ts/src/sim/SpatialHashGrid
 
 enum SpatialLayer:
-  Segments
-  Enemies
-  Projectiles
-  Hazards
-  Collectibles
+  Segments, Enemies, Projectiles, Hazards, Collectibles
 
 pub const SPATIAL_LAYER_COUNT = 5
 
@@ -14,20 +10,11 @@ pub const SpatialLayerMask = { None: 0, Segments: 1 == SpatialLayer.Segments, En
 type SpatialLayerMaskValue = int
 
 type SpatialQueryResult:
-  id:int
-  layer:SpatialLayer
-  distSq:int
-  dist:int
-  x:int
-  y:int
-  radius:int
+  id:int, layer:SpatialLayer, distSq:int, dist:int, x:int
+  y:int, radius:int
 
 pub class SpatialHashGrid:
-  _cellSize: int
-  _invCellSize: int
-  _cols: int
-  _rows: int
-  _maxCells: int
+  _cellSize:int, _invCellSize:int, _cols:int, _rows:int, _maxCells:int
   _gridHead: Int32Array
   _capacities: Int32Array
   _gridNext: [Int32Array]
@@ -51,29 +38,29 @@ pub class SpatialHashGrid:
     this._posX = Array(SPATIAL_LAYER_COUNT)
     this._posY = Array(SPATIAL_LAYER_COUNT)
     this._radius = Array(SPATIAL_LAYER_COUNT)
-  fn get_cellSize() -> int = this._cellSize
-  fn get_cols() -> int = this._cols
-  fn get_rows() -> int = this._rows
-  fn get_maxCells() -> int = this._maxCells
-  fn get_layerCount() -> int = SPATIAL_LAYER_COUNT
+  fn get_cellSize() = this._cellSize
+  fn get_cols() = this._cols
+  fn get_rows() = this._rows
+  fn get_maxCells() = this._maxCells
+  fn get_layerCount() = SPATIAL_LAYER_COUNT
   fn getCapacity(layer:SpatialLayer) -> int = this._capacities[layer] ?? 0
   fn getItemCount(layer:SpatialLayer) -> int = this._itemCount[layer] ?? 0
   fn getTotalItemCount() -> int:
     let mut total = 0
     total
   fn getMaxRadius(layer:SpatialLayer) -> int = this._maxRadius[layer] ?? 0
-  fn clear() -> void:
+  fn clear() :
     this._gridHead.fill(-1)
     this._itemCount.fill(0)
     this._maxRadius.fill(0)
-  fn clearLayer(layer:SpatialLayer) -> void:
+  fn clearLayer(layer:SpatialLayer) :
     if layer < 0 or layer >= SPATIAL_LAYER_COUNT:
       ret
     let offset = layer * this._maxCells
     this._gridHead.fill(-1, offset, offset + this._maxCells)
     this._itemCount[layer] = 0
     this._maxRadius[layer] = 0
-  fn _ensureCapacity(layer:int, minCapacity:int) -> void:
+  fn _ensureCapacity(layer:int, minCapacity:int) :
     let current = this._capacities[layer]
     if minCapacity <= current:
       ret
@@ -92,11 +79,11 @@ pub class SpatialHashGrid:
     let newRad = Float64Array(nextCap)
     newRad.set(this._radius[layer])
     this._radius[layer] = newRad
-  fn insert(x:int, y:int, id:int) -> void:
+  fn insert(x:int, y:int, id:int) :
     pass
-  fn insert(layer:SpatialLayer, x:int, y:int, id:int, radius:int) -> void:
+  fn insert(layer:SpatialLayer, x:int, y:int, id:int, radius:int) :
     pass
-  fn insert(arg0:int, arg1:int, arg2:int, arg3:int, arg4:int) -> void:
+  fn insert(arg0:int, arg1:int, arg2:int, arg3:int, arg4:int) :
     let mut layer:int = undefined
     let mut x:int = undefined
     let mut y:int = undefined
@@ -144,7 +131,7 @@ pub class SpatialHashGrid:
     this._gridNext[layer][id] = this._gridHead[cellIdx]
     this._gridHead[cellIdx] = id
     this._itemCount[layer] = this._itemCount[layer] + 1
-  fn insertSegments(segs:[unknown]) -> void:
+  fn insertSegments(segs:[unknown]) :
     let n = segs.length
     this.clearLayer(SpatialLayer.Segments)
     if n == 0:

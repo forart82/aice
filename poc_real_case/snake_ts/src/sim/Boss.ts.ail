@@ -13,100 +13,52 @@ from "./SnakePlayer.js" import SnakePlayer
 from "./World.js" import World
 
 pub class BossSegment:
-  X = 0
-  Y = 0
-  Angle = 0
-  R = 15
-  Hp = 25
-  MaxHp = 25
-  HitFlash = 0
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_angle() -> int = this.Angle
-  fn set_angle(v:int) -> void = this.Angle = v
-  fn get_r() -> int = this.R
-  fn set_r(v:int) -> void = this.R = v
-  fn get_hp() -> int = this.Hp
-  fn set_hp(v:int) -> void = this.Hp = v
-  fn get_maxHp() -> int = this.MaxHp
-  fn set_maxHp(v:int) -> void = this.MaxHp = v
-  fn get_hitFlash() -> int = this.HitFlash
-  fn set_hitFlash(v:int) -> void = this.HitFlash = v
+  X = 0, Y = 0, Angle = 0, R = 15, Hp = 25
+  MaxHp = 25, HitFlash = 0
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
+  fn get_r() = this.R; fn set_r(v) = this.R = v
+  fn get_hp() = this.Hp; fn set_hp(v) = this.Hp = v
+  fn get_maxHp() = this.MaxHp; fn set_maxHp(v) = this.MaxHp = v
+  fn get_hitFlash() = this.HitFlash; fn set_hitFlash(v) = this.HitFlash = v
 
 type ITelegraphAttack:
   type:"circle" | "cone" | "line" | "hazard" | "ring" | str
-  x:Option[int]
-  y:Option[int]
-  x1:Option[int]
-  y1:Option[int]
-  x2:Option[int]
-  y2:Option[int]
-  width:Option[int]
-  radius:Option[int]
-  length:Option[int]
-  spread:Option[int]
-  angle:Option[int]
-  progress:int
-  color:Option[str]
-  maxRadius:Option[int]
-  innerRadius:Option[int]
+  x:Option[int], y:Option[int], x1:Option[int], y1:Option[int], x2:Option[int]
+  y2:Option[int], width:Option[int], radius:Option[int], length:Option[int], spread:Option[int]
+  angle:Option[int], progress:int, color:Option[str], maxRadius:Option[int], innerRadius:Option[int]
 
 pub class Boss:
   static readonly RomanNumerals = ["", "II", "III", "IV", "V"]
   static readonly SpreadPhase1 = [-0.28, 0, 0.28]
   static readonly SpreadPhase2 = [-0.5, -0.25, 0, 0.25, 0.5]
   static readonly NoParts: [BossSegment] = []
-  Floor: int
-  ArenaW: int
-  ArenaH: int
-  Type: str
-  Name: str
-  Title: str
-  Color: str
-  Accent: str
-  Radius: int
-  HeadHp = 50
-  HeadMaxHp = 50
-  _targetTotalMaxHp = 0
-  X: int
-  Y: int
-  Angle = 0
-  SpiralAngle = 0
-  Phase = 1
-  AttackTimer = 2.2
-  MoveTimer = 0
-  Telegraph = 0
-  HitFlash = 0
-  StasisTimer = 0
+  Floor:int, ArenaW:int, ArenaH:int, Type:str, Name:str
+  Title:str, Color:str, Accent:str, Radius:int, HeadHp = 50
+  HeadMaxHp = 50, _targetTotalMaxHp = 0, X:int, Y:int, Angle = 0
+  SpiralAngle = 0, Phase = 1, AttackTimer = 2.2, MoveTimer = 0, Telegraph = 0
+  HitFlash = 0, StasisTimer = 0
   Status: StatusSet
-  Dead = false
-  ContactDamage: int
-  XpValue: int = GameData.BossDefeatOuro
-  EntranceTimer = 1.4
+  Dead = false, ContactDamage:int, XpValue:int = GameData.BossDefeatOuro, EntranceTimer = 1.4
   WanderTarget: Vec2
   Segments: [BossSegment] = []
   Telegraphs: [ITelegraphAttack] = []
-  SegmentSpacing = 20
-  OnPhaseChange = false
-  MultiBossScale = 1
-  fn get_headHp() -> int = this.HeadHp
-  fn set_headHp(v:int) -> void = this.HeadHp = v
-  fn get_headMaxHp() -> int = this.HeadMaxHp
-  fn set_headMaxHp(v:int) -> void = this.HeadMaxHp = v
+  SegmentSpacing = 20, OnPhaseChange = false, MultiBossScale = 1
+  fn get_headHp() = this.HeadHp; fn set_headHp(v) = this.HeadHp = v
+  fn get_headMaxHp() = this.HeadMaxHp; fn set_headMaxHp(v) = this.HeadMaxHp = v
   fn get_MaxHp() -> int:
     if this._targetTotalMaxHp > 0:
       ret this._targetTotalMaxHp
     let mut sum = this.HeadMaxHp
     sum
-  fn set_MaxHp(v:int) -> void:
+  fn set_MaxHp(v:int) :
     this._targetTotalMaxHp = v
     this.InitSegmentHealth()
   fn get_Hp() -> int:
     let mut sum = this.HeadHp
     sum
-  fn set_Hp(v:int) -> void:
+  fn set_Hp(v:int) :
     if not Number.isFinite(v) or v <= 0:
       this.HeadHp = 0
       for s in this.Segments:
@@ -117,72 +69,40 @@ pub class Boss:
     let mut remaining = v
     this.HeadHp = Math.min(this.HeadMaxHp, remaining)
     remaining = remaining - this.HeadHp
-  fn get_segmentSpacing() -> int = this.SegmentSpacing
-  fn set_segmentSpacing(v:int) -> void = this.SegmentSpacing = v
-  fn get_multiBossScale() -> int = this.MultiBossScale
-  fn set_multiBossScale(v:int) -> void = this.MultiBossScale = v
-  fn get_floor() -> int = this.Floor
-  fn set_floor(v:int) -> void = this.Floor = v
-  fn get_arenaW() -> int = this.ArenaW
-  fn set_arenaW(v:int) -> void = this.ArenaW = v
-  fn get_arenaH() -> int = this.ArenaH
-  fn set_arenaH(v:int) -> void = this.ArenaH = v
-  fn get_type() -> str = this.Type
-  fn set_type(v:str) -> void = this.Type = v
-  fn get_name() -> str = this.Name
-  fn set_name(v:str) -> void = this.Name = v
-  fn get_title() -> str = this.Title
-  fn set_title(v:str) -> void = this.Title = v
-  fn get_color() -> str = this.Color
-  fn set_color(v:str) -> void = this.Color = v
-  fn get_accent() -> str = this.Accent
-  fn set_accent(v:str) -> void = this.Accent = v
-  fn get_radius() -> int = this.Radius
-  fn set_radius(v:int) -> void = this.Radius = v
-  fn get_maxHp() -> int = this.MaxHp
-  fn set_maxHp(v:int) -> void = this.MaxHp = v
-  fn get_hp() -> int = this.Hp
-  fn set_hp(v:int) -> void = this.Hp = v
-  fn get_x() -> int = this.X
-  fn set_x(v:int) -> void = this.X = v
-  fn get_y() -> int = this.Y
-  fn set_y(v:int) -> void = this.Y = v
-  fn get_angle() -> int = this.Angle
-  fn set_angle(v:int) -> void = this.Angle = v
-  fn get_spiralAngle() -> int = this.SpiralAngle
-  fn set_spiralAngle(v:int) -> void = this.SpiralAngle = v
-  fn get_phase() -> int = this.Phase
-  fn set_phase(v:int) -> void = this.Phase = v
-  fn get_attackTimer() -> int = this.AttackTimer
-  fn set_attackTimer(v:int) -> void = this.AttackTimer = v
-  fn get_moveTimer() -> int = this.MoveTimer
-  fn set_moveTimer(v:int) -> void = this.MoveTimer = v
-  fn get_telegraph() -> int = this.Telegraph
-  fn set_telegraph(v:int) -> void = this.Telegraph = v
-  fn get_telegraphs() -> [ITelegraphAttack] = this.Telegraphs
-  fn set_telegraphs(v:[ITelegraphAttack]) -> void = this.Telegraphs = v
-  fn get_hitFlash() -> int = this.HitFlash
-  fn set_hitFlash(v:int) -> void = this.HitFlash = v
-  fn get_stasisTimer() -> int = this.StasisTimer
-  fn set_stasisTimer(v:int) -> void = this.StasisTimer = v
-  fn get_status() -> StatusSet = this.Status
-  fn set_status(v:StatusSet) -> void = this.Status = v
-  fn get_dead() -> bool = this.Dead
-  fn set_dead(v:bool) -> void = this.Dead = v
-  fn get_Alive() -> bool = not this.Dead and this.Hp > 0
-  fn get_alive() -> bool = this.Alive
-  fn get_contactDamage() -> int = this.ContactDamage
-  fn set_contactDamage(v:int) -> void = this.ContactDamage = v
-  fn get_xpValue() -> int = this.XpValue
-  fn set_xpValue(v:int) -> void = this.XpValue = v
-  fn get_entranceTimer() -> int = this.EntranceTimer
-  fn set_entranceTimer(v:int) -> void = this.EntranceTimer = v
-  fn get_wanderTarget() -> Vec2 = this.WanderTarget
-  fn set_wanderTarget(v:Vec2) -> void = this.WanderTarget = v
-  fn get_segments() -> [BossSegment] = this.Segments
-  fn set_segments(v:[BossSegment]) -> void = this.Segments = v
-  fn get_onPhaseChange() -> bool = this.OnPhaseChange
-  fn set_onPhaseChange(v:bool) -> void = this.OnPhaseChange = v
+  fn get_segmentSpacing() = this.SegmentSpacing; fn set_segmentSpacing(v) = this.SegmentSpacing = v
+  fn get_multiBossScale() = this.MultiBossScale; fn set_multiBossScale(v) = this.MultiBossScale = v
+  fn get_floor() = this.Floor; fn set_floor(v) = this.Floor = v
+  fn get_arenaW() = this.ArenaW; fn set_arenaW(v) = this.ArenaW = v
+  fn get_arenaH() = this.ArenaH; fn set_arenaH(v) = this.ArenaH = v
+  fn get_type() = this.Type; fn set_type(v) = this.Type = v
+  fn get_name() = this.Name; fn set_name(v) = this.Name = v
+  fn get_title() = this.Title; fn set_title(v) = this.Title = v
+  fn get_color() = this.Color; fn set_color(v) = this.Color = v
+  fn get_accent() = this.Accent; fn set_accent(v) = this.Accent = v
+  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
+  fn get_maxHp() = this.MaxHp; fn set_maxHp(v) = this.MaxHp = v
+  fn get_hp() = this.Hp; fn set_hp(v) = this.Hp = v
+  fn get_x() = this.X; fn set_x(v) = this.X = v
+  fn get_y() = this.Y; fn set_y(v) = this.Y = v
+  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
+  fn get_spiralAngle() = this.SpiralAngle; fn set_spiralAngle(v) = this.SpiralAngle = v
+  fn get_phase() = this.Phase; fn set_phase(v) = this.Phase = v
+  fn get_attackTimer() = this.AttackTimer; fn set_attackTimer(v) = this.AttackTimer = v
+  fn get_moveTimer() = this.MoveTimer; fn set_moveTimer(v) = this.MoveTimer = v
+  fn get_telegraph() = this.Telegraph; fn set_telegraph(v) = this.Telegraph = v
+  fn get_telegraphs() = this.Telegraphs; fn set_telegraphs(v) = this.Telegraphs = v
+  fn get_hitFlash() = this.HitFlash; fn set_hitFlash(v) = this.HitFlash = v
+  fn get_stasisTimer() = this.StasisTimer; fn set_stasisTimer(v) = this.StasisTimer = v
+  fn get_status() = this.Status; fn set_status(v) = this.Status = v
+  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
+  fn get_Alive() = not this.Dead and this.Hp > 0
+  fn get_alive() = this.Alive
+  fn get_contactDamage() = this.ContactDamage; fn set_contactDamage(v) = this.ContactDamage = v
+  fn get_xpValue() = this.XpValue; fn set_xpValue(v) = this.XpValue = v
+  fn get_entranceTimer() = this.EntranceTimer; fn set_entranceTimer(v) = this.EntranceTimer = v
+  fn get_wanderTarget() = this.WanderTarget; fn set_wanderTarget(v) = this.WanderTarget = v
+  fn get_segments() = this.Segments; fn set_segments(v) = this.Segments = v
+  fn get_onPhaseChange() = this.OnPhaseChange; fn set_onPhaseChange(v) = this.OnPhaseChange = v
   fn constructor(floor:int, arenaW:int, arenaH:int, specificTypeOrArchetype:str | BossArchetypeDef, startX:int, startY:int, multiBossScale:unknown = 1):
     this.Floor = Math.max(1, floor)
     this.ArenaW = arenaW
@@ -237,7 +157,7 @@ pub class Boss:
       spacing = 20
     this.SegmentSpacing = spacing
     this.InitSegmentHealth()
-  fn InitSegmentHealth() -> void:
+  fn InitSegmentHealth() :
     let total = this._targetTotalMaxHp
     let n = this.Segments.length
     if n == 0:
@@ -249,16 +169,15 @@ pub class Boss:
     let headHp = total - unitHp * n
     this.HeadMaxHp = headHp
     this.HeadHp = headHp
-  fn get_Vulnerable() -> bool = this.EntranceTimer <= 0 and not this.Dead
-  fn set_Vulnerable(v:bool) -> void:
+  fn get_Vulnerable() = this.EntranceTimer <= 0 and not this.Dead
+  fn set_Vulnerable(v:bool) :
     if v != nil:
       this.EntranceTimer = 0
     else:
       this.EntranceTimer = 999
-  fn get_vulnerable() -> bool = this.Vulnerable
-  fn set_vulnerable(v:bool) -> void = this.Vulnerable = v
-  fn get_HpPct() -> int = MathX.clamp(this.Hp / this.MaxHp, 0, 1)
-  fn get_hpPct() -> int = this.HpPct
+  fn get_vulnerable() = this.Vulnerable; fn set_vulnerable(v) = this.Vulnerable = v
+  fn get_HpPct() = MathX.clamp(this.Hp / this.MaxHp, 0, 1)
+  fn get_hpPct() = this.HpPct
   fn ApplyDamage(amount:int) -> bool:
     if not this.Vulnerable or not (amount > 0):
       ret false
@@ -312,7 +231,7 @@ pub class Boss:
       ret true
     false
   fn damageSegment(index:int, amount:int) -> bool = this.DamageSegment(index, amount)
-  fn SeverFrom(index:int) -> void:
+  fn SeverFrom(index:int) :
     if typeof(index) != "number" or not Number.isInteger(index) or index < 0 or index >= this.Segments.length:
       ret
     Services.Sound.PlayExplosion()
@@ -320,9 +239,9 @@ pub class Boss:
     if this.Segments.length == 0 and this.HeadHp <= 0:
       this.HeadHp = 0
       this.Dead = true
-  fn severFrom(index:int) -> void:
+  fn severFrom(index:int) :
     this.SeverFrom(index)
-  fn Update(dt:int, target:SnakePlayer, world:World) -> void:
+  fn Update(dt:int, target:SnakePlayer, world:World) :
     if not Number.isFinite(dt) or dt <= 0 or not target or not world:
       ret
     if not Number.isFinite(this.X):
@@ -361,20 +280,20 @@ pub class Boss:
     let ah = this.ArenaH or world.ArenaH or world.arenaH
     this.X = MathX.clamp(this.X, this.Radius, aw - this.Radius)
     this.Y = MathX.clamp(this.Y, this.Radius, ah - this.Radius)
-  fn update(dt:int, target:SnakePlayer, world:World) -> void:
+  fn update(dt:int, target:SnakePlayer, world:World) :
     this.Update(dt, target, world)
-  fn UpdateSegments(_dt:int) -> void:
+  fn UpdateSegments(_dt:int) :
     let mut px = Number.isFinite(this.X) and this.X or this.ArenaW * 0.5
     let mut py = Number.isFinite(this.Y) and this.Y or this.ArenaH * 0.5
     let spacing = this.SegmentSpacing
     let n = this.Segments.length
-  fn updateSegments(dt:int) -> void:
+  fn updateSegments(dt:int) :
     this.UpdateSegments(dt)
-  fn stepIK(dt:int) -> void:
+  fn stepIK(dt:int) :
     this.UpdateSegments(dt)
-  fn stepIk(dt:int) -> void:
+  fn stepIk(dt:int) :
     this.UpdateSegments(dt)
-  fn UpdateCentipede(dt:int, dx:int, dy:int, _dist:int, world:World) -> void:
+  fn UpdateCentipede(dt:int, dx:int, dy:int, _dist:int, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6.5 or 4.5 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -389,7 +308,7 @@ pub class Boss:
         this.AttackTimer = 2.2
       let spread = this.Phase == 2 and Boss.SpreadPhase2 or Boss.SpreadPhase1
       Services.Sound.PlayShoot()
-  fn UpdateGorgon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateGorgon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6 or 4 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -410,7 +329,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, this.ArenaH - 40), "laser", { Radius: 40, Life: 1.2, ImpactDamage: 24 + this.Floor * 3, Telegraph: 0.9, Owner: "enemy" }))
-  fn UpdateColossus(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateColossus(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.MoveTimer = this.MoveTimer - dt
     if this.MoveTimer <= 0 or not this.WanderTarget:
       this.MoveTimer = Rng.Shared.range(2.4, 4.2)
@@ -435,7 +354,7 @@ pub class Boss:
       if ringPhase != nil and world.Hazards.length < 70:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
-  fn UpdateFrostwyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateFrostwyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 5.5 or 3.8 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -455,7 +374,7 @@ pub class Boss:
       if this.Phase == 2 and world.Hazards.length < 70:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
-  fn UpdateLeviathan(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateLeviathan(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.SpiralAngle = this.SpiralAngle + dt * this.Phase == 2 and 3.4 or 2.4
     this.MoveTimer = this.MoveTimer - dt
     let cx = this.ArenaW * 0.5
@@ -480,7 +399,7 @@ pub class Boss:
       let tx = target.X ?? target.x
       let ty = target.Y ?? target.y
       Services.Sound.PlayBossAlert()
-  fn UpdateChronoWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateChronoWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6.2 or 4.2 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -500,7 +419,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, this.ArenaH - 40), "chrono", { Radius: 45, Life: 2.5, ImpactDamage: 18 + this.Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
-  fn UpdateHivemind(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateHivemind(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 5.8 or 3.9 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -520,7 +439,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, this.ArenaH - 40), "poison", { Radius: 50, Life: 3.5, Dps: 15 + this.Floor * 2, Telegraph: 0.85, Owner: "enemy" }))
-  fn UpdateSuperconductor(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateSuperconductor(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6.8 or 4.6 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -540,7 +459,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-90, 90), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-90, 90), 40, this.ArenaH - 40), "laser", { Radius: 42, Life: 1.5, ImpactDamage: 28 + this.Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
-  fn UpdateQuantumHydra(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateQuantumHydra(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 7.2 or 5 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -560,7 +479,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, this.ArenaH - 40), "laser", { Radius: 44, Life: 1.4, ImpactDamage: 26 + this.Floor * 3, Telegraph: 0.8, Owner: "enemy" }))
-  fn UpdateMirrorWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateMirrorWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 7.5 or 5.2 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -580,7 +499,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, this.ArenaH - 40), "poison", { Radius: 42, Life: 2.8, Dps: 18 + this.Floor * 2, Telegraph: 0.7, Owner: "enemy" }))
-  fn UpdateVoidDevourer(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateVoidDevourer(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.SpiralAngle = this.SpiralAngle + dt * this.Phase == 2 and 3.8 or 2.6
     this.MoveTimer = this.MoveTimer - dt
     let cx = this.ArenaW * 0.5
@@ -605,7 +524,7 @@ pub class Boss:
       let ty = target.Y ?? target.y
       Services.Fx.RingShockwave(this.X, this.Y, "#7928ca", 45, 0.04)
       Services.Sound.PlayBossAlert()
-  fn UpdateOrbitalDreadnought(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateOrbitalDreadnought(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 5.2 or 3.6 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -627,7 +546,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, this.ArenaH - 40), "laser", { Radius: 45, Life: 1.3, ImpactDamage: 28 + this.Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
-  fn UpdateIronJuggernaut(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateIronJuggernaut(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.MoveTimer = this.MoveTimer - dt
     if this.MoveTimer <= 0 or not this.WanderTarget:
       this.MoveTimer = Rng.Shared.range(2, 3.8)
@@ -652,7 +571,7 @@ pub class Boss:
       if ringPhase != nil and world.Hazards.length < 70:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
-  fn UpdateSolarArchon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateSolarArchon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6.2 or 4.4 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -673,7 +592,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-130, 130), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-130, 130), 40, this.ArenaH - 40), "laser", { Radius: 48, Life: 1.6, ImpactDamage: 30 + this.Floor * 3, Telegraph: 0.7, Owner: "enemy" }))
-  fn UpdateCrystalMonolith(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateCrystalMonolith(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.SpiralAngle = this.SpiralAngle + dt * this.Phase == 2 and 3 or 2
     this.MoveTimer = this.MoveTimer - dt
     let cx = this.ArenaW * 0.5
@@ -693,7 +612,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, this.ArenaH - 40), "laser", { Radius: 40, Life: 1.4, ImpactDamage: 26 + this.Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
-  fn UpdateTempestSiren(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateTempestSiren(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 6.5 or 4.5 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -713,7 +632,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, this.ArenaH - 40), "laser", { Radius: 46, Life: 1.5, ImpactDamage: 28 + this.Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
-  fn UpdateNaniteTitan(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdateNaniteTitan(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 5.8 or 4 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -749,7 +668,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, this.ArenaH - 40), "poison", { Radius: 48, Life: 3, Dps: 18 + this.Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
-  fn UpdatePhaseSpecter(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) -> void:
+  fn UpdatePhaseSpecter(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
     let targetAngle = Math.atan2(dy, dx)
     let maxTurnRate = this.Phase == 2 and 7 or 4.8 * dt
     let diff = MathX.angleDelta(this.Angle, targetAngle)
@@ -769,7 +688,7 @@ pub class Boss:
         let tx = target.X ?? target.x
         let ty = target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, this.ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, this.ArenaH - 40), "laser", { Radius: 42, Life: 1.4, ImpactDamage: 26 + this.Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
-  fn UpdateVolcanicChimera(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateVolcanicChimera(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.MoveTimer = this.MoveTimer - dt
     if this.MoveTimer <= 0 or not this.WanderTarget:
       this.MoveTimer = Rng.Shared.range(2.2, 3.8)
@@ -797,7 +716,7 @@ pub class Boss:
       Services.Sound.PlayExplosion(0.85)
       if ringPhase != nil and world.Hazards.length < 70:
         nil
-  fn UpdateEternalOuroboros(dt:int, target:SnakePlayer, _dist:int, world:World) -> void:
+  fn UpdateEternalOuroboros(dt:int, target:SnakePlayer, _dist:int, world:World) :
     this.SpiralAngle = this.SpiralAngle + dt * this.Phase == 2 and 4.2 or 3
     this.MoveTimer = this.MoveTimer - dt
     let cx = this.ArenaW * 0.5

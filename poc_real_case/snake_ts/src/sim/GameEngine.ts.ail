@@ -24,23 +24,12 @@ from "./ai/AutonomousBotPlayer.js" import AutonomousBotPlayer
 from "./BossRushGauntlet.js" import BossRushGauntlet
 
 type Steering:
-  X:int
-  Y:int
-  Active:bool
-  x:Option[int]
-  y:Option[int]
+  X:int, Y:int, Active:bool, x:Option[int], y:Option[int]
   active:Option[bool]
 
 type GameEngineOptions:
-  isolated:Option[bool]
-  services:Option[IServiceContainer]
-  meta:Option[MetaProgression]
-  fx:Option[IFx]
-  sound:Option[ISound]
-  input:Option[IInput]
-  saveIO:Option[ISaveIO]
-  headless:Option[bool]
-  rng:Option[Rng]
+  isolated:Option[bool], services:Option[IServiceContainer], meta:Option[MetaProgression], fx:Option[IFx], sound:Option[ISound]
+  input:Option[IInput], saveIO:Option[ISaveIO], headless:Option[bool], rng:Option[Rng]
 
 pub class GameEngine:
   static readonly FixedStep = 1 / 120
@@ -70,26 +59,12 @@ pub class GameEngine:
   OnMenuNavigate: () => void
   OnDraw: () => void
   DailyKeyProvider: () => void
-  ArenaW = 960
-  ArenaH = 640
-  Dpr = 1
-  CssWidth = 960
-  CssHeight = 640
-  BackingWidth = 960
-  BackingHeight = 640
+  ArenaW = 960, ArenaH = 640, Dpr = 1, CssWidth = 960, CssHeight = 640
+  BackingWidth = 960, BackingHeight = 640
   State: GameState = GameState.Menu
-  GameMode = "rogue"
-  SelectedClass = "emerald"
-  RunSeed = 0
-  CurrentFloor = 1
-  MaxFloors = 20
-  FoodTarget = 15
-  FloorFoodProgress = 0
-  FloorClearTimer = 0
-  InitialSegments = 2
-  GrowthOnEat = false
-  LabIntroSeen = false
-  RecoveryPityCounter = 0
+  GameMode = "rogue", SelectedClass = "emerald", RunSeed = 0, CurrentFloor = 1, MaxFloors = 20
+  FoodTarget = 15, FloorFoodProgress = 0, FloorClearTimer = 0, InitialSegments = 2, GrowthOnEat = false
+  LabIntroSeen = false, RecoveryPityCounter = 0
   Player: SnakePlayer
   Foods: [FoodItem] = []
   Enemies: [Enemy] = []
@@ -101,33 +76,14 @@ pub class GameEngine:
   RerollsRemaining = 1
   CurrentDraftCards: [CardDef] = []
   ActivePerks: [CardDef] = []
-  FoodSpawnTimer = 0
-  WaveTimer = 3
-  VacuumTimer = 0
-  ChronoTimer = 0
-  TimeScale = 1
-  BannerTimer = 0
-  Vignette = 0
-  Accumulator = 0
-  Fps = 60
-  FpsSamples = 0
-  FpsAccum = 0
-  FrameCount = 0
+  FoodSpawnTimer = 0, WaveTimer = 3, VacuumTimer = 0, ChronoTimer = 0, TimeScale = 1
+  BannerTimer = 0, Vignette = 0, Accumulator = 0, Fps = 60, FpsSamples = 0
+  FpsAccum = 0, FrameCount = 0
   SettingsReturnState: GameState = GameState.Menu
-  TouchScheme = "stick"
-  IsTouchDevice = false
-  HasSteered = false
-  RunActive = false
-  DailyMilestoneReached = 0
+  TouchScheme = "stick", IsTouchDevice = false, HasSteered = false, RunActive = false, DailyMilestoneReached = 0
   Gauntlet: Option[BossRushGauntlet] = nil
-  isBotEnabled = false
-  botPlayer = AutonomousBotPlayer()
-  _botDraftTimer = 0
-  _botFloorClearTimer = 0
-  _botGameOverTimer = 0
-  _floorBaseFloor = -1
-  _floorBaseEaten = 0
-  _storageWarned = false
+  isBotEnabled = false, botPlayer = AutonomousBotPlayer(), _botDraftTimer = 0, _botFloorClearTimer = 0, _botGameOverTimer = 0
+  _floorBaseFloor = -1, _floorBaseEaten = 0, _storageWarned = false
   readonly _world = World()
   readonly _eligibleEnemies: [str] = []
   readonly _reusableSteering: Steering = { X: 0, Y: 0, Active: false, x: 0, y: 0, active: false }
@@ -140,110 +96,61 @@ pub class GameEngine:
       ret 0
     Math.min(42, 16 + Math.floor(Math))
   static fn calculateFoodTarget(floor:int, bossRush:unknown = false) -> int = GameEngine.CalculateFoodTarget(floor, bossRush)
-  get Bosses() -> [Boss] = this.ActiveBosses
-  set Bosses(v:[Boss]) = this.ActiveBosses = v ?? []
-  get bosses() -> [Boss] = this.ActiveBosses
-  set bosses(v:[Boss]) = this.ActiveBosses = v ?? []
-  get activeBosses() -> [Boss] = this.ActiveBosses
-  set activeBosses(v:[Boss]) = this.ActiveBosses = v ?? []
-  get Boss() -> Option[Boss] = this.ActiveBosses.length > 0 and this.ActiveBosses[0] or nil
+  get Bosses = this.ActiveBosses; set Bosses(v) = this.ActiveBosses = v ?? []
+  get bosses = this.ActiveBosses; set bosses(v) = this.ActiveBosses = v ?? []
+  get activeBosses = this.ActiveBosses; set activeBosses(v) = this.ActiveBosses = v ?? []
+  get Boss = this.ActiveBosses.length > 0 and this.ActiveBosses[0] or nil
   set Boss(v:Option[Boss]):
     if not v:
       this.ActiveBosses.length = 0
     else:
       this.ActiveBosses = [v]
-  get arenaW() -> int = this.ArenaW
-  set arenaW(v:int) = this.ArenaW = v
-  get arenaH() -> int = this.ArenaH
-  set arenaH(v:int) = this.ArenaH = v
-  get dpr() -> int = this.Dpr
-  set dpr(v:int) = this.Dpr = v
-  get cssWidth() -> int = this.CssWidth
-  set cssWidth(v:int) = this.CssWidth = v
-  get cssHeight() -> int = this.CssHeight
-  set cssHeight(v:int) = this.CssHeight = v
-  get backingWidth() -> int = this.BackingWidth
-  set backingWidth(v:int) = this.BackingWidth = v
-  get backingHeight() -> int = this.BackingHeight
-  set backingHeight(v:int) = this.BackingHeight = v
-  get state() -> GameState = this.State
-  set state(v:GameState) = this.State = v
-  get gameMode() -> str = this.GameMode
-  set gameMode(v:str) = this.GameMode = v
-  get selectedClass() -> str = this.SelectedClass
-  set selectedClass(v:str) = this.SelectedClass = v
-  get runSeed() -> int = this.RunSeed
-  set runSeed(v:int) = this.RunSeed = v
-  get currentFloor() -> int = this.CurrentFloor
-  set currentFloor(v:int) = this.CurrentFloor = v
-  get maxFloors() -> int = this.MaxFloors
-  set maxFloors(v:int) = this.MaxFloors = v
-  get foodTarget() -> int = this.FoodTarget
-  set foodTarget(v:int) = this.FoodTarget = v
-  get recoveryPityCounter() -> int = this.RecoveryPityCounter
-  set recoveryPityCounter(v:int) = this.RecoveryPityCounter = v
-  get floorFoodProgress() -> int = this.FloorFoodProgress
-  set floorFoodProgress(v:int) = this.FloorFoodProgress = v
-  get floorClearTimer() -> int = this.FloorClearTimer
-  set floorClearTimer(v:int) = this.FloorClearTimer = v
-  get initialSegments() -> int = this.InitialSegments
-  set initialSegments(v:int) = this.InitialSegments = v
-  get growthOnEat() -> bool = this.GrowthOnEat
-  set growthOnEat(v:bool) = this.GrowthOnEat = v
-  get labIntroSeen() -> bool = this.LabIntroSeen
-  set labIntroSeen(v:bool) = this.LabIntroSeen = v
-  get player() -> SnakePlayer = this.Player
-  set player(v:SnakePlayer) = this.Player = v
-  get foods() -> [FoodItem] = this.Foods
-  set foods(v:[FoodItem]) = this.Foods = v
-  get foodItems() -> [FoodItem] = this.Foods
-  set foodItems(v:[FoodItem]) = this.Foods = v
-  get enemies() -> [Enemy] = this.Enemies
-  set enemies(v:[Enemy]) = this.Enemies = v
-  get projectiles() -> [Projectile] = this.Projectiles
-  set projectiles(v:[Projectile]) = this.Projectiles = v
-  get hazards() -> [Hazard] = this.Hazards
-  set hazards(v:[Hazard]) = this.Hazards = v
-  get boss() -> Option[Boss] = this.Boss
-  set boss(v:Option[Boss]) = this.Boss = v
-  get helmetDrops() -> [HelmetDrop] = this.HelmetDrops
-  set helmetDrops(v:[HelmetDrop]) = this.HelmetDrops = v
-  get combat() -> CombatSystem = this.Combat
-  set combat(v:CombatSystem) = this.Combat = v
-  get rerollsRemaining() -> int = this.RerollsRemaining
-  set rerollsRemaining(v:int) = this.RerollsRemaining = v
-  get currentDraftCards() -> [CardDef] = this.CurrentDraftCards
-  set currentDraftCards(v:[CardDef]) = this.CurrentDraftCards = v
-  get activePerks() -> [CardDef] = this.ActivePerks
-  set activePerks(v:[CardDef]) = this.ActivePerks = v
-  get foodSpawnTimer() -> int = this.FoodSpawnTimer
-  set foodSpawnTimer(v:int) = this.FoodSpawnTimer = v
-  get waveTimer() -> int = this.WaveTimer
-  set waveTimer(v:int) = this.WaveTimer = v
-  get vacuumTimer() -> int = this.VacuumTimer
-  set vacuumTimer(v:int) = this.VacuumTimer = v
-  get chronoTimer() -> int = this.ChronoTimer
-  set chronoTimer(v:int) = this.ChronoTimer = v
-  get timeScale() -> int = this.TimeScale
-  set timeScale(v:int) = this.TimeScale = v
-  get bannerTimer() -> int = this.BannerTimer
-  set bannerTimer(v:int) = this.BannerTimer = v
-  get vignette() -> int = this.Vignette
-  set vignette(v:int) = this.Vignette = v
-  get accumulator() -> int = this.Accumulator
-  set accumulator(v:int) = this.Accumulator = v
-  get fps() -> int = this.Fps
-  set fps(v:int) = this.Fps = v
-  get frameCount() -> int = this.FrameCount
-  set frameCount(v:int) = this.FrameCount = v
-  get hasSteered() -> bool = this.HasSteered
-  set hasSteered(v:bool) = this.HasSteered = v
-  get runActive() -> bool = this.RunActive
-  set runActive(v:bool) = this.RunActive = v
-  get dailyMilestoneReached() -> int = this.DailyMilestoneReached
-  set dailyMilestoneReached(v:int) = this.DailyMilestoneReached = v
-  get gauntlet() -> Option[BossRushGauntlet] = this.Gauntlet
-  set gauntlet(v:Option[BossRushGauntlet]) = this.Gauntlet = v
+  get arenaW = this.ArenaW; set arenaW(v) = this.ArenaW = v
+  get arenaH = this.ArenaH; set arenaH(v) = this.ArenaH = v
+  get dpr = this.Dpr; set dpr(v) = this.Dpr = v
+  get cssWidth = this.CssWidth; set cssWidth(v) = this.CssWidth = v
+  get cssHeight = this.CssHeight; set cssHeight(v) = this.CssHeight = v
+  get backingWidth = this.BackingWidth; set backingWidth(v) = this.BackingWidth = v
+  get backingHeight = this.BackingHeight; set backingHeight(v) = this.BackingHeight = v
+  get state = this.State; set state(v) = this.State = v
+  get gameMode = this.GameMode; set gameMode(v) = this.GameMode = v
+  get selectedClass = this.SelectedClass; set selectedClass(v) = this.SelectedClass = v
+  get runSeed = this.RunSeed; set runSeed(v) = this.RunSeed = v
+  get currentFloor = this.CurrentFloor; set currentFloor(v) = this.CurrentFloor = v
+  get maxFloors = this.MaxFloors; set maxFloors(v) = this.MaxFloors = v
+  get foodTarget = this.FoodTarget; set foodTarget(v) = this.FoodTarget = v
+  get recoveryPityCounter = this.RecoveryPityCounter; set recoveryPityCounter(v) = this.RecoveryPityCounter = v
+  get floorFoodProgress = this.FloorFoodProgress; set floorFoodProgress(v) = this.FloorFoodProgress = v
+  get floorClearTimer = this.FloorClearTimer; set floorClearTimer(v) = this.FloorClearTimer = v
+  get initialSegments = this.InitialSegments; set initialSegments(v) = this.InitialSegments = v
+  get growthOnEat = this.GrowthOnEat; set growthOnEat(v) = this.GrowthOnEat = v
+  get labIntroSeen = this.LabIntroSeen; set labIntroSeen(v) = this.LabIntroSeen = v
+  get player = this.Player; set player(v) = this.Player = v
+  get foods = this.Foods; set foods(v) = this.Foods = v
+  get foodItems = this.Foods; set foodItems(v) = this.Foods = v
+  get enemies = this.Enemies; set enemies(v) = this.Enemies = v
+  get projectiles = this.Projectiles; set projectiles(v) = this.Projectiles = v
+  get hazards = this.Hazards; set hazards(v) = this.Hazards = v
+  get boss = this.Boss; set boss(v) = this.Boss = v
+  get helmetDrops = this.HelmetDrops; set helmetDrops(v) = this.HelmetDrops = v
+  get combat = this.Combat; set combat(v) = this.Combat = v
+  get rerollsRemaining = this.RerollsRemaining; set rerollsRemaining(v) = this.RerollsRemaining = v
+  get currentDraftCards = this.CurrentDraftCards; set currentDraftCards(v) = this.CurrentDraftCards = v
+  get activePerks = this.ActivePerks; set activePerks(v) = this.ActivePerks = v
+  get foodSpawnTimer = this.FoodSpawnTimer; set foodSpawnTimer(v) = this.FoodSpawnTimer = v
+  get waveTimer = this.WaveTimer; set waveTimer(v) = this.WaveTimer = v
+  get vacuumTimer = this.VacuumTimer; set vacuumTimer(v) = this.VacuumTimer = v
+  get chronoTimer = this.ChronoTimer; set chronoTimer(v) = this.ChronoTimer = v
+  get timeScale = this.TimeScale; set timeScale(v) = this.TimeScale = v
+  get bannerTimer = this.BannerTimer; set bannerTimer(v) = this.BannerTimer = v
+  get vignette = this.Vignette; set vignette(v) = this.Vignette = v
+  get accumulator = this.Accumulator; set accumulator(v) = this.Accumulator = v
+  get fps = this.Fps; set fps(v) = this.Fps = v
+  get frameCount = this.FrameCount; set frameCount(v) = this.FrameCount = v
+  get hasSteered = this.HasSteered; set hasSteered(v) = this.HasSteered = v
+  get runActive = this.RunActive; set runActive(v) = this.RunActive = v
+  get dailyMilestoneReached = this.DailyMilestoneReached; set dailyMilestoneReached(v) = this.DailyMilestoneReached = v
+  get gauntlet = this.Gauntlet; set gauntlet(v) = this.Gauntlet = v
   fn StartBossRushGauntlet() -> BossRushGauntlet:
     this.Gauntlet = BossRushGauntlet()
     this.Gauntlet.Start(this)
@@ -256,7 +163,7 @@ pub class GameEngine:
     else:
       this.Banner("🎮 MANUAL CONTROL: RESTORED", 1.8)
     this.isBotEnabled
-  fn setUiRoot(uiRoot:Option[IUiRoot]) -> void:
+  fn setUiRoot(uiRoot:Option[IUiRoot]) :
     if not uiRoot:
       ret
     this.OnShowScreen = fn(id:str, payload:unknown) = uiRoot.showScreen(id, payload)
@@ -270,22 +177,18 @@ pub class GameEngine:
     this.OnBossBox = fn(visible:bool, name:Option[str]) = uiRoot.hudView.setBossBox(visible, name)
     this.OnPerksChanged = fn() = uiRoot.hudView.updatePerks()
     this.OnDraftChanged = fn() = nil
-  fn draw(_ctx:unknown) -> void:
+  fn draw(_ctx:unknown) :
     this.OnDraw()
-  get services() -> IServiceContainer = this._services ?? typeof(Services) != "undefined" and Services.defaultContainer ?? Services or nil
-  set services(v:IServiceContainer) = this._services = v
-  get Services() -> IServiceContainer = this.services
-  set Services(v:IServiceContainer) = this.services = v
-  get meta() -> MetaProgression = this._meta ?? this.services?.Meta ?? typeof(MetaProgression) != "undefined" and MetaProgression.Instance or nil
-  set meta(v:MetaProgression) = this._meta = v
-  get Meta() -> MetaProgression = this.meta
-  set Meta(v:MetaProgression) = this.meta = v
-  get sound() -> ISound = this.services?.Sound ?? Services.Sound
-  get Sound() -> ISound = this.sound
-  get fx() -> IFx = this.services?.Fx ?? Services.Fx
-  get Fx() -> IFx = this.fx
-  get input() -> IInput = this.services?.Input ?? Services.Input
-  get Input() -> IInput = this.input
+  get services = this._services ?? typeof(Services) != "undefined" and Services.defaultContainer ?? Services or nil; set services(v) = this._services = v
+  get Services = this.services; set Services(v) = this.services = v
+  get meta = this._meta ?? this.services?.Meta ?? typeof(MetaProgression) != "undefined" and MetaProgression.Instance or nil; set meta(v) = this._meta = v
+  get Meta = this.meta; set Meta(v) = this.meta = v
+  get sound = this.services?.Sound ?? Services.Sound
+  get Sound = this.sound
+  get fx = this.services?.Fx ?? Services.Fx
+  get Fx = this.fx
+  get input = this.services?.Input ?? Services.Input
+  get Input = this.input
   fn constructor(fxOrOptions:int | GameEngineOptions | unknown, options:int | GameEngineOptions | unknown):
     if typeof(fxOrOptions) == "number":
       this.ArenaW = fxOrOptions
@@ -319,8 +222,8 @@ pub class GameEngine:
     this.Combat.Engine = this
     this.Combat.Meta = this.meta
     this.Combat.Services = this.services
-  get Cfg() -> GameModeDef = GameData.Modes.Get(this.GameMode) ?? GameData.Modes.Get("rogue")
-  fn SetupCanvas(cssWidth:int, cssHeight:int, dpr:int) -> void:
+  get Cfg = GameData.Modes.Get(this.GameMode) ?? GameData.Modes.Get("rogue")
+  fn SetupCanvas(cssWidth:int, cssHeight:int, dpr:int) :
     let mut w = cssWidth
     let mut h = cssHeight
     if not (w > 0) or not (h > 0):
@@ -345,19 +248,19 @@ pub class GameEngine:
     if this.Player != nil and oldW > 0 and oldH > 0 and oldW != this.ArenaW or oldH != this.ArenaH:
       this.RescaleWorld(this.ArenaW / oldW, this.ArenaH / oldH)
     this.OnCanvasResized()
-  fn setupCanvas(cssWidth:int, cssHeight:int, dpr:int) -> void:
+  fn setupCanvas(cssWidth:int, cssHeight:int, dpr:int) :
     this.SetupCanvas(cssWidth, cssHeight, dpr)
-  fn RescaleWorld(sx:int, sy:int) -> void:
+  fn RescaleWorld(sx:int, sy:int) :
     let hiX = this.ArenaW - 4
     let hiY = this.ArenaH - 4
     if this.Player != nil:
       this.Player.X = MathX.clamp(this.Player.X * sx, 4, hiX)
       this.Player.Y = MathX.clamp(this.Player.Y * sy, 4, hiY)
-  fn rescaleWorld(sx:int, sy:int) -> void:
+  fn rescaleWorld(sx:int, sy:int) :
     this.RescaleWorld(sx, sy)
   fn ScreenToWorld(normX:int, normY:int) -> Vec2 = Vec2(MathX.clamp(normX, 0, 1) * this.ArenaW, MathX.clamp(normY, 0, 1) * this.ArenaH)
   fn screenToWorld(normX:int, normY:int) -> Vec2 = this.ScreenToWorld(normX, normY)
-  fn ShowMenu() -> void:
+  fn ShowMenu() :
     this.AbandonRun()
     this.State = GameState.Menu
     this.ClearTransientUi()
@@ -365,39 +268,39 @@ pub class GameEngine:
     this.OnShowScreen("modal-main-menu")
     this.Sound.StopMusic()
     this.Sound.SetBossMode(false)
-  fn showMenu() -> void:
+  fn showMenu() :
     this.ShowMenu()
-  fn SetHudVisible(visible:bool) -> void:
+  fn SetHudVisible(visible:bool) :
     this.OnHudVisible(visible)
-  fn setHudVisible(visible:bool) -> void:
+  fn setHudVisible(visible:bool) :
     this.SetHudVisible(visible)
-  fn ChooseMode(mode:str) -> void:
+  fn ChooseMode(mode:str) :
     if GameData.Modes.Has(mode):
       this.GameMode = mode
     else:
       this.GameMode = "rogue"
     this.ShowClassSelect()
-  fn chooseMode(mode:str) -> void:
+  fn chooseMode(mode:str) :
     this.ChooseMode(mode)
-  fn ShowClassSelect() -> void:
+  fn ShowClassSelect() :
     this.State = GameState.ClassSelect
     this.SetHudVisible(false)
     this.OnShowScreen("modal-class-select")
-  fn showClassSelect() -> void:
+  fn showClassSelect() :
     this.ShowClassSelect()
-  fn ShowSanctuary() -> void:
+  fn ShowSanctuary() :
     this.State = GameState.Sanctuary
     this.SetHudVisible(false)
     this.OnShowScreen("modal-sanctuary")
-  fn showSanctuary() -> void:
+  fn showSanctuary() :
     this.ShowSanctuary()
-  fn ShowRecords() -> void:
+  fn ShowRecords() :
     this.State = GameState.Records
     this.SetHudVisible(false)
     this.OnShowScreen("modal-records")
-  fn showRecords() -> void:
+  fn showRecords() :
     this.ShowRecords()
-  fn ShowStats(tab:"run" | "global" = "run") -> void:
+  fn ShowStats(tab:"run" | "global" = "run") :
     if this.State == GameState.Playing:
       this.State = GameState.Paused
       this.Sound.SetPaused(true)
@@ -405,65 +308,65 @@ pub class GameEngine:
       this.OnShowScreen("modal-snake-lab", { tab: "telemetry" })
     else:
       this.OnShowScreen("modal-stats", { mode: tab })
-  fn showStats(tab:"run" | "global" = "run") -> void:
+  fn showStats(tab:"run" | "global" = "run") :
     this.ShowStats(tab)
-  fn ToggleStats() -> void:
+  fn ToggleStats() :
     if this.State == GameState.Playing:
       this.ShowStats("run")
     elif this.State == GameState.Paused:
       this.Resume()
-  fn toggleStats() -> void:
+  fn toggleStats() :
     this.ToggleStats()
-  fn ShowHelp() -> void:
+  fn ShowHelp() :
     if this.State == GameState.Playing:
       this.State = GameState.Paused
       this.Sound.SetPaused(true)
     elif this.State != GameState.Paused:
       this.State = GameState.Help
     this.OnShowScreen("modal-help")
-  fn showHelp() -> void:
+  fn showHelp() :
     this.ShowHelp()
-  fn ToggleHelp() -> void:
+  fn ToggleHelp() :
     if this.State == GameState.Playing:
       this.ShowHelp()
     elif this.State == GameState.Paused or this.State == GameState.Help:
       this.Resume()
-  fn toggleHelp() -> void:
+  fn toggleHelp() :
     this.ToggleHelp()
-  fn OpenSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+  fn OpenSnakeLab(tab:"lab" | "telemetry" = "lab") :
     if this.State == GameState.Playing:
       this.State = GameState.Paused
       this.Sound.SetPaused(true)
     this.OnShowScreen("modal-snake-lab", { tab })
-  fn openSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+  fn openSnakeLab(tab:"lab" | "telemetry" = "lab") :
     this.OpenSnakeLab(tab)
-  fn ShowSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+  fn ShowSnakeLab(tab:"lab" | "telemetry" = "lab") :
     this.OpenSnakeLab(tab)
-  fn showSnakeLab(tab:"lab" | "telemetry" = "lab") -> void:
+  fn showSnakeLab(tab:"lab" | "telemetry" = "lab") :
     this.OpenSnakeLab(tab)
-  fn CloseSnakeLab() -> void:
+  fn CloseSnakeLab() :
     if this.State == GameState.Paused and this.RunActive and this.Player and this.Player.Alive:
       this.Resume()
     this.OnHideModals()
-  fn closeSnakeLab() -> void:
+  fn closeSnakeLab() :
     this.CloseSnakeLab()
-  fn ShowSettings(returnState:GameState) -> void:
+  fn ShowSettings(returnState:GameState) :
     this.SettingsReturnState = returnState
     this.State = GameState.Settings
     this.SetHudVisible(false)
     this.OnShowScreen("modal-settings")
-  fn showSettings(returnState:GameState) -> void:
+  fn showSettings(returnState:GameState) :
     this.ShowSettings(returnState)
-  fn CloseSettings() -> void:
+  fn CloseSettings() :
     this.OnSaveSettings()
     if this.SettingsReturnState == GameState.Paused:
       this.State = GameState.Paused
       this.OnShowScreen("modal-pause")
     else:
       this.ShowMenu()
-  fn closeSettings() -> void:
+  fn closeSettings() :
     this.CloseSettings()
-  fn TogglePause() -> void:
+  fn TogglePause() :
     if this.State == GameState.Playing:
       this.State = GameState.Paused
       this.OnShowScreen("modal-pause")
@@ -476,7 +379,7 @@ pub class GameEngine:
       this.SetHudVisible(true)
       this.Accumulator = 0
       this.Sound.SetPaused(false)
-  fn Resume() -> void:
+  fn Resume() :
     if not this.RunActive or not this.Player or not this.Player.Alive or this.State == GameState.GameOver or this.State == GameState.Victory:
       ret
     this.State = GameState.Playing
@@ -484,50 +387,50 @@ pub class GameEngine:
     this.SetHudVisible(true)
     this.Accumulator = 0
     this.Sound.SetPaused(false)
-  fn resume() -> void:
+  fn resume() :
     this.Resume()
-  get paused() -> bool = this.State == GameState.Paused
-  get isPaused() -> bool = this.State == GameState.Paused
-  fn togglePause() -> void:
+  get paused = this.State == GameState.Paused
+  get isPaused = this.State == GameState.Paused
+  fn togglePause() :
     this.TogglePause()
   fn OnVisibilityRestored() -> void = this.Accumulator = 0
-  fn onVisibilityRestored() -> void:
+  fn onVisibilityRestored() :
     this.OnVisibilityRestored()
-  fn Banner(text:str, seconds:unknown = 0) -> void:
+  fn Banner(text:str, seconds:unknown = 0) :
     if seconds > 0:
       this.BannerTimer = seconds
     else:
       this.BannerTimer = 1.5
     this.OnBanner(text, this.BannerTimer)
-  fn banner(text:str, seconds:unknown = 0) -> void:
+  fn banner(text:str, seconds:unknown = 0) :
     this.Banner(text, seconds)
-  fn Toast(message:str, seconds:unknown = 0) -> void:
+  fn Toast(message:str, seconds:unknown = 0) :
     this.OnToast(message, seconds > 0 and seconds or 2.6)
-  fn toast(message:str, seconds:unknown = 0) -> void:
+  fn toast(message:str, seconds:unknown = 0) :
     this.Toast(message, seconds)
-  fn UpdateBanner(dt:int) -> void:
+  fn UpdateBanner(dt:int) :
     if this.BannerTimer <= 0:
       ret
     this.BannerTimer = this.BannerTimer - dt
     if this.BannerTimer > 0:
       ret
     this.OnBannerHide()
-  fn updateBanner(dt:int) -> void:
+  fn updateBanner(dt:int) :
     this.UpdateBanner(dt)
-  fn UpdateVignette(dt:int) -> void:
+  fn UpdateVignette(dt:int) :
     if this.Vignette <= 0:
       ret
     this.Vignette = Math.max(0, this.Vignette - dt * 1.6)
     this.OnVignette(MathX.roundJs(this.Vignette * 100) / 100 * 0.75)
-  fn updateVignette(dt:int) -> void:
+  fn updateVignette(dt:int) :
     this.UpdateVignette(dt)
-  fn ClearTransientUi() -> void:
+  fn ClearTransientUi() :
     this.BannerTimer = 0
     this.Vignette = 0
     this.OnClearTransientUi()
-  fn clearTransientUi() -> void:
+  fn clearTransientUi() :
     this.ClearTransientUi()
-  fn StartRun(seed:int) -> void:
+  fn StartRun(seed:int) :
     this.AbandonRun()
     let cfg = this.Cfg
     if seed != undefined:
@@ -601,31 +504,31 @@ pub class GameEngine:
     if cfg.BossRush != nil:
       this.SpawnBoss()
     this.Accumulator = 0
-  fn startRun(seed:int) -> void:
+  fn startRun(seed:int) :
     this.StartRun(seed)
-  fn restartRun(seed:int) -> void:
+  fn restartRun(seed:int) :
     this.StartRun(seed)
-  fn StartGame(classIdOrSeed:str | int, seed:int) -> void:
+  fn StartGame(classIdOrSeed:str | int, seed:int) :
     if typeof(classIdOrSeed) == "string":
       this.SelectedClass = classIdOrSeed
       this.StartRun(seed)
     else:
       this.StartRun(classIdOrSeed)
-  fn startGame(classIdOrSeed:str | int, seed:int) -> void:
+  fn startGame(classIdOrSeed:str | int, seed:int) :
     this.StartGame(classIdOrSeed, seed)
-  fn Reset() -> void:
+  fn Reset() :
     this.StartRun()
-  fn reset() -> void:
+  fn reset() :
     this.StartRun()
-  fn Init() -> void:
+  fn Init() :
     this.StartRun()
-  fn init() -> void:
+  fn init() :
     this.StartRun()
   static fn defaultDailyKey() -> str:
     let d = Date()
     "" + String(d.getUTCFullYear()) + "-" + String(d.getUTCMonth() + 1) + "-" + String(d.getUTCDate())
-  get RunInProgress() -> bool = this.RunActive != nil and this.Player != nil and this.Player != undefined
-  get runInProgress() -> bool = this.RunInProgress
+  get RunInProgress = this.RunActive != nil and this.Player != nil and this.Player != undefined
+  get runInProgress = this.RunInProgress
   fn CommitRun(victory:bool) -> int:
     if not this.RunActive or not this.Player:
       ret 0
@@ -638,23 +541,23 @@ pub class GameEngine:
     meta.Save()
     banked
   fn commitRun(victory:bool) -> int = this.CommitRun(victory)
-  fn AbandonRun() -> void:
+  fn AbandonRun() :
     if not this.RunInProgress:
       ret
     let banked = this.CommitRun(false)
     if banked > 0:
       this.Toast("Run abandoned — banked " + String(banked) + " ⭐")
-  fn abandonRun() -> void:
+  fn abandonRun() :
     this.AbandonRun()
-  fn WarnIfStorageBroken() -> void:
+  fn WarnIfStorageBroken() :
     let meta = this.meta
     if not meta or not meta.StorageBroken or this._storageWarned:
       ret
     this._storageWarned = true
     this.Toast("⚠️ Progress cannot be saved on this browser — stars will not persist.", 6)
-  fn warnIfStorageBroken() -> void:
+  fn warnIfStorageBroken() :
     this.WarnIfStorageBroken()
-  fn HandleGameOver(victory:bool) -> void:
+  fn HandleGameOver(victory:bool) :
     if this.State == GameState.GameOver or this.State == GameState.Victory:
       ret
     if not victory and this.Gauntlet and this.Gauntlet.Active:
@@ -679,13 +582,13 @@ pub class GameEngine:
     this.OnRunSummary(victory, banked)
     this.OnShowScreen("modal-summary")
     this.WarnIfStorageBroken()
-  fn handleGameOver(victory:bool) -> void:
+  fn handleGameOver(victory:bool) :
     this.HandleGameOver(victory)
-  fn EndRun(victory:bool = false) -> void:
+  fn EndRun(victory:bool = false) :
     this.HandleGameOver(victory)
-  fn endRun(victory:bool = false) -> void:
+  fn endRun(victory:bool = false) :
     this.HandleGameOver(victory)
-  fn TriggerLevelUp() -> void:
+  fn TriggerLevelUp() :
     this.State = GameState.LevelUp
     this.Sound.PlayLevelUp()
     this.Sound.SetPaused(true)
@@ -699,16 +602,16 @@ pub class GameEngine:
       this.Fx.Burst(this.Player.X, this.Player.Y, "#ffd166", 26, 6, 4)
     this.OnDraftChanged()
     this.OnShowScreen("modal-snake-lab")
-  fn triggerLevelUp() -> void:
+  fn triggerLevelUp() :
     this.TriggerLevelUp()
-  fn ToggleLab() -> void:
+  fn ToggleLab() :
     if this.State == GameState.Playing:
       this.TriggerLevelUp()
     elif this.State == GameState.LevelUp:
       this.CompleteLevelUp()
-  fn toggleLab() -> void:
+  fn toggleLab() :
     this.ToggleLab()
-  fn CompleteLevelUp() -> void:
+  fn CompleteLevelUp() :
     this.OnHideModals()
     if this.GrowthOnEat != nil and this.Player and this.Player.PendingLevelUps > 0:
       this.Player.PendingLevelUps = this.Player.PendingLevelUps - 1
@@ -717,9 +620,9 @@ pub class GameEngine:
     this.State = GameState.Playing
     this.Accumulator = 0
     this.Sound.SetPaused(false)
-  fn completeLevelUp() -> void:
+  fn completeLevelUp() :
     this.CompleteLevelUp()
-  fn RerollDraft() -> void:
+  fn RerollDraft() :
     if this.RerollsRemaining <= 0:
       this.Sound.PlayError()
       ret
@@ -731,16 +634,16 @@ pub class GameEngine:
       this.CurrentDraftCards = []
     this.OnDraftChanged()
     this.OnShowScreen("modal-level-up")
-  fn rerollDraft() -> void:
+  fn rerollDraft() :
     this.RerollDraft()
-  fn SkipDraft() -> void:
+  fn SkipDraft() :
     this.Player.Stats.MaxHp = this.Player.Stats.MaxHp + 25
     this.Player.Heal(25)
     this.Fx.AddText(this.Player.X, this.Player.Y - 30, "+25 MAX HP", "#10b981", 17, true)
     this.ResumeFromDraft()
-  fn skipDraft() -> void:
+  fn skipDraft() :
     this.SkipDraft()
-  fn SelectUpgradeCard(card:CardDef) -> void:
+  fn SelectUpgradeCard(card:CardDef) :
     if not card or not this.Player:
       ret
     let cardId = card.Id or card.id
@@ -768,15 +671,15 @@ pub class GameEngine:
     this.Fx.AddText(this.Player.X, this.Player.Y - 34, "" + String(cardIcon) + " " + String(cardTitle), "#00f0b5", 18, true)
     this.OnPerksChanged()
     this.ResumeFromDraft()
-  fn selectUpgradeCard(card:CardDef) -> void:
+  fn selectUpgradeCard(card:CardDef) :
     this.SelectUpgradeCard(card)
-  fn ResumeFromDraft() -> void:
+  fn ResumeFromDraft() :
     this.CurrentDraftCards = []
     this.OnHideModals()
     this.State = GameState.Playing
     this.Accumulator = 0
     this.Sound.SetPaused(false)
-  fn resumeFromDraft() -> void:
+  fn resumeFromDraft() :
     this.ResumeFromDraft()
   fn RandomArenaPoint(margin:unknown = 0) -> Vec2:
     let m = margin > 0 and margin or 50
@@ -786,7 +689,7 @@ pub class GameEngine:
     let maxY = Math.max(minY, this.ArenaH - minY)
     Vec2(Rng.Shared.range(minX, maxX), Rng.Shared.range(minY, maxY))
   fn randomArenaPoint(margin:unknown = 0) -> Vec2 = this.RandomArenaPoint(margin)
-  fn SpawnFood(type:Option[str] = nil) -> void:
+  fn SpawnFood(type:Option[str] = nil) :
     let mut p = Vec2(0, 0)
     let mut chosen = type
     if not chosen:
@@ -816,9 +719,9 @@ pub class GameEngine:
         elif r < 0.75:
           chosen = "golden"
     this.Foods.push(FoodItem(p.X, p.Y, chosen))
-  fn spawnFood(type:Option[str] = nil) -> void:
+  fn spawnFood(type:Option[str] = nil) :
     this.SpawnFood(type)
-  fn SpawnEnemy(type:Option[str] = nil) -> void:
+  fn SpawnEnemy(type:Option[str] = nil) :
     let margin = 26
     let mut x = 0
     let mut y = 0
@@ -828,11 +731,11 @@ pub class GameEngine:
       let keys = GameData.Enemies.Keys
       chosen = Rng.Shared.pick(this._eligibleEnemies) ?? "scarab"
     this.Enemies.push(Enemy(x, y, chosen, this.CurrentFloor))
-  fn spawnEnemy(type:Option[str] = nil) -> void:
+  fn spawnEnemy(type:Option[str] = nil) :
     this.SpawnEnemy(type)
   fn EnemyBudget() -> int = Math.min(24, 3 + MathX.roundJs(this.CurrentFloor * 2.5))
   fn enemyBudget() -> int = this.EnemyBudget()
-  fn SpawnBoss(specificType:str | unknown, count:int) -> void:
+  fn SpawnBoss(specificType:str | unknown, count:int) :
     let mut spawnCount = 1
     if count != undefined:
       spawnCount = Math.max(1, count)
@@ -851,9 +754,9 @@ pub class GameEngine:
     this.Projectiles.length = 0
     if this.Player != nil:
       this.Player.InvulnerableTimer = Math.max(this.Player.InvulnerableTimer, 1.2)
-  fn spawnBoss(specificType:str | unknown, count:int) -> void:
+  fn spawnBoss(specificType:str | unknown, count:int) :
     this.SpawnBoss(specificType, count)
-  fn OnBossDefeated(defeatedBoss:Option[Boss]) -> void:
+  fn OnBossDefeated(defeatedBoss:Option[Boss]) :
     let boss = defeatedBoss or this.Boss
     if not boss:
       ret
@@ -902,9 +805,9 @@ pub class GameEngine:
     this.State = GameState.FloorClear
     this.FloorClearTimer = 2.6
     this.Sound.PlayFloorClear()
-  fn onBossDefeated(defeatedBoss:Option[Boss]) -> void:
+  fn onBossDefeated(defeatedBoss:Option[Boss]) :
     this.OnBossDefeated(defeatedBoss)
-  fn CollectHelmetDrop(drop:HelmetDrop) -> void:
+  fn CollectHelmetDrop(drop:HelmetDrop) :
     if drop.Dead != nil:
       ret
     drop.Dead = true
@@ -921,9 +824,9 @@ pub class GameEngine:
     let hName = drop.Helmet.Name or drop.Helmet.name or "Helmet"
     let statSummary = formatHelmetStatDescription(drop.Helmet.Stats or drop.Helmet.stats or {  })
     this.Banner("🏆 " + String(hIcon) + " " + String(hName) + " [" + String(rName) + "] LOOTED! (" + String(statSummary) + ")", 3.5)
-  fn collectHelmetDrop(drop:HelmetDrop) -> void:
+  fn collectHelmetDrop(drop:HelmetDrop) :
     this.CollectHelmetDrop(drop)
-  fn AdvanceFloor() -> void:
+  fn AdvanceFloor() :
     for drop in this.HelmetDrops:
       if not drop.Dead:
         this.CollectHelmetDrop(drop)
@@ -963,9 +866,9 @@ pub class GameEngine:
     if cfg.BossRush != nil:
       this.SpawnBoss()
     this.Accumulator = 0
-  fn advanceFloor() -> void:
+  fn advanceFloor() :
     this.AdvanceFloor()
-  fn nextFloor() -> void:
+  fn nextFloor() :
     this.AdvanceFloor()
   fn GetTodaySpecialCapacity() -> Partial[DailyCapacityState]:
     let key = this.DailyKeyProvider != nil and this.DailyKeyProvider() or GameEngine.defaultDailyKey()
@@ -1035,19 +938,19 @@ pub class GameEngine:
   fn checkDailyMilestones() -> bool = this.CheckDailyMilestones()
   fn CheckDailyLevel5CapacityUnlock() -> bool = this.CheckDailyMilestones()
   fn checkDailyLevel5CapacityUnlock() -> bool = this.CheckDailyLevel5CapacityUnlock()
-  fn RequestDash() -> void:
+  fn RequestDash() :
     if this.State != GameState.Playing or not this.Player:
       ret
     if this.Player.TryDash():
       Services.Input.Vibrate(18)
-  fn requestDash() -> void:
+  fn requestDash() :
     this.RequestDash()
-  fn RequestSkill() -> void:
+  fn RequestSkill() :
     if this.State != GameState.Playing or not this.Player:
       ret
     if this.Combat.ActivateSkill(this.WorldBag()):
       Services.Input.Vibrate(GameEngine.SkillHaptic)
-  fn requestSkill() -> void:
+  fn requestSkill() :
     this.RequestSkill()
   fn RequestAutotomy() -> int:
     if this.State != GameState.Playing or not this.Player:
@@ -1116,17 +1019,17 @@ pub class GameEngine:
     this._world.Game = this
     this._world
   fn worldBag() -> World = this.WorldBag()
-  get World() -> World = this.WorldBag()
-  get world() -> World = this.WorldBag()
+  get World = this.WorldBag()
+  get world = this.WorldBag()
   fn ReplaceProjectiles(list:[Projectile]) -> void = this.Projectiles = list
-  fn replaceProjectiles(list:[Projectile]) -> void:
+  fn replaceProjectiles(list:[Projectile]) :
     this.ReplaceProjectiles(list)
-  fn OnPlayerHurt(dealt:int) -> void:
+  fn OnPlayerHurt(dealt:int) :
     this.Vignette = Math.min(1, this.Vignette + dealt / 60 + 0.25)
     Services.Input.Vibrate(Math.min(90, 25 + dealt))
-  fn onPlayerHurt(dealt:int) -> void:
+  fn onPlayerHurt(dealt:int) :
     this.OnPlayerHurt(dealt)
-  fn Step(dt:int) -> void:
+  fn Step(dt:int) :
     let player = this.Player
     if not player:
       ret
@@ -1183,7 +1086,7 @@ pub class GameEngine:
     if not cfg.BossRush and this.ActiveBosses.length == 0 and this.FloorFoodProgress >= this.FoodTarget:
       this.SpawnBoss()
     Services.Fx.Update(dt)
-  fn step(dt:int) -> void:
+  fn step(dt:int) :
     this.Step(dt)
   fn FloorFoodBase() -> int:
     if this._floorBaseFloor != this.CurrentFloor:
@@ -1191,7 +1094,7 @@ pub class GameEngine:
       this._floorBaseEaten = this.Combat.FoodsEaten
     this._floorBaseEaten
   fn floorFoodBase() -> int = this.FloorFoodBase()
-  fn UpdateSpawning(dt:int) -> void:
+  fn UpdateSpawning(dt:int) :
     this.FoodSpawnTimer = this.FoodSpawnTimer + dt
     let foodCap = 9 + Math.min(6, this.CurrentFloor)
     if this.FoodSpawnTimer >= 1.35 and this.Foods.length < foodCap:
@@ -1210,9 +1113,9 @@ pub class GameEngine:
       this.Hazards.splice(0, this.Hazards.length - Caps.Hazards)
     if this.Foods.length > Caps.Foods:
       this.Foods.splice(0, this.Foods.length - Caps.Foods)
-  fn updateSpawning(dt:int) -> void:
+  fn updateSpawning(dt:int) :
     this.UpdateSpawning(dt)
-  fn Tick(frameDt:int) -> void:
+  fn Tick(frameDt:int) :
     let dt = Math.min(0.25, Math.max(0, frameDt))
     this.FrameCount = this.FrameCount + 1
     this.FpsAccum = this.FpsAccum + dt
@@ -1257,9 +1160,9 @@ pub class GameEngine:
           this._botDraftTimer = 0
           this.botPlayer.handleLevelUp(this)
     this.OnDraw()
-  fn tick(frameDt:int) -> void:
+  fn tick(frameDt:int) :
     this.Tick(frameDt)
-  fn update(frameDt:int) -> void:
+  fn update(frameDt:int) :
     this.Tick(frameDt)
-  fn Update(frameDt:int) -> void:
+  fn Update(frameDt:int) :
     this.Tick(frameDt)

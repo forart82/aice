@@ -263,7 +263,9 @@ export class TypeChecker {
           name: p.name,
           type: this.resolveTypeExpr(p.typeAnnotation, env),
         }));
-        const mRet = m.returnType ? this.resolveTypeExpr(m.returnType, env) : TYPE_VOID;
+        const mRet = m.returnType
+          ? this.resolveTypeExpr(m.returnType, env)
+          : (m.isExpressionBodied || m.accessor === "get" ? TYPE_UNKNOWN : TYPE_VOID);
         fields.set(m.name, makeFunctionType(mParams, mRet));
         if (m.accessor === "get") {
           fields.set(`get_${m.name}`, makeFunctionType([], mRet));
@@ -331,7 +333,9 @@ export class TypeChecker {
         }
       }
       for (const m of item.methods) {
-        const retType = m.returnType ? this.resolveTypeExpr(m.returnType, classEnv) : TYPE_VOID;
+        const retType = m.returnType
+          ? this.resolveTypeExpr(m.returnType, classEnv)
+          : (m.isExpressionBodied || m.accessor === "get" ? TYPE_UNKNOWN : TYPE_VOID);
         const methodEnv = classEnv.extend(retType);
         for (const p of m.params) {
           methodEnv.define(p.name, this.resolveTypeExpr(p.typeAnnotation, classEnv), true);
