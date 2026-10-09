@@ -232,17 +232,21 @@ export class AilGenerator {
 
     const pub = c.isExported ? "pub " : "";
     const typeParams = c.typeParams.length > 0 ? `[${c.typeParams.join(", ")}]` : "";
-    const primaryCtor = c.primaryConstructor && c.primaryConstructor.length > 0
-      ? `(${c.primaryConstructor.map((p) => {
-          const pPub = p.isPub ? "pub " : "";
-          const pRo = p.isReadonly ? "readonly " : "";
-          const pMut = p.isMut ? "mut " : "";
-          const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-          return `${pPub}${pRo}${pMut}${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
-        }).join(", ")})`
-      : "";
+    const primaryCtor =
+      c.primaryConstructor && c.primaryConstructor.length > 0
+        ? `(${c.primaryConstructor
+            .map((p) => {
+              const pPub = p.isPub ? "pub " : "";
+              const pRo = p.isReadonly ? "readonly " : "";
+              const pMut = p.isMut ? "mut " : "";
+              const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
+              return `${pPub}${pRo}${pMut}${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+            })
+            .join(", ")})`
+        : "";
     const ext = c.extends ? ` extends ${c.extends}` : "";
-    const impl = c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
+    const impl =
+      c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
 
     this.writeLine(`${pub}class ${c.name}${typeParams}${primaryCtor}${ext}${impl}:`, nodeId);
     this.indent();
@@ -255,7 +259,7 @@ export class AilGenerator {
         this.emitLeadingTrivia(pNodeId);
         const st = p.isStatic ? "static " : "";
         const ro = p.isReadonly ? "readonly " : "";
-        const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+        const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
         const aliasStr = aliases.length > 0 ? `, ${aliases.join(", ")}` : "";
         const propKw = aliases.length > 0 ? "prop " : "";
         const typeAnn = p.typeAnnotation ? `: ${this.formatTypeExpr(p.typeAnnotation)}` : "";
@@ -377,7 +381,9 @@ export class AilGenerator {
     switch (stmt.kind) {
       case "LetBinding": {
         const op = stmt.isMut ? "::=" : ":=";
-        const typeAnn = stmt.typeAnnotation ? `: ${this.formatTypeExpr(stmt.typeAnnotation)} ` : " ";
+        const typeAnn = stmt.typeAnnotation
+          ? `: ${this.formatTypeExpr(stmt.typeAnnotation)} `
+          : " ";
         this.writeLine(`${stmt.name}${typeAnn}${op} ${this.formatExpr(stmt.init)}`);
         break;
       }
@@ -388,7 +394,9 @@ export class AilGenerator {
         break;
       }
       case "AssignStmt": {
-        this.writeLine(`${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`);
+        this.writeLine(
+          `${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`,
+        );
         break;
       }
       case "ReturnStmt": {
@@ -554,7 +562,9 @@ export class AilGenerator {
       if (tokenMatch && valMatch) {
         const ns = tokenMatch[1];
         const unit = valMatch[2];
-        const group: { key: string; valNum: string }[] = [{ key: tokenMatch[2], valNum: valMatch[1] }];
+        const group: { key: string; valNum: string }[] = [
+          { key: tokenMatch[2], valNum: valMatch[1] },
+        ];
         let j = i + 1;
         while (j < s.properties.length) {
           const nextP = s.properties[j];

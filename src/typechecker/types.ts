@@ -274,16 +274,25 @@ export function isAssignable(target: Type, source: Type): boolean {
   // Numeric hierarchy: num accepts int and float; int accepts byte; float accepts int and byte
   if (
     target.kind === "num" &&
-    (source.kind === "int" || source.kind === "float" || source.kind === "byte" || source.kind === "enum")
+    (source.kind === "int" ||
+      source.kind === "float" ||
+      source.kind === "byte" ||
+      source.kind === "enum")
   ) {
     return true;
   }
-  if (target.kind === "float" && (source.kind === "int" || source.kind === "byte" || source.kind === "num")) {
+  if (
+    target.kind === "float" &&
+    (source.kind === "int" || source.kind === "byte" || source.kind === "num")
+  ) {
     return true;
   }
   if (
     target.kind === "int" &&
-    (source.kind === "byte" || source.kind === "float" || source.kind === "num" || source.kind === "enum")
+    (source.kind === "byte" ||
+      source.kind === "float" ||
+      source.kind === "num" ||
+      source.kind === "enum")
   ) {
     return true;
   }

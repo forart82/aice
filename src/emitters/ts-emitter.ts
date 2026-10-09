@@ -316,7 +316,8 @@ export class TypeScriptEmitter {
     const exp = c.isExported ? "export " : "";
     const typeParams = c.typeParams.length > 0 ? `<${c.typeParams.join(", ")}>` : "";
     const ext = c.extends ? ` extends ${c.extends}` : "";
-    const impl = c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
+    const impl =
+      c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
 
     this.ctx.writeLine(`${exp}class ${c.name}${typeParams}${ext}${impl} {`);
     this.ctx.indent();
@@ -346,10 +347,14 @@ export class TypeScriptEmitter {
       this.ctx.writeLine(`${st}${ro}${p.name}${typeAnn}${init};`);
       this.ctx.emitTrailingTrivia(pNodeId);
 
-      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
       for (const alias of aliases) {
-        const hasExplicitGetter = c.methods.some((m) => m.name === alias && (m.accessor === "get" || !m.accessor));
-        const hasExplicitSetter = c.methods.some((m) => m.name === alias && (m.accessor === "set" || !m.accessor));
+        const hasExplicitGetter = c.methods.some(
+          (m) => m.name === alias && (m.accessor === "get" || !m.accessor),
+        );
+        const hasExplicitSetter = c.methods.some(
+          (m) => m.name === alias && (m.accessor === "set" || !m.accessor),
+        );
         const target = p.isStatic ? `${c.name}.${p.name}` : `this.${p.name}`;
         const typeStr = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "any";
         if (!hasExplicitGetter) {
@@ -815,7 +820,10 @@ export class TypeScriptEmitter {
             return `typeof (${argCodes[0]})`;
           }
 
-          if (this.classNames.has(expr.callee.name) || TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name)) {
+          if (
+            this.classNames.has(expr.callee.name) ||
+            TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name)
+          ) {
             return `new ${expr.callee.name}(${argCodes.join(", ")})`;
           }
 

@@ -252,7 +252,10 @@ export function lowerMethodCall(
       case "max":
         return { isLowered: true, code: `std::max(${objectCode}, ${argCodes[0] ?? "0"})` };
       case "clamp":
-        return { isLowered: true, code: `std::clamp(${objectCode}, ${argCodes[0] ?? "0"}, ${argCodes[1] ?? "0"})` };
+        return {
+          isLowered: true,
+          code: `std::clamp(${objectCode}, ${argCodes[0] ?? "0"}, ${argCodes[1] ?? "0"})`,
+        };
       case "isEmpty":
         return { isLowered: true, code: `${objectCode}.empty()` };
       case "first":

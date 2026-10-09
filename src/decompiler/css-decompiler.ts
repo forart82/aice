@@ -26,7 +26,12 @@ export class CssDecompiler {
     const root = postcss.parse(this.source, { from: this.filePath });
     const items: (StyleDecl | ImportDecl)[] = [];
 
-    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.css$/, "").replace(/\.ail$/, "") ?? "style";
+    const baseName =
+      this.filePath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.css$/, "")
+        .replace(/\.ail$/, "") ?? "style";
     const cleanModPath = baseName;
 
     let pendingComment: string | null = null;
@@ -75,12 +80,18 @@ export class CssDecompiler {
           // Check for fl-center: display: flex + align-items: center + justify-content: center
           if (
             i + 2 < decls.length &&
-            ((d.prop === "display" && d.value === "flex" &&
-              decls[i + 1].prop === "align-items" && decls[i + 1].value === "center" &&
-              decls[i + 2].prop === "justify-content" && decls[i + 2].value === "center") ||
-             (d.prop === "display" && d.value === "flex" &&
-              decls[i + 1].prop === "justify-content" && decls[i + 1].value === "center" &&
-              decls[i + 2].prop === "align-items" && decls[i + 2].value === "center"))
+            ((d.prop === "display" &&
+              d.value === "flex" &&
+              decls[i + 1].prop === "align-items" &&
+              decls[i + 1].value === "center" &&
+              decls[i + 2].prop === "justify-content" &&
+              decls[i + 2].value === "center") ||
+              (d.prop === "display" &&
+                d.value === "flex" &&
+                decls[i + 1].prop === "justify-content" &&
+                decls[i + 1].value === "center" &&
+                decls[i + 2].prop === "align-items" &&
+                decls[i + 2].value === "center"))
           ) {
             properties.push({
               property: "fl-center",
@@ -94,10 +105,14 @@ export class CssDecompiler {
           // Check for fl-row: display: flex + flex-direction: row
           if (
             i + 1 < decls.length &&
-            ((d.prop === "display" && d.value === "flex" &&
-              decls[i + 1].prop === "flex-direction" && decls[i + 1].value === "row") ||
-             (d.prop === "flex-direction" && d.value === "row" &&
-              decls[i + 1].prop === "display" && decls[i + 1].value === "flex"))
+            ((d.prop === "display" &&
+              d.value === "flex" &&
+              decls[i + 1].prop === "flex-direction" &&
+              decls[i + 1].value === "row") ||
+              (d.prop === "flex-direction" &&
+                d.value === "row" &&
+                decls[i + 1].prop === "display" &&
+                decls[i + 1].value === "flex"))
           ) {
             properties.push({
               property: "fl-row",
@@ -111,10 +126,14 @@ export class CssDecompiler {
           // Check for fl-col: display: flex + flex-direction: column
           if (
             i + 1 < decls.length &&
-            ((d.prop === "display" && d.value === "flex" &&
-              decls[i + 1].prop === "flex-direction" && decls[i + 1].value === "column") ||
-             (d.prop === "flex-direction" && d.value === "column" &&
-              decls[i + 1].prop === "display" && decls[i + 1].value === "flex"))
+            ((d.prop === "display" &&
+              d.value === "flex" &&
+              decls[i + 1].prop === "flex-direction" &&
+              decls[i + 1].value === "column") ||
+              (d.prop === "flex-direction" &&
+                d.value === "column" &&
+                decls[i + 1].prop === "display" &&
+                decls[i + 1].value === "flex"))
           ) {
             properties.push({
               property: "fl-col",

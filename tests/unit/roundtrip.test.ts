@@ -121,7 +121,9 @@ export interface UserProfile {
     expect(res.ail).toContain("enum WaveShape:");
     expect(res.ail).toContain("sine");
     expect(res.ail).toContain("square");
-    expect(res.reconstructed).toContain('export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";');
+    expect(res.reconstructed).toContain(
+      'export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";',
+    );
   });
 
   it("decompiles and roundtrips classes with getters, setters, and expression bodies", () => {

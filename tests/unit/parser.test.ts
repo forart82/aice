@@ -799,7 +799,7 @@ const ACTIVE: bool = true`;
       expect(stmt.typeAnnotation).toBeNull();
     });
 
-    it("parses mutable keywordless binding y ::= \"mutable\"", () => {
+    it('parses mutable keywordless binding y ::= "mutable"', () => {
       const src = `fn test():
   y ::= "mutable"`;
       const mod = parse(src);
@@ -825,7 +825,7 @@ const ACTIVE: bool = true`;
       expect(stmt.typeAnnotation?.kind).toBe("PrimitiveType");
     });
 
-    it("parses typed mutable keywordless binding w: string ::= \"mut_typed\"", () => {
+    it('parses typed mutable keywordless binding w: string ::= "mut_typed"', () => {
       const src = `fn test():
   w: str ::= "mut_typed"`;
       const mod = parse(src);

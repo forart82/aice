@@ -18,7 +18,8 @@ describe("Step 14: Autonomous Self-Repair Engine & Unified Diff Telemetry", () =
   describe("Deterministic Unified Diff Patch Applicator", () => {
     it("applies a single-line replacement patch accurately", () => {
       const source = "let count = 0\ncount = count + 1\n";
-      const patch = "--- test.ail\n+++ test.ail\n@@ -1,1 +1,1 @@\n-let count = 0\n+let mut count = 0";
+      const patch =
+        "--- test.ail\n+++ test.ail\n@@ -1,1 +1,1 @@\n-let count = 0\n+let mut count = 0";
       const result = applyUnifiedDiffPatch(source, patch);
       expect(result).toBe("let mut count = 0\ncount = count + 1\n");
     });
@@ -110,9 +111,7 @@ describe("Step 14: Autonomous Self-Repair Engine & Unified Diff Telemetry", () =
       const res = attemptSelfRepair(unrepairableAil, "unfixable.ail");
       expect(res.fixed).toBe(false);
       expect(res.error).toBeDefined();
-      expect(res.error?.primary_diagnostic?.violation.code).toBe(
-        "AIL_E2007_RETURN_TYPE_MISMATCH",
-      );
+      expect(res.error?.primary_diagnostic?.violation.code).toBe("AIL_E2007_RETURN_TYPE_MISMATCH");
     });
   });
 });

@@ -43,11 +43,7 @@ export function getPropertyType(receiver: Type, prop: string): Type | null {
     return null;
   }
 
-  if (
-    receiver.kind === "named" ||
-    receiver.kind === "unknown" ||
-    receiver.kind === "function"
-  ) {
+  if (receiver.kind === "named" || receiver.kind === "unknown" || receiver.kind === "function") {
     return TYPE_UNKNOWN;
   }
 
@@ -138,7 +134,10 @@ export function getMethodType(receiver: Type, method: string): Type | null {
       case "filter":
         return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], receiver);
       case "map":
-        return makeFunctionType([{ name: "transform", type: TYPE_UNKNOWN }], makeArrayType(TYPE_UNKNOWN));
+        return makeFunctionType(
+          [{ name: "transform", type: TYPE_UNKNOWN }],
+          makeArrayType(TYPE_UNKNOWN),
+        );
       case "forEach":
         return makeFunctionType([{ name: "callback", type: TYPE_UNKNOWN }], TYPE_VOID);
       case "some":
@@ -146,7 +145,10 @@ export function getMethodType(receiver: Type, method: string): Type | null {
       case "every":
         return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], TYPE_BOOL);
       case "find":
-        return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], makeOptionType(elemType));
+        return makeFunctionType(
+          [{ name: "predicate", type: TYPE_UNKNOWN }],
+          makeOptionType(elemType),
+        );
       case "findIndex":
         return makeFunctionType([{ name: "predicate", type: TYPE_UNKNOWN }], TYPE_INT);
       case "splice":
@@ -166,7 +168,10 @@ export function getMethodType(receiver: Type, method: string): Type | null {
       case "reverse":
         return makeFunctionType([], receiver);
       case "sort":
-        return makeFunctionType([{ name: "compareFn", type: TYPE_UNKNOWN, optional: true }], receiver);
+        return makeFunctionType(
+          [{ name: "compareFn", type: TYPE_UNKNOWN, optional: true }],
+          receiver,
+        );
       case "isEmpty":
         return makeFunctionType([], TYPE_BOOL);
       case "first":

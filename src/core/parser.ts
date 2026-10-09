@@ -849,11 +849,7 @@ export class Parser {
         }
         const pt = this.parseTypeExpr();
         const ptName =
-          pt.kind === "NamedType"
-            ? pt.name
-            : pt.kind === "PrimitiveType"
-              ? pt.primitive
-              : "any";
+          pt.kind === "NamedType" ? pt.name : pt.kind === "PrimitiveType" ? pt.primitive : "any";
         paramTypes.push(ptName);
         if (this.check("COMMA")) this.advance();
       }
@@ -1259,7 +1255,11 @@ export class Parser {
       lastSpan = initialValue.span;
     }
 
-    const endSpan = initialValue ? initialValue.span : typeAnnotation ? typeAnnotation.span : lastSpan;
+    const endSpan = initialValue
+      ? initialValue.span
+      : typeAnnotation
+        ? typeAnnotation.span
+        : lastSpan;
     return {
       kind: "PropertyDecl",
       name,

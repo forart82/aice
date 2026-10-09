@@ -103,7 +103,12 @@ export class TsDecompiler {
     const items: ModuleItem[] = [];
 
     // Derive module path from file name
-    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.(tsx?|jsx?)$/, "").replace(/\.ail$/, "") ?? "main";
+    const baseName =
+      this.filePath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.(tsx?|jsx?)$/, "")
+        .replace(/\.ail$/, "") ?? "main";
     const cleanModPath = baseName;
 
     for (const stmt of this.sourceFile.statements) {
@@ -453,8 +458,10 @@ export class TsDecompiler {
         const pNodeId = `field:${name}.${propName}`;
         this.extractComments(member, pNodeId);
 
-        const isStatic = member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
-        const isReadonly = member.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+        const isStatic =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
+        const isReadonly =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
         let typeAnn = member.type ? this.convertTypeNode(member.type) : undefined;
         if (member.questionToken && typeAnn) {
           typeAnn = {
@@ -463,7 +470,9 @@ export class TsDecompiler {
             span: this.getSpan(member),
           };
         }
-        const initialValue = member.initializer ? this.convertExpression(member.initializer) : undefined;
+        const initialValue = member.initializer
+          ? this.convertExpression(member.initializer)
+          : undefined;
 
         properties.push({
           kind: "PropertyDecl",
@@ -481,9 +490,8 @@ export class TsDecompiler {
         const hasParamProps = member.parameters.some((p) =>
           p.modifiers?.some(
             (m) =>
-              m.kind === ts.SyntaxKind.PublicKeyword ||
-              m.kind === ts.SyntaxKind.ReadonlyKeyword
-          )
+              m.kind === ts.SyntaxKind.PublicKeyword || m.kind === ts.SyntaxKind.ReadonlyKeyword,
+          ),
         );
         const isEmptyBody = !member.body || member.body.statements.length === 0;
 
@@ -491,7 +499,8 @@ export class TsDecompiler {
           primaryConstructor = member.parameters.map((p) => {
             const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
             const isPub = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.PublicKeyword) ?? true;
-            const isRo = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            const isRo =
+              p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
             return {
               name: pName,
               typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
@@ -505,21 +514,29 @@ export class TsDecompiler {
         }
 
         let isSimplePropertyAssignCtor = false;
-        if (member.body && member.body.statements.length === member.parameters.length && member.parameters.length > 0) {
+        if (
+          member.body &&
+          member.body.statements.length === member.parameters.length &&
+          member.parameters.length > 0
+        ) {
           const allAssignments = member.body.statements.every((s, idx) => {
             if (!ts.isExpressionStatement(s) || !ts.isBinaryExpression(s.expression)) return false;
             const bin = s.expression;
             if (bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
             if (!ts.isPropertyAccessExpression(bin.left)) return false;
             if (bin.left.expression.kind !== ts.SyntaxKind.ThisKeyword) return false;
-            const paramName = ts.isIdentifier(member.parameters[idx].name) ? member.parameters[idx].name.text : "";
+            const paramName = ts.isIdentifier(member.parameters[idx].name)
+              ? member.parameters[idx].name.text
+              : "";
             const leftPropName = bin.left.name.text;
             const rightName = ts.isIdentifier(bin.right) ? bin.right.text : "";
             return leftPropName === paramName && rightName === paramName;
           });
           if (allAssignments) {
             const propMap = new Map(properties.map((p) => [p.name, p]));
-            if (member.parameters.every((p) => ts.isIdentifier(p.name) && propMap.has(p.name.text))) {
+            if (
+              member.parameters.every((p) => ts.isIdentifier(p.name) && propMap.has(p.name.text))
+            ) {
               isSimplePropertyAssignCtor = true;
             }
           }
@@ -536,7 +553,7 @@ export class TsDecompiler {
               name: pName,
               typeAnnotation: p.type
                 ? this.convertTypeNode(p.type)
-                : matchedProp?.typeAnnotation ?? this.makePrimitive("any"),
+                : (matchedProp?.typeAnnotation ?? this.makePrimitive("any")),
               defaultValue: p.initializer
                 ? this.convertExpression(p.initializer)
                 : matchedProp?.initialValue,
@@ -587,8 +604,10 @@ export class TsDecompiler {
         const mNodeId = `method:${name}.${methodName}`;
         this.extractComments(member, mNodeId);
 
-        const isStatic = member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
-        const isAsync = member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+        const isStatic =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
+        const isAsync =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
         const params: ParamDecl[] = member.parameters.map((p) => {
           const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
           return {
@@ -751,7 +770,10 @@ export class TsDecompiler {
             this.isSimplePropertySetter(m, prop.name, prop.isStatic, name),
         );
         if (setter || prop.isReadonly) {
-          (prop.aliases ??= []).push(getter.name);
+          if (!prop.aliases) {
+            prop.aliases = [];
+          }
+          prop.aliases.push(getter.name);
           methodsToRemove.add(getter);
           if (setter) {
             methodsToRemove.add(setter);
@@ -864,7 +886,13 @@ export class TsDecompiler {
       const typeAnn = decl.type ? this.convertTypeNode(decl.type) : undefined;
       const value: Expr = decl.initializer
         ? this.convertExpression(decl.initializer)
-        : { kind: "LiteralExpr", literalKind: "nil", value: null, rawValue: "nil", span: this.getSpan(decl) };
+        : {
+            kind: "LiteralExpr",
+            literalKind: "nil",
+            value: null,
+            rawValue: "nil",
+            span: this.getSpan(decl),
+          };
 
       if (isConst) {
         items.push({
@@ -1008,13 +1036,37 @@ export class TsDecompiler {
             if (decl.initializer) {
               init = this.convertExpression(decl.initializer);
             } else if (decl.type && decl.type.kind === ts.SyntaxKind.NumberKeyword) {
-              init = { kind: "LiteralExpr", literalKind: "number", value: 0, rawValue: "0", span: this.getSpan(decl) };
+              init = {
+                kind: "LiteralExpr",
+                literalKind: "number",
+                value: 0,
+                rawValue: "0",
+                span: this.getSpan(decl),
+              };
             } else if (decl.type && decl.type.kind === ts.SyntaxKind.BooleanKeyword) {
-              init = { kind: "LiteralExpr", literalKind: "boolean", value: false, rawValue: "false", span: this.getSpan(decl) };
+              init = {
+                kind: "LiteralExpr",
+                literalKind: "boolean",
+                value: false,
+                rawValue: "false",
+                span: this.getSpan(decl),
+              };
             } else if (decl.type && decl.type.kind === ts.SyntaxKind.StringKeyword) {
-              init = { kind: "LiteralExpr", literalKind: "string", value: "", rawValue: '""', span: this.getSpan(decl) };
+              init = {
+                kind: "LiteralExpr",
+                literalKind: "string",
+                value: "",
+                rawValue: '""',
+                span: this.getSpan(decl),
+              };
             } else {
-              init = { kind: "LiteralExpr", literalKind: "nil", value: null, rawValue: "nil", span: this.getSpan(decl) };
+              init = {
+                kind: "LiteralExpr",
+                literalKind: "nil",
+                value: null,
+                rawValue: "nil",
+                span: this.getSpan(decl),
+              };
             }
             statements.push({
               kind: "LetBinding",
@@ -1038,7 +1090,13 @@ export class TsDecompiler {
             }
             const init = decl.initializer
               ? this.convertExpression(decl.initializer)
-              : { kind: "LiteralExpr" as const, literalKind: "nil" as const, value: null, rawValue: "nil", span: this.getSpan(decl) };
+              : {
+                  kind: "LiteralExpr" as const,
+                  literalKind: "nil" as const,
+                  value: null,
+                  rawValue: "nil",
+                  span: this.getSpan(decl),
+                };
             statements.push({
               kind: "DestructureBinding",
               names,
@@ -1071,13 +1129,37 @@ export class TsDecompiler {
         if (decl.initializer) {
           init = this.convertExpression(decl.initializer);
         } else if (decl.type && decl.type.kind === ts.SyntaxKind.NumberKeyword) {
-          init = { kind: "LiteralExpr", literalKind: "number", value: 0, rawValue: "0", span: this.getSpan(decl) };
+          init = {
+            kind: "LiteralExpr",
+            literalKind: "number",
+            value: 0,
+            rawValue: "0",
+            span: this.getSpan(decl),
+          };
         } else if (decl.type && decl.type.kind === ts.SyntaxKind.BooleanKeyword) {
-          init = { kind: "LiteralExpr", literalKind: "boolean", value: false, rawValue: "false", span: this.getSpan(decl) };
+          init = {
+            kind: "LiteralExpr",
+            literalKind: "boolean",
+            value: false,
+            rawValue: "false",
+            span: this.getSpan(decl),
+          };
         } else if (decl.type && decl.type.kind === ts.SyntaxKind.StringKeyword) {
-          init = { kind: "LiteralExpr", literalKind: "string", value: "", rawValue: '""', span: this.getSpan(decl) };
+          init = {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: "",
+            rawValue: '""',
+            span: this.getSpan(decl),
+          };
         } else {
-          init = { kind: "LiteralExpr", literalKind: "nil", value: null, rawValue: "nil", span: this.getSpan(decl) };
+          init = {
+            kind: "LiteralExpr",
+            literalKind: "nil",
+            value: null,
+            rawValue: "nil",
+            span: this.getSpan(decl),
+          };
         }
         return {
           kind: "LetBinding",
@@ -1101,7 +1183,13 @@ export class TsDecompiler {
         }
         const init = decl.initializer
           ? this.convertExpression(decl.initializer)
-          : { kind: "LiteralExpr" as const, literalKind: "nil" as const, value: null, rawValue: "nil", span: this.getSpan(decl) };
+          : {
+              kind: "LiteralExpr" as const,
+              literalKind: "nil" as const,
+              value: null,
+              rawValue: "nil",
+              span: this.getSpan(decl),
+            };
         return {
           kind: "DestructureBinding",
           names,
@@ -1216,11 +1304,7 @@ export class TsDecompiler {
         if (opKind === ts.SyntaxKind.EqualsToken) {
           const target = this.convertExpression(stmt.expression.left);
           if (ts.isConditionalExpression(stmt.expression.right)) {
-            return this.convertConditionalAssign(
-              target,
-              stmt.expression.right,
-              this.getSpan(stmt),
-            );
+            return this.convertConditionalAssign(target, stmt.expression.right, this.getSpan(stmt));
           }
           return {
             kind: "AssignStmt",
@@ -1251,13 +1335,13 @@ export class TsDecompiler {
 
       // Check for increment / decrement: i++ or i--
       if (
-        (ts.isPostfixUnaryExpression(stmt.expression) || ts.isPrefixUnaryExpression(stmt.expression)) &&
+        (ts.isPostfixUnaryExpression(stmt.expression) ||
+          ts.isPrefixUnaryExpression(stmt.expression)) &&
         (stmt.expression.operator === ts.SyntaxKind.PlusPlusToken ||
           stmt.expression.operator === ts.SyntaxKind.MinusMinusToken)
       ) {
         const target = this.convertExpression(stmt.expression.operand);
-        const op: BinaryOp =
-          stmt.expression.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+        const op: BinaryOp = stmt.expression.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
         return {
           kind: "AssignStmt",
           target,

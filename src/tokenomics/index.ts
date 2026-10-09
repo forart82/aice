@@ -340,10 +340,14 @@ export function formatProjectsMarkdownTable(report: TokenomicsAuditReport): stri
     }
   }
 
-  const projects = Array.from(projectMap.values()).sort((a, b) => a.project.localeCompare(b.project));
+  const projects = Array.from(projectMap.values()).sort((a, b) =>
+    a.project.localeCompare(b.project),
+  );
   for (const p of projects) {
-    p.cl100kSavingsPct = p.targetCl100k > 0 ? ((p.targetCl100k - p.ailCl100k) / p.targetCl100k) * 100 : 0;
-    p.o200kSavingsPct = p.targetO200k > 0 ? ((p.targetO200k - p.ailO200k) / p.targetO200k) * 100 : 0;
+    p.cl100kSavingsPct =
+      p.targetCl100k > 0 ? ((p.targetCl100k - p.ailCl100k) / p.targetCl100k) * 100 : 0;
+    p.o200kSavingsPct =
+      p.targetO200k > 0 ? ((p.targetO200k - p.ailO200k) / p.targetO200k) * 100 : 0;
     p.charSavingsPct = p.targetChars > 0 ? ((p.targetChars - p.ailChars) / p.targetChars) * 100 : 0;
   }
 

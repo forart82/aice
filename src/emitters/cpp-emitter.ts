@@ -216,7 +216,7 @@ export class CppEmitter {
     }
 
     for (const p of c.properties) {
-      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
       for (const alias of aliases) {
         const hasExplicitMethod = c.methods.some((m) => m.name === alias);
         if (!hasExplicitMethod) {
@@ -322,7 +322,11 @@ export class CppEmitter {
   private emitStatement(stmt: Statement, isImplicitReturn = false): void {
     switch (stmt.kind) {
       case "LetBinding": {
-        const typeStr = stmt.typeAnnotation ? this.emitTypeExpr(stmt.typeAnnotation) : (stmt.isMut ? "auto" : "const auto");
+        const typeStr = stmt.typeAnnotation
+          ? this.emitTypeExpr(stmt.typeAnnotation)
+          : stmt.isMut
+            ? "auto"
+            : "const auto";
         this.ctx.writeLine(`${typeStr} ${stmt.name} = ${this.emitExpr(stmt.init)};`);
         break;
       }

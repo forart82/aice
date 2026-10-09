@@ -203,7 +203,7 @@ export class PythonEmitter {
     }
 
     for (const p of c.properties) {
-      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : (p.alias ? [p.alias] : []);
+      const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
       for (const alias of aliases) {
         const hasExplicitMethod = c.methods.some((m) => m.name === alias);
         if (!hasExplicitMethod) {

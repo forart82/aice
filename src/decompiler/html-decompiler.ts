@@ -46,7 +46,12 @@ export class HtmlDecompiler {
     }
 
     // Capitalize component name from file basename
-    const baseName = this.filePath.split(/[/\\]/).pop()?.replace(/\.html$/, "").replace(/\.ail$/, "") ?? "page";
+    const baseName =
+      this.filePath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.html$/, "")
+        .replace(/\.ail$/, "") ?? "page";
     const cleanModPath = baseName;
     const compName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
 
@@ -117,7 +122,9 @@ export class HtmlDecompiler {
 
     if (node.attrs) {
       for (const attr of node.attrs) {
-        const isBool = BOOLEAN_ATTRS.has(attr.name.toLowerCase()) && (attr.value === "" || attr.value === attr.name);
+        const isBool =
+          BOOLEAN_ATTRS.has(attr.name.toLowerCase()) &&
+          (attr.value === "" || attr.value === attr.name);
         attributes.push({
           name: attr.name,
           value: isBool

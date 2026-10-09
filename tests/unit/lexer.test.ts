@@ -131,12 +131,7 @@ third line"""`;
 
     it("Step 21: scans := (COLON_EQUAL) and ::= (COLON_COLON_EQUAL) operators", () => {
       const src = ":= ::=";
-      expect(kinds(src)).toEqual([
-        "COLON_EQUAL",
-        "COLON_COLON_EQUAL",
-        "NEWLINE",
-        "EOF",
-      ]);
+      expect(kinds(src)).toEqual(["COLON_EQUAL", "COLON_COLON_EQUAL", "NEWLINE", "EOF"]);
     });
 
     it("scans postfix ? error unwrap operator without ambiguity", () => {

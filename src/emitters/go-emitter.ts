@@ -556,7 +556,8 @@ export class GoEmitter {
         return `New${name}(${argCodes.join(", ")})`;
       }
 
-      if (name === "clamp") return `math.Max(${argCodes[1]}, math.Min(${argCodes[2]}, ${argCodes[0]}))`;
+      if (name === "clamp")
+        return `math.Max(${argCodes[1]}, math.Min(${argCodes[2]}, ${argCodes[0]}))`;
       if (name === "min") return `math.Min(${argCodes.join(", ")})`;
       if (name === "max") return `math.Max(${argCodes.join(", ")})`;
       if (name === "abs") return `math.Abs(${argCodes[0]})`;

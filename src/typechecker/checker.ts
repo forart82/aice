@@ -274,7 +274,9 @@ export class TypeChecker {
         }));
         const mRet = m.returnType
           ? this.resolveTypeExpr(m.returnType, env)
-          : (m.isExpressionBodied || m.accessor === "get" ? TYPE_UNKNOWN : TYPE_VOID);
+          : m.isExpressionBodied || m.accessor === "get"
+            ? TYPE_UNKNOWN
+            : TYPE_VOID;
         fields.set(m.name, makeFunctionType(mParams, mRet));
         if (m.accessor === "get") {
           fields.set(`get_${m.name}`, makeFunctionType([], mRet));
@@ -306,7 +308,9 @@ export class TypeChecker {
     }
 
     if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
-      const type = item.typeAnnotation ? this.resolveTypeExpr(item.typeAnnotation, env) : TYPE_UNKNOWN;
+      const type = item.typeAnnotation
+        ? this.resolveTypeExpr(item.typeAnnotation, env)
+        : TYPE_UNKNOWN;
       env.define(item.name, type, item.kind === "VarDecl" ? item.isMut : false);
     }
   }
@@ -342,7 +346,9 @@ export class TypeChecker {
         }
       }
       for (const p of item.properties) {
-        const pType = p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, classEnv) : TYPE_UNKNOWN;
+        const pType = p.typeAnnotation
+          ? this.resolveTypeExpr(p.typeAnnotation, classEnv)
+          : TYPE_UNKNOWN;
         classEnv.define(p.name, pType, !p.isReadonly);
         if (p.alias) {
           classEnv.define(p.alias, pType, !p.isReadonly);
@@ -356,7 +362,9 @@ export class TypeChecker {
       for (const m of item.methods) {
         const retType = m.returnType
           ? this.resolveTypeExpr(m.returnType, classEnv)
-          : (m.isExpressionBodied || m.accessor === "get" ? TYPE_UNKNOWN : TYPE_VOID);
+          : m.isExpressionBodied || m.accessor === "get"
+            ? TYPE_UNKNOWN
+            : TYPE_VOID;
         const methodEnv = classEnv.extend(retType);
         for (const p of m.params) {
           methodEnv.define(p.name, this.resolveTypeExpr(p.typeAnnotation, classEnv), true);
@@ -368,7 +376,11 @@ export class TypeChecker {
             const last = stmts[stmts.length - 1];
             if (last.kind === "ExprStmt") {
               if (m.returnType) {
-                if (retType.kind !== "void" && m.accessor !== "set" && !isAssignable(retType, trailingType)) {
+                if (
+                  retType.kind !== "void" &&
+                  m.accessor !== "set" &&
+                  !isAssignable(retType, trailingType)
+                ) {
                   throw new TypeCheckError(
                     `Trailing expression evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
                     last.expr.span,
@@ -380,7 +392,11 @@ export class TypeChecker {
               }
             } else if (last.kind === "IfStmt" && last.elseBranch) {
               if (m.returnType) {
-                if (retType.kind !== "void" && m.accessor !== "set" && !isAssignable(retType, trailingType)) {
+                if (
+                  retType.kind !== "void" &&
+                  m.accessor !== "set" &&
+                  !isAssignable(retType, trailingType)
+                ) {
                   throw new TypeCheckError(
                     `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
                     last.span,
@@ -453,7 +469,11 @@ export class TypeChecker {
     if (fn.isExpressionBodied) {
       const bodyType = this.checkExpr(fn.body as Expr, fnEnv);
       if (fn.returnType) {
-        if (returnType.kind !== "void" && (fn.body as Expr).kind !== "AssignExpr" && !isAssignable(returnType, bodyType)) {
+        if (
+          returnType.kind !== "void" &&
+          (fn.body as Expr).kind !== "AssignExpr" &&
+          !isAssignable(returnType, bodyType)
+        ) {
           throw new TypeCheckError(
             `Expression body evaluates to '${formatType(bodyType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
             (fn.body as Expr).span,

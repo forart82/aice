@@ -4,7 +4,15 @@
 
 import type { CstTriviaTable } from "../core/trivia.js";
 
-export type TargetLanguage = "typescript" | "tsx" | "python" | "html" | "css" | "rust" | "go" | "cpp";
+export type TargetLanguage =
+  | "typescript"
+  | "tsx"
+  | "python"
+  | "html"
+  | "css"
+  | "rust"
+  | "go"
+  | "cpp";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
@@ -109,7 +117,13 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (clean.endsWith(".css")) return "css";
   if (clean.endsWith(".rs")) return "rust";
   if (clean.endsWith(".go")) return "go";
-  if (clean.endsWith(".cpp") || clean.endsWith(".hpp") || clean.endsWith(".cc") || clean.endsWith(".h")) return "cpp";
+  if (
+    clean.endsWith(".cpp") ||
+    clean.endsWith(".hpp") ||
+    clean.endsWith(".cc") ||
+    clean.endsWith(".h")
+  )
+    return "cpp";
   return "typescript";
 }
 

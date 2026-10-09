@@ -12,7 +12,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse } from "../../src/core/parser.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../../src/emitters/index.js";
-import { auditTokenomics, formatProjectsMarkdownTable, formatTokenomicsMarkdownTable } from "../../src/tokenomics/index.js";
+import {
+  auditTokenomics,
+  formatProjectsMarkdownTable,
+  formatTokenomicsMarkdownTable,
+} from "../../src/tokenomics/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 function findAilFiles(dir: string): string[] {
