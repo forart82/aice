@@ -7,6 +7,7 @@
  *   Put(Get(c), Omega) == c
  */
 
+import { parse } from "../core/parser.js";
 import { emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { AilGenerator } from "./ail-generator.js";
 import { CssDecompiler } from "./css-decompiler.js";
@@ -21,6 +22,15 @@ export interface RoundtripResult {
   isIdentical: boolean;
   diff?: string;
   triviaEntriesCount: number;
+}
+
+export interface AilRoundtripResult {
+  target: TargetLanguage;
+  ailOriginal: string;
+  targetReconstructed: string;
+  ailReconstructed: string;
+  isTargetIdentical: boolean;
+  isAilIdentical: boolean;
 }
 
 export function executeRoundtrip(
@@ -78,6 +88,24 @@ export function executeRoundtrip(
     isIdentical,
     diff,
     triviaEntriesCount: trivia.size(),
+  };
+}
+
+export function executeAilRoundtrip(
+  ailSource: string,
+  target: TargetLanguage,
+  filePath = "source.ail",
+): AilRoundtripResult {
+  const ast = parse(ailSource, filePath);
+  const targetReconstructed = emitTarget(ast, target);
+  const reverseResult = executeRoundtrip(targetReconstructed, target, filePath);
+  return {
+    target,
+    ailOriginal: ailSource,
+    targetReconstructed,
+    ailReconstructed: reverseResult.ail,
+    isTargetIdentical: reverseResult.isIdentical,
+    isAilIdentical: normalizeWhitespace(ailSource) === normalizeWhitespace(reverseResult.ail),
   };
 }
 

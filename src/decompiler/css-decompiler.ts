@@ -51,15 +51,77 @@ export class CssDecompiler {
           pendingComment = null;
         }
 
-        const properties: StyleProperty[] = [];
+        const decls: { prop: string; value: string }[] = [];
         for (const child of node.nodes) {
           if (child.type === "decl") {
+            decls.push({ prop: child.prop, value: child.value });
+          }
+        }
+
+        const properties: StyleProperty[] = [];
+        let i = 0;
+        while (i < decls.length) {
+          const d = decls[i];
+
+          // Check for fl-center: display: flex + align-items: center + justify-content: center
+          if (
+            i + 2 < decls.length &&
+            ((d.prop === "display" && d.value === "flex" &&
+              decls[i + 1].prop === "align-items" && decls[i + 1].value === "center" &&
+              decls[i + 2].prop === "justify-content" && decls[i + 2].value === "center") ||
+             (d.prop === "display" && d.value === "flex" &&
+              decls[i + 1].prop === "justify-content" && decls[i + 1].value === "center" &&
+              decls[i + 2].prop === "align-items" && decls[i + 2].value === "center"))
+          ) {
             properties.push({
-              property: child.prop,
-              value: child.value,
+              property: "fl-center",
+              value: "",
               span: emptySpan(this.filePath),
             });
+            i += 3;
+            continue;
           }
+
+          // Check for fl-row: display: flex + flex-direction: row
+          if (
+            i + 1 < decls.length &&
+            ((d.prop === "display" && d.value === "flex" &&
+              decls[i + 1].prop === "flex-direction" && decls[i + 1].value === "row") ||
+             (d.prop === "flex-direction" && d.value === "row" &&
+              decls[i + 1].prop === "display" && decls[i + 1].value === "flex"))
+          ) {
+            properties.push({
+              property: "fl-row",
+              value: "",
+              span: emptySpan(this.filePath),
+            });
+            i += 2;
+            continue;
+          }
+
+          // Check for fl-col: display: flex + flex-direction: column
+          if (
+            i + 1 < decls.length &&
+            ((d.prop === "display" && d.value === "flex" &&
+              decls[i + 1].prop === "flex-direction" && decls[i + 1].value === "column") ||
+             (d.prop === "flex-direction" && d.value === "column" &&
+              decls[i + 1].prop === "display" && decls[i + 1].value === "flex"))
+          ) {
+            properties.push({
+              property: "fl-col",
+              value: "",
+              span: emptySpan(this.filePath),
+            });
+            i += 2;
+            continue;
+          }
+
+          properties.push({
+            property: d.prop,
+            value: d.value,
+            span: emptySpan(this.filePath),
+          });
+          i++;
         }
 
         items.push({

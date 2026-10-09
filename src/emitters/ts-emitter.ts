@@ -819,12 +819,12 @@ export class TypeScriptEmitter {
           }
 
           if (TypeScriptEmitter.MATH_BUILTINS.has(expr.callee.name)) {
-            const isShadowed = this.localScopeVars.some((scope) => scope.has(expr.callee.name));
+            const isShadowed = this.localScopeVars.some((scope) => scope.has(typeName));
             if (!isShadowed) {
-              if (expr.callee.name === "clamp") {
+              if (typeName === "clamp") {
                 return `Math.max(${argCodes[1]}, Math.min(${argCodes[2]}, ${argCodes[0]}))`;
               }
-              return `Math.${expr.callee.name}(${argCodes.join(", ")})`;
+              return `Math.${typeName}(${argCodes.join(", ")})`;
             }
           }
         }

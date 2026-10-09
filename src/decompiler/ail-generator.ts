@@ -537,8 +537,46 @@ export class AilGenerator {
     const nameStr = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s.name) ? s.name : `"${s.name}"`;
     this.writeLine(`style ${nameStr}:`);
     this.indent();
-    for (const p of s.properties) {
-      this.writeLine(`${p.property}: ${p.value}`);
+
+    let i = 0;
+    while (i < s.properties.length) {
+      const p = s.properties[i];
+
+      // Check for token sheets grouping on custom properties: --ns-key: <num><unit>
+      const tokenMatch = p.property.match(/^--([a-zA-Z0-9_]+)-([a-zA-Z0-9_]+)$/);
+      const valMatch = p.value ? p.value.match(/^([0-9.]+)([a-zA-Z%]+)$/) : null;
+
+      if (tokenMatch && valMatch) {
+        const ns = tokenMatch[1];
+        const unit = valMatch[2];
+        const group: { key: string; valNum: string }[] = [{ key: tokenMatch[2], valNum: valMatch[1] }];
+        let j = i + 1;
+        while (j < s.properties.length) {
+          const nextP = s.properties[j];
+          const nextTMatch = nextP.property.match(/^--([a-zA-Z0-9_]+)-([a-zA-Z0-9_]+)$/);
+          const nextVMatch = nextP.value ? nextP.value.match(/^([0-9.]+)([a-zA-Z%]+)$/) : null;
+          if (nextTMatch && nextVMatch && nextTMatch[1] === ns && nextVMatch[2] === unit) {
+            group.push({ key: nextTMatch[2], valNum: nextVMatch[1] });
+            j++;
+          } else {
+            break;
+          }
+        }
+
+        if (group.length >= 2) {
+          const entries = group.map((g) => `${g.key}: ${g.valNum}`).join(", ");
+          this.writeLine(`tokens ${ns}[${unit}]: ${entries}`);
+          i = j;
+          continue;
+        }
+      }
+
+      if (!p.value) {
+        this.writeLine(p.property);
+      } else {
+        this.writeLine(`${p.property}: ${p.value}`);
+      }
+      i++;
     }
     this.dedent();
   }

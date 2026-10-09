@@ -10,11 +10,13 @@
 
 import ts from "typescript";
 import type {
+  AssignOp,
   BinaryOp,
   Block,
   ClassDecl,
   ComponentDecl,
   ConstDecl,
+  DestructureBinding,
   Expr,
   FieldDecl,
   FunctionDecl,
@@ -37,6 +39,21 @@ import type {
 } from "../core/ast.js";
 import { createPosition, createSpan, emptySpan, mergeSpans, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem, type TriviaKind } from "../core/trivia.js";
+
+const TS_MATH_BUILTINS = new Set([
+  "abs",
+  "floor",
+  "ceil",
+  "round",
+  "min",
+  "max",
+  "sqrt",
+  "hypot",
+  "sin",
+  "cos",
+  "atan2",
+  "pow",
+]);
 
 export interface TsDecompilerOptions {
   modulePath?: string;
@@ -695,6 +712,34 @@ export class TsDecompiler {
       }
     }
 
+    // Compact dual-case property accessors (e.g., property X and getter/setter x, or vice versa)
+    const methodsToRemove = new Set<MethodDecl>();
+    for (const prop of properties) {
+      const getter = methods.find(
+        (m) =>
+          m.accessor === "get" &&
+          m.name.toLowerCase() === prop.name.toLowerCase() &&
+          m.name !== prop.name &&
+          this.isSimplePropertyGetter(m, prop.name, prop.isStatic, name),
+      );
+      if (getter) {
+        const setter = methods.find(
+          (m) =>
+            m.accessor === "set" &&
+            m.name === getter.name &&
+            this.isSimplePropertySetter(m, prop.name, prop.isStatic, name),
+        );
+        if (setter || prop.isReadonly) {
+          (prop.aliases ??= []).push(getter.name);
+          methodsToRemove.add(getter);
+          if (setter) {
+            methodsToRemove.add(setter);
+          }
+        }
+      }
+    }
+    const finalMethods = methods.filter((m) => !methodsToRemove.has(m));
+
     return {
       kind: "ClassDecl",
       name,
@@ -704,9 +749,85 @@ export class TsDecompiler {
       extends: extendsName,
       implements: implementsList.length > 0 ? implementsList : undefined,
       properties,
-      methods,
+      methods: finalMethods,
       span: this.getSpan(stmt),
     };
+  }
+
+  private isSimplePropertyGetter(
+    m: MethodDecl,
+    propName: string,
+    isStatic: boolean,
+    className: string,
+  ): boolean {
+    let expr: Expr | null = null;
+    if (m.isExpressionBodied && !("statements" in m.body)) {
+      expr = m.body as Expr;
+    } else if ("statements" in m.body && m.body.statements.length === 1) {
+      const stmt = m.body.statements[0];
+      if (stmt.kind === "ReturnStmt") {
+        expr = stmt.value;
+      }
+    }
+    if (!expr) return false;
+    if (isStatic) {
+      return (
+        (expr.kind === "MemberAccessExpr" &&
+          expr.object.kind === "IdentifierExpr" &&
+          expr.object.name === className &&
+          expr.property === propName) ||
+        (expr.kind === "IdentifierExpr" && expr.name === propName)
+      );
+    }
+    return (
+      expr.kind === "MemberAccessExpr" &&
+      expr.object.kind === "IdentifierExpr" &&
+      expr.object.name === "this" &&
+      expr.property === propName
+    );
+  }
+
+  private isSimplePropertySetter(
+    m: MethodDecl,
+    propName: string,
+    isStatic: boolean,
+    className: string,
+  ): boolean {
+    if (m.params.length !== 1) return false;
+    const paramName = m.params[0].name;
+    let target: Expr | null = null;
+    let value: Expr | null = null;
+
+    if (m.isExpressionBodied && !("statements" in m.body)) {
+      if (m.body.kind === "AssignExpr") {
+        target = m.body.target;
+        value = m.body.value;
+      }
+    } else if ("statements" in m.body && m.body.statements.length === 1) {
+      const stmt = m.body.statements[0];
+      if (stmt.kind === "AssignStmt") {
+        target = stmt.target;
+        value = stmt.value;
+      }
+    }
+    if (!target || !value) return false;
+    if (value.kind !== "IdentifierExpr" || value.name !== paramName) return false;
+
+    if (isStatic) {
+      return (
+        (target.kind === "MemberAccessExpr" &&
+          target.object.kind === "IdentifierExpr" &&
+          target.object.name === className &&
+          target.property === propName) ||
+        (target.kind === "IdentifierExpr" && target.name === propName)
+      );
+    }
+    return (
+      target.kind === "MemberAccessExpr" &&
+      target.object.kind === "IdentifierExpr" &&
+      target.object.name === "this" &&
+      target.property === propName
+    );
   }
 
   private convertVariableStatement(stmt: ts.VariableStatement): ModuleItem[] {
@@ -882,6 +1003,28 @@ export class TsDecompiler {
               init,
               span: this.getSpan(decl),
             });
+          } else if (ts.isArrayBindingPattern(decl.name)) {
+            const isMut = (stmt.declarationList.flags & ts.NodeFlags.Const) === 0;
+            const names: string[] = [];
+            for (const el of decl.name.elements) {
+              if (ts.isBindingElement(el)) {
+                if (ts.isIdentifier(el.name)) {
+                  names.push(el.name.text);
+                } else {
+                  names.push(el.name.getText(this.sourceFile));
+                }
+              }
+            }
+            const init = decl.initializer
+              ? this.convertExpression(decl.initializer)
+              : { kind: "LiteralExpr" as const, literalKind: "nil" as const, value: null, rawValue: "nil", span: this.getSpan(decl) };
+            statements.push({
+              kind: "DestructureBinding",
+              names,
+              isMut,
+              init,
+              span: this.getSpan(decl),
+            });
           }
         }
         continue;
@@ -920,6 +1063,28 @@ export class TsDecompiler {
           name: decl.name.text,
           isMut: isMut || !decl.initializer,
           typeAnnotation: decl.type ? this.convertTypeNode(decl.type) : null,
+          init,
+          span: this.getSpan(stmt),
+        };
+      } else if (decl && ts.isArrayBindingPattern(decl.name)) {
+        const isMut = (stmt.declarationList.flags & ts.NodeFlags.Const) === 0;
+        const names: string[] = [];
+        for (const el of decl.name.elements) {
+          if (ts.isBindingElement(el)) {
+            if (ts.isIdentifier(el.name)) {
+              names.push(el.name.text);
+            } else {
+              names.push(el.name.getText(this.sourceFile));
+            }
+          }
+        }
+        const init = decl.initializer
+          ? this.convertExpression(decl.initializer)
+          : { kind: "LiteralExpr" as const, literalKind: "nil" as const, value: null, rawValue: "nil", span: this.getSpan(decl) };
+        return {
+          kind: "DestructureBinding",
+          names,
+          isMut,
           init,
           span: this.getSpan(stmt),
         };
@@ -1041,25 +1206,21 @@ export class TsDecompiler {
             span: this.getSpan(stmt),
           };
         }
-        let binaryOp: BinaryOp | null = null;
-        if (opKind === ts.SyntaxKind.PlusEqualsToken) binaryOp = "+";
-        else if (opKind === ts.SyntaxKind.MinusEqualsToken) binaryOp = "-";
-        else if (opKind === ts.SyntaxKind.AsteriskEqualsToken) binaryOp = "*";
-        else if (opKind === ts.SyntaxKind.SlashEqualsToken) binaryOp = "/";
+        let assignOp: AssignOp | null = null;
+        if (opKind === ts.SyntaxKind.PlusEqualsToken) assignOp = "+=";
+        else if (opKind === ts.SyntaxKind.MinusEqualsToken) assignOp = "-=";
+        else if (opKind === ts.SyntaxKind.AsteriskEqualsToken) assignOp = "*=";
+        else if (opKind === ts.SyntaxKind.SlashEqualsToken) assignOp = "/=";
+        else if (opKind === ts.SyntaxKind.PercentEqualsToken) assignOp = "%=";
 
-        if (binaryOp) {
+        if (assignOp) {
           const target = this.convertExpression(stmt.expression.left);
           const operand = this.convertExpression(stmt.expression.right);
           return {
             kind: "AssignStmt",
             target,
-            value: {
-              kind: "BinaryExpr",
-              operator: binaryOp,
-              left: target,
-              right: operand,
-              span: this.getSpan(stmt.expression),
-            },
+            op: assignOp,
+            value: operand,
             span: this.getSpan(stmt),
           };
         }
@@ -1478,6 +1639,82 @@ export class TsDecompiler {
 
     // Call Expressions
     if (ts.isCallExpression(expr)) {
+      // Check for Math builtins (min, max, hypot, clamp, etc.)
+      if (
+        ts.isPropertyAccessExpression(expr.expression) &&
+        ts.isIdentifier(expr.expression.expression) &&
+        expr.expression.expression.text === "Math"
+      ) {
+        const fnName = expr.expression.name.text;
+
+        // Check for clamp pattern 1: Math.max(min, Math.min(max, val))
+        if (fnName === "max" && expr.arguments.length === 2) {
+          const second = expr.arguments[1];
+          if (
+            ts.isCallExpression(second) &&
+            ts.isPropertyAccessExpression(second.expression) &&
+            ts.isIdentifier(second.expression.expression) &&
+            second.expression.expression.text === "Math" &&
+            second.expression.name.text === "min" &&
+            second.arguments.length === 2
+          ) {
+            const minVal = this.convertExpression(expr.arguments[0]);
+            const maxVal = this.convertExpression(second.arguments[0]);
+            const val = this.convertExpression(second.arguments[1]);
+            return {
+              kind: "CallExpr",
+              callee: {
+                kind: "IdentifierExpr",
+                name: "clamp",
+                span: this.getSpan(expr.expression),
+              },
+              args: [val, minVal, maxVal],
+              span: this.getSpan(expr),
+            };
+          }
+        }
+
+        // Check for clamp pattern 2: Math.min(Math.max(val, min), max)
+        if (fnName === "min" && expr.arguments.length === 2) {
+          const first = expr.arguments[0];
+          if (
+            ts.isCallExpression(first) &&
+            ts.isPropertyAccessExpression(first.expression) &&
+            ts.isIdentifier(first.expression.expression) &&
+            first.expression.expression.text === "Math" &&
+            first.expression.name.text === "max" &&
+            first.arguments.length === 2
+          ) {
+            const val = this.convertExpression(first.arguments[0]);
+            const minVal = this.convertExpression(first.arguments[1]);
+            const maxVal = this.convertExpression(expr.arguments[1]);
+            return {
+              kind: "CallExpr",
+              callee: {
+                kind: "IdentifierExpr",
+                name: "clamp",
+                span: this.getSpan(expr.expression),
+              },
+              args: [val, minVal, maxVal],
+              span: this.getSpan(expr),
+            };
+          }
+        }
+
+        if (TS_MATH_BUILTINS.has(fnName)) {
+          return {
+            kind: "CallExpr",
+            callee: {
+              kind: "IdentifierExpr",
+              name: fnName,
+              span: this.getSpan(expr.expression),
+            },
+            args: expr.arguments.map((a) => this.convertExpression(a)),
+            span: this.getSpan(expr),
+          };
+        }
+      }
+
       return {
         kind: "CallExpr",
         callee: this.convertExpression(expr.expression),
