@@ -1,6 +1,6 @@
 {
   "name": "ail",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
   "type": "module",
   "main": "./src/index.ts",
@@ -13,10 +13,13 @@
     "test:watch": "vitest",
     "check": "tsc --noEmit",
     "format": "biome format --write .",
-    "lint": "biome check ."
+    "lint": "biome check .",
+    "verify:tokenomics": "tsx ./bin/ail.ts verify-tokenomics examples --check-drift",
+    "package:vscode": "cd editors/vscode && bunx @vscode/vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
     "commander": "^15.0.0",
+    "js-tiktoken": "^1.0.21",
     "parse5": "^8.0.1",
     "postcss": "^8.5.29",
     "typescript": "^5.8.2",
