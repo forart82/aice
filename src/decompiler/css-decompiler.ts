@@ -8,7 +8,7 @@
  */
 
 import postcss from "postcss";
-import type { Module, StyleDecl, StyleProperty } from "../core/ast.js";
+import type { ImportDecl, Module, StyleDecl, StyleProperty } from "../core/ast.js";
 import { emptySpan } from "../core/span.js";
 import { CstTriviaTable } from "../core/trivia.js";
 
@@ -24,7 +24,7 @@ export class CssDecompiler {
 
   decompile(): { ast: Module; trivia: CstTriviaTable } {
     const root = postcss.parse(this.source, { from: this.filePath });
-    const items: StyleDecl[] = [];
+    const items: (StyleDecl | ImportDecl)[] = [];
 
     const cleanModPath = this.filePath
       .replace(/^(\.\/|\/)/, "")
@@ -36,6 +36,17 @@ export class CssDecompiler {
     for (const node of root.nodes) {
       if (node.type === "comment") {
         pendingComment = node.text.trim();
+        continue;
+      }
+
+      if (node.type === "atrule" && node.name === "import") {
+        const cleanSource = node.params.trim().replace(/^['"]|['"]$/g, "");
+        items.push({
+          kind: "ImportDecl",
+          source: cleanSource,
+          specifiers: [],
+          span: emptySpan(this.filePath),
+        });
         continue;
       }
 

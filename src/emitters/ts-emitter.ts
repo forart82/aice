@@ -36,6 +36,7 @@ export class TypeScriptEmitter {
   private currentClassMethods: Set<string> | null = null;
   private localScopeVars: Set<string>[] = [];
   private isCurrentMethodStatic = false;
+  private emittedTypeDecls: Set<string> = new Set();
 
   private isLocal(name: string): boolean {
     for (let i = this.localScopeVars.length - 1; i >= 0; i--) {
@@ -101,6 +102,7 @@ export class TypeScriptEmitter {
     this.currentClassMethods = null;
     this.localScopeVars = [];
     this.isCurrentMethodStatic = false;
+    this.emittedTypeDecls.clear();
     for (const item of mod.items) {
       if (item.kind === "ClassDecl") {
         this.classNames.add(item.name);
@@ -257,6 +259,7 @@ export class TypeScriptEmitter {
     }
 
     if (t.fields) {
+      this.emittedTypeDecls.add(t.name);
       this.ctx.writeLine(`export interface ${t.name} {`);
       this.ctx.indent();
       for (const f of t.fields) {
@@ -269,20 +272,22 @@ export class TypeScriptEmitter {
       this.ctx.dedent();
       this.ctx.writeLine("}");
 
-      this.ctx.writeLine();
-      const params = t.fields
-        .map((f) => {
-          const typeStr = this.emitTypeExpr(f.typeAnnotation);
-          const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
-          return `${f.name}: ${typeStr}${defStr}`;
-        })
-        .join(", ");
-      const props = t.fields.map((f) => f.name).join(", ");
-      this.ctx.writeLine(`export function ${t.name}(${params}): ${t.name} {`);
-      this.ctx.indent();
-      this.ctx.writeLine(props.length === 0 ? "return {};" : `return { ${props} };`);
-      this.ctx.dedent();
-      this.ctx.writeLine("}");
+      if (!t.name.endsWith("Props")) {
+        this.ctx.writeLine();
+        const params = t.fields
+          .map((f) => {
+            const typeStr = this.emitTypeExpr(f.typeAnnotation);
+            const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
+            return `${f.name}: ${typeStr}${defStr}`;
+          })
+          .join(", ");
+        const props = t.fields.map((f) => f.name).join(", ");
+        this.ctx.writeLine(`export function ${t.name}(${params}): ${t.name} {`);
+        this.ctx.indent();
+        this.ctx.writeLine(props.length === 0 ? "return {};" : `return { ${props} };`);
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+      }
       this.ctx.emitTrailingTrivia(nodeId);
     }
   }
@@ -760,6 +765,9 @@ export class TypeScriptEmitter {
 
       case "UnaryExpr": {
         const operand = this.emitExpr(expr.operand);
+        if (expr.operator === "...") {
+          return `...${operand}`;
+        }
         const op = expr.operator === "not" ? "!" : expr.operator;
         return `${op}(${operand})`;
       }
@@ -988,14 +996,16 @@ export class TypeScriptEmitter {
 
     if (comp.params.length > 0) {
       const propsInterface = `${comp.name}Props`;
-      this.ctx.writeLine(`export interface ${propsInterface} {`);
-      this.ctx.indent();
-      for (const p of comp.params) {
-        this.ctx.writeLine(`${p.name}: ${this.emitTypeExpr(p.typeAnnotation)};`);
+      if (!this.emittedTypeDecls.has(propsInterface)) {
+        this.ctx.writeLine(`export interface ${propsInterface} {`);
+        this.ctx.indent();
+        for (const p of comp.params) {
+          this.ctx.writeLine(`${p.name}: ${this.emitTypeExpr(p.typeAnnotation)};`);
+        }
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+        this.ctx.writeLine();
       }
-      this.ctx.dedent();
-      this.ctx.writeLine("}");
-      this.ctx.writeLine();
 
       this.ctx.writeLine(
         `export function ${comp.name}({ ${comp.params.map((p) => p.name).join(", ")} }: ${propsInterface}) {`,

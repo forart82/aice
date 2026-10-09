@@ -259,24 +259,26 @@ export class Parser {
   }
 
   private parseModulePath(): string {
-    let path = this.consume("IDENT", "Expected module identifier").value;
+    let path = this.isIdentOrKeyword(this.current())
+      ? this.advance().value
+      : this.consume("IDENT", "Expected module identifier").value;
     while (
       this.check("SLASH") ||
       this.check("DOT") ||
       this.check("MINUS") ||
-      this.check("IDENT")
+      this.isIdentOrKeyword(this.current())
     ) {
       if (this.check("SLASH")) {
         this.advance();
-        const seg = this.check("IDENT") ? this.advance().value : "";
+        const seg = this.isIdentOrKeyword(this.current()) ? this.advance().value : "";
         path += `/${seg}`;
       } else if (this.check("DOT")) {
         this.advance();
-        const seg = this.check("IDENT") ? this.advance().value : "";
+        const seg = this.isIdentOrKeyword(this.current()) ? this.advance().value : "";
         path += `.${seg}`;
       } else if (this.check("MINUS")) {
         this.advance();
-        const seg = this.check("IDENT") ? this.advance().value : "";
+        const seg = this.isIdentOrKeyword(this.current()) ? this.advance().value : "";
         path += `-${seg}`;
       } else {
         path += this.advance().value;
@@ -2197,12 +2199,23 @@ export class Parser {
       };
     }
 
-    // 5. Array Literal: [ item1, item2 ]
+    // 5. Array Literal: [ item1, item2, ...spread ]
     if (tok.kind === "LBRACKET") {
       this.advance();
       const elements: Expr[] = [];
       while (!this.check("RBRACKET") && !this.check("EOF")) {
-        elements.push(this.parseExpr());
+        if (this.check("ELLIPSIS")) {
+          const spreadTok = this.advance();
+          const target = this.parseExpr();
+          elements.push({
+            kind: "UnaryExpr",
+            operator: "...",
+            operand: target,
+            span: mergeSpans(spreadTok.span, target.span),
+          });
+        } else {
+          elements.push(this.parseExpr());
+        }
         if (this.check("COMMA")) this.advance();
       }
       const endSpan = this.consume("RBRACKET").span;

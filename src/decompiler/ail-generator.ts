@@ -145,6 +145,11 @@ export class AilGenerator {
     const nodeId = `import:${imp.source}`;
     this.emitLeadingTrivia(nodeId);
 
+    if (imp.specifiers.length === 0) {
+      this.writeLine(`import "${imp.source}"`);
+      return;
+    }
+
     if (imp.specifiers.length === 1 && imp.specifiers[0].isWildcard) {
       this.writeLine(`from "${imp.source}" import * as ${imp.specifiers[0].alias ?? "mod"}`);
       return;
@@ -599,6 +604,9 @@ export class AilGenerator {
         return `${this.formatExpr(expr.left)} ${op} ${this.formatExpr(expr.right)}`;
       }
       case "UnaryExpr": {
+        if (expr.operator === "...") {
+          return `...${this.formatExpr(expr.operand)}`;
+        }
         const op =
           expr.operator === "!" ? "not " : expr.operator === "not" ? "not " : expr.operator;
         const operand = this.formatExpr(expr.operand);

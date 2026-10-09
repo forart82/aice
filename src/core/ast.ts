@@ -386,7 +386,7 @@ export interface BinaryExpr {
 
 export interface UnaryExpr {
   kind: "UnaryExpr";
-  operator: "not" | "-" | "!";
+  operator: "not" | "-" | "!" | "...";
   operand: Expr;
   span: Span;
 }

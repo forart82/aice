@@ -50,8 +50,9 @@ export class HtmlDecompiler {
       .replace(/\.html$/, "")
       .replace(/\.ail$/, "");
 
-    // Capitalize component name
-    const compName = cleanModPath.charAt(0).toUpperCase() + cleanModPath.slice(1);
+    // Capitalize component name from file basename
+    const baseName = this.filePath.split("/").pop()?.replace(/\.html$/, "").replace(/\.ail$/, "") ?? "page";
+    const compName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
 
     const comp: ComponentDecl = {
       kind: "ComponentDecl",
@@ -104,17 +105,40 @@ export class HtmlDecompiler {
     const tag = node.nodeName.toLowerCase();
     const attributes: { name: string; value: Expr; span: Span }[] = [];
 
+    const BOOLEAN_ATTRS = new Set([
+      "defer",
+      "async",
+      "disabled",
+      "readonly",
+      "checked",
+      "required",
+      "autofocus",
+      "novalidate",
+      "multiple",
+      "hidden",
+      "selected",
+    ]);
+
     if (node.attrs) {
       for (const attr of node.attrs) {
+        const isBool = BOOLEAN_ATTRS.has(attr.name.toLowerCase()) && (attr.value === "" || attr.value === attr.name);
         attributes.push({
           name: attr.name,
-          value: {
-            kind: "LiteralExpr",
-            literalKind: "string",
-            value: attr.value,
-            rawValue: JSON.stringify(attr.value),
-            span: emptySpan(this.filePath),
-          },
+          value: isBool
+            ? {
+                kind: "LiteralExpr",
+                literalKind: "boolean",
+                value: true,
+                rawValue: "true",
+                span: emptySpan(this.filePath),
+              }
+            : {
+                kind: "LiteralExpr",
+                literalKind: "string",
+                value: attr.value,
+                rawValue: JSON.stringify(attr.value),
+                span: emptySpan(this.filePath),
+              },
           span: emptySpan(this.filePath),
         });
       }

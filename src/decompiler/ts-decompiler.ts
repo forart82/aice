@@ -1802,7 +1802,12 @@ export class TsDecompiler {
 
     // Spread Element (...expr)
     if (ts.isSpreadElement(expr)) {
-      return this.convertExpression(expr.expression);
+      return {
+        kind: "UnaryExpr",
+        operator: "...",
+        operand: this.convertExpression(expr.expression),
+        span: this.getSpan(expr),
+      };
     }
 
     // Arrow Function
@@ -1906,6 +1911,10 @@ export class TsDecompiler {
       }
       case ts.SyntaxKind.UnionType: {
         const union = node as ts.UnionTypeNode;
+        if (union.types.length === 2) {
+          const resType = this.tryExtractResultType(union.types[0], union.types[1], node);
+          if (resType) return resType;
+        }
         const nonNulls = union.types.filter(
           (t) =>
             t.kind !== ts.SyntaxKind.NullKeyword &&
@@ -1974,6 +1983,46 @@ export class TsDecompiler {
         return { kind: "NamedType", name: text, span: this.getSpan(node) };
       }
     }
+  }
+
+  private tryExtractResultType(t0: ts.TypeNode, t1: ts.TypeNode, node: ts.Node): TypeExpr | null {
+    if (!ts.isTypeLiteralNode(t0) || !ts.isTypeLiteralNode(t1)) return null;
+
+    const inspect = (tl: ts.TypeLiteralNode) => {
+      let isOk: boolean | null = null;
+      let valNode: ts.TypeNode | null = null;
+      for (const m of tl.members) {
+        if (ts.isPropertySignature(m) && m.name && ts.isIdentifier(m.name)) {
+          if (m.name.text === "ok" && m.type && ts.isLiteralTypeNode(m.type)) {
+            if (m.type.literal.kind === ts.SyntaxKind.TrueKeyword) isOk = true;
+            if (m.type.literal.kind === ts.SyntaxKind.FalseKeyword) isOk = false;
+          }
+          if (m.name.text === "value" && m.type) valNode = m.type;
+          if (m.name.text === "error" && m.type) valNode = m.type;
+        }
+      }
+      return { isOk, valNode };
+    };
+
+    const r0 = inspect(t0);
+    const r1 = inspect(t1);
+    if (r0.isOk === true && r1.isOk === false && r0.valNode && r1.valNode) {
+      return {
+        kind: "ResultType",
+        okType: this.convertTypeNode(r0.valNode),
+        errType: this.convertTypeNode(r1.valNode),
+        span: this.getSpan(node),
+      };
+    }
+    if (r0.isOk === false && r1.isOk === true && r0.valNode && r1.valNode) {
+      return {
+        kind: "ResultType",
+        okType: this.convertTypeNode(r1.valNode),
+        errType: this.convertTypeNode(r0.valNode),
+        span: this.getSpan(node),
+      };
+    }
+    return null;
   }
 
   private makePrimitive(primitive: PrimitiveType["primitive"] | "any", node?: ts.Node): TypeExpr {
