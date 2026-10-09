@@ -3,3 +3,4 @@
  */
 
 export * from "./concurrency-pool.js";
+export * from "./multi-line-reporter.js";

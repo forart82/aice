@@ -46,6 +46,20 @@ export interface PoolStats {
   throughput: number;
 }
 
+export interface ConcurrencyReporter {
+  updateWorker: (
+    workerId: number,
+    status: "IDLE" | "COMPILING" | "DECOMPILING" | "SHADOWING" | "DONE" | "ERROR",
+    file?: string,
+  ) => void;
+  taskCompleted: (
+    workerId: number,
+    file: string,
+    metrics?: { targetTokens?: number; ailTokens?: number },
+  ) => void;
+  taskFailed: (workerId: number, file: string, error: string) => void;
+}
+
 export class ConcurrencyPool<T = unknown, R = unknown> {
   readonly concurrency: number;
   private readonly options: ConcurrencyPoolOptions<T, R>;
@@ -134,6 +148,95 @@ export class ConcurrencyPool<T = unknown, R = unknown> {
       elapsedMs: this.elapsedMs,
       throughput: this.throughput,
     };
+  }
+
+  public attachReporter(
+    reporter: ConcurrencyReporter,
+    mapper?: {
+      getFile?: (task: TaskItem<T, R>) => string;
+      getStatus?: (
+        task: TaskItem<T, R>,
+      ) => "IDLE" | "COMPILING" | "DECOMPILING" | "SHADOWING" | "DONE" | "ERROR";
+      getMetrics?: (
+        result: R,
+        task: TaskItem<T, R>,
+      ) => { targetTokens?: number; ailTokens?: number } | undefined;
+    },
+  ): this {
+    const prevStart = this.options.onWorkerStart;
+    const prevComplete = this.options.onWorkerComplete;
+    const prevError = this.options.onWorkerError;
+
+    this.options.onWorkerStart = (workerId, task) => {
+      prevStart?.(workerId, task);
+      const file = mapper?.getFile
+        ? mapper.getFile(task)
+        : typeof task.data === "string"
+          ? task.data
+          : typeof (task.data as { file?: unknown } | null | undefined)?.file === "string"
+            ? (task.data as { file: string }).file
+            : task.id;
+      const statusCandidate = (task.data as { status?: unknown } | null | undefined)?.status;
+      const status = mapper?.getStatus
+        ? mapper.getStatus(task)
+        : statusCandidate === "IDLE" ||
+            statusCandidate === "COMPILING" ||
+            statusCandidate === "DECOMPILING" ||
+            statusCandidate === "SHADOWING" ||
+            statusCandidate === "DONE" ||
+            statusCandidate === "ERROR"
+          ? statusCandidate
+          : "COMPILING";
+      reporter.updateWorker(workerId, status, file);
+    };
+
+    this.options.onWorkerComplete = (workerId, task, result, durationMs) => {
+      prevComplete?.(workerId, task, result, durationMs);
+      const file = mapper?.getFile
+        ? mapper.getFile(task)
+        : typeof task.data === "string"
+          ? task.data
+          : typeof (task.data as { file?: unknown } | null | undefined)?.file === "string"
+            ? (task.data as { file: string }).file
+            : task.id;
+      const resObj = result as
+        | {
+            metrics?: { targetTokens?: number; ailTokens?: number };
+            targetTokens?: number;
+            ailTokens?: number;
+          }
+        | null
+        | undefined;
+      let metrics: { targetTokens?: number; ailTokens?: number } | undefined;
+      if (mapper?.getMetrics) {
+        metrics = mapper.getMetrics(result, task);
+      } else if (resObj?.metrics) {
+        metrics = resObj.metrics;
+      } else if (
+        typeof resObj?.targetTokens === "number" ||
+        typeof resObj?.ailTokens === "number"
+      ) {
+        metrics = {
+          targetTokens: resObj.targetTokens,
+          ailTokens: resObj.ailTokens,
+        };
+      }
+      reporter.taskCompleted(workerId, file, metrics);
+    };
+
+    this.options.onWorkerError = (workerId, task, error, durationMs) => {
+      prevError?.(workerId, task, error, durationMs);
+      const file = mapper?.getFile
+        ? mapper.getFile(task)
+        : typeof task.data === "string"
+          ? task.data
+          : typeof (task.data as { file?: unknown } | null | undefined)?.file === "string"
+            ? (task.data as { file: string }).file
+            : task.id;
+      reporter.taskFailed(workerId, file, error.message);
+    };
+
+    return this;
   }
 
   public abort(reason?: string | Error): void {
