@@ -1,221 +1,559 @@
 import { describe, expect, it } from "vitest";
+import { parse } from "../../src/core/parser.js";
 import {
-  compileAil,
-  emitCss,
-  emitHtml,
-  emitPython,
-  emitTypeScript,
-  parseAil,
-} from "../../src/index.ts";
+  detectTargetFromPath,
+  emitTarget,
+  getTargetOutputPath,
+  lowerConstructor,
+  lowerMethodCall,
+  lowerPropertyAccess,
+} from "../../src/emitters/index.js";
 
-function parse(src: string) {
-  const { document, triviaTable } = parseAil(src);
-  if (!document) throw new Error("Failed to parse AIL source");
-  return { document, triviaTable };
-}
-
-describe("AIL Multi-Target Forward Emitters & Lowering (Step 5)", () => {
-  describe("TypeScript & TSX Emitter", () => {
-    it("emits interfaces and types", () => {
-      const src = `
-        (@module app/models
-          (: User (% id !s age !i active !b))
-          (: Status (| !s !nil))
-        )
-      `;
-      const { document } = parse(src);
-      const code = emitTypeScript(document);
-
-      expect(code).toContain("export interface User {");
-      expect(code).toContain("id: string;");
-      expect(code).toContain("age: number;");
-      expect(code).toContain("active: boolean;");
-      expect(code).toContain("export type Status = string | null;");
+describe("Step 5: Multi-Language Forward Emitters & Lowering", () => {
+  describe("Path & Target Detection", () => {
+    it("detects targets correctly from file extensions", () => {
+      expect(detectTargetFromPath("auth.ts.ail")).toBe("typescript");
+      expect(detectTargetFromPath("button.tsx.ail")).toBe("tsx");
+      expect(detectTargetFromPath("server.py.ail")).toBe("python");
+      expect(detectTargetFromPath("index.html.ail")).toBe("html");
+      expect(detectTargetFromPath("theme.css.ail")).toBe("css");
     });
 
-    it("lowers canonical string and collection primitives (Pillar 1 & 3)", () => {
-      const src = `
-        (@module app/utils
-          (! transform (-> (text !s items [!i]) !s)
-            (do
-              (:= sub (str:slice text 0 5))
-              (:= char (str:at text 1))
-              (:= totalLen (+ (str:len text) (arr:len items)))
-              (:= slicedArr (arr:slice items 0 2))
-              (:= nextArr (arr:append items 99))
-              sub
-            )
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const code = emitTypeScript(document);
+    it("derives output target paths by stripping .ail", () => {
+      expect(getTargetOutputPath("src/auth.ts.ail")).toBe("src/auth.ts");
+      expect(getTargetOutputPath("components/Card.tsx.ail")).toBe("components/Card.tsx");
+      expect(getTargetOutputPath("backend/main.py.ail")).toBe("backend/main.py");
+    });
+  });
 
-      expect(code).toContain("text.slice(0, 5)");
-      expect(code).toContain("text.at(1)");
-      expect(code).toContain("text.length + items.length");
-      expect(code).toContain("items.slice(0, 2)");
-      expect(code).toContain("[...items, 99]");
-      expect(code).toContain("return sub;");
+  describe("Canonical Standard Library (CSL) Rewriter & Lowering", () => {
+    it("lowers property accesses (e.g. .len)", () => {
+      const pyLen = lowerPropertyAccess("name", "len", "python");
+      expect(pyLen.isLowered).toBe(true);
+      expect(pyLen.code).toBe("len(name)");
+
+      const tsLen = lowerPropertyAccess("name", "len", "typescript");
+      expect(tsLen.isLowered).toBe(true);
+      expect(tsLen.code).toBe("name.length");
     });
 
-    it("lowers fallible Result unpacking (? expr) to defensive guards", () => {
-      const src = `
-        (@module app/service
-          (: Account (% id !s balance !f))
-          (! fetchAccount (-> (id !s) Result[Account, !s])
-            (% ok true value (% id id balance 0.0))
-          )
-          (! loadUser (-> (id !s) Result[Account, !s])
-            (do
-              (:= acc (? (fetchAccount id)))
-              acc
-            )
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const code = emitTypeScript(document);
+    it("lowers string methods for Python and TypeScript", () => {
+      expect(lowerMethodCall("s", "slice", ["0", "10"], "python").code).toBe("s[0:10]");
+      expect(lowerMethodCall("s", "slice", ["0", "10"], "typescript").code).toBe("s.slice(0, 10)");
 
-      expect(code).toContain("export type Result<T, E> =");
-      expect(code).toContain("const __res_0 = fetchAccount(id);");
-      expect(code).toContain("if (!__res_0.ok) return __res_0;");
-      expect(code).toContain("const acc = __res_0.value;");
-      expect(code).toContain("return acc;");
+      expect(lowerMethodCall("s", "concat", ["suffix"], "python").code).toBe("s + suffix");
+      expect(lowerMethodCall("s", "concat", ["suffix"], "typescript").code).toBe("s + suffix");
+
+      expect(lowerMethodCall("s", "toInt", [], "python").code).toBe("int(s)");
+      expect(lowerMethodCall("s", "toInt", [], "typescript").code).toBe("Number.parseInt(s, 10)");
     });
 
-    it("emits React 19 TSX components and layout trees", () => {
-      const src = `
-        (@module ui/card
-          (# Card (% title !s)
-            (< div (. class "card shadow-sm" .)
-              (< h2 !str "Header" >)
-              (< p (. id "title-p" .) (!val title) >)
-            >)
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const code = emitTypeScript(document);
+    it("lowers algebraic constructors (Ok, Err, Some)", () => {
+      expect(lowerConstructor("Ok", ["42"], "typescript").code).toBe("{ ok: true, value: 42 }");
+      expect(lowerConstructor("Err", ['"Bad"'], "typescript").code).toBe(
+        '{ ok: false, error: "Bad" }',
+      );
+      expect(lowerConstructor("Some", ["val"], "typescript").code).toBe("val");
 
-      expect(code).toContain("export interface CardProps {");
-      expect(code).toContain("title: string;");
-      expect(code).toContain("export function Card({ title }: CardProps) {");
-      expect(code).toContain('className="card shadow-sm"');
-      expect(code).toContain("<h2>Header</h2>");
-      expect(code).toContain('<p id="title-p">{title}</p>');
+      expect(lowerConstructor("Ok", ["42"], "python").code).toBe('{"ok": True, "value": 42}');
+      expect(lowerConstructor("Err", ['"Bad"'], "python").code).toBe(
+        '{"ok": False, "error": "Bad"}',
+      );
+    });
+  });
+
+  describe("TypeScript Emitter", () => {
+    it("emits interfaces and functions with types", () => {
+      const src = `type User:
+  id: str
+  score: int
+
+fn getScore(u: User) -> int:
+  ret u.score`;
+
+      const mod = parse(src, "user.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("export interface User {");
+      expect(out).toContain("id: string;");
+      expect(out).toContain("score: number;");
+      expect(out).toContain("export function getScore(u: User): number {");
+      expect(out).toContain("return u.score;");
+    });
+
+    it("emits control flow and pattern matching in TypeScript", () => {
+      const src = `fn categorize(score: int) -> str:
+  if score > 100:
+    ret "high"
+  elif score > 50:
+    ret "mid"
+  else:
+    ret "low"`;
+
+      const mod = parse(src, "flow.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("if ((score > 100)) {");
+      expect(out).toContain("} else if ((score > 50)) {");
+      expect(out).toContain("} else {");
+    });
+
+    it("emits algebraic data types (enums)", () => {
+      const src = `enum Shape:
+  Circle(float)
+  Square(float)
+  Point`;
+
+      const mod = parse(src, "shape.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("export type Shape =");
+      expect(out).toContain('{ kind: "Circle"; item0: number }');
+      expect(out).toContain('{ kind: "Point" }');
+    });
+
+    it("emits object property shorthand in TypeScript records", () => {
+      const src = `fn createPoint(x: int, y: int) -> any:
+  let z = 10
+  ret { x, y, extra: z }`;
+
+      const mod = parse(src, "point.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("return { x, y, extra: z };");
+    });
+
+    it("lowers positional struct constructors and emits constructor factory in TypeScript", () => {
+      const src = `type Money:
+  amountInCents: int
+  currencyCode: str
+
+fn create(amt: int, cur: str) -> Money:
+  ret Money(amt, cur)`;
+
+      const mod = parse(src, "money.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("export interface Money {");
+      expect(out).toContain(
+        "export function Money(amountInCents: number, currencyCode: string): Money {",
+      );
+      expect(out).toContain("return { amountInCents, currencyCode };");
+      expect(out).toContain("return { amountInCents: amt, currencyCode: cur };");
+    });
+
+    it("emits single-expression functions in TypeScript", () => {
+      const src = `fn add(a: int, b: int) -> int = a + b`;
+      const mod = parse(src, "math.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("export function add(a: number, b: number): number {");
+      expect(out).toContain("return (a + b);");
+    });
+
+    it("expands struct spreads to explicit fields in TypeScript", () => {
+      const src = `type User:
+  id: str
+  name: str
+  age: int
+
+fn updateAge(u: User, newAge: int) -> User:
+  ret { ...u, age: newAge }`;
+
+      const mod = parse(src, "user.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("return { id: u.id, name: u.name, age: newAge };");
+    });
+
+    it("emits native object spread when target type is unconstrained in TypeScript", () => {
+      const src = `fn merge(base: any, extra: int) -> any:
+  ret { ...base, count: extra }`;
+
+      const mod = parse(src, "merge.ts.ail");
+      const out = emitTarget(mod, "typescript");
+
+      expect(out).toContain("return { ...base, count: extra };");
+    });
+  });
+
+  describe("React TSX Emitter", () => {
+    it("emits JSX layout components with attributes and className", () => {
+      const src = `component AlertBanner(message: str):
+  div(class: "banner", role: "alert"):
+    span: "Warning"
+    p: message`;
+
+      const mod = parse(src, "banner.tsx.ail");
+      const out = emitTarget(mod, "tsx");
+
+      expect(out).toContain("export interface AlertBannerProps {");
+      expect(out).toContain("message: string;");
+      expect(out).toContain("export function AlertBanner({ message }: AlertBannerProps) {");
+      expect(out).toContain('<div className="banner" role="alert">');
+      expect(out).toContain("<span>Warning</span>");
+      expect(out).toContain("<p>{message}</p>");
+      expect(out).toContain("</div>");
+    });
+  });
+
+  describe("Python Emitter", () => {
+    it("emits TypedDict and def functions with Python idioms", () => {
+      const src = `type Session:
+  token: str
+  expires: int
+
+fn isExpired(s: Session, now: int) -> bool:
+  ret s.expires < now`;
+
+      const mod = parse(src, "session.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain("from typing import Any, Optional, Union, TypedDict");
+      expect(out).toContain("class Session(TypedDict):");
+      expect(out).toContain("token: str");
+      expect(out).toContain("expires: int");
+      expect(out).toContain("def isExpired(s: Session, now: int) -> bool:");
+      expect(out).toContain("return (s.expires < now)");
+    });
+
+    it("emits match / case statements in Python 3.12+", () => {
+      const src = `fn describe(n: int) -> str:
+  match n:
+    case 1 => "one"
+    case 2 => "two"
+    case _ => "other"`;
+
+      const mod = parse(src, "match.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain("match n:");
+      expect(out).toContain("case 1:");
+      expect(out).toContain('return "one"');
+      expect(out).toContain("case _:");
+      expect(out).toContain('return "other"');
+    });
+
+    it("emits dictionary from record property shorthand in Python", () => {
+      const src = `fn createPoint(x: int, y: int) -> any:
+  let z = 10
+  ret { x, y, extra: z }`;
+
+      const mod = parse(src, "point.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain('return {"x": x, "y": y, "extra": z}');
+    });
+
+    it("lowers positional struct constructors to dictionary literals in Python", () => {
+      const src = `type Money:
+  amountInCents: int
+  currencyCode: str
+
+fn create(amt: int, cur: str) -> Money:
+  ret Money(amt, cur)`;
+
+      const mod = parse(src, "money.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain("class Money(TypedDict):");
+      expect(out).toContain('return {"amountInCents": amt, "currencyCode": cur}');
+    });
+
+    it("emits single-expression functions in Python", () => {
+      const src = `fn add(a: int, b: int) -> int = a + b`;
+      const mod = parse(src, "math.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain("def add(a: int, b: int) -> int:");
+      expect(out).toContain("return (a + b)");
+    });
+
+    it("expands struct spreads to explicit fields in Python", () => {
+      const src = `type User:
+  id: str
+  name: str
+  age: int
+
+fn updateAge(u: User, newAge: int) -> User:
+  ret { ...u, age: newAge }`;
+
+      const mod = parse(src, "user.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain('return {"id": u.id, "name": u.name, "age": newAge}');
+    });
+
+    it("emits kwargs spread when target type is unconstrained in Python", () => {
+      const src = `fn merge(base: any, extra: int) -> any:
+  ret { ...base, count: extra }`;
+
+      const mod = parse(src, "merge.py.ail");
+      const out = emitTarget(mod, "python");
+
+      expect(out).toContain('return {**base, "count": extra}');
     });
   });
 
   describe("HTML5 Emitter", () => {
-    it("emits clean HTML5 document with void element support", () => {
-      const src = `
-        (@module site/index
-          (# Page
-            (< html (. lang "en" .)
-              (< head
-                (< meta (. charset "UTF-8" .) >)
-                (< title !str "AIL Showcase" >)
-              >)
-              (< body
-                (< h1 !str "Welcome to AIL" >)
-                (< img (. src "/logo.svg" alt "Logo" .) >)
-              >)
-            >)
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const html = emitHtml(document);
+    it("emits DOCTYPE and void elements without closing tags", () => {
+      const src = `component Page():
+  html(lang: "en"):
+    head:
+      meta(charset: "utf-8")
+      title: "Test Page"
+    body:
+      h1: "Hello World"`;
 
-      expect(html).toContain("<!DOCTYPE html>");
-      expect(html).toContain('<html lang="en">');
-      expect(html).toContain('<meta charset="UTF-8">');
-      expect(html).not.toContain("</meta>");
-      expect(html).toContain("<title>AIL Showcase</title>");
-      expect(html).toContain("<h1>Welcome to AIL</h1>");
-      expect(html).toContain('<img src="/logo.svg" alt="Logo">');
-      expect(html).not.toContain("</img>");
-      expect(html).toContain("</html>");
+      const mod = parse(src, "page.html.ail");
+      const out = emitTarget(mod, "html");
+
+      expect(out).toContain("<!DOCTYPE html>");
+      expect(out).toContain('<html lang="en">');
+      expect(out).toContain('<meta charset="utf-8">');
+      expect(out).toContain("<title>Test Page</title>");
+      expect(out).toContain("<h1>Hello World</h1>");
+      expect(out).not.toContain("</meta>");
     });
   });
 
-  describe("CSS Emitter", () => {
-    it("emits formatted CSS rules from style declarations", () => {
-      const src = `
-        (@module styles/theme
-          (& btn
-            (.
-              display "inline-flex"
-              padding "8px 16px"
-              background "#0070f3"
-              color "#ffffff"
-              border-radius "4px"
-            .)
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const css = emitCss(document);
+  describe("CSS3 Emitter", () => {
+    it("emits tag and class rules with kebab-case conversions", () => {
+      const src = `style body:
+  margin: "0"
+  background: "#000"
 
-      expect(css).toContain(".btn {");
-      expect(css).toContain("display: inline-flex;");
-      expect(css).toContain("padding: 8px 16px;");
-      expect(css).toContain("background: #0070f3;");
-      expect(css).toContain("color: #ffffff;");
-      expect(css).toContain("border-radius: 4px;");
-      expect(css).toContain("}");
+style primary_button:
+  border_radius: "4px"
+  color: "#fff"`;
+
+      const mod = parse(src, "theme.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toContain("body {");
+      expect(out).toContain("margin: 0;");
+      expect(out).toContain(".primary-button {");
+      expect(out).toContain("border-radius: 4px;");
+      expect(out).toContain("color: #fff;");
+    });
+
+    it("emits unquoted CSS rules, colors, units, and custom variables cleanly", () => {
+      const src = `style body:
+  margin: 0
+  padding: 0
+  background: #0f172a
+  color: #f8fafc
+
+style card_container:
+  padding: 1.5rem
+  border_radius: 0.5rem
+  border_bottom: 1px solid #334155
+  box_shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1)
+  --custom-accent: #3b82f6`;
+
+      const mod = parse(src, "theme.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toBe(`body {
+  margin: 0;
+  padding: 0;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.card-container {
+  padding: 1.5rem;
+  border-radius: 0.5rem;
+  border-bottom: 1px solid #334155;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --custom-accent: #3b82f6;
+}
+`);
+    });
+
+    it("emits token namespace declarations into CSS custom properties", () => {
+      const src = `tokens color.slate in root_variables:
+  950: #020617, 900: #0f172a
+tokens spacing in root_variables: [0, 4, 8]px`;
+
+      const mod = parse(src, "tokens.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toContain(".root-variables {");
+      expect(out).toContain("--color-slate-950: #020617;");
+      expect(out).toContain("--color-slate-900: #0f172a;");
+      expect(out).toContain("--spacing-0: 0px;");
+      expect(out).toContain("--spacing-4: 4px;");
+      expect(out).toContain("--spacing-8: 8px;");
+    });
+
+    it("expands hyper-dense CSS property aliases into standard CSS properties", () => {
+      const src = `style .card: bg: #fff; rad: 8px; p: 16px; disp: flex
+style .hero: sh: 0 4px 6px #000; w: 100%; h: 100vh; fz: 1.5rem; fw: 700; c: #f8fafc; z: 10; cur: pointer; op: 0.9; trans: all 0.2s; anim: pulse 2s infinite; bb: 1px solid #333; fld: row; jc: space-between; ai: center; gap: 1rem`;
+
+      const mod = parse(src, "dense.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toContain(`.card {
+  background-color: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  display: flex;
+}`);
+
+      expect(out).toContain("box-shadow: 0 4px 6px #000;");
+      expect(out).toContain("width: 100%;");
+      expect(out).toContain("height: 100vh;");
+      expect(out).toContain("font-size: 1.5rem;");
+      expect(out).toContain("font-weight: 700;");
+      expect(out).toContain("color: #f8fafc;");
+      expect(out).toContain("z-index: 10;");
+      expect(out).toContain("cursor: pointer;");
+      expect(out).toContain("opacity: 0.9;");
+      expect(out).toContain("transition: all 0.2s;");
+      expect(out).toContain("animation: pulse 2s infinite;");
+      expect(out).toContain("border-bottom: 1px solid #333;");
+      expect(out).toContain("flex-direction: row;");
+      expect(out).toContain("justify-content: space-between;");
+      expect(out).toContain("align-items: center;");
+      expect(out).toContain("gap: 1rem;");
     });
   });
 
-  describe("Python 3.12+ Emitter", () => {
-    it("emits dataclasses, typed functions, and lowered primitives", () => {
-      const src = `
-        (@module server/calc
-          (: Point (% x !f y !f))
-          (! distance (-> (s !s items [!i]) !s)
-            (do
-              (:= sub (str:slice s 0 3))
-              (:= l (str:len s))
-              (:= arrLen (arr:len items))
-              (:= newArr (arr:append items 10))
-              sub
-            )
-          )
-        )
-      `;
-      const { document } = parse(src);
-      const py = emitPython(document);
+  describe("HTML & TSX Emmet Layout Emission", () => {
+    it("emits Emmet selector tags with class and id in HTML5", () => {
+      const src = `component Page():
+  header.top-navbar#main-header:
+    .navbar-brand:
+      span.brand-icon: "⚡"`;
 
-      expect(py).toContain("from dataclasses import dataclass");
-      expect(py).toContain("@dataclass\nclass Point:");
-      expect(py).toContain("x: float");
-      expect(py).toContain("y: float");
-      expect(py).toContain("def distance(s: str, items: list[int]) -> str:");
-      expect(py).toContain("sub = s[0:3]");
-      expect(py).toContain("l = len(s)");
-      expect(py).toContain("arrLen = len(items)");
-      expect(py).toContain("newArr = [*items, 10]");
-      expect(py).toContain("return sub");
+      const mod = parse(src, "page.html.ail");
+      const out = emitTarget(mod, "html");
+
+      expect(out).toContain('<header class="top-navbar" id="main-header">');
+      expect(out).toContain('<div class="navbar-brand">');
+      expect(out).toContain('<span class="brand-icon">⚡</span>');
+    });
+
+    it("emits Emmet selector tags with className and id in TSX", () => {
+      const src = `component Card(title: str):
+  .card-container#featured-card:
+    h2.card-title: title`;
+
+      const mod = parse(src, "Card.tsx.ail");
+      const out = emitTarget(mod, "tsx");
+
+      expect(out).toContain('<div className="card-container" id="featured-card">');
+      expect(out).toContain('<h2 className="card-title">{title}</h2>');
     });
   });
 
-  describe("compileAil Dispatcher", () => {
-    it("automatically dispatches to correct emitter based on filename", () => {
-      const srcTs = '(@module test (! hello (-> () !s) "world"))';
-      const resTs = compileAil(srcTs, "src/hello.ts.ail");
-      expect(resTs.targetLanguage).toBe("typescript");
-      expect(resTs.code).toContain('export function hello(): string {\n  return "world";\n}');
+  describe("Step 10: Automatic Block-Body Trailing Return Inference", () => {
+    it("emits return for trailing block expressions in TypeScript and Python", () => {
+      const src = `fn add(a: int, b: int) -> int:
+  let sum = a + b
+  sum`;
 
-      const srcPy = '(@module test (! hello (-> () !s) "world"))';
-      const resPy = compileAil(srcPy, "server/hello.py.ail");
-      expect(resPy.targetLanguage).toBe("python");
-      expect(resPy.code).toContain('def hello() -> str:\n    return "world"');
+      const mod = parse(src, "math.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+      const pyOut = emitTarget(mod, "python");
 
-      const srcCss = '(@module test (& card (. padding "12px" .)))';
-      const resCss = compileAil(srcCss, "styles/card.css.ail");
-      expect(resCss.targetLanguage).toBe("css");
-      expect(resCss.code).toContain(".card {\n  padding: 12px;\n}");
+      expect(tsOut).toContain("return sum;");
+      expect(pyOut).toContain("return sum");
+    });
+
+    it("emits return for conditional branches in TypeScript and Python", () => {
+      const src = `fn abs(x: int) -> int:
+  if x < 0:
+    -x
+  else:
+    x`;
+
+      const mod = parse(src, "math.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+      const pyOut = emitTarget(mod, "python");
+
+      expect(tsOut).toContain("return -(x);");
+      expect(tsOut).toContain("return x;");
+      expect(pyOut).toContain("return (-x)");
+      expect(pyOut).toContain("return x");
+    });
+
+    it("does not emit return for void functions", () => {
+      const src = `fn logItem(x: str) -> void:
+  print(x)`;
+
+      const mod = parse(src, "log.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+      const pyOut = emitTarget(mod, "python");
+
+      expect(tsOut).not.toContain("return print");
+      expect(tsOut).toContain("print(x);");
+      expect(pyOut).not.toContain("return print");
+      expect(pyOut).toContain("print(x)");
+    });
+  });
+
+  describe("Step 3: Compact Structs & Sigil Field Declarations", () => {
+    it("emits TypeScript interface and factory with optional fields and defaults", () => {
+      const src = `type User: id:!s, name:!s, age:!i = 0, active:!b = true`;
+      const mod = parse(src, "user.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("export interface User {");
+      expect(tsOut).toContain("id: string;");
+      expect(tsOut).toContain("name: string;");
+      expect(tsOut).toContain("age?: number;");
+      expect(tsOut).toContain("active?: boolean;");
+      expect(tsOut).toContain(
+        "export function User(id: string, name: string, age: number = 0, active: boolean = true): User {",
+      );
+      expect(tsOut).toContain("return { id, name, age, active };");
+    });
+
+    it("emits Python TypedDict with default values from single-line struct", () => {
+      const src = `type User: id:!s, name:!s, age:!i = 0`;
+      const mod = parse(src, "user.py.ail");
+      const pyOut = emitTarget(mod, "python");
+
+      expect(pyOut).toContain("class User(TypedDict):");
+      expect(pyOut).toContain("id: str");
+      expect(pyOut).toContain("name: str");
+      expect(pyOut).toContain("age: int = 0");
+    });
+  });
+
+  describe("Step 4: Expression-Bodied Functions & Universal Implicit Returns", () => {
+    it("emits single-line expression-bodied functions in all languages", () => {
+      const src = `fn add(a: int, b: int) -> int = a + b`;
+      const mod = parse(src, "calc.ail");
+
+      const tsOut = emitTarget(mod, "typescript");
+      const pyOut = emitTarget(mod, "python");
+      const rsOut = emitTarget(mod, "rust");
+      const goOut = emitTarget(mod, "go");
+
+      expect(tsOut).toContain("return (a + b);");
+      expect(pyOut).toContain("return (a + b)");
+      expect(rsOut).toContain("(a + b)");
+      expect(goOut).toContain("return (a + b)");
+    });
+
+    it("emits implicit returns in Rust if/else and Go if/else branches", () => {
+      const src = `fn abs(x: int) -> int:
+  if x < 0:
+    -x
+  else:
+    x`;
+      const mod = parse(src, "calc.ail");
+
+      const rsOut = emitTarget(mod, "rust");
+      const goOut = emitTarget(mod, "go");
+
+      expect(rsOut).toContain("-x");
+      expect(rsOut).toContain("x");
+      expect(goOut).toContain("return -x");
+      expect(goOut).toContain("return x");
     });
   });
 });

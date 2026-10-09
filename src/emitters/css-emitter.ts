@@ -1,96 +1,242 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: CSS3 Forward Emitter (Pillars 1, 2, 5)
- * Compiles AIL style declarations into clean, formatted CSS stylesheets.
+ * CSS3 Stylesheet Emitter for AIL 2.0.
+ * Conforms to Pillar 1 & 2 of docs/RESEARCH_SYNTHESIS.md.
  */
 
-import type {
-  AilDocumentNode,
-  AilFileNode,
-  AilModuleNode,
-  AilStyleDeclNode,
-  AilWorkspaceNode,
-} from "../core/ast.ts";
-import { EmitContext, type EmitOptions } from "./context.ts";
+import type { Module, StyleDecl } from "../core/ast.js";
+import { EmitterContext, type EmitterOptions } from "./context.js";
+
+const HTML_TAGS = new Set([
+  "html",
+  "body",
+  "div",
+  "span",
+  "p",
+  "a",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "ul",
+  "ol",
+  "li",
+  "table",
+  "tr",
+  "td",
+  "th",
+  "header",
+  "footer",
+  "nav",
+  "main",
+  "section",
+  "article",
+  "aside",
+  "form",
+  "button",
+  "input",
+  "textarea",
+]);
+
+export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
+  // Background
+  bg: "background-color",
+  bgc: "background-color",
+  bkg: "background",
+  bgi: "background-image",
+  bgr: "background-repeat",
+  bgp: "background-position",
+  bgs: "background-size",
+  bga: "background-attachment",
+
+  // Color & Typography
+  c: "color",
+  f: "font-family",
+  ff: "font-family",
+  fz: "font-size",
+  fw: "font-weight",
+  fs: "font-style",
+  lh: "line-height",
+  ls: "letter-spacing",
+  ta: "text-align",
+  td: "text-decoration",
+  tt: "text-transform",
+  ti: "text-indent",
+  to: "text-overflow",
+  tr: "text-rendering",
+  ws: "white-space",
+  wb: "word-break",
+  ww: "word-wrap",
+
+  // Dimensions & Sizing
+  w: "width",
+  h: "height",
+  "min-w": "min-width",
+  "max-w": "max-width",
+  "min-h": "min-height",
+  "max-h": "max-height",
+  bsz: "box-sizing",
+
+  // Spacing (Padding & Margin)
+  p: "padding",
+  pt: "padding-top",
+  pr: "padding-right",
+  pb: "padding-bottom",
+  pl: "padding-left",
+  m: "margin",
+  mt: "margin-top",
+  mr: "margin-right",
+  mb: "margin-bottom",
+  ml: "margin-left",
+
+  // Borders & Outlines
+  b: "border",
+  bc: "border-color",
+  bw: "border-width",
+  bs: "border-style",
+  bt: "border-top",
+  br: "border-right",
+  bb: "border-bottom",
+  bl: "border-left",
+  rad: "border-radius",
+  out: "outline",
+  bcp: "border-collapse",
+  bcpl: "border-collapse",
+  bsp: "border-spacing",
+
+  // Shadows
+  sh: "box-shadow",
+  tsh: "text-shadow",
+
+  // Layout & Positioning
+  disp: "display",
+  pos: "position",
+  t: "top",
+  r: "right",
+  bot: "bottom",
+  l: "left",
+  z: "z-index",
+
+  // Flexbox & Grid
+  fl: "flex",
+  fld: "flex-direction",
+  flw: "flex-wrap",
+  flf: "flex-flow",
+  flg: "flex-grow",
+  fls: "flex-shrink",
+  fb: "flex-basis",
+  jc: "justify-content",
+  ai: "align-items",
+  ac: "align-content",
+  as: "align-self",
+  js: "justify-self",
+  gap: "gap",
+  gtc: "grid-template-columns",
+  gtr: "grid-template-rows",
+  gta: "grid-template-areas",
+  ga: "grid-area",
+  gc: "grid-column",
+  gr: "grid-row",
+
+  // Overflow & Effects
+  ov: "overflow",
+  "ov-x": "overflow-x",
+  "ov-y": "overflow-y",
+  op: "opacity",
+  vis: "visibility",
+  bdf: "backdrop-filter",
+
+  // Interactivity
+  cur: "cursor",
+  pe: "pointer-events",
+  us: "user-select",
+
+  // Transitions & Animations
+  trans: "transition",
+  anim: "animation",
+
+  // Miscellaneous
+  lst: "list-style",
+  va: "vertical-align",
+  sb: "scroll-behavior",
+  sbc: "scrollbar-color",
+  sbw: "scrollbar-width",
+};
+
+export function toCssProperty(prop: string): string {
+  const kebab = prop
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/_/g, "-")
+    .toLowerCase();
+  return CSS_PROPERTY_ALIASES[kebab] ?? kebab;
+}
 
 export class CssEmitter {
-  public emitDocument(doc: AilDocumentNode, options?: EmitOptions): string {
-    const ctx = new EmitContext("css", options);
-    if (doc.kind === "Workspace") {
-      return this.emitWorkspace(doc, ctx);
-    }
-    return this.emitModule(doc, ctx);
+  private ctx: EmitterContext;
+
+  constructor(options: EmitterOptions = {}) {
+    this.ctx = new EmitterContext("css", options);
   }
 
-  public emitWorkspace(ws: AilWorkspaceNode, ctx: EmitContext): string {
-    const parts: string[] = [];
-    for (const file of ws.files) {
-      parts.push(this.emitFile(file, ctx));
-    }
-    return parts.join("\n\n");
-  }
-
-  public emitFile(file: AilFileNode, ctx: EmitContext): string {
-    return this.emitModule(file.module, ctx);
-  }
-
-  public emitModule(mod: AilModuleNode, ctx: EmitContext): string {
-    const lines: string[] = [];
-    const comments = ctx.getLeadingComments(mod.nodeId);
-    if (comments.length > 0) {
-      lines.push(...comments.map((c) => `/* ${c.replace(/^\/\/\s*/, "")} */`));
-    }
-
-    const styles = mod.entities.filter((e): e is AilStyleDeclNode => e.kind === "StyleDecl");
-    for (const style of styles) {
-      lines.push(this.emitStyleDecl(style, ctx));
-      lines.push("");
-    }
-
-    return `${lines.join("\n").trim()}\n`;
-  }
-
-  public emitStyleDecl(node: AilStyleDeclNode, ctx: EmitContext): string {
-    const comments = ctx.getLeadingComments(node.nodeId);
-    const commentPrefix =
-      comments.length > 0
-        ? `${comments.map((c) => `/* ${c.replace(/^\/\/\s*/, "")} */`).join("\n")}\n`
-        : "";
-
-    let selector = node.name;
-    if (
-      !selector.startsWith(".") &&
-      !selector.startsWith("#") &&
-      !selector.startsWith(":") &&
-      !selector.startsWith("@")
-    ) {
-      // If it looks like a class or identifier, default to class selector
-      const htmlTags = new Set([
-        "body",
-        "html",
-        "div",
-        "p",
-        "a",
-        "span",
-        "h1",
-        "h2",
-        "h3",
-        "button",
-        "input",
-      ]);
-      if (!htmlTags.has(selector.toLowerCase())) {
-        selector = `.${selector}`;
+  emit(mod: Module): string {
+    let hasImports = false;
+    for (const item of mod.items) {
+      if (item.kind === "ImportDecl") {
+        this.ctx.writeLine(`@import "${item.source}";`);
+        hasImports = true;
       }
     }
 
-    const ruleLines = node.rules.map((r) => `  ${r.prop}: ${r.value};`);
-    return `${commentPrefix}${selector} {\n${ruleLines.join("\n")}\n}`;
-  }
-}
+    if (hasImports) {
+      this.ctx.writeLine();
+    }
 
-export function emitCss(doc: AilDocumentNode, options?: EmitOptions): string {
-  const emitter = new CssEmitter();
-  return emitter.emitDocument(doc, options);
+    let first = true;
+    for (const item of mod.items) {
+      if (item.kind === "StyleDecl") {
+        if (!first) {
+          this.ctx.writeLine();
+        }
+        first = false;
+        this.emitStyleDecl(item);
+      }
+    }
+
+    return this.ctx.getOutput();
+  }
+
+  private emitStyleDecl(decl: StyleDecl): void {
+    const nodeId = `style:${decl.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+
+    const selector = this.toCssSelector(decl.name);
+    this.ctx.writeLine(`${selector} {`);
+    this.ctx.indent();
+
+    for (const prop of decl.properties) {
+      const cssProp = toCssProperty(prop.property);
+      this.ctx.writeLine(`${cssProp}: ${prop.value};`);
+    }
+
+    this.ctx.dedent();
+    this.ctx.writeLine("}");
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private toCssSelector(name: string): string {
+    const lower = name.toLowerCase();
+    if (HTML_TAGS.has(lower) && name === lower) {
+      return lower;
+    }
+    if (name.startsWith(".") || name.startsWith("#") || name.startsWith(":")) {
+      return name;
+    }
+    // Convert PascalCase / camelCase / snake_case to kebab-case
+    const kebab = name
+      .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+      .replace(/_/g, "-")
+      .toLowerCase();
+    return `.${kebab}`;
+  }
 }

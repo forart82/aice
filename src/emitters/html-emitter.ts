@@ -1,21 +1,10 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: HTML5 Forward Emitter (Pillars 1, 2, 5)
- * Compiles AIL layout AST into clean, standards-compliant HTML5 documents.
+ * HTML5 Document & Fragment Emitter for AIL 2.0.
+ * Conforms to Pillar 1 & 2 of docs/RESEARCH_SYNTHESIS.md.
  */
 
-import type {
-  AilComponentDeclNode,
-  AilDocumentNode,
-  AilFileNode,
-  AilLayoutNode,
-  AilModuleNode,
-  AilTagNode,
-  AilWorkspaceNode,
-} from "../core/ast.ts";
-import { EmitContext, type EmitOptions } from "./context.ts";
+import type { ComponentDecl, Expr, LayoutNode, Module } from "../core/ast.js";
+import { EmitterContext, type EmitterOptions } from "./context.js";
 
 const VOID_ELEMENTS = new Set([
   "area",
@@ -35,114 +24,115 @@ const VOID_ELEMENTS = new Set([
 ]);
 
 export class HtmlEmitter {
-  public emitDocument(doc: AilDocumentNode, options?: EmitOptions): string {
-    const ctx = new EmitContext("html", options);
-    if (doc.kind === "Workspace") {
-      return this.emitWorkspace(doc, ctx);
-    }
-    return this.emitModule(doc, ctx);
+  private ctx: EmitterContext;
+
+  constructor(options: EmitterOptions = {}) {
+    this.ctx = new EmitterContext("html", options);
   }
 
-  public emitWorkspace(ws: AilWorkspaceNode, ctx: EmitContext): string {
-    const parts: string[] = [];
-    for (const file of ws.files) {
-      parts.push(this.emitFile(file, ctx));
-    }
-    return parts.join("\n\n");
-  }
-
-  public emitFile(file: AilFileNode, ctx: EmitContext): string {
-    return this.emitModule(file.module, ctx);
-  }
-
-  public emitModule(mod: AilModuleNode, ctx: EmitContext): string {
-    const comments = ctx.getLeadingComments(mod.nodeId);
-    const commentPrefix = comments.length > 0 ? `${comments.join("\n")}\n` : "";
-
-    const components = mod.entities.filter(
-      (e): e is AilComponentDeclNode => e.kind === "ComponentDecl",
-    );
-    if (components.length === 0) {
-      return `${commentPrefix}<!DOCTYPE html>\n<html>\n<head></head>\n<body></body>\n</html>\n`;
-    }
-
-    const htmlParts: string[] = [];
-    for (const comp of components) {
-      const rendered = this.emitLayout(comp.layout, ctx);
-      htmlParts.push(rendered);
-    }
-
-    const out = htmlParts.join("\n\n");
-    if (out.includes("<html")) {
-      return `${commentPrefix}<!DOCTYPE html>\n${out}\n`;
-    }
-    return `${commentPrefix}${out}\n`;
-  }
-
-  public emitLayout(layout: AilLayoutNode, ctx: EmitContext): string {
-    switch (layout.kind) {
-      case "TagNode":
-        return this.emitTag(layout, ctx);
-      case "TextNode":
-        if (layout.text !== undefined) return layout.text;
-        if (layout.expr && layout.expr.kind === "Literal") {
-          return String(layout.expr.value ?? "");
+  emit(mod: Module): string {
+    let hasHtmlTag = false;
+    for (const item of mod.items) {
+      if (item.kind === "ComponentDecl") {
+        for (const node of item.layout) {
+          if (node.tag.toLowerCase() === "html") {
+            hasHtmlTag = true;
+            break;
+          }
         }
-        return "";
-      case "ConditionalLayout":
-        return this.emitLayout(layout.thenNode, ctx);
-      case "LoopLayout":
-        return this.emitLayout(layout.body, ctx);
-    }
-  }
-
-  public emitTag(tagNode: AilTagNode, ctx: EmitContext): string {
-    const tagName = tagNode.tag.toLowerCase();
-    const isVoid = VOID_ELEMENTS.has(tagName);
-
-    const attrs: string[] = [];
-    for (const [key, expr] of Object.entries(tagNode.attributes)) {
-      const attrName = key === "className" ? "class" : key;
-      if (expr.kind === "Literal") {
-        if (expr.valueType === "boolean") {
-          if (expr.value === true) attrs.push(attrName);
-        } else {
-          attrs.push(`${attrName}="${String(expr.value)}"`);
-        }
-      } else if (expr.kind === "Symbol") {
-        attrs.push(`${attrName}="${expr.name}"`);
       }
     }
 
-    const attrStr = attrs.length > 0 ? ` ${attrs.join(" ")}` : "";
+    if (hasHtmlTag) {
+      this.ctx.writeLine("<!DOCTYPE html>");
+    }
+
+    for (const item of mod.items) {
+      if (item.kind === "ComponentDecl") {
+        this.emitComponent(item);
+      }
+    }
+
+    return this.ctx.getOutput();
+  }
+
+  private emitComponent(comp: ComponentDecl): void {
+    for (const node of comp.layout) {
+      this.emitLayoutNode(node);
+    }
+  }
+
+  private emitLayoutNode(node: LayoutNode): void {
+    const tag = node.tag.toLowerCase();
+    const isVoid = VOID_ELEMENTS.has(tag);
+
+    const attrs = node.attributes
+      .map((a) => {
+        const val = this.renderAttrValue(a.value);
+        if (val === null) {
+          return a.name;
+        }
+        return `${a.name}="${this.escapeHtmlAttr(val)}"`;
+      })
+      .join(" ");
+
+    const attrPrefix = attrs.length > 0 ? ` ${attrs}` : "";
 
     if (isVoid) {
-      return ctx.indentLine(`<${tagName}${attrStr}>`);
+      this.ctx.writeLine(`<${tag}${attrPrefix}>`);
+      return;
     }
 
-    if (tagNode.children.length === 0) {
-      return ctx.indentLine(`<${tagName}${attrStr}></${tagName}>`);
+    if (node.textLiteral !== null && node.children.length === 0) {
+      this.ctx.writeLine(`<${tag}${attrPrefix}>${this.escapeHtml(node.textLiteral)}</${tag}>`);
+      return;
     }
 
-    // Check if children are only text
-    const onlyText = tagNode.children.every((c) => c.kind === "TextNode");
-    if (onlyText) {
-      const text = tagNode.children.map((c) => this.emitLayout(c, ctx)).join("");
-      return ctx.indentLine(`<${tagName}${attrStr}>${text}</${tagName}>`);
+    if (node.childExpr && node.children.length === 0) {
+      const rendered = this.renderAttrValue(node.childExpr);
+      this.ctx.writeLine(`<${tag}${attrPrefix}>${this.escapeHtml(rendered ?? "")}</${tag}>`);
+      return;
     }
 
-    const childLines: string[] = [];
-    ctx.withIndent(() => {
-      for (const child of tagNode.children) {
-        childLines.push(this.emitLayout(child, ctx));
-      }
-    });
+    if (node.children.length === 0) {
+      this.ctx.writeLine(`<${tag}${attrPrefix}></${tag}>`);
+      return;
+    }
 
-    return `${ctx.indentLine(`<${tagName}${attrStr}>`)}\n${childLines.join("\n")}\n${ctx.indentLine(`</${tagName}>`)}`;
+    this.ctx.writeLine(`<${tag}${attrPrefix}>`);
+    this.ctx.indent();
+    for (const child of node.children) {
+      this.emitLayoutNode(child);
+    }
+    this.ctx.dedent();
+    this.ctx.writeLine(`</${tag}>`);
   }
-}
 
-export function emitHtml(doc: AilDocumentNode, options?: EmitOptions): string {
-  const emitter = new HtmlEmitter();
-  return emitter.emitDocument(doc, options);
+  private renderAttrValue(expr: Expr): string | null {
+    if (expr.kind === "LiteralExpr") {
+      if (expr.literalKind === "string") {
+        return expr.value as string;
+      }
+      if (expr.literalKind === "boolean") {
+        return expr.value ? null : "";
+      }
+      return String(expr.value);
+    }
+    if (expr.kind === "IdentifierExpr") {
+      return expr.name;
+    }
+    return "";
+  }
+
+  private escapeHtml(str: string): string {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  private escapeHtmlAttr(str: string): string {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
 }

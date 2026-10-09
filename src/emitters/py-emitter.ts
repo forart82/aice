@@ -1,307 +1,579 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Python 3.12+ Forward Emitter (Pillars 1, 2, 5)
- * Compiles AIL AST into clean, idiomatic Python with type annotations and dataclasses.
- */
-
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type {
-  AilDocumentNode,
-  AilExprNode,
-  AilFileNode,
-  AilFunctionDeclNode,
-  AilImportDeclNode,
-  AilModuleNode,
-  AilTypeDeclNode,
-  AilTypeExprNode,
-  AilWorkspaceNode,
-} from "../core/ast.ts";
-import { EmitContext, type EmitOptions } from "./context.ts";
-import { TermRewriter } from "./rewriter.ts";
+  Block,
+  ClassDecl,
+  ConstDecl,
+  Expr,
+  FunctionDecl,
+  ImportDecl,
+  MethodDecl,
+  Module,
+  ModuleItem,
+  Pattern,
+  Statement,
+  TypeDecl,
+  TypeExpr,
+  VarDecl,
+} from "../core/ast.js";
+import { EmitterContext, type EmitterOptions } from "./context.js";
+import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
 
 export class PythonEmitter {
-  private rewriter = new TermRewriter();
+  private ctx: EmitterContext;
+  private structTypes: Map<string, string[]> = new Map();
+  private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
+  private varTypes: Map<string, string> = new Map();
 
-  public emitDocument(doc: AilDocumentNode, options?: EmitOptions): string {
-    const ctx = new EmitContext("python", { indent: "    ", ...options });
-    if (doc.kind === "Workspace") {
-      return this.emitWorkspace(doc, ctx);
-    }
-    return this.emitModule(doc, ctx);
-  }
-
-  public emitWorkspace(ws: AilWorkspaceNode, ctx: EmitContext): string {
-    const parts: string[] = [];
-    for (const file of ws.files) {
-      parts.push(this.emitFile(file, ctx));
-    }
-    return parts.join("\n\n");
-  }
-
-  public emitFile(file: AilFileNode, ctx: EmitContext): string {
-    return this.emitModule(file.module, ctx);
-  }
-
-  public emitModule(mod: AilModuleNode, ctx: EmitContext): string {
-    const lines: string[] = [];
-
-    const comments = ctx.getLeadingComments(mod.nodeId);
-    if (comments.length > 0) {
-      lines.push(...comments);
-    }
-
-    const imports = mod.entities.filter((e): e is AilImportDeclNode => e.kind === "ImportDecl");
-    const types = mod.entities.filter((e): e is AilTypeDeclNode => e.kind === "TypeDecl");
-    const functions = mod.entities.filter(
-      (e): e is AilFunctionDeclNode => e.kind === "FunctionDecl",
-    );
-
-    const hasRecords = types.some((t) => t.typeExpr.kind === "RecordType");
-    const synthImports: string[] = [];
-    if (hasRecords) {
-      synthImports.push("from dataclasses import dataclass");
-    }
-    synthImports.push("from typing import Any, Optional, Union");
-
-    lines.push(...synthImports);
-
-    // 1. Emit Imports
-    for (const imp of imports) {
-      lines.push(this.emitImport(imp, ctx));
-    }
-
-    lines.push("");
-
-    // 2. Emit Types
-    for (const t of types) {
-      lines.push(this.emitTypeDecl(t, ctx));
-      lines.push("");
-    }
-
-    // 3. Emit Functions
-    for (const fn of functions) {
-      lines.push(this.emitFunction(fn, ctx));
-      lines.push("");
-    }
-
-    return `${lines.join("\n").trim()}\n`;
-  }
-
-  public emitImport(node: AilImportDeclNode, ctx: EmitContext): string {
-    const lines: string[] = [];
-    const comments = ctx.getLeadingComments(node.nodeId);
-    lines.push(...comments);
-
-    for (const binding of node.imports) {
-      const symbols = binding.symbols.join(", ");
-      lines.push(`from ${binding.modulePath} import ${symbols}`);
-    }
-    return lines.join("\n");
-  }
-
-  public emitTypeDecl(node: AilTypeDeclNode, ctx: EmitContext): string {
-    const comments = ctx.getLeadingComments(node.nodeId);
-    const commentPrefix = comments.length > 0 ? `${comments.join("\n")}\n` : "";
-
-    if (node.typeExpr.kind === "RecordType") {
-      const fields = node.typeExpr.fields.map((f) => {
-        return `    ${f.name}: ${this.emitTypeExpr(f.type)}`;
-      });
-      return `${commentPrefix}@dataclass\nclass ${node.name}:\n${fields.join("\n")}`;
-    }
-
-    return `${commentPrefix}${node.name} = ${this.emitTypeExpr(node.typeExpr)}`;
-  }
-
-  public emitTypeExpr(type: AilTypeExprNode): string {
-    switch (type.kind) {
-      case "PrimitiveType":
-        switch (type.name) {
-          case "!s":
-            return "str";
-          case "!i":
-          case "!u":
-            return "int";
-          case "!f":
-            return "float";
-          case "!b":
-            return "bool";
-          case "!void":
-          case "!nil":
-            return "None";
-          case "!unknown":
-            return "Any";
-        }
-        return "Any";
-      case "ArrayType":
-        return `list[${this.emitTypeExpr(type.elementType)}]`;
-      case "RecordType":
-        return "dict[str, Any]";
-      case "UnionType":
-        return `Union[${type.types.map((t) => this.emitTypeExpr(t)).join(", ")}]`;
-      case "NamedType": {
-        if (type.name === "Option" && type.typeArguments?.[0]) {
-          return `Optional[${this.emitTypeExpr(type.typeArguments[0])}]`;
-        }
-        if (type.name === "Result") {
-          return "dict[str, Any]";
-        }
-        if (type.typeArguments && type.typeArguments.length > 0) {
-          const args = type.typeArguments.map((a) => this.emitTypeExpr(a)).join(", ");
-          return `${type.name}[${args}]`;
-        }
-        return type.name;
-      }
-      case "RefinementType":
-        return `${this.emitTypeExpr(type.baseType)}  # refined`;
-      case "Typestate":
-        return "str";
-      case "EffectType":
-        return this.emitTypeExpr(type.returnType);
-    }
-  }
-
-  public emitFunction(node: AilFunctionDeclNode, ctx: EmitContext): string {
-    const comments = ctx.getLeadingComments(node.nodeId);
-    const commentPrefix = comments.length > 0 ? `${comments.join("\n")}\n` : "";
-
-    const params = node.signatures.params
-      .map((p) => `${p.name}: ${this.emitTypeExpr(p.type)}`)
-      .join(", ");
-    const retType = this.emitTypeExpr(node.signatures.returnType);
-
-    const bodyCode = this.emitFunctionBody(node.body, ctx);
-    return `${commentPrefix}def ${node.name}(${params}) -> ${retType}:\n${bodyCode}`;
-  }
-
-  private emitFunctionBody(body: AilExprNode, ctx: EmitContext): string {
-    return ctx.withIndent(() => {
-      if (body.kind === "BlockExpr") {
-        return this.emitBlockStatements(body.expressions, true, ctx);
-      }
-      const exprCode = this.emitExpr(body, ctx);
-      return ctx.indentLine(`return ${exprCode}`);
+  constructor(options: EmitterOptions = {}) {
+    this.ctx = new EmitterContext("python", {
+      ...options,
+      indent: options.indent ?? "    ", // standard 4 spaces for Python
     });
   }
 
-  private emitBlockStatements(
-    exprs: AilExprNode[],
-    isFunctionBody: boolean,
-    ctx: EmitContext,
-  ): string {
-    const lines: string[] = [];
-
-    for (let i = 0; i < exprs.length; i++) {
-      const expr = exprs[i];
-      const isLast = i === exprs.length - 1;
-
-      if (expr.kind === "AssignExpr") {
-        if (expr.expr.kind === "TryUnpackExpr") {
-          const innerCode = this.emitExpr(expr.expr.expr, ctx);
-          const tempVar = `__res_${i}`;
-          lines.push(ctx.indentLine(`${tempVar} = ${innerCode}`));
-          lines.push(ctx.indentLine(`if not ${tempVar}.get("ok"):`));
-          ctx.withIndent(() => {
-            lines.push(ctx.indentLine(`return ${tempVar}`));
-          });
-          lines.push(ctx.indentLine(`${expr.target} = ${tempVar}["value"]`));
-          continue;
-        }
-        const valCode = this.emitExpr(expr.expr, ctx);
-        lines.push(ctx.indentLine(`${expr.target} = ${valCode}`));
-        continue;
-      }
-
-      if (expr.kind === "TryUnpackExpr") {
-        const innerCode = this.emitExpr(expr.expr, ctx);
-        const tempVar = `__res_${i}`;
-        lines.push(ctx.indentLine(`${tempVar} = ${innerCode}`));
-        lines.push(ctx.indentLine(`if not ${tempVar}.get("ok"):`));
-        ctx.withIndent(() => {
-          lines.push(ctx.indentLine(`return ${tempVar}`));
-        });
-        if (isLast && isFunctionBody) {
-          lines.push(ctx.indentLine(`return ${tempVar}["value"]`));
-        }
-        continue;
-      }
-
-      const code = this.emitExpr(expr, ctx);
-      if (isLast && isFunctionBody) {
-        lines.push(ctx.indentLine(`return ${code}`));
-      } else {
-        lines.push(ctx.indentLine(code));
-      }
-    }
-
-    if (lines.length === 0) {
-      lines.push(ctx.indentLine("pass"));
-    }
-
-    return lines.join("\n");
+  emit(mod: Module): string {
+    return this.emitModule(mod);
   }
 
-  public emitExpr(expr: AilExprNode, ctx: EmitContext): string {
-    switch (expr.kind) {
-      case "Literal":
-        if (expr.valueType === "string") return JSON.stringify(expr.value);
-        if (expr.valueType === "number") return String(expr.value);
-        if (expr.valueType === "boolean") return expr.value ? "True" : "False";
-        if (expr.valueType === "array") {
-          const items = (expr.value as AilExprNode[]).map((e) => this.emitExpr(e, ctx));
-          return `[${items.join(", ")}]`;
-        }
-        if (expr.valueType === "record") {
-          const rec = expr.value as Record<string, AilExprNode>;
-          const entries = Object.entries(rec).map(
-            ([k, v]) => `${JSON.stringify(k)}: ${this.emitExpr(v, ctx)}`,
+  emitModule(mod: Module): string {
+    this.structTypes.clear();
+    this.enumVariants.clear();
+    this.varTypes.clear();
+    for (const item of mod.items) {
+      if (item.kind === "TypeDecl") {
+        if (item.fields) {
+          this.structTypes.set(
+            item.name,
+            item.fields.map((f) => f.name),
           );
-          return `{ ${entries.join(", ")} }`;
+        } else if (item.isEnum && item.variants) {
+          for (const v of item.variants) {
+            this.enumVariants.set(v.name, {
+              parentEnum: item.name,
+              payloadCount: v.payloadTypes?.length ?? 0,
+            });
+          }
         }
-        return "None";
+      }
+    }
 
-      case "Symbol":
-        if (expr.name === "nil") return "None";
-        if (expr.name === "true") return "True";
-        if (expr.name === "false") return "False";
+    // Scan imported modules for struct definitions to support cross-module positional constructors & spreads
+    for (const item of mod.items) {
+      if (item.kind === "ImportDecl") {
+        const importSrc = item.source;
+        const candidateNames = [
+          importSrc.replace(/\.[a-zA-Z]+$/, ".ail"),
+          importSrc.replace(/\.[a-zA-Z]+$/, ".py.ail"),
+          importSrc.replace(/\.[a-zA-Z]+$/, ".ts.ail"),
+          importSrc,
+        ];
+        for (const cand of candidateNames) {
+          const resolved = path.resolve(process.cwd(), "examples", path.basename(cand));
+          if (fs.existsSync(resolved)) {
+            try {
+              const content = fs.readFileSync(resolved, "utf-8");
+              const lines = content.split("\n");
+              for (const line of lines) {
+                const match = line.match(/^type\s+([A-Za-z0-9_]+)\s*:\s*(.+)$/);
+                if (match) {
+                  const sName = match[1];
+                  const fieldDefs = match[2].split(",").map((f) => f.trim().split(":")[0].trim());
+                  if (!this.structTypes.has(sName)) {
+                    this.structTypes.set(sName, fieldDefs);
+                  }
+                }
+              }
+            } catch {}
+            break;
+          }
+        }
+      }
+    }
+
+    const imports = mod.items.filter((i) => i.kind === "ImportDecl") as ImportDecl[];
+    const nonImports = mod.items.filter((i) => i.kind !== "ImportDecl");
+
+    this.ctx.writeLine("from typing import Any, Optional, Union, TypedDict");
+    this.ctx.writeLine();
+
+    for (const imp of imports) {
+      this.emitImport(imp);
+    }
+
+    if (imports.length > 0 && nonImports.length > 0) {
+      this.ctx.writeLine();
+    }
+
+    for (let i = 0; i < nonImports.length; i++) {
+      this.emitModuleItem(nonImports[i]);
+      if (i < nonImports.length - 1) {
+        this.ctx.writeLine();
+      }
+    }
+
+    return this.ctx.getOutput();
+  }
+
+  private emitImport(imp: ImportDecl): void {
+    const modName = imp.source.replace(/\.[a-zA-Z]+$/, "").replace(/^\.\//, "");
+    if (imp.specifiers.length === 1 && imp.specifiers[0].isWildcard) {
+      this.ctx.writeLine(`from ${modName} import *`);
+      return;
+    }
+    const specs = imp.specifiers.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
+    this.ctx.writeLine(`from ${modName} import ${specs.join(", ")}`);
+  }
+
+  private emitModuleItem(item: ModuleItem): void {
+    switch (item.kind) {
+      case "TypeDecl":
+        this.emitTypeDecl(item);
+        break;
+      case "FunctionDecl":
+        this.emitFunctionDecl(item);
+        break;
+      case "ClassDecl":
+        this.emitClassDecl(item);
+        break;
+      case "ConstDecl":
+      case "VarDecl":
+        this.emitConstOrVarDecl(item);
+        break;
+      default:
+        break;
+    }
+  }
+
+  private emitClassDecl(c: ClassDecl): void {
+    const ext = c.extends ? `(${c.extends})` : "";
+    this.ctx.writeLine(`class ${c.name}${ext}:`);
+    this.ctx.indent();
+
+    if (c.properties.length > 0) {
+      this.ctx.writeLine("def __init__(self):");
+      this.ctx.indent();
+      for (const p of c.properties) {
+        const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : " = None";
+        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+        this.ctx.writeLine(`self.${p.name}${typeStr}${init}`);
+      }
+      this.ctx.dedent();
+      this.ctx.writeLine();
+    }
+
+    if (c.methods.length === 0 && c.properties.length === 0) {
+      this.ctx.writeLine("pass");
+    }
+
+    for (let i = 0; i < c.methods.length; i++) {
+      this.emitMethodDecl(c.methods[i]);
+      if (i < c.methods.length - 1) {
+        this.ctx.writeLine();
+      }
+    }
+
+    this.ctx.dedent();
+  }
+
+  private emitMethodDecl(m: MethodDecl): void {
+    const params = ["self", ...m.params.map((p) => `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}`)].join(", ");
+    const retType = m.returnType ? ` -> ${this.emitTypeExpr(m.returnType)}` : " -> None";
+    this.ctx.writeLine(`def ${m.name}(${params})${retType}:`);
+    this.ctx.indent();
+    if (m.body.kind === "Block") {
+      this.emitBlock(m.body);
+    } else {
+      this.ctx.writeLine(`return ${this.emitExpr(m.body)}`);
+    }
+    this.ctx.dedent();
+  }
+
+  private emitConstOrVarDecl(decl: ConstDecl | VarDecl): void {
+    const typeStr = decl.typeAnnotation ? `: ${this.emitTypeExpr(decl.typeAnnotation)}` : "";
+    this.ctx.writeLine(`${decl.name}${typeStr} = ${this.emitExpr(decl.value)}`);
+  }
+
+  private emitTypeDecl(t: TypeDecl): void {
+    if (t.aliasType) {
+      const typeStr = this.emitTypeExpr(t.aliasType);
+      this.ctx.writeLine(`${t.name} = ${typeStr}`);
+      return;
+    }
+
+    if (t.fields) {
+      this.ctx.writeLine(`class ${t.name}(TypedDict):`);
+      this.ctx.indent();
+      if (t.fields.length === 0) {
+        this.ctx.writeLine("pass");
+      } else {
+        for (const f of t.fields) {
+          const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
+          this.ctx.writeLine(`${f.name}: ${this.emitTypeExpr(f.typeAnnotation)}${defStr}`);
+        }
+      }
+      this.ctx.dedent();
+    }
+  }
+
+  private emitFunctionDecl(fn: FunctionDecl): void {
+    this.varTypes.clear();
+    for (const p of fn.params) {
+      if (p.typeAnnotation.kind === "NamedType") {
+        this.varTypes.set(p.name, p.typeAnnotation.name);
+      }
+    }
+
+    const paramsStr = fn.params
+      .map((p) => {
+        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+        const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+        return `${p.name}: ${typeStr}${defStr}`;
+      })
+      .join(", ");
+
+    const retStr = fn.returnType ? ` -> ${this.emitTypeExpr(fn.returnType)}` : "";
+
+    this.ctx.writeLine(`def ${fn.name}(${paramsStr})${retStr}:`);
+    this.ctx.indent();
+
+    const isReturning = this.isReturningFunction(fn);
+    if (fn.isExpressionBodied) {
+      this.ctx.writeLine(`return ${this.emitExpr(fn.body as Expr)}`);
+    } else {
+      this.emitBlock(fn.body as Block, isReturning);
+    }
+
+    this.ctx.dedent();
+  }
+
+  private isReturningFunction(fn: FunctionDecl): boolean {
+    if (fn.name === "__top_level__") return false;
+    if (fn.returnType) {
+      return !(
+        fn.returnType.kind === "PrimitiveType" &&
+        (fn.returnType.primitive === "void" || fn.returnType.primitive === "nil")
+      );
+    }
+    if (fn.body.kind === "Block") {
+      const stmts = fn.body.statements;
+      if (stmts.length > 0) {
+        const last = stmts[stmts.length - 1];
+        if (last.kind === "ReturnStmt") return true;
+        if (last.kind === "ExprStmt") {
+          return !this.isVoidExpr(last.expr);
+        }
+        if (last.kind === "IfStmt" && last.elseBranch) {
+          return true;
+        }
+        if (last.kind === "MatchStmt") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private isVoidExpr(expr: Expr): boolean {
+    if (expr.kind === "CallExpr" && expr.callee.kind === "IdentifierExpr") {
+      return expr.callee.name === "print";
+    }
+    return false;
+  }
+
+  private emitBlock(block: Block, isReturning = false): void {
+    if (block.statements.length === 0) {
+      this.ctx.writeLine("pass");
+      return;
+    }
+    const len = block.statements.length;
+    for (let i = 0; i < len; i++) {
+      const stmt = block.statements[i];
+      const isLast = i === len - 1;
+      this.emitStatement(stmt, isReturning && isLast);
+    }
+  }
+
+  private emitStatement(stmt: Statement, isTrailingReturn = false): void {
+    switch (stmt.kind) {
+      case "LetBinding": {
+        if (stmt.typeAnnotation && stmt.typeAnnotation.kind === "NamedType") {
+          this.varTypes.set(stmt.name, stmt.typeAnnotation.name);
+        } else if (stmt.init.kind === "CallExpr" && stmt.init.callee.kind === "IdentifierExpr") {
+          this.varTypes.set(stmt.name, stmt.init.callee.name);
+        } else if (stmt.init.kind === "IdentifierExpr") {
+          const existing = this.varTypes.get(stmt.init.name);
+          if (existing) this.varTypes.set(stmt.name, existing);
+        }
+        const typeAnnotation = stmt.typeAnnotation
+          ? `: ${this.emitTypeExpr(stmt.typeAnnotation)}`
+          : "";
+        this.ctx.writeLine(`${stmt.name}${typeAnnotation} = ${this.emitExpr(stmt.init)}`);
+        break;
+      }
+      case "AssignStmt": {
+        const targetStr = this.emitExpr(stmt.target);
+        const valStr = this.emitExpr(stmt.value);
+        this.ctx.writeLine(`${targetStr} = ${valStr}`);
+        break;
+      }
+      case "ReturnStmt": {
+        if (stmt.value) {
+          this.ctx.writeLine(`return ${this.emitExpr(stmt.value)}`);
+        } else {
+          this.ctx.writeLine("return");
+        }
+        break;
+      }
+      case "IfStmt": {
+        this.ctx.writeLine(`if ${this.emitExpr(stmt.condition)}:`);
+        this.ctx.indent();
+        this.emitBlock(stmt.thenBranch, isTrailingReturn);
+        this.ctx.dedent();
+
+        for (const elif of stmt.elifBranches) {
+          this.ctx.writeLine(`elif ${this.emitExpr(elif.condition)}:`);
+          this.ctx.indent();
+          this.emitBlock(elif.body, isTrailingReturn);
+          this.ctx.dedent();
+        }
+
+        if (stmt.elseBranch) {
+          this.ctx.writeLine("else:");
+          this.ctx.indent();
+          this.emitBlock(stmt.elseBranch, isTrailingReturn);
+          this.ctx.dedent();
+        }
+        break;
+      }
+      case "ForStmt": {
+        this.ctx.writeLine(`for ${stmt.variable} in ${this.emitExpr(stmt.iterable)}:`);
+        this.ctx.indent();
+        this.emitBlock(stmt.body);
+        this.ctx.dedent();
+        break;
+      }
+      case "WhileStmt": {
+        this.ctx.writeLine(`while ${this.emitExpr(stmt.condition)}:`);
+        this.ctx.indent();
+        this.emitBlock(stmt.body);
+        this.ctx.dedent();
+        break;
+      }
+      case "MatchStmt": {
+        this.ctx.writeLine(`match ${this.emitExpr(stmt.target)}:`);
+        this.ctx.indent();
+        for (const c of stmt.cases) {
+          const pat = this.emitPattern(c.pattern);
+          const guardStr = c.guard ? ` if ${this.emitExpr(c.guard)}` : "";
+          this.ctx.writeLine(`case ${pat}${guardStr}:`);
+          this.ctx.indent();
+          if (c.body.kind === "Block") {
+            this.emitBlock(c.body, isTrailingReturn);
+          } else {
+            this.ctx.writeLine(`return ${this.emitExpr(c.body)}`);
+          }
+          this.ctx.dedent();
+        }
+        this.ctx.dedent();
+        break;
+      }
+      case "ExprStmt": {
+        if (isTrailingReturn && !this.isVoidExpr(stmt.expr)) {
+          this.ctx.writeLine(`return ${this.emitExpr(stmt.expr)}`);
+        } else {
+          this.ctx.writeLine(this.emitExpr(stmt.expr));
+        }
+        break;
+      }
+    }
+  }
+
+  emitExpr(expr: Expr): string {
+    switch (expr.kind) {
+      case "LiteralExpr":
+        if (expr.literalKind === "string") return JSON.stringify(expr.value);
+        if (expr.literalKind === "boolean") return expr.value ? "True" : "False";
+        if (expr.literalKind === "nil") return "None";
+        return String(expr.value);
+
+      case "IdentifierExpr":
+        if (expr.name === "this") return "self";
         return expr.name;
 
-      case "ApplyExpr": {
-        const emittedArgs = expr.args.map((a) => this.emitExpr(a, ctx));
-        return this.rewriter.lowerApply(expr.operator, emittedArgs, expr.args, ctx);
+      case "AssignExpr":
+        return `${this.emitExpr(expr.target)} = ${this.emitExpr(expr.value)}`;
+
+      case "BinaryExpr": {
+        const left = this.emitExpr(expr.left);
+        const right = this.emitExpr(expr.right);
+        let op = expr.operator;
+        if (op === "&&") op = "and";
+        if (op === "||") op = "or";
+        if (op === "??") return `(${left} if ${left} is not None else ${right})`;
+        return `(${left} ${op} ${right})`;
       }
 
-      case "AssignExpr": {
-        const val = this.emitExpr(expr.expr, ctx);
-        return `${expr.target} = ${val}`;
+      case "UnaryExpr": {
+        const operand = this.emitExpr(expr.operand);
+        const op = expr.operator === "!" || expr.operator === "not" ? "not " : expr.operator;
+        return `(${op}${operand})`;
       }
 
-      case "BlockExpr": {
-        return "pass";
+      case "CallExpr": {
+        const argCodes = expr.args.map((a) => this.emitExpr(a));
+
+        if (expr.callee.kind === "MemberAccessExpr") {
+          const objCode = this.emitExpr(expr.callee.object);
+          const lowered = lowerMethodCall(objCode, expr.callee.property, argCodes, "python");
+          if (lowered.isLowered) {
+            return lowered.code;
+          }
+          return `${objCode}.${expr.callee.property}(${argCodes.join(", ")})`;
+        }
+
+        // Positional Struct / Record Constructor Lowering
+        if (expr.callee.kind === "IdentifierExpr") {
+          const typeName = expr.callee.name;
+          const fields = this.structTypes.get(typeName);
+          if (fields && fields.length === expr.args.length) {
+            const props = fields
+              .map((fName, idx) => `${JSON.stringify(fName)}: ${argCodes[idx]}`)
+              .join(", ");
+            return `{${props}}`;
+          }
+
+          const enumVar = this.enumVariants.get(typeName);
+          if (enumVar && enumVar.payloadCount === expr.args.length) {
+            if (enumVar.payloadCount === 0) {
+              return `{"kind": "${typeName}"}`;
+            }
+            const payloads = expr.args
+              .map((a, idx) => `"item${idx}": ${this.emitExpr(a)}`)
+              .join(", ");
+            return `{"kind": "${typeName}", ${payloads}}`;
+          }
+
+          const lowered = lowerConstructor(expr.callee.name, argCodes, "python");
+          if (lowered.isLowered) {
+            return lowered.code;
+          }
+        }
+
+        const callee = this.emitExpr(expr.callee);
+        return `${callee}(${argCodes.join(", ")})`;
       }
 
-      case "TryUnpackExpr": {
-        const inner = this.emitExpr(expr.expr, ctx);
-        return `${inner}["value"]`;
+      case "MemberAccessExpr": {
+        const obj = this.emitExpr(expr.object);
+        const lowered = lowerPropertyAccess(obj, expr.property, "python");
+        if (lowered.isLowered) {
+          return lowered.code;
+        }
+        return `${obj}.${expr.property}`;
       }
 
-      case "IfExpr": {
-        const cond = this.emitExpr(expr.condition, ctx);
-        const thenCode = this.emitExpr(expr.thenExpr, ctx);
-        const elseCode = expr.elseExpr ? this.emitExpr(expr.elseExpr, ctx) : "None";
-        return `(${thenCode} if ${cond} else ${elseCode})`;
+      case "IndexExpr": {
+        const obj = this.emitExpr(expr.object);
+        const idx = this.emitExpr(expr.index);
+        return `${obj}[${idx}]`;
       }
 
-      case "MatchExpr": {
-        const target = this.emitExpr(expr.target, ctx);
-        return `match(${target})`;
+      case "ArrayLiteralExpr": {
+        const elements = expr.elements.map((e) => this.emitExpr(e)).join(", ");
+        return `[${elements}]`;
+      }
+
+      case "RecordLiteralExpr": {
+        const spreadProp = expr.properties.find((p) => p.isSpread);
+        if (spreadProp && spreadProp.value.kind === "IdentifierExpr") {
+          const targetName = spreadProp.value.name;
+          const typeName = this.varTypes.get(targetName);
+          const structFields = typeName ? this.structTypes.get(typeName) : undefined;
+          if (structFields) {
+            const overrideMap = new Map<string, Expr>();
+            for (const p of expr.properties) {
+              if (!p.isSpread && p.key) {
+                overrideMap.set(p.key, p.value);
+              }
+            }
+            const props = structFields.map((fName) => {
+              const val = overrideMap.get(fName);
+              if (val) {
+                return `${JSON.stringify(fName)}: ${this.emitExpr(val)}`;
+              }
+              return `${JSON.stringify(fName)}: ${targetName}.${fName}`;
+            });
+            return `{${props.join(", ")}}`;
+          }
+        }
+
+        const props = expr.properties
+          .map((p) => {
+            if (p.isSpread) {
+              return `**${this.emitExpr(p.value)}`;
+            }
+            return `${JSON.stringify(p.key)}: ${this.emitExpr(p.value)}`;
+          })
+          .join(", ");
+        return `{${props}}`;
+      }
+
+      case "PostfixTryExpr": {
+        const operand = this.emitExpr(expr.operand);
+        return `${operand}["value"]`;
+      }
+
+      case "ClosureExpr": {
+        const params = expr.params.map((p) => p.name).join(", ");
+        return `(lambda ${params}: ${this.emitExpr(expr.body as Expr)})`;
       }
     }
   }
-}
 
-export function emitPython(doc: AilDocumentNode, options?: EmitOptions): string {
-  const emitter = new PythonEmitter();
-  return emitter.emitDocument(doc, options);
+  emitTypeExpr(t: TypeExpr): string {
+    switch (t.kind) {
+      case "PrimitiveType":
+        if (t.primitive === "int" || t.primitive === "byte") return "int";
+        if (t.primitive === "float" || t.primitive === "num") return "float";
+        if (t.primitive === "str" || t.primitive === "char") return "str";
+        if (t.primitive === "bool") return "bool";
+        if (t.primitive === "void") return "None";
+        if (t.primitive === "nil") return "None";
+        return "Any";
+
+      case "ArrayType":
+        return `list[${this.emitTypeExpr(t.elementType)}]`;
+
+      case "OptionType":
+        return `Optional[${this.emitTypeExpr(t.innerType)}]`;
+
+      case "ResultType":
+        return `dict[str, Any]`;
+
+      case "RecordType":
+        return `dict[str, Any]`;
+
+      case "RefinementType":
+        return this.emitTypeExpr(t.baseType);
+
+      case "NamedType":
+        return t.name;
+    }
+  }
+
+  private emitPattern(pat: Pattern): string {
+    switch (pat.kind) {
+      case "WildcardPattern":
+        return "_";
+      case "LiteralPattern":
+        return this.emitExpr(pat.value);
+      case "IdentifierPattern":
+        return pat.name;
+      case "ConstructorPattern": {
+        const sub = pat.subPatterns.map((p) => this.emitPattern(p)).join(", ");
+        return `${pat.name}(${sub})`;
+      }
+    }
+  }
 }

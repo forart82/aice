@@ -1,220 +1,443 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Declarative Term Rewriting & Intent Lowering Engine (Pillars 1 & 5)
- * Compiles canonical high-level intent primitives into idiomatic target idioms.
+ * Declarative Term Rewriting & Canonical API Lowering Engine for AIL 2.0.
+ * Conforms to Pillar 2 of docs/RESEARCH_SYNTHESIS.md and Section 2 of docs/AIL_SPEC.md.
  */
 
-import type { AilExprNode } from "../core/ast.ts";
-import type { EmitContext } from "./context.ts";
+import type { TargetLanguage } from "./context.js";
 
-export interface TermRewriteRule {
-  id: string;
-  domain: "string" | "collection" | "math" | "logic" | "control";
-  matches: (op: string, args: AilExprNode[]) => boolean;
-  lowerTs: (args: string[], rawArgs: AilExprNode[], ctx: EmitContext) => string;
-  lowerPy: (args: string[], rawArgs: AilExprNode[], ctx: EmitContext) => string;
+export interface LoweredOperation {
+  isLowered: boolean;
+  code: string;
 }
 
-export const REWRITE_RULES: TermRewriteRule[] = [
-  // --- String Canonical Operations (Pillar 1) ---
-  {
-    id: "RULE_STR_SLICE",
-    domain: "string",
-    matches: (op, args) => op === "str:slice" && args.length === 3,
-    lowerTs: (args) => `${args[0]}.slice(${args[1]}, ${args[2]})`,
-    lowerPy: (args) => `${args[0]}[${args[1]}:${args[2]}]`,
-  },
-  {
-    id: "RULE_STR_AT",
-    domain: "string",
-    matches: (op, args) => op === "str:at" && args.length === 2,
-    lowerTs: (args) => `${args[0]}.at(${args[1]})`,
-    lowerPy: (args) => `${args[0]}[${args[1]}]`,
-  },
-  {
-    id: "RULE_STR_LEN",
-    domain: "string",
-    matches: (op, args) => op === "str:len" && args.length === 1,
-    lowerTs: (args) => `${args[0]}.length`,
-    lowerPy: (args) => `len(${args[0]})`,
-  },
-  {
-    id: "RULE_STR_CONCAT",
-    domain: "string",
-    matches: (op, args) => op === "str:concat" && args.length === 2,
-    lowerTs: (args) => `${args[0]} + ${args[1]}`,
-    lowerPy: (args) => `${args[0]} + ${args[1]}`,
-  },
-  {
-    id: "RULE_STR_PARSE_INT",
-    domain: "string",
-    matches: (op, args) => op === "str:parse-int" && args.length === 1,
-    lowerTs: (args) =>
-      `(() => { const _v = parseInt(${args[0]}, 10); return Number.isNaN(_v) ? { ok: false, error: "Invalid integer" } : { ok: true, value: _v }; })()`,
-    lowerPy: (args) =>
-      `({"ok": True, "value": int(${args[0]})} if ${args[0]}.lstrip("-").isdigit() else {"ok": False, "error": "Invalid integer"})`,
-  },
-
-  // --- Collection Primitives (Pillar 3: Pure Immutability) ---
-  {
-    id: "RULE_ARR_LEN",
-    domain: "collection",
-    matches: (op, args) => op === "arr:len" && args.length === 1,
-    lowerTs: (args) => `${args[0]}.length`,
-    lowerPy: (args) => `len(${args[0]})`,
-  },
-  {
-    id: "RULE_ARR_GET",
-    domain: "collection",
-    matches: (op, args) => op === "arr:get" && args.length === 2,
-    lowerTs: (args) =>
-      `(${args[0]}.at(${args[1]}) !== undefined ? { ok: true, value: ${args[0]}.at(${args[1]}) } : { ok: false })`,
-    lowerPy: (args) =>
-      `({"ok": True, "value": ${args[0]}[${args[1]}]} if 0 <= ${args[1]} < len(${args[0]}) else {"ok": False})`,
-  },
-  {
-    id: "RULE_ARR_SLICE",
-    domain: "collection",
-    matches: (op, args) => op === "arr:slice" && args.length === 3,
-    lowerTs: (args) => `${args[0]}.slice(${args[1]}, ${args[2]})`,
-    lowerPy: (args) => `${args[0]}[${args[1]}:${args[2]}]`,
-  },
-  {
-    id: "RULE_ARR_APPEND",
-    domain: "collection",
-    matches: (op, args) => op === "arr:append" && args.length === 2,
-    lowerTs: (args) => `[...${args[0]}, ${args[1]}]`,
-    lowerPy: (args) => `[*${args[0]}, ${args[1]}]`,
-  },
-
-  // --- Strict Arithmetic & Modulo ---
-  {
-    id: "RULE_MATH_ADD",
-    domain: "math",
-    matches: (op, args) => op === "+" && args.length >= 2,
-    lowerTs: (args) => args.join(" + "),
-    lowerPy: (args) => args.join(" + "),
-  },
-  {
-    id: "RULE_MATH_SUB",
-    domain: "math",
-    matches: (op, args) => op === "-" && args.length >= 2,
-    lowerTs: (args) => args.join(" - "),
-    lowerPy: (args) => args.join(" - "),
-  },
-  {
-    id: "RULE_MATH_MUL",
-    domain: "math",
-    matches: (op, args) => op === "*" && args.length >= 2,
-    lowerTs: (args) => args.join(" * "),
-    lowerPy: (args) => args.join(" * "),
-  },
-  {
-    id: "RULE_MATH_DIV",
-    domain: "math",
-    matches: (op, args) => op === "/" && args.length >= 2,
-    lowerTs: (args) => args.join(" / "),
-    lowerPy: (args) => args.join(" / "),
-  },
-  {
-    id: "RULE_MATH_MOD",
-    domain: "math",
-    matches: (op, args) => op === "%" && args.length === 2,
-    lowerTs: (args) => `${args[0]} % ${args[1]}`,
-    lowerPy: (args) => `${args[0]} % ${args[1]}`,
-  },
-
-  // --- Strict Equality & Comparison ---
-  {
-    id: "RULE_LOGIC_EQ",
-    domain: "logic",
-    matches: (op, args) => op === "==" && args.length === 2,
-    lowerTs: (args) => `${args[0]} === ${args[1]}`,
-    lowerPy: (args) => `${args[0]} == ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_NEQ",
-    domain: "logic",
-    matches: (op, args) => op === "!=" && args.length === 2,
-    lowerTs: (args) => `${args[0]} !== ${args[1]}`,
-    lowerPy: (args) => `${args[0]} != ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_LT",
-    domain: "logic",
-    matches: (op, args) => op === "<" && args.length === 2,
-    lowerTs: (args) => `${args[0]} < ${args[1]}`,
-    lowerPy: (args) => `${args[0]} < ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_GT",
-    domain: "logic",
-    matches: (op, args) => op === ">" && args.length === 2,
-    lowerTs: (args) => `${args[0]} > ${args[1]}`,
-    lowerPy: (args) => `${args[0]} > ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_LTE",
-    domain: "logic",
-    matches: (op, args) => op === "<=" && args.length === 2,
-    lowerTs: (args) => `${args[0]} <= ${args[1]}`,
-    lowerPy: (args) => `${args[0]} <= ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_GTE",
-    domain: "logic",
-    matches: (op, args) => op === ">=" && args.length === 2,
-    lowerTs: (args) => `${args[0]} >= ${args[1]}`,
-    lowerPy: (args) => `${args[0]} >= ${args[1]}`,
-  },
-  {
-    id: "RULE_LOGIC_AND",
-    domain: "logic",
-    matches: (op, args) => op === "and" && args.length >= 2,
-    lowerTs: (args) => args.join(" && "),
-    lowerPy: (args) => args.join(" and "),
-  },
-  {
-    id: "RULE_LOGIC_OR",
-    domain: "logic",
-    matches: (op, args) => op === "or" && args.length >= 2,
-    lowerTs: (args) => args.join(" || "),
-    lowerPy: (args) => args.join(" or "),
-  },
-  {
-    id: "RULE_LOGIC_NOT",
-    domain: "logic",
-    matches: (op, args) => op === "not" && args.length === 1,
-    lowerTs: (args) => `!${args[0]}`,
-    lowerPy: (args) => `not ${args[0]}`,
-  },
-];
-
-export class TermRewriter {
-  private rules: TermRewriteRule[] = REWRITE_RULES;
-
-  public registerRule(rule: TermRewriteRule): void {
-    this.rules.unshift(rule);
-  }
-
-  public lowerApply(
-    operator: string,
-    emittedArgs: string[],
-    rawArgs: AilExprNode[],
-    ctx: EmitContext,
-  ): string {
-    for (const rule of this.rules) {
-      if (rule.matches(operator, rawArgs)) {
-        if (ctx.target === "python") {
-          return rule.lowerPy(emittedArgs, rawArgs, ctx);
-        }
-        return rule.lowerTs(emittedArgs, rawArgs, ctx);
-      }
+/**
+ * Attempts to rewrite a member access into target language syntax.
+ * e.g. str.len -> TS: str.length | Python: len(str)
+ */
+export function lowerPropertyAccess(
+  objectCode: string,
+  property: string,
+  target: TargetLanguage,
+): LoweredOperation {
+  if (property === "len" || property === "length") {
+    if (target === "python" || target === "go") {
+      return { isLowered: true, code: `len(${objectCode})` };
     }
-
-    // Default function call emission
-    return `${operator}(${emittedArgs.join(", ")})`;
+    if (target === "rust") {
+      return { isLowered: true, code: `${objectCode}.len()` };
+    }
+    if (target === "cpp") {
+      return { isLowered: true, code: `${objectCode}.size()` };
+    }
+    return { isLowered: true, code: `${objectCode}.length` };
   }
+
+  return { isLowered: false, code: `${objectCode}.${property}` };
+}
+
+/**
+ * Attempts to rewrite a canonical method call into target language idioms.
+ */
+export function lowerMethodCall(
+  objectCode: string,
+  method: string,
+  argCodes: string[],
+  target: TargetLanguage,
+): LoweredOperation {
+  if (target === "python") {
+    switch (method) {
+      case "slice": {
+        const start = argCodes[0] ?? "0";
+        const end = argCodes[1] ? `:${argCodes[1]}` : ":";
+        return { isLowered: true, code: `${objectCode}[${start}${end}]` };
+      }
+      case "at":
+      case "get": {
+        const idx = argCodes[0] ?? "0";
+        return { isLowered: true, code: `${objectCode}[${idx}]` };
+      }
+      case "concat":
+        return { isLowered: true, code: `${objectCode} + ${argCodes[0] ?? "''"}` };
+      case "toInt":
+        return { isLowered: true, code: `int(${objectCode})` };
+      case "floor":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `int(${objectCode})` };
+      case "round":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `round(${objectCode})` };
+      case "ceil":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return {
+          isLowered: true,
+          code: `int(${objectCode}) + (1 if ${objectCode} % 1 > 0 else 0)`,
+        };
+      case "isEmpty":
+        return { isLowered: true, code: `len(${objectCode}) == 0` };
+      case "append":
+        return { isLowered: true, code: `[*${objectCode}, ${argCodes[0] ?? ""}]` };
+      case "first":
+        return { isLowered: true, code: `${objectCode}[0]` };
+      case "last":
+        return { isLowered: true, code: `${objectCode}[-1]` };
+      case "startsWith":
+        return { isLowered: true, code: `${objectCode}.startswith(${argCodes[0] ?? "''"})` };
+      case "endsWith":
+        return { isLowered: true, code: `${objectCode}.endswith(${argCodes[0] ?? "''"})` };
+      case "includes":
+      case "contains":
+        return { isLowered: true, code: `${argCodes[0] ?? "''"} in ${objectCode}` };
+      case "trim":
+        return { isLowered: true, code: `${objectCode}.strip()` };
+      case "split":
+        return { isLowered: true, code: `${objectCode}.split(${argCodes[0] ?? "''"})` };
+      case "toString":
+        return { isLowered: true, code: `str(${objectCode})` };
+      default:
+        return { isLowered: false, code: "" };
+    }
+  }
+
+  if (target === "rust") {
+    switch (method) {
+      case "slice": {
+        const start = argCodes[0] ?? "0";
+        const end = argCodes[1] ? `..${argCodes[1]}` : "..";
+        return { isLowered: true, code: `${objectCode}[${start}${end}].to_vec()` };
+      }
+      case "at":
+      case "get": {
+        const idx = argCodes[0] ?? "0";
+        return { isLowered: true, code: `${objectCode}.get(${idx})` };
+      }
+      case "concat":
+        return { isLowered: true, code: `format!("{}{}", ${objectCode}, ${argCodes[0] ?? '""'})` };
+      case "toInt":
+        return { isLowered: true, code: `${objectCode}.parse::<i64>().unwrap_or(0)` };
+      case "floor":
+        return { isLowered: true, code: `${objectCode}.floor() as i64` };
+      case "round":
+        return { isLowered: true, code: `${objectCode}.round() as i64` };
+      case "ceil":
+        return { isLowered: true, code: `${objectCode}.ceil() as i64` };
+      case "isEmpty":
+        return { isLowered: true, code: `${objectCode}.is_empty()` };
+      case "isOk":
+        return { isLowered: true, code: `${objectCode}.is_ok()` };
+      case "isErr":
+        return { isLowered: true, code: `${objectCode}.is_err()` };
+      case "append":
+        return {
+          isLowered: true,
+          code: `{ let mut v = ${objectCode}.clone(); v.push(${argCodes[0] ?? ""}); v }`,
+        };
+      case "first":
+        return { isLowered: true, code: `${objectCode}.first().cloned()` };
+      case "last":
+        return { isLowered: true, code: `${objectCode}.last().cloned()` };
+      case "startsWith":
+        return { isLowered: true, code: `${objectCode}.starts_with(${argCodes[0] ?? '""'})` };
+      case "endsWith":
+        return { isLowered: true, code: `${objectCode}.ends_with(${argCodes[0] ?? '""'})` };
+      case "includes":
+      case "contains":
+        return { isLowered: true, code: `${objectCode}.contains(${argCodes[0] ?? '""'})` };
+      case "trim":
+        return { isLowered: true, code: `${objectCode}.trim().to_string()` };
+      case "split":
+        return {
+          isLowered: true,
+          code: `${objectCode}.split(${argCodes[0] ?? '""'}).map(|s| s.to_string()).collect::<Vec<String>>()`,
+        };
+      case "toString":
+        return { isLowered: true, code: `${objectCode}.to_string()` };
+      default:
+        return { isLowered: false, code: "" };
+    }
+  }
+
+  if (target === "go") {
+    switch (method) {
+      case "slice": {
+        const start = argCodes[0] ?? "0";
+        const end = argCodes[1] ?? "";
+        return { isLowered: true, code: `${objectCode}[${start}:${end}]` };
+      }
+      case "at":
+      case "get": {
+        const idx = argCodes[0] ?? "0";
+        return { isLowered: true, code: `${objectCode}[${idx}]` };
+      }
+      case "concat":
+        return { isLowered: true, code: `${objectCode} + ${argCodes[0] ?? '""'}` };
+      case "toInt":
+        return { isLowered: true, code: `strconv.ParseInt(${objectCode}, 10, 64)` };
+      case "floor":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `int64(math.Floor(${objectCode}))` };
+      case "round":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `int64(math.Round(${objectCode}))` };
+      case "ceil":
+        if (objectCode === "math" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `int64(math.Ceil(${objectCode}))` };
+      case "isEmpty":
+        return { isLowered: true, code: `len(${objectCode}) == 0` };
+      case "append":
+        return { isLowered: true, code: `append(${objectCode}, ${argCodes[0] ?? ""})` };
+      case "first":
+        return { isLowered: true, code: `${objectCode}[0]` };
+      case "last":
+        return { isLowered: true, code: `${objectCode}[len(${objectCode})-1]` };
+      case "startsWith":
+        return {
+          isLowered: true,
+          code: `strings.HasPrefix(${objectCode}, ${argCodes[0] ?? '""'})`,
+        };
+      case "endsWith":
+        return {
+          isLowered: true,
+          code: `strings.HasSuffix(${objectCode}, ${argCodes[0] ?? '""'})`,
+        };
+      case "includes":
+      case "contains":
+        return { isLowered: true, code: `strings.Contains(${objectCode}, ${argCodes[0] ?? '""'})` };
+      case "trim":
+        return { isLowered: true, code: `strings.TrimSpace(${objectCode})` };
+      case "split":
+        return { isLowered: true, code: `strings.Split(${objectCode}, ${argCodes[0] ?? '""'})` };
+      case "toString":
+        return { isLowered: true, code: `fmt.Sprintf("%v", ${objectCode})` };
+      default:
+        return { isLowered: false, code: "" };
+    }
+  }
+
+  if (target === "cpp") {
+    switch (method) {
+      case "at":
+      case "get": {
+        const idx = argCodes[0] ?? "0";
+        return { isLowered: true, code: `${objectCode}[${idx}]` };
+      }
+      case "floor":
+        if (objectCode === "std" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `std::floor(${objectCode})` };
+      case "round":
+        if (objectCode === "std" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `std::round(${objectCode})` };
+      case "ceil":
+        if (objectCode === "std" || objectCode === "Math") {
+          return { isLowered: false, code: "" };
+        }
+        return { isLowered: true, code: `std::ceil(${objectCode})` };
+      case "min":
+        return { isLowered: true, code: `std::min(${objectCode}, ${argCodes[0] ?? "0"})` };
+      case "max":
+        return { isLowered: true, code: `std::max(${objectCode}, ${argCodes[0] ?? "0"})` };
+      case "clamp":
+        return { isLowered: true, code: `std::clamp(${objectCode}, ${argCodes[0] ?? "0"}, ${argCodes[1] ?? "0"})` };
+      case "isEmpty":
+        return { isLowered: true, code: `${objectCode}.empty()` };
+      case "first":
+        return { isLowered: true, code: `${objectCode}.front()` };
+      case "last":
+        return { isLowered: true, code: `${objectCode}.back()` };
+      case "push":
+      case "append":
+        return { isLowered: true, code: `${objectCode}.push_back(${argCodes[0] ?? ""})` };
+      case "pop":
+        return { isLowered: true, code: `${objectCode}.pop_back()` };
+      case "toInt":
+        return { isLowered: true, code: `static_cast<int>(${objectCode})` };
+      case "toFloat":
+        return { isLowered: true, code: `static_cast<float>(${objectCode})` };
+      default:
+        return { isLowered: false, code: "" };
+    }
+  }
+
+  // TypeScript / JavaScript Lowering
+  switch (method) {
+    case "slice":
+      return {
+        isLowered: true,
+        code: `${objectCode}.slice(${argCodes.join(", ")})`,
+      };
+    case "at":
+      return {
+        isLowered: true,
+        code: `${objectCode}.at(${argCodes[0] ?? "0"})`,
+      };
+    case "get":
+      return {
+        isLowered: true,
+        code: `(${objectCode}.at(${argCodes[0] ?? "0"}) ?? null)`,
+      };
+    case "concat":
+      return {
+        isLowered: true,
+        code: `${objectCode} + ${argCodes[0] ?? "''"}`,
+      };
+    case "toInt":
+      return {
+        isLowered: true,
+        code: `Number.parseInt(${objectCode}, 10)`,
+      };
+    case "floor":
+      if (objectCode === "Math") {
+        return { isLowered: false, code: "" };
+      }
+      return {
+        isLowered: true,
+        code: `Math.floor(${objectCode})`,
+      };
+    case "round":
+      if (objectCode === "Math") {
+        return { isLowered: false, code: "" };
+      }
+      return {
+        isLowered: true,
+        code: `Math.round(${objectCode})`,
+      };
+    case "ceil":
+      if (objectCode === "Math") {
+        return { isLowered: false, code: "" };
+      }
+      return {
+        isLowered: true,
+        code: `Math.ceil(${objectCode})`,
+      };
+    case "isEmpty":
+      return {
+        isLowered: true,
+        code: `${objectCode}.length === 0`,
+      };
+    case "append":
+      return {
+        isLowered: true,
+        code: `[...${objectCode}, ${argCodes[0] ?? ""}]`,
+      };
+    case "first":
+      return {
+        isLowered: true,
+        code: `(${objectCode}[0] ?? null)`,
+      };
+    case "last":
+      return {
+        isLowered: true,
+        code: `(${objectCode}.at(-1) ?? null)`,
+      };
+    case "startsWith":
+      return {
+        isLowered: true,
+        code: `${objectCode}.startsWith(${argCodes[0] ?? "''"})`,
+      };
+    case "endsWith":
+      return {
+        isLowered: true,
+        code: `${objectCode}.endsWith(${argCodes[0] ?? "''"})`,
+      };
+    case "includes":
+    case "contains":
+      return {
+        isLowered: true,
+        code: `${objectCode}.includes(${argCodes[0] ?? "''"})`,
+      };
+    case "trim":
+      return {
+        isLowered: true,
+        code: `${objectCode}.trim()`,
+      };
+    case "split":
+      return {
+        isLowered: true,
+        code: `${objectCode}.split(${argCodes[0] ?? "''"})`,
+      };
+    case "toString":
+      return {
+        isLowered: true,
+        code: `${objectCode}.toString()`,
+      };
+    default:
+      return { isLowered: false, code: "" };
+  }
+}
+
+/**
+ * Lowers algebraic constructors (Ok, Err, Some).
+ */
+export function lowerConstructor(
+  name: string,
+  argCodes: string[],
+  target: TargetLanguage,
+): LoweredOperation {
+  if (name === "Ok") {
+    const val = argCodes[0] ?? "()";
+    if (target === "rust") {
+      return { isLowered: true, code: `Ok(${val})` };
+    }
+    if (target === "go") {
+      return { isLowered: true, code: `${val}, nil` };
+    }
+    if (target === "python") {
+      return { isLowered: true, code: `{"ok": True, "value": ${val}}` };
+    }
+    return { isLowered: true, code: `{ ok: true, value: ${val} }` };
+  }
+
+  if (name === "Err") {
+    const err = argCodes[0] ?? "()";
+    if (target === "rust") {
+      return { isLowered: true, code: `Err(${err})` };
+    }
+    if (target === "go") {
+      return { isLowered: true, code: `fmt.Errorf("%v", ${err})` };
+    }
+    if (target === "python") {
+      return { isLowered: true, code: `{"ok": False, "error": ${err}}` };
+    }
+    return { isLowered: true, code: `{ ok: false, error: ${err} }` };
+  }
+
+  if (name === "Some") {
+    if (target === "rust") {
+      return { isLowered: true, code: `Some(${argCodes[0] ?? "()"})` };
+    }
+    if (target === "go") {
+      return { isLowered: true, code: `&${argCodes[0] ?? ""}` };
+    }
+    return { isLowered: true, code: argCodes[0] ?? "null" };
+  }
+
+  if (name === "None") {
+    if (target === "rust") {
+      return { isLowered: true, code: "None" };
+    }
+    if (target === "go") {
+      return { isLowered: true, code: "nil" };
+    }
+    if (target === "python") {
+      return { isLowered: true, code: "None" };
+    }
+    return { isLowered: true, code: "null" };
+  }
+
+  return { isLowered: false, code: "" };
 }
