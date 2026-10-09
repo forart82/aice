@@ -1,30 +1,6 @@
-;; Production React 19 Modern Dashboard Metric Card Component
-(@module ui/dashboard-card
-  (# MetricCard
-    (%
-      title !s
-      currentValue !f
-      previousValue !f
-      trend !s
-      isPositive !b
-    )
-    (< div (. class "relative overflow-hidden rounded-2xl bg-slate-900/90 p-6 border border-slate-800 shadow-xl" .)
-      (< header (. class "flex items-center justify-between" .)
-        (< h3 (. class "text-sm font-semibold text-slate-400 tracking-wider uppercase" .)
-          (!val title)
-        >)
-        (< span (. class "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400" .)
-          (!val trend)
-        >)
-      >)
-      (< div (. class "mt-4 flex items-baseline gap-2" .)
-        (< span (. class "text-3xl font-extrabold text-white tracking-tight" .)
-          (!val currentValue)
-        >)
-        (< span (. class "text-xs font-medium text-slate-500" .)
-          !str "vs last cycle"
-        >)
-      >)
-    >)
-  )
-)
+component DashboardCard(title: str, badge: str, description: str):
+  .card-container:
+    .card-header:
+      h2.card-title: title
+      span.card-badge: badge
+    p.card-body: description

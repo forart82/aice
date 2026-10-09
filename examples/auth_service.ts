@@ -1,10 +1,12 @@
-export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
-
 export interface UserSession {
   sessionId: string;
   userId: string;
   role: string;
   createdAt: number;
+}
+
+export function UserSession(sessionId: string, userId: string, role: string, createdAt: number): UserSession {
+  return { sessionId, userId, role, createdAt };
 }
 
 export interface AuthRequest {
@@ -13,24 +15,24 @@ export interface AuthRequest {
   rememberMe: boolean;
 }
 
-export interface AuthResponse {
-  token: string;
-  session: UserSession;
+export function AuthRequest(username: string, password: string, rememberMe: boolean): AuthRequest {
+  return { username, password, rememberMe };
 }
 
-export function sanitizeUsername(raw: string): string {
+export function sanitize(raw: string): string {
   return raw.slice(0, 24);
 }
 
-export function validatePassword(password: string): Result<boolean, string> {
-  return (password.length < 8 ? { ok: false, error: "Password must be at least 8 characters" } : { ok: true, value: true });
+export function validatePassword(pass: string): unknown | unknown {
+  if ((pass.length < 8)) {
+    return { ok: false, error: "Password too short" };
+  }
+  return { ok: true, value: true };
 }
 
-export function authenticateUser(req: AuthRequest, currentTimestamp: number): Result<AuthResponse, string> {
-  const cleanUsername = sanitizeUsername(req.username);
-  const __res_1 = validatePassword(req.password);
-  if (!__res_1.ok) return __res_1;
-  const isPasswordValid = __res_1.value;
-  const session = { sessionId: "sess_" + cleanUsername, userId: cleanUsername, role: "member", createdAt: currentTimestamp };
-  return { ok: true, value: { token: "jwt_" + cleanUsername, session: session } };
+export function authenticateUser(req: AuthRequest): unknown | unknown {
+  const valid = validatePassword(req.password).value;
+  const cleanUser = sanitize(req.username);
+  const session = { sessionId: ("sess_" + cleanUser), userId: cleanUser, role: "member", createdAt: 1711929600 };
+  return { ok: true, value: session };
 }

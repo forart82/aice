@@ -1,10 +1,24 @@
-;; High-performance Python backend service
-(@module examples/server
-  (: TaskItem
-    (% id !s title !s done !b)
-  )
+type HealthResponse:
+  status: str
+  uptime: int
+  version: str
 
-  (! formatTitle (-> (title !s) !s)
-    (str:slice title 0 50)
-  )
-)
+type Config:
+  host: str
+  port: int
+  debug: bool
+
+fn checkStatus(healthy: bool) -> str:
+  if healthy:
+    ret "HEALTHY"
+  else:
+    ret "DEGRADED"
+
+fn getSystemHealth(uptimeSeconds: int) -> HealthResponse:
+  let statusText = checkStatus(uptimeSeconds > 0)
+  let res = {
+    status: statusText,
+    uptime: uptimeSeconds,
+    version: "2.0.0"
+  }
+  ret res

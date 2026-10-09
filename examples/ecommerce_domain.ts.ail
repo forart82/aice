@@ -1,0 +1,329 @@
+type Address: street:!s, city:!s, province:!s, postalCode:!s, country:!s, isResidential:!b
+type Money: amountInCents:!i, currencyCode:!s
+type TaxRate: jurisdiction:!s, basisPoints:!i, isCompound:!b
+type DiscountCode: code:!s, discountType:!s, valueInCentsOrPercent:!i, minimumSubtotalCents:!i, expiresAtTimestamp:!i, isActive:!b
+type ProductVariant: sku:!s, title:!s, priceCents:!i, weightGrams:!i, inventoryCount:!i, isDigital:!b
+type ProductCategory: categoryId:!s, name:!s, parentCategoryId:!s, taxExempt:!b
+type InventoryItem: sku:!s, warehouseId:!s, availableQuantity:!i, reservedQuantity:!i, reorderThreshold:!i
+type CustomerProfile: customerId:!s, email:!s, tier:!s, lifetimeSpendCents:!i, orderCount:!i, isSuspended:!b
+type CartItem: sku:!s, quantity:!i, unitPriceCents:!i, discountCents:!i
+type ShoppingCart: cartId:!s, customerId:!s, items:[CartItem], appliedDiscount:!s, createdAt:!i
+type ShippingRate: carrier:!s, serviceLevel:!s, baseCostCents:!i, perKilogramCents:!i, estimatedDays:!i
+type PaymentDetails: paymentId:!s, provider:!s, amountCents:!i, lastFourDigits:!s, isAuthorized:!b
+type FraudScore: riskScore:!i, riskLevel:!s, reasons:[!s]
+type AuditEntry: auditId:!s, action:!s, entityType:!s, entityId:!s, actorId:!s, timestamp:!i
+type InvoiceItem: description:!s, quantity:!i, unitCents:!i, totalCents:!i
+type InvoiceSummary: invoiceNumber:!s, orderId:!s, subtotalCents:!i, taxCents:!i, shippingCents:!i, totalCents:!i, issuedAt:!i
+type WarehouseLocation: warehouseId:!s, name:!s, region:!s, capacityUnits:!i, activeOrders:!i
+type CarrierConfig: carrierCode:!s, apiUrl:!s, accountNumber:!s, trackingUrlTemplate:!s
+
+fn createMoney(amount:int, currency:str) -> Money = Money(amount, currency)
+
+fn formatCurrency(m:Money) -> str:
+  let dollars = (m.amountInCents / 100).floor()
+  let cents = m.amountInCents % 100
+  let sign = ""
+  if m.amountInCents < 0:
+    let sign = "-"
+  m.currencyCode + " " + sign + dollars.toString() + "." + cents.toString()
+
+fn addMoney(a:Money, b:Money) -> Result[Money, !s]:
+  if a.currencyCode != b.currencyCode:
+    ret Err("Currency mismatch in addMoney")
+  let sum = a.amountInCents + b.amountInCents
+  Ok(createMoney(sum, a.currencyCode))
+
+fn subtractMoney(a:Money, b:Money) -> Result[Money, !s]:
+  if a.currencyCode != b.currencyCode:
+    ret Err("Currency mismatch in subtractMoney")
+  let diff = a.amountInCents - b.amountInCents
+  Ok(createMoney(diff, a.currencyCode))
+
+fn multiplyMoney(m:Money, factor:int) -> Money:
+  let total = m.amountInCents * factor
+  createMoney(total, m.currencyCode)
+
+fn calculateSalesTax(subtotal:Money, rate:TaxRate) -> Money:
+  let taxCents = ((subtotal.amountInCents * rate.basisPoints) / 10000).floor()
+  createMoney(taxCents, subtotal.currencyCode)
+
+fn validateSku(sku:str) -> bool:
+  if sku.len < 6:
+    ret false
+  if sku.len > 24:
+    ret false
+  ret true
+
+fn isExpired(code:DiscountCode, currentTimestamp:int) -> bool:
+  if not code.isActive:
+    ret true
+  if code.expiresAtTimestamp <= 0:
+    ret false
+  ret currentTimestamp > code.expiresAtTimestamp
+
+fn calculateDiscount(subtotal:Money, code:DiscountCode, currentTimestamp:int) -> Result[Money, !s]:
+  if isExpired(code, currentTimestamp):
+    ret Err("Discount code expired")
+  if subtotal.amountInCents < code.minimumSubtotalCents:
+    ret Err("Subtotal does not meet minimum requirement")
+  if code.discountType == "PERCENT":
+    let deduction = ((subtotal.amountInCents * code.valueInCentsOrPercent) / 100).floor()
+    ret Ok(createMoney(deduction, subtotal.currencyCode))
+  elif code.discountType == "FIXED":
+    let deduction = code.valueInCentsOrPercent
+    if deduction > subtotal.amountInCents:
+      let deduction = subtotal.amountInCents
+    ret Ok(createMoney(deduction, subtotal.currencyCode))
+  else:
+    ret Err("Unknown discount type")
+
+fn evaluateCustomerTier(lifetimeSpendCents:int, orderCount:int) -> str:
+  if lifetimeSpendCents >= 500000 and orderCount >= 20:
+    ret "PLATINUM"
+  elif lifetimeSpendCents >= 200000 or orderCount >= 10:
+    ret "GOLD"
+  elif lifetimeSpendCents >= 50000 or orderCount >= 3:
+    ret "SILVER"
+  else:
+    ret "BRONZE"
+
+fn calculateLoyaltyPoints(spend:Money, tier:str) -> int:
+  let baseDollars = (spend.amountInCents / 100).floor()
+  if tier == "PLATINUM":
+    ret baseDollars * 3
+  elif tier == "GOLD":
+    ret baseDollars * 2
+  elif tier == "SILVER":
+    ret ((baseDollars * 15) / 10).floor()
+  else:
+    ret baseDollars
+
+fn isStockAvailable(item:InventoryItem, requestedQty:int) -> bool:
+  let netAvailable = item.availableQuantity - item.reservedQuantity
+  ret netAvailable >= requestedQty
+
+fn reserveStock(item:InventoryItem, qty:int) -> Result[InventoryItem, !s]:
+  if not isStockAvailable(item, qty):
+    ret Err("Insufficient inventory to reserve")
+  let updated = {
+    sku: item.sku,
+    warehouseId: item.warehouseId,
+    availableQuantity: item.availableQuantity,
+    reservedQuantity: item.reservedQuantity + qty,
+    reorderThreshold: item.reorderThreshold
+  }
+  ret Ok(updated)
+
+fn releaseStock(item:InventoryItem, qty:int) -> InventoryItem:
+  let newReserved = item.reservedQuantity - qty
+  if newReserved < 0:
+    let newReserved = 0
+  let updated = {
+    sku: item.sku,
+    warehouseId: item.warehouseId,
+    availableQuantity: item.availableQuantity,
+    reservedQuantity: newReserved,
+    reorderThreshold: item.reorderThreshold
+  }
+  ret updated
+
+fn commitStock(item:InventoryItem, qty:int) -> Result[InventoryItem, !s]:
+  if item.reservedQuantity < qty:
+    ret Err("Cannot commit more stock than reserved")
+  let updated = {
+    sku: item.sku,
+    warehouseId: item.warehouseId,
+    availableQuantity: item.availableQuantity - qty,
+    reservedQuantity: item.reservedQuantity - qty,
+    reorderThreshold: item.reorderThreshold
+  }
+  ret Ok(updated)
+
+fn checkReorderNeeded(item:InventoryItem) -> bool:
+  let net = item.availableQuantity - item.reservedQuantity
+  ret net <= item.reorderThreshold
+
+fn calculateItemTotal(item:CartItem) -> int:
+  let raw = item.quantity * item.unitPriceCents
+  let net = raw - item.discountCents
+  if net < 0:
+    ret 0
+  ret net
+
+fn calculateCartSubtotalCents(items:[CartItem]) -> int:
+  let mut sum = 0
+  for item in items:
+    sum = sum + calculateItemTotal(item)
+  ret sum
+
+fn calculateCartWeightGrams(items:[CartItem], avgWeightPerItem:int) -> int:
+  let mut totalCount = 0
+  for item in items:
+    totalCount = totalCount + item.quantity
+  ret totalCount * avgWeightPerItem
+
+fn calculateShippingCost(weightGrams:int, distanceKm:int, rate:ShippingRate) -> Money:
+  let weightKg = (weightGrams / 1000).floor()
+  if weightGrams % 1000 > 0:
+    let weightKg = weightKg + 1
+  let variableCost = weightKg * rate.perKilogramCents
+  let distanceFactor = (distanceKm / 100).floor()
+  let totalCents = rate.baseCostCents + variableCost + (distanceFactor * 50)
+  ret createMoney(totalCents, "USD")
+
+fn validateOrderTransition(currentStatus:str, nextStatus:str) -> bool:
+  if currentStatus == "PENDING":
+    ret nextStatus == "AUTHORIZED" or nextStatus == "CANCELLED"
+  elif currentStatus == "AUTHORIZED":
+    ret nextStatus == "PROCESSING" or nextStatus == "VOIDED"
+  elif currentStatus == "PROCESSING":
+    ret nextStatus == "SHIPPED" or nextStatus == "CANCELLED"
+  elif currentStatus == "SHIPPED":
+    ret nextStatus == "DELIVERED" or nextStatus == "RETURNED"
+  elif currentStatus == "DELIVERED":
+    ret nextStatus == "REFUNDED" or nextStatus == "COMPLETED"
+  else:
+    ret false
+
+fn calculateRiskScore(profile:CustomerProfile, amountCents:int, isNewAddress:bool) -> FraudScore:
+  let mut score = 0
+  let mut reasons: [!s] = []
+  if profile.isSuspended:
+    score = score + 90
+    reasons = reasons.append("Customer account is currently suspended")
+  if amountCents > 100000:
+    score = score + 30
+    reasons = reasons.append("High single transaction amount exceeding $1000")
+  if isNewAddress and profile.orderCount == 0:
+    score = score + 25
+    reasons = reasons.append("First time customer ordering to unverified shipping address")
+  if profile.orderCount > 10 and profile.lifetimeSpendCents > 200000:
+    score = score - 20
+    reasons = reasons.append("Established customer with high lifetime spend")
+  if score < 0:
+    score = 0
+  let mut level = "LOW"
+  if score >= 75:
+    level = "CRITICAL"
+  elif score >= 50:
+    level = "HIGH"
+  elif score >= 25:
+    level = "MEDIUM"
+  let res = {
+    riskScore: score,
+    riskLevel: level,
+    reasons
+  }
+  ret res
+
+fn generateInvoiceNumber(orderId:str, issuedTimestamp:int) -> str = "INV-" + orderId + "-" + issuedTimestamp.toString()
+
+fn calculateLineItemTotal(quantity:int, unitCents:int) -> InvoiceItem:
+  let total = quantity * unitCents
+  ret InvoiceItem("Standard Merchandise", quantity, unitCents, total)
+
+fn buildInvoiceSummary(invoiceNum:str, orderId:str, subtotal:int, tax:int, shipping:int, timestamp:int) -> InvoiceSummary:
+  let grandTotal = subtotal + tax + shipping
+  ret InvoiceSummary(invoiceNum, orderId, subtotal, tax, shipping, grandTotal, timestamp)
+
+fn formatAuditEntry(entry:AuditEntry) -> str = "[" + entry.timestamp.toString() + "] Actor " + entry.actorId + " executed " + entry.action + " on " + entry.entityType + ":" + entry.entityId
+
+fn isWarehouseOverCapacity(wh:WarehouseLocation) -> bool = wh.activeOrders >= wh.capacityUnits
+
+fn calculateWarehouseLoadPercent(wh:WarehouseLocation) -> int:
+  if wh.capacityUnits == 0:
+    ret 100
+  ret ((wh.activeOrders * 100) / wh.capacityUnits).floor()
+
+fn generateTrackingUrl(template:str, trackingNumber:str) -> str = template + trackingNumber
+
+fn createCustomer(id:str, email:str) -> CustomerProfile = CustomerProfile(id, email, "BRONZE", 0, 0, false)
+
+fn updateCustomerSpend(profile:CustomerProfile, spendCents:int) -> CustomerProfile:
+  let newSpend = profile.lifetimeSpendCents + spendCents
+  let newCount = profile.orderCount + 1
+  let newTier = evaluateCustomerTier(newSpend, newCount)
+  let updated = { ...profile, tier: newTier, lifetimeSpendCents: newSpend, orderCount: newCount }
+  updated
+
+fn suspendCustomer(profile:CustomerProfile, reason:str) -> CustomerProfile:
+  let updated = { ...profile, isSuspended: true }
+  updated
+
+fn reinstateCustomer(profile:CustomerProfile) -> CustomerProfile:
+  let updated = { ...profile, isSuspended: false }
+  updated
+
+fn sanitizeAddress(rawStreet:str, rawCity:str, rawPostal:str) -> Address:
+  let cleanStreet = rawStreet.trim()
+  let cleanCity = rawCity.trim()
+  let cleanPostal = rawPostal.trim()
+  Address(cleanStreet, cleanCity, "CA", cleanPostal, "USA", true)
+
+fn isDomesticShipment(dest:Address, originCountry:str) -> bool = dest.country == originCountry
+
+fn estimateDeliveryDate(shipTimestamp:int, transitDays:int) -> int = shipTimestamp + (transitDays * 86400)
+
+fn createProductVariant(sku:str, title:str, priceCents:int, weight:int) -> ProductVariant = ProductVariant(sku, title, priceCents, weight, 100, false)
+
+fn createDigitalProductVariant(sku:str, title:str, priceCents:int) -> ProductVariant = ProductVariant(sku, title, priceCents, 0, 999999, true)
+
+fn computeBulkDiscount(quantity:int, basePriceCents:int) -> int:
+  if quantity >= 100:
+    ((basePriceCents * 20) / 100).floor()
+  elif quantity >= 50:
+    ((basePriceCents * 15) / 100).floor()
+  elif quantity >= 20:
+    ((basePriceCents * 10) / 100).floor()
+  elif quantity >= 10:
+    ((basePriceCents * 5) / 100).floor()
+  else:
+    0
+
+fn calculateFinalCartItemPrice(quantity:int, unitPriceCents:int) -> CartItem:
+  let discountPerUnit = computeBulkDiscount(quantity, unitPriceCents)
+  let totalDiscount = discountPerUnit * quantity
+  CartItem("AUTO-SKU", quantity, unitPriceCents, totalDiscount)
+
+fn isEligibleForFreeShipping(subtotalCents:int, thresholdCents:int) -> bool = subtotalCents >= thresholdCents
+
+fn applyTaxExemption(rate:TaxRate, category:ProductCategory) -> TaxRate:
+  if category.taxExempt:
+    let zeroTax = { ...rate, basisPoints: 0, isCompound: false }
+    zeroTax
+  else:
+    rate
+
+fn calculateCompoundedTax(subtotalCents:int, stateRate:TaxRate, municipalRate:TaxRate) -> int:
+  let stateTax = ((subtotalCents * stateRate.basisPoints) / 10000).floor()
+  let taxableBase = subtotalCents
+  if stateRate.isCompound:
+    let taxableBase = taxableBase + stateTax
+  let municipalTax = ((taxableBase * municipalRate.basisPoints) / 10000).floor()
+  stateTax + municipalTax
+
+fn formatReceiptLine(sku:str, title:str, qty:int, cents:int) -> str:
+  let dollars = (cents / 100).floor()
+  let frac = cents % 100
+  sku + " - " + title + " x" + qty.toString() + " = $" + dollars.toString() + "." + frac.toString()
+
+fn parseCurrencyCode(raw:str) -> Result[!s, !s]:
+  let clean = raw.trim()
+  if clean == "USD" or clean == "EUR" or clean == "GBP" or clean == "CAD":
+    Ok(clean)
+  else:
+    Err("Unsupported currency code")
+
+fn calculateRestockingFee(itemPriceCents:int, isOpened:bool) -> int:
+  if isOpened:
+    ((itemPriceCents * 15) / 100).floor()
+  else:
+    ((itemPriceCents * 5) / 100).floor()
+
+fn computeNetRefundCents(paidCents:int, feeCents:int) -> int:
+  let net = paidCents - feeCents
+  if net < 0:
+    0
+  else:
+    net
+

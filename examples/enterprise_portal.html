@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Unified Cloud Observability and Stream Processing Control Plane">
+    <title>Enterprise Cloud Observability &amp; Stream Control Plane</title>
+    <link rel="stylesheet" href="enterprise_theme.css">
+    <script src="enterprise_portal.js" defer></script>
+  </head>
+  <body class="app-shell">
+    <header class="top-navbar">
+      <div class="navbar-brand-section">
+        <div class="brand-logo-wrapper">
+          <span class="brand-icon">⚡</span>
+          <span class="brand-name">AIL CloudOps</span>
+        </div>
+        <span class="badge badge-env-prod">PRODUCTION</span>
+        <span class="badge badge-region">us-east-1 (N. Virginia)</span>
+      </div>
+      <div class="navbar-search-section">
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input class="search-input" type="text" placeholder="Search services, traces, metrics, deployments (Press ⌘K)">
+          <span class="shortcut-hint">⌘K</span>
+        </div>
+      </div>
+      <div class="navbar-actions-section">
+        <button class="btn btn-icon" id="btn-theme-toggle">
+          <span class="icon">🌙</span>
+        </button>
+        <button class="btn btn-icon notification-bell" id="btn-notifications">
+          <span class="icon">🔔</span>
+          <span class="notification-count-badge">3</span>
+        </button>
+        <div class="cluster-selector-dropdown">
+          <span class="cluster-status-dot dot-online">●</span>
+          <span class="cluster-label">k8s-prod-us-east-core-01</span>
+          <span class="dropdown-chevron">▾</span>
+        </div>
+        <div class="user-profile-widget">
+          <div class="avatar-circle">FA</div>
+          <div class="user-meta">
+            <span class="user-display-name">Principal Staff SRE</span>
+            <span class="tenant-badge">FinTech Platform Core</span>
+          </div>
+        </div>
+      </div>
+    </header>
+    <div class="layout-workspace">
+      <aside class="navigation-sidebar">
+        <div class="sidebar-section">
+          <span class="section-heading">OBSERVABILITY</span>
+          <ul class="nav-menu">
+            <li class="nav-item active">
+              <span class="nav-icon">📊</span>
+              <span class="nav-label">Live Telemetry</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">🌊</span>
+              <span class="nav-label">Stream Pipelines</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">📡</span>
+              <span class="nav-label">Service Mesh</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">🔍</span>
+              <span class="nav-label">Distributed Traces</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">📝</span>
+              <span class="nav-label">Structured Logs</span>
+            </li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <span class="section-heading">INFRASTRUCTURE</span>
+          <ul class="nav-menu">
+            <li class="nav-item">
+              <span class="nav-icon">☸️</span>
+              <span class="nav-label">Kubernetes Clusters</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">📦</span>
+              <span class="nav-label">Pod Replicas</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">💾</span>
+              <span class="nav-label">Storage Volumes</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">🌐</span>
+              <span class="nav-label">Ingress Load Balancers</span>
+            </li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <span class="section-heading">INCIDENT RESPONSE</span>
+          <ul class="nav-menu">
+            <li class="nav-item">
+              <span class="nav-icon">🚨</span>
+              <span class="nav-label">PagerDuty Alerts</span>
+              <span class="pill-badge-alert">2 Active</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">📖</span>
+              <span class="nav-label">Automated Runbooks</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">🛡️</span>
+              <span class="nav-label">Chaos Engineering</span>
+            </li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <span class="section-heading">GOVERNANCE &amp; SETTINGS</span>
+          <ul class="nav-menu">
+            <li class="nav-item">
+              <span class="nav-icon">🔐</span>
+              <span class="nav-label">IAM &amp; Access Roles</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">📜</span>
+              <span class="nav-label">Compliance Audits</span>
+            </li>
+            <li class="nav-item">
+              <span class="nav-icon">⚙️</span>
+              <span class="nav-label">Platform Config</span>
+            </li>
+          </ul>
+        </div>
+        <div class="sidebar-footer">
+          <div class="system-status-indicator">
+            <span class="status-pulse-dot">●</span>
+            <span class="status-text">All 42 Systems Operational</span>
+          </div>
+          <span class="agent-version">AIL Runtime v2.4.0-rc3</span>
+        </div>
+      </aside>
+      <main class="main-content-viewport">
+        <div class="page-header-row">
+          <div class="header-title-block">
+            <h1 class="page-heading">Global Streaming Telemetry &amp; Mesh Fleet</h1>
+            <p class="page-subheading">Real-time distributed stream ingestion, microservice P99 SLAs, and automated anomaly routing</p>
+          </div>
+          <div class="header-action-group">
+            <button class="btn btn-secondary" id="btn-export-telemetry">
+              <span class="btn-icon">📥</span>
+              <span class="btn-text">Export Telemetry (CSV)</span>
+            </button>
+            <button class="btn btn-primary" id="btn-trigger-checkpoint">
+              <span class="btn-icon">💾</span>
+              <span class="btn-text">Trigger Checkpoint</span>
+            </button>
+            <button class="btn btn-danger" id="btn-quarantine-mode">
+              <span class="btn-icon">⚠️</span>
+              <span class="btn-text">Quarantine Shards</span>
+            </button>
+          </div>
+        </div>
+        <section class="kpi-grid-container">
+          <div class="kpi-card">
+            <div class="kpi-top-row">
+              <span class="kpi-title">INGESTION THROUGHPUT</span>
+              <span class="kpi-badge badge-trend-up">+14.6%</span>
+            </div>
+            <div class="kpi-value-row">
+              <span class="kpi-metric-number">842,510</span>
+              <span class="kpi-metric-unit">events/sec</span>
+            </div>
+            <div class="kpi-progress-bar-track">
+              <div class="kpi-progress-fill" style="width: 78%"></div>
+            </div>
+            <div class="kpi-bottom-legend">
+              <span class="kpi-subtitle">Peak: 1,050,000 rps</span>
+              <span class="kpi-status-ok">Nominal</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-top-row">
+              <span class="kpi-title">SERVICE MESH P99 LATENCY</span>
+              <span class="kpi-badge badge-trend-down">-3.2ms</span>
+            </div>
+            <div class="kpi-value-row">
+              <span class="kpi-metric-number">14.2</span>
+              <span class="kpi-metric-unit">milliseconds</span>
+            </div>
+            <div class="kpi-progress-bar-track">
+              <div class="kpi-progress-fill progress-fill-emerald" style="width: 24%"></div>
+            </div>
+            <div class="kpi-bottom-legend">
+              <span class="kpi-subtitle">SLA Target: &lt; 45.0ms</span>
+              <span class="kpi-status-ok">Within SLO</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-top-row">
+              <span class="kpi-title">ERROR BUDGET BURN RATE</span>
+              <span class="kpi-badge badge-trend-stable">0.02x</span>
+            </div>
+            <div class="kpi-value-row">
+              <span class="kpi-metric-number">99.994</span>
+              <span class="kpi-metric-unit">% availability</span>
+            </div>
+            <div class="kpi-progress-bar-track">
+              <div class="kpi-progress-fill progress-fill-blue" style="width: 98%"></div>
+            </div>
+            <div class="kpi-bottom-legend">
+              <span class="kpi-subtitle">Budget Remaining: 89.4%</span>
+              <span class="kpi-status-ok">30-Day Window</span>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-top-row">
+              <span class="kpi-title">ACTIVE STREAM WORKERS</span>
+              <span class="kpi-badge badge-nodes">128 / 128</span>
+            </div>
+            <div class="kpi-value-row">
+              <span class="kpi-metric-number">100</span>
+              <span class="kpi-metric-unit">% online</span>
+            </div>
+            <div class="kpi-progress-bar-track">
+              <div class="kpi-progress-fill progress-fill-purple" style="width: 100%"></div>
+            </div>
+            <div class="kpi-bottom-legend">
+              <span class="kpi-subtitle">0 Failed Replicas</span>
+              <span class="kpi-status-ok">Autoscaling Idle</span>
+            </div>
+          </div>
+        </section>
+        <section class="toolbar-filter-section">
+          <div class="filter-control-group">
+            <label class="filter-label">Service Filter:</label>
+            <select class="filter-select" id="filter-service-tier">
+              <option value="all">All Microservices (18 Services)</option>
+              <option value="tier0">Tier 0 Critical Path</option>
+              <option value="tier1">Tier 1 Streaming &amp; Queues</option>
+              <option value="tier2">Tier 2 Analytical Ingestion</option>
+            </select>
+          </div>
+          <div class="filter-control-group">
+            <label class="filter-label">Time Window:</label>
+            <div class="button-toggle-group">
+              <button class="btn-toggle active">15m</button>
+              <button class="btn-toggle">1h</button>
+              <button class="btn-toggle">6h</button>
+              <button class="btn-toggle">24h</button>
+              <button class="btn-toggle">7d</button>
+            </div>
+          </div>
+          <div class="filter-control-group">
+            <label class="filter-label">Region:</label>
+            <select class="filter-select" id="filter-region">
+              <option value="all">Global Multi-Region</option>
+              <option value="us-east-1">us-east-1 (Virginia)</option>
+              <option value="eu-central-1">eu-central-1 (Frankfurt)</option>
+              <option value="ap-northeast-1">ap-northeast-1 (Tokyo)</option>
+            </select>
+          </div>
+        </section>
+        <section class="data-table-container">
+          <div class="table-header-bar">
+            <div class="table-title-area">
+              <h2 class="table-title">Microservice Fleet Health &amp; Latency Budget</h2>
+              <span class="table-subtitle">Auto-refreshed every 2000ms via WebSocket telemetry stream</span>
+            </div>
+            <div class="table-actions">
+              <input class="table-quick-search" type="search" placeholder="Quick filter table...">
+            </div>
+          </div>
+          <div class="table-responsive-wrapper">
+            <table class="enterprise-table">
+              <thead>
+                <tr>
+                  <th>SERVICE NAME</th>
+                  <th>VERSION</th>
+                  <th>TIER</th>
+                  <th>REPLICAS</th>
+                  <th>P50 LATENCY</th>
+                  <th>P95 LATENCY</th>
+                  <th>P99 LATENCY</th>
+                  <th>ERROR RATE</th>
+                  <th>THROUGHPUT</th>
+                  <th>STATUS</th>
+                  <th>ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">auth-identity-service</span>
+                    <span class="service-type-tag">gRPC</span>
+                  </td>
+                  <td>v3.18.2</td>
+                  <td>
+                    <span class="badge badge-tier-0">Tier 0</span>
+                  </td>
+                  <td>16 / 16</td>
+                  <td>1.8ms</td>
+                  <td>4.2ms</td>
+                  <td>8.9ms</td>
+                  <td>0.001%</td>
+                  <td>64,200 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">order-orchestrator-api</span>
+                    <span class="service-type-tag">REST</span>
+                  </td>
+                  <td>v4.2.0</td>
+                  <td>
+                    <span class="badge badge-tier-0">Tier 0</span>
+                  </td>
+                  <td>24 / 24</td>
+                  <td>4.6ms</td>
+                  <td>11.2ms</td>
+                  <td>18.4ms</td>
+                  <td>0.003%</td>
+                  <td>48,150 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">stream-processor-engine</span>
+                    <span class="service-type-tag">AIL Pipeline</span>
+                  </td>
+                  <td>v2.4.0</td>
+                  <td>
+                    <span class="badge badge-tier-0">Tier 0</span>
+                  </td>
+                  <td>32 / 32</td>
+                  <td>0.9ms</td>
+                  <td>2.1ms</td>
+                  <td>5.4ms</td>
+                  <td>0.000%</td>
+                  <td>420,000 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">payment-gateway-relay</span>
+                    <span class="service-type-tag">TLS / PCI</span>
+                  </td>
+                  <td>v2.9.1</td>
+                  <td>
+                    <span class="badge badge-tier-0">Tier 0</span>
+                  </td>
+                  <td>12 / 12</td>
+                  <td>12.4ms</td>
+                  <td>28.5ms</td>
+                  <td>42.1ms</td>
+                  <td>0.012%</td>
+                  <td>8,920 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">fraud-scoring-evaluator</span>
+                    <span class="service-type-tag">ML / Rust</span>
+                  </td>
+                  <td>v1.14.7</td>
+                  <td>
+                    <span class="badge badge-tier-1">Tier 1</span>
+                  </td>
+                  <td>20 / 20</td>
+                  <td>3.2ms</td>
+                  <td>7.8ms</td>
+                  <td>14.6ms</td>
+                  <td>0.002%</td>
+                  <td>32,400 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">telemetry-collector-agent</span>
+                    <span class="service-type-tag">OTel / Go</span>
+                  </td>
+                  <td>v0.94.0</td>
+                  <td>
+                    <span class="badge badge-tier-1">Tier 1</span>
+                  </td>
+                  <td>64 / 64</td>
+                  <td>0.4ms</td>
+                  <td>1.1ms</td>
+                  <td>2.8ms</td>
+                  <td>0.000%</td>
+                  <td>850,000 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">inventory-ledger-worker</span>
+                    <span class="service-type-tag">EventStore</span>
+                  </td>
+                  <td>v3.0.4</td>
+                  <td>
+                    <span class="badge badge-tier-1">Tier 1</span>
+                  </td>
+                  <td>10 / 10</td>
+                  <td>5.1ms</td>
+                  <td>12.8ms</td>
+                  <td>22.3ms</td>
+                  <td>0.004%</td>
+                  <td>19,800 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">dead-letter-quarantine</span>
+                    <span class="service-type-tag">DLQ SQS</span>
+                  </td>
+                  <td>v1.2.0</td>
+                  <td>
+                    <span class="badge badge-tier-2">Tier 2</span>
+                  </td>
+                  <td>4 / 4</td>
+                  <td>1.2ms</td>
+                  <td>3.4ms</td>
+                  <td>6.8ms</td>
+                  <td>0.000%</td>
+                  <td>142 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">audit-compliance-logger</span>
+                    <span class="service-type-tag">WORM S3</span>
+                  </td>
+                  <td>v2.1.1</td>
+                  <td>
+                    <span class="badge badge-tier-2">Tier 2</span>
+                  </td>
+                  <td>8 / 8</td>
+                  <td>6.4ms</td>
+                  <td>15.0ms</td>
+                  <td>31.2ms</td>
+                  <td>0.001%</td>
+                  <td>55,200 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="col-service-name">
+                    <span class="service-name-text">notification-dispatch-bus</span>
+                    <span class="service-type-tag">Kafka</span>
+                  </td>
+                  <td>v2.6.5</td>
+                  <td>
+                    <span class="badge badge-tier-2">Tier 2</span>
+                  </td>
+                  <td>12 / 12</td>
+                  <td>2.3ms</td>
+                  <td>5.8ms</td>
+                  <td>11.7ms</td>
+                  <td>0.005%</td>
+                  <td>14,300 rps</td>
+                  <td>
+                    <span class="status-pill status-healthy">HEALTHY</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action">Inspect</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="dashboard-dual-split-section">
+          <div class="panel-box panel-anomalies">
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <span class="panel-icon">⚠️</span>
+                <h3 class="panel-title">Live Z-Score Anomaly Feed</h3>
+              </div>
+              <span class="badge badge-warning">4 Detected in 1h</span>
+            </div>
+            <ul class="anomaly-list">
+              <li class="anomaly-item">
+                <div class="anomaly-meta">
+                  <span class="anomaly-time">14:22:04.118</span>
+                  <span class="badge badge-danger">Critical (z=4.2)</span>
+                </div>
+                <p class="anomaly-desc">Metric stream-processor-engine.varianceSpike exceeded 3-sigma tolerance (+4.2σ)</p>
+                <div class="anomaly-footer">
+                  <span class="trace-link">Trace ID: 7f8a91c0b4d241ea</span>
+                  <button class="btn-ack">Acknowledge</button>
+                </div>
+              </li>
+              <li class="anomaly-item">
+                <div class="anomaly-meta">
+                  <span class="anomaly-time">14:18:51.842</span>
+                  <span class="badge badge-warning">Warning (z=3.1)</span>
+                </div>
+                <p class="anomaly-desc">Metric payment-gateway-relay.p99Latency rose to 42.1ms (Historical baseline 18.0ms)</p>
+                <div class="anomaly-footer">
+                  <span class="trace-link">Trace ID: 1a92e4fc88031d2b</span>
+                  <button class="btn-ack">Acknowledge</button>
+                </div>
+              </li>
+              <li class="anomaly-item">
+                <div class="anomaly-meta">
+                  <span class="anomaly-time">14:02:11.390</span>
+                  <span class="badge badge-info">Notice (z=2.8)</span>
+                </div>
+                <p class="anomaly-desc">Late event watermark lag spike in partition-04: 12.4s delayed arrival</p>
+                <div class="anomaly-footer">
+                  <span class="trace-link">Trace ID: c824b01fe4882199</span>
+                  <button class="btn-ack">Acknowledge</button>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <div class="panel-box panel-incidents">
+            <div class="panel-header">
+              <div class="panel-title-group">
+                <span class="panel-icon">🚨</span>
+                <h3 class="panel-title">Active Incident Command &amp; Runbooks</h3>
+              </div>
+              <span class="badge badge-neutral">Zero P1 Outages</span>
+            </div>
+            <div class="incident-card-container">
+              <div class="incident-card incident-card-low">
+                <div class="incident-card-top">
+                  <span class="badge badge-sev-p3">SEV-3</span>
+                  <span class="incident-id">INC-8842</span>
+                  <span class="incident-duration">Elapsed: 28m</span>
+                </div>
+                <h4 class="incident-card-heading">Minor Kafka Lag on Consumer Group analytics-batch-indexer</h4>
+                <p class="incident-card-body">Lag reached 14,200 records on partition 11. Consumer instances auto-healing.</p>
+                <div class="incident-assignee">
+                  <span class="assignee-avatar">JD</span>
+                  <span class="assignee-name">John Doe (On-Call SRE)</span>
+                </div>
+                <div class="incident-action-row">
+                  <button class="btn btn-sm btn-outline">View War Room</button>
+                  <button class="btn btn-sm btn-primary">Execute Auto-Scale Runbook</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        <section class="partition-checkpoint-section">
+          <div class="panel-box">
+            <div class="panel-header">
+              <h3 class="panel-title">Stream Partition Watermarks &amp; Checkpoint Offsets</h3>
+              <span class="checkpoint-badge">Last Epoch Checkpoint: 42s ago</span>
+            </div>
+            <div class="partition-table-wrapper">
+              <table class="partition-table">
+                <thead>
+                  <tr>
+                    <th>PARTITION</th>
+                    <th>LEADER BROKER</th>
+                    <th>HEAD OFFSET</th>
+                    <th>COMMITTED</th>
+                    <th>LAG</th>
+                    <th>WATERMARK LAG</th>
+                    <th>HEALTH</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>shard-partition-00</td>
+                    <td>broker-us-east-1a</td>
+                    <td>18,492,010</td>
+                    <td>18,492,010</td>
+                    <td>0 records</td>
+                    <td>120ms</td>
+                    <td>
+                      <span class="tag-online">ACTIVE</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>shard-partition-01</td>
+                    <td>broker-us-east-1a</td>
+                    <td>19,104,821</td>
+                    <td>19,104,815</td>
+                    <td>6 records</td>
+                    <td>140ms</td>
+                    <td>
+                      <span class="tag-online">ACTIVE</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>shard-partition-02</td>
+                    <td>broker-us-east-1b</td>
+                    <td>17,820,443</td>
+                    <td>17,820,443</td>
+                    <td>0 records</td>
+                    <td>115ms</td>
+                    <td>
+                      <span class="tag-online">ACTIVE</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>shard-partition-03</td>
+                    <td>broker-us-east-1c</td>
+                    <td>21,049,180</td>
+                    <td>21,049,178</td>
+                    <td>2 records</td>
+                    <td>135ms</td>
+                    <td>
+                      <span class="tag-online">ACTIVE</span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+        <footer class="app-footer">
+          <div class="footer-left">
+            <span class="legal-text">© 2026 AIL Autonomous Infrastructure Labs. All rights reserved.</span>
+            <span class="footer-divider">|</span>
+            <span class="soc2-badge">SOC-2 Type II Certified</span>
+            <span class="footer-divider">|</span>
+            <span class="iso-badge">ISO/IEC 27001 Compliant</span>
+          </div>
+          <div class="footer-right">
+            <span class="telemetry-ping">Edge Ping: 3ms</span>
+            <span class="engine-hash">Build: sha-e84b12c</span>
+            <span class="runtime-env">Cluster: k8s-prod-us-east-core-01</span>
+          </div>
+        </footer>
+      </main>
+    </div>
+    <div class="modal-backdrop hidden" id="modal-create-alert">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h3 class="modal-title">Create Automated Anomaly Alert Rule</h3>
+          <button class="modal-close-btn">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Target Metric Stream</label>
+            <input class="form-input" type="text" placeholder="e.g. stream-processor-engine.varianceEma">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Threshold Standard Deviations (Sigma)</label>
+            <input class="form-input" type="number" value="3.5" step="0.1">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notification Target Channel</label>
+            <select class="form-select">
+              <option>#sre-critical-incidents</option>
+              <option>#stream-telemetry-alerts</option>
+              <option>PagerDuty P1 On-Call Service</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary">Cancel</button>
+          <button class="btn btn-primary">Save and Arm Alert</button>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

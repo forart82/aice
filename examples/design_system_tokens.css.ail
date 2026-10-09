@@ -1,0 +1,133 @@
+style root_variables:
+  tokens font:
+    sans: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+    mono: "'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace"
+  tokens color.slate:
+    950: #020617, 900: #0f172a, 850: #131f37, 800: #1e293b, 700: #334155, 600: #475569
+    500: #64748b, 400: #94a3b8, 300: #cbd5e1, 200: #e2e8f0, 100: #f1f5f9, 50: #f8fafc
+  tokens color.emerald: 500: #10b981, 400: #34d399, 900: #064e3b
+  tokens color.rose: 500: #f43f5e, 400: #fb7185, 900: #881337
+  tokens color.amber: 500: #f59e0b, 400: #fbbf24, 900: #78350f
+  tokens color.indigo: 500: #6366f1, 400: #818cf8, 900: #312e81
+  tokens color.purple: 500: #a855f7, 400: #c084fc, 900: #581c87
+  tokens spacing:
+    0: 0px, 1: 0.25rem, 2: 0.5rem, 3: 0.75rem, 4: 1.0rem, 5: 1.25rem, 6: 1.5rem
+    8: 2.0rem, 10: 2.5rem, 12: 3.0rem, 16: 4.0rem, 20: 5.0rem
+  tokens radius: xs: 2px, sm: 4px, md: 6px, lg: 8px, xl: 12px, 2xl: 16px, full: 9999px
+  tokens shadow:
+    sm: "0 1px 2px 0 rgba(0, 0, 0, 0.05)"
+    md: "0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -2px rgba(0, 0, 0, 0.15)"
+    lg: "0 10px 15px -3px rgba(0, 0, 0, 0.3), 0 4px 6px -4px rgba(0, 0, 0, 0.2)"
+    xl: "0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 8px 10px -6px rgba(0, 0, 0, 0.3)"
+    glow-indigo: "0 0 15px rgba(99, 102, 241, 0.35)"
+    glow-emerald: "0 0 15px rgba(16, 185, 129, 0.35)"
+    glow-rose: "0 0 15px rgba(244, 63, 94, 0.35)"
+  tokens transition:
+    fast: "all 120ms cubic-bezier(0.4, 0, 0.2, 1)"
+    normal: "all 200ms cubic-bezier(0.4, 0, 0.2, 1)"
+    smooth: "all 300ms cubic-bezier(0.16, 1, 0.3, 1)"
+  tokens z: nav: 100, dropdown: 200, modal: 500, tooltip: 1000
+
+style html: bsz: border-box; fz: 16px; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; tr: optimizeLegibility; sb: smooth
+style body: m: 0; p: 0; f: var(--font-sans); bg: var(--color-slate-950); c: var(--color-slate-100); min-h: 100vh; lh: 1.5
+style box_sizing_reset: bsz: inherit; m: 0; p: 0
+style h1: fz: 1.875rem; fw: 700; lh: 1.25; ls: -0.025em; c: var(--color-slate-50); mb: 0.5rem
+style h2: fz: 1.5rem; fw: 600; lh: 1.3; ls: -0.02em; c: var(--color-slate-100); mb: 0.5rem
+style h3: fz: 1.25rem; fw: 600; lh: 1.35; ls: -0.015em; c: var(--color-slate-200); mb: 0.375rem
+style h4: fz: 1.0rem; fw: 600; lh: 1.4; c: var(--color-slate-200); mb: 0.25rem
+style p: fz: 0.875rem; lh: 1.5; c: var(--color-slate-400); mt: 0; mb: 0.75rem
+style a: c: var(--color-indigo-400); td: none; trans: var(--transition-fast)
+style a_hover: c: var(--color-indigo-300); td: underline
+style code_element: f: var(--font-mono); fz: 0.8125rem; p: 0.15rem 0.35rem; rad: var(--radius-sm); bg: var(--color-slate-800); c: var(--color-indigo-300); b: 1px solid var(--color-slate-700)
+style pre_block: f: var(--font-mono); fz: 0.8125rem; p: 1.0rem; rad: var(--radius-md); bg: var(--color-slate-900); b: 1px solid var(--color-slate-800); ov-x: auto; lh: 1.6
+style hr_divider: b: 0; h: 1px; bg: var(--color-slate-800); m: 1.5rem 0
+style table_base: w: 100%; bcp: collapse; bsp: 0; fz: 0.875rem; ta: left
+style th_base: p: 0.75rem 1.0rem; fw: 600; fz: 0.75rem; ls: 0.05em; tt: uppercase; c: var(--color-slate-400); bg: var(--color-slate-900); bb: 1px solid var(--color-slate-750)
+style td_base: p: 0.75rem 1.0rem; bb: 1px solid var(--color-slate-800); c: var(--color-slate-200); va: middle
+style input_base: f: inherit; fz: 0.875rem; p: 0.5rem 0.75rem; rad: var(--radius-md); b: 1px solid var(--color-slate-700); bg: var(--color-slate-900); c: var(--color-slate-100); out: none; trans: var(--transition-fast)
+style input_focus: bc: var(--color-indigo-500); sh: 0 0 0 2px rgba(99, 102, 241, 0.25)
+style button_base: f: inherit; fz: 0.875rem; fw: 500; p: 0.5rem 1.0rem; rad: var(--radius-md); b: 1px solid transparent; cur: pointer; disp: inline-flex; ai: center; jc: center; gap: 0.5rem; trans: var(--transition-fast); us: none
+style select_base: f: inherit; fz: 0.875rem; p: 0.5rem 2.0rem 0.5rem 0.75rem; rad: var(--radius-md); b: 1px solid var(--color-slate-700); bg: var(--color-slate-900); c: var(--color-slate-100); cur: pointer; out: none; trans: var(--transition-fast)
+style select_focus: bc: var(--color-indigo-500); sh: 0 0 0 2px rgba(99, 102, 241, 0.25)
+style badge_base: disp: inline-flex; ai: center; p: 0.2rem 0.55rem; fz: 0.75rem; fw: 600; lh: 1; rad: var(--radius-full); ls: 0.025em
+style elevation_flat: sh: none
+style elevation_sm: sh: var(--shadow-sm)
+style elevation_md: sh: var(--shadow-md)
+style elevation_lg: sh: var(--shadow-lg)
+style elevation_xl: sh: var(--shadow-xl)
+style card_base: bg: var(--color-slate-900); b: 1px solid var(--color-slate-800); rad: var(--radius-lg); p: 1.25rem; sh: var(--shadow-md); trans: var(--transition-normal)
+style card_hoverable: bc: var(--color-slate-700); sh: var(--shadow-lg)
+style flex_row: disp: flex; fld: row; ai: center
+style flex_column: disp: flex; fld: column
+style flex_between: disp: flex; jc: space-between; ai: center
+style flex_center: disp: flex; ai: center; jc: center
+style grid_layout_2: disp: grid; gtc: repeat(2, 1fr); gap: 1.0rem
+style grid_layout_4: disp: grid; gtc: repeat(4, 1fr); gap: 1.0rem
+style grid_layout_12: disp: grid; gtc: repeat(12, 1fr); gap: 1.0rem
+style scrollbar_custom: sbw: thin; sbc: var(--color-slate-700) var(--color-slate-900)
+style text_truncate: ov: hidden; to: ellipsis; ws: nowrap
+style text_uppercase: tt: uppercase; ls: 0.05em
+style text_bold: fw: 700
+style text_semibold: fw: 600
+style text_medium: fw: 500
+style text_muted: c: var(--color-slate-400)
+style text_primary: c: var(--color-slate-100)
+style text_success: c: var(--color-emerald-400)
+style text_warning: c: var(--color-amber-400)
+style text_danger: c: var(--color-rose-400)
+style text_info: c: var(--color-indigo-400)
+style bg_slate_900: bg: var(--color-slate-900)
+style bg_slate_850: bg: var(--color-slate-850)
+style bg_slate_800: bg: var(--color-slate-800)
+style border_slate_800: b: 1px solid var(--color-slate-800)
+style border_slate_700: b: 1px solid var(--color-slate-700)
+style rounded_sm: rad: var(--radius-sm)
+style rounded_md: rad: var(--radius-md)
+style rounded_lg: rad: var(--radius-lg)
+style rounded_full: rad: var(--radius-full)
+style gap_1: gap: var(--spacing-1)
+style gap_2: gap: var(--spacing-2)
+style gap_3: gap: var(--spacing-3)
+style gap_4: gap: var(--spacing-4)
+style gap_6: gap: var(--spacing-6)
+style p_2: p: var(--spacing-2)
+style p_3: p: var(--spacing-3)
+style p_4: p: var(--spacing-4)
+style p_6: p: var(--spacing-6)
+style m_0: m: 0
+style mb_2: mb: var(--spacing-2)
+style mb_4: mb: var(--spacing-4)
+style mb_6: mb: var(--spacing-6)
+style w_full: w: 100%
+style h_full: h: 100%
+style cursor_pointer: cur: pointer
+style user_select_none: us: none
+style overflow_hidden: ov: hidden
+style position_relative: pos: relative
+style position_absolute: pos: absolute
+style position_fixed: pos: fixed
+style display_none: disp: none
+style display_block: disp: block
+style display_inline_block: disp: inline-block
+style display_flex: disp: flex
+style display_grid: disp: grid
+style align_center: ai: center
+style justify_center: jc: center
+style justify_between: jc: space-between
+style flex_1: fl: 1 1 0%
+style flex_shrink_0: fls: 0
+style opacity_50: op: 0.5
+style opacity_75: op: 0.75
+style opacity_100: op: 1.0
+style pulse_animation: anim: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite
+style spin_animation: anim: spin 1s linear infinite
+style tooltip_container: pos: absolute; z: var(--z-tooltip); p: 0.35rem 0.65rem; fz: 0.75rem; c: var(--color-slate-100); bg: var(--color-slate-900); b: 1px solid var(--color-slate-700); rad: var(--radius-sm); sh: var(--shadow-lg); pe: none; ws: nowrap
+style status_dot_base: w: 8px; h: 8px; rad: var(--radius-full); disp: inline-block
+style status_dot_emerald: bg: var(--color-emerald-400); sh: 0 0 6px rgba(52, 211, 153, 0.6)
+style status_dot_amber: bg: var(--color-amber-400); sh: 0 0 6px rgba(251, 191, 36, 0.6)
+style status_dot_rose: bg: var(--color-rose-400); sh: 0 0 6px rgba(251, 113, 133, 0.6)
+style divider_vertical: w: 1px; h: 1.25rem; bg: var(--color-slate-750); m: 0 0.5rem
+style kbd_badge: f: var(--font-mono); fz: 0.75rem; fw: 500; p: 0.15rem 0.4rem; rad: var(--radius-xs); bg: var(--color-slate-800); b: 1px solid var(--color-slate-700); c: var(--color-slate-400)
+style glass_panel: bg: rgba(15, 23, 42, 0.75); bdf: blur(12px); -webkit-backdrop-filter: blur(12px); b: 1px solid rgba(255, 255, 255, 0.08); rad: var(--radius-xl)
+style skeleton_shimmer: background: linear-gradient(90deg, var(--color-slate-800) 25%, var(--color-slate-700) 50%, var(--color-slate-800) 75%); background_size: 200% 100%; anim: shimmer 1.5s infinite; rad: var(--radius-md)
+

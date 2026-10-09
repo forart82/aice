@@ -1,34 +1,25 @@
-;; Production-grade Authentication & Session Management Service
-(@module auth/service
-  (: UserSession
-    (% sessionId !s userId !s role !s createdAt !i)
-  )
+module examples/auth_service
 
-  (: AuthRequest
-    (% username !s password !s rememberMe !b)
-  )
+type UserSession:
+  sessionId:str
+  userId:str
+  role:str
+  createdAt:int
 
-  (: AuthResponse
-    (% token !s session UserSession)
-  )
+type AuthRequest:
+  username:str
+  password:str
+  rememberMe:bool
 
-  (! sanitizeUsername (-> (raw !s) !s)
-    (str:slice raw 0 24)
-  )
+fn sanitize(raw:str) -> str = raw.slice(0, 24)
 
-  (! validatePassword (-> (password !s) Result[!b, !s])
-    (?if (< (str:len password) 8)
-      (% ok false error "Password must be at least 8 characters")
-      (% ok true value true)
-    )
-  )
+fn validatePassword(pass:str) -> unknown | unknown:
+  if pass.length < 8:
+    ret { ok: false, error: "Password too short" }
+  { ok: true, value: true }
 
-  (! authenticateUser (-> (req AuthRequest currentTimestamp !i) Result[AuthResponse, !s])
-    (do
-      (:= cleanUsername (sanitizeUsername req.username))
-      (:= isPasswordValid (? (validatePassword req.password)))
-      (:= session (% sessionId (str:concat "sess_" cleanUsername) userId cleanUsername role "member" createdAt currentTimestamp))
-      (% ok true value (% token (str:concat "jwt_" cleanUsername) session session))
-    )
-  )
-)
+fn authenticateUser(req:AuthRequest) -> unknown | unknown:
+  let valid = validatePassword(req.password).value
+  let cleanUser = sanitize(req.username)
+  let session = { sessionId: "sess_" + cleanUser, userId: cleanUser, role: "member", createdAt: 1711929600 }
+  { ok: true, value: session }

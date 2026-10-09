@@ -1,15 +1,15 @@
-;; Marketing landing page
-(@module examples/page
-  (# LandingPage
-    (< html (. lang "en" .)
-      (< head
-        (< meta (. charset "UTF-8" .) >)
-        (< title !str "AIL: Next-Gen Language" >)
-      >)
-      (< body
-        (< h1 !str "Welcome to AIL" >)
-        (< p !str "Homoiconic, token-efficient, zero hallucinations." >)
-      >)
-    >)
-  )
-)
+component LandingPage():
+  html(lang: "en"):
+    head:
+      meta(charset: "utf-8")
+      meta(name: "viewport", content: "width=device-width, initial-scale=1")
+      title: "AIL 2.0 Web Application"
+      link(rel: "stylesheet", href: "style.css")
+    body:
+      header.site-header:
+        h1: "Welcome to AIL"
+        p: "The high-entropy token-efficient programming language."
+      main.content:
+        section.features:
+          h2: "Features"
+          p: "Lossless roundtripping and zero-hallucination canonical APIs."

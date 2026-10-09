@@ -1,11 +1,22 @@
-from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, TypedDict
 
-@dataclass
-class TaskItem:
-    id: str
-    title: str
-    done: bool
+class HealthResponse(TypedDict):
+    status: str
+    uptime: int
+    version: str
 
-def formatTitle(title: str) -> str:
-    return title[0:50]
+class Config(TypedDict):
+    host: str
+    port: int
+    debug: bool
+
+def checkStatus(healthy: bool) -> str:
+    if healthy:
+        return "HEALTHY"
+    else:
+        return "DEGRADED"
+
+def getSystemHealth(uptimeSeconds: int) -> HealthResponse:
+    statusText = checkStatus((uptimeSeconds > 0))
+    res = {"status": statusText, "uptime": uptimeSeconds, "version": "2.0.0"}
+    return res

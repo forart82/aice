@@ -1,19 +1,2 @@
-;; Theme styles
-(@module examples/style
-  (& container
-    (.
-      display "flex"
-      max-width "1200px"
-      margin "0 auto"
-      padding "16px"
-    .)
-  )
-  (& button
-    (.
-      background "#0070f3"
-      color "#ffffff"
-      border-radius "6px"
-      padding "10px 20px"
-    .)
-  )
-)
+style container: disp: flex; max-w: 1200px; m: 0 auto; p: 16px
+style button: bkg: #0070f3; c: #ffffff; rad: 6px; p: 10px 20px
