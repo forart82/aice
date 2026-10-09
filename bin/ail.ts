@@ -23,6 +23,7 @@ import {
 } from "../src/tokenomics/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
+  attemptSelfRepair,
   buildReportFromError,
   formatDiagnosticJson,
   formatDiagnosticText,
@@ -33,7 +34,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.2.3");
+  .version("0.2.4");
 
 // Command: compile <file>
 program
@@ -45,7 +46,8 @@ program
     "-t, --target <target>",
     "Explicit target language (typescript, tsx, python, html, css, rust, go)",
   )
-  .action((file: string, options: { out?: string; target?: string }) => {
+  .option("--fix", "Autonomously repair fixable errors before compiling")
+  .action((file: string, options: { out?: string; target?: string; fix?: boolean }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -53,7 +55,20 @@ program
         process.exit(1);
       }
 
-      const source = fs.readFileSync(fullPath, "utf-8");
+      let source = fs.readFileSync(fullPath, "utf-8");
+
+      if (options.fix) {
+        const repairRes = attemptSelfRepair(source, file);
+        if (repairRes.fixed && repairRes.modified) {
+          fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
+          console.log(`💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`);
+          for (const r of repairRes.repairs) {
+            console.log(`  - ${r.description}`);
+          }
+          source = repairRes.finalSource;
+        }
+      }
+
       const mod = parse(source, file);
 
       // Sound type check
@@ -214,7 +229,8 @@ program
   .description("Verify syntactic and type soundness of an .ail file without emitting")
   .argument("<file>", "Path to the .ail source file")
   .option("--json", "Output machine-readable telemetry JSON for LLM autonomous self-repair")
-  .action((file: string, options: { json?: boolean }) => {
+  .option("--fix", "Autonomously repair fixable violations before verification")
+  .action((file: string, options: { json?: boolean; fix?: boolean }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -244,7 +260,22 @@ program
         process.exit(1);
       }
 
-      const source = fs.readFileSync(fullPath, "utf-8");
+      let source = fs.readFileSync(fullPath, "utf-8");
+
+      if (options.fix) {
+        const repairRes = attemptSelfRepair(source, file);
+        if (repairRes.fixed && repairRes.modified) {
+          fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
+          if (!options.json) {
+            console.log(`💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`);
+            for (const r of repairRes.repairs) {
+              console.log(`  - ${r.description}`);
+            }
+          }
+          source = repairRes.finalSource;
+        }
+      }
+
       const mod = parse(source, file);
       const tc = new TypeChecker();
       tc.checkModule(mod);
@@ -270,6 +301,70 @@ program
       } else {
         console.error(formatDiagnosticText(report));
       }
+      process.exit(1);
+    }
+  });
+
+// Command: fix <file>
+program
+  .command("fix")
+  .description("Autonomously repair syntax, immutability, and type violations in an .ail file")
+  .argument("<file>", "Path to the .ail source file to repair")
+  .option("--dry-run", "Display candidate repairs and unified diffs without modifying disk")
+  .option("--json", "Output machine-readable JSON repair telemetry")
+  .action((file: string, options: { dryRun?: boolean; json?: boolean }) => {
+    try {
+      const fullPath = path.resolve(process.cwd(), file);
+      if (!fs.existsSync(fullPath)) {
+        console.error(`❌ Error: Source file not found: ${file}`);
+        process.exit(1);
+      }
+
+      const source = fs.readFileSync(fullPath, "utf-8");
+      const res = attemptSelfRepair(source, file);
+
+      if (options.json) {
+        console.log(JSON.stringify(res, null, 2));
+        if (!res.fixed) process.exit(1);
+        return;
+      }
+
+      if (res.fixed && !res.modified) {
+        console.log(
+          `✔ Source file is already sound: ${file} passed all checks with zero repairs needed.`,
+        );
+        return;
+      }
+
+      if (res.fixed && res.modified) {
+        if (!options.dryRun) {
+          fs.writeFileSync(fullPath, res.finalSource, "utf-8");
+          console.log(
+            `✔ Autonomous self-repair applied successfully to ${file} (${res.iterations} iteration(s)):`,
+          );
+        } else {
+          console.log(
+            `💡 [DRY-RUN] Candidate repairs for ${file} (${res.iterations} iteration(s)):`,
+          );
+        }
+        for (const r of res.repairs) {
+          console.log(`  - ${r.description}`);
+          if (options.dryRun) {
+            console.log(`\n${r.patch}\n`);
+          }
+        }
+        return;
+      }
+
+      console.error(
+        `❌ Autonomous self-repair could not completely resolve all violations in ${file}:`,
+      );
+      if (res.error) {
+        console.error(formatDiagnosticText(res.error));
+      }
+      process.exit(1);
+    } catch (err) {
+      console.error(`❌ Error during self-repair:`, err);
       process.exit(1);
     }
   });

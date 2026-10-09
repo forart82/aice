@@ -7,9 +7,9 @@
  */
 
 import { LexerError } from "../core/lexer.js";
-import { ParserError } from "../core/parser.js";
+import { parse, ParserError } from "../core/parser.js";
 import { emptySpan, type Span } from "../core/span.js";
-import { TypeCheckError } from "./checker.js";
+import { TypeCheckError, TypeChecker } from "./checker.js";
 import { formatType } from "./types.js";
 
 export type DiagnosticPhase = "LEXING" | "PARSING" | "TYPECHECKING" | "VERIFICATION";
@@ -160,6 +160,20 @@ export function generateCandidateRepair(
     }
   }
 
+  // 5. Missing ':' at block or header definition
+  if (message.includes("Expected ':'")) {
+    const lineToFix = Math.max(0, span.start.line - (span.start.column === 1 ? 2 : 1));
+    const targetLine = lines[lineToFix];
+    if (targetLine && !targetLine.trimEnd().endsWith(":")) {
+      const patchedLine = `${targetLine.trimEnd()}:`;
+      const patch = `--- ${file}\n+++ ${file}\n@@ -${lineToFix + 1},1 +${lineToFix + 1},1 @@\n-${targetLine}\n+${patchedLine}`;
+      return {
+        description: "Append missing colon ':' to block header",
+        patch,
+      };
+    }
+  }
+
   return undefined;
 }
 
@@ -256,4 +270,157 @@ export function formatDiagnosticText(report: DiagnosticReport): string {
  */
 export function formatDiagnosticJson(report: DiagnosticReport): string {
   return JSON.stringify(report, null, 2);
+}
+
+/**
+ * Applies a unified diff patch to a source string deterministically.
+ */
+export function applyUnifiedDiffPatch(source: string, patch: string): string {
+  const patchLines = patch.split(/\r?\n/);
+  const sourceLines = source.split(/\r?\n/);
+
+  const hunkRegex = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+  interface Hunk {
+    oldStart: number;
+    oldCount: number;
+    newStart: number;
+    newCount: number;
+    lines: string[];
+  }
+
+  const hunks: Hunk[] = [];
+  let currentHunk: Hunk | null = null;
+
+  for (const line of patchLines) {
+    const match = line.match(hunkRegex);
+    if (match) {
+      if (currentHunk) hunks.push(currentHunk);
+      currentHunk = {
+        oldStart: Number.parseInt(match[1], 10),
+        oldCount: match[2] !== undefined ? Number.parseInt(match[2], 10) : 1,
+        newStart: Number.parseInt(match[3], 10),
+        newCount: match[4] !== undefined ? Number.parseInt(match[4], 10) : 1,
+        lines: [],
+      };
+    } else if (
+      currentHunk &&
+      (line.startsWith("-") || line.startsWith("+") || line.startsWith(" "))
+    ) {
+      currentHunk.lines.push(line);
+    }
+  }
+  if (currentHunk) hunks.push(currentHunk);
+
+  if (hunks.length === 0) return source;
+
+  // Apply hunks in reverse order (bottom to top) to preserve line indices
+  hunks.sort((a, b) => b.oldStart - a.oldStart);
+
+  for (const hunk of hunks) {
+    const startIdx = hunk.oldStart - 1;
+    const toRemove = hunk.oldCount;
+    const replacementLines: string[] = [];
+    for (const hl of hunk.lines) {
+      if (hl.startsWith("+")) {
+        replacementLines.push(hl.slice(1));
+      } else if (hl.startsWith(" ")) {
+        replacementLines.push(hl.slice(1));
+      }
+      // '-' lines are dropped
+    }
+    sourceLines.splice(startIdx, toRemove, ...replacementLines);
+  }
+
+  return sourceLines.join("\n");
+}
+
+export interface SelfRepairResult {
+  fixed: boolean;
+  modified: boolean;
+  iterations: number;
+  finalSource: string;
+  repairs: CandidateRepair[];
+  error?: DiagnosticReport;
+}
+
+/**
+ * Autonomously repairs an .ail source string using synthesized candidate diagnostic patches.
+ * Evaluates parse & typecheck in a loop until the source compiles cleanly or maxIterations is reached.
+ */
+export function attemptSelfRepair(
+  source: string,
+  file = "<anonymous>",
+  maxIterations = 5,
+): SelfRepairResult {
+  let currentSource = source;
+  const appliedRepairs: CandidateRepair[] = [];
+
+  for (let iteration = 0; iteration < maxIterations; iteration++) {
+    try {
+      const mod = parse(currentSource, file);
+      const tc = new TypeChecker();
+      tc.checkModule(mod);
+
+      return {
+        fixed: true,
+        modified: appliedRepairs.length > 0,
+        iterations: iteration,
+        finalSource: currentSource,
+        repairs: appliedRepairs,
+      };
+    } catch (err) {
+      const report = buildReportFromError(err, currentSource, file);
+      const repair = report.primary_diagnostic?.candidate_repair;
+
+      if (!repair) {
+        return {
+          fixed: false,
+          modified: appliedRepairs.length > 0,
+          iterations: iteration,
+          finalSource: currentSource,
+          repairs: appliedRepairs,
+          error: report,
+        };
+      }
+
+      const patched = applyUnifiedDiffPatch(currentSource, repair.patch);
+      if (patched === currentSource) {
+        return {
+          fixed: false,
+          modified: appliedRepairs.length > 0,
+          iterations: iteration,
+          finalSource: currentSource,
+          repairs: appliedRepairs,
+          error: report,
+        };
+      }
+
+      appliedRepairs.push(repair);
+      currentSource = patched;
+    }
+  }
+
+  // Final validation after loop
+  try {
+    const mod = parse(currentSource, file);
+    const tc = new TypeChecker();
+    tc.checkModule(mod);
+    return {
+      fixed: true,
+      modified: true,
+      iterations: maxIterations,
+      finalSource: currentSource,
+      repairs: appliedRepairs,
+    };
+  } catch (err) {
+    const report = buildReportFromError(err, currentSource, file);
+    return {
+      fixed: false,
+      modified: appliedRepairs.length > 0,
+      iterations: maxIterations,
+      finalSource: currentSource,
+      repairs: appliedRepairs,
+      error: report,
+    };
+  }
 }
