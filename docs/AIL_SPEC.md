@@ -306,6 +306,7 @@ ail decompile <targetFile>           # Decompiles target file into .ail
 ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness
 ail fix <file.ail> [--dry-run]       # Autonomously self-repairs fixable diagnostics
 ail roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
+ail tokens [file|dir]                # Audits token efficiency for a specific file or folder (with subfolders)
 ail verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
 ail lsp                              # Starts Language Server Protocol over stdio
 ```

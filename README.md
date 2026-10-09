@@ -160,6 +160,12 @@ ail verify src/Boss.ts.ail --json
 ail fix src/Boss.ts.ail
 ail fix src/Boss.ts.ail --dry-run
 
+# Audit token efficiency and compression density for a specific file or folder (with subfolders):
+ail tokens src/sim/Hazard.ts
+ail tokens src/sim/Hazard.ts --check-drift
+ail tokens src/sim
+ail efficiency ./src
+
 # Audit tokenomics and enforce zero target drift:
 ail verify-tokenomics examples --check-drift
 ail verify-tokenomics poc_real_case --projects
