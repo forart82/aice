@@ -12,3 +12,4 @@ export * from "./shield/index.js";
 export * from "./tokenomics/index.js";
 export * from "./transpiler/index.js";
 export * from "./typechecker/index.js";
+export * from "./watcher/index.js";
