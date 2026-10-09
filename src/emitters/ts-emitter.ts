@@ -106,13 +106,6 @@ export class TypeScriptEmitter {
     for (const item of mod.items) {
       if (item.kind === "ClassDecl") {
         this.classNames.add(item.name);
-      } else if (item.kind === "ImportDecl") {
-        for (const spec of item.specifiers) {
-          const name = spec.name;
-          if (name.length > 0 && name[0] >= "A" && name[0] <= "Z") {
-            this.classNames.add(name);
-          }
-        }
       } else if (item.kind === "TypeDecl") {
         if (item.fields) {
           this.structTypes.set(

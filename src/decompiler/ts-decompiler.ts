@@ -67,6 +67,21 @@ export class TsDecompiler {
   private sourceFile!: ts.SourceFile;
   private trivia = new CstTriviaTable();
   private knownTypeNames = new Set<string>();
+  private currentScopeVars: Set<string>[] = [];
+
+  private pushScope(params: readonly (ts.ParameterDeclaration | ts.BindingElement)[] = []): void {
+    const scope = new Set<string>();
+    for (const p of params) {
+      if (ts.isIdentifier(p.name)) {
+        scope.add(p.name.text);
+      }
+    }
+    this.currentScopeVars.push(scope);
+  }
+
+  private popScope(): void {
+    this.currentScopeVars.pop();
+  }
 
   constructor(source: string, filePath = "source.ts", options: TsDecompilerOptions = {}) {
     this.source = source;
@@ -370,9 +385,11 @@ export class TsDecompiler {
 
     // Normal function declaration
     const returnType = stmt.type ? this.convertTypeNode(stmt.type) : null;
+    this.pushScope(stmt.parameters);
     const body = stmt.body
       ? this.convertBlock(stmt.body)
       : { kind: "Block" as const, statements: [], span: emptySpan() };
+    this.popScope();
 
     // Detect if single return expression
     if (
@@ -548,9 +565,11 @@ export class TsDecompiler {
           };
         });
 
+        this.pushScope(member.parameters);
         const body: Block = member.body
           ? this.convertBlock(member.body)
           : { kind: "Block" as const, statements: [], span: this.getSpan(member) };
+        this.popScope();
 
         methods.push({
           kind: "MethodDecl",
@@ -582,6 +601,7 @@ export class TsDecompiler {
           };
         });
 
+        this.pushScope(member.parameters);
         const returnType = member.type ? this.convertTypeNode(member.type) : null;
         let isExpressionBodied = false;
         let body: Block | Expr;
@@ -611,6 +631,7 @@ export class TsDecompiler {
             ? this.convertBlock(member.body)
             : { kind: "Block" as const, statements: [], span: this.getSpan(member) };
         }
+        this.popScope();
 
         methods.push({
           kind: "MethodDecl",
@@ -720,6 +741,7 @@ export class TsDecompiler {
           m.accessor === "get" &&
           m.name.toLowerCase() === prop.name.toLowerCase() &&
           m.name !== prop.name &&
+          m.span.start.line <= prop.span.end.line + 2 &&
           this.isSimplePropertyGetter(m, prop.name, prop.isStatic, name),
       );
       if (getter) {
@@ -727,6 +749,7 @@ export class TsDecompiler {
           (m) =>
             m.accessor === "set" &&
             m.name === getter.name &&
+            m.span.start.line <= getter.span.end.line + 2 &&
             this.isSimplePropertySetter(m, prop.name, prop.isStatic, name),
         );
         if (setter || prop.isReadonly) {
@@ -1672,7 +1695,8 @@ export class TsDecompiler {
           }
         }
 
-        if (TS_MATH_BUILTINS.has(fnName)) {
+        const isShadowed = this.currentScopeVars.some((scope) => scope.has(fnName));
+        if (TS_MATH_BUILTINS.has(fnName) && !isShadowed) {
           return {
             kind: "CallExpr",
             callee: {
