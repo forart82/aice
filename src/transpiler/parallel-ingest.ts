@@ -248,7 +248,6 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
       run: async (_workerId: number): Promise<FileIngestResult> => {
         const taskStart = performance.now();
         const ailPath = `${filePath}.ail`;
-        const triviaPath = `${filePath}.ail.trivia.json`;
 
         const source = await fs.promises.readFile(filePath, "utf-8");
         const decomp = decompile(source, targetLang, { filePath });
@@ -260,21 +259,8 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
         const cl100kSavingsPct =
           targetTokens > 0 ? ((targetTokens - ailTokens) / targetTokens) * 100 : 0;
 
-        const hasTrivia = decomp.trivia.size() > 0;
-        let emittedTriviaPath: string | undefined;
-
         if (!dryRun) {
           await fs.promises.writeFile(ailPath, decomp.ail, "utf-8");
-          if (emitTrivia && hasTrivia) {
-            await fs.promises.writeFile(
-              triviaPath,
-              `${JSON.stringify(decomp.trivia.toJSON(), null, 2)}\n`,
-              "utf-8",
-            );
-            emittedTriviaPath = triviaPath;
-          }
-        } else if (emitTrivia && hasTrivia) {
-          emittedTriviaPath = triviaPath;
         }
 
         const durationMs = Math.max(0, performance.now() - taskStart);
@@ -282,7 +268,6 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
         return {
           sourcePath: filePath,
           ailPath,
-          triviaPath: emittedTriviaPath,
           targetLang,
           success: true,
           targetChars,

@@ -46,7 +46,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.9");
+  .version("0.3.10");
 
 // Command: compile <file>
 program
@@ -390,8 +390,7 @@ program
   .argument("<file>", "Path to the target source file")
   .option("-o, --out <out>", "Output .ail file path")
   .option("-t, --target <target>", "Target language (typescript, tsx, css, html)")
-  .option("--trivia", "Emit a .trivia.json sidecar preserving original comments")
-  .action((file: string, options: { out?: string; target?: string; trivia?: boolean }) => {
+  .action((file: string, options: { out?: string; target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -409,12 +408,6 @@ program
 
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
       fs.writeFileSync(outPath, result.ail, "utf-8");
-
-      if (options.trivia && result.trivia.size() > 0) {
-        const triviaPath = `${outPath}.trivia.json`;
-        fs.writeFileSync(triviaPath, JSON.stringify(result.trivia.toJSON(), null, 2), "utf-8");
-        console.log(`✔ Emitted trivia sidecar: ${path.relative(process.cwd(), triviaPath)}`);
-      }
 
       console.log(
         `✔ Decompiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
@@ -746,7 +739,7 @@ program
   .command("eject")
   .description("Eject AIL side-by-side mode: unlock target files and revert AI shields")
   .argument("[dir]", "Target project directory", ".")
-  .option("--remove-ail", "Delete all .ail and .trivia.json source files")
+  .option("--remove-ail", "Delete all .ail source files")
   .action(
     async (
       dir: string,
@@ -783,7 +776,7 @@ program
         console.log(
           `AIL Source Files:    ${
             options.removeAil
-              ? `Deleted ${removedAilCount} .ail/.trivia.json files`
+              ? `Deleted ${removedAilCount} .ail files`
               : "Preserved on disk"
           }`,
         );

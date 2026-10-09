@@ -141,11 +141,10 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "Vector2D.ts");
-    expect(res.ail).toContain("get x() -> int = this._x");
-    expect(res.ail).toContain("set x(val:int) = this._x = val");
+    expect(res.ail).toContain("prop _x, x: int = 0");
     expect(res.ail).toContain("get length() -> int = this._x * this._x");
-    expect(res.reconstructed).toContain("get x(): number {");
-    expect(res.reconstructed).toContain("set x(val: number) {");
+    expect(res.reconstructed).toContain("get x() { return this._x; }");
+    expect(res.reconstructed).toContain("set x(v: number) { this._x = v; }");
   });
 
   it("satisfies Put(Get(c), Omega) == c for keywordless := and ::= variable declarations", () => {

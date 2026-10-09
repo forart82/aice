@@ -68,8 +68,7 @@ In real-world development, moving files into quarantine/shadow folders breaks bu
 ```
 src/sim/
 ├── Boss.ts           <-- Read-only lock (chmod 444). Hidden from AI by files.exclude & .cursorignore
-├── Boss.ts.ail       <-- VISIBLE to AI as single authoritative source of truth
-└── Boss.ts.ail.trivia.json (CST Trivia Table sidecar preserving non-semantic formatting)
+└── Boss.ts.ail       <-- VISIBLE to AI as single authoritative source of truth
 ```
 
 ### The 4-Layer Defense Mechanism:
@@ -124,7 +123,7 @@ ail dev [dir]
 # 3. Eject side-by-side mode and restore standard project state:
 # (Unlocks target files back to chmod 644 and removes AI shield rules)
 ail eject [dir]
-ail eject [dir] --remove-ail   # Optional: deletes .ail and .trivia.json files
+ail eject [dir] --remove-ail   # Optional: deletes .ail source files
 
 # 4. Fine-grained shield management:
 ail shield status [dir]        # Check active shield rules and locks
@@ -268,9 +267,9 @@ $$\text{Put} : \mathcal{A} \times \Omega \to \mathcal{C}$$
 
 Where $\mathcal{C}$ is the target language concrete syntax, $\mathcal{A}$ is the AIL abstract syntax, and $\Omega$ is the CST Trivia Table. Every roundtrip satisfies:
 
-$$\text{Put}(\text{Get}(c), \Omega(c)) \equiv c$$
+$$\text{Put}(\text{Get}(c)) \equiv c$$
 
-All comments, JSDoc blocks, license headers, indentation styles, and trailing whitespace are stored in a sidecar `.trivia.json` table, guaranteeing **100% bit-identical byte-for-byte fidelity** upon recompilation.
+All comments, JSDoc blocks, and docstrings are inlined directly into `*.ail` source files as standard `#` comments, ensuring humans and AI coding models can read and edit documentation directly without polluting repositories with external sidecar `.json` files.
 
 ---
 

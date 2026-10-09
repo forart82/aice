@@ -753,27 +753,34 @@ export class TsDecompiler {
     // Compact dual-case property accessors (e.g., property X and getter/setter x, or vice versa)
     const methodsToRemove = new Set<MethodDecl>();
     for (const prop of properties) {
-      const getter = methods.find(
+      const propClean = prop.name.replace(/^_+/, "").toLowerCase();
+      const matchingGetters = methods.filter(
         (m) =>
+          !methodsToRemove.has(m) &&
           m.accessor === "get" &&
-          m.name.toLowerCase() === prop.name.toLowerCase() &&
+          m.name.replace(/^_+/, "").toLowerCase() === propClean &&
           m.name !== prop.name &&
-          m.span.start.line <= prop.span.end.line + 2 &&
+          !properties.some((other) => other !== prop && other.name === m.name) &&
           this.isSimplePropertyGetter(m, prop.name, prop.isStatic, name),
       );
-      if (getter) {
+      for (const getter of matchingGetters) {
         const setter = methods.find(
           (m) =>
+            !methodsToRemove.has(m) &&
             m.accessor === "set" &&
             m.name === getter.name &&
-            m.span.start.line <= getter.span.end.line + 2 &&
             this.isSimplePropertySetter(m, prop.name, prop.isStatic, name),
         );
         if (setter || prop.isReadonly) {
           if (!prop.aliases) {
             prop.aliases = [];
           }
-          prop.aliases.push(getter.name);
+          if (!prop.aliases.includes(getter.name)) {
+            prop.aliases.push(getter.name);
+          }
+          if (!prop.typeAnnotation && getter.returnType) {
+            prop.typeAnnotation = getter.returnType;
+          }
           methodsToRemove.add(getter);
           if (setter) {
             methodsToRemove.add(setter);
@@ -823,10 +830,11 @@ export class TsDecompiler {
       );
     }
     return (
-      expr.kind === "MemberAccessExpr" &&
-      expr.object.kind === "IdentifierExpr" &&
-      expr.object.name === "this" &&
-      expr.property === propName
+      (expr.kind === "MemberAccessExpr" &&
+        expr.object.kind === "IdentifierExpr" &&
+        expr.object.name === "this" &&
+        expr.property === propName) ||
+      (expr.kind === "IdentifierExpr" && expr.name === propName)
     );
   }
 
@@ -866,10 +874,11 @@ export class TsDecompiler {
       );
     }
     return (
-      target.kind === "MemberAccessExpr" &&
-      target.object.kind === "IdentifierExpr" &&
-      target.object.name === "this" &&
-      target.property === propName
+      (target.kind === "MemberAccessExpr" &&
+        target.object.kind === "IdentifierExpr" &&
+        target.object.name === "this" &&
+        target.property === propName) ||
+      (target.kind === "IdentifierExpr" && target.name === propName)
     );
   }
 

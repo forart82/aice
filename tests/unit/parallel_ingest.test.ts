@@ -160,7 +160,7 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
       expect(tsAil).toContain("fn sanitize");
     });
 
-    it("emits .ail.trivia.json when trivia is present and emitTrivia is true", async () => {
+    it("never emits .ail.trivia.json sidecar files and inlines comments in .ail", async () => {
       const srcDir = path.join(testDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -176,45 +176,14 @@ export interface Service {
 
       const summary = await ingestProjectSideBySide({
         dir: testDir,
-        emitTrivia: true,
-      });
-
-      expect(summary.totalIngested).toBe(1);
-      const res = summary.results[0];
-      expect(res.triviaPath).toBe(`${fileWithTrivia}.ail.trivia.json`);
-      expect(fs.existsSync(`${fileWithTrivia}.ail`)).toBe(true);
-      expect(fs.existsSync(`${fileWithTrivia}.ail.trivia.json`)).toBe(true);
-
-      const triviaContent = JSON.parse(
-        fs.readFileSync(`${fileWithTrivia}.ail.trivia.json`, "utf-8"),
-      );
-      expect(Object.keys(triviaContent).length).toBeGreaterThan(0);
-
-      // Load trivia back to verify CST table reconstruction
-      const table = CstTriviaTable.fromJSON(triviaContent);
-      expect(table.size()).toBeGreaterThan(0);
-    });
-
-    it("suppresses .ail.trivia.json when emitTrivia is false", async () => {
-      const srcDir = path.join(testDir, "src");
-      fs.mkdirSync(srcDir, { recursive: true });
-
-      const fileWithTrivia = path.join(srcDir, "commented.ts");
-      fs.writeFileSync(
-        fileWithTrivia,
-        "/** JSDoc */\nexport interface Service { name: string; }\n",
-        "utf-8",
-      );
-
-      const summary = await ingestProjectSideBySide({
-        dir: testDir,
-        emitTrivia: false,
       });
 
       expect(summary.totalIngested).toBe(1);
       expect(fs.existsSync(`${fileWithTrivia}.ail`)).toBe(true);
       expect(fs.existsSync(`${fileWithTrivia}.ail.trivia.json`)).toBe(false);
-      expect(summary.results[0].triviaPath).toBeUndefined();
+
+      const ailContent = fs.readFileSync(`${fileWithTrivia}.ail`, "utf-8");
+      expect(ailContent).toContain("Service");
     });
 
     it("skips existing .ail files when overwrite is false", async () => {

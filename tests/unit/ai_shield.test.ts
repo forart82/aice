@@ -66,7 +66,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
         expect(content).toContain(SHIELD_START_MARKER);
         expect(content).toContain(SHIELD_END_MARKER);
         expect(content).toContain("!*.ail");
-        expect(content).toContain("!*.trivia.json");
+        expect(content).not.toContain("!*.trivia.json");
         for (const ext of DEFAULT_EXTENSIONS) {
           expect(content).toContain(`*${ext}`);
         }

@@ -93,12 +93,22 @@ export class AilGenerator {
         const entry = this.trivia.getTrivia(nodeId);
         if (entry && entry.trailing.length > 0) {
           for (const item of entry.trailing) {
-            const clean = item.content
-              .trim()
-              .replace(/^\/\//, "#")
-              .replace(/^\/\*+/, "#")
-              .replace(/\*\/$/, "");
-            trailing += `  ${clean}`;
+            let clean = item.content.trim();
+            if (clean.startsWith("//")) {
+              clean = clean.slice(2).trim();
+            } else if (clean.startsWith("/*")) {
+              clean = clean
+                .replace(/^\/\*+/, "")
+                .replace(/\*+\/$/, "")
+                .trim()
+                .replace(/^\*\s?/, "")
+                .trim();
+            } else if (clean.startsWith("#")) {
+              clean = clean.slice(1).trim();
+            }
+            if (clean.length > 0) {
+              trailing += `  # ${clean}`;
+            }
           }
         }
       }
@@ -120,22 +130,55 @@ export class AilGenerator {
     }
 
     for (const item of entry.leading) {
-      const lines = item.content.split("\n");
-      for (const line of lines) {
-        // Normalize comments to # for AIL
-        const trimmed = line.trim();
-        if (trimmed.startsWith("//")) {
-          this.writeLine(`# ${trimmed.slice(2).trim()}`);
-        } else if (trimmed.startsWith("/*") || trimmed.startsWith("/**")) {
-          const clean = trimmed
-            .replace(/^\/\*\*?/, "")
-            .replace(/\*\/$/, "")
-            .trim();
-          if (clean) this.writeLine(`# ${clean}`);
-        } else if (trimmed.startsWith("#")) {
-          this.writeLine(trimmed);
-        } else if (trimmed) {
-          this.writeLine(`# ${trimmed}`);
+      const rawLines = item.content.split("\n");
+      const isBlock =
+        item.kind === "DOCSTRING" ||
+        item.kind === "BLOCK_COMMENT" ||
+        item.content.trim().startsWith("/*");
+
+      if (isBlock) {
+        for (let i = 0; i < rawLines.length; i++) {
+          let line = rawLines[i].trim();
+          // Strip leading /* or /** on first line
+          if (i === 0) {
+            line = line.replace(/^\/\*+/, "").trim();
+          }
+          // Strip trailing */ on last line
+          if (i === rawLines.length - 1) {
+            line = line.replace(/\*+\/$/, "").trim();
+          }
+          // Strip leading * or * followed by space (standard JSDoc / block comment styling)
+          line = line.replace(/^\*\s?/, "").trim();
+
+          // If the very first or very last line became completely empty after stripping delimiters, skip it
+          if ((i === 0 || i === rawLines.length - 1) && !line) {
+            continue;
+          }
+
+          if (line.length > 0) {
+            this.writeLine(`# ${line}`);
+          } else {
+            this.writeLine("#");
+          }
+        }
+      } else {
+        // Line comments (// or #)
+        for (const line of rawLines) {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("//")) {
+            const clean = trimmed.slice(2).trim();
+            if (clean.length > 0) {
+              this.writeLine(`# ${clean}`);
+            } else {
+              this.writeLine("#");
+            }
+          } else if (trimmed.startsWith("#")) {
+            this.writeLine(trimmed);
+          } else if (trimmed.length > 0) {
+            this.writeLine(`# ${trimmed}`);
+          } else {
+            this.writeLine("#");
+          }
         }
       }
     }
@@ -693,8 +736,21 @@ export class AilGenerator {
       }
       case "ResultType":
         return `Result[${this.formatTypeExpr(t.okType)}, ${this.formatTypeExpr(t.errType)}]`;
-      case "OptionType":
-        return `Option[${this.formatTypeExpr(t.innerType)}]`;
+      case "OptionType": {
+        const inner = this.formatTypeExpr(t.innerType);
+        if (
+          t.innerType.kind === "PrimitiveType" ||
+          (t.innerType.kind === "NamedType" &&
+            !t.innerType.name.includes(" ") &&
+            !t.innerType.name.includes("(") &&
+            !t.innerType.name.includes("=>") &&
+            !t.innerType.typeArgs) ||
+          t.innerType.kind === "ArrayType"
+        ) {
+          return `${inner}?`;
+        }
+        return `Option[${inner}]`;
+      }
       case "RefinementType":
         return `{ ${t.param}:${t.baseType.primitive} | ${this.formatExpr(t.predicate)} }`;
       case "NamedType": {

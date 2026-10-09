@@ -232,8 +232,7 @@ To avoid breaking existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), r
 ```
 project/src/
 ├── Controller.ts           <-- Read-only lock (chmod 444). Hidden from AI agents.
-├── Controller.ts.ail       <-- VISIBLE to AI as single authoritative source of truth.
-└── Controller.ts.ail.trivia.json (Lossless CST trivia sidecar).
+└── Controller.ts.ail       <-- VISIBLE to AI as single authoritative source of truth.
 ```
 
 ### The 4 Layers of Protection:
@@ -301,7 +300,7 @@ ail shield <apply|remove|status|lock|unlock> [dir]
 ail compile <file.ail>               # Compiles single AIL file to target language
 ail compile-all [dir]                # Recursively compiles all .ail files across project
 ail clean [dir]                      # Cleans generated target files
-ail decompile <targetFile> [--trivia]# Decompiles target file into .ail and .trivia.json
+ail decompile <targetFile>           # Decompiles target file into .ail
 
 # Quality Gates & Diagnostics
 ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness

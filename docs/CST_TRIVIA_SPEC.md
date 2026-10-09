@@ -102,19 +102,18 @@ fn startService() -> void:
 
 ---
 
-## 4. Side-by-Side File Organization & Lifecycle
+## 4. Modern Inlined Comments Architecture & Zero Clutter Standard
 
-In adopted repositories, the trivia table is stored in the same directory as the target source and AIL files:
+In AIL 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into `*.ail` source files as standard `#` comments:
 
 ```
 src/sim/
 ├── Boss.ts                  # Read-only target source (chmod 444)
-├── Boss.ts.ail              # Authoritative AIL source edited by AI
-└── Boss.ts.ail.trivia.json  # Lossless CST trivia table sidecar
+└── Boss.ts.ail              # Authoritative AIL source with inlined comments
 ```
 
-### CLI Verification & Tooling:
-- **Decompile with Trivia**: `ail decompile src/Boss.ts --trivia` extracts AST and sidecar trivia table.
-- **Roundtrip Identity Verification**: `ail roundtrip src/Boss.ts` executes the complete lens cycle and verifies byte-for-byte identity.
-- **Lifecycle Cleanup**: When running `ail eject --remove-ail`, both `.ail` and `.trivia.json` sidecars are safely cleaned up.
+### Key Principles:
+1. **Strict Extension Standard**: Every AIL file strictly ends with `*.ail`. No external `.json` sidecars pollute the project directory.
+2. **Direct Human & AI Visibility**: Comments reside directly in `*.ail` where developers and AI models can inspect, understand, and update them naturally.
+3. **Clean Ejection**: When running `ail eject --remove-ail`, only `.ail` files need to be pruned.
 

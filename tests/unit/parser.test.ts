@@ -1004,6 +1004,48 @@ style center: fl-center; p: 1rem`;
       expect(center.properties[0]).toMatchObject({ property: "fl-center", value: "" });
       expect(center.properties[1]).toMatchObject({ property: "p", value: "1rem" });
     });
+
+    it("parses number literal types and union literal types", () => {
+      const src = `type VersionMeta:
+  version: 2
+  tier: 1 | 2 | 3`;
+      const mod = parse(src, "meta.ail");
+      expect(mod.items).toHaveLength(1);
+      const td = mod.items[0] as TypeDecl;
+      expect(td.fields).toBeDefined();
+      expect(td.fields).toHaveLength(2);
+      expect(td.fields![0].name).toBe("version");
+      expect(td.fields![0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "2" });
+      expect(td.fields![1].name).toBe("tier");
+      expect(td.fields![1].typeAnnotation).toMatchObject({ kind: "NamedType", name: "1 | 2 | 3" });
+    });
+
+    it("parses computed method and accessor names like [Symbol.iterator]", () => {
+      const src = `class IterableContainer:
+  fn [Symbol.iterator]() -> Iterator[int] = this.items[Symbol.iterator]()`;
+      const mod = parse(src, "iter.ail");
+      expect(mod.items).toHaveLength(1);
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.methods).toHaveLength(1);
+      expect(cls.methods[0].name).toBe("[Symbol.iterator]");
+    });
+
+    it("parses postfix ? OptionType concisely", () => {
+      const src = `x: int? := nil
+name: str? := nil`;
+      const mod = parse(src, "opts.ail");
+      expect(mod.items).toHaveLength(2);
+      const v1 = mod.items[0] as VarDecl;
+      expect(v1.typeAnnotation).toMatchObject({
+        kind: "OptionType",
+        innerType: { kind: "PrimitiveType", primitive: "int" },
+      });
+      const v2 = mod.items[1] as VarDecl;
+      expect(v2.typeAnnotation).toMatchObject({
+        kind: "OptionType",
+        innerType: { kind: "PrimitiveType", primitive: "str" },
+      });
+    });
   });
 
   describe("Error Handling", () => {

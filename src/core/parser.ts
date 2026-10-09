@@ -665,6 +665,15 @@ export class Parser {
       };
     }
 
+    if (tok.kind === "NUMBER") {
+      this.advance();
+      return {
+        kind: "NamedType",
+        name: tok.value,
+        span: tok.span,
+      };
+    }
+
     // 0. Primitive type sigils (!s, !i, !b, !f, !n, !v, !c, !y)
     if (tok.kind === "BANG") {
       this.advance(); // consume '!'
@@ -1289,7 +1298,18 @@ export class Parser {
       this.consume("FN");
     }
 
-    const name = this.parseContextualIdentOrString("Expected method or accessor name");
+    let name: string;
+    if (this.check("LBRACKET")) {
+      this.advance();
+      let inner = "";
+      while (!this.check("RBRACKET") && !this.check("EOF")) {
+        inner += this.advance().value;
+      }
+      this.consume("RBRACKET");
+      name = `[${inner}]`;
+    } else {
+      name = this.parseContextualIdentOrString("Expected method or accessor name");
+    }
 
     const params: ParamDecl[] = [];
     if (this.check("LPAREN")) {

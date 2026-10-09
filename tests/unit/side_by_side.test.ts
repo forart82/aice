@@ -154,13 +154,13 @@ body {
     expect(adoptRes.stdout).toContain("AI Shield:           ✔ Active");
     expect(adoptRes.stdout).toContain("Permission Locks:    ✔ 3 target file(s) locked");
 
-    // 1. Sibling .ail and .trivia.json files exist
+    // 1. Sibling .ail files exist, .trivia.json files do NOT exist
     expect(fs.existsSync(calcAil)).toBe(true);
-    expect(fs.existsSync(calcTrivia)).toBe(true);
+    expect(fs.existsSync(calcTrivia)).toBe(false);
     expect(fs.existsSync(themeAil)).toBe(true);
-    expect(fs.existsSync(themeTrivia)).toBe(true);
+    expect(fs.existsSync(themeTrivia)).toBe(false);
     expect(fs.existsSync(indexAil)).toBe(true);
-    expect(fs.existsSync(indexTrivia)).toBe(true);
+    expect(fs.existsSync(indexTrivia)).toBe(false);
 
     // 2. AI Shield files generated
     const settingsPath = path.join(testDir, ".vscode", "settings.json");
@@ -264,10 +264,10 @@ fn multiply(a:int, b:int) -> int = a * b
 
     // 3. .ail files still exist because --remove-ail was not passed
     expect(fs.existsSync(calcAil)).toBe(true);
-    expect(fs.existsSync(calcTrivia)).toBe(true);
+    expect(fs.existsSync(calcTrivia)).toBe(false);
   });
 
-  it("eject --remove-ail deletes .ail and .trivia.json files while unlocking targets", async () => {
+  it("eject --remove-ail deletes .ail files while unlocking targets", async () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
     const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
     const calcTrivia = path.join(testDir, "src", "math", "calculator.ts.ail.trivia.json");
@@ -276,18 +276,18 @@ fn multiply(a:int, b:int) -> int = a * b
     const adoptRes = runCli(["adopt", testDir]);
     expect(adoptRes.status).toBe(0);
     expect(fs.existsSync(calcAil)).toBe(true);
-    expect(fs.existsSync(calcTrivia)).toBe(true);
+    expect(fs.existsSync(calcTrivia)).toBe(false);
     expect(isTargetLocked(calcTs)).toBe(true);
 
     // Eject with --remove-ail
     const ejectRes = runCli(["eject", testDir, "--remove-ail"]);
     expect(ejectRes.status).toBe(0);
-    expect(ejectRes.stdout).toContain("Deleted 6 .ail/.trivia.json files");
+    expect(ejectRes.stdout).toContain("Deleted 3 .ail files");
 
     // Targets unlocked
     expect(isTargetLocked(calcTs)).toBe(false);
 
-    // .ail and .trivia.json deleted
+    // .ail deleted
     expect(fs.existsSync(calcAil)).toBe(false);
     expect(fs.existsSync(calcTrivia)).toBe(false);
     expect(fs.existsSync(path.join(testDir, "styles", "theme.css.ail"))).toBe(false);
