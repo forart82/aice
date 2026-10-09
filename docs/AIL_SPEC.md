@@ -1,8 +1,8 @@
 # AIL Language Specification (Version 2.0 - BPE-Tuned Standard)
 
 > **Status**: Official Normative Specification  
-> **Theoretical Basis**: Intent-Based Intermediate Representation, BPE Token Economics, and Asymmetric Lens Calculus  
-> **Target Runtimes**: TypeScript (ES2022/NodeNext/TSX), Python (3.12+), Rust (2021), HTML5/CSS3  
+> **Theoretical Basis**: Intent-Based Intermediate Representation, BPE Token Economics, Asymmetric Lens Calculus, and Side-by-Side Defense-in-Depth Architecture  
+> **Target Runtimes**: TypeScript (ES2022/NodeNext/TSX), Python (3.12+), C++ (C++20), Rust (2021), Go (1.22+), HTML5/CSS3  
 
 ---
 
@@ -12,136 +12,173 @@ AIL uses an **Indentation-Delimited Surface Grammar** backed by a two-stage lexe
 
 ```ebnf
 (* Top-level Module *)
-Module          ::= "module" ModulePath NEWLINE ModuleItem*
-ModulePath      ::= IDENT ("/" IDENT)*
-ModuleItem      ::= ImportDecl | TypeDecl | FunctionDecl | ComponentDecl | StyleDecl
+Module              ::= "module" ModulePath NEWLINE ModuleItem*
+ModulePath          ::= IDENT ("/" IDENT)*
+ModuleItem          ::= ImportDecl 
+                      | TypeDecl 
+                      | ClassDecl 
+                      | FunctionDecl 
+                      | ComponentDecl 
+                      | StyleDecl 
+                      | TokenSheetDecl 
+                      | VarDecl
 
 (* Imports & Dependencies *)
-ImportDecl      ::= "from" STRING "import" (IDENT ("," IDENT)* | "*") NEWLINE
+ImportDecl          ::= "from" STRING "import" (IDENT ("," IDENT)* | "*") NEWLINE
 
 (* Type & Struct Declarations *)
-TypeDecl        ::= "type" IDENT TypeParams? ":" (NEWLINE INDENT FieldList DEDENT | InlineFieldList NEWLINE)
-                  | "enum" IDENT TypeParams? ":" NEWLINE INDENT EnumVariants DEDENT
-TypeParams      ::= "[" IDENT ("," IDENT)* "]"
-FieldList       ::= (FieldDecl NEWLINE)+
-InlineFieldList ::= FieldDecl ("," FieldDecl)*
-FieldDecl       ::= IDENT Sigil? (":" TypeExpr)? ("=" Expr)?
-Sigil           ::= "!s" | "!i" | "!f" | "!b" | "!" | "?"
-EnumVariants    ::= (IDENT ("(" (TypeExpr ("," TypeExpr)*)? ")")? NEWLINE)+
+TypeDecl            ::= "type" IDENT TypeParams? ":" (NEWLINE INDENT FieldList DEDENT | InlineFieldList NEWLINE)
+                      | "enum" IDENT TypeParams? ":" NEWLINE INDENT EnumVariants DEDENT
+TypeParams          ::= "[" IDENT ("," IDENT)* "]"
+FieldList           ::= (FieldDecl NEWLINE)+
+InlineFieldList     ::= FieldDecl ("," FieldDecl)*
+FieldDecl           ::= IDENT Sigil? (":" TypeExpr)? ("=" Expr)?
+Sigil               ::= "!s" | "!i" | "!f" | "!b" | "!" | "?"
+EnumVariants        ::= (IDENT ("(" (TypeExpr ("," TypeExpr)*)? ")")? NEWLINE)+
+
+(* Class & Dual-Case Property Declarations *)
+ClassDecl           ::= "class" IDENT ("extends" IDENT)? ":" NEWLINE INDENT ClassMember+ DEDENT
+ClassMember         ::= PropertyDecl | MethodDecl | ConstructorDecl
+PropertyDecl        ::= "prop" IDENT ("," IDENT)? (":" TypeExpr)? ("=" Expr)? NEWLINE
+                      | IDENT (":" TypeExpr)? ("=" Expr)? NEWLINE
+ConstructorDecl     ::= "constructor" "(" ParamList? ")" ":" NEWLINE Block
+MethodDecl          ::= "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? ":" NEWLINE Block
+                      | "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? "=" Expr NEWLINE
 
 (* Type Expressions *)
-TypeExpr        ::= PrimitiveType
-                  | ArrayType
-                  | RecordType
-                  | ResultType
-                  | OptionType
-                  | RefinementType
-                  | NamedType
+TypeExpr            ::= PrimitiveType
+                      | ArrayType
+                      | RecordType
+                      | ResultType
+                      | OptionType
+                      | RefinementType
+                      | NamedType
 
-PrimitiveType   ::= "str" | "int" | "float" | "num" | "bool" | "byte" | "char" | "void" | "nil"
-ArrayType       ::= "[" TypeExpr "]"
-RecordType      ::= "{" (IDENT ":" TypeExpr ("," IDENT ":" TypeExpr)*)? "}"
-ResultType      ::= "Result" "[" TypeExpr "," TypeExpr "]"
-OptionType      ::= TypeExpr "?" | "Option" "[" TypeExpr "]"
-RefinementType  ::= "{" IDENT ":" PrimitiveType "|" Expr "}"
-NamedType       ::= IDENT ("[" TypeExpr ("," TypeExpr)* "]")?
+PrimitiveType       ::= "str" | "int" | "float" | "num" | "bool" | "byte" | "char" | "void" | "nil"
+ArrayType           ::= "[" TypeExpr "]"
+RecordType          ::= "{" (IDENT ":" TypeExpr ("," IDENT ":" TypeExpr)*)? "}"
+ResultType          ::= "Result" "[" TypeExpr "," TypeExpr "]"
+OptionType          ::= TypeExpr "?" | "Option" "[" TypeExpr "]"
+RefinementType      ::= "{" IDENT ":" PrimitiveType "|" Expr "}"
+NamedType           ::= IDENT ("[" TypeExpr ("," TypeExpr)* "]")?
 
 (* Function Declarations *)
-FunctionDecl    ::= "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? ":" NEWLINE Block
-                  | "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? "=" Expr NEWLINE
-ParamList       ::= Param ("," Param)*
-Param           ::= IDENT (":" TypeExpr)? ("=" Expr)?
+FunctionDecl        ::= "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? ":" NEWLINE Block
+                      | "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? "=" Expr NEWLINE
+ParamList           ::= Param ("," Param)*
+Param               ::= IDENT (":" TypeExpr)? ("=" Expr)?
 
 (* Statements & Blocks *)
-Block           ::= INDENT Statement+ DEDENT
-Statement       ::= LetBinding
-                  | ValBinding
-                  | MutBinding
-                  | AssignStmt
-                  | ReturnStmt
-                  | ExprStmt
-                  | IfStmt
-                  | MatchStmt
-                  | ForStmt
+Block               ::= INDENT Statement+ DEDENT
+Statement           ::= LetBinding
+                      | MutBinding
+                      | DestructureBinding
+                      | AssignStmt
+                      | ReturnStmt
+                      | ExprStmt
+                      | IfStmt
+                      | MatchStmt
+                      | ForStmt
+                      | WhileStmt
 
-LetBinding      ::= "let" IDENT (":" TypeExpr)? "=" Expr NEWLINE
-ValBinding      ::= "val" IDENT (":" TypeExpr)? "=" Expr NEWLINE
-MutBinding      ::= "mut" IDENT (":" TypeExpr)? "=" Expr NEWLINE
-AssignStmt      ::= IDENT "=" Expr NEWLINE
-ReturnStmt      ::= "ret" Expr? NEWLINE
-ExprStmt        ::= Expr NEWLINE  (* Trailing expression in block body acts as implicit return *)
+(* Keywordless Declarations (Go/Ocaml-style BPE compression) *)
+LetBinding          ::= IDENT (":" TypeExpr)? ":=" Expr NEWLINE
+                      | "let" IDENT (":" TypeExpr)? "=" Expr NEWLINE       (* Backward-compatible *)
+MutBinding          ::= IDENT (":" TypeExpr)? "::=" Expr NEWLINE
+                      | "let" "mut" IDENT (":" TypeExpr)? "=" Expr NEWLINE (* Backward-compatible *)
 
-IfStmt          ::= "if" Expr ":" NEWLINE Block ("elif" Expr ":" NEWLINE Block)* ("else" ":" NEWLINE Block)?
-MatchStmt       ::= "match" Expr ":" NEWLINE INDENT (MatchCase)+ DEDENT
-MatchCase       ::= Pattern "=>" (Expr NEWLINE | NEWLINE Block)
-Pattern         ::= Literal | IDENT | IDENT "(" (Pattern ("," Pattern)*)? ")" | "_"
+(* Vector / Tuple Destructuring *)
+DestructureBinding  ::= "[" IDENT ("," IDENT)* "]" (":=" | "::=") Expr NEWLINE
+AssignStmt          ::= (IDENT | "[" IDENT ("," IDENT)* "]") ("=" | "+=" | "-=" | "*=" | "/=") Expr NEWLINE
+ReturnStmt          ::= "ret" Expr? NEWLINE
+ExprStmt            ::= Expr NEWLINE  (* Trailing expression in block body acts as implicit return *)
 
-ForStmt         ::= "for" IDENT "in" Expr ":" NEWLINE Block
+IfStmt              ::= "if" Expr ":" NEWLINE Block ("elif" Expr ":" NEWLINE Block)* ("else" ":" NEWLINE Block)?
+MatchStmt           ::= "match" Expr ":" NEWLINE INDENT (MatchCase)+ DEDENT
+MatchCase           ::= Pattern "=>" (Expr NEWLINE | NEWLINE Block)
+Pattern             ::= Literal | IDENT | IDENT "(" (Pattern ("," Pattern)*)? ")" | "_"
+
+ForStmt             ::= "for" IDENT "in" Expr ":" NEWLINE Block
+WhileStmt           ::= "while" Expr ":" NEWLINE Block
 
 (* Expressions (Infix Precedence via Pratt Parsing) *)
-Expr            ::= BinaryExpr | UnaryExpr | PostfixExpr | PrimaryExpr
-PostfixExpr     ::= PrimaryExpr "?"                  (* Try unwrap Result/Option *)
-                  | PrimaryExpr "(" ArgList? ")"     (* Call or Positional Struct Constructor *)
-                  | PrimaryExpr "." IDENT            (* Property Access *)
-                  | PrimaryExpr "[" Expr "]"         (* Indexing *)
+Expr                ::= BinaryExpr | UnaryExpr | PostfixExpr | PrimaryExpr
+PostfixExpr         ::= PrimaryExpr "?"                  (* Try unwrap Result/Option *)
+                      | PrimaryExpr "(" ArgList? ")"     (* Call or Positional Struct Constructor *)
+                      | PrimaryExpr "." IDENT            (* Property Access *)
+                      | PrimaryExpr "[" Expr "]"         (* Indexing *)
 
-BinaryExpr      ::= Expr BinaryOp Expr
-BinaryOp        ::= "+" | "-" | "*" | "/" | "%"
-                  | "==" | "!=" | "<" | "<=" | ">" | ">="
-                  | "and" | "or" | "??"
+BinaryExpr          ::= Expr BinaryOp Expr
+BinaryOp            ::= "+" | "-" | "*" | "/" | "%"
+                      | "==" | "!=" | "<" | "<=" | ">" | ">="
+                      | "and" | "or" | "??"
 
-UnaryExpr       ::= ("not" | "-") Expr
+UnaryExpr           ::= ("not" | "-") Expr
 
-PrimaryExpr     ::= Literal
-                  | IDENT
-                  | "(" Expr ")"
-                  | "[" (Expr ("," Expr)*)? "]"      (* Array Literal *)
-                  | "{" (RecordEntry ("," RecordEntry)*)? "}" (* Record Literal with Spread & Shorthand *)
-                  | IDENT "(" (Expr ("," Expr)*)? ")" (* Positional Struct Constructor *)
-RecordEntry     ::= "..." Expr                       (* Record Spread & Structural Update *)
-                  | IDENT (":" Expr)?                (* Supports { key } punning shorthand *)
-Literal         ::= NUMBER | STRING | BOOLEAN | NIL | HEX_COLOR
+PrimaryExpr         ::= Literal
+                      | IDENT
+                      | "(" Expr ")"
+                      | "[" (Expr ("," Expr)*)? "]"      (* Array / Tuple Literal *)
+                      | "{" (RecordEntry ("," RecordEntry)*)? "}" (* Record Literal with Spread & Shorthand *)
+                      | IDENT "(" (Expr ("," Expr)*)? ")" (* Positional Struct Constructor *)
+
+RecordEntry         ::= "..." Expr                       (* Record Spread & Structural Update *)
+                      | IDENT (":" Expr)?                (* Supports { key } punning shorthand *)
+Literal             ::= NUMBER | STRING | BOOLEAN | NIL | HEX_COLOR
 
 (* Declarative UI Component DSL (56% Token Reduction vs JSX) *)
-ComponentDecl   ::= "component" IDENT ("(" ParamList? ")")? ":" NEWLINE INDENT LayoutNode+ DEDENT
-LayoutNode      ::= IDENT ("(" AttrList? ")")? (":" (NEWLINE INDENT LayoutNode+ DEDENT | STRING))? NEWLINE
-AttrList        ::= Attr ("," Attr)*
-Attr            ::= IDENT ("=" Expr)?
+ComponentDecl       ::= "component" IDENT ("(" ParamList? ")")? ":" NEWLINE INDENT LayoutNode+ DEDENT
+LayoutNode          ::= IDENT ("(" AttrList? ")")? (":" (NEWLINE INDENT LayoutNode+ DEDENT | STRING))? NEWLINE
+AttrList            ::= Attr ("," Attr)*
+Attr                ::= IDENT ("=" Expr)?
 
-(* Style Declarations (Hyper-Dense CSS Property Aliases & Tokens) *)
-StyleDecl       ::= "style" StyleSelector ":" (NEWLINE INDENT StylePropList DEDENT | InlineStylePropList NEWLINE)
-StyleSelector   ::= IDENT | CLASS_NAME | ID_NAME | PSEUDO_CLASS | STRING
-StylePropList   ::= (StyleProperty NEWLINE)+
+(* Style & Design Token Sheet Declarations *)
+TokenSheetDecl      ::= "tokens" IDENT ("[" IDENT "]")? ":" NEWLINE INDENT (IDENT ":" TokenValue NEWLINE)+ DEDENT
+StyleDecl           ::= "style" StyleSelector ":" (NEWLINE INDENT StylePropList DEDENT | InlineStylePropList NEWLINE)
+StyleSelector       ::= IDENT | CLASS_NAME | ID_NAME | PSEUDO_CLASS | STRING
+StylePropList       ::= (StyleProperty NEWLINE)+
 InlineStylePropList ::= StyleProperty (";" StyleProperty)*
-StyleProperty   ::= StylePropName ":" StylePropValue
-StylePropName   ::= PropertyAlias | IDENT | CSS_VAR | STRING
-PropertyAlias   ::= "bg" | "bgc" | "bkg" | "rad" | "sh" | "disp" | "pos" | "p" | "m"
-                  | "w" | "h" | "min-w" | "max-w" | "min-h" | "max-h"
-                  | "f" | "fz" | "fw" | "lh" | "ls" | "ta" | "td" | "tt"
-                  | "c" | "cur" | "op" | "trans" | "anim" | "b" | "bb" | "bt" | "bl" | "br"
-                  | "fl" | "fld" | "flw" | "fls" | "flg" | "jc" | "ai" | "ac" | "gap" | "z"
-StylePropValue  ::= HEX_COLOR | NUMBER | IDENT | DIMENSION | COMPOUND_CSS | STRING
+StyleProperty       ::= StylePropName ":" StylePropValue
+                      | LayoutMacro NEWLINE
+LayoutMacro         ::= "fl-row" | "fl-col" | "fl-center"
+StylePropName       ::= PropertyAlias | IDENT | CSS_VAR | STRING
+PropertyAlias       ::= "bg" | "bgc" | "bkg" | "rad" | "sh" | "disp" | "pos" | "p" | "m"
+                      | "w" | "h" | "min-w" | "max-w" | "min-h" | "max-h"
+                      | "f" | "fz" | "fw" | "lh" | "ls" | "ta" | "td" | "tt"
+                      | "c" | "cur" | "op" | "trans" | "anim" | "b" | "bb" | "bt" | "bl" | "br"
+                      | "fl" | "fld" | "flw" | "fls" | "flg" | "jc" | "ai" | "ac" | "gap" | "z"
+StylePropValue      ::= HEX_COLOR | NUMBER | IDENT | DIMENSION | COMPOUND_CSS | STRING
 ```
 
 ---
 
-## 2. Canonical Intent Standard Library (CSL)
+## 2. Canonical Intent Standard Library & Arithmetic DSL
 
-To eliminate LLM API hallucinations (such as confusing JavaScript's `slice`, `substr`, and `substring`), AIL exposes univalent canonical operations that lower to verified target code:
+To eliminate LLM API hallucinations and redundant boilerplate, AIL exposes univalent canonical operations and global math builtins that lower directly to native target expressions without runtime dependencies:
 
-| Canonical AIL Operation | Semantics | Emitted TypeScript (ES2022) | Emitted Python (3.12+) |
-| :--- | :--- | :--- | :--- |
-| `str.slice(start, end)` | Half-open $[start, end)$, negative index safe | `str.slice(start, end)` | `str[start:end]` |
-| `str.at(index)` | Character at 0-based offset | `str.at(index)` | `str[index]` |
-| `str.len` | UTF-8 codepoint length | `str.length` | `len(str)` |
-| `str.concat(other)` | Pure string concatenation | `str + other` | `str + other` |
-| `str.toInt()` | Fallible parse integer | `parseIntResult(str)` | `int(str)` (guarded) |
-| `list.len` | Element count | `list.length` | `len(list)` |
-| `list.get(index)` | Option-returning safe lookup | `list.at(index) ?? null` | `list[index] if ... else None` |
-| `list.slice(start, end)`| Pure immutable subarray | `list.slice(start, end)` | `list[start:end]` |
-| `list.append(item)` | Pure immutable append | `[...list, item]` | `[*list, item]` |
-| `list.isEmpty()` | True iff length is 0 | `list.length === 0` | `len(list) == 0` |
-| `val?` | Postfix unwrap early return | `if (!res.ok) return res; res.value` | `if not res.get("ok"): return res` |
+### 2.1 Canonical Standard Library (CSL)
+| Canonical AIL Operation | Semantics | Emitted TypeScript (ES2022) | Emitted Python (3.12+) | Emitted C++ (C++20) |
+| :--- | :--- | :--- | :--- | :--- |
+| `str.slice(start, end)` | Half-open $[start, end)$, negative index safe | `str.slice(start, end)` | `str[start:end]` | `str.substr(start, end - start)` |
+| `str.at(index)` | Character at 0-based offset | `str.at(index)` | `str[index]` | `str[index]` |
+| `str.len` | UTF-8 codepoint length | `str.length` | `len(str)` | `str.length()` |
+| `str.concat(other)` | Pure string concatenation | `str + other` | `str + other` | `str + other` |
+| `str.toInt()` | Fallible parse integer | `parseIntResult(str)` | `int(str)` (guarded) | `std::stoi(str)` |
+| `list.len` | Element count | `list.length` | `len(list)` | `list.size()` |
+| `list.get(index)` | Option-returning safe lookup | `list.at(index) ?? null` | `list[index] if ... else None` | `list.at(index)` |
+| `list.slice(start, end)`| Pure immutable subarray | `list.slice(start, end)` | `list[start:end]` | vector slice subrange |
+| `list.append(item)` | Pure immutable append | `[...list, item]` | `[*list, item]` | push to copy |
+| `list.isEmpty()` | True iff length is 0 | `list.length === 0` | `len(list) == 0` | `list.empty()` |
+| `val?` | Postfix unwrap early return | `if (!res.ok) return res; res.value` | `if not res.get("ok"): return res` | `if (!res.has_value()) return res;` |
+
+### 2.2 Vector & Arithmetic Compression DSL
+Built-in global math functions compile directly to native math calls, eliminating repetitive `Math.` prefixes (saving ~2 tokens per math call):
+- `min(a, b)` $\to$ `Math.min(a, b)` / `std::min(a, b)` / `min(a, b)`
+- `max(a, b)` $\to$ `Math.max(a, b)` / `std::max(a, b)` / `max(a, b)`
+- `clamp(x, min, max)` $\to$ `Math.max(min, Math.min(max, x))` / `std::clamp(x, min, max)`
+- `hypot(dx, dy)` $\to$ `Math.hypot(dx, dy)` / `std::hypot(dx, dy)`
+- `floor(x)`, `ceil(x)`, `round(x)`, `abs(x)`, `sqrt(x)`
+- `sin(r)`, `cos(r)`, `tan(r)`, `atan2(y, x)`, `asin(v)`, `acos(v)`, `pow(b, e)`
 
 ---
 
@@ -180,52 +217,96 @@ $$C \xrightarrow{\sim} A \times \Omega$$
 where $C$ is the target source file, $A$ is the AIL semantic AST, and $\Omega$ is the `CstTriviaTable`.
 
 ### 4.1 The Lens Stability Law (GetPut)
-$$\forall c \in C, \quad \text{put}(\text{get}(c), \text{trivia}(c)) \equiv c$$
+$$\forall c \in C, \quad \text{Put}(\text{Get}(c), \Omega(c)) \equiv c$$
 An unmutated target file decompiled to AIL and re-emitted produces a **byte-for-byte identical file with 0 git diff**.
 
 ### 4.2 The Lens Correctness Law (PutGet)
-$$\forall a \in A, \forall \omega \in \Omega, \quad \text{get}(\text{put}(a, \omega)) \equiv a$$
+$$\forall a \in A, \forall \omega \in \Omega, \quad \text{Get}(\text{Put}(a, \omega)) \equiv a$$
 Updating the AIL AST and emitting target code preserves all semantic edits when re-read into AIL.
 
 ---
 
-## 5. Empirical Tokenomics Benchmarks
+## 5. Side-by-Side 4-Layer Defense-in-Depth Architecture
 
-Empirical BPE token counts measured via `js-tiktoken` across OpenAI `cl100k_base` (GPT-4 / Claude-class) and `o200k_base` (GPT-4o / Gemini-class) subword vocabularies across all 14 real-world reference codebases:
+To avoid breaking existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), relative imports, and git history, AIL operates **side-by-side**:
+```
+project/src/
+├── Controller.ts           <-- Read-only lock (chmod 444). Hidden from AI agents.
+├── Controller.ts.ail       <-- VISIBLE to AI as single authoritative source of truth.
+└── Controller.ts.ail.trivia.json (Lossless CST trivia sidecar).
+```
 
-| File | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `gateway_service.go` | Go | 514 | 250 | **-51.4%** | 523 | 257 | **-50.9%** | -51.7% |
-| `dashboard_card.tsx` | React TSX | 106 | 47 | **-55.7%** | 112 | 48 | **-57.1%** | -57.5% |
-| `auth_service.ts` | TypeScript | 300 | 176 | **-41.3%** | 311 | 182 | **-41.5%** | -47.9% |
-| `order_engine.rs` | Rust | 562 | 348 | **-38.1%** | 565 | 353 | **-37.5%** | -45.6% |
-| `ecommerce_domain.ts` | TypeScript | 5,429 | 3,594 | **-33.8%** | 5,438 | 3,676 | **-32.4%** | -39.4% |
-| `enterprise_portal.html` | HTML5 | 7,102 | 4,899 | **-31.0%** | 7,094 | 4,881 | **-31.2%** | -24.3% |
-| `order_processing_service.ts` | TypeScript | 5,834 | 4,299 | **-26.3%** | 5,799 | 4,347 | **-25.0%** | -32.6% |
-| `page.html` | HTML5 | 171 | 132 | **-22.8%** | 172 | 132 | **-23.3%** | -12.3% |
-| `data_pipeline_models.py` | Python | 4,096 | 3,452 | **-15.7%** | 4,093 | 3,655 | **-10.7%** | -22.5% |
-| `stream_processor_engine.py` | Python | 5,048 | 4,281 | **-15.2%** | 4,927 | 4,297 | **-12.8%** | -20.5% |
-| `enterprise_theme.css` | CSS3 | 6,297 | 5,380 | **-14.6%** | 6,299 | 5,443 | **-13.6%** | -27.4% |
-| `design_system_tokens.css` | CSS3 | 4,097 | 3,511 | **-14.3%** | 4,098 | 3,526 | **-14.0%** | -26.0% |
-| `style.css` | CSS3 | 67 | 59 | **-11.9%** | 67 | 59 | **-11.9%** | -31.9% |
-| `server.py` | Python | 143 | 130 | **-9.1%** | 146 | 131 | **-10.3%** | -19.3% |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **TOTAL (All 14 Projects)** | **Aggregated** | **39,766** | **30,558** | **-23.2%** | **39,644** | **30,987** | **-21.8%** | **-28.7%** |
+### The 4 Layers of Protection:
+1. **IDE Sibling Conditional Exclusion (`.vscode/settings.json`)**:
+   Uses `"**/*.ts": { "when": "$(basename).ts.ail" }`. Hides target files from file trees, fuzzy finders, and symbol indexing in Cursor, VS Code, and Windsurf.
+2. **Universal AI Agent Ignores (`.cursorignore`, `.geminiignore`, `.aiderignore`, `.agentignore`)**:
+   Prevents agent exploration tools (`grep`, `find`, `list_dir`) and codebase vector embeddings from indexing target files.
+3. **Cognitive Lockdown Directives (`AGENTS.md`, `.cursorrules`)**:
+   Instructs AI agents that target files are read-only generated artifacts and all edits must be made directly in `*.ail` files.
+4. **Filesystem Permission Locks (`chmod 444`) & Watch Daemon (`ail watch`)**:
+   Generated target files are locked to read-only (`0o444`). Direct edit attempts fail with `EACCES`. The `ail watch` daemon atomically unlocks target files, recompiles them in $< 5\text{ms}$, and relocks them, preserving instant Hot Module Reloading (HMR).
 
 ---
 
-## 6. Automated Tokenomics CI Quality Gate & Regression Engine
+## 6. Empirical Tokenomics Benchmarks
 
-The AIL compiler toolchain provides first-class verification of token savings and target drift via `ail verify-tokenomics`:
+### 6.1 Table 1: All 14 Reference Examples (`examples/`)
+Audited via `js-tiktoken` with `--check-drift` enforcing **100% zero target drift**:
+
+| File | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `design_system_tokens.css` | CSS3 | 4,097 | 3,312 | **-19.2%** | 4,098 | 3,331 | **-18.7%** | -35.0% |
+| `enterprise_theme.css` | CSS3 | 6,297 | 4,869 | **-22.7%** | 6,299 | 4,935 | **-21.7%** | -40.1% |
+| `style.css` | CSS3 | 67 | 59 | **-11.9%** | 67 | 59 | **-11.9%** | -31.9% |
+| `gateway_service.go` | Go | 514 | 246 | **-52.1%** | 523 | 253 | **-51.6%** | -52.3% |
+| `enterprise_portal.html` | HTML5 | 7,102 | 4,873 | **-31.4%** | 7,094 | 4,855 | **-31.6%** | -26.1% |
+| `page.html` | HTML5 | 171 | 132 | **-22.8%** | 172 | 132 | **-23.3%** | -12.3% |
+| `data_pipeline_models.py` | Python | 4,096 | 3,415 | **-16.6%** | 4,093 | 3,618 | **-11.6%** | -23.2% |
+| `server.py` | Python | 143 | 128 | **-10.5%** | 146 | 129 | **-11.6%** | -20.4% |
+| `stream_processor_engine.py` | Python | 5,048 | 4,180 | **-17.2%** | 4,927 | 4,196 | **-14.8%** | -22.1% |
+| `dashboard_card.tsx` | React TSX | 106 | 47 | **-55.7%** | 112 | 48 | **-57.1%** | -58.2% |
+| `order_engine.rs` | Rust | 562 | 343 | **-39.0%** | 565 | 348 | **-38.4%** | -46.3% |
+| `auth_service.ts` | TypeScript | 263 | 175 | **-33.5%** | 274 | 181 | **-33.9%** | -41.1% |
+| `ecommerce_domain.ts` | TypeScript | 5,429 | 3,567 | **-34.3%** | 5,438 | 3,649 | **-32.9%** | -39.7% |
+| `order_processing_service.ts` | TypeScript | 5,834 | 4,234 | **-27.4%** | 5,799 | 4,282 | **-26.2%** | -33.5% |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TOTAL (14 Projects)** | **Aggregated** | **39,729** | **29,580** | **-25.5%** | **39,607** | **30,016** | **-24.2%** | **-31.8%** |
+
+### 6.2 Table 2: Real-World Production Projects (`poc_real_case/`)
+Audited across 67 production files from Raylib C++, SFML C++, and Canvas TypeScript games:
+
+| Project | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| `dogMax` (27 files) | C++20 | 8,349 | 4,488 | **-46.2%** | 8,364 | 4,488 | **-46.3%** | -56.1% |
+| `snake_pp` (22 files) | C++20 | 8,065 | 2,948 | **-63.4%** | 8,183 | 2,989 | **-63.5%** | -66.8% |
+| `snake_ts` (18 files) | TypeScript | 87,759 | 65,333 | **-25.6%** | 87,962 | 65,481 | **-25.6%** | -27.9% |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
+
+---
+
+## 7. CLI Toolchain & Workflow Specification
+
+The `ail` binary provides a comprehensive CLI for adoption, live development, compilation, and automated self-repair:
 
 ```bash
-# Verify savings and check for zero target drift:
-ail verify-tokenomics examples --check-drift
+# Side-by-side adoption & live development
+ail adopt [dir] [-c <concurrency>]   # Ingests codebase, generates shields, and locks target files
+ail watch [dir]                      # Sub-5ms incremental watch daemon preserving HMR
+ail dev [dir]                        # Alias for watch
+ail eject [dir] [--remove-ail]       # Restores target files to chmod 644 and removes shields
+ail shield <apply|remove|status|lock|unlock> [dir]
 
-# Enforce a minimum savings threshold in CI (exits with non-zero code on violation):
-ail verify-tokenomics examples --min-savings 20 --check-drift
+# Compilation & Decompilation
+ail compile <file.ail>               # Compiles single AIL file to target language
+ail compile-all [dir]                # Recursively compiles all .ail files across project
+ail clean [dir]                      # Cleans generated target files
+ail decompile <targetFile> [--trivia]# Decompiles target file into .ail and .trivia.json
 
-# Output machine-readable JSON telemetry for automated LLM self-repair:
-ail verify-tokenomics examples --json
+# Quality Gates & Diagnostics
+ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness
+ail fix <file.ail> [--dry-run]       # Autonomously self-repairs fixable diagnostics
+ail roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
+ail verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
+ail lsp                              # Starts Language Server Protocol over stdio
 ```
-

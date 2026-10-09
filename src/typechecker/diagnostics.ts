@@ -7,7 +7,7 @@
  */
 
 import { LexerError } from "../core/lexer.js";
-import { parse, ParserError } from "../core/parser.js";
+import { ParserError, parse } from "../core/parser.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { TypeCheckError, TypeChecker } from "./checker.js";
 import { formatType } from "./types.js";

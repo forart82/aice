@@ -97,5 +97,24 @@ fn startService() -> void:
 
 4. **Identity Verification Gate**:
    - For any unmutated file:
-     $$\text{assert}(\text{Put}(\text{Get}(c), c) == c)$$
+     $$\text{assert}(\text{Put}(\text{Get}(c), \Omega(c)) \equiv c)$$
    - If diff is detected, the verification gate aborts with an AST misalignment trace.
+
+---
+
+## 4. Side-by-Side File Organization & Lifecycle
+
+In adopted repositories, the trivia table is stored in the same directory as the target source and AIL files:
+
+```
+src/sim/
+├── Boss.ts                  # Read-only target source (chmod 444)
+├── Boss.ts.ail              # Authoritative AIL source edited by AI
+└── Boss.ts.ail.trivia.json  # Lossless CST trivia table sidecar
+```
+
+### CLI Verification & Tooling:
+- **Decompile with Trivia**: `ail decompile src/Boss.ts --trivia` extracts AST and sidecar trivia table.
+- **Roundtrip Identity Verification**: `ail roundtrip src/Boss.ts` executes the complete lens cycle and verifies byte-for-byte identity.
+- **Lifecycle Cleanup**: When running `ail eject --remove-ail`, both `.ail` and `.trivia.json` sidecars are safely cleaned up.
+

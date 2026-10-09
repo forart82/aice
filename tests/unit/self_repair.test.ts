@@ -6,13 +6,9 @@
  */
 
 import { describe, expect, it } from "vitest";
-import {
-  applyUnifiedDiffPatch,
-  attemptSelfRepair,
-  buildReportFromError,
-} from "../../src/typechecker/diagnostics.js";
 import { parse } from "../../src/core/parser.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
+import { applyUnifiedDiffPatch, attemptSelfRepair } from "../../src/typechecker/diagnostics.js";
 
 describe("Step 14: Autonomous Self-Repair Engine & Unified Diff Telemetry", () => {
   describe("Deterministic Unified Diff Patch Applicator", () => {

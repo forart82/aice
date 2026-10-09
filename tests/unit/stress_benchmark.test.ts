@@ -7,16 +7,12 @@
  * cross-target translation matrix, tokenomics thresholds, and parser throughput.
  */
 
-import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../../src/emitters/index.js";
-import {
-  auditTokenomics,
-  formatProjectsMarkdownTable,
-  formatTokenomicsMarkdownTable,
-} from "../../src/tokenomics/index.js";
+import { detectTargetFromPath, emitTarget } from "../../src/emitters/index.js";
+import { auditTokenomics, formatProjectsMarkdownTable } from "../../src/tokenomics/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 function findAilFiles(dir: string): string[] {

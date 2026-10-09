@@ -1213,7 +1213,8 @@ export class Parser {
       this.advance();
       const aliasName = this.parseContextualIdentOrString("Expected property alias");
       lastSpan = this.previous().span;
-      (aliases ??= []).push(aliasName);
+      if (!aliases) aliases = [];
+      aliases.push(aliasName);
       while (
         this.check("COMMA") &&
         (hasPropKeyword ||
@@ -1225,7 +1226,8 @@ export class Parser {
         this.advance();
         const nextAlias = this.parseContextualIdentOrString("Expected property alias");
         lastSpan = this.previous().span;
-        (aliases ??= []).push(nextAlias);
+        if (!aliases) aliases = [];
+        aliases.push(nextAlias);
       }
     }
 
@@ -1240,12 +1242,14 @@ export class Parser {
       this.advance();
       const aliasName = this.parseContextualIdentOrString("Expected property alias");
       lastSpan = this.previous().span;
-      (aliases ??= []).push(aliasName);
+      if (!aliases) aliases = [];
+      aliases.push(aliasName);
       while (this.check("COMMA")) {
         this.advance();
         const nextAlias = this.parseContextualIdentOrString("Expected property alias");
         lastSpan = this.previous().span;
-        (aliases ??= []).push(nextAlias);
+        if (!aliases) aliases = [];
+        aliases.push(nextAlias);
       }
     }
 
