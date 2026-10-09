@@ -29,6 +29,7 @@ import {
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
+  formatSingleFileSummary,
   formatTokenomicsMarkdownTable,
 } from "../src/tokenomics/index.js";
 import { ingestProjectSideBySide } from "../src/transpiler/index.js";
@@ -46,7 +47,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.10");
+  .version("0.3.11");
 
 // Command: compile <file>
 program
@@ -463,12 +464,13 @@ program
     new AilLspServer(process.stdin, process.stdout);
   });
 
-// Command: verify-tokenomics [dir]
+// Command: tokens [path]
+// Aliases: tokenomics, efficiency, verify-tokenomics
 program
-  .command("verify-tokenomics")
-  .alias("tokenomics")
-  .description("Audit token and character savings against cl100k_base and o200k_base tokenizers")
-  .argument("[dir]", "Directory containing .ail files", "examples")
+  .command("tokens")
+  .aliases(["tokenomics", "efficiency", "verify-tokenomics"])
+  .description("Audit token and character savings for a specific file or folder (with subfolders)")
+  .argument("[path]", "Path to file or directory to audit", ".")
   .option(
     "--min-savings <pct>",
     "Minimum required savings percentage across tokenizers",
@@ -479,11 +481,18 @@ program
   .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
   .action(
     (
-      dir: string,
+      targetPath: string,
       options: { minSavings?: number; checkDrift?: boolean; projects?: boolean; json?: boolean },
     ) => {
       try {
-        const report = auditTokenomics(dir, {
+        const fullTarget = path.resolve(process.cwd(), targetPath);
+        if (!fs.existsSync(fullTarget)) {
+          console.error(`❌ Error: File or directory not found: ${targetPath}`);
+          process.exit(1);
+        }
+        const isFile = fs.statSync(fullTarget).isFile();
+
+        const report = auditTokenomics(targetPath, {
           minSavings: options.minSavings,
           checkDrift: options.checkDrift,
         });
@@ -491,13 +500,17 @@ program
         if (options.json) {
           console.log(JSON.stringify(report, null, 2));
         } else {
-          console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${dir} ===\n`);
-          if (options.projects) {
-            console.log(formatProjectsMarkdownTable(report));
+          if (isFile && report.files.length === 1 && !options.projects) {
+            console.log("\n" + formatSingleFileSummary(report.files[0]) + "\n");
           } else {
-            console.log(formatTokenomicsMarkdownTable(report));
+            console.log(`\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`);
+            if (options.projects) {
+              console.log(formatProjectsMarkdownTable(report));
+            } else {
+              console.log(formatTokenomicsMarkdownTable(report));
+            }
+            console.log();
           }
-          console.log();
 
           if (report.driftDetected) {
             console.error("❌ Target drift detected! Compiled output differs from target file.");

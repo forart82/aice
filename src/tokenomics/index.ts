@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
 import { parse } from "../core/parser.js";
+import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 
 const cl100k = getEncoding("cl100k_base");
@@ -30,6 +31,7 @@ export interface TokenomicsFileResult {
   ailO200k: number;
   o200kSavingsPct: number;
   drift: boolean;
+  driftChecked?: boolean;
   diffSummary?: string;
 }
 
@@ -111,7 +113,11 @@ export function calculateFileTokenomics(
       const emitted = emitTarget(mod, targetLang);
       if (emitted.trim() !== targetContent.trim()) {
         drift = true;
-        diffSummary = `Expected length ${targetContent.length}, got ${emitted.length}`;
+        if (targetContent.length !== emitted.length) {
+          diffSummary = `Length mismatch: expected ${targetContent.length}, got ${emitted.length}`;
+        } else {
+          diffSummary = `Content mismatch between emitted output and target file`;
+        }
       }
     } catch (err: unknown) {
       drift = true;
@@ -133,49 +139,67 @@ export function calculateFileTokenomics(
     ailO200k,
     o200kSavingsPct,
     drift,
+    driftChecked: checkDrift,
     diffSummary,
   };
 }
 
+export interface TokenomicsAuditOptions {
+  minSavings?: number;
+  checkDrift?: boolean;
+}
+
 export function auditTokenomics(
-  dir: string,
-  options: { minSavings?: number; checkDrift?: boolean } = {},
+  targetPath: string,
+  options: TokenomicsAuditOptions = {},
 ): TokenomicsAuditReport {
-  const searchDir = path.resolve(process.cwd(), dir);
-  if (!fs.existsSync(searchDir)) {
-    throw new Error(`Directory not found: ${dir}`);
+  const resolved = path.resolve(process.cwd(), targetPath);
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`File or directory not found: ${targetPath}`);
   }
 
-  function findAilFiles(cur: string): string[] {
-    const entries = fs.readdirSync(cur, { withFileTypes: true });
-    const results: string[] = [];
-    for (const entry of entries) {
-      const full = path.resolve(cur, entry.name);
-      if (entry.isDirectory() && entry.name !== "node_modules" && !entry.name.startsWith(".")) {
-        results.push(...findAilFiles(full));
-      } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-        results.push(full);
-      }
-    }
-    return results;
-  }
-
-  const ailFiles = findAilFiles(searchDir);
+  const stat = fs.statSync(resolved);
   const files: TokenomicsFileResult[] = [];
 
-  for (const ailFile of ailFiles) {
-    const targetFile = ailFile.replace(/\.ail$/, "");
-    if (!fs.existsSync(targetFile)) {
-      continue;
+  if (stat.isFile()) {
+    const isAil = resolved.endsWith(".ail");
+    let ailFile: string;
+    let targetFile: string;
+    let ailContent: string;
+    let targetContent: string;
+
+    if (isAil) {
+      ailFile = resolved;
+      targetFile = ailFile.replace(/\.ail$/, "");
+      ailContent = fs.readFileSync(ailFile, "utf-8");
+      if (fs.existsSync(targetFile)) {
+        targetContent = fs.readFileSync(targetFile, "utf-8");
+      } else {
+        const targetLang = detectTargetFromPath(ailFile);
+        const mod = parse(ailContent, ailFile);
+        targetContent = emitTarget(mod, targetLang);
+      }
+    } else {
+      targetFile = resolved;
+      ailFile = `${targetFile}.ail`;
+      targetContent = fs.readFileSync(targetFile, "utf-8");
+      if (fs.existsSync(ailFile)) {
+        ailContent = fs.readFileSync(ailFile, "utf-8");
+      } else {
+        const targetLang = detectTargetFromPath(targetFile);
+        try {
+          const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
+          ailContent = decomp.ail;
+        } catch (err: unknown) {
+          throw new Error(
+            `Failed to evaluate token efficiency for ${targetFile}: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
     }
 
-    const ailContent = fs.readFileSync(ailFile, "utf-8");
-    const targetContent = fs.readFileSync(targetFile, "utf-8");
     const relAilPath = path.relative(process.cwd(), ailFile);
-
-    const relFromSearch = path.relative(searchDir, ailFile);
-    const parts = relFromSearch.split(path.sep);
-    const project = parts.length > 1 ? parts[0] : path.basename(searchDir);
+    const project = path.basename(path.dirname(resolved));
 
     const result = calculateFileTokenomics(
       ailContent,
@@ -186,6 +210,122 @@ export function auditTokenomics(
       project,
     );
     files.push(result);
+  } else if (stat.isDirectory()) {
+    const searchDir = resolved;
+    const processedTargets = new Set<string>();
+
+    function walk(cur: string): { ailFiles: string[]; targetCandidates: string[] } {
+      const entries = fs.readdirSync(cur, { withFileTypes: true });
+      const ails: string[] = [];
+      const targets: string[] = [];
+
+      for (const entry of entries) {
+        if (
+          entry.name === "node_modules" ||
+          entry.name === ".git" ||
+          entry.name === "dist" ||
+          entry.name === "build" ||
+          entry.name === ".next" ||
+          entry.name === ".turbo" ||
+          entry.name.startsWith(".")
+        ) {
+          continue;
+        }
+
+        const full = path.resolve(cur, entry.name);
+        if (entry.isDirectory()) {
+          const sub = walk(full);
+          ails.push(...sub.ailFiles);
+          targets.push(...sub.targetCandidates);
+        } else if (entry.isFile()) {
+          if (entry.name.endsWith(".ail.trivia.json")) {
+            continue;
+          }
+          if (entry.name.endsWith(".ail")) {
+            ails.push(full);
+          } else {
+            const ext = path.extname(entry.name);
+            if (
+              ext === ".ts" ||
+              ext === ".tsx" ||
+              ext === ".css" ||
+              ext === ".html" ||
+              ext === ".py" ||
+              ext === ".cpp" ||
+              ext === ".hpp" ||
+              ext === ".h" ||
+              ext === ".cc" ||
+              ext === ".go" ||
+              ext === ".rs"
+            ) {
+              targets.push(full);
+            }
+          }
+        }
+      }
+      return { ailFiles: ails, targetCandidates: targets };
+    }
+
+    const { ailFiles, targetCandidates } = walk(searchDir);
+
+    if (ailFiles.length > 0) {
+      // 1. Process all existing .ail files in directory and subdirectories
+      for (const ailFile of ailFiles) {
+        const targetFile = ailFile.replace(/\.ail$/, "");
+        const relAilPath = path.relative(process.cwd(), ailFile);
+        const relFromSearch = path.relative(searchDir, ailFile);
+        const parts = relFromSearch.split(path.sep);
+        const project = parts.length > 1 ? parts[0] : path.basename(searchDir);
+
+        let targetContent = "";
+        const ailContent = fs.readFileSync(ailFile, "utf-8");
+
+        if (fs.existsSync(targetFile)) {
+          targetContent = fs.readFileSync(targetFile, "utf-8");
+          processedTargets.add(targetFile);
+        } else {
+          const targetLang = detectTargetFromPath(ailFile);
+          const mod = parse(ailContent, ailFile);
+          targetContent = emitTarget(mod, targetLang);
+        }
+
+        const result = calculateFileTokenomics(
+          ailContent,
+          targetContent,
+          targetFile,
+          options.checkDrift ?? false,
+          relAilPath,
+          project,
+        );
+        files.push(result);
+      }
+    } else {
+      // 2. Directory has no .ail files: process unadopted target candidates on-the-fly in memory
+      for (const targetFile of targetCandidates) {
+        if (processedTargets.has(targetFile)) continue;
+        const targetLang = detectTargetFromPath(targetFile);
+        try {
+          const targetContent = fs.readFileSync(targetFile, "utf-8");
+          const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
+          const ailContent = decomp.ail;
+          const relFromSearch = path.relative(searchDir, targetFile);
+          const parts = relFromSearch.split(path.sep);
+          const project = parts.length > 1 ? parts[0] : path.basename(searchDir);
+
+          const result = calculateFileTokenomics(
+            ailContent,
+            targetContent,
+            targetFile,
+            options.checkDrift ?? false,
+            `${targetFile}.ail`,
+            project,
+          );
+          files.push(result);
+        } catch {
+          // Skip files that cannot be decompiled in memory
+        }
+      }
+    }
   }
 
   // Sort by language, then filename
@@ -251,6 +391,62 @@ export function auditTokenomics(
   };
 }
 
+export function formatSingleFileSummary(f: TokenomicsFileResult): string {
+  const clSign = f.cl100kSavingsPct >= 0 ? "-" : "+";
+  const o2Sign = f.o200kSavingsPct >= 0 ? "-" : "+";
+  const chSign = f.charSavingsPct >= 0 ? "-" : "+";
+
+  const clRatio = f.ailCl100k > 0 ? (f.targetCl100k / f.ailCl100k).toFixed(2) : "1.00";
+  const o2Ratio = f.ailO200k > 0 ? (f.targetO200k / f.ailO200k).toFixed(2) : "1.00";
+  const charRatio = f.ailChars > 0 ? (f.targetChars / f.ailChars).toFixed(2) : "1.00";
+
+  let driftStr = "Not verified (run with --check-drift)";
+  if (f.driftChecked) {
+    driftStr = f.drift
+      ? `❌ DRIFT DETECTED (${f.diffSummary ?? "output differs"})`
+      : "✔ ZERO DRIFT (Lossless Bit-Identical)";
+  } else if (f.drift) {
+    driftStr = `❌ DRIFT DETECTED (${f.diffSummary ?? "output differs"})`;
+  }
+
+  const contentWidth = 76;
+  function boxLine(label: string, value: string): string {
+    const text = `  ${label.padEnd(24)} ${value}`;
+    const padding = Math.max(0, contentWidth - text.length);
+    return `│${text}${" ".repeat(padding)}│`;
+  }
+  function titleLine(title: string): string {
+    const text = `  ${title}`;
+    const padding = Math.max(0, contentWidth - text.length);
+    return `│${text}${" ".repeat(padding)}│`;
+  }
+
+  const topBorder = `┌${"─".repeat(contentWidth)}┐`;
+  const midBorder = `├${"─".repeat(contentWidth)}┤`;
+  const botBorder = `└${"─".repeat(contentWidth)}┘`;
+
+  return [
+    topBorder,
+    titleLine(`AIL Token Efficiency Audit: ${f.file}`),
+    midBorder,
+    boxLine("Target Language:", f.targetLang),
+    boxLine(
+      "Tokens (cl100k_base):",
+      `${f.targetCl100k.toLocaleString()} -> ${f.ailCl100k.toLocaleString()} (${clSign}${Math.abs(f.cl100kSavingsPct).toFixed(1)}% savings, ${clRatio}x density)`,
+    ),
+    boxLine(
+      "Tokens (o200k_base):",
+      `${f.targetO200k.toLocaleString()} -> ${f.ailO200k.toLocaleString()} (${o2Sign}${Math.abs(f.o200kSavingsPct).toFixed(1)}% savings, ${o2Ratio}x density)`,
+    ),
+    boxLine(
+      "Raw Characters:",
+      `${f.targetChars.toLocaleString()} -> ${f.ailChars.toLocaleString()} (${chSign}${Math.abs(f.charSavingsPct).toFixed(1)}% savings, ${charRatio}x density)`,
+    ),
+    boxLine("Drift Status:", driftStr),
+    botBorder,
+  ].join("\n");
+}
+
 export function formatTokenomicsMarkdownTable(report: TokenomicsAuditReport): string {
   const lines: string[] = [];
   lines.push(
@@ -284,7 +480,7 @@ export function formatTokenomicsMarkdownTable(report: TokenomicsAuditReport): st
   const totalChStr = `**${chSign}${Math.abs(agg.charSavingsPct).toFixed(1)}%**`;
 
   lines.push(
-    `| **TOTAL (${report.files.length} Projects)** | **Aggregated** | **${agg.targetCl100k.toLocaleString()}** | **${agg.ailCl100k.toLocaleString()}** | ${totalClStr} | **${agg.targetO200k.toLocaleString()}** | **${agg.ailO200k.toLocaleString()}** | ${totalO2Str} | ${totalChStr} |`,
+    `| **TOTAL (${report.files.length} ${report.files.length === 1 ? "File" : "Files"})** | **Aggregated** | **${agg.targetCl100k.toLocaleString()}** | **${agg.ailCl100k.toLocaleString()}** | ${totalClStr} | **${agg.targetO200k.toLocaleString()}** | **${agg.ailO200k.toLocaleString()}** | ${totalO2Str} | ${totalChStr} |`,
   );
 
   return lines.join("\n");
