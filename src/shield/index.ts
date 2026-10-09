@@ -6,3 +6,4 @@
  */
 
 export * from "./ai-shield.js";
+export * from "./fs-lock.js";
