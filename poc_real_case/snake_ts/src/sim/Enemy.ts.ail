@@ -80,7 +80,7 @@ pub class Enemy:
       SpawnTimer -= dt
       ret
     if HitFlash > 0:
-      HitFlash = Math.max(0, HitFlash - dt * 6)
+      HitFlash = max(0, HitFlash - dt * 6)
     burn := Status.Update(dt)
     if burn > 0:
       this.ApplyDamage(burn, false)
@@ -89,7 +89,7 @@ pub class Enemy:
     if Status.Immobile != nil:
       ret
     if StasisTimer > 0:
-      StasisTimer = Math.max(0, StasisTimer - dt)
+      StasisTimer = max(0, StasisTimer - dt)
     stasisMult := StasisTimer > 0 and 0.2 or 1
     speedMult := Status.SpeedMult * stasisMult * world.TimeScale != 0 and world.TimeScale or 1
     tx := target.X ?? target.x
@@ -99,7 +99,7 @@ pub class Enemy:
     dist := MathX.safeLen(dx, dy)
     ux := dx / dist
     uy := dy / dist
-    Angle = Math.atan2(dy, dx)
+    Angle = atan2(dy, dx)
     pad := Radius
     aw := world.ArenaW ?? world.arenaW
     ah := world.ArenaH ?? world.arenaH

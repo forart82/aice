@@ -112,7 +112,14 @@ export class PythonEmitter {
       }
     }
 
-    return this.ctx.getOutput();
+    let out = this.ctx.getOutput();
+    if (out.includes("math.")) {
+      out = out.replace(
+        "from typing import Any, Optional, Union, TypedDict\n",
+        "from typing import Any, Optional, Union, TypedDict\nimport math\n",
+      );
+    }
+    return out;
   }
 
   private emitImport(imp: ImportDecl): void {
@@ -362,10 +369,33 @@ export class PythonEmitter {
         this.ctx.writeLine(`${stmt.name}${typeAnnotation} = ${this.emitExpr(stmt.init)}`);
         break;
       }
+      case "DestructureBinding": {
+        const names = stmt.names.join(", ");
+        this.ctx.writeLine(`${names} = ${this.emitExpr(stmt.init)}`);
+        break;
+      }
       case "AssignStmt": {
-        const targetStr = this.emitExpr(stmt.target);
-        const valStr = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.op &&
+          stmt.op !== "=" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const targetStr = this.emitExpr(stmt.target.elements[i]);
+            const valStr = this.emitExpr(stmt.value.elements[i]);
+            this.ctx.writeLine(`${targetStr} ${stmt.op} ${valStr}`);
+          }
+        } else if (stmt.target.kind === "ArrayLiteralExpr" && (!stmt.op || stmt.op === "=")) {
+          const names = stmt.target.elements.map((e) => this.emitExpr(e)).join(", ");
+          const valStr = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${names} = ${valStr}`);
+        } else {
+          const targetStr = this.emitExpr(stmt.target);
+          const valStr = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
+        }
         break;
       }
       case "ReturnStmt": {
@@ -508,6 +538,28 @@ export class PythonEmitter {
           const lowered = lowerConstructor(expr.callee.name, argCodes, "python");
           if (lowered.isLowered) {
             return lowered.code;
+          }
+
+          const name = expr.callee.name;
+          if (name === "clamp") {
+            return `max(${argCodes[1]}, min(${argCodes[2]}, ${argCodes[0]}))`;
+          }
+          if (
+            name === "floor" ||
+            name === "ceil" ||
+            name === "sqrt" ||
+            name === "sin" ||
+            name === "cos" ||
+            name === "tan" ||
+            name === "atan2" ||
+            name === "asin" ||
+            name === "acos" ||
+            name === "hypot"
+          ) {
+            return `math.${name}(${argCodes.join(", ")})`;
+          }
+          if (name === "sign") {
+            return `(1 if (${argCodes[0]}) > 0 else (-1 if (${argCodes[0]}) < 0 else 0))`;
           }
         }
 

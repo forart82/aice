@@ -262,10 +262,28 @@ export class RustEmitter {
         this.ctx.writeLine(`let ${mutStr}${varName}${typeStr}${initStr};`);
         break;
       }
+      case "DestructureBinding": {
+        const mutStr = stmt.isMut ? "mut " : "";
+        const names = stmt.names.map((n) => this.toSnakeCase(n)).join(", ");
+        this.ctx.writeLine(`let ${mutStr}(${names}) = ${this.emitExpr(stmt.init)};`);
+        break;
+      }
       case "AssignStmt": {
-        const target = this.emitExpr(stmt.target);
-        const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const target = this.emitExpr(stmt.target.elements[i]);
+            const value = this.emitExpr(stmt.value.elements[i]);
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          }
+        } else {
+          const target = this.emitExpr(stmt.target);
+          const value = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+        }
         break;
       }
       case "ReturnStmt": {
@@ -463,6 +481,24 @@ export class RustEmitter {
       if (this.structTypes.has(name)) {
         return `${name}::new(${argCodes.join(", ")})`;
       }
+
+      if (name === "clamp") return `(${argCodes[0]}).clamp(${argCodes[1]}, ${argCodes[2]})`;
+      if (name === "min") return `std::cmp::min(${argCodes.join(", ")})`;
+      if (name === "max") return `std::cmp::max(${argCodes.join(", ")})`;
+      if (name === "abs") return `(${argCodes[0]}).abs()`;
+      if (name === "sqrt") return `(${argCodes[0]}).sqrt()`;
+      if (name === "floor") return `(${argCodes[0]}).floor()`;
+      if (name === "ceil") return `(${argCodes[0]}).ceil()`;
+      if (name === "round") return `(${argCodes[0]}).round()`;
+      if (name === "sin") return `(${argCodes[0]}).sin()`;
+      if (name === "cos") return `(${argCodes[0]}).cos()`;
+      if (name === "tan") return `(${argCodes[0]}).tan()`;
+      if (name === "atan2") return `(${argCodes[0]}).atan2(${argCodes[1]})`;
+      if (name === "asin") return `(${argCodes[0]}).asin()`;
+      if (name === "acos") return `(${argCodes[0]}).acos()`;
+      if (name === "hypot") return `(${argCodes[0]}).hypot(${argCodes[1]})`;
+      if (name === "sign") return `(${argCodes[0]}).signum()`;
+      if (name === "pow") return `(${argCodes[0]}).powf(${argCodes[1]})`;
 
       return `${this.toSnakeCase(name)}(${argCodes.join(", ")})`;
     }

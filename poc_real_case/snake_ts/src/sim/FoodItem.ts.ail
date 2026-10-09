@@ -56,7 +56,7 @@ pub class FoodItem:
     Pulse += dt * 4.2
     Life += dt
     if SpawnScale < 1:
-      SpawnScale = Math.min(1, SpawnScale + dt * 5)
+      SpawnScale = min(1, SpawnScale + dt * 5)
     dx := px - X
     dy := py - Y
     dist := MathX.safeLen(dx, dy)

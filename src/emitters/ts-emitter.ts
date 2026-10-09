@@ -64,6 +64,26 @@ export class TypeScriptEmitter {
     "AudioContext",
   ]);
 
+  private static readonly MATH_BUILTINS = new Set([
+    "min",
+    "max",
+    "floor",
+    "ceil",
+    "round",
+    "abs",
+    "sqrt",
+    "sin",
+    "cos",
+    "tan",
+    "atan2",
+    "asin",
+    "acos",
+    "hypot",
+    "sign",
+    "pow",
+    "clamp",
+  ]);
+
   constructor(options: EmitterOptions = {}) {
     this.ctx = new EmitterContext(options.target ?? "typescript", options);
   }
@@ -576,10 +596,36 @@ export class TypeScriptEmitter {
         );
         break;
       }
+      case "DestructureBinding": {
+        if (this.localScopeVars.length > 0) {
+          const scope = this.localScopeVars[this.localScopeVars.length - 1];
+          for (const name of stmt.names) {
+            scope.add(name);
+          }
+        }
+        const keyword = stmt.isMut ? "let" : "const";
+        const names = stmt.names.join(", ");
+        this.ctx.writeLine(`${keyword} [${names}] = ${this.emitExpr(stmt.init)};`);
+        break;
+      }
       case "AssignStmt": {
-        const targetStr = this.emitExpr(stmt.target);
-        const valStr = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr};`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.op &&
+          stmt.op !== "=" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const targetStr = this.emitExpr(stmt.target.elements[i]);
+            const valStr = this.emitExpr(stmt.value.elements[i]);
+            this.ctx.writeLine(`${targetStr} ${stmt.op} ${valStr};`);
+          }
+        } else {
+          const targetStr = this.emitExpr(stmt.target);
+          const valStr = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr};`);
+        }
         break;
       }
       case "ReturnStmt": {
@@ -770,6 +816,16 @@ export class TypeScriptEmitter {
 
           if (this.classNames.has(expr.callee.name) || TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name)) {
             return `new ${expr.callee.name}(${argCodes.join(", ")})`;
+          }
+
+          if (TypeScriptEmitter.MATH_BUILTINS.has(expr.callee.name)) {
+            const isShadowed = this.localScopeVars.some((scope) => scope.has(expr.callee.name));
+            if (!isShadowed) {
+              if (expr.callee.name === "clamp") {
+                return `Math.max(${argCodes[1]}, Math.min(${argCodes[2]}, ${argCodes[0]}))`;
+              }
+              return `Math.${expr.callee.name}(${argCodes.join(", ")})`;
+            }
           }
         }
 

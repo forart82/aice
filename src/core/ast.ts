@@ -208,6 +208,7 @@ export interface Block {
 
 export type Statement =
   | LetBinding
+  | DestructureBinding
   | AssignStmt
   | ReturnStmt
   | ExprStmt
@@ -221,6 +222,15 @@ export interface LetBinding {
   name: string;
   isMut: boolean;
   typeAnnotation: TypeExpr | null;
+  init: Expr;
+  span: Span;
+}
+
+export interface DestructureBinding {
+  kind: "DestructureBinding";
+  names: string[];
+  isMut: boolean;
+  typeAnnotation?: TypeExpr | null;
   init: Expr;
   span: Span;
 }

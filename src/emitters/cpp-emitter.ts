@@ -326,10 +326,28 @@ export class CppEmitter {
         this.ctx.writeLine(`${typeStr} ${stmt.name} = ${this.emitExpr(stmt.init)};`);
         break;
       }
+      case "DestructureBinding": {
+        const qualifier = stmt.isMut ? "auto" : "const auto";
+        const names = stmt.names.join(", ");
+        this.ctx.writeLine(`${qualifier} [${names}] = ${this.emitExpr(stmt.init)};`);
+        break;
+      }
       case "AssignStmt": {
-        const target = this.emitExpr(stmt.target);
-        const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const target = this.emitExpr(stmt.target.elements[i]);
+            const value = this.emitExpr(stmt.value.elements[i]);
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          }
+        } else {
+          const target = this.emitExpr(stmt.target);
+          const value = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+        }
         break;
       }
       case "ReturnStmt": {
@@ -457,6 +475,13 @@ export class CppEmitter {
           if (typeName === "round") return `std::round(${argCodes.join(", ")})`;
           if (typeName === "sin") return `std::sin(${argCodes.join(", ")})`;
           if (typeName === "cos") return `std::cos(${argCodes.join(", ")})`;
+          if (typeName === "tan") return `std::tan(${argCodes.join(", ")})`;
+          if (typeName === "atan2") return `std::atan2(${argCodes.join(", ")})`;
+          if (typeName === "asin") return `std::asin(${argCodes.join(", ")})`;
+          if (typeName === "acos") return `std::acos(${argCodes.join(", ")})`;
+          if (typeName === "hypot") return `std::hypot(${argCodes.join(", ")})`;
+          if (typeName === "abs") return `std::abs(${argCodes.join(", ")})`;
+          if (typeName === "sign") return `((${argCodes[0]} > 0) - (${argCodes[0]} < 0))`;
         }
 
         const callee = this.emitExpr(expr.callee);

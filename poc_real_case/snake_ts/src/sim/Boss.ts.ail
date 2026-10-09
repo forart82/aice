@@ -67,7 +67,7 @@ pub class Boss:
       Dead = true
       ret
     remaining ::= v
-    HeadHp = Math.min(HeadMaxHp, remaining)
+    HeadHp = min(HeadMaxHp, remaining)
     remaining -= HeadHp
   fn get_segmentSpacing() = SegmentSpacing; fn set_segmentSpacing(v) = SegmentSpacing = v
   fn get_multiBossScale() = MultiBossScale; fn set_multiBossScale(v) = MultiBossScale = v
@@ -104,7 +104,7 @@ pub class Boss:
   fn get_segments() = Segments; fn set_segments(v) = Segments = v
   fn get_onPhaseChange() = OnPhaseChange; fn set_onPhaseChange(v) = OnPhaseChange = v
   fn constructor(floor:int, arenaW:int, arenaH:int, specificTypeOrArchetype:str | BossArchetypeDef, startX:int, startY:int, multiBossScale:unknown = 1):
-    Floor = Math.max(1, floor)
+    Floor = max(1, floor)
     ArenaW = arenaW
     ArenaH = arenaH
     MultiBossScale = multiBossScale
@@ -121,7 +121,7 @@ pub class Boss:
     cycleFloor := cycle * GameData.Bosses.length
     Type = arch.Type
     if cycle > 0:
-      Name = "" + String(arch.Name) + " " + String(Boss.RomanNumerals[Math.min(cycle, 4)]).trim()
+      Name = "" + String(arch.Name) + " " + String(Boss.RomanNumerals[min(cycle, 4)]).trim()
     else:
       Name = arch.Name
     Title = arch.Title
@@ -148,11 +148,11 @@ pub class Boss:
     baseRad ::= 15
     spacing ::= 20
     if Type == "centipede":
-      segCount = 14 + Math.min(10, Floor * 2)
+      segCount = 14 + min(10, Floor * 2)
       baseRad = 15
       spacing = 21
     elif Type == "gorgon":
-      segCount = 12 + Math.min(8, Floor * 2)
+      segCount = 12 + min(8, Floor * 2)
       baseRad = 14
       spacing = 20
     SegmentSpacing = spacing
@@ -165,7 +165,7 @@ pub class Boss:
       HeadHp = total
       ret
     totalWeights := n + 2
-    unitHp := Math.max(1, Math.floor(Math))
+    unitHp := max(1, Math.floor(Math))
     headHp := total - unitHp * n
     HeadMaxHp = headHp
     HeadHp = headHp
@@ -196,7 +196,7 @@ pub class Boss:
         Services.Fx.Burst(lastSeg.X, lastSeg.Y, Color, 8, 3, 2)
         Segments.pop()
     if toHp > 0:
-      HeadHp = Math.max(0, HeadHp - toHp)
+      HeadHp = max(0, HeadHp - toHp)
     if this.Hp > 0 and this.Hp <= this.MaxHp * 0.5 and Phase == 1:
       Phase = 2
       AttackTimer = 0.9
@@ -251,7 +251,7 @@ pub class Boss:
     if not Number.isFinite(Angle):
       Angle = 0
     if HitFlash > 0:
-      HitFlash = Math.max(0, HitFlash - dt * 5)
+      HitFlash = max(0, HitFlash - dt * 5)
     burn := Status.Update(dt)
     if burn > 0:
       this.ApplyDamage(burn)
@@ -261,7 +261,7 @@ pub class Boss:
     if Status.Immobile != nil:
       ret
     if StasisTimer > 0:
-      StasisTimer = Math.max(0, StasisTimer - dt)
+      StasisTimer = max(0, StasisTimer - dt)
     stasisMult := StasisTimer > 0 and 0.2 or 1
     worldScale := world != nil and world.TimeScale != undefined and world.TimeScale or 1
     scale := Status.SpeedMult * stasisMult * worldScale != 0 and worldScale or 1
@@ -294,13 +294,13 @@ pub class Boss:
   fn stepIk(dt:int) :
     this.UpdateSegments(dt)
   fn UpdateCentipede(dt:int, dx:int, dy:int, _dist:int, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6.5 or 4.5 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 185 or 130
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.4
@@ -309,13 +309,13 @@ pub class Boss:
       spread := Phase == 2 and Boss.SpreadPhase2 or Boss.SpreadPhase1
       Services.Sound.PlayShoot()
   fn UpdateGorgon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6 or 4 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 145 or 92
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.3
@@ -355,13 +355,13 @@ pub class Boss:
         tx := target.X ?? target.x
         ty := target.Y ?? target.y
   fn UpdateFrostwyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 5.5 or 3.8 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 138 or 78
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.4
@@ -379,11 +379,11 @@ pub class Boss:
     MoveTimer -= dt
     cx := ArenaW * 0.5
     cy := ArenaH * 0.42
-    orbitR := Math.min(ArenaW, ArenaH) * 0.22
-    ox := cx + Math.cos(SpiralAngle * 0.35) * orbitR
-    oy := cy + Math.sin(SpiralAngle * 0.55) * orbitR * 0.6
-    X += ox - X * Math.min(1, dt * 1.4)
-    Y += oy - Y * Math.min(1, dt * 1.4)
+    orbitR := min(ArenaW, ArenaH) * 0.22
+    ox := cx + cos(SpiralAngle * 0.35) * orbitR
+    oy := cy + sin(SpiralAngle * 0.55) * orbitR * 0.6
+    X += ox - X * min(1, dt * 1.4)
+    Y += oy - Y * min(1, dt * 1.4)
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 0.1
@@ -400,13 +400,13 @@ pub class Boss:
       ty := target.Y ?? target.y
       Services.Sound.PlayBossAlert()
   fn UpdateChronoWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6.2 or 4.2 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 160 or 110
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.2
@@ -420,13 +420,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "chrono", { Radius: 45, Life: 2.5, ImpactDamage: 18 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateHivemind(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 5.8 or 3.9 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 130 or 85
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.1
@@ -440,13 +440,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "poison", { Radius: 50, Life: 3.5, Dps: 15 + Floor * 2, Telegraph: 0.85, Owner: "enemy" }))
   fn UpdateSuperconductor(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6.8 or 4.6 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 180 or 125
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -460,13 +460,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-90, 90), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-90, 90), 40, ArenaH - 40), "laser", { Radius: 42, Life: 1.5, ImpactDamage: 28 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateQuantumHydra(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 7.2 or 5 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 190 or 135
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -480,13 +480,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, ArenaH - 40), "laser", { Radius: 44, Life: 1.4, ImpactDamage: 26 + Floor * 3, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateMirrorWyrm(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 7.5 or 5.2 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 195 or 140
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 0.95
@@ -504,11 +504,11 @@ pub class Boss:
     MoveTimer -= dt
     cx := ArenaW * 0.5
     cy := ArenaH * 0.45
-    orbitR := Math.min(ArenaW, ArenaH) * 0.24
-    ox := cx + Math.cos(SpiralAngle * 0.4) * orbitR
-    oy := cy + Math.sin(SpiralAngle * 0.6) * orbitR * 0.65
-    X += ox - X * Math.min(1, dt * 1.5)
-    Y += oy - Y * Math.min(1, dt * 1.5)
+    orbitR := min(ArenaW, ArenaH) * 0.24
+    ox := cx + cos(SpiralAngle * 0.4) * orbitR
+    oy := cy + sin(SpiralAngle * 0.6) * orbitR * 0.65
+    X += ox - X * min(1, dt * 1.5)
+    Y += oy - Y * min(1, dt * 1.5)
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 0.12
@@ -525,13 +525,13 @@ pub class Boss:
       Services.Fx.RingShockwave(X, Y, "#7928ca", 45, 0.04)
       Services.Sound.PlayBossAlert()
   fn UpdateOrbitalDreadnought(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 5.2 or 3.6 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 140 or 95
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.1
@@ -572,13 +572,13 @@ pub class Boss:
         tx := target.X ?? target.x
         ty := target.Y ?? target.y
   fn UpdateSolarArchon(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6.2 or 4.4 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 165 or 115
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -597,9 +597,9 @@ pub class Boss:
     MoveTimer -= dt
     cx := ArenaW * 0.5
     cy := ArenaH * 0.4
-    orbitR := Math.min(ArenaW, ArenaH) * 0.22
-    X += cx + Math.cos(SpiralAngle * 0.5) * orbitR - X * Math.min(1, dt * 1.2)
-    Y += cy + Math.sin(SpiralAngle * 0.5) * orbitR * 0.7 - Y * Math.min(1, dt * 1.2)
+    orbitR := min(ArenaW, ArenaH) * 0.22
+    X += cx + cos(SpiralAngle * 0.5) * orbitR - X * min(1, dt * 1.2)
+    Y += cy + sin(SpiralAngle * 0.5) * orbitR * 0.7 - Y * min(1, dt * 1.2)
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1.1
@@ -613,13 +613,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-100, 100), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-100, 100), 40, ArenaH - 40), "laser", { Radius: 40, Life: 1.4, ImpactDamage: 26 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdateTempestSiren(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 6.5 or 4.5 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 175 or 120
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -633,13 +633,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-110, 110), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-110, 110), 40, ArenaH - 40), "laser", { Radius: 46, Life: 1.5, ImpactDamage: 28 + Floor * 3, Telegraph: 0.75, Owner: "enemy" }))
   fn UpdateNaniteTitan(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 5.8 or 4 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 145 or 100
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -669,13 +669,13 @@ pub class Boss:
         ty := target.Y ?? target.y
         world.Hazards.push(Hazard(MathX.clamp(tx + Rng.Shared.range(-120, 120), 40, ArenaW - 40), MathX.clamp(ty + Rng.Shared.range(-120, 120), 40, ArenaH - 40), "poison", { Radius: 48, Life: 3, Dps: 18 + Floor * 2, Telegraph: 0.8, Owner: "enemy" }))
   fn UpdatePhaseSpecter(dt:int, dx:int, dy:int, _dist:int, target:SnakePlayer, world:World) :
-    targetAngle := Math.atan2(dy, dx)
+    targetAngle := atan2(dy, dx)
     maxTurnRate := Phase == 2 and 7 or 4.8 * dt
     diff := MathX.angleDelta(Angle, targetAngle)
-    Angle += Math.sign(diff) * Math.min(Math.abs(diff), maxTurnRate)
+    Angle += sign(diff) * min(abs(diff), maxTurnRate)
     speed := Phase == 2 and 185 or 130
-    X += Math.cos(Angle) * speed * dt
-    Y += Math.sin(Angle) * speed * dt
+    X += cos(Angle) * speed * dt
+    Y += sin(Angle) * speed * dt
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 1
@@ -708,7 +708,7 @@ pub class Boss:
         AttackTimer = 2
       tx := target.X ?? target.x
       ty := target.Y ?? target.y
-      mainAng := Math.atan2(ty - Y, tx - X)
+      mainAng := atan2(ty - Y, tx - X)
       angles := [mainAng - 0.45, mainAng, mainAng + 0.45]
       for base in angles:
         nil
@@ -721,9 +721,9 @@ pub class Boss:
     MoveTimer -= dt
     cx := ArenaW * 0.5
     cy := ArenaH * 0.45
-    orbitR := Math.min(ArenaW, ArenaH) * 0.25
-    X += cx + Math.cos(SpiralAngle * 0.45) * orbitR - X * Math.min(1, dt * 1.5)
-    Y += cy + Math.sin(SpiralAngle * 0.45) * orbitR * 0.75 - Y * Math.min(1, dt * 1.5)
+    orbitR := min(ArenaW, ArenaH) * 0.25
+    X += cx + cos(SpiralAngle * 0.45) * orbitR - X * min(1, dt * 1.5)
+    Y += cy + sin(SpiralAngle * 0.45) * orbitR * 0.75 - Y * min(1, dt * 1.5)
     if AttackTimer <= 0:
       if Phase == 2:
         AttackTimer = 0.12

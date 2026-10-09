@@ -6,12 +6,14 @@
  */
 
 import type {
+  ArrayLiteralExpr,
   AssignOp,
   BinaryOp,
   Block,
   ClassDecl,
   ComponentDecl,
   ConstDecl,
+  DestructureBinding,
   EnumVariantDecl,
   Expr,
   FieldDecl,
@@ -1558,6 +1560,10 @@ export class Parser {
       return null;
     }
 
+    if (this.isDestructureAhead()) {
+      return this.parseDestructureOrVectorAssign();
+    }
+
     if (this.isIdentOrKeyword(this.current())) {
       if (this.peek(1).kind === "COLON_EQUAL") {
         const startSpan = this.current().span;
@@ -1663,6 +1669,160 @@ export class Parser {
       expr,
       span: expr.span,
     };
+  }
+
+  private isDestructureAhead(): boolean {
+    const openKind = this.current().kind;
+    if (openKind !== "LBRACKET" && openKind !== "LPAREN") return false;
+    const closeKind = openKind === "LBRACKET" ? "RBRACKET" : "RPAREN";
+
+    let i = 1;
+    let count = 0;
+    while (true) {
+      const tok = this.peek(i);
+      if (!tok || tok.kind === "EOF" || tok.kind === "NEWLINE") return false;
+      if (tok.kind === "IDENT" || this.isIdentOrKeyword(tok)) {
+        count++;
+        i++;
+        const next = this.peek(i);
+        if (!next) return false;
+        if (next.kind === "COMMA") {
+          i++;
+          const afterComma = this.peek(i);
+          if (afterComma && afterComma.kind === closeKind) {
+            i++;
+            break;
+          }
+          continue;
+        }
+        if (next.kind === closeKind) {
+          i++;
+          break;
+        }
+        return false;
+      }
+      return false;
+    }
+    if (count < 1) return false;
+
+    const after = this.peek(i);
+    if (!after) return false;
+    if (
+      after.kind === "COLON_EQUAL" ||
+      after.kind === "COLON_COLON_EQUAL" ||
+      after.kind === "EQUAL" ||
+      after.kind === "PLUS_EQUAL" ||
+      after.kind === "MINUS_EQUAL" ||
+      after.kind === "STAR_EQUAL" ||
+      after.kind === "SLASH_EQUAL" ||
+      after.kind === "PERCENT_EQUAL"
+    ) {
+      return true;
+    }
+    if (after.kind === "COLON") {
+      let j = i + 1;
+      let depth = 0;
+      while (true) {
+        const t = this.peek(j);
+        if (!t || t.kind === "EOF" || t.kind === "NEWLINE") return false;
+        if (t.kind === "LBRACKET" || t.kind === "LPAREN") depth++;
+        if (t.kind === "RBRACKET" || t.kind === "RPAREN") depth--;
+        if (depth === 0) {
+          if (t.kind === "COLON_EQUAL" || t.kind === "COLON_COLON_EQUAL" || t.kind === "EQUAL") {
+            return true;
+          }
+        }
+        j++;
+      }
+    }
+    return false;
+  }
+
+  private parseDestructureOrVectorAssign(): Statement {
+    const startSpan = this.current().span;
+    const openKind = this.advance().kind; // consume '[' or '('
+    const closeKind = openKind === "LBRACKET" ? "RBRACKET" : "RPAREN";
+    const names: { name: string; span: Span }[] = [];
+
+    while (!this.check(closeKind) && !this.check("EOF")) {
+      const identTok = this.advance();
+      names.push({ name: identTok.value, span: identTok.span });
+      if (this.check("COMMA")) {
+        this.advance();
+      } else {
+        break;
+      }
+    }
+    const closeSpan = this.consume(closeKind).span;
+
+    let typeAnnotation: TypeExpr | null = null;
+    if (this.check("COLON")) {
+      this.advance();
+      typeAnnotation = this.parseTypeExpr();
+    }
+
+    if (this.check("COLON_EQUAL")) {
+      this.advance(); // consume ':='
+      const init = this.parseExpr();
+      this.consumeStatementSeparator();
+      return {
+        kind: "DestructureBinding",
+        names: names.map((n) => n.name),
+        isMut: false,
+        typeAnnotation,
+        init,
+        span: mergeSpans(startSpan, init.span),
+      };
+    }
+
+    if (this.check("COLON_COLON_EQUAL")) {
+      this.advance(); // consume '::='
+      const init = this.parseExpr();
+      this.consumeStatementSeparator();
+      return {
+        kind: "DestructureBinding",
+        names: names.map((n) => n.name),
+        isMut: true,
+        typeAnnotation,
+        init,
+        span: mergeSpans(startSpan, init.span),
+      };
+    }
+
+    if (
+      this.check("EQUAL") ||
+      this.check("PLUS_EQUAL") ||
+      this.check("MINUS_EQUAL") ||
+      this.check("STAR_EQUAL") ||
+      this.check("SLASH_EQUAL") ||
+      this.check("PERCENT_EQUAL")
+    ) {
+      const op = this.advance().value as AssignOp;
+      const val = this.parseExpr();
+      this.consumeStatementSeparator();
+      const targetSpan = mergeSpans(startSpan, closeSpan);
+      const target: ArrayLiteralExpr = {
+        kind: "ArrayLiteralExpr",
+        elements: names.map((n) => ({
+          kind: "IdentifierExpr",
+          name: n.name,
+          span: n.span,
+        })),
+        span: targetSpan,
+      };
+      return {
+        kind: "AssignStmt",
+        target,
+        op,
+        value: val,
+        span: mergeSpans(startSpan, val.span),
+      };
+    }
+
+    throw new ParserError(
+      `Expected assignment or binding operator after vector destructure target, got '${this.current().kind}'`,
+      this.current().span,
+    );
   }
 
   private parseLetBinding(): LetBinding {

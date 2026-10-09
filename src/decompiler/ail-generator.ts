@@ -376,6 +376,12 @@ export class AilGenerator {
         this.writeLine(`${stmt.name}${typeAnn}${op} ${this.formatExpr(stmt.init)}`);
         break;
       }
+      case "DestructureBinding": {
+        const op = stmt.isMut ? "::=" : ":=";
+        const names = stmt.names.join(", ");
+        this.writeLine(`[${names}] ${op} ${this.formatExpr(stmt.init)}`);
+        break;
+      }
       case "AssignStmt": {
         this.writeLine(`${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`);
         break;

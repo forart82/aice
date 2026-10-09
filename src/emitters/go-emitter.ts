@@ -306,10 +306,27 @@ export class GoEmitter {
         this.ctx.writeLine(`${varName} := ${initStr}`);
         break;
       }
+      case "DestructureBinding": {
+        const names = stmt.names.map((n) => this.toCamelCase(n)).join(", ");
+        this.ctx.writeLine(`${names} := ${this.emitExpr(stmt.init)}`);
+        break;
+      }
       case "AssignStmt": {
-        const target = this.emitExpr(stmt.target);
-        const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const target = this.emitExpr(stmt.target.elements[i]);
+            const value = this.emitExpr(stmt.value.elements[i]);
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+          }
+        } else {
+          const target = this.emitExpr(stmt.target);
+          const value = this.emitExpr(stmt.value);
+          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+        }
         break;
       }
       case "ReturnStmt": {
@@ -538,6 +555,23 @@ export class GoEmitter {
       if (this.structTypes.has(name)) {
         return `New${name}(${argCodes.join(", ")})`;
       }
+
+      if (name === "clamp") return `math.Max(${argCodes[1]}, math.Min(${argCodes[2]}, ${argCodes[0]}))`;
+      if (name === "min") return `math.Min(${argCodes.join(", ")})`;
+      if (name === "max") return `math.Max(${argCodes.join(", ")})`;
+      if (name === "abs") return `math.Abs(${argCodes[0]})`;
+      if (name === "floor") return `math.Floor(${argCodes[0]})`;
+      if (name === "ceil") return `math.Ceil(${argCodes[0]})`;
+      if (name === "round") return `math.Round(${argCodes[0]})`;
+      if (name === "sqrt") return `math.Sqrt(${argCodes[0]})`;
+      if (name === "sin") return `math.Sin(${argCodes[0]})`;
+      if (name === "cos") return `math.Cos(${argCodes[0]})`;
+      if (name === "tan") return `math.Tan(${argCodes[0]})`;
+      if (name === "atan2") return `math.Atan2(${argCodes.join(", ")})`;
+      if (name === "asin") return `math.Asin(${argCodes[0]})`;
+      if (name === "acos") return `math.Acos(${argCodes[0]})`;
+      if (name === "hypot") return `math.Hypot(${argCodes.join(", ")})`;
+      if (name === "pow") return `math.Pow(${argCodes.join(", ")})`;
 
       return `${this.toPascalCase(name)}(${argCodes.join(", ")})`;
     }

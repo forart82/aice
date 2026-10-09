@@ -47,10 +47,10 @@ pub class Projectile:
       Y = o.Y ?? o.y ?? 0
       spd := o.Speed ?? o.speed ?? o.Vx != undefined and o.Vy != undefined and MathX.hypot(o.Vx, o.Vy) or o.vx != undefined and o.vy != undefined and MathX.hypot(o.vx, o.vy) or 0
       Speed = spd
-      ang := o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and Math.atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and Math.atan2(o.vy, o.vx) or 0
+      ang := o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and atan2(o.vy, o.vx) or 0
       Angle = ang
-      Vx = o.Vx ?? o.vx ?? Math.cos(Angle) * Speed
-      Vy = o.Vy ?? o.vy ?? Math.sin(Angle) * Speed
+      Vx = o.Vx ?? o.vx ?? cos(Angle) * Speed
+      Vy = o.Vy ?? o.vy ?? sin(Angle) * Speed
       Damage = o.Damage ?? o.damage ?? 0
       if o.Source ?? o.source == "player":
         Source = "player"
@@ -72,8 +72,8 @@ pub class Projectile:
       Y = y
       Angle = angle
       Speed = speed
-      Vx = Math.cos(angle) * speed
-      Vy = Math.sin(angle) * speed
+      Vx = cos(angle) * speed
+      Vy = sin(angle) * speed
       Damage = damage
       if source == "player":
         Source = "player"
@@ -105,14 +105,14 @@ pub class Projectile:
       tx := target.X ?? target.x
       ty := target.Y ?? target.y
       if typeof(tx) == "number" and typeof(ty) == "number" and Number.isFinite(tx) and Number.isFinite(ty):
-        desired := Math.atan2(ty - Y, tx - X)
+        desired := atan2(ty - Y, tx - X)
         Angle += MathX.clamp(MathX.angleDelta(Angle, desired), -Homing * dt, Homing * dt)
-        Vx = Math.cos(Angle) * Speed
-        Vy = Math.sin(Angle) * Speed
+        Vx = cos(Angle) * Speed
+        Vy = sin(Angle) * Speed
     if Wobble > 0:
-      off := Math.sin(MaxLife - Life * 12) * Wobble
-      X += Math.cos(Angle + Math.PI / 2) * off * dt
-      Y += Math.sin(Angle + Math.PI / 2) * off * dt
+      off := sin(MaxLife - Life * 12) * Wobble
+      X += cos(Angle + Math.PI / 2) * off * dt
+      Y += sin(Angle + Math.PI / 2) * off * dt
     X += Vx * dt
     Y += Vy * dt
     Life -= dt

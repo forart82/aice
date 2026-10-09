@@ -215,6 +215,10 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
     [
       { name: "a", type: TYPE_NUM },
       { name: "b", type: TYPE_NUM },
+      { name: "c", type: TYPE_NUM, optional: true },
+      { name: "d", type: TYPE_NUM, optional: true },
+      { name: "e", type: TYPE_NUM, optional: true },
+      { name: "f", type: TYPE_NUM, optional: true },
     ],
     TYPE_NUM,
   ),
@@ -222,6 +226,10 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
     [
       { name: "a", type: TYPE_NUM },
       { name: "b", type: TYPE_NUM },
+      { name: "c", type: TYPE_NUM, optional: true },
+      { name: "d", type: TYPE_NUM, optional: true },
+      { name: "e", type: TYPE_NUM, optional: true },
+      { name: "f", type: TYPE_NUM, optional: true },
     ],
     TYPE_NUM,
   ),
@@ -246,6 +254,26 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
   round: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_INT),
   sin: makeFunctionType([{ name: "rad", type: TYPE_NUM }], TYPE_FLOAT),
   cos: makeFunctionType([{ name: "rad", type: TYPE_NUM }], TYPE_FLOAT),
+  tan: makeFunctionType([{ name: "rad", type: TYPE_NUM }], TYPE_FLOAT),
+  atan2: makeFunctionType(
+    [
+      { name: "y", type: TYPE_NUM },
+      { name: "x", type: TYPE_NUM },
+    ],
+    TYPE_FLOAT,
+  ),
+  asin: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_FLOAT),
+  acos: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_FLOAT),
+  hypot: makeFunctionType(
+    [
+      { name: "a", type: TYPE_NUM },
+      { name: "b", type: TYPE_NUM },
+      { name: "c", type: TYPE_NUM, optional: true },
+      { name: "d", type: TYPE_NUM, optional: true },
+    ],
+    TYPE_FLOAT,
+  ),
+  sign: makeFunctionType([{ name: "n", type: TYPE_NUM }], TYPE_NUM),
   Ok: makeFunctionType(
     [{ name: "value", type: TYPE_UNKNOWN }],
     makeResultType(TYPE_UNKNOWN, TYPE_NEVER),

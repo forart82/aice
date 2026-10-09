@@ -885,6 +885,72 @@ pub w: str ::= "mut_typed"`;
     });
   });
 
+  describe("Step 22: Vector & Arithmetic Compression DSL", () => {
+    it("parses immutable vector destructuring [x, y] := [1, 2]", () => {
+      const src = `fn test():
+  [x, y] := [1, 2]`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: any[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("DestructureBinding");
+      expect(stmt.names).toEqual(["x", "y"]);
+      expect(stmt.isMut).toBe(false);
+      expect(stmt.init.kind).toBe("ArrayLiteralExpr");
+    });
+
+    it("parses mutable vector destructuring [x, y] ::= [1, 2]", () => {
+      const src = `fn test():
+  [x, y] ::= [1, 2]`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: any[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("DestructureBinding");
+      expect(stmt.names).toEqual(["x", "y"]);
+      expect(stmt.isMut).toBe(true);
+      expect(stmt.init.kind).toBe("ArrayLiteralExpr");
+    });
+
+    it("parses tuple destructuring (a, b) := [10, 20]", () => {
+      const src = `fn test():
+  (a, b) := [10, 20]`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: any[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("DestructureBinding");
+      expect(stmt.names).toEqual(["a", "b"]);
+      expect(stmt.isMut).toBe(false);
+    });
+
+    it("parses vector compound assignment [x, y] += [dx, dy]", () => {
+      const src = `fn test():
+  [x, y] += [dx, dy]`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: any[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("AssignStmt");
+      expect(stmt.target.kind).toBe("ArrayLiteralExpr");
+      expect(stmt.op).toBe("+=");
+      expect(stmt.value.kind).toBe("ArrayLiteralExpr");
+    });
+
+    it("parses vector direct assignment [x, y] = [newX, newY]", () => {
+      const src = `fn test():
+  [x, y] = [newX, newY]`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: any[] };
+      const stmt = block.statements[0];
+      expect(stmt.kind).toBe("AssignStmt");
+      expect(stmt.target.kind).toBe("ArrayLiteralExpr");
+      expect(stmt.op).toBe("=");
+      expect(stmt.value.kind).toBe("ArrayLiteralExpr");
+    });
+  });
+
   describe("Error Handling", () => {
     it("throws ParserError on unexpected tokens with exact span", () => {
       const src = `fn incomplete(`;

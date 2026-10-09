@@ -852,5 +852,75 @@ pub w: str ::= "mut_typed"`;
       expect(goOut).toContain("y := 10");
     });
   });
+
+  describe("Step 22: Vector & Arithmetic Compression DSL", () => {
+    it("emits TypeScript math builtins min, hypot, and clamp", () => {
+      const src = `fn calc(a: float, b: float, dx: float, dy: float, x: float) -> float:
+  m := min(a, b)
+  h := hypot(dx, dy)
+  c := clamp(x, 0, 100)
+  ret m + h + c`;
+
+      const mod = parse(src, "math.ts.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("const m = Math.min(a, b);");
+      expect(tsOut).toContain("const h = Math.hypot(dx, dy);");
+      expect(tsOut).toContain("const c = Math.max(0, Math.min(100, x));");
+    });
+
+    it("emits TypeScript vector destructuring [x, y] := [1, 2] and [x, y] ::= [1, 2]", () => {
+      const src = `fn vectors() -> void:
+  [x, y] := [1, 2]
+  [a, b] ::= [10, 20]
+  [a, b] += [1, 1]
+  [a, b] = [100, 200]`;
+
+      const mod = parse(src, "vectors.ts.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("const [x, y] = [1, 2];");
+      expect(tsOut).toContain("let [a, b] = [10, 20];");
+      expect(tsOut).toContain("a += 1;");
+      expect(tsOut).toContain("b += 1;");
+      expect(tsOut).toContain("[a, b] = [100, 200];");
+    });
+
+    it("emits Python, C++, Rust, and Go for math builtins and destructuring", () => {
+      const src = `fn run(x: float, y: float) -> float:
+  [px, py] := [x, y]
+  c := clamp(px, 0.0, 1.0)
+  h := hypot(px, py)
+  ret c + h`;
+
+      const mod = parse(src, "math.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+
+      const pyOut = emitTarget(mod, "python");
+      expect(pyOut).toContain("px, py = [x, y]");
+      expect(pyOut).toContain("max(0, min(1, px))");
+      expect(pyOut).toContain("math.hypot(px, py)");
+
+      const cppOut = emitTarget(mod, "cpp");
+      expect(cppOut).toContain("const auto [px, py] = { x, y };");
+      expect(cppOut).toContain("std::clamp(px, 0.0f, 1.0f)");
+      expect(cppOut).toContain("std::hypot(px, py)");
+
+      const rsOut = emitTarget(mod, "rust");
+      expect(rsOut).toContain("let (px, py) = vec![x, y];");
+      expect(rsOut).toContain("(px).clamp(0.0, 1.0)");
+      expect(rsOut).toContain("(px).hypot(py)");
+
+      const goOut = emitTarget(mod, "go");
+      expect(goOut).toContain("px, py := []any{x, y}");
+      expect(goOut).toContain("math.Max(0.0, math.Min(1.0, px))");
+      expect(goOut).toContain("math.Hypot(px, py)");
+    });
+  });
 });
 

@@ -573,6 +573,27 @@ export class TypeChecker {
         return TYPE_VOID;
       }
 
+      case "DestructureBinding": {
+        const initType = this.checkExpr(stmt.init, env);
+        let elemType: Type = TYPE_UNKNOWN;
+        if (initType.kind === "array") {
+          elemType = initType.elementType;
+        }
+        if (stmt.init.kind === "ArrayLiteralExpr") {
+          for (let i = 0; i < stmt.names.length; i++) {
+            const name = stmt.names[i];
+            const elemExpr = stmt.init.elements[i];
+            const t = elemExpr ? this.checkExpr(elemExpr, env) : elemType;
+            env.define(name, t, stmt.isMut);
+          }
+        } else {
+          for (const name of stmt.names) {
+            env.define(name, elemType, stmt.isMut);
+          }
+        }
+        return TYPE_VOID;
+      }
+
       case "AssignStmt": {
         this.checkAssign(stmt.target, stmt.value, stmt.span, env);
         return TYPE_VOID;
@@ -1230,6 +1251,38 @@ export class TypeChecker {
           binding.type,
           valType,
         );
+      }
+      return valType;
+    } else if (target.kind === "ArrayLiteralExpr") {
+      const valType = this.checkExpr(value, env);
+      if (value.kind === "ArrayLiteralExpr") {
+        for (let i = 0; i < target.elements.length; i++) {
+          const tElem = target.elements[i];
+          const vElem = value.elements[i];
+          if (tElem && vElem) {
+            this.checkAssign(tElem, vElem, span, env);
+          }
+        }
+      } else {
+        for (const tElem of target.elements) {
+          if (tElem.kind === "IdentifierExpr") {
+            const binding = env.lookup(tElem.name);
+            if (!binding) {
+              throw new TypeCheckError(
+                `Cannot assign to undeclared identifier '${tElem.name}'`,
+                tElem.span,
+                "AIL_E2008_UNDECLARED_VARIABLE",
+              );
+            }
+            if (!binding.isMut) {
+              throw new TypeCheckError(
+                `Cannot assign to immutable variable '${tElem.name}'. Declare with 'let mut ${tElem.name}' or '::=' to allow mutation.`,
+                span,
+                "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+              );
+            }
+          }
+        }
       }
       return valType;
     } else {

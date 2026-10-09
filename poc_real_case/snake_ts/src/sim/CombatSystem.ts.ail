@@ -86,7 +86,7 @@ pub class CombatSystem:
   _lastSelfHitFxTime:int = 0, _constrictionCooldown = 0
   fn _ensurePolyCapacity(capacity:int) :
     if capacity > _polyX.length:
-      nextCap := Math.max(capacity * 2, _polyX.length * 2)
+      nextCap := max(capacity * 2, _polyX.length * 2)
       _polyX = Float64Array(nextCap)
       _polyY = Float64Array(nextCap)
   fn constructor():
@@ -219,8 +219,8 @@ pub class CombatSystem:
         comboMultiplier = tier.mult
     stats := player.stats or player.Stats
     comboWin := stats.comboWindow ?? stats.ComboWindow ?? 1
-    shrink := Math.min(1.9, comboCount * 0.045)
-    comboMaxTime = Math.max(1.9, comboBaseWindow - shrink * comboWin)
+    shrink := min(1.9, comboCount * 0.045)
+    comboMaxTime = max(1.9, comboBaseWindow - shrink * comboWin)
     comboTimer = comboMaxTime
     classId := player.classId or player.ClassId
     px := player.x ?? player.X
@@ -258,7 +258,7 @@ pub class CombatSystem:
       if world.game != nil:
         world.game.banner("⚡ HYPER FRENZY OVERDRIVE ⚡", 1.4)
     elif frenzyActive != nil:
-      frenzyTimer = Math.min(frenzyTimer + 0.35, frenzyMaxDuration + relics["overdrive"] or 0 * 4)
+      frenzyTimer = min(frenzyTimer + 0.35, frenzyMaxDuration + relics["overdrive"] or 0 * 4)
     if comboCount == 5:
       Services.fx.addText(px, py - 30, "🔥 5x STREAK", "#ffb703", 16)
     elif comboCount == 15:
@@ -655,12 +655,12 @@ pub class CombatSystem:
               anyHit = true
               if now - _lastSelfHitFxTime >= 0.12:
                 _lastSelfHitFxTime = now
-                Services.fx.addText(sx, sy - 22, "SELF-BITE! -" + String(Math.floor(Math)), "#ff0054", 16, true)
+                Services.fx.addText(sx, sy - 22, "SELF-BITE! -" + String(floor(Math)), "#ff0054", 16, true)
                 Services.fx.burst(sx, sy, "#ff0054", 8, 3, 2)
                 Services.sound.playHit()
                 this.onPlayerHurt(world, dealtSeg)
     segCount := segs.length
-    stride := segCount > 500 and Math.ceil(Math) or segCount > 150 and 2 or 1
+    stride := segCount > 500 and ceil(Math) or segCount > 150 and 2 or 1
     if anyHit != nil:
       this.breakCombo(player)
   fn ResolveSelfCollision(world:World) :
@@ -686,7 +686,7 @@ pub class CombatSystem:
     loopEndIndex ::= _segmentGrid.findFirstSegment(px, py, pr + 11 + 16, 3)
     if loopEndIndex < 3 or loopEndIndex >= segs.length:
       if _segmentGrid.getItemCount(SpatialLayerMask.Segments) == 0:
-        snapDistSq := Math.pow(pr + 11 + 16, 2)
+        snapDistSq := pow(pr + 11 + 16, 2)
     if loopEndIndex < 3 or loopEndIndex >= segs.length:
       ret
     polyLen := loopEndIndex + 2
@@ -712,7 +712,7 @@ pub class CombatSystem:
     this.fuseEncircledFoodIntoPrism(player, world, polyLen, minX, maxX, minY, maxY)
     if trapped > 0:
       _constrictionCooldown = 0.5
-      Services.fx.ringShockwave(cx, cy, "#ffd166", Math.max(30, maxR * 0.85), 0.04)
+      Services.fx.ringShockwave(cx, cy, "#ffd166", max(30, maxR * 0.85), 0.04)
       Services.fx.addText(cx, cy - 20, "🐍 OUROBOROS CONSTRICTION! 🐍", "#ffd166", 16, true)
       Services.sound.playExplosion(1)
   fn CheckConstriction(world:World) :

@@ -31,7 +31,7 @@ pub class HelmetDrop:
     Pulse += dt * 3.6
     Life += dt
     if SpawnScale < 1:
-      SpawnScale = Math.min(1, SpawnScale + dt * 4)
+      SpawnScale = min(1, SpawnScale + dt * 4)
     X += Vx * dt
     Y += Vy * dt
     drag := MathX.decay(0.9, dt)

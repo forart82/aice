@@ -17,22 +17,22 @@ pub class StatusSet:
   fn get_isChilled() = SlowTimer > 0
   fn get_isMarked() = MarkTimer > 0
   fn Chill(seconds:int, factor:int) :
-    SlowTimer = Math.max(SlowTimer, seconds)
-    SlowFactor = Math.min(SlowFactor == 1 and factor or SlowFactor, factor)
+    SlowTimer = max(SlowTimer, seconds)
+    SlowFactor = min(SlowFactor == 1 and factor or SlowFactor, factor)
   fn chill(seconds:int, factor:int) :
     this.Chill(seconds, factor)
-  fn Freeze(seconds:int) -> void = FreezeTimer = Math.max(FreezeTimer, seconds)
+  fn Freeze(seconds:int) -> void = FreezeTimer = max(FreezeTimer, seconds)
   fn freeze(seconds:int) :
     this.Freeze(seconds)
-  fn Stun(seconds:int) -> void = StunTimer = Math.max(StunTimer, seconds)
+  fn Stun(seconds:int) -> void = StunTimer = max(StunTimer, seconds)
   fn stun(seconds:int) :
     this.Stun(seconds)
-  fn Mark(seconds:int) -> void = MarkTimer = Math.max(MarkTimer, seconds)
+  fn Mark(seconds:int) -> void = MarkTimer = max(MarkTimer, seconds)
   fn mark(seconds:int) :
     this.Mark(seconds)
   fn Burn(seconds:int, dps:int) :
-    BurnTimer = Math.max(BurnTimer, seconds)
-    BurnDps = Math.max(BurnDps, dps)
+    BurnTimer = max(BurnTimer, seconds)
+    BurnDps = max(BurnDps, dps)
   fn burn(seconds:int, dps:int) :
     this.Burn(seconds, dps)
   fn get_Immobile() = FreezeTimer > 0 or StunTimer > 0
@@ -56,14 +56,14 @@ pub class StatusSet:
         SlowTimer = 0
         SlowFactor = 1
     if FreezeTimer > 0:
-      FreezeTimer = Math.max(0, FreezeTimer - dt)
+      FreezeTimer = max(0, FreezeTimer - dt)
     if StunTimer > 0:
-      StunTimer = Math.max(0, StunTimer - dt)
+      StunTimer = max(0, StunTimer - dt)
     if MarkTimer > 0:
-      MarkTimer = Math.max(0, MarkTimer - dt)
+      MarkTimer = max(0, MarkTimer - dt)
     burnDamage ::= 0
     if BurnTimer > 0:
-      step := Math.min(dt, BurnTimer)
+      step := min(dt, BurnTimer)
       burnDamage = BurnDps * step
       BurnTimer -= dt
       if BurnTimer <= 0:

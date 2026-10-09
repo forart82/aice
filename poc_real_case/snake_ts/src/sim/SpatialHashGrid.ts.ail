@@ -26,8 +26,8 @@ pub class SpatialHashGrid:
   fn constructor(cellSize:unknown = 48, maxArenaW:unknown = 3200, maxArenaH:unknown = 2400):
     _cellSize = cellSize
     _invCellSize = 1 / cellSize
-    _cols = Math.ceil(Math) + 2
-    _rows = Math.ceil(Math) + 2
+    _cols = ceil(Math) + 2
+    _rows = ceil(Math) + 2
     _maxCells = _cols * _rows
     _gridHead = Int32Array(SPATIAL_LAYER_COUNT * _maxCells)
     _gridHead.fill(-1)
@@ -64,7 +64,7 @@ pub class SpatialHashGrid:
     current := _capacities[layer]
     if minCapacity <= current:
       ret
-    nextCap := Math.max(minCapacity * 2, current * 2)
+    nextCap := max(minCapacity * 2, current * 2)
     _capacities[layer] = nextCap
     newNext := Int32Array(nextCap)
     newNext.set(_gridNext[layer])
@@ -117,8 +117,8 @@ pub class SpatialHashGrid:
     invCs := _invCellSize
     cols := _cols
     rows := _rows
-    cx ::= Math.floor(Math)
-    cy ::= Math.floor(Math)
+    cx ::= floor(Math)
+    cy ::= floor(Math)
     if cx < 0:
       cx = 0
     elif cx >= cols:
@@ -223,16 +223,16 @@ pub class SpatialHashGrid:
     l := SpatialLayer.Segments
     layerMaxRad := _maxRadius[l]
     searchR := radius + layerMaxRad
-    minCx ::= Math.floor(Math)
+    minCx ::= floor(Math)
     if minCx < 0:
       minCx = 0
-    maxCx ::= Math.floor(Math)
+    maxCx ::= floor(Math)
     if maxCx >= cols:
       maxCx = cols - 1
-    minCy ::= Math.floor(Math)
+    minCy ::= floor(Math)
     if minCy < 0:
       minCy = 0
-    maxCy ::= Math.floor(Math)
+    maxCy ::= floor(Math)
     if maxCy >= rows:
       maxCy = rows - 1
     if minCx > maxCx or minCy > maxCy:
@@ -279,20 +279,20 @@ pub class SpatialHashGrid:
     bestX ::= 0
     bestY ::= 0
     bestRadius ::= 0
-    centerCx := Math.floor(Math)
-    centerCy := Math.floor(Math)
+    centerCx := floor(Math)
+    centerCy := floor(Math)
     if centerCx >= 0 and centerCx < cols and centerCy >= 0 and centerCy < rows:
       nil
-    minCx ::= Math.floor(Math)
+    minCx ::= floor(Math)
     if minCx < 0:
       minCx = 0
-    maxCx ::= Math.floor(Math)
+    maxCx ::= floor(Math)
     if maxCx >= cols:
       maxCx = cols - 1
-    minCy ::= Math.floor(Math)
+    minCy ::= floor(Math)
     if minCy < 0:
       minCy = 0
-    maxCy ::= Math.floor(Math)
+    maxCy ::= floor(Math)
     if maxCy >= rows:
       maxCy = rows - 1
     if minCx > maxCx or minCy > maxCy:
@@ -323,7 +323,7 @@ pub class SpatialHashGrid:
       ret false
     if not Number.isFinite(startX) or not Number.isFinite(startY) or not Number.isFinite(dirX) or not Number.isFinite(dirY):
       ret false
-    len := Math.hypot(dirX, dirY)
+    len := hypot(dirX, dirY)
     if not Number.isFinite(len) or len <= 0.000001:
       ret false
     dx := dirX / len
@@ -340,14 +340,14 @@ pub class SpatialHashGrid:
       ret false
     if startY < 0 and dy <= 0 or startY >= gridH and dy >= 0:
       ret false
-    cx ::= Math.floor(Math)
-    cy ::= Math.floor(Math)
+    cx ::= floor(Math)
+    cy ::= floor(Math)
     stepX := dx > 0 and 1 or dx < 0 and -1 or 0
     stepY := dy > 0 and 1 or dy < 0 and -1 or 0
     tMaxX ::= dx > 0 and cx + 1 * cs - startX / dx or dx < 0 and cx * cs - startX / dx or Infinity
     tMaxY ::= dy > 0 and cy + 1 * cs - startY / dy or dy < 0 and cy * cs - startY / dy or Infinity
-    tDeltaX := dx != 0 and Math.abs(cs / dx) or Infinity
-    tDeltaY := dy != 0 and Math.abs(cs / dy) or Infinity
+    tDeltaX := dx != 0 and abs(cs / dx) or Infinity
+    tDeltaY := dy != 0 and abs(cs / dy) or Infinity
     tCurrent ::= 0
     while tCurrent <= maxDistance:
       if cx >= 0 and cx < cols and cy >= 0 and cy < rows:

@@ -197,10 +197,10 @@ pub class SnakePlayer:
       this.RecalculateHp()
     _cachedHp
   set Hp(v:int):
-    remaining ::= Number.isFinite(v) and Math.max(0, v) or 0
+    remaining ::= Number.isFinite(v) and max(0, v) or 0
     if remaining > this.MaxHp:
       this.MaxHp = remaining
-    HeadHp = Math.min(HeadMaxHp, remaining)
+    HeadHp = min(HeadMaxHp, remaining)
     remaining -= HeadHp
     this.RecalculateHp()
   get MaxHp() -> int:
@@ -213,12 +213,12 @@ pub class SnakePlayer:
     Stats.MaxHp = v
     if Segments.length > 0:
       totalUnits := 2 + Segments.length
-      unitHp := Math.max(10, Math.round(Math))
+      unitHp := max(10, round(Math))
       HeadMaxHp = unitHp * 2
-      HeadHp = Math.min(HeadHp, HeadMaxHp)
+      HeadHp = min(HeadHp, HeadMaxHp)
     else:
       HeadMaxHp = v
-      HeadHp = Math.min(HeadHp, HeadMaxHp)
+      HeadHp = min(HeadHp, HeadMaxHp)
     this.RecalculateMaxHp()
     this.RecalculateHp()
   get hp = this.Hp; set hp(v) = this.Hp = v
@@ -244,7 +244,7 @@ pub class SnakePlayer:
     this.triggerTitanGorging(duration)
   fn GetHeadModuleLevel(key:str) -> int = HeadModules[key] or 0
   fn getHeadModuleLevel(key:str) -> int = this.GetHeadModuleLevel(key)
-  fn SetHeadModuleLevel(key:str, level:int) -> void = HeadModules[key] = Math.max(0, level)
+  fn SetHeadModuleLevel(key:str, level:int) -> void = HeadModules[key] = max(0, level)
   fn setHeadModuleLevel(key:str, level:int) :
     this.SetHeadModuleLevel(key, level)
   fn GetHeadAugmentLevel(key:str) -> int = HeadAugment == key and HeadAugmentLevel or 0 or 0
@@ -268,7 +268,7 @@ pub class SnakePlayer:
     if key == "shield":
       shieldBonus := 25
       Stats.MaxShield = Stats.MaxShield + shieldBonus
-      Shield = Math.min(Stats.MaxShield, Shield + shieldBonus)
+      Shield = min(Stats.MaxShield, Shield + shieldBonus)
     elif key == "spikes":
       Stats.Thorns = Stats.Thorns + 0.2
     next
@@ -312,12 +312,12 @@ pub class SnakePlayer:
     Stats = PlayerStats()
     Stats.MaxHp = b.MaxHp + meta and meta.Level("vitality") * 10 or 0
     Stats.Speed = b.Speed * 1 + meta and meta.Level("agility") * 0.04 or 0
-    Stats.DashCooldown = Math.max(0.8, b.DashCooldown - meta and meta.Level("swiftness") * 0.15 or 0)
+    Stats.DashCooldown = max(0.8, b.DashCooldown - meta and meta.Level("swiftness") * 0.15 or 0)
     Stats.BitePower = b.BitePower * 1 + meta and meta.Level("ferocity") * 0.06 or 0
     Stats.MagnetRadius = b.MagnetRadius * 1 + meta and meta.Level("magnet") * 0.15 or 0
     Stats.CritChance = b.CritChance
     Stats.CritMult = b.CritMult
-    Stats.Armor = Math.min(0.8, b.Armor + meta and meta.Level("resilience") * 0.03 or 0)
+    Stats.Armor = min(0.8, b.Armor + meta and meta.Level("resilience") * 0.03 or 0)
     Stats.MaxShield = 0
     Stats.XpGain = 1
     Stats.ShardGain = 1
@@ -341,7 +341,7 @@ pub class SnakePlayer:
       hHp := hs.MaxHp or hs.maxHp or 0
       if hHp > 0:
         Stats.MaxHp = Stats.MaxHp + hHp
-        extraPerPart := Math.round(Math)
+        extraPerPart := round(Math)
         HeadMaxHp += 2 * extraPerPart
         HeadHp = HeadMaxHp
         for seg in Segments:
@@ -350,7 +350,7 @@ pub class SnakePlayer:
         this.RecalculateMaxHp()
         this.RecalculateHp()
       if hs.Armor or hs.armor:
-        Stats.Armor = Math.min(0.85, Stats.Armor + hs.Armor or hs.armor or 0)
+        Stats.Armor = min(0.85, Stats.Armor + hs.Armor or hs.armor or 0)
       if hs.Speed or hs.speed:
         Stats.Speed = Stats.Speed + hs.Speed or hs.speed or 0
       if hs.BitePower or hs.bitePower:
@@ -358,11 +358,11 @@ pub class SnakePlayer:
       if hs.MagnetRadius or hs.magnetRadius:
         Stats.MagnetRadius = Stats.MagnetRadius + hs.MagnetRadius or hs.magnetRadius or 0
       if hs.CritChance or hs.critChance:
-        Stats.CritChance = Math.min(1, Stats.CritChance + hs.CritChance or hs.critChance or 0)
+        Stats.CritChance = min(1, Stats.CritChance + hs.CritChance or hs.critChance or 0)
       if hs.CritMult or hs.critMult:
         Stats.CritMult = Stats.CritMult + hs.CritMult or hs.critMult or 0
       if hs.DashCooldown or hs.dashCooldown:
-        Stats.DashCooldown = Math.max(0.6, Stats.DashCooldown - hs.DashCooldown or hs.dashCooldown or 0)
+        Stats.DashCooldown = max(0.6, Stats.DashCooldown - hs.DashCooldown or hs.dashCooldown or 0)
       if hs.Thorns or hs.thorns:
         Stats.Thorns = Stats.Thorns + hs.Thorns or hs.thorns or 0
       if hs.XpMultiplier or hs.xpMultiplier:
@@ -425,11 +425,11 @@ pub class SnakePlayer:
     _head0.mult = 1
     _biteHeads.push(_head0)
     if ClassId == "hydra":
-      nx := Math.cos(Angle + Math.PI / 2)
-      ny := Math.sin(Angle + Math.PI / 2)
+      nx := cos(Angle + Math.PI / 2)
+      ny := sin(Angle + Math.PI / 2)
       back := 6
-      bx := X - Math.cos(Angle) * back
-      by := Y - Math.sin(Angle) * back
+      bx := X - cos(Angle) * back
+      by := Y - sin(Angle) * back
       h1x := bx + nx * 15
       h1y := by + ny * 15
       _head1.X = h1x
@@ -490,9 +490,9 @@ pub class SnakePlayer:
     steerX := steer != nil and steer.X ?? steer.x ?? 0 or 0
     steerY := steer != nil and steer.Y ?? steer.y ?? 0 or 0
     if steerActive != nil:
-      len := Math.sqrt(steerX * steerX + steerY * steerY)
+      len := sqrt(steerX * steerX + steerY * steerY)
       if len > 0.001 and Number.isFinite(len):
-        TargetAngle = Math.atan2(steerY, steerX)
+        TargetAngle = atan2(steerY, steerX)
     turn := this.EffectiveTurnSpeed * IsDashing and 0.65 or 1
     diff := MathX.angleDelta(Angle, TargetAngle)
     Angle += diff * MathX.clamp(turn * dt, 0, 1)
@@ -501,8 +501,8 @@ pub class SnakePlayer:
     if Angle < -Math.PI:
       Angle += MathX.Tau
     speed := this.MoveSpeed
-    VelocityX = Math.cos(Angle) * speed
-    VelocityY = Math.sin(Angle) * speed
+    VelocityX = cos(Angle) * speed
+    VelocityY = sin(Angle) * speed
     X += VelocityX * dt
     Y += VelocityY * dt
     m := HeadRadius
@@ -544,27 +544,27 @@ pub class SnakePlayer:
   fn Deflect(nx:int, ny:int) :
     if not Number.isFinite(nx) or not Number.isFinite(ny):
       ret
-    nLen := Math.hypot(nx, ny)
+    nLen := hypot(nx, ny)
     if not Number.isFinite(nLen) or nLen < 0.0001:
       ret
     nx /= nLen
     ny /= nLen
-    dot := Math.cos(Angle) * nx + Math.sin(Angle) * ny
+    dot := cos(Angle) * nx + sin(Angle) * ny
     if dot >= 0:
       ret
-    tx := Math.cos(Angle) - dot * nx
-    ty := Math.sin(Angle) - dot * ny
-    len := Math.sqrt(tx * tx + ty * ty)
+    tx := cos(Angle) - dot * nx
+    ty := sin(Angle) - dot * ny
+    len := sqrt(tx * tx + ty * ty)
     if len > 0.01:
-      Angle = Math.atan2(ty / len, tx / len)
-      tdot := Math.cos(TargetAngle) * nx + Math.sin(TargetAngle) * ny
+      Angle = atan2(ty / len, tx / len)
+      tdot := cos(TargetAngle) * nx + sin(TargetAngle) * ny
       if tdot < 0:
         TargetAngle = Angle
     else:
       tangentX := -ny
       tangentY := nx
-      Angle = Math.atan2(tangentY, tangentX)
-      tdot := Math.cos(TargetAngle) * nx + Math.sin(TargetAngle) * ny
+      Angle = atan2(tangentY, tangentX)
+      tdot := cos(TargetAngle) * nx + sin(TargetAngle) * ny
       if tdot < 0:
         TargetAngle = Angle
   fn deflect(nx:int, ny:int) :
@@ -588,7 +588,7 @@ pub class SnakePlayer:
       RegenTimer += dt
       if RegenTimer >= 3:
         RegenTimer -= 3
-        healAmt := Math.max(1, Math.round(Math))
+        healAmt := max(1, round(Math))
         if this.Hp < Stats.MaxHp:
           this.Heal(healAmt)
           Services.Fx.AddText(X, Y - 18, "+" + String(healAmt), "#10b981", 12, false)
@@ -607,13 +607,13 @@ pub class SnakePlayer:
       if MagmaTimer >= interval:
         MagmaTimer = 0
         if hazards.length < 90:
-          tail := Segments.length > 0 and Segments[Math.min(3, Segments.length - 1)] or nil
+          tail := Segments.length > 0 and Segments[min(3, Segments.length - 1)] or nil
           tx := tail != nil and tail.X or X
           ty := tail != nil and tail.Y or Y
           hazards.push(Hazard(tx, ty, "magma", { Radius: 22, Life: 3.2, Dps: 26 * magmaStacks * DamageBonus, Owner: "player" }))
     if Stats.MaxShield > 0:
       if ShieldBrokenTimer > 0:
-        ShieldBrokenTimer = Math.max(0, ShieldBrokenTimer - dt)
+        ShieldBrokenTimer = max(0, ShieldBrokenTimer - dt)
       if Shield < Stats.MaxShield and ShieldBrokenTimer <= 0:
         ShieldRechargeTimer += dt
         if ShieldRechargeTimer >= 8:
@@ -648,7 +648,7 @@ pub class SnakePlayer:
       else:
         MouthOpen = 0
     else:
-      MouthOpen *= Math.max(0, 1 - dt * 6)
+      MouthOpen *= max(0, 1 - dt * 6)
     EmberTimer += dt
     emberInterval := IsDashing != nil and 0.016 or 0.07
     while EmberTimer >= emberInterval:
@@ -665,8 +665,8 @@ pub class SnakePlayer:
     DashTimer = DashDuration
     DashCooldownTimer = Stats.DashCooldown
     DashHitIds.clear()
-    invulnWindow := ClassId == "stalker" and Math.min(0.4, Math.max(0.05, Stats.DashCooldown * 0.5 - DashDuration)) or 0.12
-    InvulnerableTimer = Math.max(InvulnerableTimer, DashDuration + invulnWindow)
+    invulnWindow := ClassId == "stalker" and min(0.4, max(0.05, Stats.DashCooldown * 0.5 - DashDuration)) or 0.12
+    InvulnerableTimer = max(InvulnerableTimer, DashDuration + invulnWindow)
     Services.Sound.PlayDash()
     Services.Fx.RingShockwave(X, Y, ClassConfig.Color, 14, 0.05)
     true
@@ -691,7 +691,7 @@ pub class SnakePlayer:
   get BaseSegmentHp() -> int:
     meta := meta ?? services?.meta ?? typeof(Services) != "undefined" and Services.Meta and Services.Meta or MetaProgression.Instance
     base := ClassConfig != nil and ClassConfig.BaseStats.MaxHp or 100
-    Math.max(15, Math.round(Math) + meta and meta.Level("vitality") * 5 or 0)
+    max(15, round(Math) + meta and meta.Level("vitality") * 5 or 0)
   get baseSegmentHp = this.BaseSegmentHp
   fn AddGrowth(count:int) :
     lx ::= X
@@ -703,7 +703,7 @@ pub class SnakePlayer:
       ly = last.Y
       la = last.Angle
     segHp := this.BaseSegmentHp
-    PeakLength = Math.max(PeakLength, Segments.length)
+    PeakLength = max(PeakLength, Segments.length)
     this.RecalculateMaxHp()
     this.RecalculateHp()
     Stats.MaxHp = this.MaxHp
@@ -711,7 +711,7 @@ pub class SnakePlayer:
     this.AddGrowth(count)
   fn SetHeadAugment(augmentId:str, level:int) :
     HeadAugment = augmentId
-    HeadAugmentLevel = Math.max(0, level)
+    HeadAugmentLevel = max(0, level)
     if augmentId == "fangs" and level > 0:
       Stats.BitePower = ClassConfig.BaseStats.BitePower * 1 + 0.15 * level
   fn setHeadAugment(augmentId:str, level:int) :
@@ -720,7 +720,7 @@ pub class SnakePlayer:
     this.SetHeadAugment(augmentId, level)
   fn setHeadAugmentLevel(augmentId:str, level:int) :
     this.SetHeadAugment(augmentId, level)
-  get SegmentArmorBonus = Math.min(0.5, Segments.length * 0.03)
+  get SegmentArmorBonus = min(0.5, Segments.length * 0.03)
   get segmentArmorBonus = this.SegmentArmorBonus
   fn AddBodySegment() :
     if Segments.length >= MaxSegments:
@@ -731,10 +731,10 @@ pub class SnakePlayer:
   fn DamageHead(amount:int, applyArmor:unknown = true, setInvulnerable:unknown = true, silent:unknown = false) -> int:
     if not Alive or setInvulnerable != nil and InvulnerableTimer > 0 or not (amount > 0) or not Number.isFinite(amount):
       ret 0
-    dealt := applyArmor != nil and Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
+    dealt := applyArmor != nil and max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
     toHp ::= dealt
     if Shield > 0:
-      toShield := Math.min(Shield, dealt)
+      toShield := min(Shield, dealt)
       Shield -= toShield
       toHp = dealt - toShield
       if Shield <= 0:
@@ -759,13 +759,13 @@ pub class SnakePlayer:
         this.RecalculateMaxHp()
         Stats.MaxHp = this.MaxHp
     if toHp > 0:
-      HeadHp = Math.max(0, HeadHp - toHp)
+      HeadHp = max(0, HeadHp - toHp)
     if setInvulnerable != nil:
       InvulnerableTimer = 0.6
     HurtFlash = 1
     if not silent:
       Services.Fx.Burst(X, Y, "#ff3366", 8, 3, 2)
-      Services.Fx.AddText(X, Y - 18, "-" + String(Math.floor(Math)), "#ff3366", 16, true)
+      Services.Fx.AddText(X, Y - 18, "-" + String(floor(Math)), "#ff3366", 16, true)
       Services.Sound.PlayHit()
     if Segments.length == 0 and HeadHp <= 0:
       HeadHp = 0
@@ -791,10 +791,10 @@ pub class SnakePlayer:
     if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= Segments.length:
       ret 0
     seg := Segments[segmentIndex]
-    dealt := applyArmor != nil and Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
+    dealt := applyArmor != nil and max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
     toHp ::= dealt
     if toHp > 0 and Shield > 0:
-      toShield := Math.min(Shield, toHp)
+      toShield := min(Shield, toHp)
       Shield -= toShield
       toHp -= toShield
       if Shield <= 0:
@@ -807,7 +807,7 @@ pub class SnakePlayer:
     HurtFlash = 1
     if not silent:
       Services.Fx.Burst(seg.X, seg.Y, "#ff3366", 8, 3, 2)
-      Services.Fx.AddText(seg.X, seg.Y - 18, "-" + String(Math.floor(Math)), "#ff3366", 16, true)
+      Services.Fx.AddText(seg.X, seg.Y - 18, "-" + String(floor(Math)), "#ff3366", 16, true)
       Services.Sound.PlayHit()
     if seg.Hp <= 0:
       this.SeverFrom(segmentIndex)
@@ -820,7 +820,7 @@ pub class SnakePlayer:
       ret
     severCount := Segments.length - index
     if severCount > 10:
-      step := Math.max(1, Math.floor(Math))
+      step := max(1, floor(Math))
       if Segments[index]:
         Services.Fx.AddText(Segments[index].X, Segments[index].Y - 24, "⚡ SEVERED (-" + String(severCount) + ")!", "#ff5400", 16, true)
     else:
@@ -866,7 +866,7 @@ pub class SnakePlayer:
     Segments.splice(toIndex, 0, item)
   fn reorderSegment(fromIndex:int, toIndex:int) :
     this.ReorderSegment(fromIndex, toIndex)
-  static fn GetAddSegmentCost(currentSegmentCount:int) -> int = 35 + Math.max(0, currentSegmentCount - 2) * 15
+  static fn GetAddSegmentCost(currentSegmentCount:int) -> int = 35 + max(0, currentSegmentCount - 2) * 15
   static fn getAddSegmentCost(currentSegmentCount:int) -> int = SnakePlayer.GetAddSegmentCost(currentSegmentCount)
   fn Heal(amount:int) -> int:
     if not Alive or not (amount > 0) or not Number.isFinite(amount):
@@ -875,7 +875,7 @@ pub class SnakePlayer:
     totalHealed ::= 0
     headMissing := HeadMaxHp - HeadHp
     if headMissing > 0:
-      headAdd := Math.min(headMissing, remaining)
+      headAdd := min(headMissing, remaining)
       HeadHp += headAdd
       remaining -= headAdd
       totalHealed += headAdd
@@ -885,7 +885,7 @@ pub class SnakePlayer:
   static fn CalibratedXpThreshold(level:int) -> int:
     if not Number.isFinite(level) or level <= 1:
       ret 0
-    Math.floor(Math)
+    floor(Math)
   static fn calibratedXpThreshold(level:int) -> int = SnakePlayer.CalibratedXpThreshold(level)
   fn GainXp(amount:int) -> bool:
     if not (amount > 0):
@@ -898,7 +898,7 @@ pub class SnakePlayer:
     while TotalXpCollected >= _xpForNextLevel and guard < 50:
       Level += 1
       _xpForNextLevel = SnakePlayer.CalibratedXpThreshold(Level + 1)
-      XpToNext = Math.max(1, _xpForNextLevel - SnakePlayer.CalibratedXpThreshold(Level))
+      XpToNext = max(1, _xpForNextLevel - SnakePlayer.CalibratedXpThreshold(Level))
       PendingLevelUps += 1
       levelled = true
     levelled
@@ -932,11 +932,11 @@ pub class SnakePlayer:
     if HeadModules["reactive"] and HeadModules["reactive"] > 0:
       Services.Fx.RingShockwave(X, Y, "#f97316", 36, 0.06)
       Services.Sound.PlayExplosion()
-    dealt := Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor))
+    dealt := max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor))
     toShield ::= 0
     toHp ::= dealt
     if Shield > 0:
-      toShield = Math.min(Shield, dealt)
+      toShield = min(Shield, dealt)
       Shield -= toShield
       toHp = dealt - toShield
       if Shield <= 0:
@@ -959,14 +959,14 @@ pub class SnakePlayer:
         this.RecalculateMaxHp()
         Stats.MaxHp = this.MaxHp
     if toHp > 0:
-      HeadHp = Math.max(0, HeadHp - toHp)
+      HeadHp = max(0, HeadHp - toHp)
     InvulnerableTimer = 0.6
     HurtFlash = 1
     if toShield > 0 and toHp == 0:
-      Services.Fx.AddText(X, Y - 22, "-" + String(Math.floor(Math)) + " 🛡️", "#3a86ff", 14, true)
+      Services.Fx.AddText(X, Y - 22, "-" + String(floor(Math)) + " 🛡️", "#3a86ff", 14, true)
       Services.Sound.PlayShield()
     else:
-      Services.Fx.AddText(X, Y - 22, "-" + String(Math.floor(Math)), "#ff3366", 17, true)
+      Services.Fx.AddText(X, Y - 22, "-" + String(floor(Math)), "#ff3366", 17, true)
       Services.Fx.Shake(9, 12)
       Services.Sound.PlayHit()
     if Segments.length == 0 and HeadHp <= 0:
@@ -986,7 +986,7 @@ pub class SnakePlayer:
   fn Autotomy(world:World) -> int:
     if not Alive or Segments.length <= 1:
       ret 0
-    cutIndex := Math.max(1, Math.floor(Math))
+    cutIndex := max(1, floor(Math))
     severedCount := Segments.length - cutIndex
     cutSegment := Segments[cutIndex]
     if cutSegment != nil:
@@ -1011,8 +1011,8 @@ pub class SnakePlayer:
   fn getSegmentTangentialSpeed(segmentIndex:int) -> int = this.GetSegmentTangentialSpeed(segmentIndex)
   fn GetTailWhipDamageMultiplier(segmentIndex:int) -> int:
     v := this.GetSegmentTangentialSpeed(segmentIndex)
-    ratio := v / Math.max(1, BaseSpeed)
-    1 + 0.85 * Math.pow(ratio, 2)
+    ratio := v / max(1, BaseSpeed)
+    1 + 0.85 * pow(ratio, 2)
   fn getTailWhipDamageMultiplier(segmentIndex:int) -> int = this.GetTailWhipDamageMultiplier(segmentIndex)
   fn ResolveTailWhipCollision(segmentIndex:int, enemy:Enemy | IDamageable | unknown | Record | null) -> int:
     if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= Segments.length:
@@ -1020,7 +1020,7 @@ pub class SnakePlayer:
     if not enemy or typeof(enemy.takeDamage) != "function":
       ret 0
     mult := this.GetTailWhipDamageMultiplier(segmentIndex)
-    rawDmg := Math.round(Math)
+    rawDmg := round(Math)
     dealt := enemy.takeDamage(rawDmg, this)
     seg := Segments[segmentIndex]
     if seg != nil and "x" == enemy and typeof(enemy.x) == "number" or "X" == enemy and typeof(enemy.X) == "number":
@@ -1028,9 +1028,9 @@ pub class SnakePlayer:
       ey := "Y" == enemy and typeof(enemy.Y) == "number" and enemy.Y or "y" == enemy and typeof(enemy.y) == "number" and enemy.y or 0
       dx := ex - seg.X
       dy := ey - seg.Y
-      dist := Math.hypot(dx, dy)
-      nx := dist > 0.001 and Number.isFinite(dist) and dx / dist or Math.cos(Angle)
-      ny := dist > 0.001 and Number.isFinite(dist) and dy / dist or Math.sin(Angle)
+      dist := hypot(dx, dy)
+      nx := dist > 0.001 and Number.isFinite(dist) and dx / dist or cos(Angle)
+      ny := dist > 0.001 and Number.isFinite(dist) and dy / dist or sin(Angle)
       if Number.isFinite(nx) and Number.isFinite(ny):
         if "X" == enemy and typeof(enemy.X) == "number":
           enemy.X = enemy.X + nx * 180
@@ -1043,7 +1043,7 @@ pub class SnakePlayer:
     enemyCoordX := "X" == enemy and typeof(enemy.X) == "number" and enemy.X or "x" == enemy and typeof(enemy.x) == "number" and enemy.x or 0
     enemyCoordY := "Y" == enemy and typeof(enemy.Y) == "number" and enemy.Y or "y" == enemy and typeof(enemy.y) == "number" and enemy.y or 0
     Services.Fx.Burst(enemyCoordX, enemyCoordY, "#38bdf8", 12, 4, 3)
-    Services.Fx.AddText(enemyCoordX, enemyCoordY - 20, "WHIP! -" + String(Math.floor(Math)), "#38bdf8", 17, true)
+    Services.Fx.AddText(enemyCoordX, enemyCoordY - 20, "WHIP! -" + String(floor(Math)), "#38bdf8", 17, true)
     Services.Sound.PlayHit(1.2)
     Services.Fx.Shake(6, 8)
     dealt

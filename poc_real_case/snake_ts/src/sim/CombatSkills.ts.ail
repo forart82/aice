@@ -62,13 +62,13 @@ fn skillUmbralBlink(sys:CombatSystem, world:World) :
   cx := px
   cy := py
   dist := 200
-  nx := MathX.clamp(px + Math.cos(pa) * dist, pr, arenaW - pr)
-  ny := MathX.clamp(py + Math.sin(pa) * dist, pr, arenaH - pr)
+  nx := MathX.clamp(px + cos(pa) * dist, pr, arenaW - pr)
+  ny := MathX.clamp(py + sin(pa) * dist, pr, arenaH - pr)
   player.x = nx
   player.X = nx
   player.y = ny
   player.Y = ny
-  player.invulnerableTimer = Math.max(player.invulnerableTimer ?? player.InvulnerableTimer ?? 0, 0.6)
+  player.invulnerableTimer = max(player.invulnerableTimer ?? player.InvulnerableTimer ?? 0, 0.6)
   player.InvulnerableTimer = player.invulnerableTimer
   afterimages := player.afterimages or player.Afterimages
   if afterimages != nil:
