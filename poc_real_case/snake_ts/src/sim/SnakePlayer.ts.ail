@@ -34,22 +34,22 @@ type HelmetLike = HelmetDef | IHelmetLike
 pub class SnakeSegment:
   X:int, Y:int, Angle:int, R:int, Hp:int
   MaxHp:int, HitFlash:int = 0, SelfHitCooldown:int = 0, BossHitCooldown:int = 0
-  get x = this.X; set x(v) = this.X = v
-  get y = this.Y; set y(v) = this.Y = v
-  get angle = this.Angle; set angle(v) = this.Angle = v
-  get r = this.R; set r(v) = this.R = v
-  get hp = this.Hp; set hp(v) = this.Hp = v
-  get maxHp = this.MaxHp; set maxHp(v) = this.MaxHp = v
-  get hitFlash = this.HitFlash; set hitFlash(v) = this.HitFlash = v
-  get selfHitCooldown = this.SelfHitCooldown; set selfHitCooldown(v) = this.SelfHitCooldown = v
-  get bossHitCooldown = this.BossHitCooldown; set bossHitCooldown(v) = this.BossHitCooldown = v
+  get x = X; set x(v) = X = v
+  get y = Y; set y(v) = Y = v
+  get angle = Angle; set angle(v) = Angle = v
+  get r = R; set r(v) = R = v
+  get hp = Hp; set hp(v) = Hp = v
+  get maxHp = MaxHp; set maxHp(v) = MaxHp = v
+  get hitFlash = HitFlash; set hitFlash(v) = HitFlash = v
+  get selfHitCooldown = SelfHitCooldown; set selfHitCooldown(v) = SelfHitCooldown = v
+  get bossHitCooldown = BossHitCooldown; set bossHitCooldown(v) = BossHitCooldown = v
   fn constructor(x:int, y:int, angle:int, r:int, maxHp:unknown = 25):
-    this.X = x
-    this.Y = y
-    this.Angle = angle
-    this.R = r
-    this.MaxHp = maxHp
-    this.Hp = maxHp
+    X = x
+    Y = y
+    Angle = angle
+    R = r
+    MaxHp = maxHp
+    Hp = maxHp
 
 type BiteHead:
   X:int, Y:int, R:int, Mult:int, x:Option[int]
@@ -61,17 +61,17 @@ type Orbital:
 
 pub class Afterimage:
   X:int, Y:int, Angle:int, Life:int, Max:int
-  get x = this.X; set x(v) = this.X = v
-  get y = this.Y; set y(v) = this.Y = v
-  get angle = this.Angle; set angle(v) = this.Angle = v
-  get life = this.Life; set life(v) = this.Life = v
-  get max = this.Max; set max(v) = this.Max = v
+  get x = X; set x(v) = X = v
+  get y = Y; set y(v) = Y = v
+  get angle = Angle; set angle(v) = Angle = v
+  get life = Life; set life(v) = Life = v
+  get max = Max; set max(v) = Max = v
   fn constructor(x:unknown = 0, y:unknown = 0, angle:unknown = 0, life:unknown = 0, max:unknown = 0):
-    this.X = x
-    this.Y = y
-    this.Angle = angle
-    this.Life = life
-    this.Max = max
+    X = x
+    Y = y
+    Angle = angle
+    Life = life
+    Max = max
 
 pub class SnakePlayer:
   ClassConfig: SnakeClassDef
@@ -128,180 +128,180 @@ pub class SnakePlayer:
     type == "shield" or type == "spikes" or type == "regen" or type == "magnet" or type == "chrono" or type == "nanite" or type == "reactive" or type == "magnetic_aegis" or type == "cryo_carapace" or type == "heatsink" or type == "cloak" or type == "emp_coil"
   static fn IsDefenseModule(type:Option[str]) -> bool = SnakePlayer.isDefenseModule(type)
   fn RecalculateHp() :
-    let mut sum = this.HeadHp
-    let len = this.Segments.length
-    this._cachedHp = sum
-    this._hpDirty = false
-    this._cachedSegCount = len
+    let mut sum = HeadHp
+    let len = Segments.length
+    _cachedHp = sum
+    _hpDirty = false
+    _cachedSegCount = len
   fn recalculateHp() :
     this.RecalculateHp()
   fn RecalculateMaxHp() :
-    let mut sum = this.HeadMaxHp
-    let len = this.Segments.length
-    this._cachedMaxHp = sum
-    this._maxHpDirty = false
-    this._cachedSegCount = len
+    let mut sum = HeadMaxHp
+    let len = Segments.length
+    _cachedMaxHp = sum
+    _maxHpDirty = false
+    _cachedSegCount = len
   fn recalculateMaxHp() :
     this.RecalculateMaxHp()
-  get headHp = this.HeadHp
+  get headHp = HeadHp
   set headHp(v:int):
-    this.HeadHp = v
-    this._hpDirty = true
-  get headMaxHp = this.HeadMaxHp
+    HeadHp = v
+    _hpDirty = true
+  get headMaxHp = HeadMaxHp
   set headMaxHp(v:int):
-    this.HeadMaxHp = v
-    this._maxHpDirty = true
+    HeadMaxHp = v
+    _maxHpDirty = true
   get Hp() -> int:
-    if this._hpDirty or this._cachedHp < 0 or this._cachedSegCount != this.Segments.length:
+    if _hpDirty or _cachedHp < 0 or _cachedSegCount != Segments.length:
       this.RecalculateHp()
-    this._cachedHp
+    _cachedHp
   set Hp(v:int):
     let mut remaining = Number.isFinite(v) and Math.max(0, v) or 0
     if remaining > this.MaxHp:
       this.MaxHp = remaining
-    this.HeadHp = Math.min(this.HeadMaxHp, remaining)
-    remaining = remaining - this.HeadHp
+    HeadHp = Math.min(HeadMaxHp, remaining)
+    remaining -= HeadHp
     this.RecalculateHp()
   get MaxHp() -> int:
-    if this._maxHpDirty or this._cachedMaxHp < 0 or this._cachedSegCount != this.Segments.length:
+    if _maxHpDirty or _cachedMaxHp < 0 or _cachedSegCount != Segments.length:
       this.RecalculateMaxHp()
-    this._cachedMaxHp
+    _cachedMaxHp
   set MaxHp(v:int):
     if not Number.isFinite(v) or v <= 0:
       ret
-    this.Stats.MaxHp = v
-    if this.Segments.length > 0:
-      let totalUnits = 2 + this.Segments.length
+    Stats.MaxHp = v
+    if Segments.length > 0:
+      let totalUnits = 2 + Segments.length
       let unitHp = Math.max(10, Math.round(Math))
-      this.HeadMaxHp = unitHp * 2
-      this.HeadHp = Math.min(this.HeadHp, this.HeadMaxHp)
+      HeadMaxHp = unitHp * 2
+      HeadHp = Math.min(HeadHp, HeadMaxHp)
     else:
-      this.HeadMaxHp = v
-      this.HeadHp = Math.min(this.HeadHp, this.HeadMaxHp)
+      HeadMaxHp = v
+      HeadHp = Math.min(HeadHp, HeadMaxHp)
     this.RecalculateMaxHp()
     this.RecalculateHp()
-  get classConfig = this.ClassConfig; set classConfig(v) = this.ClassConfig = v
-  get classId = this.ClassId; set classId(v) = this.ClassId = v
-  get stats = this.Stats; set stats(v) = this.Stats = v
+  get classConfig = ClassConfig; set classConfig(v) = ClassConfig = v
+  get classId = ClassId; set classId(v) = ClassId = v
+  get stats = Stats; set stats(v) = Stats = v
   get hp = this.Hp; set hp(v) = this.Hp = v
   get maxHp = this.MaxHp; set maxHp(v) = this.MaxHp = v
-  get totalXpCollected = this.TotalXpCollected; set totalXpCollected(v) = this.TotalXpCollected = v
-  get ouro = this.Xp; set ouro(v) = this.Xp = v
-  get Ouro = this.Xp; set Ouro(v) = this.Xp = v
-  get totalOuroCollected = this.TotalXpCollected; set totalOuroCollected(v) = this.TotalXpCollected = v
-  get TotalOuroCollected = this.TotalXpCollected; set TotalOuroCollected(v) = this.TotalXpCollected = v
-  get Length = this.Segments.length + 1
+  get totalXpCollected = TotalXpCollected; set totalXpCollected(v) = TotalXpCollected = v
+  get ouro = Xp; set ouro(v) = Xp = v
+  get Ouro = Xp; set Ouro(v) = Xp = v
+  get totalOuroCollected = TotalXpCollected; set totalOuroCollected(v) = TotalXpCollected = v
+  get TotalOuroCollected = TotalXpCollected; set TotalOuroCollected(v) = TotalXpCollected = v
+  get Length = Segments.length + 1
   get length = this.Length
-  get TotalLength = this.Segments.length + 1
+  get TotalLength = Segments.length + 1
   get totalLength = this.TotalLength
-  get shield = this.Shield; set shield(v) = this.Shield = v
-  get xp = this.Xp; set xp(v) = this.Xp = v
-  get level = this.Level; set level(v) = this.Level = v
-  get xpToNext = this.XpToNext; set xpToNext(v) = this.XpToNext = v
-  get pendingLevelUps = this.PendingLevelUps; set pendingLevelUps(v) = this.PendingLevelUps = v
-  get alive = this.Alive; set alive(v) = this.Alive = v
-  get headRadius = this.HeadRadius * this.HeadRadiusMultiplier; set headRadius(v) = this.HeadRadius = v
-  get headRadiusMultiplier = this.HeadRadiusMultiplier; set headRadiusMultiplier(v) = this.HeadRadiusMultiplier = v
-  get titanGorgingTimer = this.TitanGorgingTimer; set titanGorgingTimer(v) = this.TitanGorgingTimer = v
-  get segmentRadius = this.SegmentRadius; set segmentRadius(v) = this.SegmentRadius = v
-  get segmentSpacing = this.SegmentSpacing; set segmentSpacing(v) = this.SegmentSpacing = v
-  get baseSpeed = this.BaseSpeed; set baseSpeed(v) = this.BaseSpeed = v
-  get turnSpeed = this.TurnSpeed; set turnSpeed(v) = this.TurnSpeed = v
-  get agilitySurgeTimer = this.AgilitySurgeTimer; set agilitySurgeTimer(v) = this.AgilitySurgeTimer = v
-  get headSelfHitCooldown = this.HeadSelfHitCooldown; set headSelfHitCooldown(v) = this.HeadSelfHitCooldown = v
-  get EffectiveTurnSpeed = this.AgilitySurgeTimer > 0 and this.TurnSpeed * 1.45 or this.TurnSpeed
+  get shield = Shield; set shield(v) = Shield = v
+  get xp = Xp; set xp(v) = Xp = v
+  get level = Level; set level(v) = Level = v
+  get xpToNext = XpToNext; set xpToNext(v) = XpToNext = v
+  get pendingLevelUps = PendingLevelUps; set pendingLevelUps(v) = PendingLevelUps = v
+  get alive = Alive; set alive(v) = Alive = v
+  get headRadius = HeadRadius * HeadRadiusMultiplier; set headRadius(v) = HeadRadius = v
+  get headRadiusMultiplier = HeadRadiusMultiplier; set headRadiusMultiplier(v) = HeadRadiusMultiplier = v
+  get titanGorgingTimer = TitanGorgingTimer; set titanGorgingTimer(v) = TitanGorgingTimer = v
+  get segmentRadius = SegmentRadius; set segmentRadius(v) = SegmentRadius = v
+  get segmentSpacing = SegmentSpacing; set segmentSpacing(v) = SegmentSpacing = v
+  get baseSpeed = BaseSpeed; set baseSpeed(v) = BaseSpeed = v
+  get turnSpeed = TurnSpeed; set turnSpeed(v) = TurnSpeed = v
+  get agilitySurgeTimer = AgilitySurgeTimer; set agilitySurgeTimer(v) = AgilitySurgeTimer = v
+  get headSelfHitCooldown = HeadSelfHitCooldown; set headSelfHitCooldown(v) = HeadSelfHitCooldown = v
+  get EffectiveTurnSpeed = AgilitySurgeTimer > 0 and TurnSpeed * 1.45 or TurnSpeed
   get effectiveTurnSpeed = this.EffectiveTurnSpeed
-  get x = this.X; set x(v) = this.X = v
-  get y = this.Y; set y(v) = this.Y = v
-  get angle = this.Angle; set angle(v) = this.Angle = v
-  get targetAngle = this.TargetAngle; set targetAngle(v) = this.TargetAngle = v
-  get velocityX = this.VelocityX; set velocityX(v) = this.VelocityX = v
-  get velocityY = this.VelocityY; set velocityY(v) = this.VelocityY = v
-  get maxSegments = this.MaxSegments; set maxSegments(v) = this.MaxSegments = v
-  get segments = this.Segments; set segments(v) = this.Segments = v
-  get dashDuration = this.DashDuration; set dashDuration(v) = this.DashDuration = v
-  get dashTimer = this.DashTimer; set dashTimer(v) = this.DashTimer = v
-  get dashDurationTimer = this.DashTimer; set dashDurationTimer(v) = this.DashTimer = v
-  get dashCooldownTimer = this.DashCooldownTimer; set dashCooldownTimer(v) = this.DashCooldownTimer = v
-  get isDashing = this.IsDashing; set isDashing(v) = this.IsDashing = v
-  get dashSpeedMultiplier = this.DashSpeedMultiplier; set dashSpeedMultiplier(v) = this.DashSpeedMultiplier = v
-  get invulnerableTimer = this.InvulnerableTimer; set invulnerableTimer(v) = this.InvulnerableTimer = v
-  get dashHitIds = this.DashHitIds; set dashHitIds(v) = this.DashHitIds = v
-  get skillCooldownTimer = this.SkillCooldownTimer; set skillCooldownTimer(v) = this.SkillCooldownTimer = v
-  get skillActiveTimer = this.SkillActiveTimer; set skillActiveTimer(v) = this.SkillActiveTimer = v
-  get armorBuffTimer = this.ArmorBuffTimer; set armorBuffTimer(v) = this.ArmorBuffTimer = v
-  get relics = this.Relics; set relics(v) = this.Relics = v
-  get cardStacks = this.CardStacks; set cardStacks(v) = this.CardStacks = v
-  get orbitalAngle = this.OrbitalAngle; set orbitalAngle(v) = this.OrbitalAngle = v
-  get orbitDistance = this.OrbitDistance; set orbitDistance(v) = this.OrbitDistance = v
-  get spitCooldown = this.SpitCooldown; set spitCooldown(v) = this.SpitCooldown = v
-  get vortexTimer = this.VortexTimer; set vortexTimer(v) = this.VortexTimer = v
-  get regenTimer = this.RegenTimer; set regenTimer(v) = this.RegenTimer = v
-  get shieldRechargeTimer = this.ShieldRechargeTimer; set shieldRechargeTimer(v) = this.ShieldRechargeTimer = v
-  get shieldBrokenTimer = this.ShieldBrokenTimer; set shieldBrokenTimer(v) = this.ShieldBrokenTimer = v
-  get trailTimer = this.TrailTimer; set trailTimer(v) = this.TrailTimer = v
-  get magmaTimer = this.MagmaTimer; set magmaTimer(v) = this.MagmaTimer = v
-  get gluttonCounter = this.GluttonCounter; set gluttonCounter(v) = this.GluttonCounter = v
-  get devourerCounter = this.DevourerCounter; set devourerCounter(v) = this.DevourerCounter = v
-  get devourerStacks = this.DevourerStacks; set devourerStacks(v) = this.DevourerStacks = v
-  get damageBonus = this.DamageBonus; set damageBonus(v) = this.DamageBonus = v
-  get eyeBlinkTimer = this.EyeBlinkTimer; set eyeBlinkTimer(v) = this.EyeBlinkTimer = v
-  get eyeBlinking = this.EyeBlinking; set eyeBlinking(v) = this.EyeBlinking = v
-  get mouthOpen = this.MouthOpen; set mouthOpen(v) = this.MouthOpen = v
-  get bodyPulse = this.BodyPulse; set bodyPulse(v) = this.BodyPulse = v
-  get hurtFlash = this.HurtFlash; set hurtFlash(v) = this.HurtFlash = v
-  get afterimages = this.Afterimages; set afterimages(v) = this.Afterimages = v
-  get emberTimer = this.EmberTimer; set emberTimer(v) = this.EmberTimer = v
-  get foodsEaten = this.FoodsEaten; set foodsEaten(v) = this.FoodsEaten = v
-  get pendingRevive = this.PendingRevive; set pendingRevive(v) = this.PendingRevive = v
-  get mutationPoints = this.MutationPoints; set mutationPoints(v) = this.MutationPoints = v
-  get peakLength = this.PeakLength; set peakLength(v) = this.PeakLength = v
-  get headAugment = this.HeadAugment; set headAugment(v) = this.HeadAugment = v
-  get headAugmentLevel = this.HeadAugmentLevel; set headAugmentLevel(v) = this.HeadAugmentLevel = v
-  get headLaserTimer = this.HeadLaserTimer; set headLaserTimer(v) = this.HeadLaserTimer = v
-  get headCrownTimer = this.HeadCrownTimer; set headCrownTimer(v) = this.HeadCrownTimer = v
-  get headModules = this.HeadModules; set headModules(v) = this.HeadModules = v
-  get headModuleTimers = this.HeadModuleTimers; set headModuleTimers(v) = this.HeadModuleTimers = v
-  get headPurchaseCount = this.HeadPurchaseCount; set headPurchaseCount(v) = this.HeadPurchaseCount = v
-  get equippedHelmet = this.EquippedHelmet; set equippedHelmet(v) = this.EquippedHelmet = v ?? nil
-  get helmet = this.EquippedHelmet; set helmet(v) = this.EquippedHelmet = v ?? nil
-  fn EquipHelmet(v:Option[HelmetLike]) -> void = this.EquippedHelmet = v ?? nil
+  get x = X; set x(v) = X = v
+  get y = Y; set y(v) = Y = v
+  get angle = Angle; set angle(v) = Angle = v
+  get targetAngle = TargetAngle; set targetAngle(v) = TargetAngle = v
+  get velocityX = VelocityX; set velocityX(v) = VelocityX = v
+  get velocityY = VelocityY; set velocityY(v) = VelocityY = v
+  get maxSegments = MaxSegments; set maxSegments(v) = MaxSegments = v
+  get segments = Segments; set segments(v) = Segments = v
+  get dashDuration = DashDuration; set dashDuration(v) = DashDuration = v
+  get dashTimer = DashTimer; set dashTimer(v) = DashTimer = v
+  get dashDurationTimer = DashTimer; set dashDurationTimer(v) = DashTimer = v
+  get dashCooldownTimer = DashCooldownTimer; set dashCooldownTimer(v) = DashCooldownTimer = v
+  get isDashing = IsDashing; set isDashing(v) = IsDashing = v
+  get dashSpeedMultiplier = DashSpeedMultiplier; set dashSpeedMultiplier(v) = DashSpeedMultiplier = v
+  get invulnerableTimer = InvulnerableTimer; set invulnerableTimer(v) = InvulnerableTimer = v
+  get dashHitIds = DashHitIds; set dashHitIds(v) = DashHitIds = v
+  get skillCooldownTimer = SkillCooldownTimer; set skillCooldownTimer(v) = SkillCooldownTimer = v
+  get skillActiveTimer = SkillActiveTimer; set skillActiveTimer(v) = SkillActiveTimer = v
+  get armorBuffTimer = ArmorBuffTimer; set armorBuffTimer(v) = ArmorBuffTimer = v
+  get relics = Relics; set relics(v) = Relics = v
+  get cardStacks = CardStacks; set cardStacks(v) = CardStacks = v
+  get orbitalAngle = OrbitalAngle; set orbitalAngle(v) = OrbitalAngle = v
+  get orbitDistance = OrbitDistance; set orbitDistance(v) = OrbitDistance = v
+  get spitCooldown = SpitCooldown; set spitCooldown(v) = SpitCooldown = v
+  get vortexTimer = VortexTimer; set vortexTimer(v) = VortexTimer = v
+  get regenTimer = RegenTimer; set regenTimer(v) = RegenTimer = v
+  get shieldRechargeTimer = ShieldRechargeTimer; set shieldRechargeTimer(v) = ShieldRechargeTimer = v
+  get shieldBrokenTimer = ShieldBrokenTimer; set shieldBrokenTimer(v) = ShieldBrokenTimer = v
+  get trailTimer = TrailTimer; set trailTimer(v) = TrailTimer = v
+  get magmaTimer = MagmaTimer; set magmaTimer(v) = MagmaTimer = v
+  get gluttonCounter = GluttonCounter; set gluttonCounter(v) = GluttonCounter = v
+  get devourerCounter = DevourerCounter; set devourerCounter(v) = DevourerCounter = v
+  get devourerStacks = DevourerStacks; set devourerStacks(v) = DevourerStacks = v
+  get damageBonus = DamageBonus; set damageBonus(v) = DamageBonus = v
+  get eyeBlinkTimer = EyeBlinkTimer; set eyeBlinkTimer(v) = EyeBlinkTimer = v
+  get eyeBlinking = EyeBlinking; set eyeBlinking(v) = EyeBlinking = v
+  get mouthOpen = MouthOpen; set mouthOpen(v) = MouthOpen = v
+  get bodyPulse = BodyPulse; set bodyPulse(v) = BodyPulse = v
+  get hurtFlash = HurtFlash; set hurtFlash(v) = HurtFlash = v
+  get afterimages = Afterimages; set afterimages(v) = Afterimages = v
+  get emberTimer = EmberTimer; set emberTimer(v) = EmberTimer = v
+  get foodsEaten = FoodsEaten; set foodsEaten(v) = FoodsEaten = v
+  get pendingRevive = PendingRevive; set pendingRevive(v) = PendingRevive = v
+  get mutationPoints = MutationPoints; set mutationPoints(v) = MutationPoints = v
+  get peakLength = PeakLength; set peakLength(v) = PeakLength = v
+  get headAugment = HeadAugment; set headAugment(v) = HeadAugment = v
+  get headAugmentLevel = HeadAugmentLevel; set headAugmentLevel(v) = HeadAugmentLevel = v
+  get headLaserTimer = HeadLaserTimer; set headLaserTimer(v) = HeadLaserTimer = v
+  get headCrownTimer = HeadCrownTimer; set headCrownTimer(v) = HeadCrownTimer = v
+  get headModules = HeadModules; set headModules(v) = HeadModules = v
+  get headModuleTimers = HeadModuleTimers; set headModuleTimers(v) = HeadModuleTimers = v
+  get headPurchaseCount = HeadPurchaseCount; set headPurchaseCount(v) = HeadPurchaseCount = v
+  get equippedHelmet = EquippedHelmet; set equippedHelmet(v) = EquippedHelmet = v ?? nil
+  get helmet = EquippedHelmet; set helmet(v) = EquippedHelmet = v ?? nil
+  fn EquipHelmet(v:Option[HelmetLike]) -> void = EquippedHelmet = v ?? nil
   fn equipHelmet(v:Option[HelmetLike]) :
     this.EquipHelmet(v)
   fn triggerTitanGorging(duration:int = 3) :
-    this.HeadRadiusMultiplier = 2
-    this.TitanGorgingTimer = duration
+    HeadRadiusMultiplier = 2
+    TitanGorgingTimer = duration
   fn TriggerTitanGorging(duration:int = 3) :
     this.triggerTitanGorging(duration)
-  fn GetHeadModuleLevel(key:str) -> int = this.HeadModules[key] or 0
+  fn GetHeadModuleLevel(key:str) -> int = HeadModules[key] or 0
   fn getHeadModuleLevel(key:str) -> int = this.GetHeadModuleLevel(key)
-  fn SetHeadModuleLevel(key:str, level:int) -> void = this.HeadModules[key] = Math.max(0, level)
+  fn SetHeadModuleLevel(key:str, level:int) -> void = HeadModules[key] = Math.max(0, level)
   fn setHeadModuleLevel(key:str, level:int) :
     this.SetHeadModuleLevel(key, level)
-  fn GetHeadAugmentLevel(key:str) -> int = this.HeadAugment == key and this.HeadAugmentLevel or 0 or 0
+  fn GetHeadAugmentLevel(key:str) -> int = HeadAugment == key and HeadAugmentLevel or 0 or 0
   fn getHeadAugmentLevel(key:str) -> int = this.GetHeadAugmentLevel(key)
   fn GetHeadModuleCost(key:str, targetLvl:int) -> int:
     let lvl = targetLvl != undefined and targetLvl or this.GetHeadModuleLevel(key) + 1
-    30 * lvl + this.HeadPurchaseCount * 15
+    30 * lvl + HeadPurchaseCount * 15
   fn getHeadModuleCost(key:str, targetLvl:int) -> int = this.GetHeadModuleCost(key, targetLvl)
   fn GetHeadAugmentCost(key:str, targetLvl:int) -> int:
-    let cur = this.HeadAugment == key and this.HeadAugmentLevel or 0
+    let cur = HeadAugment == key and HeadAugmentLevel or 0
     let lvl = targetLvl != undefined and targetLvl or cur + 1
-    40 * lvl + this.HeadPurchaseCount * 20
+    40 * lvl + HeadPurchaseCount * 20
   fn getHeadAugmentCost(key:str, targetLvl:int) -> int = this.GetHeadAugmentCost(key, targetLvl)
   fn InstallHeadModule(key:str) -> int:
     let cur = this.GetHeadModuleLevel(key)
     if cur >= 3:
       ret cur
     let next = cur + 1
-    this.HeadModules[key] = next
-    this.HeadPurchaseCount = this.HeadPurchaseCount + 1
+    HeadModules[key] = next
+    HeadPurchaseCount += 1
     if key == "shield":
       let shieldBonus = 25
-      this.Stats.MaxShield = this.Stats.MaxShield + shieldBonus
-      this.Shield = Math.min(this.Stats.MaxShield, this.Shield + shieldBonus)
+      Stats.MaxShield = Stats.MaxShield + shieldBonus
+      Shield = Math.min(Stats.MaxShield, Shield + shieldBonus)
     elif key == "spikes":
-      this.Stats.Thorns = this.Stats.Thorns + 0.2
+      Stats.Thorns = Stats.Thorns + 0.2
     next
   fn installHeadModule(key:str) -> int = this.InstallHeadModule(key)
   fn UninstallHeadModule(key:str) :
@@ -309,264 +309,264 @@ pub class SnakePlayer:
   fn uninstallHeadModule(key:str) :
     this.UninstallHeadModule(key)
   fn InstallHeadAugment(key:str) -> int:
-    let cur = this.HeadAugment == key and this.HeadAugmentLevel or 0
+    let cur = HeadAugment == key and HeadAugmentLevel or 0
     if cur >= 3:
       ret cur
     let next = cur + 1
     this.SetHeadAugment(key, next)
-    this.HeadPurchaseCount = this.HeadPurchaseCount + 1
+    HeadPurchaseCount += 1
     next
   fn installHeadAugment(key:str) -> int = this.InstallHeadAugment(key)
-  get Meta = this.meta; set Meta(v) = this.meta = v
-  get Services = this.services; set Services(v) = this.services = v
+  get Meta = meta; set Meta(v) = meta = v
+  get Services = services; set Services(v) = services = v
   fn constructor(classId:Option[str] = "emerald", arenaW:unknown = 0, arenaH:unknown = 0, initialSegments:unknown = 2, metaOrOptions:MetaProgression | unknown):
     if metaOrOptions == MetaProgression:
-      this.meta = metaOrOptions
+      meta = metaOrOptions
     elif metaOrOptions != nil and typeof(metaOrOptions) == "object":
-      this.meta = metaOrOptions.meta
-      this.services = metaOrOptions.services
+      meta = metaOrOptions.meta
+      services = metaOrOptions.services
     let cfg = classId != nil and GameData.Classes.Get(classId) or nil ?? GameData.Classes.Get("emerald")
-    this.ClassConfig = cfg
-    this.ClassId = this.ClassConfig.Id
+    ClassConfig = cfg
+    ClassId = ClassConfig.Id
     if arenaW > 0:
-      this.X = arenaW * 0.5
+      X = arenaW * 0.5
     else:
-      this.X = 480
+      X = 480
     if arenaH > 0:
-      this.Y = arenaH * 0.5
+      Y = arenaH * 0.5
     else:
-      this.Y = 320
-    this.Angle = 0
-    this.TargetAngle = 0
-    this.VelocityX = this.BaseSpeed
-    this.VelocityY = 0
-    let meta = this.meta ?? this.services?.meta ?? typeof(Services) != "undefined" and Services.Meta and Services.Meta or MetaProgression.Instance
-    let b = this.ClassConfig.BaseStats
-    this.Stats = PlayerStats()
-    this.Stats.MaxHp = b.MaxHp + meta and meta.Level("vitality") * 10 or 0
-    this.Stats.Speed = b.Speed * 1 + meta and meta.Level("agility") * 0.04 or 0
-    this.Stats.DashCooldown = Math.max(0.8, b.DashCooldown - meta and meta.Level("swiftness") * 0.15 or 0)
-    this.Stats.BitePower = b.BitePower * 1 + meta and meta.Level("ferocity") * 0.06 or 0
-    this.Stats.MagnetRadius = b.MagnetRadius * 1 + meta and meta.Level("magnet") * 0.15 or 0
-    this.Stats.CritChance = b.CritChance
-    this.Stats.CritMult = b.CritMult
-    this.Stats.Armor = Math.min(0.8, b.Armor + meta and meta.Level("resilience") * 0.03 or 0)
-    this.Stats.MaxShield = 0
-    this.Stats.XpGain = 1
-    this.Stats.ShardGain = 1
-    this.Stats.ComboWindow = 1
-    this.Stats.Thorns = 0
-    this.Stats.SkillCooldown = this.ClassConfig.Skill.Cooldown
-    if this.ClassId == "emerald":
-      this.Stats.MagnetRadius = this.Stats.MagnetRadius * 1.3
+      Y = 320
+    Angle = 0
+    TargetAngle = 0
+    VelocityX = BaseSpeed
+    VelocityY = 0
+    let meta = meta ?? services?.meta ?? typeof(Services) != "undefined" and Services.Meta and Services.Meta or MetaProgression.Instance
+    let b = ClassConfig.BaseStats
+    Stats = PlayerStats()
+    Stats.MaxHp = b.MaxHp + meta and meta.Level("vitality") * 10 or 0
+    Stats.Speed = b.Speed * 1 + meta and meta.Level("agility") * 0.04 or 0
+    Stats.DashCooldown = Math.max(0.8, b.DashCooldown - meta and meta.Level("swiftness") * 0.15 or 0)
+    Stats.BitePower = b.BitePower * 1 + meta and meta.Level("ferocity") * 0.06 or 0
+    Stats.MagnetRadius = b.MagnetRadius * 1 + meta and meta.Level("magnet") * 0.15 or 0
+    Stats.CritChance = b.CritChance
+    Stats.CritMult = b.CritMult
+    Stats.Armor = Math.min(0.8, b.Armor + meta and meta.Level("resilience") * 0.03 or 0)
+    Stats.MaxShield = 0
+    Stats.XpGain = 1
+    Stats.ShardGain = 1
+    Stats.ComboWindow = 1
+    Stats.Thorns = 0
+    Stats.SkillCooldown = ClassConfig.Skill.Cooldown
+    if ClassId == "emerald":
+      Stats.MagnetRadius = Stats.MagnetRadius * 1.3
     let segCount = initialSegments != undefined and initialSegments >= 0 and initialSegments or 2
     let baseSegHp = this.BaseSegmentHp
-    this.HeadMaxHp = 2 * baseSegHp
-    this.HeadHp = this.HeadMaxHp
-    this.PeakLength = this.Segments.length
+    HeadMaxHp = 2 * baseSegHp
+    HeadHp = HeadMaxHp
+    PeakLength = Segments.length
     this.RecalculateMaxHp()
     this.RecalculateHp()
-    this.Stats.MaxHp = this.MaxHp
+    Stats.MaxHp = this.MaxHp
     let equippedHelmet = meta != nil and meta.GetEquippedHelmet and meta.GetEquippedHelmet() or nil
-    this.EquippedHelmet = equippedHelmet
-    if this.EquippedHelmet != nil and this.EquippedHelmet.Stats or this.EquippedHelmet.stats:
-      let hs = this.EquippedHelmet.Stats or this.EquippedHelmet.stats
+    EquippedHelmet = equippedHelmet
+    if EquippedHelmet != nil and EquippedHelmet.Stats or EquippedHelmet.stats:
+      let hs = EquippedHelmet.Stats or EquippedHelmet.stats
       let hHp = hs.MaxHp or hs.maxHp or 0
       if hHp > 0:
-        this.Stats.MaxHp = this.Stats.MaxHp + hHp
+        Stats.MaxHp = Stats.MaxHp + hHp
         let extraPerPart = Math.round(Math)
-        this.HeadMaxHp = this.HeadMaxHp + 2 * extraPerPart
-        this.HeadHp = this.HeadMaxHp
-        for seg in this.Segments:
+        HeadMaxHp += 2 * extraPerPart
+        HeadHp = HeadMaxHp
+        for seg in Segments:
           seg.MaxHp = seg.MaxHp + extraPerPart
           seg.Hp = seg.MaxHp
         this.RecalculateMaxHp()
         this.RecalculateHp()
       if hs.Armor or hs.armor:
-        this.Stats.Armor = Math.min(0.85, this.Stats.Armor + hs.Armor or hs.armor or 0)
+        Stats.Armor = Math.min(0.85, Stats.Armor + hs.Armor or hs.armor or 0)
       if hs.Speed or hs.speed:
-        this.Stats.Speed = this.Stats.Speed + hs.Speed or hs.speed or 0
+        Stats.Speed = Stats.Speed + hs.Speed or hs.speed or 0
       if hs.BitePower or hs.bitePower:
-        this.Stats.BitePower = this.Stats.BitePower + hs.BitePower or hs.bitePower or 0
+        Stats.BitePower = Stats.BitePower + hs.BitePower or hs.bitePower or 0
       if hs.MagnetRadius or hs.magnetRadius:
-        this.Stats.MagnetRadius = this.Stats.MagnetRadius + hs.MagnetRadius or hs.magnetRadius or 0
+        Stats.MagnetRadius = Stats.MagnetRadius + hs.MagnetRadius or hs.magnetRadius or 0
       if hs.CritChance or hs.critChance:
-        this.Stats.CritChance = Math.min(1, this.Stats.CritChance + hs.CritChance or hs.critChance or 0)
+        Stats.CritChance = Math.min(1, Stats.CritChance + hs.CritChance or hs.critChance or 0)
       if hs.CritMult or hs.critMult:
-        this.Stats.CritMult = this.Stats.CritMult + hs.CritMult or hs.critMult or 0
+        Stats.CritMult = Stats.CritMult + hs.CritMult or hs.critMult or 0
       if hs.DashCooldown or hs.dashCooldown:
-        this.Stats.DashCooldown = Math.max(0.6, this.Stats.DashCooldown - hs.DashCooldown or hs.dashCooldown or 0)
+        Stats.DashCooldown = Math.max(0.6, Stats.DashCooldown - hs.DashCooldown or hs.dashCooldown or 0)
       if hs.Thorns or hs.thorns:
-        this.Stats.Thorns = this.Stats.Thorns + hs.Thorns or hs.thorns or 0
+        Stats.Thorns = Stats.Thorns + hs.Thorns or hs.thorns or 0
       if hs.XpMultiplier or hs.xpMultiplier:
-        this.Stats.XpGain = this.Stats.XpGain + hs.XpMultiplier or hs.xpMultiplier or 0
+        Stats.XpGain = Stats.XpGain + hs.XpMultiplier or hs.xpMultiplier or 0
       if hs.ShardMultiplier or hs.shardMultiplier:
-        this.Stats.ShardGain = this.Stats.ShardGain + hs.ShardMultiplier or hs.shardMultiplier or 0
+        Stats.ShardGain = Stats.ShardGain + hs.ShardMultiplier or hs.shardMultiplier or 0
       if hs.HpRegen or hs.hpRegen:
-        this.Stats.HpRegen = this.Stats.HpRegen + hs.HpRegen or hs.hpRegen or 0
+        Stats.HpRegen = Stats.HpRegen + hs.HpRegen or hs.hpRegen or 0
       if hs.Shield or hs.shield:
         let sVal = hs.Shield or hs.shield or 0
-        this.Shield = this.Shield or 0 + sVal
-        this.Stats.MaxShield = this.Stats.MaxShield or 0 + sVal
-    this.Shield = this.Shield or 0
-    this.Xp = 0
-    this.Level = 1
-    this.XpToNext = 155
-    this._xpForNextLevel = 155
-    this.PendingLevelUps = 0
-    this.Alive = true
-    this.Relics = GameData.newRelics()
-    this.EyeBlinkTimer = Rng.Shared.range(2, 5)
+        Shield = Shield or 0 + sVal
+        Stats.MaxShield = Stats.MaxShield or 0 + sVal
+    Shield = Shield or 0
+    Xp = 0
+    Level = 1
+    XpToNext = 155
+    _xpForNextLevel = 155
+    PendingLevelUps = 0
+    Alive = true
+    Relics = GameData.newRelics()
+    EyeBlinkTimer = Rng.Shared.range(2, 5)
   get BitePower() -> int:
-    let mut p = this.Stats.BitePower * this.DamageBonus
-    let adrenal = this.Relics["adrenal"] ?? 0
-    if adrenal > 0 and this.Hp < this.Stats.MaxHp * 0.4:
-      p = p * 1 + 0.2 * adrenal
+    let mut p = Stats.BitePower * DamageBonus
+    let adrenal = Relics["adrenal"] ?? 0
+    if adrenal > 0 and this.Hp < Stats.MaxHp * 0.4:
+      p *= 1 + 0.2 * adrenal
     p
   get bitePower = this.BitePower
   get MoveSpeed() -> int:
-    let mut s = this.BaseSpeed * this.Stats.Speed
-    let adrenal = this.Relics["adrenal"] ?? 0
-    if adrenal > 0 and this.Hp < this.Stats.MaxHp * 0.4:
-      s = s * 1 + 0.35 * adrenal
-    if this.IsDashing != nil:
-      s = s * this.DashSpeedMultiplier
+    let mut s = BaseSpeed * Stats.Speed
+    let adrenal = Relics["adrenal"] ?? 0
+    if adrenal > 0 and this.Hp < Stats.MaxHp * 0.4:
+      s *= 1 + 0.35 * adrenal
+    if IsDashing != nil:
+      s *= DashSpeedMultiplier
     s
   get moveSpeed = this.MoveSpeed
   get EffectiveArmor() -> int:
-    let mut a = this.Stats.Armor + this.SegmentArmorBonus
-    if this.ArmorBuffTimer > 0:
-      a = a + 0.25
-    if this.HeadModules["spikes"]:
-      a = a + 0.04 * this.HeadModules["spikes"]
+    let mut a = Stats.Armor + this.SegmentArmorBonus
+    if ArmorBuffTimer > 0:
+      a += 0.25
+    if HeadModules["spikes"]:
+      a += 0.04 * HeadModules["spikes"]
     MathX.clamp(a, 0, 0.85)
   get effectiveArmor = this.EffectiveArmor
-  get SkillReady = this.SkillCooldownTimer <= 0
+  get SkillReady = SkillCooldownTimer <= 0
   get skillReady = this.SkillReady
-  get DashReady = this.DashCooldownTimer <= 0 and not this.IsDashing
+  get DashReady = DashCooldownTimer <= 0 and not IsDashing
   get dashReady = this.DashReady
   fn BiteHeads() -> [BiteHead]:
-    this._biteHeads.length = 0
+    _biteHeads.length = 0
     let currentR = this.headRadius
-    this._head0.X = this.X
-    this._head0.Y = this.Y
-    this._head0.R = currentR
-    this._head0.x = this.X
-    this._head0.y = this.Y
-    this._head0.r = currentR
-    this._head0.Mult = 1
-    this._head0.mult = 1
-    this._biteHeads.push(this._head0)
-    if this.ClassId == "hydra":
-      let nx = Math.cos(this.Angle + Math.PI / 2)
-      let ny = Math.sin(this.Angle + Math.PI / 2)
+    _head0.X = X
+    _head0.Y = Y
+    _head0.R = currentR
+    _head0.x = X
+    _head0.y = Y
+    _head0.r = currentR
+    _head0.Mult = 1
+    _head0.mult = 1
+    _biteHeads.push(_head0)
+    if ClassId == "hydra":
+      let nx = Math.cos(Angle + Math.PI / 2)
+      let ny = Math.sin(Angle + Math.PI / 2)
       let back = 6
-      let bx = this.X - Math.cos(this.Angle) * back
-      let by = this.Y - Math.sin(this.Angle) * back
+      let bx = X - Math.cos(Angle) * back
+      let by = Y - Math.sin(Angle) * back
       let h1x = bx + nx * 15
       let h1y = by + ny * 15
-      this._head1.X = h1x
-      this._head1.Y = h1y
-      this._head1.x = h1x
-      this._head1.y = h1y
-      this._biteHeads.push(this._head1)
+      _head1.X = h1x
+      _head1.Y = h1y
+      _head1.x = h1x
+      _head1.y = h1y
+      _biteHeads.push(_head1)
       let h2x = bx - nx * 15
       let h2y = by - ny * 15
-      this._head2.X = h2x
-      this._head2.Y = h2y
-      this._head2.x = h2x
-      this._head2.y = h2y
-      this._biteHeads.push(this._head2)
-    this._biteHeads
+      _head2.X = h2x
+      _head2.Y = h2y
+      _head2.x = h2x
+      _head2.y = h2y
+      _biteHeads.push(_head2)
+    _biteHeads
   fn biteHeads() -> [BiteHead] = this.BiteHeads()
   fn OrbitalPositions() -> [Orbital]:
-    let n = this.Relics["orbitalFangs"] ?? 0
-    while this._orbitalPositions.length < n:
-      this._orbitalPositions.push({ X: 0, Y: 0, A: 0, x: 0, y: 0, a: 0 })
-    this._orbitalPositions.length = n
-    this._orbitalPositions
+    let n = Relics["orbitalFangs"] ?? 0
+    while _orbitalPositions.length < n:
+      _orbitalPositions.push({ X: 0, Y: 0, A: 0, x: 0, y: 0, a: 0 })
+    _orbitalPositions.length = n
+    _orbitalPositions
   fn orbitalPositions() -> [Orbital] = this.OrbitalPositions()
   fn Update(dt:int, steer:ISteerInput, arenaW:int, arenaH:int, world:World) :
     if not Number.isFinite(dt) or dt <= 0:
       ret
-    if not Number.isFinite(this.X):
+    if not Number.isFinite(X):
       if arenaW > 0:
-        this.X = arenaW * 0.5
+        X = arenaW * 0.5
       else:
-        this.X = 480
-    if not Number.isFinite(this.Y):
+        X = 480
+    if not Number.isFinite(Y):
       if arenaH > 0:
-        this.Y = arenaH * 0.5
+        Y = arenaH * 0.5
       else:
-        this.Y = 320
-    if not Number.isFinite(this.Angle):
-      this.Angle = 0
-    if not Number.isFinite(this.TargetAngle):
-      this.TargetAngle = this.Angle
-    this.DashCooldownTimer = MathX.decayTimer(this.DashCooldownTimer, dt)
-    this.SkillCooldownTimer = MathX.decayTimer(this.SkillCooldownTimer, dt)
-    this.InvulnerableTimer = MathX.decayTimer(this.InvulnerableTimer, dt)
-    this.ArmorBuffTimer = MathX.decayTimer(this.ArmorBuffTimer, dt)
-    this.AgilitySurgeTimer = MathX.decayTimer(this.AgilitySurgeTimer, dt)
-    this.HeadSelfHitCooldown = MathX.decayTimer(this.HeadSelfHitCooldown, dt)
-    this.HurtFlash = MathX.decayTimer(this.HurtFlash, dt * 3)
-    if this.TitanGorgingTimer > 0:
-      this.TitanGorgingTimer = MathX.decayTimer(this.TitanGorgingTimer, dt)
-      if this.TitanGorgingTimer <= 0:
-        this.HeadRadiusMultiplier = 1
-    if this.IsDashing != nil:
-      this.DashTimer = this.DashTimer - dt
-      if this.DashTimer <= 0:
-        this.IsDashing = false
-        this.DashHitIds.clear()
+        Y = 320
+    if not Number.isFinite(Angle):
+      Angle = 0
+    if not Number.isFinite(TargetAngle):
+      TargetAngle = Angle
+    DashCooldownTimer = MathX.decayTimer(DashCooldownTimer, dt)
+    SkillCooldownTimer = MathX.decayTimer(SkillCooldownTimer, dt)
+    InvulnerableTimer = MathX.decayTimer(InvulnerableTimer, dt)
+    ArmorBuffTimer = MathX.decayTimer(ArmorBuffTimer, dt)
+    AgilitySurgeTimer = MathX.decayTimer(AgilitySurgeTimer, dt)
+    HeadSelfHitCooldown = MathX.decayTimer(HeadSelfHitCooldown, dt)
+    HurtFlash = MathX.decayTimer(HurtFlash, dt * 3)
+    if TitanGorgingTimer > 0:
+      TitanGorgingTimer = MathX.decayTimer(TitanGorgingTimer, dt)
+      if TitanGorgingTimer <= 0:
+        HeadRadiusMultiplier = 1
+    if IsDashing != nil:
+      DashTimer -= dt
+      if DashTimer <= 0:
+        IsDashing = false
+        DashHitIds.clear()
     let steerActive = steer != nil and steer.Active ?? steer.active ?? false or false
     let steerX = steer != nil and steer.X ?? steer.x ?? 0 or 0
     let steerY = steer != nil and steer.Y ?? steer.y ?? 0 or 0
     if steerActive != nil:
       let len = Math.sqrt(steerX * steerX + steerY * steerY)
       if len > 0.001 and Number.isFinite(len):
-        this.TargetAngle = Math.atan2(steerY, steerX)
-    let turn = this.EffectiveTurnSpeed * this.IsDashing and 0.65 or 1
-    let diff = MathX.angleDelta(this.Angle, this.TargetAngle)
-    this.Angle = this.Angle + diff * MathX.clamp(turn * dt, 0, 1)
-    if this.Angle > Math.PI:
-      this.Angle = this.Angle - MathX.Tau
-    if this.Angle < -Math.PI:
-      this.Angle = this.Angle + MathX.Tau
+        TargetAngle = Math.atan2(steerY, steerX)
+    let turn = this.EffectiveTurnSpeed * IsDashing and 0.65 or 1
+    let diff = MathX.angleDelta(Angle, TargetAngle)
+    Angle += diff * MathX.clamp(turn * dt, 0, 1)
+    if Angle > Math.PI:
+      Angle -= MathX.Tau
+    if Angle < -Math.PI:
+      Angle += MathX.Tau
     let speed = this.MoveSpeed
-    this.VelocityX = Math.cos(this.Angle) * speed
-    this.VelocityY = Math.sin(this.Angle) * speed
-    this.X = this.X + this.VelocityX * dt
-    this.Y = this.Y + this.VelocityY * dt
-    let m = this.HeadRadius
-    let hitLeft = this.X < m
-    let hitRight = this.X > arenaW - m
-    let hitTop = this.Y < m
-    let hitBottom = this.Y > arenaH - m
+    VelocityX = Math.cos(Angle) * speed
+    VelocityY = Math.sin(Angle) * speed
+    X += VelocityX * dt
+    Y += VelocityY * dt
+    let m = HeadRadius
+    let hitLeft = X < m
+    let hitRight = X > arenaW - m
+    let hitTop = Y < m
+    let hitBottom = Y > arenaH - m
     if hitLeft or hitRight != nil and hitTop or hitBottom:
       let nx = hitLeft != nil and 1 or -1
       let ny = hitTop != nil and 1 or -1
       if hitLeft != nil:
-        this.X = m + 1
+        X = m + 1
       else:
-        this.X = arenaW - m - 1
+        X = arenaW - m - 1
       if hitTop != nil:
-        this.Y = m + 1
+        Y = m + 1
       else:
-        this.Y = arenaH - m - 1
+        Y = arenaH - m - 1
       this.Deflect(nx * Math.SQRT1_2, ny * Math.SQRT1_2)
     else:
       if hitLeft != nil:
-        this.X = m
+        X = m
         this.Deflect(1, 0)
       elif hitRight != nil:
-        this.X = arenaW - m
+        X = arenaW - m
         this.Deflect(-1, 0)
       if hitTop != nil:
-        this.Y = m
+        Y = m
         this.Deflect(0, 1)
       elif hitBottom != nil:
-        this.Y = arenaH - m
+        Y = arenaH - m
         this.Deflect(0, -1)
     this.UpdateSegments(dt)
     if world != nil:
@@ -580,35 +580,35 @@ pub class SnakePlayer:
     let nLen = Math.hypot(nx, ny)
     if not Number.isFinite(nLen) or nLen < 0.0001:
       ret
-    nx = nx / nLen
-    ny = ny / nLen
-    let dot = Math.cos(this.Angle) * nx + Math.sin(this.Angle) * ny
+    nx /= nLen
+    ny /= nLen
+    let dot = Math.cos(Angle) * nx + Math.sin(Angle) * ny
     if dot >= 0:
       ret
-    let tx = Math.cos(this.Angle) - dot * nx
-    let ty = Math.sin(this.Angle) - dot * ny
+    let tx = Math.cos(Angle) - dot * nx
+    let ty = Math.sin(Angle) - dot * ny
     let len = Math.sqrt(tx * tx + ty * ty)
     if len > 0.01:
-      this.Angle = Math.atan2(ty / len, tx / len)
-      let tdot = Math.cos(this.TargetAngle) * nx + Math.sin(this.TargetAngle) * ny
+      Angle = Math.atan2(ty / len, tx / len)
+      let tdot = Math.cos(TargetAngle) * nx + Math.sin(TargetAngle) * ny
       if tdot < 0:
-        this.TargetAngle = this.Angle
+        TargetAngle = Angle
     else:
       let tangentX = -ny
       let tangentY = nx
-      this.Angle = Math.atan2(tangentY, tangentX)
-      let tdot = Math.cos(this.TargetAngle) * nx + Math.sin(this.TargetAngle) * ny
+      Angle = Math.atan2(tangentY, tangentX)
+      let tdot = Math.cos(TargetAngle) * nx + Math.sin(TargetAngle) * ny
       if tdot < 0:
-        this.TargetAngle = this.Angle
+        TargetAngle = Angle
   fn deflect(nx:int, ny:int) :
     this.Deflect(nx, ny)
   fn UpdateSegments(_dt:int) :
-    let mut px = Number.isFinite(this.X) and this.X or 480
-    let mut py = Number.isFinite(this.Y) and this.Y or 320
-    let spacing = this.SegmentSpacing
+    let mut px = Number.isFinite(X) and X or 480
+    let mut py = Number.isFinite(Y) and Y or 320
+    let spacing = SegmentSpacing
     let spacingSq = spacing * spacing
-    let n = this.Segments.length
-    let segRadius = this.SegmentRadius
+    let n = Segments.length
+    let segRadius = SegmentRadius
     let invN = n > 0 and 0.4 / n or 0
   fn updateSegments(dt:int) :
     this.UpdateSegments(dt)
@@ -617,91 +617,91 @@ pub class SnakePlayer:
   fn stepIk(dt:int) :
     this.UpdateSegments(dt)
   fn UpdatePassives(dt:int, world:World) :
-    if this.Stats.HpRegen > 0:
-      this.RegenTimer = this.RegenTimer + dt
-      if this.RegenTimer >= 3:
-        this.RegenTimer = this.RegenTimer - 3
+    if Stats.HpRegen > 0:
+      RegenTimer += dt
+      if RegenTimer >= 3:
+        RegenTimer -= 3
         let healAmt = Math.max(1, Math.round(Math))
-        if this.Hp < this.Stats.MaxHp:
+        if this.Hp < Stats.MaxHp:
           this.Heal(healAmt)
-          Services.Fx.AddText(this.X, this.Y - 18, "+" + String(healAmt), "#10b981", 12, false)
-    elif this.ClassId == "emerald":
-      this.RegenTimer = this.RegenTimer + dt
-      if this.RegenTimer >= 6:
-        this.RegenTimer = this.RegenTimer - 6
-        if this.Hp < this.Stats.MaxHp:
+          Services.Fx.AddText(X, Y - 18, "+" + String(healAmt), "#10b981", 12, false)
+    elif ClassId == "emerald":
+      RegenTimer += dt
+      if RegenTimer >= 6:
+        RegenTimer -= 6
+        if this.Hp < Stats.MaxHp:
           this.Heal(1)
-          Services.Fx.AddText(this.X, this.Y - 18, "+1", "#10b981", 12, false)
-    let magmaStacks = this.ClassId == "solar" and 1 or 0 + this.Relics["moltenWake"] ?? 0
+          Services.Fx.AddText(X, Y - 18, "+1", "#10b981", 12, false)
+    let magmaStacks = ClassId == "solar" and 1 or 0 + Relics["moltenWake"] ?? 0
     let hazards = world != nil and world.Hazards or world.hazards or nil
     if magmaStacks > 0 and hazards:
-      this.MagmaTimer = this.MagmaTimer + dt
+      MagmaTimer += dt
       let interval = 0.34 / magmaStacks
-      if this.MagmaTimer >= interval:
-        this.MagmaTimer = 0
+      if MagmaTimer >= interval:
+        MagmaTimer = 0
         if hazards.length < 90:
-          let tail = this.Segments.length > 0 and this.Segments[Math.min(3, this.Segments.length - 1)] or nil
-          let tx = tail != nil and tail.X or this.X
-          let ty = tail != nil and tail.Y or this.Y
-          hazards.push(Hazard(tx, ty, "magma", { Radius: 22, Life: 3.2, Dps: 26 * magmaStacks * this.DamageBonus, Owner: "player" }))
-    if this.Stats.MaxShield > 0:
-      if this.ShieldBrokenTimer > 0:
-        this.ShieldBrokenTimer = Math.max(0, this.ShieldBrokenTimer - dt)
-      if this.Shield < this.Stats.MaxShield and this.ShieldBrokenTimer <= 0:
-        this.ShieldRechargeTimer = this.ShieldRechargeTimer + dt
-        if this.ShieldRechargeTimer >= 8:
-          this.ShieldRechargeTimer = 0
-          this.Shield = this.Stats.MaxShield
-          Services.Fx.RingShockwave(this.X, this.Y, "#3a86ff", 18, 0.035)
+          let tail = Segments.length > 0 and Segments[Math.min(3, Segments.length - 1)] or nil
+          let tx = tail != nil and tail.X or X
+          let ty = tail != nil and tail.Y or Y
+          hazards.push(Hazard(tx, ty, "magma", { Radius: 22, Life: 3.2, Dps: 26 * magmaStacks * DamageBonus, Owner: "player" }))
+    if Stats.MaxShield > 0:
+      if ShieldBrokenTimer > 0:
+        ShieldBrokenTimer = Math.max(0, ShieldBrokenTimer - dt)
+      if Shield < Stats.MaxShield and ShieldBrokenTimer <= 0:
+        ShieldRechargeTimer += dt
+        if ShieldRechargeTimer >= 8:
+          ShieldRechargeTimer = 0
+          Shield = Stats.MaxShield
+          Services.Fx.RingShockwave(X, Y, "#3a86ff", 18, 0.035)
           Services.Sound.PlayShield()
-    if this.Relics["orbitalFangs"] ?? 0 > 0:
-      this.OrbitalAngle = this.OrbitalAngle + dt * 3.4 % MathX.Tau
-    if this.Relics["singularity"] ?? 0 > 0:
-      this.VortexTimer = this.VortexTimer + dt
-    if this.SpitCooldown > 0:
-      this.SpitCooldown = this.SpitCooldown - dt
+    if Relics["orbitalFangs"] ?? 0 > 0:
+      OrbitalAngle += dt * 3.4 % MathX.Tau
+    if Relics["singularity"] ?? 0 > 0:
+      VortexTimer += dt
+    if SpitCooldown > 0:
+      SpitCooldown -= dt
   fn updatePassives(dt:int, world:World) :
     this.UpdatePassives(dt, world)
   fn UpdateCosmetics(dt:int, world:World) :
-    this.BodyPulse = this.BodyPulse + dt * 2.4 % MathX.Tau
-    this.EyeBlinkTimer = this.EyeBlinkTimer - dt
-    if this.EyeBlinkTimer <= 0:
-      this.EyeBlinking = not this.EyeBlinking
-      if this.EyeBlinking != nil:
-        this.EyeBlinkTimer = 0.12
+    BodyPulse += dt * 2.4 % MathX.Tau
+    EyeBlinkTimer -= dt
+    if EyeBlinkTimer <= 0:
+      EyeBlinking = not EyeBlinking
+      if EyeBlinking != nil:
+        EyeBlinkTimer = 0.12
       else:
-        this.EyeBlinkTimer = Rng.Shared.range(2, 5)
+        EyeBlinkTimer = Rng.Shared.range(2, 5)
     let nearest:Option[FoodItem] = world != nil and world.NearestFood or world.nearestFood or nil or nil
     if nearest != nil:
       let nx = nearest.X ?? nearest.x ?? 0
       let ny = nearest.Y ?? nearest.y ?? 0
-      let d = MathX.safeLen(nx - this.X, ny - this.Y)
+      let d = MathX.safeLen(nx - X, ny - Y)
       if d < 80:
-        this.MouthOpen = MathX.clamp(80 - d / 55, 0, 1)
+        MouthOpen = MathX.clamp(80 - d / 55, 0, 1)
       else:
-        this.MouthOpen = 0
+        MouthOpen = 0
     else:
-      this.MouthOpen = this.MouthOpen * Math.max(0, 1 - dt * 6)
-    this.EmberTimer = this.EmberTimer + dt
-    let emberInterval = this.IsDashing != nil and 0.016 or 0.07
-    while this.EmberTimer >= emberInterval:
-      this.EmberTimer = this.EmberTimer - emberInterval
-      Services.Fx.TrailEmbers(this.X + Rng.Shared.range(-5, 5), this.Y + Rng.Shared.range(-5, 5), this.ClassConfig.Color, this.IsDashing != nil and 4 or 2)
-    if this.IsDashing != nil and this.ClassId == "stalker" and this.Afterimages.length < 14:
-      this.Afterimages.push(Afterimage(this.X, this.Y, this.Angle, 0.35, 0.35))
+      MouthOpen *= Math.max(0, 1 - dt * 6)
+    EmberTimer += dt
+    let emberInterval = IsDashing != nil and 0.016 or 0.07
+    while EmberTimer >= emberInterval:
+      EmberTimer -= emberInterval
+      Services.Fx.TrailEmbers(X + Rng.Shared.range(-5, 5), Y + Rng.Shared.range(-5, 5), ClassConfig.Color, IsDashing != nil and 4 or 2)
+    if IsDashing != nil and ClassId == "stalker" and Afterimages.length < 14:
+      Afterimages.push(Afterimage(X, Y, Angle, 0.35, 0.35))
   fn updateCosmetics(dt:int, world:World) :
     this.UpdateCosmetics(dt, world)
   fn TryDash() -> bool:
     if not this.DashReady:
       ret false
-    this.IsDashing = true
-    this.DashTimer = this.DashDuration
-    this.DashCooldownTimer = this.Stats.DashCooldown
-    this.DashHitIds.clear()
-    let invulnWindow = this.ClassId == "stalker" and Math.min(0.4, Math.max(0.05, this.Stats.DashCooldown * 0.5 - this.DashDuration)) or 0.12
-    this.InvulnerableTimer = Math.max(this.InvulnerableTimer, this.DashDuration + invulnWindow)
+    IsDashing = true
+    DashTimer = DashDuration
+    DashCooldownTimer = Stats.DashCooldown
+    DashHitIds.clear()
+    let invulnWindow = ClassId == "stalker" and Math.min(0.4, Math.max(0.05, Stats.DashCooldown * 0.5 - DashDuration)) or 0.12
+    InvulnerableTimer = Math.max(InvulnerableTimer, DashDuration + invulnWindow)
     Services.Sound.PlayDash()
-    Services.Fx.RingShockwave(this.X, this.Y, this.ClassConfig.Color, 14, 0.05)
+    Services.Fx.RingShockwave(X, Y, ClassConfig.Color, 14, 0.05)
     true
   fn tryDash() -> bool = this.TryDash()
   fn TriggerDash() -> bool = this.TryDash()
@@ -713,69 +713,69 @@ pub class SnakePlayer:
       ret combat.ActivateSkill(world)
     if world != nil and world.Game?.Combat:
       ret world.Game.Combat.ActivateSkill(world)
-    let stats = this.Stats
+    let stats = Stats
     let scooldown = stats.SkillCooldown ?? 20
-    this.SkillCooldownTimer = scooldown
+    SkillCooldownTimer = scooldown
     Services.Sound.PlaySkill()
-    let pcol = this.ClassConfig?.Color or "#00f0b5"
-    Services.Fx.RingShockwave(this.X, this.Y, pcol, 24, 0.05)
+    let pcol = ClassConfig?.Color or "#00f0b5"
+    Services.Fx.RingShockwave(X, Y, pcol, 24, 0.05)
     true
   fn triggerSkill(world:World, combat:CombatSystem) -> bool = this.TriggerSkill(world, combat)
   get BaseSegmentHp() -> int:
-    let meta = this.meta ?? this.services?.meta ?? typeof(Services) != "undefined" and Services.Meta and Services.Meta or MetaProgression.Instance
-    let base = this.ClassConfig != nil and this.ClassConfig.BaseStats.MaxHp or 100
+    let meta = meta ?? services?.meta ?? typeof(Services) != "undefined" and Services.Meta and Services.Meta or MetaProgression.Instance
+    let base = ClassConfig != nil and ClassConfig.BaseStats.MaxHp or 100
     Math.max(15, Math.round(Math) + meta and meta.Level("vitality") * 5 or 0)
   get baseSegmentHp = this.BaseSegmentHp
   fn AddGrowth(count:int) :
-    let mut lx = this.X
-    let mut ly = this.Y
-    let mut la = this.Angle
-    if this.Segments.length > 0:
-      let last = this.Segments[this.Segments.length - 1]
+    let mut lx = X
+    let mut ly = Y
+    let mut la = Angle
+    if Segments.length > 0:
+      let last = Segments[Segments.length - 1]
       lx = last.X
       ly = last.Y
       la = last.Angle
     let segHp = this.BaseSegmentHp
-    this.PeakLength = Math.max(this.PeakLength, this.Segments.length)
+    PeakLength = Math.max(PeakLength, Segments.length)
     this.RecalculateMaxHp()
     this.RecalculateHp()
-    this.Stats.MaxHp = this.MaxHp
+    Stats.MaxHp = this.MaxHp
   fn addGrowth(count:int) :
     this.AddGrowth(count)
   fn SetHeadAugment(augmentId:str, level:int) :
-    this.HeadAugment = augmentId
-    this.HeadAugmentLevel = Math.max(0, level)
+    HeadAugment = augmentId
+    HeadAugmentLevel = Math.max(0, level)
     if augmentId == "fangs" and level > 0:
-      this.Stats.BitePower = this.ClassConfig.BaseStats.BitePower * 1 + 0.15 * level
+      Stats.BitePower = ClassConfig.BaseStats.BitePower * 1 + 0.15 * level
   fn setHeadAugment(augmentId:str, level:int) :
     this.SetHeadAugment(augmentId, level)
   fn SetHeadAugmentLevel(augmentId:str, level:int) :
     this.SetHeadAugment(augmentId, level)
   fn setHeadAugmentLevel(augmentId:str, level:int) :
     this.SetHeadAugment(augmentId, level)
-  get SegmentArmorBonus = Math.min(0.5, this.Segments.length * 0.03)
+  get SegmentArmorBonus = Math.min(0.5, Segments.length * 0.03)
   get segmentArmorBonus = this.SegmentArmorBonus
   fn AddBodySegment() :
-    if this.Segments.length >= this.MaxSegments:
+    if Segments.length >= MaxSegments:
       ret
     this.AddGrowth(1)
   fn addBodySegment() :
     this.AddBodySegment()
   fn DamageHead(amount:int, applyArmor:unknown = true, setInvulnerable:unknown = true, silent:unknown = false) -> int:
-    if not this.Alive or setInvulnerable != nil and this.InvulnerableTimer > 0 or not (amount > 0) or not Number.isFinite(amount):
+    if not Alive or setInvulnerable != nil and InvulnerableTimer > 0 or not (amount > 0) or not Number.isFinite(amount):
       ret 0
     let dealt = applyArmor != nil and Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
     let mut toHp = dealt
-    if this.Shield > 0:
-      let toShield = Math.min(this.Shield, dealt)
-      this.Shield = this.Shield - toShield
+    if Shield > 0:
+      let toShield = Math.min(Shield, dealt)
+      Shield -= toShield
       toHp = dealt - toShield
-      if this.Shield <= 0:
-        this.ShieldBrokenTimer = 2.5
-      this.ShieldRechargeTimer = 0
-    while toHp > 0 and this.Segments.length > 0:
-      let lastIdx = this.Segments.length - 1
-      let lastSeg = this.Segments[lastIdx]
+      if Shield <= 0:
+        ShieldBrokenTimer = 2.5
+      ShieldRechargeTimer = 0
+    while toHp > 0 and Segments.length > 0:
+      let lastIdx = Segments.length - 1
+      let lastSeg = Segments[lastIdx]
       if lastSeg.Hp > toHp:
         lastSeg.Hp = lastSeg.Hp - toHp
         lastSeg.HitFlash = 1
@@ -783,61 +783,61 @@ pub class SnakePlayer:
           Services.Fx.Burst(lastSeg.X, lastSeg.Y, "#ff3366", 6, 2, 2)
         toHp = 0
       else:
-        toHp = toHp - lastSeg.Hp
+        toHp -= lastSeg.Hp
         if not silent:
           Services.Fx.Burst(lastSeg.X, lastSeg.Y, "#ff5400", 10, 4, 3)
           Services.Fx.AddText(lastSeg.X, lastSeg.Y - 20, "⚡ LIFE SOURCED", "#ffb703", 14, true)
-        this.Segments.pop()
+        Segments.pop()
         this.RecalculateHp()
         this.RecalculateMaxHp()
-        this.Stats.MaxHp = this.MaxHp
+        Stats.MaxHp = this.MaxHp
     if toHp > 0:
-      this.HeadHp = Math.max(0, this.HeadHp - toHp)
+      HeadHp = Math.max(0, HeadHp - toHp)
     if setInvulnerable != nil:
-      this.InvulnerableTimer = 0.6
-    this.HurtFlash = 1
+      InvulnerableTimer = 0.6
+    HurtFlash = 1
     if not silent:
-      Services.Fx.Burst(this.X, this.Y, "#ff3366", 8, 3, 2)
-      Services.Fx.AddText(this.X, this.Y - 18, "-" + String(Math.floor(Math)), "#ff3366", 16, true)
+      Services.Fx.Burst(X, Y, "#ff3366", 8, 3, 2)
+      Services.Fx.AddText(X, Y - 18, "-" + String(Math.floor(Math)), "#ff3366", 16, true)
       Services.Sound.PlayHit()
-    if this.Segments.length == 0 and this.HeadHp <= 0:
-      this.HeadHp = 0
-      let charges = this.Relics["phoenixCharges"] ?? 0
+    if Segments.length == 0 and HeadHp <= 0:
+      HeadHp = 0
+      let charges = Relics["phoenixCharges"] ?? 0
       if charges > 0:
-        this.Relics["phoenixCharges"] = charges - 1
-        this.HeadHp = this.HeadMaxHp
-        if this.Segments.length == 0:
+        Relics["phoenixCharges"] = charges - 1
+        HeadHp = HeadMaxHp
+        if Segments.length == 0:
           this.AddGrowth(2)
-        this.InvulnerableTimer = 3
-        this.PendingRevive = true
-        Services.Fx.AddText(this.X, this.Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
+        InvulnerableTimer = 3
+        PendingRevive = true
+        Services.Fx.AddText(X, Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
         Services.Sound.PlayRevive()
         this.RecalculateHp()
         ret dealt
-      this.Alive = false
+      Alive = false
     this.RecalculateHp()
     dealt
   fn damageHead(amount:int, applyArmor:unknown = true, setInvulnerable:unknown = true, silent:unknown = false) -> int = this.DamageHead(amount, applyArmor, setInvulnerable, silent)
   fn DamageSegment(segmentIndex:int, amount:int, applyArmor:unknown = true, setInvulnerable:unknown = true, silent:unknown = false) -> int:
-    if not this.Alive or setInvulnerable != nil and this.InvulnerableTimer > 0 or not (amount > 0) or not Number.isFinite(amount):
+    if not Alive or setInvulnerable != nil and InvulnerableTimer > 0 or not (amount > 0) or not Number.isFinite(amount):
       ret 0
-    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= this.Segments.length:
+    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= Segments.length:
       ret 0
-    let seg = this.Segments[segmentIndex]
+    let seg = Segments[segmentIndex]
     let dealt = applyArmor != nil and Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor)) or amount
     let mut toHp = dealt
-    if toHp > 0 and this.Shield > 0:
-      let toShield = Math.min(this.Shield, toHp)
-      this.Shield = this.Shield - toShield
-      toHp = toHp - toShield
-      if this.Shield <= 0:
-        this.ShieldBrokenTimer = 2.5
-      this.ShieldRechargeTimer = 0
+    if toHp > 0 and Shield > 0:
+      let toShield = Math.min(Shield, toHp)
+      Shield -= toShield
+      toHp -= toShield
+      if Shield <= 0:
+        ShieldBrokenTimer = 2.5
+      ShieldRechargeTimer = 0
     seg.Hp = seg.Hp - toHp
     seg.HitFlash = 1
     if setInvulnerable != nil:
-      this.InvulnerableTimer = 0.6
-    this.HurtFlash = 1
+      InvulnerableTimer = 0.6
+    HurtFlash = 1
     if not silent:
       Services.Fx.Burst(seg.X, seg.Y, "#ff3366", 8, 3, 2)
       Services.Fx.AddText(seg.X, seg.Y - 18, "-" + String(Math.floor(Math)), "#ff3366", 16, true)
@@ -849,69 +849,69 @@ pub class SnakePlayer:
     dealt
   fn damageSegment(segmentIndex:int, amount:int, applyArmor:unknown = true, setInvulnerable:unknown = true, silent:unknown = false) -> int = this.DamageSegment(segmentIndex, amount, applyArmor, setInvulnerable, silent)
   fn SeverFrom(index:int) :
-    if typeof(index) != "number" or not Number.isInteger(index) or index < 0 or index >= this.Segments.length:
+    if typeof(index) != "number" or not Number.isInteger(index) or index < 0 or index >= Segments.length:
       ret
-    let severCount = this.Segments.length - index
+    let severCount = Segments.length - index
     if severCount > 10:
       let step = Math.max(1, Math.floor(Math))
-      if this.Segments[index]:
-        Services.Fx.AddText(this.Segments[index].X, this.Segments[index].Y - 24, "⚡ SEVERED (-" + String(severCount) + ")!", "#ff5400", 16, true)
+      if Segments[index]:
+        Services.Fx.AddText(Segments[index].X, Segments[index].Y - 24, "⚡ SEVERED (-" + String(severCount) + ")!", "#ff5400", 16, true)
     else:
       nil
-    if this.Segments[index]:
-      Services.Fx.RingShockwave(this.Segments[index].X, this.Segments[index].Y, "#ff3366", 22, 0.08)
+    if Segments[index]:
+      Services.Fx.RingShockwave(Segments[index].X, Segments[index].Y, "#ff3366", 22, 0.08)
     Services.Sound.PlayExplosion()
-    this.Segments.splice(index)
+    Segments.splice(index)
     this.RecalculateHp()
     this.RecalculateMaxHp()
-    this.Stats.MaxHp = this.MaxHp
-    if this.Segments.length == 0 and this.HeadHp <= 0:
-      let charges = this.Relics["phoenixCharges"] ?? 0
+    Stats.MaxHp = this.MaxHp
+    if Segments.length == 0 and HeadHp <= 0:
+      let charges = Relics["phoenixCharges"] ?? 0
       if charges > 0:
-        this.Relics["phoenixCharges"] = charges - 1
-        this.HeadHp = this.HeadMaxHp
+        Relics["phoenixCharges"] = charges - 1
+        HeadHp = HeadMaxHp
         this.AddGrowth(2)
-        this.InvulnerableTimer = 3
-        this.PendingRevive = true
-        Services.Fx.AddText(this.X, this.Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
+        InvulnerableTimer = 3
+        PendingRevive = true
+        Services.Fx.AddText(X, Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
         Services.Sound.PlayRevive()
         this.RecalculateHp()
         ret
-      this.Alive = false
+      Alive = false
   fn severFrom(index:int) :
     this.SeverFrom(index)
   fn SwapSegments(i:int, j:int) :
     if typeof(i) != "number" or not Number.isInteger(i) or typeof(j) != "number" or not Number.isInteger(j):
       ret
-    if i < 0 or i >= this.Segments.length or j < 0 or j >= this.Segments.length or i == j:
+    if i < 0 or i >= Segments.length or j < 0 or j >= Segments.length or i == j:
       ret
-    let temp = this.Segments[i]
-    this.Segments[i] = this.Segments[j]
-    this.Segments[j] = temp
+    let temp = Segments[i]
+    Segments[i] = Segments[j]
+    Segments[j] = temp
   fn swapSegments(i:int, j:int) :
     this.SwapSegments(i, j)
   fn ReorderSegment(fromIndex:int, toIndex:int) :
     if typeof(fromIndex) != "number" or not Number.isInteger(fromIndex) or typeof(toIndex) != "number" or not Number.isInteger(toIndex):
       ret
-    if fromIndex < 0 or fromIndex >= this.Segments.length or toIndex < 0 or toIndex >= this.Segments.length or fromIndex == toIndex:
+    if fromIndex < 0 or fromIndex >= Segments.length or toIndex < 0 or toIndex >= Segments.length or fromIndex == toIndex:
       ret
-    let item = this.Segments.splice(fromIndex, 1)[0]
-    this.Segments.splice(toIndex, 0, item)
+    let item = Segments.splice(fromIndex, 1)[0]
+    Segments.splice(toIndex, 0, item)
   fn reorderSegment(fromIndex:int, toIndex:int) :
     this.ReorderSegment(fromIndex, toIndex)
   static fn GetAddSegmentCost(currentSegmentCount:int) -> int = 35 + Math.max(0, currentSegmentCount - 2) * 15
   static fn getAddSegmentCost(currentSegmentCount:int) -> int = SnakePlayer.GetAddSegmentCost(currentSegmentCount)
   fn Heal(amount:int) -> int:
-    if not this.Alive or not (amount > 0) or not Number.isFinite(amount):
+    if not Alive or not (amount > 0) or not Number.isFinite(amount):
       ret 0
     let mut remaining = amount
     let mut totalHealed = 0
-    let headMissing = this.HeadMaxHp - this.HeadHp
+    let headMissing = HeadMaxHp - HeadHp
     if headMissing > 0:
       let headAdd = Math.min(headMissing, remaining)
-      this.HeadHp = this.HeadHp + headAdd
-      remaining = remaining - headAdd
-      totalHealed = totalHealed + headAdd
+      HeadHp += headAdd
+      remaining -= headAdd
+      totalHealed += headAdd
     this.RecalculateHp()
     totalHealed
   fn heal(amount:int) -> int = this.Heal(amount)
@@ -923,16 +923,16 @@ pub class SnakePlayer:
   fn GainXp(amount:int) -> bool:
     if not (amount > 0):
       ret false
-    let earned = amount * this.Stats?.XpGain ?? 1
-    this.Xp = this.Xp + earned
-    this.TotalXpCollected = this.TotalXpCollected + earned
+    let earned = amount * (Stats?.XpGain ?? 1)
+    Xp += earned
+    TotalXpCollected += earned
     let mut levelled = false
     let mut guard = 0
-    while this.TotalXpCollected >= this._xpForNextLevel and guard < 50:
-      this.Level = this.Level + 1
-      this._xpForNextLevel = SnakePlayer.CalibratedXpThreshold(this.Level + 1)
-      this.XpToNext = Math.max(1, this._xpForNextLevel - SnakePlayer.CalibratedXpThreshold(this.Level))
-      this.PendingLevelUps = this.PendingLevelUps + 1
+    while TotalXpCollected >= _xpForNextLevel and guard < 50:
+      Level += 1
+      _xpForNextLevel = SnakePlayer.CalibratedXpThreshold(Level + 1)
+      XpToNext = Math.max(1, _xpForNextLevel - SnakePlayer.CalibratedXpThreshold(Level))
+      PendingLevelUps += 1
       levelled = true
     levelled
   fn gainXp(amount:int) -> bool = this.GainXp(amount)
@@ -943,127 +943,127 @@ pub class SnakePlayer:
       ret false
     if cost <= 0:
       ret true
-    if this.Xp < cost:
+    if Xp < cost:
       ret false
-    this.Xp = this.Xp - cost
+    Xp -= cost
     true
   fn spendOuro(cost:int) -> bool = this.SpendOuro(cost)
   fn AddOuro(amount:int) :
     if Number.isFinite(amount) and amount > 0:
-      this.Xp = this.Xp + amount
-      this.TotalXpCollected = this.TotalXpCollected + amount
+      Xp += amount
+      TotalXpCollected += amount
   fn addOuro(amount:int) :
     this.AddOuro(amount)
   fn TakeDamage(amount:int, _source:Option[str] = nil) -> int:
-    if not this.Alive or this.InvulnerableTimer > 0 or not (amount > 0):
+    if not Alive or InvulnerableTimer > 0 or not (amount > 0):
       ret 0
-    if this.HeadModules["cloak"] and this.HeadModules["cloak"] > 0:
-      if Math.random() < 0.15 * this.HeadModules["cloak"]:
-        Services.Fx.AddText(this.X, this.Y - 24, "💨 EVADED!", "#a855f7", 15, true)
-        this.InvulnerableTimer = 0.8
+    if HeadModules["cloak"] and HeadModules["cloak"] > 0:
+      if Math.random() < 0.15 * HeadModules["cloak"]:
+        Services.Fx.AddText(X, Y - 24, "💨 EVADED!", "#a855f7", 15, true)
+        InvulnerableTimer = 0.8
         ret 0
-    if this.HeadModules["reactive"] and this.HeadModules["reactive"] > 0:
-      Services.Fx.RingShockwave(this.X, this.Y, "#f97316", 36, 0.06)
+    if HeadModules["reactive"] and HeadModules["reactive"] > 0:
+      Services.Fx.RingShockwave(X, Y, "#f97316", 36, 0.06)
       Services.Sound.PlayExplosion()
     let dealt = Math.max(1, MathX.roundJs(amount * 1 - this.EffectiveArmor))
     let mut toShield = 0
     let mut toHp = dealt
-    if this.Shield > 0:
-      toShield = Math.min(this.Shield, dealt)
-      this.Shield = this.Shield - toShield
+    if Shield > 0:
+      toShield = Math.min(Shield, dealt)
+      Shield -= toShield
       toHp = dealt - toShield
-      if this.Shield <= 0:
-        this.ShieldBrokenTimer = 2.5
-      this.ShieldRechargeTimer = 0
-    while toHp > 0 and this.Segments.length > 0:
-      let lastIdx = this.Segments.length - 1
-      let lastSeg = this.Segments[lastIdx]
+      if Shield <= 0:
+        ShieldBrokenTimer = 2.5
+      ShieldRechargeTimer = 0
+    while toHp > 0 and Segments.length > 0:
+      let lastIdx = Segments.length - 1
+      let lastSeg = Segments[lastIdx]
       if lastSeg.Hp > toHp:
         lastSeg.Hp = lastSeg.Hp - toHp
         lastSeg.HitFlash = 1
         Services.Fx.Burst(lastSeg.X, lastSeg.Y, "#ff3366", 8, 3, 2)
         toHp = 0
       else:
-        toHp = toHp - lastSeg.Hp
+        toHp -= lastSeg.Hp
         Services.Fx.Burst(lastSeg.X, lastSeg.Y, "#ff5400", 10, 4, 3)
         Services.Fx.AddText(lastSeg.X, lastSeg.Y - 20, "⚡ LIFE SOURCED", "#ffb703", 14, true)
-        this.Segments.pop()
+        Segments.pop()
         this.RecalculateHp()
         this.RecalculateMaxHp()
-        this.Stats.MaxHp = this.MaxHp
+        Stats.MaxHp = this.MaxHp
     if toHp > 0:
-      this.HeadHp = Math.max(0, this.HeadHp - toHp)
-    this.InvulnerableTimer = 0.6
-    this.HurtFlash = 1
+      HeadHp = Math.max(0, HeadHp - toHp)
+    InvulnerableTimer = 0.6
+    HurtFlash = 1
     if toShield > 0 and toHp == 0:
-      Services.Fx.AddText(this.X, this.Y - 22, "-" + String(Math.floor(Math)) + " 🛡️", "#3a86ff", 14, true)
+      Services.Fx.AddText(X, Y - 22, "-" + String(Math.floor(Math)) + " 🛡️", "#3a86ff", 14, true)
       Services.Sound.PlayShield()
     else:
-      Services.Fx.AddText(this.X, this.Y - 22, "-" + String(Math.floor(Math)), "#ff3366", 17, true)
+      Services.Fx.AddText(X, Y - 22, "-" + String(Math.floor(Math)), "#ff3366", 17, true)
       Services.Fx.Shake(9, 12)
       Services.Sound.PlayHit()
-    if this.Segments.length == 0 and this.HeadHp <= 0:
-      let charges = this.Relics["phoenixCharges"] ?? 0
+    if Segments.length == 0 and HeadHp <= 0:
+      let charges = Relics["phoenixCharges"] ?? 0
       if charges > 0:
-        this.Relics["phoenixCharges"] = charges - 1
-        this.HeadHp = this.HeadMaxHp
+        Relics["phoenixCharges"] = charges - 1
+        HeadHp = HeadMaxHp
         this.AddGrowth(2)
-        this.InvulnerableTimer = 3
-        this.PendingRevive = true
-        Services.Fx.AddText(this.X, this.Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
+        InvulnerableTimer = 3
+        PendingRevive = true
+        Services.Fx.AddText(X, Y - 46, "🔥 PHOENIX REBIRTH 🔥", "#ffb703", 22, true)
         Services.Sound.PlayRevive()
         ret 0
-      this.Alive = false
+      Alive = false
     dealt
   fn takeDamage(amount:int, source:Option[str] = nil) -> int = this.TakeDamage(amount, source)
   fn Autotomy(world:World) -> int:
-    if not this.Alive or this.Segments.length <= 1:
+    if not Alive or Segments.length <= 1:
       ret 0
     let cutIndex = Math.max(1, Math.floor(Math))
-    let severedCount = this.Segments.length - cutIndex
-    let cutSegment = this.Segments[cutIndex]
+    let severedCount = Segments.length - cutIndex
+    let cutSegment = Segments[cutIndex]
     if cutSegment != nil:
       Services.Fx.RingShockwave(cutSegment.X, cutSegment.Y, "#ff5400", 32, 0.06)
       let combat = world != nil and world.combat ?? world.Combat ?? world.game?.combat ?? world.Game?.Combat or nil
       if world != nil and combat and typeof(combat.explodeAt) == "function":
-        combat.explodeAt(world, cutSegment.X, cutSegment.Y, 140, 80 * this.DamageBonus, "#ff5400")
+        combat.explodeAt(world, cutSegment.X, cutSegment.Y, 140, 80 * DamageBonus, "#ff5400")
     Services.Sound.PlayExplosion(1.5)
     Services.Fx.Shake(12, 16)
-    this.Segments.splice(cutIndex)
+    Segments.splice(cutIndex)
     this.RecalculateHp()
     this.RecalculateMaxHp()
-    this.Stats.MaxHp = this.MaxHp
-    this.InvulnerableTimer = 1.2
-    this.AgilitySurgeTimer = 4
+    Stats.MaxHp = this.MaxHp
+    InvulnerableTimer = 1.2
+    AgilitySurgeTimer = 4
     severedCount
   fn autotomy(world:World) -> int = this.Autotomy(world)
   fn GetSegmentTangentialSpeed(segmentIndex:int) -> int:
-    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= this.Segments.length:
-      ret this.BaseSpeed
-    this.BaseSpeed + this.EffectiveTurnSpeed * segmentIndex * this.SegmentSpacing
+    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= Segments.length:
+      ret BaseSpeed
+    BaseSpeed + this.EffectiveTurnSpeed * segmentIndex * SegmentSpacing
   fn getSegmentTangentialSpeed(segmentIndex:int) -> int = this.GetSegmentTangentialSpeed(segmentIndex)
   fn GetTailWhipDamageMultiplier(segmentIndex:int) -> int:
     let v = this.GetSegmentTangentialSpeed(segmentIndex)
-    let ratio = v / Math.max(1, this.BaseSpeed)
+    let ratio = v / Math.max(1, BaseSpeed)
     1 + 0.85 * Math.pow(ratio, 2)
   fn getTailWhipDamageMultiplier(segmentIndex:int) -> int = this.GetTailWhipDamageMultiplier(segmentIndex)
   fn ResolveTailWhipCollision(segmentIndex:int, enemy:Enemy | IDamageable | unknown | Record | null) -> int:
-    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= this.Segments.length:
+    if typeof(segmentIndex) != "number" or not Number.isInteger(segmentIndex) or segmentIndex < 0 or segmentIndex >= Segments.length:
       ret 0
     if not enemy or typeof(enemy.takeDamage) != "function":
       ret 0
     let mult = this.GetTailWhipDamageMultiplier(segmentIndex)
     let rawDmg = Math.round(Math)
     let dealt = enemy.takeDamage(rawDmg, this)
-    let seg = this.Segments[segmentIndex]
+    let seg = Segments[segmentIndex]
     if seg != nil and "x" == enemy and typeof(enemy.x) == "number" or "X" == enemy and typeof(enemy.X) == "number":
       let ex = "X" == enemy and typeof(enemy.X) == "number" and enemy.X or "x" == enemy and typeof(enemy.x) == "number" and enemy.x or 0
       let ey = "Y" == enemy and typeof(enemy.Y) == "number" and enemy.Y or "y" == enemy and typeof(enemy.y) == "number" and enemy.y or 0
       let dx = ex - seg.X
       let dy = ey - seg.Y
       let dist = Math.hypot(dx, dy)
-      let nx = dist > 0.001 and Number.isFinite(dist) and dx / dist or Math.cos(this.Angle)
-      let ny = dist > 0.001 and Number.isFinite(dist) and dy / dist or Math.sin(this.Angle)
+      let nx = dist > 0.001 and Number.isFinite(dist) and dx / dist or Math.cos(Angle)
+      let ny = dist > 0.001 and Number.isFinite(dist) and dy / dist or Math.sin(Angle)
       if Number.isFinite(nx) and Number.isFinite(ny):
         if "X" == enemy and typeof(enemy.X) == "number":
           enemy.X = enemy.X + nx * 180
@@ -1083,8 +1083,8 @@ pub class SnakePlayer:
   fn resolveTailWhipCollision(segmentIndex:int, enemy:Enemy | IDamageable | unknown) -> int = this.ResolveTailWhipCollision(segmentIndex, enemy)
   fn GetActiveAlchemicalFusions() -> [str]:
     let installed = Set()
-    if this.HeadModules != nil:
-      for [k, lvl] in Object.entries(this.HeadModules):
+    if HeadModules != nil:
+      for [k, lvl] in Object.entries(HeadModules):
         if lvl > 0:
           installed.add(k.toLowerCase())
     let active:[str] = []

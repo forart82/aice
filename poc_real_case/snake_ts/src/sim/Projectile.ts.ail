@@ -18,105 +18,105 @@ pub class Projectile:
   Color:str, Life:int, MaxLife:int, Homing:int, Pierce:int
   Burn:int, Chill:int, Trail:bool, Wobble:int, Dead:bool
   HitIds: Option[Set[int]] = nil
-  fn get_id() = this.Id; fn set_id(v) = this.Id = v
-  fn get_x() = this.X; fn set_x(v) = this.X = v
-  fn get_y() = this.Y; fn set_y(v) = this.Y = v
-  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
-  fn get_speed() = this.Speed; fn set_speed(v) = this.Speed = v
-  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
-  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
-  fn get_damage() = this.Damage; fn set_damage(v) = this.Damage = v
-  fn get_source() = this.Source; fn set_source(v) = this.Source = v
-  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
-  fn get_color() = this.Color; fn set_color(v) = this.Color = v
-  fn get_life() = this.Life; fn set_life(v) = this.Life = v
-  fn get_maxLife() = this.MaxLife; fn set_maxLife(v) = this.MaxLife = v
-  fn get_homing() = this.Homing; fn set_homing(v) = this.Homing = v
-  fn get_pierce() = this.Pierce; fn set_pierce(v) = this.Pierce = v
-  fn get_burn() = this.Burn; fn set_burn(v) = this.Burn = v
-  fn get_chill() = this.Chill; fn set_chill(v) = this.Chill = v
-  fn get_trail() = this.Trail; fn set_trail(v) = this.Trail = v
-  fn get_wobble() = this.Wobble; fn set_wobble(v) = this.Wobble = v
-  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
-  fn get_hitIds() = this.HitIds; fn set_hitIds(v) = this.HitIds = v
+  fn get_id() = Id; fn set_id(v) = Id = v
+  fn get_x() = X; fn set_x(v) = X = v
+  fn get_y() = Y; fn set_y(v) = Y = v
+  fn get_angle() = Angle; fn set_angle(v) = Angle = v
+  fn get_speed() = Speed; fn set_speed(v) = Speed = v
+  fn get_vx() = Vx; fn set_vx(v) = Vx = v
+  fn get_vy() = Vy; fn set_vy(v) = Vy = v
+  fn get_damage() = Damage; fn set_damage(v) = Damage = v
+  fn get_source() = Source; fn set_source(v) = Source = v
+  fn get_radius() = Radius; fn set_radius(v) = Radius = v
+  fn get_color() = Color; fn set_color(v) = Color = v
+  fn get_life() = Life; fn set_life(v) = Life = v
+  fn get_maxLife() = MaxLife; fn set_maxLife(v) = MaxLife = v
+  fn get_homing() = Homing; fn set_homing(v) = Homing = v
+  fn get_pierce() = Pierce; fn set_pierce(v) = Pierce = v
+  fn get_burn() = Burn; fn set_burn(v) = Burn = v
+  fn get_chill() = Chill; fn set_chill(v) = Chill = v
+  fn get_trail() = Trail; fn set_trail(v) = Trail = v
+  fn get_wobble() = Wobble; fn set_wobble(v) = Wobble = v
+  fn get_dead() = Dead; fn set_dead(v) = Dead = v
+  fn get_hitIds() = HitIds; fn set_hitIds(v) = HitIds = v
   fn constructor(xOrOpts:int | unknown, y:unknown = 0, angle:unknown = 0, speed:unknown = 0, damage:unknown = 0, source:unknown = "player", color:str, opts:ProjectileOpts = {  }):
-    this.Id = -Projectile._projectileId
+    Id = -Projectile._projectileId
     if typeof(xOrOpts) == "object" and xOrOpts != nil:
       let o = xOrOpts
-      this.X = o.X ?? o.x ?? 0
-      this.Y = o.Y ?? o.y ?? 0
+      X = o.X ?? o.x ?? 0
+      Y = o.Y ?? o.y ?? 0
       let spd = o.Speed ?? o.speed ?? o.Vx != undefined and o.Vy != undefined and MathX.hypot(o.Vx, o.Vy) or o.vx != undefined and o.vy != undefined and MathX.hypot(o.vx, o.vy) or 0
-      this.Speed = spd
+      Speed = spd
       let ang = o.Angle ?? o.angle ?? o.Vx != undefined and o.Vy != undefined and Math.atan2(o.Vy, o.Vx) or o.vx != undefined and o.vy != undefined and Math.atan2(o.vy, o.vx) or 0
-      this.Angle = ang
-      this.Vx = o.Vx ?? o.vx ?? Math.cos(this.Angle) * this.Speed
-      this.Vy = o.Vy ?? o.vy ?? Math.sin(this.Angle) * this.Speed
-      this.Damage = o.Damage ?? o.damage ?? 0
+      Angle = ang
+      Vx = o.Vx ?? o.vx ?? Math.cos(Angle) * Speed
+      Vy = o.Vy ?? o.vy ?? Math.sin(Angle) * Speed
+      Damage = o.Damage ?? o.damage ?? 0
       if o.Source ?? o.source == "player":
-        this.Source = "player"
+        Source = "player"
       else:
-        this.Source = "enemy"
-      this.Radius = Projectile.or(o.Radius ?? o.radius, this.Source == "player" and 5 or 6)
-      this.Color = o.Color ?? o.color or this.Source == "player" and "#00f0b5" or "#ff0054"
-      this.Life = Projectile.or(o.Life ?? o.life, 4)
-      this.MaxLife = this.Life
-      this.Homing = Projectile.or(o.Homing ?? o.homing, 0)
-      this.Pierce = Projectile.or(o.Pierce ?? o.pierce, 0)
-      this.Burn = Projectile.or(o.Burn ?? o.burn, 0)
-      this.Chill = Projectile.or(o.Chill ?? o.chill, 0)
+        Source = "enemy"
+      Radius = Projectile.or(o.Radius ?? o.radius, Source == "player" and 5 or 6)
+      Color = o.Color ?? o.color or Source == "player" and "#00f0b5" or "#ff0054"
+      Life = Projectile.or(o.Life ?? o.life, 4)
+      MaxLife = Life
+      Homing = Projectile.or(o.Homing ?? o.homing, 0)
+      Pierce = Projectile.or(o.Pierce ?? o.pierce, 0)
+      Burn = Projectile.or(o.Burn ?? o.burn, 0)
+      Chill = Projectile.or(o.Chill ?? o.chill, 0)
       let tr = o.Trail ?? o.trail
-      this.Trail = tr != false
-      this.Wobble = Projectile.or(o.Wobble ?? o.wobble, 0)
+      Trail = tr != false
+      Wobble = Projectile.or(o.Wobble ?? o.wobble, 0)
     else:
-      this.X = xOrOpts
-      this.Y = y
-      this.Angle = angle
-      this.Speed = speed
-      this.Vx = Math.cos(angle) * speed
-      this.Vy = Math.sin(angle) * speed
-      this.Damage = damage
+      X = xOrOpts
+      Y = y
+      Angle = angle
+      Speed = speed
+      Vx = Math.cos(angle) * speed
+      Vy = Math.sin(angle) * speed
+      Damage = damage
       if source == "player":
-        this.Source = "player"
+        Source = "player"
       else:
-        this.Source = "enemy"
-      this.Radius = Projectile.or(opts.Radius ?? opts.radius, this.Source == "player" and 5 or 6)
+        Source = "enemy"
+      Radius = Projectile.or(opts.Radius ?? opts.radius, Source == "player" and 5 or 6)
       if color != nil and color.length > 0:
-        this.Color = color
-      elif this.Source == "player":
-        this.Color = "#00f0b5"
-      this.Life = Projectile.or(opts.Life ?? opts.life, 4)
-      this.MaxLife = this.Life
-      this.Homing = Projectile.or(opts.Homing ?? opts.homing, 0)
-      this.Pierce = Projectile.or(opts.Pierce ?? opts.pierce, 0)
-      this.Burn = Projectile.or(opts.Burn ?? opts.burn, 0)
-      this.Chill = Projectile.or(opts.Chill ?? opts.chill, 0)
+        Color = color
+      elif Source == "player":
+        Color = "#00f0b5"
+      Life = Projectile.or(opts.Life ?? opts.life, 4)
+      MaxLife = Life
+      Homing = Projectile.or(opts.Homing ?? opts.homing, 0)
+      Pierce = Projectile.or(opts.Pierce ?? opts.pierce, 0)
+      Burn = Projectile.or(opts.Burn ?? opts.burn, 0)
+      Chill = Projectile.or(opts.Chill ?? opts.chill, 0)
       let tr = opts.Trail ?? opts.trail
-      this.Trail = tr != false
-      this.Wobble = Projectile.or(opts.Wobble ?? opts.wobble, 0)
-    this.Dead = false
-    this.HitIds = nil
+      Trail = tr != false
+      Wobble = Projectile.or(opts.Wobble ?? opts.wobble, 0)
+    Dead = false
+    HitIds = nil
   static fn or(v:Option[int], fallback:int) -> int:
     if v != undefined and not Number.isNaN(v):
       v
     else:
       fallback
   fn Update(dt:int, target:Option[Vec2]) :
-    if this.Homing > 0 and target:
+    if Homing > 0 and target:
       let tx = target.X ?? target.x
       let ty = target.Y ?? target.y
       if typeof(tx) == "number" and typeof(ty) == "number" and Number.isFinite(tx) and Number.isFinite(ty):
-        let desired = Math.atan2(ty - this.Y, tx - this.X)
-        this.Angle = this.Angle + MathX.clamp(MathX.angleDelta(this.Angle, desired), -this.Homing * dt, this.Homing * dt)
-        this.Vx = Math.cos(this.Angle) * this.Speed
-        this.Vy = Math.sin(this.Angle) * this.Speed
-    if this.Wobble > 0:
-      let off = Math.sin(this.MaxLife - this.Life * 12) * this.Wobble
-      this.X = this.X + Math.cos(this.Angle + Math.PI / 2) * off * dt
-      this.Y = this.Y + Math.sin(this.Angle + Math.PI / 2) * off * dt
-    this.X = this.X + this.Vx * dt
-    this.Y = this.Y + this.Vy * dt
-    this.Life = this.Life - dt
-    if this.Life <= 0:
-      this.Dead = true
+        let desired = Math.atan2(ty - Y, tx - X)
+        Angle += MathX.clamp(MathX.angleDelta(Angle, desired), -Homing * dt, Homing * dt)
+        Vx = Math.cos(Angle) * Speed
+        Vy = Math.sin(Angle) * Speed
+    if Wobble > 0:
+      let off = Math.sin(MaxLife - Life * 12) * Wobble
+      X += Math.cos(Angle + Math.PI / 2) * off * dt
+      Y += Math.sin(Angle + Math.PI / 2) * off * dt
+    X += Vx * dt
+    Y += Vy * dt
+    Life -= dt
+    if Life <= 0:
+      Dead = true
   fn update(dt:int, target:Option[Vec2]) :
     this.Update(dt, target)

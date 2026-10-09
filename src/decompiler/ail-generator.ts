@@ -374,7 +374,7 @@ export class AilGenerator {
         break;
       }
       case "AssignStmt": {
-        this.writeLine(`${this.formatExpr(stmt.target)} = ${this.formatExpr(stmt.value)}`);
+        this.writeLine(`${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`);
         break;
       }
       case "ReturnStmt": {
@@ -612,7 +612,7 @@ export class AilGenerator {
         return `fn(${params}) = nil`;
       }
       case "AssignExpr":
-        return `${this.formatExpr(expr.target)} = ${this.formatExpr(expr.value)}`;
+        return `${this.formatExpr(expr.target)} ${expr.op ?? "="} ${this.formatExpr(expr.value)}`;
     }
   }
 

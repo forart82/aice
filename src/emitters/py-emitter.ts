@@ -343,7 +343,7 @@ export class PythonEmitter {
       case "AssignStmt": {
         const targetStr = this.emitExpr(stmt.target);
         const valStr = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${targetStr} = ${valStr}`);
+        this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
         break;
       }
       case "ReturnStmt": {
@@ -431,7 +431,7 @@ export class PythonEmitter {
         return expr.name;
 
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} = ${this.emitExpr(expr.value)}`;
+        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
 
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);

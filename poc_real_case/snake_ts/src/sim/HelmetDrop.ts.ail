@@ -9,33 +9,33 @@ pub class HelmetDrop:
   Helmet: HelmetDef
   Rarity: HelmetRarity
   Color:str, Pulse:int, SpawnScale = 0, Life = 0, Dead = false
-  fn get_x() = this.X; fn set_x(v) = this.X = v
-  fn get_y() = this.Y; fn set_y(v) = this.Y = v
-  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
-  fn get_helmet() = this.Helmet; fn set_helmet(v) = this.Helmet = v
-  fn get_rarity() = this.Rarity; fn set_rarity(v) = this.Rarity = v
-  fn get_color() = this.Color; fn set_color(v) = this.Color = v
-  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
-  fn get_pulse() = this.Pulse; fn set_pulse(v) = this.Pulse = v
-  fn get_spawnScale() = this.SpawnScale; fn set_spawnScale(v) = this.SpawnScale = v
+  fn get_x() = X; fn set_x(v) = X = v
+  fn get_y() = Y; fn set_y(v) = Y = v
+  fn get_radius() = Radius; fn set_radius(v) = Radius = v
+  fn get_helmet() = Helmet; fn set_helmet(v) = Helmet = v
+  fn get_rarity() = Rarity; fn set_rarity(v) = Rarity = v
+  fn get_color() = Color; fn set_color(v) = Color = v
+  fn get_dead() = Dead; fn set_dead(v) = Dead = v
+  fn get_pulse() = Pulse; fn set_pulse(v) = Pulse = v
+  fn get_spawnScale() = SpawnScale; fn set_spawnScale(v) = SpawnScale = v
   fn constructor(x:int, y:int, helmet:HelmetDef):
-    this.X = x
-    this.Y = y
-    this.Helmet = helmet
-    this.Rarity = helmet.Rarity or helmet.rarity or "common".toLowerCase()
-    this.Color = HELMET_RARITY_COLORS[this.Rarity] or "#ffd166"
-    this.Vx = Rng.Shared.range(-35, 35)
-    this.Vy = Rng.Shared.range(-35, 35)
-    this.Pulse = Rng.Shared.angle()
+    X = x
+    Y = y
+    Helmet = helmet
+    Rarity = helmet.Rarity or helmet.rarity or "common".toLowerCase()
+    Color = HELMET_RARITY_COLORS[Rarity] or "#ffd166"
+    Vx = Rng.Shared.range(-35, 35)
+    Vy = Rng.Shared.range(-35, 35)
+    Pulse = Rng.Shared.angle()
   fn Update(dt:int) :
-    this.Pulse = this.Pulse + dt * 3.6
-    this.Life = this.Life + dt
-    if this.SpawnScale < 1:
-      this.SpawnScale = Math.min(1, this.SpawnScale + dt * 4)
-    this.X = this.X + this.Vx * dt
-    this.Y = this.Y + this.Vy * dt
+    Pulse += dt * 3.6
+    Life += dt
+    if SpawnScale < 1:
+      SpawnScale = Math.min(1, SpawnScale + dt * 4)
+    X += Vx * dt
+    Y += Vy * dt
     let drag = MathX.decay(0.9, dt)
-    this.Vx = this.Vx * drag
-    this.Vy = this.Vy * drag
+    Vx *= drag
+    Vy *= drag
   fn update(dt:int) :
     this.Update(dt)

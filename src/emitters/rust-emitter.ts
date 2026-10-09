@@ -265,7 +265,7 @@ export class RustEmitter {
       case "AssignStmt": {
         const target = this.emitExpr(stmt.target);
         const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} = ${value};`);
+        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
         break;
       }
       case "ReturnStmt": {
@@ -389,7 +389,7 @@ export class RustEmitter {
         return this.toSnakeCase(expr.name);
       }
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} = ${this.emitExpr(expr.value)}`;
+        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);

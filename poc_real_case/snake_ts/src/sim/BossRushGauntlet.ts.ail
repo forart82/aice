@@ -17,37 +17,37 @@ pub const THE_NINTH_HELMET: unknown = { Id: "helm_ouroboros_ascension_9th", id: 
 pub class BossRushGauntlet:
   state: BossRushGauntletState
   trackedBosses: [unknown] = []
-  fn get_State() = this.state
-  fn get_active() = this.state.active; fn set_active(v) = this.state.active = v
-  fn get_Active() = this.state.active; fn set_Active(v) = this.state.active = v
-  fn get_waveIndex() = this.state.waveIndex; fn set_waveIndex(v) = this.state.waveIndex = v
-  fn get_WaveIndex() = this.state.waveIndex; fn set_WaveIndex(v) = this.state.waveIndex = v
-  fn get_waveTimer() = this.state.waveTimer; fn set_waveTimer(v) = this.state.waveTimer = v
-  fn get_WaveTimer() = this.state.waveTimer; fn set_WaveTimer(v) = this.state.waveTimer = v
-  fn get_bossesSpawned() = this.state.bossesSpawned; fn set_bossesSpawned(v) = this.state.bossesSpawned = v
-  fn get_BossesSpawned() = this.state.bossesSpawned; fn set_BossesSpawned(v) = this.state.bossesSpawned = v
-  fn get_bossesDefeated() = this.state.bossesDefeated; fn set_bossesDefeated(v) = this.state.bossesDefeated = v
-  fn get_BossesDefeated() = this.state.bossesDefeated; fn set_BossesDefeated(v) = this.state.bossesDefeated = v
-  fn get_totalBosses() = this.state.totalBosses; fn set_totalBosses(v) = this.state.totalBosses = v
-  fn get_TotalBosses() = this.state.totalBosses; fn set_TotalBosses(v) = this.state.totalBosses = v
-  fn get_allSpawned() = this.state.allSpawned; fn set_allSpawned(v) = this.state.allSpawned = v
-  fn get_AllSpawned() = this.state.allSpawned; fn set_AllSpawned(v) = this.state.allSpawned = v
-  fn get_victory() = this.state.victory; fn set_victory(v) = this.state.victory = v
-  fn get_Victory() = this.state.victory; fn set_Victory(v) = this.state.victory = v
-  fn get_defeat() = this.state.defeat; fn set_defeat(v) = this.state.defeat = v
-  fn get_Defeat() = this.state.defeat; fn set_Defeat(v) = this.state.defeat = v
+  fn get_State() = state
+  fn get_active() = state.active; fn set_active(v) = state.active = v
+  fn get_Active() = state.active; fn set_Active(v) = state.active = v
+  fn get_waveIndex() = state.waveIndex; fn set_waveIndex(v) = state.waveIndex = v
+  fn get_WaveIndex() = state.waveIndex; fn set_WaveIndex(v) = state.waveIndex = v
+  fn get_waveTimer() = state.waveTimer; fn set_waveTimer(v) = state.waveTimer = v
+  fn get_WaveTimer() = state.waveTimer; fn set_WaveTimer(v) = state.waveTimer = v
+  fn get_bossesSpawned() = state.bossesSpawned; fn set_bossesSpawned(v) = state.bossesSpawned = v
+  fn get_BossesSpawned() = state.bossesSpawned; fn set_BossesSpawned(v) = state.bossesSpawned = v
+  fn get_bossesDefeated() = state.bossesDefeated; fn set_bossesDefeated(v) = state.bossesDefeated = v
+  fn get_BossesDefeated() = state.bossesDefeated; fn set_BossesDefeated(v) = state.bossesDefeated = v
+  fn get_totalBosses() = state.totalBosses; fn set_totalBosses(v) = state.totalBosses = v
+  fn get_TotalBosses() = state.totalBosses; fn set_TotalBosses(v) = state.totalBosses = v
+  fn get_allSpawned() = state.allSpawned; fn set_allSpawned(v) = state.allSpawned = v
+  fn get_AllSpawned() = state.allSpawned; fn set_AllSpawned(v) = state.allSpawned = v
+  fn get_victory() = state.victory; fn set_victory(v) = state.victory = v
+  fn get_Victory() = state.victory; fn set_Victory(v) = state.victory = v
+  fn get_defeat() = state.defeat; fn set_defeat(v) = state.defeat = v
+  fn get_Defeat() = state.defeat; fn set_Defeat(v) = state.defeat = v
   fn constructor():
-    this.state = { active: false, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
+    state = { active: false, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
   fn start(engine:GameEngine) :
-    this.state = { active: true, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
-    this.trackedBosses = []
+    state = { active: true, waveIndex: 0, waveTimer: 8, bossesSpawned: 0, bossesDefeated: 0, totalBosses: 8, allSpawned: false, victory: false, defeat: false }
+    trackedBosses = []
     if engine != nil:
       if Array.isArray(engine.ActiveBosses):
         engine.ActiveBosses.length = 0
       this.spawnBossForWave(0, engine)
-      this.state.bossesSpawned = 1
-      this.state.waveIndex = 0
-      this.state.waveTimer = 8
+      state.bossesSpawned = 1
+      state.waveIndex = 0
+      state.waveTimer = 8
       if typeof(engine.Banner) == "function":
         engine.Banner("⚡ ALL-BOSS GAUNTLET: WAVE 1/8 [CENTIPEDE] ⚡", 2.5)
       if engine.Sound?.PlayBossAlert != nil:
@@ -61,13 +61,13 @@ pub class BossRushGauntlet:
     let arenaW = engine?.ArenaW ?? engine?.arenaW ?? 1800
     let arenaH = engine?.ArenaH ?? engine?.arenaH ?? 1800
     let floor = engine?.CurrentFloor ?? engine?.currentFloor ?? 8
-    let spreadFraction = safeIdx + 1 / this.state.totalBosses + 1
+    let spreadFraction = safeIdx + 1 / state.totalBosses + 1
     let startX = arenaW * 0.15 + spreadFraction * 0.7
     let startY = arenaH * 0.22 + safeIdx % 2 * 0.12
     let boss = nil
     if Array.isArray(engine?.ActiveBosses):
       engine.ActiveBosses.push(boss)
-    this.trackedBosses.push({ boss, dead: false })
+    trackedBosses.push({ boss, dead: false })
     if engine?.Fx?.RingShockwave != nil:
       engine.Fx.RingShockwave(boss.X, boss.Y, boss.Color, 90, 0.02)
       engine.Fx.Flash(boss.Color, 0.25, 0.35)
@@ -79,39 +79,39 @@ pub class BossRushGauntlet:
       engine.Sound.PlayBossAlert()
     boss
   fn update(dt:int, engine:GameEngine) :
-    if not this.state.active or this.state.victory or this.state.defeat:
+    if not state.active or state.victory or state.defeat:
       ret
     let player = engine?.Player ?? engine?.player
     if player != nil and player.Alive == false or player.alive == false or player.Hp <= 0 or player.hp <= 0:
       this.triggerDefeat(engine)
       ret
-    if this.state.bossesSpawned < this.state.totalBosses:
-      this.state.waveTimer = this.state.waveTimer - dt
-      if this.state.waveTimer <= 0:
-        let nextIdx = this.state.bossesSpawned
-        this.state.waveIndex = nextIdx
+    if state.bossesSpawned < state.totalBosses:
+      state.waveTimer = state.waveTimer - dt
+      if state.waveTimer <= 0:
+        let nextIdx = state.bossesSpawned
+        state.waveIndex = nextIdx
         this.spawnBossForWave(nextIdx, engine)
-        this.state.bossesSpawned = this.state.bossesSpawned + 1
-        if this.state.bossesSpawned >= this.state.totalBosses:
-          this.state.allSpawned = true
-          this.state.waveTimer = 0
+        state.bossesSpawned = state.bossesSpawned + 1
+        if state.bossesSpawned >= state.totalBosses:
+          state.allSpawned = true
+          state.waveTimer = 0
         else:
-          this.state.waveTimer = 8
-    for tracked in this.trackedBosses:
+          state.waveTimer = 8
+    for tracked in trackedBosses:
       if not tracked.dead:
         if tracked.boss.Dead or tracked.boss.dead or tracked.boss.Hp <= 0 or tracked.boss.hp <= 0:
           tracked.dead = true
           tracked.boss.Dead = true
-          this.state.bossesDefeated = this.state.bossesDefeated + 1
+          state.bossesDefeated = state.bossesDefeated + 1
           if typeof(engine?.OnBossDefeated) == "function":
             engine.OnBossDefeated(tracked.boss)
-    if this.state.bossesDefeated >= this.state.totalBosses:
+    if state.bossesDefeated >= state.totalBosses:
       this.triggerVictory(engine)
   fn Update(dt:int, engine:GameEngine) :
     this.update(dt, engine)
   fn triggerDefeat(engine:GameEngine) :
-    this.state.defeat = true
-    this.state.active = false
+    state.defeat = true
+    state.active = false
     let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
     if meta != nil and typeof(meta.resetUniqueHelmets) == "function":
       meta.resetUniqueHelmets()
@@ -124,8 +124,8 @@ pub class BossRushGauntlet:
   fn TriggerDefeat(engine:GameEngine) :
     this.triggerDefeat(engine)
   fn triggerVictory(engine:GameEngine) :
-    this.state.victory = true
-    this.state.active = false
+    state.victory = true
+    state.active = false
     let meta = engine?.meta ?? engine?.Meta ?? MetaProgression.instance
     if meta != nil:
       meta.Has9thHelmet = true

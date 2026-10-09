@@ -6,6 +6,7 @@
  */
 
 import type {
+  AssignOp,
   BinaryOp,
   Block,
   ClassDecl,
@@ -94,6 +95,11 @@ const PRECEDENCES: Partial<Record<TokenKind, Precedence>> = {
   QUESTION_DOT: Precedence.POSTFIX,
   LBRACKET: Precedence.POSTFIX,
   EQUAL: Precedence.ASSIGN,
+  PLUS_EQUAL: Precedence.ASSIGN,
+  MINUS_EQUAL: Precedence.ASSIGN,
+  STAR_EQUAL: Precedence.ASSIGN,
+  SLASH_EQUAL: Precedence.ASSIGN,
+  PERCENT_EQUAL: Precedence.ASSIGN,
 };
 
 export class Parser {
@@ -1427,18 +1433,27 @@ export class Parser {
       return {
         kind: "AssignStmt",
         target: expr.target,
+        op: expr.op,
         value: expr.value,
         span: expr.span,
       };
     }
 
-    if (this.check("EQUAL")) {
-      this.advance(); // consume '='
+    if (
+      this.check("EQUAL") ||
+      this.check("PLUS_EQUAL") ||
+      this.check("MINUS_EQUAL") ||
+      this.check("STAR_EQUAL") ||
+      this.check("SLASH_EQUAL") ||
+      this.check("PERCENT_EQUAL")
+    ) {
+      const op = this.advance().value as AssignOp;
       const val = this.parseExpr();
       this.consumeStatementSeparator();
       return {
         kind: "AssignStmt",
         target: expr,
+        op,
         value: val,
         span: mergeSpans(expr.span, val.span),
       };
@@ -2020,13 +2035,21 @@ export class Parser {
       };
     }
 
-    // 5. Assignment Expression: target = value
-    if (tok.kind === "EQUAL") {
-      this.advance(); // consume '='
+    // 5. Assignment Expression: target = value / target += value etc.
+    if (
+      tok.kind === "EQUAL" ||
+      tok.kind === "PLUS_EQUAL" ||
+      tok.kind === "MINUS_EQUAL" ||
+      tok.kind === "STAR_EQUAL" ||
+      tok.kind === "SLASH_EQUAL" ||
+      tok.kind === "PERCENT_EQUAL"
+    ) {
+      const op = this.advance().value as AssignOp;
       const value = this.parseExpr(Precedence.ASSIGN);
       return {
         kind: "AssignExpr",
         target: left,
+        op,
         value,
         span: mergeSpans(left.span, value.span),
       };

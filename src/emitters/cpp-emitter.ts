@@ -317,7 +317,7 @@ export class CppEmitter {
       case "AssignStmt": {
         const target = this.emitExpr(stmt.target);
         const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} = ${value};`);
+        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
         break;
       }
       case "ReturnStmt": {
@@ -480,7 +480,7 @@ export class CppEmitter {
       case "AssignExpr": {
         const target = this.emitExpr(expr.target);
         const val = this.emitExpr(expr.value);
-        return `(${target} = ${val})`;
+        return `(${target} ${expr.op ?? "="} ${val})`;
       }
       default:
         return "/* expr */";

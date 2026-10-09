@@ -24,61 +24,61 @@ pub class SpatialHashGrid:
   _itemCount: Int32Array
   _maxRadius: Float64Array
   fn constructor(cellSize:unknown = 48, maxArenaW:unknown = 3200, maxArenaH:unknown = 2400):
-    this._cellSize = cellSize
-    this._invCellSize = 1 / cellSize
-    this._cols = Math.ceil(Math) + 2
-    this._rows = Math.ceil(Math) + 2
-    this._maxCells = this._cols * this._rows
-    this._gridHead = Int32Array(SPATIAL_LAYER_COUNT * this._maxCells)
-    this._gridHead.fill(-1)
-    this._capacities = Int32Array([2048, 512, 2048, 512, 1024])
-    this._itemCount = Int32Array(SPATIAL_LAYER_COUNT)
-    this._maxRadius = Float64Array(SPATIAL_LAYER_COUNT)
-    this._gridNext = Array(SPATIAL_LAYER_COUNT)
-    this._posX = Array(SPATIAL_LAYER_COUNT)
-    this._posY = Array(SPATIAL_LAYER_COUNT)
-    this._radius = Array(SPATIAL_LAYER_COUNT)
-  fn get_cellSize() = this._cellSize
-  fn get_cols() = this._cols
-  fn get_rows() = this._rows
-  fn get_maxCells() = this._maxCells
+    _cellSize = cellSize
+    _invCellSize = 1 / cellSize
+    _cols = Math.ceil(Math) + 2
+    _rows = Math.ceil(Math) + 2
+    _maxCells = _cols * _rows
+    _gridHead = Int32Array(SPATIAL_LAYER_COUNT * _maxCells)
+    _gridHead.fill(-1)
+    _capacities = Int32Array([2048, 512, 2048, 512, 1024])
+    _itemCount = Int32Array(SPATIAL_LAYER_COUNT)
+    _maxRadius = Float64Array(SPATIAL_LAYER_COUNT)
+    _gridNext = Array(SPATIAL_LAYER_COUNT)
+    _posX = Array(SPATIAL_LAYER_COUNT)
+    _posY = Array(SPATIAL_LAYER_COUNT)
+    _radius = Array(SPATIAL_LAYER_COUNT)
+  fn get_cellSize() = _cellSize
+  fn get_cols() = _cols
+  fn get_rows() = _rows
+  fn get_maxCells() = _maxCells
   fn get_layerCount() = SPATIAL_LAYER_COUNT
-  fn getCapacity(layer:SpatialLayer) -> int = this._capacities[layer] ?? 0
-  fn getItemCount(layer:SpatialLayer) -> int = this._itemCount[layer] ?? 0
+  fn getCapacity(layer:SpatialLayer) -> int = _capacities[layer] ?? 0
+  fn getItemCount(layer:SpatialLayer) -> int = _itemCount[layer] ?? 0
   fn getTotalItemCount() -> int:
     let mut total = 0
     total
-  fn getMaxRadius(layer:SpatialLayer) -> int = this._maxRadius[layer] ?? 0
+  fn getMaxRadius(layer:SpatialLayer) -> int = _maxRadius[layer] ?? 0
   fn clear() :
-    this._gridHead.fill(-1)
-    this._itemCount.fill(0)
-    this._maxRadius.fill(0)
+    _gridHead.fill(-1)
+    _itemCount.fill(0)
+    _maxRadius.fill(0)
   fn clearLayer(layer:SpatialLayer) :
     if layer < 0 or layer >= SPATIAL_LAYER_COUNT:
       ret
-    let offset = layer * this._maxCells
-    this._gridHead.fill(-1, offset, offset + this._maxCells)
-    this._itemCount[layer] = 0
-    this._maxRadius[layer] = 0
+    let offset = layer * _maxCells
+    _gridHead.fill(-1, offset, offset + _maxCells)
+    _itemCount[layer] = 0
+    _maxRadius[layer] = 0
   fn _ensureCapacity(layer:int, minCapacity:int) :
-    let current = this._capacities[layer]
+    let current = _capacities[layer]
     if minCapacity <= current:
       ret
     let nextCap = Math.max(minCapacity * 2, current * 2)
-    this._capacities[layer] = nextCap
+    _capacities[layer] = nextCap
     let newNext = Int32Array(nextCap)
-    newNext.set(this._gridNext[layer])
+    newNext.set(_gridNext[layer])
     newNext.fill(-1, current)
-    this._gridNext[layer] = newNext
+    _gridNext[layer] = newNext
     let newPosX = Float64Array(nextCap)
-    newPosX.set(this._posX[layer])
-    this._posX[layer] = newPosX
+    newPosX.set(_posX[layer])
+    _posX[layer] = newPosX
     let newPosY = Float64Array(nextCap)
-    newPosY.set(this._posY[layer])
-    this._posY[layer] = newPosY
+    newPosY.set(_posY[layer])
+    _posY[layer] = newPosY
     let newRad = Float64Array(nextCap)
-    newRad.set(this._radius[layer])
-    this._radius[layer] = newRad
+    newRad.set(_radius[layer])
+    _radius[layer] = newRad
   fn insert(x:int, y:int, id:int) :
     pass
   fn insert(layer:SpatialLayer, x:int, y:int, id:int, radius:int) :
@@ -107,16 +107,16 @@ pub class SpatialHashGrid:
       ret
     if not Number.isFinite(radius) or radius < 0:
       radius = 0
-    if id >= this._capacities[layer]:
+    if id >= _capacities[layer]:
       this._ensureCapacity(layer, id + 1)
-    this._posX[layer][id] = x
-    this._posY[layer][id] = y
-    this._radius[layer][id] = radius
-    if radius > this._maxRadius[layer]:
-      this._maxRadius[layer] = radius
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
+    _posX[layer][id] = x
+    _posY[layer][id] = y
+    _radius[layer][id] = radius
+    if radius > _maxRadius[layer]:
+      _maxRadius[layer] = radius
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
     let mut cx = Math.floor(Math)
     let mut cy = Math.floor(Math)
     if cx < 0:
@@ -127,30 +127,30 @@ pub class SpatialHashGrid:
       cy = 0
     elif cy >= rows:
       cy = rows - 1
-    let cellIdx = layer * this._maxCells + cy * cols + cx
-    this._gridNext[layer][id] = this._gridHead[cellIdx]
-    this._gridHead[cellIdx] = id
-    this._itemCount[layer] = this._itemCount[layer] + 1
+    let cellIdx = layer * _maxCells + cy * cols + cx
+    _gridNext[layer][id] = _gridHead[cellIdx]
+    _gridHead[cellIdx] = id
+    _itemCount[layer] = _itemCount[layer] + 1
   fn insertSegments(segs:[unknown]) :
     let n = segs.length
     this.clearLayer(SpatialLayer.Segments)
     if n == 0:
       ret
-    if n > this._capacities[SpatialLayer.Segments]:
+    if n > _capacities[SpatialLayer.Segments]:
       this._ensureCapacity(SpatialLayer.Segments, n)
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
     let layer = SpatialLayer.Segments
-    let layerOffset = layer * this._maxCells
-    let gridHead = this._gridHead
-    let next = this._gridNext[layer]
-    let posX = this._posX[layer]
-    let posY = this._posY[layer]
-    let rad = this._radius[layer]
+    let layerOffset = layer * _maxCells
+    let gridHead = _gridHead
+    let next = _gridNext[layer]
+    let posX = _posX[layer]
+    let posY = _posY[layer]
+    let rad = _radius[layer]
     let mut maxR = 0
-    this._maxRadius[SpatialLayer.Segments] = maxR
-    this._itemCount[SpatialLayer.Segments] = n
+    _maxRadius[SpatialLayer.Segments] = maxR
+    _itemCount[SpatialLayer.Segments] = n
   fn queryRadius(x:int, y:int, radius:int, callback:(number) => boolean | void) -> bool:
     pass
   fn queryRadius(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int, callback:(number, SpatialLayer, number) => boolean | void) -> bool:
@@ -177,11 +177,11 @@ pub class SpatialHashGrid:
       ret false
     if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
       ret false
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     false
   fn findFirst(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int) -> int:
     pass
@@ -206,22 +206,22 @@ pub class SpatialHashGrid:
       ret -1
     if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
       ret -1
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     -1
   fn findFirstSegment(x:int, y:int, radius:int, minIndex:unknown = 0) -> int:
     if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
       ret -1
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     let l = SpatialLayer.Segments
-    let layerMaxRad = this._maxRadius[l]
+    let layerMaxRad = _maxRadius[l]
     let searchR = radius + layerMaxRad
     let mut minCx = Math.floor(Math)
     if minCx < 0:
@@ -238,10 +238,10 @@ pub class SpatialHashGrid:
     if minCx > maxCx or minCy > maxCy:
       ret -1
     let layerOffset = l * maxCells
-    let next = this._gridNext[l]
-    let posX = this._posX[l]
-    let posY = this._posY[l]
-    let rad = this._radius[l]
+    let next = _gridNext[l]
+    let posX = _posX[l]
+    let posY = _posY[l]
+    let rad = _radius[l]
     let maxLayerRSq = searchR * searchR
     -1
   fn queryRadiusBuffer(layerMask:SpatialLayerMaskValue, x:int, y:int, radius:int, outBuffer:Int32Array, maxHits:int = outBuffer.length) -> int:
@@ -250,11 +250,11 @@ pub class SpatialHashGrid:
     if not Number.isFinite(x) or not Number.isFinite(y) or not Number.isFinite(radius) or radius < 0:
       ret 0
     let mut hitCount = 0
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     hitCount
   fn queryNearest(layerMask:SpatialLayerMaskValue, x:int, y:int, maxRadius:int) -> Option[SpatialQueryResult]:
     pass
@@ -266,12 +266,12 @@ pub class SpatialHashGrid:
         ret false
       else:
         ret nil
-    let cs = this._cellSize
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let cs = _cellSize
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     let mut bestDistSq = maxRadius * maxRadius
     let mut bestDist = maxRadius
     let mut bestId = -1
@@ -328,12 +328,12 @@ pub class SpatialHashGrid:
       ret false
     let dx = dirX / len
     let dy = dirY / len
-    let cs = this._cellSize
-    let invCs = this._invCellSize
-    let cols = this._cols
-    let rows = this._rows
-    let maxCells = this._maxCells
-    let gridHead = this._gridHead
+    let cs = _cellSize
+    let invCs = _invCellSize
+    let cols = _cols
+    let rows = _rows
+    let maxCells = _maxCells
+    let gridHead = _gridHead
     let gridW = cols * cs
     let gridH = rows * cs
     if startX < 0 and dx <= 0 or startX >= gridW and dx >= 0:
@@ -354,12 +354,12 @@ pub class SpatialHashGrid:
         nil
       if tMaxX < tMaxY:
         tCurrent = tMaxX
-        tMaxX = tMaxX + tDeltaX
-        cx = cx + stepX
+        tMaxX += tDeltaX
+        cx += stepX
       else:
         tCurrent = tMaxY
-        tMaxY = tMaxY + tDeltaY
-        cy = cy + stepY
+        tMaxY += tDeltaY
+        cy += stepY
       if stepX > 0 and cx >= cols or stepX < 0 and cx < 0:
         nil
       if stepY > 0 and cy >= rows or stepY < 0 and cy < 0:

@@ -634,5 +634,63 @@ style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
       expect(cppOut).toContain("int y;");
     });
   });
+
+  describe("Step 19: Implicit this. Scope Resolution & Compound Operators", () => {
+    it("emits implicit this. for class properties in TypeScript methods", () => {
+      const src = `class Snake:
+  Hp: int = 100
+  MaxHp: int = 100
+  fn takeDamage(amount: int):
+    Hp -= amount
+    if Hp < 0:
+      Hp = 0`;
+      const mod = parse(src, "Snake.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("this.Hp -= amount;");
+      expect(tsOut).toContain("if ((this.Hp < 0)) {");
+      expect(tsOut).toContain("this.Hp = 0;");
+    });
+
+    it("does not prefix local variables or parameters with this.", () => {
+      const src = `class Counter:
+  count: int = 0
+  fn add(count: int):
+    let step = 1
+    this.count += count + step`;
+      const mod = parse(src, "Counter.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("const step = 1;");
+      expect(tsOut).toContain("this.count += (count + step);");
+    });
+
+    it("emits compound assignment operators across targets", () => {
+      const src = `fn compute(x: int):
+  x += 10
+  x -= 5
+  x *= 2`;
+      const mod = parse(src);
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("x += 10;");
+      expect(tsOut).toContain("x -= 5;");
+      expect(tsOut).toContain("x *= 2;");
+
+      const pyOut = emitTarget(mod, "python");
+      expect(pyOut).toContain("x += 10");
+      expect(pyOut).toContain("x -= 5");
+      expect(pyOut).toContain("x *= 2");
+
+      const cppOut = emitTarget(mod, "cpp");
+      expect(cppOut).toContain("x += 10;");
+      expect(cppOut).toContain("x -= 5;");
+
+      const rustOut = emitTarget(mod, "rust");
+      expect(rustOut).toContain("x += 10;");
+
+      const goOut = emitTarget(mod, "go");
+      expect(goOut).toContain("x += 10");
+    });
+  });
 });
 

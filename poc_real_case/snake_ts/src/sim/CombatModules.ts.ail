@@ -41,12 +41,12 @@ fn findNearestTarget(ctx:ModuleActionContext, maxRange:int) -> Option[unknown]:
 pub class ModuleActionRegistry:
   static readonly _handlers: Map[str, ModuleActionHandler] = Map()
   static fn register(key:str, handler:ModuleActionHandler) :
-    this._handlers.set(key, handler)
-  static fn get(key:str) -> Option[ModuleActionHandler] = this._handlers.at(key) ?? nil
-  static fn has(key:str) -> bool = this._handlers.has(key)
-  static fn getRegisteredKeys() -> [str] = Array.from(this._handlers.keys())
+    _handlers.set(key, handler)
+  static fn get(key:str) -> Option[ModuleActionHandler] = _handlers.at(key) ?? nil
+  static fn has(key:str) -> bool = _handlers.has(key)
+  static fn getRegisteredKeys() -> [str] = Array.from(_handlers.keys())
   static fn execute(ctx:ModuleActionContext) :
-    let handler = this._handlers.at(ctx.moduleType) ?? nil
+    let handler = _handlers.at(ctx.moduleType) ?? nil
     if handler != nil:
       handler(ctx)
 

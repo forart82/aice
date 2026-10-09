@@ -66,80 +66,80 @@ pub class CombatSystem:
   readonly _cachedHostileTarget: HostileTarget = { found: false, isBoss: false, enemy: nil, x: 0, y: 0, Found: false, IsBoss: false, Enemy: nil, X: 0, Y: 0 }
   readonly _cachedBiteRoll: BiteRoll = { damage: 0, crit: false, Damage: 0, Crit: false }
   _lastSelfHitFxTime:int = 0, _constrictionCooldown = 0
-  get ComboCount = this.comboCount; set ComboCount(v) = this.comboCount = v
-  get ComboMultiplier = this.comboMultiplier; set ComboMultiplier(v) = this.comboMultiplier = v
-  get ComboTimer = this.comboTimer; set ComboTimer(v) = this.comboTimer = v
-  get Meta = this.meta; set Meta(v) = this.meta = v
-  get Services = this.services; set Services(v) = this.services = v
-  get Engine = this.engine; set Engine(v) = this.engine = v
-  get ComboBaseWindow = this.comboBaseWindow; set ComboBaseWindow(v) = this.comboBaseWindow = v
-  get ComboMaxTime = this.comboMaxTime; set ComboMaxTime(v) = this.comboMaxTime = v
-  get FrenzyActive = this.frenzyActive; set FrenzyActive(v) = this.frenzyActive = v
-  get FrenzyTimer = this.frenzyTimer; set FrenzyTimer(v) = this.frenzyTimer = v
-  get FrenzyMaxDuration = this.frenzyMaxDuration; set FrenzyMaxDuration(v) = this.frenzyMaxDuration = v
-  get Score = this.score; set Score(v) = this.score = v
-  get ShardsEarned = this.shardsEarned; set ShardsEarned(v) = this.shardsEarned = v
-  get Kills = this.kills; set Kills(v) = this.kills = v
-  get BossKills = this.bossKills; set BossKills(v) = this.bossKills = v
-  get defeatedBossTypes = this.DefeatedBossTypes; set defeatedBossTypes(v) = this.DefeatedBossTypes = v
-  get bossKillsByType = this.BossKillsByType; set bossKillsByType(v) = this.BossKillsByType = v
-  get killsByType = this.KillsByType; set killsByType(v) = this.KillsByType = v
-  get foodsEatenByType = this.FoodsEatenByType; set foodsEatenByType(v) = this.FoodsEatenByType = v
-  get FoodsEaten = this.foodsEaten; set FoodsEaten(v) = this.foodsEaten = v
-  get HighestRunCombo = this.highestRunCombo; set HighestRunCombo(v) = this.highestRunCombo = v
-  get highestCombo = this.highestRunCombo; set highestCombo(v) = this.highestRunCombo = v
-  get floorShardsEarned = this.shardsEarned; set floorShardsEarned(v) = this.shardsEarned = v
-  get clutchCatchCount = this.ClutchCatchCount; set clutchCatchCount(v) = this.ClutchCatchCount = v
-  get totalClutchBonusScore = this.TotalClutchBonusScore; set totalClutchBonusScore(v) = this.TotalClutchBonusScore = v
-  get DamageDealt = this.damageDealt; set DamageDealt(v) = this.damageDealt = v
-  get RunTime = this.runTime; set RunTime(v) = this.runTime = v
-  get FlameTimer = this.flameTimer; set FlameTimer(v) = this.flameTimer = v
-  get ThunderTimer = this.thunderTimer; set ThunderTimer(v) = this.thunderTimer = v
-  get FrenzySparkTimer = this.frenzySparkTimer; set FrenzySparkTimer(v) = this.frenzySparkTimer = v
-  get StaticCoilCounter = this.staticCoilCounter; set StaticCoilCounter(v) = this.staticCoilCounter = v
-  get BiteCooldowns = this.biteCooldowns
-  get TimeScale = this.timeScale; set TimeScale(v) = this.timeScale = v
-  get BiteInterval = this.biteInterval; set BiteInterval(v) = this.biteInterval = v
+  get ComboCount = comboCount; set ComboCount(v) = comboCount = v
+  get ComboMultiplier = comboMultiplier; set ComboMultiplier(v) = comboMultiplier = v
+  get ComboTimer = comboTimer; set ComboTimer(v) = comboTimer = v
+  get Meta = meta; set Meta(v) = meta = v
+  get Services = services; set Services(v) = services = v
+  get Engine = engine; set Engine(v) = engine = v
+  get ComboBaseWindow = comboBaseWindow; set ComboBaseWindow(v) = comboBaseWindow = v
+  get ComboMaxTime = comboMaxTime; set ComboMaxTime(v) = comboMaxTime = v
+  get FrenzyActive = frenzyActive; set FrenzyActive(v) = frenzyActive = v
+  get FrenzyTimer = frenzyTimer; set FrenzyTimer(v) = frenzyTimer = v
+  get FrenzyMaxDuration = frenzyMaxDuration; set FrenzyMaxDuration(v) = frenzyMaxDuration = v
+  get Score = score; set Score(v) = score = v
+  get ShardsEarned = shardsEarned; set ShardsEarned(v) = shardsEarned = v
+  get Kills = kills; set Kills(v) = kills = v
+  get BossKills = bossKills; set BossKills(v) = bossKills = v
+  get defeatedBossTypes = DefeatedBossTypes; set defeatedBossTypes(v) = DefeatedBossTypes = v
+  get bossKillsByType = BossKillsByType; set bossKillsByType(v) = BossKillsByType = v
+  get killsByType = KillsByType; set killsByType(v) = KillsByType = v
+  get foodsEatenByType = FoodsEatenByType; set foodsEatenByType(v) = FoodsEatenByType = v
+  get FoodsEaten = foodsEaten; set FoodsEaten(v) = foodsEaten = v
+  get HighestRunCombo = highestRunCombo; set HighestRunCombo(v) = highestRunCombo = v
+  get highestCombo = highestRunCombo; set highestCombo(v) = highestRunCombo = v
+  get floorShardsEarned = shardsEarned; set floorShardsEarned(v) = shardsEarned = v
+  get clutchCatchCount = ClutchCatchCount; set clutchCatchCount(v) = ClutchCatchCount = v
+  get totalClutchBonusScore = TotalClutchBonusScore; set totalClutchBonusScore(v) = TotalClutchBonusScore = v
+  get DamageDealt = damageDealt; set DamageDealt(v) = damageDealt = v
+  get RunTime = runTime; set RunTime(v) = runTime = v
+  get FlameTimer = flameTimer; set FlameTimer(v) = flameTimer = v
+  get ThunderTimer = thunderTimer; set ThunderTimer(v) = thunderTimer = v
+  get FrenzySparkTimer = frenzySparkTimer; set FrenzySparkTimer(v) = frenzySparkTimer = v
+  get StaticCoilCounter = staticCoilCounter; set StaticCoilCounter(v) = staticCoilCounter = v
+  get BiteCooldowns = biteCooldowns
+  get TimeScale = timeScale; set TimeScale(v) = timeScale = v
+  get BiteInterval = biteInterval; set BiteInterval(v) = biteInterval = v
   fn _ensurePolyCapacity(capacity:int) :
-    if capacity > this._polyX.length:
-      let nextCap = Math.max(capacity * 2, this._polyX.length * 2)
-      this._polyX = Float64Array(nextCap)
-      this._polyY = Float64Array(nextCap)
+    if capacity > _polyX.length:
+      let nextCap = Math.max(capacity * 2, _polyX.length * 2)
+      _polyX = Float64Array(nextCap)
+      _polyY = Float64Array(nextCap)
   fn constructor():
     this.reset()
   fn reset() :
-    this.comboCount = 0
-    this.comboMultiplier = 1
-    this.comboTimer = 0
-    this.comboBaseWindow = 4
-    this.comboMaxTime = 4
-    this.frenzyActive = false
-    this.frenzyTimer = 0
-    this.frenzyMaxDuration = 8
-    this.score = 0
-    this.shardsEarned = 0
-    this.kills = 0
-    this.bossKills = 0
-    this.foodsEaten = 0
-    this.highestRunCombo = 0
+    comboCount = 0
+    comboMultiplier = 1
+    comboTimer = 0
+    comboBaseWindow = 4
+    comboMaxTime = 4
+    frenzyActive = false
+    frenzyTimer = 0
+    frenzyMaxDuration = 8
+    score = 0
+    shardsEarned = 0
+    kills = 0
+    bossKills = 0
+    foodsEaten = 0
+    highestRunCombo = 0
     this.clutchCatchCount = 0
     this.totalClutchBonusScore = 0
-    this.damageDealt = 0
-    this.runTime = 0
-    this.DefeatedBossTypes = []
-    this.BossKillsByType = {  }
-    this.KillsByType = {  }
-    this.FoodsEatenByType = {  }
-    this.flameTimer = 0
-    this.thunderTimer = 0
-    this.frenzySparkTimer = 0
-    this.staticCoilCounter = 0
-    this.biteCooldowns.clear()
-    this.timeScale = 1
-    this.biteInterval = GameData.BiteInterval
-    this._gridBuiltThisTick = false
-    this._lastGridSegCount = -1
-    this._segmentGrid.clear()
+    damageDealt = 0
+    runTime = 0
+    DefeatedBossTypes = []
+    BossKillsByType = {  }
+    KillsByType = {  }
+    FoodsEatenByType = {  }
+    flameTimer = 0
+    thunderTimer = 0
+    frenzySparkTimer = 0
+    staticCoilCounter = 0
+    biteCooldowns.clear()
+    timeScale = 1
+    biteInterval = GameData.BiteInterval
+    _gridBuiltThisTick = false
+    _lastGridSegCount = -1
+    _segmentGrid.clear()
     Services.sound.setFrenzyState(false)
   fn Reset() :
     this.reset()
@@ -148,15 +148,15 @@ pub class CombatSystem:
     if player != nil:
       let segs = player.segments or player.Segments
       if segs != nil and segs.length > 0:
-        if not force and this._gridBuiltThisTick and segs.length == this._lastGridSegCount:
+        if not force and _gridBuiltThisTick and segs.length == _lastGridSegCount:
           ret
-        this._gridBuiltThisTick = true
-        this._lastGridSegCount = segs.length
-        this._segmentGrid.insertSegments(segs)
+        _gridBuiltThisTick = true
+        _lastGridSegCount = segs.length
+        _segmentGrid.insertSegments(segs)
         ret
-    this._gridBuiltThisTick = false
-    this._lastGridSegCount = -1
-    this._segmentGrid.clear()
+    _gridBuiltThisTick = false
+    _lastGridSegCount = -1
+    _segmentGrid.clear()
   fn resolveBites(dt:int, world:World) :
     this.resolveEnemies(dt, world)
     this.resolveBoss(dt, world)
@@ -164,14 +164,14 @@ pub class CombatSystem:
     this.resolveBites(dt, world)
   fn update(dt:int, world:World) :
     let player = world.player or world.Player
-    this.runTime = this.runTime + dt
-    this._gridBuiltThisTick = false
+    runTime += dt
+    _gridBuiltThisTick = false
     this.ensureGrid(world)
     let ts = world.timeScale or world.TimeScale
     if ts != 0 and not Number.isNaN(ts):
-      this.timeScale = ts
+      timeScale = ts
     else:
-      this.timeScale = 1
+      timeScale = 1
     this.updateCombo(dt, player)
     this.updateFrenzy(dt, player)
     this.updateAuras(dt, world)
@@ -201,24 +201,24 @@ pub class CombatSystem:
       1
   fn DilationScale(player:SnakePlayer) -> int = this.dilationScale(player)
   fn updateCombo(dt:int, player:SnakePlayer) :
-    if this.comboTimer > 0:
-      this.comboTimer = this.comboTimer - dt
-      if this.comboTimer <= 0:
+    if comboTimer > 0:
+      comboTimer -= dt
+      if comboTimer <= 0:
         this.breakCombo(player)
   fn UpdateCombo(dt:int, player:SnakePlayer) :
     this.updateCombo(dt, player)
   fn updateFrenzy(dt:int, player:SnakePlayer) :
-    if not this.frenzyActive:
+    if not frenzyActive:
       ret
-    this.frenzyTimer = this.frenzyTimer - dt
-    this.frenzySparkTimer = this.frenzySparkTimer + dt
-    if this.frenzySparkTimer >= 0.06:
-      this.frenzySparkTimer = 0
+    frenzyTimer -= dt
+    frenzySparkTimer += dt
+    if frenzySparkTimer >= 0.06:
+      frenzySparkTimer = 0
       let px = player.x ?? player.X
       let py = player.y ?? player.Y
       Services.fx.burst(px, py, "#ff0054", 3, 3, 3)
-    if this.frenzyTimer <= 0:
-      this.frenzyActive = false
+    if frenzyTimer <= 0:
+      frenzyActive = false
       Services.sound.setFrenzyState(false)
       let px = player.x ?? player.X
       let py = player.y ?? player.Y
@@ -226,27 +226,27 @@ pub class CombatSystem:
   fn UpdateFrenzy(dt:int, player:SnakePlayer) :
     this.updateFrenzy(dt, player)
   fn incrementCombo(player:SnakePlayer, world:World) :
-    this.comboCount = this.comboCount + 1
-    if this.comboCount > this.highestRunCombo:
-      this.highestRunCombo = this.comboCount
-    this.comboMultiplier = 1
+    comboCount += 1
+    if comboCount > highestRunCombo:
+      highestRunCombo = comboCount
+    comboMultiplier = 1
     for tier in GameData.ComboTiers:
-      if this.comboCount >= tier.at:
-        this.comboMultiplier = tier.mult
+      if comboCount >= tier.at:
+        comboMultiplier = tier.mult
     let stats = player.stats or player.Stats
     let comboWin = stats.comboWindow ?? stats.ComboWindow ?? 1
-    let shrink = Math.min(1.9, this.comboCount * 0.045)
-    this.comboMaxTime = Math.max(1.9, this.comboBaseWindow - shrink * comboWin)
-    this.comboTimer = this.comboMaxTime
+    let shrink = Math.min(1.9, comboCount * 0.045)
+    comboMaxTime = Math.max(1.9, comboBaseWindow - shrink * comboWin)
+    comboTimer = comboMaxTime
     let classId = player.classId or player.ClassId
     let px = player.x ?? player.X
     let py = player.y ?? player.Y
     let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
     let lvl = player.level ?? player.Level ?? 1
     if classId == "storm":
-      this.staticCoilCounter = this.staticCoilCounter + 1
-      if this.staticCoilCounter >= 5:
-        this.staticCoilCounter = 0
+      staticCoilCounter += 1
+      if staticCoilCounter >= 5:
+        staticCoilCounter = 0
         this.chainLightning(world, px, py, 3, 46 + lvl * 4 * dmgBonus, 240, false)
     let relics = player.relics or player.Relics or {  }
     if relics["devourer"] or 0 > 0:
@@ -263,9 +263,9 @@ pub class CombatSystem:
         player.DamageBonus = player.damageBonus
         Services.fx.addText(px, py - 46, "👑 DEVOURED", "#ffd166", 16, true)
     let frenzyThreshold = relics["overdrive"] or 0 > 0 and 8 or 10
-    if this.comboCount >= frenzyThreshold and not this.frenzyActive:
-      this.frenzyActive = true
-      this.frenzyTimer = this.frenzyMaxDuration + relics["overdrive"] or 0 * 4
+    if comboCount >= frenzyThreshold and not frenzyActive:
+      frenzyActive = true
+      frenzyTimer = frenzyMaxDuration + relics["overdrive"] or 0 * 4
       Services.sound.setFrenzyState(true)
       Services.sound.playFrenzy()
       Services.fx.addText(px, py - 52, "⚡ HYPER FRENZY ⚡", "#ff0054", 24, true)
@@ -273,37 +273,37 @@ pub class CombatSystem:
       Services.fx.flash("#ff0054", 0.22, 0.25)
       if world.game != nil:
         world.game.banner("⚡ HYPER FRENZY OVERDRIVE ⚡", 1.4)
-    elif this.frenzyActive != nil:
-      this.frenzyTimer = Math.min(this.frenzyTimer + 0.35, this.frenzyMaxDuration + relics["overdrive"] or 0 * 4)
-    if this.comboCount == 5:
+    elif frenzyActive != nil:
+      frenzyTimer = Math.min(frenzyTimer + 0.35, frenzyMaxDuration + relics["overdrive"] or 0 * 4)
+    if comboCount == 5:
       Services.fx.addText(px, py - 30, "🔥 5x STREAK", "#ffb703", 16)
-    elif this.comboCount == 15:
+    elif comboCount == 15:
       Services.fx.addText(px, py - 30, "⚡ 15x MEGA", "#00f0b5", 18, true)
   fn IncrementCombo(player:SnakePlayer, world:World) :
     this.incrementCombo(player, world)
   fn breakCombo(player:Option[SnakePlayer]) :
-    if this.comboCount >= 5 and player:
+    if comboCount >= 5 and player:
       let px = player.x ?? player.X
       let py = player.y ?? player.Y
       Services.fx.addText(px, py - 40, "COMBO LOST", "#64748b", 15)
-    this.comboCount = 0
-    this.comboMultiplier = 1
-    this.comboTimer = 0
-    this.staticCoilCounter = 0
+    comboCount = 0
+    comboMultiplier = 1
+    comboTimer = 0
+    staticCoilCounter = 0
   fn BreakCombo(player:Option[SnakePlayer]) :
     this.breakCombo(player)
   static fn enemyKey(id:int) -> str = String(id)
   fn canBite(key:str) -> bool:
-    let next = this.biteCooldowns.at(key) ?? nil
-    next == undefined or next <= this.runTime
+    let next = biteCooldowns.at(key) ?? nil
+    next == undefined or next <= runTime
   fn CanBite(key:str) -> bool = this.canBite(key)
   fn markBite(key:str) :
-    this.biteCooldowns.set(key, this.runTime + this.biteInterval)
-    if this.biteCooldowns.size > 64:
-      this._staleBiteKeys.length = 0
-      for [k, v] in this.biteCooldowns.entries():
-        if v <= this.runTime:
-          this._staleBiteKeys.push(k)
+    biteCooldowns.set(key, runTime + biteInterval)
+    if biteCooldowns.size > 64:
+      _staleBiteKeys.length = 0
+      for [k, v] in biteCooldowns.entries():
+        if v <= runTime:
+          _staleBiteKeys.push(k)
   fn MarkBite(key:str) :
     this.markBite(key)
   fn rollBite(player:SnakePlayer, multiplier:unknown = 1) -> BiteRoll:
@@ -314,9 +314,9 @@ pub class CombatSystem:
     let crit = Rng.Shared.rand() < critChance
     let mut dmg = power * multiplier != 0 and multiplier or 1
     if crit != nil:
-      dmg = dmg * critMult
-    if this.frenzyActive != nil:
-      dmg = dmg * 2
+      dmg *= critMult
+    if frenzyActive != nil:
+      dmg *= 2
     { damage: dmg, crit, Damage: dmg, Crit: crit }
   fn RollBite(player:SnakePlayer, multiplier:unknown = 1) -> BiteRoll = this.rollBite(player, multiplier)
   fn damageEnemy(enemy:Option[Enemy], amount:int, world:World, opts:DamageOpts = {  }) -> bool:
@@ -330,7 +330,7 @@ pub class CombatSystem:
     let freeze = opts.freeze ?? opts.Freeze
     let stun = opts.stun ?? opts.Stun
     let killed = enemy.applyDamage != nil and enemy.applyDamage(amount) or enemy.ApplyDamage(amount)
-    this.damageDealt = this.damageDealt + amount
+    damageDealt += amount
     let ex = enemy.x ?? enemy.X
     let ey = enemy.y ?? enemy.Y
     let er = enemy.radius ?? enemy.Radius
@@ -360,7 +360,7 @@ pub class CombatSystem:
     let burn = opts.burn ?? opts.Burn
     let chill = opts.chill ?? opts.Chill
     let killed = boss.applyDamage != nil and boss.applyDamage(amount) or boss.ApplyDamage(amount)
-    this.damageDealt = this.damageDealt + amount
+    damageDealt += amount
     let bx = boss.x ?? boss.X
     let by = boss.y ?? boss.Y
     let br = boss.radius ?? boss.Radius
@@ -388,18 +388,18 @@ pub class CombatSystem:
       ret
     enemy._killHandled = true
     let player = world.player or world.Player
-    this.kills = this.kills + 1
+    kills += 1
     let ekey = enemy.type or enemy.key or enemy.Key or "swarmling"
-    this.KillsByType[ekey] = this.KillsByType[ekey] or 0 + 1
+    KillsByType[ekey] = KillsByType[ekey] or 0 + 1
     let scoreVal = enemy.scoreValue ?? enemy.ScoreValue
-    this.score = this.score + MathX.roundJs(scoreVal * this.comboMultiplier)
+    score += MathX.roundJs(scoreVal * comboMultiplier)
     let ex = enemy.x ?? enemy.X
     let ey = enemy.y ?? enemy.Y
     let ecol = enemy.color or enemy.Color
     let expVal = enemy.xpValue ?? enemy.XpValue
     let isSwarmling = ekey == "swarmling" or enemy.color == "#fb7185" or enemy.Color == "#fb7185"
     if isSwarmling != nil:
-      Services.sound.playEat(this.comboCount, false)
+      Services.sound.playEat(comboCount, false)
       Services.fx.burst(ex, ey, ecol, 14, 4, 3)
     else:
       Services.sound.playExplosion(0.55)
@@ -530,23 +530,23 @@ pub class CombatSystem:
     let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
     let stats = player.stats or player.Stats
     let relics = player.relics or player.Relics or {  }
-    this.foodsEaten = this.foodsEaten + 1
+    foodsEaten += 1
     let ftype = food.type or "apple"
-    this.FoodsEatenByType[ftype] = this.FoodsEatenByType[ftype] or 0 + 1
+    FoodsEatenByType[ftype] = FoodsEatenByType[ftype] or 0 + 1
     player.foodsEaten = player.foodsEaten ?? player.FoodsEaten ?? 0 + 1
     player.FoodsEaten = player.foodsEaten
-    let isClutchCatch = this.comboTimer > 0 and this.comboTimer <= 0.6
+    let isClutchCatch = comboTimer > 0 and comboTimer <= 0.6
     this.incrementCombo(player, world)
     player.gainXp(food.xpValue)
     if isClutchCatch != nil:
-      this.ClutchCatchCount = this.ClutchCatchCount + 1
-      let baseScore = MathX.roundJs(food.scoreValue * this.comboMultiplier)
+      ClutchCatchCount += 1
+      let baseScore = MathX.roundJs(food.scoreValue * comboMultiplier)
       let bonusScore = MathX.roundJs(baseScore * 0.5)
-      this.TotalClutchBonusScore = this.TotalClutchBonusScore + bonusScore
-      this.score = this.score + baseScore + bonusScore
+      TotalClutchBonusScore += bonusScore
+      score += baseScore + bonusScore
       Services.fx.addText(food.x, food.y - 24, "⚡ CLUTCH CATCH! +50%", "#ffd166", 15, true)
     else:
-      this.score = this.score + MathX.roundJs(food.scoreValue * this.comboMultiplier)
+      score += MathX.roundJs(food.scoreValue * comboMultiplier)
     player.addGrowth(1)
     let equippedHelm = player.equippedHelmet ?? player.EquippedHelmet ?? player.helmet
     if equippedHelm != nil:
@@ -560,7 +560,7 @@ pub class CombatSystem:
         elif typeof(player.TriggerTitanGorging) == "function":
           player.TriggerTitanGorging(3)
         Services.fx.addText(px, py - 20, "TITAN GORGING! 2X SIZE", "#ffd166", 16, true)
-    Services.sound.playEat(this.comboCount, food.type == "golden")
+    Services.sound.playEat(comboCount, food.type == "golden")
     Services.fx.burst(food.x, food.y, food.color, 9, 3, 2.5)
     if relics["vampiric"] or 0 > 0:
       player.heal(relics["vampiric"])
@@ -643,8 +643,8 @@ pub class CombatSystem:
       ret
     let damageAmount = 8
     let mut anyHit = false
-    let now = world.runTime or world.RunTime or this.runTime or 0
-    let s = this._segmentGrid.findFirstSegment(px, py, pr, 3)
+    let now = world.runTime or world.RunTime or runTime or 0
+    let s = _segmentGrid.findFirstSegment(px, py, pr, 3)
     if s >= 3 and s < segs.length:
       let seg = segs[s]
       if seg != nil:
@@ -669,8 +669,8 @@ pub class CombatSystem:
                 anyHit = true
             if dealtSeg > 0:
               anyHit = true
-              if now - this._lastSelfHitFxTime >= 0.12:
-                this._lastSelfHitFxTime = now
+              if now - _lastSelfHitFxTime >= 0.12:
+                _lastSelfHitFxTime = now
                 Services.fx.addText(sx, sy - 22, "SELF-BITE! -" + String(Math.floor(Math)), "#ff0054", 16, true)
                 Services.fx.burst(sx, sy, "#ff0054", 8, 3, 2)
                 Services.sound.playHit()
@@ -687,8 +687,8 @@ pub class CombatSystem:
     let mut inside = false
     inside
   fn checkConstriction(world:World) :
-    if this._constrictionCooldown > 0:
-      this._constrictionCooldown = this._constrictionCooldown - 1 / 120
+    if _constrictionCooldown > 0:
+      _constrictionCooldown -= 1 / 120
       ret
     let player = world.player or world.Player
     if not player or not (player.alive ?? player.Alive):
@@ -699,24 +699,24 @@ pub class CombatSystem:
     let px = player.x ?? player.X
     let py = player.y ?? player.Y
     let pr = player.headRadius ?? player.HeadRadius ?? 14
-    let mut loopEndIndex = this._segmentGrid.findFirstSegment(px, py, pr + 11 + 16, 3)
+    let mut loopEndIndex = _segmentGrid.findFirstSegment(px, py, pr + 11 + 16, 3)
     if loopEndIndex < 3 or loopEndIndex >= segs.length:
-      if this._segmentGrid.getItemCount(SpatialLayerMask.Segments) == 0:
+      if _segmentGrid.getItemCount(SpatialLayerMask.Segments) == 0:
         let snapDistSq = Math.pow(pr + 11 + 16, 2)
     if loopEndIndex < 3 or loopEndIndex >= segs.length:
       ret
     let polyLen = loopEndIndex + 2
     this._ensurePolyCapacity(polyLen)
-    this._polyX[0] = px
-    this._polyY[0] = py
+    _polyX[0] = px
+    _polyY[0] = py
     let mut cx = px
     let mut cy = py
-    let mut minX = this._polyX[0]
+    let mut minX = _polyX[0]
     let mut maxX = minX
-    let mut minY = this._polyY[0]
+    let mut minY = _polyY[0]
     let mut maxY = minY
-    cx = cx / polyLen
-    cy = cy / polyLen
+    cx /= polyLen
+    cy /= polyLen
     let mut maxR = 0
     let dmgBonus = player.damageBonus ?? player.DamageBonus ?? 1
     let crushDmg = 120 + segs.length * 15 * dmgBonus
@@ -727,7 +727,7 @@ pub class CombatSystem:
     let bosses = getActiveBosses(world)
     this.fuseEncircledFoodIntoPrism(player, world, polyLen, minX, maxX, minY, maxY)
     if trapped > 0:
-      this._constrictionCooldown = 0.5
+      _constrictionCooldown = 0.5
       Services.fx.ringShockwave(cx, cy, "#ffd166", Math.max(30, maxR * 0.85), 0.04)
       Services.fx.addText(cx, cy - 20, "🐍 OUROBOROS CONSTRICTION! 🐍", "#ffd166", 16, true)
       Services.sound.playExplosion(1)
@@ -741,11 +741,11 @@ pub class CombatSystem:
       ret false
     let count = segs.length + 1
     this._ensurePolyCapacity(count)
-    this._polyX[0] = player.x ?? player.X
-    this._polyY[0] = player.y ?? player.Y
-    let mut minX = this._polyX[0]
+    _polyX[0] = player.x ?? player.X
+    _polyY[0] = player.y ?? player.Y
+    let mut minX = _polyX[0]
     let mut maxX = minX
-    let mut minY = this._polyY[0]
+    let mut minY = _polyY[0]
     let mut maxY = minY
     if px < minX or px > maxX or py < minY or py > maxY:
       ret false
@@ -841,7 +841,7 @@ pub class CombatSystem:
     let bosses = getActiveBosses(world)
     if enemies != nil:
       nil
-    let res = this._cachedHostileTarget
+    let res = _cachedHostileTarget
     if bestEnemy != nil:
       let bx = bestEnemy.x ?? bestEnemy.X
       let by = bestEnemy.y ?? bestEnemy.Y

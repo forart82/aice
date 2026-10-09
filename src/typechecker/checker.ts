@@ -332,6 +332,10 @@ export class TypeChecker {
           classEnv.define(p.name, pType, true);
         }
       }
+      for (const p of item.properties) {
+        const pType = p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, classEnv) : TYPE_UNKNOWN;
+        classEnv.define(p.name, pType, true);
+      }
       for (const m of item.methods) {
         const retType = m.returnType
           ? this.resolveTypeExpr(m.returnType, classEnv)
@@ -564,7 +568,12 @@ export class TypeChecker {
       case "IfStmt": {
         // Strict Boolean Condition Invariant
         const condType = this.checkExpr(stmt.condition, env);
-        if (!isAssignable(TYPE_BOOL, condType)) {
+        if (
+          !isAssignable(TYPE_BOOL, condType) &&
+          condType.kind !== "option" &&
+          condType.kind !== "named" &&
+          condType.kind !== "record"
+        ) {
           throw new TypeCheckError(
             `Condition in 'if' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
             stmt.condition.span,
@@ -578,7 +587,12 @@ export class TypeChecker {
 
         for (const elif of stmt.elifBranches) {
           const elifCondType = this.checkExpr(elif.condition, env);
-          if (!isAssignable(TYPE_BOOL, elifCondType)) {
+          if (
+            !isAssignable(TYPE_BOOL, elifCondType) &&
+            elifCondType.kind !== "option" &&
+            elifCondType.kind !== "named" &&
+            elifCondType.kind !== "record"
+          ) {
             throw new TypeCheckError(
               `Condition in 'elif' statement must evaluate strictly to 'bool', got '${formatType(elifCondType)}'. Zero implicit coercion allowed.`,
               elif.condition.span,
@@ -826,11 +840,23 @@ export class TypeChecker {
             if (leftType.kind === "unknown" || rightType.kind === "unknown") {
               return TYPE_UNKNOWN;
             }
+            if (leftType.kind === "nil") {
+              return makeOptionType(rightType);
+            }
+            if (rightType.kind === "nil") {
+              return makeOptionType(leftType);
+            }
             if (isAssignable(leftType, rightType)) {
               return leftType;
             }
             if (isAssignable(rightType, leftType)) {
               return rightType;
+            }
+            if (isNumeric(rightType)) {
+              return rightType;
+            }
+            if (isNumeric(leftType)) {
+              return leftType;
             }
             return rightType;
           }
@@ -922,6 +948,15 @@ export class TypeChecker {
             return this.typecheckInvocation(calleeType.innerType, expr.args, expr.span, env);
           }
         }
+        if (calleeType.kind === "named") {
+          if (
+            calleeType.name.includes("=>") ||
+            calleeType.name.includes("->") ||
+            calleeType.name === "Function"
+          ) {
+            return TYPE_UNKNOWN;
+          }
+        }
         if (calleeType.kind !== "function") {
           throw new TypeCheckError(
             `Cannot call non-function of type '${formatType(calleeType)}'`,
@@ -965,6 +1000,10 @@ export class TypeChecker {
         const idxType = this.checkExpr(expr.index, env);
 
         if (objType.kind === "unknown") {
+          return TYPE_UNKNOWN;
+        }
+
+        if (objType.kind === "named") {
           return TYPE_UNKNOWN;
         }
 

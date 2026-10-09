@@ -32,6 +32,17 @@ export class TypeScriptEmitter {
   private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
   private varTypes: Map<string, string> = new Map();
   private classNames: Set<string> = new Set();
+  private currentClassProperties: Set<string> | null = null;
+  private currentClassMethods: Set<string> | null = null;
+  private localScopeVars: Set<string>[] = [];
+  private isCurrentMethodStatic = false;
+
+  private isLocal(name: string): boolean {
+    for (let i = this.localScopeVars.length - 1; i >= 0; i--) {
+      if (this.localScopeVars[i].has(name)) return true;
+    }
+    return false;
+  }
 
   private static readonly BUILTIN_CONSTRUCTORS = new Set([
     "Int32Array",
@@ -66,6 +77,10 @@ export class TypeScriptEmitter {
     this.enumVariants.clear();
     this.varTypes.clear();
     this.classNames.clear();
+    this.currentClassProperties = null;
+    this.currentClassMethods = null;
+    this.localScopeVars = [];
+    this.isCurrentMethodStatic = false;
     for (const item of mod.items) {
       if (item.kind === "ClassDecl") {
         this.classNames.add(item.name);
@@ -253,6 +268,22 @@ export class TypeScriptEmitter {
   }
 
   private emitClassDecl(c: ClassDecl): void {
+    const prevProperties = this.currentClassProperties;
+    const prevMethods = this.currentClassMethods;
+    this.currentClassProperties = new Set();
+    this.currentClassMethods = new Set();
+    if (c.primaryConstructor) {
+      for (const p of c.primaryConstructor) {
+        this.currentClassProperties.add(p.name);
+      }
+    }
+    for (const p of c.properties) {
+      this.currentClassProperties.add(p.name);
+    }
+    for (const m of c.methods) {
+      this.currentClassMethods.add(m.name);
+    }
+
     const nodeId = `class:${c.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
 
@@ -311,6 +342,15 @@ export class TypeScriptEmitter {
         this.ctx.writeLine(`${st}${as}${m.name}(${params})${ret} {`);
       }
       this.ctx.indent();
+
+      const prevStatic = this.isCurrentMethodStatic;
+      this.isCurrentMethodStatic = !!m.isStatic;
+      const methodScope = new Set<string>();
+      for (const p of m.params) {
+        methodScope.add(p.name);
+      }
+      this.localScopeVars = [methodScope];
+
       if (m.body.kind === "Block") {
         const isReturning = this.isReturningMethod(m);
         this.emitBlock(m.body, isReturning);
@@ -327,6 +367,10 @@ export class TypeScriptEmitter {
           this.ctx.writeLine(`return ${this.emitExpr(m.body)};`);
         }
       }
+
+      this.localScopeVars = [];
+      this.isCurrentMethodStatic = prevStatic;
+
       this.ctx.dedent();
       this.ctx.writeLine("}");
       this.ctx.emitTrailingTrivia(mNodeId);
@@ -335,6 +379,9 @@ export class TypeScriptEmitter {
     this.ctx.dedent();
     this.ctx.writeLine("}");
     this.ctx.emitTrailingTrivia(nodeId);
+
+    this.currentClassProperties = prevProperties;
+    this.currentClassMethods = prevMethods;
   }
 
   private emitConstDecl(c: ConstDecl): void {
@@ -358,6 +405,13 @@ export class TypeScriptEmitter {
 
   private emitFunctionDecl(fn: FunctionDecl): void {
     this.varTypes.clear();
+    const prevProperties = this.currentClassProperties;
+    const prevMethods = this.currentClassMethods;
+    const prevStatic = this.isCurrentMethodStatic;
+    this.currentClassProperties = null;
+    this.currentClassMethods = null;
+    this.isCurrentMethodStatic = false;
+    this.localScopeVars = [new Set(fn.params.map((p) => p.name))];
     for (const p of fn.params) {
       if (p.typeAnnotation.kind === "NamedType") {
         this.varTypes.set(p.name, p.typeAnnotation.name);
@@ -385,6 +439,10 @@ export class TypeScriptEmitter {
       this.ctx.writeLine(`return ${this.emitExpr(fn.body as Expr)};`);
       this.ctx.dedent();
       this.ctx.writeLine("}");
+      this.localScopeVars = [];
+      this.currentClassProperties = prevProperties;
+      this.currentClassMethods = prevMethods;
+      this.isCurrentMethodStatic = prevStatic;
       return;
     }
 
@@ -394,6 +452,10 @@ export class TypeScriptEmitter {
     this.emitBlock(fn.body as Block, isReturning);
     this.ctx.dedent();
     this.ctx.writeLine("}");
+    this.localScopeVars = [];
+    this.currentClassProperties = prevProperties;
+    this.currentClassMethods = prevMethods;
+    this.isCurrentMethodStatic = prevStatic;
   }
 
   private isReturningFunction(fn: FunctionDecl): boolean {
@@ -458,17 +520,23 @@ export class TypeScriptEmitter {
   }
 
   private emitBlock(block: Block, isReturning = false): void {
+    const blockScope = new Set<string>();
+    this.localScopeVars.push(blockScope);
     const len = block.statements.length;
     for (let i = 0; i < len; i++) {
       const stmt = block.statements[i];
       const isLast = i === len - 1;
       this.emitStatement(stmt, isReturning && isLast);
     }
+    this.localScopeVars.pop();
   }
 
   private emitStatement(stmt: Statement, isTrailingReturn = false): void {
     switch (stmt.kind) {
       case "LetBinding": {
+        if (this.localScopeVars.length > 0) {
+          this.localScopeVars[this.localScopeVars.length - 1].add(stmt.name);
+        }
         if (stmt.typeAnnotation && stmt.typeAnnotation.kind === "NamedType") {
           this.varTypes.set(stmt.name, stmt.typeAnnotation.name);
         } else if (stmt.init.kind === "CallExpr" && stmt.init.callee.kind === "IdentifierExpr") {
@@ -489,7 +557,7 @@ export class TypeScriptEmitter {
       case "AssignStmt": {
         const targetStr = this.emitExpr(stmt.target);
         const valStr = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${targetStr} = ${valStr};`);
+        this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr};`);
         break;
       }
       case "ReturnStmt": {
@@ -525,7 +593,10 @@ export class TypeScriptEmitter {
       case "ForStmt": {
         this.ctx.writeLine(`for (const ${stmt.variable} of ${this.emitExpr(stmt.iterable)}) {`);
         this.ctx.indent();
+        const forScope = new Set<string>([stmt.variable]);
+        this.localScopeVars.push(forScope);
         this.emitBlock(stmt.body);
+        this.localScopeVars.pop();
         this.ctx.dedent();
         this.ctx.writeLine("}");
         break;
@@ -595,10 +666,18 @@ export class TypeScriptEmitter {
         return String(expr.value);
 
       case "IdentifierExpr":
+        if (
+          expr.name !== "this" &&
+          !this.isLocal(expr.name) &&
+          !this.isCurrentMethodStatic &&
+          this.currentClassProperties?.has(expr.name)
+        ) {
+          return `this.${expr.name}`;
+        }
         return expr.name;
 
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} = ${this.emitExpr(expr.value)}`;
+        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
 
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
@@ -747,10 +826,13 @@ export class TypeScriptEmitter {
       }
 
       case "ClosureExpr": {
+        const closureScope = new Set(expr.params.map((p) => p.name));
+        this.localScopeVars.push(closureScope);
         const paramsStr = expr.params
           .map((p) => `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}`)
           .join(", ");
         const retStr = expr.returnType ? `: ${this.emitTypeExpr(expr.returnType)}` : "";
+        let result: string;
         if (expr.body.kind === "Block") {
           let blockStr = "{\n";
           this.ctx.indent();
@@ -767,9 +849,12 @@ export class TypeScriptEmitter {
           }
           this.ctx.dedent();
           blockStr += `${this.ctx.getIndent()}}`;
-          return `(${paramsStr})${retStr} => ${blockStr}`;
+          result = `(${paramsStr})${retStr} => ${blockStr}`;
+        } else {
+          result = `(${paramsStr})${retStr} => ${this.emitExpr(expr.body)}`;
         }
-        return `(${paramsStr})${retStr} => ${this.emitExpr(expr.body)}`;
+        this.localScopeVars.pop();
+        return result;
       }
     }
   }

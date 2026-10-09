@@ -223,9 +223,12 @@ export interface LetBinding {
   span: Span;
 }
 
+export type AssignOp = "=" | "+=" | "-=" | "*=" | "/=" | "%=";
+
 export interface AssignStmt {
   kind: "AssignStmt";
   target: Expr;
+  op?: AssignOp;
   value: Expr;
   span: Span;
 }
@@ -324,6 +327,7 @@ export type Expr =
 export interface AssignExpr {
   kind: "AssignExpr";
   target: Expr;
+  op?: AssignOp;
   value: Expr;
   span: Span;
 }

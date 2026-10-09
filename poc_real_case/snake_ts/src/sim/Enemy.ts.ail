@@ -20,109 +20,109 @@ pub class Enemy:
   ShootTimer:int, StateTimer = 0, ChargeTimer = 0, Charging = false, ChargeAngle = 0
   WobblePhase:int, SpawnTimer = 0.45, HitFlash = 0, StasisTimer = 0, Dead = false
   Angle = 0
-  fn get_stasisTimer() = this.StasisTimer; fn set_stasisTimer(v) = this.StasisTimer = v
-  fn get_id() = this.Id; fn set_id(v) = this.Id = v
-  fn get_type() = this.Type; fn set_type(v) = this.Type = v
-  fn get_floor() = this.Floor; fn set_floor(v) = this.Floor = v
-  fn get_x() = this.X; fn set_x(v) = this.X = v
-  fn get_y() = this.Y; fn set_y(v) = this.Y = v
-  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
-  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
-  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
-  fn get_color() = this.Color; fn set_color(v) = this.Color = v
-  fn get_maxHp() = this.MaxHp; fn set_maxHp(v) = this.MaxHp = v
-  fn get_hp() = this.Hp; fn set_hp(v) = this.Hp = v
-  fn get_speed() = this.Speed; fn set_speed(v) = this.Speed = v
-  fn get_contactDamage() = this.ContactDamage; fn set_contactDamage(v) = this.ContactDamage = v
-  fn get_xpValue() = this.XpValue; fn set_xpValue(v) = this.XpValue = v
-  fn get_scoreValue() = this.ScoreValue; fn set_scoreValue(v) = this.ScoreValue = v
-  fn get_status() = this.Status; fn set_status(v) = this.Status = v
-  fn get_shootTimer() = this.ShootTimer; fn set_shootTimer(v) = this.ShootTimer = v
-  fn get_stateTimer() = this.StateTimer; fn set_stateTimer(v) = this.StateTimer = v
-  fn get_chargeTimer() = this.ChargeTimer; fn set_chargeTimer(v) = this.ChargeTimer = v
-  fn get_charging() = this.Charging; fn set_charging(v) = this.Charging = v
-  fn get_chargeAngle() = this.ChargeAngle; fn set_chargeAngle(v) = this.ChargeAngle = v
-  fn get_wobblePhase() = this.WobblePhase; fn set_wobblePhase(v) = this.WobblePhase = v
-  fn get_spawnTimer() = this.SpawnTimer; fn set_spawnTimer(v) = this.SpawnTimer = v
-  fn get_hitFlash() = this.HitFlash; fn set_hitFlash(v) = this.HitFlash = v
-  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
-  fn get_angle() = this.Angle; fn set_angle(v) = this.Angle = v
+  fn get_stasisTimer() = StasisTimer; fn set_stasisTimer(v) = StasisTimer = v
+  fn get_id() = Id; fn set_id(v) = Id = v
+  fn get_type() = Type; fn set_type(v) = Type = v
+  fn get_floor() = Floor; fn set_floor(v) = Floor = v
+  fn get_x() = X; fn set_x(v) = X = v
+  fn get_y() = Y; fn set_y(v) = Y = v
+  fn get_vx() = Vx; fn set_vx(v) = Vx = v
+  fn get_vy() = Vy; fn set_vy(v) = Vy = v
+  fn get_radius() = Radius; fn set_radius(v) = Radius = v
+  fn get_color() = Color; fn set_color(v) = Color = v
+  fn get_maxHp() = MaxHp; fn set_maxHp(v) = MaxHp = v
+  fn get_hp() = Hp; fn set_hp(v) = Hp = v
+  fn get_speed() = Speed; fn set_speed(v) = Speed = v
+  fn get_contactDamage() = ContactDamage; fn set_contactDamage(v) = ContactDamage = v
+  fn get_xpValue() = XpValue; fn set_xpValue(v) = XpValue = v
+  fn get_scoreValue() = ScoreValue; fn set_scoreValue(v) = ScoreValue = v
+  fn get_status() = Status; fn set_status(v) = Status = v
+  fn get_shootTimer() = ShootTimer; fn set_shootTimer(v) = ShootTimer = v
+  fn get_stateTimer() = StateTimer; fn set_stateTimer(v) = StateTimer = v
+  fn get_chargeTimer() = ChargeTimer; fn set_chargeTimer(v) = ChargeTimer = v
+  fn get_charging() = Charging; fn set_charging(v) = Charging = v
+  fn get_chargeAngle() = ChargeAngle; fn set_chargeAngle(v) = ChargeAngle = v
+  fn get_wobblePhase() = WobblePhase; fn set_wobblePhase(v) = WobblePhase = v
+  fn get_spawnTimer() = SpawnTimer; fn set_spawnTimer(v) = SpawnTimer = v
+  fn get_hitFlash() = HitFlash; fn set_hitFlash(v) = HitFlash = v
+  fn get_dead() = Dead; fn set_dead(v) = Dead = v
+  fn get_angle() = Angle; fn set_angle(v) = Angle = v
   fn constructor(x:int, y:int, type:Option[str] = "scarab", floor:unknown = 1):
-    this.Id = -Enemy._enemyId
+    Id = -Enemy._enemyId
     if type != nil and GameData.Enemies.Has(type):
-      this.Type = type
+      Type = type
     else:
-      this.Type = "scarab"
-    let def = GameData.Enemies.Get(this.Type) ?? GameData.Enemies.Get("scarab")
+      Type = "scarab"
+    let def = GameData.Enemies.Get(Type) ?? GameData.Enemies.Get("scarab")
     if floor > 0:
-      this.Floor = floor
+      Floor = floor
     else:
-      this.Floor = 1
-    this.X = x
-    this.Y = y
-    this.Radius = def.Radius
-    this.Color = def.Color
-    this.MaxHp = def.Hp + def.HpPerFloor * this.Floor - 1
-    this.Hp = this.MaxHp
-    this.Speed = def.Speed
-    this.ContactDamage = def.Dmg + def.DmgPerFloor * this.Floor - 1
-    this.XpValue = def.Xp
-    this.ScoreValue = def.Score
-    this.Status = nil
-    this.ShootTimer = Rng.Shared.range(0.8, 2.6)
-    this.WobblePhase = Rng.Shared.angle()
-  fn get_Vulnerable() = this.SpawnTimer <= 0 and not this.Dead
+      Floor = 1
+    X = x
+    Y = y
+    Radius = def.Radius
+    Color = def.Color
+    MaxHp = def.Hp + def.HpPerFloor * Floor - 1
+    Hp = MaxHp
+    Speed = def.Speed
+    ContactDamage = def.Dmg + def.DmgPerFloor * Floor - 1
+    XpValue = def.Xp
+    ScoreValue = def.Score
+    Status = nil
+    ShootTimer = Rng.Shared.range(0.8, 2.6)
+    WobblePhase = Rng.Shared.angle()
+  fn get_Vulnerable() = SpawnTimer <= 0 and not Dead
   fn get_vulnerable() = this.Vulnerable
   fn Update(dt:int, target:SnakePlayer, world:World) :
     if not target or not world:
       ret
-    if this.SpawnTimer > 0:
-      this.SpawnTimer = this.SpawnTimer - dt
+    if SpawnTimer > 0:
+      SpawnTimer -= dt
       ret
-    if this.HitFlash > 0:
-      this.HitFlash = Math.max(0, this.HitFlash - dt * 6)
-    let burn = this.Status.Update(dt)
+    if HitFlash > 0:
+      HitFlash = Math.max(0, HitFlash - dt * 6)
+    let burn = Status.Update(dt)
     if burn > 0:
       this.ApplyDamage(burn, false)
-    if this.Dead != nil:
+    if Dead != nil:
       ret
-    if this.Status.Immobile != nil:
+    if Status.Immobile != nil:
       ret
-    if this.StasisTimer > 0:
-      this.StasisTimer = Math.max(0, this.StasisTimer - dt)
-    let stasisMult = this.StasisTimer > 0 and 0.2 or 1
-    let speedMult = this.Status.SpeedMult * stasisMult * world.TimeScale != 0 and world.TimeScale or 1
+    if StasisTimer > 0:
+      StasisTimer = Math.max(0, StasisTimer - dt)
+    let stasisMult = StasisTimer > 0 and 0.2 or 1
+    let speedMult = Status.SpeedMult * stasisMult * world.TimeScale != 0 and world.TimeScale or 1
     let tx = target.X ?? target.x
     let ty = target.Y ?? target.y
-    let dx = tx - this.X
-    let dy = ty - this.Y
+    let dx = tx - X
+    let dy = ty - Y
     let dist = MathX.safeLen(dx, dy)
     let ux = dx / dist
     let uy = dy / dist
-    this.Angle = Math.atan2(dy, dx)
-    let pad = this.Radius
+    Angle = Math.atan2(dy, dx)
+    let pad = Radius
     let aw = world.ArenaW ?? world.arenaW
     let ah = world.ArenaH ?? world.arenaH
-    this.X = MathX.clamp(this.X, pad, aw - pad)
-    this.Y = MathX.clamp(this.Y, pad, ah - pad)
+    X = MathX.clamp(X, pad, aw - pad)
+    Y = MathX.clamp(Y, pad, ah - pad)
   fn update(dt:int, target:SnakePlayer, world:World) :
     this.Update(dt, target, world)
   fn ApplyDamage(amount:int, showFlash:unknown = true) -> bool:
-    if this.Dead or this.SpawnTimer > 0:
+    if Dead or SpawnTimer > 0:
       ret false
-    let dmg = amount * this.Status.DamageTakenMult
-    this.Hp = this.Hp - dmg
+    let dmg = amount * Status.DamageTakenMult
+    Hp -= dmg
     if showFlash != nil:
-      this.HitFlash = 1
-    if this.Hp <= 0:
-      this.Hp = 0
-      this.Dead = true
+      HitFlash = 1
+    if Hp <= 0:
+      Hp = 0
+      Dead = true
       ret true
     false
   fn applyDamage(amount:int, showFlash:unknown = true) -> bool = this.ApplyDamage(amount, showFlash)
   fn TakeDamage(amount:int, _source:unknown) -> int:
-    this.SpawnTimer = 0
-    let before = this.Hp
+    SpawnTimer = 0
+    let before = Hp
     this.ApplyDamage(amount, true)
-    before - this.Hp
+    before - Hp
   fn takeDamage(amount:int, source:unknown) -> int = this.TakeDamage(amount, source)

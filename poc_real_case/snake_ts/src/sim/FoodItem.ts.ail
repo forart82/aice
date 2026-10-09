@@ -8,69 +8,69 @@ pub class FoodItem:
   X:int, Y:int, Type:str, Color:str, XpValue:int
   ScoreValue:int, Radius:int, HealAmount:int, Vx:int, Vy:int
   Pulse:int, SpawnScale:int, Life:int, Dead:bool
-  fn get_x() = this.X; fn set_x(v) = this.X = v
-  fn get_y() = this.Y; fn set_y(v) = this.Y = v
-  fn get_type() = this.Type; fn set_type(v) = this.Type = v
-  fn get_color() = this.Color; fn set_color(v) = this.Color = v
-  fn get_xpValue() = this.XpValue; fn set_xpValue(v) = this.XpValue = v
-  fn get_scoreValue() = this.ScoreValue; fn set_scoreValue(v) = this.ScoreValue = v
-  fn get_radius() = this.Radius; fn set_radius(v) = this.Radius = v
-  fn get_healAmount() = this.HealAmount; fn set_healAmount(v) = this.HealAmount = v
-  fn get_vx() = this.Vx; fn set_vx(v) = this.Vx = v
-  fn get_vy() = this.Vy; fn set_vy(v) = this.Vy = v
-  fn get_pulse() = this.Pulse; fn set_pulse(v) = this.Pulse = v
-  fn get_spawnScale() = this.SpawnScale; fn set_spawnScale(v) = this.SpawnScale = v
-  fn get_life() = this.Life; fn set_life(v) = this.Life = v
-  fn get_dead() = this.Dead; fn set_dead(v) = this.Dead = v
+  fn get_x() = X; fn set_x(v) = X = v
+  fn get_y() = Y; fn set_y(v) = Y = v
+  fn get_type() = Type; fn set_type(v) = Type = v
+  fn get_color() = Color; fn set_color(v) = Color = v
+  fn get_xpValue() = XpValue; fn set_xpValue(v) = XpValue = v
+  fn get_scoreValue() = ScoreValue; fn set_scoreValue(v) = ScoreValue = v
+  fn get_radius() = Radius; fn set_radius(v) = Radius = v
+  fn get_healAmount() = HealAmount; fn set_healAmount(v) = HealAmount = v
+  fn get_vx() = Vx; fn set_vx(v) = Vx = v
+  fn get_vy() = Vy; fn set_vy(v) = Vy = v
+  fn get_pulse() = Pulse; fn set_pulse(v) = Pulse = v
+  fn get_spawnScale() = SpawnScale; fn set_spawnScale(v) = SpawnScale = v
+  fn get_life() = Life; fn set_life(v) = Life = v
+  fn get_dead() = Dead; fn set_dead(v) = Dead = v
   fn constructor(x:int, y:int, type:str):
-    this.X = x
-    this.Y = y
+    X = x
+    Y = y
     if GameData.Foods.Has(type):
-      this.Type = type
+      Type = type
     else:
-      this.Type = "apple"
-    let def = GameData.Foods.Get(this.Type) ?? GameData.Foods.Get("apple")
-    this.Color = def.Color
-    this.XpValue = def.Xp
-    this.ScoreValue = def.Score
-    this.Radius = def.Radius
-    this.HealAmount = def.Heal
-    this.Vx = Rng.Shared.range(-30, 30)
-    this.Vy = Rng.Shared.range(-30, 30)
-    this.Pulse = Rng.Shared.angle()
-    this.SpawnScale = 0
-    this.Life = 0
-    this.Dead = false
+      Type = "apple"
+    let def = GameData.Foods.Get(Type) ?? GameData.Foods.Get("apple")
+    Color = def.Color
+    XpValue = def.Xp
+    ScoreValue = def.Score
+    Radius = def.Radius
+    HealAmount = def.Heal
+    Vx = Rng.Shared.range(-30, 30)
+    Vy = Rng.Shared.range(-30, 30)
+    Pulse = Rng.Shared.angle()
+    SpawnScale = 0
+    Life = 0
+    Dead = false
   fn Cook() -> bool:
-    if this.Type != "apple":
+    if Type != "apple":
       ret false
-    this.Type = "golden"
+    Type = "golden"
     let def = GameData.Foods.Get("golden")
-    this.Color = def.Color
-    this.XpValue = def.Xp
-    this.ScoreValue = def.Score
-    this.Radius = def.Radius
+    Color = def.Color
+    XpValue = def.Xp
+    ScoreValue = def.Score
+    Radius = def.Radius
     true
   fn cook() -> bool = this.Cook()
   fn Update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) :
-    this.Pulse = this.Pulse + dt * 4.2
-    this.Life = this.Life + dt
-    if this.SpawnScale < 1:
-      this.SpawnScale = Math.min(1, this.SpawnScale + dt * 5)
-    let dx = px - this.X
-    let dy = py - this.Y
+    Pulse += dt * 4.2
+    Life += dt
+    if SpawnScale < 1:
+      SpawnScale = Math.min(1, SpawnScale + dt * 5)
+    let dx = px - X
+    let dy = py - Y
     let dist = MathX.safeLen(dx, dy)
     if dist < magnetRadius:
       let force = 1 - dist / magnetRadius * 620
-      this.Vx = this.Vx + dx / dist * force * dt
-      this.Vy = this.Vy + dy / dist * force * dt
+      Vx += dx / dist * force * dt
+      Vy += dy / dist * force * dt
     if extraPull > 0:
-      this.Vx = this.Vx + dx / dist * extraPull * dt
-      this.Vy = this.Vy + dy / dist * extraPull * dt
-    this.X = this.X + this.Vx * dt
-    this.Y = this.Y + this.Vy * dt
+      Vx += dx / dist * extraPull * dt
+      Vy += dy / dist * extraPull * dt
+    X += Vx * dt
+    Y += Vy * dt
     let drag = MathX.decay(0.92, dt)
-    this.Vx = this.Vx * drag
-    this.Vy = this.Vy * drag
+    Vx *= drag
+    Vy *= drag
   fn update(dt:int, px:int, py:int, magnetRadius:int, extraPull:int) :
     this.Update(dt, px, py, magnetRadius, extraPull)

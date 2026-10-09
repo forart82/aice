@@ -712,6 +712,25 @@ const ACTIVE: bool = true`;
       const mod = parse(src, "Synth.ts.ail");
       expect(mod.path).toBe("src/audio/Synth.ts");
     });
+
+    it("Step 19: parses compound assignment operators (+=, -=, *=, /=, %=)", () => {
+      const src = `fn update(x:int):
+  x += 5
+  x -= 2
+  x *= 3
+  x /= 2
+  x %= 4`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      if (fn.body.kind === "Block") {
+        const stmts = fn.body.statements as any[];
+        expect(stmts[0].op).toBe("+=");
+        expect(stmts[1].op).toBe("-=");
+        expect(stmts[2].op).toBe("*=");
+        expect(stmts[3].op).toBe("/=");
+        expect(stmts[4].op).toBe("%=");
+      }
+    });
   });
 
   describe("Error Handling", () => {

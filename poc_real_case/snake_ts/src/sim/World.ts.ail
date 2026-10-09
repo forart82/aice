@@ -23,37 +23,37 @@ pub class World:
   ChronoScale = 1
   Game: GameEngine
   _combat: Option[CombatSystem]
-  fn get_Boss() = this.ActiveBosses[0] or nil
+  fn get_Boss() = ActiveBosses[0] or nil
   fn set_Boss(v:Option[Boss]) :
     if v != nil:
-      this.ActiveBosses = [v]
+      ActiveBosses = [v]
     else:
-      this.ActiveBosses = []
-  fn get_Bosses() = this.ActiveBosses; fn set_Bosses(v) = this.ActiveBosses = v
-  fn get_VacuumTimer() = this._vacuumTimer
+      ActiveBosses = []
+  fn get_Bosses() = ActiveBosses; fn set_Bosses(v) = ActiveBosses = v
+  fn get_VacuumTimer() = _vacuumTimer
   fn set_VacuumTimer(v:int) :
-    this._vacuumTimer = v
-    if this.Game != nil:
-      this.Game.VacuumTimer = v
-  fn get_player() = this.Player; fn set_player(v) = this.Player = v
-  fn get_foods() = this.Foods; fn set_foods(v) = this.Foods = v
-  fn get_enemies() = this.Enemies; fn set_enemies(v) = this.Enemies = v
-  fn get_projectiles() = this.Projectiles; fn set_projectiles(v) = this.Projectiles = v
-  fn get_hazards() = this.Hazards; fn set_hazards(v) = this.Hazards = v
+    _vacuumTimer = v
+    if Game != nil:
+      Game.VacuumTimer = v
+  fn get_player() = Player; fn set_player(v) = Player = v
+  fn get_foods() = Foods; fn set_foods(v) = Foods = v
+  fn get_enemies() = Enemies; fn set_enemies(v) = Enemies = v
+  fn get_projectiles() = Projectiles; fn set_projectiles(v) = Projectiles = v
+  fn get_hazards() = Hazards; fn set_hazards(v) = Hazards = v
   fn get_boss() = this.Boss; fn set_boss(v) = this.Boss = v
-  fn get_activeBosses() = this.ActiveBosses; fn set_activeBosses(v) = this.ActiveBosses = v
+  fn get_activeBosses() = ActiveBosses; fn set_activeBosses(v) = ActiveBosses = v
   fn get_bosses() = this.Bosses; fn set_bosses(v) = this.Bosses = v
-  fn get_arenaW() = this.ArenaW; fn set_arenaW(v) = this.ArenaW = v
-  fn get_arenaH() = this.ArenaH; fn set_arenaH(v) = this.ArenaH = v
-  fn get_timeScale() = this.TimeScale; fn set_timeScale(v) = this.TimeScale = v
+  fn get_arenaW() = ArenaW; fn set_arenaW(v) = ArenaW = v
+  fn get_arenaH() = ArenaH; fn set_arenaH(v) = ArenaH = v
+  fn get_timeScale() = TimeScale; fn set_timeScale(v) = TimeScale = v
   fn get_vacuumTimer() = this.VacuumTimer; fn set_vacuumTimer(v) = this.VacuumTimer = v
-  fn get_chronoTimer() = this.ChronoTimer; fn set_chronoTimer(v) = this.ChronoTimer = v
-  fn get_nearestFood() = this.NearestFood; fn set_nearestFood(v) = this.NearestFood = v
-  fn get_chronoScale() = this.ChronoScale; fn set_chronoScale(v) = this.ChronoScale = v
-  fn get_game() = this.Game; fn set_game(v) = this.Game = v
-  fn get_helmetDrops() = this.HelmetDrops; fn set_helmetDrops(v) = this.HelmetDrops = v
-  fn get_combat() = this._combat or this.Game?.Combat; fn set_combat(v) = this._combat = v
-  fn get_Combat() = this._combat or this.Game?.Combat; fn set_Combat(v) = this._combat = v
+  fn get_chronoTimer() = ChronoTimer; fn set_chronoTimer(v) = ChronoTimer = v
+  fn get_nearestFood() = NearestFood; fn set_nearestFood(v) = NearestFood = v
+  fn get_chronoScale() = ChronoScale; fn set_chronoScale(v) = ChronoScale = v
+  fn get_game() = Game; fn set_game(v) = Game = v
+  fn get_helmetDrops() = HelmetDrops; fn set_helmetDrops(v) = HelmetDrops = v
+  fn get_combat() = _combat or Game?.Combat; fn set_combat(v) = _combat = v
+  fn get_Combat() = _combat or Game?.Combat; fn set_Combat(v) = _combat = v
   static fn getPlayer(w:Option[World]) -> SnakePlayer:
     if not w:
       ret nil

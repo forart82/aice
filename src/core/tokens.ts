@@ -83,6 +83,11 @@ export type TokenKind =
   | "QUESTION_DOT" // ?.
   // Assignment & Connectors
   | "EQUAL" // =
+  | "PLUS_EQUAL" // +=
+  | "MINUS_EQUAL" // -=
+  | "STAR_EQUAL" // *=
+  | "SLASH_EQUAL" // /=
+  | "PERCENT_EQUAL" // %=
   | "ARROW" // ->
   | "FAT_ARROW" // =>
   | "COLON_COLON" // ::

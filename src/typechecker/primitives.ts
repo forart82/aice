@@ -154,6 +154,10 @@ export function getMethodType(receiver: Type, method: string): Type | null {
           [
             { name: "start", type: TYPE_INT },
             { name: "deleteCount", type: TYPE_INT, optional: true },
+            { name: "item1", type: elemType, optional: true },
+            { name: "item2", type: elemType, optional: true },
+            { name: "item3", type: elemType, optional: true },
+            { name: "item4", type: elemType, optional: true },
           ],
           receiver,
         );
