@@ -264,6 +264,21 @@ export class TypeScriptEmitter {
     this.ctx.writeLine(`${exp}class ${c.name}${typeParams}${ext}${impl} {`);
     this.ctx.indent();
 
+    if (c.primaryConstructor && c.primaryConstructor.length > 0) {
+      const hasCtor = c.methods.some((m) => m.name === "constructor");
+      if (!hasCtor) {
+        const ctorParams = c.primaryConstructor
+          .map((p) => {
+            const ro = p.isReadonly ? "readonly " : "";
+            const pub = p.isPub !== false ? "public " : "";
+            const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+            return `${pub}${ro}${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+          })
+          .join(", ");
+        this.ctx.writeLine(`constructor(${ctorParams}) {}`);
+      }
+    }
+
     for (const p of c.properties) {
       const pNodeId = `field:${c.name}.${p.name}`;
       this.ctx.emitLeadingTrivia(pNodeId);

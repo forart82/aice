@@ -1,9 +1,6 @@
 # snake_pp.header.Game.h
 
-class Game:
-  timePerFrame: float = 0.0166667
-  timeSinceLastUpdate: float = 0.0
-  isRunning: bool = true
+class Game(timePerFrame:float = 0.0166667, timeSinceLastUpdate:float = 0.0, isRunning:bool = true):
 
   fn run() -> void:
     ret

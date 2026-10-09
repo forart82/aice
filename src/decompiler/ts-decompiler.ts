@@ -411,6 +411,7 @@ export class TsDecompiler {
 
     const properties: PropertyDecl[] = [];
     const methods: MethodDecl[] = [];
+    let primaryConstructor: ParamDecl[] | undefined;
 
     for (const member of stmt.members) {
       if (ts.isPropertyDeclaration(member)) {
@@ -444,6 +445,81 @@ export class TsDecompiler {
       } else if (ts.isConstructorDeclaration(member)) {
         const mNodeId = `method:${name}.constructor`;
         this.extractComments(member, mNodeId);
+
+        const hasParamProps = member.parameters.some((p) =>
+          p.modifiers?.some(
+            (m) =>
+              m.kind === ts.SyntaxKind.PublicKeyword ||
+              m.kind === ts.SyntaxKind.ReadonlyKeyword
+          )
+        );
+        const isEmptyBody = !member.body || member.body.statements.length === 0;
+
+        if (hasParamProps && isEmptyBody) {
+          primaryConstructor = member.parameters.map((p) => {
+            const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
+            const isPub = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.PublicKeyword) ?? true;
+            const isRo = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            return {
+              name: pName,
+              typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
+              defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+              isPub,
+              isReadonly: isRo,
+              span: this.getSpan(p),
+            };
+          });
+          continue;
+        }
+
+        let isSimplePropertyAssignCtor = false;
+        if (member.body && member.body.statements.length === member.parameters.length && member.parameters.length > 0) {
+          const allAssignments = member.body.statements.every((s, idx) => {
+            if (!ts.isExpressionStatement(s) || !ts.isBinaryExpression(s.expression)) return false;
+            const bin = s.expression;
+            if (bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+            if (!ts.isPropertyAccessExpression(bin.left)) return false;
+            if (bin.left.expression.kind !== ts.SyntaxKind.ThisKeyword) return false;
+            const paramName = ts.isIdentifier(member.parameters[idx].name) ? member.parameters[idx].name.text : "";
+            const leftPropName = bin.left.name.text;
+            const rightName = ts.isIdentifier(bin.right) ? bin.right.text : "";
+            return leftPropName === paramName && rightName === paramName;
+          });
+          if (allAssignments) {
+            const propMap = new Map(properties.map((p) => [p.name, p]));
+            if (member.parameters.every((p) => ts.isIdentifier(p.name) && propMap.has(p.name.text))) {
+              isSimplePropertyAssignCtor = true;
+            }
+          }
+        }
+
+        if (isSimplePropertyAssignCtor) {
+          const propMap = new Map(properties.map((p) => [p.name, p]));
+          const assignedPropNames = new Set<string>();
+          primaryConstructor = member.parameters.map((p) => {
+            const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
+            assignedPropNames.add(pName);
+            const matchedProp = propMap.get(pName);
+            return {
+              name: pName,
+              typeAnnotation: p.type
+                ? this.convertTypeNode(p.type)
+                : matchedProp?.typeAnnotation ?? this.makePrimitive("any"),
+              defaultValue: p.initializer
+                ? this.convertExpression(p.initializer)
+                : matchedProp?.initialValue,
+              isPub: true,
+              isReadonly: matchedProp?.isReadonly ?? false,
+              span: this.getSpan(p),
+            };
+          });
+          for (let i = properties.length - 1; i >= 0; i--) {
+            if (assignedPropNames.has(properties[i].name)) {
+              properties.splice(i, 1);
+            }
+          }
+          continue;
+        }
 
         const params: ParamDecl[] = member.parameters.map((p) => {
           const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
@@ -624,6 +700,7 @@ export class TsDecompiler {
       name,
       isExported,
       typeParams,
+      primaryConstructor,
       extends: extendsName,
       implements: implementsList.length > 0 ? implementsList : undefined,
       properties,

@@ -967,6 +967,55 @@ export class Parser {
       this.consume("RBRACKET", "Expected ']' after type parameters");
     }
 
+    let primaryConstructor: ParamDecl[] | undefined;
+    if (this.check("LPAREN")) {
+      this.advance();
+      primaryConstructor = [];
+      while (!this.check("RPAREN") && !this.check("EOF")) {
+        const pSpan = this.current().span;
+        let isPub = false;
+        let isReadonly = false;
+        let isMut = false;
+        if (this.check("PUB")) {
+          isPub = true;
+          this.advance();
+        }
+        if (this.check("READONLY")) {
+          isReadonly = true;
+          this.advance();
+        } else if (this.check("MUT")) {
+          isMut = true;
+          this.advance();
+        }
+        const pName = this.parseContextualIdentOrString("Expected parameter name");
+        this.consume("COLON", "Expected ':' after parameter name");
+        const pType = this.parseTypeExpr();
+
+        let defaultValue: Expr | undefined;
+        if (this.check("EQUAL")) {
+          this.advance();
+          defaultValue = this.parseExpr();
+        }
+
+        primaryConstructor.push({
+          name: pName,
+          typeAnnotation: pType,
+          defaultValue,
+          isPub,
+          isReadonly,
+          isMut,
+          span: mergeSpans(pSpan, defaultValue ? defaultValue.span : pType.span),
+        });
+
+        if (this.check("COMMA")) {
+          this.advance();
+        } else {
+          break;
+        }
+      }
+      this.consume("RPAREN", "Expected ')' after primary constructor parameters");
+    }
+
     let extendsName: string | undefined;
     if (this.check("EXTENDS")) {
       this.advance();
@@ -983,85 +1032,93 @@ export class Parser {
       }
     }
 
+    let hasBody = false;
     if (this.check("COLON")) {
       this.advance();
       this.consumeStatementSeparator();
-    } else if (!this.check("LBRACE")) {
+      hasBody = true;
+    } else if (this.check("LBRACE")) {
+      hasBody = true;
+    } else if (!primaryConstructor) {
       throw new ParserError("Expected ':' or '{' after class header", this.current().span);
     }
 
     const properties: PropertyDecl[] = [];
     const methods: MethodDecl[] = [];
 
-    const hasIndent = this.check("INDENT");
-    if (hasIndent) {
-      this.advance();
-    } else if (this.check("LBRACE")) {
-      this.advance();
-    }
-
-    while (!this.check("EOF")) {
-      this.consumeStatementSeparator();
-      if (hasIndent && (this.check("DEDENT") || this.check("EOF"))) break;
-      if (!hasIndent && (this.check("RBRACE") || this.check("EOF"))) break;
-
-      if (this.check("IDENT") && this.current().value === "pass") {
+    if (hasBody) {
+      const hasIndent = this.check("INDENT");
+      const hasBrace = this.check("LBRACE");
+      if (hasIndent) {
         this.advance();
+      } else if (hasBrace) {
+        this.advance();
+      }
+
+      while (!this.check("EOF")) {
         this.consumeStatementSeparator();
-        continue;
+        if (hasIndent && (this.check("DEDENT") || this.check("EOF"))) break;
+        if (hasBrace && (this.check("RBRACE") || this.check("EOF"))) break;
+        if (!hasIndent && !hasBrace && (this.check("NEWLINE") || this.check("EOF"))) break;
+
+        if (this.check("IDENT") && this.current().value === "pass") {
+          this.advance();
+          this.consumeStatementSeparator();
+          continue;
+        }
+
+        let isStatic = false;
+        if (this.check("STATIC")) {
+          isStatic = true;
+          this.advance();
+        }
+
+        let isReadonly = false;
+        if (this.check("READONLY")) {
+          isReadonly = true;
+          this.advance();
+        }
+
+        let isAsync = false;
+        if (this.check("ASYNC")) {
+          isAsync = true;
+          this.advance();
+        }
+
+        const isAccessor =
+          this.check("IDENT") &&
+          (this.current().value === "get" || this.current().value === "set") &&
+          (this.isIdentOrKeyword(this.peek()) || this.peek().kind === "STRING");
+
+        if (this.check("FN") || isAccessor) {
+          const accessor = isAccessor ? (this.current().value as "get" | "set") : undefined;
+          const method = this.parseMethodDecl(isStatic, isAsync, accessor);
+          methods.push(method);
+        } else if (
+          this.check("IDENT") ||
+          this.check("STRING") ||
+          this.check("STATE") ||
+          this.check("TYPE") ||
+          this.check("VAL") ||
+          this.check("MUT") ||
+          this.check("FROM")
+        ) {
+          const prop = this.parsePropertyDecl(isStatic, isReadonly);
+          properties.push(prop);
+        } else {
+          throw new ParserError(
+            `Unexpected token '${this.current().kind}' (${this.current().value}) in class body`,
+            this.current().span,
+          );
+        }
+        this.consumeStatementSeparator();
       }
 
-      let isStatic = false;
-      if (this.check("STATIC")) {
-        isStatic = true;
+      if (hasIndent && this.check("DEDENT")) {
+        this.advance();
+      } else if (hasBrace && this.check("RBRACE")) {
         this.advance();
       }
-
-      let isReadonly = false;
-      if (this.check("READONLY")) {
-        isReadonly = true;
-        this.advance();
-      }
-
-      let isAsync = false;
-      if (this.check("ASYNC")) {
-        isAsync = true;
-        this.advance();
-      }
-
-      const isAccessor =
-        this.check("IDENT") &&
-        (this.current().value === "get" || this.current().value === "set") &&
-        (this.isIdentOrKeyword(this.peek()) || this.peek().kind === "STRING");
-
-      if (this.check("FN") || isAccessor) {
-        const accessor = isAccessor ? (this.current().value as "get" | "set") : undefined;
-        const method = this.parseMethodDecl(isStatic, isAsync, accessor);
-        methods.push(method);
-      } else if (
-        this.check("IDENT") ||
-        this.check("STRING") ||
-        this.check("STATE") ||
-        this.check("TYPE") ||
-        this.check("VAL") ||
-        this.check("MUT") ||
-        this.check("FROM")
-      ) {
-        const prop = this.parsePropertyDecl(isStatic, isReadonly);
-        properties.push(prop);
-      } else {
-        throw new ParserError(
-          `Unexpected token '${this.current().kind}' (${this.current().value}) in class body`,
-          this.current().span,
-        );
-      }
-      this.consumeStatementSeparator();
-    }
-
-    if (hasIndent && this.check("DEDENT")) {
-      this.advance();
-    } else if (!hasIndent && this.check("RBRACE")) {
-      this.advance();
     }
 
     const endSpan = this.current().span;
@@ -1070,6 +1127,7 @@ export class Parser {
       name,
       isExported,
       typeParams,
+      primaryConstructor,
       extends: extendsName,
       implements: implementsList.length > 0 ? implementsList : undefined,
       properties,

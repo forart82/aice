@@ -6,16 +6,7 @@ enum Direction:
   Right
   Down
 
-class Snake:
-  size: int = 3
-  speed: float = 0.1
-  time: float = 0.0
-  direction: Direction = Direction.Right
-  isMoving: bool = false
-  canSwitchDirection: bool = true
-  score: float = 0.0
-  speedCounter: float = 0.1
-  isDead: bool = false
+class Snake(size:int = 3, speed:float = 0.1, time:float = 0.0, direction:Direction = Direction.Right, isMoving:bool = false, canSwitchDirection:bool = true, score:float = 0.0, speedCounter:float = 0.1, isDead:bool = false):
 
   fn switchMoving() -> void:
     this.isMoving = not this.isMoving

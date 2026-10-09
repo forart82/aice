@@ -194,6 +194,22 @@ export class CppEmitter {
     this.ctx.writeLine("public:");
     this.ctx.indent();
 
+    if (c.primaryConstructor && c.primaryConstructor.length > 0) {
+      const ctorParams = c.primaryConstructor
+        .map((p) => {
+          const typeStr = this.emitTypeExpr(p.typeAnnotation);
+          const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+          return `${typeStr} ${p.name}${def}`;
+        })
+        .join(", ");
+      const inits = c.primaryConstructor.map((p) => `${p.name}(${p.name})`).join(", ");
+      this.ctx.writeLine(`${c.name}(${ctorParams}) : ${inits} {}`);
+      for (const p of c.primaryConstructor) {
+        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+        this.ctx.writeLine(`${typeStr} ${p.name};`);
+      }
+    }
+
     // Emit methods
     for (const m of c.methods) {
       this.emitMethodDecl(m);

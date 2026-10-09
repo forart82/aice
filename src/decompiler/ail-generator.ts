@@ -227,10 +227,19 @@ export class AilGenerator {
 
     const pub = c.isExported ? "pub " : "";
     const typeParams = c.typeParams.length > 0 ? `[${c.typeParams.join(", ")}]` : "";
+    const primaryCtor = c.primaryConstructor && c.primaryConstructor.length > 0
+      ? `(${c.primaryConstructor.map((p) => {
+          const pPub = p.isPub ? "pub " : "";
+          const pRo = p.isReadonly ? "readonly " : "";
+          const pMut = p.isMut ? "mut " : "";
+          const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
+          return `${pPub}${pRo}${pMut}${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+        }).join(", ")})`
+      : "";
     const ext = c.extends ? ` extends ${c.extends}` : "";
     const impl = c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
 
-    this.writeLine(`${pub}class ${c.name}${typeParams}${ext}${impl}:`, nodeId);
+    this.writeLine(`${pub}class ${c.name}${typeParams}${primaryCtor}${ext}${impl}:`, nodeId);
     this.indent();
 
     if (c.properties.length === 0 && c.methods.length === 0) {

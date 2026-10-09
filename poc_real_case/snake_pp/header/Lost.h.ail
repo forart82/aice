@@ -1,8 +1,6 @@
 # snake_pp.header.Lost.h
 
-class Lost:
-  isActive: bool = false
-  isFontLoaded: bool = false
+class Lost(isActive:bool = false, isFontLoaded:bool = false):
 
   fn update(isDead:bool) -> void:
     ret

@@ -1,10 +1,6 @@
 # snake_pp.source.ScoreBoard.cpp
 
-class ScoreBoard:
-  isFontLoaded: bool = false
-  score: int = 0
-  speed: float = 0.0
-  size: int = 0
+class ScoreBoard(isFontLoaded:bool = false, score:int = 0, speed:float = 0.0, size:int = 0):
 
   fn update(scoreVal:int, speedVal:float, sizeVal:int) -> void:
     this.score = scoreVal

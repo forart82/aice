@@ -1,7 +1,6 @@
 # snake_pp.source.Grid.cpp
 
-class Grid:
-  numCells: int = 475
+class Grid(numCells:int = 475):
 
   fn createStartZone() -> void:
     let mut cellCounter:int = 0

@@ -134,6 +134,9 @@ export interface ParamDecl {
   name: string;
   typeAnnotation: TypeExpr;
   defaultValue?: Expr;
+  isPub?: boolean;
+  isReadonly?: boolean;
+  isMut?: boolean;
   span: Span;
 }
 
@@ -143,6 +146,7 @@ export interface ClassDecl {
   name: string;
   isExported: boolean;
   typeParams: string[];
+  primaryConstructor?: ParamDecl[];
   extends?: string;
   implements?: string[];
   properties: PropertyDecl[];

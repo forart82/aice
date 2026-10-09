@@ -250,6 +250,11 @@ export class TypeChecker {
 
     if (item.kind === "ClassDecl") {
       const fields = new Map<string, Type>();
+      if (item.primaryConstructor) {
+        for (const p of item.primaryConstructor) {
+          fields.set(p.name, this.resolveTypeExpr(p.typeAnnotation, env));
+        }
+      }
       for (const p of item.properties) {
         fields.set(p.name, p.typeAnnotation ? this.resolveTypeExpr(p.typeAnnotation, env) : TYPE_UNKNOWN);
       }
@@ -274,6 +279,12 @@ export class TypeChecker {
       const ctorMethod = item.methods.find((m) => m.name === "constructor");
       if (ctorMethod) {
         const ctorParams = ctorMethod.params.map((p) => ({
+          name: p.name,
+          type: this.resolveTypeExpr(p.typeAnnotation, env),
+        }));
+        env.define(item.name, makeFunctionType(ctorParams, clsType));
+      } else if (item.primaryConstructor && item.primaryConstructor.length > 0) {
+        const ctorParams = item.primaryConstructor.map((p) => ({
           name: p.name,
           type: this.resolveTypeExpr(p.typeAnnotation, env),
         }));
@@ -313,6 +324,12 @@ export class TypeChecker {
     } else if (item.kind === "ClassDecl") {
       const classEnv = env.extend();
       classEnv.define("this", { kind: "named", name: item.name });
+      if (item.primaryConstructor) {
+        for (const p of item.primaryConstructor) {
+          const pType = this.resolveTypeExpr(p.typeAnnotation, classEnv);
+          classEnv.define(p.name, pType, true);
+        }
+      }
       for (const m of item.methods) {
         const retType = m.returnType ? this.resolveTypeExpr(m.returnType, classEnv) : TYPE_VOID;
         const methodEnv = classEnv.extend(retType);

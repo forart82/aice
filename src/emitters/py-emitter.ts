@@ -150,7 +150,29 @@ export class PythonEmitter {
     this.ctx.writeLine(`class ${c.name}${ext}:`);
     this.ctx.indent();
 
-    if (c.properties.length > 0) {
+    const hasPrimaryCtor = !!(c.primaryConstructor && c.primaryConstructor.length > 0);
+
+    if (hasPrimaryCtor) {
+      const ctorParams = [
+        "self",
+        ...c.primaryConstructor!.map((p) => {
+          const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+          return `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+        }),
+      ].join(", ");
+      this.ctx.writeLine(`def __init__(${ctorParams}):`);
+      this.ctx.indent();
+      for (const p of c.primaryConstructor!) {
+        this.ctx.writeLine(`self.${p.name} = ${p.name}`);
+      }
+      for (const p of c.properties) {
+        const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : " = None";
+        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+        this.ctx.writeLine(`self.${p.name}${typeStr}${init}`);
+      }
+      this.ctx.dedent();
+      this.ctx.writeLine();
+    } else if (c.properties.length > 0) {
       this.ctx.writeLine("def __init__(self):");
       this.ctx.indent();
       for (const p of c.properties) {
@@ -162,7 +184,7 @@ export class PythonEmitter {
       this.ctx.writeLine();
     }
 
-    if (c.methods.length === 0 && c.properties.length === 0) {
+    if (c.methods.length === 0 && c.properties.length === 0 && !hasPrimaryCtor) {
       this.ctx.writeLine("pass");
     }
 
@@ -177,9 +199,16 @@ export class PythonEmitter {
   }
 
   private emitMethodDecl(m: MethodDecl): void {
-    const params = ["self", ...m.params.map((p) => `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}`)].join(", ");
+    const methodName = m.name === "constructor" ? "__init__" : m.name;
+    const params = [
+      "self",
+      ...m.params.map((p) => {
+        const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+        return `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+      }),
+    ].join(", ");
     const retType = m.returnType ? ` -> ${this.emitTypeExpr(m.returnType)}` : " -> None";
-    this.ctx.writeLine(`def ${m.name}(${params})${retType}:`);
+    this.ctx.writeLine(`def ${methodName}(${params})${retType}:`);
     this.ctx.indent();
     if (m.body.kind === "Block") {
       this.emitBlock(m.body);

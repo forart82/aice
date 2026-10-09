@@ -4,11 +4,7 @@ type Vector2f:
   x: float
   y: float
 
-class Point:
-  counter: int = 150
-  score: int = 0
-  posX: float = 0.0
-  posY: float = 0.0
+class Point(counter:int = 150, score:int = 0, posX:float = 0.0, posY:float = 0.0):
 
   fn init(x:float, y:float, scoreVal:int) -> void:
     this.posX = x

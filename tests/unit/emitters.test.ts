@@ -418,6 +418,25 @@ style .hero: sh: 0 4px 6px #000; w: 100%; h: 100vh; fz: 1.5rem; fw: 700; c: #f8f
       expect(out).toContain("align-items: center;");
       expect(out).toContain("gap: 1rem;");
     });
+
+    it("expands $token macros into standard CSS custom variables (Step 15)", () => {
+      const src = `style app: bg: $slate-950; c: $slate-100; sh: $shadow-sm; f: $font-sans; rad: $radius-md; trans: $transition-fast; z: $z-nav
+style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
+
+      const mod = parse(src, "tokens.css.ail");
+      const out = emitTarget(mod, "css");
+
+      expect(out).toContain("background-color: var(--color-slate-950);");
+      expect(out).toContain("color: var(--color-slate-100);");
+      expect(out).toContain("box-shadow: var(--shadow-sm);");
+      expect(out).toContain("font-family: var(--font-sans);");
+      expect(out).toContain("border-radius: var(--radius-md);");
+      expect(out).toContain("transition: var(--transition-fast);");
+      expect(out).toContain("z-index: var(--z-nav);");
+      expect(out).toContain("background-color: var(--color-indigo-500);");
+      expect(out).toContain("border: 1px solid var(--color-indigo-400);");
+      expect(out).toContain("box-shadow: var(--shadow-md);");
+    });
   });
 
   describe("HTML & TSX Emmet Layout Emission", () => {
@@ -556,4 +575,42 @@ style .hero: sh: 0 4px 6px #000; w: 100%; h: 100vh; fz: 1.5rem; fw: 700; c: #f8f
       expect(goOut).toContain("return x");
     });
   });
+
+  describe("Step 16: Primary Class Constructors & Inline Parameter Properties", () => {
+    it("emits TypeScript constructor parameter properties from primaryConstructor", () => {
+      const src = `class Point(pub x:!i, pub y:!i = 0):
+  fn distance() -> !f = 0.0`;
+      const mod = parse(src, "point.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+
+      expect(tsOut).toContain("class Point {");
+      expect(tsOut).toContain("constructor(public x: number, public y: number = 0) {}");
+      expect(tsOut).toContain("distance(): number {");
+    });
+
+    it("emits Python __init__ with assignments from primaryConstructor", () => {
+      const src = `class Point(x:!i, y:!i = 0):
+  fn distance() -> !f = 0.0`;
+      const mod = parse(src, "point.py.ail");
+      const pyOut = emitTarget(mod, "python");
+
+      expect(pyOut).toContain("class Point:");
+      expect(pyOut).toContain("def __init__(self, x: int, y: int = 0):");
+      expect(pyOut).toContain("self.x = x");
+      expect(pyOut).toContain("self.y = y");
+    });
+
+    it("emits C++ constructor initializer list and member variables from primaryConstructor", () => {
+      const src = `class Point(x:!i, y:!i = 0):
+  fn distance() -> !f = 0.0`;
+      const mod = parse(src, "point.cpp.ail");
+      const cppOut = emitTarget(mod, "cpp");
+
+      expect(cppOut).toContain("class Point {");
+      expect(cppOut).toContain("Point(int x, int y = 0) : x(x), y(y) {}");
+      expect(cppOut).toContain("int x;");
+      expect(cppOut).toContain("int y;");
+    });
+  });
 });
+

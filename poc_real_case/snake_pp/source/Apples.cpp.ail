@@ -9,10 +9,7 @@ enum AppleType:
   HalfSize
   ResetSize
 
-class Apples:
-  size: int = 7
-  activeCount: int = 7
-
+class Apples(size:int = 7, activeCount:int = 7):
   fn applyAppleEffect(appleType:AppleType, currentSize:int, currentSpeed:float) -> int:
     if appleType == AppleType.Grow:
       ret currentSize + 1

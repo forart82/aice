@@ -1,8 +1,6 @@
 # snake_pp.header.DebugBar.h
 
-class DebugBar:
-  isFontLoaded: bool = false
-  isActive: bool = false
+class DebugBar(isFontLoaded:bool = false, isActive:bool = false):
 
   fn update(timePerFrame:float, timeSinceLastUpdate:float) -> void:
     ret

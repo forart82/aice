@@ -616,6 +616,32 @@ fn test():
       expect(cls.methods[2].name).toBe("update");
     });
 
+    it("Step 16: parses primary class constructors with parameter properties", () => {
+      const src = `class Point(pub x:!i, pub y:!i = 0):
+  fn distance() -> !f = 0.0`;
+      const mod = parse(src, "point.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.kind).toBe("ClassDecl");
+      expect(cls.name).toBe("Point");
+      expect(cls.primaryConstructor).toBeDefined();
+      expect(cls.primaryConstructor).toHaveLength(2);
+      expect(cls.primaryConstructor![0].name).toBe("x");
+      expect(cls.primaryConstructor![0].isPub).toBe(true);
+      expect(cls.primaryConstructor![1].name).toBe("y");
+      expect(cls.primaryConstructor![1].defaultValue).toBeDefined();
+      expect(cls.methods).toHaveLength(1);
+    });
+
+    it("Step 16: parses inline primary constructor class without body", () => {
+      const src = `class Vector2D(x:!f, y:!f)`;
+      const mod = parse(src, "vec.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.name).toBe("Vector2D");
+      expect(cls.primaryConstructor).toHaveLength(2);
+      expect(cls.properties).toHaveLength(0);
+      expect(cls.methods).toHaveLength(0);
+    });
+
     it("parses top-level const and pub let module declarations", () => {
       const src = `const DEFAULT_LIVES: int = 3
 pub const MAX_HEALTH = 100
