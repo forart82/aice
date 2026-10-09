@@ -576,6 +576,45 @@ fn test():
       expect(style.properties[3]).toMatchObject({ property: "--spacing-4", value: "4px" });
       expect(style.properties[4]).toMatchObject({ property: "--spacing-8", value: "8px" });
     });
+
+    it("Step 18: parses HTML Emmet implicit tag inference and inline modifier _", () => {
+      const src = `component App():
+  ul.nav-menu:
+    .nav-item:
+      _.icon: "📊"
+      _.label: "Telemetry"
+  table.data-table:
+    tbody:
+      .row:
+        .cell: "Data"
+  button.submit-btn:
+    .btn-text: "Click"`;
+
+      const mod = parse(src, "app.html.ail");
+      const comp = mod.items[0] as ComponentDecl;
+      expect(comp.layout).toHaveLength(3);
+
+      // 1. ul -> li
+      const ul = comp.layout[0];
+      expect(ul.tag).toBe("ul");
+      const li = ul.children[0];
+      expect(li.tag).toBe("li");
+      expect(li.children[0].tag).toBe("span");
+      expect(li.children[1].tag).toBe("span");
+
+      // 2. table -> tbody -> tr -> td
+      const table = comp.layout[1];
+      const tbody = table.children[0];
+      const tr = tbody.children[0];
+      expect(tr.tag).toBe("tr");
+      const td = tr.children[0];
+      expect(td.tag).toBe("td");
+
+      // 3. button (phrasing) -> span
+      const btn = comp.layout[2];
+      expect(btn.tag).toBe("button");
+      expect(btn.children[0].tag).toBe("span");
+    });
   });
 
   describe("Step 8: Object-Oriented Class & Module-Level Constants", () => {

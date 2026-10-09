@@ -2126,14 +2126,14 @@ export class Parser {
     };
   }
 
-  private parseLayoutNode(): LayoutNode {
+  private parseLayoutNode(parentTag?: string): LayoutNode {
     const startSpan = this.current().span;
 
-    let tag = "div";
+    let tag: string | null = null;
     const classes: string[] = [];
     let id: string | null = null;
 
-    // 1. Selector shorthand (.class, #id) or explicit tag name
+    // 1. Selector shorthand (.class, #id) or explicit tag name / inline modifier (_)
     if (this.check("DOT")) {
       this.advance(); // consume '.'
       classes.push(this.parseCssKebabIdent());
@@ -2143,7 +2143,12 @@ export class Parser {
     } else if (this.check("HEX_COLOR")) {
       id = this.advance().value.slice(1);
     } else {
-      tag = this.parseContextualIdentOrString("Expected UI layout tag name");
+      const ident = this.parseContextualIdentOrString("Expected UI layout tag name");
+      if (ident === "_") {
+        tag = "span";
+      } else {
+        tag = ident;
+      }
     }
 
     // 2. Chained classes and/or ID: e.g. button.btn.btn-icon#btn-theme-toggle
@@ -2158,6 +2163,46 @@ export class Parser {
         id = this.advance().value.slice(1);
       } else {
         break;
+      }
+    }
+
+    // 3. Infer tag if omitted from parent context
+    if (!tag) {
+      if (parentTag) {
+        const lowerParent = parentTag.toLowerCase();
+        if (lowerParent === "ul" || lowerParent === "ol") {
+          tag = "li";
+        } else if (
+          lowerParent === "table" ||
+          lowerParent === "tbody" ||
+          lowerParent === "thead" ||
+          lowerParent === "tfoot"
+        ) {
+          tag = "tr";
+        } else if (lowerParent === "tr") {
+          tag = "td";
+        } else if (lowerParent === "select") {
+          tag = "option";
+        } else if (lowerParent === "dl") {
+          tag = "dt";
+        } else if (
+          lowerParent === "button" ||
+          lowerParent === "p" ||
+          lowerParent === "label" ||
+          lowerParent === "a" ||
+          lowerParent === "span" ||
+          /^h[1-6]$/.test(lowerParent) ||
+          lowerParent === "b" ||
+          lowerParent === "i" ||
+          lowerParent === "strong" ||
+          lowerParent === "em"
+        ) {
+          tag = "span";
+        } else {
+          tag = "div";
+        }
+      } else {
+        tag = "div";
       }
     }
 
@@ -2295,7 +2340,7 @@ export class Parser {
           this.consumeStatementSeparator();
           if (this.check("DEDENT") || this.check("EOF")) break;
 
-          children.push(this.parseLayoutNode());
+          children.push(this.parseLayoutNode(tag ?? undefined));
           this.consumeStatementSeparator();
         }
         this.consume("DEDENT");

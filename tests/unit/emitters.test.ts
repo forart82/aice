@@ -465,6 +465,28 @@ style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
       expect(out).toContain('<div className="card-container" id="featured-card">');
       expect(out).toContain('<h2 className="card-title">{title}</h2>');
     });
+
+    it("Step 18: emits contextual tags in HTML5 and TSX (ul -> li, table -> tr -> td, phrasing -> span, _ -> span)", () => {
+      const src = `component Layout():
+  ul.nav-menu:
+    .nav-item.active:
+      _.icon: "📊"
+  button.action-btn:
+    .label: "Run"`;
+
+      const mod = parse(src, "layout.html.ail");
+      const htmlOut = emitTarget(mod, "html");
+      expect(htmlOut).toContain('<ul class="nav-menu">');
+      expect(htmlOut).toContain('<li class="nav-item active">');
+      expect(htmlOut).toContain('<span class="icon">📊</span>');
+      expect(htmlOut).toContain('<button class="action-btn">');
+      expect(htmlOut).toContain('<span class="label">Run</span>');
+
+      const tsxOut = emitTarget(mod, "tsx");
+      expect(tsxOut).toContain('<ul className="nav-menu">');
+      expect(tsxOut).toContain('<li className="nav-item active">');
+      expect(tsxOut).toContain('<span className="icon">📊</span>');
+    });
   });
 
   describe("Step 10: Automatic Block-Body Trailing Return Inference", () => {

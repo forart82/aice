@@ -11,95 +11,95 @@ component EnterprisePortal():
       header.top-navbar:
         .navbar-brand-section:
           .brand-logo-wrapper:
-            span.brand-icon: "⚡"
-            span.brand-name: "AIL CloudOps"
-          span.badge.badge-env-prod: "PRODUCTION"
-          span.badge.badge-region: "us-east-1 (N. Virginia)"
+            _.brand-icon: "⚡"
+            _.brand-name: "AIL CloudOps"
+          _.badge.badge-env-prod: "PRODUCTION"
+          _.badge.badge-region: "us-east-1 (N. Virginia)"
         .navbar-search-section:
           .search-input-wrapper:
-            span.search-icon: "🔍"
+            _.search-icon: "🔍"
             input.search-input(type: "text", placeholder: "Search services, traces, metrics, deployments (Press ⌘K)")
-            span.shortcut-hint: "⌘K"
+            _.shortcut-hint: "⌘K"
         .navbar-actions-section:
           button.btn.btn-icon#btn-theme-toggle:
-            span.icon: "🌙"
+            _.icon: "🌙"
           button.btn.btn-icon.notification-bell#btn-notifications:
-            span.icon: "🔔"
-            span.notification-count-badge: "3"
+            _.icon: "🔔"
+            _.notification-count-badge: "3"
           .cluster-selector-dropdown:
-            span.cluster-status-dot.dot-online: "●"
-            span.cluster-label: "k8s-prod-us-east-core-01"
-            span.dropdown-chevron: "▾"
+            _.cluster-status-dot.dot-online: "●"
+            _.cluster-label: "k8s-prod-us-east-core-01"
+            _.dropdown-chevron: "▾"
           .user-profile-widget:
             .avatar-circle: "FA"
             .user-meta:
-              span.user-display-name: "Principal Staff SRE"
-              span.tenant-badge: "FinTech Platform Core"
+              _.user-display-name: "Principal Staff SRE"
+              _.tenant-badge: "FinTech Platform Core"
       .layout-workspace:
         aside.navigation-sidebar:
           .sidebar-section:
-            span.section-heading: "OBSERVABILITY"
+            _.section-heading: "OBSERVABILITY"
             ul.nav-menu:
-              li.nav-item.active:
-                span.nav-icon: "📊"
-                span.nav-label: "Live Telemetry"
-              li.nav-item:
-                span.nav-icon: "🌊"
-                span.nav-label: "Stream Pipelines"
-              li.nav-item:
-                span.nav-icon: "📡"
-                span.nav-label: "Service Mesh"
-              li.nav-item:
-                span.nav-icon: "🔍"
-                span.nav-label: "Distributed Traces"
-              li.nav-item:
-                span.nav-icon: "📝"
-                span.nav-label: "Structured Logs"
+              .nav-item.active:
+                _.nav-icon: "📊"
+                _.nav-label: "Live Telemetry"
+              .nav-item:
+                _.nav-icon: "🌊"
+                _.nav-label: "Stream Pipelines"
+              .nav-item:
+                _.nav-icon: "📡"
+                _.nav-label: "Service Mesh"
+              .nav-item:
+                _.nav-icon: "🔍"
+                _.nav-label: "Distributed Traces"
+              .nav-item:
+                _.nav-icon: "📝"
+                _.nav-label: "Structured Logs"
           .sidebar-section:
-            span.section-heading: "INFRASTRUCTURE"
+            _.section-heading: "INFRASTRUCTURE"
             ul.nav-menu:
-              li.nav-item:
-                span.nav-icon: "☸️"
-                span.nav-label: "Kubernetes Clusters"
-              li.nav-item:
-                span.nav-icon: "📦"
-                span.nav-label: "Pod Replicas"
-              li.nav-item:
-                span.nav-icon: "💾"
-                span.nav-label: "Storage Volumes"
-              li.nav-item:
-                span.nav-icon: "🌐"
-                span.nav-label: "Ingress Load Balancers"
+              .nav-item:
+                _.nav-icon: "☸️"
+                _.nav-label: "Kubernetes Clusters"
+              .nav-item:
+                _.nav-icon: "📦"
+                _.nav-label: "Pod Replicas"
+              .nav-item:
+                _.nav-icon: "💾"
+                _.nav-label: "Storage Volumes"
+              .nav-item:
+                _.nav-icon: "🌐"
+                _.nav-label: "Ingress Load Balancers"
           .sidebar-section:
-            span.section-heading: "INCIDENT RESPONSE"
+            _.section-heading: "INCIDENT RESPONSE"
             ul.nav-menu:
-              li.nav-item:
-                span.nav-icon: "🚨"
-                span.nav-label: "PagerDuty Alerts"
-                span.pill-badge-alert: "2 Active"
-              li.nav-item:
-                span.nav-icon: "📖"
-                span.nav-label: "Automated Runbooks"
-              li.nav-item:
-                span.nav-icon: "🛡️"
-                span.nav-label: "Chaos Engineering"
+              .nav-item:
+                _.nav-icon: "🚨"
+                _.nav-label: "PagerDuty Alerts"
+                _.pill-badge-alert: "2 Active"
+              .nav-item:
+                _.nav-icon: "📖"
+                _.nav-label: "Automated Runbooks"
+              .nav-item:
+                _.nav-icon: "🛡️"
+                _.nav-label: "Chaos Engineering"
           .sidebar-section:
-            span.section-heading: "GOVERNANCE & SETTINGS"
+            _.section-heading: "GOVERNANCE & SETTINGS"
             ul.nav-menu:
-              li.nav-item:
-                span.nav-icon: "🔐"
-                span.nav-label: "IAM & Access Roles"
-              li.nav-item:
-                span.nav-icon: "📜"
-                span.nav-label: "Compliance Audits"
-              li.nav-item:
-                span.nav-icon: "⚙️"
-                span.nav-label: "Platform Config"
+              .nav-item:
+                _.nav-icon: "🔐"
+                _.nav-label: "IAM & Access Roles"
+              .nav-item:
+                _.nav-icon: "📜"
+                _.nav-label: "Compliance Audits"
+              .nav-item:
+                _.nav-icon: "⚙️"
+                _.nav-label: "Platform Config"
           .sidebar-footer:
             .system-status-indicator:
-              span.status-pulse-dot: "●"
-              span.status-text: "All 42 Systems Operational"
-            span.agent-version: "AIL Runtime v2.4.0-rc3"
+              _.status-pulse-dot: "●"
+              _.status-text: "All 42 Systems Operational"
+            _.agent-version: "AIL Runtime v2.4.0-rc3"
         main.main-content-viewport:
           .page-header-row:
             .header-title-block:
@@ -107,63 +107,63 @@ component EnterprisePortal():
               p.page-subheading: "Real-time distributed stream ingestion, microservice P99 SLAs, and automated anomaly routing"
             .header-action-group:
               button.btn.btn-secondary#btn-export-telemetry:
-                span.btn-icon: "📥"
-                span.btn-text: "Export Telemetry (CSV)"
+                _.btn-icon: "📥"
+                _.btn-text: "Export Telemetry (CSV)"
               button.btn.btn-primary#btn-trigger-checkpoint:
-                span.btn-icon: "💾"
-                span.btn-text: "Trigger Checkpoint"
+                _.btn-icon: "💾"
+                _.btn-text: "Trigger Checkpoint"
               button.btn.btn-danger#btn-quarantine-mode:
-                span.btn-icon: "⚠️"
-                span.btn-text: "Quarantine Shards"
+                _.btn-icon: "⚠️"
+                _.btn-text: "Quarantine Shards"
           section.kpi-grid-container:
             .kpi-card:
               .kpi-top-row:
-                span.kpi-title: "INGESTION THROUGHPUT"
-                span.kpi-badge.badge-trend-up: "+14.6%"
+                _.kpi-title: "INGESTION THROUGHPUT"
+                _.kpi-badge.badge-trend-up: "+14.6%"
               .kpi-value-row:
-                span.kpi-metric-number: "842,510"
-                span.kpi-metric-unit: "events/sec"
+                _.kpi-metric-number: "842,510"
+                _.kpi-metric-unit: "events/sec"
               .kpi-progress-bar-track:
                 .kpi-progress-fill(style: "width: 78%")
               .kpi-bottom-legend:
-                span.kpi-subtitle: "Peak: 1,050,000 rps"
-                span.kpi-status-ok: "Nominal"
+                _.kpi-subtitle: "Peak: 1,050,000 rps"
+                _.kpi-status-ok: "Nominal"
             .kpi-card:
               .kpi-top-row:
-                span.kpi-title: "SERVICE MESH P99 LATENCY"
-                span.kpi-badge.badge-trend-down: "-3.2ms"
+                _.kpi-title: "SERVICE MESH P99 LATENCY"
+                _.kpi-badge.badge-trend-down: "-3.2ms"
               .kpi-value-row:
-                span.kpi-metric-number: "14.2"
-                span.kpi-metric-unit: "milliseconds"
+                _.kpi-metric-number: "14.2"
+                _.kpi-metric-unit: "milliseconds"
               .kpi-progress-bar-track:
                 .kpi-progress-fill.progress-fill-emerald(style: "width: 24%")
               .kpi-bottom-legend:
-                span.kpi-subtitle: "SLA Target: < 45.0ms"
-                span.kpi-status-ok: "Within SLO"
+                _.kpi-subtitle: "SLA Target: < 45.0ms"
+                _.kpi-status-ok: "Within SLO"
             .kpi-card:
               .kpi-top-row:
-                span.kpi-title: "ERROR BUDGET BURN RATE"
-                span.kpi-badge.badge-trend-stable: "0.02x"
+                _.kpi-title: "ERROR BUDGET BURN RATE"
+                _.kpi-badge.badge-trend-stable: "0.02x"
               .kpi-value-row:
-                span.kpi-metric-number: "99.994"
-                span.kpi-metric-unit: "% availability"
+                _.kpi-metric-number: "99.994"
+                _.kpi-metric-unit: "% availability"
               .kpi-progress-bar-track:
                 .kpi-progress-fill.progress-fill-blue(style: "width: 98%")
               .kpi-bottom-legend:
-                span.kpi-subtitle: "Budget Remaining: 89.4%"
-                span.kpi-status-ok: "30-Day Window"
+                _.kpi-subtitle: "Budget Remaining: 89.4%"
+                _.kpi-status-ok: "30-Day Window"
             .kpi-card:
               .kpi-top-row:
-                span.kpi-title: "ACTIVE STREAM WORKERS"
-                span.kpi-badge.badge-nodes: "128 / 128"
+                _.kpi-title: "ACTIVE STREAM WORKERS"
+                _.kpi-badge.badge-nodes: "128 / 128"
               .kpi-value-row:
-                span.kpi-metric-number: "100"
-                span.kpi-metric-unit: "% online"
+                _.kpi-metric-number: "100"
+                _.kpi-metric-unit: "% online"
               .kpi-progress-bar-track:
                 .kpi-progress-fill.progress-fill-purple(style: "width: 100%")
               .kpi-bottom-legend:
-                span.kpi-subtitle: "0 Failed Replicas"
-                span.kpi-status-ok: "Autoscaling Idle"
+                _.kpi-subtitle: "0 Failed Replicas"
+                _.kpi-status-ok: "Autoscaling Idle"
           section.toolbar-filter-section:
             .filter-control-group:
               label.filter-label: "Service Filter:"
@@ -191,7 +191,7 @@ component EnterprisePortal():
             .table-header-bar:
               .table-title-area:
                 h2.table-title: "Microservice Fleet Health & Latency Budget"
-                span.table-subtitle: "Auto-refreshed every 2000ms via WebSocket telemetry stream"
+                _.table-subtitle: "Auto-refreshed every 2000ms via WebSocket telemetry stream"
               .table-actions:
                 input.table-quick-search(type: "search", placeholder: "Quick filter table...")
             .table-responsive-wrapper:
@@ -211,12 +211,12 @@ component EnterprisePortal():
                     th: "ACTIONS"
                 tbody:
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "auth-identity-service"
-                      span.service-type-tag: "gRPC"
+                    .col-service-name:
+                      _.service-name-text: "auth-identity-service"
+                      _.service-type-tag: "gRPC"
                     td: "v3.18.2"
                     td:
-                      span.badge.badge-tier-0: "Tier 0"
+                      _.badge.badge-tier-0: "Tier 0"
                     td: "16 / 16"
                     td: "1.8ms"
                     td: "4.2ms"
@@ -224,16 +224,16 @@ component EnterprisePortal():
                     td: "0.001%"
                     td: "64,200 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "order-orchestrator-api"
-                      span.service-type-tag: "REST"
+                    .col-service-name:
+                      _.service-name-text: "order-orchestrator-api"
+                      _.service-type-tag: "REST"
                     td: "v4.2.0"
                     td:
-                      span.badge.badge-tier-0: "Tier 0"
+                      _.badge.badge-tier-0: "Tier 0"
                     td: "24 / 24"
                     td: "4.6ms"
                     td: "11.2ms"
@@ -241,16 +241,16 @@ component EnterprisePortal():
                     td: "0.003%"
                     td: "48,150 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "stream-processor-engine"
-                      span.service-type-tag: "AIL Pipeline"
+                    .col-service-name:
+                      _.service-name-text: "stream-processor-engine"
+                      _.service-type-tag: "AIL Pipeline"
                     td: "v2.4.0"
                     td:
-                      span.badge.badge-tier-0: "Tier 0"
+                      _.badge.badge-tier-0: "Tier 0"
                     td: "32 / 32"
                     td: "0.9ms"
                     td: "2.1ms"
@@ -258,16 +258,16 @@ component EnterprisePortal():
                     td: "0.000%"
                     td: "420,000 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "payment-gateway-relay"
-                      span.service-type-tag: "TLS / PCI"
+                    .col-service-name:
+                      _.service-name-text: "payment-gateway-relay"
+                      _.service-type-tag: "TLS / PCI"
                     td: "v2.9.1"
                     td:
-                      span.badge.badge-tier-0: "Tier 0"
+                      _.badge.badge-tier-0: "Tier 0"
                     td: "12 / 12"
                     td: "12.4ms"
                     td: "28.5ms"
@@ -275,16 +275,16 @@ component EnterprisePortal():
                     td: "0.012%"
                     td: "8,920 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "fraud-scoring-evaluator"
-                      span.service-type-tag: "ML / Rust"
+                    .col-service-name:
+                      _.service-name-text: "fraud-scoring-evaluator"
+                      _.service-type-tag: "ML / Rust"
                     td: "v1.14.7"
                     td:
-                      span.badge.badge-tier-1: "Tier 1"
+                      _.badge.badge-tier-1: "Tier 1"
                     td: "20 / 20"
                     td: "3.2ms"
                     td: "7.8ms"
@@ -292,16 +292,16 @@ component EnterprisePortal():
                     td: "0.002%"
                     td: "32,400 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "telemetry-collector-agent"
-                      span.service-type-tag: "OTel / Go"
+                    .col-service-name:
+                      _.service-name-text: "telemetry-collector-agent"
+                      _.service-type-tag: "OTel / Go"
                     td: "v0.94.0"
                     td:
-                      span.badge.badge-tier-1: "Tier 1"
+                      _.badge.badge-tier-1: "Tier 1"
                     td: "64 / 64"
                     td: "0.4ms"
                     td: "1.1ms"
@@ -309,16 +309,16 @@ component EnterprisePortal():
                     td: "0.000%"
                     td: "850,000 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "inventory-ledger-worker"
-                      span.service-type-tag: "EventStore"
+                    .col-service-name:
+                      _.service-name-text: "inventory-ledger-worker"
+                      _.service-type-tag: "EventStore"
                     td: "v3.0.4"
                     td:
-                      span.badge.badge-tier-1: "Tier 1"
+                      _.badge.badge-tier-1: "Tier 1"
                     td: "10 / 10"
                     td: "5.1ms"
                     td: "12.8ms"
@@ -326,16 +326,16 @@ component EnterprisePortal():
                     td: "0.004%"
                     td: "19,800 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "dead-letter-quarantine"
-                      span.service-type-tag: "DLQ SQS"
+                    .col-service-name:
+                      _.service-name-text: "dead-letter-quarantine"
+                      _.service-type-tag: "DLQ SQS"
                     td: "v1.2.0"
                     td:
-                      span.badge.badge-tier-2: "Tier 2"
+                      _.badge.badge-tier-2: "Tier 2"
                     td: "4 / 4"
                     td: "1.2ms"
                     td: "3.4ms"
@@ -343,16 +343,16 @@ component EnterprisePortal():
                     td: "0.000%"
                     td: "142 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "audit-compliance-logger"
-                      span.service-type-tag: "WORM S3"
+                    .col-service-name:
+                      _.service-name-text: "audit-compliance-logger"
+                      _.service-type-tag: "WORM S3"
                     td: "v2.1.1"
                     td:
-                      span.badge.badge-tier-2: "Tier 2"
+                      _.badge.badge-tier-2: "Tier 2"
                     td: "8 / 8"
                     td: "6.4ms"
                     td: "15.0ms"
@@ -360,16 +360,16 @@ component EnterprisePortal():
                     td: "0.001%"
                     td: "55,200 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
                   tr:
-                    td.col-service-name:
-                      span.service-name-text: "notification-dispatch-bus"
-                      span.service-type-tag: "Kafka"
+                    .col-service-name:
+                      _.service-name-text: "notification-dispatch-bus"
+                      _.service-type-tag: "Kafka"
                     td: "v2.6.5"
                     td:
-                      span.badge.badge-tier-2: "Tier 2"
+                      _.badge.badge-tier-2: "Tier 2"
                     td: "12 / 12"
                     td: "2.3ms"
                     td: "5.8ms"
@@ -377,58 +377,58 @@ component EnterprisePortal():
                     td: "0.005%"
                     td: "14,300 rps"
                     td:
-                      span.status-pill.status-healthy: "HEALTHY"
+                      _.status-pill.status-healthy: "HEALTHY"
                     td:
                       button.btn-table-action: "Inspect"
           section.dashboard-dual-split-section:
             .panel-box.panel-anomalies:
               .panel-header:
                 .panel-title-group:
-                  span.panel-icon: "⚠️"
+                  _.panel-icon: "⚠️"
                   h3.panel-title: "Live Z-Score Anomaly Feed"
-                span.badge.badge-warning: "4 Detected in 1h"
+                _.badge.badge-warning: "4 Detected in 1h"
               ul.anomaly-list:
-                li.anomaly-item:
+                .anomaly-item:
                   .anomaly-meta:
-                    span.anomaly-time: "14:22:04.118"
-                    span.badge.badge-danger: "Critical (z=4.2)"
+                    _.anomaly-time: "14:22:04.118"
+                    _.badge.badge-danger: "Critical (z=4.2)"
                   p.anomaly-desc: "Metric stream-processor-engine.varianceSpike exceeded 3-sigma tolerance (+4.2σ)"
                   .anomaly-footer:
-                    span.trace-link: "Trace ID: 7f8a91c0b4d241ea"
+                    _.trace-link: "Trace ID: 7f8a91c0b4d241ea"
                     button.btn-ack: "Acknowledge"
-                li.anomaly-item:
+                .anomaly-item:
                   .anomaly-meta:
-                    span.anomaly-time: "14:18:51.842"
-                    span.badge.badge-warning: "Warning (z=3.1)"
+                    _.anomaly-time: "14:18:51.842"
+                    _.badge.badge-warning: "Warning (z=3.1)"
                   p.anomaly-desc: "Metric payment-gateway-relay.p99Latency rose to 42.1ms (Historical baseline 18.0ms)"
                   .anomaly-footer:
-                    span.trace-link: "Trace ID: 1a92e4fc88031d2b"
+                    _.trace-link: "Trace ID: 1a92e4fc88031d2b"
                     button.btn-ack: "Acknowledge"
-                li.anomaly-item:
+                .anomaly-item:
                   .anomaly-meta:
-                    span.anomaly-time: "14:02:11.390"
-                    span.badge.badge-info: "Notice (z=2.8)"
+                    _.anomaly-time: "14:02:11.390"
+                    _.badge.badge-info: "Notice (z=2.8)"
                   p.anomaly-desc: "Late event watermark lag spike in partition-04: 12.4s delayed arrival"
                   .anomaly-footer:
-                    span.trace-link: "Trace ID: c824b01fe4882199"
+                    _.trace-link: "Trace ID: c824b01fe4882199"
                     button.btn-ack: "Acknowledge"
             .panel-box.panel-incidents:
               .panel-header:
                 .panel-title-group:
-                  span.panel-icon: "🚨"
+                  _.panel-icon: "🚨"
                   h3.panel-title: "Active Incident Command & Runbooks"
-                span.badge.badge-neutral: "Zero P1 Outages"
+                _.badge.badge-neutral: "Zero P1 Outages"
               .incident-card-container:
                 .incident-card.incident-card-low:
                   .incident-card-top:
-                    span.badge.badge-sev-p3: "SEV-3"
-                    span.incident-id: "INC-8842"
-                    span.incident-duration: "Elapsed: 28m"
+                    _.badge.badge-sev-p3: "SEV-3"
+                    _.incident-id: "INC-8842"
+                    _.incident-duration: "Elapsed: 28m"
                   h4.incident-card-heading: "Minor Kafka Lag on Consumer Group analytics-batch-indexer"
                   p.incident-card-body: "Lag reached 14,200 records on partition 11. Consumer instances auto-healing."
                   .incident-assignee:
-                    span.assignee-avatar: "JD"
-                    span.assignee-name: "John Doe (On-Call SRE)"
+                    _.assignee-avatar: "JD"
+                    _.assignee-name: "John Doe (On-Call SRE)"
                   .incident-action-row:
                     button.btn.btn-sm.btn-outline: "View War Room"
                     button.btn.btn-sm.btn-primary: "Execute Auto-Scale Runbook"
@@ -436,7 +436,7 @@ component EnterprisePortal():
             .panel-box:
               .panel-header:
                 h3.panel-title: "Stream Partition Watermarks & Checkpoint Offsets"
-                span.checkpoint-badge: "Last Epoch Checkpoint: 42s ago"
+                _.checkpoint-badge: "Last Epoch Checkpoint: 42s ago"
               .partition-table-wrapper:
                 table.partition-table:
                   thead:
@@ -457,7 +457,7 @@ component EnterprisePortal():
                       td: "0 records"
                       td: "120ms"
                       td:
-                        span.tag-online: "ACTIVE"
+                        _.tag-online: "ACTIVE"
                     tr:
                       td: "shard-partition-01"
                       td: "broker-us-east-1a"
@@ -466,7 +466,7 @@ component EnterprisePortal():
                       td: "6 records"
                       td: "140ms"
                       td:
-                        span.tag-online: "ACTIVE"
+                        _.tag-online: "ACTIVE"
                     tr:
                       td: "shard-partition-02"
                       td: "broker-us-east-1b"
@@ -475,7 +475,7 @@ component EnterprisePortal():
                       td: "0 records"
                       td: "115ms"
                       td:
-                        span.tag-online: "ACTIVE"
+                        _.tag-online: "ACTIVE"
                     tr:
                       td: "shard-partition-03"
                       td: "broker-us-east-1c"
@@ -484,18 +484,18 @@ component EnterprisePortal():
                       td: "2 records"
                       td: "135ms"
                       td:
-                        span.tag-online: "ACTIVE"
+                        _.tag-online: "ACTIVE"
           footer.app-footer:
             .footer-left:
-              span.legal-text: "© 2026 AIL Autonomous Infrastructure Labs. All rights reserved."
-              span.footer-divider: "|"
-              span.soc2-badge: "SOC-2 Type II Certified"
-              span.footer-divider: "|"
-              span.iso-badge: "ISO/IEC 27001 Compliant"
+              _.legal-text: "© 2026 AIL Autonomous Infrastructure Labs. All rights reserved."
+              _.footer-divider: "|"
+              _.soc2-badge: "SOC-2 Type II Certified"
+              _.footer-divider: "|"
+              _.iso-badge: "ISO/IEC 27001 Compliant"
             .footer-right:
-              span.telemetry-ping: "Edge Ping: 3ms"
-              span.engine-hash: "Build: sha-e84b12c"
-              span.runtime-env: "Cluster: k8s-prod-us-east-core-01"
+              _.telemetry-ping: "Edge Ping: 3ms"
+              _.engine-hash: "Build: sha-e84b12c"
+              _.runtime-env: "Cluster: k8s-prod-us-east-core-01"
       .modal-backdrop.hidden#modal-create-alert:
         .modal-dialog:
           .modal-header:
