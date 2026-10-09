@@ -1,71 +1,165 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Token Definitions & Lexical Grammar
- */
+import type { Span } from "./span.js";
 
-import type { SourceSpan } from "./span.ts";
-
-export type TokenType =
-  // Structural Delimiters
+export type TokenKind =
+  // Structural / Layout
+  | "NEWLINE"
+  | "INDENT"
+  | "DEDENT"
+  | "EOF"
+  // Comments (for CST trivia preservation)
+  | "COMMENT"
+  // Identifiers & Literals
+  | "IDENT"
+  | "NUMBER"
+  | "STRING"
+  | "BOOLEAN"
+  | "NIL"
+  | "HEX_COLOR"
+  // Declaration Keywords
+  | "MODULE"
+  | "FROM"
+  | "IMPORT"
+  | "TYPE"
+  | "ENUM"
+  | "FN"
+  | "COMPONENT"
+  | "STYLE"
+  | "TOKENS"
+  | "LET"
+  | "MUT"
+  | "VAL"
+  | "PUB"
+  | "STATE"
+  | "CLASS"
+  | "EXTENDS"
+  | "IMPLEMENTS"
+  | "STATIC"
+  | "READONLY"
+  | "CONST"
+  | "ASYNC"
+  // Control Flow Keywords
+  | "IF"
+  | "ELIF"
+  | "ELSE"
+  | "MATCH"
+  | "CASE"
+  | "FOR"
+  | "IN"
+  | "WHILE"
+  | "RET"
+  // Logical Word Operators
+  | "AND"
+  | "OR"
+  | "NOT"
+  // Primitive Types (1-Token BPE Words)
+  | "TYPE_INT"
+  | "TYPE_STR"
+  | "TYPE_FLOAT"
+  | "TYPE_BOOL"
+  | "TYPE_NUM"
+  | "TYPE_BYTE"
+  | "TYPE_CHAR"
+  | "TYPE_VOID"
+  | "TYPE_NIL"
+  | "RESULT"
+  | "OPTION"
+  // Arithmetic Operators
+  | "PLUS" // +
+  | "MINUS" // -
+  | "STAR" // *
+  | "SLASH" // /
+  | "PERCENT" // %
+  // Comparison Operators
+  | "EQ_EQ" // ==
+  | "NOT_EQ" // !=
+  | "LT_EQ" // <=
+  | "GT_EQ" // >=
+  | "LT" // <
+  | "GT" // >
+  // Logical / Safe Navigation
+  | "AMP_AMP" // &&
+  | "PIPE_PIPE" // ||
+  | "QUESTION_QUESTION" // ??
+  | "QUESTION_DOT" // ?.
+  // Assignment & Connectors
+  | "EQUAL" // =
+  | "ARROW" // ->
+  | "FAT_ARROW" // =>
+  | "COLON_COLON" // ::
+  | "PIPE" // |
+  // Delimiters & Punctuation
   | "LPAREN" // (
   | "RPAREN" // )
   | "LBRACKET" // [
   | "RBRACKET" // ]
   | "LBRACE" // {
   | "RBRACE" // }
-
-  // Special S-Expression Compound Prefixes
-  | "AT_WORKSPACE" // (@workspace
-  | "AT_FILE" // (@file
-  | "AT_MODULE" // (@module
-  | "MANIFEST_START" // (*
-  | "MANIFEST_END" // *)
-  | "TYPE_DECL" // (:
-  | "FN_DECL" // (!
-  | "VAL_TEXT" // (!val
-  | "COMPONENT_DECL" // (#
-  | "LAYOUT_OPEN" // (<
-  | "LAYOUT_CLOSE" // >)
-  | "ATTRS_OPEN" // (.
-  | "ATTRS_CLOSE" // .)
-  | "STYLE_DECL" // (&
-  | "STYLE_RULES_OPEN" // (+
-  | "STYLE_RULES_CLOSE" // +)
-  | "ASSIGN" // (:=
-  | "MATCH" // (==
-  | "DO_BLOCK" // (do
-  | "IF_EXPR" // (?if
-  | "TRY_UNPACK" // (?
-  | "RECORD_LIT" // (%
-  | "TYPESTATE" // (~
-  | "EFFECT_DECL" // (!^
-  | "REFINEMENT" // (?:
-  | "UNION" // (|
-
-  // Literals & Symbols
-  | "SYMBOL" // e.g. foo, !s, !i, calculateRisk, add
-  | "STRING" // e.g. "hello world"
-  | "NUMBER" // e.g. 42, 3.14159, -10
-  | "BOOLEAN" // true | false
-
-  // CST Trivia (preserves formatting and comments)
-  | "COMMENT_LINE" // // ... or ;; ... or # ...
-  | "COMMENT_BLOCK" // /* ... */
-  | "WHITESPACE" // spaces, tabs
-  | "NEWLINE" // \n, \r\n
-
-  // Control
-  | "EOF"
-  | "ERROR";
+  | "COLON" // :
+  | "COMMA" // ,
+  | "DOT" // .
+  | "ELLIPSIS" // ...
+  | "QUESTION" // ?
+  | "BANG" // !
+  | "HASH" // #
+  | "SEMICOLON"; // ;
 
 export interface Token {
-  type: TokenType;
+  kind: TokenKind;
   value: string;
-  span: SourceSpan;
+  span: Span;
 }
 
-export function createToken(type: TokenType, value: string, span: SourceSpan): Token {
-  return { type, value, span };
-}
+export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
+  // Declarations
+  module: "MODULE",
+  from: "FROM",
+  import: "IMPORT",
+  type: "TYPE",
+  enum: "ENUM",
+  fn: "FN",
+  component: "COMPONENT",
+  style: "STYLE",
+  tokens: "TOKENS",
+  let: "LET",
+  mut: "MUT",
+  val: "VAL",
+  pub: "PUB",
+  state: "STATE",
+  class: "CLASS",
+  extends: "EXTENDS",
+  implements: "IMPLEMENTS",
+  static: "STATIC",
+  readonly: "READONLY",
+  const: "CONST",
+  async: "ASYNC",
+  // Control
+  if: "IF",
+  elif: "ELIF",
+  else: "ELSE",
+  match: "MATCH",
+  case: "CASE",
+  for: "FOR",
+  in: "IN",
+  while: "WHILE",
+  ret: "RET",
+  // Word Operators
+  and: "AND",
+  or: "OR",
+  not: "NOT",
+  // Literals
+  true: "BOOLEAN",
+  false: "BOOLEAN",
+  nil: "NIL",
+  // Primitive Types
+  int: "TYPE_INT",
+  str: "TYPE_STR",
+  float: "TYPE_FLOAT",
+  flt: "TYPE_FLOAT",
+  bool: "TYPE_BOOL",
+  num: "TYPE_NUM",
+  byte: "TYPE_BYTE",
+  char: "TYPE_CHAR",
+  void: "TYPE_VOID",
+  Result: "RESULT",
+  Option: "OPTION",
+};

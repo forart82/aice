@@ -4,9 +4,10 @@
  *
  * AIL: Concrete Syntax Tree (CST) Trivia Engine
  * Preserves non-semantic tokens (comments, whitespace, formatting) for lossless roundtrips.
+ * Adheres to the formal specification in docs/CST_TRIVIA_SPEC.md.
  */
 
-import type { SourceSpan } from "./span.ts";
+import type { Span } from "./span.js";
 
 export type TriviaKind =
   | "LINE_COMMENT"
@@ -14,13 +15,12 @@ export type TriviaKind =
   | "DOCSTRING"
   | "LICENSE_HEADER"
   | "BLANK_LINES"
-  | "INDENTATION"
-  | "WHITESPACE";
+  | "INDENTATION";
 
 export interface TriviaItem {
   kind: TriviaKind;
   content: string;
-  span: SourceSpan;
+  span?: Span;
 }
 
 export interface NodeTrivia {
@@ -32,7 +32,7 @@ export interface NodeTrivia {
 }
 
 export class CstTriviaTable {
-  private entries: Map<string, NodeTrivia> = new Map();
+  private entries = new Map<string, NodeTrivia>();
 
   public setTrivia(nodeId: string, trivia: NodeTrivia): void {
     this.entries.set(nodeId, trivia);
@@ -57,6 +57,11 @@ export class CstTriviaTable {
     existing.indentation = indent;
   }
 
+  public setBlankLinesBefore(nodeId: string, count: number): void {
+    const existing = this.getOrCreate(nodeId);
+    existing.blankLinesBefore = count;
+  }
+
   public getOrCreate(nodeId: string): NodeTrivia {
     let entry = this.entries.get(nodeId);
     if (!entry) {
@@ -68,6 +73,10 @@ export class CstTriviaTable {
       this.entries.set(nodeId, entry);
     }
     return entry;
+  }
+
+  public getAllEntries(): [string, NodeTrivia][] {
+    return Array.from(this.entries.entries());
   }
 
   public toJSON(): Record<string, NodeTrivia> {
@@ -88,5 +97,9 @@ export class CstTriviaTable {
 
   public size(): number {
     return this.entries.size;
+  }
+
+  public clear(): void {
+    this.entries.clear();
   }
 }
