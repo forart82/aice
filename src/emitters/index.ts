@@ -1,95 +1,70 @@
 /**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * AIL: Unified Multi-Target Compiler Dispatcher (Pillar 5)
+ * Unified Emitter Hub for AIL 2.0 Multi-Language Forward Transpilation.
  */
 
-import { type Diagnostic, parseAil } from "../core/parser.ts";
-import type { CstTriviaTable } from "../core/trivia.ts";
-import type { CompileOptions } from "../index.ts";
-import type { TargetLanguage } from "./context.ts";
-import { emitCss } from "./css-emitter.ts";
-import { emitHtml } from "./html-emitter.ts";
-import { emitPython } from "./py-emitter.ts";
-import { emitTypeScript } from "./ts-emitter.ts";
+import type { Module } from "../core/ast.js";
+import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
+import { CppEmitter } from "./cpp-emitter.js";
+import { CssEmitter } from "./css-emitter.js";
+import { GoEmitter } from "./go-emitter.js";
+import { HtmlEmitter } from "./html-emitter.js";
+import { PythonEmitter } from "./py-emitter.js";
+import { RustEmitter } from "./rust-emitter.js";
+import { TypeScriptEmitter } from "./ts-emitter.js";
 
-export * from "./context.ts";
-export * from "./css-emitter.ts";
-export * from "./html-emitter.ts";
-export * from "./py-emitter.ts";
-export * from "./rewriter.ts";
-export * from "./ts-emitter.ts";
+export * from "./context.js";
+export * from "./cpp-emitter.js";
+export * from "./css-emitter.js";
+export * from "./go-emitter.js";
+export * from "./html-emitter.js";
+export * from "./py-emitter.js";
+export * from "./rewriter.js";
+export * from "./rust-emitter.js";
+export * from "./ts-emitter.js";
 
-export interface CompileResult {
-  code: string;
-  targetLanguage: TargetLanguage;
-  triviaTable: CstTriviaTable;
-  diagnostics: Diagnostic[];
-}
-
-export function detectTargetLanguage(pathOrExt: string): TargetLanguage {
-  const clean = pathOrExt.replace(/\.ail$/, "");
-  if (
-    clean.endsWith(".ts") ||
-    clean.endsWith(".tsx") ||
-    clean.endsWith(".js") ||
-    clean.endsWith(".jsx")
-  ) {
-    return "typescript";
-  }
-  if (clean.endsWith(".html") || clean.endsWith(".htm")) {
-    return "html";
-  }
-  if (clean.endsWith(".css")) {
-    return "css";
-  }
-  if (clean.endsWith(".py")) {
-    return "python";
-  }
-  // Default fallback
-  return "typescript";
-}
-
-export function compileAil(
-  source: string,
-  targetPathOrExt: string,
-  options?: CompileOptions,
-): CompileResult {
-  const { document, triviaTable, diagnostics } = parseAil(source, targetPathOrExt);
-
-  if (!document) {
-    const errorMsg = diagnostics.map((d) => `[${d.code}] ${d.message}`).join("\n");
-    throw new Error(`AIL Compilation failed to parse AST:\n${errorMsg}`);
-  }
-
-  const targetLang = detectTargetLanguage(targetPathOrExt);
-  let code = "";
-
-  const emitOptions = {
-    stripTrivia: options?.stripTrivia,
-    triviaTable: options?.stripTrivia ? undefined : triviaTable,
-  };
-
-  switch (targetLang) {
+/**
+ * Emits target source code from an AIL Module AST.
+ * If target is omitted, automatically infers target from mod.path.
+ */
+export function emitTarget(
+  mod: Module,
+  target?: TargetLanguage,
+  options: EmitterOptions = {},
+): string {
+  const chosenTarget = target ?? detectTargetFromPath(mod.path);
+  switch (chosenTarget) {
     case "typescript":
-      code = emitTypeScript(document, emitOptions);
-      break;
-    case "html":
-      code = emitHtml(document, emitOptions);
-      break;
-    case "css":
-      code = emitCss(document, emitOptions);
-      break;
-    case "python":
-      code = emitPython(document, emitOptions);
-      break;
+    case "tsx": {
+      const emitter = new TypeScriptEmitter({ ...options, target: chosenTarget });
+      return emitter.emit(mod);
+    }
+    case "python": {
+      const emitter = new PythonEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "rust": {
+      const emitter = new RustEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "go": {
+      const emitter = new GoEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "cpp": {
+      const emitter = new CppEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "html": {
+      const emitter = new HtmlEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "css": {
+      const emitter = new CssEmitter(options);
+      return emitter.emit(mod);
+    }
+    default: {
+      const exhaustiveCheck: never = chosenTarget;
+      throw new Error(`Unsupported target language: ${exhaustiveCheck}`);
+    }
   }
-
-  return {
-    code,
-    targetLanguage: targetLang,
-    triviaTable,
-    diagnostics,
-  };
 }
