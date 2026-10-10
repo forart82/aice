@@ -890,8 +890,7 @@ export class TypeScriptEmitter {
           stmt.isMut &&
           stmt.typeAnnotation &&
           stmt.init.kind === "LiteralExpr" &&
-          stmt.init.literalKind === "nil" &&
-          stmt.typeAnnotation.kind !== "OptionType";
+          stmt.init.literalKind === "nil";
         const initCode = isUninitNil ? "" : ` = ${this.emitExpr(stmt.init)}`;
         this.ctx.writeLine(`${keyword} ${stmt.name}${typeAnnotation}${initCode};`);
         break;
@@ -1083,6 +1082,15 @@ export class TypeScriptEmitter {
       case "LiteralExpr":
         if (expr.literalKind === "string") return JSON.stringify(expr.value);
         if (expr.literalKind === "nil") return "null";
+        if (
+          expr.rawValue &&
+          (expr.rawValue.startsWith("0x") ||
+            expr.rawValue.startsWith("0X") ||
+            expr.rawValue.startsWith("0b") ||
+            expr.rawValue.startsWith("0B"))
+        ) {
+          return expr.rawValue;
+        }
         return String(expr.value);
 
       case "TemplateLiteralExpr": {

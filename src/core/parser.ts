@@ -3155,9 +3155,14 @@ export class Parser {
     // 1. Literal Expressions
     if (tok.kind === "NUMBER") {
       this.advance();
-      const val = tok.value.includes(".")
-        ? Number.parseFloat(tok.value)
-        : Number.parseInt(tok.value, 10);
+      const val =
+        tok.value.startsWith("0x") || tok.value.startsWith("0X")
+          ? Number.parseInt(tok.value, 16)
+          : tok.value.startsWith("0b") || tok.value.startsWith("0B")
+            ? Number.parseInt(tok.value.slice(2), 2)
+            : tok.value.includes(".")
+              ? Number.parseFloat(tok.value)
+              : Number(tok.value);
       return {
         kind: "LiteralExpr",
         literalKind: "number",
