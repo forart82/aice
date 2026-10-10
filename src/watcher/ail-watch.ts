@@ -13,6 +13,7 @@ import * as path from "node:path";
 import { parse } from "../core/parser.js";
 import { detectTargetFromPath, emitTarget, getTargetOutputPath } from "../emitters/index.js";
 import { isTargetLocked, lockFile, unlockFile, withUnlockedTarget } from "../shield/fs-lock.js";
+import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 
 export interface AilWatchOptions {
@@ -266,23 +267,15 @@ export class AilWatcher {
       }
 
       if (this.lockTargets) {
-        const existed = fs.existsSync(targetPath);
-        if (existed) {
-          await withUnlockedTarget(targetPath, () => {
-            fs.writeFileSync(targetPath, emitted, "utf-8");
-          });
-          if (!isTargetLocked(targetPath)) {
-            lockFile(targetPath);
-          }
-        } else {
-          fs.writeFileSync(targetPath, emitted, "utf-8");
+        safeWriteTargetFile(targetPath, emitted);
+        if (!isTargetLocked(targetPath)) {
           lockFile(targetPath);
         }
       } else {
         if (fs.existsSync(targetPath) && isTargetLocked(targetPath)) {
           unlockFile(targetPath);
         }
-        fs.writeFileSync(targetPath, emitted, "utf-8");
+        safeWriteTargetFile(targetPath, emitted);
       }
 
       const durationMs = Math.max(0, performance.now() - start);

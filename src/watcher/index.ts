@@ -6,3 +6,5 @@
  */
 
 export * from "./ail-watch.js";
+export { safeWriteTargetFile } from "../shield/index.js";
+

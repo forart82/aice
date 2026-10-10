@@ -963,6 +963,11 @@ export class Parser {
       while (!this.check("EOF")) {
         const fSpan = this.current().span;
         const fName = this.parseContextualIdentOrString("Expected field name");
+        let isOptional = false;
+        if (this.check("QUESTION")) {
+          this.advance();
+          isOptional = true;
+        }
         this.consume("COLON", "Expected ':' after field name");
         const fType = this.parseTypeExpr();
 
@@ -976,6 +981,7 @@ export class Parser {
           name: fName,
           typeAnnotation: fType,
           defaultValue,
+          isOptional: isOptional ? true : undefined,
           span: mergeSpans(fSpan, defaultValue ? defaultValue.span : fType.span),
         });
 
@@ -1252,8 +1258,17 @@ export class Parser {
     if (tok.kind === "LBRACE") {
       this.advance();
       // Check if it's a refinement type { v:int | v >= 0 }
-      if (this.isIdentOrKeyword(this.current()) && this.peek().kind === "COLON") {
+      if (
+        this.isIdentOrKeyword(this.current()) &&
+        (this.peek().kind === "COLON" ||
+          (this.peek().kind === "QUESTION" && this.peek(2).kind === "COLON"))
+      ) {
         const idToken = this.advance();
+        let isFirstOptional = false;
+        if (this.check("QUESTION")) {
+          this.advance();
+          isFirstOptional = true;
+        }
         this.advance(); // consume ':'
         const base = this.parseBaseTypeExpr();
 
@@ -1284,10 +1299,11 @@ export class Parser {
             name: `${leftName} | ${rightName}`,
             span: mergeSpans(base.span, right.span),
           };
-          const fields: { name: string; type: TypeExpr; span: Span }[] = [
+          const fields: { name: string; type: TypeExpr; isOptional?: boolean; span: Span }[] = [
             {
               name: idToken.value,
               type: unionType,
+              isOptional: isFirstOptional ? true : undefined,
               span: mergeSpans(idToken.span, unionType.span),
             },
           ];
@@ -1295,11 +1311,17 @@ export class Parser {
             this.advance();
             if (this.check("RBRACE")) break;
             const fName = this.parseContextualIdentOrString("Expected field name");
+            let isOptional = false;
+            if (this.check("QUESTION")) {
+              this.advance();
+              isOptional = true;
+            }
             this.consume("COLON");
             const fType = this.parseTypeExpr();
             fields.push({
               name: fName,
               type: fType,
+              isOptional: isOptional ? true : undefined,
               span: mergeSpans(tok.span, fType.span),
             });
           }
@@ -1312,10 +1334,11 @@ export class Parser {
         }
 
         // It was a single field record: { id: int }
-        const fields: { name: string; type: TypeExpr; span: Span }[] = [
+        const fields: { name: string; type: TypeExpr; isOptional?: boolean; span: Span }[] = [
           {
             name: idToken.value,
             type: base,
+            isOptional: isFirstOptional ? true : undefined,
             span: mergeSpans(idToken.span, base.span),
           },
         ];
@@ -1324,11 +1347,17 @@ export class Parser {
           this.advance();
           if (this.check("RBRACE")) break;
           const fName = this.parseContextualIdentOrString("Expected field name");
+          let isOptional = false;
+          if (this.check("QUESTION")) {
+            this.advance();
+            isOptional = true;
+          }
           this.consume("COLON");
           const fType = this.parseTypeExpr();
           fields.push({
             name: fName,
             type: fType,
+            isOptional: isOptional ? true : undefined,
             span: mergeSpans(tok.span, fType.span),
           });
         }
@@ -1917,6 +1946,12 @@ export class Parser {
       }
     }
 
+    let isOptional = false;
+    if (this.check("QUESTION")) {
+      this.advance();
+      isOptional = true;
+    }
+
     if (this.check("COLON")) {
       this.advance();
       typeAnnotation = this.parseTypeExpr();
@@ -1957,6 +1992,7 @@ export class Parser {
       aliases: aliases && aliases.length > 0 ? aliases : undefined,
       isStatic,
       isReadonly,
+      isOptional: isOptional ? true : undefined,
       typeAnnotation,
       initialValue,
       span: mergeSpans(startSpan, endSpan),

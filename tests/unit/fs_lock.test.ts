@@ -17,6 +17,7 @@ import {
   isTargetLocked,
   lockFile,
   lockProjectTargets,
+  safeWriteTargetFile,
   unlockFile,
   unlockProjectTargets,
   withUnlockedTarget,
@@ -359,4 +360,52 @@ describe("Step 5: File-System Protection & Permission Locker", () => {
       expect(getAilSiblingPath(file3)).toBeNull();
     });
   });
+
+  describe("safeWriteTargetFile (Transparent Permission Elevation)", () => {
+    it("writes to a chmod 444 locked file without EACCES and preserves lock", () => {
+      const targetPath = path.join(testDir, "locked-output.ts");
+      fs.writeFileSync(targetPath, "initial locked code", "utf-8");
+      lockFile(targetPath);
+      expect(isTargetLocked(targetPath)).toBe(true);
+
+      // Verify normal write fails with EACCES
+      expect(() => {
+        fs.writeFileSync(targetPath, "unauthorized overwrite", "utf-8");
+      }).toThrowError(/EACCES|permission denied/i);
+
+      // safeWriteTargetFile elevates write permission transparently, writes, and relocks
+      expect(() => {
+        safeWriteTargetFile(targetPath, "safely updated by compiler");
+      }).not.toThrow();
+
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe("safely updated by compiler");
+      expect(isTargetLocked(targetPath)).toBe(true);
+
+      // Confirm file is still locked to unauthorized writes
+      expect(() => {
+        fs.writeFileSync(targetPath, "unauthorized overwrite after safe write", "utf-8");
+      }).toThrowError(/EACCES|permission denied/i);
+    });
+
+    it("writes to an unlocked file and leaves it unlocked", () => {
+      const targetPath = path.join(testDir, "unlocked-output.ts");
+      fs.writeFileSync(targetPath, "initial writable code", "utf-8");
+      expect(isTargetLocked(targetPath)).toBe(false);
+
+      safeWriteTargetFile(targetPath, "updated writable code");
+      expect(fs.readFileSync(targetPath, "utf-8")).toBe("updated writable code");
+      expect(isTargetLocked(targetPath)).toBe(false);
+    });
+
+    it("creates parent directories recursively if they do not exist", () => {
+      const nestedPath = path.join(testDir, "nested", "sub", "dir", "output.ts");
+      expect(fs.existsSync(path.dirname(nestedPath))).toBe(false);
+
+      safeWriteTargetFile(nestedPath, "nested content");
+      expect(fs.existsSync(nestedPath)).toBe(true);
+      expect(fs.readFileSync(nestedPath, "utf-8")).toBe("nested content");
+      expect(isTargetLocked(nestedPath)).toBe(false);
+    });
+  });
 });
+

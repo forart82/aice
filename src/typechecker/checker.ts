@@ -22,12 +22,15 @@ import type {
 import type { Span } from "../core/span.js";
 import { GLOBAL_SYMBOLS, getMethodType, getPropertyType } from "./primitives.js";
 import {
+  clearTypeAliases,
   type EnumTypeRep,
   formatType,
   isAssignable,
+  isOpaqueNamedType,
   isStringLiteralOrUnionType,
   isStringLiteralType,
   isStringLiteralUnion,
+  lookupTypeAlias,
   makeArrayType,
   makeFunctionType,
   makeNamedType,
@@ -38,6 +41,7 @@ import {
   type NamedTypeRep,
   type RecordTypeRep,
   type RefinementTypeRep,
+  registerTypeAlias,
   TYPE_BOOL,
   TYPE_BYTE,
   TYPE_CHAR,
@@ -50,6 +54,7 @@ import {
   TYPE_UNKNOWN,
   TYPE_VOID,
   type Type,
+  unquoteStringLiteral,
 } from "./types.js";
 
 export function isPromiseType(t: Type | null | undefined): t is NamedTypeRep {
@@ -178,6 +183,7 @@ export class TypeEnv {
 
   defineType(name: string, type: Type): void {
     this.types.set(name, type);
+    registerTypeAlias(name, type);
   }
 
   lookup(name: string): { type: Type; isMut: boolean } | null {
@@ -293,6 +299,7 @@ export class TypeChecker {
   }
 
   checkModule(mod: Module): void {
+    clearTypeAliases();
     const env = new TypeEnv(this.globalEnv);
 
     // Pass 1: Declare all types and function signatures
@@ -1479,11 +1486,24 @@ export class TypeChecker {
             : TYPE_FLOAT;
         }
         if (expr.literalKind === "string") {
-          if (
-            expectedType &&
-            (isStringLiteralOrUnionType(expectedType) || expectedType.kind === "enum")
-          ) {
-            return { kind: "named", name: JSON.stringify(expr.value) };
+          if (expectedType) {
+            let targetType = expectedType.kind === "option" ? expectedType.innerType : expectedType;
+            if (this.isMatchingStringContext(expr.value, targetType, env)) {
+              return { kind: "named", name: JSON.stringify(expr.value) };
+            }
+            if (targetType.kind === "named" && isOpaqueNamedType(targetType.name)) {
+              let alias = lookupTypeAlias(targetType.name);
+              if (alias && alias.kind === "named" && alias.name === targetType.name) {
+                alias = undefined;
+              }
+              if (alias && this.isMatchingStringContext(expr.value, alias, env)) {
+                return { kind: "named", name: JSON.stringify(expr.value) };
+              }
+              const resolved = env.lookupType(targetType.name);
+              if (!alias && (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))) {
+                return targetType;
+              }
+            }
           }
           return TYPE_STR;
         }
@@ -1492,6 +1512,30 @@ export class TypeChecker {
         }
         if (expr.literalKind === "nil") return TYPE_NIL;
         return TYPE_UNKNOWN;
+      }
+
+      case "StringLiteralExpr" as any: {
+        const strVal = (expr as any).value;
+        if (expectedType) {
+          let targetType = expectedType.kind === "option" ? expectedType.innerType : expectedType;
+          if (this.isMatchingStringContext(strVal, targetType, env)) {
+            return { kind: "named", name: JSON.stringify(strVal) };
+          }
+          if (targetType.kind === "named" && isOpaqueNamedType(targetType.name)) {
+            let alias = lookupTypeAlias(targetType.name);
+            if (alias && alias.kind === "named" && alias.name === targetType.name) {
+              alias = undefined;
+            }
+            if (alias && this.isMatchingStringContext(strVal, alias, env)) {
+              return { kind: "named", name: JSON.stringify(strVal) };
+            }
+            const resolved = env.lookupType(targetType.name);
+            if (!alias && (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))) {
+              return targetType;
+            }
+          }
+        }
+        return TYPE_STR;
       }
 
       case "TemplateLiteralExpr": {
@@ -1514,8 +1558,38 @@ export class TypeChecker {
       }
 
       case "BinaryExpr": {
+        if ((expr.operator as any) === "=") {
+          return this.checkAssign(expr.left, expr.right, expr.span, env, "=");
+        }
+        if (
+          [
+            "+=",
+            "-=",
+            "*=",
+            "/=",
+            "%=",
+            "**=",
+            "&=",
+            "|=",
+            "^=",
+            "<<=",
+            ">>=",
+            ">>>=",
+          ].includes(expr.operator as any)
+        ) {
+          return this.checkAssign(
+            expr.left,
+            expr.right,
+            expr.span,
+            env,
+            expr.operator as any,
+          );
+        }
+
         const leftType = this.checkExpr(expr.left, env);
-        const rightType = this.checkExpr(expr.right, env);
+        const rightExpected =
+          expr.operator === "==" || expr.operator === "!=" ? leftType : undefined;
+        const rightType = this.checkExpr(expr.right, env, rightExpected);
 
         // Zero Implicit Coercion Checks
         switch (expr.operator) {
@@ -2000,9 +2074,33 @@ export class TypeChecker {
               ? (env.lookupType(expectedType.name) as RecordTypeRep | undefined)?.fields
               : undefined;
 
+        let genericRecordValType: Type | undefined;
+        if (
+          expectedType &&
+          expectedType.kind === "named" &&
+          expectedType.name === "Record" &&
+          expectedType.typeArgs &&
+          expectedType.typeArgs.length === 2
+        ) {
+          genericRecordValType = expectedType.typeArgs[1];
+        } else if (expectedType && expectedType.kind === "named") {
+          const found = env.lookupType(expectedType.name) ?? lookupTypeAlias(expectedType.name);
+          if (
+            found &&
+            found.kind === "named" &&
+            found.name === "Record" &&
+            found.typeArgs &&
+            found.typeArgs.length === 2
+          ) {
+            genericRecordValType = found.typeArgs[1];
+          }
+        }
+
         for (const prop of expr.properties) {
           const expectedPropType =
-            prop.key && expectedRecordFields ? expectedRecordFields.get(prop.key) : undefined;
+            prop.key && expectedRecordFields
+              ? expectedRecordFields.get(prop.key)
+              : genericRecordValType;
           const valType = this.checkExpr(prop.value, env, expectedPropType);
           if (prop.isSpread) {
             if (valType.kind === "record") {
@@ -2733,6 +2831,35 @@ export class TypeChecker {
         );
       }
     }
+  }
+
+  private isMatchingStringContext(value: any, target: Type, env: TypeEnv): boolean {
+    if (target.kind === "option") {
+      return this.isMatchingStringContext(value, target.innerType, env);
+    }
+    const valStr = String(value);
+    if (target.kind === "enum") {
+      return (
+        target.variants.has(valStr) ||
+        Array.from(target.variants.keys()).some((v) => unquoteStringLiteral(v) === valStr)
+      );
+    }
+    if (target.kind === "named") {
+      if (isStringLiteralType(target.name)) {
+        return unquoteStringLiteral(target.name) === valStr;
+      }
+      if (isStringLiteralUnion(target.name) || target.name.includes("|")) {
+        const parts = target.name.split("|").map((p) => unquoteStringLiteral(p.trim()));
+        if (parts.includes(valStr)) {
+          return true;
+        }
+      }
+      const resolved = env.lookupType(target.name) ?? lookupTypeAlias(target.name);
+      if (resolved && resolved !== target) {
+        return this.isMatchingStringContext(value, resolved, env);
+      }
+    }
+    return false;
   }
 }
 

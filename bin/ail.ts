@@ -24,6 +24,7 @@ import {
   checkAiShieldStatus,
   lockProjectTargets,
   removeAiShield,
+  safeWriteTargetFile,
   unlockProjectTargets,
 } from "../src/shield/index.js";
 import {
@@ -49,7 +50,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.17");
+  .version("0.3.18");
 
 // Command: compile <file>
 program
@@ -112,8 +113,7 @@ program
           ? path.resolve(process.cwd(), options.out)
           : path.resolve(process.cwd(), getTargetOutputPath(file));
 
-        fs.mkdirSync(path.dirname(outPath), { recursive: true });
-        fs.writeFileSync(outPath, emitted, "utf-8");
+        safeWriteTargetFile(outPath, emitted);
 
         console.log(
           `✔ Compiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
@@ -190,8 +190,7 @@ program
             outPath = path.resolve(process.cwd(), options.outDir, relFromSearch);
           }
 
-          fs.mkdirSync(path.dirname(outPath), { recursive: true });
-          fs.writeFileSync(outPath, emitted, "utf-8");
+          safeWriteTargetFile(outPath, emitted);
           console.log(
             `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
           );

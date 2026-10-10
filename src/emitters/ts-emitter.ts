@@ -59,6 +59,15 @@ export class TypeScriptEmitter {
     return false;
   }
 
+  private isNullableOrOptionalType(t: TypeExpr): boolean {
+    if (t.kind === "OptionType") return true;
+    if (t.kind === "NamedType") {
+      const parts = t.name.split("|").map((p) => p.trim());
+      return parts.some((p) => p === "nil" || p === "null" || p === "undefined");
+    }
+    return false;
+  }
+
   private static readonly BUILTIN_CONSTRUCTORS = new Set([
     "Int32Array",
     "Float32Array",
@@ -126,9 +135,9 @@ export class TypeScriptEmitter {
     "log",
   ]);
 
-  constructor(options: EmitterOptions = {}) {
+  constructor(options: EmitterOptions & { withFactories?: boolean } = {}) {
     this.options = options;
-    this.pureInterfaces = Boolean(options.pureInterfaces);
+    this.pureInterfaces = Boolean(options.pureInterfaces) && !(options as any).withFactories;
     this.ctx = new EmitterContext(options.target ?? "typescript", options);
   }
 
@@ -418,7 +427,11 @@ export class TypeScriptEmitter {
       for (const f of t.fields) {
         const fieldNodeId = `field:${t.name}.${f.name}`;
         this.ctx.emitLeadingTrivia(fieldNodeId);
-        const optMark = f.defaultValue ? "?" : "";
+        const isOpt =
+          f.isOptional ||
+          !!f.defaultValue ||
+          this.isNullableOrOptionalType(f.typeAnnotation);
+        const optMark = isOpt ? "?" : "";
         this.ctx.writeLine(`${f.name}${optMark}: ${this.emitTypeExpr(f.typeAnnotation)};`);
         this.ctx.emitTrailingTrivia(fieldNodeId);
       }
@@ -429,9 +442,11 @@ export class TypeScriptEmitter {
         this.ctx.writeLine();
         const params = t.fields
           .map((f) => {
+            const isOpt = f.isOptional || this.isNullableOrOptionalType(f.typeAnnotation);
+            const optMark = isOpt && !f.defaultValue ? "?" : "";
             const typeStr = this.emitTypeExpr(f.typeAnnotation);
             const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
-            return `${f.name}: ${typeStr}${defStr}`;
+            return `${f.name}${optMark}: ${typeStr}${defStr}`;
           })
           .join(", ");
         const props = t.fields.map((f) => f.name).join(", ");
@@ -528,9 +543,10 @@ export class TypeScriptEmitter {
       this.ctx.emitLeadingTrivia(pNodeId);
       const st = p.isStatic ? "static " : "";
       const ro = p.isReadonly ? "readonly " : "";
+      const opt = p.isOptional ? "?" : "";
       const typeAnn = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
       const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
-      this.ctx.writeLine(`${st}${ro}${p.name}${typeAnn}${init};`);
+      this.ctx.writeLine(`${st}${ro}${p.name}${opt}${typeAnn}${init};`);
       this.ctx.emitTrailingTrivia(pNodeId);
 
       const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
@@ -1341,7 +1357,9 @@ export class TypeScriptEmitter {
         return `{ ok: true; value: ${this.emitTypeExpr(t.okType)} } | { ok: false; error: ${this.emitTypeExpr(t.errType)} }`;
 
       case "RecordType": {
-        const fields = t.fields.map((f) => `${f.name}: ${this.emitTypeExpr(f.type)};`).join(" ");
+        const fields = t.fields
+          .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.emitTypeExpr(f.type)};`)
+          .join(" ");
         return `{ ${fields} }`;
       }
 

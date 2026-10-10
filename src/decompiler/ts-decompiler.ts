@@ -2534,7 +2534,7 @@ export class TsDecompiler {
         kind: "LiteralExpr",
         literalKind: "number",
         value: Number(expr.text),
-        rawValue: expr.text,
+        rawValue: expr.getText(this.sourceFile) || expr.text,
         span: this.getSpan(expr),
       };
     }
@@ -2874,9 +2874,29 @@ export class TsDecompiler {
     if (ts.isObjectLiteralExpression(expr)) {
       const properties: RecordProperty[] = [];
       for (const p of expr.properties) {
-        if (ts.isPropertyAssignment(p) && p.name && ts.isIdentifier(p.name)) {
+        if (ts.isPropertyAssignment(p) && p.name) {
+          let key: string;
+          if (ts.isIdentifier(p.name)) {
+            key = p.name.text;
+          } else if (ts.isNumericLiteral(p.name)) {
+            key = p.name.text;
+          } else if (ts.isStringLiteral(p.name) || ts.isNoSubstitutionTemplateLiteral(p.name)) {
+            key = p.name.text;
+          } else if (ts.isComputedPropertyName(p.name)) {
+            if (
+              ts.isNumericLiteral(p.name.expression) ||
+              ts.isStringLiteral(p.name.expression) ||
+              ts.isNoSubstitutionTemplateLiteral(p.name.expression)
+            ) {
+              key = p.name.expression.text;
+            } else {
+              key = p.name.getText(this.sourceFile);
+            }
+          } else {
+            key = p.name.getText(this.sourceFile);
+          }
           properties.push({
-            key: p.name.text,
+            key,
             value: this.convertExpression(p.initializer),
             span: this.getSpan(p),
           });

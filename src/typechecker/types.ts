@@ -155,6 +155,12 @@ export function makeNamedType(name: string, typeArgs?: Type[]): NamedTypeRep {
   return { kind: "named", name, typeArgs };
 }
 
+export function isStringType(type: Type): boolean {
+  if (type.kind === "str") return true;
+  if (type.kind === "named" && (type.name === "str" || type.name === "string")) return true;
+  return false;
+}
+
 export function isStringLiteralType(name: string): boolean {
   const trimmed = name.trim();
   if (trimmed.includes("|")) return false;
@@ -195,10 +201,79 @@ export function isStringLiteralUnion(name: string): boolean {
   return parts.length > 0 && parts.every((p) => isStringLiteralType(p));
 }
 
-export function isStringLiteralOrUnionType(type: Type): boolean {
-  if (type.kind === "named") {
-    return isStringLiteralType(type.name) || isStringLiteralUnion(type.name);
+export const TYPE_ALIAS_REGISTRY = new Map<string, Type>();
+
+export function registerTypeAlias(name: string, type: Type): void {
+  TYPE_ALIAS_REGISTRY.set(name, type);
+}
+
+export function lookupTypeAlias(name: string): Type | undefined {
+  return TYPE_ALIAS_REGISTRY.get(name);
+}
+
+export function clearTypeAliases(): void {
+  TYPE_ALIAS_REGISTRY.clear();
+}
+
+const NON_OPAQUE_TYPE_NAMES = new Set([
+  "int",
+  "str",
+  "float",
+  "bool",
+  "num",
+  "byte",
+  "char",
+  "void",
+  "nil",
+  "unknown",
+  "never",
+  "any",
+  "string",
+  "number",
+  "boolean",
+  "Object",
+  "Array",
+  "Map",
+  "Set",
+  "Promise",
+  "WeakMap",
+  "WeakSet",
+  "Date",
+  "RegExp",
+  "Error",
+  "Symbol",
+  "Function",
+]);
+
+export function isOpaqueNamedType(name: string): boolean {
+  const trimmed = name.trim();
+  if (
+    trimmed === "" ||
+    NON_OPAQUE_TYPE_NAMES.has(trimmed) ||
+    trimmed.includes("|") ||
+    trimmed.includes("&") ||
+    trimmed.includes("=>") ||
+    trimmed.includes("[") ||
+    trimmed.includes("{") ||
+    !isNaN(Number(trimmed))
+  ) {
+    return false;
   }
+  return true;
+}
+
+export function isStringLiteralOrUnionType(type: Type): boolean {
+  if (type.kind === "option") {
+    return isStringLiteralOrUnionType(type.innerType);
+  }
+  if (type.kind === "named") {
+    if (isStringLiteralType(type.name) || isStringLiteralUnion(type.name)) return true;
+    const resolved = TYPE_ALIAS_REGISTRY.get(type.name);
+    if (resolved && resolved !== type) {
+      return isStringLiteralOrUnionType(resolved);
+    }
+  }
+  if (type.kind === "enum") return true;
   return false;
 }
 
@@ -329,11 +404,19 @@ export function isAssignable(target: Type, source: Type): boolean {
   // String-backed enum assignability with string literals & unions
   if (target.kind === "enum") {
     if (sourceIsStrLit) {
-      return target.variants.has(unquoteStringLiteral(source.name));
+      const sourceVal = unquoteStringLiteral(source.name);
+      return (
+        target.variants.has(sourceVal) ||
+        Array.from(target.variants.keys()).some((v) => unquoteStringLiteral(v) === sourceVal)
+      );
     }
     if (sourceIsStrUnion) {
       const parts = source.name.split("|").map((s) => unquoteStringLiteral(s));
-      return parts.every((p) => target.variants.has(p));
+      return parts.every(
+        (p) =>
+          target.variants.has(p) ||
+          Array.from(target.variants.keys()).some((v) => unquoteStringLiteral(v) === p),
+      );
     }
     if (source.kind === "named" && target.name === source.name) {
       return true;
@@ -342,11 +425,14 @@ export function isAssignable(target: Type, source: Type): boolean {
 
   if (source.kind === "enum") {
     if (targetIsStrLit) {
-      return source.variants.has(unquoteStringLiteral(target.name));
+      const targetVal = unquoteStringLiteral(target.name);
+      return Array.from(source.variants.keys()).some((v) => unquoteStringLiteral(v) === targetVal);
     }
     if (targetIsStrUnion) {
       const parts = target.name.split("|").map((s) => unquoteStringLiteral(s));
-      return Array.from(source.variants.keys()).every((v) => parts.includes(v));
+      return Array.from(source.variants.keys()).every((v) =>
+        parts.includes(unquoteStringLiteral(v)),
+      );
     }
     if (targetIsStr) {
       return true;
@@ -358,6 +444,27 @@ export function isAssignable(target: Type, source: Type): boolean {
 
   if (target.kind === "enum" && source.kind === "enum") {
     return target.name === source.name;
+  }
+
+  // String literal compatibility with string literal union aliases and enums in TYPE_ALIAS_REGISTRY
+  if (target.kind === "named") {
+    const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
+    if (resolvedTarget && resolvedTarget !== target) {
+      if (isAssignable(resolvedTarget, source)) {
+        return true;
+      }
+    } else if (sourceIsStrLit && isOpaqueNamedType(target.name)) {
+      return true;
+    }
+  }
+
+  if (source.kind === "named") {
+    const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
+    if (resolvedSource && resolvedSource !== source) {
+      if (isAssignable(target, resolvedSource)) {
+        return true;
+      }
+    }
   }
 
   // Handle named unions (e.g. "int | (number) => void", "A | B")
@@ -526,6 +633,14 @@ export function isAssignable(target: Type, source: Type): boolean {
       if (target.name.includes("=>") && source.name.includes("=>")) {
         return true;
       }
+      const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
+      if (resolvedTarget && resolvedTarget !== target) {
+        if (isAssignable(resolvedTarget, source)) return true;
+      }
+      const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
+      if (resolvedSource && resolvedSource !== source) {
+        if (isAssignable(target, resolvedSource)) return true;
+      }
       return false;
     }
     return true;
@@ -551,6 +666,29 @@ export function isAssignable(target: Type, source: Type): boolean {
   }
 
   // Structural subtyping for named interfaces and record literals
+  if (
+    target.kind === "named" &&
+    target.name === "Record" &&
+    target.typeArgs &&
+    target.typeArgs.length === 2 &&
+    source.kind === "record"
+  ) {
+    const keyType = target.typeArgs[0];
+    const valType = target.typeArgs[1];
+    for (const [key, sourceFieldType] of source.fields) {
+      if (keyType.kind === "enum" || (keyType.kind === "named" && !isStringType(keyType))) {
+        const keyAsLit: Type = { kind: "named", name: JSON.stringify(key) };
+        if (!isAssignable(keyType, keyAsLit)) {
+          return false;
+        }
+      }
+      if (!isAssignable(valType, sourceFieldType)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   if (
     (target.kind === "named" && source.kind === "record") ||
     (target.kind === "record" && source.kind === "named")

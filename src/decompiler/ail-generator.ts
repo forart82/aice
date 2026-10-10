@@ -1011,6 +1011,9 @@ export class AilGenerator {
         if (expr.literalKind === "nil") {
           return "nil";
         }
+        if (expr.literalKind === "number" && expr.rawValue !== undefined && expr.rawValue !== "") {
+          return expr.rawValue;
+        }
         return String(expr.value);
       }
       case "TemplateLiteralExpr": {
@@ -1131,7 +1134,7 @@ export class AilGenerator {
               p.value.kind === "AssignExpr"
                 ? `(${this.formatExpr(p.value)})`
                 : this.formatExpr(p.value);
-            return `${p.key}: ${valStr}`;
+            return `${this.formatRecordKey(p.key)}: ${valStr}`;
           })
           .join(", ");
         return `{ ${props} }`;
@@ -1315,5 +1318,28 @@ export class AilGenerator {
         return t.name;
       }
     }
+  }
+
+  public formatRecordKey(key?: string): string {
+    if (key === undefined) return "";
+    if (key === "") return '""';
+    // If it is already quoted or computed [expr], emit as is
+    if (
+      (key.startsWith('"') && key.endsWith('"')) ||
+      (key.startsWith("'") && key.endsWith("'")) ||
+      (key.startsWith("[") && key.endsWith("]"))
+    ) {
+      return key;
+    }
+    // If it is numeric (e.g. 1, 2, 42, 3.14, -5), emit as is
+    if (/^-?\d+(?:\.\d+)?$/.test(key)) {
+      return key;
+    }
+    // If it is a valid identifier (e.g. multiplier, bonus), emit as is
+    if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)) {
+      return key;
+    }
+    // Otherwise (e.g. special characters, hyphens, spaces), quote it cleanly
+    return JSON.stringify(key);
   }
 }

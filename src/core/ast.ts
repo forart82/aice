@@ -55,6 +55,7 @@ export interface FieldDecl {
   name: string;
   typeAnnotation: TypeExpr;
   defaultValue?: Expr;
+  isOptional?: boolean;
   span: Span;
 }
 
@@ -95,7 +96,7 @@ export interface TupleType {
 
 export interface RecordType {
   kind: "RecordType";
-  fields: { name: string; type: TypeExpr; span: Span }[];
+  fields: { name: string; type: TypeExpr; isOptional?: boolean; span: Span }[];
   span: Span;
 }
 
@@ -173,6 +174,7 @@ export interface PropertyDecl {
   aliases?: string[];
   isStatic: boolean;
   isReadonly: boolean;
+  isOptional?: boolean;
   typeAnnotation?: TypeExpr;
   initialValue?: Expr;
   span: Span;
