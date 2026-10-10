@@ -22,6 +22,7 @@ import type {
   TypeExpr,
   VarDecl,
 } from "../core/ast.js";
+import { createAstNodeSnapshot, getNodeTriviaId } from "../core/trivia.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 import { toCssProperty } from "./css-emitter.js";
 import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
@@ -136,7 +137,77 @@ export class TypeScriptEmitter {
   }
 
   emit(mod: Module): string {
+    if (this.ctx.trivia && this.isModuleUnmutated(mod)) {
+      const original = this.ctx.trivia.getOriginalSource();
+      if (original !== undefined) {
+        return original;
+      }
+    }
     return this.emitModule(mod);
+  }
+
+  private canReplaySourceSlice(item: ModuleItem, nodeId: string): boolean {
+    if (!this.ctx.trivia) return false;
+    const candidateIds = this.getCandidateTriviaIds(item, nodeId);
+    let matchedEntry: { sourceSlice?: string; nodeSnapshot?: string } | undefined;
+    for (const id of candidateIds) {
+      const entry = this.ctx.trivia.getTrivia(id);
+      if (entry?.sourceSlice) {
+        matchedEntry = entry;
+        break;
+      }
+    }
+    if (!matchedEntry || !matchedEntry.sourceSlice) return false;
+
+    // For ClassDecl, if it was compacted into prop macros (properties have aliases), do not replay raw slice
+    if (item.kind === "ClassDecl") {
+      const hasCompactedAliases = item.properties.some((p) => p.aliases && p.aliases.length > 0);
+      if (hasCompactedAliases) return false;
+    }
+
+    if (matchedEntry.nodeSnapshot) {
+      const currentSnapshot = createAstNodeSnapshot(item);
+      if (currentSnapshot !== matchedEntry.nodeSnapshot) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private getSourceSlice(item: ModuleItem, nodeId: string): string | undefined {
+    if (!this.ctx.trivia) return undefined;
+    const candidateIds = this.getCandidateTriviaIds(item, nodeId);
+    for (const id of candidateIds) {
+      const slice = this.ctx.trivia.getSourceSlice(id);
+      if (slice) return slice;
+    }
+    return undefined;
+  }
+
+  private getCandidateTriviaIds(item: ModuleItem, primaryId: string): string[] {
+    const ids = [primaryId];
+    if (item.kind === "ComponentDecl") {
+      ids.push(`fn:${item.name}`);
+    } else if (item.kind === "FunctionDecl") {
+      ids.push(`component:${item.name}`);
+    } else if (item.kind === "ConstDecl") {
+      ids.push(`var:${item.name}`);
+    } else if (item.kind === "VarDecl") {
+      ids.push(`const:${item.name}`);
+    }
+    return ids;
+  }
+
+  private isModuleUnmutated(mod: Module): boolean {
+    if (!this.ctx.trivia) return false;
+    if (!mod || !mod.items || mod.items.length === 0) return false;
+    for (const item of mod.items) {
+      const nodeId = getNodeTriviaId(item);
+      if (!nodeId || !this.canReplaySourceSlice(item, nodeId)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   emitModule(mod: Module): string {
@@ -236,6 +307,11 @@ export class TypeScriptEmitter {
 
   private emitImport(imp: ImportDecl): void {
     const nodeId = `import:${imp.source}`;
+    if (this.canReplaySourceSlice(imp, nodeId)) {
+      const slice = this.getSourceSlice(imp, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
 
     if (imp.specifiers.length === 0) {
@@ -269,6 +345,12 @@ export class TypeScriptEmitter {
   }
 
   private emitModuleItem(item: ModuleItem): void {
+    const nodeId = getNodeTriviaId(item);
+    if (nodeId && this.canReplaySourceSlice(item, nodeId)) {
+      const slice = this.getSourceSlice(item, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     switch (item.kind) {
       case "TypeDecl":
         this.emitTypeDecl(item);
@@ -296,6 +378,11 @@ export class TypeScriptEmitter {
 
   private emitTypeDecl(t: TypeDecl): void {
     const nodeId = `type:${t.name}`;
+    if (this.canReplaySourceSlice(t, nodeId)) {
+      const slice = this.getSourceSlice(t, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
 
     if (t.aliasType) {
@@ -401,6 +488,14 @@ export class TypeScriptEmitter {
     }
 
     const nodeId = `class:${c.name}`;
+    if (this.canReplaySourceSlice(c, nodeId)) {
+      const slice = this.getSourceSlice(c, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      this.currentClassProperties = prevProperties;
+      this.currentClassMethods = prevMethods;
+      this.currentClassFunctionProperties = prevFunctionProperties;
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
 
     const exp = c.isExported ? "export " : "";
@@ -537,6 +632,11 @@ export class TypeScriptEmitter {
 
   private emitConstDecl(c: ConstDecl): void {
     const nodeId = `const:${c.name}`;
+    if (this.canReplaySourceSlice(c, nodeId)) {
+      const slice = this.getSourceSlice(c, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
     const exp = c.isExported ? "export " : "";
     const typeAnn = c.typeAnnotation ? `: ${this.emitTypeExpr(c.typeAnnotation)}` : "";
@@ -546,6 +646,11 @@ export class TypeScriptEmitter {
 
   private emitVarDecl(v: VarDecl): void {
     const nodeId = `var:${v.name}`;
+    if (this.canReplaySourceSlice(v, nodeId)) {
+      const slice = this.getSourceSlice(v, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
     const exp = v.isExported ? "export " : "";
     const kw = v.isMut ? "let" : "const";
@@ -572,6 +677,12 @@ export class TypeScriptEmitter {
   }
 
   private emitFunctionDecl(fn: FunctionDecl): void {
+    const nodeId = `fn:${fn.name}`;
+    if (this.canReplaySourceSlice(fn, nodeId)) {
+      const slice = this.getSourceSlice(fn, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.varTypes.clear();
     const prevProperties = this.currentClassProperties;
     const prevMethods = this.currentClassMethods;
@@ -597,7 +708,6 @@ export class TypeScriptEmitter {
     }
     this.localScopeVars = [fnScope];
 
-    const nodeId = `fn:${fn.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
     const isExported = fn.name !== "__top_level__";
     const exportPrefix = isExported ? "export " : "";
@@ -1277,6 +1387,11 @@ export class TypeScriptEmitter {
   // React 19 TSX Declarative Component Emitter
   private emitComponentDecl(comp: ComponentDecl): void {
     const nodeId = `component:${comp.name}`;
+    if (this.canReplaySourceSlice(comp, nodeId)) {
+      const slice = this.getSourceSlice(comp, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.emitLeadingTrivia(nodeId);
 
     if (comp.params.length > 0) {
@@ -1352,6 +1467,12 @@ export class TypeScriptEmitter {
   }
 
   private emitStyleDecl(s: StyleDecl): void {
+    const nodeId = `style:${s.name}`;
+    if (this.canReplaySourceSlice(s, nodeId)) {
+      const slice = this.getSourceSlice(s, nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     this.ctx.writeLine(`export const ${s.name} = {`);
     this.ctx.indent();
     for (const p of s.properties) {

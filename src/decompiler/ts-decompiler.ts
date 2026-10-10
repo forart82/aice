@@ -86,6 +86,7 @@ export class TsDecompiler {
   private variableScopeStack: Map<string, "number" | "string" | "boolean" | "other">[] = [
     new Map(),
   ];
+  private inClosureDepth = 0;
 
   private pushScope(params: readonly (ts.ParameterDeclaration | ts.BindingElement)[] = []): void {
     const scope = new Set<string>();
@@ -1261,13 +1262,51 @@ export class TsDecompiler {
                   rawValue: "nil",
                   span: this.getSpan(decl),
                 };
-            statements.push({
-              kind: "DestructureBinding",
-              names,
-              isMut,
-              init,
-              span: this.getSpan(decl),
-            });
+            if (this.inClosureDepth > 0) {
+              const tempName = `_${names.filter(Boolean).join("_") || "destruct"}`;
+              statements.push({
+                kind: "LetBinding",
+                name: tempName,
+                isMut,
+                typeAnnotation: null,
+                init,
+                span: this.getSpan(decl),
+              });
+              names.forEach((name, idx) => {
+                if (!name) return;
+                statements.push({
+                  kind: "LetBinding",
+                  name,
+                  isMut,
+                  typeAnnotation: null,
+                  init: {
+                    kind: "IndexExpr",
+                    object: {
+                      kind: "IdentifierExpr",
+                      name: tempName,
+                      span: this.getSpan(decl),
+                    },
+                    index: {
+                      kind: "LiteralExpr",
+                      literalKind: "number",
+                      value: idx,
+                      rawValue: String(idx),
+                      span: this.getSpan(decl),
+                    },
+                    span: this.getSpan(decl),
+                  },
+                  span: this.getSpan(decl),
+                });
+              });
+            } else {
+              statements.push({
+                kind: "DestructureBinding",
+                names,
+                isMut,
+                init,
+                span: this.getSpan(decl),
+              });
+            }
           }
         }
         continue;
@@ -1284,6 +1323,45 @@ export class TsDecompiler {
       statements,
       span: this.getSpan(block),
     };
+  }
+
+  private collapseStatementsForClosure(stmts: Statement[], span: Span): Statement[] {
+    if (this.inClosureDepth === 0 || stmts.length <= 1) {
+      return stmts;
+    }
+
+    const exprs: Expr[] = [];
+    for (const s of stmts) {
+      if (s.kind === "ExprStmt") {
+        exprs.push(s.expr);
+      } else if (s.kind === "AssignStmt") {
+        exprs.push({
+          kind: "AssignExpr",
+          target: s.target,
+          op: s.op,
+          value: s.value,
+          span: s.span,
+        });
+      } else {
+        return stmts;
+      }
+    }
+
+    if (exprs.length === stmts.length) {
+      return [
+        {
+          kind: "ExprStmt",
+          expr: {
+            kind: "ArrayLiteralExpr",
+            elements: exprs,
+            span,
+          },
+          span,
+        },
+      ];
+    }
+
+    return stmts;
   }
 
   private convertStatement(stmt: ts.Statement): Statement | Statement[] | null {
@@ -1357,6 +1435,46 @@ export class TsDecompiler {
               rawValue: "nil",
               span: this.getSpan(decl),
             };
+        if (this.inClosureDepth > 0) {
+          const tempName = `_${names.filter(Boolean).join("_") || "destruct"}`;
+          const unrolled: Statement[] = [
+            {
+              kind: "LetBinding",
+              name: tempName,
+              isMut,
+              typeAnnotation: null,
+              init,
+              span: this.getSpan(stmt),
+            },
+          ];
+          names.forEach((name, idx) => {
+            if (!name) return;
+            unrolled.push({
+              kind: "LetBinding",
+              name,
+              isMut,
+              typeAnnotation: null,
+              init: {
+                kind: "IndexExpr",
+                object: {
+                  kind: "IdentifierExpr",
+                  name: tempName,
+                  span: this.getSpan(stmt),
+                },
+                index: {
+                  kind: "LiteralExpr",
+                  literalKind: "number",
+                  value: idx,
+                  rawValue: String(idx),
+                  span: this.getSpan(stmt),
+                },
+                span: this.getSpan(stmt),
+              },
+              span: this.getSpan(stmt),
+            });
+          });
+          return unrolled;
+        }
         return {
           kind: "DestructureBinding",
           names,
@@ -1399,9 +1517,19 @@ export class TsDecompiler {
         });
         return stmts;
       }
+      let retValue: Expr | null = stmt.expression ? this.convertExpression(stmt.expression) : null;
+      if (!retValue && this.inClosureDepth > 0) {
+        retValue = {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "nil",
+          span: this.getSpan(stmt),
+        };
+      }
       return {
         kind: "ReturnStmt",
-        value: stmt.expression ? this.convertExpression(stmt.expression) : null,
+        value: retValue,
         span: this.getSpan(stmt),
       };
     }
@@ -1458,6 +1586,25 @@ export class TsDecompiler {
             statements: stmts,
             span: this.getSpan(currentElse),
           };
+        }
+      }
+
+      if (this.inClosureDepth > 0) {
+        thenBranch.statements = this.collapseStatementsForClosure(
+          thenBranch.statements,
+          thenBranch.span,
+        );
+        for (const eb of elifBranches) {
+          eb.body.statements = this.collapseStatementsForClosure(
+            eb.body.statements,
+            eb.body.span,
+          );
+        }
+        if (elseBranch) {
+          elseBranch.statements = this.collapseStatementsForClosure(
+            elseBranch.statements,
+            elseBranch.span,
+          );
         }
       }
 
@@ -1575,6 +1722,158 @@ export class TsDecompiler {
 
     if (ts.isSwitchStatement(stmt)) {
       const target = this.convertExpression(stmt.expression);
+
+      let hasFallthroughOrComplex = this.inClosureDepth > 0;
+      for (let i = 0; i < stmt.caseBlock.clauses.length; i++) {
+        const clause = stmt.caseBlock.clauses[i];
+        if (ts.isCaseClause(clause)) {
+          const isSimple =
+            ts.isStringLiteral(clause.expression) ||
+            ts.isNumericLiteral(clause.expression) ||
+            clause.expression.kind === ts.SyntaxKind.TrueKeyword ||
+            clause.expression.kind === ts.SyntaxKind.FalseKeyword ||
+            clause.expression.kind === ts.SyntaxKind.NullKeyword ||
+            ts.isIdentifier(clause.expression);
+          if (!isSimple) {
+            hasFallthroughOrComplex = true;
+            break;
+          }
+          const nonBreak = clause.statements.filter(
+            (s, idx) => !(idx === clause.statements.length - 1 && ts.isBreakStatement(s))
+          );
+          if (nonBreak.length === 0 && i < stmt.caseBlock.clauses.length - 1) {
+            hasFallthroughOrComplex = true;
+            break;
+          }
+        }
+      }
+
+      if (hasFallthroughOrComplex) {
+        interface LoweredBranch {
+          conditions: Expr[];
+          isDefault: boolean;
+          statements: Statement[];
+          span: Span;
+        }
+
+        const branches: LoweredBranch[] = [];
+        let pendingConditions: Expr[] = [];
+        let pendingIsDefault = false;
+
+        for (const clause of stmt.caseBlock.clauses) {
+          const cSpan = this.getSpan(clause);
+          if (ts.isCaseClause(clause)) {
+            const caseExpr = this.convertExpression(clause.expression);
+            pendingConditions.push({
+              kind: "BinaryExpr",
+              left: target,
+              operator: "==",
+              right: caseExpr,
+              span: cSpan,
+            });
+          } else {
+            pendingIsDefault = true;
+          }
+
+          const nonBreakStatements: ts.Statement[] = [];
+          for (let i = 0; i < clause.statements.length; i++) {
+            const s = clause.statements[i];
+            if (i === clause.statements.length - 1 && ts.isBreakStatement(s)) {
+              continue;
+            }
+            nonBreakStatements.push(s);
+          }
+
+          if (nonBreakStatements.length > 0) {
+            const clauseStmts: Statement[] = [];
+            for (const s of nonBreakStatements) {
+              const converted = this.convertStatement(s);
+              if (Array.isArray(converted)) {
+                clauseStmts.push(...converted);
+              } else if (converted) {
+                clauseStmts.push(converted);
+              }
+            }
+
+            const finalStmts = this.collapseStatementsForClosure(clauseStmts, cSpan);
+
+            branches.push({
+              conditions: pendingConditions,
+              isDefault: pendingIsDefault,
+              statements: finalStmts,
+              span: cSpan,
+            });
+
+            pendingConditions = [];
+            pendingIsDefault = false;
+          }
+        }
+
+        const defaultBranch = branches.find((b) => b.isDefault);
+        const conditionalBranches = branches.filter((b) => !b.isDefault && b.conditions.length > 0);
+
+        if (conditionalBranches.length === 0) {
+          if (defaultBranch) {
+            return defaultBranch.statements;
+          }
+          return null;
+        }
+
+        const combineConditions = (conds: Expr[], span: Span): Expr => {
+          if (conds.length === 1) return conds[0];
+          let res = conds[0];
+          for (let i = 1; i < conds.length; i++) {
+            res = {
+              kind: "BinaryExpr",
+              left: res,
+              operator: "or",
+              right: conds[i],
+              span,
+            };
+          }
+          return res;
+        };
+
+        const first = conditionalBranches[0];
+        const thenCondition = combineConditions(first.conditions, first.span);
+        const thenBranch: Block = {
+          kind: "Block",
+          statements: first.statements,
+          span: first.span,
+        };
+
+        const elifBranches: { condition: Expr; body: Block; span: Span }[] = [];
+        for (let i = 1; i < conditionalBranches.length; i++) {
+          const b = conditionalBranches[i];
+          elifBranches.push({
+            condition: combineConditions(b.conditions, b.span),
+            body: {
+              kind: "Block",
+              statements: b.statements,
+              span: b.span,
+            },
+            span: b.span,
+          });
+        }
+
+        const elseBranch: Block | null = defaultBranch
+          ? {
+              kind: "Block",
+              statements: defaultBranch.statements,
+              span: defaultBranch.span,
+            }
+          : null;
+
+        return {
+          kind: "IfStmt",
+          condition: thenCondition,
+          thenBranch,
+          elifBranches,
+          elseBranch,
+          span: this.getSpan(stmt),
+        };
+      }
+
       const cases: MatchCase[] = [];
 
       for (const clause of stmt.caseBlock.clauses) {
@@ -1631,6 +1930,15 @@ export class TsDecompiler {
     }
 
     if (ts.isTryStatement(stmt)) {
+      if (this.inClosureDepth > 0) {
+        const unrolled: Statement[] = [];
+        for (const s of stmt.tryBlock.statements) {
+          const res = this.convertStatement(s);
+          if (Array.isArray(res)) unrolled.push(...res);
+          else if (res) unrolled.push(res);
+        }
+        return unrolled;
+      }
       const tryBlock = this.convertBlock(stmt.tryBlock);
       let catchParam: string | undefined;
       let catchBlock: Block | undefined;
@@ -2201,12 +2509,16 @@ export class TsDecompiler {
     }
 
     if (ts.isTemplateExpression(expr)) {
-      const quasis: string[] = [expr.head.text];
+      const quasis: string[] = [
+        (expr.head as any).rawText ?? expr.head.text.replace(/`/g, "\\`"),
+      ];
       const expressions: Expr[] = [];
 
       for (const span of expr.templateSpans) {
         expressions.push(this.convertExpression(span.expression));
-        quasis.push(span.literal.text);
+        quasis.push(
+          (span.literal as any).rawText ?? span.literal.text.replace(/`/g, "\\`"),
+        );
       }
 
       return {
@@ -2604,6 +2916,21 @@ export class TsDecompiler {
       };
     }
 
+    // JSX Element, Self-Closing Element, or Fragment -> Literal nil
+    if (
+      ts.isJsxElement(expr) ||
+      ts.isJsxSelfClosingElement(expr) ||
+      ts.isJsxFragment(expr)
+    ) {
+      return {
+        kind: "LiteralExpr",
+        literalKind: "nil",
+        value: null,
+        rawValue: "nil",
+        span: this.getSpan(expr),
+      };
+    }
+
     // Arrow Function
     if (ts.isArrowFunction(expr)) {
       const params = expr.parameters.map((p) => ({
@@ -2614,9 +2941,17 @@ export class TsDecompiler {
         span: this.getSpan(p),
       }));
 
-      const body = ts.isBlock(expr.body)
-        ? this.convertBlock(expr.body)
-        : this.convertExpression(expr.body);
+      let body: Block | Expr;
+      if (ts.isBlock(expr.body)) {
+        this.inClosureDepth++;
+        try {
+          body = this.convertBlock(expr.body);
+        } finally {
+          this.inClosureDepth--;
+        }
+      } else {
+        body = this.convertExpression(expr.body);
+      }
 
       return {
         kind: "ClosureExpr",
@@ -2637,9 +2972,17 @@ export class TsDecompiler {
         span: this.getSpan(p),
       }));
 
-      const body = expr.body
-        ? this.convertBlock(expr.body)
-        : { kind: "Block" as const, statements: [], span: this.getSpan(expr) };
+      let body: Block;
+      if (expr.body) {
+        this.inClosureDepth++;
+        try {
+          body = this.convertBlock(expr.body);
+        } finally {
+          this.inClosureDepth--;
+        }
+      } else {
+        body = { kind: "Block" as const, statements: [], span: this.getSpan(expr) };
+      }
 
       return {
         kind: "ClosureExpr",

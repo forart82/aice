@@ -54,7 +54,7 @@ import type {
 } from "./ast.js";
 import { filterIndentation, scanRawTokens, tokenize } from "./lexer.js";
 import { createSpan, emptySpan, mergeSpans, type Span } from "./span.js";
-import type { Token, TokenKind } from "./tokens.js";
+import { KEYWORDS, type Token, type TokenKind } from "./tokens.js";
 import { CstTriviaTable, type TriviaItem, type TriviaKind } from "./trivia.js";
 
 export class ParserError extends Error {
@@ -209,6 +209,9 @@ export class Parser {
   private isContextualIdentifier(tok: Token): boolean {
     if (tok.kind === "IDENT") return true;
     switch (tok.kind) {
+      case "PUB":
+      case "NIL":
+      case "TYPE_NIL":
       case "STYLE":
       case "TOKENS":
       case "MATCH":
@@ -253,11 +256,33 @@ export class Parser {
     return (
       tok.kind === "IDENT" ||
       this.isContextualIdentifier(tok) ||
-      (Boolean(tok.value) && /^[a-zA-Z_][a-zA-Z0-9_-]*$/.test(tok.value))
+      (Boolean(tok.value) && /^[a-zA-Z_$][a-zA-Z0-9_$-]*$/.test(tok.value))
     );
   }
 
   private isTypedDeclarationAhead(): boolean {
+    if (
+      this.check("ELSE") ||
+      this.check("IF") ||
+      this.check("ELIF") ||
+      this.check("TRY") ||
+      this.check("CATCH") ||
+      this.check("FINALLY") ||
+      this.check("FOR") ||
+      this.check("WHILE") ||
+      this.check("RETURN") ||
+      this.check("RET") ||
+      this.check("DEF") ||
+      this.check("FN") ||
+      this.check("CLASS") ||
+      this.check("INTERFACE") ||
+      this.check("CASE") ||
+      this.check("DEFAULT") ||
+      this.check("IMPORT") ||
+      this.check("EXPORT")
+    ) {
+      return false;
+    }
     if (!this.isIdentOrKeyword(this.current()) || this.peek(1).kind !== "COLON") {
       return false;
     }
@@ -265,7 +290,11 @@ export class Parser {
     let i = this.cursor + 2;
     while (i < this.tokens.length) {
       const k = this.tokens[i].kind;
-      if (k === "EOF" || (depth === 0 && (k === "NEWLINE" || k === "SEMICOLON"))) {
+      if (
+        k === "EOF" ||
+        (depth === 0 &&
+          (k === "NEWLINE" || k === "SEMICOLON" || k === "DEDENT" || k === "RBRACE"))
+      ) {
         break;
       }
       if (k === "LPAREN" || k === "LBRACKET" || k === "LBRACE") {
@@ -276,6 +305,35 @@ export class Parser {
         if (k === "COLON_EQUAL" || k === "COLON_COLON_EQUAL" || k === "EQUAL") {
           return true;
         }
+      }
+      i++;
+    }
+    return false;
+  }
+
+  private isClosureAhead(): boolean {
+    if (this.current().kind !== "FN") return false;
+    if (this.peek(1).kind !== "LPAREN") return false;
+    let depth = 0;
+    let i = this.cursor + 1;
+    while (i < this.tokens.length) {
+      const k = this.tokens[i].kind;
+      if (k === "LPAREN") {
+        depth++;
+      } else if (k === "RPAREN") {
+        depth--;
+        if (depth === 0) {
+          const next = this.tokens[i + 1]?.kind;
+          return (
+            next === "ARROW" ||
+            next === "FAT_ARROW" ||
+            next === "EQUAL" ||
+            next === "COLON" ||
+            next === "LBRACE"
+          );
+        }
+      } else if (depth === 0) {
+        break;
       }
       i++;
     }
@@ -352,14 +410,47 @@ export class Parser {
 
   private parseContextualIdentOrString(msg = "Expected identifier or property key"): string {
     const tok = this.current();
-    if (tok.kind === "STRING") {
-      this.advance();
-      return tok.value;
+    if (tok.kind === "STRING" || tok.kind === "NUMBER") {
+      return this.advance().value;
     }
-    if (this.isIdentOrKeyword(tok)) {
+    if (
+      this.isIdentOrKeyword(tok) ||
+      (Boolean(tok.value) && /^[a-zA-Z_$][a-zA-Z0-9_$-]*$/.test(tok.value)) ||
+      (tok.value && KEYWORDS[tok.value])
+    ) {
       return this.advance().value;
     }
     throw new ParserError(msg ?? `Expected identifier, got '${tok.kind}' (${tok.value})`, tok.span);
+  }
+
+  private parsePropertyKey(msg = "Expected property key in record literal"): string {
+    const tok = this.current();
+    if (tok.kind === "STRING" || tok.kind === "NUMBER") {
+      return this.advance().value;
+    }
+    if (tok.kind === "LBRACKET") {
+      this.advance();
+      let inner = "";
+      let depth = 1;
+      while (depth > 0 && !this.check("EOF")) {
+        if (this.check("LBRACKET")) depth++;
+        else if (this.check("RBRACKET")) {
+          depth--;
+          if (depth === 0) break;
+        }
+        inner += this.advance().value;
+      }
+      this.consume("RBRACKET");
+      return `[${inner}]`;
+    }
+    if (
+      this.isIdentOrKeyword(tok) ||
+      (Boolean(tok.value) && /^[a-zA-Z_$][a-zA-Z0-9_$-]*$/.test(tok.value)) ||
+      (tok.value && KEYWORDS[tok.value])
+    ) {
+      return this.advance().value;
+    }
+    throw new ParserError(msg, tok.span);
   }
 
   private consumeStatementSeparator(): void {
@@ -440,7 +531,15 @@ export class Parser {
 
   private parseModuleItem(): ModuleItem | null {
     let isExported = false;
-    if (this.check("PUB")) {
+    if (
+      this.check("PUB") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      this.peek(1).kind !== "EQUAL" &&
+      this.peek(1).kind !== "DOT" &&
+      this.peek(1).kind !== "QUESTION_DOT" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead())
+    ) {
       isExported = true;
       this.advance();
     }
@@ -468,10 +567,19 @@ export class Parser {
     if (this.check("CONST")) {
       return this.parseConstDecl(isExported);
     }
-    if (isExported && (this.check("LET") || this.check("VAL"))) {
+    const isValDecl =
+      this.check("VAL") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      this.peek(1).kind !== "EQUAL" &&
+      this.peek(1).kind !== "DOT" &&
+      this.peek(1).kind !== "QUESTION_DOT" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead());
+
+    if (isExported && (this.check("LET") || isValDecl)) {
       return this.parseVarDecl(isExported);
     }
-    if (this.check("VAL")) {
+    if (isValDecl) {
       return this.parseVarDecl(isExported);
     }
     if (
@@ -486,6 +594,14 @@ export class Parser {
       return this.parseFunctionDecl();
     }
     if (this.check("COMPONENT")) {
+      if (
+        this.peek(1).kind === "COLON_EQUAL" ||
+        this.peek(1).kind === "COLON_COLON_EQUAL" ||
+        this.peek(1).kind === "EQUAL" ||
+        (this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead())
+      ) {
+        return this.parseVarDecl(isExported);
+      }
       return this.parseComponentDecl();
     }
     if (this.check("STYLE")) {
@@ -891,6 +1007,32 @@ export class Parser {
     };
   }
 
+  private typeExprToString(t: TypeExpr): string {
+    switch (t.kind) {
+      case "PrimitiveType":
+        return t.primitive;
+      case "NamedType":
+        if (t.typeArgs && t.typeArgs.length > 0) {
+          return `${t.name}[${t.typeArgs.map((a) => this.typeExprToString(a)).join(", ")}]`;
+        }
+        return t.name;
+      case "ArrayType":
+        return `[${this.typeExprToString(t.elementType)}]`;
+      case "TupleType":
+        return `[${t.elementTypes.map((e) => this.typeExprToString(e)).join(", ")}]`;
+      case "OptionType":
+        return `${this.typeExprToString(t.innerType)}?`;
+      case "ResultType":
+        return `Result[${this.typeExprToString(t.okType)}, ${this.typeExprToString(t.errType)}]`;
+      case "RecordType": {
+        const fields = t.fields.map((f) => `${f.name}: ${this.typeExprToString(f.type)}`).join(", ");
+        return `{ ${fields} }`;
+      }
+      default:
+        return "any";
+    }
+  }
+
   // Type Expressions
   private parseTypeExpr(): TypeExpr {
     let type = this.parseBaseTypeExpr();
@@ -906,35 +1048,13 @@ export class Parser {
     while (this.check("PIPE")) {
       this.advance(); // consume '|'
       const right = this.parseBaseTypeExpr();
-      if (
-        (right.kind === "NamedType" &&
-          (right.name === "null" || right.name === "nil" || right.name === "undefined")) ||
-        (right.kind === "PrimitiveType" && right.primitive === "nil")
-      ) {
-        type = {
-          kind: "OptionType",
-          innerType: type,
-          span: mergeSpans(type.span, right.span),
-        };
-      } else {
-        const leftName =
-          type.kind === "NamedType"
-            ? type.name
-            : type.kind === "PrimitiveType"
-              ? type.primitive
-              : "any";
-        const rightName =
-          right.kind === "NamedType"
-            ? right.name
-            : right.kind === "PrimitiveType"
-              ? right.primitive
-              : "any";
-        type = {
-          kind: "NamedType",
-          name: `${leftName} | ${rightName}`,
-          span: mergeSpans(type.span, right.span),
-        };
-      }
+      const leftName = this.typeExprToString(type);
+      const rightName = this.typeExprToString(right);
+      type = {
+        kind: "NamedType",
+        name: `${leftName} | ${rightName}`,
+        span: mergeSpans(type.span, right.span),
+      };
     }
 
     return type;
@@ -1039,7 +1159,9 @@ export class Parser {
       tok.kind === "TYPE_NUM" ||
       tok.kind === "TYPE_BYTE" ||
       tok.kind === "TYPE_CHAR" ||
-      tok.kind === "TYPE_VOID"
+      tok.kind === "TYPE_VOID" ||
+      tok.kind === "TYPE_NIL" ||
+      tok.kind === "NIL"
     ) {
       this.advance();
       const primMap: Record<string, PrimitiveType["primitive"]> = {
@@ -1051,10 +1173,12 @@ export class Parser {
         TYPE_BYTE: "byte",
         TYPE_CHAR: "char",
         TYPE_VOID: "void",
+        TYPE_NIL: "nil",
+        NIL: "nil",
       };
       return {
         kind: "PrimitiveType",
-        primitive: primMap[tok.kind] ?? "int",
+        primitive: primMap[tok.kind] ?? "nil",
         span: tok.span,
       };
     }
@@ -1226,35 +1350,44 @@ export class Parser {
       };
     }
 
-    // 6. Function Type: (a:int, b:str) => void or () => void
+    // 6. Function Type: (a:int, b:str) => void or () => void or (...args: number[]) => number
     if (tok.kind === "LPAREN") {
       this.advance(); // consume '('
       const paramTypes: string[] = [];
       while (!this.check("RPAREN") && !this.check("EOF")) {
-        if (this.peek().kind === "COLON") {
-          this.advance(); // consume name
-          this.advance(); // consume ':'
-        } else if (this.peek().kind === "QUESTION") {
-          this.advance(); // consume name
-          this.advance(); // consume '?'
-          if (this.check("COLON")) this.advance(); // consume ':'
+        let isRest = false;
+        if (this.check("ELLIPSIS")) {
+          this.advance();
+          isRest = true;
         }
+
+        let pName: string | undefined;
+        if (
+          (this.check("IDENT") || this.isContextualIdentifier(this.current())) &&
+          (this.peek().kind === "COLON" || this.peek().kind === "QUESTION")
+        ) {
+          pName = this.advance().value;
+          if (this.check("QUESTION")) {
+            this.advance();
+            pName += "?";
+          }
+          if (this.check("COLON")) this.advance();
+        }
+
         const pt = this.parseTypeExpr();
-        const ptName =
-          pt.kind === "NamedType" ? pt.name : pt.kind === "PrimitiveType" ? pt.primitive : "any";
-        paramTypes.push(ptName);
+        const ptName = this.typeExprToString(pt);
+        if (isRest) {
+          paramTypes.push(pName ? `...${pName}: ${ptName}` : `...${ptName}`);
+        } else {
+          paramTypes.push(ptName);
+        }
         if (this.check("COMMA")) this.advance();
       }
       this.consume("RPAREN");
       if (this.check("FAT_ARROW") || this.check("ARROW")) {
         this.advance();
         const retType = this.parseTypeExpr();
-        const retName =
-          retType.kind === "NamedType"
-            ? retType.name
-            : retType.kind === "PrimitiveType"
-              ? retType.primitive
-              : "void";
+        const retName = this.typeExprToString(retType);
         return {
           kind: "NamedType",
           name: `(${paramTypes.join(", ")}) => ${retName}`,
@@ -1297,6 +1430,21 @@ export class Parser {
           if (this.check("COMMA")) this.advance();
         }
         endSpan = this.consume("RBRACKET", "Expected ']' after type arguments").span;
+      } else if (this.check("LT")) {
+        this.advance();
+        while (!this.check("GT") && !this.check("EOF")) {
+          typeArgs.push(this.parseTypeExpr());
+          if (this.check("COMMA")) this.advance();
+        }
+        endSpan = this.consume("GT", "Expected '>' after type arguments").span;
+      }
+
+      while (this.check("LBRACKET")) {
+        this.advance();
+        const indexType = this.parseTypeExpr();
+        const endB = this.consume("RBRACKET", "Expected ']' after index type").span;
+        endSpan = mergeSpans(endSpan, endB);
+        name += `[${this.typeExprToString(indexType)}]`;
       }
 
       return {
@@ -1326,7 +1474,16 @@ export class Parser {
         const ident = this.parseContextualIdentOrString(
           "Expected parameter name in destructuring pattern",
         );
-        elements.push(ident);
+        let entry = ident;
+        if (this.check("EQUAL")) {
+          this.advance();
+          const defExpr = this.parseExpr();
+          const defStr = this.source
+            ? this.source.slice(defExpr.span.start.offset, defExpr.span.end.offset)
+            : "";
+          entry += ` = ${defStr}`;
+        }
+        elements.push(entry);
         if (this.check("COMMA")) {
           this.advance();
         } else {
@@ -1342,13 +1499,21 @@ export class Parser {
         const field = this.parseContextualIdentOrString(
           "Expected property name in destructuring pattern",
         );
+        let entry = field;
         if (this.check("COLON")) {
           this.advance();
           const alias = this.parseContextualIdentOrString("Expected alias name");
-          elements.push(`${field}: ${alias}`);
-        } else {
-          elements.push(field);
+          entry = `${field}: ${alias}`;
         }
+        if (this.check("EQUAL")) {
+          this.advance();
+          const defExpr = this.parseExpr();
+          const defStr = this.source
+            ? this.source.slice(defExpr.span.start.offset, defExpr.span.end.offset)
+            : "";
+          entry += ` = ${defStr}`;
+        }
+        elements.push(entry);
         if (this.check("COMMA")) {
           this.advance();
         } else {
@@ -1968,7 +2133,12 @@ export class Parser {
         typeAnnotation = this.parseTypeExpr();
       }
       this.consume("EQUAL", "Expected '=' in variable declaration");
-    } else if (this.check("VAL")) {
+    } else if (
+      this.check("VAL") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead())
+    ) {
       this.advance();
       isMut = false;
       name = this.parseContextualIdentOrString("Expected variable identifier");
@@ -2087,7 +2257,29 @@ export class Parser {
       return this.parseDestructureOrVectorAssign();
     }
 
-    if (this.check("LET") || this.check("VAL") || this.check("CONST")) {
+    const isValKeywordDecl =
+      this.check("VAL") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      this.peek(1).kind !== "EQUAL" &&
+      this.peek(1).kind !== "DOT" &&
+      this.peek(1).kind !== "QUESTION_DOT" &&
+      this.peek(1).kind !== "LBRACKET" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead()) &&
+      this.peek(1).kind !== "PLUS_EQUAL" &&
+      this.peek(1).kind !== "MINUS_EQUAL" &&
+      this.peek(1).kind !== "STAR_EQUAL" &&
+      this.peek(1).kind !== "SLASH_EQUAL" &&
+      this.peek(1).kind !== "PERCENT_EQUAL" &&
+      this.peek(1).kind !== "PIPE_EQUAL" &&
+      this.peek(1).kind !== "AMP_EQUAL" &&
+      this.peek(1).kind !== "CARET_EQUAL" &&
+      this.peek(1).kind !== "SHL_EQUAL" &&
+      this.peek(1).kind !== "SHR_EQUAL" &&
+      this.peek(1).kind !== "USHR_EQUAL" &&
+      this.peek(1).kind !== "STAR_STAR_EQUAL";
+
+    if (this.check("LET") || isValKeywordDecl || this.check("CONST")) {
       return this.parseLetBinding();
     }
     if (this.check("RET")) {
@@ -2119,7 +2311,14 @@ export class Parser {
     if (this.check("CONTINUE")) {
       return this.parseContinueStatement();
     }
-    if (this.check("IDENT") && this.current().value === "pass") {
+    if (
+      this.check("IDENT") &&
+      this.current().value === "pass" &&
+      (this.peek(1).kind === "NEWLINE" ||
+        this.peek(1).kind === "EOF" ||
+        this.peek(1).kind === "DEDENT" ||
+        this.peek(1).kind === "SEMICOLON")
+    ) {
       this.advance();
       this.consumeStatementSeparator();
       return null;
@@ -2603,12 +2802,61 @@ export class Parser {
         guard = this.parseExpr();
       }
 
-      this.consume("FAT_ARROW", "Expected '=>' after match pattern");
+      if (this.check("FAT_ARROW") || this.check("COLON")) {
+        this.advance();
+      } else {
+        throw new ParserError("Expected '=>' or ':' after match pattern", this.current().span);
+      }
 
       let body: Block | Expr;
       if (this.check("NEWLINE")) {
         this.consumeStatementSeparator();
+        if (this.check("INDENT") || this.check("LBRACE")) {
+          body = this.parseBlock();
+        } else if (
+          this.check("RET") ||
+          this.check("BREAK") ||
+          this.check("CONTINUE") ||
+          this.check("THROW") ||
+          this.check("LET") ||
+          this.check("VAL") ||
+          this.check("CONST") ||
+          this.check("IF") ||
+          this.check("WHILE") ||
+          this.check("FOR") ||
+          this.check("TRY")
+        ) {
+          const stmt = this.parseStatement()!;
+          body = {
+            kind: "Block",
+            statements: [stmt],
+            span: stmt.span,
+          };
+        } else {
+          body = this.parseExpr();
+          this.consumeStatementSeparator();
+        }
+      } else if (this.check("LBRACE")) {
         body = this.parseBlock();
+      } else if (
+        this.check("RET") ||
+        this.check("BREAK") ||
+        this.check("CONTINUE") ||
+        this.check("THROW") ||
+        this.check("LET") ||
+        this.check("VAL") ||
+        this.check("CONST") ||
+        this.check("IF") ||
+        this.check("WHILE") ||
+        this.check("FOR") ||
+        this.check("TRY")
+      ) {
+        const stmt = this.parseStatement()!;
+        body = {
+          kind: "Block",
+          statements: [stmt],
+          span: stmt.span,
+        };
       } else {
         body = this.parseExpr();
         this.consumeStatementSeparator();
@@ -2682,10 +2930,32 @@ export class Parser {
     this.consume("FOR");
 
     let variable: string;
-    if (this.check("LBRACKET")) {
-      this.advance(); // consume '['
+    if (this.check("LBRACE")) {
+      this.advance(); // consume '{'
       const elements: string[] = [];
-      while (!this.check("RBRACKET") && !this.check("EOF")) {
+      while (!this.check("RBRACE") && !this.check("EOF")) {
+        const key = this.parseContextualIdentOrString("Expected property name");
+        if (this.check("COLON")) {
+          this.advance();
+          const alias = this.parseContextualIdentOrString("Expected alias name");
+          elements.push(`${key}: ${alias}`);
+        } else {
+          elements.push(key);
+        }
+        if (this.check("COMMA")) {
+          this.advance();
+        } else {
+          break;
+        }
+      }
+      this.consume("RBRACE");
+      variable = `{ ${elements.join(", ")} }`;
+    } else if (this.check("LBRACKET") || this.check("LPAREN")) {
+      const isBracket = this.check("LBRACKET");
+      const closeKind = isBracket ? "RBRACKET" : "RPAREN";
+      this.advance(); // consume '[' or '('
+      const elements: string[] = [];
+      while (!this.check(closeKind) && !this.check("EOF")) {
         if (this.check("COMMA")) {
           elements.push("");
           this.advance();
@@ -2698,8 +2968,8 @@ export class Parser {
           break;
         }
       }
-      this.consume("RBRACKET");
-      variable = `[${elements.join(", ")}]`;
+      this.consume(closeKind);
+      variable = isBracket ? `[${elements.join(", ")}]` : `(${elements.join(", ")})`;
     } else {
       variable = this.parseContextualIdentOrString("Expected loop variable name");
     }
@@ -3103,12 +3373,12 @@ export class Parser {
             value: target,
             span: mergeSpans(spreadTok.span, target.span),
           });
-          if (this.check("COMMA")) this.advance();
+          if (this.check("COMMA") || this.check("SEMICOLON") || this.check("NEWLINE")) this.advance();
           continue;
         }
 
         const kSpan = this.current().span;
-        const key = this.parseContextualIdentOrString("Expected property key in record literal");
+        const key = this.parsePropertyKey("Expected property key in record literal");
         let val: Expr;
         let pSpan = kSpan;
         if (this.check("COLON")) {
@@ -3124,7 +3394,7 @@ export class Parser {
           value: val,
           span: pSpan,
         });
-        if (this.check("COMMA")) this.advance();
+        if (this.check("COMMA") || this.check("SEMICOLON") || this.check("NEWLINE")) this.advance();
       }
       const endSpan = this.consume("RBRACE").span;
       return {
@@ -3136,7 +3406,15 @@ export class Parser {
 
     // 7. Anonymous Function / Closure: fn(params) -> Type = expr
     if (tok.kind === "FN") {
-      return this.parseClosureExpr(tok.span, false);
+      if (this.isClosureAhead()) {
+        return this.parseClosureExpr(tok.span, false);
+      }
+      this.advance();
+      return {
+        kind: "IdentifierExpr",
+        name: tok.value,
+        span: tok.span,
+      };
     }
 
     throw new ParserError(`Unexpected expression token '${tok.kind}' (${tok.value})`, tok.span);
@@ -3544,7 +3822,9 @@ export class Parser {
       this.advance();
       while (!this.check("RPAREN") && !this.check("EOF")) {
         const aSpan = this.current().span;
-        const aName = this.parseContextualIdentOrString("Expected attribute name");
+        const aName = this.check("STRING")
+          ? this.advance().value
+          : this.parseCssKebabIdent();
         this.consume("COLON");
         const aVal = this.parseExpr();
 
@@ -4098,8 +4378,18 @@ export class Parser {
 
       // At top-level, stop on statement delimiters
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        if (this.check("NEWLINE")) {
+          // If the last token was a comma, this is a multi-line CSS value continuation
+          if (tokens.length > 0 && tokens[tokens.length - 1].kind === "COMMA") {
+            this.advance(); // consume NEWLINE
+            if (this.check("INDENT")) {
+              this.advance();
+            }
+            continue;
+          }
+          break;
+        }
         if (
-          this.check("NEWLINE") ||
           this.check("SEMICOLON") ||
           this.check("DEDENT") ||
           this.check("COMMENT")

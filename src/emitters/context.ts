@@ -109,6 +109,14 @@ export class EmitterContext {
     }
   }
 
+  getSourceSlice(nodeId: string): string | undefined {
+    return this.trivia?.getSourceSlice(nodeId);
+  }
+
+  hasSourceSlice(nodeId: string): boolean {
+    return Boolean(this.trivia?.getSourceSlice(nodeId));
+  }
+
   getOutput(): string {
     return this.buffer.join("");
   }

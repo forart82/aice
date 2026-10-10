@@ -161,6 +161,7 @@ export class AilGenerator {
   private currentIndent = 0;
   private buffer: string[] = [];
   private trivia?: CstTriviaTable;
+  private inCurlyBlock = false;
 
   constructor(options: AilGeneratorOptions = {}) {
     this.indentStr = options.indent ?? "  ";
@@ -461,19 +462,24 @@ export class AilGenerator {
         const ret = m.returnType ? ` -> ${this.formatTypeExpr(m.returnType)}` : "";
 
         if (m.isExpressionBodied) {
+          const bodyExpr = m.body as Expr;
+          const bodyStr =
+            bodyExpr.kind === "AssignExpr"
+              ? `(${this.formatExpr(bodyExpr)})`
+              : this.formatExpr(bodyExpr);
           if (m.accessor === "get") {
             this.writeLine(
-              `${st}get ${m.name}()${ret} = ${this.formatExpr(m.body as Expr)}`,
+              `${st}get ${m.name}()${ret} = ${bodyStr}`,
               mNodeId,
             );
           } else if (m.accessor === "set") {
             this.writeLine(
-              `${st}set ${m.name}(${params}) = ${this.formatExpr(m.body as Expr)}`,
+              `${st}set ${m.name}(${params}) = ${bodyStr}`,
               mNodeId,
             );
           } else {
             this.writeLine(
-              `${st}${as}fn ${m.name}(${params})${ret} = ${this.formatExpr(m.body as Expr)}`,
+              `${st}${as}fn ${m.name}(${params})${ret} = ${bodyStr}`,
               mNodeId,
             );
           }
@@ -488,7 +494,7 @@ export class AilGenerator {
           this.indent();
           if (m.body.kind === "Block") {
             if (m.body.statements.length === 0) {
-              this.writeLine("pass");
+              this.writeLine("nil");
             } else {
               this.emitBlock(m.body, true);
             }
@@ -545,8 +551,13 @@ export class AilGenerator {
     const as = fn.isAsync ? "async " : "";
     if (fn.isExpressionBodied && !Array.isArray((fn.body as Block).statements)) {
       const retType = fn.returnType ? ` -> ${this.formatTypeExpr(fn.returnType)}` : "";
+      const bodyExpr = fn.body as Expr;
+      const bodyStr =
+        bodyExpr.kind === "AssignExpr"
+          ? `(${this.formatExpr(bodyExpr)})`
+          : this.formatExpr(bodyExpr);
       this.writeLine(
-        `${as}fn ${fn.name}(${params})${retType} = ${this.formatExpr(fn.body as Expr)}`,
+        `${as}fn ${fn.name}(${params})${retType} = ${bodyStr}`,
       );
       return;
     }
@@ -560,7 +571,7 @@ export class AilGenerator {
 
   private emitBlock(block: Block, isTail = false): void {
     if (block.statements.length === 0) {
-      this.writeLine("pass");
+      this.writeLine("nil");
       return;
     }
 
@@ -586,7 +597,8 @@ export class AilGenerator {
         return `${indent}[${names}] ${op} ${this.formatExpr(stmt.init)}`;
       }
       case "AssignStmt": {
-        return `${indent}${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`;
+        const op = stmt.op === ":=" || stmt.op === "::=" ? "=" : (stmt.op ?? "=");
+        return `${indent}${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)}`;
       }
       case "ReturnStmt": {
         if (stmt.value) {
@@ -598,13 +610,50 @@ export class AilGenerator {
         return `${indent}${this.formatExpr(stmt.expr)}`;
       }
       case "IfStmt": {
-        let s = `${indent}if ${this.formatExpr(stmt.condition)}:\n`;
+        const condStr =
+          stmt.condition.kind === "AssignExpr"
+            ? `(${this.formatExpr(stmt.condition)})`
+            : this.formatExpr(stmt.condition);
+        if (this.inCurlyBlock) {
+          let s = `${indent}if ${condStr}: {\n`;
+          this.indent();
+          s += this.formatBlock(stmt.thenBranch);
+          this.dedent();
+          s += `\n${indent}}`;
+
+          for (const elif of stmt.elifBranches) {
+            const elifCondStr =
+              elif.condition.kind === "AssignExpr"
+                ? `(${this.formatExpr(elif.condition)})`
+                : this.formatExpr(elif.condition);
+            s += ` elif ${elifCondStr}: {\n`;
+            this.indent();
+            s += this.formatBlock(elif.body);
+            this.dedent();
+            s += `\n${indent}}`;
+          }
+
+          if (stmt.elseBranch) {
+            s += ` else: {\n`;
+            this.indent();
+            s += this.formatBlock(stmt.elseBranch);
+            this.dedent();
+            s += `\n${indent}}`;
+          }
+          return s;
+        }
+
+        let s = `${indent}if ${condStr}:\n`;
         this.indent();
         s += this.formatBlock(stmt.thenBranch);
         this.dedent();
 
         for (const elif of stmt.elifBranches) {
-          s += `\n${indent}elif ${this.formatExpr(elif.condition)}:\n`;
+          const elifCondStr =
+            elif.condition.kind === "AssignExpr"
+              ? `(${this.formatExpr(elif.condition)})`
+              : this.formatExpr(elif.condition);
+          s += `\n${indent}elif ${elifCondStr}:\n`;
           this.indent();
           s += this.formatBlock(elif.body);
           this.dedent();
@@ -621,11 +670,22 @@ export class AilGenerator {
       case "MatchStmt": {
         const s = `${indent}match ${this.formatExpr(stmt.target)}:\n`;
         this.indent();
-        const cases = stmt.cases.map((mc) => this.formatMatchCase(mc)).join("\n");
+        const cases =
+          stmt.cases && stmt.cases.length > 0
+            ? stmt.cases.map((mc) => this.formatMatchCase(mc)).join("\n")
+            : `${this.getIndent()}case _ => nil`;
         this.dedent();
         return s + cases;
       }
       case "ForStmt": {
+        if (this.inCurlyBlock) {
+          let s = `${indent}for ${stmt.variable} in ${this.formatExpr(stmt.iterable)}: {\n`;
+          this.indent();
+          s += this.formatBlock(stmt.body);
+          this.dedent();
+          s += `\n${indent}}`;
+          return s;
+        }
         let s = `${indent}for ${stmt.variable} in ${this.formatExpr(stmt.iterable)}:\n`;
         this.indent();
         s += this.formatBlock(stmt.body);
@@ -633,7 +693,19 @@ export class AilGenerator {
         return s;
       }
       case "WhileStmt": {
-        let s = `${indent}while ${this.formatExpr(stmt.condition)}:\n`;
+        const condStr =
+          stmt.condition.kind === "AssignExpr"
+            ? `(${this.formatExpr(stmt.condition)})`
+            : this.formatExpr(stmt.condition);
+        if (this.inCurlyBlock) {
+          let s = `${indent}while ${condStr}: {\n`;
+          this.indent();
+          s += this.formatBlock(stmt.body);
+          this.dedent();
+          s += `\n${indent}}`;
+          return s;
+        }
+        let s = `${indent}while ${condStr}:\n`;
         this.indent();
         s += this.formatBlock(stmt.body);
         this.dedent();
@@ -649,23 +721,74 @@ export class AilGenerator {
         return `${indent}throw ${this.formatExpr(stmt.expr)}`;
       }
       case "TryStmt": {
+        if (this.inCurlyBlock) {
+          let s = `${indent}try: {\n`;
+          this.indent();
+          s += this.formatBlock(stmt.tryBlock);
+          this.dedent();
+          s += `\n${indent}}`;
+
+          const hasCatch = Boolean(stmt.catchBlock);
+          const hasFinally = Boolean(stmt.finallyBlock);
+
+          if (hasCatch) {
+            const param = stmt.catchParam
+              ? (stmt.catchParam.startsWith("(") ? ` ${stmt.catchParam}` : ` ${stmt.catchParam}`)
+              : " (err)";
+            s += ` catch${param}: {\n`;
+            this.indent();
+            s += this.formatBlock(stmt.catchBlock!);
+            this.dedent();
+            s += `\n${indent}}`;
+          }
+
+          if (hasFinally) {
+            s += ` finally: {\n`;
+            this.indent();
+            s += this.formatBlock(stmt.finallyBlock!);
+            this.dedent();
+            s += `\n${indent}}`;
+          }
+
+          if (!hasCatch && !hasFinally) {
+            s += ` catch (err): {\n`;
+            this.indent();
+            s += `${this.getIndent()}nil\n`;
+            this.dedent();
+            s += `${indent}}`;
+          }
+          return s;
+        }
+
         let s = `${indent}try:\n`;
         this.indent();
         s += this.formatBlock(stmt.tryBlock);
         this.dedent();
 
-        if (stmt.catchBlock) {
-          const param = stmt.catchParam ? ` ${stmt.catchParam}` : "";
+        const hasCatch = Boolean(stmt.catchBlock);
+        const hasFinally = Boolean(stmt.finallyBlock);
+
+        if (hasCatch) {
+          const param = stmt.catchParam
+            ? (stmt.catchParam.startsWith("(") ? ` ${stmt.catchParam}` : ` ${stmt.catchParam}`)
+            : " (err)";
           s += `\n${indent}catch${param}:\n`;
           this.indent();
-          s += this.formatBlock(stmt.catchBlock);
+          s += this.formatBlock(stmt.catchBlock!);
           this.dedent();
         }
 
-        if (stmt.finallyBlock) {
+        if (hasFinally) {
           s += `\n${indent}finally:\n`;
           this.indent();
-          s += this.formatBlock(stmt.finallyBlock);
+          s += this.formatBlock(stmt.finallyBlock!);
+          this.dedent();
+        }
+
+        if (!hasCatch && !hasFinally) {
+          s += `\n${indent}catch (err):\n`;
+          this.indent();
+          s += `${this.getIndent()}nil`;
           this.dedent();
         }
         return s;
@@ -674,10 +797,17 @@ export class AilGenerator {
   }
 
   public formatBlock(block: Block): string {
-    if (block.statements.length === 0) {
+    if (!block || !block.statements || block.statements.length === 0) {
       return `${this.getIndent()}nil`;
     }
-    return block.statements.map((s) => this.formatStatement(s, this.getIndent())).join("\n");
+    const lines = block.statements.map((s) => {
+      const formatted = this.formatStatement(s, this.getIndent());
+      if (this.inCurlyBlock && !formatted.trimEnd().endsWith("}")) {
+        return formatted + ";";
+      }
+      return formatted;
+    });
+    return lines.join("\n");
   }
 
   public formatMatchCase(mc: MatchCase): string {
@@ -685,13 +815,20 @@ export class AilGenerator {
     const guardStr = mc.guard ? ` if ${this.formatExpr(mc.guard)}` : "";
     const indent = this.getIndent();
     if ("statements" in mc.body) {
+      if (mc.body.statements.length === 0) {
+        return `${indent}case ${patternStr}${guardStr} => nil`;
+      }
       let s = `${indent}case ${patternStr}${guardStr} =>\n`;
       this.indent();
       s += this.formatBlock(mc.body);
       this.dedent();
       return s;
     } else {
-      return `${indent}case ${patternStr}${guardStr} => ${this.formatExpr(mc.body)}`;
+      const bodyStr =
+        mc.body.kind === "AssignExpr"
+          ? `(${this.formatExpr(mc.body)})`
+          : this.formatExpr(mc.body);
+      return `${indent}case ${patternStr}${guardStr} => ${bodyStr}`;
     }
   }
 
@@ -711,12 +848,20 @@ export class AilGenerator {
     const patternStr = this.formatPattern(mc.pattern);
     const guardStr = mc.guard ? ` if ${this.formatExpr(mc.guard)}` : "";
     if ("statements" in mc.body) {
+      if (mc.body.statements.length === 0) {
+        this.writeLine(`case ${patternStr}${guardStr} => nil`);
+        return;
+      }
       this.writeLine(`case ${patternStr}${guardStr} =>`);
       this.indent();
       this.emitBlock(mc.body);
       this.dedent();
     } else {
-      this.writeLine(`case ${patternStr}${guardStr} => ${this.formatExpr(mc.body)}`);
+      const bodyStr =
+        mc.body.kind === "AssignExpr"
+          ? `(${this.formatExpr(mc.body)})`
+          : this.formatExpr(mc.body);
+      this.writeLine(`case ${patternStr}${guardStr} => ${bodyStr}`);
     }
   }
 
@@ -774,7 +919,7 @@ export class AilGenerator {
     }
 
     if (!hasChildren && node.childExpr) {
-      this.writeLine(`${node.tag}${attrStr}: "{${this.formatExpr(node.childExpr)}}"`);
+      this.writeLine(`${node.tag}${attrStr}: ${JSON.stringify(`{${this.formatExpr(node.childExpr)}}`)}`);
       return;
     }
 
@@ -784,7 +929,7 @@ export class AilGenerator {
       this.writeLine(`"${node.textLiteral}"`);
     }
     if (node.childExpr) {
-      this.writeLine(`"{${this.formatExpr(node.childExpr)}}"`);
+      this.writeLine(JSON.stringify(`{${this.formatExpr(node.childExpr)}}`));
     }
     for (const child of node.children) {
       this.emitLayoutNode(child);
@@ -796,7 +941,10 @@ export class AilGenerator {
     const nodeId = `style:${s.name}`;
     this.emitLeadingTrivia(nodeId);
 
-    const nameStr = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(s.name) ? s.name : `"${s.name}"`;
+    const sanitizedName = s.name.replace(/\r?\n\s*/g, " ").trim();
+    const nameStr = /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(sanitizedName)
+      ? sanitizedName
+      : JSON.stringify(sanitizedName);
     this.writeLine(`style ${nameStr}:`);
     this.indent();
 
@@ -838,7 +986,8 @@ export class AilGenerator {
       if (!p.value) {
         this.writeLine(p.property);
       } else {
-        this.writeLine(`${p.property}: ${p.value}`);
+        const normalizedVal = p.value.replace(/\r?\n\s*/g, " ").trim();
+        this.writeLine(`${p.property}: ${normalizedVal}`);
       }
       i++;
     }
@@ -865,9 +1014,14 @@ export class AilGenerator {
         return String(expr.value);
       }
       case "TemplateLiteralExpr": {
-        let result = "`" + (expr.quasis[0] ?? "");
+        const escapeQuasi = (q: string) => q.replace(/(?<!\\)`/g, "\\`");
+        let result = "`" + escapeQuasi(expr.quasis[0] ?? "");
         for (let i = 0; i < expr.expressions.length; i++) {
-          result += "${" + this.formatExpr(expr.expressions[i]) + "}" + (expr.quasis[i + 1] ?? "");
+          result +=
+            "${" +
+            this.formatExpr(expr.expressions[i]) +
+            "}" +
+            escapeQuasi(expr.quasis[i + 1] ?? "");
         }
         result += "`";
         return result;
@@ -903,10 +1057,23 @@ export class AilGenerator {
         }
         return `${op}${operand}`;
       }
-      case "PostfixTryExpr":
-        return `${this.formatExpr(expr.operand)}?`;
+      case "PostfixTryExpr": {
+        const operandStr = this.formatExpr(expr.operand);
+        const needsParen =
+          expr.operand.kind === "AssignExpr" ||
+          expr.operand.kind === "BinaryExpr" ||
+          expr.operand.kind === "ClosureExpr";
+        return needsParen ? `(${operandStr})?` : `${operandStr}?`;
+      }
       case "CallExpr": {
-        const args = expr.args.map((a) => this.formatExpr(a)).join(", ");
+        const args = expr.args
+          .map((a) => {
+            if (a.kind === "AssignExpr") {
+              return `(${this.formatExpr(a)})`;
+            }
+            return this.formatExpr(a);
+          })
+          .join(", ");
         const needsParen =
           expr.callee.kind !== "IdentifierExpr" &&
           expr.callee.kind !== "MemberAccessExpr" &&
@@ -941,7 +1108,14 @@ export class AilGenerator {
         return `${objStr}[${this.formatExpr(expr.index)}]`;
       }
       case "ArrayLiteralExpr": {
-        const items = expr.elements.map((e) => this.formatExpr(e)).join(", ");
+        const items = expr.elements
+          .map((e) => {
+            if (e.kind === "AssignExpr") {
+              return `(${this.formatExpr(e)})`;
+            }
+            return this.formatExpr(e);
+          })
+          .join(", ");
         return `[${items}]`;
       }
       case "RecordLiteralExpr": {
@@ -953,7 +1127,11 @@ export class AilGenerator {
             if (p.value.kind === "IdentifierExpr" && p.value.name === p.key) {
               return p.key; // Shorthand
             }
-            return `${p.key}: ${this.formatExpr(p.value)}`;
+            const valStr =
+              p.value.kind === "AssignExpr"
+                ? `(${this.formatExpr(p.value)})`
+                : this.formatExpr(p.value);
+            return `${p.key}: ${valStr}`;
           })
           .join(", ");
         return `{ ${props} }`;
@@ -971,6 +1149,31 @@ export class AilGenerator {
         const retStr = expr.returnType ? ` -> ${this.formatTypeExpr(expr.returnType)}` : "";
 
         if ("kind" in expr.body && expr.body.kind !== "Block") {
+          if (
+            (expr.body as any).kind === "LetBinding" ||
+            (expr.body as any).kind === "DestructureBinding" ||
+            (expr.body as any).kind === "VarDecl" ||
+            (expr.body as any).kind === "IfStmt" ||
+            (expr.body as any).kind === "WhileStmt" ||
+            (expr.body as any).kind === "ForStmt" ||
+            (expr.body as any).kind === "TryStmt" ||
+            (expr.body as any).kind === "MatchStmt"
+          ) {
+            const prevCurly = this.inCurlyBlock;
+            this.inCurlyBlock = true;
+            try {
+              const outerIndent = this.getIndent();
+              this.indent();
+              const stmtStr = this.formatStatement(
+                expr.body as unknown as Statement,
+                this.getIndent(),
+              );
+              this.dedent();
+              return `fn(${params})${retStr} {\n${stmtStr}\n${outerIndent}}`;
+            } finally {
+              this.inCurlyBlock = prevCurly;
+            }
+          }
           const bodyExpr = expr.body as Expr;
           const bodyStr = this.formatExpr(bodyExpr);
           if (bodyExpr.kind === "AssignExpr") {
@@ -987,9 +1190,14 @@ export class AilGenerator {
           if (stmts.length === 1) {
             const stmt = stmts[0];
             if (stmt.kind === "ReturnStmt") {
-              return stmt.value
-                ? `fn(${params})${retStr} = ${this.formatExpr(stmt.value)}`
-                : `fn(${params})${retStr} = nil`;
+              if (stmt.value) {
+                const valStr = this.formatExpr(stmt.value);
+                if (stmt.value.kind === "AssignExpr") {
+                  return `fn(${params})${retStr} = (${valStr})`;
+                }
+                return `fn(${params})${retStr} = ${valStr}`;
+              }
+              return `fn(${params})${retStr} = nil`;
             }
             if (stmt.kind === "ExprStmt") {
               const bodyStr = this.formatExpr(stmt.expr);
@@ -999,24 +1207,38 @@ export class AilGenerator {
               return `fn(${params})${retStr} = ${bodyStr}`;
             }
             if (stmt.kind === "AssignStmt") {
-              return `fn(${params})${retStr} = (${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)})`;
+              const op = stmt.op === ":=" || stmt.op === "::=" ? "=" : (stmt.op ?? "=");
+              return `fn(${params})${retStr} = (${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)})`;
             }
           }
 
-          const outerIndent = this.getIndent();
-          this.indent();
-          const blockBody = this.formatBlock(expr.body);
-          this.dedent();
-
-          return `fn(${params})${retStr} {\n${blockBody}\n${outerIndent}}`;
+          const prevCurly = this.inCurlyBlock;
+          this.inCurlyBlock = true;
+          try {
+            const outerIndent = this.getIndent();
+            this.indent();
+            const blockBody = this.formatBlock(expr.body);
+            this.dedent();
+            return `fn(${params})${retStr} {\n${blockBody}\n${outerIndent}}`;
+          } finally {
+            this.inCurlyBlock = prevCurly;
+          }
         }
 
         return `fn(${params})${retStr} = nil`;
       }
-      case "AssignExpr":
-        return `${this.formatExpr(expr.target)} ${expr.op ?? "="} ${this.formatExpr(expr.value)}`;
-      case "AwaitExpr":
-        return `await ${this.formatExpr(expr.operand)}`;
+      case "AssignExpr": {
+        const op = expr.op === ":=" || expr.op === "::=" ? "=" : (expr.op ?? "=");
+        return `${this.formatExpr(expr.target)} ${op} ${this.formatExpr(expr.value)}`;
+      }
+      case "AwaitExpr": {
+        const operandStr = this.formatExpr(expr.operand);
+        const needsParen =
+          expr.operand.kind === "AssignExpr" ||
+          expr.operand.kind === "BinaryExpr" ||
+          expr.operand.kind === "ClosureExpr";
+        return needsParen ? `await (${operandStr})` : `await ${operandStr}`;
+      }
     }
   }
 
@@ -1059,6 +1281,36 @@ export class AilGenerator {
         if (t.typeArgs && t.typeArgs.length > 0) {
           const args = t.typeArgs.map((ta) => this.formatTypeExpr(ta)).join(", ");
           return `${t.name}[${args}]`;
+        }
+        if (t.name === "null" || t.name === "undefined") {
+          return "nil";
+        }
+        if (t.name.includes("|")) {
+          const rawParts = t.name.split("|").map((p) => p.trim());
+          const hasNullOrUndefined = rawParts.some(
+            (p) => p === "null" || p === "undefined" || p === "nil",
+          );
+          if (hasNullOrUndefined) {
+            const nonNullParts = rawParts.filter(
+              (p) => p !== "null" && p !== "undefined" && p !== "nil",
+            );
+            if (nonNullParts.length === 1) {
+              const single = nonNullParts[0];
+              if (
+                !single.includes(" ") &&
+                !single.includes("(") &&
+                !single.includes("=>") &&
+                !single.includes("[")
+              ) {
+                return `${single}?`;
+              }
+              return `${single} | nil`;
+            } else if (nonNullParts.length > 1) {
+              return `${nonNullParts.join(" | ")} | nil`;
+            } else {
+              return "nil";
+            }
+          }
         }
         return t.name;
       }
