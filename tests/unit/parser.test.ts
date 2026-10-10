@@ -1,25 +1,40 @@
 import { describe, expect, it } from "vitest";
 import type {
+  ArrayLiteralExpr,
+  ArrayType,
+  AwaitExpr,
   BinaryExpr,
+  BreakStmt,
   CallExpr,
   ClassDecl,
+  ClosureExpr,
   ComponentDecl,
   ConstDecl,
+  ContinueStmt,
+  DestructureBinding,
+  ForStmt,
   FunctionDecl,
   IdentifierExpr,
   IfStmt,
   LetBinding,
   MatchStmt,
   MemberAccessExpr,
+  NamedType,
   PostfixTryExpr,
   PrimitiveType,
   RecordLiteralExpr,
+  RecordType,
   RefinementType,
   StyleDecl,
+  TemplateLiteralExpr,
+  ThrowStmt,
+  TryStmt,
+  TupleType,
   TypeDecl,
+  UnaryExpr,
   VarDecl,
 } from "../../src/core/ast.js";
-import { ParserError, parse } from "../../src/core/parser.js";
+import { ParserError, parse, parseWithTrivia } from "../../src/core/parser.js";
 
 describe("AIL 2.0 Pratt Parser & Universal AST Generator", () => {
   describe("Modules & Imports", () => {
@@ -136,6 +151,189 @@ from "node:crypto" import *`;
       expect(enumDecl.isEnum).toBe(true);
       expect(enumDecl.variants).toHaveLength(4);
       expect(enumDecl.variants?.map((v) => v.name)).toEqual(["North", "South", "East", "West"]);
+    });
+
+    it("parses qualified dotted type identifiers in params, return types, class properties, and type arguments", () => {
+      const src = `class SceneRenderer:
+  scene: THREE.Scene
+  camera: THREE.OrthographicCamera
+  meshes: Map[str, THREE.Vector3] = Map()
+  materials: [THREE.MeshBasicMaterial] = []
+  activeMaterial: THREE.ShaderMaterial? = nil
+
+  fn render(target: THREE.WebGLRenderer, options: React.FC[Props]) -> THREE.Group:
+    ret THREE.Group()`;
+
+      const mod = parse(src, "renderer.ail");
+      expect(mod.items).toHaveLength(1);
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.kind).toBe("ClassDecl");
+      expect(cls.name).toBe("SceneRenderer");
+
+      // Class properties
+      expect(cls.properties).toHaveLength(5);
+      expect(cls.properties[0].name).toBe("scene");
+      expect(cls.properties[0].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "THREE.Scene",
+      });
+      expect(cls.properties[1].name).toBe("camera");
+      expect(cls.properties[1].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "THREE.OrthographicCamera",
+      });
+
+      // Type arguments: Map[str, THREE.Vector3]
+      expect(cls.properties[2].name).toBe("meshes");
+      expect(cls.properties[2].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "Map",
+        typeArgs: [
+          { kind: "PrimitiveType", primitive: "str" },
+          { kind: "NamedType", name: "THREE.Vector3" },
+        ],
+      });
+
+      // Array of dotted types: [THREE.MeshBasicMaterial]
+      expect(cls.properties[3].name).toBe("materials");
+      expect(cls.properties[3].typeAnnotation).toMatchObject({
+        kind: "ArrayType",
+        elementType: {
+          kind: "NamedType",
+          name: "THREE.MeshBasicMaterial",
+        },
+      });
+
+      // Postfix ? option with dotted type: THREE.ShaderMaterial?
+      expect(cls.properties[4].name).toBe("activeMaterial");
+      expect(cls.properties[4].typeAnnotation).toMatchObject({
+        kind: "OptionType",
+        innerType: {
+          kind: "NamedType",
+          name: "THREE.ShaderMaterial",
+        },
+      });
+
+      // Function params and return type
+      expect(cls.methods).toHaveLength(1);
+      const fn = cls.methods[0];
+      expect(fn.name).toBe("render");
+      expect(fn.params).toHaveLength(2);
+      expect(fn.params[0].name).toBe("target");
+      expect(fn.params[0].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "THREE.WebGLRenderer",
+      });
+      expect(fn.params[1].name).toBe("options");
+      expect(fn.params[1].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "React.FC",
+        typeArgs: [{ kind: "NamedType", name: "Props" }],
+      });
+      expect(fn.returnType).toMatchObject({
+        kind: "NamedType",
+        name: "THREE.Group",
+      });
+    });
+
+    it("correctly calculates source span for dotted types and type arguments", () => {
+      const src = `type T: item: NodeJS.ReadableStream[Buffer]`;
+      const mod = parse(src, "stream.ail");
+      const td = mod.items[0] as TypeDecl;
+      const typeAnn = td.fields![0].typeAnnotation as NamedType;
+      expect(typeAnn.kind).toBe("NamedType");
+      expect(typeAnn.name).toBe("NodeJS.ReadableStream");
+      expect(typeAnn.span.start.column).toBe(15);
+      expect(typeAnn.span.end.column).toBe(44);
+    });
+
+    it("throws ParserError on trailing dot in dotted type expression", () => {
+      const src = `type T: item: THREE.`;
+      expect(() => parse(src, "err.ail")).toThrowError(ParserError);
+    });
+
+    it("parses tuple types [str, int], [float, float, float], and nested [int, [str, bool]]", () => {
+      const src = `type Coordinates:
+  pair: [str, int]
+  vector: [float, float, float]
+  nested: [int, [str, bool]]
+  single: [int,]
+  empty: []
+  array: [int]`;
+
+      const mod = parse(src, "tuples.ail");
+      expect(mod.items).toHaveLength(1);
+      const td = mod.items[0] as TypeDecl;
+      expect(td.fields).toHaveLength(6);
+
+      // pair: [str, int]
+      const pair = td.fields![0].typeAnnotation as TupleType;
+      expect(pair.kind).toBe("TupleType");
+      expect(pair.elementTypes).toHaveLength(2);
+      expect(pair.elementTypes[0]).toMatchObject({ kind: "PrimitiveType", primitive: "str" });
+      expect(pair.elementTypes[1]).toMatchObject({ kind: "PrimitiveType", primitive: "int" });
+
+      // vector: [float, float, float]
+      const vec = td.fields![1].typeAnnotation as TupleType;
+      expect(vec.kind).toBe("TupleType");
+      expect(vec.elementTypes).toHaveLength(3);
+      expect(
+        vec.elementTypes.every(
+          (e) => e.kind === "PrimitiveType" && (e as any).primitive === "float",
+        ),
+      ).toBe(true);
+
+      // nested: [int, [str, bool]]
+      const nested = td.fields![2].typeAnnotation as TupleType;
+      expect(nested.kind).toBe("TupleType");
+      expect(nested.elementTypes).toHaveLength(2);
+      expect(nested.elementTypes[0]).toMatchObject({ kind: "PrimitiveType", primitive: "int" });
+      const innerTuple = nested.elementTypes[1] as TupleType;
+      expect(innerTuple.kind).toBe("TupleType");
+      expect(innerTuple.elementTypes).toHaveLength(2);
+      expect(innerTuple.elementTypes[0]).toMatchObject({ kind: "PrimitiveType", primitive: "str" });
+      expect(innerTuple.elementTypes[1]).toMatchObject({
+        kind: "PrimitiveType",
+        primitive: "bool",
+      });
+
+      // single: [int,]
+      const single = td.fields![3].typeAnnotation as TupleType;
+      expect(single.kind).toBe("TupleType");
+      expect(single.elementTypes).toHaveLength(1);
+      expect(single.elementTypes[0]).toMatchObject({ kind: "PrimitiveType", primitive: "int" });
+
+      // empty: []
+      const empty = td.fields![4].typeAnnotation as TupleType;
+      expect(empty.kind).toBe("TupleType");
+      expect(empty.elementTypes).toHaveLength(0);
+
+      // array: [int] (must remain ArrayType, not TupleType)
+      const array = td.fields![5].typeAnnotation as ArrayType;
+      expect(array.kind).toBe("ArrayType");
+      expect(array.elementType).toMatchObject({ kind: "PrimitiveType", primitive: "int" });
+    });
+
+    it("parses tuple type in function signatures with return types", () => {
+      const src = `fn swap(pair: [int, str]) -> [str, int]:
+  ret [pair[1], pair[0]]`;
+
+      const mod = parse(src, "fn_tuple.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.params[0].typeAnnotation).toMatchObject({
+        kind: "TupleType",
+        elementTypes: [
+          { kind: "PrimitiveType", primitive: "int" },
+          { kind: "PrimitiveType", primitive: "str" },
+        ],
+      });
+      expect(fn.returnType).toMatchObject({
+        kind: "TupleType",
+        elementTypes: [
+          { kind: "PrimitiveType", primitive: "str" },
+          { kind: "PrimitiveType", primitive: "int" },
+        ],
+      });
     });
   });
 
@@ -304,6 +502,67 @@ fn test():
 
       expect(expr.operator).toBe("or");
       expect((expr.left as BinaryExpr).operator).toBe("and");
+    });
+
+    it("Step 8: parses all binary power, bitwise, and shift operators individually", () => {
+      const ops = ["**", "&", "|", "^", "<<", ">>", ">>>"];
+      for (const op of ops) {
+        const src = `fn opTest(a:int, b:int) = a ${op} b`;
+        const mod = parse(src);
+        const fn = mod.items[0] as FunctionDecl;
+        const expr = fn.body as BinaryExpr;
+        expect(expr.kind).toBe("BinaryExpr");
+        expect(expr.operator).toBe(op);
+        expect((expr.left as IdentifierExpr).name).toBe("a");
+        expect((expr.right as IdentifierExpr).name).toBe("b");
+      }
+    });
+
+    it("Step 8: respects right-associativity and precedence for power operator (**)", () => {
+      // 2 ** 3 ** 2 should parse as 2 ** (3 ** 2)
+      const src1 = `fn pow1() = 2 ** 3 ** 2`;
+      const mod1 = parse(src1);
+      const fn1 = mod1.items[0] as FunctionDecl;
+      const expr1 = fn1.body as BinaryExpr;
+      expect(expr1.operator).toBe("**");
+      expect((expr1.left as LiteralExpr).value).toBe(2);
+      expect((expr1.right as BinaryExpr).operator).toBe("**");
+
+      // 2 * 3 ** 4 should parse as 2 * (3 ** 4)
+      const src2 = `fn pow2() = 2 * 3 ** 4`;
+      const mod2 = parse(src2);
+      const fn2 = mod2.items[0] as FunctionDecl;
+      const expr2 = fn2.body as BinaryExpr;
+      expect(expr2.operator).toBe("*");
+      expect((expr2.right as BinaryExpr).operator).toBe("**");
+    });
+
+    it("Step 8: respects precedence hierarchy for shift and bitwise operators", () => {
+      // a + b << c should parse as (a + b) << c because SUM > SHIFT
+      const src1 = `fn shiftTest(a:int, b:int, c:int) = a + b << c`;
+      const mod1 = parse(src1);
+      const fn1 = mod1.items[0] as FunctionDecl;
+      const expr1 = fn1.body as BinaryExpr;
+      expect(expr1.operator).toBe("<<");
+      expect((expr1.left as BinaryExpr).operator).toBe("+");
+
+      // a | b ^ c & d should parse as a | (b ^ (c & d)) because BIT_AND > BIT_XOR > BIT_OR
+      const src2 = `fn bitTest(a:int, b:int, c:int, d:int) = a | b ^ c & d`;
+      const mod2 = parse(src2);
+      const fn2 = mod2.items[0] as FunctionDecl;
+      const expr2 = fn2.body as BinaryExpr;
+      expect(expr2.operator).toBe("|");
+      const xorExpr = expr2.right as BinaryExpr;
+      expect(xorExpr.operator).toBe("^");
+      expect((xorExpr.right as BinaryExpr).operator).toBe("&");
+
+      // a << b == c should parse as (a << b) == c because SHIFT > EQUALS
+      const src3 = `fn cmpTest(a:int, b:int, c:int) = a << b == c`;
+      const mod3 = parse(src3);
+      const fn3 = mod3.items[0] as FunctionDecl;
+      const expr3 = fn3.body as BinaryExpr;
+      expect(expr3.operator).toBe("==");
+      expect((expr3.left as BinaryExpr).operator).toBe("<<");
     });
 
     it("parses postfix ? try unwrap operator on function calls", () => {
@@ -1045,6 +1304,1033 @@ name: str? := nil`;
         kind: "OptionType",
         innerType: { kind: "PrimitiveType", primitive: "str" },
       });
+    });
+  });
+
+  describe("Step 3: Call-Site Argument Spread Operator (...)", () => {
+    it("parses single spread argument in function calls: fn(...args)", () => {
+      const src = `fn run():
+  target(...args)`;
+      const mod = parse(src, "spread1.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.body).toBeDefined();
+      if (fn.body.kind === "Block") {
+        const stmt = fn.body.statements[0];
+        expect(stmt.kind).toBe("ExprStmt");
+        if (stmt.kind === "ExprStmt") {
+          const call = stmt.expr as CallExpr;
+          expect(call.kind).toBe("CallExpr");
+          expect(call.args).toHaveLength(1);
+          const spreadArg = call.args[0] as UnaryExpr;
+          expect(spreadArg.kind).toBe("UnaryExpr");
+          expect(spreadArg.operator).toBe("...");
+          expect(spreadArg.operand).toMatchObject({
+            kind: "IdentifierExpr",
+            name: "args",
+          });
+        }
+      }
+    });
+
+    it("parses mixed positional and spread arguments: calculate(x, y, ...extra)", () => {
+      const src = `fn run():
+  calculate(x, y, ...extra)`;
+      const mod = parse(src, "spread2.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      if (fn.body.kind === "Block") {
+        const stmt = fn.body.statements[0];
+        if (stmt.kind === "ExprStmt") {
+          const call = stmt.expr as CallExpr;
+          expect(call.kind).toBe("CallExpr");
+          expect(call.args).toHaveLength(3);
+          expect(call.args[0]).toMatchObject({ kind: "IdentifierExpr", name: "x" });
+          expect(call.args[1]).toMatchObject({ kind: "IdentifierExpr", name: "y" });
+          expect(call.args[2]).toMatchObject({
+            kind: "UnaryExpr",
+            operator: "...",
+            operand: { kind: "IdentifierExpr", name: "extra" },
+          });
+        }
+      }
+    });
+
+    it("parses spread arguments in member call expressions: Math.max(...nums)", () => {
+      const src = `fn run():
+  Math.max(...nums)`;
+      const mod = parse(src, "spread3.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      if (fn.body.kind === "Block") {
+        const stmt = fn.body.statements[0];
+        if (stmt.kind === "ExprStmt") {
+          const call = stmt.expr as CallExpr;
+          expect(call.kind).toBe("CallExpr");
+          expect(call.callee).toMatchObject({
+            kind: "MemberAccessExpr",
+            object: { kind: "IdentifierExpr", name: "Math" },
+            property: "max",
+          });
+          expect(call.args).toHaveLength(1);
+          expect(call.args[0]).toMatchObject({
+            kind: "UnaryExpr",
+            operator: "...",
+            operand: { kind: "IdentifierExpr", name: "nums" },
+          });
+        }
+      }
+    });
+
+    it("parses multiple spread elements in array literals: [...items, ...more]", () => {
+      const src = `combined := [...items, ...more]`;
+      const mod = parse(src, "spread4.ail");
+      expect(mod.items).toHaveLength(1);
+      const decl = mod.items[0] as VarDecl;
+      expect(decl.value).toBeDefined();
+      const arr = decl.value as ArrayLiteralExpr;
+      expect(arr.kind).toBe("ArrayLiteralExpr");
+      expect(arr.elements).toHaveLength(2);
+      expect(arr.elements[0]).toMatchObject({
+        kind: "UnaryExpr",
+        operator: "...",
+        operand: { kind: "IdentifierExpr", name: "items" },
+      });
+      expect(arr.elements[1]).toMatchObject({
+        kind: "UnaryExpr",
+        operator: "...",
+        operand: { kind: "IdentifierExpr", name: "more" },
+      });
+    });
+  });
+
+  describe("Step 4: Negative Numeric Literals in Type Unions", () => {
+    it("parses negative numbers in type unions (1 | -1, -1 | 0 | 1)", () => {
+      const src = `type Direction = 1 | -1
+type Ternary = -1 | 0 | 1`;
+      const mod = parse(src, "dir.ail");
+      expect(mod.items).toHaveLength(2);
+      const d1 = mod.items[0] as TypeDecl;
+      expect(d1.aliasType).toMatchObject({ kind: "NamedType", name: "1 | -1" });
+      const d2 = mod.items[1] as TypeDecl;
+      expect(d2.aliasType).toMatchObject({ kind: "NamedType", name: "-1 | 0 | 1" });
+    });
+
+    it("parses function return types with negative numeric literal unions (-> 1 | -1)", () => {
+      const src = `fn getDirection() -> 1 | -1:
+  ret -1`;
+      const mod = parse(src, "fn_ret.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.returnType).toMatchObject({ kind: "NamedType", name: "1 | -1" });
+    });
+
+    it("parses function parameter types with negative numeric literals (dir: 1 | -1)", () => {
+      const src = `fn step(dir: 1 | -1) -> int:
+  ret dir`;
+      const mod = parse(src, "fn_param.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.params[0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "1 | -1" });
+    });
+
+    it("parses variable declarations with negative numeric literal union types", () => {
+      const src = `val dir: 1 | -1 = -1`;
+      const mod = parse(src, "var.ail");
+      expect(mod.items).toHaveLength(1);
+      const v = mod.items[0] as VarDecl;
+      expect(v.typeAnnotation).toMatchObject({ kind: "NamedType", name: "1 | -1" });
+    });
+  });
+
+  describe("Step 5: Boolean Literal Types (: true, : false, true | false)", () => {
+    it("parses variable declarations with boolean literal types (: true, : false)", () => {
+      const src = `val enabled: true = true
+val disabled: false = false`;
+      const mod = parse(src, "bool_vars.ail");
+      expect(mod.items).toHaveLength(2);
+      const v1 = mod.items[0] as VarDecl;
+      expect(v1.typeAnnotation).toMatchObject({ kind: "NamedType", name: "true" });
+      const v2 = mod.items[1] as VarDecl;
+      expect(v2.typeAnnotation).toMatchObject({ kind: "NamedType", name: "false" });
+    });
+
+    it("parses type aliases with boolean literal types and unions (true | false, false | true)", () => {
+      const src = `type Flag = true | false
+type AlwaysTrue = true
+type InvertedFlag = false | true`;
+      const mod = parse(src, "bool_types.ail");
+      expect(mod.items).toHaveLength(3);
+      const t1 = mod.items[0] as TypeDecl;
+      expect(t1.aliasType).toMatchObject({ kind: "NamedType", name: "true | false" });
+      const t2 = mod.items[1] as TypeDecl;
+      expect(t2.aliasType).toMatchObject({ kind: "NamedType", name: "true" });
+      const t3 = mod.items[2] as TypeDecl;
+      expect(t3.aliasType).toMatchObject({ kind: "NamedType", name: "false | true" });
+    });
+
+    it("parses function signatures with boolean literal return and parameter types", () => {
+      const src = `fn isReady(strict: true) -> true:
+  ret true
+
+fn isOff(flag: false) -> false:
+  ret false
+
+fn getFlag() -> true | false:
+  ret true`;
+      const mod = parse(src, "bool_funcs.ail");
+      expect(mod.items).toHaveLength(3);
+      const fn1 = mod.items[0] as FunctionDecl;
+      expect(fn1.returnType).toMatchObject({ kind: "NamedType", name: "true" });
+      expect(fn1.params[0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "true" });
+
+      const fn2 = mod.items[1] as FunctionDecl;
+      expect(fn2.returnType).toMatchObject({ kind: "NamedType", name: "false" });
+      expect(fn2.params[0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "false" });
+
+      const fn3 = mod.items[2] as FunctionDecl;
+      expect(fn3.returnType).toMatchObject({ kind: "NamedType", name: "true | false" });
+    });
+
+    it("parses record type fields with boolean literal types (success: true, active: false)", () => {
+      const src = `type Response = { success: true, active: false }`;
+      const mod = parse(src, "bool_record.ail");
+      expect(mod.items).toHaveLength(1);
+      const td = mod.items[0] as TypeDecl;
+      expect(td.aliasType?.kind).toBe("RecordType");
+      const rec = td.aliasType as RecordType;
+      expect(rec.fields).toHaveLength(2);
+      expect(rec.fields[0].name).toBe("success");
+      expect(rec.fields[0].type).toMatchObject({ kind: "NamedType", name: "true" });
+      expect(rec.fields[1].name).toBe("active");
+      expect(rec.fields[1].type).toMatchObject({ kind: "NamedType", name: "false" });
+    });
+
+    it("parses struct declarations with boolean literal field types", () => {
+      const src = `type StatusReport:
+  ready: true
+  failed: false
+  flag: true | false`;
+      const mod = parse(src, "bool_struct.ail");
+      expect(mod.items).toHaveLength(1);
+      const td = mod.items[0] as TypeDecl;
+      expect(td.fields).toHaveLength(3);
+      expect(td.fields![0].name).toBe("ready");
+      expect(td.fields![0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "true" });
+      expect(td.fields![1].name).toBe("failed");
+      expect(td.fields![1].typeAnnotation).toMatchObject({ kind: "NamedType", name: "false" });
+      expect(td.fields![2].name).toBe("flag");
+      expect(td.fields![2].typeAnnotation).toMatchObject({
+        kind: "NamedType",
+        name: "true | false",
+      });
+    });
+  });
+
+  describe("Step 6: Contextual Keyword Identifiers", () => {
+    it("parses contextual keywords in import specifiers", () => {
+      const src = `from "ui/theme" import style, tokens, match, type
+import { style, tokens, match, type, val, char, state, mut, from, prop } from "lib"
+import { style as customStyle } from "styles"`;
+      const mod = parse(src, "imports.ail");
+      expect(mod.items).toHaveLength(3);
+      const imp1 = mod.items[0] as ImportDecl;
+      expect(imp1.specifiers.map((s) => s.name)).toEqual(["style", "tokens", "match", "type"]);
+      const imp2 = mod.items[1] as ImportDecl;
+      expect(imp2.specifiers.map((s) => s.name)).toEqual([
+        "style",
+        "tokens",
+        "match",
+        "type",
+        "val",
+        "char",
+        "state",
+        "mut",
+        "from",
+        "prop",
+      ]);
+      const imp3 = mod.items[2] as ImportDecl;
+      expect(imp3.specifiers[0].name).toBe("style");
+      expect(imp3.specifiers[0].alias).toBe("customStyle");
+    });
+
+    it("parses contextual keywords as function and method names", () => {
+      const src = `fn style():
+  ret 1
+
+fn match():
+  ret 2
+
+class Widget:
+  fn style() -> int:
+    ret 3
+  fn match() -> int:
+    ret 4`;
+      const mod = parse(src, "fn_names.ail");
+      expect(mod.items).toHaveLength(3);
+      expect((mod.items[0] as FunctionDecl).name).toBe("style");
+      expect((mod.items[1] as FunctionDecl).name).toBe("match");
+      const cls = mod.items[2] as ClassDecl;
+      expect(cls.methods[0].name).toBe("style");
+      expect(cls.methods[1].name).toBe("match");
+    });
+
+    it("parses contextual keywords as parameter names", () => {
+      const src = `fn configure(style: str, match: bool, type: int, val: num, char: byte, state: str, mut: bool, from: str, prop: str) -> bool:
+  ret match`;
+      const mod = parse(src, "params.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.params.map((p) => p.name)).toEqual([
+        "style",
+        "match",
+        "type",
+        "val",
+        "char",
+        "state",
+        "mut",
+        "from",
+        "prop",
+      ]);
+    });
+
+    it("parses contextual keywords in variable and constant declarations", () => {
+      const src = `pub let style = 1
+val tokens = 2
+const match = 3
+pub let mut state = "idle"
+pub let mut = 4
+type := 5
+char ::= 6
+fn test():
+  let style = 10
+  val tokens = 20
+  const match = 30
+  let mut = 40
+  match := 50`;
+      const mod = parse(src, "vars.ail");
+      expect(mod.items).toHaveLength(8);
+      expect((mod.items[0] as VarDecl).name).toBe("style");
+      expect((mod.items[1] as VarDecl).name).toBe("tokens");
+      expect((mod.items[2] as ConstDecl).name).toBe("match");
+      expect((mod.items[3] as VarDecl).name).toBe("state");
+      expect((mod.items[3] as VarDecl).isMut).toBe(true);
+      expect((mod.items[4] as VarDecl).name).toBe("mut");
+      expect((mod.items[4] as VarDecl).isMut).toBe(false);
+      expect((mod.items[5] as VarDecl).name).toBe("type");
+      expect((mod.items[6] as VarDecl).name).toBe("char");
+    });
+
+    it("parses contextual keywords in type definitions and record types", () => {
+      const src = `type Config:
+  style: str
+  tokens: int
+  match: bool
+  type: str
+  val: num
+  state: str
+
+type Options = { style: str, tokens: int, match: bool, type: str }`;
+      const mod = parse(src, "types.ail");
+      const td1 = mod.items[0] as TypeDecl;
+      expect(td1.name).toBe("Config");
+      expect(td1.fields?.map((f) => f.name)).toEqual([
+        "style",
+        "tokens",
+        "match",
+        "type",
+        "val",
+        "state",
+      ]);
+      const td2 = mod.items[1] as TypeDecl;
+      expect(td2.name).toBe("Options");
+      const rec = td2.aliasType as RecordType;
+      expect(rec.fields.map((f) => f.name)).toEqual(["style", "tokens", "match", "type"]);
+    });
+
+    it("parses contextual keywords in record literals", () => {
+      const src = `val theme = { style: "dark", tokens: 10, type: "primary", match: true, val: 42, char: 65 }`;
+      const mod = parse(src, "rec_lit.ail");
+      const decl = mod.items[0] as VarDecl;
+      const rec = decl.value as RecordLiteralExpr;
+      expect(rec.properties.map((p) => p.key)).toEqual([
+        "style",
+        "tokens",
+        "type",
+        "match",
+        "val",
+        "char",
+      ]);
+    });
+
+    it("parses contextual keywords in member access expressions", () => {
+      const src = `fn inspect(obj: any):
+  let s = obj.style
+  let t = obj.tokens
+  let m = obj.match
+  let ty = obj.type
+  let v = obj.val
+  let c = obj.char
+  let st = obj.state`;
+      const mod = parse(src, "member_access.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const stmts = (fn.body as Block).statements as LetBinding[];
+      expect((stmts[0].init as MemberAccessExpr).property).toBe("style");
+      expect((stmts[1].init as MemberAccessExpr).property).toBe("tokens");
+      expect((stmts[2].init as MemberAccessExpr).property).toBe("match");
+      expect((stmts[3].init as MemberAccessExpr).property).toBe("type");
+      expect((stmts[4].init as MemberAccessExpr).property).toBe("val");
+      expect((stmts[5].init as MemberAccessExpr).property).toBe("char");
+      expect((stmts[6].init as MemberAccessExpr).property).toBe("state");
+    });
+
+    it("parses contextual keywords in pattern matching", () => {
+      const src = `fn handle(val: any) -> str:
+  match val:
+    case style => "bound style"
+    case match => "bound match"
+    case tokens => "bound tokens"
+    case State(tokens) => "constructor pattern"
+    case _ => "default"`;
+      const mod = parse(src, "patterns.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const matchStmt = (fn.body as Block).statements[0] as MatchStmt;
+      expect(matchStmt.cases[0].pattern).toMatchObject({
+        kind: "IdentifierPattern",
+        name: "style",
+      });
+      expect(matchStmt.cases[1].pattern).toMatchObject({
+        kind: "IdentifierPattern",
+        name: "match",
+      });
+      expect(matchStmt.cases[2].pattern).toMatchObject({
+        kind: "IdentifierPattern",
+        name: "tokens",
+      });
+      expect(matchStmt.cases[3].pattern).toMatchObject({
+        kind: "ConstructorPattern",
+        name: "State",
+        subPatterns: [{ kind: "IdentifierPattern", name: "tokens" }],
+      });
+    });
+
+    it("parses contextual keywords in expression positions (parsePrefix)", () => {
+      const src = `fn compute(style: int, tokens: int, match: int, val: int) -> int:
+  ret style + tokens * match - val`;
+      const mod = parse(src, "exprs.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.body.kind).toBe("Block");
+    });
+
+    it("parses contextual keywords in for-in loop variable position", () => {
+      const src = `fn iterate(styles: [str]):
+  for style in styles:
+    print(style)
+  for match in styles:
+    print(match)`;
+      const mod = parse(src, "for_loops.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const stmts = (fn.body as Block).statements as ForStmt[];
+      expect(stmts[0].variable).toBe("style");
+      expect(stmts[1].variable).toBe("match");
+    });
+  });
+
+  describe("Step 7: Closure Parameter Pattern Destructuring & Elisions", () => {
+    it("parses unannotated closure with array destructuring parameter fn([a, b])", () => {
+      const src = `fn test():
+  let add = fn([a, b]) = a + b`;
+      const mod = parse(src, "closure_array.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      expect(letStmt.kind).toBe("LetBinding");
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params).toHaveLength(1);
+      expect(closure.params[0].name).toBe("[a, b]");
+      expect(closure.params[0].typeAnnotation).toBeNull();
+    });
+
+    it("parses typed closure with array destructuring parameter fn([a, b]: [int, int])", () => {
+      const src = `fn test():
+  let add = fn([a, b]: [int, int]) -> int = a + b`;
+      const mod = parse(src, "closure_typed_array.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params[0].name).toBe("[a, b]");
+      expect(closure.params[0].typeAnnotation?.kind).toBe("TupleType");
+      expect(closure.returnType?.kind).toBe("PrimitiveType");
+    });
+
+    it("parses closure with record destructuring parameter fn({ effect })", () => {
+      const src = `fn test():
+  let handler = fn({ effect }) = effect`;
+      const mod = parse(src, "closure_record.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params[0].name).toBe("{ effect }");
+      expect(closure.params[0].typeAnnotation).toBeNull();
+    });
+
+    it("parses closure with typed record destructuring parameter fn({ effect, target }: State)", () => {
+      const src = `fn test():
+  let handler = fn({ effect, target }: State) = effect`;
+      const mod = parse(src, "closure_typed_record.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params[0].name).toBe("{ effect, target }");
+      expect(closure.params[0].typeAnnotation?.kind).toBe("NamedType");
+    });
+
+    it("parses for-in loop with leading comma and elisions for [, x] in list:", () => {
+      const src = `fn iterate(pairs: [[int, int]]):
+  for [, x] in pairs:
+    print(x)
+  for [a, , b] in pairs:
+    print(a)`;
+      const mod = parse(src, "for_elisions.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const stmts = (fn.body as { kind: "Block"; statements: ForStmt[] }).statements;
+      expect(stmts[0].variable).toBe("[, x]");
+      expect(stmts[1].variable).toBe("[a, , b]");
+    });
+
+    it("parses let binding with elision destructuring let [, y] = pair", () => {
+      const src = `fn test():
+  let [, y] = pair
+  let [a, , b] = triple
+  [, b] = pair`;
+      const mod = parse(src, "let_destructure_elision.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const stmts = (fn.body as { kind: "Block"; statements: DestructureBinding[] }).statements;
+      expect(stmts[0].kind).toBe("DestructureBinding");
+      expect(stmts[0].names).toEqual(["", "y"]);
+      expect(stmts[0].isMut).toBe(false);
+
+      expect(stmts[1].kind).toBe("DestructureBinding");
+      expect(stmts[1].names).toEqual(["a", "", "b"]);
+
+      expect(stmts[2].kind).toBe("DestructureBinding");
+      expect(stmts[2].names).toEqual(["", "b"]);
+    });
+
+    it("parses function declaration with destructured parameter fn process([a, b]: [int, int])", () => {
+      const src = `fn process([a, b]: [int, int]) -> int = a + b`;
+      const mod = parse(src, "fn_destructure.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.params[0].name).toBe("[a, b]");
+      expect(fn.params[0].typeAnnotation?.kind).toBe("TupleType");
+    });
+  });
+
+  describe("Step 10: Lowering of await Expression", () => {
+    it("parses await fetch()", () => {
+      const src = `fn getData():
+  let res = await fetch()`;
+      const mod = parse(src, "await_fetch.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.init.kind).toBe("AwaitExpr");
+      const awaitExpr = stmt.init as AwaitExpr;
+      expect(awaitExpr.operand.kind).toBe("CallExpr");
+      const call = awaitExpr.operand as CallExpr;
+      expect(call.callee.kind).toBe("IdentifierExpr");
+      expect((call.callee as IdentifierExpr).name).toBe("fetch");
+      expect(call.args).toHaveLength(0);
+    });
+
+    it("parses await p", () => {
+      const src = `fn resolve(p: Promise[int]):
+  let val = await p`;
+      const mod = parse(src, "await_p.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const block = fn.body as { kind: "Block"; statements: LetBinding[] };
+      const stmt = block.statements[0];
+      expect(stmt.init.kind).toBe("AwaitExpr");
+      const awaitExpr = stmt.init as AwaitExpr;
+      expect(awaitExpr.operand.kind).toBe("IdentifierExpr");
+      expect((awaitExpr.operand as IdentifierExpr).name).toBe("p");
+    });
+  });
+
+  describe("Step 12: Multiline Block Closures Parsing", () => {
+    it("parses block closure with curly braces and multiple statements", () => {
+      const src = `fn test():
+  let f = fn(x: int) {
+    let y = x * 2
+    ret y
+  }`;
+      const mod = parse(src, "closure_braces.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params).toHaveLength(1);
+      expect(closure.params[0].name).toBe("x");
+      expect(closure.body.kind).toBe("Block");
+      const block = closure.body as Block;
+      expect(block.statements).toHaveLength(2);
+      expect(block.statements[0].kind).toBe("LetBinding");
+      expect(block.statements[1].kind).toBe("ReturnStmt");
+    });
+
+    it("parses block closure with colon and indentation", () => {
+      const src = `fn test():
+  let f = fn(x: int):
+    let y = x * 2
+    ret y`;
+      const mod = parse(src, "closure_colon.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.body.kind).toBe("Block");
+      const block = closure.body as Block;
+      expect(block.statements).toHaveLength(2);
+      expect(block.statements[0].kind).toBe("LetBinding");
+      expect(block.statements[1].kind).toBe("ReturnStmt");
+    });
+
+    it("parses block closure with colon and curly braces", () => {
+      const src = `fn test():
+  let f = fn(x: int): {
+    let y = x * 2
+    ret y
+  }`;
+      const mod = parse(src, "closure_colon_braces.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.body.kind).toBe("Block");
+      const block = closure.body as Block;
+      expect(block.statements).toHaveLength(2);
+    });
+
+    it("parses multiline block closure passed as function argument", () => {
+      const src = `fn test(arr: [int]):
+  arr.forEach(fn(x) {
+    let y = x * 2
+    log(y)
+  })`;
+      const mod = parse(src, "closure_call_arg.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const exprStmt = (fn.body as Block).statements[0] as { kind: "ExprStmt"; expr: CallExpr };
+      expect(exprStmt.expr.kind).toBe("CallExpr");
+      const closure = exprStmt.expr.args[0] as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.params[0].name).toBe("x");
+      expect(closure.params[0].typeAnnotation).toBeNull();
+      expect(closure.body.kind).toBe("Block");
+      expect((closure.body as Block).statements).toHaveLength(2);
+    });
+
+    it("parses block closure with explicit return type and curly braces", () => {
+      const src = `fn test():
+  let f = fn(x: int) -> int {
+    ret x + 1
+  }`;
+      const mod = parse(src, "closure_ret_type.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const letStmt = (fn.body as Block).statements[0] as LetBinding;
+      const closure = letStmt.init as ClosureExpr;
+      expect(closure.kind).toBe("ClosureExpr");
+      expect(closure.returnType?.kind).toBe("PrimitiveType");
+      expect(closure.body.kind).toBe("Block");
+      expect((closure.body as Block).statements).toHaveLength(1);
+    });
+  });
+
+  describe("Step 13: Statement Visitors (try/catch/finally, throw, break, continue)", () => {
+    it("parses try/catch/finally with indentation layout", () => {
+      const src = `fn test():
+  try:
+    doWork()
+  catch err:
+    log(err)
+  finally:
+    cleanup()`;
+      const mod = parse(src, "try_catch_indent.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const tryStmt = (fn.body as Block).statements[0] as TryStmt;
+      expect(tryStmt.kind).toBe("TryStmt");
+      expect(tryStmt.tryBlock.statements).toHaveLength(1);
+      expect(tryStmt.catchParam).toBe("err");
+      expect(tryStmt.catchBlock?.statements).toHaveLength(1);
+      expect(tryStmt.finallyBlock?.statements).toHaveLength(1);
+    });
+
+    it("parses try/catch/finally with curly brace layout", () => {
+      const src = `fn test() {
+  try {
+    doWork()
+  } catch err {
+    log(err)
+  } finally {
+    cleanup()
+  }
+}`;
+      const mod = parse(src, "try_catch_braces.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const tryStmt = (fn.body as Block).statements[0] as TryStmt;
+      expect(tryStmt.kind).toBe("TryStmt");
+      expect(tryStmt.tryBlock.statements).toHaveLength(1);
+      expect(tryStmt.catchParam).toBe("err");
+      expect(tryStmt.catchBlock?.statements).toHaveLength(1);
+      expect(tryStmt.finallyBlock?.statements).toHaveLength(1);
+    });
+
+    it("parses try/catch with catch param in parentheses", () => {
+      const src = `fn test() {
+  try {
+    throw "error"
+  } catch (e) {
+    ret e
+  }
+}`;
+      const mod = parse(src, "try_catch_paren.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const tryStmt = (fn.body as Block).statements[0] as TryStmt;
+      expect(tryStmt.catchParam).toBe("e");
+      expect(tryStmt.finallyBlock).toBeUndefined();
+      const throwStmt = tryStmt.tryBlock.statements[0] as ThrowStmt;
+      expect(throwStmt.kind).toBe("ThrowStmt");
+      expect(throwStmt.expr.kind).toBe("LiteralExpr");
+    });
+
+    it("parses try/finally without catch block", () => {
+      const src = `fn test():
+  try:
+    doWork()
+  finally:
+    cleanup()`;
+      const mod = parse(src, "try_finally.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const tryStmt = (fn.body as Block).statements[0] as TryStmt;
+      expect(tryStmt.catchBlock).toBeUndefined();
+      expect(tryStmt.finallyBlock).toBeDefined();
+    });
+
+    it("parses throw statement", () => {
+      const src = `fn fail(msg: str):
+  throw msg`;
+      const mod = parse(src, "throw.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const throwStmt = (fn.body as Block).statements[0] as ThrowStmt;
+      expect(throwStmt.kind).toBe("ThrowStmt");
+      expect(throwStmt.expr.kind).toBe("IdentifierExpr");
+    });
+
+    it("parses break and continue in while loop", () => {
+      const src = `fn test():
+  while true:
+    if cond:
+      continue
+    else:
+      break`;
+      const mod = parse(src, "break_continue.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      const whileStmt = (fn.body as Block).statements[0] as any;
+      const ifStmt = whileStmt.body.statements[0] as IfStmt;
+      const contStmt = ifStmt.thenBranch.statements[0] as ContinueStmt;
+      const brkStmt = ifStmt.elseBranch?.statements[0] as BreakStmt;
+      expect(contStmt.kind).toBe("ContinueStmt");
+      expect(brkStmt.kind).toBe("BreakStmt");
+    });
+
+    it("parses class with static block", () => {
+      const src = `class Registry:
+  static:
+    initRegistry()`;
+      const mod = parse(src, "static_block.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.kind).toBe("ClassDecl");
+      expect(cls.staticBlocks).toHaveLength(1);
+      expect(cls.staticBlocks![0].statements).toHaveLength(1);
+    });
+
+    it("parses pub barrel re-exports", () => {
+      const src = `pub from "./utils" import format, helper as h
+pub from "./all" import *`;
+      const mod = parse(src, "reexports.ail");
+      expect(mod.items).toHaveLength(2);
+      const imp1 = mod.items[0] as any;
+      const imp2 = mod.items[1] as any;
+      expect(imp1.kind).toBe("ImportDecl");
+      expect(imp1.isExported).toBe(true);
+      expect(imp1.specifiers).toHaveLength(2);
+      expect(imp2.kind).toBe("ImportDecl");
+      expect(imp2.isExported).toBe(true);
+      expect(imp2.specifiers[0].isWildcard).toBe(true);
+    });
+
+    it('parses async fn getData() -> Promise[str]: ret "ok"', () => {
+      const src = `async fn getData() -> Promise[str]: ret "ok"`;
+      const mod = parse(src, "async_fn.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.kind).toBe("FunctionDecl");
+      expect(fn.name).toBe("getData");
+      expect(fn.isAsync).toBe(true);
+      expect(fn.returnType?.kind).toBe("NamedType");
+      const retType = fn.returnType as NamedType;
+      expect(retType.name).toBe("Promise");
+      expect(retType.typeArgs).toHaveLength(1);
+      expect((retType.typeArgs![0] as PrimitiveType).primitive).toBe("str");
+    });
+
+    it("parses async fn with parameter destructuring and types cleanly", () => {
+      const src = `async fn process({ user, id: uid }: Config, [first, second]: [int, int]) -> Promise[int]:
+  ret 42
+`;
+      const mod = parse(src, "async_params.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.kind).toBe("FunctionDecl");
+      expect(fn.isAsync).toBe(true);
+      expect(fn.params).toHaveLength(2);
+      expect(fn.params[0].name).toContain("{ user, id: uid }");
+      expect(fn.params[1].name).toContain("[first, second]");
+    });
+
+    it("parses expression-bodied async fn and async closure", () => {
+      const src = `async fn add(a: int, b: int) -> Promise[int] = a + b
+fn run():
+  let f = async fn(x: int) -> Promise[int] = x * 2
+`;
+      const mod = parse(src, "async_expr.ail");
+      expect(mod.items).toHaveLength(2);
+      const fn1 = mod.items[0] as FunctionDecl;
+      expect(fn1.isAsync).toBe(true);
+      expect(fn1.isExpressionBodied).toBe(true);
+
+      const fn2 = mod.items[1] as FunctionDecl;
+      const letBinding = (fn2.body as any).statements[0] as LetBinding;
+      expect(letBinding.init.kind).toBe("ClosureExpr");
+      const closure = letBinding.init as ClosureExpr;
+      expect(closure.isAsync).toBe(true);
+    });
+  });
+
+  describe("Step 17: Function Parameter Optionality & Default Values", () => {
+    it("parses optional parameters with '?' syntax (fn foo(a: int, b?: str))", () => {
+      const src = `fn foo(a: int, b?: str):
+  ret a`;
+      const mod = parse(src, "optional_params.ail");
+      expect(mod.items).toHaveLength(1);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.kind).toBe("FunctionDecl");
+      expect(fn.params).toHaveLength(2);
+      expect(fn.params[0].name).toBe("a");
+      expect(fn.params[0].isOptional).toBeUndefined();
+      expect(fn.params[1].name).toBe("b");
+      expect(fn.params[1].isOptional).toBe(true);
+      expect(fn.params[1].typeAnnotation?.kind).toBe("PrimitiveType");
+      expect((fn.params[1].typeAnnotation as any).primitive).toBe("str");
+    });
+
+    it("parses optional parameters with default values (b?: str = 'def')", () => {
+      const src = `fn greet(msg: str, prefix?: str = "Hello", count: int = 1):
+  ret msg`;
+      const mod = parse(src, "optional_default.ail");
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.params[0].isOptional).toBeUndefined();
+      expect(fn.params[0].defaultValue).toBeUndefined();
+
+      expect(fn.params[1].isOptional).toBe(true);
+      expect(fn.params[1].defaultValue).toBeDefined();
+
+      expect(fn.params[2].isOptional).toBeUndefined();
+      expect(fn.params[2].defaultValue).toBeDefined();
+    });
+
+    it("parses class primary constructor with optional and default parameters", () => {
+      const src = `class Config(pub host: str, pub port: int = 8080, pub secure?: bool):
+  pass`;
+      const mod = parse(src, "class_opt.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.primaryConstructor).toHaveLength(3);
+      expect(cls.primaryConstructor![0].name).toBe("host");
+      expect(cls.primaryConstructor![0].isOptional).toBeUndefined();
+      expect(cls.primaryConstructor![1].name).toBe("port");
+      expect(cls.primaryConstructor![1].defaultValue).toBeDefined();
+      expect(cls.primaryConstructor![2].name).toBe("secure");
+      expect(cls.primaryConstructor![2].isOptional).toBe(true);
+    });
+  });
+
+  describe("Step 20: CST Trivia Retention from Lexer to Parser (parseWithTrivia)", () => {
+    it("captures module header comments on 'module'", () => {
+      const src = `# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026
+
+import "math"
+`;
+      const { trivia } = parseWithTrivia(src, "mod_header.ail");
+      const modTrivia = trivia.getTrivia("module");
+      expect(modTrivia).toBeDefined();
+      expect(modTrivia?.leading).toHaveLength(2);
+      expect(modTrivia?.leading[0].content).toBe("// SPDX-License-Identifier: Apache-2.0");
+      expect(modTrivia?.leading[0].kind).toBe("LICENSE_HEADER");
+      expect(modTrivia?.leading[1].content).toBe("// Copyright 2026");
+    });
+
+    it("captures function docstrings and comments on 'fn:name'", () => {
+      const src = `# Computes factorial recursively
+# n must be non-negative
+fn factorial(n: int) -> int:
+  ret n`;
+      const { trivia } = parseWithTrivia(src, "fn_doc.ail");
+      const fnTrivia = trivia.getTrivia("fn:factorial");
+      expect(fnTrivia).toBeDefined();
+      expect(fnTrivia?.leading).toHaveLength(2);
+      expect(fnTrivia?.leading[0].content).toBe("// Computes factorial recursively");
+      expect(fnTrivia?.leading[1].content).toBe("// n must be non-negative");
+    });
+
+    it("captures class comments on 'class:name', property comments on 'field:Class.prop', and method comments on 'method:Class.method'", () => {
+      const src = `# Greeter service class
+class Greeter:
+  # Greeting prefix
+  prefix: str = "Hello"
+
+  # Returns full greeting
+  fn greet(name: str) -> str = prefix + " " + name`;
+      const { trivia } = parseWithTrivia(src, "class_doc.ail");
+      const classTrivia = trivia.getTrivia("class:Greeter");
+      expect(classTrivia?.leading[0].content).toBe("// Greeter service class");
+
+      const propTrivia = trivia.getTrivia("field:Greeter.prefix");
+      expect(propTrivia?.leading[0].content).toBe("// Greeting prefix");
+
+      const methodTrivia = trivia.getTrivia("method:Greeter.greet");
+      expect(methodTrivia?.leading[0].content).toBe("// Returns full greeting");
+    });
+
+    it("captures type comments on 'type:name' and struct field comments on 'field:Type.field'", () => {
+      const src = `# User profile record
+type User:
+  # Unique identifier
+  id: str
+  # User email address
+  email: str`;
+      const { trivia } = parseWithTrivia(src, "type_doc.ail");
+      const typeTrivia = trivia.getTrivia("type:User");
+      expect(typeTrivia?.leading[0].content).toBe("// User profile record");
+
+      const idTrivia = trivia.getTrivia("field:User.id");
+      expect(idTrivia?.leading[0].content).toBe("// Unique identifier");
+
+      const emailTrivia = trivia.getTrivia("field:User.email");
+      expect(emailTrivia?.leading[0].content).toBe("// User email address");
+    });
+
+    it("captures const and var comments on 'const:name' and 'var:name'", () => {
+      const src = `# Max worker count
+const MAX_WORKERS = 8
+
+# Current active worker counter
+val active = 0`;
+      const { trivia } = parseWithTrivia(src, "vars_doc.ail");
+      const constTrivia = trivia.getTrivia("const:MAX_WORKERS");
+      expect(constTrivia?.leading[0].content).toBe("// Max worker count");
+
+      const varTrivia = trivia.getTrivia("var:active");
+      expect(varTrivia?.leading[0].content).toBe("// Current active worker counter");
+    });
+
+    it("captures imports comments on 'import:source'", () => {
+      const src = `# Standard math utilities
+import "math"`;
+      const { trivia } = parseWithTrivia(src, "import_doc.ail");
+      const impTrivia = trivia.getTrivia("import:math");
+      expect(impTrivia?.leading[0].content).toBe("// Standard math utilities");
+    });
+
+    it("converts # comments, preserves // comments, and preserves /* ... */ docstrings", () => {
+      const src = `// Single-line slash comment
+/**
+ * JSDoc comment for calculate
+ */
+fn calculate(): int = 42`;
+      const { trivia } = parseWithTrivia(src, "mixed_doc.ail");
+      const fnTrivia = trivia.getTrivia("fn:calculate");
+      expect(fnTrivia?.leading).toHaveLength(2);
+      expect(fnTrivia?.leading[0].content).toBe("// Single-line slash comment");
+      expect(fnTrivia?.leading[1].kind).toBe("DOCSTRING");
+      expect(fnTrivia?.leading[1].content).toContain("JSDoc comment for calculate");
+    });
+
+    it("captures trailing comments on the same line as declaration", () => {
+      const src = `const PI = 3.14159 # mathematical constant`;
+      const { trivia } = parseWithTrivia(src, "trailing_doc.ail");
+      const constTrivia = trivia.getTrivia("const:PI");
+      expect(constTrivia?.trailing).toHaveLength(1);
+      expect(constTrivia?.trailing[0].content).toBe("// mathematical constant");
+    });
+  });
+
+  describe("Step 23: Raw Multiline String / Template Literals (TemplateLiteralExpr)", () => {
+    it("parses template literal without substitutions into TemplateLiteralExpr", () => {
+      const src = "const s = `hello world`";
+      const mod = parse(src, "test.ail");
+      const stmt = mod.items[0] as ConstDecl;
+      expect(stmt.kind).toBe("ConstDecl");
+      expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
+      const tpl = stmt.value as TemplateLiteralExpr;
+      expect(tpl.quasis).toEqual(["hello world"]);
+      expect(tpl.expressions).toHaveLength(0);
+    });
+
+    it("parses multiline template literal preserving raw multiline content", () => {
+      const src = `const s = \`line 1
+line 2
+line 3\``;
+      const mod = parse(src, "test.ail");
+      const stmt = mod.items[0] as ConstDecl;
+      expect(stmt.kind).toBe("ConstDecl");
+      expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
+      const tpl = stmt.value as TemplateLiteralExpr;
+      expect(tpl.quasis).toEqual(["line 1\nline 2\nline 3"]);
+      expect(tpl.expressions).toHaveLength(0);
+    });
+
+    it("parses template literal with ${...} interpolation expressions", () => {
+      const src = "const msg = `Hello ${name}, total is ${price + tax}!`";
+      const mod = parse(src, "test.ail");
+      const stmt = mod.items[0] as ConstDecl;
+      expect(stmt.kind).toBe("ConstDecl");
+      expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
+      const tpl = stmt.value as TemplateLiteralExpr;
+      expect(tpl.quasis).toEqual(["Hello ", ", total is ", "!"]);
+      expect(tpl.expressions).toHaveLength(2);
+      expect(tpl.expressions[0].kind).toBe("IdentifierExpr");
+      expect((tpl.expressions[0] as IdentifierExpr).name).toBe("name");
+      expect(tpl.expressions[1].kind).toBe("BinaryExpr");
+      const bin = tpl.expressions[1] as BinaryExpr;
+      expect(bin.operator).toBe("+");
+      expect((bin.left as IdentifierExpr).name).toBe("price");
+      expect((bin.right as IdentifierExpr).name).toBe("tax");
+    });
+
+    it("parses nested template literals", () => {
+      const src = "const s = `Outer: ${`Inner: ${x}`}`";
+      const mod = parse(src, "test.ail");
+      const stmt = mod.items[0] as ConstDecl;
+      expect(stmt.kind).toBe("ConstDecl");
+      expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
+      const outerTpl = stmt.value as TemplateLiteralExpr;
+      expect(outerTpl.quasis).toEqual(["Outer: ", ""]);
+      expect(outerTpl.expressions).toHaveLength(1);
+      expect(outerTpl.expressions[0].kind).toBe("TemplateLiteralExpr");
+      const innerTpl = outerTpl.expressions[0] as TemplateLiteralExpr;
+      expect(innerTpl.quasis).toEqual(["Inner: ", ""]);
+      expect(innerTpl.expressions).toHaveLength(1);
+      expect((innerTpl.expressions[0] as IdentifierExpr).name).toBe("x");
     });
   });
 

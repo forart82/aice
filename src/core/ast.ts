@@ -28,6 +28,7 @@ export interface ImportDecl {
   kind: "ImportDecl";
   source: string;
   specifiers: ImportSpecifier[];
+  isExported?: boolean;
   span: Span;
 }
 
@@ -67,6 +68,7 @@ export interface EnumVariantDecl {
 export type TypeExpr =
   | PrimitiveType
   | ArrayType
+  | TupleType
   | RecordType
   | ResultType
   | OptionType
@@ -82,6 +84,12 @@ export interface PrimitiveType {
 export interface ArrayType {
   kind: "ArrayType";
   elementType: TypeExpr;
+  span: Span;
+}
+
+export interface TupleType {
+  kind: "TupleType";
+  elementTypes: TypeExpr[];
   span: Span;
 }
 
@@ -123,6 +131,7 @@ export interface NamedType {
 export interface FunctionDecl {
   kind: "FunctionDecl";
   name: string;
+  isAsync?: boolean;
   params: ParamDecl[];
   returnType: TypeExpr | null;
   body: Block | Expr;
@@ -132,8 +141,9 @@ export interface FunctionDecl {
 
 export interface ParamDecl {
   name: string;
-  typeAnnotation: TypeExpr;
+  typeAnnotation: TypeExpr | null;
   defaultValue?: Expr;
+  isOptional?: boolean;
   isPub?: boolean;
   isReadonly?: boolean;
   isMut?: boolean;
@@ -151,6 +161,7 @@ export interface ClassDecl {
   implements?: string[];
   properties: PropertyDecl[];
   methods: MethodDecl[];
+  staticBlocks?: Block[];
   span: Span;
 }
 
@@ -215,7 +226,11 @@ export type Statement =
   | IfStmt
   | MatchStmt
   | ForStmt
-  | WhileStmt;
+  | WhileStmt
+  | TryStmt
+  | ThrowStmt
+  | BreakStmt
+  | ContinueStmt;
 
 export interface LetBinding {
   kind: "LetBinding";
@@ -321,9 +336,35 @@ export interface WhileStmt {
   span: Span;
 }
 
+export interface TryStmt {
+  kind: "TryStmt";
+  tryBlock: Block;
+  catchParam?: string;
+  catchBlock?: Block;
+  finallyBlock?: Block;
+  span: Span;
+}
+
+export interface ThrowStmt {
+  kind: "ThrowStmt";
+  expr: Expr;
+  span: Span;
+}
+
+export interface BreakStmt {
+  kind: "BreakStmt";
+  span: Span;
+}
+
+export interface ContinueStmt {
+  kind: "ContinueStmt";
+  span: Span;
+}
+
 // Expressions
 export type Expr =
   | LiteralExpr
+  | TemplateLiteralExpr
   | IdentifierExpr
   | BinaryExpr
   | UnaryExpr
@@ -334,7 +375,21 @@ export type Expr =
   | ArrayLiteralExpr
   | RecordLiteralExpr
   | ClosureExpr
-  | AssignExpr;
+  | AssignExpr
+  | AwaitExpr;
+
+export interface TemplateLiteralExpr {
+  kind: "TemplateLiteralExpr";
+  quasis: string[]; // static string parts
+  expressions: Expr[]; // interpolated expressions
+  span: Span;
+}
+
+export interface AwaitExpr {
+  kind: "AwaitExpr";
+  operand: Expr;
+  span: Span;
+}
 
 export interface AssignExpr {
   kind: "AssignExpr";
@@ -364,6 +419,13 @@ export type BinaryOp =
   | "*"
   | "/"
   | "%"
+  | "**"
+  | "&"
+  | "|"
+  | "^"
+  | "<<"
+  | ">>"
+  | ">>>"
   | "=="
   | "!="
   | "<"
@@ -440,6 +502,7 @@ export interface RecordLiteralExpr {
 
 export interface ClosureExpr {
   kind: "ClosureExpr";
+  isAsync?: boolean;
   params: ParamDecl[];
   returnType: TypeExpr | null;
   body: Block | Expr;

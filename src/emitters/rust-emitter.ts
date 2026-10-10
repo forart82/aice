@@ -72,6 +72,7 @@ export class RustEmitter {
         if (t.typeArgs) t.typeArgs.forEach(checkType);
       }
       if (t.kind === "ArrayType") checkType(t.elementType);
+      if (t.kind === "TupleType") t.elementTypes.forEach(checkType);
       if (t.kind === "OptionType") checkType(t.innerType);
       if (t.kind === "ResultType") {
         checkType(t.okType);
@@ -85,7 +86,7 @@ export class RustEmitter {
           for (const f of item.fields) checkType(f.typeAnnotation);
         }
       } else if (item.kind === "FunctionDecl") {
-        for (const p of item.params) checkType(p.typeAnnotation);
+        for (const p of item.params) if (p.typeAnnotation) checkType(p.typeAnnotation);
         checkType(item.returnType);
       }
     }
@@ -222,7 +223,10 @@ export class RustEmitter {
 
     const fnName = this.toSnakeCase(fn.name);
     const paramsStr = fn.params
-      .map((p) => `${this.toSnakeCase(p.name)}: ${this.emitTypeExpr(p.typeAnnotation)}`)
+      .map(
+        (p) =>
+          `${this.toSnakeCase(p.name)}: ${p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "_"}`,
+      )
       .join(", ");
 
     const retType = fn.returnType ? this.emitTypeExpr(fn.returnType) : null;
@@ -396,6 +400,20 @@ export class RustEmitter {
         }
         return "None";
       }
+      case "TemplateLiteralExpr": {
+        let fmt = "";
+        for (let i = 0; i < expr.quasis.length; i++) {
+          fmt += expr.quasis[i].replace(/"/g, '\\"').replace(/\{/g, "{{").replace(/\}/g, "}}");
+          if (i < expr.expressions.length) {
+            fmt += "{}";
+          }
+        }
+        if (expr.expressions.length === 0) {
+          return `"${fmt}".to_string()`;
+        }
+        const args = expr.expressions.map((e) => this.emitExpr(e)).join(", ");
+        return `format!("${fmt}", ${args})`;
+      }
       case "IdentifierExpr": {
         const v = this.enumVariants.get(expr.name);
         if (v) {
@@ -418,6 +436,9 @@ export class RustEmitter {
       }
       case "UnaryExpr": {
         const operand = this.emitExpr(expr.operand);
+        if (expr.operator === "...") {
+          return `...${operand}`;
+        }
         const op = expr.operator === "not" ? "!" : expr.operator;
         return `${op}${operand}`;
       }
@@ -577,6 +598,10 @@ export class RustEmitter {
       }
       case "ArrayType":
         return `Vec<${this.emitTypeExpr(typeExpr.elementType)}>`;
+      case "TupleType": {
+        const elements = typeExpr.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
+        return `(${elements})`;
+      }
       case "OptionType":
         return `Option<${this.emitTypeExpr(typeExpr.innerType)}>`;
       case "ResultType": {

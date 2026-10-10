@@ -43,7 +43,10 @@ export const DEFAULT_LOCK_EXTENSIONS: string[] = [
   ".py",
   ".cpp",
   ".hpp",
+  ".cc",
+  ".cxx",
   ".h",
+  ".cs",
 ];
 
 export const DEFAULT_LOCK_IGNORE_PATTERNS: string[] = ["node_modules", ".git", "dist", "build"];

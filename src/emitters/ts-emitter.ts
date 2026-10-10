@@ -28,12 +28,15 @@ import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewrit
 
 export class TypeScriptEmitter {
   private ctx: EmitterContext;
+  private options: EmitterOptions;
+  private pureInterfaces: boolean;
   private structTypes: Map<string, string[]> = new Map();
   private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
   private varTypes: Map<string, string> = new Map();
   private classNames: Set<string> = new Set();
   private currentClassProperties: Set<string> | null = null;
   private currentClassMethods: Set<string> | null = null;
+  private currentClassFunctionProperties: Set<string> | null = null;
   private localScopeVars: Set<string>[] = [];
   private isCurrentMethodStatic = false;
   private emittedTypeDecls: Set<string> = new Set();
@@ -41,6 +44,16 @@ export class TypeScriptEmitter {
   private isLocal(name: string): boolean {
     for (let i = this.localScopeVars.length - 1; i >= 0; i--) {
       if (this.localScopeVars[i].has(name)) return true;
+    }
+    return false;
+  }
+
+  private isFunctionTypeExpr(typeExpr?: TypeExpr): boolean {
+    if (!typeExpr) return false;
+    if (typeExpr.kind === "NamedType") {
+      return (
+        typeExpr.name.includes("->") || typeExpr.name.includes("=>") || typeExpr.name === "Function"
+      );
     }
     return false;
   }
@@ -83,9 +96,38 @@ export class TypeScriptEmitter {
     "sign",
     "pow",
     "clamp",
+    "exp",
+  ]);
+
+  private static readonly GLOBAL_BUILTIN_FUNCTIONS = new Set(["print", "len", "log"]);
+
+  private static readonly KNOWN_BUILTINS = new Set([
+    "min",
+    "max",
+    "floor",
+    "ceil",
+    "round",
+    "abs",
+    "sqrt",
+    "sin",
+    "cos",
+    "tan",
+    "atan2",
+    "asin",
+    "acos",
+    "hypot",
+    "sign",
+    "pow",
+    "clamp",
+    "exp",
+    "print",
+    "len",
+    "log",
   ]);
 
   constructor(options: EmitterOptions = {}) {
+    this.options = options;
+    this.pureInterfaces = Boolean(options.pureInterfaces);
     this.ctx = new EmitterContext(options.target ?? "typescript", options);
   }
 
@@ -100,6 +142,7 @@ export class TypeScriptEmitter {
     this.classNames.clear();
     this.currentClassProperties = null;
     this.currentClassMethods = null;
+    this.currentClassFunctionProperties = null;
     this.localScopeVars = [];
     this.isCurrentMethodStatic = false;
     this.emittedTypeDecls.clear();
@@ -156,6 +199,13 @@ export class TypeScriptEmitter {
       }
     }
 
+    // Emit module header trivia
+    this.ctx.emitLeadingTrivia("module");
+    const moduleTrivia = this.ctx.trivia?.getTrivia("module");
+    if (moduleTrivia && moduleTrivia.leading.length > 0 && mod.items.length > 0) {
+      this.ctx.writeLine();
+    }
+
     // Collect all imports first
     const imports = mod.items.filter((i) => i.kind === "ImportDecl") as ImportDecl[];
     const nonImports = mod.items.filter((i) => i.kind !== "ImportDecl");
@@ -175,6 +225,8 @@ export class TypeScriptEmitter {
       }
     }
 
+    this.ctx.emitTrailingTrivia("module");
+
     return this.ctx.getOutput();
   }
 
@@ -182,16 +234,33 @@ export class TypeScriptEmitter {
     const nodeId = `import:${imp.source}`;
     this.ctx.emitLeadingTrivia(nodeId);
 
+    if (imp.specifiers.length === 0) {
+      this.ctx.writeLine(`import "${imp.source}";`);
+      this.ctx.emitTrailingTrivia(nodeId);
+      return;
+    }
+
     if (imp.specifiers.length === 1 && imp.specifiers[0].isWildcard) {
-      this.ctx.writeLine(
-        `import * as ${this.sanitizeModulePath(imp.source)} from "${imp.source}";`,
-      );
+      if (imp.isExported) {
+        if (imp.specifiers[0].alias && imp.specifiers[0].alias !== "mod") {
+          this.ctx.writeLine(`export * as ${imp.specifiers[0].alias} from "${imp.source}";`);
+        } else {
+          this.ctx.writeLine(`export * from "${imp.source}";`);
+        }
+      } else {
+        const alias = imp.specifiers[0].alias ?? this.sanitizeModulePath(imp.source);
+        this.ctx.writeLine(`import * as ${alias} from "${imp.source}";`);
+      }
       this.ctx.emitTrailingTrivia(nodeId);
       return;
     }
 
     const specs = imp.specifiers.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
-    this.ctx.writeLine(`import { ${specs.join(", ")} } from "${imp.source}";`);
+    if (imp.isExported) {
+      this.ctx.writeLine(`export { ${specs.join(", ")} } from "${imp.source}";`);
+    } else {
+      this.ctx.writeLine(`import { ${specs.join(", ")} } from "${imp.source}";`);
+    }
     this.ctx.emitTrailingTrivia(nodeId);
   }
 
@@ -265,7 +334,7 @@ export class TypeScriptEmitter {
       this.ctx.dedent();
       this.ctx.writeLine("}");
 
-      if (!t.name.endsWith("Props")) {
+      if (!this.pureInterfaces && !t.name.endsWith("Props")) {
         this.ctx.writeLine();
         const params = t.fields
           .map((f) => {
@@ -288,21 +357,38 @@ export class TypeScriptEmitter {
   private emitClassDecl(c: ClassDecl): void {
     const prevProperties = this.currentClassProperties;
     const prevMethods = this.currentClassMethods;
+    const prevFunctionProperties = this.currentClassFunctionProperties;
     this.currentClassProperties = new Set();
     this.currentClassMethods = new Set();
+    this.currentClassFunctionProperties = new Set();
     if (c.primaryConstructor) {
       for (const p of c.primaryConstructor) {
         this.currentClassProperties.add(p.name);
+        if (this.isFunctionTypeExpr(p.typeAnnotation)) {
+          this.currentClassFunctionProperties.add(p.name);
+        }
       }
     }
     for (const p of c.properties) {
       this.currentClassProperties.add(p.name);
+      if (
+        this.isFunctionTypeExpr(p.typeAnnotation) ||
+        (p.value && p.value.kind === "ClosureExpr")
+      ) {
+        this.currentClassFunctionProperties.add(p.name);
+      }
       if (p.alias) {
         this.currentClassProperties.add(p.alias);
+        if (this.isFunctionTypeExpr(p.typeAnnotation)) {
+          this.currentClassFunctionProperties.add(p.alias);
+        }
       }
       if (p.aliases) {
         for (const a of p.aliases) {
           this.currentClassProperties.add(a);
+          if (this.isFunctionTypeExpr(p.typeAnnotation)) {
+            this.currentClassFunctionProperties.add(a);
+          }
         }
       }
     }
@@ -329,8 +415,9 @@ export class TypeScriptEmitter {
           .map((p) => {
             const ro = p.isReadonly ? "readonly " : "";
             const pub = p.isPub !== false ? "public " : "";
+            const optMark = p.isOptional && !p.defaultValue ? "?" : "";
             const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-            return `${pub}${ro}${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+            return `${pub}${ro}${p.name}${optMark}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
           })
           .join(", ");
         this.ctx.writeLine(`constructor(${ctorParams}) {}`);
@@ -373,8 +460,9 @@ export class TypeScriptEmitter {
       const as = m.isAsync ? "async " : "";
       const params = m.params
         .map((p) => {
+          const optMark = p.isOptional && !p.defaultValue ? "?" : "";
           const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-          return `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+          return `${p.name}${optMark}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
         })
         .join(", ");
       const ret = m.returnType ? `: ${this.emitTypeExpr(m.returnType)}` : "";
@@ -421,12 +509,23 @@ export class TypeScriptEmitter {
       this.ctx.emitTrailingTrivia(mNodeId);
     }
 
+    if (c.staticBlocks && c.staticBlocks.length > 0) {
+      for (const sb of c.staticBlocks) {
+        this.ctx.writeLine("static {");
+        this.ctx.indent();
+        this.emitBlock(sb);
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+      }
+    }
+
     this.ctx.dedent();
     this.ctx.writeLine("}");
     this.ctx.emitTrailingTrivia(nodeId);
 
     this.currentClassProperties = prevProperties;
     this.currentClassMethods = prevMethods;
+    this.currentClassFunctionProperties = prevFunctionProperties;
   }
 
   private emitConstDecl(c: ConstDecl): void {
@@ -448,58 +547,94 @@ export class TypeScriptEmitter {
     this.ctx.emitTrailingTrivia(nodeId);
   }
 
+  private extractDestructureIdentifiers(pattern: string): string[] {
+    const raw = pattern.replace(/^[[{]\s*/, "").replace(/\s*[\]}]$/, "");
+    const parts = raw.split(",");
+    const result: string[] = [];
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed === "_") continue;
+      if (trimmed.includes(":")) {
+        const alias = trimmed.split(":")[1]?.trim();
+        if (alias && alias !== "_") result.push(alias);
+      } else {
+        result.push(trimmed);
+      }
+    }
+    return result;
+  }
+
   private emitFunctionDecl(fn: FunctionDecl): void {
     this.varTypes.clear();
     const prevProperties = this.currentClassProperties;
     const prevMethods = this.currentClassMethods;
+    const prevFunctionProperties = this.currentClassFunctionProperties;
     const prevStatic = this.isCurrentMethodStatic;
     this.currentClassProperties = null;
     this.currentClassMethods = null;
+    this.currentClassFunctionProperties = null;
     this.isCurrentMethodStatic = false;
-    this.localScopeVars = [new Set(fn.params.map((p) => p.name))];
+
+    const fnScope = new Set<string>();
     for (const p of fn.params) {
-      if (p.typeAnnotation.kind === "NamedType") {
+      if (p.name.startsWith("[") || p.name.startsWith("{")) {
+        for (const id of this.extractDestructureIdentifiers(p.name)) {
+          fnScope.add(id);
+        }
+      } else {
+        fnScope.add(p.name);
+      }
+      if (p.typeAnnotation && p.typeAnnotation.kind === "NamedType") {
         this.varTypes.set(p.name, p.typeAnnotation.name);
       }
     }
+    this.localScopeVars = [fnScope];
 
     const nodeId = `fn:${fn.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
     const isExported = fn.name !== "__top_level__";
     const exportPrefix = isExported ? "export " : "";
+    const asyncPrefix = fn.isAsync ? "async " : "";
 
     const paramsStr = fn.params
       .map((p) => {
-        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+        const optMark = p.isOptional && !p.defaultValue ? "?" : "";
+        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
         const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-        return `${p.name}: ${typeStr}${defStr}`;
+        return `${p.name}${optMark}${typeStr}${defStr}`;
       })
       .join(", ");
 
     const retStr = fn.returnType ? `: ${this.emitTypeExpr(fn.returnType)}` : "";
 
     if (fn.isExpressionBodied) {
-      this.ctx.writeLine(`${exportPrefix}function ${fn.name}(${paramsStr})${retStr} {`);
+      this.ctx.writeLine(
+        `${exportPrefix}${asyncPrefix}function ${fn.name}(${paramsStr})${retStr} {`,
+      );
       this.ctx.indent();
       this.ctx.writeLine(`return ${this.emitExpr(fn.body as Expr)};`);
       this.ctx.dedent();
       this.ctx.writeLine("}");
+      this.ctx.emitTrailingTrivia(nodeId);
       this.localScopeVars = [];
       this.currentClassProperties = prevProperties;
       this.currentClassMethods = prevMethods;
+      this.currentClassFunctionProperties = prevFunctionProperties;
       this.isCurrentMethodStatic = prevStatic;
       return;
     }
 
-    this.ctx.writeLine(`${exportPrefix}function ${fn.name}(${paramsStr})${retStr} {`);
+    this.ctx.writeLine(`${exportPrefix}${asyncPrefix}function ${fn.name}(${paramsStr})${retStr} {`);
     this.ctx.indent();
     const isReturning = this.isReturningFunction(fn);
     this.emitBlock(fn.body as Block, isReturning);
     this.ctx.dedent();
     this.ctx.writeLine("}");
+    this.ctx.emitTrailingTrivia(nodeId);
     this.localScopeVars = [];
     this.currentClassProperties = prevProperties;
     this.currentClassMethods = prevMethods;
+    this.currentClassFunctionProperties = prevFunctionProperties;
     this.isCurrentMethodStatic = prevStatic;
   }
 
@@ -531,7 +666,7 @@ export class TypeScriptEmitter {
   }
 
   private isReturningMethod(m: MethodDecl): boolean {
-    if (m.accessor === "set") return false;
+    if (m.name === "constructor" || m.accessor === "set") return false;
     if (m.returnType) {
       return !(
         m.returnType.kind === "PrimitiveType" &&
@@ -559,7 +694,7 @@ export class TypeScriptEmitter {
 
   private isVoidExpr(expr: Expr): boolean {
     if (expr.kind === "CallExpr" && expr.callee.kind === "IdentifierExpr") {
-      return expr.callee.name === "print";
+      return expr.callee.name === "print" || expr.callee.name === "super";
     }
     return false;
   }
@@ -603,7 +738,9 @@ export class TypeScriptEmitter {
         if (this.localScopeVars.length > 0) {
           const scope = this.localScopeVars[this.localScopeVars.length - 1];
           for (const name of stmt.names) {
-            scope.add(name);
+            if (name && name.trim() !== "" && name !== "_") {
+              scope.add(name);
+            }
           }
         }
         const keyword = stmt.isMut ? "let" : "const";
@@ -664,7 +801,14 @@ export class TypeScriptEmitter {
       case "ForStmt": {
         this.ctx.writeLine(`for (const ${stmt.variable} of ${this.emitExpr(stmt.iterable)}) {`);
         this.ctx.indent();
-        const forScope = new Set<string>([stmt.variable]);
+        const forScope = new Set<string>();
+        if (stmt.variable.startsWith("[") || stmt.variable.startsWith("{")) {
+          for (const id of this.extractDestructureIdentifiers(stmt.variable)) {
+            forScope.add(id);
+          }
+        } else {
+          forScope.add(stmt.variable);
+        }
         this.localScopeVars.push(forScope);
         this.emitBlock(stmt.body);
         this.localScopeVars.pop();
@@ -726,26 +870,93 @@ export class TypeScriptEmitter {
         }
         break;
       }
+      case "BreakStmt": {
+        this.ctx.writeLine("break;");
+        break;
+      }
+      case "ContinueStmt": {
+        this.ctx.writeLine("continue;");
+        break;
+      }
+      case "ThrowStmt": {
+        this.ctx.writeLine(`throw ${this.emitExpr(stmt.expr)};`);
+        break;
+      }
+      case "TryStmt": {
+        this.ctx.writeLine("try {");
+        this.ctx.indent();
+        this.emitBlock(stmt.tryBlock);
+        this.ctx.dedent();
+
+        if (stmt.catchBlock) {
+          const param = stmt.catchParam ? ` (${stmt.catchParam})` : "";
+          this.ctx.writeLine(`} catch${param} {`);
+          this.ctx.indent();
+          if (stmt.catchParam) {
+            const catchScope = new Set<string>([stmt.catchParam]);
+            this.localScopeVars.push(catchScope);
+            this.emitBlock(stmt.catchBlock);
+            this.localScopeVars.pop();
+          } else {
+            this.emitBlock(stmt.catchBlock);
+          }
+          this.ctx.dedent();
+        }
+
+        if (stmt.finallyBlock) {
+          this.ctx.writeLine("} finally {");
+          this.ctx.indent();
+          this.emitBlock(stmt.finallyBlock);
+          this.ctx.dedent();
+        }
+
+        this.ctx.writeLine("}");
+        break;
+      }
     }
   }
 
-  emitExpr(expr: Expr): string {
+  emitExpr(expr: Expr, isCallee = false): string {
     switch (expr.kind) {
       case "LiteralExpr":
         if (expr.literalKind === "string") return JSON.stringify(expr.value);
         if (expr.literalKind === "nil") return "null";
         return String(expr.value);
 
+      case "TemplateLiteralExpr": {
+        let result = "`" + this.escapeTsTemplateQuasi(expr.quasis[0] ?? "");
+        for (let i = 0; i < expr.expressions.length; i++) {
+          result +=
+            "${" +
+            this.emitExpr(expr.expressions[i]) +
+            "}" +
+            this.escapeTsTemplateQuasi(expr.quasis[i + 1] ?? "");
+        }
+        result += "`";
+        return result;
+      }
+
       case "IdentifierExpr":
         if (
           expr.name !== "this" &&
+          expr.name !== "super" &&
           !this.isLocal(expr.name) &&
           !this.isCurrentMethodStatic &&
           this.currentClassProperties?.has(expr.name)
         ) {
+          if (isCallee && TypeScriptEmitter.KNOWN_BUILTINS.has(expr.name)) {
+            const isMethod = this.currentClassMethods?.has(expr.name) ?? false;
+            const isFunctionProp = this.currentClassFunctionProperties?.has(expr.name) ?? false;
+            if (!isMethod && !isFunctionProp) {
+              return expr.name;
+            }
+          }
           return `this.${expr.name}`;
         }
         return expr.name;
+
+      case "AwaitExpr":
+        return `await ${this.emitExpr(expr.operand)}`;
 
       case "AssignExpr":
         return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
@@ -828,17 +1039,28 @@ export class TypeScriptEmitter {
           }
 
           if (TypeScriptEmitter.MATH_BUILTINS.has(expr.callee.name)) {
-            const isShadowed = this.localScopeVars.some((scope) => scope.has(typeName));
-            if (!isShadowed) {
+            const isLocalShadowed = this.localScopeVars.some((scope) => scope.has(typeName));
+            const isMethod = this.currentClassMethods?.has(typeName) ?? false;
+            const isFunctionProp = this.currentClassFunctionProperties?.has(typeName) ?? false;
+            if (!isLocalShadowed && !isMethod && !isFunctionProp) {
               if (typeName === "clamp") {
                 return `Math.max(${argCodes[1]}, Math.min(${argCodes[2]}, ${argCodes[0]}))`;
               }
               return `Math.${typeName}(${argCodes.join(", ")})`;
             }
           }
+
+          if (TypeScriptEmitter.GLOBAL_BUILTIN_FUNCTIONS.has(expr.callee.name)) {
+            const isLocalShadowed = this.localScopeVars.some((scope) => scope.has(typeName));
+            const isMethod = this.currentClassMethods?.has(typeName) ?? false;
+            const isFunctionProp = this.currentClassFunctionProperties?.has(typeName) ?? false;
+            if (!isLocalShadowed && !isMethod && !isFunctionProp) {
+              return `${typeName}(${argCodes.join(", ")})`;
+            }
+          }
         }
 
-        const callee = this.emitExpr(expr.callee);
+        const callee = this.emitExpr(expr.callee, true);
         return `${callee}(${argCodes.join(", ")})`;
       }
 
@@ -913,32 +1135,55 @@ export class TypeScriptEmitter {
       }
 
       case "ClosureExpr": {
-        const closureScope = new Set(expr.params.map((p) => p.name));
+        const closureScope = new Set<string>();
+        for (const p of expr.params) {
+          if (p.name.startsWith("[") || p.name.startsWith("{")) {
+            for (const id of this.extractDestructureIdentifiers(p.name)) {
+              closureScope.add(id);
+            }
+          } else {
+            closureScope.add(p.name);
+          }
+        }
         this.localScopeVars.push(closureScope);
         const paramsStr = expr.params
-          .map((p) => `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}`)
+          .map((p) => {
+            const optMark = p.isOptional && !p.defaultValue ? "?" : "";
+            const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+            const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+            return `${p.name}${optMark}${typeStr}${defStr}`;
+          })
           .join(", ");
         const retStr = expr.returnType ? `: ${this.emitTypeExpr(expr.returnType)}` : "";
         let result: string;
         if (expr.body.kind === "Block") {
-          let blockStr = "{\n";
-          this.ctx.indent();
-          for (const s of expr.body.statements) {
-            const stmtStr =
-              s.kind === "ExprStmt"
-                ? this.emitExpr(s.expr)
-                : s.kind === "ReturnStmt" && s.value
-                  ? `return ${this.emitExpr(s.value)}`
-                  : "";
-            if (stmtStr) {
-              blockStr += `${this.ctx.getIndent()}${stmtStr};\n`;
-            }
+          if (expr.body.statements.length === 0) {
+            result = `(${paramsStr})${retStr} => {}`;
+          } else {
+            const isReturning = !(
+              expr.returnType &&
+              expr.returnType.kind === "PrimitiveType" &&
+              expr.returnType.primitive === "void"
+            );
+            const savedBuffer = (this.ctx as any).buffer;
+            (this.ctx as any).buffer = [];
+            this.ctx.indent();
+            this.emitBlock(expr.body, isReturning);
+            this.ctx.dedent();
+            const blockContent = (this.ctx as any).buffer.join("");
+            (this.ctx as any).buffer = savedBuffer;
+            result = `(${paramsStr})${retStr} => {\n${blockContent}${this.ctx.getIndent()}}`;
           }
-          this.ctx.dedent();
-          blockStr += `${this.ctx.getIndent()}}`;
-          result = `(${paramsStr})${retStr} => ${blockStr}`;
         } else {
-          result = `(${paramsStr})${retStr} => ${this.emitExpr(expr.body)}`;
+          const bodyStr = this.emitExpr(expr.body);
+          if (
+            expr.body.kind === "RecordLiteralExpr" ||
+            (bodyStr.startsWith("{") && bodyStr.endsWith("}"))
+          ) {
+            result = `(${paramsStr})${retStr} => (${bodyStr})`;
+          } else {
+            result = `(${paramsStr})${retStr} => ${bodyStr}`;
+          }
         }
         this.localScopeVars.pop();
         return result;
@@ -966,6 +1211,11 @@ export class TypeScriptEmitter {
       case "ArrayType":
         return `${this.emitTypeExpr(t.elementType)}[]`;
 
+      case "TupleType": {
+        const elements = t.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
+        return `[${elements}]`;
+      }
+
       case "OptionType":
         return `${this.emitTypeExpr(t.innerType)} | null`;
 
@@ -985,6 +1235,32 @@ export class TypeScriptEmitter {
           const args = t.typeArgs.map((ta) => this.emitTypeExpr(ta)).join(", ");
           return `${t.name}<${args}>`;
         }
+        if (t.name.includes("|")) {
+          return t.name
+            .split("|")
+            .map((part) => {
+              const trimmed = part.trim();
+              if (
+                trimmed === "int" ||
+                trimmed === "float" ||
+                trimmed === "num" ||
+                trimmed === "byte"
+              ) {
+                return "number";
+              }
+              if (trimmed === "str" || trimmed === "char") return "string";
+              if (trimmed === "bool") return "boolean";
+              if (trimmed === "nil") return "null";
+              return trimmed;
+            })
+            .join(" | ");
+        }
+        if (t.name === "int" || t.name === "float" || t.name === "num" || t.name === "byte") {
+          return "number";
+        }
+        if (t.name === "str" || t.name === "char") return "string";
+        if (t.name === "bool") return "boolean";
+        if (t.name === "nil") return "null";
         return t.name;
       }
     }
@@ -1001,7 +1277,8 @@ export class TypeScriptEmitter {
         this.ctx.writeLine(`export interface ${propsInterface} {`);
         this.ctx.indent();
         for (const p of comp.params) {
-          this.ctx.writeLine(`${p.name}: ${this.emitTypeExpr(p.typeAnnotation)};`);
+          const optMark = p.isOptional && !p.defaultValue ? "?" : "";
+          this.ctx.writeLine(`${p.name}${optMark}: ${this.emitTypeExpr(p.typeAnnotation)};`);
         }
         this.ctx.dedent();
         this.ctx.writeLine("}");
@@ -1080,4 +1357,16 @@ export class TypeScriptEmitter {
   private sanitizeModulePath(p: string): string {
     return p.replace(/[^a-zA-Z0-9_]/g, "_");
   }
+
+  private escapeTsTemplateQuasi(s: string): string {
+    return s.replace(/`/g, "\\`").replace(/\$\{/g, "\\${");
+  }
+}
+
+/**
+ * High-level TypeScript emitter entrypoint.
+ */
+export function emitTypeScript(mod: Module, options: EmitterOptions = {}): string {
+  const emitter = new TypeScriptEmitter(options);
+  return emitter.emit(mod);
 }

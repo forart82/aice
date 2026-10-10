@@ -18,6 +18,7 @@ export type TypeKind =
   | "unknown"
   | "never"
   | "array"
+  | "tuple"
   | "record"
   | "result"
   | "option"
@@ -44,6 +45,11 @@ export interface PrimitiveTypeRep {
 export interface ArrayTypeRep {
   kind: "array";
   elementType: Type;
+}
+
+export interface TupleTypeRep {
+  kind: "tuple";
+  elementTypes: Type[];
 }
 
 export interface RecordTypeRep {
@@ -92,6 +98,7 @@ export interface NamedTypeRep {
 export type Type =
   | PrimitiveTypeRep
   | ArrayTypeRep
+  | TupleTypeRep
   | RecordTypeRep
   | ResultTypeRep
   | OptionTypeRep
@@ -117,6 +124,10 @@ export function makeArrayType(elementType: Type): ArrayTypeRep {
   return { kind: "array", elementType };
 }
 
+export function makeTupleType(elementTypes: Type[]): TupleTypeRep {
+  return { kind: "tuple", elementTypes };
+}
+
 export function makeOptionType(innerType: Type): OptionTypeRep {
   return { kind: "option", innerType };
 }
@@ -140,12 +151,214 @@ export function makeFunctionType(
   return { kind: "function", params, returnType };
 }
 
+export function makeNamedType(name: string, typeArgs?: Type[]): NamedTypeRep {
+  return { kind: "named", name, typeArgs };
+}
+
+export function isStringLiteralType(name: string): boolean {
+  const trimmed = name.trim();
+  if (trimmed.includes("|")) return false;
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  if (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) {
+    return !trimmed.slice(1, -1).includes("'");
+  }
+  return false;
+}
+
+export function unquoteStringLiteral(name: string): string {
+  const trimmed = name.trim();
+  if (isStringLiteralType(trimmed)) {
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      try {
+        return JSON.parse(trimmed);
+      } catch {
+        return trimmed.slice(1, -1);
+      }
+    }
+    if (trimmed.startsWith("'") && trimmed.endsWith("'")) {
+      return trimmed.slice(1, -1);
+    }
+  }
+  return trimmed;
+}
+
+export function isStringLiteralUnion(name: string): boolean {
+  if (!name.includes("|")) return false;
+  const parts = name.split("|").map((p) => p.trim());
+  return parts.length > 0 && parts.every((p) => isStringLiteralType(p));
+}
+
+export function isStringLiteralOrUnionType(type: Type): boolean {
+  if (type.kind === "named") {
+    return isStringLiteralType(type.name) || isStringLiteralUnion(type.name);
+  }
+  return false;
+}
+
 /**
  * Checks if a source type is assignable to a target type according to the AIL subtyping lattice.
  */
 export function isAssignable(target: Type, source: Type): boolean {
   if (target.kind === "unknown" || source.kind === "unknown") return true;
   if (source.kind === "never") return true;
+
+  // 1. Exact match when both source and target are boolean literal named types ("true", "false")
+  if (
+    target.kind === "named" &&
+    source.kind === "named" &&
+    (target.name === "true" || target.name === "false") &&
+    (source.name === "true" || source.name === "false")
+  ) {
+    return target.name === source.name;
+  }
+
+  // 2. Allow boolean literal named types ("true", "false") to be assignable to bool / TYPE_BOOL
+  if (
+    (target.kind === "bool" ||
+      (target.kind === "named" && (target.name === "bool" || target.name === "boolean"))) &&
+    source.kind === "named" &&
+    (source.name === "true" || source.name === "false")
+  ) {
+    return true;
+  }
+
+  // 3. Reject assigning a union to a single boolean literal type unless all union parts match target
+  if (
+    target.kind === "named" &&
+    (target.name === "true" || target.name === "false") &&
+    source.kind === "named" &&
+    source.name.includes("|")
+  ) {
+    const parts = source.name.split("|").map((s) => s.trim());
+    return parts.every((p) => isAssignable(target, { kind: "named", name: p }));
+  }
+
+  // 4. Allow bool / TYPE_BOOL to be assignable to/from "true | false" unions
+  if (
+    (source.kind === "bool" ||
+      (source.kind === "named" && (source.name === "bool" || source.name === "boolean"))) &&
+    target.kind === "named" &&
+    target.name.includes("|")
+  ) {
+    const parts = target.name.split("|").map((s) => s.trim());
+    if (parts.includes("true") && parts.includes("false")) {
+      return true;
+    }
+  }
+
+  if (
+    (target.kind === "bool" ||
+      (target.kind === "named" && (target.name === "bool" || target.name === "boolean"))) &&
+    source.kind === "named" &&
+    source.name.includes("|")
+  ) {
+    const parts = source.name.split("|").map((s) => s.trim());
+    if (
+      parts.every(
+        (p) =>
+          p === "true" ||
+          p === "false" ||
+          p === "bool" ||
+          p === "boolean" ||
+          isAssignable(target, { kind: "named", name: p }),
+      )
+    ) {
+      return true;
+    }
+  }
+
+  // 5. String literal types & string literal unions assignability
+  const targetIsStrLit = target.kind === "named" && isStringLiteralType(target.name);
+  const targetIsStrUnion = target.kind === "named" && isStringLiteralUnion(target.name);
+  const sourceIsStrLit = source.kind === "named" && isStringLiteralType(source.name);
+  const sourceIsStrUnion = source.kind === "named" && isStringLiteralUnion(source.name);
+  const targetIsStr =
+    target.kind === "str" ||
+    (target.kind === "named" && (target.name === "str" || target.name === "string"));
+  const sourceIsStr =
+    source.kind === "str" ||
+    (source.kind === "named" && (source.name === "str" || source.name === "string"));
+
+  // Exact match when both source and target are string literal named types
+  if (targetIsStrLit && sourceIsStrLit) {
+    return unquoteStringLiteral(target.name) === unquoteStringLiteral(source.name);
+  }
+
+  // Reject assigning a string literal union to a single string literal type unless all union parts match target
+  if (targetIsStrLit && sourceIsStrUnion) {
+    const parts = (source as NamedTypeRep).name.split("|").map((s) => unquoteStringLiteral(s));
+    const targetVal = unquoteStringLiteral((target as NamedTypeRep).name);
+    return parts.every((p) => p === targetVal);
+  }
+
+  // Allow assigning a single string literal to a string literal union if the union contains the literal
+  if (targetIsStrUnion && sourceIsStrLit) {
+    const parts = (target as NamedTypeRep).name.split("|").map((s) => unquoteStringLiteral(s));
+    const sourceVal = unquoteStringLiteral((source as NamedTypeRep).name);
+    return parts.includes(sourceVal);
+  }
+
+  // String literal union to string literal union: target must cover all source variants
+  if (targetIsStrUnion && sourceIsStrUnion) {
+    const targetParts = (target as NamedTypeRep).name
+      .split("|")
+      .map((s) => unquoteStringLiteral(s));
+    const sourceParts = (source as NamedTypeRep).name
+      .split("|")
+      .map((s) => unquoteStringLiteral(s));
+    return sourceParts.every((s) => targetParts.includes(s));
+  }
+
+  // Allow string literal named types and string literal unions to be assignable to str / TYPE_STR
+  if (targetIsStr && (sourceIsStrLit || sourceIsStrUnion)) {
+    return true;
+  }
+
+  // Disallow general str / TYPE_STR from being assigned to string literal or string literal union (soundness)
+  if (sourceIsStr && (targetIsStrLit || targetIsStrUnion)) {
+    return false;
+  }
+
+  // String-backed enum assignability with string literals & unions
+  if (target.kind === "enum") {
+    if (sourceIsStrLit) {
+      return target.variants.has(unquoteStringLiteral(source.name));
+    }
+    if (sourceIsStrUnion) {
+      const parts = source.name.split("|").map((s) => unquoteStringLiteral(s));
+      return parts.every((p) => target.variants.has(p));
+    }
+    if (source.kind === "named" && target.name === source.name) {
+      return true;
+    }
+  }
+
+  if (source.kind === "enum") {
+    if (targetIsStrLit) {
+      return source.variants.has(unquoteStringLiteral(target.name));
+    }
+    if (targetIsStrUnion) {
+      const parts = target.name.split("|").map((s) => unquoteStringLiteral(s));
+      return Array.from(source.variants.keys()).every((v) => parts.includes(v));
+    }
+    if (targetIsStr) {
+      return true;
+    }
+    if (target.kind === "named" && target.name === source.name) {
+      return true;
+    }
+  }
+
+  if (target.kind === "enum" && source.kind === "enum") {
+    return target.name === source.name;
+  }
 
   // Handle named unions (e.g. "int | (number) => void", "A | B")
   if (source.kind === "named" && source.name.includes("|")) {
@@ -154,7 +367,11 @@ export function isAssignable(target: Type, source: Type): boolean {
       if (p === target.kind) return true;
       if (
         (target.kind === "int" || target.kind === "float" || target.kind === "num") &&
-        (p === "int" || p === "float" || p === "num" || p === "number")
+        (p === "int" ||
+          p === "float" ||
+          p === "num" ||
+          p === "number" ||
+          (!isNaN(Number(p)) && p.trim() !== ""))
       ) {
         return true;
       }
@@ -170,7 +387,11 @@ export function isAssignable(target: Type, source: Type): boolean {
       if (p === source.kind) return true;
       if (
         (source.kind === "int" || source.kind === "float" || source.kind === "num") &&
-        (p === "int" || p === "float" || p === "num" || p === "number")
+        (p === "int" ||
+          p === "float" ||
+          p === "num" ||
+          p === "number" ||
+          (!isNaN(Number(p)) && p.trim() !== ""))
       ) {
         return true;
       }
@@ -183,6 +404,15 @@ export function isAssignable(target: Type, source: Type): boolean {
   if (target.kind === source.kind) {
     if (target.kind === "array" && source.kind === "array") {
       return isAssignable(target.elementType, source.elementType);
+    }
+    if (target.kind === "tuple" && source.kind === "tuple") {
+      if (target.elementTypes.length !== source.elementTypes.length) return false;
+      for (let i = 0; i < target.elementTypes.length; i++) {
+        if (!isAssignable(target.elementTypes[i], source.elementTypes[i])) {
+          return false;
+        }
+      }
+      return true;
     }
     if (target.kind === "option" && source.kind === "option") {
       return isAssignable(target.innerType, source.innerType);
@@ -208,8 +438,12 @@ export function isAssignable(target: Type, source: Type): boolean {
       return true;
     }
     if (target.kind === "function" && source.kind === "function") {
-      if (target.params.length !== source.params.length) return false;
-      for (let i = 0; i < target.params.length; i++) {
+      if (source.params.length > target.params.length) {
+        for (let i = target.params.length; i < source.params.length; i++) {
+          if (!source.params[i].optional) return false;
+        }
+      }
+      for (let i = 0; i < Math.min(target.params.length, source.params.length); i++) {
         // Contravariant in parameter types
         if (!isAssignable(source.params[i].type, target.params[i].type)) {
           return false;
@@ -219,7 +453,32 @@ export function isAssignable(target: Type, source: Type): boolean {
       return isAssignable(target.returnType, source.returnType);
     }
     if (target.kind === "named" && source.kind === "named") {
-      if (target.name === source.name) return true;
+      if (target.name === source.name) {
+        if (
+          target.typeArgs &&
+          target.typeArgs.length > 0 &&
+          source.typeArgs &&
+          source.typeArgs.length > 0
+        ) {
+          if (target.typeArgs.length !== source.typeArgs.length) return false;
+          for (let i = 0; i < target.typeArgs.length; i++) {
+            if (!isAssignable(target.typeArgs[i], source.typeArgs[i])) {
+              return false;
+            }
+          }
+          return true;
+        }
+        if (
+          (!target.typeArgs || target.typeArgs.length === 0) &&
+          (!source.typeArgs || source.typeArgs.length === 0)
+        ) {
+          return true;
+        }
+        if (!target.typeArgs || target.typeArgs.length === 0) {
+          return true;
+        }
+        return false;
+      }
       if (
         target.name === "any" ||
         target.name === "unknown" ||
@@ -227,6 +486,14 @@ export function isAssignable(target: Type, source: Type): boolean {
         source.name === "unknown"
       ) {
         return true;
+      }
+      if (
+        target.name.trim() !== "" &&
+        source.name.trim() !== "" &&
+        !isNaN(Number(target.name)) &&
+        !isNaN(Number(source.name))
+      ) {
+        return Number(target.name) === Number(source.name);
       }
       if (source.name.includes("|") || target.name.includes("|")) {
         const sourceParts = source.name.includes("|")
@@ -241,6 +508,15 @@ export function isAssignable(target: Type, source: Type): boolean {
             if (s === t || s === "any" || t === "any" || s === "unknown" || t === "unknown") {
               return true;
             }
+            if (
+              s.trim() !== "" &&
+              t.trim() !== "" &&
+              !isNaN(Number(s)) &&
+              !isNaN(Number(t)) &&
+              Number(s) === Number(t)
+            ) {
+              return true;
+            }
             if (s.includes("=>") && t.includes("=>")) {
               return true;
             }
@@ -252,6 +528,25 @@ export function isAssignable(target: Type, source: Type): boolean {
       }
       return false;
     }
+    return true;
+  }
+
+  // Numeric literal named types (e.g. "-1", "0", "1")
+  if (
+    target.kind === "named" &&
+    target.name.trim() !== "" &&
+    !isNaN(Number(target.name)) &&
+    (source.kind === "int" || source.kind === "float" || source.kind === "num")
+  ) {
+    return true;
+  }
+
+  if (
+    source.kind === "named" &&
+    source.name.trim() !== "" &&
+    !isNaN(Number(source.name)) &&
+    (target.kind === "int" || target.kind === "float" || target.kind === "num")
+  ) {
     return true;
   }
 
@@ -351,6 +646,8 @@ export function formatType(type: Type): string {
       return type.kind;
     case "array":
       return `[${formatType(type.elementType)}]`;
+    case "tuple":
+      return `[${type.elementTypes.map(formatType).join(", ")}]`;
     case "option":
       return `${formatType(type.innerType)}?`;
     case "result":

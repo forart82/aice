@@ -11,17 +11,21 @@ import type { Module } from "../core/ast.js";
 import type { CstTriviaTable } from "../core/trivia.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { CppDecompiler } from "./cpp-decompiler.js";
+import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
-import { TsDecompiler } from "./ts-decompiler.js";
+import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
 
 export * from "./ail-generator.js";
+export * from "./cpp-decompiler.js";
+export * from "./csharp-decompiler.js";
 export * from "./css-decompiler.js";
 export * from "./html-decompiler.js";
 export * from "./roundtrip.js";
 export * from "./ts-decompiler.js";
 
-export interface DecompileOptions extends AilGeneratorOptions {
+export interface DecompileOptions extends AilGeneratorOptions, TsDecompilerOptions {
   filePath?: string;
   target?: TargetLanguage;
 }
@@ -44,7 +48,10 @@ export function decompile(
   switch (target) {
     case "typescript":
     case "tsx": {
-      const decompiler = new TsDecompiler(source, filePath, { isTsx: target === "tsx" });
+      const decompiler = new TsDecompiler(source, filePath, {
+        isTsx: target === "tsx" || options.isTsx,
+        convertStringUnionsToEnum: options.convertStringUnionsToEnum,
+      });
       const result = decompiler.decompile();
       ast = result.ast;
       trivia = result.trivia;
@@ -52,6 +59,20 @@ export function decompile(
     }
     case "css": {
       const decompiler = new CssDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "cpp": {
+      const decompiler = new CppDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "csharp": {
+      const decompiler = new CSharpDecompiler(source, filePath);
       const result = decompiler.decompile();
       ast = result.ast;
       trivia = result.trivia;

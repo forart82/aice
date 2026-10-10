@@ -45,7 +45,10 @@ export const DEFAULT_EXTENSIONS: string[] = [
   ".py",
   ".cpp",
   ".hpp",
+  ".cc",
+  ".cxx",
   ".h",
+  ".cs",
 ];
 
 export const AGENT_IGNORE_FILES = [
@@ -104,7 +107,7 @@ export function generateCognitiveAgentsMdContent(): string {
     "  - `x := expr` -> immutable variable binding (replaces `const x = ...`)",
     "  - `y ::= expr` -> mutable variable binding (replaces `let y = ...`)",
     "  - `x: int := 42` -> typed immutable binding",
-    "  - `y: str ::= \"\"` -> typed mutable binding",
+    '  - `y: str ::= ""` -> typed mutable binding',
     "- **Vector Destructuring & Math**:",
     "  - `[x, y] := [10, 20]` (immutable destructuring)",
     "  - `[x, y] ::= [0, 0]` (mutable destructuring)",
@@ -114,7 +117,7 @@ export function generateCognitiveAgentsMdContent(): string {
     "  - `prop X, x: type = init` -> synthesizes field `X` and getter/setter `x` in emitted TypeScript/C++",
     "- **Single-Token Types & Sigils**:",
     "  - Types: `int`, `str`, `float`, `bool`, `num`, `byte`, `char`, `void`, `nil` (never use `i32` or `f64`)",
-    "  - Struct sigils: `type User: id!s, name!s, age!i = 0, active!b = true, role? = \"member\"`",
+    '  - Struct sigils: `type User: id!s, name!s, age!i = 0, active!b = true, role? = "member"`',
     "- **Functions & Trailing Returns**:",
     "  - Concise: `fn add(a:int, b:int) = a + b`",
     "  - Block: `fn process(n:int) -> int:` followed by 2-space indented block with trailing expression return",

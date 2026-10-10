@@ -4,25 +4,37 @@
  */
 
 import type {
+  ArrayLiteralExpr,
+  AwaitExpr,
   Block,
   ComponentDecl,
   Expr,
   FunctionDecl,
+  MethodDecl,
   Module,
   ModuleItem,
   Statement,
   TypeExpr,
+  UnaryExpr,
 } from "../core/ast.js";
 import type { Span } from "../core/span.js";
 import { GLOBAL_SYMBOLS, getMethodType, getPropertyType } from "./primitives.js";
 import {
+  type EnumTypeRep,
   formatType,
   isAssignable,
+  isStringLiteralOrUnionType,
+  isStringLiteralType,
+  isStringLiteralUnion,
   makeArrayType,
   makeFunctionType,
+  makeNamedType,
   makeOptionType,
   makeRecordType,
   makeResultType,
+  makeTupleType,
+  type NamedTypeRep,
+  type RecordTypeRep,
   type RefinementTypeRep,
   TYPE_BOOL,
   TYPE_BYTE,
@@ -37,6 +49,24 @@ import {
   TYPE_VOID,
   type Type,
 } from "./types.js";
+
+export function isPromiseType(t: Type | null | undefined): t is NamedTypeRep {
+  return (
+    t !== null &&
+    t !== undefined &&
+    t.kind === "named" &&
+    t.name === "Promise" &&
+    t.typeArgs !== undefined &&
+    t.typeArgs.length > 0
+  );
+}
+
+export function unwrapPromiseType(t: Type): Type {
+  if (isPromiseType(t)) {
+    return t.typeArgs![0];
+  }
+  return t;
+}
 
 export class TypeCheckError extends Error {
   readonly span: Span;
@@ -60,20 +90,83 @@ export class TypeCheckError extends Error {
   }
 }
 
+const BUILTIN_TYPE_NAMES = new Set([
+  "Promise",
+  "Set",
+  "Map",
+  "WeakMap",
+  "WeakSet",
+  "Uint8Array",
+  "Uint8ClampedArray",
+  "Uint16Array",
+  "Uint32Array",
+  "Int8Array",
+  "Int16Array",
+  "Int32Array",
+  "Float32Array",
+  "Float64Array",
+  "BigInt64Array",
+  "BigUint64Array",
+  "DataView",
+  "ArrayBuffer",
+  "Buffer",
+  "Array",
+  "Date",
+  "Error",
+  "RegExp",
+  "Record",
+  "Option",
+  "Result",
+  "TextEncoder",
+  "TextDecoder",
+  "AudioContext",
+  "AudioNode",
+  "AudioBuffer",
+  "Symbol",
+  "Function",
+]);
+
 export class TypeEnv {
   private bindings = new Map<string, { type: Type; isMut: boolean }>();
   private types = new Map<string, Type>();
   readonly parent: TypeEnv | null;
+  readonly isFunctionBoundary: boolean;
   currentFunctionReturnType: Type | null;
+  inferredReturnType?: Type;
+  isClassScope = false;
 
-  constructor(parent: TypeEnv | null = null, currentFunctionReturnType: Type | null = null) {
+  constructor(
+    parent: TypeEnv | null = null,
+    currentFunctionReturnType: Type | null = null,
+    isFunctionBoundary = false,
+    isAsync = false,
+    isClassScope = false,
+  ) {
     this.parent = parent;
+    this.isFunctionBoundary = isFunctionBoundary;
     this.currentFunctionReturnType =
       currentFunctionReturnType ?? parent?.currentFunctionReturnType ?? null;
+    this.isAsync = isFunctionBoundary ? isAsync : isAsync || parent?.isAsync || false;
+    this.isClassScope = isClassScope;
   }
 
-  extend(returnType: Type | null = null): TypeEnv {
-    return new TypeEnv(this, returnType ?? this.currentFunctionReturnType);
+  getFunctionEnv(): TypeEnv | null {
+    let cur: TypeEnv | null = this;
+    while (cur) {
+      if (cur.isFunctionBoundary) return cur;
+      cur = cur.parent;
+    }
+    return null;
+  }
+
+  extend(returnType: Type | null = null, isAsync?: boolean, isClassScope = false): TypeEnv {
+    return new TypeEnv(
+      this,
+      returnType ?? this.currentFunctionReturnType,
+      false,
+      isAsync ?? this.isAsync,
+      isClassScope,
+    );
   }
 
   define(name: string, type: Type, isMut = false): void {
@@ -93,10 +186,22 @@ export class TypeEnv {
     return null;
   }
 
+  lookupGlobal(name: string): { type: Type; isMut: boolean } | null {
+    if (this.parent) return this.parent.lookupGlobal(name);
+    const val = this.bindings.get(name);
+    if (val) return val;
+    const globalType = GLOBAL_SYMBOLS[name];
+    if (globalType) return { type: globalType, isMut: false };
+    return null;
+  }
+
   lookupType(name: string): Type | null {
     const val = this.types.get(name);
     if (val) return val;
     if (this.parent) return this.parent.lookupType(name);
+    if (BUILTIN_TYPE_NAMES.has(name)) {
+      return { kind: "named", name };
+    }
     return null;
   }
 }
@@ -121,6 +226,7 @@ export class TypeChecker {
       "window",
       "document",
       "globalThis",
+      "navigator",
       "AudioContext",
       "AudioNode",
       "AudioBuffer",
@@ -137,6 +243,7 @@ export class TypeChecker {
       "BigUint64Array",
       "DataView",
       "ArrayBuffer",
+      "Buffer",
       "typeof",
       "undefined",
       "NaN",
@@ -148,16 +255,28 @@ export class TypeChecker {
       "WeakMap",
       "WeakSet",
       "performance",
+      "crypto",
       "requestAnimationFrame",
       "cancelAnimationFrame",
       "setTimeout",
       "clearTimeout",
       "setInterval",
       "clearInterval",
+      "fetch",
+      "btoa",
+      "atob",
+      "TextEncoder",
+      "TextDecoder",
     ];
     for (const name of intrinsics) {
-      this.globalEnv.define(name, TYPE_UNKNOWN);
+      const globalSym = GLOBAL_SYMBOLS[name];
+      this.globalEnv.define(name, globalSym ?? TYPE_UNKNOWN);
       this.globalEnv.defineType(name, { kind: "named", name });
+    }
+    for (const [name, sym] of Object.entries(GLOBAL_SYMBOLS)) {
+      if (!this.globalEnv.lookup(name)) {
+        this.globalEnv.define(name, sym);
+      }
     }
   }
 
@@ -185,30 +304,40 @@ export class TypeChecker {
         for (const v of item.variants) {
           const payloads = v.payloadTypes?.map((pt) => this.resolveTypeExpr(pt, env));
           variants.set(v.name, payloads);
+        }
+        const enumTypeRep: EnumTypeRep = {
+          kind: "enum",
+          name: item.name,
+          variants,
+        };
+        for (const v of item.variants) {
+          const payloads = variants.get(v.name);
           if (payloads && payloads.length > 0) {
             const params = payloads.map((p, idx) => ({ name: `item${idx}`, type: p }));
-            env.define(v.name, makeFunctionType(params, { kind: "named", name: item.name }));
+            env.define(v.name, makeFunctionType(params, enumTypeRep));
           } else {
-            env.define(v.name, { kind: "named", name: item.name });
+            env.define(v.name, enumTypeRep);
           }
         }
         const enumRecordFields = new Map<string, Type>();
         for (const v of item.variants) {
-          enumRecordFields.set(v.name, TYPE_INT);
+          enumRecordFields.set(v.name, enumTypeRep);
         }
         env.define(item.name, makeRecordType(enumRecordFields, item.name));
-        env.defineType(item.name, {
-          kind: "enum",
-          name: item.name,
-          variants,
-        });
+        env.defineType(item.name, enumTypeRep);
       } else if (item.fields) {
         const fields = new Map<string, Type>();
-        const constructorParams: { name: string; type: Type }[] = [];
+        const constructorParams: { name: string; type: Type; optional?: boolean }[] = [];
         for (const f of item.fields) {
           const fType = this.resolveTypeExpr(f.typeAnnotation, env);
           fields.set(f.name, fType);
-          constructorParams.push({ name: f.name, type: fType });
+          constructorParams.push({
+            name: f.name,
+            type: fType,
+            optional: Boolean(
+              f.defaultValue !== undefined || f.typeAnnotation?.kind === "OptionType",
+            ),
+          });
         }
         const recordType = makeRecordType(fields, item.name);
         env.defineType(item.name, recordType);
@@ -221,10 +350,16 @@ export class TypeChecker {
       const params = item.params.map((p) => ({
         name: p.name,
         type: this.resolveTypeExpr(p.typeAnnotation, env),
+        optional: Boolean(
+          p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+        ),
       }));
       const returnType = item.returnType
         ? this.resolveTypeExpr(item.returnType, env)
-        : item.isExpressionBodied || this.hasTrailingExpr(item)
+        : item.isExpressionBodied ||
+            this.hasTrailingExpr(item) ||
+            item.isAsync ||
+            this.hasReturnStmt(item)
           ? TYPE_UNKNOWN
           : TYPE_VOID;
       env.define(item.name, makeFunctionType(params, returnType));
@@ -234,6 +369,9 @@ export class TypeChecker {
       const params = item.params.map((p) => ({
         name: p.name,
         type: this.resolveTypeExpr(p.typeAnnotation, env),
+        optional: Boolean(
+          p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+        ),
       }));
       env.define(item.name, makeFunctionType(params, TYPE_VOID));
     }
@@ -271,18 +409,25 @@ export class TypeChecker {
         const mParams = m.params.map((p) => ({
           name: p.name,
           type: this.resolveTypeExpr(p.typeAnnotation, env),
+          optional: Boolean(
+            p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+          ),
         }));
         const mRet = m.returnType
           ? this.resolveTypeExpr(m.returnType, env)
-          : m.isExpressionBodied || m.accessor === "get"
+          : m.isExpressionBodied || m.accessor === "get" || m.isAsync || this.hasReturnStmt(m)
             ? TYPE_UNKNOWN
             : TYPE_VOID;
-        fields.set(m.name, makeFunctionType(mParams, mRet));
-        if (m.accessor === "get") {
-          fields.set(`get_${m.name}`, makeFunctionType([], mRet));
+        if (!m.accessor) {
+          fields.set(m.name, makeFunctionType(mParams, mRet));
+        } else if (m.accessor === "get") {
           fields.set(m.name, mRet);
+          fields.set(`get_${m.name}`, makeFunctionType([], mRet));
         } else if (m.accessor === "set") {
           fields.set(`set_${m.name}`, makeFunctionType(mParams, TYPE_VOID));
+          if (!fields.has(m.name)) {
+            fields.set(m.name, mParams[0]?.type ?? TYPE_UNKNOWN);
+          }
         }
       }
       const clsType = makeRecordType(fields, item.name);
@@ -294,12 +439,18 @@ export class TypeChecker {
         const ctorParams = ctorMethod.params.map((p) => ({
           name: p.name,
           type: this.resolveTypeExpr(p.typeAnnotation, env),
+          optional: Boolean(
+            p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+          ),
         }));
         env.define(item.name, makeFunctionType(ctorParams, clsType));
       } else if (item.primaryConstructor && item.primaryConstructor.length > 0) {
         const ctorParams = item.primaryConstructor.map((p) => ({
           name: p.name,
           type: this.resolveTypeExpr(p.typeAnnotation, env),
+          optional: Boolean(
+            p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+          ),
         }));
         env.define(item.name, makeFunctionType(ctorParams, clsType));
       } else {
@@ -315,7 +466,7 @@ export class TypeChecker {
     }
   }
 
-  private hasTrailingExpr(fn: FunctionDecl): boolean {
+  private hasTrailingExpr(fn: FunctionDecl | MethodDecl): boolean {
     if (fn.name === "__top_level__") return false;
     if (fn.isExpressionBodied) return true;
     if (fn.body.kind === "Block") {
@@ -331,13 +482,38 @@ export class TypeChecker {
     return false;
   }
 
+  private hasReturnStmt(fn: FunctionDecl | MethodDecl): boolean {
+    if (fn.body.kind !== "Block") return false;
+    const checkStatements = (stmts: Statement[]): boolean => {
+      for (const s of stmts) {
+        if (s.kind === "ReturnStmt" && s.value) return true;
+        if (s.kind === "IfStmt") {
+          if (checkStatements(s.thenBranch.statements)) return true;
+          for (const elif of s.elifBranches) {
+            if (checkStatements(elif.body.statements)) return true;
+          }
+          if (s.elseBranch && checkStatements(s.elseBranch.statements)) return true;
+        }
+        if (s.kind === "WhileStmt" && checkStatements(s.body.statements)) return true;
+        if (s.kind === "ForStmt" && checkStatements(s.body.statements)) return true;
+        if (s.kind === "TryStmt") {
+          if (checkStatements(s.tryBlock.statements)) return true;
+          if (s.catchBlock && checkStatements(s.catchBlock.statements)) return true;
+          if (s.finallyBlock && checkStatements(s.finallyBlock.statements)) return true;
+        }
+      }
+      return false;
+    };
+    return checkStatements(fn.body.statements);
+  }
+
   private checkItem(item: ModuleItem, env: TypeEnv): void {
     if (item.kind === "FunctionDecl") {
       this.checkFunctionDecl(item, env);
     } else if (item.kind === "ComponentDecl") {
       this.checkComponentDecl(item, env);
     } else if (item.kind === "ClassDecl") {
-      const classEnv = env.extend();
+      const classEnv = env.extend(null, undefined, true);
       classEnv.define("this", { kind: "named", name: item.name });
       if (item.primaryConstructor) {
         for (const p of item.primaryConstructor) {
@@ -360,73 +536,22 @@ export class TypeChecker {
         }
       }
       for (const m of item.methods) {
-        const retType = m.returnType
-          ? this.resolveTypeExpr(m.returnType, classEnv)
-          : m.isExpressionBodied || m.accessor === "get"
-            ? TYPE_UNKNOWN
-            : TYPE_VOID;
-        const methodEnv = classEnv.extend(retType);
-        for (const p of m.params) {
-          methodEnv.define(p.name, this.resolveTypeExpr(p.typeAnnotation, classEnv), true);
-        }
-        if (m.body.kind === "Block") {
-          const trailingType = this.checkBlock(m.body, methodEnv);
-          const stmts = m.body.statements;
-          if (stmts.length > 0) {
-            const last = stmts[stmts.length - 1];
-            if (last.kind === "ExprStmt") {
-              if (m.returnType) {
-                if (
-                  retType.kind !== "void" &&
-                  m.accessor !== "set" &&
-                  !isAssignable(retType, trailingType)
-                ) {
-                  throw new TypeCheckError(
-                    `Trailing expression evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
-                    last.expr.span,
-                    "AIL_E2007_RETURN_TYPE_MISMATCH",
-                    retType,
-                    trailingType,
-                  );
-                }
-              }
-            } else if (last.kind === "IfStmt" && last.elseBranch) {
-              if (m.returnType) {
-                if (
-                  retType.kind !== "void" &&
-                  m.accessor !== "set" &&
-                  !isAssignable(retType, trailingType)
-                ) {
-                  throw new TypeCheckError(
-                    `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
-                    last.span,
-                    "AIL_E2007_RETURN_TYPE_MISMATCH",
-                    retType,
-                    trailingType,
-                  );
-                }
-              }
-            }
-          }
-        } else {
-          const bodyType = this.checkExpr(m.body, methodEnv);
-          if (retType.kind !== "void" && m.accessor !== "set" && m.body.kind !== "AssignExpr") {
-            if (!isAssignable(retType, bodyType)) {
-              throw new TypeCheckError(
-                `Method '${m.name}' returns '${formatType(bodyType)}', but declared '${formatType(retType)}'`,
-                m.body.span,
-                "AIL_E2007_RETURN_TYPE_MISMATCH",
-                retType,
-                bodyType,
-              );
-            }
-          }
+        this.checkMethodDecl(m, classEnv, item.name);
+      }
+      if (item.staticBlocks) {
+        for (const sb of item.staticBlocks) {
+          this.checkBlock(sb, classEnv);
         }
       }
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
-      const valType = this.checkExpr(item.value, env);
+      let valType: Type;
       if (item.typeAnnotation) {
         const declType = this.resolveTypeExpr(item.typeAnnotation, env);
+        if (declType.kind === "tuple" && item.value.kind === "ArrayLiteralExpr") {
+          valType = makeTupleType(item.value.elements.map((el) => this.checkExpr(el, env)));
+        } else {
+          valType = this.checkExpr(item.value, env, declType);
+        }
         if (!isAssignable(declType, valType)) {
           throw new TypeCheckError(
             `Cannot assign value of type '${formatType(valType)}' to variable '${item.name}' of type '${formatType(declType)}'`,
@@ -436,23 +561,237 @@ export class TypeChecker {
             valType,
           );
         }
+      } else {
+        valType = this.checkExpr(item.value, env);
+        if (
+          item.kind === "VarDecl" &&
+          item.isMut &&
+          valType.kind === "named" &&
+          (valType.name === "true" || valType.name === "false")
+        ) {
+          valType = TYPE_BOOL;
+        } else if (
+          item.kind === "VarDecl" &&
+          item.isMut &&
+          valType.kind === "named" &&
+          isStringLiteralType(valType.name)
+        ) {
+          valType = TYPE_STR;
+        }
       }
     }
+  }
+
+  private checkMethodDecl(m: MethodDecl, classEnv: TypeEnv, className?: string): void {
+    let retType = m.returnType
+      ? this.resolveTypeExpr(m.returnType, classEnv)
+      : m.isExpressionBodied ||
+          m.accessor === "get" ||
+          m.isAsync ||
+          this.hasTrailingExpr(m) ||
+          this.hasReturnStmt(m)
+        ? TYPE_UNKNOWN
+        : TYPE_VOID;
+
+    const isAsyncOrPromise = !!m.isAsync || isPromiseType(retType);
+    const targetCheckType = isAsyncOrPromise ? unwrapPromiseType(retType) : retType;
+
+    const methodEnv = new TypeEnv(classEnv, retType, true, m.isAsync);
+
+    for (const p of m.params) {
+      methodEnv.define(p.name, this.resolveTypeExpr(p.typeAnnotation, classEnv), true);
+    }
+
+    if (m.body.kind === "Block") {
+      const trailingType = this.checkBlock(m.body, methodEnv);
+      const stmts = m.body.statements;
+      if (stmts.length > 0) {
+        const last = stmts[stmts.length - 1];
+        if (last.kind === "ExprStmt") {
+          if (m.returnType) {
+            if (retType.kind !== "void" && m.accessor !== "set") {
+              const matches =
+                isAssignable(retType, trailingType) ||
+                (isAsyncOrPromise && isAssignable(targetCheckType, trailingType));
+              if (!matches) {
+                throw new TypeCheckError(
+                  `Trailing expression evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
+                  last.expr.span,
+                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  retType,
+                  trailingType,
+                );
+              }
+            }
+          } else if (trailingType.kind !== "void") {
+            let inferred = trailingType;
+            if (m.isAsync) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            retType = inferred;
+          }
+        } else if (last.kind === "IfStmt" && last.elseBranch) {
+          if (m.returnType) {
+            if (retType.kind !== "void" && m.accessor !== "set") {
+              const matches =
+                isAssignable(retType, trailingType) ||
+                (isAsyncOrPromise && isAssignable(targetCheckType, trailingType));
+              if (!matches) {
+                throw new TypeCheckError(
+                  `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
+                  last.span,
+                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  retType,
+                  trailingType,
+                );
+              }
+            }
+          } else if (trailingType.kind !== "void") {
+            let inferred = trailingType;
+            if (m.isAsync) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            retType = inferred;
+          }
+        }
+      }
+
+      if (
+        !m.returnType &&
+        methodEnv.inferredReturnType &&
+        methodEnv.inferredReturnType.kind !== "void"
+      ) {
+        let inferred = methodEnv.inferredReturnType;
+        if (m.isAsync) {
+          inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+        }
+        retType = inferred;
+      } else if (!m.returnType && m.isAsync && retType.kind === "unknown") {
+        retType = makeNamedType("Promise", [TYPE_VOID]);
+      }
+    } else {
+      const bodyType = this.checkExpr(m.body, methodEnv, targetCheckType);
+      if (m.returnType) {
+        if (retType.kind !== "void" && m.accessor !== "set" && m.body.kind !== "AssignExpr") {
+          const matches =
+            isAssignable(retType, bodyType) ||
+            (isAsyncOrPromise && isAssignable(targetCheckType, bodyType));
+          if (!matches) {
+            throw new TypeCheckError(
+              `Method '${m.name}' returns '${formatType(bodyType)}', but declared '${formatType(retType)}'`,
+              m.body.span,
+              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              retType,
+              bodyType,
+            );
+          }
+        }
+      } else {
+        let inferred = bodyType;
+        if (m.isAsync) {
+          inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+        }
+        retType = inferred;
+      }
+    }
+
+    if (!m.returnType && className) {
+      const clsType = classEnv.lookupType(className);
+      if (clsType && clsType.kind === "record") {
+        const mParams = m.params.map((p) => ({
+          name: p.name,
+          type: this.resolveTypeExpr(p.typeAnnotation, classEnv),
+          optional: Boolean(
+            p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+          ),
+        }));
+        if (!m.accessor) {
+          clsType.fields.set(m.name, makeFunctionType(mParams, retType));
+        } else if (m.accessor === "get") {
+          clsType.fields.set(m.name, retType);
+          clsType.fields.set(`get_${m.name}`, makeFunctionType([], retType));
+        } else if (m.accessor === "set") {
+          clsType.fields.set(`set_${m.name}`, makeFunctionType(mParams, TYPE_VOID));
+          if (!clsType.fields.has(m.name)) {
+            clsType.fields.set(m.name, mParams[0]?.type ?? TYPE_UNKNOWN);
+          }
+        }
+      }
+    }
+  }
+
+  private bindParameter(
+    paramName: string,
+    paramType: Type,
+    targetEnv: TypeEnv,
+    isMut = true,
+  ): void {
+    if (paramName.startsWith("[") && paramName.endsWith("]")) {
+      const raw = paramName.slice(1, -1);
+      const parts = raw.split(",").map((s) => s.trim());
+      for (let i = 0; i < parts.length; i++) {
+        const id = parts[i];
+        if (!id || id === "" || id === "_") continue;
+        let subType: Type = TYPE_UNKNOWN;
+        if (paramType.kind === "tuple") {
+          subType = i < paramType.elementTypes.length ? paramType.elementTypes[i] : TYPE_UNKNOWN;
+        } else if (paramType.kind === "array") {
+          subType = paramType.elementType;
+        }
+        targetEnv.define(id, subType, isMut);
+      }
+      return;
+    }
+
+    if (paramName.startsWith("{") && paramName.endsWith("}")) {
+      const raw = paramName.slice(1, -1);
+      const parts = raw.split(",").map((s) => s.trim());
+      for (const entry of parts) {
+        if (!entry || entry === "" || entry === "_") continue;
+        let propName = entry;
+        let bindingName = entry;
+        if (entry.includes(":")) {
+          const split = entry.split(":");
+          propName = split[0].trim();
+          bindingName = split[1].trim();
+        }
+        if (!bindingName || bindingName === "_") continue;
+
+        let subType: Type = TYPE_UNKNOWN;
+        if (paramType.kind === "record") {
+          subType = paramType.fields.get(propName) ?? TYPE_UNKNOWN;
+        } else if (paramType.kind === "named") {
+          const resolved = targetEnv.lookupType(paramType.name);
+          if (resolved && resolved.kind === "record") {
+            subType = resolved.fields.get(propName) ?? TYPE_UNKNOWN;
+          }
+        }
+        targetEnv.define(bindingName, subType, isMut);
+      }
+      return;
+    }
+
+    targetEnv.define(paramName, paramType, isMut);
   }
 
   private checkFunctionDecl(fn: FunctionDecl, parentEnv: TypeEnv): void {
     let returnType = fn.returnType
       ? this.resolveTypeExpr(fn.returnType, parentEnv)
-      : fn.isExpressionBodied || this.hasTrailingExpr(fn)
+      : fn.isExpressionBodied || this.hasTrailingExpr(fn) || this.hasReturnStmt(fn) || fn.isAsync
         ? TYPE_UNKNOWN
         : TYPE_VOID;
 
-    const fnEnv = new TypeEnv(parentEnv, returnType);
+    const isAsyncOrPromise = !!fn.isAsync || isPromiseType(returnType);
+    const targetCheckType = isAsyncOrPromise ? unwrapPromiseType(returnType) : returnType;
+
+    const fnEnv = new TypeEnv(parentEnv, returnType, true, fn.isAsync);
 
     for (const p of fn.params) {
-      const pType = this.resolveTypeExpr(p.typeAnnotation, parentEnv);
+      const pType = p.typeAnnotation
+        ? this.resolveTypeExpr(p.typeAnnotation, parentEnv)
+        : TYPE_UNKNOWN;
       if (p.defaultValue) {
-        const defType = this.checkExpr(p.defaultValue, parentEnv);
+        const defType = this.checkExpr(p.defaultValue, parentEnv, pType);
         if (!isAssignable(pType, defType)) {
           throw new TypeCheckError(
             `Default parameter value of type '${formatType(defType)}' is not assignable to parameter '${p.name}' of type '${formatType(pType)}'`,
@@ -463,31 +802,46 @@ export class TypeChecker {
           );
         }
       }
-      fnEnv.define(p.name, pType, true);
+      this.bindParameter(p.name, pType, fnEnv, true);
     }
 
     if (fn.isExpressionBodied) {
-      const bodyType = this.checkExpr(fn.body as Expr, fnEnv);
+      let bodyType: Type;
+      if (
+        fn.returnType &&
+        targetCheckType.kind === "tuple" &&
+        (fn.body as Expr).kind === "ArrayLiteralExpr"
+      ) {
+        const arr = fn.body as ArrayLiteralExpr;
+        bodyType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, fnEnv)));
+      } else {
+        bodyType = this.checkExpr(fn.body as Expr, fnEnv, targetCheckType);
+      }
       if (fn.returnType) {
-        if (
-          returnType.kind !== "void" &&
-          (fn.body as Expr).kind !== "AssignExpr" &&
-          !isAssignable(returnType, bodyType)
-        ) {
-          throw new TypeCheckError(
-            `Expression body evaluates to '${formatType(bodyType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
-            (fn.body as Expr).span,
-            "AIL_E2007_RETURN_TYPE_MISMATCH",
-            returnType,
-            bodyType,
-          );
+        if (returnType.kind !== "void" && (fn.body as Expr).kind !== "AssignExpr") {
+          const matches =
+            isAssignable(returnType, bodyType) ||
+            (isAsyncOrPromise && isAssignable(targetCheckType, bodyType));
+          if (!matches) {
+            throw new TypeCheckError(
+              `Expression body evaluates to '${formatType(bodyType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
+              (fn.body as Expr).span,
+              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              returnType,
+              bodyType,
+            );
+          }
         }
       } else {
         // Infer return type and update signature in parentEnv
-        returnType = bodyType;
+        let inferred = bodyType;
+        if (fn.isAsync) {
+          inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+        }
+        returnType = inferred;
         const existing = parentEnv.lookup(fn.name);
         if (existing && existing.type.kind === "function") {
-          existing.type.returnType = bodyType;
+          existing.type.returnType = inferred;
         }
       }
     } else {
@@ -499,50 +853,91 @@ export class TypeChecker {
         const last = stmts[stmts.length - 1];
         if (last.kind === "ExprStmt") {
           if (fn.returnType) {
-            if (returnType.kind !== "void" && !isAssignable(returnType, trailingType)) {
-              throw new TypeCheckError(
-                `Trailing expression evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
-                last.expr.span,
-                "AIL_E2007_RETURN_TYPE_MISMATCH",
-                returnType,
-                trailingType,
-              );
+            if (returnType.kind !== "void") {
+              const matches =
+                isAssignable(returnType, trailingType) ||
+                (isAsyncOrPromise && isAssignable(targetCheckType, trailingType));
+              if (!matches) {
+                throw new TypeCheckError(
+                  `Trailing expression evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
+                  last.expr.span,
+                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  returnType,
+                  trailingType,
+                );
+              }
             }
           } else if (fn.name !== "__top_level__" && trailingType.kind !== "void") {
-            returnType = trailingType;
+            let inferred = trailingType;
+            if (fn.isAsync) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            returnType = inferred;
             const existing = parentEnv.lookup(fn.name);
             if (existing && existing.type.kind === "function") {
-              existing.type.returnType = trailingType;
+              existing.type.returnType = inferred;
             }
           }
         } else if (last.kind === "IfStmt" && last.elseBranch) {
           if (fn.returnType) {
-            if (returnType.kind !== "void" && !isAssignable(returnType, trailingType)) {
-              throw new TypeCheckError(
-                `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
-                last.span,
-                "AIL_E2007_RETURN_TYPE_MISMATCH",
-                returnType,
-                trailingType,
-              );
+            if (returnType.kind !== "void") {
+              const matches =
+                isAssignable(returnType, trailingType) ||
+                (isAsyncOrPromise && isAssignable(targetCheckType, trailingType));
+              if (!matches) {
+                throw new TypeCheckError(
+                  `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
+                  last.span,
+                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  returnType,
+                  trailingType,
+                );
+              }
             }
           } else if (fn.name !== "__top_level__" && trailingType.kind !== "void") {
-            returnType = trailingType;
+            let inferred = trailingType;
+            if (fn.isAsync) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            returnType = inferred;
             const existing = parentEnv.lookup(fn.name);
             if (existing && existing.type.kind === "function") {
-              existing.type.returnType = trailingType;
+              existing.type.returnType = inferred;
             }
           }
+        }
+      }
+
+      if (!fn.returnType && fnEnv.inferredReturnType && fnEnv.inferredReturnType.kind !== "void") {
+        let inferred = fnEnv.inferredReturnType;
+        if (fn.isAsync) {
+          inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+        }
+        returnType = inferred;
+        const existing = parentEnv.lookup(fn.name);
+        if (existing && existing.type.kind === "function") {
+          existing.type.returnType = inferred;
+        }
+      } else if (!fn.returnType && fn.name !== "__top_level__" && fn.isAsync) {
+        const existing = parentEnv.lookup(fn.name);
+        if (
+          existing &&
+          existing.type.kind === "function" &&
+          existing.type.returnType.kind === "unknown"
+        ) {
+          existing.type.returnType = makeNamedType("Promise", [TYPE_VOID]);
         }
       }
     }
   }
 
   private checkComponentDecl(comp: ComponentDecl, parentEnv: TypeEnv): void {
-    const compEnv = new TypeEnv(parentEnv, TYPE_VOID);
+    const compEnv = new TypeEnv(parentEnv, TYPE_VOID, true);
     for (const p of comp.params) {
-      const pType = this.resolveTypeExpr(p.typeAnnotation, parentEnv);
-      compEnv.define(p.name, pType, false);
+      const pType = p.typeAnnotation
+        ? this.resolveTypeExpr(p.typeAnnotation, parentEnv)
+        : TYPE_UNKNOWN;
+      this.bindParameter(p.name, pType, compEnv, false);
     }
 
     for (const node of comp.layout) {
@@ -557,18 +952,250 @@ export class TypeChecker {
     let trailingType: Type = TYPE_VOID;
     for (const stmt of block.statements) {
       trailingType = this.checkStatement(stmt, blockEnv);
+      if (
+        stmt.kind === "IfStmt" &&
+        this.blockAlwaysExits(stmt.thenBranch) &&
+        !stmt.elseBranch &&
+        stmt.elifBranches.length === 0
+      ) {
+        const exitNarrowings = this.extractNarrowings(stmt.condition, false, blockEnv);
+        for (const [name, narrowedType] of exitNarrowings) {
+          const existing = blockEnv.lookup(name);
+          blockEnv.define(name, narrowedType, existing?.isMut ?? false);
+        }
+      }
     }
     return trailingType;
+  }
+
+  private blockAlwaysExits(block: Block): boolean {
+    for (const stmt of block.statements) {
+      if (stmt.kind === "ReturnStmt" || stmt.kind === "ThrowStmt") {
+        return true;
+      }
+      if (stmt.kind === "IfStmt" && stmt.elseBranch) {
+        if (
+          this.blockAlwaysExits(stmt.thenBranch) &&
+          this.blockAlwaysExits(stmt.elseBranch) &&
+          stmt.elifBranches.every((el) => this.blockAlwaysExits(el.body))
+        ) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  private extractNarrowings(cond: Expr, isPositive: boolean, env: TypeEnv): Map<string, Type> {
+    const narrowings = new Map<string, Type>();
+
+    if (cond.kind === "IdentifierExpr") {
+      if (isPositive) {
+        const binding = env.lookup(cond.name);
+        if (binding) {
+          let t = binding.type;
+          if (t.kind === "named") {
+            const resolved = env.lookupType(t.name);
+            if (resolved) t = resolved;
+          }
+          if (t.kind === "option") {
+            narrowings.set(cond.name, t.innerType);
+          }
+        }
+      }
+      return narrowings;
+    }
+
+    if (cond.kind === "UnaryExpr" && (cond.operator === "not" || cond.operator === "!")) {
+      return this.extractNarrowings(cond.operand, !isPositive, env);
+    }
+
+    if (cond.kind === "BinaryExpr") {
+      const op = cond.operator;
+      if (op === "and" || op === "&&") {
+        if (isPositive) {
+          const leftMap = this.extractNarrowings(cond.left, true, env);
+          const rightMap = this.extractNarrowings(cond.right, true, env);
+          const merged = new Map<string, Type>(leftMap);
+          for (const [k, v] of rightMap) {
+            merged.set(k, v);
+          }
+          return merged;
+        }
+        return narrowings;
+      }
+
+      if (op === "or" || op === "||") {
+        if (!isPositive) {
+          const leftMap = this.extractNarrowings(cond.left, false, env);
+          const rightMap = this.extractNarrowings(cond.right, false, env);
+          const merged = new Map<string, Type>(leftMap);
+          for (const [k, v] of rightMap) {
+            merged.set(k, v);
+          }
+          return merged;
+        }
+        return narrowings;
+      }
+
+      const isNilOrNull = (e: Expr): boolean => {
+        if (e.kind === "LiteralExpr") {
+          return (
+            e.literalKind === "nil" ||
+            e.value === null ||
+            e.rawValue === "nil" ||
+            e.rawValue === "null"
+          );
+        }
+        if (e.kind === "IdentifierExpr") {
+          return e.name === "nil" || e.name === "null";
+        }
+        return false;
+      };
+
+      // Not null check: x != nil or nil != x or x != null or null != x
+      if (op === "!=" || op === "!==") {
+        if (isPositive) {
+          let targetName: string | null = null;
+          if (cond.left.kind === "IdentifierExpr" && isNilOrNull(cond.right)) {
+            targetName = cond.left.name;
+          } else if (isNilOrNull(cond.left) && cond.right.kind === "IdentifierExpr") {
+            targetName = cond.right.name;
+          }
+          if (targetName) {
+            const binding = env.lookup(targetName);
+            if (binding) {
+              let t = binding.type;
+              if (t.kind === "named") {
+                const resolved = env.lookupType(t.name);
+                if (resolved) t = resolved;
+              }
+              if (t.kind === "option") {
+                narrowings.set(targetName, t.innerType);
+              }
+            }
+          }
+        }
+        return narrowings;
+      }
+
+      // Null check: x == nil or nil == x or x == null or null == x
+      if (op === "==" || op === "===") {
+        if (!isPositive) {
+          let targetName: string | null = null;
+          if (cond.left.kind === "IdentifierExpr" && isNilOrNull(cond.right)) {
+            targetName = cond.left.name;
+          } else if (isNilOrNull(cond.left) && cond.right.kind === "IdentifierExpr") {
+            targetName = cond.right.name;
+          }
+          if (targetName) {
+            const binding = env.lookup(targetName);
+            if (binding) {
+              let t = binding.type;
+              if (t.kind === "named") {
+                const resolved = env.lookupType(t.name);
+                if (resolved) t = resolved;
+              }
+              if (t.kind === "option") {
+                narrowings.set(targetName, t.innerType);
+              }
+            }
+          }
+        }
+        return narrowings;
+      }
+    }
+
+    return narrowings;
+  }
+
+  private checkIfStmt(stmt: IfStmt, env: TypeEnv): Type {
+    // Strict Boolean Condition Invariant
+    const condType = this.checkExpr(stmt.condition, env);
+    if (
+      !isAssignable(TYPE_BOOL, condType) &&
+      condType.kind !== "option" &&
+      condType.kind !== "named" &&
+      condType.kind !== "record"
+    ) {
+      throw new TypeCheckError(
+        `Condition in 'if' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
+        stmt.condition.span,
+        "AIL_E2001_NON_BOOLEAN_CONDITION",
+        TYPE_BOOL,
+        condType,
+      );
+    }
+
+    const thenEnv = new TypeEnv(env);
+    const posNarrowings = this.extractNarrowings(stmt.condition, true, env);
+    for (const [name, narrowedType] of posNarrowings) {
+      const existing = env.lookup(name);
+      thenEnv.define(name, narrowedType, existing?.isMut ?? false);
+    }
+    const thenType = this.checkBlock(stmt.thenBranch, thenEnv);
+
+    const elseEnv = new TypeEnv(env);
+    const negNarrowings = this.extractNarrowings(stmt.condition, false, env);
+    for (const [name, narrowedType] of negNarrowings) {
+      const existing = env.lookup(name);
+      elseEnv.define(name, narrowedType, existing?.isMut ?? false);
+    }
+
+    for (const elif of stmt.elifBranches) {
+      const elifCondType = this.checkExpr(elif.condition, elseEnv);
+      if (
+        !isAssignable(TYPE_BOOL, elifCondType) &&
+        elifCondType.kind !== "option" &&
+        elifCondType.kind !== "named" &&
+        elifCondType.kind !== "record"
+      ) {
+        throw new TypeCheckError(
+          `Condition in 'elif' statement must evaluate strictly to 'bool', got '${formatType(elifCondType)}'. Zero implicit coercion allowed.`,
+          elif.condition.span,
+          "AIL_E2001_NON_BOOLEAN_CONDITION",
+          TYPE_BOOL,
+          elifCondType,
+        );
+      }
+      const elifEnv = new TypeEnv(elseEnv);
+      const elifPosNarrowings = this.extractNarrowings(elif.condition, true, elseEnv);
+      for (const [name, narrowedType] of elifPosNarrowings) {
+        const existing = elseEnv.lookup(name);
+        elifEnv.define(name, narrowedType, existing?.isMut ?? false);
+      }
+      this.checkBlock(elif.body, elifEnv);
+
+      const elifNegNarrowings = this.extractNarrowings(elif.condition, false, elseEnv);
+      for (const [name, narrowedType] of elifNegNarrowings) {
+        const existing = elseEnv.lookup(name);
+        elseEnv.define(name, narrowedType, existing?.isMut ?? false);
+      }
+    }
+
+    if (stmt.elseBranch) {
+      const elseType = this.checkBlock(stmt.elseBranch, elseEnv);
+      if (stmt.elifBranches.length === 0 && isAssignable(thenType, elseType)) {
+        return thenType;
+      }
+    }
+    return thenType;
   }
 
   private checkStatement(stmt: Statement, env: TypeEnv): Type {
     switch (stmt.kind) {
       case "LetBinding": {
-        const initType = this.checkExpr(stmt.init, env);
-        let declaredType = initType;
+        let declaredType: Type | undefined;
+        let initType: Type;
 
         if (stmt.typeAnnotation) {
           declaredType = this.resolveTypeExpr(stmt.typeAnnotation, env);
+          if (declaredType.kind === "tuple" && stmt.init.kind === "ArrayLiteralExpr") {
+            const arr = stmt.init as ArrayLiteralExpr;
+            initType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+          } else {
+            initType = this.checkExpr(stmt.init, env, declaredType);
+          }
           if (!isAssignable(declaredType, initType)) {
             throw new TypeCheckError(
               `Cannot assign value of type '${formatType(initType)}' to variable '${stmt.name}' of type '${formatType(declaredType)}'`,
@@ -578,6 +1205,16 @@ export class TypeChecker {
               initType,
             );
           }
+        } else {
+          initType = this.checkExpr(stmt.init, env);
+          declaredType =
+            stmt.isMut &&
+            initType.kind === "named" &&
+            (initType.name === "true" || initType.name === "false")
+              ? TYPE_BOOL
+              : stmt.isMut && initType.kind === "named" && isStringLiteralType(initType.name)
+                ? TYPE_STR
+                : initType;
         }
 
         // Refinement checking for numeric literal bounds
@@ -595,6 +1232,15 @@ export class TypeChecker {
 
       case "DestructureBinding": {
         const initType = this.checkExpr(stmt.init, env);
+        if (initType.kind === "tuple") {
+          for (let i = 0; i < stmt.names.length; i++) {
+            const name = stmt.names[i];
+            if (!name || name.trim() === "" || name === "_") continue;
+            const t = i < initType.elementTypes.length ? initType.elementTypes[i] : TYPE_UNKNOWN;
+            env.define(name, t, stmt.isMut);
+          }
+          return TYPE_VOID;
+        }
         let elemType: Type = TYPE_UNKNOWN;
         if (initType.kind === "array") {
           elemType = initType.elementType;
@@ -602,12 +1248,14 @@ export class TypeChecker {
         if (stmt.init.kind === "ArrayLiteralExpr") {
           for (let i = 0; i < stmt.names.length; i++) {
             const name = stmt.names[i];
+            if (!name || name.trim() === "" || name === "_") continue;
             const elemExpr = stmt.init.elements[i];
             const t = elemExpr ? this.checkExpr(elemExpr, env) : elemType;
             env.define(name, t, stmt.isMut);
           }
         } else {
           for (const name of stmt.names) {
+            if (!name || name.trim() === "" || name === "_") continue;
             env.define(name, elemType, stmt.isMut);
           }
         }
@@ -620,67 +1268,59 @@ export class TypeChecker {
       }
 
       case "ReturnStmt": {
-        const expected = env.currentFunctionReturnType ?? TYPE_VOID;
-        const actual = stmt.value ? this.checkExpr(stmt.value, env) : TYPE_VOID;
+        const fnEnv = env.getFunctionEnv();
+        const expected =
+          fnEnv?.currentFunctionReturnType ?? env.currentFunctionReturnType ?? TYPE_VOID;
+        const isAsyncOrPromise = (fnEnv?.isAsync ?? false) || isPromiseType(expected);
+        const unwrapped = isAsyncOrPromise ? unwrapPromiseType(expected) : expected;
 
-        if (!isAssignable(expected, actual)) {
-          throw new TypeCheckError(
-            `Return expression of type '${formatType(actual)}' does not match function return type '${formatType(expected)}'`,
-            stmt.span,
-            "AIL_E2007_RETURN_TYPE_MISMATCH",
-            expected,
-            actual,
-          );
+        let actual = TYPE_VOID;
+        if (stmt.value) {
+          if (expected.kind === "tuple" && stmt.value.kind === "ArrayLiteralExpr") {
+            const arr = stmt.value as ArrayLiteralExpr;
+            actual = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+          } else {
+            actual = this.checkExpr(stmt.value, env, unwrapped);
+          }
         }
+
+        if (expected.kind !== "unknown") {
+          const matches =
+            isAssignable(expected, actual) || (isAsyncOrPromise && isAssignable(unwrapped, actual));
+          if (!matches) {
+            throw new TypeCheckError(
+              `Return expression of type '${formatType(actual)}' does not match function return type '${formatType(expected)}'`,
+              stmt.span,
+              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              expected,
+              actual,
+            );
+          }
+        }
+
+        // Record inferred return type on the innermost enclosing function/closure env
+        if (fnEnv) {
+          if (!fnEnv.inferredReturnType || fnEnv.inferredReturnType.kind === "void") {
+            fnEnv.inferredReturnType = actual;
+          } else if (
+            fnEnv.currentFunctionReturnType?.kind === "unknown" &&
+            !isAssignable(fnEnv.inferredReturnType, actual)
+          ) {
+            throw new TypeCheckError(
+              `Return expression of type '${formatType(actual)}' does not match previously inferred return type '${formatType(fnEnv.inferredReturnType)}'`,
+              stmt.span,
+              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              fnEnv.inferredReturnType,
+              actual,
+            );
+          }
+        }
+
         return actual;
       }
 
       case "IfStmt": {
-        // Strict Boolean Condition Invariant
-        const condType = this.checkExpr(stmt.condition, env);
-        if (
-          !isAssignable(TYPE_BOOL, condType) &&
-          condType.kind !== "option" &&
-          condType.kind !== "named" &&
-          condType.kind !== "record"
-        ) {
-          throw new TypeCheckError(
-            `Condition in 'if' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
-            stmt.condition.span,
-            "AIL_E2001_NON_BOOLEAN_CONDITION",
-            TYPE_BOOL,
-            condType,
-          );
-        }
-
-        const thenType = this.checkBlock(stmt.thenBranch, env);
-
-        for (const elif of stmt.elifBranches) {
-          const elifCondType = this.checkExpr(elif.condition, env);
-          if (
-            !isAssignable(TYPE_BOOL, elifCondType) &&
-            elifCondType.kind !== "option" &&
-            elifCondType.kind !== "named" &&
-            elifCondType.kind !== "record"
-          ) {
-            throw new TypeCheckError(
-              `Condition in 'elif' statement must evaluate strictly to 'bool', got '${formatType(elifCondType)}'. Zero implicit coercion allowed.`,
-              elif.condition.span,
-              "AIL_E2001_NON_BOOLEAN_CONDITION",
-              TYPE_BOOL,
-              elifCondType,
-            );
-          }
-          this.checkBlock(elif.body, env);
-        }
-
-        if (stmt.elseBranch) {
-          const elseType = this.checkBlock(stmt.elseBranch, env);
-          if (stmt.elifBranches.length === 0 && isAssignable(thenType, elseType)) {
-            return thenType;
-          }
-        }
-        return thenType;
+        return this.checkIfStmt(stmt, env);
       }
 
       case "MatchStmt": {
@@ -713,18 +1353,11 @@ export class TypeChecker {
       case "ForStmt": {
         const iterType = this.checkExpr(stmt.iterable, env);
         const loopEnv = new TypeEnv(env);
+        const elemType = iterType.kind === "array" ? iterType.elementType : TYPE_UNKNOWN;
 
         if (stmt.variable.startsWith("[") && stmt.variable.endsWith("]")) {
-          const names = stmt.variable
-            .slice(1, -1)
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-          for (const n of names) {
-            loopEnv.define(n, TYPE_UNKNOWN, false);
-          }
+          this.bindParameter(stmt.variable, elemType, loopEnv, false);
         } else {
-          const elemType = iterType.kind === "array" ? iterType.elementType : TYPE_UNKNOWN;
           loopEnv.define(stmt.variable, elemType, false);
         }
 
@@ -742,7 +1375,12 @@ export class TypeChecker {
 
       case "WhileStmt": {
         const condType = this.checkExpr(stmt.condition, env);
-        if (!isAssignable(TYPE_BOOL, condType)) {
+        if (
+          !isAssignable(TYPE_BOOL, condType) &&
+          condType.kind !== "option" &&
+          condType.kind !== "named" &&
+          condType.kind !== "record"
+        ) {
           throw new TypeCheckError(
             `Condition in 'while' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
             stmt.condition.span,
@@ -751,17 +1389,51 @@ export class TypeChecker {
             condType,
           );
         }
-        this.checkBlock(stmt.body, env);
+        const whileEnv = new TypeEnv(env);
+        const posNarrowings = this.extractNarrowings(stmt.condition, true, env);
+        for (const [name, narrowedType] of posNarrowings) {
+          const existing = env.lookup(name);
+          whileEnv.define(name, narrowedType, existing?.isMut ?? false);
+        }
+        this.checkBlock(stmt.body, whileEnv);
         return TYPE_VOID;
       }
 
       case "ExprStmt": {
         return this.checkExpr(stmt.expr, env);
       }
+
+      case "TryStmt": {
+        const tryType = this.checkBlock(stmt.tryBlock, env);
+        if (stmt.catchBlock) {
+          const catchEnv = env.extend();
+          if (stmt.catchParam) {
+            catchEnv.define(stmt.catchParam, TYPE_UNKNOWN, false);
+          }
+          this.checkBlock(stmt.catchBlock, catchEnv);
+        }
+        if (stmt.finallyBlock) {
+          this.checkBlock(stmt.finallyBlock, env);
+        }
+        return tryType;
+      }
+
+      case "ThrowStmt": {
+        this.checkExpr(stmt.expr, env);
+        return TYPE_VOID;
+      }
+
+      case "BreakStmt": {
+        return TYPE_VOID;
+      }
+
+      case "ContinueStmt": {
+        return TYPE_VOID;
+      }
     }
   }
 
-  checkExpr(expr: Expr, env: TypeEnv): Type {
+  checkExpr(expr: Expr, env: TypeEnv, expectedType?: Type): Type {
     switch (expr.kind) {
       case "LiteralExpr": {
         if (expr.literalKind === "number") {
@@ -777,10 +1449,27 @@ export class TypeChecker {
             ? TYPE_INT
             : TYPE_FLOAT;
         }
-        if (expr.literalKind === "string") return TYPE_STR;
-        if (expr.literalKind === "boolean") return TYPE_BOOL;
+        if (expr.literalKind === "string") {
+          if (
+            expectedType &&
+            (isStringLiteralOrUnionType(expectedType) || expectedType.kind === "enum")
+          ) {
+            return { kind: "named", name: JSON.stringify(expr.value) };
+          }
+          return TYPE_STR;
+        }
+        if (expr.literalKind === "boolean") {
+          return { kind: "named", name: expr.value ? "true" : "false" };
+        }
         if (expr.literalKind === "nil") return TYPE_NIL;
         return TYPE_UNKNOWN;
+      }
+
+      case "TemplateLiteralExpr": {
+        for (const subExpr of expr.expressions) {
+          this.checkExpr(subExpr, env);
+        }
+        return TYPE_STR;
       }
 
       case "IdentifierExpr": {
@@ -805,7 +1494,7 @@ export class TypeChecker {
             if (leftType.kind === "unknown" || rightType.kind === "unknown") {
               return TYPE_UNKNOWN;
             }
-            if (leftType.kind === "str" && rightType.kind === "str") {
+            if (isStringType(leftType) && isStringType(rightType)) {
               return TYPE_STR;
             }
             if (isNumeric(leftType) && isNumeric(rightType)) {
@@ -822,6 +1511,7 @@ export class TypeChecker {
           case "-":
           case "*":
           case "%":
+          case "**":
             if (leftType.kind === "unknown" || rightType.kind === "unknown") {
               return TYPE_UNKNOWN;
             }
@@ -829,6 +1519,24 @@ export class TypeChecker {
               return leftType.kind === "float" || rightType.kind === "float"
                 ? TYPE_FLOAT
                 : TYPE_INT;
+            }
+            throw new TypeCheckError(
+              `Operator '${expr.operator}' requires numeric operands, got '${formatType(leftType)}' and '${formatType(rightType)}'`,
+              expr.span,
+              "AIL_E2002_TYPE_MISMATCH",
+            );
+
+          case "&":
+          case "|":
+          case "^":
+          case "<<":
+          case ">>":
+          case ">>>":
+            if (leftType.kind === "unknown" || rightType.kind === "unknown") {
+              return TYPE_UNKNOWN;
+            }
+            if (isNumeric(leftType) && isNumeric(rightType)) {
+              return TYPE_INT;
             }
             throw new TypeCheckError(
               `Operator '${expr.operator}' requires numeric operands, got '${formatType(leftType)}' and '${formatType(rightType)}'`,
@@ -873,7 +1581,7 @@ export class TypeChecker {
             if (l.kind === "unknown" || r.kind === "unknown") {
               return TYPE_BOOL;
             }
-            if ((isNumeric(l) && isNumeric(r)) || (l.kind === "str" && r.kind === "str")) {
+            if ((isNumeric(l) && isNumeric(r)) || (isStringType(l) && isStringType(r))) {
               return TYPE_BOOL;
             }
             throw new TypeCheckError(
@@ -948,6 +1656,20 @@ export class TypeChecker {
         if (opType.kind === "unknown") {
           return TYPE_UNKNOWN;
         }
+        if (expr.operator === "...") {
+          if (opType.kind === "array") {
+            return opType.elementType;
+          }
+          if (opType.kind === "tuple" && opType.elementTypes.length > 0) {
+            const first = opType.elementTypes[0];
+            if (
+              opType.elementTypes.every((t) => isAssignable(first, t) && isAssignable(t, first))
+            ) {
+              return first;
+            }
+          }
+          return opType;
+        }
         if (expr.operator === "-" && isNumeric(opType)) {
           return opType;
         }
@@ -1006,7 +1728,23 @@ export class TypeChecker {
           return makeOptionType(valType);
         }
 
-        const calleeType = this.checkExpr(expr.callee, env);
+        let calleeType: Type;
+        if (expr.callee.kind === "IdentifierExpr") {
+          const name = expr.callee.name;
+          const resolved = env.lookup(name);
+          if (resolved && resolved.type.kind !== "function" && resolved.type.kind !== "unknown") {
+            const globalFn = GLOBAL_SYMBOLS[name] ?? env.lookupGlobal(name)?.type;
+            if (globalFn && globalFn.kind === "function") {
+              calleeType = globalFn;
+            } else {
+              calleeType = resolved.type;
+            }
+          } else {
+            calleeType = this.checkExpr(expr.callee, env);
+          }
+        } else {
+          calleeType = this.checkExpr(expr.callee, env);
+        }
         if (calleeType.kind === "unknown") {
           return TYPE_UNKNOWN;
         }
@@ -1026,6 +1764,18 @@ export class TypeChecker {
           ) {
             return TYPE_UNKNOWN;
           }
+        }
+        if (
+          calleeType.kind === "record" &&
+          (calleeType.name === "Date" ||
+            calleeType.name === "Buffer" ||
+            calleeType.name === "Array" ||
+            calleeType.name === "Promise")
+        ) {
+          if (calleeType.name === "Date") return makeNamedType("Date");
+          if (calleeType.name === "Buffer") return makeNamedType("Buffer");
+          if (calleeType.name === "Array") return makeArrayType(TYPE_UNKNOWN);
+          if (calleeType.name === "Promise") return makeNamedType("Promise", [TYPE_UNKNOWN]);
         }
         if (calleeType.kind !== "function") {
           throw new TypeCheckError(
@@ -1047,6 +1797,18 @@ export class TypeChecker {
         if (effectiveType.kind === "unknown") {
           return TYPE_UNKNOWN;
         }
+        if (effectiveType.kind === "named") {
+          const resolved = env.lookupType(effectiveType.name);
+          if (resolved && resolved.kind === "record") {
+            const memberType = resolved.fields.get(expr.property);
+            if (memberType && memberType.kind !== "function") {
+              return expr.isSafeNav || objType.kind === "option"
+                ? makeOptionType(memberType)
+                : memberType;
+            }
+          }
+          return TYPE_UNKNOWN;
+        }
         const propType = getPropertyType(effectiveType, expr.property);
         if (propType) {
           return expr.isSafeNav || objType.kind === "option" ? makeOptionType(propType) : propType;
@@ -1054,9 +1816,6 @@ export class TypeChecker {
         const methodType = getMethodType(effectiveType, expr.property);
         if (methodType) {
           return methodType;
-        }
-        if (effectiveType.kind === "named") {
-          return TYPE_UNKNOWN;
         }
         throw new TypeCheckError(
           `Property '${expr.property}' does not exist on type '${formatType(objType)}'`,
@@ -1079,11 +1838,35 @@ export class TypeChecker {
 
         if (objType.kind === "record") {
           if (
-            idxType.kind === "str" &&
+            isStringType(idxType) &&
             expr.index.kind === "LiteralExpr" &&
             typeof expr.index.value === "string"
           ) {
             return objType.fields.get(expr.index.value) ?? TYPE_UNKNOWN;
+          }
+          return TYPE_UNKNOWN;
+        }
+
+        if (objType.kind === "tuple") {
+          if (!isAssignable(TYPE_INT, idxType) && idxType.kind !== "unknown") {
+            throw new TypeCheckError(
+              `Tuple index must be of type 'int', got '${formatType(idxType)}'`,
+              expr.index.span,
+              "AIL_E2002_TYPE_MISMATCH",
+              TYPE_INT,
+              idxType,
+            );
+          }
+          if (expr.index.kind === "LiteralExpr" && typeof expr.index.value === "number") {
+            const idx = expr.index.value;
+            if (idx < 0 || idx >= objType.elementTypes.length) {
+              throw new TypeCheckError(
+                `Tuple index ${idx} out of bounds for tuple type '${formatType(objType)}'`,
+                expr.index.span,
+                "AIL_E2002_TYPE_MISMATCH",
+              );
+            }
+            return objType.elementTypes[idx];
           }
           return TYPE_UNKNOWN;
         }
@@ -1112,26 +1895,42 @@ export class TypeChecker {
         if (expr.elements.length === 0) {
           return makeArrayType(TYPE_UNKNOWN);
         }
-        const firstType = this.checkExpr(expr.elements[0], env);
-        for (let i = 1; i < expr.elements.length; i++) {
-          const nextType = this.checkExpr(expr.elements[i], env);
-          if (!isAssignable(firstType, nextType)) {
-            throw new TypeCheckError(
-              `Array element at index ${i} has type '${formatType(nextType)}', inconsistent with element type '${formatType(firstType)}'`,
-              expr.elements[i].span,
-              "AIL_E2002_TYPE_MISMATCH",
-              firstType,
-              nextType,
-            );
+        const elementTypes = expr.elements.map((el) => this.checkExpr(el, env));
+        const firstType = elementTypes[0];
+        const allMatch = elementTypes.every(
+          (t) => isAssignable(firstType, t) && isAssignable(t, firstType),
+        );
+        if (!allMatch) {
+          if (
+            elementTypes.every(
+              (t) =>
+                isAssignable(TYPE_BOOL, t) ||
+                (t.kind === "named" && (t.name === "true" || t.name === "false")),
+            )
+          ) {
+            return makeArrayType(TYPE_BOOL);
           }
+          if (elementTypes.every((t) => isAssignable(TYPE_STR, t))) {
+            return makeArrayType(TYPE_STR);
+          }
+          return makeTupleType(elementTypes);
         }
         return makeArrayType(firstType);
       }
 
       case "RecordLiteralExpr": {
         const fields = new Map<string, Type>();
+        const expectedRecordFields =
+          expectedType && expectedType.kind === "record"
+            ? expectedType.fields
+            : expectedType && expectedType.kind === "named"
+              ? (env.lookupType(expectedType.name) as RecordTypeRep | undefined)?.fields
+              : undefined;
+
         for (const prop of expr.properties) {
-          const valType = this.checkExpr(prop.value, env);
+          const expectedPropType =
+            prop.key && expectedRecordFields ? expectedRecordFields.get(prop.key) : undefined;
+          const valType = this.checkExpr(prop.value, env, expectedPropType);
           if (prop.isSpread) {
             if (valType.kind === "record") {
               for (const [k, v] of valType.fields) {
@@ -1150,6 +1949,19 @@ export class TypeChecker {
           }
         }
         return makeRecordType(fields);
+      }
+
+      case "AwaitExpr": {
+        const operandType = this.checkExpr(expr.operand, env);
+        if (
+          operandType.kind === "named" &&
+          operandType.name === "Promise" &&
+          operandType.typeArgs &&
+          operandType.typeArgs.length > 0
+        ) {
+          return operandType.typeArgs[0];
+        }
+        return operandType;
       }
 
       case "PostfixTryExpr": {
@@ -1206,23 +2018,75 @@ export class TypeChecker {
       }
 
       case "ClosureExpr": {
-        const params = expr.params.map((p) => ({
-          name: p.name,
-          type: this.resolveTypeExpr(p.typeAnnotation, env),
-        }));
-        let returnType = expr.returnType ? this.resolveTypeExpr(expr.returnType, env) : undefined;
+        let expectedRetType: Type | undefined;
+        let expectedParamTypes: Type[] | undefined;
+        if (expectedType && expectedType.kind === "function") {
+          expectedRetType = expectedType.returnType;
+          expectedParamTypes = expectedType.params.map((p) => p.type);
+        }
 
-        const closureEnv = new TypeEnv(env, returnType ?? TYPE_VOID);
+        const params = expr.params.map((p, idx) => ({
+          name: p.name,
+          type: p.typeAnnotation
+            ? this.resolveTypeExpr(p.typeAnnotation, env)
+            : expectedParamTypes && idx < expectedParamTypes.length
+              ? expectedParamTypes[idx]
+              : TYPE_UNKNOWN,
+          optional: Boolean(
+            p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
+          ),
+        }));
+        let returnType = expr.returnType
+          ? this.resolveTypeExpr(expr.returnType, env)
+          : expectedRetType;
+
+        const isAsyncClosure = !!expr.isAsync;
+        const isAsyncOrPromise = isAsyncClosure || isPromiseType(returnType);
+        const targetCheckType =
+          isAsyncOrPromise && returnType ? unwrapPromiseType(returnType) : returnType;
+
+        const closureEnv = new TypeEnv(env, returnType ?? TYPE_UNKNOWN, true, isAsyncClosure);
         for (const p of params) {
-          closureEnv.define(p.name, p.type, true);
+          this.bindParameter(p.name, p.type, closureEnv, true);
         }
 
         if (expr.body.kind === "Block") {
-          this.checkBlock(expr.body, closureEnv);
-        } else {
-          const bodyType = this.checkExpr(expr.body, closureEnv);
+          const bodyType = this.checkBlock(expr.body, closureEnv);
+          const effectiveReturnType =
+            closureEnv.inferredReturnType && closureEnv.inferredReturnType.kind !== "void"
+              ? closureEnv.inferredReturnType
+              : bodyType;
           if (returnType) {
-            if (!isAssignable(returnType, bodyType)) {
+            if (returnType.kind !== "void") {
+              const matches =
+                isAssignable(returnType, effectiveReturnType) ||
+                (isAsyncOrPromise &&
+                  targetCheckType &&
+                  isAssignable(targetCheckType, effectiveReturnType));
+              if (!matches) {
+                throw new TypeCheckError(
+                  `Closure body evaluates to '${formatType(effectiveReturnType)}', but returns '${formatType(returnType)}'`,
+                  expr.body.span,
+                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  returnType,
+                  effectiveReturnType,
+                );
+              }
+            }
+          } else {
+            let inferred = effectiveReturnType;
+            if (isAsyncClosure) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            returnType = inferred;
+          }
+        } else {
+          const bodyType = this.checkExpr(expr.body, closureEnv, targetCheckType ?? undefined);
+          if (returnType) {
+            const matches =
+              isAssignable(returnType, bodyType) ||
+              (isAsyncOrPromise && targetCheckType && isAssignable(targetCheckType, bodyType));
+            if (!matches) {
               throw new TypeCheckError(
                 `Closure body evaluates to '${formatType(bodyType)}', but returns '${formatType(returnType)}'`,
                 expr.body.span,
@@ -1232,11 +2096,18 @@ export class TypeChecker {
               );
             }
           } else {
-            returnType = bodyType;
+            let inferred = bodyType;
+            if (isAsyncClosure) {
+              inferred = isPromiseType(inferred) ? inferred : makeNamedType("Promise", [inferred]);
+            }
+            returnType = inferred;
           }
         }
 
-        return makeFunctionType(params, returnType ?? TYPE_VOID);
+        return makeFunctionType(
+          params,
+          returnType ?? (isAsyncClosure ? makeNamedType("Promise", [TYPE_VOID]) : TYPE_VOID),
+        );
       }
 
       case "AssignExpr": {
@@ -1262,7 +2133,13 @@ export class TypeChecker {
           "AIL_E2005_IMMUTABLE_ASSIGNMENT",
         );
       }
-      const valType = this.checkExpr(value, env);
+      let valType: Type;
+      if (binding.type.kind === "tuple" && value.kind === "ArrayLiteralExpr") {
+        const arr = value as ArrayLiteralExpr;
+        valType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+      } else {
+        valType = this.checkExpr(value, env, binding.type);
+      }
       if (!isAssignable(binding.type, valType)) {
         throw new TypeCheckError(
           `Cannot assign '${formatType(valType)}' to variable '${target.name}' of type '${formatType(binding.type)}'`,
@@ -1305,9 +2182,63 @@ export class TypeChecker {
         }
       }
       return valType;
+    } else if (target.kind === "MemberAccessExpr") {
+      const objType = this.checkExpr(target.object, env);
+      let effectiveType = objType.kind === "option" ? objType.innerType : objType;
+      if (effectiveType.kind === "named") {
+        const resolved = env.lookupType(effectiveType.name);
+        if (resolved) {
+          effectiveType = resolved;
+        }
+      }
+
+      if (effectiveType.kind === "record") {
+        const setterName = `set_${target.property}`;
+        const getterName = `get_${target.property}`;
+        const hasSetter = effectiveType.fields.has(setterName);
+        const hasGetter = effectiveType.fields.has(getterName);
+
+        if (hasSetter) {
+          const setterType = effectiveType.fields.get(setterName)!;
+          let expectedType: Type = TYPE_UNKNOWN;
+          if (setterType.kind === "function" && setterType.params.length > 0) {
+            expectedType = setterType.params[0].type;
+          }
+          const valType = this.checkExpr(value, env, expectedType);
+          if (!isAssignable(expectedType, valType)) {
+            throw new TypeCheckError(
+              `Cannot assign '${formatType(valType)}' to property '${target.property}' of type '${formatType(expectedType)}'`,
+              span,
+              "AIL_E2002_TYPE_MISMATCH",
+              expectedType,
+              valType,
+            );
+          }
+          return valType;
+        } else if (hasGetter) {
+          throw new TypeCheckError(
+            `Cannot assign to getter-only property '${target.property}'`,
+            span,
+            "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+          );
+        }
+      }
+
+      const targetType = this.checkExpr(target, env);
+      const valType = this.checkExpr(value, env, targetType);
+      if (!isAssignable(targetType, valType)) {
+        throw new TypeCheckError(
+          `Cannot assign '${formatType(valType)}' to target of type '${formatType(targetType)}'`,
+          span,
+          "AIL_E2002_TYPE_MISMATCH",
+          targetType,
+          valType,
+        );
+      }
+      return valType;
     } else {
       const targetType = this.checkExpr(target, env);
-      const valType = this.checkExpr(value, env);
+      const valType = this.checkExpr(value, env, targetType);
       if (!isAssignable(targetType, valType)) {
         throw new TypeCheckError(
           `Cannot assign '${formatType(valType)}' to target of type '${formatType(targetType)}'`,
@@ -1327,8 +2258,11 @@ export class TypeChecker {
     span: Span,
     env: TypeEnv,
   ): Type {
+    const hasSpread = args.some(
+      (arg) => arg.kind === "UnaryExpr" && (arg as UnaryExpr).operator === "...",
+    );
     const minParams = fnType.params.filter((p) => !p.optional).length;
-    if (args.length < minParams || args.length > fnType.params.length) {
+    if (!hasSpread && (args.length < minParams || args.length > fnType.params.length)) {
       throw new TypeCheckError(
         `Function expects between ${minParams} and ${fnType.params.length} arguments, got ${args.length}`,
         span,
@@ -1336,17 +2270,128 @@ export class TypeChecker {
       );
     }
 
-    for (let i = 0; i < args.length; i++) {
-      const argType = this.checkExpr(args[i], env);
-      const expectedType = fnType.params[i].type;
-      if (!isAssignable(expectedType, argType)) {
-        throw new TypeCheckError(
-          `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
-          args[i].span,
-          "AIL_E2002_TYPE_MISMATCH",
-          expectedType,
-          argType,
-        );
+    if (!hasSpread) {
+      for (let i = 0; i < args.length; i++) {
+        const expectedType = fnType.params[i].type;
+        let argType: Type;
+        if (expectedType.kind === "tuple" && args[i].kind === "ArrayLiteralExpr") {
+          const arr = args[i] as ArrayLiteralExpr;
+          argType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+        } else {
+          argType = this.checkExpr(args[i], env, expectedType);
+        }
+        const isOptionalParam = Boolean(fnType.params[i].optional);
+        const acceptsNil = isOptionalParam && argType.kind === "nil";
+        if (!isAssignable(expectedType, argType) && !acceptsNil) {
+          throw new TypeCheckError(
+            `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+            args[i].span,
+            "AIL_E2002_TYPE_MISMATCH",
+            expectedType,
+            argType,
+          );
+        }
+      }
+    } else {
+      let paramIdx = 0;
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i];
+        if (arg.kind === "UnaryExpr" && (arg as UnaryExpr).operator === "...") {
+          const spreadOperandType = this.checkExpr((arg as UnaryExpr).operand, env);
+          if (spreadOperandType.kind === "tuple") {
+            for (const elemType of spreadOperandType.elementTypes) {
+              if (paramIdx < fnType.params.length) {
+                const expectedType = fnType.params[paramIdx].type;
+                const isOptionalParam = Boolean(fnType.params[paramIdx].optional);
+                const acceptsNil = isOptionalParam && elemType.kind === "nil";
+                if (!isAssignable(expectedType, elemType) && !acceptsNil) {
+                  throw new TypeCheckError(
+                    `Argument spread element of type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+                    arg.span,
+                    "AIL_E2002_TYPE_MISMATCH",
+                    expectedType,
+                    elemType,
+                  );
+                }
+                paramIdx++;
+              }
+            }
+          } else if (spreadOperandType.kind === "array") {
+            const elemType = spreadOperandType.elementType;
+            const remainingNonSpread = args
+              .slice(i + 1)
+              .filter(
+                (a) => !(a.kind === "UnaryExpr" && (a as UnaryExpr).operator === "..."),
+              ).length;
+            const targetParamEnd = Math.max(paramIdx, fnType.params.length - remainingNonSpread);
+            if (paramIdx >= targetParamEnd && paramIdx < fnType.params.length) {
+              const expectedType = fnType.params[paramIdx].type;
+              if (!isAssignable(expectedType, elemType)) {
+                throw new TypeCheckError(
+                  `Argument spread of element type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+                  arg.span,
+                  "AIL_E2002_TYPE_MISMATCH",
+                  expectedType,
+                  elemType,
+                );
+              }
+              paramIdx++;
+            } else {
+              while (paramIdx < targetParamEnd) {
+                const expectedType = fnType.params[paramIdx].type;
+                if (!isAssignable(expectedType, elemType)) {
+                  throw new TypeCheckError(
+                    `Argument spread of element type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+                    arg.span,
+                    "AIL_E2002_TYPE_MISMATCH",
+                    expectedType,
+                    elemType,
+                  );
+                }
+                paramIdx++;
+              }
+            }
+          } else {
+            if (paramIdx < fnType.params.length) {
+              const expectedType = fnType.params[paramIdx].type;
+              if (!isAssignable(expectedType, spreadOperandType)) {
+                throw new TypeCheckError(
+                  `Argument spread of type '${formatType(spreadOperandType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+                  arg.span,
+                  "AIL_E2002_TYPE_MISMATCH",
+                  expectedType,
+                  spreadOperandType,
+                );
+              }
+              paramIdx++;
+            }
+          }
+        } else {
+          if (paramIdx < fnType.params.length) {
+            const expectedType = fnType.params[paramIdx].type;
+            let argType: Type;
+            if (expectedType.kind === "tuple" && arg.kind === "ArrayLiteralExpr") {
+              const arr = arg as ArrayLiteralExpr;
+              argType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+            } else {
+              argType = this.checkExpr(arg, env, expectedType);
+            }
+            const isOptionalParam = Boolean(fnType.params[paramIdx].optional);
+            const acceptsNil = isOptionalParam && argType.kind === "nil";
+            if (!isAssignable(expectedType, argType) && !acceptsNil) {
+              throw new TypeCheckError(
+                `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+                arg.span,
+                "AIL_E2002_TYPE_MISMATCH",
+                expectedType,
+                argType,
+              );
+            }
+            paramIdx++;
+          } else {
+            this.checkExpr(arg, env);
+          }
+        }
       }
     }
 
@@ -1371,6 +2416,8 @@ export class TypeChecker {
       }
       case "ArrayType":
         return makeArrayType(this.resolveTypeExpr(typeExpr.elementType, env));
+      case "TupleType":
+        return makeTupleType(typeExpr.elementTypes.map((et) => this.resolveTypeExpr(et, env)));
       case "OptionType":
         return makeOptionType(this.resolveTypeExpr(typeExpr.innerType, env));
       case "ResultType":
@@ -1397,7 +2444,15 @@ export class TypeChecker {
           return TYPE_UNKNOWN;
         }
         const resolved = env.lookupType(typeExpr.name);
-        if (resolved) return resolved;
+        if (resolved) {
+          if (typeExpr.typeArgs && typeExpr.typeArgs.length > 0 && resolved.kind === "named") {
+            return {
+              ...resolved,
+              typeArgs: typeExpr.typeArgs.map((ta) => this.resolveTypeExpr(ta, env)),
+            };
+          }
+          return resolved;
+        }
         return {
           kind: "named",
           name: typeExpr.name,
@@ -1459,6 +2514,15 @@ function isNumeric(type: Type): boolean {
     type.kind === "byte" ||
     type.kind === "enum"
   );
+}
+
+function isStringType(type: Type): boolean {
+  if (type.kind === "str") return true;
+  if (type.kind === "named") {
+    if (type.name === "str" || type.name === "string") return true;
+    if (isStringLiteralType(type.name) || isStringLiteralUnion(type.name)) return true;
+  }
+  return false;
 }
 
 /**

@@ -229,7 +229,10 @@ export class GoEmitter {
 
     const fnName = this.toPascalCase(fn.name);
     const paramsStr = fn.params
-      .map((p) => `${this.toCamelCase(p.name)} ${this.emitTypeExpr(p.typeAnnotation)}`)
+      .map(
+        (p) =>
+          `${this.toCamelCase(p.name)} ${p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "any"}`,
+      )
       .join(", ");
 
     let retStr = "";
@@ -467,6 +470,20 @@ export class GoEmitter {
         }
         return "nil";
       }
+      case "TemplateLiteralExpr": {
+        let fmt = "";
+        for (let i = 0; i < expr.quasis.length; i++) {
+          fmt += expr.quasis[i].replace(/"/g, '\\"').replace(/%/g, "%%");
+          if (i < expr.expressions.length) {
+            fmt += "%v";
+          }
+        }
+        if (expr.expressions.length === 0) {
+          return `"${fmt}"`;
+        }
+        const args = expr.expressions.map((e) => this.emitExpr(e)).join(", ");
+        return `fmt.Sprintf("${fmt}", ${args})`;
+      }
       case "IdentifierExpr": {
         const v = this.enumVariants.get(expr.name);
         if (v) {
@@ -492,6 +509,9 @@ export class GoEmitter {
       }
       case "UnaryExpr": {
         const operand = this.emitExpr(expr.operand);
+        if (expr.operator === "...") {
+          return `${operand}...`;
+        }
         const op = expr.operator === "not" ? "!" : expr.operator;
         return `${op}${operand}`;
       }

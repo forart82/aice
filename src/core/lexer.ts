@@ -56,6 +56,11 @@ export function scanRawTokens(
   let column = 1;
   let atLineStart = true;
 
+  interface TemplateState {
+    braceDepth: number;
+  }
+  const templateStack: TemplateState[] = [];
+
   function currentPos(): Position {
     return createPosition(line, column, offset);
   }
@@ -74,6 +79,117 @@ export function scanRawTokens(
 
   function makeSpan(start: Position): Span {
     return createSpan(file, start, currentPos());
+  }
+
+  function scanTemplateSegment(startPos: Position, isMiddleOrTail: boolean) {
+    let stringVal = "";
+    let closed = false;
+
+    while (offset < source.length) {
+      // Check for unescaped closing backtick
+      if (peek() === "`") {
+        advance(); // consume '`'
+        closed = true;
+        if (isMiddleOrTail) {
+          rawTokens.push({
+            kind: "TEMPLATE_TAIL",
+            value: stringVal,
+            span: makeSpan(startPos),
+          });
+          templateStack.pop();
+        } else {
+          rawTokens.push({
+            kind: "TEMPLATE_NO_SUBST",
+            value: stringVal,
+            span: makeSpan(startPos),
+          });
+        }
+        break;
+      }
+
+      // Check for unescaped ${
+      if (peek() === "$" && peek(1) === "{") {
+        advance(); // consume '$'
+        advance(); // consume '{'
+        closed = true;
+        if (isMiddleOrTail) {
+          rawTokens.push({
+            kind: "TEMPLATE_MIDDLE",
+            value: stringVal,
+            span: makeSpan(startPos),
+          });
+          templateStack[templateStack.length - 1].braceDepth = 0;
+        } else {
+          rawTokens.push({
+            kind: "TEMPLATE_HEAD",
+            value: stringVal,
+            span: makeSpan(startPos),
+          });
+          templateStack.push({ braceDepth: 0 });
+        }
+        break;
+      }
+
+      // Escape sequences
+      if (peek() === "\\") {
+        advance(); // consume '\'
+        if (offset >= source.length) {
+          throw new LexerError("Unclosed template literal", makeSpan(startPos));
+        }
+        const esc = advance();
+        switch (esc) {
+          case "n":
+            stringVal += "\n";
+            break;
+          case "t":
+            stringVal += "\t";
+            break;
+          case "r":
+            stringVal += "\r";
+            break;
+          case '"':
+            stringVal += '"';
+            break;
+          case "'":
+            stringVal += "'";
+            break;
+          case "`":
+            stringVal += "`";
+            break;
+          case "$":
+            stringVal += "$";
+            break;
+          case "\\":
+            stringVal += "\\";
+            break;
+          case "0":
+            stringVal += "\0";
+            break;
+          default:
+            stringVal += esc;
+            break;
+        }
+        continue;
+      }
+
+      // Newlines (multiline template literal)
+      if (peek() === "\r" || peek() === "\n") {
+        if (peek() === "\r" && peek(1) === "\n") {
+          advance(); // consume '\r'
+        }
+        line++;
+        column = 0;
+        stringVal += advance(); // consume '\n' (or standalone '\r')
+        continue;
+      }
+
+      // Normal character
+      stringVal += advance();
+    }
+
+    if (!closed) {
+      throw new LexerError("Unclosed template literal", makeSpan(startPos));
+    }
   }
 
   while (offset < source.length) {
@@ -165,14 +281,16 @@ export function scanRawTokens(
       }
     }
 
-    // 5. Comments (# followed by whitespace, or // or /* ... */)
+    // 5. Comments (# followed by whitespace/hash/bang, or // or /* ... */)
     const isHashComment =
       ch === "#" &&
       (peek(1) === " " ||
         peek(1) === "\t" ||
         peek(1) === "\r" ||
         peek(1) === "\n" ||
-        peek(1) === "\0");
+        peek(1) === "\0" ||
+        peek(1) === "#" ||
+        peek(1) === "!");
     const isSlashComment = ch === "/" && peek(1) === "/";
     if (isHashComment || isSlashComment) {
       const startPos = currentPos();
@@ -322,6 +440,14 @@ export function scanRawTokens(
       continue;
     }
 
+    // 5b. Backtick Template Literals
+    if (ch === "`") {
+      const startPos = currentPos();
+      advance(); // consume opening '`'
+      scanTemplateSegment(startPos, false);
+      continue;
+    }
+
     // 6. Number Literals
     if (isDigit(ch) || (ch === "." && isDigit(peek(1)))) {
       const startPos = currentPos();
@@ -408,11 +534,19 @@ export function scanRawTokens(
       rawTokens.push({ kind: "MINUS_EQUAL", value: "-=", span: makeSpan(startPos) });
       continue;
     }
-    if (ch === "*" && peek(1) === "=") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "STAR_EQUAL", value: "*=", span: makeSpan(startPos) });
-      continue;
+    if (ch === "*") {
+      if (peek(1) === "*") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "STAR_STAR", value: "**", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "STAR_EQUAL", value: "*=", span: makeSpan(startPos) });
+        continue;
+      }
     }
     if (ch === "/" && peek(1) === "=") {
       advance();
@@ -438,17 +572,40 @@ export function scanRawTokens(
       rawTokens.push({ kind: "NOT_EQ", value: "!=", span: makeSpan(startPos) });
       continue;
     }
-    if (ch === "<" && peek(1) === "=") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "LT_EQ", value: "<=", span: makeSpan(startPos) });
-      continue;
+    if (ch === "<") {
+      if (peek(1) === "<") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "SHL", value: "<<", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "LT_EQ", value: "<=", span: makeSpan(startPos) });
+        continue;
+      }
     }
-    if (ch === ">" && peek(1) === "=") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "GT_EQ", value: ">=", span: makeSpan(startPos) });
-      continue;
+    if (ch === ">") {
+      if (peek(1) === ">") {
+        if (peek(2) === ">") {
+          advance();
+          advance();
+          advance();
+          rawTokens.push({ kind: "USHR", value: ">>>", span: makeSpan(startPos) });
+          continue;
+        }
+        advance();
+        advance();
+        rawTokens.push({ kind: "SHR", value: ">>", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "GT_EQ", value: ">=", span: makeSpan(startPos) });
+        continue;
+      }
     }
     if (ch === "&" && peek(1) === "&") {
       advance();
@@ -542,8 +699,14 @@ export function scanRawTokens(
       case "=":
         rawTokens.push({ kind: "EQUAL", value: "=", span: makeSpan(startPos) });
         break;
+      case "&":
+        rawTokens.push({ kind: "AMPERSAND", value: "&", span: makeSpan(startPos) });
+        break;
       case "|":
         rawTokens.push({ kind: "PIPE", value: "|", span: makeSpan(startPos) });
+        break;
+      case "^":
+        rawTokens.push({ kind: "CARET", value: "^", span: makeSpan(startPos) });
         break;
       case "!":
         rawTokens.push({ kind: "BANG", value: "!", span: makeSpan(startPos) });
@@ -582,10 +745,20 @@ export function scanRawTokens(
         rawTokens.push({ kind: "RBRACKET", value: "]", span: makeSpan(startPos) });
         break;
       case "{":
+        if (templateStack.length > 0) {
+          templateStack[templateStack.length - 1].braceDepth++;
+        }
         rawTokens.push({ kind: "LBRACE", value: "{", span: makeSpan(startPos) });
         break;
       case "}":
-        rawTokens.push({ kind: "RBRACE", value: "}", span: makeSpan(startPos) });
+        if (templateStack.length > 0 && templateStack[templateStack.length - 1].braceDepth === 0) {
+          scanTemplateSegment(startPos, true);
+        } else {
+          if (templateStack.length > 0) {
+            templateStack[templateStack.length - 1].braceDepth--;
+          }
+          rawTokens.push({ kind: "RBRACE", value: "}", span: makeSpan(startPos) });
+        }
         break;
       default:
         throw new LexerError(
@@ -593,6 +766,10 @@ export function scanRawTokens(
           makeSpan(startPos),
         );
     }
+  }
+
+  if (templateStack.length > 0) {
+    throw new LexerError("Unclosed template literal interpolation", makeSpan(currentPos()));
   }
 
   return { rawTokens, comments };
@@ -695,9 +872,19 @@ export function filterIndentation(
     lineHasTokens = true;
 
     // Update bracket depth
-    if (raw.kind === "LPAREN" || raw.kind === "LBRACKET" || raw.kind === "LBRACE") {
+    if (
+      raw.kind === "LPAREN" ||
+      raw.kind === "LBRACKET" ||
+      raw.kind === "LBRACE" ||
+      raw.kind === "TEMPLATE_HEAD"
+    ) {
       bracketDepth++;
-    } else if (raw.kind === "RPAREN" || raw.kind === "RBRACKET" || raw.kind === "RBRACE") {
+    } else if (
+      raw.kind === "RPAREN" ||
+      raw.kind === "RBRACKET" ||
+      raw.kind === "RBRACE" ||
+      raw.kind === "TEMPLATE_TAIL"
+    ) {
       bracketDepth = Math.max(0, bracketDepth - 1);
     }
 

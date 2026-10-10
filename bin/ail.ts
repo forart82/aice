@@ -9,7 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
-import { parse } from "../src/core/parser.js";
+import { parse, parseWithTrivia } from "../src/core/parser.js";
 import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
 import {
   detectTargetFromPath,
@@ -49,7 +49,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.13");
+  .version("0.3.14");
 
 // Command: compile <file>
 program
@@ -59,57 +59,73 @@ program
   .option("-o, --out <out>", "Output file path")
   .option(
     "-t, --target <target>",
-    "Explicit target language (typescript, tsx, python, html, css, rust, go)",
+    "Explicit target language (typescript, tsx, python, html, css, rust, go, cpp, csharp)",
   )
   .option("--fix", "Autonomously repair fixable errors before compiling")
-  .action((file: string, options: { out?: string; target?: string; fix?: boolean }) => {
-    try {
-      const fullPath = path.resolve(process.cwd(), file);
-      if (!fs.existsSync(fullPath)) {
-        console.error(`❌ Error: Source file not found: ${file}`);
+  .option(
+    "--pure-interfaces",
+    "Emit pure TypeScript interfaces without artificial factory constructor functions",
+  )
+  .action(
+    (
+      file: string,
+      options: { out?: string; target?: string; fix?: boolean; pureInterfaces?: boolean },
+    ) => {
+      try {
+        const fullPath = path.resolve(process.cwd(), file);
+        if (!fs.existsSync(fullPath)) {
+          console.error(`❌ Error: Source file not found: ${file}`);
+          process.exit(1);
+        }
+
+        let source = fs.readFileSync(fullPath, "utf-8");
+
+        if (options.fix) {
+          const repairRes = attemptSelfRepair(source, file);
+          if (repairRes.fixed && repairRes.modified) {
+            fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
+            console.log(
+              `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
+            );
+            for (const r of repairRes.repairs) {
+              console.log(`  - ${r.description}`);
+            }
+            source = repairRes.finalSource;
+          }
+        }
+
+        const { ast: mod, trivia } = parseWithTrivia(source, file);
+
+        // Sound type check
+        const tc = new TypeChecker();
+        tc.checkModule(mod);
+
+        // Target selection
+        const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+        const emitted = emitTarget(mod, targetLang, {
+          trivia,
+          pureInterfaces: options.pureInterfaces,
+        });
+
+        // Output path
+        const outPath = options.out
+          ? path.resolve(process.cwd(), options.out)
+          : path.resolve(process.cwd(), getTargetOutputPath(file));
+
+        fs.mkdirSync(path.dirname(outPath), { recursive: true });
+        fs.writeFileSync(outPath, emitted, "utf-8");
+
+        console.log(
+          `✔ Compiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+        );
+      } catch (err) {
+        const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+        const report = buildReportFromError(err, source, file);
+        console.error(formatDiagnosticText(report));
         process.exit(1);
       }
-
-      let source = fs.readFileSync(fullPath, "utf-8");
-
-      if (options.fix) {
-        const repairRes = attemptSelfRepair(source, file);
-        if (repairRes.fixed && repairRes.modified) {
-          fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
-          console.log(`💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`);
-          for (const r of repairRes.repairs) {
-            console.log(`  - ${r.description}`);
-          }
-          source = repairRes.finalSource;
-        }
-      }
-
-      const mod = parse(source, file);
-
-      // Sound type check
-      const tc = new TypeChecker();
-      tc.checkModule(mod);
-
-      // Target selection
-      const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
-      const emitted = emitTarget(mod, targetLang);
-
-      // Output path
-      const outPath = options.out
-        ? path.resolve(process.cwd(), options.out)
-        : path.resolve(process.cwd(), getTargetOutputPath(file));
-
-      fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, emitted, "utf-8");
-
-      console.log(`✔ Compiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`);
-    } catch (err) {
-      const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
-      const report = buildReportFromError(err, source, file);
-      console.error(formatDiagnosticText(report));
-      process.exit(1);
-    }
-  });
+    },
+  );
 
 // Command: compile-all <dir>
 program
@@ -117,7 +133,11 @@ program
   .description("Recursively compile all .ail source files in a directory")
   .argument("[dir]", "Directory to search for .ail files", ".")
   .option("--out-dir <outDir>", "Optional destination directory for emitted files")
-  .action((dir: string, options: { outDir?: string }) => {
+  .option(
+    "--pure-interfaces",
+    "Emit pure TypeScript interfaces without artificial factory constructor functions",
+  )
+  .action((dir: string, options: { outDir?: string; pureInterfaces?: boolean }) => {
     try {
       const searchDir = path.resolve(process.cwd(), dir);
       if (!fs.existsSync(searchDir)) {
@@ -154,12 +174,15 @@ program
         const relPath = path.relative(process.cwd(), f);
         try {
           const source = fs.readFileSync(f, "utf-8");
-          const mod = parse(source, relPath);
+          const { ast: mod, trivia } = parseWithTrivia(source, relPath);
           const tc = new TypeChecker();
           tc.checkModule(mod);
 
           const targetLang = detectTargetFromPath(relPath);
-          const emitted = emitTarget(mod, targetLang);
+          const emitted = emitTarget(mod, targetLang, {
+            trivia,
+            pureInterfaces: options.pureInterfaces,
+          });
 
           let outPath = getTargetOutputPath(f);
           if (options.outDir) {
@@ -389,10 +412,12 @@ program
 // Command: decompile <file>
 program
   .command("decompile")
-  .description("Decompile a target language file (.ts, .tsx, .css, .html) into an .ail source file")
+  .description(
+    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs) into an .ail source file",
+  )
   .argument("<file>", "Path to the target source file")
   .option("-o, --out <out>", "Output .ail file path")
-  .option("-t, --target <target>", "Target language (typescript, tsx, css, html)")
+  .option("-t, --target <target>", "Target language (typescript, tsx, css, html, cpp, csharp)")
   .action((file: string, options: { out?: string; target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
@@ -426,7 +451,7 @@ program
   .command("roundtrip")
   .description("Verify Put/Get stability by decompiling to .ail and recompiling to target")
   .argument("<file>", "Path to target source file")
-  .option("-t, --target <target>", "Target language (typescript, tsx, css, html)")
+  .option("-t, --target <target>", "Target language (typescript, tsx, css, html, cpp, csharp)")
   .action((file: string, options: { target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
@@ -830,9 +855,7 @@ program
         );
         console.log(
           `AIL Source Files:    ${
-            options.removeAil
-              ? `Deleted ${removedAilCount} .ail files`
-              : "Preserved on disk"
+            options.removeAil ? `Deleted ${removedAilCount} .ail files` : "Preserved on disk"
           }`,
         );
         console.log(`Project successfully restored to standard toolchain state.`);

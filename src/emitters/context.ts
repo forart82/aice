@@ -12,19 +12,22 @@ export type TargetLanguage =
   | "css"
   | "rust"
   | "go"
-  | "cpp";
+  | "cpp"
+  | "csharp";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
   indent?: string;
   includeComments?: boolean;
   trivia?: CstTriviaTable;
+  pureInterfaces?: boolean;
 }
 
 export class EmitterContext {
   readonly target: TargetLanguage;
   readonly indentStr: string;
   readonly trivia?: CstTriviaTable;
+  readonly pureInterfaces?: boolean;
   private currentIndent = 0;
   private buffer: string[] = [];
   private neededHelpers = new Set<string>();
@@ -33,6 +36,7 @@ export class EmitterContext {
     this.target = target;
     this.indentStr = options.indent ?? "  ";
     this.trivia = options.trivia;
+    this.pureInterfaces = options.pureInterfaces;
   }
 
   indent(): void {
@@ -96,7 +100,12 @@ export class EmitterContext {
     if (!entry || entry.trailing.length === 0) return;
 
     for (const item of entry.trailing) {
-      this.write(` ${item.content}`);
+      if (this.buffer.length > 0 && this.buffer[this.buffer.length - 1].endsWith("\n")) {
+        const last = this.buffer[this.buffer.length - 1];
+        this.buffer[this.buffer.length - 1] = last.slice(0, -1) + ` ${item.content}\n`;
+      } else {
+        this.write(` ${item.content}`);
+      }
     }
   }
 
@@ -121,9 +130,11 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
     clean.endsWith(".cpp") ||
     clean.endsWith(".hpp") ||
     clean.endsWith(".cc") ||
+    clean.endsWith(".cxx") ||
     clean.endsWith(".h")
   )
     return "cpp";
+  if (clean.endsWith(".cs")) return "csharp";
   return "typescript";
 }
 

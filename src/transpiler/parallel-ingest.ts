@@ -27,7 +27,7 @@ export interface IngestOptions {
   overwrite?: boolean; // default false
   emitTrivia?: boolean; // default true
   dryRun?: boolean; // default false
-  extensions?: string[]; // default [".ts", ".tsx", ".css", ".html"]
+  extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".cpp", ".hpp", ".cc", ".cxx", ".h", ".cs"]
   ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build"]
 }
 
@@ -119,9 +119,20 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
     return [resolvedDir];
   }
 
-  const extensions = (options?.extensions ?? [".ts", ".tsx", ".css", ".html"]).map((ext) =>
-    ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`,
-  );
+  const extensions = (
+    options?.extensions ?? [
+      ".ts",
+      ".tsx",
+      ".css",
+      ".html",
+      ".cpp",
+      ".hpp",
+      ".cc",
+      ".cxx",
+      ".h",
+      ".cs",
+    ]
+  ).map((ext) => (ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
   const ignorePatterns = options?.ignorePatterns ?? ["node_modules", ".git", "dist", "build"];
 
   const results: string[] = [];
@@ -140,7 +151,11 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
         scanDir(fullPath);
       } else if (entry.isFile()) {
         const lowerName = entry.name.toLowerCase();
-        if (lowerName.endsWith(".ail") || lowerName.endsWith(".trivia.json")) {
+        if (
+          lowerName.endsWith(".ail") ||
+          lowerName.endsWith(".trivia.json") ||
+          lowerName.endsWith(".uid")
+        ) {
           continue;
         }
         if (extensions.some((ext) => lowerName.endsWith(ext))) {

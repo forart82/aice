@@ -77,7 +77,10 @@ export function detectLanguageName(targetPath: string): string {
     case ".hpp":
     case ".h":
     case ".cc":
+    case ".cxx":
       return "C++20";
+    case ".cs":
+      return "C#";
     default:
       return ext || "unknown";
   }
@@ -255,6 +258,8 @@ export function auditTokenomics(
               ext === ".hpp" ||
               ext === ".h" ||
               ext === ".cc" ||
+              ext === ".cxx" ||
+              ext === ".cs" ||
               ext === ".go" ||
               ext === ".rs"
             ) {
@@ -392,7 +397,6 @@ export function auditTokenomics(
 }
 
 export * from "./terminal-formatter.js";
-
 
 export function formatTokenomicsMarkdownTable(report: TokenomicsAuditReport): string {
   const lines: string[] = [];

@@ -15,6 +15,11 @@ export type TokenKind =
   | "BOOLEAN"
   | "NIL"
   | "HEX_COLOR"
+  | "TEMPLATE_HEAD"
+  | "TEMPLATE_MIDDLE"
+  | "TEMPLATE_TAIL"
+  | "TEMPLATE_NO_SUBST"
+  | "BACKTICK"
   // Declaration Keywords
   | "MODULE"
   | "FROM"
@@ -37,6 +42,7 @@ export type TokenKind =
   | "READONLY"
   | "CONST"
   | "ASYNC"
+  | "AWAIT"
   | "PROP"
   // Control Flow Keywords
   | "IF"
@@ -48,6 +54,12 @@ export type TokenKind =
   | "IN"
   | "WHILE"
   | "RET"
+  | "TRY"
+  | "CATCH"
+  | "FINALLY"
+  | "THROW"
+  | "BREAK"
+  | "CONTINUE"
   // Logical Word Operators
   | "AND"
   | "OR"
@@ -70,6 +82,13 @@ export type TokenKind =
   | "STAR" // *
   | "SLASH" // /
   | "PERCENT" // %
+  | "STAR_STAR" // **
+  // Bitwise & Shift Operators
+  | "AMPERSAND" // &
+  | "CARET" // ^
+  | "SHL" // <<
+  | "SHR" // >>
+  | "USHR" // >>>
   // Comparison Operators
   | "EQ_EQ" // ==
   | "NOT_EQ" // !=
@@ -141,6 +160,7 @@ export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
   readonly: "READONLY",
   const: "CONST",
   async: "ASYNC",
+  await: "AWAIT",
   prop: "PROP",
   // Control
   if: "IF",
@@ -153,6 +173,12 @@ export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
   while: "WHILE",
   ret: "RET",
   return: "RET",
+  try: "TRY",
+  catch: "CATCH",
+  finally: "FINALLY",
+  throw: "THROW",
+  break: "BREAK",
+  continue: "CONTINUE",
   // Word Operators
   and: "AND",
   or: "OR",

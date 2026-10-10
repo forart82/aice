@@ -272,8 +272,7 @@ export function formatTokenomicsTerminalTable(
     ];
   }
 
-  const tableInnerWidth =
-    columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
+  const tableInnerWidth = columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
   const tableTotalWidth = tableInnerWidth + 4;
 
   const topBorder = t.cyan(`┌─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┐`);
@@ -302,7 +301,9 @@ export function formatTokenomicsTerminalTable(
     ? ` AIL 2.0 Token Efficiency Audit — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
     : " AIL 2.0 Token Efficiency Audit ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
-  lines.push(t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"));
+  lines.push(
+    t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),
+  );
 
   // Header separator
   lines.push(t.cyan(`├─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┤`));
@@ -499,8 +500,7 @@ export function formatProjectsTerminalTable(
     { name: "Density", width: 8, align: "right" },
   ];
 
-  const tableInnerWidth =
-    columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
+  const tableInnerWidth = columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
   const tableTotalWidth = tableInnerWidth + 4;
 
   const topBorder = t.cyan(`┌─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┐`);
@@ -528,7 +528,9 @@ export function formatProjectsTerminalTable(
     ? ` AIL 2.0 Project Tokenomics Summary — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
     : " AIL 2.0 Project Tokenomics Summary ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
-  lines.push(t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"));
+  lines.push(
+    t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),
+  );
   lines.push(t.cyan(`├─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┤`));
   lines.push(renderCells(columns.map((c) => ({ text: c.name, color: t.bold }))));
   lines.push(midBorder);

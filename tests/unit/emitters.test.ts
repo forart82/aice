@@ -1,14 +1,24 @@
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parse } from "../../src/core/parser.js";
+import { parse, parseWithTrivia } from "../../src/core/parser.js";
 import {
   detectTargetFromPath,
   emitTarget,
+  emitTypeScript,
   getTargetOutputPath,
   lowerConstructor,
   lowerMethodCall,
   lowerPropertyAccess,
 } from "../../src/emitters/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
 
 describe("Step 5: Multi-Language Forward Emitters & Lowering", () => {
   describe("Path & Target Detection", () => {
@@ -152,6 +162,27 @@ fn create(amt: int, cur: str) -> Money:
       expect(out).toContain("return (a + b);");
     });
 
+    it("Step 8: emits binary power, bitwise, and shift operators in TypeScript", () => {
+      const src = `fn compute(a: int, b: int) -> int:
+  let p = a ** b
+  let andVal = a & b
+  let orVal = a | b
+  let xorVal = a ^ b
+  let shlVal = a << b
+  let shrVal = a >> b
+  let ushrVal = a >>> b
+  ret p`;
+      const mod = parse(src, "compute.ts.ail");
+      const out = emitTarget(mod, "typescript");
+      expect(out).toContain("(a ** b)");
+      expect(out).toContain("(a & b)");
+      expect(out).toContain("(a | b)");
+      expect(out).toContain("(a ^ b)");
+      expect(out).toContain("(a << b)");
+      expect(out).toContain("(a >> b)");
+      expect(out).toContain("(a >>> b)");
+    });
+
     it("expands struct spreads to explicit fields in TypeScript", () => {
       const src = `type User:
   id: str
@@ -259,6 +290,27 @@ fn create(amt: int, cur: str) -> Money:
 
       expect(out).toContain("class Money(TypedDict):");
       expect(out).toContain('return {"amountInCents": amt, "currencyCode": cur}');
+    });
+
+    it("Step 8: emits binary power, bitwise, and shift operators in Python with >>> mapped", () => {
+      const src = `fn compute(a: int, b: int) -> int:
+  let p = a ** b
+  let andVal = a & b
+  let orVal = a | b
+  let xorVal = a ^ b
+  let shlVal = a << b
+  let shrVal = a >> b
+  let ushrVal = a >>> b
+  ret p`;
+      const mod = parse(src, "compute.py.ail");
+      const out = emitTarget(mod, "python");
+      expect(out).toContain("(a ** b)");
+      expect(out).toContain("(a & b)");
+      expect(out).toContain("(a | b)");
+      expect(out).toContain("(a ^ b)");
+      expect(out).toContain("(a << b)");
+      expect(out).toContain("(a >> b)");
+      expect(out).toContain("((a % 0x100000000) >> b)");
     });
 
     it("emits single-expression functions in Python", () => {
@@ -954,6 +1006,889 @@ pub w: str ::= "mut_typed"`;
       expect(goOut).toContain("px, py := []any{x, y}");
       expect(goOut).toContain("math.Max(0.0, math.Min(1.0, px))");
       expect(goOut).toContain("math.Hypot(px, py)");
+    });
+
+    it("emits tuple types in TypeScript, Python, Rust, and C++", () => {
+      const src = `type Entry:
+  pair: [str, int]
+  triple: [float, float, float]
+  nested: [int, [str, bool]]
+
+fn swap(p: [str, int]) -> [int, str]:
+  ret [p[1], p[0]]`;
+
+      const mod = parse(src, "tuples.ts.ail");
+      const tsOut = emitTarget(mod, "typescript");
+      expect(tsOut).toContain("pair: [string, number];");
+      expect(tsOut).toContain("triple: [number, number, number];");
+      expect(tsOut).toContain("nested: [number, [string, boolean]];");
+      expect(tsOut).toContain("export function swap(p: [string, number]): [number, string] {");
+
+      const pyOut = emitTarget(mod, "python");
+      expect(pyOut).toContain("tuple[str, int]");
+      expect(pyOut).toContain("tuple[float, float, float]");
+
+      const rsOut = emitTarget(mod, "rust");
+      expect(rsOut).toContain("(String, i64)");
+
+      const cppOut = emitTarget(mod, "cpp");
+      expect(cppOut).toContain("std::tuple<std::string, int>");
+    });
+
+    it("emits call-site argument spreads and collection spreads in TypeScript and Python", () => {
+      const src = `fn add(a: int, b: int) -> int:
+  ret a + b
+
+fn run(x: int, y: int, extra: [int]):
+  s := add(x, ...extra)
+  m := Math.max(...extra)
+  combined := [...extra, 99]`;
+
+      const mod = parse(src, "spread.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("add(x, ...extra)");
+      expect(ts).toContain("Math.max(...extra)");
+      expect(ts).toContain("[...extra, 99]");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("add(x, *extra)");
+      expect(py).toContain("Math.max(*extra)");
+      expect(py).toContain("[*extra, 99]");
+    });
+    it("emits types with negative numeric literals in TypeScript", () => {
+      const src = `type Direction = 1 | -1
+type Ternary = -1 | 0 | 1
+
+pub fn step(dir: 1 | -1) -> 1 | -1:
+  ret dir
+
+val initialDir: 1 | -1 = -1`;
+
+      const mod = parse(src, "direction.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("export type Direction = 1 | -1;");
+      expect(ts).toContain("export type Ternary = -1 | 0 | 1;");
+      expect(ts).toContain("export function step(dir: 1 | -1): 1 | -1");
+      expect(ts).toContain("const initialDir: 1 | -1 = -(1);");
+    });
+    it("emits boolean literal types in TypeScript (: true, : false, true | false)", () => {
+      const src = `type Flag = true | false
+type SuccessResponse = { success: true, active: false }
+
+pub fn isReady() -> true:
+  ret true
+
+pub fn isOff() -> false:
+  ret false
+
+val enabled: true = true
+val disabled: false = false`;
+
+      const mod = parse(src, "bool_literals.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("export type Flag = true | false;");
+      expect(ts).toContain("export type SuccessResponse = { success: true; active: false; };");
+      expect(ts).toContain("export function isReady(): true");
+      expect(ts).toContain("export function isOff(): false");
+      expect(ts).toContain("const enabled: true = true;");
+      expect(ts).toContain("const disabled: false = false;");
+    });
+
+    it("emits contextual keywords as identifiers in TypeScript and Python", () => {
+      const src = `from "ui/theme" import style, tokens, match, type
+import { style as customStyle } from "styles"
+
+pub fn style(tokens: int, match: bool, type: str, val: float) -> str:
+  let state = "active"
+  if match:
+    ret type
+  ret state
+
+pub val themeConfig = { style: "dark", tokens: 10, match: true }`;
+
+      const mod = parse(src, "contextual.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('import { style, tokens, match, type } from "ui/theme";');
+      expect(ts).toContain('import { style as customStyle } from "styles";');
+      expect(ts).toContain(
+        "export function style(tokens: number, match: boolean, type: string, val: number): string",
+      );
+      expect(ts).toContain('const state = "active";');
+      expect(ts).toContain('const themeConfig = { style: "dark", tokens: 10, match: true };');
+
+      const pyMod = parse(src, "contextual.py.ail");
+      const py = emitTarget(pyMod, "python");
+      expect(py).toContain("from ui.theme import style, tokens, match, type");
+      expect(py).toContain("from styles import style as customStyle");
+      expect(py).toContain("def style(tokens: int, match: bool, type: str, val: float) -> str:");
+      expect(py).toContain('state = "active"');
+    });
+  });
+
+  describe("Step 7: Closure Parameter Pattern Destructuring & Elisions", () => {
+    it("emits closure and function parameter pattern destructuring in TypeScript", () => {
+      const src = `pub fn sumPair([a, b]: [int, int]) -> int:
+  ret a + b
+
+pub fn handleState({ effect, target }: State) -> void:
+  print(effect)
+
+pub fn test():
+  let f = fn([a, b]: [int, int]) -> int = a + b
+  let g = fn({ x, y }: Point) -> int = x + y
+  let unannotated = fn([a, b]) = a + b`;
+
+      const mod = parse(src, "closure_destruct.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+
+      expect(ts).toContain("export function sumPair([a, b]: [number, number]): number");
+      expect(ts).toContain("export function handleState({ effect, target }: State): void");
+      expect(ts).toContain("const f = ([a, b]: [number, number]): number => (a + b);");
+      expect(ts).toContain("const g = ({ x, y }: Point): number => (x + y);");
+      expect(ts).toContain("const unannotated = ([a, b]) => (a + b);");
+    });
+
+    it("emits for-in loops and let bindings with elisions in TypeScript", () => {
+      const src = `pub fn test(pairs: [[int, int]], triplets: [[int, int, int]]):
+  for [, x] in pairs:
+    print(x)
+  for [a, , b] in triplets:
+    print(a + b)
+  let [, y] = pairs[0]
+  let [first, , third] = triplets[0]`;
+
+      const mod = parse(src, "elisions.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+
+      expect(ts).toContain("for (const [, x] of pairs) {");
+      expect(ts).toContain("for (const [a, , b] of triplets) {");
+      expect(ts).toContain("const [, y] = pairs[0];");
+      expect(ts).toContain("const [first, , third] = triplets[0];");
+    });
+
+    it("emits for-in loops and let bindings with elisions using _ placeholders in Python", () => {
+      const src = `pub fn test(pairs: [[int, int]], triplets: [[int, int, int]]):
+  for [, x] in pairs:
+    print(x)
+  for [a, , b] in triplets:
+    print(a + b)
+  let [, y] = pairs[0]
+  let [first, , third] = triplets[0]`;
+
+      const mod = parse(src, "elisions.py.ail");
+      const py = emitTarget(mod, "python");
+
+      expect(py).toContain("for _, x in pairs:");
+      expect(py).toContain("for a, _, b in triplets:");
+      expect(py).toContain("_, y = pairs[0]");
+      expect(py).toContain("first, _, third = triplets[0]");
+    });
+
+    it("emits function and closure parameter destructuring and elisions in Python", () => {
+      const src = `pub fn sumPair([a, b]: [int, int]) -> int:
+  ret a + b
+
+pub fn skipFirst([, b]: [int, int]) -> int:
+  ret b
+
+pub fn handleState({ effect, target }: State) -> void:
+  print(effect)
+
+pub fn test():
+  let f = fn([a, b]: [int, int]) -> int = a + b
+  let g = fn([, b]: [int, int]) -> int = b
+  let h = fn({ effect }) = effect`;
+
+      const mod = parse(src, "closure_destruct.py.ail");
+      const py = emitTarget(mod, "python");
+
+      expect(py).toContain("def sumPair(_arg0: tuple[int, int]) -> int:");
+      expect(py).toContain("    a, b = _arg0");
+      expect(py).toContain("def skipFirst(_arg0: tuple[int, int]) -> int:");
+      expect(py).toContain("    _, b = _arg0");
+      expect(py).toContain("def handleState(_arg0: State) -> None:");
+      expect(py).toContain('    effect = _arg0["effect"]');
+      expect(py).toContain('    target = _arg0["target"]');
+      expect(py).toContain("f = (lambda _arg: (lambda a, b: (a + b))(*_arg))");
+      expect(py).toContain("g = (lambda _arg: (lambda _, b: b)(*_arg))");
+      expect(py).toContain("h = (lambda _arg: (lambda effect: effect)(**_arg))");
+    });
+  });
+
+  describe("Step 10: await and super Emission in TypeScript and Python", () => {
+    it("emits await expressions in TypeScript and Python", () => {
+      const src = `pub fn loadData(p: Promise[str]) -> str:
+  let res = await p
+  ret res`;
+
+      const mod = parse(src, "await_test.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const res = await p;");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("res = await p");
+    });
+
+    it("emits super constructor call and super method call in TypeScript and Python", () => {
+      const src = `pub class Derived extends Base:
+  fn constructor(x: int):
+    super(x)
+  fn greet() -> str:
+    ret super.greet()`;
+
+      const mod = parse(src, "super_test.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("super(x);");
+      expect(ts).toContain("return super.greet();");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("super().__init__(x)");
+      expect(py).toContain("return super().greet()");
+    });
+  });
+
+  describe("Step 11: String Literal Unions vs Enums Emission", () => {
+    it("emits string literal union type declarations faithfully in TypeScript", () => {
+      const src = `type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"`;
+      const mod = parse(src, "method.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";');
+    });
+
+    it("emits function signatures with string literal union parameter and return types in TypeScript", () => {
+      const src = `type HttpMethod = "GET" | "POST"
+pub fn request(method: HttpMethod) -> HttpMethod:
+  ret method`;
+      const mod = parse(src, "req.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("export function request(method: HttpMethod): HttpMethod {");
+    });
+
+    it("emits inline string literal union annotations cleanly in TypeScript", () => {
+      const src = `pub fn format(m: "GET" | "POST"):
+  ret m`;
+      const mod = parse(src, "inline.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('export function format(m: "GET" | "POST") {');
+    });
+
+    it("maps primitive types inside unions cleanly to TypeScript types", () => {
+      const src = `type Id = str | int`;
+      const mod = parse(src, "id.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("export type Id = string | number;");
+    });
+  });
+
+  describe("Step 12: Multiline Block Closures Emission in TypeScript and Python", () => {
+    it("emits multiline block closure with let binding and return in TypeScript", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) -> int {
+    let y = x * 2
+    ret y
+  }`;
+      const mod = parse(src, "closure_ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number): number => {");
+      expect(ts).toContain("const y = (x * 2);");
+      expect(ts).toContain("return y;");
+      expect(ts).toContain("};");
+    });
+
+    it("emits multiline block closure without return type in TypeScript", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) {
+    let y = x * 2
+    ret y
+  }`;
+      const mod = parse(src, "closure_ts_inferred.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number) => {");
+      expect(ts).toContain("const y = (x * 2);");
+      expect(ts).toContain("return y;");
+    });
+
+    it("emits multiline block closure as function call argument in TypeScript", () => {
+      const src = `pub fn test(arr: [int]):
+  arr.forEach(fn(x: int) {
+    let y = x * 2
+    log(y)
+  })`;
+      const mod = parse(src, "closure_arg_ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("(x: number) => {");
+      expect(ts).toContain("const y = (x * 2);");
+      expect(ts).toContain("log(y);");
+    });
+
+    it("emits multiline block closure in Python as inner def function", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) -> int {
+    let y = x * 2
+    ret y
+  }
+  ret f(10)`;
+      const mod = parse(src, "closure_py.ail");
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("def f(x: int) -> int:");
+      expect(py).toContain("y = (x * 2)");
+      expect(py).toContain("return y");
+      expect(py).toContain("return f(10)");
+    });
+
+    it("emits hoisted inner def when multiline closure is in an expression in Python", () => {
+      const src = `pub fn test(arr: [int]):
+  arr.forEach(fn(x: int) {
+    let y = x * 2
+    log(y)
+  })`;
+      const mod = parse(src, "closure_py_hoist.ail");
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("def _closure_");
+      expect(py).toContain("y = (x * 2)");
+      expect(py).toContain("log(y)");
+      expect(py).toContain("arr.forEach(_closure_");
+    });
+
+    it("preserves single-expression lambda emission in Python and TypeScript", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) = x * 2`;
+      const mod = parse(src, "closure_lambda.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number) => (x * 2);");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("f = (lambda x: (x * 2))");
+    });
+  });
+
+  describe("Step 13: Statement Visitors Emission (try/catch/finally, throw, break, continue, static blocks, barrel re-exports)", () => {
+    it("emits try/catch/finally in TypeScript and Python", () => {
+      const src = `pub fn test():
+  try:
+    log("attempt")
+  catch err:
+    log(err)
+  finally:
+    log("cleanup")
+`;
+      const mod = parse(src, "try_test.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("try {");
+      expect(ts).toContain("} catch (err) {");
+      expect(ts).toContain("} finally {");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("try:");
+      expect(py).toContain("except Exception as err:");
+      expect(py).toContain("finally:");
+    });
+
+    it("emits try/finally without catch in TypeScript and Python", () => {
+      const src = `pub fn test():
+  try:
+    log("attempt")
+  finally:
+    log("done")
+`;
+      const mod = parse(src, "try_finally.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("try {");
+      expect(ts).not.toContain("catch");
+      expect(ts).toContain("} finally {");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("try:");
+      expect(py).not.toContain("except");
+      expect(py).toContain("finally:");
+    });
+
+    it("emits throw / raise in TypeScript and Python", () => {
+      const src = `pub fn fail():
+  throw "something went wrong"
+`;
+      const mod = parse(src, "throw_test.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('throw "something went wrong";');
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain('raise "something went wrong"');
+    });
+
+    it("emits break and continue in TypeScript and Python", () => {
+      const src = `pub fn testLoop():
+  let mut i = 0
+  while i < 10:
+    if i == 5:
+      break
+    elif i == 2:
+      continue
+    i = i + 1
+`;
+      const mod = parse(src, "loop_test.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("break;");
+      expect(ts).toContain("continue;");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("break");
+      expect(py).toContain("continue");
+    });
+
+    it("emits class static block in TypeScript and Python", () => {
+      const src = `class Config:
+  pub static version: int = 1
+  static:
+    Config.version = 2
+`;
+      const mod = parse(src, "static_block.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("class Config {");
+      expect(ts).toContain("static {");
+      expect(ts).toContain("Config.version = 2;");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("class Config:");
+      expect(py).toContain("Config.version = 2");
+    });
+
+    it("emits barrel re-exports in TypeScript and Python", () => {
+      const src = `pub from "./utils" import foo, bar
+pub from "./types" import *
+`;
+      const mod = parse(src, "index.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('export { foo, bar } from "./utils";');
+      expect(ts).toContain('export * from "./types";');
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("from utils import foo, bar");
+      expect(py).toContain("from types import *");
+    });
+
+    it("emits async fn in TypeScript and Python", () => {
+      const src = `async fn getData(id: str) -> Promise[str]:
+  ret "result"
+
+async fn compute() -> Promise[int] = 42
+`;
+      const mod = parse(src, "async_fn.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("export async function getData(id: string): Promise<string> {");
+      expect(ts).toContain("export async function compute(): Promise<number> {");
+
+      const py = emitTarget(mod, "python");
+      expect(py).toContain("async def getData(id: str) -> Promise[str]:");
+      expect(py).toContain("async def compute() -> Promise[int]:");
+    });
+  });
+
+  describe("Step 16: Class Scope Builtin Function Shadowing Guard in Emitters", () => {
+    it("emits Math.floor(x) and does not emit this.floor(x) when class has floor: int property", () => {
+      const src = `class MathHelper:
+  floor: int = 0
+  fn compute(x: float) -> int:
+    ret floor(x)
+`;
+      const mod = parse(src, "MathHelper.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("return Math.floor(x);");
+      expect(ts).not.toContain("this.floor(x)");
+    });
+
+    it("emits Math builtins without this. for min, max, abs when class has matching properties", () => {
+      const src = `class Calculator:
+  min: int = 0
+  max: int = 100
+  abs: float = 1.0
+  fn run(a: float, b: float) -> float:
+    let m = min(a, b)
+    let n = max(a, b)
+    let d = abs(a)
+    ret m + n + d
+`;
+      const mod = parse(src, "Calculator.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const m = Math.min(a, b);");
+      expect(ts).toContain("const n = Math.max(a, b);");
+      expect(ts).toContain("const d = Math.abs(a);");
+      expect(ts).not.toContain("this.min(");
+      expect(ts).not.toContain("this.max(");
+      expect(ts).not.toContain("this.abs(");
+    });
+
+    it("preserves property access with this. and bare property access for class properties", () => {
+      const src = `class MathHelper:
+  floor: int = 42
+  fn getExplicit() -> int:
+    ret this.floor
+  fn getImplicit() -> int:
+    ret floor
+`;
+      const mod = parse(src, "MathHelperProp.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("return this.floor;");
+      expect(ts).not.toContain("return Math.floor;");
+    });
+
+    it("emits global builtins print() and len() without this. when class has matching properties", () => {
+      const src = `class Reporter:
+  print: str = "logger"
+  len: int = 5
+  fn report(msg: str, items: [int]):
+    print(msg)
+    let count = len(items)
+`;
+      const mod = parse(src, "Reporter.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("print(msg);");
+      expect(ts).toContain("const count = len(items);");
+      expect(ts).not.toContain("this.print(msg)");
+      expect(ts).not.toContain("this.len(items)");
+    });
+  });
+
+  describe("Step 17: Parameter Optionality & Default Values Emission", () => {
+    it("emits param?: type when param.isOptional is true and no default value is present", () => {
+      const src = `fn display(title: str, subtitle?: str, count?: int = 1):
+  ret title`;
+      const mod = parse(src, "display.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("function display(title: string, subtitle?: string, count: number = 1)");
+    });
+
+    it("emits optional parameters in class primary constructors and methods", () => {
+      const src = `class Client(pub endpoint: str, pub token?: str, pub timeout: int = 5000):
+  fn request(path: str, headers?: str):
+    ret path`;
+      const mod = parse(src, "Client.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain(
+        "constructor(public endpoint: string, public token?: string, public timeout: number = 5000)",
+      );
+      expect(ts).toContain("request(path: string, headers?: string)");
+    });
+  });
+
+  describe("Step 20: CST Trivia Retention from Lexer to TypeScript Emitter", () => {
+    it("retains module header comments at the top of emitted TypeScript", () => {
+      const src = `# SPDX-License-Identifier: Apache-2.0
+# Core math algorithms
+
+import "math"
+
+fn square(x: int) -> int = x * x
+`;
+      const { ast, trivia } = parseWithTrivia(src, "math.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("// SPDX-License-Identifier: Apache-2.0");
+      expect(ts).toContain("// Core math algorithms");
+      expect(ts.indexOf("// SPDX-License-Identifier: Apache-2.0")).toBeLessThan(
+        ts.indexOf('import "math";'),
+      );
+    });
+
+    it("retains function comments on exported functions in emitted TypeScript", () => {
+      const src = `# Calculates the discounted price
+# Apply discount percentage
+fn applyDiscount(price: float, discount: float) -> float:
+  ret price * (1.0 - discount)
+`;
+      const { ast, trivia } = parseWithTrivia(src, "discount.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("// Calculates the discounted price");
+      expect(ts).toContain("// Apply discount percentage");
+      expect(ts.indexOf("// Calculates the discounted price")).toBeLessThan(
+        ts.indexOf("export function applyDiscount"),
+      );
+    });
+
+    it("retains class, property, and method comments in emitted TypeScript", () => {
+      const src = `# Represents an HTTP client
+class HttpClient:
+  # Base server URL
+  baseUrl: str = "http://localhost"
+
+  # Sends GET request
+  fn get(path: str) -> str:
+    ret baseUrl + path
+`;
+      const { ast, trivia } = parseWithTrivia(src, "client.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("// Represents an HTTP client");
+      expect(ts.indexOf("// Represents an HTTP client")).toBeLessThan(
+        ts.indexOf("class HttpClient"),
+      );
+      expect(ts).toContain("// Base server URL");
+      expect(ts).toContain("// Sends GET request");
+    });
+
+    it("retains type and field comments in emitted TypeScript", () => {
+      const src = `# Configuration settings
+type Config:
+  # Host address
+  host: str
+  # Port number
+  port: int
+`;
+      const { ast, trivia } = parseWithTrivia(src, "config.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("// Configuration settings");
+      expect(ts).toContain("// Host address");
+      expect(ts).toContain("// Port number");
+    });
+
+    it("retains const and var comments in emitted TypeScript", () => {
+      const src = `# Server timeout in ms
+const TIMEOUT = 5000
+
+# Current active reconnects
+val reconnects = 0
+`;
+      const { ast, trivia } = parseWithTrivia(src, "server.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("// Server timeout in ms");
+      expect(ts).toContain("const TIMEOUT = 5000;");
+      expect(ts).toContain("// Current active reconnects");
+      expect(ts).toContain("const reconnects = 0;");
+    });
+
+    it("retains JSDoc comments /** ... */ in emitted TypeScript", () => {
+      const src = `/**
+ * Dispatches an event to listeners
+ */
+fn dispatch(name: str) -> void:
+  nil
+`;
+      const { ast, trivia } = parseWithTrivia(src, "dispatch.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("/**\n * Dispatches an event to listeners\n */");
+      expect(ts.indexOf("Dispatches an event")).toBeLessThan(
+        ts.indexOf("export function dispatch"),
+      );
+    });
+
+    it("retains trailing inline comments in emitted TypeScript", () => {
+      const src = `const PI = 3.14159 # mathematical constant`;
+      const { ast, trivia } = parseWithTrivia(src, "pi.ts.ail");
+      const ts = emitTypeScript(ast, { trivia });
+      expect(ts).toContain("const PI = 3.14159; // mathematical constant");
+    });
+  });
+
+  describe("Configurable Pure Interface Emission (Step 21)", () => {
+    it("preserves backward compatibility: emits factory functions when pureInterfaces is omitted or false", () => {
+      const src = `type User:
+  id: int
+  name: str
+`;
+      const mod = parse(src, "user.ts.ail");
+
+      // Default (omitted)
+      const defaultOut = emitTarget(mod, "typescript");
+      expect(defaultOut).toContain("export interface User {");
+      expect(defaultOut).toContain("id: number;");
+      expect(defaultOut).toContain("name: string;");
+      expect(defaultOut).toContain("export function User(id: number, name: string): User {");
+      expect(defaultOut).toContain("return { id, name };");
+
+      // Explicit pureInterfaces: false
+      const explicitFalseOut = emitTarget(mod, "typescript", { pureInterfaces: false });
+      expect(explicitFalseOut).toContain("export interface User {");
+      expect(explicitFalseOut).toContain("export function User(id: number, name: string): User {");
+      expect(explicitFalseOut).toContain("return { id, name };");
+    });
+
+    it("emits pure interface without factory function when pureInterfaces is true", () => {
+      const src = `type User:
+  id: int
+  name: str
+`;
+      const mod = parse(src, "user.ts.ail");
+      const pureOut = emitTarget(mod, "typescript", { pureInterfaces: true });
+
+      expect(pureOut).toContain("export interface User {");
+      expect(pureOut).toContain("id: number;");
+      expect(pureOut).toContain("name: string;");
+      expect(pureOut).not.toContain("export function User");
+      expect(pureOut).not.toContain("return { id, name };");
+
+      // Also verify via direct emitTypeScript entrypoint
+      const directOut = emitTypeScript(mod, { pureInterfaces: true });
+      expect(directOut).toContain("export interface User {");
+      expect(directOut).not.toContain("export function User");
+    });
+
+    it("transforms struct instantiation into object literals seamlessly under pureInterfaces: true", () => {
+      const src = `type User:
+  id: int
+  name: str
+
+fn makeUser(i: int, n: str) -> User:
+  ret User(i, n)
+
+fn getAdmin() -> User:
+  ret User(1, "Alice")
+`;
+      const mod = parse(src, "user.ts.ail");
+      const pureOut = emitTarget(mod, "typescript", { pureInterfaces: true });
+
+      expect(pureOut).toContain("export interface User {");
+      expect(pureOut).not.toContain("export function User(");
+      expect(pureOut).toContain("return { id: i, name: n };");
+      expect(pureOut).toContain('return { id: 1, name: "Alice" };');
+    });
+
+    it("verifies CLI --pure-interfaces flag in compile and compile-all commands", () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-pure-intf-test-"));
+      try {
+        const srcFile = path.join(tempDir, "model.ts.ail");
+        const src = `type Customer:
+  id: int
+  name: str
+
+fn getCustomer() -> Customer:
+  ret Customer(42, "Bob")
+`;
+        fs.writeFileSync(srcFile, src, "utf-8");
+
+        // 1. Compile without --pure-interfaces (default)
+        const defaultOutFile = path.join(tempDir, "default.ts");
+        const resDefault = spawnSync("bun", [cliPath, "compile", srcFile, "-o", defaultOutFile], {
+          encoding: "utf-8",
+        });
+        expect(resDefault.status).toBe(0);
+        const defaultContent = fs.readFileSync(defaultOutFile, "utf-8");
+        expect(defaultContent).toContain("export interface Customer {");
+        expect(defaultContent).toContain(
+          "export function Customer(id: number, name: string): Customer {",
+        );
+
+        // 2. Compile with --pure-interfaces
+        const pureOutFile = path.join(tempDir, "pure.ts");
+        const resPure = spawnSync(
+          "bun",
+          [cliPath, "compile", srcFile, "--pure-interfaces", "-o", pureOutFile],
+          { encoding: "utf-8" },
+        );
+        expect(resPure.status).toBe(0);
+        const pureContent = fs.readFileSync(pureOutFile, "utf-8");
+        expect(pureContent).toContain("export interface Customer {");
+        expect(pureContent).not.toContain("export function Customer(");
+        expect(pureContent).toContain('return { id: 42, name: "Bob" };');
+
+        // 3. Compile-all with --pure-interfaces
+        const outDir = path.join(tempDir, "out");
+        const resCompileAll = spawnSync(
+          "bun",
+          [cliPath, "compile-all", tempDir, "--out-dir", outDir, "--pure-interfaces"],
+          { encoding: "utf-8" },
+        );
+        expect(resCompileAll.status).toBe(0);
+        const compileAllTarget = path.join(outDir, "model.ts");
+        expect(fs.existsSync(compileAllTarget)).toBe(true);
+        const compileAllContent = fs.readFileSync(compileAllTarget, "utf-8");
+        expect(compileAllContent).toContain("export interface Customer {");
+        expect(compileAllContent).not.toContain("export function Customer(");
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Step 22: Arrow Function Record Return Parenthesization", () => {
+    it("emits parenthesized record literal return for expression-bodied closure returning non-empty record literal", () => {
+      const src = `pub fn test():
+  let f = fn() => { a: 1, b: "ok" }`;
+      const mod = parse(src, "closure_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain('const f = () => ({ a: 1, b: "ok" });');
+    });
+
+    it("emits parenthesized record literal return for expression-bodied closure returning empty record literal", () => {
+      const src = `pub fn test():
+  let f = fn() => {}`;
+      const mod = parse(src, "closure_empty_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = () => ({});");
+    });
+
+    it("emits parenthesized record literal return for expression-bodied closure with params returning record literal", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) => { value: x }`;
+      const mod = parse(src, "closure_param_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number) => ({ value: x });");
+    });
+
+    it("does not redundantly parenthesize non-record expression-bodied closures", () => {
+      const src1 = `pub fn test():
+  let f = fn(x: int) => x + 1`;
+      const mod1 = parse(src1, "closure_non_record1.ts.ail");
+      const ts1 = emitTarget(mod1, "typescript");
+      expect(ts1).toContain("const f = (x: number) => (x + 1);");
+      expect(ts1).not.toContain("((x + 1))");
+
+      const src2 = `pub fn test():
+  let f = fn(x: int) => x`;
+      const mod2 = parse(src2, "closure_non_record2.ts.ail");
+      const ts2 = emitTarget(mod2, "typescript");
+      expect(ts2).toContain("const f = (x: number) => x;");
+      expect(ts2).not.toContain("(x);");
+    });
+
+    it("emits parenthesized record literal with return type annotation", () => {
+      const src = `type Point:
+  x: int
+  y: int
+
+pub fn test():
+  let f = fn(x: int) -> Point => { x: x, y: 0 }`;
+      const mod = parse(src, "closure_typed_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number): Point => ({ x, y: 0 });");
+    });
+
+    it("emits parenthesized record literal return when closure is passed as function argument", () => {
+      const src = `pub fn transform(items: [int]):
+  ret items.map(fn(x: int) => { id: x })`;
+      const mod = parse(src, "closure_arg_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("return items.map((x: number) => ({ id: x }));");
+    });
+
+    it("emits parenthesized object literal return for lowered algebraic constructors", () => {
+      const src = `pub fn test():
+  let f = fn(x: int) => Ok(x)`;
+      const mod = parse(src, "closure_lowered_record.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("const f = (x: number) => ({ ok: true, value: x });");
+    });
+  });
+
+  describe("Step 23: Template Literals & Python f-strings Emitters", () => {
+    it("emits native TypeScript template literals", () => {
+      const src = `pub fn greet(name: str, count: int) -> str:
+  ret \`Hello \${name}, you have \${count + 1} items!\``;
+      const mod = parse(src, "greet.ts.ail");
+      const ts = emitTarget(mod, "typescript");
+      expect(ts).toContain("return `Hello ${name}, you have ${(count + 1)} items!`;");
+    });
+
+    it("emits native Python f-strings", () => {
+      const src = `pub fn greet(name: str, count: int) -> str:
+  ret \`Hello \${name}, you have \${count + 1} items!\``;
+      const mod = parse(src, "greet.py.ail");
+      const py = emitTarget(mod, "python");
+      expect(py).toContain('return f"Hello {name}, you have {(count + 1)} items!"');
+    });
+
+    it("escapes literal curly braces in Python f-strings", () => {
+      const src = `pub fn wrap(val: str) -> str:
+  ret \`{item: \${val}}\``;
+      const mod = parse(src, "wrap.py.ail");
+      const py = emitTarget(mod, "python");
+      expect(py).toContain('return f"{{item: {val}}}"');
     });
   });
 });

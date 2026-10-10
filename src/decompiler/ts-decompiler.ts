@@ -11,11 +11,14 @@
 import ts from "typescript";
 import type {
   AssignOp,
+  AwaitExpr,
   BinaryOp,
   Block,
+  BreakStmt,
   ClassDecl,
   ComponentDecl,
   ConstDecl,
+  ContinueStmt,
   DestructureBinding,
   Expr,
   FieldDecl,
@@ -25,17 +28,25 @@ import type {
   ImportSpecifier,
   LayoutNode,
   LiteralExpr,
+  MatchCase,
+  MatchStmt,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
+  Pattern,
   PrimitiveType,
   PropertyDecl,
   RecordProperty,
   Statement,
+  TemplateLiteralExpr,
+  ThrowStmt,
+  TryStmt,
+  TupleType,
   TypeDecl,
   TypeExpr,
   VarDecl,
+  WhileStmt,
 } from "../core/ast.js";
 import { createPosition, createSpan, emptySpan, mergeSpans, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem, type TriviaKind } from "../core/trivia.js";
@@ -58,39 +69,100 @@ const TS_MATH_BUILTINS = new Set([
 export interface TsDecompilerOptions {
   modulePath?: string;
   isTsx?: boolean;
+  convertStringUnionsToEnum?: boolean;
 }
 
 export class TsDecompiler {
   private source: string;
   private filePath: string;
   private isTsx: boolean;
+  private convertStringUnionsToEnum: boolean;
   private sourceFile!: ts.SourceFile;
   private trivia = new CstTriviaTable();
   private knownTypeNames = new Set<string>();
   private currentScopeVars: Set<string>[] = [];
+  private variableScopeStack: Map<string, "number" | "string" | "boolean" | "other">[] = [
+    new Map(),
+  ];
 
   private pushScope(params: readonly (ts.ParameterDeclaration | ts.BindingElement)[] = []): void {
     const scope = new Set<string>();
+    const varTypes = new Map<string, "number" | "string" | "boolean" | "other">();
     for (const p of params) {
       if (ts.isIdentifier(p.name)) {
-        scope.add(p.name.text);
+        const name = p.name.text;
+        scope.add(name);
+        if (p.type) {
+          if (p.type.kind === ts.SyntaxKind.NumberKeyword) varTypes.set(name, "number");
+          else if (p.type.kind === ts.SyntaxKind.StringKeyword) varTypes.set(name, "string");
+          else if (p.type.kind === ts.SyntaxKind.BooleanKeyword) varTypes.set(name, "boolean");
+        }
       }
     }
     this.currentScopeVars.push(scope);
+    this.variableScopeStack.push(varTypes);
   }
 
   private popScope(): void {
     this.currentScopeVars.pop();
+    if (this.variableScopeStack.length > 1) {
+      this.variableScopeStack.pop();
+    }
+  }
+
+  private registerVarType(name: string, type: "number" | "string" | "boolean" | "other"): void {
+    const current = this.variableScopeStack[this.variableScopeStack.length - 1];
+    if (current) {
+      current.set(name, type);
+    }
+  }
+
+  private getVarType(name: string): "number" | "string" | "boolean" | "other" | undefined {
+    for (let i = this.variableScopeStack.length - 1; i >= 0; i--) {
+      const t = this.variableScopeStack[i].get(name);
+      if (t) return t;
+    }
+    return undefined;
+  }
+
+  private trackDeclaration(decl: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(decl.name)) return;
+    const name = decl.name.text;
+    let typeCat: "number" | "string" | "boolean" | "other" | undefined;
+    if (decl.type) {
+      if (decl.type.kind === ts.SyntaxKind.NumberKeyword) typeCat = "number";
+      else if (decl.type.kind === ts.SyntaxKind.StringKeyword) typeCat = "string";
+      else if (decl.type.kind === ts.SyntaxKind.BooleanKeyword) typeCat = "boolean";
+    } else if (decl.initializer) {
+      if (ts.isNumericLiteral(decl.initializer)) typeCat = "number";
+      else if (
+        ts.isStringLiteral(decl.initializer) ||
+        ts.isNoSubstitutionTemplateLiteral(decl.initializer) ||
+        ts.isTemplateExpression(decl.initializer)
+      ) {
+        typeCat = "string";
+      } else if (
+        decl.initializer.kind === ts.SyntaxKind.TrueKeyword ||
+        decl.initializer.kind === ts.SyntaxKind.FalseKeyword
+      ) {
+        typeCat = "boolean";
+      }
+    }
+    if (typeCat) {
+      this.registerVarType(name, typeCat);
+    }
   }
 
   constructor(source: string, filePath = "source.ts", options: TsDecompilerOptions = {}) {
     this.source = source;
     this.filePath = filePath;
     this.isTsx = options.isTsx ?? (filePath.endsWith(".tsx") || source.includes("<"));
+    this.convertStringUnionsToEnum = options.convertStringUnionsToEnum ?? false;
   }
 
   decompile(): { ast: Module; trivia: CstTriviaTable } {
     this.knownTypeNames.clear();
+    this.variableScopeStack = [new Map()];
     const scriptKind = this.isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     this.sourceFile = ts.createSourceFile(
       this.filePath,
@@ -179,6 +251,10 @@ export class TsDecompiler {
       return this.convertImportDeclaration(stmt);
     }
 
+    if (ts.isExportDeclaration(stmt)) {
+      return this.convertExportDeclaration(stmt);
+    }
+
     if (ts.isInterfaceDeclaration(stmt)) {
       return this.convertInterfaceDeclaration(stmt);
     }
@@ -254,6 +330,51 @@ export class TsDecompiler {
     };
   }
 
+  private convertExportDeclaration(stmt: ts.ExportDeclaration): ImportDecl | null {
+    const moduleSpecifier = stmt.moduleSpecifier;
+    if (!moduleSpecifier || !ts.isStringLiteral(moduleSpecifier)) return null;
+
+    const source = moduleSpecifier.text;
+    const nodeId = `export:${source}`;
+    this.extractComments(stmt, nodeId);
+
+    const specifiers: ImportSpecifier[] = [];
+
+    if (!stmt.exportClause) {
+      // export * from './foo'
+      specifiers.push({
+        name: "*",
+        isWildcard: true,
+        span: this.getSpan(stmt),
+      });
+    } else if (ts.isNamespaceExport(stmt.exportClause)) {
+      // export * as bar from './foo'
+      specifiers.push({
+        name: "*",
+        alias: stmt.exportClause.name.text,
+        isWildcard: true,
+        span: this.getSpan(stmt.exportClause),
+      });
+    } else if (ts.isNamedExports(stmt.exportClause)) {
+      // export { a, b as c } from './foo'
+      for (const el of stmt.exportClause.elements) {
+        specifiers.push({
+          name: (el.propertyName ?? el.name).text,
+          alias: el.propertyName ? el.name.text : undefined,
+          span: this.getSpan(el),
+        });
+      }
+    }
+
+    return {
+      kind: "ImportDecl",
+      source,
+      specifiers,
+      isExported: true,
+      span: this.getSpan(stmt),
+    };
+  }
+
   private convertInterfaceDeclaration(stmt: ts.InterfaceDeclaration): TypeDecl {
     const name = stmt.name.text;
     this.knownTypeNames.add(name);
@@ -300,8 +421,8 @@ export class TsDecompiler {
     const nodeId = `type:${name}`;
     this.extractComments(stmt, nodeId);
 
-    // Check if it's a string literal union -> Enum
-    if (ts.isUnionTypeNode(stmt.type)) {
+    // Optional legacy conversion of string literal union -> Enum (disabled by default)
+    if (this.convertStringUnionsToEnum && ts.isUnionTypeNode(stmt.type)) {
       const allStringLiterals = stmt.type.types.every(
         (t) => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal),
       );
@@ -325,7 +446,7 @@ export class TsDecompiler {
       }
     }
 
-    // Otherwise, standard type alias
+    // Standard type alias (preserves string literal unions as type aliases)
     return {
       kind: "TypeDecl",
       name,
@@ -354,6 +475,7 @@ export class TsDecompiler {
             name: p.name.text,
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+            isOptional: p.questionToken ? true : undefined,
             span: this.getSpan(p),
           });
         } else if (ts.isObjectBindingPattern(p.name)) {
@@ -387,6 +509,9 @@ export class TsDecompiler {
     }
 
     // Normal function declaration
+    const isAsync = stmt.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)
+      ? true
+      : undefined;
     const returnType = stmt.type ? this.convertTypeNode(stmt.type) : null;
     this.pushScope(stmt.parameters);
     const body = stmt.body
@@ -403,6 +528,7 @@ export class TsDecompiler {
       return {
         kind: "FunctionDecl",
         name,
+        isAsync,
         params,
         returnType,
         body: body.statements[0].value,
@@ -414,6 +540,7 @@ export class TsDecompiler {
     return {
       kind: "FunctionDecl",
       name,
+      isAsync,
       params,
       returnType,
       body,
@@ -448,6 +575,7 @@ export class TsDecompiler {
 
     const properties: PropertyDecl[] = [];
     const methods: MethodDecl[] = [];
+    const staticBlocks: Block[] = [];
     let primaryConstructor: ParamDecl[] | undefined;
 
     for (const member of stmt.members) {
@@ -505,6 +633,7 @@ export class TsDecompiler {
               name: pName,
               typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
               defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+              isOptional: p.questionToken ? true : undefined,
               isPub,
               isReadonly: isRo,
               span: this.getSpan(p),
@@ -557,6 +686,7 @@ export class TsDecompiler {
               defaultValue: p.initializer
                 ? this.convertExpression(p.initializer)
                 : matchedProp?.initialValue,
+              isOptional: p.questionToken ? true : undefined,
               isPub: true,
               isReadonly: matchedProp?.isReadonly ?? false,
               span: this.getSpan(p),
@@ -576,6 +706,7 @@ export class TsDecompiler {
             name: pName,
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+            isOptional: p.questionToken ? true : undefined,
             span: this.getSpan(p),
           };
         });
@@ -614,6 +745,7 @@ export class TsDecompiler {
             name: pName,
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+            isOptional: p.questionToken ? true : undefined,
             span: this.getSpan(p),
           };
         });
@@ -707,6 +839,7 @@ export class TsDecompiler {
           name: ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile),
           typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
           defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+          isOptional: p.questionToken ? true : undefined,
           span: this.getSpan(p),
         }));
         let isExpressionBodied = false;
@@ -747,6 +880,8 @@ export class TsDecompiler {
           isExpressionBodied,
           span: this.getSpan(member),
         });
+      } else if (ts.isClassStaticBlockDeclaration(member)) {
+        staticBlocks.push(this.convertBlock(member.body));
       }
     }
 
@@ -800,6 +935,7 @@ export class TsDecompiler {
       implements: implementsList.length > 0 ? implementsList : undefined,
       properties,
       methods: finalMethods,
+      staticBlocks: staticBlocks.length > 0 ? staticBlocks : undefined,
       span: this.getSpan(stmt),
     };
   }
@@ -891,6 +1027,7 @@ export class TsDecompiler {
       const name = ts.isIdentifier(decl.name) ? decl.name.text : decl.name.getText(this.sourceFile);
       const nodeId = `${isConst ? "const" : "var"}:${name}`;
       this.extractComments(stmt, nodeId);
+      this.trackDeclaration(decl);
 
       const typeAnn = decl.type ? this.convertTypeNode(decl.type) : undefined;
       const value: Expr = decl.initializer
@@ -1040,6 +1177,7 @@ export class TsDecompiler {
       if (ts.isVariableStatement(stmt) && stmt.declarationList.declarations.length > 1) {
         for (const decl of stmt.declarationList.declarations) {
           if (ts.isIdentifier(decl.name)) {
+            this.trackDeclaration(decl);
             const isMut = (stmt.declarationList.flags & ts.NodeFlags.Const) === 0;
             let init: Expr;
             if (decl.initializer) {
@@ -1118,7 +1256,9 @@ export class TsDecompiler {
         continue;
       }
       const s = this.convertStatement(stmt);
-      if (s) {
+      if (Array.isArray(s)) {
+        statements.push(...s);
+      } else if (s) {
         statements.push(s);
       }
     }
@@ -1129,10 +1269,11 @@ export class TsDecompiler {
     };
   }
 
-  private convertStatement(stmt: ts.Statement): Statement | null {
+  private convertStatement(stmt: ts.Statement): Statement | Statement[] | null {
     if (ts.isVariableStatement(stmt)) {
       const decl = stmt.declarationList.declarations[0];
       if (decl && ts.isIdentifier(decl.name)) {
+        this.trackDeclaration(decl);
         const isMut = (stmt.declarationList.flags & ts.NodeFlags.Const) === 0;
         let init: Expr;
         if (decl.initializer) {
@@ -1221,15 +1362,16 @@ export class TsDecompiler {
     }
 
     if (ts.isIfStatement(stmt)) {
-      const condition = this.convertExpression(stmt.expression);
+      const condition = this.ensureBooleanCondition(stmt.expression);
       let thenBranch: Block;
       if (ts.isBlock(stmt.thenStatement)) {
         thenBranch = this.convertBlock(stmt.thenStatement);
       } else {
         const single = this.convertStatement(stmt.thenStatement);
+        const stmts = Array.isArray(single) ? single : single ? [single] : [];
         thenBranch = {
           kind: "Block" as const,
-          statements: single ? [single] : [],
+          statements: stmts,
           span: this.getSpan(stmt.thenStatement),
         };
       }
@@ -1244,13 +1386,14 @@ export class TsDecompiler {
           elifBody = this.convertBlock(currentElse.thenStatement);
         } else {
           const single = this.convertStatement(currentElse.thenStatement);
+          const stmts = Array.isArray(single) ? single : single ? [single] : [];
           elifBody = {
             kind: "Block" as const,
-            statements: single ? [single] : [],
+            statements: stmts,
             span: this.getSpan(currentElse.thenStatement),
           };
         }
-        const elifCond = this.convertExpression(currentElse.expression);
+        const elifCond = this.ensureBooleanCondition(currentElse.expression);
         elifBranches.push({
           condition: elifCond,
           body: elifBody,
@@ -1264,9 +1407,10 @@ export class TsDecompiler {
           elseBranch = this.convertBlock(currentElse);
         } else {
           const single = this.convertStatement(currentElse);
+          const stmts = Array.isArray(single) ? single : single ? [single] : [];
           elseBranch = {
             kind: "Block" as const,
-            statements: single ? [single] : [],
+            statements: stmts,
             span: this.getSpan(currentElse),
           };
         }
@@ -1298,7 +1442,7 @@ export class TsDecompiler {
     if (ts.isWhileStatement(stmt)) {
       return {
         kind: "WhileStmt",
-        condition: this.ensureBooleanCondition(this.convertExpression(stmt.expression)),
+        condition: this.ensureBooleanCondition(stmt.expression),
         body: ts.isBlock(stmt.statement)
           ? this.convertBlock(stmt.statement)
           : { kind: "Block" as const, statements: [], span: emptySpan() },
@@ -1307,73 +1451,188 @@ export class TsDecompiler {
     }
 
     if (ts.isExpressionStatement(stmt)) {
-      // Check for assignment: target = value or compound assignment target += value
-      if (ts.isBinaryExpression(stmt.expression)) {
-        const opKind = stmt.expression.operatorToken.kind;
-        if (opKind === ts.SyntaxKind.EqualsToken) {
-          const target = this.convertExpression(stmt.expression.left);
-          if (ts.isConditionalExpression(stmt.expression.right)) {
-            return this.convertConditionalAssign(target, stmt.expression.right, this.getSpan(stmt));
-          }
-          return {
-            kind: "AssignStmt",
-            target,
-            value: this.convertExpression(stmt.expression.right),
-            span: this.getSpan(stmt),
-          };
-        }
-        let assignOp: AssignOp | null = null;
-        if (opKind === ts.SyntaxKind.PlusEqualsToken) assignOp = "+=";
-        else if (opKind === ts.SyntaxKind.MinusEqualsToken) assignOp = "-=";
-        else if (opKind === ts.SyntaxKind.AsteriskEqualsToken) assignOp = "*=";
-        else if (opKind === ts.SyntaxKind.SlashEqualsToken) assignOp = "/=";
-        else if (opKind === ts.SyntaxKind.PercentEqualsToken) assignOp = "%=";
+      return this.convertExpressionToStatement(stmt.expression);
+    }
 
-        if (assignOp) {
-          const target = this.convertExpression(stmt.expression.left);
-          const operand = this.convertExpression(stmt.expression.right);
-          return {
-            kind: "AssignStmt",
-            target,
-            op: assignOp,
-            value: operand,
-            span: this.getSpan(stmt),
-          };
+    if (ts.isBlock(stmt)) {
+      return this.convertBlock(stmt).statements;
+    }
+
+    if (ts.isForStatement(stmt)) {
+      let initStmt: Statement | null = null;
+      if (stmt.initializer) {
+        if (ts.isVariableDeclarationList(stmt.initializer)) {
+          const decl = stmt.initializer.declarations[0];
+          if (decl && ts.isIdentifier(decl.name)) {
+            const init = decl.initializer
+              ? this.convertExpression(decl.initializer)
+              : {
+                  kind: "LiteralExpr" as const,
+                  literalKind: "number" as const,
+                  value: 0,
+                  rawValue: "0",
+                  span: this.getSpan(decl),
+                };
+            initStmt = {
+              kind: "LetBinding",
+              name: decl.name.text,
+              isMut: true,
+              typeAnnotation: decl.type ? this.convertTypeNode(decl.type) : null,
+              init,
+              span: this.getSpan(stmt.initializer),
+            };
+          }
+        } else if (ts.isExpression(stmt.initializer)) {
+          initStmt = this.convertExpressionToStatement(stmt.initializer);
         }
       }
 
-      // Check for increment / decrement: i++ or i--
-      if (
-        (ts.isPostfixUnaryExpression(stmt.expression) ||
-          ts.isPrefixUnaryExpression(stmt.expression)) &&
-        (stmt.expression.operator === ts.SyntaxKind.PlusPlusToken ||
-          stmt.expression.operator === ts.SyntaxKind.MinusMinusToken)
-      ) {
-        const target = this.convertExpression(stmt.expression.operand);
-        const op: BinaryOp = stmt.expression.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
-        return {
-          kind: "AssignStmt",
-          target,
-          value: {
-            kind: "BinaryExpr",
-            operator: op,
-            left: target,
-            right: {
-              kind: "LiteralExpr",
-              literalKind: "number",
-              value: 1,
-              rawValue: "1",
-              span: this.getSpan(stmt),
-            },
+      const condition: Expr = stmt.condition
+        ? this.ensureBooleanCondition(this.convertExpression(stmt.condition))
+        : {
+            kind: "LiteralExpr",
+            literalKind: "boolean",
+            value: true,
+            rawValue: "true",
             span: this.getSpan(stmt),
-          },
-          span: this.getSpan(stmt),
+          };
+
+      let body: Block;
+      if (ts.isBlock(stmt.statement)) {
+        body = this.convertBlock(stmt.statement);
+      } else {
+        const single = this.convertStatement(stmt.statement);
+        const stmts = Array.isArray(single) ? single : single ? [single] : [];
+        body = {
+          kind: "Block",
+          statements: stmts,
+          span: this.getSpan(stmt.statement),
         };
       }
 
+      if (stmt.incrementor) {
+        const incStmt = this.convertExpressionToStatement(stmt.incrementor);
+        body.statements.push(incStmt);
+      }
+
+      const whileStmt: WhileStmt = {
+        kind: "WhileStmt",
+        condition,
+        body,
+        span: this.getSpan(stmt),
+      };
+
+      if (initStmt) {
+        return [initStmt, whileStmt];
+      }
+      return whileStmt;
+    }
+
+    if (ts.isSwitchStatement(stmt)) {
+      const target = this.convertExpression(stmt.expression);
+      const cases: MatchCase[] = [];
+
+      for (const clause of stmt.caseBlock.clauses) {
+        let pattern: Pattern;
+        if (ts.isCaseClause(clause)) {
+          const expr = this.convertExpression(clause.expression);
+          if (expr.kind === "LiteralExpr") {
+            pattern = { kind: "LiteralPattern", value: expr, span: expr.span };
+          } else if (expr.kind === "IdentifierExpr") {
+            pattern = { kind: "IdentifierPattern", name: expr.name, span: expr.span };
+          } else {
+            pattern = {
+              kind: "IdentifierPattern",
+              name: clause.expression.getText(this.sourceFile),
+              span: this.getSpan(clause.expression),
+            };
+          }
+        } else {
+          // default clause
+          pattern = { kind: "WildcardPattern", span: this.getSpan(clause) };
+        }
+
+        const clauseStmts: Statement[] = [];
+        for (let i = 0; i < clause.statements.length; i++) {
+          const s = clause.statements[i];
+          if (i === clause.statements.length - 1 && ts.isBreakStatement(s)) {
+            continue;
+          }
+          const converted = this.convertStatement(s);
+          if (Array.isArray(converted)) {
+            clauseStmts.push(...converted);
+          } else if (converted) {
+            clauseStmts.push(converted);
+          }
+        }
+
+        cases.push({
+          pattern,
+          body: {
+            kind: "Block",
+            statements: clauseStmts,
+            span: this.getSpan(clause),
+          },
+          span: this.getSpan(clause),
+        });
+      }
+
       return {
-        kind: "ExprStmt",
+        kind: "MatchStmt",
+        target,
+        cases,
+        span: this.getSpan(stmt),
+      };
+    }
+
+    if (ts.isTryStatement(stmt)) {
+      const tryBlock = this.convertBlock(stmt.tryBlock);
+      let catchParam: string | undefined;
+      let catchBlock: Block | undefined;
+      let finallyBlock: Block | undefined;
+
+      if (stmt.catchClause) {
+        if (
+          stmt.catchClause.variableDeclaration &&
+          ts.isIdentifier(stmt.catchClause.variableDeclaration.name)
+        ) {
+          catchParam = stmt.catchClause.variableDeclaration.name.text;
+        }
+        catchBlock = this.convertBlock(stmt.catchClause.block);
+      }
+
+      if (stmt.finallyBlock) {
+        finallyBlock = this.convertBlock(stmt.finallyBlock);
+      }
+
+      return {
+        kind: "TryStmt",
+        tryBlock,
+        catchParam,
+        catchBlock,
+        finallyBlock,
+        span: this.getSpan(stmt),
+      };
+    }
+
+    if (ts.isThrowStatement(stmt)) {
+      return {
+        kind: "ThrowStmt",
         expr: this.convertExpression(stmt.expression),
+        span: this.getSpan(stmt),
+      };
+    }
+
+    if (ts.isBreakStatement(stmt)) {
+      return {
+        kind: "BreakStmt",
+        span: this.getSpan(stmt),
+      };
+    }
+
+    if (ts.isContinueStatement(stmt)) {
+      return {
+        kind: "ContinueStmt",
         span: this.getSpan(stmt),
       };
     }
@@ -1381,12 +1640,380 @@ export class TsDecompiler {
     return null;
   }
 
-  private ensureBooleanCondition(cond: Expr): Expr {
+  private convertExpressionToStatement(expr: ts.Expression): Statement {
+    const span = this.getSpan(expr);
+
+    // Check for assignment: target = value or compound assignment target += value
+    if (ts.isBinaryExpression(expr)) {
+      const opKind = expr.operatorToken.kind;
+      if (opKind === ts.SyntaxKind.EqualsToken) {
+        const target = this.convertExpression(expr.left);
+        if (ts.isConditionalExpression(expr.right)) {
+          return this.convertConditionalAssign(target, expr.right, span);
+        }
+        return {
+          kind: "AssignStmt",
+          target,
+          value: this.convertExpression(expr.right),
+          span,
+        };
+      }
+      let assignOp: AssignOp | null = null;
+      if (opKind === ts.SyntaxKind.PlusEqualsToken) assignOp = "+=";
+      else if (opKind === ts.SyntaxKind.MinusEqualsToken) assignOp = "-=";
+      else if (opKind === ts.SyntaxKind.AsteriskEqualsToken) assignOp = "*=";
+      else if (opKind === ts.SyntaxKind.SlashEqualsToken) assignOp = "/=";
+      else if (opKind === ts.SyntaxKind.PercentEqualsToken) assignOp = "%=";
+
+      if (assignOp) {
+        const target = this.convertExpression(expr.left);
+        const operand = this.convertExpression(expr.right);
+        return {
+          kind: "AssignStmt",
+          target,
+          op: assignOp,
+          value: operand,
+          span,
+        };
+      }
+    }
+
+    // Check for increment / decrement: i++ or i--
+    if (
+      (ts.isPostfixUnaryExpression(expr) || ts.isPrefixUnaryExpression(expr)) &&
+      (expr.operator === ts.SyntaxKind.PlusPlusToken ||
+        expr.operator === ts.SyntaxKind.MinusMinusToken)
+    ) {
+      const target = this.convertExpression(expr.operand);
+      const op: BinaryOp = expr.operator === ts.SyntaxKind.PlusPlusToken ? "+" : "-";
+      return {
+        kind: "AssignStmt",
+        target,
+        value: {
+          kind: "BinaryExpr",
+          operator: op,
+          left: target,
+          right: {
+            kind: "LiteralExpr",
+            literalKind: "number",
+            value: 1,
+            rawValue: "1",
+            span,
+          },
+          span,
+        },
+        span,
+      };
+    }
+
+    return {
+      kind: "ExprStmt",
+      expr: this.convertExpression(expr),
+      span,
+    };
+  }
+
+  private isNumericName(name: string): boolean {
+    const lower = name.toLowerCase();
+    return (
+      lower === "flags" ||
+      lower === "count" ||
+      lower === "length" ||
+      lower === "len" ||
+      lower === "size" ||
+      lower === "total" ||
+      lower === "offset" ||
+      lower === "index" ||
+      lower === "idx" ||
+      lower === "pos" ||
+      lower === "num" ||
+      lower === "code" ||
+      lower === "depth" ||
+      lower === "level" ||
+      lower === "counter" ||
+      lower === "retries" ||
+      lower === "retrycount" ||
+      lower === "status" ||
+      lower === "statuscode" ||
+      lower.endsWith("count") ||
+      lower.endsWith("size") ||
+      lower.endsWith("length") ||
+      lower.endsWith("index") ||
+      lower.endsWith("offset")
+    );
+  }
+
+  private isNumericExpr(cond: Expr, tsExpr?: ts.Expression): boolean {
+    if (tsExpr) {
+      if (ts.isNumericLiteral(tsExpr)) return true;
+      if (ts.isBinaryExpression(tsExpr)) {
+        const op = tsExpr.operatorToken.kind;
+        if (
+          op === ts.SyntaxKind.AmpersandToken ||
+          op === ts.SyntaxKind.BarToken ||
+          op === ts.SyntaxKind.CaretToken ||
+          op === ts.SyntaxKind.LessThanLessThanToken ||
+          op === ts.SyntaxKind.GreaterThanGreaterThanToken ||
+          op === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken ||
+          op === ts.SyntaxKind.PlusToken ||
+          op === ts.SyntaxKind.MinusToken ||
+          op === ts.SyntaxKind.AsteriskToken ||
+          op === ts.SyntaxKind.SlashToken ||
+          op === ts.SyntaxKind.PercentToken ||
+          op === ts.SyntaxKind.AsteriskAsteriskToken
+        ) {
+          return true;
+        }
+      }
+      if (ts.isPrefixUnaryExpression(tsExpr)) {
+        const op = tsExpr.operator;
+        if (
+          op === ts.SyntaxKind.PlusToken ||
+          op === ts.SyntaxKind.MinusToken ||
+          op === ts.SyntaxKind.TildeToken
+        ) {
+          return true;
+        }
+      }
+      if (ts.isPropertyAccessExpression(tsExpr)) {
+        const prop = tsExpr.name.text;
+        if (
+          prop === "length" ||
+          prop === "size" ||
+          prop === "byteLength" ||
+          prop === "charCount" ||
+          prop === "count"
+        ) {
+          return true;
+        }
+      }
+      if (ts.isIdentifier(tsExpr)) {
+        const typeCat = this.getVarType(tsExpr.text);
+        if (typeCat === "number") return true;
+        if (this.isNumericName(tsExpr.text)) return true;
+      }
+    }
+
+    if (
+      cond.kind === "LiteralExpr" &&
+      (cond.literalKind === "number" || typeof cond.value === "number")
+    ) {
+      return true;
+    }
+    if (cond.kind === "BinaryExpr") {
+      const op = cond.operator;
+      if (
+        op === "&" ||
+        op === "|" ||
+        op === "^" ||
+        op === "<<" ||
+        op === ">>" ||
+        op === ">>>" ||
+        op === "+" ||
+        op === "-" ||
+        op === "*" ||
+        op === "/" ||
+        op === "%" ||
+        op === "**"
+      ) {
+        return true;
+      }
+    }
+    if (cond.kind === "MemberAccessExpr") {
+      const prop = cond.property;
+      if (
+        prop === "length" ||
+        prop === "size" ||
+        prop === "byteLength" ||
+        prop === "charCount" ||
+        prop === "count"
+      ) {
+        return true;
+      }
+    }
+    if (cond.kind === "IdentifierExpr") {
+      const typeCat = this.getVarType(cond.name);
+      if (typeCat === "number") return true;
+      if (this.isNumericName(cond.name)) return true;
+    }
+    return false;
+  }
+
+  private isStringExpr(cond: Expr, tsExpr?: ts.Expression): boolean {
+    if (cond.kind === "TemplateLiteralExpr") return true;
+    if (tsExpr) {
+      if (
+        ts.isStringLiteral(tsExpr) ||
+        ts.isNoSubstitutionTemplateLiteral(tsExpr) ||
+        ts.isTemplateExpression(tsExpr)
+      ) {
+        return true;
+      }
+      if (ts.isIdentifier(tsExpr)) {
+        const typeCat = this.getVarType(tsExpr.text);
+        if (typeCat === "string") return true;
+      }
+    }
+    if (
+      cond.kind === "LiteralExpr" &&
+      (cond.literalKind === "string" || typeof cond.value === "string")
+    ) {
+      return true;
+    }
+    if (cond.kind === "IdentifierExpr") {
+      const typeCat = this.getVarType(cond.name);
+      if (typeCat === "string") return true;
+    }
+    return false;
+  }
+
+  private isTsNode(node: unknown): node is ts.Node {
+    return typeof node === "object" && node !== null && typeof (node as any).kind === "number";
+  }
+
+  private ensureBooleanCondition(expr: ts.Expression): Expr;
+  private ensureBooleanCondition(cond: Expr, tsExpr?: ts.Expression): Expr;
+  private ensureBooleanCondition(first: Expr | ts.Expression, second?: ts.Expression): Expr {
+    let cond: Expr;
+    let tsExpr: ts.Expression | undefined;
+
+    if (this.isTsNode(first)) {
+      tsExpr = first as ts.Expression;
+      cond = this.convertExpression(tsExpr);
+    } else {
+      cond = first as Expr;
+      tsExpr = second;
+    }
+
+    if (tsExpr && ts.isParenthesizedExpression(tsExpr)) {
+      while (tsExpr && ts.isParenthesizedExpression(tsExpr)) {
+        tsExpr = tsExpr.expression;
+      }
+    }
+
+    // Logical binary expressions (and / or) -> recursively ensure both sides
+    if (
+      cond.kind === "BinaryExpr" &&
+      (cond.operator === "and" ||
+        cond.operator === "or" ||
+        cond.operator === "&&" ||
+        cond.operator === "||")
+    ) {
+      let tsLeft: ts.Expression | undefined;
+      let tsRight: ts.Expression | undefined;
+      if (tsExpr && ts.isBinaryExpression(tsExpr)) {
+        tsLeft = tsExpr.left;
+        tsRight = tsExpr.right;
+      }
+      return {
+        ...cond,
+        left: this.ensureBooleanCondition(cond.left, tsLeft),
+        right: this.ensureBooleanCondition(cond.right, tsRight),
+      };
+    }
+
+    // Already a comparison or null-coalescing
+    if (
+      cond.kind === "BinaryExpr" &&
+      (cond.operator === "==" ||
+        cond.operator === "!=" ||
+        cond.operator === "===" ||
+        cond.operator === "!==" ||
+        cond.operator === "<" ||
+        cond.operator === "<=" ||
+        cond.operator === ">" ||
+        cond.operator === ">=" ||
+        cond.operator === "??")
+    ) {
+      return cond;
+    }
+
+    // Boolean literal
+    if (
+      cond.kind === "LiteralExpr" &&
+      (cond.literalKind === "boolean" || typeof cond.value === "boolean")
+    ) {
+      return cond;
+    }
+
+    // If it's a unary 'not'
+    if (cond.kind === "UnaryExpr" && (cond.operator === "not" || cond.operator === "!")) {
+      let innerTs: ts.Expression | undefined;
+      if (tsExpr && ts.isPrefixUnaryExpression(tsExpr)) {
+        innerTs = tsExpr.operand;
+      }
+      if (this.isNumericExpr(cond.operand, innerTs)) {
+        return {
+          kind: "BinaryExpr",
+          operator: "==",
+          left: cond.operand,
+          right: {
+            kind: "LiteralExpr",
+            literalKind: "number",
+            value: 0,
+            rawValue: "0",
+            span: cond.span,
+          },
+          span: cond.span,
+        };
+      }
+      if (this.isStringExpr(cond.operand, innerTs)) {
+        return {
+          kind: "BinaryExpr",
+          operator: "==",
+          left: cond.operand,
+          right: {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: "",
+            rawValue: '""',
+            span: cond.span,
+          },
+          span: cond.span,
+        };
+      }
+      return cond;
+    }
+
+    // Numeric expression: lower to expr != 0
+    if (this.isNumericExpr(cond, tsExpr)) {
+      return {
+        kind: "BinaryExpr",
+        operator: "!=",
+        left: cond,
+        right: {
+          kind: "LiteralExpr",
+          literalKind: "number",
+          value: 0,
+          rawValue: "0",
+          span: cond.span,
+        },
+        span: cond.span,
+      };
+    }
+
+    // String expression: lower to expr != ""
+    if (this.isStringExpr(cond, tsExpr)) {
+      return {
+        kind: "BinaryExpr",
+        operator: "!=",
+        left: cond,
+        right: {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: "",
+          rawValue: '""',
+          span: cond.span,
+        },
+        span: cond.span,
+      };
+    }
+
     return cond;
   }
 
   private convertConditionalReturn(expr: ts.ConditionalExpression, span: Span): IfStmt {
-    const condition = this.ensureBooleanCondition(this.convertExpression(expr.condition));
+    const condition = this.ensureBooleanCondition(expr.condition);
     const thenBranch: Block = {
       kind: "Block",
       statements: [
@@ -1405,7 +2032,7 @@ export class TsDecompiler {
     let currentElse: ts.Expression = expr.whenFalse;
     while (ts.isConditionalExpression(currentElse)) {
       elifBranches.push({
-        condition: this.ensureBooleanCondition(this.convertExpression(currentElse.condition)),
+        condition: this.ensureBooleanCondition(currentElse.condition),
         body: {
           kind: "Block",
           statements: [
@@ -1449,7 +2076,7 @@ export class TsDecompiler {
     expr: ts.ConditionalExpression,
     span: Span,
   ): IfStmt {
-    const condition = this.ensureBooleanCondition(this.convertExpression(expr.condition));
+    const condition = this.ensureBooleanCondition(expr.condition);
     const thenBranch: Block = {
       kind: "Block",
       statements: [
@@ -1469,7 +2096,7 @@ export class TsDecompiler {
     let currentElse: ts.Expression = expr.whenFalse;
     while (ts.isConditionalExpression(currentElse)) {
       elifBranches.push({
-        condition: this.ensureBooleanCondition(this.convertExpression(currentElse.condition)),
+        condition: this.ensureBooleanCondition(currentElse.condition),
         body: {
           kind: "Block",
           statements: [
@@ -1540,53 +2167,26 @@ export class TsDecompiler {
         kind: "LiteralExpr",
         literalKind: "string",
         value: expr.text,
-        rawValue: JSON.stringify(expr.text),
+        rawValue: expr.text.includes("\n") ? `"""\n${expr.text}\n"""` : JSON.stringify(expr.text),
         span: this.getSpan(expr),
       };
     }
 
     if (ts.isTemplateExpression(expr)) {
-      let result: Expr = {
-        kind: "LiteralExpr",
-        literalKind: "string",
-        value: expr.head.text,
-        rawValue: JSON.stringify(expr.head.text),
-        span: this.getSpan(expr.head),
-      };
+      const quasis: string[] = [expr.head.text];
+      const expressions: Expr[] = [];
 
       for (const span of expr.templateSpans) {
-        const exprNode = this.convertExpression(span.expression);
-        const strNode: Expr = {
-          kind: "CallExpr",
-          callee: { kind: "IdentifierExpr", name: "String", span: exprNode.span },
-          args: [exprNode],
-          span: exprNode.span,
-        };
-        result = {
-          kind: "BinaryExpr",
-          operator: "+",
-          left: result,
-          right: strNode,
-          span: mergeSpans(result.span, strNode.span),
-        };
-        if (span.literal.text.length > 0) {
-          const litNode: Expr = {
-            kind: "LiteralExpr",
-            literalKind: "string",
-            value: span.literal.text,
-            rawValue: JSON.stringify(span.literal.text),
-            span: this.getSpan(span.literal),
-          };
-          result = {
-            kind: "BinaryExpr",
-            operator: "+",
-            left: result,
-            right: litNode,
-            span: mergeSpans(result.span, litNode.span),
-          };
-        }
+        expressions.push(this.convertExpression(span.expression));
+        quasis.push(span.literal.text);
       }
-      return result;
+
+      return {
+        kind: "TemplateLiteralExpr",
+        quasis,
+        expressions,
+        span: this.getSpan(expr),
+      };
     }
 
     if (ts.isNumericLiteral(expr)) {
@@ -1595,6 +2195,41 @@ export class TsDecompiler {
         literalKind: "number",
         value: Number(expr.text),
         rawValue: expr.text,
+        span: this.getSpan(expr),
+      };
+    }
+
+    if (ts.isRegularExpressionLiteral(expr)) {
+      const text = expr.text;
+      const lastSlash = text.lastIndexOf("/");
+      const pattern = lastSlash > 0 ? text.slice(1, lastSlash) : text.slice(1);
+      const flags = lastSlash > 0 ? text.slice(lastSlash + 1) : "";
+      const args: Expr[] = [
+        {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: pattern,
+          rawValue: JSON.stringify(pattern),
+          span: this.getSpan(expr),
+        },
+      ];
+      if (flags.length > 0) {
+        args.push({
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: flags,
+          rawValue: JSON.stringify(flags),
+          span: this.getSpan(expr),
+        });
+      }
+      return {
+        kind: "CallExpr",
+        callee: {
+          kind: "IdentifierExpr",
+          name: "RegExp",
+          span: this.getSpan(expr),
+        },
+        args,
         span: this.getSpan(expr),
       };
     }
@@ -1638,6 +2273,14 @@ export class TsDecompiler {
       };
     }
 
+    if (expr.kind === ts.SyntaxKind.SuperKeyword) {
+      return {
+        kind: "IdentifierExpr",
+        name: "super",
+        span: this.getSpan(expr),
+      };
+    }
+
     if (ts.isIdentifier(expr)) {
       return {
         kind: "IdentifierExpr",
@@ -1662,7 +2305,7 @@ export class TsDecompiler {
 
     // Conditional Expressions (Ternary)
     if (ts.isConditionalExpression(expr)) {
-      const cond = this.convertExpression(expr.condition);
+      const cond = this.ensureBooleanCondition(expr.condition);
       const whenTrue = this.convertExpression(expr.whenTrue);
       const whenFalse = this.convertExpression(expr.whenFalse);
       return {
@@ -1718,6 +2361,15 @@ export class TsDecompiler {
         kind: "UnaryExpr",
         operator: op,
         operand: this.convertExpression(expr.operand),
+        span: this.getSpan(expr),
+      };
+    }
+
+    // Await Expressions
+    if (ts.isAwaitExpression(expr)) {
+      return {
+        kind: "AwaitExpr",
+        operand: this.convertExpression(expr.expression),
         span: this.getSpan(expr),
       };
     }
@@ -1913,13 +2565,38 @@ export class TsDecompiler {
     if (ts.isArrowFunction(expr)) {
       const params = expr.parameters.map((p) => ({
         name: p.name.getText(this.sourceFile),
-        typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
+        typeAnnotation: p.type ? this.convertTypeNode(p.type) : null,
+        defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+        isOptional: p.questionToken ? true : undefined,
         span: this.getSpan(p),
       }));
 
       const body = ts.isBlock(expr.body)
         ? this.convertBlock(expr.body)
         : this.convertExpression(expr.body);
+
+      return {
+        kind: "ClosureExpr",
+        params,
+        returnType: expr.type ? this.convertTypeNode(expr.type) : null,
+        body,
+        span: this.getSpan(expr),
+      };
+    }
+
+    // Function Expression
+    if (ts.isFunctionExpression(expr)) {
+      const params = expr.parameters.map((p) => ({
+        name: p.name.getText(this.sourceFile),
+        typeAnnotation: p.type ? this.convertTypeNode(p.type) : null,
+        defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
+        isOptional: p.questionToken ? true : undefined,
+        span: this.getSpan(p),
+      }));
+
+      const body = expr.body
+        ? this.convertBlock(expr.body)
+        : { kind: "Block", statements: [], span: this.getSpan(expr) };
 
       return {
         kind: "ClosureExpr",
@@ -1952,6 +2629,20 @@ export class TsDecompiler {
         return "/";
       case ts.SyntaxKind.PercentToken:
         return "%";
+      case ts.SyntaxKind.AsteriskAsteriskToken:
+        return "**";
+      case ts.SyntaxKind.AmpersandToken:
+        return "&";
+      case ts.SyntaxKind.BarToken:
+        return "|";
+      case ts.SyntaxKind.CaretToken:
+        return "^";
+      case ts.SyntaxKind.LessThanLessThanToken:
+        return "<<";
+      case ts.SyntaxKind.GreaterThanGreaterThanToken:
+        return ">>";
+      case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
+        return ">>>";
       case ts.SyntaxKind.EqualsEqualsToken:
       case ts.SyntaxKind.EqualsEqualsEqualsToken:
         return "==";
@@ -1973,7 +2664,9 @@ export class TsDecompiler {
       case ts.SyntaxKind.QuestionQuestionToken:
         return "??";
       default:
-        return "==";
+        throw new Error(
+          `Unsupported binary operator syntax kind: ${kind} (${ts.SyntaxKind[kind] ?? "unknown"})`,
+        );
     }
   }
 
@@ -1989,9 +2682,77 @@ export class TsDecompiler {
         return this.makePrimitive("bool", node);
       case ts.SyntaxKind.VoidKeyword:
         return this.makePrimitive("void", node);
+      case ts.SyntaxKind.NullKeyword:
+      case ts.SyntaxKind.UndefinedKeyword:
+        return this.makePrimitive("nil", node);
       case ts.SyntaxKind.AnyKeyword:
       case ts.SyntaxKind.UnknownKeyword:
         return { kind: "NamedType", name: "unknown", span: this.getSpan(node) };
+      case ts.SyntaxKind.LiteralType: {
+        const litNode = node as ts.LiteralTypeNode;
+        const lit = litNode.literal;
+        if (ts.isStringLiteral(lit) || ts.isNoSubstitutionTemplateLiteral(lit)) {
+          return {
+            kind: "NamedType",
+            name: JSON.stringify(lit.text),
+            span: this.getSpan(node),
+          };
+        }
+        if (ts.isNumericLiteral(lit)) {
+          return {
+            kind: "NamedType",
+            name: lit.text,
+            span: this.getSpan(node),
+          };
+        }
+        if (ts.isPrefixUnaryExpression(lit)) {
+          if (lit.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(lit.operand)) {
+            return {
+              kind: "NamedType",
+              name: `-${lit.operand.text}`,
+              span: this.getSpan(node),
+            };
+          }
+          if (lit.operator === ts.SyntaxKind.PlusToken && ts.isNumericLiteral(lit.operand)) {
+            return {
+              kind: "NamedType",
+              name: lit.operand.text,
+              span: this.getSpan(node),
+            };
+          }
+          return {
+            kind: "NamedType",
+            name: lit.getText(this.sourceFile),
+            span: this.getSpan(node),
+          };
+        }
+        if (lit.kind === ts.SyntaxKind.TrueKeyword) {
+          return {
+            kind: "NamedType",
+            name: "true",
+            span: this.getSpan(node),
+          };
+        }
+        if (lit.kind === ts.SyntaxKind.FalseKeyword) {
+          return {
+            kind: "NamedType",
+            name: "false",
+            span: this.getSpan(node),
+          };
+        }
+        if (lit.kind === ts.SyntaxKind.NullKeyword) {
+          return {
+            kind: "PrimitiveType",
+            primitive: "nil",
+            span: this.getSpan(node),
+          };
+        }
+        return {
+          kind: "NamedType",
+          name: lit.getText(this.sourceFile),
+          span: this.getSpan(node),
+        };
+      }
       case ts.SyntaxKind.ParenthesizedType: {
         const par = node as ts.ParenthesizedTypeNode;
         return this.convertTypeNode(par.type);
@@ -2005,6 +2766,19 @@ export class TsDecompiler {
         return {
           kind: "ArrayType",
           elementType: this.convertTypeNode(arr.elementType),
+          span: this.getSpan(node),
+        };
+      }
+      case ts.SyntaxKind.TupleType: {
+        const tuple = node as ts.TupleTypeNode;
+        return {
+          kind: "TupleType",
+          elementTypes: tuple.elements.map((el) => {
+            if (ts.isNamedTupleMember(el)) {
+              return this.convertTypeNode(el.type);
+            }
+            return this.convertTypeNode(el);
+          }),
           span: this.getSpan(node),
         };
       }

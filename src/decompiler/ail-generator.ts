@@ -7,6 +7,8 @@
  */
 
 import type {
+  BinaryExpr,
+  BinaryOp,
   Block,
   ClassDecl,
   ComponentDecl,
@@ -25,7 +27,127 @@ import type {
   TypeExpr,
   VarDecl,
 } from "../core/ast.js";
+import { Precedence } from "../core/parser.js";
 import type { CstTriviaTable } from "../core/trivia.js";
+
+export function getBinaryOpPrecedence(op: BinaryOp): number {
+  switch (op) {
+    case "**":
+      return Precedence.EXPONENT; // 14
+    case "*":
+    case "/":
+    case "%":
+      return Precedence.PRODUCT; // 13
+    case "+":
+    case "-":
+      return Precedence.SUM; // 12
+    case "<<":
+    case ">>":
+    case ">>>":
+      return Precedence.SHIFT; // 11
+    case "<":
+    case "<=":
+    case ">":
+    case ">=":
+      return Precedence.LESSGREATER; // 10
+    case "==":
+    case "!=":
+      return Precedence.EQUALS; // 9
+    case "&":
+      return Precedence.BIT_AND; // 8
+    case "^":
+      return Precedence.BIT_XOR; // 7
+    case "|":
+      return Precedence.BIT_OR; // 6
+    case "??":
+      return Precedence.COALESCE; // 5
+    case "and":
+    case "&&":
+      return Precedence.AND; // 4
+    case "or":
+    case "||":
+      return Precedence.OR; // 3
+    default:
+      return Precedence.LOWEST;
+  }
+}
+
+export function getExprPrecedence(expr: Expr): number {
+  switch (expr.kind) {
+    case "LiteralExpr":
+    case "TemplateLiteralExpr":
+    case "IdentifierExpr":
+    case "ArrayLiteralExpr":
+    case "RecordLiteralExpr":
+      return 99; // Primary / atomic
+    case "PostfixTryExpr":
+    case "CallExpr":
+    case "MemberAccessExpr":
+    case "IndexExpr":
+      return Precedence.POSTFIX; // 16
+    case "UnaryExpr":
+      return Precedence.PREFIX; // 15
+    case "BinaryExpr":
+      return getBinaryOpPrecedence(expr.operator);
+    case "AssignExpr":
+      return Precedence.ASSIGN; // 2
+    case "ClosureExpr":
+      return Precedence.LOWEST; // 1
+    default:
+      return Precedence.LOWEST;
+  }
+}
+
+export function isRightAssociative(op: BinaryOp): boolean {
+  return op === "**";
+}
+
+export function isLogicalOp(op: BinaryOp): boolean {
+  return op === "and" || op === "&&" || op === "or" || op === "||";
+}
+
+export function normalizeLogicalOp(op: BinaryOp): "and" | "or" {
+  return op === "and" || op === "&&" ? "and" : "or";
+}
+
+export function needsBinaryParentheses(
+  parentOp: BinaryOp,
+  child: Expr,
+  isRightChild: boolean,
+): boolean {
+  const childPrec = getExprPrecedence(child);
+  const parentPrec = getBinaryOpPrecedence(parentOp);
+
+  // Rule 1: childPrecedence < parentPrecedence
+  if (childPrec < parentPrec) {
+    return true;
+  }
+
+  if (child.kind === "BinaryExpr") {
+    const childOp = child.operator;
+
+    // Rule 2: Right-hand child of left-associative operators (e.g. -, /, %, <<, >>, >>>)
+    // has childPrecedence === parentPrecedence (e.g., a - (b - c), a / (b / c)).
+    if (isRightChild && !isRightAssociative(parentOp) && childPrec === parentPrec) {
+      return true;
+    }
+
+    // Rule 3: Left-hand child of right-associative operators (**)
+    // has childPrecedence === parentPrecedence (e.g., (a ** b) ** c).
+    if (!isRightChild && isRightAssociative(parentOp) && childPrec === parentPrec) {
+      return true;
+    }
+
+    // Rule 4: Logical operators mixing and and or (e.g. (a or b) and c, a and (b or c)).
+    if (isLogicalOp(parentOp) && isLogicalOp(childOp)) {
+      if (normalizeLogicalOp(parentOp) !== normalizeLogicalOp(childOp)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
 
 export interface AilGeneratorOptions {
   indent?: string;
@@ -187,19 +309,24 @@ export class AilGenerator {
   private emitImport(imp: ImportDecl): void {
     const nodeId = `import:${imp.source}`;
     this.emitLeadingTrivia(nodeId);
+    const pub = imp.isExported ? "pub " : "";
 
     if (imp.specifiers.length === 0) {
-      this.writeLine(`import "${imp.source}"`);
+      this.writeLine(`${pub}import "${imp.source}"`);
       return;
     }
 
     if (imp.specifiers.length === 1 && imp.specifiers[0].isWildcard) {
-      this.writeLine(`from "${imp.source}" import * as ${imp.specifiers[0].alias ?? "mod"}`);
+      if (imp.specifiers[0].alias) {
+        this.writeLine(`${pub}from "${imp.source}" import * as ${imp.specifiers[0].alias}`);
+      } else {
+        this.writeLine(`${pub}from "${imp.source}" import *`);
+      }
       return;
     }
 
     const specs = imp.specifiers.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
-    this.writeLine(`from "${imp.source}" import ${specs.join(", ")}`);
+    this.writeLine(`${pub}from "${imp.source}" import ${specs.join(", ")}`);
   }
 
   private emitModuleItem(item: ModuleItem): void {
@@ -282,8 +409,9 @@ export class AilGenerator {
               const pPub = p.isPub ? "pub " : "";
               const pRo = p.isReadonly ? "readonly " : "";
               const pMut = p.isMut ? "mut " : "";
+              const opt = p.isOptional ? "?" : "";
               const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-              return `${pPub}${pRo}${pMut}${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+              return `${pPub}${pRo}${pMut}${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
             })
             .join(", ")})`
         : "";
@@ -317,8 +445,9 @@ export class AilGenerator {
         const as = m.isAsync ? "async " : "";
         const params = m.params
           .map((p) => {
+            const opt = p.isOptional ? "?" : "";
             const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-            return `${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+            return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
           })
           .join(", ");
         const ret = m.returnType ? ` -> ${this.formatTypeExpr(m.returnType)}` : "";
@@ -361,6 +490,15 @@ export class AilGenerator {
           this.dedent();
         }
       }
+
+      if (c.staticBlocks && c.staticBlocks.length > 0) {
+        for (const sb of c.staticBlocks) {
+          this.writeLine("static:");
+          this.indent();
+          this.emitBlock(sb, true);
+          this.dedent();
+        }
+      }
     }
 
     this.dedent();
@@ -389,19 +527,23 @@ export class AilGenerator {
 
     const params = fn.params
       .map((p) => {
+        const opt = p.isOptional ? "?" : "";
         const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-        return `${p.name}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+        return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
       })
       .join(", ");
 
+    const as = fn.isAsync ? "async " : "";
     if (fn.isExpressionBodied && !Array.isArray((fn.body as Block).statements)) {
       const retType = fn.returnType ? ` -> ${this.formatTypeExpr(fn.returnType)}` : "";
-      this.writeLine(`fn ${fn.name}(${params})${retType} = ${this.formatExpr(fn.body as Expr)}`);
+      this.writeLine(
+        `${as}fn ${fn.name}(${params})${retType} = ${this.formatExpr(fn.body as Expr)}`,
+      );
       return;
     }
 
     const retType = fn.returnType ? ` -> ${this.formatTypeExpr(fn.returnType)}` : "";
-    this.writeLine(`fn ${fn.name}(${params})${retType}:`);
+    this.writeLine(`${as}fn ${fn.name}(${params})${retType}:`);
     this.indent();
     this.emitBlock(fn.body as Block, true);
     this.dedent();
@@ -409,7 +551,7 @@ export class AilGenerator {
 
   private emitBlock(block: Block, isTail = false): void {
     if (block.statements.length === 0) {
-      this.writeLine("nil");
+      this.writeLine("pass");
       return;
     }
 
@@ -420,88 +562,139 @@ export class AilGenerator {
     }
   }
 
-  private emitStatement(stmt: Statement, isTail = false): void {
+  public formatStatement(stmt: Statement, indent = ""): string {
     switch (stmt.kind) {
       case "LetBinding": {
         const op = stmt.isMut ? "::=" : ":=";
         const typeAnn = stmt.typeAnnotation
           ? `: ${this.formatTypeExpr(stmt.typeAnnotation)} `
           : " ";
-        this.writeLine(`${stmt.name}${typeAnn}${op} ${this.formatExpr(stmt.init)}`);
-        break;
+        return `${indent}${stmt.name}${typeAnn}${op} ${this.formatExpr(stmt.init)}`;
       }
       case "DestructureBinding": {
         const op = stmt.isMut ? "::=" : ":=";
         const names = stmt.names.join(", ");
-        this.writeLine(`[${names}] ${op} ${this.formatExpr(stmt.init)}`);
-        break;
+        return `${indent}[${names}] ${op} ${this.formatExpr(stmt.init)}`;
       }
       case "AssignStmt": {
-        this.writeLine(
-          `${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`,
-        );
-        break;
+        return `${indent}${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)}`;
       }
       case "ReturnStmt": {
         if (stmt.value) {
-          if (isTail) {
-            this.writeLine(this.formatExpr(stmt.value));
-          } else {
-            this.writeLine(`ret ${this.formatExpr(stmt.value)}`);
-          }
-        } else {
-          this.writeLine("ret");
+          return `${indent}ret ${this.formatExpr(stmt.value)}`;
         }
-        break;
+        return `${indent}ret`;
       }
       case "ExprStmt": {
-        this.writeLine(this.formatExpr(stmt.expr));
-        break;
+        return `${indent}${this.formatExpr(stmt.expr)}`;
       }
       case "IfStmt": {
-        this.writeLine(`if ${this.formatExpr(stmt.condition)}:`);
+        let s = `${indent}if ${this.formatExpr(stmt.condition)}:\n`;
         this.indent();
-        this.emitBlock(stmt.thenBranch, isTail);
+        s += this.formatBlock(stmt.thenBranch);
         this.dedent();
 
         for (const elif of stmt.elifBranches) {
-          this.writeLine(`elif ${this.formatExpr(elif.condition)}:`);
+          s += `\n${indent}elif ${this.formatExpr(elif.condition)}:\n`;
           this.indent();
-          this.emitBlock(elif.body, isTail);
+          s += this.formatBlock(elif.body);
           this.dedent();
         }
 
         if (stmt.elseBranch) {
-          this.writeLine("else:");
+          s += `\n${indent}else:\n`;
           this.indent();
-          this.emitBlock(stmt.elseBranch, isTail);
+          s += this.formatBlock(stmt.elseBranch);
           this.dedent();
         }
-        break;
+        return s;
       }
       case "MatchStmt": {
-        this.writeLine(`match ${this.formatExpr(stmt.target)}:`);
+        const s = `${indent}match ${this.formatExpr(stmt.target)}:\n`;
         this.indent();
-        for (const mc of stmt.cases) {
-          this.emitMatchCase(mc);
-        }
+        const cases = stmt.cases.map((mc) => this.formatMatchCase(mc)).join("\n");
         this.dedent();
-        break;
+        return s + cases;
       }
       case "ForStmt": {
-        this.writeLine(`for ${stmt.variable} in ${this.formatExpr(stmt.iterable)}:`);
+        let s = `${indent}for ${stmt.variable} in ${this.formatExpr(stmt.iterable)}:\n`;
         this.indent();
-        this.emitBlock(stmt.body);
+        s += this.formatBlock(stmt.body);
         this.dedent();
-        break;
+        return s;
       }
       case "WhileStmt": {
-        this.writeLine(`while ${this.formatExpr(stmt.condition)}:`);
+        let s = `${indent}while ${this.formatExpr(stmt.condition)}:\n`;
         this.indent();
-        this.emitBlock(stmt.body);
+        s += this.formatBlock(stmt.body);
         this.dedent();
-        break;
+        return s;
       }
+      case "BreakStmt": {
+        return `${indent}break`;
+      }
+      case "ContinueStmt": {
+        return `${indent}continue`;
+      }
+      case "ThrowStmt": {
+        return `${indent}throw ${this.formatExpr(stmt.expr)}`;
+      }
+      case "TryStmt": {
+        let s = `${indent}try:\n`;
+        this.indent();
+        s += this.formatBlock(stmt.tryBlock);
+        this.dedent();
+
+        if (stmt.catchBlock) {
+          const param = stmt.catchParam ? ` ${stmt.catchParam}` : "";
+          s += `\n${indent}catch${param}:\n`;
+          this.indent();
+          s += this.formatBlock(stmt.catchBlock);
+          this.dedent();
+        }
+
+        if (stmt.finallyBlock) {
+          s += `\n${indent}finally:\n`;
+          this.indent();
+          s += this.formatBlock(stmt.finallyBlock);
+          this.dedent();
+        }
+        return s;
+      }
+    }
+  }
+
+  public formatBlock(block: Block): string {
+    if (block.statements.length === 0) {
+      return `${this.getIndent()}nil`;
+    }
+    return block.statements.map((s) => this.formatStatement(s, this.getIndent())).join("\n");
+  }
+
+  public formatMatchCase(mc: MatchCase): string {
+    const patternStr = this.formatPattern(mc.pattern);
+    const guardStr = mc.guard ? ` if ${this.formatExpr(mc.guard)}` : "";
+    const indent = this.getIndent();
+    if ("statements" in mc.body) {
+      let s = `${indent}case ${patternStr}${guardStr} =>\n`;
+      this.indent();
+      s += this.formatBlock(mc.body);
+      this.dedent();
+      return s;
+    } else {
+      return `${indent}case ${patternStr}${guardStr} => ${this.formatExpr(mc.body)}`;
+    }
+  }
+
+  private emitStatement(stmt: Statement, isTail = false): void {
+    if (stmt.kind === "ReturnStmt" && stmt.value && isTail) {
+      this.writeLine(this.formatExpr(stmt.value));
+      return;
+    }
+    const str = this.formatStatement(stmt, this.getIndent());
+    const lines = str.split("\n");
+    for (const line of lines) {
+      this.buffer.push(`${line}\n`);
     }
   }
 
@@ -538,7 +731,10 @@ export class AilGenerator {
     this.emitLeadingTrivia(nodeId);
 
     const params = comp.params
-      .map((p) => `${p.name}:${this.formatTypeExpr(p.typeAnnotation)}`)
+      .map((p) => {
+        const opt = p.isOptional ? "?" : "";
+        return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}`;
+      })
       .join(", ");
 
     this.writeLine(`component ${comp.name}(${params}):`);
@@ -643,6 +839,14 @@ export class AilGenerator {
     switch (expr.kind) {
       case "LiteralExpr": {
         if (expr.literalKind === "string") {
+          if (
+            typeof expr.value === "string" &&
+            expr.value.includes("\n") &&
+            !expr.value.includes("`") &&
+            !expr.value.includes('"""')
+          ) {
+            return `"""\n${expr.value}\n"""`;
+          }
           return JSON.stringify(expr.value);
         }
         if (expr.literalKind === "nil") {
@@ -650,11 +854,25 @@ export class AilGenerator {
         }
         return String(expr.value);
       }
+      case "TemplateLiteralExpr": {
+        let result = "`" + (expr.quasis[0] ?? "");
+        for (let i = 0; i < expr.expressions.length; i++) {
+          result += "${" + this.formatExpr(expr.expressions[i]) + "}" + (expr.quasis[i + 1] ?? "");
+        }
+        result += "`";
+        return result;
+      }
       case "IdentifierExpr":
         return expr.name;
       case "BinaryExpr": {
         const op = expr.operator === "&&" ? "and" : expr.operator === "||" ? "or" : expr.operator;
-        return `${this.formatExpr(expr.left)} ${op} ${this.formatExpr(expr.right)}`;
+        const leftStr = needsBinaryParentheses(expr.operator, expr.left, false)
+          ? `(${this.formatExpr(expr.left)})`
+          : this.formatExpr(expr.left);
+        const rightStr = needsBinaryParentheses(expr.operator, expr.right, true)
+          ? `(${this.formatExpr(expr.right)})`
+          : this.formatExpr(expr.right);
+        return `${leftStr} ${op} ${rightStr}`;
       }
       case "UnaryExpr": {
         if (expr.operator === "...") {
@@ -663,7 +881,14 @@ export class AilGenerator {
         const op =
           expr.operator === "!" ? "not " : expr.operator === "not" ? "not " : expr.operator;
         const operand = this.formatExpr(expr.operand);
-        if (expr.operand.kind === "BinaryExpr") {
+        if (
+          expr.operand.kind === "BinaryExpr" ||
+          expr.operand.kind === "AssignExpr" ||
+          expr.operand.kind === "ClosureExpr" ||
+          (expr.operator === "-" &&
+            expr.operand.kind === "UnaryExpr" &&
+            expr.operand.operator === "-")
+        ) {
           return `${op}(${operand})`;
         }
         return `${op}${operand}`;
@@ -672,14 +897,39 @@ export class AilGenerator {
         return `${this.formatExpr(expr.operand)}?`;
       case "CallExpr": {
         const args = expr.args.map((a) => this.formatExpr(a)).join(", ");
-        return `${this.formatExpr(expr.callee)}(${args})`;
+        const needsParen =
+          expr.callee.kind !== "IdentifierExpr" &&
+          expr.callee.kind !== "MemberAccessExpr" &&
+          expr.callee.kind !== "CallExpr" &&
+          expr.callee.kind !== "IndexExpr";
+        const calleeStr = needsParen
+          ? `(${this.formatExpr(expr.callee)})`
+          : this.formatExpr(expr.callee);
+        return `${calleeStr}(${args})`;
       }
       case "MemberAccessExpr": {
         const dot = expr.isSafeNav ? "?." : ".";
-        return `${this.formatExpr(expr.object)}${dot}${expr.property}`;
+        const needsParen =
+          expr.object.kind === "BinaryExpr" ||
+          expr.object.kind === "UnaryExpr" ||
+          expr.object.kind === "AssignExpr" ||
+          expr.object.kind === "ClosureExpr";
+        const objStr = needsParen
+          ? `(${this.formatExpr(expr.object)})`
+          : this.formatExpr(expr.object);
+        return `${objStr}${dot}${expr.property}`;
       }
-      case "IndexExpr":
-        return `${this.formatExpr(expr.object)}[${this.formatExpr(expr.index)}]`;
+      case "IndexExpr": {
+        const needsParen =
+          expr.object.kind === "BinaryExpr" ||
+          expr.object.kind === "UnaryExpr" ||
+          expr.object.kind === "AssignExpr" ||
+          expr.object.kind === "ClosureExpr";
+        const objStr = needsParen
+          ? `(${this.formatExpr(expr.object)})`
+          : this.formatExpr(expr.object);
+        return `${objStr}[${this.formatExpr(expr.index)}]`;
+      }
       case "ArrayLiteralExpr": {
         const items = expr.elements.map((e) => this.formatExpr(e)).join(", ");
         return `[${items}]`;
@@ -700,27 +950,51 @@ export class AilGenerator {
       }
       case "ClosureExpr": {
         const params = expr.params
-          .map((p) => `${p.name}:${this.formatTypeExpr(p.typeAnnotation)}`)
+          .map((p) => {
+            const opt = p.isOptional ? "?" : "";
+            const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
+            return p.typeAnnotation
+              ? `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`
+              : `${p.name}${opt}${def}`;
+          })
           .join(", ");
+        const retStr = expr.returnType ? ` -> ${this.formatTypeExpr(expr.returnType)}` : "";
+
         if ("kind" in expr.body && expr.body.kind !== "Block") {
-          return `fn(${params}) = ${this.formatExpr(expr.body as Expr)}`;
+          return `fn(${params})${retStr} = ${this.formatExpr(expr.body as Expr)}`;
         }
+
         if (expr.body.kind === "Block") {
-          if (
-            expr.body.statements.length === 1 &&
-            expr.body.statements[0].kind === "ReturnStmt" &&
-            expr.body.statements[0].value
-          ) {
-            return `fn(${params}) = ${this.formatExpr(expr.body.statements[0].value)}`;
+          const stmts = expr.body.statements;
+          if (stmts.length === 0) {
+            return `fn(${params})${retStr} = nil`;
           }
-          if (expr.body.statements.length === 0) {
-            return `fn(${params}) = nil`;
+          if (stmts.length === 1) {
+            const stmt = stmts[0];
+            if (stmt.kind === "ReturnStmt") {
+              return stmt.value
+                ? `fn(${params})${retStr} = ${this.formatExpr(stmt.value)}`
+                : `fn(${params})${retStr} = nil`;
+            }
+            if (stmt.kind === "ExprStmt") {
+              return `fn(${params})${retStr} = ${this.formatExpr(stmt.expr)}`;
+            }
           }
+
+          const outerIndent = this.getIndent();
+          this.indent();
+          const blockBody = this.formatBlock(expr.body);
+          this.dedent();
+
+          return `fn(${params})${retStr} {\n${blockBody}\n${outerIndent}}`;
         }
-        return `fn(${params}) = nil`;
+
+        return `fn(${params})${retStr} = nil`;
       }
       case "AssignExpr":
         return `${this.formatExpr(expr.target)} ${expr.op ?? "="} ${this.formatExpr(expr.value)}`;
+      case "AwaitExpr":
+        return `await ${this.formatExpr(expr.operand)}`;
     }
   }
 
@@ -730,6 +1004,10 @@ export class AilGenerator {
         return t.primitive;
       case "ArrayType":
         return `[${this.formatTypeExpr(t.elementType)}]`;
+      case "TupleType": {
+        const elements = t.elementTypes.map((e) => this.formatTypeExpr(e)).join(", ");
+        return t.elementTypes.length === 1 ? `[${elements},]` : `[${elements}]`;
+      }
       case "RecordType": {
         const fields = t.fields.map((f) => `${f.name}:${this.formatTypeExpr(f.type)}`).join(", ");
         return `{ ${fields} }`;
@@ -745,7 +1023,8 @@ export class AilGenerator {
             !t.innerType.name.includes("(") &&
             !t.innerType.name.includes("=>") &&
             !t.innerType.typeArgs) ||
-          t.innerType.kind === "ArrayType"
+          t.innerType.kind === "ArrayType" ||
+          t.innerType.kind === "TupleType"
         ) {
           return `${inner}?`;
         }

@@ -102,8 +102,22 @@ export class CppEmitter {
 
   private extractNamespace(modPath: string): string | null {
     if (!modPath || modPath === "main") return null;
-    const clean = modPath.replace(/\.(cpp|hpp|h|cc)(\.ail)?$/, "").replace(/\.ail$/, "");
-    const parts = clean.split(/[./\\]/);
+    if (
+      !modPath.includes("/") &&
+      !modPath.includes("\\") &&
+      !modPath.includes(".cpp") &&
+      !modPath.includes(".hpp") &&
+      !modPath.includes(".h")
+    ) {
+      if (modPath.includes("::")) {
+        const parts = modPath.split("::");
+        parts.pop();
+        return parts.length > 0 ? parts.join("::") : null;
+      }
+      return modPath.replace(/\./g, "::");
+    }
+    const clean = modPath.replace(/\.(cpp|hpp|h|cc|cxx)(\.ail)?$/, "").replace(/\.ail$/, "");
+    const parts = clean.split(/[/\\]/);
     if (parts.length > 1) {
       parts.pop(); // remove file name
       return parts.join("::");
@@ -248,7 +262,7 @@ export class CppEmitter {
     const retType = m.returnType ? this.emitTypeExpr(m.returnType) : "void";
     const params = m.params
       .map((p) => {
-        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+        const typeStr = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "auto";
         const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
         return `${typeStr} ${p.name}${def}`;
       })
@@ -290,7 +304,7 @@ export class CppEmitter {
     const retType = fn.returnType ? this.emitTypeExpr(fn.returnType) : "void";
     const paramsStr = fn.params
       .map((p) => {
-        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+        const typeStr = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "auto";
         const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
         return `${typeStr} ${p.name}${def}`;
       })
@@ -406,6 +420,12 @@ export class CppEmitter {
         this.ctx.writeLine("}");
         break;
       }
+      case "BreakStmt":
+        this.ctx.writeLine("break;");
+        break;
+      case "ContinueStmt":
+        this.ctx.writeLine("continue;");
+        break;
       case "ExprStmt": {
         const exprCode = this.emitExpr(stmt.expr);
         if (isImplicitReturn) {
@@ -432,6 +452,18 @@ export class CppEmitter {
         if (expr.literalKind === "nil") return "nullptr";
         return expr.rawValue;
       }
+      case "TemplateLiteralExpr": {
+        const parts: string[] = [];
+        for (let i = 0; i < expr.quasis.length; i++) {
+          if (expr.quasis[i].length > 0 || expr.quasis.length === 1) {
+            parts.push(JSON.stringify(expr.quasis[i]));
+          }
+          if (i < expr.expressions.length) {
+            parts.push(`std::to_string(${this.emitExpr(expr.expressions[i])})`);
+          }
+        }
+        return parts.length > 0 ? parts.join(" + ") : '""';
+      }
       case "IdentifierExpr":
         return expr.name;
       case "BinaryExpr": {
@@ -444,6 +476,9 @@ export class CppEmitter {
       }
       case "UnaryExpr": {
         const operand = this.emitExpr(expr.operand);
+        if (expr.operator === "...") {
+          return `...${operand}`;
+        }
         const op = expr.operator === "not" ? "!" : expr.operator;
         return `${op}(${operand})`;
       }
@@ -543,16 +578,22 @@ export class CppEmitter {
         return "auto";
       case "ArrayType":
         return `std::vector<${this.emitTypeExpr(t.elementType)}>`;
+      case "TupleType": {
+        const elements = t.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
+        return `std::tuple<${elements}>`;
+      }
       case "OptionType":
         return `std::optional<${this.emitTypeExpr(t.innerType)}>`;
       case "ResultType":
         return `std::expected<${this.emitTypeExpr(t.okType)}, ${this.emitTypeExpr(t.errType)}>`;
-      case "NamedType":
+      case "NamedType": {
+        const cppName = t.name.replace(/\./g, "::");
         if (t.typeArgs && t.typeArgs.length > 0) {
           const args = t.typeArgs.map((ta) => this.emitTypeExpr(ta)).join(", ");
-          return `${t.name}<${args}>`;
+          return `${cppName}<${args}>`;
         }
-        return t.name;
+        return cppName;
+      }
       case "RecordType": {
         const fields = t.fields.map((f) => `${this.emitTypeExpr(f.type)} ${f.name};`).join(" ");
         return `struct { ${fields} }`;

@@ -114,13 +114,11 @@ export interface UserProfile {
     expect(res.reconstructed).toContain("update(dt: number): void {");
   });
 
-  it("decompiles and roundtrips string literal unions as enums without parser failure", () => {
+  it("decompiles and roundtrips string literal unions as type aliases without synthetic enums", () => {
     const originalTs = `export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";`;
 
     const res = executeRoundtrip(originalTs, "typescript", "WaveShape.ts");
-    expect(res.ail).toContain("enum WaveShape:");
-    expect(res.ail).toContain("sine");
-    expect(res.ail).toContain("square");
+    expect(res.ail).toContain('type WaveShape = "sine" | "square" | "sawtooth" | "triangle"');
     expect(res.reconstructed).toContain(
       'export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";',
     );

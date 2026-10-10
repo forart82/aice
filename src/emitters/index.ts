@@ -5,6 +5,7 @@
 import type { Module } from "../core/ast.js";
 import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
 import { CppEmitter } from "./cpp-emitter.js";
+import { CSharpEmitter } from "./csharp-emitter.js";
 import { CssEmitter } from "./css-emitter.js";
 import { GoEmitter } from "./go-emitter.js";
 import { HtmlEmitter } from "./html-emitter.js";
@@ -14,6 +15,7 @@ import { TypeScriptEmitter } from "./ts-emitter.js";
 
 export * from "./context.js";
 export * from "./cpp-emitter.js";
+export * from "./csharp-emitter.js";
 export * from "./css-emitter.js";
 export * from "./go-emitter.js";
 export * from "./html-emitter.js";
@@ -52,6 +54,10 @@ export function emitTarget(
     }
     case "cpp": {
       const emitter = new CppEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "csharp": {
+      const emitter = new CSharpEmitter(options);
       return emitter.emit(mod);
     }
     case "html": {

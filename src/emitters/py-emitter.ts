@@ -24,6 +24,8 @@ export class PythonEmitter {
   private structTypes: Map<string, string[]> = new Map();
   private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
   private varTypes: Map<string, string> = new Map();
+  private closureCount = 0;
+  private pendingHoistedDefs: string[] = [];
 
   constructor(options: EmitterOptions = {}) {
     this.ctx = new EmitterContext("python", {
@@ -40,6 +42,8 @@ export class PythonEmitter {
     this.structTypes.clear();
     this.enumVariants.clear();
     this.varTypes.clear();
+    this.closureCount = 0;
+    this.pendingHoistedDefs = [];
     for (const item of mod.items) {
       if (item.kind === "TypeDecl") {
         if (item.fields) {
@@ -123,7 +127,14 @@ export class PythonEmitter {
   }
 
   private emitImport(imp: ImportDecl): void {
-    const modName = imp.source.replace(/\.[a-zA-Z]+$/, "").replace(/^\.\//, "");
+    const modName = imp.source
+      .replace(/\.[a-zA-Z]+$/, "")
+      .replace(/^\.\//, "")
+      .replace(/\//g, ".");
+    if (imp.specifiers.length === 0) {
+      this.ctx.writeLine(`import ${modName}`);
+      return;
+    }
     if (imp.specifiers.length === 1 && imp.specifiers[0].isWildcard) {
       this.ctx.writeLine(`from ${modName} import *`);
       return;
@@ -191,7 +202,12 @@ export class PythonEmitter {
       this.ctx.writeLine();
     }
 
-    if (c.methods.length === 0 && c.properties.length === 0 && !hasPrimaryCtor) {
+    if (
+      c.methods.length === 0 &&
+      c.properties.length === 0 &&
+      !hasPrimaryCtor &&
+      (!c.staticBlocks || c.staticBlocks.length === 0)
+    ) {
       this.ctx.writeLine("pass");
     }
 
@@ -199,6 +215,13 @@ export class PythonEmitter {
       this.emitMethodDecl(c.methods[i]);
       if (i < c.methods.length - 1) {
         this.ctx.writeLine();
+      }
+    }
+
+    if (c.staticBlocks && c.staticBlocks.length > 0) {
+      for (const sb of c.staticBlocks) {
+        this.ctx.writeLine();
+        this.emitBlock(sb);
       }
     }
 
@@ -237,7 +260,8 @@ export class PythonEmitter {
       }),
     ].join(", ");
     const retType = m.returnType ? ` -> ${this.emitTypeExpr(m.returnType)}` : " -> None";
-    this.ctx.writeLine(`def ${methodName}(${params})${retType}:`);
+    const as = m.isAsync ? "async " : "";
+    this.ctx.writeLine(`${as}def ${methodName}(${params})${retType}:`);
     this.ctx.indent();
     if (m.body.kind === "Block") {
       this.emitBlock(m.body);
@@ -248,8 +272,35 @@ export class PythonEmitter {
   }
 
   private emitConstOrVarDecl(decl: ConstDecl | VarDecl): void {
+    if (
+      decl.value.kind === "ClosureExpr" &&
+      decl.value.body.kind === "Block" &&
+      decl.value.body.statements.length > 1
+    ) {
+      const retType = decl.value.returnType
+        ? ` -> ${this.emitTypeExpr(decl.value.returnType)}`
+        : "";
+      const params = decl.value.params
+        .map((p) => {
+          const t = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+          return `${p.name}${t}`;
+        })
+        .join(", ");
+      this.ctx.writeLine(`def ${decl.name}(${params})${retType}:`);
+      this.ctx.indent();
+      this.emitBlock(decl.value.body, true);
+      this.ctx.dedent();
+      return;
+    }
+    const val = this.emitExpr(decl.value);
+    if (this.pendingHoistedDefs.length > 0) {
+      for (const def of this.pendingHoistedDefs) {
+        this.ctx.write(def);
+      }
+      this.pendingHoistedDefs = [];
+    }
     const typeStr = decl.typeAnnotation ? `: ${this.emitTypeExpr(decl.typeAnnotation)}` : "";
-    this.ctx.writeLine(`${decl.name}${typeStr} = ${this.emitExpr(decl.value)}`);
+    this.ctx.writeLine(`${decl.name}${typeStr} = ${val}`);
   }
 
   private emitTypeDecl(t: TypeDecl): void {
@@ -277,23 +328,59 @@ export class PythonEmitter {
   private emitFunctionDecl(fn: FunctionDecl): void {
     this.varTypes.clear();
     for (const p of fn.params) {
-      if (p.typeAnnotation.kind === "NamedType") {
+      if (p.typeAnnotation && p.typeAnnotation.kind === "NamedType") {
         this.varTypes.set(p.name, p.typeAnnotation.name);
       }
     }
 
+    const unpackStatements: string[] = [];
     const paramsStr = fn.params
-      .map((p) => {
-        const typeStr = this.emitTypeExpr(p.typeAnnotation);
+      .map((p, idx) => {
         const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-        return `${p.name}: ${typeStr}${defStr}`;
+        if (p.name.startsWith("[") && p.name.endsWith("]")) {
+          const argName = `_arg${idx}`;
+          const parts = p.name
+            .slice(1, -1)
+            .split(",")
+            .map((s) => {
+              const t = s.trim();
+              return t === "" ? "_" : t;
+            });
+          unpackStatements.push(`${parts.join(", ")} = ${argName}`);
+          const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+          return `${argName}${typeStr}${defStr}`;
+        }
+        if (p.name.startsWith("{") && p.name.endsWith("}")) {
+          const argName = `_arg${idx}`;
+          const parts = p.name
+            .slice(1, -1)
+            .split(",")
+            .map((s) => {
+              const t = s.trim();
+              if (t.includes(":")) {
+                const [prop, alias] = t.split(":");
+                return `${alias.trim()} = ${argName}["${prop.trim()}"]`;
+              }
+              return `${t} = ${argName}["${t}"]`;
+            });
+          for (const un of parts) unpackStatements.push(un);
+          const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+          return `${argName}${typeStr}${defStr}`;
+        }
+        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+        return `${p.name}${typeStr}${defStr}`;
       })
       .join(", ");
 
     const retStr = fn.returnType ? ` -> ${this.emitTypeExpr(fn.returnType)}` : "";
+    const as = fn.isAsync ? "async " : "";
 
-    this.ctx.writeLine(`def ${fn.name}(${paramsStr})${retStr}:`);
+    this.ctx.writeLine(`${as}def ${fn.name}(${paramsStr})${retStr}:`);
     this.ctx.indent();
+
+    for (const un of unpackStatements) {
+      this.ctx.writeLine(un);
+    }
 
     const isReturning = this.isReturningFunction(fn);
     if (fn.isExpressionBodied) {
@@ -334,7 +421,7 @@ export class PythonEmitter {
 
   private isVoidExpr(expr: Expr): boolean {
     if (expr.kind === "CallExpr" && expr.callee.kind === "IdentifierExpr") {
-      return expr.callee.name === "print";
+      return expr.callee.name === "print" || expr.callee.name === "super";
     }
     return false;
   }
@@ -353,8 +440,37 @@ export class PythonEmitter {
   }
 
   private emitStatement(stmt: Statement, isTrailingReturn = false): void {
+    const flushHoisted = () => {
+      if (this.pendingHoistedDefs.length > 0) {
+        for (const def of this.pendingHoistedDefs) {
+          this.ctx.write(def);
+        }
+        this.pendingHoistedDefs = [];
+      }
+    };
+
     switch (stmt.kind) {
       case "LetBinding": {
+        if (
+          stmt.init.kind === "ClosureExpr" &&
+          stmt.init.body.kind === "Block" &&
+          stmt.init.body.statements.length > 1
+        ) {
+          const retType = stmt.init.returnType
+            ? ` -> ${this.emitTypeExpr(stmt.init.returnType)}`
+            : "";
+          const params = stmt.init.params
+            .map((p) => {
+              const t = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+              return `${p.name}${t}`;
+            })
+            .join(", ");
+          this.ctx.writeLine(`def ${stmt.name}(${params})${retType}:`);
+          this.ctx.indent();
+          this.emitBlock(stmt.init.body, true);
+          this.ctx.dedent();
+          break;
+        }
         if (stmt.typeAnnotation && stmt.typeAnnotation.kind === "NamedType") {
           this.varTypes.set(stmt.name, stmt.typeAnnotation.name);
         } else if (stmt.init.kind === "CallExpr" && stmt.init.callee.kind === "IdentifierExpr") {
@@ -363,15 +479,19 @@ export class PythonEmitter {
           const existing = this.varTypes.get(stmt.init.name);
           if (existing) this.varTypes.set(stmt.name, existing);
         }
+        const valStr = this.emitExpr(stmt.init);
+        flushHoisted();
         const typeAnnotation = stmt.typeAnnotation
           ? `: ${this.emitTypeExpr(stmt.typeAnnotation)}`
           : "";
-        this.ctx.writeLine(`${stmt.name}${typeAnnotation} = ${this.emitExpr(stmt.init)}`);
+        this.ctx.writeLine(`${stmt.name}${typeAnnotation} = ${valStr}`);
         break;
       }
       case "DestructureBinding": {
-        const names = stmt.names.join(", ");
-        this.ctx.writeLine(`${names} = ${this.emitExpr(stmt.init)}`);
+        const valStr = this.emitExpr(stmt.init);
+        flushHoisted();
+        const names = stmt.names.map((n) => (n.trim() === "" ? "_" : n)).join(", ");
+        this.ctx.writeLine(`${names} = ${valStr}`);
         break;
       }
       case "AssignStmt": {
@@ -385,22 +505,27 @@ export class PythonEmitter {
           for (let i = 0; i < stmt.target.elements.length; i++) {
             const targetStr = this.emitExpr(stmt.target.elements[i]);
             const valStr = this.emitExpr(stmt.value.elements[i]);
+            flushHoisted();
             this.ctx.writeLine(`${targetStr} ${stmt.op} ${valStr}`);
           }
         } else if (stmt.target.kind === "ArrayLiteralExpr" && (!stmt.op || stmt.op === "=")) {
           const names = stmt.target.elements.map((e) => this.emitExpr(e)).join(", ");
           const valStr = this.emitExpr(stmt.value);
+          flushHoisted();
           this.ctx.writeLine(`${names} = ${valStr}`);
         } else {
           const targetStr = this.emitExpr(stmt.target);
           const valStr = this.emitExpr(stmt.value);
+          flushHoisted();
           this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
         }
         break;
       }
       case "ReturnStmt": {
         if (stmt.value) {
-          this.ctx.writeLine(`return ${this.emitExpr(stmt.value)}`);
+          const val = this.emitExpr(stmt.value);
+          flushHoisted();
+          this.ctx.writeLine(`return ${val}`);
         } else {
           this.ctx.writeLine("return");
         }
@@ -428,7 +553,18 @@ export class PythonEmitter {
         break;
       }
       case "ForStmt": {
-        this.ctx.writeLine(`for ${stmt.variable} in ${this.emitExpr(stmt.iterable)}:`);
+        let variable = stmt.variable;
+        if (variable.startsWith("[") && variable.endsWith("]")) {
+          const parts = variable
+            .slice(1, -1)
+            .split(",")
+            .map((s) => {
+              const t = s.trim();
+              return t === "" ? "_" : t;
+            });
+          variable = parts.join(", ");
+        }
+        this.ctx.writeLine(`for ${variable} in ${this.emitExpr(stmt.iterable)}:`);
         this.ctx.indent();
         this.emitBlock(stmt.body);
         this.ctx.dedent();
@@ -460,10 +596,53 @@ export class PythonEmitter {
         break;
       }
       case "ExprStmt": {
+        const val = this.emitExpr(stmt.expr);
+        flushHoisted();
         if (isTrailingReturn && !this.isVoidExpr(stmt.expr)) {
-          this.ctx.writeLine(`return ${this.emitExpr(stmt.expr)}`);
+          this.ctx.writeLine(`return ${val}`);
         } else {
-          this.ctx.writeLine(this.emitExpr(stmt.expr));
+          this.ctx.writeLine(val);
+        }
+        break;
+      }
+      case "BreakStmt": {
+        flushHoisted();
+        this.ctx.writeLine("break");
+        break;
+      }
+      case "ContinueStmt": {
+        flushHoisted();
+        this.ctx.writeLine("continue");
+        break;
+      }
+      case "ThrowStmt": {
+        const val = this.emitExpr(stmt.expr);
+        flushHoisted();
+        this.ctx.writeLine(`raise ${val}`);
+        break;
+      }
+      case "TryStmt": {
+        flushHoisted();
+        this.ctx.writeLine("try:");
+        this.ctx.indent();
+        this.emitBlock(stmt.tryBlock, isTrailingReturn);
+        this.ctx.dedent();
+
+        if (stmt.catchBlock) {
+          const exc = stmt.catchParam
+            ? `except Exception as ${stmt.catchParam}:`
+            : "except Exception:";
+          this.ctx.writeLine(exc);
+          this.ctx.indent();
+          this.emitBlock(stmt.catchBlock, isTrailingReturn);
+          this.ctx.dedent();
+        }
+
+        if (stmt.finallyBlock) {
+          this.ctx.writeLine("finally:");
+          this.ctx.indent();
+          this.emitBlock(stmt.finallyBlock, isTrailingReturn);
+          this.ctx.dedent();
         }
         break;
       }
@@ -478,9 +657,26 @@ export class PythonEmitter {
         if (expr.literalKind === "nil") return "None";
         return String(expr.value);
 
+      case "TemplateLiteralExpr": {
+        let result = 'f"' + this.escapePyFStringQuasi(expr.quasis[0] ?? "");
+        for (let i = 0; i < expr.expressions.length; i++) {
+          result +=
+            "{" +
+            this.emitExpr(expr.expressions[i]) +
+            "}" +
+            this.escapePyFStringQuasi(expr.quasis[i + 1] ?? "");
+        }
+        result += '"';
+        return result;
+      }
+
       case "IdentifierExpr":
         if (expr.name === "this") return "self";
+        if (expr.name === "super") return "super()";
         return expr.name;
+
+      case "AwaitExpr":
+        return `await ${this.emitExpr(expr.operand)}`;
 
       case "AssignExpr":
         return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
@@ -488,6 +684,9 @@ export class PythonEmitter {
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
+        if (expr.operator === ">>>") {
+          return `((${left} % 0x100000000) >> ${right})`;
+        }
         let op = expr.operator;
         if (op === "&&") op = "and";
         if (op === "||") op = "or";
@@ -497,12 +696,19 @@ export class PythonEmitter {
 
       case "UnaryExpr": {
         const operand = this.emitExpr(expr.operand);
+        if (expr.operator === "...") {
+          return `*${operand}`;
+        }
         const op = expr.operator === "!" || expr.operator === "not" ? "not " : expr.operator;
         return `(${op}${operand})`;
       }
 
       case "CallExpr": {
         const argCodes = expr.args.map((a) => this.emitExpr(a));
+
+        if (expr.callee.kind === "IdentifierExpr" && expr.callee.name === "super") {
+          return `super().__init__(${argCodes.join(", ")})`;
+        }
 
         if (expr.callee.kind === "MemberAccessExpr") {
           const objCode = this.emitExpr(expr.callee.object);
@@ -628,8 +834,105 @@ export class PythonEmitter {
       }
 
       case "ClosureExpr": {
-        const params = expr.params.map((p) => p.name).join(", ");
-        return `(lambda ${params}: ${this.emitExpr(expr.body as Expr)})`;
+        let innerBodyExpr: Expr | null = null;
+        let isMultilineBlock = false;
+
+        if (expr.body.kind !== "Block") {
+          innerBodyExpr = expr.body as Expr;
+        } else {
+          const stmts = expr.body.statements;
+          if (stmts.length === 0) {
+            // empty lambda
+          } else if (stmts.length === 1 && stmts[0].kind === "ReturnStmt") {
+            innerBodyExpr = stmts[0].value ?? null;
+          } else if (stmts.length === 1 && stmts[0].kind === "ExprStmt") {
+            innerBodyExpr = stmts[0].expr;
+          } else {
+            isMultilineBlock = true;
+          }
+        }
+
+        if (isMultilineBlock && expr.body.kind === "Block") {
+          const fnName = `_closure_${++this.closureCount}`;
+          const retType = expr.returnType ? ` -> ${this.emitTypeExpr(expr.returnType)}` : "";
+          const paramsWithTypes = expr.params
+            .map((p) => {
+              const t = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+              return `${p.name}${t}`;
+            })
+            .join(", ");
+          const savedBuffer = (this.ctx as any).buffer;
+          (this.ctx as any).buffer = [];
+          this.ctx.writeLine(`def ${fnName}(${paramsWithTypes})${retType}:`);
+          this.ctx.indent();
+          this.emitBlock(expr.body, true);
+          this.ctx.dedent();
+          const defContent = (this.ctx as any).buffer.join("");
+          (this.ctx as any).buffer = savedBuffer;
+          this.pendingHoistedDefs.push(defContent);
+          return fnName;
+        }
+
+        const bodyStr = innerBodyExpr ? this.emitExpr(innerBodyExpr) : "None";
+
+        const hasDestructure = expr.params.some(
+          (p) => p.name.startsWith("[") || p.name.startsWith("{"),
+        );
+        if (!hasDestructure) {
+          const params = expr.params.map((p) => p.name).join(", ");
+          return `(lambda ${params}: ${bodyStr})`;
+        }
+
+        if (expr.params.length === 1 && expr.params[0].name.startsWith("[")) {
+          const raw = expr.params[0].name.slice(1, -1);
+          const parts = raw.split(",").map((s) => {
+            const t = s.trim();
+            return t === "" ? "_" : t;
+          });
+          const innerParams = parts.join(", ");
+          return `(lambda _arg: (lambda ${innerParams}: ${bodyStr})(*_arg))`;
+        }
+
+        if (expr.params.length === 1 && expr.params[0].name.startsWith("{")) {
+          const raw = expr.params[0].name.slice(1, -1);
+          const parts = raw.split(",").map((s) => {
+            const t = s.trim();
+            if (t.includes(":")) {
+              return t.split(":")[1]?.trim() ?? t;
+            }
+            return t;
+          });
+          const innerParams = parts.join(", ");
+          return `(lambda _arg: (lambda ${innerParams}: ${bodyStr})(**_arg))`;
+        }
+
+        const params = expr.params
+          .map((p) => {
+            if (p.name.startsWith("[") && p.name.endsWith("]")) {
+              const parts = p.name
+                .slice(1, -1)
+                .split(",")
+                .map((s) => {
+                  const t = s.trim();
+                  return t === "" ? "_" : t;
+                });
+              return parts.join(", ");
+            }
+            if (p.name.startsWith("{") && p.name.endsWith("}")) {
+              const parts = p.name
+                .slice(1, -1)
+                .split(",")
+                .map((s) => {
+                  const t = s.trim();
+                  if (t.includes(":")) return t.split(":")[1]?.trim() ?? t;
+                  return t;
+                });
+              return parts.join(", ");
+            }
+            return p.name;
+          })
+          .join(", ");
+        return `(lambda ${params}: ${bodyStr})`;
       }
     }
   }
@@ -648,6 +951,12 @@ export class PythonEmitter {
       case "ArrayType":
         return `list[${this.emitTypeExpr(t.elementType)}]`;
 
+      case "TupleType": {
+        if (t.elementTypes.length === 0) return "tuple[()]";
+        const elements = t.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
+        return `tuple[${elements}]`;
+      }
+
       case "OptionType":
         return `Optional[${this.emitTypeExpr(t.innerType)}]`;
 
@@ -660,8 +969,13 @@ export class PythonEmitter {
       case "RefinementType":
         return this.emitTypeExpr(t.baseType);
 
-      case "NamedType":
+      case "NamedType": {
+        if (t.typeArgs && t.typeArgs.length > 0) {
+          const args = t.typeArgs.map((a) => this.emitTypeExpr(a)).join(", ");
+          return `${t.name}[${args}]`;
+        }
         return t.name;
+      }
     }
   }
 
@@ -678,5 +992,15 @@ export class PythonEmitter {
         return `${pat.name}(${sub})`;
       }
     }
+  }
+
+  private escapePyFStringQuasi(s: string): string {
+    return s
+      .replace(/"/g, '\\"')
+      .replace(/\{/g, "{{")
+      .replace(/\}/g, "}}")
+      .replace(/\n/g, "\\n")
+      .replace(/\r/g, "\\r")
+      .replace(/\t/g, "\\t");
   }
 }

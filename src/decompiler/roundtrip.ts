@@ -7,9 +7,11 @@
  *   Put(Get(c), Omega) == c
  */
 
-import { parse } from "../core/parser.js";
+import { parse, parseWithTrivia } from "../core/parser.js";
 import { emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { AilGenerator } from "./ail-generator.js";
+import { CppDecompiler } from "./cpp-decompiler.js";
+import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
 import { TsDecompiler } from "./ts-decompiler.js";
@@ -49,6 +51,16 @@ export function executeRoundtrip(
     }
     case "css": {
       const decompiler = new CssDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "cpp": {
+      const decompiler = new CppDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "csharp": {
+      const decompiler = new CSharpDecompiler(source, filePath);
       decompileResult = decompiler.decompile();
       break;
     }
@@ -96,8 +108,8 @@ export function executeAilRoundtrip(
   target: TargetLanguage,
   filePath = "source.ail",
 ): AilRoundtripResult {
-  const ast = parse(ailSource, filePath);
-  const targetReconstructed = emitTarget(ast, target);
+  const { ast, trivia } = parseWithTrivia(ailSource, filePath);
+  const targetReconstructed = emitTarget(ast, target, { trivia });
   const reverseResult = executeRoundtrip(targetReconstructed, target, filePath);
   return {
     target,

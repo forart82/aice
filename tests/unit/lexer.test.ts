@@ -31,6 +31,54 @@ third line"""`;
       expect(strToken?.value).toBe("first line\nsecond line\nthird line");
     });
 
+    it("scans backtick template strings without substitutions", () => {
+      const src = "`hello world`";
+      const tokens = tokenize(src);
+      const t = tokens.find((tok) => tok.kind === "TEMPLATE_NO_SUBST");
+      expect(t).toBeDefined();
+      expect(t?.value).toBe("hello world");
+    });
+
+    it("scans multiline backtick template strings", () => {
+      const src = `\`line 1
+line 2
+line 3\``;
+      const tokens = tokenize(src);
+      const t = tokens.find((tok) => tok.kind === "TEMPLATE_NO_SUBST");
+      expect(t).toBeDefined();
+      expect(t?.value).toBe("line 1\nline 2\nline 3");
+    });
+
+    it("scans backtick template strings with ${...} interpolation expressions", () => {
+      const src = "`Hello ${name}, you have ${count + 1} items!`";
+      const tokens = tokenize(src);
+      expect(tokens.map((tok) => tok.kind)).toEqual([
+        "TEMPLATE_HEAD",
+        "IDENT",
+        "TEMPLATE_MIDDLE",
+        "IDENT",
+        "PLUS",
+        "NUMBER",
+        "TEMPLATE_TAIL",
+        "NEWLINE",
+        "EOF",
+      ]);
+      const head = tokens.find((tok) => tok.kind === "TEMPLATE_HEAD");
+      const mid = tokens.find((tok) => tok.kind === "TEMPLATE_MIDDLE");
+      const tail = tokens.find((tok) => tok.kind === "TEMPLATE_TAIL");
+      expect(head?.value).toBe("Hello ");
+      expect(mid?.value).toBe(", you have ");
+      expect(tail?.value).toBe(" items!");
+    });
+
+    it("scans escaped backticks and escaped dollar braces in template strings", () => {
+      const src = "`Cost: \\${price} in \\`USD\\``";
+      const tokens = tokenize(src);
+      const t = tokens.find((tok) => tok.kind === "TEMPLATE_NO_SUBST");
+      expect(t).toBeDefined();
+      expect(t?.value).toBe("Cost: ${price} in `USD`");
+    });
+
     it("scans booleans and nil", () => {
       const src = "true false nil";
       expect(kinds(src)).toEqual(["BOOLEAN", "BOOLEAN", "NIL", "NEWLINE", "EOF"]);
@@ -142,6 +190,43 @@ third line"""`;
         "IDENT",
         "RPAREN",
         "QUESTION",
+        "NEWLINE",
+        "EOF",
+      ]);
+    });
+
+    it("Step 8: scans binary power, bitwise, and shift operators (**, &, |, ^, <<, >>, >>>)", () => {
+      const src = "** & | ^ << >> >>>";
+      expect(kinds(src)).toEqual([
+        "STAR_STAR",
+        "AMPERSAND",
+        "PIPE",
+        "CARET",
+        "SHL",
+        "SHR",
+        "USHR",
+        "NEWLINE",
+        "EOF",
+      ]);
+    });
+
+    it("Step 8: correctly disambiguates multi-char operators from prefixes", () => {
+      const src = "> >= >> >>> < <= << * *= ** & && | ||";
+      expect(kinds(src)).toEqual([
+        "GT",
+        "GT_EQ",
+        "SHR",
+        "USHR",
+        "LT",
+        "LT_EQ",
+        "SHL",
+        "STAR",
+        "STAR_EQUAL",
+        "STAR_STAR",
+        "AMPERSAND",
+        "AMP_AMP",
+        "PIPE",
+        "PIPE_PIPE",
         "NEWLINE",
         "EOF",
       ]);
