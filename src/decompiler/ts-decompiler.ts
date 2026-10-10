@@ -3489,9 +3489,31 @@ export class TsDecompiler {
         return { kind: "NamedType", name: typeTexts.join(" | "), span: this.getSpan(node) };
       }
       case ts.SyntaxKind.IntersectionType:
-      case ts.SyntaxKind.TypeLiteral:
       case ts.SyntaxKind.TypeQuery:
         return { kind: "NamedType", name: "unknown", span: this.getSpan(node) };
+      case ts.SyntaxKind.TypeLiteral: {
+        const typeLiteral = node as ts.TypeLiteralNode;
+        const fields: { name: string; type: TypeExpr; isOptional?: boolean; span: Span }[] = [];
+        for (const member of typeLiteral.members) {
+          if (ts.isPropertySignature(member) && member.name) {
+            const name = member.name.getText(this.sourceFile);
+            const type = member.type
+              ? this.convertTypeNode(member.type)
+              : { kind: "PrimitiveType" as const, primitive: "any", span: this.getSpan(member) };
+            const isOptional = !!member.questionToken;
+            fields.push({
+              name,
+              type,
+              isOptional: isOptional || undefined,
+              span: this.getSpan(member),
+            });
+          }
+        }
+        if (fields.length > 0) {
+          return { kind: "RecordType", fields, span: this.getSpan(node) };
+        }
+        return { kind: "NamedType", name: "any", span: this.getSpan(node) };
+      }
       case ts.SyntaxKind.TypeReference: {
         const ref = node as ts.TypeReferenceNode;
         const typeName = ref.typeName.getText(this.sourceFile);
