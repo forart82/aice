@@ -10,7 +10,9 @@
 
 import ts from "typescript";
 import type {
+  AssignExpr,
   AssignOp,
+  AssignStmt,
   AwaitExpr,
   BinaryOp,
   Block,
@@ -92,7 +94,7 @@ export class TsDecompiler {
       if (ts.isIdentifier(p.name)) {
         const name = p.name.text;
         scope.add(name);
-        if (p.type) {
+        if ("type" in p && p.type) {
           if (p.type.kind === ts.SyntaxKind.NumberKeyword) varTypes.set(name, "number");
           else if (p.type.kind === ts.SyntaxKind.StringKeyword) varTypes.set(name, "string");
           else if (p.type.kind === ts.SyntaxKind.BooleanKeyword) varTypes.set(name, "boolean");
@@ -158,6 +160,14 @@ export class TsDecompiler {
     this.filePath = filePath;
     this.isTsx = options.isTsx ?? (filePath.endsWith(".tsx") || source.includes("<"));
     this.convertStringUnionsToEnum = options.convertStringUnionsToEnum ?? false;
+  }
+
+  static decompile(
+    source: string,
+    filePath = "source.ts",
+    options: TsDecompilerOptions = {},
+  ): { ast: Module; trivia: CstTriviaTable } {
+    return new TsDecompiler(source, filePath, options).decompile();
   }
 
   decompile(): { ast: Module; trivia: CstTriviaTable } {
@@ -757,7 +767,14 @@ export class TsDecompiler {
 
         if (member.body && member.body.statements.length === 1) {
           const singleStmt = member.body.statements[0];
-          if (ts.isReturnStatement(singleStmt) && singleStmt.expression) {
+          if (
+            ts.isReturnStatement(singleStmt) &&
+            singleStmt.expression &&
+            !(
+              ts.isBinaryExpression(singleStmt.expression) &&
+              singleStmt.expression.operatorToken.kind === ts.SyntaxKind.CommaToken
+            )
+          ) {
             isExpressionBodied = true;
             body = this.convertExpression(singleStmt.expression);
           } else if (
@@ -1354,6 +1371,34 @@ export class TsDecompiler {
       if (stmt.expression && ts.isConditionalExpression(stmt.expression)) {
         return this.convertConditionalReturn(stmt.expression, this.getSpan(stmt));
       }
+      if (
+        stmt.expression &&
+        ts.isBinaryExpression(stmt.expression) &&
+        stmt.expression.operatorToken.kind === ts.SyntaxKind.CommaToken
+      ) {
+        const exprs: ts.Expression[] = [];
+        let curr: ts.Expression = stmt.expression;
+        while (
+          ts.isBinaryExpression(curr) &&
+          curr.operatorToken.kind === ts.SyntaxKind.CommaToken
+        ) {
+          exprs.unshift(curr.right);
+          curr = curr.left;
+        }
+        exprs.unshift(curr);
+        const retExpr = exprs.pop()!;
+        const stmts: Statement[] = exprs.map((e) => ({
+          kind: "ExprStmt" as const,
+          expr: this.convertExpression(e),
+          span: this.getSpan(e),
+        }));
+        stmts.push({
+          kind: "ReturnStmt",
+          value: this.convertExpression(retExpr),
+          span: this.getSpan(stmt),
+        });
+        return stmts;
+      }
       return {
         kind: "ReturnStmt",
         value: stmt.expression ? this.convertExpression(stmt.expression) : null,
@@ -1645,34 +1690,17 @@ export class TsDecompiler {
 
     // Check for assignment: target = value or compound assignment target += value
     if (ts.isBinaryExpression(expr)) {
-      const opKind = expr.operatorToken.kind;
-      if (opKind === ts.SyntaxKind.EqualsToken) {
+      const assignOp = this.convertAssignOp(expr.operatorToken.kind);
+      if (assignOp) {
         const target = this.convertExpression(expr.left);
-        if (ts.isConditionalExpression(expr.right)) {
+        if (assignOp === "=" && ts.isConditionalExpression(expr.right)) {
           return this.convertConditionalAssign(target, expr.right, span);
         }
         return {
           kind: "AssignStmt",
           target,
-          value: this.convertExpression(expr.right),
-          span,
-        };
-      }
-      let assignOp: AssignOp | null = null;
-      if (opKind === ts.SyntaxKind.PlusEqualsToken) assignOp = "+=";
-      else if (opKind === ts.SyntaxKind.MinusEqualsToken) assignOp = "-=";
-      else if (opKind === ts.SyntaxKind.AsteriskEqualsToken) assignOp = "*=";
-      else if (opKind === ts.SyntaxKind.SlashEqualsToken) assignOp = "/=";
-      else if (opKind === ts.SyntaxKind.PercentEqualsToken) assignOp = "%=";
-
-      if (assignOp) {
-        const target = this.convertExpression(expr.left);
-        const operand = this.convertExpression(expr.right);
-        return {
-          kind: "AssignStmt",
-          target,
           op: assignOp,
-          value: operand,
+          value: this.convertExpression(expr.right),
           span,
         };
       }
@@ -1912,18 +1940,18 @@ export class TsDecompiler {
       };
     }
 
-    // Already a comparison or null-coalescing
+    // Already a comparison, relational, or null-coalescing
     if (
       cond.kind === "BinaryExpr" &&
       (cond.operator === "==" ||
         cond.operator === "!=" ||
-        cond.operator === "===" ||
-        cond.operator === "!==" ||
         cond.operator === "<" ||
         cond.operator === "<=" ||
         cond.operator === ">" ||
         cond.operator === ">=" ||
-        cond.operator === "??")
+        cond.operator === "??" ||
+        cond.operator === "in" ||
+        cond.operator === "instanceof")
     ) {
       return cond;
     }
@@ -2323,8 +2351,23 @@ export class TsDecompiler {
       };
     }
 
-    // Binary Expressions
+    // Binary Expressions or Assignment Expressions
     if (ts.isBinaryExpression(expr)) {
+      const assignOp = this.convertAssignOp(expr.operatorToken.kind);
+      if (assignOp) {
+        return {
+          kind: "AssignExpr",
+          target: this.convertExpression(expr.left),
+          op: assignOp,
+          value: this.convertExpression(expr.right),
+          span: this.getSpan(expr),
+        };
+      }
+
+      if (expr.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        return this.convertExpression(expr.right);
+      }
+
       if (expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
         return {
           kind: "BinaryExpr",
@@ -2596,7 +2639,7 @@ export class TsDecompiler {
 
       const body = expr.body
         ? this.convertBlock(expr.body)
-        : { kind: "Block", statements: [], span: this.getSpan(expr) };
+        : { kind: "Block" as const, statements: [], span: this.getSpan(expr) };
 
       return {
         kind: "ClosureExpr",
@@ -2663,10 +2706,47 @@ export class TsDecompiler {
         return "or";
       case ts.SyntaxKind.QuestionQuestionToken:
         return "??";
+      case ts.SyntaxKind.InKeyword:
+        return "in";
+      case ts.SyntaxKind.InstanceOfKeyword:
+        return "instanceof";
       default:
         throw new Error(
           `Unsupported binary operator syntax kind: ${kind} (${ts.SyntaxKind[kind] ?? "unknown"})`,
         );
+    }
+  }
+
+  private convertAssignOp(kind: ts.SyntaxKind): AssignOp | null {
+    switch (kind) {
+      case ts.SyntaxKind.EqualsToken:
+        return "=";
+      case ts.SyntaxKind.PlusEqualsToken:
+        return "+=";
+      case ts.SyntaxKind.MinusEqualsToken:
+        return "-=";
+      case ts.SyntaxKind.AsteriskEqualsToken:
+        return "*=";
+      case ts.SyntaxKind.SlashEqualsToken:
+        return "/=";
+      case ts.SyntaxKind.PercentEqualsToken:
+        return "%=";
+      case ts.SyntaxKind.BarEqualsToken:
+        return "|=";
+      case ts.SyntaxKind.CaretEqualsToken:
+        return "^=";
+      case ts.SyntaxKind.AmpersandEqualsToken:
+        return "&=";
+      case ts.SyntaxKind.LessThanLessThanEqualsToken:
+        return "<<=";
+      case ts.SyntaxKind.GreaterThanGreaterThanEqualsToken:
+        return ">>=";
+      case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken:
+        return ">>>=";
+      case ts.SyntaxKind.AsteriskAsteriskEqualsToken:
+        return "**=";
+      default:
+        return null;
     }
   }
 

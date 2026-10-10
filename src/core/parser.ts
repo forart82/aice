@@ -13,6 +13,7 @@ import type {
   Block,
   BreakStmt,
   ClassDecl,
+  ClosureExpr,
   ComponentDecl,
   ConstDecl,
   ContinueStmt,
@@ -78,7 +79,7 @@ export enum Precedence {
   BIT_XOR = 7, // ^
   BIT_AND = 8, // &
   EQUALS = 9, // ==, !=
-  LESSGREATER = 10, // <, >, <=, >=
+  LESSGREATER = 10, // <, >, <=, >=, in, instanceof
   SHIFT = 11, // <<, >>, >>>
   SUM = 12, // +, -
   PRODUCT = 13, // *, /, %
@@ -102,6 +103,8 @@ const PRECEDENCES: Partial<Record<TokenKind, Precedence>> = {
   LT_EQ: Precedence.LESSGREATER,
   GT: Precedence.LESSGREATER,
   GT_EQ: Precedence.LESSGREATER,
+  IN: Precedence.LESSGREATER,
+  INSTANCEOF: Precedence.LESSGREATER,
   SHL: Precedence.SHIFT,
   SHR: Precedence.SHIFT,
   USHR: Precedence.SHIFT,
@@ -122,6 +125,13 @@ const PRECEDENCES: Partial<Record<TokenKind, Precedence>> = {
   STAR_EQUAL: Precedence.ASSIGN,
   SLASH_EQUAL: Precedence.ASSIGN,
   PERCENT_EQUAL: Precedence.ASSIGN,
+  PIPE_EQUAL: Precedence.ASSIGN,
+  CARET_EQUAL: Precedence.ASSIGN,
+  AMP_EQUAL: Precedence.ASSIGN,
+  SHL_EQUAL: Precedence.ASSIGN,
+  SHR_EQUAL: Precedence.ASSIGN,
+  USHR_EQUAL: Precedence.ASSIGN,
+  STAR_STAR_EQUAL: Precedence.ASSIGN,
 };
 
 export class Parser {
@@ -139,6 +149,10 @@ export class Parser {
   static fromSource(source: string, file = "<anonymous>"): Parser {
     const tokens = tokenize(source, file);
     return new Parser(tokens, file, source);
+  }
+
+  static parse(source: string, file = "<anonymous>"): Module {
+    return Parser.fromSource(source, file).parse();
   }
 
   parse(): Module {
@@ -280,7 +294,14 @@ export class Parser {
       next.kind === "MINUS_EQUAL" ||
       next.kind === "STAR_EQUAL" ||
       next.kind === "SLASH_EQUAL" ||
-      next.kind === "PERCENT_EQUAL"
+      next.kind === "PERCENT_EQUAL" ||
+      next.kind === "PIPE_EQUAL" ||
+      next.kind === "CARET_EQUAL" ||
+      next.kind === "AMP_EQUAL" ||
+      next.kind === "SHL_EQUAL" ||
+      next.kind === "SHR_EQUAL" ||
+      next.kind === "USHR_EQUAL" ||
+      next.kind === "STAR_STAR_EQUAL"
     ) {
       return false;
     }
@@ -2189,7 +2210,14 @@ export class Parser {
       this.check("MINUS_EQUAL") ||
       this.check("STAR_EQUAL") ||
       this.check("SLASH_EQUAL") ||
-      this.check("PERCENT_EQUAL")
+      this.check("PERCENT_EQUAL") ||
+      this.check("PIPE_EQUAL") ||
+      this.check("CARET_EQUAL") ||
+      this.check("AMP_EQUAL") ||
+      this.check("SHL_EQUAL") ||
+      this.check("SHR_EQUAL") ||
+      this.check("USHR_EQUAL") ||
+      this.check("STAR_STAR_EQUAL")
     ) {
       const op = this.advance().value as AssignOp;
       const val = this.parseExpr();
@@ -2276,7 +2304,14 @@ export class Parser {
       after.kind === "MINUS_EQUAL" ||
       after.kind === "STAR_EQUAL" ||
       after.kind === "SLASH_EQUAL" ||
-      after.kind === "PERCENT_EQUAL"
+      after.kind === "PERCENT_EQUAL" ||
+      after.kind === "PIPE_EQUAL" ||
+      after.kind === "CARET_EQUAL" ||
+      after.kind === "AMP_EQUAL" ||
+      after.kind === "SHL_EQUAL" ||
+      after.kind === "SHR_EQUAL" ||
+      after.kind === "USHR_EQUAL" ||
+      after.kind === "STAR_STAR_EQUAL"
     ) {
       return true;
     }
@@ -2380,7 +2415,14 @@ export class Parser {
       this.check("MINUS_EQUAL") ||
       this.check("STAR_EQUAL") ||
       this.check("SLASH_EQUAL") ||
-      this.check("PERCENT_EQUAL")
+      this.check("PERCENT_EQUAL") ||
+      this.check("PIPE_EQUAL") ||
+      this.check("CARET_EQUAL") ||
+      this.check("AMP_EQUAL") ||
+      this.check("SHL_EQUAL") ||
+      this.check("SHR_EQUAL") ||
+      this.check("USHR_EQUAL") ||
+      this.check("STAR_STAR_EQUAL")
     ) {
       const op = this.advance().value as AssignOp;
       const val = this.parseExpr();
@@ -2931,7 +2973,8 @@ export class Parser {
       }
       return {
         kind: "ClosureExpr",
-        params: [{ name: paramName, span: paramSpan }],
+        params: [{ name: paramName, typeAnnotation: null, span: paramSpan }],
+        returnType: null,
         body,
         span: mergeSpans(paramSpan, body.span),
       };
@@ -3163,7 +3206,14 @@ export class Parser {
       tok.kind === "MINUS_EQUAL" ||
       tok.kind === "STAR_EQUAL" ||
       tok.kind === "SLASH_EQUAL" ||
-      tok.kind === "PERCENT_EQUAL"
+      tok.kind === "PERCENT_EQUAL" ||
+      tok.kind === "PIPE_EQUAL" ||
+      tok.kind === "CARET_EQUAL" ||
+      tok.kind === "AMP_EQUAL" ||
+      tok.kind === "SHL_EQUAL" ||
+      tok.kind === "SHR_EQUAL" ||
+      tok.kind === "USHR_EQUAL" ||
+      tok.kind === "STAR_STAR_EQUAL"
     ) {
       const op = this.advance().value as AssignOp;
       const value = this.parseExpr(Precedence.ASSIGN);
@@ -3199,6 +3249,8 @@ export class Parser {
       LT_EQ: "<=",
       GT: ">",
       GT_EQ: ">=",
+      IN: "in",
+      INSTANCEOF: "instanceof",
       AND: "and",
       AMP_AMP: "&&",
       OR: "or",

@@ -281,12 +281,24 @@ export class RustEmitter {
           for (let i = 0; i < stmt.target.elements.length; i++) {
             const target = this.emitExpr(stmt.target.elements[i]);
             const value = this.emitExpr(stmt.value.elements[i]);
-            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+            if (stmt.op === "**=") {
+              this.ctx.writeLine(`${target} = ${target}.pow(${value});`);
+            } else if (stmt.op === ">>>=") {
+              this.ctx.writeLine(`${target} = ((${target} as u64) >> ${value}) as _;`);
+            } else {
+              this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+            }
           }
         } else {
           const target = this.emitExpr(stmt.target);
           const value = this.emitExpr(stmt.value);
-          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          if (stmt.op === "**=") {
+            this.ctx.writeLine(`${target} = ${target}.pow(${value});`);
+          } else if (stmt.op === ">>>=") {
+            this.ctx.writeLine(`${target} = ((${target} as u64) >> ${value}) as _;`);
+          } else {
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          }
         }
         break;
       }
@@ -425,13 +437,20 @@ export class RustEmitter {
         return this.toSnakeCase(expr.name);
       }
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
+        return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
         let op = expr.operator as string;
         if (op === "and") op = "&&";
         if (op === "or") op = "||";
+        if (op === "in") return `(${right}.contains(&${left}))`;
+        if (op === "instanceof") {
+          const typeName = expr.right.kind === "IdentifierExpr" ? expr.right.name : right;
+          return `/* instanceof */ (${left}.is::<${typeName}>())`;
+        }
+        if (op === "**") return `(${left}.pow(${right}))`;
+        if (op === ">>>") return `(((${left} as u64) >> ${right}) as _)`;
         return `(${left} ${op} ${right})`;
       }
       case "UnaryExpr": {
@@ -476,6 +495,11 @@ export class RustEmitter {
           })
           .join(", ");
         return `{ ${fields} }`;
+      }
+      case "ClosureExpr": {
+        const params = expr.params.map((p) => this.toSnakeCase(p.name)).join(", ");
+        const body = expr.body.kind === "Block" ? "{ ... }" : this.emitExpr(expr.body);
+        return `|${params}| ${body}`;
       }
       default:
         return "";

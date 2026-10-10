@@ -24,6 +24,9 @@ export * from "./rewriter.js";
 export * from "./rust-emitter.js";
 export * from "./ts-emitter.js";
 
+// Convenience aliases
+export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter };
+
 /**
  * Emits target source code from an AIL Module AST.
  * If target is omitted, automatically infers target from mod.path.

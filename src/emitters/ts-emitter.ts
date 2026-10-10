@@ -48,7 +48,7 @@ export class TypeScriptEmitter {
     return false;
   }
 
-  private isFunctionTypeExpr(typeExpr?: TypeExpr): boolean {
+  private isFunctionTypeExpr(typeExpr?: TypeExpr | null): boolean {
     if (!typeExpr) return false;
     if (typeExpr.kind === "NamedType") {
       return (
@@ -129,6 +129,10 @@ export class TypeScriptEmitter {
     this.options = options;
     this.pureInterfaces = Boolean(options.pureInterfaces);
     this.ctx = new EmitterContext(options.target ?? "typescript", options);
+  }
+
+  static emit(mod: Module, options?: EmitterOptions): string {
+    return new TypeScriptEmitter(options).emit(mod);
   }
 
   emit(mod: Module): string {
@@ -373,7 +377,7 @@ export class TypeScriptEmitter {
       this.currentClassProperties.add(p.name);
       if (
         this.isFunctionTypeExpr(p.typeAnnotation) ||
-        (p.value && p.value.kind === "ClosureExpr")
+        (p.initialValue && p.initialValue.kind === "ClosureExpr")
       ) {
         this.currentClassFunctionProperties.add(p.name);
       }
@@ -488,12 +492,15 @@ export class TypeScriptEmitter {
         const isReturning = this.isReturningMethod(m);
         this.emitBlock(m.body, isReturning);
       } else {
-        if (
+        if (m.body.kind === "AssignExpr") {
+          this.ctx.writeLine(
+            `${this.emitExpr(m.body.target)} ${m.body.op ?? "="} ${this.emitExpr(m.body.value)};`,
+          );
+        } else if (
           m.accessor === "set" ||
           (m.returnType &&
             m.returnType.kind === "PrimitiveType" &&
-            m.returnType.primitive === "void") ||
-          m.body.kind === "AssignExpr"
+            m.returnType.primitive === "void")
         ) {
           this.ctx.writeLine(`${this.emitExpr(m.body)};`);
         } else {
@@ -959,7 +966,7 @@ export class TypeScriptEmitter {
         return `await ${this.emitExpr(expr.operand)}`;
 
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
+        return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
 
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
@@ -1191,7 +1198,8 @@ export class TypeScriptEmitter {
     }
   }
 
-  emitTypeExpr(t: TypeExpr): string {
+  emitTypeExpr(t?: TypeExpr | null): string {
+    if (!t) return "any";
     switch (t.kind) {
       case "PrimitiveType":
         if (

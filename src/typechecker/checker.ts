@@ -5,11 +5,13 @@
 
 import type {
   ArrayLiteralExpr,
+  AssignOp,
   AwaitExpr,
   Block,
   ComponentDecl,
   Expr,
   FunctionDecl,
+  IfStmt,
   MethodDecl,
   Module,
   ModuleItem,
@@ -134,6 +136,7 @@ export class TypeEnv {
   currentFunctionReturnType: Type | null;
   inferredReturnType?: Type;
   isClassScope = false;
+  isAsync = false;
 
   constructor(
     parent: TypeEnv | null = null,
@@ -278,6 +281,15 @@ export class TypeChecker {
         this.globalEnv.define(name, sym);
       }
     }
+  }
+
+  static check(mod: Module): void {
+    const checker = new TypeChecker();
+    checker.checkModule(mod);
+  }
+
+  check(mod: Module): void {
+    this.checkModule(mod);
   }
 
   checkModule(mod: Module): void {
@@ -1054,7 +1066,7 @@ export class TypeChecker {
       };
 
       // Not null check: x != nil or nil != x or x != null or null != x
-      if (op === "!=" || op === "!==") {
+      if (op === "!=") {
         if (isPositive) {
           let targetName: string | null = null;
           if (cond.left.kind === "IdentifierExpr" && isNilOrNull(cond.right)) {
@@ -1080,7 +1092,7 @@ export class TypeChecker {
       }
 
       // Null check: x == nil or nil == x or x == null or null == x
-      if (op === "==" || op === "===") {
+      if (op === "==") {
         if (!isPositive) {
           let targetName: string | null = null;
           if (cond.left.kind === "IdentifierExpr" && isNilOrNull(cond.right)) {
@@ -1100,6 +1112,19 @@ export class TypeChecker {
                 narrowings.set(targetName, t.innerType);
               }
             }
+          }
+        }
+        return narrowings;
+      }
+
+      // instanceof check: x instanceof MyClass
+      if (op === "instanceof") {
+        if (isPositive && cond.left.kind === "IdentifierExpr") {
+          const targetName = cond.left.name;
+          if (cond.right.kind === "IdentifierExpr") {
+            const className = cond.right.name;
+            const classType = env.lookupType(className);
+            narrowings.set(targetName, classType ?? makeNamedType(className));
           }
         }
         return narrowings;
@@ -1182,7 +1207,11 @@ export class TypeChecker {
     return thenType;
   }
 
-  private checkStatement(stmt: Statement, env: TypeEnv): Type {
+  public checkStmt(stmt: Statement, env: TypeEnv): Type {
+    return this.checkStatement(stmt, env);
+  }
+
+  public checkStatement(stmt: Statement, env: TypeEnv): Type {
     switch (stmt.kind) {
       case "LetBinding": {
         let declaredType: Type | undefined;
@@ -1263,7 +1292,7 @@ export class TypeChecker {
       }
 
       case "AssignStmt": {
-        this.checkAssign(stmt.target, stmt.value, stmt.span, env);
+        this.checkAssign(stmt.target, stmt.value, stmt.span, env, stmt.op);
         return TYPE_VOID;
       }
 
@@ -1274,7 +1303,7 @@ export class TypeChecker {
         const isAsyncOrPromise = (fnEnv?.isAsync ?? false) || isPromiseType(expected);
         const unwrapped = isAsyncOrPromise ? unwrapPromiseType(expected) : expected;
 
-        let actual = TYPE_VOID;
+        let actual: Type = TYPE_VOID;
         if (stmt.value) {
           if (expected.kind === "tuple" && stmt.value.kind === "ArrayLiteralExpr") {
             const arr = stmt.value as ArrayLiteralExpr;
@@ -1571,6 +1600,50 @@ export class TypeChecker {
           case "==":
           case "!=":
             return TYPE_BOOL;
+
+          case "in": {
+            if (leftType.kind === "unknown" || rightType.kind === "unknown") {
+              return TYPE_BOOL;
+            }
+            if (!isValidInKeyType(leftType, env)) {
+              throw new TypeCheckError(
+                `Left operand of 'in' must be a key (string, number, or any), got '${formatType(leftType)}'`,
+                expr.left.span,
+                "AIL_E2002_TYPE_MISMATCH",
+                TYPE_STR,
+                leftType,
+              );
+            }
+            if (!isValidInTargetType(rightType, env)) {
+              throw new TypeCheckError(
+                `Right operand of 'in' must be an object, record, map, or array, got '${formatType(rightType)}'`,
+                expr.right.span,
+                "AIL_E2002_TYPE_MISMATCH",
+              );
+            }
+            return TYPE_BOOL;
+          }
+
+          case "instanceof": {
+            if (leftType.kind === "unknown" || rightType.kind === "unknown") {
+              return TYPE_BOOL;
+            }
+            if (!isValidInstanceofTargetType(leftType, env)) {
+              throw new TypeCheckError(
+                `Left operand of 'instanceof' must be an object, instance, or any, got '${formatType(leftType)}'`,
+                expr.left.span,
+                "AIL_E2002_TYPE_MISMATCH",
+              );
+            }
+            if (!isValidInstanceofClassType(rightType, env)) {
+              throw new TypeCheckError(
+                `Right operand of 'instanceof' must be a class, constructor, or any, got '${formatType(rightType)}'`,
+                expr.right.span,
+                "AIL_E2002_TYPE_MISMATCH",
+              );
+            }
+            return TYPE_BOOL;
+          }
 
           case "<":
           case "<=":
@@ -2111,12 +2184,12 @@ export class TypeChecker {
       }
 
       case "AssignExpr": {
-        return this.checkAssign(expr.target, expr.value, expr.span, env);
+        return this.checkAssign(expr.target, expr.value, expr.span, env, expr.op);
       }
     }
   }
 
-  private checkAssign(target: Expr, value: Expr, span: Span, env: TypeEnv): Type {
+  private checkAssign(target: Expr, value: Expr, span: Span, env: TypeEnv, op?: AssignOp): Type {
     if (target.kind === "IdentifierExpr") {
       const binding = env.lookup(target.name);
       if (!binding) {
@@ -2134,22 +2207,24 @@ export class TypeChecker {
         );
       }
       let valType: Type;
-      if (binding.type.kind === "tuple" && value.kind === "ArrayLiteralExpr") {
+      if (
+        (!op || op === "=") &&
+        binding.type.kind === "tuple" &&
+        value.kind === "ArrayLiteralExpr"
+      ) {
         const arr = value as ArrayLiteralExpr;
         valType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
       } else {
         valType = this.checkExpr(value, env, binding.type);
       }
-      if (!isAssignable(binding.type, valType)) {
-        throw new TypeCheckError(
-          `Cannot assign '${formatType(valType)}' to variable '${target.name}' of type '${formatType(binding.type)}'`,
-          span,
-          "AIL_E2002_TYPE_MISMATCH",
-          binding.type,
-          valType,
-        );
-      }
-      return valType;
+      return this.checkCompoundOrSimpleAssign(
+        op,
+        binding.type,
+        valType,
+        span,
+        `variable '${target.name}'`,
+        value,
+      );
     } else if (target.kind === "ArrayLiteralExpr") {
       const valType = this.checkExpr(value, env);
       if (value.kind === "ArrayLiteralExpr") {
@@ -2157,10 +2232,17 @@ export class TypeChecker {
           const tElem = target.elements[i];
           const vElem = value.elements[i];
           if (tElem && vElem) {
-            this.checkAssign(tElem, vElem, span, env);
+            this.checkAssign(tElem, vElem, span, env, op);
           }
         }
       } else {
+        if (op && op !== "=") {
+          throw new TypeCheckError(
+            `Compound assignment operator '${op}' cannot be used with non-array value in vector assignment`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+          );
+        }
         for (const tElem of target.elements) {
           if (tElem.kind === "IdentifierExpr") {
             const binding = env.lookup(tElem.name);
@@ -2205,16 +2287,14 @@ export class TypeChecker {
             expectedType = setterType.params[0].type;
           }
           const valType = this.checkExpr(value, env, expectedType);
-          if (!isAssignable(expectedType, valType)) {
-            throw new TypeCheckError(
-              `Cannot assign '${formatType(valType)}' to property '${target.property}' of type '${formatType(expectedType)}'`,
-              span,
-              "AIL_E2002_TYPE_MISMATCH",
-              expectedType,
-              valType,
-            );
-          }
-          return valType;
+          return this.checkCompoundOrSimpleAssign(
+            op,
+            expectedType,
+            valType,
+            span,
+            `property '${target.property}'`,
+            value,
+          );
         } else if (hasGetter) {
           throw new TypeCheckError(
             `Cannot assign to getter-only property '${target.property}'`,
@@ -2226,22 +2306,33 @@ export class TypeChecker {
 
       const targetType = this.checkExpr(target, env);
       const valType = this.checkExpr(value, env, targetType);
-      if (!isAssignable(targetType, valType)) {
-        throw new TypeCheckError(
-          `Cannot assign '${formatType(valType)}' to target of type '${formatType(targetType)}'`,
-          span,
-          "AIL_E2002_TYPE_MISMATCH",
-          targetType,
-          valType,
-        );
-      }
-      return valType;
+      return this.checkCompoundOrSimpleAssign(
+        op,
+        targetType,
+        valType,
+        span,
+        `property '${target.property}'`,
+        value,
+      );
     } else {
       const targetType = this.checkExpr(target, env);
       const valType = this.checkExpr(value, env, targetType);
+      return this.checkCompoundOrSimpleAssign(op, targetType, valType, span, "target", value);
+    }
+  }
+
+  private checkCompoundOrSimpleAssign(
+    op: AssignOp | undefined,
+    targetType: Type,
+    valType: Type,
+    span: Span,
+    targetDesc: string,
+    value?: Expr,
+  ): Type {
+    if (!op || op === "=") {
       if (!isAssignable(targetType, valType)) {
         throw new TypeCheckError(
-          `Cannot assign '${formatType(valType)}' to target of type '${formatType(targetType)}'`,
+          `Cannot assign '${formatType(valType)}' to ${targetDesc} of type '${formatType(targetType)}'`,
           span,
           "AIL_E2002_TYPE_MISMATCH",
           targetType,
@@ -2249,6 +2340,144 @@ export class TypeChecker {
         );
       }
       return valType;
+    }
+
+    switch (op) {
+      case "|=":
+      case "^=":
+      case "&=":
+      case "<<=":
+      case ">>=":
+      case ">>>=": {
+        if (
+          (targetType.kind !== "unknown" && !isNumeric(targetType)) ||
+          (valType.kind !== "unknown" && !isNumeric(valType))
+        ) {
+          throw new TypeCheckError(
+            `Operator '${op}' requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+          );
+        }
+        const resType = TYPE_INT;
+        if (!isAssignable(targetType, resType)) {
+          throw new TypeCheckError(
+            `Cannot assign result of '${op}' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+            targetType,
+            resType,
+          );
+        }
+        return resType;
+      }
+
+      case "-=":
+      case "*=":
+      case "%=":
+      case "**=": {
+        if (
+          (targetType.kind !== "unknown" && !isNumeric(targetType)) ||
+          (valType.kind !== "unknown" && !isNumeric(valType))
+        ) {
+          throw new TypeCheckError(
+            `Operator '${op}' requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+          );
+        }
+        if (targetType.kind === "unknown" || valType.kind === "unknown") {
+          return targetType.kind !== "unknown" ? targetType : valType;
+        }
+        const resType =
+          targetType.kind === "float" || valType.kind === "float" ? TYPE_FLOAT : TYPE_INT;
+        if (!isAssignable(targetType, resType)) {
+          throw new TypeCheckError(
+            `Cannot assign result of '${op}' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+            targetType,
+            resType,
+          );
+        }
+        return resType;
+      }
+
+      case "/=": {
+        if (value && value.kind === "LiteralExpr" && (value.value === 0 || value.value === "0")) {
+          throw new TypeCheckError(
+            "Division by zero detected at compile time",
+            value.span,
+            "AIL_E2003_DIVISION_BY_ZERO",
+          );
+        }
+        if (
+          (targetType.kind !== "unknown" && !isNumeric(targetType)) ||
+          (valType.kind !== "unknown" && !isNumeric(valType))
+        ) {
+          throw new TypeCheckError(
+            `Division requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+          );
+        }
+        if (targetType.kind === "unknown" || valType.kind === "unknown") {
+          return targetType.kind !== "unknown" ? targetType : TYPE_FLOAT;
+        }
+        const resType = TYPE_FLOAT;
+        if (!isAssignable(targetType, resType)) {
+          throw new TypeCheckError(
+            `Cannot assign result of '/=' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
+            span,
+            "AIL_E2002_TYPE_MISMATCH",
+            targetType,
+            resType,
+          );
+        }
+        return resType;
+      }
+
+      case "+=": {
+        if (
+          (isStringType(targetType) || targetType.kind === "unknown") &&
+          (isStringType(valType) || valType.kind === "unknown") &&
+          (isStringType(targetType) || isStringType(valType))
+        ) {
+          const resType = TYPE_STR;
+          if (!isAssignable(targetType, resType)) {
+            throw new TypeCheckError(
+              `Cannot assign '${formatType(resType)}' to ${targetDesc} of type '${formatType(targetType)}'`,
+              span,
+              "AIL_E2002_TYPE_MISMATCH",
+              targetType,
+              resType,
+            );
+          }
+          return resType;
+        }
+        if (
+          (isNumeric(targetType) || targetType.kind === "unknown") &&
+          (isNumeric(valType) || valType.kind === "unknown")
+        ) {
+          const resType =
+            targetType.kind === "float" || valType.kind === "float" ? TYPE_FLOAT : TYPE_INT;
+          if (!isAssignable(targetType, resType)) {
+            throw new TypeCheckError(
+              `Cannot assign result of '+=' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
+              span,
+              "AIL_E2002_TYPE_MISMATCH",
+              targetType,
+              resType,
+            );
+          }
+          return resType;
+        }
+        throw new TypeCheckError(
+          `Operator '+=' cannot be applied to disparate types '${formatType(targetType)}' and '${formatType(valType)}'. Explicit conversion required.`,
+          span,
+          "AIL_E2002_TYPE_MISMATCH",
+        );
+      }
     }
   }
 
@@ -2398,7 +2627,8 @@ export class TypeChecker {
     return fnType.returnType;
   }
 
-  private resolveTypeExpr(typeExpr: TypeExpr, env: TypeEnv): Type {
+  private resolveTypeExpr(typeExpr: TypeExpr | null | undefined, env: TypeEnv): Type {
+    if (!typeExpr) return TYPE_UNKNOWN;
     switch (typeExpr.kind) {
       case "PrimitiveType": {
         const map: Record<string, Type> = {
@@ -2507,13 +2737,25 @@ export class TypeChecker {
 }
 
 function isNumeric(type: Type): boolean {
-  return (
+  if (
     type.kind === "int" ||
     type.kind === "float" ||
     type.kind === "num" ||
     type.kind === "byte" ||
     type.kind === "enum"
-  );
+  ) {
+    return true;
+  }
+  if (type.kind === "named") {
+    return (
+      type.name === "int" ||
+      type.name === "float" ||
+      type.name === "num" ||
+      type.name === "number" ||
+      type.name === "byte"
+    );
+  }
+  return false;
 }
 
 function isStringType(type: Type): boolean {
@@ -2521,6 +2763,144 @@ function isStringType(type: Type): boolean {
   if (type.kind === "named") {
     if (type.name === "str" || type.name === "string") return true;
     if (isStringLiteralType(type.name) || isStringLiteralUnion(type.name)) return true;
+  }
+  return false;
+}
+
+function isPrimitiveTypeName(name: string): boolean {
+  const n = name.trim();
+  return (
+    n === "int" ||
+    n === "float" ||
+    n === "num" ||
+    n === "number" ||
+    n === "byte" ||
+    n === "char" ||
+    n === "bool" ||
+    n === "boolean" ||
+    n === "str" ||
+    n === "string" ||
+    n === "void" ||
+    n === "nil" ||
+    n === "never" ||
+    isStringLiteralType(n) ||
+    isStringLiteralUnion(n)
+  );
+}
+
+function isPrimitiveType(type: Type): boolean {
+  if (
+    type.kind === "int" ||
+    type.kind === "float" ||
+    type.kind === "num" ||
+    type.kind === "byte" ||
+    type.kind === "char" ||
+    type.kind === "bool" ||
+    type.kind === "str" ||
+    type.kind === "void" ||
+    type.kind === "nil" ||
+    type.kind === "never"
+  ) {
+    return true;
+  }
+  if (type.kind === "named") {
+    return isPrimitiveTypeName(type.name);
+  }
+  return false;
+}
+
+function isValidInKeyType(type: Type, env: TypeEnv): boolean {
+  if (type.kind === "unknown") return true;
+  if (isStringType(type) || isNumeric(type)) return true;
+  if (type.kind === "named") {
+    if (type.name === "any" || type.name === "unknown") return true;
+    if (isPrimitiveTypeName(type.name)) {
+      return (
+        type.name === "str" ||
+        type.name === "string" ||
+        type.name === "int" ||
+        type.name === "float" ||
+        type.name === "num" ||
+        type.name === "number" ||
+        type.name === "byte" ||
+        type.name === "char"
+      );
+    }
+    const resolved = env.lookupType(type.name);
+    if (resolved) {
+      return isValidInKeyType(resolved, env);
+    }
+    return true;
+  }
+  return false;
+}
+
+function isValidInTargetType(type: Type, env: TypeEnv): boolean {
+  if (type.kind === "unknown") return true;
+  if (type.kind === "record" || type.kind === "array" || type.kind === "tuple") return true;
+  if (type.kind === "option") return isValidInTargetType(type.innerType, env);
+  if (type.kind === "named") {
+    if (
+      type.name === "any" ||
+      type.name === "unknown" ||
+      type.name === "object" ||
+      type.name === "Object"
+    ) {
+      return true;
+    }
+    if (isPrimitiveTypeName(type.name)) return false;
+    const resolved = env.lookupType(type.name);
+    if (resolved) {
+      return isValidInTargetType(resolved, env);
+    }
+    return true;
+  }
+  return false;
+}
+
+function isValidInstanceofTargetType(type: Type, env: TypeEnv): boolean {
+  if (type.kind === "unknown") return true;
+  if (
+    type.kind === "record" ||
+    type.kind === "array" ||
+    type.kind === "tuple" ||
+    type.kind === "function"
+  ) {
+    return true;
+  }
+  if (type.kind === "option") return isValidInstanceofTargetType(type.innerType, env);
+  if (type.kind === "named") {
+    if (
+      type.name === "any" ||
+      type.name === "unknown" ||
+      type.name === "object" ||
+      type.name === "Object"
+    ) {
+      return true;
+    }
+    if (isPrimitiveTypeName(type.name)) return false;
+    const resolved = env.lookupType(type.name);
+    if (resolved) {
+      return isValidInstanceofTargetType(resolved, env);
+    }
+    return true;
+  }
+  return false;
+}
+
+function isValidInstanceofClassType(type: Type, env: TypeEnv): boolean {
+  if (type.kind === "unknown") return true;
+  if (type.kind === "function" || type.kind === "record") return true;
+  if (type.kind === "named") {
+    if (type.name === "any" || type.name === "unknown" || type.name === "Function") return true;
+    if (isPrimitiveTypeName(type.name)) return false;
+    const resolved = env.lookupType(type.name);
+    if (resolved) {
+      return (
+        resolved.kind === "record" || resolved.kind === "function" || resolved.kind === "named"
+      );
+    }
+    return true;
   }
   return false;
 }

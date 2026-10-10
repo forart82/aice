@@ -9,6 +9,7 @@
 
 import type {
   ArrayLiteralExpr,
+  AssignOp,
   AssignStmt,
   BinaryExpr,
   BinaryOp,
@@ -674,7 +675,7 @@ export class CSharpDecompiler {
           .trim();
         statements.push({
           kind: "ReturnStmt",
-          value: exprStr ? this.parseCSharpExpr(exprStr) : undefined,
+          value: exprStr ? this.parseCSharpExpr(exprStr) : null,
           span: emptySpan(this.filePath),
         });
         continue;
@@ -716,7 +717,7 @@ export class CSharpDecompiler {
             .trim();
           thenBranch.statements.push({
             kind: "ReturnStmt",
-            value: retStr ? this.parseCSharpExpr(retStr) : undefined,
+            value: retStr ? this.parseCSharpExpr(retStr) : null,
             span: emptySpan(this.filePath),
           });
         }
@@ -726,6 +727,7 @@ export class CSharpDecompiler {
           condition: this.parseCSharpExpr(condStr),
           thenBranch,
           elifBranches: [],
+          elseBranch: null,
           span: emptySpan(this.filePath),
         });
         continue;
@@ -757,6 +759,7 @@ export class CSharpDecompiler {
         statements.push({
           kind: "LetBinding",
           name: varName,
+          typeAnnotation: null,
           init: this.parseCSharpExpr(valStr),
           isMut: true,
           span: emptySpan(this.filePath),
@@ -773,7 +776,7 @@ export class CSharpDecompiler {
         statements.push({
           kind: "AssignStmt",
           target: this.parseCSharpExpr(target),
-          op: op as BinaryOp,
+          op: (op as AssignOp) ?? "=",
           value: this.parseCSharpExpr(valStr),
           span: emptySpan(this.filePath),
         });
@@ -908,6 +911,7 @@ export class CSharpDecompiler {
           span: emptySpan(this.filePath),
         },
         property: memberMatch[2],
+        isSafeNav: false,
         isOptional: false,
         span: emptySpan(this.filePath),
       };

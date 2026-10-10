@@ -323,12 +323,24 @@ export class GoEmitter {
           for (let i = 0; i < stmt.target.elements.length; i++) {
             const target = this.emitExpr(stmt.target.elements[i]);
             const value = this.emitExpr(stmt.value.elements[i]);
-            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+            if (stmt.op === "**=") {
+              this.ctx.writeLine(`${target} = math.Pow(${target}, ${value})`);
+            } else if (stmt.op === ">>>=") {
+              this.ctx.writeLine(`${target} = ${target} >> ${value}`);
+            } else {
+              this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+            }
           }
         } else {
           const target = this.emitExpr(stmt.target);
           const value = this.emitExpr(stmt.value);
-          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+          if (stmt.op === "**=") {
+            this.ctx.writeLine(`${target} = math.Pow(${target}, ${value})`);
+          } else if (stmt.op === ">>>=") {
+            this.ctx.writeLine(`${target} = ${target} >> ${value}`);
+          } else {
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value}`);
+          }
         }
         break;
       }
@@ -498,13 +510,20 @@ export class GoEmitter {
         return this.toCamelCase(expr.name);
       }
       case "AssignExpr":
-        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
+        return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
         let op = expr.operator as string;
         if (op === "and") op = "&&";
         if (op === "or") op = "||";
+        if (op === "in") return `contains(${right}, ${left})`;
+        if (op === "instanceof") {
+          const typeName = expr.right.kind === "IdentifierExpr" ? expr.right.name : right;
+          return `/* instanceof */ func() bool { _, ok := any(${left}).(${typeName}); return ok }()`;
+        }
+        if (op === "**") return `math.Pow(${left}, ${right})`;
+        if (op === ">>>") return `(uint64(${left}) >> ${right})`;
         return `(${left} ${op} ${right})`;
       }
       case "UnaryExpr": {
@@ -549,6 +568,11 @@ export class GoEmitter {
           })
           .join(", ");
         return `{ ${fields} }`;
+      }
+      case "ClosureExpr": {
+        const params = expr.params.map((p) => `${this.toCamelCase(p.name)} any`).join(", ");
+        const body = expr.body.kind === "Block" ? "{ ... }" : this.emitExpr(expr.body);
+        return `func(${params}) { return ${body} }`;
       }
       default:
         return "";

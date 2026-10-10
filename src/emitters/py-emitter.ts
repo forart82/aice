@@ -34,6 +34,10 @@ export class PythonEmitter {
     });
   }
 
+  static emit(mod: Module, options?: EmitterOptions): string {
+    return new PythonEmitter(options).emit(mod);
+  }
+
   emit(mod: Module): string {
     return this.emitModule(mod);
   }
@@ -266,7 +270,13 @@ export class PythonEmitter {
     if (m.body.kind === "Block") {
       this.emitBlock(m.body);
     } else {
-      this.ctx.writeLine(`return ${this.emitExpr(m.body)}`);
+      if (m.body.kind === "AssignExpr") {
+        this.ctx.writeLine(
+          `${this.emitExpr(m.body.target)} ${m.body.op ?? "="} ${this.emitExpr(m.body.value)}`,
+        );
+      } else {
+        this.ctx.writeLine(`return ${this.emitExpr(m.body)}`);
+      }
     }
     this.ctx.dedent();
   }
@@ -506,7 +516,11 @@ export class PythonEmitter {
             const targetStr = this.emitExpr(stmt.target.elements[i]);
             const valStr = this.emitExpr(stmt.value.elements[i]);
             flushHoisted();
-            this.ctx.writeLine(`${targetStr} ${stmt.op} ${valStr}`);
+            if (stmt.op === ">>>=") {
+              this.ctx.writeLine(`${targetStr} = ((${targetStr} % 0x100000000) >> ${valStr})`);
+            } else {
+              this.ctx.writeLine(`${targetStr} ${stmt.op} ${valStr}`);
+            }
           }
         } else if (stmt.target.kind === "ArrayLiteralExpr" && (!stmt.op || stmt.op === "=")) {
           const names = stmt.target.elements.map((e) => this.emitExpr(e)).join(", ");
@@ -517,7 +531,11 @@ export class PythonEmitter {
           const targetStr = this.emitExpr(stmt.target);
           const valStr = this.emitExpr(stmt.value);
           flushHoisted();
-          this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
+          if (stmt.op === ">>>=") {
+            this.ctx.writeLine(`${targetStr} = ((${targetStr} % 0x100000000) >> ${valStr})`);
+          } else {
+            this.ctx.writeLine(`${targetStr} ${stmt.op ?? "="} ${valStr}`);
+          }
         }
         break;
       }
@@ -678,12 +696,24 @@ export class PythonEmitter {
       case "AwaitExpr":
         return `await ${this.emitExpr(expr.operand)}`;
 
-      case "AssignExpr":
-        return `${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)}`;
+      case "AssignExpr": {
+        const target = this.emitExpr(expr.target);
+        const val = this.emitExpr(expr.value);
+        if (!expr.op || expr.op === "=") {
+          return `(${target} := ${val})`;
+        }
+        if (expr.op === ">>>=") {
+          return `(${target} := ((${target} % 0x100000000) >> ${val}))`;
+        }
+        return `(${target} ${expr.op} ${val})`;
+      }
 
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
+        if (expr.operator === "instanceof") {
+          return `isinstance(${left}, ${right})`;
+        }
         if (expr.operator === ">>>") {
           return `((${left} % 0x100000000) >> ${right})`;
         }
@@ -937,7 +967,8 @@ export class PythonEmitter {
     }
   }
 
-  emitTypeExpr(t: TypeExpr): string {
+  emitTypeExpr(t?: TypeExpr | null): string {
+    if (!t) return "Any";
     switch (t.kind) {
       case "PrimitiveType":
         if (t.primitive === "int" || t.primitive === "byte") return "int";

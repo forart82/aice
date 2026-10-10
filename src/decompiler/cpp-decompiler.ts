@@ -9,6 +9,7 @@
 
 import type {
   ArrayLiteralExpr,
+  AssignOp,
   AssignStmt,
   BinaryExpr,
   BinaryOp,
@@ -622,7 +623,7 @@ export class CppDecompiler {
           .trim();
         statements.push({
           kind: "ReturnStmt",
-          value: exprStr ? this.parseCppExpr(exprStr) : undefined,
+          value: exprStr ? this.parseCppExpr(exprStr) : null,
           span: emptySpan(this.filePath),
         });
         continue;
@@ -664,7 +665,7 @@ export class CppDecompiler {
             .trim();
           thenBranch.statements.push({
             kind: "ReturnStmt",
-            value: retStr ? this.parseCppExpr(retStr) : undefined,
+            value: retStr ? this.parseCppExpr(retStr) : null,
             span: emptySpan(this.filePath),
           });
         }
@@ -674,6 +675,7 @@ export class CppDecompiler {
           condition: this.parseCppExpr(condStr),
           thenBranch,
           elifBranches: [],
+          elseBranch: null,
           span: emptySpan(this.filePath),
         });
         continue;
@@ -705,6 +707,7 @@ export class CppDecompiler {
         statements.push({
           kind: "LetBinding",
           name: varName,
+          typeAnnotation: null,
           init: this.parseCppExpr(valStr),
           isMut: !trimmed.startsWith("const"),
           span: emptySpan(this.filePath),
@@ -721,7 +724,7 @@ export class CppDecompiler {
         statements.push({
           kind: "AssignStmt",
           target: this.parseCppExpr(target),
-          op: op as BinaryOp,
+          op: (op as AssignOp) ?? "=",
           value: this.parseCppExpr(valStr),
           span: emptySpan(this.filePath),
         });
@@ -842,6 +845,7 @@ export class CppDecompiler {
           span: emptySpan(this.filePath),
         },
         property: memberMatch[3],
+        isSafeNav: false,
         isOptional: false,
         span: emptySpan(this.filePath),
       };

@@ -132,6 +132,7 @@ export interface FunctionDecl {
   kind: "FunctionDecl";
   name: string;
   isAsync?: boolean;
+  typeParams?: string[];
   params: ParamDecl[];
   returnType: TypeExpr | null;
   body: Block | Expr;
@@ -182,6 +183,7 @@ export interface MethodDecl {
   name: string;
   isStatic: boolean;
   isAsync: boolean;
+  typeParams?: string[];
   accessor?: "get" | "set";
   params: ParamDecl[];
   returnType: TypeExpr | null;
@@ -250,7 +252,20 @@ export interface DestructureBinding {
   span: Span;
 }
 
-export type AssignOp = "=" | "+=" | "-=" | "*=" | "/=" | "%=";
+export type AssignOp =
+  | "="
+  | "+="
+  | "-="
+  | "*="
+  | "/="
+  | "%="
+  | "|="
+  | "^="
+  | "&="
+  | "<<="
+  | ">>="
+  | ">>>="
+  | "**=";
 
 export interface AssignStmt {
   kind: "AssignStmt";
@@ -436,7 +451,9 @@ export type BinaryOp =
   | "or"
   | "??"
   | "&&"
-  | "||";
+  | "||"
+  | "in"
+  | "instanceof";
 
 export interface BinaryExpr {
   kind: "BinaryExpr";
@@ -471,6 +488,7 @@ export interface MemberAccessExpr {
   object: Expr;
   property: string;
   isSafeNav: boolean;
+  isOptional?: boolean;
   span: Span;
 }
 

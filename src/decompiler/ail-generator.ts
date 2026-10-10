@@ -49,6 +49,8 @@ export function getBinaryOpPrecedence(op: BinaryOp): number {
     case "<=":
     case ">":
     case ">=":
+    case "in":
+    case "instanceof":
       return Precedence.LESSGREATER; // 10
     case "==":
     case "!=":
@@ -163,6 +165,10 @@ export class AilGenerator {
   constructor(options: AilGeneratorOptions = {}) {
     this.indentStr = options.indent ?? "  ";
     this.trivia = options.trivia;
+  }
+
+  static generate(mod: Module, options?: AilGeneratorOptions): string {
+    return new AilGenerator(options).generate(mod);
   }
 
   generate(mod: Module): string {
@@ -411,7 +417,8 @@ export class AilGenerator {
               const pMut = p.isMut ? "mut " : "";
               const opt = p.isOptional ? "?" : "";
               const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-              return `${pPub}${pRo}${pMut}${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+              const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
+              return `${pPub}${pRo}${pMut}${p.name}${opt}${typePart}${def}`;
             })
             .join(", ")})`
         : "";
@@ -447,7 +454,8 @@ export class AilGenerator {
           .map((p) => {
             const opt = p.isOptional ? "?" : "";
             const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-            return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+            const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
+            return `${p.name}${opt}${typePart}${def}`;
           })
           .join(", ");
         const ret = m.returnType ? ` -> ${this.formatTypeExpr(m.returnType)}` : "";
@@ -529,7 +537,8 @@ export class AilGenerator {
       .map((p) => {
         const opt = p.isOptional ? "?" : "";
         const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
-        return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`;
+        const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
+        return `${p.name}${opt}${typePart}${def}`;
       })
       .join(", ");
 
@@ -733,7 +742,8 @@ export class AilGenerator {
     const params = comp.params
       .map((p) => {
         const opt = p.isOptional ? "?" : "";
-        return `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}`;
+        const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
+        return `${p.name}${opt}${typePart}`;
       })
       .join(", ");
 
@@ -961,7 +971,12 @@ export class AilGenerator {
         const retStr = expr.returnType ? ` -> ${this.formatTypeExpr(expr.returnType)}` : "";
 
         if ("kind" in expr.body && expr.body.kind !== "Block") {
-          return `fn(${params})${retStr} = ${this.formatExpr(expr.body as Expr)}`;
+          const bodyExpr = expr.body as Expr;
+          const bodyStr = this.formatExpr(bodyExpr);
+          if (bodyExpr.kind === "AssignExpr") {
+            return `fn(${params})${retStr} = (${bodyStr})`;
+          }
+          return `fn(${params})${retStr} = ${bodyStr}`;
         }
 
         if (expr.body.kind === "Block") {
@@ -977,7 +992,14 @@ export class AilGenerator {
                 : `fn(${params})${retStr} = nil`;
             }
             if (stmt.kind === "ExprStmt") {
-              return `fn(${params})${retStr} = ${this.formatExpr(stmt.expr)}`;
+              const bodyStr = this.formatExpr(stmt.expr);
+              if (stmt.expr.kind === "AssignExpr") {
+                return `fn(${params})${retStr} = (${bodyStr})`;
+              }
+              return `fn(${params})${retStr} = ${bodyStr}`;
+            }
+            if (stmt.kind === "AssignStmt") {
+              return `fn(${params})${retStr} = (${this.formatExpr(stmt.target)} ${stmt.op ?? "="} ${this.formatExpr(stmt.value)})`;
             }
           }
 
@@ -998,7 +1020,8 @@ export class AilGenerator {
     }
   }
 
-  public formatTypeExpr(t: TypeExpr): string {
+  public formatTypeExpr(t: TypeExpr | null | undefined): string {
+    if (!t) return "";
     switch (t.kind) {
       case "PrimitiveType":
         return t.primitive;

@@ -717,7 +717,7 @@ const JSON_SYMBOL = makeRecordType(
 );
 
 const MATH_SYMBOL = makeRecordType(
-  new Map([
+  new Map<string, Type>([
     ["floor", makeFunctionType([{ name: "n", type: TYPE_UNKNOWN, optional: true }], TYPE_INT)],
     ["ceil", makeFunctionType([{ name: "n", type: TYPE_UNKNOWN, optional: true }], TYPE_INT)],
     ["round", makeFunctionType([{ name: "n", type: TYPE_UNKNOWN, optional: true }], TYPE_INT)],

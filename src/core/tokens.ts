@@ -52,6 +52,7 @@ export type TokenKind =
   | "CASE"
   | "FOR"
   | "IN"
+  | "INSTANCEOF"
   | "WHILE"
   | "RET"
   | "TRY"
@@ -108,6 +109,13 @@ export type TokenKind =
   | "STAR_EQUAL" // *=
   | "SLASH_EQUAL" // /=
   | "PERCENT_EQUAL" // %=
+  | "STAR_STAR_EQUAL" // **=
+  | "AMP_EQUAL" // &=
+  | "PIPE_EQUAL" // |=
+  | "CARET_EQUAL" // ^=
+  | "SHL_EQUAL" // <<=
+  | "SHR_EQUAL" // >>=
+  | "USHR_EQUAL" // >>>=
   | "COLON_EQUAL" // :=
   | "COLON_COLON_EQUAL" // ::=
   | "ARROW" // ->
@@ -170,6 +178,7 @@ export const KEYWORDS: Readonly<Record<string, TokenKind>> = {
   case: "CASE",
   for: "FOR",
   in: "IN",
+  instanceof: "INSTANCEOF",
   while: "WHILE",
   ret: "RET",
   return: "RET",

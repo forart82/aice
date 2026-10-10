@@ -365,9 +365,29 @@ export class CSharpEmitter {
         break;
       }
       case "AssignStmt": {
-        const target = this.emitExpr(stmt.target);
-        const value = this.emitExpr(stmt.value);
-        this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+        if (
+          stmt.target.kind === "ArrayLiteralExpr" &&
+          stmt.value.kind === "ArrayLiteralExpr" &&
+          stmt.value.elements.length === stmt.target.elements.length
+        ) {
+          for (let i = 0; i < stmt.target.elements.length; i++) {
+            const target = this.emitExpr(stmt.target.elements[i]);
+            const value = this.emitExpr(stmt.value.elements[i]);
+            if (stmt.op === "**=") {
+              this.ctx.writeLine(`${target} = Math.Pow(${target}, ${value});`);
+            } else {
+              this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+            }
+          }
+        } else {
+          const target = this.emitExpr(stmt.target);
+          const value = this.emitExpr(stmt.value);
+          if (stmt.op === "**=") {
+            this.ctx.writeLine(`${target} = Math.Pow(${target}, ${value});`);
+          } else {
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          }
+        }
         break;
       }
       case "ReturnStmt": {
@@ -480,6 +500,10 @@ export class CSharpEmitter {
         let op: string = expr.operator;
         if (op === "and") op = "&&";
         if (op === "or") op = "||";
+        if (op === "in") return `(${right}.Contains(${left}))`;
+        if (op === "instanceof") return `(${left} is ${right})`;
+        if (op === "**") return `Math.Pow(${left}, ${right})`;
+        if (op === ">>>") return `(${left} >>> ${right})`;
         return `(${left} ${op} ${right})`;
       }
       case "UnaryExpr": {

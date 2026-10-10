@@ -536,6 +536,13 @@ export function scanRawTokens(
     }
     if (ch === "*") {
       if (peek(1) === "*") {
+        if (peek(2) === "=") {
+          advance();
+          advance();
+          advance();
+          rawTokens.push({ kind: "STAR_STAR_EQUAL", value: "**=", span: makeSpan(startPos) });
+          continue;
+        }
         advance();
         advance();
         rawTokens.push({ kind: "STAR_STAR", value: "**", span: makeSpan(startPos) });
@@ -574,6 +581,13 @@ export function scanRawTokens(
     }
     if (ch === "<") {
       if (peek(1) === "<") {
+        if (peek(2) === "=") {
+          advance();
+          advance();
+          advance();
+          rawTokens.push({ kind: "SHL_EQUAL", value: "<<=", span: makeSpan(startPos) });
+          continue;
+        }
         advance();
         advance();
         rawTokens.push({ kind: "SHL", value: "<<", span: makeSpan(startPos) });
@@ -589,10 +603,25 @@ export function scanRawTokens(
     if (ch === ">") {
       if (peek(1) === ">") {
         if (peek(2) === ">") {
+          if (peek(3) === "=") {
+            advance();
+            advance();
+            advance();
+            advance();
+            rawTokens.push({ kind: "USHR_EQUAL", value: ">>>=", span: makeSpan(startPos) });
+            continue;
+          }
           advance();
           advance();
           advance();
           rawTokens.push({ kind: "USHR", value: ">>>", span: makeSpan(startPos) });
+          continue;
+        }
+        if (peek(2) === "=") {
+          advance();
+          advance();
+          advance();
+          rawTokens.push({ kind: "SHR_EQUAL", value: ">>=", span: makeSpan(startPos) });
           continue;
         }
         advance();
@@ -607,16 +636,38 @@ export function scanRawTokens(
         continue;
       }
     }
-    if (ch === "&" && peek(1) === "&") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "AMP_AMP", value: "&&", span: makeSpan(startPos) });
-      continue;
+    if (ch === "&") {
+      if (peek(1) === "&") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "AMP_AMP", value: "&&", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "AMP_EQUAL", value: "&=", span: makeSpan(startPos) });
+        continue;
+      }
     }
-    if (ch === "|" && peek(1) === "|") {
+    if (ch === "|") {
+      if (peek(1) === "|") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "PIPE_PIPE", value: "||", span: makeSpan(startPos) });
+        continue;
+      }
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "PIPE_EQUAL", value: "|=", span: makeSpan(startPos) });
+        continue;
+      }
+    }
+    if (ch === "^" && peek(1) === "=") {
       advance();
       advance();
-      rawTokens.push({ kind: "PIPE_PIPE", value: "||", span: makeSpan(startPos) });
+      rawTokens.push({ kind: "CARET_EQUAL", value: "^=", span: makeSpan(startPos) });
       continue;
     }
     if (ch === "?" && peek(1) === "?") {

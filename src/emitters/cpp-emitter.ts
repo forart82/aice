@@ -359,12 +359,24 @@ export class CppEmitter {
           for (let i = 0; i < stmt.target.elements.length; i++) {
             const target = this.emitExpr(stmt.target.elements[i]);
             const value = this.emitExpr(stmt.value.elements[i]);
-            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+            if (stmt.op === "**=") {
+              this.ctx.writeLine(`${target} = std::pow(${target}, ${value});`);
+            } else if (stmt.op === ">>>=") {
+              this.ctx.writeLine(`${target} = (static_cast<uint64_t>(${target}) >> ${value});`);
+            } else {
+              this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+            }
           }
         } else {
           const target = this.emitExpr(stmt.target);
           const value = this.emitExpr(stmt.value);
-          this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          if (stmt.op === "**=") {
+            this.ctx.writeLine(`${target} = std::pow(${target}, ${value});`);
+          } else if (stmt.op === ">>>=") {
+            this.ctx.writeLine(`${target} = (static_cast<uint64_t>(${target}) >> ${value});`);
+          } else {
+            this.ctx.writeLine(`${target} ${stmt.op ?? "="} ${value};`);
+          }
         }
         break;
       }
@@ -472,6 +484,10 @@ export class CppEmitter {
         let op: string = expr.operator;
         if (op === "and") op = "&&";
         if (op === "or") op = "||";
+        if (op === "in") return `(${right}.contains(${left}))`;
+        if (op === "instanceof") return `(dynamic_cast<const ${right}*>(&${left}) != nullptr)`;
+        if (op === "**") return `std::pow(${left}, ${right})`;
+        if (op === ">>>") return `(static_cast<uint64_t>(${left}) >> ${right})`;
         return `(${left} ${op} ${right})`;
       }
       case "UnaryExpr": {
@@ -563,7 +579,8 @@ export class CppEmitter {
     }
   }
 
-  emitTypeExpr(t: TypeExpr): string {
+  emitTypeExpr(t?: TypeExpr | null): string {
+    if (!t) return "auto";
     switch (t.kind) {
       case "PrimitiveType":
         if (t.primitive === "int") return "int";
