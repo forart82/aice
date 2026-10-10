@@ -231,6 +231,81 @@ line 3\``;
         "EOF",
       ]);
     });
+
+    it("scans compound bitwise, shift, and power assignment operators", () => {
+      const src = "|= ^= &= <<= >>= >>>= **=";
+      expect(kinds(src)).toEqual([
+        "PIPE_EQUAL",
+        "CARET_EQUAL",
+        "AMP_EQUAL",
+        "SHL_EQUAL",
+        "SHR_EQUAL",
+        "USHR_EQUAL",
+        "STAR_STAR_EQUAL",
+        "NEWLINE",
+        "EOF",
+      ]);
+    });
+
+    it("disambiguates compound assignment operators from single/double character prefixes", () => {
+      const src = "| |= || & &= && ^ ^= << <<= >> >>= >>> >>>= * *= ** **=";
+      expect(kinds(src)).toEqual([
+        "PIPE",
+        "PIPE_EQUAL",
+        "PIPE_PIPE",
+        "AMPERSAND",
+        "AMP_EQUAL",
+        "AMP_AMP",
+        "CARET",
+        "CARET_EQUAL",
+        "SHL",
+        "SHL_EQUAL",
+        "SHR",
+        "SHR_EQUAL",
+        "USHR",
+        "USHR_EQUAL",
+        "STAR",
+        "STAR_EQUAL",
+        "STAR_STAR",
+        "STAR_STAR_EQUAL",
+        "NEWLINE",
+        "EOF",
+      ]);
+    });
+
+    it("scans instanceof keyword and operator", () => {
+      const src = "x instanceof MyClass";
+      expect(kinds(src)).toEqual(["IDENT", "INSTANCEOF", "IDENT", "NEWLINE", "EOF"]);
+    });
+
+    it("preserves exact values and spans for compound assignment and instanceof", () => {
+      const src = "a |= b; c ^= d; e &= f; g <<= h; i >>= j; k >>>= l; m **= n; obj instanceof Cls";
+      const tokens = tokenize(src);
+      const targetKinds = tokens
+        .filter((t) =>
+          [
+            "PIPE_EQUAL",
+            "CARET_EQUAL",
+            "AMP_EQUAL",
+            "SHL_EQUAL",
+            "SHR_EQUAL",
+            "USHR_EQUAL",
+            "STAR_STAR_EQUAL",
+            "INSTANCEOF",
+          ].includes(t.kind),
+        )
+        .map((t) => ({ kind: t.kind, value: t.value }));
+      expect(targetKinds).toEqual([
+        { kind: "PIPE_EQUAL", value: "|=" },
+        { kind: "CARET_EQUAL", value: "^=" },
+        { kind: "AMP_EQUAL", value: "&=" },
+        { kind: "SHL_EQUAL", value: "<<=" },
+        { kind: "SHR_EQUAL", value: ">>=" },
+        { kind: "USHR_EQUAL", value: ">>>=" },
+        { kind: "STAR_STAR_EQUAL", value: "**=" },
+        { kind: "INSTANCEOF", value: "instanceof" },
+      ]);
+    });
   });
 
   describe("Two-Stage Indentation & Layout Engine", () => {
