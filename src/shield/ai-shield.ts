@@ -14,7 +14,9 @@ export interface ShieldOptions {
   dir: string;
   ideSettings?: boolean; // default true (.vscode/settings.json)
   agentIgnores?: boolean; // default true (.cursorignore, .geminiignore, .aiderignore, .agentignore)
-  cognitiveRules?: boolean; // default true (AGENTS.md, .cursorrules)
+  cognitiveRules?: boolean; // default true (AGENTS.md, GEMINI.md, .cursorrules)
+  lifecycleHooks?: boolean; // default false for library calls, true for CLI adopt & shield apply
+  geminiMd?: boolean; // default true if GEMINI.md exists, or if specified
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".py", ".cpp", ".hpp", ".h"]
 }
 
@@ -34,6 +36,7 @@ export interface ShieldStatus {
   ideSettingsConfigured: boolean;
   agentIgnoresConfigured: boolean;
   cognitiveRulesConfigured: boolean;
+  lifecycleHooksConfigured?: boolean;
   details: Record<string, boolean>;
 }
 
@@ -97,9 +100,10 @@ export function generateCognitiveAgentsMdContent(): string {
     "## 1. Core Directives:",
     "1. **Source of Truth**: Always read, inspect, create, and modify `*.ail` source files.",
     "2. **Never Edit Target Files Directly**: Any changes made directly to target files will fail with OS permissions (`EACCES`) or be overwritten by the AIL compiler (`ail compile` or `ail compile-all`).",
-    "3. **Compilation**: When target artifacts are needed, invoke `ail compile <file.ail>` or `ail compile-all`.",
-    "4. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.",
-    "5. **Incremental Watch**: The `ail watch` daemon recompiles `*.ail` to side-by-side targets in <5ms, preserving Hot Module Reloading (HMR).",
+    "3. **Stack Trace Path Translation**: When runtime errors, test failures, compiler diagnostics, or user prompts reference a target file (e.g. `engine.ts:338` or `main.ts:12`), **DO NOT OPEN OR INSPECT THE TARGET FILE**. You MUST translate the path to its `.ail` sibling and inspect `engine.ts.ail` instead!",
+    "4. **Compilation**: When target artifacts are needed, invoke `ail compile <file.ail>` or `ail compile-all`.",
+    "5. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.",
+    "6. **Incremental Watch**: The `ail watch` daemon recompiles `*.ail` to side-by-side targets in <5ms, preserving Hot Module Reloading (HMR).",
     "",
     "## 2. AIL 2.0 Dialect Syntax Cheatsheet:",
     "- **Canonical File Naming**: Always name files with target extension before `.ail` (e.g. `src/App.tsx.ail`, `src/sim/Boss.ts.ail`, `src/styles.css.ail`).",
@@ -140,6 +144,7 @@ export function generateCognitiveCursorRulesContent(): string {
     "# All target files (*.ts, *.tsx, *.css, *.html, *.py, *.cpp, *.hpp, *.h, etc.) are machine-generated read-only build artifacts.",
     "# Agents must only read, create, and modify *.ail source files.",
     "# Never edit target files directly; changes will fail with permission denied (chmod 444) or be overwritten by `ail compile`.",
+    "# STACK TRACE TRANSLATION: If a stack trace or error cites `foo.ts:123`, inspect `foo.ts.ail` instead!",
     "# Run `ail compile <file.ail>` to produce target files, `ail verify <file.ail>` to check code, or `ail fix <file.ail>` to auto-repair.",
     "#",
     "# AIL 2.0 DIALECT CHEATSHEET:",
@@ -153,6 +158,67 @@ export function generateCognitiveCursorRulesContent(): string {
     "# 8. CSS: `fl-row`, `fl-col`, `fl-center`, `tokens spacing[rem]: 1: 0.25`.",
     COGNITIVE_RULES_TEXT_END,
   ].join("\n");
+}
+
+export function generateAilShieldHookScript(): string {
+  return `#!/usr/bin/env node
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * AIL 2.0 AI Exclusion & Cognitive Shield Lifecycle Hook Interceptor.
+ * Transparently redirects AI agent view_file tool calls from target files
+ * to their .ail source siblings, and denies direct write attempts on targets.
+ */
+import fs from "node:fs";
+import path from "node:path";
+
+try {
+  const rawInput = fs.readFileSync(0, "utf-8");
+  if (!rawInput.trim()) {
+    console.log(JSON.stringify({ decision: "allow" }));
+    process.exit(0);
+  }
+
+  const payload = JSON.parse(rawInput);
+  const toolName = payload.toolCall?.name;
+  const args = payload.toolCall?.args || {};
+  const rawPath = args.AbsolutePath || args.TargetFile || args.path || args.filePath || args.Uri;
+
+  if (rawPath && typeof rawPath === "string") {
+    let checkPath = rawPath;
+    if (checkPath.startsWith("file://")) {
+      checkPath = checkPath.slice(7);
+    }
+    const cwd = process.cwd();
+    const resolvedPath = path.isAbsolute(checkPath) ? checkPath : path.resolve(cwd, checkPath);
+
+    if (!resolvedPath.endsWith(".ail")) {
+      const ailSibling = \`\${resolvedPath}.ail\`;
+      if (fs.existsSync(ailSibling)) {
+        if (toolName === "view_file") {
+          console.log(JSON.stringify({
+            decision: "allow",
+            overwrite: { AbsolutePath: ailSibling }
+          }));
+          process.exit(0);
+        } else if (toolName === "replace_file_content" || toolName === "write_to_file") {
+          const baseName = path.basename(resolvedPath);
+          console.log(JSON.stringify({
+            decision: "deny",
+            reason: \`MANDATORY AIL SHIELD: Target file '\${baseName}' is a machine-generated read-only build artifact (chmod 444). You MUST inspect and modify '\${baseName}.ail' instead, and compile with \\\`ail compile\\\` or run \\\`npm test\\\`.\`
+          }));
+          process.exit(0);
+        }
+      }
+    }
+  }
+
+  console.log(JSON.stringify({ decision: "allow" }));
+} catch {
+  console.log(JSON.stringify({ decision: "allow" }));
+}
+`;
 }
 
 function parseJsonSafe(content: string): Record<string, unknown> {
@@ -366,6 +432,28 @@ export async function applyAiShield(
       }
     }
 
+    // GEMINI.md: Update if it already exists or if explicitly requested via options.geminiMd
+    const geminiMdPath = path.join(targetDir, "GEMINI.md");
+    const geminiMdExisted = fs.existsSync(geminiMdPath);
+    if (geminiMdExisted || options?.geminiMd) {
+      if (!geminiMdExisted) {
+        fs.writeFileSync(geminiMdPath, `${agentsBlock}\n`, "utf-8");
+        createdFiles.push(geminiMdPath);
+      } else {
+        const existing = fs.readFileSync(geminiMdPath, "utf-8");
+        const { newContent, changed } = updateMarkerBlock(
+          existing,
+          COGNITIVE_RULES_MD_START,
+          COGNITIVE_RULES_MD_END,
+          agentsBlock,
+        );
+        if (changed) {
+          fs.writeFileSync(geminiMdPath, newContent, "utf-8");
+          modifiedFiles.push(geminiMdPath);
+        }
+      }
+    }
+
     // .cursorrules
     const cursorRulesPath = path.join(targetDir, ".cursorrules");
     const cursorRulesExisted = fs.existsSync(cursorRulesPath);
@@ -389,6 +477,74 @@ export async function applyAiShield(
     }
 
     activeShields.push("cognitiveRules");
+  }
+
+  // 4. Lifecycle Hooks (.agents/hooks.json and .agents/ail-shield-hook.mjs)
+  const lifecycleHooksEnabled = options?.lifecycleHooks ?? false;
+  if (lifecycleHooksEnabled) {
+    const agentsDir = path.join(targetDir, ".agents");
+    if (!fs.existsSync(agentsDir)) {
+      fs.mkdirSync(agentsDir, { recursive: true });
+    }
+
+    const hookScriptPath = path.join(agentsDir, "ail-shield-hook.mjs");
+    const hookScriptExisted = fs.existsSync(hookScriptPath);
+    const hookScriptContent = generateAilShieldHookScript();
+    fs.writeFileSync(hookScriptPath, hookScriptContent, { mode: 0o755 });
+    if (!hookScriptExisted) {
+      createdFiles.push(hookScriptPath);
+    } else {
+      modifiedFiles.push(hookScriptPath);
+    }
+
+    // Also write .agents/rules/ail-shield.md for Antigravity directory-based rule discovery
+    const rulesDir = path.join(agentsDir, "rules");
+    if (!fs.existsSync(rulesDir)) {
+      fs.mkdirSync(rulesDir, { recursive: true });
+    }
+    const ruleMdPath = path.join(rulesDir, "ail-shield.md");
+    const ruleMdExisted = fs.existsSync(ruleMdPath);
+    fs.writeFileSync(ruleMdPath, `${generateCognitiveAgentsMdContent()}\n`, "utf-8");
+    if (!ruleMdExisted) {
+      createdFiles.push(ruleMdPath);
+    } else {
+      modifiedFiles.push(ruleMdPath);
+    }
+
+    const hooksJsonPath = path.join(agentsDir, "hooks.json");
+    const hooksJsonExisted = fs.existsSync(hooksJsonPath);
+    let hooksData: Record<string, unknown> = {};
+    if (hooksJsonExisted) {
+      try {
+        hooksData = parseJsonSafe(fs.readFileSync(hooksJsonPath, "utf-8"));
+      } catch {
+        hooksData = {};
+      }
+    }
+
+    hooksData["ail-shield-interceptor"] = {
+      PreToolUse: [
+        {
+          matcher: "view_file|replace_file_content|write_to_file",
+          hooks: [
+            {
+              type: "command",
+              command: "node .agents/ail-shield-hook.mjs",
+            },
+          ],
+        },
+      ],
+    };
+
+    const formattedHooksJson = `${JSON.stringify(hooksData, null, 2)}\n`;
+    fs.writeFileSync(hooksJsonPath, formattedHooksJson, "utf-8");
+    if (!hooksJsonExisted) {
+      createdFiles.push(hooksJsonPath);
+    } else {
+      modifiedFiles.push(hooksJsonPath);
+    }
+
+    activeShields.push("lifecycleHooks");
   }
 
   return {
@@ -537,6 +693,21 @@ export async function removeAiShield(
       }
     }
 
+    const geminiMdPath = path.join(targetDir, "GEMINI.md");
+    if (fs.existsSync(geminiMdPath)) {
+      const content = fs.readFileSync(geminiMdPath, "utf-8");
+      const { remaining, removed } = removeCognitiveRule(content);
+      if (removed) {
+        if (!remaining.trim()) {
+          fs.unlinkSync(geminiMdPath);
+          removedFiles.push(geminiMdPath);
+        } else {
+          fs.writeFileSync(geminiMdPath, remaining, "utf-8");
+          revertedFiles.push(geminiMdPath);
+        }
+      }
+    }
+
     const cursorRulesPath = path.join(targetDir, ".cursorrules");
     if (fs.existsSync(cursorRulesPath)) {
       const content = fs.readFileSync(cursorRulesPath, "utf-8");
@@ -550,6 +721,59 @@ export async function removeAiShield(
           revertedFiles.push(cursorRulesPath);
         }
       }
+    }
+  }
+
+  // 4. Clean Lifecycle Hooks
+  const lifecycleHooksEnabled = options?.lifecycleHooks ?? true;
+  if (lifecycleHooksEnabled) {
+    const agentsDir = path.join(targetDir, ".agents");
+    const hookScriptPath = path.join(agentsDir, "ail-shield-hook.mjs");
+    if (fs.existsSync(hookScriptPath)) {
+      fs.unlinkSync(hookScriptPath);
+      removedFiles.push(hookScriptPath);
+    }
+
+    const ruleMdPath = path.join(agentsDir, "rules", "ail-shield.md");
+    if (fs.existsSync(ruleMdPath)) {
+      fs.unlinkSync(ruleMdPath);
+      removedFiles.push(ruleMdPath);
+      try {
+        const rulesDir = path.join(agentsDir, "rules");
+        if (fs.existsSync(rulesDir) && fs.readdirSync(rulesDir).length === 0) {
+          fs.rmdirSync(rulesDir);
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const hooksJsonPath = path.join(agentsDir, "hooks.json");
+    if (fs.existsSync(hooksJsonPath)) {
+      try {
+        const raw = fs.readFileSync(hooksJsonPath, "utf-8");
+        const json = parseJsonSafe(raw);
+        if (json["ail-shield-interceptor"]) {
+          delete json["ail-shield-interceptor"];
+          if (Object.keys(json).length === 0) {
+            fs.unlinkSync(hooksJsonPath);
+            removedFiles.push(hooksJsonPath);
+          } else {
+            fs.writeFileSync(hooksJsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+            revertedFiles.push(hooksJsonPath);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    try {
+      if (fs.existsSync(agentsDir) && fs.readdirSync(agentsDir).length === 0) {
+        fs.rmdirSync(agentsDir);
+      }
+    } catch {
+      // ignore
     }
   }
 
@@ -585,6 +809,7 @@ export async function checkAiShieldStatus(
       ideSettingsConfigured: false,
       agentIgnoresConfigured: false,
       cognitiveRulesConfigured: false,
+      lifecycleHooksConfigured: false,
       details,
     };
   }
@@ -639,28 +864,57 @@ export async function checkAiShieldStatus(
     details["AGENTS.md"] = hasCognitiveRule(content);
   }
 
+  const geminiMdPath = path.join(targetDir, "GEMINI.md");
+  if (fs.existsSync(geminiMdPath)) {
+    const content = fs.readFileSync(geminiMdPath, "utf-8");
+    details["GEMINI.md"] = hasCognitiveRule(content);
+  }
+
   const cursorRulesPath = path.join(targetDir, ".cursorrules");
   if (fs.existsSync(cursorRulesPath)) {
     const content = fs.readFileSync(cursorRulesPath, "utf-8");
     details[".cursorrules"] = hasCognitiveRule(content);
   }
 
+  // 4. Check Lifecycle Hooks
+  const hooksJsonPath = path.join(targetDir, ".agents", "hooks.json");
+  const hookScriptPath = path.join(targetDir, ".agents", "ail-shield-hook.mjs");
+  if (fs.existsSync(hooksJsonPath)) {
+    try {
+      const hooksJson = parseJsonSafe(fs.readFileSync(hooksJsonPath, "utf-8"));
+      details[".agents/hooks.json"] = Boolean(hooksJson["ail-shield-interceptor"]);
+    } catch {
+      details[".agents/hooks.json"] = false;
+    }
+  } else {
+    details[".agents/hooks.json"] = false;
+  }
+  details[".agents/ail-shield-hook.mjs"] = fs.existsSync(hookScriptPath);
+
   const ideSettingsConfigured = details[".vscode/settings.json"] === true;
   const agentIgnoresConfigured = AGENT_IGNORE_FILES.every((f) => details[f] === true);
   const cognitiveRulesConfigured =
     details["AGENTS.md"] === true && details[".cursorrules"] === true;
+  const lifecycleHooksConfigured =
+    details[".agents/hooks.json"] === true && details[".agents/ail-shield-hook.mjs"] === true;
 
   details.ideSettings = ideSettingsConfigured;
   details.agentIgnores = agentIgnoresConfigured;
   details.cognitiveRules = cognitiveRulesConfigured;
+  details.lifecycleHooks = lifecycleHooksConfigured;
 
-  const isActive = ideSettingsConfigured || agentIgnoresConfigured || cognitiveRulesConfigured;
+  const isActive =
+    ideSettingsConfigured ||
+    agentIgnoresConfigured ||
+    cognitiveRulesConfigured ||
+    lifecycleHooksConfigured;
 
   return {
     isActive,
     ideSettingsConfigured,
     agentIgnoresConfigured,
     cognitiveRulesConfigured,
+    lifecycleHooksConfigured,
     details,
   };
 }

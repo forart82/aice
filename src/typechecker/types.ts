@@ -280,9 +280,30 @@ export function isStringLiteralOrUnionType(type: Type): boolean {
 /**
  * Checks if a source type is assignable to a target type according to the AIL subtyping lattice.
  */
-export function isAssignable(target: Type, source: Type): boolean {
+export function isAssignable(
+  target: Type,
+  source: Type,
+  visited: Set<string> = new Set(),
+): boolean {
+  if (target === source) return true;
   if (target.kind === "unknown" || source.kind === "unknown") return true;
   if (source.kind === "never") return true;
+
+  // Coinductive cycle detection for recursive types
+  const cycleKey =
+    target.kind === "named" && source.kind === "named"
+      ? `${target.name}<:${source.name}`
+      : target.kind === "named"
+        ? `${target.name}<:${source.kind}`
+        : source.kind === "named"
+          ? `${target.kind}<:${source.name}`
+          : null;
+
+  if (cycleKey) {
+    if (visited.has(cycleKey)) return true;
+    visited = new Set(visited);
+    visited.add(cycleKey);
+  }
 
   // 1. Exact match when both source and target are boolean literal named types ("true", "false")
   if (
@@ -450,7 +471,7 @@ export function isAssignable(target: Type, source: Type): boolean {
   if (target.kind === "named") {
     const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
     if (resolvedTarget && resolvedTarget !== target) {
-      if (isAssignable(resolvedTarget, source)) {
+      if (isAssignable(resolvedTarget, source, visited)) {
         return true;
       }
     } else if (sourceIsStrLit && isOpaqueNamedType(target.name)) {
@@ -461,7 +482,7 @@ export function isAssignable(target: Type, source: Type): boolean {
   if (source.kind === "named") {
     const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
     if (resolvedSource && resolvedSource !== source) {
-      if (isAssignable(target, resolvedSource)) {
+      if (isAssignable(target, resolvedSource, visited)) {
         return true;
       }
     }
@@ -484,7 +505,7 @@ export function isAssignable(target: Type, source: Type): boolean {
       }
       if (target.kind === "str" && (p === "str" || p === "string")) return true;
       if (target.kind === "bool" && (p === "bool" || p === "boolean")) return true;
-      return isAssignable(target, { kind: "named", name: p });
+      return isAssignable(target, { kind: "named", name: p }, visited);
     });
   }
 
@@ -504,29 +525,30 @@ export function isAssignable(target: Type, source: Type): boolean {
       }
       if (source.kind === "str" && (p === "str" || p === "string")) return true;
       if (source.kind === "bool" && (p === "bool" || p === "boolean")) return true;
-      return isAssignable({ kind: "named", name: p }, source);
+      return isAssignable({ kind: "named", name: p }, source, visited);
     });
   }
 
   if (target.kind === source.kind) {
     if (target.kind === "array" && source.kind === "array") {
-      return isAssignable(target.elementType, source.elementType);
+      return isAssignable(target.elementType, source.elementType, visited);
     }
     if (target.kind === "tuple" && source.kind === "tuple") {
       if (target.elementTypes.length !== source.elementTypes.length) return false;
       for (let i = 0; i < target.elementTypes.length; i++) {
-        if (!isAssignable(target.elementTypes[i], source.elementTypes[i])) {
+        if (!isAssignable(target.elementTypes[i], source.elementTypes[i], visited)) {
           return false;
         }
       }
       return true;
     }
     if (target.kind === "option" && source.kind === "option") {
-      return isAssignable(target.innerType, source.innerType);
+      return isAssignable(target.innerType, source.innerType, visited);
     }
     if (target.kind === "result" && source.kind === "result") {
       return (
-        isAssignable(target.okType, source.okType) && isAssignable(target.errType, source.errType)
+        isAssignable(target.okType, source.okType, visited) &&
+        isAssignable(target.errType, source.errType, visited)
       );
     }
     if (target.kind === "record" && source.kind === "record") {
@@ -538,7 +560,7 @@ export function isAssignable(target: Type, source: Type): boolean {
           }
           return false;
         }
-        if (!isAssignable(targetFieldType, sourceFieldType)) {
+        if (!isAssignable(targetFieldType, sourceFieldType, visited)) {
           return false;
         }
       }
@@ -552,12 +574,12 @@ export function isAssignable(target: Type, source: Type): boolean {
       }
       for (let i = 0; i < Math.min(target.params.length, source.params.length); i++) {
         // Contravariant in parameter types
-        if (!isAssignable(source.params[i].type, target.params[i].type)) {
+        if (!isAssignable(source.params[i].type, target.params[i].type, visited)) {
           return false;
         }
       }
       // Covariant in return type
-      return isAssignable(target.returnType, source.returnType);
+      return isAssignable(target.returnType, source.returnType, visited);
     }
     if (target.kind === "named" && source.kind === "named") {
       if (target.name === source.name) {
@@ -569,7 +591,7 @@ export function isAssignable(target: Type, source: Type): boolean {
         ) {
           if (target.typeArgs.length !== source.typeArgs.length) return false;
           for (let i = 0; i < target.typeArgs.length; i++) {
-            if (!isAssignable(target.typeArgs[i], source.typeArgs[i])) {
+            if (!isAssignable(target.typeArgs[i], source.typeArgs[i], visited)) {
               return false;
             }
           }
@@ -635,11 +657,11 @@ export function isAssignable(target: Type, source: Type): boolean {
       }
       const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
       if (resolvedTarget && resolvedTarget !== target) {
-        if (isAssignable(resolvedTarget, source)) return true;
+        if (isAssignable(resolvedTarget, source, visited)) return true;
       }
       const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
       if (resolvedSource && resolvedSource !== source) {
-        if (isAssignable(target, resolvedSource)) return true;
+        if (isAssignable(target, resolvedSource, visited)) return true;
       }
       return false;
     }
@@ -678,11 +700,11 @@ export function isAssignable(target: Type, source: Type): boolean {
     for (const [key, sourceFieldType] of source.fields) {
       if (keyType.kind === "enum" || (keyType.kind === "named" && !isStringType(keyType))) {
         const keyAsLit: Type = { kind: "named", name: JSON.stringify(key) };
-        if (!isAssignable(keyType, keyAsLit)) {
+        if (!isAssignable(keyType, keyAsLit, visited)) {
           return false;
         }
       }
-      if (!isAssignable(valType, sourceFieldType)) {
+      if (!isAssignable(valType, sourceFieldType, visited)) {
         return false;
       }
     }
@@ -739,7 +761,7 @@ export function isAssignable(target: Type, source: Type): boolean {
   // Option[T] accepts nil or T
   if (target.kind === "option") {
     if (source.kind === "nil") return true;
-    return isAssignable(target.innerType, source);
+    return isAssignable(target.innerType, source, visited);
   }
 
   // nil is assignable to named object references and unknown
@@ -750,16 +772,16 @@ export function isAssignable(target: Type, source: Type): boolean {
   }
 
   // Allow unwrapping Option[T] into T when target is compatible with T
-  if (source.kind === "option" && isAssignable(target, source.innerType)) {
+  if (source.kind === "option" && isAssignable(target, source.innerType, visited)) {
     return true;
   }
 
   // Refinement types: compatible with base type
   if (target.kind === "refinement") {
-    return isAssignable(target.baseType, source.kind === "refinement" ? source.baseType : source);
+    return isAssignable(target.baseType, source.kind === "refinement" ? source.baseType : source, visited);
   }
   if (source.kind === "refinement") {
-    return isAssignable(target, source.baseType);
+    return isAssignable(target, source.baseType, visited);
   }
 
   return false;

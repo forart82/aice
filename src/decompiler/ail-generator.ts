@@ -521,6 +521,10 @@ export class AilGenerator {
   private emitConstDecl(c: ConstDecl): void {
     const nodeId = `const:${c.name}`;
     this.emitLeadingTrivia(nodeId);
+    if (c.name === "_") {
+      this.writeLine(`_ := ${this.formatExpr(c.value)}`, nodeId);
+      return;
+    }
     const pub = c.isExported ? "pub " : "";
     const typeAnn = c.typeAnnotation ? `: ${this.formatTypeExpr(c.typeAnnotation)}` : "";
     this.writeLine(`${pub}const ${c.name}${typeAnn} = ${this.formatExpr(c.value)}`, nodeId);

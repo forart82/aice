@@ -1322,7 +1322,9 @@ export class TypeChecker {
 
         if (expected.kind !== "unknown") {
           const matches =
-            isAssignable(expected, actual) || (isAsyncOrPromise && isAssignable(unwrapped, actual));
+            isAssignable(expected, actual) ||
+            (expected.kind === "void" && (actual.kind === "nil" || actual.kind === "void")) ||
+            (isAsyncOrPromise && isAssignable(unwrapped, actual));
           if (!matches) {
             throw new TypeCheckError(
               `Return expression of type '${formatType(actual)}' does not match function return type '${formatType(expected)}'`,
@@ -2039,10 +2041,16 @@ export class TypeChecker {
       }
 
       case "ArrayLiteralExpr": {
+        const expectedElemType =
+          expectedType && expectedType.kind === "array" ? expectedType.elementType : undefined;
+
         if (expr.elements.length === 0) {
-          return makeArrayType(TYPE_UNKNOWN);
+          return expectedElemType ? makeArrayType(expectedElemType) : makeArrayType(TYPE_UNKNOWN);
         }
-        const elementTypes = expr.elements.map((el) => this.checkExpr(el, env));
+        const elementTypes = expr.elements.map((el) => this.checkExpr(el, env, expectedElemType));
+        if (expectedElemType && elementTypes.every((t) => isAssignable(expectedElemType, t))) {
+          return makeArrayType(expectedElemType);
+        }
         const firstType = elementTypes[0];
         const allMatch = elementTypes.every(
           (t) => isAssignable(firstType, t) && isAssignable(t, firstType),

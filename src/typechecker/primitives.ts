@@ -848,6 +848,10 @@ const CONSOLE_SYMBOL = makeRecordType(
     ["info", makeVariadicFn(TYPE_VOID)],
     ["debug", makeVariadicFn(TYPE_VOID)],
     ["trace", makeVariadicFn(TYPE_VOID)],
+    ["table", makeVariadicFn(TYPE_VOID)],
+    ["dir", makeVariadicFn(TYPE_VOID)],
+    ["assert", makeVariadicFn(TYPE_VOID)],
+    ["clear", makeVariadicFn(TYPE_VOID)],
     ["time", makeFunctionType([{ name: "label", type: TYPE_STR, optional: true }], TYPE_VOID)],
     ["timeEnd", makeFunctionType([{ name: "label", type: TYPE_STR, optional: true }], TYPE_VOID)],
   ]),
@@ -1085,24 +1089,49 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
   Promise: PROMISE_SYMBOL,
   Array: ARRAY_SYMBOL,
   Object: OBJECT_SYMBOL,
+  parseInt: makeFunctionType(
+    [
+      { name: "s", type: TYPE_UNKNOWN },
+      { name: "radix", type: TYPE_INT, optional: true },
+    ],
+    TYPE_INT,
+  ),
+  parseFloat: makeFunctionType([{ name: "s", type: TYPE_UNKNOWN }], TYPE_FLOAT),
+  isNaN: makeFunctionType([{ name: "n", type: TYPE_UNKNOWN }], TYPE_BOOL),
+  isFinite: makeFunctionType([{ name: "n", type: TYPE_UNKNOWN }], TYPE_BOOL),
   setTimeout: makeFunctionType(
     [
       { name: "handler", type: TYPE_UNKNOWN },
       { name: "timeout", type: TYPE_INT, optional: true },
       { name: "arg1", type: TYPE_UNKNOWN, optional: true },
     ],
-    TYPE_INT,
+    TYPE_UNKNOWN,
   ),
-  clearTimeout: makeFunctionType([{ name: "id", type: TYPE_INT, optional: true }], TYPE_VOID),
+  clearTimeout: makeFunctionType([{ name: "id", type: TYPE_UNKNOWN, optional: true }], TYPE_VOID),
   setInterval: makeFunctionType(
     [
       { name: "handler", type: TYPE_UNKNOWN },
       { name: "timeout", type: TYPE_INT, optional: true },
       { name: "arg1", type: TYPE_UNKNOWN, optional: true },
     ],
-    TYPE_INT,
+    TYPE_UNKNOWN,
   ),
-  clearInterval: makeFunctionType([{ name: "id", type: TYPE_INT, optional: true }], TYPE_VOID),
+  clearInterval: makeFunctionType([{ name: "id", type: TYPE_UNKNOWN, optional: true }], TYPE_VOID),
+  localStorage: makeRecordType(
+    new Map([
+      ["getItem", makeFunctionType([{ name: "key", type: TYPE_STR }], TYPE_UNKNOWN)],
+      [
+        "setItem",
+        makeFunctionType(
+          [{ name: "key", type: TYPE_STR }, { name: "val", type: TYPE_STR }],
+          TYPE_VOID,
+        ),
+      ],
+      ["removeItem", makeFunctionType([{ name: "key", type: TYPE_STR }], TYPE_VOID)],
+      ["clear", makeFunctionType([], TYPE_VOID)],
+    ]),
+    "Storage",
+  ),
   fetch: makeFunctionType(
     [
       { name: "url", type: TYPE_STR },
@@ -1139,4 +1168,5 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
     ],
     makeNamedType("RegExp"),
   ),
+  process: TYPE_UNKNOWN,
 };

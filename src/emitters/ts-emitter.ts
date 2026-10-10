@@ -344,11 +344,22 @@ export class TypeScriptEmitter {
       return;
     }
 
-    const specs = imp.specifiers.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
+    const defaultSpec =
+      imp.specifiers.find((s) => s.isDefault) ||
+      (imp.source === "node:assert" && imp.specifiers.length === 1 ? imp.specifiers[0] : undefined);
+    const namedSpecs = imp.specifiers.filter((s) => s !== defaultSpec);
+    const parts: string[] = [];
+    if (defaultSpec) {
+      parts.push(defaultSpec.alias ? `${defaultSpec.name} as ${defaultSpec.alias}` : defaultSpec.name);
+    }
+    if (namedSpecs.length > 0) {
+      const specs = namedSpecs.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
+      parts.push(`{ ${specs.join(", ")} }`);
+    }
     if (imp.isExported) {
-      this.ctx.writeLine(`export { ${specs.join(", ")} } from "${imp.source}";`);
+      this.ctx.writeLine(`export ${parts.join(", ")} from "${imp.source}";`);
     } else {
-      this.ctx.writeLine(`import { ${specs.join(", ")} } from "${imp.source}";`);
+      this.ctx.writeLine(`import ${parts.join(", ")} from "${imp.source}";`);
     }
     this.ctx.emitTrailingTrivia(nodeId);
   }
@@ -544,9 +555,12 @@ export class TypeScriptEmitter {
       const st = p.isStatic ? "static " : "";
       const ro = p.isReadonly ? "readonly " : "";
       const opt = p.isOptional ? "?" : "";
+      const hasAliases = !!p.alias || (p.aliases !== undefined && p.aliases.length > 0);
+      const defAssign =
+        !p.initialValue && !p.isOptional && !p.isStatic && p.typeAnnotation && !hasAliases ? "!" : "";
       const typeAnn = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
       const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
-      this.ctx.writeLine(`${st}${ro}${p.name}${opt}${typeAnn}${init};`);
+      this.ctx.writeLine(`${st}${ro}${p.name}${opt}${defAssign}${typeAnn}${init};`);
       this.ctx.emitTrailingTrivia(pNodeId);
 
       const aliases = p.aliases && p.aliases.length > 0 ? p.aliases : p.alias ? [p.alias] : [];
@@ -654,6 +668,11 @@ export class TypeScriptEmitter {
       return;
     }
     this.ctx.emitLeadingTrivia(nodeId);
+    if (c.name === "_") {
+      this.ctx.writeLine(`${this.emitExpr(c.value)};`);
+      this.ctx.emitTrailingTrivia(nodeId);
+      return;
+    }
     const exp = c.isExported ? "export " : "";
     const typeAnn = c.typeAnnotation ? `: ${this.emitTypeExpr(c.typeAnnotation)}` : "";
     this.ctx.writeLine(`${exp}const ${c.name}${typeAnn} = ${this.emitExpr(c.value)};`);
@@ -668,6 +687,11 @@ export class TypeScriptEmitter {
       return;
     }
     this.ctx.emitLeadingTrivia(nodeId);
+    if (v.name === "_") {
+      this.ctx.writeLine(`${this.emitExpr(v.value)};`);
+      this.ctx.emitTrailingTrivia(nodeId);
+      return;
+    }
     const exp = v.isExported ? "export " : "";
     const kw = v.isMut ? "let" : "const";
     const typeAnn = v.typeAnnotation ? `: ${this.emitTypeExpr(v.typeAnnotation)}` : "";
@@ -862,9 +886,14 @@ export class TypeScriptEmitter {
         const typeAnnotation = stmt.typeAnnotation
           ? `: ${this.emitTypeExpr(stmt.typeAnnotation)}`
           : "";
-        this.ctx.writeLine(
-          `${keyword} ${stmt.name}${typeAnnotation} = ${this.emitExpr(stmt.init)};`,
-        );
+        const isUninitNil =
+          stmt.isMut &&
+          stmt.typeAnnotation &&
+          stmt.init.kind === "LiteralExpr" &&
+          stmt.init.literalKind === "nil" &&
+          stmt.typeAnnotation.kind !== "OptionType";
+        const initCode = isUninitNil ? "" : ` = ${this.emitExpr(stmt.init)}`;
+        this.ctx.writeLine(`${keyword} ${stmt.name}${typeAnnotation}${initCode};`);
         break;
       }
       case "DestructureBinding": {
@@ -1166,7 +1195,10 @@ export class TypeScriptEmitter {
 
           if (
             this.classNames.has(expr.callee.name) ||
-            TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name)
+            TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name) ||
+            (/^[A-Z][a-zA-Z0-9_]*$/.test(expr.callee.name) &&
+              !this.enumVariants.has(expr.callee.name) &&
+              !this.structTypes.has(expr.callee.name))
           ) {
             return `new ${expr.callee.name}(${argCodes.join(", ")})`;
           }

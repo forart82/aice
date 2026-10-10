@@ -36,6 +36,7 @@ export interface ImportSpecifier {
   name: string;
   alias?: string;
   isWildcard?: boolean;
+  isDefault?: boolean;
   span: Span;
 }
 

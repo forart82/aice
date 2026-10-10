@@ -50,7 +50,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.3.18");
+  .version("0.3.19");
 
 // Command: compile <file>
 program
@@ -687,7 +687,7 @@ program
 
         if (!options.dryRun) {
           if (options.shield !== false) {
-            await applyAiShield(targetDir);
+            await applyAiShield(targetDir, { lifecycleHooks: true });
             shieldApplied = true;
           }
           if (options.lock !== false) {
@@ -710,7 +710,7 @@ program
               : options.shield === false
                 ? "⊘ Skipped (--no-shield)"
                 : shieldApplied
-                  ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md)"
+                  ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md, GEMINI.md, .agents/hooks.json)"
                   : "✖ Inactive"
           }`,
         );
@@ -881,7 +881,7 @@ program
 
       switch (action.toLowerCase()) {
         case "apply": {
-          const res = await applyAiShield(targetDir);
+          const res = await applyAiShield(targetDir, { lifecycleHooks: true });
           console.log(`✔ AI Shield applied to ${path.relative(process.cwd(), targetDir) || "."}:`);
           console.log(`  - Created files:  ${res.createdFiles.length}`);
           for (const f of res.createdFiles) {

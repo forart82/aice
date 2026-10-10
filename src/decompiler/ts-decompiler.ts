@@ -290,6 +290,45 @@ export class TsDecompiler {
       return this.convertEnumDeclaration(stmt);
     }
 
+    if (ts.isExpressionStatement(stmt)) {
+      return {
+        kind: "ConstDecl",
+        name: "_",
+        isExported: false,
+        value: this.convertExpression(stmt.expression),
+        span: this.getSpan(stmt),
+      };
+    }
+
+    if (ts.isIfStatement(stmt)) {
+      const cond = this.convertExpression(stmt.expression);
+      let thenExpr: Expr | null = null;
+      if (ts.isExpressionStatement(stmt.thenStatement)) {
+        thenExpr = this.convertExpression(stmt.thenStatement.expression);
+      } else if (
+        ts.isBlock(stmt.thenStatement) &&
+        stmt.thenStatement.statements.length === 1 &&
+        ts.isExpressionStatement(stmt.thenStatement.statements[0])
+      ) {
+        thenExpr = this.convertExpression(stmt.thenStatement.statements[0].expression);
+      }
+      if (thenExpr) {
+        return {
+          kind: "ConstDecl",
+          name: "_",
+          isExported: false,
+          value: {
+            kind: "BinaryExpr",
+            operator: "and",
+            left: cond,
+            right: thenExpr,
+            span: this.getSpan(stmt),
+          },
+          span: this.getSpan(stmt),
+        };
+      }
+    }
+
     return null;
   }
 
@@ -308,6 +347,7 @@ export class TsDecompiler {
       if (stmt.importClause.name) {
         specifiers.push({
           name: stmt.importClause.name.text,
+          isDefault: true,
           span: this.getSpan(stmt.importClause.name),
         });
       }
@@ -1042,6 +1082,82 @@ export class TsDecompiler {
     const items: ModuleItem[] = [];
 
     for (const decl of stmt.declarationList.declarations) {
+      if (ts.isObjectBindingPattern(decl.name)) {
+        let baseObjExpr: Expr;
+        if (decl.initializer && ts.isIdentifier(decl.initializer)) {
+          baseObjExpr = {
+            kind: "IdentifierExpr",
+            name: decl.initializer.text,
+            span: this.getSpan(decl.initializer),
+          };
+        } else if (decl.initializer) {
+          const tempName = "_destruct";
+          items.push({
+            kind: isConst ? "ConstDecl" : "VarDecl",
+            name: tempName,
+            isExported: false,
+            isMut: !isConst,
+            value: this.convertExpression(decl.initializer),
+            span: this.getSpan(decl),
+          });
+          baseObjExpr = {
+            kind: "IdentifierExpr",
+            name: tempName,
+            span: this.getSpan(decl),
+          };
+        } else {
+          baseObjExpr = {
+            kind: "LiteralExpr",
+            literalKind: "nil",
+            value: null,
+            rawValue: "nil",
+            span: this.getSpan(decl),
+          };
+        }
+
+        for (const el of decl.name.elements) {
+          if (ts.isBindingElement(el)) {
+            const propName =
+              el.propertyName && ts.isIdentifier(el.propertyName)
+                ? el.propertyName.text
+                : ts.isIdentifier(el.name)
+                  ? el.name.text
+                  : el.name.getText(this.sourceFile);
+            const varName = ts.isIdentifier(el.name)
+              ? el.name.text
+              : el.name.getText(this.sourceFile);
+
+            const accessExpr: Expr = {
+              kind: "MemberAccessExpr",
+              object: baseObjExpr,
+              property: propName,
+              isSafeNav: false,
+              span: this.getSpan(el),
+            };
+
+            if (isConst) {
+              items.push({
+                kind: "ConstDecl",
+                name: varName,
+                isExported,
+                value: accessExpr,
+                span: this.getSpan(el),
+              });
+            } else {
+              items.push({
+                kind: "VarDecl",
+                name: varName,
+                isExported,
+                isMut: true,
+                value: accessExpr,
+                span: this.getSpan(el),
+              });
+            }
+          }
+        }
+        continue;
+      }
+
       const name = ts.isIdentifier(decl.name) ? decl.name.text : decl.name.getText(this.sourceFile);
       const nodeId = `${isConst ? "const" : "var"}:${name}`;
       this.extractComments(stmt, nodeId);
@@ -1482,6 +1598,71 @@ export class TsDecompiler {
           init,
           span: this.getSpan(stmt),
         };
+      } else if (decl && ts.isObjectBindingPattern(decl.name)) {
+        const isMut = (stmt.declarationList.flags & ts.NodeFlags.Const) === 0;
+        const unrolled: Statement[] = [];
+        let baseObjExpr: Expr;
+
+        if (decl.initializer && ts.isIdentifier(decl.initializer)) {
+          baseObjExpr = {
+            kind: "IdentifierExpr",
+            name: decl.initializer.text,
+            span: this.getSpan(decl.initializer),
+          };
+        } else if (decl.initializer) {
+          const tempName = "_destruct";
+          unrolled.push({
+            kind: "LetBinding",
+            name: tempName,
+            isMut: false,
+            typeAnnotation: null,
+            init: this.convertExpression(decl.initializer),
+            span: this.getSpan(stmt),
+          });
+          baseObjExpr = {
+            kind: "IdentifierExpr",
+            name: tempName,
+            span: this.getSpan(stmt),
+          };
+        } else {
+          baseObjExpr = {
+            kind: "LiteralExpr",
+            literalKind: "nil",
+            value: null,
+            rawValue: "nil",
+            span: this.getSpan(stmt),
+          };
+        }
+
+        for (const el of decl.name.elements) {
+          if (ts.isBindingElement(el)) {
+            const propName =
+              el.propertyName && ts.isIdentifier(el.propertyName)
+                ? el.propertyName.text
+                : ts.isIdentifier(el.name)
+                  ? el.name.text
+                  : el.name.getText(this.sourceFile);
+            const varName = ts.isIdentifier(el.name)
+              ? el.name.text
+              : el.name.getText(this.sourceFile);
+
+            unrolled.push({
+              kind: "LetBinding",
+              name: varName,
+              isMut,
+              typeAnnotation: null,
+              init: {
+                kind: "MemberAccessExpr",
+                object: baseObjExpr,
+                property: propName,
+                isSafeNav: false,
+                span: this.getSpan(el),
+              },
+              span: this.getSpan(el),
+            });
+          }
+        }
+        return unrolled.length === 1 ? unrolled[0] : unrolled;
       }
     }
 
@@ -1619,7 +1800,59 @@ export class TsDecompiler {
     }
 
     if (ts.isForOfStatement(stmt) && ts.isVariableDeclarationList(stmt.initializer)) {
-      const varName = stmt.initializer.declarations[0]?.name.getText(this.sourceFile) ?? "item";
+      const decl = stmt.initializer.declarations[0];
+      if (decl && ts.isObjectBindingPattern(decl.name)) {
+        const loopVar = "_item";
+        const bodyBlock = ts.isBlock(stmt.statement)
+          ? this.convertBlock(stmt.statement)
+          : { kind: "Block" as const, statements: [], span: emptySpan() };
+
+        const destructStatements: Statement[] = [];
+        for (const el of decl.name.elements) {
+          if (ts.isBindingElement(el)) {
+            const propName =
+              el.propertyName && ts.isIdentifier(el.propertyName)
+                ? el.propertyName.text
+                : ts.isIdentifier(el.name)
+                  ? el.name.text
+                  : el.name.getText(this.sourceFile);
+            const varName = ts.isIdentifier(el.name)
+              ? el.name.text
+              : el.name.getText(this.sourceFile);
+
+            destructStatements.push({
+              kind: "LetBinding",
+              name: varName,
+              isMut: false,
+              typeAnnotation: null,
+              init: {
+                kind: "MemberAccessExpr",
+                object: {
+                  kind: "IdentifierExpr",
+                  name: loopVar,
+                  span: this.getSpan(el),
+                },
+                property: propName,
+                isSafeNav: false,
+                span: this.getSpan(el),
+              },
+              span: this.getSpan(el),
+            });
+          }
+        }
+
+        bodyBlock.statements.unshift(...destructStatements);
+
+        return {
+          kind: "ForStmt",
+          variable: loopVar,
+          iterable: this.convertExpression(stmt.expression),
+          body: bodyBlock,
+          span: this.getSpan(stmt),
+        };
+      }
+
+      const varName = decl?.name.getText(this.sourceFile) ?? "item";
       return {
         kind: "ForStmt",
         variable: varName,
@@ -2061,7 +2294,6 @@ export class TsDecompiler {
       lower === "offset" ||
       lower === "index" ||
       lower === "idx" ||
-      lower === "pos" ||
       lower === "num" ||
       lower === "code" ||
       lower === "depth" ||
@@ -2126,6 +2358,7 @@ export class TsDecompiler {
       if (ts.isIdentifier(tsExpr)) {
         const typeCat = this.getVarType(tsExpr.text);
         if (typeCat === "number") return true;
+        if (typeCat && typeCat !== "number") return false;
         if (this.isNumericName(tsExpr.text)) return true;
       }
     }
