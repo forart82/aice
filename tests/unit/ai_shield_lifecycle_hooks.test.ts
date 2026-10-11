@@ -140,4 +140,25 @@ describe("AIL Shield: Antigravity Lifecycle Hook Interceptor", () => {
     const status = await checkAiShieldStatus(testDir);
     expect(status.lifecycleHooksConfigured).toBe(false);
   });
+
+  it("never creates a recursive symlink .agents/.agents and cleans up legacy ones", async () => {
+    // 1. Fresh apply does not create .agents/.agents
+    await applyAiShield(testDir, { lifecycleHooks: true });
+    const nestedAgentsLink = path.join(testDir, ".agents", ".agents");
+    expect(fs.existsSync(nestedAgentsLink)).toBe(false);
+    expect(() => fs.lstatSync(nestedAgentsLink)).toThrow();
+
+    // 2. Pre-existing legacy recursive symlink is removed by applyAiShield
+    fs.symlinkSync(".", nestedAgentsLink);
+    expect(fs.lstatSync(nestedAgentsLink).isSymbolicLink()).toBe(true);
+    await applyAiShield(testDir, { lifecycleHooks: true });
+    expect(() => fs.lstatSync(nestedAgentsLink)).toThrow();
+
+    // 3. Pre-existing legacy recursive symlink is removed by removeAiShield
+    fs.symlinkSync(".", nestedAgentsLink);
+    expect(fs.lstatSync(nestedAgentsLink).isSymbolicLink()).toBe(true);
+    await removeAiShield(testDir, { lifecycleHooks: true });
+    expect(() => fs.lstatSync(nestedAgentsLink)).toThrow();
+  });
 });
+

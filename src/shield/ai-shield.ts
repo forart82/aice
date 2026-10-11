@@ -539,15 +539,14 @@ export async function applyAiShield(
       ],
     };
 
-    // Create resilience symlink: if a hook runner executes inside .agents with '.agents/...',
-    // ensure .agents/.agents resolves to .agents
+    // Clean up any legacy recursive symlink (.agents/.agents)
     const nestedAgentsLink = path.join(agentsDir, ".agents");
-    if (!fs.existsSync(nestedAgentsLink)) {
-      try {
-        fs.symlinkSync(".", nestedAgentsLink);
-      } catch {
-        // ignore symlink errors
+    try {
+      if (fs.lstatSync(nestedAgentsLink)) {
+        fs.unlinkSync(nestedAgentsLink);
       }
+    } catch {
+      // ignore if does not exist
     }
 
     const formattedHooksJson = `${JSON.stringify(hooksData, null, 2)}\n`;
@@ -742,6 +741,18 @@ export async function removeAiShield(
   const lifecycleHooksEnabled = options?.lifecycleHooks ?? true;
   if (lifecycleHooksEnabled) {
     const agentsDir = path.join(targetDir, ".agents");
+
+    // Clean up any legacy recursive symlink (.agents/.agents)
+    const nestedAgentsLink = path.join(agentsDir, ".agents");
+    try {
+      if (fs.lstatSync(nestedAgentsLink)) {
+        fs.unlinkSync(nestedAgentsLink);
+        removedFiles.push(nestedAgentsLink);
+      }
+    } catch {
+      // ignore if does not exist
+    }
+
     const hookScriptPath = path.join(agentsDir, "ail-shield-hook.mjs");
     if (fs.existsSync(hookScriptPath)) {
       fs.unlinkSync(hookScriptPath);
