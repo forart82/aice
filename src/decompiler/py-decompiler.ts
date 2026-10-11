@@ -760,6 +760,7 @@ export class PythonDecompiler {
   private pos = 0;
   private trivia: CstTriviaTable = new CstTriviaTable();
   private pendingTrivia: TriviaItem[] = [];
+  private currentScope: Set<string> = new Set();
 
   constructor(source: string, filePath = "source.py") {
     this.source = source;
@@ -1215,7 +1216,15 @@ export class PythonDecompiler {
     this.skipNewlines();
 
     const mNodeId = `method:${className}.${methodName}`;
-    const body = this.parseBlock(mNodeId);
+    const prevScope = new Set(this.currentScope);
+    this.currentScope = new Set(effectiveParams.map((p) => p.name));
+    this.currentScope.add("this");
+    let body: Block;
+    try {
+      body = this.parseBlock(mNodeId);
+    } finally {
+      this.currentScope = prevScope;
+    }
 
     this.attachTrivia(mNodeId);
 
@@ -1262,7 +1271,14 @@ export class PythonDecompiler {
     this.skipNewlines();
 
     const fnNodeId = `fn:${name}`;
-    const body = this.parseBlock(fnNodeId);
+    const prevScope = new Set(this.currentScope);
+    this.currentScope = new Set(params.map((p) => p.name));
+    let body: Block;
+    try {
+      body = this.parseBlock(fnNodeId);
+    } finally {
+      this.currentScope = prevScope;
+    }
 
     this.attachTrivia(fnNodeId);
 
@@ -1452,6 +1468,12 @@ export class PythonDecompiler {
     if (this.check("FOR")) {
       const startSpan = this.advance().span;
       const variable = this.parseForVariable();
+      if (variable.startsWith("[") && variable.endsWith("]")) {
+        const parts = variable.slice(1, -1).split(",").map((s) => s.trim());
+        for (const p of parts) if (p) this.currentScope.add(p);
+      } else {
+        this.currentScope.add(variable);
+      }
       this.consume("IN");
       const iterable = this.parseExpr();
       this.consume("COLON");
@@ -1477,16 +1499,58 @@ export class PythonDecompiler {
     // Assignment or expression statement
     const expr = this.parseExpr();
 
+    let typeAnnotation: TypeExpr | null = null;
+    if (this.check("COLON")) {
+      this.advance();
+      typeAnnotation = this.parseTypeExpr();
+    }
+
     if (this.isAssignOp(this.current().kind)) {
       const opTok = this.advance();
       const op = this.toAssignOp(opTok.kind);
       const value = this.parseExpr();
+
+      if (
+        op === "=" &&
+        expr.kind === "IdentifierExpr" &&
+        !this.currentScope.has(expr.name) &&
+        expr.name !== "this"
+      ) {
+        this.currentScope.add(expr.name);
+        return {
+          kind: "LetBinding",
+          name: expr.name,
+          isMut: true,
+          typeAnnotation,
+          init: value,
+          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, value.span.end.line, value.span.end.column, value.span.end.offset),
+        };
+      }
+
       return {
         kind: "AssignStmt",
         target: expr,
         op,
         value,
         span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, value.span.end.line, value.span.end.column, value.span.end.offset),
+      };
+    }
+
+    if (typeAnnotation !== null && expr.kind === "IdentifierExpr") {
+      this.currentScope.add(expr.name);
+      return {
+        kind: "LetBinding",
+        name: expr.name,
+        isMut: true,
+        typeAnnotation,
+        init: {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "None",
+          span: expr.span,
+        },
+        span: expr.span,
       };
     }
 
@@ -1510,7 +1574,20 @@ export class PythonDecompiler {
       this.consume(isParen ? "RPAREN" : "RBRACKET");
       return `[${parts.join(", ")}]`;
     }
-    return this.consume("IDENTIFIER").value;
+    const first = this.consume("IDENTIFIER").value;
+    if (this.check("COMMA")) {
+      const parts: string[] = [first];
+      while (this.check("COMMA")) {
+        this.advance();
+        if (this.check("IDENTIFIER")) {
+          parts.push(this.advance().value);
+        } else {
+          break;
+        }
+      }
+      return `[${parts.join(", ")}]`;
+    }
+    return first;
   }
 
   private parseIfStmt(): IfStmt {
@@ -1693,7 +1770,45 @@ export class PythonDecompiler {
 
   // Expressions & Precedence Climbing
   private parseExpr(): Expr {
-    return this.parseBinaryExpr(0);
+    let left = this.parseBinaryExpr(0);
+    if (this.check("IF")) {
+      this.advance();
+      const condition = this.parseBinaryExpr(0);
+      if (this.check("ELSE")) {
+        this.advance();
+        const alternate = this.parseExpr();
+        return {
+          kind: "BinaryExpr",
+          operator: "or",
+          left: {
+            kind: "BinaryExpr",
+            operator: "and",
+            left: condition,
+            right: left,
+            span: makeSpan(
+              this.filePath,
+              left.span.start.line,
+              left.span.start.column,
+              left.span.start.offset,
+              condition.span.end.line,
+              condition.span.end.column,
+              condition.span.end.offset,
+            ),
+          },
+          right: alternate,
+          span: makeSpan(
+            this.filePath,
+            left.span.start.line,
+            left.span.start.column,
+            left.span.start.offset,
+            alternate.span.end.line,
+            alternate.span.end.column,
+            alternate.span.end.offset,
+          ),
+        };
+      }
+    }
+    return left;
   }
 
   private getPrecedence(kind: PythonTokenKind): number {
@@ -2018,12 +2133,17 @@ export class PythonDecompiler {
           const keyExpr = this.parseExpr();
           this.consume("COLON");
           const valExpr = this.parseExpr();
-          const keyStr =
-            keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "string"
-              ? keyExpr.value
-              : keyExpr.kind === "IdentifierExpr"
-                ? keyExpr.name
-                : "key";
+          let keyStr: string;
+          if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "string") {
+            keyStr = keyExpr.value;
+          } else if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "number") {
+            keyStr = String(keyExpr.value);
+            if (!keyStr.includes(".")) keyStr += ".0";
+          } else if (keyExpr.kind === "IdentifierExpr") {
+            keyStr = keyExpr.name;
+          } else {
+            keyStr = "key";
+          }
           properties.push({
             key: keyStr,
             value: valExpr,
@@ -2041,12 +2161,34 @@ export class PythonDecompiler {
       };
     }
 
-    // Parenthesized expression: (expr) or (x := val)
+    // Parenthesized expression: (expr) or tuple (a, b, c) or ()
     if (this.check("LPAREN")) {
       const lParenSpan = this.advance().span;
-      const inner = this.parseExpr();
+      if (this.check("RPAREN")) {
+        const rParenSpan = this.advance().span;
+        return {
+          kind: "ArrayLiteralExpr",
+          elements: [],
+          span: makeSpan(this.filePath, lParenSpan.start.line, lParenSpan.start.column, lParenSpan.start.offset, rParenSpan.end.line, rParenSpan.end.column, rParenSpan.end.offset),
+        };
+      }
+      const first = this.parseExpr();
+      if (this.check("COMMA")) {
+        const elements = [first];
+        while (this.check("COMMA")) {
+          this.advance();
+          if (this.check("RPAREN")) break;
+          elements.push(this.parseExpr());
+        }
+        const rParenSpan = this.consume("RPAREN").span;
+        return {
+          kind: "ArrayLiteralExpr",
+          elements,
+          span: makeSpan(this.filePath, lParenSpan.start.line, lParenSpan.start.column, lParenSpan.start.offset, rParenSpan.end.line, rParenSpan.end.column, rParenSpan.end.offset),
+        };
+      }
       const rParenSpan = this.consume("RPAREN").span;
-      inner.span = makeSpan(
+      first.span = makeSpan(
         this.filePath,
         lParenSpan.start.line,
         lParenSpan.start.column,
@@ -2055,7 +2197,7 @@ export class PythonDecompiler {
         rParenSpan.end.column,
         rParenSpan.end.offset,
       );
-      return inner;
+      return first;
     }
 
     // Fallback
@@ -2163,11 +2305,11 @@ export class PythonDecompiler {
       this.advance();
       const nextType = this.parsePrimaryTypeExpr();
       if (
-        (nextType.kind === "PrimitiveType" && nextType.primitive === "nil") ||
-        (typeExpr.kind === "PrimitiveType" && typeExpr.primitive === "nil")
+        (nextType.kind === "PrimitiveType" && (nextType.primitive === "nil" || nextType.primitive === "void")) ||
+        (typeExpr.kind === "PrimitiveType" && (typeExpr.primitive === "nil" || typeExpr.primitive === "void"))
       ) {
         const inner =
-          nextType.kind === "PrimitiveType" && nextType.primitive === "nil"
+          nextType.kind === "PrimitiveType" && (nextType.primitive === "nil" || nextType.primitive === "void")
             ? typeExpr
             : nextType;
         typeExpr = { kind: "OptionType", innerType: inner, span: emptySpan(this.filePath) };
@@ -2180,7 +2322,13 @@ export class PythonDecompiler {
   private parsePrimaryTypeExpr(): TypeExpr {
     if (this.check("NONE")) {
       this.advance();
-      return { kind: "PrimitiveType", primitive: "nil", span: emptySpan(this.filePath) };
+      return { kind: "PrimitiveType", primitive: "void", span: emptySpan(this.filePath) };
+    }
+
+    if (this.check("STRING")) {
+      const strTok = this.advance();
+      const rawName = strTok.value.replace(/^['"]|['"]$/g, "").trim();
+      return { kind: "NamedType", name: rawName, span: strTok.span };
     }
 
     const tok = this.consume("IDENTIFIER");
@@ -2190,7 +2338,7 @@ export class PythonDecompiler {
     if (name === "float") return { kind: "PrimitiveType", primitive: "float", span: tok.span };
     if (name === "str") return { kind: "PrimitiveType", primitive: "str", span: tok.span };
     if (name === "bool") return { kind: "PrimitiveType", primitive: "bool", span: tok.span };
-    if (name === "None") return { kind: "PrimitiveType", primitive: "nil", span: tok.span };
+    if (name === "None") return { kind: "PrimitiveType", primitive: "void", span: tok.span };
     if (name === "Any" || name === "object") return { kind: "NamedType", name: "any", span: tok.span };
 
     if (name === "list" || name === "List") {

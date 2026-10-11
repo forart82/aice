@@ -81,7 +81,7 @@ export function lowerMethodCall(
       case "isEmpty":
         return { isLowered: true, code: `len(${objectCode}) == 0` };
       case "append":
-        return { isLowered: true, code: `[*${objectCode}, ${argCodes[0] ?? ""}]` };
+        return { isLowered: false, code: "" };
       case "first":
         return { isLowered: true, code: `${objectCode}[0]` };
       case "last":

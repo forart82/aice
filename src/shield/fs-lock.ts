@@ -49,6 +49,9 @@ export const DEFAULT_LOCK_EXTENSIONS: string[] = [
   ".cxx",
   ".h",
   ".cs",
+  ".php",
+  ".kt",
+  ".kts",
 ];
 
 export const DEFAULT_LOCK_IGNORE_PATTERNS: string[] = ["node_modules", ".git", "dist", "build", ".agents"];

@@ -398,6 +398,34 @@ AssertionError: expected 5 to be 4
       expect(fs.existsSync(path.join(tmpDir, "one.ts"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "two.ts"))).toBe(true);
     });
+
+    it("compileTargetAilIfNeeded compiles into .ail-build in isolated mode", () => {
+      const isolatedDir = path.join(tmpDir, "isolated_project");
+      fs.mkdirSync(path.join(isolatedDir, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(isolatedDir, "ail.config.json"),
+        JSON.stringify({
+          mode: "isolated",
+          sourceDir: "src",
+          outDir: ".ail-build",
+          targetLanguage: "typescript",
+          isolated: true,
+        }),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(isolatedDir, "src", "engine.ail"),
+        "fn getStatus() -> str = \"running\"\n",
+        "utf-8",
+      );
+
+      const res = compileTargetAilIfNeeded(undefined, { cwd: isolatedDir });
+      expect(res.compiledFiles.length).toBe(1);
+      const expectedOut = path.join(isolatedDir, ".ail-build", "engine.ts");
+      expect(fs.existsSync(expectedOut)).toBe(true);
+      expect(fs.existsSync(path.join(isolatedDir, "src", "engine.ts"))).toBe(false);
+      expect(fs.readFileSync(expectedOut, "utf-8")).toContain("getStatus");
+    });
   });
 
   describe("runAilTests Execution Engine", () => {

@@ -12,8 +12,20 @@
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  type AilProjectConfig,
+  findProjectRoot,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+  resolveTargetOutputPathForConfig,
+} from "../config/index.js";
 import { parseWithTrivia } from "../core/parser.js";
-import { detectTargetFromPath, emitTarget, getTargetOutputPath } from "../emitters/index.js";
+import {
+  detectTargetFromPath,
+  emitTarget,
+  getTargetOutputPath,
+  type TargetLanguage,
+} from "../emitters/index.js";
 import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { buildReportFromError, formatDiagnosticText } from "../typechecker/diagnostics.js";
@@ -68,38 +80,20 @@ function stripAnsi(str: string): string {
   return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?\x07/g, "");
 }
 
-const KNOWN_TARGET_EXTENSIONS = new Set([
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".mjs",
-  ".cjs",
-  ".py",
-  ".html",
-  ".css",
-  ".rs",
-  ".go",
-  ".cpp",
-  ".hpp",
-  ".cc",
-  ".cxx",
-  ".h",
-  ".cs",
-  ".json",
-  ".yaml",
-  ".yml",
-  ".twig",
-  ".php",
-  ".kt",
-  ".kts",
-]);
-
 /**
  * Derives the compiled target output path from an .ail file.
+ * In isolated mode, routes output into outDir (e.g. .ail-build/).
  * Defaults to .ts extension if none is inferred.
  */
-export function resolveTargetFilePath(ailPath: string): string {
+export function resolveTargetFilePath(
+  ailPath: string,
+  config?: AilProjectConfig,
+  projectRoot?: string,
+): string {
+  if (config) {
+    const root = projectRoot ?? findProjectRoot(path.dirname(ailPath)) ?? process.cwd();
+    return resolveTargetOutputPathForConfig(ailPath, config, root);
+  }
   let targetOut = getTargetOutputPath(ailPath);
   const ext = path.extname(targetOut);
   if (!KNOWN_TARGET_EXTENSIONS.has(ext)) {
@@ -157,8 +151,13 @@ export function resolveTargetFilePath(ailPath: string): string {
  * Checks whether an .ail source file requires compilation before running tests.
  * Returns true if target file does not exist or if .ail is strictly newer.
  */
-export function isAilCompilationNeeded(ailPath: string, targetPath?: string): boolean {
-  const target = targetPath ?? resolveTargetFilePath(ailPath);
+export function isAilCompilationNeeded(
+  ailPath: string,
+  targetPath?: string,
+  config?: AilProjectConfig,
+  projectRoot?: string,
+): boolean {
+  const target = targetPath ?? resolveTargetFilePath(ailPath, config, projectRoot);
   if (!fs.existsSync(target)) {
     return true;
   }
@@ -171,15 +170,27 @@ export function isAilCompilationNeeded(ailPath: string, targetPath?: string): bo
   }
 }
 
+export interface CompileAilFileOptions {
+  pureInterfaces?: boolean;
+  watermark?: boolean;
+  config?: AilProjectConfig;
+  projectRoot?: string;
+  targetPath?: string;
+}
+
 /**
- * Compiles a single .ail file into its side-by-side target file using safeWriteTargetFile.
+ * Compiles a single .ail file into its target file using safeWriteTargetFile.
+ * Respects project mode ("side-by-side" vs "isolated") and outDir.
  */
 export function compileAilFile(
   ailPath: string,
-  options?: { pureInterfaces?: boolean; watermark?: boolean },
+  options?: CompileAilFileOptions,
 ): { compiled: boolean; targetPath: string } {
-  const targetPath = resolveTargetFilePath(ailPath);
-  if (!isAilCompilationNeeded(ailPath, targetPath)) {
+  const root = options?.projectRoot ?? findProjectRoot(path.dirname(ailPath)) ?? process.cwd();
+  const config = options?.config ?? loadProjectConfig(root);
+  const targetPath = options?.targetPath ?? resolveTargetFilePath(ailPath, config, root);
+
+  if (!isAilCompilationNeeded(ailPath, targetPath, config, root)) {
     return { compiled: false, targetPath };
   }
 
@@ -188,11 +199,28 @@ export function compileAilFile(
   const tc = new TypeChecker();
   tc.checkModule(mod);
 
-  const targetLang = detectTargetFromPath(ailPath);
+  const base = path.basename(ailPath);
+  const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+  const innerExt = path.extname(withoutAil).toLowerCase();
+
+  let targetLang: TargetLanguage;
+  if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+    targetLang = detectTargetFromPath(ailPath);
+  } else {
+    const targetExt = path.extname(targetPath).toLowerCase();
+    if (targetExt && KNOWN_TARGET_EXTENSIONS.has(targetExt)) {
+      targetLang = detectTargetFromPath(targetPath);
+    } else {
+      targetLang = config.targetLanguage ?? detectTargetFromPath(ailPath);
+    }
+  }
+
+  const watermark = options?.watermark !== false ? config.watermark : false;
+
   const emitted = emitTarget(mod, targetLang, {
     trivia,
     pureInterfaces: options?.pureInterfaces,
-    watermark: options?.watermark,
+    watermark,
   });
 
   safeWriteTargetFile(targetPath, emitted);
@@ -204,7 +232,17 @@ export function compileAilFile(
  */
 export function findAilFiles(
   rootDir: string,
-  ignorePatterns: string[] = ["node_modules", ".git", "dist", "build", ".vitest"],
+  ignorePatterns: string[] = [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".vitest",
+    ".ail-build",
+    ".agents",
+    ".next",
+    "coverage",
+  ],
 ): string[] {
   if (!fs.existsSync(rootDir)) return [];
   const stat = fs.statSync(rootDir);
@@ -246,8 +284,17 @@ export function compileTargetAilIfNeeded(
   options?: AilTestOptions,
 ): { compiledFiles: string[]; effectiveTarget?: string } {
   const projectDir = options?.cwd ? path.resolve(options.cwd) : process.cwd();
+  const projectRoot = findProjectRoot(projectDir) ?? projectDir;
+  const config = loadProjectConfig(projectRoot);
   const compiledFiles: string[] = [];
   let effectiveTarget = targetPath;
+
+  const compileOptions: CompileAilFileOptions = {
+    config,
+    projectRoot,
+    pureInterfaces: options?.pureInterfaces,
+    watermark: options?.watermark,
+  };
 
   if (targetPath) {
     const resolved = path.resolve(projectDir, targetPath);
@@ -256,54 +303,66 @@ export function compileTargetAilIfNeeded(
       if (stat.isDirectory()) {
         const ailFiles = findAilFiles(resolved);
         for (const f of ailFiles) {
-          const res = compileAilFile(f, {
-            pureInterfaces: options?.pureInterfaces,
-            watermark: options?.watermark,
-          });
+          const res = compileAilFile(f, compileOptions);
           if (res.compiled) {
             compiledFiles.push(res.targetPath);
           }
         }
       } else if (resolved.endsWith(".ail")) {
-        const res = compileAilFile(resolved, {
-          pureInterfaces: options?.pureInterfaces,
-          watermark: options?.watermark,
-        });
+        const res = compileAilFile(resolved, compileOptions);
         if (res.compiled) {
           compiledFiles.push(res.targetPath);
         }
         effectiveTarget = path.relative(projectDir, res.targetPath);
       } else {
         // If it's a target file (e.g. foo.test.ts), check if companion .ail exists
-        const companionAil = `${resolved}.ail`;
-        const altAil = resolved.replace(/\.[a-zA-Z0-9]+$/, ".ail");
-        const candidate = fs.existsSync(companionAil)
-          ? companionAil
-          : fs.existsSync(altAil)
-            ? altAil
-            : null;
-        if (candidate) {
-          const res = compileAilFile(candidate, {
-            pureInterfaces: options?.pureInterfaces,
-            watermark: options?.watermark,
-          });
+        let candidateAil: string | null = null;
+        if (config.mode === "isolated") {
+          const absOutDir = config.outDir
+            ? path.isAbsolute(config.outDir)
+              ? config.outDir
+              : path.resolve(projectRoot, config.outDir)
+            : path.resolve(projectRoot, ".ail-build");
+          if (resolved.startsWith(absOutDir + path.sep) || resolved === absOutDir) {
+            const relFromOut = path.relative(absOutDir, resolved);
+            const sourceRel = relFromOut.replace(/\.[a-zA-Z0-9]+$/, ".ail");
+            const candidate = path.resolve(projectRoot, config.sourceDir, sourceRel);
+            if (fs.existsSync(candidate)) {
+              candidateAil = candidate;
+            }
+          }
+        }
+
+        if (!candidateAil) {
+          const companionAil = `${resolved}.ail`;
+          const altAil = resolved.replace(/\.[a-zA-Z0-9]+$/, ".ail");
+          candidateAil = fs.existsSync(companionAil)
+            ? companionAil
+            : fs.existsSync(altAil)
+              ? altAil
+              : null;
+        }
+
+        if (candidateAil) {
+          const res = compileAilFile(candidateAil, compileOptions);
           if (res.compiled) {
             compiledFiles.push(res.targetPath);
           }
         }
       }
     } else if (targetPath.endsWith(".ail")) {
-      const targetFile = resolveTargetFilePath(resolved);
+      const targetFile = resolveTargetFilePath(resolved, config, projectRoot);
       effectiveTarget = path.relative(projectDir, targetFile);
     }
   } else {
-    // No target provided: scan project directory for stale .ail files
-    const ailFiles = findAilFiles(projectDir);
+    // No target provided: scan project directory or sourceDir for stale .ail files
+    const scanDir =
+      config.mode === "isolated" && config.sourceDir
+        ? path.resolve(projectRoot, config.sourceDir)
+        : projectDir;
+    const ailFiles = findAilFiles(scanDir);
     for (const f of ailFiles) {
-      const res = compileAilFile(f, {
-        pureInterfaces: options?.pureInterfaces,
-        watermark: options?.watermark,
-      });
+      const res = compileAilFile(f, compileOptions);
       if (res.compiled) {
         compiledFiles.push(res.targetPath);
       }

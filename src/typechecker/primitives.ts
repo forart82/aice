@@ -984,6 +984,11 @@ const OBJECT_SYMBOL = makeRecordType(
 export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
   print: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_VOID),
   log: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_VOID),
+  int: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_INT),
+  float: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_FLOAT),
+  str: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_STR),
+  bool: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_BOOL),
+  len: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_INT),
   abs: makeFunctionType([{ name: "n", type: TYPE_UNKNOWN }], TYPE_NUM),
   min: makeFunctionType(
     [
@@ -1049,7 +1054,6 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
   ),
   sign: makeFunctionType([{ name: "n", type: TYPE_UNKNOWN }], TYPE_NUM),
   exp: makeFunctionType([{ name: "n", type: TYPE_UNKNOWN }], TYPE_FLOAT),
-  len: makeFunctionType([{ name: "val", type: TYPE_UNKNOWN }], TYPE_INT),
   Ok: makeFunctionType(
     [{ name: "value", type: TYPE_UNKNOWN }],
     makeResultType(TYPE_UNKNOWN, TYPE_NEVER),

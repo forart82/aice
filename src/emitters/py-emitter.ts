@@ -124,7 +124,15 @@ export class PythonEmitter {
             this.ctx.writeLine(`"""${t.content.replace(/^"""|"""$/g, "").trim()}"""`);
             this.ctx.writeLine();
           } else if (t.kind === "LICENSE_HEADER" || t.kind === "LINE_COMMENT") {
-            this.ctx.writeLine(t.content);
+            for (const line of t.content.split("\n")) {
+              const trimmed = line.trimStart();
+              if (trimmed.startsWith("//")) {
+                const pad = line.slice(0, line.length - trimmed.length);
+                this.ctx.writeLine(pad + "#" + trimmed.slice(2));
+              } else {
+                this.ctx.writeLine(line);
+              }
+            }
           }
         }
       }
@@ -161,7 +169,15 @@ export class PythonEmitter {
           this.ctx.writeLine(`"""${t.content.replace(/^"""|"""$/g, "").trim()}"""`);
           this.ctx.writeLine();
         } else if (t.kind === "LICENSE_HEADER" || t.kind === "LINE_COMMENT") {
-          this.ctx.writeLine(t.content);
+          for (const line of t.content.split("\n")) {
+            const trimmed = line.trimStart();
+            if (trimmed.startsWith("//")) {
+              const pad = line.slice(0, line.length - trimmed.length);
+              this.ctx.writeLine(pad + "#" + trimmed.slice(2));
+            } else {
+              this.ctx.writeLine(line);
+            }
+          }
         }
       }
     }
@@ -232,7 +248,13 @@ export class PythonEmitter {
       if (item.kind === "DOCSTRING") continue;
       const lines = item.content.split("\n");
       for (const line of lines) {
-        this.ctx.writeLine(line);
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith("//")) {
+          const pad = line.slice(0, line.length - trimmed.length);
+          this.ctx.writeLine(pad + "#" + trimmed.slice(2));
+        } else {
+          this.ctx.writeLine(line);
+        }
       }
     }
   }
@@ -275,10 +297,16 @@ export class PythonEmitter {
       this.ctx.writeLine(slice.trim());
       return;
     }
-    const modName = imp.source
-      .replace(/\.[a-zA-Z]+$/, "")
-      .replace(/^\.\//, "")
-      .replace(/\//g, ".");
+    let modName = imp.source.replace(/\.(py|ts|js|ail)$/, "");
+    if (modName.startsWith("./")) {
+      modName = "." + modName.slice(2).replace(/\//g, ".");
+    } else if (modName.startsWith("../")) {
+      modName = ".." + modName.slice(3).replace(/\//g, ".");
+    } else if (modName.startsWith(".")) {
+      modName = "." + modName.slice(1).replace(/\//g, ".");
+    } else {
+      modName = modName.replace(/\//g, ".");
+    }
     if (imp.specifiers.length === 0) {
       this.ctx.writeLine(`import ${modName}`);
       return;
@@ -1065,7 +1093,8 @@ export class PythonEmitter {
             if (p.isSpread) {
               return `**${this.emitExpr(p.value)}`;
             }
-            return `${JSON.stringify(p.key)}: ${this.emitExpr(p.value)}`;
+            const keyOut = /^\d+(\.\d+)?$/.test(p.key ?? "") ? p.key : JSON.stringify(p.key);
+            return `${keyOut}: ${this.emitExpr(p.value)}`;
           })
           .join(", ");
         return `{${props}}`;

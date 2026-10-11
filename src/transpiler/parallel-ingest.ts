@@ -326,6 +326,9 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
       ".cxx",
       ".h",
       ".cs",
+      ".php",
+      ".kt",
+      ".kts",
     ]
   ).map((ext) => (ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
   const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build", ".agents"];
