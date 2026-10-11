@@ -18,7 +18,7 @@ import {
   type TargetLanguage,
 } from "../src/emitters/index.js";
 import { AilLspServer } from "../src/lsp/server.js";
-import { MultiLineReporter } from "../src/runner/index.js";
+import { MultiLineReporter, runAilTests } from "../src/runner/index.js";
 import {
   applyAiShield,
   checkAiShieldStatus,
@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.8");
+  .version("0.4.9");
 
 // Command: compile <file>
 program
@@ -355,6 +355,61 @@ program
       process.exit(1);
     }
   });
+
+// Command: test [target]
+program
+  .command("test")
+  .description("Execute tests across .ail files and test suites with auto-recompilation")
+  .argument("[target]", "Optional path to a test file, directory, or omitted to run all tests")
+  .option("-r, --reporter <type>", "Test reporter to use (e.g. compact, verbose, dots, json)")
+  .option("--json", "Output test results as machine-readable JSON")
+  .option("-v, --verbose", "Display verbose test runner output")
+  .action(
+    async (
+      target?: string,
+      options?: { reporter?: string; json?: boolean; verbose?: boolean },
+    ) => {
+      try {
+        const result = await runAilTests(target, {
+          reporter: options?.reporter,
+          json: options?.json,
+          verbose: options?.verbose,
+          cwd: process.cwd(),
+        });
+
+        if (options?.json) {
+          console.log(JSON.stringify(result, null, 2));
+          process.exit(result.success ? 0 : 1);
+        }
+
+        if (result.success) {
+          if (options?.verbose && result.output) {
+            console.log(result.output);
+          }
+          console.log(
+            `✔ Tests succeeded: ${result.summary.passed}/${result.summary.total} passed (${result.summary.failed} failed).`,
+          );
+          if (result.compiledFiles && result.compiledFiles.length > 0) {
+            console.log(
+              `  (Recompiled ${result.compiledFiles.length} .ail target(s) before test execution)`,
+            );
+          }
+          process.exit(0);
+        } else {
+          if (result.output) {
+            console.error(result.output);
+          }
+          console.error(
+            `❌ Tests failed: ${result.summary.failed}/${result.summary.total} failed (${result.summary.passed} passed).`,
+          );
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(`❌ Failed to execute tests:`, err);
+        process.exit(1);
+      }
+    },
+  );
 
 // Command: fix <file>
 program
