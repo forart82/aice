@@ -22,6 +22,7 @@ import { MultiLineReporter } from "../src/runner/index.js";
 import {
   applyAiShield,
   checkAiShieldStatus,
+  interceptPreToolUse,
   lockProjectTargets,
   removeAiShield,
   safeWriteTargetFile,
@@ -50,7 +51,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.6");
+  .version("0.4.7");
 
 // Command: compile <file>
 program
@@ -865,11 +866,40 @@ program
     },
   );
 
-// Command: shield <action> [dir]
-program
+// Helper to read stdin synchronously in CLI hooks without blocking interactive TTY
+function readStdinSync(): string {
+  try {
+    if (process.stdin.isTTY) {
+      return "";
+    }
+    return fs.readFileSync(0, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+// Command: shield
+const shieldCmd = program
   .command("shield")
-  .description("Manage AI exclusion rules, cognitive shields, and filesystem locks")
-  .argument("<action>", "Action to perform: apply | remove | status | lock | unlock")
+  .description("Manage AI exclusion rules, cognitive shields, and filesystem locks");
+
+shieldCmd
+  .command("intercept")
+  .description("Intercept PreToolUse lifecycle hooks for AI agents")
+  .argument("[dir]", "Target project directory", ".")
+  .action((dir: string) => {
+    try {
+      const rawInput = readStdinSync();
+      const targetDir = path.resolve(process.cwd(), dir || ".");
+      const result = interceptPreToolUse(rawInput, targetDir);
+      console.log(JSON.stringify(result));
+    } catch {
+      console.log(JSON.stringify({ decision: "allow" }));
+    }
+  });
+
+shieldCmd
+  .argument("<action>", "Action to perform: apply | remove | status | lock | unlock | intercept")
   .argument("[dir]", "Target project directory", ".")
   .action(async (action: string, dir: string) => {
     try {
@@ -880,6 +910,12 @@ program
       }
 
       switch (action.toLowerCase()) {
+        case "intercept": {
+          const rawInput = readStdinSync();
+          const result = interceptPreToolUse(rawInput, targetDir);
+          console.log(JSON.stringify(result));
+          break;
+        }
         case "apply": {
           const res = await applyAiShield(targetDir, { lifecycleHooks: true });
           console.log(`✔ AI Shield applied to ${path.relative(process.cwd(), targetDir) || "."}:`);
@@ -961,7 +997,7 @@ program
         }
         default: {
           console.error(
-            `❌ Unknown shield action: '${action}'. Valid actions: apply, remove, status, lock, unlock`,
+            `❌ Unknown shield action: '${action}'. Valid actions: apply, remove, status, lock, unlock, intercept`,
           );
           process.exit(1);
         }

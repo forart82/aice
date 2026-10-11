@@ -10,6 +10,7 @@ import * as path from "node:path";
 
 export * from "./ai-shield.js";
 export * from "./fs-lock.js";
+export { interceptPreToolUse, type InterceptResult } from "./ai-shield.js";
 
 /**
  * Transparent Permission Elevation file writing utility.

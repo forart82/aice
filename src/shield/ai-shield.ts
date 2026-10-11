@@ -9,6 +9,8 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { getAilSiblingPath, isTargetLocked } from "./fs-lock.js";
 
 export interface ShieldOptions {
   dir: string;
@@ -182,9 +184,9 @@ try {
   }
 
   const payload = JSON.parse(rawInput);
-  const toolName = payload.toolCall?.name;
-  const args = payload.toolCall?.args || {};
-  const rawPath = args.AbsolutePath || args.TargetFile || args.path || args.filePath || args.Uri;
+  const toolName = payload.toolName || payload.tool_name || payload.toolCall?.name || payload.tool_call?.name;
+  const args = payload.toolInput || payload.tool_input || payload.toolCall?.args || payload.tool_call?.args || {};
+  const rawPath = args.AbsolutePath || args.TargetFile || args.absolutePath || args.targetFile || args.absolute_path || args.target_file || args.path || args.filePath || args.file_path || args.Uri || args.uri;
 
   if (rawPath && typeof rawPath === "string") {
     let checkPath = rawPath;
@@ -229,6 +231,172 @@ function parseJsonSafe(content: string): Record<string, unknown> {
   } catch {
     const stripped = content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^\\:])\/\/.*$/gm, "$1");
     return JSON.parse(stripped);
+  }
+}
+
+export interface InterceptResult {
+  decision: "allow" | "deny";
+  overwrite?: Record<string, string>;
+  reason?: string;
+}
+
+/**
+ * Intercepts AI agent PreToolUse lifecycle hooks (Antigravity, Cursor, Claude Code).
+ * - Transparently redirects view_file calls targeting files with a .ail sibling to the .ail sibling.
+ * - Denies replace_file_content and write_to_file calls targeting files with a .ail sibling or locked target files.
+ * - Defaults to allowing all other tool calls.
+ */
+export function interceptPreToolUse(
+  input: string,
+  projectRoot?: string,
+): InterceptResult {
+  try {
+    if (!input || !input.trim()) {
+      return { decision: "allow" };
+    }
+
+    const payload = parseJsonSafe(input) as Record<string, any>;
+    if (!payload || typeof payload !== "object") {
+      return { decision: "allow" };
+    }
+
+    // 1. Extract tool name (supporting camelCase, snake_case, toolCall, and nested formats)
+    const rawToolName: unknown =
+      payload.toolName ??
+      payload.tool_name ??
+      payload.toolCall?.name ??
+      payload.tool_call?.name ??
+      payload.name ??
+      payload.tool;
+
+    if (!rawToolName || typeof rawToolName !== "string") {
+      return { decision: "allow" };
+    }
+
+    const toolName = rawToolName.trim();
+    const lowerTool = toolName.toLowerCase().replace(/[-_]/g, "");
+
+    const isView =
+      toolName === "view_file" ||
+      lowerTool === "viewfile" ||
+      lowerTool === "view" ||
+      lowerTool === "read" ||
+      lowerTool === "readfile";
+
+    const isWrite =
+      toolName === "replace_file_content" ||
+      toolName === "write_to_file" ||
+      lowerTool === "replacefilecontent" ||
+      lowerTool === "writetofile" ||
+      lowerTool === "writefile" ||
+      lowerTool === "write" ||
+      lowerTool === "edit" ||
+      lowerTool === "editfile";
+
+    if (!isView && !isWrite) {
+      return { decision: "allow" };
+    }
+
+    // 2. Extract tool input / arguments
+    let rawArgs: unknown =
+      payload.toolInput ??
+      payload.tool_input ??
+      payload.toolCall?.args ??
+      payload.toolCall?.input ??
+      payload.tool_call?.args ??
+      payload.tool_call?.input ??
+      payload.args ??
+      payload.arguments ??
+      payload.input;
+
+    if (typeof rawArgs === "string") {
+      try {
+        rawArgs = JSON.parse(rawArgs);
+      } catch {
+        rawArgs = {};
+      }
+    }
+
+    if (!rawArgs || typeof rawArgs !== "object") {
+      return { decision: "allow" };
+    }
+
+    const args = rawArgs as Record<string, any>;
+
+    // 3. Extract file path (supporting AbsolutePath, TargetFile, and variants)
+    const rawPath: unknown =
+      args.AbsolutePath ??
+      args.TargetFile ??
+      args.absolutePath ??
+      args.targetFile ??
+      args.absolute_path ??
+      args.target_file ??
+      args.filePath ??
+      args.file_path ??
+      args.path ??
+      args.Uri ??
+      args.uri;
+
+    if (!rawPath || typeof rawPath !== "string") {
+      return { decision: "allow" };
+    }
+
+    let checkPath = rawPath.trim();
+    if (checkPath.startsWith("file://")) {
+      try {
+        checkPath = fileURLToPath(checkPath);
+      } catch {
+        checkPath = checkPath.replace(/^file:\/\//, "");
+      }
+    }
+
+    const root = projectRoot ? path.resolve(projectRoot) : process.cwd();
+    const resolvedPath = path.isAbsolute(checkPath) ? path.resolve(checkPath) : path.resolve(root, checkPath);
+
+    // If already targeting .ail source file directly, allow
+    if (resolvedPath.endsWith(".ail")) {
+      return { decision: "allow" };
+    }
+
+    const directSibling = `${resolvedPath}.ail`;
+    const ailSibling = fs.existsSync(directSibling) ? directSibling : getAilSiblingPath(resolvedPath);
+
+    if (isView) {
+      if (ailSibling) {
+        return {
+          decision: "allow",
+          overwrite: {
+            AbsolutePath: ailSibling,
+          },
+        };
+      }
+      return { decision: "allow" };
+    }
+
+    if (isWrite) {
+      let isLocked = false;
+      if (fs.existsSync(resolvedPath)) {
+        try {
+          isLocked = isTargetLocked(resolvedPath);
+        } catch {
+          isLocked = false;
+        }
+      }
+
+      if (ailSibling || isLocked) {
+        const baseName = path.basename(resolvedPath);
+        const targetAil = ailSibling ? path.basename(ailSibling) : `${baseName}.ail`;
+        return {
+          decision: "deny",
+          reason: `MANDATORY AIL SHIELD: Target file '${baseName}' is a machine-generated read-only build artifact (chmod 444). You MUST inspect and modify '${targetAil}' instead, and compile with \`ail compile\` or run \`npm test\`.`,
+        };
+      }
+      return { decision: "allow" };
+    }
+
+    return { decision: "allow" };
+  } catch {
+    return { decision: "allow" };
   }
 }
 
@@ -522,6 +690,9 @@ export async function applyAiShield(
       }
     }
 
+    const fallbackNodeScript =
+      'node -e \'const fs=require("fs"),p=fs.existsSync("./ail-shield-hook.mjs")?"./ail-shield-hook.mjs":".agents/ail-shield-hook.mjs";import(require("path").resolve(p))\'';
+
     hooksData["ail-shield-interceptor"] = {
       PreToolUse: [
         {
@@ -529,8 +700,7 @@ export async function applyAiShield(
           hooks: [
             {
               type: "command",
-              command:
-                "node -e 'const fs=require(\"fs\"),p=fs.existsSync(\"./ail-shield-hook.mjs\")?\"./ail-shield-hook.mjs\":\".agents/ail-shield-hook.mjs\";import(require(\"path\").resolve(p))'",
+              command: `command -v ail >/dev/null 2>&1 && ail shield intercept || ${fallbackNodeScript}`,
             },
           ],
         },
