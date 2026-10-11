@@ -478,6 +478,37 @@ pub fn advanceLevel(p: Player) -> Player:
       expect(roundtripRes.reconstructed).toContain("async def");
       expect(roundtripRes.reconstructed).toContain("match");
     });
+
+    it("verifies Kotlin 1.9/2.x data classes and decompilation (case53 ProductEntity.kt)", () => {
+      const targetPath = path.join(testCaseSrc, "case53/ProductEntity.kt");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.isIdentical).toBe(true);
+      expect(roundtripRes.reconstructed).toContain("data class ProductEntity");
+      expect(roundtripRes.reconstructed).toContain("formattedPrice");
+    });
+
+    it("verifies Kotlin 1.9/2.x interfaces and coroutines decompilation (case53 ProductRepository.kt)", () => {
+      const targetPath = path.join(testCaseSrc, "case53/ProductRepository.kt");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.isIdentical).toBe(true);
+      expect(roundtripRes.reconstructed).toContain("interface ProductRepository");
+      expect(roundtripRes.reconstructed).toContain("suspend fun findById");
+      expect(roundtripRes.reconstructed).toContain("class InMemoryProductRepository");
+    });
   });
 
   // ===========================================================================

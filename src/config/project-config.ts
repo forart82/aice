@@ -39,6 +39,7 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "yaml",
   "twig",
   "php",
+  "kotlin",
 ]);
 
 export const DEFAULT_PROJECT_CONFIG: Readonly<AilProjectConfig> = Object.freeze({
@@ -73,6 +74,8 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".yml",
   ".twig",
   ".php",
+  ".kt",
+  ".kts",
 ]);
 
 export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
@@ -98,6 +101,8 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".yml": "yaml",
   ".twig": "twig",
   ".php": "php",
+  ".kt": "kotlin",
+  ".kts": "kotlin",
 });
 
 const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
@@ -142,6 +147,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".twig";
     case "php":
       return ".php";
+    case "kotlin":
+      return ".kt";
     default:
       return ".ts";
   }

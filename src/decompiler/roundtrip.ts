@@ -22,6 +22,7 @@ import { TsDecompiler } from "./ts-decompiler.js";
 import { YamlDecompiler } from "./yaml-decompiler.js";
 import { PhpDecompiler } from "./php-decompiler.js";
 import { PythonDecompiler } from "./py-decompiler.js";
+import { KotlinDecompiler } from "./kotlin-decompiler.js";
 
 export interface RoundtripResult {
   target: TargetLanguage;
@@ -96,6 +97,11 @@ export function executeRoundtrip(
       decompileResult = decompiler.decompile();
       break;
     }
+    case "kotlin": {
+      const decompiler = new KotlinDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
     default:
       throw new Error(`Unsupported target language for roundtrip: ${target}`);
   }
@@ -108,6 +114,8 @@ export function executeRoundtrip(
     preserveTypeScriptSourceSlices(source, ast, trivia, filePath, target === "tsx");
   } else if (target === "python") {
     preservePythonSourceSlices(source, ast, trivia);
+  } else if (target === "kotlin") {
+    preserveKotlinSourceSlices(source, ast, trivia);
   }
 
   // Generate AIL source code
@@ -248,6 +256,20 @@ function preserveTypeScriptSourceSlices(
 }
 
 function preservePythonSourceSlices(
+  source: string,
+  ast: Module,
+  trivia: CstTriviaTable,
+): void {
+  for (const item of ast.items) {
+    const nodeId = getNodeTriviaId(item);
+    if (nodeId && item.span && item.span.start.offset < item.span.end.offset) {
+      const slice = source.slice(item.span.start.offset, item.span.end.offset);
+      trivia.setSourceSlice(nodeId, slice, createAstNodeSnapshot(item), item.span);
+    }
+  }
+}
+
+function preserveKotlinSourceSlices(
   source: string,
   ast: Module,
   trivia: CstTriviaTable,

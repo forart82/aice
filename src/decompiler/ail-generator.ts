@@ -1240,7 +1240,18 @@ export class AilGenerator {
           expr.operand.kind === "ClosureExpr";
         return needsParen ? `await (${operandStr})` : `await ${operandStr}`;
       }
+      case "MatchExpr" as any: {
+        const targetStr = this.formatExpr((expr as any).target);
+        this.indent();
+        const cases =
+          (expr as any).cases && (expr as any).cases.length > 0
+            ? (expr as any).cases.map((mc: any) => this.formatMatchCase(mc)).join("\n")
+            : `${this.getIndent()}case _ => nil`;
+        this.dedent();
+        return `match ${targetStr}:\n${cases}`;
+      }
     }
+    return "";
   }
 
   public formatTypeExpr(t: TypeExpr | null | undefined): string {

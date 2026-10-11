@@ -16,6 +16,7 @@ import { TypeScriptEmitter } from "./ts-emitter.js";
 import { TwigEmitter } from "./twig-emitter.js";
 import { YamlEmitter } from "./yaml-emitter.js";
 import { PhpEmitter } from "./php-emitter.js";
+import { KotlinEmitter } from "./kotlin-emitter.js";
 
 export * from "./context.js";
 export * from "./cpp-emitter.js";
@@ -24,6 +25,7 @@ export * from "./css-emitter.js";
 export * from "./go-emitter.js";
 export * from "./html-emitter.js";
 export * from "./json-emitter.js";
+export * from "./kotlin-emitter.js";
 export * from "./php-emitter.js";
 export * from "./py-emitter.js";
 export * from "./rewriter.js";
@@ -33,7 +35,7 @@ export * from "./twig-emitter.js";
 export * from "./yaml-emitter.js";
 
 // Convenience aliases
-export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter };
+export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter, KotlinEmitter as KtEmitter };
 
 /**
  * Emits target source code from an AIL Module AST.
@@ -97,6 +99,10 @@ export function emitTarget(
     }
     case "php": {
       const emitter = new PhpEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "kotlin": {
+      const emitter = new KotlinEmitter(options);
       return emitter.emit(mod);
     }
     default: {

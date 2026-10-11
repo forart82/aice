@@ -17,7 +17,8 @@ export type TargetLanguage =
   | "json"
   | "yaml"
   | "twig"
-  | "php";
+  | "php"
+  | "kotlin";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
@@ -157,6 +158,7 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (clean.endsWith(".yaml") || clean.endsWith(".yml")) return "yaml";
   if (clean.endsWith(".twig")) return "twig";
   if (clean.endsWith(".php")) return "php";
+  if (clean.endsWith(".kt") || clean.endsWith(".kts")) return "kotlin";
   return "typescript";
 }
 

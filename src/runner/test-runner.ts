@@ -91,6 +91,8 @@ const KNOWN_TARGET_EXTENSIONS = new Set([
   ".yml",
   ".twig",
   ".php",
+  ".kt",
+  ".kts",
 ]);
 
 /**
@@ -135,6 +137,9 @@ export function resolveTargetFilePath(ailPath: string): string {
         break;
       case "php":
         targetOut += ".php";
+        break;
+      case "kotlin":
+        targetOut += ".kt";
         break;
       case "tsx":
         targetOut += ".tsx";

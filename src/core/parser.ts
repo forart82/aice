@@ -2941,6 +2941,14 @@ export class Parser {
 
     if (tok.kind === "IDENT" || this.isContextualIdentifier(tok)) {
       this.advance();
+      let name = tok.value;
+      let lastSpan = tok.span;
+      while (this.check("DOT")) {
+        this.advance();
+        const nextTok = this.advance();
+        name += "." + nextTok.value;
+        lastSpan = nextTok.span;
+      }
       // Check for constructor pattern: Some(val) or Ok(res)
       if (this.check("LPAREN")) {
         this.advance();
@@ -2952,13 +2960,13 @@ export class Parser {
         const endSpan = this.consume("RPAREN").span;
         return {
           kind: "ConstructorPattern",
-          name: tok.value,
+          name,
           subPatterns,
           span: mergeSpans(tok.span, endSpan),
         };
       }
 
-      return { kind: "IdentifierPattern", name: tok.value, span: tok.span };
+      return { kind: "IdentifierPattern", name, span: mergeSpans(tok.span, lastSpan) };
     }
 
     throw new ParserError(`Unexpected pattern token '${tok.kind}'`, tok.span);
