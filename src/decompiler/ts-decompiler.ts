@@ -8,7 +8,7 @@
  * and lowers the AST into an AIL Module AST.
  */
 
-import ts from "typescript";
+import ts from "../compat/typescript.js";
 import type {
   AssignExpr,
   AssignOp,

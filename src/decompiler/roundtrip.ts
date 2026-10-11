@@ -7,7 +7,7 @@
  *   Put(Get(c), Omega) == c
  */
 
-import ts from "typescript";
+import ts from "../compat/typescript.js";
 import type { Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import { type CstTriviaTable, createAstNodeSnapshot, getNodeTriviaId } from "../core/trivia.js";
