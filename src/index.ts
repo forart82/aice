@@ -13,3 +13,4 @@ export * from "./tokenomics/index.js";
 export * from "./transpiler/index.js";
 export * from "./typechecker/index.js";
 export * from "./watcher/index.js";
+export { stripAnsi } from "./runner/index.js";

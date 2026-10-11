@@ -80,23 +80,30 @@ export function resolveToAilFile(
   // Strip dist/ or build/ output prefixes
   rel = rel.replace(/^(?:dist|build)\//, "");
 
+  const bases: string[] = [rel];
+  if (!rel.startsWith("src/")) {
+    bases.push(`src/${rel}`);
+  }
+
   const candidates: string[] = [];
 
-  if (rel.endsWith(".ail")) {
-    candidates.push(rel);
-  } else {
-    // 1. Check side-by-side .ail (e.g. engine.ts -> engine.ts.ail)
-    candidates.push(`${rel}.ail`);
+  for (const base of bases) {
+    if (base.endsWith(".ail")) {
+      candidates.push(base);
+    } else {
+      // 1. Check side-by-side .ail (e.g. engine.ts -> engine.ts.ail)
+      candidates.push(`${base}.ail`);
 
-    // 2. If .js/.mjs, check corresponding .ts.ail
-    if (/\.m?js$/.test(rel)) {
-      candidates.push(rel.replace(/\.m?js$/, ".ts.ail"));
-      candidates.push(rel.replace(/\.m?js$/, ".ail"));
-    }
+      // 2. If .js/.mjs, check corresponding .ts.ail
+      if (/\.m?js$/.test(base)) {
+        candidates.push(base.replace(/\.m?js$/, ".ts.ail"));
+        candidates.push(base.replace(/\.m?js$/, ".ail"));
+      }
 
-    // 3. Extension replacement (e.g. engine.ts -> engine.ail)
-    if (/\.(ts|tsx|jsx|js|mjs|cjs)$/.test(rel)) {
-      candidates.push(rel.replace(/\.(ts|tsx|jsx|js|mjs|cjs)$/, ".ail"));
+      // 3. Extension replacement (e.g. engine.ts -> engine.ail)
+      if (/\.(ts|tsx|jsx|js|mjs|cjs)$/.test(base)) {
+        candidates.push(base.replace(/\.(ts|tsx|jsx|js|mjs|cjs)$/, ".ail"));
+      }
     }
   }
 
@@ -604,7 +611,7 @@ export function scrubTargetFileReferences(text: string): string {
     .join("\n");
 
   // 2. Strip dist/ and build/ directory prefixes
-  result = result.replace(/\b(?:dist|build)\//g, "");
+  result = result.replace(/\b(?:dist|build)[/\\]/g, "");
 
   // 3. Ensure any .ts or .js file path is converted to .ail
   result = result.replace(
