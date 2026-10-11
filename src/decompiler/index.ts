@@ -20,6 +20,7 @@ import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
 import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js";
 import { decompilePhp, PhpDecompiler } from "./php-decompiler.js";
+import { decompilePython, PythonDecompiler } from "./py-decompiler.js";
 
 export * from "./ail-generator.js";
 export * from "./cpp-decompiler.js";
@@ -28,6 +29,7 @@ export * from "./css-decompiler.js";
 export * from "./html-decompiler.js";
 export * from "./json-decompiler.js";
 export * from "./php-decompiler.js";
+export * from "./py-decompiler.js";
 export * from "./roundtrip.js";
 export * from "./ts-decompiler.js";
 export * from "./twig-decompiler.js";
@@ -120,6 +122,13 @@ export function decompile(
     }
     case "php": {
       const decompiler = new PhpDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "python": {
+      const decompiler = new PythonDecompiler(source, filePath);
       const result = decompiler.decompile();
       ast = result.ast;
       trivia = result.trivia;

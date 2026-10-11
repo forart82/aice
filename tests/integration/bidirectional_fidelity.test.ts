@@ -448,6 +448,36 @@ pub fn advanceLevel(p: Player) -> Player:
       expect(roundtripRes.reconstructed).toContain("class CustomerService");
       expect(roundtripRes.reconstructed).toContain("getOrderTotal");
     });
+
+    it("verifies Python 3.10+ dataclasses decompilation and semantic re-emission (case52 UserEntity.py)", () => {
+      const targetPath = path.join(testCaseSrc, "case52/UserEntity.py");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "python", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.isIdentical).toBe(true);
+      expect(roundtripRes.reconstructed).toContain("@dataclass");
+      expect(roundtripRes.reconstructed).toContain("class UserEntity");
+    });
+
+    it("verifies Python 3.10+ async functions and pattern matching decompilation (case52 AsyncPipeline.py)", () => {
+      const targetPath = path.join(testCaseSrc, "case52/AsyncPipeline.py");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "python", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.isIdentical).toBe(true);
+      expect(roundtripRes.reconstructed).toContain("async def");
+      expect(roundtripRes.reconstructed).toContain("match");
+    });
   });
 
   // ===========================================================================

@@ -16,25 +16,32 @@ import type {
   TypeExpr,
   VarDecl,
 } from "../core/ast.js";
+import { createAstNodeSnapshot, getNodeTriviaId } from "../core/trivia.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
 
+export interface PythonEmitterOptions extends EmitterOptions {
+  useDataclasses?: boolean;
+}
+
 export class PythonEmitter {
   private ctx: EmitterContext;
+  private options: PythonEmitterOptions;
   private structTypes: Map<string, string[]> = new Map();
   private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
   private varTypes: Map<string, string> = new Map();
   private closureCount = 0;
   private pendingHoistedDefs: string[] = [];
 
-  constructor(options: EmitterOptions = {}) {
+  constructor(options: PythonEmitterOptions = {}) {
+    this.options = options;
     this.ctx = new EmitterContext("python", {
       ...options,
       indent: options.indent ?? "    ", // standard 4 spaces for Python
     });
   }
 
-  static emit(mod: Module, options?: EmitterOptions): string {
+  static emit(mod: Module, options?: PythonEmitterOptions): string {
     return new PythonEmitter(options).emit(mod);
   }
 
@@ -102,6 +109,66 @@ export class PythonEmitter {
     const imports = mod.items.filter((i) => i.kind === "ImportDecl") as ImportDecl[];
     const nonImports = mod.items.filter((i) => i.kind !== "ImportDecl");
 
+    const hasSlices =
+      mod.items.length > 0 &&
+      mod.items.every((item) => {
+        const nid = getNodeTriviaId(item);
+        return nid && this.ctx.hasSourceSlice(nid);
+      });
+
+    if (hasSlices) {
+      const modTrivia = this.ctx.trivia?.getTrivia("module");
+      if (modTrivia) {
+        for (const t of modTrivia.leading) {
+          if (t.kind === "DOCSTRING") {
+            this.ctx.writeLine(`"""${t.content.replace(/^"""|"""$/g, "").trim()}"""`);
+            this.ctx.writeLine();
+          } else if (t.kind === "LICENSE_HEADER" || t.kind === "LINE_COMMENT") {
+            this.ctx.writeLine(t.content);
+          }
+        }
+      }
+
+      for (const imp of imports) {
+        this.emitImport(imp);
+      }
+
+      if (imports.length > 0 && nonImports.length > 0) {
+        this.ctx.writeLine();
+      }
+
+      for (let i = 0; i < nonImports.length; i++) {
+        this.emitModuleItem(nonImports[i]);
+        if (i < nonImports.length - 1) {
+          this.ctx.writeLine();
+        }
+      }
+      return this.ctx.getOutput();
+    }
+
+    const hasDataclass =
+      this.options.useDataclasses ||
+      mod.items.some(
+        (i) =>
+          (i.kind === "ClassDecl" && this.isDataclass(i)) ||
+          (i.kind === "TypeDecl" && i.fields && this.isDataclassType(i)),
+      );
+
+    const modTrivia = this.ctx.trivia?.getTrivia("module");
+    if (modTrivia) {
+      for (const t of modTrivia.leading) {
+        if (t.kind === "DOCSTRING") {
+          this.ctx.writeLine(`"""${t.content.replace(/^"""|"""$/g, "").trim()}"""`);
+          this.ctx.writeLine();
+        } else if (t.kind === "LICENSE_HEADER" || t.kind === "LINE_COMMENT") {
+          this.ctx.writeLine(t.content);
+        }
+      }
+    }
+
+    if (hasDataclass) {
+      this.ctx.writeLine("from dataclasses import dataclass");
+    }
     this.ctx.writeLine("from typing import Any, Optional, Union, TypedDict");
     this.ctx.writeLine();
 
@@ -121,7 +188,7 @@ export class PythonEmitter {
     }
 
     let out = this.ctx.getOutput();
-    if (out.includes("math.")) {
+    if (out.includes("math.") && !out.includes("import math")) {
       out = out.replace(
         "from typing import Any, Optional, Union, TypedDict\n",
         "from typing import Any, Optional, Union, TypedDict\nimport math\n",
@@ -130,7 +197,84 @@ export class PythonEmitter {
     return out;
   }
 
+  private isDataclass(c: ClassDecl): boolean {
+    if (this.options.useDataclasses) return true;
+    if (this.ctx.trivia?.getTrivia(`is_dataclass:${c.name}`)) return true;
+    const classTrivia = this.ctx.trivia?.getTrivia(`class:${c.name}`);
+    if (classTrivia && classTrivia.leading.some((t) => t.content.includes("@dataclass"))) {
+      return true;
+    }
+    return false;
+  }
+
+  private isDataclassType(t: TypeDecl): boolean {
+    if (this.options.useDataclasses) return true;
+    if (this.ctx.trivia?.getTrivia(`is_dataclass:${t.name}`)) return true;
+    const typeTrivia = this.ctx.trivia?.getTrivia(`type:${t.name}`);
+    if (typeTrivia && typeTrivia.leading.some((l) => l.content.includes("@dataclass"))) {
+      return true;
+    }
+    return false;
+  }
+
+  private emitLeadingTrivia(nodeId: string): void {
+    if (!this.ctx.trivia) return;
+    const entry = this.ctx.trivia.getTrivia(nodeId);
+    if (!entry) return;
+
+    if (entry.blankLinesBefore && entry.blankLinesBefore > 0) {
+      for (let i = 0; i < entry.blankLinesBefore; i++) {
+        this.ctx.writeLine();
+      }
+    }
+
+    for (const item of entry.leading) {
+      if (item.kind === "DOCSTRING") continue;
+      const lines = item.content.split("\n");
+      for (const line of lines) {
+        this.ctx.writeLine(line);
+      }
+    }
+  }
+
+  private emitDocstring(nodeId: string): void {
+    if (!this.ctx.trivia) return;
+    const entry = this.ctx.trivia.getTrivia(nodeId);
+    if (!entry) return;
+    for (const item of entry.leading) {
+      if (item.kind === "DOCSTRING") {
+        const clean = item.content.replace(/^"""|"""$/g, "").trim();
+        this.ctx.writeLine(`"""${clean}"""`);
+      }
+    }
+  }
+
+  private canReplaySourceSlice(item: ModuleItem, nodeId: string): boolean {
+    if (!this.ctx.trivia) return false;
+    const entry = this.ctx.trivia.getTrivia(nodeId);
+    if (!entry || !entry.sourceSlice) return false;
+    if (entry.nodeSnapshot) {
+      const currentSnapshot = createAstNodeSnapshot(item);
+      if (currentSnapshot !== entry.nodeSnapshot) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private getSourceSlice(nodeId: string): string | undefined {
+    if (!this.ctx.trivia) return undefined;
+    const entry = this.ctx.trivia.getTrivia(nodeId);
+    return entry?.sourceSlice;
+  }
+
   private emitImport(imp: ImportDecl): void {
+    const nodeId = `import:${imp.source}`;
+    if (this.canReplaySourceSlice(imp, nodeId)) {
+      const slice = this.getSourceSlice(nodeId)!;
+      this.ctx.writeLine(slice.trim());
+      return;
+    }
     const modName = imp.source
       .replace(/\.[a-zA-Z]+$/, "")
       .replace(/^\.\//, "")
@@ -148,6 +292,12 @@ export class PythonEmitter {
   }
 
   private emitModuleItem(item: ModuleItem): void {
+    const nodeId = getNodeTriviaId(item);
+    if (nodeId && this.canReplaySourceSlice(item, nodeId)) {
+      const slice = this.getSourceSlice(nodeId)!;
+      this.ctx.writeLine(slice.trimEnd());
+      return;
+    }
     switch (item.kind) {
       case "TypeDecl":
         this.emitTypeDecl(item);
@@ -168,13 +318,38 @@ export class PythonEmitter {
   }
 
   private emitClassDecl(c: ClassDecl): void {
+    const nodeId = `class:${c.name}`;
+    this.emitLeadingTrivia(nodeId);
+
+    const isDc = this.isDataclass(c);
+    if (isDc) {
+      this.ctx.writeLine("@dataclass");
+    }
+
     const ext = c.extends ? `(${c.extends})` : "";
     this.ctx.writeLine(`class ${c.name}${ext}:`);
     this.ctx.indent();
+    this.emitDocstring(nodeId);
 
     const hasPrimaryCtor = !!(c.primaryConstructor && c.primaryConstructor.length > 0);
+    const hasExplicitInit = c.methods.some(
+      (m) => m.name === "__init__" || m.name === "constructor",
+    );
 
-    if (hasPrimaryCtor) {
+    if (isDc) {
+      if (c.properties.length === 0 && c.methods.length === 0) {
+        this.ctx.writeLine("pass");
+      } else {
+        for (const p of c.properties) {
+          const pNodeId = `field:${c.name}.${p.name}`;
+          this.emitLeadingTrivia(pNodeId);
+          const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : ": Any";
+          const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
+          this.ctx.writeLine(`${p.name}${typeStr}${init}`);
+          this.ctx.emitTrailingTrivia(pNodeId);
+        }
+      }
+    } else if (hasPrimaryCtor) {
       const ctorParams = [
         "self",
         ...c.primaryConstructor!.map((p) => {
@@ -194,7 +369,7 @@ export class PythonEmitter {
       }
       this.ctx.dedent();
       this.ctx.writeLine();
-    } else if (c.properties.length > 0) {
+    } else if (c.properties.length > 0 && !hasExplicitInit) {
       this.ctx.writeLine("def __init__(self):");
       this.ctx.indent();
       for (const p of c.properties) {
@@ -207,6 +382,7 @@ export class PythonEmitter {
     }
 
     if (
+      !isDc &&
       c.methods.length === 0 &&
       c.properties.length === 0 &&
       !hasPrimaryCtor &&
@@ -216,10 +392,10 @@ export class PythonEmitter {
     }
 
     for (let i = 0; i < c.methods.length; i++) {
-      this.emitMethodDecl(c.methods[i]);
-      if (i < c.methods.length - 1) {
+      if ((isDc && c.properties.length > 0) || i > 0) {
         this.ctx.writeLine();
       }
+      this.emitMethodDecl(c.methods[i], c.name);
     }
 
     if (c.staticBlocks && c.staticBlocks.length > 0) {
@@ -252,21 +428,31 @@ export class PythonEmitter {
     }
 
     this.ctx.dedent();
+    this.ctx.emitTrailingTrivia(nodeId);
   }
 
-  private emitMethodDecl(m: MethodDecl): void {
+  private emitMethodDecl(m: MethodDecl, className?: string): void {
     const methodName = m.name === "constructor" ? "__init__" : m.name;
-    const params = [
-      "self",
-      ...m.params.map((p) => {
-        const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-        return `${p.name}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
-      }),
-    ].join(", ");
-    const retType = m.returnType ? ` -> ${this.emitTypeExpr(m.returnType)}` : " -> None";
+    const mNodeId = className ? `method:${className}.${methodName}` : "";
+    if (mNodeId) this.emitLeadingTrivia(mNodeId);
+    if (m.isStatic) {
+      this.ctx.writeLine("@staticmethod");
+    }
+    const paramsList: string[] = [];
+    if (!m.isStatic) {
+      paramsList.push("self");
+    }
+    for (const p of m.params) {
+      const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
+      const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+      paramsList.push(`${p.name}${typeStr}${def}`);
+    }
+    const params = paramsList.join(", ");
+    const retType = m.returnType ? ` -> ${this.emitTypeExpr(m.returnType)}` : "";
     const as = m.isAsync ? "async " : "";
     this.ctx.writeLine(`${as}def ${methodName}(${params})${retType}:`);
     this.ctx.indent();
+    if (mNodeId) this.emitDocstring(mNodeId);
     if (m.body.kind === "Block") {
       this.emitBlock(m.body);
     } else {
@@ -279,9 +465,14 @@ export class PythonEmitter {
       }
     }
     this.ctx.dedent();
+    if (mNodeId) this.ctx.emitTrailingTrivia(mNodeId);
   }
 
   private emitConstOrVarDecl(decl: ConstDecl | VarDecl): void {
+    const isConst = decl.kind === "ConstDecl";
+    const nodeId = `${isConst ? "const" : "var"}:${decl.name}`;
+    this.emitLeadingTrivia(nodeId);
+
     if (
       decl.value.kind === "ClosureExpr" &&
       decl.value.body.kind === "Block" &&
@@ -300,6 +491,7 @@ export class PythonEmitter {
       this.ctx.indent();
       this.emitBlock(decl.value.body, true);
       this.ctx.dedent();
+      this.ctx.emitTrailingTrivia(nodeId);
       return;
     }
     const val = this.emitExpr(decl.value);
@@ -311,31 +503,50 @@ export class PythonEmitter {
     }
     const typeStr = decl.typeAnnotation ? `: ${this.emitTypeExpr(decl.typeAnnotation)}` : "";
     this.ctx.writeLine(`${decl.name}${typeStr} = ${val}`);
+    this.ctx.emitTrailingTrivia(nodeId);
   }
 
   private emitTypeDecl(t: TypeDecl): void {
+    const nodeId = `type:${t.name}`;
+    this.emitLeadingTrivia(nodeId);
+
     if (t.aliasType) {
       const typeStr = this.emitTypeExpr(t.aliasType);
       this.ctx.writeLine(`${t.name} = ${typeStr}`);
+      this.ctx.emitTrailingTrivia(nodeId);
       return;
     }
 
     if (t.fields) {
-      this.ctx.writeLine(`class ${t.name}(TypedDict):`);
+      const isDc = this.isDataclassType(t);
+      if (isDc) {
+        this.ctx.writeLine("@dataclass");
+        this.ctx.writeLine(`class ${t.name}:`);
+      } else {
+        this.ctx.writeLine(`class ${t.name}(TypedDict):`);
+      }
       this.ctx.indent();
+      this.emitDocstring(nodeId);
       if (t.fields.length === 0) {
         this.ctx.writeLine("pass");
       } else {
         for (const f of t.fields) {
+          const fNodeId = `field:${t.name}.${f.name}`;
+          this.emitLeadingTrivia(fNodeId);
           const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
           this.ctx.writeLine(`${f.name}: ${this.emitTypeExpr(f.typeAnnotation)}${defStr}`);
+          this.ctx.emitTrailingTrivia(fNodeId);
         }
       }
       this.ctx.dedent();
+      this.ctx.emitTrailingTrivia(nodeId);
     }
   }
 
   private emitFunctionDecl(fn: FunctionDecl): void {
+    const fnNodeId = `fn:${fn.name}`;
+    this.emitLeadingTrivia(fnNodeId);
+
     this.varTypes.clear();
     for (const p of fn.params) {
       if (p.typeAnnotation && p.typeAnnotation.kind === "NamedType") {
@@ -387,6 +598,7 @@ export class PythonEmitter {
 
     this.ctx.writeLine(`${as}def ${fn.name}(${paramsStr})${retStr}:`);
     this.ctx.indent();
+    this.emitDocstring(fnNodeId);
 
     for (const un of unpackStatements) {
       this.ctx.writeLine(un);
@@ -400,6 +612,7 @@ export class PythonEmitter {
     }
 
     this.ctx.dedent();
+    this.ctx.emitTrailingTrivia(fnNodeId);
   }
 
   private isReturningFunction(fn: FunctionDecl): boolean {
@@ -1001,11 +1214,17 @@ export class PythonEmitter {
         return this.emitTypeExpr(t.baseType);
 
       case "NamedType": {
+        let baseName = t.name;
+        if (baseName === "Map" || baseName === "dict" || baseName === "Dict") baseName = "dict";
+        if (baseName === "List" || baseName === "list") baseName = "list";
+        if (baseName === "Set" || baseName === "set") baseName = "set";
+        if (baseName === "Tuple" || baseName === "tuple") baseName = "tuple";
+        if (baseName === "any") return "Any";
         if (t.typeArgs && t.typeArgs.length > 0) {
           const args = t.typeArgs.map((a) => this.emitTypeExpr(a)).join(", ");
-          return `${t.name}[${args}]`;
+          return `${baseName}[${args}]`;
         }
-        return t.name;
+        return baseName;
       }
     }
   }
