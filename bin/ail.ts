@@ -45,6 +45,8 @@ import {
 } from "../src/tokenomics/index.js";
 import {
   type ContextOptions,
+  type DiffOptions,
+  diffFiles,
   type FmtOptions,
   type FmtResult,
   formatAilPath,
@@ -53,6 +55,8 @@ import {
   generateUnifiedDiff,
   type OutlineOptions,
   outlinePath,
+  type PatchOptions,
+  patchFile,
   type SpliceOptions,
   splice,
 } from "../src/tools/index.js";
@@ -71,7 +75,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.3");
+  .version("0.5.4");
 
 // Command: compile <file>
 program
@@ -1579,6 +1583,152 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Error formatting ${targetPath ?? "<stdin>"}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: diff <oldPath> [newPath]
+program
+  .command("diff")
+  .description("Semantic AST structural diff and unified diff between files or git HEAD")
+  .argument("<oldPath>", "Path to target or baseline .ail source file")
+  .argument("[newPath]", "Path to new .ail source file (optional; defaults to git HEAD comparison)")
+  .option("--ast", "Output AST symbol differences only")
+  .option("--unified", "Output standard unified diff")
+  .option("--json", "Output JSON summary of changes")
+  .action(
+    async (
+      oldPath: string,
+      newPath: string | undefined,
+      options: {
+        ast?: boolean;
+        unified?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const diffOpts: DiffOptions = {
+          oldPath,
+          newPath,
+          ast: options.ast,
+          unified: options.unified,
+          json: options.json,
+        };
+
+        const result = await diffFiles(oldPath, newPath, diffOpts);
+
+        if (options.json) {
+          console.log(JSON.stringify(result.json ?? result, null, 2));
+        } else if (options.ast) {
+          if (result.semanticSummary) {
+            console.log(result.semanticSummary);
+          } else {
+            console.log("No semantic symbol changes detected.");
+          }
+        } else if (options.unified) {
+          if (result.unifiedDiff) {
+            console.log(result.unifiedDiff);
+          } else {
+            console.log("No differences detected.");
+          }
+        } else {
+          let hasOutput = false;
+          if (result.semanticSummary) {
+            console.log(result.semanticSummary);
+            hasOutput = true;
+          }
+          if (result.unifiedDiff) {
+            if (hasOutput) console.log("");
+            console.log(result.unifiedDiff);
+            hasOutput = true;
+          }
+          if (!hasOutput) {
+            console.log("No differences detected.");
+          }
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error diffing files: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: patch <path> [patchFile]
+program
+  .command("patch")
+  .description(
+    "Apply standard unified diffs or semantic AST symbol patches with zero corruption guarantee",
+  )
+  .argument("<path>", "Path to target .ail source file")
+  .argument("[patchFile]", "Path to patch file (reads from stdin if '-' or omitted)")
+  .option("--dry-run", "Preview patch without writing to disk")
+  .option("--reverse", "Reverse the patch (rollback)")
+  .option("--compile", "Automatically recompile target after patch")
+  .action(
+    async (
+      targetPath: string,
+      patchFileArg: string | undefined,
+      options: {
+        dryRun?: boolean;
+        reverse?: boolean;
+        compile?: boolean;
+      },
+    ) => {
+      try {
+        let patchText = "";
+        if (patchFileArg && patchFileArg !== "-") {
+          const resolvedPatchPath = path.resolve(process.cwd(), patchFileArg);
+          if (!fs.existsSync(resolvedPatchPath)) {
+            console.error(`❌ Error: Patch file not found: ${patchFileArg}`);
+            process.exit(1);
+          }
+          patchText = fs.readFileSync(resolvedPatchPath, "utf-8");
+        } else {
+          patchText = await readStdin();
+          if (!patchText || patchText.trim().length === 0) {
+            console.error("❌ Error: Patch file or stdin input required.");
+            process.exit(1);
+          }
+        }
+
+        const patchOpts: PatchOptions = {
+          dryRun: options.dryRun,
+          reverse: options.reverse,
+          compile: options.compile,
+        };
+
+        const result = await patchFile(targetPath, patchText, patchOpts);
+
+        if (!result.success) {
+          console.error(
+            `❌ Error applying patch to ${targetPath}: syntax corrupted or hunks rejected (${result.appliedHunks}/${result.totalHunks} hunks applied)`,
+          );
+          process.exit(1);
+        }
+
+        if (options.dryRun) {
+          console.log(
+            `[Dry Run] Successfully previewed patch for ${targetPath} (${result.appliedHunks}/${result.totalHunks} hunks applied)`,
+          );
+          if (result.diff) {
+            console.log(result.diff);
+          }
+        } else {
+          const mode = options.reverse ? "rolled back (reversed)" : "applied";
+          console.log(
+            `✔ Successfully ${mode} patch for ${targetPath} (${result.appliedHunks}/${result.totalHunks} hunks applied)`,
+          );
+          if (options.compile) {
+            console.log(`✔ Recompiled target for ${targetPath}`);
+          }
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error patching ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }

@@ -199,7 +199,7 @@ export function findSpliceTargetSymbol(ast: Module, symbol: string): TargetSymbo
 /**
  * Finds the recursive character end offset of a statement.
  */
-function getStatementEndOffset(stmt: Statement, source: string): number {
+export function getStatementEndOffset(stmt: Statement, source: string): number {
   if (stmt.kind === "IfStmt") {
     if (stmt.elseBranch) {
       if (stmt.elseBranch.statements && stmt.elseBranch.statements.length > 0) {
@@ -290,7 +290,7 @@ export type SpliceNode =
 /**
  * Finds the accurate character end offset of an AST node.
  */
-function getNodeEndOffset(node: SpliceNode, source: string): number {
+export function getNodeEndOffset(node: SpliceNode, source: string): number {
   const nodeKind = (node as { kind?: string }).kind;
 
   if (nodeKind === "FunctionDecl" || nodeKind === "MethodDecl") {
