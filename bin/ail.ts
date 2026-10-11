@@ -69,6 +69,12 @@ import {
   formatBenchmarkMarkdown,
   formatBenchmarkTerminal,
   runTokenomicsBenchmark,
+  type ComparativeOptions,
+  type ComparativeReport,
+  formatComparativeJson,
+  formatComparativeMarkdown,
+  formatComparativeTerminal,
+  runComparativeBenchmark,
 } from "../src/tools/index.js";
 import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
@@ -85,7 +91,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.12");
+  .version("0.5.13");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -888,6 +894,10 @@ program
     "Tiktoken tokenizer encoding: cl100k_base or o200k_base",
     "cl100k_base",
   )
+  .option(
+    "--compare <dir>",
+    "Compare baseline raw codebase directory against AIL workspace directory",
+  )
   .action(
     async (
       targetArgs: string[],
@@ -896,9 +906,27 @@ program
         markdown?: boolean;
         tools?: string;
         encoding?: "cl100k_base" | "o200k_base";
+        compare?: string;
       },
     ) => {
       try {
+        if (options.compare) {
+          const rawDir = targetArgs[0] ?? process.cwd();
+          const ailDir = options.compare;
+          const report = await runComparativeBenchmark(rawDir, ailDir, {
+            encoding: options.encoding,
+          });
+
+          if (options.json) {
+            console.log(formatComparativeJson(report));
+          } else if (options.markdown || !process.stdout.isTTY) {
+            console.log(formatComparativeMarkdown(report));
+          } else {
+            console.log(formatComparativeTerminal(report));
+          }
+          return;
+        }
+
         const report = await runTokenomicsBenchmark(
           targetArgs.length > 0 ? targetArgs : undefined,
           {
@@ -917,6 +945,52 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Benchmark error: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: compare <rawDir> <ailDir>
+program
+  .command("compare")
+  .description(
+    "Run side-by-side comparative benchmark between raw codebase and isolated AIL workspace",
+  )
+  .argument("<rawDir>", "Path to raw codebase directory (e.g. snake_nonail)")
+  .argument("<ailDir>", "Path to AIL workspace directory (e.g. snake_ail)")
+  .option("--json", "Output structured JSON report")
+  .option("--markdown", "Output formatted GitHub Flavored Markdown report")
+  .option(
+    "--encoding <enc>",
+    "Tiktoken tokenizer encoding: cl100k_base or o200k_base",
+    "cl100k_base",
+  )
+  .action(
+    async (
+      rawDir: string,
+      ailDir: string,
+      options: {
+        json?: boolean;
+        markdown?: boolean;
+        encoding?: "cl100k_base" | "o200k_base";
+      },
+    ) => {
+      try {
+        const report = await runComparativeBenchmark(rawDir, ailDir, {
+          encoding: options.encoding,
+        });
+
+        if (options.json) {
+          console.log(formatComparativeJson(report));
+        } else if (options.markdown || !process.stdout.isTTY) {
+          console.log(formatComparativeMarkdown(report));
+        } else {
+          console.log(formatComparativeTerminal(report));
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Comparative benchmark error: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }

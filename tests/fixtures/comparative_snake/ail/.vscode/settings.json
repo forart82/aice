@@ -1,0 +1,72 @@
+{
+  "files.exclude": {
+    "**/*.ts": {
+      "when": "$(basename).ts.ail"
+    },
+    "**/*.tsx": {
+      "when": "$(basename).tsx.ail"
+    },
+    "**/*.css": {
+      "when": "$(basename).css.ail"
+    },
+    "**/*.html": {
+      "when": "$(basename).html.ail"
+    },
+    "**/*.py": {
+      "when": "$(basename).py.ail"
+    },
+    "**/*.cpp": {
+      "when": "$(basename).cpp.ail"
+    },
+    "**/*.hpp": {
+      "when": "$(basename).hpp.ail"
+    },
+    "**/*.cc": {
+      "when": "$(basename).cc.ail"
+    },
+    "**/*.cxx": {
+      "when": "$(basename).cxx.ail"
+    },
+    "**/*.h": {
+      "when": "$(basename).h.ail"
+    },
+    "**/*.cs": {
+      "when": "$(basename).cs.ail"
+    }
+  },
+  "search.exclude": {
+    "**/*.ts": {
+      "when": "$(basename).ts.ail"
+    },
+    "**/*.tsx": {
+      "when": "$(basename).tsx.ail"
+    },
+    "**/*.css": {
+      "when": "$(basename).css.ail"
+    },
+    "**/*.html": {
+      "when": "$(basename).html.ail"
+    },
+    "**/*.py": {
+      "when": "$(basename).py.ail"
+    },
+    "**/*.cpp": {
+      "when": "$(basename).cpp.ail"
+    },
+    "**/*.hpp": {
+      "when": "$(basename).hpp.ail"
+    },
+    "**/*.cc": {
+      "when": "$(basename).cc.ail"
+    },
+    "**/*.cxx": {
+      "when": "$(basename).cxx.ail"
+    },
+    "**/*.h": {
+      "when": "$(basename).h.ail"
+    },
+    "**/*.cs": {
+      "when": "$(basename).cs.ail"
+    }
+  }
+}

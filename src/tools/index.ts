@@ -12,4 +12,5 @@ export * from "./outline.js";
 export * from "./parity-gate.js";
 export * from "./splice.js";
 export * from "./benchmark-suite.js";
+export * from "./comparative-benchmark.js";
 
