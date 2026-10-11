@@ -45,7 +45,12 @@ import {
 } from "../src/tokenomics/index.js";
 import {
   type ContextOptions,
+  type FmtOptions,
+  type FmtResult,
+  formatAilPath,
+  formatAilSource,
   generateContext,
+  generateUnifiedDiff,
   type OutlineOptions,
   outlinePath,
   type SpliceOptions,
@@ -66,7 +71,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.2");
+  .version("0.5.3");
 
 // Command: compile <file>
 program
@@ -1478,6 +1483,102 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Error packaging context for ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: fmt [path]
+program
+  .command("fmt")
+  .description("Deterministic zero-token canonical formatting pre-pass for AIL source code")
+  .argument("[path]", "Path to .ail file or directory to format")
+  .option(
+    "--check",
+    "Verify formatting without writing to disk; exit 1 if any unformatted file found",
+  )
+  .option("--diff", "Print unified diff of formatting changes")
+  .option("--write", "Write formatted output to file (default: true)", true)
+  .option("--no-write", "Do not write formatted output to file")
+  .option("--stdin", "Read code from stdin and write formatted code to stdout")
+  .option(
+    "--indent <number>",
+    "Indentation space count (default: 2)",
+    (val) => Number.parseInt(val, 10),
+  )
+  .action(
+    async (
+      targetPath: string | undefined,
+      options: {
+        check?: boolean;
+        diff?: boolean;
+        write?: boolean;
+        stdin?: boolean;
+        indent?: number;
+      },
+    ) => {
+      try {
+        if (options.stdin) {
+          const stdinSource = fs.readFileSync(0, "utf-8");
+          const formatted = formatAilSource(stdinSource, {
+            indent: options.indent,
+          });
+
+          if (options.diff) {
+            const diff = generateUnifiedDiff("<stdin>", stdinSource, formatted);
+            if (diff) {
+              process.stdout.write(diff + "\n");
+            }
+          }
+
+          if (options.check) {
+            if (stdinSource !== formatted) {
+              process.exit(1);
+            }
+          } else if (!options.diff) {
+            process.stdout.write(formatted);
+          }
+          return;
+        }
+
+        if (!targetPath) {
+          console.error("❌ Error: Path argument is required when not using --stdin");
+          process.exit(1);
+        }
+
+        const fmtOptions: FmtOptions = {
+          check: !!options.check,
+          diff: !!options.diff,
+          write: options.write !== false && !options.check,
+          indent: options.indent,
+        };
+
+        const resultOrResults = await formatAilPath(targetPath, fmtOptions);
+        const results = Array.isArray(resultOrResults) ? resultOrResults : [resultOrResults];
+
+        let hasUnformatted = false;
+
+        for (const res of results) {
+          if (!res.isFormatted) {
+            hasUnformatted = true;
+            if (options.diff && res.diff) {
+              process.stdout.write(res.diff + "\n");
+            }
+            if (options.check) {
+              console.error(`❌ Needs formatting: ${res.filePath}`);
+            } else if (fmtOptions.write) {
+              console.log(`Formatted ${res.filePath}`);
+            }
+          }
+        }
+
+        if (options.check && hasUnformatted) {
+          process.exit(1);
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error formatting ${targetPath ?? "<stdin>"}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
