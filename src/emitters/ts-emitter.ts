@@ -438,6 +438,9 @@ export class TypeScriptEmitter {
     }
     switch (item.kind) {
       case "TypeDecl":
+        if (this.ctx.target === "javascript") {
+          break;
+        }
         this.emitTypeDecl(item);
         break;
       case "FunctionDecl":
@@ -596,11 +599,12 @@ export class TypeScriptEmitter {
     }
     this.ctx.emitLeadingTrivia(nodeId);
 
+    const isJs = this.ctx.target === "javascript";
     const exp = c.isExported ? "export " : "";
-    const typeParams = c.typeParams.length > 0 ? `<${c.typeParams.join(", ")}>` : "";
+    const typeParams = !isJs && c.typeParams.length > 0 ? `<${c.typeParams.join(", ")}>` : "";
     const ext = c.extends ? ` extends ${c.extends}` : "";
     const impl =
-      c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
+      !isJs && c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
 
     this.ctx.writeLine(`${exp}class ${c.name}${typeParams}${ext}${impl} {`);
     this.ctx.indent();
@@ -610,11 +614,12 @@ export class TypeScriptEmitter {
       if (!hasCtor) {
         const ctorParams = c.primaryConstructor
           .map((p) => {
-            const ro = p.isReadonly ? "readonly " : "";
-            const pub = p.isPub !== false ? "public " : "";
-            const optMark = p.isOptional && !p.defaultValue ? "?" : "";
+            const ro = !isJs && p.isReadonly ? "readonly " : "";
+            const pub = !isJs && p.isPub !== false ? "public " : "";
+            const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
+            const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-            return `${pub}${ro}${p.name}${optMark}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+            return `${pub}${ro}${p.name}${optMark}${typeAnn}${def}`;
           })
           .join(", ");
         this.ctx.writeLine(`constructor(${ctorParams}) {}`);
@@ -625,12 +630,12 @@ export class TypeScriptEmitter {
       const pNodeId = `field:${c.name}.${p.name}`;
       this.ctx.emitLeadingTrivia(pNodeId);
       const st = p.isStatic ? "static " : "";
-      const ro = p.isReadonly ? "readonly " : "";
-      const opt = p.isOptional ? "?" : "";
+      const ro = !isJs && p.isReadonly ? "readonly " : "";
+      const opt = !isJs && p.isOptional ? "?" : "";
       const hasAliases = !!p.alias || (p.aliases !== undefined && p.aliases.length > 0);
       const defAssign =
-        !p.initialValue && !p.isOptional && !p.isStatic && p.typeAnnotation && !hasAliases ? "!" : "";
-      const typeAnn = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+        !isJs && !p.initialValue && !p.isOptional && !p.isStatic && p.typeAnnotation && !hasAliases ? "!" : "";
+      const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
       const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
       this.ctx.writeLine(`${st}${ro}${p.name}${opt}${defAssign}${typeAnn}${init};`);
       this.ctx.emitTrailingTrivia(pNodeId);
@@ -649,7 +654,8 @@ export class TypeScriptEmitter {
           this.ctx.writeLine(`${st}get ${alias}() { return ${target}; }`);
         }
         if (!p.isReadonly && !hasExplicitSetter) {
-          this.ctx.writeLine(`${st}set ${alias}(v: ${typeStr}) { ${target} = v; }`);
+          const setterType = isJs ? "" : `: ${typeStr}`;
+          this.ctx.writeLine(`${st}set ${alias}(v${setterType}) { ${target} = v; }`);
         }
       }
     }
@@ -661,12 +667,13 @@ export class TypeScriptEmitter {
       const as = m.isAsync ? "async " : "";
       const params = m.params
         .map((p) => {
-          const optMark = p.isOptional && !p.defaultValue ? "?" : "";
+          const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
+          const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
           const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-          return `${p.name}${optMark}: ${this.emitTypeExpr(p.typeAnnotation)}${def}`;
+          return `${p.name}${optMark}${typeAnn}${def}`;
         })
         .join(", ");
-      const ret = m.returnType ? `: ${this.emitTypeExpr(m.returnType)}` : "";
+      const ret = !isJs && m.returnType ? `: ${this.emitTypeExpr(m.returnType)}` : "";
 
       if (m.accessor === "get") {
         this.ctx.writeLine(`${st}get ${m.name}()${ret} {`);
@@ -745,8 +752,9 @@ export class TypeScriptEmitter {
       this.ctx.emitTrailingTrivia(nodeId);
       return;
     }
+    const isJs = this.ctx.target === "javascript";
     const exp = c.isExported ? "export " : "";
-    const typeAnn = c.typeAnnotation ? `: ${this.emitTypeExpr(c.typeAnnotation)}` : "";
+    const typeAnn = !isJs && c.typeAnnotation ? `: ${this.emitTypeExpr(c.typeAnnotation)}` : "";
     this.ctx.writeLine(`${exp}const ${c.name}${typeAnn} = ${this.emitExpr(c.value)};`);
     this.ctx.emitTrailingTrivia(nodeId);
   }
@@ -764,9 +772,10 @@ export class TypeScriptEmitter {
       this.ctx.emitTrailingTrivia(nodeId);
       return;
     }
+    const isJs = this.ctx.target === "javascript";
     const exp = v.isExported ? "export " : "";
     const kw = v.isMut ? "let" : "const";
-    const typeAnn = v.typeAnnotation ? `: ${this.emitTypeExpr(v.typeAnnotation)}` : "";
+    const typeAnn = !isJs && v.typeAnnotation ? `: ${this.emitTypeExpr(v.typeAnnotation)}` : "";
     this.ctx.writeLine(`${exp}${kw} ${v.name}${typeAnn} = ${this.emitExpr(v.value)};`);
     this.ctx.emitTrailingTrivia(nodeId);
   }
@@ -824,17 +833,17 @@ export class TypeScriptEmitter {
     const isExported = fn.name !== "__top_level__";
     const exportPrefix = isExported ? "export " : "";
     const asyncPrefix = fn.isAsync ? "async " : "";
-
+    const isJs = this.ctx.target === "javascript";
     const paramsStr = fn.params
       .map((p) => {
-        const optMark = p.isOptional && !p.defaultValue ? "?" : "";
-        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+        const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
+        const typeStr = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
         const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
         return `${p.name}${optMark}${typeStr}${defStr}`;
       })
       .join(", ");
 
-    const retStr = fn.returnType ? `: ${this.emitTypeExpr(fn.returnType)}` : "";
+    const retStr = !isJs && fn.returnType ? `: ${this.emitTypeExpr(fn.returnType)}` : "";
 
     if (fn.isExpressionBodied) {
       this.ctx.writeLine(
@@ -958,7 +967,7 @@ export class TypeScriptEmitter {
         const isInitUndefined =
           stmt.init.kind === "IdentifierExpr" && stmt.init.name === "undefined";
         let typeAnnotation = "";
-        if (stmt.typeAnnotation) {
+        if (stmt.typeAnnotation && this.ctx.target !== "javascript") {
           if (isInitUndefined && stmt.typeAnnotation.kind === "OptionType") {
             typeAnnotation = `: ${this.emitTypeExpr(stmt.typeAnnotation.innerType)} | undefined`;
           } else {
@@ -1429,6 +1438,9 @@ export class TypeScriptEmitter {
       case "PostfixTryExpr": {
         // Desugar expr? into an unwrapped expression
         const operand = this.emitExpr(expr.operand);
+        if (this.ctx.target === "javascript") {
+          return operand;
+        }
         return `(${operand} as any).value`;
       }
 
@@ -1444,15 +1456,16 @@ export class TypeScriptEmitter {
           }
         }
         this.localScopeVars.push(closureScope);
+        const isJs = this.ctx.target === "javascript";
         const paramsStr = expr.params
           .map((p) => {
-            const optMark = p.isOptional && !p.defaultValue ? "?" : "";
-            const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+            const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
+            const typeStr = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
             return `${p.name}${optMark}${typeStr}${defStr}`;
           })
           .join(", ");
-        const retStr = expr.returnType ? `: ${this.emitTypeExpr(expr.returnType)}` : "";
+        const retStr = !isJs && expr.returnType ? `: ${this.emitTypeExpr(expr.returnType)}` : "";
         let result: string;
         if (expr.body.kind === "Block") {
           if (expr.body.statements.length === 0) {
@@ -1656,7 +1669,8 @@ export class TypeScriptEmitter {
       this.ctx.writeLine(`${JSON.stringify(prop)}: ${JSON.stringify(p.value)},`);
     }
     this.ctx.dedent();
-    this.ctx.writeLine("} as const;");
+    const asConst = this.ctx.target === "javascript" ? "" : " as const";
+    this.ctx.writeLine(`}${asConst};`);
   }
 
   private sanitizeModulePath(p: string): string {

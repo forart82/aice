@@ -45,6 +45,8 @@ export interface ShieldStatus {
 export const DEFAULT_EXTENSIONS: string[] = [
   ".ts",
   ".tsx",
+  ".js",
+  ".mjs",
   ".css",
   ".html",
   ".py",

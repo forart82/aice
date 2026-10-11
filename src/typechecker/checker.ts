@@ -274,6 +274,7 @@ export class TypeChecker {
       "fetch",
       "btoa",
       "atob",
+      "super",
       "TextEncoder",
       "TextDecoder",
     ];
@@ -1338,19 +1339,27 @@ export class TypeChecker {
 
         // Record inferred return type on the innermost enclosing function/closure env
         if (fnEnv) {
+          const isBoolType = (t: Type) => t.kind === "bool" || (t.kind === "named" && (t.name === "true" || t.name === "false"));
+          const normActual = isBoolType(actual) ? TYPE_BOOL : actual;
+
           if (!fnEnv.inferredReturnType || fnEnv.inferredReturnType.kind === "void") {
-            fnEnv.inferredReturnType = actual;
-          } else if (
-            fnEnv.currentFunctionReturnType?.kind === "unknown" &&
-            !isAssignable(fnEnv.inferredReturnType, actual)
-          ) {
-            throw new TypeCheckError(
-              `Return expression of type '${formatType(actual)}' does not match previously inferred return type '${formatType(fnEnv.inferredReturnType)}'`,
-              stmt.span,
-              "AIL_E2007_RETURN_TYPE_MISMATCH",
-              fnEnv.inferredReturnType,
-              actual,
-            );
+            fnEnv.inferredReturnType = normActual;
+          } else {
+            const normInferred = isBoolType(fnEnv.inferredReturnType) ? TYPE_BOOL : fnEnv.inferredReturnType;
+            if (normInferred.kind === "bool" && normActual.kind === "bool") {
+              fnEnv.inferredReturnType = TYPE_BOOL;
+            } else if (
+              fnEnv.currentFunctionReturnType?.kind === "unknown" &&
+              !isAssignable(normInferred, normActual)
+            ) {
+              throw new TypeCheckError(
+                `Return expression of type '${formatType(actual)}' does not match previously inferred return type '${formatType(fnEnv.inferredReturnType)}'`,
+                stmt.span,
+                "AIL_E2007_RETURN_TYPE_MISMATCH",
+                fnEnv.inferredReturnType,
+                actual,
+              );
+            }
           }
         }
 
@@ -1996,7 +2005,13 @@ export class TypeChecker {
           return TYPE_UNKNOWN;
         }
 
-        if (objType.kind === "tuple") {
+        const targetObj = objType.kind === "option" ? objType.innerType : objType;
+
+        if (targetObj.kind === "unknown") {
+          return TYPE_UNKNOWN;
+        }
+
+        if (targetObj.kind === "tuple") {
           if (!isAssignable(TYPE_INT, idxType) && idxType.kind !== "unknown") {
             throw new TypeCheckError(
               `Tuple index must be of type 'int', got '${formatType(idxType)}'`,
@@ -2008,19 +2023,19 @@ export class TypeChecker {
           }
           if (expr.index.kind === "LiteralExpr" && typeof expr.index.value === "number") {
             const idx = expr.index.value;
-            if (idx < 0 || idx >= objType.elementTypes.length) {
+            if (idx < 0 || idx >= targetObj.elementTypes.length) {
               throw new TypeCheckError(
-                `Tuple index ${idx} out of bounds for tuple type '${formatType(objType)}'`,
+                `Tuple index ${idx} out of bounds for tuple type '${formatType(targetObj)}'`,
                 expr.index.span,
                 "AIL_E2002_TYPE_MISMATCH",
               );
             }
-            return objType.elementTypes[idx];
+            return targetObj.elementTypes[idx];
           }
           return TYPE_UNKNOWN;
         }
 
-        if (objType.kind === "array") {
+        if (targetObj.kind === "array") {
           if (!isAssignable(TYPE_INT, idxType) && idxType.kind !== "unknown") {
             throw new TypeCheckError(
               `Array index must be of type 'int', got '${formatType(idxType)}'`,
@@ -2030,7 +2045,7 @@ export class TypeChecker {
               idxType,
             );
           }
-          return objType.elementType;
+          return targetObj.elementType;
         }
 
         throw new TypeCheckError(
@@ -2874,6 +2889,10 @@ export class TypeChecker {
 }
 
 function isNumeric(type: Type): boolean {
+  if (!type) return false;
+  if (type.kind === "option") {
+    return isNumeric(type.innerType);
+  }
   if (
     type.kind === "int" ||
     type.kind === "float" ||

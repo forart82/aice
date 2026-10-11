@@ -315,8 +315,11 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
     options?.extensions ?? [
       ".ts",
       ".tsx",
+      ".js",
+      ".mjs",
       ".css",
       ".html",
+      ".py",
       ".cpp",
       ".hpp",
       ".cc",
@@ -325,7 +328,7 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
       ".cs",
     ]
   ).map((ext) => (ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
-  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build"];
+  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build", ".agents"];
   if (options?.outDir) {
     const cleanOut = options.outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
     if (!defaultIgnores.includes(cleanOut)) {

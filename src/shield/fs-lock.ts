@@ -38,6 +38,8 @@ export interface LockSummary {
 export const DEFAULT_LOCK_EXTENSIONS: string[] = [
   ".ts",
   ".tsx",
+  ".js",
+  ".mjs",
   ".css",
   ".html",
   ".py",
@@ -49,7 +51,7 @@ export const DEFAULT_LOCK_EXTENSIONS: string[] = [
   ".cs",
 ];
 
-export const DEFAULT_LOCK_IGNORE_PATTERNS: string[] = ["node_modules", ".git", "dist", "build"];
+export const DEFAULT_LOCK_IGNORE_PATTERNS: string[] = ["node_modules", ".git", "dist", "build", ".agents"];
 
 /**
  * Checks whether a file path has an existing .ail sibling in the same folder.

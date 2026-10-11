@@ -64,6 +64,7 @@ export function decompile(
 
   switch (target) {
     case "typescript":
+    case "javascript":
     case "tsx": {
       const decompiler = new TsDecompiler(source, filePath, {
         isTsx: target === "tsx" || options.isTsx,

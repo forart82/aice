@@ -6,6 +6,7 @@ import type { CstTriviaTable } from "../core/trivia.js";
 
 export type TargetLanguage =
   | "typescript"
+  | "javascript"
   | "tsx"
   | "python"
   | "html"
@@ -145,6 +146,7 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   const clean = filePath.replace(/\.ail$/, "");
   if (clean.endsWith(".tsx")) return "tsx";
   if (clean.endsWith(".ts")) return "typescript";
+  if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs")) return "javascript";
   if (clean.endsWith(".py")) return "python";
   if (clean.endsWith(".html")) return "html";
   if (clean.endsWith(".css")) return "css";

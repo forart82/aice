@@ -53,6 +53,7 @@ export function emitTarget(
   const chosenTarget = target ?? detectTargetFromPath(fileCandidate);
   switch (chosenTarget) {
     case "typescript":
+    case "javascript":
     case "tsx": {
       const emitter = new TypeScriptEmitter({ ...options, target: chosenTarget });
       return emitter.emit(mod);
