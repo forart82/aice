@@ -63,6 +63,12 @@ import {
   runParityGate,
   type SpliceOptions,
   splice,
+  type BenchmarkOptions,
+  type BenchmarkSuiteReport,
+  formatBenchmarkJson,
+  formatBenchmarkMarkdown,
+  formatBenchmarkTerminal,
+  runTokenomicsBenchmark,
 } from "../src/tools/index.js";
 import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
@@ -79,7 +85,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.11");
+  .version("0.5.12");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -738,8 +744,10 @@ program
   .option("--projects", "Aggregate output by project (1 line per project)")
   .option("--markdown", "Force standard markdown table output even in interactive terminal")
   .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
+  .option("--benchmark", "Run toolchain token reduction empirical benchmark suite")
+  .option("--tools <list>", "Filter specific tools to benchmark (e.g. outline,splice,dsl)")
   .action(
-    (
+    async (
       targetPath: string,
       options: {
         minSavings?: number;
@@ -747,6 +755,8 @@ program
         projects?: boolean;
         markdown?: boolean;
         json?: boolean;
+        benchmark?: boolean;
+        tools?: string;
       },
     ) => {
       try {
@@ -754,6 +764,27 @@ program
         if (!fs.existsSync(fullTarget)) {
           console.error(`❌ Error: File or directory not found: ${targetPath}`);
           process.exit(1);
+        }
+
+        if (options.benchmark) {
+          try {
+            const report = await runTokenomicsBenchmark([targetPath], {
+              tools: options.tools,
+            });
+            if (options.json) {
+              console.log(formatBenchmarkJson(report));
+            } else if (options.markdown || !process.stdout.isTTY) {
+              console.log(formatBenchmarkMarkdown(report));
+            } else {
+              console.log(formatBenchmarkTerminal(report));
+            }
+            return;
+          } catch (benchErr: unknown) {
+            console.error(
+              `❌ Benchmark error: ${benchErr instanceof Error ? benchErr.message : String(benchErr)}`,
+            );
+            process.exit(1);
+          }
         }
         const isFile = fs.statSync(fullTarget).isFile();
         const isTTY = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
@@ -835,6 +866,58 @@ program
         }
       } catch (err) {
         console.error("❌ Tokenomics verification error:", err);
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: benchmark [target...]
+// Aliases: bench
+program
+  .command("benchmark")
+  .aliases(["bench"])
+  .description(
+    "Run empirical token reduction benchmark suite across AIL 2.0 tools (outline, splice, context, fmt, intermediate_dsl)",
+  )
+  .argument("[target...]", "Path(s) to files or directories to benchmark", [])
+  .option("--json", "Output structured JSON report")
+  .option("--markdown", "Output formatted GitHub Flavored Markdown report")
+  .option("--tools <list>", "Filter specific tools to benchmark (e.g. outline,splice,dsl)")
+  .option(
+    "--encoding <enc>",
+    "Tiktoken tokenizer encoding: cl100k_base or o200k_base",
+    "cl100k_base",
+  )
+  .action(
+    async (
+      targetArgs: string[],
+      options: {
+        json?: boolean;
+        markdown?: boolean;
+        tools?: string;
+        encoding?: "cl100k_base" | "o200k_base";
+      },
+    ) => {
+      try {
+        const report = await runTokenomicsBenchmark(
+          targetArgs.length > 0 ? targetArgs : undefined,
+          {
+            tools: options.tools,
+            encoding: options.encoding,
+          },
+        );
+
+        if (options.json) {
+          console.log(formatBenchmarkJson(report));
+        } else if (options.markdown || !process.stdout.isTTY) {
+          console.log(formatBenchmarkMarkdown(report));
+        } else {
+          console.log(formatBenchmarkTerminal(report));
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Benchmark error: ${err instanceof Error ? err.message : String(err)}`,
+        );
         process.exit(1);
       }
     },
