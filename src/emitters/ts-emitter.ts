@@ -1471,25 +1471,18 @@ export class TypeScriptEmitter {
           const args = t.typeArgs.map((ta) => this.emitTypeExpr(ta)).join(", ");
           return `${t.name}<${args}>`;
         }
-        if (t.name.includes("|")) {
-          return t.name
-            .split("|")
-            .map((part) => {
-              const trimmed = part.trim();
-              if (
-                trimmed === "int" ||
-                trimmed === "float" ||
-                trimmed === "num" ||
-                trimmed === "byte"
-              ) {
-                return "number";
-              }
-              if (trimmed === "str" || trimmed === "char") return "string";
-              if (trimmed === "bool") return "boolean";
-              if (trimmed === "nil") return "null";
-              return trimmed;
-            })
-            .join(" | ");
+        let name = t.name;
+        if (name.includes("{") || name.includes("|")) {
+          name = name
+            .replace(/\bint\b/g, "number")
+            .replace(/\bfloat\b/g, "number")
+            .replace(/\bnum\b/g, "number")
+            .replace(/\bbyte\b/g, "number")
+            .replace(/\bstr\b/g, "string")
+            .replace(/\bchar\b/g, "string")
+            .replace(/\bbool\b/g, "boolean")
+            .replace(/\bnil\b/g, "null");
+          return name;
         }
         if (t.name === "int" || t.name === "float" || t.name === "num" || t.name === "byte") {
           return "number";
