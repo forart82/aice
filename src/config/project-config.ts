@@ -49,7 +49,7 @@ export const DEFAULT_PROJECT_CONFIG: Readonly<AilProjectConfig> = Object.freeze(
   watermark: true,
 });
 
-const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
+export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
   ".py",
@@ -320,6 +320,41 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
   }
 
   return "side-by-side";
+}
+
+/**
+ * Searches upward from `startDir` to locate a project root containing
+ * `ail.config.json`, `.ailrc`, `.ail-build`, or `package.json`.
+ * If none is found, falls back to `fallbackDir` (or `startDir`).
+ */
+export function findProjectRoot(startDir: string, fallbackDir?: string): string {
+  let cur = path.resolve(startDir);
+  try {
+    if (fs.existsSync(cur) && !fs.statSync(cur).isDirectory()) {
+      cur = path.dirname(cur);
+    }
+  } catch {
+    cur = path.dirname(cur);
+  }
+
+  const initialDir = cur;
+  while (true) {
+    if (
+      fs.existsSync(path.join(cur, "ail.config.json")) ||
+      fs.existsSync(path.join(cur, ".ailrc")) ||
+      fs.existsSync(path.join(cur, ".ail-build")) ||
+      fs.existsSync(path.join(cur, "package.json"))
+    ) {
+      return cur;
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) {
+      break;
+    }
+    cur = parent;
+  }
+
+  return fallbackDir ? path.resolve(fallbackDir) : initialDir;
 }
 
 /**
@@ -594,7 +629,12 @@ export function resolveTargetOutputPathForConfig(
     let relPathFromSourceDir: string;
     let baseOutDir: string;
 
-    if (absSourceDir && sourcePath.startsWith(absSourceDir)) {
+    if (
+      absSourceDir &&
+      (sourcePath === absSourceDir ||
+        sourcePath.startsWith(absSourceDir + path.sep) ||
+        sourcePath.startsWith(absSourceDir + "/"))
+    ) {
       relPathFromSourceDir = path.relative(absSourceDir, sourcePath);
       baseOutDir =
         config.outDir && path.isAbsolute(config.outDir)
@@ -602,7 +642,12 @@ export function resolveTargetOutputPathForConfig(
           : root
             ? path.resolve(root, config.outDir)
             : path.resolve(absSourceDir, "..", config.outDir);
-    } else if (root && sourcePath.startsWith(root)) {
+    } else if (
+      root &&
+      (sourcePath === root ||
+        sourcePath.startsWith(root + path.sep) ||
+        sourcePath.startsWith(root + "/"))
+    ) {
       const relToRoot = path.relative(root, sourcePath);
       relPathFromSourceDir = stripSourceDirPrefix(relToRoot, config.sourceDir);
       baseOutDir =

@@ -9,6 +9,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
+import {
+  findProjectRoot,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+  resolveTargetOutputPathForConfig,
+} from "../src/config/index.js";
 import { parse, parseWithTrivia } from "../src/core/parser.js";
 import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
 import {
@@ -51,7 +57,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.13");
+  .version("0.4.14");
 
 // Command: compile <file>
 program
@@ -87,6 +93,9 @@ program
           process.exit(1);
         }
 
+        const projectRoot = findProjectRoot(path.dirname(fullPath), process.cwd());
+        const config = loadProjectConfig(projectRoot);
+
         let source = fs.readFileSync(fullPath, "utf-8");
 
         if (options.fix) {
@@ -110,17 +119,37 @@ program
         tc.checkModule(mod);
 
         // Target selection
-        const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+        let targetLang: TargetLanguage;
+        if (options.target) {
+          targetLang = options.target as TargetLanguage;
+        } else {
+          const detected = detectTargetFromPath(file);
+          const base = path.basename(file);
+          const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+          const innerExt = path.extname(withoutAil).toLowerCase();
+          if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+            targetLang = detected;
+          } else {
+            targetLang = config.targetLanguage ?? detected;
+          }
+        }
+
+        const watermark = options.watermark !== false ? config.watermark : false;
+
         const emitted = emitTarget(mod, targetLang, {
           trivia,
           pureInterfaces: options.pureInterfaces,
-          watermark: options.watermark,
+          watermark,
         });
 
-        // Output path
-        const outPath = options.out
-          ? path.resolve(process.cwd(), options.out)
-          : path.resolve(process.cwd(), getTargetOutputPath(file));
+        // Output path: CLI flag --out retains highest priority
+        let outPath: string;
+        if (options.out) {
+          outPath = path.resolve(process.cwd(), options.out);
+        } else {
+          const resolved = resolveTargetOutputPathForConfig(file, config, projectRoot);
+          outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
+        }
 
         safeWriteTargetFile(outPath, emitted);
 
@@ -156,13 +185,21 @@ program
           process.exit(1);
         }
 
+        const projectRoot = findProjectRoot(searchDir, process.cwd());
+        const config = loadProjectConfig(projectRoot);
+
         function findAilFiles(curDir: string): string[] {
           const entries = fs.readdirSync(curDir, { withFileTypes: true });
           const results: string[] = [];
           for (const entry of entries) {
             const res = path.resolve(curDir, entry.name);
             if (entry.isDirectory()) {
-              if (entry.name !== "node_modules" && entry.name !== ".git") {
+              if (
+                entry.name !== "node_modules" &&
+                entry.name !== ".git" &&
+                entry.name !== ".ail-build" &&
+                entry.name !== config.outDir
+              ) {
                 results.push(...findAilFiles(res));
               }
             } else if (entry.isFile() && entry.name.endsWith(".ail")) {
@@ -189,42 +226,64 @@ program
             const tc = new TypeChecker();
             tc.checkModule(mod);
 
-            const targetLang = detectTargetFromPath(relPath);
+            let targetLang: TargetLanguage;
+            const base = path.basename(f);
+            const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+            const innerExt = path.extname(withoutAil).toLowerCase();
+            if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+              targetLang = detectTargetFromPath(relPath);
+            } else {
+              targetLang = config.targetLanguage ?? detectTargetFromPath(relPath);
+            }
+
+            const watermark = options.watermark !== false ? config.watermark : false;
+
             const emitted = emitTarget(mod, targetLang, {
               trivia,
               pureInterfaces: options.pureInterfaces,
-              watermark: options.watermark,
+              watermark,
             });
 
-          let outPath = getTargetOutputPath(f);
-          if (options.outDir) {
-            const relFromSearch = path.relative(searchDir, outPath);
-            outPath = path.resolve(process.cwd(), options.outDir, relFromSearch);
+            // Output path: CLI flag --out-dir retains highest priority
+            let outPath: string;
+            if (options.outDir) {
+              const effectiveConfig: AilProjectConfig = {
+                ...config,
+                outDir: options.outDir,
+                mode: "isolated",
+                isolated: true,
+              };
+              const resolved = resolveTargetOutputPathForConfig(f, effectiveConfig, projectRoot);
+              outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
+            } else {
+              const resolved = resolveTargetOutputPathForConfig(f, config, projectRoot);
+              outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
+            }
+
+            safeWriteTargetFile(outPath, emitted);
+            console.log(
+              `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+            );
+            successCount++;
+          } catch (err) {
+            console.error(`\n❌ Failed to compile ${relPath}:`);
+            const source = fs.readFileSync(f, "utf-8");
+            const report = buildReportFromError(err, source, relPath);
+            console.error(formatDiagnosticText(report));
+            failCount++;
           }
-
-          safeWriteTargetFile(outPath, emitted);
-          console.log(
-            `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
-          );
-          successCount++;
-        } catch (err) {
-          console.error(`\n❌ Failed to compile ${relPath}:`);
-          const source = fs.readFileSync(f, "utf-8");
-          const report = buildReportFromError(err, source, relPath);
-          console.error(formatDiagnosticText(report));
-          failCount++;
         }
-      }
 
-      console.log(`\nFinished: ${successCount} compiled successfully, ${failCount} failed.`);
-      if (failCount > 0) {
+        console.log(`\nFinished: ${successCount} compiled successfully, ${failCount} failed.`);
+        if (failCount > 0) {
+          process.exit(1);
+        }
+      } catch (err) {
+        console.error(err);
         process.exit(1);
       }
-    } catch (err) {
-      console.error(err);
-      process.exit(1);
-    }
-  });
+    },
+  );
 
 // Command: clean [dir]
 program
@@ -239,12 +298,21 @@ program
         process.exit(1);
       }
 
+      const projectRoot = findProjectRoot(searchDir, process.cwd());
+      const config = loadProjectConfig(projectRoot);
+
       function findAilFiles(current: string): string[] {
         let results: string[] = [];
         const entries = fs.readdirSync(current, { withFileTypes: true });
         for (const entry of entries) {
           const full = path.join(current, entry.name);
-          if (entry.isDirectory() && entry.name !== "node_modules" && !entry.name.startsWith(".")) {
+          if (
+            entry.isDirectory() &&
+            entry.name !== "node_modules" &&
+            entry.name !== ".git" &&
+            entry.name !== ".ail-build" &&
+            entry.name !== config.outDir
+          ) {
             results = results.concat(findAilFiles(full));
           } else if (entry.isFile() && entry.name.endsWith(".ail")) {
             results.push(full);
@@ -257,11 +325,17 @@ program
       let removedCount = 0;
 
       for (const f of files) {
-        const outPath = getTargetOutputPath(f);
-        if (fs.existsSync(outPath)) {
-          fs.unlinkSync(outPath);
-          console.log(`✔ Removed ${path.relative(process.cwd(), outPath)}`);
-          removedCount++;
+        const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
+        const outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        const legacyOut = getTargetOutputPath(f);
+
+        const pathsToRemove = new Set([outPath, legacyOut]);
+        for (const p of pathsToRemove) {
+          if (fs.existsSync(p)) {
+            fs.unlinkSync(p);
+            console.log(`✔ Removed ${path.relative(process.cwd(), p)}`);
+            removedCount++;
+          }
         }
       }
 

@@ -10,14 +10,28 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  type AilProjectConfig,
+  findProjectRoot,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+  resolveTargetOutputPathForConfig,
+} from "../config/index.js";
 import { parse } from "../core/parser.js";
-import { detectTargetFromPath, emitTarget, getTargetOutputPath } from "../emitters/index.js";
+import {
+  detectTargetFromPath,
+  emitTarget,
+  getTargetOutputPath,
+  type TargetLanguage,
+} from "../emitters/index.js";
 import { isTargetLocked, lockFile, unlockFile, withUnlockedTarget } from "../shield/fs-lock.js";
 import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 
 export interface AilWatchOptions {
   dir: string;
+  config?: AilProjectConfig;
+  projectRoot?: string;
   debounceMs?: number; // default 50ms
   lockTargets?: boolean; // default true (relock to 0o444)
   recursive?: boolean; // default true
@@ -84,6 +98,8 @@ function shouldIgnore(name: string, relPath: string, ignorePatterns: string[]): 
 export class AilWatcher {
   private readonly options: AilWatchOptions;
   private readonly watchedDir: string;
+  public readonly projectRoot: string;
+  public readonly config: AilProjectConfig;
   private readonly debounceMs: number;
   private readonly lockTargets: boolean;
   private readonly recursive: boolean;
@@ -101,10 +117,16 @@ export class AilWatcher {
   constructor(options: AilWatchOptions) {
     this.options = { ...options };
     this.watchedDir = path.resolve(options.dir);
+    this.projectRoot = path.resolve(options.projectRoot ?? options.dir);
+    this.config = options.config ?? loadProjectConfig(this.projectRoot);
     this.debounceMs = options.debounceMs ?? 50;
     this.lockTargets = options.lockTargets ?? true;
     this.recursive = options.recursive ?? true;
-    this.ignorePatterns = options.ignorePatterns ?? ["node_modules", ".git", "dist", "build"];
+
+    const baseIgnores = options.ignorePatterns ?? ["node_modules", ".git", "dist", "build"];
+    const outDirName = this.config.outDir ? path.basename(this.config.outDir) : ".ail-build";
+    const outDirRel = this.config.outDir ?? ".ail-build";
+    this.ignorePatterns = Array.from(new Set([...baseIgnores, outDirName, outDirRel]));
   }
 
   isWatching(): boolean {
@@ -168,10 +190,11 @@ export class AilWatcher {
         }
 
         if (!fs.existsSync(fullPath)) {
-          let targetPath = getTargetOutputPath(fullPath);
-          if (!path.extname(targetPath)) {
-            targetPath = `${targetPath}.ts`;
-          }
+          const targetPath = resolveTargetOutputPathForConfig(
+            fullPath,
+            this.config,
+            this.projectRoot,
+          );
           this.options.onFileDeleted?.(fullPath, targetPath);
           return;
         }
@@ -246,10 +269,11 @@ export class AilWatcher {
     this.options.onCompileStart?.(resolvedAilPath);
     this._totalCompiles++;
 
-    let derivedTargetPath = getTargetOutputPath(resolvedAilPath);
-    if (!path.extname(derivedTargetPath)) {
-      derivedTargetPath = `${derivedTargetPath}.ts`;
-    }
+    const derivedTargetPath = resolveTargetOutputPathForConfig(
+      resolvedAilPath,
+      this.config,
+      this.projectRoot,
+    );
 
     try {
       const content = await fs.promises.readFile(resolvedAilPath, "utf-8");
@@ -257,8 +281,19 @@ export class AilWatcher {
       const checker = new TypeChecker();
       checker.checkModule(mod);
 
-      const targetLang = detectTargetFromPath(resolvedAilPath);
-      const emitted = emitTarget(mod, targetLang);
+      let targetLang: TargetLanguage;
+      const base = path.basename(resolvedAilPath);
+      const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+      const innerExt = path.extname(withoutAil).toLowerCase();
+      if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+        targetLang = detectTargetFromPath(resolvedAilPath);
+      } else {
+        targetLang = this.config.targetLanguage ?? detectTargetFromPath(resolvedAilPath);
+      }
+
+      const emitted = emitTarget(mod, targetLang, {
+        watermark: this.config.watermark,
+      });
       const targetPath = derivedTargetPath;
 
       const targetDir = path.dirname(targetPath);
@@ -329,10 +364,45 @@ export async function watchProject(
   dir: string,
   options?: Partial<AilWatchOptions>,
 ): Promise<AilWatcher> {
+  const resolvedDir = path.resolve(dir);
+  const projectRoot = options?.projectRoot ?? findProjectRoot(resolvedDir);
+  const config = options?.config ?? loadProjectConfig(projectRoot);
   const watcher = new AilWatcher({
     ...options,
-    dir,
+    dir: resolvedDir,
+    projectRoot,
+    config,
   });
   await watcher.start();
   return watcher;
+}
+
+export interface RecompileSingleFileOptions {
+  projectRoot?: string;
+  dir?: string;
+  config?: AilProjectConfig;
+  lockTargets?: boolean;
+  onCompileStart?: (ailFile: string) => void;
+  onCompileSuccess?: (ailFile: string, targetFile: string, durationMs: number) => void;
+  onCompileError?: (ailFile: string, error: Error) => void;
+}
+
+export async function recompileSingleFile(
+  ailPath: string,
+  options?: RecompileSingleFileOptions,
+): Promise<CompileFileResult> {
+  const resolvedAilPath = path.resolve(ailPath);
+  const projectRoot =
+    options?.projectRoot ?? options?.dir ?? findProjectRoot(path.dirname(resolvedAilPath));
+  const config = options?.config ?? loadProjectConfig(projectRoot);
+  const watcher = new AilWatcher({
+    dir: projectRoot,
+    projectRoot,
+    config,
+    lockTargets: options?.lockTargets ?? true,
+    onCompileStart: options?.onCompileStart,
+    onCompileSuccess: options?.onCompileSuccess,
+    onCompileError: options?.onCompileError,
+  });
+  return watcher.compileFile(resolvedAilPath);
 }
