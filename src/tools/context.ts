@@ -14,6 +14,7 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
+  resolvePathTargets,
 } from "../config/index.js";
 import type { ImportDecl, Module } from "../core/ast.js";
 import { parse } from "../core/parser.js";
@@ -490,13 +491,170 @@ function formatBundle(
 }
 
 /**
- * Packages dependency contracts, target file content, and downstream callers into a 1-turn context pack.
+ * Packages a workspace overview context pack covering project configuration,
+ * discovered files, module outlines, and dependencies.
  */
-export async function generateContext(
-  targetPath: string,
+export async function generateWorkspaceContext(
+  targetPath?: string,
   options: ContextOptions = {},
 ): Promise<ContextResult> {
+  const resolved = resolvePathTargets(targetPath, {
+    includeTargets: true,
+    projectRoot: options.projectRoot,
+  });
+
+  const projectRoot = resolved.projectRoot;
+  const config = resolved.config;
+  const displayTargetPath = formatDisplayPath(resolved.resolvedPath, projectRoot);
+
+  const outlines: string[] = [];
+  const dependencies: DependencyContract[] = [];
+  const depMap = new Map<string, DependencyContract>();
+
+  for (const f of resolved.files) {
+    const relFile = formatDisplayPath(f, projectRoot);
+    try {
+      const oRes = generateOutline(f, { includeTypes: true, depth: options.depth });
+      outlines.push(`### \`${relFile}\`\n\`\`\`ail\n${oRes.text}\n\`\`\``);
+
+      const imports = extractImportsFromFile(f);
+      for (const imp of imports) {
+        const specifier = imp.source;
+        const importedSymbols = imp.specifiers.map((s) => s.name);
+        const isExternal = isExternalSpecifier(specifier);
+        let resolvedImportPath: string | undefined = undefined;
+
+        if (!isExternal) {
+          resolvedImportPath = resolveImportPath(f, specifier, config, projectRoot);
+        }
+
+        const key = isExternal
+          ? `ext:${specifier}`
+          : resolvedImportPath
+            ? `res:${path.resolve(resolvedImportPath)}`
+            : `unres:${specifier}`;
+
+        if (depMap.has(key)) {
+          const existing = depMap.get(key)!;
+          for (const sym of importedSymbols) {
+            if (!existing.importedSymbols.includes(sym)) {
+              existing.importedSymbols.push(sym);
+            }
+          }
+        } else {
+          let contract: string;
+          let displayDepPath: string | undefined = undefined;
+
+          if (isExternal) {
+            contract = generateExternalContract(specifier, importedSymbols);
+          } else if (resolvedImportPath) {
+            displayDepPath = formatDisplayPath(resolvedImportPath, projectRoot);
+            contract = extractExportedContract(resolvedImportPath, importedSymbols);
+          } else {
+            contract = `// unresolved: ${specifier}`;
+          }
+
+          const depContract: DependencyContract = {
+            specifier,
+            resolvedPath: displayDepPath,
+            importedSymbols,
+            isExternal,
+            contract,
+          };
+
+          dependencies.push(depContract);
+          depMap.set(key, depContract);
+        }
+      }
+    } catch {
+      // ignore outline errors for individual files in overview
+    }
+  }
+
+  // Format bundle
+  const parts: string[] = [
+    `# AIL Workspace Overview Context Pack: ${displayTargetPath}`,
+    "",
+    "## Project Configuration:",
+    `- Mode: ${config.mode}`,
+    `- Source Directory: ${config.sourceDir}`,
+    `- Output Directory: ${config.outDir}`,
+    `- Target Language: ${config.targetLanguage}`,
+    `- Files Count: ${resolved.files.length}`,
+    "",
+    `## Workspace Files (${resolved.files.length}):`,
+    ...resolved.files.map((f) => `- \`${formatDisplayPath(f, projectRoot)}\``),
+    "",
+  ];
+
+  if (outlines.length > 0) {
+    parts.push("## Module Outlines:", ...outlines, "");
+  }
+
+  if (dependencies.length > 0) {
+    parts.push(`## Workspace Dependencies (${dependencies.length}):`);
+    for (const dep of dependencies) {
+      parts.push(
+        `### Dependency: \`${dep.specifier}\`${dep.resolvedPath ? ` (\`${dep.resolvedPath}\`)` : ""}`,
+      );
+      parts.push("```ail");
+      parts.push(dep.contract);
+      parts.push("```");
+      parts.push("");
+    }
+  }
+
+  let formattedBundle = parts.join("\n");
+  let tokenCount = estimateTokens(formattedBundle);
+
+  // Apply maxTokens bounding if requested
+  if (options.maxTokens !== undefined && tokenCount > options.maxTokens) {
+    let chars = formattedBundle.length;
+    const truncatedFooter = "\n\n// ... [truncated to fit maxTokens]";
+    while (
+      chars > 0 &&
+      estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) > options.maxTokens
+    ) {
+      chars = Math.floor(chars * 0.7);
+    }
+    if (estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens) {
+      formattedBundle = (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter;
+    } else {
+      formattedBundle = truncatedFooter;
+    }
+    tokenCount = estimateTokens(formattedBundle);
+  }
+
+  const targetContent = resolved.files.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
+
+  return {
+    targetPath: displayTargetPath,
+    targetContent,
+    targetOutline: outlines.join("\n\n"),
+    dependencies,
+    callers: [],
+    formattedBundle,
+    tokenCount,
+  };
+}
+
+/**
+ * Packages dependency contracts, target file content, and downstream callers into a 1-turn context pack.
+ * If targetPath is omitted or points to a directory, packages a workspace overview context pack.
+ */
+export async function generateContext(
+  targetPath?: string,
+  options: ContextOptions = {},
+): Promise<ContextResult> {
+  if (!targetPath || targetPath.trim() === "") {
+    return generateWorkspaceContext(undefined, options);
+  }
+
   const fullTargetPath = path.resolve(process.cwd(), targetPath);
+  if (fs.existsSync(fullTargetPath) && fs.statSync(fullTargetPath).isDirectory()) {
+    return generateWorkspaceContext(targetPath, options);
+  }
+
   if (!fs.existsSync(fullTargetPath)) {
     throw new Error(`Target file not found: ${targetPath}`);
   }

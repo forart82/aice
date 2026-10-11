@@ -14,6 +14,7 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
+  resolvePathTargets,
   resolveTargetOutputPathForConfig,
 } from "../src/config/index.js";
 import { parse, parseWithTrivia } from "../src/core/parser.js";
@@ -75,14 +76,218 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.4");
+  .version("0.5.5");
 
-// Command: compile <file>
+/**
+ * Executes polymorphic compilation across single file, directory, or omitted target.
+ */
+export function executeCompile(
+  targetArg: string | undefined,
+  options: {
+    out?: string;
+    outDir?: string;
+    target?: string;
+    fix?: boolean;
+    pureInterfaces?: boolean;
+    watermark?: boolean;
+  },
+): void {
+  try {
+    const resolved = resolvePathTargets(targetArg);
+
+    if (resolved.isSingleFile) {
+      const file = resolved.resolvedPath;
+      if (!fs.existsSync(file)) {
+        console.error(`❌ Error: Source file not found: ${targetArg ?? file}`);
+        process.exit(1);
+      }
+
+      const projectRoot = resolved.projectRoot;
+      const config = resolved.config;
+
+      let source = fs.readFileSync(file, "utf-8");
+
+      if (options.fix) {
+        const repairRes = attemptSelfRepair(source, file);
+        if (repairRes.fixed && repairRes.modified) {
+          fs.writeFileSync(file, repairRes.finalSource, "utf-8");
+          console.log(
+            `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
+          );
+          for (const r of repairRes.repairs) {
+            console.log(`  - ${r.description}`);
+          }
+          source = repairRes.finalSource;
+        }
+      }
+
+      const { ast: mod, trivia } = parseWithTrivia(source, file);
+
+      // Sound type check
+      const tc = new TypeChecker();
+      tc.checkModule(mod);
+
+      // Target selection
+      let targetLang: TargetLanguage;
+      if (options.target) {
+        targetLang = options.target as TargetLanguage;
+      } else {
+        const detected = detectTargetFromPath(file);
+        const base = path.basename(file);
+        const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+        const innerExt = path.extname(withoutAil).toLowerCase();
+        if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+          targetLang = detected;
+        } else {
+          targetLang = config.targetLanguage ?? detected;
+        }
+      }
+
+      const watermark = options.watermark !== false ? config.watermark : false;
+
+      const emitted = emitTarget(mod, targetLang, {
+        trivia,
+        pureInterfaces: options.pureInterfaces,
+        watermark,
+      });
+
+      // Output path: CLI flag --out retains highest priority
+      let outPath: string;
+      if (options.out) {
+        outPath = path.resolve(process.cwd(), options.out);
+      } else if (options.outDir) {
+        const effectiveConfig: AilProjectConfig = {
+          ...config,
+          outDir: options.outDir,
+          mode: "isolated",
+          isolated: true,
+        };
+        const resolvedOut = resolveTargetOutputPathForConfig(file, effectiveConfig, projectRoot);
+        outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+      } else {
+        const resolvedOut = resolveTargetOutputPathForConfig(file, config, projectRoot);
+        outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+      }
+
+      safeWriteTargetFile(outPath, emitted);
+
+      console.log(
+        `✔ Compiled ${targetArg ?? file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+      );
+      return;
+    }
+
+    // Directory mode (or omitted target)
+    const dirPath = resolved.resolvedPath;
+    if (!fs.existsSync(dirPath)) {
+      console.error(`❌ Error: Directory not found: ${targetArg ?? dirPath}`);
+      process.exit(1);
+    }
+
+    const files = resolved.files;
+    if (files.length === 0) {
+      console.log(`No .ail files found in ${targetArg ?? dirPath}`);
+      return;
+    }
+
+    const projectRoot = resolved.projectRoot;
+    const config = resolved.config;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const f of files) {
+      const relPath = path.relative(process.cwd(), f);
+      try {
+        let source = fs.readFileSync(f, "utf-8");
+
+        if (options.fix) {
+          const repairRes = attemptSelfRepair(source, f);
+          if (repairRes.fixed && repairRes.modified) {
+            fs.writeFileSync(f, repairRes.finalSource, "utf-8");
+            source = repairRes.finalSource;
+          }
+        }
+
+        const { ast: mod, trivia } = parseWithTrivia(source, relPath);
+        const tc = new TypeChecker();
+        tc.checkModule(mod);
+
+        let targetLang: TargetLanguage;
+        if (options.target) {
+          targetLang = options.target as TargetLanguage;
+        } else {
+          const base = path.basename(f);
+          const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+          const innerExt = path.extname(withoutAil).toLowerCase();
+          if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+            targetLang = detectTargetFromPath(relPath);
+          } else {
+            targetLang = config.targetLanguage ?? detectTargetFromPath(relPath);
+          }
+        }
+
+        const watermark = options.watermark !== false ? config.watermark : false;
+
+        const emitted = emitTarget(mod, targetLang, {
+          trivia,
+          pureInterfaces: options.pureInterfaces,
+          watermark,
+        });
+
+        // Output path: CLI flag --out-dir retains highest priority
+        let outPath: string;
+        if (options.outDir) {
+          const effectiveConfig: AilProjectConfig = {
+            ...config,
+            outDir: options.outDir,
+            mode: "isolated",
+            isolated: true,
+          };
+          const resolvedOut = resolveTargetOutputPathForConfig(f, effectiveConfig, projectRoot);
+          outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        } else {
+          const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
+          outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        }
+
+        safeWriteTargetFile(outPath, emitted);
+        console.log(
+          `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
+        );
+        successCount++;
+      } catch (err) {
+        console.error(`\n❌ Failed to compile ${relPath}:`);
+        const source = fs.readFileSync(f, "utf-8");
+        const report = buildReportFromError(err, source, relPath);
+        console.error(formatDiagnosticText(report));
+        failCount++;
+      }
+    }
+
+    console.log(`\nFinished: ${successCount} compiled successfully, ${failCount} failed.`);
+    if (failCount > 0) {
+      process.exit(1);
+    }
+  } catch (err) {
+    if (targetArg && fs.existsSync(targetArg) && !fs.statSync(targetArg).isDirectory()) {
+      const source = fs.readFileSync(targetArg, "utf-8");
+      const report = buildReportFromError(err, source, targetArg);
+      console.error(formatDiagnosticText(report));
+    } else {
+      console.error(err);
+    }
+    process.exit(1);
+  }
+}
+
+// Command: compile [target]
 program
   .command("compile")
-  .description("Compile an .ail source file to its target language")
-  .argument("<file>", "Path to the .ail source file")
-  .option("-o, --out <out>", "Output file path")
+  .description("Compile .ail source file(s) or directory to target language")
+  .argument("[target]", "Path to .ail source file or directory (omitted for workspace scan)")
+  .option("-o, --out <out>", "Output file path (single file mode)")
+  .option("--out-dir <outDir>", "Optional destination directory for emitted files")
   .option(
     "-t, --target <target>",
     "Explicit target language (typescript, tsx, python, html, css, rust, go, cpp, csharp)",
@@ -95,98 +300,24 @@ program
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
   .action(
     (
-      file: string,
+      target: string | undefined,
       options: {
         out?: string;
+        outDir?: string;
         target?: string;
         fix?: boolean;
         pureInterfaces?: boolean;
         watermark?: boolean;
       },
     ) => {
-      try {
-        const fullPath = path.resolve(process.cwd(), file);
-        if (!fs.existsSync(fullPath)) {
-          console.error(`❌ Error: Source file not found: ${file}`);
-          process.exit(1);
-        }
-
-        const projectRoot = findProjectRoot(path.dirname(fullPath), process.cwd());
-        const config = loadProjectConfig(projectRoot);
-
-        let source = fs.readFileSync(fullPath, "utf-8");
-
-        if (options.fix) {
-          const repairRes = attemptSelfRepair(source, file);
-          if (repairRes.fixed && repairRes.modified) {
-            fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
-            console.log(
-              `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
-            );
-            for (const r of repairRes.repairs) {
-              console.log(`  - ${r.description}`);
-            }
-            source = repairRes.finalSource;
-          }
-        }
-
-        const { ast: mod, trivia } = parseWithTrivia(source, file);
-
-        // Sound type check
-        const tc = new TypeChecker();
-        tc.checkModule(mod);
-
-        // Target selection
-        let targetLang: TargetLanguage;
-        if (options.target) {
-          targetLang = options.target as TargetLanguage;
-        } else {
-          const detected = detectTargetFromPath(file);
-          const base = path.basename(file);
-          const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-          const innerExt = path.extname(withoutAil).toLowerCase();
-          if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-            targetLang = detected;
-          } else {
-            targetLang = config.targetLanguage ?? detected;
-          }
-        }
-
-        const watermark = options.watermark !== false ? config.watermark : false;
-
-        const emitted = emitTarget(mod, targetLang, {
-          trivia,
-          pureInterfaces: options.pureInterfaces,
-          watermark,
-        });
-
-        // Output path: CLI flag --out retains highest priority
-        let outPath: string;
-        if (options.out) {
-          outPath = path.resolve(process.cwd(), options.out);
-        } else {
-          const resolved = resolveTargetOutputPathForConfig(file, config, projectRoot);
-          outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
-        }
-
-        safeWriteTargetFile(outPath, emitted);
-
-        console.log(
-          `✔ Compiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
-        );
-      } catch (err) {
-        const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
-        const report = buildReportFromError(err, source, file);
-        console.error(formatDiagnosticText(report));
-        process.exit(1);
-      }
+      executeCompile(target, options);
     },
   );
 
-// Command: compile-all <dir>
+// Command: compile-all [dir] (Deprecated alias to compile [dir])
 program
   .command("compile-all")
-  .description("Recursively compile all .ail source files in a directory")
+  .description("Recursively compile all .ail source files in a directory (alias for 'compile [dir]')")
   .argument("[dir]", "Directory to search for .ail files", ".")
   .option("--out-dir <outDir>", "Optional destination directory for emitted files")
   .option(
@@ -196,112 +327,10 @@ program
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
   .action(
     (dir: string, options: { outDir?: string; pureInterfaces?: boolean; watermark?: boolean }) => {
-      try {
-        const searchDir = path.resolve(process.cwd(), dir);
-        if (!fs.existsSync(searchDir)) {
-          console.error(`❌ Error: Directory not found: ${dir}`);
-          process.exit(1);
-        }
-
-        const projectRoot = findProjectRoot(searchDir, process.cwd());
-        const config = loadProjectConfig(projectRoot);
-
-        function findAilFiles(curDir: string): string[] {
-          const entries = fs.readdirSync(curDir, { withFileTypes: true });
-          const results: string[] = [];
-          for (const entry of entries) {
-            const res = path.resolve(curDir, entry.name);
-            if (entry.isDirectory()) {
-              if (
-                entry.name !== "node_modules" &&
-                entry.name !== ".git" &&
-                entry.name !== ".ail-build" &&
-                entry.name !== config.outDir
-              ) {
-                results.push(...findAilFiles(res));
-              }
-            } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-              results.push(res);
-            }
-          }
-          return results;
-        }
-
-        const files = findAilFiles(searchDir);
-        if (files.length === 0) {
-          console.log(`No .ail files found in ${dir}`);
-          return;
-        }
-
-        let successCount = 0;
-        let failCount = 0;
-
-        for (const f of files) {
-          const relPath = path.relative(process.cwd(), f);
-          try {
-            const source = fs.readFileSync(f, "utf-8");
-            const { ast: mod, trivia } = parseWithTrivia(source, relPath);
-            const tc = new TypeChecker();
-            tc.checkModule(mod);
-
-            let targetLang: TargetLanguage;
-            const base = path.basename(f);
-            const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-            const innerExt = path.extname(withoutAil).toLowerCase();
-            if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-              targetLang = detectTargetFromPath(relPath);
-            } else {
-              targetLang = config.targetLanguage ?? detectTargetFromPath(relPath);
-            }
-
-            const watermark = options.watermark !== false ? config.watermark : false;
-
-            const emitted = emitTarget(mod, targetLang, {
-              trivia,
-              pureInterfaces: options.pureInterfaces,
-              watermark,
-            });
-
-            // Output path: CLI flag --out-dir retains highest priority
-            let outPath: string;
-            if (options.outDir) {
-              const effectiveConfig: AilProjectConfig = {
-                ...config,
-                outDir: options.outDir,
-                mode: "isolated",
-                isolated: true,
-              };
-              const resolved = resolveTargetOutputPathForConfig(f, effectiveConfig, projectRoot);
-              outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
-            } else {
-              const resolved = resolveTargetOutputPathForConfig(f, config, projectRoot);
-              outPath = path.isAbsolute(resolved) ? resolved : path.resolve(projectRoot, resolved);
-            }
-
-            safeWriteTargetFile(outPath, emitted);
-            console.log(
-              `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
-            );
-            successCount++;
-          } catch (err) {
-            console.error(`\n❌ Failed to compile ${relPath}:`);
-            const source = fs.readFileSync(f, "utf-8");
-            const report = buildReportFromError(err, source, relPath);
-            console.error(formatDiagnosticText(report));
-            failCount++;
-          }
-        }
-
-        console.log(`\nFinished: ${successCount} compiled successfully, ${failCount} failed.`);
-        if (failCount > 0) {
-          process.exit(1);
-        }
-      } catch (err) {
-        console.error(err);
-        process.exit(1);
-      }
+      executeCompile(dir, options);
     },
   );
+
 
 // Command: clean [dir]
 program
@@ -1209,31 +1238,40 @@ shieldCmd
     }
   });
 
-// Command: outline <path>
+// Command: outline [target]
 program
   .command("outline")
   .description(
     "Semantic skeletonization: generate token-dense AST skeleton outline (85-90% token reduction)",
   )
-  .argument("<path>", "Path to source file or directory")
+  .argument("[target]", "Path to source file or directory (omitted for workspace sourceDir)")
   .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
   .option("--no-types", "Exclude type annotations")
   .option("--json", "Output structured JSON symbol hierarchy")
   .option("--stats", "Display token reduction savings metrics")
   .action(
     async (
-      targetPath: string,
+      targetPath: string | undefined,
       options: { depth?: number; types?: boolean; json?: boolean; stats?: boolean },
     ) => {
       try {
+        const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+        const outlineTarget = resolved.resolvedPath;
+
+        if (!fs.existsSync(outlineTarget)) {
+          console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
+          process.exit(1);
+        }
+
         const outlineOpts: OutlineOptions = {
           depth: options.depth !== undefined ? Number(options.depth) : undefined,
           includeTypes: options.types !== false,
           json: !!options.json,
           stats: !!options.stats,
+          projectRoot: resolved.projectRoot,
         };
 
-        const result = await outlinePath(targetPath, outlineOpts);
+        const result = await outlinePath(outlineTarget, outlineOpts);
 
         if (result instanceof Map) {
           // Directory output
@@ -1422,11 +1460,14 @@ program
     },
   );
 
-// Command: context <path>
+// Command: context [target]
 program
   .command("context")
   .description("Dependency contract packager in 1 turn for AI context windows")
-  .argument("<path>", "Path to target source file")
+  .argument(
+    "[target]",
+    "Path to target source file or directory (omitted for workspace overview context)",
+  )
   .option(
     "-d, --depth <number>",
     "Dependency traversal depth (default: 1)",
@@ -1444,7 +1485,7 @@ program
   .option("--stats", "Output token count statistics")
   .action(
     async (
-      targetPath: string,
+      targetPath: string | undefined,
       options: {
         depth?: number;
         callers?: boolean;
@@ -1455,12 +1496,7 @@ program
       },
     ) => {
       try {
-        const fullPath = path.resolve(process.cwd(), targetPath);
-        if (!fs.existsSync(fullPath)) {
-          console.error(`❌ Error: Target file not found: ${targetPath}`);
-          process.exit(1);
-        }
-
+        const resolved = resolvePathTargets(targetPath, { includeTargets: true });
         const contextOpts: ContextOptions = {
           depth: options.depth !== undefined ? Number(options.depth) : 1,
           includeCallers: options.callers !== false,
@@ -1468,9 +1504,10 @@ program
           maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
           json: !!options.json,
           stats: !!options.stats,
+          projectRoot: resolved.projectRoot,
         };
 
-        const result = await generateContext(fullPath, contextOpts);
+        const result = await generateContext(targetPath, contextOpts);
 
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
@@ -1493,11 +1530,14 @@ program
     },
   );
 
-// Command: fmt [path]
+// Command: fmt [target]
 program
   .command("fmt")
   .description("Deterministic zero-token canonical formatting pre-pass for AIL source code")
-  .argument("[path]", "Path to .ail file or directory to format")
+  .argument(
+    "[target]",
+    "Path to .ail file or directory to format (omitted to format all workspace .ail files)",
+  )
   .option(
     "--check",
     "Verify formatting without writing to disk; exit 1 if any unformatted file found",
@@ -1546,8 +1586,11 @@ program
           return;
         }
 
-        if (!targetPath) {
-          console.error("❌ Error: Path argument is required when not using --stdin");
+        const resolved = resolvePathTargets(targetPath);
+        const fmtTarget = resolved.resolvedPath;
+
+        if (!fs.existsSync(fmtTarget)) {
+          console.error(`❌ Error: Path not found: ${targetPath ?? fmtTarget}`);
           process.exit(1);
         }
 
@@ -1556,9 +1599,10 @@ program
           diff: !!options.diff,
           write: options.write !== false && !options.check,
           indent: options.indent,
+          projectRoot: resolved.projectRoot,
         };
 
-        const resultOrResults = await formatAilPath(targetPath, fmtOptions);
+        const resultOrResults = await formatAilPath(fmtTarget, fmtOptions);
         const results = Array.isArray(resultOrResults) ? resultOrResults : [resultOrResults];
 
         let hasUnformatted = false;
@@ -1589,18 +1633,21 @@ program
     },
   );
 
-// Command: diff <oldPath> [newPath]
+// Command: diff [oldPath] [newPath]
 program
   .command("diff")
   .description("Semantic AST structural diff and unified diff between files or git HEAD")
-  .argument("<oldPath>", "Path to target or baseline .ail source file")
+  .argument(
+    "[oldPath]",
+    "Path to target or baseline .ail source file or directory (omitted for workspace diff against git HEAD)",
+  )
   .argument("[newPath]", "Path to new .ail source file (optional; defaults to git HEAD comparison)")
   .option("--ast", "Output AST symbol differences only")
   .option("--unified", "Output standard unified diff")
   .option("--json", "Output JSON summary of changes")
   .action(
     async (
-      oldPath: string,
+      oldPath: string | undefined,
       newPath: string | undefined,
       options: {
         ast?: boolean;
@@ -1609,43 +1656,116 @@ program
       },
     ) => {
       try {
-        const diffOpts: DiffOptions = {
-          oldPath,
-          newPath,
-          ast: options.ast,
-          unified: options.unified,
-          json: options.json,
-        };
+        const resolved = resolvePathTargets(oldPath);
 
-        const result = await diffFiles(oldPath, newPath, diffOpts);
+        if (resolved.isSingleFile) {
+          const fileToDiff = resolved.resolvedPath;
+          const diffOpts: DiffOptions = {
+            oldPath: fileToDiff,
+            newPath,
+            ast: options.ast,
+            unified: options.unified,
+            json: options.json,
+            projectRoot: resolved.projectRoot,
+          };
 
-        if (options.json) {
-          console.log(JSON.stringify(result.json ?? result, null, 2));
-        } else if (options.ast) {
-          if (result.semanticSummary) {
-            console.log(result.semanticSummary);
+          const result = await diffFiles(fileToDiff, newPath, diffOpts);
+
+          if (options.json) {
+            console.log(JSON.stringify(result.json ?? result, null, 2));
+          } else if (options.ast) {
+            if (result.semanticSummary) {
+              console.log(result.semanticSummary);
+            } else {
+              console.log("No semantic symbol changes detected.");
+            }
+          } else if (options.unified) {
+            if (result.unifiedDiff) {
+              console.log(result.unifiedDiff);
+            } else {
+              console.log("No differences detected.");
+            }
           } else {
-            console.log("No semantic symbol changes detected.");
-          }
-        } else if (options.unified) {
-          if (result.unifiedDiff) {
-            console.log(result.unifiedDiff);
-          } else {
-            console.log("No differences detected.");
+            let hasOutput = false;
+            if (result.semanticSummary) {
+              console.log(result.semanticSummary);
+              hasOutput = true;
+            }
+            if (result.unifiedDiff) {
+              if (hasOutput) console.log("");
+              console.log(result.unifiedDiff);
+              hasOutput = true;
+            }
+            if (!hasOutput) {
+              console.log("No differences detected.");
+            }
           }
         } else {
-          let hasOutput = false;
-          if (result.semanticSummary) {
-            console.log(result.semanticSummary);
-            hasOutput = true;
+          // Directory or omitted: diff all files in directory against git HEAD
+          const files = resolved.files;
+          if (files.length === 0) {
+            if (options.json) {
+              console.log(JSON.stringify([], null, 2));
+            } else {
+              console.log(`No .ail files found in ${oldPath ?? resolved.resolvedPath}`);
+            }
+            return;
           }
-          if (result.unifiedDiff) {
-            if (hasOutput) console.log("");
-            console.log(result.unifiedDiff);
-            hasOutput = true;
-          }
-          if (!hasOutput) {
-            console.log("No differences detected.");
+
+          const diffOpts: DiffOptions = {
+            ast: options.ast,
+            unified: options.unified,
+            json: options.json,
+            projectRoot: resolved.projectRoot,
+          };
+
+          if (options.json) {
+            const results = [];
+            for (const f of files) {
+              const res = await diffFiles(f, undefined, diffOpts);
+              results.push({
+                file: path.relative(process.cwd(), f),
+                ...(res.json ?? res),
+              });
+            }
+            console.log(JSON.stringify(results, null, 2));
+          } else {
+            let anyDiff = false;
+            for (const f of files) {
+              const rel = path.relative(process.cwd(), f);
+              const res = await diffFiles(f, undefined, diffOpts);
+              const hasSemantic =
+                res.changes && res.changes.some((c) => c.change !== "unchanged");
+              const hasUnified = Boolean(res.unifiedDiff && res.unifiedDiff.trim().length > 0);
+
+              if (hasSemantic || hasUnified) {
+                anyDiff = true;
+                console.log(`\n// === ${rel} ===\n`);
+                if (options.ast) {
+                  if (res.semanticSummary) {
+                    console.log(res.semanticSummary);
+                  }
+                } else if (options.unified) {
+                  if (res.unifiedDiff) {
+                    console.log(res.unifiedDiff);
+                  }
+                } else {
+                  let hasOutput = false;
+                  if (res.semanticSummary) {
+                    console.log(res.semanticSummary);
+                    hasOutput = true;
+                  }
+                  if (res.unifiedDiff) {
+                    if (hasOutput) console.log("");
+                    console.log(res.unifiedDiff);
+                    hasOutput = true;
+                  }
+                }
+              }
+            }
+            if (!anyDiff) {
+              console.log("No differences detected.");
+            }
           }
         }
       } catch (err: unknown) {

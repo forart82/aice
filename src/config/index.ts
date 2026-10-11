@@ -6,3 +6,4 @@
  */
 
 export * from "./project-config.js";
+export * from "./path-resolver.js";
