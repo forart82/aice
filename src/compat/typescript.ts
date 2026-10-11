@@ -4,4 +4,3 @@
  */
 import ts from "typescript-legacy";
 export default ts;
-export * from "typescript-legacy";
