@@ -17,6 +17,38 @@ import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 const cl100k = getEncoding("cl100k_base");
 const o200k = getEncoding("o200k_base");
 
+export function estimateTokens(
+  text: string,
+  encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
+): number {
+  const enc = encoding === "o200k_base" ? o200k : cl100k;
+  return enc.encode(text).length;
+}
+
+export class TiktokenTokenizer {
+  public static count(
+    text: string,
+    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
+  ): number {
+    return estimateTokens(text, encoding);
+  }
+
+  public count(
+    text: string,
+    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
+  ): number {
+    return estimateTokens(text, encoding);
+  }
+
+  public encode(
+    text: string,
+    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
+  ): number[] {
+    const enc = encoding === "o200k_base" ? o200k : cl100k;
+    return Array.from(enc.encode(text));
+  }
+}
+
 export interface TokenomicsFileResult {
   file: string;
   project?: string;

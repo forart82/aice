@@ -133,6 +133,7 @@ export interface NamedType {
 export interface FunctionDecl {
   kind: "FunctionDecl";
   name: string;
+  isExported?: boolean;
   isAsync?: boolean;
   typeParams?: string[];
   params: ParamDecl[];

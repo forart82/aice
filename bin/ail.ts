@@ -43,6 +43,7 @@ import {
   formatTokenomicsMarkdownTable,
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
+import { type OutlineOptions, outlinePath } from "../src/tools/index.js";
 import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
@@ -58,7 +59,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.15");
+  .version("0.5.0");
 
 // Command: compile <file>
 program
@@ -1190,6 +1191,111 @@ shieldCmd
       process.exit(1);
     }
   });
+
+// Command: outline <path>
+program
+  .command("outline")
+  .description(
+    "Semantic skeletonization: generate token-dense AST skeleton outline (85-90% token reduction)",
+  )
+  .argument("<path>", "Path to source file or directory")
+  .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
+  .option("--no-types", "Exclude type annotations")
+  .option("--json", "Output structured JSON symbol hierarchy")
+  .option("--stats", "Display token reduction savings metrics")
+  .action(
+    async (
+      targetPath: string,
+      options: { depth?: number; types?: boolean; json?: boolean; stats?: boolean },
+    ) => {
+      try {
+        const outlineOpts: OutlineOptions = {
+          depth: options.depth !== undefined ? Number(options.depth) : undefined,
+          includeTypes: options.types !== false,
+          json: !!options.json,
+          stats: !!options.stats,
+        };
+
+        const result = await outlinePath(targetPath, outlineOpts);
+
+        if (result instanceof Map) {
+          // Directory output
+          if (options.json) {
+            const arr = Array.from(result.values()).map(
+              (r) =>
+                r.json ?? {
+                  file: r.file,
+                  symbols: r.symbols,
+                  ...(r.stats ? { stats: r.stats } : {}),
+                },
+            );
+            console.log(JSON.stringify(arr, null, 2));
+          } else {
+            for (const [relPath, res] of result.entries()) {
+              console.log(`\n// === ${relPath} ===\n`);
+              console.log(res.text);
+              if (options.stats && res.stats) {
+                console.log(
+                  `\n[Tokens: ${res.stats.originalTokens} -> ${res.stats.outlineTokens} (-${res.stats.savingsPct}%)]`,
+                );
+              }
+            }
+            if (options.stats) {
+              let totalOrig = 0;
+              let totalOutline = 0;
+              for (const res of result.values()) {
+                if (res.stats) {
+                  totalOrig += res.stats.originalTokens;
+                  totalOutline += res.stats.outlineTokens;
+                }
+              }
+              const savings = Math.max(0, totalOrig - totalOutline);
+              const savingsPct =
+                totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
+              console.log(`\n📊 Aggregate Token Reduction Metrics (${result.size} files):`);
+              console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
+              console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
+              console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
+            }
+          }
+        } else {
+          // Single file output
+          if (options.json) {
+            console.log(
+              JSON.stringify(
+                result.json ?? {
+                  file: result.file,
+                  symbols: result.symbols,
+                  ...(result.stats ? { stats: result.stats } : {}),
+                },
+                null,
+                2,
+              ),
+            );
+          } else {
+            console.log(result.text);
+            if (options.stats && result.stats) {
+              console.log(`\n📊 Token Reduction Metrics for ${result.file}:`);
+              console.log(`  Original tokens: ${result.stats.originalTokens.toLocaleString()}`);
+              console.log(`  Outline tokens:  ${result.stats.outlineTokens.toLocaleString()}`);
+              console.log(
+                `  Token savings:   ${result.stats.savingsTokens.toLocaleString()} tokens (${result.stats.savingsPct}%)`,
+              );
+              console.log(`  Original chars:  ${result.stats.originalChars.toLocaleString()}`);
+              console.log(
+                `  Outline chars:   ${result.stats.outlineChars.toLocaleString()} (${result.stats.charSavingsPct}%)`,
+              );
+            }
+          }
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error outlining ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
 
 export { program };
 

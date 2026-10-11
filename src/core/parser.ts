@@ -586,7 +586,7 @@ export class Parser {
       return this.parseVarDecl(isExported);
     }
     if (this.check("FN") || (this.check("ASYNC") && this.peek(1).kind === "FN")) {
-      return this.parseFunctionDecl();
+      return this.parseFunctionDecl(isExported);
     }
     if (this.check("COMPONENT")) {
       if (
@@ -873,6 +873,12 @@ export class Parser {
           break;
         }
 
+        if ((this.check("IDENT") && this.current().value === "pass") || this.check("ELLIPSIS")) {
+          this.advance();
+          this.consumeStatementSeparator();
+          continue;
+        }
+
         while (!this.check("EOF")) {
           const vSpan = this.current().span;
           const vName = this.parseContextualIdentOrString("Expected variant name");
@@ -949,7 +955,7 @@ export class Parser {
         break;
       }
 
-      if (this.check("IDENT") && this.current().value === "pass") {
+      if ((this.check("IDENT") && this.current().value === "pass") || this.check("ELLIPSIS")) {
         this.advance();
         this.consumeStatementSeparator();
         continue;
@@ -1589,7 +1595,7 @@ export class Parser {
   }
 
   // Function Declarations
-  private parseFunctionDecl(): FunctionDecl {
+  private parseFunctionDecl(isExported = false): FunctionDecl {
     const startSpan = this.current().span;
     let isAsync = false;
     if (this.check("ASYNC")) {
@@ -1637,6 +1643,7 @@ export class Parser {
       return {
         kind: "FunctionDecl",
         name,
+        isExported: isExported || undefined,
         isAsync: isAsync || undefined,
         params,
         returnType,
@@ -1658,6 +1665,7 @@ export class Parser {
     return {
       kind: "FunctionDecl",
       name,
+      isExported: isExported || undefined,
       isAsync: isAsync || undefined,
       params,
       returnType,
@@ -1794,7 +1802,7 @@ export class Parser {
         if (hasBrace && (this.check("RBRACE") || this.check("EOF"))) break;
         if (!hasIndent && !hasBrace && (this.check("NEWLINE") || this.check("EOF"))) break;
 
-        if (this.check("IDENT") && this.current().value === "pass") {
+        if ((this.check("IDENT") && this.current().value === "pass") || this.check("ELLIPSIS")) {
           this.advance();
           this.consumeStatementSeparator();
           continue;
@@ -2343,8 +2351,8 @@ export class Parser {
       return this.parseContinueStatement();
     }
     if (
-      this.check("IDENT") &&
-      this.current().value === "pass" &&
+      ((this.check("IDENT") && this.current().value === "pass") ||
+        this.check("ELLIPSIS")) &&
       (this.peek(1).kind === "NEWLINE" ||
         this.peek(1).kind === "EOF" ||
         this.peek(1).kind === "DEDENT" ||
@@ -3302,6 +3310,26 @@ export class Parser {
       tok.kind === "BANG" ||
       tok.kind === "ELLIPSIS"
     ) {
+      if (
+        tok.kind === "ELLIPSIS" &&
+        (this.peek(1).kind === "NEWLINE" ||
+          this.peek(1).kind === "SEMICOLON" ||
+          this.peek(1).kind === "EOF" ||
+          this.peek(1).kind === "DEDENT" ||
+          this.peek(1).kind === "RPAREN" ||
+          this.peek(1).kind === "RBRACE" ||
+          this.peek(1).kind === "RBRACKET" ||
+          this.peek(1).kind === "COMMA")
+      ) {
+        this.advance();
+        return {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: "...",
+          rawValue: '"..."',
+          span: tok.span,
+        };
+      }
       this.advance();
       const op =
         tok.kind === "MINUS"
