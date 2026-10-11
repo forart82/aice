@@ -44,6 +44,8 @@ import {
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
 import {
+  type ContextOptions,
+  generateContext,
   type OutlineOptions,
   outlinePath,
   type SpliceOptions,
@@ -64,7 +66,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.1");
+  .version("0.5.2");
 
 // Command: compile <file>
 program
@@ -1405,6 +1407,77 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Error splicing ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: context <path>
+program
+  .command("context")
+  .description("Dependency contract packager in 1 turn for AI context windows")
+  .argument("<path>", "Path to target source file")
+  .option(
+    "-d, --depth <number>",
+    "Dependency traversal depth (default: 1)",
+    (val) => Number.parseInt(val, 10),
+    1,
+  )
+  .option("--no-callers", "Skip reverse caller lookup")
+  .option("--outline-target", "Outline target instead of full source")
+  .option(
+    "--max-tokens <number>",
+    "Maximum token limit",
+    (val) => Number.parseInt(val, 10),
+  )
+  .option("--json", "Output as JSON bundle")
+  .option("--stats", "Output token count statistics")
+  .action(
+    async (
+      targetPath: string,
+      options: {
+        depth?: number;
+        callers?: boolean;
+        outlineTarget?: boolean;
+        maxTokens?: number;
+        json?: boolean;
+        stats?: boolean;
+      },
+    ) => {
+      try {
+        const fullPath = path.resolve(process.cwd(), targetPath);
+        if (!fs.existsSync(fullPath)) {
+          console.error(`❌ Error: Target file not found: ${targetPath}`);
+          process.exit(1);
+        }
+
+        const contextOpts: ContextOptions = {
+          depth: options.depth !== undefined ? Number(options.depth) : 1,
+          includeCallers: options.callers !== false,
+          outlineTarget: !!options.outlineTarget,
+          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+          json: !!options.json,
+          stats: !!options.stats,
+        };
+
+        const result = await generateContext(fullPath, contextOpts);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+        } else {
+          console.log(result.formattedBundle);
+          if (options.stats) {
+            console.log("\n📊 Context Pack Token Telemetry:");
+            console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
+            console.log(`  Dependencies:      ${result.dependencies.length}`);
+            console.log(`  Downstream callers:${result.callers.length}`);
+            console.log(`  Target characters: ${result.targetContent.length.toLocaleString()}`);
+          }
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error packaging context for ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }

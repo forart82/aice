@@ -1,0 +1,689 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * AIL 2.0 AI Context Packager Engine (Step 20).
+ * Assembles high-density 1-turn context packs containing target source/outline,
+ * imported dependency contracts, and downstream callers.
+ */
+
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  type AilProjectConfig,
+  findProjectRoot,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+} from "../config/index.js";
+import type { ImportDecl, Module } from "../core/ast.js";
+import { parse } from "../core/parser.js";
+import { decompile } from "../decompiler/index.js";
+import { detectTargetFromPath } from "../emitters/index.js";
+import { estimateTokens } from "../tokenomics/index.js";
+import { generateOutline, type OutlineSymbol } from "./outline.js";
+
+export interface ContextOptions {
+  /**
+   * Dependency traversal depth (default: 1).
+   */
+  depth?: number;
+
+  /**
+   * Scan workspace for downstream importers/callers (default: true).
+   */
+  includeCallers?: boolean;
+
+  /**
+   * If true, emit target outline instead of full source (default: false).
+   */
+  outlineTarget?: boolean;
+
+  /**
+   * Maximum token budget; truncates or bounds context pack if exceeded.
+   */
+  maxTokens?: number;
+
+  /**
+   * Output structured JSON bundle (default: false).
+   */
+  json?: boolean;
+
+  /**
+   * Include token telemetry (default: false).
+   */
+  stats?: boolean;
+
+  /**
+   * Root directory of the project (auto-discovered if omitted).
+   */
+  projectRoot?: string;
+}
+
+export interface DependencyContract {
+  specifier: string;
+  resolvedPath?: string;
+  importedSymbols: string[];
+  isExternal: boolean;
+  contract: string;
+}
+
+export interface CallerSummary {
+  filePath: string;
+  importedSymbols: string[];
+  line: number;
+}
+
+export interface ContextResult {
+  targetPath: string;
+  targetContent: string;
+  targetOutline?: string;
+  dependencies: DependencyContract[];
+  callers: CallerSummary[];
+  formattedBundle: string;
+  tokenCount?: number;
+}
+
+function isExternalSpecifier(specifier: string): boolean {
+  if (specifier.startsWith("node:")) return true;
+  if (
+    specifier.startsWith("./") ||
+    specifier.startsWith("../") ||
+    specifier === "." ||
+    specifier === ".."
+  ) {
+    return false;
+  }
+  if (path.isAbsolute(specifier)) {
+    return false;
+  }
+  return true;
+}
+
+function formatDisplayPath(filePath: string, projectRoot: string): string {
+  const rel = path.relative(projectRoot, filePath);
+  if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
+    return rel;
+  }
+  const relCwd = path.relative(process.cwd(), filePath);
+  if (!relCwd.startsWith("..") && !path.isAbsolute(relCwd)) {
+    return relCwd;
+  }
+  return filePath;
+}
+
+export function resolveImportPath(
+  fromFilePath: string,
+  specifier: string,
+  config: AilProjectConfig,
+  projectRoot: string,
+): string | undefined {
+  if (isExternalSpecifier(specifier)) {
+    return undefined;
+  }
+
+  const fromDir = path.dirname(path.resolve(fromFilePath));
+  let candidateBase: string;
+
+  if (specifier.startsWith(".")) {
+    candidateBase = path.resolve(fromDir, specifier);
+  } else if (path.isAbsolute(specifier)) {
+    candidateBase = path.resolve(specifier);
+  } else {
+    // Relative to projectRoot or sourceDir
+    const rootCandidate = path.resolve(projectRoot, specifier);
+    const srcCandidate = path.resolve(projectRoot, config.sourceDir, specifier);
+    if (fs.existsSync(rootCandidate)) {
+      candidateBase = rootCandidate;
+    } else if (fs.existsSync(srcCandidate)) {
+      candidateBase = srcCandidate;
+    } else {
+      candidateBase = rootCandidate;
+    }
+  }
+
+  // 1. If candidateBase already exists as a file
+  if (fs.existsSync(candidateBase) && fs.statSync(candidateBase).isFile()) {
+    if (!candidateBase.endsWith(".ail") && fs.existsSync(`${candidateBase}.ail`)) {
+      return `${candidateBase}.ail`;
+    }
+    return candidateBase;
+  }
+
+  // 2. Probes with extensions
+  const ext = path.extname(candidateBase).toLowerCase();
+  const baseWithoutExt = ext ? candidateBase.slice(0, -ext.length) : candidateBase;
+
+  const probeList: string[] = [];
+
+  if (ext) {
+    probeList.push(`${candidateBase}.ail`);
+    probeList.push(`${baseWithoutExt}.ail`);
+    probeList.push(`${baseWithoutExt}.ts.ail`);
+    probeList.push(`${baseWithoutExt}.tsx.ail`);
+    probeList.push(`${baseWithoutExt}.ts`);
+    probeList.push(`${baseWithoutExt}.tsx`);
+    probeList.push(`${baseWithoutExt}.py.ail`);
+    probeList.push(`${baseWithoutExt}.py`);
+    probeList.push(`${baseWithoutExt}.cpp.ail`);
+    probeList.push(`${baseWithoutExt}.cpp`);
+    probeList.push(`${baseWithoutExt}.cs.ail`);
+    probeList.push(`${baseWithoutExt}.cs`);
+  }
+
+  probeList.push(`${candidateBase}.ail`);
+  probeList.push(`${candidateBase}.ts.ail`);
+  probeList.push(`${candidateBase}.tsx.ail`);
+  probeList.push(`${candidateBase}.ts`);
+  probeList.push(`${candidateBase}.tsx`);
+  probeList.push(`${candidateBase}.py.ail`);
+  probeList.push(`${candidateBase}.py`);
+  probeList.push(`${candidateBase}.js`);
+  probeList.push(`${candidateBase}.rs.ail`);
+  probeList.push(`${candidateBase}.rs`);
+  probeList.push(`${candidateBase}.go.ail`);
+  probeList.push(`${candidateBase}.go`);
+  probeList.push(`${candidateBase}.cpp.ail`);
+  probeList.push(`${candidateBase}.cpp`);
+  probeList.push(`${candidateBase}.cs.ail`);
+  probeList.push(`${candidateBase}.cs`);
+
+  // Directory index probes
+  probeList.push(path.join(candidateBase, "index.ail"));
+  probeList.push(path.join(candidateBase, "index.ts.ail"));
+  probeList.push(path.join(candidateBase, "index.tsx.ail"));
+  probeList.push(path.join(candidateBase, "index.ts"));
+  probeList.push(path.join(candidateBase, "index.tsx"));
+  probeList.push(path.join(candidateBase, "index.js"));
+
+  // In isolated mode: check mapped sourceDir if candidate is in outDir
+  if (config.mode === "isolated") {
+    const relFromRoot = path.relative(projectRoot, candidateBase);
+    if (relFromRoot.startsWith(config.outDir)) {
+      const remapped = path.resolve(
+        projectRoot,
+        config.sourceDir,
+        relFromRoot.slice(config.outDir.length).replace(/^[/\\]/, ""),
+      );
+      probeList.push(`${remapped}.ail`);
+      probeList.push(`${remapped}.ts.ail`);
+      probeList.push(`${remapped}.ts`);
+    }
+  }
+
+  for (const p of probeList) {
+    if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+      return p;
+    }
+  }
+
+  return undefined;
+}
+
+function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
+  const outlineLines: string[] = [];
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = symbols[i];
+    if (
+      i > 0 &&
+      (sym.kind === "class" ||
+        sym.kind === "function" ||
+        sym.kind === "enum" ||
+        sym.kind === "interface" ||
+        sym.kind === "record")
+    ) {
+      outlineLines.push("");
+    }
+    if (sym.docstring) {
+      outlineLines.push(sym.docstring);
+    }
+    if (sym.kind === "class" || sym.kind === "interface" || sym.kind === "record") {
+      if (sym.children && sym.children.length > 0) {
+        const header = sym.signature.endsWith(": ...")
+          ? sym.signature.slice(0, -4)
+          : sym.signature;
+        outlineLines.push(header.endsWith(":") ? header : `${header}:`);
+        for (const child of sym.children) {
+          if (child.docstring) {
+            for (const dLine of child.docstring.split("\n")) {
+              outlineLines.push(`  ${dLine}`);
+            }
+          }
+          outlineLines.push(`  ${child.signature}`);
+        }
+      } else {
+        outlineLines.push(sym.signature);
+      }
+    } else if (sym.kind === "enum") {
+      if (sym.children && sym.children.length > 0) {
+        outlineLines.push(`enum ${sym.name}:`);
+        for (const child of sym.children) {
+          outlineLines.push(`  ${child.signature}`);
+        }
+      } else {
+        outlineLines.push(sym.signature);
+      }
+    } else {
+      outlineLines.push(sym.signature);
+    }
+  }
+  return outlineLines.join("\n").trim();
+}
+
+function extractExportedContract(
+  resolvedPath: string,
+  importedSymbols: string[],
+): string {
+  const outlineRes = generateOutline(resolvedPath, { includeTypes: true });
+  const nonImports = outlineRes.symbols.filter((s) => s.kind !== "import");
+
+  const hasExplicitExports = nonImports.some(
+    (s) => s.signature.startsWith("pub ") || s.signature.startsWith("export "),
+  );
+
+  let filtered: OutlineSymbol[];
+  if (importedSymbols.includes("*")) {
+    filtered = nonImports;
+  } else if (hasExplicitExports) {
+    filtered = nonImports.filter((s) => {
+      if (s.signature.startsWith("pub ") || s.signature.startsWith("export ")) {
+        return true;
+      }
+      if (
+        s.kind === "interface" ||
+        s.kind === "record" ||
+        s.kind === "type" ||
+        s.kind === "enum"
+      ) {
+        return true;
+      }
+      if (importedSymbols.includes(s.name)) {
+        return true;
+      }
+      return false;
+    });
+  } else {
+    filtered = nonImports;
+  }
+
+  const rendered = renderSymbolsOutline(filtered);
+  if (!rendered) {
+    return outlineRes.text ? outlineRes.text.trim() : "// No exported symbols";
+  }
+  return rendered;
+}
+
+function generateExternalContract(specifier: string, importedSymbols: string[]): string {
+  if (importedSymbols.length === 0) {
+    return `// external: ${specifier}\nimport "${specifier}"`;
+  }
+  return `// external: ${specifier}\nfrom "${specifier}" import { ${importedSymbols.join(", ")} }`;
+}
+
+function extractImportsFromFile(filePath: string): ImportDecl[] {
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    if (filePath.endsWith(".ail")) {
+      const mod = parse(content, filePath);
+      return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+    }
+
+    const companionAil = `${filePath}.ail`;
+    if (fs.existsSync(companionAil)) {
+      const ailContent = fs.readFileSync(companionAil, "utf-8");
+      const mod = parse(ailContent, companionAil);
+      return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+    }
+
+    const targetLang = detectTargetFromPath(filePath);
+    const decomp = decompile(content, targetLang, { filePath });
+    const mod = parse(decomp.ail, filePath);
+    return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+  } catch {
+    return [];
+  }
+}
+
+function scanWorkspaceCallers(
+  targetFullPath: string,
+  projectRoot: string,
+  config: AilProjectConfig,
+): CallerSummary[] {
+  const callers: CallerSummary[] = [];
+  const ailFiles: string[] = [];
+  const targetCandidates: string[] = [];
+
+  function walk(currentDir: string): void {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (
+        entry.name === "node_modules" ||
+        entry.name === ".git" ||
+        entry.name === "dist" ||
+        entry.name === "build" ||
+        entry.name === ".ail-build" ||
+        entry.name === ".next" ||
+        entry.name === ".turbo" ||
+        entry.name === "coverage" ||
+        entry.name.startsWith(".")
+      ) {
+        continue;
+      }
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        walk(entryPath);
+      } else if (entry.isFile()) {
+        if (entry.name.endsWith(".ail.trivia.json")) continue;
+        if (entry.name.endsWith(".ail")) {
+          ailFiles.push(entryPath);
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (KNOWN_TARGET_EXTENSIONS.has(ext)) {
+            targetCandidates.push(entryPath);
+          }
+        }
+      }
+    }
+  }
+
+  walk(projectRoot);
+
+  const filesToScan: string[] = [];
+  const processedBases = new Set<string>();
+
+  for (const ailFile of ailFiles) {
+    const baseTarget = ailFile.replace(/\.ail$/, "");
+    processedBases.add(baseTarget);
+    filesToScan.push(ailFile);
+  }
+
+  for (const targetFile of targetCandidates) {
+    if (!processedBases.has(targetFile)) {
+      filesToScan.push(targetFile);
+    }
+  }
+
+  const resolvedTarget = path.resolve(targetFullPath);
+  const targetBase = resolvedTarget.replace(/\.ail$/, "");
+
+  for (const file of filesToScan) {
+    if (path.resolve(file) === resolvedTarget) {
+      continue;
+    }
+
+    const imports = extractImportsFromFile(file);
+    for (const imp of imports) {
+      const resolved = resolveImportPath(file, imp.source, config, projectRoot);
+      if (resolved) {
+        const resolvedBase = path.resolve(resolved).replace(/\.ail$/, "");
+        if (path.resolve(resolved) === resolvedTarget || resolvedBase === targetBase) {
+          const symbols = imp.specifiers.map((s) => s.name);
+          callers.push({
+            filePath: formatDisplayPath(file, projectRoot),
+            importedSymbols: symbols,
+            line: imp.span?.start?.line ?? 1,
+          });
+        }
+      }
+    }
+  }
+
+  callers.sort((a, b) => {
+    if (a.filePath !== b.filePath) return a.filePath.localeCompare(b.filePath);
+    return a.line - b.line;
+  });
+
+  return callers;
+}
+
+function formatBundle(
+  displayTargetPath: string,
+  targetBody: string,
+  dependencies: DependencyContract[],
+  callers: CallerSummary[],
+): string {
+  const lines: string[] = [];
+
+  lines.push(`# AIL Context Pack: ${displayTargetPath}`);
+  lines.push("");
+
+  lines.push(`## Imported Dependency Contracts (${dependencies.length}):`);
+  if (dependencies.length === 0) {
+    lines.push("None");
+  } else {
+    for (let i = 0; i < dependencies.length; i++) {
+      const dep = dependencies[i];
+      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
+      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
+      lines.push("```ail");
+      lines.push(dep.contract);
+      lines.push("```");
+      if (i < dependencies.length - 1) {
+        lines.push("");
+      }
+    }
+  }
+  lines.push("");
+
+  lines.push("## Target File Content:");
+  lines.push("```ail");
+  lines.push(targetBody);
+  lines.push("```");
+  lines.push("");
+
+  lines.push(`## Downstream Callers (${callers.length}):`);
+  if (callers.length === 0) {
+    lines.push("None");
+  } else {
+    for (const caller of callers) {
+      const symStr =
+        caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
+      lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Packages dependency contracts, target file content, and downstream callers into a 1-turn context pack.
+ */
+export async function generateContext(
+  targetPath: string,
+  options: ContextOptions = {},
+): Promise<ContextResult> {
+  const fullTargetPath = path.resolve(process.cwd(), targetPath);
+  if (!fs.existsSync(fullTargetPath)) {
+    throw new Error(`Target file not found: ${targetPath}`);
+  }
+
+  const projectRoot = options.projectRoot
+    ? path.resolve(options.projectRoot)
+    : findProjectRoot(path.dirname(fullTargetPath), process.cwd());
+  const config = loadProjectConfig(projectRoot);
+
+  const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
+  const targetContent = fs.readFileSync(fullTargetPath, "utf-8");
+
+  // Generate target outline
+  const outlineRes = generateOutline(fullTargetPath, { includeTypes: true });
+  const targetOutline = outlineRes.text;
+
+  // Dependency discovery BFS
+  const maxDepth = options.depth !== undefined ? Math.max(1, options.depth) : 1;
+  const dependencies: DependencyContract[] = [];
+  const depMap = new Map<string, DependencyContract>();
+  const visitedFiles = new Set<string>([fullTargetPath]);
+
+  interface QueueItem {
+    filePath: string;
+    currentDepth: number;
+  }
+
+  const queue: QueueItem[] = [{ filePath: fullTargetPath, currentDepth: 0 }];
+
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    if (item.currentDepth >= maxDepth) {
+      continue;
+    }
+
+    const imports = extractImportsFromFile(item.filePath);
+    for (const imp of imports) {
+      const specifier = imp.source;
+      const importedSymbols = imp.specifiers.map((s) => s.name);
+      const isExternal = isExternalSpecifier(specifier);
+      let resolvedPath: string | undefined = undefined;
+
+      if (!isExternal) {
+        resolvedPath = resolveImportPath(item.filePath, specifier, config, projectRoot);
+      }
+
+      // Skip circular back-reference to the target file itself
+      if (resolvedPath) {
+        const canonicalResolved = path.resolve(resolvedPath);
+        const canonicalTarget = path.resolve(fullTargetPath);
+        if (
+          canonicalResolved === canonicalTarget ||
+          canonicalResolved.replace(/\.ail$/, "") === canonicalTarget.replace(/\.ail$/, "")
+        ) {
+          continue;
+        }
+      }
+
+      const key = isExternal
+        ? `ext:${specifier}`
+        : resolvedPath
+          ? `res:${path.resolve(resolvedPath)}`
+          : `unres:${specifier}`;
+
+      if (depMap.has(key)) {
+        const existing = depMap.get(key)!;
+        for (const sym of importedSymbols) {
+          if (!existing.importedSymbols.includes(sym)) {
+            existing.importedSymbols.push(sym);
+          }
+        }
+      } else {
+        let contract: string;
+        let displayDepPath: string | undefined = undefined;
+
+        if (isExternal) {
+          contract = generateExternalContract(specifier, importedSymbols);
+        } else if (resolvedPath) {
+          displayDepPath = formatDisplayPath(resolvedPath, projectRoot);
+          contract = extractExportedContract(resolvedPath, importedSymbols);
+        } else {
+          contract = `// unresolved: ${specifier}`;
+        }
+
+        const depContract: DependencyContract = {
+          specifier,
+          resolvedPath: displayDepPath,
+          importedSymbols,
+          isExternal,
+          contract,
+        };
+
+        dependencies.push(depContract);
+        depMap.set(key, depContract);
+
+        if (resolvedPath && !visitedFiles.has(resolvedPath)) {
+          visitedFiles.add(resolvedPath);
+          if (item.currentDepth + 1 < maxDepth) {
+            queue.push({
+              filePath: resolvedPath,
+              currentDepth: item.currentDepth + 1,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Caller lookup
+  const callers: CallerSummary[] =
+    options.includeCallers !== false
+      ? scanWorkspaceCallers(fullTargetPath, projectRoot, config)
+      : [];
+
+  // Target body selection
+  let targetBody = options.outlineTarget ? targetOutline : targetContent;
+
+  // Build formatted bundle
+  let formattedBundle = formatBundle(
+    displayTargetPath,
+    targetBody,
+    dependencies,
+    callers,
+  );
+  let tokenCount = estimateTokens(formattedBundle);
+
+  // Bounding / Truncation with maxTokens
+  if (options.maxTokens !== undefined && tokenCount > options.maxTokens) {
+    if (!options.outlineTarget && targetOutline) {
+      targetBody = targetOutline;
+      formattedBundle = formatBundle(
+        displayTargetPath,
+        targetBody,
+        dependencies,
+        callers,
+      );
+      tokenCount = estimateTokens(formattedBundle);
+    }
+
+    if (tokenCount > options.maxTokens) {
+      const bodyLines = targetBody.split("\n");
+      while (bodyLines.length > 1 && tokenCount > options.maxTokens) {
+        const cutCount = Math.max(1, Math.floor(bodyLines.length * 0.2));
+        bodyLines.splice(bodyLines.length - cutCount, cutCount);
+        const truncatedNotice = `// ... [truncated: exceeded maxTokens limit of ${options.maxTokens}]`;
+        targetBody = [...bodyLines, truncatedNotice].join("\n");
+        formattedBundle = formatBundle(
+          displayTargetPath,
+          targetBody,
+          dependencies,
+          callers,
+        );
+        tokenCount = estimateTokens(formattedBundle);
+      }
+
+      if (tokenCount > options.maxTokens) {
+        let chars = formattedBundle.length;
+        const truncatedFooter = "\n\n// ... [truncated to fit maxTokens]";
+        while (
+          chars > 0 &&
+          estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) > options.maxTokens
+        ) {
+          chars = Math.floor(chars * 0.7);
+        }
+        if (estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens) {
+          formattedBundle = (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter;
+        } else {
+          formattedBundle = truncatedFooter;
+          while (formattedBundle.length > 0 && estimateTokens(formattedBundle) > options.maxTokens) {
+            formattedBundle = formattedBundle.slice(0, -1);
+          }
+        }
+        tokenCount = estimateTokens(formattedBundle);
+      }
+    }
+  }
+
+  return {
+    targetPath: displayTargetPath,
+    targetContent,
+    targetOutline,
+    dependencies,
+    callers,
+    formattedBundle,
+    tokenCount,
+  };
+}
+
+export const packContext = generateContext;
+export const packageContext = generateContext;
