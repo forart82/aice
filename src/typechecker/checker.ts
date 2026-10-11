@@ -2293,6 +2293,8 @@ export class TypeChecker {
         return this.checkAssign(expr.target, expr.value, expr.span, env, expr.op);
       }
     }
+
+    throw new Error(`Unhandled expression kind: ${(expr as any).kind}`);
   }
 
   private checkAssign(target: Expr, value: Expr, span: Span, env: TypeEnv, op?: AssignOp): Type {
