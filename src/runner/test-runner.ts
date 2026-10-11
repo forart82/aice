@@ -24,6 +24,7 @@ import {
   buildReportFromError,
   formatDiagnosticText,
 } from "../typechecker/diagnostics.js";
+import { formatSymbolAwareError } from "./symbol-error-formatter.js";
 
 export type HarnessType = "bun" | "vitest" | "node" | "npm" | "auto";
 
@@ -384,7 +385,8 @@ function createBunHarness(): DiscoveredHarness {
  * Creates Node.js direct test execution configuration.
  */
 function createNodeHarness(): DiscoveredHarness {
-  const command = process.execPath;
+  const isBun = typeof (process.versions as any)?.bun === "string";
+  const command = isBun ? "node" : process.execPath;
   const baseArgs = ["--test"];
 
   return {
@@ -657,11 +659,16 @@ export function formatCleanTestOutput(
   rawStdout: string,
   rawStderr: string,
   exitCode: number,
-  _summary: AilTestSummary,
+  summary: AilTestSummary,
+  projectRoot: string = process.cwd(),
 ): string {
   const combined = `${rawStdout}\n${rawStderr}`.trim();
-  if (exitCode === 0) {
+  if (exitCode === 0 && summary.failed === 0) {
     return rawStdout.trim() || combined;
+  }
+  const formatted = formatSymbolAwareError(combined, projectRoot);
+  if (formatted.trim().length > 0) {
+    return formatted;
   }
   return filterTestErrorOutput(combined);
 }
@@ -770,7 +777,9 @@ export async function runAilTests(
         rawStderr,
         exitCode,
         summary,
+        projectDir,
       );
+
       const success = exitCode === 0 && summary.failed === 0;
 
       resolve({

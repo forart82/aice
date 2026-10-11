@@ -4,4 +4,5 @@
 
 export * from "./concurrency-pool.js";
 export * from "./multi-line-reporter.js";
+export * from "./symbol-error-formatter.js";
 export * from "./test-runner.js";
