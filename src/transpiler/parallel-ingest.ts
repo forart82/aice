@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
+import { getExtensionForTarget, saveProjectConfig } from "../config/project-config.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { ConcurrencyPool, type TaskItem } from "../runner/concurrency-pool.js";
@@ -28,8 +29,14 @@ export interface IngestOptions {
   emitTrivia?: boolean; // default true
   dryRun?: boolean; // default false
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".cpp", ".hpp", ".cc", ".cxx", ".h", ".cs"]
-  ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build"]
+  ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build", ".ail-build"]
+  isolate?: boolean;
+  outDir?: string;
+  sourceDir?: string;
+  targetLanguage?: TargetLanguage;
 }
+
+export type IngestProjectOptions = IngestOptions;
 
 export interface FileIngestResult {
   sourcePath: string;
@@ -44,6 +51,7 @@ export interface FileIngestResult {
   ailTokens: number;
   cl100kSavingsPct: number;
   durationMs: number;
+  relocatedPath?: string;
 }
 
 export interface IngestSummary {
@@ -61,7 +69,104 @@ export interface IngestSummary {
 interface IngestTaskData {
   filePath: string;
   targetLang: TargetLanguage;
+  destAilPath: string;
+  destTargetPath: string;
   status: "DECOMPILING";
+}
+
+export const ISOLATED_MODE_IGNORE_FILES = [
+  ".gitignore",
+  ".agentignore",
+  ".cursorignore",
+  ".geminiignore",
+] as const;
+
+/**
+ * Derives a clean `.ail` relative path from a source target path.
+ * When the file has the default extension for its target language (e.g. `.ts` for TypeScript),
+ * the target extension is replaced with `.ail` (e.g. `calc.ts` -> `calc.ail`, `calc.test.ts` -> `calc.test.ail`).
+ * Otherwise, `.ail` is appended to preserve target metadata (e.g. `Button.tsx` -> `Button.tsx.ail`).
+ */
+export function deriveCleanAilRelativePath(
+  relPath: string,
+  targetLang: TargetLanguage,
+): string {
+  const dir = path.dirname(relPath);
+  const base = path.basename(relPath);
+  const ext = path.extname(base).toLowerCase();
+  const defaultTargetExt = getExtensionForTarget(targetLang);
+
+  let ailBase: string;
+  if (ext === defaultTargetExt) {
+    ailBase = `${base.slice(0, -ext.length)}.ail`;
+  } else {
+    ailBase = `${base}.ail`;
+  }
+
+  return dir === "." ? ailBase : path.join(dir, ailBase).replace(/\\/g, "/");
+}
+
+/**
+ * Automatically updates project ignore files (.gitignore, .agentignore, .cursorignore, .geminiignore)
+ * to ignore the isolated build directory (e.g. .ail-build/).
+ */
+export function updateIgnoreFilesForIsolatedMode(
+  projectDir: string,
+  outDir: string = ".ail-build",
+): string[] {
+  const resolvedDir = path.resolve(projectDir);
+  const cleanOutDir = outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+  const patternSlash = `${cleanOutDir}/`;
+  const patternNoSlash = cleanOutDir;
+  const updatedFiles: string[] = [];
+
+  for (const ignoreFile of ISOLATED_MODE_IGNORE_FILES) {
+    const filePath = path.join(resolvedDir, ignoreFile);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const lines = content.split(/\r?\n/).map((l) => l.trim());
+      const alreadyIgnored = lines.some(
+        (line) =>
+          line === patternSlash ||
+          line === patternNoSlash ||
+          line === `/${patternSlash}` ||
+          line === `/${patternNoSlash}` ||
+          line === `./${patternSlash}` ||
+          line === `./${patternNoSlash}`,
+      );
+
+      if (!alreadyIgnored) {
+        const prefix = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
+        const addition = `${prefix}# AIL isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
+        fs.writeFileSync(filePath, content + addition, "utf-8");
+        updatedFiles.push(filePath);
+      }
+    } else {
+      const newContent = `# AIL isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
+      fs.writeFileSync(filePath, newContent, "utf-8");
+      updatedFiles.push(filePath);
+    }
+  }
+
+  return updatedFiles;
+}
+
+function cleanEmptyDirs(dir: string, stopAt: string): void {
+  let curr = path.resolve(dir);
+  const stop = path.resolve(stopAt);
+  while (curr !== stop && curr.startsWith(stop) && curr.length > stop.length) {
+    try {
+      const entries = fs.readdirSync(curr);
+      if (entries.length === 0) {
+        fs.rmdirSync(curr);
+        curr = path.dirname(curr);
+      } else {
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
 }
 
 function shouldIgnore(name: string, relPath: string, ignorePatterns: string[]): boolean {
@@ -133,7 +238,14 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
       ".cs",
     ]
   ).map((ext) => (ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
-  const ignorePatterns = options?.ignorePatterns ?? ["node_modules", ".git", "dist", "build"];
+  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build"];
+  if (options?.outDir) {
+    const cleanOut = options.outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+    if (!defaultIgnores.includes(cleanOut)) {
+      defaultIgnores.push(cleanOut);
+    }
+  }
+  const ignorePatterns = options?.ignorePatterns ?? defaultIgnores;
 
   const results: string[] = [];
 
@@ -172,14 +284,23 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
 
 /**
  * Scans an existing project and decompiles all supported target files
- * (.ts, .tsx, .css, .html) into .ail files created SIDE-BY-SIDE in the exact
- * same directory, leveraging ConcurrencyPool and MultiLineReporter.
+ * into .ail files (side-by-side or isolated mode), leveraging ConcurrencyPool
+ * and MultiLineReporter.
  */
 export async function ingestProjectSideBySide(options: IngestOptions): Promise<IngestSummary> {
   const startTime = performance.now();
   const resolvedDir = path.resolve(options.dir);
 
-  const discoveredFiles = findIngestableFiles(resolvedDir, options);
+  const isIsolated = Boolean(options.isolate);
+  const sourceDir = (options.sourceDir ?? "src").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+  const outDir = (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+  const absSourceDir = path.resolve(resolvedDir, sourceDir);
+  const absOutDir = path.resolve(resolvedDir, outDir);
+
+  const discoveredFiles = findIngestableFiles(resolvedDir, {
+    ...options,
+    outDir,
+  });
   const totalDiscovered = discoveredFiles.length;
 
   const overwrite = options.overwrite ?? false;
@@ -188,13 +309,46 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
   const cpus = os.cpus?.().length ? os.cpus().length : 4;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? cpus));
 
+  function computeFilePaths(filePath: string): {
+    targetLang: TargetLanguage;
+    destAilPath: string;
+    destTargetPath: string;
+  } {
+    const targetLang = detectTargetFromPath(filePath);
+    if (!isIsolated) {
+      return {
+        targetLang,
+        destAilPath: `${filePath}.ail`,
+        destTargetPath: filePath,
+      };
+    }
+
+    const relFromProject = path.relative(resolvedDir, filePath).replace(/\\/g, "/");
+    let relWithinSource: string;
+    if (sourceDir && sourceDir !== "." && relFromProject.startsWith(`${sourceDir}/`)) {
+      relWithinSource = relFromProject.slice(sourceDir.length + 1);
+    } else {
+      relWithinSource = relFromProject;
+    }
+
+    const cleanAilRel = deriveCleanAilRelativePath(relWithinSource, targetLang);
+    const destAilPath = path.resolve(absSourceDir, cleanAilRel);
+    const destTargetPath = path.resolve(absOutDir, relWithinSource);
+
+    return {
+      targetLang,
+      destAilPath,
+      destTargetPath,
+    };
+  }
+
   // Identify files needing ingestion
   const filesToIngest: string[] = [];
   let totalSkipped = 0;
 
   for (const filePath of discoveredFiles) {
-    const ailPath = `${filePath}.ail`;
-    if (!overwrite && fs.existsSync(ailPath)) {
+    const { destAilPath } = computeFilePaths(filePath);
+    if (!overwrite && fs.existsSync(destAilPath)) {
       totalSkipped++;
     } else {
       filesToIngest.push(filePath);
@@ -203,6 +357,17 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
   // Handle empty ingestion set
   if (filesToIngest.length === 0) {
+    if (isIsolated && !dryRun) {
+      saveProjectConfig(resolvedDir, {
+        mode: "isolated",
+        sourceDir,
+        outDir,
+        isolated: true,
+        ...(options.targetLanguage ? { targetLanguage: options.targetLanguage } : {}),
+      });
+      updateIgnoreFilesForIsolatedMode(resolvedDir, outDir);
+    }
+
     if (options.reporter) {
       if (!options.reporter.isStarted) {
         options.reporter.start("AIL 2.0 Parallel Ingestion Engine", 0);
@@ -252,17 +417,18 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
   // Build task items
   const tasks: TaskItem<IngestTaskData, FileIngestResult>[] = filesToIngest.map((filePath) => {
-    const targetLang = detectTargetFromPath(filePath);
+    const { targetLang, destAilPath, destTargetPath } = computeFilePaths(filePath);
     return {
       id: filePath,
       data: {
         filePath,
         targetLang,
+        destAilPath,
+        destTargetPath,
         status: "DECOMPILING",
       },
       run: async (_workerId: number): Promise<FileIngestResult> => {
         const taskStart = performance.now();
-        const ailPath = `${filePath}.ail`;
 
         const source = await fs.promises.readFile(filePath, "utf-8");
         const decomp = decompile(source, targetLang, { filePath });
@@ -275,14 +441,35 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
           targetTokens > 0 ? ((targetTokens - ailTokens) / targetTokens) * 100 : 0;
 
         if (!dryRun) {
-          await fs.promises.writeFile(ailPath, decomp.ail, "utf-8");
+          await fs.promises.mkdir(path.dirname(destAilPath), { recursive: true });
+          await fs.promises.writeFile(destAilPath, decomp.ail, "utf-8");
+
+          if (isIsolated && filePath !== destTargetPath) {
+            await fs.promises.mkdir(path.dirname(destTargetPath), { recursive: true });
+            try {
+              await fs.promises.rename(filePath, destTargetPath);
+            } catch (err: unknown) {
+              const code = (err as { code?: string })?.code;
+              if (code === "EXDEV") {
+                await fs.promises.copyFile(filePath, destTargetPath);
+                await fs.promises.unlink(filePath);
+              } else {
+                throw err;
+              }
+            }
+
+            const fileDir = path.dirname(filePath);
+            if (path.resolve(fileDir) !== absSourceDir && !path.resolve(fileDir).startsWith(absSourceDir)) {
+              cleanEmptyDirs(fileDir, resolvedDir);
+            }
+          }
         }
 
         const durationMs = Math.max(0, performance.now() - taskStart);
 
         return {
           sourcePath: filePath,
-          ailPath,
+          ailPath: destAilPath,
           targetLang,
           success: true,
           targetChars,
@@ -291,6 +478,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
           ailTokens,
           cl100kSavingsPct,
           durationMs,
+          relocatedPath: isIsolated ? destTargetPath : undefined,
         };
       },
     };
@@ -298,13 +486,24 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
   const poolResults = await pool.runAll(tasks);
 
+  if (isIsolated && !dryRun) {
+    saveProjectConfig(resolvedDir, {
+      mode: "isolated",
+      sourceDir,
+      outDir,
+      isolated: true,
+      ...(options.targetLanguage ? { targetLanguage: options.targetLanguage } : {}),
+    });
+    updateIgnoreFilesForIsolatedMode(resolvedDir, outDir);
+  }
+
   const results: FileIngestResult[] = poolResults.map((taskRes) => {
     if (taskRes.success && taskRes.result) {
       return taskRes.result;
     }
     return {
       sourcePath: taskRes.task.data.filePath,
-      ailPath: `${taskRes.task.data.filePath}.ail`,
+      ailPath: taskRes.task.data.destAilPath,
       targetLang: taskRes.task.data.targetLang,
       success: false,
       error: taskRes.error ?? new Error("Task execution failed"),
@@ -314,6 +513,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
       ailTokens: 0,
       cl100kSavingsPct: 0,
       durationMs: taskRes.durationMs,
+      relocatedPath: isIsolated ? taskRes.task.data.destTargetPath : undefined,
     };
   });
 
@@ -344,3 +544,5 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
     results,
   };
 }
+
+export const ingestProject = ingestProjectSideBySide;

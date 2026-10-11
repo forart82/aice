@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.12");
+  .version("0.4.13");
 
 // Command: compile <file>
 program
@@ -718,6 +718,12 @@ program
   .option("--no-lock", "Skip locking target files as read-only (chmod 444)")
   .option("--overwrite", "Force re-decompilation of existing .ail files")
   .option("--dry-run", "Calculate plan and tokenomics metrics without mutating disk")
+  .option(
+    "--isolate",
+    "Adopt project into isolated mode (src/ contains only .ail, target files in .ail-build/)",
+  )
+  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .ail-build)")
+  .option("--source-dir <dir>", "Source directory containing .ail code (default: src)")
   .action(
     async (
       dir: string,
@@ -727,6 +733,9 @@ program
         lock?: boolean;
         overwrite?: boolean;
         dryRun?: boolean;
+        isolate?: boolean;
+        outDir?: string;
+        sourceDir?: string;
       },
     ) => {
       try {
@@ -747,6 +756,9 @@ program
           reporter,
           overwrite: Boolean(options.overwrite),
           dryRun: Boolean(options.dryRun),
+          isolate: Boolean(options.isolate),
+          outDir: options.outDir,
+          sourceDir: options.sourceDir,
         });
 
         let shieldApplied = false;
@@ -762,8 +774,14 @@ program
           }
         }
 
-        console.log(`\n=== AIL Side-by-Side Adoption Summary ===`);
+        const isIsolated = Boolean(options.isolate);
+        console.log(`\n=== AIL ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
         console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
+        if (isIsolated) {
+          console.log(`Mode:                isolated`);
+          console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
+          console.log(`Build Out Dir:       ${options.outDir ?? ".ail-build"}`);
+        }
         console.log(
           `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
         );
