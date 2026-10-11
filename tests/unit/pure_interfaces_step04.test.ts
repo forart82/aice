@@ -25,14 +25,14 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
     expect(typeDecl.fields![1].isOptional).toBe(true);
 
     // Emits pure interface when pureInterfaces: true is set
-    const emitted = emitTarget(mod, "typescript", { pureInterfaces: true });
+    const emitted = emitTarget(mod, "typescript", { pureInterfaces: true, watermark: false });
     expect(emitted).toBe(
       `export interface Opts {\n  width?: number;\n  height?: number;\n}\n`,
     );
     expect(emitted).not.toContain("export function Opts");
 
     // Also via TypeScriptEmitter directly with pureInterfaces: true
-    const directEmitted = TypeScriptEmitter.emit(mod, { pureInterfaces: true });
+    const directEmitted = TypeScriptEmitter.emit(mod, { pureInterfaces: true, watermark: false });
     expect(directEmitted).toBe(
       `export interface Opts {\n  width?: number;\n  height?: number;\n}\n`,
     );
@@ -45,7 +45,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
   height: int
 `;
     const mod = parse(src, "foo.ts.ail");
-    const emitted = emitTarget(mod, "typescript", { pureInterfaces: true });
+    const emitted = emitTarget(mod, "typescript", { pureInterfaces: true, watermark: false });
 
     expect(emitted).toBe(
       `export interface Foo {\n  width: number;\n  height: number;\n}\n`,

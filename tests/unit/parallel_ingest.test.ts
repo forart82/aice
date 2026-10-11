@@ -335,7 +335,7 @@ export interface Service {
 
         const ailContent = fs.readFileSync(ailPath, "utf-8");
         const mod = parse(ailContent, ailPath);
-        const recompiled = emitTarget(mod, target);
+        const recompiled = emitTarget(mod, target, { watermark: false });
 
         expect(recompiled).toBe(origContent);
       }

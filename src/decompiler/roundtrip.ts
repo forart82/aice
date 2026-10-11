@@ -89,7 +89,7 @@ export function executeRoundtrip(
   const ail = ailGenerator.generate(ast);
 
   // Put: Emit back to target language with trivia
-  const reconstructed = emitTarget(ast, target, { trivia });
+  const reconstructed = emitTarget(ast, target, { trivia, watermark: false });
 
   // Normalize whitespace for diff comparison
   const normOriginal = normalizeWhitespace(source);
@@ -118,7 +118,7 @@ export function executeAilRoundtrip(
   filePath = "source.ail",
 ): AilRoundtripResult {
   const { ast, trivia } = parseWithTrivia(ailSource, filePath);
-  const targetReconstructed = emitTarget(ast, target, { trivia });
+  const targetReconstructed = emitTarget(ast, target, { trivia, watermark: false });
   const reverseResult = executeRoundtrip(targetReconstructed, target, filePath);
   return {
     target,

@@ -51,7 +51,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.7");
+  .version("0.4.8");
 
 // Command: compile <file>
 program
@@ -68,10 +68,17 @@ program
     "--pure-interfaces",
     "Emit pure TypeScript interfaces without artificial factory constructor functions",
   )
+  .option("--no-watermark", "Disable generated watermark header in emitted target files")
   .action(
     (
       file: string,
-      options: { out?: string; target?: string; fix?: boolean; pureInterfaces?: boolean },
+      options: {
+        out?: string;
+        target?: string;
+        fix?: boolean;
+        pureInterfaces?: boolean;
+        watermark?: boolean;
+      },
     ) => {
       try {
         const fullPath = path.resolve(process.cwd(), file);
@@ -107,6 +114,7 @@ program
         const emitted = emitTarget(mod, targetLang, {
           trivia,
           pureInterfaces: options.pureInterfaces,
+          watermark: options.watermark,
         });
 
         // Output path
@@ -138,52 +146,55 @@ program
     "--pure-interfaces",
     "Emit pure TypeScript interfaces without artificial factory constructor functions",
   )
-  .action((dir: string, options: { outDir?: string; pureInterfaces?: boolean }) => {
-    try {
-      const searchDir = path.resolve(process.cwd(), dir);
-      if (!fs.existsSync(searchDir)) {
-        console.error(`❌ Error: Directory not found: ${dir}`);
-        process.exit(1);
-      }
-
-      function findAilFiles(curDir: string): string[] {
-        const entries = fs.readdirSync(curDir, { withFileTypes: true });
-        const results: string[] = [];
-        for (const entry of entries) {
-          const res = path.resolve(curDir, entry.name);
-          if (entry.isDirectory()) {
-            if (entry.name !== "node_modules" && entry.name !== ".git") {
-              results.push(...findAilFiles(res));
-            }
-          } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-            results.push(res);
-          }
+  .option("--no-watermark", "Disable generated watermark header in emitted target files")
+  .action(
+    (dir: string, options: { outDir?: string; pureInterfaces?: boolean; watermark?: boolean }) => {
+      try {
+        const searchDir = path.resolve(process.cwd(), dir);
+        if (!fs.existsSync(searchDir)) {
+          console.error(`❌ Error: Directory not found: ${dir}`);
+          process.exit(1);
         }
-        return results;
-      }
 
-      const files = findAilFiles(searchDir);
-      if (files.length === 0) {
-        console.log(`No .ail files found in ${dir}`);
-        return;
-      }
+        function findAilFiles(curDir: string): string[] {
+          const entries = fs.readdirSync(curDir, { withFileTypes: true });
+          const results: string[] = [];
+          for (const entry of entries) {
+            const res = path.resolve(curDir, entry.name);
+            if (entry.isDirectory()) {
+              if (entry.name !== "node_modules" && entry.name !== ".git") {
+                results.push(...findAilFiles(res));
+              }
+            } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+              results.push(res);
+            }
+          }
+          return results;
+        }
 
-      let successCount = 0;
-      let failCount = 0;
+        const files = findAilFiles(searchDir);
+        if (files.length === 0) {
+          console.log(`No .ail files found in ${dir}`);
+          return;
+        }
 
-      for (const f of files) {
-        const relPath = path.relative(process.cwd(), f);
-        try {
-          const source = fs.readFileSync(f, "utf-8");
-          const { ast: mod, trivia } = parseWithTrivia(source, relPath);
-          const tc = new TypeChecker();
-          tc.checkModule(mod);
+        let successCount = 0;
+        let failCount = 0;
 
-          const targetLang = detectTargetFromPath(relPath);
-          const emitted = emitTarget(mod, targetLang, {
-            trivia,
-            pureInterfaces: options.pureInterfaces,
-          });
+        for (const f of files) {
+          const relPath = path.relative(process.cwd(), f);
+          try {
+            const source = fs.readFileSync(f, "utf-8");
+            const { ast: mod, trivia } = parseWithTrivia(source, relPath);
+            const tc = new TypeChecker();
+            tc.checkModule(mod);
+
+            const targetLang = detectTargetFromPath(relPath);
+            const emitted = emitTarget(mod, targetLang, {
+              trivia,
+              pureInterfaces: options.pureInterfaces,
+              watermark: options.watermark,
+            });
 
           let outPath = getTargetOutputPath(f);
           if (options.outDir) {

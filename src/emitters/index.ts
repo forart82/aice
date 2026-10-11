@@ -36,7 +36,9 @@ export function emitTarget(
   target?: TargetLanguage,
   options: EmitterOptions = {},
 ): string {
-  const chosenTarget = target ?? detectTargetFromPath(mod.path);
+  const fileCandidate =
+    mod.span?.file && mod.span.file !== "<anonymous>" ? mod.span.file : mod.path;
+  const chosenTarget = target ?? detectTargetFromPath(fileCandidate);
   switch (chosenTarget) {
     case "typescript":
     case "tsx": {

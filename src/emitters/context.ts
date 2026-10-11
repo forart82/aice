@@ -21,6 +21,8 @@ export interface EmitterOptions {
   includeComments?: boolean;
   trivia?: CstTriviaTable;
   pureInterfaces?: boolean;
+  watermark?: boolean;
+  sourcePath?: string;
 }
 
 export class EmitterContext {
@@ -28,6 +30,8 @@ export class EmitterContext {
   readonly indentStr: string;
   readonly trivia?: CstTriviaTable;
   readonly pureInterfaces?: boolean;
+  readonly watermark?: boolean;
+  readonly sourcePath?: string;
   private currentIndent = 0;
   private buffer: string[] = [];
   private neededHelpers = new Set<string>();
@@ -37,6 +41,8 @@ export class EmitterContext {
     this.indentStr = options.indent ?? "  ";
     this.trivia = options.trivia;
     this.pureInterfaces = options.pureInterfaces;
+    this.watermark = options.watermark;
+    this.sourcePath = options.sourcePath;
   }
 
   indent(): void {
