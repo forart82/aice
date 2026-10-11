@@ -20,6 +20,7 @@ import { HtmlDecompiler } from "./html-decompiler.js";
 import { JsonDecompiler } from "./json-decompiler.js";
 import { TsDecompiler } from "./ts-decompiler.js";
 import { YamlDecompiler } from "./yaml-decompiler.js";
+import { PhpDecompiler } from "./php-decompiler.js";
 
 export interface RoundtripResult {
   target: TargetLanguage;
@@ -81,6 +82,11 @@ export function executeRoundtrip(
     }
     case "yaml": {
       const decompiler = new YamlDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "php": {
+      const decompiler = new PhpDecompiler(source, filePath);
       decompileResult = decompiler.decompile();
       break;
     }

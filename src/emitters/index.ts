@@ -15,6 +15,7 @@ import { RustEmitter } from "./rust-emitter.js";
 import { TypeScriptEmitter } from "./ts-emitter.js";
 import { TwigEmitter } from "./twig-emitter.js";
 import { YamlEmitter } from "./yaml-emitter.js";
+import { PhpEmitter } from "./php-emitter.js";
 
 export * from "./context.js";
 export * from "./cpp-emitter.js";
@@ -23,6 +24,7 @@ export * from "./css-emitter.js";
 export * from "./go-emitter.js";
 export * from "./html-emitter.js";
 export * from "./json-emitter.js";
+export * from "./php-emitter.js";
 export * from "./py-emitter.js";
 export * from "./rewriter.js";
 export * from "./rust-emitter.js";
@@ -91,6 +93,10 @@ export function emitTarget(
     }
     case "twig": {
       const emitter = new TwigEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "php": {
+      const emitter = new PhpEmitter(options);
       return emitter.emit(mod);
     }
     default: {

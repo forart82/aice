@@ -419,6 +419,35 @@ pub fn advanceLevel(p: Player) -> Player:
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.reconstructed).toContain("FoodItem");
     });
+
+    it("verifies PHP 8 domain entities decompilation and semantic re-emission (case51 Order.php)", () => {
+      const targetPath = path.join(testCaseSrc, "case51/Order.php");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "php", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.reconstructed).toContain("class Order");
+      expect(roundtripRes.reconstructed).toContain("__construct");
+      expect(roundtripRes.reconstructed).toContain("match");
+    });
+
+    it("verifies PHP 8 service layer decompilation and semantic re-emission (case51 CustomerService.php)", () => {
+      const targetPath = path.join(testCaseSrc, "case51/CustomerService.php");
+      if (!fs.existsSync(targetPath)) return;
+
+      const original = fs.readFileSync(targetPath, "utf-8");
+      const roundtripRes = executeRoundtrip(original, "php", targetPath);
+
+      expect(roundtripRes.ail).toBeDefined();
+      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(parsedAst).toBeDefined();
+      expect(roundtripRes.reconstructed).toContain("class CustomerService");
+      expect(roundtripRes.reconstructed).toContain("getOrderTotal");
+    });
   });
 
   // ===========================================================================

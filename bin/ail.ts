@@ -76,7 +76,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.7");
+  .version("0.5.8");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
