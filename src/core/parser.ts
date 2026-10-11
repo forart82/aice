@@ -270,16 +270,11 @@ export class Parser {
       this.check("FINALLY") ||
       this.check("FOR") ||
       this.check("WHILE") ||
-      this.check("RETURN") ||
       this.check("RET") ||
-      this.check("DEF") ||
       this.check("FN") ||
       this.check("CLASS") ||
-      this.check("INTERFACE") ||
       this.check("CASE") ||
-      this.check("DEFAULT") ||
-      this.check("IMPORT") ||
-      this.check("EXPORT")
+      this.check("IMPORT")
     ) {
       return false;
     }
