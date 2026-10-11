@@ -12,11 +12,16 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
-import { getExtensionForTarget, saveProjectConfig } from "../config/project-config.js";
+import {
+  getExtensionForTarget,
+  loadProjectConfig,
+  saveProjectConfig,
+} from "../config/project-config.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { ConcurrencyPool, type TaskItem } from "../runner/concurrency-pool.js";
 import { MultiLineReporter } from "../runner/multi-line-reporter.js";
+import { removeAiShield, unlockProjectTargets } from "../shield/index.js";
 
 const cl100k = getEncoding("cl100k_base");
 
@@ -149,6 +154,88 @@ export function updateIgnoreFilesForIsolatedMode(
   }
 
   return updatedFiles;
+}
+
+/**
+ * Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore)
+ * removing .ail-build (or custom outDir) patterns and comments.
+ * Deletes the ignore file if it becomes empty.
+ */
+export function cleanIgnoreFilesForIsolatedMode(
+  projectDir: string,
+  outDir: string = ".ail-build",
+): string[] {
+  const resolvedDir = path.resolve(projectDir);
+  const cleanOutDir = outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+  const patternSlash = `${cleanOutDir}/`;
+  const patternNoSlash = cleanOutDir;
+  const defaultSlash = ".ail-build/";
+  const defaultNoSlash = ".ail-build";
+
+  const isIsolatedIgnoreLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (
+      trimmed === "# AIL isolated build artifact cache" ||
+      trimmed === "# AIL isolated build cache"
+    ) {
+      return true;
+    }
+    const candidates = [
+      patternSlash,
+      patternNoSlash,
+      `/${patternSlash}`,
+      `/${patternNoSlash}`,
+      `./${patternSlash}`,
+      `./${patternNoSlash}`,
+      defaultSlash,
+      defaultNoSlash,
+      `/${defaultSlash}`,
+      `/${defaultNoSlash}`,
+      `./${defaultSlash}`,
+      `./${defaultNoSlash}`,
+    ];
+    return candidates.includes(trimmed);
+  };
+
+  const cleanedFiles: string[] = [];
+
+  for (const ignoreFile of ISOLATED_MODE_IGNORE_FILES) {
+    const filePath = path.join(resolvedDir, ignoreFile);
+    if (!fs.existsSync(filePath)) continue;
+
+    const content = fs.readFileSync(filePath, "utf-8");
+    const lines = content.split(/\r?\n/);
+    const remainingLines: string[] = [];
+    let fileModified = false;
+
+    for (const line of lines) {
+      if (isIsolatedIgnoreLine(line)) {
+        fileModified = true;
+      } else {
+        remainingLines.push(line);
+      }
+    }
+
+    if (fileModified) {
+      const remainingText = remainingLines
+        .join("\n")
+        .replace(/\n{3,}/g, "\n\n")
+        .trim();
+
+      if (!remainingText) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch {
+          // ignore unlink error
+        }
+      } else {
+        fs.writeFileSync(filePath, `${remainingText}\n`, "utf-8");
+      }
+      cleanedFiles.push(filePath);
+    }
+  }
+
+  return cleanedFiles;
 }
 
 function cleanEmptyDirs(dir: string, stopAt: string): void {
@@ -546,3 +633,258 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 }
 
 export const ingestProject = ingestProjectSideBySide;
+
+/**
+ * Recursively removes all .ail, .trivia.json, and .uid files from a directory,
+ * skipping node_modules, .git, and build directories.
+ * Returns array of removed file paths.
+ */
+export function removeAilAndTriviaFiles(curDir: string): string[] {
+  const removed: string[] = [];
+  if (!fs.existsSync(curDir)) return removed;
+
+  const entries = fs.readdirSync(curDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (
+      entry.name === "node_modules" ||
+      entry.name === ".git" ||
+      entry.name === ".ail-build"
+    ) {
+      continue;
+    }
+    const fullPath = path.join(curDir, entry.name);
+    if (entry.isDirectory()) {
+      removed.push(...removeAilAndTriviaFiles(fullPath));
+    } else if (entry.isFile()) {
+      const lower = entry.name.toLowerCase();
+      if (
+        lower.endsWith(".ail") ||
+        lower.endsWith(".trivia.json") ||
+        lower.endsWith(".uid")
+      ) {
+        try {
+          fs.unlinkSync(fullPath);
+          removed.push(fullPath);
+        } catch {
+          try {
+            fs.chmodSync(fullPath, 0o644);
+            fs.unlinkSync(fullPath);
+            removed.push(fullPath);
+          } catch {
+            // ignore unlink errors
+          }
+        }
+      }
+    }
+  }
+  return removed;
+}
+
+export interface EjectProjectOptions {
+  dir: string;
+  fromBuild?: boolean;
+  removeAil?: boolean;
+  keepAil?: boolean;
+  sourceDir?: string;
+  outDir?: string;
+}
+
+export interface EjectProjectResult {
+  mode: "isolated" | "side-by-side";
+  restoredFiles: string[];
+  removedAilFiles: string[];
+  removedBuildDir?: string;
+  unlockedTargets?: number;
+  shieldRemoved?: string[];
+  shieldReverted?: string[];
+}
+
+/**
+ * Ejects AIL from a project.
+ * Supports both:
+ * 1. Isolated mode (or when `fromBuild` is true):
+ *    - Identifies sourceDir (e.g. src) and outDir (e.g. .ail-build)
+ *    - Copies/moves all target files from outDir back into sourceDir, restoring original file tree
+ *    - Removes .ail files unless keepAil is true (default for isolated eject is to delete .ail files)
+ *    - Removes outDir (.ail-build/)
+ *    - Removes ail.config.json and .ailrc
+ *    - Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore) removing .ail-build rules
+ *    - Removes AI shields and unlocks target files
+ *    - Returns { restoredFiles, removedAilFiles, removedBuildDir, ... }
+ * 2. Side-by-side mode:
+ *    - Unlocks target files
+ *    - Removes AI shields
+ *    - Removes .ail files if removeAil is true and not keepAil
+ *    - Returns { restoredFiles: [], removedAilFiles, ... }
+ */
+export async function ejectProject(options: EjectProjectOptions): Promise<EjectProjectResult> {
+  const resolvedDir = path.resolve(options.dir);
+  if (!fs.existsSync(resolvedDir)) {
+    throw new Error(`Directory not found: ${options.dir}`);
+  }
+
+  const config = loadProjectConfig(resolvedDir);
+  const detectedOutDir = (options.outDir ?? config.outDir ?? ".ail-build")
+    .replace(/^\.\/|^\.\\/, "")
+    .replace(/[/\\]+$/, "");
+  const absDetectedOutDir = path.resolve(resolvedDir, detectedOutDir);
+
+  const isIsolated = Boolean(
+    options.fromBuild ||
+      config.mode === "isolated" ||
+      config.isolated ||
+      fs.existsSync(absDetectedOutDir),
+  );
+
+  const restoredFiles: string[] = [];
+  const removedAilFiles: string[] = [];
+  let removedBuildDir: string | undefined;
+  let unlockedTargets = 0;
+
+  if (isIsolated) {
+    const sourceDir = (options.sourceDir ?? config.sourceDir ?? "src")
+      .replace(/^\.\/|^\.\\/, "")
+      .replace(/[/\\]+$/, "");
+    const outDir = detectedOutDir;
+    const absSourceDir = path.resolve(resolvedDir, sourceDir);
+    const absOutDir = absDetectedOutDir;
+
+    // 1. Identify and restore target files from outDir back into sourceDir
+    if (fs.existsSync(absOutDir)) {
+      function scanTargetFiles(cur: string): string[] {
+        const found: string[] = [];
+        if (!fs.existsSync(cur)) return found;
+        const entries = fs.readdirSync(cur, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = path.join(cur, entry.name);
+          if (entry.isDirectory()) {
+            found.push(...scanTargetFiles(full));
+          } else if (entry.isFile()) {
+            found.push(full);
+          }
+        }
+        return found;
+      }
+
+      const filesToRestore = scanTargetFiles(absOutDir);
+      for (const srcFile of filesToRestore) {
+        const rel = path.relative(absOutDir, srcFile);
+        const destFile = path.resolve(absSourceDir, rel);
+        fs.mkdirSync(path.dirname(destFile), { recursive: true });
+
+        // Ensure source file is readable if locked
+        try {
+          fs.chmodSync(srcFile, 0o644);
+        } catch {
+          // ignore
+        }
+
+        fs.copyFileSync(srcFile, destFile);
+
+        // Ensure restored target file is unlocked and writable
+        try {
+          fs.chmodSync(destFile, 0o644);
+        } catch {
+          // ignore
+        }
+
+        restoredFiles.push(destFile);
+      }
+
+      // 2. Remove outDir (.ail-build/)
+      try {
+        fs.rmSync(absOutDir, { recursive: true, force: true });
+        removedBuildDir = absOutDir;
+      } catch {
+        // Unlock files inside outDir and retry if needed
+        try {
+          for (const f of filesToRestore) {
+            try {
+              fs.chmodSync(f, 0o644);
+            } catch {
+              // ignore
+            }
+          }
+          fs.rmSync(absOutDir, { recursive: true, force: true });
+          removedBuildDir = absOutDir;
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // 3. Removes .ail files if --remove-ail is true (or default for isolated eject, unless keepAil)
+    let shouldRemoveAil = true;
+    if (options.keepAil) {
+      shouldRemoveAil = false;
+    } else if (options.removeAil !== undefined) {
+      shouldRemoveAil = options.removeAil;
+    }
+
+    if (shouldRemoveAil) {
+      const removed = removeAilAndTriviaFiles(resolvedDir);
+      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
+      removedAilFiles.push(...ailOnly);
+    }
+
+    // 4. Remove ail.config.json and .ailrc
+    for (const cfgName of ["ail.config.json", ".ailrc"]) {
+      const cfgPath = path.join(resolvedDir, cfgName);
+      if (fs.existsSync(cfgPath)) {
+        try {
+          fs.unlinkSync(cfgPath);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // 5. Remove AI shields
+    const shieldRes = await removeAiShield(resolvedDir);
+
+    // 6. Clean ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore)
+    cleanIgnoreFilesForIsolatedMode(resolvedDir, outDir);
+
+    // 7. Ensure restored files are unlocked
+    const lockRes = await unlockProjectTargets(resolvedDir);
+    unlockedTargets = lockRes.totalUnlocked;
+
+    restoredFiles.sort();
+    removedAilFiles.sort();
+
+    return {
+      mode: "isolated",
+      restoredFiles,
+      removedAilFiles,
+      removedBuildDir,
+      unlockedTargets,
+      shieldRemoved: shieldRes.removedFiles,
+      shieldReverted: shieldRes.revertedFiles,
+    };
+  } else {
+    // Side-by-side mode eject
+    const lockRes = await unlockProjectTargets(resolvedDir);
+    unlockedTargets = lockRes.totalUnlocked;
+
+    const shieldRes = await removeAiShield(resolvedDir);
+
+    if (options.removeAil && !options.keepAil) {
+      const removed = removeAilAndTriviaFiles(resolvedDir);
+      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
+      removedAilFiles.push(...ailOnly);
+    }
+
+    removedAilFiles.sort();
+
+    return {
+      mode: "side-by-side",
+      restoredFiles: [],
+      removedAilFiles,
+      unlockedTargets,
+      shieldRemoved: shieldRes.removedFiles,
+      shieldReverted: shieldRes.revertedFiles,
+    };
+  }
+}
+
+export const eject = ejectProject;

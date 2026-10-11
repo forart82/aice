@@ -10,6 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import {
+  type AilProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
@@ -42,7 +43,7 @@ import {
   formatTokenomicsMarkdownTable,
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
-import { ingestProjectSideBySide } from "../src/transpiler/index.js";
+import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
   attemptSelfRepair,
@@ -57,7 +58,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.14");
+  .version("0.4.15");
 
 // Command: compile <file>
 program
@@ -973,16 +974,27 @@ program
   );
 
 // Command: eject [dir]
-program
+const ejectCmd = program
   .command("eject")
-  .description("Eject AIL side-by-side mode: unlock target files and revert AI shields")
+  .description("Eject AIL side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields")
   .argument("[dir]", "Target project directory", ".")
   .option("--remove-ail", "Delete all .ail source files")
+  .option(
+    "--from-build",
+    "Restore target files from .ail-build back to sourceDir and delete .ail files",
+  )
+  .option("--keep-ail", "Preserve .ail source files while restoring target files")
+  .option("--source-dir <dir>", "Source directory containing .ail code (default: src)")
+  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .ail-build)")
   .action(
     async (
       dir: string,
       options: {
         removeAil?: boolean;
+        fromBuild?: boolean;
+        keepAil?: boolean;
+        sourceDir?: string;
+        outDir?: string;
       },
     ) => {
       try {
@@ -992,28 +1004,41 @@ program
           process.exit(1);
         }
 
-        // 1. Unlock targets
-        const lockRes = await unlockProjectTargets(targetDir);
+        const ejectResult = await ejectProject({
+          dir: targetDir,
+          fromBuild: Boolean(options.fromBuild),
+          removeAil: options.removeAil,
+          keepAil: options.keepAil,
+          sourceDir: options.sourceDir,
+          outDir: options.outDir,
+        });
 
-        // 2. Remove AI shields
-        const shieldRes = await removeAiShield(targetDir);
-
-        // 3. Optionally remove .ail files
-        let removedAilCount = 0;
-        if (options.removeAil) {
-          removedAilCount = removeAilAndTriviaFiles(targetDir);
-        }
-
-        // 4. Print confirmation
+        // Print confirmation
         console.log(`\n=== AIL Eject Complete ===`);
         console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
-        console.log(`Unlocked Targets:    ${lockRes.totalUnlocked} file(s) restored to chmod 644`);
+        if (ejectResult.mode === "isolated") {
+          console.log(`Mode:                isolated (--from-build)`);
+          console.log(
+            `Restored Targets:    ${ejectResult.restoredFiles.length} file(s) restored to source directory`,
+          );
+          if (ejectResult.removedBuildDir) {
+            console.log(
+              `Removed Build Dir:   ${path.relative(process.cwd(), ejectResult.removedBuildDir) || ejectResult.removedBuildDir}`,
+            );
+          }
+        } else {
+          console.log(
+            `Unlocked Targets:    ${ejectResult.unlockedTargets ?? 0} file(s) restored to chmod 644`,
+          );
+        }
         console.log(
-          `AI Shield:           Reverted (${shieldRes.removedFiles.length} removed, ${shieldRes.revertedFiles.length} restored)`,
+          `AI Shield:           Reverted (${ejectResult.shieldRemoved?.length ?? 0} removed, ${ejectResult.shieldReverted?.length ?? 0} restored)`,
         );
         console.log(
           `AIL Source Files:    ${
-            options.removeAil ? `Deleted ${removedAilCount} .ail files` : "Preserved on disk"
+            ejectResult.removedAilFiles.length > 0
+              ? `Deleted ${ejectResult.removedAilFiles.length} .ail files`
+              : "Preserved on disk"
           }`,
         );
         console.log(`Project successfully restored to standard toolchain state.`);
