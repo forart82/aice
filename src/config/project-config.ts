@@ -23,10 +23,7 @@ export interface AilProjectConfig {
   watermark: boolean;
 }
 
-export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
-  "side-by-side",
-  "isolated",
-]);
+export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set(["side-by-side", "isolated"]);
 
 export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "typescript",
@@ -38,6 +35,8 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "go",
   "cpp",
   "csharp",
+  "json",
+  "yaml",
 ]);
 
 export const DEFAULT_PROJECT_CONFIG: Readonly<AilProjectConfig> = Object.freeze({
@@ -67,7 +66,33 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".jsx",
   ".mjs",
   ".cjs",
+  ".json",
+  ".yaml",
+  ".yml",
 ]);
+
+export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
+  ".ts": "typescript",
+  ".tsx": "tsx",
+  ".js": "typescript",
+  ".jsx": "tsx",
+  ".mjs": "typescript",
+  ".cjs": "typescript",
+  ".py": "python",
+  ".rs": "rust",
+  ".go": "go",
+  ".cpp": "cpp",
+  ".hpp": "cpp",
+  ".cc": "cpp",
+  ".cxx": "cpp",
+  ".h": "cpp",
+  ".cs": "csharp",
+  ".html": "html",
+  ".css": "css",
+  ".json": "json",
+  ".yaml": "yaml",
+  ".yml": "yaml",
+});
 
 const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   "node_modules",
@@ -103,6 +128,10 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".html";
     case "css":
       return ".css";
+    case "json":
+      return ".json";
+    case "yaml":
+      return ".yaml";
     default:
       return ".ts";
   }
@@ -205,10 +234,7 @@ export function validateConfig(config: Partial<AilProjectConfig>): void {
     );
   }
 
-  if (
-    config.targetLanguage !== undefined &&
-    !VALID_TARGET_LANGUAGES.has(config.targetLanguage)
-  ) {
+  if (config.targetLanguage !== undefined && !VALID_TARGET_LANGUAGES.has(config.targetLanguage)) {
     throw new Error(
       `Invalid target language "${config.targetLanguage}". Valid targets are: ${Array.from(
         VALID_TARGET_LANGUAGES,
@@ -487,16 +513,13 @@ export function saveProjectConfig(
 
   if (config.mode !== undefined) {
     mode = config.mode;
-    isolated = config.isolated ?? (mode === "isolated");
+    isolated = config.isolated ?? mode === "isolated";
   } else if (config.isolated !== undefined) {
     isolated = config.isolated;
     mode = isolated ? "isolated" : "side-by-side";
   } else if (existing.mode !== undefined) {
     mode = existing.mode as ProjectMode;
-    isolated =
-      existing.isolated !== undefined
-        ? Boolean(existing.isolated)
-        : mode === "isolated";
+    isolated = existing.isolated !== undefined ? Boolean(existing.isolated) : mode === "isolated";
   } else if (existing.isolated !== undefined) {
     isolated = Boolean(existing.isolated);
     mode = isolated ? "isolated" : "side-by-side";
@@ -507,7 +530,8 @@ export function saveProjectConfig(
 
   const mergedConfig: AilProjectConfig = {
     mode,
-    sourceDir: config.sourceDir ?? (existing.sourceDir as string) ?? DEFAULT_PROJECT_CONFIG.sourceDir,
+    sourceDir:
+      config.sourceDir ?? (existing.sourceDir as string) ?? DEFAULT_PROJECT_CONFIG.sourceDir,
     outDir: config.outDir ?? (existing.outDir as string) ?? DEFAULT_PROJECT_CONFIG.outDir,
     targetLanguage:
       config.targetLanguage ??
@@ -516,7 +540,9 @@ export function saveProjectConfig(
     isolated,
     watermark:
       config.watermark ??
-      (typeof existing.watermark === "boolean" ? existing.watermark : DEFAULT_PROJECT_CONFIG.watermark),
+      (typeof existing.watermark === "boolean"
+        ? existing.watermark
+        : DEFAULT_PROJECT_CONFIG.watermark),
   };
 
   validateConfig(mergedConfig);
@@ -559,10 +585,7 @@ function stripSourceDirPrefix(filePath: string, sourceDir: string): string {
 /**
  * Derives the target relative path from a source relative path.
  */
-function deriveTargetPath(
-  relPath: string,
-  targetLanguage: TargetLanguage = "typescript",
-): string {
+function deriveTargetPath(relPath: string, targetLanguage: TargetLanguage = "typescript"): string {
   const dir = path.dirname(relPath);
   const base = path.basename(relPath);
   const targetBase = deriveTargetFilename(base, targetLanguage);

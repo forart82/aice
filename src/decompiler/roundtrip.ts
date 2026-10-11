@@ -17,7 +17,9 @@ import { CppDecompiler } from "./cpp-decompiler.js";
 import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
+import { JsonDecompiler } from "./json-decompiler.js";
 import { TsDecompiler } from "./ts-decompiler.js";
+import { YamlDecompiler } from "./yaml-decompiler.js";
 
 export interface RoundtripResult {
   target: TargetLanguage;
@@ -69,6 +71,16 @@ export function executeRoundtrip(
     }
     case "html": {
       const decompiler = new HtmlDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "json": {
+      const decompiler = new JsonDecompiler(source, filePath);
+      decompileResult = decompiler.decompile();
+      break;
+    }
+    case "yaml": {
+      const decompiler = new YamlDecompiler(source, filePath);
       decompileResult = decompiler.decompile();
       break;
     }

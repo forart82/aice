@@ -13,17 +13,10 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseWithTrivia } from "../core/parser.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  getTargetOutputPath,
-} from "../emitters/index.js";
+import { detectTargetFromPath, emitTarget, getTargetOutputPath } from "../emitters/index.js";
 import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
-import {
-  buildReportFromError,
-  formatDiagnosticText,
-} from "../typechecker/diagnostics.js";
+import { buildReportFromError, formatDiagnosticText } from "../typechecker/diagnostics.js";
 import { formatSymbolAwareError } from "./symbol-error-formatter.js";
 
 export type HarnessType = "bun" | "vitest" | "node" | "npm" | "auto";
@@ -72,9 +65,7 @@ export interface DiscoveredHarness {
  * Strips ANSI escape codes from terminal text.
  */
 function stripAnsi(str: string): string {
-  return str
-    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "")
-    .replace(/\x1b\].*?\x07/g, "");
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "").replace(/\x1b\].*?\x07/g, "");
 }
 
 const KNOWN_TARGET_EXTENSIONS = new Set([
@@ -95,6 +86,9 @@ const KNOWN_TARGET_EXTENSIONS = new Set([
   ".cxx",
   ".h",
   ".cs",
+  ".json",
+  ".yaml",
+  ".yml",
 ]);
 
 /**
@@ -128,6 +122,12 @@ export function resolveTargetFilePath(ailPath: string): string {
       case "css":
         targetOut += ".css";
         break;
+      case "json":
+        targetOut += ".json";
+        break;
+      case "yaml":
+        targetOut += ".yaml";
+        break;
       case "tsx":
         targetOut += ".tsx";
         break;
@@ -144,10 +144,7 @@ export function resolveTargetFilePath(ailPath: string): string {
  * Checks whether an .ail source file requires compilation before running tests.
  * Returns true if target file does not exist or if .ail is strictly newer.
  */
-export function isAilCompilationNeeded(
-  ailPath: string,
-  targetPath?: string,
-): boolean {
+export function isAilCompilationNeeded(ailPath: string, targetPath?: string): boolean {
   const target = targetPath ?? resolveTargetFilePath(ailPath);
   if (!fs.existsSync(target)) {
     return true;
@@ -445,12 +442,7 @@ export function discoverTestHarness(
   const pkgPath = findNearestPackageJson(projectDir);
   let pkg: Record<string, unknown> | null = null;
   const resolvedPkgDir = pkgPath ? path.dirname(pkgPath) : projectDir;
-  const localVitestBin = path.join(
-    resolvedPkgDir,
-    "node_modules",
-    ".bin",
-    "vitest",
-  );
+  const localVitestBin = path.join(resolvedPkgDir, "node_modules", ".bin", "vitest");
 
   if (pkgPath && fs.existsSync(pkgPath)) {
     try {
@@ -520,10 +512,7 @@ export function discoverTestHarness(
 /**
  * Parses test execution summary (total, passed, failed) from test runner outputs.
  */
-export function parseTestSummary(
-  rawOutput: string,
-  exitCode: number,
-): AilTestSummary {
+export function parseTestSummary(rawOutput: string, exitCode: number): AilTestSummary {
   const clean = stripAnsi(rawOutput);
   let total = 0;
   let passed = 0;
@@ -697,14 +686,8 @@ export async function runAilTests(
     effectiveTarget = compResult.effectiveTarget;
   } catch (compileErr) {
     const source =
-      targetPath && fs.existsSync(targetPath)
-        ? fs.readFileSync(targetPath, "utf-8")
-        : "";
-    const report = buildReportFromError(
-      compileErr,
-      source,
-      targetPath ?? "unknown.ail",
-    );
+      targetPath && fs.existsSync(targetPath) ? fs.readFileSync(targetPath, "utf-8") : "";
+    const report = buildReportFromError(compileErr, source, targetPath ?? "unknown.ail");
     const formattedDiag = formatDiagnosticText(report);
     return {
       success: false,
@@ -772,13 +755,7 @@ export async function runAilTests(
       const rawStderr = Buffer.concat(stderrChunks).toString("utf-8");
 
       const summary = parseTestSummary(`${rawStdout}\n${rawStderr}`, exitCode);
-      const output = formatCleanTestOutput(
-        rawStdout,
-        rawStderr,
-        exitCode,
-        summary,
-        projectDir,
-      );
+      const output = formatCleanTestOutput(rawStdout, rawStderr, exitCode, summary, projectDir);
 
       const success = exitCode === 0 && summary.failed === 0;
 

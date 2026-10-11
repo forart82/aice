@@ -1,0 +1,22 @@
+# AIL Unified Configuration Spec
+app:
+  name: ail-cluster-manager
+  version: 1.0.0
+  active: true
+  replicas: 3
+  cpuLimit: 2.5
+  memoryOffset: -256
+  leader: null
+  zones:
+    - us-east-1a
+    - us-east-1b
+    - us-east-1c
+  network:
+    bind: 0.0.0.0
+    port: 9090
+    ingress:
+      enabled: true
+      hosts:
+        - cluster.local
+  emptyRecord: {}
+  emptyArray: []

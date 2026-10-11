@@ -468,20 +468,11 @@ export class AilGenerator {
               ? `(${this.formatExpr(bodyExpr)})`
               : this.formatExpr(bodyExpr);
           if (m.accessor === "get") {
-            this.writeLine(
-              `${st}get ${m.name}()${ret} = ${bodyStr}`,
-              mNodeId,
-            );
+            this.writeLine(`${st}get ${m.name}()${ret} = ${bodyStr}`, mNodeId);
           } else if (m.accessor === "set") {
-            this.writeLine(
-              `${st}set ${m.name}(${params}) = ${bodyStr}`,
-              mNodeId,
-            );
+            this.writeLine(`${st}set ${m.name}(${params}) = ${bodyStr}`, mNodeId);
           } else {
-            this.writeLine(
-              `${st}${as}fn ${m.name}(${params})${ret} = ${bodyStr}`,
-              mNodeId,
-            );
+            this.writeLine(`${st}${as}fn ${m.name}(${params})${ret} = ${bodyStr}`, mNodeId);
           }
         } else {
           if (m.accessor === "get") {
@@ -560,9 +551,7 @@ export class AilGenerator {
         bodyExpr.kind === "AssignExpr"
           ? `(${this.formatExpr(bodyExpr)})`
           : this.formatExpr(bodyExpr);
-      this.writeLine(
-        `${as}fn ${fn.name}(${params})${retType} = ${bodyStr}`,
-      );
+      this.writeLine(`${as}fn ${fn.name}(${params})${retType} = ${bodyStr}`);
       return;
     }
 
@@ -737,7 +726,9 @@ export class AilGenerator {
 
           if (hasCatch) {
             const param = stmt.catchParam
-              ? (stmt.catchParam.startsWith("(") ? ` ${stmt.catchParam}` : ` ${stmt.catchParam}`)
+              ? stmt.catchParam.startsWith("(")
+                ? ` ${stmt.catchParam}`
+                : ` ${stmt.catchParam}`
               : " (err)";
             s += ` catch${param}: {\n`;
             this.indent();
@@ -774,7 +765,9 @@ export class AilGenerator {
 
         if (hasCatch) {
           const param = stmt.catchParam
-            ? (stmt.catchParam.startsWith("(") ? ` ${stmt.catchParam}` : ` ${stmt.catchParam}`)
+            ? stmt.catchParam.startsWith("(")
+              ? ` ${stmt.catchParam}`
+              : ` ${stmt.catchParam}`
             : " (err)";
           s += `\n${indent}catch${param}:\n`;
           this.indent();
@@ -829,9 +822,7 @@ export class AilGenerator {
       return s;
     } else {
       const bodyStr =
-        mc.body.kind === "AssignExpr"
-          ? `(${this.formatExpr(mc.body)})`
-          : this.formatExpr(mc.body);
+        mc.body.kind === "AssignExpr" ? `(${this.formatExpr(mc.body)})` : this.formatExpr(mc.body);
       return `${indent}case ${patternStr}${guardStr} => ${bodyStr}`;
     }
   }
@@ -862,9 +853,7 @@ export class AilGenerator {
       this.dedent();
     } else {
       const bodyStr =
-        mc.body.kind === "AssignExpr"
-          ? `(${this.formatExpr(mc.body)})`
-          : this.formatExpr(mc.body);
+        mc.body.kind === "AssignExpr" ? `(${this.formatExpr(mc.body)})` : this.formatExpr(mc.body);
       this.writeLine(`case ${patternStr}${guardStr} => ${bodyStr}`);
     }
   }
@@ -923,7 +912,9 @@ export class AilGenerator {
     }
 
     if (!hasChildren && node.childExpr) {
-      this.writeLine(`${node.tag}${attrStr}: ${JSON.stringify(`{${this.formatExpr(node.childExpr)}}`)}`);
+      this.writeLine(
+        `${node.tag}${attrStr}: ${JSON.stringify(`{${this.formatExpr(node.childExpr)}}`)}`,
+      );
       return;
     }
 
@@ -1126,6 +1117,9 @@ export class AilGenerator {
         return `[${items}]`;
       }
       case "RecordLiteralExpr": {
+        if (expr.properties.length === 0) {
+          return "{}";
+        }
         const props = expr.properties
           .map((p) => {
             if (p.isSpread) {

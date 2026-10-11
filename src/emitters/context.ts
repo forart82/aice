@@ -13,7 +13,9 @@ export type TargetLanguage =
   | "rust"
   | "go"
   | "cpp"
-  | "csharp";
+  | "csharp"
+  | "json"
+  | "yaml";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
@@ -149,6 +151,8 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   )
     return "cpp";
   if (clean.endsWith(".cs")) return "csharp";
+  if (clean.endsWith(".json")) return "json";
+  if (clean.endsWith(".yaml") || clean.endsWith(".yml")) return "yaml";
   return "typescript";
 }
 

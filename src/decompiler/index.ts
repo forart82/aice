@@ -15,19 +15,28 @@ import { CppDecompiler } from "./cpp-decompiler.js";
 import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
+import { JsonDecompiler, type JsonDecompilerOptions } from "./json-decompiler.js";
 import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
+import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js";
 
 export * from "./ail-generator.js";
 export * from "./cpp-decompiler.js";
 export * from "./csharp-decompiler.js";
 export * from "./css-decompiler.js";
 export * from "./html-decompiler.js";
+export * from "./json-decompiler.js";
 export * from "./roundtrip.js";
 export * from "./ts-decompiler.js";
+export * from "./yaml-decompiler.js";
 
-export interface DecompileOptions extends AilGeneratorOptions, TsDecompilerOptions {
+export interface DecompileOptions
+  extends AilGeneratorOptions,
+    TsDecompilerOptions,
+    JsonDecompilerOptions,
+    YamlDecompilerOptions {
   filePath?: string;
   target?: TargetLanguage;
+  constName?: string;
 }
 
 export interface DecompileResult {
@@ -80,6 +89,20 @@ export function decompile(
     }
     case "html": {
       const decompiler = new HtmlDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "json": {
+      const decompiler = new JsonDecompiler(source, filePath, options);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "yaml": {
+      const decompiler = new YamlDecompiler(source, filePath, options);
       const result = decompiler.decompile();
       ast = result.ast;
       trivia = result.trivia;

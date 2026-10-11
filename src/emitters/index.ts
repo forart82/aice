@@ -9,9 +9,11 @@ import { CSharpEmitter } from "./csharp-emitter.js";
 import { CssEmitter } from "./css-emitter.js";
 import { GoEmitter } from "./go-emitter.js";
 import { HtmlEmitter } from "./html-emitter.js";
+import { JsonEmitter } from "./json-emitter.js";
 import { PythonEmitter } from "./py-emitter.js";
 import { RustEmitter } from "./rust-emitter.js";
 import { TypeScriptEmitter } from "./ts-emitter.js";
+import { YamlEmitter } from "./yaml-emitter.js";
 
 export * from "./context.js";
 export * from "./cpp-emitter.js";
@@ -19,10 +21,12 @@ export * from "./csharp-emitter.js";
 export * from "./css-emitter.js";
 export * from "./go-emitter.js";
 export * from "./html-emitter.js";
+export * from "./json-emitter.js";
 export * from "./py-emitter.js";
 export * from "./rewriter.js";
 export * from "./rust-emitter.js";
 export * from "./ts-emitter.js";
+export * from "./yaml-emitter.js";
 
 // Convenience aliases
 export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter };
@@ -37,7 +41,9 @@ export function emitTarget(
   options: EmitterOptions = {},
 ): string {
   const fileCandidate =
-    mod.span?.file && mod.span.file !== "<anonymous>" ? mod.span.file : mod.path;
+    mod?.span?.file && mod.span.file !== "<anonymous>"
+      ? mod.span.file
+      : (mod?.path ?? "<anonymous>");
   const chosenTarget = target ?? detectTargetFromPath(fileCandidate);
   switch (chosenTarget) {
     case "typescript":
@@ -71,6 +77,14 @@ export function emitTarget(
     }
     case "css": {
       const emitter = new CssEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "json": {
+      const emitter = new JsonEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "yaml": {
+      const emitter = new YamlEmitter(options);
       return emitter.emit(mod);
     }
     default: {

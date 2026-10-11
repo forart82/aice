@@ -1,0 +1,40 @@
+{
+  "name": "ail-data-service",
+  "version": "2.4.0",
+  "port": 8080,
+  "timeout": 30.5,
+  "negativeOffset": -10,
+  "enabled": true,
+  "debug": false,
+  "fallback": null,
+  "tags": [
+    "transpiler",
+    "compiler",
+    "homoiconic",
+    "ast"
+  ],
+  "matrix": [
+    [
+      1,
+      2
+    ],
+    [
+      3,
+      4
+    ]
+  ],
+  "server": {
+    "host": "127.0.0.1",
+    "ssl": true,
+    "maxConnections": 5000,
+    "cors": {
+      "origins": [
+        "https://example.com",
+        "https://api.example.com"
+      ],
+      "credentials": true
+    }
+  },
+  "emptyObject": {},
+  "emptyList": []
+}
