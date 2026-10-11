@@ -38,7 +38,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
     it("creates all shield files with correct configurations", async () => {
       const result = await applyAiShield(testDir);
 
-      expect(result.createdFiles).toHaveLength(7);
+      expect(result.createdFiles).toHaveLength(8);
       expect(result.modifiedFiles).toHaveLength(0);
       expect(result.activeShields).toEqual(["ideSettings", "agentIgnores", "cognitiveRules"]);
 
@@ -80,6 +80,13 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(agentsMdContent).toContain("machine-generated, read-only build artifacts");
       expect(agentsMdContent).toContain("ail compile");
 
+      const geminiMdPath = path.join(testDir, "GEMINI.md");
+      expect(fs.existsSync(geminiMdPath)).toBe(true);
+      const geminiMdContent = fs.readFileSync(geminiMdPath, "utf-8");
+      expect(geminiMdContent).toContain("AIL (*.ail)");
+      expect(geminiMdContent).toContain("machine-generated, read-only build artifacts");
+      expect(geminiMdContent).toContain("ail compile");
+
       const cursorRulesPath = path.join(testDir, ".cursorrules");
       expect(fs.existsSync(cursorRulesPath)).toBe(true);
       const cursorRulesContent = fs.readFileSync(cursorRulesPath, "utf-8");
@@ -91,7 +98,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       const customExts = [".ts", ".py", ".cpp"];
       const result = await applyAiShield(testDir, { extensions: customExts });
 
-      expect(result.createdFiles).toHaveLength(7);
+      expect(result.createdFiles).toHaveLength(8);
 
       const settingsPath = path.join(testDir, ".vscode", "settings.json");
       const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
@@ -114,7 +121,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
   describe("Idempotency", () => {
     it("calling applyAiShield multiple times does not duplicate content or corrupt JSON", async () => {
       const firstResult = await applyAiShield(testDir);
-      expect(firstResult.createdFiles).toHaveLength(7);
+      expect(firstResult.createdFiles).toHaveLength(8);
       expect(firstResult.modifiedFiles).toHaveLength(0);
 
       const settingsContent1 = fs.readFileSync(
@@ -123,6 +130,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       );
       const cursorIgnoreContent1 = fs.readFileSync(path.join(testDir, ".cursorignore"), "utf-8");
       const agentsMdContent1 = fs.readFileSync(path.join(testDir, "AGENTS.md"), "utf-8");
+      const geminiMdContent1 = fs.readFileSync(path.join(testDir, "GEMINI.md"), "utf-8");
 
       // Second run
       const secondResult = await applyAiShield(testDir);
@@ -136,10 +144,12 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       );
       const cursorIgnoreContent2 = fs.readFileSync(path.join(testDir, ".cursorignore"), "utf-8");
       const agentsMdContent2 = fs.readFileSync(path.join(testDir, "AGENTS.md"), "utf-8");
+      const geminiMdContent2 = fs.readFileSync(path.join(testDir, "GEMINI.md"), "utf-8");
 
       expect(settingsContent2).toBe(settingsContent1);
       expect(cursorIgnoreContent2).toBe(cursorIgnoreContent1);
       expect(agentsMdContent2).toBe(agentsMdContent1);
+      expect(geminiMdContent2).toBe(geminiMdContent1);
 
       // Verify no duplicate markers in ignore files
       const occurrences = (cursorIgnoreContent2.match(/# >>> AIL-SHIELD-START >>>/g) || []).length;
@@ -188,7 +198,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       });
     });
 
-    it("preserves pre-existing user rules in agent ignore files and AGENTS.md", async () => {
+    it("preserves pre-existing user rules in agent ignore files, AGENTS.md, and GEMINI.md", async () => {
       const cursorIgnorePath = path.join(testDir, ".cursorignore");
       fs.writeFileSync(cursorIgnorePath, "node_modules/\nbuild/\n.env\n", "utf-8");
 
@@ -199,10 +209,18 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
         "utf-8",
       );
 
+      const geminiMdPath = path.join(testDir, "GEMINI.md");
+      fs.writeFileSync(
+        geminiMdPath,
+        "# Original Gemini Directives\nStrictly follow domain specifications.\n",
+        "utf-8",
+      );
+
       const result = await applyAiShield(testDir);
 
       expect(result.modifiedFiles.some((f) => f.endsWith(".cursorignore"))).toBe(true);
       expect(result.modifiedFiles.some((f) => f.endsWith("AGENTS.md"))).toBe(true);
+      expect(result.modifiedFiles.some((f) => f.endsWith("GEMINI.md"))).toBe(true);
 
       const updatedCursorIgnore = fs.readFileSync(cursorIgnorePath, "utf-8");
       expect(updatedCursorIgnore).toContain("node_modules/");
@@ -214,6 +232,11 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(updatedAgentsMd).toContain("# Original Project Instructions");
       expect(updatedAgentsMd).toContain("Always write clean tests.");
       expect(updatedAgentsMd).toContain("AIL (*.ail)");
+
+      const updatedGeminiMd = fs.readFileSync(geminiMdPath, "utf-8");
+      expect(updatedGeminiMd).toContain("# Original Gemini Directives");
+      expect(updatedGeminiMd).toContain("Strictly follow domain specifications.");
+      expect(updatedGeminiMd).toContain("AIL (*.ail)");
     });
   });
 
@@ -226,7 +249,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
 
       const removeResult = await removeAiShield(testDir);
 
-      expect(removeResult.removedFiles).toHaveLength(7);
+      expect(removeResult.removedFiles).toHaveLength(8);
       expect(removeResult.revertedFiles).toHaveLength(0);
 
       expect(fs.existsSync(path.join(testDir, ".vscode", "settings.json"))).toBe(false);
@@ -237,6 +260,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       }
 
       expect(fs.existsSync(path.join(testDir, "AGENTS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(testDir, "GEMINI.md"))).toBe(false);
       expect(fs.existsSync(path.join(testDir, ".cursorrules"))).toBe(false);
 
       const statusAfter = await checkAiShieldStatus(testDir);
@@ -262,6 +286,9 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       const agentsMdPath = path.join(testDir, "AGENTS.md");
       fs.writeFileSync(agentsMdPath, "# User Docs\nProject overview.\n", "utf-8");
 
+      const geminiMdPath = path.join(testDir, "GEMINI.md");
+      fs.writeFileSync(geminiMdPath, "# Gemini Docs\nGemini instructions.\n", "utf-8");
+
       // 2. Apply shield
       await applyAiShield(testDir);
 
@@ -271,6 +298,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(removeResult.revertedFiles.some((f) => f.endsWith("settings.json"))).toBe(true);
       expect(removeResult.revertedFiles.some((f) => f.endsWith(".cursorignore"))).toBe(true);
       expect(removeResult.revertedFiles.some((f) => f.endsWith("AGENTS.md"))).toBe(true);
+      expect(removeResult.revertedFiles.some((f) => f.endsWith("GEMINI.md"))).toBe(true);
 
       // Check settings.json preserved user configuration
       expect(fs.existsSync(settingsPath)).toBe(true);
@@ -292,6 +320,12 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       const restoredAgentsMd = fs.readFileSync(agentsMdPath, "utf-8");
       expect(restoredAgentsMd).toContain("# User Docs");
       expect(restoredAgentsMd).not.toContain("<!-- >>> AIL-COGNITIVE-RULE-START >>> -->");
+
+      // Check GEMINI.md preserved user rules
+      expect(fs.existsSync(geminiMdPath)).toBe(true);
+      const restoredGeminiMd = fs.readFileSync(geminiMdPath, "utf-8");
+      expect(restoredGeminiMd).toContain("# Gemini Docs");
+      expect(restoredGeminiMd).not.toContain("<!-- >>> AIL-COGNITIVE-RULE-START >>> -->");
     });
   });
 
@@ -310,6 +344,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(status.details[".aiderignore"]).toBe(false);
       expect(status.details[".agentignore"]).toBe(false);
       expect(status.details["AGENTS.md"]).toBe(false);
+      expect(status.details["GEMINI.md"]).toBe(false);
       expect(status.details[".cursorrules"]).toBe(false);
     });
 
@@ -328,6 +363,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(status.details[".aiderignore"]).toBe(true);
       expect(status.details[".agentignore"]).toBe(true);
       expect(status.details["AGENTS.md"]).toBe(true);
+      expect(status.details["GEMINI.md"]).toBe(true);
       expect(status.details[".cursorrules"]).toBe(true);
     });
 
@@ -348,6 +384,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(status.details[".vscode/settings.json"]).toBe(true);
       expect(status.details[".cursorignore"]).toBe(false);
       expect(status.details["AGENTS.md"]).toBe(false);
+      expect(status.details["GEMINI.md"]).toBe(false);
     });
   });
 });

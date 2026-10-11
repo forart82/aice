@@ -410,7 +410,7 @@ export async function applyAiShield(
     activeShields.push("agentIgnores");
   }
 
-  // 3. Cognitive Rule Files (AGENTS.md, .cursorrules)
+  // 3. Cognitive Rule Files (AGENTS.md, GEMINI.md, .cursorrules)
   if (cognitiveRulesEnabled) {
     // AGENTS.md
     const agentsMdPath = path.join(targetDir, "AGENTS.md");
@@ -434,25 +434,23 @@ export async function applyAiShield(
       }
     }
 
-    // GEMINI.md: Update if it already exists or if explicitly requested via options.geminiMd
+    // GEMINI.md: Always synchronized whenever cognitive rules are enabled
     const geminiMdPath = path.join(targetDir, "GEMINI.md");
     const geminiMdExisted = fs.existsSync(geminiMdPath);
-    if (geminiMdExisted || options?.geminiMd) {
-      if (!geminiMdExisted) {
-        fs.writeFileSync(geminiMdPath, `${agentsBlock}\n`, "utf-8");
-        createdFiles.push(geminiMdPath);
-      } else {
-        const existing = fs.readFileSync(geminiMdPath, "utf-8");
-        const { newContent, changed } = updateMarkerBlock(
-          existing,
-          COGNITIVE_RULES_MD_START,
-          COGNITIVE_RULES_MD_END,
-          agentsBlock,
-        );
-        if (changed) {
-          fs.writeFileSync(geminiMdPath, newContent, "utf-8");
-          modifiedFiles.push(geminiMdPath);
-        }
+    if (!geminiMdExisted) {
+      fs.writeFileSync(geminiMdPath, `${agentsBlock}\n`, "utf-8");
+      createdFiles.push(geminiMdPath);
+    } else {
+      const existing = fs.readFileSync(geminiMdPath, "utf-8");
+      const { newContent, changed } = updateMarkerBlock(
+        existing,
+        COGNITIVE_RULES_MD_START,
+        COGNITIVE_RULES_MD_END,
+        agentsBlock,
+      );
+      if (changed) {
+        fs.writeFileSync(geminiMdPath, newContent, "utf-8");
+        modifiedFiles.push(geminiMdPath);
       }
     }
 
@@ -825,6 +823,7 @@ export async function checkAiShieldStatus(
     ".aiderignore": false,
     ".agentignore": false,
     "AGENTS.md": false,
+    "GEMINI.md": false,
     ".cursorrules": false,
   };
 
@@ -919,7 +918,9 @@ export async function checkAiShieldStatus(
   const ideSettingsConfigured = details[".vscode/settings.json"] === true;
   const agentIgnoresConfigured = AGENT_IGNORE_FILES.every((f) => details[f] === true);
   const cognitiveRulesConfigured =
-    details["AGENTS.md"] === true && details[".cursorrules"] === true;
+    details["AGENTS.md"] === true &&
+    details["GEMINI.md"] === true &&
+    details[".cursorrules"] === true;
   const lifecycleHooksConfigured =
     details[".agents/hooks.json"] === true && details[".agents/ail-shield-hook.mjs"] === true;
 
