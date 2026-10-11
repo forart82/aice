@@ -43,7 +43,12 @@ import {
   formatTokenomicsMarkdownTable,
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
-import { type OutlineOptions, outlinePath } from "../src/tools/index.js";
+import {
+  type OutlineOptions,
+  outlinePath,
+  type SpliceOptions,
+  splice,
+} from "../src/tools/index.js";
 import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
@@ -59,7 +64,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.0");
+  .version("0.5.1");
 
 // Command: compile <file>
 program
@@ -328,7 +333,9 @@ program
 
       for (const f of files) {
         const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
-        const outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        const outPath = path.isAbsolute(resolvedOut)
+          ? resolvedOut
+          : path.resolve(projectRoot, resolvedOut);
         const legacyOut = getTargetOutputPath(f);
 
         const pathsToRemove = new Set([outPath, legacyOut]);
@@ -441,10 +448,7 @@ program
   .option("--json", "Output test results as machine-readable JSON")
   .option("-v, --verbose", "Display verbose test runner output")
   .action(
-    async (
-      target?: string,
-      options?: { reporter?: string; json?: boolean; verbose?: boolean },
-    ) => {
+    async (target?: string, options?: { reporter?: string; json?: boolean; verbose?: boolean }) => {
       try {
         const result = await runAilTests(target, {
           reporter: options?.reporter,
@@ -977,7 +981,9 @@ program
 // Command: eject [dir]
 const ejectCmd = program
   .command("eject")
-  .description("Eject AIL side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields")
+  .description(
+    "Eject AIL side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields",
+  )
   .argument("[dir]", "Target project directory", ".")
   .option("--remove-ail", "Delete all .ail source files")
   .option(
@@ -1250,8 +1256,7 @@ program
                 }
               }
               const savings = Math.max(0, totalOrig - totalOutline);
-              const savingsPct =
-                totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
+              const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
               console.log(`\n📊 Aggregate Token Reduction Metrics (${result.size} files):`);
               console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
               console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
@@ -1291,6 +1296,115 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Error outlining ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  return new Promise((resolve) => {
+    let data = "";
+    process.stdin.setEncoding("utf-8");
+    process.stdin.on("data", (chunk) => {
+      data += chunk;
+    });
+    process.stdin.on("end", () => {
+      resolve(data);
+    });
+    process.stdin.on("error", () => {
+      resolve("");
+    });
+  });
+}
+
+// Command: splice <path>
+program
+  .command("splice")
+  .description(
+    "AST surgical updates: replace, insert, or delete declarations with 90% token reduction",
+  )
+  .argument("<path>", "Path to source file")
+  .option("-s, --symbol <symbol>", "Target symbol identifier")
+  .option("-c, --code <code>", "Replacement AIL declaration snippet")
+  .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
+  .option("-d, --delete", "Delete the symbol")
+  .option("--insert-after <symbol>", "Insert after specified symbol")
+  .option("--insert-before <symbol>", "Insert before specified symbol")
+  .option("--dry-run", "Output result without modifying file")
+  .option("--diff", "Display unified diff")
+  .option("--compile", "Automatically recompile target after splice")
+  .action(
+    async (
+      targetPath: string,
+      options: {
+        symbol?: string;
+        code?: string;
+        body?: string;
+        delete?: boolean;
+        insertAfter?: string;
+        insertBefore?: string;
+        dryRun?: boolean;
+        diff?: boolean;
+        compile?: boolean;
+      },
+    ) => {
+      try {
+        let code = options.code;
+        if (code === undefined && options.body === undefined && !options.delete) {
+          const stdinContent = await readStdin();
+          if (stdinContent && stdinContent.trim().length > 0) {
+            code = stdinContent;
+          } else {
+            console.error("❌ Error: Must provide --code, --body, --delete, or input via stdin.");
+            process.exit(1);
+          }
+        }
+
+        const spliceOpts: SpliceOptions = {
+          symbol: options.symbol,
+          code,
+          body: options.body,
+          delete: options.delete,
+          insertAfter: options.insertAfter,
+          insertBefore: options.insertBefore,
+          dryRun: options.dryRun,
+          diff: options.diff,
+          compile: options.compile,
+        };
+
+        const result = await splice(targetPath, spliceOpts);
+
+        if (options.diff) {
+          if (result.diff) {
+            console.log(result.diff);
+          } else {
+            console.log("No changes detected.");
+          }
+        }
+
+        if (options.dryRun) {
+          console.log(`[Dry Run] Successfully spliced ${targetPath}`);
+          console.log(result.modifiedCode);
+        } else {
+          const actionDesc = options.delete
+            ? `Deleted symbol '${result.symbol}'`
+            : options.insertAfter
+              ? `Inserted after '${options.insertAfter}'`
+              : options.insertBefore
+                ? `Inserted before '${options.insertBefore}'`
+                : options.body
+                  ? `Spliced body of '${result.symbol}'`
+                  : `Spliced symbol '${result.symbol}'`;
+          console.log(`✔ ${actionDesc} in ${targetPath} (${result.tokensSaved ?? 0} tokens saved)`);
+          if (options.compile) {
+            console.log(`✔ Recompiled target for ${targetPath}`);
+          }
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error splicing ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
