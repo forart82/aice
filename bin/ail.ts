@@ -52,12 +52,15 @@ import {
   type FmtResult,
   formatAilPath,
   formatAilSource,
+  formatParitySummaryJson,
+  formatParitySummaryTerminal,
   generateContext,
   generateUnifiedDiff,
   type OutlineOptions,
   outlinePath,
   type PatchOptions,
   patchFile,
+  runParityGate,
   type SpliceOptions,
   splice,
 } from "../src/tools/index.js";
@@ -76,7 +79,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.10");
+  .version("0.5.11");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -395,89 +398,131 @@ program
     }
   });
 
-// Command: verify <file>
+// Command: verify [target]
 program
   .command("verify")
-  .description("Verify syntactic and type soundness of an .ail file without emitting")
-  .argument("<file>", "Path to the .ail source file")
-  .option("--json", "Output machine-readable telemetry JSON for LLM autonomous self-repair")
+  .description("Verify syntactic and type soundness of an .ail file, or run automated multi-file roundtrip parity gate")
+  .argument("[target]", "Path to the .ail source file, target file, or directory")
+  .option("--json", "Output machine-readable telemetry JSON")
   .option("--fix", "Autonomously repair fixable violations before verification")
-  .action((file: string, options: { json?: boolean; fix?: boolean }) => {
-    try {
-      const fullPath = path.resolve(process.cwd(), file);
-      if (!fs.existsSync(fullPath)) {
-        if (options.json) {
-          console.log(
-            JSON.stringify({
-              status: "FAILURE",
-              file,
-              diagnostics: [
-                {
-                  status: "REJECTED",
-                  error_phase: "VERIFICATION",
-                  file,
-                  span: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
-                  violation: {
-                    code: "AIL_E0001_FILE_NOT_FOUND",
-                    message: `File not found: ${file}`,
-                  },
-                  caret_slice: "",
-                },
-              ],
-            }),
-          );
-        } else {
-          console.error(`❌ Error: Source file not found: ${file}`);
+  .option("--parity", "Run the automated multi-file roundtrip parity gate across the project or target path")
+  .option("--strict", "Fail with exit code 1 if any file has roundtrip drift or non-equivalence")
+  .action(
+    async (
+      target: string | undefined,
+      options: { json?: boolean; fix?: boolean; parity?: boolean; strict?: boolean },
+    ) => {
+      if (options.parity) {
+        try {
+          const summary = await runParityGate(target, {
+            strict: options.strict,
+            json: options.json,
+          });
+
+          if (options.json) {
+            console.log(formatParitySummaryJson(summary));
+          } else {
+            console.log(formatParitySummaryTerminal(summary));
+          }
+
+          const isStrictFailure =
+            options.strict && (summary.failed > 0 || summary.parityRate < 100);
+          const isStandardFailure = summary.failed > 0;
+
+          if (isStrictFailure || isStandardFailure) {
+            process.exit(1);
+          }
+          return;
+        } catch (err: unknown) {
+          console.error(`❌ Parity gate error:`, err);
+          process.exit(1);
         }
+      }
+
+      if (!target) {
+        console.error(
+          `❌ Error: Missing required file argument for verification. Use 'ail verify <file>' or 'ail verify --parity'.`,
+        );
         process.exit(1);
       }
 
-      let source = fs.readFileSync(fullPath, "utf-8");
-
-      if (options.fix) {
-        const repairRes = attemptSelfRepair(source, file);
-        if (repairRes.fixed && repairRes.modified) {
-          fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
-          if (!options.json) {
+      const file = target;
+      try {
+        const fullPath = path.resolve(process.cwd(), file);
+        if (!fs.existsSync(fullPath)) {
+          if (options.json) {
             console.log(
-              `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
+              JSON.stringify({
+                status: "FAILURE",
+                file,
+                diagnostics: [
+                  {
+                    status: "REJECTED",
+                    error_phase: "VERIFICATION",
+                    file,
+                    span: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
+                    violation: {
+                      code: "AIL_E0001_FILE_NOT_FOUND",
+                      message: `File not found: ${file}`,
+                    },
+                    caret_slice: "",
+                  },
+                ],
+              }),
             );
-            for (const r of repairRes.repairs) {
-              console.log(`  - ${r.description}`);
-            }
+          } else {
+            console.error(`❌ Error: Source file not found: ${file}`);
           }
-          source = repairRes.finalSource;
+          process.exit(1);
         }
-      }
 
-      const mod = parse(source, file);
-      const tc = new TypeChecker();
-      tc.checkModule(mod);
+        let source = fs.readFileSync(fullPath, "utf-8");
 
-      if (options.json) {
-        console.log(
-          JSON.stringify({
-            status: "SUCCESS",
-            file,
-            diagnostics: [],
-          }),
-        );
-      } else {
-        console.log(
-          `✔ Verification successful: ${file} passed all lexical, syntax, and type checks.`,
-        );
+        if (options.fix) {
+          const repairRes = attemptSelfRepair(source, file);
+          if (repairRes.fixed && repairRes.modified) {
+            fs.writeFileSync(fullPath, repairRes.finalSource, "utf-8");
+            if (!options.json) {
+              console.log(
+                `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
+              );
+              for (const r of repairRes.repairs) {
+                console.log(`  - ${r.description}`);
+              }
+            }
+            source = repairRes.finalSource;
+          }
+        }
+
+        const mod = parse(source, file);
+        const tc = new TypeChecker();
+        tc.checkModule(mod);
+
+        if (options.json) {
+          console.log(
+            JSON.stringify({
+              status: "SUCCESS",
+              file,
+              diagnostics: [],
+            }),
+          );
+        } else {
+          console.log(
+            `✔ Verification successful: ${file} passed all lexical, syntax, and type checks.`,
+          );
+        }
+      } catch (err) {
+        const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
+        const report = buildReportFromError(err, source, file);
+        if (options.json) {
+          console.log(formatDiagnosticJson(report));
+        } else {
+          console.error(formatDiagnosticText(report));
+        }
+        process.exit(1);
       }
-    } catch (err) {
-      const source = fs.existsSync(file) ? fs.readFileSync(file, "utf-8") : "";
-      const report = buildReportFromError(err, source, file);
-      if (options.json) {
-        console.log(formatDiagnosticJson(report));
-      } else {
-        console.error(formatDiagnosticText(report));
-      }
-      process.exit(1);
-    }
-  });
+    },
+  );
 
 // Command: test [target]
 program

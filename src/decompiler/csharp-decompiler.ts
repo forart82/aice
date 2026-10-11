@@ -243,7 +243,7 @@ export class CSharpDecompiler {
       i++;
     }
 
-    const modPath = namespaceName ? `${namespaceName}.${baseName}` : baseName;
+    const modPath = namespaceName ? namespaceName : baseName;
 
     return {
       ast: {

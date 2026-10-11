@@ -78,7 +78,12 @@ export class CSharpEmitter {
       if (item.kind === "ImportDecl") {
         const clean = item.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(cs|ts|js|ail)$/, "");
         const nsName = clean.split(/[/\\]/).join(".");
-        if (nsName && nsName !== "System" && !customImports.includes(nsName)) {
+        if (
+          nsName &&
+          nsName !== "System" &&
+          nsName !== "System.Collections.Generic" &&
+          !customImports.includes(nsName)
+        ) {
           customImports.push(nsName);
         }
       }

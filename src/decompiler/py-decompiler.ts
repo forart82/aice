@@ -1901,12 +1901,45 @@ export class PythonDecompiler {
 
       if (this.check("LBRACKET")) {
         this.advance();
-        const index = this.parseExpr();
+        let startIndex: Expr | undefined;
+        if (!this.check("COLON")) {
+          startIndex = this.parseExpr();
+        }
+        if (this.check("COLON")) {
+          this.advance();
+          let endIndex: Expr | undefined;
+          if (!this.check("RBRACKET")) {
+            endIndex = this.parseExpr();
+          }
+          const rBracket = this.consume("RBRACKET");
+          const args: Expr[] = [];
+          if (startIndex) {
+            args.push(startIndex);
+          } else {
+            args.push({ kind: "LiteralExpr", literalKind: "number", value: 0, rawValue: "0", span: emptySpan(this.filePath) });
+          }
+          if (endIndex) {
+            args.push(endIndex);
+          }
+          expr = {
+            kind: "CallExpr",
+            callee: {
+              kind: "MemberAccessExpr",
+              object: expr,
+              property: "slice",
+              isSafeNav: false,
+              span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+            },
+            args,
+            span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+          };
+          continue;
+        }
         const rBracket = this.consume("RBRACKET");
         expr = {
           kind: "IndexExpr",
           object: expr,
-          index,
+          index: startIndex!,
           span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
         };
         continue;

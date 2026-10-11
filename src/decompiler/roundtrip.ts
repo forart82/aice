@@ -19,6 +19,7 @@ import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
 import { JsonDecompiler } from "./json-decompiler.js";
 import { TsDecompiler } from "./ts-decompiler.js";
+import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler } from "./yaml-decompiler.js";
 import { PhpDecompiler } from "./php-decompiler.js";
 import { PythonDecompiler } from "./py-decompiler.js";
@@ -85,6 +86,11 @@ export function executeRoundtrip(
     case "yaml": {
       const decompiler = new YamlDecompiler(source, filePath);
       decompileResult = decompiler.decompile();
+      break;
+    }
+    case "twig": {
+      const res = decompileTwig(source, filePath);
+      decompileResult = { ast: res.ast, trivia: res.trivia };
       break;
     }
     case "php": {

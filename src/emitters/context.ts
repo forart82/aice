@@ -100,7 +100,12 @@ export class EmitterContext {
     for (const item of entry.leading) {
       const lines = item.content.split("\n");
       for (const line of lines) {
-        this.writeLine(line);
+        const trimmed = line.trimStart();
+        if (trimmed.startsWith("*")) {
+          this.writeLine(" " + trimmed);
+        } else {
+          this.writeLine(trimmed);
+        }
       }
     }
   }
