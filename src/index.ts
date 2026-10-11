@@ -1,3 +1,4 @@
+export * from "./config/index.js";
 export * from "./core/ast.js";
 export * from "./core/lexer.js";
 export * from "./core/parser.js";
