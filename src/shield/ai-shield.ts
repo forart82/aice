@@ -101,9 +101,10 @@ export function generateCognitiveAgentsMdContent(): string {
     "1. **Source of Truth**: Always read, inspect, create, and modify `*.ail` source files.",
     "2. **Never Edit Target Files Directly**: Any changes made directly to target files will fail with OS permissions (`EACCES`) or be overwritten by the AIL compiler (`ail compile` or `ail compile-all`).",
     "3. **Stack Trace Path Translation**: When runtime errors, test failures, compiler diagnostics, or user prompts reference a target file (e.g. `engine.ts:338` or `main.ts:12`), **DO NOT OPEN OR INSPECT THE TARGET FILE**. You MUST translate the path to its `.ail` sibling and inspect `engine.ts.ail` instead!",
-    "4. **Compilation**: When target artifacts are needed, invoke `ail compile <file.ail>` or `ail compile-all`.",
-    "5. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.",
-    "6. **Incremental Watch**: The `ail watch` daemon recompiles `*.ail` to side-by-side targets in <5ms, preserving Hot Module Reloading (HMR).",
+    "4. **No Target Shell Inspection**: Never inspect or dump target files via shell commands (e.g. DO NOT run `git diff <file.ts>` or `cat <file.ts>`). Work strictly with `*.ail` source files.",
+    "5. **Compilation**: When target artifacts are needed, invoke `ail compile <file.ail>` or `ail compile-all`.",
+    "6. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.",
+    "7. **Incremental Watch**: The `ail watch` daemon recompiles `*.ail` to side-by-side targets in <5ms, preserving Hot Module Reloading (HMR).",
     "",
     "## 2. AIL 2.0 Dialect Syntax Cheatsheet:",
     "- **Canonical File Naming**: Always name files with target extension before `.ail` (e.g. `src/App.tsx.ail`, `src/sim/Boss.ts.ail`, `src/styles.css.ail`).",
@@ -190,8 +191,9 @@ try {
     if (checkPath.startsWith("file://")) {
       checkPath = checkPath.slice(7);
     }
-    const cwd = process.cwd();
-    const resolvedPath = path.isAbsolute(checkPath) ? checkPath : path.resolve(cwd, checkPath);
+    const hookDir = path.dirname(new URL(import.meta.url).pathname);
+    const projectRoot = path.basename(hookDir) === ".agents" ? path.resolve(hookDir, "..") : process.cwd();
+    const resolvedPath = path.isAbsolute(checkPath) ? checkPath : path.resolve(projectRoot, checkPath);
 
     if (!resolvedPath.endsWith(".ail")) {
       const ailSibling = \`\${resolvedPath}.ail\`;
@@ -529,12 +531,24 @@ export async function applyAiShield(
           hooks: [
             {
               type: "command",
-              command: "node .agents/ail-shield-hook.mjs",
+              command:
+                "node -e 'const fs=require(\"fs\"),p=fs.existsSync(\"./ail-shield-hook.mjs\")?\"./ail-shield-hook.mjs\":\".agents/ail-shield-hook.mjs\";import(require(\"path\").resolve(p))'",
             },
           ],
         },
       ],
     };
+
+    // Create resilience symlink: if a hook runner executes inside .agents with '.agents/...',
+    // ensure .agents/.agents resolves to .agents
+    const nestedAgentsLink = path.join(agentsDir, ".agents");
+    if (!fs.existsSync(nestedAgentsLink)) {
+      try {
+        fs.symlinkSync(".", nestedAgentsLink);
+      } catch {
+        // ignore symlink errors
+      }
+    }
 
     const formattedHooksJson = `${JSON.stringify(hooksData, null, 2)}\n`;
     fs.writeFileSync(hooksJsonPath, formattedHooksJson, "utf-8");

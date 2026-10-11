@@ -986,8 +986,53 @@ export class TypeScriptEmitter {
         break;
       }
       case "MatchStmt": {
-        // Lower match/case into if-else cascade in TypeScript
         const targetStr = this.emitExpr(stmt.target);
+        const canUseSwitch =
+          stmt.cases.length > 0 &&
+          stmt.cases.every((c, idx) => {
+            if (c.guard) return false;
+            if (c.pattern.kind === "LiteralPattern") return true;
+            if (c.pattern.kind === "WildcardPattern" && idx === stmt.cases.length - 1) return true;
+            return false;
+          });
+
+        if (canUseSwitch) {
+          this.ctx.writeLine(`switch (${targetStr}) {`);
+          for (const c of stmt.cases) {
+            if (c.pattern.kind === "WildcardPattern") {
+              this.ctx.writeLine("default: {");
+            } else if (c.pattern.kind === "LiteralPattern") {
+              this.ctx.writeLine(`case ${this.emitExpr(c.pattern.value)}: {`);
+            }
+            this.ctx.indent();
+            if (c.body.kind === "Block") {
+              this.emitBlock(c.body, isTrailingReturn);
+              const lastStmt =
+                c.body.statements.length > 0
+                  ? c.body.statements[c.body.statements.length - 1]
+                  : null;
+              const endsWithReturn =
+                isTrailingReturn ||
+                (lastStmt &&
+                  (lastStmt.kind === "ReturnStmt" ||
+                    (lastStmt.kind === "ExprStmt" && isTrailingReturn)));
+              if (!endsWithReturn) {
+                this.ctx.writeLine("break;");
+              }
+            } else if (isTrailingReturn) {
+              this.ctx.writeLine(`return ${this.emitExpr(c.body)};`);
+            } else {
+              this.ctx.writeLine(`${this.emitExpr(c.body)};`);
+              this.ctx.writeLine("break;");
+            }
+            this.ctx.dedent();
+            this.ctx.writeLine("}");
+          }
+          this.ctx.writeLine("}");
+          break;
+        }
+
+        // Lower complex match/case into if-else cascade in TypeScript
         for (let i = 0; i < stmt.cases.length; i++) {
           const c = stmt.cases[i];
           const isFirst = i === 0;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
 import type { TypeDecl } from "../../src/core/ast.js";
 import { emitTarget } from "../../src/emitters/index.js";

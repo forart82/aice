@@ -1340,6 +1340,17 @@ export class TsDecompiler {
                 rawValue: '""',
                 span: this.getSpan(decl),
               };
+            } else if (
+              decl.type &&
+              (decl.type.kind === ts.SyntaxKind.UndefinedKeyword ||
+                (ts.isUnionTypeNode(decl.type) &&
+                  decl.type.types.some((t) => t.kind === ts.SyntaxKind.UndefinedKeyword)))
+            ) {
+              init = {
+                kind: "IdentifierExpr",
+                name: "undefined",
+                span: this.getSpan(decl),
+              };
             } else {
               init = {
                 kind: "LiteralExpr",
@@ -1511,6 +1522,17 @@ export class TsDecompiler {
             literalKind: "string",
             value: "",
             rawValue: '""',
+            span: this.getSpan(decl),
+          };
+        } else if (
+          decl.type &&
+          (decl.type.kind === ts.SyntaxKind.UndefinedKeyword ||
+            (ts.isUnionTypeNode(decl.type) &&
+              decl.type.types.some((t) => t.kind === ts.SyntaxKind.UndefinedKeyword)))
+        ) {
+          init = {
+            kind: "IdentifierExpr",
+            name: "undefined",
             span: this.getSpan(decl),
           };
         } else {
