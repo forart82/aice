@@ -816,17 +816,7 @@ export class CSharpDecompiler {
             isStatic,
             isReadonly: true,
             typeAnnotation: this.parseCSharpType(mem.typeStr),
-            getter: {
-              kind: "Block",
-              statements: [
-                {
-                  kind: "ReturnStmt",
-                  value: this.parseCSharpExpr(bodyStr),
-                  span: emptySpan(this.filePath),
-                },
-              ],
-              span: emptySpan(this.filePath),
-            },
+            initialValue: this.parseCSharpExpr(bodyStr),
             span: emptySpan(this.filePath),
           });
           continue;
@@ -850,35 +840,10 @@ export class CSharpDecompiler {
 
         // Property with { get => ...; set => ...; } or { get; set; }
         if (propLine.includes("{")) {
-          let getter: Block | undefined;
-          let setter: Block | undefined;
+          let initialValue: Expr | undefined;
           const getMatch = propLine.match(/get\s*=>\s*(.+?);/);
           if (getMatch) {
-            getter = {
-              kind: "Block",
-              statements: [
-                {
-                  kind: "ReturnStmt",
-                  value: this.parseCSharpExpr(getMatch[1].trim()),
-                  span: emptySpan(this.filePath),
-                },
-              ],
-              span: emptySpan(this.filePath),
-            };
-          }
-          const setMatch = propLine.match(/set\s*=>\s*(.+?);/);
-          if (setMatch) {
-            setter = {
-              kind: "Block",
-              statements: [
-                {
-                  kind: "ExprStmt",
-                  expr: this.parseCSharpExpr(setMatch[1].trim()),
-                  span: emptySpan(this.filePath),
-                },
-              ],
-              span: emptySpan(this.filePath),
-            };
+            initialValue = this.parseCSharpExpr(getMatch[1].trim());
           }
           const hasOnlyGet = propLine.includes("{ get;") && !propLine.includes("set;");
           properties.push({
@@ -887,8 +852,7 @@ export class CSharpDecompiler {
             isStatic,
             isReadonly: isReadonly || hasOnlyGet,
             typeAnnotation: this.parseCSharpType(mem.typeStr),
-            getter,
-            setter,
+            ...(initialValue ? { initialValue } : {}),
             span: emptySpan(this.filePath),
           });
           continue;
@@ -1403,7 +1367,7 @@ export class CSharpDecompiler {
             thenStatements = this.parseCSharpBlock([expandedLines[lineIdx].trim()]);
           }
 
-          const elifBranches: Array<{ condition: Expr; body: Block }> = [];
+          const elifBranches: Array<{ condition: Expr; body: Block; span: Span }> = [];
 
           while (lineIdx + 1 < expandedLines.length) {
             const nextTrimmed = this.stripLineComment(expandedLines[lineIdx + 1]).trim();
@@ -1439,6 +1403,7 @@ export class CSharpDecompiler {
                 elifBranches.push({
                   condition: this.parseCSharpExpr(elifCond),
                   body: { kind: "Block", statements: elifStmts, span: emptySpan(this.filePath) },
+                  span: emptySpan(this.filePath),
                 });
               }
             } else if (nextTrimmed === "else" || nextTrimmed.startsWith("else ") || nextTrimmed.startsWith("else{")) {
@@ -1904,6 +1869,7 @@ export class CSharpDecompiler {
                 condition: cond,
                 thenBranch: bodyBlock,
                 elifBranches: [],
+                elseBranch: null,
                 span: emptySpan(this.filePath),
               };
             } else {
@@ -2215,6 +2181,7 @@ export class CSharpDecompiler {
               key,
               value: this.parseCSharpExpr(valStr),
               isSpread: false,
+              span: emptySpan(this.filePath),
             });
           }
         }

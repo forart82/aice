@@ -601,7 +601,7 @@ export class AilGenerator {
         return `${indent}[${names}] ${op} ${this.formatExpr(stmt.init)}`;
       }
       case "AssignStmt": {
-        const op = stmt.op === ":=" || stmt.op === "::=" ? "=" : (stmt.op ?? "=");
+        const op = stmt.op ?? "=";
         return `${indent}${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)}`;
       }
       case "ReturnStmt": {
@@ -1214,7 +1214,7 @@ export class AilGenerator {
               return `fn(${params})${retStr} = ${bodyStr}`;
             }
             if (stmt.kind === "AssignStmt") {
-              const op = stmt.op === ":=" || stmt.op === "::=" ? "=" : (stmt.op ?? "=");
+              const op = stmt.op ?? "=";
               return `fn(${params})${retStr} = (${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)})`;
             }
           }
@@ -1235,7 +1235,7 @@ export class AilGenerator {
         return `fn(${params})${retStr} = nil`;
       }
       case "AssignExpr": {
-        const op = expr.op === ":=" || expr.op === "::=" ? "=" : (expr.op ?? "=");
+        const op = expr.op ?? "=";
         return `${this.formatExpr(expr.target)} ${op} ${this.formatExpr(expr.value)}`;
       }
       case "AwaitExpr": {

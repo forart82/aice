@@ -2380,7 +2380,7 @@ export class TsDecompiler {
       if (ts.isIdentifier(tsExpr)) {
         const typeCat = this.getVarType(tsExpr.text);
         if (typeCat === "number") return true;
-        if (typeCat && typeCat !== "number") return false;
+        if (typeCat !== undefined) return false;
         if (this.isNumericName(tsExpr.text)) return true;
       }
     }
@@ -3527,7 +3527,11 @@ export class TsDecompiler {
             const name = member.name.getText(this.sourceFile);
             const type = member.type
               ? this.convertTypeNode(member.type)
-              : { kind: "PrimitiveType" as const, primitive: "any", span: this.getSpan(member) };
+              : {
+                  kind: "PrimitiveType" as const,
+                  primitive: "any" as PrimitiveType["primitive"],
+                  span: this.getSpan(member),
+                };
             const isOptional = !!member.questionToken;
             fields.push({
               name,

@@ -50,7 +50,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.4.1");
+  .version("0.4.2");
 
 // Command: compile <file>
 program

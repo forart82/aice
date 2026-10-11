@@ -1773,15 +1773,15 @@ export class CppDecompiler {
         const fnNodeId = `fn:${shortName}`;
         this.attachTrivia(fnNodeId, currentTrivia);
         currentTrivia = [];
-        const isSingleReturn = bodyStatements.length === 1 && bodyStatements[0].kind === 'ReturnStmt' && bodyStatements[0].value;
+        const isSingleReturn = bodyStatements.length === 1 && bodyStatements[0]?.kind === 'ReturnStmt' && Boolean((bodyStatements[0] as any).value);
         items.push({
           kind: 'FunctionDecl',
           name: shortName,
           typeParams: [],
           params: this.parseCppParams(paramsRaw),
           returnType: this.parseCppType(retTypeStr),
-          isExpressionBodied: isSingleReturn,
-          body: isSingleReturn ? (bodyStatements[0].value as any) : { kind: 'Block', statements: bodyStatements, span: emptySpan(this.filePath) },
+          isExpressionBodied: Boolean(isSingleReturn),
+          body: isSingleReturn ? (bodyStatements[0] as any).value : { kind: 'Block', statements: bodyStatements, span: emptySpan(this.filePath) },
           span: emptySpan(this.filePath),
         });
         continue;
