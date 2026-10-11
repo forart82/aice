@@ -3503,9 +3503,15 @@ export class TsDecompiler {
           const converted = this.convertTypeNode(t);
           if (converted.kind === "NamedType") return converted.name;
           if (converted.kind === "PrimitiveType") return converted.primitive;
+          if (converted.kind === "RecordType") {
+            const fields = converted.fields
+              .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAilText(f.type)}`)
+              .join(", ");
+            return `{ ${fields} }`;
+          }
           return "unknown";
         });
-        if (typeTexts.some((t) => t.includes("{") || t.includes("&") || t.includes("\n"))) {
+        if (typeTexts.some((t) => t.includes("&") || t.includes("\n"))) {
           return { kind: "NamedType", name: "unknown", span: this.getSpan(node) };
         }
         return { kind: "NamedType", name: typeTexts.join(" | "), span: this.getSpan(node) };
@@ -3628,5 +3634,30 @@ export class TsDecompiler {
       primitive,
       span,
     };
+  }
+
+  private typeExprToAilText(t: TypeExpr): string {
+    switch (t.kind) {
+      case "PrimitiveType":
+        return t.primitive;
+      case "NamedType":
+        return t.name;
+      case "ArrayType":
+        return `[${this.typeExprToAilText(t.elementType)}]`;
+      case "TupleType":
+        return `[${t.elementTypes.map((e) => this.typeExprToAilText(e)).join(", ")}]`;
+      case "OptionType":
+        return `${this.typeExprToAilText(t.innerType)}?`;
+      case "ResultType":
+        return `Result[${this.typeExprToAilText(t.okType)}, ${this.typeExprToAilText(t.errType)}]`;
+      case "RecordType": {
+        const fields = t.fields
+          .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAilText(f.type)}`)
+          .join(", ");
+        return `{ ${fields} }`;
+      }
+      default:
+        return "any";
+    }
   }
 }

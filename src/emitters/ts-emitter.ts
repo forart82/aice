@@ -443,7 +443,11 @@ export class TypeScriptEmitter {
           !!f.defaultValue ||
           this.isNullableOrOptionalType(f.typeAnnotation);
         const optMark = isOpt ? "?" : "";
-        this.ctx.writeLine(`${f.name}${optMark}: ${this.emitTypeExpr(f.typeAnnotation)};`);
+        const typeStr =
+          optMark && f.typeAnnotation.kind === "OptionType"
+            ? this.emitTypeExpr(f.typeAnnotation.innerType)
+            : this.emitTypeExpr(f.typeAnnotation);
+        this.ctx.writeLine(`${f.name}${optMark}: ${typeStr};`);
         this.ctx.emitTrailingTrivia(fieldNodeId);
       }
       this.ctx.dedent();
@@ -455,7 +459,10 @@ export class TypeScriptEmitter {
           .map((f) => {
             const isOpt = f.isOptional || this.isNullableOrOptionalType(f.typeAnnotation);
             const optMark = isOpt && !f.defaultValue ? "?" : "";
-            const typeStr = this.emitTypeExpr(f.typeAnnotation);
+            const typeStr =
+              optMark && f.typeAnnotation.kind === "OptionType"
+                ? this.emitTypeExpr(f.typeAnnotation.innerType)
+                : this.emitTypeExpr(f.typeAnnotation);
             const defStr = f.defaultValue ? ` = ${this.emitExpr(f.defaultValue)}` : "";
             return `${f.name}${optMark}: ${typeStr}${defStr}`;
           })
@@ -883,14 +890,22 @@ export class TypeScriptEmitter {
           if (existing) this.varTypes.set(stmt.name, existing);
         }
         const keyword = stmt.isMut ? "let" : "const";
-        const typeAnnotation = stmt.typeAnnotation
-          ? `: ${this.emitTypeExpr(stmt.typeAnnotation)}`
-          : "";
+        const isInitUndefined =
+          stmt.init.kind === "IdentifierExpr" && stmt.init.name === "undefined";
+        let typeAnnotation = "";
+        if (stmt.typeAnnotation) {
+          if (isInitUndefined && stmt.typeAnnotation.kind === "OptionType") {
+            typeAnnotation = `: ${this.emitTypeExpr(stmt.typeAnnotation.innerType)} | undefined`;
+          } else {
+            typeAnnotation = `: ${this.emitTypeExpr(stmt.typeAnnotation)}`;
+          }
+        }
         const isUninitNil =
           stmt.isMut &&
           stmt.typeAnnotation &&
           stmt.init.kind === "LiteralExpr" &&
-          stmt.init.literalKind === "nil";
+          stmt.init.literalKind === "nil" &&
+          stmt.typeAnnotation.kind !== "OptionType";
         const initCode = isUninitNil ? "" : ` = ${this.emitExpr(stmt.init)}`;
         this.ctx.writeLine(`${keyword} ${stmt.name}${typeAnnotation}${initCode};`);
         break;
