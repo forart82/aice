@@ -15,7 +15,8 @@ export type TargetLanguage =
   | "cpp"
   | "csharp"
   | "json"
-  | "yaml";
+  | "yaml"
+  | "twig";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
@@ -153,6 +154,7 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (clean.endsWith(".cs")) return "csharp";
   if (clean.endsWith(".json")) return "json";
   if (clean.endsWith(".yaml") || clean.endsWith(".yml")) return "yaml";
+  if (clean.endsWith(".twig")) return "twig";
   return "typescript";
 }
 

@@ -434,6 +434,28 @@ export function generateOutline(
           });
           break;
         }
+        case "ComponentDecl": {
+          const line = item.span?.start?.line || 1;
+          const paramsStr = item.params
+            .map((p) => {
+              const opt = p.isOptional ? "?" : "";
+              const typeStr =
+                includeTypes && p.typeAnnotation ? `: ${formatTypeExpr(p.typeAnnotation)}` : "";
+              return `${p.name}${opt}${typeStr}`;
+            })
+            .join(", ");
+          const sig = `component ${item.name}(${paramsStr}): ...`;
+          const docstring = getLeadingTriviaDoc(trivia, `component:${item.name}`);
+          symbols.push({
+            name: item.name,
+            kind: "component",
+            line,
+            signature: sig,
+            children: [],
+            docstring,
+          });
+          break;
+        }
       }
     }
   }
@@ -442,7 +464,15 @@ export function generateOutline(
   const outlineLines: string[] = [];
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
-    if (i > 0 && (sym.kind === "class" || sym.kind === "function" || sym.kind === "enum" || sym.kind === "interface" || sym.kind === "record")) {
+    if (
+      i > 0 &&
+      (sym.kind === "class" ||
+        sym.kind === "function" ||
+        sym.kind === "enum" ||
+        sym.kind === "interface" ||
+        sym.kind === "record" ||
+        sym.kind === "component")
+    ) {
       outlineLines.push("");
     }
 

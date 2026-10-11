@@ -13,6 +13,7 @@ import { JsonEmitter } from "./json-emitter.js";
 import { PythonEmitter } from "./py-emitter.js";
 import { RustEmitter } from "./rust-emitter.js";
 import { TypeScriptEmitter } from "./ts-emitter.js";
+import { TwigEmitter } from "./twig-emitter.js";
 import { YamlEmitter } from "./yaml-emitter.js";
 
 export * from "./context.js";
@@ -26,6 +27,7 @@ export * from "./py-emitter.js";
 export * from "./rewriter.js";
 export * from "./rust-emitter.js";
 export * from "./ts-emitter.js";
+export * from "./twig-emitter.js";
 export * from "./yaml-emitter.js";
 
 // Convenience aliases
@@ -85,6 +87,10 @@ export function emitTarget(
     }
     case "yaml": {
       const emitter = new YamlEmitter(options);
+      return emitter.emit(mod);
+    }
+    case "twig": {
+      const emitter = new TwigEmitter(options);
       return emitter.emit(mod);
     }
     default: {

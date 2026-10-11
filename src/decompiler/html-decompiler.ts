@@ -53,7 +53,11 @@ export class HtmlDecompiler {
         ?.replace(/\.html$/, "")
         .replace(/\.ail$/, "") ?? "page";
     const cleanModPath = baseName;
-    const compName = baseName.charAt(0).toUpperCase() + baseName.slice(1);
+    const compName =
+      baseName
+        .split(/[-_]/)
+        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+        .join("") || "Page";
 
     const comp: ComponentDecl = {
       kind: "ComponentDecl",

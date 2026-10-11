@@ -17,6 +17,7 @@ import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
 import { JsonDecompiler, type JsonDecompilerOptions } from "./json-decompiler.js";
 import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
+import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js";
 
 export * from "./ail-generator.js";
@@ -27,6 +28,7 @@ export * from "./html-decompiler.js";
 export * from "./json-decompiler.js";
 export * from "./roundtrip.js";
 export * from "./ts-decompiler.js";
+export * from "./twig-decompiler.js";
 export * from "./yaml-decompiler.js";
 
 export interface DecompileOptions
@@ -104,6 +106,12 @@ export function decompile(
     case "yaml": {
       const decompiler = new YamlDecompiler(source, filePath, options);
       const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "twig": {
+      const result = decompileTwig(source, filePath, options);
       ast = result.ast;
       trivia = result.trivia;
       break;

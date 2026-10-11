@@ -89,6 +89,7 @@ const KNOWN_TARGET_EXTENSIONS = new Set([
   ".json",
   ".yaml",
   ".yml",
+  ".twig",
 ]);
 
 /**
@@ -127,6 +128,9 @@ export function resolveTargetFilePath(ailPath: string): string {
         break;
       case "yaml":
         targetOut += ".yaml";
+        break;
+      case "twig":
+        targetOut += ".twig";
         break;
       case "tsx":
         targetOut += ".tsx";

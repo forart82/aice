@@ -1,0 +1,23 @@
+{# User Profile Card Template #}
+{% extends "base.twig" %}
+
+{% block content %}
+<div class="user-card" id="user-{{ user.id }}">
+  <div class="card-header">
+    <h2 class="user-name">{{ user.name }}</h2>
+    <span class="user-role">{{ user.role }}</span>
+  </div>
+  <div class="card-body">
+    {% if user.bio %}
+      <p class="user-bio">{{ user.bio }}</p>
+    {% else %}
+      <p class="user-bio empty">No bio provided</p>
+    {% endif %}
+    <ul class="skills-list">
+      {% for skill in user.skills %}
+        <li class="skill-item">{{ skill.name }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}

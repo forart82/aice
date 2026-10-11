@@ -37,6 +37,7 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "csharp",
   "json",
   "yaml",
+  "twig",
 ]);
 
 export const DEFAULT_PROJECT_CONFIG: Readonly<AilProjectConfig> = Object.freeze({
@@ -69,6 +70,7 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".json",
   ".yaml",
   ".yml",
+  ".twig",
 ]);
 
 export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
@@ -92,6 +94,7 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".json": "json",
   ".yaml": "yaml",
   ".yml": "yaml",
+  ".twig": "twig",
 });
 
 const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
@@ -132,6 +135,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".json";
     case "yaml":
       return ".yaml";
+    case "twig":
+      return ".twig";
     default:
       return ".ts";
   }

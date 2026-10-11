@@ -121,6 +121,12 @@ export class HtmlEmitter {
     if (expr.kind === "IdentifierExpr") {
       return expr.name;
     }
+    if (expr.kind === "MemberAccessExpr") {
+      return `${this.renderAttrValue(expr.object)}.${expr.property}`;
+    }
+    if (expr.kind === "BinaryExpr") {
+      return `${this.renderAttrValue(expr.left)} ${expr.operator} ${this.renderAttrValue(expr.right)}`;
+    }
     return "";
   }
 
