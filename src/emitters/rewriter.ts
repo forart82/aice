@@ -288,11 +288,6 @@ export function lowerMethodCall(
         isLowered: true,
         code: `${objectCode}.at(${argCodes[0] ?? "0"})`,
       };
-    case "get":
-      return {
-        isLowered: true,
-        code: `(${objectCode}.at(${argCodes[0] ?? "0"}) ?? null)`,
-      };
     case "concat":
       return {
         isLowered: true,
@@ -347,6 +342,11 @@ export function lowerMethodCall(
         isLowered: true,
         code: `(${objectCode}.at(-1) ?? null)`,
       };
+    case "contains":
+      return {
+        isLowered: true,
+        code: `${objectCode}.includes(${argCodes.join(", ")})`,
+      };
     case "startsWith":
       return {
         isLowered: true,
@@ -356,12 +356,6 @@ export function lowerMethodCall(
       return {
         isLowered: true,
         code: `${objectCode}.endsWith(${argCodes[0] ?? "''"})`,
-      };
-    case "includes":
-    case "contains":
-      return {
-        isLowered: true,
-        code: `${objectCode}.includes(${argCodes[0] ?? "''"})`,
       };
     case "trim":
       return {

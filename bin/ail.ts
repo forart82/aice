@@ -14,6 +14,7 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
+  saveProjectConfig,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
 } from "../src/config/index.js";
@@ -26,9 +27,11 @@ import {
   type TargetLanguage,
 } from "../src/emitters/index.js";
 import { AilLspServer } from "../src/lsp/server.js";
-import { MultiLineReporter, runAilTests } from "../src/runner/index.js";
+import { AilMcpServer } from "../src/mcp/index.js";
+import { MultiLineReporter, runAilTests, translateTrace } from "../src/runner/index.js";
 import {
   applyAiShield,
+  applyCompanionShield,
   checkAiShieldStatus,
   interceptPreToolUse,
   lockProjectTargets,
@@ -36,6 +39,15 @@ import {
   safeWriteTargetFile,
   unlockProjectTargets,
 } from "../src/shield/index.js";
+import {
+  applyProjectIdiomsToDirectory,
+  expandProjectIdiomsInDirectory,
+  expandModuleIdioms,
+} from "../src/idioms/index.js";
+import {
+  runEvolutionLoopSync,
+  runSelfHealingCampaignSync,
+} from "../src/evolve/index.js";
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
@@ -84,14 +96,14 @@ import {
   formatDiagnosticJson,
   formatDiagnosticText,
 } from "../src/typechecker/diagnostics.js";
-import { watchProject } from "../src/watcher/index.js";
+import { syncProjectFromTargets, watchProject } from "../src/watcher/index.js";
 
 const program = new Command();
 
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.5.15");
+  .version("0.6.0");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -105,6 +117,7 @@ export function executeCompile(
     fix?: boolean;
     pureInterfaces?: boolean;
     watermark?: boolean;
+    check?: boolean;
   },
 ): void {
   try {
@@ -126,9 +139,7 @@ export function executeCompile(
         const repairRes = attemptSelfRepair(source, file);
         if (repairRes.fixed && repairRes.modified) {
           fs.writeFileSync(file, repairRes.finalSource, "utf-8");
-          console.log(
-            `💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`,
-          );
+          console.log(`💡 Autonomous self-repair applied (${repairRes.iterations} iteration(s)):`);
           for (const r of repairRes.repairs) {
             console.log(`  - ${r.description}`);
           }
@@ -137,10 +148,19 @@ export function executeCompile(
       }
 
       const { ast: mod, trivia } = parseWithTrivia(source, file);
+      const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(path.resolve(file))));
+      const effectiveIdioms = projectConfig.idioms ?? config.idioms;
+      const expandedMod = effectiveIdioms ? expandModuleIdioms(mod, effectiveIdioms) : mod;
 
       // Sound type check
-      const tc = new TypeChecker();
-      tc.checkModule(mod);
+      try {
+        const tc = new TypeChecker();
+        tc.checkModule(expandedMod);
+      } catch (tcErr) {
+        if (options.check) {
+          throw tcErr;
+        }
+      }
 
       // Target selection
       let targetLang: TargetLanguage;
@@ -160,10 +180,11 @@ export function executeCompile(
 
       const watermark = options.watermark !== false ? config.watermark : false;
 
-      const emitted = emitTarget(mod, targetLang, {
+      const emitted = emitTarget(expandedMod, targetLang, {
         trivia,
         pureInterfaces: options.pureInterfaces,
         watermark,
+        idioms: effectiveIdioms,
       });
 
       // Output path: CLI flag --out retains highest priority
@@ -178,10 +199,14 @@ export function executeCompile(
           isolated: true,
         };
         const resolvedOut = resolveTargetOutputPathForConfig(file, effectiveConfig, projectRoot);
-        outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        outPath = path.isAbsolute(resolvedOut)
+          ? resolvedOut
+          : path.resolve(projectRoot, resolvedOut);
       } else {
         const resolvedOut = resolveTargetOutputPathForConfig(file, config, projectRoot);
-        outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+        outPath = path.isAbsolute(resolvedOut)
+          ? resolvedOut
+          : path.resolve(projectRoot, resolvedOut);
       }
 
       safeWriteTargetFile(outPath, emitted);
@@ -225,8 +250,15 @@ export function executeCompile(
         }
 
         const { ast: mod, trivia } = parseWithTrivia(source, relPath);
-        const tc = new TypeChecker();
-        tc.checkModule(mod);
+        const expandedMod = config.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
+        try {
+          const tc = new TypeChecker();
+          tc.checkModule(expandedMod);
+        } catch (tcErr) {
+          if (options.check) {
+            throw tcErr;
+          }
+        }
 
         let targetLang: TargetLanguage;
         if (options.target) {
@@ -244,10 +276,11 @@ export function executeCompile(
 
         const watermark = options.watermark !== false ? config.watermark : false;
 
-        const emitted = emitTarget(mod, targetLang, {
+        const emitted = emitTarget(expandedMod, targetLang, {
           trivia,
           pureInterfaces: options.pureInterfaces,
           watermark,
+          idioms: config.idioms,
         });
 
         // Output path: CLI flag --out-dir retains highest priority
@@ -260,10 +293,14 @@ export function executeCompile(
             isolated: true,
           };
           const resolvedOut = resolveTargetOutputPathForConfig(f, effectiveConfig, projectRoot);
-          outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+          outPath = path.isAbsolute(resolvedOut)
+            ? resolvedOut
+            : path.resolve(projectRoot, resolvedOut);
         } else {
           const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
-          outPath = path.isAbsolute(resolvedOut) ? resolvedOut : path.resolve(projectRoot, resolvedOut);
+          outPath = path.isAbsolute(resolvedOut)
+            ? resolvedOut
+            : path.resolve(projectRoot, resolvedOut);
         }
 
         safeWriteTargetFile(outPath, emitted);
@@ -313,6 +350,7 @@ program
     "Emit pure TypeScript interfaces without artificial factory constructor functions",
   )
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
+  .option("--check", "Perform strict type checking and abort compilation on type errors")
   .action(
     (
       target: string | undefined,
@@ -323,6 +361,7 @@ program
         fix?: boolean;
         pureInterfaces?: boolean;
         watermark?: boolean;
+        check?: boolean;
       },
     ) => {
       executeCompile(target, options);
@@ -332,20 +371,34 @@ program
 // Command: compile-all [dir] (Deprecated alias to compile [dir])
 program
   .command("compile-all")
-  .description("Recursively compile all .ail source files in a directory (alias for 'compile [dir]')")
+  .description(
+    "Recursively compile all .ail source files in a directory (alias for 'compile [dir]')",
+  )
   .argument("[dir]", "Directory to search for .ail files", ".")
   .option("--out-dir <outDir>", "Optional destination directory for emitted files")
+  .option("-t, --target <target>", "Target language")
+  .option("--check", "Run the static type checker before emitting")
+  .option("--fix", "Automatically repair common AI syntax hallucinations")
   .option(
     "--pure-interfaces",
     "Emit pure TypeScript interfaces without artificial factory constructor functions",
   )
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
   .action(
-    (dir: string, options: { outDir?: string; pureInterfaces?: boolean; watermark?: boolean }) => {
+    (
+      dir: string,
+      options: {
+        outDir?: string;
+        target?: string;
+        check?: boolean;
+        fix?: boolean;
+        pureInterfaces?: boolean;
+        watermark?: boolean;
+      },
+    ) => {
       executeCompile(dir, options);
     },
   );
-
 
 // Command: clean [dir]
 program
@@ -387,18 +440,38 @@ program
       let removedCount = 0;
 
       for (const f of files) {
-        const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
-        const outPath = path.isAbsolute(resolvedOut)
-          ? resolvedOut
-          : path.resolve(projectRoot, resolvedOut);
-        const legacyOut = getTargetOutputPath(f);
+        const pathsToRemove = new Set<string>();
 
-        const pathsToRemove = new Set([outPath, legacyOut]);
+        if (config.mode !== "companion") {
+          const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
+          const outPath = path.isAbsolute(resolvedOut)
+            ? resolvedOut
+            : path.resolve(projectRoot, resolvedOut);
+          pathsToRemove.add(outPath);
+        }
+
+        const legacyOut = getTargetOutputPath(f);
+        if (KNOWN_TARGET_EXTENSIONS.has(path.extname(legacyOut))) {
+          if (
+            config.mode !== "companion" ||
+            !path.isAbsolute(legacyOut) ||
+            legacyOut.startsWith(projectRoot)
+          ) {
+            pathsToRemove.add(legacyOut);
+          }
+        }
+
         for (const p of pathsToRemove) {
           if (fs.existsSync(p)) {
-            fs.unlinkSync(p);
-            console.log(`✔ Removed ${path.relative(process.cwd(), p)}`);
-            removedCount++;
+            try {
+              if (fs.statSync(p).isFile()) {
+                fs.unlinkSync(p);
+                console.log(`✔ Removed ${path.relative(process.cwd(), p)}`);
+                removedCount++;
+              }
+            } catch {
+              // ignore stat/unlink error
+            }
           }
         }
       }
@@ -413,11 +486,16 @@ program
 // Command: verify [target]
 program
   .command("verify")
-  .description("Verify syntactic and type soundness of an .ail file, or run automated multi-file roundtrip parity gate")
+  .description(
+    "Verify syntactic and type soundness of an .ail file, or run automated multi-file roundtrip parity gate",
+  )
   .argument("[target]", "Path to the .ail source file, target file, or directory")
   .option("--json", "Output machine-readable telemetry JSON")
   .option("--fix", "Autonomously repair fixable violations before verification")
-  .option("--parity", "Run the automated multi-file roundtrip parity gate across the project or target path")
+  .option(
+    "--parity",
+    "Run the automated multi-file roundtrip parity gate across the project or target path",
+  )
   .option("--strict", "Fail with exit code 1 if any file has roundtrip drift or non-equivalence")
   .action(
     async (
@@ -507,8 +585,10 @@ program
         }
 
         const mod = parse(source, file);
+        const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(fullPath)));
+        const expandedMod = projectConfig.idioms ? expandModuleIdioms(mod, projectConfig.idioms) : mod;
         const tc = new TypeChecker();
-        tc.checkModule(mod);
+        tc.checkModule(expandedMod);
 
         if (options.json) {
           console.log(
@@ -588,6 +668,28 @@ program
     },
   );
 
+// Command: trace <trace...>
+program
+  .command("trace")
+  .description("Translate runtime stack trace or file:line reference to companion .ail location")
+  .argument("<trace...>", "Stack trace string or file:line reference to translate")
+  .option("--cwd <dir>", "Project directory context (defaults to current working directory)")
+  .action((traceArgs: string[], options?: { cwd?: string }) => {
+    try {
+      const projectDir = options?.cwd ? path.resolve(options.cwd) : process.cwd();
+      const projectRoot = findProjectRoot(projectDir) ?? projectDir;
+      const config = loadProjectConfig(projectRoot);
+
+      const translated = translateTrace(traceArgs, projectRoot, config);
+      for (const line of translated) {
+        console.log(line);
+      }
+    } catch (err) {
+      console.error(`❌ Failed to translate trace:`, err);
+      process.exit(1);
+    }
+  });
+
 // Command: fix <file>
 program
   .command("fix")
@@ -656,11 +758,14 @@ program
 program
   .command("decompile")
   .description(
-    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs) into an .ail source file",
+    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs, .py, .php, .kt, .go, .rs) into an .ail source file",
   )
   .argument("<file>", "Path to the target source file")
   .option("-o, --out <out>", "Output .ail file path")
-  .option("-t, --target <target>", "Target language (typescript, tsx, css, html, cpp, csharp)")
+  .option(
+    "-t, --target <target>",
+    "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
+  )
   .action((file: string, options: { out?: string; target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
@@ -694,7 +799,10 @@ program
   .command("roundtrip")
   .description("Verify Put/Get stability by decompiling to .ail and recompiling to target")
   .argument("<file>", "Path to target source file")
-  .option("-t, --target <target>", "Target language (typescript, tsx, css, html, cpp, csharp)")
+  .option(
+    "-t, --target <target>",
+    "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
+  )
   .action((file: string, options: { target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
@@ -732,6 +840,14 @@ program
   .description("Launch the AIL Language Server Protocol (LSP) daemon over stdio")
   .action(() => {
     new AilLspServer(process.stdin, process.stdout);
+  });
+
+// Command: mcp
+program
+  .command("mcp")
+  .description("Launch the AIL Model Context Protocol (MCP) server over stdio")
+  .action(() => {
+    new AilMcpServer(process.stdin, process.stdout);
   });
 
 // Command: tokens [path]
@@ -943,9 +1059,7 @@ program
           console.log(formatBenchmarkTerminal(report));
         }
       } catch (err: unknown) {
-        console.error(
-          `❌ Benchmark error: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        console.error(`❌ Benchmark error: ${err instanceof Error ? err.message : String(err)}`);
         process.exit(1);
       }
     },
@@ -997,42 +1111,13 @@ program
     },
   );
 
-// Helper to recursively delete .ail and .trivia.json files
-function removeAilAndTriviaFiles(curDir: string): number {
-  let count = 0;
-  if (!fs.existsSync(curDir)) return 0;
-  const entries = fs.readdirSync(curDir, { withFileTypes: true });
-  for (const entry of entries) {
-    if (entry.name === "node_modules" || entry.name === ".git") continue;
-    const fullPath = path.join(curDir, entry.name);
-    if (entry.isDirectory()) {
-      count += removeAilAndTriviaFiles(fullPath);
-    } else if (entry.isFile()) {
-      const lower = entry.name.toLowerCase();
-      if (lower.endsWith(".ail") || lower.endsWith(".trivia.json")) {
-        try {
-          fs.unlinkSync(fullPath);
-          count++;
-        } catch {
-          try {
-            fs.chmodSync(fullPath, 0o644);
-            fs.unlinkSync(fullPath);
-            count++;
-          } catch {
-            // ignore unlink errors
-          }
-        }
-      }
-    }
-  }
-  return count;
-}
-
 // Command: adopt [dir]
 program
   .command("adopt")
-  .description("Adopt an existing codebase into AIL side-by-side architecture")
-  .argument("[dir]", "Target codebase directory", ".")
+  .description(
+    "Adopt an existing codebase into AIL side-by-side architecture or standalone companion workspace",
+  )
+  .argument("[dir]", "Target codebase directory or destination companion workspace", ".")
   .option("-c, --concurrency <number>", "Worker concurrency for parallel decompilation", (val) =>
     Number.parseInt(val, 10),
   )
@@ -1041,10 +1126,21 @@ program
   .option("--overwrite", "Force re-decompilation of existing .ail files")
   .option("--dry-run", "Calculate plan and tokenomics metrics without mutating disk")
   .option(
+    "--idioms",
+    "Automatically mine and collapse repetitive lines/blocks into token-saving project idioms",
+  )
+  .option(
     "--isolate",
     "Adopt project into isolated mode (src/ contains only .ail, target files in .ail-build/)",
   )
-  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .ail-build)")
+  .option(
+    "--companion <targetDir>",
+    "Adopt an external project into a standalone companion AIL workspace",
+  )
+  .option(
+    "--out-dir <dir>",
+    "Build artifact directory for isolated mode (default: .ail-build) or target source directory for companion mode",
+  )
   .option("--source-dir <dir>", "Source directory containing .ail code (default: src)")
   .action(
     async (
@@ -1056,15 +1152,36 @@ program
         overwrite?: boolean;
         dryRun?: boolean;
         isolate?: boolean;
+        companion?: string;
         outDir?: string;
         sourceDir?: string;
+        idioms?: boolean;
       },
     ) => {
       try {
-        const targetDir = path.resolve(process.cwd(), dir);
-        if (!fs.existsSync(targetDir)) {
-          console.error(`❌ Error: Directory not found: ${dir}`);
-          process.exit(1);
+        const isCompanion = Boolean(options.companion);
+        const isIsolated = !isCompanion && Boolean(options.isolate);
+
+        let companionDir: string;
+        let targetProjectDir: string;
+
+        if (isCompanion) {
+          targetProjectDir = path.resolve(process.cwd(), options.companion!);
+          if (!fs.existsSync(targetProjectDir)) {
+            console.error(`❌ Error: Target project directory not found: ${options.companion}`);
+            process.exit(1);
+          }
+          companionDir = path.resolve(process.cwd(), dir ?? ".");
+          if (!options.dryRun && !fs.existsSync(companionDir)) {
+            fs.mkdirSync(companionDir, { recursive: true });
+          }
+        } else {
+          companionDir = path.resolve(process.cwd(), dir);
+          targetProjectDir = companionDir;
+          if (!fs.existsSync(targetProjectDir)) {
+            console.error(`❌ Error: Directory not found: ${dir}`);
+            process.exit(1);
+          }
         }
 
         const cpus = os.cpus?.().length ? os.cpus().length : 4;
@@ -1073,63 +1190,108 @@ program
         const reporter = new MultiLineReporter({ concurrency });
 
         const summary = await ingestProjectSideBySide({
-          dir: targetDir,
+          dir: companionDir,
+          companion: isCompanion,
+          targetProjectDir: isCompanion ? targetProjectDir : undefined,
           concurrency,
           reporter,
           overwrite: Boolean(options.overwrite),
           dryRun: Boolean(options.dryRun),
-          isolate: Boolean(options.isolate),
+          isolate: isIsolated,
           outDir: options.outDir,
           sourceDir: options.sourceDir,
+          shield: options.shield !== false,
+          idioms: Boolean(options.idioms),
         });
 
         let shieldApplied = false;
         let lockSummary = { totalLocked: 0, totalSkipped: 0, totalFailed: 0 };
 
         if (!options.dryRun) {
-          if (options.shield !== false) {
-            await applyAiShield(targetDir, { lifecycleHooks: true });
-            shieldApplied = true;
-          }
-          if (options.lock !== false) {
-            lockSummary = await lockProjectTargets(targetDir);
+          if (isCompanion) {
+            shieldApplied = options.shield !== false;
+          } else {
+            if (options.shield !== false) {
+              await applyAiShield(targetProjectDir, { lifecycleHooks: true });
+              shieldApplied = true;
+            }
+            if (options.lock !== false) {
+              lockSummary = await lockProjectTargets(targetProjectDir);
+            }
           }
         }
 
-        const isIsolated = Boolean(options.isolate);
-        console.log(`\n=== AIL ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
-        console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
-        if (isIsolated) {
-          console.log(`Mode:                isolated`);
+        if (isCompanion) {
+          console.log(`\n=== AIL Companion Adoption Summary ===`);
+          console.log(`Companion Workspace: ${path.relative(process.cwd(), companionDir) || "."}`);
+          console.log(
+            `Target Project:      ${path.relative(process.cwd(), targetProjectDir) || "."}`,
+          );
+          console.log(`Mode:                companion`);
           console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
-          console.log(`Build Out Dir:       ${options.outDir ?? ".ail-build"}`);
+          console.log(
+            `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
+          );
+          console.log(
+            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
+          );
+          console.log(
+            `AI Shield:           ${
+              options.dryRun
+                ? "💡 Simulated (--dry-run)"
+                : options.shield === false
+                  ? "⊘ Skipped (--no-shield)"
+                  : "✔ Active (AGENTS.md, .cursorrules)"
+            }`,
+          );
+          if (summary.idiomsSynthesized) {
+            console.log(
+              `Project Idioms:      ${summary.idiomsSynthesized} idioms synthesized (+${summary.idiomTokenSavings ?? 0} tokens saved)`,
+            );
+          }
+          console.log(`Target Files:        ✔ Untouched (100% clean, unlocked)`);
+        } else {
+          console.log(`\n=== AIL ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
+          console.log(
+            `Directory:           ${path.relative(process.cwd(), targetProjectDir) || "."}`,
+          );
+          if (isIsolated) {
+            console.log(`Mode:                isolated`);
+            console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
+            console.log(`Build Out Dir:       ${options.outDir ?? ".ail-build"}`);
+          }
+          console.log(
+            `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
+          );
+          console.log(
+            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
+          );
+          if (summary.idiomsSynthesized) {
+            console.log(
+              `Project Idioms:      ${summary.idiomsSynthesized} idioms synthesized (+${summary.idiomTokenSavings ?? 0} tokens saved)`,
+            );
+          }
+          console.log(
+            `AI Shield:           ${
+              options.dryRun
+                ? "💡 Simulated (--dry-run)"
+                : options.shield === false
+                  ? "⊘ Skipped (--no-shield)"
+                  : shieldApplied
+                    ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md, GEMINI.md, .agents/hooks.json)"
+                    : "✖ Inactive"
+            }`,
+          );
+          console.log(
+            `Permission Locks:    ${
+              options.dryRun
+                ? "💡 Simulated (--dry-run)"
+                : options.lock === false
+                  ? "⊘ Skipped (--no-lock)"
+                  : `✔ ${lockSummary.totalLocked} target file(s) locked (chmod 444)`
+            }`,
+          );
         }
-        console.log(
-          `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
-        );
-        console.log(
-          `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
-        );
-        console.log(
-          `AI Shield:           ${
-            options.dryRun
-              ? "💡 Simulated (--dry-run)"
-              : options.shield === false
-                ? "⊘ Skipped (--no-shield)"
-                : shieldApplied
-                  ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md, GEMINI.md, .agents/hooks.json)"
-                  : "✖ Inactive"
-          }`,
-        );
-        console.log(
-          `Permission Locks:    ${
-            options.dryRun
-              ? "💡 Simulated (--dry-run)"
-              : options.lock === false
-                ? "⊘ Skipped (--no-lock)"
-                : `✔ ${lockSummary.totalLocked} target file(s) locked (chmod 444)`
-          }`,
-        );
 
         if (options.dryRun) {
           console.log(`\n💡 [DRY-RUN] No changes were written to disk.`);
@@ -1152,6 +1314,7 @@ program
   .alias("dev")
   .description("Watch .ail files and incrementally recompile side-by-side on change")
   .argument("[dir]", "Directory to watch for .ail files", ".")
+  .option("--lock", "Lock compiled target files (chmod 444)")
   .option("--no-lock", "Do not lock compiled target files")
   .option(
     "--debounce <ms>",
@@ -1159,12 +1322,14 @@ program
     (val) => Number.parseInt(val, 10),
     50,
   )
+  .option("--bidirectional", "Watch target files and reverse-sync external edits back to .ail")
   .action(
     async (
       dir: string,
       options: {
         lock?: boolean;
         debounce?: number;
+        bidirectional?: boolean;
       },
     ) => {
       try {
@@ -1174,19 +1339,48 @@ program
           process.exit(1);
         }
 
-        const lockTargets = options.lock !== false;
-        const debounceMs = options.debounce ?? 50;
+        const projectRoot = findProjectRoot(targetDir);
+        const config = loadProjectConfig(projectRoot);
+        const isCompanion = config.mode === "companion";
 
-        console.log(
-          `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
-        );
-        console.log(
-          `   Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"}\n`,
-        );
+        const lockTargets = options.lock !== undefined ? options.lock : isCompanion ? false : true;
+        const debounceMs = options.debounce ?? 50;
+        const bidirectional = Boolean(options.bidirectional);
+
+        if (isCompanion) {
+          const compRel = path.relative(process.cwd(), projectRoot) || ".";
+          const targetProjectDirAbs = config.targetProjectDir
+            ? path.isAbsolute(config.targetProjectDir)
+              ? config.targetProjectDir
+              : path.resolve(projectRoot, config.targetProjectDir)
+            : config.outDir && path.isAbsolute(config.outDir)
+              ? config.outDir
+              : path.resolve(projectRoot, config.outDir ?? ".");
+          const targetRel =
+            path.relative(process.cwd(), targetProjectDirAbs) || targetProjectDirAbs;
+
+          console.log(`[companion] Watching ${compRel} -> Emitting to ${targetRel}`);
+          console.log(
+            `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
+          );
+          console.log(
+            `   Mode: companion | Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"} | Reverse sync: ${bidirectional ? "enabled" : "disabled"}\n`,
+          );
+        } else {
+          console.log(
+            `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
+          );
+          console.log(
+            `   Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"} | Reverse sync: ${bidirectional ? "enabled" : "disabled"}\n`,
+          );
+        }
 
         const watcher = await watchProject(targetDir, {
+          projectRoot,
+          config,
           debounceMs,
           lockTargets,
+          bidirectional,
           onCompileSuccess: (ailFile, targetFile, durationMs) => {
             const relAil = path.relative(process.cwd(), ailFile);
             const relTarget = path.relative(process.cwd(), targetFile);
@@ -1200,6 +1394,17 @@ program
             const relAil = path.relative(process.cwd(), ailFile);
             const relTarget = path.relative(process.cwd(), targetFile);
             console.log(`ℹ [DELETE] Removed ${relAil} (target: ${relTarget})`);
+          },
+          onReverseSyncSuccess: (targetFile, ailFile, durationMs) => {
+            const relTarget = path.relative(process.cwd(), targetFile);
+            const relAil = path.relative(process.cwd(), ailFile);
+            console.log(`✔ [REVERSE-SYNC] ${relTarget} -> ${relAil} (${Math.round(durationMs)}ms)`);
+          },
+          onReverseSyncError: (targetFile, error) => {
+            const relTarget = path.relative(process.cwd(), targetFile);
+            console.error(
+              `❌ [REVERSE-SYNC ERROR] Failed to reverse-sync ${relTarget}: ${error.message}`,
+            );
           },
         });
 
@@ -1219,6 +1424,52 @@ program
       }
     },
   );
+
+// Command: sync [dir]
+program
+  .command("sync")
+  .description(
+    "Synchronize external edits from target files (.ts, .py, .go, .rs, etc.) back into .ail sources",
+  )
+  .argument("[dir]", "Directory containing project or target files", ".")
+  .option("--json", "Output machine-readable JSON telemetry")
+  .action(async (dir: string, options: { json?: boolean }) => {
+    try {
+      const targetDir = path.resolve(process.cwd(), dir || ".");
+      if (!fs.existsSync(targetDir)) {
+        console.error(`❌ Error: Directory not found: ${dir}`);
+        process.exit(1);
+      }
+
+      const results = await syncProjectFromTargets(targetDir);
+
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        if (results.length === 0) {
+          console.log(`ℹ No target files needed synchronization.`);
+        } else {
+          console.log(`\n=== Bidirectional Companion Sync: ${dir || "."} ===`);
+          for (const r of results) {
+            const relTarget = path.relative(process.cwd(), r.targetFile);
+            const relAil = path.relative(process.cwd(), r.ailFile);
+            if (r.success) {
+              const idiomText =
+                r.collapsedIdioms > 0 ? ` (${r.collapsedIdioms} idioms collapsed)` : "";
+              console.log(
+                `✔ ${relTarget} -> ${relAil} [${Math.round(r.durationMs)}ms]${idiomText}`,
+              );
+            } else {
+              console.error(`❌ ${relTarget} -> ${relAil}: ${r.error?.message}`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`❌ Sync error:`, err);
+      process.exit(1);
+    }
+  });
 
 // Command: eject [dir]
 const ejectCmd = program
@@ -1678,11 +1929,7 @@ program
   )
   .option("--no-callers", "Skip reverse caller lookup")
   .option("--outline-target", "Outline target instead of full source")
-  .option(
-    "--max-tokens <number>",
-    "Maximum token limit",
-    (val) => Number.parseInt(val, 10),
-  )
+  .option("--max-tokens <number>", "Maximum token limit", (val) => Number.parseInt(val, 10))
   .option("--json", "Output as JSON bundle")
   .option("--stats", "Output token count statistics")
   .action(
@@ -1709,7 +1956,7 @@ program
           projectRoot: resolved.projectRoot,
         };
 
-        const result = await generateContext(targetPath, contextOpts);
+        const result = await generateContext(resolved.resolvedPath, contextOpts);
 
         if (options.json) {
           console.log(JSON.stringify(result, null, 2));
@@ -1748,10 +1995,8 @@ program
   .option("--write", "Write formatted output to file (default: true)", true)
   .option("--no-write", "Do not write formatted output to file")
   .option("--stdin", "Read code from stdin and write formatted code to stdout")
-  .option(
-    "--indent <number>",
-    "Indentation space count (default: 2)",
-    (val) => Number.parseInt(val, 10),
+  .option("--indent <number>", "Indentation space count (default: 2)", (val) =>
+    Number.parseInt(val, 10),
   )
   .action(
     async (
@@ -1936,8 +2181,7 @@ program
             for (const f of files) {
               const rel = path.relative(process.cwd(), f);
               const res = await diffFiles(f, undefined, diffOpts);
-              const hasSemantic =
-                res.changes && res.changes.some((c) => c.change !== "unchanged");
+              const hasSemantic = res.changes && res.changes.some((c) => c.change !== "unchanged");
               const hasUnified = Boolean(res.unifiedDiff && res.unifiedDiff.trim().length > 0);
 
               if (hasSemantic || hasUnified) {
@@ -2056,6 +2300,327 @@ program
       }
     },
   );
+
+// Command: idioms [action] [dir]
+program
+  .command("idioms [action] [dir]")
+  .description("Mine, apply, expand, or list project-specific token-saving idioms")
+  .option(
+    "--min-occurrences <n>",
+    "Minimum occurrences required to synthesize an idiom (default: 3)",
+    (val) => Number.parseInt(val, 10),
+    3,
+  )
+  .option(
+    "--min-savings <tokens>",
+    "Minimum net BPE token savings to synthesize an idiom (default: 10)",
+    (val) => Number.parseInt(val, 10),
+    10,
+  )
+  .option("--json", "Output results in JSON format")
+  .option("--dry-run", "Preview idiom synthesis without modifying files")
+  .action(
+    async (
+      actionArg: string | undefined,
+      dirArg: string | undefined,
+      options: {
+        minOccurrences?: number;
+        minSavings?: number;
+        json?: boolean;
+        dryRun?: boolean;
+      },
+    ) => {
+      try {
+        const validActions = new Set(["scan", "apply", "expand", "list"]);
+        let action = "scan";
+        let targetDir = process.cwd();
+
+        if (actionArg && validActions.has(actionArg.toLowerCase())) {
+          action = actionArg.toLowerCase();
+          targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+        } else if (actionArg) {
+          targetDir = path.resolve(process.cwd(), actionArg);
+          action = "scan";
+        } else {
+          targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+        }
+
+        const minOccurrences = options.minOccurrences ?? 3;
+        const minNetTokenSavings = options.minSavings ?? 10;
+        const isJson = Boolean(options.json);
+        const dryRun = Boolean(options.dryRun);
+
+        if (action === "scan") {
+          const res = applyProjectIdiomsToDirectory(targetDir, {
+            dryRun: true,
+            minOccurrences,
+            minNetTokenSavings,
+          });
+
+          if (isJson) {
+            console.log(JSON.stringify(res, null, 2));
+            return;
+          }
+
+          const idiomsMap = res.idioms ?? (res as any).discoveredIdioms ?? {};
+          const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
+          const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
+          const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
+
+          console.log(
+            `\n=== AIL Project Idioms Scan: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          console.log(`Discovered Idioms:   ${idiomCount}`);
+          console.log(`Net Token Savings:   ${tokenSavings} tokens`);
+          console.log(`Files Analyzed:      ${filesCount}`);
+          if (Object.keys(idiomsMap).length > 0) {
+            console.log("\nDiscovered Idioms:");
+            for (const [name, def] of Object.entries(idiomsMap)) {
+              console.log(
+                `  - $${name.replace(/^\$/, "")} (${def.occurrences} occurrences, +${def.netTokenSavings} tokens)`,
+              );
+            }
+          }
+        } else if (action === "apply") {
+          const res = applyProjectIdiomsToDirectory(targetDir, {
+            dryRun,
+            minOccurrences,
+            minNetTokenSavings,
+          });
+
+          if (!dryRun) {
+            const config = loadProjectConfig(targetDir);
+            if (config.mode === "companion") {
+              applyCompanionShield(targetDir);
+            } else {
+              await applyAiShield(targetDir);
+            }
+          }
+
+          if (isJson) {
+            console.log(JSON.stringify(res, null, 2));
+            return;
+          }
+
+          const idiomsMap = res.idioms ?? (res as any).discoveredIdioms ?? {};
+          const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
+          const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
+          const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
+
+          console.log(
+            `\n=== AIL Project Idioms Apply${dryRun ? " (Dry Run)" : ""}: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          console.log(`Synthesized Idioms:  ${idiomCount}`);
+          console.log(`Net Token Savings:   ${tokenSavings} tokens`);
+          console.log(`Files Modified:      ${filesCount}`);
+          if (!dryRun) {
+            console.log(`✔ Updated ail.config.json and refreshed AI shield.`);
+          }
+        } else if (action === "expand") {
+          const res = expandProjectIdiomsInDirectory(targetDir);
+          const configPath = path.join(targetDir, "ail.config.json");
+          if (fs.existsSync(configPath)) {
+            try {
+              const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+              delete raw.idioms;
+              fs.writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+            } catch {
+              // ignore
+            }
+          }
+
+          if (isJson) {
+            console.log(JSON.stringify(res, null, 2));
+            return;
+          }
+
+          const count = res.expandedFiles ?? (res as any)?.filesModified?.length ?? 0;
+          console.log(
+            `\n=== AIL Project Idioms Expand: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          console.log(`Files Expanded:      ${count}`);
+          console.log(
+            `✔ All project idioms inlined back into standard .ail code and idioms cleared from config.`,
+          );
+        } else if (action === "list") {
+          const config = loadProjectConfig(targetDir);
+          const idioms = config.idioms ?? {};
+
+          if (isJson) {
+            console.log(JSON.stringify(idioms, null, 2));
+            return;
+          }
+
+          console.log(
+            `\n=== Active Project Idioms: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          const count = Object.keys(idioms).length;
+          console.log(`Total Idioms: ${count}`);
+          if (count === 0) {
+            console.log(
+              "No idioms configured. Run `ail idioms scan` or `ail idioms apply` to discover idioms.",
+            );
+          } else {
+            for (const [name, def] of Object.entries(idioms)) {
+              console.log(`\n- $${name.replace(/^\$/, "")} (${def.kind}):`);
+              if (def.description) {
+                console.log(`  Description: ${def.description}`);
+              }
+              console.log(`  Occurrences: ${def.occurrences}`);
+              console.log(`  Net Savings: ${def.netTokenSavings} tokens`);
+              console.log(`  Template:    ${def.templateAil.trim()}`);
+            }
+          }
+        } else {
+          console.error(
+            `❌ Unknown idioms action: '${action}'. Supported actions: scan | apply | expand | list`,
+          );
+          process.exit(1);
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error in ail idioms: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+program
+  .command("evolve")
+  .description("Execute autonomous differential fuzzing, self-healing, and idiom evolution loop")
+  .option("-r, --restarts <n>", "Number of campaign restarts (default: 1)", "1")
+  .option("-c, --cycles <n>", "Number of evolution cycles to execute per restart")
+  .option("--seed <n>", "Initial PRNG seed for deterministic fuzzing", "1337")
+  .option("--no-corpus", "Disable sampling real-world corpus files during roundtrip verification")
+  .option("--json", "Emit structured JSON evolution report")
+  .action(async (cmdOptions) => {
+    try {
+      const parsedRestarts = cmdOptions.restarts !== undefined ? Number.parseInt(cmdOptions.restarts, 10) : NaN;
+      const restarts = Number.isNaN(parsedRestarts) ? 1 : parsedRestarts;
+
+      const parsedCycles = cmdOptions.cycles !== undefined ? Number.parseInt(cmdOptions.cycles, 10) : NaN;
+      const cycles = Number.isNaN(parsedCycles) ? (restarts > 1 ? 10 : 100) : parsedCycles;
+
+      const parsedSeed = cmdOptions.seed !== undefined ? Number.parseInt(cmdOptions.seed, 10) : NaN;
+      const seed = Number.isNaN(parsedSeed) ? 1337 : parsedSeed;
+      const includeCorpus = cmdOptions.corpus !== false;
+      const isJson = Boolean(cmdOptions.json);
+
+      if (restarts > 1) {
+        const campaign = runSelfHealingCampaignSync({
+          restarts,
+          cyclesPerRestart: cycles,
+          baseSeed: seed,
+          includeCorpus,
+        });
+
+        if (isJson) {
+          console.log(JSON.stringify(campaign, null, 2));
+          if (campaign.totalFailures > 0) process.exit(1);
+          return;
+        }
+
+        console.log(`\n=== AIL Autonomous Evolution & Self-Healing Campaign Report ===`);
+        console.log(`Restarts:                  ${campaign.completedRestarts} / ${campaign.totalRestarts}`);
+        console.log(`Total Cycles Executed:     ${campaign.totalCyclesExecuted}`);
+        console.log(`Roundtrip Verifications:   ${campaign.totalRoundtripsVerified}`);
+        console.log(`Idiom Transform Identities:${campaign.totalIdiomIdentitiesVerified}`);
+        console.log(`Runtime Equivalence:       ${campaign.runtimeEquivalenceVerifications}`);
+        console.log(
+          `Self-Repair Rate:          ${(
+            (campaign.totalSelfRepairsSucceeded / (campaign.totalSelfRepairsAttempted || 1)) *
+            100
+          ).toFixed(1)}% (${campaign.totalSelfRepairsSucceeded}/${campaign.totalSelfRepairsAttempted})`,
+        );
+        console.log(`Multi-Iteration Repairs:   ${campaign.multiIterationRepairs}`);
+        console.log(`Average Token Savings:     ${campaign.averageTokenSavingsPct.toFixed(2)}%`);
+        console.log(`Total Failures:            ${campaign.totalFailures}`);
+        console.log(`Duration:                  ${campaign.durationMs}ms`);
+
+        if (campaign.totalFailures > 0) {
+          console.log(`\n❌ Campaign finished with ${campaign.totalFailures} failures.`);
+          process.exit(1);
+        } else {
+          console.log(
+            `\n✔ All ${campaign.totalRestarts} restarts (${campaign.totalCyclesExecuted} cycles) completed with 0 failures across all differential oracle gates.`,
+          );
+        }
+        return;
+      }
+
+      const report = runEvolutionLoopSync({
+        cycles,
+        seed,
+        includeCorpus,
+      });
+
+      if (isJson) {
+        console.log(JSON.stringify(report, null, 2));
+        if (report.failedCycles > 0) process.exit(1);
+        return;
+      }
+
+      console.log(`\n=== AIL Autonomous Evolution & Self-Healing Report ===`);
+      console.log(`Total Cycles:              ${report.totalCycles}`);
+      console.log(
+        `Passed Cycles:             ${report.passedCycles} (${(
+          (report.passedCycles / report.totalCycles) *
+          100
+        ).toFixed(1)}%)`,
+      );
+      console.log(`Failed Cycles:             ${report.failedCycles}`);
+      console.log(`Roundtrip Verifications:   ${report.roundtripVerifications}`);
+      console.log(`Idiom Transform Identities:${report.idiomTransformIdentities}`);
+      console.log(`TypeChecker Soundness:     ${report.typecheckerVerifications}`);
+      console.log(`Runtime Equivalence:       ${report.runtimeEquivalenceVerifications}`);
+      console.log(
+        `Self-Repair Rate:          ${report.selfRepairRatePct.toFixed(1)}% (${
+          report.selfRepairsSucceeded
+        }/${report.selfRepairsAttempted})`,
+      );
+      console.log(`Multi-Iteration Repairs:   ${report.multiIterationRepairs}`);
+      console.log(
+        `Average Token Savings:     ${report.averageTokenSavingsPct.toFixed(2)}%`,
+      );
+      console.log(`Corpus Samples Checked:    ${report.corpusSamplesChecked}`);
+      console.log(`Duration:                  ${report.durationMs}ms`);
+
+      console.log(`\nTarget Language Breakdown:`);
+      for (const [target, count] of Object.entries(report.targetBreakdown)) {
+        if (count > 0) {
+          console.log(`  - ${target.padEnd(12)}: ${count}`);
+        }
+      }
+
+      if (report.failures.length > 0) {
+        console.log(`\n❌ Failures Encountered (${report.failures.length}):`);
+        for (const f of report.failures) {
+          console.log(
+            `  - Cycle ${f.cycle} (seed ${f.seed}, gate: ${f.gate}): ${f.message}`,
+          );
+          if (f.shrunkSource) {
+            console.log(
+              `    Minimal Shrunk Reproducer:\n${f.shrunkSource
+                .split("\n")
+                .map((l) => "      " + l)
+                .join("\n")}`,
+            );
+          }
+        }
+        process.exit(1);
+      } else {
+        console.log(
+          `\n✔ 100% of evolution cycles verified cleanly across all 5 differential oracle gates.`,
+        );
+      }
+    } catch (err: unknown) {
+      console.error(
+        `❌ Evolution loop failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      process.exit(1);
+    }
+  });
 
 export { program };
 

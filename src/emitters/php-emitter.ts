@@ -609,7 +609,11 @@ export class PhpEmitter {
         break;
       }
       case "ExprStmt": {
-        if (isTrailing) {
+        const isUnset =
+          stmt.expr.kind === "CallExpr" &&
+          stmt.expr.callee.kind === "IdentifierExpr" &&
+          stmt.expr.callee.name === "unset";
+        if (isTrailing && !isUnset) {
           this.ctx.writeLine(`return ${this.emitExpr(stmt.expr)};`);
         } else {
           this.ctx.writeLine(`${this.emitExpr(stmt.expr)};`);
@@ -617,16 +621,7 @@ export class PhpEmitter {
         break;
       }
       case "MatchStmt": {
-        // In PHP 8, match is an expression: match ($x) { ... }
-        // If all cases return, or if this is in trailing return position:
-        const allReturn = stmt.cases.every(
-          (c) =>
-            c.body.kind !== "Block" ||
-            c.body.statements.length === 0 ||
-            c.body.statements.every((s) => s.kind === "ReturnStmt" || s.kind === "ExprStmt"),
-        );
-
-        if (isTrailing || allReturn) {
+        if (isTrailing) {
           this.ctx.writeLine(`return ${this.emitMatchExpr(stmt)};`);
         } else {
           this.ctx.writeLine(`${this.emitMatchExpr(stmt)};`);

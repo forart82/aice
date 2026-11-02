@@ -1,3 +1,4 @@
+export * from "./cache/index.js";
 export * from "./config/index.js";
 export * from "./core/ast.js";
 export * from "./core/lexer.js";
@@ -7,7 +8,10 @@ export * from "./core/tokens.js";
 export * from "./core/trivia.js";
 export * from "./decompiler/index.js";
 export * from "./emitters/index.js";
+export * from "./evolve/index.js";
+export * from "./idioms/index.js";
 export * from "./lsp/index.js";
+export * from "./mcp/index.js";
 export * from "./runner/index.js";
 export * from "./shield/index.js";
 export * from "./tokenomics/index.js";

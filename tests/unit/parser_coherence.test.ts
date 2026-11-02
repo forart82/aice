@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
+import { TypeChecker } from "../../src/typechecker/checker.js";
 import type {
   Block,
   ClassDecl,
@@ -102,7 +103,7 @@ type Variadic = (...args: any) -> void`;
       const t = mod.items[0] as TypeDecl;
       expect(t.aliasType).toMatchObject({
         kind: "NamedType",
-        name: "(str, ...items: [str]) => str",
+        name: "(prefix: str, ...items: [str]) => str",
       });
     });
 
@@ -331,6 +332,74 @@ component := 40`;
       const mod = parse(src, "record_shorthand.ail");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
+    });
+  });
+
+  describe("Mission 7: Rest Parameters in Primary Constructors & Typechecking", () => {
+    it("parses primary constructor rest parameter with ellipsis", () => {
+      const src = `class Logger(pub prefix: str, ...tags: [str]):
+  pass`;
+      const mod = parse(src, "primary_ctor_rest.ail");
+      const cls = mod.items[0] as ClassDecl;
+      expect(cls.primaryConstructor).toBeDefined();
+      expect(cls.primaryConstructor).toHaveLength(2);
+      expect(cls.primaryConstructor![0].name).toBe("prefix");
+      expect(cls.primaryConstructor![0].isRest).toBeUndefined();
+      expect(cls.primaryConstructor![1].name).toBe("tags");
+      expect(cls.primaryConstructor![1].isRest).toBe(true);
+    });
+
+    it("typechecks invocations with rest parameters accepting multiple trailing arguments", () => {
+      const src = `fn log(prefix: str, ...tags: [str]) -> str:
+  ret prefix
+
+fn run():
+  log("info", "a", "b", "c")`;
+      const mod = parse(src, "rest_multi.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+    });
+
+    it("typechecks invocations with rest parameters accepting a direct array argument", () => {
+      const src = `fn log(prefix: str, ...tags: [str]) -> str:
+  ret prefix
+
+fn run():
+  log("info", ["a", "b"])`;
+      const mod = parse(src, "rest_direct_array.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+    });
+
+    it("typechecks class primary constructor with rest parameters", () => {
+      const src = `class Emitter(name: str, ...events: [str]):
+  pass
+
+fn run():
+  Emitter("main", "click", "hover")`;
+      const mod = parse(src, "class_rest_ctor.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
+    });
+
+    it("rejects mismatched argument types for rest parameters", () => {
+      const src = `fn log(prefix: str, ...tags: [str]) -> str:
+  ret prefix
+
+fn run():
+  log("info", 123)`;
+      const mod = parse(src, "rest_mismatch.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).toThrow();
+    });
+
+    it("typechecks destructured method parameters with inline defaults", () => {
+      const src = `class Handler:
+  fn handle({ a = 1, b: localB = 2 }: { a: int, b: int }):
+    ret a + localB`;
+      const mod = parse(src, "method_destructure_default.ail");
+      const tc = new TypeChecker();
+      expect(() => tc.checkModule(mod)).not.toThrow();
     });
   });
 });

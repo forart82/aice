@@ -198,31 +198,50 @@ export class CppDecompiler {
     return null;
   }
 
+  private findHeaderOpenBraceIndex(line: string): number {
+    const firstParen = line.indexOf('(');
+    if (firstParen === -1) return 0;
+    let depth = 0;
+    let inQuote: string | null = null;
+    for (let j = firstParen; j < line.length; j++) {
+      const ch = line[j];
+      if (inQuote) {
+        if (ch === '\\' && j + 1 < line.length) {
+          j++;
+        } else if (ch === inQuote) {
+          inQuote = null;
+        }
+      } else {
+        if (ch === '"' || ch === "'") {
+          inQuote = ch;
+        } else if (ch === '(') {
+          depth++;
+        } else if (ch === ')') {
+          depth--;
+          if (depth === 0) {
+            return j + 1;
+          }
+        }
+      }
+    }
+    return 0;
+  }
+
   private collectBracedBlock(
     lines: string[],
     startIdx: number,
+    startCharIdx: number = 0,
   ): { bodyLines: string[]; nextIdx: number } {
     let braceCount = 0;
     let started = false;
+    let startLine = -1;
+    let startChar = -1;
     const bodyLines: string[] = [];
     let inBlockComment = false;
 
-    // Single-line block fast path: { ... } on the same line
-    const firstLine = lines[startIdx] ?? '';
-    const openBraceIdx = firstLine.indexOf('{');
-    if (openBraceIdx !== -1) {
-      const closeBraceIdx = firstLine.lastIndexOf('}');
-      if (closeBraceIdx > openBraceIdx) {
-        return {
-          bodyLines: [firstLine.slice(openBraceIdx + 1, closeBraceIdx).trim()],
-          nextIdx: startIdx + 1,
-        };
-      }
-    }
-
     for (let i = startIdx; i < lines.length; i++) {
       const line = lines[i];
-      let j = 0;
+      let j = (i === startIdx) ? startCharIdx : 0;
       while (j < line.length) {
         if (!inBlockComment && line.slice(j, j + 2) === '/*') {
           inBlockComment = true;
@@ -256,23 +275,33 @@ export class CppDecompiler {
           braceCount++;
           if (!started) {
             started = true;
-            const afterOpen = line.slice(j + 1);
-            if (afterOpen.trim().length > 0) bodyLines.push(afterOpen);
+            startLine = i;
+            startChar = j;
             j++;
             continue;
           }
         } else if (char === '}') {
           braceCount--;
           if (started && braceCount === 0) {
-            const beforeClose = line.slice(0, j);
-            if (beforeClose.trim().length > 0) bodyLines.push(beforeClose);
+            if (startLine === i) {
+              const inner = line.slice(startChar + 1, j).trim();
+              if (inner.length > 0) bodyLines.push(inner);
+            } else {
+              const beforeClose = line.slice(0, j);
+              if (beforeClose.trim().length > 0) bodyLines.push(beforeClose);
+            }
             return { bodyLines, nextIdx: i + 1 };
           }
         }
         j++;
       }
-      if (started && braceCount > 0 && i !== startIdx) {
-        bodyLines.push(line);
+      if (started && braceCount > 0) {
+        if (i === startLine) {
+          const afterOpen = line.slice(startChar + 1);
+          if (afterOpen.trim().length > 0) bodyLines.push(afterOpen);
+        } else {
+          bodyLines.push(line);
+        }
       }
     }
     return { bodyLines, nextIdx: lines.length };
@@ -520,6 +549,17 @@ export class CppDecompiler {
       s = s.slice(1).trim();
     }
     s = s.replace(/^this\./, '');
+
+    // Strip std::string(...) / std.string(...) / string(...) string constructors
+    while (/(?:std\.string|std::string|\bstring)\s*\(/.test(s)) {
+      const match = s.match(/(?:std\.string|std::string|\bstring)\s*\(/);
+      if (!match || match.index === undefined) break;
+      const startIdx = match.index;
+      const openParenIdx = startIdx + match[0].length - 1;
+      const parenRes = this.extractBalancedParen(s, openParenIdx);
+      if (!parenRes) break;
+      s = s.slice(0, startIdx) + parenRes.content + s.slice(parenRes.endIndex + 1);
+    }
 
     // Unwrap outer parens: (expr)
     while (s.startsWith('(') && this.extractBalancedParen(s, 0)?.endIndex === s.length - 1) {
@@ -814,7 +854,8 @@ export class CppDecompiler {
               const pParts = pStr.split(/\s+/);
               catchParam = pParts.pop()?.replace(/^[*&]+/, '') || 'err';
             }
-            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx);
+            const startChar = this.findHeaderOpenBraceIndex(lines[lineIdx]);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx, startChar);
             catchStmts = this.parseCppBlock(bodyLines);
             lineIdx = nextIdx - 1;
             break;
@@ -872,7 +913,8 @@ export class CppDecompiler {
           let thenStmts: Statement[] = [];
           const hasOpenBrace = rest.startsWith('{') || (lineIdx + 1 < lines.length && lines[lineIdx + 1].trim().startsWith('{'));
           if (hasOpenBrace) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx);
+            const startChar = this.findHeaderOpenBraceIndex(lines[lineIdx]);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx, startChar);
             i = nextIdx - 1;
             thenStmts = this.parseCppBlock(bodyLines);
           } else if (rest.startsWith('return')) {
@@ -921,7 +963,8 @@ export class CppDecompiler {
                 let elifStmts: Statement[] = [];
                 const elifHasOpenBrace = elifRest.startsWith('{') || (elifLineIdx + 1 < lines.length && lines[elifLineIdx + 1].trim().startsWith('{'));
                 if (elifHasOpenBrace) {
-                  const { bodyLines, nextIdx } = this.collectBracedBlock(lines, elifLineIdx);
+                  const startChar = this.findHeaderOpenBraceIndex(lines[elifLineIdx]);
+                  const { bodyLines, nextIdx } = this.collectBracedBlock(lines, elifLineIdx, startChar);
                   i = nextIdx - 1;
                   elifStmts = this.parseCppBlock(bodyLines);
                 } else if (elifRest && elifRest !== ';') {
@@ -992,7 +1035,8 @@ export class CppDecompiler {
           let bodyStmts: Statement[] = [];
           const hasOpenBrace = rest.startsWith('{') || (lineIdx + 1 < lines.length && lines[lineIdx + 1].trim().startsWith('{'));
           if (hasOpenBrace) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx);
+            const startChar = this.findHeaderOpenBraceIndex(lines[lineIdx]);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx, startChar);
             i = nextIdx - 1;
             bodyStmts = this.parseCppBlock(bodyLines);
           } else if (rest && rest !== ';') {
@@ -1191,7 +1235,8 @@ export class CppDecompiler {
           let bodyStmts: Statement[] = [];
           const hasOpenBrace = rest.startsWith('{') || (lineIdx + 1 < lines.length && lines[lineIdx + 1].trim().startsWith('{'));
           if (hasOpenBrace) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx);
+            const startChar = this.findHeaderOpenBraceIndex(lines[lineIdx]);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(lines, lineIdx, startChar);
             i = nextIdx - 1;
             bodyStmts = this.parseCppBlock(bodyLines);
           } else if (rest && rest !== ';') {
@@ -1796,4 +1841,8 @@ export class CppDecompiler {
       trivia: this.trivia,
     };
   }
+}
+
+export function decompileCpp(source: string, filePath = 'source.cpp'): { ast: Module; trivia: CstTriviaTable } {
+  return new CppDecompiler(source, filePath).decompile();
 }

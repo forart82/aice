@@ -12,10 +12,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { program } from "../../bin/ail.js";
 import {
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
+  isSameOrDescendant,
+  isTargetProjectPath,
+  resolveCompanionSource,
   resolvePathTargets,
   scanDirectoryFiles,
 } from "../../src/config/path-resolver.js";
-import { loadProjectConfig, saveProjectConfig } from "../../src/config/project-config.js";
+import {
+  type AilProjectConfig,
+  loadProjectConfig,
+  saveProjectConfig,
+} from "../../src/config/project-config.js";
 import { generateContext } from "../../src/tools/context.js";
 import { diffFiles } from "../../src/tools/diff-patch.js";
 import { formatAilPath } from "../../src/tools/fmt.js";
@@ -530,6 +537,391 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
       expect(res.stdout).toContain("## Project Configuration:");
       expect(res.stdout).toContain("## Workspace Files (1):");
       expect(res.stdout).toContain("comp.ail");
+    });
+  });
+
+  describe("7. Companion Mode Twin-Workspace Path Resolution", () => {
+    let companionDir: string;
+    let targetDir: string;
+    let companionConfig: AilProjectConfig;
+
+    beforeEach(() => {
+      companionDir = path.join(tmpDir, "companion");
+      targetDir = path.join(tmpDir, "target");
+
+      fs.mkdirSync(path.join(companionDir, "src"), { recursive: true });
+      fs.mkdirSync(path.join(targetDir, "src"), { recursive: true });
+
+      companionConfig = {
+        mode: "companion",
+        sourceDir: "src",
+        outDir: "../target/src",
+        targetProjectDir: "../target",
+        targetLanguage: "typescript",
+        isolated: false,
+        watermark: true,
+      };
+
+      saveProjectConfig(companionDir, companionConfig);
+    });
+
+    describe("Polymorphic Resolution in Companion Mode (Omitted, Directory, Single File)", () => {
+      it("resolves omitted argument to companion sourceDir and finds .ail files", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/math.ail"),
+          "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+        );
+        fs.writeFileSync(
+          path.join(targetDir, "src/math.ts"),
+          "export function add(a: number, b: number): number { return a + b; }",
+        );
+
+        const res = resolvePathTargets(undefined, { projectRoot: companionDir });
+
+        expect(res.isOmitted).toBe(true);
+        expect(res.isDirectory).toBe(true);
+        expect(res.isSingleFile).toBe(false);
+        expect(res.resolvedPath).toBe(path.join(companionDir, "src"));
+        expect(res.projectRoot).toBe(companionDir);
+        expect(res.config.mode).toBe("companion");
+        expect(res.files).toHaveLength(1);
+        expect(res.files[0]).toBe(path.join(companionDir, "src/math.ail"));
+      });
+
+      it("resolves directory argument pointing to companion sourceDir", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/math.ail"),
+          "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+        );
+
+        const res = resolvePathTargets(path.join(companionDir, "src"), {
+          projectRoot: companionDir,
+        });
+
+        expect(res.isOmitted).toBe(false);
+        expect(res.isDirectory).toBe(true);
+        expect(res.isSingleFile).toBe(false);
+        expect(res.resolvedPath).toBe(path.join(companionDir, "src"));
+        expect(res.files).toEqual([path.join(companionDir, "src/math.ail")]);
+      });
+
+      it("resolves directory argument pointing to external outDir back to companion sourceDir", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/math.ail"),
+          "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+        );
+        fs.writeFileSync(
+          path.join(targetDir, "src/math.ts"),
+          "export function add(a: number, b: number): number { return a + b; }",
+        );
+
+        const res = resolvePathTargets(path.join(targetDir, "src"), {
+          projectRoot: companionDir,
+        });
+
+        expect(res.isDirectory).toBe(true);
+        expect(res.isSingleFile).toBe(false);
+        expect(res.resolvedPath).toBe(path.join(companionDir, "src"));
+        expect(res.files).toEqual([path.join(companionDir, "src/math.ail")]);
+      });
+
+      it("resolves directory argument pointing to targetProjectDir back to companion workspace root", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/math.ail"),
+          "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+        );
+
+        const res = resolvePathTargets(targetDir, {
+          projectRoot: companionDir,
+        });
+
+        expect(res.isDirectory).toBe(true);
+        expect(res.files).toContain(path.join(companionDir, "src/math.ail"));
+      });
+
+      it("resolves single .ail file input directly in companion sourceDir", () => {
+        const ailFile = path.join(companionDir, "src/calc.ail");
+        fs.writeFileSync(ailFile, "pub fn calc(): ret 10\n");
+
+        const res = resolvePathTargets(ailFile, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.isDirectory).toBe(false);
+        expect(res.resolvedPath).toBe(ailFile);
+        expect(res.files).toEqual([ailFile]);
+      });
+    });
+
+    describe("Resolving External Target File Paths Back to Companion .ail Files", () => {
+      it("maps external target .ts file in outDir back to companion .ail file", () => {
+        const ailFile = path.join(companionDir, "src/engine.ail");
+        const tsFile = path.join(targetDir, "src/engine.ts");
+        fs.writeFileSync(ailFile, "pub fn runEngine(): ret nil\n");
+        fs.writeFileSync(tsFile, "export function runEngine() {}\n");
+
+        const res = resolvePathTargets(tsFile, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.isDirectory).toBe(false);
+        expect(res.resolvedPath).toBe(ailFile);
+        expect(res.files).toEqual([ailFile]);
+      });
+
+      it("maps deeply nested external target file back to companion .ail file", () => {
+        const nestedCompDir = path.join(companionDir, "src/services/auth");
+        const nestedTargetDir = path.join(targetDir, "src/services/auth");
+        fs.mkdirSync(nestedCompDir, { recursive: true });
+        fs.mkdirSync(nestedTargetDir, { recursive: true });
+
+        const ailFile = path.join(nestedCompDir, "jwt.ail");
+        const tsFile = path.join(nestedTargetDir, "jwt.ts");
+        fs.writeFileSync(ailFile, "pub fn verifyToken(): ret true\n");
+        fs.writeFileSync(tsFile, "export function verifyToken() { return true; }\n");
+
+        const res = resolvePathTargets(tsFile, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(ailFile);
+        expect(res.files).toEqual([ailFile]);
+      });
+
+      it("maps external target file to existing dual-extension *.tsx.ail file when present", () => {
+        const compDir = path.join(companionDir, "src/components");
+        const targetCompDir = path.join(targetDir, "src/components");
+        fs.mkdirSync(compDir, { recursive: true });
+        fs.mkdirSync(targetCompDir, { recursive: true });
+
+        const dualAilFile = path.join(compDir, "Button.tsx.ail");
+        const tsxFile = path.join(targetCompDir, "Button.tsx");
+        fs.writeFileSync(dualAilFile, "pub fn Button(): ret nil\n");
+        fs.writeFileSync(tsxFile, "export const Button = () => null;\n");
+
+        const res = resolvePathTargets(tsxFile, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(dualAilFile);
+        expect(res.files).toEqual([dualAilFile]);
+      });
+
+      it("maps external target test file (*.test.ts) back to *.test.ail file", () => {
+        const ailTestFile = path.join(companionDir, "src/engine.test.ail");
+        const tsTestFile = path.join(targetDir, "src/engine.test.ts");
+        fs.writeFileSync(ailTestFile, "pub fn test_run(): ret nil\n");
+        fs.writeFileSync(tsTestFile, "it('runs', () => {});\n");
+
+        const res = resolvePathTargets(tsTestFile, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(ailTestFile);
+        expect(res.files).toEqual([ailTestFile]);
+      });
+
+      it("maps external target file path back to companion .ail file even if .ail file does not exist on disk yet", () => {
+        const hypotheticalTarget = path.join(targetDir, "src/future_feature.ts");
+        const expectedAil = path.join(companionDir, "src/future_feature.ail");
+
+        const res = resolvePathTargets(hypotheticalTarget, { projectRoot: companionDir });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(expectedAil);
+        expect(res.files).toEqual([expectedAil]);
+      });
+
+      it("preserves external target file when includeTargets is true and companion .ail does not exist", () => {
+        const legacyTarget = path.join(targetDir, "src/legacy_untouched.ts");
+        fs.writeFileSync(legacyTarget, "export const legacy = 100;\n");
+
+        const res = resolvePathTargets(legacyTarget, {
+          projectRoot: companionDir,
+          includeTargets: true,
+        });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(legacyTarget);
+        expect(res.files).toEqual([legacyTarget]);
+      });
+
+      it("prioritizes companion .ail file over external target file when includeTargets is true if .ail exists", () => {
+        const ailFile = path.join(companionDir, "src/engine.ail");
+        const tsFile = path.join(targetDir, "src/engine.ts");
+        fs.writeFileSync(ailFile, "pub fn runEngine(): ret nil\n");
+        fs.writeFileSync(tsFile, "export function runEngine() {}\n");
+
+        const res = resolvePathTargets(tsFile, {
+          projectRoot: companionDir,
+          includeTargets: true,
+        });
+
+        expect(res.isSingleFile).toBe(true);
+        expect(res.resolvedPath).toBe(ailFile);
+        expect(res.files).toEqual([ailFile]);
+      });
+    });
+
+    describe("Scanning Companion Directory Ignores External outDir (Nested or Adjacent)", () => {
+      it("ignores nested outDir inside companion workspace directory during scan", () => {
+        const nestedTargetDir = path.join(companionDir, "nested_target");
+        fs.mkdirSync(nestedTargetDir, { recursive: true });
+        fs.writeFileSync(path.join(nestedTargetDir, "output.ts"), "export const o = 1;");
+        fs.writeFileSync(path.join(nestedTargetDir, "leak.ail"), "pub fn leak(): ret 0");
+
+        fs.writeFileSync(
+          path.join(companionDir, "src/valid.ail"),
+          "pub fn valid(): ret 1",
+        );
+
+        const customConfig: AilProjectConfig = {
+          mode: "companion",
+          sourceDir: "src",
+          outDir: "./nested_target",
+          targetProjectDir: "./nested_target",
+          targetLanguage: "typescript",
+          isolated: false,
+          watermark: true,
+        };
+
+        const files = scanDirectoryFiles(companionDir, {}, customConfig, companionDir);
+
+        expect(files).toContain(path.join(companionDir, "src/valid.ail"));
+        expect(files).not.toContain(path.join(nestedTargetDir, "leak.ail"));
+      });
+
+      it("does not skip companion 'src' directory even if outDir basename is also 'src'", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/module.ail"),
+          "pub fn moduleFn(): ret 1",
+        );
+
+        // companionConfig.outDir is "../target/src" (basename "src")
+        const files = scanDirectoryFiles(companionDir, {}, companionConfig, companionDir);
+
+        expect(files).toHaveLength(1);
+        expect(files[0]).toBe(path.join(companionDir, "src/module.ail"));
+      });
+
+      it("ignores adjacent outDir linked via symlink and prevents recursive loop", () => {
+        fs.writeFileSync(
+          path.join(companionDir, "src/valid.ail"),
+          "pub fn valid(): ret 1",
+        );
+        fs.writeFileSync(
+          path.join(targetDir, "src/target_leak.ail"),
+          "pub fn leak(): ret 0",
+        );
+
+        try {
+          const symlinkPath = path.join(companionDir, "linked_target");
+          fs.symlinkSync(targetDir, symlinkPath, "dir");
+
+          // Also create cyclic symlink to companionDir itself
+          const cyclePath = path.join(companionDir, "src/self_cycle");
+          fs.symlinkSync(companionDir, cyclePath, "dir");
+        } catch {
+          // If symlinks not supported, skip symlink test
+          return;
+        }
+
+        const files = scanDirectoryFiles(companionDir, {}, companionConfig, companionDir);
+
+        expect(files).toContain(path.join(companionDir, "src/valid.ail"));
+        expect(files.some((f) => f.includes("target_leak.ail"))).toBe(false);
+      });
+    });
+
+    describe("Companion Path Resolution Helper Functions", () => {
+      it("isSameOrDescendant accurately determines path hierarchies", () => {
+        const parent = path.join(tmpDir, "base");
+        const child = path.join(tmpDir, "base/sub/file.ts");
+        const sibling = path.join(tmpDir, "base-other/file.ts");
+
+        expect(isSameOrDescendant(parent, parent)).toBe(true);
+        expect(isSameOrDescendant(parent, child)).toBe(true);
+        expect(isSameOrDescendant(parent, sibling)).toBe(false);
+        expect(isSameOrDescendant(undefined, child)).toBe(false);
+        expect(isSameOrDescendant("/", child)).toBe(false);
+      });
+
+      it("isTargetProjectPath correctly identifies paths within outDir or targetProjectDir", () => {
+        const outFilePath = path.join(targetDir, "src/engine.ts");
+        const targetRootPath = path.join(targetDir, "package.json");
+        const companionFilePath = path.join(companionDir, "src/engine.ail");
+
+        expect(isTargetProjectPath(outFilePath, companionConfig, companionDir)).toBe(true);
+        expect(isTargetProjectPath(targetRootPath, companionConfig, companionDir)).toBe(true);
+        expect(isTargetProjectPath(companionFilePath, companionConfig, companionDir)).toBe(false);
+      });
+
+      it("resolveCompanionSource resolves target files and directories to companion equivalents", () => {
+        const targetFile = path.join(targetDir, "src/engine.ts");
+        const targetSubDir = path.join(targetDir, "src/utils");
+        fs.mkdirSync(targetSubDir, { recursive: true });
+
+        const resolvedFile = resolveCompanionSource(targetFile, companionConfig, companionDir);
+        expect(resolvedFile).toBe(path.join(companionDir, "src/engine.ail"));
+
+        const resolvedDir = resolveCompanionSource(targetSubDir, companionConfig, companionDir);
+        expect(resolvedDir).toBe(path.join(companionDir, "src/utils"));
+
+        const nonCompanionConfig: AilProjectConfig = {
+          mode: "side-by-side",
+          sourceDir: "src",
+          outDir: ".ail-build",
+          targetLanguage: "typescript",
+          isolated: false,
+          watermark: true,
+        };
+        expect(resolveCompanionSource(targetFile, nonCompanionConfig, companionDir)).toBeUndefined();
+      });
+    });
+
+    describe("CLI Seamless Compilation and Tooling in Companion Mode", () => {
+      const cliPath = path.resolve(process.cwd(), "bin/ail.ts");
+
+      function runCli(args: string[], cwd: string) {
+        const { spawnSync } = require("node:child_process");
+        return spawnSync("bun", ["run", cliPath, ...args], {
+          cwd,
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+      }
+
+      it("CLI compile accepts external target .ts path and outputs compiled file to target project", () => {
+        const ailFile = path.join(companionDir, "src/calc.ail");
+        const tsFile = path.join(targetDir, "src/calc.ts");
+        fs.writeFileSync(ailFile, "pub fn add(a: int, b: int) -> int:\n  ret a + b\n");
+
+        const res = runCli(["compile", tsFile], companionDir);
+
+        expect(res.status).toBe(0);
+        expect(res.stdout).toContain("✔ Compiled");
+        expect(fs.existsSync(tsFile)).toBe(true);
+        const compiled = fs.readFileSync(tsFile, "utf-8");
+        expect(compiled).toContain("function add(a: number, b: number): number");
+      });
+
+      it("CLI outline accepts external target .ts path and outlines the companion .ail file", () => {
+        const ailFile = path.join(companionDir, "src/calc.ail");
+        const tsFile = path.join(targetDir, "src/calc.ts");
+        fs.writeFileSync(ailFile, "pub fn multiply(x: int, y: int) -> int:\n  ret x * y\n");
+
+        const res = runCli(["outline", tsFile], companionDir);
+
+        expect(res.status).toBe(0);
+        expect(res.stdout).toContain("pub fn multiply(x: int, y: int) -> int: ...");
+      });
+
+      it("CLI context accepts external target .ts path and generates context from companion .ail", () => {
+        const ailFile = path.join(companionDir, "src/calc.ail");
+        const tsFile = path.join(targetDir, "src/calc.ts");
+        fs.writeFileSync(ailFile, "pub fn divide(a: int, b: int) -> int:\n  ret a / b\n");
+
+        const res = runCli(["context", tsFile], companionDir);
+
+        expect(res.status).toBe(0);
+        expect(res.stdout).toContain("# AIL Context Pack");
+        expect(res.stdout).toContain("divide");
+      });
     });
   });
 });

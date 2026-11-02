@@ -32,15 +32,20 @@ export class TypeScriptEmitter {
   private options: EmitterOptions;
   private pureInterfaces: boolean;
   private structTypes: Map<string, string[]> = new Map();
-  private enumVariants: Map<string, { parentEnum: string; payloadCount: number }> = new Map();
+  private enumVariants: Map<
+    string,
+    { parentEnum: string; payloadCount: number; payloadTypes?: TypeExpr[]; isUnitEnum?: boolean }
+  > = new Map();
   private varTypes: Map<string, string> = new Map();
   private classNames: Set<string> = new Set();
   private currentClassProperties: Set<string> | null = null;
   private currentClassMethods: Set<string> | null = null;
   private currentClassFunctionProperties: Set<string> | null = null;
   private localScopeVars: Set<string>[] = [];
+  private reassignedBlockVars: Set<string>[] = [];
   private isCurrentMethodStatic = false;
   private emittedTypeDecls: Set<string> = new Set();
+  private topLevelNames: Set<string> = new Set();
 
   private isLocal(name: string): boolean {
     for (let i = this.localScopeVars.length - 1; i >= 0; i--) {
@@ -288,22 +293,35 @@ export class TypeScriptEmitter {
     this.currentClassMethods = null;
     this.currentClassFunctionProperties = null;
     this.localScopeVars = [];
+    this.reassignedBlockVars = [];
     this.isCurrentMethodStatic = false;
     this.emittedTypeDecls.clear();
+    this.topLevelNames.clear();
     for (const item of mod.items) {
       if (item.kind === "ClassDecl") {
         this.classNames.add(item.name);
+        this.topLevelNames.add(item.name);
+      } else if (item.kind === "FunctionDecl" || item.kind === "ConstDecl" || item.kind === "VarDecl") {
+        this.topLevelNames.add(item.name);
+      } else if (item.kind === "ImportDecl") {
+        for (const s of item.specifiers) {
+          this.topLevelNames.add(s.alias ?? s.name);
+        }
       } else if (item.kind === "TypeDecl") {
+        this.topLevelNames.add(item.name);
         if (item.fields) {
           this.structTypes.set(
             item.name,
             item.fields.map((f) => f.name),
           );
         } else if (item.isEnum && item.variants) {
+          const allUnit = item.variants.every((v) => !v.payloadTypes || v.payloadTypes.length === 0);
           for (const v of item.variants) {
             this.enumVariants.set(v.name, {
               parentEnum: item.name,
               payloadCount: v.payloadTypes?.length ?? 0,
+              payloadTypes: v.payloadTypes,
+              isUnitEnum: allUnit,
             });
           }
         }
@@ -439,7 +457,18 @@ export class TypeScriptEmitter {
     switch (item.kind) {
       case "TypeDecl":
         if (this.ctx.target === "javascript") {
-          break;
+          const isUnitEnum =
+            item.isEnum &&
+            item.variants &&
+            item.variants.length > 0 &&
+            item.variants.every(
+              (v) =>
+                (!v.payloadTypes || v.payloadTypes.length === 0) &&
+                (!(v as any).fields || (v as any).fields.length === 0),
+            );
+          if (!isUnitEnum) {
+            break;
+          }
         }
         this.emitTypeDecl(item);
         break;
@@ -481,10 +510,28 @@ export class TypeScriptEmitter {
     }
 
     if (t.isEnum && t.variants) {
-      const allUnit = t.variants.every((v) => !v.payloadTypes || v.payloadTypes.length === 0);
+      const allUnit = t.variants.every(
+        (v) =>
+          (!v.payloadTypes || v.payloadTypes.length === 0) &&
+          (!(v as any).fields || (v as any).fields.length === 0),
+      );
+      if (this.ctx.target === "javascript") {
+        if (allUnit) {
+          this.ctx.writeLine(
+            `export const ${t.name} = { ${t.variants.map((v, idx) => `${v.name}: ${idx}`).join(", ")} };`,
+          );
+        }
+        this.ctx.emitTrailingTrivia(nodeId);
+        return;
+      }
       if (allUnit) {
-        const variantTypes = t.variants.map((v) => `"${v.name}"`);
-        this.ctx.writeLine(`export type ${t.name} = ${variantTypes.join(" | ")};`);
+        this.ctx.writeLine(`export enum ${t.name} {`);
+        this.ctx.indent();
+        for (const v of t.variants) {
+          this.ctx.writeLine(`${v.name},`);
+        }
+        this.ctx.dedent();
+        this.ctx.writeLine(`}`);
       } else {
         const variantTypes = t.variants.map((v) => {
           if (!v.payloadTypes || v.payloadTypes.length === 0) {
@@ -615,14 +662,25 @@ export class TypeScriptEmitter {
         const ctorParams = c.primaryConstructor
           .map((p) => {
             const ro = !isJs && p.isReadonly ? "readonly " : "";
-            const pub = !isJs && p.isPub !== false ? "public " : "";
+            const pub = !isJs ? (p.isPub !== false ? "public " : "private ") : "";
             const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
             const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-            return `${pub}${ro}${p.name}${optMark}${typeAnn}${def}`;
+            const rest = p.isRest ? "..." : "";
+            return `${pub}${ro}${rest}${p.name}${optMark}${typeAnn}${def}`;
           })
           .join(", ");
-        this.ctx.writeLine(`constructor(${ctorParams}) {}`);
+        if (isJs) {
+          this.ctx.writeLine(`constructor(${ctorParams}) {`);
+          this.ctx.indent();
+          for (const p of c.primaryConstructor) {
+            this.ctx.writeLine(`this.${p.name} = ${p.name};`);
+          }
+          this.ctx.dedent();
+          this.ctx.writeLine("}");
+        } else {
+          this.ctx.writeLine(`constructor(${ctorParams}) {}`);
+        }
       }
     }
 
@@ -670,7 +728,8 @@ export class TypeScriptEmitter {
           const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
           const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
           const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-          return `${p.name}${optMark}${typeAnn}${def}`;
+          const rest = p.isRest ? "..." : "";
+          return `${rest}${p.name}${optMark}${typeAnn}${def}`;
         })
         .join(", ");
       const ret = !isJs && m.returnType ? `: ${this.emitTypeExpr(m.returnType)}` : "";
@@ -785,10 +844,12 @@ export class TypeScriptEmitter {
     const parts = raw.split(",");
     const result: string[] = [];
     for (const part of parts) {
-      const trimmed = part.trim();
+      let trimmed = part.trim();
+      if (!trimmed || trimmed === "_") continue;
+      trimmed = trimmed.split("=")[0].trim();
       if (!trimmed || trimmed === "_") continue;
       if (trimmed.includes(":")) {
-        const alias = trimmed.split(":")[1]?.trim();
+        const alias = trimmed.split(":")[1]?.trim().split("=")[0].trim();
         if (alias && alias !== "_") result.push(alias);
       } else {
         result.push(trimmed);
@@ -839,7 +900,8 @@ export class TypeScriptEmitter {
         const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
         const typeStr = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
         const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-        return `${p.name}${optMark}${typeStr}${defStr}`;
+        const rest = p.isRest ? "..." : "";
+        return `${rest}${p.name}${optMark}${typeStr}${defStr}`;
       })
       .join(", ");
 
@@ -937,23 +999,87 @@ export class TypeScriptEmitter {
     return false;
   }
 
+  private collectReassignments(stmt: Statement, out: Set<string>): void {
+    if (stmt.kind === "AssignStmt") {
+      if (stmt.target.kind === "IdentifierExpr") {
+        out.add(stmt.target.name);
+      }
+    } else if (
+      stmt.kind === "ExprStmt" &&
+      stmt.expr.kind === "AssignExpr" &&
+      stmt.expr.target.kind === "IdentifierExpr"
+    ) {
+      out.add(stmt.expr.target.name);
+    } else if (stmt.kind === "IfStmt") {
+      for (const s of stmt.thenBranch.statements) this.collectReassignments(s, out);
+      for (const elif of stmt.elifBranches) {
+        for (const s of elif.body.statements) this.collectReassignments(s, out);
+      }
+      if (stmt.elseBranch) {
+        for (const s of stmt.elseBranch.statements) this.collectReassignments(s, out);
+      }
+    } else if (stmt.kind === "WhileStmt") {
+      for (const s of stmt.body.statements) this.collectReassignments(s, out);
+    } else if (stmt.kind === "ForStmt") {
+      for (const s of stmt.body.statements) this.collectReassignments(s, out);
+    } else if (stmt.kind === "TryStmt") {
+      for (const s of stmt.tryBlock.statements) this.collectReassignments(s, out);
+      if (stmt.catchBlock) {
+        for (const s of stmt.catchBlock.statements) this.collectReassignments(s, out);
+      }
+      if (stmt.finallyBlock) {
+        for (const s of stmt.finallyBlock.statements) this.collectReassignments(s, out);
+      }
+    } else if (stmt.kind === "MatchStmt") {
+      for (const c of stmt.cases) {
+        if (c.body.kind === "Block") {
+          for (const s of c.body.statements) this.collectReassignments(s, out);
+        }
+      }
+    }
+  }
+
   private emitBlock(block: Block, isReturning = false): void {
     const blockScope = new Set<string>();
     this.localScopeVars.push(blockScope);
+
+    const reassignedVars = new Set<string>();
+    const letCounts = new Map<string, number>();
+    for (const s of block.statements) {
+      if (s.kind === "LetBinding") {
+        letCounts.set(s.name, (letCounts.get(s.name) ?? 0) + 1);
+      }
+      this.collectReassignments(s, reassignedVars);
+    }
+    for (const [name, count] of letCounts.entries()) {
+      if (count > 1) {
+        reassignedVars.add(name);
+      }
+    }
+    this.reassignedBlockVars.push(reassignedVars);
+
     const len = block.statements.length;
     for (let i = 0; i < len; i++) {
       const stmt = block.statements[i];
       const isLast = i === len - 1;
       this.emitStatement(stmt, isReturning && isLast);
     }
+    this.reassignedBlockVars.pop();
     this.localScopeVars.pop();
   }
 
   private emitStatement(stmt: Statement, isTrailingReturn = false): void {
     switch (stmt.kind) {
       case "LetBinding": {
-        if (this.localScopeVars.length > 0) {
-          this.localScopeVars[this.localScopeVars.length - 1].add(stmt.name);
+        const currentScope =
+          this.localScopeVars.length > 0
+            ? this.localScopeVars[this.localScopeVars.length - 1]
+            : null;
+        const inEnclosingParamScope =
+          this.localScopeVars.length === 2 && this.localScopeVars[0].has(stmt.name);
+        const alreadyDeclared = (currentScope?.has(stmt.name) ?? false) || inEnclosingParamScope;
+        if (currentScope) {
+          currentScope.add(stmt.name);
         }
         if (stmt.typeAnnotation && stmt.typeAnnotation.kind === "NamedType") {
           this.varTypes.set(stmt.name, stmt.typeAnnotation.name);
@@ -963,7 +1089,16 @@ export class TypeScriptEmitter {
           const existing = this.varTypes.get(stmt.init.name);
           if (existing) this.varTypes.set(stmt.name, existing);
         }
-        const keyword = stmt.isMut ? "let" : "const";
+        if (alreadyDeclared) {
+          this.ctx.writeLine(`${stmt.name} = ${this.emitExpr(stmt.init)};`);
+          break;
+        }
+        const currentReassigned =
+          this.reassignedBlockVars.length > 0
+            ? this.reassignedBlockVars[this.reassignedBlockVars.length - 1]
+            : null;
+        const needsLet = stmt.isMut || (currentReassigned?.has(stmt.name) ?? false);
+        const keyword = needsLet ? "let" : "const";
         const isInitUndefined =
           stmt.init.kind === "IdentifierExpr" && stmt.init.name === "undefined";
         let typeAnnotation = "";
@@ -1104,6 +1239,7 @@ export class TypeScriptEmitter {
                 isTrailingReturn ||
                 (lastStmt &&
                   (lastStmt.kind === "ReturnStmt" ||
+                    lastStmt.kind === "BreakStmt" ||
                     (lastStmt.kind === "ExprStmt" && isTrailingReturn)));
               if (!endsWithReturn) {
                 this.ctx.writeLine("break;");
@@ -1134,7 +1270,16 @@ export class TypeScriptEmitter {
             if (c.pattern.kind === "LiteralPattern") {
               cond = `${targetStr} === ${this.emitExpr(c.pattern.value)}`;
             } else if (c.pattern.kind === "IdentifierPattern") {
-              cond = `true /* ${c.pattern.name} */`;
+              const enumVar = this.enumVariants.get(c.pattern.name);
+              if (enumVar) {
+                if (enumVar.isUnitEnum) {
+                  cond = `${targetStr} === ${enumVar.parentEnum}.${c.pattern.name}`;
+                } else {
+                  cond = `${targetStr}.kind === "${c.pattern.name}"`;
+                }
+              } else {
+                cond = `true /* ${c.pattern.name} */`;
+              }
             } else if (c.pattern.kind === "ConstructorPattern") {
               cond = `${targetStr}.kind === "${c.pattern.name}"`;
             } else {
@@ -1240,11 +1385,18 @@ export class TypeScriptEmitter {
         return result;
       }
 
-      case "IdentifierExpr":
+      case "IdentifierExpr": {
+        if (!this.isLocal(expr.name) && this.enumVariants.has(expr.name)) {
+          const enumVar = this.enumVariants.get(expr.name);
+          if (enumVar?.isUnitEnum) {
+            return `${enumVar.parentEnum}.${expr.name}`;
+          }
+        }
         if (
           expr.name !== "this" &&
           expr.name !== "super" &&
           !this.isLocal(expr.name) &&
+          !this.topLevelNames.has(expr.name) &&
           !this.isCurrentMethodStatic &&
           this.currentClassProperties?.has(expr.name)
         ) {
@@ -1258,6 +1410,7 @@ export class TypeScriptEmitter {
           return `this.${expr.name}`;
         }
         return expr.name;
+      }
 
       case "AwaitExpr":
         return `await ${this.emitExpr(expr.operand)}`;
@@ -1291,11 +1444,15 @@ export class TypeScriptEmitter {
         // Method lowering
         if (expr.callee.kind === "MemberAccessExpr") {
           const objCode = this.emitExpr(expr.callee.object);
-          const lowered = lowerMethodCall(objCode, expr.callee.property, argCodes, "typescript");
-          if (lowered.isLowered) {
-            return lowered.code;
+          if (!expr.callee.isSafeNav && !expr.isOptional) {
+            const lowered = lowerMethodCall(objCode, expr.callee.property, argCodes, "typescript");
+            if (lowered.isLowered) {
+              return lowered.code;
+            }
           }
-          return `${objCode}.${expr.callee.property}(${argCodes.join(", ")})`;
+          const dot = expr.callee.isSafeNav ? "?." : ".";
+          const opt = expr.isOptional ? "?." : "";
+          return `${objCode}${dot}${expr.callee.property}${opt}(${argCodes.join(", ")})`;
         }
 
         // Positional Struct / Record Constructor Lowering
@@ -1347,9 +1504,10 @@ export class TypeScriptEmitter {
 
           if (TypeScriptEmitter.MATH_BUILTINS.has(expr.callee.name)) {
             const isLocalShadowed = this.localScopeVars.some((scope) => scope.has(typeName));
+            const isTopLevel = this.topLevelNames.has(typeName);
             const isMethod = this.currentClassMethods?.has(typeName) ?? false;
             const isFunctionProp = this.currentClassFunctionProperties?.has(typeName) ?? false;
-            if (!isLocalShadowed && !isMethod && !isFunctionProp) {
+            if (!isLocalShadowed && !isTopLevel && !isMethod && !isFunctionProp) {
               if (typeName === "clamp") {
                 return `Math.max(${argCodes[1]}, Math.min(${argCodes[2]}, ${argCodes[0]}))`;
               }
@@ -1367,15 +1525,21 @@ export class TypeScriptEmitter {
           }
         }
 
-        const callee = this.emitExpr(expr.callee, true);
-        return `${callee}(${argCodes.join(", ")})`;
+        let callee = this.emitExpr(expr.callee, true);
+        if (expr.callee.kind === "ClosureExpr") {
+          callee = `(${callee})`;
+        }
+        const opt = expr.isOptional ? "?." : "";
+        return `${callee}${opt}(${argCodes.join(", ")})`;
       }
 
       case "MemberAccessExpr": {
         const obj = this.emitExpr(expr.object);
-        const lowered = lowerPropertyAccess(obj, expr.property, "typescript");
-        if (lowered.isLowered) {
-          return lowered.code;
+        if (!expr.isSafeNav) {
+          const lowered = lowerPropertyAccess(obj, expr.property, "typescript");
+          if (lowered.isLowered) {
+            return lowered.code;
+          }
         }
         const op = expr.isSafeNav ? "?." : ".";
         return `${obj}${op}${expr.property}`;
@@ -1462,14 +1626,16 @@ export class TypeScriptEmitter {
             const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
             const typeStr = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
-            return `${p.name}${optMark}${typeStr}${defStr}`;
+            const rest = p.isRest ? "..." : "";
+            return `${rest}${p.name}${optMark}${typeStr}${defStr}`;
           })
           .join(", ");
         const retStr = !isJs && expr.returnType ? `: ${this.emitTypeExpr(expr.returnType)}` : "";
+        const asyncPrefix = expr.isAsync ? "async " : "";
         let result: string;
         if (expr.body.kind === "Block") {
           if (expr.body.statements.length === 0) {
-            result = `(${paramsStr})${retStr} => {}`;
+            result = `${asyncPrefix}(${paramsStr})${retStr} => {}`;
           } else {
             const isReturning = !(
               expr.returnType &&
@@ -1483,23 +1649,250 @@ export class TypeScriptEmitter {
             this.ctx.dedent();
             const blockContent = (this.ctx as any).buffer.join("");
             (this.ctx as any).buffer = savedBuffer;
-            result = `(${paramsStr})${retStr} => {\n${blockContent}${this.ctx.getIndent()}}`;
+            result = `${asyncPrefix}(${paramsStr})${retStr} => {\n${blockContent}${this.ctx.getIndent()}}`;
           }
         } else {
-          const bodyStr = this.emitExpr(expr.body);
-          if (
-            expr.body.kind === "RecordLiteralExpr" ||
-            (bodyStr.startsWith("{") && bodyStr.endsWith("}"))
-          ) {
-            result = `(${paramsStr})${retStr} => (${bodyStr})`;
+          const isVoidNil =
+            expr.body.kind === "LiteralExpr" &&
+            expr.body.literalKind === "nil" &&
+            ((expr.returnType?.kind === "NamedType" && expr.returnType.name === "void") ||
+              (expr.returnType?.kind === "PrimitiveType" &&
+                (expr.returnType as any).primitive === "void"));
+          if (isVoidNil) {
+            result = `${asyncPrefix}(${paramsStr})${retStr} => {}`;
           } else {
-            result = `(${paramsStr})${retStr} => ${bodyStr}`;
+            const bodyStr = this.emitExpr(expr.body);
+            if (
+              expr.body.kind === "RecordLiteralExpr" ||
+              (bodyStr.startsWith("{") && bodyStr.endsWith("}"))
+            ) {
+              result = `${asyncPrefix}(${paramsStr})${retStr} => (${bodyStr})`;
+            } else {
+              result = `${asyncPrefix}(${paramsStr})${retStr} => ${bodyStr}`;
+            }
           }
         }
         this.localScopeVars.pop();
         return result;
       }
     }
+  }
+
+  private splitTopLevelCommas(str: string): string[] {
+    const parts: string[] = [];
+    let depthParen = 0;
+    let depthBrack = 0;
+    let depthBrace = 0;
+    let depthAngle = 0;
+    let inString: false | '"' | "'" = false;
+    let current = "";
+
+    for (let i = 0; i < str.length; i++) {
+      const char = str[i];
+      if (inString) {
+        current += char;
+        if (char === "\\" && i + 1 < str.length) {
+          current += str[++i];
+        } else if (char === inString) {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char === '"' || char === "'") {
+        inString = char;
+        current += char;
+      } else if (char === "(") {
+        depthParen++;
+        current += char;
+      } else if (char === ")") {
+        if (depthParen > 0) depthParen--;
+        current += char;
+      } else if (char === "[") {
+        depthBrack++;
+        current += char;
+      } else if (char === "]") {
+        if (depthBrack > 0) depthBrack--;
+        current += char;
+      } else if (char === "{") {
+        depthBrace++;
+        current += char;
+      } else if (char === "}") {
+        if (depthBrace > 0) depthBrace--;
+        current += char;
+      } else if (char === "<") {
+        depthAngle++;
+        current += char;
+      } else if (char === ">") {
+        if (depthAngle > 0) depthAngle--;
+        current += char;
+      } else if (
+        char === "," &&
+        depthParen === 0 &&
+        depthBrack === 0 &&
+        depthBrace === 0 &&
+        depthAngle === 0
+      ) {
+        parts.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    if (current.trim() || parts.length > 0) {
+      parts.push(current.trim());
+    }
+    return parts;
+  }
+
+  private hasTopLevelColon(param: string): boolean {
+    let depthParen = 0;
+    let depthBrack = 0;
+    let depthBrace = 0;
+    let depthAngle = 0;
+    let inString: false | '"' | "'" = false;
+
+    for (let i = 0; i < param.length; i++) {
+      const char = param[i];
+      if (inString) {
+        if (char === "\\" && i + 1 < param.length) i++;
+        else if (char === inString) inString = false;
+        continue;
+      }
+      if (char === '"' || char === "'") inString = char;
+      else if (char === "(") depthParen++;
+      else if (char === ")") {
+        if (depthParen > 0) depthParen--;
+      } else if (char === "[") depthBrack++;
+      else if (char === "]") {
+        if (depthBrack > 0) depthBrack--;
+      } else if (char === "{") depthBrace++;
+      else if (char === "}") {
+        if (depthBrace > 0) depthBrace--;
+      } else if (char === "<") depthAngle++;
+      else if (char === ">") {
+        if (depthAngle > 0) depthAngle--;
+      } else if (
+        char === ":" &&
+        depthParen === 0 &&
+        depthBrack === 0 &&
+        depthBrace === 0 &&
+        depthAngle === 0
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private normalizeArrowTypes(str: string): string {
+    const stringLitRegex = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
+    const stringRanges: [number, number][] = [];
+    let m: RegExpExecArray | null;
+    while ((m = stringLitRegex.exec(str)) !== null) {
+      stringRanges.push([m.index, m.index + m[0].length]);
+    }
+    const isInsideString = (idx: number) =>
+      stringRanges.some(([start, end]) => idx >= start && idx < end);
+
+    const arrowIndices: number[] = [];
+    let searchIdx = 0;
+    while ((searchIdx = str.indexOf("=>", searchIdx)) !== -1) {
+      if (!isInsideString(searchIdx)) {
+        arrowIndices.push(searchIdx);
+      }
+      searchIdx += 2;
+    }
+
+    for (let k = arrowIndices.length - 1; k >= 0; k--) {
+      const arrowIdx = arrowIndices[k];
+      let closeParenIdx = -1;
+      for (let i = arrowIdx - 1; i >= 0; i--) {
+        if (/\s/.test(str[i])) continue;
+        if (str[i] === ")" && !isInsideString(i)) {
+          closeParenIdx = i;
+        }
+        break;
+      }
+      if (closeParenIdx === -1) continue;
+
+      let depth = 0;
+      let openParenIdx = -1;
+      for (let i = closeParenIdx; i >= 0; i--) {
+        if (isInsideString(i)) continue;
+        if (str[i] === ")") depth++;
+        else if (str[i] === "(") {
+          depth--;
+          if (depth === 0) {
+            openParenIdx = i;
+            break;
+          }
+        }
+      }
+      if (openParenIdx === -1) continue;
+
+      const paramsStr = str.slice(openParenIdx + 1, closeParenIdx);
+      let replacement: string;
+      if (!paramsStr.trim()) {
+        replacement = "()";
+      } else {
+        const rawParams = this.splitTopLevelCommas(paramsStr);
+        const fixedParams = rawParams.map((p, idx) => {
+          if (this.hasTopLevelColon(p)) return p;
+          if (p.startsWith("...")) {
+            return `..._rest: ${p.slice(3).trim()}`;
+          }
+          return `_arg${idx}: ${p}`;
+        });
+        replacement = `(${fixedParams.join(", ")})`;
+      }
+      str = str.slice(0, openParenIdx) + replacement + str.slice(closeParenIdx + 1);
+    }
+    return str;
+  }
+
+  private rewriteTypePrimitivesAndArrows(name: string): string {
+    const stringLitRegex = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
+    let lastIdx = 0;
+    let match: RegExpExecArray | null;
+    let result = "";
+
+    const primitiveMap: Record<string, string> = {
+      int: "number",
+      float: "number",
+      num: "number",
+      byte: "number",
+      str: "string",
+      char: "string",
+      bool: "boolean",
+      nil: "null",
+    };
+
+    while ((match = stringLitRegex.exec(name)) !== null) {
+      const nonString = name.slice(lastIdx, match.index);
+      const replaced = nonString
+        .replace(/->/g, "=>")
+        .replace(
+          /\b(int|float|num|byte|str|char|bool|nil)\b(?!\s*\??:)/g,
+          (m) => primitiveMap[m] ?? m,
+        );
+      result += replaced + match[0];
+      lastIdx = match.index + match[0].length;
+    }
+
+    const tail = name.slice(lastIdx);
+    result += tail
+      .replace(/->/g, "=>")
+      .replace(
+        /\b(int|float|num|byte|str|char|bool|nil)\b(?!\s*\??:)/g,
+        (m) => primitiveMap[m] ?? m,
+      );
+
+    if (result.includes("=>")) {
+      result = this.normalizeArrowTypes(result);
+    }
+
+    return result;
   }
 
   emitTypeExpr(t?: TypeExpr | null): string {
@@ -1520,8 +1913,13 @@ export class TypeScriptEmitter {
         if (t.primitive === "nil") return "null";
         return "unknown";
 
-      case "ArrayType":
-        return `${this.emitTypeExpr(t.elementType)}[]`;
+      case "ArrayType": {
+        const elem = this.emitTypeExpr(t.elementType);
+        if (elem.includes("=>") || elem.includes("|") || elem.includes("&")) {
+          return `Array<${elem}>`;
+        }
+        return `${elem}[]`;
+      }
 
       case "TupleType": {
         const elements = t.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
@@ -1550,17 +1948,8 @@ export class TypeScriptEmitter {
           return `${t.name}<${args}>`;
         }
         let name = t.name;
-        if (name.includes("{") || name.includes("|")) {
-          name = name
-            .replace(/\bint\b/g, "number")
-            .replace(/\bfloat\b/g, "number")
-            .replace(/\bnum\b/g, "number")
-            .replace(/\bbyte\b/g, "number")
-            .replace(/\bstr\b/g, "string")
-            .replace(/\bchar\b/g, "string")
-            .replace(/\bbool\b/g, "boolean")
-            .replace(/\bnil\b/g, "null");
-          return name;
+        if (name.includes("{") || name.includes("|") || name.includes("=>") || name.includes("->")) {
+          return this.rewriteTypePrimitivesAndArrows(name);
         }
         if (t.name === "int" || t.name === "float" || t.name === "num" || t.name === "byte") {
           return "number";

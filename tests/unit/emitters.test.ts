@@ -14,6 +14,9 @@ import {
   lowerMethodCall,
   lowerPropertyAccess,
 } from "../../src/emitters/index.js";
+import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
+import { AilGenerator } from "../../src/decompiler/ail-generator.js";
+import { TypeScriptEmitter } from "../../src/emitters/ts-emitter.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1462,8 +1465,8 @@ pub from "./types" import *
       expect(ts).toContain('export * from "./types";');
 
       const py = emitTarget(mod, "python");
-      expect(py).toContain("from utils import foo, bar");
-      expect(py).toContain("from types import *");
+      expect(py).toContain("from .utils import foo, bar");
+      expect(py).toContain("from .types import *");
     });
 
     it("emits async fn in TypeScript and Python", () => {
@@ -1988,6 +1991,180 @@ pub val ACTIVE = true`;
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
+    });
+  });
+
+  describe("Decompiler & Emitter Audit Fixes Verification", () => {
+    it("splices constructor parameter properties after super() call", () => {
+      const tsSrc = `class Child extends Base {
+  constructor(public id: number) {
+    super();
+  }
+}`;
+      const { ast } = TsDecompiler.decompile(tsSrc);
+      const cls = ast.items[0] as any;
+      const ctor = cls.methods.find((m: any) => m.name === "constructor");
+      expect(ctor).toBeDefined();
+      expect(ctor.body.statements[0].kind).toBe("ExprStmt");
+      expect(ctor.body.statements[0].expr.callee.name).toBe("super");
+      expect(ctor.body.statements[1].kind).toBe("AssignStmt");
+      expect(ctor.body.statements[1].target.property).toBe("id");
+    });
+
+    it("does not create primary constructor when constructor has mixed parameters", () => {
+      const tsSrc = `class Mixed {
+  constructor(public id: number, name: string) {}
+}`;
+      const { ast } = TsDecompiler.decompile(tsSrc);
+      const cls = ast.items[0] as any;
+      expect(cls.primaryConstructor).toBeUndefined();
+      const ctor = cls.methods.find((m: any) => m.name === "constructor");
+      expect(ctor).toBeDefined();
+      expect(ctor.body.statements.length).toBe(1);
+      expect(ctor.body.statements[0].target.property).toBe("id");
+    });
+
+    it("converts multi-variable for loop initializers", () => {
+      const tsSrc = `function test() {
+  for (let i = 0, j = 10; i < j; i++) {}
+}`;
+      const { ast } = TsDecompiler.decompile(tsSrc);
+      const fn = ast.items[0] as any;
+      expect(fn.body.statements.length).toBe(3);
+      expect(fn.body.statements[0].name).toBe("i");
+      expect(fn.body.statements[1].name).toBe("j");
+      expect(fn.body.statements[2].kind).toBe("WhileStmt");
+    });
+
+    it("drains hoisted classes before enclosing top-level item", () => {
+      const tsSrc = `function outer() {
+  class Inner {}
+  return new Inner();
+}
+const x = outer();`;
+      const { ast } = TsDecompiler.decompile(tsSrc);
+      const names = ast.items.map((i: any) => i.name);
+      const innerIdx = names.indexOf("Inner");
+      const outerIdx = names.indexOf("outer");
+      expect(innerIdx).toBeGreaterThanOrEqual(0);
+      expect(outerIdx).toBeGreaterThanOrEqual(0);
+      expect(innerIdx).toBeLessThan(outerIdx);
+    });
+
+    it("handles empty closure round-trip correctly", () => {
+      const tsSrc = `const f = (): void => {};`;
+      const { ast, trivia } = TsDecompiler.decompile(tsSrc);
+      const ail = AilGenerator.generate(ast, { trivia });
+      expect(ail).toContain("fn() -> void = nil");
+
+      const ailSrc = `pub val f = fn() -> void = nil`;
+      const mod = parse(ailSrc, "closure.ts.ail");
+      const ts = emitTypeScript(mod);
+      expect(ts).toContain("(): void => {};");
+    });
+
+    it("rewrites type expressions safely without corrupting string unions or property keys", () => {
+      const unionSrc = `pub type PrimUnion = "int" | "str"`;
+      const unionMod = parse(unionSrc, "union.ts.ail");
+      const unionTs = emitTypeScript(unionMod);
+      expect(unionTs).toContain('export type PrimUnion = "int" | "str";');
+
+      const objSrc = `pub type Config = { num: int, str?: str }`;
+      const objMod = parse(objSrc, "obj.ts.ail");
+      const objTs = emitTypeScript(objMod);
+      expect(objTs).toContain("num: number;");
+      expect(objTs).toContain("str?: string;");
+
+      const dummySpan = {
+        file: "test.ail",
+        start: { line: 1, column: 0, offset: 0 },
+        end: { line: 1, column: 0, offset: 0 },
+      };
+      const emitter = new TypeScriptEmitter();
+      const mapRes = emitter.emitTypeExpr({
+        kind: "NamedType",
+        name: "(a: Map<string, number>) => void",
+        span: dummySpan,
+      });
+      expect(mapRes).toBe("(a: Map<string, number>) => void");
+
+      const cbRes = emitter.emitTypeExpr({
+        kind: "NamedType",
+        name: "(cb: () => void) => void",
+        span: dummySpan,
+      });
+      expect(cbRes).toBe("(cb: () => void) => void");
+
+      const arrowFnType = emitter.emitTypeExpr({
+        kind: "NamedType",
+        name: "(a: int, b: str) -> bool",
+        span: dummySpan,
+      });
+      expect(arrowFnType).toBe("(a: number, b: string) => boolean");
+    });
+
+    it("handles let re-declaration and parameter collision in function blocks", () => {
+      const reassignSrc = `pub fn foo():
+  let x = 1
+  x = 2`;
+      const reassignMod = parse(reassignSrc, "reassign.ts.ail");
+      const reassignTs = emitTypeScript(reassignMod);
+      expect(reassignTs).toContain("let x = 1;");
+      expect(reassignTs).toContain("x = 2;");
+
+      const redeclSrc = `pub fn bar():
+  let y = 1
+  let y = 2`;
+      const redeclMod = parse(redeclSrc, "redecl.ts.ail");
+      const redeclTs = emitTypeScript(redeclMod);
+      expect(redeclTs).toContain("let y = 1;");
+      expect(redeclTs).toContain("y = 2;");
+      expect(redeclTs).not.toContain("const y = 2;");
+
+      const paramSrc = `pub fn baz(x: int):
+  let x = 42`;
+      const paramMod = parse(paramSrc, "param.ts.ail");
+      const paramTs = emitTypeScript(paramMod);
+      expect(paramTs).toContain("x = 42;");
+      expect(paramTs).not.toContain("const x = 42;");
+    });
+
+    it("preserves optional chaining and lowers contains correctly", () => {
+      const src = `pub fn check(a: any, b: any):
+  let res1 = a.contains(b)
+  let res2 = a?.contains(b)`;
+      const mod = parse(src, "contains.ts.ail");
+      const ts = emitTypeScript(mod);
+      expect(ts).toContain("a.includes(b)");
+      expect(ts).toContain("a?.contains(b)");
+    });
+
+    it("emits JavaScript target enum and primary constructor correctly", () => {
+      const enumSrc = `pub enum Status:
+  Active
+  Inactive`;
+      const enumMod = parse(enumSrc, "status.js.ail");
+      const enumJs = emitTarget(enumMod, "javascript");
+      expect(enumJs).toContain("export const Status = { Active: 0, Inactive: 1 };");
+
+      const classSrc = `pub class Point(pub x: int, pub y: int)`;
+      const classMod = parse(classSrc, "point.js.ail");
+      const classJs = emitTarget(classMod, "javascript");
+      expect(classJs).toContain("constructor(x, y) {");
+      expect(classJs).toContain("this.x = x;");
+      expect(classJs).toContain("this.y = y;");
+    });
+
+    it("does not rewrite to Math builtin when shadowed by class method", () => {
+      const src = `pub class Calc:
+  fn min(a: int, b: int) -> int:
+    ret a
+  fn run():
+    min(1, 2)`;
+      const mod = parse(src, "calc.ts.ail");
+      const ts = emitTypeScript(mod);
+      expect(ts).not.toContain("Math.min");
+      expect(ts).toContain("min(1, 2)");
     });
   });
 });

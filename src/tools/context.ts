@@ -15,11 +15,14 @@ import {
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   resolvePathTargets,
+  resolveTargetFile,
+  type ProjectIdiomDefinition,
 } from "../config/index.js";
 import type { ImportDecl, Module } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath } from "../emitters/index.js";
+import { formatIdiomsMarkdownSection } from "../idioms/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { generateOutline, type OutlineSymbol } from "./outline.js";
 
@@ -82,6 +85,7 @@ export interface ContextResult {
   callers: CallerSummary[];
   formattedBundle: string;
   tokenCount?: number;
+  idioms?: Record<string, ProjectIdiomDefinition>;
 }
 
 function isExternalSpecifier(specifier: string): boolean {
@@ -196,18 +200,30 @@ export function resolveImportPath(
   probeList.push(path.join(candidateBase, "index.tsx"));
   probeList.push(path.join(candidateBase, "index.js"));
 
-  // In isolated mode: check mapped sourceDir if candidate is in outDir
-  if (config.mode === "isolated") {
-    const relFromRoot = path.relative(projectRoot, candidateBase);
-    if (relFromRoot.startsWith(config.outDir)) {
-      const remapped = path.resolve(
-        projectRoot,
-        config.sourceDir,
-        relFromRoot.slice(config.outDir.length).replace(/^[/\\]/, ""),
-      );
+  // In isolated or companion mode: check mapped sourceDir if candidate is in outDir
+  if (config.mode === "isolated" || config.mode === "companion") {
+    const absOutDir = path.resolve(projectRoot, config.outDir);
+    const absCandidate = path.resolve(candidateBase);
+    let relFromOut: string | null = null;
+    if (
+      absCandidate === absOutDir ||
+      absCandidate.startsWith(absOutDir + path.sep) ||
+      absCandidate.startsWith(absOutDir + "/")
+    ) {
+      relFromOut = path.relative(absOutDir, absCandidate);
+    } else {
+      const relFromRoot = path.relative(projectRoot, candidateBase);
+      if (relFromRoot.startsWith(config.outDir)) {
+        relFromOut = relFromRoot.slice(config.outDir.length).replace(/^[/\\]/, "");
+      }
+    }
+    if (relFromOut !== null) {
+      const remapped = path.resolve(projectRoot, config.sourceDir, relFromOut);
       probeList.push(`${remapped}.ail`);
       probeList.push(`${remapped}.ts.ail`);
+      probeList.push(`${remapped}.tsx.ail`);
       probeList.push(`${remapped}.ts`);
+      probeList.push(`${remapped}.tsx`);
     }
   }
 
@@ -399,6 +415,7 @@ function scanWorkspaceCallers(
   for (const ailFile of ailFiles) {
     const baseTarget = ailFile.replace(/\.ail$/, "");
     processedBases.add(baseTarget);
+    processedBases.add(path.resolve(resolveTargetFile(config, ailFile, projectRoot)));
     filesToScan.push(ailFile);
   }
 
@@ -446,6 +463,7 @@ function formatBundle(
   targetBody: string,
   dependencies: DependencyContract[],
   callers: CallerSummary[],
+  idioms?: Record<string, ProjectIdiomDefinition>,
 ): string {
   const lines: string[] = [];
 
@@ -485,6 +503,11 @@ function formatBundle(
         caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
       lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
     }
+  }
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    lines.push("");
+    lines.push(formatIdiomsMarkdownSection(idioms));
   }
 
   return lines.join("\n");
@@ -604,6 +627,10 @@ export async function generateWorkspaceContext(
     }
   }
 
+  if (config.idioms && Object.keys(config.idioms).length > 0) {
+    parts.push(formatIdiomsMarkdownSection(config.idioms), "");
+  }
+
   let formattedBundle = parts.join("\n");
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -635,6 +662,7 @@ export async function generateWorkspaceContext(
     callers: [],
     formattedBundle,
     tokenCount,
+    idioms: config.idioms,
   };
 }
 
@@ -650,19 +678,22 @@ export async function generateContext(
     return generateWorkspaceContext(undefined, options);
   }
 
-  const fullTargetPath = path.resolve(process.cwd(), targetPath);
-  if (fs.existsSync(fullTargetPath) && fs.statSync(fullTargetPath).isDirectory()) {
-    return generateWorkspaceContext(targetPath, options);
+  const resolved = resolvePathTargets(targetPath, {
+    includeTargets: true,
+    projectRoot: options.projectRoot,
+  });
+
+  if (resolved.isDirectory || resolved.isOmitted) {
+    return generateWorkspaceContext(resolved.resolvedPath, options);
   }
 
+  const fullTargetPath = resolved.resolvedPath;
   if (!fs.existsSync(fullTargetPath)) {
     throw new Error(`Target file not found: ${targetPath}`);
   }
 
-  const projectRoot = options.projectRoot
-    ? path.resolve(options.projectRoot)
-    : findProjectRoot(path.dirname(fullTargetPath), process.cwd());
-  const config = loadProjectConfig(projectRoot);
+  const projectRoot = resolved.projectRoot;
+  const config = resolved.config;
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
   const targetContent = fs.readFileSync(fullTargetPath, "utf-8");
@@ -778,6 +809,7 @@ export async function generateContext(
     targetBody,
     dependencies,
     callers,
+    config.idioms,
   );
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -790,6 +822,7 @@ export async function generateContext(
         targetBody,
         dependencies,
         callers,
+        config.idioms,
       );
       tokenCount = estimateTokens(formattedBundle);
     }
@@ -806,6 +839,7 @@ export async function generateContext(
           targetBody,
           dependencies,
           callers,
+          config.idioms,
         );
         tokenCount = estimateTokens(formattedBundle);
       }
@@ -840,6 +874,7 @@ export async function generateContext(
     callers,
     formattedBundle,
     tokenCount,
+    idioms: config.idioms,
   };
 }
 

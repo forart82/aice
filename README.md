@@ -4,7 +4,7 @@
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-321%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C546%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-25%25%20--%2063%25-orange)](src/tokenomics/)
 
 > **A token-efficient, strongly-typed, homoiconic bidirectional programming language and transpiler engine engineered for autonomous AI code generation, zero-loss roundtripping, and non-invasive side-by-side adoption.**
@@ -109,28 +109,77 @@ ail --help
 
 ## 💻 CLI Command Reference
 
-### Adoption & Side-by-Side Workflow
+### Adoption, Companion & Bidirectional Sync
 ```bash
 # 1. Adopt an existing codebase into side-by-side AIL architecture:
 # (Decompiles targets in parallel, injects AI shield rules, and locks targets to chmod 444)
 ail adopt [dir] [-c <concurrency>]
 
-# 2. Start the high-speed incremental watch daemon during active coding:
+# 2. Adopt into an isolated companion twin workspace with project idioms:
+ail adopt [companionDir] --companion [targetDir] --idioms
+
+# 3. Start the high-speed incremental watch daemon during active coding:
 # (Listens to *.ail changes, recompiles to targets in <5ms, and preserves HMR)
 ail watch [dir]
 ail dev [dir]
 
-# 3. Eject side-by-side mode and restore standard project state:
+# 4. Bidirectional companion watch (watches target files and reverse-syncs external edits into .ail):
+ail watch [dir] --bidirectional
+
+# 5. One-shot bidirectional sync from targets back to .ail:
+ail sync [dir]
+
+# 6. Eject side-by-side mode and restore standard project state:
 # (Unlocks target files back to chmod 644 and removes AI shield rules)
 ail eject [dir]
 ail eject [dir] --remove-ail   # Optional: deletes .ail source files
 
-# 4. Fine-grained shield management:
+# 7. Fine-grained shield management:
 ail shield status [dir]        # Check active shield rules and locks
 ail shield lock [dir]          # Lock target files to chmod 444
 ail shield unlock [dir]        # Unlock target files to chmod 644
 ail shield apply [dir]         # Deploy .cursorignore, settings.json, and AGENTS.md
 ail shield remove [dir]        # Remove shield rules
+```
+
+### Project-Specific Idioms ($idioms)
+```bash
+# Scan workspace to discover repetitive AST templates with positive net BPE token savings:
+ail idioms scan [dir] --min-occurrences 3 --min-savings 10
+
+# Synthesize discovered idioms into ail.config.json and collapse source occurrences into $idioms:
+ail idioms apply [dir]
+ail idioms apply [dir] --dry-run
+
+# List active project idioms registered in ail.config.json:
+ail idioms list [dir]
+
+# Expand all $idiom calls back to standard canonical .ail code and clear configuration:
+ail idioms expand [dir]
+```
+
+### AI Agent Context, Surgical Splicing, MCP & Evolution
+```bash
+# Generate 1-turn token-bounded context pack with contracts, outline, and downstream callers:
+ail context src/sim/Hazard.ts.ail --depth 2 --max-tokens 4000
+
+# Generate structural skeleton outline of an .ail file or project (85-90% token reduction):
+ail outline src/sim --depth 2 --stats
+
+# Surgically replace or delete AST symbols (fn, type, class, method) without dumping whole files:
+ail splice src/sim/Hazard.ts.ail -s calculateDamage -c "fn calculateDamage(d: int) -> int = d * 2"
+ail splice src/sim/Hazard.ts.ail -s obsoleteHelper --delete
+
+# Run test suite with symbol-mapped runtime stack trace translation and auto-recompilation:
+ail test
+ail test tests/unit/service.test.ts --json
+
+# Launch the First-Class Model Context Protocol (MCP) server over stdio:
+ail mcp
+
+# Run the 5-Gate Differential Fuzzing & Autonomous Self-Healing Evolution Campaign:
+ail evolve --restarts 100 --cycles 10
+ail evolve --cycles 50 --seed 1337 --json
 ```
 
 ### Compilation & Decompilation
@@ -144,7 +193,7 @@ ail compile-all ./src
 # Clean all generated target files:
 ail clean ./src
 
-# Decompile a target file (.ts, .tsx, .css, .html) into .ail:
+# Decompile a target file (.ts, .tsx, .css, .html, .go, .rs, .py, .kt, etc.) into .ail:
 ail decompile src/Boss.ts --trivia
 ```
 
@@ -262,6 +311,19 @@ fn fetchAccount(id: str) -> Result[Account, NetworkError]:
   ret Ok(user)
 ```
 
+### 8. Project-Specific BPE-Gated Idioms ($idioms)
+Repetitive expression or statement patterns across a workspace are automatically synthesized into parameterized project idioms (`$idiom($0, $1)`) whenever they pass the positive net BPE token-savings gate ($\text{NetSavings} = (\text{TemplateTokens} - \text{CallTokens}) \times \text{Occurrences} - \text{DefinitionOverhead} \ge 10$ tokens using `cl100k_base`):
+```python
+# Raw repetitive code (e.g., Euclidean distance or boundary clamping repeated 15 times):
+d := hypot(a.x - b.x, a.y - b.y)
+
+# Automatically collapsed with active project idiom $dist2d($0, $1):
+d := $dist2d(a, b)
+
+# Idiom definition stored in ail.config.json and expanded losslessly during target compilation:
+# "$dist2d": { "params": ["$0", "$1"], "templateAil": "hypot($0.x - $1.x, $0.y - $1.y)" }
+```
+
 ---
 
 ## 🔬 The Bidirectional Lens Theorem
@@ -296,18 +358,25 @@ ail/
 │   ├── snake_pp/              # SFML C++ snake engine
 │   └── snake_ts/              # Canvas TypeScript simulation engine
 ├── src/
+│   ├── cache/                 # Fast persistent CST & AST disk caching engine
+│   ├── config/                # Project config (ail.config.json), mode resolver & paths
 │   ├── core/                  # Lexer, Pratt Parser, AST, Tokens, Span, Trivia
-│   ├── decompiler/            # Universal reverse transpiler (TS, TSX, CSS, HTML)
-│   ├── emitters/              # Multi-target code generators (TS, Py, C++, Rust, Go, HTML, CSS)
-│   ├── lsp/                   # Language Server Protocol daemon
-│   ├── runner/                # ConcurrencyPool & MultiLineReporter TUI
+│   ├── decompiler/            # Universal reverse transpiler (Go, Rust, Python, Kotlin, PHP, C++, C#, TS/TSX/JS, CSS, HTML)
+│   ├── emitters/              # Multi-target code generators (TS/TSX/JS, Py, Go, Rust, Kotlin, PHP, C++, C#, CSS, HTML, JSON, YAML, Twig)
+│   ├── evolve/                # 5-Gate differential fuzzing, self-healing & evolution loop
+│   ├── idioms/                # Project-specific BPE-gated idiom miner & AST transform
+│   ├── lsp/                   # Language Server Protocol daemon with rich actions & idioms
+│   ├── mcp/                   # First-Class Model Context Protocol (MCP) server & tools
+│   ├── runner/                # Test runner, symbol-error formatter & ConcurrencyPool TUI
 │   ├── shield/                # AI Exclusion Rules & Permission Locker
 │   ├── tokenomics/            # TikToken BPE benchmark & drift auditor
-│   ├── transpiler/            # Side-by-Side Parallel Ingest Engine
+│   ├── tools/                 # Token-dense tools: context, outline, splice, fmt, diff, patch
+│   ├── transpiler/            # Side-by-Side & Companion Parallel Ingest Engine
 │   ├── typechecker/           # Sound TypeChecker & Autonomous Self-Repair
-│   └── watcher/               # High-Speed Incremental Watch Daemon
+│   └── watcher/               # High-Speed Incremental & Bidirectional Watch Daemon
 └── tests/
-    └── unit/                  # 321 unit and integration test suites
+    ├── unit/                  # 1,546 unit and integration tests across 63 suites
+    └── integration/           # End-to-end bidirectional fidelity & multi-round suites
 ```
 
 ---

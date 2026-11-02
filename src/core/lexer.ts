@@ -993,7 +993,7 @@ function isHexDigit(ch: string): boolean {
 }
 
 function isIdentStart(ch: string): boolean {
-  return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
+  return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_" || ch === "$";
 }
 
 function isIdentPart(ch: string): boolean {

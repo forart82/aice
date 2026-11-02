@@ -129,9 +129,11 @@ export class TsDecompiler {
   }
 
   private trackDeclaration(decl: ts.VariableDeclaration): void {
-    if (!ts.isIdentifier(decl.name)) return;
-    const name = decl.name.text;
-    let typeCat: "number" | "string" | "boolean" | "other" | undefined;
+    const currentScope = this.currentScopeVars[this.currentScopeVars.length - 1];
+    if (ts.isIdentifier(decl.name)) {
+      const name = decl.name.text;
+      currentScope?.add(name);
+      let typeCat: "number" | "string" | "boolean" | "other" | undefined;
     if (decl.type) {
       if (decl.type.kind === ts.SyntaxKind.NumberKeyword) typeCat = "number";
       else if (decl.type.kind === ts.SyntaxKind.StringKeyword) typeCat = "string";
@@ -154,6 +156,7 @@ export class TsDecompiler {
     if (typeCat) {
       this.registerVarType(name, typeCat);
     }
+    }
   }
 
   constructor(source: string, filePath = "source.ts", options: TsDecompilerOptions = {}) {
@@ -171,7 +174,12 @@ export class TsDecompiler {
     return new TsDecompiler(source, filePath, options).decompile();
   }
 
+  private hoistedItems: ModuleItem[] = [];
+  private tempVarCounter = 0;
+
   decompile(): { ast: Module; trivia: CstTriviaTable } {
+    this.hoistedItems = [];
+    this.tempVarCounter = 0;
     this.knownTypeNames.clear();
     this.variableScopeStack = [new Map()];
     const scriptKind = this.isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
@@ -196,6 +204,10 @@ export class TsDecompiler {
 
     for (const stmt of this.sourceFile.statements) {
       const item = this.convertTopLevelStatement(stmt);
+      if (this.hoistedItems.length > 0) {
+        items.push(...this.hoistedItems);
+        this.hoistedItems = [];
+      }
       if (item) {
         if (Array.isArray(item)) {
           items.push(...item);
@@ -203,6 +215,11 @@ export class TsDecompiler {
           items.push(item);
         }
       }
+    }
+
+    if (this.hoistedItems.length > 0) {
+      items.push(...this.hoistedItems);
+      this.hoistedItems = [];
     }
 
     const ast: Module = {
@@ -527,6 +544,7 @@ export class TsDecompiler {
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
             isOptional: p.questionToken ? true : undefined,
+            isRest: p.dotDotDotToken !== undefined || undefined,
             span: this.getSpan(p),
           });
         } else if (ts.isObjectBindingPattern(p.name)) {
@@ -666,18 +684,26 @@ export class TsDecompiler {
         const mNodeId = `method:${name}.constructor`;
         this.extractComments(member, mNodeId);
 
-        const hasParamProps = member.parameters.some((p) =>
+        const isParamProp = (p: ts.ParameterDeclaration) =>
           p.modifiers?.some(
             (m) =>
-              m.kind === ts.SyntaxKind.PublicKeyword || m.kind === ts.SyntaxKind.ReadonlyKeyword,
-          ),
-        );
+              m.kind === ts.SyntaxKind.PublicKeyword ||
+              m.kind === ts.SyntaxKind.PrivateKeyword ||
+              m.kind === ts.SyntaxKind.ProtectedKeyword ||
+              m.kind === ts.SyntaxKind.ReadonlyKeyword,
+          ) ?? false;
+        const hasParamProps =
+          member.parameters.length > 0 && member.parameters.every(isParamProp);
         const isEmptyBody = !member.body || member.body.statements.length === 0;
 
         if (hasParamProps && isEmptyBody) {
           primaryConstructor = member.parameters.map((p) => {
             const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
-            const isPub = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.PublicKeyword) ?? true;
+            const isPub = !p.modifiers?.some(
+              (m) =>
+                m.kind === ts.SyntaxKind.PrivateKeyword ||
+                m.kind === ts.SyntaxKind.ProtectedKeyword,
+            );
             const isRo =
               p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
             return {
@@ -751,13 +777,39 @@ export class TsDecompiler {
           continue;
         }
 
+        const paramPropAssignStmts: Statement[] = [];
         const params: ParamDecl[] = member.parameters.map((p) => {
           const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
+          if (isParamProp(p)) {
+            const isRo = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            properties.push({
+              kind: "PropertyDecl",
+              name: pName,
+              typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
+              isStatic: false,
+              isReadonly: isRo,
+              span: this.getSpan(p),
+            });
+            paramPropAssignStmts.push({
+              kind: "AssignStmt",
+              target: {
+                kind: "MemberAccessExpr",
+                object: { kind: "IdentifierExpr", name: "this", span: this.getSpan(p) },
+                property: pName,
+                isSafeNav: false,
+                span: this.getSpan(p),
+              },
+              op: "=",
+              value: { kind: "IdentifierExpr", name: pName, span: this.getSpan(p) },
+              span: this.getSpan(p),
+            });
+          }
           return {
             name: pName,
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
             isOptional: p.questionToken ? true : undefined,
+            isRest: p.dotDotDotToken !== undefined || undefined,
             span: this.getSpan(p),
           };
         });
@@ -767,6 +819,20 @@ export class TsDecompiler {
           ? this.convertBlock(member.body)
           : { kind: "Block" as const, statements: [], span: this.getSpan(member) };
         this.popScope();
+        if (paramPropAssignStmts.length > 0) {
+          const superIdx = body.statements.findIndex(
+            (s) =>
+              s.kind === "ExprStmt" &&
+              s.expr.kind === "CallExpr" &&
+              s.expr.callee.kind === "IdentifierExpr" &&
+              s.expr.callee.name === "super",
+          );
+          if (superIdx !== -1) {
+            body.statements.splice(superIdx + 1, 0, ...paramPropAssignStmts);
+          } else {
+            body.statements.unshift(...paramPropAssignStmts);
+          }
+        }
 
         methods.push({
           kind: "MethodDecl",
@@ -797,6 +863,7 @@ export class TsDecompiler {
             typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
             defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
             isOptional: p.questionToken ? true : undefined,
+            isRest: p.dotDotDotToken !== undefined || undefined,
             span: this.getSpan(p),
           };
         });
@@ -857,6 +924,8 @@ export class TsDecompiler {
           : member.name.getText(this.sourceFile);
         const mNodeId = `get:${name}.${propName}`;
         this.extractComments(member, mNodeId);
+        const isStatic =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
         const returnType = member.type ? this.convertTypeNode(member.type) : null;
         let isExpressionBodied = false;
         let body: Block | Expr;
@@ -879,7 +948,7 @@ export class TsDecompiler {
           kind: "MethodDecl",
           name: propName,
           accessor: "get",
-          isStatic: false,
+          isStatic,
           isAsync: false,
           params: [],
           returnType,
@@ -893,6 +962,8 @@ export class TsDecompiler {
           : member.name.getText(this.sourceFile);
         const mNodeId = `set:${name}.${propName}`;
         this.extractComments(member, mNodeId);
+        const isStatic =
+          member.modifiers?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) ?? false;
         const params: ParamDecl[] = member.parameters.map((p) => ({
           name: ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile),
           typeAnnotation: p.type ? this.convertTypeNode(p.type) : this.makePrimitive("any"),
@@ -930,7 +1001,7 @@ export class TsDecompiler {
           kind: "MethodDecl",
           name: propName,
           accessor: "set",
-          isStatic: false,
+          isStatic,
           isAsync: false,
           params,
           returnType: this.makePrimitive("void"),
@@ -1305,6 +1376,19 @@ export class TsDecompiler {
     };
   }
 
+  private convertStatementToBlock(stmt: ts.Statement): Block {
+    if (ts.isBlock(stmt)) {
+      return this.convertBlock(stmt);
+    }
+    const single = this.convertStatement(stmt);
+    const stmts = Array.isArray(single) ? single : single ? [single] : [];
+    return {
+      kind: "Block",
+      statements: stmts,
+      span: this.getSpan(stmt),
+    };
+  }
+
   private convertBlock(block: ts.Block): Block {
     const statements: Statement[] = [];
     for (const stmt of block.statements) {
@@ -1436,6 +1520,11 @@ export class TsDecompiler {
             }
           }
         }
+        continue;
+      }
+      if (ts.isClassDeclaration(stmt)) {
+        const cls = this.convertClassDeclaration(stmt);
+        this.hoistedItems.push(cls);
         continue;
       }
       const s = this.convertStatement(stmt);
@@ -1632,7 +1721,7 @@ export class TsDecompiler {
             span: this.getSpan(decl.initializer),
           };
         } else if (decl.initializer) {
-          const tempName = "_destruct";
+          const tempName = `_destruct_${++this.tempVarCounter}`;
           unrolled.push({
             kind: "LetBinding",
             name: tempName,
@@ -1739,36 +1828,14 @@ export class TsDecompiler {
 
     if (ts.isIfStatement(stmt)) {
       const condition = this.ensureBooleanCondition(stmt.expression);
-      let thenBranch: Block;
-      if (ts.isBlock(stmt.thenStatement)) {
-        thenBranch = this.convertBlock(stmt.thenStatement);
-      } else {
-        const single = this.convertStatement(stmt.thenStatement);
-        const stmts = Array.isArray(single) ? single : single ? [single] : [];
-        thenBranch = {
-          kind: "Block" as const,
-          statements: stmts,
-          span: this.getSpan(stmt.thenStatement),
-        };
-      }
+      const thenBranch = this.convertStatementToBlock(stmt.thenStatement);
 
       let elseBranch: Block | null = null;
       const elifBranches: { condition: Expr; body: Block; span: Span }[] = [];
 
       let currentElse: ts.Statement | undefined = stmt.elseStatement;
       while (currentElse && ts.isIfStatement(currentElse)) {
-        let elifBody: Block;
-        if (ts.isBlock(currentElse.thenStatement)) {
-          elifBody = this.convertBlock(currentElse.thenStatement);
-        } else {
-          const single = this.convertStatement(currentElse.thenStatement);
-          const stmts = Array.isArray(single) ? single : single ? [single] : [];
-          elifBody = {
-            kind: "Block" as const,
-            statements: stmts,
-            span: this.getSpan(currentElse.thenStatement),
-          };
-        }
+        const elifBody = this.convertStatementToBlock(currentElse.thenStatement);
         const elifCond = this.ensureBooleanCondition(currentElse.expression);
         elifBranches.push({
           condition: elifCond,
@@ -1779,17 +1846,7 @@ export class TsDecompiler {
       }
 
       if (currentElse) {
-        if (ts.isBlock(currentElse)) {
-          elseBranch = this.convertBlock(currentElse);
-        } else {
-          const single = this.convertStatement(currentElse);
-          const stmts = Array.isArray(single) ? single : single ? [single] : [];
-          elseBranch = {
-            kind: "Block" as const,
-            statements: stmts,
-            span: this.getSpan(currentElse),
-          };
-        }
+        elseBranch = this.convertStatementToBlock(currentElse);
       }
 
       if (this.inClosureDepth > 0) {
@@ -1825,9 +1882,7 @@ export class TsDecompiler {
       const decl = stmt.initializer.declarations[0];
       if (decl && ts.isObjectBindingPattern(decl.name)) {
         const loopVar = "_item";
-        const bodyBlock = ts.isBlock(stmt.statement)
-          ? this.convertBlock(stmt.statement)
-          : { kind: "Block" as const, statements: [], span: emptySpan() };
+        const bodyBlock = this.convertStatementToBlock(stmt.statement);
 
         const destructStatements: Statement[] = [];
         for (const el of decl.name.elements) {
@@ -1879,9 +1934,7 @@ export class TsDecompiler {
         kind: "ForStmt",
         variable: varName,
         iterable: this.convertExpression(stmt.expression),
-        body: ts.isBlock(stmt.statement)
-          ? this.convertBlock(stmt.statement)
-          : { kind: "Block" as const, statements: [], span: emptySpan() },
+        body: this.convertStatementToBlock(stmt.statement),
         span: this.getSpan(stmt),
       };
     }
@@ -1890,9 +1943,7 @@ export class TsDecompiler {
       return {
         kind: "WhileStmt",
         condition: this.ensureBooleanCondition(stmt.expression),
-        body: ts.isBlock(stmt.statement)
-          ? this.convertBlock(stmt.statement)
-          : { kind: "Block" as const, statements: [], span: emptySpan() },
+        body: this.convertStatementToBlock(stmt.statement),
         span: this.getSpan(stmt),
       };
     }
@@ -1906,31 +1957,35 @@ export class TsDecompiler {
     }
 
     if (ts.isForStatement(stmt)) {
-      let initStmt: Statement | null = null;
+      const initStmts: Statement[] = [];
       if (stmt.initializer) {
         if (ts.isVariableDeclarationList(stmt.initializer)) {
-          const decl = stmt.initializer.declarations[0];
-          if (decl && ts.isIdentifier(decl.name)) {
-            const init = decl.initializer
-              ? this.convertExpression(decl.initializer)
-              : {
-                  kind: "LiteralExpr" as const,
-                  literalKind: "number" as const,
-                  value: 0,
-                  rawValue: "0",
-                  span: this.getSpan(decl),
-                };
-            initStmt = {
-              kind: "LetBinding",
-              name: decl.name.text,
-              isMut: true,
-              typeAnnotation: decl.type ? this.convertTypeNode(decl.type) : null,
-              init,
-              span: this.getSpan(stmt.initializer),
-            };
+          for (const decl of stmt.initializer.declarations) {
+            if (decl && ts.isIdentifier(decl.name)) {
+              const init = decl.initializer
+                ? this.convertExpression(decl.initializer)
+                : {
+                    kind: "LiteralExpr" as const,
+                    literalKind: "number" as const,
+                    value: 0,
+                    rawValue: "0",
+                    span: this.getSpan(decl),
+                  };
+              initStmts.push({
+                kind: "LetBinding",
+                name: decl.name.text,
+                isMut: true,
+                typeAnnotation: decl.type ? this.convertTypeNode(decl.type) : null,
+                init,
+                span: this.getSpan(decl),
+              });
+            }
           }
         } else if (ts.isExpression(stmt.initializer)) {
-          initStmt = this.convertExpressionToStatement(stmt.initializer);
+          const s = this.convertExpressionToStatement(stmt.initializer);
+          if (s) {
+            initStmts.push(s);
+          }
         }
       }
 
@@ -1944,20 +1999,10 @@ export class TsDecompiler {
             span: this.getSpan(stmt),
           };
 
-      let body: Block;
-      if (ts.isBlock(stmt.statement)) {
-        body = this.convertBlock(stmt.statement);
-      } else {
-        const single = this.convertStatement(stmt.statement);
-        const stmts = Array.isArray(single) ? single : single ? [single] : [];
-        body = {
-          kind: "Block",
-          statements: stmts,
-          span: this.getSpan(stmt.statement),
-        };
-      }
+      const body = this.convertStatementToBlock(stmt.statement);
 
       if (stmt.incrementor) {
+        this.injectIncrementorBeforeContinue(body, stmt.incrementor);
         const incStmt = this.convertExpressionToStatement(stmt.incrementor);
         body.statements.push(incStmt);
       }
@@ -1969,8 +2014,8 @@ export class TsDecompiler {
         span: this.getSpan(stmt),
       };
 
-      if (initStmt) {
-        return [initStmt, whileStmt];
+      if (initStmts.length > 0) {
+        return [...initStmts, whileStmt];
       }
       return whileStmt;
     }
@@ -2030,10 +2075,15 @@ export class TsDecompiler {
             pendingIsDefault = true;
           }
 
+          let rawStmts: readonly ts.Statement[] = clause.statements;
+          if (rawStmts.length === 1 && ts.isBlock(rawStmts[0])) {
+            rawStmts = rawStmts[0].statements;
+          }
+
           const nonBreakStatements: ts.Statement[] = [];
-          for (let i = 0; i < clause.statements.length; i++) {
-            const s = clause.statements[i];
-            if (i === clause.statements.length - 1 && ts.isBreakStatement(s)) {
+          for (let i = 0; i < rawStmts.length; i++) {
+            const s = rawStmts[i];
+            if (i === rawStmts.length - 1 && ts.isBreakStatement(s)) {
               continue;
             }
             nonBreakStatements.push(s);
@@ -2048,6 +2098,9 @@ export class TsDecompiler {
               } else if (converted) {
                 clauseStmts.push(converted);
               }
+            }
+            if (clauseStmts.length > 0 && clauseStmts[clauseStmts.length - 1].kind === "BreakStmt") {
+              clauseStmts.pop();
             }
 
             const finalStmts = this.collapseStatementsForClosure(clauseStmts, cSpan);
@@ -2302,6 +2355,44 @@ export class TsDecompiler {
       expr: this.convertExpression(expr),
       span,
     };
+  }
+
+  private injectIncrementorBeforeContinue(block: Block, incExpr: ts.Expression): void {
+    const newStatements: Statement[] = [];
+    for (const s of block.statements) {
+      if (s.kind === "ContinueStmt") {
+        newStatements.push(this.convertExpressionToStatement(incExpr));
+        newStatements.push(s);
+      } else if (s.kind === "IfStmt") {
+        this.injectIncrementorBeforeContinue(s.thenBranch, incExpr);
+        for (const elif of s.elifBranches) {
+          this.injectIncrementorBeforeContinue(elif.body, incExpr);
+        }
+        if (s.elseBranch) {
+          this.injectIncrementorBeforeContinue(s.elseBranch, incExpr);
+        }
+        newStatements.push(s);
+      } else if (s.kind === "MatchStmt") {
+        for (const arm of s.cases) {
+          if (arm.body.kind === "Block") {
+            this.injectIncrementorBeforeContinue(arm.body, incExpr);
+          }
+        }
+        newStatements.push(s);
+      } else if (s.kind === "TryStmt") {
+        this.injectIncrementorBeforeContinue(s.tryBlock, incExpr);
+        if (s.catchBlock) {
+          this.injectIncrementorBeforeContinue(s.catchBlock, incExpr);
+        }
+        if (s.finallyBlock) {
+          this.injectIncrementorBeforeContinue(s.finallyBlock, incExpr);
+        }
+        newStatements.push(s);
+      } else {
+        newStatements.push(s);
+      }
+    }
+    block.statements = newStatements;
   }
 
   private isNumericName(name: string): boolean {
@@ -2876,6 +2967,14 @@ export class TsDecompiler {
       };
     }
 
+    if (expr.kind === ts.SyntaxKind.ImportKeyword) {
+      return {
+        kind: "IdentifierExpr",
+        name: "import",
+        span: this.getSpan(expr),
+      };
+    }
+
     if (ts.isIdentifier(expr)) {
       return {
         kind: "IdentifierExpr",
@@ -3067,6 +3166,7 @@ export class TsDecompiler {
         kind: "CallExpr",
         callee: this.convertExpression(expr.expression),
         args: expr.arguments.map((a) => this.convertExpression(a)),
+        isOptional: expr.questionDotToken !== undefined ? true : undefined,
         span: this.getSpan(expr),
       };
     }
@@ -3213,6 +3313,7 @@ export class TsDecompiler {
         typeAnnotation: p.type ? this.convertTypeNode(p.type) : null,
         defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
         isOptional: p.questionToken ? true : undefined,
+        isRest: p.dotDotDotToken !== undefined || undefined,
         span: this.getSpan(p),
       }));
 
@@ -3228,8 +3329,11 @@ export class TsDecompiler {
         body = this.convertExpression(expr.body);
       }
 
+      const isArrowAsync =
+        expr.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
       return {
         kind: "ClosureExpr",
+        isAsync: isArrowAsync || undefined,
         params,
         returnType: expr.type ? this.convertTypeNode(expr.type) : null,
         body,
@@ -3244,6 +3348,7 @@ export class TsDecompiler {
         typeAnnotation: p.type ? this.convertTypeNode(p.type) : null,
         defaultValue: p.initializer ? this.convertExpression(p.initializer) : undefined,
         isOptional: p.questionToken ? true : undefined,
+        isRest: p.dotDotDotToken !== undefined || undefined,
         span: this.getSpan(p),
       }));
 
@@ -3259,8 +3364,11 @@ export class TsDecompiler {
         body = { kind: "Block" as const, statements: [], span: this.getSpan(expr) };
       }
 
+      const isFnAsync =
+        expr.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
       return {
         kind: "ClosureExpr",
+        isAsync: isFnAsync || undefined,
         params,
         returnType: expr.type ? this.convertTypeNode(expr.type) : null,
         body,

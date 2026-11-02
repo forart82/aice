@@ -15,13 +15,17 @@ import {
   type AilProjectConfig,
   DEFAULT_PROJECT_CONFIG,
   autoDetectProjectMode,
+  deriveSourceFilename,
   deriveTargetFilename,
   getExtensionForTarget,
   loadProjectConfig,
+  resolveSourceFile,
+  resolveTargetFile,
   resolveTargetOutputPathForConfig,
   saveProjectConfig,
   stripJsonComments,
   validateConfig,
+  validateProjectConfig,
 } from "../../src/config/index.js";
 
 describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
@@ -121,6 +125,59 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(() => validateConfig({ mode: "isolated", isolated: false })).toThrow(
         /Inconsistent project config/,
       );
+    });
+
+    it("validates valid companion configuration without throwing", () => {
+      expect(() =>
+        validateProjectConfig({
+          mode: "companion",
+          isolated: true,
+          sourceDir: "src",
+          outDir: "../target-project/src",
+          targetLanguage: "typescript",
+          watermark: true,
+          targetProjectDir: "../target-project",
+          test: {
+            command: "bun test",
+            cwd: "../target-project",
+            scrubTraces: true,
+          },
+        }),
+      ).not.toThrow();
+
+      // Also via validateConfig alias
+      expect(() =>
+        validateConfig({
+          mode: "companion",
+          targetProjectDir: "/path/to/target",
+          test: {
+            command: "npm test",
+          },
+        }),
+      ).not.toThrow();
+    });
+
+    it("throws errors on invalid companion configuration values", () => {
+      // @ts-expect-error invalid targetProjectDir
+      expect(() => validateConfig({ targetProjectDir: 12345 })).toThrow(
+        /Invalid targetProjectDir/,
+      );
+      // @ts-expect-error invalid test block
+      expect(() => validateConfig({ test: "npm test" })).toThrow(/Invalid test/);
+      expect(() => validateConfig({ test: ["bun", "test"] as any })).toThrow(/Invalid test/);
+      // @ts-expect-error null test
+      expect(() => validateConfig({ test: null })).toThrow(/Invalid test/);
+    });
+
+    it("derives source filename from target filename", () => {
+      expect(deriveSourceFilename("calc.ts")).toBe("calc.ail");
+      expect(deriveSourceFilename("Button.tsx")).toBe("Button.ail");
+      expect(deriveSourceFilename("calc.test.ts")).toBe("calc.test.ail");
+      expect(deriveSourceFilename("model.py")).toBe("model.ail");
+      expect(deriveSourceFilename("lib.rs")).toBe("lib.ail");
+      expect(deriveSourceFilename("styles.css")).toBe("styles.ail");
+      expect(deriveSourceFilename("index.html")).toBe("index.ail");
+      expect(deriveSourceFilename("already.ail")).toBe("already.ail");
     });
   });
 
@@ -641,6 +698,259 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(() => saveProjectConfig(tmpDir, { mode: "bad-mode" })).toThrow(
         /Invalid project mode/,
       );
+    });
+  });
+
+  describe("Companion Mode Twin-Workspace Resolution (resolveTargetFile & resolveSourceFile)", () => {
+    const companionRoot = "/workspace/ail-companion";
+    const targetRoot = "/workspace/target-app";
+
+    const companionConfig: AilProjectConfig = {
+      mode: "companion",
+      sourceDir: "src",
+      outDir: path.join(targetRoot, "src"),
+      targetLanguage: "typescript",
+      isolated: true,
+      watermark: true,
+      targetProjectDir: targetRoot,
+      test: {
+        command: "bun test",
+        cwd: targetRoot,
+        scrubTraces: true,
+      },
+    };
+
+    const relCompanionConfig: AilProjectConfig = {
+      mode: "companion",
+      sourceDir: "src",
+      outDir: "../target-app/src",
+      targetLanguage: "typescript",
+      isolated: true,
+      watermark: true,
+      targetProjectDir: "../target-app",
+    };
+
+    describe("resolveTargetFile", () => {
+      it("maps companion .ail file to external absolute outDir target file", () => {
+        const targetPath = resolveTargetFile(
+          companionConfig,
+          "src/math/calc.ail",
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/math/calc.ts"));
+      });
+
+      it("maps companion dual-extension file preserving target extension", () => {
+        const targetPath = resolveTargetFile(
+          companionConfig,
+          "src/components/Button.tsx.ail",
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/components/Button.tsx"));
+      });
+
+      it("maps absolute companion source file to external outDir target file", () => {
+        const absSource = path.resolve(companionRoot, "src/utils/format.ail");
+        const targetPath = resolveTargetFile(companionConfig, absSource, companionRoot);
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/utils/format.ts"));
+      });
+
+      it("maps companion .ail file with relative outDir resolved against projectRoot", () => {
+        const targetPath = resolveTargetFile(
+          relCompanionConfig,
+          "src/index.ail",
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(companionRoot, "../target-app/src/index.ts"));
+      });
+
+      it("maps companion file without projectRoot when relative", () => {
+        const targetPath = resolveTargetFile(relCompanionConfig, "src/core/engine.ail");
+        expect(targetPath).toBe(path.join("../target-app/src", "core/engine.ts"));
+      });
+
+      it("respects non-default targetLanguage in companion mode", () => {
+        const pyCompanionConfig: AilProjectConfig = {
+          ...companionConfig,
+          targetLanguage: "python",
+        };
+        const targetPath = resolveTargetFile(
+          pyCompanionConfig,
+          "src/server.ail",
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/server.py"));
+      });
+
+      it("handles deeply nested subdirectories properly", () => {
+        const targetPath = resolveTargetFile(
+          companionConfig,
+          "src/a/b/c/d/service.ail",
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/a/b/c/d/service.ts"));
+      });
+
+      it("is callable through resolveTargetOutputPathForConfig backward compatibility", () => {
+        const targetPath = resolveTargetOutputPathForConfig(
+          "src/math/calc.ail",
+          companionConfig,
+          companionRoot,
+        );
+        expect(targetPath).toBe(path.resolve(targetRoot, "src/math/calc.ts"));
+      });
+    });
+
+    describe("resolveSourceFile", () => {
+      it("maps external target file back to companion .ail file", () => {
+        const externalTarget = path.resolve(targetRoot, "src/math/calc.ts");
+        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.ail"));
+      });
+
+      it("maps external target file with .tsx extension back to .ail file", () => {
+        const externalTarget = path.resolve(targetRoot, "src/components/Button.tsx");
+        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/components/Button.ail"));
+      });
+
+      it("maps external target test file (*.test.ts) back to *.test.ail file", () => {
+        const externalTarget = path.resolve(targetRoot, "src/math/calc.test.ts");
+        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.test.ail"));
+      });
+
+      it("maps external target file with relative outDir resolved against projectRoot", () => {
+        const externalTarget = path.resolve(companionRoot, "../target-app/src/index.ts");
+        const sourcePath = resolveSourceFile(relCompanionConfig, externalTarget, companionRoot);
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/index.ail"));
+      });
+
+      it("maps relative target file without projectRoot", () => {
+        const sourcePath = resolveSourceFile(
+          relCompanionConfig,
+          "../target-app/src/core/engine.ts",
+        );
+        expect(sourcePath).toBe(path.join("src", "core/engine.ail"));
+      });
+
+      it("maps non-TypeScript external file back to companion .ail file", () => {
+        const pyCompanionConfig: AilProjectConfig = {
+          ...companionConfig,
+          targetLanguage: "python",
+        };
+        const externalTarget = path.resolve(targetRoot, "src/server.py");
+        const sourcePath = resolveSourceFile(pyCompanionConfig, externalTarget, companionRoot);
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/server.ail"));
+      });
+
+      it("maps external target file when outDir starts with ../ and targetProjectDir is set", () => {
+        const testCompanionRoot = path.join(tmpDir, "twin-ws");
+        const extTargetRoot = path.join(tmpDir, "ext-project");
+        const configWithDotDot: AilProjectConfig = {
+          mode: "companion",
+          sourceDir: "src",
+          outDir: "../ext-project/src",
+          targetProjectDir: "../ext-project",
+          targetLanguage: "typescript",
+          isolated: true,
+          watermark: true,
+        };
+
+        const externalTarget = path.join(extTargetRoot, "src", "services", "api.ts");
+        const sourcePath = resolveSourceFile(configWithDotDot, externalTarget, testCompanionRoot);
+        expect(sourcePath).toBe(path.resolve(testCompanionRoot, "src", "services", "api.ail"));
+      });
+
+      it("resolves to existing dual-extension file on disk when present", () => {
+        // Create a temporary workspace to test dual-ext resolution on disk
+        const compDir = path.join(tmpDir, "comp");
+        const compSrc = path.join(compDir, "src");
+        fs.mkdirSync(compSrc, { recursive: true });
+
+        // Write dual-extension file: calc.ts.ail
+        const dualExtFile = path.join(compSrc, "calc.ts.ail");
+        fs.writeFileSync(dualExtFile, "fn add() = 1;");
+
+        const testConfig: AilProjectConfig = {
+          mode: "companion",
+          sourceDir: "src",
+          outDir: "/ext/target/src",
+          targetLanguage: "typescript",
+          isolated: true,
+          watermark: true,
+        };
+
+        const resolved = resolveSourceFile(
+          testConfig,
+          "/ext/target/src/calc.ts",
+          compDir,
+        );
+        expect(resolved).toBe(dualExtFile);
+      });
+    });
+
+    describe("Round-Trip Parity", () => {
+      it("roundtrips between companion source file and target file", () => {
+        const sourceAil = "src/modules/billing/invoice.ail";
+        const targetTs = resolveTargetFile(companionConfig, sourceAil, companionRoot);
+        const roundTripSource = resolveSourceFile(companionConfig, targetTs, companionRoot);
+        expect(roundTripSource).toBe(path.resolve(companionRoot, sourceAil));
+      });
+    });
+
+    describe("Mode Auto-Detection with companion mode", () => {
+      it("auto-detects 'companion' mode when ail.config.json specifies companion", () => {
+        fs.writeFileSync(
+          path.join(tmpDir, "ail.config.json"),
+          JSON.stringify({
+            mode: "companion",
+            targetProjectDir: "../other-project",
+            outDir: "../other-project/src",
+          }),
+          "utf-8",
+        );
+        expect(autoDetectProjectMode(tmpDir)).toBe("companion");
+
+        const loaded = loadProjectConfig(tmpDir);
+        expect(loaded.mode).toBe("companion");
+        expect(loaded.targetProjectDir).toBe("../other-project");
+      });
+
+      it("auto-detects 'companion' mode when .ailrc specifies companion", () => {
+        fs.writeFileSync(
+          path.join(tmpDir, ".ailrc"),
+          JSON.stringify({
+            mode: "companion",
+            targetProjectDir: "../other-project",
+          }),
+          "utf-8",
+        );
+        expect(autoDetectProjectMode(tmpDir)).toBe("companion");
+      });
+
+      it("loads and saves companion configuration with test block cleanly", () => {
+        saveProjectConfig(tmpDir, {
+          mode: "companion",
+          targetProjectDir: "../target-app",
+          outDir: "../target-app/src",
+          test: {
+            command: "bun test",
+            cwd: "../target-app",
+            scrubTraces: true,
+          },
+        });
+
+        const loaded = loadProjectConfig(tmpDir);
+        expect(loaded.mode).toBe("companion");
+        expect(loaded.targetProjectDir).toBe("../target-app");
+        expect(loaded.outDir).toBe("../target-app/src");
+        expect(loaded.test).toEqual({
+          command: "bun test",
+          cwd: "../target-app",
+          scrubTraces: true,
+        });
+      });
     });
   });
 });

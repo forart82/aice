@@ -21,7 +21,14 @@ import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { ConcurrencyPool, type TaskItem } from "../runner/concurrency-pool.js";
 import { MultiLineReporter } from "../runner/multi-line-reporter.js";
-import { removeAiShield, unlockProjectTargets } from "../shield/index.js";
+import {
+  applyAiShield,
+  applyCompanionShield,
+  removeAiShield,
+  removeCompanionShield,
+  unlockProjectTargets,
+} from "../shield/index.js";
+import { applyProjectIdiomsToDirectory } from "../idioms/index.js";
 
 const cl100k = getEncoding("cl100k_base");
 
@@ -36,12 +43,23 @@ export interface IngestOptions {
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".cpp", ".hpp", ".cc", ".cxx", ".h", ".cs"]
   ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build", ".ail-build"]
   isolate?: boolean;
+  companion?: boolean;
+  targetProjectDir?: string;
   outDir?: string;
   sourceDir?: string;
   targetLanguage?: TargetLanguage;
+  shield?: boolean; // default true
+  idioms?: boolean;
+  minIdiomOccurrences?: number;
+  minIdiomSavings?: number;
 }
 
 export type IngestProjectOptions = IngestOptions;
+
+export interface ParallelAdoptionOptions extends IngestOptions {
+  companion?: boolean;
+  targetProjectDir?: string;
+}
 
 export interface FileIngestResult {
   sourcePath: string;
@@ -69,6 +87,37 @@ export interface IngestSummary {
   cl100kSavingsPct: number;
   durationMs: number;
   results: FileIngestResult[];
+  idiomsSynthesized?: number;
+  idiomTokenSavings?: number;
+}
+
+export interface AdoptionResult extends IngestSummary {
+  mode: "side-by-side" | "isolated" | "companion";
+  targetProjectDir?: string;
+  companionWorkspaceDir?: string;
+  configPath?: string;
+  agentsMdPath?: string;
+  cursorRulesPath?: string;
+  generatedFiles?: string[];
+}
+
+export function detectDominantTargetLanguage(filePaths: string[]): TargetLanguage {
+  const counts = new Map<TargetLanguage, number>();
+  for (const fp of filePaths) {
+    const lang = detectTargetFromPath(fp);
+    const weight =
+      lang === "css" || lang === "html" || lang === "json" || lang === "yaml" ? 1 : 10;
+    counts.set(lang, (counts.get(lang) ?? 0) + weight);
+  }
+  let maxLang: TargetLanguage = "typescript";
+  let maxCount = 0;
+  for (const [lang, count] of counts.entries()) {
+    if (count > maxCount) {
+      maxCount = count;
+      maxLang = lang;
+    }
+  }
+  return maxLang;
 }
 
 interface IngestTaskData {
@@ -380,21 +429,89 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
  * into .ail files (side-by-side or isolated mode), leveraging ConcurrencyPool
  * and MultiLineReporter.
  */
-export async function ingestProjectSideBySide(options: IngestOptions): Promise<IngestSummary> {
+export async function ingestProjectSideBySide(options: IngestOptions): Promise<AdoptionResult> {
   const startTime = performance.now();
-  const resolvedDir = path.resolve(options.dir);
+  const isCompanion = Boolean(options.companion || options.targetProjectDir);
+  const isIsolated = !isCompanion && Boolean(options.isolate);
 
-  const isIsolated = Boolean(options.isolate);
+  const companionWorkspace = path.resolve(options.dir);
+  const targetProjectDir = isCompanion
+    ? path.resolve(options.targetProjectDir ?? options.dir)
+    : companionWorkspace;
+
+  if (isCompanion && !options.dryRun && !fs.existsSync(companionWorkspace)) {
+    fs.mkdirSync(companionWorkspace, { recursive: true });
+  }
+
   const sourceDir = (options.sourceDir ?? "src").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
-  const outDir = (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
-  const absSourceDir = path.resolve(resolvedDir, sourceDir);
-  const absOutDir = path.resolve(resolvedDir, outDir);
+  const absCompanionSourceDir = path.resolve(companionWorkspace, sourceDir);
 
-  const discoveredFiles = findIngestableFiles(resolvedDir, {
+  let targetSourceDir: string;
+  if (isCompanion) {
+    if (options.outDir) {
+      targetSourceDir = path.isAbsolute(options.outDir)
+        ? options.outDir
+        : path.resolve(targetProjectDir, options.outDir);
+    } else {
+      const candidateSourceDir = path.resolve(targetProjectDir, sourceDir);
+      if (fs.existsSync(candidateSourceDir) && fs.statSync(candidateSourceDir).isDirectory()) {
+        targetSourceDir = candidateSourceDir;
+      } else {
+        targetSourceDir = targetProjectDir;
+      }
+    }
+  } else {
+    const outDirName = (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+    targetSourceDir = path.resolve(companionWorkspace, outDirName);
+  }
+
+  const scanDir = isCompanion ? targetSourceDir : companionWorkspace;
+
+  if (!fs.existsSync(scanDir)) {
+    throw new Error(`Directory not found: ${scanDir}`);
+  }
+
+  const absSourceDir = isCompanion ? absCompanionSourceDir : path.resolve(companionWorkspace, sourceDir);
+  const absOutDir = targetSourceDir;
+
+  const outDirForConfig = isCompanion
+    ? path.relative(companionWorkspace, targetSourceDir).replace(/\\/g, "/")
+    : (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+  const targetProjectDirForConfig = isCompanion
+    ? path.relative(companionWorkspace, targetProjectDir).replace(/\\/g, "/")
+    : undefined;
+
+  let ignorePatterns = options.ignorePatterns;
+  if (isCompanion && !ignorePatterns) {
+    const relToTarget = path.relative(targetProjectDir, companionWorkspace);
+    if (!relToTarget.startsWith("..") && !path.isAbsolute(relToTarget)) {
+      const topSegment = relToTarget.split(/[/\\]/)[0];
+      if (topSegment) {
+        ignorePatterns = ["node_modules", ".git", "dist", "build", ".ail-build", ".agents", topSegment];
+      }
+    }
+  }
+
+  const discoveredFiles = findIngestableFiles(scanDir, {
     ...options,
-    outDir,
+    dir: scanDir,
+    ignorePatterns,
+    outDir: isIsolated ? outDirForConfig : undefined,
   });
   const totalDiscovered = discoveredFiles.length;
+
+  let existingTargetConfig: any = undefined;
+  if (isCompanion) {
+    try {
+      existingTargetConfig = loadProjectConfig(targetProjectDir);
+    } catch {
+      // ignore
+    }
+  }
+  const detectedLang: TargetLanguage =
+    options.targetLanguage ??
+    existingTargetConfig?.targetLanguage ??
+    detectDominantTargetLanguage(discoveredFiles);
 
   const overwrite = options.overwrite ?? false;
   const emitTrivia = options.emitTrivia ?? true;
@@ -402,12 +519,43 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
   const cpus = os.cpus?.().length ? os.cpus().length : 4;
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? cpus));
 
-  function computeFilePaths(filePath: string): {
+  function computeFilePaths(
+    filePath: string,
+    projectTargetLang: TargetLanguage = detectedLang,
+  ): {
     targetLang: TargetLanguage;
     destAilPath: string;
     destTargetPath: string;
   } {
     const targetLang = detectTargetFromPath(filePath);
+
+    if (isCompanion) {
+      let relWithinSource: string;
+      const isInsideTargetSource =
+        filePath === targetSourceDir ||
+        filePath.startsWith(targetSourceDir + path.sep) ||
+        filePath.startsWith(targetSourceDir + "/");
+
+      if (isInsideTargetSource) {
+        relWithinSource = path.relative(targetSourceDir, filePath).replace(/\\/g, "/");
+      } else {
+        relWithinSource = path.relative(targetProjectDir, filePath).replace(/\\/g, "/");
+      }
+
+      const cleanAilRel = deriveCleanAilRelativePath(
+        relWithinSource,
+        projectTargetLang ?? targetLang,
+      );
+      const destAilPath = path.resolve(absCompanionSourceDir, cleanAilRel);
+      const destTargetPath = filePath;
+
+      return {
+        targetLang,
+        destAilPath,
+        destTargetPath,
+      };
+    }
+
     if (!isIsolated) {
       return {
         targetLang,
@@ -416,7 +564,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
       };
     }
 
-    const relFromProject = path.relative(resolvedDir, filePath).replace(/\\/g, "/");
+    const relFromProject = path.relative(companionWorkspace, filePath).replace(/\\/g, "/");
     let relWithinSource: string;
     if (sourceDir && sourceDir !== "." && relFromProject.startsWith(`${sourceDir}/`)) {
       relWithinSource = relFromProject.slice(sourceDir.length + 1);
@@ -424,7 +572,10 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
       relWithinSource = relFromProject;
     }
 
-    const cleanAilRel = deriveCleanAilRelativePath(relWithinSource, targetLang);
+    const cleanAilRel = deriveCleanAilRelativePath(
+      relWithinSource,
+      projectTargetLang ?? targetLang,
+    );
     const destAilPath = path.resolve(absSourceDir, cleanAilRel);
     const destTargetPath = path.resolve(absOutDir, relWithinSource);
 
@@ -450,15 +601,33 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
   // Handle empty ingestion set
   if (filesToIngest.length === 0) {
-    if (isIsolated && !dryRun) {
-      saveProjectConfig(resolvedDir, {
+    let shieldCreated: string[] = [];
+    if (isCompanion && !dryRun) {
+      saveProjectConfig(companionWorkspace, {
+        mode: "companion",
+        targetProjectDir: targetProjectDirForConfig,
+        sourceDir,
+        outDir: outDirForConfig,
+        targetLanguage: detectedLang,
+        isolated: true,
+      });
+
+      if (options.shield !== false) {
+        const shieldRes = applyCompanionShield(companionWorkspace, {
+          targetProjectDir: targetProjectDirForConfig,
+          outDir: outDirForConfig,
+        });
+        shieldCreated = [...shieldRes.createdFiles, ...shieldRes.modifiedFiles];
+      }
+    } else if (isIsolated && !dryRun) {
+      saveProjectConfig(companionWorkspace, {
         mode: "isolated",
         sourceDir,
-        outDir,
+        outDir: outDirForConfig,
+        targetLanguage: detectedLang,
         isolated: true,
-        ...(options.targetLanguage ? { targetLanguage: options.targetLanguage } : {}),
       });
-      updateIgnoreFilesForIsolatedMode(resolvedDir, outDir);
+      updateIgnoreFilesForIsolatedMode(companionWorkspace, outDirForConfig);
     }
 
     if (options.reporter) {
@@ -473,6 +642,15 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
     }
 
     return {
+      mode: isCompanion ? "companion" : isIsolated ? "isolated" : "side-by-side",
+      targetProjectDir: isCompanion ? targetProjectDir : undefined,
+      companionWorkspaceDir: isCompanion ? companionWorkspace : undefined,
+      configPath: isCompanion ? path.join(companionWorkspace, "ail.config.json") : undefined,
+      agentsMdPath: isCompanion ? path.join(companionWorkspace, "AGENTS.md") : undefined,
+      cursorRulesPath: isCompanion ? path.join(companionWorkspace, ".cursorrules") : undefined,
+      generatedFiles: isCompanion
+        ? [path.join(companionWorkspace, "ail.config.json"), ...shieldCreated]
+        : undefined,
       totalDiscovered,
       totalIngested: 0,
       totalSkipped,
@@ -553,7 +731,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
             const fileDir = path.dirname(filePath);
             if (path.resolve(fileDir) !== absSourceDir && !path.resolve(fileDir).startsWith(absSourceDir)) {
-              cleanEmptyDirs(fileDir, resolvedDir);
+              cleanEmptyDirs(fileDir, companionWorkspace);
             }
           }
         }
@@ -579,15 +757,57 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
 
   const poolResults = await pool.runAll(tasks);
 
-  if (isIsolated && !dryRun) {
-    saveProjectConfig(resolvedDir, {
+  let shieldCreated: string[] = [];
+  if (isCompanion && !dryRun) {
+    saveProjectConfig(companionWorkspace, {
+      mode: "companion",
+      targetProjectDir: targetProjectDirForConfig,
+      sourceDir,
+      outDir: outDirForConfig,
+      targetLanguage: detectedLang,
+      isolated: true,
+    });
+
+    if (options.shield !== false) {
+      const shieldRes = applyCompanionShield(companionWorkspace, {
+        targetProjectDir: targetProjectDirForConfig,
+        outDir: outDirForConfig,
+      });
+      shieldCreated = [...shieldRes.createdFiles, ...shieldRes.modifiedFiles];
+    }
+  } else if (isIsolated && !dryRun) {
+    saveProjectConfig(companionWorkspace, {
       mode: "isolated",
       sourceDir,
-      outDir,
+      outDir: outDirForConfig,
+      targetLanguage: detectedLang,
       isolated: true,
-      ...(options.targetLanguage ? { targetLanguage: options.targetLanguage } : {}),
     });
-    updateIgnoreFilesForIsolatedMode(resolvedDir, outDir);
+    updateIgnoreFilesForIsolatedMode(companionWorkspace, outDirForConfig);
+  }
+
+  let idiomsSynthesized: number | undefined;
+  let idiomTokenSavings: number | undefined;
+
+  if (options.idioms && !dryRun) {
+    const idiomRes = applyProjectIdiomsToDirectory(companionWorkspace, {
+      minOccurrences: options.minIdiomOccurrences,
+      minNetTokenSavings: options.minIdiomSavings,
+    });
+    idiomsSynthesized = idiomRes.synthesizedIdioms;
+    idiomTokenSavings = idiomRes.netTokenSavings;
+
+    if (options.shield !== false) {
+      if (isCompanion) {
+        const shieldRes = applyCompanionShield(companionWorkspace, {
+          targetProjectDir: targetProjectDirForConfig,
+          outDir: outDirForConfig,
+        });
+        shieldCreated = [...shieldCreated, ...shieldRes.createdFiles, ...shieldRes.modifiedFiles];
+      } else {
+        await applyAiShield(companionWorkspace);
+      }
+    }
   }
 
   const results: FileIngestResult[] = poolResults.map((taskRes) => {
@@ -626,6 +846,19 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
   }
 
   return {
+    mode: isCompanion ? "companion" : isIsolated ? "isolated" : "side-by-side",
+    targetProjectDir: isCompanion ? targetProjectDir : undefined,
+    companionWorkspaceDir: isCompanion ? companionWorkspace : undefined,
+    configPath: isCompanion ? path.join(companionWorkspace, "ail.config.json") : undefined,
+    agentsMdPath: isCompanion ? path.join(companionWorkspace, "AGENTS.md") : undefined,
+    cursorRulesPath: isCompanion ? path.join(companionWorkspace, ".cursorrules") : undefined,
+    generatedFiles: isCompanion
+      ? [
+          path.join(companionWorkspace, "ail.config.json"),
+          ...shieldCreated,
+          ...successfulResults.map((r) => r.ailPath),
+        ]
+      : undefined,
     totalDiscovered,
     totalIngested,
     totalSkipped,
@@ -635,10 +868,14 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<I
     cl100kSavingsPct: aggregateSavingsPct,
     durationMs: Math.max(0, performance.now() - startTime),
     results,
+    idiomsSynthesized,
+    idiomTokenSavings,
   };
 }
 
 export const ingestProject = ingestProjectSideBySide;
+export const adoptProjectParallel = ingestProjectSideBySide;
+export const adoptProject = ingestProjectSideBySide;
 
 /**
  * Recursively removes all .ail, .trivia.json, and .uid files from a directory,
@@ -696,12 +933,14 @@ export interface EjectProjectOptions {
 }
 
 export interface EjectProjectResult {
-  mode: "isolated" | "side-by-side";
+  mode: "isolated" | "side-by-side" | "companion";
   restoredFiles: string[];
   removedAilFiles: string[];
+  deletedAilFiles?: string[];
   removedBuildDir?: string;
   unlockedTargets?: number;
   shieldRemoved?: string[];
+  removedShield?: string[];
   shieldReverted?: string[];
 }
 
@@ -717,7 +956,11 @@ export interface EjectProjectResult {
  *    - Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore) removing .ail-build rules
  *    - Removes AI shields and unlocks target files
  *    - Returns { restoredFiles, removedAilFiles, removedBuildDir, ... }
- * 2. Side-by-side mode:
+ * 2. Companion mode:
+ *    - Reverts companion shield, removes ail.config.json in companion workspace
+ *    - Removes .ail files in companion workspace (unless keepAil is true)
+ *    - NEVER deletes or touches the external target project
+ * 3. Side-by-side mode:
  *    - Unlocks target files
  *    - Removes AI shields
  *    - Removes .ail files if removeAil is true and not keepAil
@@ -730,17 +973,43 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
   }
 
   const config = loadProjectConfig(resolvedDir);
+
+  if (config.mode === "companion") {
+    const shieldRes = await removeCompanionShield(resolvedDir);
+    for (const cfgName of ["ail.config.json", ".ailrc"]) {
+      const cfgPath = path.join(resolvedDir, cfgName);
+      if (fs.existsSync(cfgPath)) {
+        try {
+          fs.unlinkSync(cfgPath);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    const removedAilFiles: string[] = [];
+    if (!options.keepAil) {
+      const removed = removeAilAndTriviaFiles(resolvedDir);
+      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
+      removedAilFiles.push(...ailOnly);
+    }
+    removedAilFiles.sort();
+    return {
+      mode: "companion",
+      restoredFiles: [],
+      removedAilFiles,
+      deletedAilFiles: removedAilFiles,
+      shieldRemoved: shieldRes.removedFiles,
+      removedShield: shieldRes.removedFiles,
+      shieldReverted: shieldRes.revertedFiles,
+    };
+  }
+
   const detectedOutDir = (options.outDir ?? config.outDir ?? ".ail-build")
     .replace(/^\.\/|^\.\\/, "")
     .replace(/[/\\]+$/, "");
   const absDetectedOutDir = path.resolve(resolvedDir, detectedOutDir);
 
-  const isIsolated = Boolean(
-    options.fromBuild ||
-      config.mode === "isolated" ||
-      config.isolated ||
-      fs.existsSync(absDetectedOutDir),
-  );
+  const isIsolated = Boolean(options.fromBuild) || config.mode === "isolated";
 
   const restoredFiles: string[] = [];
   const removedAilFiles: string[] = [];
@@ -755,8 +1024,15 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
     const absSourceDir = path.resolve(resolvedDir, sourceDir);
     const absOutDir = absDetectedOutDir;
 
+    const isSafeOutDir =
+      absOutDir !== absSourceDir &&
+      !absSourceDir.startsWith(absOutDir + path.sep) &&
+      absOutDir !== resolvedDir &&
+      absOutDir.startsWith(resolvedDir + path.sep) &&
+      !["src", "lib", "app", ".git", "node_modules"].includes(path.basename(absOutDir));
+
     // 1. Identify and restore target files from outDir back into sourceDir
-    if (fs.existsSync(absOutDir)) {
+    if (fs.existsSync(absOutDir) && isSafeOutDir) {
       function scanTargetFiles(cur: string): string[] {
         const found: string[] = [];
         if (!fs.existsSync(cur)) return found;
@@ -798,23 +1074,27 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
       }
 
       // 2. Remove outDir (.ail-build/)
-      try {
-        fs.rmSync(absOutDir, { recursive: true, force: true });
-        removedBuildDir = absOutDir;
-      } catch {
-        // Unlock files inside outDir and retry if needed
+      if (isSafeOutDir) {
         try {
-          for (const f of filesToRestore) {
-            try {
-              fs.chmodSync(f, 0o644);
-            } catch {
-              // ignore
-            }
-          }
           fs.rmSync(absOutDir, { recursive: true, force: true });
           removedBuildDir = absOutDir;
         } catch {
-          // ignore
+          // Unlock files inside outDir and retry if needed
+          try {
+            for (const f of filesToRestore) {
+              try {
+                fs.chmodSync(f, 0o644);
+              } catch {
+                // ignore
+              }
+            }
+            if (isSafeOutDir) {
+              fs.rmSync(absOutDir, { recursive: true, force: true });
+              removedBuildDir = absOutDir;
+            }
+          } catch {
+            // ignore
+          }
         }
       }
     }

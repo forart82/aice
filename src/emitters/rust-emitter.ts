@@ -9,16 +9,20 @@
 import type {
   Block,
   CallExpr,
+  ClassDecl,
+  ConstDecl,
   Expr,
   FunctionDecl,
   ImportDecl,
   MatchStmt,
+  MethodDecl,
   Module,
   ModuleItem,
   Pattern,
   Statement,
   TypeDecl,
   TypeExpr,
+  VarDecl,
 } from "../core/ast.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
@@ -62,6 +66,16 @@ export class RustEmitter {
             });
           }
         }
+      } else if (item.kind === "ClassDecl") {
+        hasStructs = true;
+        const fieldNames: string[] = [];
+        if (item.primaryConstructor) {
+          for (const p of item.primaryConstructor) fieldNames.push(p.name);
+        }
+        if (item.properties) {
+          for (const p of item.properties) fieldNames.push(p.name);
+        }
+        this.structTypes.set(item.name, fieldNames);
       }
     }
 
@@ -85,6 +99,19 @@ export class RustEmitter {
         if (item.fields) {
           for (const f of item.fields) checkType(f.typeAnnotation);
         }
+      } else if (item.kind === "ClassDecl") {
+        if (item.primaryConstructor) {
+          for (const p of item.primaryConstructor) checkType(p.typeAnnotation);
+        }
+        if (item.properties) {
+          for (const p of item.properties) checkType(p.typeAnnotation);
+        }
+        for (const m of item.methods) {
+          for (const p of m.params) checkType(p.typeAnnotation);
+          checkType(m.returnType);
+        }
+      } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
+        checkType(item.typeAnnotation);
       } else if (item.kind === "FunctionDecl") {
         for (const p of item.params) if (p.typeAnnotation) checkType(p.typeAnnotation);
         checkType(item.returnType);
@@ -138,6 +165,15 @@ export class RustEmitter {
       case "TypeDecl":
         this.emitTypeDecl(item);
         break;
+      case "ClassDecl":
+        this.emitClassDecl(item);
+        break;
+      case "ConstDecl":
+        this.emitConstDecl(item);
+        break;
+      case "VarDecl":
+        this.emitVarDecl(item);
+        break;
       case "FunctionDecl":
         this.emitFunctionDecl(item);
         break;
@@ -151,6 +187,20 @@ export class RustEmitter {
     this.ctx.emitLeadingTrivia(nodeId);
 
     if (t.aliasType) {
+      if (t.aliasType.kind === "RecordType") {
+        this.ctx.writeLine("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]");
+        this.ctx.writeLine(`pub struct ${t.name} {`);
+        this.ctx.indent();
+        for (const f of t.aliasType.fields) {
+          this.ctx.writeLine(
+            `pub ${this.toSnakeCase(f.name)}: ${this.emitTypeExpr(f.type)},`,
+          );
+        }
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+        this.ctx.emitTrailingTrivia(nodeId);
+        return;
+      }
       const typeStr = this.emitTypeExpr(t.aliasType);
       this.ctx.writeLine(`pub type ${t.name} = ${typeStr};`);
       this.ctx.emitTrailingTrivia(nodeId);
@@ -206,6 +256,184 @@ export class RustEmitter {
       this.ctx.writeLine("}");
       this.ctx.emitTrailingTrivia(nodeId);
     }
+  }
+
+  private inferRustType(val: Expr): string {
+    if (val.kind === "LiteralExpr") {
+      if (val.literalKind === "string") return "&str";
+      if (val.literalKind === "boolean") return "bool";
+      if (val.literalKind === "number") {
+        return Number.isInteger(val.value) ? "i64" : "f64";
+      }
+    }
+    return "i64";
+  }
+
+  private emitConstDecl(c: ConstDecl): void {
+    const nodeId = `const:${c.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+    const name = c.name.toUpperCase() === c.name ? c.name : this.toSnakeCase(c.name).toUpperCase();
+    const typeStr = c.typeAnnotation ? this.emitTypeExpr(c.typeAnnotation) : this.inferRustType(c.value);
+    const valStr =
+      typeStr === "&str" && c.value.kind === "LiteralExpr" && c.value.literalKind === "string"
+        ? JSON.stringify(c.value.value)
+        : this.emitExpr(c.value);
+    this.ctx.writeLine(`pub const ${name}: ${typeStr} = ${valStr};`);
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private emitVarDecl(v: VarDecl): void {
+    const nodeId = `var:${v.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+    const name = v.name.toUpperCase() === v.name ? v.name : this.toSnakeCase(v.name).toUpperCase();
+    const typeStr = v.typeAnnotation ? this.emitTypeExpr(v.typeAnnotation) : this.inferRustType(v.value);
+    const valStr =
+      typeStr === "&str" && v.value.kind === "LiteralExpr" && v.value.literalKind === "string"
+        ? JSON.stringify(v.value.value)
+        : this.emitExpr(v.value);
+    if (v.isMut) {
+      this.ctx.writeLine(`pub static mut ${name}: ${typeStr} = ${valStr};`);
+    } else {
+      this.ctx.writeLine(`pub const ${name}: ${typeStr} = ${valStr};`);
+    }
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private emitClassDecl(cls: ClassDecl): void {
+    const nodeId = `class:${cls.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+
+    const fields: { name: string; typeAnnotation?: TypeExpr }[] = [];
+    const seen = new Set<string>();
+    if (cls.primaryConstructor) {
+      for (const p of cls.primaryConstructor) {
+        if (!seen.has(p.name)) {
+          seen.add(p.name);
+          fields.push({ name: p.name, typeAnnotation: p.typeAnnotation ?? undefined });
+        }
+      }
+    }
+    if (cls.properties) {
+      for (const p of cls.properties) {
+        if (!seen.has(p.name)) {
+          seen.add(p.name);
+          fields.push({ name: p.name, typeAnnotation: p.typeAnnotation ?? undefined });
+        }
+      }
+    }
+
+    this.ctx.writeLine("#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]");
+    this.ctx.writeLine(`pub struct ${cls.name} {`);
+    this.ctx.indent();
+    for (const f of fields) {
+      const fieldNodeId = `field:${cls.name}.${f.name}`;
+      this.ctx.emitLeadingTrivia(fieldNodeId);
+      const fieldName = this.toSnakeCase(f.name);
+      const typeStr = f.typeAnnotation ? this.emitTypeExpr(f.typeAnnotation) : "()";
+      this.ctx.writeLine(`pub ${fieldName}: ${typeStr},`);
+      this.ctx.emitTrailingTrivia(fieldNodeId);
+    }
+    this.ctx.dedent();
+    this.ctx.writeLine("}");
+
+    this.ctx.writeLine();
+    this.ctx.writeLine(`impl ${cls.name} {`);
+    this.ctx.indent();
+
+    const ctorMethod = cls.methods.find(
+      (m) =>
+        m.name === "constructor" ||
+        m.name === "new" ||
+        m.name === `New${cls.name}` ||
+        m.name === cls.name,
+    );
+
+    if (cls.primaryConstructor || ctorMethod || fields.length > 0) {
+      const ctorParams = (ctorMethod ? ctorMethod.params : (cls.primaryConstructor ?? fields))
+        .map(
+          (f) =>
+            `${this.toSnakeCase(f.name)}: ${f.typeAnnotation ? this.emitTypeExpr(f.typeAnnotation) : "_"}`,
+        )
+        .join(", ");
+      this.ctx.writeLine(`pub fn new(${ctorParams}) -> Self {`);
+      this.ctx.indent();
+      const fieldAssigns = fields.map((f) => this.toSnakeCase(f.name)).join(", ");
+      this.ctx.writeLine(`Self { ${fieldAssigns} }`);
+      this.ctx.dedent();
+      this.ctx.writeLine("}");
+    }
+
+    const nonCtorMethods = cls.methods.filter((m) => m !== ctorMethod);
+    for (let i = 0; i < nonCtorMethods.length; i++) {
+      const m = nonCtorMethods[i];
+      if (cls.primaryConstructor || ctorMethod || fields.length > 0 || i > 0) {
+        this.ctx.writeLine();
+      }
+      const methodNodeId = `method:${cls.name}.${m.name}`;
+      this.ctx.emitLeadingTrivia(methodNodeId);
+      const mName = this.toSnakeCase(m.name);
+      const paramsList: string[] = [];
+      if (!m.isStatic) {
+        const isMutating = this.isMethodMutating(m);
+        paramsList.push(isMutating ? "&mut self" : "&self");
+      }
+      for (const p of m.params) {
+        if (p.name === "self" || p.name === "this") continue;
+        const pType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "_";
+        paramsList.push(`${this.toSnakeCase(p.name)}: ${pType}`);
+      }
+      const paramsStr = paramsList.join(", ");
+      const retType = m.returnType ? this.emitTypeExpr(m.returnType) : null;
+      const retStr = retType && retType !== "()" && retType !== "void" ? ` -> ${retType}` : "";
+
+      this.ctx.writeLine(`pub fn ${mName}(${paramsStr})${retStr} {`);
+      this.ctx.indent();
+      if (m.isExpressionBodied) {
+        const exprCode = this.emitExpr(m.body as Expr);
+        this.ctx.writeLine(exprCode);
+      } else if (m.body.kind === "Block") {
+        this.emitBlock(m.body, !!retStr);
+      }
+      this.ctx.dedent();
+      this.ctx.writeLine("}");
+      this.ctx.emitTrailingTrivia(methodNodeId);
+    }
+
+    this.ctx.dedent();
+    this.ctx.writeLine("}");
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private isMethodMutating(m: MethodDecl): boolean {
+    const check = (node: any): boolean => {
+      if (!node) return false;
+      if (node.kind === "AssignStmt" || node.kind === "AssignExpr") {
+        const target = node.target;
+        if (
+          target &&
+          target.kind === "MemberAccessExpr" &&
+          target.object &&
+          target.object.kind === "IdentifierExpr" &&
+          (target.object.name === "this" || target.object.name === "self")
+        ) {
+          return true;
+        }
+      }
+      for (const key of Object.keys(node)) {
+        const val = node[key];
+        if (val && typeof val === "object") {
+          if (Array.isArray(val)) {
+            for (const item of val) {
+              if (check(item)) return true;
+            }
+          } else {
+            if (check(val)) return true;
+          }
+        }
+      }
+      return false;
+    };
+    return check(m.body);
   }
 
   private emitFunctionDecl(fn: FunctionDecl): void {
@@ -427,6 +655,9 @@ export class RustEmitter {
         return `format!("${fmt}", ${args})`;
       }
       case "IdentifierExpr": {
+        if (expr.name === "this" || expr.name === "self") {
+          return "self";
+        }
         const v = this.enumVariants.get(expr.name);
         if (v) {
           return `${v.parentEnum}::${expr.name}`;
@@ -614,11 +845,14 @@ export class RustEmitter {
             return "()";
         }
       case "NamedType": {
+        let name = typeExpr.name;
+        if (name === "Map") name = "HashMap";
+        else if (name === "List") name = "Vec";
         if (typeExpr.typeArgs && typeExpr.typeArgs.length > 0) {
           const args = typeExpr.typeArgs.map((a) => this.emitTypeExpr(a)).join(", ");
-          return `${typeExpr.name}<${args}>`;
+          return `${name}<${args}>`;
         }
-        return typeExpr.name;
+        return name;
       }
       case "ArrayType":
         return `Vec<${this.emitTypeExpr(typeExpr.elementType)}>`;

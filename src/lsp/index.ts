@@ -8,11 +8,16 @@
 export * from "./analyzer.js";
 export * from "./jsonrpc.js";
 export type {
+  CodeAction,
+  CodeActionParams,
   CompletionItem,
   CompletionParams,
   Diagnostic,
   DidChangeTextDocumentParams,
   DidOpenTextDocumentParams,
+  DocumentFormattingParams,
+  DocumentSymbol,
+  DocumentSymbolParams,
   Hover,
   HoverParams,
   Location,
@@ -23,10 +28,12 @@ export type {
   TextDocumentContentChangeEvent,
   TextDocumentIdentifier,
   TextDocumentItem,
+  TextEdit,
   VersionedTextDocumentIdentifier,
 } from "./protocol.js";
 export {
   CompletionItemKind,
   DiagnosticSeverity,
+  SymbolKind,
 } from "./protocol.js";
 export * from "./server.js";

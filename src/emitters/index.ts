@@ -4,6 +4,8 @@
 
 import type { Module } from "../core/ast.js";
 import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
+import { findProjectRoot, loadProjectConfig, type ProjectIdiomDefinition } from "../config/project-config.js";
+import { expandModuleIdioms } from "../idioms/index.js";
 import { CppEmitter } from "./cpp-emitter.js";
 import { CSharpEmitter } from "./csharp-emitter.js";
 import { CssEmitter } from "./css-emitter.js";
@@ -37,6 +39,10 @@ export * from "./yaml-emitter.js";
 // Convenience aliases
 export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter, KotlinEmitter as KtEmitter };
 
+export interface EmitOptions extends EmitterOptions {
+  idioms?: Record<string, ProjectIdiomDefinition>;
+}
+
 /**
  * Emits target source code from an AIL Module AST.
  * If target is omitted, automatically infers target from mod.path.
@@ -44,12 +50,35 @@ export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter, KotlinEmitt
 export function emitTarget(
   mod: Module,
   target?: TargetLanguage,
-  options: EmitterOptions = {},
+  options: EmitOptions = {},
 ): string {
+  let idioms = options.idioms;
   const fileCandidate =
     mod?.span?.file && mod.span.file !== "<anonymous>"
       ? mod.span.file
       : (mod?.path ?? "<anonymous>");
+
+  if (
+    idioms === undefined &&
+    fileCandidate &&
+    !fileCandidate.startsWith("<") &&
+    (fileCandidate.includes("/") || fileCandidate.includes("\\"))
+  ) {
+    try {
+      const root = findProjectRoot(fileCandidate);
+      const config = loadProjectConfig(root);
+      if (config.idioms && Object.keys(config.idioms).length > 0) {
+        idioms = config.idioms;
+      }
+    } catch {
+      // Ignore config resolution error in emitter fallback
+    }
+  }
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    mod = expandModuleIdioms(mod, idioms);
+  }
+
   const chosenTarget = target ?? detectTargetFromPath(fileCandidate);
   switch (chosenTarget) {
     case "typescript":

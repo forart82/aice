@@ -103,19 +103,67 @@ export function generateCandidateRepair(
   const originalLine = lines[lineIdx];
   if (originalLine === undefined) return undefined;
 
-  // 1. Immutable variable assignment: let x = -> let mut x =
+  // 0. JS/Python hallucinations: === or !== or null
+  if (originalLine.includes("===")) {
+    const patchedLine = originalLine.replace(/===/g, "==");
+    const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
+    return {
+      description: "Replace JS strict equality '===' with AIL equality '=='",
+      patch,
+    };
+  }
+  if (originalLine.includes("!==")) {
+    const patchedLine = originalLine.replace(/!==/g, "!=");
+    const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
+    return {
+      description: "Replace JS strict inequality '!==' with AIL inequality '!='",
+      patch,
+    };
+  }
+  if (
+    (code === "AIL_E2008_UNDECLARED_VARIABLE" && message.includes("'null'")) ||
+    (/\bnull\b/.test(originalLine) && (code === "AIL_E2008_UNDECLARED_VARIABLE" || code.startsWith("AIL_E1")))
+  ) {
+    const patchedLine = originalLine.replace(/\bnull\b/g, "nil");
+    const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
+    return {
+      description: "Replace 'null' with canonical AIL 'nil'",
+      patch,
+    };
+  }
+
+  // 1. Immutable variable assignment: let x = -> let mut x = (also handles const and :=)
   if (code === "AIL_E2005_IMMUTABLE_ASSIGNMENT") {
     const varNameMatch = message.match(/'([^']+)'/);
     const varName = varNameMatch ? varNameMatch[1] : undefined;
     if (varName) {
-      for (let i = lineIdx - 1; i >= 0; i--) {
+      for (let i = lineIdx; i >= 0; i--) {
         const declLine = lines[i];
-        const letPattern = new RegExp(`(\\b)let\\s+${varName}\\b`);
+        const escapedVar = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const letPattern = new RegExp(`(^|[^a-zA-Z0-9_$])let\\s+${escapedVar}(?![a-zA-Z0-9_$])`);
+        const constPattern = new RegExp(`(^|[^a-zA-Z0-9_$])const\\s+${escapedVar}(?![a-zA-Z0-9_$])`);
+        const walrusPattern = new RegExp(`(^|[^a-zA-Z0-9_$])${escapedVar}\\s*:=`);
         if (letPattern.test(declLine)) {
-          const patchedLine = declLine.replace(letPattern, `$1let mut ${varName}`);
+          const patchedLine = declLine.replace(letPattern, (_, prefix) => `${prefix}let mut ${varName}`);
           const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
           return {
             description: `Change declaration of '${varName}' to mutable with 'let mut'`,
+            patch,
+          };
+        }
+        if (constPattern.test(declLine)) {
+          const patchedLine = declLine.replace(constPattern, (_, prefix) => `${prefix}let mut ${varName}`);
+          const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
+          return {
+            description: `Change declaration of '${varName}' to mutable with 'let mut'`,
+            patch,
+          };
+        }
+        if (walrusPattern.test(declLine)) {
+          const patchedLine = declLine.replace(walrusPattern, (_, prefix) => `${prefix}let mut ${varName} =`);
+          const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
+          return {
+            description: `Change short assignment of '${varName}' to mutable with 'let mut'`,
             patch,
           };
         }
@@ -136,9 +184,14 @@ export function generateCandidateRepair(
   // 3. Postfix ? missing or unhandled Result
   if (
     code === "AIL_E1004_UNHANDLED_RESULT" ||
-    (message.includes("Result") && message.includes("unpacked"))
+    (message.includes("Result") && (code === "AIL_E2002_TYPE_MISMATCH" || message.includes("unpacked")))
   ) {
-    const patchedLine = `${originalLine.trimEnd()}?`;
+    let patchedLine: string;
+    if (originalLine.trimEnd().endsWith(";")) {
+      patchedLine = originalLine.replace(/;\s*$/, "?;");
+    } else {
+      patchedLine = `${originalLine.trimEnd()}?`;
+    }
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
     return {
       description: "Unpack fallible Result with postfix '?' operator",
@@ -146,12 +199,24 @@ export function generateCandidateRepair(
     };
   }
 
-  // 4. Non-boolean conditional: if items: -> if not items.isEmpty():
+  // 4. Non-boolean conditional: if items: -> if not items.isEmpty(): or if count != 0:
   if (code === "AIL_E2001_NON_BOOLEAN_CONDITION") {
-    const condMatch = originalLine.match(/if\s+([^:]+):/);
+    let condMatch = originalLine.match(/if\s+([^:]+):/);
+    let withBrace = false;
+    if (!condMatch) {
+      condMatch = originalLine.match(/if\s+([^{:]+)\s*\{/);
+      withBrace = Boolean(condMatch);
+    }
     if (condMatch) {
       const cond = condMatch[1].trim();
-      const patchedLine = originalLine.replace(condMatch[0], `if not ${cond}.isEmpty():`);
+      let replacementCond: string;
+      if (/\bgot\s+['"](int|float|number)['"]/.test(message)) {
+        replacementCond = `${cond} != 0`;
+      } else {
+        replacementCond = `not ${cond}.isEmpty()`;
+      }
+      const replHeader = withBrace ? `if ${replacementCond}: {` : `if ${replacementCond}:`;
+      const patchedLine = originalLine.replace(condMatch[0], replHeader);
       const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
       return {
         description: "Replace implicit truthiness check with strict boolean predicate",

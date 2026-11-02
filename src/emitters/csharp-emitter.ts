@@ -454,6 +454,62 @@ export class CSharpEmitter {
         this.ctx.writeLine("}");
         break;
       }
+      case "MatchStmt": {
+        const targetStr = this.emitExpr(stmt.target);
+        this.ctx.writeLine(`switch (${targetStr})`);
+        this.ctx.writeLine("{");
+        for (const c of stmt.cases) {
+          if (c.pattern.kind === "WildcardPattern") {
+            this.ctx.writeLine("default:");
+          } else if (c.pattern.kind === "LiteralPattern") {
+            this.ctx.writeLine(`case ${this.emitExpr(c.pattern.value)}:`);
+          } else {
+            this.ctx.writeLine("default:");
+          }
+          this.ctx.writeLine("{");
+          this.ctx.indent();
+          if (c.body.kind === "Block") {
+            this.emitBlock(c.body, isImplicitReturn);
+            const lastStmt =
+              c.body.statements.length > 0
+                ? c.body.statements[c.body.statements.length - 1]
+                : null;
+            if (
+              !lastStmt ||
+              (lastStmt.kind !== "ReturnStmt" && lastStmt.kind !== "BreakStmt")
+            ) {
+              this.ctx.writeLine("break;");
+            }
+          } else if (isImplicitReturn) {
+            this.ctx.writeLine(`return ${this.emitExpr(c.body)};`);
+          } else {
+            this.ctx.writeLine(`${this.emitExpr(c.body)};`);
+            this.ctx.writeLine("break;");
+          }
+          this.ctx.dedent();
+          this.ctx.writeLine("}");
+        }
+        this.ctx.writeLine("}");
+        break;
+      }
+      case "TryStmt": {
+        this.ctx.writeLine("try");
+        this.ctx.writeLine("{");
+        this.ctx.indent();
+        this.emitBlock(stmt.tryBlock, isImplicitReturn);
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+        const param = stmt.catchParam ?? "err";
+        this.ctx.writeLine(`catch (Exception ${param})`);
+        this.ctx.writeLine("{");
+        if (stmt.catchBlock) {
+          this.ctx.indent();
+          this.emitBlock(stmt.catchBlock, isImplicitReturn);
+          this.ctx.dedent();
+        }
+        this.ctx.writeLine("}");
+        break;
+      }
       case "BreakStmt": {
         this.ctx.writeLine("break;");
         break;

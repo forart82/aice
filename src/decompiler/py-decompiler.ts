@@ -2050,11 +2050,23 @@ export class PythonDecompiler {
           };
           continue;
         }
+        const indices: Expr[] = startIndex ? [startIndex] : [];
+        while (this.check("COMMA")) {
+          this.advance();
+          if (!this.check("RBRACKET")) {
+            indices.push(this.parseExpr());
+          }
+        }
         const rBracket = this.consume("RBRACKET");
+        const finalIndex: Expr = indices.length === 1 ? indices[0] : {
+          kind: "ArrayLiteralExpr",
+          elements: indices,
+          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+        };
         expr = {
           kind: "IndexExpr",
           object: expr,
-          index: startIndex!,
+          index: finalIndex,
           span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
         };
         continue;

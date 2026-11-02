@@ -1327,7 +1327,8 @@ export class CSharpDecompiler {
           let elseBranch: Block | null = null;
 
           if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+            const startAt = rest === "{" ? lineIdx : lineIdx + 1;
+            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             thenStatements = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {
@@ -1387,7 +1388,8 @@ export class CSharpDecompiler {
                 const elifRest = elifLine.slice(elifParen.endIndex + 1).trim();
                 let elifStmts: Statement[] = [];
                 if (elifRest === "{" || (!elifRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-                  const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+                  const startAt = elifRest === "{" ? lineIdx : lineIdx + 1;
+                  const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
                   elifStmts = this.parseCSharpBlock(bodyLines);
                   lineIdx = nextIdx - 1;
                 } else if (elifRest.startsWith("{")) {
@@ -1411,7 +1413,8 @@ export class CSharpDecompiler {
               const elseRest = nextTrimmed.slice(4).trim();
               let elseStmts: Statement[] = [];
               if (elseRest === "{" || (!elseRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-                const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+                const startAt = elseRest === "{" ? lineIdx : lineIdx + 1;
+                const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
                 elseStmts = this.parseCSharpBlock(bodyLines);
                 lineIdx = nextIdx - 1;
               } else if (elseRest.startsWith("{")) {
@@ -1466,7 +1469,8 @@ export class CSharpDecompiler {
           const rest = whileLine.slice(parenRes.endIndex + 1).trim();
           let bodyStmts: Statement[] = [];
           if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+            const startAt = rest === "{" ? lineIdx : lineIdx + 1;
+            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {
@@ -1510,7 +1514,8 @@ export class CSharpDecompiler {
             let lineIdx = i;
             let bodyStmts: Statement[] = [];
             if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-              const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+              const startAt = rest === "{" ? lineIdx : lineIdx + 1;
+              const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
               bodyStmts = this.parseCSharpBlock(bodyLines);
               lineIdx = nextIdx - 1;
             } else if (rest.startsWith("{")) {
@@ -1551,7 +1556,8 @@ export class CSharpDecompiler {
           let lineIdx = i;
           let bodyStmts: Statement[] = [];
           if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
+            const startAt = rest === "{" ? lineIdx : lineIdx + 1;
+            const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {

@@ -120,3 +120,65 @@ export interface CompletionParams {
   textDocument: TextDocumentIdentifier;
   position: Position;
 }
+
+export enum SymbolKind {
+  File = 1,
+  Module = 2,
+  Namespace = 3,
+  Class = 5,
+  Method = 6,
+  Property = 7,
+  Field = 8,
+  Constructor = 9,
+  Enum = 10,
+  Interface = 11,
+  Function = 12,
+  Variable = 13,
+  Constant = 14,
+  Struct = 23,
+  TypeParameter = 26,
+}
+
+export interface DocumentSymbol {
+  name: string;
+  detail?: string;
+  kind: SymbolKind;
+  range: Range;
+  selectionRange: Range;
+  children?: DocumentSymbol[];
+}
+
+export interface DocumentSymbolParams {
+  textDocument: TextDocumentIdentifier;
+}
+
+export interface TextEdit {
+  range: Range;
+  newText: string;
+}
+
+export interface DocumentFormattingParams {
+  textDocument: TextDocumentIdentifier;
+  options?: {
+    tabSize?: number;
+    insertSpaces?: boolean;
+  };
+}
+
+export interface CodeActionParams {
+  textDocument: TextDocumentIdentifier;
+  range: Range;
+  context: {
+    diagnostics: Diagnostic[];
+  };
+}
+
+export interface CodeAction {
+  title: string;
+  kind?: string;
+  diagnostics?: Diagnostic[];
+  isPreferred?: boolean;
+  edit?: {
+    changes: Record<string, TextEdit[]>;
+  };
+}

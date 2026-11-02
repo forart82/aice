@@ -203,13 +203,13 @@ export function getMethodType(receiver: Type, method: string): Type | null {
       case "append":
         return makeFunctionType([{ name: "item", type: elemType }], receiver);
       case "push":
-        return makeFunctionType([{ name: "item", type: elemType }], TYPE_INT);
+        return makeFunctionType([{ name: "item", type: elemType, rest: true }], TYPE_INT);
       case "pop":
         return makeFunctionType([], makeOptionType(elemType));
       case "shift":
         return makeFunctionType([], makeOptionType(elemType));
       case "unshift":
-        return makeFunctionType([{ name: "item", type: elemType }], TYPE_INT);
+        return makeFunctionType([{ name: "item", type: elemType, rest: true }], TYPE_INT);
       case "clear":
         return makeFunctionType([], TYPE_VOID);
       case "indexOf":

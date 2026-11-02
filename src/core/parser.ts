@@ -1286,20 +1286,23 @@ export class Parser {
               span: mergeSpans(tok.span, endSpan),
             };
           }
-          this.advance(); // consume '|'
-          const right = this.parseBaseTypeExpr();
-          const leftName = base.kind === "NamedType" ? base.name : "any";
-          const rightName =
-            right.kind === "NamedType"
-              ? right.name
-              : right.kind === "PrimitiveType"
-                ? right.primitive
-                : "any";
-          const unionType: TypeExpr = {
-            kind: "NamedType",
-            name: `${leftName} | ${rightName}`,
-            span: mergeSpans(base.span, right.span),
-          };
+          let unionType: TypeExpr = base;
+          while (this.check("PIPE")) {
+            this.advance(); // consume '|'
+            const right = this.parseBaseTypeExpr();
+            const getTypeName = (t: TypeExpr): string => {
+              if (t.kind === "NamedType") return t.name;
+              if (t.kind === "PrimitiveType") return t.primitive;
+              return "any";
+            };
+            const leftName = getTypeName(unionType);
+            const rightName = getTypeName(right);
+            unionType = {
+              kind: "NamedType",
+              name: `${leftName} | ${rightName}`,
+              span: mergeSpans(unionType.span, right.span),
+            };
+          }
           const fields: { name: string; type: TypeExpr; isOptional?: boolean; span: Span }[] = [
             {
               name: idToken.value,
@@ -1409,7 +1412,7 @@ export class Parser {
         if (isRest) {
           paramTypes.push(pName ? `...${pName}: ${ptName}` : `...${ptName}`);
         } else {
-          paramTypes.push(ptName);
+          paramTypes.push(pName ? `${pName}: ${ptName}` : ptName);
         }
         if (this.check("COMMA")) this.advance();
       }
@@ -1488,8 +1491,13 @@ export class Parser {
     throw new ParserError(`Unexpected token '${tok.kind}' in type expression`, tok.span);
   }
 
-  private parseParamDecl(isClosure = false): ParamDecl {
+  private parseParamDecl(isClosure = false, allowUntyped = false): ParamDecl {
     const pSpan = this.current().span;
+    let isRest = false;
+    if (this.check("ELLIPSIS")) {
+      this.advance();
+      isRest = true;
+    }
     let pName: string;
 
     if (this.check("LBRACKET")) {
@@ -1568,12 +1576,19 @@ export class Parser {
       pType = this.parseTypeExpr();
     } else if (
       !isClosure &&
+      !allowUntyped &&
       !pName.startsWith("[") &&
       !pName.startsWith("{") &&
       !this.check("EQUAL")
     ) {
       this.consume("COLON", "Expected ':' after parameter name");
       pType = this.parseTypeExpr();
+    } else if (allowUntyped) {
+      pType = {
+        kind: "NamedType",
+        name: "any",
+        span: pSpan,
+      };
     }
 
     let defaultValue: Expr | undefined;
@@ -1587,6 +1602,7 @@ export class Parser {
       typeAnnotation: pType,
       defaultValue,
       isOptional: isOptional ? true : undefined,
+      isRest: isRest ? true : undefined,
       span: mergeSpans(
         pSpan,
         defaultValue ? defaultValue.span : pType ? pType.span : this.previous().span,
@@ -1712,6 +1728,11 @@ export class Parser {
           isMut = true;
           this.advance();
         }
+        let isRest = false;
+        if (this.check("ELLIPSIS")) {
+          this.advance();
+          isRest = true;
+        }
         const pName = this.parseContextualIdentOrString("Expected parameter name");
         let isOptional = false;
         if (this.check("QUESTION")) {
@@ -1738,6 +1759,7 @@ export class Parser {
           typeAnnotation: pType ?? { kind: "NamedType", name: "any", span: pSpan },
           defaultValue,
           isOptional: isOptional ? true : undefined,
+          ...(isRest ? { isRest: true } : {}),
           isPub,
           isReadonly,
           isMut,
@@ -2031,40 +2053,7 @@ export class Parser {
     if (this.check("LPAREN")) {
       this.advance(); // consume '('
       while (!this.check("RPAREN") && !this.check("EOF")) {
-        const pSpan = this.current().span;
-        const pName = this.parseContextualIdentOrString("Expected parameter name");
-        let isOptional = false;
-        if (this.check("QUESTION")) {
-          this.advance();
-          isOptional = true;
-        }
-        let pType: TypeExpr = {
-          kind: "NamedType",
-          name: "any",
-          span: pSpan,
-        };
-        if (this.check("COLON")) {
-          this.advance();
-          pType = this.parseTypeExpr();
-        }
-
-        let defaultValue: Expr | undefined;
-        if (this.check("EQUAL")) {
-          this.advance();
-          defaultValue = this.parseExpr();
-        }
-
-        params.push({
-          name: pName,
-          typeAnnotation: pType,
-          defaultValue,
-          isOptional: isOptional ? true : undefined,
-          span: mergeSpans(
-            pSpan,
-            defaultValue ? defaultValue.span : pType ? pType.span : this.previous().span,
-          ),
-        });
-
+        params.push(this.parseParamDecl(false, true));
         if (this.check("COMMA")) {
           this.advance();
         } else {
@@ -3302,7 +3291,7 @@ export class Parser {
       };
     }
 
-    if (tok.kind === "IDENT" || this.isContextualIdentifier(tok)) {
+    if (tok.kind === "IDENT" || tok.kind === "IMPORT" || this.isContextualIdentifier(tok)) {
       this.advance();
       return {
         kind: "IdentifierExpr",
@@ -3505,7 +3494,26 @@ export class Parser {
       };
     }
 
-    // 2. Function Call: expr(arg1, arg2)
+    // 2. Optional Function Call: expr?.(arg1, arg2)
+    if (tok.kind === "QUESTION_DOT" && this.peek(1).kind === "LPAREN") {
+      this.advance(); // consume '?.'
+      this.advance(); // consume '('
+      const args: Expr[] = [];
+      while (!this.check("RPAREN") && !this.check("EOF")) {
+        args.push(this.parseExpr());
+        if (this.check("COMMA")) this.advance();
+      }
+      const endSpan = this.consume("RPAREN").span;
+      return {
+        kind: "CallExpr",
+        callee: left,
+        args,
+        isOptional: true,
+        span: mergeSpans(left.span, endSpan),
+      };
+    }
+
+    // 2b. Function Call: expr(arg1, arg2)
     if (tok.kind === "LPAREN") {
       this.advance();
       const args: Expr[] = [];
@@ -3566,7 +3574,7 @@ export class Parser {
       tok.kind === "STAR_STAR_EQUAL"
     ) {
       const op = this.advance().value as AssignOp;
-      const value = this.parseExpr(Precedence.ASSIGN);
+      const value = this.parseExpr(Precedence.ASSIGN - 1);
       return {
         kind: "AssignExpr",
         target: left,

@@ -27,9 +27,10 @@ import {
   type TargetLanguage,
 } from "../emitters/index.js";
 import { safeWriteTargetFile } from "../shield/index.js";
+import { expandModuleIdioms } from "../idioms/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { buildReportFromError, formatDiagnosticText } from "../typechecker/diagnostics.js";
-import { formatSymbolAwareError } from "./symbol-error-formatter.js";
+import { formatSymbolAwareError, scrubTargetFileReferences } from "./symbol-error-formatter.js";
 
 export type HarnessType = "bun" | "vitest" | "node" | "npm" | "auto";
 
@@ -195,36 +196,50 @@ export function compileAilFile(
   }
 
   const source = fs.readFileSync(ailPath, "utf-8");
-  const { ast: mod, trivia } = parseWithTrivia(source, ailPath);
-  const tc = new TypeChecker();
-  tc.checkModule(mod);
-
-  const base = path.basename(ailPath);
-  const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-  const innerExt = path.extname(withoutAil).toLowerCase();
-
-  let targetLang: TargetLanguage;
-  if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-    targetLang = detectTargetFromPath(ailPath);
-  } else {
-    const targetExt = path.extname(targetPath).toLowerCase();
-    if (targetExt && KNOWN_TARGET_EXTENSIONS.has(targetExt)) {
-      targetLang = detectTargetFromPath(targetPath);
-    } else {
-      targetLang = config.targetLanguage ?? detectTargetFromPath(ailPath);
+  try {
+    const { ast: mod, trivia } = parseWithTrivia(source, ailPath);
+    const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
+    try {
+      const tc = new TypeChecker();
+      tc.checkModule(expandedMod);
+    } catch {
+      // Lenient typechecking during pre-test compilation
     }
+
+    const base = path.basename(ailPath);
+    const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
+    const innerExt = path.extname(withoutAil).toLowerCase();
+
+    let targetLang: TargetLanguage;
+    if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
+      targetLang = detectTargetFromPath(ailPath);
+    } else {
+      const targetExt = path.extname(targetPath).toLowerCase();
+      if (targetExt && KNOWN_TARGET_EXTENSIONS.has(targetExt)) {
+        targetLang = detectTargetFromPath(targetPath);
+      } else {
+        targetLang = config.targetLanguage ?? detectTargetFromPath(ailPath);
+      }
+    }
+
+    const watermark = options?.watermark !== false ? config.watermark : false;
+
+    const emitted = emitTarget(expandedMod, targetLang, {
+      trivia,
+      pureInterfaces: options?.pureInterfaces,
+      watermark,
+      idioms: config?.idioms,
+    });
+
+    safeWriteTargetFile(targetPath, emitted);
+    return { compiled: true, targetPath };
+  } catch (err: any) {
+    if (err && typeof err === "object") {
+      err.ailFilePath = ailPath;
+      err.ailSource = source;
+    }
+    throw err;
   }
-
-  const watermark = options?.watermark !== false ? config.watermark : false;
-
-  const emitted = emitTarget(mod, targetLang, {
-    trivia,
-    pureInterfaces: options?.pureInterfaces,
-    watermark,
-  });
-
-  safeWriteTargetFile(targetPath, emitted);
-  return { compiled: true, targetPath };
 }
 
 /**
@@ -296,6 +311,57 @@ export function compileTargetAilIfNeeded(
     watermark: options?.watermark,
   };
 
+  const testCwd =
+    config.mode === "companion"
+      ? config.test?.cwd
+        ? path.resolve(projectRoot, config.test.cwd)
+        : config.targetProjectDir
+          ? path.resolve(projectRoot, config.targetProjectDir)
+          : projectDir
+      : config.test?.cwd
+        ? path.resolve(projectRoot, config.test.cwd)
+        : projectDir;
+
+  if (config.mode === "companion") {
+    // When in companion mode, compile companion .ail files to config.outDir
+    // in the target project before test execution so target tests run against freshly compiled code.
+    const companionSourceDir = config.sourceDir
+      ? path.resolve(projectRoot, config.sourceDir)
+      : projectRoot;
+    const ailFiles = findAilFiles(companionSourceDir);
+    for (const f of ailFiles) {
+      const res = compileAilFile(f, compileOptions);
+      if (res.compiled) {
+        compiledFiles.push(res.targetPath);
+      }
+    }
+
+    if (targetPath) {
+      const resolved = path.resolve(projectDir, targetPath);
+      if (fs.existsSync(resolved)) {
+        if (resolved.endsWith(".ail")) {
+          const res = compileAilFile(resolved, compileOptions);
+          if (res.compiled && !compiledFiles.includes(res.targetPath)) {
+            compiledFiles.push(res.targetPath);
+          }
+          effectiveTarget = path.relative(testCwd, res.targetPath);
+        } else {
+          // If given a target path (e.g. tests/engine.test.ts)
+          effectiveTarget = path.isAbsolute(targetPath)
+            ? path.relative(testCwd, targetPath)
+            : targetPath;
+        }
+      } else if (targetPath.endsWith(".ail")) {
+        const targetFile = resolveTargetFilePath(resolved, config, projectRoot);
+        effectiveTarget = path.relative(testCwd, targetFile);
+      } else {
+        effectiveTarget = targetPath;
+      }
+    }
+
+    return { compiledFiles, effectiveTarget };
+  }
+
   if (targetPath) {
     const resolved = path.resolve(projectDir, targetPath);
     if (fs.existsSync(resolved)) {
@@ -313,15 +379,15 @@ export function compileTargetAilIfNeeded(
         if (res.compiled) {
           compiledFiles.push(res.targetPath);
         }
-        effectiveTarget = path.relative(projectDir, res.targetPath);
+        effectiveTarget = path.relative(testCwd, res.targetPath);
       } else {
         // If it's a target file (e.g. foo.test.ts), check if companion .ail exists
         let candidateAil: string | null = null;
         if (config.mode === "isolated") {
           const absOutDir = config.outDir
             ? path.isAbsolute(config.outDir)
-              ? config.outDir
-              : path.resolve(projectRoot, config.outDir)
+            ? config.outDir
+            : path.resolve(projectRoot, config.outDir)
             : path.resolve(projectRoot, ".ail-build");
           if (resolved.startsWith(absOutDir + path.sep) || resolved === absOutDir) {
             const relFromOut = path.relative(absOutDir, resolved);
@@ -352,7 +418,7 @@ export function compileTargetAilIfNeeded(
       }
     } else if (targetPath.endsWith(".ail")) {
       const targetFile = resolveTargetFilePath(resolved, config, projectRoot);
-      effectiveTarget = path.relative(projectDir, targetFile);
+      effectiveTarget = path.relative(testCwd, targetFile);
     }
   } else {
     // No target provided: scan project directory or sourceDir for stale .ail files
@@ -507,13 +573,53 @@ function createNpmHarness(isBun: boolean): DiscoveredHarness {
 export function discoverTestHarness(
   projectDir: string = process.cwd(),
   options?: AilTestOptions,
+  config?: AilProjectConfig,
 ): DiscoveredHarness {
+  const root = findProjectRoot(projectDir) ?? projectDir;
+  const effectiveConfig = config ?? loadProjectConfig(root);
+  const isCompanion = effectiveConfig.mode === "companion";
+
   const requestedHarness = options?.harness;
   const isBun = typeof process !== "undefined" && Boolean(process.versions?.bun);
 
-  const pkgPath = findNearestPackageJson(projectDir);
+  // If in companion mode (or explicitly configured) and config.test.command is set
+  if ((!requestedHarness || requestedHarness === "auto") && effectiveConfig.test?.command) {
+    const trimmed = effectiveConfig.test.command.trim();
+    const parts = (trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [])
+      .map((arg) => arg.replace(/^["']|["']$/g, ""));
+    const command = parts[0];
+    const baseArgs = parts.slice(1);
+    return {
+      type: "auto",
+      name: `custom (${trimmed})`,
+      command,
+      baseArgs,
+      description: `Configured test command: ${trimmed}`,
+      buildArgs: (target?: string, opts?: AilTestOptions) => {
+        const args = [...baseArgs];
+        if (opts?.reporter) {
+          args.push(`--reporter=${opts.reporter}`);
+        }
+        if (target) {
+          args.push(target);
+        }
+        return args;
+      },
+    };
+  }
+
+  // In companion mode, discover test harness from testCwd (targetProjectDir or config.test.cwd)
+  const testCwd = isCompanion
+    ? effectiveConfig.test?.cwd
+      ? path.resolve(root, effectiveConfig.test.cwd)
+      : effectiveConfig.targetProjectDir
+        ? path.resolve(root, effectiveConfig.targetProjectDir)
+        : projectDir
+    : projectDir;
+
+  const pkgPath = findNearestPackageJson(testCwd);
   let pkg: Record<string, unknown> | null = null;
-  const resolvedPkgDir = pkgPath ? path.dirname(pkgPath) : projectDir;
+  const resolvedPkgDir = pkgPath ? path.dirname(pkgPath) : testCwd;
   const localVitestBin = path.join(resolvedPkgDir, "node_modules", ".bin", "vitest");
 
   if (pkgPath && fs.existsSync(pkgPath)) {
@@ -722,16 +828,27 @@ export function formatCleanTestOutput(
   exitCode: number,
   summary: AilTestSummary,
   projectRoot: string = process.cwd(),
+  config?: AilProjectConfig,
 ): string {
   const combined = `${rawStdout}\n${rawStderr}`.trim();
+  const root = findProjectRoot(projectRoot) ?? projectRoot;
+  const cfg = config ?? loadProjectConfig(root);
+
   if (exitCode === 0 && summary.failed === 0) {
+    if (cfg.mode === "companion" || cfg.test?.scrubTraces) {
+      return scrubTargetFileReferences(rawStdout.trim() || combined, root, cfg);
+    }
     return rawStdout.trim() || combined;
   }
-  const formatted = formatSymbolAwareError(combined, projectRoot);
+  const formatted = formatSymbolAwareError(combined, root, cfg);
   if (formatted.trim().length > 0) {
     return formatted;
   }
-  return filterTestErrorOutput(combined);
+  const filtered = filterTestErrorOutput(combined);
+  if (cfg.mode === "companion" || cfg.test?.scrubTraces) {
+    return scrubTargetFileReferences(filtered, root, cfg);
+  }
+  return filtered;
 }
 
 /**
@@ -746,20 +863,48 @@ export async function runAilTests(
   targetPath?: string,
   options?: AilTestOptions,
 ): Promise<AilTestResult> {
+  if (targetPath?.startsWith("-")) {
+    throw new Error(`Invalid test target '${targetPath}': must not start with '-'`);
+  }
+
   const projectDir = options?.cwd ? path.resolve(options.cwd) : process.cwd();
+  const projectRoot = findProjectRoot(projectDir) ?? projectDir;
+  const config = loadProjectConfig(projectRoot);
+
+  const testCwd =
+    config.mode === "companion"
+      ? config.test?.cwd
+        ? path.resolve(projectRoot, config.test.cwd)
+        : config.targetProjectDir
+          ? path.resolve(projectRoot, config.targetProjectDir)
+          : projectDir
+      : config.test?.cwd
+        ? path.resolve(projectRoot, config.test.cwd)
+        : projectDir;
 
   // Step 1: Pre-compilation of .ail files
   let compiledFiles: string[] = [];
   let effectiveTarget = targetPath;
 
   try {
-    const compResult = compileTargetAilIfNeeded(targetPath, options);
+    const compResult = compileTargetAilIfNeeded(targetPath, {
+      ...options,
+      cwd: projectDir,
+    });
     compiledFiles = compResult.compiledFiles;
     effectiveTarget = compResult.effectiveTarget;
-  } catch (compileErr) {
+  } catch (compileErr: any) {
+    const errorAilPath =
+      compileErr?.ailFilePath ??
+      (targetPath
+        ? path.isAbsolute(targetPath)
+          ? targetPath
+          : path.resolve(projectDir, targetPath)
+        : "unknown.ail");
     const source =
-      targetPath && fs.existsSync(targetPath) ? fs.readFileSync(targetPath, "utf-8") : "";
-    const report = buildReportFromError(compileErr, source, targetPath ?? "unknown.ail");
+      compileErr?.ailSource ??
+      (errorAilPath && fs.existsSync(errorAilPath) ? fs.readFileSync(errorAilPath, "utf-8") : "");
+    const report = buildReportFromError(compileErr, source, errorAilPath);
     const formattedDiag = formatDiagnosticText(report);
     return {
       success: false,
@@ -772,15 +917,16 @@ export async function runAilTests(
   }
 
   // Step 2: Discover project test harness
-  const harness = discoverTestHarness(projectDir, options);
+  const harness = discoverTestHarness(testCwd, options, config);
   const fullArgs = harness.buildArgs(effectiveTarget, options);
 
-  // Step 3: Spawn test runner process and capture output
+  // Step 3: Spawn test runner process in testCwd and capture output
   return new Promise<AilTestResult>((resolve) => {
     let timer: NodeJS.Timeout | undefined;
+    let killTimer: NodeJS.Timeout | undefined;
 
     const child = spawn(harness.command, fullArgs, {
-      cwd: projectDir,
+      cwd: testCwd,
       env: {
         ...process.env,
         ...options?.env,
@@ -800,14 +946,25 @@ export async function runAilTests(
       stderrChunks.push(chunk);
     });
 
+    let timedOut = false;
     if (options?.timeoutMs && options.timeoutMs > 0) {
       timer = setTimeout(() => {
+        timedOut = true;
         child.kill("SIGTERM");
+        killTimer = setTimeout(() => {
+          try {
+            child.kill("SIGKILL");
+            child.stdout?.destroy();
+            child.stderr?.destroy();
+          } catch {}
+        }, 1000);
+        killTimer.unref?.();
       }, options.timeoutMs);
     }
 
     child.on("error", (err: Error) => {
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
       resolve({
         success: false,
         exitCode: 127,
@@ -819,15 +976,23 @@ export async function runAilTests(
       });
     });
 
-    child.on("close", (code: number | null) => {
+    child.on("close", (code: number | null, signal: NodeJS.Signals | null) => {
       if (timer) clearTimeout(timer);
+      if (killTimer) clearTimeout(killTimer);
 
-      const exitCode = code ?? 0;
+      const exitCode = code ?? (timedOut ? 124 : signal ? 143 : 1);
       const rawStdout = Buffer.concat(stdoutChunks).toString("utf-8");
       const rawStderr = Buffer.concat(stderrChunks).toString("utf-8");
 
       const summary = parseTestSummary(`${rawStdout}\n${rawStderr}`, exitCode);
-      const output = formatCleanTestOutput(rawStdout, rawStderr, exitCode, summary, projectDir);
+      const output = formatCleanTestOutput(
+        rawStdout,
+        rawStderr,
+        exitCode,
+        summary,
+        projectRoot,
+        config,
+      );
 
       const success = exitCode === 0 && summary.failed === 0;
 

@@ -306,7 +306,7 @@ fn calculateBatchPostageCost(manifest: ShippingManifest, costPerKgCents: int) ->
 
 fn isManifestFullyDelivered(manifest: ShippingManifest, deliveredTrackingCodes: [str]) -> bool:
   for track in manifest.trackingNumbers:
-    if not deliveredTrackingCodes.contains(track):
+    if not deliveredTrackingCodes.includes(track):
       ret false
   true
 

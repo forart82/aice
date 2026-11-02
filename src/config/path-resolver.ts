@@ -4,7 +4,7 @@
  *
  * AIL 2.0 Polymorphic Path Resolver Engine (Step 23).
  * Provides unified polymorphic resolution for files, directories, or omitted arguments
- * across all CLI commands and tooling APIs.
+ * across all CLI commands and tooling APIs, with first-class companion mode support.
  */
 
 import * as fs from "node:fs";
@@ -14,6 +14,7 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
+  resolveSourceFile,
 } from "./project-config.js";
 
 export interface PathResolverOptions {
@@ -58,7 +59,159 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Recursively scans a directory collecting matching files according to options.
+ * Checks whether `candidate` is equal to `parent` or is a descendant subdirectory/file of `parent`.
+ */
+export function isSameOrDescendant(parent: string | undefined, candidate: string): boolean {
+  if (!parent) {
+    return false;
+  }
+  const normParent = path.resolve(parent);
+  const normCandidate = path.resolve(candidate);
+  if (normParent === path.parse(normParent).root) {
+    return normCandidate === normParent;
+  }
+  const rel = path.relative(normParent, normCandidate);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/**
+ * Checks whether `candidate` or its canonical realpath is equal to or inside `parent`.
+ */
+export function isRealPathSameOrDescendant(
+  parent: string | undefined,
+  candidate: string,
+): boolean {
+  if (!parent) {
+    return false;
+  }
+  if (isSameOrDescendant(parent, candidate)) {
+    return true;
+  }
+  try {
+    const realParent = fs.realpathSync(parent);
+    const realCandidate = fs.realpathSync(candidate);
+    return isSameOrDescendant(realParent, realCandidate);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Checks if a given path is within the target project directory or outDir of the companion config.
+ */
+export function isTargetProjectPath(
+  candidatePath: string,
+  config: AilProjectConfig,
+  projectRoot?: string,
+): boolean {
+  const root = projectRoot ? path.resolve(projectRoot) : undefined;
+  const absOutDir = config.outDir
+    ? path.isAbsolute(config.outDir)
+      ? path.resolve(config.outDir)
+      : root
+        ? path.resolve(root, config.outDir)
+        : undefined
+    : undefined;
+
+  const absTargetProjectDir = config.targetProjectDir
+    ? path.isAbsolute(config.targetProjectDir)
+      ? path.resolve(config.targetProjectDir)
+      : root
+        ? path.resolve(root, config.targetProjectDir)
+        : undefined
+    : undefined;
+
+  return (
+    isSameOrDescendant(absOutDir, candidatePath) ||
+    isSameOrDescendant(absTargetProjectDir, candidatePath) ||
+    isRealPathSameOrDescendant(absOutDir, candidatePath) ||
+    isRealPathSameOrDescendant(absTargetProjectDir, candidatePath)
+  );
+}
+
+/**
+ * Resolves an external target file or directory path to its companion source path in the companion workspace.
+ * Returns undefined if config is not in companion mode or if targetPath is outside outDir / targetProjectDir.
+ */
+export function resolveCompanionSource(
+  targetPath: string,
+  config: AilProjectConfig,
+  projectRoot?: string,
+): string | undefined {
+  if (config.mode !== "companion") {
+    return undefined;
+  }
+  const root = projectRoot ? path.resolve(projectRoot) : undefined;
+  const absTarget = path.isAbsolute(targetPath)
+    ? path.resolve(targetPath)
+    : path.resolve(root ?? process.cwd(), targetPath);
+
+  const absOutDir = config.outDir
+    ? path.isAbsolute(config.outDir)
+      ? path.resolve(config.outDir)
+      : root
+        ? path.resolve(root, config.outDir)
+        : undefined
+    : undefined;
+
+  const absSourceDir = config.sourceDir
+    ? path.isAbsolute(config.sourceDir)
+      ? path.resolve(config.sourceDir)
+      : root
+        ? path.resolve(root, config.sourceDir)
+        : root
+    : root;
+
+  const absTargetProjectDir = config.targetProjectDir
+    ? path.isAbsolute(config.targetProjectDir)
+      ? path.resolve(config.targetProjectDir)
+      : root
+        ? path.resolve(root, config.targetProjectDir)
+        : undefined
+    : undefined;
+
+  // Check if directory
+  let isDir = false;
+  if (fs.existsSync(absTarget)) {
+    try {
+      isDir = fs.statSync(absTarget).isDirectory();
+    } catch {
+      isDir = false;
+    }
+  } else {
+    isDir =
+      targetPath.endsWith("/") ||
+      targetPath.endsWith("\\") ||
+      (path.extname(absTarget) === "" && !targetPath.endsWith(".ail"));
+  }
+
+  if (isDir) {
+    if (absOutDir && isSameOrDescendant(absOutDir, absTarget)) {
+      const rel = path.relative(absOutDir, absTarget);
+      return rel && absSourceDir ? path.resolve(absSourceDir, rel) : absSourceDir;
+    }
+    if (absTargetProjectDir && isSameOrDescendant(absTargetProjectDir, absTarget)) {
+      const rel = path.relative(absTargetProjectDir, absTarget);
+      return rel && root ? path.resolve(root, rel) : (absSourceDir ?? root);
+    }
+    return undefined;
+  }
+
+  // File: verify that it is within outDir or targetProjectDir or isTargetProjectPath
+  if (
+    (absOutDir && isSameOrDescendant(absOutDir, absTarget)) ||
+    (absTargetProjectDir && isSameOrDescendant(absTargetProjectDir, absTarget)) ||
+    isTargetProjectPath(absTarget, config, projectRoot)
+  ) {
+    return resolveSourceFile(config, absTarget, projectRoot);
+  }
+
+  return undefined;
+}
+
+/**
+ * Recursively scans a directory collecting matching files according to options,
+ * with robust avoidance of cyclic traversal, ignored directories, and companion external output directories.
  */
 export function scanDirectoryFiles(
   dir: string,
@@ -74,14 +227,91 @@ export function scanDirectoryFiles(
     (e.startsWith(".") ? e : `.${e}`).toLowerCase(),
   );
 
+  const absScanDir = path.resolve(dir);
   const outDirName = config.outDir ? path.basename(config.outDir) : ".ail-build";
+
   const absOutDir = config.outDir
     ? path.isAbsolute(config.outDir)
-      ? config.outDir
+      ? path.resolve(config.outDir)
       : path.resolve(projectRoot, config.outDir)
     : undefined;
 
+  let realOutDir: string | undefined;
+  if (absOutDir) {
+    try {
+      realOutDir = fs.realpathSync(absOutDir);
+    } catch {
+      realOutDir = absOutDir;
+    }
+  }
+
+  const absTargetProjectDir = config.targetProjectDir
+    ? path.isAbsolute(config.targetProjectDir)
+      ? path.resolve(config.targetProjectDir)
+      : path.resolve(projectRoot, config.targetProjectDir)
+    : undefined;
+
+  let realTargetProjectDir: string | undefined;
+  if (absTargetProjectDir) {
+    try {
+      realTargetProjectDir = fs.realpathSync(absTargetProjectDir);
+    } catch {
+      realTargetProjectDir = absTargetProjectDir;
+    }
+  }
+
+  const visitedDirs = new Set<string>();
+
+  function shouldIgnoreDirectory(
+    entryName: string,
+    fullPath: string,
+    realFullPath: string,
+  ): boolean {
+    if (DEFAULT_IGNORED_SCAN_DIRECTORIES.has(entryName)) {
+      return true;
+    }
+    if (entryName.startsWith(".") && entryName !== "." && entryName !== "..") {
+      return true;
+    }
+    if (
+      config.mode !== "companion" &&
+      outDirName !== config.sourceDir &&
+      entryName === outDirName
+    ) {
+      return true;
+    }
+    if (
+      absOutDir &&
+      absOutDir !== absScanDir &&
+      (isSameOrDescendant(absOutDir, fullPath) ||
+        (realOutDir && isSameOrDescendant(realOutDir, realFullPath)))
+    ) {
+      return true;
+    }
+    if (
+      absTargetProjectDir &&
+      absTargetProjectDir !== absScanDir &&
+      (isSameOrDescendant(absTargetProjectDir, fullPath) ||
+        (realTargetProjectDir && isSameOrDescendant(realTargetProjectDir, realFullPath)))
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   function walk(currentDir: string): void {
+    let realCurrentDir: string;
+    try {
+      realCurrentDir = fs.realpathSync(currentDir);
+    } catch {
+      realCurrentDir = currentDir;
+    }
+
+    if (visitedDirs.has(realCurrentDir)) {
+      return;
+    }
+    visitedDirs.add(realCurrentDir);
+
     let entries: fs.Dirent[] = [];
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
@@ -92,17 +322,40 @@ export function scanDirectoryFiles(
     for (const entry of entries) {
       const fullPath = path.join(currentDir, entry.name);
 
-      if (entry.isDirectory()) {
-        if (
-          DEFAULT_IGNORED_SCAN_DIRECTORIES.has(entry.name) ||
-          entry.name === outDirName ||
-          (absOutDir && fullPath === absOutDir) ||
-          (entry.name.startsWith(".") && entry.name !== "." && entry.name !== "..")
-        ) {
+      let isDirectory = entry.isDirectory();
+      let realFullPath = fullPath;
+      try {
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          isDirectory = true;
+        }
+        realFullPath = fs.realpathSync(fullPath);
+      } catch {
+        if (!isDirectory) {
+          continue;
+        }
+      }
+
+      if (isDirectory) {
+        if (shouldIgnoreDirectory(entry.name, fullPath, realFullPath)) {
           continue;
         }
         walk(fullPath);
-      } else if (entry.isFile()) {
+      } else {
+        let isFile = entry.isFile();
+        if (!isFile) {
+          try {
+            const stat = fs.statSync(fullPath);
+            isFile = stat.isFile();
+          } catch {
+            isFile = false;
+          }
+        }
+
+        if (!isFile) {
+          continue;
+        }
+
         if (entry.name.endsWith(".trivia.json")) {
           continue;
         }
@@ -129,7 +382,7 @@ export function scanDirectoryFiles(
     }
   }
 
-  walk(dir);
+  walk(absScanDir);
 
   if (customExts && customExts.length > 0) {
     if (customFiles.length > 0) {
@@ -196,7 +449,17 @@ export function resolvePathTargets(
   }
 
   const trimmed = inputPath.trim();
-  const absPath = path.resolve(process.cwd(), trimmed);
+  let absPath = path.resolve(process.cwd(), trimmed);
+  if (
+    options.projectRoot &&
+    !path.isAbsolute(trimmed) &&
+    !fs.existsSync(absPath) &&
+    fs.existsSync(path.resolve(options.projectRoot, trimmed))
+  ) {
+    absPath = path.resolve(options.projectRoot, trimmed);
+  } else if (options.projectRoot && !path.isAbsolute(trimmed) && trimmed.startsWith("..")) {
+    absPath = path.resolve(options.projectRoot, trimmed);
+  }
 
   let isDir = false;
   if (fs.existsSync(absPath)) {
@@ -215,10 +478,42 @@ export function resolvePathTargets(
   }
 
   if (isDir) {
-    const projectRoot = options.projectRoot
+    let effectiveProjectRoot = options.projectRoot
       ? path.resolve(options.projectRoot)
-      : findProjectRoot(absPath, process.cwd());
-    const config = options.config ?? loadProjectConfig(projectRoot);
+      : undefined;
+    let effectiveConfig = options.config;
+
+    if (!effectiveProjectRoot && !effectiveConfig) {
+      const cwdRoot = findProjectRoot(process.cwd());
+      const cwdConfig = loadProjectConfig(cwdRoot);
+      if (cwdConfig.mode === "companion" && isTargetProjectPath(absPath, cwdConfig, cwdRoot)) {
+        effectiveProjectRoot = cwdRoot;
+        effectiveConfig = cwdConfig;
+      }
+    }
+
+    const fallbackDir = isSameOrDescendant(process.cwd(), absPath) ? process.cwd() : absPath;
+    const projectRoot =
+      effectiveProjectRoot ?? findProjectRoot(absPath, fallbackDir);
+    const config = effectiveConfig ?? loadProjectConfig(projectRoot);
+
+    if (config.mode === "companion") {
+      const companionDir = resolveCompanionSource(absPath, config, projectRoot);
+      if (companionDir && fs.existsSync(companionDir)) {
+        const companionFiles = scanDirectoryFiles(companionDir, options, config, projectRoot);
+        if (companionFiles.length > 0 || !options.includeTargets) {
+          return {
+            isSingleFile: false,
+            isDirectory: true,
+            isOmitted: false,
+            resolvedPath: companionDir,
+            files: companionFiles,
+            projectRoot,
+            config,
+          };
+        }
+      }
+    }
 
     const files = fs.existsSync(absPath)
       ? scanDirectoryFiles(absPath, options, config, projectRoot)
@@ -236,10 +531,65 @@ export function resolvePathTargets(
   }
 
   // Single file target
-  const projectRoot = options.projectRoot
+  let effectiveProjectRoot = options.projectRoot
     ? path.resolve(options.projectRoot)
-    : findProjectRoot(path.dirname(absPath), process.cwd());
-  const config = options.config ?? loadProjectConfig(projectRoot);
+    : undefined;
+  let effectiveConfig = options.config;
+
+  if (!effectiveProjectRoot && !effectiveConfig) {
+    const cwdRoot = findProjectRoot(process.cwd());
+    const cwdConfig = loadProjectConfig(cwdRoot);
+    if (cwdConfig.mode === "companion" && isTargetProjectPath(absPath, cwdConfig, cwdRoot)) {
+      effectiveProjectRoot = cwdRoot;
+      effectiveConfig = cwdConfig;
+    }
+  }
+
+  const fallbackFileDir = isSameOrDescendant(process.cwd(), absPath)
+    ? process.cwd()
+    : path.dirname(absPath);
+  const projectRoot =
+    effectiveProjectRoot ?? findProjectRoot(path.dirname(absPath), fallbackFileDir);
+  const config = effectiveConfig ?? loadProjectConfig(projectRoot);
+
+  if (absPath.endsWith(".ail")) {
+    return {
+      isSingleFile: true,
+      isDirectory: false,
+      isOmitted: false,
+      resolvedPath: absPath,
+      files: [absPath],
+      projectRoot,
+      config,
+    };
+  }
+
+  if (config.mode === "companion" || isTargetProjectPath(absPath, config, projectRoot)) {
+    try {
+      const companionFile =
+        resolveCompanionSource(absPath, config, projectRoot) ??
+        resolveSourceFile(config, absPath, projectRoot);
+
+      if (companionFile) {
+        const companionExists = fs.existsSync(companionFile);
+        const targetExists = fs.existsSync(absPath);
+
+        if (companionExists || !targetExists || !options.includeTargets) {
+          return {
+            isSingleFile: true,
+            isDirectory: false,
+            isOmitted: false,
+            resolvedPath: companionFile,
+            files: [companionFile],
+            projectRoot,
+            config,
+          };
+        }
+      }
+    } catch {
+      // Fallback to absPath
+    }
+  }
 
   return {
     isSingleFile: true,

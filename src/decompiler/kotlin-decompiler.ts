@@ -990,7 +990,7 @@ export class KotlinDecompiler {
 
     // Save modifier trivia (e.g. data class or interface)
     if (isData) {
-      this.trivia.addLeadingTrivia(nodeId, { kind: "LINE_COMMENT", content: "data class" });
+      this.trivia.setTrivia("is_data:" + name, { nodeId: "is_data:" + name, leading: [], trailing: [] });
     }
 
     // Type parameters: <T, R>

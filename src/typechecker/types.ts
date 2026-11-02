@@ -56,6 +56,7 @@ export interface RecordTypeRep {
   kind: "record";
   name?: string;
   fields: Map<string, Type>;
+  isClass?: boolean;
 }
 
 export interface ResultTypeRep {
@@ -71,7 +72,7 @@ export interface OptionTypeRep {
 
 export interface FunctionTypeRep {
   kind: "function";
-  params: { name: string; type: Type; optional?: boolean }[];
+  params: { name: string; type: Type; optional?: boolean; rest?: boolean }[];
   returnType: Type;
 }
 
@@ -145,7 +146,7 @@ export function makeRecordType(
 }
 
 export function makeFunctionType(
-  params: { name: string; type: Type; optional?: boolean }[],
+  params: { name: string; type: Type; optional?: boolean; rest?: boolean }[],
   returnType: Type,
 ): FunctionTypeRep {
   return { kind: "function", params, returnType };
@@ -764,9 +765,13 @@ export function isAssignable(
     return isAssignable(target.innerType, source, visited);
   }
 
-  // nil is assignable to named object references and unknown
+  // nil is assignable to named object references, class instances, and unknown
   if (source.kind === "nil") {
-    if (target.kind === "named" || (target as any).kind === "unknown") {
+    if (
+      target.kind === "named" ||
+      (target as any).kind === "unknown" ||
+      (target.kind === "record" && target.isClass)
+    ) {
       return true;
     }
   }

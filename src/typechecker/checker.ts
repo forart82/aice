@@ -19,7 +19,13 @@ import type {
   TypeExpr,
   UnaryExpr,
 } from "../core/ast.js";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import type { Span } from "../core/span.js";
+import { computeSourceHash, parseCached } from "../cache/index.js";
+import { parse } from "../core/parser.js";
+import { findProjectRoot, loadProjectConfig, type ProjectIdiomDefinition } from "../config/project-config.js";
+import { expandModuleIdioms } from "../idioms/index.js";
 import { GLOBAL_SYMBOLS, getMethodType, getPropertyType } from "./primitives.js";
 import {
   clearTypeAliases,
@@ -133,6 +139,25 @@ const BUILTIN_TYPE_NAMES = new Set([
   "Function",
 ]);
 
+const COMMON_JS_OBJECT_PROPS = new Set([
+  "constructor",
+  "toString",
+  "valueOf",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "toLocaleString",
+  "then",
+  "catch",
+  "finally",
+  "apply",
+  "bind",
+  "call",
+  "prototype",
+  "length",
+  "name",
+]);
+
 export class TypeEnv {
   private bindings = new Map<string, { type: Type; isMut: boolean }>();
   private types = new Map<string, Type>();
@@ -213,10 +238,32 @@ export class TypeEnv {
     }
     return null;
   }
+
+  lookupLocal(name: string): { type: Type; isMut: boolean } | null {
+    return this.bindings.get(name) ?? null;
+  }
+
+  lookupLocalType(name: string): Type | null {
+    return this.types.get(name) ?? null;
+  }
+
+  getLocalTypes(): IterableIterator<[string, Type]> {
+    return this.types.entries();
+  }
+
+  getLocalBindings(): IterableIterator<[string, { type: Type; isMut: boolean }]> {
+    return this.bindings.entries();
+  }
 }
 
 export class TypeChecker {
   private globalEnv: TypeEnv;
+  private currentFilePath?: string;
+  private currentBaseDir?: string;
+  private currentIdioms?: Record<string, ProjectIdiomDefinition>;
+  private moduleEnvCache = new Map<string, TypeEnv>();
+  private resolvingModules = new Set<string>();
+  private currentCycleFallbackOccurred = false;
 
   constructor() {
     this.globalEnv = new TypeEnv();
@@ -277,6 +324,22 @@ export class TypeChecker {
       "super",
       "TextEncoder",
       "TextDecoder",
+      "HTMLElement",
+      "HTMLCanvasElement",
+      "Element",
+      "Node",
+      "Document",
+      "Window",
+      "URLSearchParams",
+      "encodeURIComponent",
+      "decodeURIComponent",
+      "Event",
+      "MouseEvent",
+      "TouchEvent",
+      "KeyboardEvent",
+      "WebGLRenderingContext",
+      "WebGL2RenderingContext",
+      "CanvasRenderingContext2D",
       "set",
       "dict",
       "list",
@@ -309,27 +372,298 @@ export class TypeChecker {
     }
   }
 
-  static check(mod: Module): void {
+  static check(
+    mod: Module,
+    options?: { idioms?: Record<string, ProjectIdiomDefinition>; baseDir?: string },
+  ): void {
     const checker = new TypeChecker();
-    checker.checkModule(mod);
+    checker.checkModule(mod, options);
   }
 
-  check(mod: Module): void {
-    this.checkModule(mod);
+  check(
+    mod: Module,
+    options?: { idioms?: Record<string, ProjectIdiomDefinition>; baseDir?: string },
+  ): void {
+    this.checkModule(mod, options);
   }
 
-  checkModule(mod: Module): void {
-    clearTypeAliases();
-    const env = new TypeEnv(this.globalEnv);
+  setIdioms(idioms?: Record<string, ProjectIdiomDefinition>): void {
+    this.currentIdioms = idioms;
+  }
 
-    // Pass 1: Declare all types and function signatures
-    for (const item of mod.items) {
-      this.declareItem(item, env);
+  checkModule(
+    mod: Module,
+    options?: { idioms?: Record<string, ProjectIdiomDefinition>; baseDir?: string },
+  ): void {
+    let idioms = options?.idioms;
+    this.currentIdioms = idioms;
+    const filePath = mod.span?.file;
+    let baseDir: string | undefined = undefined;
+    if (options?.baseDir) {
+      baseDir = path.resolve(options.baseDir);
+    } else if (
+      filePath &&
+      !filePath.startsWith("<") &&
+      (filePath.includes("/") || filePath.includes("\\"))
+    ) {
+      try {
+        if (fs.existsSync(filePath)) {
+          baseDir = path.dirname(path.resolve(filePath));
+        }
+      } catch {
+        // Ignore fs error
+      }
+    }
+    this.currentFilePath = filePath;
+    this.currentBaseDir = baseDir;
+
+    let isRootTracking = false;
+    let resolvedMainPath: string | null = null;
+    if (
+      filePath &&
+      !filePath.startsWith("<") &&
+      (filePath.includes("/") || filePath.includes("\\"))
+    ) {
+      try {
+        const abs = path.resolve(filePath);
+        if (fs.existsSync(abs)) {
+          resolvedMainPath = abs;
+          this.resolvingModules.add(abs);
+          isRootTracking = true;
+        }
+      } catch {
+        // Ignore fs error
+      }
     }
 
-    // Pass 2: Typecheck bodies
-    for (const item of mod.items) {
-      this.checkItem(item, env);
+    try {
+      if (
+        !idioms &&
+        filePath &&
+        !filePath.startsWith("<") &&
+        (filePath.includes("/") || filePath.includes("\\"))
+      ) {
+        if (astContainsDollarIdentifier(mod)) {
+          try {
+            const root = findProjectRoot(filePath);
+            const config = loadProjectConfig(root);
+            if (config.idioms && Object.keys(config.idioms).length > 0) {
+              idioms = config.idioms;
+              this.currentIdioms = idioms;
+            }
+          } catch {
+            // Ignore config loading error in checkModule
+          }
+        }
+      }
+
+      if (idioms && Object.keys(idioms).length > 0) {
+        mod = expandModuleIdioms(mod, idioms);
+      }
+
+      clearTypeAliases();
+      const env = new TypeEnv(this.globalEnv);
+
+      // Pass 1: Declare all types and function signatures
+      for (const item of mod.items) {
+        this.declareItem(item, env);
+      }
+
+      // Pass 2: Typecheck bodies
+      for (const item of mod.items) {
+        this.checkItem(item, env);
+      }
+    } finally {
+      if (isRootTracking && resolvedMainPath) {
+        this.resolvingModules.delete(resolvedMainPath);
+      }
+    }
+  }
+
+  private resolveImportedAilModule(importSource: string, fromDir: string): string | null {
+    if (!importSource.startsWith("./") && !importSource.startsWith("../")) {
+      return null;
+    }
+
+    const cleanRel = importSource
+      .replace(/(\.(ts|tsx|js|jsx|py))?\.ail$/i, "")
+      .replace(/\.(ts|tsx|js|jsx|py)$/i, "");
+
+    const candidates: string[] = [];
+    if (importSource.endsWith(".ail")) {
+      candidates.push(path.resolve(fromDir, importSource));
+    }
+    candidates.push(
+      path.resolve(fromDir, `${importSource}.ail`),
+      path.resolve(fromDir, `${cleanRel}.ail`),
+      path.resolve(fromDir, `${cleanRel}.ts.ail`),
+      path.resolve(fromDir, `${cleanRel}.tsx.ail`),
+      path.resolve(fromDir, `${cleanRel}.js.ail`),
+      path.resolve(fromDir, `${cleanRel}.py.ail`),
+      path.resolve(fromDir, cleanRel, "index.ail"),
+      path.resolve(fromDir, cleanRel, "index.ts.ail"),
+    );
+
+    for (const candidate of candidates) {
+      try {
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // ignore fs errors
+      }
+    }
+    return null;
+  }
+
+  public clearModuleEnvCache(): void {
+    this.moduleEnvCache.clear();
+  }
+
+  private loadModuleExportsEnv(resolvedAilPath: string): TypeEnv | null {
+    if (this.resolvingModules.has(resolvedAilPath)) {
+      return null; // cycle protection — caller falls back to TYPE_UNKNOWN
+    }
+
+    let source: string;
+    try {
+      source = fs.readFileSync(resolvedAilPath, "utf-8");
+    } catch {
+      return null;
+    }
+
+    const sourceHash = computeSourceHash(source);
+    const cacheKey = `${resolvedAilPath}::${sourceHash}`;
+
+    if (this.moduleEnvCache.has(cacheKey)) {
+      const cachedEnv = this.moduleEnvCache.get(cacheKey)!;
+      for (const [name, type] of cachedEnv.getLocalTypes()) {
+        registerTypeAlias(name, type);
+      }
+      return cachedEnv;
+    }
+
+    this.resolvingModules.add(resolvedAilPath);
+    const prevCycleFallback = this.currentCycleFallbackOccurred;
+    this.currentCycleFallbackOccurred = false;
+    const prevFilePath = this.currentFilePath;
+    const prevBaseDir = this.currentBaseDir;
+
+    try {
+      let subMod: Module;
+      try {
+        subMod = parseCached(source, resolvedAilPath);
+      } catch {
+        return null;
+      }
+
+      let idioms = this.currentIdioms;
+      if (!idioms && astContainsDollarIdentifier(subMod)) {
+        try {
+          const root = findProjectRoot(resolvedAilPath);
+          const config = loadProjectConfig(root);
+          if (config.idioms && Object.keys(config.idioms).length > 0) {
+            idioms = config.idioms;
+          }
+        } catch {
+          // Ignore config loading error
+        }
+      }
+
+      if (idioms && Object.keys(idioms).length > 0) {
+        subMod = expandModuleIdioms(subMod, idioms);
+      }
+
+      const exportedEnv = new TypeEnv(this.globalEnv);
+
+      this.currentFilePath = resolvedAilPath;
+      this.currentBaseDir = path.dirname(resolvedAilPath);
+
+      // Pass 1: Declare all items
+      for (const subItem of subMod.items) {
+        this.declareItem(subItem, exportedEnv);
+      }
+
+      // Function return type inference if not annotated
+      for (const subItem of subMod.items) {
+        if (subItem.kind === "FunctionDecl") {
+          const existing = exportedEnv.lookupLocal(subItem.name);
+          if (
+            existing &&
+            existing.type.kind === "function" &&
+            existing.type.returnType.kind === "unknown"
+          ) {
+            if (subItem.isExpressionBodied || subItem.body.kind === "Block") {
+              try {
+                this.checkFunctionDecl(subItem, exportedEnv);
+              } catch {
+                // Keep FunctionType with its declared parameter types
+              }
+            }
+          }
+        } else if (subItem.kind === "ConstDecl" || subItem.kind === "VarDecl") {
+          if (!subItem.typeAnnotation && subItem.value) {
+            try {
+              if (subItem.value.kind === "RecordLiteralExpr") {
+                const recFields = new Map<string, Type>();
+                for (const prop of subItem.value.properties) {
+                  if (prop.key) {
+                    recFields.set(prop.key, TYPE_UNKNOWN);
+                  }
+                }
+                exportedEnv.define(
+                  subItem.name,
+                  makeRecordType(recFields),
+                  subItem.kind === "VarDecl" ? subItem.isMut : false,
+                );
+              } else {
+                const valType = this.checkExpr(subItem.value, exportedEnv);
+                exportedEnv.define(
+                  subItem.name,
+                  valType,
+                  subItem.kind === "VarDecl" ? subItem.isMut : false,
+                );
+              }
+            } catch {
+              // Keep TYPE_UNKNOWN
+            }
+          }
+        } else if (subItem.kind === "ClassDecl") {
+          const clsType = exportedEnv.lookupLocalType(subItem.name);
+          if (clsType && clsType.kind === "record") {
+            const classEnv = exportedEnv.extend(null, undefined, true);
+            classEnv.define("this", { kind: "named", name: subItem.name });
+            for (const m of subItem.methods) {
+              const methodType = clsType.fields.get(m.name);
+              if (
+                methodType &&
+                methodType.kind === "function" &&
+                methodType.returnType.kind === "unknown"
+              ) {
+                try {
+                  this.checkMethodDecl(m, classEnv, subItem.name);
+                } catch {
+                  // Keep FunctionType with its declared parameter types
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (this.moduleEnvCache.size >= 500) {
+        const oldestKey = this.moduleEnvCache.keys().next().value;
+        if (oldestKey !== undefined) {
+          this.moduleEnvCache.delete(oldestKey);
+        }
+      }
+      this.moduleEnvCache.set(cacheKey, exportedEnv);
+      return exportedEnv;
+    } finally {
+      this.resolvingModules.delete(resolvedAilPath);
+      this.currentCycleFallbackOccurred = prevCycleFallback;
+      this.currentFilePath = prevFilePath;
+      this.currentBaseDir = prevBaseDir;
     }
   }
 
@@ -392,6 +726,7 @@ export class TypeChecker {
         optional: Boolean(
           p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
         ),
+        rest: Boolean(p.isRest),
       }));
       const returnType = item.returnType
         ? this.resolveTypeExpr(item.returnType, env)
@@ -411,22 +746,96 @@ export class TypeChecker {
         optional: Boolean(
           p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
         ),
+        rest: Boolean(p.isRest),
       }));
       env.define(item.name, makeFunctionType(params, TYPE_VOID));
     }
 
     if (item.kind === "ImportDecl") {
+      const resolvedPath = this.currentBaseDir
+        ? this.resolveImportedAilModule(item.source, this.currentBaseDir)
+        : null;
+      if (resolvedPath && this.resolvingModules.has(resolvedPath)) {
+        this.currentCycleFallbackOccurred = true;
+      }
+      const targetEnv = resolvedPath ? this.loadModuleExportsEnv(resolvedPath) : null;
+
       for (const spec of item.specifiers) {
-        if (!spec.isWildcard) {
+        if (spec.isWildcard) {
+          if (spec.alias) {
+            if (targetEnv) {
+              const recordFields = new Map<string, Type>();
+              for (const [name, binding] of targetEnv.getLocalBindings()) {
+                recordFields.set(name, binding.type);
+              }
+              const recType = makeRecordType(recordFields, spec.alias);
+              env.define(spec.alias, recType);
+              env.defineType(spec.alias, recType);
+            } else {
+              env.define(spec.alias, TYPE_UNKNOWN);
+              env.defineType(spec.alias, { kind: "named", name: spec.alias });
+            }
+          }
+        } else {
           const symName = spec.alias ?? spec.name;
-          env.define(symName, TYPE_UNKNOWN);
-          env.defineType(symName, { kind: "named", name: symName });
+          const origName = spec.name;
+
+          let valBinding: { type: Type; isMut: boolean } | null = null;
+          let typeBinding: Type | null = null;
+
+          if (targetEnv) {
+            valBinding =
+              targetEnv.lookupLocal(origName) ??
+              (targetEnv.lookup(origName)?.type && !GLOBAL_SYMBOLS[origName]
+                ? targetEnv.lookup(origName)
+                : null);
+            typeBinding =
+              targetEnv.lookupLocalType(origName) ??
+              (targetEnv.lookupType(origName) && !BUILTIN_TYPE_NAMES.has(origName)
+                ? targetEnv.lookupType(origName)
+                : null);
+          }
+
+          if (valBinding || typeBinding) {
+            if (valBinding) {
+              env.define(symName, valBinding.type, valBinding.isMut);
+            } else {
+              env.define(symName, TYPE_UNKNOWN);
+            }
+
+            if (typeBinding) {
+              env.defineType(symName, typeBinding);
+              if (typeBinding.kind === "enum") {
+                for (const vName of typeBinding.variants.keys()) {
+                  const vBinding = targetEnv?.lookupLocal(vName);
+                  if (vBinding && !env.lookupLocal(vName)) {
+                    env.define(vName, vBinding.type, vBinding.isMut);
+                  }
+                }
+              }
+            } else {
+              env.defineType(symName, { kind: "named", name: symName });
+            }
+          } else {
+            env.define(symName, TYPE_UNKNOWN);
+            env.defineType(symName, { kind: "named", name: symName });
+          }
         }
       }
     }
 
     if (item.kind === "ClassDecl") {
       const fields = new Map<string, Type>();
+      if (item.extends) {
+        const superType = env.lookupType(item.extends);
+        if (superType && superType.kind === "record") {
+          for (const [k, v] of superType.fields.entries()) {
+            fields.set(k, v);
+          }
+        } else {
+          fields.set("__has_unresolved_super__", TYPE_UNKNOWN);
+        }
+      }
       if (item.primaryConstructor) {
         for (const p of item.primaryConstructor) {
           fields.set(p.name, this.resolveTypeExpr(p.typeAnnotation, env));
@@ -451,6 +860,7 @@ export class TypeChecker {
           optional: Boolean(
             p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
           ),
+          rest: Boolean(p.isRest),
         }));
         const mRet = m.returnType
           ? this.resolveTypeExpr(m.returnType, env)
@@ -468,8 +878,62 @@ export class TypeChecker {
             fields.set(m.name, mParams[0]?.type ?? TYPE_UNKNOWN);
           }
         }
+
+        const scanThisProps = (node: Statement | Expr | Block | null | undefined) => {
+          if (!node) return;
+          if ("statements" in node) {
+            for (const s of node.statements) scanThisProps(s);
+            return;
+          }
+          if ("kind" in node) {
+            if (node.kind === "AssignStmt" || node.kind === "AssignExpr") {
+              const target = node.target;
+              if (
+                target.kind === "MemberAccessExpr" &&
+                target.object.kind === "IdentifierExpr" &&
+                target.object.name === "this"
+              ) {
+                if (!fields.has(target.property)) {
+                  fields.set(target.property, TYPE_UNKNOWN);
+                }
+              } else if (
+                target.kind === "IdentifierExpr" &&
+                m.name === "constructor" &&
+                !fields.has(target.name) &&
+                !m.params.some((p) => p.name === target.name)
+              ) {
+                fields.set(target.name, TYPE_UNKNOWN);
+              }
+            }
+            switch (node.kind) {
+              case "ExprStmt":
+                scanThisProps(node.expr);
+                break;
+              case "IfStmt":
+                for (const s of node.thenBranch.statements) scanThisProps(s);
+                for (const el of node.elifBranches) {
+                  for (const s of el.body.statements) scanThisProps(s);
+                }
+                if (node.elseBranch) {
+                  for (const s of node.elseBranch.statements) scanThisProps(s);
+                }
+                break;
+              case "WhileStmt":
+              case "ForStmt":
+                for (const s of node.body.statements) scanThisProps(s);
+                break;
+              case "TryStmt":
+                for (const s of node.tryBlock.statements) scanThisProps(s);
+                if (node.catchBlock) for (const s of node.catchBlock.statements) scanThisProps(s);
+                if (node.finallyBlock) for (const s of node.finallyBlock.statements) scanThisProps(s);
+                break;
+            }
+          }
+        };
+        scanThisProps(m.body);
       }
       const clsType = makeRecordType(fields, item.name);
+      clsType.isClass = true;
       env.defineType(item.name, clsType);
 
       // Define constructor function in value environment
@@ -481,6 +945,7 @@ export class TypeChecker {
           optional: Boolean(
             p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
           ),
+          rest: Boolean(p.isRest),
         }));
         env.define(item.name, makeFunctionType(ctorParams, clsType));
       } else if (item.primaryConstructor && item.primaryConstructor.length > 0) {
@@ -490,6 +955,7 @@ export class TypeChecker {
           optional: Boolean(
             p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
           ),
+          rest: Boolean(p.isRest),
         }));
         env.define(item.name, makeFunctionType(ctorParams, clsType));
       } else {
@@ -638,7 +1104,20 @@ export class TypeChecker {
     const methodEnv = new TypeEnv(classEnv, retType, true, m.isAsync);
 
     for (const p of m.params) {
-      methodEnv.define(p.name, this.resolveTypeExpr(p.typeAnnotation, classEnv), true);
+      const pType = this.resolveTypeExpr(p.typeAnnotation, classEnv);
+      if (p.defaultValue) {
+        const defType = this.checkExpr(p.defaultValue, methodEnv, pType);
+        if (!isAssignable(pType, defType)) {
+          throw new TypeCheckError(
+            `Default parameter value of type '${formatType(defType)}' is not assignable to parameter '${p.name}' of type '${formatType(pType)}'`,
+            p.defaultValue.span,
+            "AIL_E2002_TYPE_MISMATCH",
+            pType,
+            defType,
+          );
+        }
+      }
+      this.bindParameter(p.name, pType, methodEnv, true);
     }
 
     if (m.body.kind === "Block") {
@@ -743,6 +1222,7 @@ export class TypeChecker {
           optional: Boolean(
             p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
           ),
+          rest: Boolean(p.isRest),
         }));
         if (!m.accessor) {
           clsType.fields.set(m.name, makeFunctionType(mParams, retType));
@@ -769,7 +1249,10 @@ export class TypeChecker {
       const raw = paramName.slice(1, -1);
       const parts = raw.split(",").map((s) => s.trim());
       for (let i = 0; i < parts.length; i++) {
-        const id = parts[i];
+        let id = parts[i];
+        if (id.includes("=")) {
+          id = id.split("=")[0].trim();
+        }
         if (!id || id === "" || id === "_") continue;
         let subType: Type = TYPE_UNKNOWN;
         if (paramType.kind === "tuple") {
@@ -793,6 +1276,12 @@ export class TypeChecker {
           const split = entry.split(":");
           propName = split[0].trim();
           bindingName = split[1].trim();
+        }
+        if (propName.includes("=")) {
+          propName = propName.split("=")[0].trim();
+        }
+        if (bindingName.includes("=")) {
+          bindingName = bindingName.split("=")[0].trim();
         }
         if (!bindingName || bindingName === "_") continue;
 
@@ -1922,16 +2411,14 @@ export class TypeChecker {
         } else {
           calleeType = this.checkExpr(expr.callee, env);
         }
-        if (calleeType.kind === "unknown") {
-          return TYPE_UNKNOWN;
-        }
         if (calleeType.kind === "option") {
-          if (calleeType.innerType.kind === "unknown") {
-            return TYPE_UNKNOWN;
+          calleeType = calleeType.innerType;
+        }
+        if (calleeType.kind === "unknown") {
+          for (const arg of expr.args) {
+            this.checkExpr(arg, env);
           }
-          if (calleeType.innerType.kind === "function") {
-            return this.typecheckInvocation(calleeType.innerType, expr.args, expr.span, env);
-          }
+          return TYPE_UNKNOWN;
         }
         if (calleeType.kind === "named") {
           if (
@@ -1939,6 +2426,9 @@ export class TypeChecker {
             calleeType.name.includes("->") ||
             calleeType.name === "Function"
           ) {
+            for (const arg of expr.args) {
+              this.checkExpr(arg, env);
+            }
             return TYPE_UNKNOWN;
           }
         }
@@ -1949,6 +2439,9 @@ export class TypeChecker {
             calleeType.name === "Array" ||
             calleeType.name === "Promise")
         ) {
+          for (const arg of expr.args) {
+            this.checkExpr(arg, env);
+          }
           if (calleeType.name === "Date") return makeNamedType("Date");
           if (calleeType.name === "Buffer") return makeNamedType("Buffer");
           if (calleeType.name === "Array") return makeArrayType(TYPE_UNKNOWN);
@@ -1967,11 +2460,11 @@ export class TypeChecker {
 
       case "MemberAccessExpr": {
         const objType = this.checkExpr(expr.object, env);
-        if (objType.kind === "unknown") {
+        if (objType.kind === "unknown" || objType.kind === "nil") {
           return TYPE_UNKNOWN;
         }
         const effectiveType = objType.kind === "option" ? objType.innerType : objType;
-        if (effectiveType.kind === "unknown") {
+        if (effectiveType.kind === "unknown" || effectiveType.kind === "nil") {
           return TYPE_UNKNOWN;
         }
         if (effectiveType.kind === "named") {
@@ -1993,6 +2486,9 @@ export class TypeChecker {
         const methodType = getMethodType(effectiveType, expr.property);
         if (methodType) {
           return methodType;
+        }
+        if (effectiveType.kind === "record" && effectiveType.isClass) {
+          return TYPE_UNKNOWN;
         }
         throw new TypeCheckError(
           `Property '${expr.property}' does not exist on type '${formatType(objType)}'`,
@@ -2248,6 +2744,7 @@ export class TypeChecker {
           optional: Boolean(
             p.defaultValue !== undefined || p.isOptional || p.typeAnnotation?.kind === "OptionType",
           ),
+          rest: Boolean(p.isRest),
         }));
         let returnType = expr.returnType
           ? this.resolveTypeExpr(expr.returnType, env)
@@ -2624,7 +3121,10 @@ export class TypeChecker {
   }
 
   private typecheckInvocation(
-    fnType: { params: { name: string; type: Type; optional?: boolean }[]; returnType: Type },
+    fnType: {
+      params: { name: string; type: Type; optional?: boolean; rest?: boolean }[];
+      returnType: Type;
+    },
     args: Expr[],
     span: Span,
     env: TypeEnv,
@@ -2632,8 +3132,11 @@ export class TypeChecker {
     const hasSpread = args.some(
       (arg) => arg.kind === "UnaryExpr" && (arg as UnaryExpr).operator === "...",
     );
-    const minParams = fnType.params.filter((p) => !p.optional).length;
-    if (!hasSpread && (args.length < minParams || args.length > fnType.params.length)) {
+    const lastParam =
+      fnType.params.length > 0 ? fnType.params[fnType.params.length - 1] : undefined;
+    const hasRest = Boolean(lastParam?.rest);
+    const minParams = fnType.params.filter((p) => !p.optional && !p.rest).length;
+    if (!hasSpread && (args.length < minParams || (!hasRest && args.length > fnType.params.length))) {
       throw new TypeCheckError(
         `Function expects between ${minParams} and ${fnType.params.length} arguments, got ${args.length}`,
         span,
@@ -2643,24 +3146,53 @@ export class TypeChecker {
 
     if (!hasSpread) {
       for (let i = 0; i < args.length; i++) {
-        const expectedType = fnType.params[i].type;
-        let argType: Type;
-        if (expectedType.kind === "tuple" && args[i].kind === "ArrayLiteralExpr") {
-          const arr = args[i] as ArrayLiteralExpr;
-          argType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+        if (hasRest && lastParam && i >= fnType.params.length - 1) {
+          const restParamType = lastParam.type;
+          const elementType =
+            restParamType.kind === "array" ? restParamType.elementType : restParamType;
+          let argType: Type;
+          if (elementType.kind === "tuple" && args[i].kind === "ArrayLiteralExpr") {
+            const arr = args[i] as ArrayLiteralExpr;
+            argType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+          } else {
+            argType = this.checkExpr(args[i], env, elementType);
+          }
+          const isDirectArray =
+            i === fnType.params.length - 1 &&
+            args.length === fnType.params.length &&
+            isAssignable(restParamType, argType);
+          const isOptionalParam = Boolean(lastParam.optional);
+          const acceptsNil = isOptionalParam && argType.kind === "nil";
+          if (!isDirectArray && !isAssignable(elementType, argType) && !acceptsNil) {
+            throw new TypeCheckError(
+              `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(elementType)}'`,
+              args[i].span,
+              "AIL_E2002_TYPE_MISMATCH",
+              elementType,
+              argType,
+            );
+          }
         } else {
-          argType = this.checkExpr(args[i], env, expectedType);
-        }
-        const isOptionalParam = Boolean(fnType.params[i].optional);
-        const acceptsNil = isOptionalParam && argType.kind === "nil";
-        if (!isAssignable(expectedType, argType) && !acceptsNil) {
-          throw new TypeCheckError(
-            `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
-            args[i].span,
-            "AIL_E2002_TYPE_MISMATCH",
-            expectedType,
-            argType,
-          );
+          const expectedType = fnType.params[i].type;
+          let argType: Type;
+          if (expectedType.kind === "tuple" && args[i].kind === "ArrayLiteralExpr") {
+            const arr = args[i] as ArrayLiteralExpr;
+            argType = makeTupleType(arr.elements.map((el) => this.checkExpr(el, env)));
+          } else {
+            argType = this.checkExpr(args[i], env, expectedType);
+          }
+          const isOptionalParam = Boolean(fnType.params[i].optional);
+          const acceptsNil =
+            (isOptionalParam || isStringType(expectedType)) && argType.kind === "nil";
+          if (!isAssignable(expectedType, argType) && !acceptsNil) {
+            throw new TypeCheckError(
+              `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
+              args[i].span,
+              "AIL_E2002_TYPE_MISMATCH",
+              expectedType,
+              argType,
+            );
+          }
         }
       }
     } else {
@@ -3080,10 +3612,174 @@ function isValidInstanceofClassType(type: Type, env: TypeEnv): boolean {
   return false;
 }
 
+function exprContainsDollar(e: Expr | null | undefined): boolean {
+  if (!e) return false;
+  if (e.kind === "IdentifierExpr" && e.name.startsWith("$")) return true;
+  if (e.kind === "CallExpr") {
+    if (exprContainsDollar(e.callee)) return true;
+    for (const a of e.args) {
+      if (exprContainsDollar(a)) return true;
+    }
+  } else if (e.kind === "MemberAccessExpr") {
+    return exprContainsDollar(e.object);
+  } else if (e.kind === "IndexExpr") {
+    return exprContainsDollar(e.object) || exprContainsDollar(e.index);
+  } else if (e.kind === "BinaryExpr") {
+    return exprContainsDollar(e.left) || exprContainsDollar(e.right);
+  } else if (e.kind === "UnaryExpr" || e.kind === "PostfixTryExpr" || e.kind === "AwaitExpr") {
+    return exprContainsDollar(e.operand);
+  } else if (e.kind === "TemplateLiteralExpr") {
+    for (const ex of e.expressions) {
+      if (exprContainsDollar(ex)) return true;
+    }
+  } else if (e.kind === "ArrayLiteralExpr") {
+    for (const el of e.elements) {
+      if (exprContainsDollar(el)) return true;
+    }
+  } else if (e.kind === "RecordLiteralExpr") {
+    for (const p of e.properties) {
+      if (exprContainsDollar(p.value)) return true;
+    }
+  } else if (e.kind === "ClosureExpr") {
+    if ("statements" in e.body) {
+      for (const s of e.body.statements) {
+        if (stmtContainsDollar(s)) return true;
+      }
+    } else {
+      return exprContainsDollar(e.body);
+    }
+  } else if (e.kind === "AssignExpr") {
+    return exprContainsDollar(e.target) || exprContainsDollar(e.value);
+  }
+  return false;
+}
+
+function stmtContainsDollar(s: Statement | null | undefined): boolean {
+  if (!s) return false;
+  switch (s.kind) {
+    case "ExprStmt":
+      return exprContainsDollar(s.expr);
+    case "ReturnStmt":
+      return s.value ? exprContainsDollar(s.value) : false;
+    case "LetBinding":
+      return s.name.startsWith("$") || exprContainsDollar(s.init);
+    case "DestructureBinding":
+      return s.names.some((n) => n.startsWith("$")) || exprContainsDollar(s.init);
+    case "AssignStmt":
+      return exprContainsDollar(s.target) || exprContainsDollar(s.value);
+    case "ThrowStmt":
+      return exprContainsDollar(s.expr);
+    case "MatchStmt":
+      if (exprContainsDollar(s.target)) return true;
+      for (const c of s.cases) {
+        if (c.guard && exprContainsDollar(c.guard)) return true;
+        if ("statements" in c.body) {
+          for (const st of c.body.statements) {
+            if (stmtContainsDollar(st)) return true;
+          }
+        } else if (exprContainsDollar(c.body)) {
+          return true;
+        }
+      }
+      return false;
+    case "IfStmt":
+      if (exprContainsDollar(s.condition)) return true;
+      for (const st of s.thenBranch.statements) {
+        if (stmtContainsDollar(st)) return true;
+      }
+      for (const el of s.elifBranches) {
+        if (exprContainsDollar(el.condition)) return true;
+        for (const st of el.body.statements) {
+          if (stmtContainsDollar(st)) return true;
+        }
+      }
+      if (s.elseBranch) {
+        for (const st of s.elseBranch.statements) {
+          if (stmtContainsDollar(st)) return true;
+        }
+      }
+      return false;
+    case "WhileStmt":
+      if (exprContainsDollar(s.condition)) return true;
+      for (const st of s.body.statements) {
+        if (stmtContainsDollar(st)) return true;
+      }
+      return false;
+    case "ForStmt":
+      if (s.variable.startsWith("$")) return true;
+      if (exprContainsDollar(s.iterable)) return true;
+      for (const st of s.body.statements) {
+        if (stmtContainsDollar(st)) return true;
+      }
+      return false;
+    case "TryStmt":
+      for (const st of s.tryBlock.statements) {
+        if (stmtContainsDollar(st)) return true;
+      }
+      if (s.catchBlock) {
+        for (const st of s.catchBlock.statements) {
+          if (stmtContainsDollar(st)) return true;
+        }
+      }
+      if (s.finallyBlock) {
+        for (const st of s.finallyBlock.statements) {
+          if (stmtContainsDollar(st)) return true;
+        }
+      }
+      return false;
+  }
+  return false;
+}
+
+function astContainsDollarIdentifier(mod: Module): boolean {
+  for (const item of mod.items) {
+    if (item.kind === "FunctionDecl") {
+      if (item.name.startsWith("$")) return true;
+      if ("statements" in item.body) {
+        for (const s of item.body.statements) {
+          if (stmtContainsDollar(s)) return true;
+        }
+      } else if (exprContainsDollar(item.body)) {
+        return true;
+      }
+    } else if (item.kind === "ClassDecl") {
+      if (item.name.startsWith("$")) return true;
+      for (const m of item.methods) {
+        if ("statements" in m.body) {
+          for (const s of m.body.statements) {
+            if (stmtContainsDollar(s)) return true;
+          }
+        } else if (exprContainsDollar(m.body)) {
+          return true;
+        }
+      }
+      if (item.properties) {
+        for (const p of item.properties) {
+          if (p.initialValue && exprContainsDollar(p.initialValue)) return true;
+        }
+      }
+      if (item.staticBlocks) {
+        for (const sb of item.staticBlocks) {
+          for (const s of sb.statements) {
+            if (stmtContainsDollar(s)) return true;
+          }
+        }
+      }
+    } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
+      if (item.name.startsWith("$")) return true;
+      if (item.value && exprContainsDollar(item.value)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * High-level typechecking entrypoint.
  */
-export function check(mod: Module): void {
+export function check(
+  mod: Module,
+  options?: { idioms?: Record<string, ProjectIdiomDefinition>; baseDir?: string },
+): void {
   const checker = new TypeChecker();
-  checker.checkModule(mod);
+  checker.checkModule(mod, options);
 }

@@ -182,11 +182,13 @@ export class PythonEmitter {
       }
     }
 
-    if (hasDataclass) {
+    if (hasDataclass && !imports.some((imp) => imp.source === "dataclasses")) {
       this.ctx.writeLine("from dataclasses import dataclass");
     }
-    this.ctx.writeLine("from typing import Any, Optional, Union, TypedDict");
-    this.ctx.writeLine();
+    if (!imports.some((imp) => imp.source === "typing")) {
+      this.ctx.writeLine("from typing import Any, Optional, Union, TypedDict");
+      this.ctx.writeLine();
+    }
 
     for (const imp of imports) {
       this.emitImport(imp);
@@ -349,7 +351,7 @@ export class PythonEmitter {
     const nodeId = `class:${c.name}`;
     this.emitLeadingTrivia(nodeId);
 
-    const isDc = this.isDataclass(c);
+    const isDc = this.isDataclass(c) || c.extends === "TypedDict";
     if (isDc) {
       this.ctx.writeLine("@dataclass");
     }

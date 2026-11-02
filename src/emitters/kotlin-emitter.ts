@@ -310,8 +310,9 @@ export class KotlinEmitter {
         for (let i = 0; i < t.fields.length; i++) {
           const f = t.fields[i];
           const comma = i < t.fields.length - 1 ? "," : "";
-          const opt = f.isOptional ? "?" : "";
-          const typeStr = this.emitTypeExpr(f.typeAnnotation) + opt;
+          const baseType = this.emitTypeExpr(f.typeAnnotation);
+          const opt = f.isOptional && !baseType.endsWith("?") ? "?" : "";
+          const typeStr = baseType + opt;
           let defVal = "";
           if (f.defaultValue) {
             defVal = ` = ${this.emitExpr(f.defaultValue)}`;
@@ -350,7 +351,7 @@ export class KotlinEmitter {
       c.properties.length === 0;
 
     const classTrivia = this.ctx.trivia?.getTrivia(nodeId);
-    const hasDataKeyword = classTrivia?.leading.some((t) => t.content.includes("data class"));
+    const hasDataKeyword = Boolean(this.ctx.trivia?.getTrivia("is_data:" + c.name)) || Boolean(classTrivia?.leading.some((t) => t.content.includes("data class")));
 
     const isData =
       Boolean(hasDataKeyword) ||
@@ -381,8 +382,9 @@ export class KotlinEmitter {
     if (c.primaryConstructor && c.primaryConstructor.length > 0) {
       const params = c.primaryConstructor.map((p) => {
         const valKw = p.isMut ? "var " : "val ";
-        const opt = p.isOptional ? "?" : "";
-        const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}${opt}` : "";
+        const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
+        const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
+        const typeStr = baseType ? `: ${baseType}${opt}` : "";
         const def = p.defaultValue
           ? ` = ${this.emitExpr(p.defaultValue)}`
           : p.isOptional
@@ -446,8 +448,9 @@ export class KotlinEmitter {
       m.typeParams && m.typeParams.length > 0 ? `<${m.typeParams.join(", ")}> ` : "";
 
     const params = m.params.map((p) => {
-      const opt = p.isOptional ? "?" : "";
-      const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}${opt}` : "";
+      const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
+      const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
+      const typeStr = baseType ? `: ${baseType}${opt}` : "";
       const def = p.defaultValue
         ? ` = ${this.emitExpr(p.defaultValue)}`
         : p.isOptional
@@ -496,8 +499,9 @@ export class KotlinEmitter {
       fn.typeParams && fn.typeParams.length > 0 ? `<${fn.typeParams.join(", ")}> ` : "";
 
     const params = fn.params.map((p) => {
-      const opt = p.isOptional ? "?" : "";
-      const typeStr = p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}${opt}` : "";
+      const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
+      const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
+      const typeStr = baseType ? `: ${baseType}${opt}` : "";
       const def = p.defaultValue
         ? ` = ${this.emitExpr(p.defaultValue)}`
         : p.isOptional

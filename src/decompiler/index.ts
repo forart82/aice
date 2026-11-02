@@ -22,17 +22,21 @@ import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js
 import { decompilePhp, PhpDecompiler } from "./php-decompiler.js";
 import { decompilePython, PythonDecompiler } from "./py-decompiler.js";
 import { decompileKotlin, KotlinDecompiler } from "./kotlin-decompiler.js";
+import { decompileGo, GoDecompiler } from "./go-decompiler.js";
+import { decompileRust, RustDecompiler } from "./rust-decompiler.js";
 
 export * from "./ail-generator.js";
 export * from "./cpp-decompiler.js";
 export * from "./csharp-decompiler.js";
 export * from "./css-decompiler.js";
+export * from "./go-decompiler.js";
 export * from "./html-decompiler.js";
 export * from "./json-decompiler.js";
 export * from "./kotlin-decompiler.js";
 export * from "./php-decompiler.js";
 export * from "./py-decompiler.js";
 export * from "./roundtrip.js";
+export * from "./rust-decompiler.js";
 export * from "./ts-decompiler.js";
 export * from "./twig-decompiler.js";
 export * from "./yaml-decompiler.js";
@@ -139,6 +143,20 @@ export function decompile(
     }
     case "kotlin": {
       const decompiler = new KotlinDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "go": {
+      const decompiler = new GoDecompiler(source, filePath);
+      const result = decompiler.decompile();
+      ast = result.ast;
+      trivia = result.trivia;
+      break;
+    }
+    case "rust": {
+      const decompiler = new RustDecompiler(source, filePath);
       const result = decompiler.decompile();
       ast = result.ast;
       trivia = result.trivia;

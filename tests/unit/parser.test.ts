@@ -2337,6 +2337,26 @@ line 3\``;
     });
   });
 
+  describe("Chained Assignments", () => {
+    it("parses chained assignments right-associatively", () => {
+      const src = `
+fn reset():
+  a = b = c = false
+`;
+      const mod = parse(src);
+      const fn = mod.items[0] as FunctionDecl;
+      expect(fn.body.kind).toBe("Block");
+      const stmt = (fn.body as any).statements[0];
+      expect(stmt.kind).toBe("AssignStmt");
+      expect(stmt.target.name).toBe("a");
+      expect(stmt.value.kind).toBe("AssignExpr");
+      expect(stmt.value.target.name).toBe("b");
+      expect(stmt.value.value.kind).toBe("AssignExpr");
+      expect(stmt.value.value.target.name).toBe("c");
+      expect(stmt.value.value.value.value).toBe(false);
+    });
+  });
+
   describe("Error Handling", () => {
     it("throws ParserError on unexpected tokens with exact span", () => {
       const src = `fn incomplete(`;

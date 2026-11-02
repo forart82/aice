@@ -11,6 +11,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAilSiblingPath, isTargetLocked } from "./fs-lock.js";
+import { loadProjectConfig, type ProjectIdiomDefinition } from "../config/index.js";
+import { formatIdiomsMarkdownSection } from "../idioms/index.js";
 
 export interface ShieldOptions {
   dir: string;
@@ -20,6 +22,7 @@ export interface ShieldOptions {
   lifecycleHooks?: boolean; // default false for library calls, true for CLI adopt & shield apply
   geminiMd?: boolean; // default true if GEMINI.md exists, or if specified
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".py", ".cpp", ".hpp", ".h"]
+  idioms?: Record<string, ProjectIdiomDefinition>;
 }
 
 export interface ShieldApplyResult {
@@ -93,8 +96,13 @@ export function generateShieldIgnoreBlock(extensions: string[] = DEFAULT_EXTENSI
   return lines.join("\n");
 }
 
-export function generateCognitiveAgentsMdContent(): string {
-  return [
+export function generateCognitiveAgentsMdContent(
+  optionsOrIdioms?: Record<string, ProjectIdiomDefinition> | { idioms?: Record<string, ProjectIdiomDefinition> },
+): string {
+  const idioms =
+    optionsOrIdioms && ("idioms" in optionsOrIdioms ? optionsOrIdioms.idioms : optionsOrIdioms);
+
+  const lines = [
     COGNITIVE_RULES_MD_START,
     "# AIL Project Directives & Dialect Specification for AI Coding Agents",
     "",
@@ -137,12 +145,23 @@ export function generateCognitiveAgentsMdContent(): string {
     "- **CSS Layout Macros & Tokens**:",
     "  - Layout macros: `fl-row`, `fl-col`, `fl-center`",
     "  - Token unit deduplication: `tokens spacing[rem]: 1: 0.25, 2: 0.5`",
-    COGNITIVE_RULES_MD_END,
-  ].join("\n");
+  ];
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_MD_END);
+  return lines.join("\n");
 }
 
-export function generateCognitiveCursorRulesContent(): string {
-  return [
+export function generateCognitiveCursorRulesContent(
+  optionsOrIdioms?: Record<string, ProjectIdiomDefinition> | { idioms?: Record<string, ProjectIdiomDefinition> },
+): string {
+  const idioms =
+    optionsOrIdioms && ("idioms" in optionsOrIdioms ? optionsOrIdioms.idioms : optionsOrIdioms);
+
+  const lines = [
     COGNITIVE_RULES_TEXT_START,
     "# AIL Project Directives & Dialect Specification for AI Coding Agents",
     "# CRITICAL DIRECTIVE: This repository is authoritatively developed in AIL (*.ail).",
@@ -161,8 +180,243 @@ export function generateCognitiveCursorRulesContent(): string {
     "# 6. Error Handling: Return `Result[T, E]`, unpack with postfix `?` (no try/catch).",
     "# 7. UI Components: `component Name(props):` with indented children (no closing XML tags).",
     "# 8. CSS: `fl-row`, `fl-col`, `fl-center`, `tokens spacing[rem]: 1: 0.25`.",
-    COGNITIVE_RULES_TEXT_END,
-  ].join("\n");
+  ];
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_TEXT_END);
+  return lines.join("\n");
+}
+
+export function generateCompanionAgentsMdContent(options?: {
+  targetProjectDir?: string;
+  outDir?: string;
+  idioms?: Record<string, ProjectIdiomDefinition>;
+}): string {
+  const targetProjectDir = options?.targetProjectDir ?? "../target";
+  const outDir = options?.outDir ?? `${targetProjectDir}/src`;
+
+  const lines = [
+    COGNITIVE_RULES_MD_START,
+    "# AIL Companion Workspace Directives for AI Coding Agents",
+    "",
+    "> **CRITICAL DIRECTIVE**: This repository is a standalone AIL Companion Workspace operating in twin-workspace mode (`mode: \"companion\"`).",
+    `> The external target project is located at \`${targetProjectDir}\`.`,
+    "> All authoritative development occurs strictly in AIL (`*.ail`) source files within `src/`.",
+    `> Target source files in the external project (\`${outDir}\`) are machine-generated build artifacts.`,
+    "",
+    "## 1. Companion Workspace Directives:",
+    "1. **Source of Truth**: Always read, inspect, create, and modify `*.ail` source files in `src/`.",
+    `2. **Never Edit External Target Files Directly**: Do not edit files in \`${targetProjectDir}\` directly. All edits must be made in \`src/*.ail\` in this companion workspace.`,
+    `3. **Compilation**: Running \`ail compile\` or \`ail compile <file.ail>\` transpiles \`.ail\` sources directly into the external target project (\`${outDir}\`).`,
+    "4. **Stack Trace Path Translation**: When runtime errors, test failures, compiler diagnostics, or user prompts reference a target file in the external project (e.g. `engine.ts:338` or `main.ts:12`), translate the path to its companion `.ail` file in `src/` and inspect it instead.",
+    "5. **Clean Target Project**: The external target project contains zero `.ail` files and remains 100% clean and buildable by standard tooling.",
+    "6. **Targeted Compilation**: Compile only modified source files with `ail compile <path/to/file.ail>`. Never edit generated target files manually.",
+    "7. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.",
+    "",
+    "## 2. AIL 2.0 Dialect Syntax Cheatsheet:",
+    "- **Canonical File Naming**: Always name files in `src/` (e.g. `src/cli/terminal.ail`, `src/App.tsx.ail`, `src/styles.css.ail`).",
+    "- **Keywordless Bindings** (no `let` or `const`):",
+    "  - `x := expr` -> immutable variable binding (replaces `const x = ...`)",
+    "  - `y ::= expr` -> mutable variable binding (replaces `let y = ...`)",
+    "  - `x: int := 42` -> typed immutable binding",
+    '  - `y: str ::= ""` -> typed mutable binding',
+    "- **Vector Destructuring & Math**:",
+    "  - `[x, y] := [10, 20]` (immutable destructuring)",
+    "  - `[x, y] ::= [0, 0]` (mutable destructuring)",
+    "  - `[x, y] += [dx, dy]` (vector compound assignment)",
+    "  - Canonical math builtins (no `Math.` prefix): `min(a, b)`, `max(a, b)`, `clamp(val, min, max)`, `hypot(dx, dy)`, `floor(x)`, `ceil(x)`, `round(x)`, `abs(x)`, `sqrt(x)`, `sin(r)`, `cos(r)`, `atan2(y, x)`",
+    "- **Class Dual-Case Properties**:",
+    "  - `prop X, x: type = init` -> synthesizes field `X` and getter/setter `x` in emitted TypeScript/C++",
+    "- **Single-Token Types & Sigils**:",
+    "  - Types: `int`, `str`, `float`, `bool`, `num`, `byte`, `char`, `void`, `nil` (never use `i32` or `f64`)",
+    '  - Struct sigils: `type User: id!s, name!s, age!i = 0, active!b = true, role? = "member"`',
+    "- **Functions & Trailing Returns**:",
+    "  - Concise: `fn add(a:int, b:int) = a + b`",
+    "  - Block: `fn process(n:int) -> int:` followed by 2-space indented block with trailing expression return",
+    "- **Algebraic Error Handling**:",
+    "  - Return `Result[T, E]`. Use postfix `?` for early return (never use `try/catch` or `throw`)",
+    "- **Declarative UI Component DSL**:",
+    "  - `component Button(label:str):` with indented layout hierarchy (never emit closing XML tags like `</div>`)",
+    "- **CSS Layout Macros & Tokens**:",
+    "  - Layout macros: `fl-row`, `fl-col`, `fl-center`",
+    "  - Token unit deduplication: `tokens spacing[rem]: 1: 0.25, 2: 0.5`",
+  ];
+
+  if (options?.idioms && Object.keys(options.idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(options.idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_MD_END);
+  return lines.join("\n");
+}
+
+export function generateCompanionCursorRulesContent(options?: {
+  targetProjectDir?: string;
+  outDir?: string;
+  idioms?: Record<string, ProjectIdiomDefinition>;
+}): string {
+  const targetProjectDir = options?.targetProjectDir ?? "../target";
+  const outDir = options?.outDir ?? `${targetProjectDir}/src`;
+
+  const lines = [
+    COGNITIVE_RULES_TEXT_START,
+    "# AIL Companion Workspace Directives for AI Coding Agents",
+    '# CRITICAL DIRECTIVE: This repository is a standalone AIL Companion Workspace (mode: "companion").',
+    `# The external target project is located at ${targetProjectDir}.`,
+    "# All authoritative development occurs strictly in AIL (*.ail) source files within src/.",
+    `# Target source files in ${outDir} are machine-generated build artifacts.`,
+    "# Agents must only read, create, and modify *.ail source files in this workspace.",
+    "# Never edit external target files directly; changes will be overwritten by `ail compile`.",
+    "# STACK TRACE TRANSLATION: If a stack trace or error cites a target file, inspect the corresponding src/*.ail file instead!",
+    "# Run `ail compile <file.ail>` to produce target files in the external project.",
+    "#",
+    "# AIL 2.0 DIALECT CHEATSHEET:",
+    "# 1. Bindings (no let/const): `x := 42` (immutable), `y ::= 0` (mutable), `z: int := 100` (typed).",
+    "# 2. Vector DSL & Math: `[x, y] := [10, 20]`, `[x, y] += [dx, dy]`, builtins: min, max, clamp, hypot, floor, ceil, abs.",
+    "# 3. Class Properties: `prop X, x: float = 0.0` synthesizes field X and accessor pair x.",
+    "# 4. Types & Sigils: `int`, `str`, `float`, `bool`, `num`. Sigils: `!s`, `!i`, `!f`, `!b`, `?`.",
+    "# 5. Functions: `fn add(a:int, b:int) = a + b` or `fn run():` with 2-space indentation and trailing expression return.",
+    "# 6. Error Handling: Return `Result[T, E]`, unpack with postfix `?` (no try/catch).",
+    "# 7. UI Components: `component Name(props):` with indented children (no closing XML tags).",
+    "# 8. CSS: `fl-row`, `fl-col`, `fl-center`, `tokens spacing[rem]: 1: 0.25`.",
+  ];
+
+  if (options?.idioms && Object.keys(options.idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(options.idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_TEXT_END);
+  return lines.join("\n");
+}
+
+export function applyCompanionShield(
+  companionDir: string,
+  options: {
+    targetProjectDir?: string;
+    outDir?: string;
+    idioms?: Record<string, ProjectIdiomDefinition>;
+  } = {},
+): { createdFiles: string[]; modifiedFiles: string[] } {
+  const resolvedDir = path.resolve(companionDir);
+  if (!fs.existsSync(resolvedDir)) {
+    fs.mkdirSync(resolvedDir, { recursive: true });
+  }
+
+  const createdFiles: string[] = [];
+  const modifiedFiles: string[] = [];
+
+  const targetProjectDir = options.targetProjectDir ?? "../target";
+  const outDir = options.outDir ?? `${targetProjectDir}/src`;
+  let idioms = options.idioms;
+  if (!idioms) {
+    try {
+      idioms = loadProjectConfig(resolvedDir).idioms;
+    } catch {
+      // ignore
+    }
+  }
+
+  // 1. AGENTS.md
+  const agentsMdPath = path.join(resolvedDir, "AGENTS.md");
+  const agentsMdExisted = fs.existsSync(agentsMdPath);
+  const agentsBlock = generateCompanionAgentsMdContent({ targetProjectDir, outDir, idioms });
+
+  if (!agentsMdExisted) {
+    fs.writeFileSync(agentsMdPath, `${agentsBlock}\n`, "utf-8");
+    createdFiles.push(agentsMdPath);
+  } else {
+    const existing = fs.readFileSync(agentsMdPath, "utf-8");
+    const { newContent, changed } = updateMarkerBlock(
+      existing,
+      COGNITIVE_RULES_MD_START,
+      COGNITIVE_RULES_MD_END,
+      agentsBlock,
+    );
+    if (changed) {
+      fs.writeFileSync(agentsMdPath, newContent, "utf-8");
+      modifiedFiles.push(agentsMdPath);
+    }
+  }
+
+  // 2. GEMINI.md
+  const geminiMdPath = path.join(resolvedDir, "GEMINI.md");
+  const geminiMdExisted = fs.existsSync(geminiMdPath);
+
+  if (!geminiMdExisted) {
+    fs.writeFileSync(geminiMdPath, `${agentsBlock}\n`, "utf-8");
+    createdFiles.push(geminiMdPath);
+  } else {
+    const existing = fs.readFileSync(geminiMdPath, "utf-8");
+    const { newContent, changed } = updateMarkerBlock(
+      existing,
+      COGNITIVE_RULES_MD_START,
+      COGNITIVE_RULES_MD_END,
+      agentsBlock,
+    );
+    if (changed) {
+      fs.writeFileSync(geminiMdPath, newContent, "utf-8");
+      modifiedFiles.push(geminiMdPath);
+    }
+  }
+
+  // 3. .cursorrules
+  const cursorRulesPath = path.join(resolvedDir, ".cursorrules");
+  const cursorRulesExisted = fs.existsSync(cursorRulesPath);
+  const cursorRulesBlock = generateCompanionCursorRulesContent({ targetProjectDir, outDir, idioms });
+
+  if (!cursorRulesExisted) {
+    fs.writeFileSync(cursorRulesPath, `${cursorRulesBlock}\n`, "utf-8");
+    createdFiles.push(cursorRulesPath);
+  } else {
+    const existing = fs.readFileSync(cursorRulesPath, "utf-8");
+    const { newContent, changed } = updateMarkerBlock(
+      existing,
+      COGNITIVE_RULES_TEXT_START,
+      COGNITIVE_RULES_TEXT_END,
+      cursorRulesBlock,
+    );
+    if (changed) {
+      fs.writeFileSync(cursorRulesPath, newContent, "utf-8");
+      modifiedFiles.push(cursorRulesPath);
+    }
+  }
+
+  return { createdFiles, modifiedFiles };
+}
+
+export function removeCompanionShield(
+  companionDir: string,
+): { removedFiles: string[]; revertedFiles: string[] } {
+  const resolvedDir = path.resolve(companionDir);
+  const removedFiles: string[] = [];
+  const revertedFiles: string[] = [];
+
+  if (!fs.existsSync(resolvedDir)) {
+    return { removedFiles, revertedFiles };
+  }
+
+  const filesToClean = ["AGENTS.md", "GEMINI.md", ".cursorrules"];
+  for (const fileName of filesToClean) {
+    const filePath = path.join(resolvedDir, fileName);
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, "utf-8");
+      const { remaining, removed } = removeCognitiveRule(content);
+      if (removed) {
+        if (!remaining.trim()) {
+          fs.unlinkSync(filePath);
+          removedFiles.push(filePath);
+        } else {
+          fs.writeFileSync(filePath, remaining, "utf-8");
+          revertedFiles.push(filePath);
+        }
+      }
+    }
+  }
+
+  return { removedFiles, revertedFiles };
 }
 
 export function generateAilShieldHookScript(): string {
@@ -177,6 +431,7 @@ export function generateAilShieldHookScript(): string {
  */
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 try {
   const rawInput = fs.readFileSync(0, "utf-8");
@@ -186,33 +441,114 @@ try {
   }
 
   const payload = JSON.parse(rawInput);
-  const toolName = payload.toolName || payload.tool_name || payload.toolCall?.name || payload.tool_call?.name;
-  const args = payload.toolInput || payload.tool_input || payload.toolCall?.args || payload.tool_call?.args || {};
-  const rawPath = args.AbsolutePath || args.TargetFile || args.absolutePath || args.targetFile || args.absolute_path || args.target_file || args.path || args.filePath || args.file_path || args.Uri || args.uri;
+  const rawToolName =
+    payload.toolName ||
+    payload.tool_name ||
+    payload.toolCall?.name ||
+    payload.tool_call?.name ||
+    payload.name ||
+    payload.tool;
+
+  let rawArgs =
+    payload.toolInput ||
+    payload.tool_input ||
+    payload.toolCall?.args ||
+    payload.toolCall?.input ||
+    payload.tool_call?.args ||
+    payload.tool_call?.input ||
+    payload.args ||
+    payload.arguments ||
+    payload.input ||
+    {};
+
+  if (typeof rawArgs === "string") {
+    try {
+      rawArgs = JSON.parse(rawArgs);
+    } catch {
+      rawArgs = {};
+    }
+  }
+
+  const args = rawArgs && typeof rawArgs === "object" ? rawArgs : {};
+  const rawPath =
+    args.AbsolutePath ||
+    args.TargetFile ||
+    args.absolutePath ||
+    args.targetFile ||
+    args.absolute_path ||
+    args.target_file ||
+    args.path ||
+    args.filePath ||
+    args.file_path ||
+    args.Uri ||
+    args.uri;
 
   if (rawPath && typeof rawPath === "string") {
-    let checkPath = rawPath;
+    let checkPath = rawPath.trim();
     if (checkPath.startsWith("file://")) {
-      checkPath = checkPath.slice(7);
+      try {
+        checkPath = fileURLToPath(checkPath);
+      } catch {
+        checkPath = checkPath.replace(/^file:\\/\\//, "");
+      }
     }
-    const hookDir = path.dirname(new URL(import.meta.url).pathname);
+    const hookDir = path.dirname(fileURLToPath(import.meta.url));
     const projectRoot = path.basename(hookDir) === ".agents" ? path.resolve(hookDir, "..") : process.cwd();
-    const resolvedPath = path.isAbsolute(checkPath) ? checkPath : path.resolve(projectRoot, checkPath);
+    const resolvedPath = path.isAbsolute(checkPath) ? path.resolve(checkPath) : path.resolve(projectRoot, checkPath);
 
     if (!resolvedPath.endsWith(".ail")) {
-      const ailSibling = \`\${resolvedPath}.ail\`;
-      if (fs.existsSync(ailSibling)) {
-        if (toolName === "view_file") {
-          console.log(JSON.stringify({
-            decision: "allow",
-            overwrite: { AbsolutePath: ailSibling }
-          }));
-          process.exit(0);
-        } else if (toolName === "replace_file_content" || toolName === "write_to_file") {
+      const ext = path.extname(resolvedPath);
+      const shortAil = ext ? resolvedPath.slice(0, -ext.length) + ".ail" : null;
+      let ailSibling = null;
+      if (fs.existsSync(resolvedPath + ".ail")) {
+        ailSibling = resolvedPath + ".ail";
+      } else if (shortAil && fs.existsSync(shortAil)) {
+        ailSibling = shortAil;
+      }
+
+      const toolName = typeof rawToolName === "string" ? rawToolName.trim() : "";
+      const lowerTool = toolName.toLowerCase().replace(/[-_]/g, "");
+
+      const isView =
+        toolName === "view_file" ||
+        lowerTool === "viewfile" ||
+        lowerTool === "view" ||
+        lowerTool === "read" ||
+        lowerTool === "readfile";
+
+      const isWrite =
+        toolName === "replace_file_content" ||
+        toolName === "write_to_file" ||
+        lowerTool === "replacefilecontent" ||
+        lowerTool === "writetofile" ||
+        lowerTool === "writefile" ||
+        lowerTool === "write" ||
+        lowerTool === "edit" ||
+        lowerTool === "editfile";
+
+      if (isView && ailSibling) {
+        console.log(JSON.stringify({
+          decision: "allow",
+          overwrite: { AbsolutePath: ailSibling }
+        }));
+        process.exit(0);
+      } else if (isWrite) {
+        let isLocked = false;
+        if (fs.existsSync(resolvedPath)) {
+          try {
+            const stat = fs.statSync(resolvedPath);
+            isLocked = (stat.mode & 0o222) === 0;
+          } catch {
+            isLocked = false;
+          }
+        }
+
+        if (ailSibling || isLocked) {
           const baseName = path.basename(resolvedPath);
+          const targetAil = ailSibling ? path.basename(ailSibling) : baseName + ".ail";
           console.log(JSON.stringify({
             decision: "deny",
-            reason: \`MANDATORY AIL SHIELD: Target file '\${baseName}' is a machine-generated read-only build artifact (chmod 444). You MUST inspect and modify '\${baseName}.ail' instead, and compile with \\\`ail compile\\\` or run \\\`npm test\\\`.\`
+            reason: \`MANDATORY AIL SHIELD: Target file '\${baseName}' is a machine-generated read-only build artifact (chmod 444). You MUST inspect and modify '\${targetAil}' instead, and compile with \\\`ail compile\\\` or run \\\`npm test\\\`.\`
           }));
           process.exit(0);
         }
@@ -231,7 +567,9 @@ function parseJsonSafe(content: string): Record<string, unknown> {
   try {
     return JSON.parse(content);
   } catch {
-    const stripped = content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^\\:])\/\/.*$/gm, "$1");
+    const stripped = content
+      .replace(/("(?:\\.|[^"\\])*")|\/\*[\s\S]*?\*\/|\/\/.*$/gm, (_m, str) => str ?? "")
+      .replace(/,\s*([}\]])/g, "$1");
     return JSON.parse(stripped);
   }
 }
@@ -582,10 +920,19 @@ export async function applyAiShield(
 
   // 3. Cognitive Rule Files (AGENTS.md, GEMINI.md, .cursorrules)
   if (cognitiveRulesEnabled) {
+    let idioms = options?.idioms;
+    if (!idioms) {
+      try {
+        idioms = loadProjectConfig(targetDir).idioms;
+      } catch {
+        // ignore
+      }
+    }
+
     // AGENTS.md
     const agentsMdPath = path.join(targetDir, "AGENTS.md");
     const agentsMdExisted = fs.existsSync(agentsMdPath);
-    const agentsBlock = generateCognitiveAgentsMdContent();
+    const agentsBlock = generateCognitiveAgentsMdContent({ idioms });
 
     if (!agentsMdExisted) {
       fs.writeFileSync(agentsMdPath, `${agentsBlock}\n`, "utf-8");
@@ -627,7 +974,7 @@ export async function applyAiShield(
     // .cursorrules
     const cursorRulesPath = path.join(targetDir, ".cursorrules");
     const cursorRulesExisted = fs.existsSync(cursorRulesPath);
-    const cursorRulesBlock = generateCognitiveCursorRulesContent();
+    const cursorRulesBlock = generateCognitiveCursorRulesContent({ idioms });
 
     if (!cursorRulesExisted) {
       fs.writeFileSync(cursorRulesPath, `${cursorRulesBlock}\n`, "utf-8");

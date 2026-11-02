@@ -9,6 +9,8 @@
 import type {
   Block,
   CallExpr,
+  ClassDecl,
+  ConstDecl,
   Expr,
   FunctionDecl,
   MatchStmt,
@@ -18,6 +20,7 @@ import type {
   Statement,
   TypeDecl,
   TypeExpr,
+  VarDecl,
 } from "../core/ast.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
@@ -59,6 +62,15 @@ export class GoEmitter {
             });
           }
         }
+      } else if (item.kind === "ClassDecl") {
+        const fieldNames: string[] = [];
+        if (item.primaryConstructor) {
+          for (const p of item.primaryConstructor) fieldNames.push(p.name);
+        }
+        if (item.properties) {
+          for (const p of item.properties) fieldNames.push(p.name);
+        }
+        this.structTypes.set(item.name, fieldNames);
       }
     }
 
@@ -118,6 +130,15 @@ export class GoEmitter {
     switch (item.kind) {
       case "TypeDecl":
         this.emitTypeDecl(item);
+        break;
+      case "ClassDecl":
+        this.emitClassDecl(item);
+        break;
+      case "ConstDecl":
+        this.emitConstDecl(item);
+        break;
+      case "VarDecl":
+        this.emitVarDecl(item);
         break;
       case "FunctionDecl":
         this.emitFunctionDecl(item);
@@ -212,6 +233,163 @@ export class GoEmitter {
       this.ctx.writeLine("}");
       this.ctx.emitTrailingTrivia(nodeId);
     }
+  }
+
+  private emitConstDecl(c: ConstDecl): void {
+    const nodeId = `const:${c.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+    const name = c.isExported ? (c.name.charAt(0).toUpperCase() + c.name.slice(1)) : c.name;
+    const typeStr = c.typeAnnotation ? ` ${this.emitTypeExpr(c.typeAnnotation)}` : "";
+    const val = this.emitExpr(c.value);
+    this.ctx.writeLine(`const ${name}${typeStr} = ${val}`);
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private emitVarDecl(v: VarDecl): void {
+    const nodeId = `var:${v.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+    const name = v.isExported ? (v.name.charAt(0).toUpperCase() + v.name.slice(1)) : v.name;
+    const typeStr = v.typeAnnotation ? ` ${this.emitTypeExpr(v.typeAnnotation)}` : "";
+    const val = this.emitExpr(v.value);
+    this.ctx.writeLine(`var ${name}${typeStr} = ${val}`);
+    this.ctx.emitTrailingTrivia(nodeId);
+  }
+
+  private emitClassDecl(cls: ClassDecl): void {
+    const nodeId = `class:${cls.name}`;
+    this.ctx.emitLeadingTrivia(nodeId);
+
+    // Collect all fields from primaryConstructor and properties
+    const fields: { name: string; typeAnnotation?: TypeExpr }[] = [];
+    const seen = new Set<string>();
+    if (cls.primaryConstructor) {
+      for (const p of cls.primaryConstructor) {
+        if (!seen.has(p.name)) {
+          seen.add(p.name);
+          fields.push({ name: p.name, typeAnnotation: p.typeAnnotation ?? undefined });
+        }
+      }
+    }
+    if (cls.properties) {
+      for (const p of cls.properties) {
+        if (!seen.has(p.name)) {
+          seen.add(p.name);
+          fields.push({ name: p.name, typeAnnotation: p.typeAnnotation ?? undefined });
+        }
+      }
+    }
+
+    this.ctx.writeLine(`type ${cls.name} struct {`);
+    this.ctx.indent();
+    for (const f of fields) {
+      const fieldNodeId = `field:${cls.name}.${f.name}`;
+      this.ctx.emitLeadingTrivia(fieldNodeId);
+      const goFieldName = this.toPascalCase(f.name);
+      const typeStr = f.typeAnnotation ? this.emitTypeExpr(f.typeAnnotation) : "any";
+      this.ctx.writeLine(`${goFieldName} ${typeStr} \`json:"${this.toSnakeCase(f.name)}"\``);
+      this.ctx.emitTrailingTrivia(fieldNodeId);
+    }
+    this.ctx.dedent();
+    this.ctx.writeLine("}");
+
+    // Constructor helper
+    const ctorMethod = cls.methods.find(
+      (m) =>
+        m.name === "constructor" ||
+        m.name === "new" ||
+        m.name === `New${cls.name}` ||
+        m.name === cls.name,
+    );
+
+    if (cls.primaryConstructor || ctorMethod || fields.length > 0) {
+      this.ctx.writeLine();
+      const params = (ctorMethod ? ctorMethod.params : (cls.primaryConstructor ?? fields))
+        .map(
+          (f) =>
+            `${this.toCamelCase(f.name)} ${f.typeAnnotation ? this.emitTypeExpr(f.typeAnnotation) : "any"}`,
+        )
+        .join(", ");
+
+      this.ctx.writeLine(`func New${cls.name}(${params}) *${cls.name} {`);
+      this.ctx.indent();
+      if (ctorMethod && ctorMethod.body.kind === "Block" && ctorMethod.body.statements.length > 0) {
+        const stmts = ctorMethod.body.statements;
+        const lastStmt = stmts[stmts.length - 1];
+        const endsInReturn = lastStmt && lastStmt.kind === "ReturnStmt";
+        const refsSelf = stmts.some((s) => this.referencesIdentifier(s, "self"));
+
+        if (!refsSelf && endsInReturn) {
+          this.emitBlock(ctorMethod.body, false);
+        } else {
+          this.ctx.writeLine(`self := &${cls.name}{}`);
+          this.emitBlock(ctorMethod.body, false);
+          if (!endsInReturn) {
+            this.ctx.writeLine("return self");
+          }
+        }
+      } else {
+        this.ctx.writeLine(`return &${cls.name}{`);
+        this.ctx.indent();
+        for (const f of fields) {
+          this.ctx.writeLine(`${this.toPascalCase(f.name)}: ${this.toCamelCase(f.name)},`);
+        }
+        this.ctx.dedent();
+        this.ctx.writeLine("}");
+      }
+      this.ctx.dedent();
+      this.ctx.writeLine("}");
+    }
+
+    // Methods
+    const nonCtorMethods = cls.methods.filter((m) => m !== ctorMethod);
+    for (const m of nonCtorMethods) {
+      this.ctx.writeLine();
+      const methodNodeId = `method:${cls.name}.${m.name}`;
+      this.ctx.emitLeadingTrivia(methodNodeId);
+      const mName = this.toPascalCase(m.name);
+      const paramsStr = m.params
+        .map(
+          (p) =>
+            `${this.toCamelCase(p.name)} ${p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "any"}`,
+        )
+        .join(", ");
+
+      let isResult = false;
+      let okType = "";
+      let retStr = "";
+      if (m.returnType) {
+        if (m.returnType.kind === "ResultType") {
+          isResult = true;
+          okType = this.emitTypeExpr(m.returnType.okType);
+          retStr = ` (${okType}, error)`;
+        } else {
+          const tStr = this.emitTypeExpr(m.returnType);
+          if (tStr && tStr !== "void") {
+            retStr = ` ${tStr}`;
+          }
+        }
+      }
+
+      this.ctx.writeLine(`func (self *${cls.name}) ${mName}(${paramsStr})${retStr} {`);
+      this.ctx.indent();
+      if (m.isExpressionBodied) {
+        const exprCode = this.emitExpr(m.body as Expr);
+        if (isResult) {
+          this.ctx.writeLine(`return ${exprCode}, nil`);
+        } else if (retStr) {
+          this.ctx.writeLine(`return ${exprCode}`);
+        } else {
+          this.ctx.writeLine(exprCode);
+        }
+      } else if (m.body.kind === "Block") {
+        this.emitBlock(m.body, isResult, okType, Boolean(retStr));
+      }
+      this.ctx.dedent();
+      this.ctx.writeLine("}");
+      this.ctx.emitTrailingTrivia(methodNodeId);
+    }
+
+    this.ctx.emitTrailingTrivia(nodeId);
   }
 
   private emitFunctionDecl(fn: FunctionDecl): void {
@@ -507,6 +685,9 @@ export class GoEmitter {
         if (this.structTypes.has(expr.name)) {
           return expr.name;
         }
+        if (expr.name === "this" || expr.name === "self") {
+          return "self";
+        }
         return this.toCamelCase(expr.name);
       }
       case "AssignExpr":
@@ -685,6 +866,15 @@ export class GoEmitter {
             return "any";
         }
       case "NamedType": {
+        if (typeExpr.name === "Map" && typeExpr.typeArgs && typeExpr.typeArgs.length === 2) {
+          const keyType = this.emitTypeExpr(typeExpr.typeArgs[0]);
+          const valType = this.emitTypeExpr(typeExpr.typeArgs[1]);
+          return `map[${keyType}]${valType}`;
+        }
+        if (typeExpr.name === "List" && typeExpr.typeArgs && typeExpr.typeArgs.length === 1) {
+          const elemType = this.emitTypeExpr(typeExpr.typeArgs[0]);
+          return `[]${elemType}`;
+        }
         if (typeExpr.typeArgs && typeExpr.typeArgs.length > 0) {
           const args = typeExpr.typeArgs.map((a) => this.emitTypeExpr(a)).join(", ");
           return `${typeExpr.name}[${args}]`;
@@ -729,6 +919,22 @@ export class GoEmitter {
         }
         return "nil";
     }
+  }
+
+  private referencesIdentifier(node: any, name: string): boolean {
+    if (!node || typeof node !== "object") return false;
+    if (node.kind === "IdentifierExpr" && node.name === name) return true;
+    for (const key of Object.keys(node)) {
+      const val = node[key];
+      if (Array.isArray(val)) {
+        for (const item of val) {
+          if (this.referencesIdentifier(item, name)) return true;
+        }
+      } else if (val && typeof val === "object") {
+        if (this.referencesIdentifier(val, name)) return true;
+      }
+    }
+    return false;
   }
 
   private toPascalCase(str: string): string {

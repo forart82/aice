@@ -29,6 +29,7 @@ import type {
 } from "../core/ast.js";
 import { parseWithTrivia } from "../core/parser.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
+import { expandModuleIdioms } from "../idioms/index.js";
 import { safeWriteTargetFile } from "../shield/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
@@ -796,8 +797,9 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
       : path.resolve(root, resolvedTarget);
 
     const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, targetAilPath);
+    const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
     const checker = new TypeChecker();
-    checker.checkModule(mod);
+    checker.checkModule(expandedMod);
 
     let targetLang: TargetLanguage;
     const base = path.basename(targetAilPath);
@@ -809,9 +811,10 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
       targetLang = config.targetLanguage ?? detectTargetFromPath(targetAilPath);
     }
 
-    const emitted = emitTarget(mod, targetLang, {
+    const emitted = emitTarget(expandedMod, targetLang, {
       trivia,
       watermark: config.watermark,
+      idioms: config.idioms,
     });
 
     safeWriteTargetFile(outPath, emitted);

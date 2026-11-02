@@ -419,7 +419,8 @@ export class AilGenerator {
               const opt = p.isOptional ? "?" : "";
               const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
               const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
-              return `${pPub}${pRo}${pMut}${p.name}${opt}${typePart}${def}`;
+              const rest = p.isRest ? "..." : "";
+              return `${pPub}${pRo}${pMut}${rest}${p.name}${opt}${typePart}${def}`;
             })
             .join(", ")})`
         : "";
@@ -456,7 +457,8 @@ export class AilGenerator {
             const opt = p.isOptional ? "?" : "";
             const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
             const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
-            return `${p.name}${opt}${typePart}${def}`;
+            const rest = p.isRest ? "..." : "";
+            return `${rest}${p.name}${opt}${typePart}${def}`;
           })
           .join(", ");
         const ret = m.returnType ? ` -> ${this.formatTypeExpr(m.returnType)}` : "";
@@ -539,7 +541,8 @@ export class AilGenerator {
         const opt = p.isOptional ? "?" : "";
         const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
         const typePart = p.typeAnnotation ? `:${this.formatTypeExpr(p.typeAnnotation)}` : "";
-        return `${p.name}${opt}${typePart}${def}`;
+        const rest = p.isRest ? "..." : "";
+        return `${rest}${p.name}${opt}${typePart}${def}`;
       })
       .join(", ");
 
@@ -1080,7 +1083,8 @@ export class AilGenerator {
         const calleeStr = needsParen
           ? `(${this.formatExpr(expr.callee)})`
           : this.formatExpr(expr.callee);
-        return `${calleeStr}(${args})`;
+        const opt = expr.isOptional ? "?." : "";
+        return `${calleeStr}${opt}(${args})`;
       }
       case "MemberAccessExpr": {
         const dot = expr.isSafeNav ? "?." : ".";
@@ -1138,13 +1142,15 @@ export class AilGenerator {
         return `{ ${props} }`;
       }
       case "ClosureExpr": {
+        const fnKw = expr.isAsync ? "async fn" : "fn";
         const params = expr.params
           .map((p) => {
             const opt = p.isOptional ? "?" : "";
             const def = p.defaultValue ? ` = ${this.formatExpr(p.defaultValue)}` : "";
+            const rest = p.isRest ? "..." : "";
             return p.typeAnnotation
-              ? `${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`
-              : `${p.name}${opt}${def}`;
+              ? `${rest}${p.name}${opt}:${this.formatTypeExpr(p.typeAnnotation)}${def}`
+              : `${rest}${p.name}${opt}${def}`;
           })
           .join(", ");
         const retStr = expr.returnType ? ` -> ${this.formatTypeExpr(expr.returnType)}` : "";
@@ -1170,7 +1176,7 @@ export class AilGenerator {
                 this.getIndent(),
               );
               this.dedent();
-              return `fn(${params})${retStr} {\n${stmtStr}\n${outerIndent}}`;
+              return `${fnKw}(${params})${retStr} {\n${stmtStr}\n${outerIndent}}`;
             } finally {
               this.inCurlyBlock = prevCurly;
             }
@@ -1178,15 +1184,15 @@ export class AilGenerator {
           const bodyExpr = expr.body as Expr;
           const bodyStr = this.formatExpr(bodyExpr);
           if (bodyExpr.kind === "AssignExpr") {
-            return `fn(${params})${retStr} = (${bodyStr})`;
+            return `${fnKw}(${params})${retStr} = (${bodyStr})`;
           }
-          return `fn(${params})${retStr} = ${bodyStr}`;
+          return `${fnKw}(${params})${retStr} = ${bodyStr}`;
         }
 
         if (expr.body.kind === "Block") {
           const stmts = expr.body.statements;
           if (stmts.length === 0) {
-            return `fn(${params})${retStr} = nil`;
+            return `${fnKw}(${params})${retStr} = nil`;
           }
           if (stmts.length === 1) {
             const stmt = stmts[0];
@@ -1194,22 +1200,22 @@ export class AilGenerator {
               if (stmt.value) {
                 const valStr = this.formatExpr(stmt.value);
                 if (stmt.value.kind === "AssignExpr") {
-                  return `fn(${params})${retStr} = (${valStr})`;
+                  return `${fnKw}(${params})${retStr} = (${valStr})`;
                 }
-                return `fn(${params})${retStr} = ${valStr}`;
+                return `${fnKw}(${params})${retStr} = ${valStr}`;
               }
-              return `fn(${params})${retStr} = nil`;
+              return `${fnKw}(${params})${retStr} = nil`;
             }
             if (stmt.kind === "ExprStmt") {
               const bodyStr = this.formatExpr(stmt.expr);
               if (stmt.expr.kind === "AssignExpr") {
-                return `fn(${params})${retStr} = (${bodyStr})`;
+                return `${fnKw}(${params})${retStr} = (${bodyStr})`;
               }
-              return `fn(${params})${retStr} = ${bodyStr}`;
+              return `${fnKw}(${params})${retStr} = ${bodyStr}`;
             }
             if (stmt.kind === "AssignStmt") {
               const op = stmt.op ?? "=";
-              return `fn(${params})${retStr} = (${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)})`;
+              return `${fnKw}(${params})${retStr} = (${this.formatExpr(stmt.target)} ${op} ${this.formatExpr(stmt.value)})`;
             }
           }
 
@@ -1220,13 +1226,13 @@ export class AilGenerator {
             this.indent();
             const blockBody = this.formatBlock(expr.body);
             this.dedent();
-            return `fn(${params})${retStr} {\n${blockBody}\n${outerIndent}}`;
+            return `${fnKw}(${params})${retStr} {\n${blockBody}\n${outerIndent}}`;
           } finally {
             this.inCurlyBlock = prevCurly;
           }
         }
 
-        return `fn(${params})${retStr} = nil`;
+        return `${fnKw}(${params})${retStr} = nil`;
       }
       case "AssignExpr": {
         const op = expr.op ?? "=";

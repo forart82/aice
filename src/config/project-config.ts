@@ -12,7 +12,23 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
 
-export type ProjectMode = "side-by-side" | "isolated";
+export type ProjectMode = "side-by-side" | "isolated" | "companion";
+
+export interface ProjectIdiomParam {
+  name: string; // e.g. "$0", "$1"
+  type?: string;
+}
+
+export interface ProjectIdiomDefinition {
+  name: string; // e.g. "$guardOk"
+  kind: "expr" | "stmt" | "block";
+  params: ProjectIdiomParam[];
+  templateAil: string;
+  occurrences: number;
+  tokensPerOccurrenceSaved: number;
+  netTokenSavings: number;
+  description?: string;
+}
 
 export interface AilProjectConfig {
   mode: ProjectMode;
@@ -21,9 +37,21 @@ export interface AilProjectConfig {
   targetLanguage: TargetLanguage;
   isolated: boolean;
   watermark: boolean;
+  targetProjectDir?: string;
+  test?: {
+    command?: string;
+    cwd?: string;
+    scrubTraces?: boolean;
+    [key: string]: any;
+  };
+  idioms?: Record<string, ProjectIdiomDefinition>;
 }
 
-export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set(["side-by-side", "isolated"]);
+export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
+  "side-by-side",
+  "isolated",
+  "companion",
+]);
 
 export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "typescript",
@@ -247,7 +275,7 @@ export function stripJsonComments(input: string): string {
 export function validateConfig(config: Partial<AilProjectConfig>): void {
   if (config.mode !== undefined && !VALID_PROJECT_MODES.has(config.mode)) {
     throw new Error(
-      `Invalid project mode "${config.mode}". Valid modes are: "side-by-side", "isolated".`,
+      `Invalid project mode "${config.mode}". Valid modes are: "side-by-side", "isolated", "companion".`,
     );
   }
 
@@ -275,6 +303,65 @@ export function validateConfig(config: Partial<AilProjectConfig>): void {
     throw new Error(`Invalid watermark: expected boolean, received ${typeof config.watermark}`);
   }
 
+  if (config.targetProjectDir !== undefined && typeof config.targetProjectDir !== "string") {
+    throw new Error(
+      `Invalid targetProjectDir: expected string, received ${typeof config.targetProjectDir}`,
+    );
+  }
+
+  if (config.test !== undefined) {
+    if (typeof config.test !== "object" || config.test === null || Array.isArray(config.test)) {
+      throw new Error(
+        `Invalid test configuration: expected object, received ${Array.isArray(config.test) ? "array" : typeof config.test}`,
+      );
+    }
+  }
+
+  if (config.idioms !== undefined) {
+    if (typeof config.idioms !== "object" || config.idioms === null || Array.isArray(config.idioms)) {
+      throw new Error(
+        `Invalid idioms configuration: expected object mapping idiom names to definitions, received ${Array.isArray(config.idioms) ? "array" : typeof config.idioms}`,
+      );
+    }
+    for (const [name, idiom] of Object.entries(config.idioms)) {
+      if (typeof idiom !== "object" || idiom === null || Array.isArray(idiom)) {
+        throw new Error(`Invalid idiom definition for "${name}": expected object`);
+      }
+      if (typeof idiom.name !== "string" || !idiom.name) {
+        throw new Error(`Invalid idiom "${name}": "name" must be a non-empty string`);
+      }
+      if (idiom.kind !== "expr" && idiom.kind !== "stmt" && idiom.kind !== "block") {
+        throw new Error(
+          `Invalid idiom "${name}": "kind" must be "expr", "stmt", or "block", received "${idiom.kind}"`,
+        );
+      }
+      if (!Array.isArray(idiom.params)) {
+        throw new Error(`Invalid idiom "${name}": "params" must be an array`);
+      }
+      for (let i = 0; i < idiom.params.length; i++) {
+        const param = idiom.params[i];
+        if (typeof param !== "object" || param === null || typeof param.name !== "string") {
+          throw new Error(`Invalid idiom "${name}": param[${i}] must have a string name`);
+        }
+      }
+      if (typeof idiom.templateAil !== "string") {
+        throw new Error(`Invalid idiom "${name}": "templateAil" must be a string`);
+      }
+      if (typeof idiom.occurrences !== "number") {
+        throw new Error(`Invalid idiom "${name}": "occurrences" must be a number`);
+      }
+      if (typeof idiom.tokensPerOccurrenceSaved !== "number") {
+        throw new Error(`Invalid idiom "${name}": "tokensPerOccurrenceSaved" must be a number`);
+      }
+      if (typeof idiom.netTokenSavings !== "number") {
+        throw new Error(`Invalid idiom "${name}": "netTokenSavings" must be a number`);
+      }
+      if (idiom.description !== undefined && typeof idiom.description !== "string") {
+        throw new Error(`Invalid idiom "${name}": "description" must be a string`);
+      }
+    }
+  }
+
   if (
     config.mode !== undefined &&
     config.isolated !== undefined &&
@@ -286,6 +373,8 @@ export function validateConfig(config: Partial<AilProjectConfig>): void {
     );
   }
 }
+
+export const validateProjectConfig = validateConfig;
 
 /**
  * Scans a directory for `.ail` files to differentiate dual-extension (*.ts.ail)
@@ -344,6 +433,33 @@ function scanAilFiles(
  */
 export function autoDetectProjectMode(projectDir: string): ProjectMode {
   const resolvedDir = path.resolve(projectDir);
+
+  // 0. Check if ail.config.json or .ailrc explicitly specifies companion mode
+  const ailConfigPath = path.join(resolvedDir, "ail.config.json");
+  if (fs.existsSync(ailConfigPath)) {
+    try {
+      const content = fs.readFileSync(ailConfigPath, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(content));
+      if (parsed && parsed.mode === "companion") {
+        return "companion";
+      }
+    } catch {
+      // Ignore parse errors during auto-detection
+    }
+  }
+
+  const ailrcPath = path.join(resolvedDir, ".ailrc");
+  if (fs.existsSync(ailrcPath)) {
+    try {
+      const content = fs.readFileSync(ailrcPath, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(content));
+      if (parsed && parsed.mode === "companion") {
+        return "companion";
+      }
+    } catch {
+      // Ignore parse errors during auto-detection
+    }
+  }
 
   // 1. Check if .ail-build exists
   const buildDir = path.join(resolvedDir, ".ail-build");
@@ -464,16 +580,16 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
   if (configToProcess.mode !== undefined) {
     mode = configToProcess.mode as ProjectMode;
     isolated =
-      configToProcess.isolated !== undefined
-        ? Boolean(configToProcess.isolated)
-        : mode === "isolated";
+      typeof configToProcess.isolated === "boolean"
+        ? configToProcess.isolated
+        : mode === "isolated" || mode === "companion";
   } else if (configToProcess.isolated !== undefined) {
     isolated = Boolean(configToProcess.isolated);
     mode = isolated ? "isolated" : "side-by-side";
   } else {
     // Mode auto-detection
     mode = autoDetectProjectMode(resolvedDir);
-    isolated = mode === "isolated";
+    isolated = mode === "isolated" || mode === "companion";
   }
 
   const finalConfig: AilProjectConfig = {
@@ -495,6 +611,17 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
       typeof configToProcess.watermark === "boolean"
         ? configToProcess.watermark
         : DEFAULT_PROJECT_CONFIG.watermark,
+    ...(typeof configToProcess.targetProjectDir === "string"
+      ? { targetProjectDir: configToProcess.targetProjectDir }
+      : {}),
+    ...(typeof configToProcess.test === "object" && configToProcess.test !== null
+      ? { test: configToProcess.test as AilProjectConfig["test"] }
+      : {}),
+    ...(typeof configToProcess.idioms === "object" &&
+    configToProcess.idioms !== null &&
+    !Array.isArray(configToProcess.idioms)
+      ? { idioms: configToProcess.idioms as Record<string, ProjectIdiomDefinition> }
+      : {}),
   };
 
   validateConfig(finalConfig);
@@ -530,13 +657,16 @@ export function saveProjectConfig(
 
   if (config.mode !== undefined) {
     mode = config.mode;
-    isolated = config.isolated ?? mode === "isolated";
+    isolated = config.isolated ?? (mode === "isolated" || mode === "companion");
   } else if (config.isolated !== undefined) {
     isolated = config.isolated;
     mode = isolated ? "isolated" : "side-by-side";
   } else if (existing.mode !== undefined) {
     mode = existing.mode as ProjectMode;
-    isolated = existing.isolated !== undefined ? Boolean(existing.isolated) : mode === "isolated";
+    isolated =
+      existing.isolated !== undefined
+        ? Boolean(existing.isolated)
+        : mode === "isolated" || mode === "companion";
   } else if (existing.isolated !== undefined) {
     isolated = Boolean(existing.isolated);
     mode = isolated ? "isolated" : "side-by-side";
@@ -560,6 +690,21 @@ export function saveProjectConfig(
       (typeof existing.watermark === "boolean"
         ? existing.watermark
         : DEFAULT_PROJECT_CONFIG.watermark),
+    ...(config.targetProjectDir !== undefined
+      ? { targetProjectDir: config.targetProjectDir }
+      : typeof existing.targetProjectDir === "string"
+        ? { targetProjectDir: existing.targetProjectDir }
+        : {}),
+    ...(config.test !== undefined
+      ? { test: config.test }
+      : typeof existing.test === "object" && existing.test !== null
+        ? { test: existing.test as AilProjectConfig["test"] }
+        : {}),
+    ...(config.idioms !== undefined
+      ? { idioms: config.idioms }
+      : typeof existing.idioms === "object" && existing.idioms !== null && !Array.isArray(existing.idioms)
+        ? { idioms: existing.idioms as Record<string, ProjectIdiomDefinition> }
+        : {}),
   };
 
   validateConfig(mergedConfig);
@@ -618,7 +763,10 @@ function deriveTargetPath(relPath: string, targetLanguage: TargetLanguage = "typ
  */
 function extractRelPathUsingSourceDir(absPath: string, sourceDir: string): string {
   const normPath = absPath.replace(/\\/g, "/");
-  const normSourceDir = sourceDir.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  const normSourceDir = sourceDir
+    .replace(/\\/g, "/")
+    .replace(/^\/+|\/+$/g, "")
+    .replace(/^(?:\.\.?\/)+/, "");
 
   if (normSourceDir && normSourceDir !== ".") {
     const marker = `/${normSourceDir}/`;
@@ -632,28 +780,103 @@ function extractRelPathUsingSourceDir(absPath: string, sourceDir: string): strin
 }
 
 /**
+ * Derives the companion source filename by stripping target extension and appending `.ail`.
+ * E.g.:
+ * - `calc.ts` -> `calc.ail`
+ * - `Button.tsx` -> `Button.ail`
+ * - `calc.test.ts` -> `calc.test.ail`
+ * - `main.py` -> `main.ail`
+ * - `calc.ail` -> `calc.ail`
+ */
+export function deriveSourceFilename(filename: string): string {
+  if (filename.endsWith(".ail")) {
+    return filename;
+  }
+  const ext = path.extname(filename).toLowerCase();
+  if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) {
+    return `${filename.slice(0, -ext.length)}.ail`;
+  }
+  return `${filename}.ail`;
+}
+
+/**
  * Resolves the destination target file path for a source `.ail` file
  * according to project configuration:
  * - For "side-by-side": outputs sibling target path in the source file's directory.
  * - For "isolated": mirrors relative path from `sourceDir` into `outDir` (`.ail-build/`).
+ * - For "companion": mirrors relative path of `sourceFile` from `sourceDir` (or config root),
+ *   strips `.ail`, appends target extension, and joins with `config.outDir` (resolved against projectRoot).
  */
-export function resolveTargetOutputPathForConfig(
-  sourcePath: string,
+export function resolveTargetFile(
   config: AilProjectConfig,
+  sourceFile: string,
   projectRoot?: string,
 ): string {
-  const isAbs = path.isAbsolute(sourcePath);
+  const isAbs = path.isAbsolute(sourceFile);
 
   // Side-by-side mode: sibling target path in same directory
   if (config.mode === "side-by-side") {
-    const dir = path.dirname(sourcePath);
-    const base = path.basename(sourcePath);
+    const dir = path.dirname(sourceFile);
+    const base = path.basename(sourceFile);
     const targetBase = deriveTargetFilename(base, config.targetLanguage);
 
-    if (dir === "." && !sourcePath.includes("/") && !sourcePath.includes("\\")) {
+    if (dir === "." && !sourceFile.includes("/") && !sourceFile.includes("\\")) {
       return targetBase;
     }
     return path.join(dir, targetBase);
+  }
+
+  // Companion mode: mirrors relative path into outDir (resolved against projectRoot)
+  if (config.mode === "companion") {
+    const root = projectRoot ? path.resolve(projectRoot) : undefined;
+    const absOutDir =
+      config.outDir && path.isAbsolute(config.outDir)
+        ? config.outDir
+        : root
+          ? path.resolve(root, config.outDir)
+          : undefined;
+
+    let relPathFromSourceDir: string;
+
+    if (isAbs) {
+      const absSourceDir =
+        config.sourceDir && path.isAbsolute(config.sourceDir)
+          ? config.sourceDir
+          : root
+            ? path.resolve(root, config.sourceDir)
+            : undefined;
+
+      if (
+        absSourceDir &&
+        (sourceFile === absSourceDir ||
+          sourceFile.startsWith(absSourceDir + path.sep) ||
+          sourceFile.startsWith(absSourceDir + "/"))
+      ) {
+        relPathFromSourceDir = path.relative(absSourceDir, sourceFile);
+      } else if (
+        root &&
+        (sourceFile === root ||
+          sourceFile.startsWith(root + path.sep) ||
+          sourceFile.startsWith(root + "/"))
+      ) {
+        const relToRoot = path.relative(root, sourceFile);
+        relPathFromSourceDir = stripSourceDirPrefix(relToRoot, config.sourceDir);
+      } else {
+        relPathFromSourceDir = extractRelPathUsingSourceDir(sourceFile, config.sourceDir);
+      }
+    } else {
+      relPathFromSourceDir = stripSourceDirPrefix(sourceFile, config.sourceDir);
+    }
+
+    const targetRel = deriveTargetPath(relPathFromSourceDir, config.targetLanguage);
+
+    if (absOutDir) {
+      return path.resolve(absOutDir, targetRel);
+    }
+    if (root) {
+      return path.resolve(root, config.outDir, targetRel);
+    }
+    return path.join(config.outDir, targetRel);
   }
 
   // Isolated mode: mirrors relative path from sourceDir into outDir (.ail-build/)
@@ -671,11 +894,11 @@ export function resolveTargetOutputPathForConfig(
 
     if (
       absSourceDir &&
-      (sourcePath === absSourceDir ||
-        sourcePath.startsWith(absSourceDir + path.sep) ||
-        sourcePath.startsWith(absSourceDir + "/"))
+      (sourceFile === absSourceDir ||
+        sourceFile.startsWith(absSourceDir + path.sep) ||
+        sourceFile.startsWith(absSourceDir + "/"))
     ) {
-      relPathFromSourceDir = path.relative(absSourceDir, sourcePath);
+      relPathFromSourceDir = path.relative(absSourceDir, sourceFile);
       baseOutDir =
         config.outDir && path.isAbsolute(config.outDir)
           ? config.outDir
@@ -684,23 +907,23 @@ export function resolveTargetOutputPathForConfig(
             : path.resolve(absSourceDir, "..", config.outDir);
     } else if (
       root &&
-      (sourcePath === root ||
-        sourcePath.startsWith(root + path.sep) ||
-        sourcePath.startsWith(root + "/"))
+      (sourceFile === root ||
+        sourceFile.startsWith(root + path.sep) ||
+        sourceFile.startsWith(root + "/"))
     ) {
-      const relToRoot = path.relative(root, sourcePath);
+      const relToRoot = path.relative(root, sourceFile);
       relPathFromSourceDir = stripSourceDirPrefix(relToRoot, config.sourceDir);
       baseOutDir =
         config.outDir && path.isAbsolute(config.outDir)
           ? config.outDir
           : path.resolve(root, config.outDir);
     } else {
-      relPathFromSourceDir = extractRelPathUsingSourceDir(sourcePath, config.sourceDir);
-      const normPath = sourcePath.replace(/\\/g, "/");
+      relPathFromSourceDir = extractRelPathUsingSourceDir(sourceFile, config.sourceDir);
+      const normPath = sourceFile.replace(/\\/g, "/");
       const normSourceDir = config.sourceDir.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
       const marker = `/${normSourceDir}/`;
       const idx = normPath.lastIndexOf(marker);
-      const inferredRoot = idx !== -1 ? normPath.slice(0, idx) : path.dirname(sourcePath);
+      const inferredRoot = idx !== -1 ? normPath.slice(0, idx) : path.dirname(sourceFile);
       baseOutDir =
         config.outDir && path.isAbsolute(config.outDir)
           ? config.outDir
@@ -712,7 +935,165 @@ export function resolveTargetOutputPathForConfig(
   }
 
   // Relative path input
-  const relPathFromSourceDir = stripSourceDirPrefix(sourcePath, config.sourceDir);
+  const relPathFromSourceDir = stripSourceDirPrefix(sourceFile, config.sourceDir);
   const targetRel = deriveTargetPath(relPathFromSourceDir, config.targetLanguage);
   return path.join(config.outDir, targetRel);
+}
+
+/**
+ * Backward-compatible wrapper for resolveTargetFile.
+ */
+export function resolveTargetOutputPathForConfig(
+  sourcePath: string,
+  config: AilProjectConfig,
+  projectRoot?: string,
+): string {
+  return resolveTargetFile(config, sourcePath, projectRoot);
+}
+
+/**
+ * Resolves the source `.ail` file path corresponding to a target file.
+ * - For "side-by-side": returns sibling `.ail` (or dual-extension `.ts.ail` if present).
+ * - For "companion": computes relative path of targetFile from `config.outDir`,
+ *   strips target extension, appends `.ail`, and joins with `config.sourceDir` (resolved against projectRoot).
+ * - For "isolated": computes relative path of targetFile from `config.outDir`,
+ *   strips target extension, appends `.ail`, and joins with `config.sourceDir`.
+ */
+export function resolveSourceFile(
+  config: AilProjectConfig,
+  targetFile: string,
+  projectRoot?: string,
+): string {
+  const isAbs = path.isAbsolute(targetFile);
+
+  if (config.mode === "side-by-side") {
+    const dir = path.dirname(targetFile);
+    const base = path.basename(targetFile);
+    const sourceBase = deriveSourceFilename(base);
+    const bareCandidate =
+      dir === "." && !targetFile.includes("/") && !targetFile.includes("\\")
+        ? sourceBase
+        : path.join(dir, sourceBase);
+    const dualCandidate = `${targetFile}.ail`;
+    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
+      return dualCandidate;
+    }
+    return bareCandidate;
+  }
+
+  // Companion or isolated mode
+  const root = projectRoot ? path.resolve(projectRoot) : undefined;
+  const absOutDir =
+    config.outDir && path.isAbsolute(config.outDir)
+      ? config.outDir
+      : root
+        ? path.resolve(root, config.outDir)
+        : undefined;
+
+  const absSourceDir =
+    config.sourceDir && path.isAbsolute(config.sourceDir)
+      ? config.sourceDir
+      : root
+        ? path.resolve(root, config.sourceDir)
+        : undefined;
+
+  let relPathFromOutDir: string;
+
+  if (isAbs) {
+    const absTarget = targetFile;
+    const normTarget = absTarget.replace(/\\/g, "/");
+    const absTargetProjectDir =
+      root && config.targetProjectDir ? path.resolve(root, config.targetProjectDir) : undefined;
+    const normTargetProjectDir = absTargetProjectDir
+      ? absTargetProjectDir.replace(/\\/g, "/")
+      : undefined;
+
+    if (
+      absOutDir &&
+      (targetFile === absOutDir ||
+        targetFile.startsWith(absOutDir + path.sep) ||
+        targetFile.startsWith(absOutDir + "/"))
+    ) {
+      relPathFromOutDir = path.relative(absOutDir, targetFile);
+    } else if (
+      root &&
+      (targetFile === root ||
+        targetFile.startsWith(root + path.sep) ||
+        targetFile.startsWith(root + "/"))
+    ) {
+      const relToRoot = path.relative(root, targetFile);
+      relPathFromOutDir = stripSourceDirPrefix(relToRoot, config.outDir);
+    } else if (
+      normTargetProjectDir &&
+      (normTarget === normTargetProjectDir || normTarget.startsWith(`${normTargetProjectDir}/`))
+    ) {
+      relPathFromOutDir = path.relative(absTargetProjectDir!, absTarget);
+    } else {
+      relPathFromOutDir = extractRelPathUsingSourceDir(targetFile, config.outDir);
+    }
+  } else {
+    // Relative path input
+    relPathFromOutDir = stripSourceDirPrefix(targetFile, config.outDir);
+  }
+
+  // Derive source relative path by stripping target extension and appending .ail
+  const dir = path.dirname(relPathFromOutDir);
+  const base = path.basename(relPathFromOutDir);
+  const sourceBase = deriveSourceFilename(base);
+  const sourceRel =
+    dir === "." && !relPathFromOutDir.includes("/") && !relPathFromOutDir.includes("\\")
+      ? sourceBase
+      : path.join(dir, sourceBase);
+
+  // If absSourceDir exists or can be resolved
+  if (absSourceDir) {
+    const bareCandidate = path.resolve(absSourceDir, sourceRel);
+    const dualCandidate = path.resolve(
+      absSourceDir,
+      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+    );
+    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
+      return dualCandidate;
+    }
+    return bareCandidate;
+  }
+
+  if (root) {
+    const bareCandidate = path.resolve(root, config.sourceDir, sourceRel);
+    const dualCandidate = path.resolve(
+      root,
+      config.sourceDir,
+      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+    );
+    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
+      return dualCandidate;
+    }
+    return bareCandidate;
+  }
+
+  if (isAbs) {
+    const normPath = targetFile.replace(/\\/g, "/");
+    const normOutDir = config.outDir
+      .replace(/\\/g, "/")
+      .replace(/^\/+|\/+$/g, "")
+      .replace(/^(?:\.\.?\/)+/, "");
+    const marker = `/${normOutDir}/`;
+    const idx = normPath.lastIndexOf(marker);
+    const inferredRoot = idx !== -1 ? normPath.slice(0, idx) : path.dirname(targetFile);
+    const baseSourceDir =
+      config.sourceDir && path.isAbsolute(config.sourceDir)
+        ? config.sourceDir
+        : path.resolve(inferredRoot, config.sourceDir);
+    const bareCandidate = path.resolve(baseSourceDir, sourceRel);
+    const dualCandidate = path.resolve(
+      baseSourceDir,
+      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+    );
+    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
+      return dualCandidate;
+    }
+    return bareCandidate;
+  }
+
+  return path.join(config.sourceDir, sourceRel);
 }

@@ -151,6 +151,7 @@ export interface ParamDecl {
   isPub?: boolean;
   isReadonly?: boolean;
   isMut?: boolean;
+  isRest?: boolean;
   span: Span;
 }
 
@@ -484,6 +485,7 @@ export interface CallExpr {
   kind: "CallExpr";
   callee: Expr;
   args: Expr[];
+  isOptional?: boolean;
   span: Span;
 }
 

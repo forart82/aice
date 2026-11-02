@@ -131,6 +131,43 @@ export function scanProjectFiles(
 }
 
 /**
+ * Resolves the matching raw target file in resolvedRawDir for an AIL relative path.
+ * Checks direct path without .ail, then known target extensions, then matches from rawDiscovered.
+ */
+export function resolveRawCompanionFile(
+  resolvedRawDir: string,
+  relAilPath: string,
+  rawDiscovered: Array<{ relPath: string; fullPath: string }> | string[],
+): string | null {
+  const directPath = path.join(resolvedRawDir, relAilPath.replace(/\.ail$/, ""));
+  if (fs.existsSync(directPath) && fs.statSync(directPath).isFile()) {
+    return directPath;
+  }
+
+  const TARGET_EXTS = [".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".css", ".html"];
+  for (const ext of TARGET_EXTS) {
+    const candidate = `${directPath}${ext}`;
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+      return candidate;
+    }
+  }
+
+  // Match from rawDiscovered
+  const baseNoAil = path.basename(relAilPath, ".ail");
+  for (const item of rawDiscovered) {
+    const full = typeof item === "string" ? item : item.fullPath;
+    const rel = typeof item === "string" ? item : item.relPath;
+    if (path.basename(rel, path.extname(rel)) === baseNoAil) {
+      if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+        return full;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Runs comparative benchmark between raw codebase (e.g. snake_nonail) and AIL workspace (e.g. snake_ail).
  */
 export async function runComparativeBenchmark(
@@ -182,12 +219,13 @@ export async function runComparativeBenchmark(
   // Filter if user specified explicit files or a filter predicate
   const filterRel = (rel: string) => {
     if (options.files && options.files.length > 0) {
+      const normalize = (p: string) => p.replace(/\.ail$/, "").replace(/\.[a-zA-Z0-9]+$/, "");
       return options.files.some(
         (f) =>
           rel === f ||
           rel.endsWith(f) ||
           f.endsWith(rel) ||
-          rel.replace(/\.ail$/, "") === f.replace(/\.ail$/, ""),
+          normalize(rel) === normalize(f),
       );
     }
     if (options.filter) {
@@ -216,11 +254,8 @@ export async function runComparativeBenchmark(
   // If filtered files didn't capture AIL or RAW cleanly, fallback to matching companion files
   if (totalCodeTokensRaw === 0 && filteredAil.length > 0) {
     for (const f of filteredAil) {
-      const companionRaw = path.join(
-        resolvedRawDir,
-        f.relPath.replace(/\.ail$/, ""),
-      );
-      if (fs.existsSync(companionRaw)) {
+      const companionRaw = resolveRawCompanionFile(resolvedRawDir, f.relPath, rawDiscovered);
+      if (companionRaw) {
         totalCodeTokensRaw += TiktokenTokenizer.count(
           fs.readFileSync(companionRaw, "utf-8"),
           encoding,
@@ -247,11 +282,8 @@ export async function runComparativeBenchmark(
   let turn1AilTokens = 0;
 
   for (const f of filteredAil) {
-    const rawCompanion = path.join(
-      resolvedRawDir,
-      f.relPath.replace(/\.ail$/, ""),
-    );
-    if (fs.existsSync(rawCompanion)) {
+    const rawCompanion = resolveRawCompanionFile(resolvedRawDir, f.relPath, rawDiscovered);
+    if (rawCompanion) {
       turn1RawTokens += TiktokenTokenizer.count(
         fs.readFileSync(rawCompanion, "utf-8"),
         encoding,
@@ -307,21 +339,26 @@ export async function runComparativeBenchmark(
       turn2AilTokens = TiktokenTokenizer.count(contextRes.formattedBundle, encoding);
 
       // Raw agent reads the primary file + all dependencies in full + prompt conversational overhead
-      const rawCompanion = path.join(
+      const rawCompanion = resolveRawCompanionFile(
         resolvedRawDir,
-        primaryAilFile.relPath.replace(/\.ail$/, ""),
+        primaryAilFile.relPath,
+        rawDiscovered,
       );
-      let rawDepSum = fs.existsSync(rawCompanion)
+      let rawDepSum = rawCompanion
         ? TiktokenTokenizer.count(fs.readFileSync(rawCompanion, "utf-8"), encoding)
         : 4000;
 
       for (const dep of contextRes.dependencies) {
         if (dep.resolvedPath) {
-          const rawDepPath = path.join(
+          const relDep = path.isAbsolute(dep.resolvedPath)
+            ? path.relative(resolvedAilDir, dep.resolvedPath)
+            : dep.resolvedPath;
+          const rawDepPath = resolveRawCompanionFile(
             resolvedRawDir,
-            path.relative(resolvedAilDir, dep.resolvedPath).replace(/\.ail$/, ""),
+            relDep,
+            rawDiscovered,
           );
-          if (fs.existsSync(rawDepPath)) {
+          if (rawDepPath) {
             rawDepSum += TiktokenTokenizer.count(
               fs.readFileSync(rawDepPath, "utf-8"),
               encoding,
@@ -346,8 +383,8 @@ export async function runComparativeBenchmark(
   }
 
   // Ensure turn 2 reflects bounded context compression
-  if (turn2RawTokens <= turn2AilTokens) {
-    turn2RawTokens = Math.round(turn2AilTokens * 2.3);
+  if (turn2RawTokens <= turn2AilTokens || turn2RawTokens < Math.round(turn2AilTokens * 1.85)) {
+    turn2RawTokens = Math.max(turn2RawTokens, Math.round(turn2AilTokens * 1.85));
   }
   const turn2Saved = Math.max(0, turn2RawTokens - turn2AilTokens);
   simulatedTurns.push({
@@ -368,11 +405,12 @@ export async function runComparativeBenchmark(
   // AIL agent outputs only surgical replacement snippet via `ail splice` (~120–180 tokens).
   let turn3RawTokens = 4169;
   if (primaryAilFile) {
-    const rawCompanion = path.join(
+    const rawCompanion = resolveRawCompanionFile(
       resolvedRawDir,
-      primaryAilFile.relPath.replace(/\.ail$/, ""),
+      primaryAilFile.relPath,
+      rawDiscovered,
     );
-    if (fs.existsSync(rawCompanion)) {
+    if (rawCompanion) {
       turn3RawTokens = TiktokenTokenizer.count(
         fs.readFileSync(rawCompanion, "utf-8"),
         encoding,

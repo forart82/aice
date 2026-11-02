@@ -8,7 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { KNOWN_TARGET_EXTENSIONS } from "../config/index.js";
+import { findProjectRoot, KNOWN_TARGET_EXTENSIONS, loadProjectConfig } from "../config/index.js";
 import type {
   ClassDecl,
   ConstDecl,
@@ -62,9 +62,11 @@ export interface OutlineResult {
   file: string;
   text: string;
   symbols: OutlineSymbol[];
+  referencedIdioms?: string[];
   json?: {
     file: string;
     symbols: OutlineSymbol[];
+    referencedIdioms?: string[];
     stats?: OutlineStats;
   };
   stats?: OutlineStats;
@@ -151,6 +153,13 @@ export function generateOutline(
   if (typeof sourceOrMod === "object" && sourceOrMod !== null && sourceOrMod.kind === "Module") {
     ast = sourceOrMod;
     filePath = ast.path || "<anonymous>";
+    if (filePath !== "<anonymous>" && fs.existsSync(filePath)) {
+      try {
+        originalSource = fs.readFileSync(filePath, "utf-8");
+      } catch {
+        // ignore
+      }
+    }
   } else if (typeof sourceOrMod === "string") {
     const isFile = fs.existsSync(sourceOrMod) && fs.statSync(sourceOrMod).isFile();
     if (isFile) {
@@ -529,6 +538,33 @@ export function generateOutline(
     }
   }
 
+  let idiomsConfig: Record<string, any> | undefined;
+  try {
+    const root =
+      options.projectRoot ??
+      (filePath !== "<anonymous>" && fs.existsSync(filePath)
+        ? findProjectRoot(path.dirname(path.resolve(filePath)))
+        : findProjectRoot(process.cwd()));
+    const cfg = loadProjectConfig(root);
+    idiomsConfig = cfg.idioms;
+  } catch {
+    // ignore
+  }
+
+  const referencedIdioms: string[] = [];
+  if (idiomsConfig && originalSource) {
+    for (const idiomName of Object.keys(idiomsConfig)) {
+      const cleanName = idiomName.startsWith("$") ? idiomName.slice(1) : idiomName;
+      if (originalSource.includes(`$${cleanName}`)) {
+        referencedIdioms.push(`$${cleanName}`);
+      }
+    }
+  }
+
+  if (referencedIdioms.length > 0) {
+    outlineLines.unshift(`// idioms: ${referencedIdioms.join(", ")}`);
+  }
+
   const outlineText = outlineLines.join("\n");
 
   // Tokenomics Statistics
@@ -555,6 +591,7 @@ export function generateOutline(
 
   const jsonPayload = {
     file: filePath,
+    ...(referencedIdioms.length > 0 ? { referencedIdioms } : {}),
     symbols,
     ...(options.stats ? { stats } : {}),
   };
