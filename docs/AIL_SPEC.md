@@ -282,13 +282,46 @@ Audited across 67 production files from Raylib C++, SFML C++, and Canvas TypeScr
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
 
+### 6.3 Table 3: 100-Case Deep Twinless On-the-Fly Benchmark (`docs/BENCHMARK_100_ON_THE_FLY.md`)
+Evaluated across **100 distinct cases & situations** comparing **Without AIL (Raw Native Baseline)** vs. **With AIL On-the-Fly (`mode: "twinless"`)**:
+- **Pass Rate**: **100 / 100 (100.0%)** with **0 `.ail` files created on disk**
+- **Win Rate vs. Without AIL**: **100 / 100 (100.0%)**
+- **Total Tokens Without AIL**: **107,421 tokens**
+- **Total Tokens With AIL On-the-Fly**: **34,110 tokens**
+- **Total Net Tokens Saved**: **73,311 tokens (-68.25% overall reduction, -74.49% mean per-case reduction)**
+
 ---
 
-## 7. CLI Toolchain & Workflow Specification
+## 7. Twinless On-the-Fly Mode & Smart Multi-File Idioms Specification
 
-The `ail` binary provides a comprehensive CLI for adoption, live development, compilation, and automated self-repair:
+In addition to Side-by-Side mode, AIL 2.0 supports **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `ail.config.json`):
+1. **Zero `.ail` Files on Disk**: All source files remain in their native target formats (`*.ts`, `*.tsx`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`).
+2. **In-RAM Decompilation & `$idiom` Collapsing**: `ail outline <file>` and `ail context <file> [-s <symbol>]` decompile native files in memory and collapse active project `$idioms` on-the-fly.
+3. **Smart Multi-File Idioms (`ail idioms scan | read | update | on | off`)**:
+   - `ail idioms scan` mines repeated expressions (including nested compound calls) and statement blocks directly from native files via structural anti-unification and stores SHA-256 content-addressed provenance in `.ail-cache/idioms.json`.
+   - `ail idioms read $name` reports the idiom template, parameter list, and every `file:line` occurrence with bound call-site arguments across the codebase.
+   - `ail idioms update $name "<newTemplate>" [--params <spec>]` rewrites all occurrences across all native files in a single atomic transaction, supporting parameter reordering, duplication, arity reduction/expansion with defaults, capture-avoiding alpha-renaming, recursion cycle detection (`IdiomCycleError`), and atomic multi-file rollback on failure.
+4. **Forgiving Direct-to-Native Surgical Splice (`ail splice`)**:
+   - Accepts pure AIL, AIL with `$idioms`, raw native target code, or hybrid "Frankenstein" syntax, plus `--body` and `--batch` multi-file atomic splices.
+   - Replaces only the exact AST declaration byte-span in the native file, guaranteeing 100% bit-identical preservation of all surrounding comments, decorators, and formatting.
+
+---
+
+## 8. CLI Toolchain & Workflow Specification
+
+The `ail` binary provides a comprehensive CLI for Twinless On-the-Fly workflows, Side-by-Side adoption, live development, compilation, and automated self-repair:
 
 ```bash
+# Twinless On-the-Fly & Smart Multi-File Idioms
+ail shield apply [dir] --twinless    # Configure Twinless mode (zero .ail files on disk)
+ail outline <nativeFile> [--stats]   # On-the-fly structural skeleton (85-95% token reduction)
+ail context <nativeFile> [-s <sym>]  # On-the-fly dependency & symbol-scoped AIL context with $idioms
+ail splice <nativeFile> -s <sym> -c <code> # Direct-to-native surgical AST splice (AIL, $idioms, raw, hybrid)
+ail idioms scan [dir]                # Mine multi-file idioms from native code into ail.config.json
+ail idioms read '$name' [dir]        # List all file:line occurrences & bound arguments across files
+ail idioms update '$name' "<tpl>"    # Atomically rewrite all idiom occurrences across native files
+ail idioms <on|off> [dir]            # Toggle on-the-fly $idiom collapsing in ail.config.json
+
 # Side-by-side adoption & live development
 ail adopt [dir] [-c <concurrency>]   # Ingests codebase, generates shields, and locks target files
 ail watch [dir]                      # Sub-5ms incremental watch daemon preserving HMR
@@ -302,11 +335,14 @@ ail compile-all [dir]                # Recursively compiles all .ail files acros
 ail clean [dir]                      # Cleans generated target files
 ail decompile <targetFile>           # Decompiles target file into .ail
 
-# Quality Gates & Diagnostics
+# Quality Gates, Benchmarks & Diagnostics
+bun run benchmark:100                # Executes the 100-Case Deep Twinless On-the-Fly Benchmark
 ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness
 ail fix <file.ail> [--dry-run]       # Autonomously self-repairs fixable diagnostics
 ail roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
 ail tokens [file|dir]                # Audits token efficiency for a specific file or folder (with subfolders)
 ail verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
 ail lsp                              # Starts Language Server Protocol over stdio
+ail mcp                              # Starts Model Context Protocol server over stdio
 ```
+

@@ -59,10 +59,38 @@ Audited across 67 production modules from Raylib C++, SFML C++, and Canvas TypeS
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
 
+### Table 3: 100-Case Deep Twinless On-the-Fly Benchmark (`docs/BENCHMARK_100_ON_THE_FLY.md`)
+Evaluated across **100 distinct polyglot cases & situations** comparing **Without AIL (Raw Native Baseline)** vs. **With AIL On-the-Fly (`mode: "twinless"`, zero `.ail` files on disk, Smart Multi-File Idioms, and Direct-to-Native Surgical Splice)**:
+
+| Category | Cases | Wins | Without AIL Tokens | With AIL On-the-Fly Tokens | Net Savings % |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **1. On-the-Fly Structural Outline (`ail outline`)** | 10 | **10/10** | 3,425 | 817 | **-76.15%** |
+| **2. On-the-Fly Context & Symbol Slicing (`ail context`)** | 10 | **10/10** | 8,708 | 3,522 | **-59.55%** |
+| **3. Direct-to-Native Splice (AIL & `$idioms`)** | 10 | **10/10** | 8,500 | 380 | **-95.53%** |
+| **4. Forgiving Frankenstein & Raw Splice (`ail splice`)** | 10 | **10/10** | 7,172 | 412 | **-94.26%** |
+| **5. Advanced TypeScript & OOP Edge Cases** | 10 | **10/10** | 8,500 | 314 | **-96.31%** |
+| **6. Polyglot Direct-to-Native Splice (Py/Go/Rust/C++/C#/Kt/PHP)** | 10 | **10/10** | 2,175 | 384 | **-82.34%** |
+| **7. Smart Multi-File Idioms Discovery (`ail idioms scan/read`)** | 10 | **10/10** | 3,319 | 1,284 | **-61.31%** |
+| **8. Smart Multi-File Idiom Mutation & Safety (`ail idioms update`)** | 10 | **10/10** | 5,863 | 173 | **-97.05%** |
+| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | **10/10** | 8,996 | 6,969 | **-22.53%** |
+| **10. Real-World E2E, MCP, LSP & Shield** | 10 | **10/10** | 50,763 | 19,855 | **-60.89%** |
+| **TOTAL (100 Cases / 10 Categories)** | **100** | **100/100 (100%)** | **107,421** | **34,110** | **-68.25% (-74.49% avg)** |
+
+Full 100-row table and reproducible suite: see [`docs/BENCHMARK_100_ON_THE_FLY.md`](docs/BENCHMARK_100_ON_THE_FLY.md) and run `bun run benchmark:100`.
+
 ---
 
-## 🛡️ The Side-by-Side Zero-Folder-Disruption Architecture
+## ⚡ Twinless On-the-Fly Mode (`mode: "twinless"`) & Side-by-Side Architecture
 
+AIL 2.0 supports two complementary operational modes:
+
+### Mode A: Twinless On-the-Fly Mode (`mode: "twinless"` — Zero `.ail` Files on Disk)
+- **Zero `.ail` Disk Pollution**: Native files (`*.ts`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`) remain the sole source files on disk.
+- **In-RAM Decompilation & `$idiom` Collapsing**: `ail outline <file>` and `ail context <file> [-s <symbol>]` decompile native files in RAM on-the-fly and automatically collapse active project `$idioms` from `ail.config.json`.
+- **Smart Multi-File Idioms**: `ail idioms scan` mines repeated expressions and statement blocks across native files using structural anti-unification and caches SHA-256 provenance in `.ail-cache/idioms.json`. `ail idioms read $name` lists every occurrence across files (`file:line` + bound arguments), and `ail idioms update $name "<newTemplate>"` rewrites all occurrences across all native files in a single atomic operation.
+- **Forgiving Direct-to-Native Surgical Splice**: `ail splice <nativeFile> -s <Class.method>` accepts pure AIL, AIL with `$idioms`, raw native code, or hybrid "Frankenstein" syntax, expanding `$idioms` and replacing only the exact AST byte-span of the target symbol while preserving 100% of surrounding comments, decorators, and formatting.
+
+### Mode B: Side-by-Side Zero-Folder-Disruption Architecture
 In real-world development, moving files into quarantine/shadow folders breaks bundlers, relative imports, and git history. AIL solves this by keeping target files and AIL files **side-by-side** in the exact same directory, backed by a **4-Layer Defense-in-Depth System**:
 
 ```
@@ -134,41 +162,54 @@ ail sync [dir]
 ail eject [dir]
 ail eject [dir] --remove-ail   # Optional: deletes .ail source files
 
-# 7. Fine-grained shield management:
-ail shield status [dir]        # Check active shield rules and locks
-ail shield lock [dir]          # Lock target files to chmod 444
-ail shield unlock [dir]        # Unlock target files to chmod 644
-ail shield apply [dir]         # Deploy .cursorignore, settings.json, and AGENTS.md
-ail shield remove [dir]        # Remove shield rules
+# 7. Fine-grained shield management (including Twinless On-the-Fly shield):
+ail shield apply [dir] --twinless  # Configure Twinless mode (zero .ail files on disk)
+ail shield status [dir]            # Check active shield rules and locks
+ail shield lock [dir]              # Lock target files to chmod 444
+ail shield unlock [dir]            # Unlock target files to chmod 644
+ail shield apply [dir]             # Deploy .cursorignore, settings.json, and AGENTS.md
+ail shield remove [dir]            # Remove shield rules
 ```
 
-### Project-Specific Idioms ($idioms)
+### Smart Multi-File Idioms (`$idioms`)
 ```bash
-# Scan workspace to discover repetitive AST templates with positive net BPE token savings:
+# Scan native or .ail workspace to discover repetitive AST templates & build .ail-cache/idioms.json:
 ail idioms scan [dir] --min-occurrences 3 --min-savings 10
 
-# Synthesize discovered idioms into ail.config.json and collapse source occurrences into $idioms:
+# Inspect an idiom's template, parameters, and every file:line occurrence across the project:
+ail idioms read '$clamp' [dir]
+
+# Mutate an idiom's template and rewrite all occurrences across all native files atomically:
+ail idioms update '$clamp' "Math.max($1, Math.min($2, $0))" [dir]
+ail idioms update '$clamp' "Math.max($1, Math.min($2, $0)) * $3" --params '$0,$1,$2,$3=1.0' [dir]
+
+# Instant toggle of on-the-fly $idiom collapsing in ail.config.json:
+ail idioms on [dir]
+ail idioms off [dir]
+
+# Synthesize discovered idioms into .ail files (Side-by-Side mode) or expand back:
 ail idioms apply [dir]
-ail idioms apply [dir] --dry-run
-
-# List active project idioms registered in ail.config.json:
 ail idioms list [dir]
-
-# Expand all $idiom calls back to standard canonical .ail code and clear configuration:
 ail idioms expand [dir]
 ```
 
-### AI Agent Context, Surgical Splicing, MCP & Evolution
+### AI Agent On-the-Fly Context, Surgical Splicing, MCP & Evolution
 ```bash
-# Generate 1-turn token-bounded context pack with contracts, outline, and downstream callers:
-ail context src/sim/Hazard.ts.ail --depth 2 --max-tokens 4000
+# Generate 1-turn token-bounded context pack from a native file (or single symbol with -s):
+ail context src/sim/Hazard.ts --depth 2 --max-tokens 4000
+ail context src/sim/Hazard.ts -s HazardManager.calculateDamage --idioms
 
-# Generate structural skeleton outline of an .ail file or project (85-90% token reduction):
-ail outline src/sim --depth 2 --stats
+# Generate structural skeleton outline of any native or .ail file/directory (85-95% token reduction):
+ail outline src/sim/Hazard.ts --stats
 
-# Surgically replace or delete AST symbols (fn, type, class, method) without dumping whole files:
-ail splice src/sim/Hazard.ts.ail -s calculateDamage -c "fn calculateDamage(d: int) -> int = d * 2"
-ail splice src/sim/Hazard.ts.ail -s obsoleteHelper --delete
+# Surgically replace or delete AST symbols directly in native files (accepts AIL, $idioms, raw, or hybrid):
+ail splice src/sim/Hazard.ts -s HazardManager.calculateDamage -c "pub fn calculateDamage(d: int) -> int: ret $clamp(d * 2, 0, 100)"
+ail splice src/sim/Hazard.ts -s HazardManager.calculateDamage --body "ret d * 2"
+ail splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
+ail splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]'
+
+# Run the 100-Case Deep Twinless On-the-Fly Benchmark Suite:
+bun run benchmark:100
 
 # Run test suite with symbol-mapped runtime stack trace translation and auto-recompilation:
 ail test

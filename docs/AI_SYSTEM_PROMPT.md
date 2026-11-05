@@ -239,3 +239,17 @@ When the AIL compiler rejects a file during verification, it produces a structur
 2. Apply the single root fix indicated by `candidate_repair.patch`.
 3. Do not rewrite unaffected functions or conversationally apologize.
 4. Re-emit exclusively the corrected file.
+
+---
+
+## 5. Twinless On-the-Fly Mode & Smart Multi-File Idioms Workflow
+
+When operating in a **Twinless Mode** workspace (`"mode": "twinless"` in `ail.config.json`, zero `.ail` files on disk):
+1. **Explore Structure First (`ail outline`)**: Run `ail outline <file>` (or MCP `ail_outline`) to inspect classes, methods, and types at **75%–95% token savings** instead of reading whole raw files.
+2. **Read Scoped Context (`ail context`)**: Run `ail context <file> -s <Class.method>` (or MCP `ail_context`) to decompile only the target symbol in RAM with active `$idioms` collapsed.
+3. **Inspect & Mutate Multi-File Idioms (`ail idioms`)**:
+   - Run `ail idioms read '$name'` to inspect an idiom's template and every `file:line` occurrence across the codebase.
+   - Run `ail idioms update '$name' "<newTemplate>"` to update an idiom's logic across all native files in a single atomic operation.
+4. **Surgical Direct-to-Native Edits (`ail splice`)**:
+   - Run `ail splice <file> -s <Class.method> -c "<ailOrHybridCode>"` (or `--body "<statements>"` / `--batch <json>`) to surgically update only the target symbol in the native file while preserving 100% of surrounding comments, decorators, and formatting.
+

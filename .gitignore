@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+.ail-cache/
 *.log
 .DS_Store
 __pycache__/
