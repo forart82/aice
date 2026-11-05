@@ -110,7 +110,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.6.3");
+  .version("0.6.4");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -2514,11 +2514,15 @@ program
           });
 
           if (!dryRun) {
-            const config = loadProjectConfig(targetDir);
+            const rootDir = findProjectRoot(targetDir);
+            const config = loadProjectConfig(rootDir);
             if (config.mode === "companion") {
-              applyCompanionShield(targetDir);
+              applyCompanionShield(rootDir);
             } else {
-              await applyAiShield(targetDir);
+              await applyAiShield(rootDir, {
+                lifecycleHooks: config.mode !== "twinless",
+                twinless: config.mode === "twinless",
+              });
             }
           }
 
@@ -2543,7 +2547,8 @@ program
           }
         } else if (action === "expand") {
           const res = expandProjectIdiomsInDirectory(targetDir);
-          const configPath = path.join(targetDir, "ail.config.json");
+          const rootDir = findProjectRoot(targetDir);
+          const configPath = path.join(rootDir, "ail.config.json");
           if (fs.existsSync(configPath)) {
             try {
               const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -2568,7 +2573,8 @@ program
             `✔ All project idioms inlined back into standard .ail code and idioms cleared from config.`,
           );
         } else if (action === "list") {
-          const config = loadProjectConfig(targetDir);
+          const rootDir = findProjectRoot(targetDir);
+          const config = loadProjectConfig(rootDir);
           const idioms = config.idioms ?? {};
 
           if (isJson) {

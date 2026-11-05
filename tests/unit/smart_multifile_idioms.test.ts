@@ -585,6 +585,45 @@ export class Enemy {
         );
       }
     });
+
+    it("resolves project root when scanning a subdirectory (e.g. 'src/') and reading from root", () => {
+      const srcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "sub-test" }), "utf-8");
+
+      const tsCode = `export class Audio {
+  playA() {
+    if (!this.ready || !this.ctx || !this.gain) {
+      return;
+    }
+    this.ctx.start(1);
+  }
+  playB() {
+    if (!this.ready || !this.ctx || !this.gain) {
+      return;
+    }
+    this.ctx.start(2);
+  }
+  playC() {
+    if (!this.ready || !this.ctx || !this.gain) {
+      return;
+    }
+    this.ctx.start(3);
+  }
+}
+`;
+      fs.writeFileSync(path.join(srcDir, "audio.ts"), tsCode, "utf-8");
+
+      const scanRes = scanProjectIdioms(srcDir, { minOccurrences: 3, minNetTokenSavings: 5 });
+      expect(scanRes.synthesizedIdioms).toBeGreaterThanOrEqual(1);
+      expect(fs.existsSync(path.join(tmpDir, "ail.config.json"))).toBe(true);
+      expect(fs.existsSync(path.join(srcDir, "ail.config.json"))).toBe(false);
+
+      const firstIdiom = Object.keys(scanRes.idioms)[0];
+      const readRes = readProjectIdiom(tmpDir, firstIdiom);
+      expect(readRes.totalOccurrences).toBe(3);
+      expect(readRes.occurrences[0].filePath).toBe("src/audio.ts");
+    });
   });
 });
 

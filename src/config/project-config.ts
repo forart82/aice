@@ -760,7 +760,14 @@ export function setProjectIdiomsEnabled(
   projectDir: string,
   enabled: boolean,
 ): AilProjectConfig {
-  const resolvedDir = path.resolve(projectDir);
+  let resolvedDir = findProjectRoot(projectDir);
+  if (
+    resolvedDir === path.resolve(projectDir) &&
+    path.basename(resolvedDir) === "src" &&
+    !fs.existsSync(path.join(resolvedDir, "ail.config.json"))
+  ) {
+    resolvedDir = path.dirname(resolvedDir);
+  }
   const updated = saveProjectConfig(resolvedDir, { idiomsEnabled: enabled });
 
   const cachePath = path.join(resolvedDir, ".ail-cache", "idioms.json");

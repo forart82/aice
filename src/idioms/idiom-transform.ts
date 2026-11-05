@@ -49,10 +49,12 @@ import { AilGenerator } from "../decompiler/ail-generator.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath } from "../emitters/index.js";
 import {
+  findProjectRoot,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   saveProjectConfig,
+  type AilProjectConfig,
   type IdiomOccurrence,
   type ProjectIdiomDefinition,
 } from "../config/project-config.js";
@@ -2128,6 +2130,29 @@ function collectOccurrencesAcrossFiles(
   return occurrences;
 }
 
+function resolveIdiomWorkspace(dir: string): {
+  projectRoot: string;
+  config: AilProjectConfig;
+  searchDir: string;
+} {
+  const resolvedInput = path.resolve(dir);
+  let projectRoot = findProjectRoot(resolvedInput);
+  if (
+    projectRoot === resolvedInput &&
+    path.basename(resolvedInput) === "src" &&
+    !fs.existsSync(path.join(resolvedInput, "ail.config.json"))
+  ) {
+    projectRoot = path.dirname(resolvedInput);
+  }
+  const config = loadProjectConfig(projectRoot);
+  if (resolvedInput !== projectRoot && fs.existsSync(resolvedInput)) {
+    return { projectRoot, config, searchDir: resolvedInput };
+  }
+  const targetDir = path.resolve(projectRoot, config.sourceDir);
+  const searchDir = fs.existsSync(targetDir) ? targetDir : projectRoot;
+  return { projectRoot, config, searchDir };
+}
+
 /**
  * Native-first idiom scanner: discovers idioms across native (.ts, .py, etc.) and/or .ail files,
  * persists idioms in `ail.config.json` and provenance in `.ail-cache/idioms.json`,
@@ -2137,10 +2162,7 @@ export function scanProjectIdioms(
   dir: string,
   options?: ApplyProjectIdiomsOptions,
 ): ApplyProjectIdiomsResult {
-  const resolvedDir = path.resolve(dir);
-  const config = loadProjectConfig(resolvedDir);
-  const targetDir = path.resolve(resolvedDir, config.sourceDir);
-  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
+  const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
 
   const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
     resolvedDir,
@@ -2209,16 +2231,13 @@ export function applyProjectIdiomsToDirectory(
   dir: string,
   options?: ApplyProjectIdiomsOptions,
 ): ApplyProjectIdiomsResult {
-  const resolvedDir = path.resolve(dir);
-  const config = loadProjectConfig(resolvedDir);
-  const targetDir = path.resolve(resolvedDir, config.sourceDir);
-  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
+  const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
 
   const ailFilePaths = scanAilFiles(searchDir);
 
   // If no .ail files exist on disk, run native-first twinless idiom discovery!
   if (ailFilePaths.length === 0) {
-    return scanProjectIdioms(resolvedDir, options);
+    return scanProjectIdioms(dir, options);
   }
 
   const files: IdiomFileInput[] = [];
@@ -2282,8 +2301,7 @@ export function applyProjectIdiomsToDirectory(
  * automatically invalidating any stale SHA-256 cache entries when files change on disk.
  */
 export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResult {
-  const resolvedDir = path.resolve(dir);
-  const config = loadProjectConfig(resolvedDir);
+  const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
   const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
   const bareName = normName.slice(1);
 
@@ -2297,8 +2315,6 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
     name: normName,
   };
 
-  const targetDir = path.resolve(resolvedDir, config.sourceDir);
-  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
   const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
     resolvedDir,
     searchDir,
@@ -2362,8 +2378,7 @@ export async function updateProjectIdiom(
   newTemplateAil: string,
   options?: { dryRun?: boolean; description?: string },
 ): Promise<IdiomUpdateResult> {
-  const resolvedDir = path.resolve(dir);
-  const config = loadProjectConfig(resolvedDir);
+  const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
   const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
   const bareName = normName.slice(1);
 
@@ -2414,8 +2429,6 @@ export async function updateProjectIdiom(
   // Validate syntax & check for direct/mutual recursion cycles before touching any files!
   validateIdiomDefinitions(candidateIdioms);
 
-  const targetDir = path.resolve(resolvedDir, config.sourceDir);
-  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
   const { files } = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);
 
   const dryRun = Boolean(options?.dryRun);
@@ -2601,15 +2614,12 @@ export async function updateProjectIdiom(
 export function expandProjectIdiomsInDirectory(
   dir: string,
 ): { expandedFiles: number; expandedCalls: number } {
-  const resolvedDir = path.resolve(dir);
-  const config = loadProjectConfig(resolvedDir);
+  const { config, searchDir } = resolveIdiomWorkspace(dir);
 
   if (!config.idioms || Object.keys(config.idioms).length === 0) {
     return { expandedFiles: 0, expandedCalls: 0 };
   }
 
-  const targetDir = path.resolve(resolvedDir, config.sourceDir);
-  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
   const ailFilePaths = scanAilFiles(searchDir);
 
   let expandedFiles = 0;
