@@ -2111,14 +2111,79 @@ export class PythonDecompiler {
       };
     }
 
-    // List literal: [1, 2, 3]
+    // List literal: [1, 2, 3] or list comprehension: [expr for x in iterable]
     if (this.check("LBRACKET")) {
       const startSpan = this.advance().span;
       const elements: Expr[] = [];
-      while (!this.check("RBRACKET") && !this.check("EOF")) {
-        elements.push(this.parseExpr());
-        if (this.check("COMMA")) this.advance();
-        else break;
+      if (!this.check("RBRACKET") && !this.check("EOF")) {
+        const firstExpr = this.parseExpr();
+        if (this.check("FOR")) {
+          this.advance();
+          const varName = this.parseForVariable();
+          this.consume("IN");
+          const iterableExpr = this.parseExpr();
+          let mappedIterable: Expr = iterableExpr;
+          if (this.check("IF")) {
+            this.advance();
+            const filterCond = this.parseExpr();
+            mappedIterable = {
+              kind: "CallExpr",
+              callee: { kind: "IdentifierExpr", name: "filter", span: startSpan },
+              args: [
+                {
+                  kind: "ClosureExpr",
+                  params: [{ name: varName, typeAnnotation: null, span: startSpan }],
+                  returnType: null,
+                  body: filterCond,
+                  span: startSpan,
+                },
+                iterableExpr,
+              ],
+              span: startSpan,
+            };
+          }
+          const endSpan = this.consume("RBRACKET").span;
+          const fullSpan = makeSpan(
+            this.filePath,
+            startSpan.start.line,
+            startSpan.start.column,
+            startSpan.start.offset,
+            endSpan.end.line,
+            endSpan.end.column,
+            endSpan.end.offset,
+          );
+          return {
+            kind: "CallExpr",
+            callee: { kind: "IdentifierExpr", name: "list", span: fullSpan },
+            args: [
+              {
+                kind: "CallExpr",
+                callee: { kind: "IdentifierExpr", name: "map", span: fullSpan },
+                args: [
+                  {
+                    kind: "ClosureExpr",
+                    params: [{ name: varName, typeAnnotation: null, span: fullSpan }],
+                    returnType: null,
+                    body: firstExpr,
+                    span: fullSpan,
+                  },
+                  mappedIterable,
+                ],
+                span: fullSpan,
+              },
+            ],
+            span: fullSpan,
+          };
+        }
+        elements.push(firstExpr);
+        if (this.check("COMMA")) {
+          this.advance();
+          while (!this.check("RBRACKET") && !this.check("EOF")) {
+            elements.push(this.parseExpr());
+            if (this.check("COMMA")) this.advance();
+            else break;
+          }
+        }
       }
       const endSpan = this.consume("RBRACKET").span;
       return {

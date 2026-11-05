@@ -553,7 +553,12 @@ export async function generateWorkspaceContext(
   for (const f of resolved.files) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
-      const oRes = generateOutline(f, { includeTypes: true, depth: options.depth });
+      const oRes = generateOutline(f, {
+        includeTypes: true,
+        depth: options.depth,
+        idioms: options.idioms,
+        projectRoot,
+      });
       outlines.push(`### \`${relFile}\`\n\`\`\`ail\n${oRes.text}\n\`\`\``);
 
       const imports = extractImportsFromFile(f);

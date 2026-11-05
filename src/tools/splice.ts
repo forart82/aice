@@ -775,6 +775,7 @@ export function spliceSource(
 
 interface NativeSpanInfo {
   declStart: number;
+  fullDeclStart?: number;
   declEnd: number;
   tokenStart: number;
   declIndent: string;
@@ -798,13 +799,39 @@ function getTsMemberName(member: ts.Node, sf: ts.SourceFile): string | undefined
   return named.name.getText(sf);
 }
 
-function extractTsModifiersMeta(node: ts.Node, sf: ts.SourceFile): {
+function getPostDecoratorTokenStart(node: ts.Node, sf: ts.SourceFile, nativeSource: string): number {
+  const rawStart = node.getStart(sf, false);
+  const modifiers = (node as { modifiers?: ts.NodeArray<ts.ModifierLike> }).modifiers;
+  if (!modifiers || modifiers.length === 0) return rawStart;
+
+  const decorators = modifiers.filter((m) => ts.isDecorator(m));
+  if (decorators.length === 0) return rawStart;
+
+  const firstNonDecorator = modifiers.find((m) => !ts.isDecorator(m));
+  if (firstNonDecorator) {
+    return firstNonDecorator.getStart(sf, false);
+  }
+
+  const lastDecorator = decorators[decorators.length - 1];
+  let pos = lastDecorator.getEnd();
+  while (pos < nativeSource.length && /\s/.test(nativeSource[pos])) {
+    pos++;
+  }
+  return pos;
+}
+
+function extractTsModifiersMeta(
+  node: ts.Node,
+  sf: ts.SourceFile,
+  postDecoratorStart?: number,
+): {
   visibility?: "public" | "private" | "protected";
   isExported?: boolean;
   isStatic?: boolean;
   isAsync?: boolean;
 } {
-  const headerText = sf.text.slice(node.getStart(sf, false), Math.min(node.getEnd(), node.getStart(sf, false) + 120));
+  const start = postDecoratorStart ?? node.getStart(sf, false);
+  const headerText = sf.text.slice(start, Math.min(node.getEnd(), start + 120));
   let visibility: "public" | "private" | "protected" | undefined;
   if (/^(?:export\s+)?public\b/.test(headerText)) visibility = "public";
   else if (/^(?:export\s+)?private\b/.test(headerText)) visibility = "private";
@@ -823,7 +850,12 @@ function buildSpanInfoFromTsNode(
   memberName: string,
   className?: string,
 ): NativeSpanInfo {
-  const tokenStart = targetNode.getStart(sf, false);
+  const rawTokenStart = targetNode.getStart(sf, false);
+  const rawLineStart = nativeSource.lastIndexOf("\n", rawTokenStart - 1) + 1;
+  const rawLeading = nativeSource.slice(rawLineStart, rawTokenStart);
+  const fullDeclStart = /^[ \t]*$/.test(rawLeading) ? rawLineStart : rawTokenStart;
+
+  const tokenStart = getPostDecoratorTokenStart(targetNode, sf, nativeSource);
   const lineStart = nativeSource.lastIndexOf("\n", tokenStart - 1) + 1;
   const leadingSlice = nativeSource.slice(lineStart, tokenStart);
   const isOnlyWs = /^[ \t]*$/.test(leadingSlice);
@@ -832,10 +864,11 @@ function buildSpanInfoFromTsNode(
     ? leadingSlice
     : (nativeSource.slice(lineStart).match(/^[ \t]*/)?.[0] ?? "");
   const declEnd = targetNode.getEnd();
-  const meta = extractTsModifiersMeta(targetNode, sf);
+  const meta = extractTsModifiersMeta(targetNode, sf, tokenStart);
 
   return {
     declStart,
+    fullDeclStart,
     declEnd,
     tokenStart,
     declIndent,
@@ -864,28 +897,36 @@ function locateTsDeclarationSpan(
   if (className) {
     for (const stmt of sf.statements) {
       if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
-        for (const member of stmt.members) {
-          if (getTsMemberName(member, sf) === memberName) {
-            return buildSpanInfoFromTsNode(member, sf, nativeSource, memberName, className);
-          }
+        const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
+        if (matchingMembers.length > 0) {
+          const implMember =
+            matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
+            matchingMembers[matchingMembers.length - 1];
+          return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, className);
         }
       }
     }
     return undefined;
   }
 
-  // 1. Top-level declaration search
-  for (const stmt of sf.statements) {
-    if (
+  // 1. Top-level declaration search (prefer implementation with .body over overload signature headers)
+  const matchingTopStmts = sf.statements.filter(
+    (stmt) =>
       (ts.isFunctionDeclaration(stmt) ||
         ts.isClassDeclaration(stmt) ||
         ts.isInterfaceDeclaration(stmt) ||
         ts.isTypeAliasDeclaration(stmt) ||
         ts.isEnumDeclaration(stmt)) &&
-      stmt.name?.text === memberName
-    ) {
-      return buildSpanInfoFromTsNode(stmt, sf, nativeSource, memberName, undefined);
-    }
+      stmt.name?.text === memberName,
+  );
+  if (matchingTopStmts.length > 0) {
+    const implStmt =
+      matchingTopStmts.find((s) => (s as { body?: unknown }).body !== undefined) ??
+      matchingTopStmts[matchingTopStmts.length - 1];
+    return buildSpanInfoFromTsNode(implStmt, sf, nativeSource, memberName, undefined);
+  }
+
+  for (const stmt of sf.statements) {
     if (ts.isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.name.text === memberName) {
@@ -899,10 +940,12 @@ function locateTsDeclarationSpan(
   for (const stmt of sf.statements) {
     if (ts.isClassDeclaration(stmt)) {
       const parentName = stmt.name?.text;
-      for (const member of stmt.members) {
-        if (getTsMemberName(member, sf) === memberName) {
-          return buildSpanInfoFromTsNode(member, sf, nativeSource, memberName, parentName);
-        }
+      const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
+      if (matchingMembers.length > 0) {
+        const implMember =
+          matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
+          matchingMembers[matchingMembers.length - 1];
+        return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, parentName);
       }
     }
   }
@@ -1435,6 +1478,11 @@ function normalizeFrankensteinSnippetToAil(
     } else if (/^\s*pub\s+/.test(header) || /^\s*export\s+/.test(header)) {
       isExported = true;
       header = header.replace(/^\s*export\s+(?:function\s+)?/, "pub fn ");
+    } else if (/^\s*(?:async\s+)?def\s+/.test(header)) {
+      header = header.replace(/^(\s*)(async\s+)?def\s+/, "$1$2fn ");
+    } else if (/^\s*(?:async\s+)?function\s+/.test(header)) {
+      header = header.replace(/^(\s*)(async\s+)?function\s+/, "$1$2fn ");
+      header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
     }
 
     // Also normalize TS-style header without `fn`: e.g. `pub computeMetric(x: number): number {`
@@ -1453,7 +1501,7 @@ function normalizeFrankensteinSnippetToAil(
   }
 
   const normalizedLines = lines.map((line, idx) => {
-    if (idx === 0) return line;
+    if (idx === 0) return line.replace(/\breturn\b/, "ret");
     return line.replace(/^(\s*)return\b/, "$1ret");
   });
 
@@ -1462,6 +1510,52 @@ function normalizeFrankensteinSnippetToAil(
     explicitVisibility,
     isExported,
   };
+}
+
+function convertFrankensteinToNativeForDecompile(
+  snippet: string,
+  targetLang: TargetLanguage,
+  isBodyOnly = false,
+): string {
+  const lines = snippet.trim().split("\n");
+  if (targetLang === "python") {
+    return lines
+      .map((line, idx) => {
+        let out = line.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/g, "__ail_idiom__$1(");
+        if (idx === 0 && !isBodyOnly) {
+          out = out.replace(/^(\s*)(?:pub\s+)?(async\s+)?fn\s+/, "$1$2def ");
+        }
+        out = out
+          .replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*[^=]+?\s*::?=\s*(.+)$/, "$1$2 = $3")
+          .replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::?=\s*(.+)$/, "$1$2 = $3")
+          .replace(/^(\s*)ret\b/, "$1return");
+        return out;
+      })
+      .join("\n");
+  }
+
+  return lines
+    .map((line, idx) => {
+      let out = line;
+      if (idx === 0 && !isBodyOnly) {
+        out = out
+          .replace(/^(\s*)pub\s+fn\s+/, "$1public ")
+          .replace(/^(\s*)fn\s+/, "$1function ")
+          .replace(/\)\s*->\s*([^{:]+)\s*\{\s*$/, "): $1 {");
+      }
+      out = out
+        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*:=\s*(.+)$/, "$1const $2: $3 = $4")
+        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*(.+)$/, "$1const $2 = $3")
+        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*::=\s*(.+)$/, "$1let $2: $3 = $4")
+        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*(.+)$/, "$1let $2 = $3")
+        .replace(/^(\s*)ret\b/, "$1return");
+      return out;
+    })
+    .join("\n");
+}
+
+function restorePythonIdiomPlaceholders(ailSource: string): string {
+  return ailSource.replace(/__ail_idiom__([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
 }
 
 function parseSnippetToExpandedDecl(
@@ -1499,6 +1593,7 @@ function parseSnippetToExpandedDecl(
 
   // Attempt 2: If body-only or parsed only as __top_level__ statements, wrap statements inside the original declaration signature!
   if (!hasFnOrClassDecl(parsedMod) && originalSnippet) {
+    let holderFn: FunctionDecl | undefined;
     try {
       const bodyLines = rawSnippet
         .trim()
@@ -1510,11 +1605,34 @@ function parseSnippetToExpandedDecl(
         idioms && Object.keys(idioms).length > 0
           ? expandModuleIdioms(bodyMod, idioms)
           : bodyMod;
-      const holderFn = expandedBodyMod.items.find(
+      holderFn = expandedBodyMod.items.find(
         (it): it is FunctionDecl => it.kind === "FunctionDecl" && it.name === "__body_holder__",
       );
+    } catch (bodyErr) {
+      lastErr = lastErr ?? bodyErr;
+      try {
+        const nativeBody = convertFrankensteinToNativeForDecompile(rawSnippet, targetLang, true);
+        const wrappedNativeBody =
+          targetLang === "python"
+            ? `def __body_holder__():\n${indentCode(nativeBody, "    ")}\n`
+            : `function __body_holder__() {\n${indentCode(nativeBody, "  ")}\n}\n`;
+        const decompBody = decompile(wrappedNativeBody, targetLang, { filePath });
+        const restoredAil = restorePythonIdiomPlaceholders(decompBody.ail);
+        const bodyMod = parse(restoredAil, filePath);
+        const expandedBodyMod =
+          idioms && Object.keys(idioms).length > 0
+            ? expandModuleIdioms(bodyMod, idioms)
+            : bodyMod;
+        holderFn = expandedBodyMod.items.find(
+          (it): it is FunctionDecl => it.kind === "FunctionDecl" && it.name === "__body_holder__",
+        );
+      } catch {
+        // fall through
+      }
+    }
 
-      if (holderFn) {
+    if (holderFn) {
+      try {
         const wrappedOrig =
           className && (targetLang === "typescript" || targetLang === "javascript")
             ? `class ${className} {\n${originalSnippet}\n}`
@@ -1546,21 +1664,27 @@ function parseSnippetToExpandedDecl(
             };
           }
         }
+      } catch (origErr) {
+        lastErr = lastErr ?? origErr;
       }
-    } catch (bodyErr) {
-      lastErr = lastErr ?? bodyErr;
     }
   }
 
-  // Attempt 3: Decompile native snippet (e.g., raw TypeScript or Python function/method)
+  // Attempt 3: Decompile native or hybrid Frankenstein snippet (e.g., raw TypeScript or Python function/method + $idioms / := / ret)
   if (!hasFnOrClassDecl(parsedMod)) {
     try {
+      const preparedNative = convertFrankensteinToNativeForDecompile(
+        rawSnippet,
+        targetLang,
+        false,
+      );
       const wrappedNative =
         className && (targetLang === "typescript" || targetLang === "javascript")
-          ? `class ${className} {\n${rawSnippet}\n}`
-          : rawSnippet;
+          ? `class ${className} {\n${preparedNative}\n}`
+          : preparedNative;
       const decomp = decompile(wrappedNative, targetLang, { filePath });
-      parsedMod = parse(decomp.ail, filePath);
+      const restoredAil = restorePythonIdiomPlaceholders(decomp.ail);
+      parsedMod = parse(restoredAil, filePath);
     } catch (decompErr) {
       throw new Error(
         `Syntax error in splice snippet for ${filePath}: ${lastErr instanceof Error ? lastErr.message : String(decompErr)}`,
@@ -1617,15 +1741,20 @@ function spliceNativeSource(
   let modifiedCode = nativeSource;
 
   if (options.delete) {
+    const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
     let delEnd = spanInfo.declEnd;
     if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
     else if (nativeSource[delEnd] === "\n") delEnd += 1;
-    modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${nativeSource.slice(delEnd)}`;
+    modifiedCode = `${nativeSource.slice(0, delStart)}${nativeSource.slice(delEnd)}`;
   } else {
     const rawSnippet = options.code ?? options.body ?? "";
     if (!rawSnippet.trim()) {
       throw new Error("Must provide non-empty --code or --body when splicing native file");
     }
+
+    const replaceStart = rawSnippet.trimStart().startsWith("@")
+      ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
+      : spanInfo.declStart;
 
     if (
       options.code !== undefined &&
@@ -1633,7 +1762,7 @@ function spliceNativeSource(
       isPureNativeTsSnippetWithoutIdioms(rawSnippet, spanInfo.className)
     ) {
       newSnippet = indentCode(rawSnippet.trim(), spanInfo.declIndent);
-      modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+      modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
     } else {
       const { decl, explicitVisibility, isExported } = parseSnippetToExpandedDecl(
         rawSnippet,
@@ -1659,7 +1788,7 @@ function spliceNativeSource(
       );
 
       newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
-      modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+      modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
     }
   }
 

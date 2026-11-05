@@ -137,11 +137,12 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
       content = fs.readFileSync(tsFile, "utf-8");
       expect(content).toContain("const total = amount + bonus * 2;");
 
-      // Subcase 3: Hybrid "Frankenstein" syntax mixing TS braces/semicolons/const with AIL `:=`, `ret`, and `$guardMin`
+      // Subcase 3: Hybrid "Frankenstein" syntax mixing TS braces/semicolons/const/destructuring with AIL `:=`, `ret`, and `$guardMin`
       await splice(tsFile, {
         projectRoot: tmpDir,
         symbol: "CombatMath.calcShield",
-        body: `scaled := base * mult;
+        body: `const { b, m } = { b: base, m: mult };
+scaled := b * m;
 const boosted = scaled + 10;
 $guardMin(boosted, 25);
 ret boosted;`,
@@ -149,14 +150,14 @@ ret boosted;`,
 
       content = fs.readFileSync(tsFile, "utf-8");
       expect(content).not.toContain("$guardMin");
-      expect(content).toContain("scaled = base * mult");
+      expect(content).toContain("scaled = b * m");
       expect(content).toContain("boosted = scaled + 10");
       expect(content).toContain("if (boosted < 25)");
       expect(content).toContain("return 25;");
       expect(content).toContain("return boosted;");
     });
 
-    it("splices a pure native Python (.py) file directly using AIL + $idioms without creating a .ail file", async () => {
+    it("splices a pure native Python (.py) file directly using AIL + $idioms and hybrid Python/AIL syntax without creating a .ail file", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -191,6 +192,7 @@ def keep_untouched(x: int) -> int:
         "utf-8",
       );
 
+      // 1. Pure AIL + $idiom
       await splice(pyFile, {
         projectRoot: tmpDir,
         symbol: "compute_velocity",
@@ -201,12 +203,30 @@ def keep_untouched(x: int) -> int:
       });
 
       expect(fs.existsSync(`${pyFile}.ail`)).toBe(false);
-      const pyAfter = fs.readFileSync(pyFile, "utf-8");
+      let pyAfter = fs.readFileSync(pyFile, "utf-8");
       expect(pyAfter).toContain("# Physics header comment");
       expect(pyAfter).toContain("if dt < 0:");
       expect(pyAfter).toContain("return 0");
       expect(pyAfter).toContain("def keep_untouched(x: int) -> int:");
+
+      // 2. Hybrid Python `def` + list comprehension + AIL `:=`, `ret`, and `$guardNonNeg`
+      await splice(pyFile, {
+        projectRoot: tmpDir,
+        symbol: "compute_velocity",
+        code: `def compute_velocity(v: float, dt: float) -> float:
+    $guardNonNeg(dt)
+    samples = [i * 2 for i in range(3)]
+    step := v * dt + len(samples)
+    ret step`,
+      });
+
+      pyAfter = fs.readFileSync(pyFile, "utf-8");
+      expect(pyAfter).toContain("if dt < 0:");
+      expect(pyAfter).toContain("list(map((lambda i: (i * 2)), range(3)))");
+      expect(pyAfter).toContain("step = (v * dt) + len(samples)");
+      expect(pyAfter).toContain("return step");
     });
+
 
     it("packages symbol-scoped on-the-fly AIL context (`-s <symbol>`) from a native .ts file with collapsed $idioms", async () => {
       const srcDir = path.join(tmpDir, "src");
@@ -293,13 +313,24 @@ export function step(globalTick: number): number {
   return globalTick + 1;
 }
 
+export function LogStep(): MethodDecorator {
+  return (_target, _key, descriptor) => descriptor;
+}
+
 export class GameEngine {
   private tickCount = 0;
 
   /**
-   * JSDoc directly attached to GameEngine.step — MUST REMAIN 100% BIT-IDENTICAL!
+   * Method overload signature headers — MUST NOT BE OVERWRITTEN when splicing implementation!
+   */
+  public step(dt: number): number;
+  public step(dt: number, scale?: number): number;
+
+  /**
+   * JSDoc & Decorator directly attached to GameEngine.step — MUST REMAIN 100% BIT-IDENTICAL!
    * @param dt Delta time in seconds
    */
+  @LogStep()
 `;
 
       const originalTargetMethod = `  public step(dt: number): number {
@@ -333,17 +364,18 @@ export class GameEngine {
 
       const modifiedNative = fs.readFileSync(tsFile, "utf-8");
 
-      // 1. Every single byte in prefixBytes (including file header, ComplexGenericMap, SLASH_REGEX, top-level step(), and GameEngine.step's JSDoc) MUST be 100% bit-identical!
+      // 1. Every single byte in prefixBytes (including file header, ComplexGenericMap, SLASH_REGEX, top-level step(), overload headers, JSDoc, and @LogStep() decorator) MUST be 100% bit-identical!
       expect(modifiedNative.startsWith(prefixBytes)).toBe(true);
 
       // 2. Every single byte in suffixBytes (including trailing JSDoc, generic render<T>, regex, template literal) MUST be 100% bit-identical!
       expect(modifiedNative.endsWith(suffixBytes)).toBe(true);
 
-      // 3. The middle spliced method has the new logic
+      // 3. The middle spliced method has the new logic and preserved `public` visibility
       const middleReplaced = modifiedNative.slice(
         prefixBytes.length,
         modifiedNative.length - suffixBytes.length,
       );
+      expect(middleReplaced).toContain("public step(");
       expect(middleReplaced).toContain("this.tickCount += 2");
       expect(middleReplaced).toContain("this.tickCount * dt * 0.5");
     });
@@ -476,59 +508,48 @@ export class GameEngine {
         expect(fs.readFileSync(path.join(tmpDir, ".cursorignore"), "utf-8")).not.toContain("*.ts");
       }
 
-      // 2. Scan idioms directly on native snake_ts files
+      // 2. Scan idioms directly on native snake_ts files (must automatically discover $guard in Vec2.ts and $guard2 in StatusSet.ts!)
+      saveProjectConfig(tmpDir, {
+        mode: "twinless",
+        sourceDir: "src",
+        idiomsEnabled: true,
+      });
       const scanRes = scanProjectIdioms(tmpDir, {
         minOccurrences: 3,
         minNetTokenSavings: 3,
       });
-      expect(Object.keys(scanRes.idioms).length).toBeGreaterThanOrEqual(1);
-
-      // Also register a domain idiom `$maxTimer` matching `this.$0 = Math.max(this.$0, $1)` in StatusSet.ts
-      const cfg = loadProjectConfig(tmpDir);
-      const maxTimerIdiom: ProjectIdiomDefinition = {
-        name: "$maxTimer",
-        kind: "stmt",
-        params: [{ name: "$0" }, { name: "$1" }],
-        templateAil: "$0 = max($0, $1)",
-        occurrences: 4,
-        tokensPerOccurrenceSaved: 5,
-        netTokenSavings: 20,
-      };
-      saveProjectConfig(tmpDir, {
-        ...cfg,
-        mode: "twinless",
-        sourceDir: "src",
-        idiomsEnabled: true,
-        idioms: {
-          ...(cfg.idioms ?? {}),
-          $maxTimer: maxTimerIdiom,
-        },
-      });
+      expect(scanRes.idioms.$guard).toBeDefined();
+      expect(scanRes.idioms.$guard2).toBeDefined();
 
       const statusSetPath = path.join(srcSimDir, "StatusSet.ts");
 
-      // 3. On-the-fly context on StatusSet.ts collapses $maxTimer
+      // 3. On-the-fly context on StatusSet.ts collapses auto-mined $guard2 (`if $0 > 0: $0 = max(0, $0 - dt)`)
       const ctx = await generateContext(statusSetPath, { projectRoot: tmpDir });
-      expect(ctx.targetContent).toContain("$maxTimer(");
+      expect(ctx.targetContent).toContain("$guard2(this.FreezeTimer)");
+      expect(ctx.targetContent).toContain("$guard2(this.StunTimer)");
+      expect(ctx.targetContent).toContain("$guard2(this.MarkTimer)");
 
-      // 4. Multi-file idiom update on $maxTimer across StatusSet.ts methods
+      // 4. Multi-file idiom update on auto-mined $guard2 across StatusSet.ts
       const updateRes = await updateProjectIdiom(
         tmpDir,
-        "$maxTimer",
-        "$0 = max($0, max(0, $1))",
+        "$guard2",
+        "if $0 > 0:\n  $0 = max(0, $0 - dt * 1.25)",
       );
-      expect(updateRes.updatedOccurrences).toBeGreaterThanOrEqual(3);
-      expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("Math.max(0, seconds)");
+      expect(updateRes.updatedOccurrences).toBe(3);
+      expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("dt * 1.25");
 
-      // 5. Surgically splice StatusSet.Freeze using compressed AIL + $maxTimer
+      // 5. Surgically splice StatusSet.Freeze using compressed AIL + auto-mined $guard2
       await splice(statusSetPath, {
         projectRoot: tmpDir,
         symbol: "StatusSet.Freeze",
         code: `pub fn Freeze(seconds: float) -> void:
-  $maxTimer(self.FreezeTimer, seconds * 1.5)`,
+  dt := 0.0
+  $guard2(this.FreezeTimer)
+  this.FreezeTimer = max(this.FreezeTimer, seconds * 1.5)`,
       });
 
       expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("seconds * 1.5");
+
 
       // Also fix the 3 delegating getters in StatusSet.ts via spliceBatch so tsc --noEmit passes cleanly
       await spliceBatch(

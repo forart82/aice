@@ -830,23 +830,46 @@ function expandModuleIdiomsInternal(
     block.statements = newStatements;
   }
 
+  function transformDeclBody(decl: {
+    params: { name: string }[];
+    body: Block | Expr;
+    isExpressionBodied?: boolean;
+  }): void {
+    const outerScope = new Set<string>(decl.params.map((p) => p.name));
+    if ("statements" in decl.body) {
+      transformBlock(decl.body, outerScope);
+      return;
+    }
+    const bodyExpr = decl.body as Expr;
+    if (
+      bodyExpr &&
+      bodyExpr.kind === "CallExpr" &&
+      bodyExpr.callee.kind === "IdentifierExpr" &&
+      Object.hasOwn(idioms!, bodyExpr.callee.name)
+    ) {
+      const def = idioms![bodyExpr.callee.name];
+      if (def.kind === "stmt" || def.kind === "block") {
+        const synthBlock: Block = {
+          kind: "Block",
+          statements: [{ kind: "ExprStmt", expr: bodyExpr, span: bodyExpr.span }],
+          span: bodyExpr.span,
+        };
+        transformBlock(synthBlock, outerScope);
+        decl.isExpressionBodied = false;
+        decl.body = synthBlock;
+        return;
+      }
+    }
+    decl.body = transformExpr(bodyExpr);
+  }
+
   // Traverse module items
   for (const item of clonedMod.items) {
     if (item.kind === "FunctionDecl") {
-      if ("statements" in item.body) {
-        const outerScope = new Set<string>(item.params.map((p) => p.name));
-        transformBlock(item.body, outerScope);
-      } else {
-        item.body = transformExpr(item.body as Expr);
-      }
+      transformDeclBody(item);
     } else if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
-        if ("statements" in m.body) {
-          const outerScope = new Set<string>(m.params.map((p) => p.name));
-          transformBlock(m.body, outerScope);
-        } else {
-          m.body = transformExpr(m.body as Expr);
-        }
+        transformDeclBody(m);
       }
       for (const p of item.properties) {
         if (p.initialValue) {
@@ -901,8 +924,15 @@ function matchExprTemplate(
         templateExpr.rawValue === (targetExpr as LiteralExpr).rawValue ||
         templateExpr.value === (targetExpr as LiteralExpr).value
       );
-    case "IdentifierExpr":
-      return templateExpr.name === (targetExpr as IdentifierExpr).name;
+    case "IdentifierExpr": {
+      const targetName = (targetExpr as IdentifierExpr).name;
+      if (alphaMap) {
+        for (const mapped of alphaMap.values()) {
+          if (mapped === targetName) return false;
+        }
+      }
+      return templateExpr.name === targetName;
+    }
     case "BinaryExpr": {
       const t = templateExpr as BinaryExpr;
       const tg = targetExpr as BinaryExpr;
@@ -1950,37 +1980,131 @@ function collectOccurrencesAcrossFiles(
     }
 
     // 1. Also collect already-collapsed $idiom calls if present in .ail source
+    const collectExistingCallsInExpr = (expr: Expr | undefined | null, sym?: string) => {
+      if (!expr) return;
+      if (expr.kind === "CallExpr" && expr.callee.kind === "IdentifierExpr") {
+        const calleeName = expr.callee.name;
+        const normCallee = calleeName.startsWith("$") ? calleeName : `$${calleeName}`;
+        if (calleeName.startsWith("$") && occurrences[normCallee]) {
+          occurrences[normCallee].push({
+            filePath: file.relPath,
+            symbol: sym,
+            startLine: expr.span?.start?.line || 1,
+            endLine: expr.span?.end?.line || expr.span?.start?.line || 1,
+            args: expr.args.map((a) => generator.formatExpr(a)),
+            fileHash: file.fileHash,
+          });
+        }
+      }
+      switch (expr.kind) {
+        case "CallExpr":
+          collectExistingCallsInExpr(expr.callee, sym);
+          for (const a of expr.args) collectExistingCallsInExpr(a, sym);
+          break;
+        case "BinaryExpr":
+          collectExistingCallsInExpr(expr.left, sym);
+          collectExistingCallsInExpr(expr.right, sym);
+          break;
+        case "UnaryExpr":
+        case "AwaitExpr":
+        case "PostfixTryExpr":
+          collectExistingCallsInExpr(expr.operand, sym);
+          break;
+        case "AssignExpr":
+          collectExistingCallsInExpr(expr.target, sym);
+          collectExistingCallsInExpr(expr.value, sym);
+          break;
+        case "MemberAccessExpr":
+          collectExistingCallsInExpr(expr.object, sym);
+          break;
+        case "IndexExpr":
+          collectExistingCallsInExpr(expr.object, sym);
+          collectExistingCallsInExpr(expr.index, sym);
+          break;
+        case "ArrayLiteralExpr":
+          for (const el of expr.elements) collectExistingCallsInExpr(el, sym);
+          break;
+        case "RecordLiteralExpr":
+          for (const p of expr.properties) collectExistingCallsInExpr(p.value, sym);
+          break;
+        case "TemplateLiteralExpr":
+          for (const e of expr.expressions) collectExistingCallsInExpr(e, sym);
+          break;
+        case "ClosureExpr":
+          if ("statements" in expr.body) collectExistingCallsInBlock(expr.body, sym);
+          else collectExistingCallsInExpr(expr.body, sym);
+          break;
+      }
+    };
+
     const collectExistingCallsInBlock = (block: Block, sym?: string) => {
       for (const stmt of block.statements) {
-        if (
-          stmt.kind === "ExprStmt" &&
-          stmt.expr.kind === "CallExpr" &&
-          stmt.expr.callee.kind === "IdentifierExpr"
-        ) {
-          const calleeName = stmt.expr.callee.name;
-          if (occurrences[calleeName]) {
-            occurrences[calleeName].push({
-              filePath: file.relPath,
-              symbol: sym,
-              startLine: stmt.span?.start?.line || 1,
-              endLine: stmt.span?.end?.line || stmt.span?.start?.line || 1,
-              args: stmt.expr.args.map((a) => generator.formatExpr(a)),
-              fileHash: file.fileHash,
-            });
-          }
+        switch (stmt.kind) {
+          case "ExprStmt":
+            collectExistingCallsInExpr(stmt.expr, sym);
+            break;
+          case "ReturnStmt":
+            collectExistingCallsInExpr(stmt.value, sym);
+            break;
+          case "LetBinding":
+          case "DestructureBinding":
+            collectExistingCallsInExpr(stmt.init, sym);
+            break;
+          case "AssignStmt":
+            collectExistingCallsInExpr(stmt.target, sym);
+            collectExistingCallsInExpr(stmt.value, sym);
+            break;
+          case "IfStmt":
+            collectExistingCallsInExpr(stmt.condition, sym);
+            collectExistingCallsInBlock(stmt.thenBranch, sym);
+            for (const el of stmt.elifBranches) {
+              collectExistingCallsInExpr(el.condition, sym);
+              collectExistingCallsInBlock(el.body, sym);
+            }
+            if (stmt.elseBranch) collectExistingCallsInBlock(stmt.elseBranch, sym);
+            break;
+          case "WhileStmt":
+            collectExistingCallsInExpr(stmt.condition, sym);
+            collectExistingCallsInBlock(stmt.body, sym);
+            break;
+          case "ForStmt":
+            collectExistingCallsInExpr(stmt.iterable, sym);
+            collectExistingCallsInBlock(stmt.body, sym);
+            break;
+          case "TryStmt":
+            collectExistingCallsInBlock(stmt.tryBlock, sym);
+            if (stmt.catchBlock) collectExistingCallsInBlock(stmt.catchBlock, sym);
+            if (stmt.finallyBlock) collectExistingCallsInBlock(stmt.finallyBlock, sym);
+            break;
+          case "ThrowStmt":
+            collectExistingCallsInExpr(stmt.expr, sym);
+            break;
+          case "MatchStmt":
+            collectExistingCallsInExpr(stmt.target, sym);
+            for (const c of stmt.cases) {
+              if (c.guard) collectExistingCallsInExpr(c.guard, sym);
+              if ("statements" in c.body) collectExistingCallsInBlock(c.body, sym);
+              else collectExistingCallsInExpr(c.body, sym);
+            }
+            break;
         }
       }
     };
 
     for (const item of mod.items) {
-      if (item.kind === "FunctionDecl" && "statements" in item.body) {
-        collectExistingCallsInBlock(item.body, item.name);
+      if (item.kind === "FunctionDecl") {
+        if ("statements" in item.body) collectExistingCallsInBlock(item.body, item.name);
+        else collectExistingCallsInExpr(item.body, item.name);
       } else if (item.kind === "ClassDecl") {
         for (const m of item.methods) {
           if ("statements" in m.body) {
             collectExistingCallsInBlock(m.body, `${item.name}.${m.name}`);
+          } else {
+            collectExistingCallsInExpr(m.body, `${item.name}.${m.name}`);
           }
         }
+      } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
+        collectExistingCallsInExpr(item.value, item.name);
       }
     }
 

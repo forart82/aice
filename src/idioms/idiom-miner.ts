@@ -398,6 +398,35 @@ function collectModuleCandidates(
   exprGroups: Map<string, ExprCandidateOccurrence[]>,
   generator: AilGenerator,
 ): void {
+  function getRecursiveStmtEnd(stmt: Statement): Span["end"] {
+    if (stmt.kind === "IfStmt") {
+      if (stmt.elseBranch && stmt.elseBranch.statements.length > 0) {
+        return getRecursiveStmtEnd(
+          stmt.elseBranch.statements[stmt.elseBranch.statements.length - 1],
+        );
+      }
+      if (stmt.elifBranches && stmt.elifBranches.length > 0) {
+        const lastElif = stmt.elifBranches[stmt.elifBranches.length - 1];
+        if (lastElif.body.statements.length > 0) {
+          return getRecursiveStmtEnd(
+            lastElif.body.statements[lastElif.body.statements.length - 1],
+          );
+        }
+      }
+      if (stmt.thenBranch && stmt.thenBranch.statements.length > 0) {
+        return getRecursiveStmtEnd(
+          stmt.thenBranch.statements[stmt.thenBranch.statements.length - 1],
+        );
+      }
+    } else if (
+      (stmt.kind === "WhileStmt" || stmt.kind === "ForStmt") &&
+      stmt.body.statements.length > 0
+    ) {
+      return getRecursiveStmtEnd(stmt.body.statements[stmt.body.statements.length - 1]);
+    }
+    return stmt.span.end;
+  }
+
   function visitBlock(block: Block) {
     const stmts = block.statements;
     if (!stmts || stmts.length === 0) return;
@@ -433,7 +462,7 @@ function collectModuleCandidates(
           span: {
             file: rawWindow[0].span.file,
             start: rawWindow[0].span.start,
-            end: rawWindow[rawWindow.length - 1].span.end,
+            end: getRecursiveStmtEnd(rawWindow[rawWindow.length - 1]),
           },
         });
       }
@@ -657,35 +686,35 @@ function getStatementWindowSkeleton(window: Statement[]): string {
 function getStatementSkeleton(s: Statement): string {
   switch (s.kind) {
     case "LetBinding":
-      return `Let(${s.isMut},${getExprSkeleton(s.init)})`;
+      return `Let(${s.isMut},${getExprSkeleton(s.init, true)})`;
     case "DestructureBinding":
-      return `Destructure(${s.names.join(",")},${getExprSkeleton(s.init)})`;
+      return `Destructure(${s.names.join(",")},${getExprSkeleton(s.init, true)})`;
     case "ExprStmt":
-      return `ExprStmt(${getExprSkeleton(s.expr)})`;
+      return `ExprStmt(${getExprSkeleton(s.expr, true)})`;
     case "ReturnStmt":
-      return `Return(${s.value ? getExprSkeleton(s.value) : "void"})`;
+      return `Return(${s.value ? getExprSkeleton(s.value, true) : "void"})`;
     case "AssignStmt":
-      return `Assign(${s.op ?? "="},${getExprSkeleton(s.target)},${getExprSkeleton(s.value)})`;
+      return `Assign(${s.op ?? "="},${getExprSkeleton(s.target, true)},${getExprSkeleton(s.value, true)})`;
     case "IfStmt": {
       const thenSkel = s.thenBranch.statements.map((st) => getStatementSkeleton(st)).join(";");
       const elifSkel = (s.elifBranches ?? [])
         .map(
           (e) =>
-            `Elif(${getExprSkeleton(e.condition)},[${e.body.statements.map((st) => getStatementSkeleton(st)).join(";")}])`,
+            `Elif(${getExprSkeleton(e.condition, true)},[${e.body.statements.map((st) => getStatementSkeleton(st)).join(";")}])`,
         )
         .join(";");
       const elseSkel = s.elseBranch
         ? `Else([${s.elseBranch.statements.map((st) => getStatementSkeleton(st)).join(";")}])`
         : "";
-      return `If(${getExprSkeleton(s.condition)},[${thenSkel}],${elifSkel},${elseSkel})`;
+      return `If(${getExprSkeleton(s.condition, true)},[${thenSkel}],${elifSkel},${elseSkel})`;
     }
     case "WhileStmt": {
       const bodySkel = s.body.statements.map((st) => getStatementSkeleton(st)).join(";");
-      return `While(${getExprSkeleton(s.condition)},[${bodySkel}])`;
+      return `While(${getExprSkeleton(s.condition, true)},[${bodySkel}])`;
     }
     case "ForStmt": {
       const bodySkel = s.body.statements.map((st) => getStatementSkeleton(st)).join(";");
-      return `For(${s.variable},${getExprSkeleton(s.iterable)},[${bodySkel}])`;
+      return `For(${s.variable},${getExprSkeleton(s.iterable, true)},[${bodySkel}])`;
     }
     case "TryStmt": {
       const trySkel = s.tryBlock.statements.map(getStatementSkeleton).join(";");
@@ -698,43 +727,47 @@ function getStatementSkeleton(s: Statement): string {
       return `Try([${trySkel}],[${catchSkel}],[${finallySkel}])`;
     }
     case "ThrowStmt":
-      return `Throw(${getExprSkeleton(s.expr)})`;
+      return `Throw(${getExprSkeleton(s.expr, true)})`;
     case "MatchStmt": {
       const casesSkel = s.cases
         .map((c) => {
           const bodySkel =
             "statements" in c.body
               ? c.body.statements.map((st) => getStatementSkeleton(st)).join(";")
-              : getExprSkeleton(c.body);
-          return `Case(${c.guard ? getExprSkeleton(c.guard) : ""},${bodySkel})`;
+              : getExprSkeleton(c.body, true);
+          return `Case(${c.guard ? getExprSkeleton(c.guard, true) : ""},${bodySkel})`;
         })
         .join(";");
-      return `Match(${getExprSkeleton(s.target)},[${casesSkel}])`;
+      return `Match(${getExprSkeleton(s.target, true)},[${casesSkel}])`;
     }
     default:
       return s.kind;
   }
 }
 
-function getExprSkeleton(expr: Expr): string {
+function getExprSkeleton(expr: Expr, generalizeMemberProperty = false): string {
   switch (expr.kind) {
     case "CallExpr": {
       const calleeSkel =
         expr.callee.kind === "IdentifierExpr"
           ? `Call:${expr.callee.name}`
-          : getExprSkeleton(expr.callee);
+          : expr.callee.kind === "MemberAccessExpr"
+            ? `${getExprSkeleton(expr.callee.object, generalizeMemberProperty)}.Call:${expr.callee.property}`
+            : getExprSkeleton(expr.callee, generalizeMemberProperty);
       return `${calleeSkel}(${expr.args.length})`;
     }
     case "MemberAccessExpr":
-      return `${getExprSkeleton(expr.object)}.${expr.property}`;
+      return generalizeMemberProperty
+        ? `${getExprSkeleton(expr.object, true)}.Prop`
+        : `${getExprSkeleton(expr.object, false)}.${expr.property}`;
     case "IndexExpr":
-      return `${getExprSkeleton(expr.object)}[${getExprSkeleton(expr.index)}]`;
+      return `${getExprSkeleton(expr.object, generalizeMemberProperty)}[${getExprSkeleton(expr.index, generalizeMemberProperty)}]`;
     case "BinaryExpr":
-      return `(${getExprSkeleton(expr.left)} ${expr.operator} ${getExprSkeleton(expr.right)})`;
+      return `(${getExprSkeleton(expr.left, generalizeMemberProperty)} ${expr.operator} ${getExprSkeleton(expr.right, generalizeMemberProperty)})`;
     case "UnaryExpr":
-      return `${expr.operator}${getExprSkeleton(expr.operand)}`;
+      return `${expr.operator}${getExprSkeleton(expr.operand, generalizeMemberProperty)}`;
     case "PostfixTryExpr":
-      return `${getExprSkeleton(expr.operand)}?`;
+      return `${getExprSkeleton(expr.operand, generalizeMemberProperty)}?`;
     case "LiteralExpr":
       return `Lit(${expr.literalKind})`;
     case "IdentifierExpr":
@@ -748,9 +781,9 @@ function getExprSkeleton(expr: Expr): string {
     case "ClosureExpr":
       return `Closure(${expr.params.length})`;
     case "AssignExpr":
-      return `AssignExpr(${getExprSkeleton(expr.target)},${getExprSkeleton(expr.value)})`;
+      return `AssignExpr(${getExprSkeleton(expr.target, generalizeMemberProperty)},${getExprSkeleton(expr.value, generalizeMemberProperty)})`;
     case "AwaitExpr":
-      return `Await(${getExprSkeleton(expr.operand)})`;
+      return `Await(${getExprSkeleton(expr.operand, generalizeMemberProperty)})`;
     default:
       return (expr as Expr).kind;
   }
@@ -1181,6 +1214,10 @@ function deriveIdiomName(
 
   if (first.kind === "LetBinding") {
     return `$let_${first.name.replace(/^\$/, "") || "val"}`;
+  }
+
+  if (first.kind === "AssignStmt") {
+    return deriveExprIdiomName(first.value, index);
   }
 
   return `$idiom${index}`;

@@ -558,17 +558,33 @@ export class Enemy {
       // Prime provenance cache before locking file2
       readProjectIdiom(tmpDir, "$resetIfNeg");
 
-      // Simulate write failure on file2 or invalid template failure
+      // 1. Pre-flight invalid template syntax failure
       await expect(
         updateProjectIdiom(tmpDir, "$resetIfNeg", "if $0 < 0:\n  @@@INVALID_SYNTAX@@@"),
       ).rejects.toThrow();
 
-      // Verify file1, file2, and config remain 100% untouched
       expect(fs.readFileSync(file1, "utf-8")).toBe(orig1);
       expect(fs.readFileSync(file2, "utf-8")).toBe(orig2);
-      expect(loadProjectConfig(tmpDir).idioms?.$resetIfNeg.templateAil).toBe(
-        "if $0 < 0:\n  $0 = 0",
-      );
+
+      // 2. Mid-flight disk write failure after file1 has already been overwritten on disk
+      if (typeof process.getuid === "function" && process.getuid() !== 0) {
+        fs.chmodSync(file2, 0o444);
+        try {
+          await expect(
+            updateProjectIdiom(tmpDir, "$resetIfNeg", "if $0 <= 0:\n  $0 = 1"),
+          ).rejects.toThrow();
+        } finally {
+          fs.chmodSync(file2, 0o644);
+        }
+
+        // Verify file1 (which was written before file2 failed), file2, and config remain 100% untouched
+        expect(fs.readFileSync(file1, "utf-8")).toBe(orig1);
+        expect(fs.readFileSync(file2, "utf-8")).toBe(orig2);
+        expect(loadProjectConfig(tmpDir).idioms?.$resetIfNeg.templateAil).toBe(
+          "if $0 < 0:\n  $0 = 0",
+        );
+      }
     });
   });
 });
+
