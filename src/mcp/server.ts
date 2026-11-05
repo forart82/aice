@@ -363,7 +363,7 @@ export class AilMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "ail-mcp", version: "0.6.2" },
+          serverInfo: { name: "ail-mcp", version: "0.6.3" },
         };
       }
 

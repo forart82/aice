@@ -110,7 +110,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.6.2");
+  .version("0.6.3");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -2756,6 +2756,9 @@ AIL COMPLETE LIFECYCLE GUIDE: FROM PROJECT ADOPTION TO SUPPRESSION / EJECTION
 ================================================================================
 
 Step 1: Create / Onboard a Project
+  • Twinless On-the-Fly Mode (Zero .ail files on disk; AI reads/writes AIL in RAM):
+      ail shield apply . --twinless
+      ail idioms scan src/
   • Side-by-Side Mode (In-place .ail siblings next to target files):
       ail adopt .
   • Isolated Mode (Source files in src/, native builds in .ail-build/):
@@ -2771,13 +2774,14 @@ Step 2: Live Development & Bidirectional Sync
   • Reverse-sync external manual edits from target files back to .ail:
       ail sync .
 
-Step 3: AI Agent Surgical Workflow (Token-Optimized)
+Step 3: AI Agent Surgical Workflow (Works Directly on Native .ts/.py or .ail Files)
   • Outline AST skeleton (85-90% token reduction for discovery):
       ail outline src/
-  • 1-turn bounded context pack (slices dependencies into single turn):
-      ail context src/app.ts.ail -s myFunction
-  • Surgical in-place AST declaration mutation:
-      ail splice src/app.ts.ail -s oldFunc -c "fn oldFunc() = 42"
+  • 1-turn bounded context pack (auto-decompiles native files & collapses $idioms):
+      ail context src/app.ts -s myFunction
+  • Forgiving surgical in-place AST mutation (accepts AIL, $idioms, or native syntax):
+      ail splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
+      ail splice --batch edits.json
   • Zero-token canonical AST code formatting:
       ail fmt src/
   • Fast typecheck verification and 1-shot autonomous repair:
@@ -2789,16 +2793,23 @@ Step 3: AI Agent Surgical Workflow (Token-Optimized)
       ail mcp
       ail lsp
 
-Step 4: Domain Idiom Compression & Tokenomics
-  • Mine recurring AST idioms across codebase:
+Step 4: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
+  • Mine recurring AST idioms across native or .ail files (cached in .ail-cache/idioms.json):
       ail idioms scan src/
-  • Apply token-saving idioms ($idiom) with parameter extraction:
-      ail idioms apply src/
+  • Toggle idioms on/off globally for on-the-fly reads:
+      ail idioms on
+      ail idioms off
+  • Multi-file idiom read (inspect all call sites & bound arguments across repo):
+      ail idioms read '$guard'
+  • Smart multi-file idiom refactor (update pattern across all files atomically):
+      ail idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
   • Audit token savings & verify zero BPE token drift:
       ail tokens . --check-drift
       ail benchmark
 
 Step 5: Clean Project Suppression / Ejection
+  • Twinless Mode:
+      ail shield remove .            # Removes PreToolUse hooks & AGENTS.md rules
   • Side-by-Side or Isolated Mode:
       ail eject .                    # Unlocks targets, removes AI shields, preserves .ail
       ail eject . --remove-ail       # Fully restores native project, deletes all .ail files
