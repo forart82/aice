@@ -17,6 +17,7 @@ import type {
   DocumentFormattingParams,
   DocumentSymbolParams,
   HoverParams,
+  Position,
   PublishDiagnosticsParams,
   TextDocumentIdentifier,
 } from "./protocol.js";
@@ -65,6 +66,7 @@ export class AilLspServer {
               },
               documentSymbolProvider: true,
               documentFormattingProvider: true,
+              definitionProvider: true,
               codeActionProvider: true,
             },
             serverInfo: {
@@ -109,6 +111,13 @@ export class AilLspServer {
                 : undefined;
           const edits = this.analyzer.formatDocument(formatParams.textDocument.uri, { indent });
           this.connection.sendResponse(id, edits);
+          break;
+        }
+
+        case "textDocument/definition": {
+          const defParams = params as { textDocument: TextDocumentIdentifier; position: Position };
+          const def = this.analyzer.getDefinition(defParams.textDocument.uri, defParams.position);
+          this.connection.sendResponse(id, def);
           break;
         }
 

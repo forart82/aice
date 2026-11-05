@@ -4,6 +4,7 @@
   "scopeName": "source.ail",
   "patterns": [
     { "include": "#comments" },
+    { "include": "#idioms" },
     { "include": "#strings" },
     { "include": "#numbers" },
     { "include": "#colors" },
@@ -17,6 +18,18 @@
     { "include": "#punctuation" }
   ],
   "repository": {
+    "idioms": {
+      "patterns": [
+        {
+          "name": "variable.parameter.idiom.ail",
+          "match": "\\$[0-9]+\\b"
+        },
+        {
+          "name": "entity.name.function.idiom.ail",
+          "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*\\b"
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
@@ -81,11 +94,11 @@
       "patterns": [
         {
           "name": "keyword.control.ail",
-          "match": "\\b(if|elif|else|match|case|ret|return|for|in|while)\\b"
+          "match": "\\b(if|elif|else|match|case|ret|return|for|in|while|break|continue|yield|try|catch|finally|throw|async|await)\\b"
         },
         {
           "name": "keyword.declaration.ail",
-          "match": "\\b(module|from|import|as|type|fn|component|style|let|mut)\\b"
+          "match": "\\b(module|from|import|as|type|fn|component|style|let|mut|val|prop|class|interface|enum|struct|pub)\\b"
         },
         {
           "name": "keyword.operator.logical.ail",
@@ -97,11 +110,11 @@
       "patterns": [
         {
           "name": "storage.type.primitive.ail",
-          "match": "\\b(int|str|float|bool|num|byte|char|void|nil)\\b"
+          "match": "\\b(int|str|float|bool|num|byte|char|void|nil|i8|i16|i32|i64|u8|u16|u32|u64|f32|f64|Any)\\b"
         },
         {
           "name": "storage.type.container.ail",
-          "match": "\\b(Option|Result)\\b"
+          "match": "\\b(Option|Result|Vec2|Vec3|Color)\\b"
         },
         {
           "name": "entity.name.type.ail",
@@ -154,11 +167,15 @@
       "patterns": [
         {
           "name": "keyword.operator.arrow.ail",
-          "match": "(->|=>)"
+          "match": "(~>|->|=>)"
         },
         {
           "name": "keyword.operator.comparison.ail",
           "match": "(===?|!==?|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.shift.ail",
+          "match": "(<<|>>)"
         },
         {
           "name": "keyword.operator.logical.ail",
@@ -182,7 +199,7 @@
         },
         {
           "name": "keyword.operator.assignment.ail",
-          "match": "="
+          "match": "(::=|:=|\\+=|-=|\\*=|/=|%=|<<=|>>=|&=|\\|=|\\^=|=)"
         }
       ]
     },

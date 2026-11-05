@@ -8,16 +8,19 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import ts from "../compat/typescript.js";
 import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   resolveTargetOutputPathForConfig,
+  type ProjectIdiomDefinition,
 } from "../config/index.js";
 import type {
   Block,
   ClassDecl,
   EnumVariantDecl,
+  Expr,
   FieldDecl,
   FunctionDecl,
   MethodDecl,
@@ -27,7 +30,8 @@ import type {
   Statement,
   TypeDecl,
 } from "../core/ast.js";
-import { parseWithTrivia } from "../core/parser.js";
+import { parse, parseWithTrivia } from "../core/parser.js";
+import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import { safeWriteTargetFile } from "../shield/index.js";
@@ -57,6 +61,24 @@ export interface SpliceOptions {
   compile?: boolean;
   /** Project root directory */
   projectRoot?: string;
+  /** Optional idioms toggle override */
+  idioms?: boolean;
+}
+
+export interface BatchSpliceItem extends SpliceOptions {
+  filePath: string;
+}
+
+export interface BatchSpliceOptions {
+  projectRoot?: string;
+  dryRun?: boolean;
+  compile?: boolean;
+}
+
+export interface BatchSpliceResult {
+  success: boolean;
+  results: SpliceResult[];
+  modifiedFiles: string[];
 }
 
 export interface SpliceResult {
@@ -751,12 +773,926 @@ export function spliceSource(
   };
 }
 
+interface NativeSpanInfo {
+  declStart: number;
+  declEnd: number;
+  tokenStart: number;
+  declIndent: string;
+  className?: string;
+  memberName: string;
+  visibility?: "public" | "private" | "protected";
+  isExported?: boolean;
+  isStatic?: boolean;
+  isAsync?: boolean;
+}
+
+function getTsMemberName(member: ts.Node, sf: ts.SourceFile): string | undefined {
+  if (ts.isConstructorDeclaration(member)) {
+    return "constructor";
+  }
+  const named = member as { name?: ts.PropertyName };
+  if (!named.name) return undefined;
+  if (ts.isIdentifier(named.name) || ts.isStringLiteral(named.name) || ts.isNumericLiteral(named.name)) {
+    return named.name.text;
+  }
+  return named.name.getText(sf);
+}
+
+function extractTsModifiersMeta(node: ts.Node, sf: ts.SourceFile): {
+  visibility?: "public" | "private" | "protected";
+  isExported?: boolean;
+  isStatic?: boolean;
+  isAsync?: boolean;
+} {
+  const headerText = sf.text.slice(node.getStart(sf, false), Math.min(node.getEnd(), node.getStart(sf, false) + 120));
+  let visibility: "public" | "private" | "protected" | undefined;
+  if (/^(?:export\s+)?public\b/.test(headerText)) visibility = "public";
+  else if (/^(?:export\s+)?private\b/.test(headerText)) visibility = "private";
+  else if (/^(?:export\s+)?protected\b/.test(headerText)) visibility = "protected";
+
+  const isExported = /^export\b/.test(headerText);
+  const isStatic = /\bstatic\b/.test(headerText);
+  const isAsync = /\basync\b/.test(headerText);
+  return { visibility, isExported, isStatic, isAsync };
+}
+
+function buildSpanInfoFromTsNode(
+  targetNode: ts.Node,
+  sf: ts.SourceFile,
+  nativeSource: string,
+  memberName: string,
+  className?: string,
+): NativeSpanInfo {
+  const tokenStart = targetNode.getStart(sf, false);
+  const lineStart = nativeSource.lastIndexOf("\n", tokenStart - 1) + 1;
+  const leadingSlice = nativeSource.slice(lineStart, tokenStart);
+  const isOnlyWs = /^[ \t]*$/.test(leadingSlice);
+  const declStart = isOnlyWs ? lineStart : tokenStart;
+  const declIndent = isOnlyWs
+    ? leadingSlice
+    : (nativeSource.slice(lineStart).match(/^[ \t]*/)?.[0] ?? "");
+  const declEnd = targetNode.getEnd();
+  const meta = extractTsModifiersMeta(targetNode, sf);
+
+  return {
+    declStart,
+    declEnd,
+    tokenStart,
+    declIndent,
+    className,
+    memberName,
+    ...meta,
+  };
+}
+
+function locateTsDeclarationSpan(
+  nativeSource: string,
+  symbolSelector: string,
+  explicitClassName?: string,
+): NativeSpanInfo | undefined {
+  const sf = ts.createSourceFile(
+    "file.tsx",
+    nativeSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const parts = symbolSelector.split(/\.|::/);
+  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+
+  if (className) {
+    for (const stmt of sf.statements) {
+      if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
+        for (const member of stmt.members) {
+          if (getTsMemberName(member, sf) === memberName) {
+            return buildSpanInfoFromTsNode(member, sf, nativeSource, memberName, className);
+          }
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // 1. Top-level declaration search
+  for (const stmt of sf.statements) {
+    if (
+      (ts.isFunctionDeclaration(stmt) ||
+        ts.isClassDeclaration(stmt) ||
+        ts.isInterfaceDeclaration(stmt) ||
+        ts.isTypeAliasDeclaration(stmt) ||
+        ts.isEnumDeclaration(stmt)) &&
+      stmt.name?.text === memberName
+    ) {
+      return buildSpanInfoFromTsNode(stmt, sf, nativeSource, memberName, undefined);
+    }
+    if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name) && decl.name.text === memberName) {
+          return buildSpanInfoFromTsNode(stmt, sf, nativeSource, memberName, undefined);
+        }
+      }
+    }
+  }
+
+  // 2. Fallback: unique class member search
+  for (const stmt of sf.statements) {
+    if (ts.isClassDeclaration(stmt)) {
+      const parentName = stmt.name?.text;
+      for (const member of stmt.members) {
+        if (getTsMemberName(member, sf) === memberName) {
+          return buildSpanInfoFromTsNode(member, sf, nativeSource, memberName, parentName);
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function locatePythonDeclarationSpan(
+  nativeSource: string,
+  symbolSelector: string,
+  explicitClassName?: string,
+): NativeSpanInfo | undefined {
+  const parts = symbolSelector.split(/\.|::/);
+  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+
+  const lines = nativeSource.split("\n");
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  let searchStartLine = 0;
+  let searchEndLine = lines.length;
+  let activeClassName = className;
+
+  if (className) {
+    const classRegex = new RegExp(`^([ \\t]*)class\\s+${className}\\b`);
+    let foundClassLine = -1;
+    let classIndentLen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(classRegex);
+      if (m) {
+        foundClassLine = i;
+        classIndentLen = m[1].length;
+        break;
+      }
+    }
+    if (foundClassLine < 0) return undefined;
+    searchStartLine = foundClassLine + 1;
+    for (let i = searchStartLine; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
+      if (ind <= classIndentLen) {
+        searchEndLine = i;
+        break;
+      }
+    }
+  }
+
+  const defRegex = new RegExp(`^([ \\t]*)(?:async\\s+)?def\\s+${memberName}\\s*\\(`);
+  let targetLine = -1;
+  let targetIndent = "";
+  for (let i = searchStartLine; i < searchEndLine; i++) {
+    const m = lines[i].match(defRegex);
+    if (m) {
+      if (!className && m[1].length > 0) {
+        // Also detect enclosing class if any
+        for (let k = i - 1; k >= 0; k--) {
+          const cm = lines[k].match(/^([ \t]*)class\s+([A-Za-z0-9_]+)\b/);
+          if (cm && cm[1].length < m[1].length) {
+            activeClassName = cm[2];
+            break;
+          }
+        }
+      }
+      targetLine = i;
+      targetIndent = m[1];
+      break;
+    }
+  }
+
+  if (targetLine < 0) return undefined;
+
+  let endLine = targetLine;
+  const baseIndentLen = targetIndent.length;
+  for (let i = targetLine + 1; i < searchEndLine; i++) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
+    if (ind <= baseIndentLen) {
+      break;
+    }
+    endLine = i;
+  }
+
+  const declStart = lineOffsets[targetLine];
+  const tokenStart = declStart + targetIndent.length;
+  const endLineStr = lines[endLine];
+  const cleanEndLen = endLineStr.endsWith("\r") ? endLineStr.length - 1 : endLineStr.length;
+  const declEnd = lineOffsets[endLine] + cleanEndLen;
+
+  return {
+    declStart,
+    declEnd,
+    tokenStart,
+    declIndent: targetIndent,
+    className: activeClassName,
+    memberName,
+  };
+}
+
+function normalizeSelfAndThisInExpr(expr: Expr, useThis: boolean): void {
+  switch (expr.kind) {
+    case "IdentifierExpr":
+      if (useThis && expr.name === "self") {
+        expr.name = "this";
+      } else if (!useThis && expr.name === "this") {
+        expr.name = "self";
+      }
+      break;
+    case "BinaryExpr":
+      normalizeSelfAndThisInExpr(expr.left, useThis);
+      normalizeSelfAndThisInExpr(expr.right, useThis);
+      break;
+    case "UnaryExpr":
+    case "AwaitExpr":
+    case "PostfixTryExpr":
+      normalizeSelfAndThisInExpr(expr.operand, useThis);
+      break;
+    case "AssignExpr":
+      normalizeSelfAndThisInExpr(expr.target, useThis);
+      normalizeSelfAndThisInExpr(expr.value, useThis);
+      break;
+    case "CallExpr":
+      normalizeSelfAndThisInExpr(expr.callee, useThis);
+      for (const a of expr.args) normalizeSelfAndThisInExpr(a, useThis);
+      break;
+    case "MemberAccessExpr":
+      normalizeSelfAndThisInExpr(expr.object, useThis);
+      break;
+    case "IndexExpr":
+      normalizeSelfAndThisInExpr(expr.object, useThis);
+      normalizeSelfAndThisInExpr(expr.index, useThis);
+      break;
+    case "ArrayLiteralExpr":
+      for (const el of expr.elements) normalizeSelfAndThisInExpr(el, useThis);
+      break;
+    case "RecordLiteralExpr":
+      for (const p of expr.properties) normalizeSelfAndThisInExpr(p.value, useThis);
+      break;
+    case "TemplateLiteralExpr":
+      for (const e of expr.expressions) normalizeSelfAndThisInExpr(e, useThis);
+      break;
+    case "ClosureExpr":
+      if (expr.body.kind === "Block") {
+        normalizeSelfAndThisInBlock(expr.body, useThis);
+      } else {
+        normalizeSelfAndThisInExpr(expr.body, useThis);
+      }
+      break;
+  }
+}
+
+function normalizeSelfAndThisInStmt(stmt: Statement, useThis: boolean): void {
+  switch (stmt.kind) {
+    case "LetBinding":
+    case "DestructureBinding":
+      normalizeSelfAndThisInExpr(stmt.init, useThis);
+      break;
+    case "AssignStmt":
+      normalizeSelfAndThisInExpr(stmt.target, useThis);
+      normalizeSelfAndThisInExpr(stmt.value, useThis);
+      break;
+    case "ExprStmt":
+    case "ThrowStmt":
+      normalizeSelfAndThisInExpr(stmt.expr, useThis);
+      break;
+    case "ReturnStmt":
+      if (stmt.value) normalizeSelfAndThisInExpr(stmt.value, useThis);
+      break;
+    case "IfStmt":
+      normalizeSelfAndThisInExpr(stmt.condition, useThis);
+      normalizeSelfAndThisInBlock(stmt.thenBranch, useThis);
+      for (const el of stmt.elifBranches) {
+        normalizeSelfAndThisInExpr(el.condition, useThis);
+        normalizeSelfAndThisInBlock(el.body, useThis);
+      }
+      if (stmt.elseBranch) normalizeSelfAndThisInBlock(stmt.elseBranch, useThis);
+      break;
+    case "WhileStmt":
+      normalizeSelfAndThisInExpr(stmt.condition, useThis);
+      normalizeSelfAndThisInBlock(stmt.body, useThis);
+      break;
+    case "ForStmt":
+      normalizeSelfAndThisInExpr(stmt.iterable, useThis);
+      normalizeSelfAndThisInBlock(stmt.body, useThis);
+      break;
+    case "MatchStmt":
+      normalizeSelfAndThisInExpr(stmt.target, useThis);
+      for (const c of stmt.cases) {
+        if (c.guard) normalizeSelfAndThisInExpr(c.guard, useThis);
+        if (c.body.kind === "Block") normalizeSelfAndThisInBlock(c.body, useThis);
+        else normalizeSelfAndThisInExpr(c.body, useThis);
+      }
+      break;
+  }
+}
+
+function normalizeSelfAndThisInBlock(block: Block, useThis: boolean): void {
+  for (const s of block.statements) {
+    normalizeSelfAndThisInStmt(s, useThis);
+  }
+}
+
+function normalizeSelfAndThisInDecl(decl: FunctionDecl | MethodDecl, targetLang: TargetLanguage): void {
+  const useThis =
+    targetLang === "typescript" ||
+    targetLang === "javascript" ||
+    targetLang === "csharp" ||
+    targetLang === "cpp" ||
+    targetLang === "kotlin";
+  if ("statements" in decl.body) {
+    normalizeSelfAndThisInBlock(decl.body, useThis);
+  } else {
+    normalizeSelfAndThisInExpr(decl.body, useThis);
+  }
+}
+
+function isAdditiveKind(k: ts.SyntaxKind): boolean {
+  return k === ts.SyntaxKind.PlusToken || k === ts.SyntaxKind.MinusToken;
+}
+
+function isMultiplicativeKind(k: ts.SyntaxKind): boolean {
+  return (
+    k === ts.SyntaxKind.AsteriskToken ||
+    k === ts.SyntaxKind.SlashToken ||
+    k === ts.SyntaxKind.PercentToken
+  );
+}
+
+function isAssignmentKind(k: ts.SyntaxKind): boolean {
+  return k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+}
+
+/**
+ * Unwraps redundant parentheses generated by `BinaryExpr` in emitted TypeScript snippets.
+ */
+function unwrapRedundantTsParens(tsSnippet: string): string {
+  let current = tsSnippet;
+  for (let pass = 0; pass < 6; pass++) {
+    const wrappedPrefix = "class _Wrap {\n";
+    const wrappedSuffix = "\n}";
+    const isTopLevelFn = /^\s*(?:export\s+)?(?:async\s+)?function\b/.test(current);
+    const parseInput = isTopLevelFn ? current : `${wrappedPrefix}${current}${wrappedSuffix}`;
+    const offsetDelta = isTopLevelFn ? 0 : wrappedPrefix.length;
+
+    const sf = ts.createSourceFile(
+      "snippet.ts",
+      parseInput,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+
+    const removals: number[] = [];
+
+    const visit = (node: ts.Node) => {
+      if (ts.isParenthesizedExpression(node)) {
+        const parent = node.parent;
+        const inner = node.expression;
+        let shouldUnwrap = false;
+
+        if (
+          ts.isReturnStatement(parent) ||
+          ts.isVariableDeclaration(parent) ||
+          ts.isExpressionStatement(parent) ||
+          ts.isIfStatement(parent) ||
+          ts.isWhileStatement(parent)
+        ) {
+          shouldUnwrap = true;
+        } else if (ts.isCallExpression(parent) && parent.arguments.includes(node)) {
+          shouldUnwrap = true;
+        } else if (ts.isBinaryExpression(parent)) {
+          const parentOp = parent.operatorToken.kind;
+          if (isAssignmentKind(parentOp) && parent.right === node) {
+            shouldUnwrap = true;
+          } else if (ts.isBinaryExpression(inner)) {
+            const innerOp = inner.operatorToken.kind;
+            if (isMultiplicativeKind(innerOp) && isAdditiveKind(parentOp)) {
+              shouldUnwrap = true;
+            } else if (
+              parent.left === node &&
+              ((isAdditiveKind(innerOp) && isAdditiveKind(parentOp)) ||
+                (isMultiplicativeKind(innerOp) && isMultiplicativeKind(parentOp)))
+            ) {
+              shouldUnwrap = true;
+            }
+          }
+        }
+
+        if (shouldUnwrap) {
+          const openPos = node.getStart(sf, false) - offsetDelta;
+          const closePos = node.getEnd() - 1 - offsetDelta;
+          if (
+            openPos >= 0 &&
+            closePos < current.length &&
+            current[openPos] === "(" &&
+            current[closePos] === ")"
+          ) {
+            removals.push(openPos, closePos);
+            return;
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sf);
+    if (removals.length === 0) break;
+
+    const removeSet = new Set(removals);
+    let next = "";
+    for (let i = 0; i < current.length; i++) {
+      if (!removeSet.has(i)) next += current[i];
+    }
+    current = next;
+  }
+  return current;
+}
+
+function emitExpandedDeclForTarget(
+  expandedDecl: FunctionDecl | MethodDecl,
+  targetLang: TargetLanguage,
+  filePath: string,
+  className?: string,
+  origMeta?: {
+    visibility?: "public" | "private" | "protected";
+    isExported?: boolean;
+    isStatic?: boolean;
+    isAsync?: boolean;
+  },
+): string {
+  const cloned = structuredClone(expandedDecl);
+  normalizeSelfAndThisInDecl(cloned, targetLang);
+
+  const dummySpan = cloned.span;
+
+  if (className || cloned.kind === "MethodDecl") {
+    const methodNode: MethodDecl = {
+      kind: "MethodDecl",
+      name: cloned.name,
+      typeParams: cloned.typeParams ?? [],
+      params: cloned.params.filter((p) => p.name !== "self" && p.name !== "this"),
+      returnType: cloned.returnType,
+      isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
+      isStatic: Boolean(origMeta?.isStatic ?? ("isStatic" in cloned ? cloned.isStatic : false)),
+      accessor: "accessor" in cloned ? cloned.accessor : undefined,
+      isExpressionBodied: cloned.isExpressionBodied,
+      body: cloned.body,
+      span: dummySpan,
+    };
+
+    const tempClass: ClassDecl = {
+      kind: "ClassDecl",
+      name: className || "_TmpClass",
+      isExported: false,
+      typeParams: [],
+      properties: [],
+      methods: [methodNode],
+      staticBlocks: [],
+      span: dummySpan,
+    };
+
+    const tempMod: Module = {
+      kind: "Module",
+      path: filePath,
+      items: [tempClass],
+      span: dummySpan,
+    };
+
+    const emittedClass = emitTarget(tempMod, targetLang, { watermark: false }).trim();
+    const lines = emittedClass.split("\n");
+
+    if (targetLang === "python") {
+      const classLineIdx = lines.findIndex((l) => /^class\s+/.test(l.trim()));
+      const startIdx = classLineIdx >= 0 ? classLineIdx + 1 : 1;
+      const innerLines = lines
+        .slice(startIdx)
+        .map((l) => (l.startsWith("    ") ? l.slice(4) : l))
+        .map((l) =>
+          l
+            .replace(/^(\s*(?:if|elif|while)\s+)\((.+)\):$/, "$1$2:")
+            .replace(/^(\s*[A-Za-z0-9_.]+\s*=\s*)\((.+)\)$/, "$1$2")
+            .replace(/^(\s*return\s+)\((.+)\)$/, "$1$2"),
+        );
+      return innerLines.join("\n").trimEnd();
+    }
+
+    // TypeScript / JavaScript / C-like class wrapper: strip `class _TmpClass {` and closing `}`
+    const innerLines = lines
+      .slice(1, lines.length - 1)
+      .map((l) => (l.startsWith("  ") ? l.slice(2) : l));
+
+    if (innerLines.length > 0 && origMeta?.visibility && (targetLang === "typescript" || targetLang === "csharp")) {
+      const firstTrimmed = innerLines[0].trimStart();
+      if (
+        !firstTrimmed.startsWith("public ") &&
+        !firstTrimmed.startsWith("private ") &&
+        !firstTrimmed.startsWith("protected ")
+      ) {
+        innerLines[0] = `${origMeta.visibility} ${firstTrimmed}`;
+      }
+    }
+
+    const joined = innerLines.join("\n").trimEnd();
+    return targetLang === "typescript" || targetLang === "javascript"
+      ? unwrapRedundantTsParens(joined)
+      : joined;
+  }
+
+  const fnNode: FunctionDecl = {
+    kind: "FunctionDecl",
+    name: cloned.name,
+    isExported: origMeta?.isExported ?? ("isExported" in cloned ? cloned.isExported : false),
+    isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
+    typeParams: cloned.typeParams ?? [],
+    params: cloned.params,
+    returnType: cloned.returnType,
+    isExpressionBodied: cloned.isExpressionBodied,
+    body: cloned.body,
+    span: dummySpan,
+  };
+
+  const tempMod: Module = {
+    kind: "Module",
+    path: filePath,
+    items: [fnNode],
+    span: dummySpan,
+  };
+
+  const emittedFn = emitTarget(tempMod, targetLang, { watermark: false }).trim();
+  if (targetLang === "python") {
+    const fnLines = emittedFn.split("\n");
+    const defIdx = fnLines.findIndex((l) => /^(?:async\s+)?def\s+/.test(l.trim()));
+    const relevantLines = (defIdx >= 0 ? fnLines.slice(defIdx) : fnLines).map((l) =>
+      l
+        .replace(/^(\s*(?:if|elif|while)\s+)\((.+)\):$/, "$1$2:")
+        .replace(/^(\s*[A-Za-z0-9_.]+\s*=\s*)\((.+)\)$/, "$1$2")
+        .replace(/^(\s*return\s+)\((.+)\)$/, "$1$2"),
+    );
+    return relevantLines.join("\n").trimEnd();
+  }
+  return targetLang === "typescript" || targetLang === "javascript"
+    ? unwrapRedundantTsParens(emittedFn)
+    : emittedFn;
+}
+
+/**
+ * Surgically splices an already-expanded AIL FunctionDecl or MethodDecl into a native source string,
+ * preserving 100% bit-identical bytes before and after the target declaration.
+ */
+export function spliceNativeSymbolFromExpandedAst(
+  nativeSource: string,
+  symbolSelector: string,
+  expandedDecl: FunctionDecl | MethodDecl,
+  filePath: string,
+  targetLang: TargetLanguage,
+  explicitClassName?: string,
+): string {
+  const spanInfo =
+    targetLang === "python"
+      ? locatePythonDeclarationSpan(nativeSource, symbolSelector, explicitClassName)
+      : locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName);
+
+  if (!spanInfo) {
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+  }
+
+  const emittedUnindented = emitExpandedDeclForTarget(
+    expandedDecl,
+    targetLang,
+    filePath,
+    spanInfo.className ?? explicitClassName,
+    {
+      visibility: spanInfo.visibility,
+      isExported: spanInfo.isExported,
+      isStatic: spanInfo.isStatic,
+      isAsync: spanInfo.isAsync,
+    },
+  );
+
+  const indented = indentCode(emittedUnindented, spanInfo.declIndent);
+  return `${nativeSource.slice(0, spanInfo.declStart)}${indented}${nativeSource.slice(spanInfo.declEnd)}`;
+}
+
+function isPureNativeTsSnippetWithoutIdioms(
+  snippet: string,
+  className?: string,
+): boolean {
+  const trimmed = snippet.trim();
+  if (trimmed.includes("$") || trimmed.includes(":=") || /\bret\b/.test(trimmed)) {
+    return false;
+  }
+  if (/^(?:pub\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(trimmed)) {
+    return false;
+  }
+  if (!trimmed.includes("{") || !trimmed.endsWith("}")) {
+    return false;
+  }
+  const wrapped = className ? `class ${className} {\n${trimmed}\n}` : trimmed;
+  const sf = ts.createSourceFile(
+    "check.ts",
+    wrapped,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const diags = (sf as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics;
+  return !diags || diags.length === 0;
+}
+
+function normalizeFrankensteinSnippetToAil(
+  snippet: string,
+): { normalizedAil: string; explicitVisibility?: "public" | "private" | "protected"; isExported?: boolean } {
+  const lines = snippet.trim().split("\n");
+  let explicitVisibility: "public" | "private" | "protected" | undefined;
+  let isExported: boolean | undefined;
+
+  if (lines.length > 0) {
+    let header = lines[0];
+    const visMatch = header.match(/^\s*(public|private|protected)\s+/);
+    if (visMatch) {
+      explicitVisibility = visMatch[1] as "public" | "private" | "protected";
+      if (explicitVisibility === "public") isExported = true;
+      header = header.replace(/^\s*(?:public|private|protected)\s+/, "pub ");
+    } else if (/^\s*pub\s+/.test(header) || /^\s*export\s+/.test(header)) {
+      isExported = true;
+      header = header.replace(/^\s*export\s+(?:function\s+)?/, "pub fn ");
+    }
+
+    // Also normalize TS-style header without `fn`: e.g. `pub computeMetric(x: number): number {`
+    if (
+      !/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?fn\b/.test(header) &&
+      /^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(header)
+    ) {
+      header = header.replace(
+        /^(\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?)([A-Za-z_$][A-Za-z0-9_$]*\s*\()/,
+        "$1fn $2",
+      );
+      header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
+    }
+
+    lines[0] = header;
+  }
+
+  const normalizedLines = lines.map((line, idx) => {
+    if (idx === 0) return line;
+    return line.replace(/^(\s*)return\b/, "$1ret");
+  });
+
+  return {
+    normalizedAil: normalizedLines.join("\n"),
+    explicitVisibility,
+    isExported,
+  };
+}
+
+function parseSnippetToExpandedDecl(
+  rawSnippet: string,
+  filePath: string,
+  targetLang: TargetLanguage,
+  className?: string,
+  idioms?: Record<string, ProjectIdiomDefinition>,
+  originalSnippet?: string,
+  isBodyOnly?: boolean,
+): { decl: FunctionDecl | MethodDecl; explicitVisibility?: "public" | "private" | "protected"; isExported?: boolean } {
+  const { normalizedAil, explicitVisibility, isExported } =
+    normalizeFrankensteinSnippetToAil(rawSnippet);
+
+  let parsedMod: Module | undefined;
+  let lastErr: unknown;
+
+  // Attempt 1: If not explicitly body-only, try parsing as a full function/method declaration
+  if (!isBodyOnly) {
+    try {
+      parsedMod = parse(normalizedAil, filePath);
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+
+  const hasFnOrClassDecl = (mod?: Module): boolean =>
+    Boolean(
+      mod?.items.some(
+        (it) =>
+          (it.kind === "FunctionDecl" && it.name !== "__top_level__") ||
+          (it.kind === "ClassDecl" && it.methods.length > 0),
+      ),
+    );
+
+  // Attempt 2: If body-only or parsed only as __top_level__ statements, wrap statements inside the original declaration signature!
+  if (!hasFnOrClassDecl(parsedMod) && originalSnippet) {
+    try {
+      const bodyLines = rawSnippet
+        .trim()
+        .split("\n")
+        .map((line) => line.replace(/^(\s*)return\b/, "$1ret"));
+      const wrappedBodyAil = `fn __body_holder__():\n${indentCode(bodyLines.join("\n"), "  ")}`;
+      const bodyMod = parse(wrappedBodyAil, filePath);
+      const expandedBodyMod =
+        idioms && Object.keys(idioms).length > 0
+          ? expandModuleIdioms(bodyMod, idioms)
+          : bodyMod;
+      const holderFn = expandedBodyMod.items.find(
+        (it): it is FunctionDecl => it.kind === "FunctionDecl" && it.name === "__body_holder__",
+      );
+
+      if (holderFn) {
+        const wrappedOrig =
+          className && (targetLang === "typescript" || targetLang === "javascript")
+            ? `class ${className} {\n${originalSnippet}\n}`
+            : originalSnippet;
+        const origDecomp = decompile(wrappedOrig, targetLang, { filePath });
+        const origMod = parse(origDecomp.ail, filePath);
+
+        for (const item of origMod.items) {
+          if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
+            return {
+              decl: {
+                ...item,
+                isExpressionBodied: false,
+                body: holderFn.body,
+              },
+              explicitVisibility,
+              isExported,
+            };
+          }
+          if (item.kind === "ClassDecl" && item.methods.length > 0) {
+            return {
+              decl: {
+                ...item.methods[0],
+                isExpressionBodied: false,
+                body: holderFn.body,
+              },
+              explicitVisibility,
+              isExported,
+            };
+          }
+        }
+      }
+    } catch (bodyErr) {
+      lastErr = lastErr ?? bodyErr;
+    }
+  }
+
+  // Attempt 3: Decompile native snippet (e.g., raw TypeScript or Python function/method)
+  if (!hasFnOrClassDecl(parsedMod)) {
+    try {
+      const wrappedNative =
+        className && (targetLang === "typescript" || targetLang === "javascript")
+          ? `class ${className} {\n${rawSnippet}\n}`
+          : rawSnippet;
+      const decomp = decompile(wrappedNative, targetLang, { filePath });
+      parsedMod = parse(decomp.ail, filePath);
+    } catch (decompErr) {
+      throw new Error(
+        `Syntax error in splice snippet for ${filePath}: ${lastErr instanceof Error ? lastErr.message : String(decompErr)}`,
+      );
+    }
+  }
+
+  if (!parsedMod) {
+    throw new Error(`Failed to parse splice snippet for ${filePath}`);
+  }
+
+  // Expand project idioms (always expand even if idiomsEnabled is false -> Stale AI Memory Grace!)
+  const expandedMod =
+    idioms && Object.keys(idioms).length > 0
+      ? expandModuleIdioms(parsedMod, idioms)
+      : parsedMod;
+
+  for (const item of expandedMod.items) {
+    if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
+      return { decl: item, explicitVisibility, isExported };
+    }
+    if (item.kind === "ClassDecl" && item.methods.length > 0) {
+      return { decl: item.methods[0], explicitVisibility, isExported };
+    }
+  }
+
+  throw new Error(`No valid function or method declaration found in splice snippet for ${filePath}`);
+}
+
+function spliceNativeSource(
+  nativeSource: string,
+  options: SpliceOptions,
+  filePath: string,
+  idioms?: Record<string, ProjectIdiomDefinition>,
+): SpliceResult {
+  const targetLang = detectTargetFromPath(filePath);
+  const targetSymbol = options.symbol;
+
+  if (!targetSymbol) {
+    throw new Error("Must specify target symbol with --symbol when splicing native file");
+  }
+
+  const spanInfo =
+    targetLang === "python"
+      ? locatePythonDeclarationSpan(nativeSource, targetSymbol)
+      : locateTsDeclarationSpan(nativeSource, targetSymbol);
+
+  if (!spanInfo) {
+    throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}`);
+  }
+
+  const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
+  let newSnippet = "";
+  let modifiedCode = nativeSource;
+
+  if (options.delete) {
+    let delEnd = spanInfo.declEnd;
+    if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
+    else if (nativeSource[delEnd] === "\n") delEnd += 1;
+    modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${nativeSource.slice(delEnd)}`;
+  } else {
+    const rawSnippet = options.code ?? options.body ?? "";
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code or --body when splicing native file");
+    }
+
+    if (
+      options.code !== undefined &&
+      (targetLang === "typescript" || targetLang === "javascript") &&
+      isPureNativeTsSnippetWithoutIdioms(rawSnippet, spanInfo.className)
+    ) {
+      newSnippet = indentCode(rawSnippet.trim(), spanInfo.declIndent);
+      modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+    } else {
+      const { decl, explicitVisibility, isExported } = parseSnippetToExpandedDecl(
+        rawSnippet,
+        filePath,
+        targetLang,
+        spanInfo.className,
+        idioms,
+        originalSnippet,
+        options.body !== undefined && options.code === undefined,
+      );
+
+      const emittedUnindented = emitExpandedDeclForTarget(
+        decl,
+        targetLang,
+        filePath,
+        spanInfo.className,
+        {
+          visibility: spanInfo.visibility ?? explicitVisibility,
+          isExported: spanInfo.isExported ?? isExported,
+          isStatic: spanInfo.isStatic,
+          isAsync: spanInfo.isAsync,
+        },
+      );
+
+      newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+      modifiedCode = `${nativeSource.slice(0, spanInfo.declStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+    }
+  }
+
+  let diff: string | undefined;
+  if (options.diff) {
+    diff = generateUnifiedDiff(filePath, nativeSource, modifiedCode);
+  }
+
+  const snippetTokens = estimateTokens(newSnippet || options.code || options.body || "");
+  const modifiedTokens = estimateTokens(modifiedCode);
+  const tokensSaved = Math.max(0, modifiedTokens - snippetTokens);
+
+  return {
+    success: true,
+    filePath,
+    symbol: targetSymbol,
+    originalSnippet,
+    newSnippet,
+    diff,
+    modifiedCode,
+    tokensSaved,
+  };
+}
+
 /**
  * Executes AST surgical splice on a file with optional atomic disk write and re-compilation.
+ * Supports both `.ail` files and Twinless Direct-to-Native files (`.ts`, `.py`, etc. with zero `.ail` files on disk).
  */
 export async function splice(filePath: string, options: SpliceOptions = {}): Promise<SpliceResult> {
-  const fullPath = path.resolve(process.cwd(), filePath);
+  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
   let targetAilPath = fullPath;
+  let isTwinlessNative = false;
 
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Source file not found: ${filePath}`);
@@ -770,7 +1706,29 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
       targetAilPath = companion;
     } else if (fs.existsSync(shortCompanion)) {
       targetAilPath = shortCompanion;
+    } else {
+      isTwinlessNative = true;
     }
+  }
+
+  const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
+  const config = loadProjectConfig(root);
+
+  if (isTwinlessNative) {
+    const originalNative = await fs.promises.readFile(fullPath, "utf-8");
+    const result = spliceNativeSource(originalNative, options, fullPath, config.idioms);
+
+    if (!options.dryRun) {
+      const dir = path.dirname(fullPath);
+      const tmpFile = path.join(
+        dir,
+        `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      );
+      await fs.promises.writeFile(tmpFile, result.modifiedCode, "utf-8");
+      await fs.promises.rename(tmpFile, fullPath);
+    }
+
+    return result;
   }
 
   const originalSource = await fs.promises.readFile(targetAilPath, "utf-8");
@@ -789,8 +1747,6 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
 
   // Automatically trigger compilation if requested
   if (options.compile) {
-    const root = options.projectRoot || findProjectRoot(path.dirname(targetAilPath), process.cwd());
-    const config = loadProjectConfig(root);
     const resolvedTarget = resolveTargetOutputPathForConfig(targetAilPath, config, root);
     const outPath = path.isAbsolute(resolvedTarget)
       ? resolvedTarget
@@ -821,4 +1777,64 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   }
 
   return result;
+}
+
+/**
+ * Executes a batch of splices across one or more files atomically.
+ * If any splice item in the batch fails, all modified files are rolled back to their exact original bytes.
+ */
+export async function spliceBatch(
+  items: BatchSpliceItem[],
+  options: BatchSpliceOptions = {},
+): Promise<BatchSpliceResult> {
+  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const backups = new Map<string, string>();
+
+  // Snapshot original contents of all existing target files before applying any changes
+  for (const item of items) {
+    const fullPath = path.isAbsolute(item.filePath)
+      ? item.filePath
+      : path.resolve(baseDir, item.filePath);
+    if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
+      backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
+    }
+    const companion = `${fullPath}.ail`;
+    if (fs.existsSync(companion) && !backups.has(companion)) {
+      backups.set(companion, fs.readFileSync(companion, "utf-8"));
+    }
+  }
+
+  const results: SpliceResult[] = [];
+  const modifiedSet = new Set<string>();
+
+  try {
+    for (const item of items) {
+      const res = await splice(item.filePath, {
+        ...item,
+        projectRoot: item.projectRoot ?? options.projectRoot,
+        dryRun: item.dryRun ?? options.dryRun,
+        compile: item.compile ?? options.compile,
+      });
+      results.push(res);
+      modifiedSet.add(res.filePath);
+    }
+  } catch (err) {
+    // Atomic rollback of all touched files!
+    if (!options.dryRun) {
+      for (const [fp, origContent] of backups.entries()) {
+        try {
+          fs.writeFileSync(fp, origContent, "utf-8");
+        } catch {
+          // ignore
+        }
+      }
+    }
+    throw err;
+  }
+
+  return {
+    success: true,
+    results,
+    modifiedFiles: Array.from(modifiedSet),
+  };
 }

@@ -3,6 +3,7 @@
   "displayName": "AIL Language Support",
   "description": "Syntax highlighting, bracket matching, indentation rules, and language support for AIL (Abstract Intermediate Language)",
   "version": "1.0.0",
+  "icon": "icon.png",
   "publisher": "antigravity",
   "engines": {
     "vscode": "^1.80.0"
@@ -18,19 +19,44 @@
     "tokenomics",
     "transpiler"
   ],
+  "activationEvents": [
+    "onLanguage:ail"
+  ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
         "id": "ail",
         "aliases": ["AIL", "ail"],
+        "icon": {
+          "light": "./icon.png",
+          "dark": "./icon.png"
+        },
         "extensions": [
           ".ail",
           ".ts.ail",
           ".tsx.ail",
+          ".js.ail",
+          ".mjs.ail",
+          ".cjs.ail",
           ".py.ail",
+          ".go.ail",
+          ".rs.ail",
+          ".kt.ail",
+          ".kts.ail",
+          ".php.ail",
+          ".cpp.ail",
+          ".hpp.ail",
+          ".h.ail",
+          ".cc.ail",
+          ".cxx.ail",
+          ".cs.ail",
+          ".css.ail",
           ".html.ail",
-          ".css.ail"
+          ".twig.ail",
+          ".json.ail",
+          ".yaml.ail",
+          ".yml.ail"
         ],
         "configuration": "./language-configuration.json"
       }
@@ -47,6 +73,74 @@
         "language": "ail",
         "path": "./snippets/ail.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "ail.compile",
+        "title": "AIL: Compile Current File",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.watch",
+        "title": "AIL: Start Bidirectional Watch Daemon",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.sync",
+        "title": "AIL: Sync Target Changes to AIL",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.outline",
+        "title": "AIL: Show AST Structural Outline",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.context",
+        "title": "AIL: Generate Bounded Context Pack",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.idiomsScan",
+        "title": "AIL: Scan Project Idioms ($idiom)",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.idiomsApply",
+        "title": "AIL: Apply Project Idioms ($idiom)",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.shieldStatus",
+        "title": "AIL: Check 4-Layer AI Shield Status",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.shieldLock",
+        "title": "AIL: Lock Target Files (chmod 444)",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.shieldUnlock",
+        "title": "AIL: Unlock Target Files (chmod 644)",
+        "category": "AIL"
+      },
+      {
+        "command": "ail.test",
+        "title": "AIL: Run Symbol-Mapped Test Suite",
+        "category": "AIL"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "AIL Configuration",
+      "properties": {
+        "ail.executablePath": {
+          "type": "string",
+          "default": "ail",
+          "description": "Path to the ail CLI executable"
+        }
+      }
+    }
   }
 }

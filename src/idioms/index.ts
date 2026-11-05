@@ -5,7 +5,11 @@
  * AIL 2.0 Project Idiom Subsystem.
  */
 
-export type { ProjectIdiomDefinition, ProjectIdiomParam } from "../config/project-config.js";
+export type {
+  ProjectIdiomDefinition,
+  ProjectIdiomParam,
+  IdiomOccurrence,
+} from "../config/project-config.js";
 export {
   mineProjectIdioms,
   type MineIdiomsOptions,
@@ -13,13 +17,21 @@ export {
   type IdiomFileInput,
 } from "./idiom-miner.js";
 export {
+  IdiomCycleError,
+  validateIdiomDefinitions,
   expandModuleIdioms,
   collapseModuleIdioms,
   expandAilSourceIdioms,
   collapseAilSourceIdioms,
+  scanProjectIdioms,
+  readProjectIdiom,
+  updateProjectIdiom,
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
   formatIdiomsMarkdownSection,
   type ApplyProjectIdiomsOptions,
   type ApplyProjectIdiomsResult,
+  type IdiomCacheData,
+  type IdiomReadResult,
+  type IdiomUpdateResult,
 } from "./idiom-transform.js";

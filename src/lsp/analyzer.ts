@@ -25,6 +25,7 @@ import {
   DiagnosticSeverity,
   type DocumentSymbol,
   type Hover,
+  type Location,
   type Position,
   type Range,
   SymbolKind,
@@ -641,6 +642,69 @@ export class AilAnalyzer {
     }
 
     return [];
+  }
+
+  public getDefinition(uri: string, position: Position): Location | null {
+    const doc = this.documents.get(uri);
+    if (!doc) return null;
+
+    const line = doc.text.split("\n")[position.line] ?? "";
+    const word = this.getWordAt(line, position.character);
+    if (!word) return null;
+
+    let mod = doc.ast;
+    if (!mod) {
+      try {
+        mod = parse(doc.text, uri);
+      } catch {
+        return null;
+      }
+    }
+
+    const toRange = (span: Span): Range => ({
+      start: {
+        line: Math.max(0, span.start.line - 1),
+        character: Math.max(0, span.start.column - 1),
+      },
+      end: {
+        line: Math.max(0, span.end.line - 1),
+        character: Math.max(0, span.end.column - 1),
+      },
+    });
+
+    const cleanWord = word.startsWith("$") ? word.slice(1) : word;
+
+    for (const item of mod.items) {
+      if ("name" in item && (item.name === word || item.name === cleanWord)) {
+        return { uri, range: toRange(item.span) };
+      }
+      if (item.kind === "ClassDecl") {
+        if (item.properties) {
+          for (const p of item.properties) {
+            if (p.name === word) return { uri, range: toRange(p.span) };
+          }
+        }
+        if (item.methods) {
+          for (const m of item.methods) {
+            if (m.name === word) return { uri, range: toRange(m.span) };
+          }
+        }
+      }
+      if (item.kind === "TypeDecl") {
+        if (item.variants) {
+          for (const v of item.variants) {
+            if (v.name === word) return { uri, range: toRange(v.span) };
+          }
+        }
+        if (item.fields) {
+          for (const f of item.fields) {
+            if (f.name === word) return { uri, range: toRange(f.span) };
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   private getWordAt(line: string, index: number): string | null {

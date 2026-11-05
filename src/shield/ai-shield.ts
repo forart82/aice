@@ -11,7 +11,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAilSiblingPath, isTargetLocked } from "./fs-lock.js";
-import { loadProjectConfig, type ProjectIdiomDefinition } from "../config/index.js";
+import {
+  loadProjectConfig,
+  saveProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/index.js";
 import { formatIdiomsMarkdownSection } from "../idioms/index.js";
 
 export interface ShieldOptions {
@@ -23,6 +27,7 @@ export interface ShieldOptions {
   geminiMd?: boolean; // default true if GEMINI.md exists, or if specified
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".py", ".cpp", ".hpp", ".h"]
   idioms?: Record<string, ProjectIdiomDefinition>;
+  twinless?: boolean; // Twinless On-the-Fly mode (zero .ail files on disk)
 }
 
 export interface ShieldApplyResult {
@@ -812,6 +817,67 @@ function removeCognitiveRule(content: string): { remaining: string; removed: boo
   return { remaining: content, removed: false };
 }
 
+export function generateTwinlessAgentsMdContent(
+  optionsOrIdioms?: Record<string, ProjectIdiomDefinition> | { idioms?: Record<string, ProjectIdiomDefinition> },
+): string {
+  const idioms =
+    optionsOrIdioms && ("idioms" in optionsOrIdioms ? optionsOrIdioms.idioms : optionsOrIdioms);
+
+  const lines = [
+    COGNITIVE_RULES_MD_START,
+    "# AIL Twinless On-the-Fly Directives & Dialect Specification for AI Coding Agents",
+    "",
+    "> **CRITICAL DIRECTIVE**: This repository operates in **AIL Twinless On-the-Fly Mode** (`mode: \"twinless\"` — zero `*.ail` twin files on disk).",
+    "> Native source files (`*.ts`, `*.tsx`, `*.py`, `*.rs`, `*.go`, `*.cpp`, `*.cs`, etc.) remain 100% pure and writable on disk while AI agents communicate with the codebase exclusively in token-compressed AIL + `$idioms` through the `ail` toolchain.",
+    "",
+    "## 1. Twinless On-the-Fly Workflow Directives:",
+    "1. **Read via `ail outline` & `ail context`**: Inspect native files on the fly in compressed AIL + `$idioms` using `ail outline <file>` and `ail context <file> [-s <symbol>] [--idioms|--no-idioms]`.",
+    "2. **Smart Multi-File Idioms**: Discover, inspect, toggle, and mutate recurring patterns across the entire native codebase:",
+    "   - `ail idioms scan [dir]` -> Discover idioms directly from native files and index provenance in `.ail-cache/idioms.json`.",
+    "   - `ail idioms read <$name>` -> Inspect all live file/symbol/line occurrences of an idiom across the project.",
+    "   - `ail idioms update <$name> -c \"<new_template>\" [--dry-run]` -> Surgically update an idiom across all native files at once with atomic rollback.",
+    "   - `ail idioms on` / `ail idioms off` -> Instantly toggle `$idiom` collapsing on or off.",
+    "3. **Surgical Direct-to-Native Mutation via `ail splice`**: Modify functions and methods directly inside native files using AIL + `$idioms` (or hybrid/native syntax) without creating `.ail` files:",
+    "   - `ail splice <file.ts> -s <ClassName.methodName> -c \"<ail_or_native_code>\"`",
+    "   - `ail splice --batch <batch.json>` -> Atomic multi-file batch splice with automatic rollback on error.",
+    "",
+    "## 2. AIL 2.0 Dialect Syntax Cheatsheet:",
+    "- **Keywordless Bindings**: `x := expr` (immutable), `y ::= expr` (mutable), `x: int := 42` (typed).",
+    "- **Vector Destructuring & Math**: `[x, y] := [10, 20]`, `[x, y] += [dx, dy]`, builtins: `min`, `max`, `clamp`, `hypot`, `floor`, `ceil`, `round`, `abs`, `sqrt`.",
+    "- **Functions & Methods**: `fn add(a: int, b: int) -> int = a + b` or `fn step(dt: float) -> float:` with 2-space indented block and `ret`.",
+  ];
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_MD_END);
+  return lines.join("\n");
+}
+
+export function generateTwinlessCursorRulesContent(
+  optionsOrIdioms?: Record<string, ProjectIdiomDefinition> | { idioms?: Record<string, ProjectIdiomDefinition> },
+): string {
+  const idioms =
+    optionsOrIdioms && ("idioms" in optionsOrIdioms ? optionsOrIdioms.idioms : optionsOrIdioms);
+
+  const lines = [
+    COGNITIVE_RULES_TEXT_START,
+    "# AIL Twinless On-the-Fly Directives for AI Coding Agents",
+    '# CRITICAL DIRECTIVE: This repository operates in AIL Twinless On-the-Fly Mode (mode: "twinless", zero *.ail files on disk).',
+    "# 1. Read native files in compressed AIL + $idioms via `ail outline <file>` and `ail context <file> [-s <symbol>]`.",
+    "# 2. Manage multi-file idioms via `ail idioms scan`, `ail idioms read <$name>`, `ail idioms update <$name> -c \"<template>\"`, and `ail idioms on|off`.",
+    "# 3. Surgically mutate native files directly via `ail splice <file> -s <symbol> -c \"<code>\"` or `ail splice --batch <spec.json>`.",
+  ];
+
+  if (idioms && Object.keys(idioms).length > 0) {
+    lines.push("", formatIdiomsMarkdownSection(idioms));
+  }
+
+  lines.push(COGNITIVE_RULES_TEXT_END);
+  return lines.join("\n");
+}
+
 /**
  * Apply AI Exclusion & Cognitive Shield to the given project directory.
  */
@@ -820,8 +886,24 @@ export async function applyAiShield(
   options?: Partial<ShieldOptions>,
 ): Promise<ShieldApplyResult> {
   const targetDir = path.resolve(options?.dir ?? dir);
-  const ideSettingsEnabled = options?.ideSettings ?? true;
-  const agentIgnoresEnabled = options?.agentIgnores ?? true;
+  let projectCfgMode: string | undefined;
+  try {
+    projectCfgMode = loadProjectConfig(targetDir).mode;
+  } catch {
+    // ignore
+  }
+  const isTwinless = options?.twinless ?? projectCfgMode === "twinless";
+
+  if (options?.twinless === true) {
+    try {
+      saveProjectConfig(targetDir, { mode: "twinless" });
+    } catch {
+      // ignore
+    }
+  }
+
+  const ideSettingsEnabled = options?.ideSettings ?? !isTwinless;
+  const agentIgnoresEnabled = options?.agentIgnores ?? !isTwinless;
   const cognitiveRulesEnabled = options?.cognitiveRules ?? true;
   const extensions = (options?.extensions ?? DEFAULT_EXTENSIONS).map(normalizeExtension);
 
@@ -831,6 +913,25 @@ export async function applyAiShield(
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  // If switching to twinless mode and ignore files exist with old shield markers, strip them so native files are never hidden
+  if (isTwinless && !options?.agentIgnores) {
+    for (const ignoreName of AGENT_IGNORE_FILES) {
+      const ignorePath = path.join(targetDir, ignoreName);
+      if (fs.existsSync(ignorePath)) {
+        const existingContent = fs.readFileSync(ignorePath, "utf-8");
+        const { remaining, removed } = removeMarkerBlock(
+          existingContent,
+          SHIELD_START_MARKER,
+          SHIELD_END_MARKER,
+        );
+        if (removed) {
+          fs.writeFileSync(ignorePath, remaining, "utf-8");
+          modifiedFiles.push(ignorePath);
+        }
+      }
+    }
   }
 
   // 1. IDE Settings (.vscode/settings.json)
@@ -932,7 +1033,9 @@ export async function applyAiShield(
     // AGENTS.md
     const agentsMdPath = path.join(targetDir, "AGENTS.md");
     const agentsMdExisted = fs.existsSync(agentsMdPath);
-    const agentsBlock = generateCognitiveAgentsMdContent({ idioms });
+    const agentsBlock = isTwinless
+      ? generateTwinlessAgentsMdContent({ idioms })
+      : generateCognitiveAgentsMdContent({ idioms });
 
     if (!agentsMdExisted) {
       fs.writeFileSync(agentsMdPath, `${agentsBlock}\n`, "utf-8");
@@ -974,7 +1077,9 @@ export async function applyAiShield(
     // .cursorrules
     const cursorRulesPath = path.join(targetDir, ".cursorrules");
     const cursorRulesExisted = fs.existsSync(cursorRulesPath);
-    const cursorRulesBlock = generateCognitiveCursorRulesContent({ idioms });
+    const cursorRulesBlock = isTwinless
+      ? generateTwinlessCursorRulesContent({ idioms })
+      : generateCognitiveCursorRulesContent({ idioms });
 
     if (!cursorRulesExisted) {
       fs.writeFileSync(cursorRulesPath, `${cursorRulesBlock}\n`, "utf-8");

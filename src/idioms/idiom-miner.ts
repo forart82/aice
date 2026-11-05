@@ -589,14 +589,48 @@ function collectModuleCandidates(
       if ("statements" in item.body) {
         visitBlock(item.body);
       } else {
-        visitExpr(item.body as Expr);
+        const bodyExpr = item.body as Expr;
+        if (bodyExpr.kind === "AssignExpr") {
+          visitBlock({
+            kind: "Block",
+            statements: [
+              {
+                kind: "AssignStmt",
+                target: bodyExpr.target,
+                op: "=",
+                value: bodyExpr.value,
+                span: bodyExpr.span,
+              },
+            ],
+            span: bodyExpr.span,
+          });
+        } else {
+          visitExpr(bodyExpr);
+        }
       }
     } else if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
         if ("statements" in m.body) {
           visitBlock(m.body);
         } else {
-          visitExpr(m.body as Expr);
+          const bodyExpr = m.body as Expr;
+          if (bodyExpr.kind === "AssignExpr") {
+            visitBlock({
+              kind: "Block",
+              statements: [
+                {
+                  kind: "AssignStmt",
+                  target: bodyExpr.target,
+                  op: "=",
+                  value: bodyExpr.value,
+                  span: bodyExpr.span,
+                },
+              ],
+              span: bodyExpr.span,
+            });
+          } else {
+            visitExpr(bodyExpr);
+          }
         }
       }
       for (const p of item.properties) {

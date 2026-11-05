@@ -976,6 +976,35 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
 
   if (config.mode === "companion") {
     const shieldRes = await removeCompanionShield(resolvedDir);
+    let unlockedTargets = 0;
+    const targetShieldRemoved: string[] = [];
+    const targetShieldReverted: string[] = [];
+
+    // If targetProjectPath is linked and shielded, unlock and unshield it
+    const targetPath =
+      config.targetProjectDir ??
+      ((config as unknown as Record<string, unknown>).targetProjectPath as string | undefined);
+    if (targetPath) {
+      const resolvedTarget = path.isAbsolute(targetPath)
+        ? targetPath
+        : path.resolve(resolvedDir, targetPath);
+      if (fs.existsSync(resolvedTarget)) {
+        try {
+          const lockSummary = await unlockProjectTargets(resolvedTarget);
+          unlockedTargets = lockSummary.totalUnlocked;
+        } catch {
+          // ignore
+        }
+        try {
+          const tShieldRes = await removeAiShield(resolvedTarget);
+          targetShieldRemoved.push(...tShieldRes.removedFiles);
+          targetShieldReverted.push(...tShieldRes.revertedFiles);
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     for (const cfgName of ["ail.config.json", ".ailrc"]) {
       const cfgPath = path.join(resolvedDir, cfgName);
       if (fs.existsSync(cfgPath)) {
@@ -986,6 +1015,15 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
         }
       }
     }
+    const cacheDir = path.join(resolvedDir, ".ail-cache");
+    if (fs.existsSync(cacheDir)) {
+      try {
+        fs.rmSync(cacheDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+    }
+
     const removedAilFiles: string[] = [];
     if (!options.keepAil) {
       const removed = removeAilAndTriviaFiles(resolvedDir);
@@ -998,9 +1036,10 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
       restoredFiles: [],
       removedAilFiles,
       deletedAilFiles: removedAilFiles,
-      shieldRemoved: shieldRes.removedFiles,
-      removedShield: shieldRes.removedFiles,
-      shieldReverted: shieldRes.revertedFiles,
+      shieldRemoved: [...shieldRes.removedFiles, ...targetShieldRemoved],
+      removedShield: [...shieldRes.removedFiles, ...targetShieldRemoved],
+      shieldReverted: [...shieldRes.revertedFiles, ...targetShieldReverted],
+      unlockedTargets,
     };
   }
 

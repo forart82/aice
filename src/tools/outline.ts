@@ -8,7 +8,13 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { findProjectRoot, KNOWN_TARGET_EXTENSIONS, loadProjectConfig } from "../config/index.js";
+import {
+  findProjectRoot,
+  isProjectIdiomsEnabled,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/index.js";
 import type {
   ClassDecl,
   ConstDecl,
@@ -29,6 +35,7 @@ import { parseWithTrivia } from "../core/parser.js";
 import { CstTriviaTable } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { estimateTokens } from "../tokenomics/index.js";
 
 export interface OutlineOptions {
@@ -37,6 +44,7 @@ export interface OutlineOptions {
   json?: boolean;
   stats?: boolean;
   projectRoot?: string;
+  idioms?: boolean;
 }
 
 export interface OutlineSymbol {
@@ -538,7 +546,8 @@ export function generateOutline(
     }
   }
 
-  let idiomsConfig: Record<string, any> | undefined;
+  let idiomsConfig: Record<string, ProjectIdiomDefinition> | undefined;
+  let idiomsActive = true;
   try {
     const root =
       options.projectRoot ??
@@ -546,21 +555,35 @@ export function generateOutline(
         ? findProjectRoot(path.dirname(path.resolve(filePath)))
         : findProjectRoot(process.cwd()));
     const cfg = loadProjectConfig(root);
-    idiomsConfig = cfg.idioms;
+    idiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
+    if (idiomsActive) {
+      idiomsConfig = cfg.idioms;
+    }
   } catch {
     // ignore
   }
 
-  const referencedIdioms: string[] = [];
-  if (idiomsConfig && originalSource) {
-    for (const idiomName of Object.keys(idiomsConfig)) {
-      const cleanName = idiomName.startsWith("$") ? idiomName.slice(1) : idiomName;
-      if (originalSource.includes(`$${cleanName}`)) {
-        referencedIdioms.push(`$${cleanName}`);
+  const referencedSet = new Set<string>();
+  if (idiomsActive && idiomsConfig) {
+    if (originalSource) {
+      for (const idiomName of Object.keys(idiomsConfig)) {
+        const cleanName = idiomName.startsWith("$") ? idiomName.slice(1) : idiomName;
+        if (originalSource.includes(`$${cleanName}`)) {
+          referencedSet.add(`$${cleanName}`);
+        }
       }
+    }
+    try {
+      collapseModuleIdioms(ast, idiomsConfig, (idiomName) => {
+        const cleanName = idiomName.startsWith("$") ? idiomName.slice(1) : idiomName;
+        referencedSet.add(`$${cleanName}`);
+      });
+    } catch {
+      // ignore
     }
   }
 
+  const referencedIdioms = Array.from(referencedSet);
   if (referencedIdioms.length > 0) {
     outlineLines.unshift(`// idioms: ${referencedIdioms.join(", ")}`);
   }
@@ -600,6 +623,7 @@ export function generateOutline(
     file: filePath,
     text: isJson ? JSON.stringify(jsonPayload, null, 2) : outlineText,
     symbols,
+    referencedIdioms,
     json: jsonPayload,
     stats,
   };

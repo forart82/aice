@@ -42,12 +42,18 @@ import type {
   VarDecl,
   WhileStmt,
 } from "../core/ast.js";
+import { createHash } from "node:crypto";
 import { parse } from "../core/parser.js";
 import { type Span } from "../core/span.js";
 import { AilGenerator } from "../decompiler/ail-generator.js";
+import { decompile } from "../decompiler/index.js";
+import { detectTargetFromPath } from "../emitters/index.js";
 import {
+  isProjectIdiomsEnabled,
+  KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   saveProjectConfig,
+  type IdiomOccurrence,
   type ProjectIdiomDefinition,
 } from "../config/project-config.js";
 import {
@@ -57,6 +63,14 @@ import {
   collectIdentifiersInStatement,
   renameIdentifiersInStatement,
 } from "./idiom-miner.js";
+import { spliceNativeSymbolFromExpandedAst } from "../tools/splice.js";
+
+export class IdiomCycleError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "IdiomCycleError";
+  }
+}
 
 export interface ApplyProjectIdiomsOptions {
   dryRun?: boolean;
@@ -74,6 +88,93 @@ export interface ApplyProjectIdiomsResult {
   rejectedByTokenGate: number;
   synthesizedIdioms?: number;
   netTokenSavings?: number;
+  occurrences?: Record<string, IdiomOccurrence[]>;
+}
+
+export interface IdiomCacheData {
+  version: number;
+  idiomsEnabled: boolean;
+  fileHashes: Record<string, string>;
+  decompiledAil: Record<string, string>;
+  idioms: Record<string, ProjectIdiomDefinition>;
+  occurrences: Record<string, IdiomOccurrence[]>;
+}
+
+export interface IdiomReadResult {
+  idiom: ProjectIdiomDefinition;
+  idiomsEnabled: boolean;
+  occurrences: IdiomOccurrence[];
+  totalOccurrences: number;
+  filesCount: number;
+  formattedReport: string;
+}
+
+export interface IdiomUpdateResult {
+  idiom: ProjectIdiomDefinition;
+  modifiedFiles: string[];
+  updatedOccurrences: number;
+  dryRun: boolean;
+}
+
+function extractReferencedIdiomNamesFromTemplate(
+  templateAil: string,
+  knownIdioms: Set<string>,
+): string[] {
+  const refs: string[] = [];
+  const regex = /(\$[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
+  let match: RegExpExecArray | null = null;
+  while ((match = regex.exec(templateAil)) !== null) {
+    const candidate = match[1];
+    if (knownIdioms.has(candidate)) {
+      refs.push(candidate);
+    } else if (knownIdioms.has(candidate.slice(1))) {
+      refs.push(candidate.slice(1));
+    }
+  }
+  return refs;
+}
+
+/**
+ * Validates that idiom templates parse cleanly and contain no direct or mutual recursion cycles.
+ */
+export function validateIdiomDefinitions(
+  idioms: Record<string, ProjectIdiomDefinition>,
+): void {
+  const normalizedMap = new Map<string, ProjectIdiomDefinition>();
+  for (const [key, def] of Object.entries(idioms)) {
+    const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
+    normalizedMap.set(normName, { ...def, name: normName });
+    // Validate template syntax by parsing
+    getOrParseTemplate({ ...def, name: normName });
+  }
+
+  const knownNames = new Set<string>(normalizedMap.keys());
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+
+  function dfs(name: string, pathStack: string[]): void {
+    if (visiting.has(name)) {
+      const cycleChain = [...pathStack, name].join(" -> ");
+      throw new IdiomCycleError(`Idiom recursion cycle detected: ${cycleChain}`);
+    }
+    if (visited.has(name)) return;
+
+    visiting.add(name);
+    const def = normalizedMap.get(name);
+    if (def) {
+      const refs = extractReferencedIdiomNamesFromTemplate(def.templateAil, knownNames);
+      for (const ref of refs) {
+        const normRef = ref.startsWith("$") ? ref : `$${ref}`;
+        dfs(normRef, [...pathStack, name]);
+      }
+    }
+    visiting.delete(name);
+    visited.add(name);
+  }
+
+  for (const name of knownNames) {
+    dfs(name, []);
+  }
 }
 
 interface ParsedTemplate {
@@ -408,7 +509,15 @@ function expandModuleIdiomsInternal(
       expr.callee.kind === "IdentifierExpr" &&
       Object.hasOwn(idioms!, expr.callee.name)
     ) {
-      const def = idioms![expr.callee.name];
+      const idiomName = expr.callee.name;
+      const def = idioms![idiomName];
+      const selfRefs = extractReferencedIdiomNamesFromTemplate(
+        def.templateAil,
+        new Set([idiomName, def.name]),
+      );
+      if (selfRefs.length > 0) {
+        throw new IdiomCycleError(`Direct recursive cycle detected in idiom '${idiomName}'`);
+      }
       const parsed = getOrParseTemplate(def);
       const transformedArgs = expr.args.map((a) => transformExpr(a, depth + 1));
       const subst = buildSubst(def, transformedArgs);
@@ -534,6 +643,7 @@ function expandModuleIdiomsInternal(
     if (depth > 16) return;
     const newStatements: Statement[] = [];
     const usedNamesInBlock = new Set<string>(outerScopeNames);
+    const boundBeforeCurrentStmt = new Set<string>(outerScopeNames);
     for (const stmt of block.statements) {
       collectIdentifiersInStatement(stmt, usedNamesInBlock);
     }
@@ -550,9 +660,26 @@ function expandModuleIdiomsInternal(
         const call = stmt.expr;
         const idiomName = (call.callee as IdentifierExpr).name;
         const def = idioms![idiomName];
+        const selfRefs = extractReferencedIdiomNamesFromTemplate(
+          def.templateAil,
+          new Set([idiomName, def.name]),
+        );
+        if (selfRefs.length > 0) {
+          throw new IdiomCycleError(`Direct recursive cycle detected in idiom '${idiomName}'`);
+        }
         const parsed = getOrParseTemplate(def);
         const transformedArgs = call.args.map((a) => transformExpr(a, depth + 1));
         const subst = buildSubst(def, transformedArgs);
+
+        const argIdentNames = new Set<string>();
+        collectIdentifiersInStatement(
+          {
+            kind: "ExprStmt",
+            expr: { ...call, args: transformedArgs },
+            span: call.span,
+          },
+          argIdentNames,
+        );
 
         if (
           (def.kind === "stmt" || def.kind === "block") &&
@@ -561,8 +688,8 @@ function expandModuleIdiomsInternal(
         ) {
           onExpanded?.(1);
 
-          // Disambiguate local template-fixed variable bindings (e.g. _loc0)
-          // against names already used in this block or outer scope.
+          // Hygienic alpha-renaming: disambiguate local template variable bindings
+          // against names already bound before this statement, passed in args, or internal _loc names.
           const disambiguateMap = new Map<string, string>();
           const declaredNames = new Set<string>();
           collectDeclaredLocalNames(parsed.statements, declaredNames);
@@ -573,19 +700,24 @@ function expandModuleIdiomsInternal(
               block.statements.slice(i + 1),
               name,
             );
-            const shouldDisambiguate = name.startsWith("_loc") || !isReferencedLater;
+            const collidesWithCaller =
+              boundBeforeCurrentStmt.has(name) || argIdentNames.has(name);
+            const shouldDisambiguate =
+              name.startsWith("_loc") || collidesWithCaller || !isReferencedLater;
 
-            if (shouldDisambiguate && usedNamesInBlock.has(name)) {
+            if (shouldDisambiguate && (usedNamesInBlock.has(name) || collidesWithCaller)) {
               let suffix = 2;
               let freshName = `${name}_${suffix}`;
-              while (usedNamesInBlock.has(freshName)) {
+              while (usedNamesInBlock.has(freshName) || argIdentNames.has(freshName)) {
                 suffix++;
                 freshName = `${name}_${suffix}`;
               }
               disambiguateMap.set(name, freshName);
               usedNamesInBlock.add(freshName);
+              boundBeforeCurrentStmt.add(freshName);
             } else {
               usedNamesInBlock.add(name);
+              boundBeforeCurrentStmt.add(name);
             }
           }
 
@@ -634,10 +766,12 @@ function expandModuleIdiomsInternal(
           break;
         case "LetBinding":
           stmt.init = transformExpr(stmt.init, depth);
+          boundBeforeCurrentStmt.add(stmt.name);
           newStatements.push(stmt);
           break;
         case "DestructureBinding":
           stmt.init = transformExpr(stmt.init, depth);
+          for (const n of stmt.names) boundBeforeCurrentStmt.add(n);
           newStatements.push(stmt);
           break;
         case "AssignStmt":
@@ -1168,6 +1302,7 @@ function matchStatementTemplate(
 export function collapseModuleIdioms(
   mod: Module,
   idioms?: Record<string, ProjectIdiomDefinition>,
+  onCollapsed?: (idiomName: string, args: string[], span: Span, symbol?: string) => void,
 ): { ast: Module; collapsedCount: number } {
   if (!idioms || Object.keys(idioms).length === 0) {
     return { ast: mod, collapsedCount: 0 };
@@ -1175,6 +1310,7 @@ export function collapseModuleIdioms(
 
   const clonedMod = structuredClone(mod);
   let collapsedCount = 0;
+  let currentSymbol: string | undefined;
   const generator = new AilGenerator();
 
   // Sort idioms by tokensPerOccurrenceSaved descending
@@ -1255,6 +1391,12 @@ export function collapseModuleIdioms(
 
             block.statements.splice(i, k, callStmt);
             collapsedCount++;
+            onCollapsed?.(
+              idiom.name,
+              args.map((a) => generator.formatExpr(a)),
+              callSpan,
+              currentSymbol,
+            );
             matched = true;
             i += 1;
             break;
@@ -1319,6 +1461,12 @@ export function collapseModuleIdioms(
         );
 
         collapsedCount++;
+        onCollapsed?.(
+          idiom.name,
+          args.map((a) => generator.formatExpr(a)),
+          expr.span,
+          currentSymbol,
+        );
         return {
           kind: "CallExpr",
           callee: {
@@ -1444,15 +1592,50 @@ export function collapseModuleIdioms(
     }
   }
 
+  function tryCollapseAssignExprBody(fnOrMethod: {
+    body: Block | Expr;
+    isExpressionBodied?: boolean;
+  }): void {
+    if ("statements" in fnOrMethod.body) {
+      collapseBlock(fnOrMethod.body);
+      return;
+    }
+    const bodyExpr = fnOrMethod.body as Expr;
+    if (bodyExpr && bodyExpr.kind === "AssignExpr") {
+      const synthBlock: Block = {
+        kind: "Block",
+        statements: [
+          {
+            kind: "AssignStmt",
+            target: bodyExpr.target,
+            op: "=",
+            value: bodyExpr.value,
+            span: bodyExpr.span,
+          },
+        ],
+        span: bodyExpr.span,
+      };
+      const before = collapsedCount;
+      collapseBlock(synthBlock);
+      if (collapsedCount > before) {
+        fnOrMethod.isExpressionBodied = false;
+        fnOrMethod.body = synthBlock;
+      }
+    }
+  }
+
   // Pass 1: Collapse statements
   for (const item of clonedMod.items) {
-    if (item.kind === "FunctionDecl" && "statements" in item.body) {
-      collapseBlock(item.body);
+    if (item.kind === "FunctionDecl") {
+      currentSymbol = item.name;
+      tryCollapseAssignExprBody(item);
     } else if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
-        if ("statements" in m.body) collapseBlock(m.body);
+        currentSymbol = `${item.name}.${m.name}`;
+        tryCollapseAssignExprBody(m);
       }
       if (item.staticBlocks) {
+        currentSymbol = `${item.name}.<static>`;
         for (const sb of item.staticBlocks) collapseBlock(sb);
       }
     }
@@ -1461,6 +1644,7 @@ export function collapseModuleIdioms(
   // Pass 2: Collapse expressions
   for (const item of clonedMod.items) {
     if (item.kind === "FunctionDecl") {
+      currentSymbol = item.name;
       if ("statements" in item.body) {
         collapseExprsInBlock(item.body);
       } else {
@@ -1468,6 +1652,7 @@ export function collapseModuleIdioms(
       }
     } else if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
+        currentSymbol = `${item.name}.${m.name}`;
         if ("statements" in m.body) {
           collapseExprsInBlock(m.body);
         } else {
@@ -1475,14 +1660,17 @@ export function collapseModuleIdioms(
         }
       }
       for (const p of item.properties) {
+        currentSymbol = `${item.name}.${p.name}`;
         if (p.initialValue) {
           p.initialValue = collapseExpr(p.initialValue);
         }
       }
       if (item.staticBlocks) {
+        currentSymbol = `${item.name}.<static>`;
         for (const sb of item.staticBlocks) collapseExprsInBlock(sb);
       }
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
+      currentSymbol = item.name;
       item.value = collapseExpr(item.value);
     }
   }
@@ -1550,6 +1738,31 @@ export function expandAilSourceIdioms(
   return { ail, expandedCount };
 }
 
+const NATIVE_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs",
+  ".py",
+  ".rs",
+  ".go",
+  ".cpp",
+  ".hpp",
+  ".cc",
+  ".cxx",
+  ".h",
+  ".cs",
+  ".php",
+  ".kt",
+  ".kts",
+]);
+
+function computeSha256(content: string): string {
+  return createHash("sha256").update(content, "utf-8").digest("hex");
+}
+
 /**
  * Recursively locates all .ail files in a directory.
  */
@@ -1565,7 +1778,9 @@ function scanAilFiles(dir: string): string[] {
         entry.name !== "node_modules" &&
         entry.name !== ".git" &&
         entry.name !== ".ail-build" &&
-        entry.name !== "dist"
+        entry.name !== ".ail-cache" &&
+        entry.name !== "dist" &&
+        entry.name !== "build"
       ) {
         results.push(...scanAilFiles(full));
       }
@@ -1577,7 +1792,294 @@ function scanAilFiles(dir: string): string[] {
 }
 
 /**
- * Discovers idioms across a workspace, collapses occurrences, and saves configuration.
+ * Recursively locates native source code files that do not have a .ail sibling.
+ */
+function scanNativeCodeFiles(dir: string): string[] {
+  const results: string[] = [];
+  if (!fs.existsSync(dir)) return results;
+
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (
+        entry.name !== "node_modules" &&
+        entry.name !== ".git" &&
+        entry.name !== ".ail-build" &&
+        entry.name !== ".ail-cache" &&
+        entry.name !== "dist" &&
+        entry.name !== "build" &&
+        entry.name !== "coverage" &&
+        !entry.name.startsWith(".")
+      ) {
+        results.push(...scanNativeCodeFiles(full));
+      }
+    } else if (entry.isFile()) {
+      if (entry.name.endsWith(".d.ts") || entry.name.endsWith(".ail")) continue;
+      const ext = path.extname(entry.name).toLowerCase();
+      if (NATIVE_CODE_EXTENSIONS.has(ext)) {
+        if (!fs.existsSync(`${full}.ail`)) {
+          results.push(full);
+        }
+      }
+    }
+  }
+  return results.sort();
+}
+
+interface WorkspaceIdiomFile extends IdiomFileInput {
+  isNative: boolean;
+  relPath: string;
+  fileHash: string;
+  rawSource: string;
+}
+
+function getIdiomCachePath(projectRoot: string): string {
+  return path.join(projectRoot, ".ail-cache", "idioms.json");
+}
+
+function readIdiomCache(projectRoot: string): IdiomCacheData | null {
+  const cachePath = getIdiomCachePath(projectRoot);
+  if (!fs.existsSync(cachePath)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(cachePath, "utf-8")) as IdiomCacheData;
+  } catch {
+    return null;
+  }
+}
+
+function writeIdiomCache(projectRoot: string, data: IdiomCacheData): void {
+  const cacheDir = path.join(projectRoot, ".ail-cache");
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+  const cachePath = path.join(cacheDir, "idioms.json");
+  fs.writeFileSync(cachePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+}
+
+function loadAndDecompileWorkspaceFiles(
+  projectRoot: string,
+  searchDir: string,
+): {
+  files: WorkspaceIdiomFile[];
+  ailFilePaths: string[];
+  nativeFilePaths: string[];
+  fileHashes: Record<string, string>;
+  decompiledAil: Record<string, string>;
+} {
+  const ailFilePaths = scanAilFiles(searchDir);
+  const nativeFilePaths = scanNativeCodeFiles(searchDir);
+  const existingCache = readIdiomCache(projectRoot);
+  const fileHashes: Record<string, string> = {};
+  const decompiledAil: Record<string, string> = {};
+  const files: WorkspaceIdiomFile[] = [];
+
+  for (const fp of ailFilePaths) {
+    try {
+      const rawSource = fs.readFileSync(fp, "utf-8");
+      const relPath = path.relative(projectRoot, fp) || path.basename(fp);
+      const fileHash = computeSha256(rawSource);
+      fileHashes[relPath] = fileHash;
+      decompiledAil[relPath] = rawSource;
+      files.push({
+        filePath: fp,
+        source: rawSource,
+        isNative: false,
+        relPath,
+        fileHash,
+        rawSource,
+      });
+    } catch {
+      // skip unreadable
+    }
+  }
+
+  for (const fp of nativeFilePaths) {
+    try {
+      const rawSource = fs.readFileSync(fp, "utf-8");
+      const relPath = path.relative(projectRoot, fp) || path.basename(fp);
+      const fileHash = computeSha256(rawSource);
+      fileHashes[relPath] = fileHash;
+
+      let ailSource: string;
+      if (
+        existingCache?.fileHashes?.[relPath] === fileHash &&
+        typeof existingCache?.decompiledAil?.[relPath] === "string"
+      ) {
+        ailSource = existingCache.decompiledAil[relPath];
+      } else {
+        const targetLang = detectTargetFromPath(fp);
+        const decomp = decompile(rawSource, targetLang, { filePath: fp });
+        ailSource = decomp.ail;
+      }
+
+      decompiledAil[relPath] = ailSource;
+      files.push({
+        filePath: fp,
+        source: ailSource,
+        isNative: true,
+        relPath,
+        fileHash,
+        rawSource,
+      });
+    } catch {
+      // skip unparseable native file
+    }
+  }
+
+  return { files, ailFilePaths, nativeFilePaths, fileHashes, decompiledAil };
+}
+
+function collectOccurrencesAcrossFiles(
+  files: WorkspaceIdiomFile[],
+  idioms: Record<string, ProjectIdiomDefinition>,
+): Record<string, IdiomOccurrence[]> {
+  const occurrences: Record<string, IdiomOccurrence[]> = {};
+  const generator = new AilGenerator();
+  for (const key of Object.keys(idioms)) {
+    const norm = key.startsWith("$") ? key : `$${key}`;
+    occurrences[norm] = [];
+  }
+
+  for (const file of files) {
+    let mod: Module;
+    try {
+      mod = parse(file.source, file.filePath);
+    } catch {
+      continue;
+    }
+
+    // 1. Also collect already-collapsed $idiom calls if present in .ail source
+    const collectExistingCallsInBlock = (block: Block, sym?: string) => {
+      for (const stmt of block.statements) {
+        if (
+          stmt.kind === "ExprStmt" &&
+          stmt.expr.kind === "CallExpr" &&
+          stmt.expr.callee.kind === "IdentifierExpr"
+        ) {
+          const calleeName = stmt.expr.callee.name;
+          if (occurrences[calleeName]) {
+            occurrences[calleeName].push({
+              filePath: file.relPath,
+              symbol: sym,
+              startLine: stmt.span?.start?.line || 1,
+              endLine: stmt.span?.end?.line || stmt.span?.start?.line || 1,
+              args: stmt.expr.args.map((a) => generator.formatExpr(a)),
+              fileHash: file.fileHash,
+            });
+          }
+        }
+      }
+    };
+
+    for (const item of mod.items) {
+      if (item.kind === "FunctionDecl" && "statements" in item.body) {
+        collectExistingCallsInBlock(item.body, item.name);
+      } else if (item.kind === "ClassDecl") {
+        for (const m of item.methods) {
+          if ("statements" in m.body) {
+            collectExistingCallsInBlock(m.body, `${item.name}.${m.name}`);
+          }
+        }
+      }
+    }
+
+    // 2. Collect uncollapsed occurrences via collapseModuleIdioms callback
+    collapseModuleIdioms(mod, idioms, (idiomName, args, span, symbol) => {
+      const norm = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
+      if (!occurrences[norm]) {
+        occurrences[norm] = [];
+      }
+      occurrences[norm].push({
+        filePath: file.relPath,
+        symbol,
+        startLine: span?.start?.line || 1,
+        endLine: span?.end?.line || span?.start?.line || 1,
+        args,
+        fileHash: file.fileHash,
+      });
+    });
+  }
+
+  return occurrences;
+}
+
+/**
+ * Native-first idiom scanner: discovers idioms across native (.ts, .py, etc.) and/or .ail files,
+ * persists idioms in `ail.config.json` and provenance in `.ail-cache/idioms.json`,
+ * without writing any `.ail` files to disk.
+ */
+export function scanProjectIdioms(
+  dir: string,
+  options?: ApplyProjectIdiomsOptions,
+): ApplyProjectIdiomsResult {
+  const resolvedDir = path.resolve(dir);
+  const config = loadProjectConfig(resolvedDir);
+  const targetDir = path.resolve(resolvedDir, config.sourceDir);
+  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
+
+  const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
+    resolvedDir,
+    searchDir,
+  );
+
+  const mineResult = mineProjectIdioms(files, {
+    minOccurrences: options?.minOccurrences,
+    minNetTokenSavings: options?.minNetTokenSavings,
+    maxParams: options?.maxParams,
+    maxBlockStatements: options?.maxBlockStatements,
+    existingIdioms: config.idioms,
+  });
+
+  const allIdioms: Record<string, ProjectIdiomDefinition> = {
+    ...config.idioms,
+    ...mineResult.idioms,
+  };
+
+  const occurrences = collectOccurrencesAcrossFiles(files, allIdioms);
+  const affectedFilesSet = new Set<string>();
+  let totalCollapsedCalls = 0;
+  for (const occList of Object.values(occurrences)) {
+    totalCollapsedCalls += occList.length;
+    for (const occ of occList) {
+      affectedFilesSet.add(path.resolve(resolvedDir, occ.filePath));
+    }
+  }
+
+  const idiomsEnabled = isProjectIdiomsEnabled(config);
+
+  if (!options?.dryRun) {
+    if (Object.keys(allIdioms).length > 0) {
+      saveProjectConfig(resolvedDir, {
+        idiomsEnabled,
+        idioms: allIdioms,
+      });
+    }
+    writeIdiomCache(resolvedDir, {
+      version: 1,
+      idiomsEnabled,
+      fileHashes,
+      decompiledAil,
+      idioms: allIdioms,
+      occurrences,
+    });
+  }
+
+  return {
+    idioms: mineResult.idioms,
+    modifiedFiles: Array.from(affectedFilesSet),
+    totalCollapsedCalls,
+    totalNetTokenSavings: mineResult.totalNetTokenSavings,
+    rejectedByTokenGate: mineResult.rejectedByTokenGate,
+    synthesizedIdioms: Object.keys(mineResult.idioms).length,
+    netTokenSavings: mineResult.totalNetTokenSavings,
+    occurrences,
+  };
+}
+
+/**
+ * Discovers idioms across a workspace, collapses occurrences in .ail files (if any),
+ * or indexes native files in twinless mode, and saves configuration + provenance cache.
  */
 export function applyProjectIdiomsToDirectory(
   dir: string,
@@ -1589,8 +2091,13 @@ export function applyProjectIdiomsToDirectory(
   const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
 
   const ailFilePaths = scanAilFiles(searchDir);
-  const files: IdiomFileInput[] = [];
 
+  // If no .ail files exist on disk, run native-first twinless idiom discovery!
+  if (ailFilePaths.length === 0) {
+    return scanProjectIdioms(resolvedDir, options);
+  }
+
+  const files: IdiomFileInput[] = [];
   for (const fp of ailFilePaths) {
     try {
       const source = fs.readFileSync(fp, "utf-8");
@@ -1643,6 +2150,324 @@ export function applyProjectIdiomsToDirectory(
     rejectedByTokenGate: mineResult.rejectedByTokenGate,
     synthesizedIdioms: Object.keys(mineResult.idioms).length,
     netTokenSavings: mineResult.totalNetTokenSavings,
+  };
+}
+
+/**
+ * Reads all live occurrences of a specific project idiom across workspace native and .ail files,
+ * automatically invalidating any stale SHA-256 cache entries when files change on disk.
+ */
+export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResult {
+  const resolvedDir = path.resolve(dir);
+  const config = loadProjectConfig(resolvedDir);
+  const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
+  const bareName = normName.slice(1);
+
+  const idiom = config.idioms?.[normName] ?? config.idioms?.[bareName];
+  if (!idiom) {
+    throw new Error(`Idiom '${normName}' not found in project configuration.`);
+  }
+
+  const canonicalIdiom: ProjectIdiomDefinition = {
+    ...idiom,
+    name: normName,
+  };
+
+  const targetDir = path.resolve(resolvedDir, config.sourceDir);
+  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
+  const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
+    resolvedDir,
+    searchDir,
+  );
+
+  const allIdioms = config.idioms ?? { [normName]: canonicalIdiom };
+  const occurrencesMap = collectOccurrencesAcrossFiles(files, {
+    ...allIdioms,
+    [normName]: canonicalIdiom,
+  });
+  const occList = occurrencesMap[normName] ?? [];
+  const idiomsEnabled = isProjectIdiomsEnabled(config);
+
+  writeIdiomCache(resolvedDir, {
+    version: 1,
+    idiomsEnabled,
+    fileHashes,
+    decompiledAil,
+    idioms: allIdioms,
+    occurrences: occurrencesMap,
+  });
+
+  const uniqueFiles = new Set(occList.map((o) => o.filePath));
+  const paramsStr = canonicalIdiom.params.map((p) => p.name).join(", ");
+  const oneLineTemplate = canonicalIdiom.templateAil.replace(/\r?\n\s*/g, " ; ");
+
+  const lines: string[] = [
+    `=== AIL Idiom Provenance Report: ${normName}(${paramsStr}) ===`,
+    `Status:      ${idiomsEnabled ? "ON (enabled)" : "OFF (disabled)"}`,
+    `Kind:        ${canonicalIdiom.kind}`,
+    `Template:    ${oneLineTemplate}`,
+    `Occurrences: ${occList.length} across ${uniqueFiles.size} file(s)`,
+    "",
+  ];
+
+  for (const occ of occList) {
+    const symLabel = occ.symbol ? ` [${occ.symbol}]` : "";
+    lines.push(
+      `  - ${occ.filePath}:${occ.startLine}${symLabel} -> ${normName}(${occ.args.join(", ")})`,
+    );
+  }
+
+  return {
+    idiom: canonicalIdiom,
+    idiomsEnabled,
+    occurrences: occList,
+    totalOccurrences: occList.length,
+    filesCount: uniqueFiles.size,
+    formattedReport: lines.join("\n"),
+  };
+}
+
+/**
+ * Smart multi-file idiom mutation: updates an idiom's template across all occurrences
+ * in native files and/or .ail files, supporting parameter reordering, duplication,
+ * nested expressions, hygienic alpha-renaming, cycle detection, and atomic rollback.
+ */
+export async function updateProjectIdiom(
+  dir: string,
+  idiomName: string,
+  newTemplateAil: string,
+  options?: { dryRun?: boolean; description?: string },
+): Promise<IdiomUpdateResult> {
+  const resolvedDir = path.resolve(dir);
+  const config = loadProjectConfig(resolvedDir);
+  const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
+  const bareName = normName.slice(1);
+
+  const oldKey =
+    config.idioms && Object.hasOwn(config.idioms, normName)
+      ? normName
+      : config.idioms && Object.hasOwn(config.idioms, bareName)
+        ? bareName
+        : undefined;
+
+  if (!oldKey || !config.idioms) {
+    throw new Error(`Idiom '${normName}' not found in project configuration.`);
+  }
+
+  const oldDef: ProjectIdiomDefinition = {
+    ...config.idioms[oldKey],
+    name: normName,
+  };
+
+  // Determine if the updated template has multiple statements (upgrade kind stmt -> block if needed)
+  const tempCheckDef: ProjectIdiomDefinition = {
+    ...oldDef,
+    kind: oldDef.kind === "expr" ? "expr" : "block",
+    templateAil: newTemplateAil,
+    ...(options?.description !== undefined ? { description: options.description } : {}),
+  };
+  const parsedNew = getOrParseTemplate(tempCheckDef);
+  const updatedKind: "expr" | "stmt" | "block" =
+    oldDef.kind === "expr"
+      ? "expr"
+      : parsedNew.statements && parsedNew.statements.length > 1
+        ? "block"
+        : "stmt";
+
+  const updatedDef: ProjectIdiomDefinition = {
+    ...oldDef,
+    kind: updatedKind,
+    templateAil: newTemplateAil,
+    ...(options?.description !== undefined ? { description: options.description } : {}),
+  };
+
+  const candidateIdioms: Record<string, ProjectIdiomDefinition> = {
+    ...config.idioms,
+    [oldKey]: updatedDef,
+    [normName]: updatedDef,
+  };
+
+  // Validate syntax & check for direct/mutual recursion cycles before touching any files!
+  validateIdiomDefinitions(candidateIdioms);
+
+  const targetDir = path.resolve(resolvedDir, config.sourceDir);
+  const searchDir = fs.existsSync(targetDir) ? targetDir : resolvedDir;
+  const { files } = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);
+
+  const dryRun = Boolean(options?.dryRun);
+  const fileBackups = new Map<string, string>();
+  const pendingWrites = new Map<string, string>();
+  const modifiedFiles: string[] = [];
+  let updatedOccurrences = 0;
+
+  for (const file of files) {
+    if (!file.isNative) {
+      // .ail file on disk
+      let mod: Module;
+      try {
+        mod = parse(file.source, file.filePath);
+      } catch {
+        continue;
+      }
+      let countInFile = 0;
+      collapseModuleIdioms(mod, { [normName]: oldDef }, () => {
+        countInFile++;
+      });
+      // Also check existing $normName calls
+      if (file.source.includes(normName)) {
+        const matches = file.source.match(
+          new RegExp(`\\$${bareName}\\s*\\(`, "g"),
+        );
+        if (matches) countInFile += matches.length;
+      }
+      if (countInFile > 0) {
+        updatedOccurrences += countInFile;
+        modifiedFiles.push(file.filePath);
+      }
+      continue;
+    }
+
+    // Native file (.ts, .py, etc.): decompile -> locate methods/functions with occurrences ->
+    // collapse with oldDef -> expand with updatedDef -> surgically splice native symbol!
+    let mod: Module;
+    try {
+      mod = parse(file.source, file.filePath);
+    } catch {
+      continue;
+    }
+
+    const targetLang = detectTargetFromPath(file.filePath);
+    let currentNativeSource = file.rawSource;
+    let fileModified = false;
+
+    for (const item of mod.items) {
+      if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
+        const singleMod: Module = {
+          kind: "Module",
+          path: mod.path,
+          items: [structuredClone(item)],
+          span: mod.span,
+        };
+        const { ast: collapsedSingle, collapsedCount } = collapseModuleIdioms(singleMod, {
+          [normName]: oldDef,
+        });
+        if (collapsedCount > 0) {
+          const expandedSingle = expandModuleIdioms(collapsedSingle, candidateIdioms);
+          const fnDecl = expandedSingle.items[0] as FunctionDecl;
+          currentNativeSource = spliceNativeSymbolFromExpandedAst(
+            currentNativeSource,
+            item.name,
+            fnDecl,
+            file.filePath,
+            targetLang,
+          );
+          updatedOccurrences += collapsedCount;
+          fileModified = true;
+        }
+      } else if (item.kind === "ClassDecl") {
+        for (const m of item.methods) {
+          const singleClass: ClassDecl = {
+            ...structuredClone(item),
+            properties: [],
+            methods: [structuredClone(m)],
+            staticBlocks: [],
+          };
+          const singleMod: Module = {
+            kind: "Module",
+            path: mod.path,
+            items: [singleClass],
+            span: mod.span,
+          };
+          const { ast: collapsedSingle, collapsedCount } = collapseModuleIdioms(singleMod, {
+            [normName]: oldDef,
+          });
+          if (collapsedCount > 0) {
+            const expandedSingle = expandModuleIdioms(collapsedSingle, candidateIdioms);
+            const expandedCls = expandedSingle.items[0] as ClassDecl;
+            const expandedMethod = expandedCls.methods[0];
+            const symSelector = `${item.name}.${m.name}`;
+            currentNativeSource = spliceNativeSymbolFromExpandedAst(
+              currentNativeSource,
+              symSelector,
+              expandedMethod,
+              file.filePath,
+              targetLang,
+              item.name,
+            );
+            updatedOccurrences += collapsedCount;
+            fileModified = true;
+          }
+        }
+      }
+    }
+
+    if (fileModified) {
+      fileBackups.set(file.filePath, file.rawSource);
+      pendingWrites.set(file.filePath, currentNativeSource);
+      modifiedFiles.push(file.filePath);
+    }
+  }
+
+  updatedDef.occurrences = updatedOccurrences || oldDef.occurrences;
+
+  if (!dryRun) {
+    const configPath = path.join(resolvedDir, "ail.config.json");
+    const oldConfigRaw = fs.existsSync(configPath)
+      ? fs.readFileSync(configPath, "utf-8")
+      : null;
+
+    try {
+      for (const [fp, newContent] of pendingWrites.entries()) {
+        fs.writeFileSync(fp, newContent, "utf-8");
+      }
+
+      const finalIdioms = { ...config.idioms };
+      delete finalIdioms[oldKey];
+      finalIdioms[normName] = updatedDef;
+
+      saveProjectConfig(resolvedDir, {
+        idioms: finalIdioms,
+      });
+
+      // Refresh provenance cache with updated native files
+      const refreshed = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);
+      const refreshedOccurrences = collectOccurrencesAcrossFiles(
+        refreshed.files,
+        finalIdioms,
+      );
+      writeIdiomCache(resolvedDir, {
+        version: 1,
+        idiomsEnabled: isProjectIdiomsEnabled(config),
+        fileHashes: refreshed.fileHashes,
+        decompiledAil: refreshed.decompiledAil,
+        idioms: finalIdioms,
+        occurrences: refreshedOccurrences,
+      });
+    } catch (err) {
+      // Atomic multi-file rollback on any failure!
+      for (const [fp, origContent] of fileBackups.entries()) {
+        try {
+          fs.writeFileSync(fp, origContent, "utf-8");
+        } catch {
+          // ignore
+        }
+      }
+      if (oldConfigRaw !== null) {
+        try {
+          fs.writeFileSync(configPath, oldConfigRaw, "utf-8");
+        } catch {
+          // ignore
+        }
+      }
+      throw err;
+    }
+  }
+
+  return {
+    idiom: updatedDef,
+    modifiedFiles,
+    updatedOccurrences,
+    dryRun,
   };
 }
 

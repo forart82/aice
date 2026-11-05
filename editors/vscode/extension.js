@@ -9,9 +9,13 @@
 const vscode = require("vscode");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
+const fs = require("node:fs");
 
 let lspProcess = null;
 let diagnosticCollection = null;
+let outputChannel = null;
+let ailTerminal = null;
+let statusBarItem = null;
 let messageBuffer = Buffer.alloc(0);
 let nextRequestId = 1;
 const pendingRequests = new Map();
@@ -20,39 +24,250 @@ function activate(context) {
   diagnosticCollection = vscode.languages.createDiagnosticCollection("ail");
   context.subscriptions.push(diagnosticCollection);
 
+  outputChannel = vscode.window.createOutputChannel("AIL Toolchain");
+  context.subscriptions.push(outputChannel);
+
+  // Status Bar Indicator
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.text = "$(zap) AIL";
+  statusBarItem.tooltip = "AIL Language Support Active (Click to Compile)";
+  statusBarItem.command = "ail.compile";
+  statusBarItem.show();
+  context.subscriptions.push(statusBarItem);
+
   // 1. Locate LSP server executable
   const serverProcess = spawnLspServer(context);
-  if (!serverProcess) return;
+  if (serverProcess) {
+    lspProcess = serverProcess;
 
-  lspProcess = serverProcess;
+    lspProcess.stdout.on("data", (chunk) => {
+      handleServerData(chunk);
+    });
 
-  lspProcess.stdout.on("data", (chunk) => {
-    handleServerData(chunk);
-  });
+    lspProcess.stderr.on("data", (data) => {
+      console.error(`[AIL LSP] ${data.toString()}`);
+    });
 
-  lspProcess.stderr.on("data", (data) => {
-    console.error(`[AIL LSP] ${data.toString()}`);
-  });
+    lspProcess.on("close", (code) => {
+      console.log(`[AIL LSP] Process exited with code ${code}`);
+    });
 
-  lspProcess.on("close", (code) => {
-    console.log(`[AIL LSP] Process exited with code ${code}`);
-  });
-
-  // 2. Initialize LSP Handshake
-  sendRequest("initialize", {
-    capabilities: {
-      textDocument: {
-        hover: { dynamicRegistration: true },
-        completion: { dynamicRegistration: true },
+    // 2. Initialize LSP Handshake
+    sendRequest("initialize", {
+      capabilities: {
+        textDocument: {
+          hover: { dynamicRegistration: true },
+          completion: { dynamicRegistration: true },
+          formatting: { dynamicRegistration: true },
+          documentSymbol: { dynamicRegistration: true },
+          definition: { dynamicRegistration: true },
+          codeAction: { dynamicRegistration: true },
+        },
       },
-    },
-  });
+    });
 
-  sendNotification("initialized", {});
+    sendNotification("initialized", {});
 
-  // 3. Document Lifecycle Notifications
-  context.subscriptions.push(
-    vscode.workspace.onDidOpenTextDocument((doc) => {
+    // 3. Document Lifecycle Notifications
+    context.subscriptions.push(
+      vscode.workspace.onDidOpenTextDocument((doc) => {
+        if (doc.languageId === "ail") {
+          sendNotification("textDocument/didOpen", {
+            textDocument: {
+              uri: doc.uri.toString(),
+              languageId: "ail",
+              version: doc.version,
+              text: doc.getText(),
+            },
+          });
+        }
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeTextDocument((event) => {
+        if (event.document.languageId === "ail") {
+          sendNotification("textDocument/didChange", {
+            textDocument: {
+              uri: event.document.uri.toString(),
+              version: event.document.version,
+            },
+            contentChanges: [{ text: event.document.getText() }],
+          });
+        }
+      })
+    );
+
+    context.subscriptions.push(
+      vscode.workspace.onDidCloseTextDocument((doc) => {
+        if (doc.languageId === "ail") {
+          diagnosticCollection.delete(doc.uri);
+          sendNotification("textDocument/didClose", {
+            textDocument: { uri: doc.uri.toString() },
+          });
+        }
+      })
+    );
+
+    // 4. Hover Provider
+    context.subscriptions.push(
+      vscode.languages.registerHoverProvider("ail", {
+        provideHover(document, position) {
+          return sendRequest("textDocument/hover", {
+            textDocument: { uri: document.uri.toString() },
+            position: { line: position.line, character: position.character },
+          }).then((res) => {
+            if (!res || !res.contents) return null;
+            const markdown =
+              typeof res.contents === "string" ? res.contents : res.contents.value;
+            return new vscode.Hover(new vscode.MarkdownString(markdown));
+          });
+        },
+      })
+    );
+
+    // 5. Completion Item Provider
+    context.subscriptions.push(
+      vscode.languages.registerCompletionItemProvider(
+        "ail",
+        {
+          provideCompletionItems(document, position) {
+            return sendRequest("textDocument/completion", {
+              textDocument: { uri: document.uri.toString() },
+              position: { line: position.line, character: position.character },
+            }).then((items) => {
+              if (!items || !Array.isArray(items)) return [];
+              return items.map((item) => {
+                const ci = new vscode.CompletionItem(item.label);
+                ci.detail = item.detail;
+                if (item.insertText) {
+                  ci.insertText = new vscode.SnippetString(item.insertText);
+                }
+                return ci;
+              });
+            });
+          },
+        },
+        ".",
+        ":",
+        " ",
+        "$"
+      )
+    );
+
+    // 6. Document Formatting Provider
+    context.subscriptions.push(
+      vscode.languages.registerDocumentFormattingEditProvider("ail", {
+        provideDocumentFormattingEdits(document, options) {
+          return sendRequest("textDocument/formatting", {
+            textDocument: { uri: document.uri.toString() },
+            options: {
+              tabSize: options.tabSize,
+              insertSpaces: options.insertSpaces,
+            },
+          }).then((edits) => {
+            if (!edits || !Array.isArray(edits)) return [];
+            return edits.map((e) => {
+              const range = new vscode.Range(
+                new vscode.Position(e.range.start.line, e.range.start.character),
+                new vscode.Position(e.range.end.line, e.range.end.character)
+              );
+              return new vscode.TextEdit(range, e.newText);
+            });
+          });
+        },
+      })
+    );
+
+    // 7. Document Symbol Provider
+    context.subscriptions.push(
+      vscode.languages.registerDocumentSymbolProvider("ail", {
+        provideDocumentSymbols(document) {
+          return sendRequest("textDocument/documentSymbol", {
+            textDocument: { uri: document.uri.toString() },
+          }).then((symbols) => {
+            if (!symbols || !Array.isArray(symbols)) return [];
+            return symbols.map(toVsCodeSymbol);
+          });
+        },
+      })
+    );
+
+    // 8. Definition Provider
+    context.subscriptions.push(
+      vscode.languages.registerDefinitionProvider("ail", {
+        provideDefinition(document, position) {
+          return sendRequest("textDocument/definition", {
+            textDocument: { uri: document.uri.toString() },
+            position: { line: position.line, character: position.character },
+          }).then((res) => {
+            if (!res || !res.uri || !res.range) return null;
+            const targetUri = vscode.Uri.parse(res.uri);
+            const range = new vscode.Range(
+              new vscode.Position(res.range.start.line, res.range.start.character),
+              new vscode.Position(res.range.end.line, res.range.end.character)
+            );
+            return new vscode.Location(targetUri, range);
+          });
+        },
+      })
+    );
+
+    // 9. Code Actions Provider
+    context.subscriptions.push(
+      vscode.languages.registerCodeActionsProvider("ail", {
+        provideCodeActions(document, range, codeContext) {
+          return sendRequest("textDocument/codeAction", {
+            textDocument: { uri: document.uri.toString() },
+            range: {
+              start: { line: range.start.line, character: range.start.character },
+              end: { line: range.end.line, character: range.end.character },
+            },
+            context: {
+              diagnostics: (codeContext.diagnostics || []).map((d) => ({
+                range: {
+                  start: { line: d.range.start.line, character: d.range.start.character },
+                  end: { line: d.range.end.line, character: d.range.end.character },
+                },
+                message: d.message,
+                code: d.code,
+                source: d.source,
+              })),
+            },
+          }).then((actions) => {
+            if (!actions || !Array.isArray(actions)) return [];
+            return actions.map((a) => {
+              const ca = new vscode.CodeAction(
+                a.title,
+                a.kind === "quickfix"
+                  ? vscode.CodeActionKind.QuickFix
+                  : vscode.CodeActionKind.Empty
+              );
+              ca.isPreferred = a.isPreferred;
+              if (a.edit && a.edit.changes) {
+                const we = new vscode.WorkspaceEdit();
+                for (const [uriStr, edits] of Object.entries(a.edit.changes)) {
+                  const fileUri = vscode.Uri.parse(uriStr);
+                  const textEdits = edits.map((e) => {
+                    const r = new vscode.Range(
+                      new vscode.Position(e.range.start.line, e.range.start.character),
+                      new vscode.Position(e.range.end.line, e.range.end.character)
+                    );
+                    return new vscode.TextEdit(r, e.newText);
+                  });
+                  we.set(fileUri, textEdits);
+                }
+                ca.edit = we;
+              }
+              return ca;
+            });
+          });
+        },
+      })
+    );
+
+    // Sync any already open AIL documents
+    for (const doc of vscode.workspace.textDocuments) {
       if (doc.languageId === "ail") {
         sendNotification("textDocument/didOpen", {
           textDocument: {
@@ -63,100 +278,173 @@ function activate(context) {
           },
         });
       }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((event) => {
-      if (event.document.languageId === "ail") {
-        sendNotification("textDocument/didChange", {
-          textDocument: {
-            uri: event.document.uri.toString(),
-            version: event.document.version,
-          },
-          contentChanges: [{ text: event.document.getText() }],
-        });
-      }
-    })
-  );
-
-  context.subscriptions.push(
-    vscode.workspace.onDidCloseTextDocument((doc) => {
-      if (doc.languageId === "ail") {
-        diagnosticCollection.delete(doc.uri);
-        sendNotification("textDocument/didClose", {
-          textDocument: { uri: doc.uri.toString() },
-        });
-      }
-    })
-  );
-
-  // 4. Hover Provider
-  context.subscriptions.push(
-    vscode.languages.registerHoverProvider("ail", {
-      provideHover(document, position) {
-        return sendRequest("textDocument/hover", {
-          textDocument: { uri: document.uri.toString() },
-          position: { line: position.line, character: position.character },
-        }).then((res) => {
-          if (!res || !res.contents) return null;
-          const markdown = typeof res.contents === "string" ? res.contents : res.contents.value;
-          return new vscode.Hover(new vscode.MarkdownString(markdown));
-        });
-      },
-    })
-  );
-
-  // 5. Completion Item Provider
-  context.subscriptions.push(
-    vscode.languages.registerCompletionItemProvider(
-      "ail",
-      {
-        provideCompletionItems(document, position) {
-          return sendRequest("textDocument/completion", {
-            textDocument: { uri: document.uri.toString() },
-            position: { line: position.line, character: position.character },
-          }).then((items) => {
-            if (!items || !Array.isArray(items)) return [];
-            return items.map((item) => {
-              const ci = new vscode.CompletionItem(item.label);
-              ci.detail = item.detail;
-              if (item.insertText) {
-                ci.insertText = new vscode.SnippetString(item.insertText);
-              }
-              return ci;
-            });
-          });
-        },
-      },
-      ".",
-      ":",
-      " "
-    )
-  );
-
-  // Sync any already open AIL documents
-  for (const doc of vscode.workspace.textDocuments) {
-    if (doc.languageId === "ail") {
-      sendNotification("textDocument/didOpen", {
-        textDocument: {
-          uri: doc.uri.toString(),
-          languageId: "ail",
-          version: doc.version,
-          text: doc.getText(),
-        },
-      });
     }
   }
+
+  // 10. Register Contributed AIL Commands
+  registerAilCommands(context);
+}
+
+function toVsCodeSymbol(s) {
+  const range = new vscode.Range(
+    new vscode.Position(s.range.start.line, s.range.start.character),
+    new vscode.Position(s.range.end.line, s.range.end.character)
+  );
+  const selectionRange = new vscode.Range(
+    new vscode.Position(s.selectionRange.start.line, s.selectionRange.start.character),
+    new vscode.Position(s.selectionRange.end.line, s.selectionRange.end.character)
+  );
+  const kind =
+    typeof s.kind === "number" && s.kind > 0
+      ? s.kind - 1
+      : vscode.SymbolKind.Variable;
+  const vsSym = new vscode.DocumentSymbol(
+    s.name,
+    s.detail || "",
+    kind,
+    range,
+    selectionRange
+  );
+  if (s.children && Array.isArray(s.children)) {
+    vsSym.children = s.children.map(toVsCodeSymbol);
+  }
+  return vsSym;
+}
+
+function getAilCommand() {
+  const config = vscode.workspace.getConfiguration("ail");
+  const configured = config.get("executablePath");
+  if (configured && configured !== "ail") {
+    return { bin: configured, args: [] };
+  }
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (workspaceFolders && workspaceFolders.length > 0) {
+    const rootPath = workspaceFolders[0].uri.fsPath;
+    const localMjs = path.join(rootPath, "bin", "ail.mjs");
+    if (fs.existsSync(localMjs)) {
+      return { bin: "node", args: [localMjs] };
+    }
+    const localTs = path.join(rootPath, "bin", "ail.ts");
+    if (fs.existsSync(localTs)) {
+      return { bin: "bun", args: [localTs] };
+    }
+  }
+  return { bin: "ail", args: [] };
+}
+
+function getWorkspaceRoot() {
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders && folders.length > 0) {
+    return folders[0].uri.fsPath;
+  }
+  const editor = vscode.window.activeTextEditor;
+  if (editor && editor.document.uri.scheme === "file") {
+    return path.dirname(editor.document.fileName);
+  }
+  return process.cwd();
+}
+
+function runCliInOutput(subcommandArgs, cwd) {
+  outputChannel.show(true);
+  const cmdInfo = getAilCommand();
+  const allArgs = [...cmdInfo.args, ...subcommandArgs];
+  outputChannel.appendLine(`\n[AIL Toolchain] Running: ${cmdInfo.bin} ${allArgs.join(" ")}`);
+
+  const child = spawn(cmdInfo.bin, allArgs, { cwd: cwd || getWorkspaceRoot() });
+  child.stdout.on("data", (d) => outputChannel.append(d.toString()));
+  child.stderr.on("data", (d) => outputChannel.append(d.toString()));
+  child.on("close", (code) => {
+    outputChannel.appendLine(`[AIL Toolchain] Process completed with code ${code}\n`);
+  });
+}
+
+function runInTerminal(commandString, cwd) {
+  if (!ailTerminal || ailTerminal.exitStatus !== undefined) {
+    ailTerminal = vscode.window.createTerminal({ name: "AIL", cwd: cwd || getWorkspaceRoot() });
+  }
+  ailTerminal.show();
+  ailTerminal.sendText(commandString);
+}
+
+function registerAilCommands(context) {
+  const register = (id, handler) => {
+    context.subscriptions.push(vscode.commands.registerCommand(id, handler));
+  };
+
+  register("ail.compile", () => {
+    const editor = vscode.window.activeTextEditor;
+    const file = editor ? editor.document.fileName : ".";
+    runCliInOutput(["compile", file]);
+  });
+
+  register("ail.watch", () => {
+    const cmdInfo = getAilCommand();
+    const cmdStr = `${cmdInfo.bin} ${[...cmdInfo.args, "watch", ".", "--bidirectional"].join(" ")}`;
+    runInTerminal(cmdStr);
+  });
+
+  register("ail.sync", () => {
+    runCliInOutput(["sync", "."]);
+  });
+
+  register("ail.outline", () => {
+    const editor = vscode.window.activeTextEditor;
+    const file = editor ? editor.document.fileName : ".";
+    runCliInOutput(["outline", file]);
+  });
+
+  register("ail.context", () => {
+    const editor = vscode.window.activeTextEditor;
+    const file = editor ? editor.document.fileName : ".";
+    runCliInOutput(["context", file]);
+  });
+
+  register("ail.idiomsScan", () => {
+    runCliInOutput(["idioms", "scan", "."]);
+  });
+
+  register("ail.idiomsApply", () => {
+    runCliInOutput(["idioms", "apply", "."]);
+  });
+
+  register("ail.shieldStatus", () => {
+    runCliInOutput(["shield", "status"]);
+  });
+
+  register("ail.shieldLock", () => {
+    runCliInOutput(["shield", "lock", "."]);
+  });
+
+  register("ail.shieldUnlock", () => {
+    runCliInOutput(["shield", "unlock", "."]);
+  });
+
+  register("ail.test", () => {
+    const cmdInfo = getAilCommand();
+    const cmdStr = `${cmdInfo.bin} ${[...cmdInfo.args, "test"].join(" ")}`;
+    runInTerminal(cmdStr);
+  });
 }
 
 function spawnLspServer(context) {
+  const config = vscode.workspace.getConfiguration("ail");
+  const configured = config.get("executablePath");
+  if (configured && configured !== "ail") {
+    return spawn(configured, ["lsp"]);
+  }
+
   // Check workspace for local ail daemon
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders && workspaceFolders.length > 0) {
     const rootPath = workspaceFolders[0].uri.fsPath;
-    const lspScript = path.join(rootPath, "bin", "ail-lsp.ts");
-    return spawn("bun", [lspScript], { cwd: rootPath });
+    const lspTs = path.join(rootPath, "bin", "ail-lsp.ts");
+    if (fs.existsSync(lspTs)) {
+      return spawn("bun", [lspTs], { cwd: rootPath });
+    }
+    const lspMjs = path.join(rootPath, "bin", "ail-lsp.mjs");
+    if (fs.existsSync(lspMjs)) {
+      return spawn("node", [lspMjs], { cwd: rootPath });
+    }
   }
 
   // Fallback to globally available ail lsp
@@ -243,7 +531,11 @@ function handleMessage(msg) {
         new vscode.Position(d.range.start.line, d.range.start.character),
         new vscode.Position(d.range.end.line, d.range.end.character)
       );
-      const diag = new vscode.Diagnostic(range, d.message, vscode.DiagnosticSeverity.Error);
+      const diag = new vscode.Diagnostic(
+        range,
+        d.message,
+        vscode.DiagnosticSeverity.Error
+      );
       diag.code = d.code;
       diag.source = d.source || "ail";
       return diag;

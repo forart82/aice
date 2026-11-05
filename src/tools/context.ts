@@ -12,17 +12,23 @@ import * as path from "node:path";
 import {
   type AilProjectConfig,
   findProjectRoot,
+  isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   resolvePathTargets,
   resolveTargetFile,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
-import type { ImportDecl, Module } from "../core/ast.js";
+import type { ClassDecl, ImportDecl, Module, ModuleItem } from "../core/ast.js";
 import { parse } from "../core/parser.js";
+import { AilGenerator } from "../decompiler/ail-generator.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath } from "../emitters/index.js";
-import { formatIdiomsMarkdownSection } from "../idioms/index.js";
+import {
+  collapseAilSourceIdioms,
+  expandAilSourceIdioms,
+  formatIdiomsMarkdownSection,
+} from "../idioms/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { generateOutline, type OutlineSymbol } from "./outline.js";
 
@@ -61,6 +67,16 @@ export interface ContextOptions {
    * Root directory of the project (auto-discovered if omitted).
    */
   projectRoot?: string;
+
+  /**
+   * Optional symbol selector (e.g., "fnName" or "ClassName.methodName") for symbol-scoped context.
+   */
+  symbol?: string;
+
+  /**
+   * Optional override for enabling/disabling project idioms (--idioms / --no-idioms).
+   */
+  idioms?: boolean;
 }
 
 export interface DependencyContract {
@@ -627,8 +643,11 @@ export async function generateWorkspaceContext(
     }
   }
 
-  if (config.idioms && Object.keys(config.idioms).length > 0) {
-    parts.push(formatIdiomsMarkdownSection(config.idioms), "");
+  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const activeIdioms = idiomsActive ? config.idioms : undefined;
+
+  if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+    parts.push(formatIdiomsMarkdownSection(activeIdioms), "");
   }
 
   let formattedBundle = parts.join("\n");
@@ -662,8 +681,71 @@ export async function generateWorkspaceContext(
     callers: [],
     formattedBundle,
     tokenCount,
-    idioms: config.idioms,
+    idioms: activeIdioms,
   };
+}
+
+function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, filePath: string): string {
+  const mod = parse(ailSource, filePath);
+  const dotIdx = symbolSelector.indexOf(".");
+  const className = dotIdx >= 0 ? symbolSelector.slice(0, dotIdx).trim() : undefined;
+  const memberName = dotIdx >= 0 ? symbolSelector.slice(dotIdx + 1).trim() : symbolSelector.trim();
+
+  const matchedItems: ModuleItem[] = [];
+
+  for (const item of mod.items) {
+    if (className) {
+      if (item.kind === "ClassDecl" && item.name === className) {
+        const matchedMethods = item.methods.filter((m) => m.name === memberName);
+        const matchedProps = item.properties.filter((p) => p.name === memberName);
+        if (matchedMethods.length > 0 || matchedProps.length > 0) {
+          const scopedClass: ClassDecl = {
+            ...item,
+            properties: matchedProps,
+            methods: matchedMethods,
+            staticBlocks: [],
+          };
+          matchedItems.push(scopedClass);
+        }
+      }
+    } else {
+      if (
+        (item.kind === "FunctionDecl" ||
+          item.kind === "ClassDecl" ||
+          item.kind === "TypeDecl" ||
+          item.kind === "ConstDecl" ||
+          item.kind === "VarDecl" ||
+          item.kind === "ComponentDecl") &&
+        item.name === memberName
+      ) {
+        matchedItems.push(item);
+      } else if (item.kind === "ClassDecl") {
+        const matchedMethods = item.methods.filter((m) => m.name === memberName);
+        const matchedProps = item.properties.filter((p) => p.name === memberName);
+        if (matchedMethods.length > 0 || matchedProps.length > 0) {
+          const scopedClass: ClassDecl = {
+            ...item,
+            properties: matchedProps,
+            methods: matchedMethods,
+            staticBlocks: [],
+          };
+          matchedItems.push(scopedClass);
+        }
+      }
+    }
+  }
+
+  if (matchedItems.length === 0) {
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+  }
+
+  const scopedMod: Module = {
+    kind: "Module",
+    path: mod.path,
+    items: matchedItems,
+    span: mod.span,
+  };
+  return AilGenerator.generate(scopedMod);
 }
 
 /**
@@ -694,12 +776,57 @@ export async function generateContext(
 
   const projectRoot = resolved.projectRoot;
   const config = resolved.config;
+  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const activeIdioms = idiomsActive ? config.idioms : undefined;
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
-  const targetContent = fs.readFileSync(fullTargetPath, "utf-8");
+  const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
+
+  let targetContent = rawFileContent;
+  if (!fullTargetPath.endsWith(".ail")) {
+    try {
+      const targetLang = detectTargetFromPath(fullTargetPath);
+      const isTemplateOrData =
+        targetLang === "twig" ||
+        targetLang === "html" ||
+        targetLang === "css" ||
+        targetLang === "json" ||
+        targetLang === "yaml";
+      if (!isTemplateOrData || options.symbol || options.idioms) {
+        const decomp = decompile(rawFileContent, targetLang, { filePath: fullTargetPath });
+        targetContent = decomp.ail;
+      }
+    } catch {
+      targetContent = rawFileContent;
+    }
+  }
+
+  if (options.symbol) {
+    targetContent = extractSymbolFromAilSource(targetContent, options.symbol, fullTargetPath);
+  }
+
+  if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
+    try {
+      const collapsed = collapseAilSourceIdioms(targetContent, activeIdioms, fullTargetPath);
+      targetContent = collapsed.ail;
+    } catch {
+      // ignore collapse failures
+    }
+  } else if (!idiomsActive && config.idioms && Object.keys(config.idioms).length > 0 && targetContent.includes("$")) {
+    try {
+      const expanded = expandAilSourceIdioms(targetContent, config.idioms, fullTargetPath);
+      targetContent = expanded.ail;
+    } catch {
+      // ignore expand failures
+    }
+  }
 
   // Generate target outline
-  const outlineRes = generateOutline(fullTargetPath, { includeTypes: true });
+  const outlineRes = generateOutline(fullTargetPath, {
+    includeTypes: true,
+    idioms: options.idioms,
+    projectRoot,
+  });
   const targetOutline = outlineRes.text;
 
   // Dependency discovery BFS
@@ -809,7 +936,7 @@ export async function generateContext(
     targetBody,
     dependencies,
     callers,
-    config.idioms,
+    activeIdioms,
   );
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -822,7 +949,7 @@ export async function generateContext(
         targetBody,
         dependencies,
         callers,
-        config.idioms,
+        activeIdioms,
       );
       tokenCount = estimateTokens(formattedBundle);
     }
@@ -839,7 +966,7 @@ export async function generateContext(
           targetBody,
           dependencies,
           callers,
-          config.idioms,
+          activeIdioms,
         );
         tokenCount = estimateTokens(formattedBundle);
       }
@@ -874,7 +1001,7 @@ export async function generateContext(
     callers,
     formattedBundle,
     tokenCount,
-    idioms: config.idioms,
+    idioms: activeIdioms,
   };
 }
 

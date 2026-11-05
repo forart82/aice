@@ -12,11 +12,20 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
 
-export type ProjectMode = "side-by-side" | "isolated" | "companion";
+export type ProjectMode = "side-by-side" | "isolated" | "companion" | "twinless";
 
 export interface ProjectIdiomParam {
   name: string; // e.g. "$0", "$1"
   type?: string;
+}
+
+export interface IdiomOccurrence {
+  filePath: string;
+  symbol?: string;
+  startLine: number;
+  endLine: number;
+  args: string[];
+  fileHash?: string;
 }
 
 export interface ProjectIdiomDefinition {
@@ -44,6 +53,7 @@ export interface AilProjectConfig {
     scrubTraces?: boolean;
     [key: string]: any;
   };
+  idiomsEnabled?: boolean;
   idioms?: Record<string, ProjectIdiomDefinition>;
 }
 
@@ -51,6 +61,7 @@ export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
   "side-by-side",
   "isolated",
   "companion",
+  "twinless",
 ]);
 
 export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
@@ -617,6 +628,9 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
     ...(typeof configToProcess.test === "object" && configToProcess.test !== null
       ? { test: configToProcess.test as AilProjectConfig["test"] }
       : {}),
+    ...(typeof configToProcess.idiomsEnabled === "boolean"
+      ? { idiomsEnabled: configToProcess.idiomsEnabled }
+      : {}),
     ...(typeof configToProcess.idioms === "object" &&
     configToProcess.idioms !== null &&
     !Array.isArray(configToProcess.idioms)
@@ -700,6 +714,11 @@ export function saveProjectConfig(
       : typeof existing.test === "object" && existing.test !== null
         ? { test: existing.test as AilProjectConfig["test"] }
         : {}),
+    ...(config.idiomsEnabled !== undefined
+      ? { idiomsEnabled: config.idiomsEnabled }
+      : typeof existing.idiomsEnabled === "boolean"
+        ? { idiomsEnabled: existing.idiomsEnabled }
+        : {}),
     ...(config.idioms !== undefined
       ? { idioms: config.idioms }
       : typeof existing.idioms === "object" && existing.idioms !== null && !Array.isArray(existing.idioms)
@@ -716,6 +735,46 @@ export function saveProjectConfig(
 
   fs.writeFileSync(configPath, `${JSON.stringify(toWrite, null, 2)}\n`, "utf-8");
   return mergedConfig;
+}
+
+/**
+ * Returns whether project idioms are currently enabled, honoring an optional per-call override flag.
+ */
+export function isProjectIdiomsEnabled(
+  config?: Partial<AilProjectConfig> | null,
+  overrideFlag?: boolean,
+): boolean {
+  if (overrideFlag !== undefined) {
+    return overrideFlag;
+  }
+  if (!config) {
+    return true;
+  }
+  return config.idiomsEnabled !== false;
+}
+
+/**
+ * Persists the idiomsEnabled toggle in `ail.config.json` (and updates `.ail-cache/idioms.json` if present).
+ */
+export function setProjectIdiomsEnabled(
+  projectDir: string,
+  enabled: boolean,
+): AilProjectConfig {
+  const resolvedDir = path.resolve(projectDir);
+  const updated = saveProjectConfig(resolvedDir, { idiomsEnabled: enabled });
+
+  const cachePath = path.join(resolvedDir, ".ail-cache", "idioms.json");
+  if (fs.existsSync(cachePath)) {
+    try {
+      const raw = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+      raw.idiomsEnabled = enabled;
+      fs.writeFileSync(cachePath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+    } catch {
+      // ignore cache sync errors
+    }
+  }
+
+  return updated;
 }
 
 /**

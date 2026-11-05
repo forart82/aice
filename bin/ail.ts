@@ -12,9 +12,11 @@ import { Command } from "commander";
 import {
   type AilProjectConfig,
   findProjectRoot,
+  isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   saveProjectConfig,
+  setProjectIdiomsEnabled,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
 } from "../src/config/index.js";
@@ -43,6 +45,9 @@ import {
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
   expandModuleIdioms,
+  readProjectIdiom,
+  scanProjectIdioms,
+  updateProjectIdiom,
 } from "../src/idioms/index.js";
 import {
   runEvolutionLoopSync,
@@ -57,6 +62,7 @@ import {
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
 import {
+  type BatchSpliceItem,
   type ContextOptions,
   type DiffOptions,
   diffFiles,
@@ -75,6 +81,7 @@ import {
   runParityGate,
   type SpliceOptions,
   splice,
+  spliceBatch,
   type BenchmarkOptions,
   type BenchmarkSuiteReport,
   formatBenchmarkJson,
@@ -103,7 +110,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.6.0");
+  .version("0.6.1");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -1526,6 +1533,11 @@ const ejectCmd = program
               `Removed Build Dir:   ${path.relative(process.cwd(), ejectResult.removedBuildDir) || ejectResult.removedBuildDir}`,
             );
           }
+        } else if (ejectResult.mode === "companion") {
+          console.log(`Mode:                companion twin workspace`);
+          console.log(
+            `Target Project:      Unlocked & unshielded (${ejectResult.unlockedTargets ?? 0} targets restored to chmod 644)`,
+          );
         } else {
           console.log(
             `Unlocked Targets:    ${ejectResult.unlockedTargets ?? 0} file(s) restored to chmod 644`,
@@ -1584,7 +1596,8 @@ shieldCmd
 shieldCmd
   .argument("<action>", "Action to perform: apply | remove | status | lock | unlock | intercept")
   .argument("[dir]", "Target project directory", ".")
-  .action(async (action: string, dir: string) => {
+  .option("--twinless", "Configure Twinless On-the-Fly mode (zero .ail files on disk)")
+  .action(async (action: string, dir: string, opts: { twinless?: boolean }) => {
     try {
       const targetDir = path.resolve(process.cwd(), dir);
       if (!fs.existsSync(targetDir)) {
@@ -1600,7 +1613,10 @@ shieldCmd
           break;
         }
         case "apply": {
-          const res = await applyAiShield(targetDir, { lifecycleHooks: true });
+          const res = await applyAiShield(targetDir, {
+            lifecycleHooks: !opts.twinless,
+            twinless: Boolean(opts.twinless),
+          });
           console.log(`✔ AI Shield applied to ${path.relative(process.cwd(), targetDir) || "."}:`);
           console.log(`  - Created files:  ${res.createdFiles.length}`);
           for (const f of res.createdFiles) {
@@ -1700,12 +1716,14 @@ program
   .argument("[target]", "Path to source file or directory (omitted for workspace sourceDir)")
   .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
   .option("--no-types", "Exclude type annotations")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .option("--json", "Output structured JSON symbol hierarchy")
   .option("--stats", "Display token reduction savings metrics")
   .action(
     async (
       targetPath: string | undefined,
-      options: { depth?: number; types?: boolean; json?: boolean; stats?: boolean },
+      options: { depth?: number; types?: boolean; idioms?: boolean; json?: boolean; stats?: boolean },
     ) => {
       try {
         const resolved = resolvePathTargets(targetPath, { includeTargets: true });
@@ -1719,6 +1737,7 @@ program
         const outlineOpts: OutlineOptions = {
           depth: options.depth !== undefined ? Number(options.depth) : undefined,
           includeTypes: options.types !== false,
+          idioms: options.idioms,
           json: !!options.json,
           stats: !!options.stats,
           projectRoot: resolved.projectRoot,
@@ -1821,25 +1840,28 @@ async function readStdin(): Promise<string> {
   });
 }
 
-// Command: splice <path>
+// Command: splice [path]
 program
   .command("splice")
   .description(
     "AST surgical updates: replace, insert, or delete declarations with 90% token reduction",
   )
-  .argument("<path>", "Path to source file")
+  .argument("[path]", "Path to source file (optional when --batch is provided)")
   .option("-s, --symbol <symbol>", "Target symbol identifier")
-  .option("-c, --code <code>", "Replacement AIL declaration snippet")
+  .option("-c, --code <code>", "Replacement AIL or native declaration snippet")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
   .option("-d, --delete", "Delete the symbol")
   .option("--insert-after <symbol>", "Insert after specified symbol")
   .option("--insert-before <symbol>", "Insert before specified symbol")
+  .option("--batch <fileOrJson>", "Execute atomic multi-file batch splice from JSON file or JSON string")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .option("--dry-run", "Output result without modifying file")
   .option("--diff", "Display unified diff")
   .option("--compile", "Automatically recompile target after splice")
   .action(
     async (
-      targetPath: string,
+      targetPath: string | undefined,
       options: {
         symbol?: string;
         code?: string;
@@ -1847,12 +1869,36 @@ program
         delete?: boolean;
         insertAfter?: string;
         insertBefore?: string;
+        batch?: string;
+        idioms?: boolean;
         dryRun?: boolean;
         diff?: boolean;
         compile?: boolean;
       },
     ) => {
       try {
+        if (options.batch) {
+          const batchCandidatePath = path.resolve(process.cwd(), options.batch);
+          const rawJson =
+            fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
+              ? fs.readFileSync(batchCandidatePath, "utf-8")
+              : options.batch;
+          const items = JSON.parse(rawJson) as BatchSpliceItem[];
+          const batchRes = await spliceBatch(items, {
+            dryRun: options.dryRun,
+            compile: options.compile,
+          });
+          console.log(
+            `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+          );
+          return;
+        }
+
+        if (!targetPath) {
+          console.error("❌ Error: Must provide <path> or --batch <fileOrJson>.");
+          process.exit(1);
+        }
+
         let code = options.code;
         if (code === undefined && options.body === undefined && !options.delete) {
           const stdinContent = await readStdin();
@@ -1871,6 +1917,7 @@ program
           delete: options.delete,
           insertAfter: options.insertAfter,
           insertBefore: options.insertBefore,
+          idioms: options.idioms,
           dryRun: options.dryRun,
           diff: options.diff,
           compile: options.compile,
@@ -1906,7 +1953,7 @@ program
         }
       } catch (err: unknown) {
         console.error(
-          `❌ Error splicing ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error splicing ${targetPath ?? options.batch}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
@@ -1927,6 +1974,9 @@ program
     (val) => Number.parseInt(val, 10),
     1,
   )
+  .option("-s, --symbol <symbol>", "Extract symbol-scoped context (e.g., ClassName.methodName)")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .option("--no-callers", "Skip reverse caller lookup")
   .option("--outline-target", "Outline target instead of full source")
   .option("--max-tokens <number>", "Maximum token limit", (val) => Number.parseInt(val, 10))
@@ -1937,6 +1987,8 @@ program
       targetPath: string | undefined,
       options: {
         depth?: number;
+        symbol?: string;
+        idioms?: boolean;
         callers?: boolean;
         outlineTarget?: boolean;
         maxTokens?: number;
@@ -1948,6 +2000,8 @@ program
         const resolved = resolvePathTargets(targetPath, { includeTargets: true });
         const contextOpts: ContextOptions = {
           depth: options.depth !== undefined ? Number(options.depth) : 1,
+          symbol: options.symbol,
+          idioms: options.idioms,
           includeCallers: options.callers !== false,
           outlineTarget: !!options.outlineTarget,
           maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
@@ -2301,10 +2355,12 @@ program
     },
   );
 
-// Command: idioms [action] [dir]
+// Command: idioms [action] [target] [extra]
 program
-  .command("idioms [action] [dir]")
-  .description("Mine, apply, expand, or list project-specific token-saving idioms")
+  .command("idioms [action] [target] [extra]")
+  .description(
+    "Mine, apply, expand, list, toggle (on/off), read, or update project-specific token-saving idioms",
+  )
   .option(
     "--min-occurrences <n>",
     "Minimum occurrences required to synthesize an idiom (default: 3)",
@@ -2317,32 +2373,50 @@ program
     (val) => Number.parseInt(val, 10),
     10,
   )
+  .option("-c, --code <template>", "New AIL template for `ail idioms update <$name> -c <template>`")
   .option("--json", "Output results in JSON format")
-  .option("--dry-run", "Preview idiom synthesis without modifying files")
+  .option("--dry-run", "Preview idiom synthesis or update without modifying files")
   .action(
     async (
       actionArg: string | undefined,
-      dirArg: string | undefined,
+      targetArg: string | undefined,
+      extraArg: string | undefined,
       options: {
         minOccurrences?: number;
         minSavings?: number;
+        code?: string;
         json?: boolean;
         dryRun?: boolean;
       },
     ) => {
       try {
-        const validActions = new Set(["scan", "apply", "expand", "list"]);
+        const validActions = new Set([
+          "scan",
+          "apply",
+          "expand",
+          "list",
+          "on",
+          "off",
+          "read",
+          "update",
+        ]);
         let action = "scan";
         let targetDir = process.cwd();
+        let idiomNameArg = "";
 
         if (actionArg && validActions.has(actionArg.toLowerCase())) {
           action = actionArg.toLowerCase();
-          targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+          if (action === "read" || action === "update") {
+            idiomNameArg = targetArg ?? "";
+            targetDir = path.resolve(process.cwd(), extraArg ?? ".");
+          } else {
+            targetDir = path.resolve(process.cwd(), targetArg ?? ".");
+          }
         } else if (actionArg) {
           targetDir = path.resolve(process.cwd(), actionArg);
           action = "scan";
         } else {
-          targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+          targetDir = path.resolve(process.cwd(), targetArg ?? ".");
         }
 
         const minOccurrences = options.minOccurrences ?? 3;
@@ -2350,9 +2424,60 @@ program
         const isJson = Boolean(options.json);
         const dryRun = Boolean(options.dryRun);
 
+        if (action === "on" || action === "off") {
+          const enabled = action === "on";
+          const updatedCfg = setProjectIdiomsEnabled(targetDir, enabled);
+          if (isJson) {
+            console.log(JSON.stringify({ idiomsEnabled: updatedCfg.idiomsEnabled }, null, 2));
+            return;
+          }
+          console.log(
+            `✔ Project idioms ${enabled ? "ENABLED (ON)" : "DISABLED (OFF)"} in ${path.relative(process.cwd(), targetDir) || "."}`,
+          );
+          return;
+        }
+
+        if (action === "read") {
+          if (!idiomNameArg) {
+            console.error("❌ Error: Must specify idiom name: `ail idioms read <$name> [dir]`");
+            process.exit(1);
+          }
+          const res = readProjectIdiom(targetDir, idiomNameArg);
+          if (isJson) {
+            console.log(JSON.stringify(res, null, 2));
+          } else {
+            console.log(res.formattedReport);
+          }
+          return;
+        }
+
+        if (action === "update") {
+          if (!idiomNameArg) {
+            console.error(
+              "❌ Error: Must specify idiom name: `ail idioms update <$name> -c \"<template>\" [dir]`",
+            );
+            process.exit(1);
+          }
+          if (!options.code || !options.code.trim()) {
+            console.error("❌ Error: Must provide `-c, --code <template>` when updating an idiom.");
+            process.exit(1);
+          }
+          const res = await updateProjectIdiom(targetDir, idiomNameArg, options.code, {
+            dryRun,
+          });
+          if (isJson) {
+            console.log(JSON.stringify(res, null, 2));
+          } else {
+            console.log(
+              `✔ Updated idiom ${res.idiom.name}${dryRun ? " (Dry Run)" : ""}: ${res.updatedOccurrences} occurrence(s) across ${res.modifiedFiles.length} file(s)`,
+            );
+          }
+          return;
+        }
+
         if (action === "scan") {
-          const res = applyProjectIdiomsToDirectory(targetDir, {
-            dryRun: true,
+          const res = scanProjectIdioms(targetDir, {
+            dryRun,
             minOccurrences,
             minNetTokenSavings,
           });
@@ -2454,6 +2579,7 @@ program
           console.log(
             `\n=== Active Project Idioms: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
+          console.log(`Idioms Status: ${isProjectIdiomsEnabled(config) ? "ON (enabled)" : "OFF (disabled)"}`);
           const count = Object.keys(idioms).length;
           console.log(`Total Idioms: ${count}`);
           if (count === 0) {
@@ -2473,7 +2599,7 @@ program
           }
         } else {
           console.error(
-            `❌ Unknown idioms action: '${action}'. Supported actions: scan | apply | expand | list`,
+            `❌ Unknown idioms action: '${action}'. Supported actions: scan | apply | expand | list | on | off | read | update`,
           );
           process.exit(1);
         }
@@ -2621,6 +2747,67 @@ program
       process.exit(1);
     }
   });
+
+program.addHelpText(
+  "after",
+  `
+================================================================================
+AIL COMPLETE LIFECYCLE GUIDE: FROM PROJECT ADOPTION TO SUPPRESSION / EJECTION
+================================================================================
+
+Step 1: Create / Onboard a Project
+  • Side-by-Side Mode (In-place .ail siblings next to target files):
+      ail adopt .
+  • Isolated Mode (Source files in src/, native builds in .ail-build/):
+      ail adopt . --isolated
+  • Companion Twin Mode (Zero-touch external target, isolated companion workspace):
+      ail adopt ../my-app-ail --companion /path/to/my-app --idioms
+
+Step 2: Live Development & Bidirectional Sync
+  • Fast incremental watch daemon (< 5ms recompile on .ail change):
+      ail watch .
+  • Bidirectional live sync (recompiles .ail -> target AND syncs target edits -> .ail):
+      ail watch . --bidirectional
+  • Reverse-sync external manual edits from target files back to .ail:
+      ail sync .
+
+Step 3: AI Agent Surgical Workflow (Token-Optimized)
+  • Outline AST skeleton (85-90% token reduction for discovery):
+      ail outline src/
+  • 1-turn bounded context pack (slices dependencies into single turn):
+      ail context src/app.ts.ail -s myFunction
+  • Surgical in-place AST declaration mutation:
+      ail splice src/app.ts.ail -s oldFunc -c "fn oldFunc() = 42"
+  • Zero-token canonical AST code formatting:
+      ail fmt src/
+  • Fast typecheck verification and 1-shot autonomous repair:
+      ail verify src/app.ts.ail
+      ail fix src/app.ts.ail
+  • Symbol-mapped test runner with runtime stack-trace translation:
+      ail test
+  • Model Context Protocol & Language Server stdio daemons:
+      ail mcp
+      ail lsp
+
+Step 4: Domain Idiom Compression & Tokenomics
+  • Mine recurring AST idioms across codebase:
+      ail idioms scan src/
+  • Apply token-saving idioms ($idiom) with parameter extraction:
+      ail idioms apply src/
+  • Audit token savings & verify zero BPE token drift:
+      ail tokens . --check-drift
+      ail benchmark
+
+Step 5: Clean Project Suppression / Ejection
+  • Side-by-Side or Isolated Mode:
+      ail eject .                    # Unlocks targets, removes AI shields, preserves .ail
+      ail eject . --remove-ail       # Fully restores native project, deletes all .ail files
+  • Companion Twin Project:
+      ail eject <companionDir>       # Unlocks & unshields target, clears companion workspace
+      ail eject <companionDir> --remove-ail # Removes companion .ail, config, and cache
+      rm -rf <companionDir>          # Companion twin is safe to delete after eject!
+`,
+);
 
 export { program };
 

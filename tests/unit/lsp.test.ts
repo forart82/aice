@@ -198,4 +198,41 @@ describe("AIL LSP Server Handshake & Lifecycle", () => {
     expect(params.diagnostics.length).toBeGreaterThan(0);
     expect(params.diagnostics[0].code).toContain("AIL_E");
   });
+
+  it("handles textDocument/definition request", async () => {
+    const inStream = new PassThrough();
+    const outStream = new PassThrough();
+    const server = new AilLspServer(inStream, outStream);
+
+    server.analyzer.setDocument(
+      "file:///def.ail",
+      "module test\n\nfn myTargetFunc(a:int) -> int:\n  ret a\n\nfn caller():\n  myTargetFunc(1)"
+    );
+
+    const clientConn = new JsonRpcConnection(outStream, inStream);
+
+    const defPromise = new Promise<{ uri: string; range: { start: { line: number } } } | null>(
+      (resolve) => {
+        clientConn.on("message", (msg) => {
+          if (msg.id === 20) resolve(msg.result as never);
+        });
+      }
+    );
+
+    clientConn.sendMessage({
+      jsonrpc: "2.0",
+      id: 20,
+      method: "textDocument/definition",
+      params: {
+        textDocument: { uri: "file:///def.ail" },
+        position: { line: 6, character: 4 },
+      },
+    });
+
+    const result = await defPromise;
+    expect(result).toBeDefined();
+    expect(result?.uri).toBe("file:///def.ail");
+    expect(result?.range.start.line).toBe(2);
+  });
 });
+

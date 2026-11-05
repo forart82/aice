@@ -10,11 +10,18 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import { findProjectRoot, loadProjectConfig } from "../config/index.js";
+import {
+  findProjectRoot,
+  loadProjectConfig,
+  setProjectIdiomsEnabled,
+} from "../config/index.js";
 import {
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
   formatIdiomsMarkdownSection,
+  readProjectIdiom,
+  scanProjectIdioms,
+  updateProjectIdiom,
 } from "../idioms/index.js";
 import { runSelfHealingCampaignSync } from "../evolve/index.js";
 import { runAilTests } from "../runner/index.js";
@@ -56,6 +63,10 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
           type: "number",
           description: "Maximum token budget to bound the context pack",
         },
+        idioms: {
+          type: "boolean",
+          description: "Optional override to enable or disable project $idioms",
+        },
       },
       required: ["path"],
     },
@@ -63,13 +74,17 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "ail_outline",
     description:
-      "Generate structural skeleton outline of an .ail file or project directory achieving 85-90%+ token reduction.",
+      "Generate structural skeleton outline of an .ail or native file or project directory achieving 85-90%+ token reduction.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Path to .ail file or project directory",
+          description: "Path to .ail or native file or project directory",
+        },
+        idioms: {
+          type: "boolean",
+          description: "Optional override to enable or disable project $idioms",
         },
       },
       required: ["path"],
@@ -78,13 +93,13 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "ail_splice",
     description:
-      "Surgically replace or insert a named symbol (fn, type, class, method) in an .ail file and auto-compile target.",
+      "Surgically replace or insert a named symbol (fn, type, class, method) in a native or .ail file.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
-          description: "Path to target .ail file",
+          description: "Path to target native or .ail file",
         },
         symbolSelector: {
           type: "string",
@@ -92,7 +107,7 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
         },
         newAilCode: {
           type: "string",
-          description: "Replacement AIL code snippet",
+          description: "Replacement AIL or native code snippet",
         },
         delete: {
           type: "boolean",
@@ -104,7 +119,8 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
   },
   {
     name: "ail_idioms",
-    description: "Scan, list, apply, or expand token-saving $idioms in a project workspace.",
+    description:
+      "Scan, list, apply, expand, toggle (on/off), read, or update token-saving $idioms in a project workspace.",
     inputSchema: {
       type: "object",
       properties: {
@@ -114,8 +130,20 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
         },
         action: {
           type: "string",
-          enum: ["scan", "apply", "expand", "list"],
+          enum: ["scan", "apply", "expand", "list", "on", "off", "read", "update"],
           description: "Idiom action to perform (default: 'list')",
+        },
+        name: {
+          type: "string",
+          description: "Idiom name (e.g. '$arc') for 'read' or 'update' actions",
+        },
+        code: {
+          type: "string",
+          description: "New AIL template for 'update' action",
+        },
+        dryRun: {
+          type: "boolean",
+          description: "If true, preview update without modifying files",
         },
         minOccurrences: {
           type: "number",
@@ -335,7 +363,7 @@ export class AilMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "ail-mcp", version: "0.6.0" },
+          serverInfo: { name: "ail-mcp", version: "0.6.1" },
         };
       }
 
@@ -374,15 +402,16 @@ export class AilMcpServer {
       case "ail_context": {
         const targetPath = String(args.path ?? "");
         const fullPath = this.resolveSafePath(targetPath);
-        const result = await generateContext(fullPath, {
-          depth: typeof args.depth === "number" ? args.depth : 1,
-          maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
-        });
-
         const symbolFilter =
           typeof args.symbol === "string" && args.symbol.trim().length > 0
             ? args.symbol.trim()
             : undefined;
+        const result = await generateContext(fullPath, {
+          depth: typeof args.depth === "number" ? args.depth : 1,
+          maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+          symbol: symbolFilter,
+          idioms: typeof args.idioms === "boolean" ? args.idioms : undefined,
+        });
 
         let text = result.targetContent;
         let callers = result.callers;
@@ -418,7 +447,11 @@ export class AilMcpServer {
       case "ail_outline": {
         const targetPath = String(args.path ?? "");
         const fullPath = this.resolveSafePath(targetPath);
-        const result = await outlinePath(fullPath, { json: false, stats: true });
+        const result = await outlinePath(fullPath, {
+          json: false,
+          stats: true,
+          idioms: typeof args.idioms === "boolean" ? args.idioms : undefined,
+        });
         const outlineText =
           result instanceof Map
             ? Array.from(result.values())
@@ -471,6 +504,49 @@ export class AilMcpServer {
         const projectRoot = findProjectRoot(dir);
         const config = loadProjectConfig(projectRoot);
 
+        if (action === "on" || action === "off") {
+          const enabled = action === "on";
+          setProjectIdiomsEnabled(projectRoot, enabled);
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Project idioms ${enabled ? "ENABLED (ON)" : "DISABLED (OFF)"} in ${projectRoot}.`,
+              },
+            ],
+          };
+        }
+
+        if (action === "read") {
+          const idiomName = typeof args.name === "string" ? args.name : "";
+          if (!idiomName) {
+            throw new Error("Must provide 'name' argument for ail_idioms 'read' action");
+          }
+          const readRes = readProjectIdiom(projectRoot, idiomName);
+          return {
+            content: [{ type: "text", text: readRes.formattedReport }],
+          };
+        }
+
+        if (action === "update") {
+          const idiomName = typeof args.name === "string" ? args.name : "";
+          const code = typeof args.code === "string" ? args.code : "";
+          if (!idiomName || !code) {
+            throw new Error("Must provide 'name' and 'code' arguments for ail_idioms 'update' action");
+          }
+          const updateRes = await updateProjectIdiom(projectRoot, idiomName, code, {
+            dryRun: Boolean(args.dryRun),
+          });
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Updated idiom ${updateRes.idiom.name}: ${updateRes.updatedOccurrences} occurrence(s) across ${updateRes.modifiedFiles.length} file(s).`,
+              },
+            ],
+          };
+        }
+
         if (action === "list") {
           const idioms = config.idioms ?? {};
           const text =
@@ -479,15 +555,15 @@ export class AilMcpServer {
         }
 
         if (action === "scan") {
-          const applied = applyProjectIdiomsToDirectory(dir, {
-            dryRun: true,
+          const scanned = scanProjectIdioms(dir, {
+            dryRun: Boolean(args.dryRun),
             minOccurrences:
               typeof args.minOccurrences === "number" ? args.minOccurrences : 2,
             minNetTokenSavings:
               typeof args.minSavings === "number" ? args.minSavings : 10,
           });
           const text =
-            formatIdiomsMarkdownSection(applied.idioms) || "No candidate idioms discovered.";
+            formatIdiomsMarkdownSection(scanned.idioms) || "No candidate idioms discovered.";
           return { content: [{ type: "text", text }] };
         }
 
