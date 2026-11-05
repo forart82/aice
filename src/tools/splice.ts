@@ -89,6 +89,7 @@ export interface SpliceResult {
   newSnippet?: string;
   diff?: string;
   modifiedCode: string;
+  newAilSource: string;
   tokensSaved?: number;
 }
 
@@ -520,9 +521,37 @@ export function generateUnifiedDiff(
  */
 export function spliceSource(
   source: string,
-  options: SpliceOptions,
-  filePath = "source.ail",
+  optionsOrSymbol: SpliceOptions | string,
+  filePathOrCode: string = "source.ail",
+  deleteFlag?: boolean,
+  maybeFilePath?: string,
+  maybeIdioms?: Record<string, ProjectIdiomDefinition>,
+  extraOptions?: Partial<SpliceOptions> & { bodyOnly?: boolean },
 ): SpliceResult {
+  let options: SpliceOptions;
+  let filePath: string;
+  let idioms: Record<string, ProjectIdiomDefinition> | undefined = maybeIdioms;
+
+  if (typeof optionsOrSymbol === "string") {
+    const codeStr = filePathOrCode;
+    const isBodyOnly = Boolean(extraOptions?.bodyOnly);
+    options = {
+      ...extraOptions,
+      symbol: optionsOrSymbol || extraOptions?.symbol,
+      ...(isBodyOnly ? { body: codeStr } : { code: codeStr }),
+      delete: Boolean(deleteFlag ?? extraOptions?.delete),
+    };
+    filePath = maybeFilePath || "source.ail";
+  } else {
+    options = optionsOrSymbol;
+    filePath = filePathOrCode || "source.ail";
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  if (!filePath.endsWith(".ail") && KNOWN_TARGET_EXTENSIONS.has(ext)) {
+    return spliceNativeSource(source, options, filePath, idioms);
+  }
+
   const { ast } = parseWithTrivia(source, filePath);
 
   let modifiedCode = source;
@@ -769,6 +798,7 @@ export function spliceSource(
     newSnippet,
     diff,
     modifiedCode,
+    newAilSource: modifiedCode,
     tokensSaved,
   };
 }
@@ -785,6 +815,10 @@ interface NativeSpanInfo {
   isExported?: boolean;
   isStatic?: boolean;
   isAsync?: boolean;
+  accessor?: "get" | "set";
+  goReceiver?: string;
+  cppOutOfLine?: boolean;
+  isClassContainer?: boolean;
 }
 
 function getTsMemberName(member: ts.Node, sf: ts.SourceFile): string | undefined {
@@ -829,6 +863,8 @@ function extractTsModifiersMeta(
   isExported?: boolean;
   isStatic?: boolean;
   isAsync?: boolean;
+  accessor?: "get" | "set";
+  isClassContainer?: boolean;
 } {
   const start = postDecoratorStart ?? node.getStart(sf, false);
   const headerText = sf.text.slice(start, Math.min(node.getEnd(), start + 120));
@@ -840,7 +876,13 @@ function extractTsModifiersMeta(
   const isExported = /^export\b/.test(headerText);
   const isStatic = /\bstatic\b/.test(headerText);
   const isAsync = /\basync\b/.test(headerText);
-  return { visibility, isExported, isStatic, isAsync };
+  const accessor = ts.isGetAccessorDeclaration(node)
+    ? "get"
+    : ts.isSetAccessorDeclaration(node)
+      ? "set"
+      : undefined;
+  const isClassContainer = ts.isClassDeclaration(node);
+  return { visibility, isExported, isStatic, isAsync, accessor, isClassContainer };
 }
 
 function buildSpanInfoFromTsNode(
@@ -878,10 +920,28 @@ function buildSpanInfoFromTsNode(
   };
 }
 
+function selectBestTsMember(
+  matchingMembers: ts.ClassElement[],
+  preferAccessor?: "get" | "set",
+): ts.ClassElement {
+  if (preferAccessor === "get") {
+    const getter = matchingMembers.find((m) => ts.isGetAccessorDeclaration(m));
+    if (getter) return getter;
+  } else if (preferAccessor === "set") {
+    const setter = matchingMembers.find((m) => ts.isSetAccessorDeclaration(m));
+    if (setter) return setter;
+  }
+  return (
+    matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
+    matchingMembers[matchingMembers.length - 1]
+  );
+}
+
 function locateTsDeclarationSpan(
   nativeSource: string,
   symbolSelector: string,
   explicitClassName?: string,
+  preferAccessor?: "get" | "set",
 ): NativeSpanInfo | undefined {
   const sf = ts.createSourceFile(
     "file.tsx",
@@ -891,17 +951,23 @@ function locateTsDeclarationSpan(
     ts.ScriptKind.TSX,
   );
   const parts = symbolSelector.split(/\.|::/);
-  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
-  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  let className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  let memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  let inferredAccessor = preferAccessor;
+  if (memberName.startsWith("get:")) {
+    inferredAccessor = "get";
+    memberName = memberName.slice(4);
+  } else if (memberName.startsWith("set:")) {
+    inferredAccessor = "set";
+    memberName = memberName.slice(4);
+  }
 
   if (className) {
     for (const stmt of sf.statements) {
       if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
         const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
         if (matchingMembers.length > 0) {
-          const implMember =
-            matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
-            matchingMembers[matchingMembers.length - 1];
+          const implMember = selectBestTsMember(matchingMembers, inferredAccessor);
           return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, className);
         }
       }
@@ -942,9 +1008,7 @@ function locateTsDeclarationSpan(
       const parentName = stmt.name?.text;
       const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
       if (matchingMembers.length > 0) {
-        const implMember =
-          matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
-          matchingMembers[matchingMembers.length - 1];
+        const implMember = selectBestTsMember(matchingMembers, inferredAccessor);
         return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, parentName);
       }
     }
@@ -999,14 +1063,20 @@ function locatePythonDeclarationSpan(
     }
   }
 
-  const defRegex = new RegExp(`^([ \\t]*)(?:async\\s+)?def\\s+${memberName}\\s*\\(`);
+  const pyMemberPattern =
+    memberName === "constructor" || memberName === "__init__"
+      ? "(?:constructor|__init__)"
+      : memberName;
+  const defRegex = new RegExp(`^([ \\t]*)(async\\s+)?def\\s+${pyMemberPattern}\\s*\\(`);
   let targetLine = -1;
   let targetIndent = "";
+  let isAsync = false;
+  let isClassContainer = false;
+
   for (let i = searchStartLine; i < searchEndLine; i++) {
     const m = lines[i].match(defRegex);
     if (m) {
       if (!className && m[1].length > 0) {
-        // Also detect enclosing class if any
         for (let k = i - 1; k >= 0; k--) {
           const cm = lines[k].match(/^([ \t]*)class\s+([A-Za-z0-9_]+)\b/);
           if (cm && cm[1].length < m[1].length) {
@@ -1017,11 +1087,41 @@ function locatePythonDeclarationSpan(
       }
       targetLine = i;
       targetIndent = m[1];
+      isAsync = Boolean(m[2]);
       break;
     }
   }
 
+  if (targetLine < 0 && !className) {
+    const topClassRegex = new RegExp(`^([ \\t]*)class\\s+${memberName}\\b`);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(topClassRegex);
+      if (m) {
+        targetLine = i;
+        targetIndent = m[1];
+        isClassContainer = true;
+        break;
+      }
+    }
+  }
+
   if (targetLine < 0) return undefined;
+
+  let firstDecoratorLine = targetLine;
+  let isStatic = false;
+  for (let k = targetLine - 1; k >= searchStartLine; k--) {
+    const trimmed = lines[k].trim();
+    if (trimmed.startsWith("@")) {
+      firstDecoratorLine = k;
+      if (/^@staticmethod\b/.test(trimmed)) {
+        isStatic = true;
+      }
+    } else if (trimmed === "") {
+      continue;
+    } else {
+      break;
+    }
+  }
 
   let endLine = targetLine;
   const baseIndentLen = targetIndent.length;
@@ -1036,6 +1136,7 @@ function locatePythonDeclarationSpan(
   }
 
   const declStart = lineOffsets[targetLine];
+  const fullDeclStart = lineOffsets[firstDecoratorLine];
   const tokenStart = declStart + targetIndent.length;
   const endLineStr = lines[endLine];
   const cleanEndLen = endLineStr.endsWith("\r") ? endLineStr.length - 1 : endLineStr.length;
@@ -1043,12 +1144,355 @@ function locatePythonDeclarationSpan(
 
   return {
     declStart,
+    fullDeclStart,
     declEnd,
     tokenStart,
     declIndent: targetIndent,
     className: activeClassName,
     memberName,
+    isAsync,
+    isStatic,
+    isClassContainer,
   };
+}
+
+function findMatchingBraceEnd(source: string, openBracePos: number): number {
+  let depth = 0;
+  let i = openBracePos;
+  const len = source.length;
+
+  while (i < len) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    // Line comment
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < len && source[i] !== "\n") i++;
+      continue;
+    }
+    // Block comment
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < len && !(source[i] === "*" && source[i + 1] === "/")) i++;
+      i += 2;
+      continue;
+    }
+    // String or char literal
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      i++;
+      while (i < len && source[i] !== quote) {
+        if (source[i] === "\\" && quote !== "`") i += 2;
+        else i++;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === "{") {
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        return i + 1;
+      }
+    }
+    i++;
+  }
+  return len;
+}
+
+function normIdForSpan(s: string): string {
+  return s.replace(/_/g, "").toLowerCase();
+}
+
+function locateBraceLanguageDeclarationSpan(
+  nativeSource: string,
+  symbolSelector: string,
+  targetLang: TargetLanguage,
+  explicitClassName?: string,
+): NativeSpanInfo | undefined {
+  const parts = symbolSelector.split(/\.|::/);
+  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  const normMember = normIdForSpan(memberName);
+  const normClass = className ? normIdForSpan(className) : undefined;
+
+  const lines = nativeSource.split("\n");
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  const buildBraceSpanFromLine = (
+    lineIdx: number,
+    indent: string,
+    actualMemberName: string,
+    enclosingClass?: string,
+    extra?: Partial<NativeSpanInfo>,
+  ): NativeSpanInfo | undefined => {
+    let firstAttrLine = lineIdx;
+    for (let k = lineIdx - 1; k >= 0; k--) {
+      const t = lines[k].trim();
+      if (t.startsWith("#[") || (t.startsWith("[") && t.endsWith("]")) || t.startsWith("@")) {
+        firstAttrLine = k;
+      } else {
+        break;
+      }
+    }
+    const declStart = lineOffsets[lineIdx];
+    const fullDeclStart = lineOffsets[firstAttrLine];
+    const tokenStart = declStart + indent.length;
+
+    const openBraceIdx = nativeSource.indexOf("{", tokenStart);
+    if (openBraceIdx < 0) return undefined;
+    let declEnd = findMatchingBraceEnd(nativeSource, openBraceIdx);
+    if (extra?.isClassContainer && nativeSource[declEnd] === ";") {
+      declEnd++;
+    }
+
+    const headerSlice = nativeSource.slice(tokenStart, openBraceIdx);
+    let visibility: "public" | "private" | "protected" | undefined;
+    if (/\bpublic\b/.test(headerSlice)) visibility = "public";
+    else if (/\bprivate\b/.test(headerSlice)) visibility = "private";
+    else if (/\bprotected\b/.test(headerSlice)) visibility = "protected";
+
+    const isExported =
+      /\bpub\b/.test(headerSlice) ||
+      visibility === "public" ||
+      (targetLang === "go" && /^[A-Z]/.test(actualMemberName));
+    const isStatic = /\bstatic\b/.test(headerSlice);
+    const isAsync = /\b(?:async|suspend)\b/.test(headerSlice);
+
+    return {
+      declStart,
+      fullDeclStart,
+      declEnd,
+      tokenStart,
+      declIndent: indent,
+      className: enclosingClass,
+      memberName: actualMemberName,
+      visibility,
+      isExported,
+      isStatic,
+      isAsync,
+      ...extra,
+    };
+  };
+
+  // 1. Go receiver method or top-level func/struct
+  if (targetLang === "go") {
+    for (let i = 0; i < lines.length; i++) {
+      const recvMatch = lines[i].match(
+        /^([ \t]*)func\s*\(\s*([A-Za-z0-9_]+\s+\*?([A-Za-z0-9_]+))\s*\)\s*([A-Za-z0-9_]+)\s*\(/,
+      );
+      if (recvMatch) {
+        const [, indent, recvSpec, recvType, fnName] = recvMatch;
+        const classMatches = !normClass || normIdForSpan(recvType) === normClass;
+        const nameMatches = fnName === memberName || normIdForSpan(fnName) === normMember;
+        if (classMatches && nameMatches) {
+          return buildBraceSpanFromLine(i, indent, fnName, recvType, {
+            goReceiver: `(${recvSpec})`,
+          });
+        }
+      }
+      if (!className) {
+        const fnMatch = lines[i].match(/^([ \t]*)func\s+([A-Za-z0-9_]+)\s*(?:\[[^\]]+\])?\s*\(/);
+        if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
+          return buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], undefined);
+        }
+        const structMatch = lines[i].match(
+          /^([ \t]*)type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)\b/,
+        );
+        if (
+          structMatch &&
+          (structMatch[2] === memberName || normIdForSpan(structMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, structMatch[1], structMatch[2], undefined, {
+            isClassContainer: true,
+          });
+        }
+      }
+    }
+    return undefined;
+  }
+
+  // 2. C++ out-of-line method `RetType ClassName::methodName(...)`
+  if (targetLang === "cpp") {
+    for (let i = 0; i < lines.length; i++) {
+      const oolMatch = lines[i].match(
+        /^([ \t]*)(?:[A-Za-z0-9_:<>*&]+\s+)+([A-Za-z0-9_]+)\s*::\s*([A-Za-z0-9_~]+)\s*\(/,
+      );
+      if (oolMatch) {
+        const [, indent, cls, fnName] = oolMatch;
+        const classMatches = !normClass || normIdForSpan(cls) === normClass;
+        const nameMatches = fnName === memberName || normIdForSpan(fnName) === normMember;
+        if (classMatches && nameMatches && lines[i].includes("{")) {
+          return buildBraceSpanFromLine(i, indent, fnName, cls, { cppOutOfLine: true });
+        }
+      }
+    }
+  }
+
+  // 3. Determine class/impl search windows for Rust, C++, C#, Kotlin, PHP
+  const containerWindows: Array<{ start: number; end: number; resolvedName: string }> = [];
+  let resolvedClassName = className;
+
+  if (className) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const isRustImpl =
+        targetLang === "rust" &&
+        new RegExp(`^\\s*impl(?:\\s*<[^>]*>)?\\s+(?:[A-Za-z0-9_:]+\\s+for\\s+)?([A-Za-z0-9_]+)\\b`).exec(
+          line,
+        );
+      const isClassLine = new RegExp(
+        `^\\s*(?:pub\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|final\\s+|abstract\\s+|open\\s+|data\\s+|sealed\\s+)*(?:class|struct)\\s+([A-Za-z0-9_]+)\\b`,
+      ).exec(line);
+
+      const m = isRustImpl || isClassLine;
+      if (m && (m[1] === className || normIdForSpan(m[1]) === normClass)) {
+        const openBrace = nativeSource.indexOf("{", lineOffsets[i]);
+        if (openBrace >= 0) {
+          resolvedClassName = m[1];
+          containerWindows.push({
+            start: openBrace + 1,
+            end: findMatchingBraceEnd(nativeSource, openBrace),
+            resolvedName: m[1],
+          });
+        }
+      }
+    }
+    if (containerWindows.length === 0) return undefined;
+  }
+
+  // 4. Scan lines within matching container windows (or full file when top-level)
+  for (let i = 0; i < lines.length; i++) {
+    const lineOff = lineOffsets[i];
+    if (
+      className &&
+      !containerWindows.some((w) => lineOff >= w.start && lineOff < w.end)
+    ) {
+      continue;
+    }
+    const line = lines[i];
+
+    if (targetLang === "rust") {
+      const fnMatch = line.match(
+        /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?fn\s+([A-Za-z0-9_]+)\b/,
+      );
+      if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
+        return buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], resolvedClassName);
+      }
+      if (!className) {
+        const structMatch = line.match(
+          /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|impl)\s+([A-Za-z0-9_]+)\b/,
+        );
+        if (
+          structMatch &&
+          (structMatch[2] === memberName || normIdForSpan(structMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, structMatch[1], structMatch[2], undefined, {
+            isClassContainer: true,
+          });
+        }
+      }
+    } else if (targetLang === "kotlin") {
+      const funMatch = line.match(
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?([A-Za-z0-9_]+)\s*\(/,
+      );
+      if (funMatch && (funMatch[2] === memberName || normIdForSpan(funMatch[2]) === normMember)) {
+        return buildBraceSpanFromLine(i, funMatch[1], funMatch[2], resolvedClassName);
+      }
+    } else if (targetLang === "php") {
+      const phpMatch = line.match(
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|static\s+|final\s+|abstract\s+)*function\s+&?([A-Za-z0-9_]+)\s*\(/,
+      );
+      if (phpMatch && (phpMatch[2] === memberName || normIdForSpan(phpMatch[2]) === normMember)) {
+        return buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName);
+      }
+    } else if (targetLang === "csharp" || targetLang === "cpp") {
+      const trimmed = line.trim();
+      if (
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("if ") ||
+        trimmed.startsWith("if(") ||
+        trimmed.startsWith("for ") ||
+        trimmed.startsWith("for(") ||
+        trimmed.startsWith("while ") ||
+        trimmed.startsWith("while(") ||
+        trimmed.startsWith("switch ") ||
+        trimmed.startsWith("switch(") ||
+        trimmed.startsWith("return ")
+      ) {
+        continue;
+      }
+      const cMethodMatch = line.match(
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+)*(?:[A-Za-z0-9_:<>*&\[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\(/,
+      );
+      if (
+        cMethodMatch &&
+        (cMethodMatch[2] === memberName || normIdForSpan(cMethodMatch[2]) === normMember)
+      ) {
+        return buildBraceSpanFromLine(i, cMethodMatch[1], cMethodMatch[2], resolvedClassName);
+      }
+    }
+
+    if (!className) {
+      const clsMatch = line.match(
+        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/,
+      );
+      if (clsMatch && (clsMatch[2] === memberName || normIdForSpan(clsMatch[2]) === normMember)) {
+        return buildBraceSpanFromLine(i, clsMatch[1], clsMatch[2], undefined, {
+          isClassContainer: true,
+        });
+      }
+    }
+  }
+
+  // 5. Fallback: if !className, try finding enclosing class name for a unique method match
+  if (!className) {
+    for (let i = 0; i < lines.length; i++) {
+      const clsMatch = lines[i].match(
+        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_]+)\b/,
+      );
+      if (clsMatch) {
+        const candidateCls = clsMatch[1];
+        const found = locateBraceLanguageDeclarationSpan(
+          nativeSource,
+          `${candidateCls}.${memberName}`,
+          targetLang,
+          candidateCls,
+        );
+        if (found) return found;
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function locateNativeDeclarationSpan(
+  nativeSource: string,
+  symbolSelector: string,
+  targetLang: TargetLanguage,
+  explicitClassName?: string,
+  preferAccessor?: "get" | "set",
+): NativeSpanInfo | undefined {
+  if (targetLang === "python") {
+    return locatePythonDeclarationSpan(nativeSource, symbolSelector, explicitClassName);
+  }
+  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+    return locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor);
+  }
+  return (
+    locateBraceLanguageDeclarationSpan(nativeSource, symbolSelector, targetLang, explicitClassName) ??
+    locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor)
+  );
 }
 
 function normalizeSelfAndThisInExpr(expr: Expr, useThis: boolean): void {
@@ -1270,6 +1714,88 @@ function unwrapRedundantTsParens(tsSnippet: string): string {
   return current;
 }
 
+function stripOneIndentLevel(lines: string[], spaces = 2): string[] {
+  const pad = " ".repeat(spaces);
+  return lines.map((l) => {
+    if (l.startsWith(pad)) return l.slice(spaces);
+    if (l.startsWith("\t")) return l.slice(1);
+    if (spaces === 4 && l.startsWith("  ")) return l.slice(2);
+    return l;
+  });
+}
+
+function stripTopLevelLanguagePreamble(emitted: string, targetLang: TargetLanguage): string {
+  const lines = emitted.trim().split("\n");
+  if (targetLang === "python") {
+    const idx = lines.findIndex((l) => /^(?:async\s+)?(?:def|class)\s+/.test(l.trim()));
+    const relevant = idx >= 0 ? lines.slice(idx) : lines;
+    return relevant
+      .map((l) =>
+        l
+          .replace(/^(\s*(?:if|elif|while)\s+)\((.+)\):$/, "$1$2:")
+          .replace(/^(\s*[A-Za-z0-9_.]+\s*=\s*)\((.+)\)$/, "$1$2")
+          .replace(/^(\s*return\s+)\((.+)\)$/, "$1$2"),
+      )
+      .join("\n")
+      .trimEnd();
+  }
+  if (targetLang === "go") {
+    const idx = lines.findIndex((l) => /^(?:func|type|var|const)\s+/.test(l.trim()));
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  if (targetLang === "rust") {
+    const idx = lines.findIndex((l) =>
+      /^(?:#\[|pub\s+|async\s+|fn\s+|struct\s+|enum\s+|impl\s+|const\s+|type\s+)/.test(l.trim()),
+    );
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  if (targetLang === "cpp") {
+    const idx = lines.findIndex(
+      (l) =>
+        l.trim().length > 0 &&
+        !l.trim().startsWith("#include") &&
+        !l.trim().startsWith("using namespace"),
+    );
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  if (targetLang === "csharp") {
+    const staticModIdx = lines.findIndex((l) => /^public static class\s+/.test(l.trim()));
+    if (staticModIdx >= 0) {
+      let bodyStart = staticModIdx + 1;
+      if (lines[bodyStart]?.trim() === "{") bodyStart++;
+      const inner = stripOneIndentLevel(lines.slice(bodyStart, lines.length - 1), 4);
+      return inner.join("\n").trimEnd();
+    }
+    const idx = lines.findIndex(
+      (l) => l.trim().length > 0 && !l.trim().startsWith("using "),
+    );
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  if (targetLang === "kotlin") {
+    const idx = lines.findIndex(
+      (l) =>
+        l.trim().length > 0 &&
+        !l.trim().startsWith("package ") &&
+        !l.trim().startsWith("import "),
+    );
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  if (targetLang === "php") {
+    const idx = lines.findIndex(
+      (l) =>
+        l.trim().length > 0 &&
+        !l.trim().startsWith("<?php") &&
+        !l.trim().startsWith("declare(") &&
+        !l.trim().startsWith("namespace ") &&
+        !l.trim().startsWith("use "),
+    );
+    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+  }
+  return targetLang === "typescript" || targetLang === "javascript"
+    ? unwrapRedundantTsParens(emitted.trim())
+    : emitted.trim();
+}
+
 function emitExpandedDeclForTarget(
   expandedDecl: FunctionDecl | MethodDecl,
   targetLang: TargetLanguage,
@@ -1280,6 +1806,10 @@ function emitExpandedDeclForTarget(
     isExported?: boolean;
     isStatic?: boolean;
     isAsync?: boolean;
+    accessor?: "get" | "set";
+    memberName?: string;
+    goReceiver?: string;
+    cppOutOfLine?: boolean;
   },
 ): string {
   const cloned = structuredClone(expandedDecl);
@@ -1290,13 +1820,13 @@ function emitExpandedDeclForTarget(
   if (className || cloned.kind === "MethodDecl") {
     const methodNode: MethodDecl = {
       kind: "MethodDecl",
-      name: cloned.name,
+      name: origMeta?.memberName ?? cloned.name,
       typeParams: cloned.typeParams ?? [],
       params: cloned.params.filter((p) => p.name !== "self" && p.name !== "this"),
       returnType: cloned.returnType,
       isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
       isStatic: Boolean(origMeta?.isStatic ?? ("isStatic" in cloned ? cloned.isStatic : false)),
-      accessor: "accessor" in cloned ? cloned.accessor : undefined,
+      accessor: origMeta?.accessor ?? ("accessor" in cloned ? cloned.accessor : undefined),
       isExpressionBodied: cloned.isExpressionBodied,
       body: cloned.body,
       span: dummySpan,
@@ -1335,15 +1865,99 @@ function emitExpandedDeclForTarget(
             .replace(/^(\s*[A-Za-z0-9_.]+\s*=\s*)\((.+)\)$/, "$1$2")
             .replace(/^(\s*return\s+)\((.+)\)$/, "$1$2"),
         );
+      if (origMeta?.isStatic && innerLines[0]?.trim() === "@staticmethod") {
+        innerLines.shift();
+      }
       return innerLines.join("\n").trimEnd();
     }
 
-    // TypeScript / JavaScript / C-like class wrapper: strip `class _TmpClass {` and closing `}`
+    if (targetLang === "go") {
+      let recvFuncIdx = -1;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (/^func\s+\(/.test(lines[i].trim())) {
+          recvFuncIdx = i;
+          break;
+        }
+      }
+      if (recvFuncIdx >= 0) {
+        const goLines = lines.slice(recvFuncIdx);
+        if (origMeta?.goReceiver) {
+          const targetMethodName = origMeta.memberName ?? methodNode.name;
+          goLines[0] = goLines[0].replace(
+            /^func\s+\([^)]+\)\s+[A-Za-z0-9_]+\s*\(/,
+            `func ${origMeta.goReceiver} ${targetMethodName}(`,
+          );
+        }
+        return goLines.join("\n").trimEnd();
+      }
+    }
+
+    if (targetLang === "rust") {
+      const implIdx = lines.findIndex((l) => /^impl\b/.test(l.trim()));
+      if (implIdx >= 0) {
+        const inner = stripOneIndentLevel(lines.slice(implIdx + 1, lines.length - 1), 4);
+        return inner.join("\n").trimEnd();
+      }
+    }
+
+    if (targetLang === "cpp") {
+      const clsIdx = lines.findIndex((l) => /^class\s+/.test(l.trim()));
+      if (clsIdx >= 0) {
+        let startIdx = clsIdx + 1;
+        if (lines[startIdx]?.trim() === "public:") startIdx++;
+        let endIdx = lines.length - 1;
+        while (endIdx > startIdx && /^};?\s*$/.test(lines[endIdx].trim())) {
+          endIdx--;
+        }
+        const inner = stripOneIndentLevel(lines.slice(startIdx, endIdx + 1), 2);
+        if (origMeta?.cppOutOfLine && className && inner.length > 0) {
+          inner[0] = inner[0].replace(
+            new RegExp(`\\b(${methodNode.name})\\s*\\(`),
+            `${className}::$1(`,
+          );
+        }
+        return inner.join("\n").trimEnd();
+      }
+    }
+
+    if (targetLang === "csharp") {
+      const clsIdx = lines.findIndex((l) => /^(?:public\s+)?class\s+/.test(l.trim()));
+      if (clsIdx >= 0) {
+        let startIdx = clsIdx + 1;
+        if (lines[startIdx]?.trim() === "{") startIdx++;
+        const inner = stripOneIndentLevel(lines.slice(startIdx, lines.length - 1), 4);
+        if (inner.length > 0 && origMeta?.visibility) {
+          inner[0] = inner[0].replace(/^(public|private|protected)\b/, origMeta.visibility);
+        }
+        return inner.join("\n").trimEnd();
+      }
+    }
+
+    if (targetLang === "kotlin" || targetLang === "php") {
+      const clsIdx = lines.findIndex((l) => /^(?:data\s+)?(?:class|interface)\s+/.test(l.trim()));
+      if (clsIdx >= 0) {
+        let endIdx = lines.length - 1;
+        while (endIdx > clsIdx && lines[endIdx].trim() === "") endIdx--;
+        if (lines[endIdx]?.trim() === "}") endIdx--;
+        const inner = stripOneIndentLevel(lines.slice(clsIdx + 1, endIdx + 1), 4);
+        if (inner.length > 0 && origMeta?.visibility) {
+          const firstTrimmed = inner[0].trimStart();
+          if (/^(?:public|private|protected)\s+/.test(firstTrimmed)) {
+            inner[0] = inner[0].replace(/^(?:public|private|protected)\b/, origMeta.visibility);
+          } else if (targetLang === "kotlin" && origMeta.visibility !== "public") {
+            inner[0] = `${origMeta.visibility} ${firstTrimmed}`;
+          }
+        }
+        return inner.join("\n").trimEnd();
+      }
+    }
+
+    // TypeScript / JavaScript class wrapper: strip `class _TmpClass {` and closing `}`
     const innerLines = lines
       .slice(1, lines.length - 1)
       .map((l) => (l.startsWith("  ") ? l.slice(2) : l));
 
-    if (innerLines.length > 0 && origMeta?.visibility && (targetLang === "typescript" || targetLang === "csharp")) {
+    if (innerLines.length > 0 && origMeta?.visibility && (targetLang === "typescript" || targetLang === "javascript")) {
       const firstTrimmed = innerLines[0].trimStart();
       if (
         !firstTrimmed.startsWith("public ") &&
@@ -1362,7 +1976,7 @@ function emitExpandedDeclForTarget(
 
   const fnNode: FunctionDecl = {
     kind: "FunctionDecl",
-    name: cloned.name,
+    name: origMeta?.memberName ?? cloned.name,
     isExported: origMeta?.isExported ?? ("isExported" in cloned ? cloned.isExported : false),
     isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
     typeParams: cloned.typeParams ?? [],
@@ -1381,20 +1995,10 @@ function emitExpandedDeclForTarget(
   };
 
   const emittedFn = emitTarget(tempMod, targetLang, { watermark: false }).trim();
-  if (targetLang === "python") {
-    const fnLines = emittedFn.split("\n");
-    const defIdx = fnLines.findIndex((l) => /^(?:async\s+)?def\s+/.test(l.trim()));
-    const relevantLines = (defIdx >= 0 ? fnLines.slice(defIdx) : fnLines).map((l) =>
-      l
-        .replace(/^(\s*(?:if|elif|while)\s+)\((.+)\):$/, "$1$2:")
-        .replace(/^(\s*[A-Za-z0-9_.]+\s*=\s*)\((.+)\)$/, "$1$2")
-        .replace(/^(\s*return\s+)\((.+)\)$/, "$1$2"),
-    );
-    return relevantLines.join("\n").trimEnd();
-  }
+  const strippedFn = stripTopLevelLanguagePreamble(emittedFn, targetLang);
   return targetLang === "typescript" || targetLang === "javascript"
-    ? unwrapRedundantTsParens(emittedFn)
-    : emittedFn;
+    ? unwrapRedundantTsParens(strippedFn)
+    : strippedFn;
 }
 
 /**
@@ -1409,10 +2013,13 @@ export function spliceNativeSymbolFromExpandedAst(
   targetLang: TargetLanguage,
   explicitClassName?: string,
 ): string {
-  const spanInfo =
-    targetLang === "python"
-      ? locatePythonDeclarationSpan(nativeSource, symbolSelector, explicitClassName)
-      : locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName);
+  const spanInfo = locateNativeDeclarationSpan(
+    nativeSource,
+    symbolSelector,
+    targetLang,
+    explicitClassName,
+    "accessor" in expandedDecl ? expandedDecl.accessor : undefined,
+  );
 
   if (!spanInfo) {
     throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
@@ -1428,6 +2035,10 @@ export function spliceNativeSymbolFromExpandedAst(
       isExported: spanInfo.isExported,
       isStatic: spanInfo.isStatic,
       isAsync: spanInfo.isAsync,
+      accessor: spanInfo.accessor,
+      memberName: spanInfo.memberName,
+      goReceiver: spanInfo.goReceiver,
+      cppOutOfLine: spanInfo.cppOutOfLine,
     },
   );
 
@@ -1435,38 +2046,111 @@ export function spliceNativeSymbolFromExpandedAst(
   return `${nativeSource.slice(0, spanInfo.declStart)}${indented}${nativeSource.slice(spanInfo.declEnd)}`;
 }
 
-function isPureNativeTsSnippetWithoutIdioms(
+function isPureNativeSnippetWithoutIdioms(
   snippet: string,
+  targetLang: TargetLanguage,
   className?: string,
 ): boolean {
   const trimmed = snippet.trim();
-  if (trimmed.includes("$") || trimmed.includes(":=") || /\bret\b/.test(trimmed)) {
+  if (/\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed) || /\bret\b/.test(trimmed)) {
     return false;
   }
-  if (/^(?:pub\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(trimmed)) {
+  if (targetLang !== "go" && (trimmed.includes(":=") || trimmed.includes("::="))) {
     return false;
   }
-  if (!trimmed.includes("{") || !trimmed.endsWith("}")) {
-    return false;
+
+  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+    if (
+      /^(?:pub\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(trimmed) ||
+      /^(?:pub\s+)?(?:rec|enum|type|class)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*:/.test(trimmed)
+    ) {
+      return false;
+    }
+    const isTopLevelConstruct =
+      /^(?:export\s+)?(?:interface|type|enum|class|function|const|let|var)\b/.test(trimmed);
+    if (!isTopLevelConstruct && !trimmed.includes("{") && !trimmed.includes("=>") && !trimmed.endsWith(";")) {
+      return false;
+    }
+    const wrapped =
+      className && !isTopLevelConstruct ? `class ${className} {\n${trimmed}\n}` : trimmed;
+    const sf = ts.createSourceFile(
+      "check.tsx",
+      wrapped,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    const diags = (sf as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics;
+    return !diags || diags.length === 0;
   }
-  const wrapped = className ? `class ${className} {\n${trimmed}\n}` : trimmed;
-  const sf = ts.createSourceFile(
-    "check.ts",
-    wrapped,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
-  );
-  const diags = (sf as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics;
-  return !diags || diags.length === 0;
+
+  if (targetLang === "go") {
+    return /^func\b/.test(trimmed) && trimmed.endsWith("}");
+  }
+  if (targetLang === "rust") {
+    return (
+      /^(?:#\[[^\]]+\]\s*)*(?:pub\s+)?(?:async\s+)?fn\b/.test(trimmed) &&
+      trimmed.includes("{") &&
+      trimmed.endsWith("}") &&
+      !/:\s*\n/.test(trimmed)
+    );
+  }
+  if (targetLang === "kotlin") {
+    return (
+      /^(?:@[A-Za-z0-9_]+(?:\([^)]*\))?\s*)*(?:public\s+|private\s+|protected\s+|override\s+|suspend\s+|inline\s+)*fun\b/.test(
+        trimmed,
+      ) &&
+      trimmed.includes("{") &&
+      trimmed.endsWith("}")
+    );
+  }
+  if (targetLang === "php") {
+    return (
+      /^(?:public\s+|private\s+|protected\s+|static\s+)*function\b/.test(trimmed) &&
+      trimmed.includes("{") &&
+      trimmed.endsWith("}")
+    );
+  }
+  if (targetLang === "csharp" || targetLang === "cpp") {
+    return (
+      !/^(?:pub\s+|async\s+|static\s+)*fn\b/.test(trimmed) &&
+      trimmed.includes("(") &&
+      trimmed.includes("{") &&
+      (trimmed.endsWith("}") || trimmed.endsWith("};"))
+    );
+  }
+  if (targetLang === "python") {
+    return (
+      /^(?:@[A-Za-z0-9_.]+\s*\n\s*)*(?:async\s+)?def\s+[A-Za-z0-9_]+\s*\(/.test(trimmed) &&
+      !trimmed.includes(":=") &&
+      !/\bret\b/.test(trimmed)
+    );
+  }
+
+  return false;
 }
 
 function normalizeFrankensteinSnippetToAil(
   snippet: string,
-): { normalizedAil: string; explicitVisibility?: "public" | "private" | "protected"; isExported?: boolean } {
+): {
+  normalizedAil: string;
+  explicitVisibility?: "public" | "private" | "protected";
+  isExported?: boolean;
+  explicitAccessor?: "get" | "set";
+  leadingDecorators: string[];
+} {
   const lines = snippet.trim().split("\n");
+  const leadingDecorators: string[] = [];
+  while (
+    lines.length > 1 &&
+    /^\s*(?:@[A-Za-z_][A-Za-z0-9_.]*(?:\([^)]*\))?|#\[[^\]]+\])\s*$/.test(lines[0])
+  ) {
+    leadingDecorators.push(lines.shift()!.trim());
+  }
+
   let explicitVisibility: "public" | "private" | "protected" | undefined;
   let isExported: boolean | undefined;
+  let explicitAccessor: "get" | "set" | undefined;
 
   if (lines.length > 0) {
     let header = lines[0];
@@ -1483,11 +2167,26 @@ function normalizeFrankensteinSnippetToAil(
     } else if (/^\s*(?:async\s+)?function\s+/.test(header)) {
       header = header.replace(/^(\s*)(async\s+)?function\s+/, "$1$2fn ");
       header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
+    } else if (/^\s*(?:suspend\s+)?fun\s+/.test(header)) {
+      header = header.replace(/^(\s*)(?:suspend\s+)?fun\s+/, "$1fn ");
+      header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
     }
 
-    // Also normalize TS-style header without `fn`: e.g. `pub computeMetric(x: number): number {`
+    const accMatch = header.match(/^\s*(?:pub\s+)?(?:static\s+)?(get|set)\s+(?:fn\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/);
+    if (accMatch) {
+      explicitAccessor = accMatch[1] as "get" | "set";
+      header = header.replace(
+        /^(\s*(?:pub\s+)?(?:static\s+)?)(?:get|set)\s+(?:fn\s+)?/,
+        "$1fn ",
+      );
+      header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
+    }
+
+    // Also normalize TS-style header without `fn`: e.g. `pub computeMetric(x: number): number {` or `constructor(...)`
     if (
-      !/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?fn\b/.test(header) &&
+      !/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?(?:fn|class|type|rec|enum|const|val|mut|interface)\b/.test(
+        header,
+      ) &&
       /^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(header)
     ) {
       header = header.replace(
@@ -1509,6 +2208,8 @@ function normalizeFrankensteinSnippetToAil(
     normalizedAil: normalizedLines.join("\n"),
     explicitVisibility,
     isExported,
+    explicitAccessor,
+    leadingDecorators,
   };
 }
 
@@ -1558,6 +2259,60 @@ function restorePythonIdiomPlaceholders(ailSource: string): string {
   return ailSource.replace(/__ail_idiom__([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
 }
 
+function tryEmitNonCallableAilSnippet(
+  rawSnippet: string,
+  filePath: string,
+  targetLang: TargetLanguage,
+  className?: string,
+  idioms?: Record<string, ProjectIdiomDefinition>,
+  isClassContainerTarget?: boolean,
+): string | undefined {
+  const trimmed = rawSnippet.trim();
+  const isNonCallableAil =
+    /^(?:pub\s+)?(?:type|rec|enum|interface|class|const|val|mut)\b/.test(trimmed);
+  if (!isNonCallableAil) return undefined;
+
+  let normalizedNonCallable = trimmed;
+  const braceTypeMatch = trimmed.match(
+    /^((?:pub\s+)?)(?:type|rec|interface)\s+([A-Za-z_$][A-Za-z0-9_$]*(?:\s*\[[^\]]+\])?)\s*(?:=\s*)?\{([\s\S]*)\}\s*;?$/,
+  );
+  if (braceTypeMatch && !braceTypeMatch[3].includes("|")) {
+    const [, pubPrefix, typeName, rawFields] = braceTypeMatch;
+    const fieldLines = rawFields
+      .split("\n")
+      .map((l) => l.trim().replace(/[,;]\s*$/, ""))
+      .filter((l) => l.length > 0)
+      .map((l) => `  ${l}`);
+    normalizedNonCallable = `${pubPrefix}type ${typeName}:\n${fieldLines.join("\n")}`;
+  }
+
+  try {
+    const mod = parse(normalizedNonCallable, filePath);
+    const expanded =
+      idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+    for (const item of expanded.items) {
+      if (
+        item.kind === "TypeDecl" ||
+        item.kind === "ConstDecl" ||
+        item.kind === "VarDecl" ||
+        (item.kind === "ClassDecl" && (!className || isClassContainerTarget))
+      ) {
+        const singleMod: Module = {
+          kind: "Module",
+          path: filePath,
+          items: [item],
+          span: mod.span,
+        };
+        const emitted = emitTarget(singleMod, targetLang, { watermark: false }).trim();
+        return stripTopLevelLanguagePreamble(emitted, targetLang);
+      }
+    }
+  } catch {
+    // fall through
+  }
+  return undefined;
+}
+
 function parseSnippetToExpandedDecl(
   rawSnippet: string,
   filePath: string,
@@ -1566,8 +2321,14 @@ function parseSnippetToExpandedDecl(
   idioms?: Record<string, ProjectIdiomDefinition>,
   originalSnippet?: string,
   isBodyOnly?: boolean,
-): { decl: FunctionDecl | MethodDecl; explicitVisibility?: "public" | "private" | "protected"; isExported?: boolean } {
-  const { normalizedAil, explicitVisibility, isExported } =
+): {
+  decl: FunctionDecl | MethodDecl;
+  explicitVisibility?: "public" | "private" | "protected";
+  isExported?: boolean;
+  explicitAccessor?: "get" | "set";
+  leadingDecorators: string[];
+} {
+  const { normalizedAil, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
     normalizeFrankensteinSnippetToAil(rawSnippet);
 
   let parsedMod: Module | undefined;
@@ -1611,12 +2372,14 @@ function parseSnippetToExpandedDecl(
     } catch (bodyErr) {
       lastErr = lastErr ?? bodyErr;
       try {
-        const nativeBody = convertFrankensteinToNativeForDecompile(rawSnippet, targetLang, true);
+        const decompLang =
+          targetLang === "python" ? "python" : "typescript";
+        const nativeBody = convertFrankensteinToNativeForDecompile(rawSnippet, decompLang, true);
         const wrappedNativeBody =
-          targetLang === "python"
+          decompLang === "python"
             ? `def __body_holder__():\n${indentCode(nativeBody, "    ")}\n`
             : `function __body_holder__() {\n${indentCode(nativeBody, "  ")}\n}\n`;
-        const decompBody = decompile(wrappedNativeBody, targetLang, { filePath });
+        const decompBody = decompile(wrappedNativeBody, decompLang, { filePath });
         const restoredAil = restorePythonIdiomPlaceholders(decompBody.ail);
         const bodyMod = parse(restoredAil, filePath);
         const expandedBodyMod =
@@ -1633,10 +2396,25 @@ function parseSnippetToExpandedDecl(
 
     if (holderFn) {
       try {
-        const wrappedOrig =
-          className && (targetLang === "typescript" || targetLang === "javascript")
-            ? `class ${className} {\n${originalSnippet}\n}`
-            : originalSnippet;
+        let wrappedOrig = originalSnippet;
+        if (className) {
+          if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+            wrappedOrig = `class ${className} {\n${originalSnippet}\n}`;
+          } else if (targetLang === "rust") {
+            wrappedOrig = `struct ${className} {}\nimpl ${className} {\n${originalSnippet}\n}`;
+          } else if (targetLang === "go") {
+            wrappedOrig = `package main\ntype ${className} struct {}\n${originalSnippet}`;
+          } else if (targetLang === "csharp" || targetLang === "kotlin" || targetLang === "cpp") {
+            wrappedOrig = `class ${className} {\n${originalSnippet}\n}`;
+          } else if (targetLang === "php") {
+            wrappedOrig = `<?php\nclass ${className} {\n${originalSnippet}\n}`;
+          }
+        } else if (targetLang === "go" && !originalSnippet.trimStart().startsWith("package ")) {
+          wrappedOrig = `package main\n${originalSnippet}`;
+        } else if (targetLang === "php" && !originalSnippet.trimStart().startsWith("<?php")) {
+          wrappedOrig = `<?php\n${originalSnippet}`;
+        }
+
         const origDecomp = decompile(wrappedOrig, targetLang, { filePath });
         const origMod = parse(origDecomp.ail, filePath);
 
@@ -1650,6 +2428,8 @@ function parseSnippetToExpandedDecl(
               },
               explicitVisibility,
               isExported,
+              explicitAccessor,
+              leadingDecorators,
             };
           }
           if (item.kind === "ClassDecl" && item.methods.length > 0) {
@@ -1661,6 +2441,8 @@ function parseSnippetToExpandedDecl(
               },
               explicitVisibility,
               isExported,
+              explicitAccessor,
+              leadingDecorators,
             };
           }
         }
@@ -1673,16 +2455,17 @@ function parseSnippetToExpandedDecl(
   // Attempt 3: Decompile native or hybrid Frankenstein snippet (e.g., raw TypeScript or Python function/method + $idioms / := / ret)
   if (!hasFnOrClassDecl(parsedMod)) {
     try {
+      const decompLang = targetLang === "python" ? "python" : "typescript";
       const preparedNative = convertFrankensteinToNativeForDecompile(
         rawSnippet,
-        targetLang,
+        decompLang,
         false,
       );
       const wrappedNative =
-        className && (targetLang === "typescript" || targetLang === "javascript")
+        className && decompLang === "typescript"
           ? `class ${className} {\n${preparedNative}\n}`
           : preparedNative;
-      const decomp = decompile(wrappedNative, targetLang, { filePath });
+      const decomp = decompile(wrappedNative, decompLang, { filePath });
       const restoredAil = restorePythonIdiomPlaceholders(decomp.ail);
       parsedMod = parse(restoredAil, filePath);
     } catch (decompErr) {
@@ -1704,14 +2487,79 @@ function parseSnippetToExpandedDecl(
 
   for (const item of expandedMod.items) {
     if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
-      return { decl: item, explicitVisibility, isExported };
+      return { decl: item, explicitVisibility, isExported, explicitAccessor, leadingDecorators };
     }
     if (item.kind === "ClassDecl" && item.methods.length > 0) {
-      return { decl: item.methods[0], explicitVisibility, isExported };
+      return {
+        decl: item.methods[0],
+        explicitVisibility,
+        isExported,
+        explicitAccessor,
+        leadingDecorators,
+      };
     }
   }
 
   throw new Error(`No valid function or method declaration found in splice snippet for ${filePath}`);
+}
+
+function emitNativeSnippetForContext(
+  rawSnippet: string,
+  filePath: string,
+  targetLang: TargetLanguage,
+  spanInfo: NativeSpanInfo | undefined,
+  idioms: Record<string, ProjectIdiomDefinition> | undefined,
+  originalSnippet: string | undefined,
+  isBodyOnly: boolean,
+  effectiveClassName?: string,
+): string {
+  if (
+    !isBodyOnly &&
+    isPureNativeSnippetWithoutIdioms(rawSnippet, targetLang, effectiveClassName)
+  ) {
+    return rawSnippet.trim();
+  }
+
+  if (!isBodyOnly) {
+    const nonCallable = tryEmitNonCallableAilSnippet(
+      rawSnippet,
+      filePath,
+      targetLang,
+      effectiveClassName,
+      idioms,
+      spanInfo?.isClassContainer,
+    );
+    if (nonCallable !== undefined) {
+      return nonCallable;
+    }
+  }
+
+  const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
+    parseSnippetToExpandedDecl(
+      rawSnippet,
+      filePath,
+      targetLang,
+      effectiveClassName,
+      idioms,
+      originalSnippet,
+      isBodyOnly,
+    );
+
+  const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
+    visibility: spanInfo?.visibility ?? explicitVisibility,
+    isExported: spanInfo?.isExported ?? isExported,
+    isStatic: spanInfo?.isStatic,
+    isAsync: spanInfo?.isAsync,
+    accessor: explicitAccessor ?? spanInfo?.accessor,
+    memberName: originalSnippet ? spanInfo?.memberName : decl.name,
+    goReceiver: spanInfo?.goReceiver,
+    cppOutOfLine: spanInfo?.cppOutOfLine,
+  });
+
+  if (leadingDecorators.length > 0) {
+    return `${leadingDecorators.join("\n")}\n${emitted}`;
+  }
+  return emitted;
 }
 
 function spliceNativeSource(
@@ -1721,19 +2569,62 @@ function spliceNativeSource(
   idioms?: Record<string, ProjectIdiomDefinition>,
 ): SpliceResult {
   const targetLang = detectTargetFromPath(filePath);
-  const targetSymbol = options.symbol;
+  const anchorSymbol = options.symbol ?? options.insertAfter ?? options.insertBefore;
+  const rawSnippet = options.code ?? options.body ?? "";
 
-  if (!targetSymbol) {
+  // Module-level append without --symbol
+  if (options.append && !anchorSymbol) {
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when appending to native file");
+    }
+    const emitted = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      undefined,
+      idioms,
+      undefined,
+      false,
+      undefined,
+    );
+    const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+    const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
+    const diff = options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined;
+    const snippetTokens = estimateTokens(emitted);
+    const modifiedTokens = estimateTokens(modifiedCode);
+    return {
+      success: true,
+      filePath,
+      newSnippet: emitted,
+      diff,
+      modifiedCode,
+      newAilSource: modifiedCode,
+      tokensSaved: Math.max(0, modifiedTokens - snippetTokens),
+    };
+  }
+
+  if (!anchorSymbol) {
     throw new Error("Must specify target symbol with --symbol when splicing native file");
   }
 
-  const spanInfo =
-    targetLang === "python"
-      ? locatePythonDeclarationSpan(nativeSource, targetSymbol)
-      : locateTsDeclarationSpan(nativeSource, targetSymbol);
+  const preferAccessor: "get" | "set" | undefined = /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(
+    rawSnippet,
+  )
+    ? "get"
+    : /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?set\b/.test(rawSnippet)
+      ? "set"
+      : undefined;
+
+  const spanInfo = locateNativeDeclarationSpan(
+    nativeSource,
+    anchorSymbol,
+    targetLang,
+    undefined,
+    preferAccessor,
+  );
 
   if (!spanInfo) {
-    throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}`);
+    throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
   }
 
   const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
@@ -1746,50 +2637,77 @@ function spliceNativeSource(
     if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
     else if (nativeSource[delEnd] === "\n") delEnd += 1;
     modifiedCode = `${nativeSource.slice(0, delStart)}${nativeSource.slice(delEnd)}`;
+  } else if (options.insertBefore || options.insertAfter) {
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when inserting into native file");
+    }
+    const emittedUnindented = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      undefined,
+      idioms,
+      undefined,
+      false,
+      spanInfo.className,
+    );
+    newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+    if (options.insertBefore) {
+      const insStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
+      modifiedCode = `${nativeSource.slice(0, insStart)}${newSnippet}\n\n${nativeSource.slice(insStart)}`;
+    } else {
+      modifiedCode = `${nativeSource.slice(0, spanInfo.declEnd)}\n\n${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+    }
+  } else if (options.append && spanInfo.isClassContainer) {
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when appending to class in native file");
+    }
+    const memberIndent =
+      targetLang === "python" || targetLang === "rust" || targetLang === "csharp" || targetLang === "kotlin" || targetLang === "php"
+        ? `${spanInfo.declIndent}    `
+        : `${spanInfo.declIndent}  `;
+    const emittedUnindented = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      undefined,
+      idioms,
+      undefined,
+      false,
+      spanInfo.memberName,
+    );
+    newSnippet = indentCode(emittedUnindented, memberIndent);
+    if (targetLang === "python") {
+      modifiedCode = `${nativeSource.slice(0, spanInfo.declEnd)}\n\n${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
+    } else {
+      const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
+      const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
+      const insertPos = lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;
+      modifiedCode = `${nativeSource.slice(0, insertPos)}\n${newSnippet}\n${nativeSource.slice(insertPos)}`;
+    }
   } else {
-    const rawSnippet = options.code ?? options.body ?? "";
     if (!rawSnippet.trim()) {
       throw new Error("Must provide non-empty --code or --body when splicing native file");
     }
 
-    const replaceStart = rawSnippet.trimStart().startsWith("@")
+    const replaceStart = rawSnippet.trimStart().startsWith("@") || rawSnippet.trimStart().startsWith("#[")
       ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
       : spanInfo.declStart;
 
-    if (
-      options.code !== undefined &&
-      (targetLang === "typescript" || targetLang === "javascript") &&
-      isPureNativeTsSnippetWithoutIdioms(rawSnippet, spanInfo.className)
-    ) {
-      newSnippet = indentCode(rawSnippet.trim(), spanInfo.declIndent);
-      modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
-    } else {
-      const { decl, explicitVisibility, isExported } = parseSnippetToExpandedDecl(
-        rawSnippet,
-        filePath,
-        targetLang,
-        spanInfo.className,
-        idioms,
-        originalSnippet,
-        options.body !== undefined && options.code === undefined,
-      );
+    const isBodyOnly = options.body !== undefined && options.code === undefined;
+    const emittedUnindented = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      spanInfo,
+      idioms,
+      originalSnippet,
+      isBodyOnly,
+      spanInfo.className,
+    );
 
-      const emittedUnindented = emitExpandedDeclForTarget(
-        decl,
-        targetLang,
-        filePath,
-        spanInfo.className,
-        {
-          visibility: spanInfo.visibility ?? explicitVisibility,
-          isExported: spanInfo.isExported ?? isExported,
-          isStatic: spanInfo.isStatic,
-          isAsync: spanInfo.isAsync,
-        },
-      );
-
-      newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
-      modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
-    }
+    newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+    modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
   }
 
   let diff: string | undefined;
@@ -1804,11 +2722,12 @@ function spliceNativeSource(
   return {
     success: true,
     filePath,
-    symbol: targetSymbol,
+    symbol: anchorSymbol,
     originalSnippet,
     newSnippet,
     diff,
     modifiedCode,
+    newAilSource: modifiedCode,
     tokensSaved,
   };
 }

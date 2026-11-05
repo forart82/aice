@@ -110,7 +110,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.6.4");
+  .version("0.6.5");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -2374,6 +2374,7 @@ program
     10,
   )
   .option("-c, --code <template>", "New AIL template for `ail idioms update <$name> -c <template>`")
+  .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
   .option("--dry-run", "Preview idiom synthesis or update without modifying files")
   .action(
@@ -2385,6 +2386,7 @@ program
         minOccurrences?: number;
         minSavings?: number;
         code?: string;
+        params?: string;
         json?: boolean;
         dryRun?: boolean;
       },
@@ -2464,6 +2466,7 @@ program
           }
           const res = await updateProjectIdiom(targetDir, idiomNameArg, options.code, {
             dryRun,
+            params: options.params,
           });
           if (isJson) {
             console.log(JSON.stringify(res, null, 2));

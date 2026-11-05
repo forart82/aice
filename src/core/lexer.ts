@@ -555,11 +555,56 @@ export function scanRawTokens(
         continue;
       }
     }
-    if (ch === "/" && peek(1) === "=") {
-      advance();
-      advance();
-      rawTokens.push({ kind: "SLASH_EQUAL", value: "/=", span: makeSpan(startPos) });
-      continue;
+    if (ch === "/") {
+      if (peek(1) === "=") {
+        advance();
+        advance();
+        rawTokens.push({ kind: "SLASH_EQUAL", value: "/=", span: makeSpan(startPos) });
+        continue;
+      }
+      // Check if `/` can start a regex literal `/pattern/flags`
+      const prevTok = rawTokens.length > 0 ? rawTokens[rawTokens.length - 1] : undefined;
+      const canStartRegex =
+        !prevTok ||
+        (prevTok.kind !== "IDENT" &&
+          prevTok.kind !== "NUMBER" &&
+          prevTok.kind !== "STRING" &&
+          prevTok.kind !== "RPAREN" &&
+          prevTok.kind !== "RBRACKET" &&
+          prevTok.kind !== "RBRACE");
+      if (canStartRegex && peek(1) !== " " && peek(1) !== "\t" && peek(1) !== "\n" && peek(1) !== "\r" && peek(1) !== "") {
+        // Look ahead on the same line for closing unescaped `/`
+        let scanOffset = 1;
+        let inCharClass = false;
+        let foundClosingSlash = false;
+        while (true) {
+          const c = peek(scanOffset);
+          if (!c || c === "\n" || c === "\r") break;
+          if (c === "\\") {
+            scanOffset += 2;
+            continue;
+          }
+          if (c === "[") inCharClass = true;
+          else if (c === "]") inCharClass = false;
+          else if (c === "/" && !inCharClass) {
+            foundClosingSlash = true;
+            scanOffset++;
+            break;
+          }
+          scanOffset++;
+        }
+        if (foundClosingSlash) {
+          while (/^[dgimsuvy]$/.test(peek(scanOffset))) {
+            scanOffset++;
+          }
+          let regexVal = "";
+          for (let k = 0; k < scanOffset; k++) {
+            regexVal += advance();
+          }
+          rawTokens.push({ kind: "IDENT", value: regexVal, span: makeSpan(startPos) });
+          continue;
+        }
+      }
     }
     if (ch === "%" && peek(1) === "=") {
       advance();

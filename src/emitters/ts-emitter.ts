@@ -1497,7 +1497,13 @@ export class TypeScriptEmitter {
             TypeScriptEmitter.BUILTIN_CONSTRUCTORS.has(expr.callee.name) ||
             (/^[A-Z][a-zA-Z0-9_]*$/.test(expr.callee.name) &&
               !this.enumVariants.has(expr.callee.name) &&
-              !this.structTypes.has(expr.callee.name))
+              !this.structTypes.has(expr.callee.name) &&
+              expr.callee.name !== "String" &&
+              expr.callee.name !== "Number" &&
+              expr.callee.name !== "Boolean" &&
+              expr.callee.name !== "BigInt" &&
+              expr.callee.name !== "Symbol" &&
+              expr.callee.name !== "Object")
           ) {
             return `new ${expr.callee.name}(${argCodes.join(", ")})`;
           }

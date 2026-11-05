@@ -219,15 +219,25 @@ export class AilMcpServer {
   private readonly workspaceRoot: string;
 
   constructor(
-    inStream?: Readable,
+    inStreamOrOptions?: Readable | { workspaceRoot?: string },
     outStream?: Writable,
     options?: { workspaceRoot?: string },
   ) {
-    this.inStream = inStream;
-    this.outStream = outStream;
-    this.workspaceRoot = path.resolve(options?.workspaceRoot ?? process.cwd());
+    if (
+      inStreamOrOptions &&
+      typeof (inStreamOrOptions as Readable).on !== "function" &&
+      "workspaceRoot" in inStreamOrOptions
+    ) {
+      this.inStream = undefined;
+      this.outStream = undefined;
+      this.workspaceRoot = path.resolve(inStreamOrOptions.workspaceRoot ?? process.cwd());
+    } else {
+      this.inStream = inStreamOrOptions as Readable | undefined;
+      this.outStream = outStream;
+      this.workspaceRoot = path.resolve(options?.workspaceRoot ?? process.cwd());
+    }
 
-    if (this.inStream) {
+    if (this.inStream && typeof this.inStream.on === "function") {
       this.inStream.on("data", (chunk: Buffer) => this.handleData(chunk));
     }
   }
@@ -363,7 +373,7 @@ export class AilMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "ail-mcp", version: "0.6.4" },
+          serverInfo: { name: "ail-mcp", version: "0.6.5" },
         };
       }
 
@@ -539,6 +549,7 @@ export class AilMcpServer {
           }
           const updateRes = await updateProjectIdiom(projectRoot, idiomName, code, {
             dryRun: Boolean(args.dryRun),
+            params: typeof args.params === "string" ? args.params : undefined,
           });
           return {
             content: [

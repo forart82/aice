@@ -348,9 +348,14 @@ export function mineProjectIdioms(
       }
     }
 
-    // Disambiguate name if needed
-    let idiomName = cand.definition.name;
-    if (usedNames.has(idiomName)) {
+    // Reuse existing idiom name if templateAil & kind match (idempotent Twinless re-scan), otherwise disambiguate
+    const existingMatch = Object.values(existingIdioms).find(
+      (ex) =>
+        ex.kind === cand.definition.kind &&
+        ex.templateAil.trim() === cand.definition.templateAil.trim(),
+    );
+    let idiomName = existingMatch ? existingMatch.name : cand.definition.name;
+    if (!existingMatch && usedNames.has(idiomName)) {
       let suffix = 2;
       while (usedNames.has(`${idiomName}${suffix}`)) {
         suffix++;

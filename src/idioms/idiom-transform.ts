@@ -57,6 +57,7 @@ import {
   type AilProjectConfig,
   type IdiomOccurrence,
   type ProjectIdiomDefinition,
+  type ProjectIdiomParam,
 } from "../config/project-config.js";
 import {
   mineProjectIdioms,
@@ -487,15 +488,40 @@ function expandModuleIdiomsInternal(
 
   const clonedMod = structuredClone(mod);
 
+  function parseDefaultExpr(defaultVal: string): Expr {
+    try {
+      const m = parse(`_tmp := ${defaultVal}`, "<idiom-default>");
+      const first = m.items[0];
+      if (first && first.kind === "FunctionDecl" && "statements" in first.body) {
+        const s = first.body.statements[0];
+        if (s && s.kind === "LetBinding") return s.init;
+      }
+      if (first && (first.kind === "ConstDecl" || first.kind === "VarDecl")) {
+        return first.value;
+      }
+    } catch {
+      // fallback below
+    }
+    return {
+      kind: "IdentifierExpr",
+      name: defaultVal,
+      span: clonedMod.span,
+    };
+  }
+
   function buildSubst(def: ProjectIdiomDefinition, args: Expr[]): Map<string, Expr> {
     const subst = new Map<string, Expr>();
     for (let i = 0; i < def.params.length; i++) {
       const p = def.params[i];
-      const arg = args[i] ?? {
-        kind: "IdentifierExpr",
-        name: "nil",
-        span: clonedMod.span,
-      };
+      const arg =
+        args[i] ??
+        (p.defaultValue !== undefined
+          ? parseDefaultExpr(p.defaultValue)
+          : {
+              kind: "IdentifierExpr",
+              name: "nil",
+              span: clonedMod.span,
+            });
       subst.set(p.name, arg);
       subst.set(`$${i}`, arg);
     }
@@ -955,16 +981,107 @@ function matchExprTemplate(
     case "CallExpr": {
       const t = templateExpr as CallExpr;
       const tg = targetExpr as CallExpr;
-      if (t.args.length !== tg.args.length) return false;
-      if (!matchExprTemplate(t.callee, tg.callee, bindings, holeNames, generator, alphaMap)) {
-        return false;
-      }
-      for (let i = 0; i < t.args.length; i++) {
-        if (!matchExprTemplate(t.args[i], tg.args[i], bindings, holeNames, generator, alphaMap)) {
-          return false;
+
+      const getMathCallee = (callee: Expr): string | null => {
+        if (callee.kind === "IdentifierExpr") return callee.name;
+        if (
+          callee.kind === "MemberAccessExpr" &&
+          callee.object.kind === "IdentifierExpr" &&
+          callee.object.name === "Math"
+        ) {
+          return callee.property;
+        }
+        return null;
+      };
+
+      const extractClamp = (
+        call: CallExpr,
+      ): { val: Expr; min: Expr; max: Expr } | null => {
+        const fn = getMathCallee(call.callee);
+        if (fn === "clamp" && call.args.length === 3) {
+          return { val: call.args[0], min: call.args[1], max: call.args[2] };
+        }
+        if (fn === "max" && call.args.length === 2) {
+          const second = call.args[1];
+          if (
+            second.kind === "CallExpr" &&
+            getMathCallee(second.callee) === "min" &&
+            second.args.length === 2
+          ) {
+            return {
+              min: call.args[0],
+              max: second.args[0],
+              val: second.args[1],
+            };
+          }
+        }
+        if (fn === "min" && call.args.length === 2) {
+          const first = call.args[0];
+          if (
+            first.kind === "CallExpr" &&
+            getMathCallee(first.callee) === "max" &&
+            first.args.length === 2
+          ) {
+            return {
+              val: first.args[0],
+              min: first.args[1],
+              max: call.args[1],
+            };
+          }
+        }
+        return null;
+      };
+
+      if (t.args.length === tg.args.length) {
+        const savedBindings = new Map(bindings);
+        const tMath = getMathCallee(t.callee);
+        const tgMath = getMathCallee(tg.callee);
+        const calleeMatched =
+          matchExprTemplate(t.callee, tg.callee, savedBindings, holeNames, generator, alphaMap) ||
+          (tMath !== null &&
+            tMath === tgMath &&
+            !holeNames.has(tMath));
+        if (calleeMatched) {
+          let allArgsMatch = true;
+          for (let i = 0; i < t.args.length; i++) {
+            if (
+              !matchExprTemplate(
+                t.args[i],
+                tg.args[i],
+                savedBindings,
+                holeNames,
+                generator,
+                alphaMap,
+              )
+            ) {
+              allArgsMatch = false;
+              break;
+            }
+          }
+          if (allArgsMatch) {
+            bindings.clear();
+            for (const [k, v] of savedBindings) bindings.set(k, v);
+            return true;
+          }
         }
       }
-      return true;
+
+      const tClamp = extractClamp(t);
+      const tgClamp = extractClamp(tg);
+      if (tClamp && tgClamp) {
+        const savedBindings = new Map(bindings);
+        if (
+          matchExprTemplate(tClamp.val, tgClamp.val, savedBindings, holeNames, generator, alphaMap) &&
+          matchExprTemplate(tClamp.min, tgClamp.min, savedBindings, holeNames, generator, alphaMap) &&
+          matchExprTemplate(tClamp.max, tgClamp.max, savedBindings, holeNames, generator, alphaMap)
+        ) {
+          bindings.clear();
+          for (const [k, v] of savedBindings) bindings.set(k, v);
+          return true;
+        }
+      }
+
+      return false;
     }
     case "MemberAccessExpr": {
       const t = templateExpr as MemberAccessExpr;
@@ -2367,16 +2484,61 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
   };
 }
 
+function resolveUpdatedParams(
+  oldParams: ProjectIdiomParam[],
+  newTemplateAil: string,
+  explicitParams?: ProjectIdiomParam[] | string,
+): ProjectIdiomParam[] {
+  if (Array.isArray(explicitParams)) {
+    return explicitParams.map((p, idx) => ({
+      name: p.name.startsWith("$") ? p.name : `$${p.name || idx}`,
+      ...(p.type ? { type: p.type } : {}),
+      ...(p.defaultValue !== undefined ? { defaultValue: p.defaultValue } : {}),
+    }));
+  }
+  if (typeof explicitParams === "string" && explicitParams.trim()) {
+    return explicitParams
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .map((part, idx) => {
+        const eqIdx = part.indexOf("=");
+        const rawName = (eqIdx >= 0 ? part.slice(0, eqIdx) : part).trim();
+        const defVal = eqIdx >= 0 ? part.slice(eqIdx + 1).trim() : undefined;
+        const colonIdx = rawName.indexOf(":");
+        const pName = (colonIdx >= 0 ? rawName.slice(0, colonIdx) : rawName).trim();
+        const pType = colonIdx >= 0 ? rawName.slice(colonIdx + 1).trim() : undefined;
+        return {
+          name: pName.startsWith("$") ? pName : `$${pName || idx}`,
+          ...(pType ? { type: pType } : {}),
+          ...(defVal !== undefined ? { defaultValue: defVal } : {}),
+        };
+      });
+  }
+
+  let maxIdx = oldParams.length - 1;
+  const matches = newTemplateAil.matchAll(/\$(\d+)\b/g);
+  for (const m of matches) {
+    const n = Number.parseInt(m[1], 10);
+    if (!Number.isNaN(n) && n > maxIdx) maxIdx = n;
+  }
+  const result = [...oldParams];
+  for (let i = result.length; i <= maxIdx; i++) {
+    result.push({ name: `$${i}` });
+  }
+  return result;
+}
+
 /**
  * Smart multi-file idiom mutation: updates an idiom's template across all occurrences
  * in native files and/or .ail files, supporting parameter reordering, duplication,
- * nested expressions, hygienic alpha-renaming, cycle detection, and atomic rollback.
+ * arity expansion with defaults, nested expressions, hygienic alpha-renaming, cycle detection, and atomic rollback.
  */
 export async function updateProjectIdiom(
   dir: string,
   idiomName: string,
   newTemplateAil: string,
-  options?: { dryRun?: boolean; description?: string },
+  options?: { dryRun?: boolean; description?: string; params?: ProjectIdiomParam[] | string },
 ): Promise<IdiomUpdateResult> {
   const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
   const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
@@ -2398,9 +2560,12 @@ export async function updateProjectIdiom(
     name: normName,
   };
 
+  const resolvedParams = resolveUpdatedParams(oldDef.params, newTemplateAil, options?.params);
+
   // Determine if the updated template has multiple statements (upgrade kind stmt -> block if needed)
   const tempCheckDef: ProjectIdiomDefinition = {
     ...oldDef,
+    params: resolvedParams,
     kind: oldDef.kind === "expr" ? "expr" : "block",
     templateAil: newTemplateAil,
     ...(options?.description !== undefined ? { description: options.description } : {}),
@@ -2415,6 +2580,7 @@ export async function updateProjectIdiom(
 
   const updatedDef: ProjectIdiomDefinition = {
     ...oldDef,
+    params: resolvedParams,
     kind: updatedKind,
     templateAil: newTemplateAil,
     ...(options?.description !== undefined ? { description: options.description } : {}),

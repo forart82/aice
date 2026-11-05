@@ -147,20 +147,26 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
 
 export function generateOutline(
   sourceOrMod: string | Module,
-  options: OutlineOptions = {},
+  filePathOrOptions: string | OutlineOptions = {},
+  maybeOptions: OutlineOptions = {},
 ): OutlineResult {
+  const explicitFilePath =
+    typeof filePathOrOptions === "string" ? filePathOrOptions : undefined;
+  const options: OutlineOptions =
+    typeof filePathOrOptions === "string" ? maybeOptions : filePathOrOptions;
+
   const includeTypes = options.includeTypes !== false;
   const maxDepth = options.depth !== undefined ? options.depth : Infinity;
   const isJson = options.json === true;
 
-  let filePath = "<anonymous>";
+  let filePath = explicitFilePath || "<anonymous>";
   let originalSource = "";
   let ast: Module;
   let trivia = new CstTriviaTable();
 
   if (typeof sourceOrMod === "object" && sourceOrMod !== null && sourceOrMod.kind === "Module") {
     ast = sourceOrMod;
-    filePath = ast.path || "<anonymous>";
+    filePath = ast.path || explicitFilePath || "<anonymous>";
     if (filePath !== "<anonymous>" && fs.existsSync(filePath)) {
       try {
         originalSource = fs.readFileSync(filePath, "utf-8");
@@ -169,7 +175,10 @@ export function generateOutline(
       }
     }
   } else if (typeof sourceOrMod === "string") {
-    const isFile = fs.existsSync(sourceOrMod) && fs.statSync(sourceOrMod).isFile();
+    const isFile =
+      !sourceOrMod.includes("\n") &&
+      fs.existsSync(sourceOrMod) &&
+      fs.statSync(sourceOrMod).isFile();
     if (isFile) {
       filePath = sourceOrMod;
       originalSource = fs.readFileSync(filePath, "utf-8");
@@ -187,26 +196,60 @@ export function generateOutline(
         } else {
           const targetLang = detectTargetFromPath(filePath);
           const decompResult = decompile(originalSource, targetLang, { filePath });
-          const parsed = parseWithTrivia(decompResult.ail, filePath);
-          ast = parsed.ast;
-          trivia = parsed.trivia;
+          try {
+            const parsed = parseWithTrivia(decompResult.ail, filePath);
+            ast = parsed.ast;
+            trivia = parsed.trivia;
+          } catch {
+            ast = decompResult.ast;
+            trivia = decompResult.trivia;
+          }
         }
       }
     } else {
-      filePath = "<anonymous>";
+      filePath = explicitFilePath || "<anonymous>";
       originalSource = sourceOrMod;
-      try {
-        const parsed = parseWithTrivia(originalSource, filePath);
-        ast = parsed.ast;
-        trivia = parsed.trivia;
-      } catch (err) {
+      const hasKnownTargetExt =
+        explicitFilePath !== undefined &&
+        !explicitFilePath.endsWith(".ail") &&
+        KNOWN_TARGET_EXTENSIONS.has(path.extname(explicitFilePath).toLowerCase());
+
+      if (hasKnownTargetExt && explicitFilePath) {
+        const targetLang = detectTargetFromPath(explicitFilePath);
+        const decompResult = decompile(originalSource, targetLang, {
+          filePath: explicitFilePath,
+        });
         try {
-          const decompResult = decompile(originalSource, "typescript", { filePath });
-          const parsed = parseWithTrivia(decompResult.ail, filePath);
+          const parsed = parseWithTrivia(decompResult.ail, explicitFilePath);
           ast = parsed.ast;
           trivia = parsed.trivia;
         } catch {
-          throw err;
+          ast = decompResult.ast;
+          trivia = decompResult.trivia;
+        }
+      } else {
+        try {
+          const parsed = parseWithTrivia(originalSource, filePath);
+          ast = parsed.ast;
+          trivia = parsed.trivia;
+        } catch (err) {
+          try {
+            const targetLang =
+              explicitFilePath && !explicitFilePath.endsWith(".ail")
+                ? detectTargetFromPath(explicitFilePath)
+                : "typescript";
+            const decompResult = decompile(originalSource, targetLang, { filePath });
+            try {
+              const parsed = parseWithTrivia(decompResult.ail, filePath);
+              ast = parsed.ast;
+              trivia = parsed.trivia;
+            } catch {
+              ast = decompResult.ast;
+              trivia = decompResult.trivia;
+            }
+          } catch {
+            throw err;
+          }
         }
       }
     }
@@ -466,6 +509,20 @@ export function generateOutline(
           symbols.push({
             name: item.name,
             kind: "component",
+            line,
+            signature: sig,
+            children: [],
+            docstring,
+          });
+          break;
+        }
+        case "StyleDecl": {
+          const line = item.span?.start?.line || 1;
+          const sig = `style ${item.name}: ...`;
+          const docstring = getLeadingTriviaDoc(trivia, `style:${item.name}`);
+          symbols.push({
+            name: item.name,
+            kind: "style",
             line,
             signature: sig,
             children: [],

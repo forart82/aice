@@ -17,6 +17,7 @@ export type ProjectMode = "side-by-side" | "isolated" | "companion" | "twinless"
 export interface ProjectIdiomParam {
   name: string; // e.g. "$0", "$1"
   type?: string;
+  defaultValue?: string;
 }
 
 export interface IdiomOccurrence {

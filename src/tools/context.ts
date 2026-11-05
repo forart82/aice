@@ -690,19 +690,30 @@ export async function generateWorkspaceContext(
   };
 }
 
+function normalizeIdentForMatch(s: string): string {
+  return s.replace(/_/g, "").toLowerCase();
+}
+
 function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, filePath: string): string {
   const mod = parse(ailSource, filePath);
-  const dotIdx = symbolSelector.indexOf(".");
-  const className = dotIdx >= 0 ? symbolSelector.slice(0, dotIdx).trim() : undefined;
-  const memberName = dotIdx >= 0 ? symbolSelector.slice(dotIdx + 1).trim() : symbolSelector.trim();
+  const parts = symbolSelector.split(/\.|::/);
+  const className = parts.length >= 2 ? parts[0].trim() : undefined;
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : symbolSelector.trim();
+  const normMember = normalizeIdentForMatch(memberName);
 
   const matchedItems: ModuleItem[] = [];
 
   for (const item of mod.items) {
     if (className) {
-      if (item.kind === "ClassDecl" && item.name === className) {
-        const matchedMethods = item.methods.filter((m) => m.name === memberName);
-        const matchedProps = item.properties.filter((p) => p.name === memberName);
+      if (item.kind === "ClassDecl" && (item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))) {
+        let matchedMethods = item.methods.filter((m) => m.name === memberName);
+        if (matchedMethods.length === 0) {
+          matchedMethods = item.methods.filter((m) => normalizeIdentForMatch(m.name) === normMember);
+        }
+        let matchedProps = item.properties.filter((p) => p.name === memberName);
+        if (matchedProps.length === 0) {
+          matchedProps = item.properties.filter((p) => normalizeIdentForMatch(p.name) === normMember);
+        }
         if (matchedMethods.length > 0 || matchedProps.length > 0) {
           const scopedClass: ClassDecl = {
             ...item,
@@ -711,6 +722,20 @@ function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, f
             staticBlocks: [],
           };
           matchedItems.push(scopedClass);
+        }
+      } else if (item.kind === "TypeDecl" && (item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))) {
+        const matchedFields = (item.fields ?? []).filter(
+          (f) => f.name === memberName || normalizeIdentForMatch(f.name) === normMember,
+        );
+        const matchedVariants = (item.variants ?? []).filter(
+          (v) => v.name === memberName || normalizeIdentForMatch(v.name) === normMember,
+        );
+        if (matchedFields.length > 0 || matchedVariants.length > 0) {
+          matchedItems.push({
+            ...item,
+            fields: matchedFields.length > 0 ? matchedFields : item.fields,
+            variants: matchedVariants.length > 0 ? matchedVariants : item.variants,
+          });
         }
       }
     } else {
@@ -721,12 +746,18 @@ function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, f
           item.kind === "ConstDecl" ||
           item.kind === "VarDecl" ||
           item.kind === "ComponentDecl") &&
-        item.name === memberName
+        (item.name === memberName || normalizeIdentForMatch(item.name) === normMember)
       ) {
         matchedItems.push(item);
       } else if (item.kind === "ClassDecl") {
-        const matchedMethods = item.methods.filter((m) => m.name === memberName);
-        const matchedProps = item.properties.filter((p) => p.name === memberName);
+        let matchedMethods = item.methods.filter((m) => m.name === memberName);
+        if (matchedMethods.length === 0) {
+          matchedMethods = item.methods.filter((m) => normalizeIdentForMatch(m.name) === normMember);
+        }
+        let matchedProps = item.properties.filter((p) => p.name === memberName);
+        if (matchedProps.length === 0) {
+          matchedProps = item.properties.filter((p) => normalizeIdentForMatch(p.name) === normMember);
+        }
         if (matchedMethods.length > 0 || matchedProps.length > 0) {
           const scopedClass: ClassDecl = {
             ...item,
@@ -791,13 +822,8 @@ export async function generateContext(
   if (!fullTargetPath.endsWith(".ail")) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
-      const isTemplateOrData =
-        targetLang === "twig" ||
-        targetLang === "html" ||
-        targetLang === "css" ||
-        targetLang === "json" ||
-        targetLang === "yaml";
-      if (!isTemplateOrData || options.symbol || options.idioms) {
+      const isRawTemplate = targetLang === "twig";
+      if (!isRawTemplate || options.symbol || options.idioms) {
         const decomp = decompile(rawFileContent, targetLang, { filePath: fullTargetPath });
         targetContent = decomp.ail;
       }

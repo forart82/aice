@@ -72,20 +72,21 @@ export class ParserError extends Error {
 export enum Precedence {
   LOWEST = 1,
   ASSIGN = 2, // =
-  OR = 3, // or, ||
-  AND = 4, // and, &&
-  COALESCE = 5, // ??
-  BIT_OR = 6, // |
-  BIT_XOR = 7, // ^
-  BIT_AND = 8, // &
-  EQUALS = 9, // ==, !=
-  LESSGREATER = 10, // <, >, <=, >=, in, instanceof
-  SHIFT = 11, // <<, >>, >>>
-  SUM = 12, // +, -
-  PRODUCT = 13, // *, /, %
-  EXPONENT = 14, // **
-  PREFIX = 15, // not, -, !
-  POSTFIX = 16, // ?, (, ., ?., [
+  TERNARY = 3, // cond ? thenExpr : elseExpr
+  OR = 4, // or, ||
+  AND = 5, // and, &&
+  COALESCE = 6, // ??
+  BIT_OR = 7, // |
+  BIT_XOR = 8, // ^
+  BIT_AND = 9, // &
+  EQUALS = 10, // ==, !=
+  LESSGREATER = 11, // <, >, <=, >=, in, instanceof
+  SHIFT = 12, // <<, >>, >>>
+  SUM = 13, // +, -
+  PRODUCT = 14, // *, /, %
+  EXPONENT = 15, // **
+  PREFIX = 16, // not, -, !
+  POSTFIX = 17, // ?, (, ., ?., [
 }
 
 const PRECEDENCES: Partial<Record<TokenKind, Precedence>> = {
@@ -1575,20 +1576,27 @@ export class Parser {
       this.advance();
       pType = this.parseTypeExpr();
     } else if (
-      !isClosure &&
-      !allowUntyped &&
-      !pName.startsWith("[") &&
-      !pName.startsWith("{") &&
-      !this.check("EQUAL")
+      isClosure ||
+      allowUntyped ||
+      pName === "self" ||
+      pName === "cls" ||
+      pName === "this" ||
+      pName.startsWith("[") ||
+      pName.startsWith("{")
     ) {
+      if (
+        allowUntyped ||
+        (!isClosure && (pName === "self" || pName === "cls" || pName === "this"))
+      ) {
+        pType = {
+          kind: "NamedType",
+          name: "any",
+          span: pSpan,
+        };
+      }
+    } else {
       this.consume("COLON", "Expected ':' after parameter name");
       pType = this.parseTypeExpr();
-    } else if (allowUntyped) {
-      pType = {
-        kind: "NamedType",
-        name: "any",
-        span: pSpan,
-      };
     }
 
     let defaultValue: Expr | undefined;
@@ -2287,6 +2295,7 @@ export class Parser {
 
     const isValKeywordDecl =
       this.check("VAL") &&
+      (this.isIdentOrKeyword(this.peek(1)) || this.peek(1).kind === "STRING") &&
       this.peek(1).kind !== "COLON_EQUAL" &&
       this.peek(1).kind !== "COLON_COLON_EQUAL" &&
       this.peek(1).kind !== "EQUAL" &&
@@ -2728,7 +2737,7 @@ export class Parser {
     };
   }
 
-  private parseReturnStatement(): ReturnStmt {
+  private parseReturnStatement(): Statement {
     const startSpan = this.current().span;
     this.consume("RET");
 
@@ -2744,6 +2753,38 @@ export class Parser {
     }
 
     this.consumeStatementSeparator();
+
+    const ternary = value ? (value as Expr & { _ternary?: { cond: Expr; whenTrue: Expr; whenFalse: Expr } })._ternary : undefined;
+    if (ternary && value) {
+      return {
+        kind: "IfStmt",
+        condition: ternary.cond,
+        thenBranch: {
+          kind: "Block",
+          statements: [
+            {
+              kind: "ReturnStmt",
+              value: ternary.whenTrue,
+              span: ternary.whenTrue.span,
+            },
+          ],
+          span: ternary.whenTrue.span,
+        },
+        elifBranches: [],
+        elseBranch: {
+          kind: "Block",
+          statements: [
+            {
+              kind: "ReturnStmt",
+              value: ternary.whenFalse,
+              span: ternary.whenFalse.span,
+            },
+          ],
+          span: ternary.whenFalse.span,
+        },
+        span: mergeSpans(startSpan, value.span),
+      };
+    }
 
     return {
       kind: "ReturnStmt",
@@ -3146,7 +3187,65 @@ export class Parser {
   }
 
   private currentPrecedence(): Precedence {
+    if (this.current().kind === "QUESTION" && this.isTernaryQuestion()) {
+      return Precedence.TERNARY;
+    }
     return PRECEDENCES[this.current().kind] ?? Precedence.LOWEST;
+  }
+
+  private isTernaryQuestion(): boolean {
+    if (this.current().kind !== "QUESTION") return false;
+    const firstAfter = this.peek(1).kind;
+    if (
+      firstAfter === "COLON" ||
+      firstAfter === "NEWLINE" ||
+      firstAfter === "SEMICOLON" ||
+      firstAfter === "DEDENT" ||
+      firstAfter === "EOF" ||
+      firstAfter === "RPAREN" ||
+      firstAfter === "RBRACKET" ||
+      firstAfter === "RBRACE" ||
+      firstAfter === "COMMA" ||
+      firstAfter === "DOT" ||
+      firstAfter === "QUESTION_DOT" ||
+      firstAfter === "EQ_EQ" ||
+      firstAfter === "NOT_EQ" ||
+      firstAfter === "LT_EQ" ||
+      firstAfter === "GT_EQ" ||
+      firstAfter === "AMP_AMP" ||
+      firstAfter === "PIPE_PIPE" ||
+      firstAfter === "QUESTION_QUESTION" ||
+      firstAfter === "EQUAL" ||
+      firstAfter === "COLON_EQUAL" ||
+      firstAfter === "COLON_COLON_EQUAL"
+    ) {
+      return false;
+    }
+
+    let depth = 0;
+    for (let i = this.cursor + 1; i < this.tokens.length; i++) {
+      const k = this.tokens[i].kind;
+      if (k === "LPAREN" || k === "LBRACKET" || k === "LBRACE") {
+        depth++;
+      } else if (k === "RPAREN" || k === "RBRACKET" || k === "RBRACE") {
+        if (depth === 0) return false;
+        depth--;
+      } else if (depth === 0) {
+        if (k === "NEWLINE" || k === "SEMICOLON" || k === "DEDENT" || k === "EOF" || k === "COMMA") {
+          return false;
+        }
+        if (k === "COLON") {
+          const afterColon = this.tokens[i + 1]?.kind ?? "EOF";
+          return (
+            afterColon !== "NEWLINE" &&
+            afterColon !== "INDENT" &&
+            afterColon !== "SEMICOLON" &&
+            afterColon !== "EOF"
+          );
+        }
+      }
+    }
+    return false;
   }
 
   private parsePrefix(): Expr {
@@ -3484,8 +3583,30 @@ export class Parser {
   private parseInfix(left: Expr): Expr {
     const tok = this.current();
 
-    // 1. Postfix ? operator (Try unwrap Result/Option)
+    // 1. C-style ternary (cond ? thenExpr : elseExpr) or Postfix ? operator (Try unwrap Result/Option)
     if (tok.kind === "QUESTION") {
+      if (this.isTernaryQuestion()) {
+        this.advance(); // consume '?'
+        const whenTrue = this.parseExpr(Precedence.LOWEST);
+        this.consume("COLON", "Expected ':' in ternary expression");
+        const whenFalse = this.parseExpr(Precedence.TERNARY - 1);
+        const span = mergeSpans(left.span, whenFalse.span);
+        const binExpr: Expr & { _ternary?: { cond: Expr; whenTrue: Expr; whenFalse: Expr } } = {
+          kind: "BinaryExpr",
+          operator: "or",
+          left: {
+            kind: "BinaryExpr",
+            operator: "and",
+            left,
+            right: whenTrue,
+            span: mergeSpans(left.span, whenTrue.span),
+          },
+          right: whenFalse,
+          span,
+          _ternary: { cond: left, whenTrue, whenFalse },
+        };
+        return binExpr;
+      }
       this.advance();
       return {
         kind: "PostfixTryExpr",

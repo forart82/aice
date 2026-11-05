@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getAilSiblingPath, isTargetLocked } from "./fs-lock.js";
 import {
+  findProjectRoot,
   loadProjectConfig,
   saveProjectConfig,
   type ProjectIdiomDefinition,
@@ -580,7 +581,7 @@ function parseJsonSafe(content: string): Record<string, unknown> {
 }
 
 export interface InterceptResult {
-  decision: "allow" | "deny";
+  decision: "allow" | "deny" | "block";
   overwrite?: Record<string, string>;
   reason?: string;
 }
@@ -592,15 +593,15 @@ export interface InterceptResult {
  * - Defaults to allowing all other tool calls.
  */
 export function interceptPreToolUse(
-  input: string,
+  input: string | Record<string, unknown>,
   projectRoot?: string,
 ): InterceptResult {
   try {
-    if (!input || !input.trim()) {
+    if (!input || (typeof input === "string" && !input.trim())) {
       return { decision: "allow" };
     }
 
-    const payload = parseJsonSafe(input) as Record<string, any>;
+    const payload = (typeof input === "string" ? parseJsonSafe(input) : input) as Record<string, any>;
     if (!payload || typeof payload !== "object") {
       return { decision: "allow" };
     }
@@ -705,6 +706,26 @@ export function interceptPreToolUse(
 
     const directSibling = `${resolvedPath}.ail`;
     const ailSibling = fs.existsSync(directSibling) ? directSibling : getAilSiblingPath(resolvedPath);
+
+    if (!ailSibling && fs.existsSync(resolvedPath)) {
+      try {
+        const fileProjRoot = findProjectRoot(path.dirname(resolvedPath));
+        const cfgPath = path.join(fileProjRoot, "ail.config.json");
+        if (
+          fs.existsSync(cfgPath) &&
+          loadProjectConfig(fileProjRoot).mode === "twinless" &&
+          DEFAULT_EXTENSIONS.includes(path.extname(resolvedPath).toLowerCase())
+        ) {
+          const baseName = path.basename(resolvedPath);
+          return {
+            decision: isView ? "block" : "deny",
+            reason: `AIL TWINLESS SHIELD: Direct tool access on '${baseName}' bypassed AIL On-the-Fly compression. Use \`ail outline ${baseName}\`, \`ail context ${baseName}\`, or \`ail splice ${baseName}\`.`,
+          };
+        }
+      } catch {
+        // ignore
+      }
+    }
 
     if (isView) {
       if (ailSibling) {
@@ -882,9 +903,11 @@ export function generateTwinlessCursorRulesContent(
  * Apply AI Exclusion & Cognitive Shield to the given project directory.
  */
 export async function applyAiShield(
-  dir: string,
-  options?: Partial<ShieldOptions>,
+  dirOrOptions: string | Partial<ShieldOptions>,
+  maybeOptions?: Partial<ShieldOptions>,
 ): Promise<ShieldApplyResult> {
+  const options = typeof dirOrOptions === "string" ? maybeOptions : dirOrOptions;
+  const dir = typeof dirOrOptions === "string" ? dirOrOptions : (dirOrOptions.dir ?? ".");
   const targetDir = path.resolve(options?.dir ?? dir);
   let projectCfgMode: string | undefined;
   try {
