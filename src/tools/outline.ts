@@ -466,12 +466,34 @@ export function generateOutline(
             includeTypes && item.typeAnnotation ? `: ${formatTypeExpr(item.typeAnnotation)}` : "";
           const sig = `${pub}const ${item.name}${typeAnn}`;
           const docstring = getLeadingTriviaDoc(trivia, `const:${item.name}`);
+          const children: OutlineSymbol[] = [];
+          if (maxDepth >= 2 && item.value?.kind === "RecordLiteralExpr") {
+            for (const prop of item.value.properties) {
+              if (!prop.key) continue;
+              const pLine = prop.span?.start?.line || line;
+              const valDesc =
+                prop.value.kind === "RecordLiteralExpr"
+                  ? "{ ... }"
+                  : prop.value.kind === "ArrayLiteralExpr"
+                    ? "[...]"
+                    : prop.value.kind === "LiteralExpr"
+                      ? prop.value.literalKind
+                      : "...";
+              children.push({
+                name: prop.key,
+                kind: "field",
+                line: pLine,
+                signature: `${prop.key}: ${valDesc}`,
+                children: [],
+              });
+            }
+          }
           symbols.push({
             name: item.name,
             kind: "const",
             line,
             signature: sig,
-            children: [],
+            children,
             docstring,
           });
           break;

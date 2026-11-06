@@ -597,7 +597,30 @@ export class GoEmitter {
         break;
       }
       case "MatchStmt": {
-        this.emitMatchStmt(stmt);
+        this.emitMatchStmt(stmt, isResult, okType);
+        break;
+      }
+      case "BreakStmt": {
+        this.ctx.writeLine("break");
+        break;
+      }
+      case "ContinueStmt": {
+        this.ctx.writeLine("continue");
+        break;
+      }
+      case "ThrowStmt": {
+        this.ctx.writeLine(`panic(${this.emitExpr(stmt.expr)})`);
+        break;
+      }
+      case "TryStmt": {
+        if (stmt.finallyBlock) {
+          this.ctx.writeLine("defer func() {");
+          this.ctx.indent();
+          this.emitBlock(stmt.finallyBlock, false, okType, false);
+          this.ctx.dedent();
+          this.ctx.writeLine("}()");
+        }
+        this.emitBlock(stmt.tryBlock, isResult, okType, hasReturn && isLast);
         break;
       }
       case "ExprStmt": {
@@ -616,7 +639,7 @@ export class GoEmitter {
     }
   }
 
-  private emitMatchStmt(stmt: MatchStmt): void {
+  private emitMatchStmt(stmt: MatchStmt, isResult = false, okType = ""): void {
     const targetStr = this.emitExpr(stmt.target);
     this.ctx.writeLine(`switch ${targetStr} {`);
 
@@ -630,13 +653,7 @@ export class GoEmitter {
 
       this.ctx.indent();
       if (c.body.kind === "Block") {
-        for (const s of c.body.statements) {
-          if (s.kind === "ExprStmt") {
-            this.ctx.writeLine(this.emitExpr(s.expr));
-          } else if (s.kind === "ReturnStmt" && s.value) {
-            this.ctx.writeLine(`return ${this.emitExpr(s.value)}`);
-          }
-        }
+        this.emitBlock(c.body, isResult, okType, false);
       } else {
         this.ctx.writeLine(`return ${this.emitExpr(c.body)}`);
       }

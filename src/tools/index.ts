@@ -13,4 +13,6 @@ export * from "./parity-gate.js";
 export * from "./splice.js";
 export * from "./benchmark-suite.js";
 export * from "./comparative-benchmark.js";
-
+export * from "./benchmark-100-cases.js";
+export * from "./benchmark-500-cases.js";
+export * from "./benchmark-500-per-language.js";

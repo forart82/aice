@@ -18,6 +18,7 @@ import type {
   CallExpr,
   ClassDecl,
   ClosureExpr,
+  ComponentDecl,
   ConstDecl,
   DestructureBinding,
   Expr,
@@ -27,6 +28,7 @@ import type {
   IdentifierExpr,
   IfStmt,
   IndexExpr,
+  LayoutNode,
   LetBinding,
   MatchStmt,
   MemberAccessExpr,
@@ -542,7 +544,8 @@ function collectModuleCandidates(
     if (
       expr.kind === "CallExpr" ||
       expr.kind === "MemberAccessExpr" ||
-      expr.kind === "BinaryExpr"
+      expr.kind === "BinaryExpr" ||
+      (expr.kind === "RecordLiteralExpr" && expr.properties.length >= 2)
     ) {
       // Skip if already an idiom call
       const isIdiomCall =
@@ -677,6 +680,17 @@ function collectModuleCandidates(
       }
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       visitExpr(item.value);
+    } else if (item.kind === "ComponentDecl") {
+      const visitLayout = (node: LayoutNode) => {
+        for (const attr of node.attributes) {
+          if (attr.value) visitExpr(attr.value);
+        }
+        if (node.childExpr) visitExpr(node.childExpr);
+        for (const ch of node.children) visitLayout(ch);
+      };
+      for (const node of item.layout) {
+        visitLayout(node);
+      }
     }
   }
 }
@@ -886,6 +900,32 @@ function antiUnifyStatementWindows(
         const object = antiUnifyExprList(indices.map((idx) => idx.object));
         const index = antiUnifyExprList(indices.map((idx) => idx.index));
         return { kind: "IndexExpr", object, index, span: first.span };
+      } else if (first.kind === "RecordLiteralExpr") {
+        const recs = exprs as RecordLiteralExpr[];
+        const firstKeys = first.properties.map((p) => p.key).join(",");
+        if (
+          recs.every(
+            (r) =>
+              r.properties.length === first.properties.length &&
+              r.properties.map((p) => p.key).join(",") === firstKeys,
+          )
+        ) {
+          const properties = first.properties.map((prop, pIdx) => ({
+            key: prop.key,
+            value: antiUnifyExprList(recs.map((r) => r.properties[pIdx].value)),
+            isSpread: prop.isSpread,
+            span: prop.span,
+          }));
+          return { kind: "RecordLiteralExpr", properties, span: first.span };
+        }
+      } else if (first.kind === "ArrayLiteralExpr") {
+        const arrs = exprs as ArrayLiteralExpr[];
+        if (arrs.every((a) => a.elements.length === first.elements.length)) {
+          const elements = first.elements.map((_, eIdx) =>
+            antiUnifyExprList(arrs.map((a) => a.elements[eIdx])),
+          );
+          return { kind: "ArrayLiteralExpr", elements, span: first.span };
+        }
       }
     }
 
@@ -1171,6 +1211,32 @@ function antiUnifyExpressions(
         const object = antiUnifyList(indices.map((idx) => idx.object));
         const index = antiUnifyList(indices.map((idx) => idx.index));
         return { kind: "IndexExpr", object, index, span: first.span };
+      } else if (first.kind === "RecordLiteralExpr") {
+        const recs = list as RecordLiteralExpr[];
+        const firstKeys = first.properties.map((p) => p.key).join(",");
+        if (
+          recs.every(
+            (r) =>
+              r.properties.length === first.properties.length &&
+              r.properties.map((p) => p.key).join(",") === firstKeys,
+          )
+        ) {
+          const properties = first.properties.map((prop, pIdx) => ({
+            key: prop.key,
+            value: antiUnifyList(recs.map((r) => r.properties[pIdx].value)),
+            isSpread: prop.isSpread,
+            span: prop.span,
+          }));
+          return { kind: "RecordLiteralExpr", properties, span: first.span };
+        }
+      } else if (first.kind === "ArrayLiteralExpr") {
+        const arrs = list as ArrayLiteralExpr[];
+        if (arrs.every((a) => a.elements.length === first.elements.length)) {
+          const elements = first.elements.map((_, eIdx) =>
+            antiUnifyList(arrs.map((a) => a.elements[eIdx])),
+          );
+          return { kind: "ArrayLiteralExpr", elements, span: first.span };
+        }
       }
     }
 
@@ -1240,6 +1306,12 @@ function deriveExprIdiomName(expr: Expr, index: number): string {
   }
   if (expr.kind === "MemberAccessExpr") {
     return `$get_${expr.property}`;
+  }
+  if (expr.kind === "RecordLiteralExpr" && expr.properties.length > 0) {
+    const firstKey = (expr.properties[0].key ?? "").replace(/[^a-zA-Z0-9_]/g, "");
+    if (firstKey) {
+      return `$rec_${firstKey}`;
+    }
   }
   return `$idiom${index}`;
 }

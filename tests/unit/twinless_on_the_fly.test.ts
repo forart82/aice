@@ -595,4 +595,155 @@ export class GameEngine {
       expect(tscRes.status).toBe(0);
     });
   });
+
+  describe("Category H: Surgical Slicing & Splicing Across All Non-Code & Systems Dialects (.css, .json, .yaml, .html, .twig, .rs, .go)", () => {
+    it("surgically slices and splices .css rules, .json/.yaml dot-paths, .html elements, .twig blocks, and Rust/Go try-catch blocks with zero .ail files", async () => {
+      // 1. CSS rule slicing & surgical splice
+      const cssPath = path.join(tmpDir, "theme.css");
+      fs.writeFileSync(
+        cssPath,
+        `.btn-primary {\n  display: flex;\n  padding: 8px;\n}\n\n.card-panel {\n  margin: 16px;\n}\n`,
+        "utf-8",
+      );
+      const cssCtx = await generateContext(cssPath, { symbol: ".btn-primary", projectRoot: tmpDir });
+      expect(cssCtx.targetContent).toContain("btn-primary");
+      expect(cssCtx.targetContent).not.toContain("card-panel");
+      await splice(cssPath, {
+        projectRoot: tmpDir,
+        symbol: ".btn-primary",
+        code: `style .btn-primary:\n  display: "grid"\n  padding: "24px"`,
+      });
+      const updatedCss = fs.readFileSync(cssPath, "utf-8");
+      expect(updatedCss).toContain("24px");
+      expect(updatedCss).toContain(".card-panel");
+
+      // 2. JSON dot-path slicing & surgical splice
+      const jsonPath = path.join(tmpDir, "config.json");
+      fs.writeFileSync(
+        jsonPath,
+        JSON.stringify(
+          {
+            services: {
+              auth: { host: "auth.local", port: 8080 },
+              billing: { host: "billing.local", port: 8081 },
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      const jsonCtx = await generateContext(jsonPath, {
+        symbol: "services.auth",
+        projectRoot: tmpDir,
+      });
+      expect(jsonCtx.targetContent).toContain("auth.local");
+      expect(jsonCtx.targetContent).not.toContain("billing.local");
+      await splice(jsonPath, {
+        projectRoot: tmpDir,
+        symbol: "services.auth",
+        code: `{ host: "auth.v2.internal", port: 9443 }`,
+      });
+      const updatedJson = JSON.parse(fs.readFileSync(jsonPath, "utf-8"));
+      expect(updatedJson.services.auth.port).toBe(9443);
+      expect(updatedJson.services.billing.port).toBe(8081);
+
+      // 3. YAML key slicing & surgical splice
+      const yamlPath = path.join(tmpDir, "service.yaml");
+      fs.writeFileSync(
+        yamlPath,
+        `database:\n  host: db.local\n  port: 5432\ncache:\n  host: redis.local\n  port: 6379\n`,
+        "utf-8",
+      );
+      const yamlCtx = await generateContext(yamlPath, {
+        symbol: "database",
+        projectRoot: tmpDir,
+      });
+      expect(yamlCtx.targetContent).toContain("db.local");
+      expect(yamlCtx.targetContent).not.toContain("redis.local");
+      await splice(yamlPath, {
+        projectRoot: tmpDir,
+        symbol: "database",
+        code: `{ host: "db-primary.internal", port: 6432 }`,
+      });
+      const updatedYaml = fs.readFileSync(yamlPath, "utf-8");
+      expect(updatedYaml).toContain("6432");
+      expect(updatedYaml).toContain("redis.local");
+
+      // 4. HTML #id slicing & surgical splice
+      const htmlPath = path.join(tmpDir, "view.html");
+      fs.writeFileSync(
+        htmlPath,
+        `<main>\n  <section id="hero"><h1>Old Hero</h1></section>\n  <footer id="foot"><p>Keep Footer</p></footer>\n</main>\n`,
+        "utf-8",
+      );
+      const htmlCtx = await generateContext(htmlPath, {
+        symbol: "#hero",
+        projectRoot: tmpDir,
+      });
+      expect(htmlCtx.targetContent).toContain("Old Hero");
+      expect(htmlCtx.targetContent).not.toContain("Keep Footer");
+      await splice(htmlPath, {
+        projectRoot: tmpDir,
+        symbol: "#hero",
+        code: `<section id="hero"><h1>New Hero 2026</h1></section>`,
+      });
+      const updatedHtml = fs.readFileSync(htmlPath, "utf-8");
+      expect(updatedHtml).toContain("New Hero 2026");
+      expect(updatedHtml).toContain("Keep Footer");
+
+      // 5. Twig block slicing & surgical splice
+      const twigPath = path.join(tmpDir, "page.twig");
+      fs.writeFileSync(
+        twigPath,
+        `{% block header %}<header><h1>Old Twig Header</h1></header>{% endblock %}\n{% block footer %}<footer>Keep Twig Footer</footer>{% endblock %}\n`,
+        "utf-8",
+      );
+      const twigCtx = await generateContext(twigPath, {
+        symbol: "block:header",
+        projectRoot: tmpDir,
+      });
+      expect(twigCtx.targetContent).toContain("Old Twig Header");
+      await splice(twigPath, {
+        projectRoot: tmpDir,
+        symbol: "block:header",
+        code: `{% block header %}<header><h1>Upgraded Twig Header</h1></header>{% endblock %}`,
+      });
+      const updatedTwig = fs.readFileSync(twigPath, "utf-8");
+      expect(updatedTwig).toContain("Upgraded Twig Header");
+      expect(updatedTwig).toContain("Keep Twig Footer");
+
+      // 6. Rust & Go try/catch/finally + break/continue emission via surgical splice
+      const rsPath = path.join(tmpDir, "worker.rs");
+      fs.writeFileSync(
+        rsPath,
+        `pub fn process_job(limit: i64) -> i64 {\n    return limit;\n}\n`,
+        "utf-8",
+      );
+      await splice(rsPath, {
+        projectRoot: tmpDir,
+        symbol: "process_job",
+        code: `pub fn process_job(limit: int) -> int:\n  try:\n    mut i := 0\n    while i < limit:\n      i = i + 1\n      if i == 2:\n        continue\n      if i > 10:\n        break\n    ret i\n  catch err:\n    ret -1`,
+      });
+      const updatedRs = fs.readFileSync(rsPath, "utf-8");
+      expect(updatedRs).toContain("continue;");
+      expect(updatedRs).toContain("break;");
+
+      const goPath = path.join(tmpDir, "worker.go");
+      fs.writeFileSync(
+        goPath,
+        `package main\n\nfunc ProcessJob(limit int) int {\n\treturn limit\n}\n`,
+        "utf-8",
+      );
+      await splice(goPath, {
+        projectRoot: tmpDir,
+        symbol: "ProcessJob",
+        code: `pub fn ProcessJob(limit: int) -> int:\n  try:\n    mut i := 0\n    while i < limit:\n      i = i + 1\n      if i == 2:\n        continue\n      if i > 10:\n        break\n    ret i\n  catch err:\n    ret -1`,
+      });
+      const updatedGo = fs.readFileSync(goPath, "utf-8");
+      expect(updatedGo).toContain("continue");
+      expect(updatedGo).toContain("break");
+    });
+  });
 });
+

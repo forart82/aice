@@ -587,6 +587,25 @@ export class RustEmitter {
         this.emitMatchStmt(stmt, isImplicitReturn);
         break;
       }
+      case "BreakStmt": {
+        this.ctx.writeLine("break;");
+        break;
+      }
+      case "ContinueStmt": {
+        this.ctx.writeLine("continue;");
+        break;
+      }
+      case "ThrowStmt": {
+        this.ctx.writeLine(`panic!("{:?}", ${this.emitExpr(stmt.expr)});`);
+        break;
+      }
+      case "TryStmt": {
+        this.emitBlock(stmt.tryBlock, isImplicitReturn);
+        if (stmt.finallyBlock) {
+          this.emitBlock(stmt.finallyBlock, false);
+        }
+        break;
+      }
       case "ExprStmt": {
         const exprCode = this.emitExpr(stmt.expr);
         if (isImplicitReturn) {

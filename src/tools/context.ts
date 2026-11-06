@@ -19,7 +19,7 @@ import {
   resolveTargetFile,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
-import type { ClassDecl, ImportDecl, Module, ModuleItem } from "../core/ast.js";
+import type { ClassDecl, Expr, ImportDecl, LayoutNode, Module, ModuleItem } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { AilGenerator } from "../decompiler/ail-generator.js";
 import { decompile } from "../decompiler/index.js";
@@ -316,6 +316,41 @@ function extractExportedContract(
   let filtered: OutlineSymbol[];
   if (importedSymbols.includes("*")) {
     filtered = nonImports;
+  } else if (importedSymbols.length > 0) {
+    const explicitMatches = nonImports.filter((s) => importedSymbols.includes(s.name));
+    if (explicitMatches.length > 0) {
+      const matchedSigs = explicitMatches
+        .map(
+          (s) =>
+            `${s.signature} ${(s.children ?? []).map((c) => c.signature).join(" ")}`,
+        )
+        .join(" ");
+      filtered = nonImports.filter((s) => {
+        if (importedSymbols.includes(s.name)) return true;
+        if (
+          (s.kind === "interface" ||
+            s.kind === "record" ||
+            s.kind === "type" ||
+            s.kind === "enum") &&
+          new RegExp(`\\b${s.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(matchedSigs)
+        ) {
+          return true;
+        }
+        return false;
+      });
+    } else if (hasExplicitExports) {
+      filtered = nonImports.filter(
+        (s) =>
+          s.signature.startsWith("pub ") ||
+          s.signature.startsWith("export ") ||
+          s.kind === "interface" ||
+          s.kind === "record" ||
+          s.kind === "type" ||
+          s.kind === "enum",
+      );
+    } else {
+      filtered = nonImports;
+    }
   } else if (hasExplicitExports) {
     filtered = nonImports.filter((s) => {
       if (s.signature.startsWith("pub ") || s.signature.startsWith("export ")) {
@@ -327,9 +362,6 @@ function extractExportedContract(
         s.kind === "type" ||
         s.kind === "enum"
       ) {
-        return true;
-      }
-      if (importedSymbols.includes(s.name)) {
         return true;
       }
       return false;
@@ -352,9 +384,9 @@ function generateExternalContract(specifier: string, importedSymbols: string[]):
   return `// external: ${specifier}\nfrom "${specifier}" import { ${importedSymbols.join(", ")} }`;
 }
 
-function extractImportsFromFile(filePath: string): ImportDecl[] {
+function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
+    const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
     if (filePath.endsWith(".ail")) {
       const mod = parse(content, filePath);
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
@@ -443,13 +475,32 @@ function scanWorkspaceCallers(
 
   const resolvedTarget = path.resolve(targetFullPath);
   const targetBase = resolvedTarget.replace(/\.ail$/, "");
+  const targetFileName = path.basename(targetBase);
+  const targetExt = path.extname(targetFileName);
+  const targetStem = targetExt ? targetFileName.slice(0, -targetExt.length) : targetFileName;
 
   for (const file of filesToScan) {
     if (path.resolve(file) === resolvedTarget) {
       continue;
     }
 
-    const imports = extractImportsFromFile(file);
+    const fileExt = path.extname(file).toLowerCase();
+    if (fileExt === ".json" || fileExt === ".yaml" || fileExt === ".yml" || fileExt === ".css") {
+      continue;
+    }
+
+    let rawContent: string;
+    try {
+      rawContent = fs.readFileSync(file, "utf-8");
+    } catch {
+      continue;
+    }
+
+    if (targetStem !== "index" && !rawContent.includes(targetStem)) {
+      continue;
+    }
+
+    const imports = extractImportsFromFile(file, rawContent);
     for (const imp of imports) {
       const resolved = resolveImportPath(file, imp.source, config, projectRoot);
       if (resolved) {
@@ -694,11 +745,129 @@ function normalizeIdentForMatch(s: string): string {
   return s.replace(/_/g, "").toLowerCase();
 }
 
-function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, filePath: string): string {
-  const mod = parse(ailSource, filePath);
-  const parts = symbolSelector.split(/\.|::/);
+function matchLayoutNodes(nodes: LayoutNode[], rawSelector: string): LayoutNode[] {
+  const sel = rawSelector.trim();
+  const isId = sel.startsWith("#");
+  const isClass = sel.startsWith(".");
+  const isBlock = sel.startsWith("block:");
+  const cleanSel = sel.replace(/^(?:#|\.|block:)/, "");
+  const normClean = normalizeIdentForMatch(cleanSel);
+  const matched: LayoutNode[] = [];
+
+  const getAttrStr = (node: LayoutNode, attrName: string): string | undefined => {
+    const attr = node.attributes.find((a) => a.name === attrName);
+    if (!attr) return undefined;
+    if (attr.value.kind === "LiteralExpr") return String(attr.value.value);
+    if (attr.value.kind === "IdentifierExpr") return attr.value.name;
+    return undefined;
+  };
+
+  const visit = (list: LayoutNode[]) => {
+    for (const n of list) {
+      let isMatch = false;
+      if (isId) {
+        const idVal = getAttrStr(n, "id");
+        if (idVal && (idVal === cleanSel || normalizeIdentForMatch(idVal) === normClean)) {
+          isMatch = true;
+        }
+      } else if (isClass) {
+        const clsVal = getAttrStr(n, "class") ?? getAttrStr(n, "className") ?? "";
+        const tokens = clsVal.split(/\s+/).filter(Boolean);
+        if (
+          tokens.includes(cleanSel) ||
+          tokens.some((t) => normalizeIdentForMatch(t) === normClean)
+        ) {
+          isMatch = true;
+        }
+      } else if (isBlock) {
+        const blkVal = getAttrStr(n, "twig_block") ?? getAttrStr(n, "block");
+        if (
+          (blkVal && (blkVal === cleanSel || normalizeIdentForMatch(blkVal) === normClean)) ||
+          (n.tag === "block" && getAttrStr(n, "name") === cleanSel)
+        ) {
+          isMatch = true;
+        }
+      } else {
+        const idVal = getAttrStr(n, "id");
+        const blkVal = getAttrStr(n, "twig_block") ?? getAttrStr(n, "block");
+        const clsVal = getAttrStr(n, "class") ?? getAttrStr(n, "className") ?? "";
+        const tokens = clsVal.split(/\s+/).filter(Boolean);
+        if (
+          n.tag === cleanSel ||
+          normalizeIdentForMatch(n.tag) === normClean ||
+          (idVal && (idVal === cleanSel || normalizeIdentForMatch(idVal) === normClean)) ||
+          (blkVal && (blkVal === cleanSel || normalizeIdentForMatch(blkVal) === normClean)) ||
+          tokens.includes(cleanSel)
+        ) {
+          isMatch = true;
+        }
+      }
+
+      if (isMatch) {
+        matched.push(n);
+      } else if (n.children && n.children.length > 0) {
+        visit(n.children);
+      }
+    }
+  };
+
+  visit(nodes);
+  return matched;
+}
+
+function sliceRecordLiteralByPath(
+  expr: Expr,
+  keyParts: string[],
+): { leafName: string; value: Expr } | undefined {
+  let cur: Expr = expr;
+  let lastKey = keyParts[keyParts.length - 1] ?? "config";
+  for (const part of keyParts) {
+    if (cur.kind !== "RecordLiteralExpr") return undefined;
+    const normPart = normalizeIdentForMatch(part);
+    const prop =
+      cur.properties.find((p) => p.key === part) ??
+      cur.properties.find((p) => p.key && normalizeIdentForMatch(p.key) === normPart);
+    if (!prop) return undefined;
+    lastKey = prop.key ?? part;
+    cur = prop.value;
+  }
+  return { leafName: lastKey, value: cur };
+}
+
+export function extractSymbolFromAilSource(
+  ailSource: string,
+  symbolSelector: string,
+  filePath: string,
+  preParsedMod?: Module,
+): string {
+  const trimmedSel = symbolSelector.trim();
+  const mod = preParsedMod ?? parse(ailSource, filePath);
+
+  // Check StyleDecl first because CSS selectors often start with '.' (e.g. '.btn-primary')
+  for (const item of mod.items) {
+    if (item.kind === "StyleDecl") {
+      const bareItem = item.name.replace(/^[.#]/, "");
+      const bareSel = trimmedSel.replace(/^[.#]/, "");
+      if (
+        item.name === trimmedSel ||
+        bareItem === bareSel ||
+        normalizeIdentForMatch(bareItem) === normalizeIdentForMatch(bareSel)
+      ) {
+        const scopedMod: Module = {
+          kind: "Module",
+          path: mod.path,
+          items: [item],
+          span: mod.span,
+        };
+        return AilGenerator.generate(scopedMod);
+      }
+    }
+  }
+
+  const isLeadingDotOrHash = trimmedSel.startsWith(".") || trimmedSel.startsWith("#");
+  const parts = isLeadingDotOrHash ? [trimmedSel] : trimmedSel.split(/\.|::/);
   const className = parts.length >= 2 ? parts[0].trim() : undefined;
-  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : symbolSelector.trim();
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : trimmedSel;
   const normMember = normalizeIdentForMatch(memberName);
 
   const matchedItems: ModuleItem[] = [];
@@ -737,6 +906,31 @@ function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, f
             variants: matchedVariants.length > 0 ? matchedVariants : item.variants,
           });
         }
+      } else if (item.kind === "ConstDecl" && item.value.kind === "RecordLiteralExpr") {
+        const keyParts =
+          item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
+            ? parts.slice(1)
+            : parts;
+        const sliced = sliceRecordLiteralByPath(item.value, keyParts);
+        if (sliced) {
+          matchedItems.push({
+            ...item,
+            name: sliced.leafName,
+            value: sliced.value,
+          });
+        }
+      } else if (item.kind === "ComponentDecl") {
+        const layoutSel =
+          item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
+            ? memberName
+            : trimmedSel;
+        const matchedLayout = matchLayoutNodes(item.layout, layoutSel);
+        if (matchedLayout.length > 0) {
+          matchedItems.push({
+            ...item,
+            layout: matchedLayout,
+          });
+        }
       }
     } else {
       if (
@@ -766,6 +960,23 @@ function extractSymbolFromAilSource(ailSource: string, symbolSelector: string, f
             staticBlocks: [],
           };
           matchedItems.push(scopedClass);
+        }
+      } else if (item.kind === "ConstDecl" && item.value.kind === "RecordLiteralExpr") {
+        const sliced = sliceRecordLiteralByPath(item.value, [memberName]);
+        if (sliced) {
+          matchedItems.push({
+            ...item,
+            name: sliced.leafName,
+            value: sliced.value,
+          });
+        }
+      } else if (item.kind === "ComponentDecl") {
+        const matchedLayout = matchLayoutNodes(item.layout, memberName);
+        if (matchedLayout.length > 0) {
+          matchedItems.push({
+            ...item,
+            layout: matchedLayout,
+          });
         }
       }
     }
@@ -882,7 +1093,21 @@ export async function generateContext(
     const imports = extractImportsFromFile(item.filePath);
     for (const imp of imports) {
       const specifier = imp.source;
-      const importedSymbols = imp.specifiers.map((s) => s.name);
+      let importedSymbols = imp.specifiers.map((s) => s.name);
+
+      // When symbol-scoped at depth 0, prune imported symbols/dependencies not referenced by the sliced symbol
+      if (item.currentDepth === 0 && options.symbol && importedSymbols.length > 0 && !importedSymbols.includes("*")) {
+        const usedSpecs = imp.specifiers.filter((s) => {
+          const localIdent = s.alias ?? s.name;
+          const esc = localIdent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          return new RegExp(`\\b${esc}\\b`).test(targetContent);
+        });
+        if (usedSpecs.length === 0) {
+          continue;
+        }
+        importedSymbols = usedSpecs.map((s) => s.name);
+      }
+
       const isExternal = isExternalSpecifier(specifier);
       let resolvedPath: string | undefined = undefined;
 
@@ -961,13 +1186,26 @@ export async function generateContext(
   // Target body selection
   let targetBody = options.outlineTarget ? targetOutline : targetContent;
 
+  // In symbol-scoped mode, only include idioms referenced in targetBody
+  let bundleIdioms = activeIdioms;
+  if (options.symbol && activeIdioms && Object.keys(activeIdioms).length > 0) {
+    const filteredIdioms: Record<string, ProjectIdiomDefinition> = {};
+    for (const [k, def] of Object.entries(activeIdioms)) {
+      const normName = (def.name || k).startsWith("$") ? (def.name || k) : `$${def.name || k}`;
+      if (targetBody.includes(normName)) {
+        filteredIdioms[k] = def;
+      }
+    }
+    bundleIdioms = Object.keys(filteredIdioms).length > 0 ? filteredIdioms : undefined;
+  }
+
   // Build formatted bundle
   let formattedBundle = formatBundle(
     displayTargetPath,
     targetBody,
     dependencies,
     callers,
-    activeIdioms,
+    bundleIdioms,
   );
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -980,7 +1218,7 @@ export async function generateContext(
         targetBody,
         dependencies,
         callers,
-        activeIdioms,
+        bundleIdioms,
       );
       tokenCount = estimateTokens(formattedBundle);
     }

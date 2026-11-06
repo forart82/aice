@@ -18,6 +18,7 @@ import type {
   CallExpr,
   ClassDecl,
   ClosureExpr,
+  ComponentDecl,
   ConstDecl,
   DestructureBinding,
   Expr,
@@ -27,6 +28,7 @@ import type {
   IdentifierExpr,
   IfStmt,
   IndexExpr,
+  LayoutNode,
   LetBinding,
   LiteralExpr,
   MatchStmt,
@@ -47,7 +49,7 @@ import { parse } from "../core/parser.js";
 import { type Span } from "../core/span.js";
 import { AilGenerator } from "../decompiler/ail-generator.js";
 import { decompile } from "../decompiler/index.js";
-import { detectTargetFromPath } from "../emitters/index.js";
+import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 import {
   findProjectRoot,
   isProjectIdiomsEnabled,
@@ -146,9 +148,14 @@ export function validateIdiomDefinitions(
   const normalizedMap = new Map<string, ProjectIdiomDefinition>();
   for (const [key, def] of Object.entries(idioms)) {
     const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
-    normalizedMap.set(normName, { ...def, name: normName });
+    const templateAil = def.templateAil ?? (def as { template?: string }).template ?? "";
+    const params = (def.params ?? []).map((p) =>
+      typeof p === "string" ? { name: p } : p,
+    );
+    const normDef: ProjectIdiomDefinition = { ...def, name: normName, templateAil, params };
+    normalizedMap.set(normName, normDef);
     // Validate template syntax by parsing
-    getOrParseTemplate({ ...def, name: normName });
+    getOrParseTemplate(normDef);
   }
 
   const knownNames = new Set<string>(normalizedMap.keys());
@@ -202,12 +209,13 @@ function setCachedTemplate(key: string, result: ParsedTemplate): void {
  * Parses an idiom's templateAil string into template AST statement(s) or expression.
  */
 function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
-  const cacheKey = `${def.name}::${def.kind}::${def.templateAil}`;
+  const rawTemplate = def.templateAil ?? (def as { template?: string }).template ?? "";
+  const cacheKey = `${def.name}::${def.kind}::${rawTemplate}`;
   const cached = templateCache.get(cacheKey);
   if (cached) return cached;
 
   if (def.kind === "expr") {
-    const wrapper = `fn __t():\n  ret ${def.templateAil}\n`;
+    const wrapper = `fn __t():\n  ret ${rawTemplate}\n`;
     const mod = parse(wrapper, "<template>");
     const fn = mod.items[0] as FunctionDecl;
     const body = fn.body as Block;
@@ -221,7 +229,7 @@ function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
   }
 
   // kind === "stmt" | "block"
-  const indented = def.templateAil
+  const indented = rawTemplate
     .split(/\r?\n/)
     .map((line) => (line.trim().length > 0 ? `  ${line}` : ""))
     .join("\n");
@@ -511,18 +519,21 @@ function expandModuleIdiomsInternal(
 
   function buildSubst(def: ProjectIdiomDefinition, args: Expr[]): Map<string, Expr> {
     const subst = new Map<string, Expr>();
-    for (let i = 0; i < def.params.length; i++) {
-      const p = def.params[i];
+    const rawParams = def.params ?? [];
+    for (let i = 0; i < rawParams.length; i++) {
+      const rawP = rawParams[i] as ProjectIdiomParam | string;
+      const pName = typeof rawP === "string" ? rawP : rawP.name;
+      const pDefault = typeof rawP === "string" ? undefined : rawP.defaultValue;
       const arg =
         args[i] ??
-        (p.defaultValue !== undefined
-          ? parseDefaultExpr(p.defaultValue)
+        (pDefault !== undefined
+          ? parseDefaultExpr(pDefault)
           : {
               kind: "IdentifierExpr",
               name: "nil",
               span: clonedMod.span,
             });
-      subst.set(p.name, arg);
+      subst.set(pName, arg);
       subst.set(`$${i}`, arg);
     }
     return subst;
@@ -911,6 +922,17 @@ function expandModuleIdiomsInternal(
       }
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       item.value = transformExpr(item.value);
+    } else if (item.kind === "ComponentDecl") {
+      const transformLayout = (node: LayoutNode) => {
+        for (const attr of node.attributes) {
+          if (attr.value) attr.value = transformExpr(attr.value);
+        }
+        if (node.childExpr) node.childExpr = transformExpr(node.childExpr);
+        for (const ch of node.children) transformLayout(ch);
+      };
+      for (const node of item.layout) {
+        transformLayout(node);
+      }
     }
   }
 
@@ -1463,9 +1485,22 @@ export function collapseModuleIdioms(
   const generator = new AilGenerator();
 
   // Sort idioms by tokensPerOccurrenceSaved descending
-  const sortedIdioms = Object.values(idioms).sort(
-    (a, b) => b.tokensPerOccurrenceSaved - a.tokensPerOccurrenceSaved,
-  );
+  const sortedIdioms = Object.entries(idioms)
+    .map(([key, def]): ProjectIdiomDefinition => {
+      const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
+      const templateAil = def.templateAil ?? (def as { template?: string }).template ?? "";
+      const params = (def.params ?? []).map((p) =>
+        typeof p === "string" ? { name: p } : p,
+      );
+      return {
+        ...def,
+        name: normName,
+        templateAil,
+        params,
+        tokensPerOccurrenceSaved: def.tokensPerOccurrenceSaved ?? 10,
+      };
+    })
+    .sort((a, b) => b.tokensPerOccurrenceSaved - a.tokensPerOccurrenceSaved);
 
   const stmtIdioms = sortedIdioms.filter((i) => i.kind === "stmt" || i.kind === "block");
   const exprIdioms = sortedIdioms.filter((i) => i.kind === "expr");
@@ -1821,6 +1856,18 @@ export function collapseModuleIdioms(
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       currentSymbol = item.name;
       item.value = collapseExpr(item.value);
+    } else if (item.kind === "ComponentDecl") {
+      currentSymbol = item.name;
+      const collapseLayout = (node: LayoutNode) => {
+        for (const attr of node.attributes) {
+          if (attr.value) attr.value = collapseExpr(attr.value);
+        }
+        if (node.childExpr) node.childExpr = collapseExpr(node.childExpr);
+        for (const ch of node.children) collapseLayout(ch);
+      };
+      for (const node of item.layout) {
+        collapseLayout(node);
+      }
     }
   }
 
@@ -2224,6 +2271,17 @@ function collectOccurrencesAcrossFiles(
         }
       } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
         collectExistingCallsInExpr(item.value, item.name);
+      } else if (item.kind === "ComponentDecl") {
+        const collectLayout = (node: LayoutNode) => {
+          for (const attr of node.attributes) {
+            if (attr.value) collectExistingCallsInExpr(attr.value, item.name);
+          }
+          if (node.childExpr) collectExistingCallsInExpr(node.childExpr, item.name);
+          for (const ch of node.children) collectLayout(ch);
+        };
+        for (const node of item.layout) {
+          collectLayout(node);
+        }
       }
     }
 
@@ -2700,6 +2758,30 @@ export async function updateProjectIdiom(
             updatedOccurrences += collapsedCount;
             fileModified = true;
           }
+        }
+      } else if (
+        item.kind === "ConstDecl" ||
+        item.kind === "VarDecl" ||
+        item.kind === "ComponentDecl"
+      ) {
+        const singleMod: Module = {
+          kind: "Module",
+          path: mod.path,
+          items: [structuredClone(item)],
+          span: mod.span,
+        };
+        const { collapsedCount } = collapseModuleIdioms(singleMod, {
+          [normName]: oldDef,
+        });
+        if (collapsedCount > 0) {
+          const { ast: collapsedFull } = collapseModuleIdioms(mod, {
+            [normName]: oldDef,
+          });
+          const expandedFull = expandModuleIdioms(collapsedFull, candidateIdioms);
+          currentNativeSource = emitTarget(expandedFull, targetLang);
+          updatedOccurrences += collapsedCount;
+          fileModified = true;
+          break;
         }
       }
     }

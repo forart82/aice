@@ -144,7 +144,7 @@ export class EmitterContext {
  */
 export function detectTargetFromPath(filePath: string): TargetLanguage {
   const clean = filePath.replace(/\.ail$/, "");
-  if (clean.endsWith(".tsx")) return "tsx";
+  if (clean.endsWith(".tsx") || clean.endsWith(".jsx")) return "tsx";
   if (clean.endsWith(".ts")) return "typescript";
   if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs")) return "javascript";
   if (clean.endsWith(".py")) return "python";

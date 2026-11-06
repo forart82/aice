@@ -4,8 +4,8 @@
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C600%20passing-brightgreen)](tests/)
-[![Token Savings](https://img.shields.io/badge/Token%20Savings-25%25%20--%2063%25-orange)](src/tokenomics/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C623%20passing-brightgreen)](tests/)
+[![Token Savings](https://img.shields.io/badge/Token%20Savings-25%25%20--%2098%25-orange)](src/tokenomics/)
 
 > **A token-efficient, strongly-typed, homoiconic bidirectional programming language and transpiler engine engineered for autonomous AI code generation, zero-loss roundtripping, and non-invasive side-by-side adoption.**
 
@@ -76,7 +76,40 @@ Evaluated across **100 distinct polyglot cases & situations** comparing **Withou
 | **10. Real-World E2E, MCP, LSP & Shield** | 10 | **10/10** | 50,913 | 18,392 | **-63.88%** |
 | **TOTAL (100 Cases / 10 Categories)** | **100** | **100/100 (100%)** | **107,453** | **34,115** | **-68.25% (-74.50% avg)** |
 
-Full 100-row table and reproducible suite: see [`docs/BENCHMARK_100_ON_THE_FLY.md`](docs/BENCHMARK_100_ON_THE_FLY.md) and run `bun run benchmark:100`.
+Full 100-row table and reproducible suite: see [`docs/BENCHMARK_100_ON_THE_FLY.md`](docs/BENCHMARK_100_ON_THE_FLY.md) and run `npm run benchmark:100`.
+
+### Table 4: 500-Case Progressive On-the-Fly Benchmark (`#001` -> `#500`) (`docs/BENCHMARK_500_ON_THE_FLY.md`)
+Evaluated across **500 progressively more complex benchmarks (`complexity[i] > complexity[i-1]`)** comparing **Without AIL at All (Raw Native)** vs. **Without AIL On-the-Fly (Legacy Side-by-Side `.ail` Twin)** vs. **With AIL On-the-Fly (Twinless + Smart Multi-File Idioms)**:
+- **Total Progressive Cases**: `500/500 (100% Win Rate)`
+- **Without AIL at All Tokens**: `4,592,533`
+- **Without AIL On-the-Fly (Legacy Twin) Tokens**: `3,969,306`
+- **With AIL On-the-Fly Tokens**: `108,994` (**`-97.63%` vs Raw**, **`-97.25%` vs Legacy Twin**, `0` `.ail` files on disk)
+
+See [`docs/BENCHMARK_500_ON_THE_FLY.md`](docs/BENCHMARK_500_ON_THE_FLY.md) and run `npm run benchmark:500`.
+
+### Table 5: 500-Per-Language & File-Type Progressive Benchmark (15 × 500 = 7,500 Cases) (`docs/BENCHMARK_500_PER_LANGUAGE.md`)
+Evaluated across **500 progressively more complex benchmarks (`#001` -> `#500`) for EACH of the 15 supported programming languages and file types** (`7,500` total benchmarks):
+
+| Language / File Type | Ext | Benchmarks | Progressive Complexity | Wins vs Without AIL | Wins vs Legacy Twin | Without AIL Tokens | Legacy Twin Tokens | With AIL On-the-Fly Tokens | Savings vs Raw | Savings vs Twin |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TypeScript (.ts)** | `.ts` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,823,290 | 3,963,730 | 93,160 | **-98.07%** | **-97.65%** |
+| **React TSX (.tsx)** | `.tsx` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 5,266,610 | 4,392,010 | 98,680 | **-98.13%** | **-97.75%** |
+| **JavaScript (.js)** | `.js` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,697,260 | 3,950,980 | 93,160 | **-98.02%** | **-97.64%** |
+| **Python (.py)** | `.py` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,452,960 | 4,422,800 | 104,680 | **-97.65%** | **-97.63%** |
+| **Go (.go)** | `.go` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,142,560 | 3,969,980 | 92,160 | **-97.78%** | **-97.68%** |
+| **Rust (.rs)** | `.rs` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,593,990 | 4,001,560 | 94,160 | **-97.95%** | **-97.65%** |
+| **C++ (.cpp)** | `.cpp` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,739,090 | 3,963,730 | 93,160 | **-98.03%** | **-97.65%** |
+| **C# (.cs)** | `.cs` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,807,210 | 4,020,270 | 96,160 | **-98.00%** | **-97.61%** |
+| **Kotlin (.kt)** | `.kt` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,836,250 | 4,296,850 | 161,620 | **-96.66%** | **-96.24%** |
+| **PHP (.php)** | `.php` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 5,581,530 | 3,850,240 | 148,840 | **-97.33%** | **-96.13%** |
+| **CSS (.css)** | `.css` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 2,856,170 | 2,909,710 | 103,480 | **-96.38%** | **-96.44%** |
+| **HTML (.html)** | `.html` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 3,922,390 | 3,774,360 | 138,820 | **-96.46%** | **-96.32%** |
+| **JSON (.json)** | `.json` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 5,990,350 | 4,302,270 | 88,440 | **-98.52%** | **-97.94%** |
+| **YAML (.yaml)** | `.yaml` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 4,635,390 | 4,302,270 | 88,440 | **-98.09%** | **-97.94%** |
+| **Twig (.twig)** | `.twig` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 3,587,800 | 3,421,440 | 126,260 | **-96.48%** | **-96.31%** |
+| **TOTAL (15 Dialects)** | **All** | **7,500** | **`15 × 500`** | **7,500/7,500 (100%)** | **7,500/7,500 (100%)** | **68,932,850** | **59,542,200** | **1,621,220** | **-97.65%** | **-97.28%** |
+
+See [`docs/BENCHMARK_500_PER_LANGUAGE.md`](docs/BENCHMARK_500_PER_LANGUAGE.md) and run `npm run benchmark:500:languages`.
 
 ---
 

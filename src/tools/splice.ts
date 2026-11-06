@@ -8,12 +8,15 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import postcss from "postcss";
+import YAML from "yaml";
 import ts from "../compat/typescript.js";
 import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   resolveTargetOutputPathForConfig,
+  stripJsonComments,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
 import type {
@@ -30,6 +33,7 @@ import type {
   Statement,
   TypeDecl,
 } from "../core/ast.js";
+import { astToValue } from "../core/data-converter.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
@@ -104,6 +108,8 @@ export interface TargetSymbolInfo {
     | "enum"
     | "const"
     | "var"
+    | "component"
+    | "style"
     | "method"
     | "property"
     | "field"
@@ -116,7 +122,17 @@ export interface TargetSymbolInfo {
  * Supports top-level declarations and nested members via dot or double-colon syntax (Parent.child or Parent::child).
  */
 export function findSpliceTargetSymbol(ast: Module, symbol: string): TargetSymbolInfo | undefined {
-  const isNested = symbol.includes(".") || symbol.includes("::");
+  // Check StyleDecl first (CSS selectors often start with '.')
+  for (const item of ast.items) {
+    if (
+      item.kind === "StyleDecl" &&
+      (item.name === symbol || item.name.replace(/^[.#]/, "") === symbol.replace(/^[.#]/, ""))
+    ) {
+      return { name: item.name, node: item, kind: "style" };
+    }
+  }
+
+  const isNested = (symbol.includes(".") && !symbol.startsWith(".")) || symbol.includes("::");
   if (isNested) {
     const parts = symbol.split(/\.|::/);
     if (parts.length >= 2) {
@@ -173,6 +189,12 @@ export function findSpliceTargetSymbol(ast: Module, symbol: string): TargetSymbo
     }
     if (item.kind === "VarDecl" && item.name === symbol) {
       return { name: symbol, node: item, kind: "var" };
+    }
+    if (item.kind === "ComponentDecl" && item.name === symbol) {
+      return { name: symbol, node: item, kind: "component" };
+    }
+    if (item.kind === "StyleDecl" && item.name === symbol) {
+      return { name: symbol, node: item, kind: "style" };
     }
     if (item.kind === "FunctionDecl" && item.name === "__top_level__") {
       const block = item.body as Block;
@@ -1691,6 +1713,11 @@ function normalizeSelfAndThisInStmt(stmt: Statement, useThis: boolean): void {
         else normalizeSelfAndThisInExpr(c.body, useThis);
       }
       break;
+    case "TryStmt":
+      normalizeSelfAndThisInBlock(stmt.tryBlock, useThis);
+      if (stmt.catchBlock) normalizeSelfAndThisInBlock(stmt.catchBlock, useThis);
+      if (stmt.finallyBlock) normalizeSelfAndThisInBlock(stmt.finallyBlock, useThis);
+      break;
   }
 }
 
@@ -2392,7 +2419,7 @@ function tryEmitNonCallableAilSnippet(
 ): string | undefined {
   const trimmed = rawSnippet.trim();
   const isNonCallableAil =
-    /^(?:pub\s+)?(?:type|rec|enum|interface|class|const|val|mut)\b/.test(trimmed);
+    /^(?:pub\s+)?(?:type|rec|enum|interface|class|const|val|mut|component|style)\b/.test(trimmed);
   if (!isNonCallableAil) return undefined;
 
   let normalizedNonCallable = trimmed;
@@ -2418,6 +2445,8 @@ function tryEmitNonCallableAilSnippet(
         item.kind === "TypeDecl" ||
         item.kind === "ConstDecl" ||
         item.kind === "VarDecl" ||
+        item.kind === "ComponentDecl" ||
+        item.kind === "StyleDecl" ||
         (item.kind === "ClassDecl" && (!className || isClassContainerTarget))
       ) {
         const singleMod: Module = {
@@ -2686,13 +2715,373 @@ function emitNativeSnippetForContext(
   return emitted;
 }
 
-function spliceNativeSource(
+function spliceDialectNativeSource(
+  nativeSource: string,
+  options: SpliceOptions,
+  filePath: string,
+  targetLang: TargetLanguage,
+  idioms?: Record<string, ProjectIdiomDefinition>,
+): SpliceResult | undefined {
+  const anchorSymbol = options.symbol ?? options.insertAfter ?? options.insertBefore;
+  const rawSnippet = options.code ?? options.body ?? "";
+
+  if (targetLang === "css") {
+    const root = postcss.parse(nativeSource, { from: filePath });
+    const emitCssSnippet = (selectorFallback: string): string => {
+      const trimmed = rawSnippet.trim();
+      if (!trimmed) return "";
+      if (trimmed.includes("{") && trimmed.endsWith("}")) {
+        return trimmed;
+      }
+      const ailText = trimmed.startsWith("style ")
+        ? trimmed
+        : `style ${selectorFallback}:\n${indentCode(trimmed, "  ")}`;
+      const mod = parse(ailText, filePath);
+      const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+      return emitTarget(expanded, "css", { watermark: false }).trim();
+    };
+
+    if (options.append && !anchorSymbol) {
+      const emitted = emitCssSnippet(".rule");
+      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
+      return {
+        success: true,
+        filePath,
+        newSnippet: emitted,
+        modifiedCode,
+        newAilSource: modifiedCode,
+        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
+      };
+    }
+
+    if (!anchorSymbol) {
+      throw new Error("Must specify target symbol with --symbol when splicing CSS file");
+    }
+
+    const cleanAnchor = anchorSymbol.trim().replace(/^[.#]/, "");
+    let matchedRule: postcss.Rule | undefined;
+    root.walkRules((rule) => {
+      if (matchedRule) return;
+      const sel = rule.selector.trim();
+      const cleanSel = sel.replace(/^[.#]/, "");
+      if (
+        sel === anchorSymbol.trim() ||
+        cleanSel === cleanAnchor ||
+        cleanSel.replace(/[-_]/g, "").toLowerCase() === cleanAnchor.replace(/[-_]/g, "").toLowerCase()
+      ) {
+        matchedRule = rule;
+      }
+    });
+
+    if (!matchedRule || !matchedRule.source?.start || !matchedRule.source?.end) {
+      throw new Error(`CSS selector '${anchorSymbol}' not found in ${filePath}`);
+    }
+
+    const startOffset = matchedRule.source.start.offset;
+    const endOffset = matchedRule.source.end.offset;
+    const originalSnippet = nativeSource.slice(startOffset, endOffset);
+    let newSnippet = "";
+    let modifiedCode = nativeSource;
+
+    if (options.delete) {
+      let delEnd = endOffset;
+      while (delEnd < nativeSource.length && (nativeSource[delEnd] === "\r" || nativeSource[delEnd] === "\n")) {
+        delEnd++;
+      }
+      modifiedCode = `${nativeSource.slice(0, startOffset)}${nativeSource.slice(delEnd)}`;
+    } else if (options.insertBefore || options.insertAfter) {
+      newSnippet = emitCssSnippet(matchedRule.selector.trim());
+      if (options.insertBefore) {
+        modifiedCode = `${nativeSource.slice(0, startOffset)}${newSnippet}\n\n${nativeSource.slice(startOffset)}`;
+      } else {
+        modifiedCode = `${nativeSource.slice(0, endOffset)}\n\n${newSnippet}${nativeSource.slice(endOffset)}`;
+      }
+    } else {
+      newSnippet = emitCssSnippet(matchedRule.selector.trim());
+      modifiedCode = `${nativeSource.slice(0, startOffset)}${newSnippet}${nativeSource.slice(endOffset)}`;
+    }
+
+    return {
+      success: true,
+      filePath,
+      symbol: anchorSymbol,
+      originalSnippet,
+      newSnippet,
+      diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+      modifiedCode,
+      newAilSource: modifiedCode,
+      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+    };
+  }
+
+  if (targetLang === "json" || targetLang === "yaml") {
+    let docObj: Record<string, any> = {};
+    const leadingYamlComments: string[] = [];
+    if (targetLang === "json") {
+      const trimmed = nativeSource.trim();
+      if (trimmed) {
+        try {
+          docObj = JSON.parse(nativeSource);
+        } catch {
+          docObj = JSON.parse(stripJsonComments(nativeSource));
+        }
+      }
+    } else {
+      for (const line of nativeSource.split("\n")) {
+        if (line.trim().startsWith("#")) leadingYamlComments.push(line);
+        else if (line.trim().length > 0) break;
+      }
+      docObj = (YAML.parse(nativeSource) as Record<string, any>) ?? {};
+    }
+
+    const parseSnippetValue = (): any => {
+      const trimmed = rawSnippet.trim();
+      if (!trimmed) return {};
+      // Try parsing as AIL ConstDecl or expression (with idiom expansion!)
+      const candidates = [
+        trimmed,
+        /^(?:pub\s+)?(?:const|val|mut)\s+/.test(trimmed) ? trimmed : `pub const __v = ${trimmed}`,
+      ];
+      for (const cand of candidates) {
+        try {
+          const mod = parse(cand, filePath);
+          const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+          const first = expanded.items[0];
+          if (first && (first.kind === "ConstDecl" || first.kind === "VarDecl")) {
+            return astToValue(first.value);
+          }
+          if (first && first.kind === "FunctionDecl" && "statements" in first.body) {
+            const st = first.body.statements[0];
+            if (st && st.kind === "LetBinding") return astToValue(st.init);
+            if (st && st.kind === "AssignStmt") return astToValue(st.value);
+            if (st && st.kind === "ExprStmt") return astToValue(st.expr);
+          }
+        } catch {
+          // continue
+        }
+      }
+      if (targetLang === "json") {
+        return JSON.parse(stripJsonComments(trimmed));
+      }
+      return YAML.parse(trimmed);
+    };
+
+    if (!anchorSymbol && !options.append) {
+      throw new Error(`Must specify target key with --symbol when splicing ${targetLang.toUpperCase()} file`);
+    }
+
+    const keyParts = (anchorSymbol ?? "config").split(".").filter(Boolean);
+    if (keyParts.length > 1 && keyParts[0] === "config" && !Object.hasOwn(docObj, "config")) {
+      keyParts.shift();
+    }
+
+    let parent: any = docObj;
+    for (let i = 0; i < keyParts.length - 1; i++) {
+      const k = keyParts[i];
+      if (parent[k] === undefined || typeof parent[k] !== "object" || parent[k] === null) {
+        if (options.delete) {
+          throw new Error(`Key '${anchorSymbol}' not found in ${filePath}`);
+        }
+        parent[k] = {};
+      }
+      parent = parent[k];
+    }
+
+    const leafKey = keyParts[keyParts.length - 1];
+    if (!options.append && !options.insertAfter && !options.insertBefore && !(leafKey in parent) && !(keyParts.length === 1 && leafKey === "config")) {
+      throw new Error(`Key '${anchorSymbol}' not found in ${filePath}`);
+    }
+
+    const origVal = leafKey === "config" && !(leafKey in parent) ? docObj : parent[leafKey];
+    const originalSnippet =
+      targetLang === "json" ? JSON.stringify(origVal, null, 2) : YAML.stringify(origVal).trimEnd();
+
+    let newSnippet = "";
+    if (options.delete) {
+      delete parent[leafKey];
+    } else {
+      const newVal = parseSnippetValue();
+      if (leafKey === "config" && !(leafKey in parent) && typeof newVal === "object" && newVal !== null) {
+        docObj = newVal;
+      } else {
+        parent[leafKey] = newVal;
+      }
+      newSnippet =
+        targetLang === "json" ? JSON.stringify(newVal, null, 2) : YAML.stringify(newVal).trimEnd();
+    }
+
+    const modifiedCode =
+      targetLang === "json"
+        ? `${JSON.stringify(docObj, null, 2)}\n`
+        : `${leadingYamlComments.length > 0 ? `${leadingYamlComments.join("\n")}\n` : ""}${YAML.stringify(docObj)}`;
+
+    return {
+      success: true,
+      filePath,
+      symbol: anchorSymbol,
+      originalSnippet,
+      newSnippet,
+      diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+      modifiedCode,
+      newAilSource: modifiedCode,
+      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+    };
+  }
+
+  if (targetLang === "html" || targetLang === "twig") {
+    const emitTemplateFragment = (): string => {
+      const trimmed = rawSnippet.trim();
+      if (!trimmed) return "";
+      if (trimmed.startsWith("<") || trimmed.startsWith("{%")) {
+        return trimmed;
+      }
+      const ailText = trimmed.startsWith("component ")
+        ? trimmed
+        : `component __Frag():\n${indentCode(trimmed, "  ")}`;
+      const mod = parse(ailText, filePath);
+      const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+      let emitted = emitTarget(expanded, targetLang, { watermark: false }).trim();
+      if (targetLang === "html") {
+        emitted = emitted.replace(/^<!DOCTYPE html>\s*/i, "").trim();
+      }
+      return emitted;
+    };
+
+    if (options.append && !anchorSymbol) {
+      const emitted = emitTemplateFragment();
+      const modifiedCode = `${nativeSource.trimEnd()}\n${emitted}\n`;
+      return {
+        success: true,
+        filePath,
+        newSnippet: emitted,
+        modifiedCode,
+        newAilSource: modifiedCode,
+        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
+      };
+    }
+
+    if (!anchorSymbol) {
+      throw new Error(`Must specify target selector with --symbol when splicing ${targetLang.toUpperCase()} file`);
+    }
+
+    const sel = anchorSymbol.trim();
+    const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block:)/, "");
+
+    let spanStart = -1;
+    let spanEnd = -1;
+
+    // 1. Check Twig {% block <name> %}...{% endblock %}
+    if (targetLang === "twig") {
+      const blockRe = new RegExp(
+        `\\{%[-~]?\\s*block\\s+${cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b[\\s\\S]*?\\{%[-~]?\\s*endblock(?:\\s+${cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})?\\s*[-~]?%\\}`,
+      );
+      const m = blockRe.exec(nativeSource);
+      if (m && m.index !== undefined) {
+        spanStart = m.index;
+        spanEnd = m.index + m[0].length;
+      }
+    }
+
+    // 2. Check HTML/Twig element by id, class, or tag name
+    if (spanStart < 0) {
+      const openTagRe = /<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>/g;
+      let match: RegExpExecArray | null = null;
+      while ((match = openTagRe.exec(nativeSource)) !== null) {
+        const tag = match[1];
+        const attrs = match[2] ?? "";
+        const isIdMatch = new RegExp(`\\bid=["']${cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["']`).test(attrs);
+        const isClassMatch = new RegExp(
+          `\\bclass=["'][^"']*\\b${cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b[^"']*["']`,
+        ).test(attrs);
+        const isTagMatch = tag.toLowerCase() === cleanSel.toLowerCase();
+
+        if (
+          (sel.startsWith("#") && isIdMatch) ||
+          (sel.startsWith(".") && isClassMatch) ||
+          (!sel.startsWith("#") && !sel.startsWith(".") && (isTagMatch || isIdMatch || isClassMatch))
+        ) {
+          spanStart = match.index;
+          if (match[0].endsWith("/>")) {
+            spanEnd = match.index + match[0].length;
+          } else {
+            const tagRe = new RegExp(`<(\\/?)${tag}\\b[^>]*>`, "gi");
+            tagRe.lastIndex = match.index + match[0].length;
+            let depth = 1;
+            let tMatch: RegExpExecArray | null = null;
+            while (depth > 0 && (tMatch = tagRe.exec(nativeSource)) !== null) {
+              if (tMatch[1] === "/") {
+                depth--;
+                if (depth === 0) {
+                  spanEnd = tMatch.index + tMatch[0].length;
+                  break;
+                }
+              } else if (!tMatch[0].endsWith("/>")) {
+                depth++;
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    if (spanStart < 0 || spanEnd < spanStart) {
+      throw new Error(`Template element or block '${anchorSymbol}' not found in ${filePath}`);
+    }
+
+    const originalSnippet = nativeSource.slice(spanStart, spanEnd);
+    let newSnippet = "";
+    let modifiedCode = nativeSource;
+
+    if (options.delete) {
+      modifiedCode = `${nativeSource.slice(0, spanStart)}${nativeSource.slice(spanEnd)}`;
+    } else if (options.insertBefore || options.insertAfter) {
+      newSnippet = emitTemplateFragment();
+      if (options.insertBefore) {
+        modifiedCode = `${nativeSource.slice(0, spanStart)}${newSnippet}\n${nativeSource.slice(spanStart)}`;
+      } else {
+        modifiedCode = `${nativeSource.slice(0, spanEnd)}\n${newSnippet}${nativeSource.slice(spanEnd)}`;
+      }
+    } else {
+      newSnippet = emitTemplateFragment();
+      modifiedCode = `${nativeSource.slice(0, spanStart)}${newSnippet}${nativeSource.slice(spanEnd)}`;
+    }
+
+    return {
+      success: true,
+      filePath,
+      symbol: anchorSymbol,
+      originalSnippet,
+      newSnippet,
+      diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+      modifiedCode,
+      newAilSource: modifiedCode,
+      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+    };
+  }
+
+  return undefined;
+}
+
+export function spliceNativeSource(
   nativeSource: string,
   options: SpliceOptions,
   filePath: string,
   idioms?: Record<string, ProjectIdiomDefinition>,
 ): SpliceResult {
   const targetLang = detectTargetFromPath(filePath);
+  if (
+    targetLang === "css" ||
+    targetLang === "json" ||
+    targetLang === "yaml" ||
+    targetLang === "html" ||
+    targetLang === "twig"
+  ) {
+    const dialectRes = spliceDialectNativeSource(nativeSource, options, filePath, targetLang, idioms);
+    if (dialectRes) return dialectRes;
+  }
+
   const anchorSymbol = options.symbol ?? options.insertAfter ?? options.insertBefore;
   const rawSnippet = options.code ?? options.body ?? "";
 

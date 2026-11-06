@@ -290,19 +290,35 @@ Evaluated across **100 distinct cases & situations** comparing **Without AIL (Ra
 - **Total Tokens With AIL On-the-Fly**: **34,110 tokens**
 - **Total Net Tokens Saved**: **73,311 tokens (-68.25% overall reduction, -74.49% mean per-case reduction)**
 
+### 6.4 Table 4: 500-Case Progressive Complexity Benchmark (`docs/BENCHMARK_500_ON_THE_FLY.md`)
+Evaluated across **500 progressively complex cases (`#001` -> `#500`, `complexity[i] > complexity[i-1]`)** comparing **With AIL On-the-Fly (`mode: "twinless"`)** vs. **Without AIL On-the-Fly (Legacy `.ail` Twin Workflow)** vs. **Without AIL at All (Raw Native Workflow)**:
+- **Pass Rate & Win Rate**: **500 / 500 (100.0%)** against **both** Without AIL On-the-Fly and Without AIL at All (`0` `.ail` files on disk)
+- **Total Tokens Without AIL at All**: **4,592,533 tokens**
+- **Total Tokens Without AIL On-the-Fly (Legacy Twin)**: **3,969,306 tokens**
+- **Total Tokens With AIL On-the-Fly**: **108,994 tokens**
+- **Total Net Tokens Saved**: **4,483,539 tokens vs. Without AIL at All (-97.63%)** and **3,860,312 tokens vs. Without AIL On-the-Fly (-97.25%)**
+
+### 6.5 Table 5: 500-Per-Language & File-Type Progressive Benchmark (`docs/BENCHMARK_500_PER_LANGUAGE.md`)
+Evaluated across **500 progressive benchmarks for each of the 15 supported programming languages and file types (`15 × 500 = 7,500` benchmarks)**: TypeScript (`.ts`), React (`.tsx`), JavaScript (`.js`), Python (`.py`), Go (`.go`), Rust (`.rs`), C++ (`.cpp`), C# (`.cs`), Kotlin (`.kt`), PHP (`.php`), CSS (`.css`), HTML (`.html`), JSON (`.json`), YAML (`.yaml`), and Twig (`.twig`):
+- **Pass Rate & Win Rate**: **7,500 / 7,500 (100.0%)** across all 15 supported dialects (`500/500 = 100.0%` per dialect, `0` `.ail` files on disk)
+- **Total Tokens Without AIL at All**: **68,932,850 tokens**
+- **Total Tokens Without AIL On-the-Fly (Legacy Twin)**: **59,542,200 tokens**
+- **Total Tokens With AIL On-the-Fly**: **1,621,220 tokens**
+- **Total Net Tokens Saved**: **67,311,630 tokens vs. Without AIL at All (-97.65%)** and **57,920,980 tokens vs. Without AIL On-the-Fly (-97.28%)**
+
 ---
 
 ## 7. Twinless On-the-Fly Mode & Smart Multi-File Idioms Specification
 
 In addition to Side-by-Side mode, AIL 2.0 supports **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `ail.config.json`):
-1. **Zero `.ail` Files on Disk**: All source files remain in their native target formats (`*.ts`, `*.tsx`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`).
-2. **In-RAM Decompilation & `$idiom` Collapsing**: `ail outline <file>` and `ail context <file> [-s <symbol>]` decompile native files in memory and collapse active project `$idioms` on-the-fly.
+1. **Zero `.ail` Files on Disk across All 15 Dialects**: All source files remain in their native target formats (`*.ts`, `*.tsx`, `*.js`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`, `*.json`, `*.yaml`, `*.twig`).
+2. **In-RAM Decompilation, Symbol Slicing & `$idiom` Collapsing**: `ail outline <file>` and `ail context <file> [-s <symbol>]` decompile native files in memory, slice callable symbols, CSS selectors (`StyleDecl`), JSON/YAML keys & dot-paths (`RecordLiteralExpr`), and HTML/Twig/JSX elements/blocks (`LayoutNode`), prune unused imports and unreferenced `$idioms`, and collapse active project `$idioms` on-the-fly.
 3. **Smart Multi-File Idioms (`ail idioms scan | read | update | on | off`)**:
-   - `ail idioms scan` mines repeated expressions (including nested compound calls) and statement blocks directly from native files via structural anti-unification and stores SHA-256 content-addressed provenance in `.ail-cache/idioms.json`.
+   - `ail idioms scan` mines repeated expressions (including nested compound calls and `RecordLiteralExpr` data objects) and statement blocks directly from native files via structural anti-unification and stores SHA-256 content-addressed provenance in `.ail-cache/idioms.json`.
    - `ail idioms read $name` reports the idiom template, parameter list, and every `file:line` occurrence with bound call-site arguments across the codebase.
    - `ail idioms update $name "<newTemplate>" [--params <spec>]` rewrites all occurrences across all native files in a single atomic transaction, supporting parameter reordering, duplication, arity reduction/expansion with defaults, capture-avoiding alpha-renaming, recursion cycle detection (`IdiomCycleError`), and atomic multi-file rollback on failure.
 4. **Forgiving Direct-to-Native Surgical Splice (`ail splice`)**:
-   - Accepts pure AIL, AIL with `$idioms`, raw native target code, or hybrid "Frankenstein" syntax, plus `--body` and `--batch` multi-file atomic splices.
+   - Accepts pure AIL, AIL with `$idioms`, raw native target code, or hybrid "Frankenstein" syntax, plus `--body` and `--batch` multi-file atomic splices across all 15 supported target dialects (including PostCSS selector splices for `.css`, key/dot-path splices for `.json`/`.yaml`, and tag/`#id`/`.class`/`{% block %}` splices for `.html`/`.twig`).
    - Replaces only the exact AST declaration byte-span in the native file, guaranteeing 100% bit-identical preservation of all surrounding comments, decorators, and formatting.
 
 ---
@@ -337,6 +353,8 @@ ail decompile <targetFile>           # Decompiles target file into .ail
 
 # Quality Gates, Benchmarks & Diagnostics
 bun run benchmark:100                # Executes the 100-Case Deep Twinless On-the-Fly Benchmark
+bun run benchmark:500                # Executes the 500-Case Progressive Complexity Benchmark (#001 -> #500)
+bun run benchmark:500-per-lang       # Executes the 500-Per-Language Benchmark (15 dialects x 500 = 7,500 cases)
 ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness
 ail fix <file.ail> [--dry-run]       # Autonomously self-repairs fixable diagnostics
 ail roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
@@ -345,4 +363,5 @@ ail verify-tokenomics [dir] --check-drift # Audits token savings and enforces ze
 ail lsp                              # Starts Language Server Protocol over stdio
 ail mcp                              # Starts Model Context Protocol server over stdio
 ```
+
 
