@@ -4,7 +4,7 @@
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C546%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C600%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-25%25%20--%2063%25-orange)](src/tokenomics/)
 
 > **A token-efficient, strongly-typed, homoiconic bidirectional programming language and transpiler engine engineered for autonomous AI code generation, zero-loss roundtripping, and non-invasive side-by-side adoption.**
@@ -64,17 +64,17 @@ Evaluated across **100 distinct polyglot cases & situations** comparing **Withou
 
 | Category | Cases | Wins | Without AIL Tokens | With AIL On-the-Fly Tokens | Net Savings % |
 | :--- | :---: | :---: | :---: | :---: | :---: |
-| **1. On-the-Fly Structural Outline (`ail outline`)** | 10 | **10/10** | 3,425 | 817 | **-76.15%** |
-| **2. On-the-Fly Context & Symbol Slicing (`ail context`)** | 10 | **10/10** | 8,708 | 3,522 | **-59.55%** |
-| **3. Direct-to-Native Splice (AIL & `$idioms`)** | 10 | **10/10** | 8,500 | 380 | **-95.53%** |
-| **4. Forgiving Frankenstein & Raw Splice (`ail splice`)** | 10 | **10/10** | 7,172 | 412 | **-94.26%** |
-| **5. Advanced TypeScript & OOP Edge Cases** | 10 | **10/10** | 8,500 | 314 | **-96.31%** |
-| **6. Polyglot Direct-to-Native Splice (Py/Go/Rust/C++/C#/Kt/PHP)** | 10 | **10/10** | 2,175 | 384 | **-82.34%** |
-| **7. Smart Multi-File Idioms Discovery (`ail idioms scan/read`)** | 10 | **10/10** | 3,319 | 1,284 | **-61.31%** |
-| **8. Smart Multi-File Idiom Mutation & Safety (`ail idioms update`)** | 10 | **10/10** | 5,863 | 173 | **-97.05%** |
-| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | **10/10** | 8,996 | 6,969 | **-22.53%** |
-| **10. Real-World E2E, MCP, LSP & Shield** | 10 | **10/10** | 50,763 | 19,855 | **-60.89%** |
-| **TOTAL (100 Cases / 10 Categories)** | **100** | **100/100 (100%)** | **107,421** | **34,110** | **-68.25% (-74.49% avg)** |
+| **1. On-the-Fly Structural Outline (`ail outline`)** | 10 | **10/10** | 3,118 | 861 | **-72.39%** |
+| **2. On-the-Fly Context & Symbol Slicing (`ail context`)** | 10 | **10/10** | 8,265 | 4,650 | **-43.74%** |
+| **3. Direct-to-Native Splice (AIL & `$idioms`)** | 10 | **10/10** | 8,500 | 383 | **-95.49%** |
+| **4. Forgiving Frankenstein & Raw Splice (`ail splice`)** | 10 | **10/10** | 7,514 | 412 | **-94.52%** |
+| **5. Advanced TypeScript & OOP Edge Cases** | 10 | **10/10** | 8,500 | 289 | **-96.60%** |
+| **6. Polyglot Direct-to-Native Splice (Py/Go/Rust/C++/C#/Kt/PHP)** | 10 | **10/10** | 2,730 | 387 | **-85.82%** |
+| **7. Smart Multi-File Idioms Discovery (`ail idioms scan/read`)** | 10 | **10/10** | 3,752 | 1,477 | **-60.63%** |
+| **8. Smart Multi-File Idiom Mutation & Safety (`ail idioms update`)** | 10 | **10/10** | 5,165 | 198 | **-96.17%** |
+| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | **10/10** | 8,996 | 7,066 | **-21.45%** |
+| **10. Real-World E2E, MCP, LSP & Shield** | 10 | **10/10** | 50,913 | 18,392 | **-63.88%** |
+| **TOTAL (100 Cases / 10 Categories)** | **100** | **100/100 (100%)** | **107,453** | **34,115** | **-68.25% (-74.50% avg)** |
 
 Full 100-row table and reproducible suite: see [`docs/BENCHMARK_100_ON_THE_FLY.md`](docs/BENCHMARK_100_ON_THE_FLY.md) and run `bun run benchmark:100`.
 

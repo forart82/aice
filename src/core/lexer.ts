@@ -564,14 +564,35 @@ export function scanRawTokens(
       }
       // Check if `/` can start a regex literal `/pattern/flags`
       const prevTok = rawTokens.length > 0 ? rawTokens[rawTokens.length - 1] : undefined;
+      let isHeaderLine = false;
+      for (let idx = rawTokens.length - 1; idx >= 0; idx--) {
+        const tk = rawTokens[idx].kind;
+        if (tk === "NEWLINE" || tk === "SEMICOLON") break;
+        if (
+          tk === "MODULE" ||
+          tk === "FROM" ||
+          tk === "IMPORT" ||
+          (tk === "IDENT" && rawTokens[idx].value === "use")
+        ) {
+          isHeaderLine = true;
+          break;
+        }
+      }
       const canStartRegex =
-        !prevTok ||
-        (prevTok.kind !== "IDENT" &&
-          prevTok.kind !== "NUMBER" &&
-          prevTok.kind !== "STRING" &&
-          prevTok.kind !== "RPAREN" &&
-          prevTok.kind !== "RBRACKET" &&
-          prevTok.kind !== "RBRACE");
+        !isHeaderLine &&
+        (!prevTok ||
+          (prevTok.kind !== "IDENT" &&
+            prevTok.kind !== "NUMBER" &&
+            prevTok.kind !== "STRING" &&
+            prevTok.kind !== "BOOLEAN" &&
+            prevTok.kind !== "RPAREN" &&
+            prevTok.kind !== "RBRACKET" &&
+            prevTok.kind !== "RBRACE" &&
+            prevTok.kind !== "DOT" &&
+            prevTok.kind !== "MODULE" &&
+            prevTok.kind !== "FROM" &&
+            prevTok.kind !== "IMPORT" &&
+            prevTok.kind !== "QUESTION"));
       if (canStartRegex && peek(1) !== " " && peek(1) !== "\t" && peek(1) !== "\n" && peek(1) !== "\r" && peek(1) !== "") {
         // Look ahead on the same line for closing unescaped `/`
         let scanOffset = 1;
@@ -597,12 +618,14 @@ export function scanRawTokens(
           while (/^[dgimsuvy]$/.test(peek(scanOffset))) {
             scanOffset++;
           }
-          let regexVal = "";
-          for (let k = 0; k < scanOffset; k++) {
-            regexVal += advance();
+          if (!isIdentPart(peek(scanOffset))) {
+            let regexVal = "";
+            for (let k = 0; k < scanOffset; k++) {
+              regexVal += advance();
+            }
+            rawTokens.push({ kind: "IDENT", value: regexVal, span: makeSpan(startPos) });
+            continue;
           }
-          rawTokens.push({ kind: "IDENT", value: regexVal, span: makeSpan(startPos) });
-          continue;
         }
       }
     }

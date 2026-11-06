@@ -744,10 +744,17 @@ export class RustDecompiler {
       }
     }
 
+    const baseName =
+      this.filePath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.rs(\.ail)?$/, "")
+        .replace(/\.ail$/, "") || "main";
+
     const ast: Module = {
       kind: "Module",
       items,
-      path: this.filePath,
+      path: baseName,
       span: emptySpan(),
     };
 

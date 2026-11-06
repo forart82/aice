@@ -819,6 +819,7 @@ interface NativeSpanInfo {
   goReceiver?: string;
   cppOutOfLine?: boolean;
   isClassContainer?: boolean;
+  origHeader?: string;
 }
 
 function getTsMemberName(member: ts.Node, sf: ts.SourceFile): string | undefined {
@@ -1156,37 +1157,137 @@ function locatePythonDeclarationSpan(
   };
 }
 
-function findMatchingBraceEnd(source: string, openBracePos: number): number {
+function findMatchingBraceEnd(
+  source: string,
+  openBracePos: number,
+  targetLang?: TargetLanguage,
+): number {
   let depth = 0;
   let i = openBracePos;
   const len = source.length;
+  const ppStack: Array<{ startDepth: number; maxEndDepth: number }> = [];
 
   while (i < len) {
     const ch = source[i];
     const next = source[i + 1];
 
-    // Line comment
-    if (ch === "/" && next === "/") {
+    // Preprocessor #if / #ifdef / #ifndef / #elif / #else / #endif at line start (C/C++/C#)
+    if (
+      (targetLang === "cpp" || targetLang === "csharp" || !targetLang) &&
+      (i === 0 || source[i - 1] === "\n")
+    ) {
+      const ppMatch = /^[ \t]*#[ \t]*(ifdef|ifndef|if|elif|else|endif)\b/.exec(source.slice(i));
+      if (ppMatch) {
+        const dir = ppMatch[1];
+        if (dir === "if" || dir === "ifdef" || dir === "ifndef") {
+          ppStack.push({ startDepth: depth, maxEndDepth: depth });
+        } else if ((dir === "elif" || dir === "else") && ppStack.length > 0) {
+          const top = ppStack[ppStack.length - 1];
+          top.maxEndDepth = Math.max(top.maxEndDepth, depth);
+          depth = top.startDepth;
+        } else if (dir === "endif" && ppStack.length > 0) {
+          const top = ppStack.pop()!;
+          depth = Math.max(top.maxEndDepth, depth);
+        }
+        while (i < len && source[i] !== "\n") i++;
+        continue;
+      }
+    }
+
+    // Line comment `//` or PHP `#` comment (not `#[` attribute)
+    if ((ch === "/" && next === "/") || (targetLang === "php" && ch === "#" && next !== "[")) {
       i += 2;
       while (i < len && source[i] !== "\n") i++;
       continue;
     }
-    // Block comment
+    // Block comment `/* ... */`
     if (ch === "/" && next === "*") {
       i += 2;
       while (i < len && !(source[i] === "*" && source[i + 1] === "/")) i++;
       i += 2;
       continue;
     }
-    // String or char literal
+    // Rust raw string literal `r#*"..."#*` or `br#*"..."#*`
+    if (
+      (ch === "r" || (ch === "b" && next === "r")) &&
+      (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
+    ) {
+      const rStart = ch === "b" ? i + 2 : i + 1;
+      let hashes = 0;
+      while (rStart + hashes < len && source[rStart + hashes] === "#") hashes++;
+      if (source[rStart + hashes] === '"') {
+        i = rStart + hashes + 1;
+        const closeSeq = `"${"#".repeat(hashes)}`;
+        const closeIdx = source.indexOf(closeSeq, i);
+        i = closeIdx >= 0 ? closeIdx + closeSeq.length : len;
+        continue;
+      }
+    }
+    // C++ raw string literal `R"delim(...)delim"`
+    if (
+      ch === "R" &&
+      next === '"' &&
+      (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
+    ) {
+      const openParen = source.indexOf("(", i + 2);
+      if (openParen >= 0 && openParen - (i + 2) <= 16) {
+        const delim = source.slice(i + 2, openParen);
+        if (!/[\s)\\]/.test(delim)) {
+          const closeSeq = `)${delim}"`;
+          const closeIdx = source.indexOf(closeSeq, openParen + 1);
+          i = closeIdx >= 0 ? closeIdx + closeSeq.length : len;
+          continue;
+        }
+      }
+    }
+    // C# verbatim string `@"..."`
+    if (ch === "@" && next === '"') {
+      i += 2;
+      while (i < len) {
+        if (source[i] === '"') {
+          if (source[i + 1] === '"') {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      continue;
+    }
+    // Triple-quoted string `"""..."""` (Kotlin, C#, Python)
+    if (ch === '"' && next === '"' && source[i + 2] === '"') {
+      const closeIdx = source.indexOf('"""', i + 3);
+      i = closeIdx >= 0 ? closeIdx + 3 : len;
+      continue;
+    }
+    // Single-quote `'` disambiguation: C++ digit separator (`1'000`) & Rust lifetime/label (`'a`, `'static`)
+    if (ch === "'") {
+      if (i > 0 && /[0-9a-fA-F]/.test(source[i - 1]) && /[0-9a-fA-F]/.test(next ?? "")) {
+        i++;
+        continue;
+      }
+      if (targetLang !== "php" && /^'[A-Za-z_][A-Za-z0-9_]*(?!')/.test(source.slice(i))) {
+        i++;
+        while (i < len && /[A-Za-z0-9_]/.test(source[i])) i++;
+        continue;
+      }
+    }
+    // Standard string or char literal
     if (ch === '"' || ch === "'" || ch === "`") {
       const quote = ch;
       i++;
       while (i < len && source[i] !== quote) {
-        if (source[i] === "\\" && quote !== "`") i += 2;
-        else i++;
+        if (source[i] === "\\" && quote !== "`") {
+          i += 2;
+        } else if (quote === "'" && targetLang !== "php" && source[i] === "\n") {
+          break;
+        } else {
+          i++;
+        }
       }
-      i++;
+      if (i < len && source[i] === quote) i++;
       continue;
     }
 
@@ -1249,7 +1350,7 @@ function locateBraceLanguageDeclarationSpan(
 
     const openBraceIdx = nativeSource.indexOf("{", tokenStart);
     if (openBraceIdx < 0) return undefined;
-    let declEnd = findMatchingBraceEnd(nativeSource, openBraceIdx);
+    let declEnd = findMatchingBraceEnd(nativeSource, openBraceIdx, targetLang);
     if (extra?.isClassContainer && nativeSource[declEnd] === ";") {
       declEnd++;
     }
@@ -1279,6 +1380,7 @@ function locateBraceLanguageDeclarationSpan(
       isExported,
       isStatic,
       isAsync,
+      origHeader: headerSlice,
       ...extra,
     };
   };
@@ -1360,7 +1462,7 @@ function locateBraceLanguageDeclarationSpan(
           resolvedClassName = m[1];
           containerWindows.push({
             start: openBrace + 1,
-            end: findMatchingBraceEnd(nativeSource, openBrace),
+            end: findMatchingBraceEnd(nativeSource, openBrace, targetLang),
             resolvedName: m[1],
           });
         }
@@ -1604,7 +1706,8 @@ function normalizeSelfAndThisInDecl(decl: FunctionDecl | MethodDecl, targetLang:
     targetLang === "javascript" ||
     targetLang === "csharp" ||
     targetLang === "cpp" ||
-    targetLang === "kotlin";
+    targetLang === "kotlin" ||
+    targetLang === "php";
   if ("statements" in decl.body) {
     normalizeSelfAndThisInBlock(decl.body, useThis);
   } else {
@@ -1810,6 +1913,7 @@ function emitExpandedDeclForTarget(
     memberName?: string;
     goReceiver?: string;
     cppOutOfLine?: boolean;
+    origHeader?: string;
   },
 ): string {
   const cloned = structuredClone(expandedDecl);
@@ -1888,6 +1992,9 @@ function emitExpandedDeclForTarget(
             `func ${origMeta.goReceiver} ${targetMethodName}(`,
           );
         }
+        if (origMeta?.origHeader && /\bint\b/.test(origMeta.origHeader) && !/\bint64\b/.test(origMeta.origHeader)) {
+          goLines[0] = goLines[0].replace(/\bint64\b/g, "int");
+        }
         return goLines.join("\n").trimEnd();
       }
     }
@@ -1906,15 +2013,21 @@ function emitExpandedDeclForTarget(
         let startIdx = clsIdx + 1;
         if (lines[startIdx]?.trim() === "public:") startIdx++;
         let endIdx = lines.length - 1;
-        while (endIdx > startIdx && /^};?\s*$/.test(lines[endIdx].trim())) {
+        while (endIdx > startIdx && lines[endIdx].trim() === "") {
           endIdx--;
         }
-        const inner = stripOneIndentLevel(lines.slice(startIdx, endIdx + 1), 2);
+        if (/^};?\s*$/.test(lines[endIdx]?.trim() ?? "")) {
+          endIdx--;
+        }
+        const inner = stripOneIndentLevel(lines.slice(startIdx, endIdx + 1), 4);
         if (origMeta?.cppOutOfLine && className && inner.length > 0) {
           inner[0] = inner[0].replace(
             new RegExp(`\\b(${methodNode.name})\\s*\\(`),
             `${className}::$1(`,
           );
+        }
+        if (inner.length > 0 && origMeta?.origHeader && /\bdouble\b/.test(origMeta.origHeader) && !/\bfloat\b/.test(origMeta.origHeader)) {
+          inner[0] = inner[0].replace(/\bfloat\b/g, "double");
         }
         return inner.join("\n").trimEnd();
       }
@@ -1995,7 +2108,16 @@ function emitExpandedDeclForTarget(
   };
 
   const emittedFn = emitTarget(tempMod, targetLang, { watermark: false }).trim();
-  const strippedFn = stripTopLevelLanguagePreamble(emittedFn, targetLang);
+  let strippedFn = stripTopLevelLanguagePreamble(emittedFn, targetLang);
+  if (targetLang === "go" && origMeta?.origHeader && /\bint\b/.test(origMeta.origHeader) && !/\bint64\b/.test(origMeta.origHeader)) {
+    const fnLines = strippedFn.split("\n");
+    fnLines[0] = fnLines[0].replace(/\bint64\b/g, "int");
+    strippedFn = fnLines.join("\n");
+  } else if (targetLang === "cpp" && origMeta?.origHeader && /\bdouble\b/.test(origMeta.origHeader) && !/\bfloat\b/.test(origMeta.origHeader)) {
+    const fnLines = strippedFn.split("\n");
+    fnLines[0] = fnLines[0].replace(/\bfloat\b/g, "double");
+    strippedFn = fnLines.join("\n");
+  }
   return targetLang === "typescript" || targetLang === "javascript"
     ? unwrapRedundantTsParens(strippedFn)
     : strippedFn;
@@ -2039,6 +2161,7 @@ export function spliceNativeSymbolFromExpandedAst(
       memberName: spanInfo.memberName,
       goReceiver: spanInfo.goReceiver,
       cppOutOfLine: spanInfo.cppOutOfLine,
+      origHeader: spanInfo.origHeader,
     },
   );
 
@@ -2554,6 +2677,7 @@ function emitNativeSnippetForContext(
     memberName: originalSnippet ? spanInfo?.memberName : decl.name,
     goReceiver: spanInfo?.goReceiver,
     cppOutOfLine: spanInfo?.cppOutOfLine,
+    origHeader: spanInfo?.origHeader,
   });
 
   if (leadingDecorators.length > 0) {

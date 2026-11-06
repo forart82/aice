@@ -5,26 +5,26 @@
 - **Total Cases & Situations Evaluated**: **100 / 100**
 - **Semantic & Zero-Twin Pass Rate**: **100 / 100 (100.0%)**
 - **AIL On-the-Fly Win Rate vs. Without AIL**: **100 / 100 (100.0%)**
-- **Total Tokens WITHOUT AIL (Raw Native Baseline)**: **107,421 tokens**
-- **Total Tokens WITH AIL On-the-Fly**: **34,109 tokens**
-- **Total Net Tokens Saved**: **73,312 tokens (68.25% overall reduction, 74.49% mean per-case reduction)**
+- **Total Tokens WITHOUT AIL (Raw Native Baseline)**: **107,453 tokens**
+- **Total Tokens WITH AIL On-the-Fly**: **34,115 tokens**
+- **Total Net Tokens Saved**: **73,338 tokens (68.25% overall reduction, 74.50% mean per-case reduction)**
 - **Disk Pollution (`.ail` Twin Files Created)**: **0 files (100% Twinless On-the-Fly)**
 
 ## Category Breakdown
 
 | Category | Cases | AIL Wins | Without AIL (Tokens) | With AIL On-the-Fly (Tokens) | Net Saved | Reduction % |
 | :--- | :---: | :---: | ---: | ---: | ---: | ---: |
-| **1. On-the-Fly Structural Outline** | 10 | 10/10 | 3,102 | 838 | 2,264 | **-72.99%** |
-| **2. On-the-Fly Context & Symbol Slicing** | 10 | 10/10 | 8,265 | 4,666 | 3,599 | **-43.55%** |
+| **1. On-the-Fly Structural Outline** | 10 | 10/10 | 3,118 | 861 | 2,257 | **-72.39%** |
+| **2. On-the-Fly Context & Symbol Slicing** | 10 | 10/10 | 8,265 | 4,650 | 3,615 | **-43.74%** |
 | **3. Direct-to-Native Splice (AIL & $idioms)** | 10 | 10/10 | 8,500 | 383 | 8,117 | **-95.49%** |
 | **4. Forgiving Frankenstein & Raw Splice** | 10 | 10/10 | 7,514 | 412 | 7,102 | **-94.52%** |
 | **5. Advanced TypeScript & OOP Edge Cases** | 10 | 10/10 | 8,500 | 289 | 8,211 | **-96.60%** |
-| **6. Polyglot Direct-to-Native Splice** | 10 | 10/10 | 2,714 | 387 | 2,327 | **-85.74%** |
+| **6. Polyglot Direct-to-Native Splice** | 10 | 10/10 | 2,730 | 387 | 2,343 | **-85.82%** |
 | **7. Smart Multi-File Idioms Discovery** | 10 | 10/10 | 3,752 | 1,477 | 2,275 | **-60.63%** |
 | **8. Smart Multi-File Idiom Mutation & Safety** | 10 | 10/10 | 5,165 | 198 | 4,967 | **-96.17%** |
-| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | 10/10 | 8,996 | 7,067 | 1,929 | **-21.44%** |
+| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | 10/10 | 8,996 | 7,066 | 1,930 | **-21.45%** |
 | **10. Real-World E2E, MCP, LSP & Shield** | 10 | 10/10 | 50,913 | 18,392 | 32,521 | **-63.88%** |
-| **TOTAL / OVERALL** | **100** | **100/100 (100.0%)** | **107,421** | **34,109** | **73,312** | **-68.25%** |
+| **TOTAL / OVERALL** | **100** | **100/100 (100.0%)** | **107,453** | **34,115** | **73,338** | **-68.25%** |
 
 ## Complete 100-Case Benchmark Table
 
@@ -35,7 +35,7 @@
 | 003 | 1. On-the-Fly Structural Outline | Python module & class method signatures (`ail outline pipeline.py`) | Py | 357 | 107 | 250 | -70.03% | Yes | PASS (AIL Better) |
 | 004 | 1. On-the-Fly Structural Outline | Go struct & pointer-receiver methods (`ail outline collector.go`) | Go | 226 | 85 | 141 | -62.39% | Yes | PASS (AIL Better) |
 | 005 | 1. On-the-Fly Structural Outline | Rust struct & impl block signatures (`ail outline limiter.rs`) | Rust | 228 | 83 | 145 | -63.60% | Yes | PASS (AIL Better) |
-| 006 | 1. On-the-Fly Structural Outline | C++ class & out-of-line method skeleton (`ail outline controller.cpp`) | C++ | 216 | 72 | 144 | -66.67% | Yes | PASS (AIL Better) |
+| 006 | 1. On-the-Fly Structural Outline | C++ class & out-of-line method skeleton (`ail outline controller.cpp`) | C++ | 232 | 95 | 137 | -59.05% | Yes | PASS (AIL Better) |
 | 007 | 1. On-the-Fly Structural Outline | C# namespace & class contract outline (`ail outline LedgerProcessor.cs`) | C# | 171 | 54 | 117 | -68.42% | Yes | PASS (AIL Better) |
 | 008 | 1. On-the-Fly Structural Outline | Kotlin primary constructor & method outline (`ail outline SessionTracker.kt`) | Kotlin | 172 | 47 | 125 | -72.67% | Yes | PASS (AIL Better) |
 | 009 | 1. On-the-Fly Structural Outline | PHP class & typed method signatures (`ail outline PaymentGateway.php`) | PHP | 176 | 42 | 134 | -76.14% | Yes | PASS (AIL Better) |
@@ -45,7 +45,7 @@
 | 013 | 2. On-the-Fly Context & Symbol Slicing | Symbol-scoped TS method context (`ail context service.ts -s OrderOrchestrator.validateOrder`) | TS | 850 | 131 | 719 | -84.59% | Yes | PASS (AIL Better) |
 | 014 | 2. On-the-Fly Context & Symbol Slicing | Symbol-scoped Python method context (`ail context pipeline.py -s FeatureAggregator.record_sample`) | Py | 357 | 106 | 251 | -70.31% | Yes | PASS (AIL Better) |
 | 015 | 2. On-the-Fly Context & Symbol Slicing | Symbol-scoped Go receiver method context (`ail context collector.go -s CollectorService.RecordMetric`) | Go | 226 | 94 | 132 | -58.41% | Yes | PASS (AIL Better) |
-| 016 | 2. On-the-Fly Context & Symbol Slicing | Symbol-scoped Rust impl method context (`ail context limiter.rs -s RateLimiter::try_acquire`) | Rust | 228 | 86 | 142 | -62.28% | Yes | PASS (AIL Better) |
+| 016 | 2. On-the-Fly Context & Symbol Slicing | Symbol-scoped Rust impl method context (`ail context limiter.rs -s RateLimiter::try_acquire`) | Rust | 228 | 70 | 158 | -69.30% | Yes | PASS (AIL Better) |
 | 017 | 2. On-the-Fly Context & Symbol Slicing | Outline-only target + 1-hop contracts (`ail context service.ts --outline-target`) | TS | 1226 | 656 | 570 | -46.49% | Yes | PASS (AIL Better) |
 | 018 | 2. On-the-Fly Context & Symbol Slicing | Token-budgeted context packaging (`ail context service.ts --max-tokens 350`) | TS | 1226 | 288 | 938 | -76.51% | Yes | PASS (AIL Better) |
 | 019 | 2. On-the-Fly Context & Symbol Slicing | On-the-fly context with active `$idioms` collapsed (`ail context service.ts --idioms`) | TS | 850 | 717 | 133 | -15.65% | Yes | PASS (AIL Better) |
@@ -87,7 +87,7 @@
 | 055 | 6. Polyglot Direct-to-Native Splice | Go pointer-receiver method `CollectorService.ResetCollector` spliced from AIL | Go | 226 | 33 | 193 | -85.40% | Yes | PASS (AIL Better) |
 | 056 | 6. Polyglot Direct-to-Native Splice | Rust top-level `pub fn clamp_tokens` surgical splice from AIL | Rust | 228 | 48 | 180 | -78.95% | Yes | PASS (AIL Better) |
 | 057 | 6. Polyglot Direct-to-Native Splice | Rust `impl RateLimiter` method `try_acquire` surgical splice from AIL | Rust | 228 | 41 | 187 | -82.02% | Yes | PASS (AIL Better) |
-| 058 | 6. Polyglot Direct-to-Native Splice | C++ out-of-line `PidController::saturateOutput` method splice from AIL | C++ | 216 | 45 | 171 | -79.17% | Yes | PASS (AIL Better) |
+| 058 | 6. Polyglot Direct-to-Native Splice | C++ out-of-line `PidController::saturateOutput` method splice from AIL | C++ | 232 | 45 | 187 | -80.60% | Yes | PASS (AIL Better) |
 | 059 | 6. Polyglot Direct-to-Native Splice | C# class method `LedgerProcessor.ResetLedger` surgical splice from AIL | C# | 171 | 37 | 134 | -78.36% | Yes | PASS (AIL Better) |
 | 060 | 6. Polyglot Direct-to-Native Splice | Kotlin (`SessionTracker.clearSessions`) & PHP (`PaymentGateway.resetGateway`) splices | Kotlin/PHP | 348 | 72 | 276 | -79.31% | Yes | PASS (AIL Better) |
 | 061 | 7. Smart Multi-File Idioms Discovery | Native-first `ail idioms scan` across 4 `.ts` files with zero `.ail` files on disk | TS | 546 | 345 | 201 | -36.81% | Yes | PASS (AIL Better) |
@@ -118,7 +118,7 @@
 | 086 | 9. Polyglot On-the-Fly Decompile & Compression | TypeScript `switch`/`case` & `try`/`catch`/`finally` on-the-fly AIL decompile | TS | 92 | 86 | 6 | -6.52% | Yes | PASS (AIL Better) |
 | 087 | 9. Polyglot On-the-Fly Decompile & Compression | Python list comprehension & `try`/`except` on-the-fly AIL decompile | Py | 84 | 79 | 5 | -5.95% | Yes | PASS (AIL Better) |
 | 088 | 9. Polyglot On-the-Fly Decompile & Compression | Go `struct` & `if err != nil` error handling on-the-fly AIL decompile | Go | 226 | 207 | 19 | -8.41% | Yes | PASS (AIL Better) |
-| 089 | 9. Polyglot On-the-Fly Decompile & Compression | Rust `struct` & `impl` methods on-the-fly AIL decompile | Rust | 228 | 190 | 38 | -16.67% | Yes | PASS (AIL Better) |
+| 089 | 9. Polyglot On-the-Fly Decompile & Compression | Rust `struct` & `impl` methods on-the-fly AIL decompile | Rust | 228 | 189 | 39 | -17.11% | Yes | PASS (AIL Better) |
 | 090 | 9. Polyglot On-the-Fly Decompile & Compression | Tiny `< 15` line native `.ts` function decompiles with positive token savings | TS | 44 | 41 | 3 | -6.82% | Yes | PASS (AIL Better) |
 | 091 | 10. Real-World E2E, MCP, LSP & Shield | Real-World `poc_real_case/snake_ts` 4-module on-the-fly structural outline | TS | 17702 | 9323 | 8379 | -47.33% | Yes | PASS (AIL Better) |
 | 092 | 10. Real-World E2E, MCP, LSP & Shield | Real-World `snake_ts` Twinless idiom scan + 1-hop context on `Vec2.ts` | TS | 9461 | 5551 | 3910 | -41.33% | Yes | PASS (AIL Better) |

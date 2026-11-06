@@ -460,6 +460,8 @@ public:
     void resetState() {
         integral = 0.0;
     }
+
+    double saturateOutput(double value, double minLimit, double maxLimit);
 };
 
 double PidController:: saturateOutput(double value, double minLimit, double maxLimit) {
@@ -2263,7 +2265,8 @@ ret {"mean": 1.0}`;
           countTokens(FIXTURE_GO_SERVICE),
           countTokens(snippet),
           res.success &&
-            res.newAilSource.includes("func (s *CollectorService) ResetCollector() int") &&
+            res.newAilSource.includes("func (s *CollectorService) ResetCollector() int {") &&
+            !res.newAilSource.includes("int64") &&
             res.newAilSource.includes("s.Count = 0"),
         ),
       );
@@ -2351,7 +2354,10 @@ ret {"mean": 1.0}`;
           countTokens(FIXTURE_CPP_CONTROLLER),
           countTokens(snippet),
           res.success &&
-            res.newAilSource.includes("PidController::saturateOutput") &&
+            res.newAilSource.includes(
+              "double PidController::saturateOutput(double value, double minLimit, double maxLimit)",
+            ) &&
+            res.newAilSource.trimEnd().endsWith("    }\n}") &&
             res.newAilSource.includes("computeCommand"),
         ),
       );
@@ -2426,7 +2432,9 @@ ret {"mean": 1.0}`;
           ktRes.success &&
             ktRes.newAilSource.includes("fun clearSessions") &&
             phpRes.success &&
-            phpRes.newAilSource.includes("function resetGateway"),
+            phpRes.newAilSource.includes("function resetGateway") &&
+            phpRes.newAilSource.includes("$this->attempts = 0;") &&
+            !phpRes.newAilSource.includes("self::attempts"),
         ),
       );
     }

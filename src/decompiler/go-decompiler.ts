@@ -686,10 +686,17 @@ export class GoDecompiler {
       }
     }
 
+    const baseName =
+      this.filePath
+        .split(/[/\\]/)
+        .pop()
+        ?.replace(/\.go(\.ail)?$/, "")
+        .replace(/\.ail$/, "") || "main";
+
     const ast: Module = {
       kind: "Module",
       items,
-      path: packageName ?? this.filePath,
+      path: packageName ?? baseName,
       span: emptySpan(),
     };
 
