@@ -49,6 +49,12 @@ describe("500-Per-Language & File-Type Progressive On-the-Fly Benchmark Suite (1
           expect(r.complexityScore).toBeGreaterThan(
             s.results[i - 1].complexityScore,
           );
+          expect(r.withoutAilAtAllTokens).toBeGreaterThan(
+            s.results[i - 1].withoutAilAtAllTokens,
+          );
+          expect(r.withoutAilOnTheFlyTokens).toBeGreaterThan(
+            s.results[i - 1].withoutAilOnTheFlyTokens,
+          );
         }
         expect(r.semanticPass, `${r.id} semanticPass: ${r.diagnostic}`).toBe(true);
         expect(r.zeroAilFilesOnDisk).toBe(true);

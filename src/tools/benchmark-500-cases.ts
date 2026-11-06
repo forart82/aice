@@ -134,8 +134,117 @@ export interface ProgressiveScenarioWorkload {
     statementDepth: number;
     idiomCount: number;
     depCount: number;
+    depSymbolCount?: number;
     rawLines: number;
   };
+}
+
+function buildDepModuleSource(
+  lang: TargetLanguage,
+  d: number,
+  itemCount: number,
+): string {
+  switch (lang) {
+    case "typescript":
+    case "tsx":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `export function depHelper_${d}_${k}(val: number): number { return val + ${d * 10 + k}; }`,
+      ).join("\n");
+    case "javascript":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `export function depHelper_${d}_${k}(val) { return val + ${d * 10 + k}; }`,
+      ).join("\n");
+    case "python":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `def dep_helper_${d}_${k}(val: int) -> int:\n    return val + ${d * 10 + k}`,
+      ).join("\n\n");
+    case "go":
+      return (
+        "package metrics\n\n" +
+        Array.from(
+          { length: itemCount },
+          (_, k) =>
+            `func DepHelper_${d}_${k}(val int) int {\n\treturn val + ${d * 10 + k}\n}`,
+        ).join("\n\n")
+      );
+    case "rust":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `pub fn dep_helper_${d}_${k}(val: i64) -> i64 {\n    return val + ${d * 10 + k};\n}`,
+      ).join("\n\n");
+    case "cpp":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `int dep_helper_${d}_${k}(int val) {\n  return val + ${d * 10 + k};\n}`,
+      ).join("\n\n");
+    case "csharp":
+      return (
+        `public class Dep_${d} {\n` +
+        Array.from(
+          { length: itemCount },
+          (_, k) =>
+            `    public int DepHelper_${d}_${k}(int val) { return val + ${d * 10 + k}; }`,
+        ).join("\n") +
+        `\n}`
+      );
+    case "kotlin":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `fun depHelper_${d}_${k}(valIn: Int): Int {\n    return valIn + ${d * 10 + k}\n}`,
+      ).join("\n\n");
+    case "php":
+      return (
+        "<?php\n" +
+        Array.from(
+          { length: itemCount },
+          (_, k) =>
+            `function dep_helper_${d}_${k}($val) {\n    return $val + ${d * 10 + k};\n}`,
+        ).join("\n\n")
+      );
+    case "css":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `.dep-token-${d}-${k} {\n  padding: ${4 + k}px;\n  margin: ${2 + d}px;\n}`,
+      ).join("\n\n");
+    case "json": {
+      const obj: Record<string, unknown> = {};
+      for (let k = 0; k < itemCount; k++) {
+        obj[`dep_${d}_${k}`] = { host: `dep-${d}-${k}.local`, port: 9000 + k };
+      }
+      return JSON.stringify(obj, null, 2);
+    }
+    case "yaml":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `dep_${d}_${k}:\n  host: dep-${d}-${k}.local\n  port: ${9000 + k}`,
+      ).join("\n");
+    case "html":
+      return (
+        `<div>\n` +
+        Array.from(
+          { length: itemCount },
+          (_, k) => `  <span id="dep-${d}-${k}">Dep ${d}-${k}</span>`,
+        ).join("\n") +
+        `\n</div>`
+      );
+    case "twig":
+      return Array.from(
+        { length: itemCount },
+        (_, k) =>
+          `{% block dep_${d}_${k} %}<span id="dep-${d}-${k}">{{ dep_${d}_${k} }}</span>{% endblock %}`,
+      ).join("\n");
+  }
 }
 
 /**
@@ -145,7 +254,7 @@ export interface ProgressiveScenarioWorkload {
  *  - Number of sibling symbols/rules/keys/elements increases monotonically
  *  - Number of statements/properties/attributes per symbol increases monotonically
  *  - Number of repetitive idiom occurrences increases monotonically
- *  - Number of auxiliary dependency modules increases monotonically
+ *  - Total number of auxiliary dependency symbols increases strictly at every single step (`1..500`)
  */
 export function buildProgressiveDialectWorkload(
   spec: SupportedDialectSpec,
@@ -154,7 +263,10 @@ export function buildProgressiveDialectWorkload(
   // Strictly increasing structural parameters derived from stepIndex (1..500)
   const symbolCount = 3 + Math.floor(stepIndex / 25); // 3 .. 23 symbols/rules/keys/sections
   const innerChecks = 2 + Math.floor(stepIndex / 50); // 2 .. 12 inner statements/props per symbol
-  const depCount = Math.floor((stepIndex - 1) / 50); // 0 .. 9 auxiliary modules
+  const fullDepBuckets = Math.floor((stepIndex - 1) / 25); // 0 .. 19 full dependency modules (10 items each)
+  const tailDepItems = 1 + ((stepIndex - 1) % 25); // 1 .. 25 items in frontier dependency module
+  const depCount = fullDepBuckets + 1; // 1 .. 20 auxiliary modules
+  const depSymbolCount = fullDepBuckets * 25 + tailDepItems; // === stepIndex (1 .. 500 strictly increasing!)
   const targetIdx = Math.min(symbolCount - 1, 1 + (stepIndex % Math.max(1, symbolCount - 1)));
   const expectedVersion = 1000 + stepIndex;
 
@@ -180,125 +292,16 @@ export function buildProgressiveDialectWorkload(
   };
 
   const depFiles: Array<{ filePath: string; nativeSource: string }> = [];
-  for (let d = 0; d < depCount; d++) {
-    const itemCount = 3 + d;
-    let depSource = "";
-    switch (spec.lang) {
-      case "typescript":
-      case "tsx":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `export function depHelper_${d}_${k}(val: number): number { return val + ${d * 10 + k}; }`,
-        ).join("\n");
-        break;
-      case "javascript":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `export function depHelper_${d}_${k}(val) { return val + ${d * 10 + k}; }`,
-        ).join("\n");
-        break;
-      case "python":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `def dep_helper_${d}_${k}(val: int) -> int:\n    return val + ${d * 10 + k}`,
-        ).join("\n\n");
-        break;
-      case "go":
-        depSource =
-          "package metrics\n\n" +
-          Array.from(
-            { length: itemCount },
-            (_, k) =>
-              `func DepHelper_${d}_${k}(val int) int {\n\treturn val + ${d * 10 + k}\n}`,
-          ).join("\n\n");
-        break;
-      case "rust":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `pub fn dep_helper_${d}_${k}(val: i64) -> i64 {\n    return val + ${d * 10 + k};\n}`,
-        ).join("\n\n");
-        break;
-      case "cpp":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `int dep_helper_${d}_${k}(int val) {\n  return val + ${d * 10 + k};\n}`,
-        ).join("\n\n");
-        break;
-      case "csharp":
-        depSource =
-          `public class Dep_${d} {\n` +
-          Array.from(
-            { length: itemCount },
-            (_, k) =>
-              `    public int DepHelper_${d}_${k}(int val) { return val + ${d * 10 + k}; }`,
-          ).join("\n") +
-          `\n}`;
-        break;
-      case "kotlin":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `fun depHelper_${d}_${k}(valIn: Int): Int {\n    return valIn + ${d * 10 + k}\n}`,
-        ).join("\n\n");
-        break;
-      case "php":
-        depSource =
-          "<?php\n" +
-          Array.from(
-            { length: itemCount },
-            (_, k) =>
-              `function dep_helper_${d}_${k}($val) {\n    return $val + ${d * 10 + k};\n}`,
-          ).join("\n\n");
-        break;
-      case "css":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `.dep-token-${d}-${k} {\n  padding: ${4 + k}px;\n  margin: ${2 + d}px;\n}`,
-        ).join("\n\n");
-        break;
-      case "json": {
-        const obj: Record<string, unknown> = {};
-        for (let k = 0; k < itemCount; k++) {
-          obj[`dep_${d}_${k}`] = { host: `dep-${d}-${k}.local`, port: 9000 + k };
-        }
-        depSource = JSON.stringify(obj, null, 2);
-        break;
-      }
-      case "yaml":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `dep_${d}_${k}:\n  host: dep-${d}-${k}.local\n  port: ${9000 + k}`,
-        ).join("\n");
-        break;
-      case "html":
-        depSource =
-          `<div>\n` +
-          Array.from(
-            { length: itemCount },
-            (_, k) => `  <span id="dep-${d}-${k}">Dep ${d}-${k}</span>`,
-          ).join("\n") +
-          `\n</div>`;
-        break;
-      case "twig":
-        depSource = Array.from(
-          { length: itemCount },
-          (_, k) =>
-            `{% block dep_${d}_${k} %}<span id="dep-${d}-${k}">{{ dep_${d}_${k} }}</span>{% endblock %}`,
-        ).join("\n");
-        break;
-    }
+  for (let d = 0; d < fullDepBuckets; d++) {
     depFiles.push({
-      filePath: `dep_${d}${spec.ext}`,
-      nativeSource: depSource,
+      filePath: `dep_full_${d}${spec.ext}`,
+      nativeSource: buildDepModuleSource(spec.lang, 10, 25),
     });
   }
+  depFiles.push({
+    filePath: `dep_tail_${tailDepItems}${spec.ext}`,
+    nativeSource: buildDepModuleSource(spec.lang, 10, tailDepItems),
+  });
 
   const filePath = `module_${String(stepIndex).padStart(3, "0")}${spec.ext}`;
 
@@ -905,7 +908,7 @@ export function buildProgressiveDialectWorkload(
       sections.push("</main>");
       const nativeSource = sections.join("\n") + "\n";
       const targetSymbol = `#panel-${targetIdx}`;
-      const ailSpliceSnippet = `<section id="panel-${targetIdx}" class="metric-panel-${targetIdx}"><h2>Upgraded ${expectedVersion}</h2></section>`;
+      const ailSpliceSnippet = `section.metric-panel-${targetIdx}#panel-${targetIdx}:\n  h2: "Upgraded ${expectedVersion}"`;
       const nativeRewriteOutput = nativeSource.replace(
         `<h2>Metric Panel ${targetIdx}</h2>`,
         `<h2>Upgraded ${expectedVersion}</h2>`,
@@ -924,6 +927,7 @@ export function buildProgressiveDialectWorkload(
           statementDepth: innerChecks,
           idiomCount: symbolCount * innerChecks,
           depCount,
+          depSymbolCount,
           rawLines: nativeSource.split("\n").length,
         },
       };
@@ -947,7 +951,7 @@ export function buildProgressiveDialectWorkload(
       }
       const nativeSource = blocks.join("\n\n") + "\n";
       const targetSymbol = `block:panel_${targetIdx}`;
-      const ailSpliceSnippet = `{% block panel_${targetIdx} %}<section id="panel-${targetIdx}"><h3>Twig Upgraded ${expectedVersion}</h3></section>{% endblock %}`;
+      const ailSpliceSnippet = `block(name: "panel_${targetIdx}"):\n  section#panel-${targetIdx}:\n    h3: "Twig Upgraded ${expectedVersion}"`;
       const nativeRewriteOutput = nativeSource.replace(
         `<h3>{{ title_${targetIdx} }}</h3>`,
         `<h3>Twig Upgraded ${expectedVersion}</h3>`,
@@ -966,6 +970,7 @@ export function buildProgressiveDialectWorkload(
           statementDepth: innerChecks,
           idiomCount: symbolCount * innerChecks,
           depCount,
+          depSymbolCount,
           rawLines: nativeSource.split("\n").length,
         },
       };
@@ -1144,12 +1149,17 @@ export function evaluateProgressiveWorkload(
     diagnostic = err instanceof Error ? err.message : String(err);
   }
 
-  // Deterministic strictly increasing complexity score combining structural depth + step index
+  // Deterministic strictly increasing complexity score derived purely from structural workload metrics
+  const depSymCount =
+    workload.structuralMetrics.depSymbolCount ??
+    workload.depFiles.reduce((acc, d) => {
+      const m = d.filePath.match(/dep_tail_(\d+)/);
+      return acc + (m ? Number(m[1]) : 25);
+    }, 0);
   const complexityScore =
-    index * 100 +
     workload.structuralMetrics.symbolCount * 10 +
     workload.structuralMetrics.statementDepth * 5 +
-    workload.structuralMetrics.depCount * 20;
+    depSymCount * 10;
   const strictComplexityIncrease = complexityScore > prevComplexityScore;
 
   const zeroAilFilesOnDisk = true;
@@ -1375,13 +1385,13 @@ export function formatBenchmark500MarkdownReport(summary: Benchmark500Summary): 
     `- **Overall AIL On-the-Fly Win Rate**: **\`${summary.ailOnTheFlyWinsAllCount}/${summary.totalCases} (${summary.winRatePct}%)\`**`,
   );
   lines.push(
-    `- **Total Tokens (Without AIL at All)**: \`${summary.totalWithoutAilAtAllTokens.toLocaleString()}\``,
+    `- **Total Tokens (Without AIL at All)**: \`${summary.totalWithoutAilAtAllTokens.toLocaleString("en-US")}\``,
   );
   lines.push(
-    `- **Total Tokens (Without AIL On-the-Fly / Legacy Twin)**: \`${summary.totalWithoutAilOnTheFlyTokens.toLocaleString()}\``,
+    `- **Total Tokens (Without AIL On-the-Fly / Legacy Twin)**: \`${summary.totalWithoutAilOnTheFlyTokens.toLocaleString("en-US")}\``,
   );
   lines.push(
-    `- **Total Tokens (With AIL On-the-Fly)**: \`${summary.totalWithAilOnTheFlyTokens.toLocaleString()}\``,
+    `- **Total Tokens (With AIL On-the-Fly)**: \`${summary.totalWithAilOnTheFlyTokens.toLocaleString("en-US")}\``,
   );
   lines.push("");
   lines.push("## Progressive Tier Breakdown (10 Tiers × 50 Cases)");
@@ -1394,7 +1404,7 @@ export function formatBenchmark500MarkdownReport(summary: Benchmark500Summary): 
   );
   for (const t of summary.tierSummaries) {
     lines.push(
-      `| ${t.tier} | ${t.cases} | ${t.wins}/${t.cases} | ${t.minComplexity}..${t.maxComplexity} | ${t.withoutAilAtAllTokens.toLocaleString()} | ${t.withoutAilOnTheFlyTokens.toLocaleString()} | ${t.withAilOnTheFlyTokens.toLocaleString()} | -${t.savingsVsWithoutAilAtAllPct}% | -${t.savingsVsWithoutOnTheFlyPct}% |`,
+      `| ${t.tier} | ${t.cases} | ${t.wins}/${t.cases} | ${t.minComplexity}..${t.maxComplexity} | ${t.withoutAilAtAllTokens.toLocaleString("en-US")} | ${t.withoutAilOnTheFlyTokens.toLocaleString("en-US")} | ${t.withAilOnTheFlyTokens.toLocaleString("en-US")} | -${t.savingsVsWithoutAilAtAllPct}% | -${t.savingsVsWithoutOnTheFlyPct}% |`,
     );
   }
   lines.push("");

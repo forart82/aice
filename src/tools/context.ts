@@ -183,12 +183,17 @@ export function resolveImportPath(
     probeList.push(`${baseWithoutExt}.tsx.ail`);
     probeList.push(`${baseWithoutExt}.ts`);
     probeList.push(`${baseWithoutExt}.tsx`);
+    probeList.push(`${baseWithoutExt}.js`);
     probeList.push(`${baseWithoutExt}.py.ail`);
     probeList.push(`${baseWithoutExt}.py`);
     probeList.push(`${baseWithoutExt}.cpp.ail`);
     probeList.push(`${baseWithoutExt}.cpp`);
     probeList.push(`${baseWithoutExt}.cs.ail`);
     probeList.push(`${baseWithoutExt}.cs`);
+    probeList.push(`${baseWithoutExt}.kt.ail`);
+    probeList.push(`${baseWithoutExt}.kt`);
+    probeList.push(`${baseWithoutExt}.php.ail`);
+    probeList.push(`${baseWithoutExt}.php`);
   }
 
   probeList.push(`${candidateBase}.ail`);
@@ -207,6 +212,16 @@ export function resolveImportPath(
   probeList.push(`${candidateBase}.cpp`);
   probeList.push(`${candidateBase}.cs.ail`);
   probeList.push(`${candidateBase}.cs`);
+  probeList.push(`${candidateBase}.kt.ail`);
+  probeList.push(`${candidateBase}.kt`);
+  probeList.push(`${candidateBase}.php.ail`);
+  probeList.push(`${candidateBase}.php`);
+  probeList.push(`${candidateBase}.twig`);
+  probeList.push(`${candidateBase}.html`);
+  probeList.push(`${candidateBase}.css`);
+  probeList.push(`${candidateBase}.json`);
+  probeList.push(`${candidateBase}.yaml`);
+  probeList.push(`${candidateBase}.yml`);
 
   // Directory index probes
   probeList.push(path.join(candidateBase, "index.ail"));
@@ -780,16 +795,19 @@ function matchLayoutNodes(nodes: LayoutNode[], rawSelector: string): LayoutNode[
           isMatch = true;
         }
       } else if (isBlock) {
-        const blkVal = getAttrStr(n, "twig_block") ?? getAttrStr(n, "block");
-        if (
-          (blkVal && (blkVal === cleanSel || normalizeIdentForMatch(blkVal) === normClean)) ||
-          (n.tag === "block" && getAttrStr(n, "name") === cleanSel)
-        ) {
+        const blkVal =
+          getAttrStr(n, "twig_block") ??
+          getAttrStr(n, "block") ??
+          (n.tag === "block" ? getAttrStr(n, "name") : undefined);
+        if (blkVal && (blkVal === cleanSel || normalizeIdentForMatch(blkVal) === normClean)) {
           isMatch = true;
         }
       } else {
         const idVal = getAttrStr(n, "id");
-        const blkVal = getAttrStr(n, "twig_block") ?? getAttrStr(n, "block");
+        const blkVal =
+          getAttrStr(n, "twig_block") ??
+          getAttrStr(n, "block") ??
+          (n.tag === "block" ? getAttrStr(n, "name") : undefined);
         const clsVal = getAttrStr(n, "class") ?? getAttrStr(n, "className") ?? "";
         const tokens = clsVal.split(/\s+/).filter(Boolean);
         if (

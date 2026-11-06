@@ -704,10 +704,17 @@ export class GameEngine {
         projectRoot: tmpDir,
       });
       expect(twigCtx.targetContent).toContain("Old Twig Header");
+      expect(twigCtx.targetContent).not.toContain("Keep Twig Footer");
+      const twigBareCtx = await generateContext(twigPath, {
+        symbol: "header",
+        projectRoot: tmpDir,
+      });
+      expect(twigBareCtx.targetContent).toContain("Old Twig Header");
+      expect(twigBareCtx.targetContent).not.toContain("Keep Twig Footer");
       await splice(twigPath, {
         projectRoot: tmpDir,
         symbol: "block:header",
-        code: `{% block header %}<header><h1>Upgraded Twig Header</h1></header>{% endblock %}`,
+        code: `block(name: "header"):\n  header:\n    h1: "Upgraded Twig Header"`,
       });
       const updatedTwig = fs.readFileSync(twigPath, "utf-8");
       expect(updatedTwig).toContain("Upgraded Twig Header");
@@ -743,6 +750,136 @@ export class GameEngine {
       const updatedGo = fs.readFileSync(goPath, "utf-8");
       expect(updatedGo).toContain("continue");
       expect(updatedGo).toContain("break");
+    });
+
+    it("handles nested Twig blocks (depth >= 3), HTML tags with '>' in quoted attributes & void elements, YAML anchors/aliases, and native data idiom scan/update", async () => {
+      // 1. Nested Twig blocks of depth >= 3
+      const nestedTwigPath = path.join(tmpDir, "nested.twig");
+      fs.writeFileSync(
+        nestedTwigPath,
+        [
+          `{% block main %}`,
+          `  {% block header %}`,
+          `    {% block brand %}<span>Old Brand</span>{% endblock %}`,
+          `  {% endblock %}`,
+          `  <p>Main Body Before</p>`,
+          `{% endblock %}`,
+          `{% block sidebar %}<aside>Keep Sidebar</aside>{% endblock %}`,
+        ].join("\n"),
+        "utf-8",
+      );
+      await splice(nestedTwigPath, {
+        projectRoot: tmpDir,
+        symbol: "block:main",
+        code: `block(name: "main"):\n  div#main-upgraded:\n    p: "Main Body Upgraded"`,
+      });
+      const afterNestedTwig = fs.readFileSync(nestedTwigPath, "utf-8");
+      expect(afterNestedTwig).toContain("Main Body Upgraded");
+      expect(afterNestedTwig).not.toContain("Main Body Before");
+      expect(afterNestedTwig).toContain("Keep Sidebar");
+
+      // 2. HTML with '>' inside quoted attribute strings, nested identical tags of depth > 4, and HTML5 void element (<input>)
+      const complexHtmlPath = path.join(tmpDir, "complex.html");
+      fs.writeFileSync(
+        complexHtmlPath,
+        [
+          `<main>`,
+          `  <div data-expr="a > b" id="deep-box" title="x > y">`,
+          `    <div data-d="1"><div data-d="2"><div data-d="3"><div data-d="4" data-cmp="10 > 5">Deep Old</div></div></div></div>`,
+          `  </div>`,
+          `  <input data-rule="len > 0" id="email-field" type="email">`,
+          `  <footer id="keep-foot">Footer Intact</footer>`,
+          `</main>`,
+        ].join("\n"),
+        "utf-8",
+      );
+      await splice(complexHtmlPath, {
+        projectRoot: tmpDir,
+        symbol: "#deep-box",
+        code: `div#deep-box:\n  span: "Deep Replaced"`,
+      });
+      await splice(complexHtmlPath, {
+        projectRoot: tmpDir,
+        symbol: "#email-field",
+        code: `<input id="email-field" type="email" required>`,
+      });
+      const afterComplexHtml = fs.readFileSync(complexHtmlPath, "utf-8");
+      expect(afterComplexHtml).toContain("Deep Replaced");
+      expect(afterComplexHtml).not.toContain("Deep Old");
+      expect(afterComplexHtml).toContain("required");
+      expect(afterComplexHtml).toContain("Footer Intact");
+
+      // 3. YAML with anchors (&def_cfg), merge aliases (<<: *def_cfg), comments, and --append
+      const anchorYamlPath = path.join(tmpDir, "anchored.yaml");
+      fs.writeFileSync(
+        anchorYamlPath,
+        [
+          `# Global defaults`,
+          `defaults: &def_cfg`,
+          `  timeout: 5000`,
+          `  retries: 3`,
+          `services:`,
+          `  # Auth service`,
+          `  auth:`,
+          `    <<: *def_cfg`,
+          `    host: auth.local`,
+          `    port: 8080`,
+          `  billing:`,
+          `    <<: *def_cfg`,
+          `    host: billing.local`,
+          `    port: 8081`,
+        ].join("\n") + "\n",
+        "utf-8",
+      );
+      await splice(anchorYamlPath, {
+        projectRoot: tmpDir,
+        symbol: "services.auth",
+        code: `{ host: "auth.v2.internal", port: 9443 }`,
+      });
+      await splice(anchorYamlPath, {
+        projectRoot: tmpDir,
+        append: true,
+        code: `pub const metrics = { enabled: true, port: 9090 }`,
+      });
+      const afterAnchorYaml = fs.readFileSync(anchorYamlPath, "utf-8");
+      expect(afterAnchorYaml).toContain("# Global defaults");
+      expect(afterAnchorYaml).toContain("&def_cfg");
+      expect(afterAnchorYaml).toContain("<<: *def_cfg");
+      expect(afterAnchorYaml).toContain("auth.v2.internal");
+      expect(afterAnchorYaml).toContain("9443");
+      expect(afterAnchorYaml).toContain("billing.local");
+      expect(afterAnchorYaml).toContain("metrics:");
+      expect(afterAnchorYaml).toContain("9090");
+
+      // 4. Native YAML/JSON workspace idiom scan & update without watermarks
+      const dataWs = path.join(tmpDir, "data_ws");
+      fs.mkdirSync(dataWs, { recursive: true });
+      const epJson = JSON.stringify(
+        {
+          svcA: { host: "a.internal", port: 8080, tls: true, retries: 3, timeoutMs: 5000 },
+          svcB: { host: "b.internal", port: 8081, tls: true, retries: 3, timeoutMs: 5000 },
+          svcC: { host: "c.internal", port: 8082, tls: true, retries: 3, timeoutMs: 5000 },
+        },
+        null,
+        2,
+      );
+      fs.writeFileSync(path.join(dataWs, "endpoints.json"), epJson, "utf-8");
+      const scannedData = scanProjectIdioms(dataWs, { minOccurrences: 3, minNetTokenSavings: 2 });
+      const minedIdiomNames = Object.keys(scannedData.idioms);
+      expect(minedIdiomNames.length).toBeGreaterThan(0);
+      const recIdiom = minedIdiomNames[0];
+      const updData = await updateProjectIdiom(
+        dataWs,
+        recIdiom,
+        "{ host: $0, port: $1, tls: true, retries: 5, timeoutMs: 9000 }",
+      );
+      expect(updData.updatedOccurrences).toBe(3);
+      const updatedEndpoints = JSON.parse(
+        fs.readFileSync(path.join(dataWs, "endpoints.json"), "utf-8"),
+      );
+      expect(updatedEndpoints.svcA.retries).toBe(5);
+      expect(updatedEndpoints.svcB.timeoutMs).toBe(9000);
+      expect(updatedEndpoints.svcC.retries).toBe(5);
     });
   });
 });

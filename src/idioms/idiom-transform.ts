@@ -1953,6 +1953,21 @@ const NATIVE_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".php",
   ".kt",
   ".kts",
+  ".html",
+  ".twig",
+  ".yaml",
+  ".yml",
+  ".json",
+]);
+
+const IGNORED_JSON_FILENAMES: ReadonlySet<string> = new Set([
+  "ail.config.json",
+  "package.json",
+  "package-lock.json",
+  "tsconfig.json",
+  "jsconfig.json",
+  "biome.json",
+  "rome.json",
 ]);
 
 function computeSha256(content: string): string {
@@ -2011,7 +2026,15 @@ function scanNativeCodeFiles(dir: string): string[] {
         results.push(...scanNativeCodeFiles(full));
       }
     } else if (entry.isFile()) {
-      if (entry.name.endsWith(".d.ts") || entry.name.endsWith(".ail")) continue;
+      if (
+        entry.name.endsWith(".d.ts") ||
+        entry.name.endsWith(".ail") ||
+        entry.name.endsWith(".ail.trivia.json") ||
+        IGNORED_JSON_FILENAMES.has(entry.name) ||
+        /^tsconfig\..*\.json$/.test(entry.name)
+      ) {
+        continue;
+      }
       const ext = path.extname(entry.name).toLowerCase();
       if (NATIVE_CODE_EXTENSIONS.has(ext)) {
         if (!fs.existsSync(`${full}.ail`)) {
@@ -2700,6 +2723,7 @@ export async function updateProjectIdiom(
     const targetLang = detectTargetFromPath(file.filePath);
     let currentNativeSource = file.rawSource;
     let fileModified = false;
+    let fileOccurrences = 0;
 
     for (const item of mod.items) {
       if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
@@ -2722,7 +2746,7 @@ export async function updateProjectIdiom(
             file.filePath,
             targetLang,
           );
-          updatedOccurrences += collapsedCount;
+          fileOccurrences += collapsedCount;
           fileModified = true;
         }
       } else if (item.kind === "ClassDecl") {
@@ -2755,7 +2779,7 @@ export async function updateProjectIdiom(
               targetLang,
               item.name,
             );
-            updatedOccurrences += collapsedCount;
+            fileOccurrences += collapsedCount;
             fileModified = true;
           }
         }
@@ -2774,12 +2798,12 @@ export async function updateProjectIdiom(
           [normName]: oldDef,
         });
         if (collapsedCount > 0) {
-          const { ast: collapsedFull } = collapseModuleIdioms(mod, {
+          const { ast: collapsedFull, collapsedCount: fullCount } = collapseModuleIdioms(mod, {
             [normName]: oldDef,
           });
           const expandedFull = expandModuleIdioms(collapsedFull, candidateIdioms);
-          currentNativeSource = emitTarget(expandedFull, targetLang);
-          updatedOccurrences += collapsedCount;
+          currentNativeSource = emitTarget(expandedFull, targetLang, { watermark: false });
+          fileOccurrences = fullCount;
           fileModified = true;
           break;
         }
@@ -2787,6 +2811,7 @@ export async function updateProjectIdiom(
     }
 
     if (fileModified) {
+      updatedOccurrences += fileOccurrences;
       fileBackups.set(file.filePath, file.rawSource);
       pendingWrites.set(file.filePath, currentNativeSource);
       modifiedFiles.push(file.filePath);

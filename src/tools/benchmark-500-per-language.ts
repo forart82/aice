@@ -223,27 +223,27 @@ export function formatAllDialects500MarkdownReport(
   lines.push(
     `- **Progressive Benchmarks per Language/File Type**: \`${summary.casesPerDialect}\` (\`#001\` -> \`#500\`)`,
   );
-  lines.push(`- **Total Benchmarks Executed**: **\`${summary.totalCases.toLocaleString()}\`**`);
+  lines.push(`- **Total Benchmarks Executed**: **\`${summary.totalCases.toLocaleString("en-US")}\`**`);
   lines.push(
     `- **Strictly Increasing Complexity in Every Language (\`#001 -> #500\`)**: \`${summary.allStrictProgressiveComplexity ? "YES (15/15 languages)" : "NO"}\``,
   );
   lines.push(
-    `- **AIL On-the-Fly Beats Without AIL at All**: \`${summary.totalBeatsWithoutAilAtAll.toLocaleString()}/${summary.totalCases.toLocaleString()}\` (\`-${summary.overallSavingsVsWithoutAilAtAllPct}%\` tokens)`,
+    `- **AIL On-the-Fly Beats Without AIL at All**: \`${summary.totalBeatsWithoutAilAtAll.toLocaleString("en-US")}/${summary.totalCases.toLocaleString("en-US")}\` (\`-${summary.overallSavingsVsWithoutAilAtAllPct}%\` tokens)`,
   );
   lines.push(
-    `- **AIL On-the-Fly Beats Without AIL On-the-Fly (Legacy Twin)**: \`${summary.totalBeatsWithoutOnTheFly.toLocaleString()}/${summary.totalCases.toLocaleString()}\` (\`-${summary.overallSavingsVsWithoutOnTheFlyPct}%\` tokens)`,
+    `- **AIL On-the-Fly Beats Without AIL On-the-Fly (Legacy Twin)**: \`${summary.totalBeatsWithoutOnTheFly.toLocaleString("en-US")}/${summary.totalCases.toLocaleString("en-US")}\` (\`-${summary.overallSavingsVsWithoutOnTheFlyPct}%\` tokens)`,
   );
   lines.push(
-    `- **Overall AIL On-the-Fly Win Rate**: **\`${summary.totalAilOnTheFlyWinsAll.toLocaleString()}/${summary.totalCases.toLocaleString()} (${summary.overallWinRatePct}%)\`**`,
+    `- **Overall AIL On-the-Fly Win Rate**: **\`${summary.totalAilOnTheFlyWinsAll.toLocaleString("en-US")}/${summary.totalCases.toLocaleString("en-US")} (${summary.overallWinRatePct}%)\`**`,
   );
   lines.push(
-    `- **Total Tokens (Without AIL at All)**: \`${summary.totalWithoutAilAtAllTokens.toLocaleString()}\``,
+    `- **Total Tokens (Without AIL at All)**: \`${summary.totalWithoutAilAtAllTokens.toLocaleString("en-US")}\``,
   );
   lines.push(
-    `- **Total Tokens (Without AIL On-the-Fly / Legacy Twin)**: \`${summary.totalWithoutAilOnTheFlyTokens.toLocaleString()}\``,
+    `- **Total Tokens (Without AIL On-the-Fly / Legacy Twin)**: \`${summary.totalWithoutAilOnTheFlyTokens.toLocaleString("en-US")}\``,
   );
   lines.push(
-    `- **Total Tokens (With AIL On-the-Fly)**: \`${summary.totalWithAilOnTheFlyTokens.toLocaleString()}\``,
+    `- **Total Tokens (With AIL On-the-Fly)**: \`${summary.totalWithAilOnTheFlyTokens.toLocaleString("en-US")}\``,
   );
   lines.push("");
   lines.push("## Per-Language & File-Type Summary (500 Progressive Benchmarks Each)");
@@ -257,7 +257,7 @@ export function formatAllDialects500MarkdownReport(
   for (const ds of summary.dialectSuites) {
     const s = ds.summary;
     lines.push(
-      `| **${ds.spec.label}** | \`${ds.spec.ext}\` | ${s.totalCases} | ${s.strictProgressiveComplexity ? "`#001 < ... < #500`" : "FAIL"} | **${s.beatsWithoutAilAtAllCount}/${s.totalCases}** | **${s.beatsWithoutOnTheFlyCount}/${s.totalCases}** | ${s.totalWithoutAilAtAllTokens.toLocaleString()} | ${s.totalWithoutAilOnTheFlyTokens.toLocaleString()} | ${s.totalWithAilOnTheFlyTokens.toLocaleString()} | **-${s.overallSavingsVsWithoutAilAtAllPct}%** | **-${s.overallSavingsVsWithoutOnTheFlyPct}%** |`,
+      `| **${ds.spec.label}** | \`${ds.spec.ext}\` | ${s.totalCases} | ${s.strictProgressiveComplexity ? "`#001 < ... < #500`" : "FAIL"} | **${s.beatsWithoutAilAtAllCount}/${s.totalCases}** | **${s.beatsWithoutOnTheFlyCount}/${s.totalCases}** | ${s.totalWithoutAilAtAllTokens.toLocaleString("en-US")} | ${s.totalWithoutAilOnTheFlyTokens.toLocaleString("en-US")} | ${s.totalWithAilOnTheFlyTokens.toLocaleString("en-US")} | **-${s.overallSavingsVsWithoutAilAtAllPct}%** | **-${s.overallSavingsVsWithoutOnTheFlyPct}%** |`,
     );
   }
   lines.push("");
