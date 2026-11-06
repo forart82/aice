@@ -17,29 +17,29 @@
  * Honest 3-Way Apples-to-Apples Evaluation for Every Operation:
  *   1. Without AIL (Native Baseline):
  *      - Write from 0: Raw native code tokens written to disk.
- *      - Read (Discovery + Surgical Read): Symbol discovery headers + surgical read_file window of target symbols.
- *      - Update (Bug Fix / New Feature / Update Feature): Surgical replace_file_content (TargetContent + ReplacementContent).
- *      - Delete (Remove Obsolete Symbol/Rule/Key): Surgical replace_file_content (TargetContent of deleted block).
- *      - Refactor (Cross-Site Pattern Change): Surgical replace_file_content across affected functions/files.
+ *      - Read (Discovery + Surgical Read): Realistic `rg` top-level symbol discovery + surgical line-range `read_file` window around target symbol.
+ *      - Update (Bug Fix / New Feature / Update Feature): Surgical `replace_file_content` (`TargetContent` + `ReplacementContent`).
+ *      - Delete (Remove Obsolete Symbol/Rule/Key): Surgical `replace_file_content` (`TargetContent` of deleted block).
+ *      - Refactor (Cross-Site Pattern Change): Surgical `replace_file_content` across affected symbols/rules (not untouched file contents).
  *   2. AIL On-the-Fly WITHOUT Idioms (Pure Syntax + AST Tooling):
- *      - Write from 0: Pure AIL code tokens (zero $idiom macros) compiled directly to native disk.
- *      - Read: `ail outline` + decompiled pure AIL slice of target symbols (`--no-idioms`).
- *      - Update: `ail splice <file> --symbol <sym> --code "<pure AIL>"` (or `--insert-after`).
+ *      - Write from 0: Pure AIL code tokens (zero `$idiom` macros) compiled directly to native disk.
+ *      - Read: `ail outline` (`generateOutline`) + `extractSymbolFromAilSource` of target symbol (`--no-idioms`).
+ *      - Update: `ail splice <file> --symbol <sym> --code "<pure AIL>"` (verified via live `spliceNativeSource` with `{}` idioms).
  *      - Delete: `ail splice <file> --symbol <sym> --delete`.
- *      - Refactor: `ail splice` across affected symbols in pure AIL (eliminating TargetContent duplication).
- *   3. AIL On-the-Fly WITH Idioms (Syntax + AST Tooling + $idioms, including definition overhead):
- *      - Write from 0: Idiom-compressed AIL code tokens PLUS full token cost of all `idiom $name(...)` definitions.
- *      - Read: `ail outline` + decompiled $idiom-collapsed AIL slice of target symbols (`--idioms`).
- *      - Update: `ail splice <file> --symbol <sym> --code "<AIL with $idioms>"` (or `--insert-after`).
+ *      - Refactor: Surgical `ail splice` across affected symbols in pure AIL (verified via live `spliceNativeSource`).
+ *   3. AIL On-the-Fly WITH Idioms (Syntax + AST Tooling + `$idioms`, including definition overhead):
+ *      - Write from 0: Idiom-compressed AIL code tokens PLUS full token cost of all `idiom $name(...)` definitions in `ail.config.json`.
+ *      - Read: `ail outline` (`generateOutline`) + `extractSymbolFromAilSource` of target symbol (`--idioms`).
+ *      - Update: `ail splice <file> --symbol <sym> --code "<AIL with $idioms>"` (verified bit-identical to pure AIL splice).
  *      - Delete: `ail splice <file> --symbol <sym> --delete`.
- *      - Refactor: Single `ail idiom update $name "<new template>"` propagated across all call sites.
+ *      - Refactor: Single `ail idiom update $name "<new template>"` in `ail.config.json` propagated across all call sites.
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { ProjectIdiomDefinition } from "../src/config/index.js";
-import type { Module, ModuleItem } from "../src/core/ast.js";
+import type { Module } from "../src/core/ast.js";
 import { parse } from "../src/core/parser.js";
 import { AilGenerator, decompile } from "../src/decompiler/index.js";
 import { emitTarget, type TargetLanguage } from "../src/emitters/index.js";
@@ -48,6 +48,7 @@ import {
   expandModuleIdioms,
 } from "../src/idioms/index.js";
 import { estimateTokens } from "../src/tokenomics/index.js";
+import { extractSymbolFromAilSource } from "../src/tools/context.js";
 import { generateOutline } from "../src/tools/outline.js";
 import { spliceNativeSource } from "../src/tools/splice.js";
 
@@ -86,21 +87,21 @@ export interface LanguageSpec {
 }
 
 export const SUPPORTED_BENCHMARK_LANGUAGES: readonly LanguageSpec[] = [
-  { id: "ts", label: "TypeScript (.ts)", extension: ".ts", target: "typescript", idiomName: "$clamp_step" },
-  { id: "tsx", label: "React TSX (.tsx)", extension: ".tsx", target: "tsx", idiomName: "$tsx_row" },
-  { id: "js", label: "JavaScript (.js)", extension: ".js", target: "javascript", idiomName: "$clamp_step" },
-  { id: "py", label: "Python (.py)", extension: ".py", target: "python", idiomName: "$py_step" },
-  { id: "go", label: "Go (.go)", extension: ".go", target: "go", idiomName: "$go_step" },
-  { id: "rs", label: "Rust (.rs)", extension: ".rs", target: "rust", idiomName: "$rs_step" },
-  { id: "cpp", label: "C++20 (.cpp)", extension: ".cpp", target: "cpp", idiomName: "$cpp_step" },
-  { id: "cs", label: "C# (.cs)", extension: ".cs", target: "csharp", idiomName: "$cs_step" },
-  { id: "kt", label: "Kotlin (.kt)", extension: ".kt", target: "kotlin", idiomName: "$kt_step" },
-  { id: "php", label: "PHP 8 (.php)", extension: ".php", target: "php", idiomName: "$php_step" },
+  { id: "ts", label: "TypeScript (.ts)", extension: ".ts", target: "typescript", idiomName: "$guard_band_step" },
+  { id: "tsx", label: "React TSX (.tsx)", extension: ".tsx", target: "tsx", idiomName: "$tsx_kpi_tile" },
+  { id: "js", label: "JavaScript (.js)", extension: ".js", target: "javascript", idiomName: "$clamp_cart_line" },
+  { id: "py", label: "Python (.py)", extension: ".py", target: "python", idiomName: "$enforce_quota_band" },
+  { id: "go", label: "Go (.go)", extension: ".go", target: "go", idiomName: "$bounded_quorum_step" },
+  { id: "rs", label: "Rust (.rs)", extension: ".rs", target: "rust", idiomName: "$advance_wal_cursor" },
+  { id: "cpp", label: "C++20 (.cpp)", extension: ".cpp", target: "cpp", idiomName: "$solve_axis_impulse" },
+  { id: "cs", label: "C# (.cs)", extension: ".cs", target: "csharp", idiomName: "$settle_ledger_window" },
+  { id: "kt", label: "Kotlin (.kt)", extension: ".kt", target: "kotlin", idiomName: "$score_risk_signal" },
+  { id: "php", label: "PHP 8 (.php)", extension: ".php", target: "php", idiomName: "$round_money_band" },
   { id: "css", label: "CSS3 (.css)", extension: ".css", target: "css", idiomName: "$css_card" },
-  { id: "html", label: "HTML5 (.html)", extension: ".html", target: "html", idiomName: "$html_row" },
-  { id: "json", label: "JSON (.json)", extension: ".json", target: "json", idiomName: "$json_row" },
-  { id: "yaml", label: "YAML (.yaml)", extension: ".yaml", target: "yaml", idiomName: "$yaml_row" },
-  { id: "twig", label: "Twig (.twig)", extension: ".twig", target: "twig", idiomName: "$twig_row" },
+  { id: "html", label: "HTML5 (.html)", extension: ".html", target: "html", idiomName: "$html_metric_row" },
+  { id: "json", label: "JSON (.json)", extension: ".json", target: "json", idiomName: "$json_policy_rule" },
+  { id: "yaml", label: "YAML (.yaml)", extension: ".yaml", target: "yaml", idiomName: "$yaml_service_tier" },
+  { id: "twig", label: "Twig (.twig)", extension: ".twig", target: "twig", idiomName: "$twig_summary_line" },
 ] as const;
 
 export interface ThreeWayOperationScore {
@@ -232,24 +233,8 @@ export function buildIdiomRegistryForLanguage(
   updatedTemplateAil: string;
   definitionSource: string;
 } {
-  const codeStepTemplate = [
-    "if acc < $0:",
-    "  acc = $0",
-    "if acc > $1:",
-    "  acc = $1",
-    "acc = acc + $0",
-  ].join("\n");
-  const codeStepUpdated = [
-    "if acc < $0:",
-    "  acc = $0",
-    "if acc > $1:",
-    "  acc = $1",
-    "acc = acc + $0 + 1",
-  ].join("\n");
-  const intPairParams = [
-    { name: "$0", type: "int" },
-    { name: "$1", type: "int" },
-  ];
+  const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === lang)!;
+  const idiomName = langSpec.idiomName;
 
   const formatDef = (def: ProjectIdiomDefinition): string => {
     const pStr = def.params.map((p) => `${p.name}: ${p.type}`).join(", ");
@@ -258,101 +243,66 @@ export function buildIdiomRegistryForLanguage(
 
   switch (lang) {
     case "ts":
-    case "js": {
-      const def = makeIdiomDef("$clamp_step", "stmt", intPairParams, codeStepTemplate);
+    case "js":
+    case "py":
+    case "go":
+    case "rs":
+    case "cpp":
+    case "cs":
+    case "kt":
+    case "php": {
+      const params = [
+        { name: "$0", type: "int" },
+        { name: "$1", type: "int" },
+        { name: "$2", type: "int" },
+        { name: "$3", type: "int" },
+      ];
+      const templateAil = [
+        "if $0 < $1:",
+        "  $0 = $1",
+        "if $0 > $2:",
+        "  $0 = $2",
+        "$0 = $0 + $3",
+      ].join("\n");
+      const updatedTemplateAil = [
+        "if $0 < $1:",
+        "  $0 = $1",
+        "if $0 > $2:",
+        "  $0 = $2",
+        "$0 = $0 + $3 + 1",
+      ].join("\n");
+      const def = makeIdiomDef(idiomName, "stmt", params, templateAil);
+      const aliases: Record<string, ProjectIdiomDefinition> = { [idiomName]: def };
+      if (lang === "ts" || lang === "js") {
+        aliases.$clamp_step = def;
+      }
       return {
-        idioms: { $clamp_step: def },
-        updatedTemplateAil: codeStepUpdated,
+        idioms: aliases,
+        updatedTemplateAil,
         definitionSource: formatDef(def),
       };
     }
     case "tsx": {
       const def = makeIdiomDef(
-        "$tsx_row",
+        idiomName,
         "stmt",
         [
           { name: "$0", type: "string" },
-          { name: "$1", type: "int" },
+          { name: "$1", type: "string" },
+          { name: "$2", type: "string" },
         ],
-        [
-          "if rows < $1:",
-          "  rows = $1",
-          "if rows > 1000:",
-          "  rows = 1000",
-          "rows = rows + $1",
-        ].join("\n"),
+        'div(class="kpi-tile", data-metric=$0) { span(class="kpi-label"): $1; strong(class="kpi-value"): $2 }',
       );
       return {
-        idioms: { $tsx_row: def },
-        updatedTemplateAil: [
-          "if rows < $1:",
-          "  rows = $1",
-          "if rows > 2000:",
-          "  rows = 2000",
-          "rows = rows + $1",
-        ].join("\n"),
-        definitionSource: formatDef(def),
-      };
-    }
-    case "py": {
-      const def = makeIdiomDef("$py_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $py_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "go": {
-      const def = makeIdiomDef("$go_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $go_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "rs": {
-      const def = makeIdiomDef("$rs_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $rs_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "cpp": {
-      const def = makeIdiomDef("$cpp_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $cpp_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "cs": {
-      const def = makeIdiomDef("$cs_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $cs_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "kt": {
-      const def = makeIdiomDef("$kt_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $kt_step: def },
-        updatedTemplateAil: codeStepUpdated,
-        definitionSource: formatDef(def),
-      };
-    }
-    case "php": {
-      const def = makeIdiomDef("$php_step", "stmt", intPairParams, codeStepTemplate);
-      return {
-        idioms: { $php_step: def },
-        updatedTemplateAil: codeStepUpdated,
+        idioms: { [idiomName]: def },
+        updatedTemplateAil:
+          'div(class="kpi-tile-v2", data-metric=$0) { span(class="kpi-label"): $1; strong(class="kpi-value"): $2 }',
         definitionSource: formatDef(def),
       };
     }
     case "css": {
       const def = makeIdiomDef(
-        "$css_card",
+        idiomName,
         "stmt",
         [
           { name: "$0", type: "string" },
@@ -366,7 +316,7 @@ export function buildIdiomRegistryForLanguage(
         ].join("\n"),
       );
       return {
-        idioms: { $css_card: def },
+        idioms: { [idiomName]: def, $css_card: def },
         updatedTemplateAil: [
           "fl-center",
           "padding: $0",
@@ -378,7 +328,7 @@ export function buildIdiomRegistryForLanguage(
     }
     case "html": {
       const def = makeIdiomDef(
-        "$html_row",
+        idiomName,
         "stmt",
         [
           { name: "$0", type: "string" },
@@ -388,7 +338,7 @@ export function buildIdiomRegistryForLanguage(
         'div(class="metric-row", data-key=$0) { span(class="metric-label"): $1; strong(class="metric-val"): $2 }',
       );
       return {
-        idioms: { $html_row: def },
+        idioms: { [idiomName]: def },
         updatedTemplateAil:
           'div(class="metric-row-v2", data-key=$0) { span(class="metric-label"): $1; strong(class="metric-val"): $2 }',
         definitionSource: formatDef(def),
@@ -396,52 +346,54 @@ export function buildIdiomRegistryForLanguage(
     }
     case "json": {
       const def = makeIdiomDef(
-        "$json_row",
+        idiomName,
         "expr",
         [
           { name: "$0", type: "string" },
           { name: "$1", type: "int" },
+          { name: "$2", type: "int" },
         ],
-        '{ path: $0, method: "POST", timeoutMs: $1, retries: 3, authRequired: true, cacheTtlSec: 120 }',
+        "{ id: $0, threshold: $1, limit: $2, retries: 3, enabled: true, windowSec: 60 }",
       );
       return {
-        idioms: { $json_row: def },
+        idioms: { [idiomName]: def },
         updatedTemplateAil:
-          '{ path: $0, method: "POST", timeoutMs: $1, retries: 5, authRequired: true, cacheTtlSec: 300 }',
+          "{ id: $0, threshold: $1, limit: $2, retries: 5, enabled: true, windowSec: 120 }",
         definitionSource: formatDef(def),
       };
     }
     case "yaml": {
       const def = makeIdiomDef(
-        "$yaml_row",
+        idiomName,
         "expr",
         [
           { name: "$0", type: "string" },
           { name: "$1", type: "int" },
+          { name: "$2", type: "int" },
         ],
-        '{ service: $0, port: $1, replicas: 3, healthCheckSec: 15, tlsEnabled: true, buckets: [10, 25, 50, 100, 250, 500] }',
+        "{ worker: $0, port: $1, concurrency: $2, replicas: 3, healthIntervalSec: 15, tlsRequired: true }",
       );
       return {
-        idioms: { $yaml_row: def },
+        idioms: { [idiomName]: def },
         updatedTemplateAil:
-          '{ service: $0, port: $1, replicas: 4, healthCheckSec: 10, tlsEnabled: true, buckets: [10, 25, 50, 100, 250, 500] }',
+          "{ worker: $0, port: $1, concurrency: $2, replicas: 4, healthIntervalSec: 10, tlsRequired: true }",
         definitionSource: formatDef(def),
       };
     }
     case "twig": {
       const def = makeIdiomDef(
-        "$twig_row",
+        idiomName,
         "stmt",
         [
           { name: "$0", type: "string" },
           { name: "$1", type: "string" },
         ],
-        'div(class="row") { span(class="lbl"): $0; span(class="val"): $1 }',
+        'div(class="summary-row") { span(class="summary-lbl"): $0; strong(class="summary-val"): $1 }',
       );
       return {
-        idioms: { $twig_row: def },
+        idioms: { [idiomName]: def },
         updatedTemplateAil:
-          'div(class="row-v2") { span(class="lbl"): $0; span(class="val"): $1 }',
+          'div(class="summary-row-v2") { span(class="summary-lbl"): $0; strong(class="summary-val"): $1 }',
         definitionSource: formatDef(def),
       };
     }
@@ -454,6 +406,7 @@ export interface RealWorldFileSpec {
   ailWithIdioms: string;
   targetSymbol: string;
   updatedTargetSymbolAilWithIdioms: string;
+  refactorSymbols: string[];
   obsoleteSymbol?: string;
 }
 
@@ -466,12 +419,21 @@ export interface RealWorldBenchmarkSpec {
   files: RealWorldFileSpec[];
 }
 
+export interface DomainFunctionSeed {
+  name: string;
+  param: string;
+  stateVar: string;
+  scaleFactor: number;
+  bands: Array<[number, number, number]>;
+}
+
 function buildDomainModuleSpec(
   fileName: string,
   languageId: BenchmarkLanguageId,
-  domainFunctions: Array<{ name: string; param: string; pairs: Array<[number, number]> }>,
+  domainFunctions: DomainFunctionSeed[],
   scenario: EngineeringScenarioKind,
   obsoleteName?: string,
+  domainRecord?: { typeName: string; fields: Array<[string, string]> },
 ): RealWorldFileSpec {
   const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === languageId)!;
   const idiom = langSpec.idiomName;
@@ -489,7 +451,7 @@ function buildDomainModuleSpec(
     ];
     for (let i = 0; i < selectors.length; i++) {
       const sel = selectors[i];
-      const [pad, gap] = domainFunctions[i].pairs[0];
+      const [pad, gap] = domainFunctions[i].bands[0];
       blocks.push(
         [
           `style ${sel} {`,
@@ -535,6 +497,7 @@ function buildDomainModuleSpec(
       ailWithIdioms: blocks.join("\n\n"),
       targetSymbol: targetSel,
       updatedTargetSymbolAilWithIdioms: updatedRule,
+      refactorSymbols: selectors,
       obsoleteSymbol: obsoleteName ? `.${obsoleteName.replace(/_/g, "-")}` : undefined,
     };
   }
@@ -543,9 +506,9 @@ function buildDomainModuleSpec(
     const lines: string[] = ["component AppShellView():", '  main(id="app_root") {'];
     for (const fn of domainFunctions) {
       lines.push(`    section(id="${fn.name}", class="panel") {`);
-      for (let idx = 0; idx < fn.pairs.length; idx++) {
-        const [a, b] = fn.pairs[idx];
-        lines.push(`      ${idiom}("${fn.name}_${idx}", "Metric ${a}", "${b}")`);
+      for (let idx = 0; idx < fn.bands.length; idx++) {
+        const [a, b, c] = fn.bands[idx];
+        lines.push(`      ${idiom}("${fn.name}_${idx}", "${fn.stateVar} ${a}", "${b + c}")`);
       }
       lines.push("    }");
     }
@@ -578,6 +541,7 @@ function buildDomainModuleSpec(
       ailWithIdioms: lines.join("\n"),
       targetSymbol: `#${targetId}`,
       updatedTargetSymbolAilWithIdioms: updatedSection,
+      refactorSymbols: domainFunctions.map((f) => `#${f.name}`),
       obsoleteSymbol: obsoleteName ? `#${obsoleteName}` : undefined,
     };
   }
@@ -586,9 +550,9 @@ function buildDomainModuleSpec(
     const lines: string[] = ["component TwigReportView():"];
     for (const fn of domainFunctions) {
       lines.push(`  block(name="${fn.name}") {`);
-      for (let idx = 0; idx < fn.pairs.length; idx++) {
-        const [a, b] = fn.pairs[idx];
-        lines.push(`    ${idiom}("Label ${a}", val_${b})`);
+      for (let idx = 0; idx < fn.bands.length; idx++) {
+        const [a, b] = fn.bands[idx];
+        lines.push(`    ${idiom}("${fn.stateVar}_${a}", val_${b})`);
       }
       lines.push("  }");
     }
@@ -620,6 +584,7 @@ function buildDomainModuleSpec(
       ailWithIdioms: lines.join("\n"),
       targetSymbol: targetId,
       updatedTargetSymbolAilWithIdioms: updatedTwig,
+      refactorSymbols: domainFunctions.map((f) => f.name),
       obsoleteSymbol: obsoleteName,
     };
   }
@@ -627,135 +592,156 @@ function buildDomainModuleSpec(
   if (languageId === "json" || languageId === "yaml") {
     const sectionEntries: string[] = [];
     for (const fn of domainFunctions) {
-      const items = fn.pairs.map(
-        ([a, b], idx) => `${idiom}("/api/v2/${fn.name}/${idx}", ${1000 + a + b})`,
+      const items = fn.bands.map(
+        ([lo, hi, step], idx) => `${idiom}("${fn.stateVar}_${idx}", ${lo + step}, ${hi})`,
       );
       sectionEntries.push(`  ${fn.name}: [\n    ${items.join(",\n    ")}\n  ]`);
     }
     if (obsoleteName) {
       sectionEntries.push(
-        `  ${obsoleteName}: [\n    ${idiom}("/api/v1/${obsoleteName}/0", 1000),\n    ${idiom}("/api/v1/${obsoleteName}/1", 1500)\n  ]`,
+        `  ${obsoleteName}: [\n    ${idiom}("legacy_0", 10, 100),\n    ${idiom}("legacy_1", 20, 200)\n  ]`,
       );
     }
     const targetKey = domainFunctions[0].name;
     const updatedEntry =
       scenario === "new_feature"
-        ? `pub const ${targetKey}_realtime = [\n  ${idiom}("/api/v2/${targetKey}/stream_0", 4500),\n  ${idiom}("/api/v2/${targetKey}/stream_1", 5000)\n]`
-        : `pub const ${targetKey} = [\n  ${idiom}("/api/v2/${targetKey}/verified_0", 3200),\n  ${idiom}("/api/v2/${targetKey}/verified_1", 3600)\n]`;
+        ? `pub const ${targetKey}_realtime = [\n  ${idiom}("stream_0", 50, 4500),\n  ${idiom}("stream_1", 100, 5000)\n]`
+        : `pub const ${targetKey} = [\n  ${idiom}("verified_0", 30, 3200),\n  ${idiom}("verified_1", 60, 3600)\n]`;
     return {
       fileName,
       languageId,
       ailWithIdioms: `pub const config = {\n${sectionEntries.join(",\n")}\n}`,
       targetSymbol: `config.${targetKey}`,
       updatedTargetSymbolAilWithIdioms: updatedEntry,
+      refactorSymbols: domainFunctions.map((f) => `config.${f.name}`),
       obsoleteSymbol: obsoleteName ? `config.${obsoleteName}` : undefined,
     };
   }
 
   if (languageId === "tsx") {
-    const fns: string[] = [];
+    const comps: string[] = [];
     for (const fn of domainFunctions) {
-      const calls = fn.pairs.map(([a, b]) => `  ${idiom}("${fn.name}_${a}", ${b})`);
-      fns.push(
+      const tiles = fn.bands.map(
+        ([lo, hi, step], idx) =>
+          `    ${idiom}("${fn.stateVar}_${idx}", "${fn.param} ${lo}", "${hi + step}")`,
+      );
+      comps.push(
         [
-          `pub fn ${fn.name}(${fn.param}: int) -> int:`,
-          `  mut rows = ${fn.param}`,
-          ...calls,
-          "  return rows",
+          `component ${fn.name}():`,
+          `  section(class="kpi-section", id="${fn.stateVar}") {`,
+          ...tiles,
+          "  }",
         ].join("\n"),
       );
     }
     if (obsoleteName) {
-      fns.push(
+      comps.push(
         [
-          `pub fn ${obsoleteName}(seed: int) -> int:`,
-          "  mut rows = seed",
-          `  ${idiom}("legacy", 50)`,
-          `  ${idiom}("deprecated", 100)`,
-          "  return rows",
+          `component ${obsoleteName}():`,
+          '  section(class="kpi-section", id="legacy_panel") {',
+          `    ${idiom}("legacy_0", "Deprecated Card", "0")`,
+          `    ${idiom}("legacy_1", "Obsolete Card", "0")`,
+          "  }",
         ].join("\n"),
       );
     }
-    const targetFn = domainFunctions[0];
-    const updatedFn =
+    const targetComp = domainFunctions[0];
+    const updatedComp =
       scenario === "new_feature"
         ? [
-            `pub fn ${targetFn.name}Sparkline(${targetFn.param}: int) -> int:`,
-            `  mut rows = ${targetFn.param} + 10`,
-            `  ${idiom}("spark_0", 120)`,
-            `  ${idiom}("spark_1", 240)`,
-            `  ${idiom}("spark_2", 360)`,
-            "  return rows",
+            `component ${targetComp.name}Sparkline():`,
+            `  section(class="kpi-section", id="${targetComp.stateVar}_spark") {`,
+            `    ${idiom}("spark_0", "Live Velocity", "980")`,
+            `    ${idiom}("spark_1", "Cohort Retention", "94%")`,
+            `    ${idiom}("spark_2", "Alert Burn Rate", "0.4x")`,
+            "  }",
           ].join("\n")
         : [
-            `pub fn ${targetFn.name}(${targetFn.param}: int) -> int:`,
-            `  mut rows = ${targetFn.param} + 1`,
-            `  ${idiom}("fixed_0", 150)`,
-            `  ${idiom}("fixed_1", 300)`,
-            `  ${idiom}("fixed_2", 450)`,
-            "  return rows",
+            `component ${targetComp.name}():`,
+            `  section(class="kpi-section", id="${targetComp.stateVar}") {`,
+            `    ${idiom}("fixed_0", "Verified KPI", "1240")`,
+            `    ${idiom}("fixed_1", "Verified P95", "18ms")`,
+            `    ${idiom}("fixed_2", "Verified Uptime", "99.98%")`,
+            "  }",
           ].join("\n");
     return {
       fileName,
       languageId,
-      ailWithIdioms: fns.join("\n\n"),
-      targetSymbol: targetFn.name,
-      updatedTargetSymbolAilWithIdioms: updatedFn,
+      ailWithIdioms: comps.join("\n\n"),
+      targetSymbol: targetComp.name,
+      updatedTargetSymbolAilWithIdioms: updatedComp,
+      refactorSymbols: domainFunctions.map((f) => f.name),
       obsoleteSymbol: obsoleteName,
     };
   }
 
   // Code languages: ts, js, py, go, rs, cpp, cs, kt, php
-  const fns: string[] = [];
+  // Include optional domain record/dataclass + domain functions with distinct state variables,
+  // pre-validation guards, scaling arithmetic, and idiom band steps.
+  const items: string[] = [];
+  if (domainRecord && (languageId === "py" || languageId === "ts" || languageId === "rs" || languageId === "go")) {
+    const fieldLines = domainRecord.fields.map(([k, t]) => `  ${k}:${t}`);
+    items.push([`type ${domainRecord.typeName}:`, ...fieldLines].join("\n"));
+  }
+
   for (const fn of domainFunctions) {
-    const calls = fn.pairs.map(([lo, hi]) => `  ${idiom}(${lo}, ${hi})`);
-    fns.push(
+    const sv = fn.stateVar;
+    const calls = fn.bands.map(([lo, hi, step]) => `  ${idiom}(${sv}, ${lo}, ${hi}, ${step})`);
+    items.push(
       [
-        `pub fn ${fn.name}(${fn.param}: int) -> int:`,
-        `  mut acc = ${fn.param}`,
+        `pub fn ${fn.name}(${fn.param}:int) -> int:`,
+        `  ${sv} ::= ${fn.param} * ${fn.scaleFactor}`,
+        `  if ${sv} < 0:`,
+        `    ${sv} = 0`,
         ...calls,
-        "  return acc",
+        `  ${sv}`,
       ].join("\n"),
     );
   }
   if (obsoleteName) {
-    fns.push(
+    items.push(
       [
-        `pub fn ${obsoleteName}(seed: int) -> int:`,
-        "  mut acc = seed",
-        `  ${idiom}(5, 100)`,
-        `  ${idiom}(10, 200)`,
-        "  return acc",
+        `pub fn ${obsoleteName}(seed:int) -> int:`,
+        "  legacyVal ::= seed",
+        `  ${idiom}(legacyVal, 5, 100, 5)`,
+        `  ${idiom}(legacyVal, 10, 200, 10)`,
+        "  legacyVal",
       ].join("\n"),
     );
   }
 
   const targetFn = domainFunctions[0];
+  const tSv = targetFn.stateVar;
   const updatedFn =
     scenario === "new_feature"
       ? [
-          `pub fn ${targetFn.name}Extended(${targetFn.param}: int) -> int:`,
-          `  mut acc = ${targetFn.param} + 10`,
-          `  ${idiom}(20, 600)`,
-          `  ${idiom}(40, 1200)`,
-          `  ${idiom}(80, 2400)`,
-          "  return acc",
+          `pub fn ${targetFn.name}Extended(${targetFn.param}:int) -> int:`,
+          `  ${tSv} ::= ${targetFn.param} * ${targetFn.scaleFactor} + 10`,
+          `  if ${tSv} < 0:`,
+          `    ${tSv} = 0`,
+          `  ${idiom}(${tSv}, 20, 600, 15)`,
+          `  ${idiom}(${tSv}, 40, 1200, 30)`,
+          `  ${idiom}(${tSv}, 80, 2400, 45)`,
+          `  ${tSv}`,
         ].join("\n")
       : [
-          `pub fn ${targetFn.name}(${targetFn.param}: int) -> int:`,
-          `  mut acc = ${targetFn.param} + 1`,
-          `  ${idiom}(16, 512)`,
-          `  ${idiom}(32, 1024)`,
-          `  ${idiom}(64, 2048)`,
-          "  return acc",
+          `pub fn ${targetFn.name}(${targetFn.param}:int) -> int:`,
+          `  ${tSv} ::= ${targetFn.param} * ${targetFn.scaleFactor} + 1`,
+          `  if ${tSv} < 0:`,
+          `    ${tSv} = 0`,
+          `  ${idiom}(${tSv}, 16, 512, 12)`,
+          `  ${idiom}(${tSv}, 32, 1024, 24)`,
+          `  ${idiom}(${tSv}, 64, 2048, 48)`,
+          `  ${tSv}`,
         ].join("\n");
 
   return {
     fileName,
     languageId,
-    ailWithIdioms: fns.join("\n\n"),
+    ailWithIdioms: items.join("\n\n"),
     targetSymbol: targetFn.name,
     updatedTargetSymbolAilWithIdioms: updatedFn,
+    refactorSymbols: domainFunctions.map((f) => f.name),
     obsoleteSymbol: obsoleteName,
   };
 }
@@ -773,21 +759,31 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "engine.ts",
         "ts",
         [
-          { name: "stepSnakeHead", param: "coord", pairs: [[0, 640], [16, 624], [32, 608]] },
-          { name: "resolveWallCollision", param: "pos", pairs: [[0, 480], [16, 464], [32, 448]] },
-          { name: "computeFoodSpawnCell", param: "seed", pairs: [[1, 39], [2, 38], [4, 36]] },
-          { name: "advanceComboScore", param: "points", pairs: [[10, 5000], [25, 10000], [50, 25000]] },
+          { name: "stepSnakeHead", param: "gridCoord", stateVar: "headCell", scaleFactor: 2, bands: [[0, 640, 16], [16, 624, 16], [32, 608, 16]] },
+          { name: "resolveWallCollision", param: "axisPos", stateVar: "clampedPos", scaleFactor: 1, bands: [[0, 480, 8], [16, 464, 8], [32, 448, 8]] },
+          { name: "computeFoodSpawnCell", param: "rngSeed", stateVar: "spawnIndex", scaleFactor: 3, bands: [[1, 39, 2], [2, 38, 3], [4, 36, 4]] },
+          { name: "advanceComboScore", param: "basePoints", stateVar: "comboScore", scaleFactor: 5, bands: [[10, 5000, 25], [25, 10000, 50], [50, 25000, 100]] },
         ],
         "from_zero_window_app",
         "legacyWrapGrid",
+        {
+          typeName: "SnakeSegmentState",
+          fields: [
+            ["cellX", "int"],
+            ["cellY", "int"],
+            ["velocityTiles", "int"],
+            ["comboMultiplier", "int"],
+            ["isAlive", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "renderer.ts",
         "ts",
         [
-          { name: "renderViewportFrame", param: "tick", pairs: [[1, 60], [2, 120], [4, 240]] },
-          { name: "drawSnakeSegmentGlow", param: "alpha", pairs: [[15, 255], [30, 240], [45, 220]] },
-          { name: "updateParticleBurst", param: "vel", pairs: [[2, 80], [4, 160], [8, 320]] },
+          { name: "renderViewportFrame", param: "frameTick", stateVar: "frameBudgetUs", scaleFactor: 4, bands: [[1, 60, 2], [2, 120, 4], [4, 240, 8]] },
+          { name: "drawSnakeSegmentGlow", param: "baseAlpha", stateVar: "glowLuma", scaleFactor: 2, bands: [[15, 255, 10], [30, 240, 15], [45, 220, 20]] },
+          { name: "updateParticleBurst", param: "radialVel", stateVar: "particleStep", scaleFactor: 3, bands: [[2, 80, 4], [4, 160, 8], [8, 320, 12]] },
         ],
         "from_zero_window_app",
       ),
@@ -795,9 +791,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "index.html",
         "html",
         [
-          { name: "arcade_hud", param: "hud", pairs: [[100, 1], [200, 2], [300, 3]] },
-          { name: "canvas_stage", param: "stage", pairs: [[640, 480], [32, 16]] },
-          { name: "controls_bar", param: "ctrl", pairs: [[1, 60], [2, 120]] },
+          { name: "arcade_hud", param: "hud", stateVar: "Scoreboard", scaleFactor: 1, bands: [[100, 1, 10], [200, 2, 20], [300, 3, 30]] },
+          { name: "canvas_stage", param: "stage", stateVar: "Viewport", scaleFactor: 1, bands: [[640, 480, 0], [32, 16, 0]] },
+          { name: "controls_bar", param: "ctrl", stateVar: "Dpad", scaleFactor: 1, bands: [[1, 60, 5], [2, 120, 10]] },
         ],
         "from_zero_window_app",
         "legacy_overlay",
@@ -806,10 +802,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "styles.css",
         "css",
         [
-          { name: "arcade_cabinet", param: "cab", pairs: [[16, 12]] },
-          { name: "hud_scoreboard", param: "hud", pairs: [[12, 8]] },
-          { name: "canvas_viewport", param: "vp", pairs: [[8, 4]] },
-          { name: "control_badge", param: "btn", pairs: [[10, 6]] },
+          { name: "arcade_cabinet", param: "cab", stateVar: "cab", scaleFactor: 1, bands: [[16, 12, 0]] },
+          { name: "hud_scoreboard", param: "hud", stateVar: "hud", scaleFactor: 1, bands: [[12, 8, 0]] },
+          { name: "canvas_viewport", param: "vp", stateVar: "vp", scaleFactor: 1, bands: [[8, 4, 0]] },
+          { name: "control_badge", param: "btn", stateVar: "btn", scaleFactor: 1, bands: [[10, 6, 0]] },
         ],
         "from_zero_window_app",
         "deprecated_crt_scanline",
@@ -818,13 +814,13 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "game_config.json",
         "json",
         [
-          { name: "leaderboardEndpoint", param: "lb", pairs: [[80, 1500]] },
-          { name: "telemetryEndpoint", param: "tel", pairs: [[80, 2000]] },
-          { name: "replayUploadEndpoint", param: "rep", pairs: [[80, 3500]] },
-          { name: "profileSyncEndpoint", param: "prof", pairs: [[80, 1800]] },
+          { name: "speedTiers", param: "spd", stateVar: "tier", scaleFactor: 1, bands: [[60, 240, 15]] },
+          { name: "arenaBounds", param: "arn", stateVar: "grid", scaleFactor: 1, bands: [[32, 640, 16]] },
+          { name: "appleSpawnRules", param: "apl", stateVar: "spawn", scaleFactor: 1, bands: [[10, 500, 25]] },
+          { name: "comboMultipliers", param: "cmb", stateVar: "combo", scaleFactor: 1, bands: [[20, 1000, 50]] },
         ],
         "from_zero_window_app",
-        "legacyHighscoreEndpoint",
+        "legacyHighscorePolicy",
       ),
     ],
   },
@@ -840,32 +836,53 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "worker.py",
         "py",
         [
-          { name: "execute_batch_job", param: "batch_id", pairs: [[10, 500], [25, 1500], [50, 5000]] },
-          { name: "compute_retry_backoff", param: "attempt", pairs: [[100, 3000], [250, 10000], [500, 30000]] },
-          { name: "verify_payload_checksum", param: "bytes_len", pairs: [[64, 4096], [128, 16384], [256, 65536]] },
-          { name: "flush_dead_letter_queue", param: "count", pairs: [[1, 100], [5, 500], [10, 1000]] },
+          { name: "execute_batch_job", param: "batch_size", stateVar: "processed_units", scaleFactor: 4, bands: [[10, 500, 15], [25, 1500, 30], [50, 5000, 75]] },
+          { name: "compute_retry_backoff", param: "attempt_num", stateVar: "backoff_ms", scaleFactor: 50, bands: [[100, 3000, 120], [250, 10000, 250], [500, 30000, 500]] },
+          { name: "verify_payload_checksum", param: "bytes_len", stateVar: "crc_accum", scaleFactor: 2, bands: [[64, 4096, 32], [128, 16384, 64], [256, 65536, 128]] },
+          { name: "flush_dead_letter_queue", param: "pending_count", stateVar: "flushed_dlq", scaleFactor: 3, bands: [[1, 100, 5], [5, 500, 15], [10, 1000, 25]] },
         ],
         "from_zero_non_window_app",
         "legacy_poll_loop",
+        {
+          typeName: "QueueBatchEnvelope",
+          fields: [
+            ["batch_id", "str"],
+            ["tenant_slug", "str"],
+            ["payload_bytes", "int"],
+            ["retry_attempt", "int"],
+            ["max_retries", "int"],
+            ["is_dead_letter", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "cli.py",
         "py",
         [
-          { name: "parse_worker_concurrency", param: "threads", pairs: [[1, 16], [2, 32], [4, 64]] },
-          { name: "drain_inflight_batches", param: "timeout_sec", pairs: [[5, 60], [10, 120], [15, 300]] },
-          { name: "emit_health_heartbeat", param: "seq", pairs: [[1, 1000], [10, 5000], [20, 10000]] },
+          { name: "parse_worker_concurrency", param: "cpu_cores", stateVar: "worker_slots", scaleFactor: 2, bands: [[1, 16, 2], [2, 32, 4], [4, 64, 8]] },
+          { name: "drain_inflight_batches", param: "timeout_sec", stateVar: "drain_budget", scaleFactor: 3, bands: [[5, 60, 5], [10, 120, 10], [15, 300, 20]] },
+          { name: "emit_health_heartbeat", param: "seq_num", stateVar: "heartbeat_seq", scaleFactor: 2, bands: [[1, 1000, 10], [10, 5000, 25], [20, 10000, 50]] },
         ],
         "from_zero_non_window_app",
+        undefined,
+        {
+          typeName: "DaemonCliOptions",
+          fields: [
+            ["queue_name", "str"],
+            ["concurrency_limit", "int"],
+            ["drain_timeout_sec", "int"],
+            ["json_logs", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "pipeline.yaml",
         "yaml",
         [
-          { name: "ingestQueue", param: "ing", pairs: [[80, 1]] },
-          { name: "retryDispatcher", param: "ret", pairs: [[81, 2]] },
-          { name: "deadLetterSink", param: "dlq", pairs: [[82, 3]] },
-          { name: "metricsExporter", param: "met", pairs: [[90, 4]] },
+          { name: "ingestQueue", param: "ing", stateVar: "ingest", scaleFactor: 1, bands: [[8080, 16, 0]] },
+          { name: "retryDispatcher", param: "ret", stateVar: "retry", scaleFactor: 1, bands: [[8081, 8, 0]] },
+          { name: "deadLetterSink", param: "dlq", stateVar: "dlq", scaleFactor: 1, bands: [[8082, 4, 0]] },
+          { name: "metricsExporter", param: "met", stateVar: "metrics", scaleFactor: 1, bands: [[9090, 2, 0]] },
         ],
         "from_zero_non_window_app",
         "legacyBatchCron",
@@ -874,10 +891,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "schema.json",
         "json",
         [
-          { name: "batchIngestRoute", param: "bi", pairs: [[100, 2000]] },
-          { name: "dlqReplayRoute", param: "dlq", pairs: [[100, 4000]] },
-          { name: "healthProbeRoute", param: "hp", pairs: [[50, 500]] },
-          { name: "metricsFlushRoute", param: "mf", pairs: [[100, 1500]] },
+          { name: "batchIngestPolicy", param: "bi", stateVar: "ingest", scaleFactor: 1, bands: [[100, 2000, 25]] },
+          { name: "dlqReplayPolicy", param: "dlq", stateVar: "replay", scaleFactor: 1, bands: [[100, 4000, 50]] },
+          { name: "healthProbePolicy", param: "hp", stateVar: "probe", scaleFactor: 1, bands: [[50, 500, 10]] },
+          { name: "metricsFlushPolicy", param: "mf", stateVar: "flush", scaleFactor: 1, bands: [[100, 1500, 20]] },
         ],
         "from_zero_non_window_app",
         "deprecatedV1Webhook",
@@ -896,10 +913,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "CheckoutController.php",
         "php",
         [
-          { name: "calculateInvoiceTotalCents", param: "subtotal", pairs: [[100, 500000], [250, 750000], [500, 1000000]] },
-          { name: "applyPromoDiscountCents", param: "discount", pairs: [[50, 25000], [100, 50000], [200, 100000]] },
-          { name: "resolveRegionalTaxCents", param: "taxable", pairs: [[10, 80000], [25, 160000], [50, 320000]] },
-          { name: "estimateShippingFeeCents", param: "weight_g", pairs: [[400, 15000], [600, 25000], [900, 45000]] },
+          { name: "calculateInvoiceTotalCents", param: "subtotalCents", stateVar: "invoiceCents", scaleFactor: 1, bands: [[100, 500000, 50], [250, 750000, 100], [500, 1000000, 250]] },
+          { name: "applyPromoDiscountCents", param: "rawDiscount", stateVar: "discountCents", scaleFactor: 2, bands: [[50, 25000, 15], [100, 50000, 30], [200, 100000, 60]] },
+          { name: "resolveRegionalTaxCents", param: "taxableCents", stateVar: "vatCents", scaleFactor: 1, bands: [[10, 80000, 20], [25, 160000, 40], [50, 320000, 80]] },
+          { name: "estimateShippingFeeCents", param: "parcelGrams", stateVar: "postageCents", scaleFactor: 3, bands: [[400, 15000, 100], [600, 25000, 150], [900, 45000, 250]] },
         ],
         "bug_fix",
         "legacyV1TaxCalc",
@@ -908,9 +925,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "cart-client.js",
         "js",
         [
-          { name: "clampCartItemQuantity", param: "qty", pairs: [[1, 25], [2, 50], [5, 99]] },
-          { name: "recomputeDrawerSubtotal", param: "cents", pairs: [[100, 200000], [250, 400000], [500, 800000]] },
-          { name: "animateSavingsBadge", param: "delta", pairs: [[10, 5000], [20, 10000], [50, 25000]] },
+          { name: "clampCartItemQuantity", param: "requestedQty", stateVar: "safeQty", scaleFactor: 1, bands: [[1, 25, 1], [2, 50, 2], [5, 99, 3]] },
+          { name: "recomputeDrawerSubtotal", param: "lineCents", stateVar: "drawerTotal", scaleFactor: 2, bands: [[100, 200000, 50], [250, 400000, 100], [500, 800000, 200]] },
+          { name: "animateSavingsBadge", param: "savedCents", stateVar: "badgeOffset", scaleFactor: 2, bands: [[10, 5000, 15], [20, 10000, 30], [50, 25000, 75]] },
         ],
         "bug_fix",
       ),
@@ -918,8 +935,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "checkout.twig",
         "twig",
         [
-          { name: "order_summary_lines", param: "sum", pairs: [[1, 100], [2, 200], [3, 300]] },
-          { name: "tax_breakdown_box", param: "tax", pairs: [[4, 400], [5, 500]] },
+          { name: "order_summary_lines", param: "sum", stateVar: "OrderLine", scaleFactor: 1, bands: [[1, 100, 0], [2, 200, 0], [3, 300, 0]] },
+          { name: "tax_breakdown_box", param: "tax", stateVar: "TaxLine", scaleFactor: 1, bands: [[4, 400, 0], [5, 500, 0]] },
         ],
         "bug_fix",
         "legacy_coupon_banner",
@@ -928,10 +945,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "checkout.css",
         "css",
         [
-          { name: "checkout_card", param: "card", pairs: [[20, 16]] },
-          { name: "summary_line_item", param: "item", pairs: [[12, 8]] },
-          { name: "promo_badge_pill", param: "pill", pairs: [[6, 4]] },
-          { name: "payment_cta_bar", param: "cta", pairs: [[16, 12]] },
+          { name: "checkout_card", param: "card", stateVar: "card", scaleFactor: 1, bands: [[20, 16, 0]] },
+          { name: "summary_line_item", param: "item", stateVar: "item", scaleFactor: 1, bands: [[12, 8, 0]] },
+          { name: "promo_badge_pill", param: "pill", stateVar: "pill", scaleFactor: 1, bands: [[6, 4, 0]] },
+          { name: "payment_cta_bar", param: "cta", stateVar: "cta", scaleFactor: 1, bands: [[16, 12, 0]] },
         ],
         "bug_fix",
       ),
@@ -939,8 +956,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "shell.html",
         "html",
         [
-          { name: "checkout_header", param: "hdr", pairs: [[1, 10], [2, 20]] },
-          { name: "payment_modal", param: "mod", pairs: [[3, 30], [4, 40]] },
+          { name: "checkout_header", param: "hdr", stateVar: "CartStep", scaleFactor: 1, bands: [[1, 10, 0], [2, 20, 0]] },
+          { name: "payment_modal", param: "mod", stateVar: "PayStep", scaleFactor: 1, bands: [[3, 30, 0], [4, 40, 0]] },
         ],
         "bug_fix",
       ),
@@ -948,10 +965,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "routes.yaml",
         "yaml",
         [
-          { name: "checkoutApi", param: "chk", pairs: [[80, 1]] },
-          { name: "couponValidator", param: "cpn", pairs: [[81, 2]] },
-          { name: "taxCalculator", param: "tax", pairs: [[82, 3]] },
-          { name: "stripeWebhook", param: "wh", pairs: [[83, 4]] },
+          { name: "checkoutApi", param: "chk", stateVar: "checkout", scaleFactor: 1, bands: [[8080, 12, 0]] },
+          { name: "couponValidator", param: "cpn", stateVar: "coupon", scaleFactor: 1, bands: [[8081, 8, 0]] },
+          { name: "taxCalculator", param: "tax", stateVar: "tax", scaleFactor: 1, bands: [[8082, 8, 0]] },
+          { name: "stripeWebhook", param: "wh", stateVar: "webhook", scaleFactor: 1, bands: [[8083, 6, 0]] },
         ],
         "bug_fix",
       ),
@@ -959,10 +976,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "shipping_rates.json",
         "json",
         [
-          { name: "domesticStandard", param: "dom", pairs: [[50, 1200]] },
-          { name: "domesticExpress", param: "exp", pairs: [[50, 1500]] },
-          { name: "euCrossBorder", param: "eu", pairs: [[100, 2500]] },
-          { name: "globalPriority", param: "intl", pairs: [[150, 4000]] },
+          { name: "domesticStandard", param: "dom", stateVar: "dom_std", scaleFactor: 1, bands: [[50, 1200, 10]] },
+          { name: "domesticExpress", param: "exp", stateVar: "dom_exp", scaleFactor: 1, bands: [[50, 1500, 15]] },
+          { name: "euCrossBorder", param: "eu", stateVar: "eu_zone", scaleFactor: 1, bands: [[100, 2500, 25]] },
+          { name: "globalPriority", param: "intl", stateVar: "intl_air", scaleFactor: 1, bands: [[150, 4000, 40]] },
         ],
         "bug_fix",
       ),
@@ -980,33 +997,42 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "metrics-store.ts",
         "ts",
         [
-          { name: "aggregateWindowSeries", param: "sample", pairs: [[10, 1000], [25, 5000], [50, 10000]] },
-          { name: "computeP95LatencyMs", param: "ms", pairs: [[5, 250], [15, 750], [30, 2500]] },
-          { name: "detectTrafficAnomaly", param: "rate", pairs: [[20, 800], [40, 1600], [80, 3200]] },
-          { name: "normalizeFunnelConversion", param: "bps", pairs: [[100, 9500], [200, 9800], [500, 10000]] },
+          { name: "aggregateWindowSeries", param: "rawSample", stateVar: "seriesTotal", scaleFactor: 3, bands: [[10, 1000, 20], [25, 5000, 50], [50, 10000, 100]] },
+          { name: "computeP95LatencyMs", param: "sampleMs", stateVar: "p95Bucket", scaleFactor: 2, bands: [[5, 250, 10], [15, 750, 25], [30, 2500, 50]] },
+          { name: "detectTrafficAnomaly", param: "ingressRate", stateVar: "zScoreUnits", scaleFactor: 4, bands: [[20, 800, 15], [40, 1600, 30], [80, 3200, 60]] },
+          { name: "normalizeFunnelConversion", param: "rawBps", stateVar: "funnelBps", scaleFactor: 2, bands: [[100, 9500, 50], [200, 9800, 100], [500, 10000, 150]] },
         ],
         "new_feature",
         "deprecatedV1Sampler",
+        {
+          typeName: "TelemetrySeriesPoint",
+          fields: [
+            ["bucketEpochSec", "int"],
+            ["p95LatencyMs", "int"],
+            ["activeSessions", "int"],
+            ["conversionBps", "int"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "DashboardPanel.tsx",
         "tsx",
         [
-          { name: "renderKpiMetricGrid", param: "cards", pairs: [[1, 12], [2, 24], [4, 48]] },
-          { name: "renderRetentionMatrix", param: "cohorts", pairs: [[7, 90], [14, 180], [30, 365]] },
-          { name: "renderAlertBannerList", param: "alerts", pairs: [[1, 10], [3, 25], [5, 50]] },
+          { name: "KpiMetricGrid", param: "KPI", stateVar: "kpi_grid", scaleFactor: 1, bands: [[1, 120, 5], [2, 240, 10], [4, 480, 20]] },
+          { name: "RetentionMatrixCard", param: "Cohort", stateVar: "cohort_matrix", scaleFactor: 1, bands: [[7, 90, 3], [14, 180, 6], [30, 365, 12]] },
+          { name: "AlertBannerStream", param: "Alert", stateVar: "alert_stream", scaleFactor: 1, bands: [[1, 10, 1], [3, 25, 2], [5, 50, 5]] },
         ],
         "new_feature",
-        "legacySparklineWidget",
+        "LegacySparklineWidget",
       ),
       buildDomainModuleSpec(
         "dashboard.css",
         "css",
         [
-          { name: "kpi_grid_card", param: "kpi", pairs: [[16, 12]] },
-          { name: "cohort_heatmap_row", param: "hm", pairs: [[8, 6]] },
-          { name: "toolbar_filter_pill", param: "flt", pairs: [[10, 8]] },
-          { name: "sparkline_tooltip", param: "tip", pairs: [[6, 4]] },
+          { name: "kpi_grid_card", param: "kpi", stateVar: "kpi", scaleFactor: 1, bands: [[16, 12, 0]] },
+          { name: "cohort_heatmap_row", param: "hm", stateVar: "hm", scaleFactor: 1, bands: [[8, 6, 0]] },
+          { name: "toolbar_filter_pill", param: "flt", stateVar: "flt", scaleFactor: 1, bands: [[10, 8, 0]] },
+          { name: "sparkline_tooltip", param: "tip", stateVar: "tip", scaleFactor: 1, bands: [[6, 4, 0]] },
         ],
         "new_feature",
       ),
@@ -1014,8 +1040,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "index.html",
         "html",
         [
-          { name: "dashboard_topbar", param: "top", pairs: [[1, 10], [2, 20]] },
-          { name: "kpi_stage_mount", param: "mnt", pairs: [[3, 30], [4, 40]] },
+          { name: "dashboard_topbar", param: "top", stateVar: "NavMetric", scaleFactor: 1, bands: [[1, 10, 0], [2, 20, 0]] },
+          { name: "kpi_stage_mount", param: "mnt", stateVar: "StageMetric", scaleFactor: 1, bands: [[3, 30, 0], [4, 40, 0]] },
         ],
         "new_feature",
       ),
@@ -1023,10 +1049,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "bundle_budgets.json",
         "json",
         [
-          { name: "metricsQueryApi", param: "mq", pairs: [[80, 1800]] },
-          { name: "cohortExportApi", param: "ce", pairs: [[80, 3200]] },
-          { name: "alertStreamApi", param: "as", pairs: [[80, 1200]] },
-          { name: "layoutPrefsApi", param: "lp", pairs: [[80, 900]] },
+          { name: "vendorChunkBudget", param: "vnd", stateVar: "vendor", scaleFactor: 1, bands: [[80, 1800, 20]] },
+          { name: "chartsChunkBudget", param: "cht", stateVar: "charts", scaleFactor: 1, bands: [[80, 3200, 40]] },
+          { name: "workersChunkBudget", param: "wrk", stateVar: "workers", scaleFactor: 1, bands: [[80, 1200, 15]] },
+          { name: "stylesAssetBudget", param: "css", stateVar: "styles", scaleFactor: 1, bands: [[80, 900, 10]] },
         ],
         "new_feature",
       ),
@@ -1034,10 +1060,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "vite_pipeline.yaml",
         "yaml",
         [
-          { name: "vitePreview", param: "vp", pairs: [[173, 1]] },
-          { name: "edgeCdnSync", param: "cdn", pairs: [[443, 2]] },
-          { name: "lighthouseGate", param: "lh", pairs: [[300, 3]] },
-          { name: "storybookBuild", param: "sb", pairs: [[606, 4]] },
+          { name: "vitePreview", param: "vp", stateVar: "preview", scaleFactor: 1, bands: [[5173, 4, 0]] },
+          { name: "edgeCdnSync", param: "cdn", stateVar: "cdn", scaleFactor: 1, bands: [[8443, 8, 0]] },
+          { name: "lighthouseGate", param: "lh", stateVar: "lighthouse", scaleFactor: 1, bands: [[9300, 2, 0]] },
+          { name: "storybookBuild", param: "sb", stateVar: "storybook", scaleFactor: 1, bands: [[6006, 4, 0]] },
         ],
         "new_feature",
       ),
@@ -1055,34 +1081,52 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "gateway.go",
         "go",
         [
-          { name: "EvaluateQuorumHealth", param: "nodes", pairs: [[3, 15], [5, 31], [7, 63]] },
-          { name: "AcquireTokenBucket", param: "tokens", pairs: [[10, 1000], [50, 5000], [100, 10000]] },
-          { name: "ComputeCircuitBackoffMs", param: "failures", pairs: [[50, 2000], [100, 5000], [250, 15000]] },
-          { name: "ValidateShardEpoch", param: "epoch", pairs: [[1, 1024], [16, 4096], [64, 16384]] },
+          { name: "EvaluateQuorumHealth", param: "votingNodes", stateVar: "quorumWeight", scaleFactor: 3, bands: [[3, 15, 2], [5, 31, 4], [7, 63, 8]] },
+          { name: "AcquireTokenBucket", param: "requestedTokens", stateVar: "leasedTokens", scaleFactor: 2, bands: [[10, 1000, 25], [50, 5000, 75], [100, 10000, 150]] },
+          { name: "ComputeCircuitBackoffMs", param: "consecutiveFailures", stateVar: "cooldownMs", scaleFactor: 25, bands: [[50, 2000, 100], [100, 5000, 250], [250, 15000, 500]] },
+          { name: "ValidateShardEpoch", param: "clientEpoch", stateVar: "verifiedEpoch", scaleFactor: 2, bands: [[1, 1024, 8], [16, 4096, 32], [64, 16384, 64]] },
         ],
         "update_feature",
         "DeprecatedV1Route",
+        {
+          typeName: "ShardLeaseMetadata",
+          fields: [
+            ["shardId", "int"],
+            ["leaderEpoch", "int"],
+            ["quorumVoters", "int"],
+            ["burstLimit", "int"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "wal_engine.rs",
         "rs",
         [
-          { name: "compact_wal_segment", param: "entries", pairs: [[64, 4096], [128, 8192], [256, 16384]] },
-          { name: "verify_frame_crc32", param: "payload_len", pairs: [[32, 2048], [64, 4096], [128, 8192]] },
-          { name: "flush_commit_index", param: "lsn", pairs: [[100, 50000], [250, 100000], [500, 250000]] },
-          { name: "reclaim_orphan_pages", param: "pages", pairs: [[8, 512], [16, 1024], [32, 2048]] },
+          { name: "compact_wal_segment", param: "dirty_entries", stateVar: "compacted_slots", scaleFactor: 4, bands: [[64, 4096, 32], [128, 8192, 64], [256, 16384, 128]] },
+          { name: "verify_frame_crc32", param: "payload_len", stateVar: "frame_digest", scaleFactor: 2, bands: [[32, 2048, 16], [64, 4096, 32], [128, 8192, 64]] },
+          { name: "flush_commit_index", param: "pending_lsn", stateVar: "committed_lsn", scaleFactor: 3, bands: [[100, 50000, 150], [250, 100000, 300], [500, 250000, 600]] },
+          { name: "reclaim_orphan_pages", param: "free_pages", stateVar: "reclaimed_blocks", scaleFactor: 2, bands: [[8, 512, 8], [16, 1024, 16], [32, 2048, 32]] },
         ],
         "update_feature",
         "legacy_mmap_sync",
+        {
+          typeName: "WalSegmentHeader",
+          fields: [
+            ["segment_id", "int"],
+            ["base_lsn", "int"],
+            ["crc_checksum", "int"],
+            ["is_compacted", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "cluster.yaml",
         "yaml",
         [
-          { name: "raftConsensus", param: "raft", pairs: [[900, 1]] },
-          { name: "walReplicator", param: "wal", pairs: [[901, 2]] },
-          { name: "grpcIngress", param: "grpc", pairs: [[902, 3]] },
-          { name: "gossipMesh", param: "gsp", pairs: [[903, 4]] },
+          { name: "raftConsensus", param: "raft", stateVar: "raft", scaleFactor: 1, bands: [[9000, 7, 0]] },
+          { name: "walReplicator", param: "wal", stateVar: "wal", scaleFactor: 1, bands: [[9001, 5, 0]] },
+          { name: "grpcIngress", param: "grpc", stateVar: "grpc", scaleFactor: 1, bands: [[9002, 12, 0]] },
+          { name: "gossipMesh", param: "gsp", stateVar: "gossip", scaleFactor: 1, bands: [[9003, 9, 0]] },
         ],
         "update_feature",
       ),
@@ -1090,10 +1134,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "limits.json",
         "json",
         [
-          { name: "ledgerAppendRpc", param: "app", pairs: [[50, 800]] },
-          { name: "quorumReadRpc", param: "qr", pairs: [[25, 400]] },
-          { name: "snapshotSyncRpc", param: "snap", pairs: [[200, 8000]] },
-          { name: "shardRebalanceRpc", param: "reb", pairs: [[150, 5000]] },
+          { name: "ledgerAppendQuota", param: "app", stateVar: "append", scaleFactor: 1, bands: [[50, 800, 15]] },
+          { name: "quorumReadQuota", param: "qr", stateVar: "quorum", scaleFactor: 1, bands: [[25, 400, 10]] },
+          { name: "snapshotSyncQuota", param: "snap", stateVar: "snapshot", scaleFactor: 1, bands: [[200, 8000, 100]] },
+          { name: "shardRebalanceQuota", param: "reb", stateVar: "rebalance", scaleFactor: 1, bands: [[150, 5000, 75]] },
         ],
         "update_feature",
       ),
@@ -1111,10 +1155,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "viewport_sim.cpp",
         "cpp",
         [
-          { name: "solveRigidBodyAABB", param: "penetration", pairs: [[1, 128], [4, 256], [8, 512]] },
-          { name: "integrateVelocityStep", param: "vel", pairs: [[10, 800], [20, 1600], [40, 3200]] },
-          { name: "applyAngularDamping", param: "torque", pairs: [[5, 400], [10, 800], [20, 1600]] },
-          { name: "clampViewportZoom", param: "fov", pairs: [[30, 120], [45, 110], [60, 100]] },
+          { name: "solveRigidBodyAABB", param: "penetrationUm", stateVar: "resolvedDepth", scaleFactor: 2, bands: [[1, 128, 4], [4, 256, 8], [8, 512, 16]] },
+          { name: "integrateVelocityStep", param: "linearVel", stateVar: "dampedVel", scaleFactor: 3, bands: [[10, 800, 15], [20, 1600, 30], [40, 3200, 60]] },
+          { name: "applyAngularDamping", param: "rawTorque", stateVar: "clampedTorque", scaleFactor: 2, bands: [[5, 400, 10], [10, 800, 20], [20, 1600, 40]] },
+          { name: "clampViewportZoom", param: "fovDegrees", stateVar: "activeFov", scaleFactor: 1, bands: [[30, 120, 5], [45, 110, 5], [60, 100, 5]] },
         ],
         "bug_fix",
         "legacyEulerStep",
@@ -1123,9 +1167,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "inspector.ts",
         "ts",
         [
-          { name: "sampleFrameTimeHistogram", param: "usec", pairs: [[500, 16667], [1000, 33333], [2000, 50000]] },
-          { name: "projectGizmoHandle", param: "screenX", pairs: [[0, 1920], [16, 1904], [32, 1888]] },
-          { name: "syncColliderWireframe", param: "verts", pairs: [[8, 2048], [16, 4096], [32, 8192]] },
+          { name: "sampleFrameTimeHistogram", param: "frameUsec", stateVar: "bucketUsec", scaleFactor: 2, bands: [[500, 16667, 250], [1000, 33333, 500], [2000, 50000, 1000]] },
+          { name: "projectGizmoHandle", param: "worldX", stateVar: "screenPx", scaleFactor: 4, bands: [[0, 1920, 16], [16, 1904, 24], [32, 1888, 32]] },
+          { name: "syncColliderWireframe", param: "meshVerts", stateVar: "lineSegments", scaleFactor: 3, bands: [[8, 2048, 16], [16, 4096, 32], [32, 8192, 64]] },
         ],
         "bug_fix",
       ),
@@ -1133,8 +1177,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "overlay.html",
         "html",
         [
-          { name: "physics_hud_dock", param: "dock", pairs: [[1, 60], [2, 120]] },
-          { name: "solver_metrics_panel", param: "slv", pairs: [[3, 240], [4, 480]] },
+          { name: "physics_hud_dock", param: "dock", stateVar: "SolverHud", scaleFactor: 1, bands: [[1, 60, 0], [2, 120, 0]] },
+          { name: "solver_metrics_panel", param: "slv", stateVar: "BodyHud", scaleFactor: 1, bands: [[3, 240, 0], [4, 480, 0]] },
         ],
         "bug_fix",
       ),
@@ -1142,10 +1186,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "overlay.css",
         "css",
         [
-          { name: "viewport_hud_dock", param: "dock", pairs: [[12, 8]] },
-          { name: "gizmo_toolbar", param: "giz", pairs: [[8, 6]] },
-          { name: "fps_histogram_bar", param: "fps", pairs: [[6, 4]] },
-          { name: "collider_prop_row", param: "row", pairs: [[10, 6]] },
+          { name: "viewport_hud_dock", param: "dock", stateVar: "dock", scaleFactor: 1, bands: [[12, 8, 0]] },
+          { name: "gizmo_toolbar", param: "giz", stateVar: "giz", scaleFactor: 1, bands: [[8, 6, 0]] },
+          { name: "fps_histogram_bar", param: "fps", stateVar: "fps", scaleFactor: 1, bands: [[6, 4, 0]] },
+          { name: "collider_prop_row", param: "row", stateVar: "row", scaleFactor: 1, bands: [[10, 6, 0]] },
         ],
         "bug_fix",
       ),
@@ -1153,10 +1197,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "engine_settings.json",
         "json",
         [
-          { name: "solverStepBridge", param: "slv", pairs: [[16, 500]] },
-          { name: "gizmoPickBridge", param: "giz", pairs: [[16, 250]] },
-          { name: "sceneSnapshotBridge", param: "scn", pairs: [[50, 2000]] },
-          { name: "shaderReloadBridge", param: "shd", pairs: [[30, 1500]] },
+          { name: "solverSubsteps", param: "slv", stateVar: "substep", scaleFactor: 1, bands: [[16, 500, 8]] },
+          { name: "gizmoSnapGrid", param: "giz", stateVar: "gizmo", scaleFactor: 1, bands: [[16, 250, 4]] },
+          { name: "broadphaseBuckets", param: "scn", stateVar: "bvh", scaleFactor: 1, bands: [[50, 2000, 25]] },
+          { name: "contactManifoldPool", param: "shd", stateVar: "manifold", scaleFactor: 1, bands: [[30, 1500, 15]] },
         ],
         "bug_fix",
       ),
@@ -1174,10 +1218,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "SettlementEngine.cs",
         "cs",
         [
-          { name: "ReconcileLedgerBatch", param: "cents", pairs: [[100, 100000], [500, 500000], [1000, 2500000]] },
-          { name: "ComputeFxSpreadBps", param: "notional", pairs: [[15, 350], [25, 500], [50, 1000]] },
-          { name: "EvaluateMerchantReserve", param: "volume", pairs: [[500, 250000], [1000, 500000], [2500, 1000000]] },
-          { name: "AuthorizeClearingWindow", param: "cutoff", pairs: [[10, 1440], [30, 2880], [60, 4320]] },
+          { name: "ReconcileLedgerBatch", param: "grossCents", stateVar: "settledCents", scaleFactor: 2, bands: [[100, 100000, 50], [500, 500000, 250], [1000, 2500000, 500]] },
+          { name: "ComputeFxSpreadBps", param: "notionalUnits", stateVar: "spreadBps", scaleFactor: 3, bands: [[15, 350, 10], [25, 500, 20], [50, 1000, 35]] },
+          { name: "EvaluateMerchantReserve", param: "rollingVolume", stateVar: "reserveCents", scaleFactor: 2, bands: [[500, 250000, 150], [1000, 500000, 300], [2500, 1000000, 600]] },
+          { name: "AuthorizeClearingWindow", param: "cutoffMinutes", stateVar: "windowSlot", scaleFactor: 2, bands: [[10, 1440, 15], [30, 2880, 30], [60, 4320, 60]] },
         ],
         "new_feature",
         "LegacyBatchClose",
@@ -1186,10 +1230,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "FraudScorer.kt",
         "kt",
         [
-          { name: "scoreCardVelocityRisk", param: "txCount", pairs: [[5, 100], [15, 300], [30, 900]] },
-          { name: "weightDeviceFingerprint", param: "signals", pairs: [[10, 500], [25, 750], [50, 1000]] },
-          { name: "evaluateGeoDistanceRisk", param: "km", pairs: [[20, 2000], [50, 5000], [100, 15000]] },
-          { name: "computeChargebackTier", param: "disputes", pairs: [[1, 50], [5, 150], [10, 500]] },
+          { name: "scoreCardVelocityRisk", param: "hourlyTxCount", stateVar: "velocityRisk", scaleFactor: 4, bands: [[5, 100, 8], [15, 300, 16], [30, 900, 32]] },
+          { name: "weightDeviceFingerprint", param: "anomalySignals", stateVar: "devicePenalty", scaleFactor: 3, bands: [[10, 500, 15], [25, 750, 30], [50, 1000, 45]] },
+          { name: "evaluateGeoDistanceRisk", param: "distanceKm", stateVar: "geoHazard", scaleFactor: 2, bands: [[20, 2000, 25], [50, 5000, 50], [100, 15000, 100]] },
+          { name: "computeChargebackTier", param: "priorDisputes", stateVar: "disputeWeight", scaleFactor: 5, bands: [[1, 50, 5], [5, 150, 10], [10, 500, 20]] },
         ],
         "new_feature",
         "deprecatedRuleScore",
@@ -1198,10 +1242,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "settlement_policy.yaml",
         "yaml",
         [
-          { name: "sepaClearing", param: "sepa", pairs: [[410, 1]] },
-          { name: "fednowClearing", param: "fed", pairs: [[411, 2]] },
-          { name: "fraudScoringGrpc", param: "frd", pairs: [[412, 3]] },
-          { name: "ledgerVaultSync", param: "vlt", pairs: [[413, 4]] },
+          { name: "sepaClearing", param: "sepa", stateVar: "sepa", scaleFactor: 1, bands: [[8410, 6, 0]] },
+          { name: "fednowClearing", param: "fed", stateVar: "fednow", scaleFactor: 1, bands: [[8411, 8, 0]] },
+          { name: "fraudScoringGrpc", param: "frd", stateVar: "fraud", scaleFactor: 1, bands: [[8412, 12, 0]] },
+          { name: "ledgerVaultSync", param: "vlt", stateVar: "vault", scaleFactor: 1, bands: [[8413, 4, 0]] },
         ],
         "new_feature",
       ),
@@ -1209,10 +1253,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "risk_rules.json",
         "json",
         [
-          { name: "velocityCheckEndpoint", param: "vel", pairs: [[20, 350]] },
-          { name: "sanctionsScreenEndpoint", param: "snc", pairs: [[50, 900]] },
-          { name: "instantPayoutEndpoint", param: "pay", pairs: [[30, 600]] },
-          { name: "reserveLedgerEndpoint", param: "res", pairs: [[40, 800]] },
+          { name: "velocityCheckRule", param: "vel", stateVar: "velocity", scaleFactor: 1, bands: [[20, 350, 10]] },
+          { name: "sanctionsScreenRule", param: "snc", stateVar: "sanctions", scaleFactor: 1, bands: [[50, 900, 25]] },
+          { name: "instantPayoutRule", param: "pay", stateVar: "payout", scaleFactor: 1, bands: [[30, 600, 15]] },
+          { name: "reserveLedgerRule", param: "res", stateVar: "reserve", scaleFactor: 1, bands: [[40, 800, 20]] },
         ],
         "new_feature",
       ),
@@ -1230,21 +1274,32 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "billing_service.py",
         "py",
         [
-          { name: "compute_tiered_overage_cents", param: "units", pairs: [[100, 50000], [250, 150000], [500, 500000]] },
-          { name: "prorate_subscription_upgrade", param: "days_left", pairs: [[1, 30], [7, 90], [14, 365]] },
-          { name: "aggregate_vat_withholding", param: "net_cents", pairs: [[50, 100000], [150, 300000], [300, 900000]] },
-          { name: "apply_credit_balance_rollover", param: "credit", pairs: [[25, 25000], [75, 75000], [150, 150000]] },
+          { name: "compute_tiered_overage_cents", param: "metered_units", stateVar: "overage_cents", scaleFactor: 3, bands: [[100, 50000, 75], [250, 150000, 150], [500, 500000, 300]] },
+          { name: "prorate_subscription_upgrade", param: "remaining_days", stateVar: "prorated_cents", scaleFactor: 4, bands: [[1, 30, 5], [7, 90, 15], [14, 365, 30]] },
+          { name: "aggregate_vat_withholding", param: "net_invoice_cents", stateVar: "withheld_cents", scaleFactor: 2, bands: [[50, 100000, 50], [150, 300000, 125], [300, 900000, 250]] },
+          { name: "apply_credit_balance_rollover", param: "available_credit", stateVar: "applied_credit", scaleFactor: 1, bands: [[25, 25000, 25], [75, 75000, 50], [150, 150000, 100]] },
         ],
         "update_feature",
         "legacy_invoice_hash",
+        {
+          typeName: "TenantInvoiceStatement",
+          fields: [
+            ["invoice_id", "str"],
+            ["tenant_id", "str"],
+            ["subtotal_cents", "int"],
+            ["overage_cents", "int"],
+            ["vat_cents", "int"],
+            ["is_settled", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "UsageChart.tsx",
         "tsx",
         [
-          { name: "renderQuotaGaugeRows", param: "used", pairs: [[10, 500], [25, 1000], [50, 2500]] },
-          { name: "renderInvoiceHistoryTable", param: "months", pairs: [[3, 12], [6, 24], [12, 36]] },
-          { name: "renderPlanComparisonCards", param: "tiers", pairs: [[1, 4], [2, 8], [4, 16]] },
+          { name: "QuotaGaugePanel", param: "Quota", stateVar: "quota_gauges", scaleFactor: 1, bands: [[10, 500, 20], [25, 1000, 40], [50, 2500, 80]] },
+          { name: "InvoiceHistoryTable", param: "Invoice", stateVar: "invoice_history", scaleFactor: 1, bands: [[3, 120, 5], [6, 240, 10], [12, 360, 15]] },
+          { name: "PlanComparisonGrid", param: "Tier", stateVar: "plan_tiers", scaleFactor: 1, bands: [[1, 49, 0], [2, 199, 0], [4, 499, 0]] },
         ],
         "update_feature",
       ),
@@ -1252,8 +1307,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "invoice_email.twig",
         "twig",
         [
-          { name: "invoice_header_block", param: "hdr", pairs: [[1, 10], [2, 20], [3, 30]] },
-          { name: "line_items_summary", param: "lines", pairs: [[4, 40], [5, 50]] },
+          { name: "invoice_header_block", param: "hdr", stateVar: "InvoiceMeta", scaleFactor: 1, bands: [[1, 10, 0], [2, 20, 0], [3, 30, 0]] },
+          { name: "line_items_summary", param: "lines", stateVar: "ChargeLine", scaleFactor: 1, bands: [[4, 40, 0], [5, 50, 0]] },
         ],
         "update_feature",
         "legacy_vat_footer",
@@ -1262,10 +1317,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "billing.css",
         "css",
         [
-          { name: "invoice_preview_sheet", param: "inv", pairs: [[24, 16]] },
-          { name: "quota_progress_card", param: "qta", pairs: [[16, 12]] },
-          { name: "tier_badge_header", param: "bdg", pairs: [[8, 6]] },
-          { name: "overage_warning_row", param: "wrn", pairs: [[12, 8]] },
+          { name: "invoice_preview_sheet", param: "inv", stateVar: "inv", scaleFactor: 1, bands: [[24, 16, 0]] },
+          { name: "quota_progress_card", param: "qta", stateVar: "qta", scaleFactor: 1, bands: [[16, 12, 0]] },
+          { name: "tier_badge_header", param: "bdg", stateVar: "bdg", scaleFactor: 1, bands: [[8, 6, 0]] },
+          { name: "overage_warning_row", param: "wrn", stateVar: "wrn", scaleFactor: 1, bands: [[12, 8, 0]] },
         ],
         "update_feature",
       ),
@@ -1273,10 +1328,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "plans.json",
         "json",
         [
-          { name: "usageMeterIngest", param: "mtr", pairs: [[50, 1200]] },
-          { name: "invoicePdfRender", param: "pdf", pairs: [[100, 4500]] },
-          { name: "taxComplianceSync", param: "tax", pairs: [[80, 2200]] },
-          { name: "dunningWebhook", param: "dun", pairs: [[60, 1800]] },
+          { name: "starterTierQuota", param: "mtr", stateVar: "starter", scaleFactor: 1, bands: [[50, 1200, 10]] },
+          { name: "growthTierQuota", param: "pdf", stateVar: "growth", scaleFactor: 1, bands: [[100, 4500, 25]] },
+          { name: "enterpriseTierQuota", param: "tax", stateVar: "enterprise", scaleFactor: 1, bands: [[80, 2200, 20]] },
+          { name: "dunningGracePolicy", param: "dun", stateVar: "dunning", scaleFactor: 1, bands: [[60, 1800, 15]] },
         ],
         "update_feature",
       ),
@@ -1284,10 +1339,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "worker_cron.yaml",
         "yaml",
         [
-          { name: "invoiceRollupWorker", param: "inv", pairs: [[510, 1]] },
-          { name: "usageAggregator", param: "usg", pairs: [[511, 2]] },
-          { name: "dunningMailer", param: "mlr", pairs: [[512, 3]] },
-          { name: "ledgerArchiver", param: "arc", pairs: [[513, 4]] },
+          { name: "invoiceRollupWorker", param: "inv", stateVar: "rollup", scaleFactor: 1, bands: [[8510, 4, 0]] },
+          { name: "usageAggregator", param: "usg", stateVar: "usage", scaleFactor: 1, bands: [[8511, 8, 0]] },
+          { name: "dunningMailer", param: "mlr", stateVar: "mailer", scaleFactor: 1, bands: [[8512, 2, 0]] },
+          { name: "ledgerArchiver", param: "arc", stateVar: "archiver", scaleFactor: 1, bands: [[8513, 2, 0]] },
         ],
         "update_feature",
       ),
@@ -1305,10 +1360,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "matcher.rs",
         "rs",
         [
-          { name: "match_limit_order_lot", param: "qty", pairs: [[1, 10000], [10, 50000], [100, 250000]] },
-          { name: "enforce_price_collar_ticks", param: "ticks", pairs: [[5, 500], [10, 1000], [25, 2500]] },
-          { name: "allocate_pro_rata_fills", param: "lots", pairs: [[2, 2000], [8, 8000], [16, 32000]] },
-          { name: "advance_sequence_watermark", param: "seq", pairs: [[64, 65536], [128, 131072], [256, 524288]] },
+          { name: "match_limit_order_lot", param: "order_qty", stateVar: "matched_lots", scaleFactor: 2, bands: [[1, 10000, 10], [10, 50000, 50], [100, 250000, 250]] },
+          { name: "enforce_price_collar_ticks", param: "spread_ticks", stateVar: "clamped_ticks", scaleFactor: 3, bands: [[5, 500, 5], [10, 1000, 10], [25, 2500, 25]] },
+          { name: "allocate_pro_rata_fills", param: "resting_lots", stateVar: "pro_rata_fill", scaleFactor: 2, bands: [[2, 2000, 8], [8, 8000, 16], [16, 32000, 32]] },
+          { name: "advance_sequence_watermark", param: "venue_seq", stateVar: "next_watermark", scaleFactor: 4, bands: [[64, 65536, 32], [128, 131072, 64], [256, 524288, 128]] },
         ],
         "bug_fix",
         "legacy_cancel_all",
@@ -1317,9 +1372,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "margin_calc.cpp",
         "cpp",
         [
-          { name: "computeIntradayHaircutBps", param: "volatility", pairs: [[25, 1500], [50, 3000], [100, 5000]] },
-          { name: "evaluateNetSpanMargin", param: "exposure", pairs: [[1000, 500000], [2500, 1000000], [5000, 2500000]] },
-          { name: "checkLiquidationBuffer", param: "equity", pairs: [[500, 250000], [1000, 500000], [2000, 1000000]] },
+          { name: "computeIntradayHaircutBps", param: "sigmaBps", stateVar: "haircutBps", scaleFactor: 3, bands: [[25, 1500, 15], [50, 3000, 30], [100, 5000, 60]] },
+          { name: "evaluateNetSpanMargin", param: "grossExposure", stateVar: "spanMargin", scaleFactor: 2, bands: [[1000, 500000, 250], [2500, 1000000, 500], [5000, 2500000, 1000]] },
+          { name: "checkLiquidationBuffer", param: "freeEquity", stateVar: "safetyBuffer", scaleFactor: 2, bands: [[500, 250000, 100], [1000, 500000, 200], [2000, 1000000, 400]] },
         ],
         "bug_fix",
       ),
@@ -1327,19 +1382,30 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "risk_daemon.py",
         "py",
         [
-          { name: "audit_position_concentration", param: "notional", pairs: [[100, 100000], [500, 500000], [1000, 1000000]] },
-          { name: "trigger_kill_switch_cooldown", param: "breaches", pairs: [[1, 10], [3, 30], [5, 100]] },
-          { name: "record_regulatory_drop_copy", param: "events", pairs: [[10, 5000], [25, 15000], [50, 50000]] },
+          { name: "audit_position_concentration", param: "notional_usd", stateVar: "concentration_score", scaleFactor: 2, bands: [[100, 100000, 50], [500, 500000, 150], [1000, 1000000, 300]] },
+          { name: "trigger_kill_switch_cooldown", param: "breach_count", stateVar: "lockout_sec", scaleFactor: 5, bands: [[1, 10, 2], [3, 30, 5], [5, 100, 10]] },
+          { name: "record_regulatory_drop_copy", param: "fill_events", stateVar: "logged_fills", scaleFactor: 3, bands: [[10, 5000, 20], [25, 15000, 50], [50, 50000, 100]] },
         ],
         "bug_fix",
+        undefined,
+        {
+          typeName: "KillSwitchAuditEvent",
+          fields: [
+            ["trader_id", "str"],
+            ["venue_code", "str"],
+            ["exposure_cents", "int"],
+            ["breach_tier", "int"],
+            ["is_halted", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "feed_ingest.go",
         "go",
         [
-          { name: "NormalizeVenueTickGap", param: "deltaSeq", pairs: [[1, 256], [4, 1024], [16, 4096]] },
-          { name: "ReconcileBookSnapshot", param: "depth", pairs: [[10, 200], [25, 500], [50, 1000]] },
-          { name: "ArbitrateMulticastLine", param: "skewUs", pairs: [[5, 500], [15, 1500], [30, 5000]] },
+          { name: "NormalizeVenueTickGap", param: "deltaSeq", stateVar: "repairedGap", scaleFactor: 2, bands: [[1, 256, 4], [4, 1024, 8], [16, 4096, 16]] },
+          { name: "ReconcileBookSnapshot", param: "bookDepth", stateVar: "syncedLevels", scaleFactor: 3, bands: [[10, 200, 5], [25, 500, 10], [50, 1000, 20]] },
+          { name: "ArbitrateMulticastLine", param: "skewUsec", stateVar: "selectedLineSkew", scaleFactor: 2, bands: [[5, 500, 10], [15, 1500, 25], [30, 5000, 50]] },
         ],
         "bug_fix",
       ),
@@ -1347,10 +1413,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "exchange_feeds.yaml",
         "yaml",
         [
-          { name: "ouchOrderGateway", param: "ouch", pairs: [[701, 1]] },
-          { name: "itchMulticastA", param: "itch", pairs: [[702, 2]] },
-          { name: "dropCopyFix", param: "fix", pairs: [[703, 3]] },
-          { name: "marginGuardRpc", param: "mrg", pairs: [[704, 4]] },
+          { name: "ouchOrderGateway", param: "ouch", stateVar: "ouch", scaleFactor: 1, bands: [[9701, 16, 0]] },
+          { name: "itchMulticastA", param: "itch", stateVar: "itch", scaleFactor: 1, bands: [[9702, 32, 0]] },
+          { name: "dropCopyFix", param: "fix", stateVar: "fix", scaleFactor: 1, bands: [[9703, 8, 0]] },
+          { name: "marginGuardRpc", param: "mrg", stateVar: "margin", scaleFactor: 1, bands: [[9704, 12, 0]] },
         ],
         "bug_fix",
       ),
@@ -1358,10 +1424,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "collar_bands.json",
         "json",
         [
-          { name: "orderSubmitGate", param: "ord", pairs: [[10, 150]] },
-          { name: "massQuoteGate", param: "mq", pairs: [[10, 200]] },
-          { name: "killSwitchGate", param: "ks", pairs: [[5, 100]] },
-          { name: "dropCopyAuditGate", param: "dc", pairs: [[25, 500]] },
+          { name: "orderSubmitCollar", param: "ord", stateVar: "submit", scaleFactor: 1, bands: [[10, 150, 5]] },
+          { name: "massQuoteCollar", param: "mq", stateVar: "quote", scaleFactor: 1, bands: [[10, 200, 10]] },
+          { name: "killSwitchCollar", param: "ks", stateVar: "kill", scaleFactor: 1, bands: [[5, 100, 5]] },
+          { name: "dropCopyAuditCollar", param: "dc", stateVar: "audit", scaleFactor: 1, bands: [[25, 500, 15]] },
         ],
         "bug_fix",
       ),
@@ -1379,9 +1445,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "telemetry_router.ts",
         "ts",
         [
-          { name: "routeSpanBatch", param: "spans", pairs: [[16, 1024], [32, 2048], [64, 4096]] },
-          { name: "sampleTraceTail", param: "latencyMs", pairs: [[10, 500], [25, 1500], [50, 5000]] },
-          { name: "compactMetricSeries", param: "points", pairs: [[32, 4096], [64, 8192], [128, 16384]] },
+          { name: "routeSpanBatch", param: "spanCount", stateVar: "routedSpans", scaleFactor: 2, bands: [[16, 1024, 16], [32, 2048, 32], [64, 4096, 64]] },
+          { name: "sampleTraceTail", param: "durationMs", stateVar: "tailWeight", scaleFactor: 3, bands: [[10, 500, 15], [25, 1500, 30], [50, 5000, 75]] },
+          { name: "compactMetricSeries", param: "rawPoints", stateVar: "compactedPoints", scaleFactor: 2, bands: [[32, 4096, 32], [64, 8192, 64], [128, 16384, 128]] },
         ],
         "update_feature",
         "legacySpanFlush",
@@ -1390,9 +1456,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "ClusterHud.tsx",
         "tsx",
         [
-          { name: "renderClusterNodeGrid", param: "nodes", pairs: [[4, 128], [8, 256], [16, 512]] },
-          { name: "renderSloBurnCards", param: "slos", pairs: [[2, 32], [4, 64], [8, 128]] },
-          { name: "renderIncidentTimeline", param: "events", pairs: [[5, 100], [10, 250], [20, 500]] },
+          { name: "ClusterNodeGrid", param: "Node", stateVar: "cluster_nodes", scaleFactor: 1, bands: [[4, 128, 4], [8, 256, 8], [16, 512, 16]] },
+          { name: "SloBurnCardList", param: "SLO", stateVar: "slo_burn", scaleFactor: 1, bands: [[2, 32, 2], [4, 64, 4], [8, 128, 8]] },
+          { name: "IncidentTimelinePanel", param: "Incident", stateVar: "incident_timeline", scaleFactor: 1, bands: [[5, 100, 5], [10, 250, 10], [20, 500, 20]] },
         ],
         "update_feature",
       ),
@@ -1400,9 +1466,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "widget_embed.js",
         "js",
         [
-          { name: "clampStatusPollInterval", param: "sec", pairs: [[5, 60], [10, 120], [15, 300]] },
-          { name: "resizeEmbedIframeHeight", param: "px", pairs: [[240, 1080], [320, 1440], [400, 2160]] },
-          { name: "throttleBeaconFlush", param: "queued", pairs: [[1, 50], [5, 100], [10, 250]] },
+          { name: "clampStatusPollInterval", param: "requestedSec", stateVar: "pollSec", scaleFactor: 2, bands: [[5, 60, 5], [10, 120, 10], [15, 300, 15]] },
+          { name: "resizeEmbedIframeHeight", param: "contentPx", stateVar: "iframePx", scaleFactor: 1, bands: [[240, 1080, 20], [320, 1440, 40], [400, 2160, 60]] },
+          { name: "throttleBeaconFlush", param: "queuedEvents", stateVar: "beaconBatch", scaleFactor: 2, bands: [[1, 50, 5], [5, 100, 10], [10, 250, 20]] },
         ],
         "update_feature",
       ),
@@ -1410,19 +1476,29 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "anomaly_worker.py",
         "py",
         [
-          { name: "score_seasonal_zscore", param: "sigma", pairs: [[10, 300], [20, 600], [30, 900]] },
-          { name: "cluster_log_signatures", param: "tokens", pairs: [[32, 1024], [64, 2048], [128, 4096]] },
-          { name: "suppress_flapping_alerts", param: "flaps", pairs: [[3, 30], [5, 60], [10, 120]] },
+          { name: "score_seasonal_zscore", param: "sigma_units", stateVar: "anomaly_score", scaleFactor: 3, bands: [[10, 300, 10], [20, 600, 20], [30, 900, 30]] },
+          { name: "cluster_log_signatures", param: "token_count", stateVar: "signature_hash", scaleFactor: 2, bands: [[32, 1024, 16], [64, 2048, 32], [128, 4096, 64]] },
+          { name: "suppress_flapping_alerts", param: "flap_transitions", stateVar: "dampened_alerts", scaleFactor: 4, bands: [[3, 30, 3], [5, 60, 6], [10, 120, 12]] },
         ],
         "update_feature",
+        undefined,
+        {
+          typeName: "AnomalyDetectorWindow",
+          fields: [
+            ["metric_key", "str"],
+            ["baseline_mean", "int"],
+            ["sigma_threshold", "int"],
+            ["is_suppressed", "bool"],
+          ],
+        },
       ),
       buildDomainModuleSpec(
         "mesh_proxy.go",
         "go",
         [
-          { name: "BalanceEnvoyUpstream", param: "endpoints", pairs: [[2, 64], [4, 128], [8, 256]] },
-          { name: "EnforceMtlsRotation", param: "ttlHours", pairs: [[1, 24], [6, 72], [12, 168]] },
-          { name: "DrainCanaryTraffic", param: "weightPct", pairs: [[5, 100], [10, 100], [25, 100]] },
+          { name: "BalanceEnvoyUpstream", param: "healthyEndpoints", stateVar: "routedWeight", scaleFactor: 2, bands: [[2, 64, 4], [4, 128, 8], [8, 256, 16]] },
+          { name: "EnforceMtlsRotation", param: "certAgeHours", stateVar: "rotationWindow", scaleFactor: 3, bands: [[1, 24, 2], [6, 72, 6], [12, 168, 12]] },
+          { name: "DrainCanaryTraffic", param: "canaryPct", stateVar: "shiftedTraffic", scaleFactor: 2, bands: [[5, 100, 5], [10, 100, 10], [25, 100, 15]] },
         ],
         "update_feature",
       ),
@@ -1430,9 +1506,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "trace_ring.rs",
         "rs",
         [
-          { name: "append_ring_buffer_slot", param: "offset", pairs: [[64, 65536], [128, 131072], [256, 262144]] },
-          { name: "evict_expired_spans", param: "age_ms", pairs: [[100, 10000], [250, 30000], [500, 60000]] },
-          { name: "compress_lz4_chunk", param: "bytes", pairs: [[512, 32768], [1024, 65536], [2048, 131072]] },
+          { name: "append_ring_buffer_slot", param: "write_offset", stateVar: "slot_cursor", scaleFactor: 2, bands: [[64, 65536, 32], [128, 131072, 64], [256, 262144, 128]] },
+          { name: "evict_expired_spans", param: "span_age_ms", stateVar: "evicted_count", scaleFactor: 3, bands: [[100, 10000, 50], [250, 30000, 125], [500, 60000, 250]] },
+          { name: "compress_lz4_chunk", param: "raw_bytes", stateVar: "compressed_len", scaleFactor: 1, bands: [[512, 32768, 128], [1024, 65536, 256], [2048, 131072, 512]] },
         ],
         "update_feature",
       ),
@@ -1440,9 +1516,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "packet_filter.cpp",
         "cpp",
         [
-          { name: "filterEbpfSocketRing", param: "packets", pairs: [[32, 4096], [64, 8192], [128, 16384]] },
-          { name: "aggregateTcpRetransmits", param: "segs", pairs: [[1, 500], [5, 1000], [10, 2500]] },
-          { name: "clampSynBacklogQuota", param: "qlen", pairs: [[128, 8192], [256, 16384], [512, 32768]] },
+          { name: "filterEbpfSocketRing", param: "ingressPackets", stateVar: "acceptedPackets", scaleFactor: 2, bands: [[32, 4096, 32], [64, 8192, 64], [128, 16384, 128]] },
+          { name: "aggregateTcpRetransmits", param: "retransmitSegs", stateVar: "penaltyScore", scaleFactor: 3, bands: [[1, 500, 10], [5, 1000, 20], [10, 2500, 40]] },
+          { name: "clampSynBacklogQuota", param: "queueDepth", stateVar: "backlogLimit", scaleFactor: 2, bands: [[128, 8192, 64], [256, 16384, 128], [512, 32768, 256]] },
         ],
         "update_feature",
       ),
@@ -1450,9 +1526,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "AuditLedger.cs",
         "cs",
         [
-          { name: "AppendComplianceEvent", param: "seq", pairs: [[1, 10000], [10, 50000], [50, 250000]] },
-          { name: "VerifyRbacPolicyEpoch", param: "version", pairs: [[1, 512], [4, 1024], [8, 2048]] },
-          { name: "RotateKmsEnvelopeKey", param: "days", pairs: [[7, 90], [14, 180], [30, 365]] },
+          { name: "AppendComplianceEvent", param: "eventSeq", stateVar: "ledgerIndex", scaleFactor: 2, bands: [[1, 10000, 25], [10, 50000, 50], [50, 250000, 100]] },
+          { name: "VerifyRbacPolicyEpoch", param: "policyVersion", stateVar: "validatedEpoch", scaleFactor: 3, bands: [[1, 512, 8], [4, 1024, 16], [8, 2048, 32]] },
+          { name: "RotateKmsEnvelopeKey", param: "keyAgeDays", stateVar: "rotationCountdown", scaleFactor: 2, bands: [[7, 90, 7], [14, 180, 14], [30, 365, 30]] },
         ],
         "update_feature",
       ),
@@ -1460,9 +1536,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "AlertDispatcher.kt",
         "kt",
         [
-          { name: "dispatchPagerEscalation", param: "severity", pairs: [[1, 5], [2, 10], [3, 20]] },
-          { name: "deduplicateIncidentKey", param: "windowSec", pairs: [[60, 3600], [120, 7200], [300, 14400]] },
-          { name: "routeOnCallSchedule", param: "shiftId", pairs: [[1, 48], [2, 96], [4, 192]] },
+          { name: "dispatchPagerEscalation", param: "severityTier", stateVar: "escalationScore", scaleFactor: 4, bands: [[1, 5, 1], [2, 10, 2], [3, 20, 3]] },
+          { name: "deduplicateIncidentKey", param: "dedupWindowSec", stateVar: "activeWindow", scaleFactor: 2, bands: [[60, 3600, 30], [120, 7200, 60], [300, 14400, 120]] },
+          { name: "routeOnCallSchedule", param: "rotationSlot", stateVar: "assignedShift", scaleFactor: 2, bands: [[1, 48, 2], [2, 96, 4], [4, 192, 8]] },
         ],
         "update_feature",
       ),
@@ -1470,9 +1546,9 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "TenantPortal.php",
         "php",
         [
-          { name: "computeTenantQuotaUnits", param: "orgs", pairs: [[10, 1000], [25, 2500], [50, 5000]] },
-          { name: "validateSamlAssertionTtl", param: "sec", pairs: [[60, 1800], [120, 3600], [300, 7200]] },
-          { name: "tallyApiKeyUsageDaily", param: "calls", pairs: [[100, 100000], [250, 250000], [500, 500000]] },
+          { name: "computeTenantQuotaUnits", param: "activeOrgs", stateVar: "allocatedUnits", scaleFactor: 3, bands: [[10, 1000, 20], [25, 2500, 50], [50, 5000, 100]] },
+          { name: "validateSamlAssertionTtl", param: "assertionSec", stateVar: "verifiedTtl", scaleFactor: 2, bands: [[60, 1800, 30], [120, 3600, 60], [300, 7200, 120]] },
+          { name: "tallyApiKeyUsageDaily", param: "requestCalls", stateVar: "billedCalls", scaleFactor: 2, bands: [[100, 100000, 100], [250, 250000, 250], [500, 500000, 500]] },
         ],
         "update_feature",
       ),
@@ -1480,10 +1556,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "console.css",
         "css",
         [
-          { name: "control_plane_header", param: "hdr", pairs: [[16, 12]] },
-          { name: "node_health_tile", param: "til", pairs: [[12, 8]] },
-          { name: "slo_burn_badge", param: "bdg", pairs: [[8, 6]] },
-          { name: "trace_waterfall_row", param: "wf", pairs: [[6, 4]] },
+          { name: "control_plane_header", param: "hdr", stateVar: "hdr", scaleFactor: 1, bands: [[16, 12, 0]] },
+          { name: "node_health_tile", param: "til", stateVar: "til", scaleFactor: 1, bands: [[12, 8, 0]] },
+          { name: "slo_burn_badge", param: "bdg", stateVar: "bdg", scaleFactor: 1, bands: [[8, 6, 0]] },
+          { name: "trace_waterfall_row", param: "wf", stateVar: "wf", scaleFactor: 1, bands: [[6, 4, 0]] },
         ],
         "update_feature",
       ),
@@ -1491,8 +1567,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "console.html",
         "html",
         [
-          { name: "observability_nav", param: "nav", pairs: [[1, 10], [2, 20]] },
-          { name: "trace_explorer_pane", param: "trc", pairs: [[3, 30], [4, 40]] },
+          { name: "observability_nav", param: "nav", stateVar: "MeshNav", scaleFactor: 1, bands: [[1, 10, 0], [2, 20, 0]] },
+          { name: "trace_explorer_pane", param: "trc", stateVar: "TracePane", scaleFactor: 1, bands: [[3, 30, 0], [4, 40, 0]] },
         ],
         "update_feature",
       ),
@@ -1500,10 +1576,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "service_catalog.json",
         "json",
         [
-          { name: "traceIngestGateway", param: "trc", pairs: [[50, 1500]] },
-          { name: "metricsPromWrite", param: "prm", pairs: [[50, 2000]] },
-          { name: "alertManagerHook", param: "alt", pairs: [[30, 1000]] },
-          { name: "auditLedgerSink", param: "aud", pairs: [[80, 3000]] },
+          { name: "traceIngestGateway", param: "trc", stateVar: "traces", scaleFactor: 1, bands: [[50, 1500, 20]] },
+          { name: "metricsPromWrite", param: "prm", stateVar: "metrics", scaleFactor: 1, bands: [[50, 2000, 25]] },
+          { name: "alertManagerHook", param: "alt", stateVar: "alerts", scaleFactor: 1, bands: [[30, 1000, 15]] },
+          { name: "auditLedgerSink", param: "aud", stateVar: "audit", scaleFactor: 1, bands: [[80, 3000, 40]] },
         ],
         "update_feature",
       ),
@@ -1511,10 +1587,10 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "mesh_topology.yaml",
         "yaml",
         [
-          { name: "otelCollector", param: "otl", pairs: [[317, 1]] },
-          { name: "clickhouseWriter", param: "chw", pairs: [[318, 2]] },
-          { name: "envoyControlPlane", param: "env", pairs: [[319, 3]] },
-          { name: "pagerEscalator", param: "pgr", pairs: [[320, 4]] },
+          { name: "otelCollector", param: "otl", stateVar: "otel", scaleFactor: 1, bands: [[4317, 8, 0]] },
+          { name: "clickhouseWriter", param: "chw", stateVar: "clickhouse", scaleFactor: 1, bands: [[8123, 6, 0]] },
+          { name: "envoyControlPlane", param: "env", stateVar: "envoy", scaleFactor: 1, bands: [[9901, 12, 0]] },
+          { name: "pagerEscalator", param: "pgr", stateVar: "pager", scaleFactor: 1, bands: [[9902, 4, 0]] },
         ],
         "update_feature",
       ),
@@ -1522,8 +1598,8 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
         "status_digest.twig",
         "twig",
         [
-          { name: "daily_slo_digest", param: "slo", pairs: [[1, 10], [2, 20]] },
-          { name: "incident_summary_card", param: "inc", pairs: [[3, 30], [4, 40]] },
+          { name: "daily_slo_digest", param: "slo", stateVar: "SloRow", scaleFactor: 1, bands: [[1, 10, 0], [2, 20, 0]] },
+          { name: "incident_summary_card", param: "inc", stateVar: "IncRow", scaleFactor: 1, bands: [[3, 30, 0], [4, 40, 0]] },
         ],
         "update_feature",
       ),
@@ -1544,107 +1620,38 @@ function extractTargetSliceAil(
     : decomp.ast;
 
   const outlineRes = generateOutline(activeAst, filePath, { idioms: Boolean(idioms) });
-  const cleanTarget = targetSymbol.replace(/^[.#]/, "").replace(/^config\./, "");
-  const normTarget = cleanTarget.replace(/[_-]/g, "").toLowerCase();
-
-  let sliceItems: ModuleItem[] = activeAst.items;
-  if (target === "css") {
-    const cleanSel = targetSymbol.trim();
-    const matched = activeAst.items.filter(
-      (it) => it.kind === "StyleDecl" && it.name.trim() === cleanSel,
-    );
-    if (matched.length > 0) sliceItems = matched;
-  } else if (target === "html" || target === "twig") {
-    const compItem = activeAst.items.find((it) => it.kind === "ComponentDecl");
-    if (compItem && compItem.kind === "ComponentDecl") {
-      const findNode = (nodes: typeof compItem.layout): (typeof compItem.layout)[number] | undefined => {
-        for (const n of nodes) {
-          const hit = n.attributes.some(
-            (a) =>
-              (a.name === "id" || a.name === "name") &&
-              a.value.kind === "LiteralExpr" &&
-              String(a.value.value) === cleanTarget,
-          );
-          if (hit || n.tag === cleanTarget) return n;
-          if (n.children && n.children.length > 0) {
-            const sub = findNode(n.children);
-            if (sub) return sub;
-          }
-        }
-        return undefined;
-      };
-      const found = findNode(compItem.layout);
-      if (found) {
-        sliceItems = [{ ...compItem, layout: [found] }];
-      }
-    }
-  } else if (target === "json" || target === "yaml") {
-    const constItem = activeAst.items.find((it) => it.kind === "ConstDecl");
-    if (
-      constItem &&
-      constItem.kind === "ConstDecl" &&
-      constItem.value.kind === "RecordLiteralExpr"
-    ) {
-      const prop = constItem.value.properties.find((p) => p.key === cleanTarget);
-      if (prop) {
-        sliceItems = [
-          {
-            ...constItem,
-            name: cleanTarget,
-            value: prop.value,
-          },
-        ];
-      }
-    }
-  } else {
-    const matched = activeAst.items.filter((it) => {
-      if (it.kind === "FunctionDecl" || it.kind === "ClassDecl") {
-        const normName = it.name.replace(/[_-]/g, "").toLowerCase();
-        return it.name === targetSymbol || normName === normTarget;
-      }
-      return false;
-    });
-    if (matched.length > 0) {
-      sliceItems = matched;
-    } else {
-      for (const it of activeAst.items) {
-        if (it.kind === "ClassDecl") {
-          const m = it.methods.find(
-            (meth) =>
-              meth.name === cleanTarget ||
-              meth.name.replace(/[_-]/g, "").toLowerCase() === normTarget,
-          );
-          if (m) {
-            sliceItems = [{ ...it, methods: [m], properties: [] }];
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  const sliceMod: Module = { ...activeAst, items: sliceItems };
-  const sliceText = new AilGenerator().generate(sliceMod);
+  const activeAil = new AilGenerator().generate(activeAst);
+  const sliceText = extractSymbolFromAilSource(
+    activeAil,
+    targetSymbol,
+    filePath,
+    activeAst,
+  );
   return { outlineText: outlineRes.text, sliceText };
 }
 
 function measureSurgicalNativeReadTokens(
   nativeCode: string,
   filePath: string,
+  target: TargetLanguage,
   targetSymbol: string,
   idioms: Record<string, ProjectIdiomDefinition>,
 ): number {
-  // Realistic native agent read:
-  // 1. rg symbol discovery headers across the file
   const lines = nativeCode.split("\n");
-  const headerLines = lines.filter((l) =>
-    /^\s*(export\s+|pub\s+|public\s+|def\s+|func\s+|fn\s+|int\s+|void\s+|#[a-zA-Z]|\.[a-zA-Z]|<[a-zA-Z]+[^>]*id=|"[^"]+"\s*:|[a-zA-Z0-9_]+\s*:)/.test(
-      l,
-    ),
-  );
+
+  // 1. Realistic `rg` top-level symbol discovery headers across the file
+  // (For JSON/YAML, only match top-level section keys rather than every nested leaf property)
+  const headerLines =
+    target === "json" || target === "yaml"
+      ? lines.filter((l) => /^[ ]{0,2}(?:"[^"]+"\s*:|[a-zA-Z0-9_-]+\s*:)/.test(l))
+      : lines.filter((l) =>
+          /^\s*(export\s+|pub\s+|public\s+|class\s+|struct\s+|def\s+|func\s+|fn\s+|int\s+|void\s+|#[a-zA-Z]|\.[a-zA-Z]|<[a-zA-Z]+[^>]*id=|{%-?\s*block\b)/.test(
+            l,
+          ),
+        );
   const rgDiscoveryText = headerLines.join("\n");
 
-  // 2. Surgical read_file window covering the target symbol and its immediate context window
+  // 2. Surgical line-range `read_file` window centered on the target symbol + module header/imports
   const probe = spliceNativeSource(
     nativeCode,
     { symbol: targetSymbol, delete: true },
@@ -1652,13 +1659,16 @@ function measureSurgicalNativeReadTokens(
     idioms,
   );
   const targetNativeSnippet = probe.originalSnippet ?? "";
-  // A realistic line-range read_file (e.g. StartLine..EndLine) includes the target symbol
-  // plus surrounding context lines (~35% window around the symbol in the file).
-  const contextWindowChars = Math.min(
+  const snippetStartIdx = targetNativeSnippet
+    ? Math.max(0, nativeCode.indexOf(targetNativeSnippet))
+    : 0;
+  const padChars = Math.max(120, Math.round(targetNativeSnippet.length * 0.25));
+  const windowStart = Math.max(0, snippetStartIdx - padChars);
+  const windowEnd = Math.min(
     nativeCode.length,
-    Math.round(targetNativeSnippet.length * 1.35),
+    snippetStartIdx + targetNativeSnippet.length + padChars,
   );
-  const surgicalWindowText = nativeCode.slice(0, contextWindowChars);
+  const surgicalWindowText = nativeCode.slice(windowStart, windowEnd);
 
   return countTokens(rgDiscoveryText) + countTokens(surgicalWindowText);
 }
@@ -1673,18 +1683,37 @@ export function runSingleRealWorldBenchmark(
   const languagesSet = new Set<BenchmarkLanguageId>();
   const extensionsSet = new Set<string>();
   const idiomsUsedSet = new Set<string>();
+  const combinedIdiomsConfig: Record<string, ProjectIdiomDefinition> = {};
   let idiomDefinitionsTokens = 0;
 
   for (const fileSpec of spec.files) {
     languagesSet.add(fileSpec.languageId);
     const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === fileSpec.languageId)!;
     extensionsSet.add(langSpec.extension);
+    const { idioms, definitionSource } = buildIdiomRegistryForLanguage(fileSpec.languageId);
+    Object.assign(combinedIdiomsConfig, idioms);
     if (!idiomsUsedSet.has(langSpec.idiomName)) {
       idiomsUsedSet.add(langSpec.idiomName);
-      const { definitionSource } = buildIdiomRegistryForLanguage(fileSpec.languageId);
       idiomDefinitionsTokens += countTokens(definitionSource);
     }
   }
+
+  // Persist real ail.config.json in benchmark workspace (Twinless Direct-to-Native mode)
+  const configPath = path.join(benchDir, "ail.config.json");
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify(
+      {
+        version: "2.0.0",
+        mode: "twinless",
+        idiomsEnabled: true,
+        idioms: combinedIdiomsConfig,
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
 
   const fileResults: RealWorldModuleFileResult[] = [];
   let writeWithoutAil = 0;
@@ -1743,10 +1772,11 @@ export function runSingleRealWorldBenchmark(
       ),
     });
 
-    // 2. Read (Discovery + Surgical Target Symbol Context)
+    // 2. Read (Discovery + Surgical Target Symbol Context via generateOutline + extractSymbolFromAilSource)
     const nativeReadTokens = measureSurgicalNativeReadTokens(
       nativeCode,
       filePath,
+      langSpec.target,
       fileSpec.targetSymbol,
       idioms,
     );
@@ -1769,7 +1799,7 @@ export function runSingleRealWorldBenchmark(
     readAilNoIdioms += countTokens(pureSlice.outlineText) + countTokens(pureSlice.sliceText);
     readAilWithIdioms += countTokens(idiomSlice.outlineText) + countTokens(idiomSlice.sliceText);
 
-    // 3. Surgical Update (Bug Fix / New Feature Insert / Update Feature)
+    // 3. Surgical Update (Execute spliceNativeSource for BOTH Pure AIL and Idiom AIL and verify parity!)
     const updatedPureAil = expandSnippetToPureAil(
       fileSpec.updatedTargetSymbolAilWithIdioms,
       fileSpec.languageId,
@@ -1777,7 +1807,16 @@ export function runSingleRealWorldBenchmark(
     );
 
     if (spec.scenario === "new_feature") {
-      const insertRes = spliceNativeSource(
+      const pureInsertRes = spliceNativeSource(
+        nativeCode,
+        {
+          insertAfter: fileSpec.targetSymbol,
+          code: updatedPureAil,
+        },
+        filePath,
+        {},
+      );
+      const idiomInsertRes = spliceNativeSource(
         nativeCode,
         {
           insertAfter: fileSpec.targetSymbol,
@@ -1786,20 +1825,36 @@ export function runSingleRealWorldBenchmark(
         filePath,
         idioms,
       );
-      fs.writeFileSync(filePath, insertRes.modifiedCode, "utf-8");
-      const anchorLines = (insertRes.originalSnippet ?? "")
+      if (
+        !pureInsertRes.success ||
+        !idiomInsertRes.success ||
+        pureInsertRes.modifiedCode !== idiomInsertRes.modifiedCode
+      ) {
+        throw new Error(`Insert splice parity failed on ${fileSpec.fileName}`);
+      }
+      fs.writeFileSync(filePath, idiomInsertRes.modifiedCode, "utf-8");
+      const anchorLines = (idiomInsertRes.originalSnippet ?? "")
         .split("\n")
         .slice(-3)
         .join("\n");
       const anchorTokens = Math.max(6, countTokens(anchorLines));
-      updateWithoutAil += anchorTokens * 2 + countTokens(insertRes.newSnippet ?? "");
+      updateWithoutAil += anchorTokens * 2 + countTokens(idiomInsertRes.newSnippet ?? "");
       updateAilNoIdioms +=
         countTokens(`--insert-after ${fileSpec.targetSymbol}`) + countTokens(updatedPureAil);
       updateAilWithIdioms +=
         countTokens(`--insert-after ${fileSpec.targetSymbol}`) +
         countTokens(fileSpec.updatedTargetSymbolAilWithIdioms);
     } else {
-      const updateRes = spliceNativeSource(
+      const pureUpdateRes = spliceNativeSource(
+        nativeCode,
+        {
+          symbol: fileSpec.targetSymbol,
+          code: updatedPureAil,
+        },
+        filePath,
+        {},
+      );
+      const idiomUpdateRes = spliceNativeSource(
         nativeCode,
         {
           symbol: fileSpec.targetSymbol,
@@ -1808,10 +1863,17 @@ export function runSingleRealWorldBenchmark(
         filePath,
         idioms,
       );
-      fs.writeFileSync(filePath, updateRes.modifiedCode, "utf-8");
+      if (
+        !pureUpdateRes.success ||
+        !idiomUpdateRes.success ||
+        pureUpdateRes.modifiedCode !== idiomUpdateRes.modifiedCode
+      ) {
+        throw new Error(`Update splice parity failed on ${fileSpec.fileName}`);
+      }
+      fs.writeFileSync(filePath, idiomUpdateRes.modifiedCode, "utf-8");
       updateWithoutAil +=
-        countTokens(updateRes.originalSnippet ?? "") +
-        countTokens(updateRes.newSnippet ?? "");
+        countTokens(idiomUpdateRes.originalSnippet ?? "") +
+        countTokens(idiomUpdateRes.newSnippet ?? "");
       updateAilNoIdioms +=
         countTokens(`--symbol ${fileSpec.targetSymbol}`) + countTokens(updatedPureAil);
       updateAilWithIdioms +=
@@ -1838,8 +1900,10 @@ export function runSingleRealWorldBenchmark(
       deleteAilWithIdioms += delCmdTokens;
     }
 
-    // 5. Multi-Site / Multi-File Pattern Refactor
+    // 5. Surgical Multi-Site / Multi-File Pattern Refactor
+    // Measure surgical symbol-level patches (only the refactored symbols in the file, not untouched types/headers)
     const updatedIdioms: Record<string, ProjectIdiomDefinition> = {
+      ...idioms,
       [langSpec.idiomName]: {
         ...idioms[langSpec.idiomName],
         templateAil: updatedTemplateAil,
@@ -1851,15 +1915,64 @@ export function runSingleRealWorldBenchmark(
     const expandedAfterAst = expandModuleIdioms(collapsedBefore.ast, updatedIdioms);
     const afterRefactorPureAil = new AilGenerator().generate(expandedAfterAst);
     const afterRefactorNative = emitTarget(expandedAfterAst, langSpec.target, { watermark: false });
+
+    let pureWorkingNative = beforeRefactorNative;
+    for (const refSym of fileSpec.refactorSymbols) {
+      const origProbe = spliceNativeSource(
+        beforeRefactorNative,
+        { symbol: refSym, delete: true },
+        filePath,
+        {},
+      );
+      const afterProbe = spliceNativeSource(
+        afterRefactorNative,
+        { symbol: refSym, delete: true },
+        filePath,
+        {},
+      );
+      const rawRefSymPureAil = extractSymbolFromAilSource(
+        afterRefactorPureAil,
+        refSym,
+        filePath,
+        expandedAfterAst,
+      );
+      let cleanRefSymPureAil = rawRefSymPureAil
+        .replace(/^(?:#[^\n]*|module\s+[^\n]+)\n+/g, "")
+        .trim();
+      if (fileSpec.languageId === "html" || fileSpec.languageId === "twig") {
+        const lines = cleanRefSymPureAil.split("\n");
+        const compIdx = lines.findIndex((l) => l.trim().startsWith("component "));
+        if (compIdx >= 0) {
+          cleanRefSymPureAil = lines
+            .slice(compIdx + 1)
+            .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+            .join("\n")
+            .trim();
+        }
+      }
+      const pureRefactorSplice = spliceNativeSource(
+        pureWorkingNative,
+        { symbol: refSym, code: cleanRefSymPureAil },
+        filePath,
+        {},
+      );
+      if (!pureRefactorSplice.success) {
+        throw new Error(`Pure AIL refactor splice failed on ${fileSpec.fileName} (${refSym})`);
+      }
+      pureWorkingNative = pureRefactorSplice.modifiedCode;
+
+      // Without AIL: replace_file_content (old symbol snippet + new symbol snippet)
+      refactorWithoutAil +=
+        countTokens(origProbe.originalSnippet ?? "") +
+        countTokens(afterProbe.originalSnippet ?? "");
+      // AIL Without Idioms: surgical `ail splice --symbol <refSym>` with pure AIL symbol replacement
+      refactorAilNoIdioms +=
+        countTokens(`--symbol ${refSym}`) + countTokens(cleanRefSymPureAil);
+    }
+
     fs.writeFileSync(filePath, afterRefactorNative, "utf-8");
 
-    // Without AIL: replace_file_content (TargetContent + ReplacementContent in native code)
-    refactorWithoutAil +=
-      countTokens(beforeRefactorNative) + countTokens(afterRefactorNative);
-    // AIL Without Idioms: ail splice in pure AIL (only passing new pure AIL without TargetContent duplication)
-    refactorAilNoIdioms +=
-      countTokens(`--file ${fileSpec.fileName}`) + countTokens(afterRefactorPureAil);
-    // AIL With Idioms: 1 `ail idiom update $name "<updatedTemplateAil>"` per language idiom
+    // AIL With Idioms: 1 `ail idiom update $name "<updatedTemplateAil>"` per language idiom in ail.config.json
     if (!refactoredLanguages.has(fileSpec.languageId)) {
       refactoredLanguages.add(fileSpec.languageId);
       refactorAilWithIdioms +=
@@ -1960,16 +2073,19 @@ function expandSnippetToPureAil(
     const wrapped = `component Snippet():\n${indented}`;
     const parsed = parse(wrapped, "snippet.ail");
     const expanded = expandModuleIdioms(parsed, idioms);
-    const full = new AilGenerator().generate(expanded);
-    return full
-      .split("\n")
-      .slice(1)
-      .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
-      .join("\n");
+    const fullLines = new AilGenerator().generate(expanded).trim().split("\n");
+    const compIdx = fullLines.findIndex((l) => l.trim().startsWith("component Snippet"));
+    const bodyLines = compIdx >= 0 ? fullLines.slice(compIdx + 1) : fullLines;
+    return bodyLines.map((l) => (l.startsWith("  ") ? l.slice(2) : l)).join("\n");
   }
   const parsed = parse(snippetWithIdioms, "snippet.ail");
   const expanded = expandModuleIdioms(parsed, idioms);
-  return new AilGenerator().generate(expanded);
+  return new AilGenerator()
+    .generate(expanded)
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("#") && !l.trim().startsWith("module "))
+    .join("\n")
+    .trim();
 }
 
 export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {

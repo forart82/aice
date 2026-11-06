@@ -1012,7 +1012,29 @@ function locateTsDeclarationSpan(
     const implStmt =
       matchingTopStmts.find((s) => (s as { body?: unknown }).body !== undefined) ??
       matchingTopStmts[matchingTopStmts.length - 1];
-    return buildSpanInfoFromTsNode(implStmt, sf, nativeSource, memberName, undefined);
+    const spanInfo = buildSpanInfoFromTsNode(implStmt, sf, nativeSource, memberName, undefined);
+    if (
+      ts.isFunctionDeclaration(implStmt) &&
+      implStmt.body &&
+      /<[A-Za-z]/.test(implStmt.body.getText(sf))
+    ) {
+      const stmtIdx = sf.statements.indexOf(implStmt);
+      if (stmtIdx > 0) {
+        const prevStmt = sf.statements[stmtIdx - 1];
+        if (ts.isInterfaceDeclaration(prevStmt) && prevStmt.name.text === `${memberName}Props`) {
+          const prevSpan = buildSpanInfoFromTsNode(
+            prevStmt,
+            sf,
+            nativeSource,
+            prevStmt.name.text,
+            undefined,
+          );
+          spanInfo.declStart = prevSpan.declStart;
+          spanInfo.fullDeclStart = prevSpan.fullDeclStart;
+        }
+      }
+    }
+    return spanInfo;
   }
 
   for (const stmt of sf.statements) {
@@ -2212,7 +2234,7 @@ function isPureNativeSnippetWithoutIdioms(
   if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
     if (
       /^(?:pub\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(trimmed) ||
-      /^(?:pub\s+)?(?:rec|enum|type|class)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*:/.test(trimmed)
+      /^(?:pub\s+)?(?:rec|enum|type|class|component)\b/.test(trimmed)
     ) {
       return false;
     }
@@ -2334,7 +2356,7 @@ function normalizeFrankensteinSnippetToAil(
 
     // Also normalize TS-style header without `fn`: e.g. `pub computeMetric(x: number): number {` or `constructor(...)`
     if (
-      !/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?(?:fn|class|type|rec|enum|const|val|mut|interface)\b/.test(
+      !/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?(?:fn|class|type|rec|enum|const|val|mut|interface|component)\b/.test(
         header,
       ) &&
       /^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?[A-Za-z_$][A-Za-z0-9_$]*\s*\(/.test(header)
@@ -3097,7 +3119,10 @@ function spliceDialectNativeSource(
       if (trimmed.startsWith("<") || trimmed.startsWith("{%")) {
         return trimmed;
       }
-      const ailText = trimmed.startsWith("component ")
+      const hasTopLevelComponent = /^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(
+        trimmed,
+      );
+      const ailText = hasTopLevelComponent
         ? trimmed
         : `component __Frag():\n${indentCode(trimmed, "  ")}`;
       const mod = parse(ailText, filePath);

@@ -114,10 +114,26 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
     const emittedCss = emitTarget(expanded, "css", { watermark: false });
     expect(emittedCss).toContain(".btn:hover, button:focus {");
     expect(emittedCss).toContain("@media (max-width: 768px) {");
+    expect(emittedCss).toContain("padding: 12px;");
+    expect(emittedCss).not.toContain('padding: "12px"');
     expect(emittedCss).toContain("border-radius: 8px;");
 
     const decompiled = decompile(emittedCss, "css", { filePath: "responsive.css" });
     const collapsed = collapseModuleIdioms(decompiled.ast, idioms);
     expect(collapsed.collapsedCount).toBe(2);
+  });
+
+  it("compiles .tsx benchmark files from real AIL component declarations into JSX and uses domain-specific idioms", () => {
+    const tsxFiles = REAL_WORLD_BENCHMARKS.flatMap((b) =>
+      b.files.filter((f) => f.languageId === "tsx"),
+    );
+    expect(tsxFiles.length).toBeGreaterThanOrEqual(3);
+    for (const tsxSpec of tsxFiles) {
+      expect(tsxSpec.ailWithIdioms).toContain("component ");
+      expect(tsxSpec.ailWithIdioms).toContain("$tsx_kpi_tile(");
+    }
+
+    const distinctIdioms = new Set(SUPPORTED_BENCHMARK_LANGUAGES.map((l) => l.idiomName));
+    expect(distinctIdioms.size).toBe(15);
   });
 });

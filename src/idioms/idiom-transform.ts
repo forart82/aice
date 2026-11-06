@@ -336,7 +336,15 @@ function splitTopLevelCssArgs(argStr: string): string[] {
   if (cur.trim().length > 0) {
     args.push(cur.trim());
   }
-  return args;
+  return args.map((arg) => {
+    if (
+      arg.length >= 2 &&
+      ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'")))
+    ) {
+      return arg.slice(1, -1);
+    }
+    return arg;
+  });
 }
 
 function substituteLayoutNode(
