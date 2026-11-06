@@ -1236,7 +1236,15 @@ function expandModuleIdiomsInternal(
         }
         return out;
       };
-      item.properties = expandProps(item.properties);
+      const expandStyleDecl = (decl: StyleDecl): void => {
+        decl.properties = expandProps(decl.properties);
+        if (decl.children && decl.children.length > 0) {
+          for (const child of decl.children) {
+            expandStyleDecl(child);
+          }
+        }
+      };
+      expandStyleDecl(item);
     }
   }
 
@@ -2235,40 +2243,48 @@ export function collapseModuleIdioms(
       };
       item.layout = collapseLayoutList(item.layout);
     } else if (item.kind === "StyleDecl") {
-      currentSymbol = item.name;
-      let idx = 0;
-      while (idx < item.properties.length) {
-        let matched = false;
-        for (const idiom of stmtIdioms) {
-          const parsed = getOrParseTemplate(idiom);
-          const tProps = parsed.styleProperties;
-          if (!tProps || tProps.length === 0) continue;
-          const k = tProps.length;
-          if (idx + k <= item.properties.length) {
-            const window = item.properties.slice(idx, idx + k);
-            const bindings = new Map<string, string>();
-            const holeNames = new Set(idiom.params.map((p) => p.name));
-            if (matchStylePropertyWindow(tProps, window, bindings, holeNames)) {
-              const strArgs = idiom.params.map((p) => bindings.get(p.name) ?? "");
-              const callSpan = window[0].span;
-              const macroProp: StyleProperty = {
-                property: `${idiom.name}(${strArgs.join(", ")})`,
-                value: "",
-                span: callSpan,
-              };
-              item.properties.splice(idx, k, macroProp);
-              collapsedCount++;
-              onCollapsed?.(idiom.name, strArgs, callSpan, currentSymbol);
-              matched = true;
-              idx++;
-              break;
+      const collapseStyleDecl = (decl: StyleDecl): void => {
+        currentSymbol = decl.name;
+        let idx = 0;
+        while (idx < decl.properties.length) {
+          let matched = false;
+          for (const idiom of stmtIdioms) {
+            const parsed = getOrParseTemplate(idiom);
+            const tProps = parsed.styleProperties;
+            if (!tProps || tProps.length === 0) continue;
+            const k = tProps.length;
+            if (idx + k <= decl.properties.length) {
+              const window = decl.properties.slice(idx, idx + k);
+              const bindings = new Map<string, string>();
+              const holeNames = new Set(idiom.params.map((p) => p.name));
+              if (matchStylePropertyWindow(tProps, window, bindings, holeNames)) {
+                const strArgs = idiom.params.map((p) => bindings.get(p.name) ?? "");
+                const callSpan = window[0].span;
+                const macroProp: StyleProperty = {
+                  property: `${idiom.name}(${strArgs.join(", ")})`,
+                  value: "",
+                  span: callSpan,
+                };
+                decl.properties.splice(idx, k, macroProp);
+                collapsedCount++;
+                onCollapsed?.(idiom.name, strArgs, callSpan, currentSymbol);
+                matched = true;
+                idx++;
+                break;
+              }
             }
           }
+          if (!matched) {
+            idx++;
+          }
         }
-        if (!matched) {
-          idx++;
+        if (decl.children && decl.children.length > 0) {
+          for (const child of decl.children) {
+            collapseStyleDecl(child);
+          }
         }
-      }
+      };
+      collapseStyleDecl(item);
     }
   }
 

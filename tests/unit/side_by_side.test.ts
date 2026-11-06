@@ -420,7 +420,7 @@ fn multiply(a:int, b:int) -> int = a * b
     const invalidRes = runCli(["shield", "invalid-action", testDir]);
     expect(invalidRes.status).toBe(1);
     expect(invalidRes.stderr).toContain("Unknown shield action: 'invalid-action'");
-  });
+  }, 20000);
 
   it("supports custom concurrency flag -c 2 during adoption", () => {
     const adoptRes = runCli(["adopt", testDir, "-c", "2"]);

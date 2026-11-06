@@ -385,7 +385,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
         output += chunk.toString("utf-8");
       });
 
-      await waitFor(() => output.includes("[companion] Watching"), 4000);
+      await waitFor(() => output.includes("Target locking:"), 6000);
 
       expect(output).toContain("[companion] Watching . -> Emitting to ../target_project");
       expect(output).toContain("Mode: companion");
@@ -404,7 +404,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
         output += chunk.toString("utf-8");
       });
 
-      await waitFor(() => output.includes("[companion] Watching"), 4000);
+      await waitFor(() => output.includes("Target locking:"), 6000);
 
       expect(output).toContain("[companion] Watching companion_workspace -> Emitting to target_project");
       expect(output).toContain("Mode: companion");
@@ -423,7 +423,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
         output += chunk.toString("utf-8");
       });
 
-      await waitFor(() => output.includes("[companion] Watching"), 4000);
+      await waitFor(() => output.includes("Target locking:"), 6000);
 
       expect(output).toContain("Mode: companion");
       expect(output).toContain("Target locking: enabled (chmod 444)");

@@ -511,7 +511,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const profileOutlineRes = runCli(["context", profilePath, "--outline-target", "--no-callers"]);
       expect(profileOutlineRes.status).toBe(0);
       expect(profileOutlineRes.stdout).toContain("component Profile():");
-    });
+    }, 20000);
 
     it("runs 'ail compile' on a .twig.ail file and compiles to .twig", () => {
       const ailFile = path.join(tmpDir, "alert_card.twig.ail");

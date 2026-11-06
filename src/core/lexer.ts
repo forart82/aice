@@ -502,9 +502,9 @@ export function scanRawTokens(
     }
 
     // 7. Identifiers & Keywords
-    if (isIdentStart(ch)) {
+    if (isIdentStart(ch) || (ch === "@" && isIdentStart(peek(1)))) {
       const startPos = currentPos();
-      let word = "";
+      let word = ch === "@" ? advance() : "";
       while (isIdentPart(peek())) {
         word += advance();
       }

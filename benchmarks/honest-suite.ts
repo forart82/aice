@@ -489,9 +489,25 @@ export interface GeneratedBenchmarkArtifact {
  *   - `totalInnerBlocks = symbolCount * baseChecks + extraCheckOnTarget` -> strictly increases by >= 1 at every step!
  *   - `refactorFilesCount = 3 + Math.floor((stepIndex - 1) / 20)` (3..7 files for multi-file idiom refactor)
  */
+const tokenCountMemo = new Map<string, number>();
+
+function countTokens(text: string): number {
+  const hit = tokenCountMemo.get(text);
+  if (hit !== undefined) return hit;
+  const count = estimateTokens(text);
+  if (tokenCountMemo.size >= 4096) {
+    const firstKey = tokenCountMemo.keys().next().value;
+    if (firstKey !== undefined) tokenCountMemo.delete(firstKey);
+  }
+  tokenCountMemo.set(text, count);
+  return count;
+}
+
 export function generateBenchmarkArtifactForStep(
   spec: LanguageSpec,
   stepIndex: number,
+  scenario: EngineeringScenarioKind = "update_feature",
+  appSurface: ApplicationSurfaceKind = "window",
 ): GeneratedBenchmarkArtifact {
   const baseChecks = 2 + Math.floor((stepIndex - 1) / 10);
   const symbolCount = 3 + Math.floor((stepIndex - 1) / 2);
@@ -501,12 +517,14 @@ export function generateBenchmarkArtifactForStep(
   const complexityScore = totalInnerBlocks * 10 + refactorFilesCount;
 
   const { idioms } = buildIdiomRegistryForLanguage(spec.id);
+  const surfPrefix = appSurface === "window" ? "win" : "cli";
+  const isBugFix = scenario === "bug_fix";
 
   if (spec.id === "css") {
     const blocks: string[] = [];
     for (let s = 0; s < symbolCount; s++) {
       const count = s === 0 ? baseChecks + extraCheckOnTarget : baseChecks;
-      const lines: string[] = [`style .panel_${s} {`];
+      const lines: string[] = [`style .${surfPrefix}_panel_${s} {`];
       for (let c = 0; c < count; c++) {
         lines.push(`  $css_card("${8 + c * 2}px", "${4 + c}px")`);
       }
@@ -520,15 +538,17 @@ export function generateBenchmarkArtifactForStep(
     const nativeSource = emitTarget(expanded, "css", { watermark: false });
 
     const targetCount = baseChecks + extraCheckOnTarget;
-    const updatedLines: string[] = ["style .panel_0 {"];
+    const updatedLines: string[] = [`style .${surfPrefix}_panel_0 {`];
     for (let c = 0; c < targetCount; c++) {
-      updatedLines.push(`  $css_card("${12 + c * 2}px", "${6 + c}px")`);
+      const pad = isBugFix ? 10 + c * 2 : 12 + c * 2;
+      const gap = isBugFix ? 5 + c : 6 + c;
+      updatedLines.push(`  $css_card("${pad}px", "${gap}px")`);
     }
-    updatedLines.push("  z-index: 99");
+    updatedLines.push(isBugFix ? "  z-index: 10" : "  z-index: 99");
     updatedLines.push("}");
 
     const newFeatureLines: string[] = [
-      "style .panel_feature {",
+      `style .${surfPrefix}_panel_feature {`,
       '  $css_card("16px", "8px")',
       "  z-index: 100",
       "}",
@@ -537,8 +557,8 @@ export function generateBenchmarkArtifactForStep(
     return {
       ailSourceWithIdioms,
       nativeSource,
-      targetSymbol: ".panel_0",
-      obsoleteDeleteSymbol: `.panel_${symbolCount - 1}`,
+      targetSymbol: `.${surfPrefix}_panel_0`,
+      obsoleteDeleteSymbol: `.${surfPrefix}_panel_${symbolCount - 1}`,
       updatedTargetSymbolAil: updatedLines.join("\n"),
       newFeatureSymbolAil: newFeatureLines.join("\n"),
       ComplexityMetrics: {
@@ -552,10 +572,11 @@ export function generateBenchmarkArtifactForStep(
   }
 
   if (spec.id === "html") {
-    const lines: string[] = ["component DashboardView():", '  main(id="app_root") {'];
+    const compName = appSurface === "window" ? "WindowDashboardView" : "DaemonStatusView";
+    const lines: string[] = [`component ${compName}():`, `  main(id="${surfPrefix}_root") {`];
     for (let s = 0; s < symbolCount; s++) {
       const count = s === 0 ? baseChecks + extraCheckOnTarget : baseChecks;
-      lines.push(`    section(id="sec_${s}", class="panel") {`);
+      lines.push(`    section(id="${surfPrefix}_sec_${s}", class="panel") {`);
       for (let c = 0; c < count; c++) {
         const idx = s * 20 + c;
         lines.push(`      $html_row("k_${idx}", "Metric ${idx}", "${(idx + 1) * 10}")`);
@@ -569,14 +590,15 @@ export function generateBenchmarkArtifactForStep(
     const nativeSource = emitTarget(expanded, "html", { watermark: false });
 
     const targetCount = baseChecks + extraCheckOnTarget;
-    const updatedLines: string[] = ['section(id="sec_0", class="panel") {'];
+    const updatedLines: string[] = [`section(id="${surfPrefix}_sec_0", class="panel") {`];
     for (let c = 0; c < targetCount; c++) {
-      updatedLines.push(`  $html_row("k_${c}", "Updated Metric ${c}", "${(c + 1) * 25}")`);
+      const labelPrefix = isBugFix ? "Fixed Metric" : "Updated Metric";
+      updatedLines.push(`  $html_row("k_${c}", "${labelPrefix} ${c}", "${(c + 1) * 25}")`);
     }
     updatedLines.push("}");
 
     const newFeatureLines: string[] = [
-      'section(id="sec_feature", class="panel") {',
+      `section(id="${surfPrefix}_sec_feature", class="panel") {`,
       '  $html_row("k_feat", "Feature Metric", "999")',
       "}",
     ];
@@ -584,8 +606,8 @@ export function generateBenchmarkArtifactForStep(
     return {
       ailSourceWithIdioms,
       nativeSource,
-      targetSymbol: "#sec_0",
-      obsoleteDeleteSymbol: `#sec_${symbolCount - 1}`,
+      targetSymbol: `#${surfPrefix}_sec_0`,
+      obsoleteDeleteSymbol: `#${surfPrefix}_sec_${symbolCount - 1}`,
       updatedTargetSymbolAil: updatedLines.join("\n"),
       newFeatureSymbolAil: newFeatureLines.join("\n"),
       ComplexityMetrics: {
@@ -599,10 +621,11 @@ export function generateBenchmarkArtifactForStep(
   }
 
   if (spec.id === "twig") {
-    const lines: string[] = ["component TwigDashboard():"];
+    const compName = appSurface === "window" ? "WindowTwigDashboard" : "CliTwigReport";
+    const lines: string[] = [`component ${compName}():`];
     for (let s = 0; s < symbolCount; s++) {
       const count = s === 0 ? baseChecks + extraCheckOnTarget : baseChecks;
-      lines.push(`  block(name="section_${s}") {`);
+      lines.push(`  block(name="${surfPrefix}_section_${s}") {`);
       for (let c = 0; c < count; c++) {
         const idx = s * 20 + c;
         lines.push(`    $twig_row("Label ${idx}", val_${idx})`);
@@ -615,14 +638,15 @@ export function generateBenchmarkArtifactForStep(
     const nativeSource = emitTarget(expanded, "twig", { watermark: false });
 
     const targetCount = baseChecks + extraCheckOnTarget;
-    const updatedLines: string[] = ['block(name="section_0") {'];
+    const updatedLines: string[] = [`block(name="${surfPrefix}_section_0") {`];
     for (let c = 0; c < targetCount; c++) {
-      updatedLines.push(`  $twig_row("Updated ${c}", val_${c})`);
+      const lbl = isBugFix ? "Fixed" : "Updated";
+      updatedLines.push(`  $twig_row("${lbl} ${c}", val_${c})`);
     }
     updatedLines.push("}");
 
     const newFeatureLines: string[] = [
-      'block(name="section_feature") {',
+      `block(name="${surfPrefix}_section_feature") {`,
       '  $twig_row("Feature Label", val_feat)',
       "}",
     ];
@@ -630,8 +654,8 @@ export function generateBenchmarkArtifactForStep(
     return {
       ailSourceWithIdioms,
       nativeSource,
-      targetSymbol: "section_0",
-      obsoleteDeleteSymbol: `section_${symbolCount - 1}`,
+      targetSymbol: `${surfPrefix}_section_0`,
+      obsoleteDeleteSymbol: `${surfPrefix}_section_${symbolCount - 1}`,
       updatedTargetSymbolAil: updatedLines.join("\n"),
       newFeatureSymbolAil: newFeatureLines.join("\n"),
       ComplexityMetrics: {
@@ -652,9 +676,9 @@ export function generateBenchmarkArtifactForStep(
       const items: string[] = [];
       for (let c = 0; c < count; c++) {
         const idx = s * 20 + c;
-        items.push(`${fnMacro}("/api/v${stepIndex}/s${s}/r${c}", ${1000 + idx * 10})`);
+        items.push(`${fnMacro}("/${surfPrefix}/v${stepIndex}/s${s}/r${c}", ${1000 + idx * 10})`);
       }
-      sectionEntries.push(`  group_${s}: [\n    ${items.join(",\n    ")}\n  ]`);
+      sectionEntries.push(`  ${surfPrefix}_group_${s}: [\n    ${items.join(",\n    ")}\n  ]`);
     }
     const ailSourceWithIdioms = `pub const config = {\n${sectionEntries.join(",\n")}\n}`;
     const mod = parse(ailSourceWithIdioms, `case_${stepIndex}.ail`);
@@ -664,16 +688,19 @@ export function generateBenchmarkArtifactForStep(
     const targetCount = baseChecks + extraCheckOnTarget;
     const updatedItems: string[] = [];
     for (let c = 0; c < targetCount; c++) {
-      updatedItems.push(`${fnMacro}("/api/v${stepIndex}/s0/updated_${c}", ${2000 + c * 25})`);
+      const tag = isBugFix ? "patched" : "updated";
+      updatedItems.push(
+        `${fnMacro}("/${surfPrefix}/v${stepIndex}/s0/${tag}_${c}", ${2000 + c * 25})`,
+      );
     }
-    const updatedTargetSymbolAil = `pub const group_0 = [\n  ${updatedItems.join(",\n  ")}\n]`;
-    const newFeatureSymbolAil = `pub const group_feature = [\n  ${fnMacro}("/api/v${stepIndex}/feature", 5000)\n]`;
+    const updatedTargetSymbolAil = `pub const ${surfPrefix}_group_0 = [\n  ${updatedItems.join(",\n  ")}\n]`;
+    const newFeatureSymbolAil = `pub const ${surfPrefix}_group_feature = [\n  ${fnMacro}("/${surfPrefix}/v${stepIndex}/feature", 5000)\n]`;
 
     return {
       ailSourceWithIdioms,
       nativeSource,
-      targetSymbol: "config.group_0",
-      obsoleteDeleteSymbol: `config.group_${symbolCount - 1}`,
+      targetSymbol: `config.${surfPrefix}_group_0`,
+      obsoleteDeleteSymbol: `config.${surfPrefix}_group_${symbolCount - 1}`,
       updatedTargetSymbolAil,
       newFeatureSymbolAil,
       ComplexityMetrics: {
@@ -687,16 +714,17 @@ export function generateBenchmarkArtifactForStep(
   }
 
   if (spec.id === "tsx") {
+    const fnPrefix = appSurface === "window" ? "renderWindowPanel" : "computeHeadlessPanel";
     const fns: string[] = [];
     for (let s = 0; s < symbolCount; s++) {
       const count = s === 0 ? baseChecks + extraCheckOnTarget : baseChecks;
       const lines: string[] = [
-        `pub fn computePanel_${s}(seed: int) -> int:`,
+        `pub fn ${fnPrefix}_${s}(seed: int) -> int:`,
         "  mut rows = seed",
       ];
       for (let c = 0; c < count; c++) {
         const stepVal = (s + 1) * 10 + c * 5;
-        lines.push(`  $tsx_row("panel_${s}_${c}", ${stepVal})`);
+        lines.push(`  $tsx_row("${surfPrefix}_panel_${s}_${c}", ${stepVal})`);
       }
       lines.push("  return rows");
       fns.push(lines.join("\n"));
@@ -707,27 +735,28 @@ export function generateBenchmarkArtifactForStep(
     const nativeSource = emitTarget(expanded, "tsx", { watermark: false });
 
     const targetCount = baseChecks + extraCheckOnTarget;
+    const initOffset = isBugFix ? 1 : 10;
     const updatedLines: string[] = [
-      "pub fn computePanel_0(seed: int) -> int:",
-      "  mut rows = seed + 10",
+      `pub fn ${fnPrefix}_0(seed: int) -> int:`,
+      `  mut rows = seed + ${initOffset}`,
     ];
     for (let c = 0; c < targetCount; c++) {
-      updatedLines.push(`  $tsx_row("panel_0_${c}", ${25 + c * 5})`);
+      updatedLines.push(`  $tsx_row("${surfPrefix}_panel_0_${c}", ${25 + c * 5})`);
     }
     updatedLines.push("  return rows");
 
     const newFeatureLines: string[] = [
-      "pub fn computePanel_feature(seed: int) -> int:",
+      `pub fn ${fnPrefix}_feature(seed: int) -> int:`,
       "  mut rows = seed",
-      '  $tsx_row("panel_feat", 50)',
+      `  $tsx_row("${surfPrefix}_panel_feat", 50)`,
       "  return rows",
     ];
 
     return {
       ailSourceWithIdioms,
       nativeSource,
-      targetSymbol: "computePanel_0",
-      obsoleteDeleteSymbol: `computePanel_${symbolCount - 1}`,
+      targetSymbol: `${fnPrefix}_0`,
+      obsoleteDeleteSymbol: `${fnPrefix}_${symbolCount - 1}`,
       updatedTargetSymbolAil: updatedLines.join("\n"),
       newFeatureSymbolAil: newFeatureLines.join("\n"),
       ComplexityMetrics: {
@@ -742,11 +771,12 @@ export function generateBenchmarkArtifactForStep(
 
   // Code languages: ts, js, py, go, rs, cpp, cs, kt, php
   const macro = spec.idiomName;
+  const fnPrefix = appSurface === "window" ? "stepWindowFrame" : "processDaemonStep";
   const fns: string[] = [];
   for (let s = 0; s < symbolCount; s++) {
     const count = s === 0 ? baseChecks + extraCheckOnTarget : baseChecks;
     const lines: string[] = [
-      `pub fn processStep_${s}(input: int) -> int:`,
+      `pub fn ${fnPrefix}_${s}(input: int) -> int:`,
       "  mut acc = input",
     ];
     for (let c = 0; c < count; c++) {
@@ -764,19 +794,20 @@ export function generateBenchmarkArtifactForStep(
   const nativeSource = emitTarget(expanded, spec.target, { watermark: false });
 
   const targetCount = baseChecks + extraCheckOnTarget;
+  const initDelta = isBugFix ? 1 : 5;
   const updatedLines: string[] = [
-    "pub fn processStep_0(input: int) -> int:",
-    "  mut acc = input + 1",
+    `pub fn ${fnPrefix}_0(input: int) -> int:`,
+    `  mut acc = input + ${initDelta}`,
   ];
   for (let c = 0; c < targetCount; c++) {
-    const lo = 10 + c * 4;
+    const lo = (isBugFix ? 8 : 10) + c * 4;
     const hi = lo + 200 + c * 15;
     updatedLines.push(`  ${macro}(${lo}, ${hi})`);
   }
   updatedLines.push("  return acc");
 
   const newFeatureLines: string[] = [
-    "pub fn processStep_feature(input: int) -> int:",
+    `pub fn ${fnPrefix}_feature(input: int) -> int:`,
     "  mut acc = input",
     `  ${macro}(15, 250)`,
     `  ${macro}(30, 500)`,
@@ -786,8 +817,8 @@ export function generateBenchmarkArtifactForStep(
   return {
     ailSourceWithIdioms,
     nativeSource,
-    targetSymbol: "processStep_0",
-    obsoleteDeleteSymbol: `processStep_${symbolCount - 1}`,
+    targetSymbol: `${fnPrefix}_0`,
+    obsoleteDeleteSymbol: `${fnPrefix}_${symbolCount - 1}`,
     updatedTargetSymbolAil: updatedLines.join("\n"),
     newFeatureSymbolAil: newFeatureLines.join("\n"),
     ComplexityMetrics: {
@@ -801,7 +832,9 @@ export function generateBenchmarkArtifactForStep(
 }
 
 /**
- * Extracts a collapsed AIL context slice for a target symbol in a native file.
+ * Extracts a collapsed AIL context slice for a target symbol in a native file,
+ * supporting functions, styles, nested HTML/Twig LayoutNodes (#id / block name),
+ * and nested JSON/YAML config keys (config.<key>).
  */
 function extractCollapsedSymbolContext(
   nativeSource: string,
@@ -816,10 +849,18 @@ function extractCollapsedSymbolContext(
   const outlineRes = generateOutline(collapsedMod, { includeTypes: true });
 
   const cleanTarget = targetSymbol.replace(/^[.#]/, "").replace(/^config\./, "");
+  const normTarget = cleanTarget.replace(/[_-]/g, "").toLowerCase();
+
+  // 1. Direct top-level item match (functions, classes, style rules)
   const matchedItem = collapsedMod.items.find((item) => {
     if ("name" in item && typeof item.name === "string") {
       const cleanName = item.name.replace(/^[.#]/, "");
-      return item.name === targetSymbol || cleanName === cleanTarget;
+      const normName = cleanName.replace(/[_-]/g, "").toLowerCase();
+      return (
+        item.name === targetSymbol ||
+        cleanName === cleanTarget ||
+        normName === normTarget
+      );
     }
     return false;
   });
@@ -831,6 +872,71 @@ function extractCollapsedSymbolContext(
         ? collapseAilSourceIdioms(generator.generate(singleMod), idioms).ail
         : generator.generate(singleMod);
     return { outlineText: outlineRes.text, contextText, collapsedMod };
+  }
+
+  // 1b. Method match inside ClassDecl (e.g. C# static wrapper class methods)
+  for (const item of collapsedMod.items) {
+    if (item.kind === "ClassDecl") {
+      const matchedMethod = item.methods.find((m) => {
+        const normName = m.name.replace(/[_-]/g, "").toLowerCase();
+        return m.name === cleanTarget || normName === normTarget;
+      });
+      if (matchedMethod) {
+        const slicedClass = { ...item, methods: [matchedMethod], properties: [] };
+        const singleMod = { ...collapsedMod, items: [slicedClass] };
+        const contextText = generator.generate(singleMod);
+        return { outlineText: outlineRes.text, contextText, collapsedMod };
+      }
+    }
+  }
+
+  // 2. Nested LayoutNode match inside ComponentDecl (.html / .twig)
+  for (const item of collapsedMod.items) {
+    if (item.kind === "ComponentDecl") {
+      const findLayoutNode = (
+        nodes: typeof item.layout,
+      ): (typeof item.layout)[number] | undefined => {
+        for (const node of nodes) {
+          const matchesAttr = node.attributes.some(
+            (a) =>
+              (a.name === "id" || a.name === "name") &&
+              a.value.kind === "LiteralExpr" &&
+              String(a.value.value) === cleanTarget,
+          );
+          if (matchesAttr || node.tag === cleanTarget) {
+            return node;
+          }
+          if (node.children && node.children.length > 0) {
+            const foundChild = findLayoutNode(node.children);
+            if (foundChild) return foundChild;
+          }
+        }
+        return undefined;
+      };
+      const matchedNode = findLayoutNode(item.layout);
+      if (matchedNode) {
+        const slicedComp = { ...item, layout: [matchedNode] };
+        const singleMod = { ...collapsedMod, items: [slicedComp] };
+        const rawAil = generator.generate(singleMod);
+        const contextText = collapseAilSourceIdioms(rawAil, idioms).ail;
+        return { outlineText: outlineRes.text, contextText, collapsedMod };
+      }
+    }
+
+    // 3. Nested RecordProperty match inside ConstDecl (.json / .yaml)
+    if (item.kind === "ConstDecl" && item.value.kind === "RecordLiteralExpr") {
+      const matchedProp = item.value.properties.find((p) => p.key === cleanTarget);
+      if (matchedProp) {
+        const slicedConst = {
+          ...item,
+          name: cleanTarget,
+          value: matchedProp.value,
+        };
+        const singleMod = { ...collapsedMod, items: [slicedConst] };
+        const contextText = generator.generate(singleMod);
+        return { outlineText: outlineRes.text, contextText, collapsedMod };
+      }
+    }
   }
 
   const fullCollapsed =
@@ -852,25 +958,29 @@ export function runSingleHonestBenchmarkCase(
   spec: LanguageSpec,
   stepIndex: number,
   tmpRoot: string,
+  scenarioOverride?: EngineeringScenarioKind,
+  surfaceOverride?: ApplicationSurfaceKind,
 ): HonestBenchmarkCaseResult {
   const wave = Math.ceil(stepIndex / 10);
   const caseId = `${spec.id.toUpperCase()}-${String(stepIndex).padStart(3, "0")}`;
-  const { scenario, appSurface } = getScenarioForStep(stepIndex);
+  const defaultMeta = getScenarioForStep(stepIndex);
+  const scenario = scenarioOverride ?? defaultMeta.scenario;
+  const appSurface = surfaceOverride ?? defaultMeta.appSurface;
   const { idioms, updatedTemplateAil } = buildIdiomRegistryForLanguage(spec.id);
-  const artifact = generateBenchmarkArtifactForStep(spec, stepIndex);
+  const artifact = generateBenchmarkArtifactForStep(spec, stepIndex, scenario, appSurface);
 
-  const caseDir = path.join(tmpRoot, `${spec.id}_${stepIndex}`);
+  const caseDir = path.join(tmpRoot, `${spec.id}_${stepIndex}_${scenario}_${appSurface}`);
   fs.mkdirSync(caseDir, { recursive: true });
   const nativeFilePath = path.join(caseDir, `module_${stepIndex}${spec.extension}`);
   fs.writeFileSync(nativeFilePath, artifact.nativeSource, "utf-8");
 
   // 1. Write from 0 (Greenfield)
   const writeFromZero = makeOperationScore(
-    estimateTokens(artifact.nativeSource),
-    estimateTokens(artifact.ailSourceWithIdioms),
+    countTokens(artifact.nativeSource),
+    countTokens(artifact.ailSourceWithIdioms),
   );
 
-  // 2. Read (Discovery + Context)
+  // 2. Read (Discovery + Context) — uniform across all 15 languages (Outline + Symbol Context)
   const { outlineText, contextText, collapsedMod } = extractCollapsedSymbolContext(
     artifact.nativeSource,
     nativeFilePath,
@@ -878,11 +988,8 @@ export function runSingleHonestBenchmarkCase(
     artifact.targetSymbol,
     idioms,
   );
-  const readWithoutAilTokens = estimateTokens(artifact.nativeSource);
-  const readAilTokens =
-    spec.id === "html" || spec.id === "twig" || spec.id === "json" || spec.id === "yaml"
-      ? estimateTokens(contextText)
-      : estimateTokens(outlineText) + estimateTokens(contextText);
+  const readWithoutAilTokens = countTokens(artifact.nativeSource);
+  const readAilTokens = countTokens(outlineText) + countTokens(contextText);
   const readContext = makeOperationScore(readWithoutAilTokens, readAilTokens);
 
   // 3. Surgical Update (Scenario-driven: New Feature insert vs. Bug Fix / Feature Update)
@@ -897,14 +1004,14 @@ export function runSingleHonestBenchmarkCase(
       nativeFilePath,
       idioms,
     );
-    const anchorBlockTokens = Math.max(12, estimateTokens(spliceInsertRes.originalSnippet ?? ""));
-    const newNativeBlockTokens = Math.max(12, estimateTokens(spliceInsertRes.newSnippet ?? ""));
+    const anchorBlockTokens = countTokens(spliceInsertRes.originalSnippet ?? "");
+    const newNativeBlockTokens = countTokens(spliceInsertRes.newSnippet ?? "");
     // Without AIL: replace_file_content requires TargetContent (anchor block) + ReplacementContent (anchor block + new block)
     const updateWithoutAilTokens = anchorBlockTokens * 2 + newNativeBlockTokens;
     // With AIL On-the-Fly: `ail splice --insert-after <sym> --code "<new AIL>"`
     const updateAilTokens =
-      estimateTokens(`--insert-after ${artifact.targetSymbol}`) +
-      estimateTokens(artifact.newFeatureSymbolAil);
+      countTokens(`--insert-after ${artifact.targetSymbol}`) +
+      countTokens(artifact.newFeatureSymbolAil);
     surgicalUpdate = makeOperationScore(updateWithoutAilTokens, updateAilTokens);
   } else {
     const spliceUpdateRes = spliceNativeSource(
@@ -916,14 +1023,14 @@ export function runSingleHonestBenchmarkCase(
       nativeFilePath,
       idioms,
     );
-    const oldNativeSymbolTokens = estimateTokens(spliceUpdateRes.originalSnippet ?? "");
-    const newNativeSymbolTokens = estimateTokens(spliceUpdateRes.newSnippet ?? "");
+    const oldNativeSymbolTokens = countTokens(spliceUpdateRes.originalSnippet ?? "");
+    const newNativeSymbolTokens = countTokens(spliceUpdateRes.newSnippet ?? "");
     // Without AIL: replace_file_content requires TargetContent (old block) + ReplacementContent (new block)
     const updateWithoutAilTokens = oldNativeSymbolTokens + newNativeSymbolTokens;
     // With AIL On-the-Fly: `ail splice --symbol <sym> --code "<new AIL>"`
     const updateAilTokens =
-      estimateTokens(`--symbol ${artifact.targetSymbol}`) +
-      estimateTokens(artifact.updatedTargetSymbolAil);
+      countTokens(`--symbol ${artifact.targetSymbol}`) +
+      countTokens(artifact.updatedTargetSymbolAil);
     surgicalUpdate = makeOperationScore(updateWithoutAilTokens, updateAilTokens);
   }
 
@@ -938,15 +1045,12 @@ export function runSingleHonestBenchmarkCase(
     idioms,
   );
   // Without AIL: replace_file_content requires specifying the full TargetContent block to delete
-  const deleteWithoutAilTokens = Math.max(
-    12,
-    estimateTokens(spliceDeleteRes.originalSnippet ?? ""),
-  );
+  const deleteWithoutAilTokens = countTokens(spliceDeleteRes.originalSnippet ?? "");
   // With AIL On-the-Fly: only `--symbol <obsoleteSym> --delete`
-  const deleteAilTokens = estimateTokens(`--symbol ${artifact.obsoleteDeleteSymbol} --delete`);
+  const deleteAilTokens = countTokens(`--symbol ${artifact.obsoleteDeleteSymbol} --delete`);
   const surgicalDelete = makeOperationScore(deleteWithoutAilTokens, deleteAilTokens);
 
-  // 5. Multi-File Idiom Refactor across N files
+  // 5. Multi-File Idiom Refactor across N files (zero magic numbers: measured from actual native symbol tokens before + after refactor)
   const nFiles = artifact.ComplexityMetrics.refactorFilesCount;
   const updatedIdioms: Record<string, ProjectIdiomDefinition> = {
     [spec.idiomName]: {
@@ -960,15 +1064,14 @@ export function runSingleHonestBenchmarkCase(
   });
   fs.writeFileSync(nativeFilePath, refactoredNativeSource, "utf-8");
 
-  // Without AIL: N separate replace_file_content calls replacing old pattern blocks with new pattern blocks
-  const singlePatternNativeTokens = Math.max(
-    18,
-    Math.round(estimateTokens(artifact.nativeSource) / artifact.ComplexityMetrics.totalInnerBlocks),
+  // Without AIL: N separate replace_file_content calls replacing a symbol's old native block with its refactored native block
+  const perSymbolRefactorNativeTokens = Math.round(
+    (countTokens(artifact.nativeSource) + countTokens(refactoredNativeSource)) /
+      artifact.ComplexityMetrics.symbolCount,
   );
-  const refactorWithoutAilTokens =
-    nFiles * Math.min(4, artifact.ComplexityMetrics.checksPerSymbol) * singlePatternNativeTokens * 2;
+  const refactorWithoutAilTokens = nFiles * perSymbolRefactorNativeTokens;
   const refactorAilTokens =
-    estimateTokens(`ail idiom update ${spec.idiomName}`) + estimateTokens(updatedTemplateAil);
+    countTokens(`ail idiom update ${spec.idiomName}`) + countTokens(updatedTemplateAil);
   const multiFileRefactor = makeOperationScore(refactorWithoutAilTokens, refactorAilTokens);
 
   // Check zero .ail files left on disk
@@ -1193,19 +1296,21 @@ export function runGreenfieldSnakeWindowAppBenchmark(tmpRoot: string): Greenfiel
   const updatedSnakeIdioms: Record<string, ProjectIdiomDefinition> = {
     $clamp_step: { ...idioms.$clamp_step, templateAil: updatedTemplateAil },
   };
-  const refactoredEngineAst = expandModuleIdioms(
-    collapseModuleIdioms(decompile(engineNative, "typescript", { filePath: enginePath }).ast, idioms)
-      .ast,
-    updatedSnakeIdioms,
-  );
-  fs.writeFileSync(
-    enginePath,
-    emitTarget(refactoredEngineAst, "typescript", { watermark: false }),
-    "utf-8",
-  );
+  let snakeRefactorWithoutTokens = 0;
+  for (const m of moduleDefs) {
+    const filePath = path.join(snakeDir, m.file);
+    const beforeNative = fs.readFileSync(filePath, "utf-8");
+    const refactoredAst = expandModuleIdioms(
+      collapseModuleIdioms(decompile(beforeNative, "typescript", { filePath }).ast, idioms).ast,
+      updatedSnakeIdioms,
+    );
+    const afterNative = emitTarget(refactoredAst, "typescript", { watermark: false });
+    fs.writeFileSync(filePath, afterNative, "utf-8");
+    snakeRefactorWithoutTokens += countTokens(beforeNative) + countTokens(afterNative);
+  }
   const multiFileRefactor = makeOperationScore(
-    moduleDefs.length * 110,
-    estimateTokens("ail idiom update $clamp_step") + estimateTokens(updatedTemplateAil),
+    snakeRefactorWithoutTokens,
+    countTokens("ail idiom update $clamp_step") + countTokens(updatedTemplateAil),
   );
 
   const zeroAilFilesLeftOnDisk =
@@ -1333,8 +1438,8 @@ export function runGreenfieldCliNonWindowAppBenchmark(
     const filePath = path.join(cliDir, m.file);
     fs.writeFileSync(filePath, nativeCode, "utf-8");
 
-    const nativeTokens = estimateTokens(nativeCode);
-    const ailTokens = estimateTokens(m.ail);
+    const nativeTokens = countTokens(nativeCode);
+    const ailTokens = countTokens(m.ail);
     totalWriteNative += nativeTokens;
     totalWriteAil += ailTokens;
     modules.push({
@@ -1359,8 +1464,8 @@ export function runGreenfieldCliNonWindowAppBenchmark(
     idioms,
   );
   const readContext = makeOperationScore(
-    estimateTokens(workerNative),
-    estimateTokens(outlineText) + estimateTokens(contextText),
+    countTokens(workerNative),
+    countTokens(outlineText) + countTokens(contextText),
   );
 
   const updatedWorkerFnAil = [
@@ -1379,9 +1484,9 @@ export function runGreenfieldCliNonWindowAppBenchmark(
     idioms,
   );
   const surgicalUpdate = makeOperationScore(
-    estimateTokens(spliceUpdateRes.originalSnippet ?? "") +
-      estimateTokens(spliceUpdateRes.newSnippet ?? ""),
-    estimateTokens("--symbol executeBatchJob") + estimateTokens(updatedWorkerFnAil),
+    countTokens(spliceUpdateRes.originalSnippet ?? "") +
+      countTokens(spliceUpdateRes.newSnippet ?? ""),
+    countTokens("--symbol executeBatchJob") + countTokens(updatedWorkerFnAil),
   );
 
   const spliceDeleteRes = spliceNativeSource(
@@ -1391,25 +1496,28 @@ export function runGreenfieldCliNonWindowAppBenchmark(
     idioms,
   );
   const surgicalDelete = makeOperationScore(
-    estimateTokens(spliceDeleteRes.originalSnippet ?? ""),
-    estimateTokens("--symbol deprecatedWorkerHook --delete"),
+    countTokens(spliceDeleteRes.originalSnippet ?? ""),
+    countTokens("--symbol deprecatedWorkerHook --delete"),
   );
 
   const updatedPyIdioms: Record<string, ProjectIdiomDefinition> = {
     $py_step: { ...idioms.$py_step, templateAil: updatedTemplateAil },
   };
-  const refactoredWorkerAst = expandModuleIdioms(
-    collapseModuleIdioms(decompile(workerNative, "python", { filePath: workerPath }).ast, idioms).ast,
-    updatedPyIdioms,
-  );
-  fs.writeFileSync(
-    workerPath,
-    emitTarget(refactoredWorkerAst, "python", { watermark: false }),
-    "utf-8",
-  );
+  let cliRefactorWithoutTokens = 0;
+  for (const m of moduleDefs) {
+    const filePath = path.join(cliDir, m.file);
+    const beforeNative = fs.readFileSync(filePath, "utf-8");
+    const refactoredAst = expandModuleIdioms(
+      collapseModuleIdioms(decompile(beforeNative, "python", { filePath }).ast, idioms).ast,
+      updatedPyIdioms,
+    );
+    const afterNative = emitTarget(refactoredAst, "python", { watermark: false });
+    fs.writeFileSync(filePath, afterNative, "utf-8");
+    cliRefactorWithoutTokens += countTokens(beforeNative) + countTokens(afterNative);
+  }
   const multiFileRefactor = makeOperationScore(
-    moduleDefs.length * 95,
-    estimateTokens("ail idiom update $py_step") + estimateTokens(updatedTemplateAil),
+    cliRefactorWithoutTokens,
+    countTokens("ail idiom update $py_step") + countTokens(updatedTemplateAil),
   );
 
   const zeroAilFilesLeftOnDisk =
@@ -1663,6 +1771,7 @@ export function runPolyglotFullStackBenchmark(
   polySpec: PolyglotScenarioSpec,
   tmpRoot: string,
   caseLookup?: Map<string, HonestBenchmarkCaseResult>,
+  maxCasesPerLanguage = 100,
 ): PolyglotFullStackBenchmarkResult {
   const polyDir = path.join(tmpRoot, polySpec.polyglotId.toLowerCase());
   fs.mkdirSync(polyDir, { recursive: true });
@@ -1680,14 +1789,27 @@ export function runPolyglotFullStackBenchmark(
   let allZeroAil = true;
 
   const extensions: string[] = [];
+  const effectiveStep = Math.max(
+    1,
+    Math.min(
+      polySpec.stepComplexity,
+      Math.round((polySpec.stepComplexity / 100) * maxCasesPerLanguage),
+    ),
+  );
 
   for (const langId of polySpec.languages) {
     const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === langId)!;
     extensions.push(langSpec.extension);
-    const cacheKey = `${langId}:${polySpec.stepComplexity}`;
+    const cacheKey = `${langId}:${effectiveStep}:${polySpec.scenario}:${polySpec.appSurface}`;
     let subRes = caseLookup?.get(cacheKey);
     if (!subRes) {
-      subRes = runSingleHonestBenchmarkCase(langSpec, polySpec.stepComplexity, polyDir);
+      subRes = runSingleHonestBenchmarkCase(
+        langSpec,
+        effectiveStep,
+        polyDir,
+        polySpec.scenario,
+        polySpec.appSurface,
+      );
       caseLookup?.set(cacheKey, subRes);
     }
 
@@ -1704,6 +1826,11 @@ export function runPolyglotFullStackBenchmark(
     if (!subRes.zeroAilFilesLeftOnDisk) {
       allZeroAil = false;
     }
+  }
+
+  const remainingPolyAil = fs.readdirSync(polyDir).filter((f) => f.endsWith(".ail"));
+  if (remainingPolyAil.length > 0) {
+    allZeroAil = false;
   }
 
   const writeFromZero = makeOperationScore(writeWithout, writeAil);
@@ -1789,7 +1916,7 @@ export function runHonestBenchmarkSuite(maxCasesPerLanguage = 100): HonestBenchm
 
       for (let step = 1; step <= maxCasesPerLanguage; step++) {
         const res = runSingleHonestBenchmarkCase(spec, step, tmpRoot);
-        caseLookup.set(`${spec.id}:${step}`, res);
+        caseLookup.set(`${spec.id}:${step}:${res.scenario}:${res.appSurface}`, res);
         if (res.complexityScore <= prevComplexity) {
           strictComplexityMonotonicity = false;
         }
@@ -1865,7 +1992,7 @@ export function runHonestBenchmarkSuite(maxCasesPerLanguage = 100): HonestBenchm
     }
 
     const polyglotBenchmarks = POLYGLOT_FULLSTACK_SCENARIOS.map((p) =>
-      runPolyglotFullStackBenchmark(p, tmpRoot, caseLookup),
+      runPolyglotFullStackBenchmark(p, tmpRoot, caseLookup, maxCasesPerLanguage),
     );
     for (const p of polyglotBenchmarks) {
       if (!p.zeroAilFilesLeftOnDisk) zeroAilFilesLeftOnDisk = false;

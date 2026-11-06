@@ -53,111 +53,12 @@ export class CssDecompiler {
         continue;
       }
 
-      if (node.type === "rule") {
-        const selector = node.selector.trim();
-        const nodeId = `style:${selector}`;
-
-        if (pendingComment) {
-          this.trivia.addLeadingTrivia(nodeId, {
-            kind: "BLOCK_COMMENT",
-            content: `/* ${pendingComment} */`,
-          });
-          pendingComment = null;
+      if (node.type === "rule" || (node.type === "atrule" && node.name !== "import")) {
+        const styleDecl = this.decompileStyleNode(node, pendingComment);
+        pendingComment = null;
+        if (styleDecl) {
+          items.push(styleDecl);
         }
-
-        const decls: { prop: string; value: string }[] = [];
-        for (const child of node.nodes) {
-          if (child.type === "decl") {
-            decls.push({ prop: child.prop, value: child.value });
-          }
-        }
-
-        const properties: StyleProperty[] = [];
-        let i = 0;
-        while (i < decls.length) {
-          const d = decls[i];
-
-          // Check for fl-center: display: flex + align-items: center + justify-content: center
-          if (
-            i + 2 < decls.length &&
-            ((d.prop === "display" &&
-              d.value === "flex" &&
-              decls[i + 1].prop === "align-items" &&
-              decls[i + 1].value === "center" &&
-              decls[i + 2].prop === "justify-content" &&
-              decls[i + 2].value === "center") ||
-              (d.prop === "display" &&
-                d.value === "flex" &&
-                decls[i + 1].prop === "justify-content" &&
-                decls[i + 1].value === "center" &&
-                decls[i + 2].prop === "align-items" &&
-                decls[i + 2].value === "center"))
-          ) {
-            properties.push({
-              property: "fl-center",
-              value: "",
-              span: emptySpan(this.filePath),
-            });
-            i += 3;
-            continue;
-          }
-
-          // Check for fl-row: display: flex + flex-direction: row
-          if (
-            i + 1 < decls.length &&
-            ((d.prop === "display" &&
-              d.value === "flex" &&
-              decls[i + 1].prop === "flex-direction" &&
-              decls[i + 1].value === "row") ||
-              (d.prop === "flex-direction" &&
-                d.value === "row" &&
-                decls[i + 1].prop === "display" &&
-                decls[i + 1].value === "flex"))
-          ) {
-            properties.push({
-              property: "fl-row",
-              value: "",
-              span: emptySpan(this.filePath),
-            });
-            i += 2;
-            continue;
-          }
-
-          // Check for fl-col: display: flex + flex-direction: column
-          if (
-            i + 1 < decls.length &&
-            ((d.prop === "display" &&
-              d.value === "flex" &&
-              decls[i + 1].prop === "flex-direction" &&
-              decls[i + 1].value === "column") ||
-              (d.prop === "flex-direction" &&
-                d.value === "column" &&
-                decls[i + 1].prop === "display" &&
-                decls[i + 1].value === "flex"))
-          ) {
-            properties.push({
-              property: "fl-col",
-              value: "",
-              span: emptySpan(this.filePath),
-            });
-            i += 2;
-            continue;
-          }
-
-          properties.push({
-            property: d.prop,
-            value: d.value,
-            span: emptySpan(this.filePath),
-          });
-          i++;
-        }
-
-        items.push({
-          kind: "StyleDecl",
-          name: selector,
-          properties,
-          span: emptySpan(this.filePath),
-        });
       }
     }
 
@@ -169,5 +70,134 @@ export class CssDecompiler {
     };
 
     return { ast, trivia: this.trivia };
+  }
+
+  private decompileStyleNode(
+    node: postcss.Rule | postcss.AtRule,
+    pendingComment: string | null = null,
+  ): StyleDecl | null {
+    const selector =
+      node.type === "rule"
+        ? node.selector.trim()
+        : `@${node.name}${node.params ? ` ${node.params.trim()}` : ""}`;
+    const nodeId = `style:${selector}`;
+
+    if (pendingComment) {
+      this.trivia.addLeadingTrivia(nodeId, {
+        kind: "BLOCK_COMMENT",
+        content: `/* ${pendingComment} */`,
+      });
+    }
+
+    const decls: { prop: string; value: string }[] = [];
+    const children: StyleDecl[] = [];
+
+    if (node.nodes) {
+      for (const child of node.nodes) {
+        if (child.type === "decl") {
+          decls.push({ prop: child.prop, value: child.value });
+        } else if (child.type === "rule" || (child.type === "atrule" && child.name !== "import")) {
+          const nested = this.decompileStyleNode(child);
+          if (nested) {
+            children.push(nested);
+          }
+        }
+      }
+    }
+
+    const properties = this.convertDeclarationsToProperties(decls);
+
+    return {
+      kind: "StyleDecl",
+      name: selector,
+      properties,
+      ...(children.length > 0 ? { children } : {}),
+      span: emptySpan(this.filePath),
+    };
+  }
+
+  private convertDeclarationsToProperties(
+    decls: { prop: string; value: string }[],
+  ): StyleProperty[] {
+    const properties: StyleProperty[] = [];
+    let i = 0;
+    while (i < decls.length) {
+      const d = decls[i];
+
+      // Check for fl-center: display: flex + align-items: center + justify-content: center
+      if (
+        i + 2 < decls.length &&
+        ((d.prop === "display" &&
+          d.value === "flex" &&
+          decls[i + 1].prop === "align-items" &&
+          decls[i + 1].value === "center" &&
+          decls[i + 2].prop === "justify-content" &&
+          decls[i + 2].value === "center") ||
+          (d.prop === "display" &&
+            d.value === "flex" &&
+            decls[i + 1].prop === "justify-content" &&
+            decls[i + 1].value === "center" &&
+            decls[i + 2].prop === "align-items" &&
+            decls[i + 2].value === "center"))
+      ) {
+        properties.push({
+          property: "fl-center",
+          value: "",
+          span: emptySpan(this.filePath),
+        });
+        i += 3;
+        continue;
+      }
+
+      // Check for fl-row: display: flex + flex-direction: row
+      if (
+        i + 1 < decls.length &&
+        ((d.prop === "display" &&
+          d.value === "flex" &&
+          decls[i + 1].prop === "flex-direction" &&
+          decls[i + 1].value === "row") ||
+          (d.prop === "flex-direction" &&
+            d.value === "row" &&
+            decls[i + 1].prop === "display" &&
+            decls[i + 1].value === "flex"))
+      ) {
+        properties.push({
+          property: "fl-row",
+          value: "",
+          span: emptySpan(this.filePath),
+        });
+        i += 2;
+        continue;
+      }
+
+      // Check for fl-col: display: flex + flex-direction: column
+      if (
+        i + 1 < decls.length &&
+        ((d.prop === "display" &&
+          d.value === "flex" &&
+          decls[i + 1].prop === "flex-direction" &&
+          decls[i + 1].value === "column") ||
+          (d.prop === "flex-direction" &&
+            d.value === "column" &&
+            decls[i + 1].prop === "display" &&
+            decls[i + 1].value === "flex"))
+      ) {
+        properties.push({
+          property: "fl-col",
+          value: "",
+          span: emptySpan(this.filePath),
+        });
+        i += 2;
+        continue;
+      }
+
+      properties.push({
+        property: d.prop,
+        value: d.value,
+        span: emptySpan(this.filePath),
+      });
+      i++;
+    }
+    return properties;
   }
 }

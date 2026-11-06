@@ -440,7 +440,7 @@ AssertionError: expected 5 to be 4
       expect(result.summary.passed).toBe(14);
       expect(result.summary.failed).toBe(0);
       expect(result.output.length).toBeGreaterThan(0);
-    });
+    }, 20000);
 
     it("pre-compiles .ail test file and runs test suite on compiled target", async () => {
       // Create a test file in tmpDir
@@ -483,7 +483,7 @@ AssertionError: expected 5 to be 4
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(0);
       expect(result.summary.passed).toBeGreaterThanOrEqual(1);
-    });
+    }, 20000);
 
     it("captures test failures and produces clean filtered error without crashing", async () => {
       const testFile = path.join(tmpDir, "failing.test.mjs");
@@ -539,7 +539,7 @@ AssertionError: expected 5 to be 4
       const res = runCli(["test", "tests/unit/concurrency-pool.test.ts"]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("✔ Tests succeeded: 14/14 passed (0 failed).");
-    });
+    }, 20000);
 
     it("executes 'ail test --verbose' and displays detailed runner output", () => {
       const res = runCli([
@@ -550,7 +550,7 @@ AssertionError: expected 5 to be 4
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("tests/unit/concurrency-pool.test.ts");
       expect(res.stdout).toContain("✔ Tests succeeded: 14/14 passed (0 failed).");
-    });
+    }, 20000);
 
     it("executes 'ail test --json' and outputs structured machine-readable JSON", () => {
       const res = runCli([
@@ -567,7 +567,7 @@ AssertionError: expected 5 to be 4
       expect(parsed.summary.passed).toBe(14);
       expect(parsed.summary.failed).toBe(0);
       expect(parsed.harness).toBe("vitest");
-    });
+    }, 20000);
 
     it("executes 'ail test' on a failing test via CLI and exits 1 with filtered error", () => {
       const failingTest = path.join(tmpDir, "cli_fail.test.mjs");

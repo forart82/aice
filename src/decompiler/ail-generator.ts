@@ -994,6 +994,11 @@ export class AilGenerator {
       }
       i++;
     }
+    if (s.children && s.children.length > 0) {
+      for (const child of s.children) {
+        this.emitStyleDecl(child);
+      }
+    }
     this.dedent();
   }
 

@@ -4405,6 +4405,26 @@ export class Parser {
   }
 
   // Style Declarations
+  private hasLBraceBeforeLineEnd(): boolean {
+    let offset = 0;
+    while (true) {
+      const tok = this.peek(offset);
+      if (
+        tok.kind === "EOF" ||
+        tok.kind === "NEWLINE" ||
+        tok.kind === "SEMICOLON" ||
+        tok.kind === "RBRACE" ||
+        tok.kind === "DEDENT"
+      ) {
+        return false;
+      }
+      if (tok.kind === "LBRACE") {
+        return true;
+      }
+      offset++;
+    }
+  }
+
   private parseStyleSelector(): string {
     const tok = this.current();
     if (tok.kind === "STRING") {
@@ -4412,14 +4432,45 @@ export class Parser {
       return tok.value;
     }
 
+    const lineHasLBrace = this.hasLBraceBeforeLineEnd();
     const tokens: Token[] = [];
+    let parenDepth = 0;
+
     while (
-      !this.check("COLON") &&
       !this.check("LBRACE") &&
       !this.check("NEWLINE") &&
       !this.check("DEDENT") &&
       !this.check("EOF")
     ) {
+      if (this.check("LPAREN")) {
+        parenDepth++;
+        tokens.push(this.advance());
+        continue;
+      }
+      if (this.check("RPAREN")) {
+        parenDepth = Math.max(0, parenDepth - 1);
+        tokens.push(this.advance());
+        continue;
+      }
+      if (this.check("COLON")) {
+        if (parenDepth > 0 || lineHasLBrace) {
+          tokens.push(this.advance());
+          continue;
+        }
+        const colonTok = this.current();
+        const nextTok = this.peek(1);
+        const isAdjacentPseudo =
+          nextTok.kind === "COLON" ||
+          (this.isIdentOrKeyword(nextTok) &&
+            tokens.length > 0 &&
+            tokens[tokens.length - 1].span.end.offset === colonTok.span.start.offset &&
+            colonTok.span.end.offset === nextTok.span.start.offset);
+        if (isAdjacentPseudo) {
+          tokens.push(this.advance());
+          continue;
+        }
+        break;
+      }
       tokens.push(this.advance());
     }
 
@@ -4436,9 +4487,11 @@ export class Parser {
     return tokens.map((t) => t.value).join("");
   }
 
-  private parseStyleDecl(): StyleDecl {
+  private parseStyleDecl(consumeStyleKeyword = true): StyleDecl {
     const startSpan = this.current().span;
-    this.consume("STYLE");
+    if (consumeStyleKeyword) {
+      this.consume("STYLE");
+    }
 
     const name = this.parseStyleSelector();
     const hasBraces = this.check("LBRACE");
@@ -4451,6 +4504,7 @@ export class Parser {
     this.consumeStatementSeparator();
 
     const properties: StyleProperty[] = [];
+    const children: StyleDecl[] = [];
     const hasIndent = this.check("INDENT");
     if (hasIndent) {
       this.advance(); // consume INDENT
@@ -4478,6 +4532,18 @@ export class Parser {
       // Check for nested tokens block: tokens <ns>:
       if (this.check("TOKENS")) {
         this.parseTokensIntoProperties(properties);
+        if (hasIndent || hasBraces) this.consumeStatementSeparator();
+        continue;
+      }
+
+      // Check for nested style block: `style <sel> ...` or `<sel> { ... }` (e.g. `@media (...) { ... }`)
+      if (this.check("STYLE")) {
+        children.push(this.parseStyleDecl(true));
+        if (hasIndent || hasBraces) this.consumeStatementSeparator();
+        continue;
+      }
+      if (this.hasLBraceBeforeLineEnd()) {
+        children.push(this.parseStyleDecl(false));
         if (hasIndent || hasBraces) this.consumeStatementSeparator();
         continue;
       }
@@ -4557,6 +4623,7 @@ export class Parser {
       kind: "StyleDecl",
       name,
       properties,
+      ...(children.length > 0 ? { children } : {}),
       span: mergeSpans(startSpan, endSpan),
     };
   }

@@ -288,21 +288,37 @@ export class CssEmitter {
       this.ctx.writeLine(`${cssProp}: ${cssVal};`);
     }
 
+    if (decl.children && decl.children.length > 0) {
+      for (const child of decl.children) {
+        this.emitStyleDecl(child);
+      }
+    }
+
     this.ctx.dedent();
     this.ctx.writeLine("}");
     this.ctx.emitTrailingTrivia(nodeId);
   }
 
   private toCssSelector(name: string): string {
-    const lower = name.toLowerCase();
-    if (HTML_TAGS.has(lower) && name === lower) {
+    const trimmed = name.trim();
+    const lower = trimmed.toLowerCase();
+    if (HTML_TAGS.has(lower) && trimmed === lower) {
       return lower;
     }
-    if (name.startsWith(".") || name.startsWith("#") || name.startsWith(":")) {
-      return name;
+    if (
+      trimmed.startsWith(".") ||
+      trimmed.startsWith("#") ||
+      trimmed.startsWith(":") ||
+      trimmed.startsWith("@") ||
+      trimmed.startsWith("&") ||
+      trimmed.startsWith("*") ||
+      trimmed.startsWith("[") ||
+      /[:,\s>+~[(]/.test(trimmed)
+    ) {
+      return trimmed;
     }
     // Convert PascalCase / camelCase / snake_case to kebab-case
-    const kebab = name
+    const kebab = trimmed
       .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
       .replace(/_/g, "-")
       .toLowerCase();

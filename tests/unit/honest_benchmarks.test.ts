@@ -82,4 +82,60 @@ describe("AIL 2.0 Honest, Clean & Trustworthy Benchmark Suite", () => {
     expect(md).toContain("15 Languages & File Types (100 Cases/Lang = 1500)");
     expect(md).toContain("20 Complex Multi-Language Full-Stack Scenarios");
   }, 60000);
+
+  it("differentiates Window vs Non-Window application artifacts and bug_fix vs update_feature scenarios", async () => {
+    const { generateBenchmarkArtifactForStep, buildIdiomRegistryForLanguage } = await import(
+      "../../benchmarks/honest-suite.js"
+    );
+    const tsSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === "ts")!;
+    const winBug = generateBenchmarkArtifactForStep(tsSpec, 1, "bug_fix", "window");
+    const cliFeat = generateBenchmarkArtifactForStep(tsSpec, 1, "update_feature", "non_window");
+
+    expect(winBug.targetSymbol).toBe("stepWindowFrame_0");
+    expect(cliFeat.targetSymbol).toBe("processDaemonStep_0");
+    expect(winBug.updatedTargetSymbolAil).not.toBe(cliFeat.updatedTargetSymbolAil);
+    expect(buildIdiomRegistryForLanguage("css").idioms.$css_card).toBeDefined();
+  });
+
+  it("supports nested CSS @media rules, pseudo-selectors (.btn:hover), and multi-selectors in parseStyleDecl, CssEmitter, CssDecompiler, and idiom transforms", async () => {
+    const { parse } = await import("../../src/core/parser.js");
+    const { emitTarget } = await import("../../src/emitters/index.js");
+    const { decompile } = await import("../../src/decompiler/index.js");
+    const { collapseModuleIdioms, expandModuleIdioms } = await import("../../src/idioms/index.js");
+    const { buildIdiomRegistryForLanguage } = await import("../../benchmarks/honest-suite.js");
+
+    const { idioms } = buildIdiomRegistryForLanguage("css");
+    const ailCss = [
+      "style .btn:hover, button:focus {",
+      '  $css_card("12px", "6px")',
+      "  z-index: 5",
+      "}",
+      "",
+      "style @media (max-width: 768px) {",
+      "  .btn:hover {",
+      '    $css_card("8px", "4px")',
+      "  }",
+      "}",
+    ].join("\n");
+
+    const mod = parse(ailCss, "responsive.ail");
+    expect(mod.items).toHaveLength(2);
+    const mediaDecl = mod.items[1];
+    expect(mediaDecl.kind).toBe("StyleDecl");
+    if (mediaDecl.kind === "StyleDecl") {
+      expect(mediaDecl.name).toBe("@media (max-width: 768px)");
+      expect(mediaDecl.children).toHaveLength(1);
+      expect(mediaDecl.children?.[0].name).toBe(".btn:hover");
+    }
+
+    const expanded = expandModuleIdioms(mod, idioms);
+    const emittedCss = emitTarget(expanded, "css", { watermark: false });
+    expect(emittedCss).toContain(".btn:hover, button:focus {");
+    expect(emittedCss).toContain("@media (max-width: 768px) {");
+    expect(emittedCss).toContain("border-radius: 8px;");
+
+    const decompiled = decompile(emittedCss, "css", { filePath: "responsive.css" });
+    const collapsed = collapseModuleIdioms(decompiled.ast, idioms);
+    expect(collapsed.collapsedCount).toBe(2);
+  });
 });

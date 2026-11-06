@@ -557,6 +557,7 @@ export interface StyleDecl {
   kind: "StyleDecl";
   name: string;
   properties: StyleProperty[];
+  children?: StyleDecl[];
   span: Span;
 }
 
