@@ -1,8 +1,8 @@
 # AIL 2.0 Honest, Clean & Trustworthy Benchmark Report
 
-> **Verified Status**: **620 / 620 (100.0%)** AIL On-the-Fly Win Rate across **15 Languages & File Types (40 Cases/Lang = 600)** + **20 Complex Multi-Language Full-Stack Scenarios**
-> **Overall Apples-to-Apples Token Savings**: **-77.2%** (`7 828 862` native tokens -> `1 781 467` AIL On-the-Fly tokens)
-> **Zero `.ail` Files Left on Disk**: `true` | **Strict Complexity Monotonicity (`#001 < ... < #040`)**: `true`
+> **Verified Status**: **770 / 770 (100.0%)** AIL On-the-Fly Win Rate across **15 Languages & File Types (50 Cases/Lang = 750)** + **20 Complex Multi-Language Full-Stack Scenarios**
+> **Overall Apples-to-Apples Token Savings**: **-77.5%** (`10 360 746` native tokens -> `2 335 445` AIL On-the-Fly tokens)
+> **Zero `.ail` Files Left on Disk**: `true` | **Strict Complexity Monotonicity (`#001 < ... < #050`)**: `true`
 
 ---
 
@@ -20,25 +20,25 @@
 
 ---
 
-## 2. Per-Language Summary (`15 Languages × 40 Cases = 600 Benchmarks`)
+## 2. Per-Language Summary (`15 Languages × 50 Cases = 750 Benchmarks`)
 
 | Language / File Type | Ext | Cases | Win Rate | Write (`0->1`) | Read (`Context`) | Update (`Splice`) | Delete (`--delete`) | Refactor (`Idiom`) | Total Native | Total AIL | Overall Savings |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | ---: | ---: | :---: |
-| **TypeScript (.ts)** | `.ts` | 40 | **40/40 (100%)** | -67.8% | -90.8% | -83.8% | -95.4% | -96.6% | 266 710 | 45 296 | **-83.0%** |
-| **React TSX (.tsx)** | `.tsx` | 40 | **40/40 (100%)** | -61.2% | -91.3% | -81.7% | -95.6% | -96.8% | 277 438 | 53 616 | **-80.7%** |
-| **JavaScript (.js)** | `.js` | 40 | **40/40 (100%)** | -67.3% | -92.3% | -83.6% | -95.3% | -96.5% | 262 302 | 43 716 | **-83.3%** |
-| **Python (.py)** | `.py` | 40 | **40/40 (100%)** | -63.1% | -88.7% | -80.8% | -94.7% | -96.0% | 231 586 | 45 896 | **-80.2%** |
-| **Go (.go)** | `.go` | 40 | **40/40 (100%)** | -67.7% | -63.4% | -83.7% | -95.3% | -96.5% | 265 330 | 72 056 | **-72.8%** |
-| **Rust (.rs)** | `.rs` | 40 | **40/40 (100%)** | -68.9% | -90.6% | -84.3% | -95.5% | -96.7% | 275 820 | 45 796 | **-83.4%** |
-| **C++20 (.cpp)** | `.cpp` | 40 | **40/40 (100%)** | -67.7% | -90.4% | -86.2% | -95.3% | -96.5% | 268 534 | 45 616 | **-83.0%** |
-| **C# (.cs)** | `.cs` | 40 | **40/40 (100%)** | -69.6% | -62.0% | -84.8% | -95.6% | -96.8% | 281 908 | 75 756 | **-73.1%** |
-| **Kotlin (.kt)** | `.kt` | 40 | **40/40 (100%)** | -67.0% | -85.8% | -83.5% | -95.3% | -96.5% | 259 604 | 49 796 | **-80.8%** |
-| **PHP 8 (.php)** | `.php` | 40 | **40/40 (100%)** | -69.9% | -87.3% | -85.0% | -95.7% | -96.8% | 285 328 | 49 636 | **-82.6%** |
-| **CSS3 (.css)** | `.css` | 40 | **40/40 (100%)** | -64.0% | -92.9% | -76.7% | -94.7% | -96.3% | 230 724 | 41 652 | **-82.0%** |
-| **HTML5 (.html)** | `.html` | 40 | **40/40 (100%)** | -56.8% | -57.1% | -80.3% | -95.5% | -96.7% | 272 698 | 92 108 | **-66.2%** |
-| **JSON (.json)** | `.json` | 40 | **40/40 (100%)** | -68.3% | -71.5% | -84.0% | -96.1% | -97.0% | 328 000 | 78 452 | **-76.1%** |
-| **YAML (.yaml)** | `.yaml` | 40 | **40/40 (100%)** | -58.5% | -62.6% | -78.7% | -94.8% | -96.3% | 249 864 | 78 372 | **-68.6%** |
-| **Twig (.twig)** | `.twig` | 40 | **40/40 (100%)** | -60.0% | -61.0% | -82.3% | -95.0% | -96.7% | 215 516 | 66 872 | **-69.0%** |
+| **TypeScript (.ts)** | `.ts` | 50 | **50/50 (100%)** | -68.9% | -92.2% | -84.5% | -95.9% | -96.9% | 435 484 | 71 570 | **-83.6%** |
+| **React TSX (.tsx)** | `.tsx` | 50 | **50/50 (100%)** | -62.2% | -92.6% | -82.3% | -96.1% | -97.1% | 453 394 | 86 025 | **-81.0%** |
+| **JavaScript (.js)** | `.js` | 50 | **50/50 (100%)** | -68.5% | -93.5% | -84.2% | -95.8% | -96.9% | 429 080 | 69 220 | **-83.9%** |
+| **Python (.py)** | `.py` | 50 | **50/50 (100%)** | -64.3% | -90.5% | -81.6% | -95.2% | -96.5% | 377 768 | 72 320 | **-80.9%** |
+| **Go (.go)** | `.go` | 50 | **50/50 (100%)** | -68.8% | -65.1% | -84.4% | -95.8% | -96.9% | 433 014 | 117 020 | **-73.0%** |
+| **Rust (.rs)** | `.rs` | 50 | **50/50 (100%)** | -69.8% | -92.0% | -84.9% | -96.0% | -97.0% | 447 866 | 72 320 | **-83.8%** |
+| **C++20 (.cpp)** | `.cpp` | 50 | **50/50 (100%)** | -68.8% | -91.9% | -86.6% | -95.8% | -96.9% | 437 216 | 71 970 | **-83.5%** |
+| **C# (.cs)** | `.cs` | 50 | **50/50 (100%)** | -70.5% | -64.1% | -85.4% | -96.1% | -97.1% | 459 318 | 122 270 | **-73.4%** |
+| **Kotlin (.kt)** | `.kt` | 50 | **50/50 (100%)** | -68.1% | -88.1% | -84.2% | -95.8% | -96.8% | 424 298 | 77 945 | **-81.6%** |
+| **PHP 8 (.php)** | `.php` | 50 | **50/50 (100%)** | -71.0% | -89.3% | -85.6% | -96.2% | -97.1% | 465 682 | 77 720 | **-83.3%** |
+| **CSS3 (.css)** | `.css` | 50 | **50/50 (100%)** | -64.8% | -94.1% | -77.4% | -95.3% | -96.7% | 380 494 | 67 230 | **-82.3%** |
+| **HTML5 (.html)** | `.html` | 50 | **50/50 (100%)** | -57.3% | -57.7% | -80.7% | -96.0% | -97.1% | 448 044 | 154 864 | **-65.4%** |
+| **JSON (.json)** | `.json` | 50 | **50/50 (100%)** | -68.7% | -71.6% | -84.3% | -96.6% | -97.4% | 542 420 | 132 945 | **-75.5%** |
+| **YAML (.yaml)** | `.yaml` | 50 | **50/50 (100%)** | -59.0% | -62.9% | -79.1% | -95.4% | -96.8% | 414 230 | 132 845 | **-67.9%** |
+| **Twig (.twig)** | `.twig` | 50 | **50/50 (100%)** | -60.6% | -61.6% | -82.7% | -95.6% | -97.1% | 354 936 | 112 350 | **-68.3%** |
 
 ---
 
@@ -48,18 +48,18 @@
 
 | Engineering Scenario | Cases | Win Rate | Total Savings |
 | :--- | :---: | :---: | :---: |
-| **Bug Fix (`bug_fix`)** | 124 | **124/124 (100%)** | **-76.6%** |
-| **New Feature (`new_feature`)** | 124 | **124/124 (100%)** | **-77.8%** |
-| **Update Feature (`update_feature`)** | 124 | **124/124 (100%)** | **-77.0%** |
-| **From-0 Window App (`from_zero_window_app`)** | 125 | **125/125 (100%)** | **-77.5%** |
-| **From-0 Non-Window App (`from_zero_non_window_app`)** | 123 | **123/123 (100%)** | **-77.2%** |
+| **Bug Fix (`bug_fix`)** | 154 | **154/154 (100%)** | **-77.0%** |
+| **New Feature (`new_feature`)** | 154 | **154/154 (100%)** | **-78.0%** |
+| **Update Feature (`update_feature`)** | 154 | **154/154 (100%)** | **-77.3%** |
+| **From-0 Window App (`from_zero_window_app`)** | 155 | **155/155 (100%)** | **-77.6%** |
+| **From-0 Non-Window App (`from_zero_non_window_app`)** | 153 | **153/153 (100%)** | **-77.4%** |
 
 ### 3.2 Window vs. Non-Window Applications
 
 | Application Surface | Cases | Win Rate | Total Savings |
 | :--- | :---: | :---: | :---: |
-| **Window Applications (GUI / Canvas / DOM / Web UI / Desktop)** | 313 | **313/313 (100%)** | **-77.2%** |
-| **Non-Window Applications (Headless CLI / Daemon / Backend API / Worker)** | 307 | **307/307 (100%)** | **-77.3%** |
+| **Window Applications (GUI / Canvas / DOM / Web UI / Desktop)** | 388 | **388/388 (100%)** | **-77.4%** |
+| **Non-Window Applications (Headless CLI / Daemon / Backend API / Worker)** | 382 | **382/382 (100%)** | **-77.5%** |
 
 ---
 
@@ -94,18 +94,18 @@
 | `POLY-03` | **Go Microservice + React TSX + CSS + JSON + YAML Telemetry Dashboard** | `.go .tsx .ts .css .json .yaml` | `window` | `new_feature` | -65.8% | -79.9% | -79.8% | -96.7% | -97.5% | 72 096 | 16 723 | **-76.8%** |
 | `POLY-04` | **Python FastAPI + JS + Twig + CSS + HTML + YAML + JSON Analytics Portal** | `.py .js .twig .css .html .yaml .json` | `window` | `bug_fix` | -63.9% | -76.0% | -79.5% | -96.6% | -97.4% | 87 641 | 22 715 | **-74.1%** |
 | `POLY-05` | **Rust Actix + TypeScript + HTML5 + CSS3 + JSON + YAML Systems Monitor** | `.rs .ts .html .css .json .yaml` | `window` | `update_feature` | -65.9% | -79.0% | -80.1% | -97.2% | -98.0% | 103 828 | 24 980 | **-75.9%** |
-| `POLY-06` | **C++20 Desktop Viewport Engine + HTML/CSS Overlay + JSON/YAML Configs** | `.cpp .ts .html .css .json .yaml` | `window` | `from_zero_window_app` | -65.8% | -78.9% | -80.8% | -97.2% | -98.0% | 111 501 | 27 115 | **-75.7%** |
+| `POLY-06` | **C++20 Desktop Viewport Engine + HTML/CSS Overlay + JSON/YAML Configs** | `.cpp .ts .html .css .json .yaml` | `window` | `from_zero_window_app` | -65.8% | -78.9% | -80.8% | -97.2% | -98.0% | 111 495 | 27 115 | **-75.7%** |
 | `POLY-07` | **C# .NET Enterprise API + TSX Admin + CSS + HTML + JSON + YAML** | `.cs .tsx .ts .css .html .json .yaml` | `window` | `bug_fix` | -66.2% | -78.0% | -80.7% | -97.6% | -97.9% | 162 390 | 40 846 | **-74.8%** |
 | `POLY-08` | **Kotlin Ktor + TypeScript + TSX + CSS + HTML + JSON + YAML Companion App** | `.kt .ts .tsx .css .html .json .yaml` | `window` | `new_feature` | -65.9% | -81.3% | -80.8% | -97.6% | -97.9% | 171 305 | 41 074 | **-76.0%** |
 | `POLY-09` | **Full-Stack Multiplayer Snake Tournament Platform** | `.ts .tsx .php .go .css .html .json .yaml` | `window` | `from_zero_window_app` | -67.3% | -80.5% | -81.5% | -97.9% | -98.3% | 241 569 | 57 398 | **-76.2%** |
 | `POLY-10` | **Multi-Tenant SaaS Billing & Invoice Designer Studio** | `.py .php .tsx .twig .css .json .yaml` | `window` | `update_feature` | -66.7% | -82.7% | -81.2% | -97.8% | -98.2% | 214 004 | 49 511 | **-76.9%** |
 | `POLY-11` | **Headless Distributed Job Queue & Worker Mesh Daemon** | `.go .rs .py .json .yaml` | `non_window` | `from_zero_non_window_app` | -66.7% | -76.5% | -81.5% | -96.7% | -97.4% | 65 710 | 16 076 | **-75.5%** |
 | `POLY-12` | **Polyglot Monorepo Build & Release CLI Orchestrator** | `.ts .js .py .rs .json .yaml` | `non_window` | `new_feature` | -67.9% | -84.6% | -81.8% | -97.2% | -97.9% | 102 620 | 21 339 | **-79.2%** |
-| `POLY-13` | **High-Frequency Trading Risk Engine & Audit Pipeline** | `.cpp .rs .go .py .json .yaml` | `non_window` | `bug_fix` | -68.5% | -80.7% | -82.7% | -97.6% | -97.9% | 136 608 | 31 296 | **-77.1%** |
+| `POLY-13` | **High-Frequency Trading Risk Engine & Audit Pipeline** | `.cpp .rs .go .py .json .yaml` | `non_window` | `bug_fix` | -68.5% | -80.7% | -82.7% | -97.6% | -97.9% | 136 610 | 31 296 | **-77.1%** |
 | `POLY-14` | **Enterprise IAM & Zero-Trust Policy Sync Daemon** | `.cs .kt .go .json .yaml` | `non_window` | `update_feature` | -68.9% | -72.9% | -82.9% | -97.6% | -97.9% | 125 443 | 32 946 | **-73.7%** |
 | `POLY-15` | **Legacy PHP + Go + Python Zero-Downtime ETL Migration CLI** | `.php .go .py .ts .json .yaml` | `non_window` | `from_zero_non_window_app` | -69.3% | -81.1% | -82.8% | -97.9% | -98.2% | 180 001 | 40 643 | **-77.4%** |
 | `POLY-16` | **Real-Time Collaborative IDE & Layout Preview Workbench** | `.rs .ts .tsx .css .html .json .yaml` | `window` | `new_feature` | -66.8% | -82.3% | -81.2% | -98.1% | -98.3% | 264 278 | 62 443 | **-76.4%** |
-| `POLY-17` | **Smart Factory IoT Edge Gateway & Twig/JS Operator Console** | `.cpp .py .js .twig .css .html .yaml .json` | `window` | `bug_fix` | -66.6% | -79.9% | -81.5% | -98.0% | -98.2% | 301 520 | 74 959 | **-75.1%** |
+| `POLY-17` | **Smart Factory IoT Edge Gateway & Twig/JS Operator Console** | `.cpp .py .js .twig .css .html .yaml .json` | `window` | `bug_fix` | -66.6% | -79.9% | -81.5% | -98.0% | -98.2% | 301 522 | 74 959 | **-75.1%** |
 | `POLY-18` | **Cloud-Native Kubernetes Operator & Fleet Auditor CLI** | `.go .rs .py .ts .json .yaml` | `non_window` | `update_feature` | -69.7% | -81.8% | -83.2% | -98.3% | -98.5% | 275 563 | 62 257 | **-77.4%** |
-| `POLY-19` | **Cross-Platform Game Asset Baker & Shader Pipeline CLI** | `.cpp .cs .kt .py .json .yaml` | `non_window` | `from_zero_non_window_app` | -69.7% | -81.5% | -83.7% | -98.3% | -98.5% | 288 611 | 65 723 | **-77.2%** |
-| `POLY-20` | **Unified 15-Language Enterprise Polyglot Super-Platform** | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | `window` | `from_zero_window_app` | -69.6% | -84.5% | -83.7% | -98.4% | -98.5% | 842 634 | 182 410 | **-78.3%** |
+| `POLY-19` | **Cross-Platform Game Asset Baker & Shader Pipeline CLI** | `.cpp .cs .kt .py .json .yaml` | `non_window` | `from_zero_non_window_app` | -69.7% | -81.5% | -83.7% | -98.3% | -98.5% | 288 613 | 65 723 | **-77.2%** |
+| `POLY-20` | **Unified 15-Language Enterprise Polyglot Super-Platform** | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | `window` | `from_zero_window_app` | -69.6% | -84.5% | -83.7% | -98.4% | -98.5% | 842 636 | 182 410 | **-78.3%** |
