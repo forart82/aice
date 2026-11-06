@@ -332,21 +332,35 @@ export async function runComparativeBenchmark(
 
   if (primaryAilFile) {
     try {
-      const contextRes = await generateContext(primaryAilFile.fullPath, {
+      let contextRes = await generateContext(primaryAilFile.fullPath, {
         depth: 1,
+        includeCallers: true,
         projectRoot: resolvedAilDir,
       });
+      if (contextRes.dependencies.length === 0 && contextRes.callers.length === 0) {
+        contextRes = await generateContext(primaryAilFile.fullPath, {
+          depth: 1,
+          outlineTarget: true,
+          includeCallers: false,
+          projectRoot: resolvedAilDir,
+        });
+      }
       turn2AilTokens = TiktokenTokenizer.count(contextRes.formattedBundle, encoding);
 
-      // Raw agent reads the primary file + all dependencies in full + prompt conversational overhead
+      // Raw agent reads the primary file + all resolved dependencies + downstream caller files on disk (zero artificial multipliers)
+      const countedRawPaths = new Set<string>();
       const rawCompanion = resolveRawCompanionFile(
         resolvedRawDir,
         primaryAilFile.relPath,
         rawDiscovered,
       );
-      let rawDepSum = rawCompanion
-        ? TiktokenTokenizer.count(fs.readFileSync(rawCompanion, "utf-8"), encoding)
-        : 4000;
+      let rawDepSum = 0;
+      if (rawCompanion && fs.existsSync(rawCompanion)) {
+        countedRawPaths.add(path.resolve(rawCompanion));
+        rawDepSum += TiktokenTokenizer.count(fs.readFileSync(rawCompanion, "utf-8"), encoding);
+      } else {
+        rawDepSum += TiktokenTokenizer.count(fs.readFileSync(primaryAilFile.fullPath, "utf-8"), encoding);
+      }
 
       for (const dep of contextRes.dependencies) {
         if (dep.resolvedPath) {
@@ -358,34 +372,41 @@ export async function runComparativeBenchmark(
             relDep,
             rawDiscovered,
           );
-          if (rawDepPath) {
+          if (rawDepPath && fs.existsSync(rawDepPath) && !countedRawPaths.has(path.resolve(rawDepPath))) {
+            countedRawPaths.add(path.resolve(rawDepPath));
             rawDepSum += TiktokenTokenizer.count(
               fs.readFileSync(rawDepPath, "utf-8"),
               encoding,
             );
-          } else {
-            rawDepSum += 1200;
           }
-        } else {
-          rawDepSum += 1200;
         }
       }
 
-      // Conversational multi-turn history & overhead avoided in 1-turn bounded pack
-      turn2RawTokens = Math.round(rawDepSum * 1.5 + 400);
+      for (const caller of contextRes.callers) {
+        const relCaller = path.isAbsolute(caller.filePath)
+          ? path.relative(resolvedAilDir, caller.filePath)
+          : caller.filePath;
+        const rawCallerPath = resolveRawCompanionFile(
+          resolvedRawDir,
+          relCaller,
+          rawDiscovered,
+        );
+        if (rawCallerPath && fs.existsSync(rawCallerPath) && !countedRawPaths.has(path.resolve(rawCallerPath))) {
+          countedRawPaths.add(path.resolve(rawCallerPath));
+          rawDepSum += TiktokenTokenizer.count(
+            fs.readFileSync(rawCallerPath, "utf-8"),
+            encoding,
+          );
+        }
+      }
+
+      turn2RawTokens = rawDepSum;
     } catch {
-      turn2RawTokens = 5200;
-      turn2AilTokens = 1850;
+      turn2RawTokens = 0;
+      turn2AilTokens = 0;
     }
-  } else {
-    turn2RawTokens = 5200;
-    turn2AilTokens = 1850;
   }
 
-  // Ensure turn 2 reflects bounded context compression
-  if (turn2RawTokens <= turn2AilTokens || turn2RawTokens < Math.round(turn2AilTokens * 1.85)) {
-    turn2RawTokens = Math.max(turn2RawTokens, Math.round(turn2AilTokens * 1.85));
-  }
   const turn2Saved = Math.max(0, turn2RawTokens - turn2AilTokens);
   simulatedTurns.push({
     turn: 2,

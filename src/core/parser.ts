@@ -2454,7 +2454,15 @@ export class Parser {
       this.peek(1).kind !== "USHR_EQUAL" &&
       this.peek(1).kind !== "STAR_STAR_EQUAL";
 
-    if (this.check("LET") || isValKeywordDecl || this.check("CONST")) {
+    const isMutKeywordDecl =
+      this.check("MUT") &&
+      (this.isIdentOrKeyword(this.peek(1)) || this.peek(1).kind === "STRING") &&
+      (this.peek(2).kind === "EQUAL" ||
+        this.peek(2).kind === "COLON_EQUAL" ||
+        this.peek(2).kind === "COLON_COLON_EQUAL" ||
+        this.peek(2).kind === "COLON");
+
+    if (this.check("LET") || isValKeywordDecl || isMutKeywordDecl || this.check("CONST")) {
       return this.parseLetBinding();
     }
     if (this.check("RET")) {
@@ -2882,6 +2890,9 @@ export class Parser {
     if (this.check("VAL") || this.check("CONST")) {
       this.advance();
       isMut = false;
+    } else if (this.check("MUT")) {
+      this.advance();
+      isMut = true;
     } else {
       this.consume("LET");
       if (this.check("MUT") && this.peek(1).kind !== "EQUAL" && this.peek(1).kind !== "COLON") {
@@ -2898,7 +2909,12 @@ export class Parser {
       typeAnnotation = this.parseTypeExpr();
     }
 
-    this.consume("EQUAL", "Expected '=' in variable declaration");
+    if (this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
+      if (this.check("COLON_COLON_EQUAL")) isMut = true;
+      this.advance();
+    } else {
+      this.consume("EQUAL", "Expected '=' in variable declaration");
+    }
     const init = this.parseExpr();
     this.consumeStatementSeparator();
 
@@ -4193,22 +4209,41 @@ export class Parser {
 
     const attributes: { name: string; value: Expr; span: Span }[] = [];
 
-    // Optional attributes: Tag(prop: val, onClick: handle)
+    // Optional attributes: Tag(prop: val, onClick: handle) or positional $idiom(arg0, arg1)
     if (this.check("LPAREN")) {
       this.advance();
+      let posIdx = 0;
       while (!this.check("RPAREN") && !this.check("EOF")) {
         const aSpan = this.current().span;
-        const aName = this.check("STRING")
-          ? this.advance().value
-          : this.parseCssKebabIdent();
-        this.consume("COLON");
-        const aVal = this.parseExpr();
+        if (
+          tag &&
+          tag.startsWith("$") &&
+          this.peek().kind !== "COLON" &&
+          this.peek().kind !== "EQUAL"
+        ) {
+          const aVal = this.parseExpr();
+          attributes.push({
+            name: `$${posIdx++}`,
+            value: aVal,
+            span: mergeSpans(aSpan, aVal.span),
+          });
+        } else {
+          const aName = this.check("STRING")
+            ? this.advance().value
+            : this.parseCssKebabIdent();
+          if (this.check("EQUAL")) {
+            this.advance();
+          } else {
+            this.consume("COLON");
+          }
+          const aVal = this.parseExpr();
 
-        attributes.push({
-          name: aName,
-          value: aVal,
-          span: mergeSpans(aSpan, aVal.span),
-        });
+          attributes.push({
+            name: aName,
+            value: aVal,
+            span: mergeSpans(aSpan, aVal.span),
+          });
+        }
 
         if (this.check("COMMA")) this.advance();
       }
@@ -4271,7 +4306,7 @@ export class Parser {
     const children: LayoutNode[] = [];
 
     // Direct text literal child without colon: .brand-icon "⚡"
-    if (this.check("STRING")) {
+    if (this.check("STRING") && this.current().span.start.line === startSpan.start.line) {
       const strTok = this.advance();
       textLiteral = strTok.value;
       this.consumeStatementSeparator();
@@ -4285,8 +4320,26 @@ export class Parser {
       };
     }
 
-    // Tag body / children with ':'
-    if (this.check("COLON")) {
+    // Tag body / children with '{ ... }'
+    if (this.check("LBRACE")) {
+      this.advance(); // consume '{'
+      while (!this.check("RBRACE") && !this.check("EOF")) {
+        while (
+          this.check("NEWLINE") ||
+          this.check("INDENT") ||
+          this.check("DEDENT") ||
+          this.check("SEMICOLON")
+        ) {
+          this.advance();
+        }
+        if (this.check("RBRACE") || this.check("EOF")) break;
+        children.push(this.parseLayoutNode(tag ?? undefined));
+      }
+      if (this.check("RBRACE")) {
+        this.advance();
+      }
+    } else if (this.check("COLON")) {
+      // Tag body / children with ':'
       this.advance(); // consume ':'
 
       // Direct text literal child: Button: "Submit"
@@ -4305,7 +4358,12 @@ export class Parser {
       }
 
       // Direct child expression on same line: p: message or h2.title: title
-      if (!this.check("NEWLINE") && !this.check("EOF") && !this.check("INDENT")) {
+      if (
+        !this.check("NEWLINE") &&
+        !this.check("EOF") &&
+        !this.check("INDENT") &&
+        !this.check("RBRACE")
+      ) {
         childExpr = this.parseExpr();
         this.consumeStatementSeparator();
         return {
@@ -4357,6 +4415,7 @@ export class Parser {
     const tokens: Token[] = [];
     while (
       !this.check("COLON") &&
+      !this.check("LBRACE") &&
       !this.check("NEWLINE") &&
       !this.check("DEDENT") &&
       !this.check("EOF")
@@ -4382,7 +4441,13 @@ export class Parser {
     this.consume("STYLE");
 
     const name = this.parseStyleSelector();
-    this.consume("COLON", "Expected ':' before style block");
+    const hasBraces = this.check("LBRACE");
+    if (hasBraces) {
+      this.advance(); // consume '{'
+      if (this.check("COLON")) this.advance();
+    } else {
+      this.consume("COLON", "Expected ':' or '{' before style block");
+    }
     this.consumeStatementSeparator();
 
     const properties: StyleProperty[] = [];
@@ -4392,7 +4457,14 @@ export class Parser {
     }
 
     while (!this.check("EOF")) {
-      if (hasIndent) {
+      if (hasBraces) {
+        while (this.check("NEWLINE") || this.check("INDENT") || this.check("DEDENT")) {
+          this.advance();
+        }
+        if (this.check("RBRACE") || this.check("EOF")) {
+          break;
+        }
+      } else if (hasIndent) {
         this.consumeStatementSeparator();
         if (this.check("DEDENT") || this.check("EOF")) {
           break;
@@ -4406,7 +4478,7 @@ export class Parser {
       // Check for nested tokens block: tokens <ns>:
       if (this.check("TOKENS")) {
         this.parseTokensIntoProperties(properties);
-        if (hasIndent) this.consumeStatementSeparator();
+        if (hasIndent || hasBraces) this.consumeStatementSeparator();
         continue;
       }
 
@@ -4420,7 +4492,8 @@ export class Parser {
       const isMacro =
         normalizedProp === "fl-row" ||
         normalizedProp === "fl-col" ||
-        normalizedProp === "fl-center";
+        normalizedProp === "fl-center" ||
+        prop.trim().startsWith("$");
 
       let val = "";
       if (this.check("COLON")) {
@@ -4429,6 +4502,7 @@ export class Parser {
           !this.check("SEMICOLON") &&
           !this.check("NEWLINE") &&
           !this.check("DEDENT") &&
+          !this.check("RBRACE") &&
           !this.check("EOF")
         ) {
           val = this.parseCssPropertyValue();
@@ -4446,7 +4520,9 @@ export class Parser {
       if (this.check("SEMICOLON")) {
         this.advance();
       }
-      if (!hasIndent) {
+      if (hasBraces) {
+        this.consumeStatementSeparator();
+      } else if (!hasIndent) {
         if (this.check("NEWLINE") || this.check("EOF")) {
           break;
         }
@@ -4465,7 +4541,14 @@ export class Parser {
     }
 
     let endSpan = this.current().span;
-    if (hasIndent && this.check("DEDENT")) {
+    if (hasBraces) {
+      while (this.check("NEWLINE") || this.check("INDENT") || this.check("DEDENT")) {
+        this.advance();
+      }
+      if (this.check("RBRACE")) {
+        endSpan = this.consume("RBRACE").span;
+      }
+    } else if (hasIndent && this.check("DEDENT")) {
       endSpan = this.consume("DEDENT").span;
     }
     this.consumeStatementSeparator();
@@ -4718,16 +4801,37 @@ export class Parser {
       return tok.value;
     }
 
-    // Unquoted CSS property name (e.g. margin, box_sizing, --color-slate-900, -webkit-font-smoothing)
+    // Unquoted CSS property name (e.g. margin, box_sizing, --color-slate-900, -webkit-font-smoothing, or $macro(...))
     const tokens: Token[] = [];
+    let parenDepth = 0;
+    let sawMacroParen = false;
+    const isMacroStart = tok.value.startsWith("$") || tok.kind === "DOLLAR";
     while (
       !this.check("COLON") &&
       !this.check("SEMICOLON") &&
       !this.check("NEWLINE") &&
       !this.check("DEDENT") &&
+      !this.check("RBRACE") &&
       !this.check("EOF")
     ) {
-      tokens.push(this.advance());
+      if (
+        parenDepth === 0 &&
+        tokens.length > 0 &&
+        this.current().span.start.line > tokens[tokens.length - 1].span.end.line
+      ) {
+        break;
+      }
+      const cur = this.advance();
+      tokens.push(cur);
+      if (cur.kind === "LPAREN") {
+        parenDepth++;
+        if (isMacroStart) sawMacroParen = true;
+      } else if (cur.kind === "RPAREN") {
+        parenDepth = Math.max(0, parenDepth - 1);
+        if (isMacroStart && sawMacroParen && parenDepth === 0) {
+          break;
+        }
+      }
     }
 
     if (tokens.length === 0) {
@@ -4754,6 +4858,13 @@ export class Parser {
 
       // At top-level, stop on statement delimiters
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        if (
+          tokens.length > 0 &&
+          tok.span.start.line > tokens[tokens.length - 1].span.end.line &&
+          tokens[tokens.length - 1].kind !== "COMMA"
+        ) {
+          break;
+        }
         if (this.check("NEWLINE")) {
           // If the last token was a comma, this is a multi-line CSS value continuation
           if (tokens.length > 0 && tokens[tokens.length - 1].kind === "COMMA") {
@@ -4768,6 +4879,7 @@ export class Parser {
         if (
           this.check("SEMICOLON") ||
           this.check("DEDENT") ||
+          this.check("RBRACE") ||
           this.check("COMMENT")
         ) {
           break;

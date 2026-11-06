@@ -5,47 +5,18 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
 import { emitTarget } from "../../src/emitters/index.js";
-import {
-  formatBenchmark100MarkdownReport,
-  runBenchmark100Cases,
-} from "../../src/tools/benchmark-100-cases.js";
 import { spliceSource } from "../../src/tools/splice.js";
 
-describe("100-Case Deep On-the-Fly (Twinless + Smart Multi-File Idioms) Benchmark Suite", () => {
-  it("executes all 100 distinct cases with 100% pass rate, 100% win rate, determinism, and zero .ail disk pollution", async () => {
-    const summary1 = await runBenchmark100Cases();
-    const summary2 = await runBenchmark100Cases();
-
-    expect(summary1.totalCases).toBe(100);
-    expect(summary1.passedCases).toBe(100);
-    expect(summary1.ailBetterCount).toBe(100);
-    expect(summary1.winRatePct).toBe(100);
-    expect(summary1.overallSavingsPct).toBeGreaterThan(60);
-    expect(summary1.averageSavingsPct).toBeGreaterThan(70);
-
-    // Must be 100% deterministic across runs (no leaked /tmp/ail-bench100-XXXXXX paths)
-    expect(summary1.totalWithAilTokens).toBe(summary2.totalWithAilTokens);
-    expect(summary1.totalWithoutAilTokens).toBe(summary2.totalWithoutAilTokens);
-
-    for (const r of summary1.results) {
-      expect(r.semanticPass).toBe(true);
-      expect(r.zeroAilFilesOnDisk).toBe(true);
-      expect(r.withAilTokens).toBeLessThan(r.withoutAilTokens);
-      expect(r.ailBetter).toBe(true);
-    }
-
-    const md = formatBenchmark100MarkdownReport(summary1);
-    expect(md).toContain("| 001 |");
-    expect(md).toContain("| 100 |");
-    expect(md).toContain("100 / 100 (100.0%)");
-  }, 60000);
-
+describe("Polyglot Native Splice & Compiler Parity Regression Suite", () => {
   it("parses relative import paths with /.../i or /.../g segments without regex literal lexer collision", () => {
     const ast1 = parse("module test\nuse ./src/index.{foo, bar}\n", "test.ail");
     expect(ast1.items).toHaveLength(1);
     expect(ast1.items[0]?.kind).toBe("ImportDecl");
 
-    const ast2 = parse("module test\nuse ./utils/math.{clamp}\nuse ../api/gateway.{send}\n", "test.ail");
+    const ast2 = parse(
+      "module test\nuse ./utils/math.{clamp}\nuse ../api/gateway.{send}\n",
+      "test.ail",
+    );
     expect(ast2.items).toHaveLength(2);
     expect(ast2.items[0]?.kind).toBe("ImportDecl");
     expect(ast2.items[1]?.kind).toBe("ImportDecl");
@@ -237,4 +208,3 @@ class PaymentGateway
     }
   });
 });
-

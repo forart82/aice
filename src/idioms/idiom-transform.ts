@@ -38,6 +38,8 @@ import type {
   RecordLiteralExpr,
   ReturnStmt,
   Statement,
+  StyleDecl,
+  StyleProperty,
   TemplateLiteralExpr,
   ThrowStmt,
   UnaryExpr,
@@ -49,6 +51,7 @@ import { parse } from "../core/parser.js";
 import { type Span } from "../core/span.js";
 import { AilGenerator } from "../decompiler/ail-generator.js";
 import { decompile } from "../decompiler/index.js";
+import { CSS_PROPERTY_ALIASES } from "../emitters/css-emitter.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 import {
   findProjectRoot,
@@ -191,6 +194,8 @@ interface ParsedTemplate {
   kind: "expr" | "stmt" | "block";
   expr?: Expr;
   statements?: Statement[];
+  styleProperties?: StyleProperty[];
+  layoutNodes?: LayoutNode[];
 }
 
 export const templateCache = new Map<string, ParsedTemplate>();
@@ -206,7 +211,7 @@ function setCachedTemplate(key: string, result: ParsedTemplate): void {
 }
 
 /**
- * Parses an idiom's templateAil string into template AST statement(s) or expression.
+ * Parses an idiom's templateAil string into template AST statement(s), expression, layoutNodes, or styleProperties.
  */
 function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
   const rawTemplate = def.templateAil ?? (def as { template?: string }).template ?? "";
@@ -233,20 +238,258 @@ function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
     .split(/\r?\n/)
     .map((line) => (line.trim().length > 0 ? `  ${line}` : ""))
     .join("\n");
-  const wrapper = `fn __t():\n${indented}\n`;
-  const mod = parse(wrapper, "<template>");
-  const fn = mod.items[0] as FunctionDecl;
-  const body = fn.body as Block;
-  const result: ParsedTemplate = {
-    kind: def.kind,
-    statements: body.statements,
-    expr:
+
+  let parsedStatements: Statement[] | undefined;
+  let parsedSingleExpr: Expr | undefined;
+  let parsedLayoutNodes: LayoutNode[] | undefined;
+  let parsedStyleProperties: StyleProperty[] | undefined;
+  let firstErr: unknown;
+
+  try {
+    const wrapper = `fn __t():\n${indented}\n`;
+    const mod = parse(wrapper, "<template>");
+    const fn = mod.items[0] as FunctionDecl;
+    const body = fn.body as Block;
+    parsedStatements = body.statements;
+    parsedSingleExpr =
       body.statements.length === 1 && body.statements[0].kind === "ExprStmt"
         ? (body.statements[0] as ExprStmt).expr
-        : undefined,
-  };
-  setCachedTemplate(cacheKey, result);
-  return result;
+        : undefined;
+  } catch (err) {
+    firstErr = err;
+  }
+
+  try {
+    const compWrapper = `component __c():\n${indented}\n`;
+    const compMod = parse(compWrapper, "<template>");
+    const comp = compMod.items[0];
+    if (comp && comp.kind === "ComponentDecl" && comp.layout.length > 0) {
+      parsedLayoutNodes = comp.layout;
+    }
+  } catch {
+    // ignore
+  }
+
+  try {
+    const styleWrapper = `style __s:\n${indented}\n`;
+    const styleMod = parse(styleWrapper, "<template>");
+    const st = styleMod.items[0];
+    if (st && st.kind === "StyleDecl" && st.properties.length > 0) {
+      parsedStyleProperties = st.properties;
+    }
+  } catch {
+    // ignore
+  }
+
+  if (parsedStatements || parsedLayoutNodes || parsedStyleProperties) {
+    const result: ParsedTemplate = {
+      kind: def.kind,
+      statements: parsedStatements,
+      expr: parsedSingleExpr,
+      layoutNodes: parsedLayoutNodes,
+      styleProperties: parsedStyleProperties,
+    };
+    setCachedTemplate(cacheKey, result);
+    return result;
+  }
+
+  throw firstErr ?? new Error(`Failed to parse idiom template: ${def.name}`);
+}
+
+function normalizeCssPropName(prop: string): string {
+  const clean = prop
+    .replace(/([a-z0-9])([A-Z])/g, "$1-$2")
+    .replace(/_/g, "-")
+    .toLowerCase()
+    .trim();
+  return CSS_PROPERTY_ALIASES[clean] ?? clean;
+}
+
+function splitTopLevelCssArgs(argStr: string): string[] {
+  const args: string[] = [];
+  let cur = "";
+  let parenDepth = 0;
+  let inQuote: string | null = null;
+  for (let i = 0; i < argStr.length; i++) {
+    const ch = argStr[i];
+    if (inQuote) {
+      if (ch === inQuote && argStr[i - 1] !== "\\") {
+        inQuote = null;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "(") parenDepth++;
+    else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
+    else if (ch === "," && parenDepth === 0) {
+      args.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim().length > 0) {
+    args.push(cur.trim());
+  }
+  return args;
+}
+
+function substituteLayoutNode(
+  tNode: LayoutNode,
+  subst: Map<string, Expr>,
+  callSpan: Span,
+): LayoutNode {
+  const cloned = structuredClone(tNode);
+  cloned.span = callSpan;
+  cloned.attributes = cloned.attributes.map((a) => ({
+    ...a,
+    value: substituteExpr(a.value, subst, callSpan),
+    span: callSpan,
+  }));
+  if (cloned.childExpr) {
+    const subExpr = substituteExpr(cloned.childExpr, subst, callSpan);
+    if (subExpr.kind === "LiteralExpr" && subExpr.literalKind === "string") {
+      cloned.textLiteral = String(subExpr.value);
+      cloned.childExpr = null;
+    } else {
+      cloned.childExpr = subExpr;
+      cloned.textLiteral = null;
+    }
+  } else if (cloned.textLiteral !== null && subst.has(cloned.textLiteral.trim())) {
+    const subExpr = subst.get(cloned.textLiteral.trim())!;
+    if (subExpr.kind === "LiteralExpr" && subExpr.literalKind === "string") {
+      cloned.textLiteral = String(subExpr.value);
+      cloned.childExpr = null;
+    } else {
+      cloned.childExpr = structuredClone(subExpr);
+      cloned.textLiteral = null;
+    }
+  }
+  cloned.children = cloned.children.map((ch) => substituteLayoutNode(ch, subst, callSpan));
+  return cloned;
+}
+
+function matchLayoutNodeTemplate(
+  tNode: LayoutNode,
+  cNode: LayoutNode,
+  bindings: Map<string, Expr>,
+  holeNames: Set<string>,
+  generator: AilGenerator,
+): boolean {
+  if (tNode.tag !== cNode.tag) return false;
+  if (tNode.attributes.length !== cNode.attributes.length) return false;
+  for (const tAttr of tNode.attributes) {
+    const cAttr = cNode.attributes.find((a) => a.name === tAttr.name);
+    if (!cAttr) return false;
+    if (!matchExprTemplate(tAttr.value, cAttr.value, bindings, holeNames, generator)) {
+      return false;
+    }
+  }
+  if (tNode.childExpr && tNode.childExpr.kind === "IdentifierExpr" && holeNames.has(tNode.childExpr.name)) {
+    const hole = tNode.childExpr.name;
+    let boundExpr: Expr | null = null;
+    if (cNode.childExpr) {
+      boundExpr = cNode.childExpr;
+    } else if (cNode.textLiteral !== null) {
+      const trimmedText = cNode.textLiteral.trim();
+      if (
+        trimmedText.startsWith("{") &&
+        trimmedText.endsWith("}") &&
+        /^[a-zA-Z_$][a-zA-Z0-9_$.]*$/.test(trimmedText.slice(1, -1).trim())
+      ) {
+        boundExpr = {
+          kind: "IdentifierExpr",
+          name: trimmedText.slice(1, -1).trim(),
+          span: cNode.span,
+        };
+      } else {
+        boundExpr = {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: cNode.textLiteral,
+          rawValue: JSON.stringify(cNode.textLiteral),
+          span: cNode.span,
+        };
+      }
+    }
+    if (!boundExpr) return false;
+    if (bindings.has(hole)) {
+      if (generator.formatExpr(bindings.get(hole)!) !== generator.formatExpr(boundExpr)) {
+        return false;
+      }
+    } else {
+      bindings.set(hole, boundExpr);
+    }
+  } else if (tNode.textLiteral !== null) {
+    if (holeNames.has(tNode.textLiteral.trim())) {
+      const hole = tNode.textLiteral.trim();
+      const boundExpr: Expr =
+        cNode.childExpr ?? {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: cNode.textLiteral ?? "",
+          rawValue: JSON.stringify(cNode.textLiteral ?? ""),
+          span: cNode.span,
+        };
+      if (bindings.has(hole)) {
+        if (generator.formatExpr(bindings.get(hole)!) !== generator.formatExpr(boundExpr)) {
+          return false;
+        }
+      } else {
+        bindings.set(hole, boundExpr);
+      }
+    } else if (cNode.textLiteral !== tNode.textLiteral) {
+      return false;
+    }
+  } else if (tNode.childExpr) {
+    if (!cNode.childExpr) return false;
+    if (!matchExprTemplate(tNode.childExpr, cNode.childExpr, bindings, holeNames, generator)) {
+      return false;
+    }
+  } else if (cNode.textLiteral !== null || cNode.childExpr != null) {
+    return false;
+  }
+
+  if (tNode.children.length !== cNode.children.length) return false;
+  for (let i = 0; i < tNode.children.length; i++) {
+    if (!matchLayoutNodeTemplate(tNode.children[i], cNode.children[i], bindings, holeNames, generator)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function matchStylePropertyWindow(
+  tProps: StyleProperty[],
+  cProps: StyleProperty[],
+  bindings: Map<string, string>,
+  holeNames: Set<string>,
+): boolean {
+  if (tProps.length !== cProps.length) return false;
+  for (let i = 0; i < tProps.length; i++) {
+    const tp = tProps[i];
+    const cp = cProps[i];
+    if (normalizeCssPropName(tp.property) !== normalizeCssPropName(cp.property)) {
+      return false;
+    }
+    const tVal = tp.value.trim();
+    const cVal = cp.value.trim();
+    if (holeNames.has(tVal)) {
+      if (bindings.has(tVal)) {
+        if (bindings.get(tVal) !== cVal) return false;
+      } else {
+        bindings.set(tVal, cVal);
+      }
+    } else if (tVal !== cVal) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -923,16 +1166,77 @@ function expandModuleIdiomsInternal(
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       item.value = transformExpr(item.value);
     } else if (item.kind === "ComponentDecl") {
-      const transformLayout = (node: LayoutNode) => {
-        for (const attr of node.attributes) {
-          if (attr.value) attr.value = transformExpr(attr.value);
+      const expandLayoutList = (nodes: LayoutNode[], depth = 0): LayoutNode[] => {
+        if (depth > 16) return nodes;
+        const out: LayoutNode[] = [];
+        for (const node of nodes) {
+          const bareTag = node.tag.startsWith("$") ? node.tag.slice(1) : node.tag;
+          const def =
+            node.tag.startsWith("$") &&
+            (idioms![node.tag] ?? idioms![bareTag]);
+          if (def) {
+            const parsed = getOrParseTemplate(def);
+            if (parsed.layoutNodes && parsed.layoutNodes.length > 0) {
+              const args = node.attributes.map((a) => transformExpr(a.value, depth + 1));
+              const subst = buildSubst(def, args);
+              onExpanded?.(1);
+              const expandedNodes = parsed.layoutNodes.map((ln) =>
+                substituteLayoutNode(ln, subst, node.span),
+              );
+              out.push(...expandLayoutList(expandedNodes, depth + 1));
+              continue;
+            }
+          }
+          for (const attr of node.attributes) {
+            if (attr.value) attr.value = transformExpr(attr.value, depth);
+          }
+          if (node.childExpr) node.childExpr = transformExpr(node.childExpr, depth);
+          node.children = expandLayoutList(node.children, depth);
+          out.push(node);
         }
-        if (node.childExpr) node.childExpr = transformExpr(node.childExpr);
-        for (const ch of node.children) transformLayout(ch);
+        return out;
       };
-      for (const node of item.layout) {
-        transformLayout(node);
-      }
+      item.layout = expandLayoutList(item.layout);
+    } else if (item.kind === "StyleDecl") {
+      const expandProps = (props: StyleProperty[], depth = 0): StyleProperty[] => {
+        if (depth > 16) return props;
+        const out: StyleProperty[] = [];
+        for (const p of props) {
+          const macroMatch = p.property.trim().match(/^(\$[a-zA-Z_][a-zA-Z0-9_]*)\(([\s\S]*)\)$/);
+          if (macroMatch) {
+            const idiomName = macroMatch[1];
+            const bareName = idiomName.slice(1);
+            const def = idioms![idiomName] ?? idioms![bareName];
+            if (def) {
+              const parsed = getOrParseTemplate(def);
+              if (parsed.styleProperties && parsed.styleProperties.length > 0) {
+                const rawArgs = splitTopLevelCssArgs(macroMatch[2]);
+                const rawParams = def.params ?? [];
+                const subst = new Map<string, string>();
+                for (let idx = 0; idx < rawParams.length; idx++) {
+                  const rawP = rawParams[idx] as ProjectIdiomParam | string;
+                  const pName = typeof rawP === "string" ? rawP : rawP.name;
+                  const pDefault = typeof rawP === "string" ? undefined : rawP.defaultValue;
+                  const val = rawArgs[idx] ?? pDefault ?? "";
+                  subst.set(pName, val);
+                  subst.set(`$${idx}`, val);
+                }
+                onExpanded?.(1);
+                const expanded: StyleProperty[] = parsed.styleProperties.map((sp) => ({
+                  property: sp.property,
+                  value: subst.has(sp.value.trim()) ? subst.get(sp.value.trim())! : sp.value,
+                  span: p.span,
+                }));
+                out.push(...expandProps(expanded, depth + 1));
+                continue;
+              }
+            }
+          }
+          out.push(p);
+        }
+        return out;
+      };
+      item.properties = expandProps(item.properties);
     }
   }
 
@@ -1858,15 +2162,112 @@ export function collapseModuleIdioms(
       item.value = collapseExpr(item.value);
     } else if (item.kind === "ComponentDecl") {
       currentSymbol = item.name;
-      const collapseLayout = (node: LayoutNode) => {
-        for (const attr of node.attributes) {
-          if (attr.value) attr.value = collapseExpr(attr.value);
+      const collapseLayoutList = (nodes: LayoutNode[]): LayoutNode[] => {
+        let idx = 0;
+        const list = [...nodes];
+        while (idx < list.length) {
+          let matched = false;
+          for (const idiom of stmtIdioms) {
+            const parsed = getOrParseTemplate(idiom);
+            const tNodes = parsed.layoutNodes;
+            if (!tNodes || tNodes.length === 0) continue;
+            const k = tNodes.length;
+            if (idx + k <= list.length) {
+              const window = list.slice(idx, idx + k);
+              const bindings = new Map<string, Expr>();
+              const holeNames = new Set(idiom.params.map((p) => p.name));
+              let ok = true;
+              for (let s = 0; s < k; s++) {
+                if (!matchLayoutNodeTemplate(tNodes[s], window[s], bindings, holeNames, generator)) {
+                  ok = false;
+                  break;
+                }
+              }
+              if (ok) {
+                const args: Expr[] = idiom.params.map(
+                  (p) =>
+                    bindings.get(p.name) ?? {
+                      kind: "IdentifierExpr",
+                      name: "nil",
+                      span: window[0].span,
+                    },
+                );
+                const callSpan = window[0].span;
+                const callNode: LayoutNode = {
+                  kind: "LayoutNode",
+                  tag: idiom.name,
+                  attributes: args.map((a, aIdx) => ({
+                    name: `$${aIdx}`,
+                    value: a,
+                    span: callSpan,
+                  })),
+                  textLiteral: null,
+                  children: [],
+                  span: callSpan,
+                };
+                list.splice(idx, k, callNode);
+                collapsedCount++;
+                onCollapsed?.(
+                  idiom.name,
+                  args.map((a) => generator.formatExpr(a)),
+                  callSpan,
+                  currentSymbol,
+                );
+                matched = true;
+                idx++;
+                break;
+              }
+            }
+          }
+          if (!matched) {
+            const node = list[idx];
+            for (const attr of node.attributes) {
+              if (attr.value) attr.value = collapseExpr(attr.value);
+            }
+            if (node.childExpr) node.childExpr = collapseExpr(node.childExpr);
+            if (node.children && node.children.length > 0) {
+              node.children = collapseLayoutList(node.children);
+            }
+            idx++;
+          }
         }
-        if (node.childExpr) node.childExpr = collapseExpr(node.childExpr);
-        for (const ch of node.children) collapseLayout(ch);
+        return list;
       };
-      for (const node of item.layout) {
-        collapseLayout(node);
+      item.layout = collapseLayoutList(item.layout);
+    } else if (item.kind === "StyleDecl") {
+      currentSymbol = item.name;
+      let idx = 0;
+      while (idx < item.properties.length) {
+        let matched = false;
+        for (const idiom of stmtIdioms) {
+          const parsed = getOrParseTemplate(idiom);
+          const tProps = parsed.styleProperties;
+          if (!tProps || tProps.length === 0) continue;
+          const k = tProps.length;
+          if (idx + k <= item.properties.length) {
+            const window = item.properties.slice(idx, idx + k);
+            const bindings = new Map<string, string>();
+            const holeNames = new Set(idiom.params.map((p) => p.name));
+            if (matchStylePropertyWindow(tProps, window, bindings, holeNames)) {
+              const strArgs = idiom.params.map((p) => bindings.get(p.name) ?? "");
+              const callSpan = window[0].span;
+              const macroProp: StyleProperty = {
+                property: `${idiom.name}(${strArgs.join(", ")})`,
+                value: "",
+                span: callSpan,
+              };
+              item.properties.splice(idx, k, macroProp);
+              collapsedCount++;
+              onCollapsed?.(idiom.name, strArgs, callSpan, currentSymbol);
+              matched = true;
+              idx++;
+              break;
+            }
+          }
+        }
+        if (!matched) {
+          idx++;
+        }
       }
     }
   }
@@ -2786,7 +3187,8 @@ export async function updateProjectIdiom(
       } else if (
         item.kind === "ConstDecl" ||
         item.kind === "VarDecl" ||
-        item.kind === "ComponentDecl"
+        item.kind === "ComponentDecl" ||
+        item.kind === "StyleDecl"
       ) {
         const singleMod: Module = {
           kind: "Module",

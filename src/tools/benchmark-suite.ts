@@ -402,12 +402,14 @@ export async function benchmarkContext(
 
     const contextRes = await generateContext(fullPath, {
       depth: 1,
+      outlineTarget: true,
+      includeCallers: false,
       projectRoot,
     });
 
     const optimizedTokens = TiktokenTokenizer.count(contextRes.formattedBundle, encoding);
 
-    // Calculate uncompressed raw dependencies tokens
+    // Calculate real uncompressed raw dependencies tokens on disk (zero artificial multipliers)
     let rawDepTokens = 0;
     for (const dep of contextRes.dependencies) {
       if (dep.resolvedPath) {
@@ -418,24 +420,19 @@ export async function benchmarkContext(
             encoding,
           );
         } else {
-          rawDepTokens += Math.round(TiktokenTokenizer.count(dep.contract, encoding) * 2.5);
+          rawDepTokens += TiktokenTokenizer.count(dep.contract, encoding);
         }
       } else {
-        rawDepTokens += Math.round(TiktokenTokenizer.count(dep.contract, encoding) * 2.5);
+        rawDepTokens += TiktokenTokenizer.count(dep.contract, encoding);
       }
     }
 
-    // Conversational multi-turn scaffolding overhead (system prompts + query turns avoided)
-    // In multi-turn uncompressed dialogue, the LLM re-transmits conversational history and uncompressed files across multiple interaction rounds
-    const multiTurnFactor = 2.2;
-    const multiTurnOverhead = contextRes.dependencies.length > 0 ? 500 : 350;
-    const rawUncompressedTokens = Math.round(
-      (rawTargetTokens + rawDepTokens) * multiTurnFactor + multiTurnOverhead,
-    );
-
-    const originalTokens = Math.max(optimizedTokens + 100, rawUncompressedTokens);
+    const originalTokens = rawTargetTokens + rawDepTokens;
     const tokensSaved = Math.max(0, originalTokens - optimizedTokens);
-    const reductionPercentage = Number(((tokensSaved / originalTokens) * 100).toFixed(1));
+    const reductionPercentage =
+      originalTokens > 0
+        ? Number(((tokensSaved / originalTokens) * 100).toFixed(1))
+        : 0;
 
     return {
       tool: "context",

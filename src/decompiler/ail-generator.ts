@@ -897,8 +897,13 @@ export class AilGenerator {
   }
 
   private emitLayoutNode(node: LayoutNode): void {
-    const attrs = node.attributes.map((a) => `${a.name}: ${this.formatExpr(a.value)}`).join(", ");
-    const attrStr = attrs.length > 0 ? `(${attrs})` : "";
+    const isPositionalIdiom =
+      node.tag.startsWith("$") &&
+      node.attributes.every((a) => /^\$\d+$/.test(a.name));
+    const attrs = isPositionalIdiom
+      ? node.attributes.map((a) => this.formatExpr(a.value)).join(", ")
+      : node.attributes.map((a) => `${a.name}: ${this.formatExpr(a.value)}`).join(", ");
+    const attrStr = attrs.length > 0 || isPositionalIdiom ? `(${attrs})` : "";
 
     const hasChildren = node.children.length > 0;
     const hasText = node.textLiteral !== null;

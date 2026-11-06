@@ -2904,25 +2904,46 @@ function spliceDialectNativeSource(
 
       let newSnippet = "";
       if (options.delete) {
-        doc.deleteIn(keyParts);
+        const normKeys = keyParts.map((k) => (/^\d+$/.test(k) ? Number(k) : k));
+        doc.deleteIn(normKeys);
       } else {
-        const { value: newVal } = parseSnippetMeta();
-        const newNode = doc.createNode(newVal);
-        if (YAML.isMap(origNode) && YAML.isMap(newNode)) {
-          if (origNode.anchor) {
-            newNode.anchor = origNode.anchor;
-          }
-          const mergePair = origNode.items.find(
-            (p) => YAML.isScalar(p.key) && p.key.value === "<<",
-          );
-          if (mergePair && typeof newVal === "object" && newVal !== null && !("<<" in newVal)) {
-            (newNode.items as unknown[]).unshift(mergePair);
-          }
-        }
-        if (isRootConfig && typeof newVal === "object" && newVal !== null) {
-          doc.contents = newNode as any;
+        const { declName, value: newVal } = parseSnippetMeta();
+        const leaf = keyParts[keyParts.length - 1];
+        if (
+          (options.insertAfter || options.insertBefore) &&
+          declName &&
+          declName !== "config" &&
+          declName !== leaf
+        ) {
+          const siblingKeys = [...keyParts.slice(0, -1), declName];
+          doc.setIn(siblingKeys, doc.createNode(newVal));
+        } else if (
+          (options.insertAfter || options.insertBefore || options.append) &&
+          Array.isArray(origVal)
+        ) {
+          const itemsToAdd = Array.isArray(newVal) ? newVal : [newVal];
+          const nextArr = options.insertBefore
+            ? [...itemsToAdd, ...origVal]
+            : [...origVal, ...itemsToAdd];
+          doc.setIn(keyParts, doc.createNode(nextArr));
         } else {
-          doc.setIn(keyParts, newNode);
+          const newNode = doc.createNode(newVal);
+          if (YAML.isMap(origNode) && YAML.isMap(newNode)) {
+            if (origNode.anchor) {
+              newNode.anchor = origNode.anchor;
+            }
+            const mergePair = origNode.items.find(
+              (p) => YAML.isScalar(p.key) && p.key.value === "<<",
+            );
+            if (mergePair && typeof newVal === "object" && newVal !== null && !("<<" in newVal)) {
+              (newNode.items as unknown[]).unshift(mergePair);
+            }
+          }
+          if (isRootConfig && typeof newVal === "object" && newVal !== null) {
+            doc.contents = newNode as any;
+          } else {
+            doc.setIn(keyParts, newNode);
+          }
         }
         newSnippet = YAML.stringify(newVal).trimEnd();
       }
@@ -3001,10 +3022,30 @@ function spliceDialectNativeSource(
 
     let newSnippet = "";
     if (options.delete) {
-      delete parent[leafKey];
+      if (Array.isArray(parent) && /^\d+$/.test(leafKey)) {
+        parent.splice(Number(leafKey), 1);
+      } else {
+        delete parent[leafKey];
+      }
     } else {
-      const { value: newVal } = parseSnippetMeta();
-      if (leafKey === "config" && !(leafKey in parent) && typeof newVal === "object" && newVal !== null) {
+      const { declName, value: newVal } = parseSnippetMeta();
+      if (
+        (options.insertAfter || options.insertBefore) &&
+        declName &&
+        declName !== "config" &&
+        declName !== leafKey &&
+        !Array.isArray(parent)
+      ) {
+        parent[declName] = newVal;
+      } else if (
+        (options.insertAfter || options.insertBefore || options.append) &&
+        Array.isArray(origVal)
+      ) {
+        const itemsToAdd = Array.isArray(newVal) ? newVal : [newVal];
+        parent[leafKey] = options.insertBefore
+          ? [...itemsToAdd, ...origVal]
+          : [...origVal, ...itemsToAdd];
+      } else if (leafKey === "config" && !(leafKey in parent) && typeof newVal === "object" && newVal !== null) {
         docObj = newVal;
       } else {
         parent[leafKey] = newVal;

@@ -1,6 +1,6 @@
 {
   "name": "ail",
-  "version": "0.6.10",
+  "version": "0.7.0",
   "description": "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
   "type": "module",
   "main": "./src/index.ts",
@@ -17,9 +17,7 @@
     "format": "biome format --write .",
     "lint": "biome check .",
     "verify:tokenomics": "tsx ./bin/ail.ts verify-tokenomics examples --check-drift",
-    "benchmark:100": "tsx scripts/benchmark_100_on_the_fly.ts",
-    "benchmark:500": "tsx scripts/benchmark_500_on_the_fly.ts",
-    "benchmark:500:languages": "tsx scripts/benchmark_500_per_language.ts",
+    "benchmark": "tsx benchmarks/run.ts",
     "package:vscode": "cd editors/vscode && bunx @vscode/vsce package --no-dependencies --allow-missing-repository"
   },
   "dependencies": {
