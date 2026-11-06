@@ -3,4 +3,4 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export * from "./honest-suite.js";
+export * from "./real-world-suite.js";

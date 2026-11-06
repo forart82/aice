@@ -1,6 +1,6 @@
 {
   "name": "ail",
-  "version": "0.7.11",
+  "version": "0.7.12",
   "description": "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
   "type": "module",
   "main": "./src/index.ts",

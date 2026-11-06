@@ -59,30 +59,25 @@ Audited across 67 production modules from Raylib C++, SFML C++, and Canvas TypeS
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
 
-### Table 3: Consolidated 1,520-Case Honest CRUD & Polyglot Benchmark (`docs/BENCHMARKS.md`)
-Evaluated with **100% honest apples-to-apples token accounting** (**zero fake multipliers**, **zero full-file double-charging**, **zero dependency padding**) across **15 languages & file types (`15 × 100 = 1,500` cases across 10 progressive waves)** + **20 complex multi-language full-stack scenarios (`1,520` total benchmarks)** covering **Write (`0->1`)**, **Read (`outline` + `context`)**, **Update (`splice` bug fix / feature update / `--insert-after` new feature)**, **Delete (`splice --delete`)**, and **Multi-File Refactor (`idiom update`)** across both **Window Applications** and **Non-Window Applications**:
+### Table 3: 10 Real-World End-to-End Benchmarks — Without Idioms vs. With Idioms (`docs/BENCHMARKS.md`)
+Evaluated with **3-way apples-to-apples token accounting** (**Without AIL** vs. **AIL Without Idioms** vs. **AIL With Idioms** including full `$idiom` definition token cost on `Write from 0`) across **10 real-world scenarios (`RW-01` .. `RW-10`)** covering all **15 supported languages & file types**, **Window vs. Non-Window applications from `0`**, **bug fixes**, **new features**, **feature updates**, and full **CRUD + Refactor** operations with **0 `.ail` files left on disk**:
 
-| Language / File Type | Ext | Cases | Win Rate | Write (`0->1`) | Read (`Context`) | Update (`Splice`) | Delete (`--delete`) | Refactor (`Idiom`) | Total Native | Total AIL | Overall Savings |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | ---: | ---: | :---: |
-| **TypeScript (.ts)** | `.ts` | 100 | **100/100 (100%)** | -71.8% | -95.3% | -86.2% | -97.0% | -98.9% | 2,479,066 | 348,540 | **-85.9%** |
-| **React TSX (.tsx)** | `.tsx` | 100 | **100/100 (100%)** | -62.4% | -95.4% | -82.8% | -97.0% | -98.9% | 2,574,716 | 463,660 | **-82.0%** |
-| **JavaScript (.js)** | `.js` | 100 | **100/100 (100%)** | -71.5% | -96.1% | -86.0% | -97.0% | -98.9% | 2,458,606 | 340,090 | **-86.2%** |
-| **Python (.py)** | `.py` | 100 | **100/100 (100%)** | -67.4% | -94.4% | -83.6% | -96.6% | -98.7% | 2,145,817 | 350,040 | **-83.7%** |
-| **Go (.go)** | `.go` | 100 | **100/100 (100%)** | -71.6% | -95.3% | -86.2% | -97.0% | -98.9% | 2,466,236 | 348,240 | **-85.9%** |
-| **Rust (.rs)** | `.rs` | 100 | **100/100 (100%)** | -72.2% | -95.1% | -86.5% | -97.1% | -98.9% | 2,518,965 | 351,290 | **-86.0%** |
-| **C++20 (.cpp)** | `.cpp` | 100 | **100/100 (100%)** | -71.6% | -95.2% | -87.7% | -97.0% | -98.9% | 2,476,376 | 349,340 | **-85.9%** |
-| **C# (.cs)** | `.cs` | 100 | **100/100 (100%)** | -73.1% | -94.8% | -87.0% | -97.2% | -98.9% | 2,604,263 | 356,040 | **-86.3%** |
-| **Kotlin (.kt)** | `.kt` | 100 | **100/100 (100%)** | -71.0% | -93.1% | -86.0% | -97.0% | -98.8% | 2,404,687 | 368,790 | **-84.7%** |
-| **PHP 8 (.php)** | `.php` | 100 | **100/100 (100%)** | -73.6% | -93.8% | -87.2% | -97.2% | -98.9% | 2,634,593 | 368,090 | **-86.0%** |
-| **CSS3 (.css)** | `.css` | 100 | **100/100 (100%)** | -66.7% | -96.5% | -79.0% | -96.7% | -98.8% | 2,212,382 | 352,010 | **-84.1%** |
-| **HTML5 (.html)** | `.html` | 100 | **100/100 (100%)** | -58.6% | -98.6% | -81.6% | -97.2% | -98.9% | 2,583,903 | 471,324 | **-81.8%** |
-| **JSON (.json)** | `.json` | 100 | **100/100 (100%)** | -69.4% | -99.0% | -84.9% | -97.6% | -99.0% | 3,169,992 | 430,680 | **-86.4%** |
-| **YAML (.yaml)** | `.yaml` | 100 | **100/100 (100%)** | -60.2% | -98.7% | -80.0% | -96.8% | -98.8% | 2,438,576 | 430,480 | **-82.3%** |
-| **Twig (.twig)** | `.twig` | 100 | **100/100 (100%)** | -62.1% | -98.6% | -83.5% | -96.8% | -98.9% | 2,062,292 | 344,782 | **-83.3%** |
-| **20 Polyglot Full-Stack Apps** | `All 15` | 20 | **20/20 (100%)** | -67.8% | -96.8% | -85.1% | -97.6% | -99.1% | 4,145,711 | 635,795 | **-84.7%** |
-| **TOTAL (1,520 Benchmarks)** | **All** | **1,520** | **1,520/1,520 (100%)** | **-68.4%** | **-96.4%** | **-84.5%** | **-97.1%** | **-98.9%** | **41,376,181** | **6,309,181** | **-84.8%** |
+| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Total Without AIL | Total AIL (No Idioms) | Total AIL (With Idioms) |
+| :--- | :--- | :---: | :---: | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `RW-01` | **HTML5 Canvas Arcade Snake Window App (from 0)** | `window` | `from_zero_window_app` | `.ts .html .css .json` | -20.7% / **-51.5%** | -55.9% / **-74.0%** | -55.4% / **-77.7%** | **-91.8%** | -60.2% / **-96.7%** | 10,227 | 5,122 (**-49.9%**) | 2,112 (**-79.3%**) |
+| `RW-02` | **Headless Python CLI Queue & Worker Daemon (from 0)** | `non_window` | `from_zero_non_window_app` | `.py .yaml .json` | -15.5% / **-52.5%** | -56.0% / **-74.0%** | -44.8% / **-74.2%** | **-92.4%** | -55.3% / **-96.1%** | 7,969 | 4,299 (**-46.0%**) | 1,644 (**-79.4%**) |
+| `RW-03` | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront** | `window` | `bug_fix` | `.php .js .twig .css .html .yaml .json` | -20.8% / **-47.4%** | -48.6% / **-66.2%** | -53.2% / **-77.7%** | **-92.0%** | -59.6% / **-94.9%** | 11,652 | 5,976 (**-48.7%**) | 2,661 (**-77.2%**) |
+| `RW-04` | **Vite + TS + React TSX + CSS + HTML + JSON + YAML Dashboard** | `window` | `new_feature` | `.ts .tsx .css .html .json .yaml` | -20.2% / **-46.0%** | -52.5% / **-72.6%** | -26.8% / **-64.1%** | **-92.8%** | -59.5% / **-96.2%** | 11,691 | 6,094 (**-47.9%**) | 2,419 (**-79.3%**) |
+| `RW-05` | **Go API Gateway + Rust WAL Storage Ledger Mesh** | `non_window` | `update_feature` | `.go .rs .yaml .json` | -22.8% / **-54.1%** | -52.7% / **-71.9%** | -50.5% / **-77.1%** | **-92.7%** | -60.3% / **-95.8%** | 8,788 | 4,413 (**-49.8%**) | 1,732 (**-80.3%**) |
+| `RW-06` | **C++20 Framebuffer Physics Viewport + TS Inspector Overlay** | `window` | `bug_fix` | `.cpp .ts .html .css .json` | -20.8% / **-47.4%** | -49.0% / **-69.0%** | -55.7% / **-77.4%** | **-92.5%** | -60.1% / **-95.8%** | 9,289 | 4,725 (**-49.1%**) | 2,037 (**-78.1%**) |
+| `RW-07` | **C# .NET Payment Settlement + Kotlin Fraud Scoring Engine** | `non_window` | `new_feature` | `.cs .kt .yaml .json` | -21.2% / **-52.9%** | -44.9% / **-58.7%** | -25.6% / **-64.6%** | **-93.6%** | -59.0% / **-96.5%** | 9,222 | 4,898 (**-46.9%**) | 1,876 (**-79.7%**) |
+| `RW-08` | **Python FastAPI + TSX + Twig Invoice Studio + CSS + JSON + YAML** | `window` | `update_feature` | `.py .tsx .twig .css .json .yaml` | -17.6% / **-44.4%** | -49.0% / **-70.4%** | -50.5% / **-75.3%** | **-91.5%** | -57.7% / **-95.2%** | 10,368 | 5,521 (**-46.8%**) | 2,408 (**-76.8%**) |
+| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -20.7% / **-52.5%** | -42.2% / **-65.8%** | -53.3% / **-78.0%** | **-93.8%** | -58.9% / **-95.7%** | 12,224 | 6,430 (**-47.4%**) | 2,526 (**-79.3%**) |
+| `RW-10` | **Unified 15-Language Enterprise Cloud Observability Control Plane** | `window` | `update_feature` | `All 15 (.ts..twig)` | -20.4% / **-50.8%** | -36.1% / **-58.8%** | -54.7% / **-78.4%** | **-93.5%** | -58.7% / **-95.5%** | 27,332 | 14,619 (**-46.5%**) | 6,070 (**-77.8%**) |
+| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | **-20.1% / -50.0%** | **-47.0% / -67.1%** | **-50.1% / -76.0%** | **-92.5%** | **-59.0% / -95.8%** | **118,762** | **62,097 (-47.7%)** | **25,485 (-78.5%)** |
 
-Full breakdown by engineering scenario (`bug_fix`, `new_feature`, `update_feature`, `from_zero_window_app`, `from_zero_non_window_app`), Window Snake App vs. Non-Window CLI Daemon from `0`, and all 20 Polyglot Full-Stack scenarios: see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and run `npm run benchmark`.
+Full per-module breakdown (Without AIL vs. AIL Without Idioms vs. AIL With Idioms): see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and run `npm run benchmark`.
+
 
 
 ---
@@ -215,7 +210,7 @@ ail splice src/sim/Hazard.ts -s HazardManager.calculateDamage --body "ret d * 2"
 ail splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
 ail splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]'
 
-# Run the Consolidated 1,520-Case Honest CRUD & Polyglot Benchmark Suite:
+# Run the 10 Real-World Benchmarks Suite (Without Idioms & With Idioms):
 npm run benchmark
 
 # Run test suite with symbol-mapped runtime stack trace translation and auto-recompilation:

@@ -528,12 +528,35 @@ export function generateOutline(
             .join(", ");
           const sig = `component ${item.name}(${paramsStr}): ...`;
           const docstring = getLeadingTriviaDoc(trivia, `component:${item.name}`);
+          const children: OutlineSymbol[] = [];
+          if (maxDepth >= 2 && item.layout) {
+            for (const c of item.layout) {
+              const cLine = c.span?.start?.line || line;
+              const cId = c.attributes.find((a) => a.name === "id");
+              const cClass = c.attributes.find((a) => a.name === "class");
+              const cIdPart =
+                cId?.value.kind === "LiteralExpr" && typeof cId.value.value === "string"
+                  ? `#${cId.value.value}`
+                  : "";
+              const cClassPart =
+                cClass?.value.kind === "LiteralExpr" && typeof cClass.value.value === "string"
+                  ? `.${cClass.value.value.trim().split(/\s+/)[0]}`
+                  : "";
+              children.push({
+                name: `${c.tag}${cIdPart}${cClassPart}`,
+                kind: "layout",
+                line: cLine,
+                signature: `${c.tag}${cIdPart}${cClassPart}: ...`,
+                children: [],
+              });
+            }
+          }
           symbols.push({
             name: item.name,
             kind: "component",
             line,
             signature: sig,
-            children: [],
+            children,
             docstring,
           });
           break;

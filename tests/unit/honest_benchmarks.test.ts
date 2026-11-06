@@ -7,102 +7,84 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  POLYGLOT_FULLSTACK_SCENARIOS,
+  buildIdiomRegistryForLanguage,
+  REAL_WORLD_BENCHMARKS,
+  runRealWorldBenchmarkSuite,
   SUPPORTED_BENCHMARK_LANGUAGES,
-  runHonestBenchmarkSuite,
 } from "../../benchmarks/index.js";
 
-describe("AIL 2.0 Honest, Clean & Trustworthy Benchmark Suite", () => {
-  it("covers all 15 supported languages and file types, full CRUD, 5 scenarios, Window vs Non-Window apps, and 20 polyglot full-stack benchmarks", () => {
+describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Idioms)", () => {
+  it("evaluates exactly 10 real-world benchmarks across all 15 file types, 5 scenarios, Window/Non-Window surfaces, and CRUD+Refactor operations both without and with idioms", () => {
     expect(SUPPORTED_BENCHMARK_LANGUAGES).toHaveLength(15);
-    expect(POLYGLOT_FULLSTACK_SCENARIOS).toHaveLength(20);
+    expect(REAL_WORLD_BENCHMARKS).toHaveLength(10);
 
-    const report = runHonestBenchmarkSuite(10);
-    expect(report.totalSingleLanguageCases).toBe(150);
-    expect(report.totalPolyglotCases).toBe(20);
-    expect(report.totalCases).toBe(170);
-    expect(report.totalWins).toBe(170);
-    expect(report.overallWinRatePct).toBe(100);
-    expect(report.strictComplexityMonotonicity).toBe(true);
+    const report = runRealWorldBenchmarkSuite();
+    expect(report.totalBenchmarks).toBe(10);
+    expect(report.winsWithoutIdioms).toBe(10);
+    expect(report.winsWithIdioms).toBe(10);
+    expect(report.winRateWithoutIdiomsPct).toBe(100);
+    expect(report.winRateWithIdiomsPct).toBe(100);
     expect(report.zeroAilFilesLeftOnDisk).toBe(true);
+    expect(report.coveredLanguages).toHaveLength(15);
+    expect(report.coveredExtensions).toHaveLength(15);
+    expect(report.coveredScenarios).toHaveLength(5);
+    expect(report.coveredSurfaces).toHaveLength(2);
 
-    // Greenfield Window (Snake) & Non-Window (CLI Daemon) apps from 0
-    expect(report.greenfieldSnakeWindowApp.appSurface).toBe("window");
-    expect(report.greenfieldSnakeWindowApp.writeFromZero.ailWins).toBe(true);
-    expect(report.greenfieldSnakeWindowApp.readContext.ailWins).toBe(true);
-    expect(report.greenfieldSnakeWindowApp.surgicalUpdate.ailWins).toBe(true);
-    expect(report.greenfieldSnakeWindowApp.surgicalDelete.ailWins).toBe(true);
-    expect(report.greenfieldSnakeWindowApp.multiFileRefactor.ailWins).toBe(true);
-    expect(report.greenfieldSnakeWindowApp.zeroAilFilesLeftOnDisk).toBe(true);
-
-    expect(report.greenfieldCliNonWindowApp.appSurface).toBe("non_window");
-    expect(report.greenfieldCliNonWindowApp.writeFromZero.ailWins).toBe(true);
-    expect(report.greenfieldCliNonWindowApp.readContext.ailWins).toBe(true);
-    expect(report.greenfieldCliNonWindowApp.surgicalUpdate.ailWins).toBe(true);
-    expect(report.greenfieldCliNonWindowApp.surgicalDelete.ailWins).toBe(true);
-    expect(report.greenfieldCliNonWindowApp.multiFileRefactor.ailWins).toBe(true);
-    expect(report.greenfieldCliNonWindowApp.zeroAilFilesLeftOnDisk).toBe(true);
-
-    // All 5 engineering scenarios
-    expect(report.scenarioBreakdown.bug_fix.winCount).toBe(
-      report.scenarioBreakdown.bug_fix.casesCount,
-    );
-    expect(report.scenarioBreakdown.new_feature.winCount).toBe(
-      report.scenarioBreakdown.new_feature.casesCount,
-    );
-    expect(report.scenarioBreakdown.update_feature.winCount).toBe(
-      report.scenarioBreakdown.update_feature.casesCount,
-    );
-    expect(report.scenarioBreakdown.from_zero_window_app.winCount).toBe(
-      report.scenarioBreakdown.from_zero_window_app.casesCount,
-    );
-    expect(report.scenarioBreakdown.from_zero_non_window_app.winCount).toBe(
-      report.scenarioBreakdown.from_zero_non_window_app.casesCount,
-    );
-
-    // Window vs Non-Window surface breakdown
-    expect(report.surfaceBreakdown.window.winCount).toBe(
-      report.surfaceBreakdown.window.casesCount,
-    );
-    expect(report.surfaceBreakdown.non_window.winCount).toBe(
-      report.surfaceBreakdown.non_window.casesCount,
-    );
-
-    // 20 Polyglot Full-Stack benchmarks
-    for (const poly of report.polyglotBenchmarks) {
-      expect(poly.ailWinsAllOperations).toBe(true);
-      expect(poly.zeroAilFilesLeftOnDisk).toBe(true);
+    // Aggregate operations must win both without idioms and with idioms
+    for (const op of [
+      report.aggregateWrite,
+      report.aggregateRead,
+      report.aggregateUpdate,
+      report.aggregateDelete,
+      report.aggregateRefactor,
+      report.aggregateTotal,
+    ]) {
+      expect(op.ailWithoutIdiomsWins).toBe(true);
+      expect(op.ailWithIdiomsWins).toBe(true);
+      expect(op.ailWithoutIdiomsTokens).toBeLessThan(op.withoutAilTokens);
+      expect(op.ailWithIdiomsTokens).toBeLessThanOrEqual(op.ailWithoutIdiomsTokens);
     }
 
-    // Verify full 1,520-case Wave 10 report in docs/BENCHMARKS.md
+    // Verify each of the 10 real-world benchmarks
+    for (const b of report.benchmarks) {
+      expect(b.ailWinsAllWithoutIdioms).toBe(true);
+      expect(b.ailWinsAllWithIdioms).toBe(true);
+      expect(b.zeroAilFilesLeftOnDisk).toBe(true);
+      expect(b.idiomDefinitionsTokens).toBeGreaterThan(0);
+
+      // Write from 0 must charge idiom definition overhead and still beat pure AIL and Native
+      const rawIdiomFilesSum = b.files.reduce((acc, f) => acc + f.ailWithIdiomsTokens, 0);
+      expect(b.writeFromZero.ailWithIdiomsTokens).toBe(
+        rawIdiomFilesSum + b.idiomDefinitionsTokens,
+      );
+      expect(b.writeFromZero.ailWithIdiomsTokens).toBeLessThan(
+        b.writeFromZero.ailWithoutIdiomsTokens,
+      );
+      expect(b.writeFromZero.ailWithoutIdiomsTokens).toBeLessThan(
+        b.writeFromZero.withoutAilTokens,
+      );
+
+      // Every individual file in the benchmark must compress both without idioms and with idioms
+      for (const f of b.files) {
+        expect(f.ailWithoutIdiomsTokens).toBeLessThan(f.withoutAilTokens);
+        expect(f.ailWithIdiomsTokens).toBeLessThan(f.ailWithoutIdiomsTokens);
+      }
+    }
+
+    // Verify docs/BENCHMARKS.md is up to date
     const docsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
     expect(fs.existsSync(docsPath)).toBe(true);
     const md = fs.readFileSync(docsPath, "utf-8");
-    expect(md).toContain("1520 / 1520 (100.0%)");
-    expect(md).toContain("15 Languages & File Types (100 Cases/Lang = 1500)");
-    expect(md).toContain("20 Complex Multi-Language Full-Stack Scenarios");
-  }, 60000);
-
-  it("differentiates Window vs Non-Window application artifacts and bug_fix vs update_feature scenarios", async () => {
-    const { generateBenchmarkArtifactForStep, buildIdiomRegistryForLanguage } = await import(
-      "../../benchmarks/honest-suite.js"
-    );
-    const tsSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === "ts")!;
-    const winBug = generateBenchmarkArtifactForStep(tsSpec, 1, "bug_fix", "window");
-    const cliFeat = generateBenchmarkArtifactForStep(tsSpec, 1, "update_feature", "non_window");
-
-    expect(winBug.targetSymbol).toBe("stepWindowFrame_0");
-    expect(cliFeat.targetSymbol).toBe("processDaemonStep_0");
-    expect(winBug.updatedTargetSymbolAil).not.toBe(cliFeat.updatedTargetSymbolAil);
-    expect(buildIdiomRegistryForLanguage("css").idioms.$css_card).toBeDefined();
+    expect(md).toContain("10 Scenarios — Without & With Idioms");
+    expect(md).toContain("RW-01");
+    expect(md).toContain("RW-10");
   });
 
-  it("supports nested CSS @media rules, pseudo-selectors (.btn:hover), and multi-selectors in parseStyleDecl, CssEmitter, CssDecompiler, and idiom transforms", async () => {
+  it("supports nested CSS @media rules, pseudo-selectors (.btn:hover), layout macros, and idiom transforms", async () => {
     const { parse } = await import("../../src/core/parser.js");
     const { emitTarget } = await import("../../src/emitters/index.js");
     const { decompile } = await import("../../src/decompiler/index.js");
     const { collapseModuleIdioms, expandModuleIdioms } = await import("../../src/idioms/index.js");
-    const { buildIdiomRegistryForLanguage } = await import("../../benchmarks/honest-suite.js");
 
     const { idioms } = buildIdiomRegistryForLanguage("css");
     const ailCss = [

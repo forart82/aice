@@ -2730,7 +2730,12 @@ function spliceDialectNativeSource(
     const emitCssSnippet = (selectorFallback: string): string => {
       const trimmed = rawSnippet.trim();
       if (!trimmed) return "";
-      if (trimmed.includes("{") && trimmed.endsWith("}")) {
+      if (
+        !trimmed.startsWith("style ") &&
+        !trimmed.includes("$") &&
+        trimmed.includes("{") &&
+        trimmed.endsWith("}")
+      ) {
         return trimmed;
       }
       const ailText = trimmed.startsWith("style ")
