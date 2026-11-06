@@ -59,57 +59,31 @@ Audited across 67 production modules from Raylib C++, SFML C++, and Canvas TypeS
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
 
-### Table 3: 100-Case Deep Twinless On-the-Fly Benchmark (`docs/BENCHMARK_100_ON_THE_FLY.md`)
-Evaluated across **100 distinct polyglot cases & situations** comparing **Without AIL (Raw Native Baseline)** vs. **With AIL On-the-Fly (`mode: "twinless"`, zero `.ail` files on disk, Smart Multi-File Idioms, and Direct-to-Native Surgical Splice)**:
+### Table 3: Consolidated 1,520-Case Honest CRUD & Polyglot Benchmark (`docs/BENCHMARKS.md`)
+Evaluated with **100% honest apples-to-apples token accounting** (**zero fake multipliers**, **zero full-file double-charging**, **zero dependency padding**) across **15 languages & file types (`15 × 100 = 1,500` cases across 10 progressive waves)** + **20 complex multi-language full-stack scenarios (`1,520` total benchmarks)** covering **Write (`0->1`)**, **Read (`outline` + `context`)**, **Update (`splice` bug fix / feature update / `--insert-after` new feature)**, **Delete (`splice --delete`)**, and **Multi-File Refactor (`idiom update`)** across both **Window Applications** and **Non-Window Applications**:
 
-| Category | Cases | Wins | Without AIL Tokens | With AIL On-the-Fly Tokens | Net Savings % |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **1. On-the-Fly Structural Outline (`ail outline`)** | 10 | **10/10** | 3,118 | 861 | **-72.39%** |
-| **2. On-the-Fly Context & Symbol Slicing (`ail context`)** | 10 | **10/10** | 8,265 | 4,650 | **-43.74%** |
-| **3. Direct-to-Native Splice (AIL & `$idioms`)** | 10 | **10/10** | 8,500 | 383 | **-95.49%** |
-| **4. Forgiving Frankenstein & Raw Splice (`ail splice`)** | 10 | **10/10** | 7,514 | 412 | **-94.52%** |
-| **5. Advanced TypeScript & OOP Edge Cases** | 10 | **10/10** | 8,500 | 289 | **-96.60%** |
-| **6. Polyglot Direct-to-Native Splice (Py/Go/Rust/C++/C#/Kt/PHP)** | 10 | **10/10** | 2,730 | 387 | **-85.82%** |
-| **7. Smart Multi-File Idioms Discovery (`ail idioms scan/read`)** | 10 | **10/10** | 3,752 | 1,477 | **-60.63%** |
-| **8. Smart Multi-File Idiom Mutation & Safety (`ail idioms update`)** | 10 | **10/10** | 5,165 | 198 | **-96.17%** |
-| **9. Polyglot On-the-Fly Decompile & Compression** | 10 | **10/10** | 8,996 | 7,066 | **-21.45%** |
-| **10. Real-World E2E, MCP, LSP & Shield** | 10 | **10/10** | 50,913 | 18,392 | **-63.88%** |
-| **TOTAL (100 Cases / 10 Categories)** | **100** | **100/100 (100%)** | **107,453** | **34,115** | **-68.25% (-74.50% avg)** |
+| Language / File Type | Ext | Cases | Win Rate | Write (`0->1`) | Read (`Context`) | Update (`Splice`) | Delete (`--delete`) | Refactor (`Idiom`) | Total Native | Total AIL | Overall Savings |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | ---: | ---: | :---: |
+| **TypeScript (.ts)** | `.ts` | 100 | **100/100 (100%)** | -72.0% | -95.5% | -86.4% | -97.4% | -97.8% | 2,298,044 | 342,640 | **-85.1%** |
+| **React TSX (.tsx)** | `.tsx` | 100 | **100/100 (100%)** | -64.8% | -95.8% | -84.0% | -97.5% | -97.9% | 2,397,844 | 432,100 | **-82.0%** |
+| **JavaScript (.js)** | `.js` | 100 | **100/100 (100%)** | -71.7% | -96.3% | -86.3% | -97.3% | -97.7% | 2,278,440 | 334,190 | **-85.3%** |
+| **Python (.py)** | `.py` | 100 | **100/100 (100%)** | -67.6% | -94.7% | -83.9% | -96.9% | -97.4% | 1,986,068 | 344,140 | **-82.7%** |
+| **Go (.go)** | `.go` | 100 | **100/100 (100%)** | -71.8% | -69.6% | -86.4% | -97.3% | -97.7% | 2,285,864 | 603,540 | **-73.6%** |
+| **Rust (.rs)** | `.rs` | 100 | **100/100 (100%)** | -72.3% | -95.3% | -86.7% | -97.4% | -97.8% | 2,332,522 | 345,390 | **-85.2%** |
+| **C++20 (.cpp)** | `.cpp` | 100 | **100/100 (100%)** | -71.8% | -95.4% | -87.7% | -97.3% | -97.8% | 2,293,656 | 343,440 | **-85.0%** |
+| **C# (.cs)** | `.cs` | 100 | **100/100 (100%)** | -73.3% | -69.6% | -87.2% | -97.5% | -97.9% | 2,414,998 | 620,290 | **-74.3%** |
+| **Kotlin (.kt)** | `.kt` | 100 | **100/100 (100%)** | -71.3% | -93.4% | -86.2% | -97.3% | -97.7% | 2,241,668 | 362,890 | **-83.8%** |
+| **PHP 8 (.php)** | `.php` | 100 | **100/100 (100%)** | -73.8% | -94.0% | -87.4% | -97.5% | -97.9% | 2,456,552 | 362,190 | **-85.3%** |
+| **CSS3 (.css)** | `.css` | 100 | **100/100 (100%)** | -66.9% | -96.8% | -79.3% | -97.1% | -97.6% | 2,060,304 | 346,110 | **-83.2%** |
+| **HTML5 (.html)** | `.html` | 100 | **100/100 (100%)** | -58.8% | -59.0% | -81.8% | -97.5% | -97.9% | 2,402,294 | 887,318 | **-63.1%** |
+| **JSON (.json)** | `.json` | 100 | **100/100 (100%)** | -69.5% | -72.0% | -85.3% | -97.9% | -98.2% | 2,956,680 | 779,690 | **-73.6%** |
+| **YAML (.yaml)** | `.yaml` | 100 | **100/100 (100%)** | -60.4% | -63.6% | -80.5% | -97.2% | -97.7% | 2,272,340 | 779,490 | **-65.7%** |
+| **Twig (.twig)** | `.twig` | 100 | **100/100 (100%)** | -62.4% | -63.0% | -83.8% | -97.2% | -97.9% | 1,914,278 | 642,564 | **-66.4%** |
+| **20 Polyglot Full-Stack Apps** | `All 15` | 20 | **20/20 (100%)** | -67.9% | -80.8% | -82.1% | -97.9% | -98.2% | 3,857,450 | 896,831 | **-76.8%** |
+| **TOTAL (1,520 Benchmarks)** | **All** | **1,520** | **1,520/1,520 (100%)** | **-68.6%** | **-81.2%** | **-84.8%** | **-97.4%** | **-97.8%** | **38,449,002** | **8,422,813** | **-78.1%** |
 
-Full 100-row table and reproducible suite: see [`docs/BENCHMARK_100_ON_THE_FLY.md`](docs/BENCHMARK_100_ON_THE_FLY.md) and run `npm run benchmark:100`.
+Full breakdown by engineering scenario (`bug_fix`, `new_feature`, `update_feature`, `from_zero_window_app`, `from_zero_non_window_app`), Window Snake App vs. Non-Window CLI Daemon from `0`, and all 20 Polyglot Full-Stack scenarios: see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and run `npm run benchmark`.
 
-### Table 4: 500-Case Progressive On-the-Fly Benchmark (`#001` -> `#500`) (`docs/BENCHMARK_500_ON_THE_FLY.md`)
-Evaluated across **500 progressively more complex benchmarks (`complexity[i] > complexity[i-1]`)** comparing **Without AIL at All (Raw Native)** vs. **Without AIL On-the-Fly (Legacy Side-by-Side `.ail` Twin)** vs. **With AIL On-the-Fly (Twinless + Smart Multi-File Idioms)**:
-- **Total Progressive Cases**: `500/500 (100% Win Rate)`
-- **Without AIL at All Tokens**: `7,085,619`
-- **Without AIL On-the-Fly (Legacy Twin) Tokens**: `6,245,015`
-- **With AIL On-the-Fly Tokens**: `107,532` (**`-98.48%` vs Raw**, **`-98.28%` vs Legacy Twin**, `0` `.ail` files on disk)
-
-See [`docs/BENCHMARK_500_ON_THE_FLY.md`](docs/BENCHMARK_500_ON_THE_FLY.md) and run `npm run benchmark:500`.
-
-### Table 5: 500-Per-Language & File-Type Progressive Benchmark (15 × 500 = 7,500 Cases) (`docs/BENCHMARK_500_PER_LANGUAGE.md`)
-Evaluated across **500 progressively more complex benchmarks (`#001` -> `#500`) for EACH of the 15 supported programming languages and file types** (`7,500` total benchmarks):
-
-| Language / File Type | Ext | Benchmarks | Progressive Complexity | Wins vs Without AIL | Wins vs Legacy Twin | Without AIL Tokens | Legacy Twin Tokens | With AIL On-the-Fly Tokens | Savings vs Raw | Savings vs Twin |
-| :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **TypeScript (.ts)** | `.ts` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,185,790 | 6,008,980 | 93,160 | **-98.7%** | **-98.45%** |
-| **React TSX (.tsx)** | `.tsx` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,629,110 | 6,437,260 | 98,680 | **-98.71%** | **-98.47%** |
-| **JavaScript (.js)** | `.js` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,722,260 | 5,883,730 | 93,160 | **-98.61%** | **-98.42%** |
-| **Python (.py)** | `.py` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,812,460 | 6,580,550 | 104,680 | **-98.46%** | **-98.41%** |
-| **Go (.go)** | `.go` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,289,060 | 6,116,480 | 92,160 | **-98.53%** | **-98.49%** |
-| **Rust (.rs)** | `.rs` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,406,490 | 6,159,310 | 94,160 | **-98.73%** | **-98.47%** |
-| **C++ (.cpp)** | `.cpp` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,876,590 | 6,008,980 | 93,160 | **-98.65%** | **-98.45%** |
-| **C# (.cs)** | `.cs` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,078,210 | 6,308,520 | 96,160 | **-98.64%** | **-98.48%** |
-| **Kotlin (.kt)** | `.kt` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,423,750 | 6,679,600 | 161,620 | **-97.82%** | **-97.58%** |
-| **PHP (.php)** | `.php` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,840,530 | 5,557,990 | 148,840 | **-98.1%** | **-97.32%** |
-| **CSS (.css)** | `.css` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 5,331,170 | 5,517,460 | 103,480 | **-98.06%** | **-98.12%** |
-| **HTML (.html)** | `.html` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,074,890 | 5,842,360 | 135,320 | **-97.77%** | **-97.68%** |
-| **JSON (.json)** | `.json` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 9,483,850 | 6,928,020 | 88,440 | **-99.07%** | **-98.72%** |
-| **YAML (.yaml)** | `.yaml` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 7,219,890 | 6,928,020 | 88,440 | **-98.78%** | **-98.72%** |
-| **Twig (.twig)** | `.twig` | 500 | `#001 < ... < #500` | **500/500** | **500/500** | 6,965,800 | 6,717,940 | 122,760 | **-98.24%** | **-98.17%** |
-| **TOTAL (15 Dialects)** | **All** | **7,500** | **`15 × 500`** | **7,500/7,500 (100%)** | **7,500/7,500 (100%)** | **106,339,850** | **93,675,200** | **1,614,220** | **-98.48%** | **-98.28%** |
-
-See [`docs/BENCHMARK_500_PER_LANGUAGE.md`](docs/BENCHMARK_500_PER_LANGUAGE.md) and run `npm run benchmark:500:languages`.
 
 ---
 
@@ -241,8 +215,8 @@ ail splice src/sim/Hazard.ts -s HazardManager.calculateDamage --body "ret d * 2"
 ail splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
 ail splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]'
 
-# Run the 100-Case Deep Twinless On-the-Fly Benchmark Suite:
-bun run benchmark:100
+# Run the Consolidated 1,520-Case Honest CRUD & Polyglot Benchmark Suite:
+npm run benchmark
 
 # Run test suite with symbol-mapped runtime stack trace translation and auto-recompilation:
 ail test

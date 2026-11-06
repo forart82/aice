@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   POLYGLOT_FULLSTACK_SCENARIOS,
@@ -71,5 +73,13 @@ describe("AIL 2.0 Honest, Clean & Trustworthy Benchmark Suite", () => {
       expect(poly.ailWinsAllOperations).toBe(true);
       expect(poly.zeroAilFilesLeftOnDisk).toBe(true);
     }
+
+    // Verify full 1,520-case Wave 10 report in docs/BENCHMARKS.md
+    const docsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
+    expect(fs.existsSync(docsPath)).toBe(true);
+    const md = fs.readFileSync(docsPath, "utf-8");
+    expect(md).toContain("1520 / 1520 (100.0%)");
+    expect(md).toContain("15 Languages & File Types (100 Cases/Lang = 1500)");
+    expect(md).toContain("20 Complex Multi-Language Full-Stack Scenarios");
   }, 60000);
 });
