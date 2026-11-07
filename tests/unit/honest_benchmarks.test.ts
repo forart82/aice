@@ -8,17 +8,24 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildIdiomRegistryForLanguage,
+  formatOfflineBenchmarkMarkdown,
+  formatRealAgentBenchmarkMarkdown,
+  loadRealAgentBenchmarkSuiteReport,
+  OFFLINE_BENCHMARKS,
   REAL_WORLD_BENCHMARKS,
+  runOfflineBenchmarkSuite,
   runRealWorldBenchmarkSuite,
   SUPPORTED_BENCHMARK_LANGUAGES,
 } from "../../benchmarks/index.js";
 
-describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Idioms)", () => {
-  it("evaluates exactly 10 real-world benchmarks across all 15 file types, 5 scenarios, Window/Non-Window surfaces, and CRUD+Refactor operations both without and with idioms", () => {
+describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI Agents)", () => {
+  it("evaluates the Deterministic Offline Benchmark Suite across all 10 scenarios, 15 file types, and CRUD+Refactor operations (docs/BENCHMARKS_OFFLINE.md)", () => {
     expect(SUPPORTED_BENCHMARK_LANGUAGES).toHaveLength(15);
-    expect(REAL_WORLD_BENCHMARKS).toHaveLength(10);
+    expect(OFFLINE_BENCHMARKS).toHaveLength(10);
+    expect(REAL_WORLD_BENCHMARKS).toBe(OFFLINE_BENCHMARKS);
 
-    const report = runRealWorldBenchmarkSuite();
+    const report = runOfflineBenchmarkSuite();
+    expect(runRealWorldBenchmarkSuite).toBe(runOfflineBenchmarkSuite);
     expect(report.totalBenchmarks).toBe(10);
     expect(report.winsWithoutIdioms).toBe(10);
     expect(report.winsWithIdioms).toBe(10);
@@ -61,7 +68,7 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
       report.aggregateTotal.turnsSavingsWithoutIdiomsPct,
     );
 
-    // Verify each of the 10 real-world benchmarks
+    // Verify each of the 10 offline benchmarks
     for (const b of report.benchmarks) {
       expect(b.ailWinsAllWithoutIdioms).toBe(true);
       expect(b.ailWinsAllWithIdioms).toBe(true);
@@ -96,16 +103,77 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
       }
     }
 
-    // Verify docs/BENCHMARKS.md is up to date
-    const docsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
-    expect(fs.existsSync(docsPath)).toBe(true);
-    const md = fs.readFileSync(docsPath, "utf-8");
-    expect(md).toContain("10 Scenarios — Without & With Idioms");
-    expect(md).toContain("RW-01");
-    expect(md).toContain("RW-10");
-    expect(md).toContain("Total Lifecycle Turns");
-    expect(md).toContain("Agent Turns Breakdown");
+    // Verify docs/BENCHMARKS_OFFLINE.md is up to date
+    const offlineDocsPath = path.resolve(process.cwd(), "docs/BENCHMARKS_OFFLINE.md");
+    expect(fs.existsSync(offlineDocsPath)).toBe(true);
+    const offlineMd = fs.readFileSync(offlineDocsPath, "utf-8");
+    expect(offlineMd).toContain("Deterministic Offline Benchmark Report");
+    expect(offlineMd).toContain("RW-01");
+    expect(offlineMd).toContain("RW-10");
+    expect(offlineMd).toContain("Total Lifecycle Turns");
+    expect(offlineMd).toContain("Agent Turns Breakdown");
+    expect(formatOfflineBenchmarkMarkdown(report)).toContain("Deterministic Offline Benchmark Report");
   }, 60000);
+
+  it("verifies the Real AI Agent Benchmark Suite across all 30 live agent transcripts (10 scenarios x 3 modes) in docs/BENCHMARKS.md", () => {
+    const realReport = loadRealAgentBenchmarkSuiteReport();
+    expect(realReport.suiteVersion).toBe("2.0.0-real-agent");
+    expect(realReport.totalBenchmarks).toBe(10);
+    expect(realReport.coveredLanguages).toHaveLength(15);
+    expect(realReport.winsWithoutIdioms).toBe(10);
+    expect(realReport.winsWithIdioms).toBe(10);
+    expect(realReport.allVerifiedOnDisk).toBe(true);
+    expect(realReport.zeroAilFilesLeftOnDisk).toBe(true);
+
+    const seenConversationIds = new Set<string>();
+    for (const b of realReport.benchmarks) {
+      expect(b.ailWithoutIdiomsWins).toBe(true);
+      expect(b.ailWithIdiomsWins).toBe(true);
+      expect(b.idiomsBeatNoIdioms).toBe(true);
+
+      for (const m of [b.withoutAil, b.ailWithoutIdioms, b.ailWithIdioms]) {
+        expect(m.conversationId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        );
+        seenConversationIds.add(m.conversationId);
+        expect(m.verifiedOnDisk).toBe(true);
+        expect(m.zeroAilFilesLeftOnDisk).toBe(true);
+      }
+
+      // Strict ordering: withoutAil > ailWithoutIdioms > ailWithIdioms
+      expect(b.ailWithoutIdioms.llmTurns).toBeLessThan(b.withoutAil.llmTurns);
+      expect(b.ailWithIdioms.llmTurns).toBeLessThan(b.ailWithoutIdioms.llmTurns);
+
+      expect(b.ailWithoutIdioms.toolCalls).toBeLessThan(b.withoutAil.toolCalls);
+      expect(b.ailWithIdioms.toolCalls).toBeLessThan(b.ailWithoutIdioms.toolCalls);
+
+      expect(b.ailWithoutIdioms.workingTokens).toBeLessThan(b.withoutAil.workingTokens);
+      expect(b.ailWithIdioms.workingTokens).toBeLessThan(b.ailWithoutIdioms.workingTokens);
+
+      expect(b.ailWithoutIdioms.outputTokens).toBeLessThan(b.withoutAil.outputTokens);
+      expect(b.ailWithIdioms.outputTokens).toBeLessThan(b.ailWithoutIdioms.outputTokens);
+
+      expect(b.ailWithoutIdioms.billableTokens).toBeLessThan(b.withoutAil.billableTokens);
+      expect(b.ailWithIdioms.billableTokens).toBeLessThan(b.ailWithoutIdioms.billableTokens);
+
+      expect(b.ailWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAil.apiTotalTokens);
+      expect(b.ailWithIdioms.apiTotalTokens).toBeLessThan(b.ailWithoutIdioms.apiTotalTokens);
+    }
+
+    // All 30 runs must have distinct UUIDs
+    expect(seenConversationIds.size).toBe(30);
+
+    // Check docs/BENCHMARKS.md
+    const realDocsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
+    expect(fs.existsSync(realDocsPath)).toBe(true);
+    const realMd = fs.readFileSync(realDocsPath, "utf-8");
+    expect(realMd).toContain("Real AI Agent Benchmark Suite Report");
+    expect(realMd).toContain("BENCHMARKS_OFFLINE.md");
+    expect(realMd).toContain("Ground-Truth Conversation ID Audit Trail");
+    expect(formatRealAgentBenchmarkMarkdown(realReport)).toContain(
+      "Real AI Agent Benchmark Suite Report",
+    );
+  });
 
   it("supports nested CSS @media rules, pseudo-selectors (.btn:hover), layout macros, and idiom transforms", async () => {
     const { parse } = await import("../../src/core/parser.js");
@@ -151,7 +219,7 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
   });
 
   it("compiles .tsx benchmark files from real AIL component declarations into JSX and uses domain-specific idioms", () => {
-    const tsxFiles = REAL_WORLD_BENCHMARKS.flatMap((b) =>
+    const tsxFiles = OFFLINE_BENCHMARKS.flatMap((b) =>
       b.files.filter((f) => f.languageId === "tsx"),
     );
     expect(tsxFiles.length).toBeGreaterThanOrEqual(3);
@@ -162,5 +230,38 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
 
     const distinctIdioms = new Set(SUPPORTED_BENCHMARK_LANGUAGES.map((l) => l.idiomName));
     expect(distinctIdioms.size).toBe(15);
+  });
+
+  it("decompiles Kotlin and PHP assignments into AssignStmt so $guard_band_step idioms collapse cleanly", async () => {
+    const { decompile } = await import("../../src/decompiler/index.js");
+    const { collapseModuleIdioms } = await import("../../src/idioms/index.js");
+    const { idioms } = buildIdiomRegistryForLanguage("ts");
+
+    const ktCode = [
+      "fun scorePrimarySignal(rawScore: Int, floorVal: Int, ceilVal: Int, step: Int): Int {",
+      "  var nextScore = rawScore",
+      "  if (nextScore < floorVal) { nextScore = floorVal }",
+      "  if (nextScore > ceilVal) { nextScore = ceilVal }",
+      "  nextScore = nextScore + step",
+      "  return nextScore",
+      "}",
+    ].join("\n");
+    const ktDecomp = decompile(ktCode, "kotlin", { filePath: "fraud_scorer.kt" });
+    const ktCollapsed = collapseModuleIdioms(ktDecomp.ast, idioms);
+    expect(ktCollapsed.collapsedCount).toBe(1);
+
+    const phpCode = [
+      "<?php",
+      "function computeCartTotals($subtotalCents, $minCents, $maxCents, $stepCents) {",
+      "  $nextTotal = $subtotalCents;",
+      "  if ($nextTotal < $minCents) { $nextTotal = $minCents; }",
+      "  if ($nextTotal > $maxCents) { $nextTotal = $maxCents; }",
+      "  $nextTotal = $nextTotal + $stepCents;",
+      "  return $nextTotal;",
+      "}",
+    ].join("\n");
+    const phpDecomp = decompile(phpCode, "php", { filePath: "cart_pricing.php" });
+    const phpCollapsed = collapseModuleIdioms(phpDecomp.ast, idioms);
+    expect(phpCollapsed.collapsedCount).toBe(1);
   });
 });

@@ -568,6 +568,7 @@ export class PhpDecompiler {
   private cur = 0;
   private trivia: CstTriviaTable;
   private pendingTrivia: TriviaItem[] = [];
+  private declaredVars = new Set<string>();
 
   constructor(source: string, filePath = "source.php") {
     this.source = source;
@@ -1081,7 +1082,10 @@ export class PhpDecompiler {
       };
     }
 
+    const prevVars = this.declaredVars;
+    this.declaredVars = new Set(params.map((p) => p.name));
     const body = this.parseBlock();
+    this.declaredVars = prevVars;
 
     return {
       kind: "MethodDecl",
@@ -1112,7 +1116,10 @@ export class PhpDecompiler {
       returnType = this.parseTypeExpr();
     }
 
+    const prevVars = this.declaredVars;
+    this.declaredVars = new Set(params.map((p) => p.name));
     const body = this.parseBlock();
+    this.declaredVars = prevVars;
 
     return {
       kind: "FunctionDecl",
@@ -1406,7 +1413,8 @@ export class PhpDecompiler {
       const val = this.parseExpr();
       if (this.check("SEMICOLON")) this.advance();
 
-      if (expr.kind === "IdentifierExpr") {
+      if (expr.kind === "IdentifierExpr" && !this.declaredVars.has(expr.name)) {
+        this.declaredVars.add(expr.name);
         return {
           kind: "LetBinding",
           name: expr.name,

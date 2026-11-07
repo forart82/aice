@@ -2300,13 +2300,6 @@ export class KotlinDecompiler {
 
   private getPrecedence(k: KotlinTokenKind): Precedence {
     switch (k) {
-      case "ASSIGN":
-      case "PLUS_ASSIGN":
-      case "MINUS_ASSIGN":
-      case "STAR_ASSIGN":
-      case "SLASH_ASSIGN":
-      case "PERCENT_ASSIGN":
-        return Precedence.ASSIGN;
       case "ELVIS":
         return Precedence.ELVIS;
       case "OR_OR":

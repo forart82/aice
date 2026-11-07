@@ -1,362 +1,103 @@
-# AIL 2.0 Real-World Benchmark Report (10 Scenarios — Without & With Idioms)
-
-- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AIL` vs `AIL Without Idioms` vs `AIL With Idioms`)
-- **Total Real-World Benchmarks**: **10** (`RW-01` .. `RW-10`)
-- **AIL Without Idioms Win Rate**: **10 / 10 (100.0%)**
-- **AIL With Idioms Win Rate**: **10 / 10 (100.0%)**
-- **Total Lifecycle Turns (10 Benchmarks)**: Without AIL = **502 turns** | AIL Without Idioms = **206 turns (-59.0%)** | AIL With Idioms = **154 turns (-69.3%)**
-- **Languages & File Types Covered (15)**: `.ts`, `.html`, `.css`, `.json`, `.py`, `.yaml`, `.php`, `.js`, `.twig`, `.tsx`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`
-- **Engineering Scenarios Covered (5)**: `from_zero_window_app`, `from_zero_non_window_app`, `bug_fix`, `new_feature`, `update_feature`
-- **Application Surfaces Covered (2)**: `window`, `non_window`
-- **Zero `.ail` Files Left on Disk**: **PASS (0 .ail files)**
-
----
-
-## 1. Aggregate Operation Breakdown (Tokens & Turns Across All 10 Real-World Benchmarks)
-
-### Token Breakdown Across All 10 Real-World Benchmarks
-
-| Operation | Without AIL (Tokens) | AIL Without Idioms (Tokens) | Savings Without Idioms | AIL With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** *(incl. idiom defs)* | 33 034 | 26 816 | **-18.8%** | 19 545 | **-40.8%** | **+22.0%** |
-| **Read (Discovery + Context)** | 14 867 | 9 950 | **-33.1%** | 7 128 | **-52.0%** | **+19.0%** |
-| **Update (Bug Fix / Feature)** | 17 211 | 8 174 | **-52.5%** | 4 911 | **-71.5%** | **+19.0%** |
-| **Delete (Obsolete Symbol)** | 2 233 | 162 | **-92.8%** | 162 | **-92.8%** | **+0.0%** |
-| **Refactor (Multi-Site / Multi-File)** | 59 778 | 26 685 | **-55.4%** | 2 522 | **-95.8%** | **+40.4%** |
-| **TOTAL LIFECYCLE** | **127 123** | **71 787** | **-43.5%** | **34 268** | **-73.0%** | **+29.5%** |
-
-### Agent Turns Breakdown Across All 10 Real-World Benchmarks
-
-| Operation | Without AIL (Turns) | AIL Without Idioms (Turns) | Turn Savings Without Idioms | AIL With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |
-| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 62 | 62 | **0.0%** | 62 | **0.0%** | **+0.0%** |
-| **Read (Discovery + Context)** | 124 | 62 | **-50.0%** | 62 | **-50.0%** | **+0.0%** |
-| **Update (Bug Fix / Feature)** | 62 | 10 | **-83.9%** | 10 | **-83.9%** | **+0.0%** |
-| **Delete (Obsolete Symbol)** | 40 | 10 | **-75.0%** | 10 | **-75.0%** | **+0.0%** |
-| **Refactor (Multi-Site / Multi-File)** | 214 | 62 | **-71.0%** | 10 | **-95.3%** | **+24.3%** |
-| **TOTAL LIFECYCLE** | **502** | **206** | **-59.0%** | **154** | **-69.3%** | **+10.4%** |
-
----
-
-## 2. All 10 Real-World Benchmarks Summary Table
-
-| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AIL | Tokens AIL (No Idioms) | Tokens AIL (With Idioms) | Turns Without AIL | Turns AIL (No Idioms) | Turns AIL (With Idioms) |
-| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `RW-01` | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)** | `window` | `from_zero_window_app` | `.ts .html .css .json` | -21.1% / **-46.1%** | -36.5% / **-57.4%** | -57.1% / **-75.0%** | **-91.6%** | -56.9% / **-96.9%** | 11 038 | 5 944 (**-46.1%**) | 2 709 (**-75.5%**) | 46 | 17 (**-63.0%**) | 13 (**-71.7%**) |
-| `RW-02` | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)** | `non_window` | `from_zero_non_window_app` | `.py .yaml .json` | -13.0% / **-37.9%** | -26.1% / **-45.3%** | -47.0% / **-67.5%** | **-90.1%** | -51.3% / **-96.4%** | 7 852 | 4 791 (**-39.0%**) | 2 274 (**-71.0%**) | 37 | 14 (**-62.2%**) | 11 (**-70.3%**) |
-| `RW-03` | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)** | `window` | `bug_fix` | `.php .js .twig .css .html .yaml .json` | -19.0% / **-39.8%** | -31.6% / **-49.5%** | -55.7% / **-74.2%** | **-92.8%** | -56.7% / **-95.1%** | 12 061 | 6 659 (**-44.8%**) | 3 285 (**-72.8%**) | 55 | 23 (**-58.2%**) | 17 (**-69.1%**) |
-| `RW-04` | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)** | `window` | `new_feature` | `.ts .tsx .css .html .json .yaml` | -19.1% / **-40.7%** | -40.6% / **-60.2%** | -27.5% / **-57.2%** | **-93.7%** | -55.0% / **-95.1%** | 10 303 | 6 023 (**-41.5%**) | 2 895 (**-71.9%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
-| `RW-05` | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)** | `non_window` | `update_feature` | `.go .rs .yaml .json` | -25.4% / **-45.0%** | -38.6% / **-56.6%** | -52.4% / **-72.0%** | **-93.5%** | -55.3% / **-96.0%** | 9 697 | 5 269 (**-45.7%**) | 2 495 (**-74.3%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
-| `RW-06` | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)** | `window` | `bug_fix` | `.cpp .ts .html .css .json` | -18.9% / **-40.5%** | -36.3% / **-56.5%** | -57.8% / **-74.6%** | **-93.3%** | -56.1% / **-95.8%** | 10 195 | 5 596 (**-45.1%**) | 2 638 (**-74.1%**) | 39 | 17 (**-56.4%**) | 13 (**-66.7%**) |
-| `RW-07` | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)** | `non_window` | `new_feature` | `.cs .kt .yaml .json` | -18.4% / **-40.2%** | -23.1% / **-36.5%** | -27.9% / **-54.3%** | **-94.3%** | -54.4% / **-95.9%** | 8 652 | 5 204 (**-39.9%**) | 2 557 (**-70.5%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
-| `RW-08` | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)** | `window` | `update_feature` | `.py .tsx .twig .css .json .yaml` | -14.6% / **-38.3%** | -32.0% / **-54.9%** | -52.7% / **-72.6%** | **-92.5%** | -53.4% / **-95.2%** | 10 787 | 6 321 (**-41.4%**) | 2 981 (**-72.4%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
-| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -18.3% / **-40.8%** | -34.8% / **-53.3%** | -55.8% / **-72.6%** | **-94.4%** | -55.1% / **-96.0%** | 14 270 | 8 000 (**-43.9%**) | 3 755 (**-73.7%**) | 47 | 20 (**-57.5%**) | 15 (**-68.1%**) |
-| `RW-10` | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)** | `window` | `update_feature` | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | -18.9% / **-39.9%** | -30.6% / **-49.2%** | -56.6% / **-73.7%** | **-94.3%** | -56.2% / **-95.7%** | 32 268 | 17 980 (**-44.3%**) | 8 679 (**-73.1%**) | 108 | 47 (**-56.5%**) | 33 (**-69.4%**) |
-| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | -18.8% / **-40.8%** | -33.1% / **-52.0%** | -52.5% / **-71.5%** | **-92.8%** | -55.4% / **-95.8%** | **127 123** | **71 787 (-43.5%)** | **34 268 (-73.0%)** | **502** | **206 (-59.0%)** | **154 (-69.3%)** |
-
----
-
-## 3. Per-Benchmark Module & Operation Breakdown
-
-### RW-01: HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)
-
-- **Description**: Complete interactive browser game built from 0 with TypeScript game loop & collision engine, Canvas HUD renderer, HTML5 arcade shell, CSS3 neon cabinet theme, and JSON level config.
-- **Scenario**: `from_zero_window_app` | **Surface**: `window` | **Files**: 5 (`.ts`, `.html`, `.css`, `.json`)
-- **Idioms Used**: `$guard_band_step`, `$html_metric_row`, `$css_card`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **218 tokens**)
-- **Lifecycle Tokens**: Without AIL = **11 038** | AIL Without Idioms = **5 944 (-46.1%)** | AIL With Idioms = **2 709 (-75.5%)**
-- **Lifecycle Turns**: Without AIL = **46 turns** | AIL Without Idioms = **17 turns (-63.0%)** | AIL With Idioms = **13 turns (-71.7%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 3 011 tok / 5 turns | 2 375 tok / 5 turns | 1 623 tok / 5 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 270 tok / 10 turns | 806 tok / 5 turns | 541 tok / 5 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1 435 tok / 5 turns | 615 tok / 1 turns | 358 tok / 1 turns | -80.0% / **-80.0%** |
-| **Delete (Surgical)** | 415 tok / 8 turns | 35 tok / 1 turns | 35 tok / 1 turns | -87.5% / **-87.5%** |
-| **Refactor (Pattern)** | 4 907 tok / 18 turns | 2 113 tok / 5 turns | 152 tok / 1 turns | -72.2% / **-94.4%** |
-| **TOTAL** | **11 038 tok / 46 turns** | **5 944 tok / 17 turns** | **2 709 tok / 13 turns** | **-63.0% / -71.7%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `engine.ts` | `.ts` | 1025 | 803 | -21.7% | 472 | **-54.0%** |
-| `renderer.ts` | `.ts` | 647 | 531 | -17.9% | 299 | **-53.8%** |
-| `index.html` | `.html` | 494 | 444 | -10.1% | 249 | **-49.6%** |
-| `styles.css` | `.css` | 503 | 365 | -27.4% | 242 | **-51.9%** |
-| `game_config.json` | `.json` | 342 | 232 | -32.2% | 143 | **-58.2%** |
-
-### RW-02: Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)
-
-- **Description**: Non-window background queue daemon & CLI tool created from 0 with Python retry backoff scheduler, worker pool controller, YAML service deployment topology, and JSON ingestion schema.
-- **Scenario**: `from_zero_non_window_app` | **Surface**: `non_window` | **Files**: 4 (`.py`, `.yaml`, `.json`)
-- **Idioms Used**: `$enforce_quota_band`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **182 tokens**)
-- **Lifecycle Tokens**: Without AIL = **7 852** | AIL Without Idioms = **4 791 (-39.0%)** | AIL With Idioms = **2 274 (-71.0%)**
-- **Lifecycle Turns**: Without AIL = **37 turns** | AIL Without Idioms = **14 turns (-62.2%)** | AIL With Idioms = **11 turns (-70.3%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 132 tok / 4 turns | 1 854 tok / 4 turns | 1 324 tok / 4 turns | 0.0% / 0.0% |
-| **Read (Context)** | 877 tok / 8 turns | 648 tok / 4 turns | 480 tok / 4 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 963 tok / 4 turns | 510 tok / 1 turns | 313 tok / 1 turns | -75.0% / **-75.0%** |
-| **Delete (Surgical)** | 284 tok / 6 turns | 28 tok / 1 turns | 28 tok / 1 turns | -83.3% / **-83.3%** |
-| **Refactor (Pattern)** | 3 596 tok / 15 turns | 1 751 tok / 4 turns | 129 tok / 1 turns | -73.3% / **-93.3%** |
-| **TOTAL** | **7 852 tok / 37 turns** | **4 791 tok / 14 turns** | **2 274 tok / 11 turns** | **-62.2% / -70.3%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `worker.py` | `.py` | 934 | 847 | -9.3% | 515 | **-44.9%** |
-| `cli.py` | `.py` | 583 | 519 | -11.0% | 323 | **-44.6%** |
-| `pipeline.yaml` | `.yaml` | 264 | 247 | -6.4% | 152 | **-42.4%** |
-| `schema.json` | `.json` | 351 | 241 | -31.3% | 152 | **-56.7%** |
-
-### RW-03: Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)
-
-- **Description**: Full server & client e-commerce storefront fixing a negative discount/tax rounding bug in CheckoutController.php while synchronizing client cart JS, Twig summary template, CSS styles, HTML modal, YAML routes, and JSON shipping tiers.
-- **Scenario**: `bug_fix` | **Surface**: `window` | **Files**: 7 (`.php`, `.js`, `.twig`, `.css`, `.html`, `.yaml`, `.json`)
-- **Idioms Used**: `$round_money_band`, `$clamp_cart_line`, `$twig_summary_line`, `$css_card`, `$html_metric_row`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AIL = **12 061** | AIL Without Idioms = **6 659 (-44.8%)** | AIL With Idioms = **3 285 (-72.8%)**
-- **Lifecycle Turns**: Without AIL = **55 turns** | AIL Without Idioms = **23 turns (-58.2%)** | AIL With Idioms = **17 turns (-69.1%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 3 095 tok / 7 turns | 2 507 tok / 7 turns | 1 864 tok / 7 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 334 tok / 14 turns | 912 tok / 7 turns | 674 tok / 7 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1 762 tok / 7 turns | 780 tok / 1 turns | 454 tok / 1 turns | -85.7% / **-85.7%** |
-| **Delete (Surgical)** | 222 tok / 4 turns | 16 tok / 1 turns | 16 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 5 648 tok / 23 turns | 2 444 tok / 7 turns | 277 tok / 1 turns | -69.6% / **-95.7%** |
-| **TOTAL** | **12 061 tok / 55 turns** | **6 659 tok / 23 turns** | **3 285 tok / 17 turns** | **-58.2% / -69.1%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `CheckoutController.php` | `.php` | 1117 | 877 | -21.5% | 497 | **-55.5%** |
-| `cart-client.js` | `.js` | 599 | 503 | -16.0% | 298 | **-50.3%** |
-| `checkout.twig` | `.twig` | 321 | 284 | -11.5% | 140 | **-56.4%** |
-| `checkout.css` | `.css` | 411 | 298 | -27.5% | 202 | **-50.9%** |
-| `shell.html` | `.html` | 229 | 210 | -8.3% | 123 | **-46.3%** |
-| `routes.yaml` | `.yaml` | 177 | 170 | -4.0% | 108 | **-39.0%** |
-| `shipping_rates.json` | `.json` | 241 | 165 | -31.5% | 107 | **-55.6%** |
-
-### RW-04: Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)
-
-- **Description**: Modern frontend workspace adding a new cohort retention & live sparkline feature across the TypeScript metrics store, React TSX dashboard panel, CSS grid cards, HTML shell, JSON bundle budget, and YAML preview pipeline.
-- **Scenario**: `new_feature` | **Surface**: `window` | **Files**: 6 (`.ts`, `.tsx`, `.css`, `.html`, `.json`, `.yaml`)
-- **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier` (Definition Cost Charged on Write from 0: **336 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10 303** | AIL Without Idioms = **6 023 (-41.5%)** | AIL With Idioms = **2 895 (-71.9%)**
-- **Lifecycle Turns**: Without AIL = **49 turns** | AIL Without Idioms = **20 turns (-59.2%)** | AIL With Idioms = **15 turns (-69.4%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 877 tok / 6 turns | 2 329 tok / 6 turns | 1 707 tok / 6 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 324 tok / 12 turns | 786 tok / 6 turns | 527 tok / 6 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 947 tok / 6 turns | 687 tok / 1 turns | 405 tok / 1 turns | -83.3% / **-83.3%** |
-| **Delete (Surgical)** | 253 tok / 4 turns | 16 tok / 1 turns | 16 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 4 902 tok / 21 turns | 2 205 tok / 6 turns | 240 tok / 1 turns | -71.4% / **-95.2%** |
-| **TOTAL** | **10 303 tok / 49 turns** | **6 023 tok / 20 turns** | **2 895 tok / 15 turns** | **-59.2% / -69.4%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `metrics-store.ts` | `.ts` | 1105 | 868 | -21.4% | 498 | **-54.9%** |
-| `DashboardPanel.tsx` | `.tsx` | 701 | 605 | -13.7% | 320 | **-54.4%** |
-| `dashboard.css` | `.css` | 413 | 301 | -27.1% | 205 | **-50.4%** |
-| `index.html` | `.html` | 238 | 219 | -8.0% | 132 | **-44.5%** |
-| `bundle_budgets.json` | `.json` | 237 | 163 | -31.2% | 105 | **-55.7%** |
-| `vite_pipeline.yaml` | `.yaml` | 183 | 173 | -5.5% | 111 | **-39.3%** |
-
-### RW-05: Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)
-
-- **Description**: Cloud-native backend updating quorum consensus timeout and adaptive rate limiting across a Go API gateway, Rust write-ahead log compaction engine, YAML Raft cluster config, and JSON tenant burst quotas.
-- **Scenario**: `update_feature` | **Surface**: `non_window` | **Files**: 4 (`.go`, `.rs`, `.yaml`, `.json`)
-- **Idioms Used**: `$bounded_quorum_step`, `$advance_wal_cursor`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **251 tokens**)
-- **Lifecycle Tokens**: Without AIL = **9 697** | AIL Without Idioms = **5 269 (-45.7%)** | AIL With Idioms = **2 495 (-74.3%)**
-- **Lifecycle Turns**: Without AIL = **36 turns** | AIL Without Idioms = **14 turns (-61.1%)** | AIL With Idioms = **11 turns (-69.4%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 699 tok / 4 turns | 2 012 tok / 4 turns | 1 483 tok / 4 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 126 tok / 8 turns | 691 tok / 4 turns | 489 tok / 4 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1 177 tok / 4 turns | 560 tok / 1 turns | 330 tok / 1 turns | -75.0% / **-75.0%** |
-| **Delete (Surgical)** | 247 tok / 4 turns | 16 tok / 1 turns | 16 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 4 448 tok / 16 turns | 1 990 tok / 4 turns | 177 tok / 1 turns | -75.0% / **-93.8%** |
-| **TOTAL** | **9 697 tok / 36 turns** | **5 269 tok / 14 turns** | **2 495 tok / 11 turns** | **-61.1% / -69.4%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `gateway.go` | `.go` | 1117 | 823 | -26.3% | 503 | **-55.0%** |
-| `wal_engine.rs` | `.rs` | 1156 | 846 | -26.8% | 506 | **-56.2%** |
-| `cluster.yaml` | `.yaml` | 181 | 173 | -4.4% | 111 | **-38.7%** |
-| `limits.json` | `.json` | 245 | 170 | -30.6% | 112 | **-54.3%** |
-
-### RW-06: C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)
-
-- **Description**: Hybrid native/web desktop viewport engine fixing a sub-pixel AABB collision tunneling clamp bug in C++20 while updating the TypeScript inspector bridge, HTML HUD overlay, CSS dock panel, and JSON solver settings.
-- **Scenario**: `bug_fix` | **Surface**: `window` | **Files**: 5 (`.cpp`, `.ts`, `.html`, `.css`, `.json`)
-- **Idioms Used**: `$solve_axis_impulse`, `$guard_band_step`, `$html_metric_row`, `$css_card`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **287 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10 195** | AIL Without Idioms = **5 596 (-45.1%)** | AIL With Idioms = **2 638 (-74.1%)**
-- **Lifecycle Turns**: Without AIL = **39 turns** | AIL Without Idioms = **17 turns (-56.4%)** | AIL With Idioms = **13 turns (-66.7%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 567 tok / 5 turns | 2 081 tok / 5 turns | 1 528 tok / 5 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 201 tok / 10 turns | 765 tok / 5 turns | 523 tok / 5 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1 491 tok / 5 turns | 630 tok / 1 turns | 379 tok / 1 turns | -80.0% / **-80.0%** |
-| **Delete (Surgical)** | 120 tok / 2 turns | 8 tok / 1 turns | 8 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 4 816 tok / 17 turns | 2 112 tok / 5 turns | 200 tok / 1 turns | -70.6% / **-94.1%** |
-| **TOTAL** | **10 195 tok / 39 turns** | **5 596 tok / 17 turns** | **2 638 tok / 13 turns** | **-56.4% / -66.7%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `viewport_sim.cpp` | `.cpp` | 1023 | 847 | -17.2% | 482 | **-52.9%** |
-| `inspector.ts` | `.ts` | 639 | 534 | -16.4% | 300 | **-53.0%** |
-| `overlay.html` | `.html` | 245 | 226 | -7.8% | 139 | **-43.3%** |
-| `overlay.css` | `.css` | 414 | 303 | -26.8% | 207 | **-50.0%** |
-| `engine_settings.json` | `.json` | 246 | 171 | -30.5% | 113 | **-54.1%** |
-
-### RW-07: C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)
-
-- **Description**: Enterprise fintech backend adding instant payout fee calculation and real-time velocity risk scoring across C# .NET settlement services, Kotlin Ktor fraud evaluators, YAML clearing routing, and JSON risk rule weights.
-- **Scenario**: `new_feature` | **Surface**: `non_window` | **Files**: 4 (`.cs`, `.kt`, `.yaml`, `.json`)
-- **Idioms Used**: `$settle_ledger_window`, `$score_risk_signal`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **252 tokens**)
-- **Lifecycle Tokens**: Without AIL = **8 652** | AIL Without Idioms = **5 204 (-39.9%)** | AIL With Idioms = **2 557 (-70.5%)**
-- **Lifecycle Turns**: Without AIL = **36 turns** | AIL Without Idioms = **14 turns (-61.1%)** | AIL With Idioms = **11 turns (-69.4%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 460 tok / 4 turns | 2 007 tok / 4 turns | 1 470 tok / 4 turns | 0.0% / 0.0% |
-| **Read (Context)** | 856 tok / 8 turns | 658 tok / 4 turns | 544 tok / 4 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 768 tok / 4 turns | 554 tok / 1 turns | 351 tok / 1 turns | -75.0% / **-75.0%** |
-| **Delete (Surgical)** | 246 tok / 4 turns | 14 tok / 1 turns | 14 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 4 322 tok / 16 turns | 1 971 tok / 4 turns | 178 tok / 1 turns | -75.0% / **-93.8%** |
-| **TOTAL** | **8 652 tok / 36 turns** | **5 204 tok / 14 turns** | **2 557 tok / 11 turns** | **-61.1% / -69.4%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `SettlementEngine.cs` | `.cs` | 1082 | 854 | -21.1% | 515 | **-52.4%** |
-| `FraudScorer.kt` | `.kt` | 952 | 810 | -14.9% | 480 | **-49.6%** |
-| `settlement_policy.yaml` | `.yaml` | 187 | 179 | -4.3% | 117 | **-37.4%** |
-| `risk_rules.json` | `.json` | 239 | 164 | -31.4% | 106 | **-55.6%** |
-
-### RW-08: Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)
-
-- **Description**: Multi-tenant SaaS billing & reporting portal updating multi-currency tax rounding and usage quota gauges across Python FastAPI services, React TSX usage charts, Twig invoice templates, CSS print/screen rules, JSON plan tiers, and YAML cron workers.
-- **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 6 (`.py`, `.tsx`, `.twig`, `.css`, `.json`, `.yaml`)
-- **Idioms Used**: `$enforce_quota_band`, `$tsx_kpi_tile`, `$twig_summary_line`, `$css_card`, `$json_policy_rule`, `$yaml_service_tier` (Definition Cost Charged on Write from 0: **328 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10 787** | AIL Without Idioms = **6 321 (-41.4%)** | AIL With Idioms = **2 981 (-72.4%)**
-- **Lifecycle Turns**: Without AIL = **49 turns** | AIL Without Idioms = **20 turns (-59.2%)** | AIL With Idioms = **15 turns (-69.4%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2 783 tok / 6 turns | 2 378 tok / 6 turns | 1 717 tok / 6 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 320 tok / 12 turns | 897 tok / 6 turns | 595 tok / 6 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1 523 tok / 6 turns | 720 tok / 1 turns | 417 tok / 1 turns | -83.3% / **-83.3%** |
-| **Delete (Surgical)** | 199 tok / 4 turns | 15 tok / 1 turns | 15 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 4 962 tok / 21 turns | 2 311 tok / 6 turns | 237 tok / 1 turns | -71.4% / **-95.2%** |
-| **TOTAL** | **10 787 tok / 49 turns** | **6 321 tok / 20 turns** | **2 981 tok / 15 turns** | **-59.2% / -69.4%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `billing_service.py` | `.py` | 1052 | 955 | -9.2% | 560 | **-46.8%** |
-| `UsageChart.tsx` | `.tsx` | 571 | 496 | -13.1% | 262 | **-54.1%** |
-| `invoice_email.twig` | `.twig` | 321 | 284 | -11.5% | 140 | **-56.4%** |
-| `billing.css` | `.css` | 412 | 299 | -27.4% | 203 | **-50.7%** |
-| `plans.json` | `.json` | 243 | 169 | -30.4% | 111 | **-54.3%** |
-| `worker_cron.yaml` | `.yaml` | 184 | 175 | -4.9% | 113 | **-38.6%** |
-
-### RW-09: High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)
-
-- **Description**: Ultra-low-latency non-window trading & risk pipeline fixing a self-trade price collar boundary bug across a Rust matching engine, C++20 intraday margin calculator, Python compliance daemon, Go market feed normalizer, YAML venue feeds, and JSON collar bands.
-- **Scenario**: `bug_fix` | **Surface**: `non_window` | **Files**: 6 (`.rs`, `.cpp`, `.py`, `.go`, `.yaml`, `.json`)
-- **Idioms Used**: `$advance_wal_cursor`, `$solve_axis_impulse`, `$enforce_quota_band`, `$bounded_quorum_step`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AIL = **14 270** | AIL Without Idioms = **8 000 (-43.9%)** | AIL With Idioms = **3 755 (-73.7%)**
-- **Lifecycle Turns**: Without AIL = **47 turns** | AIL Without Idioms = **20 turns (-57.5%)** | AIL With Idioms = **15 turns (-68.1%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 3 568 tok / 6 turns | 2 914 tok / 6 turns | 2 114 tok / 6 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1 695 tok / 12 turns | 1 106 tok / 6 turns | 792 tok / 6 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 2 076 tok / 6 turns | 918 tok / 1 turns | 569 tok / 1 turns | -83.3% / **-83.3%** |
-| **Delete (Surgical)** | 125 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 6 806 tok / 21 turns | 3 055 tok / 6 turns | 273 tok / 1 turns | -71.4% / **-95.2%** |
-| **TOTAL** | **14 270 tok / 47 turns** | **8 000 tok / 20 turns** | **3 755 tok / 15 turns** | **-57.5% / -68.1%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `matcher.rs` | `.rs` | 1100 | 887 | -19.4% | 499 | **-54.6%** |
-| `margin_calc.cpp` | `.cpp` | 700 | 555 | -20.7% | 333 | **-52.4%** |
-| `risk_daemon.py` | `.py` | 654 | 588 | -10.1% | 357 | **-45.4%** |
-| `feed_ingest.go` | `.go` | 693 | 545 | -21.4% | 317 | **-54.3%** |
-| `exchange_feeds.yaml` | `.yaml` | 182 | 174 | -4.4% | 112 | **-38.5%** |
-| `collar_bands.json` | `.json` | 239 | 165 | -31.0% | 107 | **-55.2%** |
-
-### RW-10: Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)
-
-- **Description**: Polyglot enterprise control plane integrating all 15 supported languages and file types (.ts, .tsx, .js, .py, .go, .rs, .cpp, .cs, .kt, .php, .css, .html, .json, .yaml, .twig) in a single cohesive multi-service architecture.
-- **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 15 (`.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`, `.php`, `.css`, `.html`, `.json`, `.yaml`, `.twig`)
-- **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$clamp_cart_line`, `$enforce_quota_band`, `$bounded_quorum_step`, `$advance_wal_cursor`, `$solve_axis_impulse`, `$settle_ledger_window`, `$score_risk_signal`, `$round_money_band`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier`, `$twig_summary_line` (Definition Cost Charged on Write from 0: **932 tokens**)
-- **Lifecycle Tokens**: Without AIL = **32 268** | AIL Without Idioms = **17 980 (-44.3%)** | AIL With Idioms = **8 679 (-73.1%)**
-- **Lifecycle Turns**: Without AIL = **108 turns** | AIL Without Idioms = **47 turns (-56.5%)** | AIL With Idioms = **33 turns (-69.4%)**
-
-#### Operation Breakdown (Tokens & Turns)
-
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
-| :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 7 842 tok / 15 turns | 6 359 tok / 15 turns | 4 715 tok / 15 turns | 0.0% / 0.0% |
-| **Read (Context)** | 3 864 tok / 30 turns | 2 681 tok / 15 turns | 1 963 tok / 15 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 5 069 tok / 15 turns | 2 200 tok / 1 turns | 1 335 tok / 1 turns | -93.3% / **-93.3%** |
-| **Delete (Surgical)** | 122 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 15 371 tok / 46 turns | 6 733 tok / 15 turns | 659 tok / 1 turns | -67.4% / **-97.8%** |
-| **TOTAL** | **32 268 tok / 108 turns** | **17 980 tok / 47 turns** | **8 679 tok / 33 turns** | **-56.5% / -69.4%** |
-
-#### Module File Breakdown
-
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
-| :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `telemetry_router.ts` | `.ts` | 780 | 643 | -17.6% | 360 | **-53.9%** |
-| `ClusterHud.tsx` | `.tsx` | 567 | 492 | -13.2% | 258 | **-54.5%** |
-| `widget_embed.js` | `.js` | 601 | 495 | -17.6% | 293 | **-51.3%** |
-| `anomaly_worker.py` | `.py` | 644 | 569 | -11.7% | 343 | **-46.7%** |
-| `mesh_proxy.go` | `.go` | 653 | 495 | -24.2% | 302 | **-53.8%** |
-| `trace_ring.rs` | `.rs` | 682 | 534 | -21.7% | 312 | **-54.3%** |
-| `packet_filter.cpp` | `.cpp` | 684 | 538 | -21.4% | 328 | **-52.0%** |
-| `AuditLedger.cs` | `.cs` | 669 | 522 | -22.0% | 318 | **-52.5%** |
-| `AlertDispatcher.kt` | `.kt` | 594 | 500 | -15.8% | 307 | **-48.3%** |
-| `TenantPortal.php` | `.php` | 699 | 532 | -23.9% | 309 | **-55.8%** |
-| `console.css` | `.css` | 413 | 302 | -26.9% | 206 | **-50.1%** |
-| `console.html` | `.html` | 241 | 222 | -7.9% | 135 | **-44.0%** |
-| `service_catalog.json` | `.json` | 241 | 167 | -30.7% | 109 | **-54.8%** |
-| `mesh_topology.yaml` | `.yaml` | 183 | 175 | -4.4% | 113 | **-38.3%** |
-| `status_digest.twig` | `.twig` | 191 | 173 | -9.4% | 90 | **-52.9%** |
-
+# AIL 2.0 — Real AI Agent Benchmark Suite Report (10 Scenarios — Without & With Idioms)
+
+> **Ground-Truth Real AI Agent Proof**: Every number in this report comes from **30 real autonomous AI agent (`agy -p`) executions** (`10 scenarios × 3 modes`) running against isolated temporary workspaces on disk and measured directly from each agent's ground-truth `.system_generated/logs/transcript.jsonl` telemetry log.
+> For the deterministic offline BPE (`o200k_base`) benchmark suite, see **[`docs/BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)** (`npm run benchmark:offline`).
+
+## 1. Executive Summary: Real AI Agents vs Deterministic Offline Suite
+
+| Metric (Across All 10 Scenarios `RW-01` .. `RW-10`) | Without AIL (Native Tools) | AIL Without Idioms (Pure AIL) | AIL With Idioms (`$idiom` AST Macros) | AIL Win Rate |
+| :--- | :---: | :---: | :---: | :---: |
+| **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 126 turns | **40 turns (-68.3%)** | **30 turns (-76.2%)** | **10/10 (100%)** |
+| **Real Agent Tool Calls** (`tool_calls`) | 151 calls | **30 calls (-80.1%)** | **20 calls (-86.8%)** | **10/10 (100%)** |
+| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 225,390 | **78,974 (-65.0%)** | **33,323 (-85.2%)** | **10/10 (100%)** |
+| **Real Agent LLM Output Tokens** (`output_tokens`) | 88,284 | **45,966 (-47.9%)** | **12,316 (-86.0%)** | **10/10 (100%)** |
+| **Real Agent Billable API Tokens** (`input + output`) | 664,281 | **237,578 (-64.2%)** | **143,178 (-78.5%)** | **10/10 (100%)** |
+| **Real Agent Total API Context Tokens** (`input + cache + output`) | 4,410,780 | **1,110,441 (-74.8%)** | **726,291 (-83.5%)** | **10/10 (100%)** |
+| **Real Agent Wall-Clock Duration** | 490.4s | **266.5s** | **172.2s** | **10/10 (100%)** |
+| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,243 | **71,877 (-43.5%)** | **33,982 (-73.3%)** | **10/10 (100%)** |
+| **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 502 turns | **206 turns (-59.0%)** | **154 turns (-69.3%)** | **10/10 (100%)** |
+
+## 2. Methodology & How Real Agent Telemetry Is Measured
+
+For each of the 10 real-world scenarios (`RW-01` .. `RW-10`), 3 independent `agy` agent sessions were spawned in isolated temporary directories containing the native source files:
+1. **Without AIL (`without_ail`)**: The agent uses standard native IDE tools (`grep_search`, `view_file`, `replace_file_content`) to locate symbols, read files, update target symbols, delete obsolete symbols, and apply the multi-file pattern refactor across the workspace.
+2. **AIL Without Idioms (`ail_no_idioms`)**: The agent uses AIL On-the-Fly CLI in pure AIL mode (`ail context . -s "..." --no-idioms` and `ail splice --no-idioms --batch '[...]'`).
+3. **AIL With Idioms (`ail_with_idioms`)**: The agent uses AIL On-the-Fly CLI with project `$idiom` macros (`ail context . -s "..." --idioms`, `ail splice --idioms --batch '[...]'`, and `ail idioms update --batch '[...]'`).
+
+After each agent finishes, its ground-truth transcript at `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` is parsed and the workspace on disk is verified:
+- **LLM Turns (`llmTurns`)**: Exact count of `PLANNER_RESPONSE` entries in `transcript.jsonl`.
+- **Tool Calls (`toolCalls`)**: Exact count of `tool_calls` invoked across all `PLANNER_RESPONSE` turns.
+- **Working Payload Tokens (`workingTokens`)**: `toolCallTokens + toolResultTokens + outputTokens` (measured with `o200k_base` on tool arguments/outputs plus exact `PLANNER_RESPONSE.output_tokens`), isolating the actual code/context/edit payload from the static IDE system prompt.
+- **Billable API Tokens (`billableTokens`)**: Exact sum of `input_tokens + output_tokens` reported by the LLM API across all turns.
+- **Total API Context Tokens (`apiTotalTokens`)**: Exact sum of `input_tokens + cache_read_tokens + output_tokens` across all turns (invariant to server-side prompt cache warmth).
+- **On-Disk Verification (`verifiedOnDisk` & `zeroAilFilesLeftOnDisk`)**: Confirms every target symbol update, obsolete symbol deletion, and multi-file pattern refactor is present in the native files on disk, with `0` `.ail` files left behind.
+
+## 3. All 10 Real-World Scenarios — Real AI Agent Results
+
+| ID | Scenario & Languages | Turns (No AIL / Pure AIL / +Idioms) | Tool Calls (No AIL / Pure AIL / +Idioms) | Working Tokens (No AIL / Pure AIL / +Idioms) | LLM Output Tokens (No AIL / Pure AIL / +Idioms) | Total API Context Tokens (No AIL / Pure AIL / +Idioms) | Verified |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **RW-01** | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)**<br/>`ts, html, css, json` (5 files) | 20 / **4** (-80%) / **3** (-85%) | 23 / **3** (-87%) / **2** (-91%) | 29,427 / **6,968** (-76.3%) / **2,980** (-89.9%) | 9,998 / **3,539** (-64.6%) / **923** (-90.8%) | 687,185 / **106,111** (-84.6%) / **70,390** (-89.8%) | ✅ 100% |
+| **RW-02** | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)**<br/>`py, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 9 / **3** (-67%) / **2** (-78%) | 13,435 / **6,311** (-53.0%) / **2,656** (-80.2%) | 5,478 / **3,196** (-41.7%) / **848** (-84.5%) | 203,341 / **104,793** (-48.5%) / **70,072** (-65.5%) | ✅ 100% |
+| **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 11 / **4** (-64%) / **3** (-73%) | 16 / **3** (-81%) / **2** (-88%) | 20,790 / **7,479** (-64.0%) / **3,692** (-82.2%) | 8,144 / **4,212** (-48.3%) / **1,399** (-82.8%) | 358,966 / **111,669** (-68.9%) / **73,297** (-79.6%) | ✅ 100% |
+| **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 19,550 / **8,217** (-58.0%) / **3,539** (-81.9%) | 7,882 / **4,844** (-38.5%) / **1,317** (-83.3%) | 287,304 / **111,379** (-61.2%) / **72,688** (-74.7%) | ✅ 100% |
+| **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,754 / **6,444** (-59.1%) / **2,618** (-83.4%) | 6,484 / **3,275** (-49.5%) / **814** (-87.5%) | 211,587 / **104,895** (-50.4%) / **69,875** (-67.0%) | ✅ 100% |
+| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 9 / **4** (-56%) / **3** (-67%) | 12 / **3** (-75%) / **2** (-83%) | 17,658 / **6,825** (-61.4%) / **3,184** (-82.0%) | 6,812 / **3,402** (-50.1%) / **1,078** (-84.2%) | 276,946 / **106,436** (-61.6%) / **71,201** (-74.3%) | ✅ 100% |
+| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,737 / **7,499** (-52.4%) / **2,647** (-83.2%) | 7,078 / **4,241** (-40.1%) / **850** (-88.0%) | 203,470 / **108,559** (-46.6%) / **69,992** (-65.6%) | ✅ 100% |
+| **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 14 / **4** (-71%) / **3** (-79%) | 13 / **3** (-77%) / **2** (-85%) | 18,074 / **7,325** (-59.5%) / **3,353** (-81.5%) | 6,978 / **4,054** (-41.9%) / **1,110** (-84.1%) | 404,815 / **110,500** (-72.7%) / **72,396** (-82.1%) | ✅ 100% |
+| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 21,916 / **8,099** (-63.0%) / **3,425** (-84.4%) | 8,839 / **4,827** (-45.4%) / **1,157** (-86.9%) | 303,664 / **113,674** (-62.6%) / **72,635** (-76.1%) | ✅ 100% |
+| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 33 / **4** (-88%) / **3** (-91%) | 32 / **3** (-91%) / **2** (-94%) | 53,049 / **13,807** (-74.0%) / **5,229** (-90.1%) | 20,591 / **10,376** (-49.6%) / **2,820** (-86.3%) | 1,473,502 / **132,425** (-91.0%) / **83,745** (-94.3%) | ✅ 100% |
+| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **126** / **40** (-68.3%) / **30** (-76.2%) | **151** / **30** (-80.1%) / **20** (-86.8%) | **225,390** / **78,974** (-65.0%) / **33,323** (-85.2%) | **88,284** / **45,966** (-47.9%) / **12,316** (-86.0%) | **4,410,780** / **1,110,441** (-74.8%) / **726,291** (-83.5%) | ✅ **30/30** |
+
+## 4. Ground-Truth Conversation ID Audit Trail (30 Real Agent Sessions)
+
+Every run below corresponds to a real agent session whose `transcript.jsonl` log was recorded under `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` and stored in [`benchmarks/real-agent-results.json`](../benchmarks/real-agent-results.json):
+
+| Benchmark | Mode | Conversation ID (`brain/<id>`) | LLM Turns | Tool Calls | Tool Call Tokens | Tool Result Tokens | LLM Output Tokens | Working Tokens | Billable Tokens (`in+out`) | Total API Tokens (`in+cache+out`) | Duration | Disk Verified |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **RW-01** | Without AIL | `b81206c1-ec60-423c-a4a6-e1094818e9a9` | 20 | 23 | 10 759 | 8 670 | 9 998 | **29 427** | 109 393 | 687 185 | 24.5s | ✅ |
+| **RW-01** | AIL No Idioms | `dd82b585-eba3-4bc1-8da5-bfd75b4c126b` | 4 | 3 | 1 896 | 1 533 | 3 539 | **6 968** | 24 546 | 106 111 | 24.5s | ✅ |
+| **RW-01** | AIL With Idioms | `382ade93-a31f-4846-bb54-3ff5526ba581` | 3 | 2 | 989 | 1 068 | 923 | **2 980** | 13 309 | 70 390 | 24.5s | ✅ |
+| **RW-02** | Without AIL | `1e0d36be-83bb-4f86-b205-a8d62fb90ad3` | 7 | 9 | 4 633 | 3 324 | 5 478 | **13 435** | 52 612 | 203 341 | 38.1s | ✅ |
+| **RW-02** | AIL No Idioms | `5b9fb9ae-6e9d-47c5-98f1-b3e6c23d1b5a` | 4 | 3 | 1 701 | 1 414 | 3 196 | **6 311** | 23 232 | 104 793 | 27.7s | ✅ |
+| **RW-02** | AIL With Idioms | `be7e9d0c-fecf-460d-9af1-2d683ef4325a` | 3 | 2 | 904 | 904 | 848 | **2 656** | 12 993 | 70 072 | 16.8s | ✅ |
+| **RW-03** | Without AIL | `04884c78-8bc7-41f7-9951-43e0aaade5d3` | 11 | 16 | 7 649 | 4 997 | 8 144 | **20 790** | 57 648 | 358 966 | 41.2s | ✅ |
+| **RW-03** | AIL No Idioms | `8d1755bd-e0b9-4e12-8c40-41dda15cd665` | 4 | 3 | 1 891 | 1 376 | 4 212 | **7 479** | 21 929 | 111 669 | 25.5s | ✅ |
+| **RW-03** | AIL With Idioms | `1ba71ac9-29b1-4882-a47c-ba7bca0a6a97` | 3 | 2 | 989 | 1 304 | 1 399 | **3 692** | 12 129 | 73 297 | 18.4s | ✅ |
+| **RW-04** | Without AIL | `d2f7569f-486b-4d6f-bd7c-1adef0ac0fd6` | 9 | 13 | 7 165 | 4 503 | 7 882 | **19 550** | 51 052 | 287 304 | 41.5s | ✅ |
+| **RW-04** | AIL No Idioms | `779213ed-c4d8-446c-9997-018ea9107eb2` | 4 | 3 | 1 913 | 1 460 | 4 844 | **8 217** | 21 644 | 111 379 | 23.9s | ✅ |
+| **RW-04** | AIL With Idioms | `163e39b2-20ad-48ee-a763-c4dd9694adcb` | 3 | 2 | 1 007 | 1 215 | 1 317 | **3 539** | 15 599 | 72 688 | 15.2s | ✅ |
+| **RW-05** | Without AIL | `92c75b21-0181-4941-95bf-6a359e361738` | 7 | 10 | 5 079 | 4 191 | 6 484 | **15 754** | 40 450 | 211 587 | 32.7s | ✅ |
+| **RW-05** | AIL No Idioms | `2af6b269-0ebf-4a1f-b456-f87e46ad1798` | 4 | 3 | 1 755 | 1 414 | 3 275 | **6 444** | 23 333 | 104 895 | 22.8s | ✅ |
+| **RW-05** | AIL With Idioms | `e7de8d00-c748-4e2a-a808-e45d27e36d5a` | 3 | 2 | 883 | 921 | 814 | **2 618** | 12 796 | 69 875 | 17.0s | ✅ |
+| **RW-06** | Without AIL | `34b4c78a-79b3-46c4-aa3e-7c9394bf8423` | 9 | 12 | 6 364 | 4 482 | 6 812 | **17 658** | 44 748 | 276 946 | 38.6s | ✅ |
+| **RW-06** | AIL No Idioms | `c9dd92b6-c4fa-4d92-a068-9c573551cc94` | 4 | 3 | 1 912 | 1 511 | 3 402 | **6 825** | 20 791 | 106 436 | 22.9s | ✅ |
+| **RW-06** | AIL With Idioms | `bc9c83d1-f18b-4baa-b685-d59f4a2b08d2` | 3 | 2 | 1 026 | 1 080 | 1 078 | **3 184** | 14 118 | 71 201 | 15.8s | ✅ |
+| **RW-07** | Without AIL | `8f0f3a56-06ab-475f-be21-00fc91e71bfe` | 7 | 10 | 4 797 | 3 862 | 7 078 | **15 737** | 36 447 | 203 470 | 33.0s | ✅ |
+| **RW-07** | AIL No Idioms | `000cd25f-271d-4e4d-98c8-6921f77bb2b8` | 4 | 3 | 1 820 | 1 438 | 4 241 | **7 499** | 18 845 | 108 559 | 24.1s | ✅ |
+| **RW-07** | AIL With Idioms | `4e45c453-8fae-4668-b7b4-9018fe25a4be` | 3 | 2 | 917 | 880 | 850 | **2 647** | 12 912 | 69 992 | 12.9s | ✅ |
+| **RW-08** | Without AIL | `ad47e489-e638-4b46-827c-b9bd8a7ce594` | 14 | 13 | 6 766 | 4 330 | 6 978 | **18 074** | 62 704 | 404 815 | 65.2s | ✅ |
+| **RW-08** | AIL No Idioms | `c8871eac-4b62-439a-be74-74c1c647576b` | 4 | 3 | 1 871 | 1 400 | 4 054 | **7 325** | 20 765 | 110 500 | 31.8s | ✅ |
+| **RW-08** | AIL With Idioms | `0e1fb6ca-b84c-4f38-973d-9f89bfefe8bc` | 3 | 2 | 980 | 1 263 | 1 110 | **3 353** | 15 308 | 72 396 | 16.5s | ✅ |
+| **RW-09** | Without AIL | `e1de384d-8ca9-4094-b0aa-267834e98b68` | 9 | 13 | 7 719 | 5 358 | 8 839 | **21 916** | 55 116 | 303 664 | 46.9s | ✅ |
+| **RW-09** | AIL No Idioms | `97c856e2-339b-4faf-8fa0-238eeabac2b9` | 4 | 3 | 1 904 | 1 368 | 4 827 | **8 099** | 23 931 | 113 674 | 27.2s | ✅ |
+| **RW-09** | AIL With Idioms | `04d73011-40b8-438c-bb6c-868f59fbde8d` | 3 | 2 | 950 | 1 318 | 1 157 | **3 425** | 15 547 | 72 635 | 17.2s | ✅ |
+| **RW-10** | Without AIL | `b4bc9f0e-6b96-4721-bfe3-179bd2083520` | 33 | 32 | 20 217 | 12 241 | 20 591 | **53 049** | 154 111 | 1 473 502 | 128.7s | ✅ |
+| **RW-10** | AIL No Idioms | `e88c8fb2-4358-45aa-afb5-ecebe48687f6` | 4 | 3 | 2 049 | 1 382 | 10 376 | **13 807** | 38 562 | 132 425 | 36.0s | ✅ |
+| **RW-10** | AIL With Idioms | `fce8a32f-9c82-49f9-9dc3-fecaa894e4ea` | 3 | 2 | 1 015 | 1 394 | 2 820 | **5 229** | 18 467 | 83 745 | 17.8s | ✅ |
+
+## 5. Comparison: Real AI Agent Execution vs Deterministic Offline Suite
+
+Why do both the **Real AI Agent Suite** (`docs/BENCHMARKS.md`) and the **Deterministic Offline Suite** ([`docs/BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)) show strong, consistent wins across all 10 scenarios?
+
+| ID | Scenario | Offline Token Savings (Pure AIL / +Idioms) | Real Agent Working Token Savings (Pure AIL / +Idioms) | Offline Turn Savings (Pure AIL / +Idioms) | Real Agent Turn Savings (Pure AIL / +Idioms) |
+| :--- | :--- | :---: | :---: | :---: | :---: |
+| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -46.1% / **-75.5%** | -76.3% / **-89.9%** | -63.0% / **-71.7%** | -80.0% / **-85.0%** |
+| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -39.0% / **-71.0%** | -53.0% / **-80.2%** | -62.2% / **-70.3%** | -42.9% / **-57.1%** |
+| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -64.0% / **-82.2%** | -58.2% / **-69.1%** | -63.6% / **-72.7%** |
+| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.9%** | -58.0% / **-81.9%** | -59.2% / **-69.4%** | -55.6% / **-66.7%** |
+| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.3%** | -59.1% / **-83.4%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
+| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -45.1% / **-74.1%** | -61.4% / **-82.0%** | -56.4% / **-66.7%** | -55.6% / **-66.7%** |
+| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -52.4% / **-83.2%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
+| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.4%** | -59.5% / **-81.5%** | -59.2% / **-69.4%** | -71.4% / **-78.6%** |
+| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.9% / **-73.7%** | -63.0% / **-84.4%** | -57.5% / **-68.1%** | -55.6% / **-66.7%** |
+| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.3% / **-73.6%** | -74.0% / **-90.1%** | -56.5% / **-69.4%** | -87.9% / **-90.9%** |

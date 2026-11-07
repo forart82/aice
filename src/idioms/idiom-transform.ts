@@ -2378,6 +2378,7 @@ const NATIVE_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
   ".php",
   ".kt",
   ".kts",
+  ".css",
   ".html",
   ".twig",
   ".yaml",
@@ -3043,9 +3044,13 @@ function resolveUpdatedParams(
 export async function updateProjectIdiom(
   dir: string,
   idiomName: string,
-  newTemplateAil: string,
+  rawNewTemplateAil: string,
   options?: { dryRun?: boolean; description?: string; params?: ProjectIdiomParam[] | string },
 ): Promise<IdiomUpdateResult> {
+  const newTemplateAil =
+    rawNewTemplateAil && !rawNewTemplateAil.includes("\n") && /\s+;\s+/.test(rawNewTemplateAil)
+      ? rawNewTemplateAil.replace(/:\s*;\s*/g, ":\n  ").replace(/\s+;\s+/g, "\n")
+      : rawNewTemplateAil;
   const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
   const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
   const bareName = normName.slice(1);
@@ -3382,7 +3387,10 @@ export function formatIdiomsMarkdownSection(
     "",
   ];
 
+  const seenNames = new Set<string>();
   for (const idiom of Object.values(idioms)) {
+    if (seenNames.has(idiom.name)) continue;
+    seenNames.add(idiom.name);
     const paramsStr = idiom.params.map((p) => p.name).join(", ");
     const oneLineTemplate = idiom.templateAil.replace(/\r?\n\s*/g, " ; ");
     lines.push(

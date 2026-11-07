@@ -613,8 +613,18 @@ export async function generateWorkspaceContext(
   const displayTargetPath = formatDisplayPath(resolved.resolvedPath, projectRoot);
 
   const outlines: string[] = [];
+  const symbolSlices: string[] = [];
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
+  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const activeIdioms = idiomsActive ? config.idioms : undefined;
+
+  const requestedSelectors = options.symbol
+    ? options.symbol
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : [];
 
   for (const f of resolved.files) {
     const relFile = formatDisplayPath(f, projectRoot);
@@ -626,6 +636,52 @@ export async function generateWorkspaceContext(
         projectRoot,
       });
       outlines.push(`### \`${relFile}\`\n\`\`\`ail\n${oRes.text}\n\`\`\``);
+
+      if (requestedSelectors.length > 0) {
+        const rawFileContent = fs.readFileSync(f, "utf-8");
+        let fileAil = rawFileContent;
+        if (!f.endsWith(".ail")) {
+          const targetLang = detectTargetFromPath(f);
+          const decomp = decompile(rawFileContent, targetLang, { filePath: f });
+          fileAil = decomp.ail;
+        }
+        if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
+          try {
+            fileAil = collapseAilSourceIdioms(fileAil, activeIdioms, f).ail;
+          } catch {
+            // ignore
+          }
+        }
+        for (const rawSel of requestedSelectors) {
+          let symSel = rawSel;
+          const colonIdx = rawSel.indexOf(":");
+          if (colonIdx > 0 && !rawSel.startsWith("block:") && !rawSel.includes("::")) {
+            const fileFilter = rawSel.slice(0, colonIdx).trim();
+            symSel = rawSel.slice(colonIdx + 1).trim();
+            if (path.basename(f) !== fileFilter && relFile !== fileFilter) {
+              continue;
+            }
+          }
+          try {
+            let sliced = extractSymbolFromAilSource(fileAil, symSel, f)
+              .replace(/^(?:#[^\n]*|module\s+[^\n]+)\n+/g, "")
+              .trim();
+            if (f.endsWith(".html") || f.endsWith(".twig")) {
+              const sLines = sliced.split("\n");
+              if (sLines[0]?.trim().startsWith("component ")) {
+                sliced = sLines
+                  .slice(1)
+                  .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+                  .join("\n")
+                  .trim();
+              }
+            }
+            symbolSlices.push(`### \`${relFile}\` :: \`${symSel}\`\n\`\`\`ail\n${sliced}\n\`\`\``);
+          } catch {
+            // symbol lives in another file
+          }
+        }
+      }
 
       const imports = extractImportsFromFile(f);
       for (const imp of imports) {
@@ -682,43 +738,63 @@ export async function generateWorkspaceContext(
   }
 
   // Format bundle
-  const parts: string[] = [
-    `# AIL Workspace Overview Context Pack: ${displayTargetPath}`,
-    "",
-    "## Project Configuration:",
-    `- Mode: ${config.mode}`,
-    `- Source Directory: ${config.sourceDir}`,
-    `- Output Directory: ${config.outDir}`,
-    `- Target Language: ${config.targetLanguage}`,
-    `- Files Count: ${resolved.files.length}`,
-    "",
-    `## Workspace Files (${resolved.files.length}):`,
-    ...resolved.files.map((f) => `- \`${formatDisplayPath(f, projectRoot)}\``),
-    "",
-  ];
-
-  if (outlines.length > 0) {
-    parts.push("## Module Outlines:", ...outlines, "");
-  }
-
-  if (dependencies.length > 0) {
-    parts.push(`## Workspace Dependencies (${dependencies.length}):`);
-    for (const dep of dependencies) {
-      parts.push(
-        `### Dependency: \`${dep.specifier}\`${dep.resolvedPath ? ` (\`${dep.resolvedPath}\`)` : ""}`,
-      );
-      parts.push("```ail");
-      parts.push(dep.contract);
-      parts.push("```");
-      parts.push("");
+  const parts: string[] = [];
+  if (requestedSelectors.length > 0) {
+    if (outlines.length > 0) {
+      parts.push("## Outlines:", ...outlines, "");
     }
-  }
+    if (symbolSlices.length > 0) {
+      parts.push("## Target Symbol Slices:", ...symbolSlices, "");
+    }
+    if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+      const bundlePreview = [...outlines, ...symbolSlices].join("\n");
+      const usedIdioms: Record<string, ProjectIdiomDefinition> = {};
+      for (const [k, def] of Object.entries(activeIdioms)) {
+        const norm = k.startsWith("$") ? k : `$${k}`;
+        if (bundlePreview.includes(norm)) {
+          usedIdioms[norm] = def;
+        }
+      }
+      if (Object.keys(usedIdioms).length > 0) {
+        parts.push(formatIdiomsMarkdownSection(usedIdioms), "");
+      }
+    }
+  } else {
+    parts.push(
+      `# AIL Workspace Overview Context Pack: ${displayTargetPath}`,
+      "",
+      "## Project Configuration:",
+      `- Mode: ${config.mode}`,
+      `- Source Directory: ${config.sourceDir}`,
+      `- Output Directory: ${config.outDir}`,
+      `- Target Language: ${config.targetLanguage}`,
+      `- Files Count: ${resolved.files.length}`,
+      "",
+      `## Workspace Files (${resolved.files.length}):`,
+      ...resolved.files.map((f) => `- \`${formatDisplayPath(f, projectRoot)}\``),
+      "",
+    );
 
-  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  const activeIdioms = idiomsActive ? config.idioms : undefined;
+    if (outlines.length > 0) {
+      parts.push("## Module Outlines:", ...outlines, "");
+    }
 
-  if (activeIdioms && Object.keys(activeIdioms).length > 0) {
-    parts.push(formatIdiomsMarkdownSection(activeIdioms), "");
+    if (dependencies.length > 0) {
+      parts.push(`## Workspace Dependencies (${dependencies.length}):`);
+      for (const dep of dependencies) {
+        parts.push(
+          `### Dependency: \`${dep.specifier}\`${dep.resolvedPath ? ` (\`${dep.resolvedPath}\`)` : ""}`,
+        );
+        parts.push("```ail");
+        parts.push(dep.contract);
+        parts.push("```");
+        parts.push("");
+      }
+    }
+
+    if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+      parts.push(formatIdiomsMarkdownSection(activeIdioms), "");
+    }
   }
 
   let formattedBundle = parts.join("\n");
@@ -757,7 +833,7 @@ export async function generateWorkspaceContext(
 }
 
 function normalizeIdentForMatch(s: string): string {
-  return s.replace(/_/g, "").toLowerCase();
+  return s.replace(/[_-]/g, "").toLowerCase();
 }
 
 function matchLayoutNodes(nodes: LayoutNode[], rawSelector: string): LayoutNode[] {

@@ -356,7 +356,15 @@ export function scanDirectoryFiles(
           continue;
         }
 
-        if (entry.name.endsWith(".trivia.json")) {
+        if (
+          entry.name.endsWith(".trivia.json") ||
+          entry.name === "ail.config.json" ||
+          entry.name === "package-lock.json" ||
+          entry.name === "tsconfig.json" ||
+          entry.name === "jsconfig.json" ||
+          entry.name === "biome.json" ||
+          entry.name === "rome.json"
+        ) {
           continue;
         }
 

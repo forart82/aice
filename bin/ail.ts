@@ -83,11 +83,6 @@ import {
   splice,
   spliceBatch,
 } from "../src/tools/index.js";
-import {
-  formatRealWorldBenchmarkJson,
-  formatRealWorldBenchmarkMarkdown,
-  runRealWorldBenchmarkSuite,
-} from "../benchmarks/index.js";
 import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
@@ -103,7 +98,7 @@ const program = new Command();
 program
   .name("ail")
   .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.7.14");
+  .version("0.7.15");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -890,6 +885,11 @@ program
 
         if (options.benchmark) {
           try {
+            const {
+              formatRealWorldBenchmarkJson,
+              formatRealWorldBenchmarkMarkdown,
+              runRealWorldBenchmarkSuite,
+            } = await import("../benchmarks/index.js");
             const report = runRealWorldBenchmarkSuite();
             if (options.json) {
               console.log(formatRealWorldBenchmarkJson(report));
@@ -999,8 +999,13 @@ program
   )
   .option("--json", "Output structured JSON report")
   .option("--markdown", "Output formatted GitHub Flavored Markdown report")
-  .action((options: { json?: boolean; markdown?: boolean }) => {
+  .action(async (options: { json?: boolean; markdown?: boolean }) => {
     try {
+      const {
+        runRealWorldBenchmarkSuite,
+        formatRealWorldBenchmarkJson,
+        formatRealWorldBenchmarkMarkdown,
+      } = await import("../benchmarks/index.js");
       const report = runRealWorldBenchmarkSuite();
       if (options.json) {
         console.log(formatRealWorldBenchmarkJson(report));
@@ -1741,11 +1746,14 @@ program
   .description(
     "AST surgical updates: replace, insert, or delete declarations with 90% token reduction",
   )
-  .argument("[path]", "Path to source file (optional when --batch is provided)")
+  .argument("[path]", "Path to source file (optional when --batch or -f is provided)")
+  .argument("[symbol]", "Target symbol identifier (optional shorthand for -s/--symbol)")
+  .option("-f, --file <path>", "Path to source file")
   .option("-s, --symbol <symbol>", "Target symbol identifier")
   .option("-c, --code <code>", "Replacement AIL or native declaration snippet")
+  .option("-t, --template <code>", "Alias for --code")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
-  .option("-d, --delete", "Delete the symbol")
+  .option("-d, --delete [symbol]", "Delete the symbol (or specify an additional symbol to delete)")
   .option("--insert-after <symbol>", "Insert after specified symbol")
   .option("--insert-before <symbol>", "Insert before specified symbol")
   .option("--batch <fileOrJson>", "Execute atomic multi-file batch splice from JSON file or JSON string")
@@ -1756,12 +1764,15 @@ program
   .option("--compile", "Automatically recompile target after splice")
   .action(
     async (
-      targetPath: string | undefined,
+      rawTargetPath: string | undefined,
+      positionalSymbol: string | undefined,
       options: {
+        file?: string;
         symbol?: string;
         code?: string;
+        template?: string;
         body?: string;
-        delete?: boolean;
+        delete?: boolean | string;
         insertAfter?: string;
         insertBefore?: string;
         batch?: string;
@@ -1782,6 +1793,7 @@ program
           const batchRes = await spliceBatch(items, {
             dryRun: options.dryRun,
             compile: options.compile,
+            idioms: options.idioms,
           });
           console.log(
             `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
@@ -1789,13 +1801,42 @@ program
           return;
         }
 
+        let targetPath = rawTargetPath ?? options.file;
+        if (positionalSymbol && !options.symbol) {
+          if (
+            targetPath &&
+            !fs.existsSync(path.resolve(process.cwd(), targetPath)) &&
+            fs.existsSync(path.resolve(process.cwd(), positionalSymbol))
+          ) {
+            options.symbol = targetPath;
+            targetPath = positionalSymbol;
+          } else {
+            options.symbol = positionalSymbol;
+          }
+        }
+
         if (!targetPath) {
           console.error("❌ Error: Must provide <path> or --batch <fileOrJson>.");
           process.exit(1);
         }
 
-        let code = options.code;
-        if (code === undefined && options.body === undefined && !options.delete) {
+        let code = options.code ?? options.template;
+        let extraDeleteSymbol: string | undefined;
+        let isPrimaryDelete = false;
+
+        if (typeof options.delete === "string") {
+          if ((code !== undefined || options.body !== undefined) && options.symbol && options.symbol !== options.delete) {
+            extraDeleteSymbol = options.delete;
+            isPrimaryDelete = false;
+          } else {
+            options.symbol = options.delete;
+            isPrimaryDelete = true;
+          }
+        } else if (options.delete === true) {
+          isPrimaryDelete = true;
+        }
+
+        if (code === undefined && options.body === undefined && !isPrimaryDelete) {
           const stdinContent = await readStdin();
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
@@ -1809,7 +1850,7 @@ program
           symbol: options.symbol,
           code,
           body: options.body,
-          delete: options.delete,
+          delete: isPrimaryDelete,
           insertAfter: options.insertAfter,
           insertBefore: options.insertBefore,
           idioms: options.idioms,
@@ -1819,6 +1860,15 @@ program
         };
 
         const result = await splice(targetPath, spliceOpts);
+        if (extraDeleteSymbol) {
+          await splice(targetPath, {
+            symbol: extraDeleteSymbol,
+            delete: true,
+            idioms: options.idioms,
+            dryRun: options.dryRun,
+            compile: options.compile,
+          });
+        }
 
         if (options.diff) {
           if (result.diff) {
@@ -1832,7 +1882,7 @@ program
           console.log(`[Dry Run] Successfully spliced ${targetPath}`);
           console.log(result.modifiedCode);
         } else {
-          const actionDesc = options.delete
+          const actionDesc = isPrimaryDelete
             ? `Deleted symbol '${result.symbol}'`
             : options.insertAfter
               ? `Inserted after '${options.insertAfter}'`
@@ -1840,7 +1890,7 @@ program
                 ? `Inserted before '${options.insertBefore}'`
                 : options.body
                   ? `Spliced body of '${result.symbol}'`
-                  : `Spliced symbol '${result.symbol}'`;
+                  : `Spliced symbol '${result.symbol}'${extraDeleteSymbol ? ` and deleted '${extraDeleteSymbol}'` : ""}`;
           console.log(`✔ ${actionDesc} in ${targetPath} (${result.tokensSaved ?? 0} tokens saved)`);
           if (options.compile) {
             console.log(`✔ Recompiled target for ${targetPath}`);
@@ -1848,7 +1898,7 @@ program
         }
       } catch (err: unknown) {
         console.error(
-          `❌ Error splicing ${targetPath ?? options.batch}: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error splicing ${rawTargetPath ?? options.file ?? options.batch}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
@@ -2253,6 +2303,7 @@ program
 // Command: idioms [action] [target] [extra]
 program
   .command("idioms [action] [target] [extra]")
+  .alias("idiom")
   .description(
     "Mine, apply, expand, list, toggle (on/off), read, or update project-specific token-saving idioms",
   )
@@ -2269,6 +2320,7 @@ program
     10,
   )
   .option("-c, --code <template>", "New AIL template for `ail idioms update <$name> -c <template>`")
+  .option("--batch <fileOrJson>", "Batch update multiple idioms from JSON object or array")
   .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
   .option("--dry-run", "Preview idiom synthesis or update without modifying files")
@@ -2281,6 +2333,7 @@ program
         minOccurrences?: number;
         minSavings?: number;
         code?: string;
+        batch?: string;
         params?: string;
         json?: boolean;
         dryRun?: boolean;
@@ -2349,17 +2402,82 @@ program
         }
 
         if (action === "update") {
+          if (options.batch) {
+            const batchDir = idiomNameArg && fs.existsSync(path.resolve(process.cwd(), idiomNameArg))
+              ? path.resolve(process.cwd(), idiomNameArg)
+              : process.cwd();
+            const batchPath = path.resolve(process.cwd(), options.batch);
+            const rawJson =
+              fs.existsSync(batchPath) && fs.statSync(batchPath).isFile()
+                ? fs.readFileSync(batchPath, "utf-8")
+                : options.batch;
+            const parsedBatch = JSON.parse(rawJson);
+            const entries: Array<{
+              name?: string;
+              idiom?: string;
+              code?: string;
+              template?: string;
+              templateAil?: string;
+              ail?: string;
+              body?: string;
+              content?: string;
+              replacement?: string;
+              params?: string;
+            }> = Array.isArray(parsedBatch)
+              ? parsedBatch
+              : Object.entries(parsedBatch).map(([k, v]) => ({ name: k, code: String(v) }));
+            const batchResults = [];
+            let totalOcc = 0;
+            const modFilesSet = new Set<string>();
+            for (const entry of entries) {
+              const idName = entry.name || entry.idiom || "";
+              const idCode =
+                entry.code ??
+                entry.template ??
+                entry.templateAil ??
+                entry.ail ??
+                entry.body ??
+                entry.content ??
+                entry.replacement ??
+                "";
+              const r = await updateProjectIdiom(batchDir, idName, idCode, {
+                dryRun,
+                params: entry.params ?? options.params,
+              });
+              batchResults.push(r);
+              totalOcc += r.updatedOccurrences;
+              for (const mf of r.modifiedFiles) modFilesSet.add(mf);
+            }
+            if (isJson) {
+              console.log(JSON.stringify(batchResults, null, 2));
+            } else {
+              console.log(
+                `✔ Batch updated ${entries.length} idiom(s): ${totalOcc} occurrence(s) across ${modFilesSet.size} file(s)`,
+              );
+            }
+            return;
+          }
+
           if (!idiomNameArg) {
             console.error(
               "❌ Error: Must specify idiom name: `ail idioms update <$name> -c \"<template>\" [dir]`",
             );
             process.exit(1);
           }
-          if (!options.code || !options.code.trim()) {
+          let templateCode = options.code;
+          let resolvedTargetDir = targetDir;
+          if ((!templateCode || !templateCode.trim()) && extraArg) {
+            const candidateDir = path.resolve(process.cwd(), extraArg);
+            if (!fs.existsSync(candidateDir) || !fs.statSync(candidateDir).isDirectory()) {
+              templateCode = extraArg;
+              resolvedTargetDir = process.cwd();
+            }
+          }
+          if (!templateCode || !templateCode.trim()) {
             console.error("❌ Error: Must provide `-c, --code <template>` when updating an idiom.");
             process.exit(1);
           }
-          const res = await updateProjectIdiom(targetDir, idiomNameArg, options.code, {
+          const res = await updateProjectIdiom(resolvedTargetDir, idiomNameArg, templateCode, {
             dryRun,
             params: options.params,
           });

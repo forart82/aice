@@ -14,15 +14,23 @@ import { parse } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 
-const cl100k = getEncoding("cl100k_base");
-const o200k = getEncoding("o200k_base");
+let cl100k: ReturnType<typeof getEncoding> | undefined;
+let o200k: ReturnType<typeof getEncoding> | undefined;
+
+function getTokenizerEncoding(encoding: "cl100k_base" | "o200k_base" = "cl100k_base") {
+  if (encoding === "o200k_base") {
+    if (!o200k) o200k = getEncoding("o200k_base");
+    return o200k;
+  }
+  if (!cl100k) cl100k = getEncoding("cl100k_base");
+  return cl100k;
+}
 
 export function estimateTokens(
   text: string,
   encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
 ): number {
-  const enc = encoding === "o200k_base" ? o200k : cl100k;
-  return enc.encode(text).length;
+  return getTokenizerEncoding(encoding).encode(text).length;
 }
 
 export class TiktokenTokenizer {
@@ -44,8 +52,7 @@ export class TiktokenTokenizer {
     text: string,
     encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
   ): number[] {
-    const enc = encoding === "o200k_base" ? o200k : cl100k;
-    return Array.from(enc.encode(text));
+    return Array.from(getTokenizerEncoding(encoding).encode(text));
   }
 }
 
@@ -130,12 +137,14 @@ export function calculateFileTokenomics(
   const ailChars = ailContent.length;
   const charSavingsPct = targetChars > 0 ? ((targetChars - ailChars) / targetChars) * 100 : 0;
 
-  const targetCl100k = cl100k.encode(targetContent).length;
-  const ailCl100k = cl100k.encode(ailContent).length;
+  const encCl100k = getTokenizerEncoding("cl100k_base");
+  const encO200k = getTokenizerEncoding("o200k_base");
+  const targetCl100k = encCl100k.encode(targetContent).length;
+  const ailCl100k = encCl100k.encode(ailContent).length;
   const cl100kSavingsPct = targetCl100k > 0 ? ((targetCl100k - ailCl100k) / targetCl100k) * 100 : 0;
 
-  const targetO200k = o200k.encode(targetContent).length;
-  const ailO200k = o200k.encode(ailContent).length;
+  const targetO200k = encO200k.encode(targetContent).length;
+  const ailO200k = encO200k.encode(ailContent).length;
   const o200kSavingsPct = targetO200k > 0 ? ((targetO200k - ailO200k) / targetO200k) * 100 : 0;
 
   let drift = false;

@@ -71,12 +71,22 @@ export interface SpliceOptions {
 
 export interface BatchSpliceItem extends SpliceOptions {
   filePath: string;
+  file?: string;
+  path?: string;
+  ail?: string;
+  template?: string;
+  snippet?: string;
+  content?: string;
+  replacement?: string;
+  insert_after?: string;
+  insert_before?: string;
 }
 
 export interface BatchSpliceOptions {
   projectRoot?: string;
   dryRun?: boolean;
   compile?: boolean;
+  idioms?: boolean;
 }
 
 export interface BatchSpliceResult {
@@ -126,7 +136,10 @@ export function findSpliceTargetSymbol(ast: Module, symbol: string): TargetSymbo
   for (const item of ast.items) {
     if (
       item.kind === "StyleDecl" &&
-      (item.name === symbol || item.name.replace(/^[.#]/, "") === symbol.replace(/^[.#]/, ""))
+      (item.name === symbol ||
+        item.name.replace(/^[.#]/, "") === symbol.replace(/^[.#]/, "") ||
+        item.name.replace(/^[.#]/, "").replace(/[_-]/g, "").toLowerCase() ===
+          symbol.replace(/^[.#]/, "").replace(/[_-]/g, "").toLowerCase())
     ) {
       return { name: item.name, node: item, kind: "style" };
     }
@@ -2508,13 +2521,11 @@ function parseSnippetToExpandedDecl(
   let parsedMod: Module | undefined;
   let lastErr: unknown;
 
-  // Attempt 1: If not explicitly body-only, try parsing as a full function/method declaration
-  if (!isBodyOnly) {
-    try {
-      parsedMod = parse(normalizedAil, filePath);
-    } catch (err) {
-      lastErr = err;
-    }
+  // Attempt 1: Try parsing as a full function/method declaration (even if passed via -b/--body)
+  try {
+    parsedMod = parse(normalizedAil, filePath);
+  } catch (err) {
+    lastErr = err;
   }
 
   const hasFnOrClassDecl = (mod?: Module): boolean =>
@@ -2694,7 +2705,12 @@ function emitNativeSnippetForContext(
     return rawSnippet.trim();
   }
 
-  if (!isBodyOnly) {
+  if (
+    !isBodyOnly ||
+    /^\s*(?:pub\s+)?(?:type|struct|enum|class|interface|const|val|mut|component|style)\b/.test(
+      rawSnippet,
+    )
+  ) {
     const nonCallable = tryEmitNonCallableAilSnippet(
       rawSnippet,
       filePath,
@@ -2744,7 +2760,7 @@ function spliceDialectNativeSource(
   targetLang: TargetLanguage,
   idioms?: Record<string, ProjectIdiomDefinition>,
 ): SpliceResult | undefined {
-  const anchorSymbol = options.symbol ?? options.insertAfter ?? options.insertBefore;
+  const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
   const rawSnippet = options.code ?? options.body ?? "";
 
   if (targetLang === "css") {
@@ -3151,7 +3167,21 @@ function spliceDialectNativeSource(
       throw new Error(`Must specify target selector with --symbol when splicing ${targetLang.toUpperCase()} file`);
     }
 
-    const sel = anchorSymbol.trim();
+    let sel = anchorSymbol.trim();
+    if (
+      !sel.startsWith("#") &&
+      !sel.startsWith(".") &&
+      !sel.startsWith("block:") &&
+      /^[A-Z]/.test(sel)
+    ) {
+      const blkMatch = rawSnippet.match(/\bblock\s*\(\s*name\s*[:=]\s*["']([^"']+)["']/);
+      const idMatch = rawSnippet.match(/\bid\s*[:=]\s*["']([^"']+)["']/);
+      if (blkMatch) {
+        sel = blkMatch[1];
+      } else if (idMatch) {
+        sel = `#${idMatch[1]}`;
+      }
+    }
     const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block:)/, "");
     const escSel = cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -3298,7 +3328,7 @@ export function spliceNativeSource(
     if (dialectRes) return dialectRes;
   }
 
-  const anchorSymbol = options.symbol ?? options.insertAfter ?? options.insertBefore;
+  const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
   const rawSnippet = options.code ?? options.body ?? "";
 
   // Module-level append without --symbol
@@ -3490,10 +3520,11 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
 
   const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
   const config = loadProjectConfig(root);
+  const activeIdioms = options.idioms === false ? {} : config.idioms;
 
   if (isTwinlessNative) {
     const originalNative = await fs.promises.readFile(fullPath, "utf-8");
-    const result = spliceNativeSource(originalNative, options, fullPath, config.idioms);
+    const result = spliceNativeSource(originalNative, options, fullPath, activeIdioms);
 
     if (!options.dryRun) {
       const dir = path.dirname(fullPath);
@@ -3569,9 +3600,10 @@ export async function spliceBatch(
 
   // Snapshot original contents of all existing target files before applying any changes
   for (const item of items) {
-    const fullPath = path.isAbsolute(item.filePath)
-      ? item.filePath
-      : path.resolve(baseDir, item.filePath);
+    const rawFp = item.filePath || item.file || item.path || "";
+    const fullPath = path.isAbsolute(rawFp)
+      ? rawFp
+      : path.resolve(baseDir, rawFp);
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
       backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
@@ -3586,11 +3618,23 @@ export async function spliceBatch(
 
   try {
     for (const item of items) {
-      const res = await splice(item.filePath, {
+      const rawFp = item.filePath || item.file || item.path || "";
+      const resolvedCode =
+        item.code ??
+        item.ail ??
+        item.template ??
+        item.snippet ??
+        item.content ??
+        item.replacement;
+      const res = await splice(rawFp, {
         ...item,
+        code: resolvedCode,
+        insertAfter: item.insertAfter ?? item.insert_after,
+        insertBefore: item.insertBefore ?? item.insert_before,
         projectRoot: item.projectRoot ?? options.projectRoot,
         dryRun: item.dryRun ?? options.dryRun,
         compile: item.compile ?? options.compile,
+        idioms: item.idioms ?? options.idioms,
       });
       results.push(res);
       modifiedSet.add(res.filePath);
