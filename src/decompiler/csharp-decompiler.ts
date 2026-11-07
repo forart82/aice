@@ -119,7 +119,7 @@ export class CSharpDecompiler {
       // namespace declaration: file-scoped or block
       const nsMatch = trimmed.match(/^namespace\s+([a-zA-Z0-9_.]+)\s*[;{]?/);
       if (nsMatch) {
-        namespaceName = nsMatch[1];
+        namespaceName = namespaceName ? `${namespaceName}.${nsMatch[1]}` : nsMatch[1];
         i++;
         continue;
       }

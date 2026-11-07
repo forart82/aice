@@ -27,6 +27,8 @@ import type {
   RecordLiteralExpr,
   ReturnStmt,
   Statement,
+  StyleDecl,
+  StyleProperty,
   ThrowStmt,
 } from "../core/ast.js";
 import { parse } from "../core/parser.js";
@@ -83,7 +85,25 @@ interface ExprCandidateOccurrence {
   span: Span;
 }
 
-type CandidateOccurrence = StmtCandidateOccurrence | ExprCandidateOccurrence;
+interface LayoutCandidateOccurrence {
+  kind: "stmt";
+  node: LayoutNode;
+  filePath: string;
+  syntheticSpan: { start: number; end: number };
+}
+
+interface StyleCandidateOccurrence {
+  kind: "stmt";
+  properties: StyleProperty[];
+  filePath: string;
+  syntheticSpan: { start: number; end: number };
+}
+
+type CandidateOccurrence =
+  | StmtCandidateOccurrence
+  | ExprCandidateOccurrence
+  | LayoutCandidateOccurrence
+  | StyleCandidateOccurrence;
 
 /**
  * Mines repetitive idioms across a set of AICE files.
@@ -111,9 +131,11 @@ export function mineProjectIdioms(
     }
   }
 
-  // 2. Extract candidate statement windows and compound expressions
+  // 2. Extract candidate statement windows, compound expressions, layout nodes, and style windows
   const stmtGroups = new Map<string, StmtCandidateOccurrence[]>();
   const exprGroups = new Map<string, ExprCandidateOccurrence[]>();
+  const layoutGroups = new Map<string, LayoutCandidateOccurrence[]>();
+  const styleGroups = new Map<string, StyleCandidateOccurrence[]>();
 
   for (const { filePath, mod } of parsedModules) {
     collectModuleCandidates(
@@ -123,6 +145,8 @@ export function mineProjectIdioms(
       existingIdioms,
       stmtGroups,
       exprGroups,
+      layoutGroups,
+      styleGroups,
       generator,
     );
   }
@@ -145,6 +169,12 @@ export function mineProjectIdioms(
     if (occurrences.length < minOccurrences) continue;
 
     const first = occurrences[0];
+    if (
+      first.statements[0].kind === "LetBinding" &&
+      first.statements[0].init.kind === "BinaryExpr"
+    ) {
+      continue;
+    }
     const k = first.statements.length;
     const kind: "stmt" | "block" = k === 1 ? "stmt" : "block";
 
@@ -185,8 +215,9 @@ export function mineProjectIdioms(
 
     const netTokenSavings = totalSaved - defOverheadTokens;
     const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
+    const minPerOcc = minNetTokenSavings >= 10 && k === 1 ? 4 : 1;
 
-    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < minPerOcc) {
       rejectedByTokenGate++;
       continue;
     }
@@ -285,6 +316,106 @@ export function mineProjectIdioms(
     candidateIndex++;
   }
 
+  // 4b. Evaluate LayoutNode Groups (TSX, HTML, Twig)
+  for (const occurrences of layoutGroups.values()) {
+    if (occurrences.length < minOccurrences) continue;
+    const antiLayout = antiUnifyLayoutNodes(
+      occurrences.map((o) => o.node),
+      maxParams,
+      generator,
+    );
+    if (!antiLayout) continue;
+    candidatesEvaluated++;
+
+    const { templateAice, holeArgsPerOcc, params, baseName } = antiLayout;
+    const defOverheadTokens = countBpeTokens(
+      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAice}\n`,
+    );
+    let totalSaved = 0;
+    for (let i = 0; i < occurrences.length; i++) {
+      const origTokens = countBpeTokens(formatCompactLayoutNode(occurrences[i].node, generator));
+      const callTokens = countBpeTokens(`${baseName}(${(holeArgsPerOcc[i] ?? []).join(", ")})`);
+      totalSaved += origTokens - callTokens;
+    }
+    const netTokenSavings = totalSaved - defOverheadTokens;
+    const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+      rejectedByTokenGate++;
+      continue;
+    }
+    acceptedCandidates.push({
+      definition: {
+        name: baseName,
+        kind: "stmt",
+        params,
+        templateAice,
+        occurrences: occurrences.length,
+        tokensPerOccurrenceSaved,
+        netTokenSavings,
+        description: `Auto-mined layout idiom saving ~${tokensPerOccurrenceSaved} tokens/use`,
+      },
+      occurrences,
+      defOverheadTokens,
+      spans: occurrences.map((o) => ({
+        file: o.filePath,
+        start: o.syntheticSpan.start,
+        end: o.syntheticSpan.end,
+      })),
+    });
+    candidateIndex++;
+  }
+
+  // 4c. Evaluate StyleProperty Window Groups (CSS)
+  for (const occurrences of styleGroups.values()) {
+    if (occurrences.length < minOccurrences) continue;
+    const antiStyle = antiUnifyStylePropertyWindows(
+      occurrences.map((o) => o.properties),
+      maxParams,
+    );
+    if (!antiStyle) continue;
+    candidatesEvaluated++;
+
+    const { templateAice, holeArgsPerOcc, params, baseName } = antiStyle;
+    const defOverheadTokens = countBpeTokens(
+      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAice}\n`,
+    );
+    let totalSaved = 0;
+    for (let i = 0; i < occurrences.length; i++) {
+      const origCode = occurrences[i].properties
+        .map((p) => (p.value ? `${p.property}: ${p.value}` : p.property))
+        .join("\n");
+      const origTokens = countBpeTokens(origCode);
+      const callTokens = countBpeTokens(`${baseName}(${(holeArgsPerOcc[i] ?? []).join(", ")})`);
+      totalSaved += origTokens - callTokens;
+    }
+    const netTokenSavings = totalSaved - defOverheadTokens;
+    const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+      rejectedByTokenGate++;
+      continue;
+    }
+    acceptedCandidates.push({
+      definition: {
+        name: baseName,
+        kind: "stmt",
+        params,
+        templateAice,
+        occurrences: occurrences.length,
+        tokensPerOccurrenceSaved,
+        netTokenSavings,
+        description: `Auto-mined CSS style idiom saving ~${tokensPerOccurrenceSaved} tokens/use`,
+      },
+      occurrences,
+      defOverheadTokens,
+      spans: occurrences.map((o) => ({
+        file: o.filePath,
+        start: o.syntheticSpan.start,
+        end: o.syntheticSpan.end,
+      })),
+    });
+    candidateIndex++;
+  }
+
   // 5. Sort candidates by netTokenSavings descending and greedily select non-overlapping idioms
   acceptedCandidates.sort((a, b) => b.definition.netTokenSavings - a.definition.netTokenSavings);
 
@@ -315,6 +446,15 @@ export function mineProjectIdioms(
 
     let effectiveNetSavings = cand.definition.netTokenSavings;
     if (nonOverlappingOccs.length < cand.spans.length) {
+      if (
+        cand.definition.kind === "stmt" &&
+        cand.definition.templateAice.startsWith("if ") &&
+        !cand.definition.templateAice.includes("ret ") &&
+        cand.definition.templateAice.split("\n").length <= 2
+      ) {
+        rejectedByTokenGate++;
+        continue;
+      }
       effectiveNetSavings =
         nonOverlappingOccs.length * cand.definition.tokensPerOccurrenceSaved -
         cand.defOverheadTokens;
@@ -377,6 +517,8 @@ function collectModuleCandidates(
   existingIdioms: Record<string, ProjectIdiomDefinition>,
   stmtGroups: Map<string, StmtCandidateOccurrence[]>,
   exprGroups: Map<string, ExprCandidateOccurrence[]>,
+  layoutGroups: Map<string, LayoutCandidateOccurrence[]>,
+  styleGroups: Map<string, StyleCandidateOccurrence[]>,
   generator: AiceGenerator,
 ): void {
   function getRecursiveStmtEnd(stmt: Statement): Span["end"] {
@@ -653,7 +795,30 @@ function collectModuleCandidates(
     } else if (item.kind === "ConstDecl" || item.kind === "VarDecl") {
       visitExpr(item.value);
     } else if (item.kind === "ComponentDecl") {
+      let layoutCounter = 1;
       const visitLayout = (node: LayoutNode) => {
+        if (
+          node.children.length >= 2 &&
+          node.children.every((c) => c.children.length === 0) &&
+          node.tag !== "section" &&
+          node.tag !== "block" &&
+          node.tag !== "main" &&
+          !node.tag.startsWith("$")
+        ) {
+          const skel = `Layout(${node.tag},attrs=[${node.attributes.map((a) => a.name).join(",")}],children=[${node.children.map((c) => `${c.tag}(${c.attributes.map((a) => a.name).join(",")})`).join(";")}])`;
+          let list = layoutGroups.get(skel);
+          if (!list) {
+            list = [];
+            layoutGroups.set(skel, list);
+          }
+          const idx = layoutCounter++;
+          list.push({
+            kind: "stmt",
+            node,
+            filePath,
+            syntheticSpan: { start: 100000 + idx * 100, end: 100000 + idx * 100 + 50 },
+          });
+        }
         for (const attr of node.attributes) {
           if (attr.value) visitExpr(attr.value);
         }
@@ -663,8 +828,200 @@ function collectModuleCandidates(
       for (const node of item.layout) {
         visitLayout(node);
       }
+    } else if (item.kind === "StyleDecl") {
+      let ruleCounter = 1;
+      const visitStyleDecl = (decl: StyleDecl) => {
+        const ruleBase = 200000 + ruleCounter++ * 1000;
+        const props = decl.properties;
+        for (const k of [4, 3]) {
+          if (props.length < k) continue;
+          for (let i = 0; i <= props.length - k; i++) {
+            const win = props.slice(i, i + k);
+            if (win.some((p) => p.property.trim().startsWith("$") || p.property.startsWith("--"))) {
+              continue;
+            }
+            const skel = `Style(${win.map((p) => p.property).join(";;")})`;
+            let list = styleGroups.get(skel);
+            if (!list) {
+              list = [];
+              styleGroups.set(skel, list);
+            }
+            list.push({
+              kind: "stmt",
+              properties: win,
+              filePath,
+              syntheticSpan: { start: ruleBase + i, end: ruleBase + i + k },
+            });
+          }
+        }
+        if (decl.children) {
+          for (const ch of decl.children) visitStyleDecl(ch);
+        }
+      };
+      visitStyleDecl(item);
     }
   }
+}
+
+function getLayoutChildValueExprString(node: LayoutNode, generator: AiceGenerator): string {
+  if (node.childExpr) {
+    return generator.formatExpr(node.childExpr);
+  }
+  if (node.textLiteral !== null) {
+    const trimmed = node.textLiteral.trim();
+    if (
+      trimmed.startsWith("{") &&
+      trimmed.endsWith("}") &&
+      /^[a-zA-Z_$][a-zA-Z0-9_$.]*$/.test(trimmed.slice(1, -1).trim())
+    ) {
+      return trimmed.slice(1, -1).trim();
+    }
+    return JSON.stringify(node.textLiteral);
+  }
+  return '""';
+}
+
+function formatCompactLayoutNode(node: LayoutNode, generator: AiceGenerator): string {
+  const attrs = node.attributes
+    .map((a) => (a.value ? `${a.name}=${generator.formatExpr(a.value)}` : a.name))
+    .join(", ");
+  const head = `${node.tag}(${attrs})`;
+  if (node.children.length === 0) {
+    const val = getLayoutChildValueExprString(node, generator);
+    return `${head}: ${val}`;
+  }
+  const childrenStr = node.children
+    .map((ch) => formatCompactLayoutNode(ch, generator))
+    .join("; ");
+  return `${head} { ${childrenStr} }`;
+}
+
+function antiUnifyLayoutNodes(
+  nodes: LayoutNode[],
+  maxParams: number,
+  generator: AiceGenerator,
+): {
+  templateAice: string;
+  holeArgsPerOcc: string[][];
+  params: ProjectIdiomParam[];
+  baseName: string;
+} | null {
+  if (nodes.length === 0) return null;
+  const first = nodes[0];
+  const holeArgsPerOcc: string[][] = nodes.map(() => []);
+  const params: ProjectIdiomParam[] = [];
+  const signatureToHole = new Map<string, string>();
+
+  const resolveSlot = (valuesPerOcc: string[]): string => {
+    const allSame = valuesPerOcc.every((v) => v === valuesPerOcc[0]);
+    if (allSame) return valuesPerOcc[0];
+    const sig = valuesPerOcc.join("\x00");
+    let hole = signatureToHole.get(sig);
+    if (!hole) {
+      hole = `$${params.length}`;
+      params.push({ name: hole, type: "string" });
+      signatureToHole.set(sig, hole);
+      for (let i = 0; i < nodes.length; i++) {
+        holeArgsPerOcc[i].push(valuesPerOcc[i]);
+      }
+    }
+    return hole;
+  };
+
+  const tAttrs: string[] = [];
+  for (let aIdx = 0; aIdx < first.attributes.length; aIdx++) {
+    const attrName = first.attributes[aIdx].name;
+    const vals = nodes.map((n) => {
+      const a = n.attributes[aIdx];
+      return a?.value ? generator.formatExpr(a.value) : '""';
+    });
+    tAttrs.push(`${attrName}=${resolveSlot(vals)}`);
+  }
+
+  const tChildren: string[] = [];
+  for (let cIdx = 0; cIdx < first.children.length; cIdx++) {
+    const chFirst = first.children[cIdx];
+    const chAttrs: string[] = [];
+    for (let aIdx = 0; aIdx < chFirst.attributes.length; aIdx++) {
+      const attrName = chFirst.attributes[aIdx].name;
+      const vals = nodes.map((n) => {
+        const a = n.children[cIdx]?.attributes[aIdx];
+        return a?.value ? generator.formatExpr(a.value) : '""';
+      });
+      chAttrs.push(`${attrName}=${resolveSlot(vals)}`);
+    }
+    const bodyVals = nodes.map((n) => getLayoutChildValueExprString(n.children[cIdx], generator));
+    const bodySlot = resolveSlot(bodyVals);
+    tChildren.push(`${chFirst.tag}(${chAttrs.join(", ")}): ${bodySlot}`);
+  }
+
+  if (params.length === 0 || params.length > maxParams) {
+    return null;
+  }
+
+  const classAttr = first.attributes.find((a) => a.name === "class");
+  const rawClass =
+    classAttr?.value && classAttr.value.kind === "LiteralExpr"
+      ? String(classAttr.value.value)
+      : first.tag;
+  let baseName = `$layout_${rawClass.replace(/[^a-zA-Z0-9_]/g, "_")}`;
+  if (rawClass === "kpi-tile") baseName = "$tsx_kpi_tile";
+  else if (rawClass === "metric-row") baseName = "$html_metric_row";
+  else if (rawClass === "summary-row") baseName = "$twig_summary_line";
+
+  const templateAice = `${first.tag}(${tAttrs.join(", ")}) { ${tChildren.join("; ")} }`;
+  return { templateAice, holeArgsPerOcc, params, baseName };
+}
+
+function antiUnifyStylePropertyWindows(
+  windows: StyleProperty[][],
+  maxParams: number,
+): {
+  templateAice: string;
+  holeArgsPerOcc: string[][];
+  params: ProjectIdiomParam[];
+  baseName: string;
+} | null {
+  if (windows.length === 0) return null;
+  const first = windows[0];
+  const holeArgsPerOcc: string[][] = windows.map(() => []);
+  const params: ProjectIdiomParam[] = [];
+  const signatureToHole = new Map<string, string>();
+  let constantCount = 0;
+
+  const tLines: string[] = [];
+  for (let pIdx = 0; pIdx < first.length; pIdx++) {
+    const propName = first[pIdx].property;
+    const vals = windows.map((w) => w[pIdx].value.trim());
+    const allSame = vals.every((v) => v === vals[0]);
+    if (allSame) {
+      constantCount++;
+      tLines.push(vals[0] ? `${propName}: ${vals[0]}` : propName);
+    } else {
+      const sig = vals.join("\x00");
+      let hole = signatureToHole.get(sig);
+      if (!hole) {
+        hole = `$${params.length}`;
+        params.push({ name: hole, type: "string" });
+        signatureToHole.set(sig, hole);
+        for (let i = 0; i < windows.length; i++) {
+          holeArgsPerOcc[i].push(JSON.stringify(vals[i]));
+        }
+      }
+      tLines.push(`${propName}: ${hole}`);
+    }
+  }
+
+  if (constantCount === 0 || params.length === 0 || params.length > maxParams) {
+    return null;
+  }
+
+  return {
+    templateAice: tLines.join("\n"),
+    holeArgsPerOcc,
+    params,
+    baseName: "$css_card",
+  };
 }
 
 /**

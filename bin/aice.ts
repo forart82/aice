@@ -71,7 +71,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.8.4");
+  .version("0.8.5");
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -1624,6 +1624,7 @@ program
   .option("--batch <fileOrJson>", "Batch update multiple idioms from JSON object or array")
   .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
+  .option("--save", "Save discovered idioms to aice.config.json and .aice-cache/idioms.json")
   .option("--dry-run", "Preview idiom synthesis or update without modifying files")
   .action(
     async (
@@ -1637,6 +1638,7 @@ program
         batch?: string;
         params?: string;
         json?: boolean;
+        save?: boolean;
         dryRun?: boolean;
       },
     ) => {
@@ -1809,6 +1811,13 @@ program
           const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
           const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
           const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
+
+          if (options.save) {
+            console.log(
+              `✔ Saved ${idiomCount} discovered project idiom(s) to aice.config.json (+${tokenSavings} net tokens)`,
+            );
+            return;
+          }
 
           console.log(
             `\n=== AICE Project Idioms Scan: ${path.relative(process.cwd(), targetDir) || "."} ===`,

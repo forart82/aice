@@ -126,6 +126,9 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
     expect(realReport.winsWithIdioms).toBe(10);
     expect(realReport.allVerifiedOnDisk).toBe(true);
     expect(realReport.zeroAiceFilesLeftOnDisk).toBe(true);
+    expect(realReport.allColdStartRepos).toBe(true);
+    expect(realReport.allBlindPrompts).toBe(true);
+    expect(realReport.allDecoysIntact).toBe(true);
 
     const seenConversationIds = new Set<string>();
     for (const b of realReport.benchmarks) {
@@ -140,6 +143,11 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
         seenConversationIds.add(m.conversationId);
         expect(m.verifiedOnDisk).toBe(true);
         expect(m.zeroAiceFilesLeftOnDisk).toBe(true);
+        expect(m.coldStartRepo).toBe(true);
+        expect(m.blindPrompt).toBe(true);
+        expect(m.decoysIntact).toBe(true);
+        expect(m.decoysInjected).toBeGreaterThanOrEqual(1);
+        expect(m.apiCostUsd).toBeGreaterThan(0);
       }
 
       // Strict per-scenario monotonic ordering: withoutAice > aiceWithoutIdioms >= aiceWithIdioms
@@ -160,6 +168,9 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
 
       expect(b.aiceWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
       expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.aiceWithoutIdioms.apiTotalTokens);
+
+      expect(b.aiceWithoutIdioms.apiCostUsd).toBeLessThan(b.withoutAice.apiCostUsd);
+      expect(b.aiceWithIdioms.apiCostUsd).toBeLessThan(b.aiceWithoutIdioms.apiCostUsd);
     }
 
     // Strict aggregate ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms across all metrics
@@ -199,9 +210,28 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
     expect(realReport.totals.aiceWithIdiomsApiTotalTokens).toBeLessThan(
       realReport.totals.aiceWithoutIdiomsApiTotalTokens,
     );
+    expect(realReport.totals.aiceWithoutIdiomsApiCostUsd).toBeLessThan(
+      realReport.totals.withoutAiceApiCostUsd,
+    );
+    expect(realReport.totals.aiceWithIdiomsApiCostUsd).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsApiCostUsd,
+    );
 
-    // All 30 runs must have distinct UUIDs
-    expect(seenConversationIds.size).toBe(30);
+    if (realReport.loneNeedleBenchmark) {
+      for (const m of [
+        realReport.loneNeedleBenchmark.withoutAice,
+        realReport.loneNeedleBenchmark.aiceWithoutIdioms,
+        realReport.loneNeedleBenchmark.aiceWithIdioms,
+      ]) {
+        expect(m.conversationId).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        );
+        seenConversationIds.add(m.conversationId);
+      }
+    }
+
+    // All 33 runs (11 scenarios x 3 modes) must have distinct UUIDs
+    expect(seenConversationIds.size).toBe(33);
 
     // Check docs/BENCHMARKS.md
     const realDocsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
@@ -383,4 +413,331 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("enforces adversarial cold-start workspaces (zero pre-baked idioms), non-first seeded targets, blind prompts, RW-11 1-file 0-idiom Lone Needle, procedural decoy sentinels, and cold-start idiom discovery across all 15 languages", async () => {
+    const {
+      ALL_REAL_AGENT_BENCHMARKS,
+      buildTaskSpecText,
+      computeFileDecoySpec,
+      computeSeededFileMutation,
+      HOSTILE_LONE_NEEDLE_SPEC,
+      setupWorkspace,
+      verifyWorkspaceOnDisk,
+    } = await import("../../benchmarks/run-real-agents.js");
+    const { generateContext } = await import("../../src/tools/context.js");
+    const { scanProjectIdioms } = await import("../../src/idioms/index.js");
+
+    // 1. Every scenario prompt is 100% blind (never leaks any symbol name, never uses "first " or "@first")
+    //    and selects a non-first target index (targetIdx >= 1) in every multi-symbol file.
+    for (const seed of [1001, 20261108, 99222165]) {
+      for (const spec of ALL_REAL_AGENT_BENCHMARKS) {
+        const prompt = buildTaskSpecText(spec, seed);
+        expect(prompt.toLowerCase()).not.toContain("first ");
+        expect(prompt).not.toContain("@first");
+        for (const f of spec.files) {
+          const mut = computeSeededFileMutation(seed, spec.id, f, spec.scenario === "new_feature");
+          if (f.refactorSymbols.length > 1) {
+            expect(mut.targetIdx).toBeGreaterThanOrEqual(1);
+          }
+          expect(prompt).not.toContain(f.targetSymbol);
+          expect(prompt).not.toContain(mut.targetSymbol);
+          if (f.obsoleteSymbol) {
+            expect(prompt).not.toContain(f.obsoleteSymbol);
+          }
+        }
+      }
+    }
+
+    // 2. RW-11 (Lone Needle) is a 1-file, 0-idiom scenario covering targetIdx 1..11 where AICE still beats Without AICE
+    expect(HOSTILE_LONE_NEEDLE_SPEC.files).toHaveLength(1);
+    const seenRw11Indices = new Set<number>();
+    for (let s = 1; s <= 150; s++) {
+      const mut11 = computeSeededFileMutation(s, "RW-11", HOSTILE_LONE_NEEDLE_SPEC.files[0], false);
+      expect(mut11.targetIdx).toBeGreaterThanOrEqual(1);
+      expect(mut11.targetIdx).toBeLessThanOrEqual(11);
+      seenRw11Indices.add(mut11.targetIdx);
+    }
+    expect(seenRw11Indices.size).toBe(11);
+    const dir11 = setupWorkspace(HOSTILE_LONE_NEEDLE_SPEC, "aice_with_idioms", 99222165);
+    try {
+      const scanned11 = await scanProjectIdioms(dir11);
+      expect(Object.keys(scanned11.idioms)).toHaveLength(0);
+    } finally {
+      fs.rmSync(dir11, { recursive: true, force: true });
+    }
+    const realReport = loadRealAgentBenchmarkSuiteReport();
+    expect(realReport.loneNeedleBenchmark).toBeDefined();
+    if (realReport.loneNeedleBenchmark) {
+      const ln = realReport.loneNeedleBenchmark;
+      expect(ln.filesCount).toBe(1);
+      expect(ln.aiceWithoutIdiomsWins).toBe(true);
+      expect(ln.aiceWithIdiomsWins).toBe(true);
+      expect(ln.withoutAice.verifiedOnDisk).toBe(true);
+      expect(ln.aiceWithoutIdioms.verifiedOnDisk).toBe(true);
+      expect(ln.aiceWithIdioms.verifiedOnDisk).toBe(true);
+    }
+
+    // 3. Procedural seed produces distinct decoy sentinel names & step constants
+    const d1 = computeFileDecoySpec(1001, "RW-01", "engine.ts");
+    const d2 = computeFileDecoySpec(2002, "RW-01", "engine.ts");
+    expect(d1.fnName).not.toBe(d2.fnName);
+    expect(d1.decoyStep).not.toBe(d2.decoyStep);
+
+    // 4. Cold-start workspace setup on RW-10 (all 15 languages) has zero aice.config.json
+    const rw10 = OFFLINE_BENCHMARKS.find((s) => s.id === "RW-10")!;
+    const dir = setupWorkspace(rw10, "aice_with_idioms", 424242);
+    try {
+      expect(fs.existsSync(path.join(dir, "aice.config.json"))).toBe(false);
+      expect(fs.existsSync(path.join(dir, ".aice-idioms.json"))).toBe(false);
+      expect(fs.readdirSync(dir).filter((f) => f.endsWith(".aice"))).toHaveLength(0);
+
+      // 5. Cold-start generateContext with --idioms and -s "*" discovers & persists all 7 idiom families
+      const ctx = await generateContext(dir, { symbol: "*", idioms: true });
+      expect(fs.existsSync(path.join(dir, "aice.config.json"))).toBe(true);
+      const savedCfg = JSON.parse(fs.readFileSync(path.join(dir, "aice.config.json"), "utf-8"));
+      expect(Object.keys(savedCfg.idioms).sort()).toEqual([
+        "$css_card",
+        "$guard",
+        "$html_metric_row",
+        "$rec_id",
+        "$rec_worker",
+        "$tsx_kpi_tile",
+        "$twig_summary_line",
+      ]);
+      expect(ctx.formattedBundle).toContain("### Active Project Idioms");
+
+      // 6. Naive regex that blindly appends "+ 1" corrupts the decoy sentinel and fails verifyWorkspaceOnDisk
+      const tsFile = rw10.files.find((f) => f.languageId === "ts")!;
+      const tsPath = path.join(dir, tsFile.fileName);
+      const tsDecoy = computeFileDecoySpec(424242, "RW-10", tsFile.fileName);
+      const rawTs = fs.readFileSync(tsPath, "utf-8");
+      expect(rawTs).toContain(tsDecoy.fnName);
+      fs.writeFileSync(
+        tsPath,
+        rawTs.replace(`+ ${tsDecoy.decoyStep}`, `+ ${tsDecoy.decoyStep} + 1`),
+        "utf-8",
+      );
+      const check = verifyWorkspaceOnDisk(rw10, dir, 424242);
+      expect(check.decoysIntact).toBe(false);
+      expect(check.verified).toBe(false);
+
+      // 7. verifyCompilerAndSyntaxOnFile catches syntax corruption across tsx, cs, kt, go, html, twig, yaml
+      const { verifyCompilerAndSyntaxOnFile } = await import("../../benchmarks/run-real-agents.js");
+      const badCases: Array<[string, string, string]> = [
+        ["bad.tsx", "tsx", "export function Bad() { return <div><span>unclosed</div>; }"],
+        ["Bad.cs", "cs", "public class Bad { public static int F(int x) { return x + ; } }"],
+        ["bad.kt", "kt", "fun bad(x: Int): Int {\n  return x +\n}"],
+        ["bad.html", "html", '<main><section id="a"><div>unclosed</main>'],
+        ["bad.twig", "twig", '{% block a %}<div class="summary-row">unclosed{% endblock %}'],
+        ["bad.yaml", "yaml", "config:\n  broken: [\n    unclosed: { a: 1\n"],
+      ];
+      for (const [fname, langId, badSrc] of badCases) {
+        const p = path.join(dir, fname);
+        fs.writeFileSync(p, badSrc, "utf-8");
+        expect(verifyCompilerAndSyntaxOnFile(p, langId as any, dir)).not.toBeNull();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+
+    // 8. Verify README.md C++20 walkthrough ($clampBand + $fmtMetric) end-to-end with g++ -std=c++20 -fsyntax-only
+    const os = await import("node:os");
+    const { splice } = await import("../../src/tools/splice.js");
+    const { verifyCompilerAndSyntaxOnFile } = await import("../../benchmarks/run-real-agents.js");
+    const cppWalkDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-readme-cpp-"));
+    try {
+      fs.writeFileSync(
+        path.join(cppWalkDir, "aice.config.json"),
+        JSON.stringify(
+          {
+            idiomsEnabled: true,
+            idioms: {
+              $clampBand: {
+                name: "$clampBand",
+                kind: "stmt",
+                params: [{ name: "$0" }, { name: "$1" }, { name: "$2" }],
+                templateAice: "if $0 < $1:\n  $0 = $1\nif $0 > $2:\n  $0 = $2",
+              },
+              $fmtMetric: {
+                name: "$fmtMetric",
+                kind: "expr",
+                params: [{ name: "$0" }, { name: "$1" }],
+                templateAice: 'std.string($0 + "=") + std.to_string($1)',
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      const cppFile = path.join(cppWalkDir, "telemetry_report.cpp");
+      fs.writeFileSync(
+        cppFile,
+        [
+          "#include <string>",
+          "",
+          "std::string buildNodeReport(int cpu, int mem, int jit) {",
+          "    if (cpu < 0) { cpu = 0; }",
+          "    if (cpu > 100) { cpu = 100; }",
+          "    if (mem < 128) { mem = 128; }",
+          "    if (mem > 65536) { mem = 65536; }",
+          "",
+          '    const auto header = std::string("[Hello World]");',
+          '    const auto lineCpu = std::string("cpu=") + std::to_string(cpu);',
+          "",
+          '    return header + " " + lineCpu;',
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+      const readmeCtx = await generateContext(cppFile, {
+        symbol: "buildNodeReport",
+        idioms: true,
+        includeCallers: false,
+      });
+      expect(readmeCtx.targetContent).toContain("$clampBand(cpu, 0, 100)");
+      expect(readmeCtx.targetContent).toContain("$clampBand(mem, 128, 65536)");
+      expect(readmeCtx.targetContent).toContain('header := "[Hello World]"');
+      expect(readmeCtx.targetContent).toContain('lineCpu := $fmtMetric("cpu", cpu)');
+
+      await splice(cppFile, {
+        symbol: "buildNodeReport",
+        idioms: true,
+        code: [
+          "pub fn buildNodeReport(cpu:int, mem:int, jit:int) -> str:",
+          "  $clampBand(cpu, 0, 100)",
+          "  $clampBand(mem, 128, 65536)",
+          "  $clampBand(jit, 5, 250)",
+          "",
+          '  header := "[Hello Peter]"',
+          '  lineCpu := $fmtMetric("cpu", cpu)',
+          '  lineJit := $fmtMetric("jit", jit)',
+          '  ret header + " " + lineCpu + " " + lineJit',
+        ].join("\n"),
+      });
+      const splicedCpp = fs.readFileSync(cppFile, "utf-8");
+      expect(splicedCpp).toContain('std::string("[Hello Peter]")');
+      expect(splicedCpp).toContain('std::string("cpu=") + std::to_string(cpu)');
+      expect(splicedCpp).toContain('std::string("jit=") + std::to_string(jit)');
+      expect(verifyCompilerAndSyntaxOnFile(cppFile, "cpp", cppWalkDir)).toBeNull();
+    } finally {
+      fs.rmSync(cppWalkDir, { recursive: true, force: true });
+    }
+  });
+
+  it("handles @first/@1 on deeply nested namespaces and abstract base classes, single-file cold-start --idioms, and nested layout containers", async () => {
+    const os = await import("node:os");
+    const { generateContext } = await import("../../src/tools/context.js");
+    const { splice } = await import("../../src/tools/splice.js");
+    const { scanProjectIdioms } = await import("../../src/idioms/index.js");
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-nested-first-"));
+    try {
+      const tsPath = path.join(dir, "telemetry_nested.ts");
+      fs.writeFileSync(
+        tsPath,
+        [
+          "export namespace Cloud {",
+          "  export namespace Telemetry {",
+          "    export interface SpanConfig {",
+          "      id: number;",
+          "    }",
+          "    export abstract class AbstractBaseProbe {",
+          "      abstract sample(value: number): number;",
+          "      abstract flush(): void;",
+          "    }",
+          "    export function routeSpanBatch(value: number): number {",
+          "      if (value < 0) {",
+          "        return 0;",
+          "      }",
+          "      const scaled = value * 2;",
+          "      const bounded = scaled + 10;",
+          "      return bounded;",
+          "    }",
+          "    export function auditSpanBatch(value: number): number {",
+          "      if (value < 0) {",
+          "        return 0;",
+          "      }",
+          "      const scaled = value * 2;",
+          "      const bounded = scaled + 20;",
+          "      return bounded;",
+          "    }",
+          "    export function flushSpanBatch(value: number): number {",
+          "      if (value < 0) {",
+          "        return 0;",
+          "      }",
+          "      const scaled = value * 2;",
+          "      const bounded = scaled + 30;",
+          "      return bounded;",
+          "    }",
+          "  }",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // 1. Single-file generateContext with --idioms on a cold-start repo auto-discovers & saves idioms
+      //    and @first skips SpanConfig + AbstractBaseProbe to select routeSpanBatch
+      const singleFileCtx = await generateContext(tsPath, { symbol: "@first", idioms: true });
+      expect(fs.existsSync(path.join(dir, "aice.config.json"))).toBe(true);
+      expect(singleFileCtx.formattedBundle).toContain("routeSpanBatch");
+      expect(singleFileCtx.formattedBundle).not.toContain("AbstractBaseProbe");
+      expect(singleFileCtx.formattedBundle).toContain("$guard");
+
+      // 2. Workspace generateContext with @first also skips AbstractBaseProbe and selects routeSpanBatch
+      const wsCtx = await generateContext(dir, { symbol: "@first", idioms: true });
+      expect(wsCtx.formattedBundle).toContain("fn routeSpanBatch(value:int) -> int:");
+      expect(wsCtx.formattedBundle).not.toContain("class AbstractBaseProbe");
+
+      // 3. splice with symbol: "@first" updates routeSpanBatch inside the nested namespace without corrupting AbstractBaseProbe
+      await splice(tsPath, {
+        symbol: "@first",
+        code: [
+          "fn routeSpanBatch(value:int) -> int:",
+          "  if value < 0:",
+          "    ret 0",
+          "  scaled = value * 3",
+          "  bounded = scaled + 99",
+          "  ret bounded",
+        ].join("\n"),
+      });
+      const updatedTs = fs.readFileSync(tsPath, "utf-8");
+      expect(updatedTs).toContain("export abstract class AbstractBaseProbe");
+      expect(updatedTs).toContain("+ 99");
+
+      // 4. Nested TSX layout containers (<div class="grid"> wrapping <div class="kpi-tile">) only mine leaf-container idioms
+      const tsxPath = path.join(dir, "Board.tsx");
+      fs.writeFileSync(
+        tsxPath,
+        [
+          "export function BoardA() {",
+          "  return (",
+          '    <section className="board">',
+          '      <div className="grid">',
+          '        <div className="kpi-tile"><span>A1</span><strong>10</strong></div>',
+          '        <div className="kpi-tile"><span>A2</span><strong>20</strong></div>',
+          "      </div>",
+          '      <div className="grid">',
+          '        <div className="kpi-tile"><span>B1</span><strong>30</strong></div>',
+          '        <div className="kpi-tile"><span>B2</span><strong>40</strong></div>',
+          "      </div>",
+          '      <div className="grid">',
+          '        <div className="kpi-tile"><span>C1</span><strong>50</strong></div>',
+          '        <div className="kpi-tile"><span>C2</span><strong>60</strong></div>',
+          "      </div>",
+          "    </section>",
+          "  );",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+      const scanned = await scanProjectIdioms(dir);
+      expect(scanned.idioms.$tsx_kpi_tile).toBeDefined();
+      expect(scanned.idioms.$tsx_grid).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
+

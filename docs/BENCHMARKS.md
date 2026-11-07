@@ -1,118 +1,116 @@
-# AICE 2.0 — Real AI Agent Benchmark Suite Report (10 Scenarios — Without & With Idioms)
+# AICE 2.0 — Real AI Agent Benchmark Suite Report (Adversarial Cold-Start Scenarios — Without & With Idioms)
 
-> **Ground-Truth Real AI Agent Proof**: Every number in this report comes from **30 real autonomous AI agent (`agy -p`) executions** (`10 scenarios × 3 modes`) running against isolated temporary workspaces on disk and measured directly from each agent's ground-truth `.system_generated/logs/transcript.jsonl` telemetry log.
+> **Ground-Truth Adversarial Real AI Agent Proof**: Every number in this report comes from **real autonomous AI agent (`agy -p`) executions** running against **cold-start, procedurally seeded, decoy-minefielded workspaces** on disk under **blind issue prompts** (zero symbol name leakage, zero positional `@first` shortcuts, zero pre-baked `aice.config.json`) and measured directly from each agent's ground-truth `.system_generated/logs/transcript.jsonl` telemetry log.
 > For the deterministic offline BPE (`o200k_base`) benchmark suite, see **[`docs/BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)** (`npm run benchmark:offline`).
 
-## 1. Executive Summary: Real AI Agents vs Deterministic Offline Suite
+## 1. Executive Summary: 4 Bulletproof Metrics (Real AI Agents vs Deterministic Offline Suite)
 
-| Metric (Across All 10 Scenarios `RW-01` .. `RW-10`) | Without AICE (Native Tools) | AICE Without Idioms (Pure AICE) | AICE With Idioms (`$idiom` AST Macros) | AICE Win Rate |
+| Metric (Across All 10 Multi-File Scenarios `RW-01` .. `RW-10`) | Without AICE (Native Tools) | AICE Without Idioms (Pure AICE) | AICE With Idioms (Cold-Start `$idiom` Scan + Splice) | AICE Win Rate |
 | :--- | :---: | :---: | :---: | :---: |
-| **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 189 turns | **35 turns (-81.5%)** | **32 turns (-83.1%)** | **10/10 (100%)** |
-| **Real Agent Tool Calls** (`tool_calls`) | 204 calls | **25 calls (-87.8%)** | **22 calls (-89.2%)** | **10/10 (100%)** |
-| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 207,372 | **64,380 (-69.0%)** | **33,839 (-83.7%)** | **10/10 (100%)** |
-| **Real Agent LLM Output Tokens** (`output_tokens`) | 68,108 | **37,100 (-45.5%)** | **11,680 (-82.8%)** | **10/10 (100%)** |
-| **Real Agent Billable API Tokens** (`input + output`) | 895,923 | **227,015 (-74.7%)** | **150,257 (-83.2%)** | **10/10 (100%)** |
-| **Real Agent Total API Context Tokens** (`input + cache + output`) | 6,587,895 | **969,363 (-85.3%)** | **782,293 (-88.1%)** | **10/10 (100%)** |
-| **Real Agent Wall-Clock Duration** | 683.2s | **226.7s** | **195.3s** | **10/10 (100%)** |
+| **1. Real Agent LLM Output Tokens** (`output_tokens`, 4x API cost weight) | 65,433 | **39,034 (-40.4%)** | **11,402 (-82.6%)** | **10/10 (100%)** |
+| **2. Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 196,142 | **79,848 (-59.3%)** | **44,185 (-77.5%)** | **10/10 (100%)** |
+| **3. Real API Dollar Cost (USD)** (`$0.15/1M in, $0.0375/1M cache, $0.60/1M out`) | $0.3575 | **$0.1216 (-66.0%)** | **$0.0673 (-81.2%)** | **10/10 (100%)** |
+| **4. Real Agent Total API Context Tokens** (`input + cache + output`) | 6,222,636 | **1,916,465 (-69.2%)** | **1,078,095 (-82.7%)** | **10/10 (100%)** |
+| **Real Agent Billable API Tokens** (`input + output`) | 842,097 | **286,272 (-66.0%)** | **193,097 (-77.1%)** | **10/10 (100%)** |
+| **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 181 turns | **57 turns (-68.5%)** | **39 turns (-78.5%)** | **10/10 (100%)** |
+| **Real Agent Tool Calls** (`tool_calls`) | 184 calls | **47 calls (-74.5%)** | **29 calls (-84.2%)** | **10/10 (100%)** |
+| **Real Agent Wall-Clock Duration** | 666.2s | **302.0s** | **187.3s** | **10/10 (100%)** |
 | **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,021 | **71,877 (-43.4%)** | **34,042 (-73.2%)** | **10/10 (100%)** |
 | **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 502 turns | **206 turns (-59.0%)** | **154 turns (-69.3%)** | **10/10 (100%)** |
 
-## 2. Methodology & How Real Agent Telemetry Is Measured
+## 2. Adversarial Cold-Start Methodology & How Real Agent Telemetry Is Measured
 
-For each of the 10 real-world scenarios (`RW-01` .. `RW-10`), 3 independent `agy` agent sessions were spawned in isolated temporary directories containing the native source files:
-1. **Without AICE (`without_aice`)**: The agent uses standard native IDE tools (`grep_search`, `view_file`, `replace_file_content`) to locate symbols, read files, update target symbols, delete obsolete symbols, and apply the multi-file pattern refactor across the workspace.
-2. **AICE Without Idioms (`aice_no_idioms`)**: The agent uses AICE On-the-Fly CLI in pure AICE mode (`aice context . -s "..." --no-idioms` and `aice splice --no-idioms --batch '[...]'`).
-3. **AICE With Idioms (`aice_with_idioms`)**: The agent uses AICE On-the-Fly CLI with project `$idiom` macros (`aice context . -s "..." --idioms`, `aice splice --idioms --batch '[...]'`, and `aice idioms update --batch '[...]'`).
+To eliminate any possibility of prompt coaching, pre-computed idioms, positional shortcuts, or regex hacks, every live benchmark run enforces **6 adversarial fairness guarantees**:
+1. **Zero Pre-Baked Idioms (100% Cold-Start Repository)**: `setupWorkspace` writes **only** raw native source files (`.ts`, `.py`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`, `.php`, `.js`, `.tsx`, `.css`, `.html`, `.twig`, `.json`, `.yaml`) to disk. No `aice.config.json` or `.aice-idioms.json` exists when the session starts. In `aice_with_idioms` mode, idioms are discovered and persisted to `aice.config.json` during the live run.
+2. **Procedurally Seeded Non-First Target Symbols & Parameters (Zero Positional Shortcuts)**: Each CLI run generates a fresh random seed (`generateFreshBenchmarkSeed()`) that selects a **non-first declaration (`targetIdx >= 1`)** in every file and randomizes its numeric scale, offset, and band bounds. Prompts never use `@first` or positional indices; instead, targets are described in plain English by their unique domain signature/attributes.
+3. **Blind Issue Prompts & Un-Handcuffed Baseline**: `buildTaskSpecText` never leaks any target symbol name or obsolete symbol name, `without_aice` has full access to `multi_replace_file_content` alongside `grep_search, find_by_name, view_file, replace_file_content`, and AICE prompts provide only a neutral CLI flag/schema reference without step-by-step command recipes.
+4. **Procedurally Seeded Decoy Minefields (`verifyDecoySentinel_<seed>` + `DECOY_SENTINEL_<seed>`)**: Every code module is procedurally injected with a seeded sentinel function (`verifyDecoySentinel_<hex>(probe) -> probe + <step>`) and decoy comment (`DECOY_SENTINEL_<hex>: legacy_deprecated_obsolete_probe + <step>`) that must remain intact. Naive global regex/`sed` replacements or blind `legacy` deletions corrupt the decoys and fail `verifyWorkspaceOnDisk` (`decoysIntact === false`).
+5. **Hostile 1-File, 0-Idiom "Lone Needle" Scenario (`RW-11`) & Real Compiler Verification**: In addition to `RW-01`..`RW-10`, the suite includes `RW-11` (`ledger_reconciler.ts`), a single-file TypeScript bug-fix with **14 heterogeneous functions and 0 repeated project idioms** where cross-file `--batch` and `$idiom` templates provide zero advantage. Every modified workspace is verified with real compilers/parsers (`node --check`, `python3 -m py_compile`, `php -l`, `g++ -std=c++20 -fsyntax-only`, `rustc`, `JSON.parse`, and AICE AST decompilation).
+6. **4-Metric Ground-Truth Telemetry (`transcript.jsonl`)**: Parsed directly from `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl`: **LLM Output Tokens (`outputTokens`)**, **Working Payload Tokens (`workingTokens`)**, **Real API Dollar Cost (`apiCostUsd`)**, and **Total API Context Tokens (`apiTotalTokens`) & LLM Turns (`llmTurns`)**.
 
-After each agent finishes, its ground-truth transcript at `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` is parsed and the workspace on disk is verified:
-- **LLM Turns (`llmTurns`)**: Exact count of `PLANNER_RESPONSE` entries in `transcript.jsonl`.
-- **Tool Calls (`toolCalls`)**: Exact count of `tool_calls` invoked across all `PLANNER_RESPONSE` turns.
-- **Working Payload Tokens (`workingTokens`)**: `toolCallTokens + toolResultTokens + outputTokens` (measured with `o200k_base` on tool arguments/outputs plus exact `PLANNER_RESPONSE.output_tokens`), isolating the actual code/context/edit payload from the static IDE system prompt.
-- **Billable API Tokens (`billableTokens`)**: Exact sum of `input_tokens + output_tokens` reported by the LLM API across all turns.
-- **Total API Context Tokens (`apiTotalTokens`)**: Exact sum of `input_tokens + cache_read_tokens + output_tokens` across all turns (invariant to server-side prompt cache warmth).
-- **On-Disk Verification (`verifiedOnDisk` & `zeroAiceFilesLeftOnDisk`)**: Confirms every target symbol update, obsolete symbol deletion, and multi-file pattern refactor is present in the native files on disk, with `0` `.aice` files left behind.
+## 3. All Adversarial Scenarios — Real AI Agent Results (`RW-01` .. `RW-10` + `RW-11` Hostile Lone Needle)
 
-## 3. All 10 Real-World Scenarios — Real AI Agent Results
-
-| ID | Scenario & Languages | Turns (No AICE / Pure AICE / +Idioms) | Tool Calls (No AICE / Pure AICE / +Idioms) | Working Tokens (No AICE / Pure AICE / +Idioms) | LLM Output Tokens (No AICE / Pure AICE / +Idioms) | Total API Context Tokens (No AICE / Pure AICE / +Idioms) | Verified |
+| ID | Scenario & Languages | Turns (No AICE / Pure AICE / +Idioms) | Working Tokens (No AICE / Pure AICE / +Idioms) | LLM Output Tokens (No AICE / Pure AICE / +Idioms) | Real API Cost USD (No AICE / Pure AICE / +Idioms) | Total API Context Tokens (No AICE / Pure AICE / +Idioms) | Verified (Compiler + Decoys) |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **RW-01** | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)**<br/>`ts, html, css, json` (5 files) | 13 / **3** (-77%) / **3** (-77%) | 16 / **2** (-88%) / **2** (-88%) | 18,827 / **5,294** (-71.9%) / **2,835** (-84.9%) | 5,853 / **2,867** (-51.0%) / **945** (-83.8%) | 414,985 / **77,797** (-81.3%) / **70,214** (-83.1%) | ✅ 100% |
-| **RW-02** | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)**<br/>`py, yaml, json` (4 files) | 9 / **3** (-67%) / **3** (-67%) | 14 / **2** (-86%) / **2** (-86%) | 12,028 / **4,705** (-60.9%) / **2,432** (-79.8%) | 3,288 / **2,542** (-22.7%) / **826** (-74.9%) | 249,685 / **76,316** (-69.4%) / **69,500** (-72.2%) | ✅ 100% |
-| **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 18 / **3** (-83%) / **3** (-83%) | 23 / **2** (-91%) / **2** (-91%) | 17,222 / **5,710** (-66.8%) / **3,274** (-81.0%) | 4,909 / **3,433** (-30.1%) / **1,190** (-75.8%) | 579,533 / **80,162** (-86.2%) / **71,908** (-87.6%) | ✅ 100% |
-| **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 23 / **3** (-87%) / **3** (-87%) | 22 / **2** (-91%) / **2** (-91%) | 23,311 / **6,369** (-72.7%) / **3,138** (-86.5%) | 8,375 / **4,047** (-51.7%) / **1,139** (-86.4%) | 734,104 / **80,983** (-89.0%) / **71,525** (-90.3%) | ✅ 100% |
-| **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 20 / **3** (-85%) / **3** (-85%) | 19 / **2** (-89%) / **2** (-89%) | 21,422 / **4,662** (-78.2%) / **2,388** (-88.8%) | 6,512 / **2,481** (-61.9%) / **780** (-88.0%) | 659,277 / **75,916** (-88.5%) / **69,300** (-89.5%) | ✅ 100% |
-| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 12 / **3** (-75%) / **3** (-75%) | 15 / **2** (-87%) / **2** (-87%) | 12,325 / **5,185** (-57.9%) / **2,785** (-77.4%) | 3,980 / **2,761** (-30.6%) / **915** (-77.0%) | 349,963 / **76,925** (-78.0%) / **70,240** (-79.9%) | ✅ 100% |
-| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 12 / **3** (-75%) / **3** (-75%) | 13 / **2** (-85%) / **2** (-85%) | 12,799 / **5,331** (-58.4%) / **2,611** (-79.6%) | 4,153 / **3,055** (-26.4%) / **892** (-78.5%) | 353,669 / **77,170** (-78.2%) / **69,818** (-80.3%) | ✅ 100% |
-| **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 17 / **3** (-82%) / **3** (-82%) | 16 / **2** (-88%) / **2** (-88%) | 13,409 / **5,507** (-58.9%) / **3,193** (-76.2%) | 4,061 / **3,242** (-20.2%) / **1,131** (-72.2%) | 479,182 / **79,427** (-83.4%) / **71,468** (-85.1%) | ✅ 100% |
-| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 15 / **3** (-80%) / **3** (-80%) | 17 / **2** (-88%) / **2** (-88%) | 17,185 / **6,054** (-64.8%) / **3,092** (-82.0%) | 5,374 / **3,830** (-28.7%) / **1,124** (-79.1%) | 459,474 / **81,598** (-82.2%) / **71,588** (-84.4%) | ✅ 100% |
-| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 50 / **8** (-84%) / **5** (-90%) | 49 / **7** (-86%) / **4** (-92%) | 58,844 / **15,563** (-73.5%) / **8,091** (-86.3%) | 21,603 / **8,842** (-59.1%) / **2,738** (-87.3%) | 2,308,023 / **263,069** (-88.6%) / **146,732** (-93.6%) | ✅ 100% |
-| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **189** / **35** (-81.5%) / **32** (-83.1%) | **204** / **25** (-87.8%) / **22** (-89.2%) | **207,372** / **64,380** (-69.0%) / **33,839** (-83.7%) | **68,108** / **37,100** (-45.5%) / **11,680** (-82.8%) | **6,587,895** / **969,363** (-85.3%) / **782,293** (-88.1%) | ✅ **30/30** |
+| **RW-01** | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)**<br/>`ts, html, css, json` (5 files) | 16 / **4** (-75%) / **3** (-81%) | 13,270 / **5,796** (-56.3%) / **3,490** (-73.7%) | 4,216 / **2,998** (-28.9%) / **904** (-78.6%) | $0.0268 / **$0.0075** (-72.0%) / **$0.0050** (-81.5%) | 459,272 / **102,248** (-77.7%) / **73,246** (-84.0%) | ✅ 100% |
+| **RW-02** | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)**<br/>`py, yaml, json` (4 files) | 15 / **4** (-73%) / **4** (-73%) | 12,236 / **5,263** (-57.0%) / **3,595** (-70.6%) | 3,379 / **2,585** (-23.5%) / **845** (-75.0%) | $0.0290 / **$0.0071** (-75.4%) / **$0.0061** (-78.9%) | 475,790 / **101,001** (-78.8%) / **96,299** (-79.8%) | ✅ 100% |
+| **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 20 / **3** (-85%) / **3** (-85%) | 16,782 / **5,736** (-65.8%) / **3,584** (-78.6%) | 4,886 / **3,464** (-29.1%) / **1,120** (-77.1%) | $0.0354 / **$0.0064** (-82.1%) / **$0.0048** (-86.4%) | 609,263 / **80,908** (-86.7%) / **74,687** (-87.7%) | ✅ 100% |
+| **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 20 / **4** (-80%) / **3** (-85%) | 17,086 / **6,918** (-59.5%) / **3,636** (-78.7%) | 5,337 / **4,196** (-21.4%) / **1,142** (-78.6%) | $0.0353 / **$0.0081** (-77.0%) / **$0.0048** (-86.4%) | 603,769 / **105,837** (-82.5%) / **74,521** (-87.7%) | ✅ 100% |
+| **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 9 / **3** (-67%) / **3** (-67%) | 12,927 / **4,756** (-63.2%) / **3,069** (-76.3%) | 3,938 / **2,534** (-35.6%) / **738** (-81.3%) | $0.0164 / **$0.0058** (-64.9%) / **$0.0047** (-71.3%) | 259,271 / **76,634** (-70.4%) / **71,873** (-72.3%) | ✅ 100% |
+| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 15 / **3** (-80%) / **3** (-80%) | 12,602 / **5,200** (-58.7%) / **3,433** (-72.8%) | 4,013 / **2,778** (-30.8%) / **862** (-78.5%) | $0.0247 / **$0.0060** (-75.7%) / **$0.0048** (-80.4%) | 421,282 / **77,529** (-81.6%) / **72,534** (-82.8%) | ✅ 100% |
+| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 18 / **3** (-83%) / **3** (-83%) | 20,469 / **5,508** (-73.1%) / **3,252** (-84.1%) | 7,689 / **3,194** (-58.5%) / **805** (-89.5%) | $0.0337 / **$0.0063** (-81.3%) / **$0.0048** (-85.8%) | 574,518 / **78,263** (-86.4%) / **72,233** (-87.4%) | ✅ 100% |
+| **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 13 / **3** (-77%) / **3** (-77%) | 14,515 / **5,582** (-61.5%) / **3,483** (-76.0%) | 4,348 / **3,325** (-23.5%) / **1,061** (-75.6%) | $0.0239 / **$0.0066** (-72.2%) / **$0.0052** (-78.3%) | 396,330 / **80,093** (-79.8%) / **74,097** (-81.3%) | ✅ 100% |
+| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 12 / **3** (-75%) / **3** (-75%) | 16,424 / **6,078** (-63.0%) / **3,456** (-79.0%) | 5,533 / **3,840** (-30.6%) / **1,025** (-81.5%) | $0.0237 / **$0.0068** (-71.4%) / **$0.0048** (-79.7%) | 379,342 / **82,542** (-78.2%) / **74,840** (-80.3%) | ✅ 100% |
+| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 43 / **27** (-37%) / **11** (-74%) | 59,831 / **29,011** (-51.5%) / **13,187** (-78.0%) | 22,094 / **10,120** (-54.2%) / **2,900** (-86.9%) | $0.1087 / **$0.0611** (-43.8%) / **$0.0223** (-79.5%) | 2,043,799 / **1,131,410** (-44.6%) / **393,765** (-80.7%) | ✅ 100% |
+| **TOTAL (`RW-01..10`)** | **All 10 Multi-File Scenarios (15/15 Languages)** | **181** / **57** (-68.5%) / **39** (-78.5%) | **196,142** / **79,848** (-59.3%) / **44,185** (-77.5%) | **65,433** / **39,034** (-40.4%) / **11,402** (-82.6%) | **$0.3575** / **$0.1216** (-66.0%) / **$0.0673** (-81.2%) | **6,222,636** / **1,916,465** (-69.2%) / **1,078,095** (-82.7%) | ✅ **30/30** |
+| **RW-11 (Hostile 0-Idiom)** | **Single-File 0-Idiom Surgical Bug-Fix (Lone Needle in a Decoy Haystack)**<br/>`ts` (1 file, **0 idioms**) | 5 / **3** (-40%) / **3** (-40%) | 2,028 / **1,183** (-41.7%) / **1,133** (-44.1%) | 499 / **256** (-48.7%) / **240** (-51.9%) | $0.0066 / **$0.0042** (-36.6%) / **$0.0042** (-36.8%) | 112,930 / **66,956** (-40.7%) / **66,940** (-40.7%) | ✅ 100% |
 
-## 4. Ground-Truth Conversation ID Audit Trail (30 Real Agent Sessions)
+## 4. Ground-Truth Conversation ID Audit Trail (Real Agent Sessions)
 
 Every run below corresponds to a real agent session whose `transcript.jsonl` log was recorded under `~/.gemini/antigravity-cli/brain/<conversationId>/.system_generated/logs/transcript.jsonl` and stored in [`benchmarks/real-agent-results.json`](../benchmarks/real-agent-results.json):
 
-| Benchmark | Mode | Conversation ID (`brain/<id>`) | LLM Turns | Tool Calls | Tool Call Tokens | Tool Result Tokens | LLM Output Tokens | Working Tokens | Billable Tokens (`in+out`) | Total API Tokens (`in+cache+out`) | Duration | Disk Verified |
+| Benchmark | Mode | Conversation ID (`brain/<id>`) | Seed | Turns | Tool Calls | Working Tokens | LLM Output Tokens | Billable Tokens (`in+out`) | Total API Tokens (`in+cache+out`) | API Cost (USD) | Duration | Verified & Decoys Intact |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **RW-01** | Without AICE | `3e8c1da8-ac9f-4644-b078-06ffbdfc1847` | 13 | 16 | 5 541 | 7 433 | 5 853 | **18 827** | 77 043 | 414 985 | 46.3s | ✅ |
-| **RW-01** | AICE No Idioms | `c9135238-e694-487c-9d37-0a9ac8250402` | 3 | 2 | 901 | 1 526 | 2 867 | **5 294** | 16 617 | 77 797 | 17.3s | ✅ |
-| **RW-01** | AICE With Idioms | `17f67d0b-abb3-45b0-ac7b-836f030619b0` | 3 | 2 | 994 | 896 | 945 | **2 835** | 13 134 | 70 214 | 19.3s | ✅ |
-| **RW-02** | Without AICE | `1c04e3fd-ed73-44bd-9fcf-6ee6f273e41b` | 9 | 14 | 2 625 | 6 115 | 3 288 | **12 028** | 46 085 | 249 685 | 35.1s | ✅ |
-| **RW-02** | AICE No Idioms | `0d61fd7f-d290-4a78-8197-ec932285f628` | 3 | 2 | 795 | 1 368 | 2 542 | **4 705** | 15 141 | 76 316 | 18.3s | ✅ |
-| **RW-02** | AICE With Idioms | `a8aec2b9-34d6-410d-9ab9-479bf7366d2f` | 3 | 2 | 869 | 737 | 826 | **2 432** | 12 423 | 69 500 | 17.6s | ✅ |
-| **RW-03** | Without AICE | `65fe8013-89eb-4274-82d9-8e6a97d5b7d9` | 18 | 23 | 4 391 | 7 922 | 4 909 | **17 222** | 87 276 | 579 533 | 54.7s | ✅ |
-| **RW-03** | AICE No Idioms | `c6f54cc2-df3f-4b53-acdf-c7de30febb13` | 3 | 2 | 879 | 1 398 | 3 433 | **5 710** | 18 977 | 80 162 | 22.0s | ✅ |
-| **RW-03** | AICE With Idioms | `e3810446-8381-4a18-b870-8d409fdbe6d2` | 3 | 2 | 980 | 1 104 | 1 190 | **3 274** | 14 823 | 71 908 | 19.6s | ✅ |
-| **RW-04** | Without AICE | `a2cd4a5f-b964-4920-8e2d-b4d132503f01` | 23 | 22 | 7 481 | 7 455 | 8 375 | **23 311** | 107 450 | 734 104 | 80.0s | ✅ |
-| **RW-04** | AICE No Idioms | `d0635f89-517e-49a7-8a37-308f2b3f4f8e` | 3 | 2 | 850 | 1 472 | 4 047 | **6 369** | 19 797 | 80 983 | 21.9s | ✅ |
-| **RW-04** | AICE With Idioms | `2fab6580-b35c-409d-9d08-df3abc4adc61` | 3 | 2 | 960 | 1 039 | 1 139 | **3 138** | 14 441 | 71 525 | 20.1s | ✅ |
-| **RW-05** | Without AICE | `ba9085e7-869e-496f-a38f-1f2a34ede71a` | 20 | 19 | 4 887 | 10 023 | 6 512 | **21 422** | 105 644 | 659 277 | 74.2s | ✅ |
-| **RW-05** | AICE No Idioms | `a1d4d5c0-efae-4bb0-8c54-0f890f50a3b9` | 3 | 2 | 818 | 1 363 | 2 481 | **4 662** | 18 821 | 75 916 | 16.7s | ✅ |
-| **RW-05** | AICE With Idioms | `22456023-112d-42ab-8773-a18d8afbf3de` | 3 | 2 | 851 | 757 | 780 | **2 388** | 12 223 | 69 300 | 16.8s | ✅ |
-| **RW-06** | Without AICE | `9237ffb0-efa2-4b59-b4b8-b28caea70bda` | 12 | 15 | 3 613 | 4 732 | 3 980 | **12 325** | 52 829 | 349 963 | 41.8s | ✅ |
-| **RW-06** | AICE No Idioms | `e2718125-9a77-415a-8ff7-7ce371a7e5a5` | 3 | 2 | 891 | 1 533 | 2 761 | **5 185** | 15 748 | 76 925 | 21.7s | ✅ |
-| **RW-06** | AICE With Idioms | `80886fe4-e6d1-4a0c-96da-9dd3d8c9a855` | 3 | 2 | 982 | 888 | 915 | **2 785** | 13 160 | 70 240 | 17.5s | ✅ |
-| **RW-07** | Without AICE | `e7556050-58da-4f5b-a8bc-dd756b7fc712` | 12 | 13 | 2 794 | 5 852 | 4 153 | **12 799** | 52 273 | 353 669 | 42.0s | ✅ |
-| **RW-07** | AICE No Idioms | `71e236e7-9175-4a8c-ab82-1d986e3bd0b3` | 3 | 2 | 868 | 1 408 | 3 055 | **5 331** | 32 306 | 77 170 | 19.2s | ✅ |
-| **RW-07** | AICE With Idioms | `68b6920c-e72d-4440-8db3-4ff2fe717f65` | 3 | 2 | 949 | 770 | 892 | **2 611** | 12 739 | 69 818 | 17.2s | ✅ |
-| **RW-08** | Without AICE | `8c42e341-7be7-47c3-b96b-6129a465b151` | 17 | 16 | 3 797 | 5 551 | 4 061 | **13 409** | 76 241 | 479 182 | 55.5s | ✅ |
-| **RW-08** | AICE No Idioms | `c2996771-179f-4ecd-b768-8c80e92e23a7` | 3 | 2 | 883 | 1 382 | 3 242 | **5 507** | 18 244 | 79 427 | 19.8s | ✅ |
-| **RW-08** | AICE With Idioms | `2632ed80-7c2d-4e8d-98a5-851ea6188616` | 3 | 2 | 994 | 1 068 | 1 131 | **3 193** | 14 383 | 71 468 | 17.5s | ✅ |
-| **RW-09** | Without AICE | `0fb49627-0489-4109-bc62-3049ec77da26` | 15 | 17 | 4 622 | 7 189 | 5 374 | **17 185** | 76 810 | 459 474 | 56.2s | ✅ |
-| **RW-09** | AICE No Idioms | `092bd566-e029-4148-b953-0c38a661da11` | 3 | 2 | 899 | 1 325 | 3 830 | **6 054** | 20 409 | 81 598 | 20.0s | ✅ |
-| **RW-09** | AICE With Idioms | `5e5c922a-46d9-4745-97e0-dc7373c04d22` | 3 | 2 | 941 | 1 027 | 1 124 | **3 092** | 14 503 | 71 588 | 16.9s | ✅ |
-| **RW-10** | Without AICE | `d543e0e1-1966-4b1c-b912-c6efb777ecd4` | 50 | 49 | 20 976 | 16 265 | 21 603 | **58 844** | 214 272 | 2 308 023 | 197.4s | ✅ |
-| **RW-10** | AICE No Idioms | `817b84b7-2f15-4939-b54f-399275d54f1f` | 8 | 7 | 1 224 | 5 497 | 8 842 | **15 563** | 50 955 | 263 069 | 49.8s | ✅ |
-| **RW-10** | AICE With Idioms | `b8323091-5235-4a05-a37e-1c2cacb45b4d` | 5 | 4 | 1 322 | 4 031 | 2 738 | **8 091** | 28 428 | 146 732 | 32.7s | ✅ |
+| **RW-01** | Without AICE | `65d545da-ffdb-4435-bbc4-5d91b822dfd5` | `69295299` | 16 | 15 | **13,270** | 4,216 | 68,424 | 459,272 | $0.0268 | 37.5s | ✅ |
+| **RW-01** | AICE No Idioms | `70d632fc-a99b-4957-a37b-bd56363740fd` | `69295299` | 4 | 3 | **5,796** | 2,998 | 20,696 | 102,248 | $0.0075 | 19.4s | ✅ |
+| **RW-01** | AICE With Idioms | `e66c07d0-d3aa-430a-9048-74ec9445c7f2` | `69295299` | 3 | 2 | **3,490** | 904 | 16,155 | 73,246 | $0.0050 | 12.4s | ✅ |
+| **RW-02** | Without AICE | `780e6031-9c76-4cb1-81f9-72cc25e01e9f` | `69295299` | 15 | 14 | **12,236** | 3,379 | 85,745 | 475,790 | $0.0290 | 82.4s | ✅ |
+| **RW-02** | AICE No Idioms | `b5aab4a0-3d78-4779-8795-cb28488b39c4` | `69295299` | 4 | 3 | **5,263** | 2,585 | 19,451 | 101,001 | $0.0071 | 18.3s | ✅ |
+| **RW-02** | AICE With Idioms | `6a67f806-12bf-420d-9a78-32a520cc1acf` | `69295299` | 4 | 3 | **3,595** | 845 | 18,838 | 96,299 | $0.0061 | 15.4s | ✅ |
+| **RW-03** | Without AICE | `f1a58af8-d4aa-463a-9391-47d2f42838e5` | `69295299` | 20 | 19 | **16,782** | 4,886 | 92,367 | 609,263 | $0.0354 | 52.2s | ✅ |
+| **RW-03** | AICE No Idioms | `91db7ba1-5718-49f7-a30a-74d2bdc8790f` | `69295299` | 3 | 2 | **5,736** | 3,464 | 15,642 | 80,908 | $0.0064 | 16.5s | ✅ |
+| **RW-03** | AICE With Idioms | `78f413a8-1562-4abc-9bc2-716855f8b257` | `69295299` | 3 | 2 | **3,584** | 1,120 | 13,513 | 74,687 | $0.0048 | 18.0s | ✅ |
+| **RW-04** | Without AICE | `cd7a0983-62db-4c06-bb92-01fe6dd41b80` | `69295299` | 20 | 19 | **17,086** | 5,337 | 90,973 | 603,769 | $0.0353 | 48.9s | ✅ |
+| **RW-04** | AICE No Idioms | `59d53592-9e13-48c9-81f9-4440bdf0bb5a` | `69295299` | 4 | 3 | **6,918** | 4,196 | 20,197 | 105,837 | $0.0081 | 20.4s | ✅ |
+| **RW-04** | AICE With Idioms | `88b23aff-a5aa-4fa1-b5f8-3a95101ec22e` | `69295299` | 3 | 2 | **3,636** | 1,142 | 13,347 | 74,521 | $0.0048 | 13.3s | ✅ |
+| **RW-05** | Without AICE | `192b1b9e-7a1c-4349-89ad-be3164c44806` | `69295299` | 9 | 12 | **12,927** | 3,938 | 43,366 | 259,271 | $0.0164 | 34.0s | ✅ |
+| **RW-05** | AICE No Idioms | `6e4d304a-2c0c-4a01-9c24-a1515fedb43f` | `69295299` | 3 | 2 | **4,756** | 2,534 | 15,458 | 76,634 | $0.0058 | 15.8s | ✅ |
+| **RW-05** | AICE With Idioms | `fc4ecd2b-598f-43e9-9729-d9be46d96b63` | `69295299` | 3 | 2 | **3,069** | 738 | 14,786 | 71,873 | $0.0047 | 14.0s | ✅ |
+| **RW-06** | Without AICE | `76d421f2-65d2-4bf0-befc-0bfd637c06d6` | `69295299` | 15 | 14 | **12,602** | 4,013 | 62,992 | 421,282 | $0.0247 | 56.0s | ✅ |
+| **RW-06** | AICE No Idioms | `4dc04164-761a-493f-bf59-8cf9e57304f6` | `69295299` | 3 | 2 | **5,200** | 2,778 | 16,350 | 77,529 | $0.0060 | 18.7s | ✅ |
+| **RW-06** | AICE With Idioms | `b594cbee-18fd-430b-853b-472422b085cb` | `69295299` | 3 | 2 | **3,433** | 862 | 15,445 | 72,534 | $0.0048 | 17.0s | ✅ |
+| **RW-07** | Without AICE | `3e48d206-79a6-49ab-9926-9589f1b3caea` | `69295299` | 18 | 17 | **20,469** | 7,689 | 77,683 | 574,518 | $0.0337 | 70.6s | ✅ |
+| **RW-07** | AICE No Idioms | `041b6523-8587-495b-bef3-912853f7764e` | `69295299` | 3 | 2 | **5,508** | 3,194 | 17,084 | 78,263 | $0.0063 | 18.0s | ✅ |
+| **RW-07** | AICE With Idioms | `a31d5464-1ee7-460d-9188-0bd0ee7740d5` | `69295299` | 3 | 2 | **3,252** | 805 | 15,145 | 72,233 | $0.0048 | 13.0s | ✅ |
+| **RW-08** | Without AICE | `93c25116-1a84-4730-842e-ec0ac577aa9f` | `69295299` | 13 | 17 | **14,515** | 4,348 | 62,581 | 396,330 | $0.0239 | 50.0s | ✅ |
+| **RW-08** | AICE No Idioms | `4d80f859-b8ab-4d7c-a062-cf53724183c0` | `69295299` | 3 | 2 | **5,582** | 3,325 | 18,908 | 80,093 | $0.0066 | 19.4s | ✅ |
+| **RW-08** | AICE With Idioms | `3630fc66-e6e3-4499-b49d-edcb14577ab7` | `69295299` | 3 | 2 | **3,483** | 1,061 | 17,004 | 74,097 | $0.0052 | 15.1s | ✅ |
+| **RW-09** | Without AICE | `b4bbd693-a406-455d-bf37-086814382599` | `69295299` | 12 | 15 | **16,424** | 5,533 | 61,679 | 379,342 | $0.0237 | 51.3s | ✅ |
+| **RW-09** | AICE No Idioms | `6cda441e-6334-4d88-9046-084408dd75a5` | `69295299` | 3 | 2 | **6,078** | 3,840 | 17,272 | 82,542 | $0.0068 | 20.8s | ✅ |
+| **RW-09** | AICE With Idioms | `1a71812d-7206-4719-ba65-75e51551c2e2` | `69295299` | 3 | 2 | **3,456** | 1,025 | 13,666 | 74,840 | $0.0048 | 16.3s | ✅ |
+| **RW-10** | Without AICE | `5b4512ec-3a1c-442f-9454-bf8d7e4a073d` | `69295299` | 43 | 42 | **59,831** | 22,094 | 196,287 | 2,043,799 | $0.1087 | 183.3s | ✅ |
+| **RW-10** | AICE No Idioms | `a856f56f-1499-45f8-b65e-4390ff2bfe6e` | `69295299` | 27 | 26 | **29,011** | 10,120 | 125,214 | 1,131,410 | $0.0611 | 134.7s | ✅ |
+| **RW-10** | AICE With Idioms | `78dcaead-37bc-4d85-b398-e8864cccef06` | `69295299` | 11 | 10 | **13,187** | 2,900 | 55,198 | 393,765 | $0.0223 | 52.7s | ✅ |
+| **RW-11** | Without AICE | `3107d3d4-1ec8-441a-bf0b-b4fafe5dacaf` | `69295299` | 5 | 4 | **2,028** | 499 | 19,212 | 112,930 | $0.0066 | 18.4s | ✅ |
+| **RW-11** | AICE No Idioms | `eaa3ea68-569a-42bd-9c89-a578dfcd246a` | `69295299` | 3 | 2 | **1,183** | 256 | 13,964 | 66,956 | $0.0042 | 14.9s | ✅ |
+| **RW-11** | AICE With Idioms | `0fbb33f4-f2c4-4bab-9031-6d1a9f4911f9` | `69295299` | 3 | 2 | **1,133** | 240 | 13,948 | 66,940 | $0.0042 | 16.8s | ✅ |
 
 ## 5. Comparison: Real AI Agent Execution vs Deterministic Offline Suite
 
-Why do both the **Real AI Agent Suite** (`docs/BENCHMARKS.md`) and the **Deterministic Offline Suite** ([`docs/BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)) show strong, consistent wins across all 10 scenarios?
-
-| ID | Scenario | Offline Token Savings (Pure AICE / +Idioms) | Real Agent Working Token Savings (Pure AICE / +Idioms) | Offline Turn Savings (Pure AICE / +Idioms) | Real Agent Turn Savings (Pure AICE / +Idioms) |
+| ID | Scenario | Offline Token Savings (Pure AICE / +Idioms) | Real Agent Working Token Savings (Pure AICE / +Idioms) | Real Agent API Cost Savings (Pure AICE / +Idioms) | Real Agent Turn Savings (Pure AICE / +Idioms) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -46.1% / **-75.4%** | -71.9% / **-84.9%** | -63.0% / **-71.7%** | -76.9% / **-76.9%** |
-| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -39.0% / **-71.0%** | -60.9% / **-79.8%** | -62.2% / **-70.3%** | -66.7% / **-66.7%** |
-| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -66.8% / **-81.0%** | -58.2% / **-69.1%** | -83.3% / **-83.3%** |
-| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.8%** | -72.7% / **-86.5%** | -59.2% / **-69.4%** | -87.0% / **-87.0%** |
-| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.2%** | -78.2% / **-88.8%** | -61.1% / **-69.4%** | -85.0% / **-85.0%** |
-| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -44.7% / **-73.9%** | -57.9% / **-77.4%** | -56.4% / **-66.7%** | -75.0% / **-75.0%** |
-| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -58.4% / **-79.6%** | -61.1% / **-69.4%** | -75.0% / **-75.0%** |
-| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.3%** | -58.9% / **-76.2%** | -59.2% / **-69.4%** | -82.3% / **-82.3%** |
-| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.6% / **-73.5%** | -64.8% / **-82.0%** | -57.5% / **-68.1%** | -80.0% / **-80.0%** |
-| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.1% / **-73.5%** | -73.5% / **-86.3%** | -56.5% / **-69.4%** | -84.0% / **-90.0%** |
+| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -46.1% / **-75.4%** | -56.3% / **-73.7%** | -72.0% / **-81.5%** | -75.0% / **-81.3%** |
+| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -39.0% / **-71.0%** | -57.0% / **-70.6%** | -75.4% / **-78.9%** | -73.3% / **-73.3%** |
+| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -65.8% / **-78.6%** | -82.1% / **-86.4%** | -85.0% / **-85.0%** |
+| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.8%** | -59.5% / **-78.7%** | -77.0% / **-86.4%** | -80.0% / **-85.0%** |
+| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.2%** | -63.2% / **-76.3%** | -64.9% / **-71.3%** | -66.7% / **-66.7%** |
+| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -44.7% / **-73.9%** | -58.7% / **-72.8%** | -75.7% / **-80.4%** | -80.0% / **-80.0%** |
+| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -73.1% / **-84.1%** | -81.3% / **-85.8%** | -83.3% / **-83.3%** |
+| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.3%** | -61.5% / **-76.0%** | -72.2% / **-78.3%** | -76.9% / **-76.9%** |
+| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.6% / **-73.5%** | -63.0% / **-79.0%** | -71.4% / **-79.7%** | -75.0% / **-75.0%** |
+| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.1% / **-73.5%** | -51.5% / **-78.0%** | -43.8% / **-79.5%** | -37.2% / **-74.4%** |
 
-## 6. Architectural Analysis: When & Why AICE On-the-Fly Is Better (and Honest Trade-Offs)
+## 6. Architectural Analysis: Why AICE Wins Even on Unfair, Cold-Start, 0-Idiom & Decoy-Minefield Workspaces
 
-### A. 100% Fair, Uncoached Benchmark Design
-- **Identical Plain-English Engineering Task**: All 3 modes (`without_aice`, `aice_no_idioms`, `aice_with_idioms`) receive the exact same plain-English engineering specification (`buildTaskSpecText` in [`benchmarks/run-real-agents.ts`](../benchmarks/run-real-agents.ts)). Zero pre-written `.aice` code snippets, zero `$idiom(...)` macro calls, and zero pre-filled `-s` symbol lists are leaked in the prompt.
-- **Autonomous Symbol & Idiom Discovery**: Every agent must discover the workspace symbols, obsolete/legacy declarations, and (in idiom mode) active `$idiom` templates on its own using its allowed toolset (`grep_search`/`view_file`/`replace_file_content` for `without_aice`; `aice context`, `aice outline`, `aice splice`, `aice idioms` for the AICE modes).
+### A. Adversarial Hostile-to-AICE Design (Zero Coaching, Zero Pre-Baked Idioms, Zero Positional Shortcuts)
+- **Cold-Start Idiom Discovery Paid In-Session**: `setupWorkspace` writes zero `aice.config.json` files. The `aice_with_idioms` agent must discover and persist `aice.config.json` during its live session via `aice context . -s "*" --idioms` (or `aice idioms scan --save`), paying the full cold-start AST mining cost and still beating both `Without AICE` and `AICE Without Idioms` across all 10 multi-file scenarios.
+- **Non-First Seeded Targets + Decoy Sentinels**: Target declarations are procedurally selected at non-first indices (`targetIdx >= 1`) and identified only by their domain parameters/attributes, while every code file contains a seeded `verifyDecoySentinel_<hex>` function and `DECOY_SENTINEL_<hex>` comment that fail verification if altered.
+- **Hostile 1-File, 0-Idiom "Lone Needle" (`RW-11`)**: Even when stripped of multi-file batching (1 file) and repeating idioms (`0` idioms discovered), AICE (`aice_no_idioms` and `aice_with_idioms`) still beats `Without AICE` across turns (`-40.0%`), tool calls (`-50.0%`), working payload tokens (`-41.7%`), LLM output tokens (`-48.7%`), and real API cost.
 
-### B. Why AICE On-the-Fly WITH Idioms (`aice_with_idioms`) Wins 10/10 Across Every Metric
-1. **1-Turn Multi-File Context + AST Macro Compression (`aice context . -s "..." --idioms`)**: Instead of issuing 6–25 separate `view_file` / `grep_search` calls across native files, the agent inspects the workspace `// symbols:` headers, decompiled AICE slices (collapsed into 1-line `$idiom(...)` calls), and active idiom definitions in 1 command (`-83.7%` working payload tokens and `-82.8%` LLM output tokens).
-2. **O(1) Workspace-Wide Pattern Refactoring (`aice splice --idioms --batch` / `aice idioms update --batch`)**: When a structural pattern changes across a codebase (e.g., updating clamping step math across 10+ functions, changing JSX/HTML/Twig class names, or updating JSON/YAML policy fields), `Without AICE` must read and edit every file individually (`50` turns on the 15-language suite `RW-10`). With Project Idioms, the agent updates the shared `$idiom` templates once in a single batch command and AICE atomically re-emits all native call sites (`5` turns on `RW-10`, `-90.0%` turns and `-87.3%` output tokens).
-3. **Batch Surgical AST Splicing (`aice splice --idioms --batch`)**: Target symbol updates, new feature insertions (`insertAfter`), and obsolete symbol deletions (`delete: true`) across multiple languages are applied atomically in 1 batch command with `0` `.aice` files left on disk.
+### B. Why AICE On-the-Fly WITH Idioms (`aice_with_idioms`) Wins 10/10 Multi-File Scenarios Across All 4 Bulletproof Metrics
+1. **Cold-Start AST Mining + Compact Context Pack (`aice context . -s "*" --idioms` / `aice idioms scan --save`)**: In 1 turn, AICE mines repetitive AST patterns across all 15 languages, lists every file's symbol headers (`// symbols:`), and collapses repeating AST blocks into 1-line `$idiom(...)` calls (`-77.5%` working payload tokens and `-82.6%` LLM output tokens).
+2. **O(1) AST-Safe Pattern Refactoring (`aice splice --idioms --batch`)**: Updating the mined `$guard`, `$tsx_kpi_tile`, `$css_card`, `$html_metric_row`, `$twig_summary_line`, `$rec_id`, and `$rec_worker` templates re-emits all matching AST call sites across the workspace while leaving `verifyDecoySentinel_*` functions 100% untouched (`-81.2%` real API dollar cost and `-82.7%` total context tokens).
 
-### C. Why Pure AICE WITHOUT Idioms (`aice_no_idioms`) Wins 10/10 — and Why Idioms Still Matter
-- **Where Pure AICE Wins (`10/10` scenarios)**: Even without `$idiom` macros, `aice context . -s "*" --no-idioms` (with compact 1-line guard/layout slices) and `aice splice --no-idioms --batch` beat `Without AICE` in all 10 scenarios across **LLM Turns (`189 -> 35`, `-81.5%`)**, **Tool Calls (`204 -> 25`, `-87.8%`)**, **Working Payload Tokens (`207,372 -> 64,380`, `-69.0%`)**, **LLM Output Tokens (`68,108 -> 37,100`, `-45.5%`)**, **Billable API Tokens (`895,923 -> 227,015`, `-74.7%`)**, and **Total API Context Tokens (`6,587,895 -> 969,363`, `-85.3%`)**.
-- **Honest Granularity Comparison (`aice_no_idioms` vs `aice_with_idioms`)**: Because `aice splice --no-idioms` splices at the *symbol* boundary (`fn`, `component`, `style`, `config.<key>`), refactoring a pattern across 15–20 declarations without `$idiom` macros requires including each modified declaration's compact AICE slice in the batch JSON payload (`37,100` output tokens across the suite). Enabling Project Idioms (`--idioms`) collapses those repetitive declarations into 1-line `$idiom(...)` calls and O(1) template updates, cutting LLM output tokens by an additional **`-68.5%`** (`37,100 -> 11,680`) and working payload tokens by **`-47.4%`** (`64,380 -> 33,839`).
+### C. Why Pure AICE WITHOUT Idioms (`aice_no_idioms`) Wins 10/10 — and Why Idioms Cut Output Tokens by Another 60%+
+- **Where Pure AICE Wins (`10/10` scenarios + `RW-11` Lone Needle)**: Even without `$idiom` macros, `aice context . -s "*" --no-idioms` and `aice splice --no-idioms --batch` beat `Without AICE` across **LLM Turns (`181 -> 57`, `-68.5%`)**, **Working Payload Tokens (`196,142 -> 79,848`, `-59.3%`)**, **LLM Output Tokens (`65,433 -> 39,034`, `-40.4%`)**, **Real API Dollar Cost (`$0.3575 -> $0.1216`, `-66.0%`)**, and **Total API Context Tokens (`6,222,636 -> 1,916,465`, `-69.2%`)**.
+- **Granularity Advantage of Cold-Start Idioms (`aice_no_idioms` vs `aice_with_idioms`)**: Without idioms, refactoring 15–20 declarations requires splicing each symbol's compact AICE body in the batch JSON payload (`39,034` output tokens). Discovering idioms on the fly collapses those repetitive bodies into O(1) template updates, cutting LLM output tokens by an additional **`-70.8%`** (`39,034 -> 11,402`) and working payload tokens by **`-44.7%`** (`79,848 -> 44,185`).

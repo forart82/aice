@@ -38,6 +38,7 @@ import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
+import { resolveFirstActionableSymbol } from "./context.js";
 import { TypeChecker } from "../typechecker/checker.js";
 
 export interface SpliceOptions {
@@ -1004,8 +1005,25 @@ function locateTsDeclarationSpan(
     memberName = memberName.slice(4);
   }
 
+  const allStmts: ts.Statement[] = [];
+  const collectStmts = (stmts: readonly ts.Statement[]) => {
+    for (const s of stmts) {
+      allStmts.push(s);
+      if (ts.isModuleDeclaration(s)) {
+        let curBody = s.body;
+        while (curBody && ts.isModuleDeclaration(curBody)) {
+          curBody = curBody.body;
+        }
+        if (curBody && ts.isModuleBlock(curBody)) {
+          collectStmts(curBody.statements);
+        }
+      }
+    }
+  };
+  collectStmts(sf.statements);
+
   if (className) {
-    for (const stmt of sf.statements) {
+    for (const stmt of allStmts) {
       if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
         const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
         if (matchingMembers.length > 0) {
@@ -1018,7 +1036,7 @@ function locateTsDeclarationSpan(
   }
 
   // 1. Top-level declaration search (prefer implementation with .body over overload signature headers)
-  const matchingTopStmts = sf.statements.filter(
+  const matchingTopStmts = allStmts.filter(
     (stmt) =>
       (ts.isFunctionDeclaration(stmt) ||
         ts.isClassDeclaration(stmt) ||
@@ -1037,9 +1055,9 @@ function locateTsDeclarationSpan(
       implStmt.body &&
       /<[A-Za-z]/.test(implStmt.body.getText(sf))
     ) {
-      const stmtIdx = sf.statements.indexOf(implStmt);
+      const stmtIdx = allStmts.indexOf(implStmt);
       if (stmtIdx > 0) {
-        const prevStmt = sf.statements[stmtIdx - 1];
+        const prevStmt = allStmts[stmtIdx - 1];
         if (ts.isInterfaceDeclaration(prevStmt) && prevStmt.name.text === `${memberName}Props`) {
           const prevSpan = buildSpanInfoFromTsNode(
             prevStmt,
@@ -1056,7 +1074,7 @@ function locateTsDeclarationSpan(
     return spanInfo;
   }
 
-  for (const stmt of sf.statements) {
+  for (const stmt of allStmts) {
     if (ts.isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         if (ts.isIdentifier(decl.name) && decl.name.text === memberName) {
@@ -1067,7 +1085,7 @@ function locateTsDeclarationSpan(
   }
 
   // 2. Fallback: unique class member search
-  for (const stmt of sf.statements) {
+  for (const stmt of allStmts) {
     if (ts.isClassDeclaration(stmt)) {
       const parentName = stmt.name?.text;
       const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
@@ -3566,6 +3584,36 @@ export function spliceNativeSource(
   idioms?: Record<string, ProjectIdiomDefinition>,
 ): SpliceResult {
   const targetLang = detectTargetFromPath(filePath);
+  if (
+    options.symbol === "@first" ||
+    options.symbol === "@1" ||
+    options.insertAfter === "@first" ||
+    options.insertAfter === "@1" ||
+    options.insertBefore === "@first" ||
+    options.insertBefore === "@1"
+  ) {
+    try {
+      const decomp = decompile(nativeSource, targetLang, { filePath });
+      const firstSym = resolveFirstActionableSymbol(decomp.aice, filePath);
+      if (firstSym) {
+        options = {
+          ...options,
+          symbol:
+            options.symbol === "@first" || options.symbol === "@1" ? firstSym : options.symbol,
+          insertAfter:
+            options.insertAfter === "@first" || options.insertAfter === "@1"
+              ? firstSym
+              : options.insertAfter,
+          insertBefore:
+            options.insertBefore === "@first" || options.insertBefore === "@1"
+              ? firstSym
+              : options.insertBefore,
+        };
+      }
+    } catch {
+      // fall through
+    }
+  }
   if (
     targetLang === "css" ||
     targetLang === "json" ||

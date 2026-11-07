@@ -293,6 +293,28 @@ export class TsDecompiler {
       return this.convertEnumDeclaration(stmt);
     }
 
+    if (ts.isModuleDeclaration(stmt)) {
+      const innerItems: ModuleItem[] = [];
+      let curBody = stmt.body;
+      while (curBody && ts.isModuleDeclaration(curBody)) {
+        curBody = curBody.body;
+      }
+      if (curBody && ts.isModuleBlock(curBody)) {
+        for (const s of curBody.statements) {
+          const conv = this.convertTopLevelStatement(s);
+          if (this.hoistedItems.length > 0) {
+            innerItems.push(...this.hoistedItems);
+            this.hoistedItems = [];
+          }
+          if (conv) {
+            if (Array.isArray(conv)) innerItems.push(...conv);
+            else innerItems.push(conv);
+          }
+        }
+      }
+      return innerItems.length > 0 ? innerItems : null;
+    }
+
     if (ts.isExpressionStatement(stmt)) {
       return {
         kind: "ConstDecl",

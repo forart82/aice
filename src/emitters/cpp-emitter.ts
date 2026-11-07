@@ -544,6 +544,14 @@ export class CppEmitter {
 
         if (expr.callee.kind === "MemberAccessExpr") {
           const objCode = this.emitExpr(expr.callee.object);
+          if (objCode === "std") {
+            if (expr.callee.property === "string" && argCodes.length === 1) {
+              return argCodes[0].startsWith("std::string(")
+                ? argCodes[0]
+                : `std::string(${argCodes[0]})`;
+            }
+            return `std::${expr.callee.property}(${argCodes.join(", ")})`;
+          }
           const lowered = lowerMethodCall(objCode, expr.callee.property, argCodes, "cpp");
           if (lowered.isLowered) {
             return lowered.code;
@@ -591,6 +599,9 @@ export class CppEmitter {
       }
       case "MemberAccessExpr": {
         const obj = this.emitExpr(expr.object);
+        if (obj === "std") {
+          return `std::${expr.property}`;
+        }
         const lowered = lowerPropertyAccess(obj, expr.property, "cpp");
         if (lowered.isLowered) {
           return lowered.code;

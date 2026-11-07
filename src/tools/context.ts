@@ -13,10 +13,18 @@ import {
   type AiceProjectConfig,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
-  resolvePathTargets,
   type ProjectIdiomDefinition,
+  resolvePathTargets,
 } from "../config/index.js";
-import type { ClassDecl, Expr, ImportDecl, LayoutNode, Module, ModuleItem } from "../core/ast.js";
+import type {
+  Block,
+  ClassDecl,
+  Expr,
+  ImportDecl,
+  LayoutNode,
+  Module,
+  ModuleItem,
+} from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { AiceGenerator } from "../decompiler/aice-generator.js";
 import { decompile } from "../decompiler/index.js";
@@ -25,6 +33,7 @@ import {
   collapseAiceSourceIdioms,
   expandAiceSourceIdioms,
   formatIdiomsMarkdownSection,
+  scanProjectIdioms,
 } from "../idioms/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { generateOutline, type OutlineSymbol } from "./outline.js";
@@ -501,6 +510,83 @@ function formatBundle(
   return lines.join("\n");
 }
 
+function isEmptyOrAbstractBody(body: Block | Expr): boolean {
+  if (body.kind === "Block") {
+    if (body.statements.length === 0) return true;
+    if (body.statements.length === 1 && body.statements[0].kind === "ExprStmt") {
+      const e = body.statements[0].expr;
+      if (
+        e.kind === "LiteralExpr" &&
+        (e.literalKind === "nil" || e.value === null || e.value === "...")
+      ) {
+        return true;
+      }
+      if (e.kind === "IdentifierExpr" && (e.name === "nil" || e.name === "pass")) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (
+    body.kind === "LiteralExpr" &&
+    (body.literalKind === "nil" || body.value === null || body.value === "...")
+  ) {
+    return true;
+  }
+  if (body.kind === "IdentifierExpr" && (body.name === "nil" || body.name === "pass")) {
+    return true;
+  }
+  return false;
+}
+
+function isNonActionableModuleItem(it: ModuleItem): boolean {
+  if (it.kind === "TypeDecl") return true;
+  if (it.kind === "FunctionDecl") return isEmptyOrAbstractBody(it.body);
+  if (it.kind === "ClassDecl") {
+    if (it.methods.length === 0) return true;
+    if (
+      it.methods.every(
+        (m) => m.name === "constructor" || m.name === "__init__" || isEmptyOrAbstractBody(m.body),
+      )
+    ) {
+      return true;
+    }
+    if (
+      it.methods.some(
+        (m) => m.name !== "constructor" && m.name !== "__init__" && isEmptyOrAbstractBody(m.body),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function resolveFirstActionableSymbol(
+  aiceSource: string,
+  filePath: string,
+  preParsedMod?: Module,
+): string | undefined {
+  const syms = extractFileSymbolList(aiceSource, filePath);
+  if (syms.length === 0) return undefined;
+  let firstSym = syms.find((s) => s !== ":root") ?? syms[0];
+  try {
+    const mod = preParsedMod ?? parse(aiceSource, filePath);
+    const nonActionableNames = new Set(
+      mod.items
+        .filter(
+          (it): it is Extract<ModuleItem, { name: string }> =>
+            "name" in it && isNonActionableModuleItem(it),
+        )
+        .map((it) => it.name),
+    );
+    firstSym = syms.find((s) => s !== ":root" && !nonActionableNames.has(s)) ?? firstSym;
+  } catch {
+    // fallback to syms
+  }
+  return firstSym;
+}
+
 function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
   try {
     const mod = parse(aiceSource, filePath);
@@ -514,7 +600,13 @@ function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
       ) {
         out.push(item.name);
       } else if (item.kind === "ClassDecl") {
-        if (item.name === "Main" && filePath.endsWith(".cs")) {
+        const isCsStaticContainer =
+          filePath.endsWith(".cs") &&
+          (item.name === "Main" ||
+            (item.properties.length === 0 &&
+              item.methods.length > 0 &&
+              item.methods.every((m) => m.isStatic && !isEmptyOrAbstractBody(m.body))));
+        if (isCsStaticContainer) {
           for (const m of item.methods) {
             out.push(m.name);
           }
@@ -584,7 +676,12 @@ function unwrapSyntheticContainer(src: string, filePath: string): string {
   const sLines = src.split("\n");
   const wrapIdx = sLines.findIndex((l) => {
     const t = l.trim();
-    return t.startsWith("component ") || t === "pub class Main:" || t === "class Main:";
+    return (
+      t.startsWith("component ") ||
+      t === "pub class Main:" ||
+      t === "class Main:" ||
+      (filePath.endsWith(".cs") && /^(?:pub\s+)?class\s+[A-Za-z0-9_]+:$/.test(t))
+    );
   });
   if (wrapIdx < 0) return src;
   return sLines
@@ -630,7 +727,21 @@ export async function generateWorkspaceContext(
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  const activeIdioms = idiomsActive ? config.idioms : undefined;
+  let activeIdioms = idiomsActive ? config.idioms : undefined;
+  if (
+    options.idioms === true &&
+    (!activeIdioms || Object.keys(activeIdioms).length === 0)
+  ) {
+    try {
+      const scanRes = scanProjectIdioms(projectRoot);
+      if (Object.keys(scanRes.idioms).length > 0) {
+        activeIdioms = scanRes.idioms;
+        config.idioms = scanRes.idioms;
+      }
+    } catch {
+      // ignore scan errors
+    }
+  }
 
   const requestedSelectors = options.symbol
     ? options.symbol
@@ -687,9 +798,7 @@ export async function generateWorkspaceContext(
                     .trim(),
                   f,
                 );
-                if (!idiomsActive) {
-                  sliced = compactPureAiceSlice(sliced);
-                }
+                sliced = compactPureAiceSlice(sliced);
                 if (sliced) fileSlices.push(sliced);
               } catch {
                 // fallback handled below if needed
@@ -701,9 +810,7 @@ export async function generateWorkspaceContext(
               fileAice.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
               f,
             );
-            if (!idiomsActive) {
-              cleanedAll = compactPureAiceSlice(cleanedAll);
-            }
+            cleanedAll = compactPureAiceSlice(cleanedAll);
             fileSlices.push(cleanedAll);
           }
         } else {
@@ -717,6 +824,11 @@ export async function generateWorkspaceContext(
                 continue;
               }
             }
+            if (symSel === "@first" || symSel === "@1") {
+              const firstSym = resolveFirstActionableSymbol(fileAice, f);
+              if (!firstSym) continue;
+              symSel = firstSym;
+            }
             try {
               let sliced = unwrapSyntheticContainer(
                 extractSymbolFromAiceSource(fileAice, symSel, f)
@@ -724,9 +836,7 @@ export async function generateWorkspaceContext(
                   .trim(),
                 f,
               );
-              if (!idiomsActive) {
-                sliced = compactPureAiceSlice(sliced);
-              }
+              sliced = compactPureAiceSlice(sliced);
               fileSlices.push(sliced);
             } catch {
               // symbol lives in another file
@@ -989,8 +1099,12 @@ export function extractSymbolFromAiceSource(
   filePath: string,
   preParsedMod?: Module,
 ): string {
-  const trimmedSel = symbolSelector.trim();
+  let trimmedSel = symbolSelector.trim();
   const mod = preParsedMod ?? parse(aiceSource, filePath);
+  if (trimmedSel === "@first" || trimmedSel === "@1") {
+    const first = resolveFirstActionableSymbol(aiceSource, filePath, mod);
+    if (first) trimmedSel = first;
+  }
 
   // Check StyleDecl first because CSS selectors often start with '.' (e.g. '.btn-primary')
   for (const item of mod.items) {
@@ -1191,7 +1305,21 @@ export async function generateContext(
   const projectRoot = resolved.projectRoot;
   const config = resolved.config;
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  const activeIdioms = idiomsActive ? config.idioms : undefined;
+  let activeIdioms = idiomsActive ? config.idioms : undefined;
+  if (
+    options.idioms === true &&
+    (!activeIdioms || Object.keys(activeIdioms).length === 0)
+  ) {
+    try {
+      const scanRes = scanProjectIdioms(projectRoot);
+      if (Object.keys(scanRes.idioms).length > 0) {
+        activeIdioms = scanRes.idioms;
+        config.idioms = scanRes.idioms;
+      }
+    } catch {
+      // ignore scan errors
+    }
+  }
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");

@@ -536,14 +536,46 @@ function substituteExpr(expr: Expr, subst: Map<string, Expr>, callSpan: Span): E
     case "CallExpr":
       cloned.callee = substituteExpr(cloned.callee, subst, callSpan);
       cloned.args = cloned.args.map((a) => substituteExpr(a, subst, callSpan));
+      if (
+        cloned.callee.kind === "MemberAccessExpr" &&
+        cloned.callee.object.kind === "IdentifierExpr" &&
+        cloned.callee.object.name === "std" &&
+        cloned.callee.property === "string" &&
+        cloned.args.length === 1 &&
+        cloned.args[0].kind === "LiteralExpr" &&
+        cloned.args[0].literalKind === "string"
+      ) {
+        return cloned.args[0];
+      }
       break;
     case "MemberAccessExpr":
       cloned.object = substituteExpr(cloned.object, subst, callSpan);
       break;
-    case "BinaryExpr":
+    case "BinaryExpr": {
+      const hadHoleOperand =
+        (cloned.left.kind === "IdentifierExpr" && subst.has(cloned.left.name)) ||
+        (cloned.right.kind === "IdentifierExpr" && subst.has(cloned.right.name));
       cloned.left = substituteExpr(cloned.left, subst, callSpan);
       cloned.right = substituteExpr(cloned.right, subst, callSpan);
+      if (
+        hadHoleOperand &&
+        cloned.operator === "+" &&
+        cloned.left.kind === "LiteralExpr" &&
+        cloned.left.literalKind === "string" &&
+        cloned.right.kind === "LiteralExpr" &&
+        cloned.right.literalKind === "string"
+      ) {
+        const combined = `${String(cloned.left.value)}${String(cloned.right.value)}`;
+        return {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: combined,
+          rawValue: JSON.stringify(combined),
+          span: callSpan,
+        };
+      }
       break;
+    }
     case "UnaryExpr":
       cloned.operand = substituteExpr(cloned.operand, subst, callSpan);
       break;
@@ -1268,6 +1300,55 @@ function matchExprTemplate(
   if (templateExpr.kind === "IdentifierExpr" && alphaMap?.has(templateExpr.name)) {
     if (targetExpr.kind !== "IdentifierExpr") return false;
     return targetExpr.name === alphaMap.get(templateExpr.name);
+  }
+
+  if (
+    templateExpr.kind === "CallExpr" &&
+    templateExpr.args.length === 1 &&
+    templateExpr.callee.kind === "MemberAccessExpr" &&
+    templateExpr.callee.object.kind === "IdentifierExpr" &&
+    templateExpr.callee.object.name === "std" &&
+    templateExpr.callee.property === "string" &&
+    targetExpr.kind !== "CallExpr"
+  ) {
+    return matchExprTemplate(
+      templateExpr.args[0],
+      targetExpr,
+      bindings,
+      holeNames,
+      generator,
+      alphaMap,
+    );
+  }
+
+  if (
+    templateExpr.kind === "BinaryExpr" &&
+    templateExpr.operator === "+" &&
+    templateExpr.right.kind === "LiteralExpr" &&
+    templateExpr.right.literalKind === "string" &&
+    targetExpr.kind === "LiteralExpr" &&
+    targetExpr.literalKind === "string"
+  ) {
+    const suffix = String(templateExpr.right.value);
+    const fullStr = String(targetExpr.value);
+    if (fullStr.length > suffix.length && fullStr.endsWith(suffix)) {
+      const prefix = fullStr.slice(0, -suffix.length);
+      const synthPrefix: LiteralExpr = {
+        kind: "LiteralExpr",
+        literalKind: "string",
+        value: prefix,
+        rawValue: JSON.stringify(prefix),
+        span: targetExpr.span,
+      };
+      return matchExprTemplate(
+        templateExpr.left,
+        synthPrefix,
+        bindings,
+        holeNames,
+        generator,
+        alphaMap,
+      );
+    }
   }
 
   if (templateExpr.kind !== targetExpr.kind) {
