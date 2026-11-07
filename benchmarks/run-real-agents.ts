@@ -46,16 +46,18 @@ const CODE_LANGS = new Set<BenchmarkLanguageId>([
 
 function setupWorkspace(spec: RealWorldBenchmarkSpec, mode: RealAgentMode): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aice-${spec.id.toLowerCase()}-${mode}-`));
-  const allIdioms: Record<string, unknown> = {};
+  const activeIdioms: Record<string, unknown> = {};
   if (spec.files.some((f) => CODE_LANGS.has(f.languageId))) {
     const { idioms: tsIdioms } = buildIdiomRegistryForLanguage("ts");
-    Object.assign(allIdioms, tsIdioms);
+    activeIdioms.$guard_band_step = tsIdioms.$guard_band_step;
   }
   for (const f of spec.files) {
     const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === f.languageId);
     if (!langSpec) throw new Error(`Unknown languageId ${f.languageId}`);
     const { idioms } = buildIdiomRegistryForLanguage(f.languageId);
-    Object.assign(allIdioms, idioms);
+    if (!CODE_LANGS.has(f.languageId)) {
+      activeIdioms[langSpec.idiomName] = idioms[langSpec.idiomName];
+    }
     const ast = parse(f.aiceWithIdioms, `${f.fileName}.aice`);
     const expanded = expandModuleIdioms(ast, idioms);
     const native = emitTarget(expanded, langSpec.target, { watermark: false });
@@ -64,33 +66,99 @@ function setupWorkspace(spec: RealWorldBenchmarkSpec, mode: RealAgentMode): stri
   if (mode === "aice_with_idioms") {
     fs.writeFileSync(
       path.join(dir, "aice.config.json"),
-      JSON.stringify({ version: 2, idioms: allIdioms }, null, 2),
+      JSON.stringify({ version: 2, idioms: activeIdioms }, null, 2),
     );
   }
   return dir;
 }
 
-function buildTaskSpecText(spec: RealWorldBenchmarkSpec): string {
-  const isNewFeature = spec.scenario === "new_feature";
-  const updateLines: string[] = [];
-  const deleteLines: string[] = [];
-
-  for (const f of spec.files) {
-    const compactTargetAice = f.updatedTargetSymbolAiceWithIdioms
-      .replace(
-        /\$[a-z_]+_band_step|\$clamp_cart_line|\$enforce_quota_band|\$bounded_quorum_step|\$advance_wal_cursor|\$solve_axis_impulse|\$settle_ledger_window|\$score_risk_signal|\$round_money_band/g,
-        "$guard_band_step",
-      )
-      .replace(/\n/g, "\\n");
-    if (isNewFeature) {
-      updateLines.push(`   - ${f.fileName} (insertAfter "${f.targetSymbol}"): ${compactTargetAice}`);
-    } else {
-      updateLines.push(`   - ${f.fileName} (symbol "${f.targetSymbol}"): ${compactTargetAice}`);
-    }
-    if (f.obsoleteSymbol) {
-      deleteLines.push(`   - ${f.fileName}: delete "${f.obsoleteSymbol}"`);
+function describeFileTargetUpdatePlainEnglish(
+  f: RealWorldBenchmarkSpec["files"][number],
+  isNewFeature: boolean,
+): string {
+  const src = f.updatedTargetSymbolAiceWithIdioms;
+  if (CODE_LANGS.has(f.languageId)) {
+    const fnMatch = src.match(
+      /pub fn (\w+)\((\w+):int\) -> int:\n\s+(\w+) ::= \2 \* (\d+) \+ (\d+)/,
+    );
+    const bands = [...src.matchAll(/\(\w+,\s*(\d+),\s*(\d+),\s*(\d+)\)/g)].map(
+      (m) => `(min=${m[1]}, max=${m[2]}, step=${m[3]})`,
+    );
+    if (fnMatch) {
+      const [, fnName, param, stateVar, scale, offset] = fnMatch;
+      if (isNewFeature) {
+        return `   - ${f.fileName}: add public function ${fnName}(${param}: int) -> int after ${f.targetSymbol}: set ${stateVar} = ${param} * ${scale} + ${offset}, clamp ${stateVar} < 0 to 0, apply 3 clamping band steps ${bands.join(", ")}, and return ${stateVar}.`;
+      }
+      return `   - ${f.fileName}: update function ${f.targetSymbol}(${param}: int) -> int: set ${stateVar} = ${param} * ${scale} + ${offset}, clamp ${stateVar} < 0 to 0, apply 3 clamping band steps ${bands.join(", ")}, and return ${stateVar}.`;
     }
   }
+  if (f.languageId === "tsx") {
+    const compMatch = src.match(
+      /component (\w+)\(\):\n\s+section\(class="kpi-section", id="([^"]+)"\)/,
+    );
+    const tiles = [...src.matchAll(/\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)/g)].map(
+      (m) => `(data-metric="${m[1]}", label="${m[2]}", value="${m[3]}")`,
+    );
+    if (compMatch) {
+      const [, compName, secId] = compMatch;
+      return isNewFeature
+        ? `   - ${f.fileName}: add component ${compName} after ${f.targetSymbol} rendering section.kpi-section#${secId} with 3 KPI tiles: ${tiles.join(", ")}.`
+        : `   - ${f.fileName}: update component ${f.targetSymbol} (section.kpi-section#${secId}) so its 3 KPI tiles are: ${tiles.join(", ")}.`;
+    }
+  }
+  if (f.languageId === "css") {
+    const selMatch = src.match(/style ([^\s{]+) \{/);
+    const cards = [...src.matchAll(/\("([^"]+)",\s*"([^"]+)"\)/g)].map(
+      (m) => `(padding: ${m[1]}, gap: ${m[2]})`,
+    );
+    const zMatch = src.match(/z-index:\s*(\d+)/);
+    if (selMatch) {
+      return isNewFeature
+        ? `   - ${f.fileName}: add CSS rule ${selMatch[1]} after ${f.targetSymbol} with two flex-centered card blocks ${cards.join(" and ")} and z-index: ${zMatch ? zMatch[1] : 50}.`
+        : `   - ${f.fileName}: update CSS rule ${f.targetSymbol} to two flex-centered card blocks ${cards.join(" and ")} and z-index: ${zMatch ? zMatch[1] : 10}.`;
+    }
+  }
+  if (f.languageId === "html") {
+    const secMatch = src.match(/section\(id="([^"]+)", class="panel"\)/);
+    const rows = [...src.matchAll(/\("([^"]+)",\s*"([^"]+)",\s*"([^"]+)"\)/g)].map(
+      (m) => `(data-key="${m[1]}", label="${m[2]}", value="${m[3]}")`,
+    );
+    if (secMatch) {
+      return isNewFeature
+        ? `   - ${f.fileName}: add <section id="${secMatch[1]}" class="panel"> after ${f.targetSymbol} with 2 metric rows: ${rows.join(" and ")}.`
+        : `   - ${f.fileName}: update ${f.targetSymbol} (<section id="${secMatch[1]}" class="panel">) to 2 metric rows: ${rows.join(" and ")}.`;
+    }
+  }
+  if (f.languageId === "twig") {
+    const blkMatch = src.match(/block\(name="([^"]+)"\)/);
+    const rows = [...src.matchAll(/\("([^"]+)",\s*(\w+)\)/g)].map(
+      (m) => `(label="${m[1]}", variable=${m[2]})`,
+    );
+    if (blkMatch) {
+      return isNewFeature
+        ? `   - ${f.fileName}: add Twig block "${blkMatch[1]}" after "${f.targetSymbol}" with 2 summary rows: ${rows.join(" and ")}.`
+        : `   - ${f.fileName}: update Twig block "${f.targetSymbol}" to 2 summary rows: ${rows.join(" and ")}.`;
+    }
+  }
+  if (f.languageId === "json" || f.languageId === "yaml") {
+    const keyMatch = src.match(/pub const (\w+) =/);
+    const entries = [...src.matchAll(/\("([^"]+)",\s*(\d+),\s*(\d+)\)/g)].map((m) =>
+      f.languageId === "json"
+        ? `(id="${m[1]}", threshold=${m[2]}, limit=${m[3]})`
+        : `(worker="${m[1]}", port=${m[2]}, concurrency=${m[3]})`,
+    );
+    if (keyMatch) {
+      return isNewFeature
+        ? `   - ${f.fileName}: add top-level key "${keyMatch[1]}" (config.${keyMatch[1]}) after ${f.targetSymbol} with 2 entries: ${entries.join(" and ")}.`
+        : `   - ${f.fileName}: update top-level key ${f.targetSymbol} to 2 entries: ${entries.join(" and ")}.`;
+    }
+  }
+  throw new Error(`Unhandled file spec: ${f.fileName}`);
+}
+
+export function buildTaskSpecText(spec: RealWorldBenchmarkSpec): string {
+  const isNewFeature = spec.scenario === "new_feature";
+  const updateLines = spec.files.map((f) => describeFileTargetUpdatePlainEnglish(f, isNewFeature));
 
   const patternLines: string[] = [];
   const presentLangs = new Set(spec.files.map((f) => f.languageId));
@@ -100,46 +168,46 @@ function buildTaskSpecText(spec: RealWorldBenchmarkSpec): string {
       .map((f) => f.fileName)
       .join(", ");
     patternLines.push(
-      `   - Code files (${codeFiles}): change every clamping band step increment from "+ step" to "+ step + 1" (idiom $guard_band_step template: "if $0 < $1:\\n  $0 = $1\\nif $0 > $2:\\n  $0 = $2\\n$0 = $0 + $3 + 1").`,
+      `   - Code files (${codeFiles}): in every clamping band step across all functions in the workspace (including updated/newly added ones), change the step increment at the end of each band from "+ step" to "+ step + 1".`,
     );
   }
   if (presentLangs.has("tsx")) {
     patternLines.push(
-      `   - TSX files: change class "kpi-tile" to "kpi-tile-v2" (idiom $tsx_kpi_tile template: "div(class=\\"kpi-tile-v2\\", data-metric=$0) { span(class=\\"kpi-label\\"): $1; strong(class=\\"kpi-value\\"): $2 }").`,
+      `   - TSX files: change every KPI tile container class from "kpi-tile" to "kpi-tile-v2".`,
     );
   }
   if (presentLangs.has("css")) {
     patternLines.push(
-      `   - CSS files: change border-radius: 8px to border-radius: 12px (idiom $css_card template: "fl-center\\npadding: $0\\ngap: $1\\nborder-radius: 12px").`,
+      `   - CSS files: change every card border-radius from 8px to 12px.`,
     );
   }
   if (presentLangs.has("html")) {
     patternLines.push(
-      `   - HTML files: change class "metric-row" to "metric-row-v2" (idiom $html_metric_row template: "div(class=\\"metric-row-v2\\", data-key=$0) { span(class=\\"metric-label\\"): $1; strong(class=\\"metric-val\\"): $2 }").`,
+      `   - HTML files: change every metric row container class from "metric-row" to "metric-row-v2".`,
     );
   }
   if (presentLangs.has("twig")) {
     patternLines.push(
-      `   - Twig files: change class "summary-row" to "summary-row-v2" (idiom $twig_summary_line template: "div(class=\\"summary-row-v2\\") { span(class=\\"summary-lbl\\"): $0; strong(class=\\"summary-val\\"): $1 }").`,
+      `   - Twig files: change every summary row container class from "summary-row" to "summary-row-v2".`,
     );
   }
   if (presentLangs.has("json")) {
     patternLines.push(
-      `   - JSON files: change retries: 3, windowSec: 60 to retries: 5, windowSec: 120 (idiom $json_policy_rule template: "{ id: $0, threshold: $1, limit: $2, retries: 5, enabled: true, windowSec: 120 }").`,
+      `   - JSON files: in every policy rule entry across the file, change retries from 3 to 5 and windowSec from 60 to 120.`,
     );
   }
   if (presentLangs.has("yaml")) {
     patternLines.push(
-      `   - YAML files: change replicas: 3, healthIntervalSec: 15 to replicas: 4, healthIntervalSec: 10 (idiom $yaml_service_tier template: "{ worker: $0, port: $1, concurrency: $2, replicas: 4, healthIntervalSec: 10, tlsRequired: true }").`,
+      `   - YAML files: in every service tier entry across the file, change replicas from 3 to 4 and healthIntervalSec from 15 to 10.`,
     );
   }
 
   return [
-    `Task on workspace (${spec.id}: ${spec.title}):`,
+    `Engineering Task (${spec.id}: ${spec.title}):`,
     `1. Target Symbol Updates:`,
     ...updateLines,
     `2. Delete Obsolete Symbols:`,
-    ...deleteLines,
+    `   - Locate and delete every obsolete/legacy/deprecated function, component, CSS rule, HTML section, Twig block, or config key across the workspace (any symbol whose name contains "legacy", "deprecated", or "obsolete").`,
     `3. Multi-File Pattern Refactor across all functions/elements/rules in the workspace:`,
     ...patternLines,
   ].join("\n");
@@ -147,46 +215,41 @@ function buildTaskSpecText(spec: RealWorldBenchmarkSpec): string {
 
 function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: string): string {
   const taskText = buildTaskSpecText(spec);
-  const targetSyms = spec.files.map((f) => f.targetSymbol).join(",");
-  const allRefactorSyms = spec.files.flatMap((f) => f.refactorSymbols).join(",");
-  const fileNames = spec.files.map((f) => f.fileName).join(", ");
-  const isNewFeature = spec.scenario === "new_feature";
 
   if (mode === "without_aice") {
     return [
       `Workspace: ${dir}`,
-      `Mode: WITHOUT AICE (Native Tools Only). Do NOT use run_command or aice. Use ONLY grep_search, view_file, and replace_file_content.`,
+      `Environment: WITHOUT AICE (Native IDE Tools Only).`,
+      `Allowed tools: grep_search, find_by_name, view_file, replace_file_content. Do NOT use run_command or aice.`,
       taskText,
-      `Execute in steps:`,
-      `- Step 1: Call grep_search in ${dir} to locate the target symbols and obsolete symbols.`,
-      `- Step 2: Call view_file to read the workspace files (${fileNames}).`,
-      `- Step 3: Call replace_file_content on each file to apply Target Symbol Updates (1), Delete Obsolete Symbols (2), and Multi-File Pattern Refactor (3).`,
-      `- Step 4: Reply DONE.`,
-    ].join("\n");
+      `Reply DONE when all changes are saved to disk.`,
+    ].join("\n\n");
   }
 
   if (mode === "aice_no_idioms") {
     return [
       `Workspace: ${dir}`,
-      `Mode: AICE WITHOUT IDIOMS (Pure AICE CLI Only). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, replace_file_content, or $idioms.`,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (Pure AICE CLI).`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, python/sed/awk, or $idiom macros.`,
+      `AICE CLI Reference (Pure AICE Mode):`,
+      `- Inspect workspace symbols/code in 1 command: \`cd ${dir} && aice context . -s "*" --no-idioms\` (or \`-s "<sym1,sym2>"\` or \`aice outline .\`)`,
+      `- Apply surgical updates, insertions, and deletions in batch: \`cd ${dir} && aice splice --no-idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
       taskText,
-      `Execute in exact 3 tool-call turns:`,
-      `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && aice context . -s "${allRefactorSyms}" --no-idioms`,
-      `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --no-idioms --batch '[...]' to apply Target Symbol Updates (1) in pure AICE (expand all $idioms into pure AICE statements/expressions with the refactored pattern from (3); use ${isNewFeature ? '"insertAfter"' : '"symbol"'}) and Delete Obsolete Symbols (2) ({"file":"...","symbol":"...","delete":true}).`,
-      `- Turn 3: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --no-idioms --batch '[...]' to apply Multi-File Pattern Refactor (3) across the remaining symbols in pure AICE.`,
-      `- Turn 4: Reply DONE.`,
-    ].join("\n");
+      `Reply DONE when all changes are applied on disk.`,
+    ].join("\n\n");
   }
 
   return [
     `Workspace: ${dir}`,
-    `Mode: AICE WITH IDIOMS (AICE CLI + Project Idioms). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, or replace_file_content.`,
+    `Environment: AICE On-the-Fly WITH Project Idioms (\`aice.config.json\` configured in workspace).`,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--idioms\`. Do NOT use view_file, grep_search, replace_file_content, or python/sed/awk.`,
+    `AICE CLI Reference (Idiom Mode):`,
+    `- Inspect workspace symbol headers, selected target symbol bodies (with \`$idiom\` calls), and active idiom definitions in 1 command: \`cd ${dir} && aice context . -s "<comma-separated target symbols>" --idioms\``,
+    `- Apply surgical target updates/insertions (using active \`$idiom(...)\` calls) and obsolete symbol deletions in 1 batch command: \`cd ${dir} && aice splice --idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
+    `- Propagate a workspace-wide pattern refactor across all idiom call sites in 1 batch command: \`cd ${dir} && aice idioms update --batch '[{"name":"$<idiom_name>","template":"<updated template>"}]'\` (note: in JSON/YAML idiom templates, keep \`{ key: $0, ... }\` object syntax; in multi-line code/CSS templates, separate lines with \`\\n\`).`,
     taskText,
-    `Execute in exact 2 tool-call turns:`,
-    `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && aice context . -s "${targetSyms}" --idioms`,
-    `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --idioms --batch '[...]' (applying Target Symbol Updates (1) using ${isNewFeature ? '"insertAfter"' : '"symbol"'} and $idiom calls, plus Delete Obsolete Symbols (2) with {"file":"...","symbol":"...","delete":true}) && aice idioms update --batch '[{"name":"$...","template":"..."}]' (applying Multi-File Pattern Refactor (3) for each idiom in the workspace).`,
-    `- Turn 3: Reply DONE.`,
-  ].join("\n");
+    `Reply DONE when all changes are applied on disk.`,
+  ].join("\n\n");
 }
 
 function verifyWorkspaceOnDisk(
@@ -211,10 +274,19 @@ function verifyWorkspaceOnDisk(
     }
     const minSymCount = f.refactorSymbols.length;
     if (CODE_LANGS.has(f.languageId)) {
-      const stepPlusOnes = (content.match(/\+\s*\d+\)?\s*\+\s*1\b/g) || []).length;
-      if (stepPlusOnes < minSymCount * 3) {
+      const explicitPlusOnes = (content.match(/\+\s*\d+\)?\s*\+\s*1\b/g) || []).length;
+      const expectedSteps = [
+        ...f.aiceWithIdioms.matchAll(/\(\w+,\s*\d+,\s*\d+,\s*(\d+)\)/g),
+        ...f.updatedTargetSymbolAiceWithIdioms.matchAll(/\(\w+,\s*\d+,\s*\d+,\s*(\d+)\)/g),
+      ].map((m) => Number(m[1]) + 1);
+      const foldedSet = new Set(expectedSteps);
+      const foldedMatches = [...content.matchAll(/\+\s*(\d+)\b/g)].filter((m) =>
+        foldedSet.has(Number(m[1])),
+      ).length;
+      const totalRefactored = Math.max(explicitPlusOnes, foldedMatches);
+      if (totalRefactored < minSymCount * 3) {
         details.push(
-          `${f.fileName}: expected >= ${minSymCount * 3} refactored band steps, got ${stepPlusOnes}`,
+          `${f.fileName}: expected >= ${minSymCount * 3} refactored band steps, got ${totalRefactored}`,
         );
       }
     } else if (f.languageId === "tsx") {

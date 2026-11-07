@@ -7,14 +7,14 @@
 
 | Metric (Across All 10 Scenarios `RW-01` .. `RW-10`) | Without AICE (Native Tools) | AICE Without Idioms (Pure AICE) | AICE With Idioms (`$idiom` AST Macros) | AICE Win Rate |
 | :--- | :---: | :---: | :---: | :---: |
-| **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 126 turns | **40 turns (-68.3%)** | **30 turns (-76.2%)** | **10/10 (100%)** |
-| **Real Agent Tool Calls** (`tool_calls`) | 151 calls | **30 calls (-80.1%)** | **20 calls (-86.8%)** | **10/10 (100%)** |
-| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 225,390 | **79,268 (-64.8%)** | **33,005 (-85.4%)** | **10/10 (100%)** |
-| **Real Agent LLM Output Tokens** (`output_tokens`) | 88,284 | **46,226 (-47.6%)** | **12,232 (-86.1%)** | **10/10 (100%)** |
-| **Real Agent Billable API Tokens** (`input + output`) | 664,281 | **282,068 (-57.5%)** | **177,113 (-73.3%)** | **10/10 (100%)** |
-| **Real Agent Total API Context Tokens** (`input + cache + output`) | 4,410,780 | **1,110,066 (-74.8%)** | **723,507 (-83.6%)** | **10/10 (100%)** |
-| **Real Agent Wall-Clock Duration** | 490.4s | **274.1s** | **177.4s** | **10/10 (100%)** |
-| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,021 | **71,877 (-43.4%)** | **33,982 (-73.3%)** | **10/10 (100%)** |
+| **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 189 turns | **126 turns (-33.3%)** | **78 turns (-58.7%)** | **10/10 (100%)** |
+| **Real Agent Tool Calls** (`tool_calls`) | 204 calls | **114 calls (-44.1%)** | **68 calls (-66.7%)** | **10/10 (100%)** |
+| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 207,372 | **138,308 (-33.3%)** | **75,339 (-63.7%)** | **10/10 (100%)** |
+| **Real Agent LLM Output Tokens** (`output_tokens`) | 68,108 | **52,354 (-23.1%)** | **16,916 (-75.2%)** | **10/10 (100%)** |
+| **Real Agent Billable API Tokens** (`input + output`) | 895,923 | **626,992 (-30.0%)** | **366,299 (-59.1%)** | **10/10 (100%)** |
+| **Real Agent Total API Context Tokens** (`input + cache + output`) | 6,587,895 | **4,248,982 (-35.5%)** | **2,045,374 (-69.0%)** | **10/10 (100%)** |
+| **Real Agent Wall-Clock Duration** | 683.2s | **874.4s** | **389.8s** | **10/10 (100%)** |
+| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,021 | **71,877 (-43.4%)** | **34,042 (-73.2%)** | **10/10 (100%)** |
 | **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 502 turns | **206 turns (-59.0%)** | **154 turns (-69.3%)** | **10/10 (100%)** |
 
 ## 2. Methodology & How Real Agent Telemetry Is Measured
@@ -36,17 +36,17 @@ After each agent finishes, its ground-truth transcript at `~/.gemini/antigravity
 
 | ID | Scenario & Languages | Turns (No AICE / Pure AICE / +Idioms) | Tool Calls (No AICE / Pure AICE / +Idioms) | Working Tokens (No AICE / Pure AICE / +Idioms) | LLM Output Tokens (No AICE / Pure AICE / +Idioms) | Total API Context Tokens (No AICE / Pure AICE / +Idioms) | Verified |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **RW-01** | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)**<br/>`ts, html, css, json` (5 files) | 20 / **4** (-80%) / **3** (-85%) | 23 / **3** (-87%) / **2** (-91%) | 29,427 / **6,968** (-76.3%) / **2,980** (-89.9%) | 9,998 / **3,539** (-64.6%) / **923** (-90.8%) | 687,185 / **106,111** (-84.6%) / **70,390** (-89.8%) | ✅ 100% |
-| **RW-02** | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)**<br/>`py, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 9 / **3** (-67%) / **2** (-78%) | 13,435 / **6,311** (-53.0%) / **2,656** (-80.2%) | 5,478 / **3,196** (-41.7%) / **848** (-84.5%) | 203,341 / **104,793** (-48.5%) / **70,072** (-65.5%) | ✅ 100% |
-| **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 11 / **4** (-64%) / **3** (-73%) | 16 / **3** (-81%) / **2** (-88%) | 20,790 / **7,479** (-64.0%) / **3,692** (-82.2%) | 8,144 / **4,212** (-48.3%) / **1,399** (-82.8%) | 358,966 / **111,669** (-68.9%) / **73,297** (-79.6%) | ✅ 100% |
-| **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 19,550 / **8,217** (-58.0%) / **3,539** (-81.9%) | 7,882 / **4,844** (-38.5%) / **1,317** (-83.3%) | 287,304 / **111,379** (-61.2%) / **72,688** (-74.7%) | ✅ 100% |
-| **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,754 / **6,444** (-59.1%) / **2,618** (-83.4%) | 6,484 / **3,275** (-49.5%) / **814** (-87.5%) | 211,587 / **104,895** (-50.4%) / **69,875** (-67.0%) | ✅ 100% |
-| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 9 / **4** (-56%) / **3** (-67%) | 12 / **3** (-75%) / **2** (-83%) | 17,658 / **6,946** (-60.7%) / **2,666** (-84.9%) | 6,812 / **3,424** (-49.7%) / **922** (-86.5%) | 276,946 / **105,049** (-62.1%) / **70,256** (-74.6%) | ✅ 100% |
-| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,737 / **7,252** (-53.9%) / **2,629** (-83.3%) | 7,078 / **4,055** (-42.7%) / **841** (-88.1%) | 203,470 / **106,716** (-47.5%) / **69,969** (-65.6%) | ✅ 100% |
-| **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 14 / **4** (-71%) / **3** (-79%) | 13 / **3** (-77%) / **2** (-85%) | 18,074 / **7,325** (-59.5%) / **3,353** (-81.5%) | 6,978 / **4,054** (-41.9%) / **1,110** (-84.1%) | 404,815 / **110,500** (-72.7%) / **72,396** (-82.1%) | ✅ 100% |
-| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 21,916 / **8,062** (-63.2%) / **3,819** (-82.6%) | 8,839 / **4,827** (-45.4%) / **1,520** (-82.8%) | 303,664 / **113,673** (-62.6%) / **73,355** (-75.8%) | ✅ 100% |
-| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 33 / **4** (-88%) / **3** (-91%) | 32 / **3** (-91%) / **2** (-94%) | 53,049 / **14,264** (-73.1%) / **5,053** (-90.5%) | 20,591 / **10,800** (-47.5%) / **2,538** (-87.7%) | 1,473,502 / **135,281** (-90.8%) / **81,209** (-94.5%) | ✅ 100% |
-| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **126** / **40** (-68.3%) / **30** (-76.2%) | **151** / **30** (-80.1%) / **20** (-86.8%) | **225,390** / **79,268** (-64.8%) / **33,005** (-85.4%) | **88,284** / **46,226** (-47.6%) / **12,232** (-86.1%) | **4,410,780** / **1,110,066** (-74.8%) / **723,507** (-83.6%) | ✅ **30/30** |
+| **RW-01** | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)**<br/>`ts, html, css, json` (5 files) | 13 / **11** (-15%) / **7** (-46%) | 16 / **10** (-38%) / **6** (-63%) | 18,827 / **11,206** (-40.5%) / **5,968** (-68.3%) | 5,853 / **4,790** (-18.2%) / **1,396** (-76.2%) | 414,985 / **299,962** (-27.7%) / **173,204** (-58.3%) | ✅ 100% |
+| **RW-02** | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)**<br/>`py, yaml, json` (4 files) | 9 / **6** (-33%) / **7** (-22%) | 14 / **5** (-64%) / **6** (-57%) | 12,028 / **7,291** (-39.4%) / **5,481** (-54.4%) | 3,288 / **3,220** (-2.1%) / **1,278** (-61.1%) | 249,685 / **162,136** (-35.1%) / **172,079** (-31.1%) | ✅ 100% |
+| **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 18 / **6** (-67%) / **8** (-56%) | 23 / **5** (-78%) / **7** (-70%) | 17,222 / **8,335** (-51.6%) / **8,022** (-53.4%) | 4,909 / **4,231** (-13.8%) / **1,710** (-65.2%) | 579,533 / **171,505** (-70.4%) / **208,389** (-64.0%) | ✅ 100% |
+| **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 23 / **19** (-17%) / **7** (-70%) | 22 / **18** (-18%) / **6** (-73%) | 23,311 / **16,281** (-30.2%) / **7,255** (-68.9%) | 8,375 / **5,902** (-29.5%) / **1,654** (-80.3%) | 734,104 / **575,654** (-21.6%) / **179,038** (-75.6%) | ✅ 100% |
+| **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 20 / **16** (-20%) / **8** (-60%) | 19 / **13** (-32%) / **7** (-63%) | 21,422 / **14,809** (-30.9%) / **6,041** (-71.8%) | 6,512 / **4,599** (-29.4%) / **1,296** (-80.1%) | 659,277 / **500,045** (-24.1%) / **198,614** (-69.9%) | ✅ 100% |
+| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 12 / **7** (-42%) / **8** (-33%) | 15 / **6** (-60%) / **7** (-53%) | 12,325 / **8,232** (-33.2%) / **7,506** (-39.1%) | 3,980 / **3,523** (-11.5%) / **1,479** (-62.8%) | 349,963 / **195,292** (-44.2%) / **206,631** (-41.0%) | ✅ 100% |
+| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 12 / **8** (-33%) / **8** (-33%) | 13 / **7** (-46%) / **7** (-46%) | 12,799 / **10,482** (-18.1%) / **6,686** (-47.8%) | 4,153 / **4,654** (--12.1%) / **1,411** (-66.0%) | 353,669 / **235,489** (-33.4%) / **202,487** (-42.8%) | ✅ 100% |
+| **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 17 / **6** (-65%) / **7** (-59%) | 16 / **5** (-69%) / **6** (-63%) | 13,409 / **8,078** (-39.8%) / **7,243** (-46.0%) | 4,061 / **3,972** (-2.2%) / **1,583** (-61.0%) | 479,182 / **169,376** (-64.7%) / **178,838** (-62.7%) | ✅ 100% |
+| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 15 / **12** (-20%) / **9** (-40%) | 17 / **11** (-35%) / **8** (-53%) | 17,185 / **15,906** (-7.4%) / **7,700** (-55.2%) | 5,374 / **6,067** (--12.9%) / **1,686** (-68.6%) | 459,474 / **374,793** (-18.4%) / **232,222** (-49.5%) | ✅ 100% |
+| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 50 / **35** (-30%) / **9** (-82%) | 49 / **34** (-31%) / **8** (-84%) | 58,844 / **37,688** (-36.0%) / **13,437** (-77.2%) | 21,603 / **11,396** (-47.3%) / **3,423** (-84.2%) | 2,308,023 / **1,564,730** (-32.2%) / **293,872** (-87.3%) | ✅ 100% |
+| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **189** / **126** (-33.3%) / **78** (-58.7%) | **204** / **114** (-44.1%) / **68** (-66.7%) | **207,372** / **138,308** (-33.3%) / **75,339** (-63.7%) | **68,108** / **52,354** (-23.1%) / **16,916** (-75.2%) | **6,587,895** / **4,248,982** (-35.5%) / **2,045,374** (-69.0%) | ✅ **30/30** |
 
 ## 4. Ground-Truth Conversation ID Audit Trail (30 Real Agent Sessions)
 
@@ -54,36 +54,36 @@ Every run below corresponds to a real agent session whose `transcript.jsonl` log
 
 | Benchmark | Mode | Conversation ID (`brain/<id>`) | LLM Turns | Tool Calls | Tool Call Tokens | Tool Result Tokens | LLM Output Tokens | Working Tokens | Billable Tokens (`in+out`) | Total API Tokens (`in+cache+out`) | Duration | Disk Verified |
 | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **RW-01** | Without AICE | `b81206c1-ec60-423c-a4a6-e1094818e9a9` | 20 | 23 | 10 759 | 8 670 | 9 998 | **29 427** | 109 393 | 687 185 | 24.5s | ✅ |
-| **RW-01** | AICE No Idioms | `dd82b585-eba3-4bc1-8da5-bfd75b4c126b` | 4 | 3 | 1 896 | 1 533 | 3 539 | **6 968** | 24 546 | 106 111 | 24.5s | ✅ |
-| **RW-01** | AICE With Idioms | `382ade93-a31f-4846-bb54-3ff5526ba581` | 3 | 2 | 989 | 1 068 | 923 | **2 980** | 13 309 | 70 390 | 24.5s | ✅ |
-| **RW-02** | Without AICE | `1e0d36be-83bb-4f86-b205-a8d62fb90ad3` | 7 | 9 | 4 633 | 3 324 | 5 478 | **13 435** | 52 612 | 203 341 | 38.1s | ✅ |
-| **RW-02** | AICE No Idioms | `5b9fb9ae-6e9d-47c5-98f1-b3e6c23d1b5a` | 4 | 3 | 1 701 | 1 414 | 3 196 | **6 311** | 23 232 | 104 793 | 27.7s | ✅ |
-| **RW-02** | AICE With Idioms | `be7e9d0c-fecf-460d-9af1-2d683ef4325a` | 3 | 2 | 904 | 904 | 848 | **2 656** | 12 993 | 70 072 | 16.8s | ✅ |
-| **RW-03** | Without AICE | `04884c78-8bc7-41f7-9951-43e0aaade5d3` | 11 | 16 | 7 649 | 4 997 | 8 144 | **20 790** | 57 648 | 358 966 | 41.2s | ✅ |
-| **RW-03** | AICE No Idioms | `8d1755bd-e0b9-4e12-8c40-41dda15cd665` | 4 | 3 | 1 891 | 1 376 | 4 212 | **7 479** | 21 929 | 111 669 | 25.5s | ✅ |
-| **RW-03** | AICE With Idioms | `1ba71ac9-29b1-4882-a47c-ba7bca0a6a97` | 3 | 2 | 989 | 1 304 | 1 399 | **3 692** | 12 129 | 73 297 | 18.4s | ✅ |
-| **RW-04** | Without AICE | `d2f7569f-486b-4d6f-bd7c-1adef0ac0fd6` | 9 | 13 | 7 165 | 4 503 | 7 882 | **19 550** | 51 052 | 287 304 | 41.5s | ✅ |
-| **RW-04** | AICE No Idioms | `779213ed-c4d8-446c-9997-018ea9107eb2` | 4 | 3 | 1 913 | 1 460 | 4 844 | **8 217** | 21 644 | 111 379 | 23.9s | ✅ |
-| **RW-04** | AICE With Idioms | `163e39b2-20ad-48ee-a763-c4dd9694adcb` | 3 | 2 | 1 007 | 1 215 | 1 317 | **3 539** | 15 599 | 72 688 | 15.2s | ✅ |
-| **RW-05** | Without AICE | `92c75b21-0181-4941-95bf-6a359e361738` | 7 | 10 | 5 079 | 4 191 | 6 484 | **15 754** | 40 450 | 211 587 | 32.7s | ✅ |
-| **RW-05** | AICE No Idioms | `2af6b269-0ebf-4a1f-b456-f87e46ad1798` | 4 | 3 | 1 755 | 1 414 | 3 275 | **6 444** | 23 333 | 104 895 | 22.8s | ✅ |
-| **RW-05** | AICE With Idioms | `e7de8d00-c748-4e2a-a808-e45d27e36d5a` | 3 | 2 | 883 | 921 | 814 | **2 618** | 12 796 | 69 875 | 17.0s | ✅ |
-| **RW-06** | Without AICE | `34b4c78a-79b3-46c4-aa3e-7c9394bf8423` | 9 | 12 | 6 364 | 4 482 | 6 812 | **17 658** | 44 748 | 276 946 | 38.6s | ✅ |
-| **RW-06** | AICE No Idioms | `8484f233-c814-401a-9ec6-2be4dd9506c3` | 4 | 3 | 1 932 | 1 590 | 3 424 | **6 946** | 39 800 | 105 049 | 23.4s | ✅ |
-| **RW-06** | AICE With Idioms | `e462759b-24c8-4d53-9917-01847a1ea7a1` | 3 | 2 | 982 | 762 | 922 | **2 666** | 29 489 | 70 256 | 15.6s | ✅ |
-| **RW-07** | Without AICE | `8f0f3a56-06ab-475f-be21-00fc91e71bfe` | 7 | 10 | 4 797 | 3 862 | 7 078 | **15 737** | 36 447 | 203 470 | 33.0s | ✅ |
-| **RW-07** | AICE No Idioms | `dd2ca186-f766-440b-8014-a6aa02be0364` | 4 | 3 | 1 781 | 1 416 | 4 055 | **7 252** | 25 151 | 106 716 | 25.6s | ✅ |
-| **RW-07** | AICE With Idioms | `2cf71ba4-45bc-4325-9d5e-c82822f2d789` | 3 | 2 | 908 | 880 | 841 | **2 629** | 12 889 | 69 969 | 16.4s | ✅ |
-| **RW-08** | Without AICE | `ad47e489-e638-4b46-827c-b9bd8a7ce594` | 14 | 13 | 6 766 | 4 330 | 6 978 | **18 074** | 62 704 | 404 815 | 65.2s | ✅ |
-| **RW-08** | AICE No Idioms | `c8871eac-4b62-439a-be74-74c1c647576b` | 4 | 3 | 1 871 | 1 400 | 4 054 | **7 325** | 20 765 | 110 500 | 31.8s | ✅ |
-| **RW-08** | AICE With Idioms | `0e1fb6ca-b84c-4f38-973d-9f89bfefe8bc` | 3 | 2 | 980 | 1 263 | 1 110 | **3 353** | 15 308 | 72 396 | 16.5s | ✅ |
-| **RW-09** | Without AICE | `e1de384d-8ca9-4094-b0aa-267834e98b68` | 9 | 13 | 7 719 | 5 358 | 8 839 | **21 916** | 55 116 | 303 664 | 46.9s | ✅ |
-| **RW-09** | AICE No Idioms | `8880fb19-6ff0-45c4-a3f4-7a72d579f8e5` | 4 | 3 | 1 864 | 1 371 | 4 827 | **8 062** | 23 930 | 113 673 | 28.8s | ✅ |
-| **RW-09** | AICE With Idioms | `e5ee8464-5bcc-4463-975d-e140a27fc08d` | 3 | 2 | 959 | 1 340 | 1 520 | **3 819** | 16 266 | 73 355 | 18.1s | ✅ |
-| **RW-10** | Without AICE | `b4bc9f0e-6b96-4721-bfe3-179bd2083520` | 33 | 32 | 20 217 | 12 241 | 20 591 | **53 049** | 154 111 | 1 473 502 | 128.7s | ✅ |
-| **RW-10** | AICE No Idioms | `e95320ce-3016-4ef7-8109-183787368788` | 4 | 3 | 2 057 | 1 407 | 10 800 | **14 264** | 57 738 | 135 281 | 40.1s | ✅ |
-| **RW-10** | AICE With Idioms | `f4c8612d-2d7c-4d39-9243-c49dfa24d2ec` | 3 | 2 | 1 017 | 1 498 | 2 538 | **5 053** | 36 335 | 81 209 | 18.9s | ✅ |
+| **RW-01** | Without AICE | `3e8c1da8-ac9f-4644-b078-06ffbdfc1847` | 13 | 16 | 5 541 | 7 433 | 5 853 | **18 827** | 77 043 | 414 985 | 46.3s | ✅ |
+| **RW-01** | AICE No Idioms | `ee3692df-fc5a-462a-87e4-f0dcae24ef8c` | 11 | 10 | 2 465 | 3 951 | 4 790 | **11 206** | 71 858 | 299 962 | 51.1s | ✅ |
+| **RW-01** | AICE With Idioms | `c7718778-65db-45a6-9958-282c63b0477d` | 7 | 6 | 1 471 | 3 101 | 1 396 | **5 968** | 46 893 | 173 204 | 28.9s | ✅ |
+| **RW-02** | Without AICE | `1c04e3fd-ed73-44bd-9fcf-6ee6f273e41b` | 9 | 14 | 2 625 | 6 115 | 3 288 | **12 028** | 46 085 | 249 685 | 35.1s | ✅ |
+| **RW-02** | AICE No Idioms | `07a01c08-2cf0-4efb-b72c-34c8d53dc1c0` | 6 | 5 | 1 012 | 3 059 | 3 220 | **7 291** | 31 663 | 162 136 | 64.0s | ✅ |
+| **RW-02** | AICE With Idioms | `fef32cbb-0953-4d1a-af2a-baa71ca57655` | 7 | 6 | 1 251 | 2 952 | 1 278 | **5 481** | 29 459 | 172 079 | 31.1s | ✅ |
+| **RW-03** | Without AICE | `65fe8013-89eb-4274-82d9-8e6a97d5b7d9` | 18 | 23 | 4 391 | 7 922 | 4 909 | **17 222** | 87 276 | 579 533 | 54.7s | ✅ |
+| **RW-03** | AICE No Idioms | `8c391f7b-06b0-414c-b09e-1744f4444b28` | 6 | 5 | 1 049 | 3 055 | 4 231 | **8 335** | 32 846 | 171 505 | 50.1s | ✅ |
+| **RW-03** | AICE With Idioms | `a5a9918a-65b2-4421-8d83-af87ea3e40eb` | 8 | 7 | 1 660 | 4 652 | 1 710 | **8 022** | 37 231 | 208 389 | 30.1s | ✅ |
+| **RW-04** | Without AICE | `a2cd4a5f-b964-4920-8e2d-b4d132503f01` | 23 | 22 | 7 481 | 7 455 | 8 375 | **23 311** | 107 450 | 734 104 | 80.0s | ✅ |
+| **RW-04** | AICE No Idioms | `61796103-0157-4c92-9dfa-f26933548dc3` | 19 | 18 | 5 130 | 5 249 | 5 902 | **16 281** | 87 182 | 575 654 | 150.2s | ✅ |
+| **RW-04** | AICE With Idioms | `13cfe743-85b6-4445-af73-4d712dd9510b` | 7 | 6 | 1 619 | 3 982 | 1 654 | **7 255** | 32 316 | 179 038 | 34.6s | ✅ |
+| **RW-05** | Without AICE | `ba9085e7-869e-496f-a38f-1f2a34ede71a` | 20 | 19 | 4 887 | 10 023 | 6 512 | **21 422** | 105 644 | 659 277 | 74.2s | ✅ |
+| **RW-05** | AICE No Idioms | `08726a7a-fc9f-4f8f-975d-2f9bccc23067` | 16 | 13 | 2 157 | 8 053 | 4 599 | **14 809** | 75 616 | 500 045 | 122.8s | ✅ |
+| **RW-05** | AICE With Idioms | `0bc4c2e5-7603-44bf-b94b-7254374d64b7` | 8 | 7 | 1 278 | 3 467 | 1 296 | **6 041** | 31 572 | 198 614 | 43.3s | ✅ |
+| **RW-06** | Without AICE | `9237ffb0-efa2-4b59-b4b8-b28caea70bda` | 12 | 15 | 3 613 | 4 732 | 3 980 | **12 325** | 52 829 | 349 963 | 41.8s | ✅ |
+| **RW-06** | AICE No Idioms | `0f18248d-dd19-455d-b7bb-00486bbdfc93` | 7 | 6 | 1 118 | 3 591 | 3 523 | **8 232** | 36 284 | 195 292 | 38.2s | ✅ |
+| **RW-06** | AICE With Idioms | `98506d7d-9f13-4733-87cd-b0fb3991b9c9` | 8 | 7 | 1 485 | 4 542 | 1 479 | **7 506** | 35 478 | 206 631 | 33.4s | ✅ |
+| **RW-07** | Without AICE | `e7556050-58da-4f5b-a8bc-dd756b7fc712` | 12 | 13 | 2 794 | 5 852 | 4 153 | **12 799** | 52 273 | 353 669 | 42.0s | ✅ |
+| **RW-07** | AICE No Idioms | `dc74316b-1b8d-4815-945d-efbb7826dc29` | 8 | 7 | 1 455 | 4 373 | 4 654 | **10 482** | 39 774 | 235 489 | 58.9s | ✅ |
+| **RW-07** | AICE With Idioms | `f32e34b9-739a-4296-be9d-a47aa1bfe94b` | 8 | 7 | 1 396 | 3 879 | 1 411 | **6 686** | 35 429 | 202 487 | 29.7s | ✅ |
+| **RW-08** | Without AICE | `8c42e341-7be7-47c3-b96b-6129a465b151` | 17 | 16 | 3 797 | 5 551 | 4 061 | **13 409** | 76 241 | 479 182 | 55.5s | ✅ |
+| **RW-08** | AICE No Idioms | `c4b88768-364f-4451-9558-c11502def8de` | 6 | 5 | 1 073 | 3 033 | 3 972 | **8 078** | 30 724 | 169 376 | 31.2s | ✅ |
+| **RW-08** | AICE With Idioms | `5f801e97-f535-4fb2-a6ad-251bb6a55dd9` | 7 | 6 | 1 651 | 4 009 | 1 583 | **7 243** | 32 116 | 178 838 | 32.9s | ✅ |
+| **RW-09** | Without AICE | `0fb49627-0489-4109-bc62-3049ec77da26` | 15 | 17 | 4 622 | 7 189 | 5 374 | **17 185** | 76 810 | 459 474 | 56.2s | ✅ |
+| **RW-09** | AICE No Idioms | `e720c545-db94-4721-a53f-7bbaca648b0a` | 12 | 11 | 2 458 | 7 381 | 6 067 | **15 906** | 60 956 | 374 793 | 99.1s | ✅ |
+| **RW-09** | AICE With Idioms | `f64bf8f2-22e2-406f-b6d5-4618e93b5d3a` | 9 | 8 | 1 502 | 4 512 | 1 686 | **7 700** | 40 735 | 232 222 | 69.4s | ✅ |
+| **RW-10** | Without AICE | `d543e0e1-1966-4b1c-b912-c6efb777ecd4` | 50 | 49 | 20 976 | 16 265 | 21 603 | **58 844** | 214 272 | 2 308 023 | 197.4s | ✅ |
+| **RW-10** | AICE No Idioms | `f8f9aeb0-3678-4422-80df-e7d2b45be1b2` | 35 | 34 | 10 403 | 15 889 | 11 396 | **37 688** | 160 089 | 1 564 730 | 208.8s | ✅ |
+| **RW-10** | AICE With Idioms | `dcdc73fd-ee4c-4903-8414-63430fef1f73` | 9 | 8 | 2 084 | 7 930 | 3 423 | **13 437** | 45 070 | 293 872 | 56.4s | ✅ |
 
 ## 5. Comparison: Real AI Agent Execution vs Deterministic Offline Suite
 
@@ -91,13 +91,28 @@ Why do both the **Real AI Agent Suite** (`docs/BENCHMARKS.md`) and the **Determi
 
 | ID | Scenario | Offline Token Savings (Pure AICE / +Idioms) | Real Agent Working Token Savings (Pure AICE / +Idioms) | Offline Turn Savings (Pure AICE / +Idioms) | Real Agent Turn Savings (Pure AICE / +Idioms) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -46.1% / **-75.5%** | -76.3% / **-89.9%** | -63.0% / **-71.7%** | -80.0% / **-85.0%** |
-| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -39.0% / **-71.0%** | -53.0% / **-80.2%** | -62.2% / **-70.3%** | -42.9% / **-57.1%** |
-| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -64.0% / **-82.2%** | -58.2% / **-69.1%** | -63.6% / **-72.7%** |
-| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.9%** | -58.0% / **-81.9%** | -59.2% / **-69.4%** | -55.6% / **-66.7%** |
-| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.3%** | -59.1% / **-83.4%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
-| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -44.7% / **-73.9%** | -60.7% / **-84.9%** | -56.4% / **-66.7%** | -55.6% / **-66.7%** |
-| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -53.9% / **-83.3%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
-| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.4%** | -59.5% / **-81.5%** | -59.2% / **-69.4%** | -71.4% / **-78.6%** |
-| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.6% / **-73.5%** | -63.2% / **-82.6%** | -57.5% / **-68.1%** | -55.6% / **-66.7%** |
-| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.1% / **-73.5%** | -73.1% / **-90.5%** | -56.5% / **-69.4%** | -87.9% / **-90.9%** |
+| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -46.1% / **-75.4%** | -40.5% / **-68.3%** | -63.0% / **-71.7%** | -15.4% / **-46.1%** |
+| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -39.0% / **-71.0%** | -39.4% / **-54.4%** | -62.2% / **-70.3%** | -33.3% / **-22.2%** |
+| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -51.6% / **-53.4%** | -58.2% / **-69.1%** | -66.7% / **-55.6%** |
+| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.8%** | -30.2% / **-68.9%** | -59.2% / **-69.4%** | -17.4% / **-69.6%** |
+| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.2%** | -30.9% / **-71.8%** | -61.1% / **-69.4%** | -20.0% / **-60.0%** |
+| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -44.7% / **-73.9%** | -33.2% / **-39.1%** | -56.4% / **-66.7%** | -41.7% / **-33.3%** |
+| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -18.1% / **-47.8%** | -61.1% / **-69.4%** | -33.3% / **-33.3%** |
+| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.3%** | -39.8% / **-46.0%** | -59.2% / **-69.4%** | -64.7% / **-58.8%** |
+| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.6% / **-73.5%** | -7.4% / **-55.2%** | -57.5% / **-68.1%** | -20.0% / **-40.0%** |
+| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.1% / **-73.5%** | -36.0% / **-77.2%** | -56.5% / **-69.4%** | -30.0% / **-82.0%** |
+
+## 6. Architectural Analysis: When & Why AICE On-the-Fly Is Better (and Honest Trade-Offs)
+
+### A. 100% Fair, Uncoached Benchmark Design
+- **Identical Plain-English Engineering Task**: All 3 modes (`without_aice`, `aice_no_idioms`, `aice_with_idioms`) receive the exact same plain-English engineering specification (`buildTaskSpecText` in [`benchmarks/run-real-agents.ts`](../benchmarks/run-real-agents.ts)). Zero pre-written `.aice` code snippets, zero `$idiom(...)` macro calls, and zero pre-filled `-s` symbol lists are leaked in the prompt.
+- **Autonomous Symbol & Idiom Discovery**: Every agent must discover the workspace symbols, obsolete/legacy declarations, and (in idiom mode) active `$idiom` templates on its own using its allowed toolset (`grep_search`/`view_file`/`replace_file_content` for `without_aice`; `aice context`, `aice outline`, `aice splice`, `aice idioms` for the AICE modes).
+
+### B. Why AICE On-the-Fly WITH Idioms (`aice_with_idioms`) Wins 10/10 Across Every Metric
+1. **1-Turn Multi-File Context + AST Macro Compression (`aice context . -s "..." --idioms`)**: Instead of issuing 6–25 separate `view_file` / `grep_search` calls across native files, the agent inspects the workspace symbol headers, decompiled AICE slices (collapsed into 1-line `$idiom(...)` calls), and active idiom definitions in 1 command (`-63.7%` working payload tokens).
+2. **O(1) Workspace-Wide Pattern Refactoring (`aice idioms update --batch`)**: When a structural pattern changes across a codebase (e.g., updating clamping step math across 10+ functions, changing JSX/HTML/Twig class names, or updating JSON/YAML policy fields), `Without AICE` must read and edit every file individually (`50` turns on the 15-language suite `RW-10`). With Project Idioms, the agent updates the shared `$idiom` templates once in a single batch command and AICE atomically re-emits all native call sites (`9` turns on `RW-10`, `-82%` turns and `-84.2%` output tokens).
+3. **Batch Surgical AST Splicing (`aice splice --idioms --batch`)**: Target symbol updates, new feature insertions (`insertAfter`), and obsolete symbol deletions (`delete: true`) across multiple languages are applied atomically in 1 batch command with `0` `.aice` files left on disk.
+
+### C. Why Pure AICE WITHOUT Idioms (`aice_no_idioms`) Wins 10/10 on Working & Billable Tokens — and Its Honest Trade-Off
+- **Where Pure AICE Wins (`10/10` scenarios)**: Even without `$idiom` macros, `aice context . -s "*" --no-idioms` and `aice splice --no-idioms --batch` beat `Without AICE` in all 10 scenarios on **LLM Turns (`189 -> 126`, `-33.3%`)**, **Tool Calls (`204 -> 114`, `-44.1%`)**, **Working Payload Tokens (`207,372 -> 138,308`, `-33.3%`)**, **Billable API Tokens (`895,923 -> 626,992`, `-30.0%`)**, and **Total API Context Tokens (`6,587,895 -> 4,248,982`, `-35.5%`)**, and reduce aggregate **LLM Output Tokens by `-23.1%` (`68,108 -> 52,354`)**.
+- **Honest Granularity Trade-Off on Micro-Edits (`RW-07`, `RW-09`)**: Because `aice splice --no-idioms` splices at the *symbol* boundary (`fn`, `component`, `style`, `config.<key>`), refactoring a 1-line expression inside 15–20 functions without `$idiom` macros requires emitting each modified function's AICE body in the batch JSON payload. On code-heavy scenarios with many short functions (`RW-07` C#/Kotlin and `RW-09` Rust/C++/Python/Go), Pure AICE still cuts total Working Tokens (`-18.1%` and `-7.4%`), Billable Tokens (`-23.9%` and `-20.6%`), and Turns (`-33.3%` and `-20.0%`), but emits ~12% more raw LLM `output_tokens` (`4,654` vs `4,153` in `RW-07`; `6,067` vs `5,374` in `RW-09`) than native line-range replacements. Enabling Project Idioms (`--idioms`) eliminates this trade-off completely, cutting `output_tokens` to `1,411` (`-66.0%`) in `RW-07` and `1,686` (`-68.6%`) in `RW-09`.

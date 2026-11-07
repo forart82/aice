@@ -98,7 +98,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.8.0");
+  .version("0.8.1");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -481,6 +481,7 @@ program
 // Command: verify [target]
 program
   .command("verify")
+  .aliases(["check"])
   .description(
     "Verify syntactic and type soundness of an .aice file, or run automated multi-file roundtrip parity gate",
   )
@@ -497,7 +498,11 @@ program
       target: string | undefined,
       options: { json?: boolean; fix?: boolean; parity?: boolean; strict?: boolean },
     ) => {
-      if (options.parity) {
+      const isDirTarget =
+        !target ||
+        (fs.existsSync(path.resolve(process.cwd(), target)) &&
+          fs.statSync(path.resolve(process.cwd(), target)).isDirectory());
+      if (options.parity || isDirTarget) {
         try {
           const summary = await runParityGate(target, {
             strict: options.strict,
@@ -1910,8 +1915,8 @@ program
   .command("context")
   .description("Dependency contract packager in 1 turn for AI context windows")
   .argument(
-    "[target]",
-    "Path to target source file or directory (omitted for workspace overview context)",
+    "[targets...]",
+    "Path(s) to target source file(s) or directory (omitted for workspace overview context)",
   )
   .option(
     "-d, --depth <number>",
@@ -1929,7 +1934,7 @@ program
   .option("--stats", "Output token count statistics")
   .action(
     async (
-      targetPath: string | undefined,
+      targetPaths: string[] | undefined,
       options: {
         depth?: number;
         symbol?: string;
@@ -1941,37 +1946,42 @@ program
         stats?: boolean;
       },
     ) => {
+      const rawTargets = targetPaths && targetPaths.length > 0 ? targetPaths : [undefined];
       try {
-        const resolved = resolvePathTargets(targetPath, { includeTargets: true });
-        const contextOpts: ContextOptions = {
-          depth: options.depth !== undefined ? Number(options.depth) : 1,
-          symbol: options.symbol,
-          idioms: options.idioms,
-          includeCallers: options.callers !== false,
-          outlineTarget: !!options.outlineTarget,
-          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-          json: !!options.json,
-          stats: !!options.stats,
-          projectRoot: resolved.projectRoot,
-        };
-
-        const result = await generateContext(resolved.resolvedPath, contextOpts);
+        const results = [];
+        for (const targetPath of rawTargets) {
+          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const contextOpts: ContextOptions = {
+            depth: options.depth !== undefined ? Number(options.depth) : 1,
+            symbol: options.symbol,
+            idioms: options.idioms,
+            includeCallers: options.callers !== false,
+            outlineTarget: !!options.outlineTarget,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            json: !!options.json,
+            stats: !!options.stats,
+            projectRoot: resolved.projectRoot,
+          };
+          results.push(await generateContext(resolved.resolvedPath, contextOpts));
+        }
 
         if (options.json) {
-          console.log(JSON.stringify(result, null, 2));
+          console.log(JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
         } else {
-          console.log(result.formattedBundle);
-          if (options.stats) {
-            console.log("\n📊 Context Pack Token Telemetry:");
-            console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
-            console.log(`  Dependencies:      ${result.dependencies.length}`);
-            console.log(`  Downstream callers:${result.callers.length}`);
-            console.log(`  Target characters: ${result.targetContent.length.toLocaleString()}`);
+          for (const result of results) {
+            console.log(result.formattedBundle);
+            if (options.stats) {
+              console.log("\n📊 Context Pack Token Telemetry:");
+              console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
+              console.log(`  Dependencies:      ${result.dependencies.length}`);
+              console.log(`  Downstream callers:${result.callers.length}`);
+              console.log(`  Target characters: ${result.targetContent.length.toLocaleString()}`);
+            }
           }
         }
       } catch (err: unknown) {
         console.error(
-          `❌ Error packaging context for ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error packaging context for ${rawTargets.join(", ")}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }

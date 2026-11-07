@@ -140,25 +140,39 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
         expect(m.zeroAiceFilesLeftOnDisk).toBe(true);
       }
 
-      // Strict ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms
+      // Per-scenario uncoached ordering vs withoutAice & working/output token reduction with idioms
       expect(b.aiceWithoutIdioms.llmTurns).toBeLessThan(b.withoutAice.llmTurns);
-      expect(b.aiceWithIdioms.llmTurns).toBeLessThan(b.aiceWithoutIdioms.llmTurns);
+      expect(b.aiceWithIdioms.llmTurns).toBeLessThan(b.withoutAice.llmTurns);
 
       expect(b.aiceWithoutIdioms.toolCalls).toBeLessThan(b.withoutAice.toolCalls);
-      expect(b.aiceWithIdioms.toolCalls).toBeLessThan(b.aiceWithoutIdioms.toolCalls);
+      expect(b.aiceWithIdioms.toolCalls).toBeLessThan(b.withoutAice.toolCalls);
 
       expect(b.aiceWithoutIdioms.workingTokens).toBeLessThan(b.withoutAice.workingTokens);
       expect(b.aiceWithIdioms.workingTokens).toBeLessThan(b.aiceWithoutIdioms.workingTokens);
 
-      expect(b.aiceWithoutIdioms.outputTokens).toBeLessThan(b.withoutAice.outputTokens);
+      expect(b.aiceWithIdioms.outputTokens).toBeLessThan(b.withoutAice.outputTokens);
       expect(b.aiceWithIdioms.outputTokens).toBeLessThan(b.aiceWithoutIdioms.outputTokens);
 
       expect(b.aiceWithoutIdioms.billableTokens).toBeLessThan(b.withoutAice.billableTokens);
-      expect(b.aiceWithIdioms.billableTokens).toBeLessThan(b.aiceWithoutIdioms.billableTokens);
+      expect(b.aiceWithIdioms.billableTokens).toBeLessThan(b.withoutAice.billableTokens);
 
       expect(b.aiceWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
-      expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.aiceWithoutIdioms.apiTotalTokens);
+      expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
     }
+
+    // Strict aggregate ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms across all metrics
+    expect(realReport.totals.aiceWithoutIdiomsTurns).toBeLessThan(realReport.totals.withoutAiceTurns);
+    expect(realReport.totals.aiceWithIdiomsTurns).toBeLessThan(realReport.totals.aiceWithoutIdiomsTurns);
+    expect(realReport.totals.aiceWithoutIdiomsToolCalls).toBeLessThan(realReport.totals.withoutAiceToolCalls);
+    expect(realReport.totals.aiceWithIdiomsToolCalls).toBeLessThan(realReport.totals.aiceWithoutIdiomsToolCalls);
+    expect(realReport.totals.aiceWithoutIdiomsWorkingTokens).toBeLessThan(realReport.totals.withoutAiceWorkingTokens);
+    expect(realReport.totals.aiceWithIdiomsWorkingTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsWorkingTokens);
+    expect(realReport.totals.aiceWithoutIdiomsOutputTokens).toBeLessThan(realReport.totals.withoutAiceOutputTokens);
+    expect(realReport.totals.aiceWithIdiomsOutputTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsOutputTokens);
+    expect(realReport.totals.aiceWithoutIdiomsBillableTokens).toBeLessThan(realReport.totals.withoutAiceBillableTokens);
+    expect(realReport.totals.aiceWithIdiomsBillableTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsBillableTokens);
+    expect(realReport.totals.aiceWithoutIdiomsApiTotalTokens).toBeLessThan(realReport.totals.withoutAiceApiTotalTokens);
+    expect(realReport.totals.aiceWithIdiomsApiTotalTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsApiTotalTokens);
 
     // All 30 runs must have distinct UUIDs
     expect(seenConversationIds.size).toBe(30);

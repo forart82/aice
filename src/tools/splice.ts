@@ -2871,7 +2871,9 @@ function spliceDialectNativeSource(
 
   if (targetLang === "json" || targetLang === "yaml") {
     const parseSnippetMeta = (): { declName?: string; value: any } => {
-      const trimmed = rawSnippet.trim();
+      const trimmed = rawSnippet
+        .trim()
+        .replace(/^(?:pub\s+)?(?:const|val|mut|let)?\s*(?:config\.)([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|=)\s*/, "pub const $1 = ");
       if (!trimmed) return { value: {} };
       const hasExplicitDecl = /^(?:pub\s+)?(?:const|val|mut)\s+/.test(trimmed);
       const candidates = [
@@ -3415,7 +3417,7 @@ export function spliceNativeSource(
       rawSnippet,
       filePath,
       targetLang,
-      undefined,
+      { ...spanInfo, origHeader: undefined },
       idioms,
       undefined,
       false,

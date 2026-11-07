@@ -595,6 +595,77 @@ function formatBundle(
   return lines.join("\n");
 }
 
+function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
+  try {
+    const mod = parse(aiceSource, filePath);
+    const out: string[] = [];
+    for (const item of mod.items) {
+      if (item.kind === "FunctionDecl" || item.kind === "TypeDecl" || item.kind === "VarDecl" || item.kind === "StyleDecl") {
+        out.push(item.name);
+      } else if (item.kind === "ClassDecl") {
+        if (item.name === "Main" && filePath.endsWith(".cs")) {
+          for (const m of item.methods) {
+            out.push(m.name);
+          }
+        } else {
+          out.push(item.name);
+        }
+      } else if (item.kind === "ConstDecl") {
+        if (item.value.kind === "RecordLiteralExpr") {
+          for (const p of item.value.properties) {
+            if (p.key) out.push(`${item.name}.${p.key}`);
+          }
+        } else {
+          out.push(item.name);
+        }
+      } else if (item.kind === "ComponentDecl") {
+        const getAttrStr = (node: LayoutNode, attrName: string): string | undefined => {
+          const attr = node.attributes.find((a) => a.name === attrName);
+          if (!attr) return undefined;
+          if (attr.value.kind === "LiteralExpr") return String(attr.value.value);
+          if (attr.value.kind === "IdentifierExpr") return attr.value.name;
+          return undefined;
+        };
+        if (filePath.endsWith(".html")) {
+          const visitHtml = (nodes: LayoutNode[]) => {
+            for (const n of nodes) {
+              const idVal = getAttrStr(n, "id");
+              if (idVal && n.tag !== "main") {
+                out.push(`#${idVal}`);
+              }
+              if (n.children && n.children.length > 0) {
+                visitHtml(n.children);
+              }
+            }
+          };
+          visitHtml(item.layout);
+        } else if (filePath.endsWith(".twig")) {
+          const visitTwig = (nodes: LayoutNode[]) => {
+            for (const n of nodes) {
+              const blkVal =
+                getAttrStr(n, "twig_block") ??
+                getAttrStr(n, "block") ??
+                (n.tag === "block" ? getAttrStr(n, "name") : undefined);
+              if (blkVal) {
+                out.push(blkVal);
+              }
+              if (n.children && n.children.length > 0) {
+                visitTwig(n.children);
+              }
+            }
+          };
+          visitTwig(item.layout);
+        } else {
+          out.push(item.name);
+        }
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Packages a workspace overview context pack covering project configuration,
  * discovered files, module outlines, and dependencies.
@@ -629,66 +700,123 @@ export async function generateWorkspaceContext(
   for (const f of resolved.files) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
+      const rawFileContent = fs.readFileSync(f, "utf-8");
+      let fileAice = rawFileContent;
+      if (!f.endsWith(".aice")) {
+        const targetLang = detectTargetFromPath(f);
+        const decomp = decompile(rawFileContent, targetLang, { filePath: f });
+        fileAice = decomp.aice;
+      }
+      if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
+        try {
+          fileAice = collapseAiceSourceIdioms(fileAice, activeIdioms, f).aice;
+        } catch {
+          // ignore
+        }
+      }
+      const allSyms = extractFileSymbolList(fileAice, f);
+      const symHeader = allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}` : "";
+
       const oRes = generateOutline(f, {
         includeTypes: true,
         depth: options.depth,
         idioms: options.idioms,
         projectRoot,
       });
-      outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${oRes.text}\n\`\`\``);
+      const outlineBody =
+        symHeader && (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
+          ? `${symHeader}\n${oRes.text}`
+          : oRes.text;
+      outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${outlineBody}\n\`\`\``);
 
       if (requestedSelectors.length > 0) {
-        const rawFileContent = fs.readFileSync(f, "utf-8");
-        let fileAice = rawFileContent;
-        if (!f.endsWith(".aice")) {
-          const targetLang = detectTargetFromPath(f);
-          const decomp = decompile(rawFileContent, targetLang, { filePath: f });
-          fileAice = decomp.aice;
-        }
-        if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
-          try {
-            fileAice = collapseAiceSourceIdioms(fileAice, activeIdioms, f).aice;
-          } catch {
-            // ignore
-          }
-        }
         const fileSlices: string[] = [];
-        for (const rawSel of requestedSelectors) {
-          let symSel = rawSel;
-          const colonIdx = rawSel.indexOf(":");
-          if (colonIdx > 0 && !rawSel.startsWith("block:") && !rawSel.includes("::")) {
-            const fileFilter = rawSel.slice(0, colonIdx).trim();
-            symSel = rawSel.slice(colonIdx + 1).trim();
-            if (path.basename(f) !== fileFilter && relFile !== fileFilter) {
-              continue;
+        if (requestedSelectors.includes("*")) {
+          if (
+            (f.endsWith(".html") || f.endsWith(".json") || f.endsWith(".yaml")) &&
+            allSyms.length > 0
+          ) {
+            for (const sym of allSyms) {
+              try {
+                let sliced = extractSymbolFromAiceSource(fileAice, sym, f)
+                  .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                  .trim();
+                if (f.endsWith(".html")) {
+                  const sLines = sliced.split("\n");
+                  if (sLines[0]?.trim().startsWith("component ")) {
+                    sliced = sLines
+                      .slice(1)
+                      .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+                      .join("\n")
+                      .trim();
+                  }
+                }
+                if (sliced) fileSlices.push(sliced);
+              } catch {
+                // fallback handled below if needed
+              }
             }
           }
-          try {
-            let sliced = extractSymbolFromAiceSource(fileAice, symSel, f)
+          if (fileSlices.length === 0) {
+            let cleanedAll = fileAice
               .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
               .trim();
             if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
-              const sLines = sliced.split("\n");
+              const sLines = cleanedAll.split("\n");
               if (
                 sLines[0]?.trim().startsWith("component ") ||
                 sLines[0]?.trim() === "pub class Main:" ||
                 sLines[0]?.trim() === "class Main:"
               ) {
-                sliced = sLines
+                cleanedAll = sLines
                   .slice(1)
                   .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
                   .join("\n")
-                  .replace(/^static\s+fn\b/, "fn")
+                  .replace(/^static\s+fn\b/gm, "fn")
                   .trim();
               }
             }
-            fileSlices.push(sliced);
-          } catch {
-            // symbol lives in another file
+            fileSlices.push(cleanedAll);
+          }
+        } else {
+          for (const rawSel of requestedSelectors) {
+            let symSel = rawSel;
+            const colonIdx = rawSel.indexOf(":");
+            if (colonIdx > 0 && !rawSel.startsWith("block:") && !rawSel.includes("::")) {
+              const fileFilter = rawSel.slice(0, colonIdx).trim();
+              symSel = rawSel.slice(colonIdx + 1).trim();
+              if (path.basename(f) !== fileFilter && relFile !== fileFilter) {
+                continue;
+              }
+            }
+            try {
+              let sliced = extractSymbolFromAiceSource(fileAice, symSel, f)
+                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                .trim();
+              if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
+                const sLines = sliced.split("\n");
+                if (
+                  sLines[0]?.trim().startsWith("component ") ||
+                  sLines[0]?.trim() === "pub class Main:" ||
+                  sLines[0]?.trim() === "class Main:"
+                ) {
+                  sliced = sLines
+                    .slice(1)
+                    .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+                    .join("\n")
+                    .replace(/^static\s+fn\b/, "fn")
+                    .trim();
+                }
+              }
+              fileSlices.push(sliced);
+            } catch {
+              // symbol lives in another file
+            }
           }
         }
-        if (fileSlices.length > 0) {
-          symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${fileSlices.join("\n\n")}\n\`\`\``);
+        const sliceBody = [symHeader, ...fileSlices].filter(Boolean).join("\n\n");
+        if (sliceBody) {
+          symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${sliceBody}\n\`\`\``);
         }
       }
 
@@ -1145,8 +1273,26 @@ export async function generateContext(
     }
   }
 
-  if (options.symbol) {
-    targetContent = extractSymbolFromAiceSource(targetContent, options.symbol, fullTargetPath);
+  if (options.symbol && options.symbol.trim() !== "*") {
+    const requestedSymbols = options.symbol
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (requestedSymbols.length === 1) {
+      targetContent = extractSymbolFromAiceSource(targetContent, requestedSymbols[0], fullTargetPath);
+    } else if (requestedSymbols.length > 1) {
+      const slicedBlocks: string[] = [];
+      for (const sym of requestedSymbols) {
+        try {
+          slicedBlocks.push(extractSymbolFromAiceSource(targetContent, sym, fullTargetPath));
+        } catch {
+          // skip symbols not present in this file when multiple symbols are listed
+        }
+      }
+      if (slicedBlocks.length > 0) {
+        targetContent = slicedBlocks.join("\n\n");
+      }
+    }
   }
 
   if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
