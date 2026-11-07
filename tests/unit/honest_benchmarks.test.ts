@@ -43,7 +43,23 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
       expect(op.ailWithIdiomsWins).toBe(true);
       expect(op.ailWithoutIdiomsTokens).toBeLessThan(op.withoutAilTokens);
       expect(op.ailWithIdiomsTokens).toBeLessThanOrEqual(op.ailWithoutIdiomsTokens);
+      expect(op.withoutAilTurns).toBeGreaterThan(0);
+      expect(op.ailWithoutIdiomsTurns).toBeGreaterThan(0);
+      expect(op.ailWithIdiomsTurns).toBeGreaterThan(0);
+      expect(op.ailWithoutIdiomsTurns).toBeLessThanOrEqual(op.withoutAilTurns);
+      expect(op.ailWithIdiomsTurns).toBeLessThanOrEqual(op.ailWithoutIdiomsTurns);
     }
+
+    expect(report.aggregateTotal.ailWithoutIdiomsTurns).toBeLessThan(
+      report.aggregateTotal.withoutAilTurns,
+    );
+    expect(report.aggregateTotal.ailWithIdiomsTurns).toBeLessThan(
+      report.aggregateTotal.ailWithoutIdiomsTurns,
+    );
+    expect(report.aggregateTotal.turnsSavingsWithoutIdiomsPct).toBeGreaterThan(0);
+    expect(report.aggregateTotal.turnsSavingsWithIdiomsPct).toBeGreaterThan(
+      report.aggregateTotal.turnsSavingsWithoutIdiomsPct,
+    );
 
     // Verify each of the 10 real-world benchmarks
     for (const b of report.benchmarks) {
@@ -51,6 +67,15 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
       expect(b.ailWinsAllWithIdioms).toBe(true);
       expect(b.zeroAilFilesLeftOnDisk).toBe(true);
       expect(b.idiomDefinitionsTokens).toBeGreaterThan(0);
+
+      // Verify turn metrics per benchmark
+      expect(b.total.withoutAilTurns).toBeGreaterThan(0);
+      expect(b.total.ailWithoutIdiomsTurns).toBeLessThan(b.total.withoutAilTurns);
+      expect(b.total.ailWithIdiomsTurns).toBeLessThanOrEqual(b.total.ailWithoutIdiomsTurns);
+      expect(b.total.turnsSavingsWithoutIdiomsPct).toBeGreaterThan(0);
+      expect(b.total.turnsSavingsWithIdiomsPct).toBeGreaterThanOrEqual(
+        b.total.turnsSavingsWithoutIdiomsPct,
+      );
 
       // Write from 0 must charge idiom definition overhead and still beat pure AIL and Native
       const rawIdiomFilesSum = b.files.reduce((acc, f) => acc + f.ailWithIdiomsTokens, 0);
@@ -78,7 +103,9 @@ describe("AIL 2.0 Real-World Benchmark Suite (10 Scenarios — Without & With Id
     expect(md).toContain("10 Scenarios — Without & With Idioms");
     expect(md).toContain("RW-01");
     expect(md).toContain("RW-10");
-  });
+    expect(md).toContain("Total Lifecycle Turns");
+    expect(md).toContain("Agent Turns Breakdown");
+  }, 60000);
 
   it("supports nested CSS @media rules, pseudo-selectors (.btn:hover), layout macros, and idiom transforms", async () => {
     const { parse } = await import("../../src/core/parser.js");

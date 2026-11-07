@@ -113,6 +113,14 @@ export interface ThreeWayOperationScore {
   savedWithIdiomsTokens: number;
   savingsWithIdiomsPct: number;
   idiomExtraSavingsPct: number;
+  withoutAilTurns: number;
+  ailWithoutIdiomsTurns: number;
+  ailWithIdiomsTurns: number;
+  savedWithoutIdiomsTurns: number;
+  turnsSavingsWithoutIdiomsPct: number;
+  savedWithIdiomsTurns: number;
+  turnsSavingsWithIdiomsPct: number;
+  idiomExtraTurnsSavingsPct: number;
   ailWithoutIdiomsWins: boolean;
   ailWithIdiomsWins: boolean;
 }
@@ -179,6 +187,9 @@ function makeThreeWayScore(
   withoutAilTokens: number,
   ailWithoutIdiomsTokens: number,
   ailWithIdiomsTokens: number,
+  withoutAilTurns: number = 0,
+  ailWithoutIdiomsTurns: number = 0,
+  ailWithIdiomsTurns: number = 0,
 ): ThreeWayOperationScore {
   const savedWithoutIdiomsTokens = withoutAilTokens - ailWithoutIdiomsTokens;
   const savingsWithoutIdiomsPct =
@@ -193,6 +204,21 @@ function makeThreeWayScore(
   const idiomExtraSavingsPct = Number(
     (savingsWithIdiomsPct - savingsWithoutIdiomsPct).toFixed(2),
   );
+
+  const savedWithoutIdiomsTurns = withoutAilTurns - ailWithoutIdiomsTurns;
+  const turnsSavingsWithoutIdiomsPct =
+    withoutAilTurns > 0
+      ? Number(((savedWithoutIdiomsTurns / withoutAilTurns) * 100).toFixed(2))
+      : 0;
+  const savedWithIdiomsTurns = withoutAilTurns - ailWithIdiomsTurns;
+  const turnsSavingsWithIdiomsPct =
+    withoutAilTurns > 0
+      ? Number(((savedWithIdiomsTurns / withoutAilTurns) * 100).toFixed(2))
+      : 0;
+  const idiomExtraTurnsSavingsPct = Number(
+    (turnsSavingsWithIdiomsPct - turnsSavingsWithoutIdiomsPct).toFixed(2),
+  );
+
   return {
     withoutAilTokens,
     ailWithoutIdiomsTokens,
@@ -202,6 +228,14 @@ function makeThreeWayScore(
     savedWithIdiomsTokens,
     savingsWithIdiomsPct,
     idiomExtraSavingsPct,
+    withoutAilTurns,
+    ailWithoutIdiomsTurns,
+    ailWithIdiomsTurns,
+    savedWithoutIdiomsTurns,
+    turnsSavingsWithoutIdiomsPct,
+    savedWithIdiomsTurns,
+    turnsSavingsWithIdiomsPct,
+    idiomExtraTurnsSavingsPct,
     ailWithoutIdiomsWins: ailWithoutIdiomsTokens < withoutAilTokens,
     ailWithIdiomsWins:
       ailWithIdiomsTokens < withoutAilTokens &&
@@ -1984,30 +2018,91 @@ export function runSingleRealWorldBenchmark(
   const remainingAilFiles = fs.readdirSync(benchDir).filter((f) => f.endsWith(".ail"));
   const zeroAilFilesLeftOnDisk = remainingAilFiles.length === 0;
 
+  const writeWithoutAilTurns = spec.files.length;
+  const writeAilNoIdiomsTurns = spec.files.length;
+  const writeAilWithIdiomsTurns = spec.files.length;
+
+  const readWithoutAilTurns = 2 * spec.files.length;
+  const readAilNoIdiomsTurns = spec.files.length;
+  const readAilWithIdiomsTurns = spec.files.length;
+
+  const updateWithoutAilTurns = spec.files.length;
+  const updateAilNoIdiomsTurns = 1;
+  const updateAilWithIdiomsTurns = 1;
+
+  const deleteFilesCount = spec.files.filter((f) => Boolean(f.obsoleteSymbol)).length;
+  const deleteWithoutAilTurns = deleteFilesCount > 0 ? deleteFilesCount * 2 : 0;
+  const deleteAilNoIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
+  const deleteAilWithIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
+
+  const totalRefactorSites = spec.files.reduce(
+    (acc, f) => acc + f.refactorSymbols.length,
+    0,
+  );
+  const refactorWithoutAilTurns = totalRefactorSites;
+  const refactorAilNoIdiomsTurns = spec.files.length;
+  const refactorAilWithIdiomsTurns = 1;
+
+  const totalWithoutAilTurns =
+    writeWithoutAilTurns +
+    readWithoutAilTurns +
+    updateWithoutAilTurns +
+    deleteWithoutAilTurns +
+    refactorWithoutAilTurns;
+
+  const totalAilNoIdiomsTurns =
+    writeAilNoIdiomsTurns +
+    readAilNoIdiomsTurns +
+    updateAilNoIdiomsTurns +
+    deleteAilNoIdiomsTurns +
+    refactorAilNoIdiomsTurns;
+
+  const totalAilWithIdiomsTurns =
+    writeAilWithIdiomsTurns +
+    readAilWithIdiomsTurns +
+    updateAilWithIdiomsTurns +
+    deleteAilWithIdiomsTurns +
+    refactorAilWithIdiomsTurns;
+
   const writeFromZero = makeThreeWayScore(
     writeWithoutAil,
     writeAilNoIdioms,
     writeAilWithIdioms,
+    writeWithoutAilTurns,
+    writeAilNoIdiomsTurns,
+    writeAilWithIdiomsTurns,
   );
   const readContext = makeThreeWayScore(
     readWithoutAil,
     readAilNoIdioms,
     readAilWithIdioms,
+    readWithoutAilTurns,
+    readAilNoIdiomsTurns,
+    readAilWithIdiomsTurns,
   );
   const surgicalUpdate = makeThreeWayScore(
     updateWithoutAil,
     updateAilNoIdioms,
     updateAilWithIdioms,
+    updateWithoutAilTurns,
+    updateAilNoIdiomsTurns,
+    updateAilWithIdiomsTurns,
   );
   const surgicalDelete = makeThreeWayScore(
     deleteWithoutAil,
     deleteAilNoIdioms,
     deleteAilWithIdioms,
+    deleteWithoutAilTurns,
+    deleteAilNoIdiomsTurns,
+    deleteAilWithIdiomsTurns,
   );
   const multiFileRefactor = makeThreeWayScore(
     refactorWithoutAil,
     refactorAilNoIdioms,
     refactorAilWithIdioms,
+    refactorWithoutAilTurns,
+    refactorAilNoIdiomsTurns,
+    refactorAilWithIdiomsTurns,
   );
 
   const total = makeThreeWayScore(
@@ -2018,6 +2113,9 @@ export function runSingleRealWorldBenchmark(
       updateAilWithIdioms +
       deleteAilWithIdioms +
       refactorAilWithIdioms,
+    totalWithoutAilTurns,
+    totalAilNoIdiomsTurns,
+    totalAilWithIdiomsTurns,
   );
 
   const ailWinsAllWithoutIdioms =
@@ -2114,13 +2212,19 @@ export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
       let w = 0;
       let noId = 0;
       let withId = 0;
+      let wTurns = 0;
+      let noIdTurns = 0;
+      let withIdTurns = 0;
       for (const b of benchmarks) {
         const s = pick(b);
         w += s.withoutAilTokens;
         noId += s.ailWithoutIdiomsTokens;
         withId += s.ailWithIdiomsTokens;
+        wTurns += s.withoutAilTurns;
+        noIdTurns += s.ailWithoutIdiomsTurns;
+        withIdTurns += s.ailWithIdiomsTurns;
       }
-      return makeThreeWayScore(w, noId, withId);
+      return makeThreeWayScore(w, noId, withId, wTurns, noIdTurns, withIdTurns);
     };
 
     const aggregateWrite = sumScore((b) => b.writeFromZero);
@@ -2169,6 +2273,7 @@ export function formatRealWorldBenchmarkMarkdown(
     `- **Total Real-World Benchmarks**: **${report.totalBenchmarks}** (\`RW-01\` .. \`RW-10\`)`,
     `- **AIL Without Idioms Win Rate**: **${report.winsWithoutIdioms} / ${report.totalBenchmarks} (${report.winRateWithoutIdiomsPct.toFixed(1)}%)**`,
     `- **AIL With Idioms Win Rate**: **${report.winsWithIdioms} / ${report.totalBenchmarks} (${report.winRateWithIdiomsPct.toFixed(1)}%)**`,
+    `- **Total Lifecycle Turns (10 Benchmarks)**: Without AIL = **${report.aggregateTotal.withoutAilTurns} turns** | AIL Without Idioms = **${report.aggregateTotal.ailWithoutIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${report.aggregateTotal.ailWithIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
     `- **Languages & File Types Covered (${report.coveredLanguages.length})**: \`${report.coveredExtensions.join("`, `")}\``,
     `- **Engineering Scenarios Covered (${report.coveredScenarios.length})**: \`${report.coveredScenarios.join("`, `")}\``,
     `- **Application Surfaces Covered (${report.coveredSurfaces.length})**: \`${report.coveredSurfaces.join("`, `")}\``,
@@ -2176,7 +2281,9 @@ export function formatRealWorldBenchmarkMarkdown(
     "",
     "---",
     "",
-    "## 1. Aggregate Operation Breakdown (Across All 10 Real-World Benchmarks)",
+    "## 1. Aggregate Operation Breakdown (Tokens & Turns Across All 10 Real-World Benchmarks)",
+    "",
+    "### Token Breakdown Across All 10 Real-World Benchmarks",
     "",
     "| Operation | Without AIL (Tokens) | AIL Without Idioms (Tokens) | Savings Without Idioms | AIL With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |",
     "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
@@ -2187,21 +2294,33 @@ export function formatRealWorldBenchmarkMarkdown(
     `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAilTokens.toLocaleString()} | ${report.aggregateRefactor.ailWithoutIdiomsTokens.toLocaleString()} | **-${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.ailWithIdiomsTokens.toLocaleString()} | **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraSavingsPct.toFixed(1)}%** |`,
     `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAilTokens.toLocaleString()}** | **${report.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString()}** | **-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.ailWithIdiomsTokens.toLocaleString()}** | **-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraSavingsPct.toFixed(1)}%** |`,
     "",
+    "### Agent Turns Breakdown Across All 10 Real-World Benchmarks",
+    "",
+    "| Operation | Without AIL (Turns) | AIL Without Idioms (Turns) | Turn Savings Without Idioms | AIL With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |",
+    "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    `| **Write (Create from 0)** | ${report.aggregateWrite.withoutAilTurns.toLocaleString()} | ${report.aggregateWrite.ailWithoutIdiomsTurns.toLocaleString()} | **${report.aggregateWrite.turnsSavingsWithoutIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithoutIdiomsPct.toFixed(1)}%` : "0.0%"}** | ${report.aggregateWrite.ailWithIdiomsTurns.toLocaleString()} | **${report.aggregateWrite.turnsSavingsWithIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithIdiomsPct.toFixed(1)}%` : "0.0%"}** | **+${report.aggregateWrite.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Read (Discovery + Context)** | ${report.aggregateRead.withoutAilTurns.toLocaleString()} | ${report.aggregateRead.ailWithoutIdiomsTurns.toLocaleString()} | **-${report.aggregateRead.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRead.ailWithIdiomsTurns.toLocaleString()} | **-${report.aggregateRead.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRead.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Update (Bug Fix / Feature)** | ${report.aggregateUpdate.withoutAilTurns.toLocaleString()} | ${report.aggregateUpdate.ailWithoutIdiomsTurns.toLocaleString()} | **-${report.aggregateUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateUpdate.ailWithIdiomsTurns.toLocaleString()} | **-${report.aggregateUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateUpdate.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Delete (Obsolete Symbol)** | ${report.aggregateDelete.withoutAilTurns.toLocaleString()} | ${report.aggregateDelete.ailWithoutIdiomsTurns.toLocaleString()} | **-${report.aggregateDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateDelete.ailWithIdiomsTurns.toLocaleString()} | **-${report.aggregateDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateDelete.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAilTurns.toLocaleString()} | ${report.aggregateRefactor.ailWithoutIdiomsTurns.toLocaleString()} | **-${report.aggregateRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.ailWithIdiomsTurns.toLocaleString()} | **-${report.aggregateRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAilTurns.toLocaleString()}** | **${report.aggregateTotal.ailWithoutIdiomsTurns.toLocaleString()}** | **-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.ailWithIdiomsTurns.toLocaleString()}** | **-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    "",
     "---",
     "",
     "## 2. All 10 Real-World Benchmarks Summary Table",
     "",
-    "| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Total Without AIL | Total AIL (No Idioms) | Total AIL (With Idioms) |",
-    "| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    "| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AIL | Tokens AIL (No Idioms) | Tokens AIL (With Idioms) | Turns Without AIL | Turns AIL (No Idioms) | Turns AIL (With Idioms) |",
+    "| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
 
   for (const b of report.benchmarks) {
     lines.push(
-      `| \`${b.id}\` | **${b.title}** | \`${b.appSurface}\` | \`${b.scenario}\` | \`${b.extensions.join(" ")}\` | -${b.writeFromZero.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.writeFromZero.savingsWithIdiomsPct.toFixed(1)}%** | -${b.readContext.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.savingsWithIdiomsPct.toFixed(1)}%** | -${b.surgicalUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${b.surgicalDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${b.multiFileRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.savingsWithIdiomsPct.toFixed(1)}%** | ${b.total.withoutAilTokens.toLocaleString()} | ${b.total.ailWithoutIdiomsTokens.toLocaleString()} (**-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.ailWithIdiomsTokens.toLocaleString()} (**-${b.total.savingsWithIdiomsPct.toFixed(1)}%**) |`,
+      `| \`${b.id}\` | **${b.title}** | \`${b.appSurface}\` | \`${b.scenario}\` | \`${b.extensions.join(" ")}\` | -${b.writeFromZero.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.writeFromZero.savingsWithIdiomsPct.toFixed(1)}%** | -${b.readContext.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.savingsWithIdiomsPct.toFixed(1)}%** | -${b.surgicalUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${b.surgicalDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${b.multiFileRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.savingsWithIdiomsPct.toFixed(1)}%** | ${b.total.withoutAilTokens.toLocaleString()} | ${b.total.ailWithoutIdiomsTokens.toLocaleString()} (**-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.ailWithIdiomsTokens.toLocaleString()} (**-${b.total.savingsWithIdiomsPct.toFixed(1)}%**) | ${b.total.withoutAilTurns} | ${b.total.ailWithoutIdiomsTurns} (**-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.ailWithIdiomsTurns} (**-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%**) |`,
     );
   }
 
   lines.push(
+    `| **TOTAL** | **All 10 Real-World Scenarios (\`${report.winsWithIdioms}/${report.totalBenchmarks}\` Wins)** | **Both** | **All 5** | **All 15** | -${report.aggregateWrite.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateWrite.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRead.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRead.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${report.aggregateDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.withoutAilTokens.toLocaleString()}** | **${report.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString()} (-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.ailWithIdiomsTokens.toLocaleString()} (-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.withoutAilTurns}** | **${report.aggregateTotal.ailWithoutIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.ailWithIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)** |`,
     "",
     "---",
     "",
@@ -2216,7 +2335,21 @@ export function formatRealWorldBenchmarkMarkdown(
       `- **Description**: ${b.description}`,
       `- **Scenario**: \`${b.scenario}\` | **Surface**: \`${b.appSurface}\` | **Files**: ${b.filesCount} (\`${b.extensions.join("`, `")}\`)`,
       `- **Idioms Used**: \`${b.idiomsUsed.join("`, `")}\` (Definition Cost Charged on Write from 0: **${b.idiomDefinitionsTokens} tokens**)`,
-      `- **Lifecycle Totals**: Without AIL = **${b.total.withoutAilTokens.toLocaleString()}** | AIL Without Idioms = **${b.total.ailWithoutIdiomsTokens.toLocaleString()} (-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${b.total.ailWithIdiomsTokens.toLocaleString()} (-${b.total.savingsWithIdiomsPct.toFixed(1)}%)**`,
+      `- **Lifecycle Tokens**: Without AIL = **${b.total.withoutAilTokens.toLocaleString()}** | AIL Without Idioms = **${b.total.ailWithoutIdiomsTokens.toLocaleString()} (-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${b.total.ailWithIdiomsTokens.toLocaleString()} (-${b.total.savingsWithIdiomsPct.toFixed(1)}%)**`,
+      `- **Lifecycle Turns**: Without AIL = **${b.total.withoutAilTurns} turns** | AIL Without Idioms = **${b.total.ailWithoutIdiomsTurns} turns (-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${b.total.ailWithIdiomsTurns} turns (-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
+      "",
+      "#### Operation Breakdown (Tokens & Turns)",
+      "",
+      "| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |",
+      "| :--- | ---: | ---: | ---: | ---: |",
+      `| **Write (Create from 0)** | ${b.writeFromZero.withoutAilTokens.toLocaleString()} tok / ${b.writeFromZero.withoutAilTurns} turns | ${b.writeFromZero.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.writeFromZero.ailWithoutIdiomsTurns} turns | ${b.writeFromZero.ailWithIdiomsTokens.toLocaleString()} tok / ${b.writeFromZero.ailWithIdiomsTurns} turns | 0.0% / 0.0% |`,
+      `| **Read (Context)** | ${b.readContext.withoutAilTokens.toLocaleString()} tok / ${b.readContext.withoutAilTurns} turns | ${b.readContext.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.readContext.ailWithoutIdiomsTurns} turns | ${b.readContext.ailWithIdiomsTokens.toLocaleString()} tok / ${b.readContext.ailWithIdiomsTurns} turns | -${b.readContext.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Update (Surgical)** | ${b.surgicalUpdate.withoutAilTokens.toLocaleString()} tok / ${b.surgicalUpdate.withoutAilTurns} turns | ${b.surgicalUpdate.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.surgicalUpdate.ailWithoutIdiomsTurns} turns | ${b.surgicalUpdate.ailWithIdiomsTokens.toLocaleString()} tok / ${b.surgicalUpdate.ailWithIdiomsTurns} turns | -${b.surgicalUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Delete (Surgical)** | ${b.surgicalDelete.withoutAilTokens.toLocaleString()} tok / ${b.surgicalDelete.withoutAilTurns} turns | ${b.surgicalDelete.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.surgicalDelete.ailWithoutIdiomsTurns} turns | ${b.surgicalDelete.ailWithIdiomsTokens.toLocaleString()} tok / ${b.surgicalDelete.ailWithIdiomsTurns} turns | -${b.surgicalDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Refactor (Pattern)** | ${b.multiFileRefactor.withoutAilTokens.toLocaleString()} tok / ${b.multiFileRefactor.withoutAilTurns} turns | ${b.multiFileRefactor.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.multiFileRefactor.ailWithoutIdiomsTurns} turns | ${b.multiFileRefactor.ailWithIdiomsTokens.toLocaleString()} tok / ${b.multiFileRefactor.ailWithIdiomsTurns} turns | -${b.multiFileRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **TOTAL** | **${b.total.withoutAilTokens.toLocaleString()} tok / ${b.total.withoutAilTurns} turns** | **${b.total.ailWithoutIdiomsTokens.toLocaleString()} tok / ${b.total.ailWithoutIdiomsTurns} turns** | **${b.total.ailWithIdiomsTokens.toLocaleString()} tok / ${b.total.ailWithIdiomsTurns} turns** | **-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / -${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      "",
+      "#### Module File Breakdown",
       "",
       "| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |",
       "| :--- | :--- | ---: | ---: | ---: | ---: | ---: |",

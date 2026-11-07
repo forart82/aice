@@ -25,10 +25,10 @@ const failedWithoutIdioms = report.benchmarks.filter((b) => !b.ailWinsAllWithout
 const failedWithIdioms = report.benchmarks.filter((b) => !b.ailWinsAllWithIdioms);
 
 console.log(
-  `[Real-World Benchmarks (${report.totalBenchmarks} scenarios)] ` +
-    `Without Idioms Wins: ${report.winsWithoutIdioms}/${report.totalBenchmarks} (-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%) | ` +
-    `With Idioms Wins: ${report.winsWithIdioms}/${report.totalBenchmarks} (-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%) | ` +
-    `Languages: ${report.coveredLanguages.length}/15 | Zero .ail Left: ${report.zeroAilFilesLeftOnDisk}`,
+  `[Real-World Benchmarks (${report.totalBenchmarks} scenarios)]\n` +
+    `  Tokens: Without AIL = ${report.aggregateTotal.withoutAilTokens.toLocaleString()} | No Idioms = ${report.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString()} (-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${report.aggregateTotal.ailWithIdiomsTokens.toLocaleString()} (-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Turns:  Without AIL = ${report.aggregateTotal.withoutAilTurns} turns | No Idioms = ${report.aggregateTotal.ailWithoutIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${report.aggregateTotal.ailWithIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Wins:   No Idioms = ${report.winsWithoutIdioms}/${report.totalBenchmarks} | With Idioms = ${report.winsWithIdioms}/${report.totalBenchmarks} | Languages: ${report.coveredLanguages.length}/15 | Zero .ail Left: ${report.zeroAilFilesLeftOnDisk}`,
 );
 
 if (failedWithoutIdioms.length > 0 || failedWithIdioms.length > 0) {
