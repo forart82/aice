@@ -1,6 +1,0 @@
-module poc_real_case/snake_ts/src/sim/GameState
-
-enum GameState:
-  Menu, Title, TITLE, ClassSelect, Playing
-  Paused, LevelUp, FloorClear, GameOver, Victory
-  Sanctuary, Settings, SnakeLab, Help, Records

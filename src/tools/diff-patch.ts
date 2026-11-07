@@ -14,36 +14,18 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  resolveTargetOutputPathForConfig,
 } from "../config/index.js";
-import type {
-  Block,
-  ClassDecl,
-  ConstDecl,
-  EnumVariantDecl,
-  FieldDecl,
-  FunctionDecl,
-  MethodDecl,
-  Module,
-  ModuleItem,
-  PropertyDecl,
-  Statement,
-  TypeDecl,
-  VarDecl,
-} from "../core/ast.js";
+import type { Block, Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
-import { type Position, type Span, createPosition, createSpan, emptySpan } from "../core/span.js";
+import { type Span } from "../core/span.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
-import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import {
-  dedentCode,
   findSpliceTargetSymbol,
   generateUnifiedDiff,
   getLineEnd,
   getNodeEndOffset,
   getStatementEndOffset,
-  indentCode,
   spliceSource,
 } from "./splice.js";
 
@@ -966,55 +948,40 @@ export async function patchFile(
     throw new Error(`Target file not found: ${targetPath}`);
   }
 
-  let targetAicePath = fullPath;
-  if (!fullPath.endsWith(".aice")) {
-    const companion = `${fullPath}.aice`;
-    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".aice");
-    if (fs.existsSync(companion)) {
-      targetAicePath = companion;
-    } else if (fs.existsSync(shortCompanion)) {
-      targetAicePath = shortCompanion;
-    }
-  }
-
-  const originalSource = await fs.promises.readFile(targetAicePath, "utf-8");
+  const originalSource = await fs.promises.readFile(fullPath, "utf-8");
   const result = applyPatch(originalSource, patchText, {
     ...options,
-    projectRoot: targetAicePath,
+    projectRoot: fullPath,
   });
 
-  result.filePath = targetAicePath;
+  result.filePath = fullPath;
 
   if (result.success && !options.dryRun) {
-    const dir = path.dirname(targetAicePath);
+    const dir = path.dirname(fullPath);
     const tmpFile = path.join(
       dir,
-      `.${path.basename(targetAicePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
     await fs.promises.writeFile(tmpFile, result.modifiedSource, "utf-8");
-    await fs.promises.rename(tmpFile, targetAicePath);
+    await fs.promises.rename(tmpFile, fullPath);
 
-    if (options.compile) {
+    if (options.compile && fullPath.endsWith(".aice")) {
       const root =
-        options.projectRoot || findProjectRoot(path.dirname(targetAicePath), process.cwd());
+        options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
       const config = loadProjectConfig(root);
-      const resolvedTarget = resolveTargetOutputPathForConfig(targetAicePath, config, root);
-      const outPath = path.isAbsolute(resolvedTarget)
-        ? resolvedTarget
-        : path.resolve(root, resolvedTarget);
 
-      const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, targetAicePath);
+      const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, fullPath);
       const checker = new TypeChecker();
       checker.checkModule(mod);
 
       let targetLang: TargetLanguage;
-      const base = path.basename(targetAicePath);
+      const base = path.basename(fullPath);
       const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
       const innerExt = path.extname(withoutAice).toLowerCase();
       if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-        targetLang = detectTargetFromPath(targetAicePath);
+        targetLang = detectTargetFromPath(fullPath);
       } else {
-        targetLang = config.targetLanguage ?? detectTargetFromPath(targetAicePath);
+        targetLang = config.targetLanguage ?? detectTargetFromPath(fullPath);
       }
 
       const emitted = emitTarget(mod, targetLang, {
@@ -1022,7 +989,8 @@ export async function patchFile(
         watermark: config.watermark,
       });
 
-      safeWriteTargetFile(outPath, emitted);
+      const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
+      await fs.promises.writeFile(outPath, emitted, "utf-8");
     }
   }
 

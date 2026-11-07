@@ -566,6 +566,50 @@ export class CppDecompiler {
       s = s.slice(1, -1).trim();
     }
 
+    // Built-in C++ stream idiom: std::cout << a << b << std::endl -> print(a, b)
+    if (/^(?:std\.)?cout\s*<</.test(s)) {
+      const streamParts: string[] = [];
+      let curPart = '';
+      let pDepth = 0;
+      let bDepth = 0;
+      let inStr = false;
+      let qChar = '';
+      for (let idx = 0; idx < s.length; idx++) {
+        const ch = s[idx];
+        if ((ch === '"' || ch === "'") && (idx === 0 || s[idx - 1] !== '\\')) {
+          if (!inStr) {
+            inStr = true;
+            qChar = ch;
+          } else if (ch === qChar) {
+            inStr = false;
+          }
+        }
+        if (!inStr) {
+          if (ch === '(') pDepth++;
+          else if (ch === ')') pDepth--;
+          else if (ch === '[') bDepth++;
+          else if (ch === ']') bDepth--;
+          else if (pDepth === 0 && bDepth === 0 && ch === '<' && s[idx + 1] === '<') {
+            streamParts.push(curPart.trim());
+            curPart = '';
+            idx++;
+            continue;
+          }
+        }
+        curPart += ch;
+      }
+      if (curPart.trim()) streamParts.push(curPart.trim());
+      const printArgs = streamParts
+        .slice(1)
+        .filter((part) => part !== 'std.endl' && part !== 'endl' && part !== '"\\n"');
+      return {
+        kind: 'CallExpr',
+        callee: { kind: 'IdentifierExpr', name: 'print', span: emptySpan(this.filePath) },
+        args: printArgs.map((arg) => this.parseCppExpr(arg)),
+        span: emptySpan(this.filePath),
+      };
+    }
+
     // String literal
     if (s.startsWith('"') && s.endsWith('"')) {
       return {
@@ -733,6 +777,9 @@ export class CppDecompiler {
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && expr.slice(i, i + op.length) === op) {
         if (op === '*' || op === '&') {
           if (i === 0) continue;
+        }
+        if ((op === '<' || op === '>') && (expr[i - 1] === op || expr[i + 1] === op)) {
+          continue;
         }
         return i;
       }

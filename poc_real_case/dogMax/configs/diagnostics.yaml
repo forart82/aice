@@ -1,7 +1,0 @@
-# App-level crash handler. On a fatal signal (SIGSEGV/SIGABRT/SIGFPE/SIGILL/
-# SIGBUS) the handler writes an async-signal-safe backtrace to a per-process
-# file under CRASH_DUMP_DIRECTORY and to stderr, then re-raises the default
-# action so the OS still cores / reports the true exit status. Diagnostic aid.
-CRASH_HANDLER_ENABLED: true
-# Resolved relative to the working directory (build/ at runtime).
-CRASH_DUMP_DIRECTORY: crash-dumps

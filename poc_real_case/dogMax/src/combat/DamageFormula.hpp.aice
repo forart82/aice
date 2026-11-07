@@ -1,8 +1,0 @@
-# dof.combat.DamageFormula.hpp
-
-type DamageResult:
-  damage: float
-  sumFaces: int
-  productMultipliers: float
-  dronMultiplier: float
-  isCritical: bool

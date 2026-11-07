@@ -389,12 +389,7 @@ function resolveTargetFiles(
   let targets: string[] = [];
 
   if (!targetDirOrFiles) {
-    // If no target specified, prioritize examples/ if present, otherwise process.cwd()
-    if (fs.existsSync("examples")) {
-      targets = ["examples"];
-    } else {
-      targets = [process.cwd()];
-    }
+    targets = [process.cwd()];
   } else if (Array.isArray(targetDirOrFiles)) {
     targets = targetDirOrFiles;
   } else {

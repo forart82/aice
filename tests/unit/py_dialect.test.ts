@@ -79,6 +79,56 @@ describe("Step 27: Multi-Language Dialects for Python (.py)", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-py-test-"));
+    fs.writeFileSync(
+      path.join(tmpDir, "dataclass_sample.py"),
+      `from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class InventoryItem:
+    """Represents an item in the warehouse inventory."""
+    id: int
+    name: str
+    unit_price: float
+    quantity: int = 0
+    category: Optional[str] = None
+
+    def total_value(self) -> float:
+        """Calculate total value of inventory for this item."""
+        return self.unit_price * self.quantity
+
+    def is_in_stock(self) -> bool:
+        """Check if item quantity is positive."""
+        return self.quantity > 0
+`,
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "async_service.py"),
+      `from typing import Any, Optional
+
+async def execute_task(task_type: str, payload: dict[str, Any]) -> str:
+    """Execute asynchronous task with Python 3.10+ pattern matching."""
+    match task_type:
+        case "sync":
+            return "Task completed synchronously"
+        case "process":
+            return "Payload processed successfully"
+        case _:
+            return "Unknown task type"
+
+async def fetch_user_data(user_id: int) -> Optional[dict[str, Any]]:
+    """Fetch user data asynchronously with error handling."""
+    try:
+        if user_id <= 0:
+            raise ValueError("Invalid user ID")
+        data = {"id": user_id, "status": "active"}
+        return data
+    except Exception as e:
+        return None
+`,
+      "utf-8",
+    );
   });
 
   afterEach(() => {
@@ -338,7 +388,7 @@ pub class Service:
   // ===========================================================================
   describe("Bidirectional Fidelity & Lens Verification: Put(Get(c), Omega) == c", () => {
     it("satisfies roundtrip fidelity on dataclass_sample.py example", () => {
-      const filePath = path.resolve(__dirname, "../../examples/python/dataclass_sample.py");
+      const filePath = path.join(tmpDir, "dataclass_sample.py");
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "python", filePath);
@@ -356,7 +406,7 @@ pub class Service:
     });
 
     it("satisfies roundtrip fidelity on async_service.py example", () => {
-      const filePath = path.resolve(__dirname, "../../examples/python/async_service.py");
+      const filePath = path.join(tmpDir, "async_service.py");
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "python", filePath);

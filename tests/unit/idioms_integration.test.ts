@@ -4,13 +4,11 @@
  *
  * End-to-end integration test suite for AICE 2.0 Project Idioms engine.
  * Verifies integration across:
- * 1. `aice adopt --idioms` & ingestProjectSideBySide
- * 2. `AiceWatcher` incremental compilation and config hot-reload
- * 3. `compileAiceFile` in test runner
- * 4. `generateContext` & `generateWorkspaceContext`
- * 5. `generateOutline` referenced idiom headers
- * 6. `splice` with compile expansion
- * 7. `aice idioms` CLI actions (list, scan, apply, expand)
+ * 1. On-the-fly `scanProjectIdioms` across native files (zero `.aice` files on disk)
+ * 2. `generateContext` & `generateWorkspaceContext`
+ * 3. `generateOutline` referenced idiom headers
+ * 4. `splice` with idiom expansion directly on native files
+ * 5. `aice idioms` CLI actions (list, scan, expand)
  */
 
 import { spawnSync } from "node:child_process";
@@ -24,9 +22,7 @@ import {
   saveProjectConfig,
   type ProjectIdiomDefinition,
 } from "../../src/config/project-config.js";
-import { ingestProjectSideBySide } from "../../src/transpiler/parallel-ingest.js";
-import { AiceWatcher } from "../../src/watcher/aice-watch.js";
-import { compileAiceFile } from "../../src/runner/test-runner.js";
+import { scanProjectIdioms } from "../../src/idioms/idiom-transform.js";
 import { generateContext, generateWorkspaceContext } from "../../src/tools/context.js";
 import { generateOutline } from "../../src/tools/outline.js";
 import { splice } from "../../src/tools/splice.js";
@@ -63,9 +59,8 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
     }
   });
 
-  describe("1. Ingestion & Adoption with Idioms (`aice adopt --idioms`)", () => {
-    it("mines repetitive blocks and synthesizes idioms during adoption", async () => {
-      // Create source files with repetitive logic
+  describe("1. On-the-Fly Idiom Discovery (`scanProjectIdioms`)", () => {
+    it("mines repetitive blocks and synthesizes idioms on-the-fly without creating .aice files", () => {
       const tsCode1 = `export function handleA(x: number) {
   if (x < 0) {
     console.error("negative: " + x);
@@ -95,186 +90,22 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
       fs.writeFileSync(path.join(tmpDir, "h2.ts"), tsCode2, "utf-8");
       fs.writeFileSync(path.join(tmpDir, "h3.ts"), tsCode3, "utf-8");
 
-      const summary = await ingestProjectSideBySide({
-        dir: tmpDir,
-        idioms: true,
-        minIdiomOccurrences: 3,
-        minIdiomSavings: 1,
+      const scanRes = scanProjectIdioms(tmpDir, {
+        minOccurrences: 3,
+        minNetTokenSavings: 1,
       });
 
-      expect(summary.totalIngested).toBe(3);
-      expect(fs.existsSync(path.join(tmpDir, "h1.ts.aice"))).toBe(true);
+      expect(scanRes.synthesizedIdioms).toBeGreaterThan(0);
+      expect(scanRes.netTokenSavings).toBeGreaterThan(0);
+      expect(fs.existsSync(path.join(tmpDir, "h1.ts.aice"))).toBe(false);
 
-      // Verify shield created and updated with idioms section if idioms synthesized
-      if (summary.idiomsSynthesized && summary.idiomsSynthesized > 0) {
-        expect(summary.idiomTokenSavings).toBeGreaterThan(0);
-        const config = loadProjectConfig(tmpDir);
-        expect(config.idioms).toBeDefined();
-        expect(Object.keys(config.idioms!)).toHaveLength(summary.idiomsSynthesized);
-
-        const agentsMd = fs.readFileSync(path.join(tmpDir, "AGENTS.md"), "utf-8");
-        expect(agentsMd).toContain("Active Project Idioms");
-      }
-    });
-
-    it("supports CLI `aice adopt --idioms` flag", () => {
-      const tsCode = `export function compute(a: number) {
-  if (a < 0) {
-    throw new Error("invalid a");
-  }
-  return a + 1;
-}
-`;
-      fs.writeFileSync(path.join(tmpDir, "math.ts"), tsCode, "utf-8");
-
-      const res = runCli(["adopt", tmpDir, "--idioms", "--no-lock"]);
-      expect(res.status).toBe(0);
-      expect(fs.existsSync(path.join(tmpDir, "math.ts.aice"))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, "AGENTS.md"))).toBe(true);
+      const config = loadProjectConfig(tmpDir);
+      expect(config.idioms).toBeDefined();
+      expect(Object.keys(config.idioms!)).toHaveLength(scanRes.synthesizedIdioms!);
     });
   });
 
-  describe("2. AiceWatcher Incremental Compilation with Idioms", () => {
-    it("compiles .aice with idiom calls into expanded target TypeScript code", async () => {
-      const idiomDef: ProjectIdiomDefinition = {
-        name: "$guardPositive",
-        kind: "stmt",
-        params: [{ name: "$0" }],
-        templateAice: "if $0 <= 0:\n  ret 0",
-        occurrences: 4,
-        tokensPerOccurrenceSaved: 6,
-        netTokenSavings: 20,
-      };
-
-      saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
-        targetLanguage: "typescript",
-        idioms: {
-          $guardPositive: idiomDef,
-        },
-      });
-
-      const aiceCode = `module math.calc
-
-fn calculate(val: int) -> int:
-  $guardPositive(val)
-  ret val * 2
-`;
-      const aiceFile = path.join(tmpDir, "calc.ts.aice");
-      fs.writeFileSync(aiceFile, aiceCode, "utf-8");
-
-      const watcher = new AiceWatcher({
-        dir: tmpDir,
-        lockTargets: false,
-      });
-
-      const compileRes = await watcher.compileFile(aiceFile);
-      expect(compileRes.success).toBe(true);
-
-      const targetTs = fs.readFileSync(path.join(tmpDir, "calc.ts"), "utf-8");
-      // The idiom was expanded during emit
-      expect(targetTs).toContain("val <= 0");
-      expect(targetTs).not.toContain("$guardPositive");
-    });
-
-    it("hot-reloads aice.config.json when idioms are added or updated at runtime", async () => {
-      saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
-        targetLanguage: "typescript",
-        idioms: {},
-      });
-
-      const watcher = new AiceWatcher({
-        dir: tmpDir,
-        lockTargets: false,
-      });
-
-      expect(watcher.config.idioms).toEqual({});
-
-      // Update aice.config.json with a new idiom
-      const newIdiom: ProjectIdiomDefinition = {
-        name: "$logNotice",
-        kind: "stmt",
-        params: [{ name: "$0" }],
-        templateAice: 'console.log("NOTICE: " + $0)',
-        occurrences: 3,
-        tokensPerOccurrenceSaved: 5,
-        netTokenSavings: 15,
-      };
-
-      // Ensure timestamp is strictly higher
-      const configPath = path.join(tmpDir, "aice.config.json");
-      const updatedConfig = {
-        mode: "side-by-side",
-        targetLanguage: "typescript",
-        idioms: {
-          $logNotice: newIdiom,
-        },
-      };
-      fs.writeFileSync(configPath, JSON.stringify(updatedConfig, null, 2), "utf-8");
-      const futureTime = (Date.now() + 2000) / 1000;
-      fs.utimesSync(configPath, futureTime, futureTime);
-
-      const aiceCode = `module logger
-
-fn report(msg: str):
-  $logNotice(msg)
-  ret nil
-`;
-      const aiceFile = path.join(tmpDir, "log.ts.aice");
-      fs.writeFileSync(aiceFile, aiceCode, "utf-8");
-
-      const compileRes = await watcher.compileFile(aiceFile);
-      expect(compileRes.success).toBe(true);
-
-      // Verify watcher hot-reloaded the new idiom
-      expect(watcher.config.idioms?.$logNotice).toBeDefined();
-
-      const targetTs = fs.readFileSync(path.join(tmpDir, "log.ts"), "utf-8");
-      expect(targetTs).toContain("console.log");
-      expect(targetTs).toContain('"NOTICE: " + msg');
-    });
-  });
-
-  describe("3. Test Runner & Context Integration with Idioms", () => {
-    it("compiles .aice files containing idioms in compileAiceFile", () => {
-      const idiomDef: ProjectIdiomDefinition = {
-        name: "$checkEq",
-        kind: "stmt",
-        params: [{ name: "$0" }, { name: "$1" }],
-        templateAice: "if $0 != $1:\n  ret nil",
-        occurrences: 5,
-        tokensPerOccurrenceSaved: 7,
-        netTokenSavings: 25,
-      };
-
-      saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
-        targetLanguage: "typescript",
-        idioms: {
-          $checkEq: idiomDef,
-        },
-      });
-
-      const aiceFile = path.join(tmpDir, "test_check.ts.aice");
-      fs.writeFileSync(
-        aiceFile,
-        `module test_check\n\nfn runTest(a: int, b: int):\n  $checkEq(a, b)\n  ret true\n`,
-        "utf-8",
-      );
-
-      const targetTs = path.join(tmpDir, "test_check.ts");
-      const res = compileAiceFile(aiceFile, {
-        targetPath: targetTs,
-        projectRoot: tmpDir,
-      });
-
-      expect(res.compiled).toBe(true);
-      const emittedTs = fs.readFileSync(targetTs, "utf-8");
-      expect(emittedTs).toContain("a !== b");
-      expect(emittedTs).not.toContain("$checkEq");
-    });
-
+  describe("2. Context Integration with Idioms", () => {
     it("includes active idioms in generateContext and generateWorkspaceContext", async () => {
       const idiomDef: ProjectIdiomDefinition = {
         name: "$notify",
@@ -287,18 +118,17 @@ fn report(msg: str):
       };
 
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         targetLanguage: "typescript",
         idioms: {
           $notify: idiomDef,
         },
       });
 
-      const aiceFile = path.join(tmpDir, "service.ts.aice");
-      fs.writeFileSync(aiceFile, `module service\n\nfn run():\n  ret 42\n`, "utf-8");
+      const tsFile = path.join(tmpDir, "service.ts");
+      fs.writeFileSync(tsFile, `export function run(): number {\n  return 42;\n}\n`, "utf-8");
 
       // generateContext
-      const ctx = await generateContext(aiceFile, { projectRoot: tmpDir });
+      const ctx = await generateContext(tsFile, { projectRoot: tmpDir });
       expect(ctx.idioms).toBeDefined();
       expect(ctx.idioms?.$notify).toBeDefined();
       expect(ctx.formattedBundle).toContain("Active Project Idioms");
@@ -312,7 +142,7 @@ fn report(msg: str):
     });
   });
 
-  describe("4. Semantic Outline & AST Splice Integration with Idioms", () => {
+  describe("3. Semantic Outline & AST Splice Integration with Idioms", () => {
     it("includes compact referenced idioms header in generateOutline", () => {
       const idiomDef: ProjectIdiomDefinition = {
         name: "$safeAdd",
@@ -325,7 +155,6 @@ fn report(msg: str):
       };
 
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         idioms: {
           $safeAdd: idiomDef,
         },
@@ -343,7 +172,7 @@ fn report(msg: str):
       expect(outline.json?.referencedIdioms).toContain("$safeAdd");
     });
 
-    it("expands idioms when splicing and compiling target files", async () => {
+    it("expands idioms when splicing directly into native TypeScript files", async () => {
       const idiomDef: ProjectIdiomDefinition = {
         name: "$earlyExit",
         kind: "stmt",
@@ -355,45 +184,37 @@ fn report(msg: str):
       };
 
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         targetLanguage: "typescript",
         idioms: {
           $earlyExit: idiomDef,
         },
       });
 
-      const aiceFile = path.join(tmpDir, "handler.ts.aice");
       const targetTs = path.join(tmpDir, "handler.ts");
-
       fs.writeFileSync(
-        aiceFile,
-        `module handler\n\nfn process(done: bool) -> int:\n  ret 1\n`,
+        targetTs,
+        `export function process(done: boolean): number {\n  return 1;\n}\n`,
         "utf-8",
       );
-      fs.writeFileSync(targetTs, `export function process(done: boolean): number {\n  return 1;\n}\n`, "utf-8");
 
-      // Splice body with idiom call
-      const spliceRes = await splice(aiceFile, {
+      // Splice body with idiom call directly into native .ts file
+      const spliceRes = await splice(targetTs, {
         symbol: "process",
         body: "$earlyExit(done)\nret 2",
-        compile: true,
         projectRoot: tmpDir,
       });
 
       expect(spliceRes.success).toBe(true);
 
-      // Verify the .aice file preserves the unexpanded idiom
-      const updatedAice = fs.readFileSync(aiceFile, "utf-8");
-      expect(updatedAice).toContain("$earlyExit(done)");
-
-      // Verify the emitted target .ts file expanded the idiom
+      // Verify the native target .ts file expanded the idiom
       const updatedTs = fs.readFileSync(targetTs, "utf-8");
       expect(updatedTs).toContain("if (done)");
       expect(updatedTs).not.toContain("$earlyExit");
+      expect(fs.existsSync(`${targetTs}.aice`)).toBe(false);
     });
   });
 
-  describe("5. CLI `aice idioms` Commands (list, scan, apply, expand)", () => {
+  describe("4. CLI `aice idioms` Commands (list, scan, expand)", () => {
     it("executes `aice idioms list` via CLI", () => {
       const idiomDef: ProjectIdiomDefinition = {
         name: "$guardVal",
@@ -407,7 +228,6 @@ fn report(msg: str):
       };
 
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         idioms: {
           $guardVal: idiomDef,
         },
@@ -424,9 +244,8 @@ fn report(msg: str):
       expect(parsed.$guardVal).toBeDefined();
     });
 
-    it("executes `aice idioms scan` without mutating files", () => {
+    it("executes `aice idioms scan` without mutating source files", () => {
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         idioms: {},
       });
 
@@ -447,7 +266,6 @@ fn report(msg: str):
       };
 
       saveProjectConfig(tmpDir, {
-        mode: "side-by-side",
         idioms: {
           $logHello: idiomDef,
         },

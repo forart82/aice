@@ -25,7 +25,6 @@ import {
   scanProjectIdioms,
   updateProjectIdiom,
 } from "../../src/idioms/index.js";
-import { applyAiShield } from "../../src/shield/index.js";
 import { generateContext } from "../../src/tools/context.js";
 import { splice, spliceBatch } from "../../src/tools/splice.js";
 
@@ -451,30 +450,98 @@ export class GameEngine {
     });
   });
 
-  describe("Category G: Real-World E2E Proof on `poc_real_case/snake_ts` (Zero .aice Files + `tsc --noEmit`)", () => {
-    it("runs full Twinless workflow (Shield -> Idiom Scan -> Context -> Multi-File Idiom Update -> Direct Native Splice -> tsc --noEmit) on real snake_ts modules", async () => {
+  describe("Category G: Real-World E2E Proof on Native TypeScript Project (Zero .aice Files + `tsc --noEmit`)", () => {
+    it("runs full Twinless workflow (Idiom Scan -> Context -> Multi-File Idiom Update -> Direct Native Splice -> tsc --noEmit) on native TypeScript modules", async () => {
       const srcCoreDir = path.join(tmpDir, "src", "core");
       const srcSimDir = path.join(tmpDir, "src", "sim");
       fs.mkdirSync(srcCoreDir, { recursive: true });
       fs.mkdirSync(srcSimDir, { recursive: true });
 
-      // Copy real native .ts files (NO .aice files!) from poc_real_case/snake_ts
-      const snakeRoot = path.join(repoRoot, "poc_real_case", "snake_ts");
-      fs.copyFileSync(
-        path.join(snakeRoot, "src", "core", "MathX.ts"),
-        path.join(srcCoreDir, "MathX.ts"),
-      );
-      fs.copyFileSync(
-        path.join(snakeRoot, "src", "core", "Vec2.ts"),
+      fs.writeFileSync(
         path.join(srcCoreDir, "Vec2.ts"),
+        `export class Vec2 {
+  X: number;
+  Y: number;
+
+  constructor(x: number = 0, y: number = 0) {
+    this.X = x;
+    this.Y = y;
+  }
+
+  Add(other: Vec2): Vec2 {
+    if (!Number.isFinite(other.X)) {
+      return new Vec2(this.X, this.Y);
+    }
+    return new Vec2(this.X + other.X, this.Y + other.Y);
+  }
+
+  Sub(other: Vec2): Vec2 {
+    if (!Number.isFinite(other.Y)) {
+      return new Vec2(this.X, this.Y);
+    }
+    return new Vec2(this.X - other.X, this.Y - other.Y);
+  }
+
+  Scale(s: number): Vec2 {
+    if (!Number.isFinite(s)) {
+      return new Vec2(this.X, this.Y);
+    }
+    return new Vec2(this.X * s, this.Y * s);
+  }
+}
+`,
+        "utf-8",
       );
-      fs.copyFileSync(
-        path.join(snakeRoot, "src", "sim", "StatusSet.ts"),
+
+      fs.writeFileSync(
         path.join(srcSimDir, "StatusSet.ts"),
-      );
-      fs.copyFileSync(
-        path.join(snakeRoot, "src", "sim", "PlayerStats.ts"),
-        path.join(srcSimDir, "PlayerStats.ts"),
+        `export class StatusSet {
+  FreezeTimer: number = 0;
+  StunTimer: number = 0;
+  MarkTimer: number = 0;
+
+  Update(dt: number): void {
+    if (this.FreezeTimer > 0) {
+      this.FreezeTimer = Math.max(0, this.FreezeTimer - dt);
+    }
+    if (this.StunTimer > 0) {
+      this.StunTimer = Math.max(0, this.StunTimer - dt);
+    }
+    if (this.MarkTimer > 0) {
+      this.MarkTimer = Math.max(0, this.MarkTimer - dt);
+    }
+  }
+
+  Freeze(seconds: number): void {
+    this.FreezeTimer = Math.max(this.FreezeTimer, seconds);
+  }
+
+  get_Immobile(): boolean {
+    return this.FreezeTimer > 0 || this.StunTimer > 0;
+  }
+
+  get_SpeedMult(): number {
+    return this.FreezeTimer > 0 ? 0.5 : 1.0;
+  }
+
+  get_DamageTakenMult(): number {
+    return this.MarkTimer > 0 ? 1.25 : 1.0;
+  }
+
+  get_immobile(): boolean {
+    return this.get_Immobile();
+  }
+
+  get_speedMult(): number {
+    return this.get_SpeedMult();
+  }
+
+  get_damageTakenMult(): boolean | number {
+    return this.get_DamageTakenMult();
+  }
+}
+`,
+        "utf-8",
       );
 
       // Write tsconfig.json for strict verification
@@ -498,17 +565,7 @@ export class GameEngine {
         "utf-8",
       );
 
-      // 1. Apply Twinless AI Shield
-      const shieldRes = await applyAiShield(tmpDir, { twinless: true });
-      expect(shieldRes.activeShields.length).toBeGreaterThan(0);
-      const agentsMd = fs.readFileSync(path.join(tmpDir, "AGENTS.md"), "utf-8");
-      expect(agentsMd).toContain("Twinless");
-      // Native files must NOT be hidden in .cursorignore in twinless mode
-      if (fs.existsSync(path.join(tmpDir, ".cursorignore"))) {
-        expect(fs.readFileSync(path.join(tmpDir, ".cursorignore"), "utf-8")).not.toContain("*.ts");
-      }
-
-      // 2. Scan idioms directly on native snake_ts files (must automatically discover $guard in Vec2.ts and $guard2 in StatusSet.ts!)
+      // 1. Scan idioms directly on native .ts files (must automatically discover $guard in Vec2.ts and $guard2 in StatusSet.ts!)
       saveProjectConfig(tmpDir, {
         mode: "twinless",
         sourceDir: "src",
@@ -520,36 +577,38 @@ export class GameEngine {
       });
       expect(scanRes.idioms.$guard).toBeDefined();
       expect(scanRes.idioms.$guard2).toBeDefined();
+      const statusGuard = scanRes.idioms.$guard.templateAice.includes("max(0")
+        ? "$guard"
+        : "$guard2";
 
       const statusSetPath = path.join(srcSimDir, "StatusSet.ts");
 
-      // 3. On-the-fly context on StatusSet.ts collapses auto-mined $guard2 (`if $0 > 0: $0 = max(0, $0 - dt)`)
+      // 2. On-the-fly context on StatusSet.ts collapses auto-mined statusGuard (`if $0 > 0: $0 = max(0, $0 - dt)`)
       const ctx = await generateContext(statusSetPath, { projectRoot: tmpDir });
-      expect(ctx.targetContent).toContain("$guard2(this.FreezeTimer)");
-      expect(ctx.targetContent).toContain("$guard2(this.StunTimer)");
-      expect(ctx.targetContent).toContain("$guard2(this.MarkTimer)");
+      expect(ctx.targetContent).toContain(`${statusGuard}(this.FreezeTimer)`);
+      expect(ctx.targetContent).toContain(`${statusGuard}(this.StunTimer)`);
+      expect(ctx.targetContent).toContain(`${statusGuard}(this.MarkTimer)`);
 
-      // 4. Multi-file idiom update on auto-mined $guard2 across StatusSet.ts
+      // 3. Multi-file idiom update on auto-mined statusGuard across StatusSet.ts
       const updateRes = await updateProjectIdiom(
         tmpDir,
-        "$guard2",
+        statusGuard,
         "if $0 > 0:\n  $0 = max(0, $0 - dt * 1.25)",
       );
       expect(updateRes.updatedOccurrences).toBe(3);
       expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("dt * 1.25");
 
-      // 5. Surgically splice StatusSet.Freeze using compressed AICE + auto-mined $guard2
+      // 4. Surgically splice StatusSet.Freeze using compressed AICE + auto-mined statusGuard
       await splice(statusSetPath, {
         projectRoot: tmpDir,
         symbol: "StatusSet.Freeze",
         code: `pub fn Freeze(seconds: float) -> void:
   dt := 0.0
-  $guard2(this.FreezeTimer)
+  ${statusGuard}(this.FreezeTimer)
   this.FreezeTimer = max(this.FreezeTimer, seconds * 1.5)`,
       });
 
       expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("seconds * 1.5");
-
 
       // Also fix the 3 delegating getters in StatusSet.ts via spliceBatch so tsc --noEmit passes cleanly
       await spliceBatch(

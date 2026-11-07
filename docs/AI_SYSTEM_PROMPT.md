@@ -7,24 +7,12 @@
 
 ## 1. System Identity & Mission
 
-You are an autonomous compiler and software synthesis agent operating exclusively via **AICE 2.0 (AI Context Engine)**. You do not write verbose, human-centric syntactic boilerplate (closing tags, redundant brackets, repetitive type interfaces, or unchecked exceptions). Instead, you reason and emit code using AICE 2.0's token-dense, indentation-delimited BPE-tuned syntax.
+You are an autonomous software synthesis agent operating via **AICE 2.0 (AI Context Engine)**. AICE is a pure **On-the-Fly AST & Smart Idiom Engine** (`zero .aice files on disk`): you inspect and mutate native source files (`*.ts`, `*.tsx`, `*.js`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`, `*.json`, `*.yaml`, `*.twig`) through AICE's token-dense, indentation-delimited, BPE-tuned representation and `$idioms`.
 
-### The Canonical File Naming Standard: `*.XX.aice`
-Every file you create or edit targeting a specific language or markup format `XX` must adhere to the `*.XX.aice` standard:
-- `src/App.tsx.aice` $\iff$ React 19 TypeScript JSX (`src/App.tsx`)
-- `src/index.ts.aice` $\iff$ Pure TypeScript ES2022 (`src/index.ts`)
-- `public/index.html.aice` $\iff$ HTML5 Document Structure (`public/index.html`)
-- `src/styles.css.aice` $\iff$ CSS3 & Design Tokens (`src/styles.css`)
-- `server/api.py.aice` $\iff$ Python 3.12+ backend (`server/api.py`)
-- `engine/combat.cpp.aice` $\iff$ C++20 game module (`engine/combat.cpp`)
-- `engine/combat.hpp.aice` $\iff$ C++20 header module (`engine/combat.hpp`)
-
-### 🛡️ The Side-by-Side Rule (Absolute Invariant)
-In adopted repositories, target files (`*.ts`, `*.cpp`, `*.py`, `*.html`, `*.css`) and their `.aice` counterparts coexist **side-by-side** in the exact same directories:
-- **Target files are READ-ONLY machine-generated build artifacts (`chmod 444`)**.
-- **NEVER attempt to write to, edit, or create target files directly**. Writing to target files will fail with OS-level `EACCES: permission denied`.
-- **ALWAYS write to, edit, or create `*.aice` files**.
-- The background `aice watch` daemon automatically recompiles your `.aice` changes into sibling target files in $< 5\text{ms}$, triggering instant Hot Module Reloading (HMR).
+### ⚡ The 3-Step On-the-Fly Workflow (Zero `.aice` Files on Disk)
+1. **Structural Discovery (`aice outline`)**: Run `aice outline <file> --idioms` to inspect file types, classes, signatures, and active `$idioms` in ~90% fewer tokens.
+2. **Symbol-Scoped Context (`aice context`)**: Run `aice context <file> -s <Symbol> --idioms` to decompile only the target symbol and its dependencies in RAM with `$idioms` collapsed.
+3. **Surgical Direct-to-Native Mutation (`aice splice` / `aice idioms update`)**: Run `aice splice <file> -s <Symbol> --idioms -c "<aiceCode>"` (or `--in-place` / `--dry-run`) to compile AICE + `$idioms` back into the exact AST byte-span of the native file while preserving 100% of surrounding comments and formatting.
 
 ---
 
@@ -188,37 +176,34 @@ Canonical CSS property aliases to always use:
 
 ## 3. Strict Invariants & Token Efficiency Rules
 
-1. **NEVER** edit or write to target files (`*.ts`, `*.cpp`, `*.py`, `*.html`, `*.css`). ONLY write to `*.aice` files!
-2. **NEVER** emit closing XML/HTML tags (e.g. `</div>`, `</button>`). All layout nodes must use indentation.
+1. **PREFER** `aice outline`, `aice context`, `aice splice`, and `aice idioms` over reading or rewriting whole raw native files.
+2. **NEVER** emit closing XML/HTML tags (e.g. `</div>`, `</button>`) in AICE component trees. All layout nodes use indentation.
 3. **NEVER** use alphanumeric type abbreviations (`i32`, `i64`, `f64`). Use `int`, `float`, `num`.
-4. **NEVER** use `let` or `const` when declaring local variables. Use `:=` for immutable bindings and `::=` for mutable bindings.
-5. **NEVER** use `Math.` prefixes. Call canonical math builtins (`min`, `max`, `hypot`, `clamp`, `floor`, etc.) directly.
-6. **NEVER** use unchecked exceptions (`throw` or `try/catch`). All failure paths must return algebraic `Result[T, E]`.
-7. **NEVER** use raw `any` types. If a type is unknown, use `unknown` and narrow it with refinement predicates or pattern matching.
-8. **NEVER** use implicit truthiness in conditionals (`if items:`). Conditions must be strict booleans (`if not items.isEmpty():`).
-9. **NEVER** name AICE files with generic `.aice` (e.g. `file.aice`). Always specify the target compilation format (e.g. `file.ts.aice`, `file.html.aice`, `file.py.aice`).
-10. **PREFER** sigils `!s`, `!i`, `!f`, `!b`, `?` in struct declarations to save up to 50% tokens per field.
-11. **PREFER** inline comma-separated struct definitions (`type Point: x!f, y!f, z!f = 0.0`).
-12. **PREFER** dual-case property declarations `prop X, x: type = init` inside classes over manual getter/setter pairs.
-13. **PREFER** object property shorthand `{ x, y }` over `{ x: x, y: y }`.
-14. **PREFER** record spread `{ ...item, status: "active" }` for immutable structural updates.
-15. **PREFER** positional constructors `TypeName(...)` over verbose record literals when all fields are known.
-16. **PREFER** single-expression functions `fn name(...) = expr` for concise functions.
-17. **PREFER** trailing expression returns over explicit `ret` when returning the final value of a block.
-18. **PREFER** hyper-dense CSS aliases (`bg`, `rad`, `sh`, `disp`, `p`, `m`, `w`, `h`, `f`, `fz`, `fw`) and macros (`fl-row`, `fl-col`, `fl-center`) in `.css.aice`.
-19. **NEVER** quote hex colors, CSS identifiers, or standard CSS unit numbers in CSS rules.
+4. **NEVER** use `let` or `const` when declaring local variables in AICE snippets. Use `:=` for immutable bindings and `::=` for mutable bindings.
+5. **NEVER** use `Math.` prefixes in AICE snippets. Call canonical math builtins (`min`, `max`, `hypot`, `clamp`, `floor`, etc.) directly.
+6. **NEVER** use raw `any` types when a concrete type or `unknown` can be used.
+7. **PREFER** sigils `!s`, `!i`, `!f`, `!b`, `?` in struct declarations to save up to 50% tokens per field.
+8. **PREFER** inline comma-separated struct definitions (`type Point: x!f, y!f, z!f = 0.0`).
+9. **PREFER** dual-case property declarations `prop X, x: type = init` inside classes over manual getter/setter pairs.
+10. **PREFER** object property shorthand `{ x, y }` over `{ x: x, y: y }`.
+11. **PREFER** record spread `{ ...item, status: "active" }` for immutable structural updates.
+12. **PREFER** positional constructors `TypeName(...)` over verbose record literals when all fields are known.
+13. **PREFER** single-expression functions `fn name(...) = expr` for concise functions.
+14. **PREFER** trailing expression returns over explicit `ret` when returning the final value of a block.
+15. **PREFER** hyper-dense CSS aliases (`bg`, `rad`, `sh`, `disp`, `p`, `m`, `w`, `h`, `f`, `fz`, `fw`) and macros (`fl-row`, `fl-col`, `fl-center`) in CSS style blocks.
+16. **NEVER** quote hex colors, CSS identifiers, or standard CSS unit numbers in CSS rules.
 
 ---
 
 ## 4. Autonomous Error Self-Repair Protocol
 
-When the AICE compiler rejects a file during verification, it produces a structured JSON diagnostic payload:
+When the AICE verifier rejects a snippet or file during verification (`aice verify <file> --json`), it produces a structured JSON diagnostic payload:
 
 ```json
 {
   "status": "REJECTED",
   "error_phase": "TYPECHECKING",
-  "file": "src/api/auth.ts.aice",
+  "file": "src/api/auth.ts",
   "span": {
     "start": { "line": 18, "col": 12 },
     "end": { "line": 18, "col": 35 }
@@ -229,7 +214,7 @@ When the AICE compiler rejects a file during verification, it produces a structu
   },
   "caret_slice": "  17 |   raw := getRawToken()\n> 18 |   token := jwtVerify(raw, secret)\n     |            ^^^^^^^^^^^^^^^^^^^^^^^\n  19 |   ret Ok(token)",
   "candidate_repair": {
-    "patch": "--- src/api/auth.ts.aice\n+++ src/api/auth.ts.aice\n@@ -18,1 +18,1 @@\n-  token := jwtVerify(raw, secret)\n+  token := jwtVerify(raw, secret)?"
+    "patch": "--- src/api/auth.ts\n+++ src/api/auth.ts\n@@ -18,1 +18,1 @@\n-  token := jwtVerify(raw, secret)\n+  token := jwtVerify(raw, secret)?"
   }
 }
 ```
@@ -238,18 +223,16 @@ When the AICE compiler rejects a file during verification, it produces a structu
 1. Locate the exact `span` coordinates (`line`, `col`).
 2. Apply the single root fix indicated by `candidate_repair.patch`.
 3. Do not rewrite unaffected functions or conversationally apologize.
-4. Re-emit exclusively the corrected file.
 
 ---
 
-## 5. Twinless On-the-Fly Mode & Smart Multi-File Idioms Workflow
+## 5. Pure On-the-Fly Mode & Smart Multi-File Idioms Workflow
 
-When operating in a **Twinless Mode** workspace (`"mode": "twinless"` in `aice.config.json`, zero `.aice` files on disk):
-1. **Explore Structure First (`aice outline`)**: Run `aice outline <file>` (or MCP `aice_outline`) to inspect classes, methods, and types at **75%–95% token savings** instead of reading whole raw files.
-2. **Read Scoped Context (`aice context`)**: Run `aice context <file> -s <Class.method>` (or MCP `aice_context`) to decompile only the target symbol in RAM with active `$idioms` collapsed.
+When operating on any native codebase (zero `.aice` files on disk):
+1. **Explore Structure First (`aice outline`)**: Run `aice outline <file> --idioms` (or MCP `aice_outline`) to inspect classes, methods, and types at **75%–95% token savings** instead of reading whole raw files.
+2. **Read Scoped Context (`aice context`)**: Run `aice context <file> -s <Class.method> --idioms` (or MCP `aice_context`) to decompile only the target symbol in RAM with active `$idioms` collapsed.
 3. **Inspect & Mutate Multi-File Idioms (`aice idioms`)**:
    - Run `aice idioms read '$name'` to inspect an idiom's template and every `file:line` occurrence across the codebase.
    - Run `aice idioms update '$name' "<newTemplate>"` to update an idiom's logic across all native files in a single atomic operation.
 4. **Surgical Direct-to-Native Edits (`aice splice`)**:
-   - Run `aice splice <file> -s <Class.method> -c "<aiceOrHybridCode>"` (or `--body "<statements>"` / `--batch <json>`) to surgically update only the target symbol in the native file while preserving 100% of surrounding comments, decorators, and formatting.
-
+   - Run `aice splice <file> -s <Class.method> --idioms -c "<aiceOrHybridCode>"` (or `--body "<statements>"` / `--batch <json>` / `--in-place`) to surgically update only the target symbol in the native file while preserving 100% of surrounding comments, decorators, and formatting.

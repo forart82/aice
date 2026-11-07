@@ -1,9 +1,0 @@
-# dof.combat.CritClamp.hpp
-
-fn clampEffectiveCritChance(base:float, diceContribution:float, cap:float) -> float:
-  sum:float := base + diceContribution
-  if sum <= 0.0:
-    ret 0.0
-  if sum > cap:
-    ret cap
-  ret sum

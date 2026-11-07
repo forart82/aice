@@ -18,8 +18,6 @@ import type {
   CallExpr,
   ClassDecl,
   ClosureExpr,
-  ComponentDecl,
-  ConstDecl,
   DestructureBinding,
   Expr,
   ExprStmt,
@@ -43,7 +41,6 @@ import type {
   TemplateLiteralExpr,
   ThrowStmt,
   UnaryExpr,
-  VarDecl,
   WhileStmt,
 } from "../core/ast.js";
 import { createHash } from "node:crypto";
@@ -56,7 +53,6 @@ import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 import {
   findProjectRoot,
   isProjectIdiomsEnabled,
-  KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   saveProjectConfig,
   type AiceProjectConfig,
@@ -2463,9 +2459,7 @@ function scanNativeCodeFiles(dir: string): string[] {
       }
       const ext = path.extname(entry.name).toLowerCase();
       if (NATIVE_CODE_EXTENSIONS.has(ext)) {
-        if (!fs.existsSync(`${full}.aice`)) {
-          results.push(full);
-        }
+        results.push(full);
       }
     }
   }

@@ -568,6 +568,16 @@ export class CppEmitter {
 
         if (expr.callee.kind === "IdentifierExpr") {
           const typeName = expr.callee.name;
+          if (typeName === "print") {
+            const streamArgs = expr.args.map((a) =>
+              a.kind === "LiteralExpr" && a.literalKind === "string"
+                ? a.rawValue
+                : this.emitExpr(a),
+            );
+            return streamArgs.length > 0
+              ? `std::cout << ${streamArgs.join(" << ")} << std::endl`
+              : `std::cout << std::endl`;
+          }
           const fields = this.structTypes.get(typeName);
           if (fields && fields.length === expr.args.length) {
             return `${typeName}{ ${argCodes.join(", ")} }`;

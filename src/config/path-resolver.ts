@@ -14,7 +14,6 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  resolveSourceFile,
 } from "./project-config.js";
 
 export interface PathResolverOptions {
@@ -94,119 +93,6 @@ export function isRealPathSameOrDescendant(
   } catch {
     return false;
   }
-}
-
-/**
- * Checks if a given path is within the target project directory or outDir of the companion config.
- */
-export function isTargetProjectPath(
-  candidatePath: string,
-  config: AiceProjectConfig,
-  projectRoot?: string,
-): boolean {
-  const root = projectRoot ? path.resolve(projectRoot) : undefined;
-  const absOutDir = config.outDir
-    ? path.isAbsolute(config.outDir)
-      ? path.resolve(config.outDir)
-      : root
-        ? path.resolve(root, config.outDir)
-        : undefined
-    : undefined;
-
-  const absTargetProjectDir = config.targetProjectDir
-    ? path.isAbsolute(config.targetProjectDir)
-      ? path.resolve(config.targetProjectDir)
-      : root
-        ? path.resolve(root, config.targetProjectDir)
-        : undefined
-    : undefined;
-
-  return (
-    isSameOrDescendant(absOutDir, candidatePath) ||
-    isSameOrDescendant(absTargetProjectDir, candidatePath) ||
-    isRealPathSameOrDescendant(absOutDir, candidatePath) ||
-    isRealPathSameOrDescendant(absTargetProjectDir, candidatePath)
-  );
-}
-
-/**
- * Resolves an external target file or directory path to its companion source path in the companion workspace.
- * Returns undefined if config is not in companion mode or if targetPath is outside outDir / targetProjectDir.
- */
-export function resolveCompanionSource(
-  targetPath: string,
-  config: AiceProjectConfig,
-  projectRoot?: string,
-): string | undefined {
-  if (config.mode !== "companion") {
-    return undefined;
-  }
-  const root = projectRoot ? path.resolve(projectRoot) : undefined;
-  const absTarget = path.isAbsolute(targetPath)
-    ? path.resolve(targetPath)
-    : path.resolve(root ?? process.cwd(), targetPath);
-
-  const absOutDir = config.outDir
-    ? path.isAbsolute(config.outDir)
-      ? path.resolve(config.outDir)
-      : root
-        ? path.resolve(root, config.outDir)
-        : undefined
-    : undefined;
-
-  const absSourceDir = config.sourceDir
-    ? path.isAbsolute(config.sourceDir)
-      ? path.resolve(config.sourceDir)
-      : root
-        ? path.resolve(root, config.sourceDir)
-        : root
-    : root;
-
-  const absTargetProjectDir = config.targetProjectDir
-    ? path.isAbsolute(config.targetProjectDir)
-      ? path.resolve(config.targetProjectDir)
-      : root
-        ? path.resolve(root, config.targetProjectDir)
-        : undefined
-    : undefined;
-
-  // Check if directory
-  let isDir = false;
-  if (fs.existsSync(absTarget)) {
-    try {
-      isDir = fs.statSync(absTarget).isDirectory();
-    } catch {
-      isDir = false;
-    }
-  } else {
-    isDir =
-      targetPath.endsWith("/") ||
-      targetPath.endsWith("\\") ||
-      (path.extname(absTarget) === "" && !targetPath.endsWith(".aice"));
-  }
-
-  if (isDir) {
-    if (absOutDir && isSameOrDescendant(absOutDir, absTarget)) {
-      const rel = path.relative(absOutDir, absTarget);
-      return rel && absSourceDir ? path.resolve(absSourceDir, rel) : absSourceDir;
-    }
-    if (absTargetProjectDir && isSameOrDescendant(absTargetProjectDir, absTarget)) {
-      const rel = path.relative(absTargetProjectDir, absTarget);
-      return rel && root ? path.resolve(root, rel) : (absSourceDir ?? root);
-    }
-    return undefined;
-  }
-
-  // File: verify that it is within outDir or targetProjectDir or isTargetProjectPath
-  if (
-    (absOutDir && isSameOrDescendant(absOutDir, absTarget)) ||
-    (absTargetProjectDir && isSameOrDescendant(absTargetProjectDir, absTarget)) ||
-    isTargetProjectPath(absTarget, config, projectRoot)
-  ) {
-    return resolveSourceFile(config, absTarget, projectRoot);
-  }
-
-  return undefined;
 }
 
 /**
@@ -486,42 +372,11 @@ export function resolvePathTargets(
   }
 
   if (isDir) {
-    let effectiveProjectRoot = options.projectRoot
-      ? path.resolve(options.projectRoot)
-      : undefined;
-    let effectiveConfig = options.config;
-
-    if (!effectiveProjectRoot && !effectiveConfig) {
-      const cwdRoot = findProjectRoot(process.cwd());
-      const cwdConfig = loadProjectConfig(cwdRoot);
-      if (cwdConfig.mode === "companion" && isTargetProjectPath(absPath, cwdConfig, cwdRoot)) {
-        effectiveProjectRoot = cwdRoot;
-        effectiveConfig = cwdConfig;
-      }
-    }
-
     const fallbackDir = isSameOrDescendant(process.cwd(), absPath) ? process.cwd() : absPath;
-    const projectRoot =
-      effectiveProjectRoot ?? findProjectRoot(absPath, fallbackDir);
-    const config = effectiveConfig ?? loadProjectConfig(projectRoot);
-
-    if (config.mode === "companion") {
-      const companionDir = resolveCompanionSource(absPath, config, projectRoot);
-      if (companionDir && fs.existsSync(companionDir)) {
-        const companionFiles = scanDirectoryFiles(companionDir, options, config, projectRoot);
-        if (companionFiles.length > 0 || !options.includeTargets) {
-          return {
-            isSingleFile: false,
-            isDirectory: true,
-            isOmitted: false,
-            resolvedPath: companionDir,
-            files: companionFiles,
-            projectRoot,
-            config,
-          };
-        }
-      }
-    }
+    const projectRoot = options.projectRoot
+      ? path.resolve(options.projectRoot)
+      : findProjectRoot(absPath, fallbackDir);
+    const config = options.config ?? loadProjectConfig(projectRoot);
 
     const files = fs.existsSync(absPath)
       ? scanDirectoryFiles(absPath, options, config, projectRoot)
@@ -539,65 +394,13 @@ export function resolvePathTargets(
   }
 
   // Single file target
-  let effectiveProjectRoot = options.projectRoot
-    ? path.resolve(options.projectRoot)
-    : undefined;
-  let effectiveConfig = options.config;
-
-  if (!effectiveProjectRoot && !effectiveConfig) {
-    const cwdRoot = findProjectRoot(process.cwd());
-    const cwdConfig = loadProjectConfig(cwdRoot);
-    if (cwdConfig.mode === "companion" && isTargetProjectPath(absPath, cwdConfig, cwdRoot)) {
-      effectiveProjectRoot = cwdRoot;
-      effectiveConfig = cwdConfig;
-    }
-  }
-
   const fallbackFileDir = isSameOrDescendant(process.cwd(), absPath)
     ? process.cwd()
     : path.dirname(absPath);
-  const projectRoot =
-    effectiveProjectRoot ?? findProjectRoot(path.dirname(absPath), fallbackFileDir);
-  const config = effectiveConfig ?? loadProjectConfig(projectRoot);
-
-  if (absPath.endsWith(".aice")) {
-    return {
-      isSingleFile: true,
-      isDirectory: false,
-      isOmitted: false,
-      resolvedPath: absPath,
-      files: [absPath],
-      projectRoot,
-      config,
-    };
-  }
-
-  if (config.mode === "companion" || isTargetProjectPath(absPath, config, projectRoot)) {
-    try {
-      const companionFile =
-        resolveCompanionSource(absPath, config, projectRoot) ??
-        resolveSourceFile(config, absPath, projectRoot);
-
-      if (companionFile) {
-        const companionExists = fs.existsSync(companionFile);
-        const targetExists = fs.existsSync(absPath);
-
-        if (companionExists || !targetExists || !options.includeTargets) {
-          return {
-            isSingleFile: true,
-            isDirectory: false,
-            isOmitted: false,
-            resolvedPath: companionFile,
-            files: [companionFile],
-            projectRoot,
-            config,
-          };
-        }
-      }
-    } catch {
-      // Fallback to absPath
-    }
-  }
+  const projectRoot = options.projectRoot
+    ? path.resolve(options.projectRoot)
+    : findProjectRoot(path.dirname(absPath), fallbackFileDir);
+  const config = options.config ?? loadProjectConfig(projectRoot);
 
   return {
     isSingleFile: true,

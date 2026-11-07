@@ -24,11 +24,11 @@ AICE decouples semantic AST nodes from lexical trivia using a **Node-Indexed Tri
 
 ```mermaid
 flowchart LR
-    Source["Original Source (index.ts)"] --> Lexer["Trivia-Aware Lexer"]
-    Lexer --> AST["AICE Semantic AST (*.ts.aice)"]
-    Lexer --> TriviaTable["CST Trivia Table (*.ts.aice.trivia.json)"]
+    Source["Original Source (index.ts)"] --> Lexer["In-Memory Trivia-Aware Decompiler"]
+    Lexer --> AST["In-Memory AICE Semantic AST"]
+    Lexer --> TriviaTable["In-Memory CST Trivia Table"]
     
-    AST --> Emitter["Bidirectional Lens Emitter"]
+    AST --> Emitter["Bidirectional Lens Emitter / Splice"]
     TriviaTable --> Emitter
     Emitter --> Reconstructed["Lossless Reconstruction (index.ts)"]
 ```
@@ -102,18 +102,11 @@ fn startService() -> void:
 
 ---
 
-## 4. Modern Inlined Comments Architecture & Zero Clutter Standard
+## 4. Pure On-the-Fly Inlined Comments & Zero Disk Clutter
 
-In AICE 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into `*.aice` source files as standard `#` comments:
-
-```
-src/sim/
-├── Boss.ts                  # Read-only target source (chmod 444)
-└── Boss.ts.aice              # Authoritative AICE source with inlined comments
-```
+In AICE 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into the in-memory AICE representation as `#` comments and preserved bit-for-bit during `aice splice`:
 
 ### Key Principles:
-1. **Strict Extension Standard**: Every AICE file strictly ends with `*.aice`. No external `.json` sidecars pollute the project directory.
-2. **Direct Human & AI Visibility**: Comments reside directly in `*.aice` where developers and AI models can inspect, understand, and update them naturally.
-3. **Clean Ejection**: When running `aice eject --remove-aice`, only `.aice` files need to be pruned.
-
+1. **Zero Disk Clutter**: No `.aice` companion files or external `.json` sidecars are written to disk.
+2. **Direct Human & AI Visibility**: Comments appear directly in the in-memory `aice context` view where AI models can inspect and update them naturally.
+3. **Surgical Byte-Span Preservation**: When running `aice splice <file> -s <symbol>`, only the targeted AST declaration span is replaced, preserving 100% of surrounding comments, license headers, and formatting in the native file.

@@ -226,24 +226,12 @@ Updating the AICE AST and emitting target code preserves all semantic edits when
 
 ---
 
-## 5. Side-by-Side 4-Layer Defense-in-Depth Architecture
+## 5. Pure On-the-Fly In-Memory Architecture
 
-To avoid breaking existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), relative imports, and git history, AICE operates **side-by-side**:
-```
-project/src/
-├── Controller.ts           <-- Read-only lock (chmod 444). Hidden from AI agents.
-└── Controller.ts.aice       <-- VISIBLE to AI as single authoritative source of truth.
-```
-
-### The 4 Layers of Protection:
-1. **IDE Sibling Conditional Exclusion (`.vscode/settings.json`)**:
-   Uses `"**/*.ts": { "when": "$(basename).ts.aice" }`. Hides target files from file trees, fuzzy finders, and symbol indexing in Cursor, VS Code, and Windsurf.
-2. **Universal AI Agent Ignores (`.cursorignore`, `.geminiignore`, `.aiderignore`, `.agentignore`)**:
-   Prevents agent exploration tools (`grep`, `find`, `list_dir`) and codebase vector embeddings from indexing target files.
-3. **Cognitive Lockdown Directives (`AGENTS.md`, `.cursorrules`)**:
-   Instructs AI agents that target files are read-only generated artifacts and all edits must be made directly in `*.aice` files.
-4. **Filesystem Permission Locks (`chmod 444`) & Watch Daemon (`aice watch`)**:
-   Generated target files are locked to read-only (`0o444`). Direct edit attempts fail with `EACCES`. The `aice watch` daemon atomically unlocks target files, recompiles them in $< 5\text{ms}$, and relocks them, preserving instant Hot Module Reloading (HMR).
+To guarantee zero friction with existing build pipelines (Vite, Cargo, CMake, TypeScript, pytest, Go, etc.), relative imports, and git history, AICE operates **100% On-the-Fly in RAM** with **zero `.aice` files on disk**:
+- `aice outline <file> [--idioms]` reads native code directly from disk and emits an ultra-compact structural skeleton.
+- `aice context <file> [-s <symbol>] [--idioms]` decompiles native code in RAM, slices the requested symbol and its transitive dependencies, and collapses repetitive patterns into `$idioms`.
+- `aice splice <file> -s <symbol> [--idioms] -c <code>` compiles AICE + `$idioms` back into the exact AST byte-span of the native file while preserving 100% of surrounding comments and formatting.
 
 ---
 
@@ -325,43 +313,30 @@ In addition to Side-by-Side mode, AICE 2.0 supports **Twinless On-the-Fly Mode**
 
 ## 8. CLI Toolchain & Workflow Specification
 
-The `aice` binary provides a comprehensive CLI for Twinless On-the-Fly workflows, Side-by-Side adoption, live development, compilation, and automated self-repair:
+The `aice` binary provides a clean CLI for pure On-the-Fly workflows, Smart Multi-File Idioms, in-memory compilation/decompilation, and automated verification:
 
 ```bash
-# Twinless On-the-Fly & Smart Multi-File Idioms
-aice shield apply [dir] --twinless    # Configure Twinless mode (zero .aice files on disk)
-aice outline <nativeFile> [--stats]   # On-the-fly structural skeleton (85-95% token reduction)
-aice context <nativeFile> [-s <sym>]  # On-the-fly dependency & symbol-scoped AICE context with $idioms
-aice splice <nativeFile> -s <sym> -c <code> # Direct-to-native surgical AST splice (AICE, $idioms, raw, hybrid)
-aice idioms scan [dir]                # Mine multi-file idioms from native code into aice.config.json
-aice idioms read '$name' [dir]        # List all file:line occurrences & bound arguments across files
-aice idioms update '$name' "<tpl>"    # Atomically rewrite all idiom occurrences across native files
-aice idioms <on|off> [dir]            # Toggle on-the-fly $idiom collapsing in aice.config.json
+# Pure On-the-Fly Workflow & Smart Multi-File Idioms
+aice outline <nativeFile> [--idioms] [--stats]              # On-the-fly structural skeleton (85-95% token reduction)
+aice context <nativeFile> [-s <sym>] [--idioms|--no-idioms] # On-the-fly dependency & symbol-scoped AICE context
+aice splice <nativeFile> -s <sym> -c <code> [--idioms] [--dry-run] [--in-place] # Direct-to-native surgical AST splice
+aice idioms scan [dir]                                      # Mine multi-file idioms from native code into aice.config.json
+aice idioms read '$name' [dir]                              # List all file:line occurrences & bound arguments across files
+aice idioms update '$name' "<tpl>"                          # Atomically rewrite all idiom occurrences across native files
+aice idioms <on|off|list|apply|expand> [dir]                # Toggle or inspect on-the-fly $idiom collapsing
 
-# Side-by-side adoption & live development
-aice adopt [dir] [-c <concurrency>]   # Ingests codebase, generates shields, and locks target files
-aice watch [dir]                      # Sub-5ms incremental watch daemon preserving HMR
-aice dev [dir]                        # Alias for watch
-aice eject [dir] [--remove-aice]       # Restores target files to chmod 644 and removes shields
-aice shield <apply|remove|status|lock|unlock> [dir]
+# In-Memory Compilation, Decompilation & Verification
+aice decompile <targetFile>                                 # Decompiles target file into AICE representation
+aice compile <file>                                         # Compiles AICE representation to target language
+aice roundtrip <targetFile>                                 # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
+aice verify <file> [--json]                                 # Verifies types, immutability, and syntax soundness
+aice fix <file> [--dry-run]                                 # Autonomously self-repairs fixable diagnostics
+aice tokens [file|dir]                                      # Audits token efficiency for a specific file or folder
+aice mcp                                                    # Starts Model Context Protocol server over stdio
 
-# Compilation & Decompilation
-aice compile <file.aice>               # Compiles single AICE file to target language
-aice compile-all [dir]                # Recursively compiles all .aice files across project
-aice clean [dir]                      # Cleans generated target files
-aice decompile <targetFile>           # Decompiles target file into .aice
-
-# Quality Gates, Benchmarks & Diagnostics
-bun run benchmark:100                # Executes the 100-Case Deep Twinless On-the-Fly Benchmark
-bun run benchmark:500                # Executes the 500-Case Progressive Complexity Benchmark (#001 -> #500)
-bun run benchmark:500-per-lang       # Executes the 500-Per-Language Benchmark (15 dialects x 500 = 7,500 cases)
-aice verify <file.aice> [--json]       # Verifies types, immutability, and syntax soundness
-aice fix <file.aice> [--dry-run]       # Autonomously self-repairs fixable diagnostics
-aice roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
-aice tokens [file|dir]                # Audits token efficiency for a specific file or folder (with subfolders)
-aice verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
-aice lsp                              # Starts Language Server Protocol over stdio
-aice mcp                              # Starts Model Context Protocol server over stdio
+# Benchmarks & Quality Gates
+npm run check                                               # TypeScript typecheck (tsc --noEmit)
+npx vitest run                                              # Run unit test suite
+npm run benchmark:offline                                   # Run deterministic 3-way offline benchmark (RW-01..RW-10)
+npm run benchmark                                           # Run live real-agent 3-way benchmark (RW-01..RW-10)
 ```
-
-

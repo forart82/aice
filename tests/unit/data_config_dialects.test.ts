@@ -62,6 +62,67 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-data-config-test-"));
+    fs.writeFileSync(
+      path.join(tmpDir, "sample.json"),
+      JSON.stringify(
+        {
+          name: "aice-data-service",
+          version: "2.4.0",
+          port: 8080,
+          timeout: 30.5,
+          negativeOffset: -10,
+          enabled: true,
+          debug: false,
+          fallback: null,
+          tags: ["transpiler", "compiler", "homoiconic", "ast"],
+          matrix: [
+            [1, 2],
+            [3, 4],
+          ],
+          server: {
+            host: "127.0.0.1",
+            ssl: true,
+            maxConnections: 5000,
+            cors: {
+              origins: ["https://example.com", "https://api.example.com"],
+              credentials: true,
+            },
+          },
+          emptyObject: {},
+          emptyList: [],
+        },
+        null,
+        2,
+      ) + "\n",
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "sample.yaml"),
+      `# AICE Unified Configuration Spec
+app:
+  name: aice-cluster-manager
+  version: 1.0.0
+  active: true
+  replicas: 3
+  cpuLimit: 2.5
+  memoryOffset: -256
+  leader: null
+  zones:
+    - us-east-1a
+    - us-east-1b
+    - us-east-1c
+  network:
+    bind: 0.0.0.0
+    port: 9090
+    ingress:
+      enabled: true
+      hosts:
+        - cluster.local
+  emptyRecord: {}
+  emptyArray: []
+`,
+      "utf-8",
+    );
   });
 
   afterEach(() => {
@@ -370,7 +431,7 @@ server:
 
   describe("4. Example Test Files and Lossless Roundtrip", () => {
     it("decompiles and re-emits examples/data_config/sample.json without data loss", async () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
+      const samplePath = path.join(tmpDir, "sample.json");
       const originalContent = fs.readFileSync(samplePath, "utf-8");
       const originalJson = JSON.parse(originalContent);
 
@@ -386,7 +447,7 @@ server:
     });
 
     it("decompiles and re-emits examples/data_config/sample.yaml without data loss", async () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.yaml");
+      const samplePath = path.join(tmpDir, "sample.yaml");
       const originalContent = fs.readFileSync(samplePath, "utf-8");
       const originalYaml = YAML.parse(originalContent);
 
@@ -406,7 +467,7 @@ server:
 
   describe("5. Polymorphic CLI Integration on Data Files", () => {
     it("runs 'aice outline' on sample.json and yields symbol outline with high token savings", () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
+      const samplePath = path.join(tmpDir, "sample.json");
       const res = runCli(["outline", samplePath, "--stats"]);
 
       expect(res.status).toBe(0);
@@ -416,7 +477,7 @@ server:
     });
 
     it("runs 'aice outline' on sample.yaml and yields symbol outline with high token savings", () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.yaml");
+      const samplePath = path.join(tmpDir, "sample.yaml");
       const res = runCli(["outline", samplePath, "--stats"]);
 
       expect(res.status).toBe(0);
@@ -426,7 +487,7 @@ server:
     });
 
     it("runs 'aice outline --json' on sample.json and outputs structured symbols payload", () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
+      const samplePath = path.join(tmpDir, "sample.json");
       const res = runCli(["outline", samplePath, "--json"]);
 
       expect(res.status).toBe(0);
@@ -439,7 +500,7 @@ server:
     });
 
     it("runs 'aice context' on sample.json and packages file content", () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
+      const samplePath = path.join(tmpDir, "sample.json");
       const res = runCli(["context", samplePath, "--no-callers"]);
 
       expect(res.status).toBe(0);
@@ -448,7 +509,7 @@ server:
     });
 
     it("runs 'aice context --outline-target' on sample.json and packages outline representation", () => {
-      const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
+      const samplePath = path.join(tmpDir, "sample.json");
       const res = runCli(["context", samplePath, "--outline-target", "--no-callers"]);
 
       expect(res.status).toBe(0);

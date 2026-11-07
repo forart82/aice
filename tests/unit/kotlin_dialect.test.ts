@@ -84,6 +84,70 @@ describe("Step 28: Multi-Language Dialects for Mobile / Android (.kt, .kts)", ()
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-kt-test-"));
+    fs.writeFileSync(
+      path.join(tmpDir, "UserEntity.kt"),
+      `// Represents a system user entity with profile information.
+// data class
+data class UserEntity(
+    val id: String,
+    val name: String,
+    val email: String,
+    val age: Int = 18,
+    val isActive: Boolean = true,
+    val bio: String? = null
+) {
+    fun getDisplayName(): String {
+        "$name <$email>"
+    }
+
+    fun isAdult(): Boolean {
+        age >= 18
+    }
+}
+`,
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "NetworkClient.kt"),
+      `package com.example.network
+
+/**
+ * Status of network response.
+ */
+enum class NetworkStatus {
+    SUCCESS,
+    ERROR,
+    PENDING,
+    TIMEOUT
+}
+
+/**
+ * Network client demonstrating suspend functions, when expression, and null safety.
+ */
+class NetworkClient(val baseUrl: String, val timeoutMs: Long = 5000) {
+
+    suspend fun executeRequest(endpoint: String, token: String?): String {
+        val authHeader = token ?: "Bearer anonymous"
+        return "Response from $baseUrl$endpoint with $authHeader"
+    }
+
+    fun describeStatus(status: NetworkStatus): String {
+        return when (status) {
+            NetworkStatus.SUCCESS -> "Request completed successfully"
+            NetworkStatus.ERROR -> "Request failed with error"
+            NetworkStatus.PENDING -> "Request is still in progress"
+            NetworkStatus.TIMEOUT -> "Request timed out"
+        }
+    }
+
+    fun parsePayload(payload: String?): String {
+        val safePayload = payload?.trim() ?: "empty"
+        return safePayload
+    }
+}
+`,
+      "utf-8",
+    );
   });
 
   afterEach(() => {
@@ -517,7 +581,7 @@ fun testControl(items: List<String>): Int {
   // ===========================================================================
   describe("Bidirectional Roundtrip Fidelity: Put(Get(c), Omega) == c", () => {
     it("guarantees 100% bit-identical roundtrip for UserEntity.kt", () => {
-      const originalPath = path.resolve(__dirname, "../../examples/kotlin/UserEntity.kt");
+      const originalPath = path.join(tmpDir, "UserEntity.kt");
       const source = fs.readFileSync(originalPath, "utf-8");
 
       const result = executeRoundtrip(source, "kotlin", originalPath);
@@ -530,7 +594,7 @@ fun testControl(items: List<String>): Int {
     });
 
     it("guarantees 100% bit-identical roundtrip for NetworkClient.kt", () => {
-      const originalPath = path.resolve(__dirname, "../../examples/kotlin/NetworkClient.kt");
+      const originalPath = path.join(tmpDir, "NetworkClient.kt");
       const source = fs.readFileSync(originalPath, "utf-8");
 
       const result = executeRoundtrip(source, "kotlin", originalPath);
@@ -542,7 +606,7 @@ fun testControl(items: List<String>): Int {
     });
 
     it("satisfies multi-round convergence (Round 1 == Round 2 == Round 3)", () => {
-      const originalPath = path.resolve(__dirname, "../../examples/kotlin/UserEntity.kt");
+      const originalPath = path.join(tmpDir, "UserEntity.kt");
       const source = fs.readFileSync(originalPath, "utf-8");
 
       const round1 = executeRoundtrip(source, "kotlin", originalPath);
@@ -583,14 +647,14 @@ fun testControl(items: List<String>): Int {
   // ===========================================================================
   describe("Polymorphic CLI Execution on Kotlin Files", () => {
     it("executes 'aice outline' on Kotlin file with semantic token reduction", () => {
-      const ktFile = path.resolve(__dirname, "../../examples/kotlin/UserEntity.kt");
+      const ktFile = path.join(tmpDir, "UserEntity.kt");
       const res = runCli(["outline", ktFile]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("UserEntity");
     });
 
     it("executes 'aice context' on Kotlin file", () => {
-      const ktFile = path.resolve(__dirname, "../../examples/kotlin/NetworkClient.kt");
+      const ktFile = path.join(tmpDir, "NetworkClient.kt");
       const res = runCli(["context", ktFile]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("NetworkClient");
@@ -627,7 +691,7 @@ data class Sample(val id: String)
   // ===========================================================================
   describe("Typecheck Soundness on Decompiled Modules", () => {
     it("guarantees zero fatal diagnostics when typechecking decompiled Kotlin module", () => {
-      const originalPath = path.resolve(__dirname, "../../examples/kotlin/UserEntity.kt");
+      const originalPath = path.join(tmpDir, "UserEntity.kt");
       const source = fs.readFileSync(originalPath, "utf-8");
 
       const decomp = decompileKotlin(source, originalPath);

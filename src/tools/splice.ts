@@ -15,7 +15,6 @@ import {
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  resolveTargetOutputPathForConfig,
   stripJsonComments,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
@@ -38,7 +37,6 @@ import { parse, parseWithTrivia } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
-import { safeWriteTargetFile } from "../shield/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 
@@ -2746,7 +2744,7 @@ function emitNativeSnippetForContext(
       isBodyOnly,
     );
 
-  const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
+  let emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
     visibility: spanInfo?.visibility ?? explicitVisibility,
     isExported: spanInfo?.isExported ?? isExported,
     isStatic: spanInfo?.isStatic,
@@ -2757,6 +2755,24 @@ function emitNativeSnippetForContext(
     cppOutOfLine: spanInfo?.cppOutOfLine,
     origHeader: spanInfo?.origHeader,
   });
+
+  if (targetLang === "cpp" && originalSnippet) {
+    for (const m of originalSnippet.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
+      const ns = m[1];
+      const fn = m[2];
+      emitted = emitted.replace(new RegExp(`\\b${ns}\\.${fn}\\s*\\(`, "g"), `${ns}::${fn}(`);
+    }
+    if (spanInfo?.origHeader) {
+      const headerMatch = spanInfo.origHeader.match(/^[^{]+\([^)]*\)/);
+      if (headerMatch) {
+        for (const pm of headerMatch[0].matchAll(/\bconst\s+([A-Za-z_][A-Za-z0-9_:<>]*)\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\b/g)) {
+          const tName = pm[1];
+          const pName = pm[2];
+          emitted = emitted.replace(new RegExp(`\\b${tName}\\s+${pName}\\b`), `const ${tName}& ${pName}`);
+        }
+      }
+    }
+  }
 
   if (leadingDecorators.length > 0) {
     return `${leadingDecorators.join("\n")}\n${emitted}`;
@@ -3518,37 +3534,23 @@ export function spliceNativeSource(
 }
 
 /**
- * Executes AST surgical splice on a file with optional atomic disk write and re-compilation.
- * Supports both `.aice` files and Twinless Direct-to-Native files (`.ts`, `.py`, etc. with zero `.aice` files on disk).
+ * Executes AST surgical splice on a file with optional atomic disk write.
+ * Directly splices native files (`.ts`, `.py`, `.rs`, `.go`, `.cpp`, `.cs`, `.kt`, `.php`, `.json`, `.yaml`, `.html`, `.twig`, `.css`)
+ * as well as standalone `.aice` files in memory.
  */
 export async function splice(filePath: string, options: SpliceOptions = {}): Promise<SpliceResult> {
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
-  let targetAicePath = fullPath;
-  let isTwinlessNative = false;
 
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Source file not found: ${filePath}`);
-  }
-
-  // If path is a non-.aice target file, check for companion .aice file
-  if (!fullPath.endsWith(".aice")) {
-    const companion = `${fullPath}.aice`;
-    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".aice");
-    if (fs.existsSync(companion)) {
-      targetAicePath = companion;
-    } else if (fs.existsSync(shortCompanion)) {
-      targetAicePath = shortCompanion;
-    } else {
-      isTwinlessNative = true;
-    }
   }
 
   const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
   const config = loadProjectConfig(root);
   const activeIdioms = options.idioms === false ? {} : config.idioms;
 
-  if (isTwinlessNative) {
+  if (!fullPath.endsWith(".aice")) {
     const originalNative = await fs.promises.readFile(fullPath, "utf-8");
     const result = spliceNativeSource(originalNative, options, fullPath, activeIdioms);
 
@@ -3565,40 +3567,34 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
     return result;
   }
 
-  const originalSource = await fs.promises.readFile(targetAicePath, "utf-8");
-  const result = spliceSource(originalSource, options, targetAicePath);
+  const originalSource = await fs.promises.readFile(fullPath, "utf-8");
+  const result = spliceSource(originalSource, options, fullPath);
 
   // Write atomically to disk unless dryRun
   if (!options.dryRun) {
-    const dir = path.dirname(targetAicePath);
+    const dir = path.dirname(fullPath);
     const tmpFile = path.join(
       dir,
-      `.${path.basename(targetAicePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
     await fs.promises.writeFile(tmpFile, result.modifiedCode, "utf-8");
-    await fs.promises.rename(tmpFile, targetAicePath);
+    await fs.promises.rename(tmpFile, fullPath);
   }
 
-  // Automatically trigger compilation if requested
   if (options.compile) {
-    const resolvedTarget = resolveTargetOutputPathForConfig(targetAicePath, config, root);
-    const outPath = path.isAbsolute(resolvedTarget)
-      ? resolvedTarget
-      : path.resolve(root, resolvedTarget);
-
-    const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, targetAicePath);
+    const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, fullPath);
     const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
     const checker = new TypeChecker();
     checker.checkModule(expandedMod);
 
     let targetLang: TargetLanguage;
-    const base = path.basename(targetAicePath);
+    const base = path.basename(fullPath);
     const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
     const innerExt = path.extname(withoutAice).toLowerCase();
     if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-      targetLang = detectTargetFromPath(targetAicePath);
+      targetLang = detectTargetFromPath(fullPath);
     } else {
-      targetLang = config.targetLanguage ?? detectTargetFromPath(targetAicePath);
+      targetLang = config.targetLanguage ?? detectTargetFromPath(fullPath);
     }
 
     const emitted = emitTarget(expandedMod, targetLang, {
@@ -3607,7 +3603,8 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
       idioms: config.idioms,
     });
 
-    safeWriteTargetFile(outPath, emitted);
+    const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
+    await fs.promises.writeFile(outPath, emitted, "utf-8");
   }
 
   return result;
@@ -3632,10 +3629,6 @@ export async function spliceBatch(
       : path.resolve(baseDir, rawFp);
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
       backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
-    }
-    const companion = `${fullPath}.aice`;
-    if (fs.existsSync(companion) && !backups.has(companion)) {
-      backups.set(companion, fs.readFileSync(companion, "utf-8"));
     }
   }
 

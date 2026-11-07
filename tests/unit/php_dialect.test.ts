@@ -84,6 +84,113 @@ describe("Step 26: Multi-Language Dialects for PHP 8.x (.php)", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-php-test-"));
+    fs.writeFileSync(
+      path.join(tmpDir, "UserRepository.php"),
+      `<?php
+
+declare(strict_types=1);
+
+namespace App\\Repositories;
+
+use App\\Models\\User;
+
+interface UserRepositoryInterface {
+    public function findById(int $id): ?User;
+    public function save(User $user): bool;
+    public function delete(int $id): void;
+}
+
+class UserRepository implements UserRepositoryInterface {
+    /**
+     * In-memory storage for user entities.
+     */
+    private array $users = [];
+
+    public function findById(int $id): ?User {
+        if (isset($this->users[$id])) {
+            return $this->users[$id];
+        }
+        return null;
+    }
+
+    public function save(User $user): bool {
+        $this->users[$user->id] = $user;
+        return true;
+    }
+
+    public function delete(int $id): void {
+        unset($this->users[$id]);
+    }
+}
+`,
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "OrderStatus.php"),
+      `<?php
+
+declare(strict_types=1);
+
+namespace App\\Enums;
+
+enum OrderStatus: string {
+    case Pending = 'pending';
+    case Processing = 'processing';
+    case Completed = 'completed';
+    case Cancelled = 'cancelled';
+}
+
+function getOrderStatusLabel(OrderStatus $status): string {
+    return match ($status) {
+        OrderStatus::Pending => 'Pending Payment',
+        OrderStatus::Processing => 'Processing Order',
+        OrderStatus::Completed => 'Order Completed',
+        OrderStatus::Cancelled => 'Order Cancelled',
+    };
+}
+`,
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "PaymentService.php"),
+      `<?php
+
+declare(strict_types=1);
+
+namespace App\\Services;
+
+use App\\Repositories\\UserRepository;
+use Exception;
+
+class PaymentService {
+    public function __construct(
+        private UserRepository $userRepository,
+        public readonly float $processingFee = 1.5,
+    ) {}
+
+    public function process(int $userId, float $amount, string $method): bool {
+        if ($amount <= 0.0) {
+            throw new Exception('Invalid payment amount');
+        }
+
+        $user = $this->userRepository->findById($userId);
+        if ($user === null) {
+            throw new Exception('User not found');
+        }
+
+        $fee = match ($method) {
+            'card' => $amount * 0.03,
+            'bank' => 0.5,
+            default => $this->processingFee,
+        };
+
+        $total = $amount + $fee;
+        return $total > 0.0;
+    }
+}
+`,
+      "utf-8",
+    );
   });
 
   afterEach(() => {
@@ -433,7 +540,7 @@ pub class Navigator:
   // ===========================================================================
   describe("Bidirectional Fidelity & Lens Verification: Put(Get(c), Omega) == c", () => {
     it("satisfies roundtrip fidelity on UserRepository.php example", () => {
-      const filePath = path.resolve(__dirname, "../../examples/php/UserRepository.php");
+      const filePath = path.join(tmpDir, "UserRepository.php");
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);
@@ -451,7 +558,7 @@ pub class Navigator:
     });
 
     it("satisfies roundtrip fidelity on OrderStatus.php example", () => {
-      const filePath = path.resolve(__dirname, "../../examples/php/OrderStatus.php");
+      const filePath = path.join(tmpDir, "OrderStatus.php");
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);
@@ -468,7 +575,7 @@ pub class Navigator:
     });
 
     it("satisfies roundtrip fidelity on PaymentService.php example", () => {
-      const filePath = path.resolve(__dirname, "../../examples/php/PaymentService.php");
+      const filePath = path.join(tmpDir, "PaymentService.php");
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);

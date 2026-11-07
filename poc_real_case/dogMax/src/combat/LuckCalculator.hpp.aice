@@ -1,5 +1,0 @@
-# dof.combat.LuckCalculator.hpp
-
-fn sumLuck(luckPerDice:[int]) -> int = 0
-fn qualityFloor(luckTotal:int, scale:float) -> int = 0
-fn effectiveMinFace(luckTotal:int, scale:float) -> int = 1

@@ -512,6 +512,7 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
   while (true) {
     if (
       fs.existsSync(path.join(cur, "aice.config.json")) ||
+      fs.existsSync(path.join(cur, ".aice-idioms.json")) ||
       fs.existsSync(path.join(cur, ".aicerc")) ||
       fs.existsSync(path.join(cur, ".aice-build")) ||
       fs.existsSync(path.join(cur, "package.json"))
@@ -529,7 +530,7 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
 }
 
 /**
- * Loads project configuration from `aice.config.json`, `.aicerc`, or `package.json`'s "aice" field.
+ * Loads project configuration from `aice.config.json`, `.aice-idioms.json`, `.aicerc`, or `package.json`'s "aice" field.
  * If no config file is present, performs mode auto-detection and returns defaults.
  */
 export function loadProjectConfig(projectDir: string): AiceProjectConfig {
@@ -583,7 +584,69 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     }
   }
 
+  // 4. Merge .aice-idioms.json if present
+  const idiomsJsonPath = path.join(resolvedDir, ".aice-idioms.json");
+  if (fs.existsSync(idiomsJsonPath)) {
+    try {
+      const content = fs.readFileSync(idiomsJsonPath, "utf-8");
+      const parsedIdioms = JSON.parse(stripJsonComments(content)) as Record<string, unknown>;
+      rawConfig = rawConfig ? { ...rawConfig } : {};
+      if (rawConfig.idiomsEnabled === undefined) {
+        rawConfig.idiomsEnabled =
+          typeof parsedIdioms.idiomsEnabled === "boolean" ? parsedIdioms.idiomsEnabled : true;
+      }
+      const sourceIdioms =
+        typeof parsedIdioms.idioms === "object" &&
+        parsedIdioms.idioms !== null &&
+        !Array.isArray(parsedIdioms.idioms)
+          ? (parsedIdioms.idioms as Record<string, unknown>)
+          : parsedIdioms;
+      const mergedIdioms: Record<string, unknown> =
+        typeof rawConfig.idioms === "object" && rawConfig.idioms !== null
+          ? { ...(rawConfig.idioms as Record<string, unknown>) }
+          : {};
+      for (const [key, val] of Object.entries(sourceIdioms)) {
+        if (key === "idiomsEnabled" || typeof val !== "object" || val === null || Array.isArray(val)) {
+          continue;
+        }
+        const entry = val as Record<string, unknown>;
+        const normName = typeof entry.name === "string" ? entry.name : key.startsWith("$") ? key : `$${key}`;
+        mergedIdioms[normName] = {
+          name: normName,
+          kind: entry.kind === "expr" || entry.kind === "block" ? entry.kind : "stmt",
+          params: Array.isArray(entry.params) ? entry.params : [{ name: "$0" }],
+          templateAice: typeof entry.templateAice === "string" ? entry.templateAice : "",
+          occurrences: typeof entry.occurrences === "number" ? entry.occurrences : 0,
+          tokensPerOccurrenceSaved:
+            typeof entry.tokensPerOccurrenceSaved === "number" ? entry.tokensPerOccurrenceSaved : 0,
+          netTokenSavings: typeof entry.netTokenSavings === "number" ? entry.netTokenSavings : 0,
+          ...(typeof entry.description === "string" ? { description: entry.description } : {}),
+        };
+      }
+      rawConfig.idioms = mergedIdioms;
+    } catch (err) {
+      throw new Error(
+        `Failed to parse ${idiomsJsonPath}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   const configToProcess = rawConfig ?? {};
+
+  // Normalize any idiom definitions missing optional numeric telemetry fields
+  if (
+    typeof configToProcess.idioms === "object" &&
+    configToProcess.idioms !== null &&
+    !Array.isArray(configToProcess.idioms)
+  ) {
+    for (const idiom of Object.values(configToProcess.idioms as Record<string, Record<string, unknown>>)) {
+      if (idiom && typeof idiom === "object" && !Array.isArray(idiom)) {
+        if (idiom.occurrences === undefined) idiom.occurrences = 0;
+        if (idiom.tokensPerOccurrenceSaved === undefined) idiom.tokensPerOccurrenceSaved = 0;
+        if (idiom.netTokenSavings === undefined) idiom.netTokenSavings = 0;
+      }
+    }
+  }
 
   // Determine mode and isolated
   let mode: ProjectMode;

@@ -96,30 +96,31 @@ pub fn run():
       expect(res.formattedBundle).toContain("pub fn run():");
     });
 
-    it("resolves dependency with .js extension to .ts.aice or .aice in side-by-side mode", async () => {
-      const typesPath = path.join(tmpDir, "types.ts.aice");
+    it("resolves dependency with .js extension to .ts in on-the-fly mode", async () => {
+      const typesPath = path.join(tmpDir, "types.ts");
       fs.writeFileSync(
         typesPath,
-        `
-pub type User:
-  id: str
-  name: str
+        `export interface User {
+  id: string;
+  name: string;
+}
 
-pub enum Role:
-  Admin
-  Member
+export enum Role {
+  Admin = "Admin",
+  Member = "Member",
+}
 `,
         "utf-8",
       );
 
-      const consumerPath = path.join(tmpDir, "consumer.aice");
+      const consumerPath = path.join(tmpDir, "consumer.ts");
       fs.writeFileSync(
         consumerPath,
-        `
-from "./types.js" import { User, Role }
+        `import { User, Role } from "./types.js";
 
-pub fn getUserName(u: User) -> str:
-  ret u.name
+export function getUserName(u: User): string {
+  return u.name;
+}
 `,
         "utf-8",
       );
@@ -127,7 +128,7 @@ pub fn getUserName(u: User) -> str:
       const res = await generateContext(consumerPath, { projectRoot: tmpDir });
       expect(res.dependencies).toHaveLength(1);
       expect(res.dependencies[0].specifier).toBe("./types.js");
-      expect(res.dependencies[0].resolvedPath).toBe("types.ts.aice");
+      expect(res.dependencies[0].resolvedPath).toBe("types.ts");
       expect(res.dependencies[0].isExternal).toBe(false);
       expect(res.dependencies[0].contract).toContain("type User:");
       expect(res.dependencies[0].contract).toContain("id: str");

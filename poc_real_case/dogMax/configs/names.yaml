@@ -1,5 +1,0 @@
-# Probability that a weapon's display base is a flavour synonym (e.g. "Scythe")
-# instead of the canonical type name (e.g. "Pitchfork"). Range: 0.0 - 1.0.
-WEAPON_FLAVOUR_SUBSTITUTION_CHANCE: 0.4
-# Directory (relative to working dir) containing *.names text pools.
-NAMES_ASSET_DIRECTORY: assets/names

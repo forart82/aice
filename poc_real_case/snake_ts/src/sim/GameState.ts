@@ -1,1 +1,0 @@
-export type GameState = "Menu" | "Title" | "TITLE" | "ClassSelect" | "Playing" | "Paused" | "LevelUp" | "FloorClear" | "GameOver" | "Victory" | "Sanctuary" | "Settings" | "SnakeLab" | "Help" | "Records";

@@ -1,5 +1,0 @@
-# dof.combat.KillStreak.hpp
-
-type KillStreakOutcome:
-  newStreak: int
-  multiplier: float

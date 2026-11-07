@@ -23,8 +23,6 @@ import {
   scanProjectIdioms,
   updateProjectIdiom,
 } from "../idioms/index.js";
-import { runSelfHealingCampaignSync } from "../evolve/index.js";
-import { runAiceTests } from "../runner/index.js";
 import { generateContext } from "../tools/context.js";
 import { outlinePath } from "../tools/outline.js";
 import { splice } from "../tools/splice.js";
@@ -155,50 +153,6 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         },
       },
       required: ["dir"],
-    },
-  },
-  {
-    name: "aice_test",
-    description:
-      "Execute AICE test suite with symbol-mapped error diagnostics and automatic staleness recompilation.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        target: {
-          type: "string",
-          description: "Test target file, glob pattern, or test suite name",
-        },
-        cwd: {
-          type: "string",
-          description: "Working directory for test execution",
-        },
-      },
-    },
-  },
-  {
-    name: "aice_evolve",
-    description:
-      "Run the AICE 5-Gate Differential Fuzzing & Autonomous Self-Healing Evolution Loop",
-    inputSchema: {
-      type: "object",
-      properties: {
-        cycles: {
-          type: "number",
-          description: "Number of fuzzing/healing cycles per restart (default: 10)",
-        },
-        restarts: {
-          type: "number",
-          description: "Number of campaign restarts across randomized seeds (default: 1)",
-        },
-        seed: {
-          type: "number",
-          description: "Base random seed for reproducible differential fuzzing (default: 1337)",
-        },
-        includeCorpus: {
-          type: "boolean",
-          description: "Whether to include real example corpus files in fuzzing (default: true)",
-        },
-      },
     },
   },
 ];
@@ -373,7 +327,7 @@ export class AiceMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "aice-mcp", version: "0.8.2" },
+          serverInfo: { name: "aice-mcp", version: "0.8.3" },
         };
       }
 
@@ -610,47 +564,6 @@ export class AiceMcpServer {
         }
 
         throw new Error(`Unknown idiom action: ${action}`);
-      }
-
-      case "aice_test": {
-        const target = typeof args.target === "string" ? args.target : undefined;
-        if (target && target.startsWith("-")) {
-          throw new Error("Invalid test target: must not start with '-'");
-        }
-        const resolvedTarget = target ? this.resolveSafePath(target) : undefined;
-        const cwd = typeof args.cwd === "string" ? this.resolveSafePath(args.cwd) : undefined;
-        const res = await runAiceTests(resolvedTarget, { cwd });
-        return {
-          content: [
-            {
-              type: "text",
-              text:
-                res.output ||
-                (res.success
-                  ? `All tests passed (${res.summary.passed}/${res.summary.total})`
-                  : `Tests failed (${res.summary.failed}/${res.summary.total})`),
-            },
-          ],
-          isError: !res.success,
-        };
-      }
-
-      case "aice_evolve": {
-        const report = runSelfHealingCampaignSync({
-          restarts: typeof args.restarts === "number" ? args.restarts : 1,
-          cyclesPerRestart: typeof args.cycles === "number" ? args.cycles : 10,
-          baseSeed: typeof args.seed === "number" ? args.seed : 1337,
-          includeCorpus: typeof args.includeCorpus === "boolean" ? args.includeCorpus : true,
-        });
-
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(report, null, 2),
-            },
-          ],
-        };
       }
 
       default: {

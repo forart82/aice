@@ -11,12 +11,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import {
   type AiceProjectConfig,
-  findProjectRoot,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
-  loadProjectConfig,
   resolvePathTargets,
-  resolveTargetFile,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
 import type { ClassDecl, Expr, ImportDecl, LayoutNode, Module, ModuleItem } from "../core/ast.js";
@@ -164,9 +161,6 @@ export function resolveImportPath(
 
   // 1. If candidateBase already exists as a file
   if (fs.existsSync(candidateBase) && fs.statSync(candidateBase).isFile()) {
-    if (!candidateBase.endsWith(".aice") && fs.existsSync(`${candidateBase}.aice`)) {
-      return `${candidateBase}.aice`;
-    }
     return candidateBase;
   }
 
@@ -177,44 +171,26 @@ export function resolveImportPath(
   const probeList: string[] = [];
 
   if (ext) {
-    probeList.push(`${candidateBase}.aice`);
-    probeList.push(`${baseWithoutExt}.aice`);
-    probeList.push(`${baseWithoutExt}.ts.aice`);
-    probeList.push(`${baseWithoutExt}.tsx.aice`);
     probeList.push(`${baseWithoutExt}.ts`);
     probeList.push(`${baseWithoutExt}.tsx`);
     probeList.push(`${baseWithoutExt}.js`);
-    probeList.push(`${baseWithoutExt}.py.aice`);
     probeList.push(`${baseWithoutExt}.py`);
-    probeList.push(`${baseWithoutExt}.cpp.aice`);
     probeList.push(`${baseWithoutExt}.cpp`);
-    probeList.push(`${baseWithoutExt}.cs.aice`);
     probeList.push(`${baseWithoutExt}.cs`);
-    probeList.push(`${baseWithoutExt}.kt.aice`);
     probeList.push(`${baseWithoutExt}.kt`);
-    probeList.push(`${baseWithoutExt}.php.aice`);
     probeList.push(`${baseWithoutExt}.php`);
+    probeList.push(`${baseWithoutExt}.aice`);
   }
 
-  probeList.push(`${candidateBase}.aice`);
-  probeList.push(`${candidateBase}.ts.aice`);
-  probeList.push(`${candidateBase}.tsx.aice`);
   probeList.push(`${candidateBase}.ts`);
   probeList.push(`${candidateBase}.tsx`);
-  probeList.push(`${candidateBase}.py.aice`);
   probeList.push(`${candidateBase}.py`);
   probeList.push(`${candidateBase}.js`);
-  probeList.push(`${candidateBase}.rs.aice`);
   probeList.push(`${candidateBase}.rs`);
-  probeList.push(`${candidateBase}.go.aice`);
   probeList.push(`${candidateBase}.go`);
-  probeList.push(`${candidateBase}.cpp.aice`);
   probeList.push(`${candidateBase}.cpp`);
-  probeList.push(`${candidateBase}.cs.aice`);
   probeList.push(`${candidateBase}.cs`);
-  probeList.push(`${candidateBase}.kt.aice`);
   probeList.push(`${candidateBase}.kt`);
-  probeList.push(`${candidateBase}.php.aice`);
   probeList.push(`${candidateBase}.php`);
   probeList.push(`${candidateBase}.twig`);
   probeList.push(`${candidateBase}.html`);
@@ -222,41 +198,13 @@ export function resolveImportPath(
   probeList.push(`${candidateBase}.json`);
   probeList.push(`${candidateBase}.yaml`);
   probeList.push(`${candidateBase}.yml`);
+  probeList.push(`${candidateBase}.aice`);
 
   // Directory index probes
-  probeList.push(path.join(candidateBase, "index.aice"));
-  probeList.push(path.join(candidateBase, "index.ts.aice"));
-  probeList.push(path.join(candidateBase, "index.tsx.aice"));
   probeList.push(path.join(candidateBase, "index.ts"));
   probeList.push(path.join(candidateBase, "index.tsx"));
   probeList.push(path.join(candidateBase, "index.js"));
-
-  // In isolated or companion mode: check mapped sourceDir if candidate is in outDir
-  if (config.mode === "isolated" || config.mode === "companion") {
-    const absOutDir = path.resolve(projectRoot, config.outDir);
-    const absCandidate = path.resolve(candidateBase);
-    let relFromOut: string | null = null;
-    if (
-      absCandidate === absOutDir ||
-      absCandidate.startsWith(absOutDir + path.sep) ||
-      absCandidate.startsWith(absOutDir + "/")
-    ) {
-      relFromOut = path.relative(absOutDir, absCandidate);
-    } else {
-      const relFromRoot = path.relative(projectRoot, candidateBase);
-      if (relFromRoot.startsWith(config.outDir)) {
-        relFromOut = relFromRoot.slice(config.outDir.length).replace(/^[/\\]/, "");
-      }
-    }
-    if (relFromOut !== null) {
-      const remapped = path.resolve(projectRoot, config.sourceDir, relFromOut);
-      probeList.push(`${remapped}.aice`);
-      probeList.push(`${remapped}.ts.aice`);
-      probeList.push(`${remapped}.tsx.aice`);
-      probeList.push(`${remapped}.ts`);
-      probeList.push(`${remapped}.tsx`);
-    }
-  }
+  probeList.push(path.join(candidateBase, "index.aice"));
 
   for (const p of probeList) {
     if (fs.existsSync(p) && fs.statSync(p).isFile()) {
@@ -407,13 +355,6 @@ function extractImportsFromFile(filePath: string, preReadContent?: string): Impo
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
     }
 
-    const companionAice = `${filePath}.aice`;
-    if (fs.existsSync(companionAice)) {
-      const aiceContent = fs.readFileSync(companionAice, "utf-8");
-      const mod = parse(aiceContent, companionAice);
-      return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
-    }
-
     const targetLang = detectTargetFromPath(filePath);
     const decomp = decompile(content, targetLang, { filePath });
     const mod = parse(decomp.aice, filePath);
@@ -429,8 +370,7 @@ function scanWorkspaceCallers(
   config: AiceProjectConfig,
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
-  const aiceFiles: string[] = [];
-  const targetCandidates: string[] = [];
+  const filesToScan: string[] = [];
 
   function walk(currentDir: string): void {
     let entries: fs.Dirent[];
@@ -457,36 +397,16 @@ function scanWorkspaceCallers(
       if (entry.isDirectory()) {
         walk(entryPath);
       } else if (entry.isFile()) {
-        if (entry.name.endsWith(".aice.trivia.json")) continue;
-        if (entry.name.endsWith(".aice")) {
-          aiceFiles.push(entryPath);
-        } else {
-          const ext = path.extname(entry.name).toLowerCase();
-          if (KNOWN_TARGET_EXTENSIONS.has(ext)) {
-            targetCandidates.push(entryPath);
-          }
+        if (entry.name.endsWith(".trivia.json")) continue;
+        const ext = path.extname(entry.name).toLowerCase();
+        if (KNOWN_TARGET_EXTENSIONS.has(ext) || entry.name.endsWith(".aice")) {
+          filesToScan.push(entryPath);
         }
       }
     }
   }
 
   walk(projectRoot);
-
-  const filesToScan: string[] = [];
-  const processedBases = new Set<string>();
-
-  for (const aiceFile of aiceFiles) {
-    const baseTarget = aiceFile.replace(/\.aice$/, "");
-    processedBases.add(baseTarget);
-    processedBases.add(path.resolve(resolveTargetFile(config, aiceFile, projectRoot)));
-    filesToScan.push(aiceFile);
-  }
-
-  for (const targetFile of targetCandidates) {
-    if (!processedBases.has(targetFile)) {
-      filesToScan.push(targetFile);
-    }
-  }
 
   const resolvedTarget = path.resolve(targetFullPath);
   const targetBase = resolvedTarget.replace(/\.aice$/, "");

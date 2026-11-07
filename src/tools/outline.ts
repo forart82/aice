@@ -16,15 +16,7 @@ import {
   type ProjectIdiomDefinition,
 } from "../config/index.js";
 import type {
-  ClassDecl,
-  ConstDecl,
-  EnumVariantDecl,
-  FieldDecl,
-  FunctionDecl,
-  ImportDecl,
-  MethodDecl,
   Module,
-  ModuleItem,
   ParamDecl,
   PropertyDecl,
   TypeDecl,
@@ -187,23 +179,15 @@ export function generateOutline(
         ast = parsed.ast;
         trivia = parsed.trivia;
       } else {
-        const companionAice = `${filePath}.aice`;
-        if (fs.existsSync(companionAice)) {
-          const aiceSource = fs.readFileSync(companionAice, "utf-8");
-          const parsed = parseWithTrivia(aiceSource, companionAice);
+        const targetLang = detectTargetFromPath(filePath);
+        const decompResult = decompile(originalSource, targetLang, { filePath });
+        try {
+          const parsed = parseWithTrivia(decompResult.aice, filePath);
           ast = parsed.ast;
           trivia = parsed.trivia;
-        } else {
-          const targetLang = detectTargetFromPath(filePath);
-          const decompResult = decompile(originalSource, targetLang, { filePath });
-          try {
-            const parsed = parseWithTrivia(decompResult.aice, filePath);
-            ast = parsed.ast;
-            trivia = parsed.trivia;
-          } catch {
-            ast = decompResult.ast;
-            trivia = decompResult.trivia;
-          }
+        } catch {
+          ast = decompResult.ast;
+          trivia = decompResult.trivia;
         }
       }
     } else {
@@ -746,7 +730,6 @@ export async function outlinePath(
   }
 
   const resultMap = new Map<string, OutlineResult>();
-  const aiceFiles: string[] = [];
   const targetCandidates: string[] = [];
 
   function walk(currentDir: string): void {
@@ -768,7 +751,7 @@ export async function outlinePath(
         walk(entryPath);
       } else if (entry.isFile()) {
         if (
-          entry.name.endsWith(".aice.trivia.json") ||
+          entry.name.endsWith(".trivia.json") ||
           entry.name === "aice.config.json" ||
           entry.name === "package-lock.json" ||
           entry.name === "tsconfig.json" ||
@@ -778,13 +761,9 @@ export async function outlinePath(
         ) {
           continue;
         }
-        if (entry.name.endsWith(".aice")) {
-          aiceFiles.push(entryPath);
-        } else {
-          const ext = path.extname(entry.name).toLowerCase();
-          if (KNOWN_TARGET_EXTENSIONS.has(ext)) {
-            targetCandidates.push(entryPath);
-          }
+        const ext = path.extname(entry.name).toLowerCase();
+        if (KNOWN_TARGET_EXTENSIONS.has(ext) || entry.name.endsWith(".aice")) {
+          targetCandidates.push(entryPath);
         }
       }
     }
@@ -792,19 +771,9 @@ export async function outlinePath(
 
   walk(fullPath);
 
-  const processedBases = new Set<string>();
-  for (const aiceFile of aiceFiles) {
-    const baseTarget = aiceFile.replace(/\.aice$/, "");
-    processedBases.add(baseTarget);
-    const relKey = path.relative(process.cwd(), aiceFile);
-    resultMap.set(relKey, generateOutline(aiceFile, options));
-  }
-
-  for (const targetFile of targetCandidates) {
-    if (!processedBases.has(targetFile)) {
-      const relKey = path.relative(process.cwd(), targetFile);
-      resultMap.set(relKey, generateOutline(targetFile, options));
-    }
+  for (const targetFile of targetCandidates.sort()) {
+    const relKey = path.relative(process.cwd(), targetFile);
+    resultMap.set(relKey, generateOutline(targetFile, options));
   }
 
   return resultMap;

@@ -1,65 +1,207 @@
-# AICE: AI Context Engine & Bidirectional Transpiler Engine
+![AICE — AI Context Engine](assets/aice-banner.jpg)
+
+# AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C623%20passing-brightgreen)](tests/)
-[![Token Savings](https://img.shields.io/badge/Token%20Savings-25%25%20--%2098%25-orange)](src/tokenomics/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C259%20passing-brightgreen)](tests/)
+[![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
-> **A token-efficient, strongly-typed, homoiconic bidirectional programming language and transpiler engine engineered for autonomous AI code generation, zero-loss roundtripping, and non-invasive side-by-side adoption.**
+> **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
 
 ---
 
 ## ⚡ Executive Summary
 
-Modern Large Language Models (LLMs) spend **30% to 50% of their context windows and token budget on syntactic noise**: closing XML/HTML tags (`</div>`, `</section>`), redundant curly braces (`{ ... }`), semicolon line terminators (`;`), duplicated type interfaces, and repetitive boilerplate keywords (`function`, `interface`, `public`, `return`).
+Modern Large Language Models (LLMs) spend **40% to 85% of their context windows, tool calls, and output token budgets on syntactic noise and full-file re-reads**: closing XML/HTML tags (`</div>`, `</section>`), redundant curly braces (`{ ... }`), verbose language ceremony (`std::cout << ... << std::endl`, `export interface`, `public readonly`), and repetitive multi-file patterns.
 
-**AICE 2.0 (AI Context Engine)** solves this by providing:
-1. **25% to 63% Token Compression**: BPE-tuned syntax minimizing subword fragmentation across OpenAI `o200k_base`, `cl100k_base`, Claude, and Llama tokenizers.
-2. **Side-by-Side Zero-Folder-Disruption Architecture**: Target files (`*.ts`, `*.cpp`, `*.py`) and AICE files (`*.aice`) coexist in their **exact original locations**, keeping existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), relative imports, and git history 100% intact while rendering target files completely invisible and read-only to AI agents.
-3. **Lossless Bidirectional Lens Engine**: Mathematical Put/Get lens preservation ($Put(Get(c), \Omega) == c$) with Concrete Syntax Tree (CST) Trivia Tables preserving all comments, docstrings, formatting, and license headers with **100% bit-identical fidelity**.
-4. **Sub-5ms Incremental Watch Daemon**: Real-time transpilation with atomic permission locks ensuring instant Hot Module Reloading (HMR) for existing dev servers.
-5. **Sound Static Type System & Self-Repair Telemetry**: Single-root machine-readable JSON diagnostics with visual caret slices and unified diff candidate repair patches for autonomous 1-shot self-healing.
+**AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **15 languages** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`):
+
+1. **Zero `.aice` Files on Disk**: Your native codebase (`*.ts`, `*.cpp`, `*.py`, `*.rs`, `*.go`, etc.) remains 100% untouched by companion or shadow files. No watchers, no file permission locks, and no build-pipeline disruption.
+2. **In-RAM AST Decompilation & Skeleton Outlines (`aice outline`)**: Summarizes any native file or workspace into a compact AICE structural skeleton in milliseconds (`65%` to `92%` token reduction).
+3. **1-Turn Symbol-Scoped Context Packs (`aice context`)**: Extracts just the target symbol, its imported dependency contracts, and active `$idioms` in a single turn (`-69.0%` to `-83.7%` working payload tokens).
+4. **Built-In & Project-Specific `$idioms` (`aice idioms`)**: Automatically collapses both language-level ceremony (e.g., C++ `std::cout << a << b << std::endl` $\leftrightarrow$ `print(a, b)`) and project-specific multi-file AST patterns (`$clampBand`, `$guard`, `$big_out` via `.aice-idioms.json` / `aice.config.json`) using structural anti-unification.
+5. **Surgical Direct-to-Native AST Splicing (`aice splice`)**: Accepts compact AICE + `$idioms`, raw native code, or hybrid syntax and splices the expanded native AST directly into the exact byte-span of the target symbol on disk — preserving 100% of surrounding comments, formatting, and headers.
 
 ---
 
-## 📊 Empirical Tokenomics Benchmarks
+## 🛠️ End-to-End C++20 On-the-Fly Workflow Example
 
-### Table 1: All 14 Reference Examples (`examples/`)
-Audited with `--check-drift` enforcing **100% zero target drift**:
+![AICE End-to-End C++20 Workflow](assets/aice-cpp-workflow.jpg)
 
-| File | Target Lang | Target cl100k | AICE cl100k | cl100k Savings | Target o200k | AICE o200k | o200k Savings | Char Savings |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `design_system_tokens.css` | CSS3 | 4,097 | 3,312 | **-19.2%** | 4,098 | 3,331 | **-18.7%** | -35.0% |
-| `enterprise_theme.css` | CSS3 | 6,297 | 4,869 | **-22.7%** | 6,299 | 4,935 | **-21.7%** | -40.1% |
-| `style.css` | CSS3 | 67 | 59 | **-11.9%** | 67 | 59 | **-11.9%** | -31.9% |
-| `gateway_service.go` | Go | 514 | 246 | **-52.1%** | 523 | 253 | **-51.6%** | -52.3% |
-| `enterprise_portal.html` | HTML5 | 7,102 | 4,873 | **-31.4%** | 7,094 | 4,855 | **-31.6%** | -26.1% |
-| `page.html` | HTML5 | 171 | 132 | **-22.8%** | 172 | 132 | **-23.3%** | -12.3% |
-| `data_pipeline_models.py` | Python | 4,096 | 3,415 | **-16.6%** | 4,093 | 3,618 | **-11.6%** | -23.2% |
-| `server.py` | Python | 143 | 128 | **-10.5%** | 146 | 129 | **-11.6%** | -20.4% |
-| `stream_processor_engine.py` | Python | 5,048 | 4,180 | **-17.2%** | 4,927 | 4,196 | **-14.8%** | -22.1% |
-| `dashboard_card.tsx` | React TSX | 106 | 47 | **-55.7%** | 112 | 48 | **-57.1%** | -58.2% |
-| `order_engine.rs` | Rust | 562 | 343 | **-39.0%** | 565 | 348 | **-38.4%** | -46.3% |
-| `auth_service.ts` | TypeScript | 263 | 175 | **-33.5%** | 274 | 181 | **-33.9%** | -41.1% |
-| `ecommerce_domain.ts` | TypeScript | 5,429 | 3,567 | **-34.3%** | 5,438 | 3,649 | **-32.9%** | -39.7% |
-| `order_processing_service.ts` | TypeScript | 5,834 | 4,234 | **-27.4%** | 5,799 | 4,282 | **-26.2%** | -33.5% |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **TOTAL (14 Projects)** | **Aggregated** | **39,729** | **29,580** | **-25.5%** | **39,607** | **30,016** | **-24.2%** | **-31.8%** |
+AICE reads native C++20 directly into RAM, compresses verbose C++ syntax and repetitive patterns into compact AICE + `$idioms` for the AI agent, and surgically splices the AI's compact edit back into the native `.cpp` file on disk.
 
-### Table 2: Real-World Case Studies (`poc_real_case/`)
-Audited across 67 production modules from Raylib C++, SFML C++, and Canvas TypeScript games:
+### Built-In Idioms vs. Project-Specific Custom Idioms (`.aice-idioms.json`)
 
-| Project | Target Lang | Target cl100k | AICE cl100k | cl100k Savings | Target o200k | AICE o200k | o200k Savings | Char Savings |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| `dogMax` (27 files) | C++20 | 8,349 | 4,488 | **-46.2%** | 8,364 | 4,488 | **-46.3%** | -56.1% |
-| `snake_pp` (22 files) | C++20 | 8,065 | 2,948 | **-63.4%** | 8,183 | 2,989 | **-63.5%** | -66.8% |
-| `snake_ts` (18 files) | TypeScript | 87,759 | 65,333 | **-25.6%** | 87,962 | 65,481 | **-25.6%** | -27.9% |
-| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
+AICE combines two layers of idiom compression:
+- **Built-In Language Idioms**: Verbose standard-library constructs are automatically lowered and raised by the C++20 decompiler/emitter without configuration — for example, `std::cout << "[CARD] Sessions=" << m.activeSessions << std::endl;` automatically decompiles to `print("[CARD] Sessions=", m.activeSessions)` and compiles back to `std::cout << ... << std::endl;`.
+- **Project-Specific Custom Idioms (`.aice-idioms.json` / `aice.config.json`)**: Custom project wrappers or domain patterns (such as a custom C++ stream helper `givemeabigstring::out(msg)` or repeated bounds checks like `$clampBand`) can be mined automatically via `aice idioms scan` or declared in `.aice-idioms.json`:
 
-### Table 3: Real AI Agent Benchmarks — 30 Live Uncoached Autonomous Agent Transcripts (`docs/BENCHMARKS.md`)
+```json
+{
+  "idiomsEnabled": true,
+  "idioms": {
+    "$big_out": {
+      "name": "$big_out",
+      "kind": "stmt",
+      "params": [{ "name": "$0" }],
+      "templateAice": "givemeabigstring.out($0)",
+      "description": "Custom C++ stream wrapper givemeabigstring::out(msg)"
+    }
+  }
+}
+```
+
+### Step 1: Native C++20 Source File on Disk (`src/telemetry_report.cpp`)
+
+```cpp
+#include <iostream>
+#include <string>
+
+struct TelemetryMetrics {
+    int activeSessions;
+    double latencyMs;
+    std::string recipient;
+};
+
+int calculateLoadScore(int activeSessions, int threshold) {
+    if (activeSessions <= 0) {
+        return 0;
+    }
+    if (activeSessions > threshold) {
+        return activeSessions * 2;
+    }
+    return activeSessions;
+}
+
+void renderDashboardCard(const TelemetryMetrics& m) {
+    std::cout << "[CARD] Sessions=" << m.activeSessions << std::endl;
+    givemeabigstring::out(m.recipient);
+    if (m.latencyMs > 100.0) {
+        std::cout << "[WARN] High latency=" << m.latencyMs << std::endl;
+    }
+}
+```
+
+### Step 2: Inspect File Skeleton Outline (`aice outline --idioms`)
+
+The AI agent inspects the module structure without reading function bodies (`-68.1%` tokens):
+
+```bash
+$ aice outline src/telemetry_report.cpp --idioms --stats
+```
+
+```aice
+type TelemetryMetrics:
+  activeSessions: int
+  latencyMs: num
+  recipient: str
+
+fn calculateLoadScore(activeSessions: int, threshold: int) -> int: ...
+
+fn renderDashboardCard(m: TelemetryMetrics) -> void: ...
+
+📊 Token Reduction Metrics for src/telemetry_report.cpp:
+  Original tokens: 166
+  Outline tokens:  53
+  Token savings:   113 tokens (68.1%)
+```
+
+### Step 3: Extract Symbol-Scoped Context (`aice context --symbol renderDashboardCard --idioms`)
+
+The AI agent requests only `renderDashboardCard`. AICE decompiles `std::cout << ... << std::endl` to `print(...)` and collapses `givemeabigstring::out(m.recipient)` into `$big_out(m.recipient)`:
+
+```bash
+$ aice context src/telemetry_report.cpp --symbol renderDashboardCard --idioms --no-callers
+```
+
+```markdown
+# AICE Context Pack: src/telemetry_report.cpp
+
+## Imported Dependency Contracts (0):
+None
+
+## Target File Content:
+```aice
+module telemetry_report
+
+fn renderDashboardCard(m:TelemetryMetrics) -> void:
+  print("[CARD] Sessions=", m.activeSessions)
+  $big_out(m.recipient)
+  if m.latencyMs > 100.0:
+    print("[WARN] High latency=", m.latencyMs)
+```
+
+### Active Project Idioms
+- `$big_out($0)` -> `givemeabigstring.out($0)`
+```
+
+### Step 4: Preview Surgical Edit (`aice splice --symbol renderDashboardCard --idioms --dry-run`)
+
+The AI agent writes a compact AICE + `$idioms` update adding a critical latency branch and previews the native C++20 diff with `--dry-run --diff`:
+
+```bash
+$ aice splice src/telemetry_report.cpp \
+    --symbol renderDashboardCard \
+    --idioms \
+    --dry-run \
+    --diff \
+    --code 'fn renderDashboardCard(m: TelemetryMetrics):
+  print("[CARD] Sessions=", m.activeSessions)
+  $big_out(m.recipient)
+  if m.latencyMs > 250.0:
+    print("[CRITICAL] Latency spike=", m.latencyMs)
+  elif m.latencyMs > 100.0:
+    print("[WARN] High latency=", m.latencyMs)'
+```
+
+```diff
+--- a/src/telemetry_report.cpp
++++ b/src/telemetry_report.cpp
+@@ -20,7 +20,10 @@
+ void renderDashboardCard(const TelemetryMetrics& m) {
+     std::cout << "[CARD] Sessions=" << m.activeSessions << std::endl;
+     givemeabigstring::out(m.recipient);
+-    if (m.latencyMs > 100.0) {
++    if ((m.latencyMs > 250.0f)) {
++        std::cout << "[CRITICAL] Latency spike=" << m.latencyMs << std::endl;
++    }
++    else if ((m.latencyMs > 100.0f)) {
+         std::cout << "[WARN] High latency=" << m.latencyMs << std::endl;
+     }
+ }
+```
+
+### Step 5: Apply Surgical Edit In-Place (`aice splice --symbol renderDashboardCard --idioms --in-place`)
+
+```bash
+$ aice splice src/telemetry_report.cpp \
+    --symbol renderDashboardCard \
+    --idioms \
+    --in-place \
+    --code 'fn renderDashboardCard(m: TelemetryMetrics):
+  print("[CARD] Sessions=", m.activeSessions)
+  $big_out(m.recipient)
+  if m.latencyMs > 250.0:
+    print("[CRITICAL] Latency spike=", m.latencyMs)
+  elif m.latencyMs > 100.0:
+    print("[WARN] High latency=", m.latencyMs)'
+```
+
+```text
+✔ Spliced symbol 'renderDashboardCard' in src/telemetry_report.cpp (84 tokens saved)
+```
+
+`src/telemetry_report.cpp` is updated atomically in-place on disk with valid C++20 (`std::cout`, `givemeabigstring::out`, `const TelemetryMetrics& m`) and **zero `.aice` files created**.
+
+---
+
+## 📊 Empirical Benchmarks (Real AI Agents & Deterministic Offline)
+
+### Table 1: Real AI Agent Benchmarks — 30 Live Uncoached Autonomous Agent Transcripts (`docs/BENCHMARKS.md`)
+
 Verified by running **30 real autonomous AI agent (`agy -p`) sessions** (`10 scenarios × 3 modes`) in isolated temporary workspaces on disk under a **100% fair, uncoached plain-English task specification** (zero pre-written `.aice` snippets, zero `$idiom` leakage, and zero pre-filled symbol lists in the prompt). Ground-truth telemetry is parsed directly from each agent's `.system_generated/logs/transcript.jsonl` (`PLANNER_RESPONSE` turns, `tool_calls`, working payload tokens, `output_tokens`, `input_tokens`, and `cache_read_tokens`), with **100% on-disk native mutation verification** and **0 `.aice` files left on disk**:
 
 | ID | Real-World Benchmark Scenario | Languages & Files | LLM Turns (No AICE / Pure AICE / +Idioms) | Tool Calls (No AICE / Pure AICE / +Idioms) | Working Tokens (No AICE / Pure AICE / +Idioms) | LLM Output Tokens (No AICE / Pure AICE / +Idioms) | Total API Context Tokens (No AICE / Pure AICE / +Idioms) |
@@ -77,10 +219,11 @@ Verified by running **30 real autonomous AI agent (`agy -p`) sessions** (`10 sce
 | **TOTAL** | **All 10 Scenarios (`10/10` Wins — 30 Real Agent Sessions)** | **15/15 Languages** | **189** / **35** (-81.5%) / **32** (-83.1%) | **204** / **25** (-87.8%) / **22** (-89.2%) | **207,372** / **64,380** (-69.0%) / **33,839** (-83.7%) | **68,108** / **37,100** (-45.5%) / **11,680** (-82.8%) | **6,587,895** / **969,363** (-85.3%) / **782,293** (-88.1%) |
 
 - **Why AICE On-the-Fly With Idioms (`--idioms`) wins `10/10` across every metric**: `aice context . -s "..." --idioms` collapses repetitive multi-line AST patterns into 1-line `$idiom(...)` calls (`-83.7%` working payload tokens), `aice splice --idioms --batch` / `aice idioms update --batch` propagates workspace-wide pattern refactors in $O(1)$ across all 15 languages alongside surgical target updates/insertions/deletions (`5` turns vs `50` turns on `RW-10`, `-82.8%` LLM output tokens, `-83.2%` billable API tokens, `-88.1%` total API context tokens).
-- **Why Pure AICE (`--no-idioms`) wins `10/10` across every metric — and why Idioms still matter**: Even without `$idiom` macros, `aice context . -s "*" --no-idioms` (with compact 1-line guard/layout slices) and `aice splice --no-idioms --batch` beat `Without AICE` in all 10 scenarios across turns (`-81.5%`), tool calls (`-87.8%`), working tokens (`-69.0%`), output tokens (`-45.5%`), billable tokens (`-74.7%`), and total API context tokens (`-85.3%`). Because `--no-idioms` splices at the symbol boundary (`37,100` output tokens across the suite), enabling Project Idioms (`--idioms`) cuts LLM output tokens by an additional **`-68.5%`** (`37,100 -> 11,680`) and working payload tokens by an additional **`-47.4%`** (`64,380 -> 33,839`).
-- Full 30-session ground-truth audit trail (including all `conversationId` UUIDs and raw `transcript.jsonl` metrics): see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`benchmarks/real-agent-results.json`](benchmarks/real-agent-results.json) (`npm run benchmark` / `npm run benchmark:agents`).
+- **Why Pure AICE (`--no-idioms`) wins `10/10` across every metric — and why Idioms still matter**: Even without `$idiom` macros, `aice context . -s "*" --no-idioms` and `aice splice --no-idioms --batch` beat `Without AICE` in all 10 scenarios across turns (`-81.5%`), tool calls (`-87.8%`), working tokens (`-69.0%`), output tokens (`-45.5%`), billable tokens (`-74.7%`), and total API context tokens (`-85.3%`). Enabling Project Idioms (`--idioms`) cuts LLM output tokens by an additional **`-68.5%`** (`37,100 -> 11,680`) and working payload tokens by an additional **`-47.4%`** (`64,380 -> 33,839`).
+- Full 30-session ground-truth audit trail: see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`benchmarks/real-agent-results.json`](benchmarks/real-agent-results.json) (`npm run benchmark`).
 
-### Table 4: Deterministic Offline Benchmarks — Without Idioms vs. With Idioms (`docs/BENCHMARKS_OFFLINE.md`)
+### Table 2: Deterministic Offline Benchmarks — Without Idioms vs. With Idioms (`docs/BENCHMARKS_OFFLINE.md`)
+
 Evaluated deterministically offline (exact `o200k_base` BPE token & turn accounting across `Write from 0` incl. `$idiom` definition cost, `Read`, `Surgical Update`, `Surgical Delete`, and `Multi-File Refactor`):
 
 | ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Id / Id) | Read (No Id / Id) | Update (No Id / Id) | Delete | Refactor (No Id / Id) | Tokens Without AICE | Tokens AICE (No Id) | Tokens AICE (With Id) | Turns Without AICE | Turns AICE (No Id) | Turns AICE (With Id) |
@@ -99,45 +242,11 @@ Evaluated deterministically offline (exact `o200k_base` BPE token & turn account
 
 Full offline deterministic per-module breakdown: see [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md) (`npm run benchmark:offline`).
 
-
-
----
-
-## ⚡ Twinless On-the-Fly Mode (`mode: "twinless"`) & Side-by-Side Architecture
-
-AICE 2.0 supports two complementary operational modes:
-
-### Mode A: Twinless On-the-Fly Mode (`mode: "twinless"` — Zero `.aice` Files on Disk)
-- **Zero `.aice` Disk Pollution**: Native files (`*.ts`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`) remain the sole source files on disk.
-- **In-RAM Decompilation & `$idiom` Collapsing**: `aice outline <file>` and `aice context <file> [-s <symbol>]` decompile native files in RAM on-the-fly and automatically collapse active project `$idioms` from `aice.config.json`.
-- **Smart Multi-File Idioms**: `aice idioms scan` mines repeated expressions and statement blocks across native files using structural anti-unification and caches SHA-256 provenance in `.aice-cache/idioms.json`. `aice idioms read $name` lists every occurrence across files (`file:line` + bound arguments), and `aice idioms update $name "<newTemplate>"` rewrites all occurrences across all native files in a single atomic operation.
-- **Forgiving Direct-to-Native Surgical Splice**: `aice splice <nativeFile> -s <Class.method>` accepts pure AICE, AICE with `$idioms`, raw native code, or hybrid "Frankenstein" syntax, expanding `$idioms` and replacing only the exact AST byte-span of the target symbol while preserving 100% of surrounding comments, decorators, and formatting.
-
-### Mode B: Side-by-Side Zero-Folder-Disruption Architecture
-In real-world development, moving files into quarantine/shadow folders breaks bundlers, relative imports, and git history. AICE solves this by keeping target files and AICE files **side-by-side** in the exact same directory, backed by a **4-Layer Defense-in-Depth System**:
-
-```
-src/sim/
-├── Boss.ts           <-- Read-only lock (chmod 444). Hidden from AI by files.exclude & .cursorignore
-└── Boss.ts.aice       <-- VISIBLE to AI as single authoritative source of truth
-```
-
-### The 4-Layer Defense Mechanism:
-1. **Layer 1: IDE Sibling Conditional Exclusion (`.vscode/settings.json`)**:
-   Uses native IDE conditional when-clauses (`"**/*.ts": { "when": "$(basename).ts.aice" }`). In Cursor, VS Code, and Windsurf, `Boss.ts` completely disappears from the file tree, fuzzy finders, and symbol indexing whenever `Boss.ts.aice` exists alongside it.
-2. **Layer 2: Universal AI Agent Ignores (`.cursorignore`, `.geminiignore`, `.aiderignore`, `.agentignore`)**:
-   Prevents AI tool search calls (`list_dir`, `find`, `grep`) and codebase vector embeddings from indexing target files.
-3. **Layer 3: Cognitive Lockdown Directives (`AGENTS.md`, `.cursorrules`)**:
-   Informs AI agents that this project is authoritatively written in AICE (`*.aice`), target files are machine-generated read-only build artifacts, and direct edits to target files are prohibited.
-4. **Layer 4: Filesystem Protection & Live Watch Daemon (`chmod 444` + `aice watch`)**:
-   Generated target files are marked read-only on disk (`0o444`). If an AI agent attempts a raw write or edit, the OS raises `EACCES: permission denied`. When `Boss.ts.aice` is saved, the `aice watch` daemon atomically unlocks `Boss.ts`, recompiles it in $< 5\text{ms}$, and relocks it, triggering instant Hot Module Reloading (HMR).
-
 ---
 
 ## 🚀 Quick Start & Installation
 
 ### Option 1: Local Link (Recommended for Development)
-Link directly to your local AICE repository so any compiler updates are instantly live everywhere:
 ```bash
 cd /path/to/aice
 ln -sf $(pwd)/bin/aice.mjs ~/.local/bin/aice
@@ -145,7 +254,6 @@ ln -sf $(pwd)/bin/aice.mjs ~/.local/bin/aice
 *(Or with Bun: `bun link`)*
 
 ### Option 2: Standalone Single Binary (Zero Dependencies)
-Compile into a standalone Linux executable (no Node or Bun required in target projects):
 ```bash
 bun build --compile /path/to/aice/bin/aice.ts --outfile ~/.local/bin/aice
 ```
@@ -160,248 +268,59 @@ aice --help
 
 ## 💻 CLI Command Reference
 
-### Adoption, Companion & Bidirectional Sync
+### 1. On-the-Fly Context, Skeleton Outlines & Surgical Splicing
 ```bash
-# 1. Adopt an existing codebase into side-by-side AICE architecture:
-# (Decompiles targets in parallel, injects AI shield rules, and locks targets to chmod 444)
-aice adopt [dir] [-c <concurrency>]
+# Generate structural skeleton outline of any native file or directory (65-92% token reduction):
+aice outline src/telemetry_report.cpp --idioms --stats
 
-# 2. Adopt into an isolated companion twin workspace with project idioms:
-aice adopt [companionDir] --companion [targetDir] --idioms
+# Generate 1-turn token-bounded context pack from a native file (or single symbol with -s):
+aice context src/telemetry_report.cpp --symbol renderDashboardCard --idioms
+aice context . --symbol "*" --idioms
 
-# 3. Start the high-speed incremental watch daemon during active coding:
-# (Listens to *.aice changes, recompiles to targets in <5ms, and preserves HMR)
-aice watch [dir]
-aice dev [dir]
+# Preview surgical AST replacement with unified diff (--dry-run --diff):
+aice splice src/telemetry_report.cpp -s renderDashboardCard -c "fn renderDashboardCard(m: TelemetryMetrics): ..." --idioms --dry-run --diff
 
-# 4. Bidirectional companion watch (watches target files and reverse-syncs external edits into .aice):
-aice watch [dir] --bidirectional
-
-# 5. One-shot bidirectional sync from targets back to .aice:
-aice sync [dir]
-
-# 6. Eject side-by-side mode and restore standard project state:
-# (Unlocks target files back to chmod 644 and removes AI shield rules)
-aice eject [dir]
-aice eject [dir] --remove-aice   # Optional: deletes .aice source files
-
-# 7. Fine-grained shield management (including Twinless On-the-Fly shield):
-aice shield apply [dir] --twinless  # Configure Twinless mode (zero .aice files on disk)
-aice shield status [dir]            # Check active shield rules and locks
-aice shield lock [dir]              # Lock target files to chmod 444
-aice shield unlock [dir]            # Unlock target files to chmod 644
-aice shield apply [dir]             # Deploy .cursorignore, settings.json, and AGENTS.md
-aice shield remove [dir]            # Remove shield rules
+# Apply surgical AST replacement in-place directly on the native file:
+aice splice src/telemetry_report.cpp -s renderDashboardCard -c "fn renderDashboardCard(m: TelemetryMetrics): ..." --idioms --in-place
+aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
+aice splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]' --idioms
 ```
 
-### Smart Multi-File Idioms (`$idioms`)
+### 2. Smart Multi-File Idioms (`$idioms`)
 ```bash
-# Scan native or .aice workspace to discover repetitive AST templates & build .aice-cache/idioms.json:
+# Scan native workspace to discover repetitive AST templates & build .aice-cache/idioms.json:
 aice idioms scan [dir] --min-occurrences 3 --min-savings 10
 
 # Inspect an idiom's template, parameters, and every file:line occurrence across the project:
 aice idioms read '$clamp' [dir]
+aice idioms list [dir]
 
 # Mutate an idiom's template and rewrite all occurrences across all native files atomically:
 aice idioms update '$clamp' "Math.max($1, Math.min($2, $0))" [dir]
-aice idioms update '$clamp' "Math.max($1, Math.min($2, $0)) * $3" --params '$0,$1,$2,$3=1.0' [dir]
+aice idioms update --batch '[{"name":"$clamp","newTemplate":"Math.max($1, Math.min($2, $0))"}]' [dir]
 
-# Instant toggle of on-the-fly $idiom collapsing in aice.config.json:
+# Toggle on-the-fly $idiom collapsing in aice.config.json / .aice-idioms.json:
 aice idioms on [dir]
 aice idioms off [dir]
-
-# Synthesize discovered idioms into .aice files (Side-by-Side mode) or expand back:
-aice idioms apply [dir]
-aice idioms list [dir]
-aice idioms expand [dir]
 ```
 
-### AI Agent On-the-Fly Context, Surgical Splicing, MCP & Evolution
+### 3. Semantic Diff, Patch, Tokenomics & MCP Server
 ```bash
-# Generate 1-turn token-bounded context pack from a native file (or single symbol with -s):
-aice context src/sim/Hazard.ts --depth 2 --max-tokens 4000
-aice context src/sim/Hazard.ts -s HazardManager.calculateDamage --idioms
+# Structural AST diff & reversible patch application:
+aice diff src/old.ts src/new.ts
+aice patch src/target.ts patch.json
 
-# Generate structural skeleton outline of any native or .aice file/directory (85-95% token reduction):
-aice outline src/sim/Hazard.ts --stats
-
-# Surgically replace or delete AST symbols directly in native files (accepts AICE, $idioms, raw, or hybrid):
-aice splice src/sim/Hazard.ts -s HazardManager.calculateDamage -c "pub fn calculateDamage(d: int) -> int: ret $clamp(d * 2, 0, 100)"
-aice splice src/sim/Hazard.ts -s HazardManager.calculateDamage --body "ret d * 2"
-aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
-aice splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]'
-
-# Run the 10 Real-World Benchmarks Suite (Without Idioms & With Idioms):
-npm run benchmark
-
-# Run test suite with symbol-mapped runtime stack trace translation and auto-recompilation:
-aice test
-aice test tests/unit/service.test.ts --json
+# Audit token efficiency and roundtrip parity:
+aice tokens src/
+aice verify --parity src/
 
 # Launch the First-Class Model Context Protocol (MCP) server over stdio:
 aice mcp
 
-# Run the 5-Gate Differential Fuzzing & Autonomous Self-Healing Evolution Campaign:
-aice evolve --restarts 100 --cycles 10
-aice evolve --cycles 50 --seed 1337 --json
+# Run the Offline & Real-Agent Benchmark Suites:
+npm run benchmark:offline
+npm run benchmark
 ```
-
-### Compilation & Decompilation
-```bash
-# Compile a single .aice file to its target language:
-aice compile src/Boss.ts.aice
-
-# Recursively compile all .aice files across a project:
-aice compile-all ./src
-
-# Clean all generated target files:
-aice clean ./src
-
-# Decompile a target file (.ts, .tsx, .css, .html, .go, .rs, .py, .kt, etc.) into .aice:
-aice decompile src/Boss.ts --trivia
-```
-
-### Verification & Autonomous Self-Repair
-```bash
-# Verify syntax, immutability, and type soundness without emitting:
-aice verify src/Boss.ts.aice
-
-# Output machine-readable JSON telemetry for AI agents:
-aice verify src/Boss.ts.aice --json
-
-# Autonomously repair fixable violations (mutability, division by zero, truthiness):
-aice fix src/Boss.ts.aice
-aice fix src/Boss.ts.aice --dry-run
-
-# Audit token efficiency and compression density for a specific file or folder (with subfolders):
-aice tokens src/sim/Hazard.ts
-aice tokens src/sim/Hazard.ts --check-drift
-aice tokens src/sim
-aice efficiency ./src
-
-# Audit tokenomics and enforce zero target drift:
-aice verify-tokenomics examples --check-drift
-aice verify-tokenomics poc_real_case --projects
-```
-
-### Bidirectional Roundtrip & Language Server
-```bash
-# Verify Put/Get roundtrip stability (Put(Get(c), Omega) == c):
-aice roundtrip src/Boss.ts
-
-# Launch the AICE Language Server Protocol (LSP) daemon over stdio:
-aice lsp
-```
-
----
-
-## 📐 Language Syntax & Grammar Features
-
-### 1. Keywordless Variable & Mutable Binding
-Eliminates `let`, `const`, and `var` keywords using standard Go/Ocaml style bindings:
-```python
-# Immutable binding (replaces 'let x = 42' or 'const x = 42')
-x := 42
-name: str := "Alice"
-
-# Mutable binding (replaces 'let mut y = 0' or 'let y = 0')
-count ::= 0
-buffer: [int] ::= []
-```
-
-### 2. Dual-Case Property Compaction (`prop X, x`)
-Collapses repetitive TypeScript getter/setter boilerplate into a single declaration:
-```python
-class SnakeSegment:
-  prop X, x: float = 0.0      # Emits field X, get x() { return this.X; }, set x(v) { this.X = v; }
-  prop Y, y: float = 0.0
-  prop Speed, speed: int = 10
-```
-
-### 3. Vector & Arithmetic Compression DSL
-Built-in global math functions and vector destructuring eliminate repetitive `Math.` prefixes:
-```python
-# Vector destructuring:
-[x, y] := [10, 20]
-[x, y] += [dx, dy]
-
-# Built-in math functions (automatically mapped to target math libraries):
-dist := hypot(dx, dy)
-clamped := clamp(val, 0, 100)
-snapped := floor(pos / 16.0)
-```
-
-### 4. Single-Token BPE Dictionary Types & Sigils
-Uses single-token primitive keywords avoiding subword splitting:
-- Types: `int`, `str`, `float`, `bool`, `num`, `byte`, `char`, `void`, `nil`.
-- Field Sigils: `!s` (string), `!i` (int), `!f` (float), `!b` (bool), `!` (required), `?` (optional).
-```python
-type User: id!s, name!s, score!i = 0, active!b = true, avatar?
-```
-
-### 5. Declarative UI Component DSL (56% Savings vs JSX)
-Zero closing XML tags (`</div>`, `</Card>`), Emmet-style contextual tag inference, and `_` inline modifier:
-```python
-component DashboardCard(title: str, value: int):
-  .card.p-4:
-    h2 _ title
-    .metric-row:
-      span.text-muted _ "Count"
-      span.font-bold _ value.toString()
-```
-
-### 6. CSS Multi-Value Packs & Unit Deduplication
-Namespace unit inheritance and layout macros:
-```python
-# Unit deduplication (appends rem automatically to unitless numbers)
-tokens spacing[rem]:
-  xs: 0.25
-  sm: 0.5
-  md: 1.0
-  lg: 1.5
-
-# Layout macro shorthand
-style ".flex-container":
-  fl-row           # Emits display: flex; flex-direction: row;
-  gap: 1rem
-```
-
-### 7. Algebraic Error Handling (`Result[T, E]` and `?`)
-Replaces unchecked `try/catch` with sound algebraic results and postfix unwrap:
-```python
-fn fetchAccount(id: str) -> Result[Account, NetworkError]:
-  data := httpGet(`/accounts/${id}`)?
-  user := parseAccount(data)?
-  ret Ok(user)
-```
-
-### 8. Project-Specific BPE-Gated Idioms ($idioms)
-Repetitive expression or statement patterns across a workspace are automatically synthesized into parameterized project idioms (`$idiom($0, $1)`) whenever they pass the positive net BPE token-savings gate ($\text{NetSavings} = (\text{TemplateTokens} - \text{CallTokens}) \times \text{Occurrences} - \text{DefinitionOverhead} \ge 10$ tokens using `cl100k_base`):
-```python
-# Raw repetitive code (e.g., Euclidean distance or boundary clamping repeated 15 times):
-d := hypot(a.x - b.x, a.y - b.y)
-
-# Automatically collapsed with active project idiom $dist2d($0, $1):
-d := $dist2d(a, b)
-
-# Idiom definition stored in aice.config.json and expanded losslessly during target compilation:
-# "$dist2d": { "params": ["$0", "$1"], "templateAice": "hypot($0.x - $1.x, $0.y - $1.y)" }
-```
-
----
-
-## 🔬 The Bidirectional Lens Theorem
-
-AICE 2.0 implements formal asymmetric lenses over Concrete Syntax Trees:
-
-$$\text{Get} : \mathcal{C} \to \mathcal{A}$$
-$$\text{Put} : \mathcal{A} \times \Omega \to \mathcal{C}$$
-
-Where $\mathcal{C}$ is the target language concrete syntax, $\mathcal{A}$ is the AICE abstract syntax, and $\Omega$ is the CST Trivia Table. Every roundtrip satisfies:
-
-$$\text{Put}(\text{Get}(c)) \equiv c$$
-
-All comments, JSDoc blocks, and docstrings are inlined directly into `*.aice` source files as standard `#` comments, ensuring humans and AI coding models can read and edit documentation directly without polluting repositories with external sidecar `.json` files.
 
 ---
 
@@ -409,38 +328,39 @@ All comments, JSDoc blocks, and docstrings are inlined directly into `*.aice` so
 
 ```
 aice/
+├── assets/
+│   ├── aice-banner.jpg         # Official wide title banner
+│   ├── aice-cpp-workflow.jpg   # End-to-End C++20 On-the-Fly Workflow diagram
+│   └── aice-logo.jpg           # Official square logo
+├── benchmarks/
+│   ├── offline-suite.ts        # Deterministic 10-scenario / 15-language BPE benchmark engine
+│   ├── real-agent-suite.ts     # Live 30-session autonomous agent benchmark verifier
+│   ├── run-offline.ts          # CLI runner for offline benchmarks
+│   └── run.ts                  # CLI runner for full benchmark suite
 ├── bin/
-│   ├── aice.ts                 # Full CLI command suite
+│   ├── aice.ts                 # AICE CLI entrypoint
 │   └── aice.mjs                # Node/Bun executable wrapper
 ├── docs/
-│   ├── AICE_SPEC.md            # Normative language specification (EBNF)
-│   ├── AI_SYSTEM_PROMPT.md    # System prompt for LLM code generation
-│   └── CST_TRIVIA_SPEC.md     # Lens and trivia table technical spec
-├── examples/                  # 14 reference multi-language examples
-├── poc_real_case/             # 67 real-world case study modules
-│   ├── dogMax/                # Raylib C++ game combat subsystem
-│   ├── snake_pp/              # SFML C++ snake engine
-│   └── snake_ts/              # Canvas TypeScript simulation engine
+│   ├── AICE_SPEC.md            # Normative language & AST specification (EBNF)
+│   ├── AI_SYSTEM_PROMPT.md     # System prompt for LLM code generation & CLI usage
+│   ├── BENCHMARKS.md           # Real AI agent benchmark report (30 live sessions)
+│   ├── BENCHMARKS_OFFLINE.md   # Deterministic offline benchmark report
+│   ├── CST_TRIVIA_SPEC.md      # Bidirectional lens and CST trivia table specification
+│   └── RESEARCH_SYNTHESIS.md   # Tokenomics and AST anti-unification research synthesis
 ├── src/
-│   ├── cache/                 # Fast persistent CST & AST disk caching engine
-│   ├── config/                # Project config (aice.config.json), mode resolver & paths
-│   ├── core/                  # Lexer, Pratt Parser, AST, Tokens, Span, Trivia
-│   ├── decompiler/            # Universal reverse transpiler (Go, Rust, Python, Kotlin, PHP, C++, C#, TS/TSX/JS, CSS, HTML)
-│   ├── emitters/              # Multi-target code generators (TS/TSX/JS, Py, Go, Rust, Kotlin, PHP, C++, C#, CSS, HTML, JSON, YAML, Twig)
-│   ├── evolve/                # 5-Gate differential fuzzing, self-healing & evolution loop
-│   ├── idioms/                # Project-specific BPE-gated idiom miner & AST transform
-│   ├── lsp/                   # Language Server Protocol daemon with rich actions & idioms
-│   ├── mcp/                   # First-Class Model Context Protocol (MCP) server & tools
-│   ├── runner/                # Test runner, symbol-error formatter & ConcurrencyPool TUI
-│   ├── shield/                # AI Exclusion Rules & Permission Locker
-│   ├── tokenomics/            # TikToken BPE benchmark & drift auditor
-│   ├── tools/                 # Token-dense tools: context, outline, splice, fmt, diff, patch
-│   ├── transpiler/            # Side-by-Side & Companion Parallel Ingest Engine
-│   ├── typechecker/           # Sound TypeChecker & Autonomous Self-Repair
-│   └── watcher/               # High-Speed Incremental & Bidirectional Watch Daemon
+│   ├── cache/                  # Persistent AST & idiom provenance disk cache
+│   ├── config/                 # Project config (aice.config.json / .aice-idioms.json) & path resolver
+│   ├── core/                   # Lexer, Pratt Parser, AST, Tokens, Span, CST Trivia
+│   ├── decompiler/             # On-the-fly reverse transpilers across 15 languages
+│   ├── emitters/               # Multi-target native code generators across 15 languages
+│   ├── idioms/                 # BPE-gated AST anti-unification idiom miner & transformer
+│   ├── mcp/                    # Model Context Protocol (MCP) stdio server
+│   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
+│   ├── tools/                  # On-the-fly tools: outline, context, splice, fmt, diff, patch, parity-gate
+│   └── typechecker/            # Static typechecker & autonomous self-repair engine
 └── tests/
-    ├── unit/                  # 1,546 unit and integration tests across 63 suites
-    └── integration/           # End-to-end bidirectional fidelity & multi-round suites
+    ├── unit/                   # 44 unit test suites
+    └── integration/            # Multi-file roundtrip & operator pipeline integration suites
 ```
 
 ---

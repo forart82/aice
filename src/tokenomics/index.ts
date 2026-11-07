@@ -10,9 +10,11 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
+import { findProjectRoot, isProjectIdiomsEnabled, loadProjectConfig } from "../config/index.js";
 import { parse } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
+import { collapseAiceSourceIdioms } from "../idioms/index.js";
 
 let cl100k: ReturnType<typeof getEncoding> | undefined;
 let o200k: ReturnType<typeof getEncoding> | undefined;
@@ -205,6 +207,9 @@ export function auditTokenomics(
 
   const stat = fs.statSync(resolved);
   const files: TokenomicsFileResult[] = [];
+  const projectRoot = findProjectRoot(stat.isDirectory() ? resolved : path.dirname(resolved));
+  const config = loadProjectConfig(projectRoot);
+  const activeIdioms = isProjectIdiomsEnabled(config) ? config.idioms : undefined;
 
   if (stat.isFile()) {
     const isAice = resolved.endsWith(".aice");
@@ -228,18 +233,17 @@ export function auditTokenomics(
       targetFile = resolved;
       aiceFile = `${targetFile}.aice`;
       targetContent = fs.readFileSync(targetFile, "utf-8");
-      if (fs.existsSync(aiceFile)) {
-        aiceContent = fs.readFileSync(aiceFile, "utf-8");
-      } else {
-        const targetLang = detectTargetFromPath(targetFile);
-        try {
-          const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
-          aiceContent = decomp.aice;
-        } catch (err: unknown) {
-          throw new Error(
-            `Failed to evaluate token efficiency for ${targetFile}: ${err instanceof Error ? err.message : String(err)}`,
-          );
+      const targetLang = detectTargetFromPath(targetFile);
+      try {
+        const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
+        aiceContent = decomp.aice;
+        if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+          aiceContent = collapseAiceSourceIdioms(aiceContent, activeIdioms, targetFile).aice;
         }
+      } catch (err: unknown) {
+        throw new Error(
+          `Failed to evaluate token efficiency for ${targetFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
       }
     }
 
@@ -283,7 +287,7 @@ export function auditTokenomics(
           aices.push(...sub.aiceFiles);
           targets.push(...sub.targetCandidates);
         } else if (entry.isFile()) {
-          if (entry.name.endsWith(".aice.trivia.json")) {
+          if (entry.name.endsWith(".trivia.json")) {
             continue;
           }
           if (entry.name.endsWith(".aice")) {
@@ -316,7 +320,6 @@ export function auditTokenomics(
     const { aiceFiles, targetCandidates } = walk(searchDir);
 
     if (aiceFiles.length > 0) {
-      // 1. Process all existing .aice files in directory and subdirectories
       for (const aiceFile of aiceFiles) {
         const targetFile = aiceFile.replace(/\.aice$/, "");
         const relAicePath = path.relative(process.cwd(), aiceFile);
@@ -347,14 +350,16 @@ export function auditTokenomics(
         files.push(result);
       }
     } else {
-      // 2. Directory has no .aice files: process unadopted target candidates on-the-fly in memory
       for (const targetFile of targetCandidates) {
         if (processedTargets.has(targetFile)) continue;
         const targetLang = detectTargetFromPath(targetFile);
         try {
           const targetContent = fs.readFileSync(targetFile, "utf-8");
           const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
-          const aiceContent = decomp.aice;
+          let aiceContent = decomp.aice;
+          if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+            aiceContent = collapseAiceSourceIdioms(aiceContent, activeIdioms, targetFile).aice;
+          }
           const relFromSearch = path.relative(searchDir, targetFile);
           const parts = relFromSearch.split(path.sep);
           const project = parts.length > 1 ? parts[0] : path.basename(searchDir);

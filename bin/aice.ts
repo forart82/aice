@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 /**
- * AICE CLI Compiler & Verification Tool.
- * Provides `aice compile`, `aice compile-all`, and `aice verify [--json]`.
+ * AICE CLI: On-the-Fly AI Context Engine & Multi-File Idiom Tool.
  */
 
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
@@ -15,7 +13,6 @@ import {
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  saveProjectConfig,
   setProjectIdiomsEnabled,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
@@ -25,22 +22,9 @@ import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
 import {
   detectTargetFromPath,
   emitTarget,
-  getTargetOutputPath,
   type TargetLanguage,
 } from "../src/emitters/index.js";
-import { AiceLspServer } from "../src/lsp/server.js";
 import { AiceMcpServer } from "../src/mcp/index.js";
-import { MultiLineReporter, runAiceTests, translateTrace } from "../src/runner/index.js";
-import {
-  applyAiShield,
-  applyCompanionShield,
-  checkAiShieldStatus,
-  interceptPreToolUse,
-  lockProjectTargets,
-  removeAiShield,
-  safeWriteTargetFile,
-  unlockProjectTargets,
-} from "../src/shield/index.js";
 import {
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
@@ -49,10 +33,6 @@ import {
   scanProjectIdioms,
   updateProjectIdiom,
 } from "../src/idioms/index.js";
-import {
-  runEvolutionLoopSync,
-  runSelfHealingCampaignSync,
-} from "../src/evolve/index.js";
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
@@ -67,7 +47,6 @@ import {
   type DiffOptions,
   diffFiles,
   type FmtOptions,
-  type FmtResult,
   formatAicePath,
   formatAiceSource,
   formatParitySummaryJson,
@@ -83,7 +62,6 @@ import {
   splice,
   spliceBatch,
 } from "../src/tools/index.js";
-import { ejectProject, ingestProjectSideBySide } from "../src/transpiler/index.js";
 import { TypeChecker } from "../src/typechecker/checker.js";
 import {
   attemptSelfRepair,
@@ -91,14 +69,21 @@ import {
   formatDiagnosticJson,
   formatDiagnosticText,
 } from "../src/typechecker/diagnostics.js";
-import { syncProjectFromTargets, watchProject } from "../src/watcher/index.js";
 
 const program = new Command();
 
 program
   .name("aice")
-  .description("AICE: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.8.2");
+  .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
+  .version("0.8.3");
+
+function writeTargetFile(outPath: string, content: string): void {
+  const dir = path.dirname(outPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  fs.writeFileSync(outPath, content, "utf-8");
+}
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -204,7 +189,7 @@ export function executeCompile(
           : path.resolve(projectRoot, resolvedOut);
       }
 
-      safeWriteTargetFile(outPath, emitted);
+      writeTargetFile(outPath, emitted);
 
       console.log(
         `✔ Compiled ${targetArg ?? file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
@@ -298,7 +283,7 @@ export function executeCompile(
             : path.resolve(projectRoot, resolvedOut);
         }
 
-        safeWriteTargetFile(outPath, emitted);
+        writeTargetFile(outPath, emitted);
         console.log(
           `✔ Compiled ${relPath} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
         );
@@ -394,89 +379,6 @@ program
       executeCompile(dir, options);
     },
   );
-
-// Command: clean [dir]
-program
-  .command("clean")
-  .description("Remove all emitted target files generated from .aice files in a directory")
-  .argument("[dir]", "Directory containing .aice files", ".")
-  .action((dir: string) => {
-    try {
-      const searchDir = path.resolve(process.cwd(), dir);
-      if (!fs.existsSync(searchDir)) {
-        console.error(`Directory not found: ${dir}`);
-        process.exit(1);
-      }
-
-      const projectRoot = findProjectRoot(searchDir, process.cwd());
-      const config = loadProjectConfig(projectRoot);
-
-      function findAiceFiles(current: string): string[] {
-        let results: string[] = [];
-        const entries = fs.readdirSync(current, { withFileTypes: true });
-        for (const entry of entries) {
-          const full = path.join(current, entry.name);
-          if (
-            entry.isDirectory() &&
-            entry.name !== "node_modules" &&
-            entry.name !== ".git" &&
-            entry.name !== ".aice-build" &&
-            entry.name !== config.outDir
-          ) {
-            results = results.concat(findAiceFiles(full));
-          } else if (entry.isFile() && entry.name.endsWith(".aice")) {
-            results.push(full);
-          }
-        }
-        return results;
-      }
-
-      const files = findAiceFiles(searchDir);
-      let removedCount = 0;
-
-      for (const f of files) {
-        const pathsToRemove = new Set<string>();
-
-        if (config.mode !== "companion") {
-          const resolvedOut = resolveTargetOutputPathForConfig(f, config, projectRoot);
-          const outPath = path.isAbsolute(resolvedOut)
-            ? resolvedOut
-            : path.resolve(projectRoot, resolvedOut);
-          pathsToRemove.add(outPath);
-        }
-
-        const legacyOut = getTargetOutputPath(f);
-        if (KNOWN_TARGET_EXTENSIONS.has(path.extname(legacyOut))) {
-          if (
-            config.mode !== "companion" ||
-            !path.isAbsolute(legacyOut) ||
-            legacyOut.startsWith(projectRoot)
-          ) {
-            pathsToRemove.add(legacyOut);
-          }
-        }
-
-        for (const p of pathsToRemove) {
-          if (fs.existsSync(p)) {
-            try {
-              if (fs.statSync(p).isFile()) {
-                fs.unlinkSync(p);
-                console.log(`✔ Removed ${path.relative(process.cwd(), p)}`);
-                removedCount++;
-              }
-            } catch {
-              // ignore stat/unlink error
-            }
-          }
-        }
-      }
-
-      console.log(`\nFinished: ${removedCount} generated files removed.`);
-    } catch (err) {
-      console.error(err);
-      process.exit(1);
-    }
-  });
 
 // Command: verify [target]
 program
@@ -615,80 +517,6 @@ program
       }
     },
   );
-
-// Command: test [target]
-program
-  .command("test")
-  .description("Execute tests across .aice files and test suites with auto-recompilation")
-  .argument("[target]", "Optional path to a test file, directory, or omitted to run all tests")
-  .option("-r, --reporter <type>", "Test reporter to use (e.g. compact, verbose, dots, json)")
-  .option("--json", "Output test results as machine-readable JSON")
-  .option("-v, --verbose", "Display verbose test runner output")
-  .action(
-    async (target?: string, options?: { reporter?: string; json?: boolean; verbose?: boolean }) => {
-      try {
-        const result = await runAiceTests(target, {
-          reporter: options?.reporter,
-          json: options?.json,
-          verbose: options?.verbose,
-          cwd: process.cwd(),
-        });
-
-        if (options?.json) {
-          console.log(JSON.stringify(result, null, 2));
-          process.exit(result.success ? 0 : 1);
-        }
-
-        if (result.success) {
-          if (options?.verbose && result.output) {
-            console.log(result.output);
-          }
-          console.log(
-            `✔ Tests succeeded: ${result.summary.passed}/${result.summary.total} passed (${result.summary.failed} failed).`,
-          );
-          if (result.compiledFiles && result.compiledFiles.length > 0) {
-            console.log(
-              `  (Recompiled ${result.compiledFiles.length} .aice target(s) before test execution)`,
-            );
-          }
-          process.exit(0);
-        } else {
-          if (result.output) {
-            console.error(result.output);
-          }
-          console.error(
-            `❌ Tests failed: ${result.summary.failed}/${result.summary.total} failed (${result.summary.passed} passed).`,
-          );
-          process.exit(1);
-        }
-      } catch (err) {
-        console.error(`❌ Failed to execute tests:`, err);
-        process.exit(1);
-      }
-    },
-  );
-
-// Command: trace <trace...>
-program
-  .command("trace")
-  .description("Translate runtime stack trace or file:line reference to companion .aice location")
-  .argument("<trace...>", "Stack trace string or file:line reference to translate")
-  .option("--cwd <dir>", "Project directory context (defaults to current working directory)")
-  .action((traceArgs: string[], options?: { cwd?: string }) => {
-    try {
-      const projectDir = options?.cwd ? path.resolve(options.cwd) : process.cwd();
-      const projectRoot = findProjectRoot(projectDir) ?? projectDir;
-      const config = loadProjectConfig(projectRoot);
-
-      const translated = translateTrace(traceArgs, projectRoot, config);
-      for (const line of translated) {
-        console.log(line);
-      }
-    } catch (err) {
-      console.error(`❌ Failed to translate trace:`, err);
-      process.exit(1);
-    }
-  });
 
 // Command: fix <file>
 program
@@ -832,14 +660,6 @@ program
       console.error(`❌ Roundtrip error:`, err);
       process.exit(1);
     }
-  });
-
-// Command: lsp
-program
-  .command("lsp")
-  .description("Launch the AICE Language Server Protocol (LSP) daemon over stdio")
-  .action(() => {
-    new AiceLspServer(process.stdin, process.stdout);
   });
 
 // Command: mcp
@@ -1023,595 +843,6 @@ program
     }
   });
 
-// Command: adopt [dir]
-program
-  .command("adopt")
-  .description(
-    "Adopt an existing codebase into AICE side-by-side architecture or standalone companion workspace",
-  )
-  .argument("[dir]", "Target codebase directory or destination companion workspace", ".")
-  .option("-c, --concurrency <number>", "Worker concurrency for parallel decompilation", (val) =>
-    Number.parseInt(val, 10),
-  )
-  .option("--no-shield", "Skip generating AI shield rules (.vscode, ignores, AGENTS.md)")
-  .option("--no-lock", "Skip locking target files as read-only (chmod 444)")
-  .option("--overwrite", "Force re-decompilation of existing .aice files")
-  .option("--dry-run", "Calculate plan and tokenomics metrics without mutating disk")
-  .option(
-    "--idioms",
-    "Automatically mine and collapse repetitive lines/blocks into token-saving project idioms",
-  )
-  .option(
-    "--isolate",
-    "Adopt project into isolated mode (src/ contains only .aice, target files in .aice-build/)",
-  )
-  .option(
-    "--companion <targetDir>",
-    "Adopt an external project into a standalone companion AICE workspace",
-  )
-  .option(
-    "--out-dir <dir>",
-    "Build artifact directory for isolated mode (default: .aice-build) or target source directory for companion mode",
-  )
-  .option("--source-dir <dir>", "Source directory containing .aice code (default: src)")
-  .action(
-    async (
-      dir: string,
-      options: {
-        concurrency?: number;
-        shield?: boolean;
-        lock?: boolean;
-        overwrite?: boolean;
-        dryRun?: boolean;
-        isolate?: boolean;
-        companion?: string;
-        outDir?: string;
-        sourceDir?: string;
-        idioms?: boolean;
-      },
-    ) => {
-      try {
-        const isCompanion = Boolean(options.companion);
-        const isIsolated = !isCompanion && Boolean(options.isolate);
-
-        let companionDir: string;
-        let targetProjectDir: string;
-
-        if (isCompanion) {
-          targetProjectDir = path.resolve(process.cwd(), options.companion!);
-          if (!fs.existsSync(targetProjectDir)) {
-            console.error(`❌ Error: Target project directory not found: ${options.companion}`);
-            process.exit(1);
-          }
-          companionDir = path.resolve(process.cwd(), dir ?? ".");
-          if (!options.dryRun && !fs.existsSync(companionDir)) {
-            fs.mkdirSync(companionDir, { recursive: true });
-          }
-        } else {
-          companionDir = path.resolve(process.cwd(), dir);
-          targetProjectDir = companionDir;
-          if (!fs.existsSync(targetProjectDir)) {
-            console.error(`❌ Error: Directory not found: ${dir}`);
-            process.exit(1);
-          }
-        }
-
-        const cpus = os.cpus?.().length ? os.cpus().length : 4;
-        const concurrency = Math.max(1, Math.floor(options.concurrency ?? cpus));
-
-        const reporter = new MultiLineReporter({ concurrency });
-
-        const summary = await ingestProjectSideBySide({
-          dir: companionDir,
-          companion: isCompanion,
-          targetProjectDir: isCompanion ? targetProjectDir : undefined,
-          concurrency,
-          reporter,
-          overwrite: Boolean(options.overwrite),
-          dryRun: Boolean(options.dryRun),
-          isolate: isIsolated,
-          outDir: options.outDir,
-          sourceDir: options.sourceDir,
-          shield: options.shield !== false,
-          idioms: Boolean(options.idioms),
-        });
-
-        let shieldApplied = false;
-        let lockSummary = { totalLocked: 0, totalSkipped: 0, totalFailed: 0 };
-
-        if (!options.dryRun) {
-          if (isCompanion) {
-            shieldApplied = options.shield !== false;
-          } else {
-            if (options.shield !== false) {
-              await applyAiShield(targetProjectDir, { lifecycleHooks: true });
-              shieldApplied = true;
-            }
-            if (options.lock !== false) {
-              lockSummary = await lockProjectTargets(targetProjectDir);
-            }
-          }
-        }
-
-        if (isCompanion) {
-          console.log(`\n=== AICE Companion Adoption Summary ===`);
-          console.log(`Companion Workspace: ${path.relative(process.cwd(), companionDir) || "."}`);
-          console.log(
-            `Target Project:      ${path.relative(process.cwd(), targetProjectDir) || "."}`,
-          );
-          console.log(`Mode:                companion`);
-          console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
-          console.log(
-            `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
-          );
-          console.log(
-            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAiceTokens} tokens)`,
-          );
-          console.log(
-            `AI Shield:           ${
-              options.dryRun
-                ? "💡 Simulated (--dry-run)"
-                : options.shield === false
-                  ? "⊘ Skipped (--no-shield)"
-                  : "✔ Active (AGENTS.md, .cursorrules)"
-            }`,
-          );
-          if (summary.idiomsSynthesized) {
-            console.log(
-              `Project Idioms:      ${summary.idiomsSynthesized} idioms synthesized (+${summary.idiomTokenSavings ?? 0} tokens saved)`,
-            );
-          }
-          console.log(`Target Files:        ✔ Untouched (100% clean, unlocked)`);
-        } else {
-          console.log(`\n=== AICE ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
-          console.log(
-            `Directory:           ${path.relative(process.cwd(), targetProjectDir) || "."}`,
-          );
-          if (isIsolated) {
-            console.log(`Mode:                isolated`);
-            console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
-            console.log(`Build Out Dir:       ${options.outDir ?? ".aice-build"}`);
-          }
-          console.log(
-            `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
-          );
-          console.log(
-            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAiceTokens} tokens)`,
-          );
-          if (summary.idiomsSynthesized) {
-            console.log(
-              `Project Idioms:      ${summary.idiomsSynthesized} idioms synthesized (+${summary.idiomTokenSavings ?? 0} tokens saved)`,
-            );
-          }
-          console.log(
-            `AI Shield:           ${
-              options.dryRun
-                ? "💡 Simulated (--dry-run)"
-                : options.shield === false
-                  ? "⊘ Skipped (--no-shield)"
-                  : shieldApplied
-                    ? "✔ Active (.vscode/settings.json, agent ignores, AGENTS.md, GEMINI.md, .agents/hooks.json)"
-                    : "✖ Inactive"
-            }`,
-          );
-          console.log(
-            `Permission Locks:    ${
-              options.dryRun
-                ? "💡 Simulated (--dry-run)"
-                : options.lock === false
-                  ? "⊘ Skipped (--no-lock)"
-                  : `✔ ${lockSummary.totalLocked} target file(s) locked (chmod 444)`
-            }`,
-          );
-        }
-
-        if (options.dryRun) {
-          console.log(`\n💡 [DRY-RUN] No changes were written to disk.`);
-        }
-
-        if (summary.totalFailed > 0) {
-          console.error(`\n❌ Failed to decompile ${summary.totalFailed} file(s).`);
-          process.exit(1);
-        }
-      } catch (err) {
-        console.error(`❌ Adoption error:`, err);
-        process.exit(1);
-      }
-    },
-  );
-
-// Command: watch [dir] (alias: dev)
-program
-  .command("watch")
-  .alias("dev")
-  .description("Watch .aice files and incrementally recompile side-by-side on change")
-  .argument("[dir]", "Directory to watch for .aice files", ".")
-  .option("--lock", "Lock compiled target files (chmod 444)")
-  .option("--no-lock", "Do not lock compiled target files")
-  .option(
-    "--debounce <ms>",
-    "Debounce time in ms before recompiling",
-    (val) => Number.parseInt(val, 10),
-    50,
-  )
-  .option("--bidirectional", "Watch target files and reverse-sync external edits back to .aice")
-  .action(
-    async (
-      dir: string,
-      options: {
-        lock?: boolean;
-        debounce?: number;
-        bidirectional?: boolean;
-      },
-    ) => {
-      try {
-        const targetDir = path.resolve(process.cwd(), dir);
-        if (!fs.existsSync(targetDir)) {
-          console.error(`❌ Error: Directory not found: ${dir}`);
-          process.exit(1);
-        }
-
-        const projectRoot = findProjectRoot(targetDir);
-        const config = loadProjectConfig(projectRoot);
-        const isCompanion = config.mode === "companion";
-
-        const lockTargets = options.lock !== undefined ? options.lock : isCompanion ? false : true;
-        const debounceMs = options.debounce ?? 50;
-        const bidirectional = Boolean(options.bidirectional);
-
-        if (isCompanion) {
-          const compRel = path.relative(process.cwd(), projectRoot) || ".";
-          const targetProjectDirAbs = config.targetProjectDir
-            ? path.isAbsolute(config.targetProjectDir)
-              ? config.targetProjectDir
-              : path.resolve(projectRoot, config.targetProjectDir)
-            : config.outDir && path.isAbsolute(config.outDir)
-              ? config.outDir
-              : path.resolve(projectRoot, config.outDir ?? ".");
-          const targetRel =
-            path.relative(process.cwd(), targetProjectDirAbs) || targetProjectDirAbs;
-
-          console.log(`[companion] Watching ${compRel} -> Emitting to ${targetRel}`);
-          console.log(
-            `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
-          );
-          console.log(
-            `   Mode: companion | Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"} | Reverse sync: ${bidirectional ? "enabled" : "disabled"}\n`,
-          );
-        } else {
-          console.log(
-            `👀 Watching ${path.relative(process.cwd(), targetDir) || "."} for changes... (Press Ctrl+C to exit)`,
-          );
-          console.log(
-            `   Debounce: ${debounceMs}ms | Target locking: ${lockTargets ? "enabled (chmod 444)" : "disabled"} | Reverse sync: ${bidirectional ? "enabled" : "disabled"}\n`,
-          );
-        }
-
-        const watcher = await watchProject(targetDir, {
-          projectRoot,
-          config,
-          debounceMs,
-          lockTargets,
-          bidirectional,
-          onCompileSuccess: (aiceFile, targetFile, durationMs) => {
-            const relAice = path.relative(process.cwd(), aiceFile);
-            const relTarget = path.relative(process.cwd(), targetFile);
-            console.log(`✔ [COMPILE] ${relAice} -> ${relTarget} (${Math.round(durationMs)}ms)`);
-          },
-          onCompileError: (aiceFile, error) => {
-            const relAice = path.relative(process.cwd(), aiceFile);
-            console.error(`❌ [ERROR] Failed to compile ${relAice}: ${error.message}`);
-          },
-          onFileDeleted: (aiceFile, targetFile) => {
-            const relAice = path.relative(process.cwd(), aiceFile);
-            const relTarget = path.relative(process.cwd(), targetFile);
-            console.log(`ℹ [DELETE] Removed ${relAice} (target: ${relTarget})`);
-          },
-          onReverseSyncSuccess: (targetFile, aiceFile, durationMs) => {
-            const relTarget = path.relative(process.cwd(), targetFile);
-            const relAice = path.relative(process.cwd(), aiceFile);
-            console.log(`✔ [REVERSE-SYNC] ${relTarget} -> ${relAice} (${Math.round(durationMs)}ms)`);
-          },
-          onReverseSyncError: (targetFile, error) => {
-            const relTarget = path.relative(process.cwd(), targetFile);
-            console.error(
-              `❌ [REVERSE-SYNC ERROR] Failed to reverse-sync ${relTarget}: ${error.message}`,
-            );
-          },
-        });
-
-        const cleanup = async () => {
-          process.stdout.write("\x1B[?25h\n");
-          console.log("Stopping AICE watch daemon...");
-          await watcher.stop();
-          process.exit(0);
-        };
-
-        process.on("SIGINT", cleanup);
-        process.on("SIGTERM", cleanup);
-      } catch (err) {
-        process.stdout.write("\x1B[?25h\n");
-        console.error(`❌ Watcher error:`, err);
-        process.exit(1);
-      }
-    },
-  );
-
-// Command: sync [dir]
-program
-  .command("sync")
-  .description(
-    "Synchronize external edits from target files (.ts, .py, .go, .rs, etc.) back into .aice sources",
-  )
-  .argument("[dir]", "Directory containing project or target files", ".")
-  .option("--json", "Output machine-readable JSON telemetry")
-  .action(async (dir: string, options: { json?: boolean }) => {
-    try {
-      const targetDir = path.resolve(process.cwd(), dir || ".");
-      if (!fs.existsSync(targetDir)) {
-        console.error(`❌ Error: Directory not found: ${dir}`);
-        process.exit(1);
-      }
-
-      const results = await syncProjectFromTargets(targetDir);
-
-      if (options.json) {
-        console.log(JSON.stringify(results, null, 2));
-      } else {
-        if (results.length === 0) {
-          console.log(`ℹ No target files needed synchronization.`);
-        } else {
-          console.log(`\n=== Bidirectional Companion Sync: ${dir || "."} ===`);
-          for (const r of results) {
-            const relTarget = path.relative(process.cwd(), r.targetFile);
-            const relAice = path.relative(process.cwd(), r.aiceFile);
-            if (r.success) {
-              const idiomText =
-                r.collapsedIdioms > 0 ? ` (${r.collapsedIdioms} idioms collapsed)` : "";
-              console.log(
-                `✔ ${relTarget} -> ${relAice} [${Math.round(r.durationMs)}ms]${idiomText}`,
-              );
-            } else {
-              console.error(`❌ ${relTarget} -> ${relAice}: ${r.error?.message}`);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error(`❌ Sync error:`, err);
-      process.exit(1);
-    }
-  });
-
-// Command: eject [dir]
-const ejectCmd = program
-  .command("eject")
-  .description(
-    "Eject AICE side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields",
-  )
-  .argument("[dir]", "Target project directory", ".")
-  .option("--remove-aice", "Delete all .aice source files")
-  .option(
-    "--from-build",
-    "Restore target files from .aice-build back to sourceDir and delete .aice files",
-  )
-  .option("--keep-aice", "Preserve .aice source files while restoring target files")
-  .option("--source-dir <dir>", "Source directory containing .aice code (default: src)")
-  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .aice-build)")
-  .action(
-    async (
-      dir: string,
-      options: {
-        removeAice?: boolean;
-        fromBuild?: boolean;
-        keepAice?: boolean;
-        sourceDir?: string;
-        outDir?: string;
-      },
-    ) => {
-      try {
-        const targetDir = path.resolve(process.cwd(), dir);
-        if (!fs.existsSync(targetDir)) {
-          console.error(`❌ Error: Directory not found: ${dir}`);
-          process.exit(1);
-        }
-
-        const ejectResult = await ejectProject({
-          dir: targetDir,
-          fromBuild: Boolean(options.fromBuild),
-          removeAice: options.removeAice,
-          keepAice: options.keepAice,
-          sourceDir: options.sourceDir,
-          outDir: options.outDir,
-        });
-
-        // Print confirmation
-        console.log(`\n=== AICE Eject Complete ===`);
-        console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
-        if (ejectResult.mode === "isolated") {
-          console.log(`Mode:                isolated (--from-build)`);
-          console.log(
-            `Restored Targets:    ${ejectResult.restoredFiles.length} file(s) restored to source directory`,
-          );
-          if (ejectResult.removedBuildDir) {
-            console.log(
-              `Removed Build Dir:   ${path.relative(process.cwd(), ejectResult.removedBuildDir) || ejectResult.removedBuildDir}`,
-            );
-          }
-        } else if (ejectResult.mode === "companion") {
-          console.log(`Mode:                companion twin workspace`);
-          console.log(
-            `Target Project:      Unlocked & unshielded (${ejectResult.unlockedTargets ?? 0} targets restored to chmod 644)`,
-          );
-        } else {
-          console.log(
-            `Unlocked Targets:    ${ejectResult.unlockedTargets ?? 0} file(s) restored to chmod 644`,
-          );
-        }
-        console.log(
-          `AI Shield:           Reverted (${ejectResult.shieldRemoved?.length ?? 0} removed, ${ejectResult.shieldReverted?.length ?? 0} restored)`,
-        );
-        console.log(
-          `AICE Source Files:    ${
-            ejectResult.removedAiceFiles.length > 0
-              ? `Deleted ${ejectResult.removedAiceFiles.length} .aice files`
-              : "Preserved on disk"
-          }`,
-        );
-        console.log(`Project successfully restored to standard toolchain state.`);
-      } catch (err) {
-        console.error(`❌ Eject error:`, err);
-        process.exit(1);
-      }
-    },
-  );
-
-// Helper to read stdin synchronously in CLI hooks without blocking interactive TTY
-function readStdinSync(): string {
-  try {
-    if (process.stdin.isTTY) {
-      return "";
-    }
-    return fs.readFileSync(0, "utf-8");
-  } catch {
-    return "";
-  }
-}
-
-// Command: shield
-const shieldCmd = program
-  .command("shield")
-  .description("Manage AI exclusion rules, cognitive shields, and filesystem locks");
-
-shieldCmd
-  .command("intercept")
-  .description("Intercept PreToolUse lifecycle hooks for AI agents")
-  .argument("[dir]", "Target project directory", ".")
-  .action((dir: string) => {
-    try {
-      const rawInput = readStdinSync();
-      const targetDir = path.resolve(process.cwd(), dir || ".");
-      const result = interceptPreToolUse(rawInput, targetDir);
-      console.log(JSON.stringify(result));
-    } catch {
-      console.log(JSON.stringify({ decision: "allow" }));
-    }
-  });
-
-shieldCmd
-  .argument("<action>", "Action to perform: apply | remove | status | lock | unlock | intercept")
-  .argument("[dir]", "Target project directory", ".")
-  .option("--twinless", "Configure Twinless On-the-Fly mode (zero .aice files on disk)")
-  .action(async (action: string, dir: string, opts: { twinless?: boolean }) => {
-    try {
-      const targetDir = path.resolve(process.cwd(), dir);
-      if (!fs.existsSync(targetDir)) {
-        console.error(`❌ Error: Directory not found: ${dir}`);
-        process.exit(1);
-      }
-
-      switch (action.toLowerCase()) {
-        case "intercept": {
-          const rawInput = readStdinSync();
-          const result = interceptPreToolUse(rawInput, targetDir);
-          console.log(JSON.stringify(result));
-          break;
-        }
-        case "apply": {
-          const res = await applyAiShield(targetDir, {
-            lifecycleHooks: !opts.twinless,
-            twinless: Boolean(opts.twinless),
-          });
-          console.log(`✔ AI Shield applied to ${path.relative(process.cwd(), targetDir) || "."}:`);
-          console.log(`  - Created files:  ${res.createdFiles.length}`);
-          for (const f of res.createdFiles) {
-            console.log(`    + ${path.relative(process.cwd(), f)}`);
-          }
-          console.log(`  - Modified files: ${res.modifiedFiles.length}`);
-          for (const f of res.modifiedFiles) {
-            console.log(`    ~ ${path.relative(process.cwd(), f)}`);
-          }
-          console.log(`  - Active shields: ${res.activeShields.join(", ") || "none"}`);
-          break;
-        }
-        case "remove": {
-          const res = await removeAiShield(targetDir);
-          console.log(
-            `✔ AI Shield removed from ${path.relative(process.cwd(), targetDir) || "."}:`,
-          );
-          console.log(`  - Removed files:  ${res.removedFiles.length}`);
-          for (const f of res.removedFiles) {
-            console.log(`    - ${path.relative(process.cwd(), f)}`);
-          }
-          console.log(`  - Reverted files: ${res.revertedFiles.length}`);
-          for (const f of res.revertedFiles) {
-            console.log(`    ~ ${path.relative(process.cwd(), f)}`);
-          }
-          break;
-        }
-        case "status": {
-          const status = await checkAiShieldStatus(targetDir);
-          console.log(
-            `=== AI Shield Status: ${path.relative(process.cwd(), targetDir) || "."} ===`,
-          );
-          console.log(`Active:            ${status.isActive ? "✔ YES" : "✖ NO"}`);
-          console.log(
-            `IDE Settings:      ${status.ideSettingsConfigured ? "✔ Configured (.vscode/settings.json)" : "✖ Not configured"}`,
-          );
-          console.log(
-            `Agent Ignores:     ${status.agentIgnoresConfigured ? "✔ Configured (.cursorignore, etc.)" : "✖ Not configured"}`,
-          );
-          console.log(
-            `Cognitive Rules:   ${status.cognitiveRulesConfigured ? "✔ Configured (AGENTS.md, .cursorrules)" : "✖ Not configured"}`,
-          );
-          for (const [file, active] of Object.entries(status.details)) {
-            if (typeof active === "boolean") {
-              console.log(`  - ${file}: ${active ? "✔ active" : "✖ inactive"}`);
-            }
-          }
-          break;
-        }
-        case "lock": {
-          const res = await lockProjectTargets(targetDir);
-          console.log(
-            `✔ Locked ${res.totalLocked} target file(s) in ${path.relative(process.cwd(), targetDir) || "."} (chmod 444).`,
-          );
-          if (res.totalSkipped > 0) {
-            console.log(`  (${res.totalSkipped} file(s) were already locked)`);
-          }
-          if (res.totalFailed > 0) {
-            console.error(`❌ Failed to lock ${res.totalFailed} file(s).`);
-            process.exit(1);
-          }
-          break;
-        }
-        case "unlock": {
-          const res = await unlockProjectTargets(targetDir);
-          console.log(
-            `✔ Unlocked ${res.totalUnlocked} target file(s) in ${path.relative(process.cwd(), targetDir) || "."} (chmod 644).`,
-          );
-          if (res.totalSkipped > 0) {
-            console.log(`  (${res.totalSkipped} file(s) were already writable)`);
-          }
-          if (res.totalFailed > 0) {
-            console.error(`❌ Failed to unlock ${res.totalFailed} file(s).`);
-            process.exit(1);
-          }
-          break;
-        }
-        default: {
-          console.error(
-            `❌ Unknown shield action: '${action}'. Valid actions: apply, remove, status, lock, unlock, intercept`,
-          );
-          process.exit(1);
-        }
-      }
-    } catch (err) {
-      console.error(`❌ Shield error:`, err);
-      process.exit(1);
-    }
-  });
-
 // Command: outline [target]
 program
   .command("outline")
@@ -1764,6 +995,7 @@ program
   .option("--batch <fileOrJson>", "Execute atomic multi-file batch splice from JSON file or JSON string")
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
+  .option("--in-place", "Apply splice mutation directly to the file on disk (default)")
   .option("--dry-run", "Output result without modifying file")
   .option("--diff", "Display unified diff")
   .option("--compile", "Automatically recompile target after splice")
@@ -2583,19 +1815,6 @@ program
             minNetTokenSavings,
           });
 
-          if (!dryRun) {
-            const rootDir = findProjectRoot(targetDir);
-            const config = loadProjectConfig(rootDir);
-            if (config.mode === "companion") {
-              applyCompanionShield(rootDir);
-            } else {
-              await applyAiShield(rootDir, {
-                lifecycleHooks: config.mode !== "twinless",
-                twinless: config.mode === "twinless",
-              });
-            }
-          }
-
           if (isJson) {
             console.log(JSON.stringify(res, null, 2));
             return;
@@ -2613,7 +1832,7 @@ program
           console.log(`Net Token Savings:   ${tokenSavings} tokens`);
           console.log(`Files Modified:      ${filesCount}`);
           if (!dryRun) {
-            console.log(`✔ Updated aice.config.json and refreshed AI shield.`);
+            console.log(`✔ Updated aice.config.json.`);
           }
         } else if (action === "expand") {
           const res = expandProjectIdiomsInDirectory(targetDir);
@@ -2640,7 +1859,7 @@ program
           );
           console.log(`Files Expanded:      ${count}`);
           console.log(
-            `✔ All project idioms inlined back into standard .aice code and idioms cleared from config.`,
+            `✔ All project idioms inlined back into standard code and idioms cleared from config.`,
           );
         } else if (action === "list") {
           const rootDir = findProjectRoot(targetDir);
@@ -2688,189 +1907,31 @@ program
     },
   );
 
-program
-  .command("evolve")
-  .description("Execute autonomous differential fuzzing, self-healing, and idiom evolution loop")
-  .option("-r, --restarts <n>", "Number of campaign restarts (default: 1)", "1")
-  .option("-c, --cycles <n>", "Number of evolution cycles to execute per restart")
-  .option("--seed <n>", "Initial PRNG seed for deterministic fuzzing", "1337")
-  .option("--no-corpus", "Disable sampling real-world corpus files during roundtrip verification")
-  .option("--json", "Emit structured JSON evolution report")
-  .action(async (cmdOptions) => {
-    try {
-      const parsedRestarts = cmdOptions.restarts !== undefined ? Number.parseInt(cmdOptions.restarts, 10) : NaN;
-      const restarts = Number.isNaN(parsedRestarts) ? 1 : parsedRestarts;
-
-      const parsedCycles = cmdOptions.cycles !== undefined ? Number.parseInt(cmdOptions.cycles, 10) : NaN;
-      const cycles = Number.isNaN(parsedCycles) ? (restarts > 1 ? 10 : 100) : parsedCycles;
-
-      const parsedSeed = cmdOptions.seed !== undefined ? Number.parseInt(cmdOptions.seed, 10) : NaN;
-      const seed = Number.isNaN(parsedSeed) ? 1337 : parsedSeed;
-      const includeCorpus = cmdOptions.corpus !== false;
-      const isJson = Boolean(cmdOptions.json);
-
-      if (restarts > 1) {
-        const campaign = runSelfHealingCampaignSync({
-          restarts,
-          cyclesPerRestart: cycles,
-          baseSeed: seed,
-          includeCorpus,
-        });
-
-        if (isJson) {
-          console.log(JSON.stringify(campaign, null, 2));
-          if (campaign.totalFailures > 0) process.exit(1);
-          return;
-        }
-
-        console.log(`\n=== AICE Autonomous Evolution & Self-Healing Campaign Report ===`);
-        console.log(`Restarts:                  ${campaign.completedRestarts} / ${campaign.totalRestarts}`);
-        console.log(`Total Cycles Executed:     ${campaign.totalCyclesExecuted}`);
-        console.log(`Roundtrip Verifications:   ${campaign.totalRoundtripsVerified}`);
-        console.log(`Idiom Transform Identities:${campaign.totalIdiomIdentitiesVerified}`);
-        console.log(`Runtime Equivalence:       ${campaign.runtimeEquivalenceVerifications}`);
-        console.log(
-          `Self-Repair Rate:          ${(
-            (campaign.totalSelfRepairsSucceeded / (campaign.totalSelfRepairsAttempted || 1)) *
-            100
-          ).toFixed(1)}% (${campaign.totalSelfRepairsSucceeded}/${campaign.totalSelfRepairsAttempted})`,
-        );
-        console.log(`Multi-Iteration Repairs:   ${campaign.multiIterationRepairs}`);
-        console.log(`Average Token Savings:     ${campaign.averageTokenSavingsPct.toFixed(2)}%`);
-        console.log(`Total Failures:            ${campaign.totalFailures}`);
-        console.log(`Duration:                  ${campaign.durationMs}ms`);
-
-        if (campaign.totalFailures > 0) {
-          console.log(`\n❌ Campaign finished with ${campaign.totalFailures} failures.`);
-          process.exit(1);
-        } else {
-          console.log(
-            `\n✔ All ${campaign.totalRestarts} restarts (${campaign.totalCyclesExecuted} cycles) completed with 0 failures across all differential oracle gates.`,
-          );
-        }
-        return;
-      }
-
-      const report = runEvolutionLoopSync({
-        cycles,
-        seed,
-        includeCorpus,
-      });
-
-      if (isJson) {
-        console.log(JSON.stringify(report, null, 2));
-        if (report.failedCycles > 0) process.exit(1);
-        return;
-      }
-
-      console.log(`\n=== AICE Autonomous Evolution & Self-Healing Report ===`);
-      console.log(`Total Cycles:              ${report.totalCycles}`);
-      console.log(
-        `Passed Cycles:             ${report.passedCycles} (${(
-          (report.passedCycles / report.totalCycles) *
-          100
-        ).toFixed(1)}%)`,
-      );
-      console.log(`Failed Cycles:             ${report.failedCycles}`);
-      console.log(`Roundtrip Verifications:   ${report.roundtripVerifications}`);
-      console.log(`Idiom Transform Identities:${report.idiomTransformIdentities}`);
-      console.log(`TypeChecker Soundness:     ${report.typecheckerVerifications}`);
-      console.log(`Runtime Equivalence:       ${report.runtimeEquivalenceVerifications}`);
-      console.log(
-        `Self-Repair Rate:          ${report.selfRepairRatePct.toFixed(1)}% (${
-          report.selfRepairsSucceeded
-        }/${report.selfRepairsAttempted})`,
-      );
-      console.log(`Multi-Iteration Repairs:   ${report.multiIterationRepairs}`);
-      console.log(
-        `Average Token Savings:     ${report.averageTokenSavingsPct.toFixed(2)}%`,
-      );
-      console.log(`Corpus Samples Checked:    ${report.corpusSamplesChecked}`);
-      console.log(`Duration:                  ${report.durationMs}ms`);
-
-      console.log(`\nTarget Language Breakdown:`);
-      for (const [target, count] of Object.entries(report.targetBreakdown)) {
-        if (count > 0) {
-          console.log(`  - ${target.padEnd(12)}: ${count}`);
-        }
-      }
-
-      if (report.failures.length > 0) {
-        console.log(`\n❌ Failures Encountered (${report.failures.length}):`);
-        for (const f of report.failures) {
-          console.log(
-            `  - Cycle ${f.cycle} (seed ${f.seed}, gate: ${f.gate}): ${f.message}`,
-          );
-          if (f.shrunkSource) {
-            console.log(
-              `    Minimal Shrunk Reproducer:\n${f.shrunkSource
-                .split("\n")
-                .map((l) => "      " + l)
-                .join("\n")}`,
-            );
-          }
-        }
-        process.exit(1);
-      } else {
-        console.log(
-          `\n✔ 100% of evolution cycles verified cleanly across all 5 differential oracle gates.`,
-        );
-      }
-    } catch (err: unknown) {
-      console.error(
-        `❌ Evolution loop failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      process.exit(1);
-    }
-  });
-
 program.addHelpText(
   "after",
   `
 ================================================================================
-AICE COMPLETE LIFECYCLE GUIDE: FROM PROJECT ADOPTION TO SUPPRESSION / EJECTION
+AICE ON-THE-FLY AI CONTEXT ENGINE & MULTI-FILE IDIOM CLI WORKFLOW
 ================================================================================
 
-Step 1: Create / Onboard a Project
-  • Twinless On-the-Fly Mode (Zero .aice files on disk; AI reads/writes AICE in RAM):
-      aice shield apply . --twinless
-      aice idioms scan src/
-  • Side-by-Side Mode (In-place .aice siblings next to target files):
-      aice adopt .
-  • Isolated Mode (Source files in src/, native builds in .aice-build/):
-      aice adopt . --isolated
-  • Companion Twin Mode (Zero-touch external target, isolated companion workspace):
-      aice adopt ../my-app-aice --companion /path/to/my-app --idioms
-
-Step 2: Live Development & Bidirectional Sync
-  • Fast incremental watch daemon (< 5ms recompile on .aice change):
-      aice watch .
-  • Bidirectional live sync (recompiles .aice -> target AND syncs target edits -> .aice):
-      aice watch . --bidirectional
-  • Reverse-sync external manual edits from target files back to .aice:
-      aice sync .
-
-Step 3: AI Agent Surgical Workflow (Works Directly on Native .ts/.py or .aice Files)
-  • Outline AST skeleton (85-90% token reduction for discovery):
+Step 1: On-the-Fly AST Discovery & Context Compression (Zero .aice Files on Disk)
+  • Outline AST skeleton (85-90% token reduction for rapid discovery):
       aice outline src/
   • 1-turn bounded context pack (auto-decompiles native files & collapses $idioms):
       aice context src/app.ts -s myFunction
+  • Model Context Protocol stdio server for AI coding agents:
+      aice mcp
+
+Step 2: Surgical In-Place AST Mutation
   • Forgiving surgical in-place AST mutation (accepts AICE, $idioms, or native syntax):
       aice splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
       aice splice --batch edits.json
-  • Zero-token canonical AST code formatting:
-      aice fmt src/
-  • Fast typecheck verification and 1-shot autonomous repair:
-      aice verify src/app.ts.aice
-      aice fix src/app.ts.aice
-  • Symbol-mapped test runner with runtime stack-trace translation:
-      aice test
-  • Model Context Protocol & Language Server stdio daemons:
-      aice mcp
-      aice lsp
+  • Semantic AST diff & unified diff patching:
+      aice diff src/old.ts src/new.ts --ast
+      aice patch src/app.ts changes.patch
 
-Step 4: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
-  • Mine recurring AST idioms across native or .aice files (cached in .aice-cache/idioms.json):
+Step 3: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
+  • Mine recurring AST idioms across native files (cached in .aice-cache/idioms.json):
       aice idioms scan src/
   • Toggle idioms on/off globally for on-the-fly reads:
       aice idioms on
@@ -2879,20 +1940,9 @@ Step 4: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
       aice idioms read '$guard'
   • Smart multi-file idiom refactor (update pattern across all files atomically):
       aice idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
-  • Audit token savings & verify zero BPE token drift:
-      aice tokens . --check-drift
+  • Audit token savings & run benchmarks:
+      aice tokens .
       aice benchmark
-
-Step 5: Clean Project Suppression / Ejection
-  • Twinless Mode:
-      aice shield remove .            # Removes PreToolUse hooks & AGENTS.md rules
-  • Side-by-Side or Isolated Mode:
-      aice eject .                    # Unlocks targets, removes AI shields, preserves .aice
-      aice eject . --remove-aice       # Fully restores native project, deletes all .aice files
-  • Companion Twin Project:
-      aice eject <companionDir>       # Unlocks & unshields target, clears companion workspace
-      aice eject <companionDir> --remove-aice # Removes companion .aice, config, and cache
-      rm -rf <companionDir>          # Companion twin is safe to delete after eject!
 `,
 );
 

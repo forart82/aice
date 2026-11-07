@@ -1,5 +1,0 @@
-# dof.combat.LootRolls.hpp
-
-fn rollQuality(qFloor:int) -> int = 1
-fn rollItemLevel(enemyLevel:int) -> int = 1
-fn rollStatQuality(biasFloor:int) -> int = 1

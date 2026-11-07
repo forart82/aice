@@ -18,10 +18,7 @@ import { decompile } from "../../src/decompiler/index.js";
 import { executeRoundtrip } from "../../src/decompiler/roundtrip.js";
 import { detectTargetFromPath, emitTarget } from "../../src/emitters/index.js";
 import { calculateFileTokenomics, detectLanguageName } from "../../src/tokenomics/index.js";
-import {
-  findIngestableFiles,
-  ingestProjectSideBySide,
-} from "../../src/transpiler/parallel-ingest.js";
+import { generateContext, outlinePath, splice } from "../../src/tools/index.js";
 
 describe("Step 24: C++20 and C# Engine Adoption", () => {
   describe("C++20 Decompiler (CppDecompiler)", () => {
@@ -422,59 +419,118 @@ public class Character
       expect(csTokenomics.aiceCl100k).toBeGreaterThan(0);
       expect(csTokenomics.cl100kSavingsPct).toBeGreaterThan(0);
     });
-  });
 
-  describe("Parallel Adoption (findIngestableFiles & ingestProjectSideBySide)", () => {
-    it("discovers C++ and C# files in directory tree while ignoring .uid metadata", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-adopt-test-"));
+    it("executes End-to-End C++20 On-the-Fly Workflow (outline -> context -> splice dry-run -> splice in-place) with built-in std::cout<->print and custom .aice-idioms.json", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cpp20-e2e-"));
       try {
-        fs.writeFileSync(path.join(tempDir, "Entity.hpp"), "// hpp file\n");
-        fs.writeFileSync(path.join(tempDir, "Entity.cpp"), "// cpp file\n");
-        fs.writeFileSync(path.join(tempDir, "Game.cs"), "// cs file\n");
-        fs.writeFileSync(path.join(tempDir, "Game.cs.uid"), "uid:12345\n"); // Godot metadata
-
-        const files = findIngestableFiles(tempDir);
-        const basenames = files.map((f) => path.basename(f));
-
-        expect(basenames).toContain("Entity.hpp");
-        expect(basenames).toContain("Entity.cpp");
-        expect(basenames).toContain("Game.cs");
-        expect(basenames).not.toContain("Game.cs.uid");
-      } finally {
-        fs.rmSync(tempDir, { recursive: true, force: true });
-      }
-    });
-
-    it("adopts C++ and C# codebases side-by-side with .aice sibling generation", async () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-adopt-run-"));
-      try {
+        const srcDir = path.join(tmpDir, "src");
+        fs.mkdirSync(srcDir, { recursive: true });
         fs.writeFileSync(
-          path.join(tempDir, "QualityTier.hpp"),
-          `#pragma once\nenum class QualityTier { Common, Rare, Legendary };\n`,
-        );
-        fs.writeFileSync(
-          path.join(tempDir, "Sound.cs"),
-          `namespace Audio;\npublic enum SoundKind { Sfx, Music }\n`,
+          path.join(tmpDir, ".aice-idioms.json"),
+          JSON.stringify(
+            {
+              idiomsEnabled: true,
+              idioms: {
+                $big_out: {
+                  name: "$big_out",
+                  kind: "stmt",
+                  params: [{ name: "$0" }],
+                  templateAice: "givemeabigstring.out($0)",
+                  description: "Custom C++ stream wrapper givemeabigstring::out(msg)",
+                },
+              },
+            },
+            null,
+            2,
+          ),
+          "utf-8",
         );
 
-        const summary = await ingestProjectSideBySide({
-          dir: tempDir,
-          concurrency: 2,
-          dryRun: false,
+        const cppFile = path.join(srcDir, "telemetry_report.cpp");
+        fs.writeFileSync(
+          cppFile,
+          `#include <iostream>
+#include <string>
+
+struct TelemetryMetrics {
+    int activeSessions;
+    double latencyMs;
+    std::string recipient;
+};
+
+int calculateLoadScore(int activeSessions, int threshold) {
+    if (activeSessions <= 0) {
+        return 0;
+    }
+    if (activeSessions > threshold) {
+        return activeSessions * 2;
+    }
+    return activeSessions;
+}
+
+void renderDashboardCard(const TelemetryMetrics& m) {
+    std::cout << "[CARD] Sessions=" << m.activeSessions << std::endl;
+    givemeabigstring::out(m.recipient);
+    if (m.latencyMs > 100.0) {
+        std::cout << "[WARN] High latency=" << m.latencyMs << std::endl;
+    }
+}
+`,
+          "utf-8",
+        );
+
+        const outlineRes = (await outlinePath(cppFile, { idioms: true, stats: true })) as any;
+        expect(outlineRes.text).toContain("type TelemetryMetrics:");
+        expect(outlineRes.text).toContain("recipient: str");
+        expect(outlineRes.text).toContain("fn renderDashboardCard(m: TelemetryMetrics) -> void: ...");
+
+        const ctxRes = await generateContext(cppFile, {
+          symbol: "renderDashboardCard",
+          idioms: true,
+          includeCallers: false,
+          projectRoot: tmpDir,
+        });
+        expect(ctxRes.targetContent).toContain('print("[CARD] Sessions=", m.activeSessions)');
+        expect(ctxRes.targetContent).toContain("$big_out(m.recipient)");
+        expect(ctxRes.targetContent).toContain('print("[WARN] High latency=", m.latencyMs)');
+
+        const newAiceSnippet = `fn renderDashboardCard(m: TelemetryMetrics):
+  print("[CARD] Sessions=", m.activeSessions)
+  $big_out(m.recipient)
+  if m.latencyMs > 250.0:
+    print("[CRITICAL] Latency spike=", m.latencyMs)
+  elif m.latencyMs > 100.0:
+    print("[WARN] High latency=", m.latencyMs)`;
+
+        const dryRes = await splice(cppFile, {
+          symbol: "renderDashboardCard",
+          code: newAiceSnippet,
+          idioms: true,
+          dryRun: true,
+          diff: true,
+          projectRoot: tmpDir,
+        });
+        expect(dryRes.modifiedCode).toContain("void renderDashboardCard(const TelemetryMetrics& m)");
+        expect(dryRes.modifiedCode).toContain("givemeabigstring::out(m.recipient);");
+        expect(dryRes.modifiedCode).toContain(
+          'std::cout << "[CRITICAL] Latency spike=" << m.latencyMs << std::endl;',
+        );
+
+        await splice(cppFile, {
+          symbol: "renderDashboardCard",
+          code: newAiceSnippet,
+          idioms: true,
+          projectRoot: tmpDir,
         });
 
-        expect(summary.totalIngested).toBe(2);
-        expect(summary.totalFailed).toBe(0);
-        expect(fs.existsSync(path.join(tempDir, "QualityTier.hpp.aice"))).toBe(true);
-        expect(fs.existsSync(path.join(tempDir, "Sound.cs.aice"))).toBe(true);
-
-        const hppAice = fs.readFileSync(path.join(tempDir, "QualityTier.hpp.aice"), "utf-8");
-        expect(hppAice).toContain("enum QualityTier:");
-
-        const csAice = fs.readFileSync(path.join(tempDir, "Sound.cs.aice"), "utf-8");
-        expect(csAice).toContain("enum SoundKind:");
+        const updatedDisk = fs.readFileSync(cppFile, "utf-8");
+        expect(updatedDisk).toContain("void renderDashboardCard(const TelemetryMetrics& m)");
+        expect(updatedDisk).toContain("givemeabigstring::out(m.recipient);");
+        expect(updatedDisk).toContain(
+          'std::cout << "[CRITICAL] Latency spike=" << m.latencyMs << std::endl;',
+        );
       } finally {
-        fs.rmSync(tempDir, { recursive: true, force: true });
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
   });

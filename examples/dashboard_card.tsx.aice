@@ -1,6 +1,0 @@
-component DashboardCard(title: str, badge: str, description: str):
-  .card-container:
-    .card-header:
-      h2.card-title: title
-      _.card-badge: badge
-    p.card-body: description

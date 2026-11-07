@@ -68,6 +68,70 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-template-dialects-test-"));
+    fs.writeFileSync(
+      path.join(tmpDir, "card.twig"),
+      `{# User Profile Card Template #}
+{% extends "base.twig" %}
+
+{% block content %}
+<div class="user-card" id="user-{{ user.id }}">
+  <div class="card-header">
+    <h2 class="user-name">{{ user.name }}</h2>
+    <span class="user-role">{{ user.role }}</span>
+  </div>
+  <div class="card-body">
+    {% if user.bio %}
+      <p class="user-bio">{{ user.bio }}</p>
+    {% else %}
+      <p class="user-bio empty">No bio provided</p>
+    {% endif %}
+    <ul class="skills-list">
+      {% for skill in user.skills %}
+        <li class="skill-item">{{ skill.name }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+{% endblock %}
+`,
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, "profile.html"),
+      `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Developer Profile</title>
+</head>
+<body>
+  <div class="profile-container" id="profile-root">
+    <header class="profile-header">
+      <h1 class="profile-title">Alex Johnson</h1>
+      <p class="profile-subtitle">Staff Compiler Engineer</p>
+    </header>
+    <main class="profile-content">
+      <section class="bio-section">
+        <h2>About Me</h2>
+        <p>Passionate about homoiconic languages, tokenomics, and bidirectional transpilation.</p>
+      </section>
+      <section class="stats-section">
+        <ul class="stats-list">
+          <li class="stat-item">Commits: 1420</li>
+          <li class="stat-item">Repositories: 38</li>
+          <li class="stat-item">Followers: 950</li>
+        </ul>
+      </section>
+    </main>
+    <footer class="profile-footer">
+      <p>&copy; 2026 AICE Ecosystem</p>
+    </footer>
+  </div>
+</body>
+</html>
+`,
+      "utf-8",
+    );
   });
 
   afterEach(() => {
@@ -300,7 +364,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     });
 
     it("guarantees 100% bidirectional roundtrip convergence on card.twig", () => {
-      const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
+      const cardPath = path.join(tmpDir, "card.twig");
       const originalTwig = fs.readFileSync(cardPath, "utf-8");
 
       // Round 1: Twig -> Decompile -> AICE
@@ -351,7 +415,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 
   describe("3. HTML5 Template Dialect (Standalone Documents & Embedded Layouts)", () => {
     it("decompiles and emits standalone HTML5 documents with <!DOCTYPE html>", () => {
-      const profilePath = path.resolve(__dirname, "../../examples/templates/profile.html");
+      const profilePath = path.join(tmpDir, "profile.html");
       const originalHtml = fs.readFileSync(profilePath, "utf-8");
 
       const decomp = decompile(originalHtml, "html", { filePath: "profile.html" });
@@ -446,7 +510,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     });
 
     it("supports decompileFile asynchronously on template files", async () => {
-      const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
+      const cardPath = path.join(tmpDir, "card.twig");
       const res = await decompileFile(cardPath);
       expect(res.ast.items).toHaveLength(1);
       expect((res.ast.items[0] as ComponentDecl).name).toBe("Card");
@@ -456,7 +520,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 
   describe("5. Polymorphic CLI Integration on Templates", () => {
     it("runs 'aice outline' on card.twig and outputs component declaration with token reduction", () => {
-      const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
+      const cardPath = path.join(tmpDir, "card.twig");
       const res = runCli(["outline", cardPath, "--stats"]);
 
       expect(res.status).toBe(0);
@@ -466,7 +530,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     });
 
     it("runs 'aice outline' on profile.html and outputs component declaration", () => {
-      const profilePath = path.resolve(__dirname, "../../examples/templates/profile.html");
+      const profilePath = path.join(tmpDir, "profile.html");
       const res = runCli(["outline", profilePath, "--stats"]);
 
       expect(res.status).toBe(0);
@@ -475,7 +539,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     });
 
     it("runs 'aice outline --json' on card.twig and yields structured symbol outline", () => {
-      const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
+      const cardPath = path.join(tmpDir, "card.twig");
       const res = runCli(["outline", cardPath, "--json"]);
 
       expect(res.status).toBe(0);
@@ -488,7 +552,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     });
 
     it("runs 'aice context' on card.twig and profile.html and packages into 1-turn context pack", () => {
-      const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
+      const cardPath = path.join(tmpDir, "card.twig");
       const res = runCli(["context", cardPath, "--no-callers"]);
 
       expect(res.status).toBe(0);
@@ -500,7 +564,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(outlineRes.status).toBe(0);
       expect(outlineRes.stdout).toContain("component Card():");
 
-      const profilePath = path.resolve(__dirname, "../../examples/templates/profile.html");
+      const profilePath = path.join(tmpDir, "profile.html");
       const profileRes = runCli(["context", profilePath, "--no-callers"]);
 
       expect(profileRes.status).toBe(0);

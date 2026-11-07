@@ -26,12 +26,13 @@ import {
   saveAstCacheToDisk,
 } from "../../src/cache/index.js";
 import { loadProjectConfig } from "../../src/config/project-config.js";
+import { scanProjectIdioms } from "../../src/idioms/idiom-transform.js";
 import { auditTokenomics } from "../../src/tokenomics/index.js";
-import { ingestProjectSideBySide } from "../../src/transpiler/parallel-ingest.js";
+import { generateContext } from "../../src/tools/context.js";
+import { splice } from "../../src/tools/splice.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
-import { syncProjectFromTargets } from "../../src/watcher/aice-watch.js";
 
-describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => {
+describe("Phase 3: Content-Addressed AST Cache & On-the-Fly Idioms Trial", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -219,10 +220,9 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
     });
   });
 
-  describe("3. Real-World Multi-File Companion Mode Trial", () => {
-    it("executes full companion lifecycle: adoption with idioms, cross-file typechecking, reverse sync, and tokenomics", async () => {
+  describe("3. Real-World Multi-File On-the-Fly Idioms Trial", () => {
+    it("executes full on-the-fly lifecycle: idiom discovery, context compression, splice mutation, and tokenomics", async () => {
       const targetProjectDir = path.join(tmpDir, "target_app");
-      const companionWorkspaceDir = path.join(tmpDir, "companion_app");
       const targetSrc = path.join(targetProjectDir, "src");
 
       fs.mkdirSync(targetSrc, { recursive: true });
@@ -257,85 +257,44 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
       fs.writeFileSync(path.join(targetSrc, "billing.ts"), billingTs, "utf-8");
       fs.writeFileSync(path.join(targetSrc, "shipping.ts"), shippingTs, "utf-8");
 
-      // Step A: Ingest project in companion mode with idioms
-      const adoption = await ingestProjectSideBySide({
-        dir: companionWorkspaceDir,
-        targetProjectDir,
-        companion: true,
-        idioms: true,
-        minIdiomOccurrences: 2,
-        minIdiomSavings: 1,
+      // Step A: Scan project idioms on-the-fly (zero .aice files written to disk)
+      const scanRes = scanProjectIdioms(targetProjectDir, {
+        minOccurrences: 2,
+        minNetTokenSavings: 1,
       });
 
-      expect(adoption.mode).toBe("companion");
-      expect(adoption.totalIngested).toBe(3);
+      expect(scanRes.synthesizedIdioms).toBeGreaterThan(0);
 
       // Target project remains 100% clean of .aice files
       const targetEntries = fs.readdirSync(targetSrc);
       expect(targetEntries.every((e) => !e.endsWith(".aice"))).toBe(true);
 
-      // Companion workspace has aice.config.json and companion src/
-      const configPath = path.join(companionWorkspaceDir, "aice.config.json");
+      const configPath = path.join(targetProjectDir, "aice.config.json");
       expect(fs.existsSync(configPath)).toBe(true);
 
-      const config = loadProjectConfig(companionWorkspaceDir);
-      expect(config.mode).toBe("companion");
-      expect(config.targetProjectDir).toBeDefined();
+      const config = loadProjectConfig(targetProjectDir);
+      expect(config.idioms).toBeDefined();
+      const idiomNames = Object.keys(config.idioms ?? {});
+      expect(idiomNames.length).toBeGreaterThan(0);
 
-      const companionSrc = path.join(companionWorkspaceDir, "src");
-      expect(fs.existsSync(companionSrc)).toBe(true);
+      // Step B: On-the-fly context generation collapses idioms automatically
+      const ctx = await generateContext(path.join(targetSrc, "billing.ts"), {
+        symbol: "validateBilling",
+        projectRoot: targetProjectDir,
+      });
+      expect(ctx.formattedBundle).toContain("$");
 
-      const companionFiles = fs.readdirSync(companionSrc);
-      expect(companionFiles.some((f) => f.includes("auth"))).toBe(true);
-      expect(companionFiles.some((f) => f.includes("billing"))).toBe(true);
-      expect(companionFiles.some((f) => f.includes("shipping"))).toBe(true);
+      // Step C: Splice in-place mutation using AICE + $idiom
+      const firstIdiom = `$${idiomNames[0].replace(/^\$/, "")}`;
+      const spliceRes = await splice(path.join(targetSrc, "billing.ts"), {
+        symbol: "validateBilling",
+        code: `pub fn validateBilling(amount: float) -> float?:\n  ${firstIdiom}(amount)\n  ret amount * 5\n`,
+        projectRoot: targetProjectDir,
+      });
+      expect(spliceRes.modifiedCode).toContain("amount * 5");
 
-      // Step B: Cross-file typechecking on companion workspace
-      // Create a coordinator file in companion workspace importing from auth & billing
-      const authAiceName = companionFiles.find((f) => f.startsWith("auth"))!;
-      const billingAiceName = companionFiles.find((f) => f.startsWith("billing"))!;
-
-      const coordinatorSource = `import { validateAuth } from "./${authAiceName}";
-import { validateBilling } from "./${billingAiceName}";
-
-pub fn runPipeline(input: int) -> int = input * 10;
-`;
-      const coordinatorPath = path.join(companionSrc, "coordinator.aice");
-      fs.writeFileSync(coordinatorPath, coordinatorSource, "utf-8");
-
-      const checker = new TypeChecker();
-      if (config.idioms) {
-        checker.setIdioms(config.idioms);
-      }
-      const coordMod = parseCached(coordinatorSource, coordinatorPath);
-      expect(() => checker.checkModule(coordMod)).not.toThrow();
-
-      // Step C: External target file edit simulation & syncProjectFromTargets
-      const updatedBillingTs = `export function validateBilling(amount: number) {
-  if (amount < 0) {
-    console.error("error: negative value " + amount);
-    return null;
-  }
-  return amount * 3;
-}
-
-export function computeDiscount(amount: number): number {
-  return amount * 0.1;
-}
-`;
-      fs.writeFileSync(path.join(targetSrc, "billing.ts"), updatedBillingTs, "utf-8");
-
-      // Reverse sync from external target project into companion workspace
-      const syncResults = await syncProjectFromTargets(companionWorkspaceDir);
-      expect(syncResults.length).toBeGreaterThan(0);
-
-      // Verify companion billing file received the updated symbol
-      const companionBillingPath = path.join(companionSrc, billingAiceName);
-      const syncedBillingAice = fs.readFileSync(companionBillingPath, "utf-8");
-      expect(syncedBillingAice).toContain("computeDiscount");
-
-      // Step D: Audit Tokenomics
-      const audit = auditTokenomics(companionWorkspaceDir);
+      // Step D: Audit Tokenomics directly on native files + idioms
+      const audit = auditTokenomics(targetProjectDir);
       expect(audit.files.length).toBeGreaterThan(0);
       expect(audit.aggregate.aiceCl100k).toBeGreaterThan(0);
       expect(audit.aggregate.targetCl100k).toBeGreaterThan(0);
