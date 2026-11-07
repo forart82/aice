@@ -652,6 +652,7 @@ export async function generateWorkspaceContext(
             // ignore
           }
         }
+        const fileSlices: string[] = [];
         for (const rawSel of requestedSelectors) {
           let symSel = rawSel;
           const colonIdx = rawSel.indexOf(":");
@@ -664,22 +665,30 @@ export async function generateWorkspaceContext(
           }
           try {
             let sliced = extractSymbolFromAilSource(fileAil, symSel, f)
-              .replace(/^(?:#[^\n]*|module\s+[^\n]+)\n+/g, "")
+              .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
               .trim();
-            if (f.endsWith(".html") || f.endsWith(".twig")) {
+            if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
               const sLines = sliced.split("\n");
-              if (sLines[0]?.trim().startsWith("component ")) {
+              if (
+                sLines[0]?.trim().startsWith("component ") ||
+                sLines[0]?.trim() === "pub class Main:" ||
+                sLines[0]?.trim() === "class Main:"
+              ) {
                 sliced = sLines
                   .slice(1)
                   .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
                   .join("\n")
+                  .replace(/^static\s+fn\b/, "fn")
                   .trim();
               }
             }
-            symbolSlices.push(`### \`${relFile}\` :: \`${symSel}\`\n\`\`\`ail\n${sliced}\n\`\`\``);
+            fileSlices.push(sliced);
           } catch {
             // symbol lives in another file
           }
+        }
+        if (fileSlices.length > 0) {
+          symbolSlices.push(`### \`${relFile}\`\n\`\`\`ail\n${fileSlices.join("\n\n")}\n\`\`\``);
         }
       }
 
@@ -740,11 +749,10 @@ export async function generateWorkspaceContext(
   // Format bundle
   const parts: string[] = [];
   if (requestedSelectors.length > 0) {
-    if (outlines.length > 0) {
-      parts.push("## Outlines:", ...outlines, "");
-    }
     if (symbolSlices.length > 0) {
       parts.push("## Target Symbol Slices:", ...symbolSlices, "");
+    } else if (outlines.length > 0) {
+      parts.push("## Outlines:", ...outlines, "");
     }
     if (activeIdioms && Object.keys(activeIdioms).length > 0) {
       const bundlePreview = [...outlines, ...symbolSlices].join("\n");

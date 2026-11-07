@@ -9,12 +9,12 @@
 | :--- | :---: | :---: | :---: | :---: |
 | **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 126 turns | **40 turns (-68.3%)** | **30 turns (-76.2%)** | **10/10 (100%)** |
 | **Real Agent Tool Calls** (`tool_calls`) | 151 calls | **30 calls (-80.1%)** | **20 calls (-86.8%)** | **10/10 (100%)** |
-| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 225,390 | **78,974 (-65.0%)** | **33,323 (-85.2%)** | **10/10 (100%)** |
-| **Real Agent LLM Output Tokens** (`output_tokens`) | 88,284 | **45,966 (-47.9%)** | **12,316 (-86.0%)** | **10/10 (100%)** |
-| **Real Agent Billable API Tokens** (`input + output`) | 664,281 | **237,578 (-64.2%)** | **143,178 (-78.5%)** | **10/10 (100%)** |
-| **Real Agent Total API Context Tokens** (`input + cache + output`) | 4,410,780 | **1,110,441 (-74.8%)** | **726,291 (-83.5%)** | **10/10 (100%)** |
-| **Real Agent Wall-Clock Duration** | 490.4s | **266.5s** | **172.2s** | **10/10 (100%)** |
-| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,243 | **71,877 (-43.5%)** | **33,982 (-73.3%)** | **10/10 (100%)** |
+| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | 225,390 | **79,268 (-64.8%)** | **33,005 (-85.4%)** | **10/10 (100%)** |
+| **Real Agent LLM Output Tokens** (`output_tokens`) | 88,284 | **46,226 (-47.6%)** | **12,232 (-86.1%)** | **10/10 (100%)** |
+| **Real Agent Billable API Tokens** (`input + output`) | 664,281 | **282,068 (-57.5%)** | **177,113 (-73.3%)** | **10/10 (100%)** |
+| **Real Agent Total API Context Tokens** (`input + cache + output`) | 4,410,780 | **1,110,066 (-74.8%)** | **723,507 (-83.6%)** | **10/10 (100%)** |
+| **Real Agent Wall-Clock Duration** | 490.4s | **274.1s** | **177.4s** | **10/10 (100%)** |
+| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,021 | **71,877 (-43.4%)** | **33,982 (-73.3%)** | **10/10 (100%)** |
 | **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 502 turns | **206 turns (-59.0%)** | **154 turns (-69.3%)** | **10/10 (100%)** |
 
 ## 2. Methodology & How Real Agent Telemetry Is Measured
@@ -41,12 +41,12 @@ After each agent finishes, its ground-truth transcript at `~/.gemini/antigravity
 | **RW-03** | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)**<br/>`php, js, twig, css, html, yaml, json` (7 files) | 11 / **4** (-64%) / **3** (-73%) | 16 / **3** (-81%) / **2** (-88%) | 20,790 / **7,479** (-64.0%) / **3,692** (-82.2%) | 8,144 / **4,212** (-48.3%) / **1,399** (-82.8%) | 358,966 / **111,669** (-68.9%) / **73,297** (-79.6%) | ✅ 100% |
 | **RW-04** | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)**<br/>`ts, tsx, css, html, json, yaml` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 19,550 / **8,217** (-58.0%) / **3,539** (-81.9%) | 7,882 / **4,844** (-38.5%) / **1,317** (-83.3%) | 287,304 / **111,379** (-61.2%) / **72,688** (-74.7%) | ✅ 100% |
 | **RW-05** | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)**<br/>`go, rs, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,754 / **6,444** (-59.1%) / **2,618** (-83.4%) | 6,484 / **3,275** (-49.5%) / **814** (-87.5%) | 211,587 / **104,895** (-50.4%) / **69,875** (-67.0%) | ✅ 100% |
-| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 9 / **4** (-56%) / **3** (-67%) | 12 / **3** (-75%) / **2** (-83%) | 17,658 / **6,825** (-61.4%) / **3,184** (-82.0%) | 6,812 / **3,402** (-50.1%) / **1,078** (-84.2%) | 276,946 / **106,436** (-61.6%) / **71,201** (-74.3%) | ✅ 100% |
-| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,737 / **7,499** (-52.4%) / **2,647** (-83.2%) | 7,078 / **4,241** (-40.1%) / **850** (-88.0%) | 203,470 / **108,559** (-46.6%) / **69,992** (-65.6%) | ✅ 100% |
+| **RW-06** | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)**<br/>`cpp, ts, html, css, json` (5 files) | 9 / **4** (-56%) / **3** (-67%) | 12 / **3** (-75%) / **2** (-83%) | 17,658 / **6,946** (-60.7%) / **2,666** (-84.9%) | 6,812 / **3,424** (-49.7%) / **922** (-86.5%) | 276,946 / **105,049** (-62.1%) / **70,256** (-74.6%) | ✅ 100% |
+| **RW-07** | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)**<br/>`cs, kt, yaml, json` (4 files) | 7 / **4** (-43%) / **3** (-57%) | 10 / **3** (-70%) / **2** (-80%) | 15,737 / **7,252** (-53.9%) / **2,629** (-83.3%) | 7,078 / **4,055** (-42.7%) / **841** (-88.1%) | 203,470 / **106,716** (-47.5%) / **69,969** (-65.6%) | ✅ 100% |
 | **RW-08** | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)**<br/>`py, tsx, twig, css, json, yaml` (6 files) | 14 / **4** (-71%) / **3** (-79%) | 13 / **3** (-77%) / **2** (-85%) | 18,074 / **7,325** (-59.5%) / **3,353** (-81.5%) | 6,978 / **4,054** (-41.9%) / **1,110** (-84.1%) | 404,815 / **110,500** (-72.7%) / **72,396** (-82.1%) | ✅ 100% |
-| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 21,916 / **8,099** (-63.0%) / **3,425** (-84.4%) | 8,839 / **4,827** (-45.4%) / **1,157** (-86.9%) | 303,664 / **113,674** (-62.6%) / **72,635** (-76.1%) | ✅ 100% |
-| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 33 / **4** (-88%) / **3** (-91%) | 32 / **3** (-91%) / **2** (-94%) | 53,049 / **13,807** (-74.0%) / **5,229** (-90.1%) | 20,591 / **10,376** (-49.6%) / **2,820** (-86.3%) | 1,473,502 / **132,425** (-91.0%) / **83,745** (-94.3%) | ✅ 100% |
-| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **126** / **40** (-68.3%) / **30** (-76.2%) | **151** / **30** (-80.1%) / **20** (-86.8%) | **225,390** / **78,974** (-65.0%) / **33,323** (-85.2%) | **88,284** / **45,966** (-47.9%) / **12,316** (-86.0%) | **4,410,780** / **1,110,441** (-74.8%) / **726,291** (-83.5%) | ✅ **30/30** |
+| **RW-09** | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)**<br/>`rs, cpp, py, go, yaml, json` (6 files) | 9 / **4** (-56%) / **3** (-67%) | 13 / **3** (-77%) / **2** (-85%) | 21,916 / **8,062** (-63.2%) / **3,819** (-82.6%) | 8,839 / **4,827** (-45.4%) / **1,520** (-82.8%) | 303,664 / **113,673** (-62.6%) / **73,355** (-75.8%) | ✅ 100% |
+| **RW-10** | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)**<br/>`ts, tsx, js, py, go, rs, cpp, cs, kt, php, css, html, json, yaml, twig` (15 files) | 33 / **4** (-88%) / **3** (-91%) | 32 / **3** (-91%) / **2** (-94%) | 53,049 / **14,264** (-73.1%) / **5,053** (-90.5%) | 20,591 / **10,800** (-47.5%) / **2,538** (-87.7%) | 1,473,502 / **135,281** (-90.8%) / **81,209** (-94.5%) | ✅ 100% |
+| **TOTAL** | **All 10 Scenarios (15/15 Languages)** | **126** / **40** (-68.3%) / **30** (-76.2%) | **151** / **30** (-80.1%) / **20** (-86.8%) | **225,390** / **79,268** (-64.8%) / **33,005** (-85.4%) | **88,284** / **46,226** (-47.6%) / **12,232** (-86.1%) | **4,410,780** / **1,110,066** (-74.8%) / **723,507** (-83.6%) | ✅ **30/30** |
 
 ## 4. Ground-Truth Conversation ID Audit Trail (30 Real Agent Sessions)
 
@@ -70,20 +70,20 @@ Every run below corresponds to a real agent session whose `transcript.jsonl` log
 | **RW-05** | AIL No Idioms | `2af6b269-0ebf-4a1f-b456-f87e46ad1798` | 4 | 3 | 1 755 | 1 414 | 3 275 | **6 444** | 23 333 | 104 895 | 22.8s | ✅ |
 | **RW-05** | AIL With Idioms | `e7de8d00-c748-4e2a-a808-e45d27e36d5a` | 3 | 2 | 883 | 921 | 814 | **2 618** | 12 796 | 69 875 | 17.0s | ✅ |
 | **RW-06** | Without AIL | `34b4c78a-79b3-46c4-aa3e-7c9394bf8423` | 9 | 12 | 6 364 | 4 482 | 6 812 | **17 658** | 44 748 | 276 946 | 38.6s | ✅ |
-| **RW-06** | AIL No Idioms | `c9dd92b6-c4fa-4d92-a068-9c573551cc94` | 4 | 3 | 1 912 | 1 511 | 3 402 | **6 825** | 20 791 | 106 436 | 22.9s | ✅ |
-| **RW-06** | AIL With Idioms | `bc9c83d1-f18b-4baa-b685-d59f4a2b08d2` | 3 | 2 | 1 026 | 1 080 | 1 078 | **3 184** | 14 118 | 71 201 | 15.8s | ✅ |
+| **RW-06** | AIL No Idioms | `8484f233-c814-401a-9ec6-2be4dd9506c3` | 4 | 3 | 1 932 | 1 590 | 3 424 | **6 946** | 39 800 | 105 049 | 23.4s | ✅ |
+| **RW-06** | AIL With Idioms | `e462759b-24c8-4d53-9917-01847a1ea7a1` | 3 | 2 | 982 | 762 | 922 | **2 666** | 29 489 | 70 256 | 15.6s | ✅ |
 | **RW-07** | Without AIL | `8f0f3a56-06ab-475f-be21-00fc91e71bfe` | 7 | 10 | 4 797 | 3 862 | 7 078 | **15 737** | 36 447 | 203 470 | 33.0s | ✅ |
-| **RW-07** | AIL No Idioms | `000cd25f-271d-4e4d-98c8-6921f77bb2b8` | 4 | 3 | 1 820 | 1 438 | 4 241 | **7 499** | 18 845 | 108 559 | 24.1s | ✅ |
-| **RW-07** | AIL With Idioms | `4e45c453-8fae-4668-b7b4-9018fe25a4be` | 3 | 2 | 917 | 880 | 850 | **2 647** | 12 912 | 69 992 | 12.9s | ✅ |
+| **RW-07** | AIL No Idioms | `dd2ca186-f766-440b-8014-a6aa02be0364` | 4 | 3 | 1 781 | 1 416 | 4 055 | **7 252** | 25 151 | 106 716 | 25.6s | ✅ |
+| **RW-07** | AIL With Idioms | `2cf71ba4-45bc-4325-9d5e-c82822f2d789` | 3 | 2 | 908 | 880 | 841 | **2 629** | 12 889 | 69 969 | 16.4s | ✅ |
 | **RW-08** | Without AIL | `ad47e489-e638-4b46-827c-b9bd8a7ce594` | 14 | 13 | 6 766 | 4 330 | 6 978 | **18 074** | 62 704 | 404 815 | 65.2s | ✅ |
 | **RW-08** | AIL No Idioms | `c8871eac-4b62-439a-be74-74c1c647576b` | 4 | 3 | 1 871 | 1 400 | 4 054 | **7 325** | 20 765 | 110 500 | 31.8s | ✅ |
 | **RW-08** | AIL With Idioms | `0e1fb6ca-b84c-4f38-973d-9f89bfefe8bc` | 3 | 2 | 980 | 1 263 | 1 110 | **3 353** | 15 308 | 72 396 | 16.5s | ✅ |
 | **RW-09** | Without AIL | `e1de384d-8ca9-4094-b0aa-267834e98b68` | 9 | 13 | 7 719 | 5 358 | 8 839 | **21 916** | 55 116 | 303 664 | 46.9s | ✅ |
-| **RW-09** | AIL No Idioms | `97c856e2-339b-4faf-8fa0-238eeabac2b9` | 4 | 3 | 1 904 | 1 368 | 4 827 | **8 099** | 23 931 | 113 674 | 27.2s | ✅ |
-| **RW-09** | AIL With Idioms | `04d73011-40b8-438c-bb6c-868f59fbde8d` | 3 | 2 | 950 | 1 318 | 1 157 | **3 425** | 15 547 | 72 635 | 17.2s | ✅ |
+| **RW-09** | AIL No Idioms | `8880fb19-6ff0-45c4-a3f4-7a72d579f8e5` | 4 | 3 | 1 864 | 1 371 | 4 827 | **8 062** | 23 930 | 113 673 | 28.8s | ✅ |
+| **RW-09** | AIL With Idioms | `e5ee8464-5bcc-4463-975d-e140a27fc08d` | 3 | 2 | 959 | 1 340 | 1 520 | **3 819** | 16 266 | 73 355 | 18.1s | ✅ |
 | **RW-10** | Without AIL | `b4bc9f0e-6b96-4721-bfe3-179bd2083520` | 33 | 32 | 20 217 | 12 241 | 20 591 | **53 049** | 154 111 | 1 473 502 | 128.7s | ✅ |
-| **RW-10** | AIL No Idioms | `e88c8fb2-4358-45aa-afb5-ecebe48687f6` | 4 | 3 | 2 049 | 1 382 | 10 376 | **13 807** | 38 562 | 132 425 | 36.0s | ✅ |
-| **RW-10** | AIL With Idioms | `fce8a32f-9c82-49f9-9dc3-fecaa894e4ea` | 3 | 2 | 1 015 | 1 394 | 2 820 | **5 229** | 18 467 | 83 745 | 17.8s | ✅ |
+| **RW-10** | AIL No Idioms | `e95320ce-3016-4ef7-8109-183787368788` | 4 | 3 | 2 057 | 1 407 | 10 800 | **14 264** | 57 738 | 135 281 | 40.1s | ✅ |
+| **RW-10** | AIL With Idioms | `f4c8612d-2d7c-4d39-9243-c49dfa24d2ec` | 3 | 2 | 1 017 | 1 498 | 2 538 | **5 053** | 36 335 | 81 209 | 18.9s | ✅ |
 
 ## 5. Comparison: Real AI Agent Execution vs Deterministic Offline Suite
 
@@ -96,8 +96,8 @@ Why do both the **Real AI Agent Suite** (`docs/BENCHMARKS.md`) and the **Determi
 | **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -44.7% / **-73.5%** | -64.0% / **-82.2%** | -58.2% / **-69.1%** | -63.6% / **-72.7%** |
 | **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -41.5% / **-71.9%** | -58.0% / **-81.9%** | -59.2% / **-69.4%** | -55.6% / **-66.7%** |
 | **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -45.7% / **-74.3%** | -59.1% / **-83.4%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
-| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -45.1% / **-74.1%** | -61.4% / **-82.0%** | -56.4% / **-66.7%** | -55.6% / **-66.7%** |
-| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -52.4% / **-83.2%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
+| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -44.7% / **-73.9%** | -60.7% / **-84.9%** | -56.4% / **-66.7%** | -55.6% / **-66.7%** |
+| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.9% / **-71.3%** | -53.9% / **-83.3%** | -61.1% / **-69.4%** | -42.9% / **-57.1%** |
 | **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -41.4% / **-72.4%** | -59.5% / **-81.5%** | -59.2% / **-69.4%** | -71.4% / **-78.6%** |
-| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.9% / **-73.7%** | -63.0% / **-84.4%** | -57.5% / **-68.1%** | -55.6% / **-66.7%** |
-| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.3% / **-73.6%** | -74.0% / **-90.1%** | -56.5% / **-69.4%** | -87.9% / **-90.9%** |
+| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -43.6% / **-73.5%** | -63.2% / **-82.6%** | -57.5% / **-68.1%** | -55.6% / **-66.7%** |
+| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -44.1% / **-73.5%** | -73.1% / **-90.5%** | -56.5% / **-69.4%** | -87.9% / **-90.9%** |

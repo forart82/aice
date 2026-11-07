@@ -264,4 +264,84 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
     const phpCollapsed = collapseModuleIdioms(phpDecomp.ast, idioms);
     expect(phpCollapsed.collapsedCount).toBe(1);
   });
+
+  it("splices C++ and C# native files and applies updateProjectIdiom without duplicate #pragma once/namespace wrappers or static signature corruption", async () => {
+    const os = await import("node:os");
+    const { parse } = await import("../../src/core/parser.js");
+    const { emitTarget } = await import("../../src/emitters/index.js");
+    const { expandModuleIdioms, updateProjectIdiom } = await import("../../src/idioms/index.js");
+    const { splice } = await import("../../src/tools/splice.js");
+
+    const spec = OFFLINE_BENCHMARKS.find((s) => s.id === "RW-10")!;
+    const cppFile = spec.files.find((f) => f.languageId === "cpp")!;
+    const csFile = spec.files.find((f) => f.languageId === "cs")!;
+    const idioms = {
+      ...buildIdiomRegistryForLanguage("ts").idioms,
+      ...buildIdiomRegistryForLanguage("cpp").idioms,
+      ...buildIdiomRegistryForLanguage("cs").idioms,
+    };
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-cpp-cs-splice-test-"));
+    try {
+      const cppNative = emitTarget(
+        expandModuleIdioms(parse(cppFile.ailWithIdioms, `${cppFile.fileName}.ail`), idioms),
+        "cpp",
+        { watermark: false },
+      );
+      const csNative = emitTarget(
+        expandModuleIdioms(parse(csFile.ailWithIdioms, `${csFile.fileName}.ail`), idioms),
+        "csharp",
+        { watermark: false },
+      );
+      fs.writeFileSync(path.join(tmpDir, cppFile.fileName), cppNative, "utf-8");
+      fs.writeFileSync(path.join(tmpDir, csFile.fileName), csNative, "utf-8");
+      fs.writeFileSync(
+        path.join(tmpDir, "ail.config.json"),
+        JSON.stringify({ version: 2, idioms }, null, 2),
+      );
+
+      await splice(path.join(tmpDir, cppFile.fileName), {
+        symbol: cppFile.targetSymbol,
+        code: cppFile.updatedTargetSymbolAilWithIdioms.replace(
+          /\$[a-z_]+_band_step|\$solve_axis_impulse/g,
+          "$guard_band_step",
+        ),
+        idioms: true,
+      });
+      await splice(path.join(tmpDir, csFile.fileName), {
+        symbol: csFile.targetSymbol,
+        code: csFile.updatedTargetSymbolAilWithIdioms.replace(
+          /\$[a-z_]+_band_step|\$settle_ledger_window/g,
+          "$guard_band_step",
+        ),
+        idioms: true,
+      });
+
+      const upd = await updateProjectIdiom(
+        tmpDir,
+        "$guard_band_step",
+        "if $0 < $1:\n  $0 = $1\nif $0 > $2:\n  $0 = $2\n$0 = $0 + $3 + 1",
+      );
+      expect(upd.modifiedFiles.map((f) => path.basename(f)).sort()).toEqual([
+        csFile.fileName,
+        cppFile.fileName,
+      ]);
+
+      const finalCpp = fs.readFileSync(path.join(tmpDir, cppFile.fileName), "utf-8");
+      expect((finalCpp.match(/#pragma once/g) || []).length).toBe(1);
+      expect(finalCpp).not.toContain("namespace ::");
+      expect((finalCpp.match(/\+\s*\d+\)?\s*\+\s*1\b/g) || []).length).toBeGreaterThanOrEqual(
+        cppFile.refactorSymbols.length * 3,
+      );
+
+      const finalCs = fs.readFileSync(path.join(tmpDir, csFile.fileName), "utf-8");
+      expect(finalCs).not.toMatch(/public\s+static\s+\w+\s+public\s+/);
+      expect((finalCs.match(/\+\s*\d+\)?\s*\+\s*1\b/g) || []).length).toBeGreaterThanOrEqual(
+        csFile.refactorSymbols.length * 3,
+      );
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
 });
+

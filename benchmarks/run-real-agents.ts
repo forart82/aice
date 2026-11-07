@@ -168,23 +168,23 @@ function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: str
   if (mode === "ail_no_idioms") {
     return [
       `Workspace: ${dir}`,
-      `Mode: AIL WITHOUT IDIOMS (Pure AIL CLI Only). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use view_file, grep_search, replace_file_content, or $idioms.`,
+      `Mode: AIL WITHOUT IDIOMS (Pure AIL CLI Only). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, replace_file_content, or $idioms.`,
       taskText,
       `Execute in exact 3 tool-call turns:`,
       `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && ail context . -s "${allRefactorSyms}" --no-idioms`,
-      `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: ail splice --no-idioms --batch '[...]' to apply Target Symbol Updates (1) in pure AIL (expand all $idioms into pure AIL statements/expressions with the refactored pattern from (3); use ${isNewFeature ? '"insertAfter"' : '"symbol"'}) and Delete Obsolete Symbols (2) ({"file":"...","symbol":"...","delete":true}).`,
-      `- Turn 3: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: ail splice --no-idioms --batch '[...]' to apply Multi-File Pattern Refactor (3) across the remaining symbols in pure AIL.`,
+      `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --no-idioms --batch '[...]' to apply Target Symbol Updates (1) in pure AIL (expand all $idioms into pure AIL statements/expressions with the refactored pattern from (3); use ${isNewFeature ? '"insertAfter"' : '"symbol"'}) and Delete Obsolete Symbols (2) ({"file":"...","symbol":"...","delete":true}).`,
+      `- Turn 3: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --no-idioms --batch '[...]' to apply Multi-File Pattern Refactor (3) across the remaining symbols in pure AIL.`,
       `- Turn 4: Reply DONE.`,
     ].join("\n");
   }
 
   return [
     `Workspace: ${dir}`,
-    `Mode: AIL WITH IDIOMS (AIL CLI + Project Idioms). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use view_file, grep_search, or replace_file_content.`,
+    `Mode: AIL WITH IDIOMS (AIL CLI + Project Idioms). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, or replace_file_content.`,
     taskText,
     `Execute in exact 2 tool-call turns:`,
     `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && ail context . -s "${targetSyms}" --idioms`,
-    `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: ail splice --idioms --batch '[...]' (applying Target Symbol Updates (1) using ${isNewFeature ? '"insertAfter"' : '"symbol"'} and $idiom calls, plus Delete Obsolete Symbols (2) with {"file":"...","symbol":"...","delete":true}) && ail idioms update --batch '[{"name":"$...","template":"..."}]' (applying Multi-File Pattern Refactor (3) for each idiom in the workspace).`,
+    `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --idioms --batch '[...]' (applying Target Symbol Updates (1) using ${isNewFeature ? '"insertAfter"' : '"symbol"'} and $idiom calls, plus Delete Obsolete Symbols (2) with {"file":"...","symbol":"...","delete":true}) && ail idioms update --batch '[{"name":"$...","template":"..."}]' (applying Multi-File Pattern Refactor (3) for each idiom in the workspace).`,
     `- Turn 3: Reply DONE.`,
   ].join("\n");
 }
@@ -202,26 +202,40 @@ function verifyWorkspaceOnDisk(
     const content = fs.readFileSync(path.join(dir, f.fileName), "utf-8");
     if (f.obsoleteSymbol) {
       const cleanObs = f.obsoleteSymbol.replace(/^config\./, "").replace(/^[.#]/, "");
-      if (content.includes(cleanObs) && content.includes(cleanObs.replace(/_/g, "-"))) {
+      if (content.includes(cleanObs) || content.includes(cleanObs.replace(/_/g, "-"))) {
         details.push(`${f.fileName}: obsoleteSymbol ${f.obsoleteSymbol} still present`);
       }
     }
+    if (content.includes("namespace ::") || /public\s+static\s+\w+\s+public\s+/.test(content)) {
+      details.push(`${f.fileName}: contains corrupted splice header/namespace`);
+    }
+    const minSymCount = f.refactorSymbols.length;
     if (CODE_LANGS.has(f.languageId)) {
-      if (!content.includes("+ 1")) details.push(`${f.fileName}: missing refactored band step`);
+      const stepPlusOnes = (content.match(/\+\s*\d+\)?\s*\+\s*1\b/g) || []).length;
+      if (stepPlusOnes < minSymCount * 3) {
+        details.push(
+          `${f.fileName}: expected >= ${minSymCount * 3} refactored band steps, got ${stepPlusOnes}`,
+        );
+      }
     } else if (f.languageId === "tsx") {
-      if (!content.includes("kpi-tile-v2")) details.push(`${f.fileName}: missing kpi-tile-v2`);
+      const c = (content.match(/kpi-tile-v2/g) || []).length;
+      if (c < minSymCount) details.push(`${f.fileName}: missing kpi-tile-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "css") {
-      if (!content.includes("12px")) details.push(`${f.fileName}: missing 12px border-radius`);
+      const c = (content.match(/12px/g) || []).length;
+      if (c < minSymCount) details.push(`${f.fileName}: missing 12px border-radius (${c}/${minSymCount})`);
     } else if (f.languageId === "html") {
-      if (!content.includes("metric-row-v2")) details.push(`${f.fileName}: missing metric-row-v2`);
+      const c = (content.match(/metric-row-v2/g) || []).length;
+      if (c < minSymCount) details.push(`${f.fileName}: missing metric-row-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "twig") {
-      if (!content.includes("summary-row-v2"))
-        details.push(`${f.fileName}: missing summary-row-v2`);
+      const c = (content.match(/summary-row-v2/g) || []).length;
+      if (c < minSymCount)
+        details.push(`${f.fileName}: missing summary-row-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "json") {
-      if (!content.includes('"retries": 5') && !content.includes('"retries":5'))
-        details.push(`${f.fileName}: missing retries: 5`);
+      const c = (content.match(/"retries":\s*5/g) || []).length;
+      if (c < minSymCount) details.push(`${f.fileName}: missing retries: 5 (${c}/${minSymCount})`);
     } else if (f.languageId === "yaml") {
-      if (!content.includes("replicas: 4")) details.push(`${f.fileName}: missing replicas: 4`);
+      const c = (content.match(/replicas:\s*4/g) || []).length;
+      if (c < minSymCount) details.push(`${f.fileName}: missing replicas: 4 (${c}/${minSymCount})`);
     }
   }
 

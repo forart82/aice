@@ -21,10 +21,10 @@
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** *(incl. idiom defs)* | 33,034 | 26,816 | **-18.8%** | 19,545 | **-40.8%** | **+22.0%** |
 | **Read (Discovery + Context)** | 14,867 | 9,941 | **-33.1%** | 6,842 | **-54.0%** | **+20.9%** |
-| **Update (Bug Fix / Feature)** | 17,205 | 8,174 | **-52.5%** | 4,911 | **-71.5%** | **+19.0%** |
+| **Update (Bug Fix / Feature)** | 16,989 | 8,174 | **-51.9%** | 4,911 | **-71.1%** | **+19.2%** |
 | **Delete (Obsolete Symbol)** | 2,233 | 162 | **-92.8%** | 162 | **-92.8%** | **+0.0%** |
-| **Refactor (Multi-Site / Multi-File)** | 59,904 | 26,784 | **-55.3%** | 2,522 | **-95.8%** | **+40.5%** |
-| **TOTAL LIFECYCLE** | **127,243** | **71,877** | **-43.5%** | **33,982** | **-73.3%** | **+29.8%** |
+| **Refactor (Multi-Site / Multi-File)** | 59,898 | 26,784 | **-55.3%** | 2,522 | **-95.8%** | **+40.5%** |
+| **TOTAL LIFECYCLE** | **127,021** | **71,877** | **-43.4%** | **33,982** | **-73.3%** | **+29.8%** |
 
 ### Agent Turns Breakdown Across All 10 Real-World Benchmarks
 
@@ -48,12 +48,12 @@
 | `RW-03` | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)** | `window` | `bug_fix` | `.php .js .twig .css .html .yaml .json` | -19.0% / **-39.8%** | -31.6% / **-55.9%** | -55.7% / **-74.2%** | **-92.8%** | -56.4% / **-95.1%** | 12,097 | 6,695 (**-44.7%**) | 3,200 (**-73.5%**) | 55 | 23 (**-58.2%**) | 17 (**-69.1%**) |
 | `RW-04` | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)** | `window` | `new_feature` | `.ts .tsx .css .html .json .yaml` | -19.1% / **-40.7%** | -40.6% / **-60.2%** | -27.5% / **-57.2%** | **-93.7%** | -55.0% / **-95.1%** | 10,303 | 6,023 (**-41.5%**) | 2,895 (**-71.9%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
 | `RW-05` | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)** | `non_window` | `update_feature` | `.go .rs .yaml .json` | -25.4% / **-45.0%** | -38.6% / **-56.6%** | -52.4% / **-72.0%** | **-93.5%** | -55.3% / **-96.0%** | 9,697 | 5,269 (**-45.7%**) | 2,495 (**-74.3%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
-| `RW-06` | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)** | `window` | `bug_fix` | `.cpp .ts .html .css .json` | -18.9% / **-40.5%** | -36.3% / **-56.5%** | -57.7% / **-74.5%** | **-93.3%** | -56.1% / **-95.8%** | 10,193 | 5,596 (**-45.1%**) | 2,638 (**-74.1%**) | 39 | 17 (**-56.4%**) | 13 (**-66.7%**) |
+| `RW-06` | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)** | `window` | `bug_fix` | `.cpp .ts .html .css .json` | -18.9% / **-40.5%** | -36.3% / **-56.5%** | -55.5% / **-73.3%** | **-93.3%** | -56.1% / **-95.8%** | 10,119 | 5,596 (**-44.7%**) | 2,638 (**-73.9%**) | 39 | 17 (**-56.4%**) | 13 (**-66.7%**) |
 | `RW-07` | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)** | `non_window` | `new_feature` | `.cs .kt .yaml .json` | -18.4% / **-40.2%** | -23.5% / **-44.2%** | -27.9% / **-54.3%** | **-94.3%** | -54.3% / **-95.9%** | 8,688 | 5,222 (**-39.9%**) | 2,491 (**-71.3%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
 | `RW-08` | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)** | `window` | `update_feature` | `.py .tsx .twig .css .json .yaml` | -14.6% / **-38.3%** | -32.0% / **-54.9%** | -52.7% / **-72.6%** | **-92.5%** | -53.4% / **-95.2%** | 10,787 | 6,321 (**-41.4%**) | 2,981 (**-72.4%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
-| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -18.3% / **-40.8%** | -34.8% / **-53.3%** | -55.7% / **-72.6%** | **-94.4%** | -55.1% / **-96.0%** | 14,268 | 8,000 (**-43.9%**) | 3,755 (**-73.7%**) | 47 | 20 (**-57.5%**) | 15 (**-68.1%**) |
-| `RW-10` | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)** | `window` | `update_feature` | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | -18.9% / **-39.9%** | -30.8% / **-52.7%** | -56.6% / **-73.7%** | **-94.3%** | -56.1% / **-95.7%** | 32,320 | 18,016 (**-44.3%**) | 8,544 (**-73.6%**) | 108 | 47 (**-56.5%**) | 33 (**-69.4%**) |
-| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | -18.8% / **-40.8%** | -33.1% / **-54.0%** | -52.5% / **-71.5%** | **-92.8%** | -55.3% / **-95.8%** | **127,243** | **71,877 (-43.5%)** | **33,982 (-73.3%)** | **502** | **206 (-59.0%)** | **154 (-69.3%)** |
+| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -18.3% / **-40.8%** | -34.8% / **-53.3%** | -54.1% / **-71.6%** | **-94.4%** | -55.1% / **-96.0%** | 14,194 | 8,000 (**-43.6%**) | 3,755 (**-73.5%**) | 47 | 20 (**-57.5%**) | 15 (**-68.1%**) |
+| `RW-10` | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)** | `window` | `update_feature` | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | -18.9% / **-39.9%** | -30.8% / **-52.7%** | -56.0% / **-73.3%** | **-94.3%** | -56.1% / **-95.7%** | 32,246 | 18,016 (**-44.1%**) | 8,544 (**-73.5%**) | 108 | 47 (**-56.5%**) | 33 (**-69.4%**) |
+| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | -18.8% / **-40.8%** | -33.1% / **-54.0%** | -51.9% / **-71.1%** | **-92.8%** | -55.3% / **-95.8%** | **127,021** | **71,877 (-43.4%)** | **33,982 (-73.3%)** | **502** | **206 (-59.0%)** | **154 (-69.3%)** |
 
 ---
 
@@ -210,7 +210,7 @@
 - **Description**: Hybrid native/web desktop viewport engine fixing a sub-pixel AABB collision tunneling clamp bug in C++20 while updating the TypeScript inspector bridge, HTML HUD overlay, CSS dock panel, and JSON solver settings.
 - **Scenario**: `bug_fix` | **Surface**: `window` | **Files**: 5 (`.cpp`, `.ts`, `.html`, `.css`, `.json`)
 - **Idioms Used**: `$solve_axis_impulse`, `$guard_band_step`, `$html_metric_row`, `$css_card`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **287 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10,193** | AIL Without Idioms = **5,596 (-45.1%)** | AIL With Idioms = **2,638 (-74.1%)**
+- **Lifecycle Tokens**: Without AIL = **10,119** | AIL Without Idioms = **5,596 (-44.7%)** | AIL With Idioms = **2,638 (-73.9%)**
 - **Lifecycle Turns**: Without AIL = **39 turns** | AIL Without Idioms = **17 turns (-56.4%)** | AIL With Idioms = **13 turns (-66.7%)**
 
 #### Operation Breakdown (Tokens & Turns)
@@ -219,10 +219,10 @@
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,567 tok / 5 turns | 2,081 tok / 5 turns | 1,528 tok / 5 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,201 tok / 10 turns | 765 tok / 5 turns | 523 tok / 5 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 1,489 tok / 5 turns | 630 tok / 1 turns | 379 tok / 1 turns | -80.0% / **-80.0%** |
+| **Update (Surgical)** | 1,417 tok / 5 turns | 630 tok / 1 turns | 379 tok / 1 turns | -80.0% / **-80.0%** |
 | **Delete (Surgical)** | 120 tok / 2 turns | 8 tok / 1 turns | 8 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 4,816 tok / 17 turns | 2,112 tok / 5 turns | 200 tok / 1 turns | -70.6% / **-94.1%** |
-| **TOTAL** | **10,193 tok / 39 turns** | **5,596 tok / 17 turns** | **2,638 tok / 13 turns** | **-56.4% / -66.7%** |
+| **Refactor (Pattern)** | 4,814 tok / 17 turns | 2,112 tok / 5 turns | 200 tok / 1 turns | -70.6% / **-94.1%** |
+| **TOTAL** | **10,119 tok / 39 turns** | **5,596 tok / 17 turns** | **2,638 tok / 13 turns** | **-56.4% / -66.7%** |
 
 #### Module File Breakdown
 
@@ -297,7 +297,7 @@
 - **Description**: Ultra-low-latency non-window trading & risk pipeline fixing a self-trade price collar boundary bug across a Rust matching engine, C++20 intraday margin calculator, Python compliance daemon, Go market feed normalizer, YAML venue feeds, and JSON collar bands.
 - **Scenario**: `bug_fix` | **Surface**: `non_window` | **Files**: 6 (`.rs`, `.cpp`, `.py`, `.go`, `.yaml`, `.json`)
 - **Idioms Used**: `$advance_wal_cursor`, `$solve_axis_impulse`, `$enforce_quota_band`, `$bounded_quorum_step`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AIL = **14,268** | AIL Without Idioms = **8,000 (-43.9%)** | AIL With Idioms = **3,755 (-73.7%)**
+- **Lifecycle Tokens**: Without AIL = **14,194** | AIL Without Idioms = **8,000 (-43.6%)** | AIL With Idioms = **3,755 (-73.5%)**
 - **Lifecycle Turns**: Without AIL = **47 turns** | AIL Without Idioms = **20 turns (-57.5%)** | AIL With Idioms = **15 turns (-68.1%)**
 
 #### Operation Breakdown (Tokens & Turns)
@@ -306,10 +306,10 @@
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 3,568 tok / 6 turns | 2,914 tok / 6 turns | 2,114 tok / 6 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,695 tok / 12 turns | 1,106 tok / 6 turns | 792 tok / 6 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 2,074 tok / 6 turns | 918 tok / 1 turns | 569 tok / 1 turns | -83.3% / **-83.3%** |
+| **Update (Surgical)** | 2,002 tok / 6 turns | 918 tok / 1 turns | 569 tok / 1 turns | -83.3% / **-83.3%** |
 | **Delete (Surgical)** | 125 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 6,806 tok / 21 turns | 3,055 tok / 6 turns | 273 tok / 1 turns | -71.4% / **-95.2%** |
-| **TOTAL** | **14,268 tok / 47 turns** | **8,000 tok / 20 turns** | **3,755 tok / 15 turns** | **-57.5% / -68.1%** |
+| **Refactor (Pattern)** | 6,804 tok / 21 turns | 3,055 tok / 6 turns | 273 tok / 1 turns | -71.4% / **-95.2%** |
+| **TOTAL** | **14,194 tok / 47 turns** | **8,000 tok / 20 turns** | **3,755 tok / 15 turns** | **-57.5% / -68.1%** |
 
 #### Module File Breakdown
 
@@ -327,7 +327,7 @@
 - **Description**: Polyglot enterprise control plane integrating all 15 supported languages and file types (.ts, .tsx, .js, .py, .go, .rs, .cpp, .cs, .kt, .php, .css, .html, .json, .yaml, .twig) in a single cohesive multi-service architecture.
 - **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 15 (`.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`, `.php`, `.css`, `.html`, `.json`, `.yaml`, `.twig`)
 - **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$clamp_cart_line`, `$enforce_quota_band`, `$bounded_quorum_step`, `$advance_wal_cursor`, `$solve_axis_impulse`, `$settle_ledger_window`, `$score_risk_signal`, `$round_money_band`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier`, `$twig_summary_line` (Definition Cost Charged on Write from 0: **932 tokens**)
-- **Lifecycle Tokens**: Without AIL = **32,320** | AIL Without Idioms = **18,016 (-44.3%)** | AIL With Idioms = **8,544 (-73.6%)**
+- **Lifecycle Tokens**: Without AIL = **32,246** | AIL Without Idioms = **18,016 (-44.1%)** | AIL With Idioms = **8,544 (-73.5%)**
 - **Lifecycle Turns**: Without AIL = **108 turns** | AIL Without Idioms = **47 turns (-56.5%)** | AIL With Idioms = **33 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
@@ -336,10 +336,10 @@
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 7,842 tok / 15 turns | 6,359 tok / 15 turns | 4,715 tok / 15 turns | 0.0% / 0.0% |
 | **Read (Context)** | 3,864 tok / 30 turns | 2,675 tok / 15 turns | 1,828 tok / 15 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 5,067 tok / 15 turns | 2,200 tok / 1 turns | 1,335 tok / 1 turns | -93.3% / **-93.3%** |
+| **Update (Surgical)** | 4,995 tok / 15 turns | 2,200 tok / 1 turns | 1,335 tok / 1 turns | -93.3% / **-93.3%** |
 | **Delete (Surgical)** | 122 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 15,425 tok / 46 turns | 6,775 tok / 15 turns | 659 tok / 1 turns | -67.4% / **-97.8%** |
-| **TOTAL** | **32,320 tok / 108 turns** | **18,016 tok / 47 turns** | **8,544 tok / 33 turns** | **-56.5% / -69.4%** |
+| **Refactor (Pattern)** | 15,423 tok / 46 turns | 6,775 tok / 15 turns | 659 tok / 1 turns | -67.4% / **-97.8%** |
+| **TOTAL** | **32,246 tok / 108 turns** | **18,016 tok / 47 turns** | **8,544 tok / 33 turns** | **-56.5% / -69.4%** |
 
 #### Module File Breakdown
 

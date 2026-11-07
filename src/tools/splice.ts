@@ -1509,7 +1509,7 @@ function locateBraceLanguageDeclarationSpan(
           line,
         );
       const isClassLine = new RegExp(
-        `^\\s*(?:pub\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|final\\s+|abstract\\s+|open\\s+|data\\s+|sealed\\s+)*(?:class|struct)\\s+([A-Za-z0-9_]+)\\b`,
+        `^\\s*(?:pub\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|static\\s+|partial\\s+|final\\s+|abstract\\s+|open\\s+|data\\s+|sealed\\s+)*(?:class|struct)\\s+([A-Za-z0-9_]+)\\b`,
       ).exec(line);
 
       const m = isRustImpl || isClassLine;
@@ -1603,7 +1603,7 @@ function locateBraceLanguageDeclarationSpan(
 
     if (!className) {
       const clsMatch = line.match(
-        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/,
+        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/,
       );
       if (clsMatch && (clsMatch[2] === memberName || normIdForSpan(clsMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, clsMatch[1], clsMatch[2], undefined, {
@@ -1617,7 +1617,7 @@ function locateBraceLanguageDeclarationSpan(
   if (!className) {
     for (let i = 0; i < lines.length; i++) {
       const clsMatch = lines[i].match(
-        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_]+)\b/,
+        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_]+)\b/,
       );
       if (clsMatch) {
         const candidateCls = clsMatch[1];
@@ -1918,10 +1918,19 @@ function stripTopLevelLanguagePreamble(emitted: string, targetLang: TargetLangua
     const idx = lines.findIndex(
       (l) =>
         l.trim().length > 0 &&
+        !l.trim().startsWith("#pragma once") &&
         !l.trim().startsWith("#include") &&
         !l.trim().startsWith("using namespace"),
     );
-    return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
+    let cppLines = idx >= 0 ? lines.slice(idx) : lines;
+    if (
+      cppLines.length >= 2 &&
+      /^namespace\s+[^\s{]+\s*\{/.test(cppLines[0].trim()) &&
+      /^\}\s*(?:\/\/\s*namespace\b.*)?$/.test(cppLines[cppLines.length - 1].trim())
+    ) {
+      cppLines = stripOneIndentLevel(cppLines.slice(1, cppLines.length - 1), 4);
+    }
+    return cppLines.join("\n").trim();
   }
   if (targetLang === "csharp") {
     const staticModIdx = lines.findIndex((l) => /^public static class\s+/.test(l.trim()));
@@ -2011,7 +2020,7 @@ function emitExpandedDeclForTarget(
 
     const tempMod: Module = {
       kind: "Module",
-      path: filePath,
+      path: path.basename(filePath),
       items: [tempClass],
       span: dummySpan,
     };
@@ -2096,7 +2105,9 @@ function emitExpandedDeclForTarget(
     }
 
     if (targetLang === "csharp") {
-      const clsIdx = lines.findIndex((l) => /^(?:public\s+)?class\s+/.test(l.trim()));
+      const clsIdx = lines.findIndex((l) =>
+        /^(?:public\s+|static\s+|partial\s+|internal\s+|sealed\s+|abstract\s+)*class\s+/.test(l.trim()),
+      );
       if (clsIdx >= 0) {
         let startIdx = clsIdx + 1;
         if (lines[startIdx]?.trim() === "{") startIdx++;
@@ -2164,7 +2175,7 @@ function emitExpandedDeclForTarget(
 
   const tempMod: Module = {
     kind: "Module",
-    path: filePath,
+    path: path.basename(filePath),
     items: [fnNode],
     span: dummySpan,
   };
@@ -2486,7 +2497,7 @@ function tryEmitNonCallableAilSnippet(
       ) {
         const singleMod: Module = {
           kind: "Module",
-          path: filePath,
+          path: path.basename(filePath),
           items: [item],
           span: mod.span,
         };
