@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 Test Runner Engine & CLI Command (Step 11).
+ * Unit tests for AICE 2.0 Test Runner Engine & CLI Command (Step 11).
  */
 
 import { spawnSync } from "node:child_process";
@@ -12,21 +12,21 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  compileAilFile,
-  compileTargetAilIfNeeded,
+  compileAiceFile,
+  compileTargetAiceIfNeeded,
   discoverTestHarness,
   filterTestErrorOutput,
-  findAilFiles,
-  isAilCompilationNeeded,
+  findAiceFiles,
+  isAiceCompilationNeeded,
   parseTestSummary,
   resolveTargetFilePath,
-  runAilTests,
+  runAiceTests,
 } from "../../src/runner/index.js";
 import { isTargetLocked, lockFile } from "../../src/shield/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(
   args: string[],
@@ -44,11 +44,11 @@ function runCli(
   };
 }
 
-describe("AIL 2.0 Test Runner Engine (Step 11)", () => {
+describe("AICE 2.0 Test Runner Engine (Step 11)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-test-runner-unit-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-test-runner-unit-"));
   });
 
   afterEach(() => {
@@ -161,7 +161,7 @@ describe("AIL 2.0 Test Runner Engine (Step 11)", () => {
   describe("Test Output Summary Parsing (parseTestSummary)", () => {
     it("parses vitest success summary format", () => {
       const raw = `
- RUN  v5.0.3 /home/forart/dev/ail
+ RUN  v5.0.3 /home/forart/dev/aice
  ✓ tests/unit/foo.test.ts (14 tests) 258ms
  Test Files  1 passed (1)
       Tests  14 passed (14)
@@ -190,7 +190,7 @@ describe("AIL 2.0 Test Runner Engine (Step 11)", () => {
       const raw = `
 bun test v1.4.2 (744846f84)
 tests/unit/concurrency-pool.test.ts:
-✓ AIL 2.0 Async Concurrency Worker Pool > test [76.79ms]
+✓ AICE 2.0 Async Concurrency Worker Pool > test [76.79ms]
  14 pass
  0 fail
  224 expect() calls
@@ -255,8 +255,8 @@ AssertionError: expected 5 to be 4
   - Expected: 4
   + Received: 5
     at tests/unit/calc.test.ts:15:23
-    at runTest (file:///home/forart/dev/ail/node_modules/vitest/dist/chunks/run.js:12:34)
-    at async file:///home/forart/dev/ail/node_modules/@vitest/runner/dist/index.js:56:78
+    at runTest (file:///home/forart/dev/aice/node_modules/vitest/dist/chunks/run.js:12:34)
+    at async file:///home/forart/dev/aice/node_modules/@vitest/runner/dist/index.js:56:78
     at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
 `;
       const filtered = filterTestErrorOutput(raw);
@@ -271,168 +271,168 @@ AssertionError: expected 5 to be 4
 
   describe("Pre-Test Compilation & Staleness Detection", () => {
     it("derives target file path correctly", () => {
-      expect(resolveTargetFilePath("/path/to/foo.ts.ail")).toBe(
+      expect(resolveTargetFilePath("/path/to/foo.ts.aice")).toBe(
         "/path/to/foo.ts",
       );
-      expect(resolveTargetFilePath("/path/to/bar.test.ail")).toBe(
+      expect(resolveTargetFilePath("/path/to/bar.test.aice")).toBe(
         "/path/to/bar.test.ts",
       );
-      expect(resolveTargetFilePath("/path/to/baz.py.ail")).toBe(
+      expect(resolveTargetFilePath("/path/to/baz.py.aice")).toBe(
         "/path/to/baz.py",
       );
     });
 
     it("detects compilation needed when target does not exist", () => {
-      const ailFile = path.join(tmpDir, "calc.test.ts.ail");
+      const aiceFile = path.join(tmpDir, "calc.test.ts.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn add(a:int, b:int) -> int = a + b\n`,
         "utf-8",
       );
 
-      expect(isAilCompilationNeeded(ailFile)).toBe(true);
+      expect(isAiceCompilationNeeded(aiceFile)).toBe(true);
     });
 
-    it("compiles .ail file and writes target file via safeWriteTargetFile", () => {
-      const ailFile = path.join(tmpDir, "math.ts.ail");
+    it("compiles .aice file and writes target file via safeWriteTargetFile", () => {
+      const aiceFile = path.join(tmpDir, "math.ts.aice");
       const targetFile = path.join(tmpDir, "math.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn multiply(x:int, y:int) -> int = x * y\n`,
         "utf-8",
       );
 
-      const res = compileAilFile(ailFile);
+      const res = compileAiceFile(aiceFile);
       expect(res.compiled).toBe(true);
       expect(res.targetPath).toBe(targetFile);
       expect(fs.existsSync(targetFile)).toBe(true);
       expect(fs.readFileSync(targetFile, "utf-8")).toContain("multiply");
 
-      // Running compileAilFile again should skip compilation because target is up-to-date
-      const secondRun = compileAilFile(ailFile);
+      // Running compileAiceFile again should skip compilation because target is up-to-date
+      const secondRun = compileAiceFile(aiceFile);
       expect(secondRun.compiled).toBe(false);
     });
 
-    it("recompiles target file if .ail source file is updated with newer timestamp", async () => {
-      const ailFile = path.join(tmpDir, "greet.ts.ail");
+    it("recompiles target file if .aice source file is updated with newer timestamp", async () => {
+      const aiceFile = path.join(tmpDir, "greet.ts.aice");
       const targetFile = path.join(tmpDir, "greet.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn greet() -> str = "v1"\n`,
         "utf-8",
       );
-      compileAilFile(ailFile);
+      compileAiceFile(aiceFile);
       expect(fs.readFileSync(targetFile, "utf-8")).toContain('"v1"');
 
-      // Update .ail source with delay to guarantee newer mtime
+      // Update .aice source with delay to guarantee newer mtime
       await new Promise((r) => setTimeout(r, 20));
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn greet() -> str = "v2"\n`,
         "utf-8",
       );
 
-      expect(isAilCompilationNeeded(ailFile)).toBe(true);
-      const res = compileAilFile(ailFile);
+      expect(isAiceCompilationNeeded(aiceFile)).toBe(true);
+      const res = compileAiceFile(aiceFile);
       expect(res.compiled).toBe(true);
       expect(fs.readFileSync(targetFile, "utf-8")).toContain('"v2"');
     });
 
     it("transparently elevates chmod 444 locked targets during pre-test compilation", () => {
-      const ailFile = path.join(tmpDir, "locked.ts.ail");
+      const aiceFile = path.join(tmpDir, "locked.ts.aice");
       const targetFile = path.join(tmpDir, "locked.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn compute() -> int = 10\n`,
         "utf-8",
       );
-      compileAilFile(ailFile);
+      compileAiceFile(aiceFile);
       lockFile(targetFile);
       expect(isTargetLocked(targetFile)).toBe(true);
 
-      // Now update ail source and recompile
+      // Now update aice source and recompile
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn compute() -> int = 20\n`,
         "utf-8",
       );
       const now = new Date(Date.now() + 1000);
-      fs.utimesSync(ailFile, now, now);
+      fs.utimesSync(aiceFile, now, now);
 
-      expect(isAilCompilationNeeded(ailFile)).toBe(true);
-      const res = compileAilFile(ailFile);
+      expect(isAiceCompilationNeeded(aiceFile)).toBe(true);
+      const res = compileAiceFile(aiceFile);
       expect(res.compiled).toBe(true);
       expect(fs.readFileSync(targetFile, "utf-8")).toContain("20");
       // Verify safeWriteTargetFile restored lock
       expect(isTargetLocked(targetFile)).toBe(true);
     });
 
-    it("finds all .ail files in directory tree", () => {
+    it("finds all .aice files in directory tree", () => {
       const subDir = path.join(tmpDir, "sub");
       fs.mkdirSync(subDir);
-      fs.writeFileSync(path.join(tmpDir, "a.ail"), "fn a() -> int = 1\n", "utf-8");
-      fs.writeFileSync(path.join(subDir, "b.ail"), "fn b() -> int = 2\n", "utf-8");
+      fs.writeFileSync(path.join(tmpDir, "a.aice"), "fn a() -> int = 1\n", "utf-8");
+      fs.writeFileSync(path.join(subDir, "b.aice"), "fn b() -> int = 2\n", "utf-8");
       fs.writeFileSync(path.join(subDir, "c.ts"), "export const c = 1;", "utf-8");
 
-      const found = findAilFiles(tmpDir);
+      const found = findAiceFiles(tmpDir);
       expect(found.length).toBe(2);
     });
 
-    it("compileTargetAilIfNeeded compiles all files in directory or specific target", () => {
+    it("compileTargetAiceIfNeeded compiles all files in directory or specific target", () => {
       fs.writeFileSync(
-        path.join(tmpDir, "one.ts.ail"),
+        path.join(tmpDir, "one.ts.aice"),
         "fn one() -> int = 1\n",
         "utf-8",
       );
       fs.writeFileSync(
-        path.join(tmpDir, "two.ts.ail"),
+        path.join(tmpDir, "two.ts.aice"),
         "fn two() -> int = 2\n",
         "utf-8",
       );
 
-      const res = compileTargetAilIfNeeded(undefined, { cwd: tmpDir });
+      const res = compileTargetAiceIfNeeded(undefined, { cwd: tmpDir });
       expect(res.compiledFiles.length).toBe(2);
       expect(fs.existsSync(path.join(tmpDir, "one.ts"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "two.ts"))).toBe(true);
     });
 
-    it("compileTargetAilIfNeeded compiles into .ail-build in isolated mode", () => {
+    it("compileTargetAiceIfNeeded compiles into .aice-build in isolated mode", () => {
       const isolatedDir = path.join(tmpDir, "isolated_project");
       fs.mkdirSync(path.join(isolatedDir, "src"), { recursive: true });
       fs.writeFileSync(
-        path.join(isolatedDir, "ail.config.json"),
+        path.join(isolatedDir, "aice.config.json"),
         JSON.stringify({
           mode: "isolated",
           sourceDir: "src",
-          outDir: ".ail-build",
+          outDir: ".aice-build",
           targetLanguage: "typescript",
           isolated: true,
         }),
         "utf-8",
       );
       fs.writeFileSync(
-        path.join(isolatedDir, "src", "engine.ail"),
+        path.join(isolatedDir, "src", "engine.aice"),
         "fn getStatus() -> str = \"running\"\n",
         "utf-8",
       );
 
-      const res = compileTargetAilIfNeeded(undefined, { cwd: isolatedDir });
+      const res = compileTargetAiceIfNeeded(undefined, { cwd: isolatedDir });
       expect(res.compiledFiles.length).toBe(1);
-      const expectedOut = path.join(isolatedDir, ".ail-build", "engine.ts");
+      const expectedOut = path.join(isolatedDir, ".aice-build", "engine.ts");
       expect(fs.existsSync(expectedOut)).toBe(true);
       expect(fs.existsSync(path.join(isolatedDir, "src", "engine.ts"))).toBe(false);
       expect(fs.readFileSync(expectedOut, "utf-8")).toContain("getStatus");
     });
   });
 
-  describe("runAilTests Execution Engine", () => {
+  describe("runAiceTests Execution Engine", () => {
     it("runs tests on an existing test suite and returns clean result", async () => {
       // Run against existing unit test file
       const target = "tests/unit/concurrency-pool.test.ts";
-      const result = await runAilTests(target, { cwd: process.cwd() });
+      const result = await runAiceTests(target, { cwd: process.cwd() });
 
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(0);
@@ -442,11 +442,11 @@ AssertionError: expected 5 to be 4
       expect(result.output.length).toBeGreaterThan(0);
     }, 20000);
 
-    it("pre-compiles .ail test file and runs test suite on compiled target", async () => {
+    it("pre-compiles .aice test file and runs test suite on compiled target", async () => {
       // Create a test file in tmpDir
-      const ailTestFile = path.join(tmpDir, "sample.test.ts.ail");
+      const aiceTestFile = path.join(tmpDir, "sample.test.ts.aice");
       fs.writeFileSync(
-        ailTestFile,
+        aiceTestFile,
         `fn getAnswer() -> int = 42\n`,
         "utf-8",
       );
@@ -462,7 +462,7 @@ AssertionError: expected 5 to be 4
       );
 
       // Create an actual runnable test in target
-      const compRes = compileTargetAilIfNeeded(ailTestFile, { cwd: tmpDir });
+      const compRes = compileTargetAiceIfNeeded(aiceTestFile, { cwd: tmpDir });
       expect(compRes.compiledFiles.length).toBe(1);
       const compiledTarget = compRes.compiledFiles[0];
       expect(fs.existsSync(compiledTarget)).toBe(true);
@@ -475,7 +475,7 @@ AssertionError: expected 5 to be 4
       );
 
       // Run tests on compiled target with bun harness
-      const result = await runAilTests(compiledTarget, {
+      const result = await runAiceTests(compiledTarget, {
         cwd: tmpDir,
         harness: "bun",
       });
@@ -493,7 +493,7 @@ AssertionError: expected 5 to be 4
         "utf-8",
       );
 
-      const result = await runAilTests(testFile, {
+      const result = await runAiceTests(testFile, {
         cwd: tmpDir,
         harness: "node",
       });
@@ -504,25 +504,25 @@ AssertionError: expected 5 to be 4
       expect(result.output).toContain("intentionally fails");
     });
 
-    it("catches syntactic/semantic AIL compiler errors prior to running tests", async () => {
-      const brokenAil = path.join(tmpDir, "broken.test.ts.ail");
+    it("catches syntactic/semantic AICE compiler errors prior to running tests", async () => {
+      const brokenAice = path.join(tmpDir, "broken.test.ts.aice");
       fs.writeFileSync(
-        brokenAil,
+        brokenAice,
         `fn invalidSyntax( { return ; }\n`,
         "utf-8",
       );
 
-      const result = await runAilTests(brokenAil, { cwd: tmpDir });
+      const result = await runAiceTests(brokenAice, { cwd: tmpDir });
       expect(result.success).toBe(false);
       expect(result.exitCode).toBe(1);
       expect(result.summary.failed).toBe(1);
-      expect(result.output).toContain("❌ AIL Compilation Error");
+      expect(result.output).toContain("❌ AICE Compilation Error");
     });
   });
 
-  describe("CLI Registration & ail test Command Execution", () => {
+  describe("CLI Registration & aice test Command Execution", () => {
     it("exports program with test registered command", async () => {
-      const { program } = await import("../../bin/ail.ts");
+      const { program } = await import("../../bin/aice.ts");
       expect(program).toBeDefined();
 
       const testCmd = program.commands.find((c) => c.name() === "test");
@@ -535,13 +535,13 @@ AssertionError: expected 5 to be 4
       expect(options).toContain("verbose");
     });
 
-    it("executes 'ail test' on a passing test via CLI and exits 0", () => {
+    it("executes 'aice test' on a passing test via CLI and exits 0", () => {
       const res = runCli(["test", "tests/unit/concurrency-pool.test.ts"]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("✔ Tests succeeded: 14/14 passed (0 failed).");
     }, 20000);
 
-    it("executes 'ail test --verbose' and displays detailed runner output", () => {
+    it("executes 'aice test --verbose' and displays detailed runner output", () => {
       const res = runCli([
         "test",
         "--verbose",
@@ -552,7 +552,7 @@ AssertionError: expected 5 to be 4
       expect(res.stdout).toContain("✔ Tests succeeded: 14/14 passed (0 failed).");
     }, 20000);
 
-    it("executes 'ail test --json' and outputs structured machine-readable JSON", () => {
+    it("executes 'aice test --json' and outputs structured machine-readable JSON", () => {
       const res = runCli([
         "test",
         "--json",
@@ -569,7 +569,7 @@ AssertionError: expected 5 to be 4
       expect(parsed.harness).toBe("vitest");
     }, 20000);
 
-    it("executes 'ail test' on a failing test via CLI and exits 1 with filtered error", () => {
+    it("executes 'aice test' on a failing test via CLI and exits 1 with filtered error", () => {
       const failingTest = path.join(tmpDir, "cli_fail.test.mjs");
       fs.writeFileSync(
         failingTest,

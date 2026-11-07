@@ -24,7 +24,7 @@ import {
   getBinaryOpPrecedence,
   isRightAssociative,
   needsBinaryParentheses,
-} from "../../src/decompiler/ail-generator.js";
+} from "../../src/decompiler/aice-generator.js";
 import { CssDecompiler } from "../../src/decompiler/css-decompiler.js";
 import { HtmlDecompiler } from "../../src/decompiler/html-decompiler.js";
 import { decompile } from "../../src/decompiler/index.js";
@@ -32,7 +32,7 @@ import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 describe("TypeScript & TSX Decompiler", () => {
-  it("decompiles TypeScript interfaces into AIL TypeDecl", () => {
+  it("decompiles TypeScript interfaces into AICE TypeDecl", () => {
     const tsCode = `
 export interface UserProfile {
   id: string;
@@ -56,7 +56,7 @@ export interface UserProfile {
     }
   });
 
-  it("decompiles TypeScript tuple types into AIL TupleType", () => {
+  it("decompiles TypeScript tuple types into AICE TupleType", () => {
     const tsCode = `
 export interface Pair {
   coords: [number, number];
@@ -85,8 +85,8 @@ export interface Pair {
     }
 
     const res = decompile(tsCode, "typescript", { filePath: "tuple.ts" });
-    expect(res.ail).toContain("coords:[int, int]");
-    expect(res.ail).toContain("entry:[str, bool]");
+    expect(res.aice).toContain("coords:[int, int]");
+    expect(res.aice).toContain("entry:[str, bool]");
   });
 
   it("extracts JSDoc comments into CstTriviaTable", () => {
@@ -167,13 +167,13 @@ export function bitOps(a: number, b: number) {
     }
 
     const res = decompile(tsCode, "typescript", { filePath: "ops.ts" });
-    expect(res.ail).toContain("a ** b");
-    expect(res.ail).toContain("a & b");
-    expect(res.ail).toContain("a | b");
-    expect(res.ail).toContain("a ^ b");
-    expect(res.ail).toContain("a << b");
-    expect(res.ail).toContain("a >> b");
-    expect(res.ail).toContain("a >>> b");
+    expect(res.aice).toContain("a ** b");
+    expect(res.aice).toContain("a & b");
+    expect(res.aice).toContain("a | b");
+    expect(res.aice).toContain("a ^ b");
+    expect(res.aice).toContain("a << b");
+    expect(res.aice).toContain("a >> b");
+    expect(res.aice).toContain("a >>> b");
   });
 
   describe("Step 9: Binary Expression Precedence & Parenthesization", () => {
@@ -188,11 +188,11 @@ export function math(a: number, b: number, c: number) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "math.ts" });
-      expect(res.ail).toContain("p1 := (a + b) * c");
-      expect(res.ail).toContain("p2 := a * (b + c)");
-      expect(res.ail).toContain("p3 := a - (b - c)");
-      expect(res.ail).toContain("p4 := a - b - c");
-      expect(res.ail).toContain("p5 := a / (b / c)");
+      expect(res.aice).toContain("p1 := (a + b) * c");
+      expect(res.aice).toContain("p2 := a * (b + c)");
+      expect(res.aice).toContain("p3 := a - (b - c)");
+      expect(res.aice).toContain("p4 := a - b - c");
+      expect(res.aice).toContain("p5 := a / (b / c)");
     });
 
     it("preserves exponentiation precedence and right-associativity", () => {
@@ -203,8 +203,8 @@ export function pow(a: number, b: number, c: number) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "pow.ts" });
-      expect(res.ail).toContain("e1 := (a ** b) ** c");
-      expect(res.ail).toContain("e2 := a ** b ** c");
+      expect(res.aice).toContain("e1 := (a ** b) ** c");
+      expect(res.aice).toContain("e2 := a ** b ** c");
     });
 
     it("preserves bitwise and shift precedence", () => {
@@ -219,12 +219,12 @@ export function bitwise(a: number, b: number, c: number) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "bitwise.ts" });
-      expect(res.ail).toContain("b1 := a & b | c");
-      expect(res.ail).toContain("b2 := a & (b | c)");
-      expect(res.ail).toContain("b3 := a + b << c");
-      expect(res.ail).toContain("b4 := a + (b << c)");
-      expect(res.ail).toContain("b5 := (a << b) + c");
-      expect(res.ail).toContain("b6 := a << (b << c)");
+      expect(res.aice).toContain("b1 := a & b | c");
+      expect(res.aice).toContain("b2 := a & (b | c)");
+      expect(res.aice).toContain("b3 := a + b << c");
+      expect(res.aice).toContain("b4 := a + (b << c)");
+      expect(res.aice).toContain("b5 := (a << b) + c");
+      expect(res.aice).toContain("b6 := a << (b << c)");
     });
 
     it("preserves logical precedence when mixing and and or", () => {
@@ -239,12 +239,12 @@ export function logic(a: boolean, b: boolean, c: boolean) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "logic.ts" });
-      expect(res.ail).toContain("l1 := (a or b) and c");
-      expect(res.ail).toContain("l2 := a and (b or c)");
-      expect(res.ail).toContain("l3 := (a and b) or c");
-      expect(res.ail).toContain("l4 := a or (b and c)");
-      expect(res.ail).toContain("l5 := a and b and c");
-      expect(res.ail).toContain("l6 := a or b or c");
+      expect(res.aice).toContain("l1 := (a or b) and c");
+      expect(res.aice).toContain("l2 := a and (b or c)");
+      expect(res.aice).toContain("l3 := (a and b) or c");
+      expect(res.aice).toContain("l4 := a or (b and c)");
+      expect(res.aice).toContain("l5 := a and b and c");
+      expect(res.aice).toContain("l6 := a or b or c");
     });
 
     it("parenthesizes object in MemberAccessExpr and IndexExpr when needed", () => {
@@ -257,10 +257,10 @@ export function access(a: any, b: any, x: any) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "access.ts" });
-      expect(res.ail).toContain("m1 := (a + b).toString()");
-      expect(res.ail).toContain("m2 := (-x).abs()");
-      expect(res.ail).toContain("i1 := (a + b)[0]");
-      expect(res.ail).toContain("i2 := (-x)[0]");
+      expect(res.aice).toContain("m1 := (a + b).toString()");
+      expect(res.aice).toContain("m2 := (-x).abs()");
+      expect(res.aice).toContain("i1 := (a + b)[0]");
+      expect(res.aice).toContain("i2 := (-x)[0]");
     });
 
     it("parenthesizes non-identifier callee in CallExpr", () => {
@@ -271,8 +271,8 @@ export function callFn(a: any, b: any) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "call.ts" });
-      expect(res.ail).toContain("c1 := (fn() = 1)()");
-      expect(res.ail).toContain("c2 := ((a and b) or a)()");
+      expect(res.aice).toContain("c1 := (fn() = 1)()");
+      expect(res.aice).toContain("c2 := ((a and b) or a)()");
     });
 
     it("roundtrips complex mixed expressions with full AST equivalence", () => {
@@ -298,7 +298,7 @@ export function roundtrip(a: number, b: number, c: number, d: number) {
       const decompiler = new TsDecompiler(tsCode, "roundtrip.ts");
       const { ast: originalAst } = decompiler.decompile();
       const res = decompile(tsCode, "typescript", { filePath: "roundtrip.ts" });
-      const parsedAst = parse(res.ail, "roundtrip.ail");
+      const parsedAst = parse(res.aice, "roundtrip.aice");
 
       function simplifyExpr(e: any): any {
         if (!e) return e;
@@ -369,7 +369,7 @@ export function roundtrip(a: number, b: number, c: number, d: number) {
     });
   });
 
-  it("decompiles React TSX components into AIL ComponentDecl", () => {
+  it("decompiles React TSX components into AICE ComponentDecl", () => {
     const tsxCode = `
 export interface CardProps {
   title: string;
@@ -386,13 +386,13 @@ export function Card({ title, badge }: CardProps) {
 }
 `;
     const result = decompile(tsxCode, "tsx", { filePath: "card.tsx" });
-    expect(result.ail).toContain("type CardProps:");
-    expect(result.ail).toContain("component Card(title:str, badge:str):");
-    expect(result.ail).toContain('div(class: "card-container"):');
-    expect(result.ail).toContain('h2(class: "title"): "{title}"');
+    expect(result.aice).toContain("type CardProps:");
+    expect(result.aice).toContain("component Card(title:str, badge:str):");
+    expect(result.aice).toContain('div(class: "card-container"):');
+    expect(result.aice).toContain('h2(class: "title"): "{title}"');
 
-    // Verify generated AIL parses and typechecks
-    const mod = parse(result.ail, "card.tsx.ail");
+    // Verify generated AICE parses and typechecks
+    const mod = parse(result.aice, "card.tsx.aice");
     const tc = new TypeChecker();
     tc.checkModule(mod);
     expect(mod.items).toHaveLength(2);
@@ -405,9 +405,9 @@ export async function fetchData() {
   return result;
 }
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "fetch.ts" });
-    expect(ail).toContain("await fetch(");
-    expect(ail).not.toContain("nil(");
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "fetch.ts" });
+    expect(aice).toContain("await fetch(");
+    expect(aice).not.toContain("nil(");
     const fn = ast.items[0] as FunctionDecl;
     const body = fn.body as Block;
     const letStmt = body.statements[0] as LetBinding;
@@ -424,9 +424,9 @@ export class Derived extends Base {
   }
 }
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "derived.ts" });
-    expect(ail).toContain("super(x)");
-    expect(ail).not.toContain("nil(x)");
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "derived.ts" });
+    expect(aice).toContain("super(x)");
+    expect(aice).not.toContain("nil(x)");
     const cls = ast.items[0] as ClassDecl;
     const ctor = cls.methods.find((m) => m.name === "constructor")!;
     const body = ctor.body as Block;
@@ -447,9 +447,9 @@ export class Derived extends Base {
   }
 }
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "derived.ts" });
-    expect(ail).toContain("super.greet()");
-    expect(ail).not.toContain("nil.greet()");
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "derived.ts" });
+    expect(aice).toContain("super.greet()");
+    expect(aice).not.toContain("nil.greet()");
     const cls = ast.items[0] as ClassDecl;
     const m = cls.methods.find((m) => m.name === "greet")!;
     const callExpr = (
@@ -472,9 +472,9 @@ export class Derived extends Base {
     const tsCode = `
 export const pattern = /regex/g;
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "regex.ts" });
-    expect(ail).toContain('RegExp("regex", "g")');
-    expect(ail).not.toContain("nil");
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "regex.ts" });
+    expect(aice).toContain('RegExp("regex", "g")');
+    expect(aice).not.toContain("nil");
     const c = ast.items[0] as ConstDecl;
     expect(c.value.kind).toBe("CallExpr");
     const call = c.value as CallExpr;
@@ -493,7 +493,7 @@ export const pattern = /regex/g;
       const tsCode = `
 export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "http.ts" });
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "http.ts" });
       expect(ast.items).toHaveLength(1);
       const item = ast.items[0];
       expect(item.kind).toBe("TypeDecl");
@@ -506,15 +506,15 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
           expect(item.aliasType.name).toBe('"GET" | "POST" | "PUT" | "DELETE"');
         }
       }
-      expect(ail).toContain('type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"');
-      expect(ail).not.toContain("enum HttpMethod");
+      expect(aice).toContain('type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"');
+      expect(aice).not.toContain("enum HttpMethod");
     });
 
     it("supports convertStringUnionsToEnum option to emit synthetic enums when requested", () => {
       const tsCode = `
 export type HttpMethod = "GET" | "POST" | "DELETE";
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", {
+      const { ast, aice } = decompile(tsCode, "typescript", {
         filePath: "http.ts",
         convertStringUnionsToEnum: true,
       });
@@ -526,10 +526,10 @@ export type HttpMethod = "GET" | "POST" | "DELETE";
         expect(item.isEnum).toBe(true);
         expect(item.variants?.map((v) => v.name)).toEqual(["GET", "POST", "DELETE"]);
       }
-      expect(ail).toContain("enum HttpMethod:");
-      expect(ail).toContain("GET");
-      expect(ail).toContain("POST");
-      expect(ail).toContain("DELETE");
+      expect(aice).toContain("enum HttpMethod:");
+      expect(aice).toContain("GET");
+      expect(aice).toContain("POST");
+      expect(aice).toContain("DELETE");
     });
 
     it("decompiles numeric and boolean literal unions without converting to enum", () => {
@@ -537,10 +537,10 @@ export type HttpMethod = "GET" | "POST" | "DELETE";
 export type Direction = 1 | -1;
 export type Toggle = true | false;
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "types.ts" });
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "types.ts" });
       expect(ast.items).toHaveLength(2);
-      expect(ail).toContain("type Direction = 1 | -1");
-      expect(ail).toContain("type Toggle = true | false");
+      expect(aice).toContain("type Direction = 1 | -1");
+      expect(aice).toContain("type Toggle = true | false");
     });
 
     it("decompiles literal type annotations on variables and function params", () => {
@@ -550,9 +550,9 @@ export function request(method: "GET" | "POST"): string {
   return method;
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "req.ts" });
-      expect(ail).toContain('defaultMethod: "GET" = "GET"');
-      expect(ail).toContain('method:"GET" | "POST"');
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "req.ts" });
+      expect(aice).toContain('defaultMethod: "GET" = "GET"');
+      expect(aice).toContain('method:"GET" | "POST"');
     });
   });
 
@@ -566,12 +566,12 @@ export function process(arr: number[]) {
   });
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "callback.ts" });
-      expect(ail).not.toContain("fn() = nil");
-      expect(ail).not.toContain("fn(x) = nil");
-      expect(ail).toContain("arr.forEach(fn(x) {");
-      expect(ail).toContain("y := x * 2");
-      expect(ail).toContain("log(y)");
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "callback.ts" });
+      expect(aice).not.toContain("fn() = nil");
+      expect(aice).not.toContain("fn(x) = nil");
+      expect(aice).toContain("arr.forEach(fn(x) {");
+      expect(aice).toContain("y := x * 2");
+      expect(aice).toContain("log(y)");
     });
 
     it("decompiles Promise constructor callback preserving resolve and reject statements", () => {
@@ -583,11 +583,11 @@ export function defer() {
   });
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "promise.ts" });
-      expect(ail).not.toContain("fn() = nil");
-      expect(ail).toContain("Promise(fn(resolve, reject) {");
-      expect(ail).toContain("setup()");
-      expect(ail).toContain("resolve()");
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "promise.ts" });
+      expect(aice).not.toContain("fn() = nil");
+      expect(aice).toContain("Promise(fn(resolve, reject) {");
+      expect(aice).toContain("setup()");
+      expect(aice).toContain("resolve()");
     });
 
     it("formats single-expression and single-return closures cleanly without squashing", () => {
@@ -598,10 +598,10 @@ export function single(arr: number[]) {
   const empty = arr.forEach(() => {});
 }
 `;
-      const { ail } = decompile(tsCode, "typescript", { filePath: "single.ts" });
-      expect(ail).toContain("arr.map(fn(x) = x * 2)");
-      expect(ail).toContain("arr.map(fn(x) = x + 1)");
-      expect(ail).toContain("arr.forEach(fn() = nil)");
+      const { aice } = decompile(tsCode, "typescript", { filePath: "single.ts" });
+      expect(aice).toContain("arr.map(fn(x) = x * 2)");
+      expect(aice).toContain("arr.map(fn(x) = x + 1)");
+      expect(aice).toContain("arr.forEach(fn() = nil)");
     });
 
     it("decompiles function expressions into closures without squashing", () => {
@@ -616,12 +616,12 @@ export function runWithFn() {
   });
 }
 `;
-      const { ail } = decompile(tsCode, "typescript", { filePath: "fnexpr.ts" });
-      expect(ail).not.toContain("fn() = nil");
-      expect(ail).toContain("callHandler(fn(err, data) {");
-      expect(ail).toContain("if err:");
-      expect(ail).toContain("log(err)");
-      expect(ail).toContain("process(data)");
+      const { aice } = decompile(tsCode, "typescript", { filePath: "fnexpr.ts" });
+      expect(aice).not.toContain("fn() = nil");
+      expect(aice).toContain("callHandler(fn(err, data) {");
+      expect(aice).toContain("if err:");
+      expect(aice).toContain("log(err)");
+      expect(aice).toContain("process(data)");
     });
   });
 });
@@ -657,10 +657,10 @@ describe("CSS Decompiler", () => {
 });
 
 describe("HTML5 Decompiler", () => {
-  it("decompiles HTML markup into AIL Component layout", () => {
+  it("decompiles HTML markup into AICE Component layout", () => {
     const htmlCode = `
 <div class="hero-section" id="hero">
-  <h1>Welcome to AIL</h1>
+  <h1>Welcome to AICE</h1>
   <p>Universal Token-Dense Language</p>
 </div>
 `;
@@ -677,7 +677,7 @@ describe("HTML5 Decompiler", () => {
       expect(rootDiv.attributes).toHaveLength(2);
       expect(rootDiv.children).toHaveLength(2);
       expect(rootDiv.children[0].tag).toBe("h1");
-      expect(rootDiv.children[0].textLiteral).toBe("Welcome to AIL");
+      expect(rootDiv.children[0].textLiteral).toBe("Welcome to AICE");
     }
   });
 });
@@ -692,10 +692,10 @@ export function loop() {
 }
 `;
     const res = decompile(tsCode, "typescript", { filePath: "loop.ts" });
-    expect(res.ail).toContain("i ::= 0");
-    expect(res.ail).toContain("while i < 10:");
-    expect(res.ail).toContain("i = i + 1");
-    expect(res.ail).toContain("console.log(i)");
+    expect(res.aice).toContain("i ::= 0");
+    expect(res.aice).toContain("while i < 10:");
+    expect(res.aice).toContain("i = i + 1");
+    expect(res.aice).toContain("console.log(i)");
   });
 
   it("decompiles switch statements lowered to match statements", () => {
@@ -715,13 +715,13 @@ export function testSwitch(x: number) {
 }
 `;
     const res = decompile(tsCode, "typescript", { filePath: "switch.ts" });
-    expect(res.ail).toContain("match x:");
-    expect(res.ail).toContain("case 1 =>");
-    expect(res.ail).toContain('console.log("one")');
-    expect(res.ail).toContain("case 2 =>");
-    expect(res.ail).toContain('console.log("two")');
-    expect(res.ail).toContain("case _ =>");
-    expect(res.ail).toContain('console.log("other")');
+    expect(res.aice).toContain("match x:");
+    expect(res.aice).toContain("case 1 =>");
+    expect(res.aice).toContain('console.log("one")');
+    expect(res.aice).toContain("case 2 =>");
+    expect(res.aice).toContain('console.log("two")');
+    expect(res.aice).toContain("case _ =>");
+    expect(res.aice).toContain('console.log("other")');
   });
 
   it("decompiles try/catch/finally and throw statements", () => {
@@ -737,12 +737,12 @@ export function testTry() {
 }
 `;
     const res = decompile(tsCode, "typescript", { filePath: "try.ts" });
-    expect(res.ail).toContain("try:");
-    expect(res.ail).toContain('throw Error("failed")');
-    expect(res.ail).toContain("catch err:");
-    expect(res.ail).toContain("console.error(err)");
-    expect(res.ail).toContain("finally:");
-    expect(res.ail).toContain("cleanup()");
+    expect(res.aice).toContain("try:");
+    expect(res.aice).toContain('throw Error("failed")');
+    expect(res.aice).toContain("catch err:");
+    expect(res.aice).toContain("console.error(err)");
+    expect(res.aice).toContain("finally:");
+    expect(res.aice).toContain("cleanup()");
   });
 
   it("decompiles break and continue statements", () => {
@@ -758,8 +758,8 @@ export function testBreakContinue() {
 }
 `;
     const res = decompile(tsCode, "typescript", { filePath: "brk.ts" });
-    expect(res.ail).toContain("continue");
-    expect(res.ail).toContain("break");
+    expect(res.aice).toContain("continue");
+    expect(res.aice).toContain("break");
   });
 
   it("decompiles barrel re-exports", () => {
@@ -803,18 +803,18 @@ export class MyClass {
     expect(cls.staticBlocks[0].statements).toHaveLength(1);
   });
 
-  it("decompiles TypeScript async function to AIL async fn", () => {
+  it("decompiles TypeScript async function to AICE async fn", () => {
     const tsCode = `
 export async function fetchData(url: string): Promise<string> {
   return "data";
 }
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "async.ts" });
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "async.ts" });
     const fn = ast.items.find((item: any) => item.kind === "FunctionDecl") as any;
     expect(fn).toBeDefined();
     expect(fn.name).toBe("fetchData");
     expect(fn.isAsync).toBe(true);
-    expect(ail).toContain("async fn fetchData");
+    expect(aice).toContain("async fn fetchData");
   });
 
   it("Step 17: decompiles TypeScript functions with optional parameters", () => {
@@ -823,7 +823,7 @@ export function formatUser(name: string, age?: number, role?: string): string {
   return name;
 }
 `;
-    const { ast, ail } = decompile(tsCode, "typescript", { filePath: "opt.ts" });
+    const { ast, aice } = decompile(tsCode, "typescript", { filePath: "opt.ts" });
     const fn = ast.items.find((item: any) => item.kind === "FunctionDecl") as any;
     expect(fn).toBeDefined();
     expect(fn.name).toBe("formatUser");
@@ -834,7 +834,7 @@ export function formatUser(name: string, age?: number, role?: string): string {
     expect(fn.params[1].isOptional).toBe(true);
     expect(fn.params[2].name).toBe("role");
     expect(fn.params[2].isOptional).toBe(true);
-    expect(ail).toContain("formatUser(name:str, age?:int, role?:str)");
+    expect(aice).toContain("formatUser(name:str, age?:int, role?:str)");
   });
 
   describe("Step 19: Decompiler Truthiness Adaptation (Zero-Implicit-Coercion)", () => {
@@ -847,9 +847,9 @@ export function processItems(arr: number[]): number {
   return 0;
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "length.ts" });
-      expect(ail).toContain("if arr.length != 0:");
-      expect(ail).not.toContain("if arr.length:");
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "length.ts" });
+      expect(aice).toContain("if arr.length != 0:");
+      expect(aice).not.toContain("if arr.length:");
       const fn = ast.items.find((item: any) => item.kind === "FunctionDecl") as any;
       expect(fn).toBeDefined();
       const ifStmt = fn.body.statements[0];
@@ -868,8 +868,8 @@ export function checkFlag(flags: number): boolean {
   return false;
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "flags.ts" });
-      expect(ail).toContain("if (flags & 1) != 0:");
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "flags.ts" });
+      expect(aice).toContain("if (flags & 1) != 0:");
       const fn = ast.items.find((item: any) => item.kind === "FunctionDecl") as any;
       expect(fn).toBeDefined();
       const ifStmt = fn.body.statements[0];
@@ -890,9 +890,9 @@ export function checkValues(count: number, name: string): void {
   }
 }
 `;
-      const { ail } = decompile(tsCode, "typescript", { filePath: "values.ts" });
-      expect(ail).toContain("if count != 0:");
-      expect(ail).toContain('if name != "":');
+      const { aice } = decompile(tsCode, "typescript", { filePath: "values.ts" });
+      expect(aice).toContain("if count != 0:");
+      expect(aice).toContain('if name != "":');
     });
 
     it("decompiles while loop and ternary non-boolean conditions with truthiness adaptation", () => {
@@ -904,18 +904,18 @@ export function loopAndTernary(arr: number[], flags: number): number {
   return flags & 1 ? 42 : 0;
 }
 `;
-      const { ail } = decompile(tsCode, "typescript", { filePath: "loop.ts" });
-      expect(ail).toContain("while arr.length != 0:");
-      expect(ail).toContain("(flags & 1) != 0");
+      const { aice } = decompile(tsCode, "typescript", { filePath: "loop.ts" });
+      expect(aice).toContain("while arr.length != 0:");
+      expect(aice).toContain("(flags & 1) != 0");
     });
 
-    it("decompiles TypeScript template expressions to TemplateLiteralExpr and generates clean AIL", () => {
+    it("decompiles TypeScript template expressions to TemplateLiteralExpr and generates clean AICE", () => {
       const tsCode = `
 export function greet(name: string, count: number): string {
   return \`Hello \${name}, you have \${count + 1} items!\`;
 }
 `;
-      const { ast, ail } = decompile(tsCode, "typescript", { filePath: "greet.ts" });
+      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "greet.ts" });
       const fn = ast.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
       const expr = (
@@ -924,17 +924,17 @@ export function greet(name: string, count: number): string {
       expect(expr.kind).toBe("TemplateLiteralExpr");
       expect(expr.quasis).toEqual(["Hello ", ", you have ", " items!"]);
       expect(expr.expressions).toHaveLength(2);
-      expect(ail).toContain("`Hello ${name}, you have ${count + 1} items!`");
+      expect(aice).toContain("`Hello ${name}, you have ${count + 1} items!`");
     });
 
-    it("decompiles multiline template literals to multiline raw strings in AIL", () => {
+    it("decompiles multiline template literals to multiline raw strings in AICE", () => {
       const tsCode = `
 export const query = \`SELECT *
 FROM users
 WHERE active = true\`;
 `;
-      const { ail } = decompile(tsCode, "typescript", { filePath: "query.ts" });
-      expect(ail).toContain('"""\nSELECT *\nFROM users\nWHERE active = true\n"""');
+      const { aice } = decompile(tsCode, "typescript", { filePath: "query.ts" });
+      expect(aice).toContain('"""\nSELECT *\nFROM users\nWHERE active = true\n"""');
     });
   });
 });

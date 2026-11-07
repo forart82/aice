@@ -4,11 +4,11 @@
  *
  * Comprehensive Unit Test Suite for Fast Incremental Watch in Companion Mode (Step 3.1).
  * Verifies:
- * 1. Companion watch daemon initialization with companion `ail.config.json`.
+ * 1. Companion watch daemon initialization with companion `aice.config.json`.
  * 2. `compileFile` / `recompileSingleFile` emitting from companion directory into external target project.
  * 3. File creation / update triggers target file emission in target project with < 5ms latency.
  * 4. File deletion in companion directory removes corresponding emitted file in target project.
- * 5. CLI output for `ail watch` in companion mode (status header, target locking defaults, --lock flag).
+ * 5. CLI output for `aice watch` in companion mode (status header, target locking defaults, --lock flag).
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
@@ -18,20 +18,20 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   loadProjectConfig,
   resolveTargetOutputPathForConfig,
 } from "../../src/config/index.js";
 import { isTargetLocked } from "../../src/shield/index.js";
 import {
-  AilWatcher,
+  AiceWatcher,
   recompileSingleFile,
   watchProject,
 } from "../../src/watcher/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 async function waitFor(
   predicate: () => boolean,
@@ -67,19 +67,19 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
   let baseTmpDir: string;
   let targetDir: string;
   let companionDir: string;
-  let activeWatcher: AilWatcher | null = null;
+  let activeWatcher: AiceWatcher | null = null;
   let spawnedChildren: ChildProcess[] = [];
 
   beforeEach(() => {
-    baseTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-comp-watch-"));
+    baseTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-comp-watch-"));
     targetDir = path.join(baseTmpDir, "target_project");
     companionDir = path.join(baseTmpDir, "companion_workspace");
 
     fs.mkdirSync(path.join(targetDir, "src"), { recursive: true });
     fs.mkdirSync(path.join(companionDir, "src"), { recursive: true });
 
-    // Companion ail.config.json
-    const companionConfig: AilProjectConfig = {
+    // Companion aice.config.json
+    const companionConfig: AiceProjectConfig = {
       mode: "companion",
       sourceDir: "src",
       targetProjectDir: "../target_project",
@@ -89,7 +89,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
       watermark: false,
     };
     fs.writeFileSync(
-      path.join(companionDir, "ail.config.json"),
+      path.join(companionDir, "aice.config.json"),
       JSON.stringify(companionConfig, null, 2),
       "utf-8",
     );
@@ -127,8 +127,8 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
   });
 
   describe("Companion Watch Daemon Initialization", () => {
-    it("initializes AilWatcher in companion mode with default non-intrusive target locking (lockTargets: false)", () => {
-      const watcher = new AilWatcher({ dir: companionDir });
+    it("initializes AiceWatcher in companion mode with default non-intrusive target locking (lockTargets: false)", () => {
+      const watcher = new AiceWatcher({ dir: companionDir });
       expect(watcher.config.mode).toBe("companion");
       expect(watcher.lockTargets).toBe(false);
       expect(watcher.isWatching()).toBe(false);
@@ -141,13 +141,13 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
     });
 
     it("respects explicit lockTargets: true in companion mode when requested", () => {
-      const watcher = new AilWatcher({ dir: companionDir, lockTargets: true });
+      const watcher = new AiceWatcher({ dir: companionDir, lockTargets: true });
       expect(watcher.config.mode).toBe("companion");
       expect(watcher.lockTargets).toBe(true);
     });
 
     it("does not ignore companion src/ directory even when outDir contains src", () => {
-      const watcher = new AilWatcher({ dir: companionDir });
+      const watcher = new AiceWatcher({ dir: companionDir });
       const ignorePatterns = (watcher as unknown as { ignorePatterns: string[] }).ignorePatterns;
       expect(ignorePatterns).not.toContain("src");
       expect(ignorePatterns).not.toContain("../target_project/src");
@@ -157,22 +157,22 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
   describe("Target Path Mapping & Single-File Compilation", () => {
     it("correctly resolves target output path from companion workspace to external target project", () => {
       const config = loadProjectConfig(companionDir);
-      const ailFile = path.join(companionDir, "src", "engine.ail");
-      const resolved = resolveTargetOutputPathForConfig(ailFile, config, companionDir);
+      const aiceFile = path.join(companionDir, "src", "engine.aice");
+      const resolved = resolveTargetOutputPathForConfig(aiceFile, config, companionDir);
       const expected = path.join(targetDir, "src", "engine.ts");
       expect(path.resolve(resolved)).toBe(path.resolve(expected));
     });
 
-    it("compiles .ail in companion workspace to external target project with unlocked permissions by default", async () => {
-      const ailFile = path.join(companionDir, "src", "math.ail");
+    it("compiles .aice in companion workspace to external target project with unlocked permissions by default", async () => {
+      const aiceFile = path.join(companionDir, "src", "math.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn add(a: int, b: int) -> int:\n  ret a + b\n`,
         "utf-8",
       );
 
-      const watcher = new AilWatcher({ dir: companionDir });
-      const result = await watcher.compileFile(ailFile);
+      const watcher = new AiceWatcher({ dir: companionDir });
+      const result = await watcher.compileFile(aiceFile);
 
       expect(result.success).toBe(true);
       expect(result.durationMs).toBeGreaterThanOrEqual(0);
@@ -196,18 +196,18 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
     it("recompiles single file via recompileSingleFile in companion mode with sub-5ms latency", async () => {
       const nestedDir = path.join(companionDir, "src", "core");
       fs.mkdirSync(nestedDir, { recursive: true });
-      const ailFile = path.join(nestedDir, "calculator.ail");
+      const aiceFile = path.join(nestedDir, "calculator.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn multiply(x: int, y: int) -> int:\n  ret x * y\n`,
         "utf-8",
       );
 
       // Warm-up compile
-      await recompileSingleFile(ailFile, { projectRoot: companionDir });
+      await recompileSingleFile(aiceFile, { projectRoot: companionDir });
 
       // Timed single file incremental recompilation
-      const result = await recompileSingleFile(ailFile, { projectRoot: companionDir });
+      const result = await recompileSingleFile(aiceFile, { projectRoot: companionDir });
       expect(result.success).toBe(true);
       expect(result.targetFile).toBe(path.join(targetDir, "src", "core", "calculator.ts"));
       expect(fs.existsSync(result.targetFile)).toBe(true);
@@ -218,14 +218,14 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
     });
 
     it("locks target file when lockTargets: true is explicitly requested in companion recompileSingleFile", async () => {
-      const ailFile = path.join(companionDir, "src", "secure.ail");
+      const aiceFile = path.join(companionDir, "src", "secure.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn secret() -> str:\n  ret "token"\n`,
         "utf-8",
       );
 
-      const result = await recompileSingleFile(ailFile, {
+      const result = await recompileSingleFile(aiceFile, {
         projectRoot: companionDir,
         lockTargets: true,
       });
@@ -237,10 +237,10 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
 
   describe("Watch Daemon Incremental Compilation & File Creation", () => {
     it("automatically detects file modification and emits updated target in target project with sub-5ms latency", async () => {
-      const ailFile = path.join(companionDir, "src", "state.ail");
+      const aiceFile = path.join(companionDir, "src", "state.aice");
       const targetFile = path.join(targetDir, "src", "state.ts");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getCount() -> int:\n  ret 1\n`,
         "utf-8",
       );
@@ -250,7 +250,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
       });
 
       // Initial compile
-      await activeWatcher.compileFile(ailFile);
+      await activeWatcher.compileFile(aiceFile);
       expect(fs.existsSync(targetFile)).toBe(true);
       expect(fs.readFileSync(targetFile, "utf-8")).toContain("return 1;");
 
@@ -258,7 +258,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
 
       // Modify companion file
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getCount() -> int:\n  ret 42\n`,
         "utf-8",
       );
@@ -275,18 +275,18 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
       expect(isTargetLocked(targetFile)).toBe(false);
     });
 
-    it("automatically compiles newly created .ail file in companion workspace to target project", async () => {
+    it("automatically compiles newly created .aice file in companion workspace to target project", async () => {
       activeWatcher = await watchProject(companionDir, {
         debounceMs: 15,
       });
 
       await new Promise((r) => setTimeout(r, 40));
 
-      const newAil = path.join(companionDir, "src", "greet.ail");
+      const newAice = path.join(companionDir, "src", "greet.aice");
       const expectedTarget = path.join(targetDir, "src", "greet.ts");
 
       fs.writeFileSync(
-        newAil,
+        newAice,
         `fn greet(name: str) -> str:\n  ret "Hello, " + name\n`,
         "utf-8",
       );
@@ -299,51 +299,51 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
   });
 
   describe("File Deletion in Companion Workspace", () => {
-    it("removes corresponding target file in target project when companion .ail file is deleted", async () => {
-      const ailFile = path.join(companionDir, "src", "obsolete.ail");
+    it("removes corresponding target file in target project when companion .aice file is deleted", async () => {
+      const aiceFile = path.join(companionDir, "src", "obsolete.aice");
       const targetFile = path.join(targetDir, "src", "obsolete.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn obsolete() -> void:\n  ret\n`,
         "utf-8",
       );
 
-      let notifiedDeletedAil = "";
+      let notifiedDeletedAice = "";
       let notifiedDeletedTarget = "";
 
       activeWatcher = await watchProject(companionDir, {
         debounceMs: 15,
-        onFileDeleted: (ail, target) => {
-          notifiedDeletedAil = ail;
+        onFileDeleted: (aice, target) => {
+          notifiedDeletedAice = aice;
           notifiedDeletedTarget = target;
         },
       });
 
       // Pre-compile target file so it exists before deletion
-      await activeWatcher.compileFile(ailFile);
+      await activeWatcher.compileFile(aiceFile);
       expect(fs.existsSync(targetFile)).toBe(true);
 
       await new Promise((r) => setTimeout(r, 40));
 
       // Delete companion file
-      fs.unlinkSync(ailFile);
+      fs.unlinkSync(aiceFile);
 
       // Wait for deletion notification and target file removal
-      await waitFor(() => notifiedDeletedAil !== "");
-      expect(notifiedDeletedAil).toBe(path.resolve(ailFile));
+      await waitFor(() => notifiedDeletedAice !== "");
+      expect(notifiedDeletedAice).toBe(path.resolve(aiceFile));
       expect(notifiedDeletedTarget).toBe(path.resolve(targetFile));
 
       // Crucial: target file must have been removed from external target project!
       expect(fs.existsSync(targetFile)).toBe(false);
     });
 
-    it("unlinks target file even if previously locked (chmod 444) when companion .ail is deleted", async () => {
-      const ailFile = path.join(companionDir, "src", "locked_obsolete.ail");
+    it("unlinks target file even if previously locked (chmod 444) when companion .aice is deleted", async () => {
+      const aiceFile = path.join(companionDir, "src", "locked_obsolete.aice");
       const targetFile = path.join(targetDir, "src", "locked_obsolete.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn secret() -> void:\n  ret\n`,
         "utf-8",
       );
@@ -352,27 +352,27 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
       activeWatcher = await watchProject(companionDir, {
         debounceMs: 15,
         lockTargets: true,
-        onFileDeleted: (_ail, target) => {
+        onFileDeleted: (_aice, target) => {
           deletedTarget = target;
         },
       });
 
       // Pre-compile target file so it exists and is locked
-      await activeWatcher.compileFile(ailFile);
+      await activeWatcher.compileFile(aiceFile);
       expect(fs.existsSync(targetFile)).toBe(true);
       expect(isTargetLocked(targetFile)).toBe(true);
 
       await new Promise((r) => setTimeout(r, 40));
 
       // Delete companion file
-      fs.unlinkSync(ailFile);
+      fs.unlinkSync(aiceFile);
 
       await waitFor(() => deletedTarget !== "");
       expect(fs.existsSync(targetFile)).toBe(false);
     });
   });
 
-  describe("CLI ail watch in Companion Mode", () => {
+  describe("CLI aice watch in Companion Mode", () => {
     it("displays clear companion status header and disabled lock default when executed inside companion workspace", async () => {
       let output = "";
       const child = spawn("bun", [cliPath, "watch"], {
@@ -411,7 +411,7 @@ describe("Step 3.1: Fast Incremental Watch in Companion Mode", () => {
       expect(output).toContain("Target locking: disabled");
     });
 
-    it("displays Target locking: enabled when --lock is passed to companion ail watch", async () => {
+    it("displays Target locking: enabled when --lock is passed to companion aice watch", async () => {
       let output = "";
       const child = spawn("bun", [cliPath, "watch", "--lock"], {
         cwd: companionDir,

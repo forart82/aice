@@ -24,13 +24,13 @@ import {
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { attemptSelfRepair } from "../typechecker/diagnostics.js";
-import { formatAilSource } from "../tools/fmt.js";
+import { formatAiceSource } from "../tools/fmt.js";
 import { generateOutline } from "../tools/outline.js";
-import { AilAnalyzer } from "../lsp/analyzer.js";
+import { AiceAnalyzer } from "../lsp/analyzer.js";
 import {
   FUZZ_TARGET_LANGUAGES,
-  generateFuzzAilProgram,
-  generateHallucinatedAilProgram,
+  generateFuzzAiceProgram,
+  generateHallucinatedAiceProgram,
 } from "./ast-fuzzer.js";
 
 export type EvolutionGateName =
@@ -62,7 +62,7 @@ export interface EvolutionCycleMetrics {
   gate4SelfRepairPassed: boolean;
   gate5TokenomicsPassed: boolean;
   gate6RuntimePassed: boolean;
-  ailTokens: number;
+  aiceTokens: number;
   targetTokens: number;
   tokenSavingsPct: number;
   idiomsMined: number;
@@ -93,7 +93,7 @@ export interface EvolutionLoopReport {
   multiIterationRepairs: number;
   runtimeEquivalenceVerifications: number;
   averageTokenSavingsPct: number;
-  aggregateAilTokens: number;
+  aggregateAiceTokens: number;
   aggregateTargetTokens: number;
   targetBreakdown: Record<TargetLanguage, number>;
   corpusSamplesChecked: number;
@@ -146,20 +146,20 @@ export const RAW_TARGET_EXTENSIONS = [
 
 /**
  * Delta-debugging test-case minimizer (binary chunk reduction + greedy line pruning).
- * Shrinks any failing .ail source code down to the minimal reproducible snippet.
+ * Shrinks any failing .aice source code down to the minimal reproducible snippet.
  */
-export function shrinkFailingAilSource(
-  ailSource: string,
+export function shrinkFailingAiceSource(
+  aiceSource: string,
   predicate: (candidate: string) => boolean,
 ): string {
   try {
-    if (!predicate(ailSource)) return ailSource;
+    if (!predicate(aiceSource)) return aiceSource;
   } catch {
-    return ailSource;
+    return aiceSource;
   }
 
-  let lines = ailSource.split(/\r?\n/);
-  if (lines.length <= 1) return ailSource;
+  let lines = aiceSource.split(/\r?\n/);
+  if (lines.length <= 1) return aiceSource;
 
   // 1. Binary chunk removal (delta-debugging)
   let chunkSize = Math.max(1, Math.floor(lines.length / 2));
@@ -238,7 +238,7 @@ function scanDir(dir: string): string[] {
         }
       } else if (ent.isFile()) {
         if (
-          ent.name.endsWith(".ail") ||
+          ent.name.endsWith(".aice") ||
           RAW_TARGET_EXTENSIONS.some((ext) => ent.name.endsWith(ext))
         ) {
           results.push(full);
@@ -252,7 +252,7 @@ function scanDir(dir: string): string[] {
 }
 
 /**
- * Recursively scans directory for .ail and raw target corpus sample files.
+ * Recursively scans directory for .aice and raw target corpus sample files.
  */
 export function findCorpusFiles(dir: string): string[] {
   const scanned = scanDir(dir);
@@ -274,7 +274,7 @@ export function runEvolutionCycle(
   options: EvolutionLoopOptions = {},
   corpusFiles: string[] = [],
 ): EvolutionCycleResult {
-  const p = generateFuzzAilProgram(seed);
+  const p = generateFuzzAiceProgram(seed);
   const failures: EvolutionCycleFailure[] = [];
 
   let gate1Passed = false;
@@ -284,7 +284,7 @@ export function runEvolutionCycle(
   let gate5Passed = false;
   let gate6Passed = false;
 
-  let ailTokens = 0;
+  let aiceTokens = 0;
   let targetTokens = 0;
   let tokenSavingsPct = 0;
   let idiomsMined = 0;
@@ -295,10 +295,10 @@ export function runEvolutionCycle(
   let mod: Module | undefined;
   let expanded: Module | undefined;
   try {
-    mod = parse(p.ailSource, p.name);
+    mod = parse(p.aiceSource, p.name);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    const shrunk = shrinkFailingAilSource(p.ailSource, (cand) => {
+    const shrunk = shrinkFailingAiceSource(p.aiceSource, (cand) => {
       try {
         parse(cand, p.name);
         return false;
@@ -311,7 +311,7 @@ export function runEvolutionCycle(
       seed,
       gate: "typecheck",
       message: `Failed to parse generated fuzz program: ${msg}`,
-      originalSource: p.ailSource,
+      originalSource: p.aiceSource,
       shrunkSource: shrunk,
       target: p.target,
     });
@@ -338,7 +338,7 @@ export function runEvolutionCycle(
       gate1Passed = true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      const shrunk = shrinkFailingAilSource(p.ailSource, (cand) => {
+      const shrunk = shrinkFailingAiceSource(p.aiceSource, (cand) => {
         try {
           const m = parse(cand, p.name);
           const t1 = emitTarget(m, p.target, { watermark: false });
@@ -356,7 +356,7 @@ export function runEvolutionCycle(
         seed,
         gate: "roundtrip",
         message: `Gate 1 Convergence failed: ${msg}`,
-        originalSource: p.ailSource,
+        originalSource: p.aiceSource,
         shrunkSource: shrunk,
         target: p.target,
       });
@@ -368,16 +368,16 @@ export function runEvolutionCycle(
       corpusFileUsed = cFile;
       try {
         const cSrc = fs.readFileSync(cFile, "utf-8");
-        if (cFile.endsWith(".ail")) {
+        if (cFile.endsWith(".aice")) {
           const cMod = parse(cSrc, cFile);
-          const cTarget = detectTargetFromPath(cFile.replace(/\.ail$/, ""));
+          const cTarget = detectTargetFromPath(cFile.replace(/\.aice$/, ""));
           const cEmit1 = emitTarget(cMod, cTarget, { watermark: false });
           const cDec1 = decompile(cEmit1, cTarget);
           const cEmit2 = emitTarget(cDec1.ast, cTarget, { watermark: false, trivia: cDec1.trivia });
           const cDec2 = decompile(cEmit2, cTarget);
           const cEmit3 = emitTarget(cDec2.ast, cTarget, { watermark: false, trivia: cDec2.trivia });
           if (cEmit2.trim() !== cEmit3.trim()) {
-            throw new Error(`Corpus .ail convergence drift on ${cFile}`);
+            throw new Error(`Corpus .aice convergence drift on ${cFile}`);
           }
         } else {
           const cTarget = detectTargetFromPath(cFile);
@@ -407,7 +407,7 @@ export function runEvolutionCycle(
     // -------------------------------------------------------------
     try {
       const mined = mineProjectIdioms(
-        [{ filePath: p.name, source: p.ailSource, ast: mod }],
+        [{ filePath: p.name, source: p.aiceSource, ast: mod }],
         { minOccurrences: 2, minNetTokenSavings: 1 },
       );
       idiomsMined = Object.keys(mined.idioms).length;
@@ -423,7 +423,7 @@ export function runEvolutionCycle(
       gate2Passed = true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      const shrunk = shrinkFailingAilSource(p.ailSource, (cand) => {
+      const shrunk = shrinkFailingAiceSource(p.aiceSource, (cand) => {
         try {
           const m = parse(cand, p.name);
           const mined = mineProjectIdioms(
@@ -445,7 +445,7 @@ export function runEvolutionCycle(
         seed,
         gate: "idiom",
         message: `Gate 2 Idiom identity failed: ${msg}`,
-        originalSource: p.ailSource,
+        originalSource: p.aiceSource,
         shrunkSource: shrunk,
         target: p.target,
       });
@@ -460,7 +460,7 @@ export function runEvolutionCycle(
       gate3Passed = true;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      const shrunk = shrinkFailingAilSource(p.ailSource, (cand) => {
+      const shrunk = shrinkFailingAiceSource(p.aiceSource, (cand) => {
         try {
           const m = parse(cand, p.name);
           const tc = new TypeChecker();
@@ -475,7 +475,7 @@ export function runEvolutionCycle(
         seed,
         gate: "typecheck",
         message: `Gate 3 Typechecker soundness failed: ${msg}`,
-        originalSource: p.ailSource,
+        originalSource: p.aiceSource,
         shrunkSource: shrunk,
         target: p.target,
       });
@@ -485,12 +485,12 @@ export function runEvolutionCycle(
     // Gate 5: Tokenomics Audit (cl100k_base compression)
     // -------------------------------------------------------------
     try {
-      ailTokens = estimateTokens(p.ailSource, "cl100k_base");
+      aiceTokens = estimateTokens(p.aiceSource, "cl100k_base");
       const targetCode = emittedT1 || emitTarget(mod, p.target, { watermark: false });
       targetTokens = estimateTokens(targetCode, "cl100k_base");
       tokenSavingsPct =
         targetTokens > 0
-          ? ((targetTokens - ailTokens) / targetTokens) * 100
+          ? ((targetTokens - aiceTokens) / targetTokens) * 100
           : 0;
       gate5Passed = true;
     } catch (err: unknown) {
@@ -500,7 +500,7 @@ export function runEvolutionCycle(
         seed,
         gate: "tokenomics",
         message: `Gate 5 Tokenomics estimation failed: ${msg}`,
-        originalSource: p.ailSource,
+        originalSource: p.aiceSource,
         target: p.target,
       });
     }
@@ -510,14 +510,14 @@ export function runEvolutionCycle(
     // -------------------------------------------------------------
     try {
       // 1. Multi-File Toolchain Verification
-      const f1 = formatAilSource(p.ailSource);
-      const f2 = formatAilSource(f1);
+      const f1 = formatAiceSource(p.aiceSource);
+      const f2 = formatAiceSource(f1);
       if (f1 !== f2) {
-        throw new Error("formatAilSource idempotence failed");
+        throw new Error("formatAiceSource idempotence failed");
       }
       generateOutline(mod);
-      const analyzer = new AilAnalyzer();
-      analyzer.setDocument(p.name, p.ailSource);
+      const analyzer = new AiceAnalyzer();
+      analyzer.setDocument(p.name, p.aiceSource);
       analyzer.getDocumentSymbols(p.name);
       analyzer.formatDocument(p.name);
 
@@ -569,7 +569,7 @@ export function runEvolutionCycle(
         seed,
         gate: "runtime",
         message: `Gate 6 Runtime Equivalence failed: ${msg}`,
-        originalSource: p.ailSource,
+        originalSource: p.aiceSource,
         target: p.target,
       });
     }
@@ -578,15 +578,15 @@ export function runEvolutionCycle(
   // -------------------------------------------------------------
   // Gate 4: Self-Repair Loop (autonomous healing of broken AST)
   // -------------------------------------------------------------
-  const broken = generateHallucinatedAilProgram(seed);
+  const broken = generateHallucinatedAiceProgram(seed);
   try {
-    const rep = attemptSelfRepair(broken.brokenAilSource);
+    const rep = attemptSelfRepair(broken.brokenAiceSource);
     if (rep.fixed) {
       gate4Passed = true;
       repairedFault = broken.faultKind;
       repairIterations = rep.iterations;
     } else {
-      const shrunk = shrinkFailingAilSource(broken.brokenAilSource, (cand) => {
+      const shrunk = shrinkFailingAiceSource(broken.brokenAiceSource, (cand) => {
         const r = attemptSelfRepair(cand);
         return !r.fixed;
       });
@@ -595,7 +595,7 @@ export function runEvolutionCycle(
         seed,
         gate: "self-repair",
         message: `Gate 4 Self-repair failed for fault kind: ${broken.faultKind}`,
-        originalSource: broken.brokenAilSource,
+        originalSource: broken.brokenAiceSource,
         shrunkSource: shrunk,
         faultKind: broken.faultKind,
         target: p.target,
@@ -608,7 +608,7 @@ export function runEvolutionCycle(
       seed,
       gate: "self-repair",
       message: `Gate 4 Self-repair threw exception: ${msg}`,
-      originalSource: broken.brokenAilSource,
+      originalSource: broken.brokenAiceSource,
       faultKind: broken.faultKind,
       target: p.target,
     });
@@ -624,7 +624,7 @@ export function runEvolutionCycle(
     gate4SelfRepairPassed: gate4Passed,
     gate5TokenomicsPassed: gate5Passed,
     gate6RuntimePassed: gate6Passed,
-    ailTokens,
+    aiceTokens,
     targetTokens,
     tokenSavingsPct,
     idiomsMined,
@@ -677,7 +677,7 @@ export function runEvolutionLoopSync(
   let selfRepairsSucceeded = 0;
   let multiIterationRepairs = 0;
   let runtimeEquivalenceVerifications = 0;
-  let aggregateAilTokens = 0;
+  let aggregateAiceTokens = 0;
   let aggregateTargetTokens = 0;
   let corpusSamplesChecked = 0;
   const allFailures: EvolutionCycleFailure[] = [];
@@ -705,7 +705,7 @@ export function runEvolutionLoopSync(
     }
     if (metrics.corpusFile && metrics.gate1RoundtripPassed) corpusSamplesChecked++;
 
-    aggregateAilTokens += metrics.ailTokens;
+    aggregateAiceTokens += metrics.aiceTokens;
     aggregateTargetTokens += metrics.targetTokens;
 
     if (failures.length === 0) {
@@ -728,7 +728,7 @@ export function runEvolutionLoopSync(
       : 0;
   const averageTokenSavingsPct =
     aggregateTargetTokens > 0
-      ? ((aggregateTargetTokens - aggregateAilTokens) / aggregateTargetTokens) * 100
+      ? ((aggregateTargetTokens - aggregateAiceTokens) / aggregateTargetTokens) * 100
       : 0;
 
   return {
@@ -744,7 +744,7 @@ export function runEvolutionLoopSync(
     multiIterationRepairs,
     runtimeEquivalenceVerifications,
     averageTokenSavingsPct,
-    aggregateAilTokens,
+    aggregateAiceTokens,
     aggregateTargetTokens,
     targetBreakdown,
     corpusSamplesChecked,
@@ -782,7 +782,7 @@ export function runSelfHealingCampaignSync(
   let multiIterationRepairs = 0;
   let totalRuntimeEquivalenceVerifications = 0;
   let totalFailures = 0;
-  let aggregateAil = 0;
+  let aggregateAice = 0;
   let aggregateTarget = 0;
 
   for (let r = 0; r < totalRestarts; r++) {
@@ -803,7 +803,7 @@ export function runSelfHealingCampaignSync(
     multiIterationRepairs += report.multiIterationRepairs;
     totalRuntimeEquivalenceVerifications += report.runtimeEquivalenceVerifications;
     totalFailures += report.failedCycles;
-    aggregateAil += report.aggregateAilTokens;
+    aggregateAice += report.aggregateAiceTokens;
     aggregateTarget += report.aggregateTargetTokens;
 
     options.onRestart?.(r, report);
@@ -812,7 +812,7 @@ export function runSelfHealingCampaignSync(
   const durationMs = Date.now() - startTime;
   const averageTokenSavingsPct =
     aggregateTarget > 0
-      ? ((aggregateTarget - aggregateAil) / aggregateTarget) * 100
+      ? ((aggregateTarget - aggregateAice) / aggregateTarget) * 100
       : 0;
 
   return {

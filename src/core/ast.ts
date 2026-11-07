@@ -1,6 +1,6 @@
 /**
- * Universal Abstract Syntax Tree (AST) definitions for AIL 2.0.
- * Conforms to the formal EBNF grammar in docs/AIL_SPEC.md.
+ * Universal Abstract Syntax Tree (AST) definitions for AICE 2.0.
+ * Conforms to the formal EBNF grammar in docs/AICE_SPEC.md.
  */
 
 import type { Span } from "./span.js";

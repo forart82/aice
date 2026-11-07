@@ -2,18 +2,18 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Kotlin 1.9 / 2.x Decompiler & Parser for AIL 2.0.
+ * Idiomatic Kotlin 1.9 / 2.x Decompiler & Parser for AICE 2.0.
  * Dedicated zero-dependency streaming lexer (KotlinLexer) and recursive-descent/Pratt
  * parser (KotlinDecompiler):
  *   - Parses `package` and `import` declarations
  *   - Parses `data class`, standard classes, interfaces, `enum class`, and `object`
  *   - Parses primary and secondary constructors
  *   - Parses `fun` and `suspend fun` functions with parameter types, default values, and return types
- *   - Parses `when` expressions into AIL `MatchExpr` / `MatchStmt`
+ *   - Parses `when` expressions into AICE `MatchExpr` / `MatchStmt`
  *   - Parses expressions (binary, unary, call, member access, elvis `?:`, safe call `?.`, string templates)
  *   - Parses control flow (`if / else`, `while`, `for`, `try / catch / finally`, `return`, `throw`)
  *   - Extracts KDoc docstrings and comments into `CstTriviaTable`
- *   - Lowers into canonical AIL AST `Module`
+ *   - Lowers into canonical AICE AST `Module`
  *   - Exports `decompileKotlin(source: string, filePath?: string): DecompileResult`
  */
 
@@ -62,7 +62,7 @@ import type {
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 import type { MatchExpr } from "./php-decompiler.js";
 
 export type { MatchExpr };
@@ -791,7 +791,7 @@ export class KotlinDecompiler {
       this.filePath
         .split(/[/\\]/)
         .pop()
-        ?.replace(/\.(kt|kts|ail)$/i, "") || "main";
+        ?.replace(/\.(kt|kts|aice)$/i, "") || "main";
 
     const ast: Module = {
       kind: "Module",
@@ -1174,7 +1174,7 @@ export class KotlinDecompiler {
     const endTok = this.tokens[this.cur - 1] ?? startTok;
     const span = this.makeSpan(startOffset, endTok.endOffset);
 
-    // If it's a data class with NO methods and NO extra properties, lower to TypeDecl for maximum AIL portability
+    // If it's a data class with NO methods and NO extra properties, lower to TypeDecl for maximum AICE portability
     if (isData && methods.length === 0 && properties.length === 0) {
       return {
         kind: "TypeDecl",
@@ -2477,14 +2477,14 @@ export class KotlinDecompiler {
 export function decompileKotlin(
   source: string,
   filePath = "source.kt",
-  options: AilGeneratorOptions = {},
-): { ast: Module; ail: string; trivia: CstTriviaTable } {
+  options: AiceGeneratorOptions = {},
+): { ast: Module; aice: string; trivia: CstTriviaTable } {
   const decompiler = new KotlinDecompiler(source, filePath);
   const { ast, trivia } = decompiler.decompile();
   trivia.setOriginalSource(source);
 
-  const generator = new AilGenerator({ ...options, trivia });
-  const ail = generator.generate(ast);
+  const generator = new AiceGenerator({ ...options, trivia });
+  const aice = generator.generate(ast);
 
-  return { ast, ail, trivia };
+  return { ast, aice, trivia };
 }

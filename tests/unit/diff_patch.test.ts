@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 Semantic AST Diff & Patch Engine (Step 22).
+ * Unit tests for AICE 2.0 Semantic AST Diff & Patch Engine (Step 22).
  */
 
 import { spawnSync } from "node:child_process";
@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { program } from "../../bin/ail.js";
+import { program } from "../../bin/aice.js";
 import { parse } from "../../src/core/parser.js";
 import {
   applyPatch,
@@ -21,7 +21,7 @@ import {
   type SemanticDiffResult,
 } from "../../src/tools/diff-patch.js";
 
-describe("AIL 2.0 Semantic AST Diff & Patch Engine (Step 22)", () => {
+describe("AICE 2.0 Semantic AST Diff & Patch Engine (Step 22)", () => {
   describe("computeSemanticDiff: AST Structural Difference Detection", () => {
     it("detects added, removed, and modified functions and class methods", () => {
       const oldSource = `
@@ -114,10 +114,10 @@ class GameEngine:
       const oldSource = "fn foo() -> int:\n  return 1\n";
       const newSource = "fn foo() -> int:\n  return 2\n";
 
-      const result = computeSemanticDiff(oldSource, newSource, { oldPath: "test.ail" });
+      const result = computeSemanticDiff(oldSource, newSource, { oldPath: "test.aice" });
 
-      expect(result.unifiedDiff).toContain("--- a/test.ail");
-      expect(result.unifiedDiff).toContain("+++ b/test.ail");
+      expect(result.unifiedDiff).toContain("--- a/test.aice");
+      expect(result.unifiedDiff).toContain("+++ b/test.aice");
       expect(result.unifiedDiff).toContain("-  return 1");
       expect(result.unifiedDiff).toContain("+  return 2");
     });
@@ -127,13 +127,13 @@ class GameEngine:
       const newSource = "fn bar():\n  pass\n";
 
       const result = computeSemanticDiff(oldSource, newSource, {
-        oldPath: "old.ail",
-        newPath: "new.ail",
+        oldPath: "old.aice",
+        newPath: "new.aice",
       });
 
       expect(result.json).toBeDefined();
-      expect(result.json.oldPath).toBe("old.ail");
-      expect(result.json.newPath).toBe("new.ail");
+      expect(result.json.oldPath).toBe("old.aice");
+      expect(result.json.newPath).toBe("new.aice");
       expect(result.json.hasChanges).toBe(true);
       expect(Array.isArray(result.json.changes)).toBe(true);
     });
@@ -159,8 +159,8 @@ fn other():
 `.trim();
 
       const patch = `
---- a/math.ail
-+++ b/math.ail
+--- a/math.aice
++++ b/math.aice
 @@ -1,3 +1,3 @@
  fn calculate(a: int) -> int:
 -  return a * 2
@@ -187,8 +187,8 @@ fn calculate(a: int) -> int:
 `.trim();
 
       const patch = `
---- a/math.ail
-+++ b/math.ail
+--- a/math.aice
++++ b/math.aice
 @@ -1,2 +1,2 @@
  fn calculate(a: int) -> int:
 -  return a * 2
@@ -219,8 +219,8 @@ fn last():
 `.trim();
 
       const patch = `
---- a/file.ail
-+++ b/file.ail
+--- a/file.aice
++++ b/file.aice
 @@ -1,2 +1,2 @@
  fn first():
 -  return 1
@@ -415,8 +415,8 @@ class GameEngine:
     it("rejects malformed unified diff without corrupting source", () => {
       const source = "fn foo() -> int:\n  return 1\n";
       const malformedPatch = `
---- a/foo.ail
-+++ b/foo.ail
+--- a/foo.aice
++++ b/foo.aice
 @@ -50,5 +50,5 @@
 -non_existent_line_completely_random
 +other_random_line
@@ -431,8 +431,8 @@ class GameEngine:
     it("rejects patch that would corrupt syntax and guarantees clean rollback", () => {
       const source = "fn foo() -> int:\n  return 1\n";
       const corruptPatch = `
---- a/foo.ail
-+++ b/foo.ail
+--- a/foo.aice
++++ b/foo.aice
 @@ -1,2 +1,2 @@
 -fn foo() -> int:
 +fn foo(::: invalid syntax @@!#
@@ -458,8 +458,8 @@ class GameEngine:
     it("computes diff between two files on disk via diffFiles", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "diff_files_test_"));
       try {
-        const fileA = path.join(tmpDir, "v1.ail");
-        const fileB = path.join(tmpDir, "v2.ail");
+        const fileA = path.join(tmpDir, "v1.aice");
+        const fileB = path.join(tmpDir, "v2.aice");
         fs.writeFileSync(fileA, "fn calc():\n  return 1\n", "utf-8");
         fs.writeFileSync(fileB, "fn calc():\n  return 2\n", "utf-8");
 
@@ -477,12 +477,12 @@ class GameEngine:
     it("applies patch to file on disk atomically with patchFile", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "patch_file_test_"));
       try {
-        const target = path.join(tmpDir, "code.ail");
+        const target = path.join(tmpDir, "code.aice");
         fs.writeFileSync(target, "fn foo():\n  return 1\n", "utf-8");
 
         const patch = `
---- a/code.ail
-+++ b/code.ail
+--- a/code.aice
++++ b/code.aice
 @@ -1,2 +1,2 @@
  fn foo():
 -  return 1
@@ -504,13 +504,13 @@ class GameEngine:
     it("dry-run validates patch without modifying file on disk", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "patch_dry_run_"));
       try {
-        const target = path.join(tmpDir, "code.ail");
+        const target = path.join(tmpDir, "code.aice");
         const originalCode = "fn foo():\n  return 1\n";
         fs.writeFileSync(target, originalCode, "utf-8");
 
         const patch = `
---- a/code.ail
-+++ b/code.ail
+--- a/code.aice
++++ b/code.aice
 @@ -1,2 +1,2 @@
  fn foo():
 -  return 1
@@ -533,7 +533,7 @@ class GameEngine:
     it("rejects invalid patch on disk without corrupting file", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "patch_reject_test_"));
       try {
-        const target = path.join(tmpDir, "code.ail");
+        const target = path.join(tmpDir, "code.aice");
         const original = "fn foo():\n  return 1\n";
         fs.writeFileSync(target, original, "utf-8");
 
@@ -552,26 +552,26 @@ class GameEngine:
     it("automatically recompiles target with --compile flag", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "patch_compile_test_"));
       try {
-        const configFile = path.join(tmpDir, "ail.config.json");
+        const configFile = path.join(tmpDir, "aice.config.json");
         fs.writeFileSync(
           configFile,
           JSON.stringify({ targetLanguage: "typescript", outDir: "." }),
           "utf-8",
         );
 
-        const ailFile = path.join(tmpDir, "math.ail");
-        fs.writeFileSync(ailFile, "fn sum(a: int, b: int) -> int:\n  return a + b\n", "utf-8");
+        const aiceFile = path.join(tmpDir, "math.aice");
+        fs.writeFileSync(aiceFile, "fn sum(a: int, b: int) -> int:\n  return a + b\n", "utf-8");
 
         const patch = `
---- a/math.ail
-+++ b/math.ail
+--- a/math.aice
++++ b/math.aice
 @@ -1,2 +1,2 @@
  fn sum(a: int, b: int) -> int:
 -  return a + b
 +  return a * b
 `.trim();
 
-        const res = await patchFile(ailFile, patch, { compile: true, projectRoot: tmpDir });
+        const res = await patchFile(aiceFile, patch, { compile: true, projectRoot: tmpDir });
         expect(res.success).toBe(true);
 
         const tsFile = path.join(tmpDir, "math.ts");
@@ -601,15 +601,15 @@ class GameEngine:
       expect(patchOptions).toContain("compile");
     });
 
-    it("executes CLI 'ail diff' with two files and --ast flag", () => {
+    it("executes CLI 'aice diff' with two files and --ast flag", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_diff_test_"));
       try {
-        const fileA = path.join(tmpDir, "a.ail");
-        const fileB = path.join(tmpDir, "b.ail");
+        const fileA = path.join(tmpDir, "a.aice");
+        const fileB = path.join(tmpDir, "b.aice");
         fs.writeFileSync(fileA, "fn calc():\n  return 1\n", "utf-8");
         fs.writeFileSync(fileB, "fn calc():\n  return 2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "diff", fileA, fileB, "--ast"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "diff", fileA, fileB, "--ast"], {
           encoding: "utf-8",
         });
 
@@ -620,15 +620,15 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail diff' with --unified flag", () => {
+    it("executes CLI 'aice diff' with --unified flag", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_diff_uni_"));
       try {
-        const fileA = path.join(tmpDir, "a.ail");
-        const fileB = path.join(tmpDir, "b.ail");
+        const fileA = path.join(tmpDir, "a.aice");
+        const fileB = path.join(tmpDir, "b.aice");
         fs.writeFileSync(fileA, "fn calc():\n  return 1\n", "utf-8");
         fs.writeFileSync(fileB, "fn calc():\n  return 2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "diff", fileA, fileB, "--unified"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "diff", fileA, fileB, "--unified"], {
           encoding: "utf-8",
         });
 
@@ -640,15 +640,15 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail diff' with --json flag", () => {
+    it("executes CLI 'aice diff' with --json flag", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_diff_json_"));
       try {
-        const fileA = path.join(tmpDir, "a.ail");
-        const fileB = path.join(tmpDir, "b.ail");
+        const fileA = path.join(tmpDir, "a.aice");
+        const fileB = path.join(tmpDir, "b.aice");
         fs.writeFileSync(fileA, "fn calc():\n  return 1\n", "utf-8");
         fs.writeFileSync(fileB, "fn calc():\n  return 2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "diff", fileA, fileB, "--json"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "diff", fileA, fileB, "--json"], {
           encoding: "utf-8",
         });
 
@@ -661,19 +661,19 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail patch' with patch file", () => {
+    it("executes CLI 'aice patch' with patch file", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_patch_file_"));
       try {
-        const target = path.join(tmpDir, "math.ail");
+        const target = path.join(tmpDir, "math.aice");
         const patchFile = path.join(tmpDir, "math.patch");
         fs.writeFileSync(target, "fn foo():\n  return 1\n", "utf-8");
         fs.writeFileSync(
           patchFile,
-          "--- a/math.ail\n+++ b/math.ail\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 777\n",
+          "--- a/math.aice\n+++ b/math.aice\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 777\n",
           "utf-8",
         );
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "patch", target, patchFile], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "patch", target, patchFile], {
           encoding: "utf-8",
         });
 
@@ -686,16 +686,16 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail patch' via stdin input", () => {
+    it("executes CLI 'aice patch' via stdin input", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_patch_stdin_"));
       try {
-        const target = path.join(tmpDir, "math.ail");
+        const target = path.join(tmpDir, "math.aice");
         fs.writeFileSync(target, "fn foo():\n  return 1\n", "utf-8");
 
         const patch =
-          "--- a/math.ail\n+++ b/math.ail\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 888\n";
+          "--- a/math.aice\n+++ b/math.aice\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 888\n";
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "patch", target, "-"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "patch", target, "-"], {
           input: patch,
           encoding: "utf-8",
         });
@@ -709,17 +709,17 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail patch --dry-run' previewing changes without touching disk", () => {
+    it("executes CLI 'aice patch --dry-run' previewing changes without touching disk", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_patch_dry_"));
       try {
-        const target = path.join(tmpDir, "math.ail");
+        const target = path.join(tmpDir, "math.aice");
         const original = "fn foo():\n  return 1\n";
         fs.writeFileSync(target, original, "utf-8");
 
         const patch =
-          "--- a/math.ail\n+++ b/math.ail\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 999\n";
+          "--- a/math.aice\n+++ b/math.aice\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 999\n";
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "patch", target, "-", "--dry-run"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "patch", target, "-", "--dry-run"], {
           input: patch,
           encoding: "utf-8",
         });
@@ -733,24 +733,24 @@ class GameEngine:
       }
     });
 
-    it("executes CLI 'ail patch --reverse' rolling back changes", () => {
+    it("executes CLI 'aice patch --reverse' rolling back changes", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_patch_rev_"));
       try {
-        const target = path.join(tmpDir, "math.ail");
+        const target = path.join(tmpDir, "math.aice");
         fs.writeFileSync(target, "fn foo():\n  return 1\n", "utf-8");
 
         const patch =
-          "--- a/math.ail\n+++ b/math.ail\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 555\n";
+          "--- a/math.aice\n+++ b/math.aice\n@@ -1,2 +1,2 @@\n fn foo():\n-  return 1\n+  return 555\n";
 
         // Forward
-        spawnSync("bun", ["./bin/ail.ts", "patch", target, "-"], {
+        spawnSync("bun", ["./bin/aice.ts", "patch", target, "-"], {
           input: patch,
           encoding: "utf-8",
         });
         expect(fs.readFileSync(target, "utf-8")).toContain("return 555");
 
         // Reverse
-        const res = spawnSync("bun", ["./bin/ail.ts", "patch", target, "-", "--reverse"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "patch", target, "-", "--reverse"], {
           input: patch,
           encoding: "utf-8",
         });

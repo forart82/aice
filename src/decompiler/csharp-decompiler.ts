@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C# Decompiler (Reverse Transpiler) for AIL 2.0.
+ * Modern C# Decompiler (Reverse Transpiler) for AICE 2.0.
  * Parses C# source files (.cs), extracts comments and XML documentation into
- * CstTriviaTable, and produces an AIL Module AST.
+ * CstTriviaTable, and produces an AICE Module AST.
  */
 
 import type {
@@ -2633,7 +2633,7 @@ export class CSharpDecompiler {
       .replace(/^in\s+/, "")
       .replace(/^const\s+/, "");
 
-    // C# primitives to AIL types
+    // C# primitives to AICE types
     switch (clean) {
       case "int":
       case "uint":

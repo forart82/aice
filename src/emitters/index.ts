@@ -1,5 +1,5 @@
 /**
- * Unified Emitter Hub for AIL 2.0 Multi-Language Forward Transpilation.
+ * Unified Emitter Hub for AICE 2.0 Multi-Language Forward Transpilation.
  */
 
 import type { Module } from "../core/ast.js";
@@ -44,7 +44,7 @@ export interface EmitOptions extends EmitterOptions {
 }
 
 /**
- * Emits target source code from an AIL Module AST.
+ * Emits target source code from an AICE Module AST.
  * If target is omitted, automatically infers target from mod.path.
  */
 export function emitTarget(

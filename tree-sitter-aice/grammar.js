@@ -2,12 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Tree-sitter Grammar Specification for AIL (Abstract Intermediate Language) 2.0.
- * Conforms to docs/AIL_SPEC.md.
+ * Tree-sitter Grammar Specification for AICE (AI Context Engine) 2.0.
+ * Conforms to docs/AICE_SPEC.md.
  */
 
 module.exports = grammar({
-  name: "ail",
+  name: "aice",
 
   extras: ($) => [/\s/, $.comment],
 

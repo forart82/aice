@@ -6,7 +6,7 @@
       "",
       "$0"
     ],
-    "description": "Declare top-level AIL module"
+    "description": "Declare top-level AICE module"
   },
   "Function Block": {
     "prefix": "fn",

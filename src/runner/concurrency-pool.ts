@@ -1,5 +1,5 @@
 /**
- * AIL 2.0 Async Concurrency Worker Pool.
+ * AICE 2.0 Async Concurrency Worker Pool.
  * Manages bounded concurrent execution across recycled worker slots.
  */
 
@@ -55,7 +55,7 @@ export interface ConcurrencyReporter {
   taskCompleted: (
     workerId: number,
     file: string,
-    metrics?: { targetTokens?: number; ailTokens?: number },
+    metrics?: { targetTokens?: number; aiceTokens?: number },
   ) => void;
   taskFailed: (workerId: number, file: string, error: string) => void;
 }
@@ -160,7 +160,7 @@ export class ConcurrencyPool<T = unknown, R = unknown> {
       getMetrics?: (
         result: R,
         task: TaskItem<T, R>,
-      ) => { targetTokens?: number; ailTokens?: number } | undefined;
+      ) => { targetTokens?: number; aiceTokens?: number } | undefined;
     },
   ): this {
     const prevStart = this.options.onWorkerStart;
@@ -201,24 +201,24 @@ export class ConcurrencyPool<T = unknown, R = unknown> {
             : task.id;
       const resObj = result as
         | {
-            metrics?: { targetTokens?: number; ailTokens?: number };
+            metrics?: { targetTokens?: number; aiceTokens?: number };
             targetTokens?: number;
-            ailTokens?: number;
+            aiceTokens?: number;
           }
         | null
         | undefined;
-      let metrics: { targetTokens?: number; ailTokens?: number } | undefined;
+      let metrics: { targetTokens?: number; aiceTokens?: number } | undefined;
       if (mapper?.getMetrics) {
         metrics = mapper.getMetrics(result, task);
       } else if (resObj?.metrics) {
         metrics = resObj.metrics;
       } else if (
         typeof resObj?.targetTokens === "number" ||
-        typeof resObj?.ailTokens === "number"
+        typeof resObj?.aiceTokens === "number"
       ) {
         metrics = {
           targetTokens: resObj.targetTokens,
-          ailTokens: resObj.ailTokens,
+          aiceTokens: resObj.aiceTokens,
         };
       }
       reporter.taskCompleted(workerId, file, metrics);

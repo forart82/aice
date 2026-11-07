@@ -1,5 +1,5 @@
 /**
- * AIL 2.0 Runner & Execution Orchestration Engine.
+ * AICE 2.0 Runner & Execution Orchestration Engine.
  */
 
 export * from "./concurrency-pool.js";

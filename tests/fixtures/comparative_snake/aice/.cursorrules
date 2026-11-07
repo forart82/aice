@@ -1,13 +1,13 @@
-# >>> AIL-COGNITIVE-RULE-START >>>
-# AIL Project Directives & Dialect Specification for AI Coding Agents
-# CRITICAL DIRECTIVE: This repository is authoritatively developed in AIL (*.ail).
+# >>> AICE-COGNITIVE-RULE-START >>>
+# AICE Project Directives & Dialect Specification for AI Coding Agents
+# CRITICAL DIRECTIVE: This repository is authoritatively developed in AICE (*.aice).
 # All target files (*.ts, *.tsx, *.css, *.html, *.py, *.cpp, *.hpp, *.h, etc.) are machine-generated read-only build artifacts.
-# Agents must only read, create, and modify *.ail source files.
-# Never edit target files directly; changes will fail with permission denied (chmod 444) or be overwritten by `ail compile`.
-# STACK TRACE TRANSLATION: If a stack trace or error cites `foo.ts:123`, inspect `foo.ts.ail` instead!
-# Run `ail compile <file.ail>` to produce target files, `ail verify <file.ail>` to check code, or `ail fix <file.ail>` to auto-repair.
+# Agents must only read, create, and modify *.aice source files.
+# Never edit target files directly; changes will fail with permission denied (chmod 444) or be overwritten by `aice compile`.
+# STACK TRACE TRANSLATION: If a stack trace or error cites `foo.ts:123`, inspect `foo.ts.aice` instead!
+# Run `aice compile <file.aice>` to produce target files, `aice verify <file.aice>` to check code, or `aice fix <file.aice>` to auto-repair.
 #
-# AIL 2.0 DIALECT CHEATSHEET:
+# AICE 2.0 DIALECT CHEATSHEET:
 # 1. Bindings (no let/const): `x := 42` (immutable), `y ::= 0` (mutable), `z: int := 100` (typed).
 # 2. Vector DSL & Math: `[x, y] := [10, 20]`, `[x, y] += [dx, dy]`, builtins: min, max, clamp, hypot, floor, ceil, abs.
 # 3. Class Properties: `prop X, x: float = 0.0` synthesizes field X and accessor pair x.
@@ -16,4 +16,4 @@
 # 6. Error Handling: Return `Result[T, E]`, unpack with postfix `?` (no try/catch).
 # 7. UI Components: `component Name(props):` with indented children (no closing XML tags).
 # 8. CSS: `fl-row`, `fl-col`, `fl-center`, `tokens spacing[rem]: 1: 0.25`.
-# <<< AIL-COGNITIVE-RULE-END <<<
+# <<< AICE-COGNITIVE-RULE-END <<<

@@ -18,15 +18,15 @@ When conventional transpilers re-emit code from an AST, they generate freshly fo
 
 ---
 
-## 2. Trivia Architecture in AIL
+## 2. Trivia Architecture in AICE
 
-AIL decouples semantic AST nodes from lexical trivia using a **Node-Indexed Trivia Table**:
+AICE decouples semantic AST nodes from lexical trivia using a **Node-Indexed Trivia Table**:
 
 ```mermaid
 flowchart LR
     Source["Original Source (index.ts)"] --> Lexer["Trivia-Aware Lexer"]
-    Lexer --> AST["AIL Semantic AST (*.ts.ail)"]
-    Lexer --> TriviaTable["CST Trivia Table (*.ts.ail.trivia.json)"]
+    Lexer --> AST["AICE Semantic AST (*.ts.aice)"]
+    Lexer --> TriviaTable["CST Trivia Table (*.ts.aice.trivia.json)"]
     
     AST --> Emitter["Bidirectional Lens Emitter"]
     TriviaTable --> Emitter
@@ -61,7 +61,7 @@ export interface TriviaItem {
 ```
 
 ### 2.2 Inline Trivia Manifest Representation
-For single-file compilation where external sidecar files are unwanted, AIL allows embedding the trivia table directly inside the module manifest:
+For single-file compilation where external sidecar files are unwanted, AICE allows embedding the trivia table directly inside the module manifest:
 
 ```text
 module app/service
@@ -80,17 +80,17 @@ fn startService() -> void:
 
 ## 3. The 4-Step Lossless Synthesis Algorithm
 
-1. **Extraction (`Get: Source -> AIL + Trivia`)**:
+1. **Extraction (`Get: Source -> AICE + Trivia`)**:
    - The language parser identifies all comments and whitespace tokens.
    - Comments preceding an AST statement are bound to `leadingTrivia`.
    - Trailing same-line comments are bound to `trailingTrivia`.
-   - The semantic AIL tree is emitted clean and token-dense.
+   - The semantic AICE tree is emitted clean and token-dense.
 
 2. **Mutation**:
-   - The AI agent or developer edits the AIL file. Node additions generate clean code; unmutated nodes retain their trivia bindings.
+   - The AI agent or developer edits the AICE file. Node additions generate clean code; unmutated nodes retain their trivia bindings.
 
-3. **Re-insertion (`Put: AIL + Trivia -> Source`)**:
-   - The emitter traverses the AIL AST.
+3. **Re-insertion (`Put: AICE + Trivia -> Source`)**:
+   - The emitter traverses the AICE AST.
    - Before emitting each statement, it outputs `leadingTrivia` with original comment syntax (`//`, `/* */`, or `#`).
    - The emitter formats the statement respecting the recorded indentation style.
    - It appends any `trailingTrivia`.
@@ -104,16 +104,16 @@ fn startService() -> void:
 
 ## 4. Modern Inlined Comments Architecture & Zero Clutter Standard
 
-In AIL 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into `*.ail` source files as standard `#` comments:
+In AICE 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into `*.aice` source files as standard `#` comments:
 
 ```
 src/sim/
 ├── Boss.ts                  # Read-only target source (chmod 444)
-└── Boss.ts.ail              # Authoritative AIL source with inlined comments
+└── Boss.ts.aice              # Authoritative AICE source with inlined comments
 ```
 
 ### Key Principles:
-1. **Strict Extension Standard**: Every AIL file strictly ends with `*.ail`. No external `.json` sidecars pollute the project directory.
-2. **Direct Human & AI Visibility**: Comments reside directly in `*.ail` where developers and AI models can inspect, understand, and update them naturally.
-3. **Clean Ejection**: When running `ail eject --remove-ail`, only `.ail` files need to be pruned.
+1. **Strict Extension Standard**: Every AICE file strictly ends with `*.aice`. No external `.json` sidecars pollute the project directory.
+2. **Direct Human & AI Visibility**: Comments reside directly in `*.aice` where developers and AI models can inspect, understand, and update them naturally.
+3. **Clean Ejection**: When running `aice eject --remove-aice`, only `.aice` files need to be pruned.
 

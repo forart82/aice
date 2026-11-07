@@ -4,11 +4,11 @@
  *
  * STEP 7: Comprehensive Operator Pipeline Integration Matrix Test Suite.
  *
- * Exercises the complete end-to-end AIL 2.0 transpilation lifecycle:
+ * Exercises the complete end-to-end AICE 2.0 transpilation lifecycle:
  *   TypeScript Source
- *     -> TsDecompiler.decompile() -> AIL AST
- *     -> AilGenerator.generate() -> AIL source code
- *     -> Parser.parse() -> parsed AIL AST
+ *     -> TsDecompiler.decompile() -> AICE AST
+ *     -> AiceGenerator.generate() -> AICE source code
+ *     -> Parser.parse() -> parsed AICE AST
  *     -> TypeChecker.check() -> typed AST (0 type errors)
  *     -> TsEmitter.emit() -> TS target code
  *     -> PyEmitter.emit() -> Python target code
@@ -38,14 +38,14 @@ import type {
   WhileStmt,
 } from "../../src/core/ast.js";
 import { Parser } from "../../src/core/parser.js";
-import { AilGenerator } from "../../src/decompiler/ail-generator.js";
+import { AiceGenerator } from "../../src/decompiler/aice-generator.js";
 import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
 import { PyEmitter, TsEmitter } from "../../src/emitters/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 interface PipelineVerificationResult {
   decompiledAst: Module;
-  ailSource: string;
+  aiceSource: string;
   parsedAst: Module;
   tsOutput: string;
   pyOutput: string;
@@ -59,27 +59,27 @@ function verifyEndToEndPipeline(
   tsSource: string,
   filename = "test_matrix.ts",
 ): PipelineVerificationResult {
-  // Phase 1: TypeScript Source -> TsDecompiler.decompile() -> AIL AST
+  // Phase 1: TypeScript Source -> TsDecompiler.decompile() -> AICE AST
   const decompilerResult = TsDecompiler.decompile(tsSource, filename);
   const decompiledAst = decompilerResult.ast;
   expect(decompiledAst).toBeDefined();
   expect(decompiledAst.items.length).toBeGreaterThan(0);
 
-  // Phase 2: AIL AST -> AilGenerator.generate() -> AIL source code
-  const ailSource = AilGenerator.generate(decompiledAst, {
+  // Phase 2: AICE AST -> AiceGenerator.generate() -> AICE source code
+  const aiceSource = AiceGenerator.generate(decompiledAst, {
     trivia: decompilerResult.trivia,
   });
-  expect(ailSource).toBeDefined();
-  expect(typeof ailSource).toBe("string");
-  expect(ailSource.length).toBeGreaterThan(0);
+  expect(aiceSource).toBeDefined();
+  expect(typeof aiceSource).toBe("string");
+  expect(aiceSource.length).toBeGreaterThan(0);
 
-  // Phase 3: AIL source code -> Parser.parse() -> parsed AIL AST
-  const ailFile = filename.replace(/\.tsx?$/, ".ail");
-  const parsedAst = Parser.parse(ailSource, ailFile);
+  // Phase 3: AICE source code -> Parser.parse() -> parsed AICE AST
+  const aiceFile = filename.replace(/\.tsx?$/, ".aice");
+  const parsedAst = Parser.parse(aiceSource, aiceFile);
   expect(parsedAst).toBeDefined();
   expect(parsedAst.items.length).toBe(decompiledAst.items.length);
 
-  // Phase 4: parsed AIL AST -> TypeChecker.check() -> typed AST (0 type errors)
+  // Phase 4: parsed AICE AST -> TypeChecker.check() -> typed AST (0 type errors)
   expect(() => TypeChecker.check(parsedAst)).not.toThrow();
 
   // Phase 5: parsed AST -> TsEmitter.emit() -> TS target code
@@ -96,7 +96,7 @@ function verifyEndToEndPipeline(
 
   return {
     decompiledAst,
-    ailSource,
+    aiceSource,
     parsedAst,
     tsOutput,
     pyOutput,
@@ -114,13 +114,13 @@ export function hasShield(p: any): boolean {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category1_shield.ts");
 
-      // Verify AIL AST
+      // Verify AICE AST
       const fn = result.parsedAst.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
       expect(fn.name).toBe("hasShield");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain('has := "shield" in p');
+      // Verify AICE Source
+      expect(result.aiceSource).toContain('has := "shield" in p');
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain('("shield" in p)');
@@ -137,8 +137,8 @@ export function hasKey(key: string, obj: any): boolean {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category1_key.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("key in obj");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("key in obj");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(key in obj)");
@@ -158,9 +158,9 @@ export function checkEquipment(p: any): boolean {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category1_if_in.ts");
 
-      // Verify AIL syntax has no redundant '!= nil'
-      expect(result.ailSource).toContain('if "shield" in p:');
-      expect(result.ailSource).not.toContain('("shield" in p) != nil');
+      // Verify AICE syntax has no redundant '!= nil'
+      expect(result.aiceSource).toContain('if "shield" in p:');
+      expect(result.aiceSource).not.toContain('("shield" in p) != nil');
 
       // Verify Target Emitters
       expect(result.tsOutput).toContain('if (("shield" in p)) {');
@@ -183,12 +183,12 @@ export function checkVec(o: any): boolean {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category2_vec.ts");
 
-      // Verify AIL AST
+      // Verify AICE AST
       const checkFn = result.parsedAst.items[1] as FunctionDecl;
       expect(checkFn.name).toBe("checkVec");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("isVec := o instanceof Vec2");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("isVec := o instanceof Vec2");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(o instanceof Vec2)");
@@ -205,8 +205,8 @@ export function isError(err: any): boolean {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category2_error.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("err instanceof Error");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("err instanceof Error");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(err instanceof Error)");
@@ -226,8 +226,8 @@ export function getErrorMessage(err: any): string {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category2_if_error.ts");
 
-      // Verify AIL syntax
-      expect(result.ailSource).toContain("if err instanceof Error:");
+      // Verify AICE syntax
+      expect(result.aiceSource).toContain("if err instanceof Error:");
 
       // Verify Emitters
       expect(result.tsOutput).toContain("if ((err instanceof Error))");
@@ -245,8 +245,8 @@ export function truncate(s: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category3_trunc.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("s |= 0");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("s |= 0");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("s |= 0;");
@@ -271,8 +271,8 @@ export function addNorth(mask: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category3_roadmask.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("m |= RoadMask.North");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("m |= RoadMask.North");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("m |= RoadMask.North;");
@@ -290,8 +290,8 @@ export function createMaskApplier(mask: number) {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category3_arrow_or.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("(flags |= mask)");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("(flags |= mask)");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(flags |= mask)");
@@ -311,8 +311,8 @@ export function scramble(t: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category4_scramble.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("t ^= t + 1");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("t ^= t + 1");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("t ^= (t + 1);");
@@ -330,8 +330,8 @@ export function updateHash(hash: number, char: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category4_hash.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("hash ^= char");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("hash ^= char");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("hash ^= char;");
@@ -349,8 +349,8 @@ export function nextScramble(t: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category4_expr.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("next := t ^= t + 1");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("next := t ^= t + 1");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(t ^= (t + 1))");
@@ -374,8 +374,8 @@ export function setText(el: Element, v: string) {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category5_arrow_assign.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("setter := fn(target:Element) = (target.textContent = v)");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("setter := fn(target:Element) = (target.textContent = v)");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(target.textContent = v)");
@@ -395,8 +395,8 @@ export function matchAll(regex: any, s: string) {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category5_while_assign.ts");
 
-      // Verify AIL Source has while assignment
-      expect(result.ailSource).toContain("while (pMatch = regex.exec(s)) != nil:");
+      // Verify AICE Source has while assignment
+      expect(result.aiceSource).toContain("while (pMatch = regex.exec(s)) != nil:");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("while (((pMatch = regex.exec(s)) !== null)) {");
@@ -418,8 +418,8 @@ export function createIncrementer() {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category5_arrow_compound.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("fn(item:CounterItem) = (item.count += 1)");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("fn(item:CounterItem) = (item.count += 1)");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(item.count += 1)");
@@ -439,8 +439,8 @@ export function clearBit(cell: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category6_clearbit.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("cell &= -(1 << 2)");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("cell &= -(1 << 2)");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("cell &= -((1 << 2));");
@@ -458,8 +458,8 @@ export function applyAndMask(cell: number, mask: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category6_mask.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("cell &= mask");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("cell &= mask");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("cell &= mask;");
@@ -477,8 +477,8 @@ export function testAndExpr(cell: number, mask: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category6_expr.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("masked := cell &= mask");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("masked := cell &= mask");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(cell &= mask)");
@@ -498,8 +498,8 @@ export function shiftRight(v: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category7_shr.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("v >>= 7");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("v >>= 7");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("v >>= 7;");
@@ -517,8 +517,8 @@ export function shiftLeft(a: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category7_shl.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("a <<= 2");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("a <<= 2");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("a <<= 2;");
@@ -536,8 +536,8 @@ export function unsignedShift(b: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category7_ushr.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("b >>>= 1");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("b >>>= 1");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("b >>>= 1;");
@@ -555,8 +555,8 @@ export function powerAssign(c: number): number {
 `;
       const result = verifyEndToEndPipeline(tsSource, "category7_power.ts");
 
-      // Verify AIL Source
-      expect(result.ailSource).toContain("c **= 3");
+      // Verify AICE Source
+      expect(result.aiceSource).toContain("c **= 3");
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("c **= 3;");
@@ -623,16 +623,16 @@ export function processOperators(
       expect(result.decompiledAst.items).toHaveLength(3); // enum, class, function
       expect(result.parsedAst.items).toHaveLength(3);
 
-      // Verify AIL source contains all categories
-      expect(result.ailSource).toContain('hasTag := "tag" in obj');
-      expect(result.ailSource).toContain("isState := obj instanceof BitState");
-      expect(result.ailSource).toContain("flags |= FlagMask.North");
-      expect(result.ailSource).toContain("code ^= code + 1");
-      expect(result.ailSource).toContain("cell &= -(1 << 2)");
-      expect(result.ailSource).toContain("shifted >>= 7");
-      expect(result.ailSource).toContain("shifted <<= 2");
-      expect(result.ailSource).toContain("shifted >>>= 1");
-      expect(result.ailSource).toContain("shifted **= 3");
+      // Verify AICE source contains all categories
+      expect(result.aiceSource).toContain('hasTag := "tag" in obj');
+      expect(result.aiceSource).toContain("isState := obj instanceof BitState");
+      expect(result.aiceSource).toContain("flags |= FlagMask.North");
+      expect(result.aiceSource).toContain("code ^= code + 1");
+      expect(result.aiceSource).toContain("cell &= -(1 << 2)");
+      expect(result.aiceSource).toContain("shifted >>= 7");
+      expect(result.aiceSource).toContain("shifted <<= 2");
+      expect(result.aiceSource).toContain("shifted >>>= 1");
+      expect(result.aiceSource).toContain("shifted **= 3");
 
       // Verify TypeScript target output contains all categories
       expect(result.tsOutput).toContain('const hasTag = ("tag" in obj);');

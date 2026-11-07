@@ -12,7 +12,7 @@ component EnterprisePortal():
         .navbar-brand-section:
           .brand-logo-wrapper:
             _.brand-icon: "⚡"
-            _.brand-name: "AIL CloudOps"
+            _.brand-name: "AICE CloudOps"
           _.badge.badge-env-prod: "PRODUCTION"
           _.badge.badge-region: "us-east-1 (N. Virginia)"
         .navbar-search-section:
@@ -99,7 +99,7 @@ component EnterprisePortal():
             .system-status-indicator:
               _.status-pulse-dot: "●"
               _.status-text: "All 42 Systems Operational"
-            _.agent-version: "AIL Runtime v2.4.0-rc3"
+            _.agent-version: "AICE Runtime v2.4.0-rc3"
         main.main-content-viewport:
           .page-header-row:
             .header-title-block:
@@ -247,7 +247,7 @@ component EnterprisePortal():
                   tr:
                     .col-service-name:
                       _.service-name-text: "stream-processor-engine"
-                      _.service-type-tag: "AIL Pipeline"
+                      _.service-type-tag: "AICE Pipeline"
                     td: "v2.4.0"
                     td:
                       _.badge.badge-tier-0: "Tier 0"
@@ -487,7 +487,7 @@ component EnterprisePortal():
                         _.tag-online: "ACTIVE"
           footer.app-footer:
             .footer-left:
-              _.legal-text: "© 2026 AIL Autonomous Infrastructure Labs. All rights reserved."
+              _.legal-text: "© 2026 AICE Autonomous Infrastructure Labs. All rights reserved."
               _.footer-divider: "|"
               _.soc2-badge: "SOC-2 Type II Certified"
               _.footer-divider: "|"

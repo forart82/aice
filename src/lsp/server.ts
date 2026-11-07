@@ -2,12 +2,12 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Language Server Protocol (LSP) Daemon for AIL 2.0.
+ * Language Server Protocol (LSP) Daemon for AICE 2.0.
  * Conforms to Microsoft LSP 3.17 protocol over JSON-RPC 2.0 stdio streams.
  */
 
 import type { Readable, Writable } from "node:stream";
-import { AilAnalyzer } from "./analyzer.js";
+import { AiceAnalyzer } from "./analyzer.js";
 import { JsonRpcConnection, type JsonRpcMessage } from "./jsonrpc.js";
 import type {
   CodeActionParams,
@@ -22,14 +22,14 @@ import type {
   TextDocumentIdentifier,
 } from "./protocol.js";
 
-export class AilLspServer {
+export class AiceLspServer {
   public connection: JsonRpcConnection;
-  public analyzer: AilAnalyzer;
+  public analyzer: AiceAnalyzer;
   private isShutdown = false;
 
   constructor(inStream: Readable = process.stdin, outStream: Writable = process.stdout) {
     this.connection = new JsonRpcConnection(inStream, outStream);
-    this.analyzer = new AilAnalyzer();
+    this.analyzer = new AiceAnalyzer();
 
     this.connection.on("error", () => {});
     this.connection.on("message", (msg: JsonRpcMessage) => this.handleMessage(msg));
@@ -70,7 +70,7 @@ export class AilLspServer {
               codeActionProvider: true,
             },
             serverInfo: {
-              name: "ail-lsp",
+              name: "aice-lsp",
               version: "2.0.0",
             },
           });

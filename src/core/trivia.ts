@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL: Concrete Syntax Tree (CST) Trivia Engine
+ * AICE: Concrete Syntax Tree (CST) Trivia Engine
  * Preserves non-semantic tokens (comments, whitespace, formatting) for lossless roundtrips.
  * Adheres to the formal specification in docs/CST_TRIVIA_SPEC.md.
  */

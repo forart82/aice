@@ -3,7 +3,7 @@ import { parse } from "../../src/core/parser.js";
 import { check, TypeCheckError } from "../../src/typechecker/checker.js";
 
 function checkSource(source: string): void {
-  const mod = parse(source, "test.ail");
+  const mod = parse(source, "test.aice");
   check(mod);
 }
 

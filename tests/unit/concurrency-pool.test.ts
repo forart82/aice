@@ -6,7 +6,7 @@ import os from "node:os";
 import { describe, expect, it } from "vitest";
 import { ConcurrencyPool, type TaskItem } from "../../src/runner/index.js";
 
-describe("AIL 2.0 Async Concurrency Worker Pool", () => {
+describe("AICE 2.0 Async Concurrency Worker Pool", () => {
   describe("Concurrency Bounding", () => {
     it("ensures no more than N tasks run simultaneously", async () => {
       const concurrency = 3;

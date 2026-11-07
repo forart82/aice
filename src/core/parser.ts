@@ -1,5 +1,5 @@
 /**
- * Pratt Parser & Universal AST Generator for AIL 2.0.
+ * Pratt Parser & Universal AST Generator for AICE 2.0.
  *
  * Implements Top-Down Operator Precedence (Pratt) parsing for expressions
  * and Recursive Descent for module declarations, types, functions, and control flow.
@@ -61,7 +61,7 @@ export class ParserError extends Error {
   readonly span: Span;
   readonly code: string;
 
-  constructor(message: string, span: Span, code = "AIL_E1003_PARSER_ERROR") {
+  constructor(message: string, span: Span, code = "AICE_E1003_PARSER_ERROR") {
     super(`${message} at ${span.file}:${span.start.line}:${span.start.column}`);
     this.name = "ParserError";
     this.span = span;

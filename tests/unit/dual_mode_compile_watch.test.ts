@@ -2,10 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit Test Suite for Dual-Mode Execution in `ail compile` and `ail watch` (Step 16).
+ * Unit Test Suite for Dual-Mode Execution in `aice compile` and `aice watch` (Step 16).
  * Verifies:
- * 1. Single-file and directory compilation in isolated mode (`src/math.ail` -> `.ail-build/math.ts`).
- * 2. Watch daemon and `recompileSingleFile` updating `.ail-build/` on file change when in isolated mode (< 5ms).
+ * 1. Single-file and directory compilation in isolated mode (`src/math.aice` -> `.aice-build/math.ts`).
+ * 2. Watch daemon and `recompileSingleFile` updating `.aice-build/` on file change when in isolated mode (< 5ms).
  * 3. Preserving side-by-side behavior when in side-by-side mode.
  * 4. Priority of explicit CLI flags (`--out`, `--out-dir`).
  */
@@ -19,14 +19,14 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadProjectConfig, saveProjectConfig } from "../../src/config/index.js";
 import { isTargetLocked } from "../../src/shield/index.js";
 import {
-  AilWatcher,
+  AiceWatcher,
   recompileSingleFile,
   watchProject,
 } from "../../src/watcher/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -67,12 +67,12 @@ function makeWritable(dir: string): void {
   }
 }
 
-describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
+describe("Step 16: Dual-Mode Execution in aice compile and aice watch", () => {
   let tmpDir: string;
-  let activeWatcher: AilWatcher | null = null;
+  let activeWatcher: AiceWatcher | null = null;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-dual-mode-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-dual-mode-test-"));
     activeWatcher = null;
   });
 
@@ -97,30 +97,30 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       saveProjectConfig(tmpDir, {
         mode: "isolated",
         sourceDir: "src",
-        outDir: ".ail-build",
+        outDir: ".aice-build",
         targetLanguage: "typescript",
         isolated: true,
       });
     });
 
-    it("compiles a single file in isolated mode to .ail-build/math.ts via CLI", () => {
+    it("compiles a single file in isolated mode to .aice-build/math.ts via CLI", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ail");
+      const aiceFile = path.join(srcDir, "math.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn add(a: int, b: int) -> int:
   ret a + b
 `,
         "utf-8",
       );
 
-      const res = runCli(["compile", "src/math.ail"], tmpDir);
+      const res = runCli(["compile", "src/math.aice"], tmpDir);
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain(".ail-build/math.ts");
+      expect(res.stdout).toContain(".aice-build/math.ts");
 
-      // Verify emitted output in .ail-build/
-      const expectedTarget = path.join(tmpDir, ".ail-build", "math.ts");
+      // Verify emitted output in .aice-build/
+      const expectedTarget = path.join(tmpDir, ".aice-build", "math.ts");
       expect(fs.existsSync(expectedTarget)).toBe(true);
 
       const content = fs.readFileSync(expectedTarget, "utf-8");
@@ -135,9 +135,9 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
     it("recompiles single file via recompileSingleFile in isolated mode in < 5ms", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ail");
+      const aiceFile = path.join(srcDir, "math.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn multiply(a: int, b: int) -> int:
   ret a * b
 `,
@@ -145,12 +145,12 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       );
 
       // Warm up module caches to ensure measurement isolates incremental compile speed
-      await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+      await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
 
-      const expectedTarget = path.join(tmpDir, ".ail-build", "math.ts");
-      let result = await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+      const expectedTarget = path.join(tmpDir, ".aice-build", "math.ts");
+      let result = await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
       for (let i = 0; i < 4 && result.durationMs >= 5; i++) {
-        const candidate = await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+        const candidate = await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
         if (candidate.durationMs < result.durationMs) {
           result = candidate;
         }
@@ -166,13 +166,13 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       expect(isTargetLocked(expectedTarget)).toBe(true);
     });
 
-    it("compiles all files in isolated mode to .ail-build/... via compile-all", () => {
+    it("compiles all files in isolated mode to .aice-build/... via compile-all", () => {
       const srcDir = path.join(tmpDir, "src");
       const utilsDir = path.join(srcDir, "utils");
       fs.mkdirSync(utilsDir, { recursive: true });
 
       fs.writeFileSync(
-        path.join(srcDir, "math.ail"),
+        path.join(srcDir, "math.aice"),
         `fn add(a: int, b: int) -> int:
   ret a + b
 `,
@@ -180,7 +180,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       );
 
       fs.writeFileSync(
-        path.join(utilsDir, "calc.ail"),
+        path.join(utilsDir, "calc.aice"),
         `fn square(n: int) -> int:
   ret n * n
 `,
@@ -189,12 +189,12 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       const res = runCli(["compile-all"], tmpDir);
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain(".ail-build/math.ts");
-      expect(res.stdout).toContain(".ail-build/utils/calc.ts");
+      expect(res.stdout).toContain(".aice-build/math.ts");
+      expect(res.stdout).toContain(".aice-build/utils/calc.ts");
 
-      // Emitted targets exist in .ail-build/
-      const targetMath = path.join(tmpDir, ".ail-build", "math.ts");
-      const targetCalc = path.join(tmpDir, ".ail-build", "utils", "calc.ts");
+      // Emitted targets exist in .aice-build/
+      const targetMath = path.join(tmpDir, ".aice-build", "math.ts");
+      const targetCalc = path.join(tmpDir, ".aice-build", "utils", "calc.ts");
       expect(fs.existsSync(targetMath)).toBe(true);
       expect(fs.existsSync(targetCalc)).toBe(true);
 
@@ -203,12 +203,12 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       expect(fs.existsSync(path.join(utilsDir, "calc.ts"))).toBe(false);
     });
 
-    it("respects CLI flag --out to override default .ail-build target in isolated mode", () => {
+    it("respects CLI flag --out to override default .aice-build target in isolated mode", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ail");
+      const aiceFile = path.join(srcDir, "math.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn doubleVal(n: int) -> int:
   ret n * 2
 `,
@@ -216,21 +216,21 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       );
 
       const customOut = path.join(tmpDir, "custom", "custom-math.ts");
-      const res = runCli(["compile", "src/math.ail", "--out", "custom/custom-math.ts"], tmpDir);
+      const res = runCli(["compile", "src/math.aice", "--out", "custom/custom-math.ts"], tmpDir);
       expect(res.status).toBe(0);
 
       expect(fs.existsSync(customOut)).toBe(true);
       expect(fs.readFileSync(customOut, "utf-8")).toContain("doubleVal");
 
-      // Default .ail-build was not used because CLI flag has highest priority
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build", "math.ts"))).toBe(false);
+      // Default .aice-build was not used because CLI flag has highest priority
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build", "math.ts"))).toBe(false);
     });
 
-    it("respects CLI flag --out-dir to override default .ail-build in compile-all", () => {
+    it("respects CLI flag --out-dir to override default .aice-build in compile-all", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
       fs.writeFileSync(
-        path.join(srcDir, "math.ail"),
+        path.join(srcDir, "math.aice"),
         `fn getOne() -> int:\n  ret 1\n`,
         "utf-8",
       );
@@ -240,7 +240,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       const customOut = path.join(tmpDir, "dist-out", "math.ts");
       expect(fs.existsSync(customOut)).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build", "math.ts"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build", "math.ts"))).toBe(false);
     });
   });
 
@@ -249,20 +249,20 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       saveProjectConfig(tmpDir, {
         mode: "isolated",
         sourceDir: "src",
-        outDir: ".ail-build",
+        outDir: ".aice-build",
         targetLanguage: "typescript",
         isolated: true,
       });
     });
 
-    it("automatically recompiles to .ail-build/ on file change in < 5ms", async () => {
+    it("automatically recompiles to .aice-build/ on file change in < 5ms", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ail");
-      const targetFile = path.join(tmpDir, ".ail-build", "math.ts");
+      const aiceFile = path.join(srcDir, "math.aice");
+      const targetFile = path.join(tmpDir, ".aice-build", "math.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getScore() -> int:
   ret 10
 `,
@@ -275,7 +275,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       activeWatcher = await watchProject(tmpDir, {
         debounceMs: 20,
-        onCompileSuccess: (_ail, target, duration) => {
+        onCompileSuccess: (_aice, target, duration) => {
           successCount++;
           lastTarget = target;
           lastDurationMs = duration;
@@ -284,9 +284,9 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       await new Promise((r) => setTimeout(r, 40));
 
-      // Modify the .ail source file
+      // Modify the .aice source file
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getScore() -> int:
   ret 42
 `,
@@ -306,31 +306,31 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       expect(fs.existsSync(path.join(srcDir, "math.ts"))).toBe(false);
     });
 
-    it("notifies deletion with .ail-build target path when .ail file is deleted", async () => {
+    it("notifies deletion with .aice-build target path when .aice file is deleted", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "temp.ail");
-      const targetFile = path.join(tmpDir, ".ail-build", "temp.ts");
+      const aiceFile = path.join(srcDir, "temp.aice");
+      const targetFile = path.join(tmpDir, ".aice-build", "temp.ts");
 
-      fs.writeFileSync(ailFile, `fn temp():\n  ret\n`, "utf-8");
+      fs.writeFileSync(aiceFile, `fn temp():\n  ret\n`, "utf-8");
 
-      let deletedAil = "";
+      let deletedAice = "";
       let deletedTarget = "";
 
       activeWatcher = await watchProject(tmpDir, {
         debounceMs: 20,
-        onFileDeleted: (ail, target) => {
-          deletedAil = ail;
+        onFileDeleted: (aice, target) => {
+          deletedAice = aice;
           deletedTarget = target;
         },
       });
 
       await new Promise((r) => setTimeout(r, 40));
 
-      fs.unlinkSync(ailFile);
+      fs.unlinkSync(aiceFile);
 
-      await waitFor(() => deletedAil !== "");
-      expect(deletedAil).toBe(path.resolve(ailFile));
+      await waitFor(() => deletedAice !== "");
+      expect(deletedAice).toBe(path.resolve(aiceFile));
       expect(deletedTarget).toBe(targetFile);
     });
   });
@@ -340,7 +340,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       saveProjectConfig(tmpDir, {
         mode: "side-by-side",
         sourceDir: "src",
-        outDir: ".ail-build",
+        outDir: ".aice-build",
         targetLanguage: "typescript",
         isolated: false,
       });
@@ -349,16 +349,16 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
     it("compiles single file to sibling target in-place via CLI", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ts.ail");
+      const aiceFile = path.join(srcDir, "math.ts.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn add(a: int, b: int) -> int:
   ret a + b
 `,
         "utf-8",
       );
 
-      const res = runCli(["compile", "src/math.ts.ail"], tmpDir);
+      const res = runCli(["compile", "src/math.ts.aice"], tmpDir);
       expect(res.status).toBe(0);
 
       // In side-by-side mode, target is in-place sibling
@@ -366,16 +366,16 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       expect(fs.existsSync(siblingTarget)).toBe(true);
       expect(fs.readFileSync(siblingTarget, "utf-8")).toContain("export function add");
 
-      // .ail-build directory should NOT be created
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build"))).toBe(false);
+      // .aice-build directory should NOT be created
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build"))).toBe(false);
     });
 
     it("recompiles single file to sibling target via recompileSingleFile", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "calc.ts.ail");
+      const aiceFile = path.join(srcDir, "calc.ts.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getPi() -> int:
   ret 3
 `,
@@ -383,10 +383,10 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       );
 
       const siblingTarget = path.join(srcDir, "calc.ts");
-      await recompileSingleFile(ailFile, { projectRoot: tmpDir });
-      let result = await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+      await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
+      let result = await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
       for (let i = 0; i < 4 && result.durationMs >= 5; i++) {
-        const candidate = await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+        const candidate = await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
         if (candidate.durationMs < result.durationMs) {
           result = candidate;
         }
@@ -396,19 +396,19 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       expect(result.targetFile).toBe(siblingTarget);
       expect(result.durationMs).toBeLessThan(5);
       expect(fs.existsSync(siblingTarget)).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build"))).toBe(false);
     });
 
     it("compiles directory to sibling targets in-place via compile-all", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
       fs.writeFileSync(
-        path.join(srcDir, "math.ts.ail"),
+        path.join(srcDir, "math.ts.aice"),
         `fn f1() -> int:\n  ret 1\n`,
         "utf-8",
       );
       fs.writeFileSync(
-        path.join(srcDir, "helper.ail"),
+        path.join(srcDir, "helper.aice"),
         `fn f2() -> int:\n  ret 2\n`,
         "utf-8",
       );
@@ -418,17 +418,17 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       expect(fs.existsSync(path.join(srcDir, "math.ts"))).toBe(true);
       expect(fs.existsSync(path.join(srcDir, "helper.ts"))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build"))).toBe(false);
     });
 
     it("watch daemon emits to sibling target in-place when in side-by-side mode", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "counter.ts.ail");
+      const aiceFile = path.join(srcDir, "counter.ts.aice");
       const siblingTarget = path.join(srcDir, "counter.ts");
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getCount() -> int:
   ret 100
 `,
@@ -440,7 +440,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       activeWatcher = await watchProject(tmpDir, {
         debounceMs: 20,
-        onCompileSuccess: (_ail, target) => {
+        onCompileSuccess: (_aice, target) => {
           successCount++;
           lastTarget = target;
         },
@@ -449,7 +449,7 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       await new Promise((r) => setTimeout(r, 40));
 
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn getCount() -> int:
   ret 200
 `,
@@ -460,21 +460,21 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
 
       expect(lastTarget).toBe(siblingTarget);
       expect(fs.readFileSync(siblingTarget, "utf-8")).toContain("200");
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build"))).toBe(false);
     });
 
     it("respects CLI flag --out in side-by-side mode overriding sibling target", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "calc.ts.ail");
+      const aiceFile = path.join(srcDir, "calc.ts.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn calc():\n  ret\n`,
         "utf-8",
       );
 
       const customOut = path.join(tmpDir, "custom-out.ts");
-      const res = runCli(["compile", "src/calc.ts.ail", "--out", "custom-out.ts"], tmpDir);
+      const res = runCli(["compile", "src/calc.ts.aice", "--out", "custom-out.ts"], tmpDir);
       expect(res.status).toBe(0);
 
       expect(fs.existsSync(customOut)).toBe(true);
@@ -483,11 +483,11 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
   });
 
   describe("Auto-Detection & Multi-Language Dual Mode", () => {
-    it("mirrors dual-extension tsx files to .ail-build in isolated mode", () => {
+    it("mirrors dual-extension tsx files to .aice-build in isolated mode", () => {
       saveProjectConfig(tmpDir, {
         mode: "isolated",
         sourceDir: "src",
-        outDir: ".ail-build",
+        outDir: ".aice-build",
         targetLanguage: "typescript",
         isolated: true,
       });
@@ -495,35 +495,35 @@ describe("Step 16: Dual-Mode Execution in ail compile and ail watch", () => {
       const srcDir = path.join(tmpDir, "src", "components");
       fs.mkdirSync(srcDir, { recursive: true });
       fs.writeFileSync(
-        path.join(srcDir, "Button.tsx.ail"),
+        path.join(srcDir, "Button.tsx.aice"),
         `fn Button() -> str:\n  ret "btn"\n`,
         "utf-8",
       );
 
-      const res = runCli(["compile", "src/components/Button.tsx.ail"], tmpDir);
+      const res = runCli(["compile", "src/components/Button.tsx.aice"], tmpDir);
       expect(res.status).toBe(0);
 
-      const expectedTarget = path.join(tmpDir, ".ail-build", "components", "Button.tsx");
+      const expectedTarget = path.join(tmpDir, ".aice-build", "components", "Button.tsx");
       expect(fs.existsSync(expectedTarget)).toBe(true);
       expect(fs.existsSync(path.join(srcDir, "Button.tsx"))).toBe(false);
     });
 
-    it("auto-detects isolated mode when .ail-build folder exists without config", async () => {
-      // Create .ail-build folder to trigger auto-detection of isolated mode
-      fs.mkdirSync(path.join(tmpDir, ".ail-build"), { recursive: true });
+    it("auto-detects isolated mode when .aice-build folder exists without config", async () => {
+      // Create .aice-build folder to trigger auto-detection of isolated mode
+      fs.mkdirSync(path.join(tmpDir, ".aice-build"), { recursive: true });
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      const ailFile = path.join(srcDir, "math.ail");
+      const aiceFile = path.join(srcDir, "math.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn add(a: int, b: int) -> int:\n  ret a + b\n`,
         "utf-8",
       );
 
-      const result = await recompileSingleFile(ailFile, { projectRoot: tmpDir });
+      const result = await recompileSingleFile(aiceFile, { projectRoot: tmpDir });
       expect(result.success).toBe(true);
-      expect(result.targetFile).toBe(path.join(tmpDir, ".ail-build", "math.ts"));
-      expect(fs.existsSync(path.join(tmpDir, ".ail-build", "math.ts"))).toBe(true);
+      expect(result.targetFile).toBe(path.join(tmpDir, ".aice-build", "math.ts"));
+      expect(fs.existsSync(path.join(tmpDir, ".aice-build", "math.ts"))).toBe(true);
       expect(fs.existsSync(path.join(srcDir, "math.ts"))).toBe(false);
     });
   });

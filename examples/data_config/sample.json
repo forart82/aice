@@ -1,5 +1,5 @@
 {
-  "name": "ail-data-service",
+  "name": "aice-data-service",
   "version": "2.4.0",
   "port": 8080,
   "timeout": 30.5,

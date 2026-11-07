@@ -1,6 +1,6 @@
 /**
  * Canonical Standard Library (CSL) primitive types and signature registry.
- * Conforms to Section 2 of docs/AIL_SPEC.md.
+ * Conforms to Section 2 of docs/AICE_SPEC.md.
  */
 
 import {

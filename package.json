@@ -1,22 +1,22 @@
 {
-  "name": "ail",
-  "version": "0.7.16",
-  "description": "AIL: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
+  "name": "aice",
+  "version": "0.8.0",
+  "description": "AICE: Token-Efficient Homoiconic Bidirectional Programming Language & Compiler Engine",
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
-    "ail": "./bin/ail.mjs",
-    "ail-lsp": "./bin/ail-lsp.mjs"
+    "aice": "./bin/aice.mjs",
+    "aice-lsp": "./bin/aice-lsp.mjs"
   },
   "scripts": {
-    "ail": "tsx ./bin/ail.ts",
-    "fix": "tsx ./bin/ail.ts fix",
+    "aice": "tsx ./bin/aice.ts",
+    "fix": "tsx ./bin/aice.ts fix",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc --noEmit",
     "format": "biome format --write .",
     "lint": "biome check .",
-    "verify:tokenomics": "tsx ./bin/ail.ts verify-tokenomics examples --check-drift",
+    "verify:tokenomics": "tsx ./bin/aice.ts verify-tokenomics examples --check-drift",
     "benchmark": "tsx benchmarks/run.ts",
     "benchmark:offline": "tsx benchmarks/run-offline.ts",
     "benchmark:agents": "tsx benchmarks/run-real-agents.ts",

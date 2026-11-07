@@ -18,7 +18,7 @@ import {
   SUPPORTED_BENCHMARK_LANGUAGES,
 } from "../../benchmarks/index.js";
 
-describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI Agents)", () => {
+describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI Agents)", () => {
   it("evaluates the Deterministic Offline Benchmark Suite across all 10 scenarios, 15 file types, and CRUD+Refactor operations (docs/BENCHMARKS_OFFLINE.md)", () => {
     expect(SUPPORTED_BENCHMARK_LANGUAGES).toHaveLength(15);
     expect(OFFLINE_BENCHMARKS).toHaveLength(10);
@@ -31,7 +31,7 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
     expect(report.winsWithIdioms).toBe(10);
     expect(report.winRateWithoutIdiomsPct).toBe(100);
     expect(report.winRateWithIdiomsPct).toBe(100);
-    expect(report.zeroAilFilesLeftOnDisk).toBe(true);
+    expect(report.zeroAiceFilesLeftOnDisk).toBe(true);
     expect(report.coveredLanguages).toHaveLength(15);
     expect(report.coveredExtensions).toHaveLength(15);
     expect(report.coveredScenarios).toHaveLength(5);
@@ -46,22 +46,22 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
       report.aggregateRefactor,
       report.aggregateTotal,
     ]) {
-      expect(op.ailWithoutIdiomsWins).toBe(true);
-      expect(op.ailWithIdiomsWins).toBe(true);
-      expect(op.ailWithoutIdiomsTokens).toBeLessThan(op.withoutAilTokens);
-      expect(op.ailWithIdiomsTokens).toBeLessThanOrEqual(op.ailWithoutIdiomsTokens);
-      expect(op.withoutAilTurns).toBeGreaterThan(0);
-      expect(op.ailWithoutIdiomsTurns).toBeGreaterThan(0);
-      expect(op.ailWithIdiomsTurns).toBeGreaterThan(0);
-      expect(op.ailWithoutIdiomsTurns).toBeLessThanOrEqual(op.withoutAilTurns);
-      expect(op.ailWithIdiomsTurns).toBeLessThanOrEqual(op.ailWithoutIdiomsTurns);
+      expect(op.aiceWithoutIdiomsWins).toBe(true);
+      expect(op.aiceWithIdiomsWins).toBe(true);
+      expect(op.aiceWithoutIdiomsTokens).toBeLessThan(op.withoutAiceTokens);
+      expect(op.aiceWithIdiomsTokens).toBeLessThanOrEqual(op.aiceWithoutIdiomsTokens);
+      expect(op.withoutAiceTurns).toBeGreaterThan(0);
+      expect(op.aiceWithoutIdiomsTurns).toBeGreaterThan(0);
+      expect(op.aiceWithIdiomsTurns).toBeGreaterThan(0);
+      expect(op.aiceWithoutIdiomsTurns).toBeLessThanOrEqual(op.withoutAiceTurns);
+      expect(op.aiceWithIdiomsTurns).toBeLessThanOrEqual(op.aiceWithoutIdiomsTurns);
     }
 
-    expect(report.aggregateTotal.ailWithoutIdiomsTurns).toBeLessThan(
-      report.aggregateTotal.withoutAilTurns,
+    expect(report.aggregateTotal.aiceWithoutIdiomsTurns).toBeLessThan(
+      report.aggregateTotal.withoutAiceTurns,
     );
-    expect(report.aggregateTotal.ailWithIdiomsTurns).toBeLessThan(
-      report.aggregateTotal.ailWithoutIdiomsTurns,
+    expect(report.aggregateTotal.aiceWithIdiomsTurns).toBeLessThan(
+      report.aggregateTotal.aiceWithoutIdiomsTurns,
     );
     expect(report.aggregateTotal.turnsSavingsWithoutIdiomsPct).toBeGreaterThan(0);
     expect(report.aggregateTotal.turnsSavingsWithIdiomsPct).toBeGreaterThan(
@@ -70,36 +70,36 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
 
     // Verify each of the 10 offline benchmarks
     for (const b of report.benchmarks) {
-      expect(b.ailWinsAllWithoutIdioms).toBe(true);
-      expect(b.ailWinsAllWithIdioms).toBe(true);
-      expect(b.zeroAilFilesLeftOnDisk).toBe(true);
+      expect(b.aiceWinsAllWithoutIdioms).toBe(true);
+      expect(b.aiceWinsAllWithIdioms).toBe(true);
+      expect(b.zeroAiceFilesLeftOnDisk).toBe(true);
       expect(b.idiomDefinitionsTokens).toBeGreaterThan(0);
 
       // Verify turn metrics per benchmark
-      expect(b.total.withoutAilTurns).toBeGreaterThan(0);
-      expect(b.total.ailWithoutIdiomsTurns).toBeLessThan(b.total.withoutAilTurns);
-      expect(b.total.ailWithIdiomsTurns).toBeLessThanOrEqual(b.total.ailWithoutIdiomsTurns);
+      expect(b.total.withoutAiceTurns).toBeGreaterThan(0);
+      expect(b.total.aiceWithoutIdiomsTurns).toBeLessThan(b.total.withoutAiceTurns);
+      expect(b.total.aiceWithIdiomsTurns).toBeLessThanOrEqual(b.total.aiceWithoutIdiomsTurns);
       expect(b.total.turnsSavingsWithoutIdiomsPct).toBeGreaterThan(0);
       expect(b.total.turnsSavingsWithIdiomsPct).toBeGreaterThanOrEqual(
         b.total.turnsSavingsWithoutIdiomsPct,
       );
 
-      // Write from 0 must charge idiom definition overhead and still beat pure AIL and Native
-      const rawIdiomFilesSum = b.files.reduce((acc, f) => acc + f.ailWithIdiomsTokens, 0);
-      expect(b.writeFromZero.ailWithIdiomsTokens).toBe(
+      // Write from 0 must charge idiom definition overhead and still beat pure AICE and Native
+      const rawIdiomFilesSum = b.files.reduce((acc, f) => acc + f.aiceWithIdiomsTokens, 0);
+      expect(b.writeFromZero.aiceWithIdiomsTokens).toBe(
         rawIdiomFilesSum + b.idiomDefinitionsTokens,
       );
-      expect(b.writeFromZero.ailWithIdiomsTokens).toBeLessThan(
-        b.writeFromZero.ailWithoutIdiomsTokens,
+      expect(b.writeFromZero.aiceWithIdiomsTokens).toBeLessThan(
+        b.writeFromZero.aiceWithoutIdiomsTokens,
       );
-      expect(b.writeFromZero.ailWithoutIdiomsTokens).toBeLessThan(
-        b.writeFromZero.withoutAilTokens,
+      expect(b.writeFromZero.aiceWithoutIdiomsTokens).toBeLessThan(
+        b.writeFromZero.withoutAiceTokens,
       );
 
       // Every individual file in the benchmark must compress both without idioms and with idioms
       for (const f of b.files) {
-        expect(f.ailWithoutIdiomsTokens).toBeLessThan(f.withoutAilTokens);
-        expect(f.ailWithIdiomsTokens).toBeLessThan(f.ailWithoutIdiomsTokens);
+        expect(f.aiceWithoutIdiomsTokens).toBeLessThan(f.withoutAiceTokens);
+        expect(f.aiceWithIdiomsTokens).toBeLessThan(f.aiceWithoutIdiomsTokens);
       }
     }
 
@@ -123,41 +123,41 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
     expect(realReport.winsWithoutIdioms).toBe(10);
     expect(realReport.winsWithIdioms).toBe(10);
     expect(realReport.allVerifiedOnDisk).toBe(true);
-    expect(realReport.zeroAilFilesLeftOnDisk).toBe(true);
+    expect(realReport.zeroAiceFilesLeftOnDisk).toBe(true);
 
     const seenConversationIds = new Set<string>();
     for (const b of realReport.benchmarks) {
-      expect(b.ailWithoutIdiomsWins).toBe(true);
-      expect(b.ailWithIdiomsWins).toBe(true);
+      expect(b.aiceWithoutIdiomsWins).toBe(true);
+      expect(b.aiceWithIdiomsWins).toBe(true);
       expect(b.idiomsBeatNoIdioms).toBe(true);
 
-      for (const m of [b.withoutAil, b.ailWithoutIdioms, b.ailWithIdioms]) {
+      for (const m of [b.withoutAice, b.aiceWithoutIdioms, b.aiceWithIdioms]) {
         expect(m.conversationId).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
         );
         seenConversationIds.add(m.conversationId);
         expect(m.verifiedOnDisk).toBe(true);
-        expect(m.zeroAilFilesLeftOnDisk).toBe(true);
+        expect(m.zeroAiceFilesLeftOnDisk).toBe(true);
       }
 
-      // Strict ordering: withoutAil > ailWithoutIdioms > ailWithIdioms
-      expect(b.ailWithoutIdioms.llmTurns).toBeLessThan(b.withoutAil.llmTurns);
-      expect(b.ailWithIdioms.llmTurns).toBeLessThan(b.ailWithoutIdioms.llmTurns);
+      // Strict ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms
+      expect(b.aiceWithoutIdioms.llmTurns).toBeLessThan(b.withoutAice.llmTurns);
+      expect(b.aiceWithIdioms.llmTurns).toBeLessThan(b.aiceWithoutIdioms.llmTurns);
 
-      expect(b.ailWithoutIdioms.toolCalls).toBeLessThan(b.withoutAil.toolCalls);
-      expect(b.ailWithIdioms.toolCalls).toBeLessThan(b.ailWithoutIdioms.toolCalls);
+      expect(b.aiceWithoutIdioms.toolCalls).toBeLessThan(b.withoutAice.toolCalls);
+      expect(b.aiceWithIdioms.toolCalls).toBeLessThan(b.aiceWithoutIdioms.toolCalls);
 
-      expect(b.ailWithoutIdioms.workingTokens).toBeLessThan(b.withoutAil.workingTokens);
-      expect(b.ailWithIdioms.workingTokens).toBeLessThan(b.ailWithoutIdioms.workingTokens);
+      expect(b.aiceWithoutIdioms.workingTokens).toBeLessThan(b.withoutAice.workingTokens);
+      expect(b.aiceWithIdioms.workingTokens).toBeLessThan(b.aiceWithoutIdioms.workingTokens);
 
-      expect(b.ailWithoutIdioms.outputTokens).toBeLessThan(b.withoutAil.outputTokens);
-      expect(b.ailWithIdioms.outputTokens).toBeLessThan(b.ailWithoutIdioms.outputTokens);
+      expect(b.aiceWithoutIdioms.outputTokens).toBeLessThan(b.withoutAice.outputTokens);
+      expect(b.aiceWithIdioms.outputTokens).toBeLessThan(b.aiceWithoutIdioms.outputTokens);
 
-      expect(b.ailWithoutIdioms.billableTokens).toBeLessThan(b.withoutAil.billableTokens);
-      expect(b.ailWithIdioms.billableTokens).toBeLessThan(b.ailWithoutIdioms.billableTokens);
+      expect(b.aiceWithoutIdioms.billableTokens).toBeLessThan(b.withoutAice.billableTokens);
+      expect(b.aiceWithIdioms.billableTokens).toBeLessThan(b.aiceWithoutIdioms.billableTokens);
 
-      expect(b.ailWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAil.apiTotalTokens);
-      expect(b.ailWithIdioms.apiTotalTokens).toBeLessThan(b.ailWithoutIdioms.apiTotalTokens);
+      expect(b.aiceWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
+      expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.aiceWithoutIdioms.apiTotalTokens);
     }
 
     // All 30 runs must have distinct UUIDs
@@ -182,7 +182,7 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
     const { collapseModuleIdioms, expandModuleIdioms } = await import("../../src/idioms/index.js");
 
     const { idioms } = buildIdiomRegistryForLanguage("css");
-    const ailCss = [
+    const aiceCss = [
       "style .btn:hover, button:focus {",
       '  $css_card("12px", "6px")',
       "  z-index: 5",
@@ -195,7 +195,7 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
       "}",
     ].join("\n");
 
-    const mod = parse(ailCss, "responsive.ail");
+    const mod = parse(aiceCss, "responsive.aice");
     expect(mod.items).toHaveLength(2);
     const mediaDecl = mod.items[1];
     expect(mediaDecl.kind).toBe("StyleDecl");
@@ -218,14 +218,14 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
     expect(collapsed.collapsedCount).toBe(2);
   });
 
-  it("compiles .tsx benchmark files from real AIL component declarations into JSX and uses domain-specific idioms", () => {
+  it("compiles .tsx benchmark files from real AICE component declarations into JSX and uses domain-specific idioms", () => {
     const tsxFiles = OFFLINE_BENCHMARKS.flatMap((b) =>
       b.files.filter((f) => f.languageId === "tsx"),
     );
     expect(tsxFiles.length).toBeGreaterThanOrEqual(3);
     for (const tsxSpec of tsxFiles) {
-      expect(tsxSpec.ailWithIdioms).toContain("component ");
-      expect(tsxSpec.ailWithIdioms).toContain("$tsx_kpi_tile(");
+      expect(tsxSpec.aiceWithIdioms).toContain("component ");
+      expect(tsxSpec.aiceWithIdioms).toContain("$tsx_kpi_tile(");
     }
 
     const distinctIdioms = new Set(SUPPORTED_BENCHMARK_LANGUAGES.map((l) => l.idiomName));
@@ -281,28 +281,28 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
       ...buildIdiomRegistryForLanguage("cs").idioms,
     };
 
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-cpp-cs-splice-test-"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cpp-cs-splice-test-"));
     try {
       const cppNative = emitTarget(
-        expandModuleIdioms(parse(cppFile.ailWithIdioms, `${cppFile.fileName}.ail`), idioms),
+        expandModuleIdioms(parse(cppFile.aiceWithIdioms, `${cppFile.fileName}.aice`), idioms),
         "cpp",
         { watermark: false },
       );
       const csNative = emitTarget(
-        expandModuleIdioms(parse(csFile.ailWithIdioms, `${csFile.fileName}.ail`), idioms),
+        expandModuleIdioms(parse(csFile.aiceWithIdioms, `${csFile.fileName}.aice`), idioms),
         "csharp",
         { watermark: false },
       );
       fs.writeFileSync(path.join(tmpDir, cppFile.fileName), cppNative, "utf-8");
       fs.writeFileSync(path.join(tmpDir, csFile.fileName), csNative, "utf-8");
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         JSON.stringify({ version: 2, idioms }, null, 2),
       );
 
       await splice(path.join(tmpDir, cppFile.fileName), {
         symbol: cppFile.targetSymbol,
-        code: cppFile.updatedTargetSymbolAilWithIdioms.replace(
+        code: cppFile.updatedTargetSymbolAiceWithIdioms.replace(
           /\$[a-z_]+_band_step|\$solve_axis_impulse/g,
           "$guard_band_step",
         ),
@@ -310,7 +310,7 @@ describe("AIL 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI A
       });
       await splice(path.join(tmpDir, csFile.fileName), {
         symbol: csFile.targetSymbol,
-        code: csFile.updatedTargetSymbolAilWithIdioms.replace(
+        code: csFile.updatedTargetSymbolAiceWithIdioms.replace(
           /\$[a-z_]+_band_step|\$settle_ledger_window/g,
           "$guard_band_step",
         ),

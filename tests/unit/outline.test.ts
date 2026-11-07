@@ -2,14 +2,14 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 Semantic AST Skeleton Outline Engine (Step 18).
+ * Unit tests for AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18).
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { program } from "../../bin/ail.js";
+import { program } from "../../bin/aice.js";
 import { parse } from "../../src/core/parser.js";
 import {
   generateOutline,
@@ -18,7 +18,7 @@ import {
   type OutlineSymbol,
 } from "../../src/tools/outline.js";
 
-describe("AIL 2.0 Semantic AST Skeleton Outline Engine (Step 18)", () => {
+describe("AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18)", () => {
   describe("Outlining Functions", () => {
     it("strips function implementation body and replaces with ': ...'", () => {
       const src = `
@@ -379,10 +379,10 @@ class DataPipeline:
 
   describe("Directory Traversal & Path Handling", () => {
     it("recursively outlines files across directories and returns Map<string, OutlineResult>", async () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail_outline_test_"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_outline_test_"));
       try {
-        const fileA = path.join(tmpDir, "math.ail");
-        const fileB = path.join(tmpDir, "service.ail");
+        const fileA = path.join(tmpDir, "math.aice");
+        const fileB = path.join(tmpDir, "service.aice");
 
         fs.writeFileSync(fileA, "fn add(a: int, b: int) -> int:\n  ret a + b\n", "utf-8");
         fs.writeFileSync(fileB, "class Worker:\n  fn run():\n    pass\n", "utf-8");
@@ -393,17 +393,17 @@ class DataPipeline:
         expect(map.size).toBe(2);
 
         const keys = Array.from(map.keys());
-        expect(keys.some((k) => k.includes("math.ail"))).toBe(true);
-        expect(keys.some((k) => k.includes("service.ail"))).toBe(true);
+        expect(keys.some((k) => k.includes("math.aice"))).toBe(true);
+        expect(keys.some((k) => k.includes("service.aice"))).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
 
     it("outlines a single file path and returns OutlineResult directly", async () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail_outline_single_"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_outline_single_"));
       try {
-        const singleFile = path.join(tmpDir, "helper.ail");
+        const singleFile = path.join(tmpDir, "helper.aice");
         fs.writeFileSync(singleFile, "fn help(): pass\n", "utf-8");
 
         const result = await outlinePath(singleFile);

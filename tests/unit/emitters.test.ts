@@ -15,28 +15,28 @@ import {
   lowerPropertyAccess,
 } from "../../src/emitters/index.js";
 import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
-import { AilGenerator } from "../../src/decompiler/ail-generator.js";
+import { AiceGenerator } from "../../src/decompiler/aice-generator.js";
 import { TypeScriptEmitter } from "../../src/emitters/ts-emitter.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 describe("Step 5: Multi-Language Forward Emitters & Lowering", () => {
   describe("Path & Target Detection", () => {
     it("detects targets correctly from file extensions", () => {
-      expect(detectTargetFromPath("auth.ts.ail")).toBe("typescript");
-      expect(detectTargetFromPath("button.tsx.ail")).toBe("tsx");
-      expect(detectTargetFromPath("server.py.ail")).toBe("python");
-      expect(detectTargetFromPath("index.html.ail")).toBe("html");
-      expect(detectTargetFromPath("theme.css.ail")).toBe("css");
+      expect(detectTargetFromPath("auth.ts.aice")).toBe("typescript");
+      expect(detectTargetFromPath("button.tsx.aice")).toBe("tsx");
+      expect(detectTargetFromPath("server.py.aice")).toBe("python");
+      expect(detectTargetFromPath("index.html.aice")).toBe("html");
+      expect(detectTargetFromPath("theme.css.aice")).toBe("css");
     });
 
-    it("derives output target paths by stripping .ail", () => {
-      expect(getTargetOutputPath("src/auth.ts.ail")).toBe("src/auth.ts");
-      expect(getTargetOutputPath("components/Card.tsx.ail")).toBe("components/Card.tsx");
-      expect(getTargetOutputPath("backend/main.py.ail")).toBe("backend/main.py");
+    it("derives output target paths by stripping .aice", () => {
+      expect(getTargetOutputPath("src/auth.ts.aice")).toBe("src/auth.ts");
+      expect(getTargetOutputPath("components/Card.tsx.aice")).toBe("components/Card.tsx");
+      expect(getTargetOutputPath("backend/main.py.aice")).toBe("backend/main.py");
     });
   });
 
@@ -85,7 +85,7 @@ describe("Step 5: Multi-Language Forward Emitters & Lowering", () => {
 fn getScore(u: User) -> int:
   ret u.score`;
 
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("export interface User {");
@@ -104,7 +104,7 @@ fn getScore(u: User) -> int:
   else:
     ret "low"`;
 
-      const mod = parse(src, "flow.ts.ail");
+      const mod = parse(src, "flow.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("if ((score > 100)) {");
@@ -118,7 +118,7 @@ fn getScore(u: User) -> int:
   Square(float)
   Point`;
 
-      const mod = parse(src, "shape.ts.ail");
+      const mod = parse(src, "shape.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("export type Shape =");
@@ -131,7 +131,7 @@ fn getScore(u: User) -> int:
   let z = 10
   ret { x, y, extra: z }`;
 
-      const mod = parse(src, "point.ts.ail");
+      const mod = parse(src, "point.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("return { x, y, extra: z };");
@@ -145,7 +145,7 @@ fn getScore(u: User) -> int:
 fn create(amt: int, cur: str) -> Money:
   ret Money(amt, cur)`;
 
-      const mod = parse(src, "money.ts.ail");
+      const mod = parse(src, "money.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("export interface Money {");
@@ -158,7 +158,7 @@ fn create(amt: int, cur: str) -> Money:
 
     it("emits single-expression functions in TypeScript", () => {
       const src = `fn add(a: int, b: int) -> int = a + b`;
-      const mod = parse(src, "math.ts.ail");
+      const mod = parse(src, "math.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("export function add(a: number, b: number): number {");
@@ -175,7 +175,7 @@ fn create(amt: int, cur: str) -> Money:
   let shrVal = a >> b
   let ushrVal = a >>> b
   ret p`;
-      const mod = parse(src, "compute.ts.ail");
+      const mod = parse(src, "compute.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("(a ** b)");
       expect(out).toContain("(a & b)");
@@ -195,7 +195,7 @@ fn create(amt: int, cur: str) -> Money:
 fn updateAge(u: User, newAge: int) -> User:
   ret { ...u, age: newAge }`;
 
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("return { id: u.id, name: u.name, age: newAge };");
@@ -205,7 +205,7 @@ fn updateAge(u: User, newAge: int) -> User:
       const src = `fn merge(base: any, extra: int) -> any:
   ret { ...base, count: extra }`;
 
-      const mod = parse(src, "merge.ts.ail");
+      const mod = parse(src, "merge.ts.aice");
       const out = emitTarget(mod, "typescript");
 
       expect(out).toContain("return { ...base, count: extra };");
@@ -219,7 +219,7 @@ fn updateAge(u: User, newAge: int) -> User:
     span: "Warning"
     p: message`;
 
-      const mod = parse(src, "banner.tsx.ail");
+      const mod = parse(src, "banner.tsx.aice");
       const out = emitTarget(mod, "tsx");
 
       expect(out).toContain("export interface AlertBannerProps {");
@@ -241,7 +241,7 @@ fn updateAge(u: User, newAge: int) -> User:
 fn isExpired(s: Session, now: int) -> bool:
   ret s.expires < now`;
 
-      const mod = parse(src, "session.py.ail");
+      const mod = parse(src, "session.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain("from typing import Any, Optional, Union, TypedDict");
@@ -259,7 +259,7 @@ fn isExpired(s: Session, now: int) -> bool:
     case 2 => "two"
     case _ => "other"`;
 
-      const mod = parse(src, "match.py.ail");
+      const mod = parse(src, "match.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain("match n:");
@@ -274,7 +274,7 @@ fn isExpired(s: Session, now: int) -> bool:
   let z = 10
   ret { x, y, extra: z }`;
 
-      const mod = parse(src, "point.py.ail");
+      const mod = parse(src, "point.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain('return {"x": x, "y": y, "extra": z}');
@@ -288,7 +288,7 @@ fn isExpired(s: Session, now: int) -> bool:
 fn create(amt: int, cur: str) -> Money:
   ret Money(amt, cur)`;
 
-      const mod = parse(src, "money.py.ail");
+      const mod = parse(src, "money.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain("class Money(TypedDict):");
@@ -305,7 +305,7 @@ fn create(amt: int, cur: str) -> Money:
   let shrVal = a >> b
   let ushrVal = a >>> b
   ret p`;
-      const mod = parse(src, "compute.py.ail");
+      const mod = parse(src, "compute.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("(a ** b)");
       expect(out).toContain("(a & b)");
@@ -318,7 +318,7 @@ fn create(amt: int, cur: str) -> Money:
 
     it("emits single-expression functions in Python", () => {
       const src = `fn add(a: int, b: int) -> int = a + b`;
-      const mod = parse(src, "math.py.ail");
+      const mod = parse(src, "math.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain("def add(a: int, b: int) -> int:");
@@ -334,7 +334,7 @@ fn create(amt: int, cur: str) -> Money:
 fn updateAge(u: User, newAge: int) -> User:
   ret { ...u, age: newAge }`;
 
-      const mod = parse(src, "user.py.ail");
+      const mod = parse(src, "user.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain('return {"id": u.id, "name": u.name, "age": newAge}');
@@ -344,7 +344,7 @@ fn updateAge(u: User, newAge: int) -> User:
       const src = `fn merge(base: any, extra: int) -> any:
   ret { ...base, count: extra }`;
 
-      const mod = parse(src, "merge.py.ail");
+      const mod = parse(src, "merge.py.aice");
       const out = emitTarget(mod, "python");
 
       expect(out).toContain('return {**base, "count": extra}');
@@ -361,7 +361,7 @@ fn updateAge(u: User, newAge: int) -> User:
     body:
       h1: "Hello World"`;
 
-      const mod = parse(src, "page.html.ail");
+      const mod = parse(src, "page.html.aice");
       const out = emitTarget(mod, "html");
 
       expect(out).toContain("<!DOCTYPE html>");
@@ -383,7 +383,7 @@ style primary_button:
   border_radius: "4px"
   color: "#fff"`;
 
-      const mod = parse(src, "theme.css.ail");
+      const mod = parse(src, "theme.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toContain("body {");
@@ -407,7 +407,7 @@ style card_container:
   box_shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1)
   --custom-accent: #3b82f6`;
 
-      const mod = parse(src, "theme.css.ail");
+      const mod = parse(src, "theme.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toBe(`body {
@@ -432,7 +432,7 @@ style card_container:
   950: #020617, 900: #0f172a
 tokens spacing in root_variables: [0, 4, 8]px`;
 
-      const mod = parse(src, "tokens.css.ail");
+      const mod = parse(src, "tokens.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toContain(".root-variables {");
@@ -447,7 +447,7 @@ tokens spacing in root_variables: [0, 4, 8]px`;
       const src = `style .card: bg: #fff; rad: 8px; p: 16px; disp: flex
 style .hero: sh: 0 4px 6px #000; w: 100%; h: 100vh; fz: 1.5rem; fw: 700; c: #f8fafc; z: 10; cur: pointer; op: 0.9; trans: all 0.2s; anim: pulse 2s infinite; bb: 1px solid #333; fld: row; jc: space-between; ai: center; gap: 1rem`;
 
-      const mod = parse(src, "dense.css.ail");
+      const mod = parse(src, "dense.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toContain(`.card {
@@ -479,7 +479,7 @@ style .hero: sh: 0 4px 6px #000; w: 100%; h: 100vh; fz: 1.5rem; fw: 700; c: #f8f
       const src = `style app: bg: $slate-950; c: $slate-100; sh: $shadow-sm; f: $font-sans; rad: $radius-md; trans: $transition-fast; z: $z-nav
 style btn: bg: $indigo-500; c: white; b: 1px solid $indigo-400; sh: $shadow-md`;
 
-      const mod = parse(src, "tokens.css.ail");
+      const mod = parse(src, "tokens.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toContain("background-color: var(--color-slate-950);");
@@ -500,7 +500,7 @@ style box: fl-row; gap: 1rem
 style stack: fl-col; gap: 0.5rem
 style center_box: fl-center; p: 2rem`;
 
-      const mod = parse(src, "test.css.ail");
+      const mod = parse(src, "test.css.aice");
       const out = emitTarget(mod, "css");
 
       expect(out).toContain(`:root {
@@ -536,7 +536,7 @@ style center_box: fl-center; p: 2rem`;
     .navbar-brand:
       span.brand-icon: "⚡"`;
 
-      const mod = parse(src, "page.html.ail");
+      const mod = parse(src, "page.html.aice");
       const out = emitTarget(mod, "html");
 
       expect(out).toContain('<header class="top-navbar" id="main-header">');
@@ -549,7 +549,7 @@ style center_box: fl-center; p: 2rem`;
   .card-container#featured-card:
     h2.card-title: title`;
 
-      const mod = parse(src, "Card.tsx.ail");
+      const mod = parse(src, "Card.tsx.aice");
       const out = emitTarget(mod, "tsx");
 
       expect(out).toContain('<div className="card-container" id="featured-card">');
@@ -564,7 +564,7 @@ style center_box: fl-center; p: 2rem`;
   button.action-btn:
     .label: "Run"`;
 
-      const mod = parse(src, "layout.html.ail");
+      const mod = parse(src, "layout.html.aice");
       const htmlOut = emitTarget(mod, "html");
       expect(htmlOut).toContain('<ul class="nav-menu">');
       expect(htmlOut).toContain('<li class="nav-item active">');
@@ -585,7 +585,7 @@ style center_box: fl-center; p: 2rem`;
   let sum = a + b
   sum`;
 
-      const mod = parse(src, "math.ts.ail");
+      const mod = parse(src, "math.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
       const pyOut = emitTarget(mod, "python");
 
@@ -600,7 +600,7 @@ style center_box: fl-center; p: 2rem`;
   else:
     x`;
 
-      const mod = parse(src, "math.ts.ail");
+      const mod = parse(src, "math.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
       const pyOut = emitTarget(mod, "python");
 
@@ -614,7 +614,7 @@ style center_box: fl-center; p: 2rem`;
       const src = `fn logItem(x: str) -> void:
   print(x)`;
 
-      const mod = parse(src, "log.ts.ail");
+      const mod = parse(src, "log.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
       const pyOut = emitTarget(mod, "python");
 
@@ -628,7 +628,7 @@ style center_box: fl-center; p: 2rem`;
   describe("Step 3: Compact Structs & Sigil Field Declarations", () => {
     it("emits TypeScript interface and factory with optional fields and defaults", () => {
       const src = `type User: id:!s, name:!s, age:!i = 0, active:!b = true`;
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("export interface User {");
@@ -644,7 +644,7 @@ style center_box: fl-center; p: 2rem`;
 
     it("emits Python TypedDict with default values from single-line struct", () => {
       const src = `type User: id:!s, name:!s, age:!i = 0`;
-      const mod = parse(src, "user.py.ail");
+      const mod = parse(src, "user.py.aice");
       const pyOut = emitTarget(mod, "python");
 
       expect(pyOut).toContain("class User(TypedDict):");
@@ -657,7 +657,7 @@ style center_box: fl-center; p: 2rem`;
   describe("Step 4: Expression-Bodied Functions & Universal Implicit Returns", () => {
     it("emits single-line expression-bodied functions in all languages", () => {
       const src = `fn add(a: int, b: int) -> int = a + b`;
-      const mod = parse(src, "calc.ail");
+      const mod = parse(src, "calc.aice");
 
       const tsOut = emitTarget(mod, "typescript");
       const pyOut = emitTarget(mod, "python");
@@ -676,7 +676,7 @@ style center_box: fl-center; p: 2rem`;
     -x
   else:
     x`;
-      const mod = parse(src, "calc.ail");
+      const mod = parse(src, "calc.aice");
 
       const rsOut = emitTarget(mod, "rust");
       const goOut = emitTarget(mod, "go");
@@ -692,7 +692,7 @@ style center_box: fl-center; p: 2rem`;
     it("emits TypeScript constructor parameter properties from primaryConstructor", () => {
       const src = `class Point(pub x:!i, pub y:!i = 0):
   fn distance() -> !f = 0.0`;
-      const mod = parse(src, "point.ts.ail");
+      const mod = parse(src, "point.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("class Point {");
@@ -703,7 +703,7 @@ style center_box: fl-center; p: 2rem`;
     it("emits Python __init__ with assignments from primaryConstructor", () => {
       const src = `class Point(x:!i, y:!i = 0):
   fn distance() -> !f = 0.0`;
-      const mod = parse(src, "point.py.ail");
+      const mod = parse(src, "point.py.aice");
       const pyOut = emitTarget(mod, "python");
 
       expect(pyOut).toContain("class Point:");
@@ -715,7 +715,7 @@ style center_box: fl-center; p: 2rem`;
     it("emits C++ constructor initializer list and member variables from primaryConstructor", () => {
       const src = `class Point(x:!i, y:!i = 0):
   fn distance() -> !f = 0.0`;
-      const mod = parse(src, "point.cpp.ail");
+      const mod = parse(src, "point.cpp.aice");
       const cppOut = emitTarget(mod, "cpp");
 
       expect(cppOut).toContain("class Point {");
@@ -734,7 +734,7 @@ style center_box: fl-center; p: 2rem`;
     Hp -= amount
     if Hp < 0:
       Hp = 0`;
-      const mod = parse(src, "Snake.ts.ail");
+      const mod = parse(src, "Snake.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("this.Hp -= amount;");
@@ -748,7 +748,7 @@ style center_box: fl-center; p: 2rem`;
   fn add(count: int):
     let step = 1
     this.count += count + step`;
-      const mod = parse(src, "Counter.ts.ail");
+      const mod = parse(src, "Counter.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("const step = 1;");
@@ -792,7 +792,7 @@ style center_box: fl-center; p: 2rem`;
   readonly prop Id, id: str
   prop Shield: int = 50`;
 
-      const mod = parse(src, "SnakeSegment.ts.ail");
+      const mod = parse(src, "SnakeSegment.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("X: number = 0;");
@@ -820,7 +820,7 @@ style center_box: fl-center; p: 2rem`;
   get hp() -> int:
     ret this.Hp * 2`;
 
-      const mod = parse(src, "CustomPlayer.ts.ail");
+      const mod = parse(src, "CustomPlayer.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("Hp: number = 100;");
@@ -835,7 +835,7 @@ style center_box: fl-center; p: 2rem`;
   fn move(dx: int):
     x += dx`;
 
-      const mod = parse(src, "Mover.ts.ail");
+      const mod = parse(src, "Mover.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain("this.x += dx;");
@@ -845,7 +845,7 @@ style center_box: fl-center; p: 2rem`;
       const src = `class Config:
   static prop Version, version: str = "1.0.0"`;
 
-      const mod = parse(src, "Config.ts.ail");
+      const mod = parse(src, "Config.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
 
       expect(tsOut).toContain('static Version: string = "1.0.0";');
@@ -857,7 +857,7 @@ style center_box: fl-center; p: 2rem`;
       const src = `class Player:
   prop X, x: int = 0`;
 
-      const mod = parse(src, "Player.py.ail");
+      const mod = parse(src, "Player.py.aice");
       const pyOut = emitTarget(mod, "python");
 
       expect(pyOut).toContain("self.X: int = 0");
@@ -875,7 +875,7 @@ style center_box: fl-center; p: 2rem`;
   fn getCoords() -> int:
     ret this.x + this.X`;
 
-      const mod = parse(src, "Vector.ail");
+      const mod = parse(src, "Vector.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
@@ -889,7 +889,7 @@ style center_box: fl-center; p: 2rem`;
   z: int := 100
   w: str ::= "mut_typed"`;
 
-      const mod = parse(src, "process.ts.ail");
+      const mod = parse(src, "process.ts.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
 
@@ -906,7 +906,7 @@ pub y ::= "mutable"
 z: int := 100
 pub w: str ::= "mut_typed"`;
 
-      const mod = parse(src, "globals.ts.ail");
+      const mod = parse(src, "globals.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
       expect(tsOut).toContain("const x = 10;");
       expect(tsOut).toContain('export let y = "mutable";');
@@ -920,7 +920,7 @@ pub w: str ::= "mut_typed"`;
   y ::= 10
   ret x + y`;
 
-      const mod = parse(src, "compute.ail");
+      const mod = parse(src, "compute.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
 
@@ -950,7 +950,7 @@ pub w: str ::= "mut_typed"`;
   c := clamp(x, 0, 100)
   ret m + h + c`;
 
-      const mod = parse(src, "math.ts.ail");
+      const mod = parse(src, "math.ts.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
 
@@ -967,7 +967,7 @@ pub w: str ::= "mut_typed"`;
   [a, b] += [1, 1]
   [a, b] = [100, 200]`;
 
-      const mod = parse(src, "vectors.ts.ail");
+      const mod = parse(src, "vectors.ts.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
 
@@ -986,7 +986,7 @@ pub w: str ::= "mut_typed"`;
   h := hypot(px, py)
   ret c + h`;
 
-      const mod = parse(src, "math.ail");
+      const mod = parse(src, "math.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
 
@@ -1020,7 +1020,7 @@ pub w: str ::= "mut_typed"`;
 fn swap(p: [str, int]) -> [int, str]:
   ret [p[1], p[0]]`;
 
-      const mod = parse(src, "tuples.ts.ail");
+      const mod = parse(src, "tuples.ts.aice");
       const tsOut = emitTarget(mod, "typescript");
       expect(tsOut).toContain("pair: [string, number];");
       expect(tsOut).toContain("triple: [number, number, number];");
@@ -1047,7 +1047,7 @@ fn run(x: int, y: int, extra: [int]):
   m := Math.max(...extra)
   combined := [...extra, 99]`;
 
-      const mod = parse(src, "spread.ts.ail");
+      const mod = parse(src, "spread.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("add(x, ...extra)");
       expect(ts).toContain("Math.max(...extra)");
@@ -1067,7 +1067,7 @@ pub fn step(dir: 1 | -1) -> 1 | -1:
 
 val initialDir: 1 | -1 = -1`;
 
-      const mod = parse(src, "direction.ts.ail");
+      const mod = parse(src, "direction.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("export type Direction = 1 | -1;");
       expect(ts).toContain("export type Ternary = -1 | 0 | 1;");
@@ -1087,7 +1087,7 @@ pub fn isOff() -> false:
 val enabled: true = true
 val disabled: false = false`;
 
-      const mod = parse(src, "bool_literals.ts.ail");
+      const mod = parse(src, "bool_literals.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("export type Flag = true | false;");
       expect(ts).toContain("export type SuccessResponse = { success: true; active: false; };");
@@ -1109,7 +1109,7 @@ pub fn style(tokens: int, match: bool, type: str, val: float) -> str:
 
 pub val themeConfig = { style: "dark", tokens: 10, match: true }`;
 
-      const mod = parse(src, "contextual.ts.ail");
+      const mod = parse(src, "contextual.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('import { style, tokens, match, type } from "ui/theme";');
       expect(ts).toContain('import { style as customStyle } from "styles";');
@@ -1119,7 +1119,7 @@ pub val themeConfig = { style: "dark", tokens: 10, match: true }`;
       expect(ts).toContain('const state = "active";');
       expect(ts).toContain('const themeConfig = { style: "dark", tokens: 10, match: true };');
 
-      const pyMod = parse(src, "contextual.py.ail");
+      const pyMod = parse(src, "contextual.py.aice");
       const py = emitTarget(pyMod, "python");
       expect(py).toContain("from ui.theme import style, tokens, match, type");
       expect(py).toContain("from styles import style as customStyle");
@@ -1141,7 +1141,7 @@ pub fn test():
   let g = fn({ x, y }: Point) -> int = x + y
   let unannotated = fn([a, b]) = a + b`;
 
-      const mod = parse(src, "closure_destruct.ts.ail");
+      const mod = parse(src, "closure_destruct.ts.aice");
       const ts = emitTarget(mod, "typescript");
 
       expect(ts).toContain("export function sumPair([a, b]: [number, number]): number");
@@ -1160,7 +1160,7 @@ pub fn test():
   let [, y] = pairs[0]
   let [first, , third] = triplets[0]`;
 
-      const mod = parse(src, "elisions.ts.ail");
+      const mod = parse(src, "elisions.ts.aice");
       const ts = emitTarget(mod, "typescript");
 
       expect(ts).toContain("for (const [, x] of pairs) {");
@@ -1178,7 +1178,7 @@ pub fn test():
   let [, y] = pairs[0]
   let [first, , third] = triplets[0]`;
 
-      const mod = parse(src, "elisions.py.ail");
+      const mod = parse(src, "elisions.py.aice");
       const py = emitTarget(mod, "python");
 
       expect(py).toContain("for _, x in pairs:");
@@ -1202,7 +1202,7 @@ pub fn test():
   let g = fn([, b]: [int, int]) -> int = b
   let h = fn({ effect }) = effect`;
 
-      const mod = parse(src, "closure_destruct.py.ail");
+      const mod = parse(src, "closure_destruct.py.aice");
       const py = emitTarget(mod, "python");
 
       expect(py).toContain("def sumPair(_arg0: tuple[int, int]) -> int:");
@@ -1224,7 +1224,7 @@ pub fn test():
   let res = await p
   ret res`;
 
-      const mod = parse(src, "await_test.ail");
+      const mod = parse(src, "await_test.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const res = await p;");
 
@@ -1239,7 +1239,7 @@ pub fn test():
   fn greet() -> str:
     ret super.greet()`;
 
-      const mod = parse(src, "super_test.ail");
+      const mod = parse(src, "super_test.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("super(x);");
       expect(ts).toContain("return super.greet();");
@@ -1253,7 +1253,7 @@ pub fn test():
   describe("Step 11: String Literal Unions vs Enums Emission", () => {
     it("emits string literal union type declarations faithfully in TypeScript", () => {
       const src = `type HttpMethod = "GET" | "POST" | "PUT" | "DELETE"`;
-      const mod = parse(src, "method.ail");
+      const mod = parse(src, "method.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('export type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";');
     });
@@ -1262,7 +1262,7 @@ pub fn test():
       const src = `type HttpMethod = "GET" | "POST"
 pub fn request(method: HttpMethod) -> HttpMethod:
   ret method`;
-      const mod = parse(src, "req.ail");
+      const mod = parse(src, "req.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("export function request(method: HttpMethod): HttpMethod {");
     });
@@ -1270,14 +1270,14 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     it("emits inline string literal union annotations cleanly in TypeScript", () => {
       const src = `pub fn format(m: "GET" | "POST"):
   ret m`;
-      const mod = parse(src, "inline.ail");
+      const mod = parse(src, "inline.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('export function format(m: "GET" | "POST") {');
     });
 
     it("maps primitive types inside unions cleanly to TypeScript types", () => {
       const src = `type Id = str | int`;
-      const mod = parse(src, "id.ail");
+      const mod = parse(src, "id.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("export type Id = string | number;");
     });
@@ -1290,7 +1290,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     let y = x * 2
     ret y
   }`;
-      const mod = parse(src, "closure_ts.ail");
+      const mod = parse(src, "closure_ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number): number => {");
       expect(ts).toContain("const y = (x * 2);");
@@ -1304,7 +1304,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     let y = x * 2
     ret y
   }`;
-      const mod = parse(src, "closure_ts_inferred.ail");
+      const mod = parse(src, "closure_ts_inferred.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number) => {");
       expect(ts).toContain("const y = (x * 2);");
@@ -1317,7 +1317,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     let y = x * 2
     log(y)
   })`;
-      const mod = parse(src, "closure_arg_ts.ail");
+      const mod = parse(src, "closure_arg_ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("(x: number) => {");
       expect(ts).toContain("const y = (x * 2);");
@@ -1331,7 +1331,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     ret y
   }
   ret f(10)`;
-      const mod = parse(src, "closure_py.ail");
+      const mod = parse(src, "closure_py.aice");
       const py = emitTarget(mod, "python");
       expect(py).toContain("def f(x: int) -> int:");
       expect(py).toContain("y = (x * 2)");
@@ -1345,7 +1345,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     let y = x * 2
     log(y)
   })`;
-      const mod = parse(src, "closure_py_hoist.ail");
+      const mod = parse(src, "closure_py_hoist.aice");
       const py = emitTarget(mod, "python");
       expect(py).toContain("def _closure_");
       expect(py).toContain("y = (x * 2)");
@@ -1356,7 +1356,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
     it("preserves single-expression lambda emission in Python and TypeScript", () => {
       const src = `pub fn test():
   let f = fn(x: int) = x * 2`;
-      const mod = parse(src, "closure_lambda.ail");
+      const mod = parse(src, "closure_lambda.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number) => (x * 2);");
 
@@ -1375,7 +1375,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
   finally:
     log("cleanup")
 `;
-      const mod = parse(src, "try_test.ail");
+      const mod = parse(src, "try_test.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("try {");
       expect(ts).toContain("} catch (err) {");
@@ -1394,7 +1394,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
   finally:
     log("done")
 `;
-      const mod = parse(src, "try_finally.ail");
+      const mod = parse(src, "try_finally.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("try {");
       expect(ts).not.toContain("catch");
@@ -1410,7 +1410,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
       const src = `pub fn fail():
   throw "something went wrong"
 `;
-      const mod = parse(src, "throw_test.ail");
+      const mod = parse(src, "throw_test.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('throw "something went wrong";');
 
@@ -1428,7 +1428,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
       continue
     i = i + 1
 `;
-      const mod = parse(src, "loop_test.ail");
+      const mod = parse(src, "loop_test.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("break;");
       expect(ts).toContain("continue;");
@@ -1444,7 +1444,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
   static:
     Config.version = 2
 `;
-      const mod = parse(src, "static_block.ail");
+      const mod = parse(src, "static_block.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("class Config {");
       expect(ts).toContain("static {");
@@ -1459,7 +1459,7 @@ pub fn request(method: HttpMethod) -> HttpMethod:
       const src = `pub from "./utils" import foo, bar
 pub from "./types" import *
 `;
-      const mod = parse(src, "index.ail");
+      const mod = parse(src, "index.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('export { foo, bar } from "./utils";');
       expect(ts).toContain('export * from "./types";');
@@ -1475,7 +1475,7 @@ pub from "./types" import *
 
 async fn compute() -> Promise[int] = 42
 `;
-      const mod = parse(src, "async_fn.ail");
+      const mod = parse(src, "async_fn.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("export async function getData(id: string): Promise<string> {");
       expect(ts).toContain("export async function compute(): Promise<number> {");
@@ -1493,7 +1493,7 @@ async fn compute() -> Promise[int] = 42
   fn compute(x: float) -> int:
     ret floor(x)
 `;
-      const mod = parse(src, "MathHelper.ail");
+      const mod = parse(src, "MathHelper.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("return Math.floor(x);");
       expect(ts).not.toContain("this.floor(x)");
@@ -1510,7 +1510,7 @@ async fn compute() -> Promise[int] = 42
     let d = abs(a)
     ret m + n + d
 `;
-      const mod = parse(src, "Calculator.ail");
+      const mod = parse(src, "Calculator.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const m = Math.min(a, b);");
       expect(ts).toContain("const n = Math.max(a, b);");
@@ -1528,7 +1528,7 @@ async fn compute() -> Promise[int] = 42
   fn getImplicit() -> int:
     ret floor
 `;
-      const mod = parse(src, "MathHelperProp.ail");
+      const mod = parse(src, "MathHelperProp.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("return this.floor;");
       expect(ts).not.toContain("return Math.floor;");
@@ -1542,7 +1542,7 @@ async fn compute() -> Promise[int] = 42
     print(msg)
     let count = len(items)
 `;
-      const mod = parse(src, "Reporter.ail");
+      const mod = parse(src, "Reporter.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("print(msg);");
       expect(ts).toContain("const count = len(items);");
@@ -1555,7 +1555,7 @@ async fn compute() -> Promise[int] = 42
     it("emits param?: type when param.isOptional is true and no default value is present", () => {
       const src = `fn display(title: str, subtitle?: str, count?: int = 1):
   ret title`;
-      const mod = parse(src, "display.ts.ail");
+      const mod = parse(src, "display.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("function display(title: string, subtitle?: string, count: number = 1)");
     });
@@ -1564,7 +1564,7 @@ async fn compute() -> Promise[int] = 42
       const src = `class Client(pub endpoint: str, pub token?: str, pub timeout: int = 5000):
   fn request(path: str, headers?: str):
     ret path`;
-      const mod = parse(src, "Client.ts.ail");
+      const mod = parse(src, "Client.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain(
         "constructor(public endpoint: string, public token?: string, public timeout: number = 5000)",
@@ -1582,7 +1582,7 @@ import "math"
 
 fn square(x: int) -> int = x * x
 `;
-      const { ast, trivia } = parseWithTrivia(src, "math.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "math.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("// SPDX-License-Identifier: Apache-2.0");
       expect(ts).toContain("// Core math algorithms");
@@ -1597,7 +1597,7 @@ fn square(x: int) -> int = x * x
 fn applyDiscount(price: float, discount: float) -> float:
   ret price * (1.0 - discount)
 `;
-      const { ast, trivia } = parseWithTrivia(src, "discount.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "discount.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("// Calculates the discounted price");
       expect(ts).toContain("// Apply discount percentage");
@@ -1616,7 +1616,7 @@ class HttpClient:
   fn get(path: str) -> str:
     ret baseUrl + path
 `;
-      const { ast, trivia } = parseWithTrivia(src, "client.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "client.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("// Represents an HTTP client");
       expect(ts.indexOf("// Represents an HTTP client")).toBeLessThan(
@@ -1634,7 +1634,7 @@ type Config:
   # Port number
   port: int
 `;
-      const { ast, trivia } = parseWithTrivia(src, "config.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "config.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("// Configuration settings");
       expect(ts).toContain("// Host address");
@@ -1648,7 +1648,7 @@ const TIMEOUT = 5000
 # Current active reconnects
 val reconnects = 0
 `;
-      const { ast, trivia } = parseWithTrivia(src, "server.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "server.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("// Server timeout in ms");
       expect(ts).toContain("const TIMEOUT = 5000;");
@@ -1663,7 +1663,7 @@ val reconnects = 0
 fn dispatch(name: str) -> void:
   nil
 `;
-      const { ast, trivia } = parseWithTrivia(src, "dispatch.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "dispatch.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("/**\n * Dispatches an event to listeners\n */");
       expect(ts.indexOf("Dispatches an event")).toBeLessThan(
@@ -1673,7 +1673,7 @@ fn dispatch(name: str) -> void:
 
     it("retains trailing inline comments in emitted TypeScript", () => {
       const src = `const PI = 3.14159 # mathematical constant`;
-      const { ast, trivia } = parseWithTrivia(src, "pi.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "pi.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
       expect(ts).toContain("const PI = 3.14159; // mathematical constant");
     });
@@ -1685,7 +1685,7 @@ fn dispatch(name: str) -> void:
   id: int
   name: str
 `;
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
 
       // Default (omitted)
       const defaultOut = emitTarget(mod, "typescript");
@@ -1707,7 +1707,7 @@ fn dispatch(name: str) -> void:
   id: int
   name: str
 `;
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
       const pureOut = emitTarget(mod, "typescript", { pureInterfaces: true });
 
       expect(pureOut).toContain("export interface User {");
@@ -1733,7 +1733,7 @@ fn makeUser(i: int, n: str) -> User:
 fn getAdmin() -> User:
   ret User(1, "Alice")
 `;
-      const mod = parse(src, "user.ts.ail");
+      const mod = parse(src, "user.ts.aice");
       const pureOut = emitTarget(mod, "typescript", { pureInterfaces: true });
 
       expect(pureOut).toContain("export interface User {");
@@ -1743,9 +1743,9 @@ fn getAdmin() -> User:
     });
 
     it("verifies CLI --pure-interfaces flag in compile and compile-all commands", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-pure-intf-test-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-pure-intf-test-"));
       try {
-        const srcFile = path.join(tempDir, "model.ts.ail");
+        const srcFile = path.join(tempDir, "model.ts.aice");
         const src = `type Customer:
   id: int
   name: str
@@ -1803,7 +1803,7 @@ fn getCustomer() -> Customer:
     it("emits parenthesized record literal return for expression-bodied closure returning non-empty record literal", () => {
       const src = `pub fn test():
   let f = fn() => { a: 1, b: "ok" }`;
-      const mod = parse(src, "closure_record.ts.ail");
+      const mod = parse(src, "closure_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain('const f = () => ({ a: 1, b: "ok" });');
     });
@@ -1811,7 +1811,7 @@ fn getCustomer() -> Customer:
     it("emits parenthesized record literal return for expression-bodied closure returning empty record literal", () => {
       const src = `pub fn test():
   let f = fn() => {}`;
-      const mod = parse(src, "closure_empty_record.ts.ail");
+      const mod = parse(src, "closure_empty_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = () => ({});");
     });
@@ -1819,7 +1819,7 @@ fn getCustomer() -> Customer:
     it("emits parenthesized record literal return for expression-bodied closure with params returning record literal", () => {
       const src = `pub fn test():
   let f = fn(x: int) => { value: x }`;
-      const mod = parse(src, "closure_param_record.ts.ail");
+      const mod = parse(src, "closure_param_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number) => ({ value: x });");
     });
@@ -1827,14 +1827,14 @@ fn getCustomer() -> Customer:
     it("does not redundantly parenthesize non-record expression-bodied closures", () => {
       const src1 = `pub fn test():
   let f = fn(x: int) => x + 1`;
-      const mod1 = parse(src1, "closure_non_record1.ts.ail");
+      const mod1 = parse(src1, "closure_non_record1.ts.aice");
       const ts1 = emitTarget(mod1, "typescript");
       expect(ts1).toContain("const f = (x: number) => (x + 1);");
       expect(ts1).not.toContain("((x + 1))");
 
       const src2 = `pub fn test():
   let f = fn(x: int) => x`;
-      const mod2 = parse(src2, "closure_non_record2.ts.ail");
+      const mod2 = parse(src2, "closure_non_record2.ts.aice");
       const ts2 = emitTarget(mod2, "typescript");
       expect(ts2).toContain("const f = (x: number) => x;");
       expect(ts2).not.toContain("(x);");
@@ -1847,7 +1847,7 @@ fn getCustomer() -> Customer:
 
 pub fn test():
   let f = fn(x: int) -> Point => { x: x, y: 0 }`;
-      const mod = parse(src, "closure_typed_record.ts.ail");
+      const mod = parse(src, "closure_typed_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number): Point => ({ x, y: 0 });");
     });
@@ -1855,7 +1855,7 @@ pub fn test():
     it("emits parenthesized record literal return when closure is passed as function argument", () => {
       const src = `pub fn transform(items: [int]):
   ret items.map(fn(x: int) => { id: x })`;
-      const mod = parse(src, "closure_arg_record.ts.ail");
+      const mod = parse(src, "closure_arg_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("return items.map((x: number) => ({ id: x }));");
     });
@@ -1863,7 +1863,7 @@ pub fn test():
     it("emits parenthesized object literal return for lowered algebraic constructors", () => {
       const src = `pub fn test():
   let f = fn(x: int) => Ok(x)`;
-      const mod = parse(src, "closure_lowered_record.ts.ail");
+      const mod = parse(src, "closure_lowered_record.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("const f = (x: number) => ({ ok: true, value: x });");
     });
@@ -1873,7 +1873,7 @@ pub fn test():
     it("emits native TypeScript template literals", () => {
       const src = `pub fn greet(name: str, count: int) -> str:
   ret \`Hello \${name}, you have \${count + 1} items!\``;
-      const mod = parse(src, "greet.ts.ail");
+      const mod = parse(src, "greet.ts.aice");
       const ts = emitTarget(mod, "typescript");
       expect(ts).toContain("return `Hello ${name}, you have ${(count + 1)} items!`;");
     });
@@ -1881,7 +1881,7 @@ pub fn test():
     it("emits native Python f-strings", () => {
       const src = `pub fn greet(name: str, count: int) -> str:
   ret \`Hello \${name}, you have \${count + 1} items!\``;
-      const mod = parse(src, "greet.py.ail");
+      const mod = parse(src, "greet.py.aice");
       const py = emitTarget(mod, "python");
       expect(py).toContain('return f"Hello {name}, you have {(count + 1)} items!"');
     });
@@ -1889,7 +1889,7 @@ pub fn test():
     it("escapes literal curly braces in Python f-strings", () => {
       const src = `pub fn wrap(val: str) -> str:
   ret \`{item: \${val}}\``;
-      const mod = parse(src, "wrap.py.ail");
+      const mod = parse(src, "wrap.py.aice");
       const py = emitTarget(mod, "python");
       expect(py).toContain('return f"{{item: {val}}}"');
     });
@@ -1898,14 +1898,14 @@ pub fn test():
   describe("Step 9: Emitted Target File Watermark Header", () => {
     it("prepends watermark header to fresh emitted TypeScript code by default", () => {
       const src = `pub fn add(a: int, b: int) -> int = a + b`;
-      const mod = parse(src, "math.ts.ail");
+      const mod = parse(src, "math.ts.aice");
       const ts = emitTypeScript(mod);
 
-      expect(ts).toContain("// @generated by AIL (AI Language) - DO NOT EDIT DIRECTLY");
-      expect(ts).toContain("// Authoritative Source of Truth: math.ts.ail");
+      expect(ts).toContain("// @generated by AICE (AI Context Engine) - DO NOT EDIT DIRECTLY");
+      expect(ts).toContain("// Authoritative Source of Truth: math.ts.aice");
       expect(
         ts.startsWith(
-          "// @generated by AIL (AI Language) - DO NOT EDIT DIRECTLY\n// Authoritative Source of Truth: math.ts.ail",
+          "// @generated by AICE (AI Context Engine) - DO NOT EDIT DIRECTLY\n// Authoritative Source of Truth: math.ts.aice",
         ),
       ).toBe(true);
       expect(ts).toContain("export function add(a: number, b: number): number {");
@@ -1913,58 +1913,58 @@ pub fn test():
 
     it("uses options.sourcePath when explicitly provided", () => {
       const src = `pub val VERSION = "1.0.0"`;
-      const mod = parse(src, "version.ts.ail");
-      const ts = emitTypeScript(mod, { sourcePath: "custom/path/version.ail" });
+      const mod = parse(src, "version.ts.aice");
+      const ts = emitTypeScript(mod, { sourcePath: "custom/path/version.aice" });
 
-      expect(ts).toContain("// Authoritative Source of Truth: custom/path/version.ail");
+      expect(ts).toContain("// Authoritative Source of Truth: custom/path/version.aice");
     });
 
-    it("falls back to .ail when path is anonymous or omitted", () => {
+    it("falls back to .aice when path is anonymous or omitted", () => {
       const src = `pub val PI = 3.14`;
       const mod = parse(src);
       const ts = emitTypeScript(mod);
 
-      expect(ts).toContain("// Authoritative Source of Truth: .ail");
+      expect(ts).toContain("// Authoritative Source of Truth: .aice");
     });
 
     it("prepends watermark header to fresh emitted React TSX components", () => {
       const src = `pub component Button(label: str):
   button: label`;
-      const mod = parse(src, "Button.tsx.ail");
+      const mod = parse(src, "Button.tsx.aice");
       const tsx = emitTarget(mod, "tsx");
 
-      expect(tsx).toContain("// @generated by AIL (AI Language) - DO NOT EDIT DIRECTLY");
-      expect(tsx).toContain("// Authoritative Source of Truth: Button.tsx.ail");
+      expect(tsx).toContain("// @generated by AICE (AI Context Engine) - DO NOT EDIT DIRECTLY");
+      expect(tsx).toContain("// Authoritative Source of Truth: Button.tsx.aice");
       expect(tsx).toContain("export function Button({ label }: ButtonProps) {");
     });
 
     it("suppresses watermark header when watermark: false is specified", () => {
       const src = `pub fn multiply(x: int, y: int) -> int = x * y`;
-      const mod = parse(src, "calc.ts.ail");
+      const mod = parse(src, "calc.ts.aice");
       const ts = emitTypeScript(mod, { watermark: false });
 
-      expect(ts).not.toContain("@generated by AIL");
+      expect(ts).not.toContain("@generated by AICE");
       expect(ts).not.toContain("Authoritative Source of Truth");
       expect(ts.trim().startsWith("export function multiply")).toBe(true);
     });
 
     it("does not duplicate watermark header if already present in leading trivia", () => {
-      const src = `# @generated by AIL (AI Language) - DO NOT EDIT DIRECTLY
-# Authoritative Source of Truth: existing.ts.ail
+      const src = `# @generated by AICE (AI Context Engine) - DO NOT EDIT DIRECTLY
+# Authoritative Source of Truth: existing.ts.aice
 
 pub val ACTIVE = true`;
-      const { ast, trivia } = parseWithTrivia(src, "existing.ts.ail");
+      const { ast, trivia } = parseWithTrivia(src, "existing.ts.aice");
       const ts = emitTypeScript(ast, { trivia });
 
       // Count occurrences of watermark text
-      const matches = ts.match(/@generated by AIL/g) || [];
+      const matches = ts.match(/@generated by AICE/g) || [];
       expect(matches.length).toBe(1);
     });
 
     it("CLI supports --no-watermark flag to suppress watermark header", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-watermark-test-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-watermark-test-"));
       try {
-        const srcFile = path.join(tempDir, "service.ts.ail");
+        const srcFile = path.join(tempDir, "service.ts.aice");
         fs.writeFileSync(srcFile, `pub fn ping() -> str = "pong"`, "utf-8");
 
         // 1. Compile with default watermark
@@ -1974,7 +1974,7 @@ pub val ACTIVE = true`;
         });
         expect(resDefault.status).toBe(0);
         const contentDefault = fs.readFileSync(outDefault, "utf-8");
-        expect(contentDefault).toContain("// @generated by AIL (AI Language) - DO NOT EDIT DIRECTLY");
+        expect(contentDefault).toContain("// @generated by AICE (AI Context Engine) - DO NOT EDIT DIRECTLY");
         expect(contentDefault).toContain("// Authoritative Source of Truth: ");
 
         // 2. Compile with --no-watermark
@@ -1986,7 +1986,7 @@ pub val ACTIVE = true`;
         );
         expect(resNoWm.status).toBe(0);
         const contentNoWm = fs.readFileSync(outNoWatermark, "utf-8");
-        expect(contentNoWm).not.toContain("@generated by AIL");
+        expect(contentNoWm).not.toContain("@generated by AICE");
         expect(contentNoWm).not.toContain("Authoritative Source of Truth");
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
@@ -2054,29 +2054,29 @@ const x = outer();`;
     it("handles empty closure round-trip correctly", () => {
       const tsSrc = `const f = (): void => {};`;
       const { ast, trivia } = TsDecompiler.decompile(tsSrc);
-      const ail = AilGenerator.generate(ast, { trivia });
-      expect(ail).toContain("fn() -> void = nil");
+      const aice = AiceGenerator.generate(ast, { trivia });
+      expect(aice).toContain("fn() -> void = nil");
 
-      const ailSrc = `pub val f = fn() -> void = nil`;
-      const mod = parse(ailSrc, "closure.ts.ail");
+      const aiceSrc = `pub val f = fn() -> void = nil`;
+      const mod = parse(aiceSrc, "closure.ts.aice");
       const ts = emitTypeScript(mod);
       expect(ts).toContain("(): void => {};");
     });
 
     it("rewrites type expressions safely without corrupting string unions or property keys", () => {
       const unionSrc = `pub type PrimUnion = "int" | "str"`;
-      const unionMod = parse(unionSrc, "union.ts.ail");
+      const unionMod = parse(unionSrc, "union.ts.aice");
       const unionTs = emitTypeScript(unionMod);
       expect(unionTs).toContain('export type PrimUnion = "int" | "str";');
 
       const objSrc = `pub type Config = { num: int, str?: str }`;
-      const objMod = parse(objSrc, "obj.ts.ail");
+      const objMod = parse(objSrc, "obj.ts.aice");
       const objTs = emitTypeScript(objMod);
       expect(objTs).toContain("num: number;");
       expect(objTs).toContain("str?: string;");
 
       const dummySpan = {
-        file: "test.ail",
+        file: "test.aice",
         start: { line: 1, column: 0, offset: 0 },
         end: { line: 1, column: 0, offset: 0 },
       };
@@ -2107,7 +2107,7 @@ const x = outer();`;
       const reassignSrc = `pub fn foo():
   let x = 1
   x = 2`;
-      const reassignMod = parse(reassignSrc, "reassign.ts.ail");
+      const reassignMod = parse(reassignSrc, "reassign.ts.aice");
       const reassignTs = emitTypeScript(reassignMod);
       expect(reassignTs).toContain("let x = 1;");
       expect(reassignTs).toContain("x = 2;");
@@ -2115,7 +2115,7 @@ const x = outer();`;
       const redeclSrc = `pub fn bar():
   let y = 1
   let y = 2`;
-      const redeclMod = parse(redeclSrc, "redecl.ts.ail");
+      const redeclMod = parse(redeclSrc, "redecl.ts.aice");
       const redeclTs = emitTypeScript(redeclMod);
       expect(redeclTs).toContain("let y = 1;");
       expect(redeclTs).toContain("y = 2;");
@@ -2123,7 +2123,7 @@ const x = outer();`;
 
       const paramSrc = `pub fn baz(x: int):
   let x = 42`;
-      const paramMod = parse(paramSrc, "param.ts.ail");
+      const paramMod = parse(paramSrc, "param.ts.aice");
       const paramTs = emitTypeScript(paramMod);
       expect(paramTs).toContain("x = 42;");
       expect(paramTs).not.toContain("const x = 42;");
@@ -2133,7 +2133,7 @@ const x = outer();`;
       const src = `pub fn check(a: any, b: any):
   let res1 = a.contains(b)
   let res2 = a?.contains(b)`;
-      const mod = parse(src, "contains.ts.ail");
+      const mod = parse(src, "contains.ts.aice");
       const ts = emitTypeScript(mod);
       expect(ts).toContain("a.includes(b)");
       expect(ts).toContain("a?.contains(b)");
@@ -2143,12 +2143,12 @@ const x = outer();`;
       const enumSrc = `pub enum Status:
   Active
   Inactive`;
-      const enumMod = parse(enumSrc, "status.js.ail");
+      const enumMod = parse(enumSrc, "status.js.aice");
       const enumJs = emitTarget(enumMod, "javascript");
       expect(enumJs).toContain("export const Status = { Active: 0, Inactive: 1 };");
 
       const classSrc = `pub class Point(pub x: int, pub y: int)`;
-      const classMod = parse(classSrc, "point.js.ail");
+      const classMod = parse(classSrc, "point.js.aice");
       const classJs = emitTarget(classMod, "javascript");
       expect(classJs).toContain("constructor(x, y) {");
       expect(classJs).toContain("this.x = x;");
@@ -2161,7 +2161,7 @@ const x = outer();`;
     ret a
   fn run():
     min(1, 2)`;
-      const mod = parse(src, "calc.ts.ail");
+      const mod = parse(src, "calc.ts.aice");
       const ts = emitTypeScript(mod);
       expect(ts).not.toContain("Math.min");
       expect(ts).toContain("min(1, 2)");

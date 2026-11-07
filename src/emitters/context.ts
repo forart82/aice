@@ -140,10 +140,10 @@ export class EmitterContext {
 }
 
 /**
- * Detects target language from an AIL file path (e.g. foo.ts.ail -> typescript).
+ * Detects target language from an AICE file path (e.g. foo.ts.aice -> typescript).
  */
 export function detectTargetFromPath(filePath: string): TargetLanguage {
-  const clean = filePath.replace(/\.ail$/, "");
+  const clean = filePath.replace(/\.aice$/, "");
   if (clean.endsWith(".tsx") || clean.endsWith(".jsx")) return "tsx";
   if (clean.endsWith(".ts")) return "typescript";
   if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs")) return "javascript";
@@ -170,11 +170,11 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
 }
 
 /**
- * Derives the output target file path from an AIL file path (e.g. src/App.tsx.ail -> src/App.tsx).
+ * Derives the output target file path from an AICE file path (e.g. src/App.tsx.aice -> src/App.tsx).
  */
 export function getTargetOutputPath(filePath: string): string {
-  if (filePath.endsWith(".ail")) {
-    return filePath.slice(0, -4);
+  if (filePath.endsWith(".aice")) {
+    return filePath.slice(0, -5);
   }
   return filePath;
 }

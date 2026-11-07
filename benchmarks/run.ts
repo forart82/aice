@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CLI Runner for AIL 2.0 Real AI Agent Benchmarks (`docs/BENCHMARKS.md`)
+ * CLI Runner for AICE 2.0 Real AI Agent Benchmarks (`docs/BENCHMARKS.md`)
  * and Deterministic Offline Benchmarks (`docs/BENCHMARKS_OFFLINE.md`).
  * Usage:
  *   npx tsx benchmarks/run.ts
@@ -36,26 +36,26 @@ fs.writeFileSync(realDocsPath, realMarkdown, "utf-8");
 const t = realReport.totals;
 console.log(
   `[Real AI Agent Benchmarks (${realReport.totalBenchmarks} scenarios — 30 real agent transcripts)]\n` +
-    `  LLM Turns:      Without AIL = ${t.withoutAilTurns} turns | No Idioms = ${t.ailWithoutIdiomsTurns} turns (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsTurns} turns (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Tool Calls:     Without AIL = ${t.withoutAilToolCalls} calls | No Idioms = ${t.ailWithoutIdiomsToolCalls} calls (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsToolCalls} calls (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Working Tokens: Without AIL = ${t.withoutAilWorkingTokens.toLocaleString("en-US")} | No Idioms = ${t.ailWithoutIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Output Tokens:  Without AIL = ${t.withoutAilOutputTokens.toLocaleString("en-US")} | No Idioms = ${t.ailWithoutIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Billable Tok:   Without AIL = ${t.withoutAilBillableTokens.toLocaleString("en-US")} | No Idioms = ${t.ailWithoutIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  API Total Tok:  Without AIL = ${t.withoutAilApiTotalTokens.toLocaleString("en-US")} | No Idioms = ${t.ailWithoutIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.ailWithIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Wins:           No Idioms = ${realReport.winsWithoutIdioms}/${realReport.totalBenchmarks} | With Idioms = ${realReport.winsWithIdioms}/${realReport.totalBenchmarks} | Disk Verified: ${realReport.allVerifiedOnDisk} | Zero .ail Left: ${realReport.zeroAilFilesLeftOnDisk}`,
+    `  LLM Turns:      Without AICE = ${t.withoutAiceTurns} turns | No Idioms = ${t.aiceWithoutIdiomsTurns} turns (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsTurns} turns (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Tool Calls:     Without AICE = ${t.withoutAiceToolCalls} calls | No Idioms = ${t.aiceWithoutIdiomsToolCalls} calls (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsToolCalls} calls (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Working Tokens: Without AICE = ${t.withoutAiceWorkingTokens.toLocaleString("en-US")} | No Idioms = ${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Output Tokens:  Without AICE = ${t.withoutAiceOutputTokens.toLocaleString("en-US")} | No Idioms = ${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Billable Tok:   Without AICE = ${t.withoutAiceBillableTokens.toLocaleString("en-US")} | No Idioms = ${t.aiceWithoutIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  API Total Tok:  Without AICE = ${t.withoutAiceApiTotalTokens.toLocaleString("en-US")} | No Idioms = ${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${t.aiceWithIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Wins:           No Idioms = ${realReport.winsWithoutIdioms}/${realReport.totalBenchmarks} | With Idioms = ${realReport.winsWithIdioms}/${realReport.totalBenchmarks} | Disk Verified: ${realReport.allVerifiedOnDisk} | Zero .aice Left: ${realReport.zeroAiceFilesLeftOnDisk}`,
 );
 
 console.log(
   `\n[Deterministic Offline Benchmarks (${offlineReport.totalBenchmarks} scenarios -> docs/BENCHMARKS_OFFLINE.md)]\n` +
-    `  Tokens: Without AIL = ${offlineReport.aggregateTotal.withoutAilTokens.toLocaleString("en-US")} | No Idioms = ${offlineReport.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString("en-US")} (-${offlineReport.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${offlineReport.aggregateTotal.ailWithIdiomsTokens.toLocaleString("en-US")} (-${offlineReport.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)\n` +
-    `  Turns:  Without AIL = ${offlineReport.aggregateTotal.withoutAilTurns} turns | No Idioms = ${offlineReport.aggregateTotal.ailWithoutIdiomsTurns} turns (-${offlineReport.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${offlineReport.aggregateTotal.ailWithIdiomsTurns} turns (-${offlineReport.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)`,
+    `  Tokens: Without AICE = ${offlineReport.aggregateTotal.withoutAiceTokens.toLocaleString("en-US")} | No Idioms = ${offlineReport.aggregateTotal.aiceWithoutIdiomsTokens.toLocaleString("en-US")} (-${offlineReport.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${offlineReport.aggregateTotal.aiceWithIdiomsTokens.toLocaleString("en-US")} (-${offlineReport.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)\n` +
+    `  Turns:  Without AICE = ${offlineReport.aggregateTotal.withoutAiceTurns} turns | No Idioms = ${offlineReport.aggregateTotal.aiceWithoutIdiomsTurns} turns (-${offlineReport.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) | With Idioms = ${offlineReport.aggregateTotal.aiceWithIdiomsTurns} turns (-${offlineReport.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)`,
 );
 
 if (
   realReport.winsWithoutIdioms < realReport.totalBenchmarks ||
   realReport.winsWithIdioms < realReport.totalBenchmarks ||
   !realReport.allVerifiedOnDisk ||
-  !realReport.zeroAilFilesLeftOnDisk ||
+  !realReport.zeroAiceFilesLeftOnDisk ||
   offlineReport.winsWithoutIdioms < offlineReport.totalBenchmarks ||
   offlineReport.winsWithIdioms < offlineReport.totalBenchmarks
 ) {

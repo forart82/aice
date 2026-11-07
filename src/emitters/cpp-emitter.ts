@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C++20 Forward Transpiler & Native Systems Emitter for AIL 2.0.
- * Emits clean, idiomatic modern C++20 code from AIL Module AST.
+ * Modern C++20 Forward Transpiler & Native Systems Emitter for AICE 2.0.
+ * Emits clean, idiomatic modern C++20 code from AICE Module AST.
  */
 
 import type {
@@ -116,7 +116,7 @@ export class CppEmitter {
       }
       return modPath.replace(/\./g, "::");
     }
-    const clean = modPath.replace(/\.(cpp|hpp|h|cc|cxx)(\.ail)?$/, "").replace(/\.ail$/, "");
+    const clean = modPath.replace(/\.(cpp|hpp|h|cc|cxx)(\.aice)?$/, "").replace(/\.aice$/, "");
     const parts = clean.split(/[/\\]/);
     if (parts.length > 1) {
       parts.pop(); // remove file name

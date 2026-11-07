@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Real-time In-Memory AIL Document Analyzer & Intelligence Engine.
+ * Real-time In-Memory AICE Document Analyzer & Intelligence Engine.
  * Powers Diagnostics, Hover Cards, and Contextual Autocompletions.
  */
 
@@ -14,7 +14,7 @@ import type { Module } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import type { Span } from "../core/span.js";
 import { expandModuleIdioms } from "../idioms/index.js";
-import { formatAilSource } from "../tools/fmt.js";
+import { formatAiceSource } from "../tools/fmt.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { attemptSelfRepair, buildReportFromError } from "../typechecker/diagnostics.js";
 import {
@@ -39,7 +39,7 @@ export interface AnalyzedDocument {
   diagnostics: Diagnostic[];
 }
 
-export class AilAnalyzer {
+export class AiceAnalyzer {
   private documents = new Map<string, AnalyzedDocument>();
   private idioms?: Record<string, ProjectIdiomDefinition>;
 
@@ -108,7 +108,7 @@ export class AilAnalyzer {
           },
           severity: DiagnosticSeverity.Error,
           code: diag.violation.code,
-          source: "ail",
+          source: "aice",
           message,
         });
       }
@@ -150,7 +150,7 @@ export class AilAnalyzer {
         `**Project Idiom \`$${cleanWord}\`** (${idiomDef.kind})`,
         `- Parameters: \`(${paramsList})\``,
         `- Token savings: saves ~${savingsTokens} tokens/use, ${netSavings} net BPE tokens`,
-        `\`\`\`ail\n${idiomDef.templateAil}\n\`\`\``,
+        `\`\`\`aice\n${idiomDef.templateAice}\n\`\`\``,
       ].join("\n\n");
       return {
         contents: {
@@ -238,7 +238,7 @@ export class AilAnalyzer {
           return {
             contents: {
               kind: "markdown",
-              value: `\`\`\`ail\nfn ${item.name}(${params})\n\`\`\`\nFunction declaration in module \`${doc.ast.path}\`.`,
+              value: `\`\`\`aice\nfn ${item.name}(${params})\n\`\`\`\nFunction declaration in module \`${doc.ast.path}\`.`,
             },
           };
         }
@@ -248,7 +248,7 @@ export class AilAnalyzer {
           return {
             contents: {
               kind: "markdown",
-              value: `\`\`\`ail\ncomponent ${item.name}(${params})\n\`\`\`\nDeclarative UI component.`,
+              value: `\`\`\`aice\ncomponent ${item.name}(${params})\n\`\`\`\nDeclarative UI component.`,
             },
           };
         }
@@ -360,7 +360,7 @@ export class AilAnalyzer {
       completions.push({
         label: kw,
         kind: CompletionItemKind.Keyword,
-        detail: "AIL Keyword",
+        detail: "AICE Keyword",
       });
     }
 
@@ -382,7 +382,7 @@ export class AilAnalyzer {
       completions.push({
         label: t,
         kind: CompletionItemKind.Class,
-        detail: "AIL Builtin Type",
+        detail: "AICE Builtin Type",
       });
     }
 
@@ -418,10 +418,10 @@ export class AilAnalyzer {
       completions.push({
         label: cleanName,
         kind: CompletionItemKind.Snippet,
-        detail: `Project Idiom (${def.kind}): ${def.templateAil}`,
+        detail: `Project Idiom (${def.kind}): ${def.templateAice}`,
         documentation: {
           kind: "markdown",
-          value: `**Template:**\n\`\`\`ail\n${def.templateAil}\n\`\`\`\nSaves ~${def.tokensPerOccurrenceSaved ?? 0} tokens/use.`,
+          value: `**Template:**\n\`\`\`aice\n${def.templateAice}\n\`\`\`\nSaves ~${def.tokensPerOccurrenceSaved ?? 0} tokens/use.`,
         },
       });
     }
@@ -579,7 +579,7 @@ export class AilAnalyzer {
 
     let formatted: string;
     try {
-      formatted = formatAilSource(doc.text, {
+      formatted = formatAiceSource(doc.text, {
         indent: options?.indent ? options.indent.length : undefined,
       });
     } catch {
@@ -617,7 +617,7 @@ export class AilAnalyzer {
         repairRes.repairs
           .map((r) => r.description)
           .filter(Boolean)
-          .join("; ") || "Apply AIL autonomous self-repair";
+          .join("; ") || "Apply AICE autonomous self-repair";
 
       return [
         {

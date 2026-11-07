@@ -10,10 +10,10 @@ import type {
 } from "../../src/core/ast.js";
 import { Precedence } from "../../src/core/parser.js";
 import { emptySpan } from "../../src/core/span.js";
-import { getBinaryOpPrecedence } from "../../src/decompiler/ail-generator.js";
+import { getBinaryOpPrecedence } from "../../src/decompiler/aice-generator.js";
 import { TypeChecker, TypeEnv } from "../../src/typechecker/checker.js";
 
-describe("AIL 2.0 AST Extension for Operators & Compound Assignments", () => {
+describe("AICE 2.0 AST Extension for Operators & Compound Assignments", () => {
   const dummySpan = emptySpan();
   const idA: IdentifierExpr = { kind: "IdentifierExpr", name: "a", span: dummySpan };
   const idB: IdentifierExpr = { kind: "IdentifierExpr", name: "b", span: dummySpan };

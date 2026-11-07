@@ -39,7 +39,7 @@ import type {
 } from "../../src/core/ast.js";
 import { ParserError, parse, parseWithTrivia } from "../../src/core/parser.js";
 
-describe("AIL 2.0 Pratt Parser & Universal AST Generator", () => {
+describe("AICE 2.0 Pratt Parser & Universal AST Generator", () => {
   describe("Modules & Imports", () => {
     it("parses module header and imports", () => {
       const src = `module app/calculator
@@ -47,7 +47,7 @@ describe("AIL 2.0 Pratt Parser & Universal AST Generator", () => {
 from "./math.ts" import add, multiply as mult
 from "node:crypto" import *`;
 
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       expect(mod.path).toBe("app/calculator");
       expect(mod.items).toHaveLength(2);
 
@@ -167,7 +167,7 @@ from "node:crypto" import *`;
   fn render(target: THREE.WebGLRenderer, options: React.FC[Props]) -> THREE.Group:
     ret THREE.Group()`;
 
-      const mod = parse(src, "renderer.ail");
+      const mod = parse(src, "renderer.aice");
       expect(mod.items).toHaveLength(1);
       const cls = mod.items[0] as ClassDecl;
       expect(cls.kind).toBe("ClassDecl");
@@ -241,7 +241,7 @@ from "node:crypto" import *`;
 
     it("correctly calculates source span for dotted types and type arguments", () => {
       const src = `type T: item: NodeJS.ReadableStream[Buffer]`;
-      const mod = parse(src, "stream.ail");
+      const mod = parse(src, "stream.aice");
       const td = mod.items[0] as TypeDecl;
       const typeAnn = td.fields![0].typeAnnotation as NamedType;
       expect(typeAnn.kind).toBe("NamedType");
@@ -252,7 +252,7 @@ from "node:crypto" import *`;
 
     it("throws ParserError on trailing dot in dotted type expression", () => {
       const src = `type T: item: THREE.`;
-      expect(() => parse(src, "err.ail")).toThrowError(ParserError);
+      expect(() => parse(src, "err.aice")).toThrowError(ParserError);
     });
 
     it("parses tuple types [str, int], [float, float, float], and nested [int, [str, bool]]", () => {
@@ -264,7 +264,7 @@ from "node:crypto" import *`;
   empty: []
   array: [int]`;
 
-      const mod = parse(src, "tuples.ail");
+      const mod = parse(src, "tuples.aice");
       expect(mod.items).toHaveLength(1);
       const td = mod.items[0] as TypeDecl;
       expect(td.fields).toHaveLength(6);
@@ -321,7 +321,7 @@ from "node:crypto" import *`;
       const src = `fn swap(pair: [int, str]) -> [str, int]:
   ret [pair[1], pair[0]]`;
 
-      const mod = parse(src, "fn_tuple.ail");
+      const mod = parse(src, "fn_tuple.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.params[0].typeAnnotation).toMatchObject({
         kind: "TupleType",
@@ -774,7 +774,7 @@ fn test():
     button.btn.btn-icon#btn-theme-toggle:
       span.icon "🌙"`;
 
-      const mod = parse(src, "navbar.html.ail");
+      const mod = parse(src, "navbar.html.aice");
       const comp = mod.items[0] as ComponentDecl;
       expect(comp.kind).toBe("ComponentDecl");
       expect(comp.layout).toHaveLength(1);
@@ -822,7 +822,7 @@ fn test():
     950: #020617, 900: #0f172a
   tokens spacing: [0, 4, 8]px`;
 
-      const mod = parse(src, "tokens.css.ail");
+      const mod = parse(src, "tokens.css.aice");
       const style = mod.items[0] as StyleDecl;
       expect(style.kind).toBe("StyleDecl");
       expect(style.properties).toHaveLength(5);
@@ -852,7 +852,7 @@ fn test():
   button.submit-btn:
     .btn-text: "Click"`;
 
-      const mod = parse(src, "app.html.ail");
+      const mod = parse(src, "app.html.aice");
       const comp = mod.items[0] as ComponentDecl;
       expect(comp.layout).toHaveLength(3);
 
@@ -895,7 +895,7 @@ fn test():
   fn update(dt: float) -> void:
     this.score = this.score + 10`;
 
-      const mod = parse(src, "player.ail");
+      const mod = parse(src, "player.aice");
       expect(mod.items).toHaveLength(1);
       const cls = mod.items[0] as ClassDecl;
       expect(cls.kind).toBe("ClassDecl");
@@ -920,7 +920,7 @@ fn test():
     it("Step 16: parses primary class constructors with parameter properties", () => {
       const src = `class Point(pub x:!i, pub y:!i = 0):
   fn distance() -> !f = 0.0`;
-      const mod = parse(src, "point.ail");
+      const mod = parse(src, "point.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.kind).toBe("ClassDecl");
       expect(cls.name).toBe("Point");
@@ -935,7 +935,7 @@ fn test():
 
     it("Step 16: parses inline primary constructor class without body", () => {
       const src = `class Vector2D(x:!f, y:!f)`;
-      const mod = parse(src, "vec.ail");
+      const mod = parse(src, "vec.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.name).toBe("Vector2D");
       expect(cls.primaryConstructor).toHaveLength(2);
@@ -954,7 +954,7 @@ fn test():
   prop Multi, m1, m2: int = 42
   Score, score: int = 100`;
 
-      const mod = parse(src, "player.ail");
+      const mod = parse(src, "player.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.properties).toHaveLength(8);
 
@@ -1000,7 +1000,7 @@ fn test():
 pub const MAX_HEALTH = 100
 pub let mut gameRunning: bool = true`;
 
-      const mod = parse(src, "constants.ail");
+      const mod = parse(src, "constants.aice");
       expect(mod.items).toHaveLength(3);
 
       const c1 = mod.items[0] as ConstDecl;
@@ -1023,7 +1023,7 @@ pub let mut gameRunning: bool = true`;
     it("parses module paths containing slashes and dots", () => {
       const src = `module src/audio/Synth.ts
 const ACTIVE: bool = true`;
-      const mod = parse(src, "Synth.ts.ail");
+      const mod = parse(src, "Synth.ts.aice");
       expect(mod.path).toBe("src/audio/Synth.ts");
     });
 
@@ -1219,7 +1219,7 @@ pub w: str ::= "mut_typed"`;
   tokens spacing[rem]:
     0: 0px, 1: 0.25, 2: 0.5, 3: 0.75, 4: 1.0
   tokens radius[px]: xs: 2, sm: 4, full: 9999px`;
-      const mod = parse(src, "tokens.css.ail");
+      const mod = parse(src, "tokens.css.aice");
       const style = mod.items[0] as StyleDecl;
       expect(style.kind).toBe("StyleDecl");
       expect(style.properties).toHaveLength(8);
@@ -1237,7 +1237,7 @@ pub w: str ::= "mut_typed"`;
 
     it("parses top-level single-line tokens with unit annotation: tokens spacing[rem]: 1: 0.25, 2: 0.5", () => {
       const src = `tokens spacing[rem]: 1: 0.25, 2: 0.5`;
-      const mod = parse(src, "tokens.css.ail");
+      const mod = parse(src, "tokens.css.aice");
       const style = mod.items[0] as StyleDecl;
       expect(style.name).toBe(":root");
       expect(style.properties).toHaveLength(2);
@@ -1249,7 +1249,7 @@ pub w: str ::= "mut_typed"`;
       const src = `style box: fl-row; gap: 1rem
 style col: fl-col
 style center: fl-center; p: 1rem`;
-      const mod = parse(src, "layout.css.ail");
+      const mod = parse(src, "layout.css.aice");
       expect(mod.items).toHaveLength(3);
 
       const box = mod.items[0] as StyleDecl;
@@ -1271,7 +1271,7 @@ style center: fl-center; p: 1rem`;
       const src = `type VersionMeta:
   version: 2
   tier: 1 | 2 | 3`;
-      const mod = parse(src, "meta.ail");
+      const mod = parse(src, "meta.aice");
       expect(mod.items).toHaveLength(1);
       const td = mod.items[0] as TypeDecl;
       expect(td.fields).toBeDefined();
@@ -1285,7 +1285,7 @@ style center: fl-center; p: 1rem`;
     it("parses computed method and accessor names like [Symbol.iterator]", () => {
       const src = `class IterableContainer:
   fn [Symbol.iterator]() -> Iterator[int] = this.items[Symbol.iterator]()`;
-      const mod = parse(src, "iter.ail");
+      const mod = parse(src, "iter.aice");
       expect(mod.items).toHaveLength(1);
       const cls = mod.items[0] as ClassDecl;
       expect(cls.methods).toHaveLength(1);
@@ -1295,7 +1295,7 @@ style center: fl-center; p: 1rem`;
     it("parses postfix ? OptionType concisely", () => {
       const src = `x: int? := nil
 name: str? := nil`;
-      const mod = parse(src, "opts.ail");
+      const mod = parse(src, "opts.aice");
       expect(mod.items).toHaveLength(2);
       const v1 = mod.items[0] as VarDecl;
       expect(v1.typeAnnotation).toMatchObject({
@@ -1314,7 +1314,7 @@ name: str? := nil`;
     it("parses single spread argument in function calls: fn(...args)", () => {
       const src = `fn run():
   target(...args)`;
-      const mod = parse(src, "spread1.ail");
+      const mod = parse(src, "spread1.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body).toBeDefined();
@@ -1339,7 +1339,7 @@ name: str? := nil`;
     it("parses mixed positional and spread arguments: calculate(x, y, ...extra)", () => {
       const src = `fn run():
   calculate(x, y, ...extra)`;
-      const mod = parse(src, "spread2.ail");
+      const mod = parse(src, "spread2.aice");
       const fn = mod.items[0] as FunctionDecl;
       if (fn.body.kind === "Block") {
         const stmt = fn.body.statements[0];
@@ -1361,7 +1361,7 @@ name: str? := nil`;
     it("parses spread arguments in member call expressions: Math.max(...nums)", () => {
       const src = `fn run():
   Math.max(...nums)`;
-      const mod = parse(src, "spread3.ail");
+      const mod = parse(src, "spread3.aice");
       const fn = mod.items[0] as FunctionDecl;
       if (fn.body.kind === "Block") {
         const stmt = fn.body.statements[0];
@@ -1385,7 +1385,7 @@ name: str? := nil`;
 
     it("parses multiple spread elements in array literals: [...items, ...more]", () => {
       const src = `combined := [...items, ...more]`;
-      const mod = parse(src, "spread4.ail");
+      const mod = parse(src, "spread4.aice");
       expect(mod.items).toHaveLength(1);
       const decl = mod.items[0] as VarDecl;
       expect(decl.value).toBeDefined();
@@ -1409,7 +1409,7 @@ name: str? := nil`;
     it("parses negative numbers in type unions (1 | -1, -1 | 0 | 1)", () => {
       const src = `type Direction = 1 | -1
 type Ternary = -1 | 0 | 1`;
-      const mod = parse(src, "dir.ail");
+      const mod = parse(src, "dir.aice");
       expect(mod.items).toHaveLength(2);
       const d1 = mod.items[0] as TypeDecl;
       expect(d1.aliasType).toMatchObject({ kind: "NamedType", name: "1 | -1" });
@@ -1420,7 +1420,7 @@ type Ternary = -1 | 0 | 1`;
     it("parses function return types with negative numeric literal unions (-> 1 | -1)", () => {
       const src = `fn getDirection() -> 1 | -1:
   ret -1`;
-      const mod = parse(src, "fn_ret.ail");
+      const mod = parse(src, "fn_ret.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.returnType).toMatchObject({ kind: "NamedType", name: "1 | -1" });
@@ -1429,7 +1429,7 @@ type Ternary = -1 | 0 | 1`;
     it("parses function parameter types with negative numeric literals (dir: 1 | -1)", () => {
       const src = `fn step(dir: 1 | -1) -> int:
   ret dir`;
-      const mod = parse(src, "fn_param.ail");
+      const mod = parse(src, "fn_param.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.params[0].typeAnnotation).toMatchObject({ kind: "NamedType", name: "1 | -1" });
@@ -1437,7 +1437,7 @@ type Ternary = -1 | 0 | 1`;
 
     it("parses variable declarations with negative numeric literal union types", () => {
       const src = `val dir: 1 | -1 = -1`;
-      const mod = parse(src, "var.ail");
+      const mod = parse(src, "var.aice");
       expect(mod.items).toHaveLength(1);
       const v = mod.items[0] as VarDecl;
       expect(v.typeAnnotation).toMatchObject({ kind: "NamedType", name: "1 | -1" });
@@ -1448,7 +1448,7 @@ type Ternary = -1 | 0 | 1`;
     it("parses variable declarations with boolean literal types (: true, : false)", () => {
       const src = `val enabled: true = true
 val disabled: false = false`;
-      const mod = parse(src, "bool_vars.ail");
+      const mod = parse(src, "bool_vars.aice");
       expect(mod.items).toHaveLength(2);
       const v1 = mod.items[0] as VarDecl;
       expect(v1.typeAnnotation).toMatchObject({ kind: "NamedType", name: "true" });
@@ -1460,7 +1460,7 @@ val disabled: false = false`;
       const src = `type Flag = true | false
 type AlwaysTrue = true
 type InvertedFlag = false | true`;
-      const mod = parse(src, "bool_types.ail");
+      const mod = parse(src, "bool_types.aice");
       expect(mod.items).toHaveLength(3);
       const t1 = mod.items[0] as TypeDecl;
       expect(t1.aliasType).toMatchObject({ kind: "NamedType", name: "true | false" });
@@ -1479,7 +1479,7 @@ fn isOff(flag: false) -> false:
 
 fn getFlag() -> true | false:
   ret true`;
-      const mod = parse(src, "bool_funcs.ail");
+      const mod = parse(src, "bool_funcs.aice");
       expect(mod.items).toHaveLength(3);
       const fn1 = mod.items[0] as FunctionDecl;
       expect(fn1.returnType).toMatchObject({ kind: "NamedType", name: "true" });
@@ -1495,7 +1495,7 @@ fn getFlag() -> true | false:
 
     it("parses record type fields with boolean literal types (success: true, active: false)", () => {
       const src = `type Response = { success: true, active: false }`;
-      const mod = parse(src, "bool_record.ail");
+      const mod = parse(src, "bool_record.aice");
       expect(mod.items).toHaveLength(1);
       const td = mod.items[0] as TypeDecl;
       expect(td.aliasType?.kind).toBe("RecordType");
@@ -1512,7 +1512,7 @@ fn getFlag() -> true | false:
   ready: true
   failed: false
   flag: true | false`;
-      const mod = parse(src, "bool_struct.ail");
+      const mod = parse(src, "bool_struct.aice");
       expect(mod.items).toHaveLength(1);
       const td = mod.items[0] as TypeDecl;
       expect(td.fields).toHaveLength(3);
@@ -1533,7 +1533,7 @@ fn getFlag() -> true | false:
       const src = `from "ui/theme" import style, tokens, match, type
 import { style, tokens, match, type, val, char, state, mut, from, prop } from "lib"
 import { style as customStyle } from "styles"`;
-      const mod = parse(src, "imports.ail");
+      const mod = parse(src, "imports.aice");
       expect(mod.items).toHaveLength(3);
       const imp1 = mod.items[0] as ImportDecl;
       expect(imp1.specifiers.map((s) => s.name)).toEqual(["style", "tokens", "match", "type"]);
@@ -1567,7 +1567,7 @@ class Widget:
     ret 3
   fn match() -> int:
     ret 4`;
-      const mod = parse(src, "fn_names.ail");
+      const mod = parse(src, "fn_names.aice");
       expect(mod.items).toHaveLength(3);
       expect((mod.items[0] as FunctionDecl).name).toBe("style");
       expect((mod.items[1] as FunctionDecl).name).toBe("match");
@@ -1579,7 +1579,7 @@ class Widget:
     it("parses contextual keywords as parameter names", () => {
       const src = `fn configure(style: str, match: bool, type: int, val: num, char: byte, state: str, mut: bool, from: str, prop: str) -> bool:
   ret match`;
-      const mod = parse(src, "params.ail");
+      const mod = parse(src, "params.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.params.map((p) => p.name)).toEqual([
         "style",
@@ -1608,7 +1608,7 @@ fn test():
   const match = 30
   let mut = 40
   match := 50`;
-      const mod = parse(src, "vars.ail");
+      const mod = parse(src, "vars.aice");
       expect(mod.items).toHaveLength(8);
       expect((mod.items[0] as VarDecl).name).toBe("style");
       expect((mod.items[1] as VarDecl).name).toBe("tokens");
@@ -1631,7 +1631,7 @@ fn test():
   state: str
 
 type Options = { style: str, tokens: int, match: bool, type: str }`;
-      const mod = parse(src, "types.ail");
+      const mod = parse(src, "types.aice");
       const td1 = mod.items[0] as TypeDecl;
       expect(td1.name).toBe("Config");
       expect(td1.fields?.map((f) => f.name)).toEqual([
@@ -1650,7 +1650,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
 
     it("parses contextual keywords in record literals", () => {
       const src = `val theme = { style: "dark", tokens: 10, type: "primary", match: true, val: 42, char: 65 }`;
-      const mod = parse(src, "rec_lit.ail");
+      const mod = parse(src, "rec_lit.aice");
       const decl = mod.items[0] as VarDecl;
       const rec = decl.value as RecordLiteralExpr;
       expect(rec.properties.map((p) => p.key)).toEqual([
@@ -1672,7 +1672,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
   let v = obj.val
   let c = obj.char
   let st = obj.state`;
-      const mod = parse(src, "member_access.ail");
+      const mod = parse(src, "member_access.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as Block).statements as LetBinding[];
       expect((stmts[0].init as MemberAccessExpr).property).toBe("style");
@@ -1692,7 +1692,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     case tokens => "bound tokens"
     case State(tokens) => "constructor pattern"
     case _ => "default"`;
-      const mod = parse(src, "patterns.ail");
+      const mod = parse(src, "patterns.aice");
       const fn = mod.items[0] as FunctionDecl;
       const matchStmt = (fn.body as Block).statements[0] as MatchStmt;
       expect(matchStmt.cases[0].pattern).toMatchObject({
@@ -1717,7 +1717,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses contextual keywords in expression positions (parsePrefix)", () => {
       const src = `fn compute(style: int, tokens: int, match: int, val: int) -> int:
   ret style + tokens * match - val`;
-      const mod = parse(src, "exprs.ail");
+      const mod = parse(src, "exprs.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("Block");
     });
@@ -1728,7 +1728,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     print(style)
   for match in styles:
     print(match)`;
-      const mod = parse(src, "for_loops.ail");
+      const mod = parse(src, "for_loops.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as Block).statements as ForStmt[];
       expect(stmts[0].variable).toBe("style");
@@ -1740,7 +1740,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses unannotated closure with array destructuring parameter fn([a, b])", () => {
       const src = `fn test():
   let add = fn([a, b]) = a + b`;
-      const mod = parse(src, "closure_array.ail");
+      const mod = parse(src, "closure_array.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       expect(letStmt.kind).toBe("LetBinding");
@@ -1754,7 +1754,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses typed closure with array destructuring parameter fn([a, b]: [int, int])", () => {
       const src = `fn test():
   let add = fn([a, b]: [int, int]) -> int = a + b`;
-      const mod = parse(src, "closure_typed_array.ail");
+      const mod = parse(src, "closure_typed_array.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1767,7 +1767,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses closure with record destructuring parameter fn({ effect })", () => {
       const src = `fn test():
   let handler = fn({ effect }) = effect`;
-      const mod = parse(src, "closure_record.ail");
+      const mod = parse(src, "closure_record.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1779,7 +1779,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses closure with typed record destructuring parameter fn({ effect, target }: State)", () => {
       const src = `fn test():
   let handler = fn({ effect, target }: State) = effect`;
-      const mod = parse(src, "closure_typed_record.ail");
+      const mod = parse(src, "closure_typed_record.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1794,7 +1794,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     print(x)
   for [a, , b] in pairs:
     print(a)`;
-      const mod = parse(src, "for_elisions.ail");
+      const mod = parse(src, "for_elisions.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as { kind: "Block"; statements: ForStmt[] }).statements;
       expect(stmts[0].variable).toBe("[, x]");
@@ -1806,7 +1806,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
   let [, y] = pair
   let [a, , b] = triple
   [, b] = pair`;
-      const mod = parse(src, "let_destructure_elision.ail");
+      const mod = parse(src, "let_destructure_elision.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as { kind: "Block"; statements: DestructureBinding[] }).statements;
       expect(stmts[0].kind).toBe("DestructureBinding");
@@ -1822,7 +1822,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
 
     it("parses function declaration with destructured parameter fn process([a, b]: [int, int])", () => {
       const src = `fn process([a, b]: [int, int]) -> int = a + b`;
-      const mod = parse(src, "fn_destructure.ail");
+      const mod = parse(src, "fn_destructure.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.params[0].name).toBe("[a, b]");
       expect(fn.params[0].typeAnnotation?.kind).toBe("TupleType");
@@ -1833,7 +1833,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses await fetch()", () => {
       const src = `fn getData():
   let res = await fetch()`;
-      const mod = parse(src, "await_fetch.ail");
+      const mod = parse(src, "await_fetch.aice");
       const fn = mod.items[0] as FunctionDecl;
       const block = fn.body as { kind: "Block"; statements: LetBinding[] };
       const stmt = block.statements[0];
@@ -1849,7 +1849,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses await p", () => {
       const src = `fn resolve(p: Promise[int]):
   let val = await p`;
-      const mod = parse(src, "await_p.ail");
+      const mod = parse(src, "await_p.aice");
       const fn = mod.items[0] as FunctionDecl;
       const block = fn.body as { kind: "Block"; statements: LetBinding[] };
       const stmt = block.statements[0];
@@ -1867,7 +1867,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     let y = x * 2
     ret y
   }`;
-      const mod = parse(src, "closure_braces.ail");
+      const mod = parse(src, "closure_braces.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1886,7 +1886,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
   let f = fn(x: int):
     let y = x * 2
     ret y`;
-      const mod = parse(src, "closure_colon.ail");
+      const mod = parse(src, "closure_colon.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1904,7 +1904,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     let y = x * 2
     ret y
   }`;
-      const mod = parse(src, "closure_colon_braces.ail");
+      const mod = parse(src, "closure_colon_braces.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1920,7 +1920,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     let y = x * 2
     log(y)
   })`;
-      const mod = parse(src, "closure_call_arg.ail");
+      const mod = parse(src, "closure_call_arg.aice");
       const fn = mod.items[0] as FunctionDecl;
       const exprStmt = (fn.body as Block).statements[0] as { kind: "ExprStmt"; expr: CallExpr };
       expect(exprStmt.expr.kind).toBe("CallExpr");
@@ -1937,7 +1937,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
   let f = fn(x: int) -> int {
     ret x + 1
   }`;
-      const mod = parse(src, "closure_ret_type.ail");
+      const mod = parse(src, "closure_ret_type.aice");
       const fn = mod.items[0] as FunctionDecl;
       const letStmt = (fn.body as Block).statements[0] as LetBinding;
       const closure = letStmt.init as ClosureExpr;
@@ -1957,7 +1957,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     log(err)
   finally:
     cleanup()`;
-      const mod = parse(src, "try_catch_indent.ail");
+      const mod = parse(src, "try_catch_indent.aice");
       const fn = mod.items[0] as FunctionDecl;
       const tryStmt = (fn.body as Block).statements[0] as TryStmt;
       expect(tryStmt.kind).toBe("TryStmt");
@@ -1977,7 +1977,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     cleanup()
   }
 }`;
-      const mod = parse(src, "try_catch_braces.ail");
+      const mod = parse(src, "try_catch_braces.aice");
       const fn = mod.items[0] as FunctionDecl;
       const tryStmt = (fn.body as Block).statements[0] as TryStmt;
       expect(tryStmt.kind).toBe("TryStmt");
@@ -1995,7 +1995,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     ret e
   }
 }`;
-      const mod = parse(src, "try_catch_paren.ail");
+      const mod = parse(src, "try_catch_paren.aice");
       const fn = mod.items[0] as FunctionDecl;
       const tryStmt = (fn.body as Block).statements[0] as TryStmt;
       expect(tryStmt.catchParam).toBe("e");
@@ -2011,7 +2011,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     doWork()
   finally:
     cleanup()`;
-      const mod = parse(src, "try_finally.ail");
+      const mod = parse(src, "try_finally.aice");
       const fn = mod.items[0] as FunctionDecl;
       const tryStmt = (fn.body as Block).statements[0] as TryStmt;
       expect(tryStmt.catchBlock).toBeUndefined();
@@ -2021,7 +2021,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses throw statement", () => {
       const src = `fn fail(msg: str):
   throw msg`;
-      const mod = parse(src, "throw.ail");
+      const mod = parse(src, "throw.aice");
       const fn = mod.items[0] as FunctionDecl;
       const throwStmt = (fn.body as Block).statements[0] as ThrowStmt;
       expect(throwStmt.kind).toBe("ThrowStmt");
@@ -2035,7 +2035,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
       continue
     else:
       break`;
-      const mod = parse(src, "break_continue.ail");
+      const mod = parse(src, "break_continue.aice");
       const fn = mod.items[0] as FunctionDecl;
       const whileStmt = (fn.body as Block).statements[0] as any;
       const ifStmt = whileStmt.body.statements[0] as IfStmt;
@@ -2049,7 +2049,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
       const src = `class Registry:
   static:
     initRegistry()`;
-      const mod = parse(src, "static_block.ail");
+      const mod = parse(src, "static_block.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.kind).toBe("ClassDecl");
       expect(cls.staticBlocks).toHaveLength(1);
@@ -2059,7 +2059,7 @@ type Options = { style: str, tokens: int, match: bool, type: str }`;
     it("parses pub barrel re-exports", () => {
       const src = `pub from "./utils" import format, helper as h
 pub from "./all" import *`;
-      const mod = parse(src, "reexports.ail");
+      const mod = parse(src, "reexports.aice");
       expect(mod.items).toHaveLength(2);
       const imp1 = mod.items[0] as any;
       const imp2 = mod.items[1] as any;
@@ -2073,7 +2073,7 @@ pub from "./all" import *`;
 
     it('parses async fn getData() -> Promise[str]: ret "ok"', () => {
       const src = `async fn getData() -> Promise[str]: ret "ok"`;
-      const mod = parse(src, "async_fn.ail");
+      const mod = parse(src, "async_fn.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
@@ -2090,7 +2090,7 @@ pub from "./all" import *`;
       const src = `async fn process({ user, id: uid }: Config, [first, second]: [int, int]) -> Promise[int]:
   ret 42
 `;
-      const mod = parse(src, "async_params.ail");
+      const mod = parse(src, "async_params.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
@@ -2105,7 +2105,7 @@ pub from "./all" import *`;
 fn run():
   let f = async fn(x: int) -> Promise[int] = x * 2
 `;
-      const mod = parse(src, "async_expr.ail");
+      const mod = parse(src, "async_expr.aice");
       expect(mod.items).toHaveLength(2);
       const fn1 = mod.items[0] as FunctionDecl;
       expect(fn1.isAsync).toBe(true);
@@ -2123,7 +2123,7 @@ fn run():
     it("parses optional parameters with '?' syntax (fn foo(a: int, b?: str))", () => {
       const src = `fn foo(a: int, b?: str):
   ret a`;
-      const mod = parse(src, "optional_params.ail");
+      const mod = parse(src, "optional_params.aice");
       expect(mod.items).toHaveLength(1);
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
@@ -2139,7 +2139,7 @@ fn run():
     it("parses optional parameters with default values (b?: str = 'def')", () => {
       const src = `fn greet(msg: str, prefix?: str = "Hello", count: int = 1):
   ret msg`;
-      const mod = parse(src, "optional_default.ail");
+      const mod = parse(src, "optional_default.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.params[0].isOptional).toBeUndefined();
       expect(fn.params[0].defaultValue).toBeUndefined();
@@ -2154,7 +2154,7 @@ fn run():
     it("parses class primary constructor with optional and default parameters", () => {
       const src = `class Config(pub host: str, pub port: int = 8080, pub secure?: bool):
   pass`;
-      const mod = parse(src, "class_opt.ail");
+      const mod = parse(src, "class_opt.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.primaryConstructor).toHaveLength(3);
       expect(cls.primaryConstructor![0].name).toBe("host");
@@ -2173,7 +2173,7 @@ fn run():
 
 import "math"
 `;
-      const { trivia } = parseWithTrivia(src, "mod_header.ail");
+      const { trivia } = parseWithTrivia(src, "mod_header.aice");
       const modTrivia = trivia.getTrivia("module");
       expect(modTrivia).toBeDefined();
       expect(modTrivia?.leading).toHaveLength(2);
@@ -2187,7 +2187,7 @@ import "math"
 # n must be non-negative
 fn factorial(n: int) -> int:
   ret n`;
-      const { trivia } = parseWithTrivia(src, "fn_doc.ail");
+      const { trivia } = parseWithTrivia(src, "fn_doc.aice");
       const fnTrivia = trivia.getTrivia("fn:factorial");
       expect(fnTrivia).toBeDefined();
       expect(fnTrivia?.leading).toHaveLength(2);
@@ -2203,7 +2203,7 @@ class Greeter:
 
   # Returns full greeting
   fn greet(name: str) -> str = prefix + " " + name`;
-      const { trivia } = parseWithTrivia(src, "class_doc.ail");
+      const { trivia } = parseWithTrivia(src, "class_doc.aice");
       const classTrivia = trivia.getTrivia("class:Greeter");
       expect(classTrivia?.leading[0].content).toBe("// Greeter service class");
 
@@ -2221,7 +2221,7 @@ type User:
   id: str
   # User email address
   email: str`;
-      const { trivia } = parseWithTrivia(src, "type_doc.ail");
+      const { trivia } = parseWithTrivia(src, "type_doc.aice");
       const typeTrivia = trivia.getTrivia("type:User");
       expect(typeTrivia?.leading[0].content).toBe("// User profile record");
 
@@ -2238,7 +2238,7 @@ const MAX_WORKERS = 8
 
 # Current active worker counter
 val active = 0`;
-      const { trivia } = parseWithTrivia(src, "vars_doc.ail");
+      const { trivia } = parseWithTrivia(src, "vars_doc.aice");
       const constTrivia = trivia.getTrivia("const:MAX_WORKERS");
       expect(constTrivia?.leading[0].content).toBe("// Max worker count");
 
@@ -2249,7 +2249,7 @@ val active = 0`;
     it("captures imports comments on 'import:source'", () => {
       const src = `# Standard math utilities
 import "math"`;
-      const { trivia } = parseWithTrivia(src, "import_doc.ail");
+      const { trivia } = parseWithTrivia(src, "import_doc.aice");
       const impTrivia = trivia.getTrivia("import:math");
       expect(impTrivia?.leading[0].content).toBe("// Standard math utilities");
     });
@@ -2260,7 +2260,7 @@ import "math"`;
  * JSDoc comment for calculate
  */
 fn calculate(): int = 42`;
-      const { trivia } = parseWithTrivia(src, "mixed_doc.ail");
+      const { trivia } = parseWithTrivia(src, "mixed_doc.aice");
       const fnTrivia = trivia.getTrivia("fn:calculate");
       expect(fnTrivia?.leading).toHaveLength(2);
       expect(fnTrivia?.leading[0].content).toBe("// Single-line slash comment");
@@ -2270,7 +2270,7 @@ fn calculate(): int = 42`;
 
     it("captures trailing comments on the same line as declaration", () => {
       const src = `const PI = 3.14159 # mathematical constant`;
-      const { trivia } = parseWithTrivia(src, "trailing_doc.ail");
+      const { trivia } = parseWithTrivia(src, "trailing_doc.aice");
       const constTrivia = trivia.getTrivia("const:PI");
       expect(constTrivia?.trailing).toHaveLength(1);
       expect(constTrivia?.trailing[0].content).toBe("// mathematical constant");
@@ -2280,7 +2280,7 @@ fn calculate(): int = 42`;
   describe("Step 23: Raw Multiline String / Template Literals (TemplateLiteralExpr)", () => {
     it("parses template literal without substitutions into TemplateLiteralExpr", () => {
       const src = "const s = `hello world`";
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const stmt = mod.items[0] as ConstDecl;
       expect(stmt.kind).toBe("ConstDecl");
       expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
@@ -2293,7 +2293,7 @@ fn calculate(): int = 42`;
       const src = `const s = \`line 1
 line 2
 line 3\``;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const stmt = mod.items[0] as ConstDecl;
       expect(stmt.kind).toBe("ConstDecl");
       expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
@@ -2304,7 +2304,7 @@ line 3\``;
 
     it("parses template literal with ${...} interpolation expressions", () => {
       const src = "const msg = `Hello ${name}, total is ${price + tax}!`";
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const stmt = mod.items[0] as ConstDecl;
       expect(stmt.kind).toBe("ConstDecl");
       expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
@@ -2322,7 +2322,7 @@ line 3\``;
 
     it("parses nested template literals", () => {
       const src = "const s = `Outer: ${`Inner: ${x}`}`";
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const stmt = mod.items[0] as ConstDecl;
       expect(stmt.kind).toBe("ConstDecl");
       expect(stmt.value?.kind).toBe("TemplateLiteralExpr");
@@ -2360,7 +2360,7 @@ fn reset():
   describe("Error Handling", () => {
     it("throws ParserError on unexpected tokens with exact span", () => {
       const src = `fn incomplete(`;
-      expect(() => parse(src, "err.ail")).toThrowError(ParserError);
+      expect(() => parse(src, "err.aice")).toThrowError(ParserError);
     });
   });
 });

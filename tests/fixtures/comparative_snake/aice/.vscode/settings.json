@@ -1,0 +1,72 @@
+{
+  "files.exclude": {
+    "**/*.ts": {
+      "when": "$(basename).ts.aice"
+    },
+    "**/*.tsx": {
+      "when": "$(basename).tsx.aice"
+    },
+    "**/*.css": {
+      "when": "$(basename).css.aice"
+    },
+    "**/*.html": {
+      "when": "$(basename).html.aice"
+    },
+    "**/*.py": {
+      "when": "$(basename).py.aice"
+    },
+    "**/*.cpp": {
+      "when": "$(basename).cpp.aice"
+    },
+    "**/*.hpp": {
+      "when": "$(basename).hpp.aice"
+    },
+    "**/*.cc": {
+      "when": "$(basename).cc.aice"
+    },
+    "**/*.cxx": {
+      "when": "$(basename).cxx.aice"
+    },
+    "**/*.h": {
+      "when": "$(basename).h.aice"
+    },
+    "**/*.cs": {
+      "when": "$(basename).cs.aice"
+    }
+  },
+  "search.exclude": {
+    "**/*.ts": {
+      "when": "$(basename).ts.aice"
+    },
+    "**/*.tsx": {
+      "when": "$(basename).tsx.aice"
+    },
+    "**/*.css": {
+      "when": "$(basename).css.aice"
+    },
+    "**/*.html": {
+      "when": "$(basename).html.aice"
+    },
+    "**/*.py": {
+      "when": "$(basename).py.aice"
+    },
+    "**/*.cpp": {
+      "when": "$(basename).cpp.aice"
+    },
+    "**/*.hpp": {
+      "when": "$(basename).hpp.aice"
+    },
+    "**/*.cc": {
+      "when": "$(basename).cc.aice"
+    },
+    "**/*.cxx": {
+      "when": "$(basename).cxx.aice"
+    },
+    "**/*.h": {
+      "when": "$(basename).h.aice"
+    },
+    "**/*.cs": {
+      "when": "$(basename).cs.aice"
+    }
+  }
+}

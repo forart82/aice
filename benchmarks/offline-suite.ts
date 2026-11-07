@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Real-World Benchmark Suite (10 End-to-End Real-World Benchmarks):
+ * AICE 2.0 Real-World Benchmark Suite (10 End-to-End Real-World Benchmarks):
  *   RW-01: HTML5 Canvas Arcade Snake Window Application from 0 (.ts, .html, .css, .json)
  *   RW-02: Headless Python CLI Task Queue & Telemetry Worker Daemon from 0 (.py, .yaml, .json)
  *   RW-03: Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout Bug Fix
@@ -15,24 +15,24 @@
  *   RW-10: Unified 15-Language Enterprise Cloud Observability & Control Plane Update Feature (all 15 file types)
  *
  * Honest 3-Way Apples-to-Apples Evaluation for Every Operation:
- *   1. Without AIL (Native Baseline):
+ *   1. Without AICE (Native Baseline):
  *      - Write from 0: Raw native code tokens written to disk.
  *      - Read (Discovery + Surgical Read): Realistic `rg` top-level symbol discovery + surgical line-range `read_file` window around target symbol.
  *      - Update (Bug Fix / New Feature / Update Feature): Surgical `replace_file_content` (`TargetContent` + `ReplacementContent`).
  *      - Delete (Remove Obsolete Symbol/Rule/Key): Surgical `replace_file_content` (`TargetContent` of deleted block).
  *      - Refactor (Cross-Site Pattern Change): Surgical `replace_file_content` across affected symbols/rules (not untouched file contents).
- *   2. AIL On-the-Fly WITHOUT Idioms (Pure Syntax + AST Tooling):
- *      - Write from 0: Pure AIL code tokens (zero `$idiom` macros) compiled directly to native disk.
- *      - Read: `ail outline` (`generateOutline`) + `extractSymbolFromAilSource` of target symbol (`--no-idioms`).
- *      - Update: `ail splice <file> --symbol <sym> --code "<pure AIL>"` (verified via live `spliceNativeSource` with `{}` idioms).
- *      - Delete: `ail splice <file> --symbol <sym> --delete`.
- *      - Refactor: Surgical `ail splice` across affected symbols in pure AIL (verified via live `spliceNativeSource`).
- *   3. AIL On-the-Fly WITH Idioms (Syntax + AST Tooling + `$idioms`, including definition overhead):
- *      - Write from 0: Idiom-compressed AIL code tokens PLUS full token cost of all `idiom $name(...)` definitions in `ail.config.json`.
- *      - Read: `ail outline` (`generateOutline`) + `extractSymbolFromAilSource` of target symbol (`--idioms`).
- *      - Update: `ail splice <file> --symbol <sym> --code "<AIL with $idioms>"` (verified bit-identical to pure AIL splice).
- *      - Delete: `ail splice <file> --symbol <sym> --delete`.
- *      - Refactor: Single `ail idiom update $name "<new template>"` in `ail.config.json` propagated across all call sites.
+ *   2. AICE On-the-Fly WITHOUT Idioms (Pure Syntax + AST Tooling):
+ *      - Write from 0: Pure AICE code tokens (zero `$idiom` macros) compiled directly to native disk.
+ *      - Read: `aice outline` (`generateOutline`) + `extractSymbolFromAiceSource` of target symbol (`--no-idioms`).
+ *      - Update: `aice splice <file> --symbol <sym> --code "<pure AICE>"` (verified via live `spliceNativeSource` with `{}` idioms).
+ *      - Delete: `aice splice <file> --symbol <sym> --delete`.
+ *      - Refactor: Surgical `aice splice` across affected symbols in pure AICE (verified via live `spliceNativeSource`).
+ *   3. AICE On-the-Fly WITH Idioms (Syntax + AST Tooling + `$idioms`, including definition overhead):
+ *      - Write from 0: Idiom-compressed AICE code tokens PLUS full token cost of all `idiom $name(...)` definitions in `aice.config.json`.
+ *      - Read: `aice outline` (`generateOutline`) + `extractSymbolFromAiceSource` of target symbol (`--idioms`).
+ *      - Update: `aice splice <file> --symbol <sym> --code "<AICE with $idioms>"` (verified bit-identical to pure AICE splice).
+ *      - Delete: `aice splice <file> --symbol <sym> --delete`.
+ *      - Refactor: Single `aice idiom update $name "<new template>"` in `aice.config.json` propagated across all call sites.
  */
 
 import * as fs from "node:fs";
@@ -41,14 +41,14 @@ import * as path from "node:path";
 import type { ProjectIdiomDefinition } from "../src/config/index.js";
 import type { Module } from "../src/core/ast.js";
 import { parse } from "../src/core/parser.js";
-import { AilGenerator, decompile } from "../src/decompiler/index.js";
+import { AiceGenerator, decompile } from "../src/decompiler/index.js";
 import { emitTarget, type TargetLanguage } from "../src/emitters/index.js";
 import {
   collapseModuleIdioms,
   expandModuleIdioms,
 } from "../src/idioms/index.js";
 import { estimateTokens } from "../src/tokenomics/index.js";
-import { extractSymbolFromAilSource } from "../src/tools/context.js";
+import { extractSymbolFromAiceSource } from "../src/tools/context.js";
 import { generateOutline } from "../src/tools/outline.js";
 import { spliceNativeSource } from "../src/tools/splice.js";
 
@@ -105,33 +105,33 @@ export const SUPPORTED_BENCHMARK_LANGUAGES: readonly LanguageSpec[] = [
 ] as const;
 
 export interface ThreeWayOperationScore {
-  withoutAilTokens: number;
-  ailWithoutIdiomsTokens: number;
-  ailWithIdiomsTokens: number;
+  withoutAiceTokens: number;
+  aiceWithoutIdiomsTokens: number;
+  aiceWithIdiomsTokens: number;
   savedWithoutIdiomsTokens: number;
   savingsWithoutIdiomsPct: number;
   savedWithIdiomsTokens: number;
   savingsWithIdiomsPct: number;
   idiomExtraSavingsPct: number;
-  withoutAilTurns: number;
-  ailWithoutIdiomsTurns: number;
-  ailWithIdiomsTurns: number;
+  withoutAiceTurns: number;
+  aiceWithoutIdiomsTurns: number;
+  aiceWithIdiomsTurns: number;
   savedWithoutIdiomsTurns: number;
   turnsSavingsWithoutIdiomsPct: number;
   savedWithIdiomsTurns: number;
   turnsSavingsWithIdiomsPct: number;
   idiomExtraTurnsSavingsPct: number;
-  ailWithoutIdiomsWins: boolean;
-  ailWithIdiomsWins: boolean;
+  aiceWithoutIdiomsWins: boolean;
+  aiceWithIdiomsWins: boolean;
 }
 
 export interface RealWorldModuleFileResult {
   fileName: string;
   languageId: BenchmarkLanguageId;
   extension: string;
-  withoutAilTokens: number;
-  ailWithoutIdiomsTokens: number;
-  ailWithIdiomsTokens: number;
+  withoutAiceTokens: number;
+  aiceWithoutIdiomsTokens: number;
+  aiceWithIdiomsTokens: number;
   savingsWithoutIdiomsPct: number;
   savingsWithIdiomsPct: number;
 }
@@ -154,9 +154,9 @@ export interface RealWorldBenchmarkResult {
   surgicalDelete: ThreeWayOperationScore;
   multiFileRefactor: ThreeWayOperationScore;
   total: ThreeWayOperationScore;
-  ailWinsAllWithoutIdioms: boolean;
-  ailWinsAllWithIdioms: boolean;
-  zeroAilFilesLeftOnDisk: boolean;
+  aiceWinsAllWithoutIdioms: boolean;
+  aiceWinsAllWithIdioms: boolean;
+  zeroAiceFilesLeftOnDisk: boolean;
 }
 
 export interface RealWorldBenchmarkSuiteReport {
@@ -165,7 +165,7 @@ export interface RealWorldBenchmarkSuiteReport {
   winsWithIdioms: number;
   winRateWithoutIdiomsPct: number;
   winRateWithIdiomsPct: number;
-  zeroAilFilesLeftOnDisk: boolean;
+  zeroAiceFilesLeftOnDisk: boolean;
   coveredLanguages: BenchmarkLanguageId[];
   coveredExtensions: string[];
   coveredScenarios: EngineeringScenarioKind[];
@@ -184,62 +184,62 @@ function countTokens(text: string): number {
 }
 
 function makeThreeWayScore(
-  withoutAilTokens: number,
-  ailWithoutIdiomsTokens: number,
-  ailWithIdiomsTokens: number,
-  withoutAilTurns: number = 0,
-  ailWithoutIdiomsTurns: number = 0,
-  ailWithIdiomsTurns: number = 0,
+  withoutAiceTokens: number,
+  aiceWithoutIdiomsTokens: number,
+  aiceWithIdiomsTokens: number,
+  withoutAiceTurns: number = 0,
+  aiceWithoutIdiomsTurns: number = 0,
+  aiceWithIdiomsTurns: number = 0,
 ): ThreeWayOperationScore {
-  const savedWithoutIdiomsTokens = withoutAilTokens - ailWithoutIdiomsTokens;
+  const savedWithoutIdiomsTokens = withoutAiceTokens - aiceWithoutIdiomsTokens;
   const savingsWithoutIdiomsPct =
-    withoutAilTokens > 0
-      ? Number(((savedWithoutIdiomsTokens / withoutAilTokens) * 100).toFixed(2))
+    withoutAiceTokens > 0
+      ? Number(((savedWithoutIdiomsTokens / withoutAiceTokens) * 100).toFixed(2))
       : 0;
-  const savedWithIdiomsTokens = withoutAilTokens - ailWithIdiomsTokens;
+  const savedWithIdiomsTokens = withoutAiceTokens - aiceWithIdiomsTokens;
   const savingsWithIdiomsPct =
-    withoutAilTokens > 0
-      ? Number(((savedWithIdiomsTokens / withoutAilTokens) * 100).toFixed(2))
+    withoutAiceTokens > 0
+      ? Number(((savedWithIdiomsTokens / withoutAiceTokens) * 100).toFixed(2))
       : 0;
   const idiomExtraSavingsPct = Number(
     (savingsWithIdiomsPct - savingsWithoutIdiomsPct).toFixed(2),
   );
 
-  const savedWithoutIdiomsTurns = withoutAilTurns - ailWithoutIdiomsTurns;
+  const savedWithoutIdiomsTurns = withoutAiceTurns - aiceWithoutIdiomsTurns;
   const turnsSavingsWithoutIdiomsPct =
-    withoutAilTurns > 0
-      ? Number(((savedWithoutIdiomsTurns / withoutAilTurns) * 100).toFixed(2))
+    withoutAiceTurns > 0
+      ? Number(((savedWithoutIdiomsTurns / withoutAiceTurns) * 100).toFixed(2))
       : 0;
-  const savedWithIdiomsTurns = withoutAilTurns - ailWithIdiomsTurns;
+  const savedWithIdiomsTurns = withoutAiceTurns - aiceWithIdiomsTurns;
   const turnsSavingsWithIdiomsPct =
-    withoutAilTurns > 0
-      ? Number(((savedWithIdiomsTurns / withoutAilTurns) * 100).toFixed(2))
+    withoutAiceTurns > 0
+      ? Number(((savedWithIdiomsTurns / withoutAiceTurns) * 100).toFixed(2))
       : 0;
   const idiomExtraTurnsSavingsPct = Number(
     (turnsSavingsWithIdiomsPct - turnsSavingsWithoutIdiomsPct).toFixed(2),
   );
 
   return {
-    withoutAilTokens,
-    ailWithoutIdiomsTokens,
-    ailWithIdiomsTokens,
+    withoutAiceTokens,
+    aiceWithoutIdiomsTokens,
+    aiceWithIdiomsTokens,
     savedWithoutIdiomsTokens,
     savingsWithoutIdiomsPct,
     savedWithIdiomsTokens,
     savingsWithIdiomsPct,
     idiomExtraSavingsPct,
-    withoutAilTurns,
-    ailWithoutIdiomsTurns,
-    ailWithIdiomsTurns,
+    withoutAiceTurns,
+    aiceWithoutIdiomsTurns,
+    aiceWithIdiomsTurns,
     savedWithoutIdiomsTurns,
     turnsSavingsWithoutIdiomsPct,
     savedWithIdiomsTurns,
     turnsSavingsWithIdiomsPct,
     idiomExtraTurnsSavingsPct,
-    ailWithoutIdiomsWins: ailWithoutIdiomsTokens < withoutAilTokens,
-    ailWithIdiomsWins:
-      ailWithIdiomsTokens < withoutAilTokens &&
-      ailWithIdiomsTokens <= ailWithoutIdiomsTokens,
+    aiceWithoutIdiomsWins: aiceWithoutIdiomsTokens < withoutAiceTokens,
+    aiceWithIdiomsWins:
+      aiceWithIdiomsTokens < withoutAiceTokens &&
+      aiceWithIdiomsTokens <= aiceWithoutIdiomsTokens,
   };
 }
 
@@ -247,13 +247,13 @@ function makeIdiomDef(
   name: string,
   kind: "expr" | "stmt" | "block",
   params: Array<{ name: string; type: string }>,
-  templateAil: string,
+  templateAice: string,
 ): ProjectIdiomDefinition {
   return {
     name,
     kind,
     params,
-    templateAil,
+    templateAice,
     occurrences: 8,
     tokensPerOccurrenceSaved: 20,
     netTokenSavings: 160,
@@ -264,7 +264,7 @@ export function buildIdiomRegistryForLanguage(
   lang: BenchmarkLanguageId,
 ): {
   idioms: Record<string, ProjectIdiomDefinition>;
-  updatedTemplateAil: string;
+  updatedTemplateAice: string;
   definitionSource: string;
 } {
   const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === lang)!;
@@ -272,7 +272,7 @@ export function buildIdiomRegistryForLanguage(
 
   const formatDef = (def: ProjectIdiomDefinition): string => {
     const pStr = def.params.map((p) => `${p.name}: ${p.type}`).join(", ");
-    return `idiom ${def.name}(${pStr}) {\n  ${def.templateAil.replace(/\n/g, "\n  ")}\n}`;
+    return `idiom ${def.name}(${pStr}) {\n  ${def.templateAice.replace(/\n/g, "\n  ")}\n}`;
   };
 
   switch (lang) {
@@ -291,28 +291,28 @@ export function buildIdiomRegistryForLanguage(
         { name: "$2", type: "int" },
         { name: "$3", type: "int" },
       ];
-      const templateAil = [
+      const templateAice = [
         "if $0 < $1:",
         "  $0 = $1",
         "if $0 > $2:",
         "  $0 = $2",
         "$0 = $0 + $3",
       ].join("\n");
-      const updatedTemplateAil = [
+      const updatedTemplateAice = [
         "if $0 < $1:",
         "  $0 = $1",
         "if $0 > $2:",
         "  $0 = $2",
         "$0 = $0 + $3 + 1",
       ].join("\n");
-      const def = makeIdiomDef(idiomName, "stmt", params, templateAil);
+      const def = makeIdiomDef(idiomName, "stmt", params, templateAice);
       const aliases: Record<string, ProjectIdiomDefinition> = { [idiomName]: def };
       if (lang === "ts" || lang === "js") {
         aliases.$clamp_step = def;
       }
       return {
         idioms: aliases,
-        updatedTemplateAil,
+        updatedTemplateAice,
         definitionSource: formatDef(def),
       };
     }
@@ -329,7 +329,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def },
-        updatedTemplateAil:
+        updatedTemplateAice:
           'div(class="kpi-tile-v2", data-metric=$0) { span(class="kpi-label"): $1; strong(class="kpi-value"): $2 }',
         definitionSource: formatDef(def),
       };
@@ -351,7 +351,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def, $css_card: def },
-        updatedTemplateAil: [
+        updatedTemplateAice: [
           "fl-center",
           "padding: $0",
           "gap: $1",
@@ -373,7 +373,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def },
-        updatedTemplateAil:
+        updatedTemplateAice:
           'div(class="metric-row-v2", data-key=$0) { span(class="metric-label"): $1; strong(class="metric-val"): $2 }',
         definitionSource: formatDef(def),
       };
@@ -391,7 +391,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def },
-        updatedTemplateAil:
+        updatedTemplateAice:
           "{ id: $0, threshold: $1, limit: $2, retries: 5, enabled: true, windowSec: 120 }",
         definitionSource: formatDef(def),
       };
@@ -409,7 +409,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def },
-        updatedTemplateAil:
+        updatedTemplateAice:
           "{ worker: $0, port: $1, concurrency: $2, replicas: 4, healthIntervalSec: 10, tlsRequired: true }",
         definitionSource: formatDef(def),
       };
@@ -426,7 +426,7 @@ export function buildIdiomRegistryForLanguage(
       );
       return {
         idioms: { [idiomName]: def },
-        updatedTemplateAil:
+        updatedTemplateAice:
           'div(class="summary-row-v2") { span(class="summary-lbl"): $0; strong(class="summary-val"): $1 }',
         definitionSource: formatDef(def),
       };
@@ -437,9 +437,9 @@ export function buildIdiomRegistryForLanguage(
 export interface RealWorldFileSpec {
   fileName: string;
   languageId: BenchmarkLanguageId;
-  ailWithIdioms: string;
+  aiceWithIdioms: string;
   targetSymbol: string;
-  updatedTargetSymbolAilWithIdioms: string;
+  updatedTargetSymbolAiceWithIdioms: string;
   refactorSymbols: string[];
   obsoleteSymbol?: string;
 }
@@ -528,9 +528,9 @@ function buildDomainModuleSpec(
     return {
       fileName,
       languageId,
-      ailWithIdioms: blocks.join("\n\n"),
+      aiceWithIdioms: blocks.join("\n\n"),
       targetSymbol: targetSel,
-      updatedTargetSymbolAilWithIdioms: updatedRule,
+      updatedTargetSymbolAiceWithIdioms: updatedRule,
       refactorSymbols: selectors,
       obsoleteSymbol: obsoleteName ? `.${obsoleteName.replace(/_/g, "-")}` : undefined,
     };
@@ -572,9 +572,9 @@ function buildDomainModuleSpec(
     return {
       fileName,
       languageId,
-      ailWithIdioms: lines.join("\n"),
+      aiceWithIdioms: lines.join("\n"),
       targetSymbol: `#${targetId}`,
-      updatedTargetSymbolAilWithIdioms: updatedSection,
+      updatedTargetSymbolAiceWithIdioms: updatedSection,
       refactorSymbols: domainFunctions.map((f) => `#${f.name}`),
       obsoleteSymbol: obsoleteName ? `#${obsoleteName}` : undefined,
     };
@@ -615,9 +615,9 @@ function buildDomainModuleSpec(
     return {
       fileName,
       languageId,
-      ailWithIdioms: lines.join("\n"),
+      aiceWithIdioms: lines.join("\n"),
       targetSymbol: targetId,
-      updatedTargetSymbolAilWithIdioms: updatedTwig,
+      updatedTargetSymbolAiceWithIdioms: updatedTwig,
       refactorSymbols: domainFunctions.map((f) => f.name),
       obsoleteSymbol: obsoleteName,
     };
@@ -644,9 +644,9 @@ function buildDomainModuleSpec(
     return {
       fileName,
       languageId,
-      ailWithIdioms: `pub const config = {\n${sectionEntries.join(",\n")}\n}`,
+      aiceWithIdioms: `pub const config = {\n${sectionEntries.join(",\n")}\n}`,
       targetSymbol: `config.${targetKey}`,
-      updatedTargetSymbolAilWithIdioms: updatedEntry,
+      updatedTargetSymbolAiceWithIdioms: updatedEntry,
       refactorSymbols: domainFunctions.map((f) => `config.${f.name}`),
       obsoleteSymbol: obsoleteName ? `config.${obsoleteName}` : undefined,
     };
@@ -701,9 +701,9 @@ function buildDomainModuleSpec(
     return {
       fileName,
       languageId,
-      ailWithIdioms: comps.join("\n\n"),
+      aiceWithIdioms: comps.join("\n\n"),
       targetSymbol: targetComp.name,
-      updatedTargetSymbolAilWithIdioms: updatedComp,
+      updatedTargetSymbolAiceWithIdioms: updatedComp,
       refactorSymbols: domainFunctions.map((f) => f.name),
       obsoleteSymbol: obsoleteName,
     };
@@ -772,9 +772,9 @@ function buildDomainModuleSpec(
   return {
     fileName,
     languageId,
-    ailWithIdioms: items.join("\n\n"),
+    aiceWithIdioms: items.join("\n\n"),
     targetSymbol: targetFn.name,
-    updatedTargetSymbolAilWithIdioms: updatedFn,
+    updatedTargetSymbolAiceWithIdioms: updatedFn,
     refactorSymbols: domainFunctions.map((f) => f.name),
     obsoleteSymbol: obsoleteName,
   };
@@ -1641,7 +1641,7 @@ export const REAL_WORLD_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
   },
 ] as const;
 
-function extractTargetSliceAil(
+function extractTargetSliceAice(
   nativeCode: string,
   filePath: string,
   target: TargetLanguage,
@@ -1654,9 +1654,9 @@ function extractTargetSliceAil(
     : decomp.ast;
 
   const outlineRes = generateOutline(activeAst, filePath, { idioms: Boolean(idioms) });
-  const activeAil = new AilGenerator().generate(activeAst);
-  const sliceText = extractSymbolFromAilSource(
-    activeAil,
+  const activeAice = new AiceGenerator().generate(activeAst);
+  const sliceText = extractSymbolFromAiceSource(
+    activeAice,
     targetSymbol,
     filePath,
     activeAst,
@@ -1732,8 +1732,8 @@ export function runSingleRealWorldBenchmark(
     }
   }
 
-  // Persist real ail.config.json in benchmark workspace (Twinless Direct-to-Native mode)
-  const configPath = path.join(benchDir, "ail.config.json");
+  // Persist real aice.config.json in benchmark workspace (Twinless Direct-to-Native mode)
+  const configPath = path.join(benchDir, "aice.config.json");
   fs.writeFileSync(
     configPath,
     JSON.stringify(
@@ -1750,63 +1750,63 @@ export function runSingleRealWorldBenchmark(
   );
 
   const fileResults: RealWorldModuleFileResult[] = [];
-  let writeWithoutAil = 0;
-  let writeAilNoIdioms = 0;
-  let writeAilWithIdioms = idiomDefinitionsTokens; // Charge full idiom definition overhead on Write from 0!
+  let writeWithoutAice = 0;
+  let writeAiceNoIdioms = 0;
+  let writeAiceWithIdioms = idiomDefinitionsTokens; // Charge full idiom definition overhead on Write from 0!
 
-  let readWithoutAil = 0;
-  let readAilNoIdioms = 0;
-  let readAilWithIdioms = 0;
+  let readWithoutAice = 0;
+  let readAiceNoIdioms = 0;
+  let readAiceWithIdioms = 0;
 
-  let updateWithoutAil = 0;
-  let updateAilNoIdioms = 0;
-  let updateAilWithIdioms = 0;
+  let updateWithoutAice = 0;
+  let updateAiceNoIdioms = 0;
+  let updateAiceWithIdioms = 0;
 
-  let deleteWithoutAil = 0;
-  let deleteAilNoIdioms = 0;
-  let deleteAilWithIdioms = 0;
+  let deleteWithoutAice = 0;
+  let deleteAiceNoIdioms = 0;
+  let deleteAiceWithIdioms = 0;
 
-  let refactorWithoutAil = 0;
-  let refactorAilNoIdioms = 0;
-  let refactorAilWithIdioms = 0;
+  let refactorWithoutAice = 0;
+  let refactorAiceNoIdioms = 0;
+  let refactorAiceWithIdioms = 0;
   const refactoredLanguages = new Set<BenchmarkLanguageId>();
 
   for (const fileSpec of spec.files) {
     const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === fileSpec.languageId)!;
-    const { idioms, updatedTemplateAil } = buildIdiomRegistryForLanguage(fileSpec.languageId);
+    const { idioms, updatedTemplateAice } = buildIdiomRegistryForLanguage(fileSpec.languageId);
     const filePath = path.join(benchDir, fileSpec.fileName);
 
-    // 1. Write from 0 (Compile AIL -> Native on disk; also generate Pure AIL without idioms)
-    const parsedWithIdioms = parse(fileSpec.ailWithIdioms, `${fileSpec.fileName}.ail`);
+    // 1. Write from 0 (Compile AICE -> Native on disk; also generate Pure AICE without idioms)
+    const parsedWithIdioms = parse(fileSpec.aiceWithIdioms, `${fileSpec.fileName}.aice`);
     const expandedAst = expandModuleIdioms(parsedWithIdioms, idioms);
-    const pureAilSource = new AilGenerator().generate(expandedAst);
+    const pureAiceSource = new AiceGenerator().generate(expandedAst);
     const nativeCode = emitTarget(expandedAst, langSpec.target, { watermark: false });
     fs.writeFileSync(filePath, nativeCode, "utf-8");
 
     const fileNativeTokens = countTokens(nativeCode);
-    const filePureAilTokens = countTokens(pureAilSource);
-    const fileIdiomAilTokens = countTokens(fileSpec.ailWithIdioms);
+    const filePureAiceTokens = countTokens(pureAiceSource);
+    const fileIdiomAiceTokens = countTokens(fileSpec.aiceWithIdioms);
 
-    writeWithoutAil += fileNativeTokens;
-    writeAilNoIdioms += filePureAilTokens;
-    writeAilWithIdioms += fileIdiomAilTokens;
+    writeWithoutAice += fileNativeTokens;
+    writeAiceNoIdioms += filePureAiceTokens;
+    writeAiceWithIdioms += fileIdiomAiceTokens;
 
     fileResults.push({
       fileName: fileSpec.fileName,
       languageId: fileSpec.languageId,
       extension: langSpec.extension,
-      withoutAilTokens: fileNativeTokens,
-      ailWithoutIdiomsTokens: filePureAilTokens,
-      ailWithIdiomsTokens: fileIdiomAilTokens,
+      withoutAiceTokens: fileNativeTokens,
+      aiceWithoutIdiomsTokens: filePureAiceTokens,
+      aiceWithIdiomsTokens: fileIdiomAiceTokens,
       savingsWithoutIdiomsPct: Number(
-        (((fileNativeTokens - filePureAilTokens) / fileNativeTokens) * 100).toFixed(2),
+        (((fileNativeTokens - filePureAiceTokens) / fileNativeTokens) * 100).toFixed(2),
       ),
       savingsWithIdiomsPct: Number(
-        (((fileNativeTokens - fileIdiomAilTokens) / fileNativeTokens) * 100).toFixed(2),
+        (((fileNativeTokens - fileIdiomAiceTokens) / fileNativeTokens) * 100).toFixed(2),
       ),
     });
 
-    // 2. Read (Discovery + Surgical Target Symbol Context via generateOutline + extractSymbolFromAilSource)
+    // 2. Read (Discovery + Surgical Target Symbol Context via generateOutline + extractSymbolFromAiceSource)
     const nativeReadTokens = measureSurgicalNativeReadTokens(
       nativeCode,
       filePath,
@@ -1814,14 +1814,14 @@ export function runSingleRealWorldBenchmark(
       fileSpec.targetSymbol,
       idioms,
     );
-    const pureSlice = extractTargetSliceAil(
+    const pureSlice = extractTargetSliceAice(
       nativeCode,
       filePath,
       langSpec.target,
       fileSpec.targetSymbol,
       undefined,
     );
-    const idiomSlice = extractTargetSliceAil(
+    const idiomSlice = extractTargetSliceAice(
       nativeCode,
       filePath,
       langSpec.target,
@@ -1829,13 +1829,13 @@ export function runSingleRealWorldBenchmark(
       idioms,
     );
 
-    readWithoutAil += nativeReadTokens;
-    readAilNoIdioms += countTokens(pureSlice.outlineText) + countTokens(pureSlice.sliceText);
-    readAilWithIdioms += countTokens(idiomSlice.outlineText) + countTokens(idiomSlice.sliceText);
+    readWithoutAice += nativeReadTokens;
+    readAiceNoIdioms += countTokens(pureSlice.outlineText) + countTokens(pureSlice.sliceText);
+    readAiceWithIdioms += countTokens(idiomSlice.outlineText) + countTokens(idiomSlice.sliceText);
 
-    // 3. Surgical Update (Execute spliceNativeSource for BOTH Pure AIL and Idiom AIL and verify parity!)
-    const updatedPureAil = expandSnippetToPureAil(
-      fileSpec.updatedTargetSymbolAilWithIdioms,
+    // 3. Surgical Update (Execute spliceNativeSource for BOTH Pure AICE and Idiom AICE and verify parity!)
+    const updatedPureAice = expandSnippetToPureAice(
+      fileSpec.updatedTargetSymbolAiceWithIdioms,
       fileSpec.languageId,
       idioms,
     );
@@ -1845,7 +1845,7 @@ export function runSingleRealWorldBenchmark(
         nativeCode,
         {
           insertAfter: fileSpec.targetSymbol,
-          code: updatedPureAil,
+          code: updatedPureAice,
         },
         filePath,
         {},
@@ -1854,7 +1854,7 @@ export function runSingleRealWorldBenchmark(
         nativeCode,
         {
           insertAfter: fileSpec.targetSymbol,
-          code: fileSpec.updatedTargetSymbolAilWithIdioms,
+          code: fileSpec.updatedTargetSymbolAiceWithIdioms,
         },
         filePath,
         idioms,
@@ -1872,18 +1872,18 @@ export function runSingleRealWorldBenchmark(
         .slice(-3)
         .join("\n");
       const anchorTokens = Math.max(6, countTokens(anchorLines));
-      updateWithoutAil += anchorTokens * 2 + countTokens(idiomInsertRes.newSnippet ?? "");
-      updateAilNoIdioms +=
-        countTokens(`--insert-after ${fileSpec.targetSymbol}`) + countTokens(updatedPureAil);
-      updateAilWithIdioms +=
+      updateWithoutAice += anchorTokens * 2 + countTokens(idiomInsertRes.newSnippet ?? "");
+      updateAiceNoIdioms +=
+        countTokens(`--insert-after ${fileSpec.targetSymbol}`) + countTokens(updatedPureAice);
+      updateAiceWithIdioms +=
         countTokens(`--insert-after ${fileSpec.targetSymbol}`) +
-        countTokens(fileSpec.updatedTargetSymbolAilWithIdioms);
+        countTokens(fileSpec.updatedTargetSymbolAiceWithIdioms);
     } else {
       const pureUpdateRes = spliceNativeSource(
         nativeCode,
         {
           symbol: fileSpec.targetSymbol,
-          code: updatedPureAil,
+          code: updatedPureAice,
         },
         filePath,
         {},
@@ -1892,7 +1892,7 @@ export function runSingleRealWorldBenchmark(
         nativeCode,
         {
           symbol: fileSpec.targetSymbol,
-          code: fileSpec.updatedTargetSymbolAilWithIdioms,
+          code: fileSpec.updatedTargetSymbolAiceWithIdioms,
         },
         filePath,
         idioms,
@@ -1905,14 +1905,14 @@ export function runSingleRealWorldBenchmark(
         throw new Error(`Update splice parity failed on ${fileSpec.fileName}`);
       }
       fs.writeFileSync(filePath, idiomUpdateRes.modifiedCode, "utf-8");
-      updateWithoutAil +=
+      updateWithoutAice +=
         countTokens(idiomUpdateRes.originalSnippet ?? "") +
         countTokens(idiomUpdateRes.newSnippet ?? "");
-      updateAilNoIdioms +=
-        countTokens(`--symbol ${fileSpec.targetSymbol}`) + countTokens(updatedPureAil);
-      updateAilWithIdioms +=
+      updateAiceNoIdioms +=
+        countTokens(`--symbol ${fileSpec.targetSymbol}`) + countTokens(updatedPureAice);
+      updateAiceWithIdioms +=
         countTokens(`--symbol ${fileSpec.targetSymbol}`) +
-        countTokens(fileSpec.updatedTargetSymbolAilWithIdioms);
+        countTokens(fileSpec.updatedTargetSymbolAiceWithIdioms);
     }
 
     // 4. Surgical Delete (for files carrying an obsolete symbol/rule/key)
@@ -1928,10 +1928,10 @@ export function runSingleRealWorldBenchmark(
         idioms,
       );
       fs.writeFileSync(filePath, deleteRes.modifiedCode, "utf-8");
-      deleteWithoutAil += countTokens(deleteRes.originalSnippet ?? "");
+      deleteWithoutAice += countTokens(deleteRes.originalSnippet ?? "");
       const delCmdTokens = countTokens(`--symbol ${fileSpec.obsoleteSymbol} --delete`);
-      deleteAilNoIdioms += delCmdTokens;
-      deleteAilWithIdioms += delCmdTokens;
+      deleteAiceNoIdioms += delCmdTokens;
+      deleteAiceWithIdioms += delCmdTokens;
     }
 
     // 5. Surgical Multi-Site / Multi-File Pattern Refactor
@@ -1940,14 +1940,14 @@ export function runSingleRealWorldBenchmark(
       ...idioms,
       [langSpec.idiomName]: {
         ...idioms[langSpec.idiomName],
-        templateAil: updatedTemplateAil,
+        templateAice: updatedTemplateAice,
       },
     };
     const beforeRefactorNative = fs.readFileSync(filePath, "utf-8");
     const decompiledBefore = decompile(beforeRefactorNative, langSpec.target, { filePath });
     const collapsedBefore = collapseModuleIdioms(decompiledBefore.ast, idioms);
     const expandedAfterAst = expandModuleIdioms(collapsedBefore.ast, updatedIdioms);
-    const afterRefactorPureAil = new AilGenerator().generate(expandedAfterAst);
+    const afterRefactorPureAice = new AiceGenerator().generate(expandedAfterAst);
     const afterRefactorNative = emitTarget(expandedAfterAst, langSpec.target, { watermark: false });
 
     let pureWorkingNative = beforeRefactorNative;
@@ -1964,20 +1964,20 @@ export function runSingleRealWorldBenchmark(
         filePath,
         {},
       );
-      const rawRefSymPureAil = extractSymbolFromAilSource(
-        afterRefactorPureAil,
+      const rawRefSymPureAice = extractSymbolFromAiceSource(
+        afterRefactorPureAice,
         refSym,
         filePath,
         expandedAfterAst,
       );
-      let cleanRefSymPureAil = rawRefSymPureAil
+      let cleanRefSymPureAice = rawRefSymPureAice
         .replace(/^(?:#[^\n]*|module\s+[^\n]+)\n+/g, "")
         .trim();
       if (fileSpec.languageId === "html" || fileSpec.languageId === "twig") {
-        const lines = cleanRefSymPureAil.split("\n");
+        const lines = cleanRefSymPureAice.split("\n");
         const compIdx = lines.findIndex((l) => l.trim().startsWith("component "));
         if (compIdx >= 0) {
-          cleanRefSymPureAil = lines
+          cleanRefSymPureAice = lines
             .slice(compIdx + 1)
             .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
             .join("\n")
@@ -1986,153 +1986,153 @@ export function runSingleRealWorldBenchmark(
       }
       const pureRefactorSplice = spliceNativeSource(
         pureWorkingNative,
-        { symbol: refSym, code: cleanRefSymPureAil },
+        { symbol: refSym, code: cleanRefSymPureAice },
         filePath,
         {},
       );
       if (!pureRefactorSplice.success) {
-        throw new Error(`Pure AIL refactor splice failed on ${fileSpec.fileName} (${refSym})`);
+        throw new Error(`Pure AICE refactor splice failed on ${fileSpec.fileName} (${refSym})`);
       }
       pureWorkingNative = pureRefactorSplice.modifiedCode;
 
-      // Without AIL: replace_file_content (old symbol snippet + new symbol snippet)
-      refactorWithoutAil +=
+      // Without AICE: replace_file_content (old symbol snippet + new symbol snippet)
+      refactorWithoutAice +=
         countTokens(origProbe.originalSnippet ?? "") +
         countTokens(afterProbe.originalSnippet ?? "");
-      // AIL Without Idioms: surgical `ail splice --symbol <refSym>` with pure AIL symbol replacement
-      refactorAilNoIdioms +=
-        countTokens(`--symbol ${refSym}`) + countTokens(cleanRefSymPureAil);
+      // AICE Without Idioms: surgical `aice splice --symbol <refSym>` with pure AICE symbol replacement
+      refactorAiceNoIdioms +=
+        countTokens(`--symbol ${refSym}`) + countTokens(cleanRefSymPureAice);
     }
 
     fs.writeFileSync(filePath, afterRefactorNative, "utf-8");
 
-    // AIL With Idioms: 1 `ail idiom update $name "<updatedTemplateAil>"` per language idiom in ail.config.json
+    // AICE With Idioms: 1 `aice idiom update $name "<updatedTemplateAice>"` per language idiom in aice.config.json
     if (!refactoredLanguages.has(fileSpec.languageId)) {
       refactoredLanguages.add(fileSpec.languageId);
-      refactorAilWithIdioms +=
-        countTokens(`ail idiom update ${langSpec.idiomName}`) +
-        countTokens(updatedTemplateAil);
+      refactorAiceWithIdioms +=
+        countTokens(`aice idiom update ${langSpec.idiomName}`) +
+        countTokens(updatedTemplateAice);
     }
   }
 
-  const remainingAilFiles = fs.readdirSync(benchDir).filter((f) => f.endsWith(".ail"));
-  const zeroAilFilesLeftOnDisk = remainingAilFiles.length === 0;
+  const remainingAiceFiles = fs.readdirSync(benchDir).filter((f) => f.endsWith(".aice"));
+  const zeroAiceFilesLeftOnDisk = remainingAiceFiles.length === 0;
 
-  const writeWithoutAilTurns = spec.files.length;
-  const writeAilNoIdiomsTurns = spec.files.length;
-  const writeAilWithIdiomsTurns = spec.files.length;
+  const writeWithoutAiceTurns = spec.files.length;
+  const writeAiceNoIdiomsTurns = spec.files.length;
+  const writeAiceWithIdiomsTurns = spec.files.length;
 
-  const readWithoutAilTurns = 2 * spec.files.length;
-  const readAilNoIdiomsTurns = spec.files.length;
-  const readAilWithIdiomsTurns = spec.files.length;
+  const readWithoutAiceTurns = 2 * spec.files.length;
+  const readAiceNoIdiomsTurns = spec.files.length;
+  const readAiceWithIdiomsTurns = spec.files.length;
 
-  const updateWithoutAilTurns = spec.files.length;
-  const updateAilNoIdiomsTurns = 1;
-  const updateAilWithIdiomsTurns = 1;
+  const updateWithoutAiceTurns = spec.files.length;
+  const updateAiceNoIdiomsTurns = 1;
+  const updateAiceWithIdiomsTurns = 1;
 
   const deleteFilesCount = spec.files.filter((f) => Boolean(f.obsoleteSymbol)).length;
-  const deleteWithoutAilTurns = deleteFilesCount > 0 ? deleteFilesCount * 2 : 0;
-  const deleteAilNoIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
-  const deleteAilWithIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
+  const deleteWithoutAiceTurns = deleteFilesCount > 0 ? deleteFilesCount * 2 : 0;
+  const deleteAiceNoIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
+  const deleteAiceWithIdiomsTurns = deleteFilesCount > 0 ? 1 : 0;
 
   const totalRefactorSites = spec.files.reduce(
     (acc, f) => acc + f.refactorSymbols.length,
     0,
   );
-  const refactorWithoutAilTurns = totalRefactorSites;
-  const refactorAilNoIdiomsTurns = spec.files.length;
-  const refactorAilWithIdiomsTurns = 1;
+  const refactorWithoutAiceTurns = totalRefactorSites;
+  const refactorAiceNoIdiomsTurns = spec.files.length;
+  const refactorAiceWithIdiomsTurns = 1;
 
-  const totalWithoutAilTurns =
-    writeWithoutAilTurns +
-    readWithoutAilTurns +
-    updateWithoutAilTurns +
-    deleteWithoutAilTurns +
-    refactorWithoutAilTurns;
+  const totalWithoutAiceTurns =
+    writeWithoutAiceTurns +
+    readWithoutAiceTurns +
+    updateWithoutAiceTurns +
+    deleteWithoutAiceTurns +
+    refactorWithoutAiceTurns;
 
-  const totalAilNoIdiomsTurns =
-    writeAilNoIdiomsTurns +
-    readAilNoIdiomsTurns +
-    updateAilNoIdiomsTurns +
-    deleteAilNoIdiomsTurns +
-    refactorAilNoIdiomsTurns;
+  const totalAiceNoIdiomsTurns =
+    writeAiceNoIdiomsTurns +
+    readAiceNoIdiomsTurns +
+    updateAiceNoIdiomsTurns +
+    deleteAiceNoIdiomsTurns +
+    refactorAiceNoIdiomsTurns;
 
-  const totalAilWithIdiomsTurns =
-    writeAilWithIdiomsTurns +
-    readAilWithIdiomsTurns +
-    updateAilWithIdiomsTurns +
-    deleteAilWithIdiomsTurns +
-    refactorAilWithIdiomsTurns;
+  const totalAiceWithIdiomsTurns =
+    writeAiceWithIdiomsTurns +
+    readAiceWithIdiomsTurns +
+    updateAiceWithIdiomsTurns +
+    deleteAiceWithIdiomsTurns +
+    refactorAiceWithIdiomsTurns;
 
   const writeFromZero = makeThreeWayScore(
-    writeWithoutAil,
-    writeAilNoIdioms,
-    writeAilWithIdioms,
-    writeWithoutAilTurns,
-    writeAilNoIdiomsTurns,
-    writeAilWithIdiomsTurns,
+    writeWithoutAice,
+    writeAiceNoIdioms,
+    writeAiceWithIdioms,
+    writeWithoutAiceTurns,
+    writeAiceNoIdiomsTurns,
+    writeAiceWithIdiomsTurns,
   );
   const readContext = makeThreeWayScore(
-    readWithoutAil,
-    readAilNoIdioms,
-    readAilWithIdioms,
-    readWithoutAilTurns,
-    readAilNoIdiomsTurns,
-    readAilWithIdiomsTurns,
+    readWithoutAice,
+    readAiceNoIdioms,
+    readAiceWithIdioms,
+    readWithoutAiceTurns,
+    readAiceNoIdiomsTurns,
+    readAiceWithIdiomsTurns,
   );
   const surgicalUpdate = makeThreeWayScore(
-    updateWithoutAil,
-    updateAilNoIdioms,
-    updateAilWithIdioms,
-    updateWithoutAilTurns,
-    updateAilNoIdiomsTurns,
-    updateAilWithIdiomsTurns,
+    updateWithoutAice,
+    updateAiceNoIdioms,
+    updateAiceWithIdioms,
+    updateWithoutAiceTurns,
+    updateAiceNoIdiomsTurns,
+    updateAiceWithIdiomsTurns,
   );
   const surgicalDelete = makeThreeWayScore(
-    deleteWithoutAil,
-    deleteAilNoIdioms,
-    deleteAilWithIdioms,
-    deleteWithoutAilTurns,
-    deleteAilNoIdiomsTurns,
-    deleteAilWithIdiomsTurns,
+    deleteWithoutAice,
+    deleteAiceNoIdioms,
+    deleteAiceWithIdioms,
+    deleteWithoutAiceTurns,
+    deleteAiceNoIdiomsTurns,
+    deleteAiceWithIdiomsTurns,
   );
   const multiFileRefactor = makeThreeWayScore(
-    refactorWithoutAil,
-    refactorAilNoIdioms,
-    refactorAilWithIdioms,
-    refactorWithoutAilTurns,
-    refactorAilNoIdiomsTurns,
-    refactorAilWithIdiomsTurns,
+    refactorWithoutAice,
+    refactorAiceNoIdioms,
+    refactorAiceWithIdioms,
+    refactorWithoutAiceTurns,
+    refactorAiceNoIdiomsTurns,
+    refactorAiceWithIdiomsTurns,
   );
 
   const total = makeThreeWayScore(
-    writeWithoutAil + readWithoutAil + updateWithoutAil + deleteWithoutAil + refactorWithoutAil,
-    writeAilNoIdioms + readAilNoIdioms + updateAilNoIdioms + deleteAilNoIdioms + refactorAilNoIdioms,
-    writeAilWithIdioms +
-      readAilWithIdioms +
-      updateAilWithIdioms +
-      deleteAilWithIdioms +
-      refactorAilWithIdioms,
-    totalWithoutAilTurns,
-    totalAilNoIdiomsTurns,
-    totalAilWithIdiomsTurns,
+    writeWithoutAice + readWithoutAice + updateWithoutAice + deleteWithoutAice + refactorWithoutAice,
+    writeAiceNoIdioms + readAiceNoIdioms + updateAiceNoIdioms + deleteAiceNoIdioms + refactorAiceNoIdioms,
+    writeAiceWithIdioms +
+      readAiceWithIdioms +
+      updateAiceWithIdioms +
+      deleteAiceWithIdioms +
+      refactorAiceWithIdioms,
+    totalWithoutAiceTurns,
+    totalAiceNoIdiomsTurns,
+    totalAiceWithIdiomsTurns,
   );
 
-  const ailWinsAllWithoutIdioms =
-    writeFromZero.ailWithoutIdiomsWins &&
-    readContext.ailWithoutIdiomsWins &&
-    surgicalUpdate.ailWithoutIdiomsWins &&
-    surgicalDelete.ailWithoutIdiomsWins &&
-    multiFileRefactor.ailWithoutIdiomsWins &&
-    zeroAilFilesLeftOnDisk;
+  const aiceWinsAllWithoutIdioms =
+    writeFromZero.aiceWithoutIdiomsWins &&
+    readContext.aiceWithoutIdiomsWins &&
+    surgicalUpdate.aiceWithoutIdiomsWins &&
+    surgicalDelete.aiceWithoutIdiomsWins &&
+    multiFileRefactor.aiceWithoutIdiomsWins &&
+    zeroAiceFilesLeftOnDisk;
 
-  const ailWinsAllWithIdioms =
-    writeFromZero.ailWithIdiomsWins &&
-    readContext.ailWithIdiomsWins &&
-    surgicalUpdate.ailWithIdiomsWins &&
-    surgicalDelete.ailWithIdiomsWins &&
-    multiFileRefactor.ailWithIdiomsWins &&
-    zeroAilFilesLeftOnDisk;
+  const aiceWinsAllWithIdioms =
+    writeFromZero.aiceWithIdiomsWins &&
+    readContext.aiceWithIdiomsWins &&
+    surgicalUpdate.aiceWithIdiomsWins &&
+    surgicalDelete.aiceWithIdiomsWins &&
+    multiFileRefactor.aiceWithIdiomsWins &&
+    zeroAiceFilesLeftOnDisk;
 
   return {
     id: spec.id,
@@ -2152,13 +2152,13 @@ export function runSingleRealWorldBenchmark(
     surgicalDelete,
     multiFileRefactor,
     total,
-    ailWinsAllWithoutIdioms,
-    ailWinsAllWithIdioms,
-    zeroAilFilesLeftOnDisk,
+    aiceWinsAllWithoutIdioms,
+    aiceWinsAllWithIdioms,
+    zeroAiceFilesLeftOnDisk,
   };
 }
 
-function expandSnippetToPureAil(
+function expandSnippetToPureAice(
   snippetWithIdioms: string,
   languageId: BenchmarkLanguageId,
   idioms: Record<string, ProjectIdiomDefinition>,
@@ -2169,16 +2169,16 @@ function expandSnippetToPureAil(
       .map((l) => `  ${l}`)
       .join("\n");
     const wrapped = `component Snippet():\n${indented}`;
-    const parsed = parse(wrapped, "snippet.ail");
+    const parsed = parse(wrapped, "snippet.aice");
     const expanded = expandModuleIdioms(parsed, idioms);
-    const fullLines = new AilGenerator().generate(expanded).trim().split("\n");
+    const fullLines = new AiceGenerator().generate(expanded).trim().split("\n");
     const compIdx = fullLines.findIndex((l) => l.trim().startsWith("component Snippet"));
     const bodyLines = compIdx >= 0 ? fullLines.slice(compIdx + 1) : fullLines;
     return bodyLines.map((l) => (l.startsWith("  ") ? l.slice(2) : l)).join("\n");
   }
-  const parsed = parse(snippetWithIdioms, "snippet.ail");
+  const parsed = parse(snippetWithIdioms, "snippet.aice");
   const expanded = expandModuleIdioms(parsed, idioms);
-  return new AilGenerator()
+  return new AiceGenerator()
     .generate(expanded)
     .split("\n")
     .filter((l) => !l.trim().startsWith("#") && !l.trim().startsWith("module "))
@@ -2187,14 +2187,14 @@ function expandSnippetToPureAil(
 }
 
 export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ail-real-world-bench-"));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aice-real-world-bench-"));
   try {
     const benchmarks: RealWorldBenchmarkResult[] = [];
     const coveredLanguages = new Set<BenchmarkLanguageId>();
     const coveredExtensions = new Set<string>();
     const coveredScenarios = new Set<EngineeringScenarioKind>();
     const coveredSurfaces = new Set<ApplicationSurfaceKind>();
-    let zeroAilFilesLeftOnDisk = true;
+    let zeroAiceFilesLeftOnDisk = true;
 
     for (const spec of REAL_WORLD_BENCHMARKS) {
       const res = runSingleRealWorldBenchmark(spec, tmpRoot);
@@ -2203,7 +2203,7 @@ export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
       for (const e of res.extensions) coveredExtensions.add(e);
       coveredScenarios.add(res.scenario);
       coveredSurfaces.add(res.appSurface);
-      if (!res.zeroAilFilesLeftOnDisk) zeroAilFilesLeftOnDisk = false;
+      if (!res.zeroAiceFilesLeftOnDisk) zeroAiceFilesLeftOnDisk = false;
     }
 
     const sumScore = (
@@ -2217,12 +2217,12 @@ export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
       let withIdTurns = 0;
       for (const b of benchmarks) {
         const s = pick(b);
-        w += s.withoutAilTokens;
-        noId += s.ailWithoutIdiomsTokens;
-        withId += s.ailWithIdiomsTokens;
-        wTurns += s.withoutAilTurns;
-        noIdTurns += s.ailWithoutIdiomsTurns;
-        withIdTurns += s.ailWithIdiomsTurns;
+        w += s.withoutAiceTokens;
+        noId += s.aiceWithoutIdiomsTokens;
+        withId += s.aiceWithIdiomsTokens;
+        wTurns += s.withoutAiceTurns;
+        noIdTurns += s.aiceWithoutIdiomsTurns;
+        withIdTurns += s.aiceWithIdiomsTurns;
       }
       return makeThreeWayScore(w, noId, withId, wTurns, noIdTurns, withIdTurns);
     };
@@ -2234,8 +2234,8 @@ export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
     const aggregateRefactor = sumScore((b) => b.multiFileRefactor);
     const aggregateTotal = sumScore((b) => b.total);
 
-    const winsWithoutIdioms = benchmarks.filter((b) => b.ailWinsAllWithoutIdioms).length;
-    const winsWithIdioms = benchmarks.filter((b) => b.ailWinsAllWithIdioms).length;
+    const winsWithoutIdioms = benchmarks.filter((b) => b.aiceWinsAllWithoutIdioms).length;
+    const winsWithIdioms = benchmarks.filter((b) => b.aiceWinsAllWithIdioms).length;
 
     return {
       totalBenchmarks: benchmarks.length,
@@ -2245,7 +2245,7 @@ export function runRealWorldBenchmarkSuite(): RealWorldBenchmarkSuiteReport {
         ((winsWithoutIdioms / benchmarks.length) * 100).toFixed(1),
       ),
       winRateWithIdiomsPct: Number(((winsWithIdioms / benchmarks.length) * 100).toFixed(1)),
-      zeroAilFilesLeftOnDisk,
+      zeroAiceFilesLeftOnDisk,
       coveredLanguages: Array.from(coveredLanguages),
       coveredExtensions: Array.from(coveredExtensions),
       coveredScenarios: Array.from(coveredScenarios),
@@ -2267,18 +2267,18 @@ export function formatRealWorldBenchmarkMarkdown(
   report: RealWorldBenchmarkSuiteReport,
 ): string {
   const lines: string[] = [
-    "# AIL 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)",
+    "# AICE 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)",
     "",
     "- **Evaluation Engine**: Deterministic Offline AST & Tooling Harness (Exact API Calls & Character/Token Accounting — No Live LLM Agent Calls)",
-    "- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AIL` vs `AIL Without Idioms` vs `AIL With Idioms`)",
+    "- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AICE` vs `AICE Without Idioms` vs `AICE With Idioms`)",
     `- **Total Real-World Benchmarks**: **${report.totalBenchmarks}** (\`RW-01\` .. \`RW-10\`)`,
-    `- **AIL Without Idioms Win Rate**: **${report.winsWithoutIdioms} / ${report.totalBenchmarks} (${report.winRateWithoutIdiomsPct.toFixed(1)}%)**`,
-    `- **AIL With Idioms Win Rate**: **${report.winsWithIdioms} / ${report.totalBenchmarks} (${report.winRateWithIdiomsPct.toFixed(1)}%)**`,
-    `- **Total Lifecycle Turns (10 Benchmarks)**: Without AIL = **${report.aggregateTotal.withoutAilTurns} turns** | AIL Without Idioms = **${report.aggregateTotal.ailWithoutIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${report.aggregateTotal.ailWithIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
+    `- **AICE Without Idioms Win Rate**: **${report.winsWithoutIdioms} / ${report.totalBenchmarks} (${report.winRateWithoutIdiomsPct.toFixed(1)}%)**`,
+    `- **AICE With Idioms Win Rate**: **${report.winsWithIdioms} / ${report.totalBenchmarks} (${report.winRateWithIdiomsPct.toFixed(1)}%)**`,
+    `- **Total Lifecycle Turns (10 Benchmarks)**: Without AICE = **${report.aggregateTotal.withoutAiceTurns} turns** | AICE Without Idioms = **${report.aggregateTotal.aiceWithoutIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AICE With Idioms = **${report.aggregateTotal.aiceWithIdiomsTurns} turns (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
     `- **Languages & File Types Covered (${report.coveredLanguages.length})**: \`${report.coveredExtensions.join("`, `")}\``,
     `- **Engineering Scenarios Covered (${report.coveredScenarios.length})**: \`${report.coveredScenarios.join("`, `")}\``,
     `- **Application Surfaces Covered (${report.coveredSurfaces.length})**: \`${report.coveredSurfaces.join("`, `")}\``,
-    `- **Zero \`.ail\` Files Left on Disk**: **${report.zeroAilFilesLeftOnDisk ? "PASS (0 .ail files)" : "FAIL"}**`,
+    `- **Zero \`.aice\` Files Left on Disk**: **${report.zeroAiceFilesLeftOnDisk ? "PASS (0 .aice files)" : "FAIL"}**`,
     "",
     "---",
     "",
@@ -2286,42 +2286,42 @@ export function formatRealWorldBenchmarkMarkdown(
     "",
     "### Token Breakdown Across All 10 Real-World Benchmarks",
     "",
-    "| Operation | Without AIL (Tokens) | AIL Without Idioms (Tokens) | Savings Without Idioms | AIL With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |",
+    "| Operation | Without AICE (Tokens) | AICE Without Idioms (Tokens) | Savings Without Idioms | AICE With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |",
     "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    `| **Write (Create from 0)** *(incl. idiom defs)* | ${report.aggregateWrite.withoutAilTokens.toLocaleString("en-US")} | ${report.aggregateWrite.ailWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateWrite.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateWrite.ailWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateWrite.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateWrite.idiomExtraSavingsPct.toFixed(1)}%** |`,
-    `| **Read (Discovery + Context)** | ${report.aggregateRead.withoutAilTokens.toLocaleString("en-US")} | ${report.aggregateRead.ailWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRead.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRead.ailWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRead.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRead.idiomExtraSavingsPct.toFixed(1)}%** |`,
-    `| **Update (Bug Fix / Feature)** | ${report.aggregateUpdate.withoutAilTokens.toLocaleString("en-US")} | ${report.aggregateUpdate.ailWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateUpdate.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateUpdate.ailWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateUpdate.idiomExtraSavingsPct.toFixed(1)}%** |`,
-    `| **Delete (Obsolete Symbol)** | ${report.aggregateDelete.withoutAilTokens.toLocaleString("en-US")} | ${report.aggregateDelete.ailWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateDelete.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateDelete.ailWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateDelete.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateDelete.idiomExtraSavingsPct.toFixed(1)}%** |`,
-    `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAilTokens.toLocaleString("en-US")} | ${report.aggregateRefactor.ailWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.ailWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraSavingsPct.toFixed(1)}%** |`,
-    `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAilTokens.toLocaleString("en-US")}** | **${report.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString("en-US")}** | **-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.ailWithIdiomsTokens.toLocaleString("en-US")}** | **-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **Write (Create from 0)** *(incl. idiom defs)* | ${report.aggregateWrite.withoutAiceTokens.toLocaleString("en-US")} | ${report.aggregateWrite.aiceWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateWrite.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateWrite.aiceWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateWrite.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateWrite.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **Read (Discovery + Context)** | ${report.aggregateRead.withoutAiceTokens.toLocaleString("en-US")} | ${report.aggregateRead.aiceWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRead.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRead.aiceWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRead.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRead.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **Update (Bug Fix / Feature)** | ${report.aggregateUpdate.withoutAiceTokens.toLocaleString("en-US")} | ${report.aggregateUpdate.aiceWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateUpdate.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateUpdate.aiceWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateUpdate.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **Delete (Obsolete Symbol)** | ${report.aggregateDelete.withoutAiceTokens.toLocaleString("en-US")} | ${report.aggregateDelete.aiceWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateDelete.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateDelete.aiceWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateDelete.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateDelete.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAiceTokens.toLocaleString("en-US")} | ${report.aggregateRefactor.aiceWithoutIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.aiceWithIdiomsTokens.toLocaleString("en-US")} | **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraSavingsPct.toFixed(1)}%** |`,
+    `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAiceTokens.toLocaleString("en-US")}** | **${report.aggregateTotal.aiceWithoutIdiomsTokens.toLocaleString("en-US")}** | **-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.aiceWithIdiomsTokens.toLocaleString("en-US")}** | **-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraSavingsPct.toFixed(1)}%** |`,
     "",
     "### Agent Turns Breakdown Across All 10 Real-World Benchmarks",
     "",
-    "| Operation | Without AIL (Turns) | AIL Without Idioms (Turns) | Turn Savings Without Idioms | AIL With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |",
+    "| Operation | Without AICE (Turns) | AICE Without Idioms (Turns) | Turn Savings Without Idioms | AICE With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |",
     "| :--- | ---: | ---: | ---: | ---: | ---: | ---: |",
-    `| **Write (Create from 0)** | ${report.aggregateWrite.withoutAilTurns.toLocaleString("en-US")} | ${report.aggregateWrite.ailWithoutIdiomsTurns.toLocaleString("en-US")} | **${report.aggregateWrite.turnsSavingsWithoutIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithoutIdiomsPct.toFixed(1)}%` : "0.0%"}** | ${report.aggregateWrite.ailWithIdiomsTurns.toLocaleString("en-US")} | **${report.aggregateWrite.turnsSavingsWithIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithIdiomsPct.toFixed(1)}%` : "0.0%"}** | **+${report.aggregateWrite.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
-    `| **Read (Discovery + Context)** | ${report.aggregateRead.withoutAilTurns.toLocaleString("en-US")} | ${report.aggregateRead.ailWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRead.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRead.ailWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRead.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRead.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
-    `| **Update (Bug Fix / Feature)** | ${report.aggregateUpdate.withoutAilTurns.toLocaleString("en-US")} | ${report.aggregateUpdate.ailWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateUpdate.ailWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateUpdate.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
-    `| **Delete (Obsolete Symbol)** | ${report.aggregateDelete.withoutAilTurns.toLocaleString("en-US")} | ${report.aggregateDelete.ailWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateDelete.ailWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateDelete.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
-    `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAilTurns.toLocaleString("en-US")} | ${report.aggregateRefactor.ailWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.ailWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
-    `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAilTurns.toLocaleString("en-US")}** | **${report.aggregateTotal.ailWithoutIdiomsTurns.toLocaleString("en-US")}** | **-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.ailWithIdiomsTurns.toLocaleString("en-US")}** | **-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Write (Create from 0)** | ${report.aggregateWrite.withoutAiceTurns.toLocaleString("en-US")} | ${report.aggregateWrite.aiceWithoutIdiomsTurns.toLocaleString("en-US")} | **${report.aggregateWrite.turnsSavingsWithoutIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithoutIdiomsPct.toFixed(1)}%` : "0.0%"}** | ${report.aggregateWrite.aiceWithIdiomsTurns.toLocaleString("en-US")} | **${report.aggregateWrite.turnsSavingsWithIdiomsPct > 0 ? `-${report.aggregateWrite.turnsSavingsWithIdiomsPct.toFixed(1)}%` : "0.0%"}** | **+${report.aggregateWrite.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Read (Discovery + Context)** | ${report.aggregateRead.withoutAiceTurns.toLocaleString("en-US")} | ${report.aggregateRead.aiceWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRead.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRead.aiceWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRead.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRead.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Update (Bug Fix / Feature)** | ${report.aggregateUpdate.withoutAiceTurns.toLocaleString("en-US")} | ${report.aggregateUpdate.aiceWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateUpdate.aiceWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateUpdate.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Delete (Obsolete Symbol)** | ${report.aggregateDelete.withoutAiceTurns.toLocaleString("en-US")} | ${report.aggregateDelete.aiceWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateDelete.aiceWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateDelete.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **Refactor (Multi-Site / Multi-File)** | ${report.aggregateRefactor.withoutAiceTurns.toLocaleString("en-US")} | ${report.aggregateRefactor.aiceWithoutIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | ${report.aggregateRefactor.aiceWithIdiomsTurns.toLocaleString("en-US")} | **-${report.aggregateRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateRefactor.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
+    `| **TOTAL LIFECYCLE** | **${report.aggregateTotal.withoutAiceTurns.toLocaleString("en-US")}** | **${report.aggregateTotal.aiceWithoutIdiomsTurns.toLocaleString("en-US")}** | **-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.aiceWithIdiomsTurns.toLocaleString("en-US")}** | **-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%** | **+${report.aggregateTotal.idiomExtraTurnsSavingsPct.toFixed(1)}%** |`,
     "",
     "---",
     "",
     "## 2. All 10 Real-World Benchmarks Summary Table (Offline Deterministic Suite)",
     "",
-    "| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AIL | Tokens AIL (No Idioms) | Tokens AIL (With Idioms) | Turns Without AIL | Turns AIL (No Idioms) | Turns AIL (With Idioms) |",
+    "| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AICE | Tokens AICE (No Idioms) | Tokens AICE (With Idioms) | Turns Without AICE | Turns AICE (No Idioms) | Turns AICE (With Idioms) |",
     "| :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
   ];
 
   for (const b of report.benchmarks) {
     lines.push(
-      `| \`${b.id}\` | **${b.title}** | \`${b.appSurface}\` | \`${b.scenario}\` | \`${b.extensions.join(" ")}\` | -${b.writeFromZero.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.writeFromZero.savingsWithIdiomsPct.toFixed(1)}%** | -${b.readContext.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.savingsWithIdiomsPct.toFixed(1)}%** | -${b.surgicalUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${b.surgicalDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${b.multiFileRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.savingsWithIdiomsPct.toFixed(1)}%** | ${b.total.withoutAilTokens.toLocaleString("en-US")} | ${b.total.ailWithoutIdiomsTokens.toLocaleString("en-US")} (**-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.ailWithIdiomsTokens.toLocaleString("en-US")} (**-${b.total.savingsWithIdiomsPct.toFixed(1)}%**) | ${b.total.withoutAilTurns} | ${b.total.ailWithoutIdiomsTurns} (**-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.ailWithIdiomsTurns} (**-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%**) |`,
+      `| \`${b.id}\` | **${b.title}** | \`${b.appSurface}\` | \`${b.scenario}\` | \`${b.extensions.join(" ")}\` | -${b.writeFromZero.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.writeFromZero.savingsWithIdiomsPct.toFixed(1)}%** | -${b.readContext.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.savingsWithIdiomsPct.toFixed(1)}%** | -${b.surgicalUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${b.surgicalDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${b.multiFileRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.savingsWithIdiomsPct.toFixed(1)}%** | ${b.total.withoutAiceTokens.toLocaleString("en-US")} | ${b.total.aiceWithoutIdiomsTokens.toLocaleString("en-US")} (**-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.aiceWithIdiomsTokens.toLocaleString("en-US")} (**-${b.total.savingsWithIdiomsPct.toFixed(1)}%**) | ${b.total.withoutAiceTurns} | ${b.total.aiceWithoutIdiomsTurns} (**-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%**) | ${b.total.aiceWithIdiomsTurns} (**-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%**) |`,
     );
   }
 
   lines.push(
-    `| **TOTAL** | **All 10 Real-World Scenarios (\`${report.winsWithIdioms}/${report.totalBenchmarks}\` Wins)** | **Both** | **All 5** | **All 15** | -${report.aggregateWrite.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateWrite.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRead.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRead.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${report.aggregateDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.withoutAilTokens.toLocaleString("en-US")}** | **${report.aggregateTotal.ailWithoutIdiomsTokens.toLocaleString("en-US")} (-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.ailWithIdiomsTokens.toLocaleString("en-US")} (-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.withoutAilTurns}** | **${report.aggregateTotal.ailWithoutIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.ailWithIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)** |`,
+    `| **TOTAL** | **All 10 Real-World Scenarios (\`${report.winsWithIdioms}/${report.totalBenchmarks}\` Wins)** | **Both** | **All 5** | **All 15** | -${report.aggregateWrite.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateWrite.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRead.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRead.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateUpdate.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateUpdate.savingsWithIdiomsPct.toFixed(1)}%** | **-${report.aggregateDelete.savingsWithIdiomsPct.toFixed(1)}%** | -${report.aggregateRefactor.savingsWithoutIdiomsPct.toFixed(1)}% / **-${report.aggregateRefactor.savingsWithIdiomsPct.toFixed(1)}%** | **${report.aggregateTotal.withoutAiceTokens.toLocaleString("en-US")}** | **${report.aggregateTotal.aiceWithoutIdiomsTokens.toLocaleString("en-US")} (-${report.aggregateTotal.savingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.aiceWithIdiomsTokens.toLocaleString("en-US")} (-${report.aggregateTotal.savingsWithIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.withoutAiceTurns}** | **${report.aggregateTotal.aiceWithoutIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${report.aggregateTotal.aiceWithIdiomsTurns} (-${report.aggregateTotal.turnsSavingsWithIdiomsPct.toFixed(1)}%)** |`,
     "",
     "---",
     "",
@@ -2336,28 +2336,28 @@ export function formatRealWorldBenchmarkMarkdown(
       `- **Description**: ${b.description}`,
       `- **Scenario**: \`${b.scenario}\` | **Surface**: \`${b.appSurface}\` | **Files**: ${b.filesCount} (\`${b.extensions.join("`, `")}\`)`,
       `- **Idioms Used**: \`${b.idiomsUsed.join("`, `")}\` (Definition Cost Charged on Write from 0: **${b.idiomDefinitionsTokens} tokens**)`,
-      `- **Lifecycle Tokens**: Without AIL = **${b.total.withoutAilTokens.toLocaleString("en-US")}** | AIL Without Idioms = **${b.total.ailWithoutIdiomsTokens.toLocaleString("en-US")} (-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${b.total.ailWithIdiomsTokens.toLocaleString("en-US")} (-${b.total.savingsWithIdiomsPct.toFixed(1)}%)**`,
-      `- **Lifecycle Turns**: Without AIL = **${b.total.withoutAilTurns} turns** | AIL Without Idioms = **${b.total.ailWithoutIdiomsTurns} turns (-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AIL With Idioms = **${b.total.ailWithIdiomsTurns} turns (-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
+      `- **Lifecycle Tokens**: Without AICE = **${b.total.withoutAiceTokens.toLocaleString("en-US")}** | AICE Without Idioms = **${b.total.aiceWithoutIdiomsTokens.toLocaleString("en-US")} (-${b.total.savingsWithoutIdiomsPct.toFixed(1)}%)** | AICE With Idioms = **${b.total.aiceWithIdiomsTokens.toLocaleString("en-US")} (-${b.total.savingsWithIdiomsPct.toFixed(1)}%)**`,
+      `- **Lifecycle Turns**: Without AICE = **${b.total.withoutAiceTurns} turns** | AICE Without Idioms = **${b.total.aiceWithoutIdiomsTurns} turns (-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | AICE With Idioms = **${b.total.aiceWithIdiomsTurns} turns (-${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%)**`,
       "",
       "#### Operation Breakdown (Tokens & Turns)",
       "",
-      "| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |",
+      "| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |",
       "| :--- | ---: | ---: | ---: | ---: |",
-      `| **Write (Create from 0)** | ${b.writeFromZero.withoutAilTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.withoutAilTurns} turns | ${b.writeFromZero.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.ailWithoutIdiomsTurns} turns | ${b.writeFromZero.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.ailWithIdiomsTurns} turns | 0.0% / 0.0% |`,
-      `| **Read (Context)** | ${b.readContext.withoutAilTokens.toLocaleString("en-US")} tok / ${b.readContext.withoutAilTurns} turns | ${b.readContext.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.readContext.ailWithoutIdiomsTurns} turns | ${b.readContext.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.readContext.ailWithIdiomsTurns} turns | -${b.readContext.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
-      `| **Update (Surgical)** | ${b.surgicalUpdate.withoutAilTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.withoutAilTurns} turns | ${b.surgicalUpdate.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.ailWithoutIdiomsTurns} turns | ${b.surgicalUpdate.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.ailWithIdiomsTurns} turns | -${b.surgicalUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
-      `| **Delete (Surgical)** | ${b.surgicalDelete.withoutAilTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.withoutAilTurns} turns | ${b.surgicalDelete.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.ailWithoutIdiomsTurns} turns | ${b.surgicalDelete.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.ailWithIdiomsTurns} turns | -${b.surgicalDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
-      `| **Refactor (Pattern)** | ${b.multiFileRefactor.withoutAilTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.withoutAilTurns} turns | ${b.multiFileRefactor.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.ailWithoutIdiomsTurns} turns | ${b.multiFileRefactor.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.ailWithIdiomsTurns} turns | -${b.multiFileRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
-      `| **TOTAL** | **${b.total.withoutAilTokens.toLocaleString("en-US")} tok / ${b.total.withoutAilTurns} turns** | **${b.total.ailWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.total.ailWithoutIdiomsTurns} turns** | **${b.total.ailWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.total.ailWithIdiomsTurns} turns** | **-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / -${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Write (Create from 0)** | ${b.writeFromZero.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.withoutAiceTurns} turns | ${b.writeFromZero.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.aiceWithoutIdiomsTurns} turns | ${b.writeFromZero.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.writeFromZero.aiceWithIdiomsTurns} turns | 0.0% / 0.0% |`,
+      `| **Read (Context)** | ${b.readContext.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.readContext.withoutAiceTurns} turns | ${b.readContext.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.readContext.aiceWithoutIdiomsTurns} turns | ${b.readContext.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.readContext.aiceWithIdiomsTurns} turns | -${b.readContext.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.readContext.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Update (Surgical)** | ${b.surgicalUpdate.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.withoutAiceTurns} turns | ${b.surgicalUpdate.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.aiceWithoutIdiomsTurns} turns | ${b.surgicalUpdate.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalUpdate.aiceWithIdiomsTurns} turns | -${b.surgicalUpdate.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalUpdate.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Delete (Surgical)** | ${b.surgicalDelete.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.withoutAiceTurns} turns | ${b.surgicalDelete.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.aiceWithoutIdiomsTurns} turns | ${b.surgicalDelete.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.surgicalDelete.aiceWithIdiomsTurns} turns | -${b.surgicalDelete.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.surgicalDelete.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **Refactor (Pattern)** | ${b.multiFileRefactor.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.withoutAiceTurns} turns | ${b.multiFileRefactor.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.aiceWithoutIdiomsTurns} turns | ${b.multiFileRefactor.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.multiFileRefactor.aiceWithIdiomsTurns} turns | -${b.multiFileRefactor.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${b.multiFileRefactor.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **TOTAL** | **${b.total.withoutAiceTokens.toLocaleString("en-US")} tok / ${b.total.withoutAiceTurns} turns** | **${b.total.aiceWithoutIdiomsTokens.toLocaleString("en-US")} tok / ${b.total.aiceWithoutIdiomsTurns} turns** | **${b.total.aiceWithIdiomsTokens.toLocaleString("en-US")} tok / ${b.total.aiceWithIdiomsTurns} turns** | **-${b.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / -${b.total.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
       "",
       "#### Module File Breakdown",
       "",
-      "| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |",
+      "| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |",
       "| :--- | :--- | ---: | ---: | ---: | ---: | ---: |",
     );
     for (const f of b.files) {
       lines.push(
-        `| \`${f.fileName}\` | \`${f.extension}\` | ${f.withoutAilTokens} | ${f.ailWithoutIdiomsTokens} | -${f.savingsWithoutIdiomsPct.toFixed(1)}% | ${f.ailWithIdiomsTokens} | **-${f.savingsWithIdiomsPct.toFixed(1)}%** |`,
+        `| \`${f.fileName}\` | \`${f.extension}\` | ${f.withoutAiceTokens} | ${f.aiceWithoutIdiomsTokens} | -${f.savingsWithoutIdiomsPct.toFixed(1)}% | ${f.aiceWithIdiomsTokens} | **-${f.savingsWithIdiomsPct.toFixed(1)}%** |`,
       );
     }
     lines.push("");

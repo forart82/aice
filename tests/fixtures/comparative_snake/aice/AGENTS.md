@@ -28,23 +28,23 @@ Before executing any tool or command (`view_file`, `run_command`, `write_to_file
 1. **Scope Check**: Confirm that all targeted file paths and command operations resolve strictly within `./` or its descendants.
 2. **Immediate Rejection**: If an operation references any parent, external, or out-of-boundary path, halt and refuse the out-of-boundary operation immediately.
 
-<!-- >>> AIL-COGNITIVE-RULE-START >>> -->
-# AIL Project Directives & Dialect Specification for AI Coding Agents
+<!-- >>> AICE-COGNITIVE-RULE-START >>> -->
+# AICE Project Directives & Dialect Specification for AI Coding Agents
 
-> **CRITICAL DIRECTIVE**: This project is authoritatively developed in AIL (*.ail).
+> **CRITICAL DIRECTIVE**: This project is authoritatively developed in AICE (*.aice).
 > Target files (`*.ts`, `*.tsx`, `*.css`, `*.html`, `*.py`, `*.cpp`, `*.hpp`, `*.h`, etc.) are **machine-generated, read-only build artifacts** (`chmod 444`).
 
 ## 1. Core Directives:
-1. **Source of Truth**: Always read, inspect, create, and modify `*.ail` source files.
-2. **Never Edit Target Files Directly**: Any changes made directly to target files will fail with OS permissions (`EACCES`) or be overwritten by the AIL compiler (`ail compile` or `ail compile-all`).
-3. **Stack Trace Path Translation**: When runtime errors, test failures, compiler diagnostics, or user prompts reference a target file (e.g. `engine.ts:338` or `main.ts:12`), **DO NOT OPEN OR INSPECT THE TARGET FILE**. You MUST translate the path to its `.ail` sibling and inspect `engine.ts.ail` instead!
-4. **No Target Shell Inspection**: Never inspect or dump target files via shell commands (e.g. DO NOT run `git diff <file.ts>` or `cat <file.ts>`). Work strictly with `*.ail` source files.
-5. **Targeted Compilation**: Compile only modified source files with `ail compile <path/to/file.ail>`. Never run `compile-all` for single-file bug fixes.
+1. **Source of Truth**: Always read, inspect, create, and modify `*.aice` source files.
+2. **Never Edit Target Files Directly**: Any changes made directly to target files will fail with OS permissions (`EACCES`) or be overwritten by the AICE compiler (`aice compile` or `aice compile-all`).
+3. **Stack Trace Path Translation**: When runtime errors, test failures, compiler diagnostics, or user prompts reference a target file (e.g. `engine.ts:338` or `main.ts:12`), **DO NOT OPEN OR INSPECT THE TARGET FILE**. You MUST translate the path to its `.aice` sibling and inspect `engine.ts.aice` instead!
+4. **No Target Shell Inspection**: Never inspect or dump target files via shell commands (e.g. DO NOT run `git diff <file.ts>` or `cat <file.ts>`). Work strictly with `*.aice` source files.
+5. **Targeted Compilation**: Compile only modified source files with `aice compile <path/to/file.aice>`. Never run `compile-all` for single-file bug fixes.
 6. **Verification & Testing**: Build with `npm run build` and run test suites (`npm test`). Once tests pass, task is complete.
-7. **Verification & Auto-Repair**: Run `ail verify <file.ail> --json` to test code, or `ail fix <file.ail>` to autonomously repair violations.
+7. **Verification & Auto-Repair**: Run `aice verify <file.aice> --json` to test code, or `aice fix <file.aice>` to autonomously repair violations.
 
-## 2. AIL 2.0 Dialect Syntax Cheatsheet:
-- **Canonical File Naming**: Always name files with target extension before `.ail` (e.g. `src/App.tsx.ail`, `src/sim/Boss.ts.ail`, `src/styles.css.ail`).
+## 2. AICE 2.0 Dialect Syntax Cheatsheet:
+- **Canonical File Naming**: Always name files with target extension before `.aice` (e.g. `src/App.tsx.aice`, `src/sim/Boss.ts.aice`, `src/styles.css.aice`).
 - **Keywordless Bindings** (no `let` or `const`):
   - `x := expr` -> immutable variable binding (replaces `const x = ...`)
   - `y ::= expr` -> mutable variable binding (replaces `let y = ...`)
@@ -70,4 +70,4 @@ Before executing any tool or command (`view_file`, `run_command`, `write_to_file
 - **CSS Layout Macros & Tokens**:
   - Layout macros: `fl-row`, `fl-col`, `fl-center`
   - Token unit deduplication: `tokens spacing[rem]: 1: 0.25, 2: 0.5`
-<!-- <<< AIL-COGNITIVE-RULE-END <<< -->
+<!-- <<< AICE-COGNITIVE-RULE-END <<< -->

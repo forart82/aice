@@ -1,4 +1,4 @@
-# AIL Core Research Synthesis: Verified Empirical & Theoretical Foundations
+# AICE Core Research Synthesis: Verified Empirical & Theoretical Foundations
 
 > **Status**: Authoritative Architectural Knowledge Base  
 > **Source**: 5 Independent Deep-Research Subagent Studies (October 2026)  
@@ -118,7 +118,7 @@ LLMs hallucinate conflicting APIs when prompted in human-facing languages (e.g. 
 A bidirectional lens $(get, put)$ is very well-behaved ($Put(Get(c), c) \equiv c$ and $Get(Put(a, c)) \equiv a$) if and only if there exists a Syntactic Complement $\Omega$ such that:
 $$C \cong A \times \Omega$$
 - $C$: Target concrete source (TypeScript, Python).
-- $A$: Semantic AIL AST (clean, token-compressed).
+- $A$: Semantic AICE AST (clean, token-compressed).
 - $\Omega$: CST Trivia Table (comments, docstrings, blank lines, indentation, punctuation style).
 
 ### 5.2 Node-Indexed CST Trivia Architecture

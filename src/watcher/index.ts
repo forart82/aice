@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Incremental Watch Daemon Module.
+ * AICE 2.0 Incremental Watch Daemon Module.
  */
 
-export * from "./ail-watch.js";
+export * from "./aice-watch.js";
 export { safeWriteTargetFile } from "../shield/index.js";
 

@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 Project Idiom Subsystem.
+ * Unit tests for AICE 2.0 Project Idiom Subsystem.
  */
 
 import { describe, expect, it } from "vitest";
@@ -15,8 +15,8 @@ import {
   mineProjectIdioms,
   expandModuleIdioms,
   collapseModuleIdioms,
-  expandAilSourceIdioms,
-  collapseAilSourceIdioms,
+  expandAiceSourceIdioms,
+  collapseAiceSourceIdioms,
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
   formatIdiomsMarkdownSection,
@@ -31,7 +31,7 @@ import {
 } from "../../src/config/project-config.js";
 import { templateCache } from "../../src/idioms/idiom-transform.js";
 
-describe("AIL 2.0 Project Idioms Subsystem", () => {
+describe("AICE 2.0 Project Idioms Subsystem", () => {
   describe("1. Core Lexer & Parser: $ Identifier Support", () => {
     it("scans $idiomName and $0 holes as IDENT tokens", () => {
       const code = "$guardOk($0, $1)";
@@ -81,7 +81,7 @@ describe("AIL 2.0 Project Idioms Subsystem", () => {
         name: "$guardOk",
         kind: "stmt",
         params: [{ name: "$0" }, { name: "$1" }],
-        templateAil: "if res.status != $0: ret err($1)",
+        templateAice: "if res.status != $0: ret err($1)",
         occurrences: 5,
         tokensPerOccurrenceSaved: 8,
         netTokenSavings: 34,
@@ -109,14 +109,14 @@ describe("AIL 2.0 Project Idioms Subsystem", () => {
       }).toThrow(/Invalid idiom/);
     });
 
-    it("loads, saves, and merges idioms in ail.config.json", () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-idiom-cfg-"));
+    it("loads, saves, and merges idioms in aice.config.json", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-idiom-cfg-"));
       try {
         const idiom: ProjectIdiomDefinition = {
           name: "$checkErr",
           kind: "stmt",
           params: [{ name: "$0" }],
-          templateAil: "if err != nil: ret $0",
+          templateAice: "if err != nil: ret $0",
           occurrences: 4,
           tokensPerOccurrenceSaved: 6,
           netTokenSavings: 20,
@@ -136,7 +136,7 @@ describe("AIL 2.0 Project Idioms Subsystem", () => {
           name: "$logInfo",
           kind: "expr",
           params: [{ name: "$0" }],
-          templateAil: "logger.info($0)",
+          templateAice: "logger.info($0)",
           occurrences: 10,
           tokensPerOccurrenceSaved: 5,
           netTokenSavings: 45,
@@ -188,9 +188,9 @@ fn handleC(ctx: any, req: any):
 
       const result = mineProjectIdioms(
         [
-          { filePath: "s1.ail", source: file1 },
-          { filePath: "s2.ail", source: file2 },
-          { filePath: "s3.ail", source: file3 },
+          { filePath: "s1.aice", source: file1 },
+          { filePath: "s2.aice", source: file2 },
+          { filePath: "s3.aice", source: file3 },
         ],
         {
           minOccurrences: 3,
@@ -217,9 +217,9 @@ fn handleC(ctx: any, req: any):
 
       const result = mineProjectIdioms(
         [
-          { filePath: "t1.ail", source: tiny1 },
-          { filePath: "t2.ail", source: tiny2 },
-          { filePath: "t3.ail", source: tiny3 },
+          { filePath: "t1.aice", source: tiny1 },
+          { filePath: "t2.aice", source: tiny2 },
+          { filePath: "t3.aice", source: tiny3 },
         ],
         {
           minOccurrences: 3,
@@ -259,9 +259,9 @@ fn runC(id: str):
 
       const result = mineProjectIdioms(
         [
-          { filePath: "w1.ail", source: file1 },
-          { filePath: "w2.ail", source: file2 },
-          { filePath: "w3.ail", source: file3 },
+          { filePath: "w1.aice", source: file1 },
+          { filePath: "w2.aice", source: file2 },
+          { filePath: "w3.aice", source: file3 },
         ],
         {
           minOccurrences: 3,
@@ -272,12 +272,12 @@ fn runC(id: str):
       const idiomKeys = Object.keys(result.idioms);
       expect(idiomKeys.length).toBeGreaterThan(0);
       const alphaIdiom = Object.values(result.idioms).find(
-        (i) => i.kind === "block" && i.templateAil.includes("_loc0"),
+        (i) => i.kind === "block" && i.templateAice.includes("_loc0"),
       );
-      expect(alphaIdiom!.templateAil).toMatch(
+      expect(alphaIdiom!.templateAice).toMatch(
         /(_loc0\s*:=\s*fetch\(|let _loc0\s*=\s*fetch\()/,
       );
-      expect(alphaIdiom!.templateAil).toContain("save(_loc0)");
+      expect(alphaIdiom!.templateAice).toContain("save(_loc0)");
       // Only holes should be parameter, _loc0 must NOT be a param
       expect(alphaIdiom!.params.every((p) => p.name !== "_loc0")).toBe(true);
       expect(
@@ -293,13 +293,13 @@ fn runC(id: str):
       name: "$guardStatus",
       kind: "stmt",
       params: [{ name: "$0" }, { name: "$1" }],
-      templateAil: "if res.status != $0:\n  ret err($1)",
+      templateAice: "if res.status != $0:\n  ret err($1)",
       occurrences: 3,
       tokensPerOccurrenceSaved: 8,
       netTokenSavings: 20,
     };
 
-    it("collapses repetitive code into idiom calls in AIL source", () => {
+    it("collapses repetitive code into idiom calls in AICE source", () => {
       const source = `
 module app.handler
 
@@ -308,16 +308,16 @@ fn handle():
     ret err("bad status")
   ret ok
 `;
-      const { ail, collapsedCount } = collapseAilSourceIdioms(source, {
+      const { aice, collapsedCount } = collapseAiceSourceIdioms(source, {
         $guardStatus: guardIdiom,
       });
 
       expect(collapsedCount).toBe(1);
-      expect(ail).toContain("$guardStatus(200, \"bad status\")");
-      expect(ail).not.toContain("if res.status != 200");
+      expect(aice).toContain("$guardStatus(200, \"bad status\")");
+      expect(aice).not.toContain("if res.status != 200");
     });
 
-    it("expands idiom calls back into canonical AIL code", () => {
+    it("expands idiom calls back into canonical AICE code", () => {
       const source = `
 module app.handler
 
@@ -325,14 +325,14 @@ fn handle():
   $guardStatus(404, "not found")
   ret ok
 `;
-      const { ail, expandedCount } = expandAilSourceIdioms(source, {
+      const { aice, expandedCount } = expandAiceSourceIdioms(source, {
         $guardStatus: guardIdiom,
       });
 
       expect(expandedCount).toBe(1);
-      expect(ail).toContain("if res.status != 404:");
-      expect(ail).toContain('ret err("not found")');
-      expect(ail).not.toContain("$guardStatus");
+      expect(aice).toContain("if res.status != 404:");
+      expect(aice).toContain('ret err("not found")');
+      expect(aice).not.toContain("$guardStatus");
     });
 
     it("collapses and expands compound expression idioms", () => {
@@ -340,7 +340,7 @@ fn handle():
         name: "$sendJson",
         kind: "expr",
         params: [{ name: "$0" }, { name: "$1" }],
-        templateAil: "res.status($0).json($1)",
+        templateAice: "res.status($0).json($1)",
         occurrences: 4,
         tokensPerOccurrenceSaved: 7,
         netTokenSavings: 25,
@@ -352,14 +352,14 @@ module app.api
 fn respond():
   _ := res.status(200).json(payload)
 `;
-      const { ail: collapsed, collapsedCount } = collapseAilSourceIdioms(source, {
+      const { aice: collapsed, collapsedCount } = collapseAiceSourceIdioms(source, {
         $sendJson: exprIdiom,
       });
 
       expect(collapsedCount).toBe(1);
       expect(collapsed).toContain("$sendJson(200, payload)");
 
-      const { ail: expanded, expandedCount } = expandAilSourceIdioms(collapsed, {
+      const { aice: expanded, expandedCount } = expandAiceSourceIdioms(collapsed, {
         $sendJson: exprIdiom,
       });
 
@@ -372,7 +372,7 @@ fn respond():
         name: "$fetchAndSave",
         kind: "block",
         params: [{ name: "$0" }],
-        templateAil:
+        templateAice:
           'let _loc0 = fetch($0)\nlogger.info("processing record: " + _loc0)\nsave(_loc0)',
         occurrences: 3,
         tokensPerOccurrenceSaved: 10,
@@ -389,7 +389,7 @@ fn handleEscaping(id: str):
   ret tempVar
 `;
 
-      const { collapsedCount: escapedCollapsed } = collapseAilSourceIdioms(
+      const { collapsedCount: escapedCollapsed } = collapseAiceSourceIdioms(
         escapingSource,
         {
           $fetchAndSave: blockIdiom,
@@ -407,14 +407,14 @@ fn handleNonEscaping(id: str):
   ret nil
 `;
 
-      const { collapsedCount: nonEscapedCollapsed, ail } = collapseAilSourceIdioms(
+      const { collapsedCount: nonEscapedCollapsed, aice } = collapseAiceSourceIdioms(
         nonEscapingSource,
         {
           $fetchAndSave: blockIdiom,
         },
       );
       expect(nonEscapedCollapsed).toBe(1);
-      expect(ail).toContain("$fetchAndSave(id)");
+      expect(aice).toContain("$fetchAndSave(id)");
     });
   });
 
@@ -423,7 +423,7 @@ fn handleNonEscaping(id: str):
       name: "$fetchData",
       kind: "expr",
       params: [{ name: "$0" }],
-      templateAil: "fetch($0)",
+      templateAice: "fetch($0)",
       occurrences: 3,
       tokensPerOccurrenceSaved: 5,
       netTokenSavings: 15,
@@ -464,7 +464,7 @@ fn load(url: str):
         name: "$computeAndLog",
         kind: "block",
         params: [{ name: "$0" }],
-        templateAil: "let _loc0 = $0 * 2\nlogValue(_loc0)",
+        templateAice: "let _loc0 = $0 * 2\nlogValue(_loc0)",
         occurrences: 4,
         tokensPerOccurrenceSaved: 8,
         netTokenSavings: 30,
@@ -520,7 +520,7 @@ fn run():
           name: "$guard",
           kind: "stmt",
           params: [{ name: "$0" }],
-          templateAil: "if err != nil: ret $0",
+          templateAice: "if err != nil: ret $0",
           occurrences: 5,
           tokensPerOccurrenceSaved: 7,
           netTokenSavings: 30,
@@ -534,7 +534,7 @@ fn run():
     });
 
     it("applies project idioms to workspace directory and collapses files", () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-ws-idioms-"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-ws-idioms-"));
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -553,9 +553,9 @@ fn handle():
     ret err("${msg}")
   ret nil
 `;
-        fs.writeFileSync(path.join(srcDir, "h1.ail"), template(200, "status 200"), "utf-8");
-        fs.writeFileSync(path.join(srcDir, "h2.ail"), template(404, "status 404"), "utf-8");
-        fs.writeFileSync(path.join(srcDir, "h3.ail"), template(500, "status 500"), "utf-8");
+        fs.writeFileSync(path.join(srcDir, "h1.aice"), template(200, "status 200"), "utf-8");
+        fs.writeFileSync(path.join(srcDir, "h2.aice"), template(404, "status 404"), "utf-8");
+        fs.writeFileSync(path.join(srcDir, "h3.aice"), template(500, "status 500"), "utf-8");
 
         const result = applyProjectIdiomsToDirectory(tmpDir, {
           minOccurrences: 3,
@@ -566,7 +566,7 @@ fn handle():
         expect(result.totalCollapsedCalls).toBe(3);
 
         // Check that files on disk now contain the idiom call
-        const fileContent = fs.readFileSync(path.join(srcDir, "h1.ail"), "utf-8");
+        const fileContent = fs.readFileSync(path.join(srcDir, "h1.aice"), "utf-8");
         const idiomName = Object.keys(result.idioms)[0];
         expect(fileContent).toContain(idiomName);
 
@@ -575,7 +575,7 @@ fn handle():
         expect(expandResult.expandedFiles).toBe(3);
         expect(expandResult.expandedCalls).toBe(3);
 
-        const restoredContent = fs.readFileSync(path.join(srcDir, "h1.ail"), "utf-8");
+        const restoredContent = fs.readFileSync(path.join(srcDir, "h1.aice"), "utf-8");
         expect(restoredContent).toContain("if res.status != 200:");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -593,7 +593,7 @@ fn handle():
             { name: "$0", type: "int" },
             { name: "$1", type: "int" },
           ],
-          templateAil: "$0 + $1",
+          templateAice: "$0 + $1",
           description: "adds two numbers",
           tokensPerOccurrenceSaved: 2,
           netTokenSavings: 2,
@@ -607,7 +607,7 @@ fn handle():
             { name: "$1", type: "int" },
             { name: "$2", type: "int" },
           ],
-          templateAil: "$add($0, $add($1, $2))",
+          templateAice: "$add($0, $add($1, $2))",
           description: "adds three numbers via nested idiom",
           tokensPerOccurrenceSaved: 4,
           netTokenSavings: 4,
@@ -621,7 +621,7 @@ fn handle():
             { name: "$1", type: "int" },
             { name: "$2", type: "int" },
           ],
-          templateAil: "let sum = $add3($0, $1, $2)",
+          templateAice: "let sum = $add3($0, $1, $2)",
           description: "stmt calling nested expr idiom",
           tokensPerOccurrenceSaved: 6,
           netTokenSavings: 6,
@@ -631,7 +631,7 @@ fn handle():
           name: "$cycleA",
           kind: "expr",
           params: [{ name: "$0", type: "int" }],
-          templateAil: "$cycleB($0)",
+          templateAice: "$cycleB($0)",
           description: "cyclical A",
           tokensPerOccurrenceSaved: 1,
           netTokenSavings: 1,
@@ -641,7 +641,7 @@ fn handle():
           name: "$cycleB",
           kind: "expr",
           params: [{ name: "$0", type: "int" }],
-          templateAil: "$cycleA($0)",
+          templateAice: "$cycleA($0)",
           description: "cyclical B",
           tokensPerOccurrenceSaved: 1,
           netTokenSavings: 1,
@@ -650,13 +650,13 @@ fn handle():
       };
 
       const code = "module test\n\nfn test():\n  $nestedStmt(10, 20, 30)\n";
-      const { ail } = expandAilSourceIdioms(code, idioms);
-      expect(ail).toContain("sum :=");
-      expect(ail).toContain("10 + (20 + 30)");
+      const { aice } = expandAiceSourceIdioms(code, idioms);
+      expect(aice).toContain("sum :=");
+      expect(aice).toContain("10 + (20 + 30)");
 
       // Cycle protection test: terminates cleanly at depth limit without crashing
       const cycleCode = "module test\n\nfn cycle():\n  let val = $cycleA(42)\n";
-      expect(() => expandAilSourceIdioms(cycleCode, idioms)).not.toThrow();
+      expect(() => expandAiceSourceIdioms(cycleCode, idioms)).not.toThrow();
     });
 
     it("supports PostfixTryExpr and IndexExpr inside idioms and respects escape analysis", () => {
@@ -668,7 +668,7 @@ fn handle():
             { name: "$0", type: "any" },
             { name: "$1", type: "int" },
           ],
-          templateAil: "fetchItem($0)?[ $1 ]",
+          templateAice: "fetchItem($0)?[ $1 ]",
           description: "fetch then index with try unwrap",
           tokensPerOccurrenceSaved: 4,
           netTokenSavings: 4,
@@ -677,17 +677,17 @@ fn handle():
       };
 
       const code = "module test\n\nfn test():\n  let item = $tryLookup(target, 0)\n";
-      const { ail } = expandAilSourceIdioms(code, idioms);
-      expect(ail).toContain("fetchItem(target)?[0]");
+      const { aice } = expandAiceSourceIdioms(code, idioms);
+      expect(aice).toContain("fetchItem(target)?[0]");
 
       // Idiom miner supports AST with PostfixTryExpr and IndexExpr
       const inputs = [
         {
-          filePath: "f1.ail",
+          filePath: "f1.aice",
           source: "module f1\nfn run():\n  let item = fetchItem(a)?[0]\n  log(item)\n",
         },
         {
-          filePath: "f2.ail",
+          filePath: "f2.aice",
           source: "module f2\nfn run2():\n  let item = fetchItem(b)?[0]\n  log(item)\n",
         },
       ];
@@ -700,7 +700,7 @@ fn handle():
           name: "$calcWithExposed",
           kind: "block",
           params: [{ name: "$0", type: "int" }],
-          templateAil: "let _loc0 = compute($0)\nlet out = _loc0 * 2",
+          templateAice: "let _loc0 = compute($0)\nlet out = _loc0 * 2",
           description: "block idiom exposing out",
           tokensPerOccurrenceSaved: 10,
           netTokenSavings: 10,
@@ -710,20 +710,20 @@ fn handle():
 
       // 1. When out is referenced downstream, it is not renamed to out_2
       const code1 = "module test\n\nfn test():\n  $calcWithExposed(10)\n  let finalVal = out + 5\n";
-      const { ail: ail1 } = expandAilSourceIdioms(code1, idioms);
-      expect(ail1).toContain("out := _loc0 * 2");
-      expect(ail1).not.toContain("out_2");
+      const { aice: aice1 } = expandAiceSourceIdioms(code1, idioms);
+      expect(aice1).toContain("out := _loc0 * 2");
+      expect(aice1).not.toContain("out_2");
 
       // 2. When called multiple times, internal _loc0 is disambiguated to _loc0_2
       const code2 = "module test\n\nfn test():\n  $calcWithExposed(10)\n  $calcWithExposed(20)\n";
-      const { ail: ail2 } = expandAilSourceIdioms(code2, idioms);
-      expect(ail2).toContain("_loc0_2");
+      const { aice: aice2 } = expandAiceSourceIdioms(code2, idioms);
+      expect(aice2).toContain("_loc0_2");
     });
 
     it("enforces multi-statement full span coverage and re-checks token gate after greedy non-overlapping selection", () => {
       const inputs = [
         {
-          filePath: "m1.ail",
+          filePath: "m1.aice",
           source: `module m1
 fn worker1():
   let x = fetch(1)
@@ -733,7 +733,7 @@ fn worker1():
 `,
         },
         {
-          filePath: "m2.ail",
+          filePath: "m2.aice",
           source: `module m2
 fn worker2():
   let x = fetch(2)
@@ -743,7 +743,7 @@ fn worker2():
 `,
         },
         {
-          filePath: "m3.ail",
+          filePath: "m3.aice",
           source: `module m3
 fn worker3():
   let x = fetch(3)
@@ -758,9 +758,9 @@ fn worker3():
       expect(minedKeys.length).toBeGreaterThan(0);
 
       // Verify that collapsing multi-statement window replaces entire span cleanly
-      const { ail, collapsedCount } = collapseAilSourceIdioms(inputs[0].source, result.idioms);
+      const { aice, collapsedCount } = collapseAiceSourceIdioms(inputs[0].source, result.idioms);
       expect(collapsedCount).toBeGreaterThanOrEqual(1);
-      expect(ail).toContain(minedKeys[0]);
+      expect(aice).toContain(minedKeys[0]);
     });
 
     it("caps templateCache at 500 entries with FIFO/LRU eviction of oldest items", () => {
@@ -773,14 +773,14 @@ fn worker3():
             name: `$dummy_${i}`,
             kind: "expr",
             params: [{ name: "$0", type: "int" }],
-            templateAil: `$0 + ${i}`,
+            templateAice: `$0 + ${i}`,
             description: `dummy ${i}`,
             tokensPerOccurrenceSaved: 1,
             netTokenSavings: 1,
             occurrences: 1,
           },
         };
-        expandAilSourceIdioms(`fn f():\n  let x = $dummy_${i}(1)\n`, defs);
+        expandAiceSourceIdioms(`fn f():\n  let x = $dummy_${i}(1)\n`, defs);
       }
 
       expect(templateCache.size).toBe(500);

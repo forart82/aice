@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 AI Context Packager Engine (Step 20).
+ * AICE 2.0 AI Context Packager Engine (Step 20).
  * Assembles high-density 1-turn context packs containing target source/outline,
  * imported dependency contracts, and downstream callers.
  */
@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
@@ -21,12 +21,12 @@ import {
 } from "../config/index.js";
 import type { ClassDecl, Expr, ImportDecl, LayoutNode, Module, ModuleItem } from "../core/ast.js";
 import { parse } from "../core/parser.js";
-import { AilGenerator } from "../decompiler/ail-generator.js";
+import { AiceGenerator } from "../decompiler/aice-generator.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath } from "../emitters/index.js";
 import {
-  collapseAilSourceIdioms,
-  expandAilSourceIdioms,
+  collapseAiceSourceIdioms,
+  expandAiceSourceIdioms,
   formatIdiomsMarkdownSection,
 } from "../idioms/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
@@ -135,7 +135,7 @@ function formatDisplayPath(filePath: string, projectRoot: string): string {
 export function resolveImportPath(
   fromFilePath: string,
   specifier: string,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   projectRoot: string,
 ): string | undefined {
   if (isExternalSpecifier(specifier)) {
@@ -164,8 +164,8 @@ export function resolveImportPath(
 
   // 1. If candidateBase already exists as a file
   if (fs.existsSync(candidateBase) && fs.statSync(candidateBase).isFile()) {
-    if (!candidateBase.endsWith(".ail") && fs.existsSync(`${candidateBase}.ail`)) {
-      return `${candidateBase}.ail`;
+    if (!candidateBase.endsWith(".aice") && fs.existsSync(`${candidateBase}.aice`)) {
+      return `${candidateBase}.aice`;
     }
     return candidateBase;
   }
@@ -177,44 +177,44 @@ export function resolveImportPath(
   const probeList: string[] = [];
 
   if (ext) {
-    probeList.push(`${candidateBase}.ail`);
-    probeList.push(`${baseWithoutExt}.ail`);
-    probeList.push(`${baseWithoutExt}.ts.ail`);
-    probeList.push(`${baseWithoutExt}.tsx.ail`);
+    probeList.push(`${candidateBase}.aice`);
+    probeList.push(`${baseWithoutExt}.aice`);
+    probeList.push(`${baseWithoutExt}.ts.aice`);
+    probeList.push(`${baseWithoutExt}.tsx.aice`);
     probeList.push(`${baseWithoutExt}.ts`);
     probeList.push(`${baseWithoutExt}.tsx`);
     probeList.push(`${baseWithoutExt}.js`);
-    probeList.push(`${baseWithoutExt}.py.ail`);
+    probeList.push(`${baseWithoutExt}.py.aice`);
     probeList.push(`${baseWithoutExt}.py`);
-    probeList.push(`${baseWithoutExt}.cpp.ail`);
+    probeList.push(`${baseWithoutExt}.cpp.aice`);
     probeList.push(`${baseWithoutExt}.cpp`);
-    probeList.push(`${baseWithoutExt}.cs.ail`);
+    probeList.push(`${baseWithoutExt}.cs.aice`);
     probeList.push(`${baseWithoutExt}.cs`);
-    probeList.push(`${baseWithoutExt}.kt.ail`);
+    probeList.push(`${baseWithoutExt}.kt.aice`);
     probeList.push(`${baseWithoutExt}.kt`);
-    probeList.push(`${baseWithoutExt}.php.ail`);
+    probeList.push(`${baseWithoutExt}.php.aice`);
     probeList.push(`${baseWithoutExt}.php`);
   }
 
-  probeList.push(`${candidateBase}.ail`);
-  probeList.push(`${candidateBase}.ts.ail`);
-  probeList.push(`${candidateBase}.tsx.ail`);
+  probeList.push(`${candidateBase}.aice`);
+  probeList.push(`${candidateBase}.ts.aice`);
+  probeList.push(`${candidateBase}.tsx.aice`);
   probeList.push(`${candidateBase}.ts`);
   probeList.push(`${candidateBase}.tsx`);
-  probeList.push(`${candidateBase}.py.ail`);
+  probeList.push(`${candidateBase}.py.aice`);
   probeList.push(`${candidateBase}.py`);
   probeList.push(`${candidateBase}.js`);
-  probeList.push(`${candidateBase}.rs.ail`);
+  probeList.push(`${candidateBase}.rs.aice`);
   probeList.push(`${candidateBase}.rs`);
-  probeList.push(`${candidateBase}.go.ail`);
+  probeList.push(`${candidateBase}.go.aice`);
   probeList.push(`${candidateBase}.go`);
-  probeList.push(`${candidateBase}.cpp.ail`);
+  probeList.push(`${candidateBase}.cpp.aice`);
   probeList.push(`${candidateBase}.cpp`);
-  probeList.push(`${candidateBase}.cs.ail`);
+  probeList.push(`${candidateBase}.cs.aice`);
   probeList.push(`${candidateBase}.cs`);
-  probeList.push(`${candidateBase}.kt.ail`);
+  probeList.push(`${candidateBase}.kt.aice`);
   probeList.push(`${candidateBase}.kt`);
-  probeList.push(`${candidateBase}.php.ail`);
+  probeList.push(`${candidateBase}.php.aice`);
   probeList.push(`${candidateBase}.php`);
   probeList.push(`${candidateBase}.twig`);
   probeList.push(`${candidateBase}.html`);
@@ -224,9 +224,9 @@ export function resolveImportPath(
   probeList.push(`${candidateBase}.yml`);
 
   // Directory index probes
-  probeList.push(path.join(candidateBase, "index.ail"));
-  probeList.push(path.join(candidateBase, "index.ts.ail"));
-  probeList.push(path.join(candidateBase, "index.tsx.ail"));
+  probeList.push(path.join(candidateBase, "index.aice"));
+  probeList.push(path.join(candidateBase, "index.ts.aice"));
+  probeList.push(path.join(candidateBase, "index.tsx.aice"));
   probeList.push(path.join(candidateBase, "index.ts"));
   probeList.push(path.join(candidateBase, "index.tsx"));
   probeList.push(path.join(candidateBase, "index.js"));
@@ -250,9 +250,9 @@ export function resolveImportPath(
     }
     if (relFromOut !== null) {
       const remapped = path.resolve(projectRoot, config.sourceDir, relFromOut);
-      probeList.push(`${remapped}.ail`);
-      probeList.push(`${remapped}.ts.ail`);
-      probeList.push(`${remapped}.tsx.ail`);
+      probeList.push(`${remapped}.aice`);
+      probeList.push(`${remapped}.ts.aice`);
+      probeList.push(`${remapped}.tsx.aice`);
       probeList.push(`${remapped}.ts`);
       probeList.push(`${remapped}.tsx`);
     }
@@ -402,21 +402,21 @@ function generateExternalContract(specifier: string, importedSymbols: string[]):
 function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
   try {
     const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
-    if (filePath.endsWith(".ail")) {
+    if (filePath.endsWith(".aice")) {
       const mod = parse(content, filePath);
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
     }
 
-    const companionAil = `${filePath}.ail`;
-    if (fs.existsSync(companionAil)) {
-      const ailContent = fs.readFileSync(companionAil, "utf-8");
-      const mod = parse(ailContent, companionAil);
+    const companionAice = `${filePath}.aice`;
+    if (fs.existsSync(companionAice)) {
+      const aiceContent = fs.readFileSync(companionAice, "utf-8");
+      const mod = parse(aiceContent, companionAice);
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
     }
 
     const targetLang = detectTargetFromPath(filePath);
     const decomp = decompile(content, targetLang, { filePath });
-    const mod = parse(decomp.ail, filePath);
+    const mod = parse(decomp.aice, filePath);
     return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
   } catch {
     return [];
@@ -426,10 +426,10 @@ function extractImportsFromFile(filePath: string, preReadContent?: string): Impo
 function scanWorkspaceCallers(
   targetFullPath: string,
   projectRoot: string,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
-  const ailFiles: string[] = [];
+  const aiceFiles: string[] = [];
   const targetCandidates: string[] = [];
 
   function walk(currentDir: string): void {
@@ -445,7 +445,7 @@ function scanWorkspaceCallers(
         entry.name === ".git" ||
         entry.name === "dist" ||
         entry.name === "build" ||
-        entry.name === ".ail-build" ||
+        entry.name === ".aice-build" ||
         entry.name === ".next" ||
         entry.name === ".turbo" ||
         entry.name === "coverage" ||
@@ -457,9 +457,9 @@ function scanWorkspaceCallers(
       if (entry.isDirectory()) {
         walk(entryPath);
       } else if (entry.isFile()) {
-        if (entry.name.endsWith(".ail.trivia.json")) continue;
-        if (entry.name.endsWith(".ail")) {
-          ailFiles.push(entryPath);
+        if (entry.name.endsWith(".aice.trivia.json")) continue;
+        if (entry.name.endsWith(".aice")) {
+          aiceFiles.push(entryPath);
         } else {
           const ext = path.extname(entry.name).toLowerCase();
           if (KNOWN_TARGET_EXTENSIONS.has(ext)) {
@@ -475,11 +475,11 @@ function scanWorkspaceCallers(
   const filesToScan: string[] = [];
   const processedBases = new Set<string>();
 
-  for (const ailFile of ailFiles) {
-    const baseTarget = ailFile.replace(/\.ail$/, "");
+  for (const aiceFile of aiceFiles) {
+    const baseTarget = aiceFile.replace(/\.aice$/, "");
     processedBases.add(baseTarget);
-    processedBases.add(path.resolve(resolveTargetFile(config, ailFile, projectRoot)));
-    filesToScan.push(ailFile);
+    processedBases.add(path.resolve(resolveTargetFile(config, aiceFile, projectRoot)));
+    filesToScan.push(aiceFile);
   }
 
   for (const targetFile of targetCandidates) {
@@ -489,7 +489,7 @@ function scanWorkspaceCallers(
   }
 
   const resolvedTarget = path.resolve(targetFullPath);
-  const targetBase = resolvedTarget.replace(/\.ail$/, "");
+  const targetBase = resolvedTarget.replace(/\.aice$/, "");
   const targetFileName = path.basename(targetBase);
   const targetExt = path.extname(targetFileName);
   const targetStem = targetExt ? targetFileName.slice(0, -targetExt.length) : targetFileName;
@@ -519,7 +519,7 @@ function scanWorkspaceCallers(
     for (const imp of imports) {
       const resolved = resolveImportPath(file, imp.source, config, projectRoot);
       if (resolved) {
-        const resolvedBase = path.resolve(resolved).replace(/\.ail$/, "");
+        const resolvedBase = path.resolve(resolved).replace(/\.aice$/, "");
         if (path.resolve(resolved) === resolvedTarget || resolvedBase === targetBase) {
           const symbols = imp.specifiers.map((s) => s.name);
           callers.push({
@@ -549,7 +549,7 @@ function formatBundle(
 ): string {
   const lines: string[] = [];
 
-  lines.push(`# AIL Context Pack: ${displayTargetPath}`);
+  lines.push(`# AICE Context Pack: ${displayTargetPath}`);
   lines.push("");
 
   lines.push(`## Imported Dependency Contracts (${dependencies.length}):`);
@@ -560,7 +560,7 @@ function formatBundle(
       const dep = dependencies[i];
       const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
       lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
-      lines.push("```ail");
+      lines.push("```aice");
       lines.push(dep.contract);
       lines.push("```");
       if (i < dependencies.length - 1) {
@@ -571,7 +571,7 @@ function formatBundle(
   lines.push("");
 
   lines.push("## Target File Content:");
-  lines.push("```ail");
+  lines.push("```aice");
   lines.push(targetBody);
   lines.push("```");
   lines.push("");
@@ -635,19 +635,19 @@ export async function generateWorkspaceContext(
         idioms: options.idioms,
         projectRoot,
       });
-      outlines.push(`### \`${relFile}\`\n\`\`\`ail\n${oRes.text}\n\`\`\``);
+      outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${oRes.text}\n\`\`\``);
 
       if (requestedSelectors.length > 0) {
         const rawFileContent = fs.readFileSync(f, "utf-8");
-        let fileAil = rawFileContent;
-        if (!f.endsWith(".ail")) {
+        let fileAice = rawFileContent;
+        if (!f.endsWith(".aice")) {
           const targetLang = detectTargetFromPath(f);
           const decomp = decompile(rawFileContent, targetLang, { filePath: f });
-          fileAil = decomp.ail;
+          fileAice = decomp.aice;
         }
         if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
           try {
-            fileAil = collapseAilSourceIdioms(fileAil, activeIdioms, f).ail;
+            fileAice = collapseAiceSourceIdioms(fileAice, activeIdioms, f).aice;
           } catch {
             // ignore
           }
@@ -664,7 +664,7 @@ export async function generateWorkspaceContext(
             }
           }
           try {
-            let sliced = extractSymbolFromAilSource(fileAil, symSel, f)
+            let sliced = extractSymbolFromAiceSource(fileAice, symSel, f)
               .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
               .trim();
             if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
@@ -688,7 +688,7 @@ export async function generateWorkspaceContext(
           }
         }
         if (fileSlices.length > 0) {
-          symbolSlices.push(`### \`${relFile}\`\n\`\`\`ail\n${fileSlices.join("\n\n")}\n\`\`\``);
+          symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${fileSlices.join("\n\n")}\n\`\`\``);
         }
       }
 
@@ -769,7 +769,7 @@ export async function generateWorkspaceContext(
     }
   } else {
     parts.push(
-      `# AIL Workspace Overview Context Pack: ${displayTargetPath}`,
+      `# AICE Workspace Overview Context Pack: ${displayTargetPath}`,
       "",
       "## Project Configuration:",
       `- Mode: ${config.mode}`,
@@ -793,7 +793,7 @@ export async function generateWorkspaceContext(
         parts.push(
           `### Dependency: \`${dep.specifier}\`${dep.resolvedPath ? ` (\`${dep.resolvedPath}\`)` : ""}`,
         );
-        parts.push("```ail");
+        parts.push("```aice");
         parts.push(dep.contract);
         parts.push("```");
         parts.push("");
@@ -936,14 +936,14 @@ function sliceRecordLiteralByPath(
   return { leafName: lastKey, value: cur };
 }
 
-export function extractSymbolFromAilSource(
-  ailSource: string,
+export function extractSymbolFromAiceSource(
+  aiceSource: string,
   symbolSelector: string,
   filePath: string,
   preParsedMod?: Module,
 ): string {
   const trimmedSel = symbolSelector.trim();
-  const mod = preParsedMod ?? parse(ailSource, filePath);
+  const mod = preParsedMod ?? parse(aiceSource, filePath);
 
   // Check StyleDecl first because CSS selectors often start with '.' (e.g. '.btn-primary')
   for (const item of mod.items) {
@@ -961,7 +961,7 @@ export function extractSymbolFromAilSource(
           items: [item],
           span: mod.span,
         };
-        return AilGenerator.generate(scopedMod);
+        return AiceGenerator.generate(scopedMod);
       }
     }
   }
@@ -1094,7 +1094,7 @@ export function extractSymbolFromAilSource(
     items: matchedItems,
     span: mod.span,
   };
-  return AilGenerator.generate(scopedMod);
+  return AiceGenerator.generate(scopedMod);
 }
 
 /**
@@ -1132,13 +1132,13 @@ export async function generateContext(
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
 
   let targetContent = rawFileContent;
-  if (!fullTargetPath.endsWith(".ail")) {
+  if (!fullTargetPath.endsWith(".aice")) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
       const isRawTemplate = targetLang === "twig";
       if (!isRawTemplate || options.symbol || options.idioms) {
         const decomp = decompile(rawFileContent, targetLang, { filePath: fullTargetPath });
-        targetContent = decomp.ail;
+        targetContent = decomp.aice;
       }
     } catch {
       targetContent = rawFileContent;
@@ -1146,20 +1146,20 @@ export async function generateContext(
   }
 
   if (options.symbol) {
-    targetContent = extractSymbolFromAilSource(targetContent, options.symbol, fullTargetPath);
+    targetContent = extractSymbolFromAiceSource(targetContent, options.symbol, fullTargetPath);
   }
 
   if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
     try {
-      const collapsed = collapseAilSourceIdioms(targetContent, activeIdioms, fullTargetPath);
-      targetContent = collapsed.ail;
+      const collapsed = collapseAiceSourceIdioms(targetContent, activeIdioms, fullTargetPath);
+      targetContent = collapsed.aice;
     } catch {
       // ignore collapse failures
     }
   } else if (!idiomsActive && config.idioms && Object.keys(config.idioms).length > 0 && targetContent.includes("$")) {
     try {
-      const expanded = expandAilSourceIdioms(targetContent, config.idioms, fullTargetPath);
-      targetContent = expanded.ail;
+      const expanded = expandAiceSourceIdioms(targetContent, config.idioms, fullTargetPath);
+      targetContent = expanded.aice;
     } catch {
       // ignore expand failures
     }
@@ -1223,7 +1223,7 @@ export async function generateContext(
         const canonicalTarget = path.resolve(fullTargetPath);
         if (
           canonicalResolved === canonicalTarget ||
-          canonicalResolved.replace(/\.ail$/, "") === canonicalTarget.replace(/\.ail$/, "")
+          canonicalResolved.replace(/\.aice$/, "") === canonicalTarget.replace(/\.aice$/, "")
         ) {
           continue;
         }

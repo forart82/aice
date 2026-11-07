@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * JSON Emitter for AIL 2.0 (Step 24).
- * Emits valid, beautifully formatted `.json` from an AIL Module AST.
+ * JSON Emitter for AICE 2.0 (Step 24).
+ * Emits valid, beautifully formatted `.json` from an AICE Module AST.
  */
 
 import type { Module } from "../core/ast.js";

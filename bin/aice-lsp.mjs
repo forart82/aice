@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const entry = resolve(__dirname, "ail.ts");
+const entry = resolve(__dirname, "aice-lsp.ts");
 const tsxBin = resolve(__dirname, "../node_modules/.bin/tsx");
 
 const result = spawnSync(tsxBin, [entry, ...process.argv.slice(2)], {

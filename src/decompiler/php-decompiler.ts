@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern PHP 8.x Decompiler (Reverse Transpiler) for AIL 2.0.
+ * Modern PHP 8.x Decompiler (Reverse Transpiler) for AICE 2.0.
  * Dedicated zero-dependency lexer and recursive-descent/Pratt parser for PHP 8.x:
  *   - Strips `<?php` and `declare(strict_types=1);`
  *   - Parses namespaces and use statements into Module metadata and ImportDecl
@@ -11,7 +11,7 @@
  *   - Parses match expressions into MatchStmt with MatchCase branches
  *   - Parses types (int -> int, string -> str, float -> float, bool -> bool, ?T -> T?, array -> [any])
  *   - Extracts comments into CstTriviaTable (docblocks /** ... * / and line comments //)
- *   - Lowers into canonical AIL AST Module
+ *   - Lowers into canonical AICE AST Module
  */
 
 import type {
@@ -57,7 +57,7 @@ import type {
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 
 export interface MatchExpr {
   kind: "MatchExpr";
@@ -653,7 +653,7 @@ export class PhpDecompiler {
       this.filePath
         .split(/[/\\]/)
         .pop()
-        ?.replace(/\.(php|ail)$/i, "") || "main";
+        ?.replace(/\.(php|aice)$/i, "") || "main";
 
     const ast: Module = {
       kind: "Module",
@@ -1975,11 +1975,11 @@ export class PhpDecompiler {
 export function decompilePhp(
   source: string,
   filePath = "source.php",
-  options: AilGeneratorOptions = {},
-): { ast: Module; ail: string; trivia: CstTriviaTable } {
+  options: AiceGeneratorOptions = {},
+): { ast: Module; aice: string; trivia: CstTriviaTable } {
   const decompiler = new PhpDecompiler(source, filePath);
   const result = decompiler.decompile();
-  const generator = new AilGenerator({ ...options, trivia: result.trivia });
-  const ail = generator.generate(result.ast);
-  return { ast: result.ast, ail, trivia: result.trivia };
+  const generator = new AiceGenerator({ ...options, trivia: result.trivia });
+  const aice = generator.generate(result.ast);
+  return { ast: result.ast, aice, trivia: result.trivia };
 }

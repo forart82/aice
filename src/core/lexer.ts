@@ -1,5 +1,5 @@
 /**
- * Two-Stage Decoupled Lexer for AIL 2.0.
+ * Two-Stage Decoupled Lexer for AICE 2.0.
  *
  * Stage 1: scanRawTokens (Stateless Scanner)
  *   Scans characters into physical tokens, strings, numbers, identifiers,
@@ -18,7 +18,7 @@ export class LexerError extends Error {
   readonly span: Span;
   readonly code: string;
 
-  constructor(message: string, span: Span, code = "AIL_E1001_LEXER_ERROR") {
+  constructor(message: string, span: Span, code = "AICE_E1001_LEXER_ERROR") {
     super(`${message} at ${span.file}:${span.start.line}:${span.start.column}`);
     this.name = "LexerError";
     this.span = span;
@@ -980,7 +980,7 @@ export function filterIndentation(
             throw new LexerError(
               `Inconsistent indentation: unindent of ${pendingIndent} spaces does not match any outer indentation level in [${indentStack.join(", ")}]`,
               raw.span,
-              "AIL_E1002_INCONSISTENT_INDENT",
+              "AICE_E1002_INCONSISTENT_INDENT",
             );
           }
         }

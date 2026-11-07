@@ -63,7 +63,7 @@ class Counter(pub initial: int, pub count: int):
     self.count = self.count + amount
     ret self.count
 `;
-      const mod = parse(source, "counter.go.ail");
+      const mod = parse(source, "counter.go.aice");
       const emitter = new GoEmitter();
       const code = emitter.emit(mod);
 
@@ -83,7 +83,7 @@ pub const MaxRetries: int = 5
 pub const DefaultHost: str = "localhost"
 pub Active: bool := true
 `;
-      const mod = parse(source, "constants.go.ail");
+      const mod = parse(source, "constants.go.aice");
       const emitter = new GoEmitter();
       const code = emitter.emit(mod);
 
@@ -103,7 +103,7 @@ class BankAccount(pub owner: str, pub balance: int):
   fn getBalance() -> int:
     ret self.balance
 `;
-      const mod = parse(source, "bank.rs.ail");
+      const mod = parse(source, "bank.rs.aice");
       const emitter = new RustEmitter();
       const code = emitter.emit(mod);
 
@@ -123,19 +123,19 @@ class BankAccount(pub owner: str, pub balance: int):
     it("emits const and static declarations in Rust", () => {
       const source = `
 pub const TIMEOUT: int = 30
-pub const SERVICE_NAME: str = "ail-core"
+pub const SERVICE_NAME: str = "aice-core"
 `;
-      const mod = parse(source, "consts.rs.ail");
+      const mod = parse(source, "consts.rs.aice");
       const emitter = new RustEmitter();
       const code = emitter.emit(mod);
 
       expect(code).toContain("pub const TIMEOUT: i64 = 30;");
-      expect(code).toContain('pub const SERVICE_NAME: String = "ail-core".to_string();');
+      expect(code).toContain('pub const SERVICE_NAME: String = "aice-core".to_string();');
     });
   });
 
   describe("GoDecompiler (Reverse Transpiler)", () => {
-    it("decompiles Go struct and receiver methods into canonical AIL ClassDecl", () => {
+    it("decompiles Go struct and receiver methods into canonical AICE ClassDecl", () => {
       const goCode = `
 package counter
 
@@ -158,12 +158,12 @@ func (self *Counter) Increment(amount int64) int64 {
       expect(cls.methods.length).toBe(1);
       expect(cls.methods[0].name).toBe("increment");
 
-      expect(result.ail).toContain("class Counter");
-      expect(result.ail).toContain("count: int");
-      expect(result.ail).toContain("fn increment(amount:int) -> int:");
+      expect(result.aice).toContain("class Counter");
+      expect(result.aice).toContain("count: int");
+      expect(result.aice).toContain("fn increment(amount:int) -> int:");
     });
 
-    it("decompiles Go enums and constants into canonical AIL TypeDecl and ConstDecl", () => {
+    it("decompiles Go enums and constants into canonical AICE TypeDecl and ConstDecl", () => {
       const goCode = `
 package main
 
@@ -205,14 +205,14 @@ func ProcessNumbers(n int64) {
 `;
       const result = decompileGo(goCode, "grades.go");
       expect(result.ast.items.length).toBe(2);
-      expect(result.ail).toContain("fn checkGrade(score:int) -> str:");
-      expect(result.ail).toContain("if score >= 90:");
-      expect(result.ail).toContain('ret "A"');
+      expect(result.aice).toContain("fn checkGrade(score:int) -> str:");
+      expect(result.aice).toContain("if score >= 90:");
+      expect(result.aice).toContain('ret "A"');
     });
   });
 
   describe("RustDecompiler (Reverse Transpiler)", () => {
-    it("decompiles Rust pub struct and impl block into canonical AIL ClassDecl", () => {
+    it("decompiles Rust pub struct and impl block into canonical AICE ClassDecl", () => {
       const rustCode = `
 pub struct Session {
     pub user_id: String,
@@ -238,9 +238,9 @@ impl Session {
       expect(cls.methods.length).toBe(1);
       expect(cls.methods[0].name).toBe("isValid");
 
-      expect(result.ail).toContain("class Session");
-      expect(result.ail).toContain("userId: str");
-      expect(result.ail).toContain("fn isValid(now:int) -> bool:");
+      expect(result.aice).toContain("class Session");
+      expect(result.aice).toContain("userId: str");
+      expect(result.aice).toContain("fn isValid(now:int) -> bool:");
     });
 
     it("decompiles Rust enums with tuple variants and constants", () => {
@@ -269,14 +269,14 @@ pub fn evaluate(cmd: Command) -> i64 {
 `;
       const result = decompileRust(rustCode, "eval.rs");
       expect(result.ast.items.length).toBe(1);
-      expect(result.ail).toContain("match cmd:");
-      expect(result.ail).toContain("Quit => 0");
-      expect(result.ail).toContain("Echo(msg) => 1");
+      expect(result.aice).toContain("match cmd:");
+      expect(result.aice).toContain("Quit => 0");
+      expect(result.aice).toContain("Echo(msg) => 1");
     });
   });
 
   describe("Go & Rust Bidirectional Roundtrip Fidelity", () => {
-    it("round-trips Go structs with methods through AIL AST", () => {
+    it("round-trips Go structs with methods through AICE AST", () => {
       const originalGo = `
 package main
 
@@ -297,7 +297,7 @@ func (self *Vector) LengthSquared() int64 {
       expect(roundtrip.reconstructed).toContain("return ((self.X * self.X) + (self.Y * self.Y))");
     });
 
-    it("round-trips Rust struct with constructor and methods through AIL AST", () => {
+    it("round-trips Rust struct with constructor and methods through AICE AST", () => {
       const originalRust = `
 pub struct Rectangle {
     pub width: i64,
@@ -444,12 +444,12 @@ func (s *Server) GetPort() int64 {
     });
 
     it("emits Go constructor without unused self when body ends in explicit return and doesn't reference self", () => {
-      const ailCode = `
+      const aiceCode = `
 class Server(pub port: int):
   fn new(port: int) -> Server:
     ret Server(port)
 `;
-      const mod = parse(ailCode, "server.go.ail");
+      const mod = parse(aiceCode, "server.go.aice");
       const emitter = new GoEmitter();
       const emitted = emitter.emit(mod);
       expect(emitted).toContain("func NewServer(port int64) *Server {");
@@ -556,7 +556,7 @@ pub static mut COUNTER: i64 = 0;
     });
 
     it("emits Rust Map to HashMap and List to Vec and infers sensible types for unannotated const/var", () => {
-      const ailCode = `
+      const aiceCode = `
 pub const GREETING = "hello"
 pub const FLAG = true
 pub const RATIO = 3.14
@@ -564,7 +564,7 @@ pub const RATIO = 3.14
 type UserRegistry = Map[str, int]
 type Scores = List[int]
 `;
-      const mod = parse(ailCode, "types.rs.ail");
+      const mod = parse(aiceCode, "types.rs.aice");
       const emitter = new RustEmitter();
       const emitted = emitter.emit(mod);
       expect(emitted).toContain("pub const GREETING: &str = \"hello\";");
@@ -593,7 +593,7 @@ int check(int x) {
     });
 
     it("emits TypeScript unit enum member references in expressions, match statements, and detects nested reassignments", () => {
-      const ailCode = `
+      const aiceCode = `
 enum Status:
   Pending
   Active
@@ -607,7 +607,7 @@ fn get_status(code: int) -> Status:
     Active => ret Active
     _ => ret Complete
 `;
-      const mod = parse(ailCode, "status.ts.ail");
+      const mod = parse(aiceCode, "status.ts.aice");
       const emitter = new TypeScriptEmitter();
       const emitted = emitter.emit(mod);
       expect(emitted).toContain("let s = Status.Pending;");

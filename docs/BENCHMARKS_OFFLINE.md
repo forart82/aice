@@ -1,15 +1,15 @@
-# AIL 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)
+# AICE 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)
 
 - **Evaluation Engine**: Deterministic Offline AST & Tooling Harness (Exact API Calls & Character/Token Accounting — No Live LLM Agent Calls)
-- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AIL` vs `AIL Without Idioms` vs `AIL With Idioms`)
+- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AICE` vs `AICE Without Idioms` vs `AICE With Idioms`)
 - **Total Real-World Benchmarks**: **10** (`RW-01` .. `RW-10`)
-- **AIL Without Idioms Win Rate**: **10 / 10 (100.0%)**
-- **AIL With Idioms Win Rate**: **10 / 10 (100.0%)**
-- **Total Lifecycle Turns (10 Benchmarks)**: Without AIL = **502 turns** | AIL Without Idioms = **206 turns (-59.0%)** | AIL With Idioms = **154 turns (-69.3%)**
+- **AICE Without Idioms Win Rate**: **10 / 10 (100.0%)**
+- **AICE With Idioms Win Rate**: **10 / 10 (100.0%)**
+- **Total Lifecycle Turns (10 Benchmarks)**: Without AICE = **502 turns** | AICE Without Idioms = **206 turns (-59.0%)** | AICE With Idioms = **154 turns (-69.3%)**
 - **Languages & File Types Covered (15)**: `.ts`, `.html`, `.css`, `.json`, `.py`, `.yaml`, `.php`, `.js`, `.twig`, `.tsx`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`
 - **Engineering Scenarios Covered (5)**: `from_zero_window_app`, `from_zero_non_window_app`, `bug_fix`, `new_feature`, `update_feature`
 - **Application Surfaces Covered (2)**: `window`, `non_window`
-- **Zero `.ail` Files Left on Disk**: **PASS (0 .ail files)**
+- **Zero `.aice` Files Left on Disk**: **PASS (0 .aice files)**
 
 ---
 
@@ -17,7 +17,7 @@
 
 ### Token Breakdown Across All 10 Real-World Benchmarks
 
-| Operation | Without AIL (Tokens) | AIL Without Idioms (Tokens) | Savings Without Idioms | AIL With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |
+| Operation | Without AICE (Tokens) | AICE Without Idioms (Tokens) | Savings Without Idioms | AICE With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** *(incl. idiom defs)* | 33,034 | 26,816 | **-18.8%** | 19,545 | **-40.8%** | **+22.0%** |
 | **Read (Discovery + Context)** | 14,867 | 9,941 | **-33.1%** | 6,842 | **-54.0%** | **+20.9%** |
@@ -28,7 +28,7 @@
 
 ### Agent Turns Breakdown Across All 10 Real-World Benchmarks
 
-| Operation | Without AIL (Turns) | AIL Without Idioms (Turns) | Turn Savings Without Idioms | AIL With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |
+| Operation | Without AICE (Turns) | AICE Without Idioms (Turns) | Turn Savings Without Idioms | AICE With Idioms (Turns) | Turn Savings With Idioms | Extra Idiom Turn Boost |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 62 | 62 | **0.0%** | 62 | **0.0%** | **+0.0%** |
 | **Read (Discovery + Context)** | 124 | 62 | **-50.0%** | 62 | **-50.0%** | **+0.0%** |
@@ -41,7 +41,7 @@
 
 ## 2. All 10 Real-World Benchmarks Summary Table (Offline Deterministic Suite)
 
-| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AIL | Tokens AIL (No Idioms) | Tokens AIL (With Idioms) | Turns Without AIL | Turns AIL (No Idioms) | Turns AIL (With Idioms) |
+| ID | Real-World Benchmark Scenario | Surface | Task Kind | File Types | Write (No Idiom / Idiom) | Read (No Idiom / Idiom) | Update (No Idiom / Idiom) | Delete | Refactor (No Idiom / Idiom) | Tokens Without AICE | Tokens AICE (No Idioms) | Tokens AICE (With Idioms) | Turns Without AICE | Turns AICE (No Idioms) | Turns AICE (With Idioms) |
 | :--- | :--- | :--- | :--- | :--- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | `RW-01` | **HTML5 Canvas Arcade Snake Window Application (Greenfield from 0)** | `window` | `from_zero_window_app` | `.ts .html .css .json` | -21.1% / **-46.1%** | -36.5% / **-57.4%** | -57.1% / **-75.0%** | **-91.6%** | -56.9% / **-96.9%** | 11,038 | 5,944 (**-46.1%**) | 2,709 (**-75.5%**) | 46 | 17 (**-63.0%**) | 13 (**-71.7%**) |
 | `RW-02` | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)** | `non_window` | `from_zero_non_window_app` | `.py .yaml .json` | -13.0% / **-37.9%** | -26.1% / **-45.3%** | -47.0% / **-67.5%** | **-90.1%** | -51.3% / **-96.4%** | 7,852 | 4,791 (**-39.0%**) | 2,274 (**-71.0%**) | 37 | 14 (**-62.2%**) | 11 (**-70.3%**) |
@@ -64,12 +64,12 @@
 - **Description**: Complete interactive browser game built from 0 with TypeScript game loop & collision engine, Canvas HUD renderer, HTML5 arcade shell, CSS3 neon cabinet theme, and JSON level config.
 - **Scenario**: `from_zero_window_app` | **Surface**: `window` | **Files**: 5 (`.ts`, `.html`, `.css`, `.json`)
 - **Idioms Used**: `$guard_band_step`, `$html_metric_row`, `$css_card`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **218 tokens**)
-- **Lifecycle Tokens**: Without AIL = **11,038** | AIL Without Idioms = **5,944 (-46.1%)** | AIL With Idioms = **2,709 (-75.5%)**
-- **Lifecycle Turns**: Without AIL = **46 turns** | AIL Without Idioms = **17 turns (-63.0%)** | AIL With Idioms = **13 turns (-71.7%)**
+- **Lifecycle Tokens**: Without AICE = **11,038** | AICE Without Idioms = **5,944 (-46.1%)** | AICE With Idioms = **2,709 (-75.5%)**
+- **Lifecycle Turns**: Without AICE = **46 turns** | AICE Without Idioms = **17 turns (-63.0%)** | AICE With Idioms = **13 turns (-71.7%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 3,011 tok / 5 turns | 2,375 tok / 5 turns | 1,623 tok / 5 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,270 tok / 10 turns | 806 tok / 5 turns | 541 tok / 5 turns | -50.0% / **-50.0%** |
@@ -80,7 +80,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `engine.ts` | `.ts` | 1025 | 803 | -21.7% | 472 | **-54.0%** |
 | `renderer.ts` | `.ts` | 647 | 531 | -17.9% | 299 | **-53.8%** |
@@ -93,12 +93,12 @@
 - **Description**: Non-window background queue daemon & CLI tool created from 0 with Python retry backoff scheduler, worker pool controller, YAML service deployment topology, and JSON ingestion schema.
 - **Scenario**: `from_zero_non_window_app` | **Surface**: `non_window` | **Files**: 4 (`.py`, `.yaml`, `.json`)
 - **Idioms Used**: `$enforce_quota_band`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **182 tokens**)
-- **Lifecycle Tokens**: Without AIL = **7,852** | AIL Without Idioms = **4,791 (-39.0%)** | AIL With Idioms = **2,274 (-71.0%)**
-- **Lifecycle Turns**: Without AIL = **37 turns** | AIL Without Idioms = **14 turns (-62.2%)** | AIL With Idioms = **11 turns (-70.3%)**
+- **Lifecycle Tokens**: Without AICE = **7,852** | AICE Without Idioms = **4,791 (-39.0%)** | AICE With Idioms = **2,274 (-71.0%)**
+- **Lifecycle Turns**: Without AICE = **37 turns** | AICE Without Idioms = **14 turns (-62.2%)** | AICE With Idioms = **11 turns (-70.3%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,132 tok / 4 turns | 1,854 tok / 4 turns | 1,324 tok / 4 turns | 0.0% / 0.0% |
 | **Read (Context)** | 877 tok / 8 turns | 648 tok / 4 turns | 480 tok / 4 turns | -50.0% / **-50.0%** |
@@ -109,7 +109,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `worker.py` | `.py` | 934 | 847 | -9.3% | 515 | **-44.9%** |
 | `cli.py` | `.py` | 583 | 519 | -11.0% | 323 | **-44.6%** |
@@ -121,12 +121,12 @@
 - **Description**: Full server & client e-commerce storefront fixing a negative discount/tax rounding bug in CheckoutController.php while synchronizing client cart JS, Twig summary template, CSS styles, HTML modal, YAML routes, and JSON shipping tiers.
 - **Scenario**: `bug_fix` | **Surface**: `window` | **Files**: 7 (`.php`, `.js`, `.twig`, `.css`, `.html`, `.yaml`, `.json`)
 - **Idioms Used**: `$round_money_band`, `$clamp_cart_line`, `$twig_summary_line`, `$css_card`, `$html_metric_row`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AIL = **12,097** | AIL Without Idioms = **6,695 (-44.7%)** | AIL With Idioms = **3,200 (-73.5%)**
-- **Lifecycle Turns**: Without AIL = **55 turns** | AIL Without Idioms = **23 turns (-58.2%)** | AIL With Idioms = **17 turns (-69.1%)**
+- **Lifecycle Tokens**: Without AICE = **12,097** | AICE Without Idioms = **6,695 (-44.7%)** | AICE With Idioms = **3,200 (-73.5%)**
+- **Lifecycle Turns**: Without AICE = **55 turns** | AICE Without Idioms = **23 turns (-58.2%)** | AICE With Idioms = **17 turns (-69.1%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 3,095 tok / 7 turns | 2,507 tok / 7 turns | 1,864 tok / 7 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,334 tok / 14 turns | 912 tok / 7 turns | 589 tok / 7 turns | -50.0% / **-50.0%** |
@@ -137,7 +137,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `CheckoutController.php` | `.php` | 1117 | 877 | -21.5% | 497 | **-55.5%** |
 | `cart-client.js` | `.js` | 599 | 503 | -16.0% | 298 | **-50.3%** |
@@ -152,12 +152,12 @@
 - **Description**: Modern frontend workspace adding a new cohort retention & live sparkline feature across the TypeScript metrics store, React TSX dashboard panel, CSS grid cards, HTML shell, JSON bundle budget, and YAML preview pipeline.
 - **Scenario**: `new_feature` | **Surface**: `window` | **Files**: 6 (`.ts`, `.tsx`, `.css`, `.html`, `.json`, `.yaml`)
 - **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier` (Definition Cost Charged on Write from 0: **336 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10,303** | AIL Without Idioms = **6,023 (-41.5%)** | AIL With Idioms = **2,895 (-71.9%)**
-- **Lifecycle Turns**: Without AIL = **49 turns** | AIL Without Idioms = **20 turns (-59.2%)** | AIL With Idioms = **15 turns (-69.4%)**
+- **Lifecycle Tokens**: Without AICE = **10,303** | AICE Without Idioms = **6,023 (-41.5%)** | AICE With Idioms = **2,895 (-71.9%)**
+- **Lifecycle Turns**: Without AICE = **49 turns** | AICE Without Idioms = **20 turns (-59.2%)** | AICE With Idioms = **15 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,877 tok / 6 turns | 2,329 tok / 6 turns | 1,707 tok / 6 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,324 tok / 12 turns | 786 tok / 6 turns | 527 tok / 6 turns | -50.0% / **-50.0%** |
@@ -168,7 +168,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `metrics-store.ts` | `.ts` | 1105 | 868 | -21.4% | 498 | **-54.9%** |
 | `DashboardPanel.tsx` | `.tsx` | 701 | 605 | -13.7% | 320 | **-54.4%** |
@@ -182,12 +182,12 @@
 - **Description**: Cloud-native backend updating quorum consensus timeout and adaptive rate limiting across a Go API gateway, Rust write-ahead log compaction engine, YAML Raft cluster config, and JSON tenant burst quotas.
 - **Scenario**: `update_feature` | **Surface**: `non_window` | **Files**: 4 (`.go`, `.rs`, `.yaml`, `.json`)
 - **Idioms Used**: `$bounded_quorum_step`, `$advance_wal_cursor`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **251 tokens**)
-- **Lifecycle Tokens**: Without AIL = **9,697** | AIL Without Idioms = **5,269 (-45.7%)** | AIL With Idioms = **2,495 (-74.3%)**
-- **Lifecycle Turns**: Without AIL = **36 turns** | AIL Without Idioms = **14 turns (-61.1%)** | AIL With Idioms = **11 turns (-69.4%)**
+- **Lifecycle Tokens**: Without AICE = **9,697** | AICE Without Idioms = **5,269 (-45.7%)** | AICE With Idioms = **2,495 (-74.3%)**
+- **Lifecycle Turns**: Without AICE = **36 turns** | AICE Without Idioms = **14 turns (-61.1%)** | AICE With Idioms = **11 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,699 tok / 4 turns | 2,012 tok / 4 turns | 1,483 tok / 4 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,126 tok / 8 turns | 691 tok / 4 turns | 489 tok / 4 turns | -50.0% / **-50.0%** |
@@ -198,7 +198,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `gateway.go` | `.go` | 1117 | 823 | -26.3% | 503 | **-55.0%** |
 | `wal_engine.rs` | `.rs` | 1156 | 846 | -26.8% | 506 | **-56.2%** |
@@ -210,12 +210,12 @@
 - **Description**: Hybrid native/web desktop viewport engine fixing a sub-pixel AABB collision tunneling clamp bug in C++20 while updating the TypeScript inspector bridge, HTML HUD overlay, CSS dock panel, and JSON solver settings.
 - **Scenario**: `bug_fix` | **Surface**: `window` | **Files**: 5 (`.cpp`, `.ts`, `.html`, `.css`, `.json`)
 - **Idioms Used**: `$solve_axis_impulse`, `$guard_band_step`, `$html_metric_row`, `$css_card`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **287 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10,119** | AIL Without Idioms = **5,596 (-44.7%)** | AIL With Idioms = **2,638 (-73.9%)**
-- **Lifecycle Turns**: Without AIL = **39 turns** | AIL Without Idioms = **17 turns (-56.4%)** | AIL With Idioms = **13 turns (-66.7%)**
+- **Lifecycle Tokens**: Without AICE = **10,119** | AICE Without Idioms = **5,596 (-44.7%)** | AICE With Idioms = **2,638 (-73.9%)**
+- **Lifecycle Turns**: Without AICE = **39 turns** | AICE Without Idioms = **17 turns (-56.4%)** | AICE With Idioms = **13 turns (-66.7%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,567 tok / 5 turns | 2,081 tok / 5 turns | 1,528 tok / 5 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,201 tok / 10 turns | 765 tok / 5 turns | 523 tok / 5 turns | -50.0% / **-50.0%** |
@@ -226,7 +226,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `viewport_sim.cpp` | `.cpp` | 1023 | 847 | -17.2% | 482 | **-52.9%** |
 | `inspector.ts` | `.ts` | 639 | 534 | -16.4% | 300 | **-53.0%** |
@@ -239,12 +239,12 @@
 - **Description**: Enterprise fintech backend adding instant payout fee calculation and real-time velocity risk scoring across C# .NET settlement services, Kotlin Ktor fraud evaluators, YAML clearing routing, and JSON risk rule weights.
 - **Scenario**: `new_feature` | **Surface**: `non_window` | **Files**: 4 (`.cs`, `.kt`, `.yaml`, `.json`)
 - **Idioms Used**: `$settle_ledger_window`, `$score_risk_signal`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **252 tokens**)
-- **Lifecycle Tokens**: Without AIL = **8,688** | AIL Without Idioms = **5,222 (-39.9%)** | AIL With Idioms = **2,491 (-71.3%)**
-- **Lifecycle Turns**: Without AIL = **36 turns** | AIL Without Idioms = **14 turns (-61.1%)** | AIL With Idioms = **11 turns (-69.4%)**
+- **Lifecycle Tokens**: Without AICE = **8,688** | AICE Without Idioms = **5,222 (-39.9%)** | AICE With Idioms = **2,491 (-71.3%)**
+- **Lifecycle Turns**: Without AICE = **36 turns** | AICE Without Idioms = **14 turns (-61.1%)** | AICE With Idioms = **11 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,460 tok / 4 turns | 2,007 tok / 4 turns | 1,470 tok / 4 turns | 0.0% / 0.0% |
 | **Read (Context)** | 856 tok / 8 turns | 655 tok / 4 turns | 478 tok / 4 turns | -50.0% / **-50.0%** |
@@ -255,7 +255,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `SettlementEngine.cs` | `.cs` | 1082 | 854 | -21.1% | 515 | **-52.4%** |
 | `FraudScorer.kt` | `.kt` | 952 | 810 | -14.9% | 480 | **-49.6%** |
@@ -267,12 +267,12 @@
 - **Description**: Multi-tenant SaaS billing & reporting portal updating multi-currency tax rounding and usage quota gauges across Python FastAPI services, React TSX usage charts, Twig invoice templates, CSS print/screen rules, JSON plan tiers, and YAML cron workers.
 - **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 6 (`.py`, `.tsx`, `.twig`, `.css`, `.json`, `.yaml`)
 - **Idioms Used**: `$enforce_quota_band`, `$tsx_kpi_tile`, `$twig_summary_line`, `$css_card`, `$json_policy_rule`, `$yaml_service_tier` (Definition Cost Charged on Write from 0: **328 tokens**)
-- **Lifecycle Tokens**: Without AIL = **10,787** | AIL Without Idioms = **6,321 (-41.4%)** | AIL With Idioms = **2,981 (-72.4%)**
-- **Lifecycle Turns**: Without AIL = **49 turns** | AIL Without Idioms = **20 turns (-59.2%)** | AIL With Idioms = **15 turns (-69.4%)**
+- **Lifecycle Tokens**: Without AICE = **10,787** | AICE Without Idioms = **6,321 (-41.4%)** | AICE With Idioms = **2,981 (-72.4%)**
+- **Lifecycle Turns**: Without AICE = **49 turns** | AICE Without Idioms = **20 turns (-59.2%)** | AICE With Idioms = **15 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 2,783 tok / 6 turns | 2,378 tok / 6 turns | 1,717 tok / 6 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,320 tok / 12 turns | 897 tok / 6 turns | 595 tok / 6 turns | -50.0% / **-50.0%** |
@@ -283,7 +283,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `billing_service.py` | `.py` | 1052 | 955 | -9.2% | 560 | **-46.8%** |
 | `UsageChart.tsx` | `.tsx` | 571 | 496 | -13.1% | 262 | **-54.1%** |
@@ -297,12 +297,12 @@
 - **Description**: Ultra-low-latency non-window trading & risk pipeline fixing a self-trade price collar boundary bug across a Rust matching engine, C++20 intraday margin calculator, Python compliance daemon, Go market feed normalizer, YAML venue feeds, and JSON collar bands.
 - **Scenario**: `bug_fix` | **Surface**: `non_window` | **Files**: 6 (`.rs`, `.cpp`, `.py`, `.go`, `.yaml`, `.json`)
 - **Idioms Used**: `$advance_wal_cursor`, `$solve_axis_impulse`, `$enforce_quota_band`, `$bounded_quorum_step`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AIL = **14,194** | AIL Without Idioms = **8,000 (-43.6%)** | AIL With Idioms = **3,755 (-73.5%)**
-- **Lifecycle Turns**: Without AIL = **47 turns** | AIL Without Idioms = **20 turns (-57.5%)** | AIL With Idioms = **15 turns (-68.1%)**
+- **Lifecycle Tokens**: Without AICE = **14,194** | AICE Without Idioms = **8,000 (-43.6%)** | AICE With Idioms = **3,755 (-73.5%)**
+- **Lifecycle Turns**: Without AICE = **47 turns** | AICE Without Idioms = **20 turns (-57.5%)** | AICE With Idioms = **15 turns (-68.1%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 3,568 tok / 6 turns | 2,914 tok / 6 turns | 2,114 tok / 6 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,695 tok / 12 turns | 1,106 tok / 6 turns | 792 tok / 6 turns | -50.0% / **-50.0%** |
@@ -313,7 +313,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `matcher.rs` | `.rs` | 1100 | 887 | -19.4% | 499 | **-54.6%** |
 | `margin_calc.cpp` | `.cpp` | 700 | 555 | -20.7% | 333 | **-52.4%** |
@@ -327,12 +327,12 @@
 - **Description**: Polyglot enterprise control plane integrating all 15 supported languages and file types (.ts, .tsx, .js, .py, .go, .rs, .cpp, .cs, .kt, .php, .css, .html, .json, .yaml, .twig) in a single cohesive multi-service architecture.
 - **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 15 (`.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`, `.php`, `.css`, `.html`, `.json`, `.yaml`, `.twig`)
 - **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$clamp_cart_line`, `$enforce_quota_band`, `$bounded_quorum_step`, `$advance_wal_cursor`, `$solve_axis_impulse`, `$settle_ledger_window`, `$score_risk_signal`, `$round_money_band`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier`, `$twig_summary_line` (Definition Cost Charged on Write from 0: **932 tokens**)
-- **Lifecycle Tokens**: Without AIL = **32,246** | AIL Without Idioms = **18,016 (-44.1%)** | AIL With Idioms = **8,544 (-73.5%)**
-- **Lifecycle Turns**: Without AIL = **108 turns** | AIL Without Idioms = **47 turns (-56.5%)** | AIL With Idioms = **33 turns (-69.4%)**
+- **Lifecycle Tokens**: Without AICE = **32,246** | AICE Without Idioms = **18,016 (-44.1%)** | AICE With Idioms = **8,544 (-73.5%)**
+- **Lifecycle Turns**: Without AICE = **108 turns** | AICE Without Idioms = **47 turns (-56.5%)** | AICE With Idioms = **33 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
-| Operation | Without AIL | AIL Without Idioms | AIL With Idioms | Turn Savings (No Id / Id) |
+| Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
 | **Write (Create from 0)** | 7,842 tok / 15 turns | 6,359 tok / 15 turns | 4,715 tok / 15 turns | 0.0% / 0.0% |
 | **Read (Context)** | 3,864 tok / 30 turns | 2,675 tok / 15 turns | 1,828 tok / 15 turns | -50.0% / **-50.0%** |
@@ -343,7 +343,7 @@
 
 #### Module File Breakdown
 
-| File | Type | Native Tokens | AIL (No Idioms) | Savings (No Idioms) | AIL (With Idioms) | Savings (With Idioms) |
+| File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `telemetry_router.ts` | `.ts` | 780 | 643 | -17.6% | 360 | **-53.9%** |
 | `ClusterHud.tsx` | `.tsx` | 567 | 492 | -13.2% | 258 | **-54.5%** |

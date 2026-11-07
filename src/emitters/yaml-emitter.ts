@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * YAML Emitter for AIL 2.0 (Step 24).
- * Emits valid `.yaml` from an AIL Module AST using YAML.stringify.
+ * YAML Emitter for AICE 2.0 (Step 24).
+ * Emits valid `.yaml` from an AICE Module AST using YAML.stringify.
  */
 
 import YAML from "yaml";

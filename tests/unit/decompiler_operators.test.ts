@@ -6,7 +6,7 @@
  * Verifies that TypeScript source containing relational operators ('in', 'instanceof'),
  * bitwise compound assignment operators ('|=', '^=', '&=', '>>=', '<<=', '>>>=', '**='),
  * assignment expressions in expression positions ('(el) => (el.textContent = v)'),
- * and while loop assignment conditions decompile cleanly into valid AIL AST and AIL source code.
+ * and while loop assignment conditions decompile cleanly into valid AICE AST and AICE source code.
  */
 
 import { describe, expect, it } from "vitest";
@@ -59,10 +59,10 @@ function hasShield(p: any) {
       expect((bin.right as IdentifierExpr).name).toBe("p");
 
       const res = decompile(tsCode, "typescript", { filePath: "in_test.ts" });
-      expect(res.ail).toContain('has := "shield" in p');
+      expect(res.aice).toContain('has := "shield" in p');
 
-      // Verify roundtrip parse of generated AIL
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      // Verify roundtrip parse of generated AICE
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -83,9 +83,9 @@ function hasShield(p: any) {
       expect((bin.right as IdentifierExpr).name).toBe("p");
 
       const res = decompile(tsCode, "typescript", { filePath: "top_in.ts" });
-      expect(res.ail).toContain('const hasShield = "shield" in p');
+      expect(res.aice).toContain('const hasShield = "shield" in p');
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -112,10 +112,10 @@ function test(p: any) {
       expect((cond.right as IdentifierExpr).name).toBe("p");
 
       const res = decompile(tsCode, "typescript", { filePath: "if_in.ts" });
-      expect(res.ail).toContain('if "shield" in p:');
-      expect(res.ail).not.toContain('("shield" in p) != nil');
+      expect(res.aice).toContain('if "shield" in p:');
+      expect(res.aice).not.toContain('("shield" in p) != nil');
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -127,7 +127,7 @@ function check(p: any) {
 }
 `;
       const res = decompile(tsCode, "typescript", { filePath: "chain_in.ts" });
-      expect(res.ail).toContain('ok := "shield" in p and "sword" in p');
+      expect(res.aice).toContain('ok := "shield" in p and "sword" in p');
 
       const fn = res.ast.items[0] as FunctionDecl;
       const body = fn.body as Block;
@@ -137,7 +137,7 @@ function check(p: any) {
       expect((bin.left as BinaryExpr).operator).toBe("in");
       expect((bin.right as BinaryExpr).operator).toBe("in");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
   });
@@ -169,9 +169,9 @@ function checkVec(o: any) {
       expect((bin.right as IdentifierExpr).name).toBe("Vec2");
 
       const res = decompile(tsCode, "typescript", { filePath: "instanceof_test.ts" });
-      expect(res.ail).toContain("isVec := o instanceof Vec2");
+      expect(res.aice).toContain("isVec := o instanceof Vec2");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -184,8 +184,8 @@ function checkVec(o: any) {
       expect(decl.value.kind).toBe("BinaryExpr");
       expect((decl.value as BinaryExpr).operator).toBe("instanceof");
 
-      expect(res.ail).toContain("const isVec = o instanceof Vec2");
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      expect(res.aice).toContain("const isVec = o instanceof Vec2");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -204,10 +204,10 @@ function test(o: any) {
       expect(ifStmt.condition.kind).toBe("BinaryExpr");
       expect((ifStmt.condition as BinaryExpr).operator).toBe("instanceof");
 
-      expect(res.ail).toContain("if o instanceof Vec2:");
-      expect(res.ail).not.toContain("(o instanceof Vec2) != nil");
+      expect(res.aice).toContain("if o instanceof Vec2:");
+      expect(res.aice).not.toContain("(o instanceof Vec2) != nil");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
   });
@@ -232,9 +232,9 @@ function truncate(s: number) {
       expect((stmt.value as LiteralExpr).value).toBe(0);
 
       const res = decompile(tsCode, "typescript", { filePath: "or_assign.ts" });
-      expect(res.ail).toContain("s |= 0");
+      expect(res.aice).toContain("s |= 0");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -258,7 +258,7 @@ function test(s: number) {
       expect((assign.value as LiteralExpr).value).toBe(0);
 
       const res = decompile(tsCode, "typescript", { filePath: "or_assign_expr.ts" });
-      expect(res.ail).toContain("trunc := s |= 0");
+      expect(res.aice).toContain("trunc := s |= 0");
     });
 
     it("decompiles arrow function '(flags: number) => (flags |= mask)' with AssignExpr", () => {
@@ -275,8 +275,8 @@ function test(s: number) {
       expect((assign.target as IdentifierExpr).name).toBe("flags");
       expect((assign.value as IdentifierExpr).name).toBe("mask");
 
-      expect(res.ail).toContain("const applyMask = fn(flags:int) = (flags |= mask)");
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      expect(res.aice).toContain("const applyMask = fn(flags:int) = (flags |= mask)");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
   });
@@ -306,9 +306,9 @@ function scramble(t: number) {
       expect((bin.right as LiteralExpr).value).toBe(1);
 
       const res = decompile(tsCode, "typescript", { filePath: "xor_assign.ts" });
-      expect(res.ail).toContain("t ^= t + 1");
+      expect(res.aice).toContain("t ^= t + 1");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -330,7 +330,7 @@ function test(t: number) {
       expect((assign.target as IdentifierExpr).name).toBe("t");
       expect(assign.value.kind).toBe("BinaryExpr");
 
-      expect(res.ail).toContain("next := t ^= t + 1");
+      expect(res.aice).toContain("next := t ^= t + 1");
     });
   });
 
@@ -357,9 +357,9 @@ function test(t: number) {
       expect((assign.value as IdentifierExpr).name).toBe("v");
 
       const res = decompile(tsCode, "typescript", { filePath: "arrow_assign.ts" });
-      expect(res.ail).toContain("const setText = fn(el:unknown) = (el.textContent = v)");
+      expect(res.aice).toContain("const setText = fn(el:unknown) = (el.textContent = v)");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -377,9 +377,9 @@ function test(t: number) {
       expect((assign.target as MemberAccessExpr).property).toBe("count");
       expect((assign.value as LiteralExpr).value).toBe(1);
 
-      expect(res.ail).toContain("const inc = fn(item:unknown) = (item.count += 1)");
+      expect(res.aice).toContain("const inc = fn(item:unknown) = (item.count += 1)");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -415,9 +415,9 @@ function matchAll(regex: any, s: string) {
       expect((call.callee as MemberAccessExpr).property).toBe("exec");
 
       const res = decompile(tsCode, "typescript", { filePath: "while_assign.ts" });
-      expect(res.ail).toContain("while (pMatch = regex.exec(s)) != nil:");
+      expect(res.aice).toContain("while (pMatch = regex.exec(s)) != nil:");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
   });
@@ -441,9 +441,9 @@ function clearBit(cell: number) {
       expect((stmt.target as IdentifierExpr).name).toBe("cell");
 
       const res = decompile(tsCode, "typescript", { filePath: "and_assign.ts" });
-      expect(res.ail).toContain("cell &= -(1 << 2)");
+      expect(res.aice).toContain("cell &= -(1 << 2)");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -465,7 +465,7 @@ function test(cell: number, mask: number) {
       expect((assign.target as IdentifierExpr).name).toBe("cell");
       expect((assign.value as IdentifierExpr).name).toBe("mask");
 
-      expect(res.ail).toContain("masked := cell &= mask");
+      expect(res.aice).toContain("masked := cell &= mask");
     });
   });
 
@@ -489,9 +489,9 @@ function shiftRight(v: number) {
       expect((stmt.value as LiteralExpr).value).toBe(7);
 
       const res = decompile(tsCode, "typescript", { filePath: "shr_assign.ts" });
-      expect(res.ail).toContain("v >>= 7");
+      expect(res.aice).toContain("v >>= 7");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -526,11 +526,11 @@ function bitwiseShifts(a: number, b: number, c: number) {
       expect((stmt3.target as IdentifierExpr).name).toBe("c");
 
       const res = decompile(tsCode, "typescript", { filePath: "all_shifts.ts" });
-      expect(res.ail).toContain("a <<= 2");
-      expect(res.ail).toContain("b >>>= 1");
-      expect(res.ail).toContain("c **= 3");
+      expect(res.aice).toContain("a <<= 2");
+      expect(res.aice).toContain("b >>>= 1");
+      expect(res.aice).toContain("c **= 3");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
 
@@ -554,13 +554,13 @@ function arithmetic(x: number) {
         expect(stmt.op).toBe(expectedOps[i]);
       }
 
-      expect(res.ail).toContain("x += 1");
-      expect(res.ail).toContain("x -= 2");
-      expect(res.ail).toContain("x *= 3");
-      expect(res.ail).toContain("x /= 4");
-      expect(res.ail).toContain("x %= 5");
+      expect(res.aice).toContain("x += 1");
+      expect(res.aice).toContain("x -= 2");
+      expect(res.aice).toContain("x *= 3");
+      expect(res.aice).toContain("x /= 4");
+      expect(res.aice).toContain("x %= 5");
 
-      const roundtripMod = parse(res.ail, "roundtrip.ail");
+      const roundtripMod = parse(res.aice, "roundtrip.aice");
       expect(roundtripMod.items).toHaveLength(1);
     });
   });

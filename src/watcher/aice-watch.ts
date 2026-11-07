@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 High-Speed Incremental Watch Daemon (Step 6).
- * Background daemon that monitors *.ail source files, performs sub-5ms incremental
+ * AICE 2.0 High-Speed Incremental Watch Daemon (Step 6).
+ * Background daemon that monitors *.aice source files, performs sub-5ms incremental
  * recompilation into side-by-side target files, atomically unlocks & relocks
  * chmod 444 targets, and preserves dev server Hot Module Reloading (HMR).
  */
@@ -11,7 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
@@ -20,7 +20,7 @@ import {
 } from "../config/index.js";
 import { invalidateCachedFile, parseCached } from "../cache/index.js";
 import { parse } from "../core/parser.js";
-import { AilGenerator, decompile } from "../decompiler/index.js";
+import { AiceGenerator, decompile } from "../decompiler/index.js";
 import {
   detectTargetFromPath,
   emitTarget,
@@ -36,26 +36,26 @@ import { isTargetLocked, lockFile, unlockFile, withUnlockedTarget } from "../shi
 import { safeWriteTargetFile } from "../shield/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 
-export interface AilWatchOptions {
+export interface AiceWatchOptions {
   dir: string;
-  config?: AilProjectConfig;
+  config?: AiceProjectConfig;
   projectRoot?: string;
   debounceMs?: number; // default 50ms
   lockTargets?: boolean; // default true (relock to 0o444)
   recursive?: boolean; // default true
   ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build"]
-  bidirectional?: boolean; // Watch target files and sync external changes back to .ail
-  onCompileStart?: (ailFile: string) => void;
-  onCompileSuccess?: (ailFile: string, targetFile: string, durationMs: number) => void;
-  onCompileError?: (ailFile: string, error: Error) => void;
-  onFileDeleted?: (ailFile: string, targetFile: string) => void;
-  onReverseSyncSuccess?: (targetFile: string, ailFile: string, durationMs: number) => void;
+  bidirectional?: boolean; // Watch target files and sync external changes back to .aice
+  onCompileStart?: (aiceFile: string) => void;
+  onCompileSuccess?: (aiceFile: string, targetFile: string, durationMs: number) => void;
+  onCompileError?: (aiceFile: string, error: Error) => void;
+  onFileDeleted?: (aiceFile: string, targetFile: string) => void;
+  onReverseSyncSuccess?: (targetFile: string, aiceFile: string, durationMs: number) => void;
   onReverseSyncError?: (targetFile: string, error: Error) => void;
 }
 
 export interface ReverseSyncResult {
   targetFile: string;
-  ailFile: string;
+  aiceFile: string;
   success: boolean;
   collapsedIdioms: number;
   durationMs: number;
@@ -63,7 +63,7 @@ export interface ReverseSyncResult {
 }
 
 export interface CompileFileResult {
-  ailFile: string;
+  aiceFile: string;
   targetFile: string;
   success: boolean;
   durationMs: number;
@@ -115,11 +115,11 @@ function shouldIgnore(name: string, relPath: string, ignorePatterns: string[]): 
   return false;
 }
 
-export class AilWatcher {
-  private readonly options: AilWatchOptions;
+export class AiceWatcher {
+  private readonly options: AiceWatchOptions;
   private readonly watchedDir: string;
   public readonly projectRoot: string;
-  public config: AilProjectConfig;
+  public config: AiceProjectConfig;
   private readonly debounceMs: number;
   public readonly lockTargets: boolean;
   private readonly recursive: boolean;
@@ -136,15 +136,15 @@ export class AilWatcher {
   private fsWatchers: fs.FSWatcher[] = [];
   private watchedDirs = new Set<string>();
   private recentTargetWrites = new Map<string, number>();
-  private recentAilWrites = new Map<string, number>();
+  private recentAiceWrites = new Map<string, number>();
 
-  constructor(options: AilWatchOptions) {
+  constructor(options: AiceWatchOptions) {
     this.options = { ...options };
     this.watchedDir = path.resolve(options.dir);
     this.projectRoot = path.resolve(options.projectRoot ?? options.dir);
     this.config = options.config ?? loadProjectConfig(this.projectRoot);
     try {
-      const configPath = path.join(this.projectRoot, "ail.config.json");
+      const configPath = path.join(this.projectRoot, "aice.config.json");
       if (fs.existsSync(configPath)) {
         this.lastConfigMtime = fs.statSync(configPath).mtimeMs;
       }
@@ -162,7 +162,7 @@ export class AilWatcher {
       if (this.config.mode !== "companion" && this.config.outDir) {
         outDirIgnores.push(path.basename(this.config.outDir), this.config.outDir);
       } else if (!this.config.outDir) {
-        outDirIgnores.push(".ail-build");
+        outDirIgnores.push(".aice-build");
       }
     }
     this.ignorePatterns = Array.from(new Set([...baseIgnores, ...outDirIgnores]));
@@ -178,14 +178,14 @@ export class AilWatcher {
     this.recentTargetWrites.set(path.resolve(targetPath), now);
   }
 
-  private recordAilWrite(ailPath: string): void {
+  private recordAiceWrite(aicePath: string): void {
     const now = Date.now();
-    for (const [p, ts] of this.recentAilWrites.entries()) {
+    for (const [p, ts] of this.recentAiceWrites.entries()) {
       if (now - ts > 2000) {
-        this.recentAilWrites.delete(p);
+        this.recentAiceWrites.delete(p);
       }
     }
-    this.recentAilWrites.set(path.resolve(ailPath), now);
+    this.recentAiceWrites.set(path.resolve(aicePath), now);
   }
 
   isWatching(): boolean {
@@ -228,9 +228,9 @@ export class AilWatcher {
         return;
       }
 
-      if (baseName === "ail.config.json" || fullPath.endsWith("ail.config.json")) {
+      if (baseName === "aice.config.json" || fullPath.endsWith("aice.config.json")) {
         try {
-          const configPath = path.join(this.projectRoot, "ail.config.json");
+          const configPath = path.join(this.projectRoot, "aice.config.json");
           if (fs.existsSync(configPath)) {
             this.lastConfigMtime = fs.statSync(configPath).mtimeMs;
           }
@@ -245,9 +245,9 @@ export class AilWatcher {
         return;
       }
 
-      if (fullPath.endsWith(".ail")) {
-        const lastAilWrite = this.recentAilWrites.get(fullPath);
-        if (lastAilWrite && Date.now() - lastAilWrite < 750) {
+      if (fullPath.endsWith(".aice")) {
+        const lastAiceWrite = this.recentAiceWrites.get(fullPath);
+        if (lastAiceWrite && Date.now() - lastAiceWrite < 750) {
           return;
         }
 
@@ -429,8 +429,8 @@ export class AilWatcher {
     }
   }
 
-  async compileFile(ailPath: string): Promise<CompileFileResult> {
-    const configFilePath = path.join(this.projectRoot, "ail.config.json");
+  async compileFile(aicePath: string): Promise<CompileFileResult> {
+    const configFilePath = path.join(this.projectRoot, "aice.config.json");
     try {
       if (fs.existsSync(configFilePath)) {
         const stat = fs.statSync(configFilePath);
@@ -443,20 +443,20 @@ export class AilWatcher {
       // Ignore stat errors
     }
 
-    const resolvedAilPath = path.resolve(ailPath);
+    const resolvedAicePath = path.resolve(aicePath);
     const start = performance.now();
-    this.options.onCompileStart?.(resolvedAilPath);
+    this.options.onCompileStart?.(resolvedAicePath);
     this._totalCompiles++;
 
     const derivedTargetPath = resolveTargetOutputPathForConfig(
-      resolvedAilPath,
+      resolvedAicePath,
       this.config,
       this.projectRoot,
     );
 
     try {
-      const content = await fs.promises.readFile(resolvedAilPath, "utf-8");
-      const mod = parseCached(content, resolvedAilPath);
+      const content = await fs.promises.readFile(resolvedAicePath, "utf-8");
+      const mod = parseCached(content, resolvedAicePath);
       const expandedMod = this.config.idioms ? expandModuleIdioms(mod, this.config.idioms) : mod;
       if (this.config.mode !== "companion") {
         const checker = new TypeChecker();
@@ -464,13 +464,13 @@ export class AilWatcher {
       }
 
       let targetLang: TargetLanguage;
-      const base = path.basename(resolvedAilPath);
-      const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-      const innerExt = path.extname(withoutAil).toLowerCase();
+      const base = path.basename(resolvedAicePath);
+      const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+      const innerExt = path.extname(withoutAice).toLowerCase();
       if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-        targetLang = detectTargetFromPath(resolvedAilPath);
+        targetLang = detectTargetFromPath(resolvedAicePath);
       } else {
-        targetLang = this.config.targetLanguage ?? detectTargetFromPath(resolvedAilPath);
+        targetLang = this.config.targetLanguage ?? detectTargetFromPath(resolvedAicePath);
       }
 
       const emitted = emitTarget(expandedMod, targetLang, {
@@ -506,10 +506,10 @@ export class AilWatcher {
       const durationMs = Math.max(0, performance.now() - start);
       this._successfulCompiles++;
       this._lastCompileDurationMs = durationMs;
-      this.options.onCompileSuccess?.(resolvedAilPath, targetPath, durationMs);
+      this.options.onCompileSuccess?.(resolvedAicePath, targetPath, durationMs);
 
       return {
-        ailFile: resolvedAilPath,
+        aiceFile: resolvedAicePath,
         targetFile: targetPath,
         success: true,
         durationMs,
@@ -519,10 +519,10 @@ export class AilWatcher {
       this._failedCompiles++;
       this._lastCompileDurationMs = durationMs;
       const error = err instanceof Error ? err : new Error(String(err));
-      this.options.onCompileError?.(resolvedAilPath, error);
+      this.options.onCompileError?.(resolvedAicePath, error);
 
       return {
-        ailFile: resolvedAilPath,
+        aiceFile: resolvedAicePath,
         targetFile: derivedTargetPath,
         success: false,
         durationMs,
@@ -539,7 +539,7 @@ export class AilWatcher {
     const start = performance.now();
 
     // Reload config if modified
-    const configFilePath = path.join(this.projectRoot, "ail.config.json");
+    const configFilePath = path.join(this.projectRoot, "aice.config.json");
     try {
       if (fs.existsSync(configFilePath)) {
         const stat = fs.statSync(configFilePath);
@@ -552,24 +552,24 @@ export class AilWatcher {
       // Ignore stat errors
     }
 
-    // Determine corresponding .ail source path
-    let ailPath = resolveSourceFile(this.config, absTarget, this.projectRoot);
-    const dualCandidate = `${absTarget}.ail`;
-    const bareCandidate = absTarget.replace(/\.[^.]+$/, ".ail");
+    // Determine corresponding .aice source path
+    let aicePath = resolveSourceFile(this.config, absTarget, this.projectRoot);
+    const dualCandidate = `${absTarget}.aice`;
+    const bareCandidate = absTarget.replace(/\.[^.]+$/, ".aice");
 
     if (fs.existsSync(dualCandidate)) {
-      ailPath = dualCandidate;
+      aicePath = dualCandidate;
     } else if (fs.existsSync(bareCandidate)) {
-      ailPath = bareCandidate;
+      aicePath = bareCandidate;
     }
 
-    const resolvedAilPath = path.resolve(ailPath);
+    const resolvedAicePath = path.resolve(aicePath);
 
     const lastTargetWrite = this.recentTargetWrites.get(absTarget);
     if (!options?.force && lastTargetWrite && Date.now() - lastTargetWrite < 750) {
       return {
         targetFile: absTarget,
-        ailFile: resolvedAilPath,
+        aiceFile: resolvedAicePath,
         success: true,
         collapsedIdioms: 0,
         durationMs: Math.max(0, performance.now() - start),
@@ -585,7 +585,7 @@ export class AilWatcher {
       const targetSource = await fs.promises.readFile(absTarget, "utf-8");
       const decompiled = decompile(targetSource, targetLang, { filePath: absTarget });
 
-      let ailSource = decompiled.ail;
+      let aiceSource = decompiled.aice;
       let collapsedCount = 0;
 
       if (this.config.idioms && Object.keys(this.config.idioms).length > 0) {
@@ -597,18 +597,18 @@ export class AilWatcher {
         const collapsed = collapseModuleIdioms(decompiled.ast, normalizedIdioms);
         collapsedCount = collapsed.collapsedCount;
         if (collapsedCount > 0) {
-          ailSource = new AilGenerator({ trivia: decompiled.trivia }).generate(collapsed.ast);
+          aiceSource = new AiceGenerator({ trivia: decompiled.trivia }).generate(collapsed.ast);
         }
       }
 
-      // Check if existing .ail file already has identical content
-      if (fs.existsSync(resolvedAilPath)) {
-        const existingAil = await fs.promises.readFile(resolvedAilPath, "utf-8");
-        if (existingAil === ailSource) {
+      // Check if existing .aice file already has identical content
+      if (fs.existsSync(resolvedAicePath)) {
+        const existingAice = await fs.promises.readFile(resolvedAicePath, "utf-8");
+        if (existingAice === aiceSource) {
           const durationMs = Math.max(0, performance.now() - start);
           return {
             targetFile: absTarget,
-            ailFile: resolvedAilPath,
+            aiceFile: resolvedAicePath,
             success: true,
             collapsedIdioms: collapsedCount,
             durationMs,
@@ -616,23 +616,23 @@ export class AilWatcher {
         }
       }
 
-      this.recordAilWrite(resolvedAilPath);
+      this.recordAiceWrite(resolvedAicePath);
 
-      const ailDir = path.dirname(resolvedAilPath);
-      if (!fs.existsSync(ailDir)) {
-        fs.mkdirSync(ailDir, { recursive: true });
+      const aiceDir = path.dirname(resolvedAicePath);
+      if (!fs.existsSync(aiceDir)) {
+        fs.mkdirSync(aiceDir, { recursive: true });
       }
 
-      await fs.promises.writeFile(resolvedAilPath, ailSource, "utf-8");
-      this.recordAilWrite(resolvedAilPath);
-      invalidateCachedFile(resolvedAilPath);
+      await fs.promises.writeFile(resolvedAicePath, aiceSource, "utf-8");
+      this.recordAiceWrite(resolvedAicePath);
+      invalidateCachedFile(resolvedAicePath);
 
       const durationMs = Math.max(0, performance.now() - start);
-      this.options.onReverseSyncSuccess?.(absTarget, resolvedAilPath, durationMs);
+      this.options.onReverseSyncSuccess?.(absTarget, resolvedAicePath, durationMs);
 
       return {
         targetFile: absTarget,
-        ailFile: resolvedAilPath,
+        aiceFile: resolvedAicePath,
         success: true,
         collapsedIdioms: collapsedCount,
         durationMs,
@@ -643,7 +643,7 @@ export class AilWatcher {
       this.options.onReverseSyncError?.(absTarget, error);
       return {
         targetFile: absTarget,
-        ailFile: ailPath,
+        aiceFile: aicePath,
         success: false,
         collapsedIdioms: 0,
         durationMs,
@@ -680,7 +680,7 @@ export class AilWatcher {
       return files;
     };
 
-    const findAilFiles = (dir: string): string[] => {
+    const findAiceFiles = (dir: string): string[] => {
       const files: string[] = [];
       if (!fs.existsSync(dir)) return files;
       try {
@@ -690,8 +690,8 @@ export class AilWatcher {
           const relPath = path.relative(this.watchedDir, fullPath);
           if (shouldIgnore(entry.name, relPath, this.ignorePatterns)) continue;
           if (entry.isDirectory()) {
-            files.push(...findAilFiles(fullPath));
-          } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+            files.push(...findAiceFiles(fullPath));
+          } else if (entry.isFile() && entry.name.endsWith(".aice")) {
             files.push(fullPath);
           }
         }
@@ -725,10 +725,10 @@ export class AilWatcher {
       }
     }
 
-    const ailFiles = findAilFiles(this.watchedDir);
-    for (const ailFile of ailFiles) {
+    const aiceFiles = findAiceFiles(this.watchedDir);
+    for (const aiceFile of aiceFiles) {
       const derivedTarget = resolveTargetOutputPathForConfig(
-        ailFile,
+        aiceFile,
         this.config,
         this.projectRoot,
       );
@@ -738,24 +738,24 @@ export class AilWatcher {
     }
 
     for (const targetFile of targetFilesToSync) {
-      let ailFile = resolveSourceFile(this.config, targetFile, this.projectRoot);
-      const dualCandidate = `${targetFile}.ail`;
-      const bareCandidate = targetFile.replace(/\.[^.]+$/, ".ail");
-      if (fs.existsSync(dualCandidate) && !fs.existsSync(ailFile)) {
-        ailFile = dualCandidate;
-      } else if (fs.existsSync(bareCandidate) && !fs.existsSync(ailFile)) {
-        ailFile = bareCandidate;
+      let aiceFile = resolveSourceFile(this.config, targetFile, this.projectRoot);
+      const dualCandidate = `${targetFile}.aice`;
+      const bareCandidate = targetFile.replace(/\.[^.]+$/, ".aice");
+      if (fs.existsSync(dualCandidate) && !fs.existsSync(aiceFile)) {
+        aiceFile = dualCandidate;
+      } else if (fs.existsSync(bareCandidate) && !fs.existsSync(aiceFile)) {
+        aiceFile = bareCandidate;
       }
 
       let shouldSync = force;
       if (!shouldSync) {
-        if (!fs.existsSync(ailFile)) {
+        if (!fs.existsSync(aiceFile)) {
           shouldSync = true;
         } else {
           try {
             const targetMtime = fs.statSync(targetFile).mtimeMs;
-            const ailMtime = fs.statSync(ailFile).mtimeMs;
-            if (targetMtime >= ailMtime) {
+            const aiceMtime = fs.statSync(aiceFile).mtimeMs;
+            if (targetMtime >= aiceMtime) {
               shouldSync = true;
             }
           } catch {
@@ -791,7 +791,7 @@ export class AilWatcher {
     this.fsWatchers = [];
     this.watchedDirs.clear();
     this.recentTargetWrites.clear();
-    this.recentAilWrites.clear();
+    this.recentAiceWrites.clear();
   }
 }
 
@@ -802,7 +802,7 @@ export async function syncProjectFromTargets(
   const resolvedDir = path.resolve(dir);
   const projectRoot = findProjectRoot(resolvedDir);
   const config = loadProjectConfig(projectRoot);
-  const watcher = new AilWatcher({
+  const watcher = new AiceWatcher({
     dir: resolvedDir,
     projectRoot,
     config,
@@ -813,12 +813,12 @@ export async function syncProjectFromTargets(
 
 export async function watchProject(
   dir: string,
-  options?: Partial<AilWatchOptions>,
-): Promise<AilWatcher> {
+  options?: Partial<AiceWatchOptions>,
+): Promise<AiceWatcher> {
   const resolvedDir = path.resolve(dir);
   const projectRoot = options?.projectRoot ?? findProjectRoot(resolvedDir);
   const config = options?.config ?? loadProjectConfig(projectRoot);
-  const watcher = new AilWatcher({
+  const watcher = new AiceWatcher({
     ...options,
     dir: resolvedDir,
     projectRoot,
@@ -831,22 +831,22 @@ export async function watchProject(
 export interface RecompileSingleFileOptions {
   projectRoot?: string;
   dir?: string;
-  config?: AilProjectConfig;
+  config?: AiceProjectConfig;
   lockTargets?: boolean;
-  onCompileStart?: (ailFile: string) => void;
-  onCompileSuccess?: (ailFile: string, targetFile: string, durationMs: number) => void;
-  onCompileError?: (ailFile: string, error: Error) => void;
+  onCompileStart?: (aiceFile: string) => void;
+  onCompileSuccess?: (aiceFile: string, targetFile: string, durationMs: number) => void;
+  onCompileError?: (aiceFile: string, error: Error) => void;
 }
 
 export async function recompileSingleFile(
-  ailPath: string,
+  aicePath: string,
   options?: RecompileSingleFileOptions,
 ): Promise<CompileFileResult> {
-  const resolvedAilPath = path.resolve(ailPath);
+  const resolvedAicePath = path.resolve(aicePath);
   const projectRoot =
-    options?.projectRoot ?? options?.dir ?? findProjectRoot(path.dirname(resolvedAilPath));
+    options?.projectRoot ?? options?.dir ?? findProjectRoot(path.dirname(resolvedAicePath));
   const config = options?.config ?? loadProjectConfig(projectRoot);
-  const watcher = new AilWatcher({
+  const watcher = new AiceWatcher({
     dir: projectRoot,
     projectRoot,
     config,
@@ -855,5 +855,5 @@ export async function recompileSingleFile(
     onCompileSuccess: options?.onCompileSuccess,
     onCompileError: options?.onCompileError,
   });
-  return watcher.compileFile(resolvedAilPath);
+  return watcher.compileFile(resolvedAicePath);
 }

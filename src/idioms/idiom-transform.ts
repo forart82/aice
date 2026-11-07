@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Project Idiom Transformation Engine.
+ * AICE 2.0 Project Idiom Transformation Engine.
  * Expands and collapses idioms in ASTs, source strings, and project workspaces.
  */
 
@@ -49,7 +49,7 @@ import type {
 import { createHash } from "node:crypto";
 import { parse } from "../core/parser.js";
 import { type Span } from "../core/span.js";
-import { AilGenerator } from "../decompiler/ail-generator.js";
+import { AiceGenerator } from "../decompiler/aice-generator.js";
 import { decompile } from "../decompiler/index.js";
 import { CSS_PROPERTY_ALIASES } from "../emitters/css-emitter.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
@@ -59,7 +59,7 @@ import {
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   saveProjectConfig,
-  type AilProjectConfig,
+  type AiceProjectConfig,
   type IdiomOccurrence,
   type ProjectIdiomDefinition,
   type ProjectIdiomParam,
@@ -103,7 +103,7 @@ export interface IdiomCacheData {
   version: number;
   idiomsEnabled: boolean;
   fileHashes: Record<string, string>;
-  decompiledAil: Record<string, string>;
+  decompiledAice: Record<string, string>;
   idioms: Record<string, ProjectIdiomDefinition>;
   occurrences: Record<string, IdiomOccurrence[]>;
 }
@@ -125,13 +125,13 @@ export interface IdiomUpdateResult {
 }
 
 function extractReferencedIdiomNamesFromTemplate(
-  templateAil: string,
+  templateAice: string,
   knownIdioms: Set<string>,
 ): string[] {
   const refs: string[] = [];
   const regex = /(\$[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
   let match: RegExpExecArray | null = null;
-  while ((match = regex.exec(templateAil)) !== null) {
+  while ((match = regex.exec(templateAice)) !== null) {
     const candidate = match[1];
     if (knownIdioms.has(candidate)) {
       refs.push(candidate);
@@ -151,11 +151,11 @@ export function validateIdiomDefinitions(
   const normalizedMap = new Map<string, ProjectIdiomDefinition>();
   for (const [key, def] of Object.entries(idioms)) {
     const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
-    const templateAil = def.templateAil ?? (def as { template?: string }).template ?? "";
+    const templateAice = def.templateAice ?? (def as { template?: string }).template ?? "";
     const params = (def.params ?? []).map((p) =>
       typeof p === "string" ? { name: p } : p,
     );
-    const normDef: ProjectIdiomDefinition = { ...def, name: normName, templateAil, params };
+    const normDef: ProjectIdiomDefinition = { ...def, name: normName, templateAice, params };
     normalizedMap.set(normName, normDef);
     // Validate template syntax by parsing
     getOrParseTemplate(normDef);
@@ -175,7 +175,7 @@ export function validateIdiomDefinitions(
     visiting.add(name);
     const def = normalizedMap.get(name);
     if (def) {
-      const refs = extractReferencedIdiomNamesFromTemplate(def.templateAil, knownNames);
+      const refs = extractReferencedIdiomNamesFromTemplate(def.templateAice, knownNames);
       for (const ref of refs) {
         const normRef = ref.startsWith("$") ? ref : `$${ref}`;
         dfs(normRef, [...pathStack, name]);
@@ -211,10 +211,10 @@ function setCachedTemplate(key: string, result: ParsedTemplate): void {
 }
 
 /**
- * Parses an idiom's templateAil string into template AST statement(s), expression, layoutNodes, or styleProperties.
+ * Parses an idiom's templateAice string into template AST statement(s), expression, layoutNodes, or styleProperties.
  */
 function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
-  const rawTemplate = def.templateAil ?? (def as { template?: string }).template ?? "";
+  const rawTemplate = def.templateAice ?? (def as { template?: string }).template ?? "";
   const cacheKey = `${def.name}::${def.kind}::${rawTemplate}`;
   const cached = templateCache.get(cacheKey);
   if (cached) return cached;
@@ -387,7 +387,7 @@ function matchLayoutNodeTemplate(
   cNode: LayoutNode,
   bindings: Map<string, Expr>,
   holeNames: Set<string>,
-  generator: AilGenerator,
+  generator: AiceGenerator,
 ): boolean {
   if (tNode.tag !== cNode.tag) return false;
   if (tNode.attributes.length !== cNode.attributes.length) return false;
@@ -802,7 +802,7 @@ function expandModuleIdiomsInternal(
       const idiomName = expr.callee.name;
       const def = idioms![idiomName];
       const selfRefs = extractReferencedIdiomNamesFromTemplate(
-        def.templateAil,
+        def.templateAice,
         new Set([idiomName, def.name]),
       );
       if (selfRefs.length > 0) {
@@ -951,7 +951,7 @@ function expandModuleIdiomsInternal(
         const idiomName = (call.callee as IdentifierExpr).name;
         const def = idioms![idiomName];
         const selfRefs = extractReferencedIdiomNamesFromTemplate(
-          def.templateAil,
+          def.templateAice,
           new Set([idiomName, def.name]),
         );
         if (selfRefs.length > 0) {
@@ -1267,7 +1267,7 @@ function matchExprTemplate(
   targetExpr: Expr,
   bindings: Map<string, Expr>,
   holeNames: Set<string>,
-  generator: AilGenerator,
+  generator: AiceGenerator,
   alphaMap?: Map<string, string>,
 ): boolean {
   if (templateExpr.kind === "IdentifierExpr" && holeNames.has(templateExpr.name)) {
@@ -1526,7 +1526,7 @@ function matchStatementTemplate(
   targetStmt: Statement,
   bindings: Map<string, Expr>,
   holeNames: Set<string>,
-  generator: AilGenerator,
+  generator: AiceGenerator,
   alphaMap?: Map<string, string>,
   remainingStmts?: Statement[],
 ): boolean {
@@ -1802,20 +1802,20 @@ export function collapseModuleIdioms(
   const clonedMod = structuredClone(mod);
   let collapsedCount = 0;
   let currentSymbol: string | undefined;
-  const generator = new AilGenerator();
+  const generator = new AiceGenerator();
 
   // Sort idioms by tokensPerOccurrenceSaved descending
   const sortedIdioms = Object.entries(idioms)
     .map(([key, def]): ProjectIdiomDefinition => {
       const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
-      const templateAil = def.templateAil ?? (def as { template?: string }).template ?? "";
+      const templateAice = def.templateAice ?? (def as { template?: string }).template ?? "";
       const params = (def.params ?? []).map((p) =>
         typeof p === "string" ? { name: p } : p,
       );
       return {
         ...def,
         name: normName,
-        templateAil,
+        templateAice,
         params,
         tokensPerOccurrenceSaved: def.tokensPerOccurrenceSaved ?? 10,
       };
@@ -2300,50 +2300,50 @@ export function collapseModuleIdioms(
 }
 
 /**
- * Collapses idiom occurrences in AIL source code.
+ * Collapses idiom occurrences in AICE source code.
  */
-export function collapseAilSourceIdioms(
+export function collapseAiceSourceIdioms(
   source: string,
   idioms: Record<string, ProjectIdiomDefinition>,
-  filePath = "module.ail",
-): { ail: string; collapsedCount: number } {
+  filePath = "module.aice",
+): { aice: string; collapsedCount: number } {
   if (!idioms || Object.keys(idioms).length === 0) {
-    return { ail: source, collapsedCount: 0 };
+    return { aice: source, collapsedCount: 0 };
   }
 
   let mod: Module;
   try {
     mod = parse(source, filePath);
   } catch {
-    return { ail: source, collapsedCount: 0 };
+    return { aice: source, collapsedCount: 0 };
   }
 
   const { ast, collapsedCount } = collapseModuleIdioms(mod, idioms);
   if (collapsedCount === 0) {
-    return { ail: source, collapsedCount: 0 };
+    return { aice: source, collapsedCount: 0 };
   }
 
-  const ail = AilGenerator.generate(ast);
-  return { ail, collapsedCount };
+  const aice = AiceGenerator.generate(ast);
+  return { aice, collapsedCount };
 }
 
 /**
- * Expands idiom calls in AIL source code.
+ * Expands idiom calls in AICE source code.
  */
-export function expandAilSourceIdioms(
+export function expandAiceSourceIdioms(
   source: string,
   idioms: Record<string, ProjectIdiomDefinition>,
-  filePath = "module.ail",
-): { ail: string; expandedCount: number } {
+  filePath = "module.aice",
+): { aice: string; expandedCount: number } {
   if (!idioms || Object.keys(idioms).length === 0) {
-    return { ail: source, expandedCount: 0 };
+    return { aice: source, expandedCount: 0 };
   }
 
   let mod: Module;
   try {
     mod = parse(source, filePath);
   } catch {
-    return { ail: source, expandedCount: 0 };
+    return { aice: source, expandedCount: 0 };
   }
 
   let expandedCount = 0;
@@ -2352,11 +2352,11 @@ export function expandAilSourceIdioms(
   });
 
   if (expandedCount === 0) {
-    return { ail: source, expandedCount: 0 };
+    return { aice: source, expandedCount: 0 };
   }
 
-  const ail = AilGenerator.generate(expandedMod);
-  return { ail, expandedCount };
+  const aice = AiceGenerator.generate(expandedMod);
+  return { aice, expandedCount };
 }
 
 const NATIVE_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -2387,7 +2387,7 @@ const NATIVE_CODE_EXTENSIONS: ReadonlySet<string> = new Set([
 ]);
 
 const IGNORED_JSON_FILENAMES: ReadonlySet<string> = new Set([
-  "ail.config.json",
+  "aice.config.json",
   "package.json",
   "package-lock.json",
   "tsconfig.json",
@@ -2401,9 +2401,9 @@ function computeSha256(content: string): string {
 }
 
 /**
- * Recursively locates all .ail files in a directory.
+ * Recursively locates all .aice files in a directory.
  */
-function scanAilFiles(dir: string): string[] {
+function scanAiceFiles(dir: string): string[] {
   const results: string[] = [];
   if (!fs.existsSync(dir)) return results;
 
@@ -2414,14 +2414,14 @@ function scanAilFiles(dir: string): string[] {
       if (
         entry.name !== "node_modules" &&
         entry.name !== ".git" &&
-        entry.name !== ".ail-build" &&
-        entry.name !== ".ail-cache" &&
+        entry.name !== ".aice-build" &&
+        entry.name !== ".aice-cache" &&
         entry.name !== "dist" &&
         entry.name !== "build"
       ) {
-        results.push(...scanAilFiles(full));
+        results.push(...scanAiceFiles(full));
       }
-    } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+    } else if (entry.isFile() && entry.name.endsWith(".aice")) {
       results.push(full);
     }
   }
@@ -2429,7 +2429,7 @@ function scanAilFiles(dir: string): string[] {
 }
 
 /**
- * Recursively locates native source code files that do not have a .ail sibling.
+ * Recursively locates native source code files that do not have a .aice sibling.
  */
 function scanNativeCodeFiles(dir: string): string[] {
   const results: string[] = [];
@@ -2442,8 +2442,8 @@ function scanNativeCodeFiles(dir: string): string[] {
       if (
         entry.name !== "node_modules" &&
         entry.name !== ".git" &&
-        entry.name !== ".ail-build" &&
-        entry.name !== ".ail-cache" &&
+        entry.name !== ".aice-build" &&
+        entry.name !== ".aice-cache" &&
         entry.name !== "dist" &&
         entry.name !== "build" &&
         entry.name !== "coverage" &&
@@ -2454,8 +2454,8 @@ function scanNativeCodeFiles(dir: string): string[] {
     } else if (entry.isFile()) {
       if (
         entry.name.endsWith(".d.ts") ||
-        entry.name.endsWith(".ail") ||
-        entry.name.endsWith(".ail.trivia.json") ||
+        entry.name.endsWith(".aice") ||
+        entry.name.endsWith(".aice.trivia.json") ||
         IGNORED_JSON_FILENAMES.has(entry.name) ||
         /^tsconfig\..*\.json$/.test(entry.name)
       ) {
@@ -2463,7 +2463,7 @@ function scanNativeCodeFiles(dir: string): string[] {
       }
       const ext = path.extname(entry.name).toLowerCase();
       if (NATIVE_CODE_EXTENSIONS.has(ext)) {
-        if (!fs.existsSync(`${full}.ail`)) {
+        if (!fs.existsSync(`${full}.aice`)) {
           results.push(full);
         }
       }
@@ -2480,7 +2480,7 @@ interface WorkspaceIdiomFile extends IdiomFileInput {
 }
 
 function getIdiomCachePath(projectRoot: string): string {
-  return path.join(projectRoot, ".ail-cache", "idioms.json");
+  return path.join(projectRoot, ".aice-cache", "idioms.json");
 }
 
 function readIdiomCache(projectRoot: string): IdiomCacheData | null {
@@ -2494,7 +2494,7 @@ function readIdiomCache(projectRoot: string): IdiomCacheData | null {
 }
 
 function writeIdiomCache(projectRoot: string, data: IdiomCacheData): void {
-  const cacheDir = path.join(projectRoot, ".ail-cache");
+  const cacheDir = path.join(projectRoot, ".aice-cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });
   }
@@ -2507,25 +2507,25 @@ function loadAndDecompileWorkspaceFiles(
   searchDir: string,
 ): {
   files: WorkspaceIdiomFile[];
-  ailFilePaths: string[];
+  aiceFilePaths: string[];
   nativeFilePaths: string[];
   fileHashes: Record<string, string>;
-  decompiledAil: Record<string, string>;
+  decompiledAice: Record<string, string>;
 } {
-  const ailFilePaths = scanAilFiles(searchDir);
+  const aiceFilePaths = scanAiceFiles(searchDir);
   const nativeFilePaths = scanNativeCodeFiles(searchDir);
   const existingCache = readIdiomCache(projectRoot);
   const fileHashes: Record<string, string> = {};
-  const decompiledAil: Record<string, string> = {};
+  const decompiledAice: Record<string, string> = {};
   const files: WorkspaceIdiomFile[] = [];
 
-  for (const fp of ailFilePaths) {
+  for (const fp of aiceFilePaths) {
     try {
       const rawSource = fs.readFileSync(fp, "utf-8");
       const relPath = path.relative(projectRoot, fp) || path.basename(fp);
       const fileHash = computeSha256(rawSource);
       fileHashes[relPath] = fileHash;
-      decompiledAil[relPath] = rawSource;
+      decompiledAice[relPath] = rawSource;
       files.push({
         filePath: fp,
         source: rawSource,
@@ -2546,22 +2546,22 @@ function loadAndDecompileWorkspaceFiles(
       const fileHash = computeSha256(rawSource);
       fileHashes[relPath] = fileHash;
 
-      let ailSource: string;
+      let aiceSource: string;
       if (
         existingCache?.fileHashes?.[relPath] === fileHash &&
-        typeof existingCache?.decompiledAil?.[relPath] === "string"
+        typeof existingCache?.decompiledAice?.[relPath] === "string"
       ) {
-        ailSource = existingCache.decompiledAil[relPath];
+        aiceSource = existingCache.decompiledAice[relPath];
       } else {
         const targetLang = detectTargetFromPath(fp);
         const decomp = decompile(rawSource, targetLang, { filePath: fp });
-        ailSource = decomp.ail;
+        aiceSource = decomp.aice;
       }
 
-      decompiledAil[relPath] = ailSource;
+      decompiledAice[relPath] = aiceSource;
       files.push({
         filePath: fp,
-        source: ailSource,
+        source: aiceSource,
         isNative: true,
         relPath,
         fileHash,
@@ -2572,7 +2572,7 @@ function loadAndDecompileWorkspaceFiles(
     }
   }
 
-  return { files, ailFilePaths, nativeFilePaths, fileHashes, decompiledAil };
+  return { files, aiceFilePaths, nativeFilePaths, fileHashes, decompiledAice };
 }
 
 function collectOccurrencesAcrossFiles(
@@ -2580,7 +2580,7 @@ function collectOccurrencesAcrossFiles(
   idioms: Record<string, ProjectIdiomDefinition>,
 ): Record<string, IdiomOccurrence[]> {
   const occurrences: Record<string, IdiomOccurrence[]> = {};
-  const generator = new AilGenerator();
+  const generator = new AiceGenerator();
   for (const key of Object.keys(idioms)) {
     const norm = key.startsWith("$") ? key : `$${key}`;
     occurrences[norm] = [];
@@ -2594,7 +2594,7 @@ function collectOccurrencesAcrossFiles(
       continue;
     }
 
-    // 1. Also collect already-collapsed $idiom calls if present in .ail source
+    // 1. Also collect already-collapsed $idiom calls if present in .aice source
     const collectExistingCallsInExpr = (expr: Expr | undefined | null, sym?: string) => {
       if (!expr) return;
       if (expr.kind === "CallExpr" && expr.callee.kind === "IdentifierExpr") {
@@ -2756,7 +2756,7 @@ function collectOccurrencesAcrossFiles(
 
 function resolveIdiomWorkspace(dir: string): {
   projectRoot: string;
-  config: AilProjectConfig;
+  config: AiceProjectConfig;
   searchDir: string;
 } {
   const resolvedInput = path.resolve(dir);
@@ -2764,7 +2764,7 @@ function resolveIdiomWorkspace(dir: string): {
   if (
     projectRoot === resolvedInput &&
     path.basename(resolvedInput) === "src" &&
-    !fs.existsSync(path.join(resolvedInput, "ail.config.json"))
+    !fs.existsSync(path.join(resolvedInput, "aice.config.json"))
   ) {
     projectRoot = path.dirname(resolvedInput);
   }
@@ -2778,9 +2778,9 @@ function resolveIdiomWorkspace(dir: string): {
 }
 
 /**
- * Native-first idiom scanner: discovers idioms across native (.ts, .py, etc.) and/or .ail files,
- * persists idioms in `ail.config.json` and provenance in `.ail-cache/idioms.json`,
- * without writing any `.ail` files to disk.
+ * Native-first idiom scanner: discovers idioms across native (.ts, .py, etc.) and/or .aice files,
+ * persists idioms in `aice.config.json` and provenance in `.aice-cache/idioms.json`,
+ * without writing any `.aice` files to disk.
  */
 export function scanProjectIdioms(
   dir: string,
@@ -2788,7 +2788,7 @@ export function scanProjectIdioms(
 ): ApplyProjectIdiomsResult {
   const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
 
-  const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
+  const { files, fileHashes, decompiledAice } = loadAndDecompileWorkspaceFiles(
     resolvedDir,
     searchDir,
   );
@@ -2829,7 +2829,7 @@ export function scanProjectIdioms(
       version: 1,
       idiomsEnabled,
       fileHashes,
-      decompiledAil,
+      decompiledAice,
       idioms: allIdioms,
       occurrences,
     });
@@ -2848,7 +2848,7 @@ export function scanProjectIdioms(
 }
 
 /**
- * Discovers idioms across a workspace, collapses occurrences in .ail files (if any),
+ * Discovers idioms across a workspace, collapses occurrences in .aice files (if any),
  * or indexes native files in twinless mode, and saves configuration + provenance cache.
  */
 export function applyProjectIdiomsToDirectory(
@@ -2857,15 +2857,15 @@ export function applyProjectIdiomsToDirectory(
 ): ApplyProjectIdiomsResult {
   const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
 
-  const ailFilePaths = scanAilFiles(searchDir);
+  const aiceFilePaths = scanAiceFiles(searchDir);
 
-  // If no .ail files exist on disk, run native-first twinless idiom discovery!
-  if (ailFilePaths.length === 0) {
+  // If no .aice files exist on disk, run native-first twinless idiom discovery!
+  if (aiceFilePaths.length === 0) {
     return scanProjectIdioms(dir, options);
   }
 
   const files: IdiomFileInput[] = [];
-  for (const fp of ailFilePaths) {
+  for (const fp of aiceFilePaths) {
     try {
       const source = fs.readFileSync(fp, "utf-8");
       files.push({ filePath: fp, source });
@@ -2891,7 +2891,7 @@ export function applyProjectIdiomsToDirectory(
   let totalCollapsedCalls = 0;
 
   for (const file of files) {
-    const { ail, collapsedCount } = collapseAilSourceIdioms(
+    const { aice, collapsedCount } = collapseAiceSourceIdioms(
       file.source,
       allIdioms,
       file.filePath,
@@ -2900,7 +2900,7 @@ export function applyProjectIdiomsToDirectory(
       totalCollapsedCalls += collapsedCount;
       modifiedFiles.push(file.filePath);
       if (!options?.dryRun) {
-        fs.writeFileSync(file.filePath, ail, "utf-8");
+        fs.writeFileSync(file.filePath, aice, "utf-8");
       }
     }
   }
@@ -2921,7 +2921,7 @@ export function applyProjectIdiomsToDirectory(
 }
 
 /**
- * Reads all live occurrences of a specific project idiom across workspace native and .ail files,
+ * Reads all live occurrences of a specific project idiom across workspace native and .aice files,
  * automatically invalidating any stale SHA-256 cache entries when files change on disk.
  */
 export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResult {
@@ -2939,7 +2939,7 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
     name: normName,
   };
 
-  const { files, fileHashes, decompiledAil } = loadAndDecompileWorkspaceFiles(
+  const { files, fileHashes, decompiledAice } = loadAndDecompileWorkspaceFiles(
     resolvedDir,
     searchDir,
   );
@@ -2956,17 +2956,17 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
     version: 1,
     idiomsEnabled,
     fileHashes,
-    decompiledAil,
+    decompiledAice,
     idioms: allIdioms,
     occurrences: occurrencesMap,
   });
 
   const uniqueFiles = new Set(occList.map((o) => o.filePath));
   const paramsStr = canonicalIdiom.params.map((p) => p.name).join(", ");
-  const oneLineTemplate = canonicalIdiom.templateAil.replace(/\r?\n\s*/g, " ; ");
+  const oneLineTemplate = canonicalIdiom.templateAice.replace(/\r?\n\s*/g, " ; ");
 
   const lines: string[] = [
-    `=== AIL Idiom Provenance Report: ${normName}(${paramsStr}) ===`,
+    `=== AICE Idiom Provenance Report: ${normName}(${paramsStr}) ===`,
     `Status:      ${idiomsEnabled ? "ON (enabled)" : "OFF (disabled)"}`,
     `Kind:        ${canonicalIdiom.kind}`,
     `Template:    ${oneLineTemplate}`,
@@ -2993,7 +2993,7 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
 
 function resolveUpdatedParams(
   oldParams: ProjectIdiomParam[],
-  newTemplateAil: string,
+  newTemplateAice: string,
   explicitParams?: ProjectIdiomParam[] | string,
 ): ProjectIdiomParam[] {
   if (Array.isArray(explicitParams)) {
@@ -3024,7 +3024,7 @@ function resolveUpdatedParams(
   }
 
   let maxIdx = oldParams.length - 1;
-  const matches = newTemplateAil.matchAll(/\$(\d+)\b/g);
+  const matches = newTemplateAice.matchAll(/\$(\d+)\b/g);
   for (const m of matches) {
     const n = Number.parseInt(m[1], 10);
     if (!Number.isNaN(n) && n > maxIdx) maxIdx = n;
@@ -3038,19 +3038,19 @@ function resolveUpdatedParams(
 
 /**
  * Smart multi-file idiom mutation: updates an idiom's template across all occurrences
- * in native files and/or .ail files, supporting parameter reordering, duplication,
+ * in native files and/or .aice files, supporting parameter reordering, duplication,
  * arity expansion with defaults, nested expressions, hygienic alpha-renaming, cycle detection, and atomic rollback.
  */
 export async function updateProjectIdiom(
   dir: string,
   idiomName: string,
-  rawNewTemplateAil: string,
+  rawNewTemplateAice: string,
   options?: { dryRun?: boolean; description?: string; params?: ProjectIdiomParam[] | string },
 ): Promise<IdiomUpdateResult> {
-  const newTemplateAil =
-    rawNewTemplateAil && !rawNewTemplateAil.includes("\n") && /\s+;\s+/.test(rawNewTemplateAil)
-      ? rawNewTemplateAil.replace(/:\s*;\s*/g, ":\n  ").replace(/\s+;\s+/g, "\n")
-      : rawNewTemplateAil;
+  const newTemplateAice =
+    rawNewTemplateAice && !rawNewTemplateAice.includes("\n") && /\s+;\s+/.test(rawNewTemplateAice)
+      ? rawNewTemplateAice.replace(/:\s*;\s*/g, ":\n  ").replace(/\s+;\s+/g, "\n")
+      : rawNewTemplateAice;
   const { projectRoot: resolvedDir, config, searchDir } = resolveIdiomWorkspace(dir);
   const normName = idiomName.startsWith("$") ? idiomName : `$${idiomName}`;
   const bareName = normName.slice(1);
@@ -3071,14 +3071,14 @@ export async function updateProjectIdiom(
     name: normName,
   };
 
-  const resolvedParams = resolveUpdatedParams(oldDef.params, newTemplateAil, options?.params);
+  const resolvedParams = resolveUpdatedParams(oldDef.params, newTemplateAice, options?.params);
 
   // Determine if the updated template has multiple statements (upgrade kind stmt -> block if needed)
   const tempCheckDef: ProjectIdiomDefinition = {
     ...oldDef,
     params: resolvedParams,
     kind: oldDef.kind === "expr" ? "expr" : "block",
-    templateAil: newTemplateAil,
+    templateAice: newTemplateAice,
     ...(options?.description !== undefined ? { description: options.description } : {}),
   };
   const parsedNew = getOrParseTemplate(tempCheckDef);
@@ -3093,7 +3093,7 @@ export async function updateProjectIdiom(
     ...oldDef,
     params: resolvedParams,
     kind: updatedKind,
-    templateAil: newTemplateAil,
+    templateAice: newTemplateAice,
     ...(options?.description !== undefined ? { description: options.description } : {}),
   };
 
@@ -3116,7 +3116,7 @@ export async function updateProjectIdiom(
 
   for (const file of files) {
     if (!file.isNative) {
-      // .ail file on disk
+      // .aice file on disk
       let mod: Module;
       try {
         mod = parse(file.source, file.filePath);
@@ -3252,7 +3252,7 @@ export async function updateProjectIdiom(
   updatedDef.occurrences = updatedOccurrences || oldDef.occurrences;
 
   if (!dryRun) {
-    const configPath = path.join(resolvedDir, "ail.config.json");
+    const configPath = path.join(resolvedDir, "aice.config.json");
     const oldConfigRaw = fs.existsSync(configPath)
       ? fs.readFileSync(configPath, "utf-8")
       : null;
@@ -3280,7 +3280,7 @@ export async function updateProjectIdiom(
         version: 1,
         idiomsEnabled: isProjectIdiomsEnabled(config),
         fileHashes: refreshed.fileHashes,
-        decompiledAil: refreshed.decompiledAil,
+        decompiledAice: refreshed.decompiledAice,
         idioms: finalIdioms,
         occurrences: refreshedOccurrences,
       });
@@ -3324,15 +3324,15 @@ export function expandProjectIdiomsInDirectory(
     return { expandedFiles: 0, expandedCalls: 0 };
   }
 
-  const ailFilePaths = scanAilFiles(searchDir);
+  const aiceFilePaths = scanAiceFiles(searchDir);
 
   let expandedFiles = 0;
   let expandedCalls = 0;
 
-  for (const fp of ailFilePaths) {
+  for (const fp of aiceFilePaths) {
     try {
       const source = fs.readFileSync(fp, "utf-8");
-      const { ail, expandedCount } = expandAilSourceIdioms(
+      const { aice, expandedCount } = expandAiceSourceIdioms(
         source,
         config.idioms,
         fp,
@@ -3340,7 +3340,7 @@ export function expandProjectIdiomsInDirectory(
       if (expandedCount > 0) {
         expandedFiles++;
         expandedCalls += expandedCount;
-        fs.writeFileSync(fp, ail, "utf-8");
+        fs.writeFileSync(fp, aice, "utf-8");
       }
     } catch {
       // Ignore errors reading/writing individual files
@@ -3367,7 +3367,7 @@ export function formatIdiomsMarkdownSection(
   const raw = optionsOrIdioms as Record<string, unknown>;
   let idioms: Record<string, ProjectIdiomDefinition> | undefined;
 
-  if ("kind" in raw && "templateAil" in raw) {
+  if ("kind" in raw && "templateAice" in raw) {
     const single = optionsOrIdioms as ProjectIdiomDefinition;
     idioms = { [single.name]: single };
   } else if ("idioms" in raw && raw.idioms && typeof raw.idioms === "object") {
@@ -3392,7 +3392,7 @@ export function formatIdiomsMarkdownSection(
     if (seenNames.has(idiom.name)) continue;
     seenNames.add(idiom.name);
     const paramsStr = idiom.params.map((p) => p.name).join(", ");
-    const oneLineTemplate = idiom.templateAil.replace(/\r?\n\s*/g, " ; ");
+    const oneLineTemplate = idiom.templateAice.replace(/\r?\n\s*/g, " ; ");
     lines.push(
       `- \`${idiom.name}(${paramsStr})\` -> \`${oneLineTemplate}\` (saves ~${idiom.tokensPerOccurrenceSaved} tokens/use)`,
     );

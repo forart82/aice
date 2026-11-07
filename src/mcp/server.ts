@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 First-Class Model Context Protocol (MCP) Server.
- * Exposes token-optimized AI productivity tools (ail_context, ail_outline,
- * ail_splice, ail_idioms, ail_test) over JSON-RPC 2.0 stdio streams.
+ * AICE 2.0 First-Class Model Context Protocol (MCP) Server.
+ * Exposes token-optimized AI productivity tools (aice_context, aice_outline,
+ * aice_splice, aice_idioms, aice_test) over JSON-RPC 2.0 stdio streams.
  */
 
 import * as os from "node:os";
@@ -24,7 +24,7 @@ import {
   updateProjectIdiom,
 } from "../idioms/index.js";
 import { runSelfHealingCampaignSync } from "../evolve/index.js";
-import { runAilTests } from "../runner/index.js";
+import { runAiceTests } from "../runner/index.js";
 import { generateContext } from "../tools/context.js";
 import { outlinePath } from "../tools/outline.js";
 import { splice } from "../tools/splice.js";
@@ -39,17 +39,17 @@ export interface McpToolDefinition {
   };
 }
 
-export const AIL_MCP_TOOLS: McpToolDefinition[] = [
+export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
-    name: "ail_context",
+    name: "aice_context",
     description:
-      "Generate token-optimized AIL context bundle with target source/outline, dependency contracts, and downstream callers.",
+      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Target .ail or target language file path",
+          description: "Target .aice or target language file path",
         },
         symbol: {
           type: "string",
@@ -72,15 +72,15 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
-    name: "ail_outline",
+    name: "aice_outline",
     description:
-      "Generate structural skeleton outline of an .ail or native file or project directory achieving 85-90%+ token reduction.",
+      "Generate structural skeleton outline of an .aice or native file or project directory achieving 85-90%+ token reduction.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Path to .ail or native file or project directory",
+          description: "Path to .aice or native file or project directory",
         },
         idioms: {
           type: "boolean",
@@ -91,23 +91,23 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
-    name: "ail_splice",
+    name: "aice_splice",
     description:
-      "Surgically replace or insert a named symbol (fn, type, class, method) in a native or .ail file.",
+      "Surgically replace or insert a named symbol (fn, type, class, method) in a native or .aice file.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
-          description: "Path to target native or .ail file",
+          description: "Path to target native or .aice file",
         },
         symbolSelector: {
           type: "string",
           description: "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step')",
         },
-        newAilCode: {
+        newAiceCode: {
           type: "string",
-          description: "Replacement AIL or native code snippet",
+          description: "Replacement AICE or native code snippet",
         },
         delete: {
           type: "boolean",
@@ -118,7 +118,7 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
-    name: "ail_idioms",
+    name: "aice_idioms",
     description:
       "Scan, list, apply, expand, toggle (on/off), read, or update token-saving $idioms in a project workspace.",
     inputSchema: {
@@ -139,7 +139,7 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
         },
         code: {
           type: "string",
-          description: "New AIL template for 'update' action",
+          description: "New AICE template for 'update' action",
         },
         dryRun: {
           type: "boolean",
@@ -158,9 +158,9 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
-    name: "ail_test",
+    name: "aice_test",
     description:
-      "Execute AIL test suite with symbol-mapped error diagnostics and automatic staleness recompilation.",
+      "Execute AICE test suite with symbol-mapped error diagnostics and automatic staleness recompilation.",
     inputSchema: {
       type: "object",
       properties: {
@@ -176,9 +176,9 @@ export const AIL_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
-    name: "ail_evolve",
+    name: "aice_evolve",
     description:
-      "Run the AIL 5-Gate Differential Fuzzing & Autonomous Self-Healing Evolution Loop",
+      "Run the AICE 5-Gate Differential Fuzzing & Autonomous Self-Healing Evolution Loop",
     inputSchema: {
       type: "object",
       properties: {
@@ -211,7 +211,7 @@ export interface McpToolCallResult {
   isError?: boolean;
 }
 
-export class AilMcpServer {
+export class AiceMcpServer {
   private inStream?: Readable;
   private outStream?: Writable;
   private buffer = Buffer.alloc(0);
@@ -373,7 +373,7 @@ export class AilMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "ail-mcp", version: "0.7.16" },
+          serverInfo: { name: "aice-mcp", version: "0.8.0" },
         };
       }
 
@@ -382,7 +382,7 @@ export class AilMcpServer {
       }
 
       case "tools/list": {
-        return { tools: AIL_MCP_TOOLS };
+        return { tools: AICE_MCP_TOOLS };
       }
 
       case "tools/call": {
@@ -409,7 +409,7 @@ export class AilMcpServer {
     args: Record<string, unknown>,
   ): Promise<McpToolCallResult> {
     switch (name) {
-      case "ail_context": {
+      case "aice_context": {
         const targetPath = String(args.path ?? "");
         const fullPath = this.resolveSafePath(targetPath);
         const symbolFilter =
@@ -438,7 +438,7 @@ export class AilMcpServer {
           text +=
             `\n\n## Dependencies\n` +
             result.dependencies
-              .map((d) => `### ${d.specifier}\n\`\`\`ail\n${d.contract}\n\`\`\``)
+              .map((d) => `### ${d.specifier}\n\`\`\`aice\n${d.contract}\n\`\`\``)
               .join("\n\n");
         }
         if (callers && callers.length > 0) {
@@ -457,7 +457,7 @@ export class AilMcpServer {
         };
       }
 
-      case "ail_outline": {
+      case "aice_outline": {
         const targetPath = String(args.path ?? "");
         const fullPath = this.resolveSafePath(targetPath);
         const result = await outlinePath(fullPath, {
@@ -476,15 +476,15 @@ export class AilMcpServer {
         };
       }
 
-      case "ail_splice": {
+      case "aice_splice": {
         const filePath = this.resolveSafePath(String(args.filePath ?? ""));
         const symbolSelector = String(args.symbolSelector ?? "");
-        const newAilCode = typeof args.newAilCode === "string" ? args.newAilCode : "";
+        const newAiceCode = typeof args.newAiceCode === "string" ? args.newAiceCode : "";
         const deleteFlag = Boolean(args.delete);
 
         const result = await splice(filePath, {
           symbol: symbolSelector,
-          code: newAilCode,
+          code: newAiceCode,
           delete: deleteFlag,
           compile: true,
         });
@@ -511,7 +511,7 @@ export class AilMcpServer {
         };
       }
 
-      case "ail_idioms": {
+      case "aice_idioms": {
         const dir = this.resolveSafePath(String(args.dir ?? "."));
         const action = typeof args.action === "string" ? args.action : "list";
         const projectRoot = findProjectRoot(dir);
@@ -533,7 +533,7 @@ export class AilMcpServer {
         if (action === "read") {
           const idiomName = typeof args.name === "string" ? args.name : "";
           if (!idiomName) {
-            throw new Error("Must provide 'name' argument for ail_idioms 'read' action");
+            throw new Error("Must provide 'name' argument for aice_idioms 'read' action");
           }
           const readRes = readProjectIdiom(projectRoot, idiomName);
           return {
@@ -545,7 +545,7 @@ export class AilMcpServer {
           const idiomName = typeof args.name === "string" ? args.name : "";
           const code = typeof args.code === "string" ? args.code : "";
           if (!idiomName || !code) {
-            throw new Error("Must provide 'name' and 'code' arguments for ail_idioms 'update' action");
+            throw new Error("Must provide 'name' and 'code' arguments for aice_idioms 'update' action");
           }
           const updateRes = await updateProjectIdiom(projectRoot, idiomName, code, {
             dryRun: Boolean(args.dryRun),
@@ -612,14 +612,14 @@ export class AilMcpServer {
         throw new Error(`Unknown idiom action: ${action}`);
       }
 
-      case "ail_test": {
+      case "aice_test": {
         const target = typeof args.target === "string" ? args.target : undefined;
         if (target && target.startsWith("-")) {
           throw new Error("Invalid test target: must not start with '-'");
         }
         const resolvedTarget = target ? this.resolveSafePath(target) : undefined;
         const cwd = typeof args.cwd === "string" ? this.resolveSafePath(args.cwd) : undefined;
-        const res = await runAilTests(resolvedTarget, { cwd });
+        const res = await runAiceTests(resolvedTarget, { cwd });
         return {
           content: [
             {
@@ -635,7 +635,7 @@ export class AilMcpServer {
         };
       }
 
-      case "ail_evolve": {
+      case "aice_evolve": {
         const report = runSelfHealingCampaignSync({
           restarts: typeof args.restarts === "number" ? args.restarts : 1,
           cyclesPerRestart: typeof args.cycles === "number" ? args.cycles : 10,

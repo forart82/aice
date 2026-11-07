@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 AST Surgical Splice Engine (Step 19).
+ * AICE 2.0 AST Surgical Splice Engine (Step 19).
  * Enables surgical AST modifications achieving 90%+ output token reduction for AI contexts.
  */
 
@@ -45,7 +45,7 @@ import { TypeChecker } from "../typechecker/checker.js";
 export interface SpliceOptions {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'User.id') */
   symbol?: string;
-  /** Replacement AIL code snippet */
+  /** Replacement AICE code snippet */
   code?: string;
   /** If set, replaces only the body/statements of the function/method rather than the entire declaration signature */
   body?: string;
@@ -73,7 +73,7 @@ export interface BatchSpliceItem extends SpliceOptions {
   filePath: string;
   file?: string;
   path?: string;
-  ail?: string;
+  aice?: string;
   template?: string;
   snippet?: string;
   content?: string;
@@ -103,7 +103,7 @@ export interface SpliceResult {
   newSnippet?: string;
   diff?: string;
   modifiedCode: string;
-  newAilSource: string;
+  newAiceSource: string;
   tokensSaved?: number;
 }
 
@@ -557,7 +557,7 @@ export function generateUnifiedDiff(
 export function spliceSource(
   source: string,
   optionsOrSymbol: SpliceOptions | string,
-  filePathOrCode: string = "source.ail",
+  filePathOrCode: string = "source.aice",
   deleteFlag?: boolean,
   maybeFilePath?: string,
   maybeIdioms?: Record<string, ProjectIdiomDefinition>,
@@ -576,14 +576,14 @@ export function spliceSource(
       ...(isBodyOnly ? { body: codeStr } : { code: codeStr }),
       delete: Boolean(deleteFlag ?? extraOptions?.delete),
     };
-    filePath = maybeFilePath || "source.ail";
+    filePath = maybeFilePath || "source.aice";
   } else {
     options = optionsOrSymbol;
-    filePath = filePathOrCode || "source.ail";
+    filePath = filePathOrCode || "source.aice";
   }
 
   const ext = path.extname(filePath).toLowerCase();
-  if (!filePath.endsWith(".ail") && KNOWN_TARGET_EXTENSIONS.has(ext)) {
+  if (!filePath.endsWith(".aice") && KNOWN_TARGET_EXTENSIONS.has(ext)) {
     return spliceNativeSource(source, options, filePath, idioms);
   }
 
@@ -833,7 +833,7 @@ export function spliceSource(
     newSnippet,
     diff,
     modifiedCode,
-    newAilSource: modifiedCode,
+    newAiceSource: modifiedCode,
     tokensSaved,
   };
 }
@@ -2197,7 +2197,7 @@ function emitExpandedDeclForTarget(
 }
 
 /**
- * Surgically splices an already-expanded AIL FunctionDecl or MethodDecl into a native source string,
+ * Surgically splices an already-expanded AICE FunctionDecl or MethodDecl into a native source string,
  * preserving 100% bit-identical bytes before and after the target declaration.
  */
 export function spliceNativeSymbolFromExpandedAst(
@@ -2326,10 +2326,10 @@ function isPureNativeSnippetWithoutIdioms(
   return false;
 }
 
-function normalizeFrankensteinSnippetToAil(
+function normalizeFrankensteinSnippetToAice(
   snippet: string,
 ): {
-  normalizedAil: string;
+  normalizedAice: string;
   explicitVisibility?: "public" | "private" | "protected";
   isExported?: boolean;
   explicitAccessor?: "get" | "set";
@@ -2401,7 +2401,7 @@ function normalizeFrankensteinSnippetToAil(
   });
 
   return {
-    normalizedAil: normalizedLines.join("\n"),
+    normalizedAice: normalizedLines.join("\n"),
     explicitVisibility,
     isExported,
     explicitAccessor,
@@ -2418,7 +2418,7 @@ function convertFrankensteinToNativeForDecompile(
   if (targetLang === "python") {
     return lines
       .map((line, idx) => {
-        let out = line.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/g, "__ail_idiom__$1(");
+        let out = line.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/g, "__aice_idiom__$1(");
         if (idx === 0 && !isBodyOnly) {
           out = out.replace(/^(\s*)(?:pub\s+)?(async\s+)?fn\s+/, "$1$2def ");
         }
@@ -2451,11 +2451,11 @@ function convertFrankensteinToNativeForDecompile(
     .join("\n");
 }
 
-function restorePythonIdiomPlaceholders(ailSource: string): string {
-  return ailSource.replace(/__ail_idiom__([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
+function restorePythonIdiomPlaceholders(aiceSource: string): string {
+  return aiceSource.replace(/__aice_idiom__([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
 }
 
-function tryEmitNonCallableAilSnippet(
+function tryEmitNonCallableAiceSnippet(
   rawSnippet: string,
   filePath: string,
   targetLang: TargetLanguage,
@@ -2464,9 +2464,9 @@ function tryEmitNonCallableAilSnippet(
   isClassContainerTarget?: boolean,
 ): string | undefined {
   const trimmed = rawSnippet.trim();
-  const isNonCallableAil =
+  const isNonCallableAice =
     /^(?:pub\s+)?(?:type|rec|enum|interface|class|const|val|mut|component|style)\b/.test(trimmed);
-  if (!isNonCallableAil) return undefined;
+  if (!isNonCallableAice) return undefined;
 
   let normalizedNonCallable = trimmed;
   const braceTypeMatch = trimmed.match(
@@ -2526,15 +2526,15 @@ function parseSnippetToExpandedDecl(
   explicitAccessor?: "get" | "set";
   leadingDecorators: string[];
 } {
-  const { normalizedAil, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
-    normalizeFrankensteinSnippetToAil(rawSnippet);
+  const { normalizedAice, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
+    normalizeFrankensteinSnippetToAice(rawSnippet);
 
   let parsedMod: Module | undefined;
   let lastErr: unknown;
 
   // Attempt 1: Try parsing as a full function/method declaration (even if passed via -b/--body)
   try {
-    parsedMod = parse(normalizedAil, filePath);
+    parsedMod = parse(normalizedAice, filePath);
   } catch (err) {
     lastErr = err;
   }
@@ -2556,8 +2556,8 @@ function parseSnippetToExpandedDecl(
         .trim()
         .split("\n")
         .map((line) => line.replace(/^(\s*)return\b/, "$1ret"));
-      const wrappedBodyAil = `fn __body_holder__():\n${indentCode(bodyLines.join("\n"), "  ")}`;
-      const bodyMod = parse(wrappedBodyAil, filePath);
+      const wrappedBodyAice = `fn __body_holder__():\n${indentCode(bodyLines.join("\n"), "  ")}`;
+      const bodyMod = parse(wrappedBodyAice, filePath);
       const expandedBodyMod =
         idioms && Object.keys(idioms).length > 0
           ? expandModuleIdioms(bodyMod, idioms)
@@ -2576,8 +2576,8 @@ function parseSnippetToExpandedDecl(
             ? `def __body_holder__():\n${indentCode(nativeBody, "    ")}\n`
             : `function __body_holder__() {\n${indentCode(nativeBody, "  ")}\n}\n`;
         const decompBody = decompile(wrappedNativeBody, decompLang, { filePath });
-        const restoredAil = restorePythonIdiomPlaceholders(decompBody.ail);
-        const bodyMod = parse(restoredAil, filePath);
+        const restoredAice = restorePythonIdiomPlaceholders(decompBody.aice);
+        const bodyMod = parse(restoredAice, filePath);
         const expandedBodyMod =
           idioms && Object.keys(idioms).length > 0
             ? expandModuleIdioms(bodyMod, idioms)
@@ -2612,7 +2612,7 @@ function parseSnippetToExpandedDecl(
         }
 
         const origDecomp = decompile(wrappedOrig, targetLang, { filePath });
-        const origMod = parse(origDecomp.ail, filePath);
+        const origMod = parse(origDecomp.aice, filePath);
 
         for (const item of origMod.items) {
           if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
@@ -2662,8 +2662,8 @@ function parseSnippetToExpandedDecl(
           ? `class ${className} {\n${preparedNative}\n}`
           : preparedNative;
       const decomp = decompile(wrappedNative, decompLang, { filePath });
-      const restoredAil = restorePythonIdiomPlaceholders(decomp.ail);
-      parsedMod = parse(restoredAil, filePath);
+      const restoredAice = restorePythonIdiomPlaceholders(decomp.aice);
+      parsedMod = parse(restoredAice, filePath);
     } catch (decompErr) {
       throw new Error(
         `Syntax error in splice snippet for ${filePath}: ${lastErr instanceof Error ? lastErr.message : String(decompErr)}`,
@@ -2722,7 +2722,7 @@ function emitNativeSnippetForContext(
       rawSnippet,
     )
   ) {
-    const nonCallable = tryEmitNonCallableAilSnippet(
+    const nonCallable = tryEmitNonCallableAiceSnippet(
       rawSnippet,
       filePath,
       targetLang,
@@ -2787,10 +2787,10 @@ function spliceDialectNativeSource(
       ) {
         return trimmed;
       }
-      const ailText = trimmed.startsWith("style ")
+      const aiceText = trimmed.startsWith("style ")
         ? trimmed
         : `style ${selectorFallback}:\n${indentCode(trimmed, "  ")}`;
-      const mod = parse(ailText, filePath);
+      const mod = parse(aiceText, filePath);
       const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
       return emitTarget(expanded, "css", { watermark: false }).trim();
     };
@@ -2804,7 +2804,7 @@ function spliceDialectNativeSource(
         filePath,
         newSnippet: emitted,
         modifiedCode,
-        newAilSource: modifiedCode,
+        newAiceSource: modifiedCode,
         tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
       };
     }
@@ -2864,7 +2864,7 @@ function spliceDialectNativeSource(
       newSnippet,
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
-      newAilSource: modifiedCode,
+      newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
     };
   }
@@ -2934,7 +2934,7 @@ function spliceDialectNativeSource(
           newSnippet,
           diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
           modifiedCode,
-          newAilSource: modifiedCode,
+          newAiceSource: modifiedCode,
           tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
         };
       }
@@ -3011,7 +3011,7 @@ function spliceDialectNativeSource(
         newSnippet,
         diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
         modifiedCode,
-        newAilSource: modifiedCode,
+        newAiceSource: modifiedCode,
         tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
       };
     }
@@ -3044,7 +3044,7 @@ function spliceDialectNativeSource(
         newSnippet,
         diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
         modifiedCode,
-        newAilSource: modifiedCode,
+        newAiceSource: modifiedCode,
         tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
       };
     }
@@ -3117,7 +3117,7 @@ function spliceDialectNativeSource(
       newSnippet,
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
-      newAilSource: modifiedCode,
+      newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
     };
   }
@@ -3149,10 +3149,10 @@ function spliceDialectNativeSource(
       const hasTopLevelComponent = /^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(
         trimmed,
       );
-      const ailText = hasTopLevelComponent
+      const aiceText = hasTopLevelComponent
         ? trimmed
         : `component __Frag():\n${indentCode(trimmed, "  ")}`;
-      const mod = parse(ailText, filePath);
+      const mod = parse(aiceText, filePath);
       const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
       let emitted = emitTarget(expanded, targetLang, { watermark: false }).trim();
       if (targetLang === "html") {
@@ -3169,7 +3169,7 @@ function spliceDialectNativeSource(
         filePath,
         newSnippet: emitted,
         modifiedCode,
-        newAilSource: modifiedCode,
+        newAiceSource: modifiedCode,
         tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
       };
     }
@@ -3313,7 +3313,7 @@ function spliceDialectNativeSource(
       newSnippet,
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
-      newAilSource: modifiedCode,
+      newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
     };
   }
@@ -3368,7 +3368,7 @@ export function spliceNativeSource(
       newSnippet: emitted,
       diff,
       modifiedCode,
-      newAilSource: modifiedCode,
+      newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, modifiedTokens - snippetTokens),
     };
   }
@@ -3497,33 +3497,33 @@ export function spliceNativeSource(
     newSnippet,
     diff,
     modifiedCode,
-    newAilSource: modifiedCode,
+    newAiceSource: modifiedCode,
     tokensSaved,
   };
 }
 
 /**
  * Executes AST surgical splice on a file with optional atomic disk write and re-compilation.
- * Supports both `.ail` files and Twinless Direct-to-Native files (`.ts`, `.py`, etc. with zero `.ail` files on disk).
+ * Supports both `.aice` files and Twinless Direct-to-Native files (`.ts`, `.py`, etc. with zero `.aice` files on disk).
  */
 export async function splice(filePath: string, options: SpliceOptions = {}): Promise<SpliceResult> {
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
-  let targetAilPath = fullPath;
+  let targetAicePath = fullPath;
   let isTwinlessNative = false;
 
   if (!fs.existsSync(fullPath)) {
     throw new Error(`Source file not found: ${filePath}`);
   }
 
-  // If path is a non-.ail target file, check for companion .ail file
-  if (!fullPath.endsWith(".ail")) {
-    const companion = `${fullPath}.ail`;
-    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".ail");
+  // If path is a non-.aice target file, check for companion .aice file
+  if (!fullPath.endsWith(".aice")) {
+    const companion = `${fullPath}.aice`;
+    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".aice");
     if (fs.existsSync(companion)) {
-      targetAilPath = companion;
+      targetAicePath = companion;
     } else if (fs.existsSync(shortCompanion)) {
-      targetAilPath = shortCompanion;
+      targetAicePath = shortCompanion;
     } else {
       isTwinlessNative = true;
     }
@@ -3550,40 +3550,40 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
     return result;
   }
 
-  const originalSource = await fs.promises.readFile(targetAilPath, "utf-8");
-  const result = spliceSource(originalSource, options, targetAilPath);
+  const originalSource = await fs.promises.readFile(targetAicePath, "utf-8");
+  const result = spliceSource(originalSource, options, targetAicePath);
 
   // Write atomically to disk unless dryRun
   if (!options.dryRun) {
-    const dir = path.dirname(targetAilPath);
+    const dir = path.dirname(targetAicePath);
     const tmpFile = path.join(
       dir,
-      `.${path.basename(targetAilPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      `.${path.basename(targetAicePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
     await fs.promises.writeFile(tmpFile, result.modifiedCode, "utf-8");
-    await fs.promises.rename(tmpFile, targetAilPath);
+    await fs.promises.rename(tmpFile, targetAicePath);
   }
 
   // Automatically trigger compilation if requested
   if (options.compile) {
-    const resolvedTarget = resolveTargetOutputPathForConfig(targetAilPath, config, root);
+    const resolvedTarget = resolveTargetOutputPathForConfig(targetAicePath, config, root);
     const outPath = path.isAbsolute(resolvedTarget)
       ? resolvedTarget
       : path.resolve(root, resolvedTarget);
 
-    const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, targetAilPath);
+    const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, targetAicePath);
     const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
     const checker = new TypeChecker();
     checker.checkModule(expandedMod);
 
     let targetLang: TargetLanguage;
-    const base = path.basename(targetAilPath);
-    const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-    const innerExt = path.extname(withoutAil).toLowerCase();
+    const base = path.basename(targetAicePath);
+    const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+    const innerExt = path.extname(withoutAice).toLowerCase();
     if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-      targetLang = detectTargetFromPath(targetAilPath);
+      targetLang = detectTargetFromPath(targetAicePath);
     } else {
-      targetLang = config.targetLanguage ?? detectTargetFromPath(targetAilPath);
+      targetLang = config.targetLanguage ?? detectTargetFromPath(targetAicePath);
     }
 
     const emitted = emitTarget(expandedMod, targetLang, {
@@ -3618,7 +3618,7 @@ export async function spliceBatch(
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
       backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
-    const companion = `${fullPath}.ail`;
+    const companion = `${fullPath}.aice`;
     if (fs.existsSync(companion) && !backups.has(companion)) {
       backups.set(companion, fs.readFileSync(companion, "utf-8"));
     }
@@ -3632,7 +3632,7 @@ export async function spliceBatch(
       const rawFp = item.filePath || item.file || item.path || "";
       const resolvedCode =
         item.code ??
-        item.ail ??
+        item.aice ??
         item.template ??
         item.snippet ??
         item.content ??

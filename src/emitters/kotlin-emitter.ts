@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Kotlin 1.9 / 2.x Forward Transpiler & Mobile/Android Emitter for AIL 2.0.
- * Emits clean, modern Kotlin code from AIL Module AST:
+ * Idiomatic Kotlin 1.9 / 2.x Forward Transpiler & Mobile/Android Emitter for AICE 2.0.
+ * Emits clean, modern Kotlin code from AICE Module AST:
  *   - Package declaration & imports
  *   - Data classes for records and primary constructors
  *   - Standard classes, interfaces, enum classes, and objects
@@ -203,7 +203,7 @@ export class KotlinEmitter {
     if (!modPath || modPath === "<anonymous>" || modPath === "source" || modPath === "main") {
       return undefined;
     }
-    const clean = modPath.replace(/\.(kt|kts|ail)$/i, "").replace(/^[./\\]+/, "");
+    const clean = modPath.replace(/\.(kt|kts|aice)$/i, "").replace(/^[./\\]+/, "");
     const parts = clean.split(/[/\\]/);
     if (parts.length > 1) {
       parts.pop(); // remove file name
@@ -224,7 +224,7 @@ export class KotlinEmitter {
     }
     this.ctx.emitLeadingTrivia(nid);
 
-    let src = imp.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(kt|kts|ts|js|ail)$/, "");
+    let src = imp.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(kt|kts|ts|js|aice)$/, "");
     src = src.split(/[/\\]/).join(".");
 
     if (imp.specifiers.length === 0) {

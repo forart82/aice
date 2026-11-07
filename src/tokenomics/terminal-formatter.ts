@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Responsive Terminal Formatting Engine for AIL 2.0 Tokenomics CLI.
+ * Responsive Terminal Formatting Engine for AICE 2.0 Tokenomics CLI.
  * Dynamically adapts output to terminal width, provides ANSI color themes,
  * visual progress bars, and flicker-free character-exact Unicode box borders.
  */
@@ -151,9 +151,9 @@ export function formatSingleFileSummary(
   const o2Sign = f.o200kSavingsPct >= 0 ? "-" : "+";
   const chSign = f.charSavingsPct >= 0 ? "-" : "+";
 
-  const clRatio = f.ailCl100k > 0 ? (f.targetCl100k / f.ailCl100k).toFixed(2) : "1.00";
-  const o2Ratio = f.ailO200k > 0 ? (f.targetO200k / f.ailO200k).toFixed(2) : "1.00";
-  const charRatio = f.ailChars > 0 ? (f.targetChars / f.ailChars).toFixed(2) : "1.00";
+  const clRatio = f.aiceCl100k > 0 ? (f.targetCl100k / f.aiceCl100k).toFixed(2) : "1.00";
+  const o2Ratio = f.aiceO200k > 0 ? (f.targetO200k / f.aiceO200k).toFixed(2) : "1.00";
+  const charRatio = f.aiceChars > 0 ? (f.targetChars / f.aiceChars).toFixed(2) : "1.00";
 
   let driftStatus = t.gray("Not verified (run with --check-drift)");
   if (f.driftChecked) {
@@ -179,19 +179,19 @@ export function formatSingleFileSummary(
 
   const lines: string[] = [
     topBorder,
-    formatLine(`${t.brightCyan("◆")} ${t.bold(`AIL Token Efficiency Audit: ${f.file}`)}`),
+    formatLine(`${t.brightCyan("◆")} ${t.bold(`AICE Token Efficiency Audit: ${f.file}`)}`),
     midBorder,
     formatLine(
       `${t.gray("Target Language:".padEnd(24))} ${t.white(f.targetLang)}${f.project ? t.gray(` (Project: ${f.project})`) : ""}`,
     ),
     formatLine(
-      `${t.gray("Tokens (cl100k_base):".padEnd(24))} ${t.white(f.targetCl100k.toLocaleString())} ${t.dim("→")} ${t.white(f.ailCl100k.toLocaleString())}  ${formatSavingsBadge(f.cl100kSavingsPct, t)}  ${t.cyan(`(${clRatio}x density)`)}`,
+      `${t.gray("Tokens (cl100k_base):".padEnd(24))} ${t.white(f.targetCl100k.toLocaleString())} ${t.dim("→")} ${t.white(f.aiceCl100k.toLocaleString())}  ${formatSavingsBadge(f.cl100kSavingsPct, t)}  ${t.cyan(`(${clRatio}x density)`)}`,
     ),
     formatLine(
-      `${t.gray("Tokens (o200k_base):".padEnd(24))} ${t.white(f.targetO200k.toLocaleString())} ${t.dim("→")} ${t.white(f.ailO200k.toLocaleString())}  ${formatSavingsBadge(f.o200kSavingsPct, t)}  ${t.cyan(`(${o2Ratio}x density)`)}`,
+      `${t.gray("Tokens (o200k_base):".padEnd(24))} ${t.white(f.targetO200k.toLocaleString())} ${t.dim("→")} ${t.white(f.aiceO200k.toLocaleString())}  ${formatSavingsBadge(f.o200kSavingsPct, t)}  ${t.cyan(`(${o2Ratio}x density)`)}`,
     ),
     formatLine(
-      `${t.gray("Raw Characters:".padEnd(24))} ${t.white(f.targetChars.toLocaleString())} ${t.dim("→")} ${t.white(f.ailChars.toLocaleString())}  ${formatSavingsBadge(f.charSavingsPct, t)}  ${t.cyan(`(${charRatio}x density)`)}`,
+      `${t.gray("Raw Characters:".padEnd(24))} ${t.white(f.targetChars.toLocaleString())} ${t.dim("→")} ${t.white(f.aiceChars.toLocaleString())}  ${formatSavingsBadge(f.charSavingsPct, t)}  ${t.cyan(`(${charRatio}x density)`)}`,
     ),
     formatLine(
       `${t.gray("Savings Progress:".padEnd(24))} ${progressBar} ${formatSavingsBadge(f.cl100kSavingsPct, t)} tokens reduced`,
@@ -239,7 +239,7 @@ export function formatTokenomicsTerminalTable(
       { name: "File", width: fileWidth, align: "left" },
       { name: "Language", width: 10, align: "left" },
       { name: "Target Tok", width: 12, align: "right" },
-      { name: "AIL Tok", width: 11, align: "right" },
+      { name: "AICE Tok", width: 11, align: "right" },
       { name: "Savings", width: 10, align: "right" },
       { name: "Density", width: 9, align: "right" },
       { name: "Char Sav", width: 10, align: "right" },
@@ -253,7 +253,7 @@ export function formatTokenomicsTerminalTable(
       { name: "File", width: fileWidth, align: "left" },
       { name: "Language", width: 10, align: "left" },
       { name: "Target Tok", width: 11, align: "right" },
-      { name: "AIL Tok", width: 10, align: "right" },
+      { name: "AICE Tok", width: 10, align: "right" },
       { name: "Savings", width: 10, align: "right" },
       { name: "Density", width: 9, align: "right" },
     ];
@@ -266,7 +266,7 @@ export function formatTokenomicsTerminalTable(
     columns = [
       { name: "File", width: fileWidth, align: "left" },
       { name: "Target", width: 9, align: "right" },
-      { name: "AIL", width: 8, align: "right" },
+      { name: "AICE", width: 8, align: "right" },
       { name: "Savings", width: 9, align: "right" },
       { name: "Density", width: 8, align: "right" },
     ];
@@ -298,8 +298,8 @@ export function formatTokenomicsTerminalTable(
 
   // Title line
   const rawTitle = options.title
-    ? ` AIL 2.0 Token Efficiency Audit — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
-    : " AIL 2.0 Token Efficiency Audit ";
+    ? ` AICE 2.0 Token Efficiency Audit — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
+    : " AICE 2.0 Token Efficiency Audit ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
   lines.push(
     t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),
@@ -314,7 +314,7 @@ export function formatTokenomicsTerminalTable(
 
   // File rows
   for (const f of report.files) {
-    const density = f.ailCl100k > 0 ? `${(f.targetCl100k / f.ailCl100k).toFixed(2)}x` : "1.00x";
+    const density = f.aiceCl100k > 0 ? `${(f.targetCl100k / f.aiceCl100k).toFixed(2)}x` : "1.00x";
     const clSign = f.cl100kSavingsPct >= 0 ? "-" : "+";
     const clSavingsStr = `${clSign}${Math.abs(f.cl100kSavingsPct).toFixed(1)}%`;
     const chSign = f.charSavingsPct >= 0 ? "-" : "+";
@@ -329,7 +329,7 @@ export function formatTokenomicsTerminalTable(
           { text: f.file, color: t.white },
           { text: f.targetLang, color: t.gray },
           { text: f.targetCl100k.toLocaleString(), color: t.white },
-          { text: f.ailCl100k.toLocaleString(), color: t.white },
+          { text: f.aiceCl100k.toLocaleString(), color: t.white },
           { text: clSavingsStr, color: savingsColor },
           { text: density, color: t.cyan },
           { text: chSavingsStr, color: t.gray },
@@ -341,7 +341,7 @@ export function formatTokenomicsTerminalTable(
           { text: f.file, color: t.white },
           { text: f.targetLang, color: t.gray },
           { text: f.targetCl100k.toLocaleString(), color: t.white },
-          { text: f.ailCl100k.toLocaleString(), color: t.white },
+          { text: f.aiceCl100k.toLocaleString(), color: t.white },
           { text: clSavingsStr, color: savingsColor },
           { text: density, color: t.cyan },
         ]),
@@ -351,7 +351,7 @@ export function formatTokenomicsTerminalTable(
         renderCells([
           { text: f.file, color: t.white },
           { text: f.targetCl100k.toLocaleString(), color: t.white },
-          { text: f.ailCl100k.toLocaleString(), color: t.white },
+          { text: f.aiceCl100k.toLocaleString(), color: t.white },
           { text: clSavingsStr, color: savingsColor },
           { text: density, color: t.cyan },
         ]),
@@ -364,7 +364,7 @@ export function formatTokenomicsTerminalTable(
 
   const agg = report.aggregate;
   const totalDensity =
-    agg.ailCl100k > 0 ? `${(agg.targetCl100k / agg.ailCl100k).toFixed(2)}x` : "1.00x";
+    agg.aiceCl100k > 0 ? `${(agg.targetCl100k / agg.aiceCl100k).toFixed(2)}x` : "1.00x";
   const totClSign = agg.cl100kSavingsPct >= 0 ? "-" : "+";
   const totClSavingsStr = `${totClSign}${Math.abs(agg.cl100kSavingsPct).toFixed(1)}%`;
   const totChSign = agg.charSavingsPct >= 0 ? "-" : "+";
@@ -382,7 +382,7 @@ export function formatTokenomicsTerminalTable(
         { text: totalLabel, color: t.bold },
         { text: "Aggregated", color: t.dim },
         { text: agg.targetCl100k.toLocaleString(), color: t.bold },
-        { text: agg.ailCl100k.toLocaleString(), color: t.bold },
+        { text: agg.aiceCl100k.toLocaleString(), color: t.bold },
         { text: totClSavingsStr, color: totSavingsColor },
         { text: totalDensity, color: t.brightCyan },
         { text: totChSavingsStr, color: t.gray },
@@ -394,7 +394,7 @@ export function formatTokenomicsTerminalTable(
         { text: totalLabel, color: t.bold },
         { text: "Aggregated", color: t.dim },
         { text: agg.targetCl100k.toLocaleString(), color: t.bold },
-        { text: agg.ailCl100k.toLocaleString(), color: t.bold },
+        { text: agg.aiceCl100k.toLocaleString(), color: t.bold },
         { text: totClSavingsStr, color: totSavingsColor },
         { text: totalDensity, color: t.brightCyan },
       ]),
@@ -404,7 +404,7 @@ export function formatTokenomicsTerminalTable(
       renderCells([
         { text: totalLabel, color: t.bold },
         { text: agg.targetCl100k.toLocaleString(), color: t.bold },
-        { text: agg.ailCl100k.toLocaleString(), color: t.bold },
+        { text: agg.aiceCl100k.toLocaleString(), color: t.bold },
         { text: totClSavingsStr, color: totSavingsColor },
         { text: totalDensity, color: t.brightCyan },
       ]),
@@ -444,9 +444,9 @@ export function formatProjectsTerminalTable(
     targetLang: string;
     fileCount: number;
     targetChars: number;
-    ailChars: number;
+    aiceChars: number;
     targetCl100k: number;
-    ailCl100k: number;
+    aiceCl100k: number;
     cl100kSavingsPct: number;
   }
 
@@ -460,18 +460,18 @@ export function formatProjectsTerminalTable(
         targetLang: f.targetLang,
         fileCount: 0,
         targetChars: 0,
-        ailChars: 0,
+        aiceChars: 0,
         targetCl100k: 0,
-        ailCl100k: 0,
+        aiceCl100k: 0,
         cl100kSavingsPct: 0,
       };
       projectMap.set(proj, entry);
     }
     entry.fileCount++;
     entry.targetChars += f.targetChars;
-    entry.ailChars += f.ailChars;
+    entry.aiceChars += f.aiceChars;
     entry.targetCl100k += f.targetCl100k;
-    entry.ailCl100k += f.ailCl100k;
+    entry.aiceCl100k += f.aiceCl100k;
     if (entry.targetLang !== f.targetLang) {
       entry.targetLang = "Polyglot";
     }
@@ -482,7 +482,7 @@ export function formatProjectsTerminalTable(
   );
   for (const p of projects) {
     p.cl100kSavingsPct =
-      p.targetCl100k > 0 ? ((p.targetCl100k - p.ailCl100k) / p.targetCl100k) * 100 : 0;
+      p.targetCl100k > 0 ? ((p.targetCl100k - p.aiceCl100k) / p.targetCl100k) * 100 : 0;
   }
 
   const fixedWidth = 10 + 6 + 11 + 10 + 9 + 8; // 54
@@ -495,7 +495,7 @@ export function formatProjectsTerminalTable(
     { name: "Language", width: 10, align: "left" },
     { name: "Files", width: 6, align: "right" },
     { name: "Target Tok", width: 11, align: "right" },
-    { name: "AIL Tok", width: 10, align: "right" },
+    { name: "AICE Tok", width: 10, align: "right" },
     { name: "Savings", width: 9, align: "right" },
     { name: "Density", width: 8, align: "right" },
   ];
@@ -525,8 +525,8 @@ export function formatProjectsTerminalTable(
   const lines: string[] = [];
 
   const rawTitle = options.title
-    ? ` AIL 2.0 Project Tokenomics Summary — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
-    : " AIL 2.0 Project Tokenomics Summary ";
+    ? ` AICE 2.0 Project Tokenomics Summary — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
+    : " AICE 2.0 Project Tokenomics Summary ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
   lines.push(
     t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),
@@ -536,7 +536,7 @@ export function formatProjectsTerminalTable(
   lines.push(midBorder);
 
   for (const p of projects) {
-    const density = p.ailCl100k > 0 ? `${(p.targetCl100k / p.ailCl100k).toFixed(2)}x` : "1.00x";
+    const density = p.aiceCl100k > 0 ? `${(p.targetCl100k / p.aiceCl100k).toFixed(2)}x` : "1.00x";
     const clSign = p.cl100kSavingsPct >= 0 ? "-" : "+";
     const clSavingsStr = `${clSign}${Math.abs(p.cl100kSavingsPct).toFixed(1)}%`;
     const savingsColor =
@@ -548,7 +548,7 @@ export function formatProjectsTerminalTable(
         { text: p.targetLang, color: t.gray },
         { text: p.fileCount.toString(), color: t.white },
         { text: p.targetCl100k.toLocaleString(), color: t.white },
-        { text: p.ailCl100k.toLocaleString(), color: t.white },
+        { text: p.aiceCl100k.toLocaleString(), color: t.white },
         { text: clSavingsStr, color: savingsColor },
         { text: density, color: t.cyan },
       ]),
@@ -559,7 +559,7 @@ export function formatProjectsTerminalTable(
 
   const agg = report.aggregate;
   const totalDensity =
-    agg.ailCl100k > 0 ? `${(agg.targetCl100k / agg.ailCl100k).toFixed(2)}x` : "1.00x";
+    agg.aiceCl100k > 0 ? `${(agg.targetCl100k / agg.aiceCl100k).toFixed(2)}x` : "1.00x";
   const totClSign = agg.cl100kSavingsPct >= 0 ? "-" : "+";
   const totClSavingsStr = `${totClSign}${Math.abs(agg.cl100kSavingsPct).toFixed(1)}%`;
   const totSavingsColor =
@@ -578,7 +578,7 @@ export function formatProjectsTerminalTable(
       { text: "Polyglot", color: t.dim },
       { text: report.files.length.toString(), color: t.bold },
       { text: agg.targetCl100k.toLocaleString(), color: t.bold },
-      { text: agg.ailCl100k.toLocaleString(), color: t.bold },
+      { text: agg.aiceCl100k.toLocaleString(), color: t.bold },
       { text: totClSavingsStr, color: totSavingsColor },
       { text: totalDensity, color: t.brightCyan },
     ]),

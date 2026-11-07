@@ -33,28 +33,28 @@ export const FUZZ_TARGET_LANGUAGES: TargetLanguage[] = [
   "csharp",
 ];
 
-export interface FuzzAilProgram {
+export interface FuzzAiceProgram {
   name: string;
-  ailSource: string;
+  aiceSource: string;
   target: TargetLanguage;
   entryCallExpr?: string;
 }
 
-export interface HallucinatedAilProgram {
+export interface HallucinatedAiceProgram {
   name: string;
-  brokenAilSource: string;
+  brokenAiceSource: string;
   faultKind: string;
 }
 
 /**
- * Synthesizes Level-2 ultra-complex, recursively-combinator AIL programs
+ * Synthesizes Level-2 ultra-complex, recursively-combinator AICE programs
  * with nested arithmetic/boolean expressions, loops, try/catch, match/case, classes,
  * repetitive blocks for idiom mining, and exposing deterministic entry `pub fn computeMain(x: int, y: int) -> int`.
  */
-export function generateRecursiveAilProgram(
+export function generateRecursiveAiceProgram(
   seed: number,
   maxDepth = 3,
-): FuzzAilProgram & { entryCallExpr: string } {
+): FuzzAiceProgram & { entryCallExpr: string } {
   const prng = mulberry32(seed);
   const targetIndex = Math.abs(seed) % FUZZ_TARGET_LANGUAGES.length;
   const target = FUZZ_TARGET_LANGUAGES[targetIndex];
@@ -74,7 +74,7 @@ export function generateRecursiveAilProgram(
 
   const expr1 = genExpr(maxDepth, ["x", "y", "total"]);
 
-  const ailSource = `class Acc:
+  const aiceSource = `class Acc:
   val: int
 
   fn constructor(init: int):
@@ -115,16 +115,16 @@ pub fn computeMain(x: int, y: int) -> int:
   return res + stepB(x)
 `;
 
-  return { name, ailSource, target, entryCallExpr: "computeMain(x, y)" };
+  return { name, aiceSource, target, entryCallExpr: "computeMain(x, y)" };
 }
 
 /**
- * Generates diverse, valid AIL programs containing varied combinations of
+ * Generates diverse, valid AICE programs containing varied combinations of
  * records, enums, classes, functions, loops, and repetitive statement blocks (for idiom mining).
  */
-export function generateFuzzAilProgram(seed: number): FuzzAilProgram {
+export function generateFuzzAiceProgram(seed: number): FuzzAiceProgram {
   if (Math.abs(seed) % 2 === 1) {
-    return generateRecursiveAilProgram(seed, 3);
+    return generateRecursiveAiceProgram(seed, 3);
   }
 
   const prng = mulberry32(seed);
@@ -136,12 +136,12 @@ export function generateFuzzAilProgram(seed: number): FuzzAilProgram {
   const factor = 2 + Math.floor(prng() * 5);
 
   let name = `fuzz_${seed}`;
-  let ailSource = "";
+  let aiceSource = "";
 
   switch (archetype) {
     case 0: {
       name = `fuzz_math_stats_${seed}`;
-      ailSource = `type Range = { minVal: int, maxVal: int }
+      aiceSource = `type Range = { minVal: int, maxVal: int }
 
 pub fn clampA(val: int, minVal: int, maxVal: int) -> int:
   if val < minVal:
@@ -182,7 +182,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 1: {
       name = `fuzz_ecommerce_${seed}`;
-      ailSource = `enum Tier:
+      aiceSource = `enum Tier:
   Bronze
   Silver
   Gold
@@ -236,7 +236,7 @@ pub fn computeMain(x: int, y: int) -> int {
 
     case 2: {
       name = `fuzz_geometry_${seed}`;
-      ailSource = `type Point = { x: int, y: int }
+      aiceSource = `type Point = { x: int, y: int }
 type Rect = { x: int, y: int, w: int, h: int }
 
 pub fn containsA(px: int, py: int, rx: int, ry: int) -> bool:
@@ -275,7 +275,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 3: {
       name = `fuzz_task_pipeline_${seed}`;
-      ailSource = `enum Status:
+      aiceSource = `enum Status:
   Ready
   Running
   Success
@@ -322,7 +322,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 4: {
       name = `fuzz_game_entity_${seed}`;
-      ailSource = `class Entity {
+      aiceSource = `class Entity {
   id: int
   health: int
 
@@ -366,7 +366,7 @@ pub fn computeMain(x: int, y: int) -> int {
 
     case 5: {
       name = `fuzz_event_log_${seed}`;
-      ailSource = `enum LogLevel:
+      aiceSource = `enum LogLevel:
   Debug
   Info
   Warn
@@ -406,7 +406,7 @@ pub fn computeMain(x: int, y: int) -> int:
     }
     case 6: {
       name = `fuzz_match_status_${seed}`;
-      ailSource = `pub fn evalStatus(c: int) -> int:
+      aiceSource = `pub fn evalStatus(c: int) -> int:
   match c:
     case 1 =>
       return ${baseVal}
@@ -424,7 +424,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 7: {
       name = `fuzz_array_iter_${seed}`;
-      ailSource = `pub fn sumList(items: [int]) -> int:
+      aiceSource = `pub fn sumList(items: [int]) -> int:
   let mut total = ${baseVal}
   for item in items:
     total = total + item
@@ -439,7 +439,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 8: {
       name = `fuzz_string_csl_${seed}`;
-      ailSource = `pub fn procStr(s: str) -> bool:
+      aiceSource = `pub fn procStr(s: str) -> bool:
   let c = s.trim()
   if c.startsWith("prefix_${baseVal}"):
     return true
@@ -459,7 +459,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 9: {
       name = `fuzz_opt_result_${seed}`;
-      ailSource = `pub fn parseScore(v: int?) -> Result[int, str]:
+      aiceSource = `pub fn parseScore(v: int?) -> Result[int, str]:
   if v != nil:
     return Ok(v)
   return Err("no score")
@@ -477,7 +477,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 10: {
       name = `fuzz_multi_param_idiom_${seed}`;
-      ailSource = `pub fn checkBoundsA(x: int, y: int) -> bool:
+      aiceSource = `pub fn checkBoundsA(x: int, y: int) -> bool:
   if x < ${baseVal}:
     return false
   if y > ${baseVal * factor}:
@@ -509,7 +509,7 @@ pub fn computeMain(x: int, y: int) -> int:
 
     case 11: {
       name = `fuzz_while_nested_if_${seed}`;
-      ailSource = `pub fn countAccum(lim: int) -> int:
+      aiceSource = `pub fn countAccum(lim: int) -> int:
   let mut s = ${baseVal}
   let mut i = 0
   while i < lim:
@@ -529,14 +529,14 @@ pub fn computeMain(x: int, y: int) -> int:
     }
   }
 
-  return { name, ailSource, target, entryCallExpr: "computeMain(x, y)" };
+  return { name, aiceSource, target, entryCallExpr: "computeMain(x, y)" };
 }
 
 /**
- * Generates broken/hallucinated AIL programs with specific fault kinds
+ * Generates broken/hallucinated AICE programs with specific fault kinds
  * to exercise the autonomous self-repair engine.
  */
-export function generateHallucinatedAilProgram(seed: number): HallucinatedAilProgram {
+export function generateHallucinatedAiceProgram(seed: number): HallucinatedAiceProgram {
   const faultIndex = Math.abs(seed) % 14;
   const val = 10 + (Math.abs(seed) % 50);
 
@@ -545,98 +545,98 @@ export function generateHallucinatedAilProgram(seed: number): HallucinatedAilPro
       return {
         name: `broken_let_reassign_${seed}`,
         faultKind: "immutable_reassignment_let",
-        brokenAilSource: `fn test_${seed}() -> int {\n  let x = ${val};\n  x = ${val + 10};\n  return x;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  let x = ${val};\n  x = ${val + 10};\n  return x;\n}`,
       };
 
     case 1:
       return {
         name: `broken_walrus_reassign_${seed}`,
         faultKind: "immutable_reassignment_walrus",
-        brokenAilSource: `fn test_${seed}() -> int {\n  x := ${val};\n  x = ${val + 10};\n  return x;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  x := ${val};\n  x = ${val + 10};\n  return x;\n}`,
       };
 
     case 2:
       return {
         name: `broken_const_reassign_${seed}`,
         faultKind: "immutable_reassignment_const",
-        brokenAilSource: `fn test_${seed}() -> int {\n  const x = ${val};\n  x = ${val + 10};\n  return x;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  const x = ${val};\n  x = ${val + 10};\n  return x;\n}`,
       };
 
     case 3:
       return {
         name: `broken_div_zero_${seed}`,
         faultKind: "division_by_zero",
-        brokenAilSource: `fn test_${seed}() -> int {\n  let x = ${val} / 0;\n  return x;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  let x = ${val} / 0;\n  return x;\n}`,
       };
 
     case 4:
       return {
         name: `broken_if_int_${seed}`,
         faultKind: "non_boolean_condition_int",
-        brokenAilSource: `fn test_${seed}(count: int) -> int {\n  if count: {\n    return 1;\n  }\n  return 0;\n}`,
+        brokenAiceSource: `fn test_${seed}(count: int) -> int {\n  if count: {\n    return 1;\n  }\n  return 0;\n}`,
       };
 
     case 5:
       return {
         name: `broken_unhandled_result_${seed}`,
         faultKind: "unhandled_result",
-        brokenAilSource: `fn fetch_${seed}() -> Result[int, str] = Ok(${val});\nfn test_${seed}() -> Result[int, str] {\n  let val: int = fetch_${seed}();\n  return Ok(val);\n}`,
+        brokenAiceSource: `fn fetch_${seed}() -> Result[int, str] = Ok(${val});\nfn test_${seed}() -> Result[int, str] {\n  let val: int = fetch_${seed}();\n  return Ok(val);\n}`,
       };
 
     case 6:
       return {
         name: `broken_js_triple_eq_${seed}`,
         faultKind: "js_triple_eq",
-        brokenAilSource: `fn test_${seed}(a: int, b: int) -> bool {\n  let res = a === b;\n  return res;\n}`,
+        brokenAiceSource: `fn test_${seed}(a: int, b: int) -> bool {\n  let res = a === b;\n  return res;\n}`,
       };
 
     case 7:
       return {
         name: `broken_js_not_triple_eq_${seed}`,
         faultKind: "js_not_triple_eq",
-        brokenAilSource: `fn test_${seed}(a: int, b: int) -> bool {\n  let res = a !== b;\n  return res;\n}`,
+        brokenAiceSource: `fn test_${seed}(a: int, b: int) -> bool {\n  let res = a !== b;\n  return res;\n}`,
       };
 
     case 8:
       return {
         name: `broken_js_null_${seed}`,
         faultKind: "js_null",
-        brokenAilSource: `fn test_${seed}() -> int {\n  let x = null;\n  return 0;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  let x = null;\n  return 0;\n}`,
       };
 
     case 9:
       return {
         name: `broken_compound_const_if_${seed}`,
         faultKind: "compound_const_and_non_bool_if",
-        brokenAilSource: `fn test_${seed}() -> int {\n  const x = ${val};\n  if x: {\n    x = x + 1;\n  }\n  return x;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  const x = ${val};\n  if x: {\n    x = x + 1;\n  }\n  return x;\n}`,
       };
 
     case 10:
       return {
         name: `broken_compound_walrus_eq_div_${seed}`,
         faultKind: "compound_walrus_and_triple_eq_and_div_zero",
-        brokenAilSource: `fn test_${seed}() -> int {\n  a := ${val};\n  if a === ${val}: {\n    a = ${val} / 0;\n  }\n  return a;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  a := ${val};\n  if a === ${val}: {\n    a = ${val} / 0;\n  }\n  return a;\n}`,
       };
 
     case 11:
       return {
         name: `broken_compound_null_neq_${seed}`,
         faultKind: "compound_null_and_not_triple_eq",
-        brokenAilSource: `fn test_${seed}() -> int {\n  let x: int? = null;\n  if x !== nil: {\n    return 1;\n  }\n  return 0;\n}`,
+        brokenAiceSource: `fn test_${seed}() -> int {\n  let x: int? = null;\n  if x !== nil: {\n    return 1;\n  }\n  return 0;\n}`,
       };
 
     case 12:
       return {
         name: `broken_compound_let_result_${seed}`,
         faultKind: "compound_let_and_unhandled_result",
-        brokenAilSource: `fn fetch_${seed}() -> Result[int, str] = Ok(${val});\nfn test_${seed}() -> Result[int, str] {\n  let x: int = fetch_${seed}();\n  x = x + 1;\n  return Ok(x);\n}`,
+        brokenAiceSource: `fn fetch_${seed}() -> Result[int, str] = Ok(${val});\nfn test_${seed}() -> Result[int, str] {\n  let x: int = fetch_${seed}();\n  x = x + 1;\n  return Ok(x);\n}`,
       };
 
     default:
       return {
         name: `broken_compound_triple_eq_div_${seed}`,
         faultKind: "compound_triple_eq_and_div_zero",
-        brokenAilSource: `fn test_${seed}(a: int) -> int {\n  let mut res = ${val} / 0;\n  if a === ${val}: {\n    return res;\n  }\n  return 0;\n}`,
+        brokenAiceSource: `fn test_${seed}(a: int) -> int {\n  let mut res = ${val} / 0;\n  if a === ${val}: {\n    return res;\n  }\n  return 0;\n}`,
       };
   }
 }

@@ -11,7 +11,7 @@ describe("Cross-File Module Symbol Resolution in TypeChecker", () => {
   let tempDir: string;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-cross-file-test-"));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cross-file-test-"));
   });
 
   afterEach(() => {
@@ -24,11 +24,11 @@ describe("Cross-File Module Symbol Resolution in TypeChecker", () => {
 
   describe("Requirement 1: Typed Function Imports", () => {
     it("passes typechecking for valid function call imported from ./tax", () => {
-      const taxAil = `
+      const taxAice = `
 pub fn calculateTax(amount: float, rate: float) -> float:
   return amount * rate
 `;
-      fs.writeFileSync(path.join(tempDir, "tax.ail"), taxAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "tax.aice"), taxAice, "utf-8");
 
       const checkoutSrc = `
 from "./tax" import { calculateTax }
@@ -36,7 +36,7 @@ from "./tax" import { calculateTax }
 fn processOrder():
   let t: float = calculateTax(100.0, 0.2)
 `;
-      const checkoutFile = path.join(tempDir, "checkout.ail");
+      const checkoutFile = path.join(tempDir, "checkout.aice");
       fs.writeFileSync(checkoutFile, checkoutSrc, "utf-8");
 
       const mod = parse(checkoutSrc, checkoutFile);
@@ -44,12 +44,12 @@ fn processOrder():
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
 
-    it("rejects wrong argument types for imported functions with AIL_E2002_TYPE_MISMATCH", () => {
-      const taxAil = `
+    it("rejects wrong argument types for imported functions with AICE_E2002_TYPE_MISMATCH", () => {
+      const taxAice = `
 pub fn calculateTax(amount: float, rate: float) -> float:
   return amount * rate
 `;
-      fs.writeFileSync(path.join(tempDir, "tax.ail"), taxAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "tax.aice"), taxAice, "utf-8");
 
       const checkoutSrc = `
 from "./tax" import { calculateTax }
@@ -57,7 +57,7 @@ from "./tax" import { calculateTax }
 fn processOrder():
   calculateTax("wrong", 0.2)
 `;
-      const checkoutFile = path.join(tempDir, "checkout.ail");
+      const checkoutFile = path.join(tempDir, "checkout.aice");
       fs.writeFileSync(checkoutFile, checkoutSrc, "utf-8");
 
       const mod = parse(checkoutSrc, checkoutFile);
@@ -67,16 +67,16 @@ fn processOrder():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
 
-    it("rejects wrong argument counts for imported functions with AIL_E2013_ARGUMENT_COUNT_MISMATCH", () => {
-      const taxAil = `
+    it("rejects wrong argument counts for imported functions with AICE_E2013_ARGUMENT_COUNT_MISMATCH", () => {
+      const taxAice = `
 pub fn calculateTax(amount: float, rate: float) -> float:
   return amount * rate
 `;
-      fs.writeFileSync(path.join(tempDir, "tax.ail"), taxAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "tax.aice"), taxAice, "utf-8");
 
       const checkoutSrc = `
 from "./tax" import { calculateTax }
@@ -84,7 +84,7 @@ from "./tax" import { calculateTax }
 fn processOrder():
   calculateTax(100.0)
 `;
-      const checkoutFile = path.join(tempDir, "checkout.ail");
+      const checkoutFile = path.join(tempDir, "checkout.aice");
       fs.writeFileSync(checkoutFile, checkoutSrc, "utf-8");
 
       const mod = parse(checkoutSrc, checkoutFile);
@@ -94,16 +94,16 @@ fn processOrder():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2013_ARGUMENT_COUNT_MISMATCH");
+        expect(e.code).toBe("AICE_E2013_ARGUMENT_COUNT_MISMATCH");
       }
     });
 
-    it("propagates return types and rejects incompatible assignments with AIL_E2002_TYPE_MISMATCH", () => {
-      const taxAil = `
+    it("propagates return types and rejects incompatible assignments with AICE_E2002_TYPE_MISMATCH", () => {
+      const taxAice = `
 pub fn calculateTax(amount: float, rate: float) -> float:
   return amount * rate
 `;
-      fs.writeFileSync(path.join(tempDir, "tax.ail"), taxAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "tax.aice"), taxAice, "utf-8");
 
       const checkoutSrc = `
 from "./tax" import { calculateTax }
@@ -111,7 +111,7 @@ from "./tax" import { calculateTax }
 fn processOrder():
   let label: str = calculateTax(100.0, 0.2)
 `;
-      const checkoutFile = path.join(tempDir, "checkout.ail");
+      const checkoutFile = path.join(tempDir, "checkout.aice");
       fs.writeFileSync(checkoutFile, checkoutSrc, "utf-8");
 
       const mod = parse(checkoutSrc, checkoutFile);
@@ -121,14 +121,14 @@ fn processOrder():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
   });
 
   describe("Requirement 2: Record and Class Imports", () => {
     it("imports type User and class OrderService across files with valid field and method access", () => {
-      const modelsAil = `
+      const modelsAice = `
 type User:
   name: str
   age: int
@@ -140,7 +140,7 @@ class OrderService:
   fn getOrder(id: int) -> str:
     return this.prefix + str(id)
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ts.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.ts.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models.ts" import { User, OrderService }
@@ -153,7 +153,7 @@ fn main():
   let pfx: str = svc.prefix
   let ord: str = svc.getOrder(101)
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -162,13 +162,13 @@ fn main():
     });
 
     it("verifies constructor argument typechecking for imported classes", () => {
-      const modelsAil = `
+      const modelsAice = `
 class OrderService:
   prefix: str
   fn constructor(prefix: str):
     this.prefix = prefix
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models" import { OrderService }
@@ -176,7 +176,7 @@ from "./models" import { OrderService }
 fn main():
   let svc = OrderService(12345)
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -186,17 +186,17 @@ fn main():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
 
     it("verifies constructor argument count checking for imported types", () => {
-      const modelsAil = `
+      const modelsAice = `
 type User:
   name: str
   age: int
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models" import { User }
@@ -204,7 +204,7 @@ from "./models" import { User }
 fn main():
   let u = User("Alice")
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -214,17 +214,17 @@ fn main():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2013_ARGUMENT_COUNT_MISMATCH");
+        expect(e.code).toBe("AICE_E2013_ARGUMENT_COUNT_MISMATCH");
       }
     });
 
     it("rejects invalid field access types on imported record instances", () => {
-      const modelsAil = `
+      const modelsAice = `
 type User:
   name: str
   age: int
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models" import { User }
@@ -233,7 +233,7 @@ fn main():
   let u = User("Alice", 30)
   let wrong: str = u.age
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -243,17 +243,17 @@ fn main():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
 
     it("rejects unknown property access on imported record instances", () => {
-      const modelsAil = `
+      const modelsAice = `
 type User:
   name: str
   age: int
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models" import { User }
@@ -262,7 +262,7 @@ fn main():
   let u = User("Alice", 30)
   let x = u.unknownProperty
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -272,12 +272,12 @@ fn main():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2011_UNKNOWN_PROPERTY");
+        expect(e.code).toBe("AICE_E2011_UNKNOWN_PROPERTY");
       }
     });
 
     it("verifies method argument typechecking on imported class instances", () => {
-      const modelsAil = `
+      const modelsAice = `
 class OrderService:
   prefix: str
   fn constructor(prefix: str):
@@ -285,7 +285,7 @@ class OrderService:
   fn getOrder(id: int) -> str:
     return this.prefix + str(id)
 `;
-      fs.writeFileSync(path.join(tempDir, "models.ail"), modelsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "models.aice"), modelsAice, "utf-8");
 
       const mainSrc = `
 from "./models" import { OrderService }
@@ -294,7 +294,7 @@ fn main():
   let svc = OrderService("ORD-")
   let code = svc.getOrder("not-an-int")
 `;
-      const mainFile = path.join(tempDir, "main.ail");
+      const mainFile = path.join(tempDir, "main.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -304,18 +304,18 @@ fn main():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
   });
 
   describe("Requirement 3: Aliased Imports and Cyclic Imports", () => {
     it("correctly binds aliased imports and keeps original name undeclared", () => {
-      const mathAil = `
+      const mathAice = `
 pub fn add(a: int, b: int) -> int:
   return a + b
 `;
-      fs.writeFileSync(path.join(tempDir, "math.ail"), mathAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "math.aice"), mathAice, "utf-8");
 
       const validSrc = `
 from "./math" import { add as sumValues }
@@ -323,7 +323,7 @@ from "./math" import { add as sumValues }
 fn calculate():
   let total: int = sumValues(10, 20)
 `;
-      const validFile = path.join(tempDir, "valid.ail");
+      const validFile = path.join(tempDir, "valid.aice");
       fs.writeFileSync(validFile, validSrc, "utf-8");
 
       const mod = parse(validSrc, validFile);
@@ -337,7 +337,7 @@ from "./math" import { add as sumValues }
 fn calculate():
   add(10, 20)
 `;
-      const invalidFile = path.join(tempDir, "invalid.ail");
+      const invalidFile = path.join(tempDir, "invalid.aice");
       fs.writeFileSync(invalidFile, invalidSrc, "utf-8");
 
       const invMod = parse(invalidSrc, invalidFile);
@@ -346,7 +346,7 @@ fn calculate():
         new TypeChecker().checkModule(invMod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2008_UNDECLARED_VARIABLE");
+        expect(e.code).toBe("AICE_E2008_UNDECLARED_VARIABLE");
       }
     });
 
@@ -363,10 +363,10 @@ from "./a" import { aFn }
 pub fn bFn() -> int:
   return 2
 `;
-      fs.writeFileSync(path.join(tempDir, "a.ail"), aSrc, "utf-8");
-      fs.writeFileSync(path.join(tempDir, "b.ail"), bSrc, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "a.aice"), aSrc, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "b.aice"), bSrc, "utf-8");
 
-      const aFile = path.join(tempDir, "a.ail");
+      const aFile = path.join(tempDir, "a.aice");
       const mod = parse(aSrc, aFile);
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
@@ -382,7 +382,7 @@ fn test():
   anything(1, 2, "three")
   let x = anotherThing.foo.bar
 `;
-      const filePath = path.join(tempDir, "test.ail");
+      const filePath = path.join(tempDir, "test.aice");
       fs.writeFileSync(filePath, src, "utf-8");
 
       const mod = parse(src, filePath);
@@ -391,11 +391,11 @@ fn test():
     });
 
     it("falls back to TYPE_UNKNOWN for unexported symbols from an existing file", () => {
-      const existingAil = `
+      const existingAice = `
 pub fn existingFn() -> int:
   return 42
 `;
-      fs.writeFileSync(path.join(tempDir, "existing.ail"), existingAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "existing.aice"), existingAice, "utf-8");
 
       const src = `
 from "./existing" import { missingSymbol }
@@ -403,7 +403,7 @@ from "./existing" import { missingSymbol }
 fn test():
   missingSymbol("call", 123)
 `;
-      const filePath = path.join(tempDir, "test.ail");
+      const filePath = path.join(tempDir, "test.aice");
       fs.writeFileSync(filePath, src, "utf-8");
 
       const mod = parse(src, filePath);
@@ -417,11 +417,11 @@ fn test():
       const utilsDir = path.join(tempDir, "nested", "utils");
       fs.mkdirSync(utilsDir, { recursive: true });
 
-      const mathAil = `
+      const mathAice = `
 pub fn double(x: int) -> int:
   return x * 2
 `;
-      fs.writeFileSync(path.join(utilsDir, "math.ail"), mathAil, "utf-8");
+      fs.writeFileSync(path.join(utilsDir, "math.aice"), mathAice, "utf-8");
 
       const src = `
 from "./math" import { double }
@@ -447,15 +447,15 @@ fn run():
   });
 
   describe("Requirement 6: Extension Probing and Transitive Resolution", () => {
-    it("probes index.ail inside subdirectories", () => {
+    it("probes index.aice inside subdirectories", () => {
       const subDir = path.join(tempDir, "components");
       fs.mkdirSync(subDir, { recursive: true });
 
-      const indexAil = `
+      const indexAice = `
 pub fn renderButton(label: str) -> str:
   return "<btn>" + label + "</btn>"
 `;
-      fs.writeFileSync(path.join(subDir, "index.ail"), indexAil, "utf-8");
+      fs.writeFileSync(path.join(subDir, "index.aice"), indexAice, "utf-8");
 
       const mainSrc = `
 from "./components" import { renderButton }
@@ -463,7 +463,7 @@ from "./components" import { renderButton }
 fn run():
   let btn: str = renderButton("Submit")
 `;
-      const mainFile = path.join(tempDir, "app.ail");
+      const mainFile = path.join(tempDir, "app.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -472,11 +472,11 @@ fn run():
     });
 
     it("infers return type across files for unannotated functions", () => {
-      const helperAil = `
+      const helperAice = `
 pub fn multiply(a: int, b: int):
   return a * b
 `;
-      fs.writeFileSync(path.join(tempDir, "helpers.ail"), helperAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "helpers.aice"), helperAice, "utf-8");
 
       const validSrc = `
 from "./helpers" import { multiply }
@@ -484,7 +484,7 @@ from "./helpers" import { multiply }
 fn run():
   let r: int = multiply(3, 4)
 `;
-      const validFile = path.join(tempDir, "valid.ail");
+      const validFile = path.join(tempDir, "valid.aice");
       fs.writeFileSync(validFile, validSrc, "utf-8");
 
       const mod = parse(validSrc, validFile);
@@ -497,7 +497,7 @@ from "./helpers" import { multiply }
 fn run():
   let wrong: str = multiply(3, 4)
 `;
-      const invalidFile = path.join(tempDir, "invalid.ail");
+      const invalidFile = path.join(tempDir, "invalid.aice");
       fs.writeFileSync(invalidFile, invalidSrc, "utf-8");
 
       const invMod = parse(invalidSrc, invalidFile);
@@ -505,40 +505,40 @@ fn run():
     });
 
     it("resolves transitive cross-file imports (A -> B -> C)", () => {
-      const coreAil = `
+      const coreAice = `
 type Ident:
   val: int
 `;
-      fs.writeFileSync(path.join(tempDir, "core.ail"), coreAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "core.aice"), coreAice, "utf-8");
 
-      const repoAil = `
+      const repoAice = `
 from "./core" import { Ident }
 
 pub fn createIdent(v: int) -> Ident:
   return Ident(v)
 `;
-      fs.writeFileSync(path.join(tempDir, "repo.ail"), repoAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "repo.aice"), repoAice, "utf-8");
 
-      const serviceAil = `
+      const serviceAice = `
 from "./repo" import { createIdent }
 
 fn test():
   let id = createIdent(100)
   let v: int = id.val
 `;
-      const serviceFile = path.join(tempDir, "service.ail");
-      fs.writeFileSync(serviceFile, serviceAil, "utf-8");
+      const serviceFile = path.join(tempDir, "service.aice");
+      fs.writeFileSync(serviceFile, serviceAice, "utf-8");
 
-      const mod = parse(serviceAil, serviceFile);
+      const mod = parse(serviceAice, serviceFile);
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
 
     it("infers float type for unannotated pub const TAX_RATE across files", () => {
-      const taxAil = `
+      const taxAice = `
 pub const TAX_RATE = 0.2
 `;
-      fs.writeFileSync(path.join(tempDir, "constants.ail"), taxAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "constants.aice"), taxAice, "utf-8");
 
       const mainSrc = `
 from "./constants" import { TAX_RATE }
@@ -547,7 +547,7 @@ fn calculate(subtotal: float) -> float:
   let rate: float = TAX_RATE
   return subtotal * rate
 `;
-      const mainFile = path.join(tempDir, "calc.ail");
+      const mainFile = path.join(tempDir, "calc.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -560,19 +560,19 @@ from "./constants" import { TAX_RATE }
 fn bad():
   let rate: str = TAX_RATE
 `;
-      const badFile = path.join(tempDir, "bad.ail");
+      const badFile = path.join(tempDir, "bad.aice");
       fs.writeFileSync(badFile, badSrc, "utf-8");
       const badMod = parse(badSrc, badFile);
       expect(() => new TypeChecker().checkModule(badMod)).toThrowError(TypeCheckError);
     });
 
     it("supports wildcard imports (* as ns) and validates namespace member access", () => {
-      const utilsAil = `
+      const utilsAice = `
 pub const VERSION = "2.0.0"
 pub fn add(a: int, b: int) -> int:
   return a + b
 `;
-      fs.writeFileSync(path.join(tempDir, "utils.ail"), utilsAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "utils.aice"), utilsAice, "utf-8");
 
       const mainSrc = `
 from "./utils" import * as utils
@@ -581,7 +581,7 @@ fn run():
   let ver: str = utils.VERSION
   let sum: int = utils.add(10, 20)
 `;
-      const mainFile = path.join(tempDir, "app.ail");
+      const mainFile = path.join(tempDir, "app.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -594,18 +594,18 @@ from "./utils" import * as utils
 fn run():
   utils.add("bad", 20)
 `;
-      const badFile = path.join(tempDir, "bad_app.ail");
+      const badFile = path.join(tempDir, "bad_app.aice");
       fs.writeFileSync(badFile, badSrc, "utf-8");
       const badMod = parse(badSrc, badFile);
       expect(() => new TypeChecker().checkModule(badMod)).toThrowError(TypeCheckError);
     });
 
-    it("rejects passing nil to a non-optional int parameter with AIL_E2002_TYPE_MISMATCH", () => {
-      const mathAil = `
+    it("rejects passing nil to a non-optional int parameter with AICE_E2002_TYPE_MISMATCH", () => {
+      const mathAice = `
 pub fn increment(val: int) -> int:
   return val + 1
 `;
-      fs.writeFileSync(path.join(tempDir, "math_non_optional.ail"), mathAil, "utf-8");
+      fs.writeFileSync(path.join(tempDir, "math_non_optional.aice"), mathAice, "utf-8");
 
       const mainSrc = `
 from "./math_non_optional" import { increment }
@@ -613,7 +613,7 @@ from "./math_non_optional" import { increment }
 fn run():
   increment(nil)
 `;
-      const mainFile = path.join(tempDir, "call_nil.ail");
+      const mainFile = path.join(tempDir, "call_nil.aice");
       fs.writeFileSync(mainFile, mainSrc, "utf-8");
 
       const mod = parse(mainSrc, mainFile);
@@ -623,7 +623,7 @@ fn run():
         tc.checkModule(mod);
       } catch (e: any) {
         expect(e).toBeInstanceOf(TypeCheckError);
-        expect(e.code).toBe("AIL_E2002_TYPE_MISMATCH");
+        expect(e.code).toBe("AICE_E2002_TYPE_MISMATCH");
       }
     });
 
@@ -633,13 +633,13 @@ fn run():
   $count = 2
   ret $count`;
 
-      const span = createSpan("test.ail", createPosition(3, 3, 29), createPosition(3, 9, 35));
+      const span = createSpan("test.aice", createPosition(3, 3, 29), createPosition(3, 9, 35));
       const repair = generateCandidateRepair(
-        "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+        "AICE_E2005_IMMUTABLE_ASSIGNMENT",
         "Cannot assign to immutable variable '$count'",
         span,
         src,
-        "test.ail",
+        "test.aice",
       );
 
       expect(repair).toBeDefined();

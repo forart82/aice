@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Automated Multi-File Roundtrip Parity Gate for AIL 2.0 (Step 29).
+ * Automated Multi-File Roundtrip Parity Gate for AICE 2.0 (Step 29).
  * Verifies Bancilhon & Spyratos Bidirectional Lens Invariant:
  *   Put(Get(c), Omega) == c
  * Validates Multi-Round Stability, Idempotence & Convergence:
@@ -93,7 +93,7 @@ export const PARITY_SUPPORTED_EXTENSIONS = new Set<string>([
  * Classifies a file path into its canonical ParityTargetLanguage.
  */
 export function classifyTargetLanguage(filePath: string): ParityTargetLanguage | null {
-  const clean = filePath.replace(/\.ail$/, "").toLowerCase();
+  const clean = filePath.replace(/\.aice$/, "").toLowerCase();
   if (clean.endsWith(".tsx")) return "tsx";
   if (clean.endsWith(".ts")) return "typescript";
   if (clean.endsWith(".py")) return "python";
@@ -140,7 +140,7 @@ export function normalizeLanguageName(target: string): string {
  * Checks if a file path is supported by the Parity Gate.
  */
 export function isSupportedParityLanguage(filePath: string): boolean {
-  if (filePath.endsWith(".ail") || filePath.endsWith(".d.ts")) {
+  if (filePath.endsWith(".aice") || filePath.endsWith(".d.ts")) {
     return false;
   }
   const ext = path.extname(filePath).toLowerCase();
@@ -203,13 +203,13 @@ export async function verifyFileParity(
     const round1 = executeRoundtrip(source, detectedTarget, filePath);
     decompileOk = true;
 
-    // Verify generated AIL parses cleanly
+    // Verify generated AICE parses cleanly
     try {
-      parse(round1.ail, `${filePath}.ail`);
+      parse(round1.aice, `${filePath}.aice`);
       parseOk = true;
     } catch (parseErr) {
       parseOk = false;
-      throw new Error(`Generated AIL failed to parse: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+      throw new Error(`Generated AICE failed to parse: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
     }
 
     emitOk = typeof round1.reconstructed === "string" && round1.reconstructed.length > 0;
@@ -238,8 +238,8 @@ export async function verifyFileParity(
     } else {
       isAstEquivalent =
         isConverged ||
-        round1.ail.trim() === round2.ail.trim() ||
-        round2.ail.trim() === round3.ail.trim();
+        round1.aice.trim() === round2.aice.trim() ||
+        round2.aice.trim() === round3.aice.trim();
 
       // Zero drift if converged, otherwise drift distance
       if (isConverged) {
@@ -402,7 +402,7 @@ function resolveTargetFiles(
   }
 
   const results: string[] = [];
-  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build", ".next", ".turbo"];
+  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".aice-build", ".next", ".turbo"];
   const ignorePatterns = options.ignorePatterns ?? defaultIgnores;
 
   function scan(current: string) {
@@ -458,7 +458,7 @@ function resolveTargetFiles(
 export function formatParitySummaryTerminal(summary: ParityGateSummary): string {
   const lines: string[] = [];
   lines.push("================================================================================");
-  lines.push("        AIL Automated Multi-File Roundtrip Parity Gate: Put(Get(c)) == c        ");
+  lines.push("        AICE Automated Multi-File Roundtrip Parity Gate: Put(Get(c)) == c        ");
   lines.push("================================================================================");
   lines.push(`Total Files Verified:    ${summary.totalFiles}`);
   lines.push(`Passed (Bit-Identical):  ${summary.passedBitIdentical}`);

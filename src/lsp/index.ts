@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Language Server Protocol (LSP) Daemon Exports.
+ * AICE 2.0 Language Server Protocol (LSP) Daemon Exports.
  */
 
 export * from "./analyzer.js";

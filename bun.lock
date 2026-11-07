@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ail",
+      "name": "aice",
       "dependencies": {
         "commander": "^15.0.0",
         "js-tiktoken": "^1.0.21",

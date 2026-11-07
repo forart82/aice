@@ -2,10 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * TypeScript & TSX Decompiler (Reverse Transpiler) for AIL 2.0.
+ * TypeScript & TSX Decompiler (Reverse Transpiler) for AICE 2.0.
  * Parses TypeScript/TSX code using the TypeScript Compiler API,
  * extracts CST trivia (comments, JSDoc) into CstTriviaTable,
- * and lowers the AST into an AIL Module AST.
+ * and lowers the AST into an AICE Module AST.
  */
 
 import ts from "../compat/typescript.js";
@@ -199,7 +199,7 @@ export class TsDecompiler {
         .split(/[/\\]/)
         .pop()
         ?.replace(/\.(tsx?|jsx?)$/, "")
-        .replace(/\.ail$/, "") ?? "main";
+        .replace(/\.aice$/, "") ?? "main";
     const cleanModPath = baseName;
 
     for (const stmt of this.sourceFile.statements) {
@@ -3613,7 +3613,7 @@ export class TsDecompiler {
           if (converted.kind === "PrimitiveType") return converted.primitive;
           if (converted.kind === "RecordType") {
             const fields = converted.fields
-              .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAilText(f.type)}`)
+              .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAiceText(f.type)}`)
               .join(", ");
             return `{ ${fields} }`;
           }
@@ -3748,23 +3748,23 @@ export class TsDecompiler {
     };
   }
 
-  private typeExprToAilText(t: TypeExpr): string {
+  private typeExprToAiceText(t: TypeExpr): string {
     switch (t.kind) {
       case "PrimitiveType":
         return t.primitive;
       case "NamedType":
         return t.name;
       case "ArrayType":
-        return `[${this.typeExprToAilText(t.elementType)}]`;
+        return `[${this.typeExprToAiceText(t.elementType)}]`;
       case "TupleType":
-        return `[${t.elementTypes.map((e) => this.typeExprToAilText(e)).join(", ")}]`;
+        return `[${t.elementTypes.map((e) => this.typeExprToAiceText(e)).join(", ")}]`;
       case "OptionType":
-        return `${this.typeExprToAilText(t.innerType)}?`;
+        return `${this.typeExprToAiceText(t.innerType)}?`;
       case "ResultType":
-        return `Result[${this.typeExprToAilText(t.okType)}, ${this.typeExprToAilText(t.errType)}]`;
+        return `Result[${this.typeExprToAiceText(t.okType)}, ${this.typeExprToAiceText(t.errType)}]`;
       case "RecordType": {
         const fields = t.fields
-          .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAilText(f.type)}`)
+          .map((f) => `${f.name}${f.isOptional ? "?" : ""}: ${this.typeExprToAiceText(f.type)}`)
           .join(", ");
         return `{ ${fields} }`;
       }

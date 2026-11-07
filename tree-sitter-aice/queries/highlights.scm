@@ -1,4 +1,4 @@
-; Tree-sitter syntax highlighting queries for AIL 2.0
+; Tree-sitter syntax highlighting queries for AICE 2.0
 
 ; Keywords
 [

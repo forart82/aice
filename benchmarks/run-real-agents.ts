@@ -6,7 +6,7 @@
  * Usage:
  *   npx tsx benchmarks/run-real-agents.ts               # Run all 10 scenarios (30 agent sessions)
  *   npx tsx benchmarks/run-real-agents.ts RW-01 RW-05   # Run specific scenarios
- *   npx tsx benchmarks/run-real-agents.ts RW-05:ail_with_idioms
+ *   npx tsx benchmarks/run-real-agents.ts RW-05:aice_with_idioms
  */
 
 import { execFile } from "node:child_process";
@@ -45,7 +45,7 @@ const CODE_LANGS = new Set<BenchmarkLanguageId>([
 ]);
 
 function setupWorkspace(spec: RealWorldBenchmarkSpec, mode: RealAgentMode): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `ail-${spec.id.toLowerCase()}-${mode}-`));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aice-${spec.id.toLowerCase()}-${mode}-`));
   const allIdioms: Record<string, unknown> = {};
   if (spec.files.some((f) => CODE_LANGS.has(f.languageId))) {
     const { idioms: tsIdioms } = buildIdiomRegistryForLanguage("ts");
@@ -56,14 +56,14 @@ function setupWorkspace(spec: RealWorldBenchmarkSpec, mode: RealAgentMode): stri
     if (!langSpec) throw new Error(`Unknown languageId ${f.languageId}`);
     const { idioms } = buildIdiomRegistryForLanguage(f.languageId);
     Object.assign(allIdioms, idioms);
-    const ast = parse(f.ailWithIdioms, `${f.fileName}.ail`);
+    const ast = parse(f.aiceWithIdioms, `${f.fileName}.aice`);
     const expanded = expandModuleIdioms(ast, idioms);
     const native = emitTarget(expanded, langSpec.target, { watermark: false });
     fs.writeFileSync(path.join(dir, f.fileName), native, "utf-8");
   }
-  if (mode === "ail_with_idioms") {
+  if (mode === "aice_with_idioms") {
     fs.writeFileSync(
-      path.join(dir, "ail.config.json"),
+      path.join(dir, "aice.config.json"),
       JSON.stringify({ version: 2, idioms: allIdioms }, null, 2),
     );
   }
@@ -76,16 +76,16 @@ function buildTaskSpecText(spec: RealWorldBenchmarkSpec): string {
   const deleteLines: string[] = [];
 
   for (const f of spec.files) {
-    const compactTargetAil = f.updatedTargetSymbolAilWithIdioms
+    const compactTargetAice = f.updatedTargetSymbolAiceWithIdioms
       .replace(
         /\$[a-z_]+_band_step|\$clamp_cart_line|\$enforce_quota_band|\$bounded_quorum_step|\$advance_wal_cursor|\$solve_axis_impulse|\$settle_ledger_window|\$score_risk_signal|\$round_money_band/g,
         "$guard_band_step",
       )
       .replace(/\n/g, "\\n");
     if (isNewFeature) {
-      updateLines.push(`   - ${f.fileName} (insertAfter "${f.targetSymbol}"): ${compactTargetAil}`);
+      updateLines.push(`   - ${f.fileName} (insertAfter "${f.targetSymbol}"): ${compactTargetAice}`);
     } else {
-      updateLines.push(`   - ${f.fileName} (symbol "${f.targetSymbol}"): ${compactTargetAil}`);
+      updateLines.push(`   - ${f.fileName} (symbol "${f.targetSymbol}"): ${compactTargetAice}`);
     }
     if (f.obsoleteSymbol) {
       deleteLines.push(`   - ${f.fileName}: delete "${f.obsoleteSymbol}"`);
@@ -152,10 +152,10 @@ function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: str
   const fileNames = spec.files.map((f) => f.fileName).join(", ");
   const isNewFeature = spec.scenario === "new_feature";
 
-  if (mode === "without_ail") {
+  if (mode === "without_aice") {
     return [
       `Workspace: ${dir}`,
-      `Mode: WITHOUT AIL (Native Tools Only). Do NOT use run_command or ail. Use ONLY grep_search, view_file, and replace_file_content.`,
+      `Mode: WITHOUT AICE (Native Tools Only). Do NOT use run_command or aice. Use ONLY grep_search, view_file, and replace_file_content.`,
       taskText,
       `Execute in steps:`,
       `- Step 1: Call grep_search in ${dir} to locate the target symbols and obsolete symbols.`,
@@ -165,26 +165,26 @@ function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: str
     ].join("\n");
   }
 
-  if (mode === "ail_no_idioms") {
+  if (mode === "aice_no_idioms") {
     return [
       `Workspace: ${dir}`,
-      `Mode: AIL WITHOUT IDIOMS (Pure AIL CLI Only). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, replace_file_content, or $idioms.`,
+      `Mode: AICE WITHOUT IDIOMS (Pure AICE CLI Only). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, replace_file_content, or $idioms.`,
       taskText,
       `Execute in exact 3 tool-call turns:`,
-      `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && ail context . -s "${allRefactorSyms}" --no-idioms`,
-      `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --no-idioms --batch '[...]' to apply Target Symbol Updates (1) in pure AIL (expand all $idioms into pure AIL statements/expressions with the refactored pattern from (3); use ${isNewFeature ? '"insertAfter"' : '"symbol"'}) and Delete Obsolete Symbols (2) ({"file":"...","symbol":"...","delete":true}).`,
-      `- Turn 3: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --no-idioms --batch '[...]' to apply Multi-File Pattern Refactor (3) across the remaining symbols in pure AIL.`,
+      `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && aice context . -s "${allRefactorSyms}" --no-idioms`,
+      `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --no-idioms --batch '[...]' to apply Target Symbol Updates (1) in pure AICE (expand all $idioms into pure AICE statements/expressions with the refactored pattern from (3); use ${isNewFeature ? '"insertAfter"' : '"symbol"'}) and Delete Obsolete Symbols (2) ({"file":"...","symbol":"...","delete":true}).`,
+      `- Turn 3: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --no-idioms --batch '[...]' to apply Multi-File Pattern Refactor (3) across the remaining symbols in pure AICE.`,
       `- Turn 4: Reply DONE.`,
     ].join("\n");
   }
 
   return [
     `Workspace: ${dir}`,
-    `Mode: AIL WITH IDIOMS (AIL CLI + Project Idioms). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, or replace_file_content.`,
+    `Mode: AICE WITH IDIOMS (AICE CLI + Project Idioms). Use ONLY run_command (WaitMsBeforeAsync: 10000) in ${dir}. Do NOT use python3, view_file, grep_search, or replace_file_content.`,
     taskText,
     `Execute in exact 2 tool-call turns:`,
-    `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && ail context . -s "${targetSyms}" --idioms`,
-    `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && ail splice --idioms --batch '[...]' (applying Target Symbol Updates (1) using ${isNewFeature ? '"insertAfter"' : '"symbol"'} and $idiom calls, plus Delete Obsolete Symbols (2) with {"file":"...","symbol":"...","delete":true}) && ail idioms update --batch '[{"name":"$...","template":"..."}]' (applying Multi-File Pattern Refactor (3) for each idiom in the workspace).`,
+    `- Turn 1: Call run_command (WaitMsBeforeAsync: 10000): cd ${dir} && aice context . -s "${targetSyms}" --idioms`,
+    `- Turn 2: Call run_command (WaitMsBeforeAsync: 10000) once in ${dir}: cd ${dir} && aice splice --idioms --batch '[...]' (applying Target Symbol Updates (1) using ${isNewFeature ? '"insertAfter"' : '"symbol"'} and $idiom calls, plus Delete Obsolete Symbols (2) with {"file":"...","symbol":"...","delete":true}) && aice idioms update --batch '[{"name":"$...","template":"..."}]' (applying Multi-File Pattern Refactor (3) for each idiom in the workspace).`,
     `- Turn 3: Reply DONE.`,
   ].join("\n");
 }
@@ -192,11 +192,11 @@ function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: str
 function verifyWorkspaceOnDisk(
   spec: RealWorldBenchmarkSpec,
   dir: string,
-): { verified: boolean; zeroAil: boolean; details: string[] } {
+): { verified: boolean; zeroAice: boolean; details: string[] } {
   const details: string[] = [];
-  const ailFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".ail"));
-  const zeroAil = ailFiles.length === 0;
-  if (!zeroAil) details.push(`Found .ail files: ${ailFiles.join(",")}`);
+  const aiceFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".aice"));
+  const zeroAice = aiceFiles.length === 0;
+  if (!zeroAice) details.push(`Found .aice files: ${aiceFiles.join(",")}`);
 
   for (const f of spec.files) {
     const content = fs.readFileSync(path.join(dir, f.fileName), "utf-8");
@@ -239,7 +239,7 @@ function verifyWorkspaceOnDisk(
     }
   }
 
-  return { verified: details.length === 0 && zeroAil, zeroAil, details };
+  return { verified: details.length === 0 && zeroAice, zeroAice, details };
 }
 
 export async function runAgentBenchmarkMode(
@@ -322,7 +322,7 @@ export async function runAgentBenchmarkMode(
     apiTotalTokens: inputTokens + cacheReadTokens + outputTokens,
     durationSeconds,
     verifiedOnDisk: check.verified,
-    zeroAilFilesLeftOnDisk: check.zeroAil,
+    zeroAiceFilesLeftOnDisk: check.zeroAice,
   };
 }
 
@@ -359,21 +359,21 @@ async function main() {
   for (const spec of specs) {
     console.log(`Running ${spec.id} (${spec.title})...`);
     const [w, n, i] = await Promise.all([
-      runAgentBenchmarkMode(spec, "without_ail"),
-      runAgentBenchmarkMode(spec, "ail_no_idioms"),
-      runAgentBenchmarkMode(spec, "ail_with_idioms"),
+      runAgentBenchmarkMode(spec, "without_aice"),
+      runAgentBenchmarkMode(spec, "aice_no_idioms"),
+      runAgentBenchmarkMode(spec, "aice_with_idioms"),
     ]);
-    existing[spec.id] = { without_ail: w, ail_no_idioms: n, ail_with_idioms: i };
+    existing[spec.id] = { without_aice: w, aice_no_idioms: n, aice_with_idioms: i };
     fs.writeFileSync(outPath, `${JSON.stringify(existing, null, 2)}\n`);
     console.log(`${spec.id} DONE:`);
     console.log(
-      `  without_ail:     turns=${w.llmTurns} tools=${w.toolCalls} workTok=${w.workingTokens} outTok=${w.outputTokens} billTok=${w.billableTokens} ok=${w.verifiedOnDisk}`,
+      `  without_aice:     turns=${w.llmTurns} tools=${w.toolCalls} workTok=${w.workingTokens} outTok=${w.outputTokens} billTok=${w.billableTokens} ok=${w.verifiedOnDisk}`,
     );
     console.log(
-      `  ail_no_idioms:   turns=${n.llmTurns} tools=${n.toolCalls} workTok=${n.workingTokens} outTok=${n.outputTokens} billTok=${n.billableTokens} ok=${n.verifiedOnDisk}`,
+      `  aice_no_idioms:   turns=${n.llmTurns} tools=${n.toolCalls} workTok=${n.workingTokens} outTok=${n.outputTokens} billTok=${n.billableTokens} ok=${n.verifiedOnDisk}`,
     );
     console.log(
-      `  ail_with_idioms: turns=${i.llmTurns} tools=${i.toolCalls} workTok=${i.workingTokens} outTok=${i.outputTokens} billTok=${i.billableTokens} ok=${i.verifiedOnDisk}`,
+      `  aice_with_idioms: turns=${i.llmTurns} tools=${i.toolCalls} workTok=${i.workingTokens} outTok=${i.outputTokens} billTok=${i.billableTokens} ok=${i.verifiedOnDisk}`,
     );
   }
 }

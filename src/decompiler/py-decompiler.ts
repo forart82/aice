@@ -2,18 +2,18 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern Python 3.10+ Decompiler (Reverse Transpiler) for AIL 2.0.
+ * Modern Python 3.10+ Decompiler (Reverse Transpiler) for AICE 2.0.
  * Dedicated zero-dependency streaming indentation-aware lexer (PythonLexer)
  * and recursive-descent / Pratt parser (PythonDecompiler):
  *   - Tracks indentation stack to emit INDENT and DEDENT tokens.
- *   - Parses @dataclass classes into AIL records or classes with typed fields.
+ *   - Parses @dataclass classes into AICE records or classes with typed fields.
  *   - Parses standard classes, methods, constructors (def __init__(self, ...)).
  *   - Parses def and async def functions with typed parameters and return types.
  *   - Parses expressions (await, binary, unary, call, member access, list/dict/set literals).
  *   - Parses control flow (if, elif, else, while, for x in xs, try/except/finally, return, raise).
- *   - Parses Python 3.10+ match / case into AIL MatchStmt with patterns and guards.
+ *   - Parses Python 3.10+ match / case into AICE MatchStmt with patterns and guards.
  *   - Extracts docstrings ("""...""") and # comments into CstTriviaTable.
- *   - Lowers into canonical AIL AST Module.
+ *   - Lowers into canonical AICE AST Module.
  *   - Exports decompilePython(source: string, filePath?: string): DecompileResult.
  */
 
@@ -63,7 +63,7 @@ import type {
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, getNodeTriviaId, type TriviaItem } from "../core/trivia.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 
 function makeSpan(
   file: string,
@@ -810,7 +810,7 @@ export class PythonDecompiler {
       this.filePath
         .split(/[/\\]/)
         .pop()
-        ?.replace(/\.(py|ail)$/i, "")
+        ?.replace(/\.(py|aice)$/i, "")
         .replace(/[^a-zA-Z0-9_]/g, "_") || "main";
 
     const ast: Module = {
@@ -2530,11 +2530,11 @@ export class PythonDecompiler {
 export function decompilePython(
   source: string,
   filePath = "source.py",
-  options: AilGeneratorOptions = {},
-): { ast: Module; ail: string; trivia: CstTriviaTable } {
+  options: AiceGeneratorOptions = {},
+): { ast: Module; aice: string; trivia: CstTriviaTable } {
   const decompiler = new PythonDecompiler(source, filePath);
   const result = decompiler.decompile();
-  const generator = new AilGenerator({ ...options, trivia: result.trivia });
-  const ail = generator.generate(result.ast);
-  return { ast: result.ast, ail, trivia: result.trivia };
+  const generator = new AiceGenerator({ ...options, trivia: result.trivia });
+  const aice = generator.generate(result.ast);
+  return { ast: result.ast, aice, trivia: result.trivia };
 }

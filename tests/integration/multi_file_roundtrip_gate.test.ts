@@ -22,7 +22,7 @@ import {
   verifyFileParity,
 } from "../../src/tools/index.js";
 
-const TEST_CASE_DIR = "/home/forart/dev/ail_test_case";
+const TEST_CASE_DIR = "/home/forart/dev/aice_test_case";
 
 describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
   // ===========================================================================
@@ -242,7 +242,7 @@ describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
       }
     });
 
-    it("runs parity gate across real-world case studies in /home/forart/dev/ail_test_case", async () => {
+    it("runs parity gate across real-world case studies in /home/forart/dev/aice_test_case", async () => {
       const realWorldCases = [
         path.join(TEST_CASE_DIR, "src/case03/src/core/MathX.ts"),
         path.join(TEST_CASE_DIR, "src/case03/src/core/Vec2.ts"),
@@ -334,7 +334,7 @@ describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
       const summary = await runParityGate("examples/auth_service.ts");
       const terminalReport = formatParitySummaryTerminal(summary);
 
-      expect(terminalReport).toContain("AIL Automated Multi-File Roundtrip Parity Gate");
+      expect(terminalReport).toContain("AICE Automated Multi-File Roundtrip Parity Gate");
       expect(terminalReport).toContain("Total Files Verified:    1");
       expect(terminalReport).toContain("Parity Rate:             100.0%");
       expect(terminalReport).toContain("typescript");
@@ -355,23 +355,23 @@ describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
   });
 
   // ===========================================================================
-  // SECTION 5: CLI Command Execution (ail verify --parity)
+  // SECTION 5: CLI Command Execution (aice verify --parity)
   // ===========================================================================
-  describe("CLI Command Execution (ail verify --parity)", () => {
-    const binPath = path.resolve(process.cwd(), "bin/ail.ts");
+  describe("CLI Command Execution (aice verify --parity)", () => {
+    const binPath = path.resolve(process.cwd(), "bin/aice.ts");
 
-    it("executes 'ail verify --parity <file>' and exits with code 0", () => {
+    it("executes 'aice verify --parity <file>' and exits with code 0", () => {
       const child = spawnSync("bun", ["run", binPath, "verify", "--parity", "examples/auth_service.ts"], {
         encoding: "utf-8",
         cwd: process.cwd(),
       });
 
       expect(child.status).toBe(0);
-      expect(child.stdout).toContain("AIL Automated Multi-File Roundtrip Parity Gate");
+      expect(child.stdout).toContain("AICE Automated Multi-File Roundtrip Parity Gate");
       expect(child.stdout).toContain("✔ Parity Gate PASSED");
     });
 
-    it("executes 'ail verify --parity <file> --json' producing valid machine-readable JSON", () => {
+    it("executes 'aice verify --parity <file> --json' producing valid machine-readable JSON", () => {
       const child = spawnSync(
         "bun",
         ["run", binPath, "verify", "--parity", "examples/auth_service.ts", "--json"],
@@ -388,7 +388,7 @@ describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
       expect(parsed.parityRate).toBe(100);
     });
 
-    it("executes 'ail verify --parity examples/ --strict' and exits 0 on 100% parity rate", () => {
+    it("executes 'aice verify --parity examples/ --strict' and exits 0 on 100% parity rate", () => {
       const child = spawnSync(
         "bun",
         ["run", binPath, "verify", "--parity", "examples/", "--strict"],

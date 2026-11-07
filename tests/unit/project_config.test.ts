@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   DEFAULT_PROJECT_CONFIG,
   autoDetectProjectMode,
   deriveSourceFilename,
@@ -28,11 +28,11 @@ import {
   validateProjectConfig,
 } from "../../src/config/index.js";
 
-describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
+describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-config-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-config-test-"));
   });
 
   afterEach(() => {
@@ -54,30 +54,30 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(getExtensionForTarget("css")).toBe(".css");
     });
 
-    it("derives target filename for dual-extension and bare .ail files", () => {
-      expect(deriveTargetFilename("App.tsx.ail")).toBe("App.tsx");
-      expect(deriveTargetFilename("calc.ts.ail")).toBe("calc.ts");
-      expect(deriveTargetFilename("model.py.ail")).toBe("model.py");
-      expect(deriveTargetFilename("lib.rs.ail")).toBe("lib.rs");
-      expect(deriveTargetFilename("index.html.ail")).toBe("index.html");
-      expect(deriveTargetFilename("styles.css.ail")).toBe("styles.css");
+    it("derives target filename for dual-extension and bare .aice files", () => {
+      expect(deriveTargetFilename("App.tsx.aice")).toBe("App.tsx");
+      expect(deriveTargetFilename("calc.ts.aice")).toBe("calc.ts");
+      expect(deriveTargetFilename("model.py.aice")).toBe("model.py");
+      expect(deriveTargetFilename("lib.rs.aice")).toBe("lib.rs");
+      expect(deriveTargetFilename("index.html.aice")).toBe("index.html");
+      expect(deriveTargetFilename("styles.css.aice")).toBe("styles.css");
 
-      // Bare .ail files with targetLanguage
-      expect(deriveTargetFilename("calc.ail", "typescript")).toBe("calc.ts");
-      expect(deriveTargetFilename("calc.ail", "python")).toBe("calc.py");
-      expect(deriveTargetFilename("calc.ail", "rust")).toBe("calc.rs");
-      expect(deriveTargetFilename("calc.ail", "go")).toBe("calc.go");
-      expect(deriveTargetFilename("calc.ail", "cpp")).toBe("calc.cpp");
-      expect(deriveTargetFilename("calc.ail", "csharp")).toBe("calc.cs");
-      expect(deriveTargetFilename("calc.ail", "tsx")).toBe("calc.tsx");
+      // Bare .aice files with targetLanguage
+      expect(deriveTargetFilename("calc.aice", "typescript")).toBe("calc.ts");
+      expect(deriveTargetFilename("calc.aice", "python")).toBe("calc.py");
+      expect(deriveTargetFilename("calc.aice", "rust")).toBe("calc.rs");
+      expect(deriveTargetFilename("calc.aice", "go")).toBe("calc.go");
+      expect(deriveTargetFilename("calc.aice", "cpp")).toBe("calc.cpp");
+      expect(deriveTargetFilename("calc.aice", "csharp")).toBe("calc.cs");
+      expect(deriveTargetFilename("calc.aice", "tsx")).toBe("calc.tsx");
 
-      // Non-.ail file passes through
+      // Non-.aice file passes through
       expect(deriveTargetFilename("main.ts")).toBe("main.ts");
     });
 
     it("strips comments cleanly from JSON strings", () => {
       const jsonWithComments = `
-        // Configuration for AIL
+        // Configuration for AICE
         {
           "mode": "isolated", /* mode setting */
           "url": "https://example.com/api", // preserve URLs with slashes
@@ -97,7 +97,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
           mode: "isolated",
           isolated: true,
           sourceDir: "src",
-          outDir: ".ail-build",
+          outDir: ".aice-build",
           targetLanguage: "typescript",
           watermark: true,
         }),
@@ -170,19 +170,19 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
     });
 
     it("derives source filename from target filename", () => {
-      expect(deriveSourceFilename("calc.ts")).toBe("calc.ail");
-      expect(deriveSourceFilename("Button.tsx")).toBe("Button.ail");
-      expect(deriveSourceFilename("calc.test.ts")).toBe("calc.test.ail");
-      expect(deriveSourceFilename("model.py")).toBe("model.ail");
-      expect(deriveSourceFilename("lib.rs")).toBe("lib.ail");
-      expect(deriveSourceFilename("styles.css")).toBe("styles.ail");
-      expect(deriveSourceFilename("index.html")).toBe("index.ail");
-      expect(deriveSourceFilename("already.ail")).toBe("already.ail");
+      expect(deriveSourceFilename("calc.ts")).toBe("calc.aice");
+      expect(deriveSourceFilename("Button.tsx")).toBe("Button.aice");
+      expect(deriveSourceFilename("calc.test.ts")).toBe("calc.test.aice");
+      expect(deriveSourceFilename("model.py")).toBe("model.aice");
+      expect(deriveSourceFilename("lib.rs")).toBe("lib.aice");
+      expect(deriveSourceFilename("styles.css")).toBe("styles.aice");
+      expect(deriveSourceFilename("index.html")).toBe("index.aice");
+      expect(deriveSourceFilename("already.aice")).toBe("already.aice");
     });
   });
 
   describe("Config Loading (loadProjectConfig)", () => {
-    it("loads complete config from ail.config.json", () => {
+    it("loads complete config from aice.config.json", () => {
       const configData = {
         mode: "isolated",
         sourceDir: "source",
@@ -192,7 +192,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
         watermark: false,
       };
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         JSON.stringify(configData, null, 2),
         "utf-8",
       );
@@ -201,9 +201,9 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded).toEqual(configData);
     });
 
-    it("loads partial config from ail.config.json and applies robust defaults", () => {
+    it("loads partial config from aice.config.json and applies robust defaults", () => {
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         JSON.stringify({ mode: "isolated" }),
         "utf-8",
       );
@@ -212,16 +212,16 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded).toEqual({
         mode: "isolated",
         sourceDir: "src",
-        outDir: ".ail-build",
+        outDir: ".aice-build",
         targetLanguage: "typescript",
         isolated: true,
         watermark: true,
       });
     });
 
-    it("loads config from ail.config.json with comments", () => {
+    it("loads config from aice.config.json with comments", () => {
       const content = `
-        // AIL Workspace Config
+        // AICE Workspace Config
         {
           /* Target output settings */
           "mode": "side-by-side",
@@ -229,7 +229,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
           "watermark": false
         }
       `;
-      fs.writeFileSync(path.join(tmpDir, "ail.config.json"), content, "utf-8");
+      fs.writeFileSync(path.join(tmpDir, "aice.config.json"), content, "utf-8");
 
       const loaded = loadProjectConfig(tmpDir);
       expect(loaded.mode).toBe("side-by-side");
@@ -237,12 +237,12 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.isolated).toBe(false);
       expect(loaded.watermark).toBe(false);
       expect(loaded.sourceDir).toBe("src");
-      expect(loaded.outDir).toBe(".ail-build");
+      expect(loaded.outDir).toBe(".aice-build");
     });
 
-    it("loads config from .ailrc when ail.config.json is absent", () => {
+    it("loads config from .aicerc when aice.config.json is absent", () => {
       fs.writeFileSync(
-        path.join(tmpDir, ".ailrc"),
+        path.join(tmpDir, ".aicerc"),
         JSON.stringify({ mode: "isolated", outDir: ".custom-out" }),
         "utf-8",
       );
@@ -254,11 +254,11 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.sourceDir).toBe("src");
     });
 
-    it("loads config from package.json's 'ail' block when config files are absent", () => {
+    it("loads config from package.json's 'aice' block when config files are absent", () => {
       const packageJson = {
         name: "test-pkg",
         version: "1.0.0",
-        ail: {
+        aice: {
           mode: "side-by-side",
           targetLanguage: "go",
           watermark: false,
@@ -277,20 +277,20 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.isolated).toBe(false);
     });
 
-    it("prioritizes ail.config.json over .ailrc and package.json", () => {
+    it("prioritizes aice.config.json over .aicerc and package.json", () => {
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         JSON.stringify({ mode: "isolated", targetLanguage: "python" }),
         "utf-8",
       );
       fs.writeFileSync(
-        path.join(tmpDir, ".ailrc"),
+        path.join(tmpDir, ".aicerc"),
         JSON.stringify({ mode: "side-by-side", targetLanguage: "rust" }),
         "utf-8",
       );
       fs.writeFileSync(
         path.join(tmpDir, "package.json"),
-        JSON.stringify({ ail: { mode: "side-by-side", targetLanguage: "go" } }),
+        JSON.stringify({ aice: { mode: "side-by-side", targetLanguage: "go" } }),
         "utf-8",
       );
 
@@ -299,15 +299,15 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.targetLanguage).toBe("python");
     });
 
-    it("prioritizes .ailrc over package.json when ail.config.json is absent", () => {
+    it("prioritizes .aicerc over package.json when aice.config.json is absent", () => {
       fs.writeFileSync(
-        path.join(tmpDir, ".ailrc"),
+        path.join(tmpDir, ".aicerc"),
         JSON.stringify({ mode: "isolated", targetLanguage: "rust" }),
         "utf-8",
       );
       fs.writeFileSync(
         path.join(tmpDir, "package.json"),
-        JSON.stringify({ ail: { mode: "side-by-side", targetLanguage: "go" } }),
+        JSON.stringify({ aice: { mode: "side-by-side", targetLanguage: "go" } }),
         "utf-8",
       );
 
@@ -316,17 +316,17 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.targetLanguage).toBe("rust");
     });
 
-    it("throws helpful error when ail.config.json is malformed JSON", () => {
+    it("throws helpful error when aice.config.json is malformed JSON", () => {
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         "{ unquotedKey: invalid }",
         "utf-8",
       );
       expect(() => loadProjectConfig(tmpDir)).toThrow(/Failed to parse/);
     });
 
-    it("throws helpful error when .ailrc is malformed JSON", () => {
-      fs.writeFileSync(path.join(tmpDir, ".ailrc"), "{ corrupted json ...", "utf-8");
+    it("throws helpful error when .aicerc is malformed JSON", () => {
+      fs.writeFileSync(path.join(tmpDir, ".aicerc"), "{ corrupted json ...", "utf-8");
       expect(() => loadProjectConfig(tmpDir)).toThrow(/Failed to parse/);
     });
 
@@ -337,8 +337,8 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
   });
 
   describe("Mode Auto-Detection (autoDetectProjectMode)", () => {
-    it("auto-detects 'isolated' when .ail-build directory exists", () => {
-      fs.mkdirSync(path.join(tmpDir, ".ail-build"), { recursive: true });
+    it("auto-detects 'isolated' when .aice-build directory exists", () => {
+      fs.mkdirSync(path.join(tmpDir, ".aice-build"), { recursive: true });
       expect(autoDetectProjectMode(tmpDir)).toBe("isolated");
 
       const config = loadProjectConfig(tmpDir);
@@ -346,10 +346,10 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(config.isolated).toBe(true);
     });
 
-    it("auto-detects 'isolated' when workspace contains bare *.ail files", () => {
+    it("auto-detects 'isolated' when workspace contains bare *.aice files", () => {
       fs.mkdirSync(path.join(tmpDir, "src", "math"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "index.ail"), "fn main() = 0;");
-      fs.writeFileSync(path.join(tmpDir, "src", "math", "calc.ail"), "fn add(a, b) = a + b;");
+      fs.writeFileSync(path.join(tmpDir, "src", "index.aice"), "fn main() = 0;");
+      fs.writeFileSync(path.join(tmpDir, "src", "math", "calc.aice"), "fn add(a, b) = a + b;");
 
       expect(autoDetectProjectMode(tmpDir)).toBe("isolated");
 
@@ -358,11 +358,11 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(config.isolated).toBe(true);
     });
 
-    it("auto-detects 'side-by-side' when workspace contains dual-extension files (*.ts.ail, *.tsx.ail)", () => {
+    it("auto-detects 'side-by-side' when workspace contains dual-extension files (*.ts.aice, *.tsx.aice)", () => {
       fs.mkdirSync(path.join(tmpDir, "src", "components"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "index.ts.ail"), "export fn main() = 0;");
+      fs.writeFileSync(path.join(tmpDir, "src", "index.ts.aice"), "export fn main() = 0;");
       fs.writeFileSync(
-        path.join(tmpDir, "src", "components", "Button.tsx.ail"),
+        path.join(tmpDir, "src", "components", "Button.tsx.aice"),
         "component Button() => <button />;",
       );
 
@@ -373,33 +373,33 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(config.isolated).toBe(false);
     });
 
-    it("auto-detects 'side-by-side' when dual-extension files use other languages (*.py.ail, *.rs.ail)", () => {
+    it("auto-detects 'side-by-side' when dual-extension files use other languages (*.py.aice, *.rs.aice)", () => {
       fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "calc.py.ail"), "def add(a, b): return a + b");
-      fs.writeFileSync(path.join(tmpDir, "src", "lib.rs.ail"), "fn run() {}");
+      fs.writeFileSync(path.join(tmpDir, "src", "calc.py.aice"), "def add(a, b): return a + b");
+      fs.writeFileSync(path.join(tmpDir, "src", "lib.rs.aice"), "fn run() {}");
 
       expect(autoDetectProjectMode(tmpDir)).toBe("side-by-side");
     });
 
-    it("auto-detects 'isolated' when bare *.ail files outnumber dual-extension *.ts.ail files", () => {
+    it("auto-detects 'isolated' when bare *.aice files outnumber dual-extension *.ts.aice files", () => {
       fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "a.ail"), "");
-      fs.writeFileSync(path.join(tmpDir, "src", "b.ail"), "");
-      fs.writeFileSync(path.join(tmpDir, "src", "c.ts.ail"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "a.aice"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "b.aice"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "c.ts.aice"), "");
 
       expect(autoDetectProjectMode(tmpDir)).toBe("isolated");
     });
 
-    it("auto-detects 'side-by-side' when dual-extension files outnumber bare *.ail files", () => {
+    it("auto-detects 'side-by-side' when dual-extension files outnumber bare *.aice files", () => {
       fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "a.ts.ail"), "");
-      fs.writeFileSync(path.join(tmpDir, "src", "b.ts.ail"), "");
-      fs.writeFileSync(path.join(tmpDir, "src", "c.ail"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "a.ts.aice"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "b.ts.aice"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "c.aice"), "");
 
       expect(autoDetectProjectMode(tmpDir)).toBe("side-by-side");
     });
 
-    it("defaults to 'side-by-side' when directory is empty or has no .ail files", () => {
+    it("defaults to 'side-by-side' when directory is empty or has no .aice files", () => {
       expect(autoDetectProjectMode(tmpDir)).toBe("side-by-side");
 
       const config = loadProjectConfig(tmpDir);
@@ -407,22 +407,22 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
     });
 
     it("ignores node_modules, .git, dist, and build directories during auto-detection", () => {
-      // Put bare .ail in ignored directory
+      // Put bare .aice in ignored directory
       const ignoredDir = path.join(tmpDir, "node_modules", "some-dep");
       fs.mkdirSync(ignoredDir, { recursive: true });
-      fs.writeFileSync(path.join(ignoredDir, "dep.ail"), "");
+      fs.writeFileSync(path.join(ignoredDir, "dep.aice"), "");
 
-      // Root has dual-ext .ts.ail
+      // Root has dual-ext .ts.aice
       fs.mkdirSync(path.join(tmpDir, "src"), { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "src", "main.ts.ail"), "");
+      fs.writeFileSync(path.join(tmpDir, "src", "main.ts.aice"), "");
 
       expect(autoDetectProjectMode(tmpDir)).toBe("side-by-side");
     });
 
     it("applies auto-detection when config file exists but mode and isolated are omitted", () => {
-      fs.mkdirSync(path.join(tmpDir, ".ail-build"), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, ".aice-build"), { recursive: true });
       fs.writeFileSync(
-        path.join(tmpDir, "ail.config.json"),
+        path.join(tmpDir, "aice.config.json"),
         JSON.stringify({ targetLanguage: "python" }),
         "utf-8",
       );
@@ -435,19 +435,19 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
   });
 
   describe("Target Path Resolution (resolveTargetOutputPathForConfig)", () => {
-    const sbsConfig: AilProjectConfig = {
+    const sbsConfig: AiceProjectConfig = {
       mode: "side-by-side",
       sourceDir: "src",
-      outDir: ".ail-build",
+      outDir: ".aice-build",
       targetLanguage: "typescript",
       isolated: false,
       watermark: true,
     };
 
-    const isolatedConfig: AilProjectConfig = {
+    const isolatedConfig: AiceProjectConfig = {
       mode: "isolated",
       sourceDir: "src",
-      outDir: ".ail-build",
+      outDir: ".aice-build",
       targetLanguage: "typescript",
       isolated: true,
       watermark: true,
@@ -455,43 +455,43 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
 
     describe("Side-by-Side Mode", () => {
       it("resolves dual-extension files to sibling target paths", () => {
-        expect(resolveTargetOutputPathForConfig("src/App.tsx.ail", sbsConfig)).toBe("src/App.tsx");
-        expect(resolveTargetOutputPathForConfig("src/math/calc.ts.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("src/App.tsx.aice", sbsConfig)).toBe("src/App.tsx");
+        expect(resolveTargetOutputPathForConfig("src/math/calc.ts.aice", sbsConfig)).toBe(
           "src/math/calc.ts",
         );
-        expect(resolveTargetOutputPathForConfig("scripts/build.py.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("scripts/build.py.aice", sbsConfig)).toBe(
           "scripts/build.py",
         );
-        expect(resolveTargetOutputPathForConfig("native/core.rs.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("native/core.rs.aice", sbsConfig)).toBe(
           "native/core.rs",
         );
-        expect(resolveTargetOutputPathForConfig("server/main.go.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("server/main.go.aice", sbsConfig)).toBe(
           "server/main.go",
         );
-        expect(resolveTargetOutputPathForConfig("cpp/engine.cpp.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("cpp/engine.cpp.aice", sbsConfig)).toBe(
           "cpp/engine.cpp",
         );
-        expect(resolveTargetOutputPathForConfig("dotnet/App.cs.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("dotnet/App.cs.aice", sbsConfig)).toBe(
           "dotnet/App.cs",
         );
-        expect(resolveTargetOutputPathForConfig("public/index.html.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("public/index.html.aice", sbsConfig)).toBe(
           "public/index.html",
         );
-        expect(resolveTargetOutputPathForConfig("styles/main.css.ail", sbsConfig)).toBe(
+        expect(resolveTargetOutputPathForConfig("styles/main.css.aice", sbsConfig)).toBe(
           "styles/main.css",
         );
       });
 
-      it("resolves bare *.ail files to sibling paths using config.targetLanguage", () => {
-        expect(resolveTargetOutputPathForConfig("src/math.ail", sbsConfig)).toBe("src/math.ts");
+      it("resolves bare *.aice files to sibling paths using config.targetLanguage", () => {
+        expect(resolveTargetOutputPathForConfig("src/math.aice", sbsConfig)).toBe("src/math.ts");
         expect(
-          resolveTargetOutputPathForConfig("src/calc.ail", {
+          resolveTargetOutputPathForConfig("src/calc.aice", {
             ...sbsConfig,
             targetLanguage: "python",
           }),
         ).toBe("src/calc.py");
         expect(
-          resolveTargetOutputPathForConfig("src/lib.ail", {
+          resolveTargetOutputPathForConfig("src/lib.aice", {
             ...sbsConfig,
             targetLanguage: "rust",
           }),
@@ -499,116 +499,116 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       });
 
       it("resolves bare root files to sibling paths in current directory", () => {
-        expect(resolveTargetOutputPathForConfig("index.ts.ail", sbsConfig)).toBe("index.ts");
-        expect(resolveTargetOutputPathForConfig("main.ail", sbsConfig)).toBe("main.ts");
+        expect(resolveTargetOutputPathForConfig("index.ts.aice", sbsConfig)).toBe("index.ts");
+        expect(resolveTargetOutputPathForConfig("main.aice", sbsConfig)).toBe("main.ts");
       });
 
       it("preserves absolute paths for sibling resolution in side-by-side mode", () => {
-        const absPath = "/workspace/project/src/math/calc.ts.ail";
+        const absPath = "/workspace/project/src/math/calc.ts.aice";
         expect(resolveTargetOutputPathForConfig(absPath, sbsConfig)).toBe(
           "/workspace/project/src/math/calc.ts",
         );
       });
 
-      it("passes through non-.ail files as siblings", () => {
+      it("passes through non-.aice files as siblings", () => {
         expect(resolveTargetOutputPathForConfig("src/math.ts", sbsConfig)).toBe("src/math.ts");
       });
     });
 
     describe("Isolated Mode", () => {
-      it("mirrors relative path from sourceDir into outDir (.ail-build/)", () => {
-        expect(resolveTargetOutputPathForConfig("src/math/calc.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "math", "calc.ts"),
+      it("mirrors relative path from sourceDir into outDir (.aice-build/)", () => {
+        expect(resolveTargetOutputPathForConfig("src/math/calc.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "math", "calc.ts"),
         );
-        expect(resolveTargetOutputPathForConfig("src/index.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "index.ts"),
+        expect(resolveTargetOutputPathForConfig("src/index.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "index.ts"),
         );
       });
 
       it("mirrors dual-extension files into outDir preserving target extension", () => {
         expect(
-          resolveTargetOutputPathForConfig("src/components/Button.tsx.ail", isolatedConfig),
-        ).toBe(path.join(".ail-build", "components", "Button.tsx"));
-        expect(resolveTargetOutputPathForConfig("src/math/calc.ts.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "math", "calc.ts"),
+          resolveTargetOutputPathForConfig("src/components/Button.tsx.aice", isolatedConfig),
+        ).toBe(path.join(".aice-build", "components", "Button.tsx"));
+        expect(resolveTargetOutputPathForConfig("src/math/calc.ts.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "math", "calc.ts"),
         );
-        expect(resolveTargetOutputPathForConfig("src/scripts/run.py.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "scripts", "run.py"),
+        expect(resolveTargetOutputPathForConfig("src/scripts/run.py.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "scripts", "run.py"),
         );
       });
 
-      it("mirrors bare *.ail with non-default targetLanguage into outDir", () => {
-        const pyIsolatedConfig: AilProjectConfig = {
+      it("mirrors bare *.aice with non-default targetLanguage into outDir", () => {
+        const pyIsolatedConfig: AiceProjectConfig = {
           ...isolatedConfig,
           targetLanguage: "python",
         };
-        expect(resolveTargetOutputPathForConfig("src/math/calc.ail", pyIsolatedConfig)).toBe(
-          path.join(".ail-build", "math", "calc.py"),
+        expect(resolveTargetOutputPathForConfig("src/math/calc.aice", pyIsolatedConfig)).toBe(
+          path.join(".aice-build", "math", "calc.py"),
         );
       });
 
       it("mirrors absolute source path into absolute outDir with projectRoot", () => {
         const projectRoot = "/home/user/project";
-        const absSourcePath = "/home/user/project/src/math/calc.ail";
+        const absSourcePath = "/home/user/project/src/math/calc.aice";
         const targetPath = resolveTargetOutputPathForConfig(
           absSourcePath,
           isolatedConfig,
           projectRoot,
         );
-        expect(targetPath).toBe(path.resolve("/home/user/project/.ail-build/math/calc.ts"));
+        expect(targetPath).toBe(path.resolve("/home/user/project/.aice-build/math/calc.ts"));
       });
 
       it("mirrors absolute source path into absolute outDir when projectRoot is omitted", () => {
-        const absSourcePath = "/workspace/my-app/src/utils/format.ail";
+        const absSourcePath = "/workspace/my-app/src/utils/format.aice";
         const targetPath = resolveTargetOutputPathForConfig(absSourcePath, isolatedConfig);
-        expect(targetPath).toBe(path.resolve("/workspace/my-app/.ail-build/utils/format.ts"));
+        expect(targetPath).toBe(path.resolve("/workspace/my-app/.aice-build/utils/format.ts"));
       });
 
       it("handles custom sourceDir and outDir properly", () => {
-        const customConfig: AilProjectConfig = {
+        const customConfig: AiceProjectConfig = {
           mode: "isolated",
           sourceDir: "lib",
-          outDir: "dist-ail",
+          outDir: "dist-aice",
           targetLanguage: "rust",
           isolated: true,
           watermark: true,
         };
-        expect(resolveTargetOutputPathForConfig("lib/core/engine.ail", customConfig)).toBe(
-          path.join("dist-ail", "core", "engine.rs"),
+        expect(resolveTargetOutputPathForConfig("lib/core/engine.aice", customConfig)).toBe(
+          path.join("dist-aice", "core", "engine.rs"),
         );
       });
 
       it("handles root sourceDir ('.') mirroring into outDir", () => {
-        const rootSourceConfig: AilProjectConfig = {
+        const rootSourceConfig: AiceProjectConfig = {
           mode: "isolated",
           sourceDir: ".",
-          outDir: ".ail-build",
+          outDir: ".aice-build",
           targetLanguage: "typescript",
           isolated: true,
           watermark: true,
         };
-        expect(resolveTargetOutputPathForConfig("src/math/calc.ail", rootSourceConfig)).toBe(
-          path.join(".ail-build", "src", "math", "calc.ts"),
+        expect(resolveTargetOutputPathForConfig("src/math/calc.aice", rootSourceConfig)).toBe(
+          path.join(".aice-build", "src", "math", "calc.ts"),
         );
       });
 
       it("handles files outside sourceDir cleanly", () => {
-        expect(resolveTargetOutputPathForConfig("tests/unit/calc.test.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "tests", "unit", "calc.test.ts"),
+        expect(resolveTargetOutputPathForConfig("tests/unit/calc.test.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "tests", "unit", "calc.test.ts"),
         );
       });
 
       it("handles normalized leading './' prefix in relative paths", () => {
-        expect(resolveTargetOutputPathForConfig("./src/math/calc.ail", isolatedConfig)).toBe(
-          path.join(".ail-build", "math", "calc.ts"),
+        expect(resolveTargetOutputPathForConfig("./src/math/calc.aice", isolatedConfig)).toBe(
+          path.join(".aice-build", "math", "calc.ts"),
         );
       });
     });
   });
 
   describe("Config Saving & Roundtripping (saveProjectConfig)", () => {
-    it("creates ail.config.json with formatted JSON", () => {
-      const config: AilProjectConfig = {
+    it("creates aice.config.json with formatted JSON", () => {
+      const config: AiceProjectConfig = {
         mode: "isolated",
         sourceDir: "source",
         outDir: ".dist",
@@ -620,7 +620,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       const saved = saveProjectConfig(tmpDir, config);
       expect(saved).toEqual(config);
 
-      const filePath = path.join(tmpDir, "ail.config.json");
+      const filePath = path.join(tmpDir, "aice.config.json");
       expect(fs.existsSync(filePath)).toBe(true);
 
       const raw = fs.readFileSync(filePath, "utf-8");
@@ -633,11 +633,11 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       const nestedDir = path.join(tmpDir, "nested", "sub", "project");
       const saved = saveProjectConfig(nestedDir, { mode: "isolated" });
       expect(saved.mode).toBe("isolated");
-      expect(fs.existsSync(path.join(nestedDir, "ail.config.json"))).toBe(true);
+      expect(fs.existsSync(path.join(nestedDir, "aice.config.json"))).toBe(true);
     });
 
     it("roundtrips configuration perfectly (save -> load)", () => {
-      const config: AilProjectConfig = {
+      const config: AiceProjectConfig = {
         mode: "isolated",
         sourceDir: "source",
         outDir: ".build-out",
@@ -672,7 +672,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.isolated).toBe(false);
     });
 
-    it("merges incrementally with existing ail.config.json", () => {
+    it("merges incrementally with existing aice.config.json", () => {
       saveProjectConfig(tmpDir, {
         mode: "side-by-side",
         targetLanguage: "python",
@@ -689,7 +689,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       expect(loaded.targetLanguage).toBe("rust");
       expect(loaded.watermark).toBe(false);
       expect(loaded.sourceDir).toBe("src");
-      expect(loaded.outDir).toBe(".ail-build");
+      expect(loaded.outDir).toBe(".aice-build");
       expect(loaded.isolated).toBe(false);
     });
 
@@ -702,10 +702,10 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
   });
 
   describe("Companion Mode Twin-Workspace Resolution (resolveTargetFile & resolveSourceFile)", () => {
-    const companionRoot = "/workspace/ail-companion";
+    const companionRoot = "/workspace/aice-companion";
     const targetRoot = "/workspace/target-app";
 
-    const companionConfig: AilProjectConfig = {
+    const companionConfig: AiceProjectConfig = {
       mode: "companion",
       sourceDir: "src",
       outDir: path.join(targetRoot, "src"),
@@ -720,7 +720,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       },
     };
 
-    const relCompanionConfig: AilProjectConfig = {
+    const relCompanionConfig: AiceProjectConfig = {
       mode: "companion",
       sourceDir: "src",
       outDir: "../target-app/src",
@@ -731,10 +731,10 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
     };
 
     describe("resolveTargetFile", () => {
-      it("maps companion .ail file to external absolute outDir target file", () => {
+      it("maps companion .aice file to external absolute outDir target file", () => {
         const targetPath = resolveTargetFile(
           companionConfig,
-          "src/math/calc.ail",
+          "src/math/calc.aice",
           companionRoot,
         );
         expect(targetPath).toBe(path.resolve(targetRoot, "src/math/calc.ts"));
@@ -743,40 +743,40 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       it("maps companion dual-extension file preserving target extension", () => {
         const targetPath = resolveTargetFile(
           companionConfig,
-          "src/components/Button.tsx.ail",
+          "src/components/Button.tsx.aice",
           companionRoot,
         );
         expect(targetPath).toBe(path.resolve(targetRoot, "src/components/Button.tsx"));
       });
 
       it("maps absolute companion source file to external outDir target file", () => {
-        const absSource = path.resolve(companionRoot, "src/utils/format.ail");
+        const absSource = path.resolve(companionRoot, "src/utils/format.aice");
         const targetPath = resolveTargetFile(companionConfig, absSource, companionRoot);
         expect(targetPath).toBe(path.resolve(targetRoot, "src/utils/format.ts"));
       });
 
-      it("maps companion .ail file with relative outDir resolved against projectRoot", () => {
+      it("maps companion .aice file with relative outDir resolved against projectRoot", () => {
         const targetPath = resolveTargetFile(
           relCompanionConfig,
-          "src/index.ail",
+          "src/index.aice",
           companionRoot,
         );
         expect(targetPath).toBe(path.resolve(companionRoot, "../target-app/src/index.ts"));
       });
 
       it("maps companion file without projectRoot when relative", () => {
-        const targetPath = resolveTargetFile(relCompanionConfig, "src/core/engine.ail");
+        const targetPath = resolveTargetFile(relCompanionConfig, "src/core/engine.aice");
         expect(targetPath).toBe(path.join("../target-app/src", "core/engine.ts"));
       });
 
       it("respects non-default targetLanguage in companion mode", () => {
-        const pyCompanionConfig: AilProjectConfig = {
+        const pyCompanionConfig: AiceProjectConfig = {
           ...companionConfig,
           targetLanguage: "python",
         };
         const targetPath = resolveTargetFile(
           pyCompanionConfig,
-          "src/server.ail",
+          "src/server.aice",
           companionRoot,
         );
         expect(targetPath).toBe(path.resolve(targetRoot, "src/server.py"));
@@ -785,7 +785,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
       it("handles deeply nested subdirectories properly", () => {
         const targetPath = resolveTargetFile(
           companionConfig,
-          "src/a/b/c/d/service.ail",
+          "src/a/b/c/d/service.aice",
           companionRoot,
         );
         expect(targetPath).toBe(path.resolve(targetRoot, "src/a/b/c/d/service.ts"));
@@ -793,7 +793,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
 
       it("is callable through resolveTargetOutputPathForConfig backward compatibility", () => {
         const targetPath = resolveTargetOutputPathForConfig(
-          "src/math/calc.ail",
+          "src/math/calc.aice",
           companionConfig,
           companionRoot,
         );
@@ -802,28 +802,28 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
     });
 
     describe("resolveSourceFile", () => {
-      it("maps external target file back to companion .ail file", () => {
+      it("maps external target file back to companion .aice file", () => {
         const externalTarget = path.resolve(targetRoot, "src/math/calc.ts");
         const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.ail"));
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.aice"));
       });
 
-      it("maps external target file with .tsx extension back to .ail file", () => {
+      it("maps external target file with .tsx extension back to .aice file", () => {
         const externalTarget = path.resolve(targetRoot, "src/components/Button.tsx");
         const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/components/Button.ail"));
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/components/Button.aice"));
       });
 
-      it("maps external target test file (*.test.ts) back to *.test.ail file", () => {
+      it("maps external target test file (*.test.ts) back to *.test.aice file", () => {
         const externalTarget = path.resolve(targetRoot, "src/math/calc.test.ts");
         const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.test.ail"));
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.test.aice"));
       });
 
       it("maps external target file with relative outDir resolved against projectRoot", () => {
         const externalTarget = path.resolve(companionRoot, "../target-app/src/index.ts");
         const sourcePath = resolveSourceFile(relCompanionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/index.ail"));
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/index.aice"));
       });
 
       it("maps relative target file without projectRoot", () => {
@@ -831,23 +831,23 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
           relCompanionConfig,
           "../target-app/src/core/engine.ts",
         );
-        expect(sourcePath).toBe(path.join("src", "core/engine.ail"));
+        expect(sourcePath).toBe(path.join("src", "core/engine.aice"));
       });
 
-      it("maps non-TypeScript external file back to companion .ail file", () => {
-        const pyCompanionConfig: AilProjectConfig = {
+      it("maps non-TypeScript external file back to companion .aice file", () => {
+        const pyCompanionConfig: AiceProjectConfig = {
           ...companionConfig,
           targetLanguage: "python",
         };
         const externalTarget = path.resolve(targetRoot, "src/server.py");
         const sourcePath = resolveSourceFile(pyCompanionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/server.ail"));
+        expect(sourcePath).toBe(path.resolve(companionRoot, "src/server.aice"));
       });
 
       it("maps external target file when outDir starts with ../ and targetProjectDir is set", () => {
         const testCompanionRoot = path.join(tmpDir, "twin-ws");
         const extTargetRoot = path.join(tmpDir, "ext-project");
-        const configWithDotDot: AilProjectConfig = {
+        const configWithDotDot: AiceProjectConfig = {
           mode: "companion",
           sourceDir: "src",
           outDir: "../ext-project/src",
@@ -859,7 +859,7 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
 
         const externalTarget = path.join(extTargetRoot, "src", "services", "api.ts");
         const sourcePath = resolveSourceFile(configWithDotDot, externalTarget, testCompanionRoot);
-        expect(sourcePath).toBe(path.resolve(testCompanionRoot, "src", "services", "api.ail"));
+        expect(sourcePath).toBe(path.resolve(testCompanionRoot, "src", "services", "api.aice"));
       });
 
       it("resolves to existing dual-extension file on disk when present", () => {
@@ -868,11 +868,11 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
         const compSrc = path.join(compDir, "src");
         fs.mkdirSync(compSrc, { recursive: true });
 
-        // Write dual-extension file: calc.ts.ail
-        const dualExtFile = path.join(compSrc, "calc.ts.ail");
+        // Write dual-extension file: calc.ts.aice
+        const dualExtFile = path.join(compSrc, "calc.ts.aice");
         fs.writeFileSync(dualExtFile, "fn add() = 1;");
 
-        const testConfig: AilProjectConfig = {
+        const testConfig: AiceProjectConfig = {
           mode: "companion",
           sourceDir: "src",
           outDir: "/ext/target/src",
@@ -892,17 +892,17 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
 
     describe("Round-Trip Parity", () => {
       it("roundtrips between companion source file and target file", () => {
-        const sourceAil = "src/modules/billing/invoice.ail";
-        const targetTs = resolveTargetFile(companionConfig, sourceAil, companionRoot);
+        const sourceAice = "src/modules/billing/invoice.aice";
+        const targetTs = resolveTargetFile(companionConfig, sourceAice, companionRoot);
         const roundTripSource = resolveSourceFile(companionConfig, targetTs, companionRoot);
-        expect(roundTripSource).toBe(path.resolve(companionRoot, sourceAil));
+        expect(roundTripSource).toBe(path.resolve(companionRoot, sourceAice));
       });
     });
 
     describe("Mode Auto-Detection with companion mode", () => {
-      it("auto-detects 'companion' mode when ail.config.json specifies companion", () => {
+      it("auto-detects 'companion' mode when aice.config.json specifies companion", () => {
         fs.writeFileSync(
-          path.join(tmpDir, "ail.config.json"),
+          path.join(tmpDir, "aice.config.json"),
           JSON.stringify({
             mode: "companion",
             targetProjectDir: "../other-project",
@@ -917,9 +917,9 @@ describe("Step 14: Unified Project Configuration (AilProjectConfig)", () => {
         expect(loaded.targetProjectDir).toBe("../other-project");
       });
 
-      it("auto-detects 'companion' mode when .ailrc specifies companion", () => {
+      it("auto-detects 'companion' mode when .aicerc specifies companion", () => {
         fs.writeFileSync(
-          path.join(tmpDir, ".ailrc"),
+          path.join(tmpDir, ".aicerc"),
           JSON.stringify({
             mode: "companion",
             targetProjectDir: "../other-project",

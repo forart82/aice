@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * Unit tests for Phase 2:
- * 1. Bidirectional Companion Sync (`ail sync` / `ail watch --bidirectional`)
+ * 1. Bidirectional Companion Sync (`aice sync` / `aice watch --bidirectional`)
  * 2. Rich LSP Actions (`$idiom` hover, `documentSymbol`, `documentFormatting`, `codeAction`)
- * 3. First-Class MCP Server (`ail mcp`, tools/list, tools/call)
+ * 3. First-Class MCP Server (`aice mcp`, tools/list, tools/call)
  */
 
 import * as fs from "node:fs";
@@ -13,18 +13,18 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Readable, Writable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AilAstCache } from "../../src/cache/index.js";
-import { AilAnalyzer } from "../../src/lsp/analyzer.js";
+import { AiceAstCache } from "../../src/cache/index.js";
+import { AiceAnalyzer } from "../../src/lsp/analyzer.js";
 import { SymbolKind } from "../../src/lsp/protocol.js";
-import { AilLspServer } from "../../src/lsp/server.js";
-import { AIL_MCP_TOOLS, AilMcpServer } from "../../src/mcp/index.js";
-import { AilWatcher, syncProjectFromTargets } from "../../src/watcher/index.js";
+import { AiceLspServer } from "../../src/lsp/server.js";
+import { AICE_MCP_TOOLS, AiceMcpServer } from "../../src/mcp/index.js";
+import { AiceWatcher, syncProjectFromTargets } from "../../src/watcher/index.js";
 
 describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-phase2-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-phase2-test-"));
   });
 
   afterEach(() => {
@@ -36,11 +36,11 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
   });
 
   describe("1. Bidirectional Companion Sync", () => {
-    it("synchronizes external edits from target file into .ail source", async () => {
+    it("synchronizes external edits from target file into .aice source", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
-      const configPath = path.join(tmpDir, "ail.config.json");
+      const configPath = path.join(tmpDir, "aice.config.json");
       fs.writeFileSync(
         configPath,
         JSON.stringify(
@@ -62,7 +62,7 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
 `,
       );
 
-      const watcher = new AilWatcher({
+      const watcher = new AiceWatcher({
         dir: tmpDir,
         projectRoot: tmpDir,
         bidirectional: true,
@@ -71,17 +71,17 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
       const res = await watcher.syncTargetFile(tsFile);
       expect(res.success).toBe(true);
       expect(res.targetFile).toBe(path.resolve(tsFile));
-      expect(fs.existsSync(res.ailFile)).toBe(true);
+      expect(fs.existsSync(res.aiceFile)).toBe(true);
 
-      const ailContent = fs.readFileSync(res.ailFile, "utf-8");
-      expect(ailContent).toContain("fn add");
+      const aiceContent = fs.readFileSync(res.aiceFile, "utf-8");
+      expect(aiceContent).toContain("fn add");
     });
 
     it("collapses active project $idioms during reverse synchronization", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
-      const configPath = path.join(tmpDir, "ail.config.json");
+      const configPath = path.join(tmpDir, "aice.config.json");
       fs.writeFileSync(
         configPath,
         JSON.stringify(
@@ -93,7 +93,7 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
                 name: "square",
                 kind: "expr",
                 params: [{ name: "x" }],
-                templateAil: "x * x",
+                templateAice: "x * x",
                 occurrences: 4,
                 tokensPerOccurrenceSaved: 4,
                 netTokenSavings: 16,
@@ -116,7 +116,7 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
 `,
       );
 
-      const watcher = new AilWatcher({
+      const watcher = new AiceWatcher({
         dir: tmpDir,
         projectRoot: tmpDir,
         bidirectional: true,
@@ -124,10 +124,10 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
 
       const res = await watcher.syncTargetFile(tsFile, { force: true });
       expect(res.success).toBe(true);
-      expect(fs.existsSync(res.ailFile)).toBe(true);
+      expect(fs.existsSync(res.aiceFile)).toBe(true);
 
-      const ailContent = fs.readFileSync(res.ailFile, "utf-8");
-      expect(ailContent).toContain("$square");
+      const aiceContent = fs.readFileSync(res.aiceFile, "utf-8");
+      expect(aiceContent).toContain("$square");
       expect(res.collapsedIdioms).toBeGreaterThanOrEqual(1);
     });
 
@@ -135,15 +135,15 @@ describe("Phase 2: Bidirectional Companion Sync, Rich LSP, and MCP Server", () =
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
-      const configPath = path.join(tmpDir, "ail.config.json");
+      const configPath = path.join(tmpDir, "aice.config.json");
       fs.writeFileSync(
         configPath,
         JSON.stringify({ mode: "side-by-side", targetLanguage: "typescript" }, null, 2),
       );
 
-      const ailFile = path.join(srcDir, "greeter.ts.ail");
+      const aiceFile = path.join(srcDir, "greeter.ts.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `module greeter
 fn greet(name: str) -> str:
   ret "Hello " + name
@@ -151,7 +151,7 @@ fn greet(name: str) -> str:
       );
 
       let reverseSyncTriggered = false;
-      const watcher = new AilWatcher({
+      const watcher = new AiceWatcher({
         dir: tmpDir,
         projectRoot: tmpDir,
         bidirectional: true,
@@ -161,7 +161,7 @@ fn greet(name: str) -> str:
       });
 
       // Forward compile
-      const compileRes = await watcher.compileFile(ailFile);
+      const compileRes = await watcher.compileFile(aiceFile);
       expect(compileRes.success).toBe(true);
       expect(fs.existsSync(compileRes.targetFile)).toBe(true);
 
@@ -176,7 +176,7 @@ fn greet(name: str) -> str:
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
-      const configPath = path.join(tmpDir, "ail.config.json");
+      const configPath = path.join(tmpDir, "aice.config.json");
       fs.writeFileSync(
         configPath,
         JSON.stringify({ mode: "side-by-side", targetLanguage: "typescript" }, null, 2),
@@ -188,34 +188,34 @@ fn greet(name: str) -> str:
       );
       fs.writeFileSync(
         path.join(srcDir, "fileB.ts"),
-        `export function bar(): string { return "ail"; }\n`,
+        `export function bar(): string { return "aice"; }\n`,
       );
 
       const syncResults = await syncProjectFromTargets(tmpDir);
       expect(syncResults.length).toBeGreaterThanOrEqual(2);
       expect(syncResults.every((r) => r.success)).toBe(true);
       for (const r of syncResults) {
-        expect(fs.existsSync(r.ailFile)).toBe(true);
+        expect(fs.existsSync(r.aiceFile)).toBe(true);
       }
     });
   });
 
   describe("2. Rich LSP Actions", () => {
     it("provides project idiom ($idiom) hover preview with expanded template and token savings", () => {
-      const analyzer = new AilAnalyzer();
+      const analyzer = new AiceAnalyzer();
       analyzer.setIdioms({
         clamp: {
           name: "clamp",
           kind: "expr",
           params: [{ name: "val" }, { name: "min" }, { name: "max" }],
-          templateAil: "if val < min => min elif val > max => max else => val",
+          templateAice: "if val < min => min elif val > max => max else => val",
           occurrences: 5,
           tokensPerOccurrenceSaved: 8,
           netTokenSavings: 40,
         },
       });
 
-      const uri = "file:///workspace/test.ail";
+      const uri = "file:///workspace/test.aice";
       const source = `module test
 fn bound(x: int) -> int = $clamp(x, 0, 100)
 `;
@@ -232,20 +232,20 @@ fn bound(x: int) -> int = $clamp(x, 0, 100)
     });
 
     it("includes project idioms in completion items", () => {
-      const analyzer = new AilAnalyzer();
+      const analyzer = new AiceAnalyzer();
       analyzer.setIdioms({
         fast_sqrt: {
           name: "fast_sqrt",
           kind: "expr",
           params: [{ name: "x" }],
-          templateAil: "x ** 0.5",
+          templateAice: "x ** 0.5",
           occurrences: 3,
           tokensPerOccurrenceSaved: 4,
           netTokenSavings: 12,
         },
       });
 
-      const uri = "file:///workspace/math.ail";
+      const uri = "file:///workspace/math.aice";
       analyzer.setDocument(uri, "module math\nlet y = ");
 
       const completions = analyzer.getCompletions(uri, { line: 1, character: 8 });
@@ -255,8 +255,8 @@ fn bound(x: int) -> int = $clamp(x, 0, 100)
     });
 
     it("returns structured document symbols for functions, types, and classes", () => {
-      const analyzer = new AilAnalyzer();
-      const uri = "file:///workspace/symbols.ail";
+      const analyzer = new AiceAnalyzer();
+      const uri = "file:///workspace/symbols.aice";
       const source = `module domain
 
 type User:
@@ -300,9 +300,9 @@ fn transfer(from: str, to: str, amt: int) -> bool:
       expect(transferSym?.kind).toBe(SymbolKind.Function);
     });
 
-    it("formats unformatted AIL document via formatDocument", () => {
-      const analyzer = new AilAnalyzer();
-      const uri = "file:///workspace/unformatted.ail";
+    it("formats unformatted AICE document via formatDocument", () => {
+      const analyzer = new AiceAnalyzer();
+      const uri = "file:///workspace/unformatted.aice";
       const unformatted = `fn   add(  a :  int , b : int ) -> int :
   ret   a+b
 `;
@@ -315,14 +315,14 @@ fn transfer(from: str, to: str, amt: int) -> bool:
     });
 
     it("synthesizes quickfix code actions for autonomous self-repair", () => {
-      const analyzer = new AilAnalyzer();
-      const uri = "file:///workspace/immutable.ail";
-      const brokenAil = `fn update_balance(initial: int) -> int:
+      const analyzer = new AiceAnalyzer();
+      const uri = "file:///workspace/immutable.aice";
+      const brokenAice = `fn update_balance(initial: int) -> int:
   let balance = initial
   balance = balance + 100
   return balance
 `;
-      analyzer.setDocument(uri, brokenAil);
+      analyzer.setDocument(uri, brokenAice);
 
       const actions = analyzer.getCodeActions(uri, {
         start: { line: 2, character: 2 },
@@ -339,7 +339,7 @@ fn transfer(from: str, to: str, amt: int) -> bool:
       expect(repairedText).toContain("let mut balance = initial");
     });
 
-    it("handles LSP JSON-RPC requests via AilLspServer", async () => {
+    it("handles LSP JSON-RPC requests via AiceLspServer", async () => {
       const inStream = new Readable({ read() {} });
       const outStream = new Writable({
         write(_chunk, _encoding, callback) {
@@ -347,7 +347,7 @@ fn transfer(from: str, to: str, amt: int) -> bool:
         },
       });
 
-      const server = new AilLspServer(inStream, outStream);
+      const server = new AiceLspServer(inStream, outStream);
       let capturedResponse: any = null;
       server.connection.sendResponse = (_id: any, result: any) => {
         capturedResponse = result;
@@ -365,14 +365,14 @@ fn transfer(from: str, to: str, amt: int) -> bool:
       expect(capturedResponse?.capabilities?.codeActionProvider).toBe(true);
 
       // 2. didOpen
-      const testUri = "file:///demo.ail";
+      const testUri = "file:///demo.aice";
       server.handleMessage({
         jsonrpc: "2.0",
         method: "textDocument/didOpen",
         params: {
           textDocument: {
             uri: testUri,
-            languageId: "ail",
+            languageId: "aice",
             version: 1,
             text: 'fn hello() -> str = "world"\n',
           },
@@ -391,31 +391,31 @@ fn transfer(from: str, to: str, amt: int) -> bool:
     });
   });
 
-  describe("3. First-Class MCP Server (`AilMcpServer`)", () => {
-    it("advertises all 6 AIL productivity tools in tools/list", async () => {
-      const server = new AilMcpServer();
+  describe("3. First-Class MCP Server (`AiceMcpServer`)", () => {
+    it("advertises all 6 AICE productivity tools in tools/list", async () => {
+      const server = new AiceMcpServer();
 
       const initResult = (await server.handleRequest(1, "initialize", {})) as any;
       expect(initResult.protocolVersion).toBe("2024-11-05");
-      expect(initResult.serverInfo.name).toBe("ail-mcp");
+      expect(initResult.serverInfo.name).toBe("aice-mcp");
 
       const listResult = (await server.handleRequest(2, "tools/list", {})) as any;
       expect(listResult.tools).toHaveLength(6);
 
       const toolNames = listResult.tools.map((t: any) => t.name);
-      expect(toolNames).toContain("ail_context");
-      expect(toolNames).toContain("ail_outline");
-      expect(toolNames).toContain("ail_splice");
-      expect(toolNames).toContain("ail_idioms");
-      expect(toolNames).toContain("ail_test");
-      expect(toolNames).toContain("ail_evolve");
+      expect(toolNames).toContain("aice_context");
+      expect(toolNames).toContain("aice_outline");
+      expect(toolNames).toContain("aice_splice");
+      expect(toolNames).toContain("aice_idioms");
+      expect(toolNames).toContain("aice_test");
+      expect(toolNames).toContain("aice_evolve");
     });
 
-    it("executes ail_outline via tools/call with high token reduction", async () => {
-      const server = new AilMcpServer();
-      const testAil = path.join(tmpDir, "outline_test.ail");
+    it("executes aice_outline via tools/call with high token reduction", async () => {
+      const server = new AiceMcpServer();
+      const testAice = path.join(tmpDir, "outline_test.aice");
       fs.writeFileSync(
-        testAil,
+        testAice,
         `module outline_test
 
 class Vector2:
@@ -429,8 +429,8 @@ class Vector2:
       );
 
       const res = (await server.handleRequest(10, "tools/call", {
-        name: "ail_outline",
-        arguments: { path: testAil },
+        name: "aice_outline",
+        arguments: { path: testAice },
       })) as any;
 
       expect(res.content).toBeDefined();
@@ -439,11 +439,11 @@ class Vector2:
       expect(res.content[0].text).toContain("fn length()");
     });
 
-    it("executes ail_context via tools/call", async () => {
-      const server = new AilMcpServer();
-      const testAil = path.join(tmpDir, "ctx_test.ail");
+    it("executes aice_context via tools/call", async () => {
+      const server = new AiceMcpServer();
+      const testAice = path.join(tmpDir, "ctx_test.aice");
       fs.writeFileSync(
-        testAil,
+        testAice,
         `module ctx_test
 fn greet(name: str) -> str:
   ret "Hello " + name
@@ -451,19 +451,19 @@ fn greet(name: str) -> str:
       );
 
       const res = (await server.handleRequest(11, "tools/call", {
-        name: "ail_context",
-        arguments: { path: testAil },
+        name: "aice_context",
+        arguments: { path: testAice },
       })) as any;
 
       expect(res.content).toBeDefined();
       expect(res.content[0].text).toContain("fn greet");
     });
 
-    it("executes ail_splice via tools/call to replace symbol in AST", async () => {
-      const server = new AilMcpServer();
-      const testAil = path.join(tmpDir, "splice_test.ail");
+    it("executes aice_splice via tools/call to replace symbol in AST", async () => {
+      const server = new AiceMcpServer();
+      const testAice = path.join(tmpDir, "splice_test.aice");
       fs.writeFileSync(
-        testAil,
+        testAice,
         `module splice_test
 
 fn compute(x: int) -> int:
@@ -472,24 +472,24 @@ fn compute(x: int) -> int:
       );
 
       const res = (await server.handleRequest(12, "tools/call", {
-        name: "ail_splice",
+        name: "aice_splice",
         arguments: {
-          filePath: testAil,
+          filePath: testAice,
           symbolSelector: "compute",
-          newAilCode: `fn compute(x: int) -> int:\n  ret x * 2\n`,
+          newAiceCode: `fn compute(x: int) -> int:\n  ret x * 2\n`,
         },
       })) as any;
 
       expect(res.isError).toBeFalsy();
       expect(res.content[0].text).toContain("Successfully spliced symbol 'compute'");
 
-      const modified = fs.readFileSync(testAil, "utf-8");
+      const modified = fs.readFileSync(testAice, "utf-8");
       expect(modified).toContain("ret x * 2");
     });
 
-    it("executes ail_idioms list and scan via tools/call", async () => {
-      const server = new AilMcpServer();
-      const configPath = path.join(tmpDir, "ail.config.json");
+    it("executes aice_idioms list and scan via tools/call", async () => {
+      const server = new AiceMcpServer();
+      const configPath = path.join(tmpDir, "aice.config.json");
       fs.writeFileSync(
         configPath,
         JSON.stringify(
@@ -499,7 +499,7 @@ fn compute(x: int) -> int:
                 name: "square",
                 kind: "expr",
                 params: [{ name: "x" }],
-                templateAil: "x * x",
+                templateAice: "x * x",
                 occurrences: 3,
                 tokensPerOccurrenceSaved: 3,
                 netTokenSavings: 9,
@@ -512,7 +512,7 @@ fn compute(x: int) -> int:
       );
 
       const res = (await server.handleRequest(13, "tools/call", {
-        name: "ail_idioms",
+        name: "aice_idioms",
         arguments: { dir: tmpDir, action: "list" },
       })) as any;
 
@@ -520,10 +520,10 @@ fn compute(x: int) -> int:
       expect(res.content[0].text).toContain("x * x");
     });
 
-    it("executes ail_evolve via tools/call", async () => {
-      const server = new AilMcpServer();
+    it("executes aice_evolve via tools/call", async () => {
+      const server = new AiceMcpServer();
       const res = (await server.handleRequest(14, "tools/call", {
-        name: "ail_evolve",
+        name: "aice_evolve",
         arguments: { cycles: 1, restarts: 1, seed: 100, includeCorpus: false },
       })) as any;
 
@@ -544,7 +544,7 @@ fn compute(x: int) -> int:
         },
       });
 
-      new AilMcpServer(inStream, outStream);
+      new AiceMcpServer(inStream, outStream);
 
       // Send line-delimited JSON-RPC request
       const lineMsg = `${JSON.stringify({ jsonrpc: "2.0", id: "req-1", method: "ping", params: {} })}\n`;
@@ -575,36 +575,36 @@ fn compute(x: int) -> int:
     });
 
     it("enforces path confinement rejecting paths escaping workspace root", async () => {
-      const server = new AilMcpServer(undefined, undefined, { workspaceRoot: tmpDir });
+      const server = new AiceMcpServer(undefined, undefined, { workspaceRoot: tmpDir });
       await expect(
         server.handleRequest(100, "tools/call", {
-          name: "ail_outline",
+          name: "aice_outline",
           arguments: { path: "../../../etc/passwd" },
         }),
       ).rejects.toThrow("Access denied: path '../../../etc/passwd' escapes workspace root");
     });
 
     it("rejects test targets starting with '-' to prevent flag injection", async () => {
-      const server = new AilMcpServer(undefined, undefined, { workspaceRoot: tmpDir });
+      const server = new AiceMcpServer(undefined, undefined, { workspaceRoot: tmpDir });
       await expect(
         server.handleRequest(101, "tools/call", {
-          name: "ail_test",
+          name: "aice_test",
           arguments: { target: "--danger-flag" },
         }),
       ).rejects.toThrow("Invalid test target: must not start with '-'");
     });
 
-    it("returns empty edits without crashing on malformed .ail syntax in formatDocument", () => {
-      const analyzer = new AilAnalyzer();
-      const uri = "file:///test/broken.ail";
+    it("returns empty edits without crashing on malformed .aice syntax in formatDocument", () => {
+      const analyzer = new AiceAnalyzer();
+      const uri = "file:///test/broken.aice";
       analyzer.setDocument(uri, 'fn broken() {\n  let s = "unterminated string\n');
       const edits = analyzer.formatDocument(uri);
       expect(edits).toEqual([]);
     });
 
     it("evicts stale file hashes upon modification so only latest content is retained", () => {
-      const cache = new AilAstCache(50);
-      const testFile = path.join(tmpDir, "stale_test.ail");
+      const cache = new AiceAstCache(50);
+      const testFile = path.join(tmpDir, "stale_test.aice");
 
       const v1 = "fn foo(): int => 1;";
       const v2 = "fn foo(): int => 2;";

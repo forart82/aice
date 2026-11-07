@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * AIL CLI Compiler & Verification Tool.
- * Provides `ail compile`, `ail compile-all`, and `ail verify [--json]`.
+ * AICE CLI Compiler & Verification Tool.
+ * Provides `aice compile`, `aice compile-all`, and `aice verify [--json]`.
  */
 
 import * as fs from "node:fs";
@@ -10,7 +10,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
@@ -28,9 +28,9 @@ import {
   getTargetOutputPath,
   type TargetLanguage,
 } from "../src/emitters/index.js";
-import { AilLspServer } from "../src/lsp/server.js";
-import { AilMcpServer } from "../src/mcp/index.js";
-import { MultiLineReporter, runAilTests, translateTrace } from "../src/runner/index.js";
+import { AiceLspServer } from "../src/lsp/server.js";
+import { AiceMcpServer } from "../src/mcp/index.js";
+import { MultiLineReporter, runAiceTests, translateTrace } from "../src/runner/index.js";
 import {
   applyAiShield,
   applyCompanionShield,
@@ -68,8 +68,8 @@ import {
   diffFiles,
   type FmtOptions,
   type FmtResult,
-  formatAilPath,
-  formatAilSource,
+  formatAicePath,
+  formatAiceSource,
   formatParitySummaryJson,
   formatParitySummaryTerminal,
   generateContext,
@@ -96,9 +96,9 @@ import { syncProjectFromTargets, watchProject } from "../src/watcher/index.js";
 const program = new Command();
 
 program
-  .name("ail")
-  .description("AIL: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.7.16");
+  .name("aice")
+  .description("AICE: Token-Efficient Homoiconic Bidirectional Compiler CLI")
+  .version("0.8.0");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -164,8 +164,8 @@ export function executeCompile(
       } else {
         const detected = detectTargetFromPath(file);
         const base = path.basename(file);
-        const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-        const innerExt = path.extname(withoutAil).toLowerCase();
+        const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+        const innerExt = path.extname(withoutAice).toLowerCase();
         if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
           targetLang = detected;
         } else {
@@ -187,7 +187,7 @@ export function executeCompile(
       if (options.out) {
         outPath = path.resolve(process.cwd(), options.out);
       } else if (options.outDir) {
-        const effectiveConfig: AilProjectConfig = {
+        const effectiveConfig: AiceProjectConfig = {
           ...config,
           outDir: options.outDir,
           mode: "isolated",
@@ -221,7 +221,7 @@ export function executeCompile(
 
     const files = resolved.files;
     if (files.length === 0) {
-      console.log(`No .ail files found in ${targetArg ?? dirPath}`);
+      console.log(`No .aice files found in ${targetArg ?? dirPath}`);
       return;
     }
 
@@ -260,8 +260,8 @@ export function executeCompile(
           targetLang = options.target as TargetLanguage;
         } else {
           const base = path.basename(f);
-          const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-          const innerExt = path.extname(withoutAil).toLowerCase();
+          const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+          const innerExt = path.extname(withoutAice).toLowerCase();
           if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
             targetLang = detectTargetFromPath(relPath);
           } else {
@@ -281,7 +281,7 @@ export function executeCompile(
         // Output path: CLI flag --out-dir retains highest priority
         let outPath: string;
         if (options.outDir) {
-          const effectiveConfig: AilProjectConfig = {
+          const effectiveConfig: AiceProjectConfig = {
             ...config,
             outDir: options.outDir,
             mode: "isolated",
@@ -331,8 +331,8 @@ export function executeCompile(
 // Command: compile [target]
 program
   .command("compile")
-  .description("Compile .ail source file(s) or directory to target language")
-  .argument("[target]", "Path to .ail source file or directory (omitted for workspace scan)")
+  .description("Compile .aice source file(s) or directory to target language")
+  .argument("[target]", "Path to .aice source file or directory (omitted for workspace scan)")
   .option("-o, --out <out>", "Output file path (single file mode)")
   .option("--out-dir <outDir>", "Optional destination directory for emitted files")
   .option(
@@ -367,9 +367,9 @@ program
 program
   .command("compile-all")
   .description(
-    "Recursively compile all .ail source files in a directory (alias for 'compile [dir]')",
+    "Recursively compile all .aice source files in a directory (alias for 'compile [dir]')",
   )
-  .argument("[dir]", "Directory to search for .ail files", ".")
+  .argument("[dir]", "Directory to search for .aice files", ".")
   .option("--out-dir <outDir>", "Optional destination directory for emitted files")
   .option("-t, --target <target>", "Target language")
   .option("--check", "Run the static type checker before emitting")
@@ -398,8 +398,8 @@ program
 // Command: clean [dir]
 program
   .command("clean")
-  .description("Remove all emitted target files generated from .ail files in a directory")
-  .argument("[dir]", "Directory containing .ail files", ".")
+  .description("Remove all emitted target files generated from .aice files in a directory")
+  .argument("[dir]", "Directory containing .aice files", ".")
   .action((dir: string) => {
     try {
       const searchDir = path.resolve(process.cwd(), dir);
@@ -411,7 +411,7 @@ program
       const projectRoot = findProjectRoot(searchDir, process.cwd());
       const config = loadProjectConfig(projectRoot);
 
-      function findAilFiles(current: string): string[] {
+      function findAiceFiles(current: string): string[] {
         let results: string[] = [];
         const entries = fs.readdirSync(current, { withFileTypes: true });
         for (const entry of entries) {
@@ -420,18 +420,18 @@ program
             entry.isDirectory() &&
             entry.name !== "node_modules" &&
             entry.name !== ".git" &&
-            entry.name !== ".ail-build" &&
+            entry.name !== ".aice-build" &&
             entry.name !== config.outDir
           ) {
-            results = results.concat(findAilFiles(full));
-          } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+            results = results.concat(findAiceFiles(full));
+          } else if (entry.isFile() && entry.name.endsWith(".aice")) {
             results.push(full);
           }
         }
         return results;
       }
 
-      const files = findAilFiles(searchDir);
+      const files = findAiceFiles(searchDir);
       let removedCount = 0;
 
       for (const f of files) {
@@ -482,9 +482,9 @@ program
 program
   .command("verify")
   .description(
-    "Verify syntactic and type soundness of an .ail file, or run automated multi-file roundtrip parity gate",
+    "Verify syntactic and type soundness of an .aice file, or run automated multi-file roundtrip parity gate",
   )
-  .argument("[target]", "Path to the .ail source file, target file, or directory")
+  .argument("[target]", "Path to the .aice source file, target file, or directory")
   .option("--json", "Output machine-readable telemetry JSON")
   .option("--fix", "Autonomously repair fixable violations before verification")
   .option(
@@ -526,7 +526,7 @@ program
 
       if (!target) {
         console.error(
-          `❌ Error: Missing required file argument for verification. Use 'ail verify <file>' or 'ail verify --parity'.`,
+          `❌ Error: Missing required file argument for verification. Use 'aice verify <file>' or 'aice verify --parity'.`,
         );
         process.exit(1);
       }
@@ -547,7 +547,7 @@ program
                     file,
                     span: { start: { line: 1, column: 1 }, end: { line: 1, column: 1 } },
                     violation: {
-                      code: "AIL_E0001_FILE_NOT_FOUND",
+                      code: "AICE_E0001_FILE_NOT_FOUND",
                       message: `File not found: ${file}`,
                     },
                     caret_slice: "",
@@ -614,7 +614,7 @@ program
 // Command: test [target]
 program
   .command("test")
-  .description("Execute tests across .ail files and test suites with auto-recompilation")
+  .description("Execute tests across .aice files and test suites with auto-recompilation")
   .argument("[target]", "Optional path to a test file, directory, or omitted to run all tests")
   .option("-r, --reporter <type>", "Test reporter to use (e.g. compact, verbose, dots, json)")
   .option("--json", "Output test results as machine-readable JSON")
@@ -622,7 +622,7 @@ program
   .action(
     async (target?: string, options?: { reporter?: string; json?: boolean; verbose?: boolean }) => {
       try {
-        const result = await runAilTests(target, {
+        const result = await runAiceTests(target, {
           reporter: options?.reporter,
           json: options?.json,
           verbose: options?.verbose,
@@ -643,7 +643,7 @@ program
           );
           if (result.compiledFiles && result.compiledFiles.length > 0) {
             console.log(
-              `  (Recompiled ${result.compiledFiles.length} .ail target(s) before test execution)`,
+              `  (Recompiled ${result.compiledFiles.length} .aice target(s) before test execution)`,
             );
           }
           process.exit(0);
@@ -666,7 +666,7 @@ program
 // Command: trace <trace...>
 program
   .command("trace")
-  .description("Translate runtime stack trace or file:line reference to companion .ail location")
+  .description("Translate runtime stack trace or file:line reference to companion .aice location")
   .argument("<trace...>", "Stack trace string or file:line reference to translate")
   .option("--cwd <dir>", "Project directory context (defaults to current working directory)")
   .action((traceArgs: string[], options?: { cwd?: string }) => {
@@ -688,8 +688,8 @@ program
 // Command: fix <file>
 program
   .command("fix")
-  .description("Autonomously repair syntax, immutability, and type violations in an .ail file")
-  .argument("<file>", "Path to the .ail source file to repair")
+  .description("Autonomously repair syntax, immutability, and type violations in an .aice file")
+  .argument("<file>", "Path to the .aice source file to repair")
   .option("--dry-run", "Display candidate repairs and unified diffs without modifying disk")
   .option("--json", "Output machine-readable JSON repair telemetry")
   .action((file: string, options: { dryRun?: boolean; json?: boolean }) => {
@@ -753,10 +753,10 @@ program
 program
   .command("decompile")
   .description(
-    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs, .py, .php, .kt, .go, .rs) into an .ail source file",
+    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs, .py, .php, .kt, .go, .rs) into an .aice source file",
   )
   .argument("<file>", "Path to the target source file")
-  .option("-o, --out <out>", "Output .ail file path")
+  .option("-o, --out <out>", "Output .aice file path")
   .option(
     "-t, --target <target>",
     "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
@@ -775,10 +775,10 @@ program
 
       const outPath = options.out
         ? path.resolve(process.cwd(), options.out)
-        : path.resolve(process.cwd(), `${file}.ail`);
+        : path.resolve(process.cwd(), `${file}.aice`);
 
       fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, result.ail, "utf-8");
+      fs.writeFileSync(outPath, result.aice, "utf-8");
 
       console.log(
         `✔ Decompiled ${file} -> ${path.relative(process.cwd(), outPath)} [${targetLang}]`,
@@ -792,7 +792,7 @@ program
 // Command: roundtrip <file>
 program
   .command("roundtrip")
-  .description("Verify Put/Get stability by decompiling to .ail and recompiling to target")
+  .description("Verify Put/Get stability by decompiling to .aice and recompiling to target")
   .argument("<file>", "Path to target source file")
   .option(
     "-t, --target <target>",
@@ -814,7 +814,7 @@ program
       console.log(`Target Language:     ${res.target}`);
       console.log(`Trivia Entries:      ${res.triviaEntriesCount}`);
       console.log(`Original Size:       ${res.original.length} chars`);
-      console.log(`AIL Representation:  ${res.ail.length} chars`);
+      console.log(`AICE Representation:  ${res.aice.length} chars`);
       console.log(`Reconstructed Size:  ${res.reconstructed.length} chars`);
       console.log(
         `Stability Status:    ${res.isIdentical ? "✔ IDENTICAL (Lossless Put/Get)" : "✔ SEMANTICALLY RECONSTRUCTED"}`,
@@ -832,17 +832,17 @@ program
 // Command: lsp
 program
   .command("lsp")
-  .description("Launch the AIL Language Server Protocol (LSP) daemon over stdio")
+  .description("Launch the AICE Language Server Protocol (LSP) daemon over stdio")
   .action(() => {
-    new AilLspServer(process.stdin, process.stdout);
+    new AiceLspServer(process.stdin, process.stdout);
   });
 
 // Command: mcp
 program
   .command("mcp")
-  .description("Launch the AIL Model Context Protocol (MCP) server over stdio")
+  .description("Launch the AICE Model Context Protocol (MCP) server over stdio")
   .action(() => {
-    new AilMcpServer(process.stdin, process.stdout);
+    new AiceMcpServer(process.stdin, process.stdout);
   });
 
 // Command: tokens [path]
@@ -928,7 +928,7 @@ program
           } else {
             if (options.markdown || !process.stdout.isTTY) {
               console.log(
-                `\n=== AIL 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`,
+                `\n=== AICE 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`,
               );
               if (options.projects) {
                 console.log(formatProjectsMarkdownTable(report));
@@ -995,7 +995,7 @@ program
   .command("benchmark")
   .aliases(["bench"])
   .description(
-    "Run the 10 Real-World AIL 2.0 Benchmarks Suite (evaluating Without AIL vs AIL Without Idioms vs AIL With Idioms)",
+    "Run the 10 Real-World AICE 2.0 Benchmarks Suite (evaluating Without AICE vs AICE Without Idioms vs AICE With Idioms)",
   )
   .option("--json", "Output structured JSON report")
   .option("--markdown", "Output formatted GitHub Flavored Markdown report")
@@ -1022,7 +1022,7 @@ program
 program
   .command("adopt")
   .description(
-    "Adopt an existing codebase into AIL side-by-side architecture or standalone companion workspace",
+    "Adopt an existing codebase into AICE side-by-side architecture or standalone companion workspace",
   )
   .argument("[dir]", "Target codebase directory or destination companion workspace", ".")
   .option("-c, --concurrency <number>", "Worker concurrency for parallel decompilation", (val) =>
@@ -1030,7 +1030,7 @@ program
   )
   .option("--no-shield", "Skip generating AI shield rules (.vscode, ignores, AGENTS.md)")
   .option("--no-lock", "Skip locking target files as read-only (chmod 444)")
-  .option("--overwrite", "Force re-decompilation of existing .ail files")
+  .option("--overwrite", "Force re-decompilation of existing .aice files")
   .option("--dry-run", "Calculate plan and tokenomics metrics without mutating disk")
   .option(
     "--idioms",
@@ -1038,17 +1038,17 @@ program
   )
   .option(
     "--isolate",
-    "Adopt project into isolated mode (src/ contains only .ail, target files in .ail-build/)",
+    "Adopt project into isolated mode (src/ contains only .aice, target files in .aice-build/)",
   )
   .option(
     "--companion <targetDir>",
-    "Adopt an external project into a standalone companion AIL workspace",
+    "Adopt an external project into a standalone companion AICE workspace",
   )
   .option(
     "--out-dir <dir>",
-    "Build artifact directory for isolated mode (default: .ail-build) or target source directory for companion mode",
+    "Build artifact directory for isolated mode (default: .aice-build) or target source directory for companion mode",
   )
-  .option("--source-dir <dir>", "Source directory containing .ail code (default: src)")
+  .option("--source-dir <dir>", "Source directory containing .aice code (default: src)")
   .action(
     async (
       dir: string,
@@ -1129,7 +1129,7 @@ program
         }
 
         if (isCompanion) {
-          console.log(`\n=== AIL Companion Adoption Summary ===`);
+          console.log(`\n=== AICE Companion Adoption Summary ===`);
           console.log(`Companion Workspace: ${path.relative(process.cwd(), companionDir) || "."}`);
           console.log(
             `Target Project:      ${path.relative(process.cwd(), targetProjectDir) || "."}`,
@@ -1140,7 +1140,7 @@ program
             `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
           );
           console.log(
-            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
+            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAiceTokens} tokens)`,
           );
           console.log(
             `AI Shield:           ${
@@ -1158,20 +1158,20 @@ program
           }
           console.log(`Target Files:        ✔ Untouched (100% clean, unlocked)`);
         } else {
-          console.log(`\n=== AIL ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
+          console.log(`\n=== AICE ${isIsolated ? "Isolated" : "Side-by-Side"} Adoption Summary ===`);
           console.log(
             `Directory:           ${path.relative(process.cwd(), targetProjectDir) || "."}`,
           );
           if (isIsolated) {
             console.log(`Mode:                isolated`);
             console.log(`Source Dir:          ${options.sourceDir ?? "src"}`);
-            console.log(`Build Out Dir:       ${options.outDir ?? ".ail-build"}`);
+            console.log(`Build Out Dir:       ${options.outDir ?? ".aice-build"}`);
           }
           console.log(
             `Files:               ${summary.totalIngested} ingested, ${summary.totalSkipped} skipped, ${summary.totalFailed} failed (${summary.totalDiscovered} total)`,
           );
           console.log(
-            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAilTokens} tokens)`,
+            `Token Savings:       ${summary.cl100kSavingsPct.toFixed(1)}% cl100k (${summary.totalTargetTokens} -> ${summary.totalAiceTokens} tokens)`,
           );
           if (summary.idiomsSynthesized) {
             console.log(
@@ -1219,8 +1219,8 @@ program
 program
   .command("watch")
   .alias("dev")
-  .description("Watch .ail files and incrementally recompile side-by-side on change")
-  .argument("[dir]", "Directory to watch for .ail files", ".")
+  .description("Watch .aice files and incrementally recompile side-by-side on change")
+  .argument("[dir]", "Directory to watch for .aice files", ".")
   .option("--lock", "Lock compiled target files (chmod 444)")
   .option("--no-lock", "Do not lock compiled target files")
   .option(
@@ -1229,7 +1229,7 @@ program
     (val) => Number.parseInt(val, 10),
     50,
   )
-  .option("--bidirectional", "Watch target files and reverse-sync external edits back to .ail")
+  .option("--bidirectional", "Watch target files and reverse-sync external edits back to .aice")
   .action(
     async (
       dir: string,
@@ -1288,24 +1288,24 @@ program
           debounceMs,
           lockTargets,
           bidirectional,
-          onCompileSuccess: (ailFile, targetFile, durationMs) => {
-            const relAil = path.relative(process.cwd(), ailFile);
+          onCompileSuccess: (aiceFile, targetFile, durationMs) => {
+            const relAice = path.relative(process.cwd(), aiceFile);
             const relTarget = path.relative(process.cwd(), targetFile);
-            console.log(`✔ [COMPILE] ${relAil} -> ${relTarget} (${Math.round(durationMs)}ms)`);
+            console.log(`✔ [COMPILE] ${relAice} -> ${relTarget} (${Math.round(durationMs)}ms)`);
           },
-          onCompileError: (ailFile, error) => {
-            const relAil = path.relative(process.cwd(), ailFile);
-            console.error(`❌ [ERROR] Failed to compile ${relAil}: ${error.message}`);
+          onCompileError: (aiceFile, error) => {
+            const relAice = path.relative(process.cwd(), aiceFile);
+            console.error(`❌ [ERROR] Failed to compile ${relAice}: ${error.message}`);
           },
-          onFileDeleted: (ailFile, targetFile) => {
-            const relAil = path.relative(process.cwd(), ailFile);
+          onFileDeleted: (aiceFile, targetFile) => {
+            const relAice = path.relative(process.cwd(), aiceFile);
             const relTarget = path.relative(process.cwd(), targetFile);
-            console.log(`ℹ [DELETE] Removed ${relAil} (target: ${relTarget})`);
+            console.log(`ℹ [DELETE] Removed ${relAice} (target: ${relTarget})`);
           },
-          onReverseSyncSuccess: (targetFile, ailFile, durationMs) => {
+          onReverseSyncSuccess: (targetFile, aiceFile, durationMs) => {
             const relTarget = path.relative(process.cwd(), targetFile);
-            const relAil = path.relative(process.cwd(), ailFile);
-            console.log(`✔ [REVERSE-SYNC] ${relTarget} -> ${relAil} (${Math.round(durationMs)}ms)`);
+            const relAice = path.relative(process.cwd(), aiceFile);
+            console.log(`✔ [REVERSE-SYNC] ${relTarget} -> ${relAice} (${Math.round(durationMs)}ms)`);
           },
           onReverseSyncError: (targetFile, error) => {
             const relTarget = path.relative(process.cwd(), targetFile);
@@ -1317,7 +1317,7 @@ program
 
         const cleanup = async () => {
           process.stdout.write("\x1B[?25h\n");
-          console.log("Stopping AIL watch daemon...");
+          console.log("Stopping AICE watch daemon...");
           await watcher.stop();
           process.exit(0);
         };
@@ -1336,7 +1336,7 @@ program
 program
   .command("sync")
   .description(
-    "Synchronize external edits from target files (.ts, .py, .go, .rs, etc.) back into .ail sources",
+    "Synchronize external edits from target files (.ts, .py, .go, .rs, etc.) back into .aice sources",
   )
   .argument("[dir]", "Directory containing project or target files", ".")
   .option("--json", "Output machine-readable JSON telemetry")
@@ -1359,15 +1359,15 @@ program
           console.log(`\n=== Bidirectional Companion Sync: ${dir || "."} ===`);
           for (const r of results) {
             const relTarget = path.relative(process.cwd(), r.targetFile);
-            const relAil = path.relative(process.cwd(), r.ailFile);
+            const relAice = path.relative(process.cwd(), r.aiceFile);
             if (r.success) {
               const idiomText =
                 r.collapsedIdioms > 0 ? ` (${r.collapsedIdioms} idioms collapsed)` : "";
               console.log(
-                `✔ ${relTarget} -> ${relAil} [${Math.round(r.durationMs)}ms]${idiomText}`,
+                `✔ ${relTarget} -> ${relAice} [${Math.round(r.durationMs)}ms]${idiomText}`,
               );
             } else {
-              console.error(`❌ ${relTarget} -> ${relAil}: ${r.error?.message}`);
+              console.error(`❌ ${relTarget} -> ${relAice}: ${r.error?.message}`);
             }
           }
         }
@@ -1382,24 +1382,24 @@ program
 const ejectCmd = program
   .command("eject")
   .description(
-    "Eject AIL side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields",
+    "Eject AICE side-by-side or isolated mode: restore target files, unlock targets, and revert AI shields",
   )
   .argument("[dir]", "Target project directory", ".")
-  .option("--remove-ail", "Delete all .ail source files")
+  .option("--remove-aice", "Delete all .aice source files")
   .option(
     "--from-build",
-    "Restore target files from .ail-build back to sourceDir and delete .ail files",
+    "Restore target files from .aice-build back to sourceDir and delete .aice files",
   )
-  .option("--keep-ail", "Preserve .ail source files while restoring target files")
-  .option("--source-dir <dir>", "Source directory containing .ail code (default: src)")
-  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .ail-build)")
+  .option("--keep-aice", "Preserve .aice source files while restoring target files")
+  .option("--source-dir <dir>", "Source directory containing .aice code (default: src)")
+  .option("--out-dir <dir>", "Build artifact directory for isolated mode (default: .aice-build)")
   .action(
     async (
       dir: string,
       options: {
-        removeAil?: boolean;
+        removeAice?: boolean;
         fromBuild?: boolean;
-        keepAil?: boolean;
+        keepAice?: boolean;
         sourceDir?: string;
         outDir?: string;
       },
@@ -1414,14 +1414,14 @@ const ejectCmd = program
         const ejectResult = await ejectProject({
           dir: targetDir,
           fromBuild: Boolean(options.fromBuild),
-          removeAil: options.removeAil,
-          keepAil: options.keepAil,
+          removeAice: options.removeAice,
+          keepAice: options.keepAice,
           sourceDir: options.sourceDir,
           outDir: options.outDir,
         });
 
         // Print confirmation
-        console.log(`\n=== AIL Eject Complete ===`);
+        console.log(`\n=== AICE Eject Complete ===`);
         console.log(`Directory:           ${path.relative(process.cwd(), targetDir) || "."}`);
         if (ejectResult.mode === "isolated") {
           console.log(`Mode:                isolated (--from-build)`);
@@ -1447,9 +1447,9 @@ const ejectCmd = program
           `AI Shield:           Reverted (${ejectResult.shieldRemoved?.length ?? 0} removed, ${ejectResult.shieldReverted?.length ?? 0} restored)`,
         );
         console.log(
-          `AIL Source Files:    ${
-            ejectResult.removedAilFiles.length > 0
-              ? `Deleted ${ejectResult.removedAilFiles.length} .ail files`
+          `AICE Source Files:    ${
+            ejectResult.removedAiceFiles.length > 0
+              ? `Deleted ${ejectResult.removedAiceFiles.length} .aice files`
               : "Preserved on disk"
           }`,
         );
@@ -1496,7 +1496,7 @@ shieldCmd
 shieldCmd
   .argument("<action>", "Action to perform: apply | remove | status | lock | unlock | intercept")
   .argument("[dir]", "Target project directory", ".")
-  .option("--twinless", "Configure Twinless On-the-Fly mode (zero .ail files on disk)")
+  .option("--twinless", "Configure Twinless On-the-Fly mode (zero .aice files on disk)")
   .action(async (action: string, dir: string, opts: { twinless?: boolean }) => {
     try {
       const targetDir = path.resolve(process.cwd(), dir);
@@ -1750,7 +1750,7 @@ program
   .argument("[symbol]", "Target symbol identifier (optional shorthand for -s/--symbol)")
   .option("-f, --file <path>", "Path to source file")
   .option("-s, --symbol <symbol>", "Target symbol identifier")
-  .option("-c, --code <code>", "Replacement AIL or native declaration snippet")
+  .option("-c, --code <code>", "Replacement AICE or native declaration snippet")
   .option("-t, --template <code>", "Alias for --code")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
   .option("-d, --delete [symbol]", "Delete the symbol (or specify an additional symbol to delete)")
@@ -1981,10 +1981,10 @@ program
 // Command: fmt [target]
 program
   .command("fmt")
-  .description("Deterministic zero-token canonical formatting pre-pass for AIL source code")
+  .description("Deterministic zero-token canonical formatting pre-pass for AICE source code")
   .argument(
     "[target]",
-    "Path to .ail file or directory to format (omitted to format all workspace .ail files)",
+    "Path to .aice file or directory to format (omitted to format all workspace .aice files)",
   )
   .option(
     "--check",
@@ -2011,7 +2011,7 @@ program
       try {
         if (options.stdin) {
           const stdinSource = fs.readFileSync(0, "utf-8");
-          const formatted = formatAilSource(stdinSource, {
+          const formatted = formatAiceSource(stdinSource, {
             indent: options.indent,
           });
 
@@ -2048,7 +2048,7 @@ program
           projectRoot: resolved.projectRoot,
         };
 
-        const resultOrResults = await formatAilPath(fmtTarget, fmtOptions);
+        const resultOrResults = await formatAicePath(fmtTarget, fmtOptions);
         const results = Array.isArray(resultOrResults) ? resultOrResults : [resultOrResults];
 
         let hasUnformatted = false;
@@ -2085,9 +2085,9 @@ program
   .description("Semantic AST structural diff and unified diff between files or git HEAD")
   .argument(
     "[oldPath]",
-    "Path to target or baseline .ail source file or directory (omitted for workspace diff against git HEAD)",
+    "Path to target or baseline .aice source file or directory (omitted for workspace diff against git HEAD)",
   )
-  .argument("[newPath]", "Path to new .ail source file (optional; defaults to git HEAD comparison)")
+  .argument("[newPath]", "Path to new .aice source file (optional; defaults to git HEAD comparison)")
   .option("--ast", "Output AST symbol differences only")
   .option("--unified", "Output standard unified diff")
   .option("--json", "Output JSON summary of changes")
@@ -2153,7 +2153,7 @@ program
             if (options.json) {
               console.log(JSON.stringify([], null, 2));
             } else {
-              console.log(`No .ail files found in ${oldPath ?? resolved.resolvedPath}`);
+              console.log(`No .aice files found in ${oldPath ?? resolved.resolvedPath}`);
             }
             return;
           }
@@ -2228,7 +2228,7 @@ program
   .description(
     "Apply standard unified diffs or semantic AST symbol patches with zero corruption guarantee",
   )
-  .argument("<path>", "Path to target .ail source file")
+  .argument("<path>", "Path to target .aice source file")
   .argument("[patchFile]", "Path to patch file (reads from stdin if '-' or omitted)")
   .option("--dry-run", "Preview patch without writing to disk")
   .option("--reverse", "Reverse the patch (rollback)")
@@ -2319,7 +2319,7 @@ program
     (val) => Number.parseInt(val, 10),
     10,
   )
-  .option("-c, --code <template>", "New AIL template for `ail idioms update <$name> -c <template>`")
+  .option("-c, --code <template>", "New AICE template for `aice idioms update <$name> -c <template>`")
   .option("--batch <fileOrJson>", "Batch update multiple idioms from JSON object or array")
   .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
@@ -2389,7 +2389,7 @@ program
 
         if (action === "read") {
           if (!idiomNameArg) {
-            console.error("❌ Error: Must specify idiom name: `ail idioms read <$name> [dir]`");
+            console.error("❌ Error: Must specify idiom name: `aice idioms read <$name> [dir]`");
             process.exit(1);
           }
           const res = readProjectIdiom(targetDir, idiomNameArg);
@@ -2417,8 +2417,8 @@ program
               idiom?: string;
               code?: string;
               template?: string;
-              templateAil?: string;
-              ail?: string;
+              templateAice?: string;
+              aice?: string;
               body?: string;
               content?: string;
               replacement?: string;
@@ -2434,8 +2434,8 @@ program
               const idCode =
                 entry.code ??
                 entry.template ??
-                entry.templateAil ??
-                entry.ail ??
+                entry.templateAice ??
+                entry.aice ??
                 entry.body ??
                 entry.content ??
                 entry.replacement ??
@@ -2460,7 +2460,7 @@ program
 
           if (!idiomNameArg) {
             console.error(
-              "❌ Error: Must specify idiom name: `ail idioms update <$name> -c \"<template>\" [dir]`",
+              "❌ Error: Must specify idiom name: `aice idioms update <$name> -c \"<template>\" [dir]`",
             );
             process.exit(1);
           }
@@ -2509,7 +2509,7 @@ program
           const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
 
           console.log(
-            `\n=== AIL Project Idioms Scan: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+            `\n=== AICE Project Idioms Scan: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
           console.log(`Discovered Idioms:   ${idiomCount}`);
           console.log(`Net Token Savings:   ${tokenSavings} tokens`);
@@ -2553,18 +2553,18 @@ program
           const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
 
           console.log(
-            `\n=== AIL Project Idioms Apply${dryRun ? " (Dry Run)" : ""}: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+            `\n=== AICE Project Idioms Apply${dryRun ? " (Dry Run)" : ""}: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
           console.log(`Synthesized Idioms:  ${idiomCount}`);
           console.log(`Net Token Savings:   ${tokenSavings} tokens`);
           console.log(`Files Modified:      ${filesCount}`);
           if (!dryRun) {
-            console.log(`✔ Updated ail.config.json and refreshed AI shield.`);
+            console.log(`✔ Updated aice.config.json and refreshed AI shield.`);
           }
         } else if (action === "expand") {
           const res = expandProjectIdiomsInDirectory(targetDir);
           const rootDir = findProjectRoot(targetDir);
-          const configPath = path.join(rootDir, "ail.config.json");
+          const configPath = path.join(rootDir, "aice.config.json");
           if (fs.existsSync(configPath)) {
             try {
               const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -2582,11 +2582,11 @@ program
 
           const count = res.expandedFiles ?? (res as any)?.filesModified?.length ?? 0;
           console.log(
-            `\n=== AIL Project Idioms Expand: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+            `\n=== AICE Project Idioms Expand: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
           console.log(`Files Expanded:      ${count}`);
           console.log(
-            `✔ All project idioms inlined back into standard .ail code and idioms cleared from config.`,
+            `✔ All project idioms inlined back into standard .aice code and idioms cleared from config.`,
           );
         } else if (action === "list") {
           const rootDir = findProjectRoot(targetDir);
@@ -2606,7 +2606,7 @@ program
           console.log(`Total Idioms: ${count}`);
           if (count === 0) {
             console.log(
-              "No idioms configured. Run `ail idioms scan` or `ail idioms apply` to discover idioms.",
+              "No idioms configured. Run `aice idioms scan` or `aice idioms apply` to discover idioms.",
             );
           } else {
             for (const [name, def] of Object.entries(idioms)) {
@@ -2616,7 +2616,7 @@ program
               }
               console.log(`  Occurrences: ${def.occurrences}`);
               console.log(`  Net Savings: ${def.netTokenSavings} tokens`);
-              console.log(`  Template:    ${def.templateAil.trim()}`);
+              console.log(`  Template:    ${def.templateAice.trim()}`);
             }
           }
         } else {
@@ -2627,7 +2627,7 @@ program
         }
       } catch (err: unknown) {
         console.error(
-          `❌ Error in ail idioms: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error in aice idioms: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
@@ -2669,7 +2669,7 @@ program
           return;
         }
 
-        console.log(`\n=== AIL Autonomous Evolution & Self-Healing Campaign Report ===`);
+        console.log(`\n=== AICE Autonomous Evolution & Self-Healing Campaign Report ===`);
         console.log(`Restarts:                  ${campaign.completedRestarts} / ${campaign.totalRestarts}`);
         console.log(`Total Cycles Executed:     ${campaign.totalCyclesExecuted}`);
         console.log(`Roundtrip Verifications:   ${campaign.totalRoundtripsVerified}`);
@@ -2709,7 +2709,7 @@ program
         return;
       }
 
-      console.log(`\n=== AIL Autonomous Evolution & Self-Healing Report ===`);
+      console.log(`\n=== AICE Autonomous Evolution & Self-Healing Report ===`);
       console.log(`Total Cycles:              ${report.totalCycles}`);
       console.log(
         `Passed Cycles:             ${report.passedCycles} (${(
@@ -2774,70 +2774,70 @@ program.addHelpText(
   "after",
   `
 ================================================================================
-AIL COMPLETE LIFECYCLE GUIDE: FROM PROJECT ADOPTION TO SUPPRESSION / EJECTION
+AICE COMPLETE LIFECYCLE GUIDE: FROM PROJECT ADOPTION TO SUPPRESSION / EJECTION
 ================================================================================
 
 Step 1: Create / Onboard a Project
-  • Twinless On-the-Fly Mode (Zero .ail files on disk; AI reads/writes AIL in RAM):
-      ail shield apply . --twinless
-      ail idioms scan src/
-  • Side-by-Side Mode (In-place .ail siblings next to target files):
-      ail adopt .
-  • Isolated Mode (Source files in src/, native builds in .ail-build/):
-      ail adopt . --isolated
+  • Twinless On-the-Fly Mode (Zero .aice files on disk; AI reads/writes AICE in RAM):
+      aice shield apply . --twinless
+      aice idioms scan src/
+  • Side-by-Side Mode (In-place .aice siblings next to target files):
+      aice adopt .
+  • Isolated Mode (Source files in src/, native builds in .aice-build/):
+      aice adopt . --isolated
   • Companion Twin Mode (Zero-touch external target, isolated companion workspace):
-      ail adopt ../my-app-ail --companion /path/to/my-app --idioms
+      aice adopt ../my-app-aice --companion /path/to/my-app --idioms
 
 Step 2: Live Development & Bidirectional Sync
-  • Fast incremental watch daemon (< 5ms recompile on .ail change):
-      ail watch .
-  • Bidirectional live sync (recompiles .ail -> target AND syncs target edits -> .ail):
-      ail watch . --bidirectional
-  • Reverse-sync external manual edits from target files back to .ail:
-      ail sync .
+  • Fast incremental watch daemon (< 5ms recompile on .aice change):
+      aice watch .
+  • Bidirectional live sync (recompiles .aice -> target AND syncs target edits -> .aice):
+      aice watch . --bidirectional
+  • Reverse-sync external manual edits from target files back to .aice:
+      aice sync .
 
-Step 3: AI Agent Surgical Workflow (Works Directly on Native .ts/.py or .ail Files)
+Step 3: AI Agent Surgical Workflow (Works Directly on Native .ts/.py or .aice Files)
   • Outline AST skeleton (85-90% token reduction for discovery):
-      ail outline src/
+      aice outline src/
   • 1-turn bounded context pack (auto-decompiles native files & collapses $idioms):
-      ail context src/app.ts -s myFunction
-  • Forgiving surgical in-place AST mutation (accepts AIL, $idioms, or native syntax):
-      ail splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
-      ail splice --batch edits.json
+      aice context src/app.ts -s myFunction
+  • Forgiving surgical in-place AST mutation (accepts AICE, $idioms, or native syntax):
+      aice splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
+      aice splice --batch edits.json
   • Zero-token canonical AST code formatting:
-      ail fmt src/
+      aice fmt src/
   • Fast typecheck verification and 1-shot autonomous repair:
-      ail verify src/app.ts.ail
-      ail fix src/app.ts.ail
+      aice verify src/app.ts.aice
+      aice fix src/app.ts.aice
   • Symbol-mapped test runner with runtime stack-trace translation:
-      ail test
+      aice test
   • Model Context Protocol & Language Server stdio daemons:
-      ail mcp
-      ail lsp
+      aice mcp
+      aice lsp
 
 Step 4: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
-  • Mine recurring AST idioms across native or .ail files (cached in .ail-cache/idioms.json):
-      ail idioms scan src/
+  • Mine recurring AST idioms across native or .aice files (cached in .aice-cache/idioms.json):
+      aice idioms scan src/
   • Toggle idioms on/off globally for on-the-fly reads:
-      ail idioms on
-      ail idioms off
+      aice idioms on
+      aice idioms off
   • Multi-file idiom read (inspect all call sites & bound arguments across repo):
-      ail idioms read '$guard'
+      aice idioms read '$guard'
   • Smart multi-file idiom refactor (update pattern across all files atomically):
-      ail idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
+      aice idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
   • Audit token savings & verify zero BPE token drift:
-      ail tokens . --check-drift
-      ail benchmark
+      aice tokens . --check-drift
+      aice benchmark
 
 Step 5: Clean Project Suppression / Ejection
   • Twinless Mode:
-      ail shield remove .            # Removes PreToolUse hooks & AGENTS.md rules
+      aice shield remove .            # Removes PreToolUse hooks & AGENTS.md rules
   • Side-by-Side or Isolated Mode:
-      ail eject .                    # Unlocks targets, removes AI shields, preserves .ail
-      ail eject . --remove-ail       # Fully restores native project, deletes all .ail files
+      aice eject .                    # Unlocks targets, removes AI shields, preserves .aice
+      aice eject . --remove-aice       # Fully restores native project, deletes all .aice files
   • Companion Twin Project:
-      ail eject <companionDir>       # Unlocks & unshields target, clears companion workspace
-      ail eject <companionDir> --remove-ail # Removes companion .ail, config, and cache
+      aice eject <companionDir>       # Unlocks & unshields target, clears companion workspace
+      aice eject <companionDir> --remove-aice # Removes companion .aice, config, and cache
       rm -rf <companionDir>          # Companion twin is safe to delete after eject!
 `,
 );
@@ -2854,12 +2854,12 @@ const isDirectCliRun = () => {
     // fallback
   }
   return Boolean(
-    (process.argv[1].endsWith("/bin/ail.ts") ||
-      process.argv[1].endsWith("/bin/ail.mjs") ||
-      process.argv[1].endsWith("/bin/ail.js") ||
-      process.argv[1].endsWith("/bin/ail") ||
-      process.argv[1].endsWith("/ail") ||
-      process.argv[1] === "ail") &&
+    (process.argv[1].endsWith("/bin/aice.ts") ||
+      process.argv[1].endsWith("/bin/aice.mjs") ||
+      process.argv[1].endsWith("/bin/aice.js") ||
+      process.argv[1].endsWith("/bin/aice") ||
+      process.argv[1].endsWith("/aice") ||
+      process.argv[1] === "aice") &&
       !process.argv[1].includes("test") &&
       !process.argv[1].includes("vitest"),
   );

@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C# Forward Transpiler & .NET Emitter for AIL 2.0.
- * Emits clean, idiomatic modern C# (C# 10+) code from AIL Module AST.
+ * Modern C# Forward Transpiler & .NET Emitter for AICE 2.0.
+ * Emits clean, idiomatic modern C# (C# 10+) code from AICE Module AST.
  */
 
 import type {
@@ -76,7 +76,7 @@ export class CSharpEmitter {
     const customImports: string[] = [];
     for (const item of mod.items) {
       if (item.kind === "ImportDecl") {
-        const clean = item.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(cs|ts|js|ail)$/, "");
+        const clean = item.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(cs|ts|js|aice)$/, "");
         const nsName = clean.split(/[/\\]/).join(".");
         if (
           nsName &&
@@ -133,7 +133,7 @@ export class CSharpEmitter {
     if (!modPath.includes("/") && !modPath.includes("\\") && !modPath.includes(".cs")) {
       return modPath.replace(/::/g, ".");
     }
-    const clean = modPath.replace(/\.(cs)(\.ail)?$/, "").replace(/\.ail$/, "");
+    const clean = modPath.replace(/\.(cs)(\.aice)?$/, "").replace(/\.aice$/, "");
     const parts = clean.split(/[/\\]/);
     if (parts.length > 1) {
       parts.pop(); // remove file name
@@ -144,7 +144,7 @@ export class CSharpEmitter {
 
   private extractClassName(modPath: string): string | null {
     if (!modPath) return null;
-    const clean = modPath.replace(/\.(cs)(\.ail)?$/, "").replace(/\.ail$/, "");
+    const clean = modPath.replace(/\.(cs)(\.aice)?$/, "").replace(/\.aice$/, "");
     const parts = clean.split(/[./\\]/);
     const base = parts.pop();
     if (!base) return null;

@@ -138,12 +138,12 @@ describe("Step 5: Sound Calculus & Typechecker Validation", () => {
       );
     });
 
-    it("typechecks 'key in obj' cleanly inside parsed AIL function", () => {
+    it("typechecks 'key in obj' cleanly inside parsed AICE function", () => {
       const src = `
 fn hasProperty(obj: any, key: str) -> bool:
   return key in obj
 `;
-      const mod = parse(src, "test_in.ail");
+      const mod = parse(src, "test_in.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -242,12 +242,12 @@ fn hasProperty(obj: any, key: str) -> bool:
       );
     });
 
-    it("typechecks 'err instanceof Error' cleanly in parsed AIL code", () => {
+    it("typechecks 'err instanceof Error' cleanly in parsed AICE code", () => {
       const src = `
 fn isError(err: any) -> bool:
   return err instanceof Error
 `;
-      const mod = parse(src, "test_inst.ail");
+      const mod = parse(src, "test_inst.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -602,7 +602,7 @@ fn parseMatches(s: str, regex: any):
   while ((pMatch = regex.exec(s)) != nil):
     print(pMatch)
 `;
-      const mod = parse(src, "test_while_assign.ail");
+      const mod = parse(src, "test_while_assign.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -613,7 +613,7 @@ fn updateElements(v: str):
   let setter = (el: any) => (el.textContent = v)
   setter(nil)
 `;
-      const mod = parse(src, "test_arrow_assign.ail");
+      const mod = parse(src, "test_arrow_assign.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -624,7 +624,7 @@ fn incrementItems():
   let inc = (item: any) => (item.count += 1)
   inc(nil)
 `;
-      const mod = parse(src, "test_arrow_compound.ail");
+      const mod = parse(src, "test_arrow_compound.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -636,7 +636,7 @@ fn bitwiseClosure():
   let applyMask = (mask: int) => (flags |= mask)
   applyMask(1)
 `;
-      const mod = parse(src, "test_bitwise_closure.ail");
+      const mod = parse(src, "test_bitwise_closure.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });
@@ -667,7 +667,7 @@ fn processBatch(items: any, err: any):
   if err instanceof Error:
     print("Handled error")
 `;
-      const mod = parse(src, "test_batch.ail");
+      const mod = parse(src, "test_batch.aice");
       const checker = new TypeChecker();
       expect(() => checker.checkModule(mod)).not.toThrow();
     });

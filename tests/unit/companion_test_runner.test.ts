@@ -12,12 +12,12 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  compileTargetAilIfNeeded,
+  compileTargetAiceIfNeeded,
   discoverTestHarness,
   formatCleanTestOutput,
   formatSymbolAwareError,
-  resolveToAilFile,
-  runAilTests,
+  resolveToAiceFile,
+  runAiceTests,
   scrubTargetFileReferences,
   translateTrace,
   translateTraceLine,
@@ -25,7 +25,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(
   args: string[],
@@ -49,7 +49,7 @@ describe("Companion Twin-Workspace Test Execution & Stack-Trace Reverse Mapping 
   let companionDir: string;
 
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "ail-companion-test-"));
+    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aice-companion-test-"));
     targetDir = path.join(tmpRoot, "target-app");
     companionDir = path.join(tmpRoot, "companion-ws");
 
@@ -77,7 +77,7 @@ describe("Companion Twin-Workspace Test Execution & Stack-Trace Reverse Mapping 
     fs.mkdirSync(path.join(companionDir, "src", "core"), { recursive: true });
 
     fs.writeFileSync(
-      path.join(companionDir, "ail.config.json"),
+      path.join(companionDir, "aice.config.json"),
       JSON.stringify(
         {
           mode: "companion",
@@ -97,9 +97,9 @@ describe("Companion Twin-Workspace Test Execution & Stack-Trace Reverse Mapping 
       "utf-8",
     );
 
-    // 3. Write companion .ail source file
+    // 3. Write companion .aice source file
     fs.writeFileSync(
-      path.join(companionDir, "src", "core", "engine.ail"),
+      path.join(companionDir, "src", "core", "engine.aice"),
       `fn processFoodConsumption(food: int) -> int {
   return food + 10;
 }
@@ -129,7 +129,7 @@ describe("Companion Twin-Workspace Test Execution & Stack-Trace Reverse Mapping 
     it("falls back to target project package.json scripts.test when test.command is omitted", () => {
       // Overwrite config without test.command
       fs.writeFileSync(
-        path.join(companionDir, "ail.config.json"),
+        path.join(companionDir, "aice.config.json"),
         JSON.stringify(
           {
             mode: "companion",
@@ -151,7 +151,7 @@ describe("Companion Twin-Workspace Test Execution & Stack-Trace Reverse Mapping 
   });
 
   describe("Pre-Compilation Sync & Cross-Directory Test Execution", () => {
-    it("compiles companion .ail to targetProject outDir before executing tests in target project", async () => {
+    it("compiles companion .aice to targetProject outDir before executing tests in target project", async () => {
       // Write target test that imports from freshly compiled file
       fs.writeFileSync(
         path.join(targetDir, "tests", "engine.test.ts"),
@@ -169,7 +169,7 @@ test("computes food consumption", () => {
       expect(fs.existsSync(compiledTarget)).toBe(false);
 
       // Run tests from companion workspace
-      const result = await runAilTests(undefined, { cwd: companionDir });
+      const result = await runAiceTests(undefined, { cwd: companionDir });
 
       expect(fs.existsSync(compiledTarget)).toBe(true);
       expect(result.compiledFiles).toContain(compiledTarget);
@@ -178,17 +178,17 @@ test("computes food consumption", () => {
       expect(result.summary.passed).toBeGreaterThanOrEqual(1);
     });
 
-    it("recompiles modified companion .ail before test execution when source changes", async () => {
+    it("recompiles modified companion .aice before test execution when source changes", async () => {
       // 1. Initial compilation
-      const compResult = compileTargetAilIfNeeded(undefined, { cwd: companionDir });
+      const compResult = compileTargetAiceIfNeeded(undefined, { cwd: companionDir });
       const compiledTarget = path.join(targetDir, "src", "core", "engine.ts");
       expect(fs.existsSync(compiledTarget)).toBe(true);
       expect(compResult.compiledFiles).toContain(compiledTarget);
 
-      // 2. Modify companion .ail source with new logic
-      const ailFile = path.join(companionDir, "src", "core", "engine.ail");
+      // 2. Modify companion .aice source with new logic
+      const aiceFile = path.join(companionDir, "src", "core", "engine.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `fn processFoodConsumption(food: int) -> int {
   return food + 50;
 }
@@ -196,9 +196,9 @@ test("computes food consumption", () => {
         "utf-8",
       );
 
-      // Artificially advance mtime of .ail
+      // Artificially advance mtime of .aice
       const future = new Date(Date.now() + 5000);
-      fs.utimesSync(ailFile, future, future);
+      fs.utimesSync(aiceFile, future, future);
 
       // 3. Write test asserting updated logic
       fs.writeFileSync(
@@ -213,7 +213,7 @@ test("computes updated food consumption", () => {
         "utf-8",
       );
 
-      const result = await runAilTests(undefined, { cwd: companionDir });
+      const result = await runAiceTests(undefined, { cwd: companionDir });
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(0);
 
@@ -223,26 +223,26 @@ test("computes updated food consumption", () => {
   });
 
   describe("Reverse-Mapping & Output Scrubbing", () => {
-    it("resolves external target paths back to companion workspace .ail files", () => {
+    it("resolves external target paths back to companion workspace .aice files", () => {
       // 1. Relative target path from companion root
-      const rel1 = resolveToAilFile("../target-app/src/core/engine.ts", companionDir);
+      const rel1 = resolveToAiceFile("../target-app/src/core/engine.ts", companionDir);
       expect(rel1.exists).toBe(true);
-      expect(rel1.relAilPath).toBe("src/core/engine.ail");
+      expect(rel1.relAicePath).toBe("src/core/engine.aice");
 
       // 2. Target relative path inside target project
-      const rel2 = resolveToAilFile("src/core/engine.ts", companionDir);
+      const rel2 = resolveToAiceFile("src/core/engine.ts", companionDir);
       expect(rel2.exists).toBe(true);
-      expect(rel2.relAilPath).toBe("src/core/engine.ail");
+      expect(rel2.relAicePath).toBe("src/core/engine.aice");
 
       // 3. Simple basename
-      const rel3 = resolveToAilFile("engine.ts", companionDir);
+      const rel3 = resolveToAiceFile("engine.ts", companionDir);
       expect(rel3.exists).toBe(true);
-      expect(rel3.relAilPath).toBe("src/core/engine.ail");
+      expect(rel3.relAicePath).toBe("src/core/engine.aice");
 
       // 4. File with line and col
-      const rel4 = resolveToAilFile("engine.ts:338:24", companionDir);
+      const rel4 = resolveToAiceFile("engine.ts:338:24", companionDir);
       expect(rel4.exists).toBe(true);
-      expect(rel4.relAilPath).toBe("src/core/engine.ail");
+      expect(rel4.relAicePath).toBe("src/core/engine.aice");
     });
 
     it("scrubs all .ts, .js, and dist/ paths from output in companion mode", () => {
@@ -255,18 +255,18 @@ AssertionError: expected 15 to be 999
 
       const formatted = formatSymbolAwareError(rawError, companionDir);
 
-      // Emitted diagnostic must cite .ail and never .ts
-      expect(formatted).toContain("src/core/engine.ail");
+      // Emitted diagnostic must cite .aice and never .ts
+      expect(formatted).toContain("src/core/engine.aice");
       expect(formatted).not.toContain("engine.ts");
       expect(formatted).not.toContain("../target-app");
       expect(formatted).not.toContain(".ts");
-      expect(formatted).toContain("Scope: fn processFoodConsumption in src/core/engine.ail:1");
+      expect(formatted).toContain("Scope: fn processFoodConsumption in src/core/engine.aice:1");
     });
 
-    it("reverse-maps target lines to .ail AST symbol locations during test failure", async () => {
-      // Update companion .ail to throw inside processFoodConsumption
+    it("reverse-maps target lines to .aice AST symbol locations during test failure", async () => {
+      // Update companion .aice to throw inside processFoodConsumption
       fs.writeFileSync(
-        path.join(companionDir, "src", "core", "engine.ail"),
+        path.join(companionDir, "src", "core", "engine.aice"),
         `fn processFoodConsumption(food: int) -> int {
   if food == 5: throw "Food limit exceeded";
   return food + 10;
@@ -276,7 +276,7 @@ AssertionError: expected 15 to be 999
       );
 
       // Precompile so target has panic logic
-      compileTargetAilIfNeeded(undefined, { cwd: companionDir });
+      compileTargetAiceIfNeeded(undefined, { cwd: companionDir });
 
       // Failing test calling processFoodConsumption
       fs.writeFileSync(
@@ -291,42 +291,42 @@ test("fails intentionally", () => {
         "utf-8",
       );
 
-      const result = await runAilTests(undefined, { cwd: companionDir });
+      const result = await runAiceTests(undefined, { cwd: companionDir });
       expect(result.success).toBe(false);
       expect(result.exitCode).not.toBe(0);
 
-      // Verify output has scrubbed .ts references and points to .ail
-      expect(result.output).toContain("src/core/engine.ail");
+      // Verify output has scrubbed .ts references and points to .aice
+      expect(result.output).toContain("src/core/engine.aice");
       expect(result.output).not.toContain("engine.ts");
       expect(result.output).not.toContain("../target-app");
       expect(result.output).not.toContain(".ts");
-      expect(result.output).toContain("Scope: fn processFoodConsumption in src/core/engine.ail:1");
+      expect(result.output).toContain("Scope: fn processFoodConsumption in src/core/engine.aice:1");
     });
   });
 
-  describe("ail trace CLI Command & API", () => {
-    it("translates direct file:line reference (engine.ts:338) to companion .ail symbol and line", () => {
+  describe("aice trace CLI Command & API", () => {
+    it("translates direct file:line reference (engine.ts:338) to companion .aice symbol and line", () => {
       // Compile first so target file exists
-      compileTargetAilIfNeeded(undefined, { cwd: companionDir });
+      compileTargetAiceIfNeeded(undefined, { cwd: companionDir });
 
       const trace = translateTraceLine("engine.ts:338", companionDir);
-      expect(trace).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(trace).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
     });
 
-    it("translates V8 stack frame with function name to companion .ail", () => {
+    it("translates V8 stack frame with function name to companion .aice", () => {
       const trace = translateTraceLine(
         "at processFoodConsumption (engine.ts:338:24)",
         companionDir,
       );
-      expect(trace).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(trace).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
     });
 
-    it("translates frame with target path (src/core/engine.ts:338:24) to companion .ail", () => {
+    it("translates frame with target path (src/core/engine.ts:338:24) to companion .aice", () => {
       const trace = translateTraceLine(
         "at processFoodConsumption (src/core/engine.ts:338:24)",
         companionDir,
       );
-      expect(trace).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(trace).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
     });
 
     it("translates multi-line stack trace string using translateTrace", () => {
@@ -337,14 +337,14 @@ Error: Food consumption limit exceeded
 `;
       const lines = translateTrace(multiLine, companionDir);
       expect(lines.length).toBeGreaterThanOrEqual(1);
-      expect(lines[0]).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(lines[0]).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
     });
 
-    it("executes 'ail trace <trace...>' via CLI in companion workspace", () => {
+    it("executes 'aice trace <trace...>' via CLI in companion workspace", () => {
       // 1. Single argument
       const cliRes1 = runCli(["trace", "engine.ts:338"], companionDir);
       expect(cliRes1.status).toBe(0);
-      expect(cliRes1.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(cliRes1.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
 
       // 2. Quoted stack frame
       const cliRes2 = runCli(
@@ -352,7 +352,7 @@ Error: Food consumption limit exceeded
         companionDir,
       );
       expect(cliRes2.status).toBe(0);
-      expect(cliRes2.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(cliRes2.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
 
       // 3. Unquoted stack frame args
       const cliRes3 = runCli(
@@ -360,17 +360,17 @@ Error: Food consumption limit exceeded
         companionDir,
       );
       expect(cliRes3.status).toBe(0);
-      expect(cliRes3.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.ail:1:1");
+      expect(cliRes3.stdout.trim()).toBe("=> processFoodConsumption src/core/engine.aice:1:1");
     });
 
-    it("executes 'ail test' via CLI in companion workspace with 0 exit code on passing tests", () => {
+    it("executes 'aice test' via CLI in companion workspace with 0 exit code on passing tests", () => {
       // Write passing test in target project
       fs.writeFileSync(
         path.join(targetDir, "tests", "engine.test.ts"),
         `import { expect, test } from "bun:test";
 import { processFoodConsumption } from "../src/core/engine.js";
 
-test("runs cleanly via ail test CLI", () => {
+test("runs cleanly via aice test CLI", () => {
   expect(processFoodConsumption(10)).toBe(20);
 });
 `,
@@ -393,7 +393,7 @@ test("hangs", async () => {
         "utf-8",
       );
 
-      const result = await runAilTests("tests/hang.test.ts", {
+      const result = await runAiceTests("tests/hang.test.ts", {
         cwd: companionDir,
         timeoutMs: 100,
       });

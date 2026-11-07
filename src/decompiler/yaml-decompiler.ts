@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * YAML Decompiler (Reverse Transpiler) for AIL 2.0 (Step 24).
- * Parses YAML documents into canonical, token-dense AIL code:
+ * YAML Decompiler (Reverse Transpiler) for AICE 2.0 (Step 24).
+ * Parses YAML documents into canonical, token-dense AICE code:
  * e.g. `pub const config = { ... }` with comment extraction and data lowering.
  */
 
@@ -12,16 +12,16 @@ import type { ConstDecl, Module } from "../core/ast.js";
 import { valueToAst } from "../core/data-converter.js";
 import { emptySpan } from "../core/span.js";
 import { CstTriviaTable } from "../core/trivia.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 
-export interface YamlDecompilerOptions extends AilGeneratorOptions {
+export interface YamlDecompilerOptions extends AiceGeneratorOptions {
   filePath?: string;
   constName?: string;
 }
 
 export interface YamlDecompileResult {
   ast: Module;
-  ail: string;
+  aice: string;
   trivia: CstTriviaTable;
 }
 
@@ -74,7 +74,7 @@ export class YamlDecompiler {
         .split(/[/\\]/)
         .pop()
         ?.replace(/\.(yaml|yml)$/, "")
-        .replace(/\.ail$/, "") ?? "config";
+        .replace(/\.aice$/, "") ?? "config";
     const cleanModPath = baseName.replace(/[^a-zA-Z0-9_/-]/g, "_") || "config";
     const constName = this.options.constName ?? "config";
 
@@ -93,9 +93,9 @@ export class YamlDecompiler {
       span: emptySpan(this.filePath),
     };
 
-    const generator = new AilGenerator({ ...this.options, trivia: this.trivia });
-    const ail = generator.generate(ast);
+    const generator = new AiceGenerator({ ...this.options, trivia: this.trivia });
+    const aice = generator.generate(ast);
 
-    return { ast, ail, trivia: this.trivia };
+    return { ast, aice, trivia: this.trivia };
   }
 }

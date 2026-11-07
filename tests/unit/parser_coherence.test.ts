@@ -24,7 +24,7 @@ describe("Parser Coherence & Grammar Resolution", () => {
       const src = `val empty: nil = nil
 fn doNothing() -> nil:
   ret nil`;
-      const mod = parse(src, "nil_type.ail");
+      const mod = parse(src, "nil_type.aice");
       expect(mod.items).toHaveLength(2);
 
       const v = mod.items[0] as VarDecl;
@@ -44,7 +44,7 @@ fn doNothing() -> nil:
       const src = `type NullableResult = int | str | nil
 type CustomUnion = ModelA | ModelB | nil
 val x: str | nil = nil`;
-      const mod = parse(src, "union_nil.ail");
+      const mod = parse(src, "union_nil.aice");
       expect(mod.items).toHaveLength(3);
 
       const t1 = mod.items[0] as TypeDecl;
@@ -68,7 +68,7 @@ val x: str | nil = nil`;
 
     it("parses 'nil' on the left side of union types (nil | A)", () => {
       const src = `type OrNil = nil | int | str`;
-      const mod = parse(src, "nil_left.ail");
+      const mod = parse(src, "nil_left.aice");
       const t = mod.items[0] as TypeDecl;
       expect(t.aliasType).toMatchObject({
         kind: "NamedType",
@@ -81,7 +81,7 @@ val x: str | nil = nil`;
     it("parses rest parameters in function types: (...args: number[]) => number", () => {
       const src = `type SumFn = (...args: [int]) => int
 type Variadic = (...args: any) -> void`;
-      const mod = parse(src, "fn_type_rest.ail");
+      const mod = parse(src, "fn_type_rest.aice");
       expect(mod.items).toHaveLength(2);
 
       const t1 = mod.items[0] as TypeDecl;
@@ -99,7 +99,7 @@ type Variadic = (...args: any) -> void`;
 
     it("parses mixed function types with regular and rest parameters", () => {
       const src = `type Formatter = (prefix: str, ...items: [str]) => str`;
-      const mod = parse(src, "mixed_fn_type.ail");
+      const mod = parse(src, "mixed_fn_type.aice");
       const t = mod.items[0] as TypeDecl;
       expect(t.aliasType).toMatchObject({
         kind: "NamedType",
@@ -109,7 +109,7 @@ type Variadic = (...args: any) -> void`;
 
     it("parses anonymous rest parameters without explicit parameter names (...[int]) => void", () => {
       const src = `type VoidVar = (...[int]) => void`;
-      const mod = parse(src, "anon_rest.ail");
+      const mod = parse(src, "anon_rest.aice");
       const t = mod.items[0] as TypeDecl;
       expect(t.aliasType).toMatchObject({
         kind: "NamedType",
@@ -125,7 +125,7 @@ type Variadic = (...args: any) -> void`;
   val = 99
   val.count = 100
   print(val.count)`;
-      const mod = parse(src, "val_ident.ail");
+      const mod = parse(src, "val_ident.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as Block).statements;
       expect(stmts).toHaveLength(4);
@@ -147,7 +147,7 @@ type Variadic = (...args: any) -> void`;
   style := 5
   state := 6
   let x = obj.pub + obj.val + obj.mut + obj.type + obj.component + obj.style + obj.state`;
-      const mod = parse(src, "kw_idents.ail");
+      const mod = parse(src, "kw_idents.aice");
       const fn = mod.items[0] as FunctionDecl;
       const stmts = (fn.body as Block).statements;
       expect(stmts).toHaveLength(7);
@@ -168,7 +168,7 @@ type Variadic = (...args: any) -> void`;
 pub := 20
 type := 30
 component := 40`;
-      const mod = parse(src, "top_level_kw.ail");
+      const mod = parse(src, "top_level_kw.aice");
       expect(mod.items).toHaveLength(4);
       expect((mod.items[0] as VarDecl).name).toBe("val");
       expect((mod.items[1] as VarDecl).name).toBe("pub");
@@ -184,7 +184,7 @@ component := 40`;
   case 2 => ret "two"
   case 3 =>
     ret "three"`;
-      const mod = parse(src, "match_arrow.ail");
+      const mod = parse(src, "match_arrow.aice");
       const stmt = mod.items[0] as FunctionDecl; // top level wrapper
       const match = (stmt.body as Block).statements[0] as MatchStmt;
       expect(match.cases).toHaveLength(3);
@@ -201,7 +201,7 @@ component := 40`;
     ret "three"
   case 4:
     "four"`;
-      const mod = parse(src, "match_colon.ail");
+      const mod = parse(src, "match_colon.aice");
       const stmt = mod.items[0] as FunctionDecl;
       const match = (stmt.body as Block).statements[0] as MatchStmt;
       expect(match.cases).toHaveLength(4);
@@ -216,7 +216,7 @@ component := 40`;
   case x if x > 0: ret x
   case x if x < 0 => ret -x
   case _: ret 0`;
-      const mod = parse(src, "match_guards.ail");
+      const mod = parse(src, "match_guards.aice");
       const stmt = mod.items[0] as FunctionDecl;
       const match = (stmt.body as Block).statements[0] as MatchStmt;
       expect(match.cases).toHaveLength(3);
@@ -230,7 +230,7 @@ component := 40`;
       const src = `fn run():
   for { skill, effect } in getEffects():
     print(skill, effect)`;
-      const mod = parse(src, "for_obj_destruct.ail");
+      const mod = parse(src, "for_obj_destruct.aice");
       const fn = mod.items[0] as FunctionDecl;
       const forStmt = (fn.body as Block).statements[0] as ForStmt;
       expect(forStmt.kind).toBe("ForStmt");
@@ -242,7 +242,7 @@ component := 40`;
       const src = `fn run():
   for { skill: s, effect: e } in getEffects():
     print(s, e)`;
-      const mod = parse(src, "for_obj_alias.ail");
+      const mod = parse(src, "for_obj_alias.aice");
       const fn = mod.items[0] as FunctionDecl;
       const forStmt = (fn.body as Block).statements[0] as ForStmt;
       expect(forStmt.variable).toBe("{ skill: s, effect: e }");
@@ -252,7 +252,7 @@ component := 40`;
       const src = `fn run():
   for [k, v] in entries():
     print(k, v)`;
-      const mod = parse(src, "for_tuple.ail");
+      const mod = parse(src, "for_tuple.aice");
       const fn = mod.items[0] as FunctionDecl;
       const forStmt = (fn.body as Block).statements[0] as ForStmt;
       expect(forStmt.kind).toBe("ForStmt");
@@ -264,7 +264,7 @@ component := 40`;
       const src = `fn run():
   for (k, v) in entries():
     print(k, v)`;
-      const mod = parse(src, "for_parens.ail");
+      const mod = parse(src, "for_parens.aice");
       const fn = mod.items[0] as FunctionDecl;
       const forStmt = (fn.body as Block).statements[0] as ForStmt;
       expect(forStmt.variable).toBe("(k, v)");
@@ -288,7 +288,7 @@ component := 40`;
   if: "cond",
   nil: nil
 }`;
-      const mod = parse(src, "record_keywords.ail");
+      const mod = parse(src, "record_keywords.aice");
       const v = mod.items[0] as VarDecl;
       const rec = v.value as RecordLiteralExpr;
       expect(rec.kind).toBe("RecordLiteralExpr");
@@ -312,7 +312,7 @@ component := 40`;
 
     it("allows numeric literals as property keys in records", () => {
       const src = `val statusCodes = { 200: "OK", 404: "Not Found", 500: "Internal Server Error" }`;
-      const mod = parse(src, "record_numbers.ail");
+      const mod = parse(src, "record_numbers.aice");
       const v = mod.items[0] as VarDecl;
       const rec = v.value as RecordLiteralExpr;
       expect(rec.properties.map((p) => p.key)).toEqual(["200", "404", "500"]);
@@ -320,7 +320,7 @@ component := 40`;
 
     it("allows computed property keys [expr] in record literals", () => {
       const src = `val dynamic = { [Symbol.iterator]: fn() = nil, [k]: v }`;
-      const mod = parse(src, "record_computed.ail");
+      const mod = parse(src, "record_computed.aice");
       const v = mod.items[0] as VarDecl;
       const rec = v.value as RecordLiteralExpr;
       expect(rec.properties.map((p) => p.key)).toEqual(["[Symbol.iterator]", "[k]"]);
@@ -329,7 +329,7 @@ component := 40`;
     it("allows shorthand record properties with contextual keywords", () => {
       const src = `fn makeObj(val: int, mut: str, pub: bool, style: str):
   ret { val, mut, pub, style }`;
-      const mod = parse(src, "record_shorthand.ail");
+      const mod = parse(src, "record_shorthand.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.kind).toBe("FunctionDecl");
     });
@@ -339,7 +339,7 @@ component := 40`;
     it("parses primary constructor rest parameter with ellipsis", () => {
       const src = `class Logger(pub prefix: str, ...tags: [str]):
   pass`;
-      const mod = parse(src, "primary_ctor_rest.ail");
+      const mod = parse(src, "primary_ctor_rest.aice");
       const cls = mod.items[0] as ClassDecl;
       expect(cls.primaryConstructor).toBeDefined();
       expect(cls.primaryConstructor).toHaveLength(2);
@@ -355,7 +355,7 @@ component := 40`;
 
 fn run():
   log("info", "a", "b", "c")`;
-      const mod = parse(src, "rest_multi.ail");
+      const mod = parse(src, "rest_multi.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
@@ -366,7 +366,7 @@ fn run():
 
 fn run():
   log("info", ["a", "b"])`;
-      const mod = parse(src, "rest_direct_array.ail");
+      const mod = parse(src, "rest_direct_array.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
@@ -377,7 +377,7 @@ fn run():
 
 fn run():
   Emitter("main", "click", "hover")`;
-      const mod = parse(src, "class_rest_ctor.ail");
+      const mod = parse(src, "class_rest_ctor.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });
@@ -388,7 +388,7 @@ fn run():
 
 fn run():
   log("info", 123)`;
-      const mod = parse(src, "rest_mismatch.ail");
+      const mod = parse(src, "rest_mismatch.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).toThrow();
     });
@@ -397,7 +397,7 @@ fn run():
       const src = `class Handler:
   fn handle({ a = 1, b: localB = 2 }: { a: int, b: int }):
     ret a + localB`;
-      const mod = parse(src, "method_destructure_default.ail");
+      const mod = parse(src, "method_destructure_default.aice");
       const tc = new TypeChecker();
       expect(() => tc.checkModule(mod)).not.toThrow();
     });

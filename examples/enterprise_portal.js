@@ -20,7 +20,7 @@
     setupEventListeners();
     setupKeyboardShortcuts();
     startTelemetrySimulation();
-    console.log("[AIL Enterprise Portal] Runtime initialized successfully.");
+    console.log("[AICE Enterprise Portal] Runtime initialized successfully.");
   }
 
   function setupEventListeners() {
@@ -97,7 +97,7 @@
 
   function toggleColorTheme() {
     const isDark = document.body.classList.toggle("theme-dark");
-    localStorage.setItem("ail_theme_dark", isDark ? "true" : "false");
+    localStorage.setItem("aice_theme_dark", isDark ? "true" : "false");
   }
 
   function triggerManualCheckpoint() {
@@ -125,7 +125,7 @@
   }
 
   function refreshKpiTrends() {
-    console.log(`[AIL Telemetry] Window adjusted to ${state.timeWindow}`);
+    console.log(`[AICE Telemetry] Window adjusted to ${state.timeWindow}`);
   }
 
   function startTelemetrySimulation() {

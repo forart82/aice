@@ -4,7 +4,7 @@
  *
  * Content-Addressed In-Memory and Disk AST & Module Cache.
  * Provides SHA-256 content-addressed caching for parsed ASTs and modules,
- * disk persistence (.ail-cache/ast-cache.json), cache invalidation, and telemetry.
+ * disk persistence (.aice-cache/ast-cache.json), cache invalidation, and telemetry.
  */
 
 import { createHash } from "node:crypto";
@@ -47,13 +47,13 @@ function resolveCacheFilePath(projectRootOrFile: string): string {
   if (resolved.endsWith(".json")) {
     return resolved;
   }
-  if (path.basename(resolved) === ".ail-cache") {
+  if (path.basename(resolved) === ".aice-cache") {
     return path.join(resolved, "ast-cache.json");
   }
-  return path.join(resolved, ".ail-cache", "ast-cache.json");
+  return path.join(resolved, ".aice-cache", "ast-cache.json");
 }
 
-export class AilAstCache {
+export class AiceAstCache {
   private readonly maxEntries: number;
   private entries = new Map<string, AstCacheEntry>();
   private fileToKeys = new Map<string, Set<string>>();
@@ -266,7 +266,7 @@ export class AilAstCache {
   }
 }
 
-const defaultCache = new AilAstCache();
+const defaultCache = new AiceAstCache();
 
 export function parseCached(
   source: string,

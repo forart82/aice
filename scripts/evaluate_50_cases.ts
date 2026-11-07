@@ -8,7 +8,7 @@ import { getEncoding } from "js-tiktoken";
 import { detectLanguageName } from "../src/tokenomics/index.js";
 
 const cl100k = getEncoding("cl100k_base");
-const testCaseRoot = "/home/forart/dev/ail_test_case/src";
+const testCaseRoot = "/home/forart/dev/aice_test_case/src";
 
 export interface CaseResult {
   id: string;
@@ -18,7 +18,7 @@ export interface CaseResult {
   typechecked: number;
   emitted: number;
   origTokens: number;
-  ailTokens: number;
+  aiceTokens: number;
   parsePct: number;
   typecheckPct: number;
   emissionPct: number;
@@ -30,7 +30,7 @@ function evaluateCase(caseDirName: string): CaseResult | null {
   const caseDir = path.join(testCaseRoot, caseDirName);
   if (!fs.existsSync(caseDir) || !fs.statSync(caseDir).isDirectory()) return null;
 
-  const filePairs: { sourceFile: string; ailFile?: string; lang: string }[] = [];
+  const filePairs: { sourceFile: string; aiceFile?: string; lang: string }[] = [];
 
   function walk(dir: string) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -40,12 +40,12 @@ function evaluateCase(caseDirName: string): CaseResult | null {
       if (entry.isDirectory()) {
         walk(full);
       } else if (entry.isFile()) {
-        if (entry.name.endsWith(".ail.trivia.json") || entry.name.endsWith(".uid")) continue;
-        if (entry.name.endsWith(".ail")) {
-          const target = full.replace(/\.ail$/, "");
+        if (entry.name.endsWith(".aice.trivia.json") || entry.name.endsWith(".uid")) continue;
+        if (entry.name.endsWith(".aice")) {
+          const target = full.replace(/\.aice$/, "");
           filePairs.push({
             sourceFile: target,
-            ailFile: full,
+            aiceFile: full,
             lang: detectLanguageName(target),
           });
         }
@@ -64,7 +64,7 @@ function evaluateCase(caseDirName: string): CaseResult | null {
         if (entry.isDirectory()) {
           walkSources(full);
         } else if (entry.isFile()) {
-          if (entry.name.endsWith(".uid") || entry.name.endsWith(".ail.trivia.json")) continue;
+          if (entry.name.endsWith(".uid") || entry.name.endsWith(".aice.trivia.json")) continue;
           const ext = path.extname(entry.name);
           if ([".ts", ".tsx", ".cpp", ".hpp", ".cc", ".cxx", ".h", ".cs", ".py", ".css", ".html"].includes(ext)) {
             filePairs.push({
@@ -84,37 +84,37 @@ function evaluateCase(caseDirName: string): CaseResult | null {
   let typechecked = 0;
   let emitted = 0;
   let totalOrigTokens = 0;
-  let totalAilTokens = 0;
+  let totalAiceTokens = 0;
   let allBitIdentical = true;
   const langs = new Set<string>();
 
   for (const pair of filePairs) {
     langs.add(pair.lang);
-    let ailContent = "";
+    let aiceContent = "";
     let sourceContent = "";
 
     if (fs.existsSync(pair.sourceFile)) {
       sourceContent = fs.readFileSync(pair.sourceFile, "utf-8");
     }
 
-    if (pair.ailFile && fs.existsSync(pair.ailFile)) {
-      ailContent = fs.readFileSync(pair.ailFile, "utf-8");
+    if (pair.aiceFile && fs.existsSync(pair.aiceFile)) {
+      aiceContent = fs.readFileSync(pair.aiceFile, "utf-8");
     } else if (sourceContent) {
       try {
         const target = detectTargetFromPath(pair.sourceFile);
         const decomp = decompile(sourceContent, target, { filePath: pair.sourceFile });
-        ailContent = decomp.ail;
+        aiceContent = decomp.aice;
       } catch (e) {
         // decompile error
       }
     }
 
     const sTokens = sourceContent ? cl100k.encode(sourceContent).length : 0;
-    const aTokens = ailContent ? cl100k.encode(ailContent).length : sTokens;
+    const aTokens = aiceContent ? cl100k.encode(aiceContent).length : sTokens;
     totalOrigTokens += sTokens;
-    totalAilTokens += aTokens;
+    totalAiceTokens += aTokens;
 
-    if (!ailContent) {
+    if (!aiceContent) {
       allBitIdentical = false;
       continue;
     }
@@ -122,7 +122,7 @@ function evaluateCase(caseDirName: string): CaseResult | null {
     // 1. Parse
     let ast: any = null;
     try {
-      ast = parse(ailContent, pair.ailFile || `${pair.sourceFile}.ail`);
+      ast = parse(aiceContent, pair.aiceFile || `${pair.sourceFile}.aice`);
       parsed++;
     } catch (e) {
       allBitIdentical = false;
@@ -156,7 +156,7 @@ function evaluateCase(caseDirName: string): CaseResult | null {
   const parsePct = files > 0 ? (parsed / files) * 100 : 0;
   const typecheckPct = files > 0 ? (typechecked / files) * 100 : 0;
   const emissionPct = files > 0 ? (emitted / files) * 100 : 0;
-  const savingsPct = totalOrigTokens > 0 ? ((totalOrigTokens - totalAilTokens) / totalOrigTokens) * 100 : 0;
+  const savingsPct = totalOrigTokens > 0 ? ((totalOrigTokens - totalAiceTokens) / totalOrigTokens) * 100 : 0;
 
   let driftStatus = "0 Semantic Drift";
   if (allBitIdentical) {
@@ -171,7 +171,7 @@ function evaluateCase(caseDirName: string): CaseResult | null {
     typechecked,
     emitted,
     origTokens: totalOrigTokens,
-    ailTokens: totalAilTokens,
+    aiceTokens: totalAiceTokens,
     parsePct: Math.round(parsePct * 10) / 10,
     typecheckPct: Math.round(typecheckPct * 10) / 10,
     emissionPct: Math.round(emissionPct * 10) / 10,

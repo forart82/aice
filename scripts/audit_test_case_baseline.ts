@@ -2,24 +2,24 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse } from "../src/core/parser.js";
 
-const testCaseSrc = "/home/forart/dev/ail_test_case/src";
+const testCaseSrc = "/home/forart/dev/aice_test_case/src";
 
-function findAilFiles(dir: string): string[] {
+function findAiceFiles(dir: string): string[] {
   const results: string[] = [];
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      results.push(...findAilFiles(fullPath));
-    } else if (entry.name.endsWith(".ail")) {
+      results.push(...findAiceFiles(fullPath));
+    } else if (entry.name.endsWith(".aice")) {
       results.push(fullPath);
     }
   }
   return results.sort();
 }
 
-const files = findAilFiles(testCaseSrc);
-console.log(`Found ${files.length} .ail files in ${testCaseSrc}`);
+const files = findAiceFiles(testCaseSrc);
+console.log(`Found ${files.length} .aice files in ${testCaseSrc}`);
 
 let successCount = 0;
 let failCount = 0;
@@ -45,7 +45,7 @@ for (const file of files) {
 }
 
 console.log("\n========================================================");
-console.log(`Total .ail files: ${files.length}`);
+console.log(`Total .aice files: ${files.length}`);
 console.log(`Parse Successes:  ${successCount} (${((successCount / files.length) * 100).toFixed(2)}%)`);
 console.log(`Parse Failures:   ${failCount} (${((failCount / files.length) * 100).toFixed(2)}%)`);
 console.log("========================================================\n");

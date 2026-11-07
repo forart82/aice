@@ -6,7 +6,7 @@ function kinds(source: string): TokenKind[] {
   return tokenize(source).map((t) => t.kind);
 }
 
-describe("AIL 2.0 Lexer & Tokenizer Engine", () => {
+describe("AICE 2.0 Lexer & Tokenizer Engine", () => {
   describe("Literals & Primitives", () => {
     it("scans numbers including ints, floats, hex, binary, and underscores", () => {
       const src = "42 3.14 0x1A 0b1010 1_000_000 1e-4";
@@ -451,8 +451,8 @@ ret items`;
     let x = 1
   let y = 2`;
 
-      expect(() => tokenize(src, "test.ail")).toThrowError(LexerError);
-      expect(() => tokenize(src, "test.ail")).toThrowError(/Inconsistent indentation/);
+      expect(() => tokenize(src, "test.aice")).toThrowError(LexerError);
+      expect(() => tokenize(src, "test.aice")).toThrowError(/Inconsistent indentation/);
     });
   });
 
@@ -486,7 +486,7 @@ fn test():
 # Second comment
 let a = 1`;
 
-      const { comments } = tokenizeWithTrivia(src, "service.ts.ail");
+      const { comments } = tokenizeWithTrivia(src, "service.ts.aice");
       expect(comments).toHaveLength(2);
       expect(comments[0]?.value).toBe("File license header");
       expect(comments[1]?.value).toBe("Second comment");

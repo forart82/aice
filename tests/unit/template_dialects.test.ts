@@ -6,8 +6,8 @@
  * Verifies:
  * 1. Twig Template Dialect:
  *    - Decompilation of interpolations, control tags (if, for), block & inheritance tags (block, extends, include), comments.
- *    - Lowering to canonical AIL AST (ComponentDecl with LayoutNode hierarchy and expression bindings).
- *    - Emission of clean, canonical .twig from AIL AST.
+ *    - Lowering to canonical AICE AST (ComponentDecl with LayoutNode hierarchy and expression bindings).
+ *    - Emission of clean, canonical .twig from AICE AST.
  *    - Lossless bidirectional roundtrip fidelity.
  * 2. HTML5 Template Dialect:
  *    - Decompilation and emission of standalone documents (with <!DOCTYPE html>) and embedded layout fragments.
@@ -15,7 +15,7 @@
  * 3. Core Toolchain Registration:
  *    - TargetLanguage ("twig"), detectTargetFromPath, emitTarget, decompile, KNOWN_TARGET_EXTENSIONS, TARGET_EXT_MAP.
  * 4. Polymorphic CLI Integration:
- *    - `ail compile`, `ail outline`, and `ail context` on .twig and .html template files.
+ *    - `aice compile`, `aice outline`, and `aice context` on .twig and .html template files.
  */
 
 import { spawnSync } from "node:child_process";
@@ -48,7 +48,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -67,7 +67,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-template-dialects-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-template-dialects-test-"));
   });
 
   afterEach(() => {
@@ -79,7 +79,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   });
 
   describe("1. Twig Template Dialect Decompiler", () => {
-    it("parses interpolation expressions into canonical AIL expression bindings", () => {
+    it("parses interpolation expressions into canonical AICE expression bindings", () => {
       const twig = `<div class="user-greeting">
   <h1>{{ user.name }}</h1>
   <p>{{ count + 1 }}</p>
@@ -87,7 +87,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 </div>`;
 
       const decompiler = new TwigDecompiler(twig, "greeting.twig");
-      const { ast, ail } = decompiler.decompile();
+      const { ast, aice } = decompiler.decompile();
 
       expect(ast.items).toHaveLength(1);
       const comp = ast.items[0] as ComponentDecl;
@@ -128,11 +128,11 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
         expect(span.childExpr.operator).toBe("|");
       }
 
-      // Generated AIL code verifies clean serialization
-      expect(ail).toContain("component Greeting():");
-      expect(ail).toContain('div(class: "user-greeting"):');
-      expect(ail).toContain('h1: "{user.name}"');
-      expect(ail).toContain('p: "{count + 1}"');
+      // Generated AICE code verifies clean serialization
+      expect(aice).toContain("component Greeting():");
+      expect(aice).toContain('div(class: "user-greeting"):');
+      expect(aice).toContain('h1: "{user.name}"');
+      expect(aice).toContain('p: "{count + 1}"');
     });
 
     it("parses control tags ({% if %}, {% elseif %}, {% else %}, {% endif %})", () => {
@@ -144,7 +144,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   <p class="login-prompt">Please sign in.</p>
 {% endif %}`;
 
-      const { ast, ail } = decompileTwig(twig, "auth_status.twig");
+      const { ast, aice } = decompileTwig(twig, "auth_status.twig");
       expect(ast.items).toHaveLength(1);
       const comp = ast.items[0] as ComponentDecl;
       expect(comp.layout).toHaveLength(1);
@@ -159,9 +159,9 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(ifNode.children[1].tag).toBe("elseif");
       expect(ifNode.children[2].tag).toBe("else");
 
-      expect(ail).toContain("if(condition: user.is_authenticated):");
-      expect(ail).toContain("elseif(condition: user.is_guest):");
-      expect(ail).toContain("else:");
+      expect(aice).toContain("if(condition: user.is_authenticated):");
+      expect(aice).toContain("elseif(condition: user.is_guest):");
+      expect(aice).toContain("else:");
     });
 
     it("parses loop tags ({% for item in items %}, {% for key, item in items %})", () => {
@@ -171,7 +171,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   {% endfor %}
 </ul>`;
 
-      const { ast, ail } = decompileTwig(twig, "users.twig");
+      const { ast, aice } = decompileTwig(twig, "users.twig");
       const comp = ast.items[0] as ComponentDecl;
       expect(comp.layout).toHaveLength(1);
 
@@ -186,8 +186,8 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(forNode.children).toHaveLength(1);
       expect(forNode.children[0].tag).toBe("li");
 
-      expect(ail).toContain("for(item: user, in: users):");
-      expect(ail).toContain('li(class: "user-item"): "{user.name}"');
+      expect(aice).toContain("for(item: user, in: users):");
+      expect(aice).toContain('li(class: "user-item"): "{user.name}"');
     });
 
     it("parses block and template inheritance tags ({% extends %}, {% block %}, {% include %})", () => {
@@ -204,7 +204,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 {% endblock %}`;
 
       const decompiler = new TwigDecompiler(twig, "dashboard.twig");
-      const { ast, trivia, ail } = decompiler.decompile();
+      const { ast, trivia, aice } = decompiler.decompile();
 
       const comp = ast.items[0] as ComponentDecl;
       expect(comp.name).toBe("Dashboard");
@@ -237,18 +237,18 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(rootTrivia).toBeDefined();
       expect(rootTrivia?.leading[0].content).toContain("Page Layout");
 
-      expect(ail).toContain('extends(template: "layouts/base.twig")');
-      expect(ail).toContain('include(template: "partials/nav.twig")');
-      expect(ail).toContain('block(name: "title"): "Dashboard"');
-      expect(ail).toContain('block(name: "content"):');
+      expect(aice).toContain('extends(template: "layouts/base.twig")');
+      expect(aice).toContain('include(template: "partials/nav.twig")');
+      expect(aice).toContain('block(name: "title"): "Dashboard"');
+      expect(aice).toContain('block(name: "content"):');
     });
 
     it("parses nested HTML elements and text nodes with attributes", () => {
       const twig = `<section class="hero" id="hero-sec" data-active>
   <div class="container">
     <h1 class="headline">Fast, Clean, Token-Dense</h1>
-    <p>AIL multi-language compiler pipeline.</p>
-    <img src="/logo.png" alt="AIL Logo" />
+    <p>AICE multi-language compiler pipeline.</p>
+    <img src="/logo.png" alt="AICE Logo" />
   </div>
 </section>`;
 
@@ -266,8 +266,8 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   });
 
   describe("2. Twig Emitter & Bidirectional Roundtrip Fidelity", () => {
-    it("emits clean, canonical .twig from canonical AIL AST", () => {
-      const ailSource = `component UserCard():
+    it("emits clean, canonical .twig from canonical AICE AST", () => {
+      const aiceSource = `component UserCard():
   extends(template: "base.twig")
   block(name: "content"):
     div(class: "card", id: "user-101"):
@@ -280,7 +280,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
         for(item: skill, in: user.skills):
           li: "{skill}"`;
 
-      const mod = parse(ailSource, "user_card.twig.ail");
+      const mod = parse(aiceSource, "user_card.twig.aice");
       const emitter = new TwigEmitter();
       const emitted = emitter.emit(mod);
 
@@ -303,18 +303,18 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
       const originalTwig = fs.readFileSync(cardPath, "utf-8");
 
-      // Round 1: Twig -> Decompile -> AIL
+      // Round 1: Twig -> Decompile -> AICE
       const decompileRes1 = decompile(originalTwig, "twig", { filePath: "card.twig" });
-      expect(decompileRes1.ail).toContain("component Card():");
-      expect(decompileRes1.ail).toContain('extends(template: "base.twig")');
-      expect(decompileRes1.ail).toContain('block(name: "content"):');
-      expect(decompileRes1.ail).toContain("for(item: skill, in: user.skills):");
+      expect(decompileRes1.aice).toContain("component Card():");
+      expect(decompileRes1.aice).toContain('extends(template: "base.twig")');
+      expect(decompileRes1.aice).toContain('block(name: "content"):');
+      expect(decompileRes1.aice).toContain("for(item: skill, in: user.skills):");
 
-      // Parse generated AIL back to Module AST
-      const astFromAil = parse(decompileRes1.ail, "card.twig.ail");
+      // Parse generated AICE back to Module AST
+      const astFromAice = parse(decompileRes1.aice, "card.twig.aice");
 
       // Forward emit back to Twig
-      const reEmittedTwig = emitTarget(astFromAil, "twig");
+      const reEmittedTwig = emitTarget(astFromAice, "twig");
       expect(reEmittedTwig).toContain('{% extends "base.twig" %}');
       expect(reEmittedTwig).toContain("{% block content %}");
       expect(reEmittedTwig).toContain('<div class="user-card" id="user-{{ user.id }}">');
@@ -328,9 +328,9 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(reEmittedTwig).toContain('<li class="skill-item">{{ skill.name }}</li>');
       expect(reEmittedTwig).toContain("{% endfor %}");
 
-      // Round 2: Re-emitted Twig -> Decompile -> AIL (verifying zero drift)
+      // Round 2: Re-emitted Twig -> Decompile -> AICE (verifying zero drift)
       const decompileRes2 = decompile(reEmittedTwig, "twig", { filePath: "card.twig" });
-      expect(decompileRes2.ail).toBe(decompileRes1.ail);
+      expect(decompileRes2.aice).toBe(decompileRes1.aice);
     });
 
     it("preserves Twig comments via CstTriviaTable across roundtrips", () => {
@@ -355,12 +355,12 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const originalHtml = fs.readFileSync(profilePath, "utf-8");
 
       const decomp = decompile(originalHtml, "html", { filePath: "profile.html" });
-      expect(decomp.ail).toContain("component Profile():");
-      expect(decomp.ail).toContain("html(lang: \"en\"):");
-      expect(decomp.ail).toContain("title: \"Developer Profile\"");
-      expect(decomp.ail).toContain('h1(class: "profile-title"): "Alex Johnson"');
+      expect(decomp.aice).toContain("component Profile():");
+      expect(decomp.aice).toContain("html(lang: \"en\"):");
+      expect(decomp.aice).toContain("title: \"Developer Profile\"");
+      expect(decomp.aice).toContain('h1(class: "profile-title"): "Alex Johnson"');
 
-      const ast = parse(decomp.ail, "profile.html.ail");
+      const ast = parse(decomp.aice, "profile.html.aice");
       const reEmitted = emitTarget(ast, "html");
 
       expect(reEmitted).toContain("<!DOCTYPE html>");
@@ -378,10 +378,10 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 </div>`;
 
       const decomp = decompile(fragment, "html", { filePath: "card_fragment.html" });
-      expect(decomp.ail).toContain("component CardFragment():");
-      expect(decomp.ail).toContain('div(class: "card-component", id: "card-01"):');
+      expect(decomp.aice).toContain("component CardFragment():");
+      expect(decomp.aice).toContain('div(class: "card-component", id: "card-01"):');
 
-      const ast = parse(decomp.ail, "card_fragment.html.ail");
+      const ast = parse(decomp.aice, "card_fragment.html.aice");
       const reEmitted = emitTarget(ast, "html");
 
       expect(reEmitted).not.toContain("<!DOCTYPE html>");
@@ -398,7 +398,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 </form>`;
 
       const decomp = decompile(html, "html", { filePath: "login.html" });
-      const ast = parse(decomp.ail, "login.html.ail");
+      const ast = parse(decomp.aice, "login.html.aice");
       const reEmitted = emitTarget(ast, "html");
 
       expect(reEmitted).toContain("<input");
@@ -417,12 +417,12 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(getExtensionForTarget("twig")).toBe(".twig");
     });
 
-    it("detects target language from file paths (.twig -> 'twig', .twig.ail -> 'twig')", () => {
+    it("detects target language from file paths (.twig -> 'twig', .twig.aice -> 'twig')", () => {
       expect(detectTargetFromPath("card.twig")).toBe("twig");
       expect(detectTargetFromPath("views/page.twig")).toBe("twig");
-      expect(detectTargetFromPath("views/page.twig.ail")).toBe("twig");
+      expect(detectTargetFromPath("views/page.twig.aice")).toBe("twig");
       expect(detectTargetFromPath("views/profile.html")).toBe("html");
-      expect(detectTargetFromPath("views/profile.html.ail")).toBe("html");
+      expect(detectTargetFromPath("views/profile.html.aice")).toBe("html");
     });
 
     it("dispatches emitTarget with target 'twig'", () => {
@@ -430,7 +430,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
   extends(template: "layout.twig")
   block(name: "main"):
     h1: "Hello World"`;
-      const mod = parse(src, "sample.twig.ail");
+      const mod = parse(src, "sample.twig.aice");
       const out = emitTarget(mod, "twig");
       expect(out).toContain('{% extends "layout.twig" %}');
       expect(out).toContain("{% block main %}");
@@ -440,9 +440,9 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
     it("dispatches decompile with target 'twig'", () => {
       const twig = `{% block body %}<h2>Decompiled Twig</h2>{% endblock %}`;
       const res = decompile(twig, "twig", { filePath: "body.twig" });
-      expect(res.ail).toContain("component Body():");
-      expect(res.ail).toContain('block(name: "body"):');
-      expect(res.ail).toContain('h2: "Decompiled Twig"');
+      expect(res.aice).toContain("component Body():");
+      expect(res.aice).toContain('block(name: "body"):');
+      expect(res.aice).toContain('h2: "Decompiled Twig"');
     });
 
     it("supports decompileFile asynchronously on template files", async () => {
@@ -450,12 +450,12 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const res = await decompileFile(cardPath);
       expect(res.ast.items).toHaveLength(1);
       expect((res.ast.items[0] as ComponentDecl).name).toBe("Card");
-      expect(res.ail).toContain("component Card():");
+      expect(res.aice).toContain("component Card():");
     });
   });
 
   describe("5. Polymorphic CLI Integration on Templates", () => {
-    it("runs 'ail outline' on card.twig and outputs component declaration with token reduction", () => {
+    it("runs 'aice outline' on card.twig and outputs component declaration with token reduction", () => {
       const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
       const res = runCli(["outline", cardPath, "--stats"]);
 
@@ -465,7 +465,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(res.stdout).toContain("%");
     });
 
-    it("runs 'ail outline' on profile.html and outputs component declaration", () => {
+    it("runs 'aice outline' on profile.html and outputs component declaration", () => {
       const profilePath = path.resolve(__dirname, "../../examples/templates/profile.html");
       const res = runCli(["outline", profilePath, "--stats"]);
 
@@ -474,7 +474,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(res.stdout).toContain("Token savings:");
     });
 
-    it("runs 'ail outline --json' on card.twig and yields structured symbol outline", () => {
+    it("runs 'aice outline --json' on card.twig and yields structured symbol outline", () => {
       const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
       const res = runCli(["outline", cardPath, "--json"]);
 
@@ -487,12 +487,12 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(parsed.symbols[0].kind).toBe("component");
     });
 
-    it("runs 'ail context' on card.twig and profile.html and packages into 1-turn context pack", () => {
+    it("runs 'aice context' on card.twig and profile.html and packages into 1-turn context pack", () => {
       const cardPath = path.resolve(__dirname, "../../examples/templates/card.twig");
       const res = runCli(["context", cardPath, "--no-callers"]);
 
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain("# AIL Context Pack:");
+      expect(res.stdout).toContain("# AICE Context Pack:");
       expect(res.stdout).toContain("card.twig");
       expect(res.stdout).toContain('{% extends "base.twig" %}');
 
@@ -504,7 +504,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const profileRes = runCli(["context", profilePath, "--no-callers"]);
 
       expect(profileRes.status).toBe(0);
-      expect(profileRes.stdout).toContain("# AIL Context Pack:");
+      expect(profileRes.stdout).toContain("# AICE Context Pack:");
       expect(profileRes.stdout).toContain("profile.html");
       expect(profileRes.stdout).toContain("Alex Johnson");
 
@@ -513,10 +513,10 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(profileOutlineRes.stdout).toContain("component Profile():");
     }, 20000);
 
-    it("runs 'ail compile' on a .twig.ail file and compiles to .twig", () => {
-      const ailFile = path.join(tmpDir, "alert_card.twig.ail");
+    it("runs 'aice compile' on a .twig.aice file and compiles to .twig", () => {
+      const aiceFile = path.join(tmpDir, "alert_card.twig.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `component AlertCard():
   extends(template: "base.twig")
   block(name: "alert"):
@@ -527,7 +527,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
         "utf-8",
       );
 
-      const res = runCli(["compile", ailFile], tmpDir);
+      const res = runCli(["compile", aiceFile], tmpDir);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("Compiled");
       expect(res.stdout).toContain("[twig]");
@@ -544,13 +544,13 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(content).toContain("{% endblock %}");
     });
 
-    it("runs 'ail compile' on a .html.ail file and compiles to .html", () => {
-      const ailFile = path.join(tmpDir, "navbar.html.ail");
+    it("runs 'aice compile' on a .html.aice file and compiles to .html", () => {
+      const aiceFile = path.join(tmpDir, "navbar.html.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `component Navbar():
   nav(class: "main-nav"):
-    a(class: "nav-brand", href: "/"): "AIL"
+    a(class: "nav-brand", href: "/"): "AICE"
     ul(class: "nav-links"):
       li: "Docs"
       li: "Tutorials"
@@ -558,7 +558,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
         "utf-8",
       );
 
-      const res = runCli(["compile", ailFile], tmpDir);
+      const res = runCli(["compile", aiceFile], tmpDir);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("Compiled");
       expect(res.stdout).toContain("[html]");
@@ -568,7 +568,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 
       const content = fs.readFileSync(generatedHtml, "utf-8");
       expect(content).toContain('<nav class="main-nav">');
-      expect(content).toContain('<a class="nav-brand" href="/">AIL</a>');
+      expect(content).toContain('<a class="nav-brand" href="/">AICE</a>');
       expect(content).toContain('<ul class="nav-links">');
       expect(content).toContain("<li>Docs</li>");
       expect(content).toContain("<li>Tutorials</li>");

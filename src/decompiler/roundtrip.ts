@@ -12,7 +12,7 @@ import type { Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import { type CstTriviaTable, createAstNodeSnapshot, getNodeTriviaId } from "../core/trivia.js";
 import { emitTarget, type TargetLanguage } from "../emitters/index.js";
-import { AilGenerator } from "./ail-generator.js";
+import { AiceGenerator } from "./aice-generator.js";
 import { CppDecompiler } from "./cpp-decompiler.js";
 import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
@@ -28,20 +28,20 @@ import { KotlinDecompiler } from "./kotlin-decompiler.js";
 export interface RoundtripResult {
   target: TargetLanguage;
   original: string;
-  ail: string;
+  aice: string;
   reconstructed: string;
   isIdentical: boolean;
   diff?: string;
   triviaEntriesCount: number;
 }
 
-export interface AilRoundtripResult {
+export interface AiceRoundtripResult {
   target: TargetLanguage;
-  ailOriginal: string;
+  aiceOriginal: string;
   targetReconstructed: string;
-  ailReconstructed: string;
+  aiceReconstructed: string;
   isTargetIdentical: boolean;
-  isAilIdentical: boolean;
+  isAiceIdentical: boolean;
 }
 
 export function executeRoundtrip(
@@ -124,9 +124,9 @@ export function executeRoundtrip(
     preserveKotlinSourceSlices(source, ast, trivia);
   }
 
-  // Generate AIL source code
-  const ailGenerator = new AilGenerator({ trivia });
-  const ail = ailGenerator.generate(ast);
+  // Generate AICE source code
+  const aiceGenerator = new AiceGenerator({ trivia });
+  const aice = aiceGenerator.generate(ast);
 
   // Put: Emit back to target language with trivia
   const reconstructed = emitTarget(ast, target, { trivia, watermark: false });
@@ -144,7 +144,7 @@ export function executeRoundtrip(
   return {
     target,
     original: source,
-    ail,
+    aice,
     reconstructed,
     isIdentical,
     diff,
@@ -152,21 +152,21 @@ export function executeRoundtrip(
   };
 }
 
-export function executeAilRoundtrip(
-  ailSource: string,
+export function executeAiceRoundtrip(
+  aiceSource: string,
   target: TargetLanguage,
-  filePath = "source.ail",
-): AilRoundtripResult {
-  const { ast, trivia } = parseWithTrivia(ailSource, filePath);
+  filePath = "source.aice",
+): AiceRoundtripResult {
+  const { ast, trivia } = parseWithTrivia(aiceSource, filePath);
   const targetReconstructed = emitTarget(ast, target, { trivia, watermark: false });
   const reverseResult = executeRoundtrip(targetReconstructed, target, filePath);
   return {
     target,
-    ailOriginal: ailSource,
+    aiceOriginal: aiceSource,
     targetReconstructed,
-    ailReconstructed: reverseResult.ail,
+    aiceReconstructed: reverseResult.aice,
     isTargetIdentical: reverseResult.isIdentical,
-    isAilIdentical: normalizeWhitespace(ailSource) === normalizeWhitespace(reverseResult.ail),
+    isAiceIdentical: normalizeWhitespace(aiceSource) === normalizeWhitespace(reverseResult.aice),
   };
 }
 

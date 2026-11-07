@@ -1,6 +1,6 @@
 /**
- * Semantic Type System & Subtyping Lattice for AIL 2.0.
- * Conforms to Section 3 of docs/AIL_SPEC.md.
+ * Semantic Type System & Subtyping Lattice for AICE 2.0.
+ * Conforms to Section 3 of docs/AICE_SPEC.md.
  */
 
 import type { Expr } from "../core/ast.js";
@@ -279,7 +279,7 @@ export function isStringLiteralOrUnionType(type: Type): boolean {
 }
 
 /**
- * Checks if a source type is assignable to a target type according to the AIL subtyping lattice.
+ * Checks if a source type is assignable to a target type according to the AICE subtyping lattice.
  */
 export function isAssignable(
   target: Type,

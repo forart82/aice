@@ -1,5 +1,5 @@
 /**
- * AIL 2.0 Multi-Line Terminal Reporter / TUI Engine (Step 2).
+ * AICE 2.0 Multi-Line Terminal Reporter / TUI Engine (Step 2).
  * Flicker-free interactive terminal progress dashboard visualizing concurrent
  * compilation, active worker states, overall progress, and live tokenomics.
  */
@@ -11,7 +11,7 @@ export type WorkerStatus = "IDLE" | "COMPILING" | "DECOMPILING" | "SHADOWING" | 
 
 export interface TaskMetrics {
   targetTokens?: number;
-  ailTokens?: number;
+  aiceTokens?: number;
 }
 
 export interface MultiLineReporterOptions {
@@ -46,7 +46,7 @@ export interface ReporterStats {
   elapsedMs: number;
   throughput: number;
   totalTargetTokens: number;
-  totalAilTokens: number;
+  totalAiceTokens: number;
   tokenSavingsPct: number;
 }
 
@@ -58,12 +58,12 @@ export class MultiLineReporter {
   readonly barWidth: number;
   readonly width: number;
 
-  private _title = "AIL 2.0 Compiler";
+  private _title = "AICE 2.0 Compiler";
   private _totalTasks = 0;
   private _completedTasks = 0;
   private _failedTasks = 0;
   private _totalTargetTokens = 0;
-  private _totalAilTokens = 0;
+  private _totalAiceTokens = 0;
   private _summary?: string;
 
   private _workers: WorkerState[];
@@ -157,13 +157,13 @@ export class MultiLineReporter {
     return this._totalTargetTokens;
   }
 
-  public get totalAilTokens(): number {
-    return this._totalAilTokens;
+  public get totalAiceTokens(): number {
+    return this._totalAiceTokens;
   }
 
   public get tokenSavingsPct(): number {
     if (this._totalTargetTokens <= 0) return 0;
-    return ((this._totalTargetTokens - this._totalAilTokens) / this._totalTargetTokens) * 100;
+    return ((this._totalTargetTokens - this._totalAiceTokens) / this._totalTargetTokens) * 100;
   }
 
   public getWorker(workerId: number): WorkerState | undefined {
@@ -184,7 +184,7 @@ export class MultiLineReporter {
       elapsedMs: this.elapsedMs,
       throughput: this.throughput,
       totalTargetTokens: this._totalTargetTokens,
-      totalAilTokens: this._totalAilTokens,
+      totalAiceTokens: this._totalAiceTokens,
       tokenSavingsPct: this.tokenSavingsPct,
     };
   }
@@ -200,7 +200,7 @@ export class MultiLineReporter {
     this._completedTasks = 0;
     this._failedTasks = 0;
     this._totalTargetTokens = 0;
-    this._totalAilTokens = 0;
+    this._totalAiceTokens = 0;
     this._summary = undefined;
     this._isStarted = true;
     this._isFinished = false;
@@ -248,7 +248,7 @@ export class MultiLineReporter {
           this._startedCount++;
           const verb = status.charAt(0) + status.slice(1).toLowerCase();
           const taskStr = `(${this._startedCount}/${this._totalTasks})`;
-          this.stream.write(`[AIL] ${taskStr} ${verb} ${formattedFile}...\n`);
+          this.stream.write(`[AICE] ${taskStr} ${verb} ${formattedFile}...\n`);
         }
       }
     } else {
@@ -273,8 +273,8 @@ export class MultiLineReporter {
       if (typeof metrics.targetTokens === "number" && !Number.isNaN(metrics.targetTokens)) {
         this._totalTargetTokens += metrics.targetTokens;
       }
-      if (typeof metrics.ailTokens === "number" && !Number.isNaN(metrics.ailTokens)) {
-        this._totalAilTokens += metrics.ailTokens;
+      if (typeof metrics.aiceTokens === "number" && !Number.isNaN(metrics.aiceTokens)) {
+        this._totalAiceTokens += metrics.aiceTokens;
       }
     }
 
@@ -283,7 +283,7 @@ export class MultiLineReporter {
         this._loggedFiles.add(formattedFile);
         this._startedCount++;
         this.stream.write(
-          `[AIL] (${this._startedCount}/${this._totalTasks}) Completed ${formattedFile}\n`,
+          `[AICE] (${this._startedCount}/${this._totalTasks}) Completed ${formattedFile}\n`,
         );
       }
     } else {
@@ -305,7 +305,7 @@ export class MultiLineReporter {
     }
 
     if (!this.isTTY) {
-      this.stream.write(`[AIL] ERROR (${formattedFile}): ${error}\n`);
+      this.stream.write(`[AICE] ERROR (${formattedFile}): ${error}\n`);
     } else {
       this.requestRender();
     }
@@ -414,7 +414,7 @@ export class MultiLineReporter {
     let tokensStr: string;
     if (this._totalTargetTokens > 0) {
       const tokenDiffPct =
-        ((this._totalAilTokens - this._totalTargetTokens) / this._totalTargetTokens) * 100;
+        ((this._totalAiceTokens - this._totalTargetTokens) / this._totalTargetTokens) * 100;
       tokensStr = `${tokenDiffPct > 0 ? "+" : ""}${tokenDiffPct.toFixed(1)}%`;
     } else {
       tokensStr = "0.0%";
@@ -434,7 +434,7 @@ export class MultiLineReporter {
     return {
       onWorkerStart: (workerId: number, task: TaskItem<T, R>) => {
         if (!this._isStarted && mapper?.autoStart !== false) {
-          this.start(mapper?.title ?? "AIL Compilation", 0);
+          this.start(mapper?.title ?? "AICE Compilation", 0);
         }
         const file = this.resolveTaskFile(task, mapper);
         const status = this.resolveTaskStatus(task, mapper);
@@ -557,17 +557,17 @@ export class MultiLineReporter {
       | {
           metrics?: TaskMetrics;
           targetTokens?: number;
-          ailTokens?: number;
+          aiceTokens?: number;
         }
       | null
       | undefined;
     if (resObj?.metrics) {
       return resObj.metrics;
     }
-    if (typeof resObj?.targetTokens === "number" || typeof resObj?.ailTokens === "number") {
+    if (typeof resObj?.targetTokens === "number" || typeof resObj?.aiceTokens === "number") {
       return {
         targetTokens: resObj.targetTokens,
-        ailTokens: resObj.ailTokens,
+        aiceTokens: resObj.aiceTokens,
       };
     }
     return undefined;

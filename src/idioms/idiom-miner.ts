@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Project Idiom Miner.
- * Discovers repetitive statement blocks and compound expressions across workspace .ail files,
+ * AICE 2.0 Project Idiom Miner.
+ * Discovers repetitive statement blocks and compound expressions across workspace .aice files,
  * parameterizes holes via structural anti-unification, and enforces strict BPE token gates.
  */
 
@@ -47,7 +47,7 @@ import type {
 } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import type { Span } from "../core/span.js";
-import { AilGenerator } from "../decompiler/ail-generator.js";
+import { AiceGenerator } from "../decompiler/aice-generator.js";
 import type {
   ProjectIdiomDefinition,
   ProjectIdiomParam,
@@ -105,7 +105,7 @@ interface ExprCandidateOccurrence {
 type CandidateOccurrence = StmtCandidateOccurrence | ExprCandidateOccurrence;
 
 /**
- * Mines repetitive idioms across a set of AIL files.
+ * Mines repetitive idioms across a set of AICE files.
  */
 export function mineProjectIdioms(
   files: IdiomFileInput[],
@@ -117,7 +117,7 @@ export function mineProjectIdioms(
   const maxBlockStatements = options?.maxBlockStatements ?? 4;
   const existingIdioms = options?.existingIdioms ?? {};
 
-  const generator = new AilGenerator();
+  const generator = new AiceGenerator();
 
   // 1. Parse files and collect modules
   const parsedModules: { filePath: string; mod: Module }[] = [];
@@ -181,13 +181,13 @@ export function mineProjectIdioms(
     candidatesEvaluated++;
 
     const { templateStatements, holeValuesPerOcc, params } = antiResult;
-    const templateAil = templateStatements
+    const templateAice = templateStatements
       .map((s) => generator.formatStatement(s))
       .join("\n");
 
     const baseName = deriveIdiomName(templateStatements, kind, candidateIndex);
     const defOverheadTokens = countBpeTokens(
-      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAil}\n`,
+      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAice}\n`,
     );
 
     let totalSaved = 0;
@@ -216,7 +216,7 @@ export function mineProjectIdioms(
       name: baseName,
       kind,
       params,
-      templateAil,
+      templateAice,
       occurrences: occurrences.length,
       tokensPerOccurrenceSaved,
       netTokenSavings,
@@ -254,11 +254,11 @@ export function mineProjectIdioms(
     candidatesEvaluated++;
 
     const { templateExpr, holeValuesPerOcc, params } = antiResult;
-    const templateAil = generator.formatExpr(templateExpr);
+    const templateAice = generator.formatExpr(templateExpr);
 
     const baseName = deriveExprIdiomName(templateExpr, candidateIndex);
     const defOverheadTokens = countBpeTokens(
-      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAil}\n`,
+      `${baseName}(${params.map((p) => p.name).join(", ")}) => ${templateAice}\n`,
     );
 
     let totalSaved = 0;
@@ -285,7 +285,7 @@ export function mineProjectIdioms(
       name: baseName,
       kind: "expr",
       params,
-      templateAil,
+      templateAice,
       occurrences: occurrences.length,
       tokensPerOccurrenceSaved,
       netTokenSavings,
@@ -350,11 +350,11 @@ export function mineProjectIdioms(
       }
     }
 
-    // Reuse existing idiom name if templateAil & kind match (idempotent Twinless re-scan), otherwise disambiguate
+    // Reuse existing idiom name if templateAice & kind match (idempotent Twinless re-scan), otherwise disambiguate
     const existingMatch = Object.values(existingIdioms).find(
       (ex) =>
         ex.kind === cand.definition.kind &&
-        ex.templateAil.trim() === cand.definition.templateAil.trim(),
+        ex.templateAice.trim() === cand.definition.templateAice.trim(),
     );
     let idiomName = existingMatch ? existingMatch.name : cand.definition.name;
     if (!existingMatch && usedNames.has(idiomName)) {
@@ -403,7 +403,7 @@ function collectModuleCandidates(
   existingIdioms: Record<string, ProjectIdiomDefinition>,
   stmtGroups: Map<string, StmtCandidateOccurrence[]>,
   exprGroups: Map<string, ExprCandidateOccurrence[]>,
-  generator: AilGenerator,
+  generator: AiceGenerator,
 ): void {
   function getRecursiveStmtEnd(stmt: Statement): Span["end"] {
     if (stmt.kind === "IfStmt") {
@@ -814,7 +814,7 @@ function getExprSkeleton(expr: Expr, generalizeMemberProperty = false): string {
 function antiUnifyStatementWindows(
   windows: Statement[][],
   maxParams: number,
-  generator: AilGenerator,
+  generator: AiceGenerator,
 ): {
   templateStatements: Statement[];
   holeValuesPerOcc: Expr[][];
@@ -1128,7 +1128,7 @@ function antiUnifyStatementWindows(
 function antiUnifyExpressions(
   exprs: Expr[],
   maxParams: number,
-  generator: AilGenerator,
+  generator: AiceGenerator,
 ): {
   templateExpr: Expr;
   holeValuesPerOcc: Expr[][];

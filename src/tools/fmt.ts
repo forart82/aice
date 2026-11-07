@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
- * Formats AIL source code deterministically with canonical spacing, indentation,
+ * AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
+ * Formats AICE source code deterministically with canonical spacing, indentation,
  * punctuation normalization, blank line normalization, and CST token preservation.
  */
 
@@ -221,7 +221,7 @@ function formatTokensOnLine(tokens: RawToken[], source: string): string {
 }
 
 /**
- * Deterministically formats raw AIL source code according to canonical styling rules:
+ * Deterministically formats raw AICE source code according to canonical styling rules:
  * - 2-space indentation per nesting level
  * - Normalized operator spacing (1 space around binary and assignment operators)
  * - Normalized punctuation (no space before comma/colon, 1 space after)
@@ -230,7 +230,7 @@ function formatTokensOnLine(tokens: RawToken[], source: string): string {
  * - Exact single trailing newline `\n` at EOF
  * - Preserves string literals, template literals, docstrings, and comments completely intact
  */
-export function formatAilSource(source: string, options: FmtOptions = {}): string {
+export function formatAiceSource(source: string, options: FmtOptions = {}): string {
   const indentSize = options.indent ?? 2;
   const rawLines = source.split(/\r?\n/);
   const { rawTokens } = scanRawTokens(source);
@@ -341,10 +341,10 @@ export function formatAilSource(source: string, options: FmtOptions = {}): strin
 }
 
 /**
- * Formats a single AIL file on disk.
+ * Formats a single AICE file on disk.
  * If not already formatted and writing is permitted, writes atomically.
  */
-export async function formatAilFile(
+export async function formatAiceFile(
   filePath: string,
   options: FmtOptions = {},
 ): Promise<FmtResult> {
@@ -358,7 +358,7 @@ export async function formatAilFile(
   }
 
   const originalSource = await fs.promises.readFile(fullPath, "utf-8");
-  const formattedSource = formatAilSource(originalSource, options);
+  const formattedSource = formatAiceSource(originalSource, options);
   const isFormatted = originalSource === formattedSource;
 
   let diff: string | undefined;
@@ -387,9 +387,9 @@ export async function formatAilFile(
 }
 
 /**
- * Formats a single file or traverses a directory recursively formatting all .ail files.
+ * Formats a single file or traverses a directory recursively formatting all .aice files.
  */
-export async function formatAilPath(
+export async function formatAicePath(
   targetPath: string,
   options: FmtOptions = {},
 ): Promise<FmtResult | FmtResult[]> {
@@ -400,11 +400,11 @@ export async function formatAilPath(
 
   const stat = await fs.promises.stat(fullPath);
   if (stat.isFile()) {
-    return await formatAilFile(targetPath, options);
+    return await formatAiceFile(targetPath, options);
   }
 
   if (stat.isDirectory()) {
-    const ailFiles: string[] = [];
+    const aiceFiles: string[] = [];
 
     async function walk(dir: string) {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true });
@@ -421,19 +421,19 @@ export async function formatAilPath(
         const entryPath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           await walk(entryPath);
-        } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-          ailFiles.push(entryPath);
+        } else if (entry.isFile() && entry.name.endsWith(".aice")) {
+          aiceFiles.push(entryPath);
         }
       }
     }
 
     await walk(fullPath);
-    ailFiles.sort();
+    aiceFiles.sort();
 
     const results: FmtResult[] = [];
-    for (const file of ailFiles) {
+    for (const file of aiceFiles) {
       const relPath = path.relative(process.cwd(), file);
-      results.push(await formatAilFile(relPath, options));
+      results.push(await formatAiceFile(relPath, options));
     }
     return results;
   }

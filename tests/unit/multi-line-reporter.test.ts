@@ -28,7 +28,7 @@ function createMockStream(isTTY = false) {
   };
 }
 
-describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
+describe("AICE 2.0 Multi-Line Terminal Reporter / TUI", () => {
   describe("TTY Interactive Mode", () => {
     it("emits ANSI cursor hide on start and show on finish", () => {
       const mock = createMockStream(true);
@@ -170,9 +170,9 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       reporter.taskFailed(0, "src/core/ast.ts", "Syntax error on line 42");
 
       const output = mock.getOutput();
-      expect(output).toContain("[AIL] (1/5) Compiling src/core/ast.ts...\n");
-      expect(output).toContain("[AIL] (2/5) Decompiling src/emitters/ts.ts...\n");
-      expect(output).toContain("[AIL] ERROR (src/core/ast.ts): Syntax error on line 42\n");
+      expect(output).toContain("[AICE] (1/5) Compiling src/core/ast.ts...\n");
+      expect(output).toContain("[AICE] (2/5) Decompiling src/emitters/ts.ts...\n");
+      expect(output).toContain("[AICE] ERROR (src/core/ast.ts): Syntax error on line 42\n");
     });
 
     it("emits the final summary box on completion without cursor jump codes", () => {
@@ -183,7 +183,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
         isTTY: false,
       });
 
-      reporter.start("AIL Batch", 2);
+      reporter.start("AICE Batch", 2);
       reporter.taskCompleted(0, "A.ts");
       reporter.taskCompleted(1, "B.ts");
       mock.clear();
@@ -191,7 +191,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       reporter.finish("Successfully compiled 2 files");
       const finishOutput = mock.getOutput();
 
-      expect(finishOutput).toContain("┌─ AIL Batch [Concurrency: 2 Workers]");
+      expect(finishOutput).toContain("┌─ AICE Batch [Concurrency: 2 Workers]");
       expect(finishOutput).toContain("Summary:    Successfully compiled 2 files");
       expect(finishOutput).toContain("Progress:   [████████████] 100.0% (2/2 files)");
       expect(finishOutput).toContain(
@@ -229,12 +229,12 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       });
 
       reporter.start("Tokenomics", 2);
-      // target: 1000 tokens, ail: 716 tokens -> -28.4%
-      reporter.taskCompleted(0, "A.ts", { targetTokens: 500, ailTokens: 358 });
-      reporter.taskCompleted(1, "B.ts", { targetTokens: 500, ailTokens: 358 });
+      // target: 1000 tokens, aice: 716 tokens -> -28.4%
+      reporter.taskCompleted(0, "A.ts", { targetTokens: 500, aiceTokens: 358 });
+      reporter.taskCompleted(1, "B.ts", { targetTokens: 500, aiceTokens: 358 });
 
       expect(reporter.totalTargetTokens).toBe(1000);
-      expect(reporter.totalAilTokens).toBe(716);
+      expect(reporter.totalAiceTokens).toBe(716);
       expect(reporter.tokenSavingsPct).toBeCloseTo(28.4, 1);
 
       const box = reporter.formatBox();
@@ -251,7 +251,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       });
 
       reporter.start("Token Expansion", 1);
-      reporter.taskCompleted(0, "Exp.ts", { targetTokens: 100, ailTokens: 115 });
+      reporter.taskCompleted(0, "Exp.ts", { targetTokens: 100, aiceTokens: 115 });
 
       const box = reporter.formatBox();
       const metricsLine = box.find((line) => line.includes("Tokens:"));
@@ -289,7 +289,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
 
       const pool = new ConcurrencyPool<
         string,
-        { metrics: { targetTokens: number; ailTokens: number } }
+        { metrics: { targetTokens: number; aiceTokens: number } }
       >({
         concurrency: 2,
       });
@@ -297,13 +297,13 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       pool.attachReporter(reporter);
       reporter.start("Pool Integration", 4);
 
-      const tasks: TaskItem<string, { metrics: { targetTokens: number; ailTokens: number } }>[] = [
+      const tasks: TaskItem<string, { metrics: { targetTokens: number; aiceTokens: number } }>[] = [
         {
           id: "t1",
           data: "src/Foo.ts",
           run: async () => {
             await new Promise((r) => setTimeout(r, 10));
-            return { metrics: { targetTokens: 100, ailTokens: 80 } };
+            return { metrics: { targetTokens: 100, aiceTokens: 80 } };
           },
         },
         {
@@ -311,7 +311,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
           data: "src/Bar.ts",
           run: async () => {
             await new Promise((r) => setTimeout(r, 10));
-            return { metrics: { targetTokens: 100, ailTokens: 70 } };
+            return { metrics: { targetTokens: 100, aiceTokens: 70 } };
           },
         },
       ];
@@ -323,7 +323,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       expect(reporter.completedTasks).toBe(2);
       expect(reporter.failedTasks).toBe(0);
       expect(reporter.totalTargetTokens).toBe(200);
-      expect(reporter.totalAilTokens).toBe(150);
+      expect(reporter.totalAiceTokens).toBe(150);
       expect(reporter.tokenSavingsPct).toBe(25);
     });
 
@@ -397,7 +397,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
 
       expect(reporter.completedTasks).toBe(1);
       expect(reporter.failedTasks).toBe(1);
-      expect(mock.getOutput()).toContain("[AIL] ERROR (bad.ts): Compilation crashed");
+      expect(mock.getOutput()).toContain("[AICE] ERROR (bad.ts): Compilation crashed");
     });
 
     it("supports createPoolReporterCallbacks directly in pool constructor options", async () => {
@@ -472,8 +472,8 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       });
 
       reporter.start("Telemetry Run", 10);
-      reporter.taskCompleted(0, "a.ts", { targetTokens: 200, ailTokens: 140 });
-      reporter.taskCompleted(1, "b.ts", { targetTokens: 100, ailTokens: 70 });
+      reporter.taskCompleted(0, "a.ts", { targetTokens: 200, aiceTokens: 140 });
+      reporter.taskCompleted(1, "b.ts", { targetTokens: 100, aiceTokens: 70 });
       reporter.taskFailed(2, "c.ts", "File not found");
 
       const stats = reporter.getStats();
@@ -483,7 +483,7 @@ describe("AIL 2.0 Multi-Line Terminal Reporter / TUI", () => {
       expect(stats.completedTasks).toBe(2);
       expect(stats.failedTasks).toBe(1);
       expect(stats.totalTargetTokens).toBe(300);
-      expect(stats.totalAilTokens).toBe(210);
+      expect(stats.totalAiceTokens).toBe(210);
       expect(stats.tokenSavingsPct).toBeCloseTo(30.0, 1);
     });
   });

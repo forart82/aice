@@ -1,6 +1,6 @@
-# AIL Unified Configuration Spec
+# AICE Unified Configuration Spec
 app:
-  name: ail-cluster-manager
+  name: aice-cluster-manager
   version: 1.0.0
   active: true
   replicas: 3

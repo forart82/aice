@@ -15,7 +15,7 @@ import { detectTargetFromPath, emitTarget } from "../../src/emitters/index.js";
 import { auditTokenomics, formatProjectsMarkdownTable } from "../../src/tokenomics/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
-function findAilFiles(dir: string): string[] {
+function findAiceFiles(dir: string): string[] {
   const resolved = path.resolve(process.cwd(), dir);
   if (!fs.existsSync(resolved)) return [];
   const entries = fs.readdirSync(resolved, { withFileTypes: true });
@@ -23,8 +23,8 @@ function findAilFiles(dir: string): string[] {
   for (const entry of entries) {
     const full = path.resolve(resolved, entry.name);
     if (entry.isDirectory() && entry.name !== "node_modules" && !entry.name.startsWith(".")) {
-      results.push(...findAilFiles(full));
-    } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+      results.push(...findAiceFiles(full));
+    } else if (entry.isFile() && entry.name.endsWith(".aice")) {
       results.push(full);
     }
   }
@@ -33,14 +33,14 @@ function findAilFiles(dir: string): string[] {
 
 describe("Step 13: Full Multi-Project Benchmark Suite & Cross-Compilation Stress Test", () => {
   describe("Multi-Project Compilation & Type Soundness Matrix", () => {
-    const exampleFiles = findAilFiles("examples");
-    const pocFiles = findAilFiles("poc_real_case");
+    const exampleFiles = findAiceFiles("examples");
+    const pocFiles = findAiceFiles("poc_real_case");
 
-    it("verifies examples directory contains 14 canonical AIL projects", () => {
+    it("verifies examples directory contains 14 canonical AICE projects", () => {
       expect(exampleFiles.length).toBe(14);
     });
 
-    it("verifies poc_real_case contains 67 real-world AIL modules across 3 projects", () => {
+    it("verifies poc_real_case contains 67 real-world AICE modules across 3 projects", () => {
       expect(pocFiles.length).toBe(67);
     });
 
@@ -75,8 +75,8 @@ describe("Step 13: Full Multi-Project Benchmark Suite & Cross-Compilation Stress
     });
   });
 
-  describe("Cross-Target Transpilation Matrix (Single AIL -> Multi-Target)", () => {
-    const testAilModule = `
+  describe("Cross-Target Transpilation Matrix (Single AICE -> Multi-Target)", () => {
+    const testAiceModule = `
 # math_matrix_benchmark
 
 fn calculate_hypotenuse(a: float, b: float) -> float:
@@ -100,8 +100,8 @@ class StatisticsAccumulator:
     ret this.sum / this.count.toFloat()
 `;
 
-    it("cross-compiles canonical AIL module to TypeScript, Python, C++20, Rust, and Go", () => {
-      const mod = parse(testAilModule, "math_matrix_benchmark.ail");
+    it("cross-compiles canonical AICE module to TypeScript, Python, C++20, Rust, and Go", () => {
+      const mod = parse(testAiceModule, "math_matrix_benchmark.aice");
       const tc = new TypeChecker();
       tc.checkModule(mod);
 
@@ -155,7 +155,7 @@ class StatisticsAccumulator:
   });
 
   describe("Throughput & Micro-Benchmark Gate", () => {
-    it("processes and tokenizes high-density AIL code at > 10,000 lines/sec", () => {
+    it("processes and tokenizes high-density AICE code at > 10,000 lines/sec", () => {
       const codeSnippet = `
 class BenchmarkNode:
   id: int = 0
@@ -167,7 +167,7 @@ class BenchmarkNode:
 `;
       const repeatedCode = Array(500).fill(codeSnippet).join("\n");
       const startTime = performance.now();
-      const mod = parse(repeatedCode, "benchmark.ail");
+      const mod = parse(repeatedCode, "benchmark.aice");
       const parseTime = performance.now() - startTime;
 
       expect(mod.items.length).toBe(500);

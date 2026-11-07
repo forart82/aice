@@ -5,10 +5,10 @@
  * Full Bit-Identical Verification Suite across examples/ and poc_real_case/.
  * Protocol:
  * 1. Ensure clean original state
- * 2. Remove all .ail files
- * 3. Create all .ail files (decompile supported targets, restore canonical AIL for forward targets)
- * 4. Move all non-ail files to temporary backup
- * 5. Recreate all non-ail files from .ail files
+ * 2. Remove all .aice files
+ * 3. Create all .aice files (decompile supported targets, restore canonical AICE for forward targets)
+ * 4. Move all non-aice files to temporary backup
+ * 5. Recreate all non-aice files from .aice files
  * 6. Compare byte-for-byte (100% Bit-Identical check)
  * 7. Restore working tree cleanly
  */
@@ -22,10 +22,10 @@ import { detectTargetFromPath, emitTarget, getTargetOutputPath } from "../src/em
 import { TypeChecker } from "../src/typechecker/checker.js";
 
 const rootDir = process.cwd();
-const tmpDir = "/tmp/ail_bit_identical_test";
+const tmpDir = "/tmp/aice_bit_identical_test";
 
 console.log("================================================================================");
-console.log("=== AIL 2.0: FULL BIT-IDENTICAL VERIFICATION SUITE ===");
+console.log("=== AICE 2.0: FULL BIT-IDENTICAL VERIFICATION SUITE ===");
 console.log("================================================================================");
 
 // Step 1: Ensure clean state from git
@@ -39,7 +39,7 @@ const tmpOriginals = path.join(tmpDir, "originals");
 fs.mkdirSync(tmpOriginals, { recursive: true });
 
 // Step 2: Test Decompiler Roundtrip on Supported Targets (9 in examples, 18 in snake_ts)
-console.log("\n[2/6] Running Decompiler Roundtrip (Target -> AIL -> Target) on supported files...");
+console.log("\n[2/6] Running Decompiler Roundtrip (Target -> AICE -> Target) on supported files...");
 
 const decompileTargets = [
   // examples (9 files)
@@ -83,7 +83,7 @@ for (const relPath of decompileTargets) {
   const decomp = decompile(origContent, target, { filePath: relPath });
 
   // Compile back
-  const mod = parse(decomp.ail, `${relPath}.ail`);
+  const mod = parse(decomp.aice, `${relPath}.aice`);
   const emitted = emitTarget(mod, target);
   const emittedBuffer = Buffer.from(emitted, "utf-8");
 
@@ -104,23 +104,23 @@ for (const relPath of decompileTargets) {
 
 console.log(`\nDecompiler Roundtrip: ${roundtripPassCount}/${decompileTargets.length} files 100% BIT-IDENTICAL.`);
 
-// Step 3: Test Forward Compilation on All 14 Examples (AIL -> Target == Target)
-console.log("\n[3/6] Running Forward Compilation (AIL -> Target) on all 14 reference examples...");
+// Step 3: Test Forward Compilation on All 14 Examples (AICE -> Target == Target)
+console.log("\n[3/6] Running Forward Compilation (AICE -> Target) on all 14 reference examples...");
 
-const exampleAilFiles = fs.readdirSync(path.join(rootDir, "examples")).filter((f) => f.endsWith(".ail"));
+const exampleAiceFiles = fs.readdirSync(path.join(rootDir, "examples")).filter((f) => f.endsWith(".aice"));
 let forwardPassCount = 0;
 
-for (const ailFile of exampleAilFiles) {
-  const ailRelPath = path.join("examples", ailFile);
-  const targetRelPath = getTargetOutputPath(ailRelPath);
+for (const aiceFile of exampleAiceFiles) {
+  const aiceRelPath = path.join("examples", aiceFile);
+  const targetRelPath = getTargetOutputPath(aiceRelPath);
 
   const origBuffer = fs.readFileSync(path.join(rootDir, targetRelPath));
-  const ailContent = fs.readFileSync(path.join(rootDir, ailRelPath), "utf-8");
+  const aiceContent = fs.readFileSync(path.join(rootDir, aiceRelPath), "utf-8");
 
-  const mod = parse(ailContent, ailRelPath);
+  const mod = parse(aiceContent, aiceRelPath);
   const tc = new TypeChecker();
   tc.checkModule(mod);
-  const target = detectTargetFromPath(ailRelPath);
+  const target = detectTargetFromPath(aiceRelPath);
   const emitted = emitTarget(mod, target);
   const emittedBuffer = Buffer.from(emitted, "utf-8");
 
@@ -133,7 +133,7 @@ for (const ailFile of exampleAilFiles) {
   }
 }
 
-console.log(`\nForward Compilation: ${forwardPassCount}/${exampleAilFiles.length} files 100% BIT-IDENTICAL.`);
+console.log(`\nForward Compilation: ${forwardPassCount}/${exampleAiceFiles.length} files 100% BIT-IDENTICAL.`);
 
 // Restore clean git state
 console.log("\n[4/6] Restoring clean working directory state...");

@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C++20 Decompiler (Reverse Transpiler) for AIL 2.0.
+ * Modern C++20 Decompiler (Reverse Transpiler) for AICE 2.0.
  * Parses C++ headers and source files (.cpp, .hpp, .cc, .cxx, .h),
- * extracts comments into CstTriviaTable, and produces an AIL Module AST.
+ * extracts comments into CstTriviaTable, and produces an AICE Module AST.
  */
 
 import { emptySpan } from '../core/span.js';
@@ -1591,8 +1591,8 @@ export class CppDecompiler {
       this.filePath
         .split(/[/\\]/)
         .pop()
-        ?.replace(/\.(cpp|hpp|cc|cxx|h)(\.ail)?$/, '')
-        .replace(/\.ail$/, '') ?? 'source';
+        ?.replace(/\.(cpp|hpp|cc|cxx|h)(\.aice)?$/, '')
+        .replace(/\.aice$/, '') ?? 'source';
     let namespaceName: string | null = null;
     const lines = this.source.split('\n');
     let currentTrivia: TriviaItem[] = [];

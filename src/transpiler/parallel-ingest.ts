@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Side-by-Side Parallel Ingestion Engine (Step 3).
+ * AICE 2.0 Side-by-Side Parallel Ingestion Engine (Step 3).
  * Recursively scans project directories and decompiles supported target files
- * (.ts, .tsx, .css, .html) into bit-identical .ail source files side-by-side,
+ * (.ts, .tsx, .css, .html) into bit-identical .aice source files side-by-side,
  * leveraging ConcurrencyPool and MultiLineReporter.
  */
 
@@ -41,7 +41,7 @@ export interface IngestOptions {
   emitTrivia?: boolean; // default true
   dryRun?: boolean; // default false
   extensions?: string[]; // default [".ts", ".tsx", ".css", ".html", ".cpp", ".hpp", ".cc", ".cxx", ".h", ".cs"]
-  ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build", ".ail-build"]
+  ignorePatterns?: string[]; // default ["node_modules", ".git", "dist", "build", ".aice-build"]
   isolate?: boolean;
   companion?: boolean;
   targetProjectDir?: string;
@@ -63,15 +63,15 @@ export interface ParallelAdoptionOptions extends IngestOptions {
 
 export interface FileIngestResult {
   sourcePath: string;
-  ailPath: string;
+  aicePath: string;
   triviaPath?: string;
   targetLang: TargetLanguage;
   success: boolean;
   error?: Error;
   targetChars: number;
-  ailChars: number;
+  aiceChars: number;
   targetTokens: number;
-  ailTokens: number;
+  aiceTokens: number;
   cl100kSavingsPct: number;
   durationMs: number;
   relocatedPath?: string;
@@ -83,7 +83,7 @@ export interface IngestSummary {
   totalSkipped: number;
   totalFailed: number;
   totalTargetTokens: number;
-  totalAilTokens: number;
+  totalAiceTokens: number;
   cl100kSavingsPct: number;
   durationMs: number;
   results: FileIngestResult[];
@@ -123,7 +123,7 @@ export function detectDominantTargetLanguage(filePaths: string[]): TargetLanguag
 interface IngestTaskData {
   filePath: string;
   targetLang: TargetLanguage;
-  destAilPath: string;
+  destAicePath: string;
   destTargetPath: string;
   status: "DECOMPILING";
 }
@@ -136,12 +136,12 @@ export const ISOLATED_MODE_IGNORE_FILES = [
 ] as const;
 
 /**
- * Derives a clean `.ail` relative path from a source target path.
+ * Derives a clean `.aice` relative path from a source target path.
  * When the file has the default extension for its target language (e.g. `.ts` for TypeScript),
- * the target extension is replaced with `.ail` (e.g. `calc.ts` -> `calc.ail`, `calc.test.ts` -> `calc.test.ail`).
- * Otherwise, `.ail` is appended to preserve target metadata (e.g. `Button.tsx` -> `Button.tsx.ail`).
+ * the target extension is replaced with `.aice` (e.g. `calc.ts` -> `calc.aice`, `calc.test.ts` -> `calc.test.aice`).
+ * Otherwise, `.aice` is appended to preserve target metadata (e.g. `Button.tsx` -> `Button.tsx.aice`).
  */
-export function deriveCleanAilRelativePath(
+export function deriveCleanAiceRelativePath(
   relPath: string,
   targetLang: TargetLanguage,
 ): string {
@@ -150,23 +150,23 @@ export function deriveCleanAilRelativePath(
   const ext = path.extname(base).toLowerCase();
   const defaultTargetExt = getExtensionForTarget(targetLang);
 
-  let ailBase: string;
+  let aiceBase: string;
   if (ext === defaultTargetExt) {
-    ailBase = `${base.slice(0, -ext.length)}.ail`;
+    aiceBase = `${base.slice(0, -ext.length)}.aice`;
   } else {
-    ailBase = `${base}.ail`;
+    aiceBase = `${base}.aice`;
   }
 
-  return dir === "." ? ailBase : path.join(dir, ailBase).replace(/\\/g, "/");
+  return dir === "." ? aiceBase : path.join(dir, aiceBase).replace(/\\/g, "/");
 }
 
 /**
  * Automatically updates project ignore files (.gitignore, .agentignore, .cursorignore, .geminiignore)
- * to ignore the isolated build directory (e.g. .ail-build/).
+ * to ignore the isolated build directory (e.g. .aice-build/).
  */
 export function updateIgnoreFilesForIsolatedMode(
   projectDir: string,
-  outDir: string = ".ail-build",
+  outDir: string = ".aice-build",
 ): string[] {
   const resolvedDir = path.resolve(projectDir);
   const cleanOutDir = outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
@@ -191,12 +191,12 @@ export function updateIgnoreFilesForIsolatedMode(
 
       if (!alreadyIgnored) {
         const prefix = content.length > 0 && !content.endsWith("\n") ? "\n" : "";
-        const addition = `${prefix}# AIL isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
+        const addition = `${prefix}# AICE isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
         fs.writeFileSync(filePath, content + addition, "utf-8");
         updatedFiles.push(filePath);
       }
     } else {
-      const newContent = `# AIL isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
+      const newContent = `# AICE isolated build artifact cache\n${patternSlash}\n${patternNoSlash}\n`;
       fs.writeFileSync(filePath, newContent, "utf-8");
       updatedFiles.push(filePath);
     }
@@ -207,25 +207,25 @@ export function updateIgnoreFilesForIsolatedMode(
 
 /**
  * Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore)
- * removing .ail-build (or custom outDir) patterns and comments.
+ * removing .aice-build (or custom outDir) patterns and comments.
  * Deletes the ignore file if it becomes empty.
  */
 export function cleanIgnoreFilesForIsolatedMode(
   projectDir: string,
-  outDir: string = ".ail-build",
+  outDir: string = ".aice-build",
 ): string[] {
   const resolvedDir = path.resolve(projectDir);
   const cleanOutDir = outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
   const patternSlash = `${cleanOutDir}/`;
   const patternNoSlash = cleanOutDir;
-  const defaultSlash = ".ail-build/";
-  const defaultNoSlash = ".ail-build";
+  const defaultSlash = ".aice-build/";
+  const defaultNoSlash = ".aice-build";
 
   const isIsolatedIgnoreLine = (line: string): boolean => {
     const trimmed = line.trim();
     if (
-      trimmed === "# AIL isolated build artifact cache" ||
-      trimmed === "# AIL isolated build cache"
+      trimmed === "# AICE isolated build artifact cache" ||
+      trimmed === "# AICE isolated build cache"
     ) {
       return true;
     }
@@ -380,7 +380,7 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
       ".kts",
     ]
   ).map((ext) => (ext.startsWith(".") ? ext.toLowerCase() : `.${ext.toLowerCase()}`));
-  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".ail-build", ".agents"];
+  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".aice-build", ".agents"];
   if (options?.outDir) {
     const cleanOut = options.outDir.replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
     if (!defaultIgnores.includes(cleanOut)) {
@@ -406,7 +406,7 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
       } else if (entry.isFile()) {
         const lowerName = entry.name.toLowerCase();
         if (
-          lowerName.endsWith(".ail") ||
+          lowerName.endsWith(".aice") ||
           lowerName.endsWith(".trivia.json") ||
           lowerName.endsWith(".uid")
         ) {
@@ -426,7 +426,7 @@ export function findIngestableFiles(dir: string, options?: Partial<IngestOptions
 
 /**
  * Scans an existing project and decompiles all supported target files
- * into .ail files (side-by-side or isolated mode), leveraging ConcurrencyPool
+ * into .aice files (side-by-side or isolated mode), leveraging ConcurrencyPool
  * and MultiLineReporter.
  */
 export async function ingestProjectSideBySide(options: IngestOptions): Promise<AdoptionResult> {
@@ -461,7 +461,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
       }
     }
   } else {
-    const outDirName = (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+    const outDirName = (options.outDir ?? ".aice-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
     targetSourceDir = path.resolve(companionWorkspace, outDirName);
   }
 
@@ -476,7 +476,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
 
   const outDirForConfig = isCompanion
     ? path.relative(companionWorkspace, targetSourceDir).replace(/\\/g, "/")
-    : (options.outDir ?? ".ail-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
+    : (options.outDir ?? ".aice-build").replace(/^\.\/|^\.\\/, "").replace(/[/\\]+$/, "");
   const targetProjectDirForConfig = isCompanion
     ? path.relative(companionWorkspace, targetProjectDir).replace(/\\/g, "/")
     : undefined;
@@ -487,7 +487,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     if (!relToTarget.startsWith("..") && !path.isAbsolute(relToTarget)) {
       const topSegment = relToTarget.split(/[/\\]/)[0];
       if (topSegment) {
-        ignorePatterns = ["node_modules", ".git", "dist", "build", ".ail-build", ".agents", topSegment];
+        ignorePatterns = ["node_modules", ".git", "dist", "build", ".aice-build", ".agents", topSegment];
       }
     }
   }
@@ -524,7 +524,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     projectTargetLang: TargetLanguage = detectedLang,
   ): {
     targetLang: TargetLanguage;
-    destAilPath: string;
+    destAicePath: string;
     destTargetPath: string;
   } {
     const targetLang = detectTargetFromPath(filePath);
@@ -542,16 +542,16 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
         relWithinSource = path.relative(targetProjectDir, filePath).replace(/\\/g, "/");
       }
 
-      const cleanAilRel = deriveCleanAilRelativePath(
+      const cleanAiceRel = deriveCleanAiceRelativePath(
         relWithinSource,
         projectTargetLang ?? targetLang,
       );
-      const destAilPath = path.resolve(absCompanionSourceDir, cleanAilRel);
+      const destAicePath = path.resolve(absCompanionSourceDir, cleanAiceRel);
       const destTargetPath = filePath;
 
       return {
         targetLang,
-        destAilPath,
+        destAicePath,
         destTargetPath,
       };
     }
@@ -559,7 +559,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     if (!isIsolated) {
       return {
         targetLang,
-        destAilPath: `${filePath}.ail`,
+        destAicePath: `${filePath}.aice`,
         destTargetPath: filePath,
       };
     }
@@ -572,16 +572,16 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
       relWithinSource = relFromProject;
     }
 
-    const cleanAilRel = deriveCleanAilRelativePath(
+    const cleanAiceRel = deriveCleanAiceRelativePath(
       relWithinSource,
       projectTargetLang ?? targetLang,
     );
-    const destAilPath = path.resolve(absSourceDir, cleanAilRel);
+    const destAicePath = path.resolve(absSourceDir, cleanAiceRel);
     const destTargetPath = path.resolve(absOutDir, relWithinSource);
 
     return {
       targetLang,
-      destAilPath,
+      destAicePath,
       destTargetPath,
     };
   }
@@ -591,8 +591,8 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
   let totalSkipped = 0;
 
   for (const filePath of discoveredFiles) {
-    const { destAilPath } = computeFilePaths(filePath);
-    if (!overwrite && fs.existsSync(destAilPath)) {
+    const { destAicePath } = computeFilePaths(filePath);
+    if (!overwrite && fs.existsSync(destAicePath)) {
       totalSkipped++;
     } else {
       filesToIngest.push(filePath);
@@ -632,12 +632,12 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
 
     if (options.reporter) {
       if (!options.reporter.isStarted) {
-        options.reporter.start("AIL 2.0 Parallel Ingestion Engine", 0);
+        options.reporter.start("AICE 2.0 Parallel Ingestion Engine", 0);
       }
       options.reporter.finish("No files needed ingestion.");
     } else if (options.showProgress) {
       const reporter = new MultiLineReporter({ concurrency });
-      reporter.start("AIL 2.0 Parallel Ingestion Engine", 0);
+      reporter.start("AICE 2.0 Parallel Ingestion Engine", 0);
       reporter.finish("No files needed ingestion.");
     }
 
@@ -645,18 +645,18 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
       mode: isCompanion ? "companion" : isIsolated ? "isolated" : "side-by-side",
       targetProjectDir: isCompanion ? targetProjectDir : undefined,
       companionWorkspaceDir: isCompanion ? companionWorkspace : undefined,
-      configPath: isCompanion ? path.join(companionWorkspace, "ail.config.json") : undefined,
+      configPath: isCompanion ? path.join(companionWorkspace, "aice.config.json") : undefined,
       agentsMdPath: isCompanion ? path.join(companionWorkspace, "AGENTS.md") : undefined,
       cursorRulesPath: isCompanion ? path.join(companionWorkspace, ".cursorrules") : undefined,
       generatedFiles: isCompanion
-        ? [path.join(companionWorkspace, "ail.config.json"), ...shieldCreated]
+        ? [path.join(companionWorkspace, "aice.config.json"), ...shieldCreated]
         : undefined,
       totalDiscovered,
       totalIngested: 0,
       totalSkipped,
       totalFailed: 0,
       totalTargetTokens: 0,
-      totalAilTokens: 0,
+      totalAiceTokens: 0,
       cl100kSavingsPct: 0,
       durationMs: Math.max(0, performance.now() - startTime),
       results: [],
@@ -670,7 +670,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
   }
 
   if (reporter && !reporter.isStarted) {
-    reporter.start("AIL 2.0 Parallel Ingestion Engine", filesToIngest.length);
+    reporter.start("AICE 2.0 Parallel Ingestion Engine", filesToIngest.length);
   }
 
   const pool = new ConcurrencyPool<IngestTaskData, FileIngestResult>({
@@ -682,19 +682,19 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
       getFile: (task) => task.data.filePath,
       getStatus: () => "DECOMPILING",
       getMetrics: (res) =>
-        res ? { targetTokens: res.targetTokens, ailTokens: res.ailTokens } : undefined,
+        res ? { targetTokens: res.targetTokens, aiceTokens: res.aiceTokens } : undefined,
     });
   }
 
   // Build task items
   const tasks: TaskItem<IngestTaskData, FileIngestResult>[] = filesToIngest.map((filePath) => {
-    const { targetLang, destAilPath, destTargetPath } = computeFilePaths(filePath);
+    const { targetLang, destAicePath, destTargetPath } = computeFilePaths(filePath);
     return {
       id: filePath,
       data: {
         filePath,
         targetLang,
-        destAilPath,
+        destAicePath,
         destTargetPath,
         status: "DECOMPILING",
       },
@@ -705,15 +705,15 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
         const decomp = decompile(source, targetLang, { filePath });
 
         const targetChars = source.length;
-        const ailChars = decomp.ail.length;
+        const aiceChars = decomp.aice.length;
         const targetTokens = cl100k.encode(source).length;
-        const ailTokens = cl100k.encode(decomp.ail).length;
+        const aiceTokens = cl100k.encode(decomp.aice).length;
         const cl100kSavingsPct =
-          targetTokens > 0 ? ((targetTokens - ailTokens) / targetTokens) * 100 : 0;
+          targetTokens > 0 ? ((targetTokens - aiceTokens) / targetTokens) * 100 : 0;
 
         if (!dryRun) {
-          await fs.promises.mkdir(path.dirname(destAilPath), { recursive: true });
-          await fs.promises.writeFile(destAilPath, decomp.ail, "utf-8");
+          await fs.promises.mkdir(path.dirname(destAicePath), { recursive: true });
+          await fs.promises.writeFile(destAicePath, decomp.aice, "utf-8");
 
           if (isIsolated && filePath !== destTargetPath) {
             await fs.promises.mkdir(path.dirname(destTargetPath), { recursive: true });
@@ -740,13 +740,13 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
 
         return {
           sourcePath: filePath,
-          ailPath: destAilPath,
+          aicePath: destAicePath,
           targetLang,
           success: true,
           targetChars,
-          ailChars,
+          aiceChars,
           targetTokens,
-          ailTokens,
+          aiceTokens,
           cl100kSavingsPct,
           durationMs,
           relocatedPath: isIsolated ? destTargetPath : undefined,
@@ -816,14 +816,14 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     }
     return {
       sourcePath: taskRes.task.data.filePath,
-      ailPath: taskRes.task.data.destAilPath,
+      aicePath: taskRes.task.data.destAicePath,
       targetLang: taskRes.task.data.targetLang,
       success: false,
       error: taskRes.error ?? new Error("Task execution failed"),
       targetChars: 0,
-      ailChars: 0,
+      aiceChars: 0,
       targetTokens: 0,
-      ailTokens: 0,
+      aiceTokens: 0,
       cl100kSavingsPct: 0,
       durationMs: taskRes.durationMs,
       relocatedPath: isIsolated ? taskRes.task.data.destTargetPath : undefined,
@@ -835,9 +835,9 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
   const totalFailed = results.length - totalIngested;
 
   const totalTargetTokens = successfulResults.reduce((acc, r) => acc + r.targetTokens, 0);
-  const totalAilTokens = successfulResults.reduce((acc, r) => acc + r.ailTokens, 0);
+  const totalAiceTokens = successfulResults.reduce((acc, r) => acc + r.aiceTokens, 0);
   const aggregateSavingsPct =
-    totalTargetTokens > 0 ? ((totalTargetTokens - totalAilTokens) / totalTargetTokens) * 100 : 0;
+    totalTargetTokens > 0 ? ((totalTargetTokens - totalAiceTokens) / totalTargetTokens) * 100 : 0;
 
   if (reporter) {
     reporter.finish(
@@ -849,14 +849,14 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     mode: isCompanion ? "companion" : isIsolated ? "isolated" : "side-by-side",
     targetProjectDir: isCompanion ? targetProjectDir : undefined,
     companionWorkspaceDir: isCompanion ? companionWorkspace : undefined,
-    configPath: isCompanion ? path.join(companionWorkspace, "ail.config.json") : undefined,
+    configPath: isCompanion ? path.join(companionWorkspace, "aice.config.json") : undefined,
     agentsMdPath: isCompanion ? path.join(companionWorkspace, "AGENTS.md") : undefined,
     cursorRulesPath: isCompanion ? path.join(companionWorkspace, ".cursorrules") : undefined,
     generatedFiles: isCompanion
       ? [
-          path.join(companionWorkspace, "ail.config.json"),
+          path.join(companionWorkspace, "aice.config.json"),
           ...shieldCreated,
-          ...successfulResults.map((r) => r.ailPath),
+          ...successfulResults.map((r) => r.aicePath),
         ]
       : undefined,
     totalDiscovered,
@@ -864,7 +864,7 @@ export async function ingestProjectSideBySide(options: IngestOptions): Promise<A
     totalSkipped,
     totalFailed,
     totalTargetTokens,
-    totalAilTokens,
+    totalAiceTokens,
     cl100kSavingsPct: aggregateSavingsPct,
     durationMs: Math.max(0, performance.now() - startTime),
     results,
@@ -878,11 +878,11 @@ export const adoptProjectParallel = ingestProjectSideBySide;
 export const adoptProject = ingestProjectSideBySide;
 
 /**
- * Recursively removes all .ail, .trivia.json, and .uid files from a directory,
+ * Recursively removes all .aice, .trivia.json, and .uid files from a directory,
  * skipping node_modules, .git, and build directories.
  * Returns array of removed file paths.
  */
-export function removeAilAndTriviaFiles(curDir: string): string[] {
+export function removeAiceAndTriviaFiles(curDir: string): string[] {
   const removed: string[] = [];
   if (!fs.existsSync(curDir)) return removed;
 
@@ -891,17 +891,17 @@ export function removeAilAndTriviaFiles(curDir: string): string[] {
     if (
       entry.name === "node_modules" ||
       entry.name === ".git" ||
-      entry.name === ".ail-build"
+      entry.name === ".aice-build"
     ) {
       continue;
     }
     const fullPath = path.join(curDir, entry.name);
     if (entry.isDirectory()) {
-      removed.push(...removeAilAndTriviaFiles(fullPath));
+      removed.push(...removeAiceAndTriviaFiles(fullPath));
     } else if (entry.isFile()) {
       const lower = entry.name.toLowerCase();
       if (
-        lower.endsWith(".ail") ||
+        lower.endsWith(".aice") ||
         lower.endsWith(".trivia.json") ||
         lower.endsWith(".uid")
       ) {
@@ -926,8 +926,8 @@ export function removeAilAndTriviaFiles(curDir: string): string[] {
 export interface EjectProjectOptions {
   dir: string;
   fromBuild?: boolean;
-  removeAil?: boolean;
-  keepAil?: boolean;
+  removeAice?: boolean;
+  keepAice?: boolean;
   sourceDir?: string;
   outDir?: string;
 }
@@ -935,8 +935,8 @@ export interface EjectProjectOptions {
 export interface EjectProjectResult {
   mode: "isolated" | "side-by-side" | "companion";
   restoredFiles: string[];
-  removedAilFiles: string[];
-  deletedAilFiles?: string[];
+  removedAiceFiles: string[];
+  deletedAiceFiles?: string[];
   removedBuildDir?: string;
   unlockedTargets?: number;
   shieldRemoved?: string[];
@@ -945,26 +945,26 @@ export interface EjectProjectResult {
 }
 
 /**
- * Ejects AIL from a project.
+ * Ejects AICE from a project.
  * Supports both:
  * 1. Isolated mode (or when `fromBuild` is true):
- *    - Identifies sourceDir (e.g. src) and outDir (e.g. .ail-build)
+ *    - Identifies sourceDir (e.g. src) and outDir (e.g. .aice-build)
  *    - Copies/moves all target files from outDir back into sourceDir, restoring original file tree
- *    - Removes .ail files unless keepAil is true (default for isolated eject is to delete .ail files)
- *    - Removes outDir (.ail-build/)
- *    - Removes ail.config.json and .ailrc
- *    - Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore) removing .ail-build rules
+ *    - Removes .aice files unless keepAice is true (default for isolated eject is to delete .aice files)
+ *    - Removes outDir (.aice-build/)
+ *    - Removes aice.config.json and .aicerc
+ *    - Cleans ignore rules (.gitignore, .agentignore, .cursorignore, .geminiignore) removing .aice-build rules
  *    - Removes AI shields and unlocks target files
- *    - Returns { restoredFiles, removedAilFiles, removedBuildDir, ... }
+ *    - Returns { restoredFiles, removedAiceFiles, removedBuildDir, ... }
  * 2. Companion mode:
- *    - Reverts companion shield, removes ail.config.json in companion workspace
- *    - Removes .ail files in companion workspace (unless keepAil is true)
+ *    - Reverts companion shield, removes aice.config.json in companion workspace
+ *    - Removes .aice files in companion workspace (unless keepAice is true)
  *    - NEVER deletes or touches the external target project
  * 3. Side-by-side mode:
  *    - Unlocks target files
  *    - Removes AI shields
- *    - Removes .ail files if removeAil is true and not keepAil
- *    - Returns { restoredFiles: [], removedAilFiles, ... }
+ *    - Removes .aice files if removeAice is true and not keepAice
+ *    - Returns { restoredFiles: [], removedAiceFiles, ... }
  */
 export async function ejectProject(options: EjectProjectOptions): Promise<EjectProjectResult> {
   const resolvedDir = path.resolve(options.dir);
@@ -1005,7 +1005,7 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
       }
     }
 
-    for (const cfgName of ["ail.config.json", ".ailrc"]) {
+    for (const cfgName of ["aice.config.json", ".aicerc"]) {
       const cfgPath = path.join(resolvedDir, cfgName);
       if (fs.existsSync(cfgPath)) {
         try {
@@ -1015,7 +1015,7 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
         }
       }
     }
-    const cacheDir = path.join(resolvedDir, ".ail-cache");
+    const cacheDir = path.join(resolvedDir, ".aice-cache");
     if (fs.existsSync(cacheDir)) {
       try {
         fs.rmSync(cacheDir, { recursive: true, force: true });
@@ -1024,18 +1024,18 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
       }
     }
 
-    const removedAilFiles: string[] = [];
-    if (!options.keepAil) {
-      const removed = removeAilAndTriviaFiles(resolvedDir);
-      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
-      removedAilFiles.push(...ailOnly);
+    const removedAiceFiles: string[] = [];
+    if (!options.keepAice) {
+      const removed = removeAiceAndTriviaFiles(resolvedDir);
+      const aiceOnly = removed.filter((f) => f.endsWith(".aice"));
+      removedAiceFiles.push(...aiceOnly);
     }
-    removedAilFiles.sort();
+    removedAiceFiles.sort();
     return {
       mode: "companion",
       restoredFiles: [],
-      removedAilFiles,
-      deletedAilFiles: removedAilFiles,
+      removedAiceFiles,
+      deletedAiceFiles: removedAiceFiles,
       shieldRemoved: [...shieldRes.removedFiles, ...targetShieldRemoved],
       removedShield: [...shieldRes.removedFiles, ...targetShieldRemoved],
       shieldReverted: [...shieldRes.revertedFiles, ...targetShieldReverted],
@@ -1043,7 +1043,7 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
     };
   }
 
-  const detectedOutDir = (options.outDir ?? config.outDir ?? ".ail-build")
+  const detectedOutDir = (options.outDir ?? config.outDir ?? ".aice-build")
     .replace(/^\.\/|^\.\\/, "")
     .replace(/[/\\]+$/, "");
   const absDetectedOutDir = path.resolve(resolvedDir, detectedOutDir);
@@ -1051,7 +1051,7 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
   const isIsolated = Boolean(options.fromBuild) || config.mode === "isolated";
 
   const restoredFiles: string[] = [];
-  const removedAilFiles: string[] = [];
+  const removedAiceFiles: string[] = [];
   let removedBuildDir: string | undefined;
   let unlockedTargets = 0;
 
@@ -1112,7 +1112,7 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
         restoredFiles.push(destFile);
       }
 
-      // 2. Remove outDir (.ail-build/)
+      // 2. Remove outDir (.aice-build/)
       if (isSafeOutDir) {
         try {
           fs.rmSync(absOutDir, { recursive: true, force: true });
@@ -1138,22 +1138,22 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
       }
     }
 
-    // 3. Removes .ail files if --remove-ail is true (or default for isolated eject, unless keepAil)
-    let shouldRemoveAil = true;
-    if (options.keepAil) {
-      shouldRemoveAil = false;
-    } else if (options.removeAil !== undefined) {
-      shouldRemoveAil = options.removeAil;
+    // 3. Removes .aice files if --remove-aice is true (or default for isolated eject, unless keepAice)
+    let shouldRemoveAice = true;
+    if (options.keepAice) {
+      shouldRemoveAice = false;
+    } else if (options.removeAice !== undefined) {
+      shouldRemoveAice = options.removeAice;
     }
 
-    if (shouldRemoveAil) {
-      const removed = removeAilAndTriviaFiles(resolvedDir);
-      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
-      removedAilFiles.push(...ailOnly);
+    if (shouldRemoveAice) {
+      const removed = removeAiceAndTriviaFiles(resolvedDir);
+      const aiceOnly = removed.filter((f) => f.endsWith(".aice"));
+      removedAiceFiles.push(...aiceOnly);
     }
 
-    // 4. Remove ail.config.json and .ailrc
-    for (const cfgName of ["ail.config.json", ".ailrc"]) {
+    // 4. Remove aice.config.json and .aicerc
+    for (const cfgName of ["aice.config.json", ".aicerc"]) {
       const cfgPath = path.join(resolvedDir, cfgName);
       if (fs.existsSync(cfgPath)) {
         try {
@@ -1175,12 +1175,12 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
     unlockedTargets = lockRes.totalUnlocked;
 
     restoredFiles.sort();
-    removedAilFiles.sort();
+    removedAiceFiles.sort();
 
     return {
       mode: "isolated",
       restoredFiles,
-      removedAilFiles,
+      removedAiceFiles,
       removedBuildDir,
       unlockedTargets,
       shieldRemoved: shieldRes.removedFiles,
@@ -1193,18 +1193,18 @@ export async function ejectProject(options: EjectProjectOptions): Promise<EjectP
 
     const shieldRes = await removeAiShield(resolvedDir);
 
-    if (options.removeAil && !options.keepAil) {
-      const removed = removeAilAndTriviaFiles(resolvedDir);
-      const ailOnly = removed.filter((f) => f.endsWith(".ail"));
-      removedAilFiles.push(...ailOnly);
+    if (options.removeAice && !options.keepAice) {
+      const removed = removeAiceAndTriviaFiles(resolvedDir);
+      const aiceOnly = removed.filter((f) => f.endsWith(".aice"));
+      removedAiceFiles.push(...aiceOnly);
     }
 
-    removedAilFiles.sort();
+    removedAiceFiles.sort();
 
     return {
       mode: "side-by-side",
       restoredFiles: [],
-      removedAilFiles,
+      removedAiceFiles,
       unlockedTargets,
       shieldRemoved: shieldRes.removedFiles,
       shieldReverted: shieldRes.revertedFiles,

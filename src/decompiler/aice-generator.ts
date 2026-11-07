@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Code Generator
- * Serializes an AIL Module AST and optional CstTriviaTable into clean, token-dense .ail code.
+ * AICE 2.0 Code Generator
+ * Serializes an AICE Module AST and optional CstTriviaTable into clean, token-dense .aice code.
  */
 
 import type {
@@ -151,25 +151,25 @@ export function needsBinaryParentheses(
   return false;
 }
 
-export interface AilGeneratorOptions {
+export interface AiceGeneratorOptions {
   indent?: string;
   trivia?: CstTriviaTable;
 }
 
-export class AilGenerator {
+export class AiceGenerator {
   private indentStr: string;
   private currentIndent = 0;
   private buffer: string[] = [];
   private trivia?: CstTriviaTable;
   private inCurlyBlock = false;
 
-  constructor(options: AilGeneratorOptions = {}) {
+  constructor(options: AiceGeneratorOptions = {}) {
     this.indentStr = options.indent ?? "  ";
     this.trivia = options.trivia;
   }
 
-  static generate(mod: Module, options?: AilGeneratorOptions): string {
-    return new AilGenerator(options).generate(mod);
+  static generate(mod: Module, options?: AiceGeneratorOptions): string {
+    return new AiceGenerator(options).generate(mod);
   }
 
   generate(mod: Module): string {

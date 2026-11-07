@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit & Integration Test Suite for `ail adopt --isolate` (Step 15).
- * Verifies clean `src/*.ail` workspace adoption, `.ail-build/` target cache relocation,
- * `ail.config.json` creation with mode: "isolated", and automated ignore file updates.
+ * Unit & Integration Test Suite for `aice adopt --isolate` (Step 15).
+ * Verifies clean `src/*.aice` workspace adoption, `.aice-build/` target cache relocation,
+ * `aice.config.json` creation with mode: "isolated", and automated ignore file updates.
  */
 
 import { spawnSync } from "node:child_process";
@@ -25,7 +25,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -57,11 +57,11 @@ function getAllFiles(dir: string): string[] {
   return results;
 }
 
-describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", () => {
+describe("Step 15: aice adopt --isolate (Clean src/*.aice + .aice-build/ cache)", () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-isolate-test-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-isolate-test-"));
   });
 
   afterEach(() => {
@@ -72,7 +72,7 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     }
   });
 
-  it("adopts sample project with --isolate via CLI into clean src/*.ail and .ail-build/", () => {
+  it("adopts sample project with --isolate via CLI into clean src/*.aice and .aice-build/", () => {
     // 1. Setup sample project with TypeScript source files in src/
     const srcDir = path.join(testDir, "src");
     const mathDir = path.join(srcDir, "math");
@@ -88,30 +88,30 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     const gitignorePath = path.join(testDir, ".gitignore");
     fs.writeFileSync(gitignorePath, "node_modules/\ndist/\n", "utf-8");
 
-    // 2. Execute `ail adopt <dir> --isolate`
+    // 2. Execute `aice adopt <dir> --isolate`
     const res = runCli(["adopt", testDir, "--isolate"]);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain("=== AIL Isolated Adoption Summary ===");
+    expect(res.stdout).toContain("=== AICE Isolated Adoption Summary ===");
     expect(res.stdout).toContain("Mode:                isolated");
-    expect(res.stdout).toContain("Build Out Dir:       .ail-build");
+    expect(res.stdout).toContain("Build Out Dir:       .aice-build");
     expect(res.stdout).toContain("2 ingested");
 
-    // 3. Verification that src/ contains ONLY .ail files and 0 .ts files
+    // 3. Verification that src/ contains ONLY .aice files and 0 .ts files
     const srcFiles = getAllFiles(srcDir);
     expect(srcFiles.length).toBeGreaterThan(0);
     const tsFiles = srcFiles.filter((f) => f.endsWith(".ts"));
-    const nonAilFiles = srcFiles.filter((f) => !f.endsWith(".ail"));
+    const nonAiceFiles = srcFiles.filter((f) => !f.endsWith(".aice"));
 
     expect(tsFiles).toHaveLength(0);
-    expect(nonAilFiles).toHaveLength(0);
-    expect(srcFiles.every((f) => f.endsWith(".ail"))).toBe(true);
+    expect(nonAiceFiles).toHaveLength(0);
+    expect(srcFiles.every((f) => f.endsWith(".aice"))).toBe(true);
 
-    // Verify expected .ail file locations
-    expect(fs.existsSync(path.join(srcDir, "index.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(mathDir, "calculator.ail"))).toBe(true);
+    // Verify expected .aice file locations
+    expect(fs.existsSync(path.join(srcDir, "index.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(mathDir, "calculator.aice"))).toBe(true);
 
-    // 4. Verification that .ail-build/ contains the target files
-    const outDir = path.join(testDir, ".ail-build");
+    // 4. Verification that .aice-build/ contains the target files
+    const outDir = path.join(testDir, ".aice-build");
     const outIndexTs = path.join(outDir, "index.ts");
     const outCalcTs = path.join(outDir, "math", "calculator.ts");
 
@@ -120,32 +120,32 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     expect(fs.readFileSync(outIndexTs, "utf-8")).toBe(indexTsContent);
     expect(fs.readFileSync(outCalcTs, "utf-8")).toBe(calcTsContent);
 
-    // 5. Verification that ail.config.json was created with mode: "isolated"
-    const configPath = path.join(testDir, "ail.config.json");
+    // 5. Verification that aice.config.json was created with mode: "isolated"
+    const configPath = path.join(testDir, "aice.config.json");
     expect(fs.existsSync(configPath)).toBe(true);
     const rawConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     expect(rawConfig.mode).toBe("isolated");
     expect(rawConfig.isolated).toBe(true);
     expect(rawConfig.sourceDir).toBe("src");
-    expect(rawConfig.outDir).toBe(".ail-build");
+    expect(rawConfig.outDir).toBe(".aice-build");
 
     const loaded = loadProjectConfig(testDir);
     expect(loaded.mode).toBe("isolated");
     expect(loaded.isolated).toBe(true);
 
-    // 6. Verification that .ail-build was added to all ignore files
+    // 6. Verification that .aice-build was added to all ignore files
     for (const ignoreFile of ISOLATED_MODE_IGNORE_FILES) {
       const p = path.join(testDir, ignoreFile);
       expect(fs.existsSync(p)).toBe(true);
       const content = fs.readFileSync(p, "utf-8");
-      expect(content).toContain(".ail-build");
+      expect(content).toContain(".aice-build");
     }
 
     // Verify pre-existing .gitignore rules preserved
     const gitignoreContent = fs.readFileSync(gitignorePath, "utf-8");
     expect(gitignoreContent).toContain("node_modules/");
     expect(gitignoreContent).toContain("dist/");
-    expect(gitignoreContent).toContain(".ail-build");
+    expect(gitignoreContent).toContain(".aice-build");
   });
 
   it("supports programmatic ingestProjectSideBySide with isolate: true", async () => {
@@ -166,32 +166,32 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     expect(summary.totalIngested).toBe(1);
     expect(summary.totalFailed).toBe(0);
     expect(summary.results[0].success).toBe(true);
-    expect(summary.results[0].ailPath).toBe(path.join(srcDir, "utils.ail"));
+    expect(summary.results[0].aicePath).toBe(path.join(srcDir, "utils.aice"));
     expect(summary.results[0].relocatedPath).toBe(
-      path.join(testDir, ".ail-build", "utils.ts"),
+      path.join(testDir, ".aice-build", "utils.ts"),
     );
 
-    // Verify src has only .ail
+    // Verify src has only .aice
     const srcFiles = getAllFiles(srcDir);
     expect(srcFiles).toHaveLength(1);
-    expect(srcFiles[0].endsWith("utils.ail")).toBe(true);
+    expect(srcFiles[0].endsWith("utils.aice")).toBe(true);
     expect(fs.existsSync(path.join(srcDir, "utils.ts"))).toBe(false);
 
-    // Verify .ail-build has utils.ts
-    expect(fs.existsSync(path.join(testDir, ".ail-build", "utils.ts"))).toBe(true);
+    // Verify .aice-build has utils.ts
+    expect(fs.existsSync(path.join(testDir, ".aice-build", "utils.ts"))).toBe(true);
 
-    // Verify ail.config.json
+    // Verify aice.config.json
     const config = loadProjectConfig(testDir);
     expect(config.mode).toBe("isolated");
     expect(config.isolated).toBe(true);
 
     // Verify path resolution works symmetrically
     const resolvedTarget = resolveTargetOutputPathForConfig(
-      path.join(srcDir, "utils.ail"),
+      path.join(srcDir, "utils.aice"),
       config,
       testDir,
     );
-    expect(resolvedTarget).toBe(path.join(testDir, ".ail-build", "utils.ts"));
+    expect(resolvedTarget).toBe(path.join(testDir, ".aice-build", "utils.ts"));
   });
 
   it("supports custom --source-dir and --out-dir options", () => {
@@ -218,10 +218,10 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     expect(res.stdout).toContain("Source Dir:          app");
     expect(res.stdout).toContain("Build Out Dir:       .custom-artifacts");
 
-    // Verify app contains only main.ail
+    // Verify app contains only main.aice
     const appFiles = getAllFiles(customSrc);
     expect(appFiles).toHaveLength(1);
-    expect(appFiles[0].endsWith("main.ail")).toBe(true);
+    expect(appFiles[0].endsWith("main.aice")).toBe(true);
     expect(fs.existsSync(path.join(customSrc, "main.ts"))).toBe(false);
 
     // Verify .custom-artifacts contains main.ts
@@ -229,7 +229,7 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
       fs.existsSync(path.join(testDir, ".custom-artifacts", "main.ts")),
     ).toBe(true);
 
-    // Verify ail.config.json
+    // Verify aice.config.json
     const config = loadProjectConfig(testDir);
     expect(config.mode).toBe("isolated");
     expect(config.sourceDir).toBe("app");
@@ -256,12 +256,12 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
 
     // Original file must still be in src/
     expect(fs.existsSync(tsPath)).toBe(true);
-    // .ail file must NOT exist
-    expect(fs.existsSync(path.join(srcDir, "service.ail"))).toBe(false);
-    // .ail-build must NOT exist
-    expect(fs.existsSync(path.join(testDir, ".ail-build"))).toBe(false);
-    // ail.config.json must NOT exist
-    expect(fs.existsSync(path.join(testDir, "ail.config.json"))).toBe(false);
+    // .aice file must NOT exist
+    expect(fs.existsSync(path.join(srcDir, "service.aice"))).toBe(false);
+    // .aice-build must NOT exist
+    expect(fs.existsSync(path.join(testDir, ".aice-build"))).toBe(false);
+    // aice.config.json must NOT exist
+    expect(fs.existsSync(path.join(testDir, "aice.config.json"))).toBe(false);
   });
 
   it("is idempotent when running adoption twice and does not duplicate ignore rules", () => {
@@ -281,25 +281,25 @@ describe("Step 15: ail adopt --isolate (Clean src/*.ail + .ail-build/ cache)", (
     const res2 = runCli(["adopt", testDir, "--isolate"]);
     expect(res2.status).toBe(0);
 
-    // Check .gitignore does not have duplicate .ail-build entries
+    // Check .gitignore does not have duplicate .aice-build entries
     const gitignoreContent = fs.readFileSync(path.join(testDir, ".gitignore"), "utf-8");
-    const countAilBuild = (gitignoreContent.match(/\.ail-build\//g) || []).length;
-    expect(countAilBuild).toBe(1);
+    const countAiceBuild = (gitignoreContent.match(/\.aice-build\//g) || []).length;
+    expect(countAiceBuild).toBe(1);
   });
 
   it("updateIgnoreFilesForIsolatedMode creates missing files and appends to existing without duplicates", () => {
     // 1. Initial invocation creates all 4 ignore files
-    const updated1 = updateIgnoreFilesForIsolatedMode(testDir, ".ail-build");
+    const updated1 = updateIgnoreFilesForIsolatedMode(testDir, ".aice-build");
     expect(updated1).toHaveLength(4);
 
     for (const ignoreFile of ISOLATED_MODE_IGNORE_FILES) {
       const p = path.join(testDir, ignoreFile);
       expect(fs.existsSync(p)).toBe(true);
-      expect(fs.readFileSync(p, "utf-8")).toContain(".ail-build");
+      expect(fs.readFileSync(p, "utf-8")).toContain(".aice-build");
     }
 
     // 2. Second invocation on same dir is a no-op (no duplicates)
-    const updated2 = updateIgnoreFilesForIsolatedMode(testDir, ".ail-build");
+    const updated2 = updateIgnoreFilesForIsolatedMode(testDir, ".aice-build");
     expect(updated2).toHaveLength(0);
   });
 });

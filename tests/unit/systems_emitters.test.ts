@@ -22,15 +22,15 @@ import { TypeChecker } from "../../src/typechecker/checker.js";
 describe("Phase 2.4: Native Systems Emitters (Rust & Go)", () => {
   describe("Systems Target & Path Detection", () => {
     it("detects rust and go targets from file extensions", () => {
-      expect(detectTargetFromPath("order_engine.rs.ail")).toBe("rust");
-      expect(detectTargetFromPath("gateway.go.ail")).toBe("go");
+      expect(detectTargetFromPath("order_engine.rs.aice")).toBe("rust");
+      expect(detectTargetFromPath("gateway.go.aice")).toBe("go");
       expect(detectTargetFromPath("src/backend/engine.rs")).toBe("rust");
       expect(detectTargetFromPath("src/backend/service.go")).toBe("go");
     });
 
-    it("derives target output paths by stripping .ail", () => {
-      expect(getTargetOutputPath("src/order_engine.rs.ail")).toBe("src/order_engine.rs");
-      expect(getTargetOutputPath("services/gateway.go.ail")).toBe("services/gateway.go");
+    it("derives target output paths by stripping .aice", () => {
+      expect(getTargetOutputPath("src/order_engine.rs.aice")).toBe("src/order_engine.rs");
+      expect(getTargetOutputPath("services/gateway.go.aice")).toBe("services/gateway.go");
     });
   });
 
@@ -86,7 +86,7 @@ type User:
   age: int
   active: bool
 `;
-      const mod = parse(source, "user.rs.ail");
+      const mod = parse(source, "user.rs.aice");
       const emitter = new RustEmitter();
       const code = emitter.emit(mod);
 
@@ -105,7 +105,7 @@ enum Action:
   Open
   Close(str)
 `;
-      const mod = parse(source, "action.rs.ail");
+      const mod = parse(source, "action.rs.aice");
       const emitter = new RustEmitter();
       const code = emitter.emit(mod);
 
@@ -123,7 +123,7 @@ fn execute(raw: str) -> Result[int, str]:
   let parsed: int = parseValue(raw)?
   ret Ok(parsed)
 `;
-      const mod = parse(source, "calc.rs.ail");
+      const mod = parse(source, "calc.rs.aice");
       const tc = new TypeChecker();
       tc.checkModule(mod);
 
@@ -145,7 +145,7 @@ fn check(s: State) -> int:
     Ready(msg) => 1
     _ => -1
 `;
-      const mod = parse(source, "match.rs.ail");
+      const mod = parse(source, "match.rs.aice");
       const code = emitTarget(mod, "rust");
 
       expect(code).toContain("match s {");
@@ -163,7 +163,7 @@ type Route:
   weight: int
   enabled: bool
 `;
-      const mod = parse(source, "route.go.ail");
+      const mod = parse(source, "route.go.aice");
       const emitter = new GoEmitter();
       const code = emitter.emit(mod);
 
@@ -182,7 +182,7 @@ enum Priority:
   Medium
   High
 `;
-      const mod = parse(source, "priority.go.ail");
+      const mod = parse(source, "priority.go.aice");
       const code = emitTarget(mod, "go");
 
       expect(code).toContain("type Priority string");
@@ -202,7 +202,7 @@ fn process(key: str) -> Result[str, str]:
   let found: str = lookup(key)?
   ret Ok(found)
 `;
-      const mod = parse(source, "proc.go.ail");
+      const mod = parse(source, "proc.go.aice");
       const tc = new TypeChecker();
       tc.checkModule(mod);
 
@@ -228,7 +228,7 @@ fn getEnv(m: Mode) -> str:
     Prod => "production"
     _ => "unknown"
 `;
-      const mod = parse(source, "mode.go.ail");
+      const mod = parse(source, "mode.go.aice");
       const code = emitTarget(mod, "go");
 
       expect(code).toContain("switch m {");

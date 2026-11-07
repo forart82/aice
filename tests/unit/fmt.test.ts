@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
+ * Unit tests for AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
  */
 
 import { spawnSync } from "node:child_process";
@@ -10,15 +10,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { program } from "../../bin/ail.js";
+import { program } from "../../bin/aice.js";
 import {
-  formatAilFile,
-  formatAilPath,
-  formatAilSource,
+  formatAiceFile,
+  formatAicePath,
+  formatAiceSource,
   generateUnifiedDiff,
 } from "../../src/tools/fmt.js";
 
-describe("AIL 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21)", () => {
+describe("AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21)", () => {
   describe("Indentation Normalization", () => {
     it("normalizes inconsistent 4-space indentation to 2 spaces", () => {
       const src = `
@@ -29,7 +29,7 @@ fn calculate(a: int) -> int:
     ret x
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 fn calculate(a: int) -> int:
   x := a * 2
@@ -49,7 +49,7 @@ type User:
    age: int
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 type User:
   id: str
@@ -71,7 +71,7 @@ class Service:
         ret sum
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 class Service:
   pub fn process(items: [int]) -> int:
@@ -92,7 +92,7 @@ fn test():
   ret x
 `.trim();
 
-      const formatted = formatAilSource(src, { indent: 4 });
+      const formatted = formatAiceSource(src, { indent: 4 });
       const expected = `
 fn test():
     x := 1
@@ -111,7 +111,7 @@ let arr = [
 ]
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 let arr = [
   1,
@@ -134,7 +134,7 @@ x*=3
 x/=4
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 x := 1 + 2 * 3 / 4 % 5
 x += 10
@@ -152,7 +152,7 @@ if a==b&&c!=d||e<=f&&g>=h||i<j&&k>l:
   ret true
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 if a == b && c != d || e <= f && g >= h || i < j && k > l:
   ret true
@@ -169,7 +169,7 @@ isMember:=item in collection
 isErr:=e instanceof Error
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 mask := a | b & c ^ d
 flag := x and y or not z
@@ -188,7 +188,7 @@ fn test(a: int)->bool:
     _=>false
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 fn test(a: int) -> bool:
   match a:
@@ -209,7 +209,7 @@ arr := [-1, -2, -3]
 ret -x
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 x := -5
 y := +10
@@ -229,7 +229,7 @@ if !isValid:
 val := parse()?
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 if !isValid:
   ret Err("Invalid")
@@ -247,7 +247,7 @@ fn test( a:int , b:str , c:[int] )->bool:
   ret true
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 fn test(a: int, b: str, c: [int]) -> bool:
   ret true
@@ -258,25 +258,25 @@ fn test(a: int, b: str, c: [int]) -> bool:
 
     it("normalizes list and array literals [a, b, c]", () => {
       const src = "let items = [ a , b , c ]";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("let items = [a, b, c]\n");
     });
 
     it("normalizes dictionary and record literals { a: 1, b: 2 }", () => {
       const src = "let obj = {a:1,b:2}";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("let obj = { a: 1, b: 2 }\n");
     });
 
     it("preserves empty objects {} and arrays []", () => {
       const src = "let a = {}\nlet b = []";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("let a = {}\nlet b = []\n");
     });
 
     it("preserves double colon :: without adding spaces", () => {
       const src = "val := RoadMask::North";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("val := RoadMask::North\n");
     });
   });
@@ -284,7 +284,7 @@ fn test(a: int, b: str, c: [int]) -> bool:
   describe("Removal of Trailing Whitespace and Excess Blank Lines", () => {
     it("eliminates trailing whitespace on all lines", () => {
       const src = "fn test():   \n  x := 1   \n  ret x   \n";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("fn test():\n  x := 1\n  ret x\n");
     });
 
@@ -298,7 +298,7 @@ fn test():
   y := 2
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 fn test():
   x := 1
@@ -322,7 +322,7 @@ fn b():
   ret 2
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 fn a():
   ret 1
@@ -337,22 +337,22 @@ fn b():
 
     it("ensures exact single trailing newline \\n at end of file", () => {
       const src1 = "fn test():\n  ret 1";
-      expect(formatAilSource(src1)).toBe("fn test():\n  ret 1\n");
+      expect(formatAiceSource(src1)).toBe("fn test():\n  ret 1\n");
 
       const src2 = "fn test():\n  ret 1\n\n\n\n";
-      expect(formatAilSource(src2)).toBe("fn test():\n  ret 1\n");
+      expect(formatAiceSource(src2)).toBe("fn test():\n  ret 1\n");
     });
 
     it("returns empty string for empty or whitespace-only source", () => {
-      expect(formatAilSource("")).toBe("");
-      expect(formatAilSource("   \n\n\t  \n")).toBe("");
+      expect(formatAiceSource("")).toBe("");
+      expect(formatAiceSource("   \n\n\t  \n")).toBe("");
     });
   });
 
   describe("Preserving String Literals, Template Literals, and Comments", () => {
     it("preserves string contents containing operators and punctuation completely intact", () => {
       const src = 'let msg = "Hello, world! 1 + 2 = 3: test"';
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe('let msg = "Hello, world! 1 + 2 = 3: test"\n');
     });
 
@@ -365,13 +365,13 @@ Third line
 """
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe(src + "\n");
     });
 
     it("formats template literal expressions while keeping template text intact", () => {
       const src = "let t = `User: ${ user.name }, Total: ${ a+b }`";
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe("let t = `User: ${user.name}, Total: ${a + b}`\n");
     });
 
@@ -384,7 +384,7 @@ fn calculate():
   ret x
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       const expected = `
 // Top level header comment
 fn calculate():
@@ -404,7 +404,7 @@ pub fn add(a: int, b: int) -> int:
   ret a + b
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe(src + "\n");
     });
 
@@ -418,7 +418,7 @@ fn test():
   ret 1
 `.trim();
 
-      const formatted = formatAilSource(src);
+      const formatted = formatAiceSource(src);
       expect(formatted).toBe(src + "\n");
     });
   });
@@ -465,22 +465,22 @@ fn test():
       ];
 
       for (const snippet of snippets) {
-        const round1 = formatAilSource(snippet.trim());
-        const round2 = formatAilSource(round1);
+        const round1 = formatAiceSource(snippet.trim());
+        const round2 = formatAiceSource(round1);
         expect(round2).toBe(round1);
       }
     });
   });
 
-  describe("formatAilFile and --check Mode", () => {
+  describe("formatAiceFile and --check Mode", () => {
     it("reports formatted status without modifying disk in check mode", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fmt_check_"));
       try {
-        const file = path.join(tmpDir, "test.ail");
+        const file = path.join(tmpDir, "test.aice");
         const unformatted = "fn test( a:int ,b:str )->bool: ret 1+2\n";
         fs.writeFileSync(file, unformatted, "utf-8");
 
-        const result = await formatAilFile(file, { check: true });
+        const result = await formatAiceFile(file, { check: true });
         expect(result.isFormatted).toBe(false);
         expect(result.originalSource).toBe(unformatted);
         expect(result.formattedSource).toBe("fn test(a: int, b: str) -> bool: ret 1 + 2\n");
@@ -496,11 +496,11 @@ fn test():
     it("writes formatted file atomically when write is permitted and check is false", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fmt_write_"));
       try {
-        const file = path.join(tmpDir, "test.ail");
+        const file = path.join(tmpDir, "test.aice");
         const unformatted = "fn test( a:int )->int: ret a*2\n";
         fs.writeFileSync(file, unformatted, "utf-8");
 
-        const result = await formatAilFile(file, { check: false, write: true });
+        const result = await formatAiceFile(file, { check: false, write: true });
         expect(result.isFormatted).toBe(false);
 
         // Verify disk WAS modified
@@ -508,7 +508,7 @@ fn test():
         expect(diskContent).toBe("fn test(a: int) -> int: ret a * 2\n");
 
         // Running format again should report already formatted
-        const secondRun = await formatAilFile(file);
+        const secondRun = await formatAiceFile(file);
         expect(secondRun.isFormatted).toBe(true);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -518,11 +518,11 @@ fn test():
     it("generates unified diff when diff option is enabled", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fmt_diff_"));
       try {
-        const file = path.join(tmpDir, "test.ail");
+        const file = path.join(tmpDir, "test.aice");
         const unformatted = "x:=1+2\n";
         fs.writeFileSync(file, unformatted, "utf-8");
 
-        const result = await formatAilFile(file, { diff: true, check: true });
+        const result = await formatAiceFile(file, { diff: true, check: true });
         expect(result.isFormatted).toBe(false);
         expect(result.diff).toBeDefined();
         expect(result.diff).toContain("--- a/");
@@ -536,21 +536,21 @@ fn test():
   });
 
   describe("Directory Traversal", () => {
-    it("formats all .ail files recursively in a directory", async () => {
+    it("formats all .aice files recursively in a directory", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "fmt_dir_"));
       try {
         const subDir = path.join(tmpDir, "sub");
         fs.mkdirSync(subDir);
 
-        const file1 = path.join(tmpDir, "a.ail");
-        const file2 = path.join(subDir, "b.ail");
+        const file1 = path.join(tmpDir, "a.aice");
+        const file2 = path.join(subDir, "b.aice");
         const file3 = path.join(tmpDir, "ignore.txt");
 
         fs.writeFileSync(file1, "fn a( x:int ): ret x\n", "utf-8");
         fs.writeFileSync(file2, "fn b( y:str ): ret y\n", "utf-8");
         fs.writeFileSync(file3, "do not touch", "utf-8");
 
-        const results = await formatAilPath(tmpDir, { check: false, write: true });
+        const results = await formatAicePath(tmpDir, { check: false, write: true });
         expect(Array.isArray(results)).toBe(true);
         if (Array.isArray(results)) {
           expect(results.length).toBe(2);
@@ -569,7 +569,7 @@ fn test():
   describe("CLI Command Execution", () => {
     it("formats from stdin with --stdin flag to stdout", () => {
       const input = "fn test( a:int ,b:str )->bool: ret 1+2*3\n";
-      const res = spawnSync("bun", ["./bin/ail.ts", "fmt", "--stdin"], {
+      const res = spawnSync("bun", ["./bin/aice.ts", "fmt", "--stdin"], {
         input,
         encoding: "utf-8",
       });
@@ -580,7 +580,7 @@ fn test():
 
     it("exits 0 with --stdin --check on already formatted code", () => {
       const input = "fn test(a: int, b: str) -> bool: ret 1 + 2 * 3\n";
-      const res = spawnSync("bun", ["./bin/ail.ts", "fmt", "--stdin", "--check"], {
+      const res = spawnSync("bun", ["./bin/aice.ts", "fmt", "--stdin", "--check"], {
         input,
         encoding: "utf-8",
       });
@@ -590,7 +590,7 @@ fn test():
 
     it("exits 1 with --stdin --check on unformatted code", () => {
       const input = "fn test( a:int )->int: ret a*2\n";
-      const res = spawnSync("bun", ["./bin/ail.ts", "fmt", "--stdin", "--check"], {
+      const res = spawnSync("bun", ["./bin/aice.ts", "fmt", "--stdin", "--check"], {
         input,
         encoding: "utf-8",
       });
@@ -600,7 +600,7 @@ fn test():
 
     it("outputs unified diff with --stdin --diff", () => {
       const input = "x:=1+2\n";
-      const res = spawnSync("bun", ["./bin/ail.ts", "fmt", "--stdin", "--diff"], {
+      const res = spawnSync("bun", ["./bin/aice.ts", "fmt", "--stdin", "--diff"], {
         input,
         encoding: "utf-8",
       });
@@ -615,10 +615,10 @@ fn test():
     it("executes CLI fmt on file modifying disk by default", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_fmt_file_"));
       try {
-        const file = path.join(tmpDir, "calc.ail");
+        const file = path.join(tmpDir, "calc.aice");
         fs.writeFileSync(file, "fn calc( a:int )->int:\n    ret a*2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "fmt", file], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "fmt", file], {
           encoding: "utf-8",
         });
 
@@ -635,10 +635,10 @@ fn test():
     it("executes CLI fmt with --check exiting 1 on unformatted file", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_fmt_chk_"));
       try {
-        const file = path.join(tmpDir, "unformatted.ail");
+        const file = path.join(tmpDir, "unformatted.aice");
         fs.writeFileSync(file, "x:=1+2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "fmt", file, "--check"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "fmt", file, "--check"], {
           encoding: "utf-8",
         });
 
@@ -652,10 +652,10 @@ fn test():
     it("executes CLI fmt with --diff printing unified diff", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_fmt_diff_"));
       try {
-        const file = path.join(tmpDir, "diff.ail");
+        const file = path.join(tmpDir, "diff.aice");
         fs.writeFileSync(file, "x:=1+2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "fmt", file, "--diff", "--check"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "fmt", file, "--diff", "--check"], {
           encoding: "utf-8",
         });
 

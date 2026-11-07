@@ -28,7 +28,7 @@ describe("Step 6: Multi-Target Code Emitters Harmonization", () => {
 fn hasProperty(key: str, obj: any) -> bool:
   ret key in obj
 `;
-      const mod = parse(src, "hasProp.ts.ail");
+      const mod = parse(src, "hasProp.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("return (key in obj);");
     });
@@ -38,7 +38,7 @@ fn hasProperty(key: str, obj: any) -> bool:
 fn isError(err: any) -> bool:
   ret err instanceof Error
 `;
-      const mod = parse(src, "isError.ts.ail");
+      const mod = parse(src, "isError.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("return (err instanceof Error);");
     });
@@ -50,7 +50,7 @@ fn testExprs():
   let mut g = (mask) => (flags |= mask)
   let mut h = (x) => (x = 42)
 `;
-      const mod = parse(src, "assignExpr.ts.ail");
+      const mod = parse(src, "assignExpr.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("(item.count += 1)");
       expect(out).toContain("(flags |= mask)");
@@ -63,7 +63,7 @@ fn matchAll(regex: any, s: str):
   while ((pMatch = regex.exec(s)) != nil):
     print(pMatch)
 `;
-      const mod = parse(src, "whileCond.ts.ail");
+      const mod = parse(src, "whileCond.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("while (((pMatch = regex.exec(s)) !== null)) {");
     });
@@ -85,7 +85,7 @@ fn runAssignments():
   x >>>= 3
   x **= 4
 `;
-      const mod = parse(src, "compound.ts.ail");
+      const mod = parse(src, "compound.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("x += 1;");
       expect(out).toContain("x -= 2;");
@@ -107,7 +107,7 @@ fn runArrayCompound():
   let mut [a, b] = [1, 2]
   [a, b] += [10, 20]
 `;
-      const mod = parse(src, "arrayCompound.ts.ail");
+      const mod = parse(src, "arrayCompound.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("a += 10;");
       expect(out).toContain("b += 20;");
@@ -119,7 +119,7 @@ class Counter:
   count: int = 0
   fn reset() = (this.count = 0)
 `;
-      const mod = parse(src, "counter.ts.ail");
+      const mod = parse(src, "counter.ts.aice");
       const out = emitTarget(mod, "typescript");
       expect(out).toContain("this.count = 0;");
       expect(out).not.toContain("return this.count = 0;");
@@ -132,7 +132,7 @@ class Counter:
 fn hasProperty(key: str, obj: any) -> bool:
   ret key in obj
 `;
-      const mod = parse(src, "hasProp.py.ail");
+      const mod = parse(src, "hasProp.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("return (key in obj)");
     });
@@ -142,7 +142,7 @@ fn hasProperty(key: str, obj: any) -> bool:
 fn isError(err: any) -> bool:
   ret err instanceof Error
 `;
-      const mod = parse(src, "isError.py.ail");
+      const mod = parse(src, "isError.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("return isinstance(err, Error)");
     });
@@ -154,7 +154,7 @@ fn testExprs():
   let mut g = (mask) => (flags |= mask)
   let mut h = (x) => (x = 42)
 `;
-      const mod = parse(src, "assignExpr.py.ail");
+      const mod = parse(src, "assignExpr.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("(item.count += 1)");
       expect(out).toContain("(flags |= mask)");
@@ -167,7 +167,7 @@ fn matchAll(regex: any, s: str):
   while ((pMatch = regex.exec(s)) != nil):
     print(pMatch)
 `;
-      const mod = parse(src, "whileCond.py.ail");
+      const mod = parse(src, "whileCond.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("while ((pMatch := regex.exec(s)) != None):");
     });
@@ -189,7 +189,7 @@ fn runAssignments():
   x >>>= 3
   x **= 4
 `;
-      const mod = parse(src, "compound.py.ail");
+      const mod = parse(src, "compound.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("x += 1");
       expect(out).toContain("x -= 2");
@@ -211,7 +211,7 @@ class Counter:
   count: int = 0
   fn reset() = (this.count = 0)
 `;
-      const mod = parse(src, "counter.py.ail");
+      const mod = parse(src, "counter.py.aice");
       const out = emitTarget(mod, "python");
       expect(out).toContain("self.count = 0");
       expect(out).not.toContain("return self.count = 0");
@@ -226,7 +226,7 @@ fn check(k: str, coll: any, err: any) -> bool:
     ret true
   ret err instanceof Error
 `;
-      const mod = parse(src, "check.rs.ail");
+      const mod = parse(src, "check.rs.aice");
       const emitter = new RustEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("coll.contains(&k)");
@@ -238,7 +238,7 @@ fn check(k: str, coll: any, err: any) -> bool:
 fn testExpr():
   let mut f = (x) => (x += 1)
 `;
-      const mod = parse(src, "test.rs.ail");
+      const mod = parse(src, "test.rs.aice");
       const emitter = new RustEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(x += 1)");
@@ -253,7 +253,7 @@ fn run():
   x **= 3
   x >>>= 4
 `;
-      const mod = parse(src, "run.rs.ail");
+      const mod = parse(src, "run.rs.aice");
       const emitter = new RustEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("x += 1;");
@@ -271,7 +271,7 @@ fn check(k: str, coll: any, err: any) -> bool:
     ret true
   ret err instanceof Error
 `;
-      const mod = parse(src, "check.go.ail");
+      const mod = parse(src, "check.go.aice");
       const emitter = new GoEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("contains(coll, k)");
@@ -283,7 +283,7 @@ fn check(k: str, coll: any, err: any) -> bool:
 fn testExpr():
   let mut f = (x) => (x += 1)
 `;
-      const mod = parse(src, "test.go.ail");
+      const mod = parse(src, "test.go.aice");
       const emitter = new GoEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(x += 1)");
@@ -298,7 +298,7 @@ fn run():
   x **= 3
   x >>>= 4
 `;
-      const mod = parse(src, "run.go.ail");
+      const mod = parse(src, "run.go.aice");
       const emitter = new GoEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("x += 1");
@@ -316,7 +316,7 @@ fn check(k: str, coll: any, err: any) -> bool:
     ret true
   ret err instanceof Error
 `;
-      const mod = parse(src, "check.cpp.ail");
+      const mod = parse(src, "check.cpp.aice");
       const emitter = new CppEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(coll.contains(k))");
@@ -329,7 +329,7 @@ fn testExpr():
   let mut x = 10
   let mut y = (x += 1)
 `;
-      const mod = parse(src, "test.cpp.ail");
+      const mod = parse(src, "test.cpp.aice");
       const emitter = new CppEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(x += 1)");
@@ -344,7 +344,7 @@ fn run():
   x **= 3
   x >>>= 4
 `;
-      const mod = parse(src, "run.cpp.ail");
+      const mod = parse(src, "run.cpp.aice");
       const emitter = new CppEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("x += 1;");
@@ -362,7 +362,7 @@ fn check(k: str, coll: any, err: any) -> bool:
     ret true
   ret err instanceof Error
 `;
-      const mod = parse(src, "check.cs.ail");
+      const mod = parse(src, "check.cs.aice");
       const emitter = new CSharpEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(coll.Contains(k))");
@@ -375,7 +375,7 @@ fn testExpr():
   let mut x = 10
   let mut y = (x += 1)
 `;
-      const mod = parse(src, "test.cs.ail");
+      const mod = parse(src, "test.cs.aice");
       const emitter = new CSharpEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("(x += 1)");
@@ -390,7 +390,7 @@ fn run():
   x **= 3
   x >>>= 4
 `;
-      const mod = parse(src, "run.cs.ail");
+      const mod = parse(src, "run.cs.aice");
       const emitter = new CSharpEmitter();
       const out = emitter.emit(mod);
       expect(out).toContain("x += 1;");

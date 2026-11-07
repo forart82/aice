@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Language Server Protocol (LSP) Specification Types for AIL 2.0.
+ * Language Server Protocol (LSP) Specification Types for AICE 2.0.
  * Conforms to LSP 3.17 Specification.
  */
 

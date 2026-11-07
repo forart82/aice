@@ -4,10 +4,10 @@
  *
  * Comprehensive Unit & Integration Test Suite for Companion Twin-Workspace Adoption (Step 2.1).
  * Verifies:
- * 1. `ail adopt --companion <targetDir>` and `ail adopt [destDir] --companion <targetDir>`
- * 2. Generated `ail.config.json` with mode: "companion", targetProjectDir, outDir, sourceDir: "src"
- * 3. All decompiled .ail source files written to companion src/ (preserving relative structure)
- * 4. Target project remains 100% clean, unmodified, unlocked (zero .ail files in target)
+ * 1. `aice adopt --companion <targetDir>` and `aice adopt [destDir] --companion <targetDir>`
+ * 2. Generated `aice.config.json` with mode: "companion", targetProjectDir, outDir, sourceDir: "src"
+ * 3. All decompiled .aice source files written to companion src/ (preserving relative structure)
+ * 4. Target project remains 100% clean, unmodified, unlocked (zero .aice files in target)
  * 5. Companion cognitive shields (AGENTS.md, .cursorrules) created in companion workspace
  * 6. Programmatic invocation with ParallelAdoptionOptions and AdoptionResult
  * 7. Forward transpilation from companion workspace to external target project
@@ -32,7 +32,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -64,13 +64,13 @@ function getAllFiles(dir: string): string[] {
   return results;
 }
 
-describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <targetDir>)", () => {
+describe("Step 2.1: Companion Twin-Workspace Adoption (aice adopt --companion <targetDir>)", () => {
   let baseTmpDir: string;
   let targetDir: string;
   let companionDir: string;
 
   beforeEach(() => {
-    baseTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-companion-test-"));
+    baseTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-companion-test-"));
     targetDir = path.join(baseTmpDir, "target_project");
     companionDir = path.join(baseTmpDir, "companion_workspace");
     fs.mkdirSync(targetDir, { recursive: true });
@@ -84,7 +84,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     }
   });
 
-  it("adopts a target project with src/ hierarchy via CLI: ail adopt <destDir> --companion <targetDir>", () => {
+  it("adopts a target project with src/ hierarchy via CLI: aice adopt <destDir> --companion <targetDir>", () => {
     // 1. Setup target fixture project
     const targetSrc = path.join(targetDir, "src");
     const targetMath = path.join(targetSrc, "math");
@@ -103,13 +103,13 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     // 2. Execute CLI adopt command
     const res = runCli(["adopt", companionDir, "--companion", targetDir]);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain("=== AIL Companion Adoption Summary ===");
+    expect(res.stdout).toContain("=== AICE Companion Adoption Summary ===");
     expect(res.stdout).toContain("Mode:                companion");
     expect(res.stdout).toContain("Target Files:        ✔ Untouched (100% clean, unlocked)");
     expect(res.stdout).toContain("2 ingested");
 
-    // 3. Verify ail.config.json in companion workspace
-    const configPath = path.join(companionDir, "ail.config.json");
+    // 3. Verify aice.config.json in companion workspace
+    const configPath = path.join(companionDir, "aice.config.json");
     expect(fs.existsSync(configPath)).toBe(true);
 
     const rawConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
@@ -127,17 +127,17 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(loaded.mode).toBe("companion");
     expect(loaded.targetProjectDir).toBe(expectedTargetRel);
 
-    // 4. Verify all .ail files written to companion src/
+    // 4. Verify all .aice files written to companion src/
     const companionSrc = path.join(companionDir, "src");
     expect(fs.existsSync(companionSrc)).toBe(true);
 
-    const compIndexAil = path.join(companionSrc, "index.ail");
-    const compCalcAil = path.join(companionSrc, "math", "calculator.ail");
-    expect(fs.existsSync(compIndexAil)).toBe(true);
-    expect(fs.existsSync(compCalcAil)).toBe(true);
+    const compIndexAice = path.join(companionSrc, "index.aice");
+    const compCalcAice = path.join(companionSrc, "math", "calculator.aice");
+    expect(fs.existsSync(compIndexAice)).toBe(true);
+    expect(fs.existsSync(compCalcAice)).toBe(true);
 
     const compFiles = getAllFiles(companionDir);
-    // Ensure all code files in companion are .ail
+    // Ensure all code files in companion are .aice
     const codeFiles = compFiles.filter(
       (f) =>
         !f.endsWith(".json") &&
@@ -146,7 +146,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
         !path.basename(f).startsWith("."),
     );
     expect(codeFiles.length).toBe(2);
-    expect(codeFiles.every((f) => f.endsWith(".ail"))).toBe(true);
+    expect(codeFiles.every((f) => f.endsWith(".aice"))).toBe(true);
 
     // 5. Verify AGENTS.md and .cursorrules in companion workspace
     const agentsMdPath = path.join(companionDir, "AGENTS.md");
@@ -155,19 +155,19 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(fs.existsSync(cursorRulesPath)).toBe(true);
 
     const agentsContent = fs.readFileSync(agentsMdPath, "utf-8");
-    expect(agentsContent).toContain("AIL Companion Workspace Directives");
+    expect(agentsContent).toContain("AICE Companion Workspace Directives");
     expect(agentsContent).toContain(expectedTargetRel);
 
     const cursorRulesContent = fs.readFileSync(cursorRulesPath, "utf-8");
-    expect(cursorRulesContent).toContain("AIL Companion Workspace Directives");
+    expect(cursorRulesContent).toContain("AICE Companion Workspace Directives");
     expect(cursorRulesContent).toContain(expectedTargetRel);
 
     // 6. Verify target project is completely unmodified
     const targetFilesAfter = getAllFiles(targetDir);
-    const targetAilFiles = targetFilesAfter.filter((f) => f.endsWith(".ail"));
-    expect(targetAilFiles).toHaveLength(0);
+    const targetAiceFiles = targetFilesAfter.filter((f) => f.endsWith(".aice"));
+    expect(targetAiceFiles).toHaveLength(0);
 
-    expect(fs.existsSync(path.join(targetDir, "ail.config.json"))).toBe(false);
+    expect(fs.existsSync(path.join(targetDir, "aice.config.json"))).toBe(false);
     expect(fs.existsSync(path.join(targetDir, "AGENTS.md"))).toBe(false);
     expect(fs.existsSync(path.join(targetDir, ".cursorrules"))).toBe(false);
 
@@ -180,7 +180,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(targetIndexStatAfter.mode & 0o200).not.toBe(0); // writable by owner
   });
 
-  it("adopts target project when run directly inside companion directory: ail adopt --companion <targetDir>", () => {
+  it("adopts target project when run directly inside companion directory: aice adopt --companion <targetDir>", () => {
     fs.mkdirSync(companionDir, { recursive: true });
 
     // Setup target project
@@ -196,20 +196,20 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     const relTarget = path.relative(companionDir, targetDir);
     const res = runCli(["adopt", "--companion", relTarget], companionDir);
     expect(res.status).toBe(0);
-    expect(res.stdout).toContain("=== AIL Companion Adoption Summary ===");
+    expect(res.stdout).toContain("=== AICE Companion Adoption Summary ===");
 
-    // Verify companion workspace contains server.ail
-    expect(fs.existsSync(path.join(companionDir, "src", "server.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(companionDir, "ail.config.json"))).toBe(true);
+    // Verify companion workspace contains server.aice
+    expect(fs.existsSync(path.join(companionDir, "src", "server.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "aice.config.json"))).toBe(true);
 
     const config = JSON.parse(
-      fs.readFileSync(path.join(companionDir, "ail.config.json"), "utf-8"),
+      fs.readFileSync(path.join(companionDir, "aice.config.json"), "utf-8"),
     );
     expect(config.mode).toBe("companion");
 
-    // Target project remains untouched with zero .ail
+    // Target project remains untouched with zero .aice
     const targetFiles = getAllFiles(targetDir);
-    expect(targetFiles.filter((f) => f.endsWith(".ail"))).toHaveLength(0);
+    expect(targetFiles.filter((f) => f.endsWith(".aice"))).toHaveLength(0);
   });
 
   it("adopts a target project with flat structure (no src/ folder)", () => {
@@ -228,7 +228,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
 
     // Verify config
     const rawConfig = JSON.parse(
-      fs.readFileSync(path.join(companionDir, "ail.config.json"), "utf-8"),
+      fs.readFileSync(path.join(companionDir, "aice.config.json"), "utf-8"),
     );
     expect(rawConfig.mode).toBe("companion");
     const expectedRel = path.relative(companionDir, targetDir).replace(/\\/g, "/");
@@ -237,12 +237,12 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(rawConfig.outDir).toBe(expectedRel);
 
     // Verify companion src/ contains both files
-    expect(fs.existsSync(path.join(companionDir, "src", "main.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(companionDir, "src", "utils", "helper.ail"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "src", "main.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "src", "utils", "helper.aice"))).toBe(true);
 
-    // Verify target has 0 .ail files
+    // Verify target has 0 .aice files
     const targetFiles = getAllFiles(targetDir);
-    expect(targetFiles.filter((f) => f.endsWith(".ail"))).toHaveLength(0);
+    expect(targetFiles.filter((f) => f.endsWith(".aice"))).toHaveLength(0);
   });
 
   it("supports programmatic adoption via adoptProjectParallel and ingestProjectSideBySide", async () => {
@@ -268,13 +268,13 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(result.totalIngested).toBe(1);
     expect(result.totalFailed).toBe(0);
     expect(result.cl100kSavingsPct).toBeGreaterThanOrEqual(0);
-    expect(result.configPath).toBe(path.join(companionDir, "ail.config.json"));
+    expect(result.configPath).toBe(path.join(companionDir, "aice.config.json"));
     expect(result.agentsMdPath).toBe(path.join(companionDir, "AGENTS.md"));
     expect(result.cursorRulesPath).toBe(path.join(companionDir, ".cursorrules"));
     expect(result.generatedFiles).toBeDefined();
 
-    expect(fs.existsSync(path.join(companionDir, "src", "module.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(targetDir, "src", "module.ail"))).toBe(false);
+    expect(fs.existsSync(path.join(companionDir, "src", "module.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(targetDir, "src", "module.aice"))).toBe(false);
   });
 
   it("respects --dry-run without creating files on disk", () => {
@@ -287,7 +287,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(res.stdout).toContain("[DRY-RUN] No changes were written to disk");
 
     // Companion directory was not modified with configs or sources
-    expect(fs.existsSync(path.join(companionDir, "ail.config.json"))).toBe(false);
+    expect(fs.existsSync(path.join(companionDir, "aice.config.json"))).toBe(false);
     expect(fs.existsSync(path.join(companionDir, "src"))).toBe(false);
   });
 
@@ -303,10 +303,10 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
 
     // Verify resolveTargetOutputPathForConfig
     const config = loadProjectConfig(companionDir);
-    const companionAil = path.join(companionDir, "src", "math", "logic.ail");
-    expect(fs.existsSync(companionAil)).toBe(true);
+    const companionAice = path.join(companionDir, "src", "math", "logic.aice");
+    expect(fs.existsSync(companionAice)).toBe(true);
 
-    const resolvedTarget = resolveTargetOutputPathForConfig(companionAil, config, companionDir);
+    const resolvedTarget = resolveTargetOutputPathForConfig(companionAice, config, companionDir);
     const expectedTarget = path.resolve(targetMath, "logic.ts");
     expect(path.resolve(resolvedTarget)).toBe(expectedTarget);
   });
@@ -328,9 +328,9 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     const res = runCli(["adopt", companionDir, "--companion", targetDir]);
     expect(res.status).toBe(0);
 
-    // .tsx must be preserved as Button.tsx.ail, while main.ts becomes main.ail
-    expect(fs.existsSync(path.join(companionDir, "src", "Button.tsx.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(companionDir, "src", "main.ail"))).toBe(true);
+    // .tsx must be preserved as Button.tsx.aice, while main.ts becomes main.aice
+    expect(fs.existsSync(path.join(companionDir, "src", "Button.tsx.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "src", "main.aice"))).toBe(true);
 
     const config = loadProjectConfig(companionDir);
     expect(config.targetLanguage).toBe("typescript");
@@ -345,14 +345,14 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     // Adopt into companion
     const res = runCli(["adopt", companionDir, "--companion", targetDir]);
     expect(res.status).toBe(0);
-    expect(fs.existsSync(path.join(companionDir, "src", "app.ail"))).toBe(true);
-    expect(fs.existsSync(path.join(companionDir, "ail.config.json"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "src", "app.aice"))).toBe(true);
+    expect(fs.existsSync(path.join(companionDir, "aice.config.json"))).toBe(true);
 
     // Programmatic eject
     const ejectRes = await ejectProject({ dir: companionDir });
     expect(ejectRes.mode).toBe("companion");
     expect(ejectRes.restoredFiles).toEqual([]);
-    expect(ejectRes.removedAilFiles.length).toBeGreaterThan(0);
+    expect(ejectRes.removedAiceFiles.length).toBeGreaterThan(0);
 
     // CRITICAL: External target project must remain completely intact!
     expect(fs.existsSync(targetDir)).toBe(true);
@@ -360,8 +360,8 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     expect(fs.readFileSync(targetFile, "utf-8")).toBe(`export const app = "healthy";\n`);
 
     // Companion workspace cleaned
-    expect(fs.existsSync(path.join(companionDir, "src", "app.ail"))).toBe(false);
-    expect(fs.existsSync(path.join(companionDir, "ail.config.json"))).toBe(false);
+    expect(fs.existsSync(path.join(companionDir, "src", "app.aice"))).toBe(false);
+    expect(fs.existsSync(path.join(companionDir, "aice.config.json"))).toBe(false);
   });
 
   it("never deletes src/ when ejectProject is called with outDir: 'src'", async () => {
@@ -373,7 +373,7 @@ describe("Step 2.1: Companion Twin-Workspace Adoption (ail adopt --companion <ta
     fs.writeFileSync(codeFile, `export const answer = 42;\n`, "utf-8");
 
     fs.writeFileSync(
-      path.join(projectDir, "ail.config.json"),
+      path.join(projectDir, "aice.config.json"),
       JSON.stringify(
         {
           mode: "isolated",

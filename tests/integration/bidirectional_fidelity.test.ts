@@ -5,8 +5,8 @@
  * Comprehensive Bidirectional Fidelity & Lens Verification Integration Test Suite.
  *
  * Validates the complete bidirectional adoption pipeline:
- *   1. Direction 1: Target -> AIL (Decompilation & 100% Parse Success Rate)
- *   2. Direction 2: AIL -> Target (Re-emission & Semantic Reconstruction)
+ *   1. Direction 1: Target -> AICE (Decompilation & 100% Parse Success Rate)
+ *   2. Direction 2: AICE -> Target (Re-emission & Semantic Reconstruction)
  *   3. Put/Get Lens Law: Put(Get(c), Omega) == c (Bit-Identical Lossless Fidelity)
  *   4. Multi-Round Stability & Idempotence (Round 1 == Round 2, Zero Drift)
  *   5. Real-World Case Studies across TypeScript, TSX, CSS, HTML, C++, and C#
@@ -18,7 +18,7 @@ import { describe, expect, it } from "vitest";
 import { parse, parseWithTrivia, Parser } from "../../src/core/parser.js";
 import {
   decompile,
-  executeAilRoundtrip,
+  executeAiceRoundtrip,
   executeRoundtrip,
   type RoundtripResult,
 } from "../../src/decompiler/index.js";
@@ -27,10 +27,10 @@ import { TypeChecker } from "../../src/typechecker/checker.js";
 
 describe("Bidirectional Fidelity & Multi-Round Verification Engine", () => {
   // ===========================================================================
-  // SECTION 1: Direction 1 - Target -> AIL Decompilation & 100% Parse Success
+  // SECTION 1: Direction 1 - Target -> AICE Decompilation & 100% Parse Success
   // ===========================================================================
-  describe("Direction 1: Target -> AIL Decompilation & 100% Parse Success", () => {
-    it("decompiles TypeScript with contextual keywords ('val', 'mut', 'pub') into 100% valid parseable AIL", () => {
+  describe("Direction 1: Target -> AICE Decompilation & 100% Parse Success", () => {
+    it("decompiles TypeScript with contextual keywords ('val', 'mut', 'pub') into 100% valid parseable AICE", () => {
       const tsCode = `
 export interface DataPoint {
   val: number;
@@ -49,17 +49,17 @@ export function computeMetric(points: DataPoint[]): number {
 }
 `;
       const decomp = decompile(tsCode, "typescript", { filePath: "Metric.ts" });
-      expect(decomp.ail).toBeDefined();
-      expect(decomp.ail.length).toBeGreaterThan(0);
+      expect(decomp.aice).toBeDefined();
+      expect(decomp.aice.length).toBeGreaterThan(0);
 
       // Must parse cleanly with 100% success
-      const parsedAst = parse(decomp.ail, "Metric.ts.ail");
+      const parsedAst = parse(decomp.aice, "Metric.ts.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.kind).toBe("Module");
       expect(parsedAst.items.length).toBeGreaterThan(0);
     });
 
-    it("decompiles TypeScript with 'nil' union types, ellipsis function types, and destructuring into valid AIL", () => {
+    it("decompiles TypeScript with 'nil' union types, ellipsis function types, and destructuring into valid AICE", () => {
       const tsCode = `
 export type NullableHandler = ((...args: string[]) => void) | null | undefined;
 
@@ -78,12 +78,12 @@ export function runEvents(bus: EventBus, items: [string, string][]): void {
 }
 `;
       const decomp = decompile(tsCode, "typescript", { filePath: "EventBus.ts" });
-      const parsedAst = parse(decomp.ail, "EventBus.ts.ail");
+      const parsedAst = parse(decomp.aice, "EventBus.ts.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.items.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("decompiles React 19 TSX components with JSX hierarchy into 100% parseable AIL DSL", () => {
+    it("decompiles React 19 TSX components with JSX hierarchy into 100% parseable AICE DSL", () => {
       const tsxCode = `
 import React from "react";
 
@@ -110,12 +110,12 @@ export function Modal({ title, isOpen, onClose, children }: ModalProps) {
 }
 `;
       const decomp = decompile(tsxCode, "tsx", { filePath: "Modal.tsx" });
-      const parsedAst = parse(decomp.ail, "Modal.tsx.ail");
+      const parsedAst = parse(decomp.aice, "Modal.tsx.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.items.some((i) => i.kind === "ComponentDecl" || i.kind === "FunctionDecl")).toBe(true);
     });
 
-    it("decompiles C# domain classes, properties, and match expressions into 100% parseable AIL", () => {
+    it("decompiles C# domain classes, properties, and match expressions into 100% parseable AICE", () => {
       const csCode = `
 using System;
 
@@ -151,12 +151,12 @@ namespace Game.Combat
 }
 `;
       const decomp = decompile(csCode, "csharp", { filePath: "CombatEntity.cs" });
-      const parsedAst = parse(decomp.ail, "CombatEntity.cs.ail");
+      const parsedAst = parse(decomp.aice, "CombatEntity.cs.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.items.some((i) => i.kind === "ClassDecl")).toBe(true);
     });
 
-    it("decompiles C++ headers and methods with math helpers into 100% parseable AIL", () => {
+    it("decompiles C++ headers and methods with math helpers into 100% parseable AICE", () => {
       const cppCode = `
 #include <cmath>
 #include <string>
@@ -177,12 +177,12 @@ public:
 };
 `;
       const decomp = decompile(cppCode, "cpp", { filePath: "VectorMath.cpp" });
-      const parsedAst = parse(decomp.ail, "VectorMath.cpp.ail");
+      const parsedAst = parse(decomp.aice, "VectorMath.cpp.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.items.some((i) => i.kind === "ClassDecl")).toBe(true);
     });
 
-    it("decompiles CSS responsive token rules into 100% parseable AIL style blocks", () => {
+    it("decompiles CSS responsive token rules into 100% parseable AICE style blocks", () => {
       const cssCode = `
 :root {
   --primary-color: #3b82f6;
@@ -197,12 +197,12 @@ public:
 }
 `;
       const decomp = decompile(cssCode, "css", { filePath: "theme.css" });
-      const parsedAst = parse(decomp.ail, "theme.css.ail");
+      const parsedAst = parse(decomp.aice, "theme.css.aice");
       expect(parsedAst).toBeDefined();
       expect(parsedAst.items.some((i) => i.kind === "StyleDecl")).toBe(true);
     });
 
-    it("decompiles HTML5 markup into 100% parseable AIL declarative layout nodes", () => {
+    it("decompiles HTML5 markup into 100% parseable AICE declarative layout nodes", () => {
       const htmlCode = `
 <section class="card-grid">
   <article class="card">
@@ -212,7 +212,7 @@ public:
 </section>
 `;
       const decomp = decompile(htmlCode, "html", { filePath: "page.html" });
-      const parsedAst = parse(decomp.ail, "page.html.ail");
+      const parsedAst = parse(decomp.aice, "page.html.aice");
       expect(parsedAst).toBeDefined();
     });
   });
@@ -282,7 +282,7 @@ export function StatCard({ title, count }: CardProps) {
 
     it("guarantees 100% bit-identical lossless roundtrip for HTML documents", () => {
       const originalHtml = `<div class="hero">
-  <h1>Welcome to AIL</h1>
+  <h1>Welcome to AICE</h1>
   <p>Homoiconic bidirectional programming language.</p>
 </div>
 `;
@@ -323,8 +323,8 @@ export function formatUrl(config: Config): string {
       expect(round3.reconstructed).toBe(round1.reconstructed);
     });
 
-    it("satisfies AIL-first roundtrip: AIL -> Target -> AIL (executeAilRoundtrip)", () => {
-      const ailSource = `pub type Player:
+    it("satisfies AICE-first roundtrip: AICE -> Target -> AICE (executeAiceRoundtrip)", () => {
+      const aiceSource = `pub type Player:
   id: str
   level: int = 1
   score: float = 0.0
@@ -332,12 +332,12 @@ export function formatUrl(config: Config): string {
 pub fn advanceLevel(p: Player) -> Player:
   ret p
 `;
-      const res = executeAilRoundtrip(ailSource, "typescript", "player.ts.ail");
+      const res = executeAiceRoundtrip(aiceSource, "typescript", "player.ts.aice");
       expect(res.targetReconstructed).toBeDefined();
       expect(res.targetReconstructed.length).toBeGreaterThan(0);
-      expect(res.ailReconstructed).toBeDefined();
+      expect(res.aiceReconstructed).toBeDefined();
       // Verifies that the decompiled reverse result parses cleanly
-      const reparsed = parse(res.ailReconstructed, "player.ts.ail");
+      const reparsed = parse(res.aiceReconstructed, "player.ts.aice");
       expect(reparsed).toBeDefined();
     });
   });
@@ -345,8 +345,8 @@ pub fn advanceLevel(p: Player) -> Player:
   // ===========================================================================
   // SECTION 4: Real-World Case Studies across Diverse Repositories
   // ===========================================================================
-  describe("Real-World Case Studies from /home/forart/dev/ail_test_case", () => {
-    const testCaseSrc = "/home/forart/dev/ail_test_case/src";
+  describe("Real-World Case Studies from /home/forart/dev/aice_test_case", () => {
+    const testCaseSrc = "/home/forart/dev/aice_test_case/src";
 
     it("verifies 100% parse success on complex TypeScript math modules (case03 MathX.ts)", () => {
       const targetPath = path.join(testCaseSrc, "case03/src/core/MathX.ts");
@@ -356,10 +356,10 @@ pub fn advanceLevel(p: Player) -> Player:
       const roundtripRes = executeRoundtrip(original, "typescript", targetPath);
 
       // Decompilation succeeded
-      expect(roundtripRes.ail).toBeDefined();
+      expect(roundtripRes.aice).toBeDefined();
 
-      // Parse decompiled AIL
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      // Parse decompiled AICE
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
 
       // Put/Get identity
@@ -374,7 +374,7 @@ pub fn advanceLevel(p: Player) -> Player:
       const roundtripRes = executeRoundtrip(original, "typescript", targetPath);
 
       expect(roundtripRes.isIdentical).toBe(true);
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
 
@@ -386,7 +386,7 @@ pub fn advanceLevel(p: Player) -> Player:
       const roundtripRes = executeRoundtrip(original, "tsx", targetPath);
 
       expect(roundtripRes.isIdentical).toBe(true);
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
 
@@ -398,9 +398,9 @@ pub fn advanceLevel(p: Player) -> Player:
       const roundtripRes = executeRoundtrip(original, "cpp", targetPath);
 
       // Must decompile without crash
-      expect(roundtripRes.ail).toBeDefined();
-      // Generated AIL must parse
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      // Generated AICE must parse
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       // Must re-emit valid C++ code
       expect(roundtripRes.reconstructed).toContain("namespace dof");
@@ -414,8 +414,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "csharp", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.reconstructed).toContain("FoodItem");
     });
@@ -427,8 +427,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "php", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.reconstructed).toContain("class Order");
       expect(roundtripRes.reconstructed).toContain("__construct");
@@ -442,8 +442,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "php", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.reconstructed).toContain("class CustomerService");
       expect(roundtripRes.reconstructed).toContain("getOrderTotal");
@@ -456,8 +456,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "python", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.isIdentical).toBe(true);
       expect(roundtripRes.reconstructed).toContain("@dataclass");
@@ -471,8 +471,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "python", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.isIdentical).toBe(true);
       expect(roundtripRes.reconstructed).toContain("async def");
@@ -486,8 +486,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.isIdentical).toBe(true);
       expect(roundtripRes.reconstructed).toContain("data class ProductEntity");
@@ -501,8 +501,8 @@ pub fn advanceLevel(p: Player) -> Player:
       const original = fs.readFileSync(targetPath, "utf-8");
       const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
 
-      expect(roundtripRes.ail).toBeDefined();
-      const parsedAst = parse(roundtripRes.ail, `${targetPath}.ail`);
+      expect(roundtripRes.aice).toBeDefined();
+      const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
       expect(roundtripRes.isIdentical).toBe(true);
       expect(roundtripRes.reconstructed).toContain("interface ProductRepository");
@@ -542,7 +542,7 @@ export class Weapon {
 }
 `;
       const decomp = decompile(source, "typescript", { filePath: "Weapon.ts" });
-      const { ast } = parseWithTrivia(decomp.ail, "Weapon.ts.ail");
+      const { ast } = parseWithTrivia(decomp.aice, "Weapon.ts.aice");
 
       // Verify sound type checking runs without fatal exceptions
       const checker = new TypeChecker();

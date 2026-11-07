@@ -3,11 +3,11 @@ component LandingPage():
     head:
       meta(charset: "utf-8")
       meta(name: "viewport", content: "width=device-width, initial-scale=1")
-      title: "AIL 2.0 Web Application"
+      title: "AICE 2.0 Web Application"
       link(rel: "stylesheet", href: "style.css")
     body:
       header.site-header:
-        h1: "Welcome to AIL"
+        h1: "Welcome to AICE"
         p: "The high-entropy token-efficient programming language."
       main.content:
         section.features:

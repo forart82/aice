@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { executeAilRoundtrip, executeRoundtrip } from "../../src/decompiler/roundtrip.js";
+import { executeAiceRoundtrip, executeRoundtrip } from "../../src/decompiler/roundtrip.js";
 
 describe("Bidirectional Roundtrip Lens Engine", () => {
   it("satisfies Put(Get(c), Omega) == c for CSS stylesheets", () => {
@@ -23,8 +23,8 @@ describe("Bidirectional Roundtrip Lens Engine", () => {
 
     const res = executeRoundtrip(originalCss, "css", "theme.css");
     expect(res.target).toBe("css");
-    expect(res.ail).toContain("style body:");
-    expect(res.ail).toContain('style ".card":');
+    expect(res.aice).toContain("style body:");
+    expect(res.aice).toContain('style ".card":');
     expect(res.isIdentical).toBe(true);
   });
 
@@ -36,8 +36,8 @@ describe("Bidirectional Roundtrip Lens Engine", () => {
 
     const res = executeRoundtrip(originalHtml, "html", "page.html");
     expect(res.target).toBe("html");
-    expect(res.ail).toContain('div(class: "container"):');
-    expect(res.ail).toContain('h1: "Page Title"');
+    expect(res.aice).toContain('div(class: "container"):');
+    expect(res.aice).toContain('h1: "Page Title"');
     expect(res.isIdentical).toBe(true);
   });
 
@@ -72,8 +72,8 @@ export function Button({ label }: ButtonProps) {
 }`;
 
     const res = executeRoundtrip(originalTsx, "tsx", "Button.tsx");
-    expect(res.ail).toContain("type ButtonProps:");
-    expect(res.ail).toContain("component Button(label:str):");
+    expect(res.aice).toContain("type ButtonProps:");
+    expect(res.aice).toContain("component Button(label:str):");
     expect(res.reconstructed).toContain("export function Button({ label }: ButtonProps) {");
     expect(res.reconstructed).toContain('<button className="btn">');
     expect(res.reconstructed).toContain("<span>{label}</span>");
@@ -104,11 +104,11 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "Hazard.ts");
-    expect(res.ail).toContain("pub class Hazard:");
-    expect(res.ail).toContain("radius: int = 20");
-    expect(res.ail).toContain("life: int = 5");
-    expect(res.ail).toContain("static defaultSpeed: int = 10");
-    expect(res.ail).toContain("fn update(dt:int) -> void = dt");
+    expect(res.aice).toContain("pub class Hazard:");
+    expect(res.aice).toContain("radius: int = 20");
+    expect(res.aice).toContain("life: int = 5");
+    expect(res.aice).toContain("static defaultSpeed: int = 10");
+    expect(res.aice).toContain("fn update(dt:int) -> void = dt");
     expect(res.reconstructed).toContain("export class Hazard");
     expect(res.reconstructed).toContain("radius: number = 20;");
     expect(res.reconstructed).toContain("update(dt: number): void {");
@@ -118,7 +118,7 @@ export interface UserProfile {
     const originalTs = `export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";`;
 
     const res = executeRoundtrip(originalTs, "typescript", "WaveShape.ts");
-    expect(res.ail).toContain('type WaveShape = "sine" | "square" | "sawtooth" | "triangle"');
+    expect(res.aice).toContain('type WaveShape = "sine" | "square" | "sawtooth" | "triangle"');
     expect(res.reconstructed).toContain(
       'export type WaveShape = "sine" | "square" | "sawtooth" | "triangle";',
     );
@@ -139,8 +139,8 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "Vector2D.ts");
-    expect(res.ail).toContain("prop _x, x: int = 0");
-    expect(res.ail).toContain("get length() -> int = this._x * this._x");
+    expect(res.aice).toContain("prop _x, x: int = 0");
+    expect(res.aice).toContain("get length() -> int = this._x * this._x");
     expect(res.reconstructed).toContain("get x() { return this._x; }");
     expect(res.reconstructed).toContain("set x(v: number) { this._x = v; }");
   });
@@ -149,19 +149,19 @@ export interface UserProfile {
     const originalTs = `export function computeState(initial: number): number {
   const x = 42;
   let y = initial;
-  const name: string = "AIL";
+  const name: string = "AICE";
   let active: boolean = true;
   return (x + y);
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "state.ts");
-    expect(res.ail).toContain("x := 42");
-    expect(res.ail).toContain("y ::= initial");
-    expect(res.ail).toContain('name: str := "AIL"');
-    expect(res.ail).toContain("active: bool ::= true");
+    expect(res.aice).toContain("x := 42");
+    expect(res.aice).toContain("y ::= initial");
+    expect(res.aice).toContain('name: str := "AICE"');
+    expect(res.aice).toContain("active: bool ::= true");
     expect(res.reconstructed).toContain("const x = 42;");
     expect(res.reconstructed).toContain("let y = initial;");
-    expect(res.reconstructed).toContain('const name: string = "AIL";');
+    expect(res.reconstructed).toContain('const name: string = "AICE";');
     expect(res.reconstructed).toContain("let active: boolean = true;");
     expect(res.isIdentical).toBe(true);
   });
@@ -177,8 +177,8 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "PlayerTransform.ts");
-    expect(res.ail).toContain("prop X, x: int = 0");
-    expect(res.ail).toContain("prop Speed, speed: int = 10");
+    expect(res.aice).toContain("prop X, x: int = 0");
+    expect(res.aice).toContain("prop Speed, speed: int = 10");
     expect(res.reconstructed).toContain("X: number = 0;");
     expect(res.reconstructed).toContain("get x() { return this.X; }");
     expect(res.reconstructed).toContain("set x(v: number) { this.X = v; }");
@@ -196,8 +196,8 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "coords.ts");
-    expect(res.ail).toContain("[x, y] := [10, 20]");
-    expect(res.ail).toContain("[dx, dy] ::= [1, 2]");
+    expect(res.aice).toContain("[x, y] := [10, 20]");
+    expect(res.aice).toContain("[dx, dy] ::= [1, 2]");
     expect(res.reconstructed).toContain("const [x, y] = [10, 20];");
     expect(res.reconstructed).toContain("let [dx, dy] = [1, 2];");
     expect(res.isIdentical).toBe(true);
@@ -213,10 +213,10 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalTs, "typescript", "kinematics.ts");
-    expect(res.ail).toContain("min(x, y)");
-    expect(res.ail).toContain("max(x, y)");
-    expect(res.ail).toContain("hypot(x, y)");
-    expect(res.ail).toContain("clamp(rawVal, 0, 100)");
+    expect(res.aice).toContain("min(x, y)");
+    expect(res.aice).toContain("max(x, y)");
+    expect(res.aice).toContain("hypot(x, y)");
+    expect(res.aice).toContain("clamp(rawVal, 0, 100)");
     expect(res.reconstructed).toContain("const low = Math.min(x, y);");
     expect(res.reconstructed).toContain("const high = Math.max(x, y);");
     expect(res.reconstructed).toContain("const dist = Math.hypot(x, y);");
@@ -242,12 +242,12 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalCss, "css", "layout.css");
-    expect(res.ail).toContain('style ".row-box":');
-    expect(res.ail).toContain("fl-row");
-    expect(res.ail).toContain('style ".col-box":');
-    expect(res.ail).toContain("fl-col");
-    expect(res.ail).toContain('style ".centered-card":');
-    expect(res.ail).toContain("fl-center");
+    expect(res.aice).toContain('style ".row-box":');
+    expect(res.aice).toContain("fl-row");
+    expect(res.aice).toContain('style ".col-box":');
+    expect(res.aice).toContain("fl-col");
+    expect(res.aice).toContain('style ".centered-card":');
+    expect(res.aice).toContain("fl-center");
     expect(res.isIdentical).toBe(true);
   });
 
@@ -259,25 +259,25 @@ export interface UserProfile {
 }`;
 
     const res = executeRoundtrip(originalCss, "css", "tokens.css");
-    expect(res.ail).toContain("tokens spacing[rem]: 1: 0.25, 2: 0.5, 3: 0.75");
+    expect(res.aice).toContain("tokens spacing[rem]: 1: 0.25, 2: 0.5, 3: 0.75");
     expect(res.reconstructed).toContain("--spacing-1: 0.25rem;");
     expect(res.reconstructed).toContain("--spacing-2: 0.5rem;");
     expect(res.reconstructed).toContain("--spacing-3: 0.75rem;");
     expect(res.isIdentical).toBe(true);
   });
 
-  it("satisfies Get(Put(a)) == a lens invariant for AIL constructs across targets", () => {
-    const ailCss = `module theme
+  it("satisfies Get(Put(a)) == a lens invariant for AICE constructs across targets", () => {
+    const aiceCss = `module theme
 
 style ".header":
   fl-row
   padding: 10px
 `;
-    const cssRes = executeAilRoundtrip(ailCss, "css", "theme.ail");
+    const cssRes = executeAiceRoundtrip(aiceCss, "css", "theme.aice");
     expect(cssRes.targetReconstructed).toContain("display: flex;");
     expect(cssRes.targetReconstructed).toContain("flex-direction: row;");
-    expect(cssRes.ailReconstructed).toContain("fl-row");
+    expect(cssRes.aiceReconstructed).toContain("fl-row");
     expect(cssRes.isTargetIdentical).toBe(true);
-    expect(cssRes.isAilIdentical).toBe(true);
+    expect(cssRes.isAiceIdentical).toBe(true);
   });
 });

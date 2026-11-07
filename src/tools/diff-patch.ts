@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Semantic AST Diff & Patch Engine (Step 22).
+ * AICE 2.0 Semantic AST Diff & Patch Engine (Step 22).
  * Provides structural AST diffs, concise semantic summaries, unified diffs,
  * and deterministic, reversible patch application with zero corruption guarantee.
  */
@@ -306,7 +306,7 @@ export function computeSemanticDiff(
   newSource: string,
   options: DiffOptions = {},
 ): SemanticDiffResult {
-  const filePath = options.newPath || options.oldPath || "source.ail";
+  const filePath = options.newPath || options.oldPath || "source.aice";
   const unifiedDiff = generateUnifiedDiff(filePath, oldSource, newSource, options.context ?? 3);
 
   let oldAst: Module | undefined;
@@ -966,55 +966,55 @@ export async function patchFile(
     throw new Error(`Target file not found: ${targetPath}`);
   }
 
-  let targetAilPath = fullPath;
-  if (!fullPath.endsWith(".ail")) {
-    const companion = `${fullPath}.ail`;
-    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".ail");
+  let targetAicePath = fullPath;
+  if (!fullPath.endsWith(".aice")) {
+    const companion = `${fullPath}.aice`;
+    const shortCompanion = fullPath.replace(/\.[^.]+$/, ".aice");
     if (fs.existsSync(companion)) {
-      targetAilPath = companion;
+      targetAicePath = companion;
     } else if (fs.existsSync(shortCompanion)) {
-      targetAilPath = shortCompanion;
+      targetAicePath = shortCompanion;
     }
   }
 
-  const originalSource = await fs.promises.readFile(targetAilPath, "utf-8");
+  const originalSource = await fs.promises.readFile(targetAicePath, "utf-8");
   const result = applyPatch(originalSource, patchText, {
     ...options,
-    projectRoot: targetAilPath,
+    projectRoot: targetAicePath,
   });
 
-  result.filePath = targetAilPath;
+  result.filePath = targetAicePath;
 
   if (result.success && !options.dryRun) {
-    const dir = path.dirname(targetAilPath);
+    const dir = path.dirname(targetAicePath);
     const tmpFile = path.join(
       dir,
-      `.${path.basename(targetAilPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      `.${path.basename(targetAicePath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
     await fs.promises.writeFile(tmpFile, result.modifiedSource, "utf-8");
-    await fs.promises.rename(tmpFile, targetAilPath);
+    await fs.promises.rename(tmpFile, targetAicePath);
 
     if (options.compile) {
       const root =
-        options.projectRoot || findProjectRoot(path.dirname(targetAilPath), process.cwd());
+        options.projectRoot || findProjectRoot(path.dirname(targetAicePath), process.cwd());
       const config = loadProjectConfig(root);
-      const resolvedTarget = resolveTargetOutputPathForConfig(targetAilPath, config, root);
+      const resolvedTarget = resolveTargetOutputPathForConfig(targetAicePath, config, root);
       const outPath = path.isAbsolute(resolvedTarget)
         ? resolvedTarget
         : path.resolve(root, resolvedTarget);
 
-      const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, targetAilPath);
+      const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, targetAicePath);
       const checker = new TypeChecker();
       checker.checkModule(mod);
 
       let targetLang: TargetLanguage;
-      const base = path.basename(targetAilPath);
-      const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-      const innerExt = path.extname(withoutAil).toLowerCase();
+      const base = path.basename(targetAicePath);
+      const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+      const innerExt = path.extname(withoutAice).toLowerCase();
       if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-        targetLang = detectTargetFromPath(targetAilPath);
+        targetLang = detectTargetFromPath(targetAicePath);
       } else {
-        targetLang = config.targetLanguage ?? detectTargetFromPath(targetAilPath);
+        targetLang = config.targetLanguage ?? detectTargetFromPath(targetAicePath);
       }
 
       const emitted = emitTarget(mod, targetLang, {

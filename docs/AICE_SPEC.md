@@ -1,4 +1,4 @@
-# AIL Language Specification (Version 2.0 - BPE-Tuned Standard)
+# AICE Language Specification (Version 2.0 - BPE-Tuned Standard)
 
 > **Status**: Official Normative Specification  
 > **Theoretical Basis**: Intent-Based Intermediate Representation, BPE Token Economics, Asymmetric Lens Calculus, and Side-by-Side Defense-in-Depth Architecture  
@@ -8,7 +8,7 @@
 
 ## 1. Formal Grammar (EBNF)
 
-AIL uses an **Indentation-Delimited Surface Grammar** backed by a two-stage lexer that converts layout into logical `NEWLINE`, `INDENT`, and `DEDENT` tokens. The grammar is **permissive**: it optionally accepts curly braces `{}` and semicolons `;` when operating in whitespace-sensitive patch environments.
+AICE uses an **Indentation-Delimited Surface Grammar** backed by a two-stage lexer that converts layout into logical `NEWLINE`, `INDENT`, and `DEDENT` tokens. The grammar is **permissive**: it optionally accepts curly braces `{}` and semicolons `;` when operating in whitespace-sensitive patch environments.
 
 ```ebnf
 (* Top-level Module *)
@@ -154,10 +154,10 @@ StylePropValue      ::= HEX_COLOR | NUMBER | IDENT | DIMENSION | COMPOUND_CSS | 
 
 ## 2. Canonical Intent Standard Library & Arithmetic DSL
 
-To eliminate LLM API hallucinations and redundant boilerplate, AIL exposes univalent canonical operations and global math builtins that lower directly to native target expressions without runtime dependencies:
+To eliminate LLM API hallucinations and redundant boilerplate, AICE exposes univalent canonical operations and global math builtins that lower directly to native target expressions without runtime dependencies:
 
 ### 2.1 Canonical Standard Library (CSL)
-| Canonical AIL Operation | Semantics | Emitted TypeScript (ES2022) | Emitted Python (3.12+) | Emitted C++ (C++20) |
+| Canonical AICE Operation | Semantics | Emitted TypeScript (ES2022) | Emitted Python (3.12+) | Emitted C++ (C++20) |
 | :--- | :--- | :--- | :--- | :--- |
 | `str.slice(start, end)` | Half-open $[start, end)$, negative index safe | `str.slice(start, end)` | `str[start:end]` | `str.substr(start, end - start)` |
 | `str.at(index)` | Character at 0-based offset | `str.at(index)` | `str[index]` | `str[index]` |
@@ -214,36 +214,36 @@ Compile-time bounds checking eliminates out-of-bounds indexing and division-by-z
 
 The bidirectional transpiler is governed by the Bancilhon-Spyratos Constant Complement Theorem:
 $$C \xrightarrow{\sim} A \times \Omega$$
-where $C$ is the target source file, $A$ is the AIL semantic AST, and $\Omega$ is the `CstTriviaTable`.
+where $C$ is the target source file, $A$ is the AICE semantic AST, and $\Omega$ is the `CstTriviaTable`.
 
 ### 4.1 The Lens Stability Law (GetPut)
 $$\forall c \in C, \quad \text{Put}(\text{Get}(c), \Omega(c)) \equiv c$$
-An unmutated target file decompiled to AIL and re-emitted produces a **byte-for-byte identical file with 0 git diff**.
+An unmutated target file decompiled to AICE and re-emitted produces a **byte-for-byte identical file with 0 git diff**.
 
 ### 4.2 The Lens Correctness Law (PutGet)
 $$\forall a \in A, \forall \omega \in \Omega, \quad \text{Get}(\text{Put}(a, \omega)) \equiv a$$
-Updating the AIL AST and emitting target code preserves all semantic edits when re-read into AIL.
+Updating the AICE AST and emitting target code preserves all semantic edits when re-read into AICE.
 
 ---
 
 ## 5. Side-by-Side 4-Layer Defense-in-Depth Architecture
 
-To avoid breaking existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), relative imports, and git history, AIL operates **side-by-side**:
+To avoid breaking existing build pipelines (Vite, Cargo, CMake, Bun, Next.js), relative imports, and git history, AICE operates **side-by-side**:
 ```
 project/src/
 ├── Controller.ts           <-- Read-only lock (chmod 444). Hidden from AI agents.
-└── Controller.ts.ail       <-- VISIBLE to AI as single authoritative source of truth.
+└── Controller.ts.aice       <-- VISIBLE to AI as single authoritative source of truth.
 ```
 
 ### The 4 Layers of Protection:
 1. **IDE Sibling Conditional Exclusion (`.vscode/settings.json`)**:
-   Uses `"**/*.ts": { "when": "$(basename).ts.ail" }`. Hides target files from file trees, fuzzy finders, and symbol indexing in Cursor, VS Code, and Windsurf.
+   Uses `"**/*.ts": { "when": "$(basename).ts.aice" }`. Hides target files from file trees, fuzzy finders, and symbol indexing in Cursor, VS Code, and Windsurf.
 2. **Universal AI Agent Ignores (`.cursorignore`, `.geminiignore`, `.aiderignore`, `.agentignore`)**:
    Prevents agent exploration tools (`grep`, `find`, `list_dir`) and codebase vector embeddings from indexing target files.
 3. **Cognitive Lockdown Directives (`AGENTS.md`, `.cursorrules`)**:
-   Instructs AI agents that target files are read-only generated artifacts and all edits must be made directly in `*.ail` files.
-4. **Filesystem Permission Locks (`chmod 444`) & Watch Daemon (`ail watch`)**:
-   Generated target files are locked to read-only (`0o444`). Direct edit attempts fail with `EACCES`. The `ail watch` daemon atomically unlocks target files, recompiles them in $< 5\text{ms}$, and relocks them, preserving instant Hot Module Reloading (HMR).
+   Instructs AI agents that target files are read-only generated artifacts and all edits must be made directly in `*.aice` files.
+4. **Filesystem Permission Locks (`chmod 444`) & Watch Daemon (`aice watch`)**:
+   Generated target files are locked to read-only (`0o444`). Direct edit attempts fail with `EACCES`. The `aice watch` daemon atomically unlocks target files, recompiles them in $< 5\text{ms}$, and relocks them, preserving instant Hot Module Reloading (HMR).
 
 ---
 
@@ -252,7 +252,7 @@ project/src/
 ### 6.1 Table 1: All 14 Reference Examples (`examples/`)
 Audited via `js-tiktoken` with `--check-drift` enforcing **100% zero target drift**:
 
-| File | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
+| File | Target Lang | Target cl100k | AICE cl100k | cl100k Savings | Target o200k | AICE o200k | o200k Savings | Char Savings |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | `design_system_tokens.css` | CSS3 | 4,097 | 3,312 | **-19.2%** | 4,098 | 3,331 | **-18.7%** | -35.0% |
 | `enterprise_theme.css` | CSS3 | 6,297 | 4,869 | **-22.7%** | 6,299 | 4,935 | **-21.7%** | -40.1% |
@@ -274,7 +274,7 @@ Audited via `js-tiktoken` with `--check-drift` enforcing **100% zero target drif
 ### 6.2 Table 2: Real-World Production Projects (`poc_real_case/`)
 Audited across 67 production files from Raylib C++, SFML C++, and Canvas TypeScript games:
 
-| Project | Target Lang | Target cl100k | AIL cl100k | cl100k Savings | Target o200k | AIL o200k | o200k Savings | Char Savings |
+| Project | Target Lang | Target cl100k | AICE cl100k | cl100k Savings | Target o200k | AICE o200k | o200k Savings | Char Savings |
 | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | `dogMax` (27 files) | C++20 | 8,349 | 4,488 | **-46.2%** | 8,364 | 4,488 | **-46.3%** | -56.1% |
 | `snake_pp` (22 files) | C++20 | 8,065 | 2,948 | **-63.4%** | 8,183 | 2,989 | **-63.5%** | -66.8% |
@@ -283,85 +283,85 @@ Audited across 67 production files from Raylib C++, SFML C++, and Canvas TypeScr
 | **TOTAL (3 Projects / 67 Files)** | **Aggregated** | **104,173** | **72,769** | **-30.1%** | **104,509** | **72,958** | **-30.2%** | **-33.8%** |
 
 ### 6.3 Table 3: 100-Case Deep Twinless On-the-Fly Benchmark (`docs/BENCHMARK_100_ON_THE_FLY.md`)
-Evaluated across **100 distinct cases & situations** comparing **Without AIL (Raw Native Baseline)** vs. **With AIL On-the-Fly (`mode: "twinless"`)**:
-- **Pass Rate**: **100 / 100 (100.0%)** with **0 `.ail` files created on disk**
-- **Win Rate vs. Without AIL**: **100 / 100 (100.0%)**
-- **Total Tokens Without AIL**: **107,421 tokens**
-- **Total Tokens With AIL On-the-Fly**: **34,110 tokens**
+Evaluated across **100 distinct cases & situations** comparing **Without AICE (Raw Native Baseline)** vs. **With AICE On-the-Fly (`mode: "twinless"`)**:
+- **Pass Rate**: **100 / 100 (100.0%)** with **0 `.aice` files created on disk**
+- **Win Rate vs. Without AICE**: **100 / 100 (100.0%)**
+- **Total Tokens Without AICE**: **107,421 tokens**
+- **Total Tokens With AICE On-the-Fly**: **34,110 tokens**
 - **Total Net Tokens Saved**: **73,311 tokens (-68.25% overall reduction, -74.49% mean per-case reduction)**
 
 ### 6.4 Table 4: 500-Case Progressive Complexity Benchmark (`docs/BENCHMARK_500_ON_THE_FLY.md`)
-Evaluated across **500 progressively complex cases (`#001` -> `#500`, `complexity[i] > complexity[i-1]`)** comparing **With AIL On-the-Fly (`mode: "twinless"`)** vs. **Without AIL On-the-Fly (Legacy `.ail` Twin Workflow)** vs. **Without AIL at All (Raw Native Workflow)**:
-- **Pass Rate & Win Rate**: **500 / 500 (100.0%)** against **both** Without AIL On-the-Fly and Without AIL at All (`0` `.ail` files on disk)
-- **Total Tokens Without AIL at All**: **4,592,533 tokens**
-- **Total Tokens Without AIL On-the-Fly (Legacy Twin)**: **3,969,306 tokens**
-- **Total Tokens With AIL On-the-Fly**: **108,994 tokens**
-- **Total Net Tokens Saved**: **4,483,539 tokens vs. Without AIL at All (-97.63%)** and **3,860,312 tokens vs. Without AIL On-the-Fly (-97.25%)**
+Evaluated across **500 progressively complex cases (`#001` -> `#500`, `complexity[i] > complexity[i-1]`)** comparing **With AICE On-the-Fly (`mode: "twinless"`)** vs. **Without AICE On-the-Fly (Legacy `.aice` Twin Workflow)** vs. **Without AICE at All (Raw Native Workflow)**:
+- **Pass Rate & Win Rate**: **500 / 500 (100.0%)** against **both** Without AICE On-the-Fly and Without AICE at All (`0` `.aice` files on disk)
+- **Total Tokens Without AICE at All**: **4,592,533 tokens**
+- **Total Tokens Without AICE On-the-Fly (Legacy Twin)**: **3,969,306 tokens**
+- **Total Tokens With AICE On-the-Fly**: **108,994 tokens**
+- **Total Net Tokens Saved**: **4,483,539 tokens vs. Without AICE at All (-97.63%)** and **3,860,312 tokens vs. Without AICE On-the-Fly (-97.25%)**
 
 ### 6.5 Table 5: 500-Per-Language & File-Type Progressive Benchmark (`docs/BENCHMARK_500_PER_LANGUAGE.md`)
 Evaluated across **500 progressive benchmarks for each of the 15 supported programming languages and file types (`15 × 500 = 7,500` benchmarks)**: TypeScript (`.ts`), React (`.tsx`), JavaScript (`.js`), Python (`.py`), Go (`.go`), Rust (`.rs`), C++ (`.cpp`), C# (`.cs`), Kotlin (`.kt`), PHP (`.php`), CSS (`.css`), HTML (`.html`), JSON (`.json`), YAML (`.yaml`), and Twig (`.twig`):
-- **Pass Rate & Win Rate**: **7,500 / 7,500 (100.0%)** across all 15 supported dialects (`500/500 = 100.0%` per dialect, `0` `.ail` files on disk)
-- **Total Tokens Without AIL at All**: **68,932,850 tokens**
-- **Total Tokens Without AIL On-the-Fly (Legacy Twin)**: **59,542,200 tokens**
-- **Total Tokens With AIL On-the-Fly**: **1,621,220 tokens**
-- **Total Net Tokens Saved**: **67,311,630 tokens vs. Without AIL at All (-97.65%)** and **57,920,980 tokens vs. Without AIL On-the-Fly (-97.28%)**
+- **Pass Rate & Win Rate**: **7,500 / 7,500 (100.0%)** across all 15 supported dialects (`500/500 = 100.0%` per dialect, `0` `.aice` files on disk)
+- **Total Tokens Without AICE at All**: **68,932,850 tokens**
+- **Total Tokens Without AICE On-the-Fly (Legacy Twin)**: **59,542,200 tokens**
+- **Total Tokens With AICE On-the-Fly**: **1,621,220 tokens**
+- **Total Net Tokens Saved**: **67,311,630 tokens vs. Without AICE at All (-97.65%)** and **57,920,980 tokens vs. Without AICE On-the-Fly (-97.28%)**
 
 ---
 
 ## 7. Twinless On-the-Fly Mode & Smart Multi-File Idioms Specification
 
-In addition to Side-by-Side mode, AIL 2.0 supports **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `ail.config.json`):
-1. **Zero `.ail` Files on Disk across All 15 Dialects**: All source files remain in their native target formats (`*.ts`, `*.tsx`, `*.js`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`, `*.json`, `*.yaml`, `*.twig`).
-2. **In-RAM Decompilation, Symbol Slicing & `$idiom` Collapsing**: `ail outline <file>` and `ail context <file> [-s <symbol>]` decompile native files in memory, slice callable symbols, CSS selectors (`StyleDecl`), JSON/YAML keys & dot-paths (`RecordLiteralExpr`), and HTML/Twig/JSX elements/blocks (`LayoutNode`), prune unused imports and unreferenced `$idioms`, and collapse active project `$idioms` on-the-fly.
-3. **Smart Multi-File Idioms (`ail idioms scan | read | update | on | off`)**:
-   - `ail idioms scan` mines repeated expressions (including nested compound calls and `RecordLiteralExpr` data objects) and statement blocks directly from native files via structural anti-unification and stores SHA-256 content-addressed provenance in `.ail-cache/idioms.json`.
-   - `ail idioms read $name` reports the idiom template, parameter list, and every `file:line` occurrence with bound call-site arguments across the codebase.
-   - `ail idioms update $name "<newTemplate>" [--params <spec>]` rewrites all occurrences across all native files in a single atomic transaction, supporting parameter reordering, duplication, arity reduction/expansion with defaults, capture-avoiding alpha-renaming, recursion cycle detection (`IdiomCycleError`), and atomic multi-file rollback on failure.
-4. **Forgiving Direct-to-Native Surgical Splice (`ail splice`)**:
-   - Accepts pure AIL, AIL with `$idioms`, raw native target code, or hybrid "Frankenstein" syntax, plus `--body` and `--batch` multi-file atomic splices across all 15 supported target dialects (including PostCSS selector splices for `.css`, key/dot-path splices for `.json`/`.yaml`, and tag/`#id`/`.class`/`{% block %}` splices for `.html`/`.twig`).
+In addition to Side-by-Side mode, AICE 2.0 supports **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `aice.config.json`):
+1. **Zero `.aice` Files on Disk across All 15 Dialects**: All source files remain in their native target formats (`*.ts`, `*.tsx`, `*.js`, `*.py`, `*.go`, `*.rs`, `*.cpp`, `*.cs`, `*.kt`, `*.php`, `*.css`, `*.html`, `*.json`, `*.yaml`, `*.twig`).
+2. **In-RAM Decompilation, Symbol Slicing & `$idiom` Collapsing**: `aice outline <file>` and `aice context <file> [-s <symbol>]` decompile native files in memory, slice callable symbols, CSS selectors (`StyleDecl`), JSON/YAML keys & dot-paths (`RecordLiteralExpr`), and HTML/Twig/JSX elements/blocks (`LayoutNode`), prune unused imports and unreferenced `$idioms`, and collapse active project `$idioms` on-the-fly.
+3. **Smart Multi-File Idioms (`aice idioms scan | read | update | on | off`)**:
+   - `aice idioms scan` mines repeated expressions (including nested compound calls and `RecordLiteralExpr` data objects) and statement blocks directly from native files via structural anti-unification and stores SHA-256 content-addressed provenance in `.aice-cache/idioms.json`.
+   - `aice idioms read $name` reports the idiom template, parameter list, and every `file:line` occurrence with bound call-site arguments across the codebase.
+   - `aice idioms update $name "<newTemplate>" [--params <spec>]` rewrites all occurrences across all native files in a single atomic transaction, supporting parameter reordering, duplication, arity reduction/expansion with defaults, capture-avoiding alpha-renaming, recursion cycle detection (`IdiomCycleError`), and atomic multi-file rollback on failure.
+4. **Forgiving Direct-to-Native Surgical Splice (`aice splice`)**:
+   - Accepts pure AICE, AICE with `$idioms`, raw native target code, or hybrid "Frankenstein" syntax, plus `--body` and `--batch` multi-file atomic splices across all 15 supported target dialects (including PostCSS selector splices for `.css`, key/dot-path splices for `.json`/`.yaml`, and tag/`#id`/`.class`/`{% block %}` splices for `.html`/`.twig`).
    - Replaces only the exact AST declaration byte-span in the native file, guaranteeing 100% bit-identical preservation of all surrounding comments, decorators, and formatting.
 
 ---
 
 ## 8. CLI Toolchain & Workflow Specification
 
-The `ail` binary provides a comprehensive CLI for Twinless On-the-Fly workflows, Side-by-Side adoption, live development, compilation, and automated self-repair:
+The `aice` binary provides a comprehensive CLI for Twinless On-the-Fly workflows, Side-by-Side adoption, live development, compilation, and automated self-repair:
 
 ```bash
 # Twinless On-the-Fly & Smart Multi-File Idioms
-ail shield apply [dir] --twinless    # Configure Twinless mode (zero .ail files on disk)
-ail outline <nativeFile> [--stats]   # On-the-fly structural skeleton (85-95% token reduction)
-ail context <nativeFile> [-s <sym>]  # On-the-fly dependency & symbol-scoped AIL context with $idioms
-ail splice <nativeFile> -s <sym> -c <code> # Direct-to-native surgical AST splice (AIL, $idioms, raw, hybrid)
-ail idioms scan [dir]                # Mine multi-file idioms from native code into ail.config.json
-ail idioms read '$name' [dir]        # List all file:line occurrences & bound arguments across files
-ail idioms update '$name' "<tpl>"    # Atomically rewrite all idiom occurrences across native files
-ail idioms <on|off> [dir]            # Toggle on-the-fly $idiom collapsing in ail.config.json
+aice shield apply [dir] --twinless    # Configure Twinless mode (zero .aice files on disk)
+aice outline <nativeFile> [--stats]   # On-the-fly structural skeleton (85-95% token reduction)
+aice context <nativeFile> [-s <sym>]  # On-the-fly dependency & symbol-scoped AICE context with $idioms
+aice splice <nativeFile> -s <sym> -c <code> # Direct-to-native surgical AST splice (AICE, $idioms, raw, hybrid)
+aice idioms scan [dir]                # Mine multi-file idioms from native code into aice.config.json
+aice idioms read '$name' [dir]        # List all file:line occurrences & bound arguments across files
+aice idioms update '$name' "<tpl>"    # Atomically rewrite all idiom occurrences across native files
+aice idioms <on|off> [dir]            # Toggle on-the-fly $idiom collapsing in aice.config.json
 
 # Side-by-side adoption & live development
-ail adopt [dir] [-c <concurrency>]   # Ingests codebase, generates shields, and locks target files
-ail watch [dir]                      # Sub-5ms incremental watch daemon preserving HMR
-ail dev [dir]                        # Alias for watch
-ail eject [dir] [--remove-ail]       # Restores target files to chmod 644 and removes shields
-ail shield <apply|remove|status|lock|unlock> [dir]
+aice adopt [dir] [-c <concurrency>]   # Ingests codebase, generates shields, and locks target files
+aice watch [dir]                      # Sub-5ms incremental watch daemon preserving HMR
+aice dev [dir]                        # Alias for watch
+aice eject [dir] [--remove-aice]       # Restores target files to chmod 644 and removes shields
+aice shield <apply|remove|status|lock|unlock> [dir]
 
 # Compilation & Decompilation
-ail compile <file.ail>               # Compiles single AIL file to target language
-ail compile-all [dir]                # Recursively compiles all .ail files across project
-ail clean [dir]                      # Cleans generated target files
-ail decompile <targetFile>           # Decompiles target file into .ail
+aice compile <file.aice>               # Compiles single AICE file to target language
+aice compile-all [dir]                # Recursively compiles all .aice files across project
+aice clean [dir]                      # Cleans generated target files
+aice decompile <targetFile>           # Decompiles target file into .aice
 
 # Quality Gates, Benchmarks & Diagnostics
 bun run benchmark:100                # Executes the 100-Case Deep Twinless On-the-Fly Benchmark
 bun run benchmark:500                # Executes the 500-Case Progressive Complexity Benchmark (#001 -> #500)
 bun run benchmark:500-per-lang       # Executes the 500-Per-Language Benchmark (15 dialects x 500 = 7,500 cases)
-ail verify <file.ail> [--json]       # Verifies types, immutability, and syntax soundness
-ail fix <file.ail> [--dry-run]       # Autonomously self-repairs fixable diagnostics
-ail roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
-ail tokens [file|dir]                # Audits token efficiency for a specific file or folder (with subfolders)
-ail verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
-ail lsp                              # Starts Language Server Protocol over stdio
-ail mcp                              # Starts Model Context Protocol server over stdio
+aice verify <file.aice> [--json]       # Verifies types, immutability, and syntax soundness
+aice fix <file.aice> [--dry-run]       # Autonomously self-repairs fixable diagnostics
+aice roundtrip <targetFile>           # Verifies Put/Get lens identity (Put(Get(c), Omega) == c)
+aice tokens [file|dir]                # Audits token efficiency for a specific file or folder (with subfolders)
+aice verify-tokenomics [dir] --check-drift # Audits token savings and enforces zero target drift
+aice lsp                              # Starts Language Server Protocol over stdio
+aice mcp                              # Starts Model Context Protocol server over stdio
 ```
 
 

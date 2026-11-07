@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern PHP 8.x Forward Transpiler & Emitter for AIL 2.0.
+ * Modern PHP 8.x Forward Transpiler & Emitter for AICE 2.0.
  * Emits canonical modern PHP 8.x code with:
  *   - strict_types declaration (declare(strict_types=1);)
  *   - PSR-12 formatting (4-space indentation)
@@ -229,7 +229,7 @@ export class PhpEmitter {
     const imports: string[] = [];
     for (const item of mod.items) {
       if (item.kind === "ImportDecl") {
-        let src = item.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(php|ail|ts|js)$/, "");
+        let src = item.source.replace(/^(\.\/|\.\.\/)+/, "").replace(/\.(php|aice|ts|js)$/, "");
         src = src.split("/").join("\\");
         if (item.specifiers && item.specifiers.length > 0) {
           for (const spec of item.specifiers) {

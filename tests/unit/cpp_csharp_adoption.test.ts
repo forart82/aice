@@ -142,8 +142,8 @@ float clampValue(float value, float lo, float hi) {
 }
 `;
       const result = decompile(cppCode, "cpp", { filePath: "test.cpp" });
-      expect(result.ail).toContain("Math helper functions for collision bounds");
-      expect(result.ail).toContain("fn clampValue");
+      expect(result.aice).toContain("Math helper functions for collision bounds");
+      expect(result.aice).toContain("fn clampValue");
     });
   });
 
@@ -252,14 +252,14 @@ public class Chef
 }
 `;
       const result = decompile(csCode, "csharp", { filePath: "Chef.cs" });
-      expect(result.ail).toContain("Calculates whether food can be cooked");
-      expect(result.ail).toContain("class Chef");
+      expect(result.aice).toContain("Calculates whether food can be cooked");
+      expect(result.aice).toContain("class Chef");
     });
   });
 
   describe("C# Emitter & Target Generation", () => {
-    it("emits clean modern C# code from AIL Module AST", () => {
-      const ailSource = `
+    it("emits clean modern C# code from AICE Module AST", () => {
+      const aiceSource = `
 module Game.Entities
 
 enum WeaponTier:
@@ -277,7 +277,7 @@ pub class Player:
     this.Score = this.Score + delta
     ret this.Score
 `;
-      const mod = parse(ailSource, "Game/Entities/Player.cs.ail");
+      const mod = parse(aiceSource, "Game/Entities/Player.cs.aice");
       const emitted = emitTarget(mod, "csharp");
 
       expect(emitted).toContain("namespace Game.Entities;");
@@ -291,8 +291,8 @@ pub class Player:
   });
 
   describe("C++ Emitter & Target Generation", () => {
-    it("emits modern C++20 code from AIL Module AST with break and continue support", () => {
-      const ailSource = `
+    it("emits modern C++20 code from AICE Module AST with break and continue support", () => {
+      const aiceSource = `
 module Core.Physics
 
 pub fn processLoop(limit:int) -> int:
@@ -305,7 +305,7 @@ pub fn processLoop(limit:int) -> int:
     i = i + 1
   ret sum
 `;
-      const mod = parse(ailSource, "Core/Physics/Loop.cpp.ail");
+      const mod = parse(aiceSource, "Core/Physics/Loop.cpp.aice");
       const emitted = emitTarget(mod, "cpp");
 
       expect(emitted).toContain("#pragma once");
@@ -328,7 +328,7 @@ enum class ItemRarity {
 `;
       const res = executeRoundtrip(cppSource, "cpp", "ItemRarity.hpp");
       expect(res.target).toBe("cpp");
-      expect(res.ail).toContain("enum ItemRarity:");
+      expect(res.aice).toContain("enum ItemRarity:");
       expect(res.reconstructed).toContain("enum class ItemRarity");
     });
 
@@ -346,7 +346,7 @@ public enum GameMode
 `;
       const res = executeRoundtrip(csSource, "csharp", "GameMode.cs");
       expect(res.target).toBe("csharp");
-      expect(res.ail).toContain("enum GameMode:");
+      expect(res.aice).toContain("enum GameMode:");
       expect(res.reconstructed).toContain("public enum GameMode");
     });
   });
@@ -389,11 +389,11 @@ public:
 }
 `;
       const cppDecomp = decompile(cppOriginal, "cpp", { filePath: "Character.hpp" });
-      const cppTokenomics = calculateFileTokenomics(cppDecomp.ail, cppOriginal, "Character.hpp");
+      const cppTokenomics = calculateFileTokenomics(cppDecomp.aice, cppOriginal, "Character.hpp");
 
       expect(cppTokenomics.targetLang).toBe("C++20");
       expect(cppTokenomics.targetCl100k).toBeGreaterThan(0);
-      expect(cppTokenomics.ailCl100k).toBeGreaterThan(0);
+      expect(cppTokenomics.aiceCl100k).toBeGreaterThan(0);
       expect(cppTokenomics.cl100kSavingsPct).toBeGreaterThan(0);
 
       const csOriginal = `
@@ -415,18 +415,18 @@ public class Character
 }
 `;
       const csDecomp = decompile(csOriginal, "csharp", { filePath: "Character.cs" });
-      const csTokenomics = calculateFileTokenomics(csDecomp.ail, csOriginal, "Character.cs");
+      const csTokenomics = calculateFileTokenomics(csDecomp.aice, csOriginal, "Character.cs");
 
       expect(csTokenomics.targetLang).toBe("C#");
       expect(csTokenomics.targetCl100k).toBeGreaterThan(0);
-      expect(csTokenomics.ailCl100k).toBeGreaterThan(0);
+      expect(csTokenomics.aiceCl100k).toBeGreaterThan(0);
       expect(csTokenomics.cl100kSavingsPct).toBeGreaterThan(0);
     });
   });
 
   describe("Parallel Adoption (findIngestableFiles & ingestProjectSideBySide)", () => {
     it("discovers C++ and C# files in directory tree while ignoring .uid metadata", () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-adopt-test-"));
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-adopt-test-"));
       try {
         fs.writeFileSync(path.join(tempDir, "Entity.hpp"), "// hpp file\n");
         fs.writeFileSync(path.join(tempDir, "Entity.cpp"), "// cpp file\n");
@@ -445,8 +445,8 @@ public class Character
       }
     });
 
-    it("adopts C++ and C# codebases side-by-side with .ail sibling generation", async () => {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-adopt-run-"));
+    it("adopts C++ and C# codebases side-by-side with .aice sibling generation", async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-adopt-run-"));
       try {
         fs.writeFileSync(
           path.join(tempDir, "QualityTier.hpp"),
@@ -465,14 +465,14 @@ public class Character
 
         expect(summary.totalIngested).toBe(2);
         expect(summary.totalFailed).toBe(0);
-        expect(fs.existsSync(path.join(tempDir, "QualityTier.hpp.ail"))).toBe(true);
-        expect(fs.existsSync(path.join(tempDir, "Sound.cs.ail"))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, "QualityTier.hpp.aice"))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, "Sound.cs.aice"))).toBe(true);
 
-        const hppAil = fs.readFileSync(path.join(tempDir, "QualityTier.hpp.ail"), "utf-8");
-        expect(hppAil).toContain("enum QualityTier:");
+        const hppAice = fs.readFileSync(path.join(tempDir, "QualityTier.hpp.aice"), "utf-8");
+        expect(hppAice).toContain("enum QualityTier:");
 
-        const csAil = fs.readFileSync(path.join(tempDir, "Sound.cs.ail"), "utf-8");
-        expect(csAil).toContain("enum SoundKind:");
+        const csAice = fs.readFileSync(path.join(tempDir, "Sound.cs.aice"), "utf-8");
+        expect(csAice).toContain("enum SoundKind:");
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

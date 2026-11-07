@@ -5,7 +5,7 @@
  * Comprehensive Unit Test Suite for Multi-Language Dialects: PHP 8.x (Step 26).
  *
  * Verifies:
- * 1. PHP 8.x Decompilation to AIL AST:
+ * 1. PHP 8.x Decompilation to AICE AST:
  *    - Stripping `<?php` header and `declare(strict_types=1);`
  *    - Namespaces and use statements
  *    - Classes with extends and implements
@@ -16,8 +16,8 @@
  *    - Control flow (if, elseif, else, while, foreach, try/catch/finally, throw)
  *    - Null-safe operator ($x?->foo()) and null coalescing ($x ?? $default)
  *    - Comment & docblock trivia retention (/** ... * / and //)
- *    - 100% parse success on decompiled AIL code
- * 2. PHP 8.x Forward Emission from AIL AST:
+ *    - 100% parse success on decompiled AICE code
+ * 2. PHP 8.x Forward Emission from AICE AST:
  *    - Header, namespace, use statements
  *    - Canonical PSR-12 formatting (4 spaces)
  *    - Constructor property promotion
@@ -28,9 +28,9 @@
  *    - Multi-round convergence (Round 1 == Round 2 == Round 3)
  *    - Real-world validation against examples/php and case51
  * 4. Polymorphic CLI Execution:
- *    - `ail compile` on .php files
- *    - `ail outline` on .php files
- *    - `ail context` on .php files
+ *    - `aice compile` on .php files
+ *    - `aice outline` on .php files
+ *    - `aice context` on .php files
  * 5. Typecheck Soundness:
  *    - Zero diagnostic crashes when checking decompiled modules
  */
@@ -64,7 +64,7 @@ import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -83,7 +83,7 @@ describe("Step 26: Multi-Language Dialects for PHP 8.x (.php)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-php-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-php-test-"));
   });
 
   afterEach(() => {
@@ -113,15 +113,15 @@ describe("Step 26: Multi-Language Dialects for PHP 8.x (.php)", () => {
 
     it("detects 'php' from file paths via detectTargetFromPath", () => {
       expect(detectTargetFromPath("src/Domain/Order.php")).toBe("php");
-      expect(detectTargetFromPath("src/Domain/Order.php.ail")).toBe("php");
+      expect(detectTargetFromPath("src/Domain/Order.php.aice")).toBe("php");
       expect(detectTargetFromPath("PaymentService.php")).toBe("php");
     });
   });
 
   // ===========================================================================
-  // SECTION 2: PHP 8.x Decompilation to AIL AST
+  // SECTION 2: PHP 8.x Decompilation to AICE AST
   // ===========================================================================
-  describe("PHP 8.x Decompilation to AIL AST", () => {
+  describe("PHP 8.x Decompilation to AICE AST", () => {
     it("strips `<?php` header and `declare(strict_types=1);` cleanly", () => {
       const phpCode = `<?php
 
@@ -143,8 +143,8 @@ class User {
       expect(cls.properties.length).toBe(1);
       expect(cls.properties[0].name).toBe("name");
 
-      // Verify generated AIL parses cleanly
-      const parsed = parse(decomp.ail, "User.php.ail");
+      // Verify generated AICE parses cleanly
+      const parsed = parse(decomp.aice, "User.php.aice");
       expect(parsed).toBeDefined();
       expect(parsed.items.length).toBe(1);
     });
@@ -175,8 +175,8 @@ class Payment {
       expect(cls.primaryConstructor![2].isReadonly).toBe(true);
       expect(cls.primaryConstructor![3].defaultValue).toBeDefined();
 
-      // Generated AIL must parse
-      const parsed = parse(decomp.ail, "Payment.php.ail");
+      // Generated AICE must parse
+      const parsed = parse(decomp.aice, "Payment.php.aice");
       expect(parsed).toBeDefined();
       const parsedCls = parsed.items[0] as ClassDecl;
       expect(parsedCls.primaryConstructor).toBeDefined();
@@ -206,7 +206,7 @@ enum OrderStatus: string {
       expect(enm.variants![0].name).toBe("Pending");
       expect(enm.variants![3].name).toBe("Cancelled");
 
-      const parsed = parse(decomp.ail, "OrderStatus.php.ail");
+      const parsed = parse(decomp.aice, "OrderStatus.php.aice");
       expect(parsed).toBeDefined();
       const parsedEnm = parsed.items[0] as TypeDecl;
       expect(parsedEnm.isEnum).toBe(true);
@@ -240,7 +240,7 @@ class PriceCalculator {
       expect(matchStmt.cases[0].pattern.kind).toBe("LiteralPattern");
       expect(matchStmt.cases[2].pattern.kind).toBe("WildcardPattern");
 
-      const parsed = parse(decomp.ail, "PriceCalculator.php.ail");
+      const parsed = parse(decomp.aice, "PriceCalculator.php.aice");
       expect(parsed).toBeDefined();
     });
 
@@ -269,7 +269,7 @@ interface UserRepositoryInterface {
       expect(iface.methods[1].name).toBe("save");
       expect(iface.methods[2].name).toBe("delete");
 
-      const parsed = parse(decomp.ail, "UserRepositoryInterface.php.ail");
+      const parsed = parse(decomp.aice, "UserRepositoryInterface.php.aice");
       expect(parsed).toBeDefined();
     });
 
@@ -328,18 +328,18 @@ class Processor {
 }
 `;
       const decomp = decompilePhp(phpCode, "Processor.php");
-      const parsed = parse(decomp.ail, "Processor.php.ail");
+      const parsed = parse(decomp.aice, "Processor.php.aice");
       expect(parsed).toBeDefined();
       expect(parsed.items.length).toBe(1);
     });
   });
 
   // ===========================================================================
-  // SECTION 3: PHP 8.x Forward Emission from AIL AST
+  // SECTION 3: PHP 8.x Forward Emission from AICE AST
   // ===========================================================================
-  describe("PHP 8.x Forward Emission from AIL AST", () => {
+  describe("PHP 8.x Forward Emission from AICE AST", () => {
     it("emits strict_types, namespace, and use statements canonically", () => {
-      const ailSource = `module App/Services/UserService
+      const aiceSource = `module App/Services/UserService
 
 from "App/Repositories/UserRepository" import UserRepository
 
@@ -348,7 +348,7 @@ pub class UserService:
   fn getUser(id: int) -> str:
     ret "user"
 `;
-      const { ast, trivia } = parseWithTrivia(ailSource, "UserService.php.ail");
+      const { ast, trivia } = parseWithTrivia(aiceSource, "UserService.php.aice");
       const emitted = emitTarget(ast, "php", { trivia });
 
       expect(emitted).toContain("<?php");
@@ -360,13 +360,13 @@ pub class UserService:
     });
 
     it("emits PHP 8 constructor property promotion cleanly", () => {
-      const ailSource = `module Order
+      const aiceSource = `module Order
 
 pub class Order(pub id: int, pub customer: str, readonly price: float = 0.0):
   fn getTotal() -> float:
     ret this.price
 `;
-      const { ast } = parseWithTrivia(ailSource, "Order.php.ail");
+      const { ast } = parseWithTrivia(aiceSource, "Order.php.aice");
       const emitted = emitTarget(ast, "php");
 
       expect(emitted).toContain("public function __construct(");
@@ -377,14 +377,14 @@ pub class Order(pub id: int, pub customer: str, readonly price: float = 0.0):
     });
 
     it("emits PHP 8 backed enums with typed values", () => {
-      const ailSource = `module OrderStatus
+      const aiceSource = `module OrderStatus
 
 pub enum OrderStatus:
   Pending
   Processing
   Completed
 `;
-      const { ast } = parseWithTrivia(ailSource, "OrderStatus.php.ail");
+      const { ast } = parseWithTrivia(aiceSource, "OrderStatus.php.aice");
       const emitted = emitTarget(ast, "php");
 
       expect(emitted).toContain("enum OrderStatus: string {");
@@ -395,7 +395,7 @@ pub enum OrderStatus:
     });
 
     it("emits PHP 8 match expressions with pattern branches and default arm", () => {
-      const ailSource = `module TaxCalculator
+      const aiceSource = `module TaxCalculator
 
 pub class TaxCalculator:
   fn calculate(country: str, amount: float) -> float:
@@ -404,7 +404,7 @@ pub class TaxCalculator:
       case "EU" => amount * 0.20
       case _ => 0.0
 `;
-      const { ast } = parseWithTrivia(ailSource, "TaxCalculator.php.ail");
+      const { ast } = parseWithTrivia(aiceSource, "TaxCalculator.php.aice");
       const emitted = emitTarget(ast, "php");
 
       expect(emitted).toContain("return match ($country) {");
@@ -415,13 +415,13 @@ pub class TaxCalculator:
     });
 
     it("emits null-safe operator and null coalescing operators", () => {
-      const ailSource = `module Navigator
+      const aiceSource = `module Navigator
 
 pub class Navigator:
   fn getZip(user: any) -> str:
     ret user?.address?.zip ?? "00000"
 `;
-      const { ast } = parseWithTrivia(ailSource, "Navigator.php.ail");
+      const { ast } = parseWithTrivia(aiceSource, "Navigator.php.aice");
       const emitted = emitTarget(ast, "php");
 
       expect(emitted).toContain("$user?->address?->zip ?? '00000'");
@@ -437,9 +437,9 @@ pub class Navigator:
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);
-      expect(res.ail).toBeDefined();
+      expect(res.aice).toBeDefined();
 
-      const parsed = parse(res.ail, `${filePath}.ail`);
+      const parsed = parse(res.aice, `${filePath}.aice`);
       expect(parsed).toBeDefined();
       expect(parsed.items.length).toBeGreaterThanOrEqual(2);
 
@@ -455,9 +455,9 @@ pub class Navigator:
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);
-      expect(res.ail).toBeDefined();
+      expect(res.aice).toBeDefined();
 
-      const parsed = parse(res.ail, `${filePath}.ail`);
+      const parsed = parse(res.aice, `${filePath}.aice`);
       expect(parsed).toBeDefined();
 
       expect(res.reconstructed).toContain("enum OrderStatus: string");
@@ -472,9 +472,9 @@ pub class Navigator:
       const original = fs.readFileSync(filePath, "utf-8");
 
       const res = executeRoundtrip(original, "php", filePath);
-      expect(res.ail).toBeDefined();
+      expect(res.aice).toBeDefined();
 
-      const parsed = parse(res.ail, `${filePath}.ail`);
+      const parsed = parse(res.aice, `${filePath}.aice`);
       expect(parsed).toBeDefined();
 
       expect(res.reconstructed).toContain("class PaymentService");
@@ -511,7 +511,7 @@ class MathUtil {
   // SECTION 5: Polymorphic CLI Integration on .php Files
   // ===========================================================================
   describe("Polymorphic CLI Integration on .php Files", () => {
-    it("executes 'ail decompile' on a .php file producing valid .php.ail and 'ail compile' back", () => {
+    it("executes 'aice decompile' on a .php file producing valid .php.aice and 'aice compile' back", () => {
       const testPhp = path.join(tmpDir, "UserEntity.php");
       fs.writeFileSync(
         testPhp,
@@ -535,16 +535,16 @@ class UserEntity {
       const decompileRes = runCli(["decompile", testPhp], tmpDir);
       expect(decompileRes.status).toBe(0);
 
-      const ailOutput = path.join(tmpDir, "UserEntity.php.ail");
-      expect(fs.existsSync(ailOutput)).toBe(true);
-      const ailContent = fs.readFileSync(ailOutput, "utf-8");
-      expect(ailContent).toContain("class UserEntity");
-      expect(ailContent).toContain("pub id:int");
-      expect(ailContent).toContain("pub name:str");
+      const aiceOutput = path.join(tmpDir, "UserEntity.php.aice");
+      expect(fs.existsSync(aiceOutput)).toBe(true);
+      const aiceContent = fs.readFileSync(aiceOutput, "utf-8");
+      expect(aiceContent).toContain("class UserEntity");
+      expect(aiceContent).toContain("pub id:int");
+      expect(aiceContent).toContain("pub name:str");
 
-      // Now compile it back with ail compile
+      // Now compile it back with aice compile
       fs.rmSync(testPhp);
-      const compileRes = runCli(["compile", ailOutput], tmpDir);
+      const compileRes = runCli(["compile", aiceOutput], tmpDir);
       expect(compileRes.status).toBe(0);
       expect(fs.existsSync(testPhp)).toBe(true);
       const phpRecompiled = fs.readFileSync(testPhp, "utf-8");
@@ -552,7 +552,7 @@ class UserEntity {
       expect(phpRecompiled).toContain("__construct");
     });
 
-    it("executes 'ail outline' on a .php file with high token savings", () => {
+    it("executes 'aice outline' on a .php file with high token savings", () => {
       const testPhp = path.join(tmpDir, "ReportService.php");
       fs.writeFileSync(
         testPhp,
@@ -586,7 +586,7 @@ class ReportService {
       expect(res.stdout).toContain("emailReport");
     });
 
-    it("executes 'ail context' on a .php file generating semantic context map", () => {
+    it("executes 'aice context' on a .php file generating semantic context map", () => {
       const testPhp = path.join(tmpDir, "OrderCalculator.php");
       fs.writeFileSync(
         testPhp,
@@ -634,7 +634,7 @@ class BankAccount {
 }
 `;
       const decomp = decompilePhp(source, "BankAccount.php");
-      const { ast } = parseWithTrivia(decomp.ail, "BankAccount.php.ail");
+      const { ast } = parseWithTrivia(decomp.aice, "BankAccount.php.aice");
 
       const checker = new TypeChecker();
       expect(() => checker.checkModule(ast)).not.toThrow();

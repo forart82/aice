@@ -4,7 +4,7 @@ import { parse } from "../src/core/parser.js";
 import { executeRoundtrip } from "../src/decompiler/roundtrip.js";
 import { detectTargetFromPath, type TargetLanguage } from "../src/emitters/index.js";
 
-const testCaseRoot = "/home/forart/dev/ail_test_case/src";
+const testCaseRoot = "/home/forart/dev/aice_test_case/src";
 
 interface FileAuditResult {
   file: string;
@@ -29,7 +29,7 @@ function findTargetFiles(dir: string): string[] {
       results.push(...findTargetFiles(full));
     } else if (entry.isFile()) {
       const ext = path.extname(entry.name);
-      if (supportedExtensions.includes(ext) && !entry.name.endsWith(".ail")) {
+      if (supportedExtensions.includes(ext) && !entry.name.endsWith(".aice")) {
         results.push(full);
       }
     }
@@ -62,13 +62,13 @@ for (let i = 0; i < allTargetFiles.length; i++) {
     totalDecompileOk++;
     resultsByLang[langKey].decompileOk++;
 
-    // Test parse on roundtripRes.ail
+    // Test parse on roundtripRes.aice
     try {
-      parse(roundtripRes.ail, `${targetFile}.ail`);
+      parse(roundtripRes.aice, `${targetFile}.aice`);
       totalParseOk++;
       resultsByLang[langKey].parseOk++;
     } catch (parseErr) {
-      // Parse failed on generated AIL
+      // Parse failed on generated AICE
     }
 
     if (roundtripRes.reconstructed) {
@@ -89,9 +89,9 @@ console.log("\n=================================================================
 console.log("=== BIDIRECTIONAL ROUNDTRIP FIDELITY AUDIT REPORT ===");
 console.log("================================================================================");
 console.log(`Total Target Files Audited: ${allTargetFiles.length}`);
-console.log(`Direction 1 (Target -> AIL Decompile): ${totalDecompileOk}/${allTargetFiles.length} (${((totalDecompileOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
-console.log(`Decompiled AIL Parse Success:          ${totalParseOk}/${allTargetFiles.length} (${((totalParseOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
-console.log(`Direction 2 (AIL -> Target Re-emit):   ${totalReemitOk}/${allTargetFiles.length} (${((totalReemitOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
+console.log(`Direction 1 (Target -> AICE Decompile): ${totalDecompileOk}/${allTargetFiles.length} (${((totalDecompileOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
+console.log(`Decompiled AICE Parse Success:          ${totalParseOk}/${allTargetFiles.length} (${((totalParseOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
+console.log(`Direction 2 (AICE -> Target Re-emit):   ${totalReemitOk}/${allTargetFiles.length} (${((totalReemitOk / allTargetFiles.length) * 100).toFixed(1)}%)`);
 console.log(`Bit-Identical Lossless Fidelity:       ${totalIdentical}/${allTargetFiles.length} (${((totalIdentical / allTargetFiles.length) * 100).toFixed(1)}%)`);
 console.log("================================================================================\n");
 

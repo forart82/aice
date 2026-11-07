@@ -11,9 +11,9 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   findTargetFiles,
-  getAilSiblingPath,
+  getAiceSiblingPath,
   getGeneratedBanner,
-  hasAilSibling,
+  hasAiceSibling,
   isTargetLocked,
   lockFile,
   lockProjectTargets,
@@ -27,7 +27,7 @@ describe("Step 5: File-System Protection & Permission Locker", () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-fs-lock-test-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-fs-lock-test-"));
   });
 
   afterEach(() => {
@@ -165,7 +165,7 @@ describe("Step 5: File-System Protection & Permission Locker", () => {
   });
 
   describe("batch operations: lockProjectTargets and unlockProjectTargets", () => {
-    it("locks and unlocks generated target files having a .ail sibling", async () => {
+    it("locks and unlocks generated target files having a .aice sibling", async () => {
       const srcDir = path.join(testDir, "src");
       const distDir = path.join(testDir, "dist");
       const nodeModulesDir = path.join(testDir, "node_modules", "pkg");
@@ -174,53 +174,53 @@ describe("Step 5: File-System Protection & Permission Locker", () => {
       fs.mkdirSync(distDir, { recursive: true });
       fs.mkdirSync(nodeModulesDir, { recursive: true });
 
-      // Target files with .ail siblings in src
+      // Target files with .aice siblings in src
       const f1 = path.join(srcDir, "main.ts");
-      const f1Ail = path.join(srcDir, "main.ts.ail");
+      const f1Aice = path.join(srcDir, "main.ts.aice");
       fs.writeFileSync(f1, "// ts code\n");
-      fs.writeFileSync(f1Ail, "# ail code\n");
+      fs.writeFileSync(f1Aice, "# aice code\n");
 
       const f2 = path.join(srcDir, "script.py");
-      const f2Ail = path.join(srcDir, "script.py.ail");
+      const f2Aice = path.join(srcDir, "script.py.aice");
       fs.writeFileSync(f2, "# python code\n");
-      fs.writeFileSync(f2Ail, "# ail code\n");
+      fs.writeFileSync(f2Aice, "# aice code\n");
 
       const f3 = path.join(srcDir, "theme.css");
-      const f3Ail = path.join(srcDir, "theme.css.ail");
+      const f3Aice = path.join(srcDir, "theme.css.aice");
       fs.writeFileSync(f3, "/* css code */\n");
-      fs.writeFileSync(f3Ail, "# ail code\n");
+      fs.writeFileSync(f3Aice, "# aice code\n");
 
       const f4 = path.join(srcDir, "index.html");
-      const f4Ail = path.join(srcDir, "index.html.ail");
+      const f4Aice = path.join(srcDir, "index.html.aice");
       fs.writeFileSync(f4, "<!-- html code -->\n");
-      fs.writeFileSync(f4Ail, "# ail code\n");
+      fs.writeFileSync(f4Aice, "# aice code\n");
 
       const f5 = path.join(srcDir, "engine.cpp");
-      const f5Ail = path.join(srcDir, "engine.cpp.ail");
+      const f5Aice = path.join(srcDir, "engine.cpp.aice");
       fs.writeFileSync(f5, "// cpp code\n");
-      fs.writeFileSync(f5Ail, "# ail code\n");
+      fs.writeFileSync(f5Aice, "# aice code\n");
 
-      // File with short sibling convention: component.tsx and component.ail
+      // File with short sibling convention: component.tsx and component.aice
       const f6 = path.join(srcDir, "component.tsx");
-      const f6Ail = path.join(srcDir, "component.ail");
+      const f6Aice = path.join(srcDir, "component.aice");
       fs.writeFileSync(f6, "// tsx code\n");
-      fs.writeFileSync(f6Ail, "# ail code\n");
+      fs.writeFileSync(f6Aice, "# aice code\n");
 
-      // Standalone file WITHOUT .ail sibling (must NOT be touched)
+      // Standalone file WITHOUT .aice sibling (must NOT be touched)
       const standalone = path.join(srcDir, "standalone.ts");
       fs.writeFileSync(standalone, "// standalone\n");
 
       // File in ignored directory (dist) - must NOT be touched
       const distFile = path.join(distDir, "bundle.ts");
-      const distAil = path.join(distDir, "bundle.ts.ail");
+      const distAice = path.join(distDir, "bundle.ts.aice");
       fs.writeFileSync(distFile, "// dist bundle\n");
-      fs.writeFileSync(distAil, "# ail\n");
+      fs.writeFileSync(distAice, "# aice\n");
 
       // File in ignored directory (node_modules) - must NOT be touched
       const nmFile = path.join(nodeModulesDir, "dep.ts");
-      const nmAil = path.join(nodeModulesDir, "dep.ts.ail");
+      const nmAice = path.join(nodeModulesDir, "dep.ts.aice");
       fs.writeFileSync(nmFile, "// dep\n");
-      fs.writeFileSync(nmAil, "# ail\n");
+      fs.writeFileSync(nmAice, "# aice\n");
 
       // Verify findTargetFiles finds exactly the 6 target files
       const targets = findTargetFiles(testDir);
@@ -286,78 +286,78 @@ describe("Step 5: File-System Protection & Permission Locker", () => {
 
   describe("getGeneratedBanner", () => {
     it("produces correct comment syntax for TS, Python, CSS, HTML, C++", () => {
-      const source = "src/modules/calc.ail";
+      const source = "src/modules/calc.aice";
 
       // TypeScript / TS / TSX
       expect(getGeneratedBanner("typescript", source)).toBe(
-        `// @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `// @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
       expect(getGeneratedBanner("TS", source)).toBe(
-        `// @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `// @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
       expect(getGeneratedBanner("tsx", source)).toBe(
-        `// @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `// @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
 
       // Python / py
       expect(getGeneratedBanner("python", source)).toBe(
-        `# @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `# @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
       expect(getGeneratedBanner("Python", source)).toBe(
-        `# @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `# @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
       expect(getGeneratedBanner("py", source)).toBe(
-        `# @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `# @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
 
       // CSS
       expect(getGeneratedBanner("css", source)).toBe(
-        `/* @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source} */`,
+        `/* @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source} */`,
       );
       expect(getGeneratedBanner("CSS", source)).toBe(
-        `/* @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source} */`,
+        `/* @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source} */`,
       );
 
       // HTML
       expect(getGeneratedBanner("html", source)).toBe(
-        `<!-- @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source} -->`,
+        `<!-- @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source} -->`,
       );
       expect(getGeneratedBanner("HTML", source)).toBe(
-        `<!-- @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source} -->`,
+        `<!-- @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source} -->`,
       );
 
       // C++ / CPP
       expect(getGeneratedBanner("cpp", source)).toBe(
-        `// @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `// @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
       expect(getGeneratedBanner("C++", source)).toBe(
-        `// @generated by AIL - DO NOT EDIT DIRECTLY. Source: ${source}`,
+        `// @generated by AICE - DO NOT EDIT DIRECTLY. Source: ${source}`,
       );
     });
   });
 
-  describe("hasAilSibling and getAilSiblingPath", () => {
+  describe("hasAiceSibling and getAiceSiblingPath", () => {
     it("detects both direct and short sibling conventions", () => {
       const file1 = path.join(testDir, "test.ts");
-      const file1Sibling = path.join(testDir, "test.ts.ail");
+      const file1Sibling = path.join(testDir, "test.ts.aice");
       fs.writeFileSync(file1, "content");
       fs.writeFileSync(file1Sibling, "content");
 
-      expect(hasAilSibling(file1)).toBe(true);
-      expect(getAilSiblingPath(file1)).toBe(file1Sibling);
+      expect(hasAiceSibling(file1)).toBe(true);
+      expect(getAiceSiblingPath(file1)).toBe(file1Sibling);
 
       const file2 = path.join(testDir, "view.tsx");
-      const file2Sibling = path.join(testDir, "view.ail");
+      const file2Sibling = path.join(testDir, "view.aice");
       fs.writeFileSync(file2, "content");
       fs.writeFileSync(file2Sibling, "content");
 
-      expect(hasAilSibling(file2)).toBe(true);
-      expect(getAilSiblingPath(file2)).toBe(file2Sibling);
+      expect(hasAiceSibling(file2)).toBe(true);
+      expect(getAiceSiblingPath(file2)).toBe(file2Sibling);
 
       const file3 = path.join(testDir, "orphan.ts");
       fs.writeFileSync(file3, "content");
-      expect(hasAilSibling(file3)).toBe(false);
-      expect(getAilSiblingPath(file3)).toBeNull();
+      expect(hasAiceSibling(file3)).toBe(false);
+      expect(getAiceSiblingPath(file3)).toBeNull();
     });
   });
 

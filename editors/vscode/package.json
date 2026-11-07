@@ -1,7 +1,7 @@
 {
-  "name": "vscode-ail",
-  "displayName": "AIL Language Support",
-  "description": "Syntax highlighting, bracket matching, indentation rules, and language support for AIL (Abstract Intermediate Language)",
+  "name": "vscode-aice",
+  "displayName": "AICE Language Support",
+  "description": "Syntax highlighting, bracket matching, indentation rules, and language support for AICE (AI Context Engine)",
   "version": "1.0.0",
   "icon": "icon.png",
   "publisher": "antigravity",
@@ -13,132 +13,132 @@
     "Snippets"
   ],
   "keywords": [
-    "ail",
+    "aice",
     "compiler",
     "bpe",
     "tokenomics",
     "transpiler"
   ],
   "activationEvents": [
-    "onLanguage:ail"
+    "onLanguage:aice"
   ],
   "main": "./extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "ail",
-        "aliases": ["AIL", "ail"],
+        "id": "aice",
+        "aliases": ["AICE", "aice"],
         "icon": {
           "light": "./icon.png",
           "dark": "./icon.png"
         },
         "extensions": [
-          ".ail",
-          ".ts.ail",
-          ".tsx.ail",
-          ".js.ail",
-          ".mjs.ail",
-          ".cjs.ail",
-          ".py.ail",
-          ".go.ail",
-          ".rs.ail",
-          ".kt.ail",
-          ".kts.ail",
-          ".php.ail",
-          ".cpp.ail",
-          ".hpp.ail",
-          ".h.ail",
-          ".cc.ail",
-          ".cxx.ail",
-          ".cs.ail",
-          ".css.ail",
-          ".html.ail",
-          ".twig.ail",
-          ".json.ail",
-          ".yaml.ail",
-          ".yml.ail"
+          ".aice",
+          ".ts.aice",
+          ".tsx.aice",
+          ".js.aice",
+          ".mjs.aice",
+          ".cjs.aice",
+          ".py.aice",
+          ".go.aice",
+          ".rs.aice",
+          ".kt.aice",
+          ".kts.aice",
+          ".php.aice",
+          ".cpp.aice",
+          ".hpp.aice",
+          ".h.aice",
+          ".cc.aice",
+          ".cxx.aice",
+          ".cs.aice",
+          ".css.aice",
+          ".html.aice",
+          ".twig.aice",
+          ".json.aice",
+          ".yaml.aice",
+          ".yml.aice"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "ail",
-        "scopeName": "source.ail",
-        "path": "./syntaxes/ail.tmLanguage.json"
+        "language": "aice",
+        "scopeName": "source.aice",
+        "path": "./syntaxes/aice.tmLanguage.json"
       }
     ],
     "snippets": [
       {
-        "language": "ail",
-        "path": "./snippets/ail.json"
+        "language": "aice",
+        "path": "./snippets/aice.json"
       }
     ],
     "commands": [
       {
-        "command": "ail.compile",
-        "title": "AIL: Compile Current File",
-        "category": "AIL"
+        "command": "aice.compile",
+        "title": "AICE: Compile Current File",
+        "category": "AICE"
       },
       {
-        "command": "ail.watch",
-        "title": "AIL: Start Bidirectional Watch Daemon",
-        "category": "AIL"
+        "command": "aice.watch",
+        "title": "AICE: Start Bidirectional Watch Daemon",
+        "category": "AICE"
       },
       {
-        "command": "ail.sync",
-        "title": "AIL: Sync Target Changes to AIL",
-        "category": "AIL"
+        "command": "aice.sync",
+        "title": "AICE: Sync Target Changes to AICE",
+        "category": "AICE"
       },
       {
-        "command": "ail.outline",
-        "title": "AIL: Show AST Structural Outline",
-        "category": "AIL"
+        "command": "aice.outline",
+        "title": "AICE: Show AST Structural Outline",
+        "category": "AICE"
       },
       {
-        "command": "ail.context",
-        "title": "AIL: Generate Bounded Context Pack",
-        "category": "AIL"
+        "command": "aice.context",
+        "title": "AICE: Generate Bounded Context Pack",
+        "category": "AICE"
       },
       {
-        "command": "ail.idiomsScan",
-        "title": "AIL: Scan Project Idioms ($idiom)",
-        "category": "AIL"
+        "command": "aice.idiomsScan",
+        "title": "AICE: Scan Project Idioms ($idiom)",
+        "category": "AICE"
       },
       {
-        "command": "ail.idiomsApply",
-        "title": "AIL: Apply Project Idioms ($idiom)",
-        "category": "AIL"
+        "command": "aice.idiomsApply",
+        "title": "AICE: Apply Project Idioms ($idiom)",
+        "category": "AICE"
       },
       {
-        "command": "ail.shieldStatus",
-        "title": "AIL: Check 4-Layer AI Shield Status",
-        "category": "AIL"
+        "command": "aice.shieldStatus",
+        "title": "AICE: Check 4-Layer AI Shield Status",
+        "category": "AICE"
       },
       {
-        "command": "ail.shieldLock",
-        "title": "AIL: Lock Target Files (chmod 444)",
-        "category": "AIL"
+        "command": "aice.shieldLock",
+        "title": "AICE: Lock Target Files (chmod 444)",
+        "category": "AICE"
       },
       {
-        "command": "ail.shieldUnlock",
-        "title": "AIL: Unlock Target Files (chmod 644)",
-        "category": "AIL"
+        "command": "aice.shieldUnlock",
+        "title": "AICE: Unlock Target Files (chmod 644)",
+        "category": "AICE"
       },
       {
-        "command": "ail.test",
-        "title": "AIL: Run Symbol-Mapped Test Suite",
-        "category": "AIL"
+        "command": "aice.test",
+        "title": "AICE: Run Symbol-Mapped Test Suite",
+        "category": "AICE"
       }
     ],
     "configuration": {
       "type": "object",
-      "title": "AIL Configuration",
+      "title": "AICE Configuration",
       "properties": {
-        "ail.executablePath": {
+        "aice.executablePath": {
           "type": "string",
-          "default": "ail",
-          "description": "Path to the ail CLI executable"
+          "default": "aice",
+          "description": "Path to the aice CLI executable"
         }
       }
     }

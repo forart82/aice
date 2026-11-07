@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Data & Config AST Bi-directional Converter Engine for AIL 2.0 (Step 24).
+ * Data & Config AST Bi-directional Converter Engine for AICE 2.0 (Step 24).
  * Handles bi-directional lossless lowering between JavaScript data values
- * and AIL AST Expressions / Module items for JSON & YAML dialects.
+ * and AICE AST Expressions / Module items for JSON & YAML dialects.
  */
 
 import type {
@@ -19,7 +19,7 @@ import type {
 import { emptySpan } from "./span.js";
 
 /**
- * Converts a JavaScript value (primitive, array, object) into an AIL AST Expr.
+ * Converts a JavaScript value (primitive, array, object) into an AICE AST Expr.
  */
 export function valueToAst(val: any, filePath = "<anonymous>"): Expr {
   if (val === null || val === undefined) {
@@ -102,7 +102,7 @@ export function valueToAst(val: any, filePath = "<anonymous>"): Expr {
 }
 
 /**
- * Converts an AIL AST Expr back into a native JavaScript data value.
+ * Converts an AICE AST Expr back into a native JavaScript data value.
  */
 export function astToValue(expr: Expr): any {
   switch (expr.kind) {
@@ -173,7 +173,7 @@ export function astToValue(expr: Expr): any {
 }
 
 /**
- * Extracts data representation from an AIL Module AST containing data/config declarations.
+ * Extracts data representation from an AICE Module AST containing data/config declarations.
  */
 export function extractValueFromModule(mod: Module): any {
   if (!mod || !mod.items || mod.items.length === 0) {

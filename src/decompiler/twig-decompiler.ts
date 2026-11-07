@@ -2,14 +2,14 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Twig Template Dialect Decompiler (Reverse Transpiler) for AIL 2.0 (Step 25).
+ * Twig Template Dialect Decompiler (Reverse Transpiler) for AICE 2.0 (Step 25).
  * Parses Twig templates (.twig), recognizing:
  * - Interpolation expressions: {{ user.name }}, {{ count + 1 }}
  * - Control tags: {% if condition %} ... {% else %} ... {% endif %}, {% for item in items %} ... {% endfor %}
  * - Block & inheritance tags: {% block title %} ... {% endblock %}, {% extends "base.twig" %}, {% include "nav.twig" %}
  * - Comments: {# comment text #} -> stored in CstTriviaTable
  * - Nested HTML elements and text nodes
- * Lowers into canonical AIL AST (ComponentDecl with LayoutNode hierarchy and expression bindings).
+ * Lowers into canonical AICE AST (ComponentDecl with LayoutNode hierarchy and expression bindings).
  */
 
 import type {
@@ -21,7 +21,7 @@ import type {
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable } from "../core/trivia.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 
 const VOID_ELEMENTS = new Set([
   "area",
@@ -640,7 +640,7 @@ export class TwigDecompiler {
     this.filePath = filePath;
   }
 
-  decompile(): { ast: Module; ail: string; trivia: CstTriviaTable } {
+  decompile(): { ast: Module; aice: string; trivia: CstTriviaTable } {
     this.tokens = tokenizeTwigTemplate(this.source);
     this.cur = 0;
 
@@ -652,7 +652,7 @@ export class TwigDecompiler {
         .pop()
         ?.replace(/\.twig$/, "")
         .replace(/\.html$/, "")
-        .replace(/\.ail$/, "") ?? "card";
+        .replace(/\.aice$/, "") ?? "card";
 
     const cleanModPath = baseName;
     const compName =
@@ -676,10 +676,10 @@ export class TwigDecompiler {
       span: emptySpan(this.filePath),
     };
 
-    const generator = new AilGenerator({ trivia: this.trivia });
-    const ail = generator.generate(ast);
+    const generator = new AiceGenerator({ trivia: this.trivia });
+    const aice = generator.generate(ast);
 
-    return { ast, ail, trivia: this.trivia };
+    return { ast, aice, trivia: this.trivia };
   }
 
   private parseLayoutNodes(stopTags?: string[]): LayoutNode[] {
@@ -1190,11 +1190,11 @@ export class TwigDecompiler {
 export function decompileTwig(
   source: string,
   filePath = "template.twig",
-  options: AilGeneratorOptions = {},
-): { ast: Module; ail: string; trivia: CstTriviaTable } {
+  options: AiceGeneratorOptions = {},
+): { ast: Module; aice: string; trivia: CstTriviaTable } {
   const decompiler = new TwigDecompiler(source, filePath);
   const result = decompiler.decompile();
-  const generator = new AilGenerator({ ...options, trivia: result.trivia });
-  const ail = generator.generate(result.ast);
-  return { ast: result.ast, ail, trivia: result.trivia };
+  const generator = new AiceGenerator({ ...options, trivia: result.trivia });
+  const aice = generator.generate(result.ast);
+  return { ast: result.ast, aice, trivia: result.trivia };
 }

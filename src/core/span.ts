@@ -1,5 +1,5 @@
 /**
- * Source position and span tracking for AIL tokens and AST nodes.
+ * Source position and span tracking for AICE tokens and AST nodes.
  */
 
 export interface Position {

@@ -2,14 +2,14 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 AI Context Packager Engine (Step 20).
+ * Unit tests for AICE 2.0 AI Context Packager Engine (Step 20).
  */
 
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { program } from "../../bin/ail.js";
+import { program } from "../../bin/aice.js";
 import {
   type ContextOptions,
   type ContextResult,
@@ -19,11 +19,11 @@ import {
   resolveImportPath,
 } from "../../src/tools/context.js";
 
-describe("AIL 2.0 AI Context Packager Engine (Step 20)", () => {
+describe("AICE 2.0 AI Context Packager Engine (Step 20)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-context-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-context-test-"));
   });
 
   afterEach(() => {
@@ -36,7 +36,7 @@ describe("AIL 2.0 AI Context Packager Engine (Step 20)", () => {
 
   describe("Resolving Direct Local Dependencies", () => {
     it("extracts exported symbols and methods from local dependency into contract", async () => {
-      const depPath = path.join(tmpDir, "dep.ail");
+      const depPath = path.join(tmpDir, "dep.aice");
       fs.writeFileSync(
         depPath,
         `
@@ -56,7 +56,7 @@ fn internalSecret():
         "utf-8",
       );
 
-      const mainPath = path.join(tmpDir, "main.ail");
+      const mainPath = path.join(tmpDir, "main.aice");
       fs.writeFileSync(
         mainPath,
         `
@@ -70,14 +70,14 @@ pub fn run():
 
       const res = await generateContext(mainPath, { projectRoot: tmpDir });
 
-      expect(res.targetPath).toBe("main.ail");
+      expect(res.targetPath).toBe("main.aice");
       expect(res.targetContent).toContain("pub fn run():");
       expect(res.dependencies).toHaveLength(1);
 
       const dep = res.dependencies[0];
       expect(dep.specifier).toBe("./dep");
       expect(dep.isExternal).toBe(false);
-      expect(dep.resolvedPath).toBe("dep.ail");
+      expect(dep.resolvedPath).toBe("dep.aice");
       expect(dep.importedSymbols).toEqual(["add", "MathHelper"]);
 
       // Verify contract has exported symbols and docstrings, but omits internalSecret
@@ -88,16 +88,16 @@ pub fn run():
       expect(dep.contract).not.toContain("internalSecret");
 
       // Verify formatted markdown bundle
-      expect(res.formattedBundle).toContain("# AIL Context Pack: main.ail");
+      expect(res.formattedBundle).toContain("# AICE Context Pack: main.aice");
       expect(res.formattedBundle).toContain("## Imported Dependency Contracts (1):");
-      expect(res.formattedBundle).toContain("### Dependency: `./dep` (`dep.ail`)");
-      expect(res.formattedBundle).toContain("```ail");
+      expect(res.formattedBundle).toContain("### Dependency: `./dep` (`dep.aice`)");
+      expect(res.formattedBundle).toContain("```aice");
       expect(res.formattedBundle).toContain("## Target File Content:");
       expect(res.formattedBundle).toContain("pub fn run():");
     });
 
-    it("resolves dependency with .js extension to .ts.ail or .ail in side-by-side mode", async () => {
-      const typesPath = path.join(tmpDir, "types.ts.ail");
+    it("resolves dependency with .js extension to .ts.aice or .aice in side-by-side mode", async () => {
+      const typesPath = path.join(tmpDir, "types.ts.aice");
       fs.writeFileSync(
         typesPath,
         `
@@ -112,7 +112,7 @@ pub enum Role:
         "utf-8",
       );
 
-      const consumerPath = path.join(tmpDir, "consumer.ail");
+      const consumerPath = path.join(tmpDir, "consumer.aice");
       fs.writeFileSync(
         consumerPath,
         `
@@ -127,7 +127,7 @@ pub fn getUserName(u: User) -> str:
       const res = await generateContext(consumerPath, { projectRoot: tmpDir });
       expect(res.dependencies).toHaveLength(1);
       expect(res.dependencies[0].specifier).toBe("./types.js");
-      expect(res.dependencies[0].resolvedPath).toBe("types.ts.ail");
+      expect(res.dependencies[0].resolvedPath).toBe("types.ts.aice");
       expect(res.dependencies[0].isExternal).toBe(false);
       expect(res.dependencies[0].contract).toContain("type User:");
       expect(res.dependencies[0].contract).toContain("id: str");
@@ -142,7 +142,7 @@ pub fn getUserName(u: User) -> str:
 
   describe("External Library Imports", () => {
     it("categorizes node:* and external packages properly", async () => {
-      const extFile = path.join(tmpDir, "external_test.ail");
+      const extFile = path.join(tmpDir, "external_test.aice");
       fs.writeFileSync(
         extFile,
         `
@@ -192,10 +192,10 @@ pub fn getPath():
 
   describe("Recursive Dependency Traversal with Depth and Cycle Protection", () => {
     it("limits discovery to depth 1 by default", async () => {
-      const cPath = path.join(tmpDir, "c.ail");
+      const cPath = path.join(tmpDir, "c.aice");
       fs.writeFileSync(cPath, `pub fn funcC() -> int: ret 3\n`, "utf-8");
 
-      const bPath = path.join(tmpDir, "b.ail");
+      const bPath = path.join(tmpDir, "b.aice");
       fs.writeFileSync(
         bPath,
         `
@@ -205,7 +205,7 @@ pub fn funcB() -> int: ret funcC()
         "utf-8",
       );
 
-      const aPath = path.join(tmpDir, "a.ail");
+      const aPath = path.join(tmpDir, "a.aice");
       fs.writeFileSync(
         aPath,
         `
@@ -226,9 +226,9 @@ pub fn funcA() -> int: ret funcB()
     });
 
     it("prevents infinite loops when dependencies have circular references", async () => {
-      const loopAPath = path.join(tmpDir, "loopA.ail");
-      const loopBPath = path.join(tmpDir, "loopB.ail");
-      const loopCPath = path.join(tmpDir, "loopC.ail");
+      const loopAPath = path.join(tmpDir, "loopA.aice");
+      const loopBPath = path.join(tmpDir, "loopB.aice");
+      const loopCPath = path.join(tmpDir, "loopC.aice");
 
       fs.writeFileSync(
         loopAPath,
@@ -263,13 +263,13 @@ pub fn funcC() -> int: ret funcA()
       // Should contain loopB and loopC without infinitely duplicating loopA
       expect(res.dependencies).toHaveLength(2);
       expect(res.dependencies.map((d) => d.specifier)).toEqual(["./loopB", "./loopC"]);
-      expect(res.dependencies.find((d) => d.resolvedPath === "loopA.ail")).toBeUndefined();
+      expect(res.dependencies.find((d) => d.resolvedPath === "loopA.aice")).toBeUndefined();
     });
   });
 
   describe("Caller Discovery Across Sibling Workspace Files", () => {
     it("discovers downstream callers and their imported symbols across workspace", async () => {
-      const mathPath = path.join(tmpDir, "math.ail");
+      const mathPath = path.join(tmpDir, "math.aice");
       fs.writeFileSync(
         mathPath,
         `
@@ -279,7 +279,7 @@ pub fn sub(a: int, b: int) -> int: ret a - b
         "utf-8",
       );
 
-      const calcPath = path.join(tmpDir, "calc.ail");
+      const calcPath = path.join(tmpDir, "calc.aice");
       fs.writeFileSync(
         calcPath,
         `from "./math" import { add }
@@ -288,7 +288,7 @@ pub fn calc(): ret add(1, 2)
         "utf-8",
       );
 
-      const servicePath = path.join(tmpDir, "service.ail");
+      const servicePath = path.join(tmpDir, "service.aice");
       fs.writeFileSync(
         servicePath,
         `from "./math" import { add, sub }
@@ -297,7 +297,7 @@ pub fn doService(): ret sub(5, 2)
         "utf-8",
       );
 
-      const unrelatedPath = path.join(tmpDir, "unrelated.ail");
+      const unrelatedPath = path.join(tmpDir, "unrelated.aice");
       fs.writeFileSync(unrelatedPath, `pub fn unrelated(): ret 123\n`, "utf-8");
 
       const res = await generateContext(mathPath, {
@@ -306,26 +306,26 @@ pub fn doService(): ret sub(5, 2)
       });
 
       expect(res.callers).toHaveLength(2);
-      expect(res.callers.map((c) => c.filePath)).toEqual(["calc.ail", "service.ail"]);
+      expect(res.callers.map((c) => c.filePath)).toEqual(["calc.aice", "service.aice"]);
 
-      const calcCaller = res.callers.find((c) => c.filePath === "calc.ail");
+      const calcCaller = res.callers.find((c) => c.filePath === "calc.aice");
       expect(calcCaller?.importedSymbols).toEqual(["add"]);
       expect(calcCaller?.line).toBe(1);
 
-      const serviceCaller = res.callers.find((c) => c.filePath === "service.ail");
+      const serviceCaller = res.callers.find((c) => c.filePath === "service.aice");
       expect(serviceCaller?.importedSymbols).toEqual(["add", "sub"]);
       expect(serviceCaller?.line).toBe(1);
 
       expect(res.formattedBundle).toContain("## Downstream Callers (2):");
-      expect(res.formattedBundle).toContain("- `calc.ail` imports: `add`");
-      expect(res.formattedBundle).toContain("- `service.ail` imports: `add, sub`");
+      expect(res.formattedBundle).toContain("- `calc.aice` imports: `add`");
+      expect(res.formattedBundle).toContain("- `service.aice` imports: `add, sub`");
     });
 
     it("skips caller lookup when includeCallers is false", async () => {
-      const mathPath = path.join(tmpDir, "math.ail");
+      const mathPath = path.join(tmpDir, "math.aice");
       fs.writeFileSync(mathPath, `pub fn add(a: int, b: int) -> int: ret a + b\n`, "utf-8");
 
-      const calcPath = path.join(tmpDir, "calc.ail");
+      const calcPath = path.join(tmpDir, "calc.aice");
       fs.writeFileSync(
         calcPath,
         `from "./math" import { add }\npub fn calc(): ret add(1, 2)\n`,
@@ -345,7 +345,7 @@ pub fn doService(): ret sub(5, 2)
 
   describe("Target Outline Mode (--outline-target)", () => {
     it("emits concise AST skeleton outline instead of full source when outlineTarget is true", async () => {
-      const targetPath = path.join(tmpDir, "heavy.ail");
+      const targetPath = path.join(tmpDir, "heavy.aice");
       fs.writeFileSync(
         targetPath,
         `
@@ -381,7 +381,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
 
   describe("Token Estimation & MaxTokens Bounding", () => {
     it("computes accurate token count and bounds context when maxTokens is specified", async () => {
-      const targetPath = path.join(tmpDir, "large.ail");
+      const targetPath = path.join(tmpDir, "large.aice");
       const lines = [
         "pub fn bigFunction():",
         ...Array.from({ length: 150 }, (_, i) => `  val line${i} = ${i} * 2`),
@@ -412,7 +412,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
 
   describe("JSON Output Format", () => {
     it("outputs valid structured JSON bundle", async () => {
-      const targetPath = path.join(tmpDir, "simple.ail");
+      const targetPath = path.join(tmpDir, "simple.aice");
       fs.writeFileSync(targetPath, `pub fn simple(): ret 1\n`, "utf-8");
 
       const res = await generateContext(targetPath, {
@@ -429,7 +429,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
 
       const jsonStr = JSON.stringify(res);
       const parsed = JSON.parse(jsonStr);
-      expect(parsed.targetPath).toBe("simple.ail");
+      expect(parsed.targetPath).toBe("simple.aice");
     });
   });
 
@@ -449,10 +449,10 @@ pub fn calculateMetrics(x: int, y: int) -> int:
     });
 
     it("executes CLI context packaging command with stdout capture", async () => {
-      const depPath = path.join(tmpDir, "cli_dep.ail");
+      const depPath = path.join(tmpDir, "cli_dep.aice");
       fs.writeFileSync(depPath, `pub fn add(a: int, b: int) -> int: ret a + b\n`, "utf-8");
 
-      const mainPath = path.join(tmpDir, "cli_main.ail");
+      const mainPath = path.join(tmpDir, "cli_main.aice");
       fs.writeFileSync(
         mainPath,
         `from "./cli_dep" import { add }\npub fn run(): ret add(1, 2)\n`,
@@ -468,7 +468,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       try {
         await program.parseAsync([
           "node",
-          "ail",
+          "aice",
           "context",
           mainPath,
           "--depth",
@@ -480,13 +480,13 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       }
 
       const output = logs.join("\n");
-      expect(output).toContain("# AIL Context Pack:");
+      expect(output).toContain("# AICE Context Pack:");
       expect(output).toContain("### Dependency: `./cli_dep`");
       expect(output).toContain("pub fn add(a: int, b: int) -> int: ...");
     });
 
     it("executes CLI context packaging with --json flag", async () => {
-      const mainPath = path.join(tmpDir, "cli_json.ail");
+      const mainPath = path.join(tmpDir, "cli_json.aice");
       fs.writeFileSync(mainPath, `pub fn ping(): ret "pong"\n`, "utf-8");
 
       const logs: string[] = [];
@@ -496,7 +496,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       };
 
       try {
-        await program.parseAsync(["node", "ail", "context", mainPath, "--json"]);
+        await program.parseAsync(["node", "aice", "context", mainPath, "--json"]);
       } finally {
         console.log = origLog;
       }
@@ -509,7 +509,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
     });
 
     it("executes CLI context packaging with --stats flag", async () => {
-      const mainPath = path.join(tmpDir, "cli_stats.ail");
+      const mainPath = path.join(tmpDir, "cli_stats.aice");
       fs.writeFileSync(mainPath, `pub fn statsFn(): ret 42\n`, "utf-8");
 
       const logs: string[] = [];
@@ -519,7 +519,7 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       };
 
       try {
-        await program.parseAsync(["node", "ail", "context", mainPath, "--stats"]);
+        await program.parseAsync(["node", "aice", "context", mainPath, "--stats"]);
       } finally {
         console.log = origLog;
       }

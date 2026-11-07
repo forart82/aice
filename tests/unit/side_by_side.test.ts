@@ -15,11 +15,11 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { checkAiShieldStatus, isTargetLocked } from "../../src/shield/index.js";
-import { type AilWatcher, watchProject } from "../../src/watcher/index.js";
+import { type AiceWatcher, watchProject } from "../../src/watcher/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -46,10 +46,10 @@ async function waitFor(predicate: () => boolean, timeoutMs = 3000, intervalMs = 
 
 describe("Step 7: Side-by-Side Architecture & CLI Ergonomics End-to-End", () => {
   let testDir: string;
-  let activeWatcher: AilWatcher | null = null;
+  let activeWatcher: AiceWatcher | null = null;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-sbs-e2e-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-sbs-e2e-"));
     activeWatcher = null;
 
     // Create nested workspace structure
@@ -91,7 +91,7 @@ body {
 <!DOCTYPE html>
 <html>
   <head>
-    <title>AIL E2E Test</title>
+    <title>AICE E2E Test</title>
   </head>
   <body>
     <h1>Hello World</h1>
@@ -133,33 +133,33 @@ body {
     }
   });
 
-  it("executes complete lifecycle: adopt -> lock -> AI modifies .ail -> watch recompile -> eject", async () => {
+  it("executes complete lifecycle: adopt -> lock -> AI modifies .aice -> watch recompile -> eject", async () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
-    const calcTrivia = path.join(testDir, "src", "math", "calculator.ts.ail.trivia.json");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
+    const calcTrivia = path.join(testDir, "src", "math", "calculator.ts.aice.trivia.json");
 
     const themeCss = path.join(testDir, "styles", "theme.css");
-    const themeAil = path.join(testDir, "styles", "theme.css.ail");
-    const themeTrivia = path.join(testDir, "styles", "theme.css.ail.trivia.json");
+    const themeAice = path.join(testDir, "styles", "theme.css.aice");
+    const themeTrivia = path.join(testDir, "styles", "theme.css.aice.trivia.json");
 
     const indexHtml = path.join(testDir, "public", "index.html");
-    const indexAil = path.join(testDir, "public", "index.html.ail");
-    const indexTrivia = path.join(testDir, "public", "index.html.ail.trivia.json");
+    const indexAice = path.join(testDir, "public", "index.html.aice");
+    const indexTrivia = path.join(testDir, "public", "index.html.aice.trivia.json");
 
-    // PHASE 1: ail adopt [dir]
+    // PHASE 1: aice adopt [dir]
     const adoptRes = runCli(["adopt", testDir]);
     expect(adoptRes.status).toBe(0);
-    expect(adoptRes.stdout).toContain("AIL Side-by-Side Adoption Summary");
+    expect(adoptRes.stdout).toContain("AICE Side-by-Side Adoption Summary");
     expect(adoptRes.stdout).toContain("3 ingested");
     expect(adoptRes.stdout).toContain("AI Shield:           ✔ Active");
     expect(adoptRes.stdout).toContain("Permission Locks:    ✔ 3 target file(s) locked");
 
-    // 1. Sibling .ail files exist, .trivia.json files do NOT exist
-    expect(fs.existsSync(calcAil)).toBe(true);
+    // 1. Sibling .aice files exist, .trivia.json files do NOT exist
+    expect(fs.existsSync(calcAice)).toBe(true);
     expect(fs.existsSync(calcTrivia)).toBe(false);
-    expect(fs.existsSync(themeAil)).toBe(true);
+    expect(fs.existsSync(themeAice)).toBe(true);
     expect(fs.existsSync(themeTrivia)).toBe(false);
-    expect(fs.existsSync(indexAil)).toBe(true);
+    expect(fs.existsSync(indexAice)).toBe(true);
     expect(fs.existsSync(indexTrivia)).toBe(false);
 
     // 2. AI Shield files generated
@@ -167,7 +167,7 @@ body {
     expect(fs.existsSync(settingsPath)).toBe(true);
     const settingsContent = fs.readFileSync(settingsPath, "utf-8");
     expect(settingsContent).toContain("files.exclude");
-    expect(settingsContent).toContain("$(basename).ts.ail");
+    expect(settingsContent).toContain("$(basename).ts.aice");
 
     expect(fs.existsSync(path.join(testDir, ".cursorignore"))).toBe(true);
     expect(fs.existsSync(path.join(testDir, ".geminiignore"))).toBe(true);
@@ -196,25 +196,25 @@ body {
       fs.writeFileSync(themeCss, "/* direct edit */", "utf-8");
     }).toThrow();
 
-    // PHASE 2: AI Modifies .ail Source & Watch Daemon Recompiles
+    // PHASE 2: AI Modifies .aice Source & Watch Daemon Recompiles
     let compileSuccess = false;
-    let compiledAil = "";
+    let compiledAice = "";
     let compiledTarget = "";
 
     activeWatcher = await watchProject(testDir, {
       debounceMs: 25,
       lockTargets: true,
-      onCompileSuccess: (ail, target) => {
+      onCompileSuccess: (aice, target) => {
         compileSuccess = true;
-        compiledAil = ail;
+        compiledAice = aice;
         compiledTarget = target;
       },
     });
 
     expect(activeWatcher.isWatching()).toBe(true);
 
-    // Simulate AI modifying calculator.ts.ail by appending a new function: multiply
-    const updatedAilSource = `module source
+    // Simulate AI modifying calculator.ts.aice by appending a new function: multiply
+    const updatedAiceSource = `module source
 
 fn add(a:int, b:int) -> int = a + b
 
@@ -222,10 +222,10 @@ fn subtract(a:int, b:int) -> int = a - b
 
 fn multiply(a:int, b:int) -> int = a * b
 `;
-    fs.writeFileSync(calcAil, updatedAilSource, "utf-8");
+    fs.writeFileSync(calcAice, updatedAiceSource, "utf-8");
 
     await waitFor(() => compileSuccess);
-    expect(compiledAil).toBe(path.resolve(calcAil));
+    expect(compiledAice).toBe(path.resolve(calcAice));
     expect(compiledTarget).toBe(path.resolve(calcTs));
 
     // Target file now contains reconstructed code with multiply
@@ -238,13 +238,13 @@ fn multiply(a:int, b:int) -> int = a * b
     await activeWatcher.stop();
     activeWatcher = null;
 
-    // PHASE 3: ail eject [dir]
+    // PHASE 3: aice eject [dir]
     const ejectRes = runCli(["eject", testDir]);
     expect(ejectRes.status).toBe(0);
-    expect(ejectRes.stdout).toContain("AIL Eject Complete");
+    expect(ejectRes.stdout).toContain("AICE Eject Complete");
     expect(ejectRes.stdout).toContain("3 file(s) restored to chmod 644");
     expect(ejectRes.stdout).toContain("AI Shield:           Reverted");
-    expect(ejectRes.stdout).toContain("AIL Source Files:    Preserved on disk");
+    expect(ejectRes.stdout).toContain("AICE Source Files:    Preserved on disk");
 
     // 1. Target files are unlocked (chmod 644) and writable
     expect(isTargetLocked(calcTs)).toBe(false);
@@ -262,44 +262,44 @@ fn multiply(a:int, b:int) -> int = a * b
     expect(fs.existsSync(path.join(testDir, ".geminiignore"))).toBe(false);
     expect(fs.existsSync(path.join(testDir, "AGENTS.md"))).toBe(false);
 
-    // 3. .ail files still exist because --remove-ail was not passed
-    expect(fs.existsSync(calcAil)).toBe(true);
+    // 3. .aice files still exist because --remove-aice was not passed
+    expect(fs.existsSync(calcAice)).toBe(true);
     expect(fs.existsSync(calcTrivia)).toBe(false);
   });
 
-  it("eject --remove-ail deletes .ail files while unlocking targets", async () => {
+  it("eject --remove-aice deletes .aice files while unlocking targets", async () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
-    const calcTrivia = path.join(testDir, "src", "math", "calculator.ts.ail.trivia.json");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
+    const calcTrivia = path.join(testDir, "src", "math", "calculator.ts.aice.trivia.json");
 
     // Adopt first
     const adoptRes = runCli(["adopt", testDir]);
     expect(adoptRes.status).toBe(0);
-    expect(fs.existsSync(calcAil)).toBe(true);
+    expect(fs.existsSync(calcAice)).toBe(true);
     expect(fs.existsSync(calcTrivia)).toBe(false);
     expect(isTargetLocked(calcTs)).toBe(true);
 
-    // Eject with --remove-ail
-    const ejectRes = runCli(["eject", testDir, "--remove-ail"]);
+    // Eject with --remove-aice
+    const ejectRes = runCli(["eject", testDir, "--remove-aice"]);
     expect(ejectRes.status).toBe(0);
-    expect(ejectRes.stdout).toContain("Deleted 3 .ail files");
+    expect(ejectRes.stdout).toContain("Deleted 3 .aice files");
 
     // Targets unlocked
     expect(isTargetLocked(calcTs)).toBe(false);
 
-    // .ail deleted
-    expect(fs.existsSync(calcAil)).toBe(false);
+    // .aice deleted
+    expect(fs.existsSync(calcAice)).toBe(false);
     expect(fs.existsSync(calcTrivia)).toBe(false);
-    expect(fs.existsSync(path.join(testDir, "styles", "theme.css.ail"))).toBe(false);
-    expect(fs.existsSync(path.join(testDir, "public", "index.html.ail"))).toBe(false);
+    expect(fs.existsSync(path.join(testDir, "styles", "theme.css.aice"))).toBe(false);
+    expect(fs.existsSync(path.join(testDir, "public", "index.html.aice"))).toBe(false);
 
     // Original target files remain intact
     expect(fs.existsSync(calcTs)).toBe(true);
   });
 
-  it("adopt --dry-run calculates metrics without creating .ail files or locking targets", () => {
+  it("adopt --dry-run calculates metrics without creating .aice files or locking targets", () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
 
     const dryRes = runCli(["adopt", testDir, "--dry-run"]);
     expect(dryRes.status).toBe(0);
@@ -308,7 +308,7 @@ fn multiply(a:int, b:int) -> int = a * b
     expect(dryRes.stdout).toContain("Permission Locks:    💡 Simulated (--dry-run)");
 
     // No files created
-    expect(fs.existsSync(calcAil)).toBe(false);
+    expect(fs.existsSync(calcAice)).toBe(false);
     expect(fs.existsSync(path.join(testDir, ".cursorignore"))).toBe(false);
     expect(fs.existsSync(path.join(testDir, "AGENTS.md"))).toBe(false);
 
@@ -318,15 +318,15 @@ fn multiply(a:int, b:int) -> int = a * b
 
   it("adopt --no-shield skips AI shield generation while locking targets", async () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
 
     const adoptRes = runCli(["adopt", testDir, "--no-shield"]);
     expect(adoptRes.status).toBe(0);
     expect(adoptRes.stdout).toContain("AI Shield:           ⊘ Skipped (--no-shield)");
     expect(adoptRes.stdout).toContain("Permission Locks:    ✔ 3 target file(s) locked");
 
-    // .ail exists and target is locked
-    expect(fs.existsSync(calcAil)).toBe(true);
+    // .aice exists and target is locked
+    expect(fs.existsSync(calcAice)).toBe(true);
     expect(isTargetLocked(calcTs)).toBe(true);
 
     // No shield files
@@ -340,14 +340,14 @@ fn multiply(a:int, b:int) -> int = a * b
 
   it("adopt --no-lock leaves target files writable", () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
 
     const adoptRes = runCli(["adopt", testDir, "--no-lock"]);
     expect(adoptRes.status).toBe(0);
     expect(adoptRes.stdout).toContain("Permission Locks:    ⊘ Skipped (--no-lock)");
 
-    // .ail exists
-    expect(fs.existsSync(calcAil)).toBe(true);
+    // .aice exists
+    expect(fs.existsSync(calcAice)).toBe(true);
 
     // Target remains writable
     expect(isTargetLocked(calcTs)).toBe(false);
@@ -356,28 +356,28 @@ fn multiply(a:int, b:int) -> int = a * b
     }).not.toThrow();
   });
 
-  it("adopt --overwrite re-decompiles files even if .ail exists", () => {
+  it("adopt --overwrite re-decompiles files even if .aice exists", () => {
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
 
     // Initial adopt
     runCli(["adopt", testDir]);
     expect(fs.existsSync(calcTs)).toBe(true);
-    expect(fs.existsSync(calcAil)).toBe(true);
+    expect(fs.existsSync(calcAice)).toBe(true);
 
-    // Overwrite .ail with dummy content
-    fs.writeFileSync(calcAil, "# dummy content\n", "utf-8");
+    // Overwrite .aice with dummy content
+    fs.writeFileSync(calcAice, "# dummy content\n", "utf-8");
 
     // Adopt without --overwrite: skips existing
     const skipRes = runCli(["adopt", testDir]);
     expect(skipRes.stdout).toContain("0 ingested, 3 skipped");
-    expect(fs.readFileSync(calcAil, "utf-8")).toBe("# dummy content\n");
+    expect(fs.readFileSync(calcAice, "utf-8")).toBe("# dummy content\n");
 
     // Adopt with --overwrite: forces re-decompilation
     const overwriteRes = runCli(["adopt", testDir, "--overwrite"]);
     expect(overwriteRes.stdout).toContain("3 ingested, 0 skipped");
-    expect(fs.readFileSync(calcAil, "utf-8")).not.toBe("# dummy content\n");
-    expect(fs.readFileSync(calcAil, "utf-8")).toContain("fn add");
+    expect(fs.readFileSync(calcAice, "utf-8")).not.toBe("# dummy content\n");
+    expect(fs.readFileSync(calcAice, "utf-8")).toContain("fn add");
   });
 
   it("manages shields via fine-grained shield subcommands: status, lock, unlock, remove, apply", async () => {
@@ -425,14 +425,14 @@ fn multiply(a:int, b:int) -> int = a * b
   it("supports custom concurrency flag -c 2 during adoption", () => {
     const adoptRes = runCli(["adopt", testDir, "-c", "2"]);
     expect(adoptRes.status).toBe(0);
-    expect(adoptRes.stdout).toContain("AIL Side-by-Side Adoption Summary");
+    expect(adoptRes.stdout).toContain("AICE Side-by-Side Adoption Summary");
     expect(adoptRes.stdout).toContain("3 ingested");
   });
 
   it("supports watch daemon with lockTargets: false leaving target files writable", async () => {
     runCli(["adopt", testDir, "--no-lock"]);
     const calcTs = path.join(testDir, "src", "math", "calculator.ts");
-    const calcAil = path.join(testDir, "src", "math", "calculator.ts.ail");
+    const calcAice = path.join(testDir, "src", "math", "calculator.ts.aice");
 
     let compiled = false;
     activeWatcher = await watchProject(testDir, {
@@ -443,8 +443,8 @@ fn multiply(a:int, b:int) -> int = a * b
       },
     });
 
-    const newAil = `module source\n\nfn add(a:int, b:int) -> int = a + b + 10\n`;
-    fs.writeFileSync(calcAil, newAil, "utf-8");
+    const newAice = `module source\n\nfn add(a:int, b:int) -> int = a + b + 10\n`;
+    fs.writeFileSync(calcAice, newAice, "utf-8");
 
     await waitFor(() => compiled);
     expect(isTargetLocked(calcTs)).toBe(false);
@@ -455,7 +455,7 @@ fn multiply(a:int, b:int) -> int = a * b
   });
 
   it("exports program with adopt, watch, eject, and shield registered commands for programmatic invocation", async () => {
-    const { program } = await import("../../bin/ail.ts");
+    const { program } = await import("../../bin/aice.ts");
     expect(program).toBeDefined();
     const commandNames = program.commands.map((c) => c.name());
     expect(commandNames).toContain("adopt");

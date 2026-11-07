@@ -14,16 +14,16 @@ import {
   DOGFOOD_COMPILER_FILES,
   findCorpusFiles,
   FUZZ_TARGET_LANGUAGES,
-  generateFuzzAilProgram,
-  generateHallucinatedAilProgram,
-  generateRecursiveAilProgram,
+  generateFuzzAiceProgram,
+  generateHallucinatedAiceProgram,
+  generateRecursiveAiceProgram,
   mulberry32,
   runEvolutionCycle,
   runEvolutionLoop,
   runEvolutionLoopSync,
   runSelfHealingCampaign,
   runSelfHealingCampaignSync,
-  shrinkFailingAilSource,
+  shrinkFailingAiceSource,
 } from "../../src/evolve/index.js";
 
 describe("Autonomous Evolution & Self-Healing Engine (src/evolve)", () => {
@@ -38,7 +38,7 @@ describe("Autonomous Evolution & Self-Healing Engine (src/evolve)", () => {
       expect(seq1.every((n) => n >= 0 && n < 1)).toBe(true);
     });
 
-    it("generates valid AIL fuzz programs spanning target languages and 12 archetypes", () => {
+    it("generates valid AICE fuzz programs spanning target languages and 12 archetypes", () => {
       const targetsCovered = new Set<string>();
       let hasMatch = false;
       let hasForLoop = false;
@@ -48,18 +48,18 @@ describe("Autonomous Evolution & Self-Healing Engine (src/evolve)", () => {
       let hasWhileNestedIf = false;
 
       for (let seed = 1000; seed < 1100; seed++) {
-        const prog = generateFuzzAilProgram(seed);
+        const prog = generateFuzzAiceProgram(seed);
         expect(prog.name).toBeTruthy();
-        expect(prog.ailSource.length).toBeGreaterThan(20);
+        expect(prog.aiceSource.length).toBeGreaterThan(20);
         expect(FUZZ_TARGET_LANGUAGES).toContain(prog.target);
         targetsCovered.add(prog.target);
 
-        if (prog.ailSource.includes("match c:")) hasMatch = true;
-        if (prog.ailSource.includes("for item in items:")) hasForLoop = true;
-        if (prog.ailSource.includes(".startsWith(") || prog.ailSource.includes(".trim()")) hasStringCsl = true;
-        if (prog.ailSource.includes("Option[int]") || prog.ailSource.includes("Result[int, str]")) hasOptionResult = true;
-        if (prog.ailSource.includes("checkBoundsA")) hasMultiParamIdiom = true;
-        if (prog.ailSource.includes("while i < lim:") && prog.ailSource.includes("+=")) hasWhileNestedIf = true;
+        if (prog.aiceSource.includes("match c:")) hasMatch = true;
+        if (prog.aiceSource.includes("for item in items:")) hasForLoop = true;
+        if (prog.aiceSource.includes(".startsWith(") || prog.aiceSource.includes(".trim()")) hasStringCsl = true;
+        if (prog.aiceSource.includes("Option[int]") || prog.aiceSource.includes("Result[int, str]")) hasOptionResult = true;
+        if (prog.aiceSource.includes("checkBoundsA")) hasMultiParamIdiom = true;
+        if (prog.aiceSource.includes("while i < lim:") && prog.aiceSource.includes("+=")) hasWhileNestedIf = true;
       }
 
       // Should cover all 9 target languages across multiple seeds
@@ -80,9 +80,9 @@ describe("Autonomous Evolution & Self-Healing Engine (src/evolve)", () => {
       const faultKinds = new Set<string>();
 
       for (let seed = 0; seed < 40; seed++) {
-        const broken = generateHallucinatedAilProgram(seed);
+        const broken = generateHallucinatedAiceProgram(seed);
         expect(broken.name).toBeTruthy();
-        expect(broken.brokenAilSource.length).toBeGreaterThan(10);
+        expect(broken.brokenAiceSource.length).toBeGreaterThan(10);
         expect(broken.faultKind).toBeTruthy();
         faultKinds.add(broken.faultKind);
       }
@@ -117,7 +117,7 @@ fn e() = 50;
 fn f() = 60;
 `;
 
-      const shrunk = shrinkFailingAilSource(source, (cand) =>
+      const shrunk = shrinkFailingAiceSource(source, (cand) =>
         cand.includes("100 / 0"),
       );
 
@@ -129,7 +129,7 @@ fn f() = 60;
 
     it("returns original source if predicate is already false", () => {
       const source = "fn ok() = 42;";
-      const shrunk = shrinkFailingAilSource(source, () => false);
+      const shrunk = shrinkFailingAiceSource(source, () => false);
       expect(shrunk).toBe(source);
     });
   });
@@ -228,10 +228,10 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("prevents runaway .to_string().to_string() accumulation in Rust decompiler", () => {
-      const ail = `pub fn greet(name: str) -> str:
+      const aice = `pub fn greet(name: str) -> str:
   return name
 `;
-      const mod = parse(ail, "test_rs.ail");
+      const mod = parse(aice, "test_rs.aice");
       const t1 = emitTarget(mod, "rust", { watermark: false });
       const d1 = decompile(t1, "rust");
       const t2 = emitTarget(d1.ast, "rust", { watermark: false });
@@ -243,10 +243,10 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("prevents duplicate nullable question marks in Kotlin emitter (Int?? -> Int?)", () => {
-      const ail = `class OptionalPayload(optCount?: int?):
+      const aice = `class OptionalPayload(optCount?: int?):
   pass
 `;
-      const mod = parse(ail, "test_kt.ail");
+      const mod = parse(aice, "test_kt.aice");
       const kt = emitTarget(mod, "kotlin", { watermark: false });
 
       expect(kt).not.toContain("??");
@@ -254,10 +254,10 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("prevents nested std::string(...) wrappers in C++ decompiler", () => {
-      const ail = `pub fn formatPrefix(s: str) -> str:
+      const aice = `pub fn formatPrefix(s: str) -> str:
   return "prefix_" + s
 `;
-      const mod = parse(ail, "test_cpp.ail");
+      const mod = parse(aice, "test_cpp.aice");
       const t1 = emitTarget(mod, "cpp", { watermark: false });
       const d1 = decompile(t1, "cpp");
       const t2 = emitTarget(d1.ast, "cpp", { watermark: false });
@@ -269,11 +269,11 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("emits clean Python TypedDict class without __init__ method per PEP 589", () => {
-      const ail = `class UserProfile extends TypedDict:
+      const aice = `class UserProfile extends TypedDict:
   name: str
   age: int
 `;
-      const mod = parse(ail, "test_py.ail");
+      const mod = parse(aice, "test_py.aice");
       const py = emitTarget(mod, "python", { watermark: false });
 
       expect(py).toContain("class UserProfile(TypedDict):");
@@ -283,10 +283,10 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("prevents prepending return to PHP unset statements", () => {
-      const ail = `pub fn cleanup(key: str):
+      const aice = `pub fn cleanup(key: str):
   unset(key)
 `;
-      const mod = parse(ail, "test_php.ail");
+      const mod = parse(aice, "test_php.aice");
       const php = emitTarget(mod, "php", { watermark: false });
 
       expect(php).not.toContain("return unset(");
@@ -294,14 +294,14 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("emits and converges clean PHP match expressions", () => {
-      const ail = `pub fn evalScore(s: int) -> int:
+      const aice = `pub fn evalScore(s: int) -> int:
   match s:
     case 1 =>
       return 10
     case _ =>
       return 0
 `;
-      const mod = parse(ail, "test_php_match.ail");
+      const mod = parse(aice, "test_php_match.aice");
       const php = emitTarget(mod, "php", { watermark: false });
       expect(php).toContain("match ($s)");
       const d1 = decompile(php, "php");
@@ -316,15 +316,15 @@ func MakeConfig(h string, p int64) Config {
   describe("Level-2 Ultra-Complex Evolution & Runtime Equivalence Engine", () => {
     it("generates deeply recursive combinator programs with computeMain entry", () => {
       for (const seed of [1, 3, 5, 7, 9, 11]) {
-        const prog = generateRecursiveAilProgram(seed, 3);
+        const prog = generateRecursiveAiceProgram(seed, 3);
         expect(prog.name).toBe(`fuzz_recursive_${seed}`);
-        expect(prog.ailSource).toContain("pub fn computeMain(x: int, y: int) -> int");
-        expect(prog.ailSource).toContain("class Acc");
-        expect(prog.ailSource).toContain("pub fn stepA");
-        expect(prog.ailSource).toContain("pub fn stepB");
+        expect(prog.aiceSource).toContain("pub fn computeMain(x: int, y: int) -> int");
+        expect(prog.aiceSource).toContain("class Acc");
+        expect(prog.aiceSource).toContain("pub fn stepA");
+        expect(prog.aiceSource).toContain("pub fn stepB");
         expect(prog.entryCallExpr).toBe("computeMain(x, y)");
 
-        const mod = parse(prog.ailSource, prog.name);
+        const mod = parse(prog.aiceSource, prog.name);
         expect(mod.items.length).toBeGreaterThanOrEqual(4);
       }
     });
@@ -346,13 +346,13 @@ func MakeConfig(h string, p int64) Config {
     });
 
     it("converges C++ and C# range-based for loops over initializer lists without drift", () => {
-      const ail = `pub fn computeMain(x: int, y: int) -> int:
+      const aice = `pub fn computeMain(x: int, y: int) -> int:
   let mut total: int = y
   for item in [1, 2, 3]:
     total = total + item
   return total
 `;
-      const mod = parse(ail, "loop_test.ail");
+      const mod = parse(aice, "loop_test.aice");
 
       // C++ roundtrip verification
       const cpp1 = emitTarget(mod, "cpp", { watermark: false });

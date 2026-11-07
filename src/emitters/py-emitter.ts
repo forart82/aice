@@ -78,9 +78,9 @@ export class PythonEmitter {
       if (item.kind === "ImportDecl") {
         const importSrc = item.source;
         const candidateNames = [
-          importSrc.replace(/\.[a-zA-Z]+$/, ".ail"),
-          importSrc.replace(/\.[a-zA-Z]+$/, ".py.ail"),
-          importSrc.replace(/\.[a-zA-Z]+$/, ".ts.ail"),
+          importSrc.replace(/\.[a-zA-Z]+$/, ".aice"),
+          importSrc.replace(/\.[a-zA-Z]+$/, ".py.aice"),
+          importSrc.replace(/\.[a-zA-Z]+$/, ".ts.aice"),
           importSrc,
         ];
         for (const cand of candidateNames) {
@@ -299,7 +299,7 @@ export class PythonEmitter {
       this.ctx.writeLine(slice.trim());
       return;
     }
-    let modName = imp.source.replace(/\.(py|ts|js|ail)$/, "");
+    let modName = imp.source.replace(/\.(py|ts|js|aice)$/, "");
     if (modName.startsWith("./")) {
       modName = "." + modName.slice(2).replace(/\//g, ".");
     } else if (modName.startsWith("../")) {

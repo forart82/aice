@@ -4,7 +4,7 @@
  *
  * Phase 3 Test Suite: Content-Addressed AST Cache & Real-World Companion Idioms Trial.
  * Verifies:
- * 1. In-memory and disk AST cache hit/miss/invalidation and round-trip persistence (.ail-cache/ast-cache.json).
+ * 1. In-memory and disk AST cache hit/miss/invalidation and round-trip persistence (.aice-cache/ast-cache.json).
  * 2. Cross-file TypeChecker cache invalidation on disk modification via content-hash keys.
  * 3. End-to-end multi-file companion mode trial with idiom synthesis, cross-file typechecking,
  *    external target edits + reverse sync, and tokenomics auditing.
@@ -15,7 +15,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  AilAstCache,
+  AiceAstCache,
   clearAstCache,
   computeSourceHash,
   getAstCacheStats,
@@ -29,13 +29,13 @@ import { loadProjectConfig } from "../../src/config/project-config.js";
 import { auditTokenomics } from "../../src/tokenomics/index.js";
 import { ingestProjectSideBySide } from "../../src/transpiler/parallel-ingest.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
-import { syncProjectFromTargets } from "../../src/watcher/ail-watch.js";
+import { syncProjectFromTargets } from "../../src/watcher/aice-watch.js";
 
 describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-phase3-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-phase3-test-"));
     clearAstCache();
   });
 
@@ -65,7 +65,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("tracks cache misses and hits with parseCached", () => {
       const source = "let x: int = 42;";
-      const filePath = path.join(tmpDir, "demo.ail");
+      const filePath = path.join(tmpDir, "demo.aice");
 
       expect(hasCached(source, filePath)).toBe(false);
 
@@ -91,7 +91,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("bypasses cache when bypassCache option is true", () => {
       const source = "let y: int = 100;";
-      const filePath = path.join(tmpDir, "bypass.ail");
+      const filePath = path.join(tmpDir, "bypass.aice");
 
       parseCached(source, filePath, { bypassCache: true });
       expect(hasCached(source, filePath)).toBe(false);
@@ -104,7 +104,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("protects cached AST against external mutations by default (clone: true)", () => {
       const source = "let count: int = 0;";
-      const filePath = path.join(tmpDir, "mutate.ail");
+      const filePath = path.join(tmpDir, "mutate.aice");
 
       const ast1 = parseCached(source, filePath);
       expect(ast1.items.length).toBe(1);
@@ -120,7 +120,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("allows bypassing clone via clone: false for high-throughput callers", () => {
       const source = "let z: int = 99;";
-      const filePath = path.join(tmpDir, "fast.ail");
+      const filePath = path.join(tmpDir, "fast.aice");
 
       const ast1 = parseCached(source, filePath, { clone: false });
       const ast2 = parseCached(source, filePath, { clone: false });
@@ -129,7 +129,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("invalidates cached file entries by file path", () => {
       const source = "let a: int = 1;";
-      const filePath = path.join(tmpDir, "inval.ail");
+      const filePath = path.join(tmpDir, "inval.aice");
 
       parseCached(source, filePath);
       expect(hasCached(source, filePath)).toBe(true);
@@ -144,9 +144,9 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
     it("persists AST cache to disk and reloads on fresh cache instance", () => {
       const source1 = "pub fn first() -> int = 1;";
-      const file1 = path.join(tmpDir, "one.ail");
+      const file1 = path.join(tmpDir, "one.aice");
       const source2 = "pub fn second() -> int = 2;";
-      const file2 = path.join(tmpDir, "two.ail");
+      const file2 = path.join(tmpDir, "two.aice");
 
       parseCached(source1, file1);
       parseCached(source2, file2);
@@ -155,7 +155,7 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
       // Save to disk
       const savedPath = saveAstCacheToDisk(tmpDir);
       expect(fs.existsSync(savedPath)).toBe(true);
-      expect(savedPath).toBe(path.join(tmpDir, ".ail-cache", "ast-cache.json"));
+      expect(savedPath).toBe(path.join(tmpDir, ".aice-cache", "ast-cache.json"));
 
       // Wipe memory cache
       clearAstCache();
@@ -178,12 +178,12 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
       expect(fs.existsSync(savedPath)).toBe(false);
     });
 
-    it("supports isolated AilAstCache instances", () => {
-      const cacheA = new AilAstCache();
-      const cacheB = new AilAstCache();
+    it("supports isolated AiceAstCache instances", () => {
+      const cacheA = new AiceAstCache();
+      const cacheB = new AiceAstCache();
 
       const source = "let inst = 1;";
-      cacheA.parseCached(source, "file.ail");
+      cacheA.parseCached(source, "file.aice");
       expect(cacheA.getAstCacheStats().size).toBe(1);
       expect(cacheB.getAstCacheStats().size).toBe(0);
     });
@@ -191,28 +191,28 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
   describe("2. Cross-File TypeChecker Invalidation on Disk Modification", () => {
     it("invalidates TypeChecker module environment cache when an imported file changes on disk", () => {
-      const mathAilPath = path.join(tmpDir, "math_utils.ail");
-      const mainAilPath = path.join(tmpDir, "main.ail");
+      const mathAicePath = path.join(tmpDir, "math_utils.aice");
+      const mainAicePath = path.join(tmpDir, "main.aice");
 
       // Version 1: calculate returns int and accepts int
       const mathSourceV1 = `pub fn calculate(x: int) -> int = x * 2;\n`;
-      fs.writeFileSync(mathAilPath, mathSourceV1, "utf-8");
+      fs.writeFileSync(mathAicePath, mathSourceV1, "utf-8");
 
-      const mainSource = `import { calculate } from "./math_utils.ail";\nlet res = calculate(21);\n`;
-      fs.writeFileSync(mainAilPath, mainSource, "utf-8");
+      const mainSource = `import { calculate } from "./math_utils.aice";\nlet res = calculate(21);\n`;
+      fs.writeFileSync(mainAicePath, mainSource, "utf-8");
 
       const checker = new TypeChecker();
-      const mod1 = parseCached(mainSource, mainAilPath);
+      const mod1 = parseCached(mainSource, mainAicePath);
       expect(() => checker.checkModule(mod1)).not.toThrow();
 
       // Version 2: calculate signature changed on disk to accept string and return string
       const mathSourceV2 = `pub fn calculate(x: string) -> string = x;\n`;
-      fs.writeFileSync(mathAilPath, mathSourceV2, "utf-8");
+      fs.writeFileSync(mathAicePath, mathSourceV2, "utf-8");
 
-      // When main is checked again, content hash of math_utils.ail has changed.
-      // TypeChecker's moduleEnvCache key (${resolvedAilPath}::${sourceHash}) detects the change,
+      // When main is checked again, content hash of math_utils.aice has changed.
+      // TypeChecker's moduleEnvCache key (${resolvedAicePath}::${sourceHash}) detects the change,
       // even when reusing the exact same TypeChecker instance!
-      const mod2 = parseCached(mainSource, mainAilPath, { bypassCache: true });
+      const mod2 = parseCached(mainSource, mainAicePath, { bypassCache: true });
       expect(() => checker.checkModule(mod2)).toThrow(
         /Argument 1 of type 'int' is not assignable to expected type 'string'/,
       );
@@ -270,12 +270,12 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
       expect(adoption.mode).toBe("companion");
       expect(adoption.totalIngested).toBe(3);
 
-      // Target project remains 100% clean of .ail files
+      // Target project remains 100% clean of .aice files
       const targetEntries = fs.readdirSync(targetSrc);
-      expect(targetEntries.every((e) => !e.endsWith(".ail"))).toBe(true);
+      expect(targetEntries.every((e) => !e.endsWith(".aice"))).toBe(true);
 
-      // Companion workspace has ail.config.json and companion src/
-      const configPath = path.join(companionWorkspaceDir, "ail.config.json");
+      // Companion workspace has aice.config.json and companion src/
+      const configPath = path.join(companionWorkspaceDir, "aice.config.json");
       expect(fs.existsSync(configPath)).toBe(true);
 
       const config = loadProjectConfig(companionWorkspaceDir);
@@ -292,15 +292,15 @@ describe("Phase 3: Content-Addressed AST Cache & Companion Idioms Trial", () => 
 
       // Step B: Cross-file typechecking on companion workspace
       // Create a coordinator file in companion workspace importing from auth & billing
-      const authAilName = companionFiles.find((f) => f.startsWith("auth"))!;
-      const billingAilName = companionFiles.find((f) => f.startsWith("billing"))!;
+      const authAiceName = companionFiles.find((f) => f.startsWith("auth"))!;
+      const billingAiceName = companionFiles.find((f) => f.startsWith("billing"))!;
 
-      const coordinatorSource = `import { validateAuth } from "./${authAilName}";
-import { validateBilling } from "./${billingAilName}";
+      const coordinatorSource = `import { validateAuth } from "./${authAiceName}";
+import { validateBilling } from "./${billingAiceName}";
 
 pub fn runPipeline(input: int) -> int = input * 10;
 `;
-      const coordinatorPath = path.join(companionSrc, "coordinator.ail");
+      const coordinatorPath = path.join(companionSrc, "coordinator.aice");
       fs.writeFileSync(coordinatorPath, coordinatorSource, "utf-8");
 
       const checker = new TypeChecker();
@@ -330,14 +330,14 @@ export function computeDiscount(amount: number): number {
       expect(syncResults.length).toBeGreaterThan(0);
 
       // Verify companion billing file received the updated symbol
-      const companionBillingPath = path.join(companionSrc, billingAilName);
-      const syncedBillingAil = fs.readFileSync(companionBillingPath, "utf-8");
-      expect(syncedBillingAil).toContain("computeDiscount");
+      const companionBillingPath = path.join(companionSrc, billingAiceName);
+      const syncedBillingAice = fs.readFileSync(companionBillingPath, "utf-8");
+      expect(syncedBillingAice).toContain("computeDiscount");
 
       // Step D: Audit Tokenomics
       const audit = auditTokenomics(companionWorkspaceDir);
       expect(audit.files.length).toBeGreaterThan(0);
-      expect(audit.aggregate.ailCl100k).toBeGreaterThan(0);
+      expect(audit.aggregate.aiceCl100k).toBeGreaterThan(0);
       expect(audit.aggregate.targetCl100k).toBeGreaterThan(0);
       expect(audit.aggregate.charSavingsPct).toBeGreaterThan(0);
     });

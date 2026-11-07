@@ -3,11 +3,11 @@ import { parse } from "../../src/core/parser.js";
 import { check, TypeCheckError } from "../../src/typechecker/checker.js";
 
 function checkSource(source: string): void {
-  const mod = parse(source, "test.ail");
+  const mod = parse(source, "test.aice");
   check(mod);
 }
 
-describe("AIL 2.0 Sound Type Calculus & Refinement Solver", () => {
+describe("AICE 2.0 Sound Type Calculus & Refinement Solver", () => {
   describe("Valid Programs", () => {
     it("passes typechecking for valid arithmetic, functions, and let bindings", () => {
       const src = `fn add(a:int, b:int) -> int:
@@ -931,7 +931,7 @@ fn test():
         checkSource(src);
         expect(true).toBe(false);
       } catch (err: any) {
-        expect(err.code).toBe("AIL_E2007_RETURN_TYPE_MISMATCH");
+        expect(err.code).toBe("AICE_E2007_RETURN_TYPE_MISMATCH");
       }
     });
 
@@ -948,7 +948,7 @@ fn test():
         checkSource(src);
         expect(true).toBe(false);
       } catch (err: any) {
-        expect(err.code).toBe("AIL_E2007_RETURN_TYPE_MISMATCH");
+        expect(err.code).toBe("AICE_E2007_RETURN_TYPE_MISMATCH");
       }
     });
 
@@ -1390,9 +1390,9 @@ fn main():
   ret query
 
 fn main():
-  search("ail")
-  search("ail", "compiler")
-  search("ail", nil)
+  search("aice")
+  search("aice", "compiler")
+  search("aice", nil)
 `;
       expect(() => checkSource(src)).not.toThrow();
     });

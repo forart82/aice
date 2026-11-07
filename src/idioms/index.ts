@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Project Idiom Subsystem.
+ * AICE 2.0 Project Idiom Subsystem.
  */
 
 export type {
@@ -21,8 +21,8 @@ export {
   validateIdiomDefinitions,
   expandModuleIdioms,
   collapseModuleIdioms,
-  expandAilSourceIdioms,
-  collapseAilSourceIdioms,
+  expandAiceSourceIdioms,
+  collapseAiceSourceIdioms,
   scanProjectIdioms,
   readProjectIdiom,
   updateProjectIdiom,

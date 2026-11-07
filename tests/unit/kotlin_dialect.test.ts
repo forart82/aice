@@ -5,7 +5,7 @@
  * Comprehensive Unit Test Suite for Multi-Language Dialects: Kotlin (.kt, .kts) (Step 28).
  *
  * Verifies:
- * 1. Kotlin Decompilation to AIL AST:
+ * 1. Kotlin Decompilation to AICE AST:
  *    - Package declarations and imports
  *    - Data classes with primary constructors and default arguments
  *    - Standard classes, interfaces, enum classes, and objects
@@ -15,7 +15,7 @@
  *    - Kotlin type system (Int, Long, Float, Double, String, Boolean, List<T>, Map<K, V>, T?, Unit)
  *    - Null-safe operators: ?. (safe call) and ?: (elvis)
  *    - KDoc docstrings (/** ... * /) and comments (//) trivia retention
- *    - 100% parse success on decompiled AIL code
+ *    - 100% parse success on decompiled AICE code
  * 2. Kotlin Forward Emission:
  *    - Canonical idiomatic Kotlin 1.9 / 2.x formatting
  *    - Data classes, interfaces, enum classes
@@ -27,9 +27,9 @@
  *    - Multi-round convergence (Round 1 == Round 2 == Round 3)
  *    - Verification on examples/kotlin and case53
  * 4. Polymorphic CLI Execution:
- *    - `ail compile` on .kt files
- *    - `ail outline` on .kt files
- *    - `ail context` on .kt files
+ *    - `aice compile` on .kt files
+ *    - `aice outline` on .kt files
+ *    - `aice context` on .kt files
  * 5. Typecheck Soundness:
  *    - Zero diagnostic crashes when checking decompiled modules
  */
@@ -64,7 +64,7 @@ import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -83,7 +83,7 @@ describe("Step 28: Multi-Language Dialects for Mobile / Android (.kt, .kts)", ()
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-kt-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-kt-test-"));
   });
 
   afterEach(() => {
@@ -101,7 +101,7 @@ describe("Step 28: Multi-Language Dialects for Mobile / Android (.kt, .kts)", ()
     it("recognizes .kt and .kts extensions via detectTargetFromPath", () => {
       expect(detectTargetFromPath("App.kt")).toBe("kotlin");
       expect(detectTargetFromPath("build.gradle.kts")).toBe("kotlin");
-      expect(detectTargetFromPath("src/domain/User.kt.ail")).toBe("kotlin");
+      expect(detectTargetFromPath("src/domain/User.kt.aice")).toBe("kotlin");
     });
 
     it("registers 'kotlin' in VALID_TARGET_LANGUAGES", () => {
@@ -156,14 +156,14 @@ val STATUS: String = "READY"
 `;
       const result = decompile(code, "kotlin", { filePath: "demo.kt" });
       expect(result.ast).toBeDefined();
-      expect(result.ail).toContain('STATUS: str = "READY"');
+      expect(result.aice).toContain('STATUS: str = "READY"');
     });
   });
 
   // ===========================================================================
-  // SECTION 2: Kotlin Decompilation to AIL AST
+  // SECTION 2: Kotlin Decompilation to AICE AST
   // ===========================================================================
-  describe("Kotlin Decompilation (Kotlin -> AIL)", () => {
+  describe("Kotlin Decompilation (Kotlin -> AICE)", () => {
     it("decompiles package and import statements", () => {
       const code = `
 package com.example.service
@@ -177,7 +177,7 @@ val VERSION = "1.0.0"
       const result = decompileKotlin(code, "service.kt");
       expect(result.ast.items.some((i) => i.kind === "ImportDecl")).toBe(true);
       expect(result.trivia.getTrivia("mod:package")).toBeDefined();
-      const parsedAst = parse(result.ail, "service.kt.ail");
+      const parsedAst = parse(result.aice, "service.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -202,7 +202,7 @@ data class User(
       expect(typeItem?.name).toBe("User");
       expect(typeItem?.fields?.length).toBe(5);
 
-      const parsedAst = parse(result.ail, "User.kt.ail");
+      const parsedAst = parse(result.aice, "User.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -224,7 +224,7 @@ class Calculator(val factor: Double = 1.0) {
       expect(classItem?.name).toBe("Calculator");
       expect(classItem?.methods.length).toBe(2);
 
-      const parsedAst = parse(result.ail, "Calculator.kt.ail");
+      const parsedAst = parse(result.aice, "Calculator.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -244,11 +244,11 @@ interface UserRepository {
       expect(iface?.methods.length).toBe(2);
       expect(iface?.methods.every((m) => m.isAsync)).toBe(true);
 
-      const parsedAst = parse(result.ail, "UserRepository.kt.ail");
+      const parsedAst = parse(result.aice, "UserRepository.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
-    it("decompiles enum class into AIL enum TypeDecl", () => {
+    it("decompiles enum class into AICE enum TypeDecl", () => {
       const code = `
 package com.example.state
 
@@ -266,7 +266,7 @@ enum class OrderStatus {
       expect(enumItem?.isEnum).toBe(true);
       expect(enumItem?.variants?.length).toBe(5);
 
-      const parsedAst = parse(result.ail, "OrderStatus.kt.ail");
+      const parsedAst = parse(result.aice, "OrderStatus.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -286,7 +286,7 @@ fun evaluateGrade(score: Int): String {
       const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as FunctionDecl | undefined;
       expect(fn).toBeDefined();
 
-      const parsedAst = parse(result.ail, "Grade.kt.ail");
+      const parsedAst = parse(result.aice, "Grade.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -303,9 +303,9 @@ fun getLength(str: String?): Int {
       const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as FunctionDecl | undefined;
       expect(fn).toBeDefined();
 
-      const parsedAst = parse(result.ail, "Safety.kt.ail");
+      const parsedAst = parse(result.aice, "Safety.kt.aice");
       expect(parsedAst).toBeDefined();
-      expect(result.ail).toContain("??");
+      expect(result.aice).toContain("??");
     });
 
     it("decompiles string templates with expressions", () => {
@@ -317,7 +317,7 @@ fun formatGreeting(name: String, count: Int): String {
 }
 `;
       const result = decompileKotlin(code, "Greeting.kt");
-      const parsedAst = parse(result.ail, "Greeting.kt.ail");
+      const parsedAst = parse(result.aice, "Greeting.kt.aice");
       expect(parsedAst).toBeDefined();
     });
 
@@ -349,7 +349,7 @@ fun testControl(items: List<String>): Int {
 }
 `;
       const result = decompileKotlin(code, "Flow.kt");
-      const parsedAst = parse(result.ail, "Flow.kt.ail");
+      const parsedAst = parse(result.aice, "Flow.kt.aice");
       expect(parsedAst).toBeDefined();
     });
   });
@@ -357,7 +357,7 @@ fun testControl(items: List<String>): Int {
   // ===========================================================================
   // SECTION 3: Kotlin Forward Emission
   // ===========================================================================
-  describe("Kotlin Forward Emission (AIL -> Kotlin)", () => {
+  describe("Kotlin Forward Emission (AICE -> Kotlin)", () => {
     it("emits data class from TypeDecl with fields", () => {
       const mod: Module = {
         kind: "Module",
@@ -524,8 +524,8 @@ fun testControl(items: List<String>): Int {
       expect(result.isIdentical).toBe(true);
       expect(result.diff).toBeUndefined();
 
-      // Decompiled AIL must be 100% parseable
-      const parsedAst = parse(result.ail, `${originalPath}.ail`);
+      // Decompiled AICE must be 100% parseable
+      const parsedAst = parse(result.aice, `${originalPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
 
@@ -537,7 +537,7 @@ fun testControl(items: List<String>): Int {
       expect(result.isIdentical).toBe(true);
       expect(result.diff).toBeUndefined();
 
-      const parsedAst = parse(result.ail, `${originalPath}.ail`);
+      const parsedAst = parse(result.aice, `${originalPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
 
@@ -554,26 +554,26 @@ fun testControl(items: List<String>): Int {
     });
 
     it("verifies roundtrip on case53 ProductEntity.kt", () => {
-      const targetPath = "/home/forart/dev/ail_test_case/src/case53/ProductEntity.kt";
+      const targetPath = "/home/forart/dev/aice_test_case/src/case53/ProductEntity.kt";
       if (!fs.existsSync(targetPath)) return;
 
       const source = fs.readFileSync(targetPath, "utf-8");
       const result = executeRoundtrip(source, "kotlin", targetPath);
 
       expect(result.isIdentical).toBe(true);
-      const parsedAst = parse(result.ail, `${targetPath}.ail`);
+      const parsedAst = parse(result.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
 
     it("verifies roundtrip on case53 ProductRepository.kt", () => {
-      const targetPath = "/home/forart/dev/ail_test_case/src/case53/ProductRepository.kt";
+      const targetPath = "/home/forart/dev/aice_test_case/src/case53/ProductRepository.kt";
       if (!fs.existsSync(targetPath)) return;
 
       const source = fs.readFileSync(targetPath, "utf-8");
       const result = executeRoundtrip(source, "kotlin", targetPath);
 
       expect(result.isIdentical).toBe(true);
-      const parsedAst = parse(result.ail, `${targetPath}.ail`);
+      const parsedAst = parse(result.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
     });
   });
@@ -582,21 +582,21 @@ fun testControl(items: List<String>): Int {
   // SECTION 5: Polymorphic CLI Execution
   // ===========================================================================
   describe("Polymorphic CLI Execution on Kotlin Files", () => {
-    it("executes 'ail outline' on Kotlin file with semantic token reduction", () => {
+    it("executes 'aice outline' on Kotlin file with semantic token reduction", () => {
       const ktFile = path.resolve(__dirname, "../../examples/kotlin/UserEntity.kt");
       const res = runCli(["outline", ktFile]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("UserEntity");
     });
 
-    it("executes 'ail context' on Kotlin file", () => {
+    it("executes 'aice context' on Kotlin file", () => {
       const ktFile = path.resolve(__dirname, "../../examples/kotlin/NetworkClient.kt");
       const res = runCli(["context", ktFile]);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("NetworkClient");
     });
 
-    it("executes 'ail compile' on Kotlin file", () => {
+    it("executes 'aice compile' on Kotlin file", () => {
       const testKt = path.join(tmpDir, "Sample.kt");
       fs.writeFileSync(
         testKt,
@@ -608,15 +608,15 @@ data class Sample(val id: String)
         "utf-8",
       );
 
-      // Decompile side-by-side: generates Sample.kt.ail
+      // Decompile side-by-side: generates Sample.kt.aice
       const decompileRes = runCli(["decompile", testKt], tmpDir);
       expect(decompileRes.status).toBe(0);
 
-      const companionAil = `${testKt}.ail`;
-      expect(fs.existsSync(companionAil)).toBe(true);
+      const companionAice = `${testKt}.aice`;
+      expect(fs.existsSync(companionAice)).toBe(true);
 
-      // Compile companion .ail back to target
-      const compRes = runCli(["compile", companionAil], tmpDir);
+      // Compile companion .aice back to target
+      const compRes = runCli(["compile", companionAice], tmpDir);
       expect(compRes.status).toBe(0);
       expect(fs.existsSync(testKt)).toBe(true);
     });

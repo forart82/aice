@@ -33,7 +33,7 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-ingest-test-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-ingest-test-"));
   });
 
   afterEach(() => {
@@ -83,9 +83,9 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
       fs.mkdirSync(gitDir, { recursive: true });
       fs.writeFileSync(path.join(gitDir, "HEAD.ts"), "dummy");
 
-      // Also create an existing .ail file and trivia file
-      fs.writeFileSync(path.join(testDir, "src", "style.css.ail"), "style body: margin 0");
-      fs.writeFileSync(path.join(testDir, "src", "style.css.ail.trivia.json"), "{}");
+      // Also create an existing .aice file and trivia file
+      fs.writeFileSync(path.join(testDir, "src", "style.css.aice"), "style body: margin 0");
+      fs.writeFileSync(path.join(testDir, "src", "style.css.aice.trivia.json"), "{}");
 
       const files = findIngestableFiles(testDir);
 
@@ -99,7 +99,7 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
       expect(files.some((f) => f.includes("node_modules"))).toBe(false);
       expect(files.some((f) => f.includes("dist"))).toBe(false);
       expect(files.some((f) => f.includes(".git"))).toBe(false);
-      expect(files.some((f) => f.endsWith(".ail"))).toBe(false);
+      expect(files.some((f) => f.endsWith(".aice"))).toBe(false);
       expect(files.some((f) => f.endsWith(".trivia.json"))).toBe(false);
     });
 
@@ -131,7 +131,7 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
   });
 
   describe("ingestProjectSideBySide", () => {
-    it("decompiles supported files into .ail side-by-side with accurate metrics", async () => {
+    it("decompiles supported files into .aice side-by-side with accurate metrics", async () => {
       const { cssPath, htmlPath, tsPath, tsxPath } = setupSampleProject(testDir);
 
       const summary = await ingestProjectSideBySide({
@@ -144,23 +144,23 @@ describe("Step 3: Side-by-Side Parallel Ingestion Engine", () => {
       expect(summary.totalSkipped).toBe(0);
       expect(summary.totalFailed).toBe(0);
       expect(summary.totalTargetTokens).toBeGreaterThan(0);
-      expect(summary.totalAilTokens).toBeGreaterThan(0);
+      expect(summary.totalAiceTokens).toBeGreaterThan(0);
       expect(summary.cl100kSavingsPct).toBeGreaterThan(0);
       expect(summary.results).toHaveLength(4);
 
       // Verify side-by-side files exist on disk
-      expect(fs.existsSync(`${cssPath}.ail`)).toBe(true);
-      expect(fs.existsSync(`${htmlPath}.ail`)).toBe(true);
-      expect(fs.existsSync(`${tsPath}.ail`)).toBe(true);
-      expect(fs.existsSync(`${tsxPath}.ail`)).toBe(true);
+      expect(fs.existsSync(`${cssPath}.aice`)).toBe(true);
+      expect(fs.existsSync(`${htmlPath}.aice`)).toBe(true);
+      expect(fs.existsSync(`${tsPath}.aice`)).toBe(true);
+      expect(fs.existsSync(`${tsxPath}.aice`)).toBe(true);
 
-      // Verify AIL content is valid and non-empty
-      const tsAil = fs.readFileSync(`${tsPath}.ail`, "utf-8");
-      expect(tsAil).toContain("type UserSession:");
-      expect(tsAil).toContain("fn sanitize");
+      // Verify AICE content is valid and non-empty
+      const tsAice = fs.readFileSync(`${tsPath}.aice`, "utf-8");
+      expect(tsAice).toContain("type UserSession:");
+      expect(tsAice).toContain("fn sanitize");
     });
 
-    it("never emits .ail.trivia.json sidecar files and inlines comments in .ail", async () => {
+    it("never emits .aice.trivia.json sidecar files and inlines comments in .aice", async () => {
       const srcDir = path.join(testDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -179,14 +179,14 @@ export interface Service {
       });
 
       expect(summary.totalIngested).toBe(1);
-      expect(fs.existsSync(`${fileWithTrivia}.ail`)).toBe(true);
-      expect(fs.existsSync(`${fileWithTrivia}.ail.trivia.json`)).toBe(false);
+      expect(fs.existsSync(`${fileWithTrivia}.aice`)).toBe(true);
+      expect(fs.existsSync(`${fileWithTrivia}.aice.trivia.json`)).toBe(false);
 
-      const ailContent = fs.readFileSync(`${fileWithTrivia}.ail`, "utf-8");
-      expect(ailContent).toContain("Service");
+      const aiceContent = fs.readFileSync(`${fileWithTrivia}.aice`, "utf-8");
+      expect(aiceContent).toContain("Service");
     });
 
-    it("skips existing .ail files when overwrite is false", async () => {
+    it("skips existing .aice files when overwrite is false", async () => {
       setupSampleProject(testDir);
 
       // First run: ingests all 4 files
@@ -197,7 +197,7 @@ export interface Service {
       expect(firstRun.totalIngested).toBe(4);
       expect(firstRun.totalSkipped).toBe(0);
 
-      // Second run: all 4 .ail files exist, so all should be skipped
+      // Second run: all 4 .aice files exist, so all should be skipped
       const secondRun = await ingestProjectSideBySide({
         dir: testDir,
         overwrite: false,
@@ -232,14 +232,14 @@ export interface Service {
       expect(summary.totalSkipped).toBe(0);
       expect(summary.totalFailed).toBe(0);
       expect(summary.totalTargetTokens).toBeGreaterThan(0);
-      expect(summary.totalAilTokens).toBeGreaterThan(0);
+      expect(summary.totalAiceTokens).toBeGreaterThan(0);
       expect(summary.cl100kSavingsPct).toBeGreaterThan(0);
 
-      // Verify NO .ail files were created on disk
-      expect(fs.existsSync(`${cssPath}.ail`)).toBe(false);
-      expect(fs.existsSync(`${htmlPath}.ail`)).toBe(false);
-      expect(fs.existsSync(`${tsPath}.ail`)).toBe(false);
-      expect(fs.existsSync(`${tsxPath}.ail`)).toBe(false);
+      // Verify NO .aice files were created on disk
+      expect(fs.existsSync(`${cssPath}.aice`)).toBe(false);
+      expect(fs.existsSync(`${htmlPath}.aice`)).toBe(false);
+      expect(fs.existsSync(`${tsPath}.aice`)).toBe(false);
+      expect(fs.existsSync(`${tsxPath}.aice`)).toBe(false);
     });
 
     it("integrates with ConcurrencyPool and custom MultiLineReporter", async () => {
@@ -263,10 +263,10 @@ export interface Service {
       expect(reporter.completedTasks).toBe(4);
       expect(reporter.failedTasks).toBe(0);
       expect(reporter.totalTargetTokens).toBe(summary.totalTargetTokens);
-      expect(reporter.totalAilTokens).toBe(summary.totalAilTokens);
+      expect(reporter.totalAiceTokens).toBe(summary.totalAiceTokens);
 
       const logs = mock.getOutput();
-      expect(logs).toContain("[AIL]");
+      expect(logs).toContain("[AICE]");
       expect(logs).toContain("Decompiling");
     });
 
@@ -313,7 +313,7 @@ export interface Service {
       expect(failedResult?.error).toBeDefined();
     });
 
-    it("verifies decompiled .ail files can be recompiled back with 100% bit-identical fidelity", async () => {
+    it("verifies decompiled .aice files can be recompiled back with 100% bit-identical fidelity", async () => {
       const { cssPath, htmlPath, tsPath, tsxPath } = setupSampleProject(testDir);
 
       await ingestProjectSideBySide({
@@ -330,11 +330,11 @@ export interface Service {
 
       for (const { origPath, target } of files) {
         const origContent = fs.readFileSync(origPath, "utf-8");
-        const ailPath = `${origPath}.ail`;
-        expect(fs.existsSync(ailPath)).toBe(true);
+        const aicePath = `${origPath}.aice`;
+        expect(fs.existsSync(aicePath)).toBe(true);
 
-        const ailContent = fs.readFileSync(ailPath, "utf-8");
-        const mod = parse(ailContent, ailPath);
+        const aiceContent = fs.readFileSync(aicePath, "utf-8");
+        const mod = parse(aiceContent, aicePath);
         const recompiled = emitTarget(mod, target, { watermark: false });
 
         expect(recompiled).toBe(origContent);

@@ -23,7 +23,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
   let testDir: string;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-shield-test-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-shield-test-"));
   });
 
   afterEach(() => {
@@ -51,10 +51,10 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
 
       for (const ext of DEFAULT_EXTENSIONS) {
         expect(settings["files.exclude"][`**/*${ext}`]).toEqual({
-          when: `$(basename)${ext}.ail`,
+          when: `$(basename)${ext}.aice`,
         });
         expect(settings["search.exclude"][`**/*${ext}`]).toEqual({
-          when: `$(basename)${ext}.ail`,
+          when: `$(basename)${ext}.aice`,
         });
       }
 
@@ -65,7 +65,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
         const content = fs.readFileSync(ignorePath, "utf-8");
         expect(content).toContain(SHIELD_START_MARKER);
         expect(content).toContain(SHIELD_END_MARKER);
-        expect(content).toContain("!*.ail");
+        expect(content).toContain("!*.aice");
         expect(content).not.toContain("!*.trivia.json");
         for (const ext of DEFAULT_EXTENSIONS) {
           expect(content).toContain(`*${ext}`);
@@ -76,21 +76,21 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       const agentsMdPath = path.join(testDir, "AGENTS.md");
       expect(fs.existsSync(agentsMdPath)).toBe(true);
       const agentsMdContent = fs.readFileSync(agentsMdPath, "utf-8");
-      expect(agentsMdContent).toContain("AIL (*.ail)");
+      expect(agentsMdContent).toContain("AICE (*.aice)");
       expect(agentsMdContent).toContain("machine-generated, read-only build artifacts");
-      expect(agentsMdContent).toContain("ail compile");
+      expect(agentsMdContent).toContain("aice compile");
 
       const geminiMdPath = path.join(testDir, "GEMINI.md");
       expect(fs.existsSync(geminiMdPath)).toBe(true);
       const geminiMdContent = fs.readFileSync(geminiMdPath, "utf-8");
-      expect(geminiMdContent).toContain("AIL (*.ail)");
+      expect(geminiMdContent).toContain("AICE (*.aice)");
       expect(geminiMdContent).toContain("machine-generated, read-only build artifacts");
-      expect(geminiMdContent).toContain("ail compile");
+      expect(geminiMdContent).toContain("aice compile");
 
       const cursorRulesPath = path.join(testDir, ".cursorrules");
       expect(fs.existsSync(cursorRulesPath)).toBe(true);
       const cursorRulesContent = fs.readFileSync(cursorRulesPath, "utf-8");
-      expect(cursorRulesContent).toContain("AIL (*.ail)");
+      expect(cursorRulesContent).toContain("AICE (*.aice)");
       expect(cursorRulesContent).toContain("machine-generated read-only build artifacts");
     });
 
@@ -105,7 +105,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
 
       for (const ext of customExts) {
         expect(settings["files.exclude"][`**/*${ext}`]).toEqual({
-          when: `$(basename)${ext}.ail`,
+          when: `$(basename)${ext}.aice`,
         });
       }
       expect(settings["files.exclude"]["**/*.css"]).toBeUndefined();
@@ -152,7 +152,7 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(geminiMdContent2).toBe(geminiMdContent1);
 
       // Verify no duplicate markers in ignore files
-      const occurrences = (cursorIgnoreContent2.match(/# >>> AIL-SHIELD-START >>>/g) || []).length;
+      const occurrences = (cursorIgnoreContent2.match(/# >>> AICE-SHIELD-START >>>/g) || []).length;
       expect(occurrences).toBe(1);
 
       // Verify valid JSON
@@ -189,12 +189,12 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(updatedSettings["files.exclude"]["**/.git"]).toBe(true);
       expect(updatedSettings["files.exclude"]["**/dist"]).toBe(true);
 
-      // Injects AIL shields
+      // Injects AICE shields
       expect(updatedSettings["files.exclude"]["**/*.ts"]).toEqual({
-        when: "$(basename).ts.ail",
+        when: "$(basename).ts.aice",
       });
       expect(updatedSettings["search.exclude"]["**/*.ts"]).toEqual({
-        when: "$(basename).ts.ail",
+        when: "$(basename).ts.aice",
       });
     });
 
@@ -231,17 +231,17 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       const updatedAgentsMd = fs.readFileSync(agentsMdPath, "utf-8");
       expect(updatedAgentsMd).toContain("# Original Project Instructions");
       expect(updatedAgentsMd).toContain("Always write clean tests.");
-      expect(updatedAgentsMd).toContain("AIL (*.ail)");
+      expect(updatedAgentsMd).toContain("AICE (*.aice)");
 
       const updatedGeminiMd = fs.readFileSync(geminiMdPath, "utf-8");
       expect(updatedGeminiMd).toContain("# Original Gemini Directives");
       expect(updatedGeminiMd).toContain("Strictly follow domain specifications.");
-      expect(updatedGeminiMd).toContain("AIL (*.ail)");
+      expect(updatedGeminiMd).toContain("AICE (*.aice)");
     });
   });
 
   describe("removeAiShield", () => {
-    it("cleanly removes files created solely for AIL and cleans up empty .vscode directory", async () => {
+    it("cleanly removes files created solely for AICE and cleans up empty .vscode directory", async () => {
       await applyAiShield(testDir);
 
       const statusBefore = await checkAiShieldStatus(testDir);
@@ -319,13 +319,13 @@ describe("Step 4: AI Exclusion & Cognitive Shield Generator", () => {
       expect(fs.existsSync(agentsMdPath)).toBe(true);
       const restoredAgentsMd = fs.readFileSync(agentsMdPath, "utf-8");
       expect(restoredAgentsMd).toContain("# User Docs");
-      expect(restoredAgentsMd).not.toContain("<!-- >>> AIL-COGNITIVE-RULE-START >>> -->");
+      expect(restoredAgentsMd).not.toContain("<!-- >>> AICE-COGNITIVE-RULE-START >>> -->");
 
       // Check GEMINI.md preserved user rules
       expect(fs.existsSync(geminiMdPath)).toBe(true);
       const restoredGeminiMd = fs.readFileSync(geminiMdPath, "utf-8");
       expect(restoredGeminiMd).toContain("# Gemini Docs");
-      expect(restoredGeminiMd).not.toContain("<!-- >>> AIL-COGNITIVE-RULE-START >>> -->");
+      expect(restoredGeminiMd).not.toContain("<!-- >>> AICE-COGNITIVE-RULE-START >>> -->");
     });
   });
 

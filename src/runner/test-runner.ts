@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Test Runner Engine & Orchestrator (Step 11).
- * Executes tests across .ail source files and compiled suites with automatic
+ * AICE 2.0 Test Runner Engine & Orchestrator (Step 11).
+ * Executes tests across .aice source files and compiled suites with automatic
  * staleness-detection and side-by-side recompilation via safeWriteTargetFile.
  * Discovers project test harness from package.json (scripts.test), bun:test, vitest,
  * or direct node execution.
@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
@@ -34,7 +34,7 @@ import { formatSymbolAwareError, scrubTargetFileReferences } from "./symbol-erro
 
 export type HarnessType = "bun" | "vitest" | "node" | "npm" | "auto";
 
-export interface AilTestOptions {
+export interface AiceTestOptions {
   cwd?: string;
   reporter?: string;
   json?: boolean;
@@ -46,18 +46,18 @@ export interface AilTestOptions {
   watermark?: boolean;
 }
 
-export interface AilTestSummary {
+export interface AiceTestSummary {
   total: number;
   passed: number;
   failed: number;
   skipped?: number;
 }
 
-export interface AilTestResult {
+export interface AiceTestResult {
   success: boolean;
   exitCode: number;
   output: string;
-  summary: AilTestSummary;
+  summary: AiceTestSummary;
   compiledFiles?: string[];
   harness?: string;
   command?: string;
@@ -70,7 +70,7 @@ export interface DiscoveredHarness {
   name: string;
   command: string;
   baseArgs: string[];
-  buildArgs: (target?: string, options?: AilTestOptions) => string[];
+  buildArgs: (target?: string, options?: AiceTestOptions) => string[];
   description: string;
 }
 
@@ -82,23 +82,23 @@ function stripAnsi(str: string): string {
 }
 
 /**
- * Derives the compiled target output path from an .ail file.
- * In isolated mode, routes output into outDir (e.g. .ail-build/).
+ * Derives the compiled target output path from an .aice file.
+ * In isolated mode, routes output into outDir (e.g. .aice-build/).
  * Defaults to .ts extension if none is inferred.
  */
 export function resolveTargetFilePath(
-  ailPath: string,
-  config?: AilProjectConfig,
+  aicePath: string,
+  config?: AiceProjectConfig,
   projectRoot?: string,
 ): string {
   if (config) {
-    const root = projectRoot ?? findProjectRoot(path.dirname(ailPath)) ?? process.cwd();
-    return resolveTargetOutputPathForConfig(ailPath, config, root);
+    const root = projectRoot ?? findProjectRoot(path.dirname(aicePath)) ?? process.cwd();
+    return resolveTargetOutputPathForConfig(aicePath, config, root);
   }
-  let targetOut = getTargetOutputPath(ailPath);
+  let targetOut = getTargetOutputPath(aicePath);
   const ext = path.extname(targetOut);
   if (!KNOWN_TARGET_EXTENSIONS.has(ext)) {
-    const lang = detectTargetFromPath(ailPath);
+    const lang = detectTargetFromPath(aicePath);
     switch (lang) {
       case "python":
         targetOut += ".py";
@@ -149,21 +149,21 @@ export function resolveTargetFilePath(
 }
 
 /**
- * Checks whether an .ail source file requires compilation before running tests.
- * Returns true if target file does not exist or if .ail is strictly newer.
+ * Checks whether an .aice source file requires compilation before running tests.
+ * Returns true if target file does not exist or if .aice is strictly newer.
  */
-export function isAilCompilationNeeded(
-  ailPath: string,
+export function isAiceCompilationNeeded(
+  aicePath: string,
   targetPath?: string,
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
   projectRoot?: string,
 ): boolean {
-  const target = targetPath ?? resolveTargetFilePath(ailPath, config, projectRoot);
+  const target = targetPath ?? resolveTargetFilePath(aicePath, config, projectRoot);
   if (!fs.existsSync(target)) {
     return true;
   }
   try {
-    const srcStat = fs.statSync(ailPath);
+    const srcStat = fs.statSync(aicePath);
     const tgtStat = fs.statSync(target);
     return srcStat.mtimeMs > tgtStat.mtimeMs;
   } catch {
@@ -171,33 +171,33 @@ export function isAilCompilationNeeded(
   }
 }
 
-export interface CompileAilFileOptions {
+export interface CompileAiceFileOptions {
   pureInterfaces?: boolean;
   watermark?: boolean;
-  config?: AilProjectConfig;
+  config?: AiceProjectConfig;
   projectRoot?: string;
   targetPath?: string;
 }
 
 /**
- * Compiles a single .ail file into its target file using safeWriteTargetFile.
+ * Compiles a single .aice file into its target file using safeWriteTargetFile.
  * Respects project mode ("side-by-side" vs "isolated") and outDir.
  */
-export function compileAilFile(
-  ailPath: string,
-  options?: CompileAilFileOptions,
+export function compileAiceFile(
+  aicePath: string,
+  options?: CompileAiceFileOptions,
 ): { compiled: boolean; targetPath: string } {
-  const root = options?.projectRoot ?? findProjectRoot(path.dirname(ailPath)) ?? process.cwd();
+  const root = options?.projectRoot ?? findProjectRoot(path.dirname(aicePath)) ?? process.cwd();
   const config = options?.config ?? loadProjectConfig(root);
-  const targetPath = options?.targetPath ?? resolveTargetFilePath(ailPath, config, root);
+  const targetPath = options?.targetPath ?? resolveTargetFilePath(aicePath, config, root);
 
-  if (!isAilCompilationNeeded(ailPath, targetPath, config, root)) {
+  if (!isAiceCompilationNeeded(aicePath, targetPath, config, root)) {
     return { compiled: false, targetPath };
   }
 
-  const source = fs.readFileSync(ailPath, "utf-8");
+  const source = fs.readFileSync(aicePath, "utf-8");
   try {
-    const { ast: mod, trivia } = parseWithTrivia(source, ailPath);
+    const { ast: mod, trivia } = parseWithTrivia(source, aicePath);
     const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
     try {
       const tc = new TypeChecker();
@@ -206,19 +206,19 @@ export function compileAilFile(
       // Lenient typechecking during pre-test compilation
     }
 
-    const base = path.basename(ailPath);
-    const withoutAil = base.endsWith(".ail") ? base.slice(0, -4) : base;
-    const innerExt = path.extname(withoutAil).toLowerCase();
+    const base = path.basename(aicePath);
+    const withoutAice = base.endsWith(".aice") ? base.slice(0, -5) : base;
+    const innerExt = path.extname(withoutAice).toLowerCase();
 
     let targetLang: TargetLanguage;
     if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-      targetLang = detectTargetFromPath(ailPath);
+      targetLang = detectTargetFromPath(aicePath);
     } else {
       const targetExt = path.extname(targetPath).toLowerCase();
       if (targetExt && KNOWN_TARGET_EXTENSIONS.has(targetExt)) {
         targetLang = detectTargetFromPath(targetPath);
       } else {
-        targetLang = config.targetLanguage ?? detectTargetFromPath(ailPath);
+        targetLang = config.targetLanguage ?? detectTargetFromPath(aicePath);
       }
     }
 
@@ -235,17 +235,17 @@ export function compileAilFile(
     return { compiled: true, targetPath };
   } catch (err: any) {
     if (err && typeof err === "object") {
-      err.ailFilePath = ailPath;
-      err.ailSource = source;
+      err.aiceFilePath = aicePath;
+      err.aiceSource = source;
     }
     throw err;
   }
 }
 
 /**
- * Recursively locates all .ail files in a target directory or file.
+ * Recursively locates all .aice files in a target directory or file.
  */
-export function findAilFiles(
+export function findAiceFiles(
   rootDir: string,
   ignorePatterns: string[] = [
     "node_modules",
@@ -253,7 +253,7 @@ export function findAilFiles(
     "dist",
     "build",
     ".vitest",
-    ".ail-build",
+    ".aice-build",
     ".agents",
     ".next",
     "coverage",
@@ -262,7 +262,7 @@ export function findAilFiles(
   if (!fs.existsSync(rootDir)) return [];
   const stat = fs.statSync(rootDir);
   if (!stat.isDirectory()) {
-    return rootDir.endsWith(".ail") ? [path.resolve(rootDir)] : [];
+    return rootDir.endsWith(".aice") ? [path.resolve(rootDir)] : [];
   }
 
   const results: string[] = [];
@@ -281,7 +281,7 @@ export function findAilFiles(
         if (!ignorePatterns.includes(entry.name)) {
           walk(fullPath);
         }
-      } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+      } else if (entry.isFile() && entry.name.endsWith(".aice")) {
         results.push(fullPath);
       }
     }
@@ -292,11 +292,11 @@ export function findAilFiles(
 }
 
 /**
- * Checks and compiles all .ail files relevant to targetPath or project.
+ * Checks and compiles all .aice files relevant to targetPath or project.
  */
-export function compileTargetAilIfNeeded(
+export function compileTargetAiceIfNeeded(
   targetPath?: string,
-  options?: AilTestOptions,
+  options?: AiceTestOptions,
 ): { compiledFiles: string[]; effectiveTarget?: string } {
   const projectDir = options?.cwd ? path.resolve(options.cwd) : process.cwd();
   const projectRoot = findProjectRoot(projectDir) ?? projectDir;
@@ -304,7 +304,7 @@ export function compileTargetAilIfNeeded(
   const compiledFiles: string[] = [];
   let effectiveTarget = targetPath;
 
-  const compileOptions: CompileAilFileOptions = {
+  const compileOptions: CompileAiceFileOptions = {
     config,
     projectRoot,
     pureInterfaces: options?.pureInterfaces,
@@ -323,14 +323,14 @@ export function compileTargetAilIfNeeded(
         : projectDir;
 
   if (config.mode === "companion") {
-    // When in companion mode, compile companion .ail files to config.outDir
+    // When in companion mode, compile companion .aice files to config.outDir
     // in the target project before test execution so target tests run against freshly compiled code.
     const companionSourceDir = config.sourceDir
       ? path.resolve(projectRoot, config.sourceDir)
       : projectRoot;
-    const ailFiles = findAilFiles(companionSourceDir);
-    for (const f of ailFiles) {
-      const res = compileAilFile(f, compileOptions);
+    const aiceFiles = findAiceFiles(companionSourceDir);
+    for (const f of aiceFiles) {
+      const res = compileAiceFile(f, compileOptions);
       if (res.compiled) {
         compiledFiles.push(res.targetPath);
       }
@@ -339,8 +339,8 @@ export function compileTargetAilIfNeeded(
     if (targetPath) {
       const resolved = path.resolve(projectDir, targetPath);
       if (fs.existsSync(resolved)) {
-        if (resolved.endsWith(".ail")) {
-          const res = compileAilFile(resolved, compileOptions);
+        if (resolved.endsWith(".aice")) {
+          const res = compileAiceFile(resolved, compileOptions);
           if (res.compiled && !compiledFiles.includes(res.targetPath)) {
             compiledFiles.push(res.targetPath);
           }
@@ -351,7 +351,7 @@ export function compileTargetAilIfNeeded(
             ? path.relative(testCwd, targetPath)
             : targetPath;
         }
-      } else if (targetPath.endsWith(".ail")) {
+      } else if (targetPath.endsWith(".aice")) {
         const targetFile = resolveTargetFilePath(resolved, config, projectRoot);
         effectiveTarget = path.relative(testCwd, targetFile);
       } else {
@@ -367,68 +367,68 @@ export function compileTargetAilIfNeeded(
     if (fs.existsSync(resolved)) {
       const stat = fs.statSync(resolved);
       if (stat.isDirectory()) {
-        const ailFiles = findAilFiles(resolved);
-        for (const f of ailFiles) {
-          const res = compileAilFile(f, compileOptions);
+        const aiceFiles = findAiceFiles(resolved);
+        for (const f of aiceFiles) {
+          const res = compileAiceFile(f, compileOptions);
           if (res.compiled) {
             compiledFiles.push(res.targetPath);
           }
         }
-      } else if (resolved.endsWith(".ail")) {
-        const res = compileAilFile(resolved, compileOptions);
+      } else if (resolved.endsWith(".aice")) {
+        const res = compileAiceFile(resolved, compileOptions);
         if (res.compiled) {
           compiledFiles.push(res.targetPath);
         }
         effectiveTarget = path.relative(testCwd, res.targetPath);
       } else {
-        // If it's a target file (e.g. foo.test.ts), check if companion .ail exists
-        let candidateAil: string | null = null;
+        // If it's a target file (e.g. foo.test.ts), check if companion .aice exists
+        let candidateAice: string | null = null;
         if (config.mode === "isolated") {
           const absOutDir = config.outDir
             ? path.isAbsolute(config.outDir)
             ? config.outDir
             : path.resolve(projectRoot, config.outDir)
-            : path.resolve(projectRoot, ".ail-build");
+            : path.resolve(projectRoot, ".aice-build");
           if (resolved.startsWith(absOutDir + path.sep) || resolved === absOutDir) {
             const relFromOut = path.relative(absOutDir, resolved);
-            const sourceRel = relFromOut.replace(/\.[a-zA-Z0-9]+$/, ".ail");
+            const sourceRel = relFromOut.replace(/\.[a-zA-Z0-9]+$/, ".aice");
             const candidate = path.resolve(projectRoot, config.sourceDir, sourceRel);
             if (fs.existsSync(candidate)) {
-              candidateAil = candidate;
+              candidateAice = candidate;
             }
           }
         }
 
-        if (!candidateAil) {
-          const companionAil = `${resolved}.ail`;
-          const altAil = resolved.replace(/\.[a-zA-Z0-9]+$/, ".ail");
-          candidateAil = fs.existsSync(companionAil)
-            ? companionAil
-            : fs.existsSync(altAil)
-              ? altAil
+        if (!candidateAice) {
+          const companionAice = `${resolved}.aice`;
+          const altAice = resolved.replace(/\.[a-zA-Z0-9]+$/, ".aice");
+          candidateAice = fs.existsSync(companionAice)
+            ? companionAice
+            : fs.existsSync(altAice)
+              ? altAice
               : null;
         }
 
-        if (candidateAil) {
-          const res = compileAilFile(candidateAil, compileOptions);
+        if (candidateAice) {
+          const res = compileAiceFile(candidateAice, compileOptions);
           if (res.compiled) {
             compiledFiles.push(res.targetPath);
           }
         }
       }
-    } else if (targetPath.endsWith(".ail")) {
+    } else if (targetPath.endsWith(".aice")) {
       const targetFile = resolveTargetFilePath(resolved, config, projectRoot);
       effectiveTarget = path.relative(testCwd, targetFile);
     }
   } else {
-    // No target provided: scan project directory or sourceDir for stale .ail files
+    // No target provided: scan project directory or sourceDir for stale .aice files
     const scanDir =
       config.mode === "isolated" && config.sourceDir
         ? path.resolve(projectRoot, config.sourceDir)
         : projectDir;
-    const ailFiles = findAilFiles(scanDir);
-    for (const f of ailFiles) {
-      const res = compileAilFile(f, compileOptions);
+    const aiceFiles = findAiceFiles(scanDir);
+    for (const f of aiceFiles) {
+      const res = compileAiceFile(f, compileOptions);
       if (res.compiled) {
         compiledFiles.push(res.targetPath);
       }
@@ -475,7 +475,7 @@ function createVitestHarness(
     command,
     baseArgs,
     description: "Vitest Test Runner Engine",
-    buildArgs: (target?: string, opts?: AilTestOptions) => {
+    buildArgs: (target?: string, opts?: AiceTestOptions) => {
       const args = [...baseArgs];
       if (opts?.reporter) {
         args.push("--reporter", opts.reporter);
@@ -503,7 +503,7 @@ function createBunHarness(): DiscoveredHarness {
     command,
     baseArgs,
     description: "Bun Native Test Runner (bun:test)",
-    buildArgs: (target?: string, opts?: AilTestOptions) => {
+    buildArgs: (target?: string, opts?: AiceTestOptions) => {
       const args = [...baseArgs];
       if (opts?.reporter) {
         args.push(`--reporter=${opts.reporter}`);
@@ -530,7 +530,7 @@ function createNodeHarness(): DiscoveredHarness {
     command,
     baseArgs,
     description: "Node.js Built-in Test Runner",
-    buildArgs: (target?: string, opts?: AilTestOptions) => {
+    buildArgs: (target?: string, opts?: AiceTestOptions) => {
       const args = [...baseArgs];
       if (opts?.reporter) {
         args.push(`--test-reporter=${opts.reporter}`);
@@ -572,8 +572,8 @@ function createNpmHarness(isBun: boolean): DiscoveredHarness {
  */
 export function discoverTestHarness(
   projectDir: string = process.cwd(),
-  options?: AilTestOptions,
-  config?: AilProjectConfig,
+  options?: AiceTestOptions,
+  config?: AiceProjectConfig,
 ): DiscoveredHarness {
   const root = findProjectRoot(projectDir) ?? projectDir;
   const effectiveConfig = config ?? loadProjectConfig(root);
@@ -595,7 +595,7 @@ export function discoverTestHarness(
       command,
       baseArgs,
       description: `Configured test command: ${trimmed}`,
-      buildArgs: (target?: string, opts?: AilTestOptions) => {
+      buildArgs: (target?: string, opts?: AiceTestOptions) => {
         const args = [...baseArgs];
         if (opts?.reporter) {
           args.push(`--reporter=${opts.reporter}`);
@@ -690,7 +690,7 @@ export function discoverTestHarness(
 /**
  * Parses test execution summary (total, passed, failed) from test runner outputs.
  */
-export function parseTestSummary(rawOutput: string, exitCode: number): AilTestSummary {
+export function parseTestSummary(rawOutput: string, exitCode: number): AiceTestSummary {
   const clean = stripAnsi(rawOutput);
   let total = 0;
   let passed = 0;
@@ -826,9 +826,9 @@ export function formatCleanTestOutput(
   rawStdout: string,
   rawStderr: string,
   exitCode: number,
-  summary: AilTestSummary,
+  summary: AiceTestSummary,
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
 ): string {
   const combined = `${rawStdout}\n${rawStderr}`.trim();
   const root = findProjectRoot(projectRoot) ?? projectRoot;
@@ -852,17 +852,17 @@ export function formatCleanTestOutput(
 }
 
 /**
- * Primary entry point: Runs tests across .ail files and test suites.
+ * Primary entry point: Runs tests across .aice files and test suites.
  *
- * 1. Checks if target .ail files need compilation before running tests; compiles them via safeWriteTargetFile.
+ * 1. Checks if target .aice files need compilation before running tests; compiles them via safeWriteTargetFile.
  * 2. Discovers project test harness from package.json (scripts.test), bun:test, vitest, or direct node execution.
  * 3. Spawns process, captures stdout and stderr.
  * 4. Formats clean output and returns { success, exitCode, output, summary: { total, passed, failed } }.
  */
-export async function runAilTests(
+export async function runAiceTests(
   targetPath?: string,
-  options?: AilTestOptions,
-): Promise<AilTestResult> {
+  options?: AiceTestOptions,
+): Promise<AiceTestResult> {
   if (targetPath?.startsWith("-")) {
     throw new Error(`Invalid test target '${targetPath}': must not start with '-'`);
   }
@@ -882,37 +882,37 @@ export async function runAilTests(
         ? path.resolve(projectRoot, config.test.cwd)
         : projectDir;
 
-  // Step 1: Pre-compilation of .ail files
+  // Step 1: Pre-compilation of .aice files
   let compiledFiles: string[] = [];
   let effectiveTarget = targetPath;
 
   try {
-    const compResult = compileTargetAilIfNeeded(targetPath, {
+    const compResult = compileTargetAiceIfNeeded(targetPath, {
       ...options,
       cwd: projectDir,
     });
     compiledFiles = compResult.compiledFiles;
     effectiveTarget = compResult.effectiveTarget;
   } catch (compileErr: any) {
-    const errorAilPath =
-      compileErr?.ailFilePath ??
+    const errorAicePath =
+      compileErr?.aiceFilePath ??
       (targetPath
         ? path.isAbsolute(targetPath)
           ? targetPath
           : path.resolve(projectDir, targetPath)
-        : "unknown.ail");
+        : "unknown.aice");
     const source =
-      compileErr?.ailSource ??
-      (errorAilPath && fs.existsSync(errorAilPath) ? fs.readFileSync(errorAilPath, "utf-8") : "");
-    const report = buildReportFromError(compileErr, source, errorAilPath);
+      compileErr?.aiceSource ??
+      (errorAicePath && fs.existsSync(errorAicePath) ? fs.readFileSync(errorAicePath, "utf-8") : "");
+    const report = buildReportFromError(compileErr, source, errorAicePath);
     const formattedDiag = formatDiagnosticText(report);
     return {
       success: false,
       exitCode: 1,
-      output: `❌ AIL Compilation Error prior to test execution:\n${formattedDiag}`,
+      output: `❌ AICE Compilation Error prior to test execution:\n${formattedDiag}`,
       summary: { total: 1, passed: 0, failed: 1 },
       compiledFiles,
-      harness: "ail-compiler",
+      harness: "aice-compiler",
     };
   }
 
@@ -921,7 +921,7 @@ export async function runAilTests(
   const fullArgs = harness.buildArgs(effectiveTarget, options);
 
   // Step 3: Spawn test runner process in testCwd and capture output
-  return new Promise<AilTestResult>((resolve) => {
+  return new Promise<AiceTestResult>((resolve) => {
     let timer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
 

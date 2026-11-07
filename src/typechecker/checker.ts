@@ -1,6 +1,6 @@
 /**
- * Sound Type Checker & Refinement Solver for AIL 2.0.
- * Conforms to Section 3 of docs/AIL_SPEC.md and Pillar 4 of docs/RESEARCH_SYNTHESIS.md.
+ * Sound Type Checker & Refinement Solver for AICE 2.0.
+ * Conforms to Section 3 of docs/AICE_SPEC.md and Pillar 4 of docs/RESEARCH_SYNTHESIS.md.
  */
 
 import type {
@@ -90,7 +90,7 @@ export class TypeCheckError extends Error {
   constructor(
     message: string,
     span: Span,
-    code = "AIL_E2000_TYPE_ERROR",
+    code = "AICE_E2000_TYPE_ERROR",
     expected?: Type,
     actual?: Type,
   ) {
@@ -480,28 +480,28 @@ export class TypeChecker {
     }
   }
 
-  private resolveImportedAilModule(importSource: string, fromDir: string): string | null {
+  private resolveImportedAiceModule(importSource: string, fromDir: string): string | null {
     if (!importSource.startsWith("./") && !importSource.startsWith("../")) {
       return null;
     }
 
     const cleanRel = importSource
-      .replace(/(\.(ts|tsx|js|jsx|py))?\.ail$/i, "")
+      .replace(/(\.(ts|tsx|js|jsx|py))?\.aice$/i, "")
       .replace(/\.(ts|tsx|js|jsx|py)$/i, "");
 
     const candidates: string[] = [];
-    if (importSource.endsWith(".ail")) {
+    if (importSource.endsWith(".aice")) {
       candidates.push(path.resolve(fromDir, importSource));
     }
     candidates.push(
-      path.resolve(fromDir, `${importSource}.ail`),
-      path.resolve(fromDir, `${cleanRel}.ail`),
-      path.resolve(fromDir, `${cleanRel}.ts.ail`),
-      path.resolve(fromDir, `${cleanRel}.tsx.ail`),
-      path.resolve(fromDir, `${cleanRel}.js.ail`),
-      path.resolve(fromDir, `${cleanRel}.py.ail`),
-      path.resolve(fromDir, cleanRel, "index.ail"),
-      path.resolve(fromDir, cleanRel, "index.ts.ail"),
+      path.resolve(fromDir, `${importSource}.aice`),
+      path.resolve(fromDir, `${cleanRel}.aice`),
+      path.resolve(fromDir, `${cleanRel}.ts.aice`),
+      path.resolve(fromDir, `${cleanRel}.tsx.aice`),
+      path.resolve(fromDir, `${cleanRel}.js.aice`),
+      path.resolve(fromDir, `${cleanRel}.py.aice`),
+      path.resolve(fromDir, cleanRel, "index.aice"),
+      path.resolve(fromDir, cleanRel, "index.ts.aice"),
     );
 
     for (const candidate of candidates) {
@@ -520,20 +520,20 @@ export class TypeChecker {
     this.moduleEnvCache.clear();
   }
 
-  private loadModuleExportsEnv(resolvedAilPath: string): TypeEnv | null {
-    if (this.resolvingModules.has(resolvedAilPath)) {
+  private loadModuleExportsEnv(resolvedAicePath: string): TypeEnv | null {
+    if (this.resolvingModules.has(resolvedAicePath)) {
       return null; // cycle protection — caller falls back to TYPE_UNKNOWN
     }
 
     let source: string;
     try {
-      source = fs.readFileSync(resolvedAilPath, "utf-8");
+      source = fs.readFileSync(resolvedAicePath, "utf-8");
     } catch {
       return null;
     }
 
     const sourceHash = computeSourceHash(source);
-    const cacheKey = `${resolvedAilPath}::${sourceHash}`;
+    const cacheKey = `${resolvedAicePath}::${sourceHash}`;
 
     if (this.moduleEnvCache.has(cacheKey)) {
       const cachedEnv = this.moduleEnvCache.get(cacheKey)!;
@@ -543,7 +543,7 @@ export class TypeChecker {
       return cachedEnv;
     }
 
-    this.resolvingModules.add(resolvedAilPath);
+    this.resolvingModules.add(resolvedAicePath);
     const prevCycleFallback = this.currentCycleFallbackOccurred;
     this.currentCycleFallbackOccurred = false;
     const prevFilePath = this.currentFilePath;
@@ -552,7 +552,7 @@ export class TypeChecker {
     try {
       let subMod: Module;
       try {
-        subMod = parseCached(source, resolvedAilPath);
+        subMod = parseCached(source, resolvedAicePath);
       } catch {
         return null;
       }
@@ -560,7 +560,7 @@ export class TypeChecker {
       let idioms = this.currentIdioms;
       if (!idioms && astContainsDollarIdentifier(subMod)) {
         try {
-          const root = findProjectRoot(resolvedAilPath);
+          const root = findProjectRoot(resolvedAicePath);
           const config = loadProjectConfig(root);
           if (config.idioms && Object.keys(config.idioms).length > 0) {
             idioms = config.idioms;
@@ -576,8 +576,8 @@ export class TypeChecker {
 
       const exportedEnv = new TypeEnv(this.globalEnv);
 
-      this.currentFilePath = resolvedAilPath;
-      this.currentBaseDir = path.dirname(resolvedAilPath);
+      this.currentFilePath = resolvedAicePath;
+      this.currentBaseDir = path.dirname(resolvedAicePath);
 
       // Pass 1: Declare all items
       for (const subItem of subMod.items) {
@@ -660,7 +660,7 @@ export class TypeChecker {
       this.moduleEnvCache.set(cacheKey, exportedEnv);
       return exportedEnv;
     } finally {
-      this.resolvingModules.delete(resolvedAilPath);
+      this.resolvingModules.delete(resolvedAicePath);
       this.currentCycleFallbackOccurred = prevCycleFallback;
       this.currentFilePath = prevFilePath;
       this.currentBaseDir = prevBaseDir;
@@ -753,7 +753,7 @@ export class TypeChecker {
 
     if (item.kind === "ImportDecl") {
       const resolvedPath = this.currentBaseDir
-        ? this.resolveImportedAilModule(item.source, this.currentBaseDir)
+        ? this.resolveImportedAiceModule(item.source, this.currentBaseDir)
         : null;
       if (resolvedPath && this.resolvingModules.has(resolvedPath)) {
         this.currentCycleFallbackOccurred = true;
@@ -1061,7 +1061,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot assign value of type '${formatType(valType)}' to variable '${item.name}' of type '${formatType(declType)}'`,
             item.span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             declType,
             valType,
           );
@@ -1111,7 +1111,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Default parameter value of type '${formatType(defType)}' is not assignable to parameter '${p.name}' of type '${formatType(pType)}'`,
             p.defaultValue.span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             pType,
             defType,
           );
@@ -1135,7 +1135,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Trailing expression evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
                   last.expr.span,
-                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  "AICE_E2007_RETURN_TYPE_MISMATCH",
                   retType,
                   trailingType,
                 );
@@ -1158,7 +1158,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but method '${m.name}' declares return type '${formatType(retType)}'`,
                   last.span,
-                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  "AICE_E2007_RETURN_TYPE_MISMATCH",
                   retType,
                   trailingType,
                 );
@@ -1198,7 +1198,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Method '${m.name}' returns '${formatType(bodyType)}', but declared '${formatType(retType)}'`,
               m.body.span,
-              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              "AICE_E2007_RETURN_TYPE_MISMATCH",
               retType,
               bodyType,
             );
@@ -1324,7 +1324,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Default parameter value of type '${formatType(defType)}' is not assignable to parameter '${p.name}' of type '${formatType(pType)}'`,
             p.defaultValue.span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             pType,
             defType,
           );
@@ -1354,7 +1354,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Expression body evaluates to '${formatType(bodyType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
               (fn.body as Expr).span,
-              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              "AICE_E2007_RETURN_TYPE_MISMATCH",
               returnType,
               bodyType,
             );
@@ -1389,7 +1389,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Trailing expression evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
                   last.expr.span,
-                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  "AICE_E2007_RETURN_TYPE_MISMATCH",
                   returnType,
                   trailingType,
                 );
@@ -1416,7 +1416,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Trailing expression in conditional branch evaluates to '${formatType(trailingType)}', but function '${fn.name}' declares return type '${formatType(returnType)}'`,
                   last.span,
-                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  "AICE_E2007_RETURN_TYPE_MISMATCH",
                   returnType,
                   trailingType,
                 );
@@ -1662,7 +1662,7 @@ export class TypeChecker {
       throw new TypeCheckError(
         `Condition in 'if' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
         stmt.condition.span,
-        "AIL_E2001_NON_BOOLEAN_CONDITION",
+        "AICE_E2001_NON_BOOLEAN_CONDITION",
         TYPE_BOOL,
         condType,
       );
@@ -1694,7 +1694,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Condition in 'elif' statement must evaluate strictly to 'bool', got '${formatType(elifCondType)}'. Zero implicit coercion allowed.`,
           elif.condition.span,
-          "AIL_E2001_NON_BOOLEAN_CONDITION",
+          "AICE_E2001_NON_BOOLEAN_CONDITION",
           TYPE_BOOL,
           elifCondType,
         );
@@ -1745,7 +1745,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Cannot assign value of type '${formatType(initType)}' to variable '${stmt.name}' of type '${formatType(declaredType)}'`,
               stmt.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               declaredType,
               initType,
             );
@@ -1838,7 +1838,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Return expression of type '${formatType(actual)}' does not match function return type '${formatType(expected)}'`,
               stmt.span,
-              "AIL_E2007_RETURN_TYPE_MISMATCH",
+              "AICE_E2007_RETURN_TYPE_MISMATCH",
               expected,
               actual,
             );
@@ -1863,7 +1863,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Return expression of type '${formatType(actual)}' does not match previously inferred return type '${formatType(fnEnv.inferredReturnType)}'`,
                 stmt.span,
-                "AIL_E2007_RETURN_TYPE_MISMATCH",
+                "AICE_E2007_RETURN_TYPE_MISMATCH",
                 fnEnv.inferredReturnType,
                 actual,
               );
@@ -1892,7 +1892,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Match guard must evaluate to 'bool', got '${formatType(guardType)}'`,
                 c.guard.span,
-                "AIL_E2001_NON_BOOLEAN_CONDITION",
+                "AICE_E2001_NON_BOOLEAN_CONDITION",
               );
             }
           }
@@ -1920,7 +1920,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot iterate over non-array type '${formatType(iterType)}'`,
             stmt.iterable.span,
-            "AIL_E2009_NON_ITERABLE_TYPE",
+            "AICE_E2009_NON_ITERABLE_TYPE",
           );
         }
 
@@ -1939,7 +1939,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Condition in 'while' statement must evaluate strictly to 'bool', got '${formatType(condType)}'. Zero implicit coercion allowed.`,
             stmt.condition.span,
-            "AIL_E2001_NON_BOOLEAN_CONDITION",
+            "AICE_E2001_NON_BOOLEAN_CONDITION",
             TYPE_BOOL,
             condType,
           );
@@ -2070,7 +2070,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Undeclared identifier '${expr.name}'`,
             expr.span,
-            "AIL_E2008_UNDECLARED_VARIABLE",
+            "AICE_E2008_UNDECLARED_VARIABLE",
           );
         }
         return binding.type;
@@ -2127,7 +2127,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Operator '+' cannot be applied to disparate types '${formatType(leftType)}' and '${formatType(rightType)}'. Explicit conversion required.`,
               expr.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
             );
 
           case "-":
@@ -2145,7 +2145,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Operator '${expr.operator}' requires numeric operands, got '${formatType(leftType)}' and '${formatType(rightType)}'`,
               expr.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
             );
 
           case "&":
@@ -2163,7 +2163,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Operator '${expr.operator}' requires numeric operands, got '${formatType(leftType)}' and '${formatType(rightType)}'`,
               expr.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
             );
 
           case "/":
@@ -2175,7 +2175,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 "Division by zero detected at compile time",
                 expr.right.span,
-                "AIL_E2003_DIVISION_BY_ZERO",
+                "AICE_E2003_DIVISION_BY_ZERO",
               );
             }
             if (leftType.kind === "unknown" || rightType.kind === "unknown") {
@@ -2187,7 +2187,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Division requires numeric operands, got '${formatType(leftType)}' and '${formatType(rightType)}'`,
               expr.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
             );
 
           case "==":
@@ -2202,7 +2202,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Left operand of 'in' must be a key (string, number, or any), got '${formatType(leftType)}'`,
                 expr.left.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
                 TYPE_STR,
                 leftType,
               );
@@ -2211,7 +2211,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Right operand of 'in' must be an object, record, map, or array, got '${formatType(rightType)}'`,
                 expr.right.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
               );
             }
             return TYPE_BOOL;
@@ -2225,14 +2225,14 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Left operand of 'instanceof' must be an object, instance, or any, got '${formatType(leftType)}'`,
                 expr.left.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
               );
             }
             if (!isValidInstanceofClassType(rightType, env)) {
               throw new TypeCheckError(
                 `Right operand of 'instanceof' must be a class, constructor, or any, got '${formatType(rightType)}'`,
                 expr.right.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
               );
             }
             return TYPE_BOOL;
@@ -2253,7 +2253,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Comparison '${expr.operator}' cannot compare '${formatType(leftType)}' with '${formatType(rightType)}'`,
               expr.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
             );
           }
 
@@ -2354,7 +2354,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Unary '${expr.operator}' cannot be applied to type '${formatType(opType)}'`,
           expr.span,
-          "AIL_E2002_TYPE_MISMATCH",
+          "AICE_E2002_TYPE_MISMATCH",
         );
       }
 
@@ -2451,7 +2451,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot call non-function of type '${formatType(calleeType)}'`,
             expr.callee.span,
-            "AIL_E2010_NOT_CALLABLE",
+            "AICE_E2010_NOT_CALLABLE",
           );
         }
 
@@ -2493,7 +2493,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Property '${expr.property}' does not exist on type '${formatType(objType)}'`,
           expr.span,
-          "AIL_E2011_UNKNOWN_PROPERTY",
+          "AICE_E2011_UNKNOWN_PROPERTY",
         );
       }
 
@@ -2531,7 +2531,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Tuple index must be of type 'int', got '${formatType(idxType)}'`,
               expr.index.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               TYPE_INT,
               idxType,
             );
@@ -2542,7 +2542,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Tuple index ${idx} out of bounds for tuple type '${formatType(targetObj)}'`,
                 expr.index.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
               );
             }
             return targetObj.elementTypes[idx];
@@ -2555,7 +2555,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Array index must be of type 'int', got '${formatType(idxType)}'`,
               expr.index.span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               TYPE_INT,
               idxType,
             );
@@ -2566,7 +2566,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Cannot index non-array type '${formatType(objType)}'`,
           expr.object.span,
-          "AIL_E2012_NOT_INDEXABLE",
+          "AICE_E2012_NOT_INDEXABLE",
         );
       }
 
@@ -2683,7 +2683,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Cannot use '?' unwrap on Result[T, E] inside a function that returns '${formatType(currentFnRet ?? TYPE_VOID)}'. Function must return a compatible Result[T, ${formatType(operandType.errType)}].`,
               expr.span,
-              "AIL_E2004_CANNOT_UNWRAP_RESULT",
+              "AICE_E2004_CANNOT_UNWRAP_RESULT",
             );
           }
 
@@ -2691,7 +2691,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Error type '${formatType(operandType.errType)}' in '?' unwrap cannot be returned by function expecting error type '${formatType(currentFnRet.errType)}'`,
               expr.span,
-              "AIL_E2004_CANNOT_UNWRAP_RESULT",
+              "AICE_E2004_CANNOT_UNWRAP_RESULT",
               currentFnRet.errType,
               operandType.errType,
             );
@@ -2715,14 +2715,14 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot use '?' unwrap on Result[T, E] inside a function that returns '${formatType(currentFnRet ?? TYPE_VOID)}'. Function must return a compatible Result[T, E].`,
             expr.span,
-            "AIL_E2004_CANNOT_UNWRAP_RESULT",
+            "AICE_E2004_CANNOT_UNWRAP_RESULT",
           );
         }
 
         throw new TypeCheckError(
           `Postfix '?' unwrap can only be applied to 'Result' or 'Option' types, got '${formatType(operandType)}'`,
           expr.span,
-          "AIL_E2004_CANNOT_UNWRAP_RESULT",
+          "AICE_E2004_CANNOT_UNWRAP_RESULT",
         );
       }
 
@@ -2777,7 +2777,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Closure body evaluates to '${formatType(effectiveReturnType)}', but returns '${formatType(returnType)}'`,
                   expr.body.span,
-                  "AIL_E2007_RETURN_TYPE_MISMATCH",
+                  "AICE_E2007_RETURN_TYPE_MISMATCH",
                   returnType,
                   effectiveReturnType,
                 );
@@ -2800,7 +2800,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Closure body evaluates to '${formatType(bodyType)}', but returns '${formatType(returnType)}'`,
                 expr.body.span,
-                "AIL_E2007_RETURN_TYPE_MISMATCH",
+                "AICE_E2007_RETURN_TYPE_MISMATCH",
                 returnType,
                 bodyType,
               );
@@ -2835,14 +2835,14 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Cannot assign to undeclared identifier '${target.name}'`,
           target.span,
-          "AIL_E2008_UNDECLARED_VARIABLE",
+          "AICE_E2008_UNDECLARED_VARIABLE",
         );
       }
       if (!binding.isMut) {
         throw new TypeCheckError(
           `Cannot assign to immutable variable '${target.name}'. Declare with 'let mut ${target.name}' to allow mutation.`,
           span,
-          "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+          "AICE_E2005_IMMUTABLE_ASSIGNMENT",
         );
       }
       let valType: Type;
@@ -2879,7 +2879,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Compound assignment operator '${op}' cannot be used with non-array value in vector assignment`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
           );
         }
         for (const tElem of target.elements) {
@@ -2889,14 +2889,14 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Cannot assign to undeclared identifier '${tElem.name}'`,
                 tElem.span,
-                "AIL_E2008_UNDECLARED_VARIABLE",
+                "AICE_E2008_UNDECLARED_VARIABLE",
               );
             }
             if (!binding.isMut) {
               throw new TypeCheckError(
                 `Cannot assign to immutable variable '${tElem.name}'. Declare with 'let mut ${tElem.name}' or '::=' to allow mutation.`,
                 span,
-                "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+                "AICE_E2005_IMMUTABLE_ASSIGNMENT",
               );
             }
           }
@@ -2938,7 +2938,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot assign to getter-only property '${target.property}'`,
             span,
-            "AIL_E2005_IMMUTABLE_ASSIGNMENT",
+            "AICE_E2005_IMMUTABLE_ASSIGNMENT",
           );
         }
       }
@@ -2973,7 +2973,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Cannot assign '${formatType(valType)}' to ${targetDesc} of type '${formatType(targetType)}'`,
           span,
-          "AIL_E2002_TYPE_MISMATCH",
+          "AICE_E2002_TYPE_MISMATCH",
           targetType,
           valType,
         );
@@ -2995,7 +2995,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Operator '${op}' requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
           );
         }
         const resType = TYPE_INT;
@@ -3003,7 +3003,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot assign result of '${op}' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             targetType,
             resType,
           );
@@ -3022,7 +3022,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Operator '${op}' requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
           );
         }
         if (targetType.kind === "unknown" || valType.kind === "unknown") {
@@ -3034,7 +3034,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot assign result of '${op}' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             targetType,
             resType,
           );
@@ -3047,7 +3047,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             "Division by zero detected at compile time",
             value.span,
-            "AIL_E2003_DIVISION_BY_ZERO",
+            "AICE_E2003_DIVISION_BY_ZERO",
           );
         }
         if (
@@ -3057,7 +3057,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Division requires numeric operands, got '${formatType(targetType)}' and '${formatType(valType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
           );
         }
         if (targetType.kind === "unknown" || valType.kind === "unknown") {
@@ -3068,7 +3068,7 @@ export class TypeChecker {
           throw new TypeCheckError(
             `Cannot assign result of '/=' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
             span,
-            "AIL_E2002_TYPE_MISMATCH",
+            "AICE_E2002_TYPE_MISMATCH",
             targetType,
             resType,
           );
@@ -3087,7 +3087,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Cannot assign '${formatType(resType)}' to ${targetDesc} of type '${formatType(targetType)}'`,
               span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               targetType,
               resType,
             );
@@ -3104,7 +3104,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Cannot assign result of '+=' ('${formatType(resType)}') to ${targetDesc} of type '${formatType(targetType)}'`,
               span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               targetType,
               resType,
             );
@@ -3114,7 +3114,7 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Operator '+=' cannot be applied to disparate types '${formatType(targetType)}' and '${formatType(valType)}'. Explicit conversion required.`,
           span,
-          "AIL_E2002_TYPE_MISMATCH",
+          "AICE_E2002_TYPE_MISMATCH",
         );
       }
     }
@@ -3140,7 +3140,7 @@ export class TypeChecker {
       throw new TypeCheckError(
         `Function expects between ${minParams} and ${fnType.params.length} arguments, got ${args.length}`,
         span,
-        "AIL_E2013_ARGUMENT_COUNT_MISMATCH",
+        "AICE_E2013_ARGUMENT_COUNT_MISMATCH",
       );
     }
 
@@ -3167,7 +3167,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(elementType)}'`,
               args[i].span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               elementType,
               argType,
             );
@@ -3188,7 +3188,7 @@ export class TypeChecker {
             throw new TypeCheckError(
               `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
               args[i].span,
-              "AIL_E2002_TYPE_MISMATCH",
+              "AICE_E2002_TYPE_MISMATCH",
               expectedType,
               argType,
             );
@@ -3211,7 +3211,7 @@ export class TypeChecker {
                   throw new TypeCheckError(
                     `Argument spread element of type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
                     arg.span,
-                    "AIL_E2002_TYPE_MISMATCH",
+                    "AICE_E2002_TYPE_MISMATCH",
                     expectedType,
                     elemType,
                   );
@@ -3233,7 +3233,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Argument spread of element type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
                   arg.span,
-                  "AIL_E2002_TYPE_MISMATCH",
+                  "AICE_E2002_TYPE_MISMATCH",
                   expectedType,
                   elemType,
                 );
@@ -3246,7 +3246,7 @@ export class TypeChecker {
                   throw new TypeCheckError(
                     `Argument spread of element type '${formatType(elemType)}' is not assignable to expected type '${formatType(expectedType)}'`,
                     arg.span,
-                    "AIL_E2002_TYPE_MISMATCH",
+                    "AICE_E2002_TYPE_MISMATCH",
                     expectedType,
                     elemType,
                   );
@@ -3261,7 +3261,7 @@ export class TypeChecker {
                 throw new TypeCheckError(
                   `Argument spread of type '${formatType(spreadOperandType)}' is not assignable to expected type '${formatType(expectedType)}'`,
                   arg.span,
-                  "AIL_E2002_TYPE_MISMATCH",
+                  "AICE_E2002_TYPE_MISMATCH",
                   expectedType,
                   spreadOperandType,
                 );
@@ -3285,7 +3285,7 @@ export class TypeChecker {
               throw new TypeCheckError(
                 `Argument ${i + 1} of type '${formatType(argType)}' is not assignable to expected type '${formatType(expectedType)}'`,
                 arg.span,
-                "AIL_E2002_TYPE_MISMATCH",
+                "AICE_E2002_TYPE_MISMATCH",
                 expectedType,
                 argType,
               );
@@ -3396,14 +3396,14 @@ export class TypeChecker {
         throw new TypeCheckError(
           `Value ${val} violates refinement constraint: must be >= ${minBound}`,
           span,
-          "AIL_E2006_REFINEMENT_VIOLATION",
+          "AICE_E2006_REFINEMENT_VIOLATION",
         );
       }
       if (maxBound !== undefined && val > maxBound) {
         throw new TypeCheckError(
           `Value ${val} violates refinement constraint: must be <= ${maxBound}`,
           span,
-          "AIL_E2006_REFINEMENT_VIOLATION",
+          "AICE_E2006_REFINEMENT_VIOLATION",
         );
       }
     }

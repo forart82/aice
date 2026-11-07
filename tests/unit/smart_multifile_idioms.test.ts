@@ -4,8 +4,8 @@
  *
  * Phase 0 TDD Suite: Smart Multi-File Idioms Engine (Twinless Native-First Mode)
  * Covers:
- * - Category A: Native-first idiom discovery & SHA-256 provenance index (.ail-cache/idioms.json)
- * - Category B: Instant On/Off Toggle (ail idioms on/off, --idioms/--no-idioms, stale AI memory grace)
+ * - Category A: Native-first idiom discovery & SHA-256 provenance index (.aice-cache/idioms.json)
+ * - Category B: Instant On/Off Toggle (aice idioms on/off, --idioms/--no-idioms, stale AI memory grace)
  * - Category C: Multi-file idiom read & smart multi-file idiom update (reordering, hygiene, cycle detection, atomic rollback)
  */
 
@@ -23,7 +23,7 @@ import {
   type ProjectIdiomDefinition,
 } from "../../src/config/project-config.js";
 import {
-  expandAilSourceIdioms,
+  expandAiceSourceIdioms,
   IdiomCycleError,
   readProjectIdiom,
   scanProjectIdioms,
@@ -36,7 +36,7 @@ import { splice } from "../../src/tools/splice.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -55,7 +55,7 @@ describe("Smart Multi-File Idioms Engine (Twinless Native-First Mode)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-smart-idioms-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-smart-idioms-"));
   });
 
   afterEach(() => {
@@ -83,7 +83,7 @@ describe("Smart Multi-File Idioms Engine (Twinless Native-First Mode)", () => {
   });
 
   describe("Category A: Native-First Idiom Discovery & Provenance Cache", () => {
-    it("discovers idioms directly across pure native .ts files with zero .ail files on disk and writes provenance to .ail-cache/idioms.json", () => {
+    it("discovers idioms directly across pure native .ts files with zero .aice files on disk and writes provenance to .aice-cache/idioms.json", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -127,17 +127,17 @@ describe("Smart Multi-File Idioms Engine (Twinless Native-First Mode)", () => {
       expect(Object.keys(scanRes.idioms).length).toBeGreaterThanOrEqual(1);
       expect(scanRes.totalNetTokenSavings).toBeGreaterThan(0);
 
-      // Verify zero .ail files were created on disk
+      // Verify zero .aice files were created on disk
       const allFiles = fs.readdirSync(srcDir);
-      expect(allFiles.some((f) => f.endsWith(".ail"))).toBe(false);
+      expect(allFiles.some((f) => f.endsWith(".aice"))).toBe(false);
 
-      // Verify ail.config.json persisted the discovered idioms
+      // Verify aice.config.json persisted the discovered idioms
       const config = loadProjectConfig(tmpDir);
       expect(config.idioms).toBeDefined();
       expect(Object.keys(config.idioms!).length).toBeGreaterThanOrEqual(1);
 
-      // Verify .ail-cache/idioms.json exists and records fileHashes + occurrence provenance
-      const cacheFile = path.join(tmpDir, ".ail-cache", "idioms.json");
+      // Verify .aice-cache/idioms.json exists and records fileHashes + occurrence provenance
+      const cacheFile = path.join(tmpDir, ".aice-cache", "idioms.json");
       expect(fs.existsSync(cacheFile)).toBe(true);
       const cacheData = JSON.parse(fs.readFileSync(cacheFile, "utf-8"));
       expect(cacheData.fileHashes).toBeDefined();
@@ -161,7 +161,7 @@ describe("Smart Multi-File Idioms Engine (Twinless Native-First Mode)", () => {
         name: "$guardPos",
         kind: "stmt",
         params: [{ name: "$0" }, { name: "$1" }],
-        templateAil: "if $0 <= 0:\n  ret $1",
+        templateAice: "if $0 <= 0:\n  ret $1",
         occurrences: 2,
         tokensPerOccurrenceSaved: 6,
         netTokenSavings: 12,
@@ -220,7 +220,7 @@ export function computeB(y: number): number {
   });
 
   describe("Category B: Instant On/Off Switch & Stale AI Memory Grace", () => {
-    it("toggles idioms on and off via API and CLI (`ail idioms off` / `ail idioms on`) and respects --idioms / --no-idioms flags", async () => {
+    it("toggles idioms on and off via API and CLI (`aice idioms off` / `aice idioms on`) and respects --idioms / --no-idioms flags", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -228,7 +228,7 @@ export function computeB(y: number): number {
         name: "$drawCircle",
         kind: "block",
         params: [{ name: "$0" }, { name: "$1" }, { name: "$2" }, { name: "$3" }],
-        templateAil: "$0.beginPath()\n$0.arc($1, $2, $3, 0, 6.28)\n$0.fill()",
+        templateAice: "$0.beginPath()\n$0.arc($1, $2, $3, 0, 6.28)\n$0.fill()",
         occurrences: 3,
         tokensPerOccurrenceSaved: 12,
         netTokenSavings: 36,
@@ -271,7 +271,7 @@ export function computeB(y: number): number {
       expect(ctxOverrideOff.targetContent).toContain("ctx.beginPath()");
       expect(ctxOverrideOff.formattedBundle).not.toContain("### Active Project Idioms");
 
-      // 3. Switch OFF globally via CLI `ail idioms off`
+      // 3. Switch OFF globally via CLI `aice idioms off`
       const offRes = runCli(["idioms", "off", tmpDir]);
       expect(offRes.status).toBe(0);
       const cfgAfterOff = loadProjectConfig(tmpDir);
@@ -304,7 +304,7 @@ export function computeB(y: number): number {
       expect(updatedNative).toContain("ctx.beginPath()");
       expect(updatedNative).toContain("ctx.arc(x + 1, y + 1, r * 2, 0, 6.28)");
 
-      // 5. Switch ON globally via setProjectIdiomsEnabled / CLI `ail idioms on`
+      // 5. Switch ON globally via setProjectIdiomsEnabled / CLI `aice idioms on`
       setProjectIdiomsEnabled(tmpDir, true);
       expect(isProjectIdiomsEnabled(loadProjectConfig(tmpDir))).toBe(true);
     });
@@ -319,7 +319,7 @@ export function computeB(y: number): number {
         name: "$clampAssign",
         kind: "stmt",
         params: [{ name: "$0" }, { name: "$1" }, { name: "$2" }],
-        templateAil: "if $0 > $1:\n  $0 = $2",
+        templateAice: "if $0 > $1:\n  $0 = $2",
         occurrences: 3,
         tokensPerOccurrenceSaved: 8,
         netTokenSavings: 24,
@@ -410,7 +410,7 @@ export class Enemy {
 
       // Config template updated
       const updatedCfg = loadProjectConfig(tmpDir);
-      expect(updatedCfg.idioms?.$clampAssign.templateAil).toBe(newTemplate);
+      expect(updatedCfg.idioms?.$clampAssign.templateAice).toBe(newTemplate);
     });
 
     it("enforces hygienic alpha-renaming when an idiom template local variable collides with call-site arguments or scope variables", () => {
@@ -419,7 +419,7 @@ export class Enemy {
           name: "$swapAdd",
           kind: "block",
           params: [{ name: "$0" }, { name: "$1" }],
-          templateAil: "tmp := $0 + 1\n$1 = tmp * 2",
+          templateAice: "tmp := $0 + 1\n$1 = tmp * 2",
           occurrences: 3,
           tokensPerOccurrenceSaved: 8,
           netTokenSavings: 24,
@@ -427,20 +427,20 @@ export class Enemy {
       };
 
       // Caller already has a variable named `tmp` AND passes `tmp` as $0!
-      const ailSource = `fn compute(x: int) -> int:
+      const aiceSource = `fn compute(x: int) -> int:
   tmp := x * 10
   out ::= 0
   $swapAdd(tmp, out)
   ret tmp + out
 `;
 
-      const expanded = expandAilSourceIdioms(ailSource, idioms);
+      const expanded = expandAiceSourceIdioms(aiceSource, idioms);
       expect(expanded.expandedCount).toBe(1);
       // The template's internal `tmp` must be alpha-renamed (e.g. tmp_1) so it does not shadow or clobber caller's `tmp`!
-      expect(expanded.ail).toContain("tmp := x * 10");
-      expect(expanded.ail).toMatch(/tmp_\d+\s*:=\s*tmp\s*\+\s*1/);
-      expect(expanded.ail).toMatch(/out\s*=\s*tmp_\d+\s*\*\s*2/);
-      expect(expanded.ail).toContain("tmp + out");
+      expect(expanded.aice).toContain("tmp := x * 10");
+      expect(expanded.aice).toMatch(/tmp_\d+\s*:=\s*tmp\s*\+\s*1/);
+      expect(expanded.aice).toMatch(/out\s*=\s*tmp_\d+\s*\*\s*2/);
+      expect(expanded.aice).toContain("tmp + out");
     });
 
     it("detects direct and mutual recursion cycles in idiom definitions and throws IdiomCycleError", async () => {
@@ -449,7 +449,7 @@ export class Enemy {
           name: "$selfLoop",
           kind: "stmt",
           params: [{ name: "$0" }],
-          templateAil: "$selfLoop($0)",
+          templateAice: "$selfLoop($0)",
           occurrences: 3,
           tokensPerOccurrenceSaved: 5,
           netTokenSavings: 15,
@@ -457,7 +457,7 @@ export class Enemy {
       };
 
       expect(() => validateIdiomDefinitions(directCycle)).toThrow(IdiomCycleError);
-      expect(() => expandAilSourceIdioms("fn f():\n  $selfLoop(1)\n", directCycle)).toThrow(
+      expect(() => expandAiceSourceIdioms("fn f():\n  $selfLoop(1)\n", directCycle)).toThrow(
         IdiomCycleError,
       );
 
@@ -466,7 +466,7 @@ export class Enemy {
           name: "$ping",
           kind: "stmt",
           params: [{ name: "$0" }],
-          templateAil: "$pong($0)",
+          templateAice: "$pong($0)",
           occurrences: 3,
           tokensPerOccurrenceSaved: 5,
           netTokenSavings: 15,
@@ -475,7 +475,7 @@ export class Enemy {
           name: "$pong",
           kind: "stmt",
           params: [{ name: "$0" }],
-          templateAil: "$ping($0)",
+          templateAice: "$ping($0)",
           occurrences: 3,
           tokensPerOccurrenceSaved: 5,
           netTokenSavings: 15,
@@ -492,7 +492,7 @@ export class Enemy {
             name: "$alpha",
             kind: "stmt",
             params: [{ name: "$0" }],
-            templateAil: "$beta($0)",
+            templateAice: "$beta($0)",
             occurrences: 3,
             tokensPerOccurrenceSaved: 5,
             netTokenSavings: 15,
@@ -501,7 +501,7 @@ export class Enemy {
             name: "$beta",
             kind: "stmt",
             params: [{ name: "$0" }],
-            templateAil: "print($0)",
+            templateAice: "print($0)",
             occurrences: 3,
             tokensPerOccurrenceSaved: 5,
             netTokenSavings: 15,
@@ -522,7 +522,7 @@ export class Enemy {
         name: "$resetIfNeg",
         kind: "stmt",
         params: [{ name: "$0" }],
-        templateAil: "if $0 < 0:\n  $0 = 0",
+        templateAice: "if $0 < 0:\n  $0 = 0",
         occurrences: 2,
         tokensPerOccurrenceSaved: 6,
         netTokenSavings: 12,
@@ -580,7 +580,7 @@ export class Enemy {
         // Verify file1 (which was written before file2 failed), file2, and config remain 100% untouched
         expect(fs.readFileSync(file1, "utf-8")).toBe(orig1);
         expect(fs.readFileSync(file2, "utf-8")).toBe(orig2);
-        expect(loadProjectConfig(tmpDir).idioms?.$resetIfNeg.templateAil).toBe(
+        expect(loadProjectConfig(tmpDir).idioms?.$resetIfNeg.templateAice).toBe(
           "if $0 < 0:\n  $0 = 0",
         );
       }
@@ -616,8 +616,8 @@ export class Enemy {
 
       const scanRes = scanProjectIdioms(srcDir, { minOccurrences: 3, minNetTokenSavings: 5 });
       expect(scanRes.synthesizedIdioms).toBeGreaterThanOrEqual(1);
-      expect(fs.existsSync(path.join(tmpDir, "ail.config.json"))).toBe(true);
-      expect(fs.existsSync(path.join(srcDir, "ail.config.json"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, "aice.config.json"))).toBe(true);
+      expect(fs.existsSync(path.join(srcDir, "aice.config.json"))).toBe(false);
 
       const firstIdiom = Object.keys(scanRes.idioms)[0];
       const readRes = readProjectIdiom(tmpDir, firstIdiom);

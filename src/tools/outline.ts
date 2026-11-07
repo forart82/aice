@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Semantic AST Skeleton Outline Engine (Step 18).
+ * AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18).
  * Provides semantic skeletonization achieving 85–90%+ token reduction for AI contexts.
  */
 
@@ -182,22 +182,22 @@ export function generateOutline(
     if (isFile) {
       filePath = sourceOrMod;
       originalSource = fs.readFileSync(filePath, "utf-8");
-      if (filePath.endsWith(".ail")) {
+      if (filePath.endsWith(".aice")) {
         const parsed = parseWithTrivia(originalSource, filePath);
         ast = parsed.ast;
         trivia = parsed.trivia;
       } else {
-        const companionAil = `${filePath}.ail`;
-        if (fs.existsSync(companionAil)) {
-          const ailSource = fs.readFileSync(companionAil, "utf-8");
-          const parsed = parseWithTrivia(ailSource, companionAil);
+        const companionAice = `${filePath}.aice`;
+        if (fs.existsSync(companionAice)) {
+          const aiceSource = fs.readFileSync(companionAice, "utf-8");
+          const parsed = parseWithTrivia(aiceSource, companionAice);
           ast = parsed.ast;
           trivia = parsed.trivia;
         } else {
           const targetLang = detectTargetFromPath(filePath);
           const decompResult = decompile(originalSource, targetLang, { filePath });
           try {
-            const parsed = parseWithTrivia(decompResult.ail, filePath);
+            const parsed = parseWithTrivia(decompResult.aice, filePath);
             ast = parsed.ast;
             trivia = parsed.trivia;
           } catch {
@@ -211,7 +211,7 @@ export function generateOutline(
       originalSource = sourceOrMod;
       const hasKnownTargetExt =
         explicitFilePath !== undefined &&
-        !explicitFilePath.endsWith(".ail") &&
+        !explicitFilePath.endsWith(".aice") &&
         KNOWN_TARGET_EXTENSIONS.has(path.extname(explicitFilePath).toLowerCase());
 
       if (hasKnownTargetExt && explicitFilePath) {
@@ -220,7 +220,7 @@ export function generateOutline(
           filePath: explicitFilePath,
         });
         try {
-          const parsed = parseWithTrivia(decompResult.ail, explicitFilePath);
+          const parsed = parseWithTrivia(decompResult.aice, explicitFilePath);
           ast = parsed.ast;
           trivia = parsed.trivia;
         } catch {
@@ -235,12 +235,12 @@ export function generateOutline(
         } catch (err) {
           try {
             const targetLang =
-              explicitFilePath && !explicitFilePath.endsWith(".ail")
+              explicitFilePath && !explicitFilePath.endsWith(".aice")
                 ? detectTargetFromPath(explicitFilePath)
                 : "typescript";
             const decompResult = decompile(originalSource, targetLang, { filePath });
             try {
-              const parsed = parseWithTrivia(decompResult.ail, filePath);
+              const parsed = parseWithTrivia(decompResult.aice, filePath);
               ast = parsed.ast;
               trivia = parsed.trivia;
             } catch {
@@ -746,7 +746,7 @@ export async function outlinePath(
   }
 
   const resultMap = new Map<string, OutlineResult>();
-  const ailFiles: string[] = [];
+  const aiceFiles: string[] = [];
   const targetCandidates: string[] = [];
 
   function walk(currentDir: string): void {
@@ -768,8 +768,8 @@ export async function outlinePath(
         walk(entryPath);
       } else if (entry.isFile()) {
         if (
-          entry.name.endsWith(".ail.trivia.json") ||
-          entry.name === "ail.config.json" ||
+          entry.name.endsWith(".aice.trivia.json") ||
+          entry.name === "aice.config.json" ||
           entry.name === "package-lock.json" ||
           entry.name === "tsconfig.json" ||
           entry.name === "jsconfig.json" ||
@@ -778,8 +778,8 @@ export async function outlinePath(
         ) {
           continue;
         }
-        if (entry.name.endsWith(".ail")) {
-          ailFiles.push(entryPath);
+        if (entry.name.endsWith(".aice")) {
+          aiceFiles.push(entryPath);
         } else {
           const ext = path.extname(entry.name).toLowerCase();
           if (KNOWN_TARGET_EXTENSIONS.has(ext)) {
@@ -793,11 +793,11 @@ export async function outlinePath(
   walk(fullPath);
 
   const processedBases = new Set<string>();
-  for (const ailFile of ailFiles) {
-    const baseTarget = ailFile.replace(/\.ail$/, "");
+  for (const aiceFile of aiceFiles) {
+    const baseTarget = aiceFile.replace(/\.aice$/, "");
     processedBases.add(baseTarget);
-    const relKey = path.relative(process.cwd(), ailFile);
-    resultMap.set(relKey, generateOutline(ailFile, options));
+    const relKey = path.relative(process.cwd(), aiceFile);
+    resultMap.set(relKey, generateOutline(aiceFile, options));
   }
 
   for (const targetFile of targetCandidates) {

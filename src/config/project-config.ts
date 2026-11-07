@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Unified Project Configuration Engine (Step 14).
- * Manages `ail.config.json`, `.ailrc`, and `package.json` config discovery,
+ * AICE 2.0 Unified Project Configuration Engine (Step 14).
+ * Manages `aice.config.json`, `.aicerc`, and `package.json` config discovery,
  * mode auto-detection ("side-by-side" vs "isolated"), robust default options,
  * and target output path resolution.
  */
@@ -33,14 +33,14 @@ export interface ProjectIdiomDefinition {
   name: string; // e.g. "$guardOk"
   kind: "expr" | "stmt" | "block";
   params: ProjectIdiomParam[];
-  templateAil: string;
+  templateAice: string;
   occurrences: number;
   tokensPerOccurrenceSaved: number;
   netTokenSavings: number;
   description?: string;
 }
 
-export interface AilProjectConfig {
+export interface AiceProjectConfig {
   mode: ProjectMode;
   sourceDir: string;
   outDir: string;
@@ -82,10 +82,10 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "kotlin",
 ]);
 
-export const DEFAULT_PROJECT_CONFIG: Readonly<AilProjectConfig> = Object.freeze({
+export const DEFAULT_PROJECT_CONFIG: Readonly<AiceProjectConfig> = Object.freeze({
   mode: "side-by-side",
   sourceDir: "src",
-  outDir: ".ail-build",
+  outDir: ".aice-build",
   targetLanguage: "typescript",
   isolated: false,
   watermark: true,
@@ -150,7 +150,7 @@ const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   ".git",
   "dist",
   "build",
-  ".ail-build",
+  ".aice-build",
   ".next",
   "coverage",
   ".turbo",
@@ -195,30 +195,30 @@ export function getExtensionForTarget(target: TargetLanguage): string {
 }
 
 /**
- * Derives target filename by stripping `.ail` or applying target language extension.
+ * Derives target filename by stripping `.aice` or applying target language extension.
  * E.g.:
- * - `App.tsx.ail` -> `App.tsx`
- * - `calc.ts.ail` -> `calc.ts`
- * - `calc.ail` (targetLanguage = "python") -> `calc.py`
- * - `calc.ail` (targetLanguage = "typescript") -> `calc.ts`
+ * - `App.tsx.aice` -> `App.tsx`
+ * - `calc.ts.aice` -> `calc.ts`
+ * - `calc.aice` (targetLanguage = "python") -> `calc.py`
+ * - `calc.aice` (targetLanguage = "typescript") -> `calc.ts`
  */
 export function deriveTargetFilename(
   filename: string,
   targetLanguage: TargetLanguage = "typescript",
 ): string {
-  if (!filename.endsWith(".ail")) {
+  if (!filename.endsWith(".aice")) {
     return filename;
   }
 
-  const withoutAil = filename.slice(0, -4);
-  const innerExt = path.extname(withoutAil).toLowerCase();
+  const withoutAice = filename.slice(0, -5);
+  const innerExt = path.extname(withoutAice).toLowerCase();
 
   if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
-    return withoutAil;
+    return withoutAice;
   }
 
   const defaultExt = getExtensionForTarget(targetLanguage);
-  return `${withoutAil}${defaultExt}`;
+  return `${withoutAice}${defaultExt}`;
 }
 
 /**
@@ -284,7 +284,7 @@ export function stripJsonComments(input: string): string {
 /**
  * Validates partial or complete project configuration fields.
  */
-export function validateConfig(config: Partial<AilProjectConfig>): void {
+export function validateConfig(config: Partial<AiceProjectConfig>): void {
   if (config.mode !== undefined && !VALID_PROJECT_MODES.has(config.mode)) {
     throw new Error(
       `Invalid project mode "${config.mode}". Valid modes are: "side-by-side", "isolated", "companion".`,
@@ -356,8 +356,8 @@ export function validateConfig(config: Partial<AilProjectConfig>): void {
           throw new Error(`Invalid idiom "${name}": param[${i}] must have a string name`);
         }
       }
-      if (typeof idiom.templateAil !== "string") {
-        throw new Error(`Invalid idiom "${name}": "templateAil" must be a string`);
+      if (typeof idiom.templateAice !== "string") {
+        throw new Error(`Invalid idiom "${name}": "templateAice" must be a string`);
       }
       if (typeof idiom.occurrences !== "number") {
         throw new Error(`Invalid idiom "${name}": "occurrences" must be a number`);
@@ -389,48 +389,48 @@ export function validateConfig(config: Partial<AilProjectConfig>): void {
 export const validateProjectConfig = validateConfig;
 
 /**
- * Scans a directory for `.ail` files to differentiate dual-extension (*.ts.ail)
- * vs bare (*.ail) files for mode auto-detection.
+ * Scans a directory for `.aice` files to differentiate dual-extension (*.ts.aice)
+ * vs bare (*.aice) files for mode auto-detection.
  */
-function scanAilFiles(
+function scanAiceFiles(
   dir: string,
   maxDepth = 6,
   currentDepth = 0,
-): { dualExtCount: number; bareAilCount: number } {
+): { dualExtCount: number; bareAiceCount: number } {
   let dualExtCount = 0;
-  let bareAilCount = 0;
+  let bareAiceCount = 0;
 
   if (currentDepth > maxDepth || !fs.existsSync(dir)) {
-    return { dualExtCount, bareAilCount };
+    return { dualExtCount, bareAiceCount };
   }
 
   let entries: fs.Dirent[] = [];
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true });
   } catch {
-    return { dualExtCount, bareAilCount };
+    return { dualExtCount, bareAiceCount };
   }
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!IGNORED_SCAN_DIRECTORIES.has(entry.name)) {
-        const sub = scanAilFiles(fullPath, maxDepth, currentDepth + 1);
+        const sub = scanAiceFiles(fullPath, maxDepth, currentDepth + 1);
         dualExtCount += sub.dualExtCount;
-        bareAilCount += sub.bareAilCount;
+        bareAiceCount += sub.bareAiceCount;
       }
-    } else if (entry.isFile() && entry.name.endsWith(".ail")) {
-      const withoutAil = entry.name.slice(0, -4);
-      const innerExt = path.extname(withoutAil).toLowerCase();
+    } else if (entry.isFile() && entry.name.endsWith(".aice")) {
+      const withoutAice = entry.name.slice(0, -5);
+      const innerExt = path.extname(withoutAice).toLowerCase();
       if (innerExt && KNOWN_TARGET_EXTENSIONS.has(innerExt)) {
         dualExtCount++;
       } else {
-        bareAilCount++;
+        bareAiceCount++;
       }
     }
   }
 
-  return { dualExtCount, bareAilCount };
+  return { dualExtCount, bareAiceCount };
 }
 
 /**
@@ -438,19 +438,19 @@ function scanAilFiles(
  * or "isolated" compilation.
  *
  * Rules:
- * 1. If `.ail-build` directory exists -> "isolated"
- * 2. If bare `*.ail` files outnumber dual-ext `*.ts.ail` files -> "isolated"
- * 3. If dual-ext `*.ts.ail` files exist -> "side-by-side"
+ * 1. If `.aice-build` directory exists -> "isolated"
+ * 2. If bare `*.aice` files outnumber dual-ext `*.ts.aice` files -> "isolated"
+ * 3. If dual-ext `*.ts.aice` files exist -> "side-by-side"
  * 4. Fallback default -> "side-by-side"
  */
 export function autoDetectProjectMode(projectDir: string): ProjectMode {
   const resolvedDir = path.resolve(projectDir);
 
-  // 0. Check if ail.config.json or .ailrc explicitly specifies companion mode
-  const ailConfigPath = path.join(resolvedDir, "ail.config.json");
-  if (fs.existsSync(ailConfigPath)) {
+  // 0. Check if aice.config.json or .aicerc explicitly specifies companion mode
+  const aiceConfigPath = path.join(resolvedDir, "aice.config.json");
+  if (fs.existsSync(aiceConfigPath)) {
     try {
-      const content = fs.readFileSync(ailConfigPath, "utf-8");
+      const content = fs.readFileSync(aiceConfigPath, "utf-8");
       const parsed = JSON.parse(stripJsonComments(content));
       if (parsed && parsed.mode === "companion") {
         return "companion";
@@ -460,10 +460,10 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
     }
   }
 
-  const ailrcPath = path.join(resolvedDir, ".ailrc");
-  if (fs.existsSync(ailrcPath)) {
+  const aicercPath = path.join(resolvedDir, ".aicerc");
+  if (fs.existsSync(aicercPath)) {
     try {
-      const content = fs.readFileSync(ailrcPath, "utf-8");
+      const content = fs.readFileSync(aicercPath, "utf-8");
       const parsed = JSON.parse(stripJsonComments(content));
       if (parsed && parsed.mode === "companion") {
         return "companion";
@@ -473,16 +473,16 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
     }
   }
 
-  // 1. Check if .ail-build exists
-  const buildDir = path.join(resolvedDir, ".ail-build");
+  // 1. Check if .aice-build exists
+  const buildDir = path.join(resolvedDir, ".aice-build");
   if (fs.existsSync(buildDir)) {
     return "isolated";
   }
 
   // 2. Scan files
-  const { dualExtCount, bareAilCount } = scanAilFiles(resolvedDir);
+  const { dualExtCount, bareAiceCount } = scanAiceFiles(resolvedDir);
 
-  if (bareAilCount > dualExtCount) {
+  if (bareAiceCount > dualExtCount) {
     return "isolated";
   }
 
@@ -495,7 +495,7 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
 
 /**
  * Searches upward from `startDir` to locate a project root containing
- * `ail.config.json`, `.ailrc`, `.ail-build`, or `package.json`.
+ * `aice.config.json`, `.aicerc`, `.aice-build`, or `package.json`.
  * If none is found, falls back to `fallbackDir` (or `startDir`).
  */
 export function findProjectRoot(startDir: string, fallbackDir?: string): string {
@@ -511,9 +511,9 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
   const initialDir = cur;
   while (true) {
     if (
-      fs.existsSync(path.join(cur, "ail.config.json")) ||
-      fs.existsSync(path.join(cur, ".ailrc")) ||
-      fs.existsSync(path.join(cur, ".ail-build")) ||
+      fs.existsSync(path.join(cur, "aice.config.json")) ||
+      fs.existsSync(path.join(cur, ".aicerc")) ||
+      fs.existsSync(path.join(cur, ".aice-build")) ||
       fs.existsSync(path.join(cur, "package.json"))
     ) {
       return cur;
@@ -529,51 +529,51 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
 }
 
 /**
- * Loads project configuration from `ail.config.json`, `.ailrc`, or `package.json`'s "ail" field.
+ * Loads project configuration from `aice.config.json`, `.aicerc`, or `package.json`'s "aice" field.
  * If no config file is present, performs mode auto-detection and returns defaults.
  */
-export function loadProjectConfig(projectDir: string): AilProjectConfig {
+export function loadProjectConfig(projectDir: string): AiceProjectConfig {
   const resolvedDir = path.resolve(projectDir);
 
   let rawConfig: Record<string, unknown> | null = null;
 
-  // 1. Try ail.config.json
-  const ailConfigPath = path.join(resolvedDir, "ail.config.json");
-  if (fs.existsSync(ailConfigPath)) {
+  // 1. Try aice.config.json
+  const aiceConfigPath = path.join(resolvedDir, "aice.config.json");
+  if (fs.existsSync(aiceConfigPath)) {
     try {
-      const content = fs.readFileSync(ailConfigPath, "utf-8");
+      const content = fs.readFileSync(aiceConfigPath, "utf-8");
       rawConfig = JSON.parse(stripJsonComments(content));
     } catch (err) {
       throw new Error(
-        `Failed to parse ${ailConfigPath}: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to parse ${aiceConfigPath}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
 
-  // 2. Try .ailrc
+  // 2. Try .aicerc
   if (!rawConfig) {
-    const ailrcPath = path.join(resolvedDir, ".ailrc");
-    if (fs.existsSync(ailrcPath)) {
+    const aicercPath = path.join(resolvedDir, ".aicerc");
+    if (fs.existsSync(aicercPath)) {
       try {
-        const content = fs.readFileSync(ailrcPath, "utf-8");
+        const content = fs.readFileSync(aicercPath, "utf-8");
         rawConfig = JSON.parse(stripJsonComments(content));
       } catch (err) {
         throw new Error(
-          `Failed to parse ${ailrcPath}: ${err instanceof Error ? err.message : String(err)}`,
+          `Failed to parse ${aicercPath}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
   }
 
-  // 3. Try package.json's "ail" field
+  // 3. Try package.json's "aice" field
   if (!rawConfig) {
     const pkgPath = path.join(resolvedDir, "package.json");
     if (fs.existsSync(pkgPath)) {
       try {
         const content = fs.readFileSync(pkgPath, "utf-8");
         const parsed = JSON.parse(content);
-        if (parsed && typeof parsed.ail === "object" && parsed.ail !== null) {
-          rawConfig = parsed.ail as Record<string, unknown>;
+        if (parsed && typeof parsed.aice === "object" && parsed.aice !== null) {
+          rawConfig = parsed.aice as Record<string, unknown>;
         }
       } catch (err) {
         throw new Error(
@@ -604,7 +604,7 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
     isolated = mode === "isolated" || mode === "companion";
   }
 
-  const finalConfig: AilProjectConfig = {
+  const finalConfig: AiceProjectConfig = {
     mode,
     sourceDir:
       typeof configToProcess.sourceDir === "string"
@@ -627,7 +627,7 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
       ? { targetProjectDir: configToProcess.targetProjectDir }
       : {}),
     ...(typeof configToProcess.test === "object" && configToProcess.test !== null
-      ? { test: configToProcess.test as AilProjectConfig["test"] }
+      ? { test: configToProcess.test as AiceProjectConfig["test"] }
       : {}),
     ...(typeof configToProcess.idiomsEnabled === "boolean"
       ? { idiomsEnabled: configToProcess.idiomsEnabled }
@@ -644,18 +644,18 @@ export function loadProjectConfig(projectDir: string): AilProjectConfig {
 }
 
 /**
- * Saves or updates project configuration in `ail.config.json`.
+ * Saves or updates project configuration in `aice.config.json`.
  */
 export function saveProjectConfig(
   projectDir: string,
-  config: Partial<AilProjectConfig>,
-): AilProjectConfig {
+  config: Partial<AiceProjectConfig>,
+): AiceProjectConfig {
   const resolvedDir = path.resolve(projectDir);
   if (!fs.existsSync(resolvedDir)) {
     fs.mkdirSync(resolvedDir, { recursive: true });
   }
 
-  const configPath = path.join(resolvedDir, "ail.config.json");
+  const configPath = path.join(resolvedDir, "aice.config.json");
   let existing: Record<string, unknown> = {};
 
   if (fs.existsSync(configPath)) {
@@ -690,7 +690,7 @@ export function saveProjectConfig(
     isolated = DEFAULT_PROJECT_CONFIG.isolated;
   }
 
-  const mergedConfig: AilProjectConfig = {
+  const mergedConfig: AiceProjectConfig = {
     mode,
     sourceDir:
       config.sourceDir ?? (existing.sourceDir as string) ?? DEFAULT_PROJECT_CONFIG.sourceDir,
@@ -713,7 +713,7 @@ export function saveProjectConfig(
     ...(config.test !== undefined
       ? { test: config.test }
       : typeof existing.test === "object" && existing.test !== null
-        ? { test: existing.test as AilProjectConfig["test"] }
+        ? { test: existing.test as AiceProjectConfig["test"] }
         : {}),
     ...(config.idiomsEnabled !== undefined
       ? { idiomsEnabled: config.idiomsEnabled }
@@ -742,7 +742,7 @@ export function saveProjectConfig(
  * Returns whether project idioms are currently enabled, honoring an optional per-call override flag.
  */
 export function isProjectIdiomsEnabled(
-  config?: Partial<AilProjectConfig> | null,
+  config?: Partial<AiceProjectConfig> | null,
   overrideFlag?: boolean,
 ): boolean {
   if (overrideFlag !== undefined) {
@@ -755,23 +755,23 @@ export function isProjectIdiomsEnabled(
 }
 
 /**
- * Persists the idiomsEnabled toggle in `ail.config.json` (and updates `.ail-cache/idioms.json` if present).
+ * Persists the idiomsEnabled toggle in `aice.config.json` (and updates `.aice-cache/idioms.json` if present).
  */
 export function setProjectIdiomsEnabled(
   projectDir: string,
   enabled: boolean,
-): AilProjectConfig {
+): AiceProjectConfig {
   let resolvedDir = findProjectRoot(projectDir);
   if (
     resolvedDir === path.resolve(projectDir) &&
     path.basename(resolvedDir) === "src" &&
-    !fs.existsSync(path.join(resolvedDir, "ail.config.json"))
+    !fs.existsSync(path.join(resolvedDir, "aice.config.json"))
   ) {
     resolvedDir = path.dirname(resolvedDir);
   }
   const updated = saveProjectConfig(resolvedDir, { idiomsEnabled: enabled });
 
-  const cachePath = path.join(resolvedDir, ".ail-cache", "idioms.json");
+  const cachePath = path.join(resolvedDir, ".aice-cache", "idioms.json");
   if (fs.existsSync(cachePath)) {
     try {
       const raw = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
@@ -847,35 +847,35 @@ function extractRelPathUsingSourceDir(absPath: string, sourceDir: string): strin
 }
 
 /**
- * Derives the companion source filename by stripping target extension and appending `.ail`.
+ * Derives the companion source filename by stripping target extension and appending `.aice`.
  * E.g.:
- * - `calc.ts` -> `calc.ail`
- * - `Button.tsx` -> `Button.ail`
- * - `calc.test.ts` -> `calc.test.ail`
- * - `main.py` -> `main.ail`
- * - `calc.ail` -> `calc.ail`
+ * - `calc.ts` -> `calc.aice`
+ * - `Button.tsx` -> `Button.aice`
+ * - `calc.test.ts` -> `calc.test.aice`
+ * - `main.py` -> `main.aice`
+ * - `calc.aice` -> `calc.aice`
  */
 export function deriveSourceFilename(filename: string): string {
-  if (filename.endsWith(".ail")) {
+  if (filename.endsWith(".aice")) {
     return filename;
   }
   const ext = path.extname(filename).toLowerCase();
   if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) {
-    return `${filename.slice(0, -ext.length)}.ail`;
+    return `${filename.slice(0, -ext.length)}.aice`;
   }
-  return `${filename}.ail`;
+  return `${filename}.aice`;
 }
 
 /**
- * Resolves the destination target file path for a source `.ail` file
+ * Resolves the destination target file path for a source `.aice` file
  * according to project configuration:
  * - For "side-by-side": outputs sibling target path in the source file's directory.
- * - For "isolated": mirrors relative path from `sourceDir` into `outDir` (`.ail-build/`).
+ * - For "isolated": mirrors relative path from `sourceDir` into `outDir` (`.aice-build/`).
  * - For "companion": mirrors relative path of `sourceFile` from `sourceDir` (or config root),
- *   strips `.ail`, appends target extension, and joins with `config.outDir` (resolved against projectRoot).
+ *   strips `.aice`, appends target extension, and joins with `config.outDir` (resolved against projectRoot).
  */
 export function resolveTargetFile(
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   sourceFile: string,
   projectRoot?: string,
 ): string {
@@ -946,7 +946,7 @@ export function resolveTargetFile(
     return path.join(config.outDir, targetRel);
   }
 
-  // Isolated mode: mirrors relative path from sourceDir into outDir (.ail-build/)
+  // Isolated mode: mirrors relative path from sourceDir into outDir (.aice-build/)
   if (isAbs) {
     const root = projectRoot ? path.resolve(projectRoot) : undefined;
     const absSourceDir =
@@ -1012,22 +1012,22 @@ export function resolveTargetFile(
  */
 export function resolveTargetOutputPathForConfig(
   sourcePath: string,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   projectRoot?: string,
 ): string {
   return resolveTargetFile(config, sourcePath, projectRoot);
 }
 
 /**
- * Resolves the source `.ail` file path corresponding to a target file.
- * - For "side-by-side": returns sibling `.ail` (or dual-extension `.ts.ail` if present).
+ * Resolves the source `.aice` file path corresponding to a target file.
+ * - For "side-by-side": returns sibling `.aice` (or dual-extension `.ts.aice` if present).
  * - For "companion": computes relative path of targetFile from `config.outDir`,
- *   strips target extension, appends `.ail`, and joins with `config.sourceDir` (resolved against projectRoot).
+ *   strips target extension, appends `.aice`, and joins with `config.sourceDir` (resolved against projectRoot).
  * - For "isolated": computes relative path of targetFile from `config.outDir`,
- *   strips target extension, appends `.ail`, and joins with `config.sourceDir`.
+ *   strips target extension, appends `.aice`, and joins with `config.sourceDir`.
  */
 export function resolveSourceFile(
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   targetFile: string,
   projectRoot?: string,
 ): string {
@@ -1041,7 +1041,7 @@ export function resolveSourceFile(
       dir === "." && !targetFile.includes("/") && !targetFile.includes("\\")
         ? sourceBase
         : path.join(dir, sourceBase);
-    const dualCandidate = `${targetFile}.ail`;
+    const dualCandidate = `${targetFile}.aice`;
     if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
       return dualCandidate;
     }
@@ -1103,7 +1103,7 @@ export function resolveSourceFile(
     relPathFromOutDir = stripSourceDirPrefix(targetFile, config.outDir);
   }
 
-  // Derive source relative path by stripping target extension and appending .ail
+  // Derive source relative path by stripping target extension and appending .aice
   const dir = path.dirname(relPathFromOutDir);
   const base = path.basename(relPathFromOutDir);
   const sourceBase = deriveSourceFilename(base);
@@ -1117,7 +1117,7 @@ export function resolveSourceFile(
     const bareCandidate = path.resolve(absSourceDir, sourceRel);
     const dualCandidate = path.resolve(
       absSourceDir,
-      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
     );
     if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
       return dualCandidate;
@@ -1130,7 +1130,7 @@ export function resolveSourceFile(
     const dualCandidate = path.resolve(
       root,
       config.sourceDir,
-      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
     );
     if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
       return dualCandidate;
@@ -1154,7 +1154,7 @@ export function resolveSourceFile(
     const bareCandidate = path.resolve(baseSourceDir, sourceRel);
     const dualCandidate = path.resolve(
       baseSourceDir,
-      dir === "." ? `${base}.ail` : path.join(dir, `${base}.ail`),
+      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
     );
     if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
       return dualCandidate;

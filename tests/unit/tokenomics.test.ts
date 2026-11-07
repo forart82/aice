@@ -18,15 +18,15 @@ import {
 describe("Tokenomics CI Quality Gate & Regression Engine", () => {
   it("calculates accurate tokenomics for code snippets", () => {
     const targetCode = `export interface UserProfile {\n  id: string;\n  name: string;\n  isActive: boolean;\n}`;
-    const ailCode = `type UserProfile: id!s, name!s, isActive!b`;
+    const aiceCode = `type UserProfile: id!s, name!s, isActive!b`;
 
-    const res = calculateFileTokenomics(ailCode, targetCode, "user.ts");
+    const res = calculateFileTokenomics(aiceCode, targetCode, "user.ts");
 
-    expect(res.targetChars).toBeGreaterThan(res.ailChars);
+    expect(res.targetChars).toBeGreaterThan(res.aiceChars);
     expect(res.charSavingsPct).toBeGreaterThan(40);
-    expect(res.targetCl100k).toBeGreaterThan(res.ailCl100k);
+    expect(res.targetCl100k).toBeGreaterThan(res.aiceCl100k);
     expect(res.cl100kSavingsPct).toBeGreaterThan(25);
-    expect(res.targetO200k).toBeGreaterThan(res.ailO200k);
+    expect(res.targetO200k).toBeGreaterThan(res.aiceO200k);
     expect(res.o200kSavingsPct).toBeGreaterThan(25);
     expect(res.drift).toBe(false);
   });
@@ -43,7 +43,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     expect(report.passedThreshold).toBe(true);
 
     expect(report.aggregate.targetCl100k).toBeGreaterThan(35000);
-    expect(report.aggregate.ailCl100k).toBeLessThan(report.aggregate.targetCl100k);
+    expect(report.aggregate.aiceCl100k).toBeLessThan(report.aggregate.targetCl100k);
     expect(report.aggregate.cl100kSavingsPct).toBeGreaterThan(20);
     expect(report.aggregate.o200kSavingsPct).toBeGreaterThan(20);
     expect(report.aggregate.charSavingsPct).toBeGreaterThan(25);
@@ -85,8 +85,8 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     expect(report.status).toBe("SUCCESS");
   });
 
-  it("audits a specific single adopted .ail file", () => {
-    const report = auditTokenomics("examples/ecommerce_domain.ts.ail", {
+  it("audits a specific single adopted .aice file", () => {
+    const report = auditTokenomics("examples/ecommerce_domain.ts.aice", {
       checkDrift: true,
     });
 
@@ -110,7 +110,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
       const f = report.files[0];
       expect(f.targetLang).toBe("TypeScript");
       expect(f.targetCl100k).toBeGreaterThan(0);
-      expect(f.ailCl100k).toBeGreaterThan(0);
+      expect(f.aiceCl100k).toBeGreaterThan(0);
       expect(report.status).toBe("SUCCESS");
     } finally {
       if (fs.existsSync(tmpFile)) {
@@ -120,7 +120,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
   });
 
   it("audits a folder with nested subfolders recursively", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail_subfolders_"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_subfolders_"));
     const nestedDir = path.join(tmpDir, "level1", "level2");
     fs.mkdirSync(nestedDir, { recursive: true });
 
@@ -134,7 +134,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
       const report = auditTokenomics(tmpDir);
       expect(report.files.length).toBe(2);
       expect(report.aggregate.targetCl100k).toBeGreaterThan(0);
-      expect(report.aggregate.ailCl100k).toBeGreaterThan(0);
+      expect(report.aggregate.aiceCl100k).toBeGreaterThan(0);
       expect(report.status).toBe("SUCCESS");
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -147,7 +147,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     });
     const summary = formatSingleFileSummary(report.files[0], { useColor: false });
 
-    expect(summary).toContain("AIL Token Efficiency Audit: ecommerce_domain.ts");
+    expect(summary).toContain("AICE Token Efficiency Audit: ecommerce_domain.ts");
     expect(summary).toContain("Target Language:         TypeScript");
     expect(summary).toContain("Tokens (cl100k_base):");
     expect(summary).toContain("Tokens (o200k_base):");
@@ -162,7 +162,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
 
     // Standard width (80 cols)
     const table80 = formatTokenomicsTerminalTable(report, { width: 80, useColor: false });
-    expect(table80).toContain("AIL 2.0 Token Efficiency Audit");
+    expect(table80).toContain("AICE 2.0 Token Efficiency Audit");
     expect(table80).toContain("TOTAL (14 Files)");
     const lines80 = table80.split("\n");
     // Verify every line has the exact same visible length
@@ -193,7 +193,7 @@ describe("Tokenomics CI Quality Gate & Regression Engine", () => {
     const report = auditTokenomics("poc_real_case");
     const table = formatProjectsTerminalTable(report, { width: 90, useColor: false });
 
-    expect(table).toContain("AIL 2.0 Project Tokenomics Summary");
+    expect(table).toContain("AICE 2.0 Project Tokenomics Summary");
     expect(table).toContain("dogMax");
     expect(table).toContain("snake_pp");
     expect(table).toContain("snake_ts");

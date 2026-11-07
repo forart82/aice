@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Official Visual Studio Code & Cursor Extension Client for AIL 2.0.
- * Connects to the AIL Language Server Protocol (LSP) Daemon over stdio.
+ * Official Visual Studio Code & Cursor Extension Client for AICE 2.0.
+ * Connects to the AICE Language Server Protocol (LSP) Daemon over stdio.
  */
 
 const vscode = require("vscode");
@@ -14,24 +14,24 @@ const fs = require("node:fs");
 let lspProcess = null;
 let diagnosticCollection = null;
 let outputChannel = null;
-let ailTerminal = null;
+let aiceTerminal = null;
 let statusBarItem = null;
 let messageBuffer = Buffer.alloc(0);
 let nextRequestId = 1;
 const pendingRequests = new Map();
 
 function activate(context) {
-  diagnosticCollection = vscode.languages.createDiagnosticCollection("ail");
+  diagnosticCollection = vscode.languages.createDiagnosticCollection("aice");
   context.subscriptions.push(diagnosticCollection);
 
-  outputChannel = vscode.window.createOutputChannel("AIL Toolchain");
+  outputChannel = vscode.window.createOutputChannel("AICE Toolchain");
   context.subscriptions.push(outputChannel);
 
   // Status Bar Indicator
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusBarItem.text = "$(zap) AIL";
-  statusBarItem.tooltip = "AIL Language Support Active (Click to Compile)";
-  statusBarItem.command = "ail.compile";
+  statusBarItem.text = "$(zap) AICE";
+  statusBarItem.tooltip = "AICE Language Support Active (Click to Compile)";
+  statusBarItem.command = "aice.compile";
   statusBarItem.show();
   context.subscriptions.push(statusBarItem);
 
@@ -45,11 +45,11 @@ function activate(context) {
     });
 
     lspProcess.stderr.on("data", (data) => {
-      console.error(`[AIL LSP] ${data.toString()}`);
+      console.error(`[AICE LSP] ${data.toString()}`);
     });
 
     lspProcess.on("close", (code) => {
-      console.log(`[AIL LSP] Process exited with code ${code}`);
+      console.log(`[AICE LSP] Process exited with code ${code}`);
     });
 
     // 2. Initialize LSP Handshake
@@ -71,11 +71,11 @@ function activate(context) {
     // 3. Document Lifecycle Notifications
     context.subscriptions.push(
       vscode.workspace.onDidOpenTextDocument((doc) => {
-        if (doc.languageId === "ail") {
+        if (doc.languageId === "aice") {
           sendNotification("textDocument/didOpen", {
             textDocument: {
               uri: doc.uri.toString(),
-              languageId: "ail",
+              languageId: "aice",
               version: doc.version,
               text: doc.getText(),
             },
@@ -86,7 +86,7 @@ function activate(context) {
 
     context.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((event) => {
-        if (event.document.languageId === "ail") {
+        if (event.document.languageId === "aice") {
           sendNotification("textDocument/didChange", {
             textDocument: {
               uri: event.document.uri.toString(),
@@ -100,7 +100,7 @@ function activate(context) {
 
     context.subscriptions.push(
       vscode.workspace.onDidCloseTextDocument((doc) => {
-        if (doc.languageId === "ail") {
+        if (doc.languageId === "aice") {
           diagnosticCollection.delete(doc.uri);
           sendNotification("textDocument/didClose", {
             textDocument: { uri: doc.uri.toString() },
@@ -111,7 +111,7 @@ function activate(context) {
 
     // 4. Hover Provider
     context.subscriptions.push(
-      vscode.languages.registerHoverProvider("ail", {
+      vscode.languages.registerHoverProvider("aice", {
         provideHover(document, position) {
           return sendRequest("textDocument/hover", {
             textDocument: { uri: document.uri.toString() },
@@ -129,7 +129,7 @@ function activate(context) {
     // 5. Completion Item Provider
     context.subscriptions.push(
       vscode.languages.registerCompletionItemProvider(
-        "ail",
+        "aice",
         {
           provideCompletionItems(document, position) {
             return sendRequest("textDocument/completion", {
@@ -157,7 +157,7 @@ function activate(context) {
 
     // 6. Document Formatting Provider
     context.subscriptions.push(
-      vscode.languages.registerDocumentFormattingEditProvider("ail", {
+      vscode.languages.registerDocumentFormattingEditProvider("aice", {
         provideDocumentFormattingEdits(document, options) {
           return sendRequest("textDocument/formatting", {
             textDocument: { uri: document.uri.toString() },
@@ -181,7 +181,7 @@ function activate(context) {
 
     // 7. Document Symbol Provider
     context.subscriptions.push(
-      vscode.languages.registerDocumentSymbolProvider("ail", {
+      vscode.languages.registerDocumentSymbolProvider("aice", {
         provideDocumentSymbols(document) {
           return sendRequest("textDocument/documentSymbol", {
             textDocument: { uri: document.uri.toString() },
@@ -195,7 +195,7 @@ function activate(context) {
 
     // 8. Definition Provider
     context.subscriptions.push(
-      vscode.languages.registerDefinitionProvider("ail", {
+      vscode.languages.registerDefinitionProvider("aice", {
         provideDefinition(document, position) {
           return sendRequest("textDocument/definition", {
             textDocument: { uri: document.uri.toString() },
@@ -215,7 +215,7 @@ function activate(context) {
 
     // 9. Code Actions Provider
     context.subscriptions.push(
-      vscode.languages.registerCodeActionsProvider("ail", {
+      vscode.languages.registerCodeActionsProvider("aice", {
         provideCodeActions(document, range, codeContext) {
           return sendRequest("textDocument/codeAction", {
             textDocument: { uri: document.uri.toString() },
@@ -266,13 +266,13 @@ function activate(context) {
       })
     );
 
-    // Sync any already open AIL documents
+    // Sync any already open AICE documents
     for (const doc of vscode.workspace.textDocuments) {
-      if (doc.languageId === "ail") {
+      if (doc.languageId === "aice") {
         sendNotification("textDocument/didOpen", {
           textDocument: {
             uri: doc.uri.toString(),
-            languageId: "ail",
+            languageId: "aice",
             version: doc.version,
             text: doc.getText(),
           },
@@ -281,8 +281,8 @@ function activate(context) {
     }
   }
 
-  // 10. Register Contributed AIL Commands
-  registerAilCommands(context);
+  // 10. Register Contributed AICE Commands
+  registerAiceCommands(context);
 }
 
 function toVsCodeSymbol(s) {
@@ -311,25 +311,25 @@ function toVsCodeSymbol(s) {
   return vsSym;
 }
 
-function getAilCommand() {
-  const config = vscode.workspace.getConfiguration("ail");
+function getAiceCommand() {
+  const config = vscode.workspace.getConfiguration("aice");
   const configured = config.get("executablePath");
-  if (configured && configured !== "ail") {
+  if (configured && configured !== "aice") {
     return { bin: configured, args: [] };
   }
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders && workspaceFolders.length > 0) {
     const rootPath = workspaceFolders[0].uri.fsPath;
-    const localMjs = path.join(rootPath, "bin", "ail.mjs");
+    const localMjs = path.join(rootPath, "bin", "aice.mjs");
     if (fs.existsSync(localMjs)) {
       return { bin: "node", args: [localMjs] };
     }
-    const localTs = path.join(rootPath, "bin", "ail.ts");
+    const localTs = path.join(rootPath, "bin", "aice.ts");
     if (fs.existsSync(localTs)) {
       return { bin: "bun", args: [localTs] };
     }
   }
-  return { bin: "ail", args: [] };
+  return { bin: "aice", args: [] };
 }
 
 function getWorkspaceRoot() {
@@ -346,109 +346,109 @@ function getWorkspaceRoot() {
 
 function runCliInOutput(subcommandArgs, cwd) {
   outputChannel.show(true);
-  const cmdInfo = getAilCommand();
+  const cmdInfo = getAiceCommand();
   const allArgs = [...cmdInfo.args, ...subcommandArgs];
-  outputChannel.appendLine(`\n[AIL Toolchain] Running: ${cmdInfo.bin} ${allArgs.join(" ")}`);
+  outputChannel.appendLine(`\n[AICE Toolchain] Running: ${cmdInfo.bin} ${allArgs.join(" ")}`);
 
   const child = spawn(cmdInfo.bin, allArgs, { cwd: cwd || getWorkspaceRoot() });
   child.stdout.on("data", (d) => outputChannel.append(d.toString()));
   child.stderr.on("data", (d) => outputChannel.append(d.toString()));
   child.on("close", (code) => {
-    outputChannel.appendLine(`[AIL Toolchain] Process completed with code ${code}\n`);
+    outputChannel.appendLine(`[AICE Toolchain] Process completed with code ${code}\n`);
   });
 }
 
 function runInTerminal(commandString, cwd) {
-  if (!ailTerminal || ailTerminal.exitStatus !== undefined) {
-    ailTerminal = vscode.window.createTerminal({ name: "AIL", cwd: cwd || getWorkspaceRoot() });
+  if (!aiceTerminal || aiceTerminal.exitStatus !== undefined) {
+    aiceTerminal = vscode.window.createTerminal({ name: "AICE", cwd: cwd || getWorkspaceRoot() });
   }
-  ailTerminal.show();
-  ailTerminal.sendText(commandString);
+  aiceTerminal.show();
+  aiceTerminal.sendText(commandString);
 }
 
-function registerAilCommands(context) {
+function registerAiceCommands(context) {
   const register = (id, handler) => {
     context.subscriptions.push(vscode.commands.registerCommand(id, handler));
   };
 
-  register("ail.compile", () => {
+  register("aice.compile", () => {
     const editor = vscode.window.activeTextEditor;
     const file = editor ? editor.document.fileName : ".";
     runCliInOutput(["compile", file]);
   });
 
-  register("ail.watch", () => {
-    const cmdInfo = getAilCommand();
+  register("aice.watch", () => {
+    const cmdInfo = getAiceCommand();
     const cmdStr = `${cmdInfo.bin} ${[...cmdInfo.args, "watch", ".", "--bidirectional"].join(" ")}`;
     runInTerminal(cmdStr);
   });
 
-  register("ail.sync", () => {
+  register("aice.sync", () => {
     runCliInOutput(["sync", "."]);
   });
 
-  register("ail.outline", () => {
+  register("aice.outline", () => {
     const editor = vscode.window.activeTextEditor;
     const file = editor ? editor.document.fileName : ".";
     runCliInOutput(["outline", file]);
   });
 
-  register("ail.context", () => {
+  register("aice.context", () => {
     const editor = vscode.window.activeTextEditor;
     const file = editor ? editor.document.fileName : ".";
     runCliInOutput(["context", file]);
   });
 
-  register("ail.idiomsScan", () => {
+  register("aice.idiomsScan", () => {
     runCliInOutput(["idioms", "scan", "."]);
   });
 
-  register("ail.idiomsApply", () => {
+  register("aice.idiomsApply", () => {
     runCliInOutput(["idioms", "apply", "."]);
   });
 
-  register("ail.shieldStatus", () => {
+  register("aice.shieldStatus", () => {
     runCliInOutput(["shield", "status"]);
   });
 
-  register("ail.shieldLock", () => {
+  register("aice.shieldLock", () => {
     runCliInOutput(["shield", "lock", "."]);
   });
 
-  register("ail.shieldUnlock", () => {
+  register("aice.shieldUnlock", () => {
     runCliInOutput(["shield", "unlock", "."]);
   });
 
-  register("ail.test", () => {
-    const cmdInfo = getAilCommand();
+  register("aice.test", () => {
+    const cmdInfo = getAiceCommand();
     const cmdStr = `${cmdInfo.bin} ${[...cmdInfo.args, "test"].join(" ")}`;
     runInTerminal(cmdStr);
   });
 }
 
 function spawnLspServer(context) {
-  const config = vscode.workspace.getConfiguration("ail");
+  const config = vscode.workspace.getConfiguration("aice");
   const configured = config.get("executablePath");
-  if (configured && configured !== "ail") {
+  if (configured && configured !== "aice") {
     return spawn(configured, ["lsp"]);
   }
 
-  // Check workspace for local ail daemon
+  // Check workspace for local aice daemon
   const workspaceFolders = vscode.workspace.workspaceFolders;
   if (workspaceFolders && workspaceFolders.length > 0) {
     const rootPath = workspaceFolders[0].uri.fsPath;
-    const lspTs = path.join(rootPath, "bin", "ail-lsp.ts");
+    const lspTs = path.join(rootPath, "bin", "aice-lsp.ts");
     if (fs.existsSync(lspTs)) {
       return spawn("bun", [lspTs], { cwd: rootPath });
     }
-    const lspMjs = path.join(rootPath, "bin", "ail-lsp.mjs");
+    const lspMjs = path.join(rootPath, "bin", "aice-lsp.mjs");
     if (fs.existsSync(lspMjs)) {
       return spawn("node", [lspMjs], { cwd: rootPath });
     }
   }
 
-  // Fallback to globally available ail lsp
-  return spawn("ail", ["lsp"]);
+  // Fallback to globally available aice lsp
+  return spawn("aice", ["lsp"]);
 }
 
 function sendNotification(method, params) {
@@ -504,7 +504,7 @@ function handleServerData(chunk) {
       const msg = JSON.parse(payload);
       handleMessage(msg);
     } catch (e) {
-      console.error("[AIL LSP] JSON parse error:", e);
+      console.error("[AICE LSP] JSON parse error:", e);
     }
   }
 }
@@ -537,7 +537,7 @@ function handleMessage(msg) {
         vscode.DiagnosticSeverity.Error
       );
       diag.code = d.code;
-      diag.source = d.source || "ail";
+      diag.source = d.source || "aice";
       return diag;
     });
 

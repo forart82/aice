@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Symbol-Aware AST Error Formatter (Step 12).
+ * AICE 2.0 Symbol-Aware AST Error Formatter (Step 12).
  * Formats high-density, concise developer and AI test failure diagnostics
- * by mapping runtime stack frames directly to .ail source AST declarations.
+ * by mapping runtime stack frames directly to .aice source AST declarations.
  *
  * Enforces zero *.map files on disk and completely scrubs target runtime
  * paths (.ts, .js, dist/, node:internal).
@@ -13,7 +13,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   loadProjectConfig,
   resolveSourceFile,
@@ -64,14 +64,14 @@ export function stripAnsi(text: string): string {
 }
 
 /**
- * Scans a directory recursively collecting all .ail files.
+ * Scans a directory recursively collecting all .aice files.
  */
-function scanAilFiles(rootDir: string): string[] {
+function scanAiceFiles(rootDir: string): string[] {
   if (!fs.existsSync(rootDir)) return [];
   try {
     const stat = fs.statSync(rootDir);
     if (!stat.isDirectory()) {
-      return rootDir.endsWith(".ail") ? [path.resolve(rootDir)] : [];
+      return rootDir.endsWith(".aice") ? [path.resolve(rootDir)] : [];
     }
   } catch {
     return [];
@@ -91,14 +91,14 @@ function scanAilFiles(rootDir: string): string[] {
         entry.name === ".git" ||
         entry.name === "dist" ||
         entry.name === "build" ||
-        entry.name === ".ail-build"
+        entry.name === ".aice-build"
       ) {
         continue;
       }
       const fullPath = path.resolve(dir, entry.name);
       if (entry.isDirectory()) {
         walk(fullPath);
-      } else if (entry.isFile() && entry.name.endsWith(".ail")) {
+      } else if (entry.isFile() && entry.name.endsWith(".aice")) {
         results.push(fullPath);
       }
     }
@@ -108,14 +108,14 @@ function scanAilFiles(rootDir: string): string[] {
 }
 
 /**
- * Normalizes a file path and resolves it to its corresponding .ail source file.
- * In companion mode, resolves external target paths back to companion workspace .ail files.
+ * Normalizes a file path and resolves it to its corresponding .aice source file.
+ * In companion mode, resolves external target paths back to companion workspace .aice files.
  */
-export function resolveToAilFile(
+export function resolveToAiceFile(
   filePath: string,
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
-): { relAilPath: string; fullAilPath?: string; exists: boolean } {
+  config?: AiceProjectConfig,
+): { relAicePath: string; fullAicePath?: string; exists: boolean } {
   let clean = filePath.replace(/:\d+(?::\d+)?$/, "").trim();
   if (clean.startsWith("file://")) {
     clean = clean.slice(7);
@@ -127,21 +127,21 @@ export function resolveToAilFile(
   const cfg = config ?? loadProjectConfig(root);
 
   if (cfg.mode === "companion") {
-    // 1. If clean is an absolute or relative path that already ends in .ail
-    if (clean.endsWith(".ail")) {
+    // 1. If clean is an absolute or relative path that already ends in .aice
+    if (clean.endsWith(".aice")) {
       const absCand = path.isAbsolute(clean) ? clean : path.resolve(root, clean);
       if (fs.existsSync(absCand)) {
         return {
-          relAilPath: path.relative(root, absCand).replace(/\\/g, "/"),
-          fullAilPath: absCand,
+          relAicePath: path.relative(root, absCand).replace(/\\/g, "/"),
+          fullAicePath: absCand,
           exists: true,
         };
       }
       const srcCand = path.resolve(root, cfg.sourceDir, clean);
       if (fs.existsSync(srcCand)) {
         return {
-          relAilPath: path.relative(root, srcCand).replace(/\\/g, "/"),
-          fullAilPath: srcCand,
+          relAicePath: path.relative(root, srcCand).replace(/\\/g, "/"),
+          fullAicePath: srcCand,
           exists: true,
         };
       }
@@ -186,21 +186,21 @@ export function resolveToAilFile(
         const src = resolveSourceFile(cfg, tgt, root);
         if (fs.existsSync(src)) {
           return {
-            relAilPath: path.relative(root, src).replace(/\\/g, "/"),
-            fullAilPath: src,
+            relAicePath: path.relative(root, src).replace(/\\/g, "/"),
+            fullAicePath: src,
             exists: true,
           };
         }
       }
     }
 
-    // Even if target file does not exist on disk, check if resolveSourceFile locates existing .ail
+    // Even if target file does not exist on disk, check if resolveSourceFile locates existing .aice
     for (const tgt of targetCandidates) {
       const src = resolveSourceFile(cfg, tgt, root);
       if (fs.existsSync(src)) {
         return {
-          relAilPath: path.relative(root, src).replace(/\\/g, "/"),
-          fullAilPath: src,
+          relAicePath: path.relative(root, src).replace(/\\/g, "/"),
+          fullAicePath: src,
           exists: true,
         };
       }
@@ -208,7 +208,7 @@ export function resolveToAilFile(
 
     // 3. Basename or subpath lookup in companion sourceDir
     const companionSourceDir = path.resolve(root, cfg.sourceDir);
-    const ailFiles = scanAilFiles(companionSourceDir);
+    const aiceFiles = scanAiceFiles(companionSourceDir);
     const cleanBase = path.basename(clean);
     const nameWithoutExt = cleanBase.replace(/\.[a-zA-Z0-9]+$/, "");
 
@@ -217,31 +217,31 @@ export function resolveToAilFile(
     const cleanSegments = cleanNormalized.split("/").filter(Boolean);
     if (cleanSegments.length > 1) {
       for (let s = Math.min(cleanSegments.length, 4); s >= 2; s--) {
-        const subSuffix = cleanSegments.slice(-s).join("/") + ".ail";
-        const matched = ailFiles.find((f) => {
+        const subSuffix = cleanSegments.slice(-s).join("/") + ".aice";
+        const matched = aiceFiles.find((f) => {
           const normF = f.replace(/\\/g, "/");
           return normF.endsWith("/" + subSuffix) || normF.endsWith(subSuffix);
         });
         if (matched) {
           return {
-            relAilPath: path.relative(root, matched).replace(/\\/g, "/"),
-            fullAilPath: matched,
+            relAicePath: path.relative(root, matched).replace(/\\/g, "/"),
+            fullAicePath: matched,
             exists: true,
           };
         }
       }
     }
 
-    for (const f of ailFiles) {
+    for (const f of aiceFiles) {
       const fBase = path.basename(f);
       if (
-        fBase === `${nameWithoutExt}.ail` ||
-        fBase === `${nameWithoutExt}.ts.ail` ||
+        fBase === `${nameWithoutExt}.aice` ||
+        fBase === `${nameWithoutExt}.ts.aice` ||
         fBase === cleanBase
       ) {
         return {
-          relAilPath: path.relative(root, f).replace(/\\/g, "/"),
-          fullAilPath: f,
+          relAicePath: path.relative(root, f).replace(/\\/g, "/"),
+          fullAicePath: f,
           exists: true,
         };
       }
@@ -249,20 +249,20 @@ export function resolveToAilFile(
 
     // 4. Normalized relative fallback check
     const normalizedClean = clean.replace(/^(?:dist|build)\//, "");
-    const directRel = normalizedClean.replace(/\.[a-zA-Z0-9]+$/, ".ail");
+    const directRel = normalizedClean.replace(/\.[a-zA-Z0-9]+$/, ".aice");
     const fallbackCand = path.resolve(root, directRel);
     if (fs.existsSync(fallbackCand)) {
       return {
-        relAilPath: path.relative(root, fallbackCand).replace(/\\/g, "/"),
-        fullAilPath: fallbackCand,
+        relAicePath: path.relative(root, fallbackCand).replace(/\\/g, "/"),
+        fullAicePath: fallbackCand,
         exists: true,
       };
     }
     const fallbackSrcCand = path.resolve(companionSourceDir, path.basename(directRel));
     if (fs.existsSync(fallbackSrcCand)) {
       return {
-        relAilPath: path.relative(root, fallbackSrcCand).replace(/\\/g, "/"),
-        fullAilPath: fallbackSrcCand,
+        relAicePath: path.relative(root, fallbackSrcCand).replace(/\\/g, "/"),
+        fullAicePath: fallbackSrcCand,
         exists: true,
       };
     }
@@ -271,7 +271,7 @@ export function resolveToAilFile(
     const derived = resolveSourceFile(cfg, clean, root);
     const relOut = path.isAbsolute(derived) ? path.relative(root, derived) : derived;
     return {
-      relAilPath: relOut.replace(/\\/g, "/"),
+      relAicePath: relOut.replace(/\\/g, "/"),
       exists: false,
     };
   }
@@ -297,21 +297,21 @@ export function resolveToAilFile(
   const candidates: string[] = [];
 
   for (const base of bases) {
-    if (base.endsWith(".ail")) {
+    if (base.endsWith(".aice")) {
       candidates.push(base);
     } else {
-      // 1. Check side-by-side .ail (e.g. engine.ts -> engine.ts.ail)
-      candidates.push(`${base}.ail`);
+      // 1. Check side-by-side .aice (e.g. engine.ts -> engine.ts.aice)
+      candidates.push(`${base}.aice`);
 
-      // 2. If .js/.mjs, check corresponding .ts.ail
+      // 2. If .js/.mjs, check corresponding .ts.aice
       if (/\.m?js$/.test(base)) {
-        candidates.push(base.replace(/\.m?js$/, ".ts.ail"));
-        candidates.push(base.replace(/\.m?js$/, ".ail"));
+        candidates.push(base.replace(/\.m?js$/, ".ts.aice"));
+        candidates.push(base.replace(/\.m?js$/, ".aice"));
       }
 
-      // 3. Extension replacement (e.g. engine.ts -> engine.ail)
+      // 3. Extension replacement (e.g. engine.ts -> engine.aice)
       if (/\.(ts|tsx|jsx|js|mjs|cjs)$/.test(base)) {
-        candidates.push(base.replace(/\.(ts|tsx|jsx|js|mjs|cjs)$/, ".ail"));
+        candidates.push(base.replace(/\.(ts|tsx|jsx|js|mjs|cjs)$/, ".aice"));
       }
     }
   }
@@ -320,21 +320,21 @@ export function resolveToAilFile(
     const full = path.resolve(root, cand);
     if (fs.existsSync(full)) {
       return {
-        relAilPath: cand,
-        fullAilPath: full,
+        relAicePath: cand,
+        fullAicePath: full,
         exists: true,
       };
     }
   }
 
   // Fallback when file does not exist on disk
-  let fallback = candidates[0] || `${rel}.ail`;
-  if (!fallback.endsWith(".ail")) {
-    fallback = `${fallback}.ail`;
+  let fallback = candidates[0] || `${rel}.aice`;
+  if (!fallback.endsWith(".aice")) {
+    fallback = `${fallback}.aice`;
   }
 
   return {
-    relAilPath: fallback,
+    relAicePath: fallback,
     exists: false,
   };
 }
@@ -451,7 +451,7 @@ export function findSymbolInAst(
 }
 
 /**
- * Searches the parsed AST for a declaration enclosing or matching an .ail line number.
+ * Searches the parsed AST for a declaration enclosing or matching an .aice line number.
  */
 export function findSymbolAtLineInAst(
   mod: Module,
@@ -925,16 +925,16 @@ function extractTestFile(
     return frames[0].filePath;
   }
 
-  return "test.ail";
+  return "test.aice";
 }
 /**
  * Scrubs out all references to target file paths (.ts, .js, dist/, node:internal, stack frames).
- * When in companion mode, resolves target paths back to companion workspace .ail references.
+ * When in companion mode, resolves target paths back to companion workspace .aice references.
  */
 export function scrubTargetFileReferences(
   text: string,
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
 ): string {
   let result = text;
   const root = findProjectRoot(projectRoot) ?? projectRoot;
@@ -962,7 +962,7 @@ export function scrubTargetFileReferences(
   // 2. Strip dist/ and build/ directory prefixes
   result = result.replace(/\b(?:dist|build)[/\\]/g, "");
 
-  // 3. Ensure any .ts or .js file path is converted to .ail
+  // 3. Ensure any .ts or .js file path is converted to .aice
   if (cfg.mode === "companion") {
     // Strip targetProjectDir and outDir relative path segments if present
     if (cfg.targetProjectDir) {
@@ -975,19 +975,19 @@ export function scrubTargetFileReferences(
     }
 
     result = result.replace(
-      /\b([a-zA-Z0-9_\-./]+)\.(?:ts|tsx|js|jsx|mjs|cjs)\b(?!\.ail)/g,
+      /\b([a-zA-Z0-9_\-./]+)\.(?:ts|tsx|js|jsx|mjs|cjs)\b(?!\.aice)/g,
       (match, prefix) => {
-        const res = resolveToAilFile(match, root, cfg);
+        const res = resolveToAiceFile(match, root, cfg);
         if (res.exists) {
-          return res.relAilPath;
+          return res.relAicePath;
         }
-        return `${prefix}.ail`;
+        return `${prefix}.aice`;
       },
     );
   } else {
     result = result.replace(
-      /\b([a-zA-Z0-9_\-./]+)\.(?:ts|tsx|js|jsx|mjs|cjs)\b(?!\.ail)/g,
-      "$1.ts.ail",
+      /\b([a-zA-Z0-9_\-./]+)\.(?:ts|tsx|js|jsx|mjs|cjs)\b(?!\.aice)/g,
+      "$1.ts.aice",
     );
   }
 
@@ -997,17 +997,17 @@ export function scrubTargetFileReferences(
 /**
  * Primary symbol-aware error formatter function (Step 12 & Step 4.2).
  *
- * Scans error text and stack traces, resolves corresponding .ail AST definitions,
+ * Scans error text and stack traces, resolves corresponding .aice AST definitions,
  * and formats a concise 3-to-4 line error report:
  *
- * ❌ FAIL: <test-file.ail> [<test description>]
+ * ❌ FAIL: <test-file.aice> [<test description>]
  *    Error: <concise error message>
- *    Scope: fn <functionName> in <source-file.ail>:<line>
+ *    Scope: fn <functionName> in <source-file.aice>:<line>
  */
 export function formatSymbolAwareError(
   rawOutput: string,
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
 ): string {
   const cleanText = stripAnsi(rawOutput).trim();
   if (cleanText.length === 0) {
@@ -1033,13 +1033,13 @@ export function formatSymbolAwareError(
   for (const block of validBlocks) {
     const frames = parseStackFrames(block);
     const rawTestFile = extractTestFile(block, frames, defaultTestFile);
-    const testAil = resolveToAilFile(rawTestFile, root, cfg);
+    const testAice = resolveToAiceFile(rawTestFile, root, cfg);
     const testDescription = extractTestDescription(block);
     const errorMessage = extractErrorMessage(block);
 
     // Skip duplicate summary-only blocks when another block has failure details
     const hasDetails = frames.length > 0 || errorMessage !== "Test failed";
-    const testKey = `${testAil.relAilPath}::${testDescription}`;
+    const testKey = `${testAice.relAicePath}::${testDescription}`;
 
     if (seenTests.has(testKey) && !hasDetails) {
       continue;
@@ -1061,16 +1061,16 @@ export function formatSymbolAwareError(
     const candidateFrames = appFrames.length > 0 ? appFrames : frames;
 
     for (const frame of candidateFrames) {
-      const resolved = resolveToAilFile(frame.filePath, root, cfg);
+      const resolved = resolveToAiceFile(frame.filePath, root, cfg);
 
-      if (resolved.exists && resolved.fullAilPath) {
+      if (resolved.exists && resolved.fullAicePath) {
         try {
-          const source = fs.readFileSync(resolved.fullAilPath, "utf-8");
-          const mod = parse(source, resolved.relAilPath);
+          const source = fs.readFileSync(resolved.fullAicePath, "utf-8");
+          const mod = parse(source, resolved.relAicePath);
 
           let targetFn = frame.functionName;
           if (!targetFn && frame.line) {
-            const targetFile = resolveTargetFile(cfg, resolved.fullAilPath, root);
+            const targetFile = resolveTargetFile(cfg, resolved.fullAicePath, root);
             if (fs.existsSync(targetFile)) {
               targetFn = extractEnclosingSymbolFromSource(
                 fs.readFileSync(targetFile, "utf-8"),
@@ -1083,7 +1083,7 @@ export function formatSymbolAwareError(
             const match = findSymbolInAst(mod, targetFn);
             if (match) {
               scopeSymbol = match.name;
-              scopeFile = resolved.relAilPath;
+              scopeFile = resolved.relAicePath;
               scopeLine = match.line;
               break;
             }
@@ -1093,7 +1093,7 @@ export function formatSymbolAwareError(
             const astMatch = findSymbolAtLineInAst(mod, frame.line);
             if (astMatch) {
               scopeSymbol = astMatch.name;
-              scopeFile = resolved.relAilPath;
+              scopeFile = resolved.relAicePath;
               scopeLine = astMatch.line;
               break;
             }
@@ -1105,7 +1105,7 @@ export function formatSymbolAwareError(
 
       if (!scopeSymbol && frame.functionName) {
         scopeSymbol = frame.functionName;
-        scopeFile = resolved.relAilPath;
+        scopeFile = resolved.relAicePath;
         scopeLine = frame.line ?? 1;
         break;
       }
@@ -1113,14 +1113,14 @@ export function formatSymbolAwareError(
 
     // If still no scope found, try first available frame file
     if (!scopeFile && candidateFrames.length > 0) {
-      const resolved = resolveToAilFile(candidateFrames[0].filePath, root, cfg);
-      scopeFile = resolved.relAilPath;
+      const resolved = resolveToAiceFile(candidateFrames[0].filePath, root, cfg);
+      scopeFile = resolved.relAicePath;
       scopeLine = candidateFrames[0].line ?? 1;
     }
 
     // Build the concise 3-to-4 line report
     const lines: string[] = [];
-    lines.push(`❌ FAIL: ${testAil.relAilPath} [${testDescription}]`);
+    lines.push(`❌ FAIL: ${testAice.relAicePath} [${testDescription}]`);
 
     // Concise Error line
     let formattedError = errorMessage;
@@ -1158,13 +1158,13 @@ export function formatSymbolAwareError(
 }
 
 /**
- * Translates a single stack trace line or file:line reference into companion .ail format.
- * Format: => <symbol> <file.ail>:<line>:<col> or => <file.ail>:<line>:<col>
+ * Translates a single stack trace line or file:line reference into companion .aice format.
+ * Format: => <symbol> <file.aice>:<line>:<col> or => <file.aice>:<line>:<col>
  */
 export function translateTraceLine(
   rawLine: string,
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
 ): string {
   const line = stripAnsi(rawLine).trim();
   if (line.length === 0) return "";
@@ -1241,20 +1241,20 @@ export function translateTraceLine(
 
   filePath = filePath.replace(/^file:\/\//, "");
 
-  const resolved = resolveToAilFile(filePath, root, cfg);
+  const resolved = resolveToAiceFile(filePath, root, cfg);
   let resolvedSymbol: string | undefined = fn;
   let resolvedLine: number | undefined = lineNum;
   let resolvedCol: number | undefined = colNum;
 
-  if (resolved.exists && resolved.fullAilPath) {
+  if (resolved.exists && resolved.fullAicePath) {
     try {
-      const source = fs.readFileSync(resolved.fullAilPath, "utf-8");
-      const mod = parse(source, resolved.relAilPath);
+      const source = fs.readFileSync(resolved.fullAicePath, "utf-8");
+      const mod = parse(source, resolved.relAicePath);
 
       // If function name was not in the trace line, but lineNum is present
       if (!resolvedSymbol && lineNum) {
         let targetContent: string | undefined;
-        const targetPath = resolveTargetFile(cfg, resolved.fullAilPath, root);
+        const targetPath = resolveTargetFile(cfg, resolved.fullAicePath, root);
         if (fs.existsSync(targetPath)) {
           targetContent = fs.readFileSync(targetPath, "utf-8");
         } else {
@@ -1316,7 +1316,7 @@ export function translateTraceLine(
     }
   }
 
-  const filePart = resolved.relAilPath;
+  const filePart = resolved.relAicePath;
   const linePart = resolvedLine !== undefined ? `:${resolvedLine}` : "";
   const colPart = resolvedCol !== undefined ? `:${resolvedCol}` : "";
   const loc = `${filePart}${linePart}${colPart}`;
@@ -1328,12 +1328,12 @@ export function translateTraceLine(
 }
 
 /**
- * Translates multi-line stack trace or argument list to companion .ail format.
+ * Translates multi-line stack trace or argument list to companion .aice format.
  */
 export function translateTrace(
   traceInput: string | string[],
   projectRoot: string = process.cwd(),
-  config?: AilProjectConfig,
+  config?: AiceProjectConfig,
 ): string[] {
   let lines: string[] = [];
 

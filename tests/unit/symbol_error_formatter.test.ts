@@ -4,7 +4,7 @@
  *
  * Unit tests for Step 12: Symbol-Aware AST Error Formatter.
  * Verifies that runtime errors across test runners (vitest, bun, node:test, jest)
- * are mapped directly to .ail source AST declarations without sourcemap files on disk,
+ * are mapped directly to .aice source AST declarations without sourcemap files on disk,
  * and that all runtime/target references (.ts, .js, dist/, node:internal) are scrubbed.
  */
 
@@ -17,20 +17,20 @@ import {
   findSymbolInAst,
   formatSymbolAwareError,
   parseStackFrames,
-  resolveToAilFile,
+  resolveToAiceFile,
   scrubTargetFileReferences,
   stripAnsi,
 } from "../../src/runner/symbol-error-formatter.js";
 import {
   formatCleanTestOutput,
-  runAilTests,
+  runAiceTests,
 } from "../../src/runner/test-runner.js";
 
 describe("Step 12: Symbol-Aware AST Error Formatter", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-symbol-error-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-symbol-error-test-"));
   });
 
   afterEach(() => {
@@ -52,7 +52,7 @@ describe("Step 12: Symbol-Aware AST Error Formatter", () => {
   static fn createDefault() -> GameEngine:
     ret GameEngine()
 `;
-      const mod = parse(code, "engine.ts.ail");
+      const mod = parse(code, "engine.ts.aice");
 
       // Qualified method lookup
       const qualified = findSymbolInAst(mod, "GameEngine.processFoodConsumption");
@@ -79,7 +79,7 @@ describe("Step 12: Symbol-Aware AST Error Formatter", () => {
 fn calculateScore(points: int, bonus: int) -> int:
   ret points * 10 + bonus
 `;
-      const mod = parse(code, "score.ts.ail");
+      const mod = parse(code, "score.ts.aice");
 
       const match = findSymbolInAst(mod, "calculateScore");
       expect(match).toBeDefined();
@@ -93,7 +93,7 @@ component ScoreBoard(score: int):
   div:
     text: "Score"
 `;
-      const mod = parse(code, "scoreboard.tsx.ail");
+      const mod = parse(code, "scoreboard.tsx.aice");
 
       const match = findSymbolInAst(mod, "ScoreBoard");
       expect(match).toBeDefined();
@@ -108,7 +108,7 @@ component ScoreBoard(score: int):
   fn new(name: str):
     this.name = name
 `;
-      const mod = parse(code, "player.ts.ail");
+      const mod = parse(code, "player.ts.aice");
 
       const ctor = findSymbolInAst(mod, "Player.new");
       expect(ctor).toBeDefined();
@@ -121,38 +121,38 @@ component ScoreBoard(score: int):
 
     it("returns undefined when symbol does not exist in AST", () => {
       const code = `fn exists() -> int = 42\n`;
-      const mod = parse(code, "mod.ail");
+      const mod = parse(code, "mod.aice");
 
       const missing = findSymbolInAst(mod, "doesNotExist");
       expect(missing).toBeUndefined();
     });
   });
 
-  describe("File Resolution to .ail Source (resolveToAilFile)", () => {
-    it("resolves target .ts path to existing .ts.ail file", () => {
-      const ailFile = path.join(tmpDir, "src", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(ailFile), { recursive: true });
-      fs.writeFileSync(ailFile, "fn run() -> void {}\n", "utf-8");
+  describe("File Resolution to .aice Source (resolveToAiceFile)", () => {
+    it("resolves target .ts path to existing .ts.aice file", () => {
+      const aiceFile = path.join(tmpDir, "src", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(aiceFile), { recursive: true });
+      fs.writeFileSync(aiceFile, "fn run() -> void {}\n", "utf-8");
 
-      const res = resolveToAilFile("src/engine.ts", tmpDir);
+      const res = resolveToAiceFile("src/engine.ts", tmpDir);
       expect(res.exists).toBe(true);
-      expect(res.relAilPath).toBe("src/engine.ts.ail");
+      expect(res.relAicePath).toBe("src/engine.ts.aice");
     });
 
     it("strips dist/ or build/ prefix when resolving target file", () => {
-      const ailFile = path.join(tmpDir, "src", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(ailFile), { recursive: true });
-      fs.writeFileSync(ailFile, "fn run() -> void {}\n", "utf-8");
+      const aiceFile = path.join(tmpDir, "src", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(aiceFile), { recursive: true });
+      fs.writeFileSync(aiceFile, "fn run() -> void {}\n", "utf-8");
 
-      const res = resolveToAilFile("dist/src/engine.js", tmpDir);
+      const res = resolveToAiceFile("dist/src/engine.js", tmpDir);
       expect(res.exists).toBe(true);
-      expect(res.relAilPath).toBe("src/engine.ts.ail");
+      expect(res.relAicePath).toBe("src/engine.ts.aice");
     });
 
-    it("falls back cleanly to candidate .ail name when file is not on disk", () => {
-      const res = resolveToAilFile("src/core/engine.ts", tmpDir);
+    it("falls back cleanly to candidate .aice name when file is not on disk", () => {
+      const res = resolveToAiceFile("src/core/engine.ts", tmpDir);
       expect(res.exists).toBe(false);
-      expect(res.relAilPath).toBe("src/core/engine.ts.ail");
+      expect(res.relAicePath).toBe("src/core/engine.ts.aice");
     });
   });
 
@@ -200,24 +200,24 @@ component ScoreBoard(score: int):
       expect(scrubbed).not.toContain("node:internal");
       expect(scrubbed).not.toContain("dist/");
       expect(scrubbed).not.toContain("at runTest");
-      expect(scrubbed).toContain("tests/unit/calc.test.ts.ail");
-      expect(scrubbed).toContain("src/math.ts.ail:10");
+      expect(scrubbed).toContain("tests/unit/calc.test.ts.aice");
+      expect(scrubbed).toContain("src/math.ts.aice:10");
     });
 
-    it("preserves legitimate .ail and .ts.ail extensions", () => {
-      const text = `Scope: fn process in src/core/engine.ts.ail:4`;
+    it("preserves legitimate .aice and .ts.aice extensions", () => {
+      const text = `Scope: fn process in src/core/engine.ts.aice:4`;
       const scrubbed = scrubTargetFileReferences(text);
-      expect(scrubbed).toBe("Scope: fn process in src/core/engine.ts.ail:4");
+      expect(scrubbed).toBe("Scope: fn process in src/core/engine.ts.aice:4");
     });
   });
 
   describe("formatSymbolAwareError Output across Test Runners", () => {
     it("formats Vitest runtime error into concise 3-line report with exact AST line", () => {
-      // Create .ail source file in tmpDir
-      const engineAil = path.join(tmpDir, "src", "core", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(engineAil), { recursive: true });
+      // Create .aice source file in tmpDir
+      const engineAice = path.join(tmpDir, "src", "core", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(engineAice), { recursive: true });
       fs.writeFileSync(
-        engineAil,
+        engineAice,
         `class GameEngine:
   multiplier: int = 1
 
@@ -238,9 +238,9 @@ TypeError: Cannot read properties of undefined (reading 'multiplier')
       const formatted = formatSymbolAwareError(vitestOutput, tmpDir);
 
       expect(formatted).toBe(
-        `❌ FAIL: tests/unit/game.test.ts.ail [AI Bot plays 100+ steps...]
+        `❌ FAIL: tests/unit/game.test.ts.aice [AI Bot plays 100+ steps...]
    Error: TypeError: Cannot read properties of undefined (reading 'multiplier')
-   Scope: fn GameEngine.processFoodConsumption in src/core/engine.ts.ail:4`,
+   Scope: fn GameEngine.processFoodConsumption in src/core/engine.ts.aice:4`,
       );
 
       // Verify no target runtime paths leaked
@@ -250,10 +250,10 @@ TypeError: Cannot read properties of undefined (reading 'multiplier')
     });
 
     it("formats Bun test runner output with unqualified method and AST line", () => {
-      const engineAil = path.join(tmpDir, "src", "core", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(engineAil), { recursive: true });
+      const engineAice = path.join(tmpDir, "src", "core", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(engineAice), { recursive: true });
       fs.writeFileSync(
-        engineAil,
+        engineAice,
         `class GameEngine:
   fn processFoodConsumption(food: int) -> int:
     ret food * 2
@@ -271,17 +271,17 @@ TypeError: Cannot read properties of undefined (reading 'multiplier')
       const formatted = formatSymbolAwareError(bunOutput, tmpDir);
 
       expect(formatted).toBe(
-        `❌ FAIL: tests/unit/game.test.ts.ail [AI Bot plays 100+ steps...]
+        `❌ FAIL: tests/unit/game.test.ts.aice [AI Bot plays 100+ steps...]
    Error: TypeError: Cannot read properties of undefined (reading 'multiplier')
-   Scope: fn processFoodConsumption in src/core/engine.ts.ail:2`,
+   Scope: fn processFoodConsumption in src/core/engine.ts.aice:2`,
       );
     });
 
     it("formats Node.js --test TAP output with AST symbol resolution", () => {
-      const mathAil = path.join(tmpDir, "src", "math.ts.ail");
-      fs.mkdirSync(path.dirname(mathAil), { recursive: true });
+      const mathAice = path.join(tmpDir, "src", "math.ts.aice");
+      fs.mkdirSync(path.dirname(mathAice), { recursive: true });
       fs.writeFileSync(
-        mathAil,
+        mathAice,
         `# Math library
 fn calculateSum(a: int, b: int) -> int:
   ret a + b
@@ -306,17 +306,17 @@ not ok 1 - adds two numbers correctly
       const formatted = formatSymbolAwareError(nodeTap, tmpDir);
 
       expect(formatted).toBe(
-        `❌ FAIL: tests/unit/math.test.ts.ail [adds two numbers correctly]
+        `❌ FAIL: tests/unit/math.test.ts.aice [adds two numbers correctly]
    Error: Cannot read properties of undefined (reading 'val')
-   Scope: fn calculateSum in src/math.ts.ail:2`,
+   Scope: fn calculateSum in src/math.ts.aice:2`,
       );
     });
 
     it("formats ComponentDecl failures in JSX/TSX layout code", () => {
-      const compAil = path.join(tmpDir, "src", "ui", "view.tsx.ail");
-      fs.mkdirSync(path.dirname(compAil), { recursive: true });
+      const compAice = path.join(tmpDir, "src", "ui", "view.tsx.aice");
+      fs.mkdirSync(path.dirname(compAice), { recursive: true });
       fs.writeFileSync(
-        compAil,
+        compAice,
         `
 component PlayerCard(name: str):
   div:
@@ -335,9 +335,9 @@ Error: Render failed
       const formatted = formatSymbolAwareError(errorText, tmpDir);
 
       expect(formatted).toBe(
-        `❌ FAIL: tests/ui/view.test.tsx.ail [renders player card]
+        `❌ FAIL: tests/ui/view.test.tsx.aice [renders player card]
    Error: Render failed
-   Scope: fn PlayerCard in src/ui/view.tsx.ail:2`,
+   Scope: fn PlayerCard in src/ui/view.tsx.aice:2`,
       );
     });
 
@@ -357,20 +357,20 @@ AssertionError: expected 1 to be 2
       const parts = formatted.split("\n\n");
       expect(parts.length).toBe(2);
 
-      expect(parts[0]).toContain("❌ FAIL: tests/unit/one.test.ts.ail [first test]");
+      expect(parts[0]).toContain("❌ FAIL: tests/unit/one.test.ts.aice [first test]");
       expect(parts[0]).toContain("Error: TypeError: Cannot read properties of undefined");
-      expect(parts[0]).toContain("Scope: fn funcOne in src/one.ts.ail:10");
+      expect(parts[0]).toContain("Scope: fn funcOne in src/one.ts.aice:10");
 
-      expect(parts[1]).toContain("❌ FAIL: tests/unit/two.test.ts.ail [second test]");
+      expect(parts[1]).toContain("❌ FAIL: tests/unit/two.test.ts.aice [second test]");
       expect(parts[1]).toContain("Error: AssertionError: expected 1 to be 2");
-      expect(parts[1]).toContain("Scope: fn funcTwo in src/two.ts.ail:20");
+      expect(parts[1]).toContain("Scope: fn funcTwo in src/two.ts.aice:20");
     });
 
     it("guarantees zero *.map files are written to disk during symbol resolution", () => {
-      const engineAil = path.join(tmpDir, "src", "core", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(engineAil), { recursive: true });
+      const engineAice = path.join(tmpDir, "src", "core", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(engineAice), { recursive: true });
       fs.writeFileSync(
-        engineAil,
+        engineAice,
         `class GameEngine:
   fn run():
     ret nil
@@ -408,12 +408,12 @@ Error: failure
     });
   });
 
-  describe("Integration with test-runner (formatCleanTestOutput & runAilTests)", () => {
+  describe("Integration with test-runner (formatCleanTestOutput & runAiceTests)", () => {
     it("formatCleanTestOutput formats failing test output via symbol-aware error formatter", () => {
-      const engineAil = path.join(tmpDir, "src", "core", "engine.ts.ail");
-      fs.mkdirSync(path.dirname(engineAil), { recursive: true });
+      const engineAice = path.join(tmpDir, "src", "core", "engine.ts.aice");
+      fs.mkdirSync(path.dirname(engineAice), { recursive: true });
       fs.writeFileSync(
-        engineAil,
+        engineAice,
         `class GameEngine:
   fn tick():
     ret nil
@@ -436,14 +436,14 @@ TypeError: state is null
         tmpDir,
       );
 
-      expect(output).toContain("❌ FAIL: tests/unit/game.test.ts.ail [game loop tick]");
+      expect(output).toContain("❌ FAIL: tests/unit/game.test.ts.aice [game loop tick]");
       expect(output).toContain("Error: TypeError: state is null");
-      expect(output).toContain("Scope: fn GameEngine.tick in src/core/engine.ts.ail:2");
+      expect(output).toContain("Scope: fn GameEngine.tick in src/core/engine.ts.aice:2");
       expect(output).not.toContain("node:internal");
       expect(output).not.toContain(".js");
     });
 
-    it("runAilTests returns symbol-aware formatted error on test failure", async () => {
+    it("runAiceTests returns symbol-aware formatted error on test failure", async () => {
       const testFile = path.join(tmpDir, "runner_fail.test.mjs");
       fs.writeFileSync(
         testFile,
@@ -451,7 +451,7 @@ TypeError: state is null
         "utf-8",
       );
 
-      const result = await runAilTests(testFile, {
+      const result = await runAiceTests(testFile, {
         cwd: tmpDir,
         harness: "node",
       });
@@ -459,7 +459,7 @@ TypeError: state is null
       expect(result.success).toBe(false);
       expect(result.exitCode).not.toBe(0);
       expect(result.summary.failed).toBeGreaterThanOrEqual(1);
-      expect(result.output).toContain("❌ FAIL: runner_fail.test.mjs.ail [runner fails cleanly]");
+      expect(result.output).toContain("❌ FAIL: runner_fail.test.mjs.aice [runner fails cleanly]");
       expect(result.output).toContain("expected failure");
       expect(result.output).not.toContain("node:internal");
     });

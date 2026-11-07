@@ -1,6 +1,6 @@
-# AIL Language Support for VSCode & Cursor
+# AICE Language Support for VSCode & Cursor
 
-Official Visual Studio Code and Cursor extension for **AIL (Abstract Intermediate Language) 2.0**.
+Official Visual Studio Code and Cursor extension for **AICE (AI Context Engine) 2.0**.
 
 ---
 
@@ -15,20 +15,20 @@ Official Visual Studio Code and Cursor extension for **AIL (Abstract Intermediat
   - **Document Symbols**: Hierarchical AST outline structure for classes, functions, components, types, and variables.
   - **Go to Definition**: Jump directly to definitions for functions, types, components, and class members.
 - **Integrated Toolchain Commands**:
-  - `AIL: Compile Current File` (`ail.compile`)
-  - `AIL: Start Bidirectional Watch Daemon` (`ail.watch`)
-  - `AIL: Sync Target Changes to AIL` (`ail.sync`)
-  - `AIL: Show AST Structural Outline` (`ail.outline`)
-  - `AIL: Generate Bounded Context Pack` (`ail.context`)
-  - `AIL: Scan Project Idioms ($idiom)` (`ail.idiomsScan`)
-  - `AIL: Apply Project Idioms ($idiom)` (`ail.idiomsApply`)
-  - `AIL: Check 4-Layer AI Shield Status` (`ail.shieldStatus`)
-  - `AIL: Lock Target Files (chmod 444)` (`ail.shieldLock`)
-  - `AIL: Unlock Target Files (chmod 644)` (`ail.shieldUnlock`)
-  - `AIL: Run Symbol-Mapped Test Suite` (`ail.test`)
-- **Status Bar Integration**: Clickable `$(zap) AIL` status bar indicator.
-- **Configurable Toolchain**: `ail.executablePath` setting to customize the AIL CLI binary path.
-- **Target File Associations**: Automatically activates for `.ail`, `.ts.ail`, `.tsx.ail`, `.js.ail`, `.mjs.ail`, `.cjs.ail`, `.py.ail`, `.go.ail`, `.rs.ail`, `.kt.ail`, `.kts.ail`, `.php.ail`, `.cpp.ail`, `.hpp.ail`, `.h.ail`, `.cc.ail`, `.cxx.ail`, `.cs.ail`, `.css.ail`, `.html.ail`, `.twig.ail`, `.json.ail`, `.yaml.ail`, `.yml.ail`.
+  - `AICE: Compile Current File` (`aice.compile`)
+  - `AICE: Start Bidirectional Watch Daemon` (`aice.watch`)
+  - `AICE: Sync Target Changes to AICE` (`aice.sync`)
+  - `AICE: Show AST Structural Outline` (`aice.outline`)
+  - `AICE: Generate Bounded Context Pack` (`aice.context`)
+  - `AICE: Scan Project Idioms ($idiom)` (`aice.idiomsScan`)
+  - `AICE: Apply Project Idioms ($idiom)` (`aice.idiomsApply`)
+  - `AICE: Check 4-Layer AI Shield Status` (`aice.shieldStatus`)
+  - `AICE: Lock Target Files (chmod 444)` (`aice.shieldLock`)
+  - `AICE: Unlock Target Files (chmod 644)` (`aice.shieldUnlock`)
+  - `AICE: Run Symbol-Mapped Test Suite` (`aice.test`)
+- **Status Bar Integration**: Clickable `$(zap) AICE` status bar indicator.
+- **Configurable Toolchain**: `aice.executablePath` setting to customize the AICE CLI binary path.
+- **Target File Associations**: Automatically activates for `.aice`, `.ts.aice`, `.tsx.aice`, `.js.aice`, `.mjs.aice`, `.cjs.aice`, `.py.aice`, `.go.aice`, `.rs.aice`, `.kt.aice`, `.kts.aice`, `.php.aice`, `.cpp.aice`, `.hpp.aice`, `.h.aice`, `.cc.aice`, `.cxx.aice`, `.cs.aice`, `.css.aice`, `.html.aice`, `.twig.aice`, `.json.aice`, `.yaml.aice`, `.yml.aice`.
 
 ---
 
@@ -43,4 +43,4 @@ Official Visual Studio Code and Cursor extension for **AIL (Abstract Intermediat
 2. In VSCode or Cursor:
    - Press `Ctrl+Shift+P` (or `Cmd+Shift+P` on macOS)
    - Type `Extensions: Install from VSIX...`
-   - Select `editors/vscode/vscode-ail-1.0.0.vsix`
+   - Select `editors/vscode/vscode-aice-1.0.0.vsix`

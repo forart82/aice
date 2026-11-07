@@ -1,5 +1,5 @@
 /**
- * Machine-Readable Diagnostic Engine & Autonomous Self-Repair Telemetry for AIL 2.0.
+ * Machine-Readable Diagnostic Engine & Autonomous Self-Repair Telemetry for AICE 2.0.
  *
  * Implements the single-root diagnostic payload, visual caret slices, and unified diff
  * candidate repair generator designed to maximize LLM 1-shot self-healing (SWE-bench / Reflexion).
@@ -26,7 +26,7 @@ export interface ViolationDetail {
   actual?: string;
 }
 
-export interface AilDiagnostic {
+export interface AiceDiagnostic {
   status: "REJECTED";
   error_phase: DiagnosticPhase;
   file: string;
@@ -42,8 +42,8 @@ export interface AilDiagnostic {
 export interface DiagnosticReport {
   status: "SUCCESS" | "FAILURE";
   file: string;
-  diagnostics: AilDiagnostic[];
-  primary_diagnostic?: AilDiagnostic;
+  diagnostics: AiceDiagnostic[];
+  primary_diagnostic?: AiceDiagnostic;
 }
 
 /**
@@ -108,7 +108,7 @@ export function generateCandidateRepair(
     const patchedLine = originalLine.replace(/===/g, "==");
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
     return {
-      description: "Replace JS strict equality '===' with AIL equality '=='",
+      description: "Replace JS strict equality '===' with AICE equality '=='",
       patch,
     };
   }
@@ -116,24 +116,24 @@ export function generateCandidateRepair(
     const patchedLine = originalLine.replace(/!==/g, "!=");
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
     return {
-      description: "Replace JS strict inequality '!==' with AIL inequality '!='",
+      description: "Replace JS strict inequality '!==' with AICE inequality '!='",
       patch,
     };
   }
   if (
-    (code === "AIL_E2008_UNDECLARED_VARIABLE" && message.includes("'null'")) ||
-    (/\bnull\b/.test(originalLine) && (code === "AIL_E2008_UNDECLARED_VARIABLE" || code.startsWith("AIL_E1")))
+    (code === "AICE_E2008_UNDECLARED_VARIABLE" && message.includes("'null'")) ||
+    (/\bnull\b/.test(originalLine) && (code === "AICE_E2008_UNDECLARED_VARIABLE" || code.startsWith("AICE_E1")))
   ) {
     const patchedLine = originalLine.replace(/\bnull\b/g, "nil");
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
     return {
-      description: "Replace 'null' with canonical AIL 'nil'",
+      description: "Replace 'null' with canonical AICE 'nil'",
       patch,
     };
   }
 
   // 1. Immutable variable assignment: let x = -> let mut x = (also handles const and :=)
-  if (code === "AIL_E2005_IMMUTABLE_ASSIGNMENT") {
+  if (code === "AICE_E2005_IMMUTABLE_ASSIGNMENT") {
     const varNameMatch = message.match(/'([^']+)'/);
     const varName = varNameMatch ? varNameMatch[1] : undefined;
     if (varName) {
@@ -172,7 +172,7 @@ export function generateCandidateRepair(
   }
 
   // 2. Division by zero: replace 0 with safe fallback
-  if (code === "AIL_E2003_DIVISION_BY_ZERO") {
+  if (code === "AICE_E2003_DIVISION_BY_ZERO") {
     const patchedLine = originalLine.replace(/\/\s*0\b/, "/ 1 /* divisor must be non-zero */");
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
     return {
@@ -183,8 +183,8 @@ export function generateCandidateRepair(
 
   // 3. Postfix ? missing or unhandled Result
   if (
-    code === "AIL_E1004_UNHANDLED_RESULT" ||
-    (message.includes("Result") && (code === "AIL_E2002_TYPE_MISMATCH" || message.includes("unpacked")))
+    code === "AICE_E1004_UNHANDLED_RESULT" ||
+    (message.includes("Result") && (code === "AICE_E2002_TYPE_MISMATCH" || message.includes("unpacked")))
   ) {
     let patchedLine: string;
     if (originalLine.trimEnd().endsWith(";")) {
@@ -200,7 +200,7 @@ export function generateCandidateRepair(
   }
 
   // 4. Non-boolean conditional: if items: -> if not items.isEmpty(): or if count != 0:
-  if (code === "AIL_E2001_NON_BOOLEAN_CONDITION") {
+  if (code === "AICE_E2001_NON_BOOLEAN_CONDITION") {
     let condMatch = originalLine.match(/if\s+([^:]+):/);
     let withBrace = false;
     if (!condMatch) {
@@ -251,7 +251,7 @@ export function buildReportFromError(
   file = "<anonymous>",
 ): DiagnosticReport {
   let error_phase: DiagnosticPhase = "VERIFICATION";
-  let code = "AIL_E0000_UNKNOWN_ERROR";
+  let code = "AICE_E0000_UNKNOWN_ERROR";
   let message = "Unknown error during compilation";
   let span: Span = emptySpan(file);
   let expected: string | undefined;
@@ -281,7 +281,7 @@ export function buildReportFromError(
   const caret_slice = generateCaretSlice(source, span);
   const candidate_repair = generateCandidateRepair(code, message, span, source, file);
 
-  const diagnostic: AilDiagnostic = {
+  const diagnostic: AiceDiagnostic = {
     status: "REJECTED",
     error_phase,
     file,
@@ -409,7 +409,7 @@ export interface SelfRepairResult {
 }
 
 /**
- * Autonomously repairs an .ail source string using synthesized candidate diagnostic patches.
+ * Autonomously repairs an .aice source string using synthesized candidate diagnostic patches.
  * Evaluates parse & typecheck in a loop until the source compiles cleanly or maxIterations is reached.
  */
 export function attemptSelfRepair(

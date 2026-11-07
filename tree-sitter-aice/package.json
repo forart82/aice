@@ -1,13 +1,13 @@
 {
-  "name": "tree-sitter-ail",
+  "name": "tree-sitter-aice",
   "version": "1.0.0",
-  "description": "Tree-sitter grammar for AIL (Abstract Intermediate Language)",
+  "description": "Tree-sitter grammar for AICE (AI Context Engine)",
   "main": "bindings/node",
   "keywords": [
     "parser",
     "lexer",
     "tree-sitter",
-    "ail"
+    "aice"
   ],
   "author": "Antigravity",
   "license": "Apache-2.0",
@@ -19,14 +19,14 @@
   },
   "tree-sitter": [
     {
-      "scope": "source.ail",
+      "scope": "source.aice",
       "file-types": [
-        "ail",
-        "ts.ail",
-        "tsx.ail",
-        "py.ail",
-        "html.ail",
-        "css.ail"
+        "aice",
+        "ts.aice",
+        "tsx.aice",
+        "py.aice",
+        "html.aice",
+        "css.aice"
       ],
       "highlights": "queries/highlights.scm"
     }

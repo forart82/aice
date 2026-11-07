@@ -2,11 +2,11 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Phase 0 TDD Suite: Twinless On-the-Fly Mode (Zero .ail Files on Disk)
+ * Phase 0 TDD Suite: Twinless On-the-Fly Mode (Zero .aice Files on Disk)
  * Covers:
- * - Category D: "Frankenstein syntax" forgiving `ail splice` directly on native files (.ts, .py) + symbol-scoped context
+ * - Category D: "Frankenstein syntax" forgiving `aice splice` directly on native files (.ts, .py) + symbol-scoped context
  * - Category E: Surgical byte-span isolation & 100% bit-identical trivia preservation on native files
- * - Category F: Multi-file batch splice (`spliceBatch` & `ail splice --batch`) with atomic rollback
+ * - Category F: Multi-file batch splice (`spliceBatch` & `aice splice --batch`) with atomic rollback
  * - Category G: Real-world E2E proof on `poc_real_case/snake_ts` native files with `tsc --noEmit` verification & Twinless Shield
  */
 
@@ -32,7 +32,7 @@ import { splice, spliceBatch } from "../../src/tools/splice.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "../..");
-const cliPath = path.resolve(repoRoot, "bin/ail.ts");
+const cliPath = path.resolve(repoRoot, "bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -51,7 +51,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-twinless-otf-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-twinless-otf-"));
   });
 
   afterEach(() => {
@@ -63,7 +63,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
   });
 
   describe("Category D: Forgiving 'Frankenstein Syntax' Direct-to-Native Splice & Symbol-Scoped Context", () => {
-    it("splices a pure native .ts file with (1) pure AIL + $idioms, (2) raw TypeScript, and (3) hybrid Frankenstein syntax with zero .ail files created", async () => {
+    it("splices a pure native .ts file with (1) pure AICE + $idioms, (2) raw TypeScript, and (3) hybrid Frankenstein syntax with zero .aice files created", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -71,7 +71,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
         name: "$guardMin",
         kind: "stmt",
         params: [{ name: "$0" }, { name: "$1" }],
-        templateAil: "if $0 < $1:\n  ret $1",
+        templateAice: "if $0 < $1:\n  ret $1",
         occurrences: 3,
         tokensPerOccurrenceSaved: 6,
         netTokenSavings: 18,
@@ -104,7 +104,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
         "utf-8",
       );
 
-      // Subcase 1: Pure AIL + $idiom
+      // Subcase 1: Pure AICE + $idiom
       await splice(tsFile, {
         projectRoot: tmpDir,
         symbol: "CombatMath.calcDamage",
@@ -116,7 +116,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
       });
 
       let content = fs.readFileSync(tsFile, "utf-8");
-      expect(fs.existsSync(`${tsFile}.ail`)).toBe(false);
+      expect(fs.existsSync(`${tsFile}.aice`)).toBe(false);
       expect(content).toContain("if (raw < 0)");
       expect(content).toContain("if (net < 1)");
       expect(content).toContain("return net;");
@@ -137,7 +137,7 @@ describe("Twinless On-the-Fly Mode (Direct Native Read, Context, & Surgical Spli
       content = fs.readFileSync(tsFile, "utf-8");
       expect(content).toContain("const total = amount + bonus * 2;");
 
-      // Subcase 3: Hybrid "Frankenstein" syntax mixing TS braces/semicolons/const/destructuring with AIL `:=`, `ret`, and `$guardMin`
+      // Subcase 3: Hybrid "Frankenstein" syntax mixing TS braces/semicolons/const/destructuring with AICE `:=`, `ret`, and `$guardMin`
       await splice(tsFile, {
         projectRoot: tmpDir,
         symbol: "CombatMath.calcShield",
@@ -157,7 +157,7 @@ ret boosted;`,
       expect(content).toContain("return boosted;");
     });
 
-    it("splices a pure native Python (.py) file directly using AIL + $idioms and hybrid Python/AIL syntax without creating a .ail file", async () => {
+    it("splices a pure native Python (.py) file directly using AICE + $idioms and hybrid Python/AICE syntax without creating a .aice file", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -165,7 +165,7 @@ ret boosted;`,
         name: "$guardNonNeg",
         kind: "stmt",
         params: [{ name: "$0" }],
-        templateAil: "if $0 < 0:\n  ret 0",
+        templateAice: "if $0 < 0:\n  ret 0",
         occurrences: 3,
         tokensPerOccurrenceSaved: 5,
         netTokenSavings: 15,
@@ -192,7 +192,7 @@ def keep_untouched(x: int) -> int:
         "utf-8",
       );
 
-      // 1. Pure AIL + $idiom
+      // 1. Pure AICE + $idiom
       await splice(pyFile, {
         projectRoot: tmpDir,
         symbol: "compute_velocity",
@@ -202,14 +202,14 @@ def keep_untouched(x: int) -> int:
   ret step`,
       });
 
-      expect(fs.existsSync(`${pyFile}.ail`)).toBe(false);
+      expect(fs.existsSync(`${pyFile}.aice`)).toBe(false);
       let pyAfter = fs.readFileSync(pyFile, "utf-8");
       expect(pyAfter).toContain("# Physics header comment");
       expect(pyAfter).toContain("if dt < 0:");
       expect(pyAfter).toContain("return 0");
       expect(pyAfter).toContain("def keep_untouched(x: int) -> int:");
 
-      // 2. Hybrid Python `def` + list comprehension + AIL `:=`, `ret`, and `$guardNonNeg`
+      // 2. Hybrid Python `def` + list comprehension + AICE `:=`, `ret`, and `$guardNonNeg`
       await splice(pyFile, {
         projectRoot: tmpDir,
         symbol: "compute_velocity",
@@ -228,7 +228,7 @@ def keep_untouched(x: int) -> int:
     });
 
 
-    it("packages symbol-scoped on-the-fly AIL context (`-s <symbol>`) from a native .ts file with collapsed $idioms", async () => {
+    it("packages symbol-scoped on-the-fly AICE context (`-s <symbol>`) from a native .ts file with collapsed $idioms", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
 
@@ -236,7 +236,7 @@ def keep_untouched(x: int) -> int:
         name: "$guardAlive",
         kind: "stmt",
         params: [{ name: "$0" }],
-        templateAil: "if $0 <= 0:\n  ret 0",
+        templateAice: "if $0 <= 0:\n  ret 0",
         occurrences: 3,
         tokensPerOccurrenceSaved: 5,
         netTokenSavings: 15,
@@ -277,7 +277,7 @@ def keep_untouched(x: int) -> int:
         symbol: "Actor.updateMovement",
       });
 
-      // Scoped context must contain the decompiled AIL with collapsed $guardAlive for updateMovement
+      // Scoped context must contain the decompiled AICE with collapsed $guardAlive for updateMovement
       expect(scopedCtx.targetContent).toContain("$guardAlive(hp)");
       expect(scopedCtx.targetContent).toContain("updateMovement");
       // And it must NOT include the body of veryLongUnrelatedMethod
@@ -451,14 +451,14 @@ export class GameEngine {
     });
   });
 
-  describe("Category G: Real-World E2E Proof on `poc_real_case/snake_ts` (Zero .ail Files + `tsc --noEmit`)", () => {
+  describe("Category G: Real-World E2E Proof on `poc_real_case/snake_ts` (Zero .aice Files + `tsc --noEmit`)", () => {
     it("runs full Twinless workflow (Shield -> Idiom Scan -> Context -> Multi-File Idiom Update -> Direct Native Splice -> tsc --noEmit) on real snake_ts modules", async () => {
       const srcCoreDir = path.join(tmpDir, "src", "core");
       const srcSimDir = path.join(tmpDir, "src", "sim");
       fs.mkdirSync(srcCoreDir, { recursive: true });
       fs.mkdirSync(srcSimDir, { recursive: true });
 
-      // Copy real native .ts files (NO .ail files!) from poc_real_case/snake_ts
+      // Copy real native .ts files (NO .aice files!) from poc_real_case/snake_ts
       const snakeRoot = path.join(repoRoot, "poc_real_case", "snake_ts");
       fs.copyFileSync(
         path.join(snakeRoot, "src", "core", "MathX.ts"),
@@ -538,7 +538,7 @@ export class GameEngine {
       expect(updateRes.updatedOccurrences).toBe(3);
       expect(fs.readFileSync(statusSetPath, "utf-8")).toContain("dt * 1.25");
 
-      // 5. Surgically splice StatusSet.Freeze using compressed AIL + auto-mined $guard2
+      // 5. Surgically splice StatusSet.Freeze using compressed AICE + auto-mined $guard2
       await splice(statusSetPath, {
         projectRoot: tmpDir,
         symbol: "StatusSet.Freeze",
@@ -573,17 +573,17 @@ export class GameEngine {
         { projectRoot: tmpDir },
       );
 
-      // Verify zero .ail files exist anywhere in tmpDir
-      const findAilFiles = (dir: string): string[] => {
+      // Verify zero .aice files exist anywhere in tmpDir
+      const findAiceFiles = (dir: string): string[] => {
         const out: string[] = [];
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
           const full = path.join(dir, entry.name);
-          if (entry.isDirectory()) out.push(...findAilFiles(full));
-          else if (entry.name.endsWith(".ail")) out.push(full);
+          if (entry.isDirectory()) out.push(...findAiceFiles(full));
+          else if (entry.name.endsWith(".aice")) out.push(full);
         }
         return out;
       };
-      expect(findAilFiles(tmpDir)).toHaveLength(0);
+      expect(findAiceFiles(tmpDir)).toHaveLength(0);
 
       // 6. Run `tsc --noEmit` to prove the resulting native TypeScript compiles with 0 errors!
       const tscBin = path.join(repoRoot, "node_modules", ".bin", "tsc");
@@ -597,7 +597,7 @@ export class GameEngine {
   });
 
   describe("Category H: Surgical Slicing & Splicing Across All Non-Code & Systems Dialects (.css, .json, .yaml, .html, .twig, .rs, .go)", () => {
-    it("surgically slices and splices .css rules, .json/.yaml dot-paths, .html elements, .twig blocks, and Rust/Go try-catch blocks with zero .ail files", async () => {
+    it("surgically slices and splices .css rules, .json/.yaml dot-paths, .html elements, .twig blocks, and Rust/Go try-catch blocks with zero .aice files", async () => {
       // 1. CSS rule slicing & surgical splice
       const cssPath = path.join(tmpDir, "theme.css");
       fs.writeFileSync(

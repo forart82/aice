@@ -4,10 +4,10 @@
  *
  * Unit & Roundtrip Test Suite for Multi-Language Dialects for Data & Config (`.json`, `.yaml`) (Step 24).
  * Verifies:
- * 1. JSON Dialect: Decompilation to token-dense AIL, forward emission, and lossless data equivalence.
+ * 1. JSON Dialect: Decompilation to token-dense AICE, forward emission, and lossless data equivalence.
  * 2. YAML Dialect: Decompilation with comment retention, forward emission with YAML.stringify, and lossless equivalence.
  * 3. Core System Registration: TargetLanguage, detectTargetFromPath, emitTarget, decompile, KNOWN_TARGET_EXTENSIONS, TARGET_EXT_MAP.
- * 4. Polymorphic CLI Integration: `ail compile`, `ail outline`, and `ail context` on data files.
+ * 4. Polymorphic CLI Integration: `aice compile`, `aice outline`, and `aice context` on data files.
  * 5. Edge cases: Nested hierarchies, empty collections, special keys, negative numbers, multiple const decls.
  */
 
@@ -28,7 +28,7 @@ import { parse, parseWithTrivia } from "../../src/core/parser.js";
 import {
   decompile,
   decompileFile,
-  executeAilRoundtrip,
+  executeAiceRoundtrip,
   executeRoundtrip,
   JsonDecompiler,
   YamlDecompiler,
@@ -42,7 +42,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const cliPath = path.resolve(__dirname, "../../bin/ail.ts");
+const cliPath = path.resolve(__dirname, "../../bin/aice.ts");
 
 function runCli(args: string[], cwd?: string): { status: number; stdout: string; stderr: string } {
   const result = spawnSync("bun", [cliPath, ...args], {
@@ -61,7 +61,7 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-data-config-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-data-config-test-"));
   });
 
   afterEach(() => {
@@ -73,7 +73,7 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
   });
 
   describe("1. JSON Dialect Implementation", () => {
-    it("decompiles nested JSON with diverse data types into canonical AIL code", () => {
+    it("decompiles nested JSON with diverse data types into canonical AICE code", () => {
       const jsonSource = JSON.stringify(
         {
           name: "data-service",
@@ -111,18 +111,18 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
         expect(decl.value.kind).toBe("RecordLiteralExpr");
       }
 
-      // Check generated AIL code
-      expect(result.ail).toContain("module service");
-      expect(result.ail).toContain('pub const config = { name: "data-service"');
-      expect(result.ail).toContain("fallback: nil");
-      expect(result.ail).toContain("enabled: true");
-      expect(result.ail).toContain("disabled: false");
-      expect(result.ail).toContain("negativeOffset: -42");
-      expect(result.ail).toContain("emptyObj: {}");
-      expect(result.ail).toContain("emptyArr: []");
+      // Check generated AICE code
+      expect(result.aice).toContain("module service");
+      expect(result.aice).toContain('pub const config = { name: "data-service"');
+      expect(result.aice).toContain("fallback: nil");
+      expect(result.aice).toContain("enabled: true");
+      expect(result.aice).toContain("disabled: false");
+      expect(result.aice).toContain("negativeOffset: -42");
+      expect(result.aice).toContain("emptyObj: {}");
+      expect(result.aice).toContain("emptyArr: []");
 
-      // Verify generated AIL code can be parsed back into AST without syntax errors
-      const parsed = parse(result.ail);
+      // Verify generated AICE code can be parsed back into AST without syntax errors
+      const parsed = parse(result.aice);
       expect(parsed.items.length).toBe(1);
     });
 
@@ -132,7 +132,7 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
         constName: "customSettings",
       });
       const result = decompiler.decompile();
-      expect(result.ail).toContain('pub const customSettings = { key: "val" }');
+      expect(result.aice).toContain('pub const customSettings = { key: "val" }');
     });
 
     it("parses JSON containing line and block comments by stripping comments cleanly", () => {
@@ -145,28 +145,28 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
       `;
       const decompiler = new JsonDecompiler(jsonWithComments, "commented.json");
       const result = decompiler.decompile();
-      expect(result.ail).toContain('host: "localhost"');
-      expect(result.ail).toContain("port: 3000");
+      expect(result.aice).toContain('host: "localhost"');
+      expect(result.aice).toContain("port: 3000");
     });
 
-    it("emits valid formatted JSON from AIL AST using JsonEmitter", () => {
-      const ailSource = `module test\n\npub const config = { app: "ail", count: 10, debug: false, meta: nil }\n`;
-      const ast = parse(ailSource);
+    it("emits valid formatted JSON from AICE AST using JsonEmitter", () => {
+      const aiceSource = `module test\n\npub const config = { app: "aice", count: 10, debug: false, meta: nil }\n`;
+      const ast = parse(aiceSource);
       const emitter = new JsonEmitter({ indent: "  " });
       const emitted = emitter.emit(ast);
 
       const parsedJson = JSON.parse(emitted);
       expect(parsedJson).toEqual({
-        app: "ail",
+        app: "aice",
         count: 10,
         debug: false,
         meta: null,
       });
     });
 
-    it("guarantees 100% lossless data equivalence for JSON -> AIL -> JSON", () => {
+    it("guarantees 100% lossless data equivalence for JSON -> AICE -> JSON", () => {
       const originalData = {
-        title: "AIL Benchmark",
+        title: "AICE Benchmark",
         active: true,
         score: 99.85,
         depth: -5,
@@ -186,7 +186,7 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
       const jsonStr = JSON.stringify(originalData, null, 2);
 
       const decompResult = decompile(jsonStr, "json", { filePath: "benchmark.json" });
-      const ast = parse(decompResult.ail);
+      const ast = parse(decompResult.aice);
       const emittedJson = emitTarget(ast, "json");
 
       const roundtrippedData = JSON.parse(emittedJson);
@@ -204,13 +204,13 @@ describe("Step 24: Multi-Language Dialects for Data & Config (.json, .yaml)", ()
       const result = executeRoundtrip(originalJson, "json", "auth.json");
 
       expect(result.target).toBe("json");
-      expect(result.ail).toContain("pub const config");
+      expect(result.aice).toContain("pub const config");
       expect(JSON.parse(result.reconstructed)).toEqual(originalData);
     });
   });
 
   describe("2. YAML Dialect Implementation", () => {
-    it("decompiles YAML with comments and hierarchy into canonical AIL code", () => {
+    it("decompiles YAML with comments and hierarchy into canonical AICE code", () => {
       const yamlSource = `# Cluster configuration
 server:
   host: 0.0.0.0
@@ -236,27 +236,27 @@ server:
       expect(result.ast.path).toBe("cluster");
       expect(result.ast.items.length).toBe(1);
 
-      // Verify comment retention in decompiled AIL
-      expect(result.ail).toContain("# Cluster configuration");
-      expect(result.ail).toContain("module cluster");
-      expect(result.ail).toContain("pub const config =");
-      expect(result.ail).toContain('host: "0.0.0.0"');
-      expect(result.ail).toContain("drainTarget: nil");
-      expect(result.ail).toContain("healthy: true");
-      expect(result.ail).toContain("maintenance: false");
-      expect(result.ail).toContain("negativeMargin: -50");
-      expect(result.ail).toContain('endpoints: ["/healthz", "/metrics"]');
-      expect(result.ail).toContain("emptyMap: {}");
-      expect(result.ail).toContain("emptySeq: []");
+      // Verify comment retention in decompiled AICE
+      expect(result.aice).toContain("# Cluster configuration");
+      expect(result.aice).toContain("module cluster");
+      expect(result.aice).toContain("pub const config =");
+      expect(result.aice).toContain('host: "0.0.0.0"');
+      expect(result.aice).toContain("drainTarget: nil");
+      expect(result.aice).toContain("healthy: true");
+      expect(result.aice).toContain("maintenance: false");
+      expect(result.aice).toContain("negativeMargin: -50");
+      expect(result.aice).toContain('endpoints: ["/healthz", "/metrics"]');
+      expect(result.aice).toContain("emptyMap: {}");
+      expect(result.aice).toContain("emptySeq: []");
 
       // Verify valid parse
-      const parsed = parse(result.ail);
+      const parsed = parse(result.aice);
       expect(parsed.items.length).toBe(1);
     });
 
-    it("emits valid YAML from AIL AST using YamlEmitter", () => {
-      const ailSource = `module test\n\npub const config = { service: "gateway", port: 443, secure: true, cert: nil }\n`;
-      const ast = parse(ailSource);
+    it("emits valid YAML from AICE AST using YamlEmitter", () => {
+      const aiceSource = `module test\n\npub const config = { service: "gateway", port: 443, secure: true, cert: nil }\n`;
+      const ast = parse(aiceSource);
       const emitter = new YamlEmitter();
       const emitted = emitter.emit(ast);
 
@@ -272,7 +272,7 @@ server:
     it("preserves comments when emitting YAML with trivia", () => {
       const yamlSource = `# Top secret credentials\napiKey: "xyz123"\nsecret: "topsecret"\n`;
       const decompileResult = decompile(yamlSource, "yaml", { filePath: "creds.yaml" });
-      const { ast, trivia } = parseWithTrivia(decompileResult.ail, "creds.yaml");
+      const { ast, trivia } = parseWithTrivia(decompileResult.aice, "creds.yaml");
 
       const emitter = new YamlEmitter({ trivia });
       const emitted = emitter.emit(ast);
@@ -284,7 +284,7 @@ server:
       });
     });
 
-    it("guarantees 100% lossless data equivalence for YAML -> AIL -> YAML", () => {
+    it("guarantees 100% lossless data equivalence for YAML -> AICE -> YAML", () => {
       const originalData = {
         deployment: "k8s-prod",
         replicas: 5,
@@ -303,7 +303,7 @@ server:
       const yamlStr = YAML.stringify(originalData);
 
       const decompResult = decompile(yamlStr, "yaml", { filePath: "k8s.yaml" });
-      const ast = parse(decompResult.ail);
+      const ast = parse(decompResult.aice);
       const emittedYaml = emitTarget(ast, "yaml");
 
       const roundtrippedData = YAML.parse(emittedYaml);
@@ -320,7 +320,7 @@ server:
       const result = executeRoundtrip(originalYaml, "yaml", "worker.yaml");
 
       expect(result.target).toBe("yaml");
-      expect(result.ail).toContain("pub const config");
+      expect(result.aice).toContain("pub const config");
       expect(YAML.parse(result.reconstructed)).toEqual(originalData);
     });
   });
@@ -328,11 +328,11 @@ server:
   describe("3. Core Systems Registration & Target Detection", () => {
     it("detects TargetLanguage correctly from paths and extensions", () => {
       expect(detectTargetFromPath("config.json")).toBe("json");
-      expect(detectTargetFromPath("config.json.ail")).toBe("json");
+      expect(detectTargetFromPath("config.json.aice")).toBe("json");
       expect(detectTargetFromPath("data/app.yaml")).toBe("yaml");
-      expect(detectTargetFromPath("data/app.yaml.ail")).toBe("yaml");
+      expect(detectTargetFromPath("data/app.yaml.aice")).toBe("yaml");
       expect(detectTargetFromPath("data/settings.yml")).toBe("yaml");
-      expect(detectTargetFromPath("data/settings.yml.ail")).toBe("yaml");
+      expect(detectTargetFromPath("data/settings.yml.aice")).toBe("yaml");
     });
 
     it("includes .json, .yaml, and .yml in KNOWN_TARGET_EXTENSIONS and TARGET_EXT_MAP", () => {
@@ -357,12 +357,12 @@ server:
       const sampleObj = { greeting: "hello", count: 7 };
 
       const jsonDecompiled = decompile(JSON.stringify(sampleObj), "json");
-      expect(jsonDecompiled.ail).toContain("pub const config");
+      expect(jsonDecompiled.aice).toContain("pub const config");
       const jsonEmitted = emitTarget(jsonDecompiled.ast, "json");
       expect(JSON.parse(jsonEmitted)).toEqual(sampleObj);
 
       const yamlDecompiled = decompile(YAML.stringify(sampleObj), "yaml");
-      expect(yamlDecompiled.ail).toContain("pub const config");
+      expect(yamlDecompiled.aice).toContain("pub const config");
       const yamlEmitted = emitTarget(yamlDecompiled.ast, "yaml");
       expect(YAML.parse(yamlEmitted)).toEqual(sampleObj);
     });
@@ -375,10 +375,10 @@ server:
       const originalJson = JSON.parse(originalContent);
 
       const decompResult = await decompileFile(samplePath);
-      expect(decompResult.ail).toContain("module sample");
-      expect(decompResult.ail).toContain("pub const config");
+      expect(decompResult.aice).toContain("module sample");
+      expect(decompResult.aice).toContain("pub const config");
 
-      const ast = parse(decompResult.ail);
+      const ast = parse(decompResult.aice);
       const reEmitted = emitTarget(ast, "json");
       const reEmittedJson = JSON.parse(reEmitted);
 
@@ -391,21 +391,21 @@ server:
       const originalYaml = YAML.parse(originalContent);
 
       const decompResult = await decompileFile(samplePath);
-      expect(decompResult.ail).toContain("# AIL Unified Configuration Spec");
-      expect(decompResult.ail).toContain("module sample");
-      expect(decompResult.ail).toContain("pub const config");
+      expect(decompResult.aice).toContain("# AICE Unified Configuration Spec");
+      expect(decompResult.aice).toContain("module sample");
+      expect(decompResult.aice).toContain("pub const config");
 
-      const { ast, trivia } = parseWithTrivia(decompResult.ail, samplePath);
+      const { ast, trivia } = parseWithTrivia(decompResult.aice, samplePath);
       const reEmitted = emitTarget(ast, "yaml", { trivia });
       const reEmittedYaml = YAML.parse(reEmitted);
 
       expect(reEmittedYaml).toEqual(originalYaml);
-      expect(reEmitted).toContain("# AIL Unified Configuration Spec");
+      expect(reEmitted).toContain("# AICE Unified Configuration Spec");
     });
   });
 
   describe("5. Polymorphic CLI Integration on Data Files", () => {
-    it("runs 'ail outline' on sample.json and yields symbol outline with high token savings", () => {
+    it("runs 'aice outline' on sample.json and yields symbol outline with high token savings", () => {
       const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
       const res = runCli(["outline", samplePath, "--stats"]);
 
@@ -415,7 +415,7 @@ server:
       expect(res.stdout).toContain("98.");
     });
 
-    it("runs 'ail outline' on sample.yaml and yields symbol outline with high token savings", () => {
+    it("runs 'aice outline' on sample.yaml and yields symbol outline with high token savings", () => {
       const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.yaml");
       const res = runCli(["outline", samplePath, "--stats"]);
 
@@ -425,7 +425,7 @@ server:
       expect(res.stdout).toContain("97.");
     });
 
-    it("runs 'ail outline --json' on sample.json and outputs structured symbols payload", () => {
+    it("runs 'aice outline --json' on sample.json and outputs structured symbols payload", () => {
       const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
       const res = runCli(["outline", samplePath, "--json"]);
 
@@ -438,16 +438,16 @@ server:
       expect(parsed.symbols[0].kind).toBe("const");
     });
 
-    it("runs 'ail context' on sample.json and packages file content", () => {
+    it("runs 'aice context' on sample.json and packages file content", () => {
       const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
       const res = runCli(["context", samplePath, "--no-callers"]);
 
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain("# AIL Context Pack:");
-      expect(res.stdout).toContain("ail-data-service");
+      expect(res.stdout).toContain("# AICE Context Pack:");
+      expect(res.stdout).toContain("aice-data-service");
     });
 
-    it("runs 'ail context --outline-target' on sample.json and packages outline representation", () => {
+    it("runs 'aice context --outline-target' on sample.json and packages outline representation", () => {
       const samplePath = path.resolve(__dirname, "../../examples/data_config/sample.json");
       const res = runCli(["context", samplePath, "--outline-target", "--no-callers"]);
 
@@ -455,15 +455,15 @@ server:
       expect(res.stdout).toContain("pub const config");
     });
 
-    it("runs 'ail compile' on a .json.ail file and compiles to .json", () => {
-      const ailFile = path.join(tmpDir, "server_config.json.ail");
+    it("runs 'aice compile' on a .json.aice file and compiles to .json", () => {
+      const aiceFile = path.join(tmpDir, "server_config.json.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `module server_config\n\npub const config = { port: 9000, secure: false }\n`,
         "utf-8",
       );
 
-      const res = runCli(["compile", ailFile], tmpDir);
+      const res = runCli(["compile", aiceFile], tmpDir);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("Compiled");
       expect(res.stdout).toContain("[json]");
@@ -475,15 +475,15 @@ server:
       expect(content).toEqual({ port: 9000, secure: false });
     });
 
-    it("runs 'ail compile' on a .yaml.ail file and compiles to .yaml", () => {
-      const ailFile = path.join(tmpDir, "manifest.yaml.ail");
+    it("runs 'aice compile' on a .yaml.aice file and compiles to .yaml", () => {
+      const aiceFile = path.join(tmpDir, "manifest.yaml.aice");
       fs.writeFileSync(
-        ailFile,
+        aiceFile,
         `# App Manifest\nmodule manifest\n\npub const config = { name: "demo", replicas: 2 }\n`,
         "utf-8",
       );
 
-      const res = runCli(["compile", ailFile], tmpDir);
+      const res = runCli(["compile", aiceFile], tmpDir);
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("Compiled");
       expect(res.stdout).toContain("[yaml]");
@@ -500,7 +500,7 @@ server:
     it("handles special keys containing dashes, dots, spaces, numbers, and empty string", () => {
       const original = {
         "content-type": "application/json",
-        "app.config.path": "/etc/ail",
+        "app.config.path": "/etc/aice",
         "hello world": "greeting",
         "123": "numeric-key",
         "": "empty-key",
@@ -508,15 +508,15 @@ server:
 
       const jsonStr = JSON.stringify(original);
       const decomp = decompile(jsonStr, "json");
-      const ast = parse(decomp.ail);
+      const ast = parse(decomp.aice);
       const reEmitted = emitTarget(ast, "json");
 
       expect(JSON.parse(reEmitted)).toEqual(original);
     });
 
     it("handles multiple top-level ConstDecl items and combines them into an object", () => {
-      const ailSource = `module settings\n\npub const host = "localhost"\npub const port = 5000\npub const debug = true\n`;
-      const ast = parse(ailSource);
+      const aiceSource = `module settings\n\npub const host = "localhost"\npub const port = 5000\npub const debug = true\n`;
+      const ast = parse(aiceSource);
 
       const jsonEmitted = emitTarget(ast, "json");
       expect(JSON.parse(jsonEmitted)).toEqual({
@@ -538,24 +538,24 @@ server:
 
       const jsonStr = JSON.stringify(listData);
       const jsonDecomp = decompile(jsonStr, "json");
-      const jsonAst = parse(jsonDecomp.ail);
+      const jsonAst = parse(jsonDecomp.aice);
       expect(JSON.parse(emitTarget(jsonAst, "json"))).toEqual(listData);
 
       const yamlStr = YAML.stringify(listData);
       const yamlDecomp = decompile(yamlStr, "yaml");
-      const yamlAst = parse(yamlDecomp.ail);
+      const yamlAst = parse(yamlDecomp.aice);
       expect(YAML.parse(emitTarget(yamlAst, "yaml"))).toEqual(listData);
     });
 
     it("handles top-level scalar primitives in JSON and YAML", () => {
       const scalarNumber = 123.456;
       const numDecomp = decompile(JSON.stringify(scalarNumber), "json");
-      const numAst = parse(numDecomp.ail);
+      const numAst = parse(numDecomp.aice);
       expect(JSON.parse(emitTarget(numAst, "json"))).toBe(scalarNumber);
 
-      const scalarString = "Hello AIL World";
+      const scalarString = "Hello AICE World";
       const strDecomp = decompile(JSON.stringify(scalarString), "json");
-      const strAst = parse(strDecomp.ail);
+      const strAst = parse(strDecomp.aice);
       expect(JSON.parse(emitTarget(strAst, "json"))).toBe(scalarString);
     });
   });

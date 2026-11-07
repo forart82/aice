@@ -20,7 +20,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
   describe("Relational 'in' Operator", () => {
     it("parses 'x in obj' as BinaryExpr with operator 'in'", () => {
       const src = `fn check(x: str, obj: any) = x in obj`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const bin = fn.body as BinaryExpr;
@@ -33,7 +33,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses \"'shield' in p\" as BinaryExpr with string literal and identifier", () => {
       const src = `fn hasShield(p: any) = 'shield' in p`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const bin = fn.body as BinaryExpr;
@@ -46,7 +46,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("respects operator precedence: 'in' binds tighter than 'and' and 'or'", () => {
       const src = `fn test(x: str, a: any, y: str, b: any) = x in a and y in b`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const andExpr = fn.body as BinaryExpr;
@@ -57,7 +57,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("respects operator precedence: arithmetic binds tighter than 'in'", () => {
       const src = `fn test(a: int, b: int, list: any) = a + b in list`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const inExpr = fn.body as BinaryExpr;
@@ -68,7 +68,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("respects operator precedence: 'in' binds tighter than '=='", () => {
       const src = `fn test(x: str, a: any, b: bool) = x in a == b`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const eqExpr = fn.body as BinaryExpr;
@@ -81,7 +81,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
   describe("Relational 'instanceof' Operator", () => {
     it("parses 'o instanceof Vec2' as BinaryExpr with operator 'instanceof'", () => {
       const src = `fn check(o: any) = o instanceof Vec2`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const bin = fn.body as BinaryExpr;
@@ -94,7 +94,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'err instanceof Error' as BinaryExpr with operator 'instanceof'", () => {
       const src = `fn isErr(err: any) = err instanceof Error`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const bin = fn.body as BinaryExpr;
@@ -105,7 +105,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("respects operator precedence: 'instanceof' binds tighter than 'or'", () => {
       const src = `fn test(o: any) = o instanceof Vec2 or o instanceof Vec3`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("BinaryExpr");
       const orExpr = fn.body as BinaryExpr;
@@ -118,7 +118,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
   describe("Compound Assignment Statements", () => {
     it("parses 's |= 0' into AssignStmt with op '|='", () => {
       const src = `fn run():\n  s |= 0`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -130,7 +130,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'hash ^= char' into AssignStmt with op '^='", () => {
       const src = `fn run():\n  hash ^= char`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -142,7 +142,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'cell &= mask' into AssignStmt with op '&='", () => {
       const src = `fn run():\n  cell &= mask`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -154,7 +154,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'v >>= 7' into AssignStmt with op '>>='", () => {
       const src = `fn run():\n  v >>= 7`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -166,7 +166,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'v <<= 2' into AssignStmt with op '<<='", () => {
       const src = `fn run():\n  v <<= 2`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -178,7 +178,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'v >>>= 1' into AssignStmt with op '>>>='", () => {
       const src = `fn run():\n  v >>>= 1`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -190,7 +190,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses 'p **= 2' into AssignStmt with op '**='", () => {
       const src = `fn run():\n  p **= 2`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
       const stmt = body.statements[0];
@@ -213,7 +213,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
       for (const [code, expectedOp] of ops) {
         const src = `fn run():\n  ${code}`;
-        const mod = parse(src, "test.ail");
+        const mod = parse(src, "test.aice");
         const fn = mod.items[0] as FunctionDecl;
         const body = fn.body as { kind: "Block"; statements: AssignStmt[] };
         const stmt = body.statements[0];
@@ -230,7 +230,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
   describe("AssignExpr in Expression Positions", () => {
     it("parses AssignExpr in arrow function body: (el) => (el.textContent = v)", () => {
       const src = `fn makeSetter() = (el) => (el.textContent = v)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("ClosureExpr");
       const closure = fn.body as ClosureExpr;
@@ -249,7 +249,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses compound AssignExpr in arrow function body: (item) => (item.count += 1)", () => {
       const src = `fn inc() = (item) => (item.count += 1)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("ClosureExpr");
       const closure = fn.body as ClosureExpr;
@@ -261,7 +261,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
 
     it("parses bitwise compound AssignExpr in arrow function body: (mask) => (flags |= mask)", () => {
       const src = `fn applyFlag() = (mask) => (flags |= mask)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       expect(fn.body.kind).toBe("ClosureExpr");
       const closure = fn.body as ClosureExpr;
@@ -276,7 +276,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
       const src = `fn matchAll(regex: any, s: str):
   while ((pMatch = regex.exec(s)) != nil):
     print(pMatch)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as Block;
       const whileStmt = body.statements[0] as WhileStmt;
@@ -308,7 +308,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
       const src = `fn process(arr: [int]):
   for x in arr:
     print(x)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as Block;
       const forStmt = body.statements[0] as ForStmt;
@@ -323,7 +323,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
       const src = `fn iterate(entries: any):
   for [k, v] in entries:
     print(k, v)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as Block;
       const forStmt = body.statements[0] as ForStmt;
@@ -337,7 +337,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
       const src = `fn iterate(obj: any):
   for item in obj.getItems():
     print(item)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as Block;
       const forStmt = body.statements[0] as ForStmt;
@@ -351,7 +351,7 @@ describe("Step 3: Pratt Parser Grammar & Precedence Upgrades", () => {
   for item in arr:
     if item in whitelist:
       print(item)`;
-      const mod = parse(src, "test.ail");
+      const mod = parse(src, "test.aice");
       const fn = mod.items[0] as FunctionDecl;
       const body = fn.body as Block;
       const forStmt = body.statements[0] as ForStmt;

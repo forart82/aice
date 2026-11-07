@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AIL 2.0 AST Surgical Splice Engine (Step 19).
+ * Unit tests for AICE 2.0 AST Surgical Splice Engine (Step 19).
  */
 
 import { spawnSync } from "node:child_process";
@@ -10,12 +10,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { program } from "../../bin/ail.js";
+import { program } from "../../bin/aice.js";
 import type { FunctionDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
 import { splice, spliceSource } from "../../src/tools/splice.js";
 
-describe("AIL 2.0 AST Surgical Splice Engine (Step 19)", () => {
+describe("AICE 2.0 AST Surgical Splice Engine (Step 19)", () => {
   describe("Splicing Top-Level Functions", () => {
     it("splices entire function declaration (signature + body)", () => {
       const src = `
@@ -371,8 +371,8 @@ class Runner:
       });
 
       expect(res.diff).toBeDefined();
-      expect(res.diff).toContain("--- a/source.ail");
-      expect(res.diff).toContain("+++ b/source.ail");
+      expect(res.diff).toContain("--- a/source.aice");
+      expect(res.diff).toContain("+++ b/source.aice");
       expect(res.diff).toContain("-  return a * 2");
       expect(res.diff).toContain("+  return a * 10");
     });
@@ -401,9 +401,9 @@ fn funcF(): return 6
 
   describe("File Operations, Dry Run & --compile Emitter Update", () => {
     it("respects dryRun: true and does not modify disk", async () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail_splice_dry_"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_dry_"));
       try {
-        const filePath = path.join(tmpDir, "test.ail");
+        const filePath = path.join(tmpDir, "test.aice");
         const originalContent = 'fn hello(): return "world"\n';
         fs.writeFileSync(filePath, originalContent, "utf-8");
 
@@ -424,9 +424,9 @@ fn funcF(): return 6
     });
 
     it("writes to disk atomically and updates target file when compile: true", async () => {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail_splice_compile_"));
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_compile_"));
       try {
-        const configPath = path.join(tmpDir, "ail.config.json");
+        const configPath = path.join(tmpDir, "aice.config.json");
         fs.writeFileSync(
           configPath,
           JSON.stringify(
@@ -437,10 +437,10 @@ fn funcF(): return 6
           "utf-8",
         );
 
-        const ailFile = path.join(tmpDir, "math.ail");
-        fs.writeFileSync(ailFile, "pub fn add(a: int, b: int) -> int:\n  return a + b\n", "utf-8");
+        const aiceFile = path.join(tmpDir, "math.aice");
+        fs.writeFileSync(aiceFile, "pub fn add(a: int, b: int) -> int:\n  return a + b\n", "utf-8");
 
-        const res = await splice(ailFile, {
+        const res = await splice(aiceFile, {
           symbol: "add",
           body: "return a * b",
           compile: true,
@@ -449,9 +449,9 @@ fn funcF(): return 6
 
         expect(res.success).toBe(true);
 
-        // Verify .ail file updated
-        const updatedAil = fs.readFileSync(ailFile, "utf-8");
-        expect(updatedAil).toContain("return a * b");
+        // Verify .aice file updated
+        const updatedAice = fs.readFileSync(aiceFile, "utf-8");
+        expect(updatedAice).toContain("return a * b");
 
         // Verify target .ts file was compiled!
         const targetTs = path.join(tmpDir, "math.ts");
@@ -484,12 +484,12 @@ fn funcF(): return 6
     it("executes CLI splice with --body modifying target file", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_splice_body_"));
       try {
-        const file = path.join(tmpDir, "math.ail");
+        const file = path.join(tmpDir, "math.aice");
         fs.writeFileSync(file, "fn calc(a: int) -> int:\n  return a * 2\n", "utf-8");
 
         const res = spawnSync(
           "bun",
-          ["./bin/ail.ts", "splice", file, "-s", "calc", "-b", "return a * 10"],
+          ["./bin/aice.ts", "splice", file, "-s", "calc", "-b", "return a * 10"],
           {
             encoding: "utf-8",
           },
@@ -507,10 +507,10 @@ fn funcF(): return 6
     it("executes CLI splice reading replacement code from stdin", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_splice_stdin_"));
       try {
-        const file = path.join(tmpDir, "math.ail");
+        const file = path.join(tmpDir, "math.aice");
         fs.writeFileSync(file, "fn calc(a: int) -> int:\n  return a * 2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "splice", file, "-s", "calc"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "splice", file, "-s", "calc"], {
           input: "fn calc(a: int, b: int) -> int:\n  return a + b",
           encoding: "utf-8",
         });
@@ -527,14 +527,14 @@ fn funcF(): return 6
     it("executes CLI splice with --diff flag and --dry-run without modifying disk", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_splice_diff_"));
       try {
-        const file = path.join(tmpDir, "math.ail");
+        const file = path.join(tmpDir, "math.aice");
         const original = "fn calc(a: int) -> int:\n  return a * 2\n";
         fs.writeFileSync(file, original, "utf-8");
 
         const res = spawnSync(
           "bun",
           [
-            "./bin/ail.ts",
+            "./bin/aice.ts",
             "splice",
             file,
             "-s",
@@ -564,10 +564,10 @@ fn funcF(): return 6
     it("executes CLI splice with --delete", () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_splice_del_"));
       try {
-        const file = path.join(tmpDir, "math.ail");
+        const file = path.join(tmpDir, "math.aice");
         fs.writeFileSync(file, "fn a(): return 1\nfn b(): return 2\n", "utf-8");
 
-        const res = spawnSync("bun", ["./bin/ail.ts", "splice", file, "-s", "b", "--delete"], {
+        const res = spawnSync("bun", ["./bin/aice.ts", "splice", file, "-s", "b", "--delete"], {
           encoding: "utf-8",
         });
 

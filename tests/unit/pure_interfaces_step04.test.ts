@@ -10,7 +10,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
   width?: int
   height?: int
 `;
-    const mod = parse(src, "opts.ts.ail");
+    const mod = parse(src, "opts.ts.aice");
     expect(mod.items).toHaveLength(1);
 
     const typeDecl = mod.items[0] as TypeDecl;
@@ -44,7 +44,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
   width: int
   height: int
 `;
-    const mod = parse(src, "foo.ts.ail");
+    const mod = parse(src, "foo.ts.aice");
     const emitted = emitTarget(mod, "typescript", { pureInterfaces: true, watermark: false });
 
     expect(emitted).toBe(
@@ -58,7 +58,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
   width: int
   height: int
 `;
-    const mod = parse(src, "foo.ts.ail");
+    const mod = parse(src, "foo.ts.aice");
 
     const withDefault = emitTarget(mod, "typescript");
     expect(withDefault).toContain("export interface Foo {");
@@ -75,7 +75,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
   timeout?: int
   retries?: int = 3
 `;
-    const mod = parse(src, "config.ts.ail");
+    const mod = parse(src, "config.ts.aice");
     const typeDecl = mod.items[0] as TypeDecl;
     expect(typeDecl.fields![0].isOptional).toBeUndefined();
     expect(typeDecl.fields![1].isOptional).toBe(true);

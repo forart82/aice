@@ -9,13 +9,13 @@ import { spliceSource } from "../../src/tools/splice.js";
 
 describe("Polyglot Native Splice & Compiler Parity Regression Suite", () => {
   it("parses relative import paths with /.../i or /.../g segments without regex literal lexer collision", () => {
-    const ast1 = parse("module test\nuse ./src/index.{foo, bar}\n", "test.ail");
+    const ast1 = parse("module test\nuse ./src/index.{foo, bar}\n", "test.aice");
     expect(ast1.items).toHaveLength(1);
     expect(ast1.items[0]?.kind).toBe("ImportDecl");
 
     const ast2 = parse(
       "module test\nuse ./utils/math.{clamp}\nuse ../api/gateway.{send}\n",
-      "test.ail",
+      "test.aice",
     );
     expect(ast2.items).toHaveLength(2);
     expect(ast2.items[0]?.kind).toBe("ImportDecl");
@@ -25,7 +25,7 @@ describe("Polyglot Native Splice & Compiler Parity Regression Suite", () => {
   it("lowers ternary assignment (x = cond ? 0 : 1) into IfStmt so falsy true-branch values evaluate accurately", () => {
     const ast = parse(
       `module test\npub fn pick(flag: bool) -> int:\n  x := 99\n  x = flag ? 0 : 1\n  ret x\n`,
-      "test.ail",
+      "test.aice",
     );
     const tsCode = emitTarget(ast, "typescript", { watermark: false });
     expect(tsCode).toContain("if (flag)");
@@ -60,8 +60,8 @@ impl Pool {
       "pool.rs",
     );
     expect(rustRes.success).toBe(true);
-    expect(rustRes.newAilSource).toContain("pub fn keep_me(&self) -> i32");
-    expect(rustRes.newAilSource.trimEnd().endsWith("}")).toBe(true);
+    expect(rustRes.newAiceSource).toContain("pub fn keep_me(&self) -> i32");
+    expect(rustRes.newAiceSource.trimEnd().endsWith("}")).toBe(true);
 
     const cppSrc = `class Engine {
 public:
@@ -90,12 +90,12 @@ public:
       "engine.cpp",
     );
     expect(cppRes.success).toBe(true);
-    expect(cppRes.newAilSource).toContain("double keepMe()");
-    expect(cppRes.newAilSource.trimEnd().endsWith("};")).toBe(true);
+    expect(cppRes.newAiceSource).toContain("double keepMe()");
+    expect(cppRes.newAiceSource.trimEnd().endsWith("};")).toBe(true);
   });
 
   it("produces syntax-valid native code verified by real C++ (g++), Rust (rustc), Python (py_compile), and PHP (php -l) compilers", () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-compiler-verify-"));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-compiler-verify-"));
     try {
       // 1. C++ out-of-line splice verified with g++ -std=c++20 -fsyntax-only
       const cppFixture = `#include <cmath>
@@ -118,7 +118,7 @@ double PidController::saturateOutput(double value, double minLimit, double maxLi
       );
       expect(cppSplice.success).toBe(true);
       const cppFile = path.join(tmpDir, "controller.cpp");
-      fs.writeFileSync(cppFile, cppSplice.newAilSource, "utf-8");
+      fs.writeFileSync(cppFile, cppSplice.newAiceSource, "utf-8");
       execFileSync("g++", ["-std=c++20", "-fsyntax-only", cppFile]);
 
       // 2. Rust impl method splice verified with rustc --crate-type lib
@@ -146,7 +146,7 @@ impl RateLimiter {
       expect(rustSplice.success).toBe(true);
       const rustFile = path.join(tmpDir, "limiter.rs");
       const rustRlib = path.join(tmpDir, "liblimiter.rlib");
-      fs.writeFileSync(rustFile, rustSplice.newAilSource, "utf-8");
+      fs.writeFileSync(rustFile, rustSplice.newAiceSource, "utf-8");
       const rustcBin = fs.existsSync("/home/forart/.cargo/bin/rustc")
         ? "/home/forart/.cargo/bin/rustc"
         : "rustc";
@@ -176,7 +176,7 @@ class PaymentGateway
       );
       expect(phpSplice.success).toBe(true);
       const phpFile = path.join(tmpDir, "PaymentGateway.php");
-      fs.writeFileSync(phpFile, phpSplice.newAilSource, "utf-8");
+      fs.writeFileSync(phpFile, phpSplice.newAiceSource, "utf-8");
       const phpBin = fs.existsSync("/home/forart/.local/bin/php")
         ? "/home/forart/.local/bin/php"
         : "php";
@@ -201,7 +201,7 @@ class PaymentGateway
       );
       expect(pySplice.success).toBe(true);
       const pyFile = path.join(tmpDir, "pipeline.py");
-      fs.writeFileSync(pyFile, pySplice.newAilSource, "utf-8");
+      fs.writeFileSync(pyFile, pySplice.newAiceSource, "utf-8");
       execFileSync("python3", ["-m", "py_compile", pyFile]);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

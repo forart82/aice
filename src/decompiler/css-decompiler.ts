@@ -2,9 +2,9 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CSS Decompiler (Reverse Transpiler) for AIL 2.0.
+ * CSS Decompiler (Reverse Transpiler) for AICE 2.0.
  * Parses CSS styles using PostCSS, extracts comments into CstTriviaTable,
- * and generates an AIL Module AST containing StyleDecl rules.
+ * and generates an AICE Module AST containing StyleDecl rules.
  */
 
 import postcss from "postcss";
@@ -31,7 +31,7 @@ export class CssDecompiler {
         .split(/[/\\]/)
         .pop()
         ?.replace(/\.css$/, "")
-        .replace(/\.ail$/, "") ?? "style";
+        .replace(/\.aice$/, "") ?? "style";
     const cleanModPath = baseName;
 
     let pendingComment: string | null = null;

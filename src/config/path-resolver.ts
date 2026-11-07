@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 Polymorphic Path Resolver Engine (Step 23).
+ * AICE 2.0 Polymorphic Path Resolver Engine (Step 23).
  * Provides unified polymorphic resolution for files, directories, or omitted arguments
  * across all CLI commands and tooling APIs, with first-class companion mode support.
  */
@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
-  type AilProjectConfig,
+  type AiceProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
@@ -19,11 +19,11 @@ import {
 
 export interface PathResolverOptions {
   /**
-   * Extensions to filter when scanning directories (default: [".ail"]).
+   * Extensions to filter when scanning directories (default: [".aice"]).
    */
   extensions?: string[];
   /**
-   * Include target files if no .ail files exist in the scanned directory.
+   * Include target files if no .aice files exist in the scanned directory.
    */
   includeTargets?: boolean;
   /**
@@ -33,7 +33,7 @@ export interface PathResolverOptions {
   /**
    * Pre-loaded project config (auto-loaded if omitted).
    */
-  config?: AilProjectConfig;
+  config?: AiceProjectConfig;
 }
 
 export interface ResolvedPathTargets {
@@ -43,7 +43,7 @@ export interface ResolvedPathTargets {
   resolvedPath: string;
   files: string[];
   projectRoot: string;
-  config: AilProjectConfig;
+  config: AiceProjectConfig;
 }
 
 export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
@@ -51,7 +51,7 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   ".git",
   "dist",
   "build",
-  ".ail-build",
+  ".aice-build",
   ".agents",
   ".next",
   ".turbo",
@@ -101,7 +101,7 @@ export function isRealPathSameOrDescendant(
  */
 export function isTargetProjectPath(
   candidatePath: string,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   projectRoot?: string,
 ): boolean {
   const root = projectRoot ? path.resolve(projectRoot) : undefined;
@@ -135,7 +135,7 @@ export function isTargetProjectPath(
  */
 export function resolveCompanionSource(
   targetPath: string,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   projectRoot?: string,
 ): string | undefined {
   if (config.mode !== "companion") {
@@ -182,7 +182,7 @@ export function resolveCompanionSource(
     isDir =
       targetPath.endsWith("/") ||
       targetPath.endsWith("\\") ||
-      (path.extname(absTarget) === "" && !targetPath.endsWith(".ail"));
+      (path.extname(absTarget) === "" && !targetPath.endsWith(".aice"));
   }
 
   if (isDir) {
@@ -216,10 +216,10 @@ export function resolveCompanionSource(
 export function scanDirectoryFiles(
   dir: string,
   options: PathResolverOptions,
-  config: AilProjectConfig,
+  config: AiceProjectConfig,
   projectRoot: string,
 ): string[] {
-  const ailFiles: string[] = [];
+  const aiceFiles: string[] = [];
   const targetFiles: string[] = [];
   const customFiles: string[] = [];
 
@@ -228,7 +228,7 @@ export function scanDirectoryFiles(
   );
 
   const absScanDir = path.resolve(dir);
-  const outDirName = config.outDir ? path.basename(config.outDir) : ".ail-build";
+  const outDirName = config.outDir ? path.basename(config.outDir) : ".aice-build";
 
   const absOutDir = config.outDir
     ? path.isAbsolute(config.outDir)
@@ -358,7 +358,7 @@ export function scanDirectoryFiles(
 
         if (
           entry.name.endsWith(".trivia.json") ||
-          entry.name === "ail.config.json" ||
+          entry.name === "aice.config.json" ||
           entry.name === "package-lock.json" ||
           entry.name === "tsconfig.json" ||
           entry.name === "jsconfig.json" ||
@@ -375,14 +375,14 @@ export function scanDirectoryFiles(
             customFiles.push(fullPath);
           }
         } else {
-          if (lowerName.endsWith(".ail")) {
-            ailFiles.push(fullPath);
+          if (lowerName.endsWith(".aice")) {
+            aiceFiles.push(fullPath);
           }
         }
 
         if (options.includeTargets) {
           const ext = path.extname(lowerName);
-          if (ext && KNOWN_TARGET_EXTENSIONS.has(ext) && !lowerName.endsWith(".ail")) {
+          if (ext && KNOWN_TARGET_EXTENSIONS.has(ext) && !lowerName.endsWith(".aice")) {
             targetFiles.push(fullPath);
           }
         }
@@ -396,14 +396,14 @@ export function scanDirectoryFiles(
     if (customFiles.length > 0) {
       return customFiles.sort();
     }
-    if (options.includeTargets && customExts.every((e) => e.endsWith(".ail"))) {
+    if (options.includeTargets && customExts.every((e) => e.endsWith(".aice"))) {
       return targetFiles.sort();
     }
     return [];
   }
 
-  if (ailFiles.length > 0) {
-    return ailFiles.sort();
+  if (aiceFiles.length > 0) {
+    return aiceFiles.sort();
   }
 
   if (options.includeTargets) {
@@ -482,7 +482,7 @@ export function resolvePathTargets(
     isDir =
       trimmed.endsWith("/") ||
       trimmed.endsWith("\\") ||
-      (path.extname(absPath) === "" && !trimmed.endsWith(".ail"));
+      (path.extname(absPath) === "" && !trimmed.endsWith(".aice"));
   }
 
   if (isDir) {
@@ -560,7 +560,7 @@ export function resolvePathTargets(
     effectiveProjectRoot ?? findProjectRoot(path.dirname(absPath), fallbackFileDir);
   const config = effectiveConfig ?? loadProjectConfig(projectRoot);
 
-  if (absPath.endsWith(".ail")) {
+  if (absPath.endsWith(".aice")) {
     return {
       isSingleFile: true,
       isDirectory: false,

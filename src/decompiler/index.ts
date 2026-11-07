@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Universal Decompiler & Bidirectional Transpiler Hub for AIL 2.0.
+ * Universal Decompiler & Bidirectional Transpiler Hub for AICE 2.0.
  */
 
 import { promises as fs } from "node:fs";
@@ -10,7 +10,7 @@ import { resolve } from "node:path";
 import type { Module } from "../core/ast.js";
 import type { CstTriviaTable } from "../core/trivia.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
-import { AilGenerator, type AilGeneratorOptions } from "./ail-generator.js";
+import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 import { CppDecompiler } from "./cpp-decompiler.js";
 import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
@@ -25,7 +25,7 @@ import { decompileKotlin, KotlinDecompiler } from "./kotlin-decompiler.js";
 import { decompileGo, GoDecompiler } from "./go-decompiler.js";
 import { decompileRust, RustDecompiler } from "./rust-decompiler.js";
 
-export * from "./ail-generator.js";
+export * from "./aice-generator.js";
 export * from "./cpp-decompiler.js";
 export * from "./csharp-decompiler.js";
 export * from "./css-decompiler.js";
@@ -42,7 +42,7 @@ export * from "./twig-decompiler.js";
 export * from "./yaml-decompiler.js";
 
 export interface DecompileOptions
-  extends AilGeneratorOptions,
+  extends AiceGeneratorOptions,
     TsDecompilerOptions,
     JsonDecompilerOptions,
     YamlDecompilerOptions {
@@ -53,7 +53,7 @@ export interface DecompileOptions
 
 export interface DecompileResult {
   ast: Module;
-  ail: string;
+  aice: string;
   trivia: CstTriviaTable;
 }
 
@@ -166,10 +166,10 @@ export function decompile(
       throw new Error(`Unsupported target language for decompilation: ${target}`);
   }
 
-  const generator = new AilGenerator({ ...options, trivia });
-  const ail = generator.generate(ast);
+  const generator = new AiceGenerator({ ...options, trivia });
+  const aice = generator.generate(ast);
 
-  return { ast, ail, trivia };
+  return { ast, aice, trivia };
 }
 
 export async function decompileFile(

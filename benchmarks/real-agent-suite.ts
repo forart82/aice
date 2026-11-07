@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AIL 2.0 — Real AI Agent Benchmark Suite (10 Real-World Scenarios — Without AIL vs AIL Without Idioms vs AIL With Idioms)
+ * AICE 2.0 — Real AI Agent Benchmark Suite (10 Real-World Scenarios — Without AICE vs AICE Without Idioms vs AICE With Idioms)
  *
  * Evaluates real autonomous AI agent (`agy -p`) runs across all 10 real-world scenarios (`RW-01` .. `RW-10`)
  * in isolated temporary workspaces on disk, measuring ground-truth telemetry from each agent's
@@ -13,7 +13,7 @@
  *   - Real LLM Output Tokens (`output_tokens`)
  *   - Real API Billable Tokens (`input_tokens + output_tokens`)
  *   - Real Total API Context Tokens (`input_tokens + cache_read_tokens + output_tokens`)
- *   - Verified On-Disk Native Code Mutations (`verifiedOnDisk === true`, `zeroAilFilesLeftOnDisk === true`)
+ *   - Verified On-Disk Native Code Mutations (`verifiedOnDisk === true`, `zeroAiceFilesLeftOnDisk === true`)
  */
 
 import * as fs from "node:fs";
@@ -30,7 +30,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-export type RealAgentMode = "without_ail" | "ail_no_idioms" | "ail_with_idioms";
+export type RealAgentMode = "without_aice" | "aice_no_idioms" | "aice_with_idioms";
 
 export interface RealAgentRunMetrics {
   benchmarkId: string;
@@ -48,7 +48,7 @@ export interface RealAgentRunMetrics {
   apiTotalTokens: number;
   durationSeconds: number;
   verifiedOnDisk: boolean;
-  zeroAilFilesLeftOnDisk: boolean;
+  zeroAiceFilesLeftOnDisk: boolean;
 }
 
 export interface RealAgentScenarioComparison {
@@ -57,9 +57,9 @@ export interface RealAgentScenarioComparison {
   scenario: string;
   languages: string[];
   filesCount: number;
-  withoutAil: RealAgentRunMetrics;
-  ailWithoutIdioms: RealAgentRunMetrics;
-  ailWithIdioms: RealAgentRunMetrics;
+  withoutAice: RealAgentRunMetrics;
+  aiceWithoutIdioms: RealAgentRunMetrics;
+  aiceWithIdioms: RealAgentRunMetrics;
   workingTokensSavingsWithoutIdiomsPct: number;
   workingTokensSavingsWithIdiomsPct: number;
   outputTokensSavingsWithoutIdiomsPct: number;
@@ -72,8 +72,8 @@ export interface RealAgentScenarioComparison {
   turnsSavingsWithIdiomsPct: number;
   toolCallsSavingsWithoutIdiomsPct: number;
   toolCallsSavingsWithIdiomsPct: number;
-  ailWithoutIdiomsWins: boolean;
-  ailWithIdiomsWins: boolean;
+  aiceWithoutIdiomsWins: boolean;
+  aiceWithIdiomsWins: boolean;
   idiomsBeatNoIdioms: boolean;
 }
 
@@ -84,41 +84,41 @@ export interface RealAgentSuiteReport {
   winsWithoutIdioms: number;
   winsWithIdioms: number;
   allVerifiedOnDisk: boolean;
-  zeroAilFilesLeftOnDisk: boolean;
+  zeroAiceFilesLeftOnDisk: boolean;
   totals: {
-    withoutAilWorkingTokens: number;
-    ailWithoutIdiomsWorkingTokens: number;
-    ailWithIdiomsWorkingTokens: number;
+    withoutAiceWorkingTokens: number;
+    aiceWithoutIdiomsWorkingTokens: number;
+    aiceWithIdiomsWorkingTokens: number;
     workingTokensSavingsWithoutIdiomsPct: number;
     workingTokensSavingsWithIdiomsPct: number;
-    withoutAilOutputTokens: number;
-    ailWithoutIdiomsOutputTokens: number;
-    ailWithIdiomsOutputTokens: number;
+    withoutAiceOutputTokens: number;
+    aiceWithoutIdiomsOutputTokens: number;
+    aiceWithIdiomsOutputTokens: number;
     outputTokensSavingsWithoutIdiomsPct: number;
     outputTokensSavingsWithIdiomsPct: number;
-    withoutAilApiTotalTokens: number;
-    ailWithoutIdiomsApiTotalTokens: number;
-    ailWithIdiomsApiTotalTokens: number;
+    withoutAiceApiTotalTokens: number;
+    aiceWithoutIdiomsApiTotalTokens: number;
+    aiceWithIdiomsApiTotalTokens: number;
     apiTotalTokensSavingsWithoutIdiomsPct: number;
     apiTotalTokensSavingsWithIdiomsPct: number;
-    withoutAilBillableTokens: number;
-    ailWithoutIdiomsBillableTokens: number;
-    ailWithIdiomsBillableTokens: number;
+    withoutAiceBillableTokens: number;
+    aiceWithoutIdiomsBillableTokens: number;
+    aiceWithIdiomsBillableTokens: number;
     billableTokensSavingsWithoutIdiomsPct: number;
     billableTokensSavingsWithIdiomsPct: number;
-    withoutAilTurns: number;
-    ailWithoutIdiomsTurns: number;
-    ailWithIdiomsTurns: number;
+    withoutAiceTurns: number;
+    aiceWithoutIdiomsTurns: number;
+    aiceWithIdiomsTurns: number;
     turnsSavingsWithoutIdiomsPct: number;
     turnsSavingsWithIdiomsPct: number;
-    withoutAilToolCalls: number;
-    ailWithoutIdiomsToolCalls: number;
-    ailWithIdiomsToolCalls: number;
+    withoutAiceToolCalls: number;
+    aiceWithoutIdiomsToolCalls: number;
+    aiceWithIdiomsToolCalls: number;
     toolCallsSavingsWithoutIdiomsPct: number;
     toolCallsSavingsWithIdiomsPct: number;
-    withoutAilDurationSeconds: number;
-    ailWithoutIdiomsDurationSeconds: number;
-    ailWithIdiomsDurationSeconds: number;
+    withoutAiceDurationSeconds: number;
+    aiceWithoutIdiomsDurationSeconds: number;
+    aiceWithIdiomsDurationSeconds: number;
   };
   benchmarks: RealAgentScenarioComparison[];
 }
@@ -148,15 +148,15 @@ export function loadRealAgentBenchmarkSuiteReport(
 
   for (const spec of OFFLINE_BENCHMARKS) {
     const entry = raw[spec.id];
-    if (!entry || !entry.without_ail || !entry.ail_no_idioms || !entry.ail_with_idioms) {
+    if (!entry || !entry.without_aice || !entry.aice_no_idioms || !entry.aice_with_idioms) {
       throw new Error(`Missing real-agent benchmark results for ${spec.id}`);
     }
     const specLanguages = Array.from(new Set(spec.files.map((f) => f.languageId)));
     for (const l of specLanguages) langSet.add(l);
 
-    const w = entry.without_ail;
-    const n = entry.ail_no_idioms;
-    const i = entry.ail_with_idioms;
+    const w = entry.without_aice;
+    const n = entry.aice_no_idioms;
+    const i = entry.aice_with_idioms;
 
     const workingTokensSavingsWithoutIdiomsPct = pctSavings(w.workingTokens, n.workingTokens);
     const workingTokensSavingsWithIdiomsPct = pctSavings(w.workingTokens, i.workingTokens);
@@ -171,18 +171,18 @@ export function loadRealAgentBenchmarkSuiteReport(
     const toolCallsSavingsWithoutIdiomsPct = pctSavings(w.toolCalls, n.toolCalls);
     const toolCallsSavingsWithIdiomsPct = pctSavings(w.toolCalls, i.toolCalls);
 
-    const ailWithoutIdiomsWins =
+    const aiceWithoutIdiomsWins =
       n.verifiedOnDisk &&
-      n.zeroAilFilesLeftOnDisk &&
+      n.zeroAiceFilesLeftOnDisk &&
       n.workingTokens < w.workingTokens &&
       n.outputTokens < w.outputTokens &&
       n.apiTotalTokens < w.apiTotalTokens &&
       n.llmTurns < w.llmTurns &&
       n.toolCalls < w.toolCalls;
 
-    const ailWithIdiomsWins =
+    const aiceWithIdiomsWins =
       i.verifiedOnDisk &&
-      i.zeroAilFilesLeftOnDisk &&
+      i.zeroAiceFilesLeftOnDisk &&
       i.workingTokens < w.workingTokens &&
       i.outputTokens < w.outputTokens &&
       i.apiTotalTokens < w.apiTotalTokens &&
@@ -202,9 +202,9 @@ export function loadRealAgentBenchmarkSuiteReport(
       scenario: spec.scenario,
       languages: specLanguages,
       filesCount: spec.files.length,
-      withoutAil: w,
-      ailWithoutIdioms: n,
-      ailWithIdioms: i,
+      withoutAice: w,
+      aiceWithoutIdioms: n,
+      aiceWithIdioms: i,
       workingTokensSavingsWithoutIdiomsPct,
       workingTokensSavingsWithIdiomsPct,
       outputTokensSavingsWithoutIdiomsPct,
@@ -217,8 +217,8 @@ export function loadRealAgentBenchmarkSuiteReport(
       turnsSavingsWithIdiomsPct,
       toolCallsSavingsWithoutIdiomsPct,
       toolCallsSavingsWithIdiomsPct,
-      ailWithoutIdiomsWins,
-      ailWithIdiomsWins,
+      aiceWithoutIdiomsWins,
+      aiceWithIdiomsWins,
       idiomsBeatNoIdioms,
     });
   }
@@ -226,116 +226,116 @@ export function loadRealAgentBenchmarkSuiteReport(
   const sum = <T>(arr: T[], fn: (x: T) => number): number =>
     arr.reduce((acc, item) => acc + fn(item), 0);
 
-  const withoutAilWorkingTokens = sum(benchmarks, (b) => b.withoutAil.workingTokens);
-  const ailWithoutIdiomsWorkingTokens = sum(benchmarks, (b) => b.ailWithoutIdioms.workingTokens);
-  const ailWithIdiomsWorkingTokens = sum(benchmarks, (b) => b.ailWithIdioms.workingTokens);
+  const withoutAiceWorkingTokens = sum(benchmarks, (b) => b.withoutAice.workingTokens);
+  const aiceWithoutIdiomsWorkingTokens = sum(benchmarks, (b) => b.aiceWithoutIdioms.workingTokens);
+  const aiceWithIdiomsWorkingTokens = sum(benchmarks, (b) => b.aiceWithIdioms.workingTokens);
 
-  const withoutAilOutputTokens = sum(benchmarks, (b) => b.withoutAil.outputTokens);
-  const ailWithoutIdiomsOutputTokens = sum(benchmarks, (b) => b.ailWithoutIdioms.outputTokens);
-  const ailWithIdiomsOutputTokens = sum(benchmarks, (b) => b.ailWithIdioms.outputTokens);
+  const withoutAiceOutputTokens = sum(benchmarks, (b) => b.withoutAice.outputTokens);
+  const aiceWithoutIdiomsOutputTokens = sum(benchmarks, (b) => b.aiceWithoutIdioms.outputTokens);
+  const aiceWithIdiomsOutputTokens = sum(benchmarks, (b) => b.aiceWithIdioms.outputTokens);
 
-  const withoutAilApiTotalTokens = sum(benchmarks, (b) => b.withoutAil.apiTotalTokens);
-  const ailWithoutIdiomsApiTotalTokens = sum(benchmarks, (b) => b.ailWithoutIdioms.apiTotalTokens);
-  const ailWithIdiomsApiTotalTokens = sum(benchmarks, (b) => b.ailWithIdioms.apiTotalTokens);
+  const withoutAiceApiTotalTokens = sum(benchmarks, (b) => b.withoutAice.apiTotalTokens);
+  const aiceWithoutIdiomsApiTotalTokens = sum(benchmarks, (b) => b.aiceWithoutIdioms.apiTotalTokens);
+  const aiceWithIdiomsApiTotalTokens = sum(benchmarks, (b) => b.aiceWithIdioms.apiTotalTokens);
 
-  const withoutAilBillableTokens = sum(benchmarks, (b) => b.withoutAil.billableTokens);
-  const ailWithoutIdiomsBillableTokens = sum(benchmarks, (b) => b.ailWithoutIdioms.billableTokens);
-  const ailWithIdiomsBillableTokens = sum(benchmarks, (b) => b.ailWithIdioms.billableTokens);
+  const withoutAiceBillableTokens = sum(benchmarks, (b) => b.withoutAice.billableTokens);
+  const aiceWithoutIdiomsBillableTokens = sum(benchmarks, (b) => b.aiceWithoutIdioms.billableTokens);
+  const aiceWithIdiomsBillableTokens = sum(benchmarks, (b) => b.aiceWithIdioms.billableTokens);
 
-  const withoutAilTurns = sum(benchmarks, (b) => b.withoutAil.llmTurns);
-  const ailWithoutIdiomsTurns = sum(benchmarks, (b) => b.ailWithoutIdioms.llmTurns);
-  const ailWithIdiomsTurns = sum(benchmarks, (b) => b.ailWithIdioms.llmTurns);
+  const withoutAiceTurns = sum(benchmarks, (b) => b.withoutAice.llmTurns);
+  const aiceWithoutIdiomsTurns = sum(benchmarks, (b) => b.aiceWithoutIdioms.llmTurns);
+  const aiceWithIdiomsTurns = sum(benchmarks, (b) => b.aiceWithIdioms.llmTurns);
 
-  const withoutAilToolCalls = sum(benchmarks, (b) => b.withoutAil.toolCalls);
-  const ailWithoutIdiomsToolCalls = sum(benchmarks, (b) => b.ailWithoutIdioms.toolCalls);
-  const ailWithIdiomsToolCalls = sum(benchmarks, (b) => b.ailWithIdioms.toolCalls);
+  const withoutAiceToolCalls = sum(benchmarks, (b) => b.withoutAice.toolCalls);
+  const aiceWithoutIdiomsToolCalls = sum(benchmarks, (b) => b.aiceWithoutIdioms.toolCalls);
+  const aiceWithIdiomsToolCalls = sum(benchmarks, (b) => b.aiceWithIdioms.toolCalls);
 
-  const withoutAilDurationSeconds = Number(
-    sum(benchmarks, (b) => b.withoutAil.durationSeconds).toFixed(2),
+  const withoutAiceDurationSeconds = Number(
+    sum(benchmarks, (b) => b.withoutAice.durationSeconds).toFixed(2),
   );
-  const ailWithoutIdiomsDurationSeconds = Number(
-    sum(benchmarks, (b) => b.ailWithoutIdioms.durationSeconds).toFixed(2),
+  const aiceWithoutIdiomsDurationSeconds = Number(
+    sum(benchmarks, (b) => b.aiceWithoutIdioms.durationSeconds).toFixed(2),
   );
-  const ailWithIdiomsDurationSeconds = Number(
-    sum(benchmarks, (b) => b.ailWithIdioms.durationSeconds).toFixed(2),
+  const aiceWithIdiomsDurationSeconds = Number(
+    sum(benchmarks, (b) => b.aiceWithIdioms.durationSeconds).toFixed(2),
   );
 
   return {
     suiteVersion: "2.0.0-real-agent",
     totalBenchmarks: benchmarks.length,
     coveredLanguages: Array.from(langSet),
-    winsWithoutIdioms: benchmarks.filter((b) => b.ailWithoutIdiomsWins).length,
-    winsWithIdioms: benchmarks.filter((b) => b.ailWithIdiomsWins).length,
+    winsWithoutIdioms: benchmarks.filter((b) => b.aiceWithoutIdiomsWins).length,
+    winsWithIdioms: benchmarks.filter((b) => b.aiceWithIdiomsWins).length,
     allVerifiedOnDisk: benchmarks.every(
       (b) =>
-        b.withoutAil.verifiedOnDisk &&
-        b.ailWithoutIdioms.verifiedOnDisk &&
-        b.ailWithIdioms.verifiedOnDisk,
+        b.withoutAice.verifiedOnDisk &&
+        b.aiceWithoutIdioms.verifiedOnDisk &&
+        b.aiceWithIdioms.verifiedOnDisk,
     ),
-    zeroAilFilesLeftOnDisk: benchmarks.every(
+    zeroAiceFilesLeftOnDisk: benchmarks.every(
       (b) =>
-        b.withoutAil.zeroAilFilesLeftOnDisk &&
-        b.ailWithoutIdioms.zeroAilFilesLeftOnDisk &&
-        b.ailWithIdioms.zeroAilFilesLeftOnDisk,
+        b.withoutAice.zeroAiceFilesLeftOnDisk &&
+        b.aiceWithoutIdioms.zeroAiceFilesLeftOnDisk &&
+        b.aiceWithIdioms.zeroAiceFilesLeftOnDisk,
     ),
     totals: {
-      withoutAilWorkingTokens,
-      ailWithoutIdiomsWorkingTokens,
-      ailWithIdiomsWorkingTokens,
+      withoutAiceWorkingTokens,
+      aiceWithoutIdiomsWorkingTokens,
+      aiceWithIdiomsWorkingTokens,
       workingTokensSavingsWithoutIdiomsPct: pctSavings(
-        withoutAilWorkingTokens,
-        ailWithoutIdiomsWorkingTokens,
+        withoutAiceWorkingTokens,
+        aiceWithoutIdiomsWorkingTokens,
       ),
       workingTokensSavingsWithIdiomsPct: pctSavings(
-        withoutAilWorkingTokens,
-        ailWithIdiomsWorkingTokens,
+        withoutAiceWorkingTokens,
+        aiceWithIdiomsWorkingTokens,
       ),
-      withoutAilOutputTokens,
-      ailWithoutIdiomsOutputTokens,
-      ailWithIdiomsOutputTokens,
+      withoutAiceOutputTokens,
+      aiceWithoutIdiomsOutputTokens,
+      aiceWithIdiomsOutputTokens,
       outputTokensSavingsWithoutIdiomsPct: pctSavings(
-        withoutAilOutputTokens,
-        ailWithoutIdiomsOutputTokens,
+        withoutAiceOutputTokens,
+        aiceWithoutIdiomsOutputTokens,
       ),
       outputTokensSavingsWithIdiomsPct: pctSavings(
-        withoutAilOutputTokens,
-        ailWithIdiomsOutputTokens,
+        withoutAiceOutputTokens,
+        aiceWithIdiomsOutputTokens,
       ),
-      withoutAilApiTotalTokens,
-      ailWithoutIdiomsApiTotalTokens,
-      ailWithIdiomsApiTotalTokens,
+      withoutAiceApiTotalTokens,
+      aiceWithoutIdiomsApiTotalTokens,
+      aiceWithIdiomsApiTotalTokens,
       apiTotalTokensSavingsWithoutIdiomsPct: pctSavings(
-        withoutAilApiTotalTokens,
-        ailWithoutIdiomsApiTotalTokens,
+        withoutAiceApiTotalTokens,
+        aiceWithoutIdiomsApiTotalTokens,
       ),
       apiTotalTokensSavingsWithIdiomsPct: pctSavings(
-        withoutAilApiTotalTokens,
-        ailWithIdiomsApiTotalTokens,
+        withoutAiceApiTotalTokens,
+        aiceWithIdiomsApiTotalTokens,
       ),
-      withoutAilBillableTokens,
-      ailWithoutIdiomsBillableTokens,
-      ailWithIdiomsBillableTokens,
+      withoutAiceBillableTokens,
+      aiceWithoutIdiomsBillableTokens,
+      aiceWithIdiomsBillableTokens,
       billableTokensSavingsWithoutIdiomsPct: pctSavings(
-        withoutAilBillableTokens,
-        ailWithoutIdiomsBillableTokens,
+        withoutAiceBillableTokens,
+        aiceWithoutIdiomsBillableTokens,
       ),
       billableTokensSavingsWithIdiomsPct: pctSavings(
-        withoutAilBillableTokens,
-        ailWithIdiomsBillableTokens,
+        withoutAiceBillableTokens,
+        aiceWithIdiomsBillableTokens,
       ),
-      withoutAilTurns,
-      ailWithoutIdiomsTurns,
-      ailWithIdiomsTurns,
-      turnsSavingsWithoutIdiomsPct: pctSavings(withoutAilTurns, ailWithoutIdiomsTurns),
-      turnsSavingsWithIdiomsPct: pctSavings(withoutAilTurns, ailWithIdiomsTurns),
-      withoutAilToolCalls,
-      ailWithoutIdiomsToolCalls,
-      ailWithIdiomsToolCalls,
-      toolCallsSavingsWithoutIdiomsPct: pctSavings(withoutAilToolCalls, ailWithoutIdiomsToolCalls),
-      toolCallsSavingsWithIdiomsPct: pctSavings(withoutAilToolCalls, ailWithIdiomsToolCalls),
-      withoutAilDurationSeconds,
-      ailWithoutIdiomsDurationSeconds,
-      ailWithIdiomsDurationSeconds,
+      withoutAiceTurns,
+      aiceWithoutIdiomsTurns,
+      aiceWithIdiomsTurns,
+      turnsSavingsWithoutIdiomsPct: pctSavings(withoutAiceTurns, aiceWithoutIdiomsTurns),
+      turnsSavingsWithIdiomsPct: pctSavings(withoutAiceTurns, aiceWithIdiomsTurns),
+      withoutAiceToolCalls,
+      aiceWithoutIdiomsToolCalls,
+      aiceWithIdiomsToolCalls,
+      toolCallsSavingsWithoutIdiomsPct: pctSavings(withoutAiceToolCalls, aiceWithoutIdiomsToolCalls),
+      toolCallsSavingsWithIdiomsPct: pctSavings(withoutAiceToolCalls, aiceWithIdiomsToolCalls),
+      withoutAiceDurationSeconds,
+      aiceWithoutIdiomsDurationSeconds,
+      aiceWithIdiomsDurationSeconds,
     },
     benchmarks,
   };
@@ -354,7 +354,7 @@ export function formatRealAgentBenchmarkMarkdown(
   const o = offlineReport.aggregateTotal;
 
   lines.push(
-    "# AIL 2.0 — Real AI Agent Benchmark Suite Report (10 Scenarios — Without & With Idioms)",
+    "# AICE 2.0 — Real AI Agent Benchmark Suite Report (10 Scenarios — Without & With Idioms)",
   );
   lines.push("");
   lines.push(
@@ -367,35 +367,35 @@ export function formatRealAgentBenchmarkMarkdown(
   lines.push("## 1. Executive Summary: Real AI Agents vs Deterministic Offline Suite");
   lines.push("");
   lines.push(
-    "| Metric (Across All 10 Scenarios `RW-01` .. `RW-10`) | Without AIL (Native Tools) | AIL Without Idioms (Pure AIL) | AIL With Idioms (`$idiom` AST Macros) | AIL Win Rate |",
+    "| Metric (Across All 10 Scenarios `RW-01` .. `RW-10`) | Without AICE (Native Tools) | AICE Without Idioms (Pure AICE) | AICE With Idioms (`$idiom` AST Macros) | AICE Win Rate |",
   );
   lines.push("| :--- | :---: | :---: | :---: | :---: |");
   lines.push(
-    `| **Real Agent LLM Turns** (\`PLANNER_RESPONSE\`) | ${t.withoutAilTurns} turns | **${t.ailWithoutIdiomsTurns} turns (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsTurns} turns (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent LLM Turns** (\`PLANNER_RESPONSE\`) | ${t.withoutAiceTurns} turns | **${t.aiceWithoutIdiomsTurns} turns (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsTurns} turns (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent Tool Calls** (\`tool_calls\`) | ${t.withoutAilToolCalls} calls | **${t.ailWithoutIdiomsToolCalls} calls (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsToolCalls} calls (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent Tool Calls** (\`tool_calls\`) | ${t.withoutAiceToolCalls} calls | **${t.aiceWithoutIdiomsToolCalls} calls (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsToolCalls} calls (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | ${t.withoutAilWorkingTokens.toLocaleString("en-US")} | **${t.ailWithoutIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent Working Payload Tokens** (Tool In/Out + LLM Out) | ${t.withoutAiceWorkingTokens.toLocaleString("en-US")} | **${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")} (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent LLM Output Tokens** (\`output_tokens\`) | ${t.withoutAilOutputTokens.toLocaleString("en-US")} | **${t.ailWithoutIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent LLM Output Tokens** (\`output_tokens\`) | ${t.withoutAiceOutputTokens.toLocaleString("en-US")} | **${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")} (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent Billable API Tokens** (\`input + output\`) | ${t.withoutAilBillableTokens.toLocaleString("en-US")} | **${t.ailWithoutIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent Billable API Tokens** (\`input + output\`) | ${t.withoutAiceBillableTokens.toLocaleString("en-US")} | **${t.aiceWithoutIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsBillableTokens.toLocaleString("en-US")} (-${t.billableTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent Total API Context Tokens** (\`input + cache + output\`) | ${t.withoutAilApiTotalTokens.toLocaleString("en-US")} | **${t.ailWithoutIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.ailWithIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent Total API Context Tokens** (\`input + cache + output\`) | ${t.withoutAiceApiTotalTokens.toLocaleString("en-US")} | **${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${t.aiceWithIdiomsApiTotalTokens.toLocaleString("en-US")} (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%)** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Real Agent Wall-Clock Duration** | ${t.withoutAilDurationSeconds.toFixed(1)}s | **${t.ailWithoutIdiomsDurationSeconds.toFixed(1)}s** | **${t.ailWithIdiomsDurationSeconds.toFixed(1)}s** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
+    `| **Real Agent Wall-Clock Duration** | ${t.withoutAiceDurationSeconds.toFixed(1)}s | **${t.aiceWithoutIdiomsDurationSeconds.toFixed(1)}s** | **${t.aiceWithIdiomsDurationSeconds.toFixed(1)}s** | **${realReport.winsWithIdioms}/${realReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | ${o.withoutAilTokens.toLocaleString("en-US")} | **${o.ailWithoutIdiomsTokens.toLocaleString("en-US")} (-${o.savingsWithoutIdiomsPct.toFixed(1)}%)** | **${o.ailWithIdiomsTokens.toLocaleString("en-US")} (-${o.savingsWithIdiomsPct.toFixed(1)}%)** | **${offlineReport.winsWithIdioms}/${offlineReport.totalBenchmarks} (100%)** |`,
+    `| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | ${o.withoutAiceTokens.toLocaleString("en-US")} | **${o.aiceWithoutIdiomsTokens.toLocaleString("en-US")} (-${o.savingsWithoutIdiomsPct.toFixed(1)}%)** | **${o.aiceWithIdiomsTokens.toLocaleString("en-US")} (-${o.savingsWithIdiomsPct.toFixed(1)}%)** | **${offlineReport.winsWithIdioms}/${offlineReport.totalBenchmarks} (100%)** |`,
   );
   lines.push(
-    `| **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | ${o.withoutAilTurns} turns | **${o.ailWithoutIdiomsTurns} turns (-${o.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${o.ailWithIdiomsTurns} turns (-${o.turnsSavingsWithIdiomsPct.toFixed(1)}%)** | **${offlineReport.winsWithIdioms}/${offlineReport.totalBenchmarks} (100%)** |`,
+    `| **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | ${o.withoutAiceTurns} turns | **${o.aiceWithoutIdiomsTurns} turns (-${o.turnsSavingsWithoutIdiomsPct.toFixed(1)}%)** | **${o.aiceWithIdiomsTurns} turns (-${o.turnsSavingsWithIdiomsPct.toFixed(1)}%)** | **${offlineReport.winsWithIdioms}/${offlineReport.totalBenchmarks} (100%)** |`,
   );
   lines.push("");
 
@@ -405,13 +405,13 @@ export function formatRealAgentBenchmarkMarkdown(
     "For each of the 10 real-world scenarios (`RW-01` .. `RW-10`), 3 independent `agy` agent sessions were spawned in isolated temporary directories containing the native source files:",
   );
   lines.push(
-    "1. **Without AIL (`without_ail`)**: The agent uses standard native IDE tools (`grep_search`, `view_file`, `replace_file_content`) to locate symbols, read files, update target symbols, delete obsolete symbols, and apply the multi-file pattern refactor across the workspace.",
+    "1. **Without AICE (`without_aice`)**: The agent uses standard native IDE tools (`grep_search`, `view_file`, `replace_file_content`) to locate symbols, read files, update target symbols, delete obsolete symbols, and apply the multi-file pattern refactor across the workspace.",
   );
   lines.push(
-    "2. **AIL Without Idioms (`ail_no_idioms`)**: The agent uses AIL On-the-Fly CLI in pure AIL mode (`ail context . -s \"...\" --no-idioms` and `ail splice --no-idioms --batch '[...]'`).",
+    "2. **AICE Without Idioms (`aice_no_idioms`)**: The agent uses AICE On-the-Fly CLI in pure AICE mode (`aice context . -s \"...\" --no-idioms` and `aice splice --no-idioms --batch '[...]'`).",
   );
   lines.push(
-    "3. **AIL With Idioms (`ail_with_idioms`)**: The agent uses AIL On-the-Fly CLI with project `$idiom` macros (`ail context . -s \"...\" --idioms`, `ail splice --idioms --batch '[...]'`, and `ail idioms update --batch '[...]'`).",
+    "3. **AICE With Idioms (`aice_with_idioms`)**: The agent uses AICE On-the-Fly CLI with project `$idiom` macros (`aice context . -s \"...\" --idioms`, `aice splice --idioms --batch '[...]'`, and `aice idioms update --batch '[...]'`).",
   );
   lines.push("");
   lines.push(
@@ -433,26 +433,26 @@ export function formatRealAgentBenchmarkMarkdown(
     "- **Total API Context Tokens (`apiTotalTokens`)**: Exact sum of `input_tokens + cache_read_tokens + output_tokens` across all turns (invariant to server-side prompt cache warmth).",
   );
   lines.push(
-    "- **On-Disk Verification (`verifiedOnDisk` & `zeroAilFilesLeftOnDisk`)**: Confirms every target symbol update, obsolete symbol deletion, and multi-file pattern refactor is present in the native files on disk, with `0` `.ail` files left behind.",
+    "- **On-Disk Verification (`verifiedOnDisk` & `zeroAiceFilesLeftOnDisk`)**: Confirms every target symbol update, obsolete symbol deletion, and multi-file pattern refactor is present in the native files on disk, with `0` `.aice` files left behind.",
   );
   lines.push("");
 
   lines.push("## 3. All 10 Real-World Scenarios — Real AI Agent Results");
   lines.push("");
   lines.push(
-    "| ID | Scenario & Languages | Turns (No AIL / Pure AIL / +Idioms) | Tool Calls (No AIL / Pure AIL / +Idioms) | Working Tokens (No AIL / Pure AIL / +Idioms) | LLM Output Tokens (No AIL / Pure AIL / +Idioms) | Total API Context Tokens (No AIL / Pure AIL / +Idioms) | Verified |",
+    "| ID | Scenario & Languages | Turns (No AICE / Pure AICE / +Idioms) | Tool Calls (No AICE / Pure AICE / +Idioms) | Working Tokens (No AICE / Pure AICE / +Idioms) | LLM Output Tokens (No AICE / Pure AICE / +Idioms) | Total API Context Tokens (No AICE / Pure AICE / +Idioms) | Verified |",
   );
   lines.push("| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |");
   for (const b of realReport.benchmarks) {
-    const w = b.withoutAil;
-    const n = b.ailWithoutIdioms;
-    const i = b.ailWithIdioms;
+    const w = b.withoutAice;
+    const n = b.aiceWithoutIdioms;
+    const i = b.aiceWithIdioms;
     lines.push(
       `| **${b.id}** | **${b.title}**<br/>\`${b.languages.join(", ")}\` (${b.filesCount} files) | ${w.llmTurns} / **${n.llmTurns}** (-${b.turnsSavingsWithoutIdiomsPct.toFixed(0)}%) / **${i.llmTurns}** (-${b.turnsSavingsWithIdiomsPct.toFixed(0)}%) | ${w.toolCalls} / **${n.toolCalls}** (-${b.toolCallsSavingsWithoutIdiomsPct.toFixed(0)}%) / **${i.toolCalls}** (-${b.toolCallsSavingsWithIdiomsPct.toFixed(0)}%) | ${w.workingTokens.toLocaleString("en-US")} / **${n.workingTokens.toLocaleString("en-US")}** (-${b.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.workingTokens.toLocaleString("en-US")}** (-${b.workingTokensSavingsWithIdiomsPct.toFixed(1)}%) | ${w.outputTokens.toLocaleString("en-US")} / **${n.outputTokens.toLocaleString("en-US")}** (-${b.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.outputTokens.toLocaleString("en-US")}** (-${b.outputTokensSavingsWithIdiomsPct.toFixed(1)}%) | ${w.apiTotalTokens.toLocaleString("en-US")} / **${n.apiTotalTokens.toLocaleString("en-US")}** (-${b.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.apiTotalTokens.toLocaleString("en-US")}** (-${b.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%) | ✅ 100% |`,
     );
   }
   lines.push(
-    `| **TOTAL** | **All 10 Scenarios (${realReport.coveredLanguages.length}/15 Languages)** | **${t.withoutAilTurns}** / **${t.ailWithoutIdiomsTurns}** (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.ailWithIdiomsTurns}** (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAilToolCalls}** / **${t.ailWithoutIdiomsToolCalls}** (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.ailWithIdiomsToolCalls}** (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAilWorkingTokens.toLocaleString("en-US")}** / **${t.ailWithoutIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.ailWithIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAilOutputTokens.toLocaleString("en-US")}** / **${t.ailWithoutIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.ailWithIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAilApiTotalTokens.toLocaleString("en-US")}** / **${t.ailWithoutIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.ailWithIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%) | ✅ **30/30** |`,
+    `| **TOTAL** | **All 10 Scenarios (${realReport.coveredLanguages.length}/15 Languages)** | **${t.withoutAiceTurns}** / **${t.aiceWithoutIdiomsTurns}** (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsTurns}** (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceToolCalls}** / **${t.aiceWithoutIdiomsToolCalls}** (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsToolCalls}** (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceWorkingTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceOutputTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceApiTotalTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%) | ✅ **30/30** |`,
   );
   lines.push("");
 
@@ -470,13 +470,13 @@ export function formatRealAgentBenchmarkMarkdown(
   );
   for (const b of realReport.benchmarks) {
     const modes: Array<[string, RealAgentRunMetrics]> = [
-      ["Without AIL", b.withoutAil],
-      ["AIL No Idioms", b.ailWithoutIdioms],
-      ["AIL With Idioms", b.ailWithIdioms],
+      ["Without AICE", b.withoutAice],
+      ["AICE No Idioms", b.aiceWithoutIdioms],
+      ["AICE With Idioms", b.aiceWithIdioms],
     ];
     for (const [label, m] of modes) {
       lines.push(
-        `| **${b.id}** | ${label} | \`${m.conversationId}\` | ${m.llmTurns} | ${m.toolCalls} | ${m.toolCallTokens.toLocaleString()} | ${m.toolResultTokens.toLocaleString()} | ${m.outputTokens.toLocaleString()} | **${m.workingTokens.toLocaleString()}** | ${m.billableTokens.toLocaleString()} | ${m.apiTotalTokens.toLocaleString()} | ${m.durationSeconds.toFixed(1)}s | ${m.verifiedOnDisk && m.zeroAilFilesLeftOnDisk ? "✅" : "❌"} |`,
+        `| **${b.id}** | ${label} | \`${m.conversationId}\` | ${m.llmTurns} | ${m.toolCalls} | ${m.toolCallTokens.toLocaleString()} | ${m.toolResultTokens.toLocaleString()} | ${m.outputTokens.toLocaleString()} | **${m.workingTokens.toLocaleString()}** | ${m.billableTokens.toLocaleString()} | ${m.apiTotalTokens.toLocaleString()} | ${m.durationSeconds.toFixed(1)}s | ${m.verifiedOnDisk && m.zeroAiceFilesLeftOnDisk ? "✅" : "❌"} |`,
       );
     }
   }
@@ -489,7 +489,7 @@ export function formatRealAgentBenchmarkMarkdown(
   );
   lines.push("");
   lines.push(
-    "| ID | Scenario | Offline Token Savings (Pure AIL / +Idioms) | Real Agent Working Token Savings (Pure AIL / +Idioms) | Offline Turn Savings (Pure AIL / +Idioms) | Real Agent Turn Savings (Pure AIL / +Idioms) |",
+    "| ID | Scenario | Offline Token Savings (Pure AICE / +Idioms) | Real Agent Working Token Savings (Pure AICE / +Idioms) | Offline Turn Savings (Pure AICE / +Idioms) | Real Agent Turn Savings (Pure AICE / +Idioms) |",
   );
   lines.push("| :--- | :--- | :---: | :---: | :---: | :---: |");
   for (let idx = 0; idx < realReport.benchmarks.length; idx++) {

@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isTargetLocked } from "../../src/shield/index.js";
-import { AilWatcher, watchProject } from "../../src/watcher/index.js";
+import { AiceWatcher, watchProject } from "../../src/watcher/index.js";
 
 async function waitFor(predicate: () => boolean, timeoutMs = 2500, intervalMs = 15): Promise<void> {
   const start = Date.now();
@@ -24,10 +24,10 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2500, intervalMs = 
 
 describe("Step 6: High-Speed Incremental Watch Daemon", () => {
   let testDir: string;
-  let activeWatcher: AilWatcher | null = null;
+  let activeWatcher: AiceWatcher | null = null;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "ail-watch-test-"));
+    testDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-watch-test-"));
     activeWatcher = null;
   });
 
@@ -63,19 +63,19 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
   });
 
   describe("compileFile", () => {
-    it("compiles a single .ail file to side-by-side target and locks with chmod 444", async () => {
-      const ailPath = path.join(testDir, "math.ts.ail");
+    it("compiles a single .aice file to side-by-side target and locks with chmod 444", async () => {
+      const aicePath = path.join(testDir, "math.ts.aice");
       const targetPath = path.join(testDir, "math.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn add(a: int, b: int) -> int:
   ret a + b
 `,
         "utf-8",
       );
 
-      const watcher = new AilWatcher({ dir: testDir });
-      const result = await watcher.compileFile(ailPath);
+      const watcher = new AiceWatcher({ dir: testDir });
+      const result = await watcher.compileFile(aicePath);
 
       expect(result.success).toBe(true);
       expect(result.targetFile).toBe(targetPath);
@@ -95,18 +95,18 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
     });
 
     it("respects lockTargets: false leaving target file writable", async () => {
-      const ailPath = path.join(testDir, "unlocked.ts.ail");
+      const aicePath = path.join(testDir, "unlocked.ts.aice");
       const targetPath = path.join(testDir, "unlocked.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn answer() -> int:
   ret 42
 `,
         "utf-8",
       );
 
-      const watcher = new AilWatcher({ dir: testDir, lockTargets: false });
-      const result = await watcher.compileFile(ailPath);
+      const watcher = new AiceWatcher({ dir: testDir, lockTargets: false });
+      const result = await watcher.compileFile(aicePath);
 
       expect(result.success).toBe(true);
       expect(fs.existsSync(targetPath)).toBe(true);
@@ -114,28 +114,28 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
     });
 
     it("invokes onCompileStart callback before compiling", async () => {
-      const ailPath = path.join(testDir, "lifecycle.ts.ail");
-      fs.writeFileSync(ailPath, `fn test():\n  ret\n`, "utf-8");
+      const aicePath = path.join(testDir, "lifecycle.ts.aice");
+      fs.writeFileSync(aicePath, `fn test():\n  ret\n`, "utf-8");
 
       let startCalledWith = "";
-      const watcher = new AilWatcher({
+      const watcher = new AiceWatcher({
         dir: testDir,
         onCompileStart: (file) => {
           startCalledWith = file;
         },
       });
 
-      await watcher.compileFile(ailPath);
-      expect(startCalledWith).toBe(path.resolve(ailPath));
+      await watcher.compileFile(aicePath);
+      expect(startCalledWith).toBe(path.resolve(aicePath));
     });
   });
 
   describe("Watch Triggering & HMR", () => {
-    it("modifying an .ail file triggers automatic incremental compilation and updates target", async () => {
-      const ailPath = path.join(testDir, "widget.ts.ail");
+    it("modifying an .aice file triggers automatic incremental compilation and updates target", async () => {
+      const aicePath = path.join(testDir, "widget.ts.aice");
       const targetPath = path.join(testDir, "widget.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn getScore() -> int:
   ret 10
 `,
@@ -145,10 +145,10 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       let successCount = 0;
       let lastTarget = "";
 
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         debounceMs: 20,
-        onCompileSuccess: (_ail, target) => {
+        onCompileSuccess: (_aice, target) => {
           successCount++;
           lastTarget = target;
         },
@@ -157,9 +157,9 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       await activeWatcher.start();
       await new Promise((r) => setTimeout(r, 40));
 
-      // Modify the .ail file
+      // Modify the .aice file
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn getScore() -> int:
   ret 42
 `,
@@ -175,31 +175,31 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
     });
 
     it("seamlessly preserves target locked state across multiple compiles (HMR simulation)", async () => {
-      const ailPath = path.join(testDir, "hmr.ts.ail");
+      const aicePath = path.join(testDir, "hmr.ts.aice");
       const targetPath = path.join(testDir, "hmr.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn render() -> str:
   ret "v1"
 `,
         "utf-8",
       );
 
-      const watcher = new AilWatcher({ dir: testDir });
-      const res1 = await watcher.compileFile(ailPath);
+      const watcher = new AiceWatcher({ dir: testDir });
+      const res1 = await watcher.compileFile(aicePath);
       expect(res1.success).toBe(true);
       expect(isTargetLocked(targetPath)).toBe(true);
       expect(fs.readFileSync(targetPath, "utf-8")).toContain('"v1"');
 
       // Second compilation modifies target in place while retaining lock
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn render() -> str:
   ret "v2"
 `,
         "utf-8",
       );
-      const res2 = await watcher.compileFile(ailPath);
+      const res2 = await watcher.compileFile(aicePath);
       expect(res2.success).toBe(true);
       expect(isTargetLocked(targetPath)).toBe(true);
       expect(fs.readFileSync(targetPath, "utf-8")).toContain('"v2"');
@@ -207,11 +207,11 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
   });
 
   describe("Debouncing", () => {
-    it("rapid sequential writes to .ail only trigger compilation once", async () => {
-      const ailPath = path.join(testDir, "counter.ts.ail");
+    it("rapid sequential writes to .aice only trigger compilation once", async () => {
+      const aicePath = path.join(testDir, "counter.ts.aice");
       const targetPath = path.join(testDir, "counter.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn getCount() -> int:
   ret 0
 `,
@@ -219,7 +219,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       );
 
       let compileCount = 0;
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         debounceMs: 50,
         onCompileSuccess: () => {
@@ -235,7 +235,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       // 5 rapid sequential writes within the debounce window
       for (let i = 1; i <= 5; i++) {
         fs.writeFileSync(
-          ailPath,
+          aicePath,
           `fn getCount() -> int:
   ret ${i}
 `,
@@ -254,18 +254,18 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
 
   describe("Error Isolation & Recovery", () => {
     it("syntax errors invoke onCompileError without modifying target file or crashing daemon", async () => {
-      const ailPath = path.join(testDir, "service.ts.ail");
+      const aicePath = path.join(testDir, "service.ts.aice");
       const targetPath = path.join(testDir, "service.ts");
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn validService() -> int:
   ret 999
 `,
         "utf-8",
       );
 
-      const seedWatcher = new AilWatcher({ dir: testDir });
-      const seedRes = await seedWatcher.compileFile(ailPath);
+      const seedWatcher = new AiceWatcher({ dir: testDir });
+      const seedRes = await seedWatcher.compileFile(aicePath);
       expect(seedRes.success).toBe(true);
       const originalTarget = fs.readFileSync(targetPath, "utf-8");
       expect(originalTarget).toContain("999");
@@ -273,10 +273,10 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       let errorOccurred: Error | null = null;
       let successOccurred = false;
 
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         debounceMs: 20,
-        onCompileError: (_ail, err) => {
+        onCompileError: (_aice, err) => {
           errorOccurred = err;
         },
         onCompileSuccess: () => {
@@ -288,7 +288,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       await new Promise((r) => setTimeout(r, 40));
 
       // Write invalid syntax
-      fs.writeFileSync(ailPath, `fn invalid {{{ !!!\n`, "utf-8");
+      fs.writeFileSync(aicePath, `fn invalid {{{ !!!\n`, "utf-8");
 
       await waitFor(() => errorOccurred !== null);
       expect(errorOccurred).toBeDefined();
@@ -300,7 +300,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
 
       // Now recover with valid code on the SAME active watcher
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn validService() -> int:
   ret 12345
 `,
@@ -313,10 +313,10 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
     });
 
     it("typecheck errors invoke onCompileError and return success: false from compileFile", async () => {
-      const ailPath = path.join(testDir, "type_err.ts.ail");
+      const aicePath = path.join(testDir, "type_err.ts.aice");
       // Type mismatch: assigning string to int
       fs.writeFileSync(
-        ailPath,
+        aicePath,
         `fn bad():
   x: int := "not an int"
   ret
@@ -324,8 +324,8 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
         "utf-8",
       );
 
-      const watcher = new AilWatcher({ dir: testDir });
-      const result = await watcher.compileFile(ailPath);
+      const watcher = new AiceWatcher({ dir: testDir });
+      const result = await watcher.compileFile(aicePath);
 
       expect(result.success).toBe(false);
       expect(result.error).toBeDefined();
@@ -334,19 +334,19 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
   });
 
   describe("File Deletion", () => {
-    it("calls onFileDeleted when a .ail file is deleted from the filesystem", async () => {
-      const ailPath = path.join(testDir, "temp.ts.ail");
+    it("calls onFileDeleted when a .aice file is deleted from the filesystem", async () => {
+      const aicePath = path.join(testDir, "temp.ts.aice");
       const targetPath = path.join(testDir, "temp.ts");
-      fs.writeFileSync(ailPath, `fn temp():\n  ret\n`, "utf-8");
+      fs.writeFileSync(aicePath, `fn temp():\n  ret\n`, "utf-8");
 
-      let deletedAilPath = "";
+      let deletedAicePath = "";
       let deletedTargetPath = "";
 
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         debounceMs: 20,
-        onFileDeleted: (ail, target) => {
-          deletedAilPath = ail;
+        onFileDeleted: (aice, target) => {
+          deletedAicePath = aice;
           deletedTargetPath = target;
         },
       });
@@ -354,32 +354,32 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       await activeWatcher.start();
       await new Promise((r) => setTimeout(r, 40));
 
-      fs.unlinkSync(ailPath);
+      fs.unlinkSync(aicePath);
 
-      await waitFor(() => deletedAilPath !== "");
-      expect(deletedAilPath).toBe(path.resolve(ailPath));
+      await waitFor(() => deletedAicePath !== "");
+      expect(deletedAicePath).toBe(path.resolve(aicePath));
       expect(deletedTargetPath).toBe(path.resolve(targetPath));
     });
   });
 
   describe("Lifecycle & Stats", () => {
     it("stop() cleanly terminates watcher, clears pending timers, and sets isWatching false", async () => {
-      activeWatcher = new AilWatcher({ dir: testDir, debounceMs: 50 });
+      activeWatcher = new AiceWatcher({ dir: testDir, debounceMs: 50 });
       await activeWatcher.start();
       expect(activeWatcher.isWatching()).toBe(true);
 
       await activeWatcher.stop();
       expect(activeWatcher.isWatching()).toBe(false);
 
-      const ailPath = path.join(testDir, "after_stop.ts.ail");
-      fs.writeFileSync(ailPath, `fn test():\n  ret\n`, "utf-8");
+      const aicePath = path.join(testDir, "after_stop.ts.aice");
+      fs.writeFileSync(aicePath, `fn test():\n  ret\n`, "utf-8");
 
       await new Promise((r) => setTimeout(r, 80));
       expect(activeWatcher.getStats().totalCompiles).toBe(0);
     });
 
     it("getStats() reports accurate counts across compiler operations", async () => {
-      const watcher = new AilWatcher({ dir: testDir });
+      const watcher = new AiceWatcher({ dir: testDir });
       expect(watcher.getStats()).toEqual({
         isWatching: false,
         totalCompiles: 0,
@@ -389,9 +389,9 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
         watchedDir: testDir,
       });
 
-      const validAil = path.join(testDir, "good.ts.ail");
-      fs.writeFileSync(validAil, `fn good():\n  ret\n`, "utf-8");
-      await watcher.compileFile(validAil);
+      const validAice = path.join(testDir, "good.ts.aice");
+      fs.writeFileSync(validAice, `fn good():\n  ret\n`, "utf-8");
+      await watcher.compileFile(validAice);
 
       let stats = watcher.getStats();
       expect(stats.totalCompiles).toBe(1);
@@ -399,9 +399,9 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       expect(stats.failedCompiles).toBe(0);
       expect(stats.lastCompileDurationMs).toBeGreaterThanOrEqual(0);
 
-      const badAil = path.join(testDir, "bad.ts.ail");
-      fs.writeFileSync(badAil, `syntax error <<<<<\n`, "utf-8");
-      await watcher.compileFile(badAil);
+      const badAice = path.join(testDir, "bad.ts.aice");
+      fs.writeFileSync(badAice, `syntax error <<<<<\n`, "utf-8");
+      await watcher.compileFile(badAice);
 
       stats = watcher.getStats();
       expect(stats.totalCompiles).toBe(2);
@@ -417,35 +417,35 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
 
     it("throws when watching a non-existent directory", async () => {
       const nonExistent = path.join(testDir, "does-not-exist");
-      const watcher = new AilWatcher({ dir: nonExistent });
+      const watcher = new AiceWatcher({ dir: nonExistent });
       await expect(watcher.start()).rejects.toThrow("Directory not found");
     });
   });
 
   describe("Subdirectories & Ignore Patterns", () => {
-    it("recursively watches subdirectories and compiles nested .ail files", async () => {
+    it("recursively watches subdirectories and compiles nested .aice files", async () => {
       const subDir = path.join(testDir, "nested", "components");
       fs.mkdirSync(subDir, { recursive: true });
 
       let nestedCompiled = false;
       let compiledFile = "";
 
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         recursive: true,
         debounceMs: 20,
-        onCompileSuccess: (ail) => {
+        onCompileSuccess: (aice) => {
           nestedCompiled = true;
-          compiledFile = ail;
+          compiledFile = aice;
         },
       });
 
       await activeWatcher.start();
       await new Promise((r) => setTimeout(r, 40));
 
-      const nestedAil = path.join(subDir, "Card.tsx.ail");
+      const nestedAice = path.join(subDir, "Card.tsx.aice");
       fs.writeFileSync(
-        nestedAil,
+        nestedAice,
         `fn Card() -> str:
   ret "card"
 `,
@@ -453,7 +453,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       );
 
       await waitFor(() => nestedCompiled);
-      expect(compiledFile).toBe(path.resolve(nestedAil));
+      expect(compiledFile).toBe(path.resolve(nestedAice));
 
       const expectedTarget = path.join(subDir, "Card.tsx");
       expect(fs.existsSync(expectedTarget)).toBe(true);
@@ -465,7 +465,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       fs.mkdirSync(nodeModulesDir, { recursive: true });
 
       let triggered = false;
-      activeWatcher = new AilWatcher({
+      activeWatcher = new AiceWatcher({
         dir: testDir,
         debounceMs: 20,
         onCompileSuccess: () => {
@@ -476,7 +476,7 @@ describe("Step 6: High-Speed Incremental Watch Daemon", () => {
       await activeWatcher.start();
       await new Promise((r) => setTimeout(r, 40));
 
-      fs.writeFileSync(path.join(nodeModulesDir, "pkg.ts.ail"), `fn pkg():\n  ret\n`, "utf-8");
+      fs.writeFileSync(path.join(nodeModulesDir, "pkg.ts.aice"), `fn pkg():\n  ret\n`, "utf-8");
 
       await new Promise((r) => setTimeout(r, 70));
       expect(triggered).toBe(false);

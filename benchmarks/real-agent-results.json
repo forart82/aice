@@ -1,8 +1,8 @@
 {
   "RW-01": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-01",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "b81206c1-ec60-423c-a4a6-e1094818e9a9",
       "llmTurns": 20,
       "toolCalls": 23,
@@ -16,11 +16,11 @@
       "apiTotalTokens": 687185,
       "durationSeconds": 24.5,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-01",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "dd82b585-eba3-4bc1-8da5-bfd75b4c126b",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -34,11 +34,11 @@
       "apiTotalTokens": 106111,
       "durationSeconds": 24.5,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-01",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "382ade93-a31f-4846-bb54-3ff5526ba581",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -52,13 +52,13 @@
       "apiTotalTokens": 70390,
       "durationSeconds": 24.5,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-02": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-02",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "1e0d36be-83bb-4f86-b205-a8d62fb90ad3",
       "llmTurns": 7,
       "toolCalls": 9,
@@ -72,11 +72,11 @@
       "apiTotalTokens": 203341,
       "durationSeconds": 38.12,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-02",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "5b9fb9ae-6e9d-47c5-98f1-b3e6c23d1b5a",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -90,11 +90,11 @@
       "apiTotalTokens": 104793,
       "durationSeconds": 27.74,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-02",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "be7e9d0c-fecf-460d-9af1-2d683ef4325a",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -108,13 +108,13 @@
       "apiTotalTokens": 70072,
       "durationSeconds": 16.83,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-03": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-03",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "04884c78-8bc7-41f7-9951-43e0aaade5d3",
       "llmTurns": 11,
       "toolCalls": 16,
@@ -128,11 +128,11 @@
       "apiTotalTokens": 358966,
       "durationSeconds": 41.24,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-03",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "8d1755bd-e0b9-4e12-8c40-41dda15cd665",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -146,11 +146,11 @@
       "apiTotalTokens": 111669,
       "durationSeconds": 25.54,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-03",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "1ba71ac9-29b1-4882-a47c-ba7bca0a6a97",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -164,13 +164,13 @@
       "apiTotalTokens": 73297,
       "durationSeconds": 18.4,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-04": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-04",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "d2f7569f-486b-4d6f-bd7c-1adef0ac0fd6",
       "llmTurns": 9,
       "toolCalls": 13,
@@ -184,11 +184,11 @@
       "apiTotalTokens": 287304,
       "durationSeconds": 41.48,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-04",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "779213ed-c4d8-446c-9997-018ea9107eb2",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -202,11 +202,11 @@
       "apiTotalTokens": 111379,
       "durationSeconds": 23.91,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-04",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "163e39b2-20ad-48ee-a763-c4dd9694adcb",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -220,13 +220,13 @@
       "apiTotalTokens": 72688,
       "durationSeconds": 15.2,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-05": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-05",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "92c75b21-0181-4941-95bf-6a359e361738",
       "llmTurns": 7,
       "toolCalls": 10,
@@ -240,11 +240,11 @@
       "apiTotalTokens": 211587,
       "durationSeconds": 32.73,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-05",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "2af6b269-0ebf-4a1f-b456-f87e46ad1798",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -258,11 +258,11 @@
       "apiTotalTokens": 104895,
       "durationSeconds": 22.75,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-05",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "e7de8d00-c748-4e2a-a808-e45d27e36d5a",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -276,13 +276,13 @@
       "apiTotalTokens": 69875,
       "durationSeconds": 17.04,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-06": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-06",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "34b4c78a-79b3-46c4-aa3e-7c9394bf8423",
       "llmTurns": 9,
       "toolCalls": 12,
@@ -296,11 +296,11 @@
       "apiTotalTokens": 276946,
       "durationSeconds": 38.63,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-06",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "8484f233-c814-401a-9ec6-2be4dd9506c3",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -314,11 +314,11 @@
       "apiTotalTokens": 105049,
       "durationSeconds": 23.36,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-06",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "e462759b-24c8-4d53-9917-01847a1ea7a1",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -332,13 +332,13 @@
       "apiTotalTokens": 70256,
       "durationSeconds": 15.61,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-07": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-07",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "8f0f3a56-06ab-475f-be21-00fc91e71bfe",
       "llmTurns": 7,
       "toolCalls": 10,
@@ -352,11 +352,11 @@
       "apiTotalTokens": 203470,
       "durationSeconds": 32.95,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-07",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "dd2ca186-f766-440b-8014-a6aa02be0364",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -370,11 +370,11 @@
       "apiTotalTokens": 106716,
       "durationSeconds": 25.57,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-07",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "2cf71ba4-45bc-4325-9d5e-c82822f2d789",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -388,13 +388,13 @@
       "apiTotalTokens": 69969,
       "durationSeconds": 16.36,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-08": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-08",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "ad47e489-e638-4b46-827c-b9bd8a7ce594",
       "llmTurns": 14,
       "toolCalls": 13,
@@ -408,11 +408,11 @@
       "apiTotalTokens": 404815,
       "durationSeconds": 65.16,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-08",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "c8871eac-4b62-439a-be74-74c1c647576b",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -426,11 +426,11 @@
       "apiTotalTokens": 110500,
       "durationSeconds": 31.81,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-08",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "0e1fb6ca-b84c-4f38-973d-9f89bfefe8bc",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -444,13 +444,13 @@
       "apiTotalTokens": 72396,
       "durationSeconds": 16.49,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-09": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-09",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "e1de384d-8ca9-4094-b0aa-267834e98b68",
       "llmTurns": 9,
       "toolCalls": 13,
@@ -464,11 +464,11 @@
       "apiTotalTokens": 303664,
       "durationSeconds": 46.88,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-09",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "8880fb19-6ff0-45c4-a3f4-7a72d579f8e5",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -482,11 +482,11 @@
       "apiTotalTokens": 113673,
       "durationSeconds": 28.82,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-09",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "e5ee8464-5bcc-4463-975d-e140a27fc08d",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -500,13 +500,13 @@
       "apiTotalTokens": 73355,
       "durationSeconds": 18.13,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   },
   "RW-10": {
-    "without_ail": {
+    "without_aice": {
       "benchmarkId": "RW-10",
-      "mode": "without_ail",
+      "mode": "without_aice",
       "conversationId": "b4bc9f0e-6b96-4721-bfe3-179bd2083520",
       "llmTurns": 33,
       "toolCalls": 32,
@@ -520,11 +520,11 @@
       "apiTotalTokens": 1473502,
       "durationSeconds": 128.73,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_no_idioms": {
+    "aice_no_idioms": {
       "benchmarkId": "RW-10",
-      "mode": "ail_no_idioms",
+      "mode": "aice_no_idioms",
       "conversationId": "e95320ce-3016-4ef7-8109-183787368788",
       "llmTurns": 4,
       "toolCalls": 3,
@@ -538,11 +538,11 @@
       "apiTotalTokens": 135281,
       "durationSeconds": 40.1,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     },
-    "ail_with_idioms": {
+    "aice_with_idioms": {
       "benchmarkId": "RW-10",
-      "mode": "ail_with_idioms",
+      "mode": "aice_with_idioms",
       "conversationId": "f4c8612d-2d7c-4d39-9243-c49dfa24d2ec",
       "llmTurns": 3,
       "toolCalls": 2,
@@ -556,7 +556,7 @@
       "apiTotalTokens": 81209,
       "durationSeconds": 18.88,
       "verifiedOnDisk": true,
-      "zeroAilFilesLeftOnDisk": true
+      "zeroAiceFilesLeftOnDisk": true
     }
   }
 }
