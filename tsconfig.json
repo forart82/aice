@@ -12,7 +12,8 @@
     "types": ["node"],
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
+    "noUnusedLocals": true,
     "noEmit": true
   },
-  "include": ["src/**/*", "bin/**/*", "tests/**/*", "docs/**/*"]
+  "include": ["src/**/*", "bin/**/*", "benchmarks/**/*", "tests/**/*"]
 }

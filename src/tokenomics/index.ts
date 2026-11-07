@@ -43,17 +43,11 @@ export class TiktokenTokenizer {
     return estimateTokens(text, encoding);
   }
 
-  public count(
-    text: string,
-    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
-  ): number {
+  public count(text: string, encoding: "cl100k_base" | "o200k_base" = "cl100k_base"): number {
     return estimateTokens(text, encoding);
   }
 
-  public encode(
-    text: string,
-    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
-  ): number[] {
+  public encode(text: string, encoding: "cl100k_base" | "o200k_base" = "cl100k_base"): number[] {
     return Array.from(getTokenizerEncoding(encoding).encode(text));
   }
 }
@@ -143,7 +137,8 @@ export function calculateFileTokenomics(
   const encO200k = getTokenizerEncoding("o200k_base");
   const targetCl100k = encCl100k.encode(targetContent).length;
   const aiceCl100k = encCl100k.encode(aiceContent).length;
-  const cl100kSavingsPct = targetCl100k > 0 ? ((targetCl100k - aiceCl100k) / targetCl100k) * 100 : 0;
+  const cl100kSavingsPct =
+    targetCl100k > 0 ? ((targetCl100k - aiceCl100k) / targetCl100k) * 100 : 0;
 
   const targetO200k = encO200k.encode(targetContent).length;
   const aiceO200k = encO200k.encode(aiceContent).length;
@@ -542,7 +537,8 @@ export function formatProjectsMarkdownTable(report: TokenomicsAuditReport): stri
       p.targetCl100k > 0 ? ((p.targetCl100k - p.aiceCl100k) / p.targetCl100k) * 100 : 0;
     p.o200kSavingsPct =
       p.targetO200k > 0 ? ((p.targetO200k - p.aiceO200k) / p.targetO200k) * 100 : 0;
-    p.charSavingsPct = p.targetChars > 0 ? ((p.targetChars - p.aiceChars) / p.targetChars) * 100 : 0;
+    p.charSavingsPct =
+      p.targetChars > 0 ? ((p.targetChars - p.aiceChars) / p.targetChars) * 100 : 0;
   }
 
   const lines: string[] = [];

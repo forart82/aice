@@ -76,10 +76,7 @@ export function isSameOrDescendant(parent: string | undefined, candidate: string
 /**
  * Checks whether `candidate` or its canonical realpath is equal to or inside `parent`.
  */
-export function isRealPathSameOrDescendant(
-  parent: string | undefined,
-  candidate: string,
-): boolean {
+export function isRealPathSameOrDescendant(parent: string | undefined, candidate: string): boolean {
   if (!parent) {
     return false;
   }
@@ -131,21 +128,6 @@ export function scanDirectoryFiles(
     }
   }
 
-  const absTargetProjectDir = config.targetProjectDir
-    ? path.isAbsolute(config.targetProjectDir)
-      ? path.resolve(config.targetProjectDir)
-      : path.resolve(projectRoot, config.targetProjectDir)
-    : undefined;
-
-  let realTargetProjectDir: string | undefined;
-  if (absTargetProjectDir) {
-    try {
-      realTargetProjectDir = fs.realpathSync(absTargetProjectDir);
-    } catch {
-      realTargetProjectDir = absTargetProjectDir;
-    }
-  }
-
   const visitedDirs = new Set<string>();
 
   function shouldIgnoreDirectory(
@@ -159,11 +141,7 @@ export function scanDirectoryFiles(
     if (entryName.startsWith(".") && entryName !== "." && entryName !== "..") {
       return true;
     }
-    if (
-      config.mode !== "companion" &&
-      outDirName !== config.sourceDir &&
-      entryName === outDirName
-    ) {
+    if (outDirName !== config.sourceDir && entryName === outDirName) {
       return true;
     }
     if (
@@ -171,14 +149,6 @@ export function scanDirectoryFiles(
       absOutDir !== absScanDir &&
       (isSameOrDescendant(absOutDir, fullPath) ||
         (realOutDir && isSameOrDescendant(realOutDir, realFullPath)))
-    ) {
-      return true;
-    }
-    if (
-      absTargetProjectDir &&
-      absTargetProjectDir !== absScanDir &&
-      (isSameOrDescendant(absTargetProjectDir, fullPath) ||
-        (realTargetProjectDir && isSameOrDescendant(realTargetProjectDir, realFullPath)))
     ) {
       return true;
     }

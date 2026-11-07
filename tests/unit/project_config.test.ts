@@ -15,17 +15,15 @@ import {
   type AiceProjectConfig,
   DEFAULT_PROJECT_CONFIG,
   autoDetectProjectMode,
-  deriveSourceFilename,
   deriveTargetFilename,
+  findProjectRoot,
   getExtensionForTarget,
   loadProjectConfig,
-  resolveSourceFile,
-  resolveTargetFile,
   resolveTargetOutputPathForConfig,
   saveProjectConfig,
+  setProjectIdiomsEnabled,
   stripJsonComments,
   validateConfig,
-  validateProjectConfig,
 } from "../../src/config/index.js";
 
 describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
@@ -125,59 +123,6 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(() => validateConfig({ mode: "isolated", isolated: false })).toThrow(
         /Inconsistent project config/,
       );
-    });
-
-    it("validates valid companion configuration without throwing", () => {
-      expect(() =>
-        validateProjectConfig({
-          mode: "companion",
-          isolated: true,
-          sourceDir: "src",
-          outDir: "../target-project/src",
-          targetLanguage: "typescript",
-          watermark: true,
-          targetProjectDir: "../target-project",
-          test: {
-            command: "bun test",
-            cwd: "../target-project",
-            scrubTraces: true,
-          },
-        }),
-      ).not.toThrow();
-
-      // Also via validateConfig alias
-      expect(() =>
-        validateConfig({
-          mode: "companion",
-          targetProjectDir: "/path/to/target",
-          test: {
-            command: "npm test",
-          },
-        }),
-      ).not.toThrow();
-    });
-
-    it("throws errors on invalid companion configuration values", () => {
-      // @ts-expect-error invalid targetProjectDir
-      expect(() => validateConfig({ targetProjectDir: 12345 })).toThrow(
-        /Invalid targetProjectDir/,
-      );
-      // @ts-expect-error invalid test block
-      expect(() => validateConfig({ test: "npm test" })).toThrow(/Invalid test/);
-      expect(() => validateConfig({ test: ["bun", "test"] as any })).toThrow(/Invalid test/);
-      // @ts-expect-error null test
-      expect(() => validateConfig({ test: null })).toThrow(/Invalid test/);
-    });
-
-    it("derives source filename from target filename", () => {
-      expect(deriveSourceFilename("calc.ts")).toBe("calc.aice");
-      expect(deriveSourceFilename("Button.tsx")).toBe("Button.aice");
-      expect(deriveSourceFilename("calc.test.ts")).toBe("calc.test.aice");
-      expect(deriveSourceFilename("model.py")).toBe("model.aice");
-      expect(deriveSourceFilename("lib.rs")).toBe("lib.aice");
-      expect(deriveSourceFilename("styles.css")).toBe("styles.aice");
-      expect(deriveSourceFilename("index.html")).toBe("index.aice");
-      expect(deriveSourceFilename("already.aice")).toBe("already.aice");
     });
   });
 
@@ -317,11 +262,7 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
     });
 
     it("throws helpful error when aice.config.json is malformed JSON", () => {
-      fs.writeFileSync(
-        path.join(tmpDir, "aice.config.json"),
-        "{ unquotedKey: invalid }",
-        "utf-8",
-      );
+      fs.writeFileSync(path.join(tmpDir, "aice.config.json"), "{ unquotedKey: invalid }", "utf-8");
       expect(() => loadProjectConfig(tmpDir)).toThrow(/Failed to parse/);
     });
 
@@ -695,262 +636,103 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
 
     it("throws validation error on invalid configuration during save", () => {
       // @ts-expect-error invalid mode
-      expect(() => saveProjectConfig(tmpDir, { mode: "bad-mode" })).toThrow(
-        /Invalid project mode/,
-      );
+      expect(() => saveProjectConfig(tmpDir, { mode: "bad-mode" })).toThrow(/Invalid project mode/);
     });
   });
 
-  describe("Companion Mode Twin-Workspace Resolution (resolveTargetFile & resolveSourceFile)", () => {
-    const companionRoot = "/workspace/aice-companion";
-    const targetRoot = "/workspace/target-app";
-
-    const companionConfig: AiceProjectConfig = {
-      mode: "companion",
-      sourceDir: "src",
-      outDir: path.join(targetRoot, "src"),
-      targetLanguage: "typescript",
-      isolated: true,
-      watermark: true,
-      targetProjectDir: targetRoot,
-      test: {
-        command: "bun test",
-        cwd: targetRoot,
-        scrubTraces: true,
-      },
-    };
-
-    const relCompanionConfig: AiceProjectConfig = {
-      mode: "companion",
-      sourceDir: "src",
-      outDir: "../target-app/src",
-      targetLanguage: "typescript",
-      isolated: true,
-      watermark: true,
-      targetProjectDir: "../target-app",
-    };
-
-    describe("resolveTargetFile", () => {
-      it("maps companion .aice file to external absolute outDir target file", () => {
-        const targetPath = resolveTargetFile(
-          companionConfig,
-          "src/math/calc.aice",
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/math/calc.ts"));
-      });
-
-      it("maps companion dual-extension file preserving target extension", () => {
-        const targetPath = resolveTargetFile(
-          companionConfig,
-          "src/components/Button.tsx.aice",
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/components/Button.tsx"));
-      });
-
-      it("maps absolute companion source file to external outDir target file", () => {
-        const absSource = path.resolve(companionRoot, "src/utils/format.aice");
-        const targetPath = resolveTargetFile(companionConfig, absSource, companionRoot);
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/utils/format.ts"));
-      });
-
-      it("maps companion .aice file with relative outDir resolved against projectRoot", () => {
-        const targetPath = resolveTargetFile(
-          relCompanionConfig,
-          "src/index.aice",
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(companionRoot, "../target-app/src/index.ts"));
-      });
-
-      it("maps companion file without projectRoot when relative", () => {
-        const targetPath = resolveTargetFile(relCompanionConfig, "src/core/engine.aice");
-        expect(targetPath).toBe(path.join("../target-app/src", "core/engine.ts"));
-      });
-
-      it("respects non-default targetLanguage in companion mode", () => {
-        const pyCompanionConfig: AiceProjectConfig = {
-          ...companionConfig,
-          targetLanguage: "python",
-        };
-        const targetPath = resolveTargetFile(
-          pyCompanionConfig,
-          "src/server.aice",
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/server.py"));
-      });
-
-      it("handles deeply nested subdirectories properly", () => {
-        const targetPath = resolveTargetFile(
-          companionConfig,
-          "src/a/b/c/d/service.aice",
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/a/b/c/d/service.ts"));
-      });
-
-      it("is callable through resolveTargetOutputPathForConfig backward compatibility", () => {
-        const targetPath = resolveTargetOutputPathForConfig(
-          "src/math/calc.aice",
-          companionConfig,
-          companionRoot,
-        );
-        expect(targetPath).toBe(path.resolve(targetRoot, "src/math/calc.ts"));
-      });
-    });
-
-    describe("resolveSourceFile", () => {
-      it("maps external target file back to companion .aice file", () => {
-        const externalTarget = path.resolve(targetRoot, "src/math/calc.ts");
-        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.aice"));
-      });
-
-      it("maps external target file with .tsx extension back to .aice file", () => {
-        const externalTarget = path.resolve(targetRoot, "src/components/Button.tsx");
-        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/components/Button.aice"));
-      });
-
-      it("maps external target test file (*.test.ts) back to *.test.aice file", () => {
-        const externalTarget = path.resolve(targetRoot, "src/math/calc.test.ts");
-        const sourcePath = resolveSourceFile(companionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/math/calc.test.aice"));
-      });
-
-      it("maps external target file with relative outDir resolved against projectRoot", () => {
-        const externalTarget = path.resolve(companionRoot, "../target-app/src/index.ts");
-        const sourcePath = resolveSourceFile(relCompanionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/index.aice"));
-      });
-
-      it("maps relative target file without projectRoot", () => {
-        const sourcePath = resolveSourceFile(
-          relCompanionConfig,
-          "../target-app/src/core/engine.ts",
-        );
-        expect(sourcePath).toBe(path.join("src", "core/engine.aice"));
-      });
-
-      it("maps non-TypeScript external file back to companion .aice file", () => {
-        const pyCompanionConfig: AiceProjectConfig = {
-          ...companionConfig,
-          targetLanguage: "python",
-        };
-        const externalTarget = path.resolve(targetRoot, "src/server.py");
-        const sourcePath = resolveSourceFile(pyCompanionConfig, externalTarget, companionRoot);
-        expect(sourcePath).toBe(path.resolve(companionRoot, "src/server.aice"));
-      });
-
-      it("maps external target file when outDir starts with ../ and targetProjectDir is set", () => {
-        const testCompanionRoot = path.join(tmpDir, "twin-ws");
-        const extTargetRoot = path.join(tmpDir, "ext-project");
-        const configWithDotDot: AiceProjectConfig = {
-          mode: "companion",
-          sourceDir: "src",
-          outDir: "../ext-project/src",
-          targetProjectDir: "../ext-project",
-          targetLanguage: "typescript",
-          isolated: true,
-          watermark: true,
-        };
-
-        const externalTarget = path.join(extTargetRoot, "src", "services", "api.ts");
-        const sourcePath = resolveSourceFile(configWithDotDot, externalTarget, testCompanionRoot);
-        expect(sourcePath).toBe(path.resolve(testCompanionRoot, "src", "services", "api.aice"));
-      });
-
-      it("resolves to existing dual-extension file on disk when present", () => {
-        // Create a temporary workspace to test dual-ext resolution on disk
-        const compDir = path.join(tmpDir, "comp");
-        const compSrc = path.join(compDir, "src");
-        fs.mkdirSync(compSrc, { recursive: true });
-
-        // Write dual-extension file: calc.ts.aice
-        const dualExtFile = path.join(compSrc, "calc.ts.aice");
-        fs.writeFileSync(dualExtFile, "fn add() = 1;");
-
-        const testConfig: AiceProjectConfig = {
-          mode: "companion",
-          sourceDir: "src",
-          outDir: "/ext/target/src",
-          targetLanguage: "typescript",
-          isolated: true,
-          watermark: true,
-        };
-
-        const resolved = resolveSourceFile(
-          testConfig,
-          "/ext/target/src/calc.ts",
-          compDir,
-        );
-        expect(resolved).toBe(dualExtFile);
-      });
-    });
-
-    describe("Round-Trip Parity", () => {
-      it("roundtrips between companion source file and target file", () => {
-        const sourceAice = "src/modules/billing/invoice.aice";
-        const targetTs = resolveTargetFile(companionConfig, sourceAice, companionRoot);
-        const roundTripSource = resolveSourceFile(companionConfig, targetTs, companionRoot);
-        expect(roundTripSource).toBe(path.resolve(companionRoot, sourceAice));
-      });
-    });
-
-    describe("Mode Auto-Detection with companion mode", () => {
-      it("auto-detects 'companion' mode when aice.config.json specifies companion", () => {
-        fs.writeFileSync(
-          path.join(tmpDir, "aice.config.json"),
-          JSON.stringify({
-            mode: "companion",
-            targetProjectDir: "../other-project",
-            outDir: "../other-project/src",
-          }),
-          "utf-8",
-        );
-        expect(autoDetectProjectMode(tmpDir)).toBe("companion");
-
-        const loaded = loadProjectConfig(tmpDir);
-        expect(loaded.mode).toBe("companion");
-        expect(loaded.targetProjectDir).toBe("../other-project");
-      });
-
-      it("auto-detects 'companion' mode when .aicerc specifies companion", () => {
-        fs.writeFileSync(
-          path.join(tmpDir, ".aicerc"),
-          JSON.stringify({
-            mode: "companion",
-            targetProjectDir: "../other-project",
-          }),
-          "utf-8",
-        );
-        expect(autoDetectProjectMode(tmpDir)).toBe("companion");
-      });
-
-      it("loads and saves companion configuration with test block cleanly", () => {
-        saveProjectConfig(tmpDir, {
-          mode: "companion",
-          targetProjectDir: "../target-app",
-          outDir: "../target-app/src",
-          test: {
-            command: "bun test",
-            cwd: "../target-app",
-            scrubTraces: true,
+  describe(".aice-idioms.json Discovery, Shorthand Normalization & Persistence", () => {
+    it("discovers project root via .aice-idioms.json when aice.config.json is absent", () => {
+      const subDir = path.join(tmpDir, "src", "telemetry");
+      fs.mkdirSync(subDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, ".aice-idioms.json"),
+        JSON.stringify({
+          idioms: {
+            $print: {
+              templateAice: "givemeabigstring.out($0)",
+            },
           },
-        });
+        }),
+        "utf-8",
+      );
 
-        const loaded = loadProjectConfig(tmpDir);
-        expect(loaded.mode).toBe("companion");
-        expect(loaded.targetProjectDir).toBe("../target-app");
-        expect(loaded.outDir).toBe("../target-app/src");
-        expect(loaded.test).toEqual({
-          command: "bun test",
-          cwd: "../target-app",
-          scrubTraces: true,
-        });
+      expect(findProjectRoot(subDir)).toBe(path.resolve(tmpDir));
+    });
+
+    it("normalizes shorthand .aice-idioms.json entries including multi-arg $0, $1 inference", () => {
+      fs.writeFileSync(
+        path.join(tmpDir, ".aice-idioms.json"),
+        JSON.stringify({
+          idiomsEnabled: true,
+          idioms: {
+            $print: {
+              templateAice: "givemeabigstring.out($0)",
+              description: "Custom C++ string logger",
+            },
+            $metric: {
+              template: "telemetry.record($0, $1)",
+            },
+            $warn: "logger.warn($0)",
+          },
+        }),
+        "utf-8",
+      );
+
+      const loaded = loadProjectConfig(tmpDir);
+      expect(loaded.idiomsEnabled).toBe(true);
+      expect(loaded.idioms?.["$print"]).toEqual({
+        name: "$print",
+        kind: "stmt",
+        params: [{ name: "$0" }],
+        templateAice: "givemeabigstring.out($0)",
+        occurrences: 0,
+        tokensPerOccurrenceSaved: 0,
+        netTokenSavings: 0,
+        description: "Custom C++ string logger",
       });
+      expect(loaded.idioms?.["$metric"]?.params).toEqual([{ name: "$0" }, { name: "$1" }]);
+      expect(loaded.idioms?.["$metric"]?.templateAice).toBe("telemetry.record($0, $1)");
+      expect(loaded.idioms?.["$warn"]?.params).toEqual([{ name: "$0" }]);
+      expect(loaded.idioms?.["$warn"]?.templateAice).toBe("logger.warn($0)");
+    });
+
+    it("persists saveProjectConfig and setProjectIdiomsEnabled directly to .aice-idioms.json when standalone", () => {
+      const idiomsPath = path.join(tmpDir, ".aice-idioms.json");
+      fs.writeFileSync(
+        idiomsPath,
+        JSON.stringify({
+          idioms: {
+            $print: {
+              templateAice: "givemeabigstring.out($0)",
+            },
+          },
+        }),
+        "utf-8",
+      );
+
+      // Update idiom template via saveProjectConfig
+      const config = loadProjectConfig(tmpDir);
+      saveProjectConfig(tmpDir, {
+        ...config,
+        idioms: {
+          ...config.idioms,
+          $print: {
+            ...config.idioms!["$print"],
+            templateAice: "givemeabigstring.warn($0)",
+          },
+        },
+      });
+
+      // Should update .aice-idioms.json in place without creating aice.config.json
+      expect(fs.existsSync(path.join(tmpDir, "aice.config.json"))).toBe(false);
+      const reloaded = loadProjectConfig(tmpDir);
+      expect(reloaded.idioms?.["$print"]?.templateAice).toBe("givemeabigstring.warn($0)");
+
+      // Toggle idioms off/on via setProjectIdiomsEnabled
+      setProjectIdiomsEnabled(tmpDir, false);
+      expect(loadProjectConfig(tmpDir).idiomsEnabled).toBe(false);
+      setProjectIdiomsEnabled(tmpDir, true);
+      expect(loadProjectConfig(tmpDir).idiomsEnabled).toBe(true);
     });
   });
 });

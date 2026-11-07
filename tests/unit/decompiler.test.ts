@@ -13,18 +13,13 @@ import type {
   ClassDecl,
   ConstDecl,
   FunctionDecl,
-  IdentifierExpr,
   LetBinding,
   MemberAccessExpr,
   ReturnStmt,
   TemplateLiteralExpr,
 } from "../../src/core/ast.js";
 import { Precedence, parse } from "../../src/core/parser.js";
-import {
-  getBinaryOpPrecedence,
-  isRightAssociative,
-  needsBinaryParentheses,
-} from "../../src/decompiler/aice-generator.js";
+import { getBinaryOpPrecedence, isRightAssociative } from "../../src/decompiler/aice-generator.js";
 import { CssDecompiler } from "../../src/decompiler/css-decompiler.js";
 import { HtmlDecompiler } from "../../src/decompiler/html-decompiler.js";
 import { decompile } from "../../src/decompiler/index.js";
@@ -550,7 +545,7 @@ export function request(method: "GET" | "POST"): string {
   return method;
 }
 `;
-      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "req.ts" });
+      const { aice } = decompile(tsCode, "typescript", { filePath: "req.ts" });
       expect(aice).toContain('defaultMethod: "GET" = "GET"');
       expect(aice).toContain('method:"GET" | "POST"');
     });
@@ -566,7 +561,7 @@ export function process(arr: number[]) {
   });
 }
 `;
-      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "callback.ts" });
+      const { aice } = decompile(tsCode, "typescript", { filePath: "callback.ts" });
       expect(aice).not.toContain("fn() = nil");
       expect(aice).not.toContain("fn(x) = nil");
       expect(aice).toContain("arr.forEach(fn(x) {");
@@ -583,7 +578,7 @@ export function defer() {
   });
 }
 `;
-      const { ast, aice } = decompile(tsCode, "typescript", { filePath: "promise.ts" });
+      const { aice } = decompile(tsCode, "typescript", { filePath: "promise.ts" });
       expect(aice).not.toContain("fn() = nil");
       expect(aice).toContain("Promise(fn(resolve, reject) {");
       expect(aice).toContain("setup()");

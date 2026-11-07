@@ -25,18 +25,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  AssignExpr,
-  AssignStmt,
-  BinaryExpr,
-  Block,
-  CallExpr,
-  ClosureExpr,
-  FunctionDecl,
-  IfStmt,
-  Module,
-  WhileStmt,
-} from "../../src/core/ast.js";
+import type { FunctionDecl, Module } from "../../src/core/ast.js";
 import { Parser } from "../../src/core/parser.js";
 import { AiceGenerator } from "../../src/decompiler/aice-generator.js";
 import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
@@ -375,7 +364,9 @@ export function setText(el: Element, v: string) {
       const result = verifyEndToEndPipeline(tsSource, "category5_arrow_assign.ts");
 
       // Verify AICE Source
-      expect(result.aiceSource).toContain("setter := fn(target:Element) = (target.textContent = v)");
+      expect(result.aiceSource).toContain(
+        "setter := fn(target:Element) = (target.textContent = v)",
+      );
 
       // Verify TypeScript Target
       expect(result.tsOutput).toContain("(target.textContent = v)");

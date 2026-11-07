@@ -8,49 +8,25 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  BinaryExpr,
   BinaryOp,
   Block,
-  BreakStmt,
-  CallExpr,
   ClassDecl,
-  ClosureExpr,
-  ConstDecl,
-  ContinueStmt,
   Expr,
-  ExprStmt,
   FieldDecl,
-  ForStmt,
-  FunctionDecl,
-  IdentifierExpr,
   IfStmt,
-  ImportDecl,
-  IndexExpr,
-  LetBinding,
-  LiteralExpr,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   PropertyDecl,
-  RecordLiteralExpr,
   RecordProperty,
-  ReturnStmt,
   Statement,
   TemplateLiteralExpr,
-  TryStmt,
-  TypeDecl,
   TypeExpr,
-  UnaryExpr,
-  VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
-import { CstTriviaTable, type TriviaItem, type TriviaKind } from "../core/trivia.js";
+import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
 
 export class CSharpDecompiler {
   private trivia: CstTriviaTable;
@@ -230,12 +206,7 @@ export class CSharpDecompiler {
         const { bodyLines, nextIdx } = this.collectBracedBlock(rawLines, i);
         i = nextIdx;
 
-        const parsedClass = this.parseClassMembers(
-          className,
-          baseClass,
-          implementsList,
-          bodyLines,
-        );
+        const parsedClass = this.parseClassMembers(className, baseClass, implementsList, bodyLines);
         items.push(parsedClass);
         continue;
       }
@@ -295,7 +266,9 @@ export class CSharpDecompiler {
   }
 
   private extractEnumVariants(text: string, variants: { name: string; span: Span }[]): void {
-    const clean = this.stripLineComment(text).replace(/\/\*[\s\S]*?\*\//g, "").trim();
+    const clean = this.stripLineComment(text)
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .trim();
     if (!clean) return;
 
     for (const part of clean.split(",")) {
@@ -784,7 +757,8 @@ export class CSharpDecompiler {
         // 2. Field or Property
         let propLine = fullLine;
         const hasAccessorBlock =
-          (!fullLine.includes("=") || (fullLine.includes("{") && fullLine.indexOf("{") < fullLine.indexOf("="))) &&
+          (!fullLine.includes("=") ||
+            (fullLine.includes("{") && fullLine.indexOf("{") < fullLine.indexOf("="))) &&
           (fullLine.includes("{") ||
             (lineIdx + 1 < lines.length && lines[lineIdx + 1].trim().startsWith("{")));
         if (hasAccessorBlock) {
@@ -808,8 +782,15 @@ export class CSharpDecompiler {
         memberTrivia = [];
 
         // Expression-bodied property: => expr;
-        if (propLine.includes("=>") && !propLine.includes("get =>") && !propLine.includes("set =>")) {
-          const bodyStr = propLine.slice(propLine.indexOf("=>") + 2).replace(/;$/, "").trim();
+        if (
+          propLine.includes("=>") &&
+          !propLine.includes("get =>") &&
+          !propLine.includes("set =>")
+        ) {
+          const bodyStr = propLine
+            .slice(propLine.indexOf("=>") + 2)
+            .replace(/;$/, "")
+            .trim();
           properties.push({
             kind: "PropertyDecl",
             name: mem.name,
@@ -823,9 +804,15 @@ export class CSharpDecompiler {
         }
 
         // Initialized field / const: = expr;
-        if (propLine.includes("=") && (!propLine.includes("{") || propLine.indexOf("=") < propLine.indexOf("{"))) {
+        if (
+          propLine.includes("=") &&
+          (!propLine.includes("{") || propLine.indexOf("=") < propLine.indexOf("{"))
+        ) {
           const eqIdx = propLine.indexOf("=");
-          const initValStr = propLine.slice(eqIdx + 1).replace(/;$/, "").trim();
+          const initValStr = propLine
+            .slice(eqIdx + 1)
+            .replace(/;$/, "")
+            .trim();
           properties.push({
             kind: "PropertyDecl",
             name: mem.name,
@@ -1255,11 +1242,18 @@ export class CSharpDecompiler {
         }
       }
 
-      if (trimmed.startsWith("using var ") || (trimmed.startsWith("using ") && !trimmed.includes("(") && trimmed.includes("="))) {
+      if (
+        trimmed.startsWith("using var ") ||
+        (trimmed.startsWith("using ") && !trimmed.includes("(") && trimmed.includes("="))
+      ) {
         trimmed = trimmed.replace(/^using\s+/, "");
       }
 
-      if (trimmed.startsWith("{") && (trimmed.endsWith("}") || trimmed.endsWith("};")) && !trimmed.includes("=>")) {
+      if (
+        trimmed.startsWith("{") &&
+        (trimmed.endsWith("}") || trimmed.endsWith("};")) &&
+        !trimmed.includes("=>")
+      ) {
         const inner = trimmed.replace(/^\{/, "").replace(/\};?$/, "").trim();
         if (inner) {
           statements.push(...this.parseCSharpBlock(this.splitBySemicolon(inner)));
@@ -1268,7 +1262,10 @@ export class CSharpDecompiler {
       }
 
       // return [expr];
-      if (trimmed.startsWith("return") && (trimmed === "return;" || trimmed.startsWith("return ") || trimmed.startsWith("return\t"))) {
+      if (
+        trimmed.startsWith("return") &&
+        (trimmed === "return;" || trimmed.startsWith("return ") || trimmed.startsWith("return\t"))
+      ) {
         let returnLine = trimmed;
         let lineIdx = i;
         if (!returnLine.endsWith(";")) {
@@ -1279,7 +1276,10 @@ export class CSharpDecompiler {
           }
         }
         i = lineIdx;
-        const valStr = returnLine.replace(/^return\s*/, "").replace(/;$/, "").trim();
+        const valStr = returnLine
+          .replace(/^return\s*/, "")
+          .replace(/;$/, "")
+          .trim();
         statements.push({
           kind: "ReturnStmt",
           value: valStr ? this.parseCSharpExpr(valStr) : null,
@@ -1310,7 +1310,10 @@ export class CSharpDecompiler {
       if (trimmed.startsWith("if") && (trimmed.startsWith("if ") || trimmed.startsWith("if("))) {
         let ifLine = trimmed;
         let lineIdx = i;
-        if (!ifLine.includes(")") || this.extractBalancedParen(ifLine, ifLine.indexOf("(")) === null) {
+        if (
+          !ifLine.includes(")") ||
+          this.extractBalancedParen(ifLine, ifLine.indexOf("(")) === null
+        ) {
           while (lineIdx + 1 < expandedLines.length) {
             lineIdx++;
             ifLine += " " + this.stripLineComment(expandedLines[lineIdx]).trim();
@@ -1326,17 +1329,28 @@ export class CSharpDecompiler {
           let thenStatements: Statement[] = [];
           let elseBranch: Block | null = null;
 
-          if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+          if (
+            rest === "{" ||
+            (!rest &&
+              lineIdx + 1 < expandedLines.length &&
+              expandedLines[lineIdx + 1].trim().startsWith("{"))
+          ) {
             const startAt = rest === "{" ? lineIdx : lineIdx + 1;
             const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             thenStatements = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock([rest, ...expandedLines.slice(lineIdx + 1)], 0);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(
+              [rest, ...expandedLines.slice(lineIdx + 1)],
+              0,
+            );
             thenStatements = this.parseCSharpBlock(bodyLines);
             lineIdx += nextIdx - 1;
           } else if (rest.startsWith("return")) {
-            const retStr = rest.replace(/^return\s*/, "").replace(/;$/, "").trim();
+            const retStr = rest
+              .replace(/^return\s*/, "")
+              .replace(/;$/, "")
+              .trim();
             thenStatements = [
               {
                 kind: "ReturnStmt",
@@ -1344,7 +1358,11 @@ export class CSharpDecompiler {
                 span: emptySpan(this.filePath),
               },
             ];
-          } else if (rest.includes(" else ") || rest.includes(";else ") || rest.includes("; else ")) {
+          } else if (
+            rest.includes(" else ") ||
+            rest.includes(";else ") ||
+            rest.includes("; else ")
+          ) {
             const elseMatch = rest.match(/;\s*else\s+(.*)$/);
             if (elseMatch) {
               const thenPart = rest.slice(0, elseMatch.index).trim();
@@ -1352,10 +1370,14 @@ export class CSharpDecompiler {
               if (elsePart.startsWith("{") && elsePart.endsWith("}")) {
                 elsePart = elsePart.slice(1, -1).trim();
               }
-              thenStatements = this.parseCSharpBlock(this.splitBySemicolon(thenPart.endsWith(";") ? thenPart : thenPart + ";"));
+              thenStatements = this.parseCSharpBlock(
+                this.splitBySemicolon(thenPart.endsWith(";") ? thenPart : thenPart + ";"),
+              );
               elseBranch = {
                 kind: "Block",
-                statements: this.parseCSharpBlock(this.splitBySemicolon(elsePart.endsWith(";") ? elsePart : elsePart + ";")),
+                statements: this.parseCSharpBlock(
+                  this.splitBySemicolon(elsePart.endsWith(";") ? elsePart : elsePart + ";"),
+                ),
                 span: emptySpan(this.filePath),
               };
             } else {
@@ -1375,7 +1397,10 @@ export class CSharpDecompiler {
             if (nextTrimmed.startsWith("else if") || nextTrimmed.startsWith("else\tif")) {
               lineIdx++;
               let elifLine = nextTrimmed;
-              if (!elifLine.includes(")") || this.extractBalancedParen(elifLine, elifLine.indexOf("(")) === null) {
+              if (
+                !elifLine.includes(")") ||
+                this.extractBalancedParen(elifLine, elifLine.indexOf("(")) === null
+              ) {
                 while (lineIdx + 1 < expandedLines.length) {
                   lineIdx++;
                   elifLine += " " + this.stripLineComment(expandedLines[lineIdx]).trim();
@@ -1387,13 +1412,21 @@ export class CSharpDecompiler {
                 const elifCond = elifParen.content;
                 const elifRest = elifLine.slice(elifParen.endIndex + 1).trim();
                 let elifStmts: Statement[] = [];
-                if (elifRest === "{" || (!elifRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+                if (
+                  elifRest === "{" ||
+                  (!elifRest &&
+                    lineIdx + 1 < expandedLines.length &&
+                    expandedLines[lineIdx + 1].trim().startsWith("{"))
+                ) {
                   const startAt = elifRest === "{" ? lineIdx : lineIdx + 1;
                   const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
                   elifStmts = this.parseCSharpBlock(bodyLines);
                   lineIdx = nextIdx - 1;
                 } else if (elifRest.startsWith("{")) {
-                  const { bodyLines, nextIdx } = this.collectBracedBlock([elifRest, ...expandedLines.slice(lineIdx + 1)], 0);
+                  const { bodyLines, nextIdx } = this.collectBracedBlock(
+                    [elifRest, ...expandedLines.slice(lineIdx + 1)],
+                    0,
+                  );
                   elifStmts = this.parseCSharpBlock(bodyLines);
                   lineIdx += nextIdx - 1;
                 } else if (elifRest && elifRest !== ";") {
@@ -1408,17 +1441,29 @@ export class CSharpDecompiler {
                   span: emptySpan(this.filePath),
                 });
               }
-            } else if (nextTrimmed === "else" || nextTrimmed.startsWith("else ") || nextTrimmed.startsWith("else{")) {
+            } else if (
+              nextTrimmed === "else" ||
+              nextTrimmed.startsWith("else ") ||
+              nextTrimmed.startsWith("else{")
+            ) {
               lineIdx++;
               const elseRest = nextTrimmed.slice(4).trim();
               let elseStmts: Statement[] = [];
-              if (elseRest === "{" || (!elseRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+              if (
+                elseRest === "{" ||
+                (!elseRest &&
+                  lineIdx + 1 < expandedLines.length &&
+                  expandedLines[lineIdx + 1].trim().startsWith("{"))
+              ) {
                 const startAt = elseRest === "{" ? lineIdx : lineIdx + 1;
                 const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
                 elseStmts = this.parseCSharpBlock(bodyLines);
                 lineIdx = nextIdx - 1;
               } else if (elseRest.startsWith("{")) {
-                const { bodyLines, nextIdx } = this.collectBracedBlock([elseRest, ...expandedLines.slice(lineIdx + 1)], 0);
+                const { bodyLines, nextIdx } = this.collectBracedBlock(
+                  [elseRest, ...expandedLines.slice(lineIdx + 1)],
+                  0,
+                );
                 elseStmts = this.parseCSharpBlock(bodyLines);
                 lineIdx += nextIdx - 1;
               } else if (elseRest && elseRest !== ";") {
@@ -1442,7 +1487,11 @@ export class CSharpDecompiler {
           statements.push({
             kind: "IfStmt",
             condition: this.parseCSharpExpr(condStr),
-            thenBranch: { kind: "Block", statements: thenStatements, span: emptySpan(this.filePath) },
+            thenBranch: {
+              kind: "Block",
+              statements: thenStatements,
+              span: emptySpan(this.filePath),
+            },
             elifBranches,
             elseBranch,
             span: emptySpan(this.filePath),
@@ -1452,10 +1501,16 @@ export class CSharpDecompiler {
       }
 
       // while (cond) { ... }
-      if (trimmed.startsWith("while") && (trimmed.startsWith("while ") || trimmed.startsWith("while("))) {
+      if (
+        trimmed.startsWith("while") &&
+        (trimmed.startsWith("while ") || trimmed.startsWith("while("))
+      ) {
         let whileLine = trimmed;
         let lineIdx = i;
-        if (!whileLine.includes(")") || this.extractBalancedParen(whileLine, whileLine.indexOf("(")) === null) {
+        if (
+          !whileLine.includes(")") ||
+          this.extractBalancedParen(whileLine, whileLine.indexOf("(")) === null
+        ) {
           while (lineIdx + 1 < expandedLines.length) {
             lineIdx++;
             whileLine += " " + this.stripLineComment(expandedLines[lineIdx]).trim();
@@ -1468,13 +1523,21 @@ export class CSharpDecompiler {
           const condStr = parenRes.content;
           const rest = whileLine.slice(parenRes.endIndex + 1).trim();
           let bodyStmts: Statement[] = [];
-          if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+          if (
+            rest === "{" ||
+            (!rest &&
+              lineIdx + 1 < expandedLines.length &&
+              expandedLines[lineIdx + 1].trim().startsWith("{"))
+          ) {
             const startAt = rest === "{" ? lineIdx : lineIdx + 1;
             const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock([rest, ...expandedLines.slice(lineIdx + 1)], 0);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(
+              [rest, ...expandedLines.slice(lineIdx + 1)],
+              0,
+            );
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx += nextIdx - 1;
           } else if (rest && rest !== ";") {
@@ -1500,7 +1563,10 @@ export class CSharpDecompiler {
       }
 
       // foreach (var item in list) { ... }
-      if (trimmed.startsWith("foreach") && (trimmed.startsWith("foreach ") || trimmed.startsWith("foreach("))) {
+      if (
+        trimmed.startsWith("foreach") &&
+        (trimmed.startsWith("foreach ") || trimmed.startsWith("foreach("))
+      ) {
         const parenRes = this.extractBalancedParen(trimmed, trimmed.indexOf("("));
         if (parenRes) {
           const content = parenRes.content.trim();
@@ -1513,13 +1579,21 @@ export class CSharpDecompiler {
             const rest = trimmed.slice(parenRes.endIndex + 1).trim();
             let lineIdx = i;
             let bodyStmts: Statement[] = [];
-            if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+            if (
+              rest === "{" ||
+              (!rest &&
+                lineIdx + 1 < expandedLines.length &&
+                expandedLines[lineIdx + 1].trim().startsWith("{"))
+            ) {
               const startAt = rest === "{" ? lineIdx : lineIdx + 1;
               const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
               bodyStmts = this.parseCSharpBlock(bodyLines);
               lineIdx = nextIdx - 1;
             } else if (rest.startsWith("{")) {
-              const { bodyLines, nextIdx } = this.collectBracedBlock([rest, ...expandedLines.slice(lineIdx + 1)], 0);
+              const { bodyLines, nextIdx } = this.collectBracedBlock(
+                [rest, ...expandedLines.slice(lineIdx + 1)],
+                0,
+              );
               bodyStmts = this.parseCSharpBlock(bodyLines);
               lineIdx += nextIdx - 1;
             } else if (rest && rest !== ";") {
@@ -1555,13 +1629,21 @@ export class CSharpDecompiler {
           const rest = trimmed.slice(parenRes.endIndex + 1).trim();
           let lineIdx = i;
           let bodyStmts: Statement[] = [];
-          if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+          if (
+            rest === "{" ||
+            (!rest &&
+              lineIdx + 1 < expandedLines.length &&
+              expandedLines[lineIdx + 1].trim().startsWith("{"))
+          ) {
             const startAt = rest === "{" ? lineIdx : lineIdx + 1;
             const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, startAt);
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx = nextIdx - 1;
           } else if (rest.startsWith("{")) {
-            const { bodyLines, nextIdx } = this.collectBracedBlock([rest, ...expandedLines.slice(lineIdx + 1)], 0);
+            const { bodyLines, nextIdx } = this.collectBracedBlock(
+              [rest, ...expandedLines.slice(lineIdx + 1)],
+              0,
+            );
             bodyStmts = this.parseCSharpBlock(bodyLines);
             lineIdx += nextIdx - 1;
           } else if (rest && rest !== ";") {
@@ -1587,16 +1669,27 @@ export class CSharpDecompiler {
       }
 
       // try { ... } catch (...) { ... } [finally { ... }]
-      if (trimmed.startsWith("try") && (trimmed === "try" || trimmed.startsWith("try ") || trimmed.startsWith("try{"))) {
+      if (
+        trimmed.startsWith("try") &&
+        (trimmed === "try" || trimmed.startsWith("try ") || trimmed.startsWith("try{"))
+      ) {
         let lineIdx = i;
         const tryRest = trimmed.slice(3).trim();
         let tryStmts: Statement[] = [];
-        if (tryRest === "{" || (!tryRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+        if (
+          tryRest === "{" ||
+          (!tryRest &&
+            lineIdx + 1 < expandedLines.length &&
+            expandedLines[lineIdx + 1].trim().startsWith("{"))
+        ) {
           const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
           tryStmts = this.parseCSharpBlock(bodyLines);
           lineIdx = nextIdx - 1;
         } else if (tryRest.startsWith("{")) {
-          const { bodyLines, nextIdx } = this.collectBracedBlock([tryRest, ...expandedLines.slice(lineIdx + 1)], 0);
+          const { bodyLines, nextIdx } = this.collectBracedBlock(
+            [tryRest, ...expandedLines.slice(lineIdx + 1)],
+            0,
+          );
           tryStmts = this.parseCSharpBlock(bodyLines);
           lineIdx += nextIdx - 1;
         }
@@ -1610,7 +1703,9 @@ export class CSharpDecompiler {
           if (nextTrimmed.startsWith("catch")) {
             lineIdx++;
             const catchRest = nextTrimmed.slice(5).trim();
-            const parenRes = catchRest.startsWith("(") ? this.extractBalancedParen(catchRest, 0) : null;
+            const parenRes = catchRest.startsWith("(")
+              ? this.extractBalancedParen(catchRest, 0)
+              : null;
             if (parenRes) {
               const catchDecl = parenRes.content.trim();
               const words = catchDecl.split(/\s+/);
@@ -1619,12 +1714,20 @@ export class CSharpDecompiler {
               }
             }
             const afterCatch = parenRes ? catchRest.slice(parenRes.endIndex + 1).trim() : catchRest;
-            if (afterCatch === "{" || (!afterCatch && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+            if (
+              afterCatch === "{" ||
+              (!afterCatch &&
+                lineIdx + 1 < expandedLines.length &&
+                expandedLines[lineIdx + 1].trim().startsWith("{"))
+            ) {
               const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
               catchStmts = this.parseCSharpBlock(bodyLines);
               lineIdx = nextIdx - 1;
             } else if (afterCatch.startsWith("{")) {
-              const { bodyLines, nextIdx } = this.collectBracedBlock([afterCatch, ...expandedLines.slice(lineIdx + 1)], 0);
+              const { bodyLines, nextIdx } = this.collectBracedBlock(
+                [afterCatch, ...expandedLines.slice(lineIdx + 1)],
+                0,
+              );
               catchStmts = this.parseCSharpBlock(bodyLines);
               lineIdx += nextIdx - 1;
             } else {
@@ -1633,12 +1736,20 @@ export class CSharpDecompiler {
           } else if (nextTrimmed.startsWith("finally")) {
             lineIdx++;
             const finRest = nextTrimmed.slice(7).trim();
-            if (finRest === "{" || (!finRest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+            if (
+              finRest === "{" ||
+              (!finRest &&
+                lineIdx + 1 < expandedLines.length &&
+                expandedLines[lineIdx + 1].trim().startsWith("{"))
+            ) {
               const { bodyLines, nextIdx } = this.collectBracedBlock(expandedLines, lineIdx);
               finallyStmts = this.parseCSharpBlock(bodyLines);
               lineIdx = nextIdx - 1;
             } else if (finRest.startsWith("{")) {
-              const { bodyLines, nextIdx } = this.collectBracedBlock([finRest, ...expandedLines.slice(lineIdx + 1)], 0);
+              const { bodyLines, nextIdx } = this.collectBracedBlock(
+                [finRest, ...expandedLines.slice(lineIdx + 1)],
+                0,
+              );
               finallyStmts = this.parseCSharpBlock(bodyLines);
               lineIdx += nextIdx - 1;
             } else {
@@ -1681,8 +1792,14 @@ export class CSharpDecompiler {
           kind: "TryStmt",
           tryBlock: { kind: "Block", statements: finalTryStmts, span: emptySpan(this.filePath) },
           catchParam: catchStmts !== undefined ? catchParam : undefined,
-          catchBlock: catchStmts !== undefined ? { kind: "Block", statements: catchStmts, span: emptySpan(this.filePath) } : undefined,
-          finallyBlock: finallyStmts !== undefined ? { kind: "Block", statements: finallyStmts, span: emptySpan(this.filePath) } : undefined,
+          catchBlock:
+            catchStmts !== undefined
+              ? { kind: "Block", statements: catchStmts, span: emptySpan(this.filePath) }
+              : undefined,
+          finallyBlock:
+            finallyStmts !== undefined
+              ? { kind: "Block", statements: finallyStmts, span: emptySpan(this.filePath) }
+              : undefined,
           span: emptySpan(this.filePath),
         });
         continue;
@@ -1692,7 +1809,10 @@ export class CSharpDecompiler {
       if (trimmed.startsWith("using") && /using\s*\(/.test(trimmed)) {
         let usingLine = trimmed;
         let lineIdx = i;
-        if (!usingLine.includes(")") || this.extractBalancedParen(usingLine, usingLine.indexOf("(")) === null) {
+        if (
+          !usingLine.includes(")") ||
+          this.extractBalancedParen(usingLine, usingLine.indexOf("(")) === null
+        ) {
           while (lineIdx + 1 < expandedLines.length) {
             lineIdx++;
             usingLine += " " + this.stripLineComment(expandedLines[lineIdx]).trim();
@@ -1706,7 +1826,12 @@ export class CSharpDecompiler {
           const rest = usingLine.slice(parenRes.endIndex + 1).trim();
 
           let bodyLines: string[] = [];
-          if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+          if (
+            rest === "{" ||
+            (!rest &&
+              lineIdx + 1 < expandedLines.length &&
+              expandedLines[lineIdx + 1].trim().startsWith("{"))
+          ) {
             const res = this.collectBracedBlock(expandedLines, lineIdx);
             bodyLines = res.bodyLines;
             lineIdx = res.nextIdx - 1;
@@ -1724,7 +1849,9 @@ export class CSharpDecompiler {
           i = lineIdx;
 
           if (resDecl) {
-            const declStmt = this.parseCSharpBlock([resDecl.endsWith(";") ? resDecl : resDecl + ";"]);
+            const declStmt = this.parseCSharpBlock([
+              resDecl.endsWith(";") ? resDecl : resDecl + ";",
+            ]);
             statements.push(...declStmt);
           }
           if (bodyLines.length > 0) {
@@ -1735,10 +1862,16 @@ export class CSharpDecompiler {
       }
 
       // switch (expr) { case ...: ... }
-      if (trimmed.startsWith("switch") && (trimmed.startsWith("switch ") || trimmed.startsWith("switch("))) {
+      if (
+        trimmed.startsWith("switch") &&
+        (trimmed.startsWith("switch ") || trimmed.startsWith("switch("))
+      ) {
         let switchLine = trimmed;
         let lineIdx = i;
-        if (!switchLine.includes(")") || this.extractBalancedParen(switchLine, switchLine.indexOf("(")) === null) {
+        if (
+          !switchLine.includes(")") ||
+          this.extractBalancedParen(switchLine, switchLine.indexOf("(")) === null
+        ) {
           while (lineIdx + 1 < expandedLines.length) {
             lineIdx++;
             switchLine += " " + this.stripLineComment(expandedLines[lineIdx]).trim();
@@ -1752,7 +1885,12 @@ export class CSharpDecompiler {
           const rest = switchLine.slice(parenRes.endIndex + 1).trim();
 
           let bodyLines: string[] = [];
-          if (rest === "{" || (!rest && lineIdx + 1 < expandedLines.length && expandedLines[lineIdx + 1].trim().startsWith("{"))) {
+          if (
+            rest === "{" ||
+            (!rest &&
+              lineIdx + 1 < expandedLines.length &&
+              expandedLines[lineIdx + 1].trim().startsWith("{"))
+          ) {
             const res = this.collectBracedBlock(expandedLines, lineIdx);
             bodyLines = res.bodyLines;
             lineIdx = res.nextIdx - 1;
@@ -1825,10 +1963,12 @@ export class CSharpDecompiler {
           let defaultStmts: Statement[] | undefined = undefined;
 
           for (const g of groups) {
-            let cleanLines = g.lines
-              .map((l) => l.trim())
-              .filter((l) => l && l !== "break;");
-            if (cleanLines.length >= 2 && cleanLines[0] === "{" && cleanLines[cleanLines.length - 1] === "}") {
+            let cleanLines = g.lines.map((l) => l.trim()).filter((l) => l && l !== "break;");
+            if (
+              cleanLines.length >= 2 &&
+              cleanLines[0] === "{" &&
+              cleanLines[cleanLines.length - 1] === "}"
+            ) {
               cleanLines = cleanLines.slice(1, -1);
             }
             const caseStmts = this.parseCSharpBlock(cleanLines);
@@ -2015,7 +2155,9 @@ export class CSharpDecompiler {
       }
 
       // Assignment: target = expr; or target += expr;
-      const assignMatch = stmtLine.match(/^([a-zA-Z0-9_.[\]\s,]+?)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/);
+      const assignMatch = stmtLine.match(
+        /^([a-zA-Z0-9_.[\]\s,]+?)\s*(\+=|-=|\*=|\/=|%=|=)\s*(.+?);$/,
+      );
       if (assignMatch) {
         const target = assignMatch[1].trim();
         const op = assignMatch[2] === "=" ? undefined : assignMatch[2];
@@ -2084,7 +2226,10 @@ export class CSharpDecompiler {
     }
 
     // Strip ++ or -- prefix/suffix
-    s = s.replace(/^\+\+|^--/, "").replace(/\+\+$|--$/, "").trim();
+    s = s
+      .replace(/^\+\+|^--/, "")
+      .replace(/\+\+$|--$/, "")
+      .trim();
 
     // String literal: regular and verbatim
     const regularStrMatch = s.match(/^"(?:\\.|[^"\\])*"$/);
@@ -2544,7 +2689,13 @@ export class CSharpDecompiler {
         genericDepth--;
       }
 
-      if (c === "," && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && genericDepth === 0) {
+      if (
+        c === "," &&
+        parenDepth === 0 &&
+        bracketDepth === 0 &&
+        braceDepth === 0 &&
+        genericDepth === 0
+      ) {
         if (cur.trim()) args.push(cur.trim());
         cur = "";
       } else {

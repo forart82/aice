@@ -6,7 +6,7 @@
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C259%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C240%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -356,11 +356,11 @@ aice/
 │   ├── idioms/                 # BPE-gated AST anti-unification idiom miner & transformer
 │   ├── mcp/                    # Model Context Protocol (MCP) stdio server
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
-│   ├── tools/                  # On-the-fly tools: outline, context, splice, fmt, diff, patch, parity-gate
+│   ├── tools/                  # On-the-fly tools: outline, context, splice, fmt, parity-gate
 │   └── typechecker/            # Static typechecker & autonomous self-repair engine
 └── tests/
-    ├── unit/                   # 44 unit test suites
-    └── integration/            # Multi-file roundtrip & operator pipeline integration suites
+    ├── unit/                   # 43 unit test suites
+    └── integration/            # 3 multi-file roundtrip & operator pipeline integration suites
 ```
 
 ---

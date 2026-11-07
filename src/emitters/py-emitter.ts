@@ -75,16 +75,15 @@ export class PythonEmitter {
 
     // Scan imported modules for struct definitions to support cross-module positional constructors & spreads
     const baseDir =
-      mod.span?.file && mod.span.file !== "<anonymous>" && fs.existsSync(path.dirname(mod.span.file))
+      mod.span?.file &&
+      mod.span.file !== "<anonymous>" &&
+      fs.existsSync(path.dirname(mod.span.file))
         ? path.dirname(path.resolve(mod.span.file))
         : process.cwd();
     for (const item of mod.items) {
       if (item.kind === "ImportDecl") {
         const importSrc = item.source;
-        const candidateNames = [
-          importSrc.replace(/\.[a-zA-Z]+$/, ".aice"),
-          importSrc,
-        ];
+        const candidateNames = [importSrc.replace(/\.[a-zA-Z]+$/, ".aice"), importSrc];
         for (const cand of candidateNames) {
           const resolved = path.resolve(baseDir, cand);
           if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {

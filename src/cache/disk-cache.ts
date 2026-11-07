@@ -73,11 +73,7 @@ export class AiceAstCache {
     return path.resolve(filePath);
   }
 
-  public parseCached(
-    source: string,
-    filePath?: string,
-    options?: ParseCachedOptions,
-  ): Module {
+  public parseCached(source: string, filePath?: string, options?: ParseCachedOptions): Module {
     const hash = computeSourceHash(source);
     const normalizedPath = this.normalizeFilePath(filePath);
     const key = this.makeKey(normalizedPath, hash);

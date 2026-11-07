@@ -122,7 +122,8 @@ export function generateCandidateRepair(
   }
   if (
     (code === "AICE_E2008_UNDECLARED_VARIABLE" && message.includes("'null'")) ||
-    (/\bnull\b/.test(originalLine) && (code === "AICE_E2008_UNDECLARED_VARIABLE" || code.startsWith("AICE_E1")))
+    (/\bnull\b/.test(originalLine) &&
+      (code === "AICE_E2008_UNDECLARED_VARIABLE" || code.startsWith("AICE_E1")))
   ) {
     const patchedLine = originalLine.replace(/\bnull\b/g, "nil");
     const patch = `--- ${file}\n+++ ${file}\n@@ -${span.start.line},1 +${span.start.line},1 @@\n-${originalLine}\n+${patchedLine}`;
@@ -141,10 +142,15 @@ export function generateCandidateRepair(
         const declLine = lines[i];
         const escapedVar = varName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         const letPattern = new RegExp(`(^|[^a-zA-Z0-9_$])let\\s+${escapedVar}(?![a-zA-Z0-9_$])`);
-        const constPattern = new RegExp(`(^|[^a-zA-Z0-9_$])const\\s+${escapedVar}(?![a-zA-Z0-9_$])`);
+        const constPattern = new RegExp(
+          `(^|[^a-zA-Z0-9_$])const\\s+${escapedVar}(?![a-zA-Z0-9_$])`,
+        );
         const walrusPattern = new RegExp(`(^|[^a-zA-Z0-9_$])${escapedVar}\\s*:=`);
         if (letPattern.test(declLine)) {
-          const patchedLine = declLine.replace(letPattern, (_, prefix) => `${prefix}let mut ${varName}`);
+          const patchedLine = declLine.replace(
+            letPattern,
+            (_, prefix) => `${prefix}let mut ${varName}`,
+          );
           const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
           return {
             description: `Change declaration of '${varName}' to mutable with 'let mut'`,
@@ -152,7 +158,10 @@ export function generateCandidateRepair(
           };
         }
         if (constPattern.test(declLine)) {
-          const patchedLine = declLine.replace(constPattern, (_, prefix) => `${prefix}let mut ${varName}`);
+          const patchedLine = declLine.replace(
+            constPattern,
+            (_, prefix) => `${prefix}let mut ${varName}`,
+          );
           const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
           return {
             description: `Change declaration of '${varName}' to mutable with 'let mut'`,
@@ -160,7 +169,10 @@ export function generateCandidateRepair(
           };
         }
         if (walrusPattern.test(declLine)) {
-          const patchedLine = declLine.replace(walrusPattern, (_, prefix) => `${prefix}let mut ${varName} =`);
+          const patchedLine = declLine.replace(
+            walrusPattern,
+            (_, prefix) => `${prefix}let mut ${varName} =`,
+          );
           const patch = `--- ${file}\n+++ ${file}\n@@ -${i + 1},1 +${i + 1},1 @@\n-${declLine}\n+${patchedLine}`;
           return {
             description: `Change short assignment of '${varName}' to mutable with 'let mut'`,
@@ -184,7 +196,8 @@ export function generateCandidateRepair(
   // 3. Postfix ? missing or unhandled Result
   if (
     code === "AICE_E1004_UNHANDLED_RESULT" ||
-    (message.includes("Result") && (code === "AICE_E2002_TYPE_MISMATCH" || message.includes("unpacked")))
+    (message.includes("Result") &&
+      (code === "AICE_E2002_TYPE_MISMATCH" || message.includes("unpacked")))
   ) {
     let patchedLine: string;
     if (originalLine.trimEnd().endsWith(";")) {

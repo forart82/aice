@@ -7,45 +7,25 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  BinaryExpr,
   BinaryOp,
   Block,
-  CallExpr,
   ClassDecl,
   ConstDecl,
   Expr,
-  ExprStmt,
   FieldDecl,
-  ForStmt,
   FunctionDecl,
-  IdentifierExpr,
-  IfStmt,
   ImportDecl,
-  IndexExpr,
-  LetBinding,
-  LiteralExpr,
   MatchCase,
-  MatchStmt,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   Pattern,
-  PostfixTryExpr,
-  PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
-  TemplateLiteralExpr,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
   VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
@@ -1035,11 +1015,7 @@ export class GoDecompiler {
     this.parseSingleConstOrVar(items, false, trivia);
   }
 
-  private parseSingleConstOrVar(
-    items: ModuleItem[],
-    isConst: boolean,
-    trivia: TriviaItem[],
-  ): void {
+  private parseSingleConstOrVar(items: ModuleItem[], isConst: boolean, trivia: TriviaItem[]): void {
     const name = this.consume("IDENTIFIER", "Expected constant/variable name").value;
     const isExported = /^[A-Z]/.test(name);
 
@@ -1880,7 +1856,9 @@ export class GoDecompiler {
       return { kind: "ArrayLiteralExpr", elements, span: emptySpan() };
     }
 
-    throw new Error(`Unexpected token in Go expression: ${this.peek().kind} (${this.peek().value})`);
+    throw new Error(
+      `Unexpected token in Go expression: ${this.peek().kind} (${this.peek().value})`,
+    );
   }
 
   private getInfixPrecedence(): number {

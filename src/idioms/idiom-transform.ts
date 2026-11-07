@@ -141,16 +141,12 @@ function extractReferencedIdiomNamesFromTemplate(
 /**
  * Validates that idiom templates parse cleanly and contain no direct or mutual recursion cycles.
  */
-export function validateIdiomDefinitions(
-  idioms: Record<string, ProjectIdiomDefinition>,
-): void {
+export function validateIdiomDefinitions(idioms: Record<string, ProjectIdiomDefinition>): void {
   const normalizedMap = new Map<string, ProjectIdiomDefinition>();
   for (const [key, def] of Object.entries(idioms)) {
     const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
     const templateAice = def.templateAice ?? (def as { template?: string }).template ?? "";
-    const params = (def.params ?? []).map((p) =>
-      typeof p === "string" ? { name: p } : p,
-    );
+    const params = (def.params ?? []).map((p) => (typeof p === "string" ? { name: p } : p));
     const normDef: ProjectIdiomDefinition = { ...def, name: normName, templateAice, params };
     normalizedMap.set(normName, normDef);
     // Validate template syntax by parsing
@@ -394,7 +390,11 @@ function matchLayoutNodeTemplate(
       return false;
     }
   }
-  if (tNode.childExpr && tNode.childExpr.kind === "IdentifierExpr" && holeNames.has(tNode.childExpr.name)) {
+  if (
+    tNode.childExpr &&
+    tNode.childExpr.kind === "IdentifierExpr" &&
+    holeNames.has(tNode.childExpr.name)
+  ) {
     const hole = tNode.childExpr.name;
     let boundExpr: Expr | null = null;
     if (cNode.childExpr) {
@@ -432,14 +432,13 @@ function matchLayoutNodeTemplate(
   } else if (tNode.textLiteral !== null) {
     if (holeNames.has(tNode.textLiteral.trim())) {
       const hole = tNode.textLiteral.trim();
-      const boundExpr: Expr =
-        cNode.childExpr ?? {
-          kind: "LiteralExpr",
-          literalKind: "string",
-          value: cNode.textLiteral ?? "",
-          rawValue: JSON.stringify(cNode.textLiteral ?? ""),
-          span: cNode.span,
-        };
+      const boundExpr: Expr = cNode.childExpr ?? {
+        kind: "LiteralExpr",
+        literalKind: "string",
+        value: cNode.textLiteral ?? "",
+        rawValue: JSON.stringify(cNode.textLiteral ?? ""),
+        span: cNode.span,
+      };
       if (bindings.has(hole)) {
         if (generator.formatExpr(bindings.get(hole)!) !== generator.formatExpr(boundExpr)) {
           return false;
@@ -461,7 +460,9 @@ function matchLayoutNodeTemplate(
 
   if (tNode.children.length !== cNode.children.length) return false;
   for (let i = 0; i < tNode.children.length; i++) {
-    if (!matchLayoutNodeTemplate(tNode.children[i], cNode.children[i], bindings, holeNames, generator)) {
+    if (
+      !matchLayoutNodeTemplate(tNode.children[i], cNode.children[i], bindings, holeNames, generator)
+    ) {
       return false;
     }
   }
@@ -599,11 +600,7 @@ function substituteExpr(expr: Expr, subst: Map<string, Expr>, callSpan: Span): E
 /**
  * Substitutes hole parameters in an AST statement.
  */
-function substituteStatement(
-  stmt: Statement,
-  subst: Map<string, Expr>,
-  callSpan: Span,
-): Statement {
+function substituteStatement(stmt: Statement, subst: Map<string, Expr>, callSpan: Span): Statement {
   const cloned = structuredClone(stmt);
   cloned.span = callSpan;
 
@@ -921,11 +918,7 @@ function expandModuleIdiomsInternal(
     }
   }
 
-  function transformBlock(
-    block: Block,
-    outerScopeNames?: Set<string>,
-    depth = 0,
-  ): void {
+  function transformBlock(block: Block, outerScopeNames?: Set<string>, depth = 0): void {
     if (depth > 16) return;
     const newStatements: Statement[] = [];
     const usedNamesInBlock = new Set<string>(outerScopeNames);
@@ -986,8 +979,7 @@ function expandModuleIdiomsInternal(
               block.statements.slice(i + 1),
               name,
             );
-            const collidesWithCaller =
-              boundBeforeCurrentStmt.has(name) || argIdentNames.has(name);
+            const collidesWithCaller = boundBeforeCurrentStmt.has(name) || argIdentNames.has(name);
             const shouldDisambiguate =
               name.startsWith("_loc") || collidesWithCaller || !isReferencedLater;
 
@@ -1175,9 +1167,7 @@ function expandModuleIdiomsInternal(
         const out: LayoutNode[] = [];
         for (const node of nodes) {
           const bareTag = node.tag.startsWith("$") ? node.tag.slice(1) : node.tag;
-          const def =
-            node.tag.startsWith("$") &&
-            (idioms![node.tag] ?? idioms![bareTag]);
+          const def = node.tag.startsWith("$") && (idioms![node.tag] ?? idioms![bareTag]);
           if (def) {
             const parsed = getOrParseTemplate(def);
             if (parsed.layoutNodes && parsed.layoutNodes.length > 0) {
@@ -1332,9 +1322,7 @@ function matchExprTemplate(
         return null;
       };
 
-      const extractClamp = (
-        call: CallExpr,
-      ): { val: Expr; min: Expr; max: Expr } | null => {
+      const extractClamp = (call: CallExpr): { val: Expr; min: Expr; max: Expr } | null => {
         const fn = getMathCallee(call.callee);
         if (fn === "clamp" && call.args.length === 3) {
           return { val: call.args[0], min: call.args[1], max: call.args[2] };
@@ -1376,9 +1364,7 @@ function matchExprTemplate(
         const tgMath = getMathCallee(tg.callee);
         const calleeMatched =
           matchExprTemplate(t.callee, tg.callee, savedBindings, holeNames, generator, alphaMap) ||
-          (tMath !== null &&
-            tMath === tgMath &&
-            !holeNames.has(tMath));
+          (tMath !== null && tMath === tgMath && !holeNames.has(tMath));
         if (calleeMatched) {
           let allArgsMatch = true;
           for (let i = 0; i < t.args.length; i++) {
@@ -1409,8 +1395,22 @@ function matchExprTemplate(
       if (tClamp && tgClamp) {
         const savedBindings = new Map(bindings);
         if (
-          matchExprTemplate(tClamp.val, tgClamp.val, savedBindings, holeNames, generator, alphaMap) &&
-          matchExprTemplate(tClamp.min, tgClamp.min, savedBindings, holeNames, generator, alphaMap) &&
+          matchExprTemplate(
+            tClamp.val,
+            tgClamp.val,
+            savedBindings,
+            holeNames,
+            generator,
+            alphaMap,
+          ) &&
+          matchExprTemplate(
+            tClamp.min,
+            tgClamp.min,
+            savedBindings,
+            holeNames,
+            generator,
+            alphaMap,
+          ) &&
           matchExprTemplate(tClamp.max, tgClamp.max, savedBindings, holeNames, generator, alphaMap)
         ) {
           bindings.clear();
@@ -1434,7 +1434,16 @@ function matchExprTemplate(
       const tg = targetExpr as ArrayLiteralExpr;
       if (t.elements.length !== tg.elements.length) return false;
       for (let i = 0; i < t.elements.length; i++) {
-        if (!matchExprTemplate(t.elements[i], tg.elements[i], bindings, holeNames, generator, alphaMap)) {
+        if (
+          !matchExprTemplate(
+            t.elements[i],
+            tg.elements[i],
+            bindings,
+            holeNames,
+            generator,
+            alphaMap,
+          )
+        ) {
           return false;
         }
       }
@@ -1446,7 +1455,16 @@ function matchExprTemplate(
       if (t.properties.length !== tg.properties.length) return false;
       for (let i = 0; i < t.properties.length; i++) {
         if (t.properties[i].key !== tg.properties[i].key) return false;
-        if (!matchExprTemplate(t.properties[i].value, tg.properties[i].value, bindings, holeNames, generator, alphaMap)) {
+        if (
+          !matchExprTemplate(
+            t.properties[i].value,
+            tg.properties[i].value,
+            bindings,
+            holeNames,
+            generator,
+            alphaMap,
+          )
+        ) {
           return false;
         }
       }
@@ -1455,12 +1473,22 @@ function matchExprTemplate(
     case "TemplateLiteralExpr": {
       const t = templateExpr as TemplateLiteralExpr;
       const tg = targetExpr as TemplateLiteralExpr;
-      if (t.quasis.length !== tg.quasis.length || t.expressions.length !== tg.expressions.length) return false;
+      if (t.quasis.length !== tg.quasis.length || t.expressions.length !== tg.expressions.length)
+        return false;
       for (let i = 0; i < t.quasis.length; i++) {
         if (t.quasis[i] !== tg.quasis[i]) return false;
       }
       for (let i = 0; i < t.expressions.length; i++) {
-        if (!matchExprTemplate(t.expressions[i], tg.expressions[i], bindings, holeNames, generator, alphaMap)) {
+        if (
+          !matchExprTemplate(
+            t.expressions[i],
+            tg.expressions[i],
+            bindings,
+            holeNames,
+            generator,
+            alphaMap,
+          )
+        ) {
           return false;
         }
       }
@@ -1496,17 +1524,34 @@ function matchExprTemplate(
       const t = templateExpr as ClosureExpr;
       const tg = targetExpr as ClosureExpr;
       if (t.params.length !== tg.params.length) return false;
-      if (("statements" in t.body) !== ("statements" in tg.body)) return false;
+      if ("statements" in t.body !== "statements" in tg.body) return false;
       if ("statements" in t.body) {
         const tb = t.body as Block;
         const tgb = tg.body as Block;
         if (tb.statements.length !== tgb.statements.length) return false;
         for (let i = 0; i < tb.statements.length; i++) {
-          if (!matchStatementTemplate(tb.statements[i], tgb.statements[i], bindings, holeNames, generator, alphaMap)) return false;
+          if (
+            !matchStatementTemplate(
+              tb.statements[i],
+              tgb.statements[i],
+              bindings,
+              holeNames,
+              generator,
+              alphaMap,
+            )
+          )
+            return false;
         }
         return true;
       } else {
-        return matchExprTemplate(t.body as Expr, tg.body as Expr, bindings, holeNames, generator, alphaMap);
+        return matchExprTemplate(
+          t.body as Expr,
+          tg.body as Expr,
+          bindings,
+          holeNames,
+          generator,
+          alphaMap,
+        );
       }
     }
     default:
@@ -1645,7 +1690,9 @@ function matchStatementTemplate(
         ) {
           return false;
         }
-        if (t.elifBranches[e].body.statements.length !== tg.elifBranches[e].body.statements.length) {
+        if (
+          t.elifBranches[e].body.statements.length !== tg.elifBranches[e].body.statements.length
+        ) {
           return false;
         }
         for (let j = 0; j < t.elifBranches[e].body.statements.length; j++) {
@@ -1759,27 +1806,46 @@ function matchStatementTemplate(
         const tgc = tg.cases[i];
         if (Boolean(tc.guard) !== Boolean(tgc.guard)) return false;
         if (tc.guard && tgc.guard) {
-          if (!matchExprTemplate(tc.guard, tgc.guard, bindings, holeNames, generator, alphaMap)) return false;
+          if (!matchExprTemplate(tc.guard, tgc.guard, bindings, holeNames, generator, alphaMap))
+            return false;
         }
-        if (("statements" in tc.body) !== ("statements" in tgc.body)) return false;
+        if ("statements" in tc.body !== "statements" in tgc.body) return false;
         if ("statements" in tc.body) {
           const tStmts = (tc.body as Block).statements;
           const tgStmts = (tgc.body as Block).statements;
           if (tStmts.length !== tgStmts.length) return false;
           for (let s = 0; s < tStmts.length; s++) {
-            if (!matchStatementTemplate(tStmts[s], tgStmts[s], bindings, holeNames, generator, alphaMap, remainingStmts)) return false;
+            if (
+              !matchStatementTemplate(
+                tStmts[s],
+                tgStmts[s],
+                bindings,
+                holeNames,
+                generator,
+                alphaMap,
+                remainingStmts,
+              )
+            )
+              return false;
           }
         } else {
-          if (!matchExprTemplate(tc.body as Expr, tgc.body as Expr, bindings, holeNames, generator, alphaMap)) return false;
+          if (
+            !matchExprTemplate(
+              tc.body as Expr,
+              tgc.body as Expr,
+              bindings,
+              holeNames,
+              generator,
+              alphaMap,
+            )
+          )
+            return false;
         }
       }
       return true;
     }
     default:
-      return (
-        generator.formatStatement(templateStmt) ===
-        generator.formatStatement(targetStmt)
-      );
+      return generator.formatStatement(templateStmt) === generator.formatStatement(targetStmt);
   }
 }
 
@@ -1805,9 +1871,7 @@ export function collapseModuleIdioms(
     .map(([key, def]): ProjectIdiomDefinition => {
       const normName = (def.name || key).startsWith("$") ? def.name || key : `$${def.name || key}`;
       const templateAice = def.templateAice ?? (def as { template?: string }).template ?? "";
-      const params = (def.params ?? []).map((p) =>
-        typeof p === "string" ? { name: p } : p,
-      );
+      const params = (def.params ?? []).map((p) => (typeof p === "string" ? { name: p } : p));
       return {
         ...def,
         name: normName,
@@ -2190,7 +2254,9 @@ export function collapseModuleIdioms(
               const holeNames = new Set(idiom.params.map((p) => p.name));
               let ok = true;
               for (let s = 0; s < k; s++) {
-                if (!matchLayoutNodeTemplate(tNodes[s], window[s], bindings, holeNames, generator)) {
+                if (
+                  !matchLayoutNodeTemplate(tNodes[s], window[s], bindings, holeNames, generator)
+                ) {
                   ok = false;
                   break;
                 }
@@ -2758,7 +2824,8 @@ function resolveIdiomWorkspace(dir: string): {
   if (
     projectRoot === resolvedInput &&
     path.basename(resolvedInput) === "src" &&
-    !fs.existsSync(path.join(resolvedInput, "aice.config.json"))
+    !fs.existsSync(path.join(resolvedInput, "aice.config.json")) &&
+    !fs.existsSync(path.join(resolvedInput, ".aice-idioms.json"))
   ) {
     projectRoot = path.dirname(resolvedInput);
   }
@@ -3123,9 +3190,7 @@ export async function updateProjectIdiom(
       });
       // Also check existing $normName calls
       if (file.source.includes(normName)) {
-        const matches = file.source.match(
-          new RegExp(`\\$${bareName}\\s*\\(`, "g"),
-        );
+        const matches = file.source.match(new RegExp(`\\$${bareName}\\s*\\(`, "g"));
         if (matches) countInFile += matches.length;
       }
       if (countInFile > 0) {
@@ -3247,8 +3312,10 @@ export async function updateProjectIdiom(
 
   if (!dryRun) {
     const configPath = path.join(resolvedDir, "aice.config.json");
-    const oldConfigRaw = fs.existsSync(configPath)
-      ? fs.readFileSync(configPath, "utf-8")
+    const idiomsJsonPath = path.join(resolvedDir, ".aice-idioms.json");
+    const oldConfigRaw = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf-8") : null;
+    const oldIdiomsJsonRaw = fs.existsSync(idiomsJsonPath)
+      ? fs.readFileSync(idiomsJsonPath, "utf-8")
       : null;
 
     try {
@@ -3266,10 +3333,7 @@ export async function updateProjectIdiom(
 
       // Refresh provenance cache with updated native files
       const refreshed = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);
-      const refreshedOccurrences = collectOccurrencesAcrossFiles(
-        refreshed.files,
-        finalIdioms,
-      );
+      const refreshedOccurrences = collectOccurrencesAcrossFiles(refreshed.files, finalIdioms);
       writeIdiomCache(resolvedDir, {
         version: 1,
         idiomsEnabled: isProjectIdiomsEnabled(config),
@@ -3294,6 +3358,13 @@ export async function updateProjectIdiom(
           // ignore
         }
       }
+      if (oldIdiomsJsonRaw !== null) {
+        try {
+          fs.writeFileSync(idiomsJsonPath, oldIdiomsJsonRaw, "utf-8");
+        } catch {
+          // ignore
+        }
+      }
       throw err;
     }
   }
@@ -3309,9 +3380,10 @@ export async function updateProjectIdiom(
 /**
  * Expands all project idioms back to canonical code across a workspace.
  */
-export function expandProjectIdiomsInDirectory(
-  dir: string,
-): { expandedFiles: number; expandedCalls: number } {
+export function expandProjectIdiomsInDirectory(dir: string): {
+  expandedFiles: number;
+  expandedCalls: number;
+} {
   const { config, searchDir } = resolveIdiomWorkspace(dir);
 
   if (!config.idioms || Object.keys(config.idioms).length === 0) {
@@ -3326,11 +3398,7 @@ export function expandProjectIdiomsInDirectory(
   for (const fp of aiceFilePaths) {
     try {
       const source = fs.readFileSync(fp, "utf-8");
-      const { aice, expandedCount } = expandAiceSourceIdioms(
-        source,
-        config.idioms,
-        fp,
-      );
+      const { aice, expandedCount } = expandAiceSourceIdioms(source, config.idioms, fp);
       if (expandedCount > 0) {
         expandedFiles++;
         expandedCalls += expandedCount;

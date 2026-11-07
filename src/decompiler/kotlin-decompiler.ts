@@ -18,45 +18,32 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  BinaryExpr,
   BinaryOp,
   Block,
-  BreakStmt,
-  CallExpr,
   ClassDecl,
   ConstDecl,
-  ContinueStmt,
   Expr,
-  ExprStmt,
   ForStmt,
   FunctionDecl,
-  IdentifierExpr,
   IfStmt,
   ImportDecl,
-  IndexExpr,
   LetBinding,
   LiteralExpr,
   MatchCase,
   MatchStmt,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   Pattern,
   PropertyDecl,
-  RecordLiteralExpr,
   ReturnStmt,
   Statement,
   TemplateLiteralExpr,
-  ThrowStmt,
   TryStmt,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
   VarDecl,
   WhileStmt,
 } from "../core/ast.js";
@@ -359,7 +346,8 @@ export class KotlinLexer {
         const startCol = this.col;
         const startOffset = this.pos;
         const endIdx = this.src.indexOf("`", this.pos + 1);
-        const ident = endIdx === -1 ? this.src.slice(this.pos + 1) : this.src.slice(this.pos + 1, endIdx);
+        const ident =
+          endIdx === -1 ? this.src.slice(this.pos + 1) : this.src.slice(this.pos + 1, endIdx);
         this.advanceChars(this.src.slice(this.pos, endIdx === -1 ? this.src.length : endIdx + 1));
         tokens.push({
           kind: "IDENTIFIER",
@@ -643,7 +631,10 @@ export class KotlinLexer {
     let numStr = "";
 
     // Hex
-    if (this.src[this.pos] === "0" && (this.src[this.pos + 1] === "x" || this.src[this.pos + 1] === "X")) {
+    if (
+      this.src[this.pos] === "0" &&
+      (this.src[this.pos + 1] === "x" || this.src[this.pos + 1] === "X")
+    ) {
       numStr += this.advance(); // 0
       numStr += this.advance(); // x
       while (
@@ -656,12 +647,18 @@ export class KotlinLexer {
         numStr += this.advance();
       }
     } else {
-      while (this.pos < this.src.length && (this.isDigit(this.src[this.pos]) || this.src[this.pos] === "_")) {
+      while (
+        this.pos < this.src.length &&
+        (this.isDigit(this.src[this.pos]) || this.src[this.pos] === "_")
+      ) {
         numStr += this.advance();
       }
       if (this.src[this.pos] === "." && this.isDigit(this.src[this.pos + 1] ?? "")) {
         numStr += this.advance(); // .
-        while (this.pos < this.src.length && (this.isDigit(this.src[this.pos]) || this.src[this.pos] === "_")) {
+        while (
+          this.pos < this.src.length &&
+          (this.isDigit(this.src[this.pos]) || this.src[this.pos] === "_")
+        ) {
           numStr += this.advance();
         }
       }
@@ -694,9 +691,23 @@ export class KotlinLexer {
 
     const kw = KOTLIN_KEYWORDS.get(ident);
     if (kw) {
-      return { kind: kw, value: ident, line: startLine, col: startCol, offset: startOffset, endOffset: this.pos };
+      return {
+        kind: kw,
+        value: ident,
+        line: startLine,
+        col: startCol,
+        offset: startOffset,
+        endOffset: this.pos,
+      };
     }
-    return { kind: "IDENTIFIER", value: ident, line: startLine, col: startCol, offset: startOffset, endOffset: this.pos };
+    return {
+      kind: "IDENTIFIER",
+      value: ident,
+      line: startLine,
+      col: startCol,
+      offset: startOffset,
+      endOffset: this.pos,
+    };
   }
 }
 
@@ -742,7 +753,11 @@ export class KotlinDecompiler {
     if (this.check("PACKAGE")) {
       this.advance();
       let pkgName = "";
-      while (!this.check("SEMICOLON") && !this.check("EOF") && this.isIdentOrDot(this.current().kind)) {
+      while (
+        !this.check("SEMICOLON") &&
+        !this.check("EOF") &&
+        this.isIdentOrDot(this.current().kind)
+      ) {
         pkgName += this.advance().value;
       }
       if (this.check("SEMICOLON")) this.advance();
@@ -808,11 +823,16 @@ export class KotlinDecompiler {
   }
 
   private current(): KotlinToken {
-    return this.tokens[this.cur] ?? { kind: "EOF", value: "", line: 1, col: 1, offset: this.source.length, endOffset: this.source.length };
-  }
-
-  private peek(offset = 1): KotlinToken {
-    return this.tokens[this.cur + offset] ?? { kind: "EOF", value: "", line: 1, col: 1, offset: this.source.length, endOffset: this.source.length };
+    return (
+      this.tokens[this.cur] ?? {
+        kind: "EOF",
+        value: "",
+        line: 1,
+        col: 1,
+        offset: this.source.length,
+        endOffset: this.source.length,
+      }
+    );
   }
 
   private check(kind: KotlinTokenKind): boolean {
@@ -831,23 +851,31 @@ export class KotlinDecompiler {
     if (this.check(kind)) {
       return this.advance();
     }
-    return { kind, value: "", line: this.current().line, col: this.current().col, offset: this.current().offset, endOffset: this.current().endOffset };
+    return {
+      kind,
+      value: "",
+      line: this.current().line,
+      col: this.current().col,
+      offset: this.current().offset,
+      endOffset: this.current().endOffset,
+    };
   }
 
   private declStartOffset: number | null = null;
 
   private collectLeadingTrivia(): void {
-    while (
-      this.check("DOC_COMMENT") ||
-      this.check("LINE_COMMENT") ||
-      this.check("BLOCK_COMMENT")
-    ) {
+    while (this.check("DOC_COMMENT") || this.check("LINE_COMMENT") || this.check("BLOCK_COMMENT")) {
       const tok = this.advance();
       if (this.declStartOffset === null) {
         this.declStartOffset = tok.offset;
       }
       this.pendingTrivia.push({
-        kind: tok.kind === "DOC_COMMENT" ? "DOCSTRING" : tok.kind === "LINE_COMMENT" ? "LINE_COMMENT" : "BLOCK_COMMENT",
+        kind:
+          tok.kind === "DOC_COMMENT"
+            ? "DOCSTRING"
+            : tok.kind === "LINE_COMMENT"
+              ? "LINE_COMMENT"
+              : "BLOCK_COMMENT",
         content: tok.value,
       });
     }
@@ -865,7 +893,12 @@ export class KotlinDecompiler {
     this.declStartOffset = null;
     const startTok = this.consume("IMPORT");
     let fullPath = "";
-    while (!this.check("SEMICOLON") && !this.check("AS") && !this.check("EOF") && (this.isIdentOrDot(this.current().kind) || this.check("STAR"))) {
+    while (
+      !this.check("SEMICOLON") &&
+      !this.check("AS") &&
+      !this.check("EOF") &&
+      (this.isIdentOrDot(this.current().kind) || this.check("STAR"))
+    ) {
       fullPath += this.advance().value;
     }
 
@@ -990,7 +1023,11 @@ export class KotlinDecompiler {
 
     // Save modifier trivia (e.g. data class or interface)
     if (isData) {
-      this.trivia.setTrivia("is_data:" + name, { nodeId: "is_data:" + name, leading: [], trailing: [] });
+      this.trivia.setTrivia("is_data:" + name, {
+        nodeId: "is_data:" + name,
+        leading: [],
+        trailing: [],
+      });
     }
 
     // Type parameters: <T, R>
@@ -1183,7 +1220,11 @@ export class KotlinDecompiler {
         typeParams,
         fields: primaryConstructor.map((p) => ({
           name: p.name,
-          typeAnnotation: p.typeAnnotation ?? { kind: "NamedType", name: "Any", span: emptySpan(this.filePath) },
+          typeAnnotation: p.typeAnnotation ?? {
+            kind: "NamedType",
+            name: "Any",
+            span: emptySpan(this.filePath),
+          },
           defaultValue: p.defaultValue,
           isOptional: p.isOptional,
           span: p.span,
@@ -1595,7 +1636,11 @@ export class KotlinDecompiler {
       const startTok = this.advance();
       const expr = this.parseExpr();
       if (this.check("SEMICOLON")) this.advance();
-      return { kind: "ThrowStmt", expr, span: this.makeSpan(startTok.offset, this.current().offset) };
+      return {
+        kind: "ThrowStmt",
+        expr,
+        span: this.makeSpan(startTok.offset, this.current().offset),
+      };
     }
 
     if (this.check("BREAK")) {
@@ -1696,13 +1741,21 @@ export class KotlinDecompiler {
     const startTok = this.consume("RETURN");
     if (this.check("SEMICOLON") || this.check("RBRACE") || this.check("EOF")) {
       if (this.check("SEMICOLON")) this.advance();
-      return { kind: "ReturnStmt", value: null, span: this.makeSpan(startTok.offset, startTok.endOffset) };
+      return {
+        kind: "ReturnStmt",
+        value: null,
+        span: this.makeSpan(startTok.offset, startTok.endOffset),
+      };
     }
 
     const val = this.parseExpr();
     if (this.check("SEMICOLON")) this.advance();
     const endTok = this.tokens[this.cur - 1] ?? startTok;
-    return { kind: "ReturnStmt", value: val, span: this.makeSpan(startTok.offset, endTok.endOffset) };
+    return {
+      kind: "ReturnStmt",
+      value: val,
+      span: this.makeSpan(startTok.offset, endTok.endOffset),
+    };
   }
 
   private parseIf(): IfStmt {
@@ -1885,7 +1938,11 @@ export class KotlinDecompiler {
         } else if (patExpr.kind === "IdentifierExpr") {
           pattern = { kind: "IdentifierPattern", name: patExpr.name, span: patExpr.span };
         } else {
-          pattern = { kind: "IdentifierPattern", name: this.exprToString(patExpr), span: patExpr.span };
+          pattern = {
+            kind: "IdentifierPattern",
+            name: this.exprToString(patExpr),
+            span: patExpr.span,
+          };
         }
       }
 
@@ -1926,7 +1983,8 @@ export class KotlinDecompiler {
 
   private exprToString(expr: Expr): string {
     if (expr.kind === "IdentifierExpr") return expr.name;
-    if (expr.kind === "MemberAccessExpr") return `${this.exprToString(expr.object)}.${expr.property}`;
+    if (expr.kind === "MemberAccessExpr")
+      return `${this.exprToString(expr.object)}.${expr.property}`;
     if (expr.kind === "LiteralExpr") return String(expr.value);
     return "val";
   }
@@ -2093,7 +2151,11 @@ export class KotlinDecompiler {
     };
   }
 
-  private parseStringTemplate(raw: string, startOffset: number, endOffset: number): TemplateLiteralExpr | LiteralExpr {
+  private parseStringTemplate(
+    raw: string,
+    startOffset: number,
+    endOffset: number,
+  ): TemplateLiteralExpr | LiteralExpr {
     const quasis: string[] = [];
     const expressions: Expr[] = [];
 
@@ -2202,7 +2264,8 @@ export class KotlinDecompiler {
           for (const a of args) {
             // Check if binary expr with "to" or similar
             if (a.kind === "BinaryExpr") {
-              const k = a.left.kind === "LiteralExpr" ? String(a.left.value) : this.exprToString(a.left);
+              const k =
+                a.left.kind === "LiteralExpr" ? String(a.left.value) : this.exprToString(a.left);
               properties.push({ name: k, value: a.right, span: emptySpan(this.filePath) });
             }
           }
@@ -2430,7 +2493,11 @@ export class KotlinDecompiler {
       case "Iterable":
         result = {
           kind: "ArrayType",
-          elementType: typeArgs[0] ?? { kind: "NamedType", name: "Any", span: emptySpan(this.filePath) },
+          elementType: typeArgs[0] ?? {
+            kind: "NamedType",
+            name: "Any",
+            span: emptySpan(this.filePath),
+          },
           span: emptySpan(this.filePath),
         };
         break;
@@ -2438,7 +2505,11 @@ export class KotlinDecompiler {
         result = {
           kind: "ResultType",
           okType: typeArgs[0] ?? { kind: "NamedType", name: "Any", span: emptySpan(this.filePath) },
-          errType: typeArgs[1] ?? { kind: "NamedType", name: "Throwable", span: emptySpan(this.filePath) },
+          errType: typeArgs[1] ?? {
+            kind: "NamedType",
+            name: "Throwable",
+            span: emptySpan(this.filePath),
+          },
           span: emptySpan(this.filePath),
         };
         break;

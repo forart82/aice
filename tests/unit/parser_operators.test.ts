@@ -6,7 +6,6 @@ import type {
   Block,
   CallExpr,
   ClosureExpr,
-  ExprStmt,
   ForStmt,
   FunctionDecl,
   IdentifierExpr,

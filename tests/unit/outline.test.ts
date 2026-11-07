@@ -11,12 +11,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
 import { parse } from "../../src/core/parser.js";
-import {
-  generateOutline,
-  outlinePath,
-  type OutlineResult,
-  type OutlineSymbol,
-} from "../../src/tools/outline.js";
+import { generateOutline, outlinePath, type OutlineResult } from "../../src/tools/outline.js";
 
 describe("AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18)", () => {
   describe("Outlining Functions", () => {
@@ -49,7 +44,9 @@ pub async fn fetchData(url: str, timeout?: int) -> Promise[str]:
 `;
       const res = generateOutline(src);
       expect(res.text).toContain("Asynchronously fetch resource from remote server");
-      expect(res.text).toContain("pub async fn fetchData(url: str, timeout?: int) -> Promise[str]: ...");
+      expect(res.text).toContain(
+        "pub async fn fetchData(url: str, timeout?: int) -> Promise[str]: ...",
+      );
       expect(res.text).not.toContain("await fetch");
 
       expect(res.symbols[0].docstring).toContain("Asynchronously fetch resource");
@@ -81,7 +78,9 @@ pub class Vec2(pub x: float, pub y: float) extends BaseVector implements ITransf
 `;
       const res = generateOutline(src);
       expect(res.text).toContain("Vector 2D math entity");
-      expect(res.text).toContain("pub class Vec2(pub x: float, pub y: float) extends BaseVector implements ITransformable:");
+      expect(res.text).toContain(
+        "pub class Vec2(pub x: float, pub y: float) extends BaseVector implements ITransformable:",
+      );
       expect(res.text).toContain("  static origin: Vec2");
       expect(res.text).toContain("  val id: str");
       expect(res.text).toContain("  active?: bool");

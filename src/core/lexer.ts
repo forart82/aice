@@ -593,7 +593,14 @@ export function scanRawTokens(
             prevTok.kind !== "FROM" &&
             prevTok.kind !== "IMPORT" &&
             prevTok.kind !== "QUESTION"));
-      if (canStartRegex && peek(1) !== " " && peek(1) !== "\t" && peek(1) !== "\n" && peek(1) !== "\r" && peek(1) !== "") {
+      if (
+        canStartRegex &&
+        peek(1) !== " " &&
+        peek(1) !== "\t" &&
+        peek(1) !== "\n" &&
+        peek(1) !== "\r" &&
+        peek(1) !== ""
+      ) {
         // Look ahead on the same line for closing unescaped `/`
         let scanOffset = 1;
         let inCharClass = false;

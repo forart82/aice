@@ -7,31 +7,21 @@
  */
 
 import type {
-  BinaryExpr,
   Block,
-  CallExpr,
   ClassDecl,
   ConstDecl,
   Expr,
   FunctionDecl,
-  IfStmt,
-  ImportDecl,
-  IndexExpr,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
-  PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
   VarDecl,
 } from "../core/ast.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
-import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
+import { lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
 
 export class CppEmitter {
   private ctx: EmitterContext;
@@ -448,13 +438,8 @@ export class CppEmitter {
           if (c.body.kind === "Block") {
             this.emitBlock(c.body, isImplicitReturn);
             const lastStmt =
-              c.body.statements.length > 0
-                ? c.body.statements[c.body.statements.length - 1]
-                : null;
-            if (
-              !lastStmt ||
-              (lastStmt.kind !== "ReturnStmt" && lastStmt.kind !== "BreakStmt")
-            ) {
+              c.body.statements.length > 0 ? c.body.statements[c.body.statements.length - 1] : null;
+            if (!lastStmt || (lastStmt.kind !== "ReturnStmt" && lastStmt.kind !== "BreakStmt")) {
               this.ctx.writeLine("break;");
             }
           } else if (isImplicitReturn) {
@@ -669,6 +654,12 @@ export class CppEmitter {
         const cppName = t.name.replace(/\./g, "::");
         if (t.typeArgs && t.typeArgs.length > 0) {
           const args = t.typeArgs.map((ta) => this.emitTypeExpr(ta)).join(", ");
+          if (cppName === "list" || cppName === "Array") {
+            return `std::vector<${args}>`;
+          }
+          if (cppName === "map" || cppName === "dict" || cppName === "Record") {
+            return `std::map<${args}>`;
+          }
           return `${cppName}<${args}>`;
         }
         return cppName;

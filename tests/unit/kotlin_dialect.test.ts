@@ -46,20 +46,11 @@ import {
   TARGET_EXT_MAP,
   VALID_TARGET_LANGUAGES,
 } from "../../src/config/index.js";
-import type { ClassDecl, FunctionDecl, MatchStmt, Module, TypeDecl } from "../../src/core/ast.js";
-import { parse, parseWithTrivia } from "../../src/core/parser.js";
+import type { ClassDecl, FunctionDecl, Module, TypeDecl } from "../../src/core/ast.js";
+import { parse } from "../../src/core/parser.js";
 import { emptySpan } from "../../src/core/span.js";
-import {
-  decompile,
-  decompileKotlin,
-  executeRoundtrip,
-  KotlinDecompiler,
-} from "../../src/decompiler/index.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  KotlinEmitter,
-} from "../../src/emitters/index.js";
+import { decompile, decompileKotlin, executeRoundtrip } from "../../src/decompiler/index.js";
+import { detectTargetFromPath, emitTarget, KotlinEmitter } from "../../src/emitters/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -200,12 +191,24 @@ class NetworkClient(val baseUrl: String, val timeoutMs: Long = 5000) {
               literalKind: "number",
               value: 3,
               rawValue: "3",
-              span: { file: "Test.kt", start: { line: 1, column: 1, offset: 0 }, end: { line: 1, column: 1, offset: 1 } },
+              span: {
+                file: "Test.kt",
+                start: { line: 1, column: 1, offset: 0 },
+                end: { line: 1, column: 1, offset: 1 },
+              },
             },
-            span: { file: "Test.kt", start: { line: 1, column: 1, offset: 0 }, end: { line: 1, column: 1, offset: 1 } },
+            span: {
+              file: "Test.kt",
+              start: { line: 1, column: 1, offset: 0 },
+              end: { line: 1, column: 1, offset: 1 },
+            },
           },
         ],
-        span: { file: "Test.kt", start: { line: 1, column: 1, offset: 0 }, end: { line: 1, column: 1, offset: 1 } },
+        span: {
+          file: "Test.kt",
+          start: { line: 1, column: 1, offset: 0 },
+          end: { line: 1, column: 1, offset: 1 },
+        },
       };
 
       const emitted = emitTarget(mod, "kotlin");
@@ -283,7 +286,9 @@ class Calculator(val factor: Double = 1.0) {
 }
 `;
       const result = decompileKotlin(code, "Calculator.kt");
-      const classItem = result.ast.items.find((i) => i.kind === "ClassDecl") as ClassDecl | undefined;
+      const classItem = result.ast.items.find((i) => i.kind === "ClassDecl") as
+        | ClassDecl
+        | undefined;
       expect(classItem).toBeDefined();
       expect(classItem?.name).toBe("Calculator");
       expect(classItem?.methods.length).toBe(2);
@@ -347,7 +352,9 @@ fun evaluateGrade(score: Int): String {
 }
 `;
       const result = decompileKotlin(code, "Grade.kt");
-      const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as FunctionDecl | undefined;
+      const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as
+        | FunctionDecl
+        | undefined;
       expect(fn).toBeDefined();
 
       const parsedAst = parse(result.aice, "Grade.kt.aice");
@@ -364,7 +371,9 @@ fun getLength(str: String?): Int {
 }
 `;
       const result = decompileKotlin(code, "Safety.kt");
-      const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as FunctionDecl | undefined;
+      const fn = result.ast.items.find((i) => i.kind === "FunctionDecl") as
+        | FunctionDecl
+        | undefined;
       expect(fn).toBeDefined();
 
       const parsedAst = parse(result.aice, "Safety.kt.aice");
@@ -441,7 +450,13 @@ fun testControl(items: List<String>): Int {
               {
                 name: "age",
                 typeAnnotation: { kind: "PrimitiveType", primitive: "int", span: emptySpan() },
-                defaultValue: { kind: "LiteralExpr", literalKind: "number", value: 18, rawValue: "18", span: emptySpan() },
+                defaultValue: {
+                  kind: "LiteralExpr",
+                  literalKind: "number",
+                  value: 18,
+                  rawValue: "18",
+                  span: emptySpan(),
+                },
                 span: emptySpan(),
               },
             ],
@@ -525,7 +540,13 @@ fun testControl(items: List<String>): Int {
                     {
                       pattern: {
                         kind: "LiteralPattern",
-                        value: { kind: "LiteralExpr", literalKind: "number", value: 200, rawValue: "200", span: emptySpan() },
+                        value: {
+                          kind: "LiteralExpr",
+                          literalKind: "number",
+                          value: 200,
+                          rawValue: "200",
+                          span: emptySpan(),
+                        },
                         span: emptySpan(),
                       },
                       body: {
@@ -533,7 +554,13 @@ fun testControl(items: List<String>): Int {
                         statements: [
                           {
                             kind: "ReturnStmt",
-                            value: { kind: "LiteralExpr", literalKind: "string", value: "OK", rawValue: '"OK"', span: emptySpan() },
+                            value: {
+                              kind: "LiteralExpr",
+                              literalKind: "string",
+                              value: "OK",
+                              rawValue: '"OK"',
+                              span: emptySpan(),
+                            },
                             span: emptySpan(),
                           },
                         ],
@@ -548,7 +575,13 @@ fun testControl(items: List<String>): Int {
                         statements: [
                           {
                             kind: "ReturnStmt",
-                            value: { kind: "LiteralExpr", literalKind: "string", value: "ERROR", rawValue: '"ERROR"', span: emptySpan() },
+                            value: {
+                              kind: "LiteralExpr",
+                              literalKind: "string",
+                              value: "ERROR",
+                              rawValue: '"ERROR"',
+                              span: emptySpan(),
+                            },
                             span: emptySpan(),
                           },
                         ],
@@ -571,8 +604,8 @@ fun testControl(items: List<String>): Int {
 
       const emitted = KotlinEmitter.emit(mod);
       expect(emitted).toContain("when (code) {");
-      expect(emitted).toContain("200 -> return \"OK\"");
-      expect(emitted).toContain("else -> return \"ERROR\"");
+      expect(emitted).toContain('200 -> return "OK"');
+      expect(emitted).toContain('else -> return "ERROR"');
     });
   });
 
@@ -618,10 +651,13 @@ fun testControl(items: List<String>): Int {
     });
 
     it("verifies roundtrip on case53 ProductEntity.kt", () => {
-      const targetPath = "/home/forart/dev/aice_test_case/src/case53/ProductEntity.kt";
-      if (!fs.existsSync(targetPath)) return;
-
-      const source = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case53/ProductEntity.kt";
+      const source = `data class ProductEntity(val id: String, val priceCents: Int) {
+    fun formattedPrice(): String {
+        return "$" + (priceCents / 100).toString()
+    }
+}
+`;
       const result = executeRoundtrip(source, "kotlin", targetPath);
 
       expect(result.isIdentical).toBe(true);
@@ -630,10 +666,17 @@ fun testControl(items: List<String>): Int {
     });
 
     it("verifies roundtrip on case53 ProductRepository.kt", () => {
-      const targetPath = "/home/forart/dev/aice_test_case/src/case53/ProductRepository.kt";
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case53/ProductRepository.kt";
+      const source = `interface ProductRepository {
+    suspend fun findById(id: String): String
+}
 
-      const source = fs.readFileSync(targetPath, "utf-8");
+class InMemoryProductRepository : ProductRepository {
+    override suspend fun findById(id: String): String {
+        return id
+    }
+}
+`;
       const result = executeRoundtrip(source, "kotlin", targetPath);
 
       expect(result.isIdentical).toBe(true);

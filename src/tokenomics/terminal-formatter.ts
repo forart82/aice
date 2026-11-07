@@ -147,10 +147,6 @@ export function formatSingleFileSummary(
     );
   const t = getTheme(useColor);
 
-  const clSign = f.cl100kSavingsPct >= 0 ? "-" : "+";
-  const o2Sign = f.o200kSavingsPct >= 0 ? "-" : "+";
-  const chSign = f.charSavingsPct >= 0 ? "-" : "+";
-
   const clRatio = f.aiceCl100k > 0 ? (f.targetCl100k / f.aiceCl100k).toFixed(2) : "1.00";
   const o2Ratio = f.aiceO200k > 0 ? (f.targetO200k / f.aiceO200k).toFixed(2) : "1.00";
   const charRatio = f.aiceChars > 0 ? (f.targetChars / f.aiceChars).toFixed(2) : "1.00";
@@ -275,7 +271,6 @@ export function formatTokenomicsTerminalTable(
   const tableInnerWidth = columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
   const tableTotalWidth = tableInnerWidth + 4;
 
-  const topBorder = t.cyan(`┌─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┐`);
   const midBorder = t.cyan(`├─${columns.map((c) => "─".repeat(c.width)).join("─┼─")}─┤`);
   const botBorder = t.cyan(`└─${columns.map((c) => "─".repeat(c.width)).join("─┴─")}─┘`);
 
@@ -503,7 +498,6 @@ export function formatProjectsTerminalTable(
   const tableInnerWidth = columns.reduce((sum, c) => sum + c.width, 0) + (columns.length - 1) * 3;
   const tableTotalWidth = tableInnerWidth + 4;
 
-  const topBorder = t.cyan(`┌─${columns.map((c) => "─".repeat(c.width)).join("─┬─")}─┐`);
   const midBorder = t.cyan(`├─${columns.map((c) => "─".repeat(c.width)).join("─┼─")}─┤`);
   const botBorder = t.cyan(`└─${columns.map((c) => "─".repeat(c.width)).join("─┴─")}─┘`);
 

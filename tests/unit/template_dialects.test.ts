@@ -30,21 +30,15 @@ import {
   TARGET_EXT_MAP,
   VALID_TARGET_LANGUAGES,
 } from "../../src/config/index.js";
-import type { ComponentDecl, LayoutNode } from "../../src/core/ast.js";
-import { parse, parseWithTrivia } from "../../src/core/parser.js";
+import type { ComponentDecl } from "../../src/core/ast.js";
+import { parse } from "../../src/core/parser.js";
 import {
   decompile,
   decompileFile,
   decompileTwig,
-  HtmlDecompiler,
   TwigDecompiler,
 } from "../../src/decompiler/index.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  HtmlEmitter,
-  TwigEmitter,
-} from "../../src/emitters/index.js";
+import { detectTargetFromPath, emitTarget, TwigEmitter } from "../../src/emitters/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -420,8 +414,8 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
 
       const decomp = decompile(originalHtml, "html", { filePath: "profile.html" });
       expect(decomp.aice).toContain("component Profile():");
-      expect(decomp.aice).toContain("html(lang: \"en\"):");
-      expect(decomp.aice).toContain("title: \"Developer Profile\"");
+      expect(decomp.aice).toContain('html(lang: "en"):');
+      expect(decomp.aice).toContain('title: "Developer Profile"');
       expect(decomp.aice).toContain('h1(class: "profile-title"): "Alex Johnson"');
 
       const ast = parse(decomp.aice, "profile.html.aice");
@@ -451,7 +445,9 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(reEmitted).not.toContain("<!DOCTYPE html>");
       expect(reEmitted).toContain('<div class="card-component" id="card-01">');
       expect(reEmitted).toContain("<h3>Embedded Component</h3>");
-      expect(reEmitted).toContain("<p>Seamlessly integrated inside broader templates or web pages.</p>");
+      expect(reEmitted).toContain(
+        "<p>Seamlessly integrated inside broader templates or web pages.</p>",
+      );
     });
 
     it("handles void elements (img, input, br, hr, meta) and boolean attributes in HTML5", () => {
@@ -572,7 +568,12 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(profileRes.stdout).toContain("profile.html");
       expect(profileRes.stdout).toContain("Alex Johnson");
 
-      const profileOutlineRes = runCli(["context", profilePath, "--outline-target", "--no-callers"]);
+      const profileOutlineRes = runCli([
+        "context",
+        profilePath,
+        "--outline-target",
+        "--no-callers",
+      ]);
       expect(profileOutlineRes.status).toBe(0);
       expect(profileOutlineRes.stdout).toContain("component Profile():");
     }, 20000);

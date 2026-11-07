@@ -7,7 +7,6 @@
  */
 
 import type {
-  BinaryExpr,
   BinaryOp,
   Block,
   ClassDecl,
@@ -842,25 +841,6 @@ export class AiceGenerator {
     }
   }
 
-  private emitMatchCase(mc: MatchCase): void {
-    const patternStr = this.formatPattern(mc.pattern);
-    const guardStr = mc.guard ? ` if ${this.formatExpr(mc.guard)}` : "";
-    if ("statements" in mc.body) {
-      if (mc.body.statements.length === 0) {
-        this.writeLine(`case ${patternStr}${guardStr} => nil`);
-        return;
-      }
-      this.writeLine(`case ${patternStr}${guardStr} =>`);
-      this.indent();
-      this.emitBlock(mc.body);
-      this.dedent();
-    } else {
-      const bodyStr =
-        mc.body.kind === "AssignExpr" ? `(${this.formatExpr(mc.body)})` : this.formatExpr(mc.body);
-      this.writeLine(`case ${patternStr}${guardStr} => ${bodyStr}`);
-    }
-  }
-
   private formatPattern(p: Pattern): string {
     switch (p.kind) {
       case "LiteralPattern":
@@ -898,8 +878,7 @@ export class AiceGenerator {
 
   private emitLayoutNode(node: LayoutNode): void {
     const isPositionalIdiom =
-      node.tag.startsWith("$") &&
-      node.attributes.every((a) => /^\$\d+$/.test(a.name));
+      node.tag.startsWith("$") && node.attributes.every((a) => /^\$\d+$/.test(a.name));
     const attrs = isPositionalIdiom
       ? node.attributes.map((a) => this.formatExpr(a.value)).join(", ")
       : node.attributes.map((a) => `${a.name}: ${this.formatExpr(a.value)}`).join(", ");

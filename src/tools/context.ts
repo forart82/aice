@@ -234,9 +234,7 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
     }
     if (sym.kind === "class" || sym.kind === "interface" || sym.kind === "record") {
       if (sym.children && sym.children.length > 0) {
-        const header = sym.signature.endsWith(": ...")
-          ? sym.signature.slice(0, -4)
-          : sym.signature;
+        const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
         outlineLines.push(header.endsWith(":") ? header : `${header}:`);
         for (const child of sym.children) {
           if (child.docstring) {
@@ -265,10 +263,7 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
   return outlineLines.join("\n").trim();
 }
 
-function extractExportedContract(
-  resolvedPath: string,
-  importedSymbols: string[],
-): string {
+function extractExportedContract(resolvedPath: string, importedSymbols: string[]): string {
   const outlineRes = generateOutline(resolvedPath, { includeTypes: true });
   const nonImports = outlineRes.symbols.filter((s) => s.kind !== "import");
 
@@ -283,10 +278,7 @@ function extractExportedContract(
     const explicitMatches = nonImports.filter((s) => importedSymbols.includes(s.name));
     if (explicitMatches.length > 0) {
       const matchedSigs = explicitMatches
-        .map(
-          (s) =>
-            `${s.signature} ${(s.children ?? []).map((c) => c.signature).join(" ")}`,
-        )
+        .map((s) => `${s.signature} ${(s.children ?? []).map((c) => c.signature).join(" ")}`)
         .join(" ");
       filtered = nonImports.filter((s) => {
         if (importedSymbols.includes(s.name)) return true;
@@ -319,12 +311,7 @@ function extractExportedContract(
       if (s.signature.startsWith("pub ") || s.signature.startsWith("export ")) {
         return true;
       }
-      if (
-        s.kind === "interface" ||
-        s.kind === "record" ||
-        s.kind === "type" ||
-        s.kind === "enum"
-      ) {
+      if (s.kind === "interface" || s.kind === "record" || s.kind === "type" || s.kind === "enum") {
         return true;
       }
       return false;
@@ -501,8 +488,7 @@ function formatBundle(
     lines.push("None");
   } else {
     for (const caller of callers) {
-      const symStr =
-        caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
+      const symStr = caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
       lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
     }
   }
@@ -520,7 +506,12 @@ function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
     const mod = parse(aiceSource, filePath);
     const out: string[] = [];
     for (const item of mod.items) {
-      if (item.kind === "FunctionDecl" || item.kind === "TypeDecl" || item.kind === "VarDecl" || item.kind === "StyleDecl") {
+      if (
+        item.kind === "FunctionDecl" ||
+        item.kind === "TypeDecl" ||
+        item.kind === "VarDecl" ||
+        item.kind === "StyleDecl"
+      ) {
         out.push(item.name);
       } else if (item.kind === "ClassDecl") {
         if (item.name === "Main" && filePath.endsWith(".cs")) {
@@ -675,7 +666,8 @@ export async function generateWorkspaceContext(
         projectRoot,
       });
       const outlineBody =
-        symHeader && (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
+        symHeader &&
+        (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
           ? `${symHeader}\n${oRes.text}`
           : oRes.text;
       outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${outlineBody}\n\`\`\``);
@@ -706,9 +698,7 @@ export async function generateWorkspaceContext(
           }
           if (fileSlices.length === 0) {
             let cleanedAll = unwrapSyntheticContainer(
-              fileAice
-                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                .trim(),
+              fileAice.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
               f,
             );
             if (!idiomsActive) {
@@ -1033,14 +1023,22 @@ export function extractSymbolFromAiceSource(
 
   for (const item of mod.items) {
     if (className) {
-      if (item.kind === "ClassDecl" && (item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))) {
+      if (
+        item.kind === "ClassDecl" &&
+        (item.name === className ||
+          normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))
+      ) {
         let matchedMethods = item.methods.filter((m) => m.name === memberName);
         if (matchedMethods.length === 0) {
-          matchedMethods = item.methods.filter((m) => normalizeIdentForMatch(m.name) === normMember);
+          matchedMethods = item.methods.filter(
+            (m) => normalizeIdentForMatch(m.name) === normMember,
+          );
         }
         let matchedProps = item.properties.filter((p) => p.name === memberName);
         if (matchedProps.length === 0) {
-          matchedProps = item.properties.filter((p) => normalizeIdentForMatch(p.name) === normMember);
+          matchedProps = item.properties.filter(
+            (p) => normalizeIdentForMatch(p.name) === normMember,
+          );
         }
         if (matchedMethods.length > 0 || matchedProps.length > 0) {
           const scopedClass: ClassDecl = {
@@ -1051,7 +1049,11 @@ export function extractSymbolFromAiceSource(
           };
           matchedItems.push(scopedClass);
         }
-      } else if (item.kind === "TypeDecl" && (item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))) {
+      } else if (
+        item.kind === "TypeDecl" &&
+        (item.name === className ||
+          normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className))
+      ) {
         const matchedFields = (item.fields ?? []).filter(
           (f) => f.name === memberName || normalizeIdentForMatch(f.name) === normMember,
         );
@@ -1067,7 +1069,8 @@ export function extractSymbolFromAiceSource(
         }
       } else if (item.kind === "ConstDecl" && item.value.kind === "RecordLiteralExpr") {
         const keyParts =
-          item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
+          item.name === className ||
+          normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
             ? parts.slice(1)
             : parts;
         const sliced = sliceRecordLiteralByPath(item.value, keyParts);
@@ -1080,7 +1083,8 @@ export function extractSymbolFromAiceSource(
         }
       } else if (item.kind === "ComponentDecl") {
         const layoutSel =
-          item.name === className || normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
+          item.name === className ||
+          normalizeIdentForMatch(item.name) === normalizeIdentForMatch(className)
             ? memberName
             : trimmedSel;
         const matchedLayout = matchLayoutNodes(item.layout, layoutSel);
@@ -1105,11 +1109,15 @@ export function extractSymbolFromAiceSource(
       } else if (item.kind === "ClassDecl") {
         let matchedMethods = item.methods.filter((m) => m.name === memberName);
         if (matchedMethods.length === 0) {
-          matchedMethods = item.methods.filter((m) => normalizeIdentForMatch(m.name) === normMember);
+          matchedMethods = item.methods.filter(
+            (m) => normalizeIdentForMatch(m.name) === normMember,
+          );
         }
         let matchedProps = item.properties.filter((p) => p.name === memberName);
         if (matchedProps.length === 0) {
-          matchedProps = item.properties.filter((p) => normalizeIdentForMatch(p.name) === normMember);
+          matchedProps = item.properties.filter(
+            (p) => normalizeIdentForMatch(p.name) === normMember,
+          );
         }
         if (matchedMethods.length > 0 || matchedProps.length > 0) {
           const scopedClass: ClassDecl = {
@@ -1270,7 +1278,12 @@ export async function generateContext(
     } catch {
       // ignore collapse failures
     }
-  } else if (!idiomsActive && config.idioms && Object.keys(config.idioms).length > 0 && targetContent.includes("$")) {
+  } else if (
+    !idiomsActive &&
+    config.idioms &&
+    Object.keys(config.idioms).length > 0 &&
+    targetContent.includes("$")
+  ) {
     try {
       const expanded = expandAiceSourceIdioms(targetContent, config.idioms, fullTargetPath);
       targetContent = expanded.aice;
@@ -1315,7 +1328,12 @@ export async function generateContext(
       let importedSymbols = imp.specifiers.map((s) => s.name);
 
       // When symbol-scoped at depth 0, prune imported symbols/dependencies not referenced by the sliced symbol
-      if (item.currentDepth === 0 && options.symbol && importedSymbols.length > 0 && !importedSymbols.includes("*")) {
+      if (
+        item.currentDepth === 0 &&
+        options.symbol &&
+        importedSymbols.length > 0 &&
+        !importedSymbols.includes("*")
+      ) {
         const usedSpecs = imp.specifiers.filter((s) => {
           const localIdent = s.alias ?? s.name;
           const esc = localIdent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1410,7 +1428,7 @@ export async function generateContext(
   if (options.symbol && activeIdioms && Object.keys(activeIdioms).length > 0) {
     const filteredIdioms: Record<string, ProjectIdiomDefinition> = {};
     for (const [k, def] of Object.entries(activeIdioms)) {
-      const normName = (def.name || k).startsWith("$") ? (def.name || k) : `$${def.name || k}`;
+      const normName = (def.name || k).startsWith("$") ? def.name || k : `$${def.name || k}`;
       if (targetBody.includes(normName)) {
         filteredIdioms[k] = def;
       }
@@ -1468,11 +1486,16 @@ export async function generateContext(
         ) {
           chars = Math.floor(chars * 0.7);
         }
-        if (estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens) {
+        if (
+          estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens
+        ) {
           formattedBundle = (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter;
         } else {
           formattedBundle = truncatedFooter;
-          while (formattedBundle.length > 0 && estimateTokens(formattedBundle) > options.maxTokens) {
+          while (
+            formattedBundle.length > 0 &&
+            estimateTokens(formattedBundle) > options.maxTokens
+          ) {
             formattedBundle = formattedBundle.slice(0, -1);
           }
         }

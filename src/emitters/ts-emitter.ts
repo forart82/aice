@@ -301,7 +301,11 @@ export class TypeScriptEmitter {
       if (item.kind === "ClassDecl") {
         this.classNames.add(item.name);
         this.topLevelNames.add(item.name);
-      } else if (item.kind === "FunctionDecl" || item.kind === "ConstDecl" || item.kind === "VarDecl") {
+      } else if (
+        item.kind === "FunctionDecl" ||
+        item.kind === "ConstDecl" ||
+        item.kind === "VarDecl"
+      ) {
         this.topLevelNames.add(item.name);
       } else if (item.kind === "ImportDecl") {
         for (const s of item.specifiers) {
@@ -315,7 +319,9 @@ export class TypeScriptEmitter {
             item.fields.map((f) => f.name),
           );
         } else if (item.isEnum && item.variants) {
-          const allUnit = item.variants.every((v) => !v.payloadTypes || v.payloadTypes.length === 0);
+          const allUnit = item.variants.every(
+            (v) => !v.payloadTypes || v.payloadTypes.length === 0,
+          );
           for (const v of item.variants) {
             this.enumVariants.set(v.name, {
               parentEnum: item.name,
@@ -330,16 +336,15 @@ export class TypeScriptEmitter {
 
     // Scan imported modules for struct definitions to support cross-module positional constructors & spreads
     const baseDir =
-      mod.span?.file && mod.span.file !== "<anonymous>" && fs.existsSync(path.dirname(mod.span.file))
+      mod.span?.file &&
+      mod.span.file !== "<anonymous>" &&
+      fs.existsSync(path.dirname(mod.span.file))
         ? path.dirname(path.resolve(mod.span.file))
         : process.cwd();
     for (const item of mod.items) {
       if (item.kind === "ImportDecl") {
         const importSrc = item.source;
-        const candidateNames = [
-          importSrc.replace(/\.[a-zA-Z]+$/, ".aice"),
-          importSrc,
-        ];
+        const candidateNames = [importSrc.replace(/\.[a-zA-Z]+$/, ".aice"), importSrc];
         for (const cand of candidateNames) {
           const resolved = path.resolve(baseDir, cand);
           if (fs.existsSync(resolved) && fs.statSync(resolved).isFile()) {
@@ -435,7 +440,9 @@ export class TypeScriptEmitter {
     const namedSpecs = imp.specifiers.filter((s) => s !== defaultSpec);
     const parts: string[] = [];
     if (defaultSpec) {
-      parts.push(defaultSpec.alias ? `${defaultSpec.name} as ${defaultSpec.alias}` : defaultSpec.name);
+      parts.push(
+        defaultSpec.alias ? `${defaultSpec.name} as ${defaultSpec.alias}` : defaultSpec.name,
+      );
     }
     if (namedSpecs.length > 0) {
       const specs = namedSpecs.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name));
@@ -556,9 +563,7 @@ export class TypeScriptEmitter {
         const fieldNodeId = `field:${t.name}.${f.name}`;
         this.ctx.emitLeadingTrivia(fieldNodeId);
         const isOpt =
-          f.isOptional ||
-          !!f.defaultValue ||
-          this.isNullableOrOptionalType(f.typeAnnotation);
+          f.isOptional || !!f.defaultValue || this.isNullableOrOptionalType(f.typeAnnotation);
         const optMark = isOpt ? "?" : "";
         const typeStr =
           optMark && f.typeAnnotation.kind === "OptionType"
@@ -653,7 +658,9 @@ export class TypeScriptEmitter {
     const typeParams = !isJs && c.typeParams.length > 0 ? `<${c.typeParams.join(", ")}>` : "";
     const ext = c.extends ? ` extends ${c.extends}` : "";
     const impl =
-      !isJs && c.implements && c.implements.length > 0 ? ` implements ${c.implements.join(", ")}` : "";
+      !isJs && c.implements && c.implements.length > 0
+        ? ` implements ${c.implements.join(", ")}`
+        : "";
 
     this.ctx.writeLine(`${exp}class ${c.name}${typeParams}${ext}${impl} {`);
     this.ctx.indent();
@@ -666,7 +673,8 @@ export class TypeScriptEmitter {
             const ro = !isJs && p.isReadonly ? "readonly " : "";
             const pub = !isJs ? (p.isPub !== false ? "public " : "private ") : "";
             const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
-            const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+            const typeAnn =
+              !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
             const rest = p.isRest ? "..." : "";
             return `${pub}${ro}${rest}${p.name}${optMark}${typeAnn}${def}`;
@@ -694,7 +702,9 @@ export class TypeScriptEmitter {
       const opt = !isJs && p.isOptional ? "?" : "";
       const hasAliases = !!p.alias || (p.aliases !== undefined && p.aliases.length > 0);
       const defAssign =
-        !isJs && !p.initialValue && !p.isOptional && !p.isStatic && p.typeAnnotation && !hasAliases ? "!" : "";
+        !isJs && !p.initialValue && !p.isOptional && !p.isStatic && p.typeAnnotation && !hasAliases
+          ? "!"
+          : "";
       const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
       const init = p.initialValue ? ` = ${this.emitExpr(p.initialValue)}` : "";
       this.ctx.writeLine(`${st}${ro}${p.name}${opt}${defAssign}${typeAnn}${init};`);
@@ -728,7 +738,8 @@ export class TypeScriptEmitter {
       const params = m.params
         .map((p) => {
           const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
-          const typeAnn = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+          const typeAnn =
+            !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
           const def = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
           const rest = p.isRest ? "..." : "";
           return `${rest}${p.name}${optMark}${typeAnn}${def}`;
@@ -1632,7 +1643,8 @@ export class TypeScriptEmitter {
         const paramsStr = expr.params
           .map((p) => {
             const optMark = !isJs && p.isOptional && !p.defaultValue ? "?" : "";
-            const typeStr = !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
+            const typeStr =
+              !isJs && p.typeAnnotation ? `: ${this.emitTypeExpr(p.typeAnnotation)}` : "";
             const defStr = p.defaultValue ? ` = ${this.emitExpr(p.defaultValue)}` : "";
             const rest = p.isRest ? "..." : "";
             return `${rest}${p.name}${optMark}${typeStr}${defStr}`;
@@ -1956,7 +1968,12 @@ export class TypeScriptEmitter {
           return `${t.name}<${args}>`;
         }
         let name = t.name;
-        if (name.includes("{") || name.includes("|") || name.includes("=>") || name.includes("->")) {
+        if (
+          name.includes("{") ||
+          name.includes("|") ||
+          name.includes("=>") ||
+          name.includes("->")
+        ) {
           return this.rewriteTypePrimitivesAndArrows(name);
         }
         if (t.name === "int" || t.name === "float" || t.name === "num" || t.name === "byte") {

@@ -861,13 +861,21 @@ function getTsMemberName(member: ts.Node, sf: ts.SourceFile): string | undefined
   }
   const named = member as { name?: ts.PropertyName };
   if (!named.name) return undefined;
-  if (ts.isIdentifier(named.name) || ts.isStringLiteral(named.name) || ts.isNumericLiteral(named.name)) {
+  if (
+    ts.isIdentifier(named.name) ||
+    ts.isStringLiteral(named.name) ||
+    ts.isNumericLiteral(named.name)
+  ) {
     return named.name.text;
   }
   return named.name.getText(sf);
 }
 
-function getPostDecoratorTokenStart(node: ts.Node, sf: ts.SourceFile, nativeSource: string): number {
+function getPostDecoratorTokenStart(
+  node: ts.Node,
+  sf: ts.SourceFile,
+  nativeSource: string,
+): number {
   const rawStart = node.getStart(sf, false);
   const modifiers = (node as { modifiers?: ts.NodeArray<ts.ModifierLike> }).modifiers;
   if (!modifiers || modifiers.length === 0) return rawStart;
@@ -1279,11 +1287,7 @@ function findMatchingBraceEnd(
       }
     }
     // C++ raw string literal `R"delim(...)delim"`
-    if (
-      ch === "R" &&
-      next === '"' &&
-      (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
-    ) {
+    if (ch === "R" && next === '"' && (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))) {
       const openParen = source.indexOf("(", i + 2);
       if (openParen >= 0 && openParen - (i + 2) <= 16) {
         const delim = source.slice(i + 2, openParen);
@@ -1503,9 +1507,9 @@ function locateBraceLanguageDeclarationSpan(
       const line = lines[i];
       const isRustImpl =
         targetLang === "rust" &&
-        new RegExp(`^\\s*impl(?:\\s*<[^>]*>)?\\s+(?:[A-Za-z0-9_:]+\\s+for\\s+)?([A-Za-z0-9_]+)\\b`).exec(
-          line,
-        );
+        new RegExp(
+          `^\\s*impl(?:\\s*<[^>]*>)?\\s+(?:[A-Za-z0-9_:]+\\s+for\\s+)?([A-Za-z0-9_]+)\\b`,
+        ).exec(line);
       const isClassLine = new RegExp(
         `^\\s*(?:pub\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|static\\s+|partial\\s+|final\\s+|abstract\\s+|open\\s+|data\\s+|sealed\\s+)*(?:class|struct)\\s+([A-Za-z0-9_]+)\\b`,
       ).exec(line);
@@ -1529,10 +1533,7 @@ function locateBraceLanguageDeclarationSpan(
   // 4. Scan lines within matching container windows (or full file when top-level)
   for (let i = 0; i < lines.length; i++) {
     const lineOff = lineOffsets[i];
-    if (
-      className &&
-      !containerWindows.some((w) => lineOff >= w.start && lineOff < w.end)
-    ) {
+    if (className && !containerWindows.some((w) => lineOff >= w.start && lineOff < w.end)) {
       continue;
     }
     const line = lines[i];
@@ -1647,8 +1648,12 @@ function locateNativeDeclarationSpan(
     return locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor);
   }
   return (
-    locateBraceLanguageDeclarationSpan(nativeSource, symbolSelector, targetLang, explicitClassName) ??
-    locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor)
+    locateBraceLanguageDeclarationSpan(
+      nativeSource,
+      symbolSelector,
+      targetLang,
+      explicitClassName,
+    ) ?? locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor)
   );
 }
 
@@ -1760,7 +1765,10 @@ function normalizeSelfAndThisInBlock(block: Block, useThis: boolean): void {
   }
 }
 
-function normalizeSelfAndThisInDecl(decl: FunctionDecl | MethodDecl, targetLang: TargetLanguage): void {
+function normalizeSelfAndThisInDecl(
+  decl: FunctionDecl | MethodDecl,
+  targetLang: TargetLanguage,
+): void {
   const useThis =
     targetLang === "typescript" ||
     targetLang === "javascript" ||
@@ -1938,17 +1946,13 @@ function stripTopLevelLanguagePreamble(emitted: string, targetLang: TargetLangua
       const inner = stripOneIndentLevel(lines.slice(bodyStart, lines.length - 1), 4);
       return inner.join("\n").trimEnd();
     }
-    const idx = lines.findIndex(
-      (l) => l.trim().length > 0 && !l.trim().startsWith("using "),
-    );
+    const idx = lines.findIndex((l) => l.trim().length > 0 && !l.trim().startsWith("using "));
     return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
   }
   if (targetLang === "kotlin") {
     const idx = lines.findIndex(
       (l) =>
-        l.trim().length > 0 &&
-        !l.trim().startsWith("package ") &&
-        !l.trim().startsWith("import "),
+        l.trim().length > 0 && !l.trim().startsWith("package ") && !l.trim().startsWith("import "),
     );
     return (idx >= 0 ? lines.slice(idx) : lines).join("\n").trimEnd();
   }
@@ -1968,6 +1972,122 @@ function stripTopLevelLanguagePreamble(emitted: string, targetLang: TargetLangua
     : emitted.trim();
 }
 
+function splitTopLevelParams(paramList: string): string[] {
+  const parts: string[] = [];
+  let depthAngle = 0;
+  let depthParen = 0;
+  let current = "";
+  for (let i = 0; i < paramList.length; i++) {
+    const ch = paramList[i];
+    if (ch === "<") depthAngle++;
+    else if (ch === ">" && depthAngle > 0) depthAngle--;
+    else if (ch === "(") depthParen++;
+    else if (ch === ")" && depthParen > 0) depthParen--;
+    else if (ch === "," && depthAngle === 0 && depthParen === 0) {
+      parts.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current.trim().length > 0) {
+    parts.push(current);
+  }
+  return parts;
+}
+
+function restoreCppQualifiersAndScopes(
+  emitted: string,
+  origHeader?: string,
+  referenceTexts?: (string | undefined)[],
+): string {
+  let result = emitted;
+
+  // 1. Restore C++ scope resolution chains (e.g. a::b::c::fn or givemeabigstring::out)
+  const scopeChains = new Set<string>();
+  const namespacePrefixes = new Set<string>();
+  for (const text of referenceTexts ?? []) {
+    if (!text) continue;
+    for (const m of text.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*(?:::[A-Za-z_][A-Za-z0-9_]*)+)\b/g)) {
+      const chain = m[1];
+      if (chain.startsWith("std::")) continue;
+      scopeChains.add(chain);
+      const segments = chain.split("::");
+      if (segments.length >= 2) {
+        namespacePrefixes.add(segments.slice(0, -1).join("::"));
+      }
+    }
+  }
+
+  for (const chain of scopeChains) {
+    const dotted = chain.replace(/::/g, "\\.");
+    result = result.replace(new RegExp(`\\b${dotted}\\b`, "g"), chain);
+  }
+
+  for (const nsPrefix of namespacePrefixes) {
+    const dottedNs = nsPrefix.replace(/::/g, "\\.");
+    result = result.replace(
+      new RegExp(`\\b${dottedNs}\\.([A-Za-z_][A-Za-z0-9_]*)\\s*\\(`, "g"),
+      `${nsPrefix}::$1(`,
+    );
+  }
+
+  // 2. Restore C++ parameter qualifiers (const Type& param, Type& param, including template types)
+  if (origHeader) {
+    const openParen = origHeader.indexOf("(");
+    const closeParen = origHeader.lastIndexOf(")");
+    if (openParen >= 0 && closeParen > openParen) {
+      const rawOrigParams = splitTopLevelParams(origHeader.slice(openParen + 1, closeParen));
+      const qualByParamName = new Map<string, { fullDecl: string; normBaseType: string }>();
+      for (const rawParam of rawOrigParams) {
+        const trimmed = rawParam.trim();
+        const pm = trimmed.match(/^(const\s+.+?&|.+?&)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:=.*)?$/s);
+        if (pm) {
+          const qualType = pm[1].trim();
+          const pName = pm[2];
+          const normBaseType = qualType
+            .replace(/^const\s+/, "")
+            .replace(/\s*&\s*$/, "")
+            .replace(/\s+/g, "");
+          qualByParamName.set(pName, { fullDecl: `${qualType} ${pName}`, normBaseType });
+        }
+      }
+
+      if (qualByParamName.size > 0) {
+        const lines = result.split("\n");
+        const firstLine = lines[0] ?? "";
+        const emOpen = firstLine.indexOf("(");
+        const emClose = firstLine.lastIndexOf(")");
+        if (emOpen >= 0 && emClose > emOpen) {
+          const emParams = splitTopLevelParams(firstLine.slice(emOpen + 1, emClose));
+          const updatedParams = emParams.map((emParam) => {
+            const trimmedEm = emParam.trim();
+            const emMatch = trimmedEm.match(/^(.+?)\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:=.*)?$/s);
+            if (!emMatch) return emParam;
+            const emType = emMatch[1].trim();
+            const emName = emMatch[2];
+            const origInfo = qualByParamName.get(emName);
+            if (!origInfo) return emParam;
+            const normEmType = emType
+              .replace(/^const\s+/, "")
+              .replace(/\s*&\s*$/, "")
+              .replace(/\s+/g, "");
+            if (normEmType === origInfo.normBaseType) {
+              const leadingWs = emParam.match(/^\s*/)?.[0] ?? "";
+              return `${leadingWs}${origInfo.fullDecl}`;
+            }
+            return emParam;
+          });
+          lines[0] = `${firstLine.slice(0, emOpen + 1)}${updatedParams.join(",")}${firstLine.slice(emClose)}`;
+          result = lines.join("\n");
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
 function emitExpandedDeclForTarget(
   expandedDecl: FunctionDecl | MethodDecl,
   targetLang: TargetLanguage,
@@ -1983,6 +2103,9 @@ function emitExpandedDeclForTarget(
     goReceiver?: string;
     cppOutOfLine?: boolean;
     origHeader?: string;
+    origSource?: string;
+    rawSnippet?: string;
+    idioms?: Record<string, ProjectIdiomDefinition>;
   },
 ): string {
   const cloned = structuredClone(expandedDecl);
@@ -2061,7 +2184,11 @@ function emitExpandedDeclForTarget(
             `func ${origMeta.goReceiver} ${targetMethodName}(`,
           );
         }
-        if (origMeta?.origHeader && /\bint\b/.test(origMeta.origHeader) && !/\bint64\b/.test(origMeta.origHeader)) {
+        if (
+          origMeta?.origHeader &&
+          /\bint\b/.test(origMeta.origHeader) &&
+          !/\bint64\b/.test(origMeta.origHeader)
+        ) {
           goLines[0] = goLines[0].replace(/\bint64\b/g, "int");
         }
         return goLines.join("\n").trimEnd();
@@ -2095,16 +2222,30 @@ function emitExpandedDeclForTarget(
             `${className}::$1(`,
           );
         }
-        if (inner.length > 0 && origMeta?.origHeader && /\bdouble\b/.test(origMeta.origHeader) && !/\bfloat\b/.test(origMeta.origHeader)) {
+        if (
+          inner.length > 0 &&
+          origMeta?.origHeader &&
+          /\bdouble\b/.test(origMeta.origHeader) &&
+          !/\bfloat\b/.test(origMeta.origHeader)
+        ) {
           inner[0] = inner[0].replace(/\bfloat\b/g, "double");
         }
-        return inner.join("\n").trimEnd();
+        const idiomTexts = origMeta?.idioms
+          ? Object.values(origMeta.idioms).flatMap((id) => [id.templateAice, id.description])
+          : [];
+        return restoreCppQualifiersAndScopes(inner.join("\n").trimEnd(), origMeta?.origHeader, [
+          origMeta?.origSource,
+          origMeta?.rawSnippet,
+          ...idiomTexts,
+        ]);
       }
     }
 
     if (targetLang === "csharp") {
       const clsIdx = lines.findIndex((l) =>
-        /^(?:public\s+|static\s+|partial\s+|internal\s+|sealed\s+|abstract\s+)*class\s+/.test(l.trim()),
+        /^(?:public\s+|static\s+|partial\s+|internal\s+|sealed\s+|abstract\s+)*class\s+/.test(
+          l.trim(),
+        ),
       );
       if (clsIdx >= 0) {
         let startIdx = clsIdx + 1;
@@ -2141,7 +2282,11 @@ function emitExpandedDeclForTarget(
       .slice(1, lines.length - 1)
       .map((l) => (l.startsWith("  ") ? l.slice(2) : l));
 
-    if (innerLines.length > 0 && origMeta?.visibility && (targetLang === "typescript" || targetLang === "javascript")) {
+    if (
+      innerLines.length > 0 &&
+      origMeta?.visibility &&
+      (targetLang === "typescript" || targetLang === "javascript")
+    ) {
       const firstTrimmed = innerLines[0].trimStart();
       if (
         !firstTrimmed.startsWith("public ") &&
@@ -2180,14 +2325,33 @@ function emitExpandedDeclForTarget(
 
   const emittedFn = emitTarget(tempMod, targetLang, { watermark: false }).trim();
   let strippedFn = stripTopLevelLanguagePreamble(emittedFn, targetLang);
-  if (targetLang === "go" && origMeta?.origHeader && /\bint\b/.test(origMeta.origHeader) && !/\bint64\b/.test(origMeta.origHeader)) {
+  if (
+    targetLang === "go" &&
+    origMeta?.origHeader &&
+    /\bint\b/.test(origMeta.origHeader) &&
+    !/\bint64\b/.test(origMeta.origHeader)
+  ) {
     const fnLines = strippedFn.split("\n");
     fnLines[0] = fnLines[0].replace(/\bint64\b/g, "int");
     strippedFn = fnLines.join("\n");
-  } else if (targetLang === "cpp" && origMeta?.origHeader && /\bdouble\b/.test(origMeta.origHeader) && !/\bfloat\b/.test(origMeta.origHeader)) {
-    const fnLines = strippedFn.split("\n");
-    fnLines[0] = fnLines[0].replace(/\bfloat\b/g, "double");
-    strippedFn = fnLines.join("\n");
+  } else if (targetLang === "cpp") {
+    if (
+      origMeta?.origHeader &&
+      /\bdouble\b/.test(origMeta.origHeader) &&
+      !/\bfloat\b/.test(origMeta.origHeader)
+    ) {
+      const fnLines = strippedFn.split("\n");
+      fnLines[0] = fnLines[0].replace(/\bfloat\b/g, "double");
+      strippedFn = fnLines.join("\n");
+    }
+    const idiomTexts = origMeta?.idioms
+      ? Object.values(origMeta.idioms).flatMap((id) => [id.templateAice, id.description])
+      : [];
+    strippedFn = restoreCppQualifiersAndScopes(strippedFn, origMeta?.origHeader, [
+      origMeta?.origSource,
+      origMeta?.rawSnippet,
+      ...idiomTexts,
+    ]);
   }
   return targetLang === "typescript" || targetLang === "javascript"
     ? unwrapRedundantTsParens(strippedFn)
@@ -2233,6 +2397,7 @@ export function spliceNativeSymbolFromExpandedAst(
       goReceiver: spanInfo.goReceiver,
       cppOutOfLine: spanInfo.cppOutOfLine,
       origHeader: spanInfo.origHeader,
+      origSource: nativeSource.slice(spanInfo.declStart, spanInfo.declEnd),
     },
   );
 
@@ -2262,7 +2427,12 @@ function isPureNativeSnippetWithoutIdioms(
     }
     const isTopLevelConstruct =
       /^(?:export\s+)?(?:interface|type|enum|class|function|const|let|var)\b/.test(trimmed);
-    if (!isTopLevelConstruct && !trimmed.includes("{") && !trimmed.includes("=>") && !trimmed.endsWith(";")) {
+    if (
+      !isTopLevelConstruct &&
+      !trimmed.includes("{") &&
+      !trimmed.includes("=>") &&
+      !trimmed.endsWith(";")
+    ) {
       return false;
     }
     const wrapped =
@@ -2324,9 +2494,7 @@ function isPureNativeSnippetWithoutIdioms(
   return false;
 }
 
-function normalizeFrankensteinSnippetToAice(
-  snippet: string,
-): {
+function normalizeFrankensteinSnippetToAice(snippet: string): {
   normalizedAice: string;
   explicitVisibility?: "public" | "private" | "protected";
   isExported?: boolean;
@@ -2366,13 +2534,12 @@ function normalizeFrankensteinSnippetToAice(
       header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
     }
 
-    const accMatch = header.match(/^\s*(?:pub\s+)?(?:static\s+)?(get|set)\s+(?:fn\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/);
+    const accMatch = header.match(
+      /^\s*(?:pub\s+)?(?:static\s+)?(get|set)\s+(?:fn\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/,
+    );
     if (accMatch) {
       explicitAccessor = accMatch[1] as "get" | "set";
-      header = header.replace(
-        /^(\s*(?:pub\s+)?(?:static\s+)?)(?:get|set)\s+(?:fn\s+)?/,
-        "$1fn ",
-      );
+      header = header.replace(/^(\s*(?:pub\s+)?(?:static\s+)?)(?:get|set)\s+(?:fn\s+)?/, "$1fn ");
       header = header.replace(/\)\s*:\s*([^{:]+)\s*(:|\{)\s*$/, ") -> $1$2");
     }
 
@@ -2439,9 +2606,15 @@ function convertFrankensteinToNativeForDecompile(
           .replace(/\)\s*->\s*([^{:]+)\s*\{\s*$/, "): $1 {");
       }
       out = out
-        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*:=\s*(.+)$/, "$1const $2: $3 = $4")
+        .replace(
+          /^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*:=\s*(.+)$/,
+          "$1const $2: $3 = $4",
+        )
         .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*(.+)$/, "$1const $2 = $3")
-        .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*::=\s*(.+)$/, "$1let $2: $3 = $4")
+        .replace(
+          /^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*::=\s*(.+)$/,
+          "$1let $2: $3 = $4",
+        )
         .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*(.+)$/, "$1let $2 = $3")
         .replace(/^(\s*)ret\b/, "$1return");
       return out;
@@ -2557,17 +2730,14 @@ function parseSnippetToExpandedDecl(
       const wrappedBodyAice = `fn __body_holder__():\n${indentCode(bodyLines.join("\n"), "  ")}`;
       const bodyMod = parse(wrappedBodyAice, filePath);
       const expandedBodyMod =
-        idioms && Object.keys(idioms).length > 0
-          ? expandModuleIdioms(bodyMod, idioms)
-          : bodyMod;
+        idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(bodyMod, idioms) : bodyMod;
       holderFn = expandedBodyMod.items.find(
         (it): it is FunctionDecl => it.kind === "FunctionDecl" && it.name === "__body_holder__",
       );
     } catch (bodyErr) {
       lastErr = lastErr ?? bodyErr;
       try {
-        const decompLang =
-          targetLang === "python" ? "python" : "typescript";
+        const decompLang = targetLang === "python" ? "python" : "typescript";
         const nativeBody = convertFrankensteinToNativeForDecompile(rawSnippet, decompLang, true);
         const wrappedNativeBody =
           decompLang === "python"
@@ -2577,9 +2747,7 @@ function parseSnippetToExpandedDecl(
         const restoredAice = restorePythonIdiomPlaceholders(decompBody.aice);
         const bodyMod = parse(restoredAice, filePath);
         const expandedBodyMod =
-          idioms && Object.keys(idioms).length > 0
-            ? expandModuleIdioms(bodyMod, idioms)
-            : bodyMod;
+          idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(bodyMod, idioms) : bodyMod;
         holderFn = expandedBodyMod.items.find(
           (it): it is FunctionDecl => it.kind === "FunctionDecl" && it.name === "__body_holder__",
         );
@@ -2650,11 +2818,7 @@ function parseSnippetToExpandedDecl(
   if (!hasFnOrClassDecl(parsedMod)) {
     try {
       const decompLang = targetLang === "python" ? "python" : "typescript";
-      const preparedNative = convertFrankensteinToNativeForDecompile(
-        rawSnippet,
-        decompLang,
-        false,
-      );
+      const preparedNative = convertFrankensteinToNativeForDecompile(rawSnippet, decompLang, false);
       const wrappedNative =
         className && decompLang === "typescript"
           ? `class ${className} {\n${preparedNative}\n}`
@@ -2675,9 +2839,7 @@ function parseSnippetToExpandedDecl(
 
   // Expand project idioms (always expand even if idiomsEnabled is false -> Stale AI Memory Grace!)
   const expandedMod =
-    idioms && Object.keys(idioms).length > 0
-      ? expandModuleIdioms(parsedMod, idioms)
-      : parsedMod;
+    idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(parsedMod, idioms) : parsedMod;
 
   for (const item of expandedMod.items) {
     if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
@@ -2694,7 +2856,9 @@ function parseSnippetToExpandedDecl(
     }
   }
 
-  throw new Error(`No valid function or method declaration found in splice snippet for ${filePath}`);
+  throw new Error(
+    `No valid function or method declaration found in splice snippet for ${filePath}`,
+  );
 }
 
 function emitNativeSnippetForContext(
@@ -2707,10 +2871,7 @@ function emitNativeSnippetForContext(
   isBodyOnly: boolean,
   effectiveClassName?: string,
 ): string {
-  if (
-    !isBodyOnly &&
-    isPureNativeSnippetWithoutIdioms(rawSnippet, targetLang, effectiveClassName)
-  ) {
+  if (!isBodyOnly && isPureNativeSnippetWithoutIdioms(rawSnippet, targetLang, effectiveClassName)) {
     return rawSnippet.trim();
   }
 
@@ -2744,7 +2905,7 @@ function emitNativeSnippetForContext(
       isBodyOnly,
     );
 
-  let emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
+  const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
     visibility: spanInfo?.visibility ?? explicitVisibility,
     isExported: spanInfo?.isExported ?? isExported,
     isStatic: spanInfo?.isStatic,
@@ -2754,25 +2915,10 @@ function emitNativeSnippetForContext(
     goReceiver: spanInfo?.goReceiver,
     cppOutOfLine: spanInfo?.cppOutOfLine,
     origHeader: spanInfo?.origHeader,
+    origSource: originalSnippet,
+    rawSnippet,
+    idioms,
   });
-
-  if (targetLang === "cpp" && originalSnippet) {
-    for (const m of originalSnippet.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)::([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)) {
-      const ns = m[1];
-      const fn = m[2];
-      emitted = emitted.replace(new RegExp(`\\b${ns}\\.${fn}\\s*\\(`, "g"), `${ns}::${fn}(`);
-    }
-    if (spanInfo?.origHeader) {
-      const headerMatch = spanInfo.origHeader.match(/^[^{]+\([^)]*\)/);
-      if (headerMatch) {
-        for (const pm of headerMatch[0].matchAll(/\bconst\s+([A-Za-z_][A-Za-z0-9_:<>]*)\s*&\s*([A-Za-z_][A-Za-z0-9_]*)\b/g)) {
-          const tName = pm[1];
-          const pName = pm[2];
-          emitted = emitted.replace(new RegExp(`\\b${tName}\\s+${pName}\\b`), `const ${tName}& ${pName}`);
-        }
-      }
-    }
-  }
 
   if (leadingDecorators.length > 0) {
     return `${leadingDecorators.join("\n")}\n${emitted}`;
@@ -2807,7 +2953,8 @@ function spliceDialectNativeSource(
         ? trimmed
         : `style ${selectorFallback}:\n${indentCode(trimmed, "  ")}`;
       const mod = parse(aiceText, filePath);
-      const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+      const expanded =
+        idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
       return emitTarget(expanded, "css", { watermark: false }).trim();
     };
 
@@ -2821,7 +2968,10 @@ function spliceDialectNativeSource(
         newSnippet: emitted,
         modifiedCode,
         newAiceSource: modifiedCode,
-        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
+        tokensSaved: Math.max(
+          0,
+          estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted),
+        ),
       };
     }
 
@@ -2838,7 +2988,8 @@ function spliceDialectNativeSource(
       if (
         sel === anchorSymbol.trim() ||
         cleanSel === cleanAnchor ||
-        cleanSel.replace(/[-_]/g, "").toLowerCase() === cleanAnchor.replace(/[-_]/g, "").toLowerCase()
+        cleanSel.replace(/[-_]/g, "").toLowerCase() ===
+          cleanAnchor.replace(/[-_]/g, "").toLowerCase()
       ) {
         matchedRule = rule;
       }
@@ -2856,7 +3007,10 @@ function spliceDialectNativeSource(
 
     if (options.delete) {
       let delEnd = endOffset;
-      while (delEnd < nativeSource.length && (nativeSource[delEnd] === "\r" || nativeSource[delEnd] === "\n")) {
+      while (
+        delEnd < nativeSource.length &&
+        (nativeSource[delEnd] === "\r" || nativeSource[delEnd] === "\n")
+      ) {
         delEnd++;
       }
       modifiedCode = `${nativeSource.slice(0, startOffset)}${nativeSource.slice(delEnd)}`;
@@ -2881,7 +3035,10 @@ function spliceDialectNativeSource(
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
       newAiceSource: modifiedCode,
-      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+      tokensSaved: Math.max(
+        0,
+        estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+      ),
     };
   }
 
@@ -2889,17 +3046,18 @@ function spliceDialectNativeSource(
     const parseSnippetMeta = (): { declName?: string; value: any } => {
       const trimmed = rawSnippet
         .trim()
-        .replace(/^(?:pub\s+)?(?:const|val|mut|let)?\s*(?:config\.)([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|=)\s*/, "pub const $1 = ");
+        .replace(
+          /^(?:pub\s+)?(?:const|val|mut|let)?\s*(?:config\.)([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|=)\s*/,
+          "pub const $1 = ",
+        );
       if (!trimmed) return { value: {} };
       const hasExplicitDecl = /^(?:pub\s+)?(?:const|val|mut)\s+/.test(trimmed);
-      const candidates = [
-        trimmed,
-        hasExplicitDecl ? trimmed : `pub const __v = ${trimmed}`,
-      ];
+      const candidates = [trimmed, hasExplicitDecl ? trimmed : `pub const __v = ${trimmed}`];
       for (const cand of candidates) {
         try {
           const mod = parse(cand, filePath);
-          const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+          const expanded =
+            idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
           const first = expanded.items[0];
           if (first && (first.kind === "ConstDecl" || first.kind === "VarDecl")) {
             return {
@@ -2909,7 +3067,11 @@ function spliceDialectNativeSource(
           }
           if (first && first.kind === "FunctionDecl" && "statements" in first.body) {
             const st = first.body.statements[0];
-            if (st && st.kind === "LetBinding") return { declName: st.name !== "__v" ? st.name : undefined, value: astToValue(st.init) };
+            if (st && st.kind === "LetBinding")
+              return {
+                declName: st.name !== "__v" ? st.name : undefined,
+                value: astToValue(st.init),
+              };
             if (st && st.kind === "AssignStmt") return { value: astToValue(st.value) };
             if (st && st.kind === "ExprStmt") return { value: astToValue(st.expr) };
           }
@@ -2924,7 +3086,9 @@ function spliceDialectNativeSource(
     };
 
     if (!anchorSymbol && !options.append) {
-      throw new Error(`Must specify target key with --symbol when splicing ${targetLang.toUpperCase()} file`);
+      throw new Error(
+        `Must specify target key with --symbol when splicing ${targetLang.toUpperCase()} file`,
+      );
     }
 
     if (targetLang === "yaml") {
@@ -2950,10 +3114,15 @@ function spliceDialectNativeSource(
           success: true,
           filePath,
           newSnippet,
-          diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+          diff: options.diff
+            ? generateUnifiedDiff(filePath, nativeSource, modifiedCode)
+            : undefined,
           modifiedCode,
           newAiceSource: modifiedCode,
-          tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+          tokensSaved: Math.max(
+            0,
+            estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+          ),
         };
       }
 
@@ -2962,8 +3131,15 @@ function spliceDialectNativeSource(
         keyParts.shift();
       }
 
-      const isRootConfig = keyParts.length === 1 && keyParts[0] === "config" && !doc.hasIn(["config"]);
-      if (!options.append && !options.insertAfter && !options.insertBefore && !isRootConfig && !doc.hasIn(keyParts)) {
+      const isRootConfig =
+        keyParts.length === 1 && keyParts[0] === "config" && !doc.hasIn(["config"]);
+      if (
+        !options.append &&
+        !options.insertAfter &&
+        !options.insertBefore &&
+        !isRootConfig &&
+        !doc.hasIn(keyParts)
+      ) {
         throw new Error(`Key '${anchorSymbol}' not found in ${filePath}`);
       }
 
@@ -3030,7 +3206,10 @@ function spliceDialectNativeSource(
         diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
         modifiedCode,
         newAiceSource: modifiedCode,
-        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+        tokensSaved: Math.max(
+          0,
+          estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+        ),
       };
     }
 
@@ -3063,7 +3242,10 @@ function spliceDialectNativeSource(
         diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
         modifiedCode,
         newAiceSource: modifiedCode,
-        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+        tokensSaved: Math.max(
+          0,
+          estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+        ),
       };
     }
 
@@ -3085,7 +3267,13 @@ function spliceDialectNativeSource(
     }
 
     const leafKey = keyParts[keyParts.length - 1];
-    if (!options.append && !options.insertAfter && !options.insertBefore && !(leafKey in parent) && !(keyParts.length === 1 && leafKey === "config")) {
+    if (
+      !options.append &&
+      !options.insertAfter &&
+      !options.insertBefore &&
+      !(leafKey in parent) &&
+      !(keyParts.length === 1 && leafKey === "config")
+    ) {
       throw new Error(`Key '${anchorSymbol}' not found in ${filePath}`);
     }
 
@@ -3117,7 +3305,12 @@ function spliceDialectNativeSource(
         parent[leafKey] = options.insertBefore
           ? [...itemsToAdd, ...origVal]
           : [...origVal, ...itemsToAdd];
-      } else if (leafKey === "config" && !(leafKey in parent) && typeof newVal === "object" && newVal !== null) {
+      } else if (
+        leafKey === "config" &&
+        !(leafKey in parent) &&
+        typeof newVal === "object" &&
+        newVal !== null
+      ) {
         docObj = newVal;
       } else {
         parent[leafKey] = newVal;
@@ -3136,7 +3329,10 @@ function spliceDialectNativeSource(
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
       newAiceSource: modifiedCode,
-      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+      tokensSaved: Math.max(
+        0,
+        estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+      ),
     };
   }
 
@@ -3173,7 +3369,8 @@ function spliceDialectNativeSource(
         ? trimmed
         : `component __Frag():\n${indentCode(trimmed, "  ")}`;
       const mod = parse(aiceText, filePath);
-      const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+      const expanded =
+        idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
       let emitted = emitTarget(expanded, targetLang, { watermark: false }).trim();
       if (targetLang === "html") {
         emitted = emitted.replace(/^<!DOCTYPE html>\s*/i, "").trim();
@@ -3190,12 +3387,17 @@ function spliceDialectNativeSource(
         newSnippet: emitted,
         modifiedCode,
         newAiceSource: modifiedCode,
-        tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted)),
+        tokensSaved: Math.max(
+          0,
+          estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted),
+        ),
       };
     }
 
     if (!anchorSymbol) {
-      throw new Error(`Must specify target selector with --symbol when splicing ${targetLang.toUpperCase()} file`);
+      throw new Error(
+        `Must specify target selector with --symbol when splicing ${targetLang.toUpperCase()} file`,
+      );
     }
 
     let sel = anchorSymbol.trim();
@@ -3211,14 +3413,17 @@ function spliceDialectNativeSource(
       !sel.startsWith("block:") &&
       /^[A-Z]/.test(sel)
     ) {
-      if (isTopLevelCompSnippet && !options.insertBefore && !options.insertAfter && !options.delete) {
+      if (
+        isTopLevelCompSnippet &&
+        !options.insertBefore &&
+        !options.insertAfter &&
+        !options.delete
+      ) {
         const doctypeMatch = nativeSource.match(/^<!DOCTYPE html>\s*/i);
         spanStart = doctypeMatch ? doctypeMatch[0].length : 0;
         spanEnd = nativeSource.length;
       } else {
-        const blkMatch = rawSnippet.match(
-          /\bblock(?:\s*\(\s*name\s*[:=]\s*|\s+)["']([^"']+)["']/,
-        );
+        const blkMatch = rawSnippet.match(/\bblock(?:\s*\(\s*name\s*[:=]\s*|\s+)["']([^"']+)["']/);
         const idMatch = rawSnippet.match(/\bid\s*[:=]\s*["']([^"']+)["']/);
         if (blkMatch) {
           sel = blkMatch[1];
@@ -3280,7 +3485,9 @@ function spliceDialectNativeSource(
         if (
           (sel.startsWith("#") && isIdMatch) ||
           (sel.startsWith(".") && isClassMatch) ||
-          (!sel.startsWith("#") && !sel.startsWith(".") && (isTagMatch || isIdMatch || isClassMatch))
+          (!sel.startsWith("#") &&
+            !sel.startsWith(".") &&
+            (isTagMatch || isIdMatch || isClassMatch))
         ) {
           spanStart = match.index;
           const lowerTag = tag.toLowerCase();
@@ -3288,10 +3495,7 @@ function spliceDialectNativeSource(
             spanEnd = match.index + match[0].length;
           } else {
             const escTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const tagRe = new RegExp(
-              `<(\\/?)${escTag}\\b((?:[^>"']|"[^"]*"|'[^']*')*)>`,
-              "gi",
-            );
+            const tagRe = new RegExp(`<(\\/?)${escTag}\\b((?:[^>"']|"[^"]*"|'[^']*')*)>`, "gi");
             tagRe.lastIndex = match.index + match[0].length;
             let depth = 1;
             let tMatch: RegExpExecArray | null = null;
@@ -3345,7 +3549,10 @@ function spliceDialectNativeSource(
       diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
       modifiedCode,
       newAiceSource: modifiedCode,
-      tokensSaved: Math.max(0, estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet)),
+      tokensSaved: Math.max(
+        0,
+        estimateTokens(modifiedCode) - estimateTokens(rawSnippet || newSnippet),
+      ),
     };
   }
 
@@ -3366,7 +3573,13 @@ export function spliceNativeSource(
     targetLang === "html" ||
     targetLang === "twig"
   ) {
-    const dialectRes = spliceDialectNativeSource(nativeSource, options, filePath, targetLang, idioms);
+    const dialectRes = spliceDialectNativeSource(
+      nativeSource,
+      options,
+      filePath,
+      targetLang,
+      idioms,
+    );
     if (dialectRes) return dialectRes;
   }
 
@@ -3390,7 +3603,9 @@ export function spliceNativeSource(
     );
     const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
     const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
-    const diff = options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined;
+    const diff = options.diff
+      ? generateUnifiedDiff(filePath, nativeSource, modifiedCode)
+      : undefined;
     const snippetTokens = estimateTokens(emitted);
     const modifiedTokens = estimateTokens(modifiedCode);
     return {
@@ -3408,13 +3623,12 @@ export function spliceNativeSource(
     throw new Error("Must specify target symbol with --symbol when splicing native file");
   }
 
-  const preferAccessor: "get" | "set" | undefined = /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(
-    rawSnippet,
-  )
-    ? "get"
-    : /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?set\b/.test(rawSnippet)
-      ? "set"
-      : undefined;
+  const preferAccessor: "get" | "set" | undefined =
+    /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(rawSnippet)
+      ? "get"
+      : /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?set\b/.test(rawSnippet)
+        ? "set"
+        : undefined;
 
   const spanInfo = locateNativeDeclarationSpan(
     nativeSource,
@@ -3464,7 +3678,11 @@ export function spliceNativeSource(
       throw new Error("Must provide non-empty --code when appending to class in native file");
     }
     const memberIndent =
-      targetLang === "python" || targetLang === "rust" || targetLang === "csharp" || targetLang === "kotlin" || targetLang === "php"
+      targetLang === "python" ||
+      targetLang === "rust" ||
+      targetLang === "csharp" ||
+      targetLang === "kotlin" ||
+      targetLang === "php"
         ? `${spanInfo.declIndent}    `
         : `${spanInfo.declIndent}  `;
     const emittedUnindented = emitNativeSnippetForContext(
@@ -3483,7 +3701,8 @@ export function spliceNativeSource(
     } else {
       const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
       const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
-      const insertPos = lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;
+      const insertPos =
+        lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;
       modifiedCode = `${nativeSource.slice(0, insertPos)}\n${newSnippet}\n${nativeSource.slice(insertPos)}`;
     }
   } else {
@@ -3491,9 +3710,10 @@ export function spliceNativeSource(
       throw new Error("Must provide non-empty --code or --body when splicing native file");
     }
 
-    const replaceStart = rawSnippet.trimStart().startsWith("@") || rawSnippet.trimStart().startsWith("#[")
-      ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
-      : spanInfo.declStart;
+    const replaceStart =
+      rawSnippet.trimStart().startsWith("@") || rawSnippet.trimStart().startsWith("#[")
+        ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
+        : spanInfo.declStart;
 
     const isBodyOnly = options.body !== undefined && options.code === undefined;
     const emittedUnindented = emitNativeSnippetForContext(
@@ -3624,9 +3844,7 @@ export async function spliceBatch(
   // Snapshot original contents of all existing target files before applying any changes
   for (const item of items) {
     const rawFp = item.filePath || item.file || item.path || "";
-    const fullPath = path.isAbsolute(rawFp)
-      ? rawFp
-      : path.resolve(baseDir, rawFp);
+    const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
       backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
@@ -3639,12 +3857,7 @@ export async function spliceBatch(
     for (const item of items) {
       const rawFp = item.filePath || item.file || item.path || "";
       const resolvedCode =
-        item.code ??
-        item.aice ??
-        item.template ??
-        item.snippet ??
-        item.content ??
-        item.replacement;
+        item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
       const res = await splice(rawFp, {
         ...item,
         code: resolvedCode,

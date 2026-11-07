@@ -509,9 +509,9 @@ export class Enemy {
         },
       });
 
-      await expect(
-        updateProjectIdiom(tmpDir, "$beta", "$alpha($0)"),
-      ).rejects.toThrow(IdiomCycleError);
+      await expect(updateProjectIdiom(tmpDir, "$beta", "$alpha($0)")).rejects.toThrow(
+        IdiomCycleError,
+      );
     });
 
     it("atomically rolls back all files and config if a multi-file idiom update fails mid-flight", async () => {
@@ -589,7 +589,11 @@ export class Enemy {
     it("resolves project root when scanning a subdirectory (e.g. 'src/') and reading from root", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      fs.writeFileSync(path.join(tmpDir, "package.json"), JSON.stringify({ name: "sub-test" }), "utf-8");
+      fs.writeFileSync(
+        path.join(tmpDir, "package.json"),
+        JSON.stringify({ name: "sub-test" }),
+        "utf-8",
+      );
 
       const tsCode = `export class Audio {
   playA() {
@@ -626,4 +630,3 @@ export class Enemy {
     });
   });
 });
-

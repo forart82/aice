@@ -9,7 +9,7 @@
 
 import ts from "../compat/typescript.js";
 import type { Module } from "../core/ast.js";
-import { parse, parseWithTrivia } from "../core/parser.js";
+import { parseWithTrivia } from "../core/parser.js";
 import { type CstTriviaTable, createAstNodeSnapshot, getNodeTriviaId } from "../core/trivia.js";
 import { emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { AiceGenerator } from "./aice-generator.js";
@@ -261,11 +261,7 @@ function preserveTypeScriptSourceSlices(
   }
 }
 
-function preservePythonSourceSlices(
-  source: string,
-  ast: Module,
-  trivia: CstTriviaTable,
-): void {
+function preservePythonSourceSlices(source: string, ast: Module, trivia: CstTriviaTable): void {
   for (const item of ast.items) {
     const nodeId = getNodeTriviaId(item);
     if (nodeId && item.span && item.span.start.offset < item.span.end.offset) {
@@ -275,11 +271,7 @@ function preservePythonSourceSlices(
   }
 }
 
-function preserveKotlinSourceSlices(
-  source: string,
-  ast: Module,
-  trivia: CstTriviaTable,
-): void {
+function preserveKotlinSourceSlices(source: string, ast: Module, trivia: CstTriviaTable): void {
   for (const item of ast.items) {
     const nodeId = getNodeTriviaId(item);
     if (nodeId && item.span && item.span.start.offset < item.span.end.offset) {
@@ -288,4 +280,3 @@ function preserveKotlinSourceSlices(
     }
   }
 }
-

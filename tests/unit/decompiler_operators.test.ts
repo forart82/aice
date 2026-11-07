@@ -18,7 +18,6 @@ import type {
   CallExpr,
   ClosureExpr,
   ConstDecl,
-  ExprStmt,
   FunctionDecl,
   IdentifierExpr,
   IfStmt,

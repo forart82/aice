@@ -19,11 +19,7 @@ import {
 } from "../src/config/index.js";
 import { parse, parseWithTrivia } from "../src/core/parser.js";
 import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  type TargetLanguage,
-} from "../src/emitters/index.js";
+import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../src/emitters/index.js";
 import { AiceMcpServer } from "../src/mcp/index.js";
 import {
   applyProjectIdiomsToDirectory,
@@ -75,7 +71,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.8.3");
+  .version("0.8.4");
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -488,7 +484,9 @@ program
 
         const mod = parse(source, file);
         const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(fullPath)));
-        const expandedMod = projectConfig.idioms ? expandModuleIdioms(mod, projectConfig.idioms) : mod;
+        const expandedMod = projectConfig.idioms
+          ? expandModuleIdioms(mod, projectConfig.idioms)
+          : mod;
         const tc = new TypeChecker();
         tc.checkModule(expandedMod);
 
@@ -859,7 +857,13 @@ program
   .action(
     async (
       targetPath: string | undefined,
-      options: { depth?: number; types?: boolean; idioms?: boolean; json?: boolean; stats?: boolean },
+      options: {
+        depth?: number;
+        types?: boolean;
+        idioms?: boolean;
+        json?: boolean;
+        stats?: boolean;
+      },
     ) => {
       try {
         const resolved = resolvePathTargets(targetPath, { includeTargets: true });
@@ -992,7 +996,10 @@ program
   .option("-d, --delete [symbol]", "Delete the symbol (or specify an additional symbol to delete)")
   .option("--insert-after <symbol>", "Insert after specified symbol")
   .option("--insert-before <symbol>", "Insert before specified symbol")
-  .option("--batch <fileOrJson>", "Execute atomic multi-file batch splice from JSON file or JSON string")
+  .option(
+    "--batch <fileOrJson>",
+    "Execute atomic multi-file batch splice from JSON file or JSON string",
+  )
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .option("--in-place", "Apply splice mutation directly to the file on disk (default)")
@@ -1039,9 +1046,7 @@ program
           ) as unknown as BatchSpliceItem[];
           const idiomItems = allEntries.filter(
             (e) =>
-              !e.file &&
-              !e.filePath &&
-              (typeof e.name === "string" || typeof e.idiom === "string"),
+              !e.file && !e.filePath && (typeof e.name === "string" || typeof e.idiom === "string"),
           );
           if (spliceItems.length > 0) {
             const batchRes = await spliceBatch(spliceItems, {
@@ -1106,7 +1111,11 @@ program
         let isPrimaryDelete = false;
 
         if (typeof options.delete === "string") {
-          if ((code !== undefined || options.body !== undefined) && options.symbol && options.symbol !== options.delete) {
+          if (
+            (code !== undefined || options.body !== undefined) &&
+            options.symbol &&
+            options.symbol !== options.delete
+          ) {
             extraDeleteSymbol = options.delete;
             isPrimaryDelete = false;
           } else {
@@ -1373,7 +1382,10 @@ program
     "[oldPath]",
     "Path to target or baseline .aice source file or directory (omitted for workspace diff against git HEAD)",
   )
-  .argument("[newPath]", "Path to new .aice source file (optional; defaults to git HEAD comparison)")
+  .argument(
+    "[newPath]",
+    "Path to new .aice source file (optional; defaults to git HEAD comparison)",
+  )
   .option("--ast", "Output AST symbol differences only")
   .option("--unified", "Output standard unified diff")
   .option("--json", "Output JSON summary of changes")
@@ -1605,7 +1617,10 @@ program
     (val) => Number.parseInt(val, 10),
     10,
   )
-  .option("-c, --code <template>", "New AICE template for `aice idioms update <$name> -c <template>`")
+  .option(
+    "-c, --code <template>",
+    "New AICE template for `aice idioms update <$name> -c <template>`",
+  )
   .option("--batch <fileOrJson>", "Batch update multiple idioms from JSON object or array")
   .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
@@ -1689,9 +1704,10 @@ program
 
         if (action === "update") {
           if (options.batch) {
-            const batchDir = idiomNameArg && fs.existsSync(path.resolve(process.cwd(), idiomNameArg))
-              ? path.resolve(process.cwd(), idiomNameArg)
-              : process.cwd();
+            const batchDir =
+              idiomNameArg && fs.existsSync(path.resolve(process.cwd(), idiomNameArg))
+                ? path.resolve(process.cwd(), idiomNameArg)
+                : process.cwd();
             const batchPath = path.resolve(process.cwd(), options.batch);
             const rawJson =
               fs.existsSync(batchPath) && fs.statSync(batchPath).isFile()
@@ -1746,7 +1762,7 @@ program
 
           if (!idiomNameArg) {
             console.error(
-              "❌ Error: Must specify idiom name: `aice idioms update <$name> -c \"<template>\" [dir]`",
+              '❌ Error: Must specify idiom name: `aice idioms update <$name> -c "<template>" [dir]`',
             );
             process.exit(1);
           }
@@ -1847,6 +1863,18 @@ program
               // ignore
             }
           }
+          const idiomsJsonPath = path.join(rootDir, ".aice-idioms.json");
+          if (fs.existsSync(idiomsJsonPath)) {
+            try {
+              fs.writeFileSync(
+                idiomsJsonPath,
+                `${JSON.stringify({ idioms: {} }, null, 2)}\n`,
+                "utf-8",
+              );
+            } catch {
+              // ignore
+            }
+          }
 
           if (isJson) {
             console.log(JSON.stringify(res, null, 2));
@@ -1874,7 +1902,9 @@ program
           console.log(
             `\n=== Active Project Idioms: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
-          console.log(`Idioms Status: ${isProjectIdiomsEnabled(config) ? "ON (enabled)" : "OFF (disabled)"}`);
+          console.log(
+            `Idioms Status: ${isProjectIdiomsEnabled(config) ? "ON (enabled)" : "OFF (disabled)"}`,
+          );
           const count = Object.keys(idioms).length;
           console.log(`Total Idioms: ${count}`);
           if (count === 0) {

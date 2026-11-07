@@ -23,8 +23,6 @@ import {
   verifyFileParity,
 } from "../../src/tools/index.js";
 
-const TEST_CASE_DIR = "/home/forart/dev/aice_test_case";
-
 describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
   let tmpExamplesDir: string;
 
@@ -35,6 +33,34 @@ describe("Step 29: Automated Multi-File Roundtrip Parity Gate", () => {
     fs.mkdirSync(path.join(tmpExamplesDir, "php"), { recursive: true });
     fs.mkdirSync(path.join(tmpExamplesDir, "python"), { recursive: true });
     fs.mkdirSync(path.join(tmpExamplesDir, "kotlin"), { recursive: true });
+    fs.mkdirSync(path.join(tmpExamplesDir, "cpp"), { recursive: true });
+    fs.mkdirSync(path.join(tmpExamplesDir, "csharp"), { recursive: true });
+
+    fs.writeFileSync(
+      path.join(tmpExamplesDir, "cpp/StringHelper.cpp"),
+      `#include <string>
+
+int computeLength(int baseLen, int pad) {
+    return baseLen + pad;
+}
+`,
+      "utf-8",
+    );
+
+    fs.writeFileSync(
+      path.join(tmpExamplesDir, "csharp/FoodItem.cs"),
+      `public class FoodItem {
+    public string Name { get; set; }
+    public int Calories { get; set; }
+
+    public FoodItem(string name, int calories) {
+        this.Name = name;
+        this.Calories = calories;
+    }
+}
+`,
+      "utf-8",
+    );
 
     fs.writeFileSync(
       path.join(tmpExamplesDir, "auth_service.ts"),
@@ -366,8 +392,7 @@ data class UserEntity(
     });
 
     it("3. C++ (.cpp) satisfies AST equivalence and multi-round convergence", async () => {
-      const filePath = path.join(TEST_CASE_DIR, "src/case42/src/helpers/StringHelper.cpp");
-      if (!fs.existsSync(filePath)) return;
+      const filePath = path.join(tmpExamplesDir, "cpp/StringHelper.cpp");
 
       const res = await verifyFileParity(filePath);
       expect(res.decompileOk).toBe(true);
@@ -379,8 +404,7 @@ data class UserEntity(
     });
 
     it("4. C# (.cs) satisfies AST equivalence and multi-round convergence", async () => {
-      const filePath = path.join(TEST_CASE_DIR, "src/case43/godot/src/Sim/FoodItem.cs");
-      if (!fs.existsSync(filePath)) return;
+      const filePath = path.join(tmpExamplesDir, "csharp/FoodItem.cs");
 
       const res = await verifyFileParity(filePath);
       expect(res.decompileOk).toBe(true);
@@ -494,8 +518,8 @@ data class UserEntity(
       const multiLangFiles = [
         path.join(tmpExamplesDir, "auth_service.ts"),
         path.join(tmpExamplesDir, "dashboard_card.tsx"),
-        path.join(TEST_CASE_DIR, "src/case42/src/helpers/StringHelper.cpp"),
-        path.join(TEST_CASE_DIR, "src/case43/godot/src/Sim/FoodItem.cs"),
+        path.join(tmpExamplesDir, "cpp/StringHelper.cpp"),
+        path.join(tmpExamplesDir, "csharp/FoodItem.cs"),
         path.join(tmpExamplesDir, "style.css"),
         path.join(tmpExamplesDir, "page.html"),
         path.join(tmpExamplesDir, "data_config/sample.json"),
@@ -504,11 +528,11 @@ data class UserEntity(
         path.join(tmpExamplesDir, "php/OrderStatus.php"),
         path.join(tmpExamplesDir, "python/dataclass_sample.py"),
         path.join(tmpExamplesDir, "kotlin/UserEntity.kt"),
-      ].filter((f) => fs.existsSync(f));
+      ];
 
       const summary = await runParityGate(multiLangFiles);
 
-      expect(summary.totalFiles).toBeGreaterThanOrEqual(10);
+      expect(summary.totalFiles).toBe(12);
       expect(summary.failed).toBe(0);
       expect(summary.parityRate).toBe(100);
       expect(summary.passedBitIdentical + summary.passedAstEquivalent).toBe(summary.totalFiles);
@@ -520,6 +544,8 @@ data class UserEntity(
 
       const expectedLangs = [
         "typescript",
+        "cpp",
+        "csharp",
         "css",
         "html",
         "json",
@@ -550,23 +576,15 @@ data class UserEntity(
       }
     });
 
-    it("runs parity gate across real-world case studies in /home/forart/dev/aice_test_case", async () => {
+    it("runs parity gate across multi-language case studies (TS, C++, C#, PHP, Python, Kotlin)", async () => {
       const realWorldCases = [
-        path.join(TEST_CASE_DIR, "src/case03/src/core/MathX.ts"),
-        path.join(TEST_CASE_DIR, "src/case03/src/core/Vec2.ts"),
-        path.join(TEST_CASE_DIR, "src/case49/src/App.tsx"),
-        path.join(TEST_CASE_DIR, "src/case42/src/helpers/StringHelper.cpp"),
-        path.join(TEST_CASE_DIR, "src/case42/src/helpers/MathHelper.cpp"),
-        path.join(TEST_CASE_DIR, "src/case43/godot/src/Sim/FoodItem.cs"),
-        path.join(TEST_CASE_DIR, "src/case51/Order.php"),
-        path.join(TEST_CASE_DIR, "src/case51/CustomerService.php"),
-        path.join(TEST_CASE_DIR, "src/case52/UserEntity.py"),
-        path.join(TEST_CASE_DIR, "src/case52/AsyncPipeline.py"),
-        path.join(TEST_CASE_DIR, "src/case53/ProductEntity.kt"),
-        path.join(TEST_CASE_DIR, "src/case53/ProductRepository.kt"),
-      ].filter((f) => fs.existsSync(f));
-
-      if (realWorldCases.length === 0) return;
+        path.join(tmpExamplesDir, "auth_service.ts"),
+        path.join(tmpExamplesDir, "cpp/StringHelper.cpp"),
+        path.join(tmpExamplesDir, "csharp/FoodItem.cs"),
+        path.join(tmpExamplesDir, "php/OrderStatus.php"),
+        path.join(tmpExamplesDir, "python/dataclass_sample.py"),
+        path.join(tmpExamplesDir, "kotlin/UserEntity.kt"),
+      ];
 
       const summary = await runParityGate(realWorldCases);
       expect(summary.failed).toBe(0);
@@ -686,7 +704,14 @@ data class UserEntity(
     it("executes 'aice verify --parity <file> --json' producing valid machine-readable JSON", () => {
       const child = spawnSync(
         "bun",
-        ["run", binPath, "verify", "--parity", path.join(tmpExamplesDir, "auth_service.ts"), "--json"],
+        [
+          "run",
+          binPath,
+          "verify",
+          "--parity",
+          path.join(tmpExamplesDir, "auth_service.ts"),
+          "--json",
+        ],
         {
           encoding: "utf-8",
           cwd: process.cwd(),

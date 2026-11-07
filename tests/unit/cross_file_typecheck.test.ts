@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
-import { check, TypeChecker, TypeCheckError } from "../../src/typechecker/checker.js";
+import { TypeChecker, TypeCheckError } from "../../src/typechecker/checker.js";
 import { generateCandidateRepair } from "../../src/typechecker/diagnostics.js";
 import { createPosition, createSpan } from "../../src/core/span.js";
 
@@ -442,7 +442,9 @@ fn run():
   double("wrong")
 `;
       const badMod = parse(badSrc, "<in-memory>");
-      expect(() => new TypeChecker().checkModule(badMod, { baseDir: utilsDir })).toThrowError(TypeCheckError);
+      expect(() => new TypeChecker().checkModule(badMod, { baseDir: utilsDir })).toThrowError(
+        TypeCheckError,
+      );
     });
   });
 

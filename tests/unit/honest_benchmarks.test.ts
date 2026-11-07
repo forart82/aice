@@ -112,7 +112,9 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
     expect(offlineMd).toContain("RW-10");
     expect(offlineMd).toContain("Total Lifecycle Turns");
     expect(offlineMd).toContain("Agent Turns Breakdown");
-    expect(formatOfflineBenchmarkMarkdown(report)).toContain("Deterministic Offline Benchmark Report");
+    expect(formatOfflineBenchmarkMarkdown(report)).toContain(
+      "Deterministic Offline Benchmark Report",
+    );
   }, 60000);
 
   it("verifies the Real AI Agent Benchmark Suite across all 30 live agent transcripts (10 scenarios x 3 modes) in docs/BENCHMARKS.md", () => {
@@ -161,18 +163,42 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
     }
 
     // Strict aggregate ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms across all metrics
-    expect(realReport.totals.aiceWithoutIdiomsTurns).toBeLessThan(realReport.totals.withoutAiceTurns);
-    expect(realReport.totals.aiceWithIdiomsTurns).toBeLessThan(realReport.totals.aiceWithoutIdiomsTurns);
-    expect(realReport.totals.aiceWithoutIdiomsToolCalls).toBeLessThan(realReport.totals.withoutAiceToolCalls);
-    expect(realReport.totals.aiceWithIdiomsToolCalls).toBeLessThan(realReport.totals.aiceWithoutIdiomsToolCalls);
-    expect(realReport.totals.aiceWithoutIdiomsWorkingTokens).toBeLessThan(realReport.totals.withoutAiceWorkingTokens);
-    expect(realReport.totals.aiceWithIdiomsWorkingTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsWorkingTokens);
-    expect(realReport.totals.aiceWithoutIdiomsOutputTokens).toBeLessThan(realReport.totals.withoutAiceOutputTokens);
-    expect(realReport.totals.aiceWithIdiomsOutputTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsOutputTokens);
-    expect(realReport.totals.aiceWithoutIdiomsBillableTokens).toBeLessThan(realReport.totals.withoutAiceBillableTokens);
-    expect(realReport.totals.aiceWithIdiomsBillableTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsBillableTokens);
-    expect(realReport.totals.aiceWithoutIdiomsApiTotalTokens).toBeLessThan(realReport.totals.withoutAiceApiTotalTokens);
-    expect(realReport.totals.aiceWithIdiomsApiTotalTokens).toBeLessThan(realReport.totals.aiceWithoutIdiomsApiTotalTokens);
+    expect(realReport.totals.aiceWithoutIdiomsTurns).toBeLessThan(
+      realReport.totals.withoutAiceTurns,
+    );
+    expect(realReport.totals.aiceWithIdiomsTurns).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsTurns,
+    );
+    expect(realReport.totals.aiceWithoutIdiomsToolCalls).toBeLessThan(
+      realReport.totals.withoutAiceToolCalls,
+    );
+    expect(realReport.totals.aiceWithIdiomsToolCalls).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsToolCalls,
+    );
+    expect(realReport.totals.aiceWithoutIdiomsWorkingTokens).toBeLessThan(
+      realReport.totals.withoutAiceWorkingTokens,
+    );
+    expect(realReport.totals.aiceWithIdiomsWorkingTokens).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsWorkingTokens,
+    );
+    expect(realReport.totals.aiceWithoutIdiomsOutputTokens).toBeLessThan(
+      realReport.totals.withoutAiceOutputTokens,
+    );
+    expect(realReport.totals.aiceWithIdiomsOutputTokens).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsOutputTokens,
+    );
+    expect(realReport.totals.aiceWithoutIdiomsBillableTokens).toBeLessThan(
+      realReport.totals.withoutAiceBillableTokens,
+    );
+    expect(realReport.totals.aiceWithIdiomsBillableTokens).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsBillableTokens,
+    );
+    expect(realReport.totals.aiceWithoutIdiomsApiTotalTokens).toBeLessThan(
+      realReport.totals.withoutAiceApiTotalTokens,
+    );
+    expect(realReport.totals.aiceWithIdiomsApiTotalTokens).toBeLessThan(
+      realReport.totals.aiceWithoutIdiomsApiTotalTokens,
+    );
 
     // All 30 runs must have distinct UUIDs
     expect(seenConversationIds.size).toBe(30);
@@ -358,4 +384,3 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
     }
   });
 });
-

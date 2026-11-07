@@ -6,7 +6,6 @@
 import type {
   ArrayLiteralExpr,
   AssignOp,
-  AwaitExpr,
   Block,
   ComponentDecl,
   Expr,
@@ -23,8 +22,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { Span } from "../core/span.js";
 import { computeSourceHash, parseCached } from "../cache/index.js";
-import { parse } from "../core/parser.js";
-import { findProjectRoot, loadProjectConfig, type ProjectIdiomDefinition } from "../config/project-config.js";
+import {
+  findProjectRoot,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/project-config.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import { GLOBAL_SYMBOLS, getMethodType, getPropertyType } from "./primitives.js";
 import {
@@ -33,7 +35,6 @@ import {
   formatType,
   isAssignable,
   isOpaqueNamedType,
-  isStringLiteralOrUnionType,
   isStringLiteralType,
   isStringLiteralUnion,
   lookupTypeAlias,
@@ -137,25 +138,6 @@ const BUILTIN_TYPE_NAMES = new Set([
   "AudioBuffer",
   "Symbol",
   "Function",
-]);
-
-const COMMON_JS_OBJECT_PROPS = new Set([
-  "constructor",
-  "toString",
-  "valueOf",
-  "hasOwnProperty",
-  "isPrototypeOf",
-  "propertyIsEnumerable",
-  "toLocaleString",
-  "then",
-  "catch",
-  "finally",
-  "apply",
-  "bind",
-  "call",
-  "prototype",
-  "length",
-  "name",
 ]);
 
 export class TypeEnv {
@@ -925,7 +907,8 @@ export class TypeChecker {
               case "TryStmt":
                 for (const s of node.tryBlock.statements) scanThisProps(s);
                 if (node.catchBlock) for (const s of node.catchBlock.statements) scanThisProps(s);
-                if (node.finallyBlock) for (const s of node.finallyBlock.statements) scanThisProps(s);
+                if (node.finallyBlock)
+                  for (const s of node.finallyBlock.statements) scanThisProps(s);
                 break;
             }
           }
@@ -1847,13 +1830,16 @@ export class TypeChecker {
 
         // Record inferred return type on the innermost enclosing function/closure env
         if (fnEnv) {
-          const isBoolType = (t: Type) => t.kind === "bool" || (t.kind === "named" && (t.name === "true" || t.name === "false"));
+          const isBoolType = (t: Type) =>
+            t.kind === "bool" || (t.kind === "named" && (t.name === "true" || t.name === "false"));
           const normActual = isBoolType(actual) ? TYPE_BOOL : actual;
 
           if (!fnEnv.inferredReturnType || fnEnv.inferredReturnType.kind === "void") {
             fnEnv.inferredReturnType = normActual;
           } else {
-            const normInferred = isBoolType(fnEnv.inferredReturnType) ? TYPE_BOOL : fnEnv.inferredReturnType;
+            const normInferred = isBoolType(fnEnv.inferredReturnType)
+              ? TYPE_BOOL
+              : fnEnv.inferredReturnType;
             if (normInferred.kind === "bool" && normActual.kind === "bool") {
               fnEnv.inferredReturnType = TYPE_BOOL;
             } else if (
@@ -2019,7 +2005,10 @@ export class TypeChecker {
                 return { kind: "named", name: JSON.stringify(expr.value) };
               }
               const resolved = env.lookupType(targetType.name);
-              if (!alias && (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))) {
+              if (
+                !alias &&
+                (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))
+              ) {
                 return targetType;
               }
             }
@@ -2049,7 +2038,10 @@ export class TypeChecker {
               return { kind: "named", name: JSON.stringify(strVal) };
             }
             const resolved = env.lookupType(targetType.name);
-            if (!alias && (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))) {
+            if (
+              !alias &&
+              (!resolved || (resolved.kind === "named" && resolved.name === targetType.name))
+            ) {
               return targetType;
             }
           }
@@ -2081,28 +2073,11 @@ export class TypeChecker {
           return this.checkAssign(expr.left, expr.right, expr.span, env, "=");
         }
         if (
-          [
-            "+=",
-            "-=",
-            "*=",
-            "/=",
-            "%=",
-            "**=",
-            "&=",
-            "|=",
-            "^=",
-            "<<=",
-            ">>=",
-            ">>>=",
-          ].includes(expr.operator as any)
-        ) {
-          return this.checkAssign(
-            expr.left,
-            expr.right,
-            expr.span,
-            env,
+          ["+=", "-=", "*=", "/=", "%=", "**=", "&=", "|=", "^=", "<<=", ">>=", ">>>="].includes(
             expr.operator as any,
-          );
+          )
+        ) {
+          return this.checkAssign(expr.left, expr.right, expr.span, env, expr.operator as any);
         }
 
         const leftType = this.checkExpr(expr.left, env);
@@ -3136,7 +3111,10 @@ export class TypeChecker {
       fnType.params.length > 0 ? fnType.params[fnType.params.length - 1] : undefined;
     const hasRest = Boolean(lastParam?.rest);
     const minParams = fnType.params.filter((p) => !p.optional && !p.rest).length;
-    if (!hasSpread && (args.length < minParams || (!hasRest && args.length > fnType.params.length))) {
+    if (
+      !hasSpread &&
+      (args.length < minParams || (!hasRest && args.length > fnType.params.length))
+    ) {
       throw new TypeCheckError(
         `Function expects between ${minParams} and ${fnType.params.length} arguments, got ${args.length}`,
         span,
@@ -3493,27 +3471,6 @@ function isPrimitiveTypeName(name: string): boolean {
     isStringLiteralType(n) ||
     isStringLiteralUnion(n)
   );
-}
-
-function isPrimitiveType(type: Type): boolean {
-  if (
-    type.kind === "int" ||
-    type.kind === "float" ||
-    type.kind === "num" ||
-    type.kind === "byte" ||
-    type.kind === "char" ||
-    type.kind === "bool" ||
-    type.kind === "str" ||
-    type.kind === "void" ||
-    type.kind === "nil" ||
-    type.kind === "never"
-  ) {
-    return true;
-  }
-  if (type.kind === "named") {
-    return isPrimitiveTypeName(type.name);
-  }
-  return false;
 }
 
 function isValidInKeyType(type: Type, env: TypeEnv): boolean {

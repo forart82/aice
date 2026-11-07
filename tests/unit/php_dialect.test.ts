@@ -47,19 +47,10 @@ import {
   TARGET_EXT_MAP,
   VALID_TARGET_LANGUAGES,
 } from "../../src/config/index.js";
-import type { ClassDecl, FunctionDecl, MatchStmt, Module, TypeDecl } from "../../src/core/ast.js";
+import type { ClassDecl, MatchStmt, TypeDecl } from "../../src/core/ast.js";
 import { parse, parseWithTrivia } from "../../src/core/parser.js";
-import {
-  decompile,
-  decompilePhp,
-  executeRoundtrip,
-  PhpDecompiler,
-} from "../../src/decompiler/index.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  PhpEmitter,
-} from "../../src/emitters/index.js";
+import { decompilePhp, executeRoundtrip } from "../../src/decompiler/index.js";
+import { detectTargetFromPath, emitTarget } from "../../src/emitters/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -463,7 +454,7 @@ pub class UserService:
       expect(emitted).toContain("use App\\Repositories\\UserRepository;");
       expect(emitted).toContain("class UserService {");
       expect(emitted).toContain("public function getUser(int $id): string {");
-      expect(emitted).toContain('return \'user\';');
+      expect(emitted).toContain("return 'user';");
     });
 
     it("emits PHP 8 constructor property promotion cleanly", () => {

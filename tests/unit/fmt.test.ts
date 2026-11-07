@@ -10,13 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { program } from "../../bin/aice.js";
-import {
-  formatAiceFile,
-  formatAicePath,
-  formatAiceSource,
-  generateUnifiedDiff,
-} from "../../src/tools/fmt.js";
+import { formatAiceFile, formatAicePath, formatAiceSource } from "../../src/tools/fmt.js";
 
 describe("AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21)", () => {
   describe("Indentation Normalization", () => {
@@ -30,7 +24,8 @@ fn calculate(a: int) -> int:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 fn calculate(a: int) -> int:
   x := a * 2
   if x > 10:
@@ -50,7 +45,8 @@ type User:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 type User:
   id: str
   name: str
@@ -72,7 +68,8 @@ class Service:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 class Service:
   pub fn process(items: [int]) -> int:
     sum := 0
@@ -93,7 +90,8 @@ fn test():
 `.trim();
 
       const formatted = formatAiceSource(src, { indent: 4 });
-      const expected = `
+      const expected =
+        `
 fn test():
     x := 1
     ret x
@@ -112,7 +110,8 @@ let arr = [
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 let arr = [
   1,
   2,
@@ -135,7 +134,8 @@ x/=4
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 x := 1 + 2 * 3 / 4 % 5
 x += 10
 x -= 2
@@ -153,7 +153,8 @@ if a==b&&c!=d||e<=f&&g>=h||i<j&&k>l:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 if a == b && c != d || e <= f && g >= h || i < j && k > l:
   ret true
 `.trim() + "\n";
@@ -170,7 +171,8 @@ isErr:=e instanceof Error
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 mask := a | b & c ^ d
 flag := x and y or not z
 isMember := item in collection
@@ -189,7 +191,8 @@ fn test(a: int)->bool:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 fn test(a: int) -> bool:
   match a:
     1 => true
@@ -210,7 +213,8 @@ ret -x
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 x := -5
 y := +10
 z := a - -b
@@ -230,7 +234,8 @@ val := parse()?
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 if !isValid:
   ret Err("Invalid")
 val := parse()?
@@ -248,7 +253,8 @@ fn test( a:int , b:str , c:[int] )->bool:
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 fn test(a: int, b: str, c: [int]) -> bool:
   ret true
 `.trim() + "\n";
@@ -299,7 +305,8 @@ fn test():
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 fn test():
   x := 1
 
@@ -323,7 +330,8 @@ fn b():
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 fn a():
   ret 1
 
@@ -385,7 +393,8 @@ fn calculate():
 `.trim();
 
       const formatted = formatAiceSource(src);
-      const expected = `
+      const expected =
+        `
 // Top level header comment
 fn calculate():
   // Inside comment

@@ -6,13 +6,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type {
-  AssignExpr,
-  AssignStmt,
-  BinaryExpr,
-  IdentifierExpr,
-  LiteralExpr,
-} from "../../src/core/ast.js";
+import type { AssignExpr, AssignStmt, BinaryExpr } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
 import { emptySpan } from "../../src/core/span.js";
 import { TypeCheckError, TypeChecker, TypeEnv } from "../../src/typechecker/checker.js";

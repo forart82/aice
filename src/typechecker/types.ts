@@ -783,7 +783,11 @@ export function isAssignable(
 
   // Refinement types: compatible with base type
   if (target.kind === "refinement") {
-    return isAssignable(target.baseType, source.kind === "refinement" ? source.baseType : source, visited);
+    return isAssignable(
+      target.baseType,
+      source.kind === "refinement" ? source.baseType : source,
+      visited,
+    );
   }
   if (source.kind === "refinement") {
     return isAssignable(target, source.baseType, visited);

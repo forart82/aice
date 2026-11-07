@@ -10,18 +10,11 @@
 
 import ts from "../compat/typescript.js";
 import type {
-  AssignExpr,
   AssignOp,
-  AssignStmt,
-  AwaitExpr,
   BinaryOp,
   Block,
-  BreakStmt,
   ClassDecl,
   ComponentDecl,
-  ConstDecl,
-  ContinueStmt,
-  DestructureBinding,
   Expr,
   FieldDecl,
   FunctionDecl,
@@ -29,9 +22,7 @@ import type {
   ImportDecl,
   ImportSpecifier,
   LayoutNode,
-  LiteralExpr,
   MatchCase,
-  MatchStmt,
   MethodDecl,
   Module,
   ModuleItem,
@@ -41,16 +32,11 @@ import type {
   PropertyDecl,
   RecordProperty,
   Statement,
-  TemplateLiteralExpr,
-  ThrowStmt,
-  TryStmt,
-  TupleType,
   TypeDecl,
   TypeExpr,
-  VarDecl,
   WhileStmt,
 } from "../core/ast.js";
-import { createPosition, createSpan, emptySpan, mergeSpans, type Span } from "../core/span.js";
+import { createPosition, createSpan, emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem, type TriviaKind } from "../core/trivia.js";
 
 const TS_MATH_BUILTINS = new Set([
@@ -134,28 +120,28 @@ export class TsDecompiler {
       const name = decl.name.text;
       currentScope?.add(name);
       let typeCat: "number" | "string" | "boolean" | "other" | undefined;
-    if (decl.type) {
-      if (decl.type.kind === ts.SyntaxKind.NumberKeyword) typeCat = "number";
-      else if (decl.type.kind === ts.SyntaxKind.StringKeyword) typeCat = "string";
-      else if (decl.type.kind === ts.SyntaxKind.BooleanKeyword) typeCat = "boolean";
-    } else if (decl.initializer) {
-      if (ts.isNumericLiteral(decl.initializer)) typeCat = "number";
-      else if (
-        ts.isStringLiteral(decl.initializer) ||
-        ts.isNoSubstitutionTemplateLiteral(decl.initializer) ||
-        ts.isTemplateExpression(decl.initializer)
-      ) {
-        typeCat = "string";
-      } else if (
-        decl.initializer.kind === ts.SyntaxKind.TrueKeyword ||
-        decl.initializer.kind === ts.SyntaxKind.FalseKeyword
-      ) {
-        typeCat = "boolean";
+      if (decl.type) {
+        if (decl.type.kind === ts.SyntaxKind.NumberKeyword) typeCat = "number";
+        else if (decl.type.kind === ts.SyntaxKind.StringKeyword) typeCat = "string";
+        else if (decl.type.kind === ts.SyntaxKind.BooleanKeyword) typeCat = "boolean";
+      } else if (decl.initializer) {
+        if (ts.isNumericLiteral(decl.initializer)) typeCat = "number";
+        else if (
+          ts.isStringLiteral(decl.initializer) ||
+          ts.isNoSubstitutionTemplateLiteral(decl.initializer) ||
+          ts.isTemplateExpression(decl.initializer)
+        ) {
+          typeCat = "string";
+        } else if (
+          decl.initializer.kind === ts.SyntaxKind.TrueKeyword ||
+          decl.initializer.kind === ts.SyntaxKind.FalseKeyword
+        ) {
+          typeCat = "boolean";
+        }
       }
-    }
-    if (typeCat) {
-      this.registerVarType(name, typeCat);
-    }
+      if (typeCat) {
+        this.registerVarType(name, typeCat);
+      }
     }
   }
 
@@ -692,8 +678,7 @@ export class TsDecompiler {
               m.kind === ts.SyntaxKind.ProtectedKeyword ||
               m.kind === ts.SyntaxKind.ReadonlyKeyword,
           ) ?? false;
-        const hasParamProps =
-          member.parameters.length > 0 && member.parameters.every(isParamProp);
+        const hasParamProps = member.parameters.length > 0 && member.parameters.every(isParamProp);
         const isEmptyBody = !member.body || member.body.statements.length === 0;
 
         if (hasParamProps && isEmptyBody) {
@@ -781,7 +766,8 @@ export class TsDecompiler {
         const params: ParamDecl[] = member.parameters.map((p) => {
           const pName = ts.isIdentifier(p.name) ? p.name.text : p.name.getText(this.sourceFile);
           if (isParamProp(p)) {
-            const isRo = p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
+            const isRo =
+              p.modifiers?.some((m) => m.kind === ts.SyntaxKind.ReadonlyKeyword) ?? false;
             properties.push({
               kind: "PropertyDecl",
               name: pName,
@@ -1855,10 +1841,7 @@ export class TsDecompiler {
           thenBranch.span,
         );
         for (const eb of elifBranches) {
-          eb.body.statements = this.collapseStatementsForClosure(
-            eb.body.statements,
-            eb.body.span,
-          );
+          eb.body.statements = this.collapseStatementsForClosure(eb.body.statements, eb.body.span);
         }
         if (elseBranch) {
           elseBranch.statements = this.collapseStatementsForClosure(
@@ -2039,7 +2022,7 @@ export class TsDecompiler {
             break;
           }
           const nonBreak = clause.statements.filter(
-            (s, idx) => !(idx === clause.statements.length - 1 && ts.isBreakStatement(s))
+            (s, idx) => !(idx === clause.statements.length - 1 && ts.isBreakStatement(s)),
           );
           if (nonBreak.length === 0 && i < stmt.caseBlock.clauses.length - 1) {
             hasFallthroughOrComplex = true;
@@ -2099,7 +2082,10 @@ export class TsDecompiler {
                 clauseStmts.push(converted);
               }
             }
-            if (clauseStmts.length > 0 && clauseStmts[clauseStmts.length - 1].kind === "BreakStmt") {
+            if (
+              clauseStmts.length > 0 &&
+              clauseStmts[clauseStmts.length - 1].kind === "BreakStmt"
+            ) {
               clauseStmts.pop();
             }
 
@@ -2855,16 +2841,12 @@ export class TsDecompiler {
     }
 
     if (ts.isTemplateExpression(expr)) {
-      const quasis: string[] = [
-        (expr.head as any).rawText ?? expr.head.text.replace(/`/g, "\\`"),
-      ];
+      const quasis: string[] = [(expr.head as any).rawText ?? expr.head.text.replace(/`/g, "\\`")];
       const expressions: Expr[] = [];
 
       for (const span of expr.templateSpans) {
         expressions.push(this.convertExpression(span.expression));
-        quasis.push(
-          (span.literal as any).rawText ?? span.literal.text.replace(/`/g, "\\`"),
-        );
+        quasis.push((span.literal as any).rawText ?? span.literal.text.replace(/`/g, "\\`"));
       }
 
       return {
@@ -3292,11 +3274,7 @@ export class TsDecompiler {
     }
 
     // JSX Element, Self-Closing Element, or Fragment -> Literal nil
-    if (
-      ts.isJsxElement(expr) ||
-      ts.isJsxSelfClosingElement(expr) ||
-      ts.isJsxFragment(expr)
-    ) {
+    if (ts.isJsxElement(expr) || ts.isJsxSelfClosingElement(expr) || ts.isJsxFragment(expr)) {
       return {
         kind: "LiteralExpr",
         literalKind: "nil",
@@ -3364,8 +3342,7 @@ export class TsDecompiler {
         body = { kind: "Block" as const, statements: [], span: this.getSpan(expr) };
       }
 
-      const isFnAsync =
-        expr.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+      const isFnAsync = expr.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
       return {
         kind: "ClosureExpr",
         isAsync: isFnAsync || undefined,

@@ -4,16 +4,11 @@ import { TypeChecker } from "../../src/typechecker/checker.js";
 import type {
   Block,
   ClassDecl,
-  ConstDecl,
   ForStmt,
   FunctionDecl,
   LetBinding,
   MatchStmt,
-  MemberAccessExpr,
-  NamedType,
-  PrimitiveType,
   RecordLiteralExpr,
-  RecordType,
   TypeDecl,
   VarDecl,
 } from "../../src/core/ast.js";

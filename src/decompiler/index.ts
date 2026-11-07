@@ -19,11 +19,11 @@ import { JsonDecompiler, type JsonDecompilerOptions } from "./json-decompiler.js
 import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
 import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js";
-import { decompilePhp, PhpDecompiler } from "./php-decompiler.js";
-import { decompilePython, PythonDecompiler } from "./py-decompiler.js";
-import { decompileKotlin, KotlinDecompiler } from "./kotlin-decompiler.js";
-import { decompileGo, GoDecompiler } from "./go-decompiler.js";
-import { decompileRust, RustDecompiler } from "./rust-decompiler.js";
+import { PhpDecompiler } from "./php-decompiler.js";
+import { PythonDecompiler } from "./py-decompiler.js";
+import { KotlinDecompiler } from "./kotlin-decompiler.js";
+import { GoDecompiler } from "./go-decompiler.js";
+import { RustDecompiler } from "./rust-decompiler.js";
 
 export * from "./aice-generator.js";
 export * from "./cpp-decompiler.js";

@@ -12,13 +12,7 @@
  * Lowers into canonical AICE AST (ComponentDecl with LayoutNode hierarchy and expression bindings).
  */
 
-import type {
-  BinaryOp,
-  ComponentDecl,
-  Expr,
-  LayoutNode,
-  Module,
-} from "../core/ast.js";
+import type { BinaryOp, ComponentDecl, Expr, LayoutNode, Module } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable } from "../core/trivia.js";
 import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
@@ -40,31 +34,11 @@ const VOID_ELEMENTS = new Set([
   "wbr",
 ]);
 
-const BOOLEAN_ATTRS = new Set([
-  "defer",
-  "async",
-  "disabled",
-  "readonly",
-  "checked",
-  "required",
-  "autofocus",
-  "novalidate",
-  "multiple",
-  "hidden",
-  "selected",
-]);
-
 // ---------------------------------------------------------------------------
 // Twig Expression Pratt Parser
 // ---------------------------------------------------------------------------
 
-type ExprTokenType =
-  | "NUMBER"
-  | "STRING"
-  | "IDENT"
-  | "PUNCT"
-  | "OP"
-  | "EOF";
+type ExprTokenType = "NUMBER" | "STRING" | "IDENT" | "PUNCT" | "OP" | "EOF";
 
 interface ExprToken {
   type: ExprTokenType;
@@ -176,7 +150,13 @@ class TwigExprParser {
 
     while (this.cur < this.tokens.length) {
       const tok = this.current();
-      if (tok.type === "EOF" || tok.value === ")" || tok.value === "]" || tok.value === "}" || tok.value === ",") {
+      if (
+        tok.type === "EOF" ||
+        tok.value === ")" ||
+        tok.value === "]" ||
+        tok.value === "}" ||
+        tok.value === ","
+      ) {
         break;
       }
 
@@ -531,7 +511,10 @@ function tokenizeTwigTemplate(source: string): TemplateToken[] {
         tokens.push({ type: "TEXT", content: source.slice(i) });
         break;
       }
-      const tag = source.slice(i + 2, end).trim().toLowerCase();
+      const tag = source
+        .slice(i + 2, end)
+        .trim()
+        .toLowerCase();
       tokens.push({ type: "HTML_CLOSE", content: tag, tag });
       i = end + 1;
       continue;
@@ -613,7 +596,10 @@ function findNextSpecialIndex(source: string, start: number): number {
     if (idx !== -1 && idx < min) {
       if (d === "<") {
         // Only trigger if followed by a-zA-Z or /
-        if (idx + 1 < source.length && (/[a-zA-Z]/.test(source[idx + 1]) || source[idx + 1] === "/")) {
+        if (
+          idx + 1 < source.length &&
+          (/[a-zA-Z]/.test(source[idx + 1]) || source[idx + 1] === "/")
+        ) {
           min = idx;
         }
       } else {

@@ -18,48 +18,27 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  AwaitExpr,
-  BinaryExpr,
   BinaryOp,
   Block,
-  BreakStmt,
-  CallExpr,
   ClassDecl,
-  ConstDecl,
-  ContinueStmt,
   Expr,
-  ExprStmt,
-  ForStmt,
   FunctionDecl,
-  IdentifierExpr,
   IfStmt,
   ImportDecl,
-  IndexExpr,
-  LetBinding,
   LiteralExpr,
   MatchCase,
   MatchStmt,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   Pattern,
   PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
   TemplateLiteralExpr,
-  ThrowStmt,
   TryStmt,
-  TypeDecl,
   TypeExpr,
-  UnaryExpr,
-  VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, getNodeTriviaId, type TriviaItem } from "../core/trivia.js";
@@ -276,7 +255,11 @@ export class PythonLexer {
             const startCol = this.column + spaces;
             const startOffset = p;
             let endP = p;
-            while (endP < this.source.length && this.source[endP] !== "\n" && this.source[endP] !== "\r") {
+            while (
+              endP < this.source.length &&
+              this.source[endP] !== "\n" &&
+              this.source[endP] !== "\r"
+            ) {
               endP++;
             }
             const commentText = this.source.slice(p, endP);
@@ -319,7 +302,15 @@ export class PythonLexer {
             tokens.push({
               kind: "INDENT",
               value: "",
-              span: makeSpan(this.filePath, this.line, 1, this.pos - spaces, this.line, this.column, this.pos),
+              span: makeSpan(
+                this.filePath,
+                this.line,
+                1,
+                this.pos - spaces,
+                this.line,
+                this.column,
+                this.pos,
+              ),
             });
           } else if (currentIndent < prevIndent) {
             while (
@@ -330,7 +321,15 @@ export class PythonLexer {
               tokens.push({
                 kind: "DEDENT",
                 value: "",
-                span: makeSpan(this.filePath, this.line, 1, this.pos - spaces, this.line, this.column, this.pos),
+                span: makeSpan(
+                  this.filePath,
+                  this.line,
+                  1,
+                  this.pos - spaces,
+                  this.line,
+                  this.column,
+                  this.pos,
+                ),
               });
             }
           }
@@ -366,7 +365,15 @@ export class PythonLexer {
       if (ch === "\r" || ch === "\n") {
         const isCrlf = ch === "\r" && this.source[this.pos + 1] === "\n";
         const len = isCrlf ? 2 : 1;
-        const span = makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column + len, this.pos + len);
+        const span = makeSpan(
+          this.filePath,
+          this.line,
+          this.column,
+          this.pos,
+          this.line,
+          this.column + len,
+          this.pos + len,
+        );
         this.pos += len;
         this.line++;
         this.column = 1;
@@ -389,7 +396,11 @@ export class PythonLexer {
         const startCol = this.column;
         const startOffset = this.pos;
         let endP = this.pos;
-        while (endP < this.source.length && this.source[endP] !== "\n" && this.source[endP] !== "\r") {
+        while (
+          endP < this.source.length &&
+          this.source[endP] !== "\n" &&
+          this.source[endP] !== "\r"
+        ) {
           endP++;
         }
         const comment = this.source.slice(this.pos, endP);
@@ -398,7 +409,15 @@ export class PythonLexer {
         tokens.push({
           kind: "COMMENT",
           value: comment,
-          span: makeSpan(this.filePath, startLine, startCol, startOffset, this.line, this.column, this.pos),
+          span: makeSpan(
+            this.filePath,
+            startLine,
+            startCol,
+            startOffset,
+            this.line,
+            this.column,
+            this.pos,
+          ),
         });
         continue;
       }
@@ -410,7 +429,15 @@ export class PythonLexer {
         tokens.push({
           kind,
           value: ch,
-          span: makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column + 1, this.pos + 1),
+          span: makeSpan(
+            this.filePath,
+            this.line,
+            this.column,
+            this.pos,
+            this.line,
+            this.column + 1,
+            this.pos + 1,
+          ),
         });
         this.pos++;
         this.column++;
@@ -423,7 +450,15 @@ export class PythonLexer {
         tokens.push({
           kind,
           value: ch,
-          span: makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column + 1, this.pos + 1),
+          span: makeSpan(
+            this.filePath,
+            this.line,
+            this.column,
+            this.pos,
+            this.line,
+            this.column + 1,
+            this.pos + 1,
+          ),
         });
         this.pos++;
         this.column++;
@@ -465,7 +500,15 @@ export class PythonLexer {
       tokens.push({
         kind: "NEWLINE",
         value: "\n",
-        span: makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column, this.pos),
+        span: makeSpan(
+          this.filePath,
+          this.line,
+          this.column,
+          this.pos,
+          this.line,
+          this.column,
+          this.pos,
+        ),
       });
     }
 
@@ -474,14 +517,30 @@ export class PythonLexer {
       tokens.push({
         kind: "DEDENT",
         value: "",
-        span: makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column, this.pos),
+        span: makeSpan(
+          this.filePath,
+          this.line,
+          this.column,
+          this.pos,
+          this.line,
+          this.column,
+          this.pos,
+        ),
       });
     }
 
     tokens.push({
       kind: "EOF",
       value: "",
-      span: makeSpan(this.filePath, this.line, this.column, this.pos, this.line, this.column, this.pos),
+      span: makeSpan(
+        this.filePath,
+        this.line,
+        this.column,
+        this.pos,
+        this.line,
+        this.column,
+        this.pos,
+      ),
     });
 
     return tokens;
@@ -512,9 +571,7 @@ export class PythonLexer {
 
     // Check for triple quotes
     const isTriple =
-      p + 2 < this.source.length &&
-      this.source[p + 1] === quote &&
-      this.source[p + 2] === quote;
+      p + 2 < this.source.length && this.source[p + 1] === quote && this.source[p + 2] === quote;
 
     if (isTriple) {
       p += 3;
@@ -552,7 +609,15 @@ export class PythonLexer {
         kind: isFString ? "FSTRING" : "STRING",
         value: content,
         isFString,
-        span: makeSpan(this.filePath, startLine, startCol, startOffset, this.line, this.column, this.pos),
+        span: makeSpan(
+          this.filePath,
+          startLine,
+          startCol,
+          startOffset,
+          this.line,
+          this.column,
+          this.pos,
+        ),
       };
     }
 
@@ -589,7 +654,15 @@ export class PythonLexer {
       kind: isFString ? "FSTRING" : "STRING",
       value: content,
       isFString,
-      span: makeSpan(this.filePath, startLine, startCol, startOffset, this.line, this.column, this.pos),
+      span: makeSpan(
+        this.filePath,
+        startLine,
+        startCol,
+        startOffset,
+        this.line,
+        this.column,
+        this.pos,
+      ),
     };
   }
 
@@ -642,7 +715,15 @@ export class PythonLexer {
     return {
       kind: "NUMBER",
       value: numStr.replace(/_/g, ""),
-      span: makeSpan(this.filePath, startLine, startCol, startOffset, this.line, this.column, this.pos),
+      span: makeSpan(
+        this.filePath,
+        startLine,
+        startCol,
+        startOffset,
+        this.line,
+        this.column,
+        this.pos,
+      ),
     };
   }
 
@@ -664,7 +745,15 @@ export class PythonLexer {
     return {
       kind: kw ?? "IDENTIFIER",
       value: word,
-      span: makeSpan(this.filePath, startLine, startCol, startOffset, this.line, this.column, this.pos),
+      span: makeSpan(
+        this.filePath,
+        startLine,
+        startCol,
+        startOffset,
+        this.line,
+        this.column,
+        this.pos,
+      ),
     };
   }
 
@@ -675,7 +764,8 @@ export class PythonLexer {
     const startCol = this.column;
     const startOffset = this.pos;
 
-    if (three === "//=") return this.makeOp("SLASH_SLASH_EQUAL", 3, startLine, startCol, startOffset);
+    if (three === "//=")
+      return this.makeOp("SLASH_SLASH_EQUAL", 3, startLine, startCol, startOffset);
     if (three === "**=") return this.makeOp("STAR_STAR_EQUAL", 3, startLine, startCol, startOffset);
     if (three === "<<=") return this.makeOp("LSHIFT_EQUAL", 3, startLine, startCol, startOffset);
     if (three === ">>=") return this.makeOp("RSHIFT_EQUAL", 3, startLine, startCol, startOffset);
@@ -727,7 +817,13 @@ export class PythonLexer {
     return null;
   }
 
-  private makeOp(kind: PythonTokenKind, len: number, sLine: number, sCol: number, sOffset: number): PythonToken {
+  private makeOp(
+    kind: PythonTokenKind,
+    len: number,
+    sLine: number,
+    sCol: number,
+    sOffset: number,
+  ): PythonToken {
     const val = this.source.slice(this.pos, this.pos + len);
     this.pos += len;
     this.column += len;
@@ -847,7 +943,9 @@ export class PythonDecompiler {
     if (this.check(kind)) {
       return this.advance();
     }
-    throw new Error(`${msg}, found ${this.current().kind} ('${this.current().value}') at line ${this.current().span.start.line}`);
+    throw new Error(
+      `${msg}, found ${this.current().kind} ('${this.current().value}') at line ${this.current().span.start.line}`,
+    );
   }
 
   private skipNewlines(): void {
@@ -926,7 +1024,15 @@ export class PythonDecompiler {
           isMut: true,
           typeAnnotation,
           value,
-          span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, value.span.end.line, value.span.end.column, value.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            startSpan.start.line,
+            startSpan.start.column,
+            startSpan.start.offset,
+            value.span.end.line,
+            value.span.end.column,
+            value.span.end.offset,
+          ),
         };
       }
     }
@@ -969,7 +1075,11 @@ export class PythonDecompiler {
         const hasParens = this.check("LPAREN");
         if (hasParens) this.advance();
 
-        while (!this.check("NEWLINE") && !this.check("EOF") && (!hasParens || !this.check("RPAREN"))) {
+        while (
+          !this.check("NEWLINE") &&
+          !this.check("EOF") &&
+          (!hasParens || !this.check("RPAREN"))
+        ) {
           this.skipNewlines();
           if (this.check("IDENTIFIER")) {
             const sName = this.advance().value;
@@ -1202,7 +1312,9 @@ export class PythonDecompiler {
 
     // Filter out self/cls if not static
     const effectiveParams =
-      !isStatic && rawParams.length > 0 && (rawParams[0].name === "self" || rawParams[0].name === "cls")
+      !isStatic &&
+      rawParams.length > 0 &&
+      (rawParams[0].name === "self" || rawParams[0].name === "cls")
         ? rawParams.slice(1)
         : rawParams;
 
@@ -1425,7 +1537,17 @@ export class PythonDecompiler {
       return {
         kind: "ReturnStmt",
         value: val,
-        span: val ? makeSpan(this.filePath, retSpan.start.line, retSpan.start.column, retSpan.start.offset, val.span.end.line, val.span.end.column, val.span.end.offset) : retSpan,
+        span: val
+          ? makeSpan(
+              this.filePath,
+              retSpan.start.line,
+              retSpan.start.column,
+              retSpan.start.offset,
+              val.span.end.line,
+              val.span.end.column,
+              val.span.end.offset,
+            )
+          : retSpan,
       };
     }
 
@@ -1435,7 +1557,15 @@ export class PythonDecompiler {
       return {
         kind: "ThrowStmt",
         expr,
-        span: makeSpan(this.filePath, raiseSpan.start.line, raiseSpan.start.column, raiseSpan.start.offset, expr.span.end.line, expr.span.end.column, expr.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          raiseSpan.start.line,
+          raiseSpan.start.column,
+          raiseSpan.start.offset,
+          expr.span.end.line,
+          expr.span.end.column,
+          expr.span.end.offset,
+        ),
       };
     }
 
@@ -1461,7 +1591,15 @@ export class PythonDecompiler {
         kind: "WhileStmt",
         condition,
         body,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, body.span.end.line, body.span.end.column, body.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          body.span.end.line,
+          body.span.end.column,
+          body.span.end.offset,
+        ),
       };
     }
 
@@ -1469,7 +1607,10 @@ export class PythonDecompiler {
       const startSpan = this.advance().span;
       const variable = this.parseForVariable();
       if (variable.startsWith("[") && variable.endsWith("]")) {
-        const parts = variable.slice(1, -1).split(",").map((s) => s.trim());
+        const parts = variable
+          .slice(1, -1)
+          .split(",")
+          .map((s) => s.trim());
         for (const p of parts) if (p) this.currentScope.add(p);
       } else {
         this.currentScope.add(variable);
@@ -1484,7 +1625,15 @@ export class PythonDecompiler {
         variable,
         iterable,
         body,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, body.span.end.line, body.span.end.column, body.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          body.span.end.line,
+          body.span.end.column,
+          body.span.end.offset,
+        ),
       };
     }
 
@@ -1523,7 +1672,15 @@ export class PythonDecompiler {
           isMut: true,
           typeAnnotation,
           init: value,
-          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, value.span.end.line, value.span.end.column, value.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            expr.span.start.line,
+            expr.span.start.column,
+            expr.span.start.offset,
+            value.span.end.line,
+            value.span.end.column,
+            value.span.end.offset,
+          ),
         };
       }
 
@@ -1532,7 +1689,15 @@ export class PythonDecompiler {
         target: expr,
         op,
         value,
-        span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, value.span.end.line, value.span.end.column, value.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          expr.span.start.line,
+          expr.span.start.column,
+          expr.span.start.offset,
+          value.span.end.line,
+          value.span.end.column,
+          value.span.end.offset,
+        ),
       };
     }
 
@@ -1607,7 +1772,15 @@ export class PythonDecompiler {
       elifBranches.push({
         condition: eCond,
         body: eBody,
-        span: makeSpan(this.filePath, elifSpan.start.line, elifSpan.start.column, elifSpan.start.offset, eBody.span.end.line, eBody.span.end.column, eBody.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          elifSpan.start.line,
+          elifSpan.start.column,
+          elifSpan.start.offset,
+          eBody.span.end.line,
+          eBody.span.end.column,
+          eBody.span.end.offset,
+        ),
       });
     }
 
@@ -1619,7 +1792,9 @@ export class PythonDecompiler {
       elseBranch = this.parseBlock();
     }
 
-    const endSpan = elseBranch?.span ?? (elifBranches.length > 0 ? elifBranches[elifBranches.length - 1].body.span : thenBranch.span);
+    const endSpan =
+      elseBranch?.span ??
+      (elifBranches.length > 0 ? elifBranches[elifBranches.length - 1].body.span : thenBranch.span);
 
     return {
       kind: "IfStmt",
@@ -1627,7 +1802,15 @@ export class PythonDecompiler {
       thenBranch,
       elifBranches,
       elseBranch,
-      span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, endSpan.end.line, endSpan.end.column, endSpan.end.offset),
+      span: makeSpan(
+        this.filePath,
+        startSpan.start.line,
+        startSpan.start.column,
+        startSpan.start.offset,
+        endSpan.end.line,
+        endSpan.end.column,
+        endSpan.end.offset,
+      ),
     };
   }
 
@@ -1670,7 +1853,15 @@ export class PythonDecompiler {
       catchParam,
       catchBlock,
       finallyBlock,
-      span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, endSpan.end.line, endSpan.end.column, endSpan.end.offset),
+      span: makeSpan(
+        this.filePath,
+        startSpan.start.line,
+        startSpan.start.column,
+        startSpan.start.offset,
+        endSpan.end.line,
+        endSpan.end.column,
+        endSpan.end.offset,
+      ),
     };
   }
 
@@ -1703,7 +1894,15 @@ export class PythonDecompiler {
         pattern,
         guard,
         body,
-        span: makeSpan(this.filePath, caseSpan.start.line, caseSpan.start.column, caseSpan.start.offset, body.span.end.line, body.span.end.column, body.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          caseSpan.start.line,
+          caseSpan.start.column,
+          caseSpan.start.offset,
+          body.span.end.line,
+          body.span.end.column,
+          body.span.end.offset,
+        ),
       });
       this.skipNewlines();
     }
@@ -1941,7 +2140,15 @@ export class PythonDecompiler {
         operator: op,
         left,
         right,
-        span: makeSpan(this.filePath, left.span.start.line, left.span.start.column, left.span.start.offset, right.span.end.line, right.span.end.column, right.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          left.span.start.line,
+          left.span.start.column,
+          left.span.start.offset,
+          right.span.end.line,
+          right.span.end.column,
+          right.span.end.offset,
+        ),
       };
     }
 
@@ -1955,7 +2162,15 @@ export class PythonDecompiler {
       return {
         kind: "AwaitExpr",
         operand,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, operand.span.end.line, operand.span.end.column, operand.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          operand.span.end.line,
+          operand.span.end.column,
+          operand.span.end.offset,
+        ),
       };
     }
 
@@ -1966,7 +2181,15 @@ export class PythonDecompiler {
         kind: "UnaryExpr",
         operator: "!",
         operand,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, operand.span.end.line, operand.span.end.column, operand.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          operand.span.end.line,
+          operand.span.end.column,
+          operand.span.end.offset,
+        ),
       };
     }
 
@@ -1977,7 +2200,15 @@ export class PythonDecompiler {
         kind: "UnaryExpr",
         operator: (opTok.kind === "MINUS" ? "-" : opTok.kind === "PLUS" ? "+" : "~") as any,
         operand,
-        span: makeSpan(this.filePath, opTok.span.start.line, opTok.span.start.column, opTok.span.start.offset, operand.span.end.line, operand.span.end.column, operand.span.end.offset),
+        span: makeSpan(
+          this.filePath,
+          opTok.span.start.line,
+          opTok.span.start.column,
+          opTok.span.start.offset,
+          operand.span.end.line,
+          operand.span.end.column,
+          operand.span.end.offset,
+        ),
       };
     }
 
@@ -1996,7 +2227,15 @@ export class PythonDecompiler {
           object: expr,
           property: propTok.value,
           isSafeNav: false,
-          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, propTok.span.end.line, propTok.span.end.column, propTok.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            expr.span.start.line,
+            expr.span.start.column,
+            expr.span.start.offset,
+            propTok.span.end.line,
+            propTok.span.end.column,
+            propTok.span.end.offset,
+          ),
         };
         continue;
       }
@@ -2009,7 +2248,15 @@ export class PythonDecompiler {
           kind: "CallExpr",
           callee: expr,
           args,
-          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rParen.span.end.line, rParen.span.end.column, rParen.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            expr.span.start.line,
+            expr.span.start.column,
+            expr.span.start.offset,
+            rParen.span.end.line,
+            rParen.span.end.column,
+            rParen.span.end.offset,
+          ),
         };
         continue;
       }
@@ -2031,7 +2278,13 @@ export class PythonDecompiler {
           if (startIndex) {
             args.push(startIndex);
           } else {
-            args.push({ kind: "LiteralExpr", literalKind: "number", value: 0, rawValue: "0", span: emptySpan(this.filePath) });
+            args.push({
+              kind: "LiteralExpr",
+              literalKind: "number",
+              value: 0,
+              rawValue: "0",
+              span: emptySpan(this.filePath),
+            });
           }
           if (endIndex) {
             args.push(endIndex);
@@ -2043,10 +2296,26 @@ export class PythonDecompiler {
               object: expr,
               property: "slice",
               isSafeNav: false,
-              span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+              span: makeSpan(
+                this.filePath,
+                expr.span.start.line,
+                expr.span.start.column,
+                expr.span.start.offset,
+                rBracket.span.end.line,
+                rBracket.span.end.column,
+                rBracket.span.end.offset,
+              ),
             },
             args,
-            span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+            span: makeSpan(
+              this.filePath,
+              expr.span.start.line,
+              expr.span.start.column,
+              expr.span.start.offset,
+              rBracket.span.end.line,
+              rBracket.span.end.column,
+              rBracket.span.end.offset,
+            ),
           };
           continue;
         }
@@ -2058,16 +2327,35 @@ export class PythonDecompiler {
           }
         }
         const rBracket = this.consume("RBRACKET");
-        const finalIndex: Expr = indices.length === 1 ? indices[0] : {
-          kind: "ArrayLiteralExpr",
-          elements: indices,
-          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
-        };
+        const finalIndex: Expr =
+          indices.length === 1
+            ? indices[0]
+            : {
+                kind: "ArrayLiteralExpr",
+                elements: indices,
+                span: makeSpan(
+                  this.filePath,
+                  expr.span.start.line,
+                  expr.span.start.column,
+                  expr.span.start.offset,
+                  rBracket.span.end.line,
+                  rBracket.span.end.column,
+                  rBracket.span.end.offset,
+                ),
+              };
         expr = {
           kind: "IndexExpr",
           object: expr,
           index: finalIndex,
-          span: makeSpan(this.filePath, expr.span.start.line, expr.span.start.column, expr.span.start.offset, rBracket.span.end.line, rBracket.span.end.column, rBracket.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            expr.span.start.line,
+            expr.span.start.column,
+            expr.span.start.offset,
+            rBracket.span.end.line,
+            rBracket.span.end.column,
+            rBracket.span.end.offset,
+          ),
         };
         continue;
       }
@@ -2079,7 +2367,13 @@ export class PythonDecompiler {
   }
 
   private parsePrimaryExpr(): Expr {
-    if (this.check("TRUE") || this.check("FALSE") || this.check("NONE") || this.check("NUMBER") || this.check("STRING")) {
+    if (
+      this.check("TRUE") ||
+      this.check("FALSE") ||
+      this.check("NONE") ||
+      this.check("NUMBER") ||
+      this.check("STRING")
+    ) {
       return this.parseLiteralExpr();
     }
 
@@ -2100,7 +2394,15 @@ export class PythonDecompiler {
           target: { kind: "IdentifierExpr", name, span: tok.span },
           op: "=",
           value: val,
-          span: makeSpan(this.filePath, tok.span.start.line, tok.span.start.column, tok.span.start.offset, val.span.end.line, val.span.end.column, val.span.end.offset),
+          span: makeSpan(
+            this.filePath,
+            tok.span.start.line,
+            tok.span.start.column,
+            tok.span.start.offset,
+            val.span.end.line,
+            val.span.end.column,
+            val.span.end.offset,
+          ),
         };
       }
 
@@ -2189,7 +2491,15 @@ export class PythonDecompiler {
       return {
         kind: "ArrayLiteralExpr",
         elements,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, endSpan.end.line, endSpan.end.column, endSpan.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          endSpan.end.line,
+          endSpan.end.column,
+          endSpan.end.offset,
+        ),
       };
     }
 
@@ -2224,7 +2534,15 @@ export class PythonDecompiler {
           properties.push({
             key: keyStr,
             value: valExpr,
-            span: makeSpan(this.filePath, keyExpr.span.start.line, keyExpr.span.start.column, keyExpr.span.start.offset, valExpr.span.end.line, valExpr.span.end.column, valExpr.span.end.offset),
+            span: makeSpan(
+              this.filePath,
+              keyExpr.span.start.line,
+              keyExpr.span.start.column,
+              keyExpr.span.start.offset,
+              valExpr.span.end.line,
+              valExpr.span.end.column,
+              valExpr.span.end.offset,
+            ),
           });
         }
         if (this.check("COMMA")) this.advance();
@@ -2234,7 +2552,15 @@ export class PythonDecompiler {
       return {
         kind: "RecordLiteralExpr",
         properties,
-        span: makeSpan(this.filePath, startSpan.start.line, startSpan.start.column, startSpan.start.offset, endSpan.end.line, endSpan.end.column, endSpan.end.offset),
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          endSpan.end.line,
+          endSpan.end.column,
+          endSpan.end.offset,
+        ),
       };
     }
 
@@ -2246,7 +2572,15 @@ export class PythonDecompiler {
         return {
           kind: "ArrayLiteralExpr",
           elements: [],
-          span: makeSpan(this.filePath, lParenSpan.start.line, lParenSpan.start.column, lParenSpan.start.offset, rParenSpan.end.line, rParenSpan.end.column, rParenSpan.end.offset),
+          span: makeSpan(
+            this.filePath,
+            lParenSpan.start.line,
+            lParenSpan.start.column,
+            lParenSpan.start.offset,
+            rParenSpan.end.line,
+            rParenSpan.end.column,
+            rParenSpan.end.offset,
+          ),
         };
       }
       const first = this.parseExpr();
@@ -2261,7 +2595,15 @@ export class PythonDecompiler {
         return {
           kind: "ArrayLiteralExpr",
           elements,
-          span: makeSpan(this.filePath, lParenSpan.start.line, lParenSpan.start.column, lParenSpan.start.offset, rParenSpan.end.line, rParenSpan.end.column, rParenSpan.end.offset),
+          span: makeSpan(
+            this.filePath,
+            lParenSpan.start.line,
+            lParenSpan.start.column,
+            lParenSpan.start.offset,
+            rParenSpan.end.line,
+            rParenSpan.end.column,
+            rParenSpan.end.offset,
+          ),
         };
       }
       const rParenSpan = this.consume("RPAREN").span;
@@ -2291,19 +2633,49 @@ export class PythonDecompiler {
   private parseLiteralExpr(): LiteralExpr {
     const tok = this.advance();
     if (tok.kind === "TRUE") {
-      return { kind: "LiteralExpr", literalKind: "boolean", value: true, rawValue: "True", span: tok.span };
+      return {
+        kind: "LiteralExpr",
+        literalKind: "boolean",
+        value: true,
+        rawValue: "True",
+        span: tok.span,
+      };
     }
     if (tok.kind === "FALSE") {
-      return { kind: "LiteralExpr", literalKind: "boolean", value: false, rawValue: "False", span: tok.span };
+      return {
+        kind: "LiteralExpr",
+        literalKind: "boolean",
+        value: false,
+        rawValue: "False",
+        span: tok.span,
+      };
     }
     if (tok.kind === "NONE") {
-      return { kind: "LiteralExpr", literalKind: "nil", value: null, rawValue: "None", span: tok.span };
+      return {
+        kind: "LiteralExpr",
+        literalKind: "nil",
+        value: null,
+        rawValue: "None",
+        span: tok.span,
+      };
     }
     if (tok.kind === "NUMBER") {
       const numVal = tok.value.includes(".") ? parseFloat(tok.value) : parseInt(tok.value, 10);
-      return { kind: "LiteralExpr", literalKind: "number", value: numVal, rawValue: tok.value, span: tok.span };
+      return {
+        kind: "LiteralExpr",
+        literalKind: "number",
+        value: numVal,
+        rawValue: tok.value,
+        span: tok.span,
+      };
     }
-    return { kind: "LiteralExpr", literalKind: "string", value: tok.value, rawValue: JSON.stringify(tok.value), span: tok.span };
+    return {
+      kind: "LiteralExpr",
+      literalKind: "string",
+      value: tok.value,
+      rawValue: JSON.stringify(tok.value),
+      span: tok.span,
+    };
   }
 
   private parseFStringExpr(): TemplateLiteralExpr {
@@ -2382,11 +2754,14 @@ export class PythonDecompiler {
       this.advance();
       const nextType = this.parsePrimaryTypeExpr();
       if (
-        (nextType.kind === "PrimitiveType" && (nextType.primitive === "nil" || nextType.primitive === "void")) ||
-        (typeExpr.kind === "PrimitiveType" && (typeExpr.primitive === "nil" || typeExpr.primitive === "void"))
+        (nextType.kind === "PrimitiveType" &&
+          (nextType.primitive === "nil" || nextType.primitive === "void")) ||
+        (typeExpr.kind === "PrimitiveType" &&
+          (typeExpr.primitive === "nil" || typeExpr.primitive === "void"))
       ) {
         const inner =
-          nextType.kind === "PrimitiveType" && (nextType.primitive === "nil" || nextType.primitive === "void")
+          nextType.kind === "PrimitiveType" &&
+          (nextType.primitive === "nil" || nextType.primitive === "void")
             ? typeExpr
             : nextType;
         typeExpr = { kind: "OptionType", innerType: inner, span: emptySpan(this.filePath) };
@@ -2416,7 +2791,8 @@ export class PythonDecompiler {
     if (name === "str") return { kind: "PrimitiveType", primitive: "str", span: tok.span };
     if (name === "bool") return { kind: "PrimitiveType", primitive: "bool", span: tok.span };
     if (name === "None") return { kind: "PrimitiveType", primitive: "void", span: tok.span };
-    if (name === "Any" || name === "object") return { kind: "NamedType", name: "any", span: tok.span };
+    if (name === "Any" || name === "object")
+      return { kind: "NamedType", name: "any", span: tok.span };
 
     if (name === "list" || name === "List") {
       if (this.check("LBRACKET")) {
@@ -2425,7 +2801,11 @@ export class PythonDecompiler {
         this.consume("RBRACKET");
         return { kind: "ArrayType", elementType: elem, span: tok.span };
       }
-      return { kind: "ArrayType", elementType: { kind: "NamedType", name: "any", span: tok.span }, span: tok.span };
+      return {
+        kind: "ArrayType",
+        elementType: { kind: "NamedType", name: "any", span: tok.span },
+        span: tok.span,
+      };
     }
 
     if (name === "dict" || name === "Dict") {

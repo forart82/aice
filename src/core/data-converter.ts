@@ -7,15 +7,7 @@
  * and AICE AST Expressions / Module items for JSON & YAML dialects.
  */
 
-import type {
-  ArrayLiteralExpr,
-  ConstDecl,
-  Expr,
-  LiteralExpr,
-  Module,
-  RecordLiteralExpr,
-  VarDecl,
-} from "./ast.js";
+import type { ConstDecl, Expr, Module, VarDecl } from "./ast.js";
 import { emptySpan } from "./span.js";
 
 /**

@@ -11,12 +11,14 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadProjectConfig } from "../../src/config/index.js";
 import { parse } from "../../src/core/parser.js";
 import { CppDecompiler } from "../../src/decompiler/cpp-decompiler.js";
 import { CSharpDecompiler } from "../../src/decompiler/csharp-decompiler.js";
 import { decompile } from "../../src/decompiler/index.js";
 import { executeRoundtrip } from "../../src/decompiler/roundtrip.js";
 import { detectTargetFromPath, emitTarget } from "../../src/emitters/index.js";
+import { updateProjectIdiom } from "../../src/idioms/index.js";
 import { calculateFileTokenomics, detectLanguageName } from "../../src/tokenomics/index.js";
 import { generateContext, outlinePath, splice } from "../../src/tools/index.js";
 
@@ -482,7 +484,9 @@ void renderDashboardCard(const TelemetryMetrics& m) {
         const outlineRes = (await outlinePath(cppFile, { idioms: true, stats: true })) as any;
         expect(outlineRes.text).toContain("type TelemetryMetrics:");
         expect(outlineRes.text).toContain("recipient: str");
-        expect(outlineRes.text).toContain("fn renderDashboardCard(m: TelemetryMetrics) -> void: ...");
+        expect(outlineRes.text).toContain(
+          "fn renderDashboardCard(m: TelemetryMetrics) -> void: ...",
+        );
 
         const ctxRes = await generateContext(cppFile, {
           symbol: "renderDashboardCard",
@@ -510,7 +514,9 @@ void renderDashboardCard(const TelemetryMetrics& m) {
           diff: true,
           projectRoot: tmpDir,
         });
-        expect(dryRes.modifiedCode).toContain("void renderDashboardCard(const TelemetryMetrics& m)");
+        expect(dryRes.modifiedCode).toContain(
+          "void renderDashboardCard(const TelemetryMetrics& m)",
+        );
         expect(dryRes.modifiedCode).toContain("givemeabigstring::out(m.recipient);");
         expect(dryRes.modifiedCode).toContain(
           'std::cout << "[CRITICAL] Latency spike=" << m.latencyMs << std::endl;',
@@ -529,6 +535,49 @@ void renderDashboardCard(const TelemetryMetrics& m) {
         expect(updatedDisk).toContain(
           'std::cout << "[CRITICAL] Latency spike=" << m.latencyMs << std::endl;',
         );
+
+        // Verify `aice idioms update` updates C++20 native files and .aice-idioms.json in place
+        const updateRes = await updateProjectIdiom(tmpDir, "$big_out", "givemeabigstring.warn($0)");
+        expect(updateRes.modifiedFiles).toContain(cppFile);
+        const afterIdiomUpdate = fs.readFileSync(cppFile, "utf-8");
+        expect(afterIdiomUpdate).toContain("void renderDashboardCard(const TelemetryMetrics& m)");
+        expect(afterIdiomUpdate).toContain("givemeabigstring::warn(m.recipient);");
+        expect(loadProjectConfig(tmpDir).idioms?.["$big_out"]?.templateAice).toBe(
+          "givemeabigstring.warn($0)",
+        );
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves nested C++20 namespaces (a::b::c::fn) and template const-ref parameters (const std::vector<std::string>&) during splice", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cpp20-nested-"));
+      try {
+        const cppFile = path.join(tmpDir, "batch_processor.cpp");
+        fs.writeFileSync(
+          cppFile,
+          `#include <string>
+#include <vector>
+
+void processBatch(const std::vector<std::string>& tags, int limit) {
+    core::telemetry::sink::record(limit);
+}
+`,
+          "utf-8",
+        );
+
+        const res = await splice(cppFile, {
+          symbol: "processBatch",
+          code: `fn processBatch(tags: list[str], limit: int):
+  if limit > 0:
+    core::telemetry::sink::record(limit)`,
+          projectRoot: tmpDir,
+        });
+
+        expect(res.modifiedCode).toContain(
+          "void processBatch(const std::vector<std::string>& tags, int limit)",
+        );
+        expect(res.modifiedCode).toContain("core::telemetry::sink::record(limit);");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

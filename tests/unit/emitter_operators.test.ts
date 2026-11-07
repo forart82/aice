@@ -16,9 +16,7 @@ import {
   CSharpEmitter,
   emitTarget,
   GoEmitter,
-  PythonEmitter,
   RustEmitter,
-  TypeScriptEmitter,
 } from "../../src/emitters/index.js";
 
 describe("Step 6: Multi-Target Code Emitters Harmonization", () => {

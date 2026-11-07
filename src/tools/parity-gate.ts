@@ -12,8 +12,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parse } from "../core/parser.js";
-import { executeRoundtrip, type RoundtripResult } from "../decompiler/index.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
+import { executeRoundtrip } from "../decompiler/index.js";
+import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 
 export type ParityTargetLanguage = TargetLanguage;
 
@@ -185,7 +185,8 @@ export async function verifyFileParity(
     source = fs.readFileSync(resolvedPath, "utf-8");
   }
 
-  const detectedTarget = options.target ?? classifyTargetLanguage(filePath) ?? detectTargetFromPath(filePath);
+  const detectedTarget =
+    options.target ?? classifyTargetLanguage(filePath) ?? detectTargetFromPath(filePath);
   const canonicalLang = normalizeLanguageName(detectedTarget);
 
   let decompileOk = false;
@@ -209,7 +210,9 @@ export async function verifyFileParity(
       parseOk = true;
     } catch (parseErr) {
       parseOk = false;
-      throw new Error(`Generated AICE failed to parse: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`);
+      throw new Error(
+        `Generated AICE failed to parse: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+      );
     }
 
     emitOk = typeof round1.reconstructed === "string" && round1.reconstructed.length > 0;
@@ -294,10 +297,8 @@ export async function runParityGate(
   const fileList = resolveTargetFiles(targetDirOrFiles, options);
 
   const results: FileParityResult[] = [];
-  const resultsByLanguage: Record<
-    string,
-    { total: number; passed: number; parityRate: number }
-  > = {};
+  const resultsByLanguage: Record<string, { total: number; passed: number; parityRate: number }> =
+    {};
 
   function ensureLangBucket(lang: string) {
     if (!resultsByLanguage[lang]) {
@@ -318,13 +319,16 @@ export async function runParityGate(
     ensureLangBucket(lang);
 
     resultsByLanguage[lang].total += 1;
-    const passed = (res.isBitIdentical || res.isAstEquivalent) && !res.error && res.roundtripDrift === 0;
+    const passed =
+      (res.isBitIdentical || res.isAstEquivalent) && !res.error && res.roundtripDrift === 0;
     if (passed) {
       resultsByLanguage[lang].passed += 1;
     }
     resultsByLanguage[lang].parityRate =
       resultsByLanguage[lang].total > 0
-        ? Number(((resultsByLanguage[lang].passed / resultsByLanguage[lang].total) * 100).toFixed(1))
+        ? Number(
+            ((resultsByLanguage[lang].passed / resultsByLanguage[lang].total) * 100).toFixed(1),
+          )
         : 100;
   }
 
@@ -397,7 +401,15 @@ function resolveTargetFiles(
   }
 
   const results: string[] = [];
-  const defaultIgnores = ["node_modules", ".git", "dist", "build", ".aice-build", ".next", ".turbo"];
+  const defaultIgnores = [
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".aice-build",
+    ".next",
+    ".turbo",
+  ];
   const ignorePatterns = options.ignorePatterns ?? defaultIgnores;
 
   function scan(current: string) {
@@ -505,7 +517,9 @@ export function formatParitySummaryTerminal(summary: ParityGateSummary): string 
     if (summary.results) {
       for (const r of summary.results) {
         if (!r.isBitIdentical && !r.isAstEquivalent) {
-          lines.push(`  - [FAIL] ${r.filePath} [${r.language}]: ${r.error ?? "roundtrip drift detected"}`);
+          lines.push(
+            `  - [FAIL] ${r.filePath} [${r.language}]: ${r.error ?? "roundtrip drift detected"}`,
+          );
         }
       }
     }

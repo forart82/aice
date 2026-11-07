@@ -26,9 +26,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
 
     // Emits pure interface when pureInterfaces: true is set
     const emitted = emitTarget(mod, "typescript", { pureInterfaces: true, watermark: false });
-    expect(emitted).toBe(
-      `export interface Opts {\n  width?: number;\n  height?: number;\n}\n`,
-    );
+    expect(emitted).toBe(`export interface Opts {\n  width?: number;\n  height?: number;\n}\n`);
     expect(emitted).not.toContain("export function Opts");
 
     // Also via TypeScriptEmitter directly with pureInterfaces: true
@@ -47,9 +45,7 @@ describe("Phase 0 Steps 0.4 & 0.6: Pure Interfaces & Optional Interface Fields",
     const mod = parse(src, "foo.ts.aice");
     const emitted = emitTarget(mod, "typescript", { pureInterfaces: true, watermark: false });
 
-    expect(emitted).toBe(
-      `export interface Foo {\n  width: number;\n  height: number;\n}\n`,
-    );
+    expect(emitted).toBe(`export interface Foo {\n  width: number;\n  height: number;\n}\n`);
     expect(emitted).not.toContain("export function Foo");
   });
 

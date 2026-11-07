@@ -15,45 +15,26 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  BinaryExpr,
   BinaryOp,
   Block,
-  BreakStmt,
-  CallExpr,
   ClassDecl,
-  ConstDecl,
-  ContinueStmt,
   Expr,
-  ExprStmt,
-  ForStmt,
   FunctionDecl,
   IdentifierExpr,
   IfStmt,
   ImportDecl,
-  IndexExpr,
-  LetBinding,
-  LiteralExpr,
   MatchCase,
   MatchStmt,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   Pattern,
   PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
-  ThrowStmt,
-  TryStmt,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
-  WhileStmt,
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
@@ -669,10 +650,6 @@ export class PhpDecompiler {
     return this.tokens[this.cur] ?? { kind: "EOF", value: "", line: 1, col: 1 };
   }
 
-  private peek(offset = 1): PhpToken {
-    return this.tokens[this.cur + offset] ?? { kind: "EOF", value: "", line: 1, col: 1 };
-  }
-
   private check(kind: PhpTokenKind): boolean {
     return this.current().kind === kind;
   }
@@ -751,7 +728,10 @@ export class PhpDecompiler {
 
   private isClassModifierAhead(): boolean {
     let i = this.cur;
-    while (i < this.tokens.length && (this.tokens[i].kind === "COMMENT" || this.tokens[i].kind === "DOC_COMMENT")) {
+    while (
+      i < this.tokens.length &&
+      (this.tokens[i].kind === "COMMENT" || this.tokens[i].kind === "DOC_COMMENT")
+    ) {
       i++;
     }
     const k = this.tokens[i]?.kind;
@@ -954,7 +934,13 @@ export class PhpDecompiler {
         i++;
         continue;
       }
-      if (k === "PUBLIC" || k === "PROTECTED" || k === "PRIVATE" || k === "STATIC" || k === "READONLY") {
+      if (
+        k === "PUBLIC" ||
+        k === "PROTECTED" ||
+        k === "PRIVATE" ||
+        k === "STATIC" ||
+        k === "READONLY"
+      ) {
         i++;
         continue;
       }
@@ -1513,7 +1499,11 @@ export class PhpDecompiler {
         if (patExpr.kind === "LiteralExpr") {
           pattern = { kind: "LiteralPattern", value: patExpr, span: emptySpan(this.filePath) };
         } else if (patExpr.kind === "IdentifierExpr") {
-          pattern = { kind: "IdentifierPattern", name: patExpr.name, span: emptySpan(this.filePath) };
+          pattern = {
+            kind: "IdentifierPattern",
+            name: patExpr.name,
+            span: emptySpan(this.filePath),
+          };
         } else if (patExpr.kind === "MemberAccessExpr") {
           const qualified = `${(patExpr.object as IdentifierExpr).name}.${patExpr.property}`;
           pattern = { kind: "IdentifierPattern", name: qualified, span: emptySpan(this.filePath) };

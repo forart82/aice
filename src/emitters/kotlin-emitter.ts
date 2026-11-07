@@ -19,19 +19,15 @@
 
 import type {
   ArrayLiteralExpr,
-  AssignStmt,
   BinaryExpr,
   Block,
   CallExpr,
   ClassDecl,
   ConstDecl,
   Expr,
-  FieldDecl,
   FunctionDecl,
-  IdentifierExpr,
   IfStmt,
   ImportDecl,
-  IndexExpr,
   LiteralExpr,
   MatchCase,
   MatchStmt,
@@ -39,7 +35,6 @@ import type {
   MethodDecl,
   Module,
   ModuleItem,
-  ParamDecl,
   Pattern,
   PropertyDecl,
   RecordLiteralExpr,
@@ -118,7 +113,11 @@ export class KotlinEmitter {
           if (t.kind === "DOCSTRING") {
             this.ctx.writeLine(t.content);
             this.ctx.writeLine();
-          } else if (t.kind === "LICENSE_HEADER" || t.kind === "LINE_COMMENT" || t.kind === "BLOCK_COMMENT") {
+          } else if (
+            t.kind === "LICENSE_HEADER" ||
+            t.kind === "LINE_COMMENT" ||
+            t.kind === "BLOCK_COMMENT"
+          ) {
             this.ctx.writeLine(t.content);
           }
         }
@@ -208,7 +207,9 @@ export class KotlinEmitter {
     if (parts.length > 1) {
       parts.pop(); // remove file name
       // Filter out standard source dir prefixes
-      const filtered = parts.filter((p) => p !== "src" && p !== "main" && p !== "kotlin" && p !== "java");
+      const filtered = parts.filter(
+        (p) => p !== "src" && p !== "main" && p !== "kotlin" && p !== "java",
+      );
       if (filtered.length > 0) {
         return filtered.join(".");
       }
@@ -346,16 +347,23 @@ export class KotlinEmitter {
     // Determine if this is an interface, data class, or regular class
     const isInterface =
       c.methods.length > 0 &&
-      c.methods.every((m) => !m.body || (m.body.kind === "Block" && m.body.statements.length === 0)) &&
+      c.methods.every(
+        (m) => !m.body || (m.body.kind === "Block" && m.body.statements.length === 0),
+      ) &&
       (!c.primaryConstructor || c.primaryConstructor.length === 0) &&
       c.properties.length === 0;
 
     const classTrivia = this.ctx.trivia?.getTrivia(nodeId);
-    const hasDataKeyword = Boolean(this.ctx.trivia?.getTrivia("is_data:" + c.name)) || Boolean(classTrivia?.leading.some((t) => t.content.includes("data class")));
+    const hasDataKeyword =
+      Boolean(this.ctx.trivia?.getTrivia("is_data:" + c.name)) ||
+      Boolean(classTrivia?.leading.some((t) => t.content.includes("data class")));
 
     const isData =
       Boolean(hasDataKeyword) ||
-      (c.primaryConstructor && c.primaryConstructor.length > 0 && c.properties.length === 0 && !isInterface);
+      (c.primaryConstructor &&
+        c.primaryConstructor.length > 0 &&
+        c.properties.length === 0 &&
+        !isInterface);
 
     let prefix = "class";
     if (isInterface) {
@@ -447,17 +455,19 @@ export class KotlinEmitter {
     const typeParamsStr =
       m.typeParams && m.typeParams.length > 0 ? `<${m.typeParams.join(", ")}> ` : "";
 
-    const params = m.params.map((p) => {
-      const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
-      const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
-      const typeStr = baseType ? `: ${baseType}${opt}` : "";
-      const def = p.defaultValue
-        ? ` = ${this.emitExpr(p.defaultValue)}`
-        : p.isOptional
-          ? " = null"
-          : "";
-      return `${p.name}${typeStr}${def}`;
-    }).join(", ");
+    const params = m.params
+      .map((p) => {
+        const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
+        const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
+        const typeStr = baseType ? `: ${baseType}${opt}` : "";
+        const def = p.defaultValue
+          ? ` = ${this.emitExpr(p.defaultValue)}`
+          : p.isOptional
+            ? " = null"
+            : "";
+        return `${p.name}${typeStr}${def}`;
+      })
+      .join(", ");
 
     let retStr = "";
     if (m.returnType) {
@@ -498,17 +508,19 @@ export class KotlinEmitter {
     const typeParamsStr =
       fn.typeParams && fn.typeParams.length > 0 ? `<${fn.typeParams.join(", ")}> ` : "";
 
-    const params = fn.params.map((p) => {
-      const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
-      const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
-      const typeStr = baseType ? `: ${baseType}${opt}` : "";
-      const def = p.defaultValue
-        ? ` = ${this.emitExpr(p.defaultValue)}`
-        : p.isOptional
-          ? " = null"
-          : "";
-      return `${p.name}${typeStr}${def}`;
-    }).join(", ");
+    const params = fn.params
+      .map((p) => {
+        const baseType = p.typeAnnotation ? this.emitTypeExpr(p.typeAnnotation) : "";
+        const opt = p.isOptional && !baseType.endsWith("?") ? "?" : "";
+        const typeStr = baseType ? `: ${baseType}${opt}` : "";
+        const def = p.defaultValue
+          ? ` = ${this.emitExpr(p.defaultValue)}`
+          : p.isOptional
+            ? " = null"
+            : "";
+        return `${p.name}${typeStr}${def}`;
+      })
+      .join(", ");
 
     let retStr = "";
     if (fn.returnType) {
@@ -527,7 +539,11 @@ export class KotlinEmitter {
     }
 
     // Check if block has only one return statement
-    if (fn.body.kind === "Block" && fn.body.statements.length === 1 && fn.body.statements[0].kind === "ReturnStmt") {
+    if (
+      fn.body.kind === "Block" &&
+      fn.body.statements.length === 1 &&
+      fn.body.statements[0].kind === "ReturnStmt"
+    ) {
       const retStmt = fn.body.statements[0] as ReturnStmt;
       if (retStmt.value && fn.isExpressionBodied) {
         this.ctx.writeLine(

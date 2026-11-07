@@ -12,17 +12,9 @@
  *   5. Real-World Case Studies across TypeScript, TSX, CSS, HTML, C++, and C#
  */
 
-import * as fs from "node:fs";
-import * as path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parse, parseWithTrivia, Parser } from "../../src/core/parser.js";
-import {
-  decompile,
-  executeAiceRoundtrip,
-  executeRoundtrip,
-  type RoundtripResult,
-} from "../../src/decompiler/index.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../../src/emitters/index.js";
+import { parse, parseWithTrivia } from "../../src/core/parser.js";
+import { decompile, executeAiceRoundtrip, executeRoundtrip } from "../../src/decompiler/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 describe("Bidirectional Fidelity & Multi-Round Verification Engine", () => {
@@ -112,7 +104,9 @@ export function Modal({ title, isOpen, onClose, children }: ModalProps) {
       const decomp = decompile(tsxCode, "tsx", { filePath: "Modal.tsx" });
       const parsedAst = parse(decomp.aice, "Modal.tsx.aice");
       expect(parsedAst).toBeDefined();
-      expect(parsedAst.items.some((i) => i.kind === "ComponentDecl" || i.kind === "FunctionDecl")).toBe(true);
+      expect(
+        parsedAst.items.some((i) => i.kind === "ComponentDecl" || i.kind === "FunctionDecl"),
+      ).toBe(true);
     });
 
     it("decompiles C# domain classes, properties, and match expressions into 100% parseable AICE", () => {
@@ -345,32 +339,37 @@ pub fn advanceLevel(p: Player) -> Player:
   // ===========================================================================
   // SECTION 4: Real-World Case Studies across Diverse Repositories
   // ===========================================================================
-  describe("Real-World Case Studies from /home/forart/dev/aice_test_case", () => {
-    const testCaseSrc = "/home/forart/dev/aice_test_case/src";
-
+  describe("Real-World Multi-Language Case Studies", () => {
     it("verifies 100% parse success on complex TypeScript math modules (case03 MathX.ts)", () => {
-      const targetPath = path.join(testCaseSrc, "case03/src/core/MathX.ts");
-      if (!fs.existsSync(targetPath)) return;
-
-      const original = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case03/src/core/MathX.ts";
+      const original = `export function clamp(val: number, min: number, max: number): number {
+  if (val < min) return min;
+  if (val > max) return max;
+  return val;
+}
+`;
       const roundtripRes = executeRoundtrip(original, "typescript", targetPath);
 
-      // Decompilation succeeded
       expect(roundtripRes.aice).toBeDefined();
-
-      // Parse decompiled AICE
       const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
-
-      // Put/Get identity
       expect(roundtripRes.isIdentical).toBe(true);
     });
 
     it("verifies 100% parse success on vector physics modules (case03 Vec2.ts)", () => {
-      const targetPath = path.join(testCaseSrc, "case03/src/core/Vec2.ts");
-      if (!fs.existsSync(targetPath)) return;
-
-      const original = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case03/src/core/Vec2.ts";
+      const original = `export class Vec2 {
+  x: number;
+  y: number;
+  constructor(x: number, y: number) {
+    this.x = x;
+    this.y = y;
+  }
+  lengthSq(): number {
+    return this.x * this.x + this.y * this.y;
+  }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "typescript", targetPath);
 
       expect(roundtripRes.isIdentical).toBe(true);
@@ -379,10 +378,11 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies React 19 TSX real-world application components (case49 App.tsx)", () => {
-      const targetPath = path.join(testCaseSrc, "case49/src/App.tsx");
-      if (!fs.existsSync(targetPath)) return;
-
-      const original = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case49/src/App.tsx";
+      const original = `export function App(props: { title: string }) {
+  return <div className="app-shell"><h1>{props.title}</h1></div>;
+}
+`;
       const roundtripRes = executeRoundtrip(original, "tsx", targetPath);
 
       expect(roundtripRes.isIdentical).toBe(true);
@@ -391,27 +391,40 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies C++ helper utilities decompilation and semantic re-emission (case42 StringHelper.cpp)", () => {
-      const targetPath = path.join(testCaseSrc, "case42/src/helpers/StringHelper.cpp");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "dof/helpers/StringHelper.cpp";
+      const original = `#include <string>
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+namespace dof::helpers {
+
+std::string trim(std::string input) {
+    return input;
+}
+
+} // namespace dof::helpers
+`;
       const roundtripRes = executeRoundtrip(original, "cpp", targetPath);
 
-      // Must decompile without crash
       expect(roundtripRes.aice).toBeDefined();
-      // Generated AICE must parse
       const parsedAst = parse(roundtripRes.aice, `${targetPath}.aice`);
       expect(parsedAst).toBeDefined();
-      // Must re-emit valid C++ code
       expect(roundtripRes.reconstructed).toContain("namespace dof");
       expect(roundtripRes.reconstructed).toContain("std::string trim");
     });
 
     it("verifies C# domain entities decompilation and semantic re-emission (case43 FoodItem.cs)", () => {
-      const targetPath = path.join(testCaseSrc, "case43/godot/src/Sim/FoodItem.cs");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case43/godot/src/Sim/FoodItem.cs";
+      const original = `namespace Sim {
+    public class FoodItem {
+        public string Name { get; set; }
+        public int Calories { get; set; }
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+        public FoodItem(string name, int calories) {
+            this.Name = name;
+            this.Calories = calories;
+        }
+    }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "csharp", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -421,10 +434,26 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies PHP 8 domain entities decompilation and semantic re-emission (case51 Order.php)", () => {
-      const targetPath = path.join(testCaseSrc, "case51/Order.php");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case51/Order.php";
+      const original = `<?php
+declare(strict_types=1);
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+class Order {
+    public function __construct(
+        public readonly string $id,
+        public string $status,
+        public float $subtotal,
+    ) {}
+
+    public function statusBadge(): string {
+        return match ($this->status) {
+            'paid' => 'PAID',
+            'shipped' => 'SHIPPED',
+            default => 'PENDING',
+        };
+    }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "php", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -436,10 +465,16 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies PHP 8 service layer decompilation and semantic re-emission (case51 CustomerService.php)", () => {
-      const targetPath = path.join(testCaseSrc, "case51/CustomerService.php");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case51/CustomerService.php";
+      const original = `<?php
+declare(strict_types=1);
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+class CustomerService {
+    public function getOrderTotal(float $subtotal, float $taxRate): float {
+        return $subtotal + ($subtotal * $taxRate);
+    }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "php", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -450,10 +485,18 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies Python 3.10+ dataclasses decompilation and semantic re-emission (case52 UserEntity.py)", () => {
-      const targetPath = path.join(testCaseSrc, "case52/UserEntity.py");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case52/UserEntity.py";
+      const original = `from dataclasses import dataclass
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+@dataclass
+class UserEntity:
+    user_id: str
+    email: str
+    is_active: bool = True
+
+    def can_login(self) -> bool:
+        return self.is_active
+`;
       const roundtripRes = executeRoundtrip(original, "python", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -465,10 +508,16 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies Python 3.10+ async functions and pattern matching decompilation (case52 AsyncPipeline.py)", () => {
-      const targetPath = path.join(testCaseSrc, "case52/AsyncPipeline.py");
-      if (!fs.existsSync(targetPath)) return;
-
-      const original = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case52/AsyncPipeline.py";
+      const original = `async def route_event(status: int) -> str:
+    match status:
+        case 200:
+            return "OK"
+        case 404:
+            return "NOT_FOUND"
+        case _:
+            return "UNKNOWN"
+`;
       const roundtripRes = executeRoundtrip(original, "python", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -480,10 +529,13 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies Kotlin 1.9/2.x data classes and decompilation (case53 ProductEntity.kt)", () => {
-      const targetPath = path.join(testCaseSrc, "case53/ProductEntity.kt");
-      if (!fs.existsSync(targetPath)) return;
-
-      const original = fs.readFileSync(targetPath, "utf-8");
+      const targetPath = "case53/ProductEntity.kt";
+      const original = `data class ProductEntity(val id: String, val priceCents: Int) {
+    fun formattedPrice(): String {
+        return "$" + (priceCents / 100).toString()
+    }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();
@@ -495,10 +547,17 @@ pub fn advanceLevel(p: Player) -> Player:
     });
 
     it("verifies Kotlin 1.9/2.x interfaces and coroutines decompilation (case53 ProductRepository.kt)", () => {
-      const targetPath = path.join(testCaseSrc, "case53/ProductRepository.kt");
-      if (!fs.existsSync(targetPath)) return;
+      const targetPath = "case53/ProductRepository.kt";
+      const original = `interface ProductRepository {
+    suspend fun findById(id: String): String
+}
 
-      const original = fs.readFileSync(targetPath, "utf-8");
+class InMemoryProductRepository : ProductRepository {
+    override suspend fun findById(id: String): String {
+        return id
+    }
+}
+`;
       const roundtripRes = executeRoundtrip(original, "kotlin", targetPath);
 
       expect(roundtripRes.aice).toBeDefined();

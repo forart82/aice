@@ -14,7 +14,6 @@ import { parse } from "../../src/core/parser.js";
 import {
   mineProjectIdioms,
   expandModuleIdioms,
-  collapseModuleIdioms,
   expandAiceSourceIdioms,
   collapseAiceSourceIdioms,
   applyProjectIdiomsToDirectory,
@@ -274,9 +273,7 @@ fn runC(id: str):
       const alphaIdiom = Object.values(result.idioms).find(
         (i) => i.kind === "block" && i.templateAice.includes("_loc0"),
       );
-      expect(alphaIdiom!.templateAice).toMatch(
-        /(_loc0\s*:=\s*fetch\(|let _loc0\s*=\s*fetch\()/,
-      );
+      expect(alphaIdiom!.templateAice).toMatch(/(_loc0\s*:=\s*fetch\(|let _loc0\s*=\s*fetch\()/);
       expect(alphaIdiom!.templateAice).toContain("save(_loc0)");
       // Only holes should be parameter, _loc0 must NOT be a param
       expect(alphaIdiom!.params.every((p) => p.name !== "_loc0")).toBe(true);
@@ -313,7 +310,7 @@ fn handle():
       });
 
       expect(collapsedCount).toBe(1);
-      expect(aice).toContain("$guardStatus(200, \"bad status\")");
+      expect(aice).toContain('$guardStatus(200, "bad status")');
       expect(aice).not.toContain("if res.status != 200");
     });
 
@@ -389,12 +386,9 @@ fn handleEscaping(id: str):
   ret tempVar
 `;
 
-      const { collapsedCount: escapedCollapsed } = collapseAiceSourceIdioms(
-        escapingSource,
-        {
-          $fetchAndSave: blockIdiom,
-        },
-      );
+      const { collapsedCount: escapedCollapsed } = collapseAiceSourceIdioms(escapingSource, {
+        $fetchAndSave: blockIdiom,
+      });
       expect(escapedCollapsed).toBe(0);
 
       // In this function, tempVar does NOT escape the window!
@@ -586,7 +580,7 @@ fn handle():
   describe("7. Deep Audit Fixes & Regressions", () => {
     it("expands nested expressions and block idioms with recursion protection", () => {
       const idioms: Record<string, ProjectIdiomDefinition> = {
-        "$add": {
+        $add: {
           name: "$add",
           kind: "expr",
           params: [
@@ -599,7 +593,7 @@ fn handle():
           netTokenSavings: 2,
           occurrences: 1,
         },
-        "$add3": {
+        $add3: {
           name: "$add3",
           kind: "expr",
           params: [
@@ -613,7 +607,7 @@ fn handle():
           netTokenSavings: 4,
           occurrences: 1,
         },
-        "$nestedStmt": {
+        $nestedStmt: {
           name: "$nestedStmt",
           kind: "stmt",
           params: [
@@ -627,7 +621,7 @@ fn handle():
           netTokenSavings: 6,
           occurrences: 1,
         },
-        "$cycleA": {
+        $cycleA: {
           name: "$cycleA",
           kind: "expr",
           params: [{ name: "$0", type: "int" }],
@@ -637,7 +631,7 @@ fn handle():
           netTokenSavings: 1,
           occurrences: 1,
         },
-        "$cycleB": {
+        $cycleB: {
           name: "$cycleB",
           kind: "expr",
           params: [{ name: "$0", type: "int" }],
@@ -661,7 +655,7 @@ fn handle():
 
     it("supports PostfixTryExpr and IndexExpr inside idioms and respects escape analysis", () => {
       const idioms: Record<string, ProjectIdiomDefinition> = {
-        "$tryLookup": {
+        $tryLookup: {
           name: "$tryLookup",
           kind: "expr",
           params: [
@@ -691,12 +685,14 @@ fn handle():
           source: "module f2\nfn run2():\n  let item = fetchItem(b)?[0]\n  log(item)\n",
         },
       ];
-      expect(() => mineProjectIdioms(inputs, { minOccurrences: 2, minNetTokenSavings: 0 })).not.toThrow();
+      expect(() =>
+        mineProjectIdioms(inputs, { minOccurrences: 2, minNetTokenSavings: 0 }),
+      ).not.toThrow();
     });
 
     it("preserves exposed non-internal variables while disambiguating internal _loc variables", () => {
       const idioms: Record<string, ProjectIdiomDefinition> = {
-        "$calcWithExposed": {
+        $calcWithExposed: {
           name: "$calcWithExposed",
           kind: "block",
           params: [{ name: "$0", type: "int" }],
@@ -789,4 +785,3 @@ fn worker3():
     });
   });
 });
-

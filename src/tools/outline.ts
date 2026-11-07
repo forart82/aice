@@ -15,18 +15,11 @@ import {
   loadProjectConfig,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
-import type {
-  Module,
-  ParamDecl,
-  PropertyDecl,
-  TypeDecl,
-  TypeExpr,
-  VarDecl,
-} from "../core/ast.js";
+import type { Module, ParamDecl, TypeExpr } from "../core/ast.js";
 import { parseWithTrivia } from "../core/parser.js";
 import { CstTriviaTable } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
-import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import { detectTargetFromPath } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { estimateTokens } from "../tokenomics/index.js";
 
@@ -129,9 +122,7 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   const comments = entry.leading
     .filter(
       (item) =>
-        item.kind === "LINE_COMMENT" ||
-        item.kind === "BLOCK_COMMENT" ||
-        item.kind === "DOCSTRING",
+        item.kind === "LINE_COMMENT" || item.kind === "BLOCK_COMMENT" || item.kind === "DOCSTRING",
     )
     .map((item) => item.content.trimEnd());
   return comments.length > 0 ? comments.join("\n") : undefined;
@@ -142,8 +133,7 @@ export function generateOutline(
   filePathOrOptions: string | OutlineOptions = {},
   maybeOptions: OutlineOptions = {},
 ): OutlineResult {
-  const explicitFilePath =
-    typeof filePathOrOptions === "string" ? filePathOrOptions : undefined;
+  const explicitFilePath = typeof filePathOrOptions === "string" ? filePathOrOptions : undefined;
   const options: OutlineOptions =
     typeof filePathOrOptions === "string" ? maybeOptions : filePathOrOptions;
 
@@ -586,9 +576,7 @@ export function generateOutline(
     if (sym.kind === "class") {
       if (sym.children && sym.children.length > 0) {
         // Strip trailing ' ...' into ':' for multiline outline
-        const header = sym.signature.endsWith(": ...")
-          ? sym.signature.slice(0, -4)
-          : sym.signature;
+        const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
         outlineLines.push(header);
         for (const child of sym.children) {
           if (child.docstring) {
@@ -612,9 +600,7 @@ export function generateOutline(
       }
     } else if (sym.kind === "interface" || sym.kind === "record") {
       if (sym.children && sym.children.length > 0) {
-        const header = sym.signature.endsWith(": ...")
-          ? sym.signature.slice(0, -4)
-          : sym.signature;
+        const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
         outlineLines.push(header);
         for (const child of sym.children) {
           if (child.docstring) {
@@ -686,7 +672,9 @@ export function generateOutline(
   const originalChars = origForTokens.length;
   const outlineChars = outlineText.length;
   const charSavingsPct =
-    originalChars > 0 ? Number((((originalChars - outlineChars) / originalChars) * 100).toFixed(1)) : 0;
+    originalChars > 0
+      ? Number((((originalChars - outlineChars) / originalChars) * 100).toFixed(1))
+      : 0;
 
   const stats: OutlineStats = {
     originalTokens,

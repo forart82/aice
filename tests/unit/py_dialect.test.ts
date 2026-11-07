@@ -42,19 +42,10 @@ import {
   TARGET_EXT_MAP,
   VALID_TARGET_LANGUAGES,
 } from "../../src/config/index.js";
-import type { ClassDecl, FunctionDecl, MatchStmt, Module, TypeDecl } from "../../src/core/ast.js";
+import type { ClassDecl, FunctionDecl, MatchStmt } from "../../src/core/ast.js";
 import { parse, parseWithTrivia } from "../../src/core/parser.js";
-import {
-  decompile,
-  decompilePython,
-  executeRoundtrip,
-  PythonDecompiler,
-} from "../../src/decompiler/index.js";
-import {
-  detectTargetFromPath,
-  emitTarget,
-  PythonEmitter,
-} from "../../src/emitters/index.js";
+import { decompilePython, executeRoundtrip } from "../../src/decompiler/index.js";
+import { detectTargetFromPath, emitTarget, PythonEmitter } from "../../src/emitters/index.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -247,7 +238,9 @@ async def fetch_user(user_id: int) -> Optional[dict]:
       expect(fn).toBeDefined();
       expect(fn.body.kind).toBe("Block");
 
-      const matchStmt = (fn.body as any).statements.find((s: any) => s.kind === "MatchStmt") as MatchStmt;
+      const matchStmt = (fn.body as any).statements.find(
+        (s: any) => s.kind === "MatchStmt",
+      ) as MatchStmt;
       expect(matchStmt).toBeDefined();
       expect(matchStmt.cases.length).toBe(3);
       expect(matchStmt.cases[0].pattern.kind).toBe("LiteralPattern");

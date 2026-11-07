@@ -146,7 +146,8 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   const clean = filePath.replace(/\.aice$/, "");
   if (clean.endsWith(".tsx") || clean.endsWith(".jsx")) return "tsx";
   if (clean.endsWith(".ts")) return "typescript";
-  if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs")) return "javascript";
+  if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs"))
+    return "javascript";
   if (clean.endsWith(".py")) return "python";
   if (clean.endsWith(".html")) return "html";
   if (clean.endsWith(".css")) return "css";

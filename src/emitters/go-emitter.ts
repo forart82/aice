@@ -238,7 +238,7 @@ export class GoEmitter {
   private emitConstDecl(c: ConstDecl): void {
     const nodeId = `const:${c.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
-    const name = c.isExported ? (c.name.charAt(0).toUpperCase() + c.name.slice(1)) : c.name;
+    const name = c.isExported ? c.name.charAt(0).toUpperCase() + c.name.slice(1) : c.name;
     const typeStr = c.typeAnnotation ? ` ${this.emitTypeExpr(c.typeAnnotation)}` : "";
     const val = this.emitExpr(c.value);
     this.ctx.writeLine(`const ${name}${typeStr} = ${val}`);
@@ -248,7 +248,7 @@ export class GoEmitter {
   private emitVarDecl(v: VarDecl): void {
     const nodeId = `var:${v.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
-    const name = v.isExported ? (v.name.charAt(0).toUpperCase() + v.name.slice(1)) : v.name;
+    const name = v.isExported ? v.name.charAt(0).toUpperCase() + v.name.slice(1) : v.name;
     const typeStr = v.typeAnnotation ? ` ${this.emitTypeExpr(v.typeAnnotation)}` : "";
     const val = this.emitExpr(v.value);
     this.ctx.writeLine(`var ${name}${typeStr} = ${val}`);

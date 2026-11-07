@@ -10,14 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
-import {
-  type ContextOptions,
-  type ContextResult,
-  generateContext,
-  packageContext,
-  packContext,
-  resolveImportPath,
-} from "../../src/tools/context.js";
+import { generateContext, packageContext, packContext } from "../../src/tools/context.js";
 
 describe("AICE 2.0 AI Context Packager Engine (Step 20)", () => {
   let tmpDir: string;

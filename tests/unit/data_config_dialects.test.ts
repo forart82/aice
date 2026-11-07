@@ -28,7 +28,6 @@ import { parse, parseWithTrivia } from "../../src/core/parser.js";
 import {
   decompile,
   decompileFile,
-  executeAiceRoundtrip,
   executeRoundtrip,
   JsonDecompiler,
   YamlDecompiler,

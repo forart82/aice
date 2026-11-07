@@ -10,11 +10,7 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
-  findProjectRoot,
-  KNOWN_TARGET_EXTENSIONS,
-  loadProjectConfig,
-} from "../config/index.js";
+import { findProjectRoot, KNOWN_TARGET_EXTENSIONS, loadProjectConfig } from "../config/index.js";
 import type { Block, Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import { type Span } from "../core/span.js";
@@ -499,12 +495,8 @@ function applySemanticPatch(
     const hasDiffPrefixes = contentLines.some((l) => l.startsWith("+") || l.startsWith("-"));
 
     if (hasDiffPrefixes) {
-      const plusLines = contentLines
-        .filter((l) => l.startsWith("+"))
-        .map((l) => l.slice(1));
-      const minusLines = contentLines
-        .filter((l) => l.startsWith("-"))
-        .map((l) => l.slice(1));
+      const plusLines = contentLines.filter((l) => l.startsWith("+")).map((l) => l.slice(1));
+      const minusLines = contentLines.filter((l) => l.startsWith("-")).map((l) => l.slice(1));
 
       if (options.reverse) {
         if (minusLines.length > 0 && plusLines.length > 0) {
@@ -966,8 +958,7 @@ export async function patchFile(
     await fs.promises.rename(tmpFile, fullPath);
 
     if (options.compile && fullPath.endsWith(".aice")) {
-      const root =
-        options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
+      const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
       const config = loadProjectConfig(root);
 
       const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, fullPath);

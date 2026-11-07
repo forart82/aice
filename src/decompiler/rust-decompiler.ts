@@ -7,45 +7,26 @@
  */
 
 import type {
-  ArrayLiteralExpr,
   AssignOp,
-  AssignStmt,
-  BinaryExpr,
   BinaryOp,
   Block,
-  CallExpr,
   ClassDecl,
   ConstDecl,
   Expr,
-  ExprStmt,
   FieldDecl,
-  ForStmt,
   FunctionDecl,
-  IdentifierExpr,
-  IfStmt,
   ImportDecl,
-  IndexExpr,
-  LetBinding,
   LiteralExpr,
   MatchCase,
-  MatchStmt,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
   ParamDecl,
   Pattern,
-  PostfixTryExpr,
-  PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
-  TemplateLiteralExpr,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
   VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { emptySpan, type Span } from "../core/span.js";
 import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
@@ -318,7 +299,11 @@ export class RustLexer {
         }
 
         // Check and strip valid Rust numeric type suffix from input stream
-        const suffixMatch = this.src.slice(this.pos).match(/^(?:i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f32|f64)(?![a-zA-Z0-9_])/);
+        const suffixMatch = this.src
+          .slice(this.pos)
+          .match(
+            /^(?:i8|i16|i32|i64|i128|isize|u8|u16|u32|u64|u128|usize|f32|f64)(?![a-zA-Z0-9_])/,
+          );
         if (suffixMatch) {
           for (let s = 0; s < suffixMatch[0].length; s++) {
             this.advance();
@@ -1220,7 +1205,14 @@ export class RustDecompiler {
           break;
         }
       }
-      return { kind: "IfStmt", condition: cond, thenBranch, elifBranches, elseBranch, span: emptySpan() };
+      return {
+        kind: "IfStmt",
+        condition: cond,
+        thenBranch,
+        elifBranches,
+        elseBranch,
+        span: emptySpan(),
+      };
     }
 
     // Match statement: match expr { ... }

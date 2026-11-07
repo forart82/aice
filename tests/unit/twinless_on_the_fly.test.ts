@@ -16,15 +16,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  loadProjectConfig,
-  saveProjectConfig,
-  type ProjectIdiomDefinition,
-} from "../../src/config/project-config.js";
-import {
-  scanProjectIdioms,
-  updateProjectIdiom,
-} from "../../src/idioms/index.js";
+import { saveProjectConfig, type ProjectIdiomDefinition } from "../../src/config/project-config.js";
+import { scanProjectIdioms, updateProjectIdiom } from "../../src/idioms/index.js";
 import { generateContext } from "../../src/tools/context.js";
 import { splice, spliceBatch } from "../../src/tools/splice.js";
 
@@ -225,7 +218,6 @@ def keep_untouched(x: int) -> int:
       expect(pyAfter).toContain("step = (v * dt) + len(samples)");
       expect(pyAfter).toContain("return step");
     });
-
 
     it("packages symbol-scoped on-the-fly AICE context (`-s <symbol>`) from a native .ts file with collapsed $idioms", async () => {
       const srcDir = path.join(tmpDir, "src");
@@ -664,7 +656,10 @@ export class GameEngine {
         `.btn-primary {\n  display: flex;\n  padding: 8px;\n}\n\n.card-panel {\n  margin: 16px;\n}\n`,
         "utf-8",
       );
-      const cssCtx = await generateContext(cssPath, { symbol: ".btn-primary", projectRoot: tmpDir });
+      const cssCtx = await generateContext(cssPath, {
+        symbol: ".btn-primary",
+        projectRoot: tmpDir,
+      });
       expect(cssCtx.targetContent).toContain("btn-primary");
       expect(cssCtx.targetContent).not.toContain("card-panel");
       await splice(cssPath, {
@@ -942,4 +937,3 @@ export class GameEngine {
     });
   });
 });
-

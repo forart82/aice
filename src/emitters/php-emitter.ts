@@ -15,28 +15,15 @@
  */
 
 import type {
-  ArrayLiteralExpr,
-  AssignExpr,
-  AssignStmt,
   BinaryExpr,
   Block,
-  BreakStmt,
   CallExpr,
   ClassDecl,
   ClosureExpr,
   ConstDecl,
-  ContinueStmt,
   Expr,
-  ExprStmt,
-  ForStmt,
   FunctionDecl,
-  IdentifierExpr,
-  IfStmt,
-  ImportDecl,
-  IndexExpr,
-  LetBinding,
   LiteralExpr,
-  MatchCase,
   MatchStmt,
   MemberAccessExpr,
   MethodDecl,
@@ -44,16 +31,11 @@ import type {
   ModuleItem,
   ParamDecl,
   PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
-  ThrowStmt,
-  TryStmt,
   TypeDecl,
   TypeExpr,
   UnaryExpr,
   VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 
@@ -127,13 +109,6 @@ export class PhpEmitter {
     if (this.localScopeVars.length > 0) {
       this.localScopeVars[this.localScopeVars.length - 1].add(name);
     }
-  }
-
-  private isLocalVar(name: string): boolean {
-    for (let i = this.localScopeVars.length - 1; i >= 0; i--) {
-      if (this.localScopeVars[i].has(name)) return true;
-    }
-    return false;
   }
 
   emitModule(mod: Module): string {
@@ -292,8 +267,7 @@ export class PhpEmitter {
     const isInterface =
       c.name.endsWith("Interface") &&
       c.methods.every(
-        (m) =>
-          !m.body || (m.body.kind === "Block" && m.body.statements.length === 0) || !m.body,
+        (m) => !m.body || (m.body.kind === "Block" && m.body.statements.length === 0) || !m.body,
       );
 
     const kindKeyword = isInterface ? "interface" : "class";
@@ -499,7 +473,7 @@ export class PhpEmitter {
   }
 
   private emitBlock(block: Block, isValuedFunction = false): void {
-    const scope = this.enterScope();
+    this.enterScope();
 
     for (let i = 0; i < block.statements.length; i++) {
       const stmt = block.statements[i];
@@ -644,8 +618,7 @@ export class PhpEmitter {
       } else if (c.pattern.kind === "LiteralPattern") {
         patternStr = this.emitLiteral(c.pattern.value);
       } else if (c.pattern.kind === "IdentifierPattern") {
-        patternStr =
-          c.pattern.name === "_" ? "default" : this.formatPatternIdent(c.pattern.name);
+        patternStr = c.pattern.name === "_" ? "default" : this.formatPatternIdent(c.pattern.name);
       } else if (c.pattern.kind === "ConstructorPattern") {
         patternStr = this.formatPatternIdent(c.pattern.name);
       }

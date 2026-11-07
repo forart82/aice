@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
 
-export type ProjectMode = "side-by-side" | "isolated" | "companion" | "twinless";
+export type ProjectMode = "side-by-side" | "isolated" | "twinless";
 
 export interface ProjectIdiomParam {
   name: string; // e.g. "$0", "$1"
@@ -47,13 +47,6 @@ export interface AiceProjectConfig {
   targetLanguage: TargetLanguage;
   isolated: boolean;
   watermark: boolean;
-  targetProjectDir?: string;
-  test?: {
-    command?: string;
-    cwd?: string;
-    scrubTraces?: boolean;
-    [key: string]: any;
-  };
   idiomsEnabled?: boolean;
   idioms?: Record<string, ProjectIdiomDefinition>;
 }
@@ -61,7 +54,6 @@ export interface AiceProjectConfig {
 export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
   "side-by-side",
   "isolated",
-  "companion",
   "twinless",
 ]);
 
@@ -281,13 +273,89 @@ export function stripJsonComments(input: string): string {
   return output;
 }
 
+function inferParamsFromTemplate(templateAice: string): ProjectIdiomParam[] {
+  let maxIdx = -1;
+  for (const m of templateAice.matchAll(/\$(\d+)\b/g)) {
+    const idx = Number.parseInt(m[1], 10);
+    if (!Number.isNaN(idx) && idx > maxIdx) {
+      maxIdx = idx;
+    }
+  }
+  if (maxIdx < 0) {
+    return [];
+  }
+  const params: ProjectIdiomParam[] = [];
+  for (let i = 0; i <= maxIdx; i++) {
+    params.push({ name: `$${i}` });
+  }
+  return params;
+}
+
+function normalizeShapedIdiom(key: string, val: unknown): ProjectIdiomDefinition | null {
+  if (typeof val === "string") {
+    const normName = key.startsWith("$") ? key : `$${key}`;
+    const templateAice = val;
+    const isMultiLine = templateAice.includes("\n");
+    return {
+      name: normName,
+      kind: isMultiLine ? "block" : "stmt",
+      params: inferParamsFromTemplate(templateAice),
+      templateAice,
+      occurrences: 0,
+      tokensPerOccurrenceSaved: 0,
+      netTokenSavings: 0,
+    };
+  }
+  if (typeof val !== "object" || val === null || Array.isArray(val)) {
+    return null;
+  }
+  const entry = val as Record<string, unknown>;
+  const normName =
+    typeof entry.name === "string" && entry.name.trim()
+      ? entry.name
+      : key.startsWith("$")
+        ? key
+        : `$${key}`;
+  const rawTemplate =
+    typeof entry.templateAice === "string"
+      ? entry.templateAice
+      : typeof entry.template === "string"
+        ? entry.template
+        : undefined;
+  const normalizedParams = Array.isArray(entry.params)
+    ? entry.params.map((p) => (typeof p === "string" ? { name: p } : (p as ProjectIdiomParam)))
+    : typeof rawTemplate === "string"
+      ? inferParamsFromTemplate(rawTemplate)
+      : (entry.params as ProjectIdiomParam[]);
+
+  return {
+    ...(entry as unknown as ProjectIdiomDefinition),
+    name: normName,
+    kind:
+      entry.kind === "expr" || entry.kind === "stmt" || entry.kind === "block"
+        ? entry.kind
+        : typeof entry.kind === "string"
+          ? (entry.kind as "expr" | "stmt" | "block")
+          : typeof rawTemplate === "string" && rawTemplate.includes("\n")
+            ? "block"
+            : "stmt",
+    params: normalizedParams,
+    templateAice: (rawTemplate ?? entry.templateAice) as string,
+    occurrences: entry.occurrences === undefined ? 0 : (entry.occurrences as number),
+    tokensPerOccurrenceSaved:
+      entry.tokensPerOccurrenceSaved === undefined ? 0 : (entry.tokensPerOccurrenceSaved as number),
+    netTokenSavings: entry.netTokenSavings === undefined ? 0 : (entry.netTokenSavings as number),
+    ...(entry.description !== undefined ? { description: entry.description as string } : {}),
+  };
+}
+
 /**
  * Validates partial or complete project configuration fields.
  */
 export function validateConfig(config: Partial<AiceProjectConfig>): void {
   if (config.mode !== undefined && !VALID_PROJECT_MODES.has(config.mode)) {
     throw new Error(
-      `Invalid project mode "${config.mode}". Valid modes are: "side-by-side", "isolated", "companion".`,
+      `Invalid project mode "${config.mode}". Valid modes are: "side-by-side", "isolated", "twinless".`,
     );
   }
 
@@ -315,22 +383,12 @@ export function validateConfig(config: Partial<AiceProjectConfig>): void {
     throw new Error(`Invalid watermark: expected boolean, received ${typeof config.watermark}`);
   }
 
-  if (config.targetProjectDir !== undefined && typeof config.targetProjectDir !== "string") {
-    throw new Error(
-      `Invalid targetProjectDir: expected string, received ${typeof config.targetProjectDir}`,
-    );
-  }
-
-  if (config.test !== undefined) {
-    if (typeof config.test !== "object" || config.test === null || Array.isArray(config.test)) {
-      throw new Error(
-        `Invalid test configuration: expected object, received ${Array.isArray(config.test) ? "array" : typeof config.test}`,
-      );
-    }
-  }
-
   if (config.idioms !== undefined) {
-    if (typeof config.idioms !== "object" || config.idioms === null || Array.isArray(config.idioms)) {
+    if (
+      typeof config.idioms !== "object" ||
+      config.idioms === null ||
+      Array.isArray(config.idioms)
+    ) {
       throw new Error(
         `Invalid idioms configuration: expected object mapping idiom names to definitions, received ${Array.isArray(config.idioms) ? "array" : typeof config.idioms}`,
       );
@@ -436,42 +494,9 @@ function scanAiceFiles(
 /**
  * Heuristically auto-detects whether a workspace is configured for "side-by-side"
  * or "isolated" compilation.
- *
- * Rules:
- * 1. If `.aice-build` directory exists -> "isolated"
- * 2. If bare `*.aice` files outnumber dual-ext `*.ts.aice` files -> "isolated"
- * 3. If dual-ext `*.ts.aice` files exist -> "side-by-side"
- * 4. Fallback default -> "side-by-side"
  */
 export function autoDetectProjectMode(projectDir: string): ProjectMode {
   const resolvedDir = path.resolve(projectDir);
-
-  // 0. Check if aice.config.json or .aicerc explicitly specifies companion mode
-  const aiceConfigPath = path.join(resolvedDir, "aice.config.json");
-  if (fs.existsSync(aiceConfigPath)) {
-    try {
-      const content = fs.readFileSync(aiceConfigPath, "utf-8");
-      const parsed = JSON.parse(stripJsonComments(content));
-      if (parsed && parsed.mode === "companion") {
-        return "companion";
-      }
-    } catch {
-      // Ignore parse errors during auto-detection
-    }
-  }
-
-  const aicercPath = path.join(resolvedDir, ".aicerc");
-  if (fs.existsSync(aicercPath)) {
-    try {
-      const content = fs.readFileSync(aicercPath, "utf-8");
-      const parsed = JSON.parse(stripJsonComments(content));
-      if (parsed && parsed.mode === "companion") {
-        return "companion";
-      }
-    } catch {
-      // Ignore parse errors during auto-detection
-    }
-  }
 
   // 1. Check if .aice-build exists
   const buildDir = path.join(resolvedDir, ".aice-build");
@@ -495,7 +520,7 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
 
 /**
  * Searches upward from `startDir` to locate a project root containing
- * `aice.config.json`, `.aicerc`, `.aice-build`, or `package.json`.
+ * `aice.config.json`, `.aice-idioms.json`, `.aicerc`, `.aice-build`, or `package.json`.
  * If none is found, falls back to `fallbackDir` (or `startDir`).
  */
 export function findProjectRoot(startDir: string, fallbackDir?: string): string {
@@ -601,27 +626,22 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
         !Array.isArray(parsedIdioms.idioms)
           ? (parsedIdioms.idioms as Record<string, unknown>)
           : parsedIdioms;
-      const mergedIdioms: Record<string, unknown> =
-        typeof rawConfig.idioms === "object" && rawConfig.idioms !== null
-          ? { ...(rawConfig.idioms as Record<string, unknown>) }
-          : {};
+      const mergedIdioms: Record<string, unknown> = {};
       for (const [key, val] of Object.entries(sourceIdioms)) {
-        if (key === "idiomsEnabled" || typeof val !== "object" || val === null || Array.isArray(val)) {
-          continue;
+        if (key === "idiomsEnabled") continue;
+        const normalized = normalizeShapedIdiom(key, val);
+        if (normalized) {
+          mergedIdioms[normalized.name] = normalized;
         }
-        const entry = val as Record<string, unknown>;
-        const normName = typeof entry.name === "string" ? entry.name : key.startsWith("$") ? key : `$${key}`;
-        mergedIdioms[normName] = {
-          name: normName,
-          kind: entry.kind === "expr" || entry.kind === "block" ? entry.kind : "stmt",
-          params: Array.isArray(entry.params) ? entry.params : [{ name: "$0" }],
-          templateAice: typeof entry.templateAice === "string" ? entry.templateAice : "",
-          occurrences: typeof entry.occurrences === "number" ? entry.occurrences : 0,
-          tokensPerOccurrenceSaved:
-            typeof entry.tokensPerOccurrenceSaved === "number" ? entry.tokensPerOccurrenceSaved : 0,
-          netTokenSavings: typeof entry.netTokenSavings === "number" ? entry.netTokenSavings : 0,
-          ...(typeof entry.description === "string" ? { description: entry.description } : {}),
-        };
+      }
+      if (
+        typeof rawConfig.idioms === "object" &&
+        rawConfig.idioms !== null &&
+        !Array.isArray(rawConfig.idioms)
+      ) {
+        for (const [key, val] of Object.entries(rawConfig.idioms as Record<string, unknown>)) {
+          mergedIdioms[key] = val;
+        }
       }
       rawConfig.idioms = mergedIdioms;
     } catch (err) {
@@ -639,13 +659,31 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     configToProcess.idioms !== null &&
     !Array.isArray(configToProcess.idioms)
   ) {
-    for (const idiom of Object.values(configToProcess.idioms as Record<string, Record<string, unknown>>)) {
-      if (idiom && typeof idiom === "object" && !Array.isArray(idiom)) {
-        if (idiom.occurrences === undefined) idiom.occurrences = 0;
-        if (idiom.tokensPerOccurrenceSaved === undefined) idiom.tokensPerOccurrenceSaved = 0;
-        if (idiom.netTokenSavings === undefined) idiom.netTokenSavings = 0;
+    const rawMap = configToProcess.idioms as Record<string, unknown>;
+    const normalizedMap: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(rawMap)) {
+      if (typeof val === "string") {
+        const shaped = normalizeShapedIdiom(key, val);
+        if (shaped) normalizedMap[shaped.name] = shaped;
+      } else if (val && typeof val === "object" && !Array.isArray(val)) {
+        const entry = { ...(val as Record<string, unknown>) };
+        if (entry.templateAice === undefined && typeof entry.template === "string") {
+          entry.templateAice = entry.template;
+        }
+        if (entry.params === undefined && typeof entry.templateAice === "string") {
+          entry.params = inferParamsFromTemplate(entry.templateAice);
+        } else if (Array.isArray(entry.params)) {
+          entry.params = entry.params.map((p) => (typeof p === "string" ? { name: p } : p));
+        }
+        if (entry.occurrences === undefined) entry.occurrences = 0;
+        if (entry.tokensPerOccurrenceSaved === undefined) entry.tokensPerOccurrenceSaved = 0;
+        if (entry.netTokenSavings === undefined) entry.netTokenSavings = 0;
+        normalizedMap[key] = entry;
+      } else {
+        normalizedMap[key] = val;
       }
     }
+    configToProcess.idioms = normalizedMap;
   }
 
   // Determine mode and isolated
@@ -657,14 +695,13 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     isolated =
       typeof configToProcess.isolated === "boolean"
         ? configToProcess.isolated
-        : mode === "isolated" || mode === "companion";
+        : mode === "isolated";
   } else if (configToProcess.isolated !== undefined) {
     isolated = Boolean(configToProcess.isolated);
     mode = isolated ? "isolated" : "side-by-side";
   } else {
-    // Mode auto-detection
     mode = autoDetectProjectMode(resolvedDir);
-    isolated = mode === "isolated" || mode === "companion";
+    isolated = mode === "isolated";
   }
 
   const finalConfig: AiceProjectConfig = {
@@ -686,12 +723,6 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
       typeof configToProcess.watermark === "boolean"
         ? configToProcess.watermark
         : DEFAULT_PROJECT_CONFIG.watermark,
-    ...(typeof configToProcess.targetProjectDir === "string"
-      ? { targetProjectDir: configToProcess.targetProjectDir }
-      : {}),
-    ...(typeof configToProcess.test === "object" && configToProcess.test !== null
-      ? { test: configToProcess.test as AiceProjectConfig["test"] }
-      : {}),
     ...(typeof configToProcess.idiomsEnabled === "boolean"
       ? { idiomsEnabled: configToProcess.idiomsEnabled }
       : {}),
@@ -707,7 +738,7 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
 }
 
 /**
- * Saves or updates project configuration in `aice.config.json`.
+ * Saves or updates project configuration in `aice.config.json` (or `.aice-idioms.json` when used).
  */
 export function saveProjectConfig(
   projectDir: string,
@@ -719,12 +750,39 @@ export function saveProjectConfig(
   }
 
   const configPath = path.join(resolvedDir, "aice.config.json");
+  const idiomsJsonPath = path.join(resolvedDir, ".aice-idioms.json");
+  const hasAiceConfig = fs.existsSync(configPath);
+  const hasIdiomsJson = fs.existsSync(idiomsJsonPath);
+
   let existing: Record<string, unknown> = {};
 
-  if (fs.existsSync(configPath)) {
+  if (hasAiceConfig) {
     try {
       const content = fs.readFileSync(configPath, "utf-8");
       existing = JSON.parse(stripJsonComments(content));
+    } catch {
+      existing = {};
+    }
+  } else if (hasIdiomsJson) {
+    try {
+      const content = fs.readFileSync(idiomsJsonPath, "utf-8");
+      const parsed = JSON.parse(stripJsonComments(content)) as Record<string, unknown>;
+      const sourceIdioms =
+        typeof parsed.idioms === "object" && parsed.idioms !== null && !Array.isArray(parsed.idioms)
+          ? (parsed.idioms as Record<string, unknown>)
+          : parsed;
+      const normIdioms: Record<string, ProjectIdiomDefinition> = {};
+      for (const [k, v] of Object.entries(sourceIdioms)) {
+        if (k === "idiomsEnabled") continue;
+        const shaped = normalizeShapedIdiom(k, v);
+        if (shaped) normIdioms[shaped.name] = shaped;
+      }
+      existing = {
+        ...(typeof parsed.idiomsEnabled === "boolean"
+          ? { idiomsEnabled: parsed.idiomsEnabled }
+          : { idiomsEnabled: true }),
+        idioms: normIdioms,
+      };
     } catch {
       existing = {};
     }
@@ -735,16 +793,13 @@ export function saveProjectConfig(
 
   if (config.mode !== undefined) {
     mode = config.mode;
-    isolated = config.isolated ?? (mode === "isolated" || mode === "companion");
+    isolated = config.isolated ?? mode === "isolated";
   } else if (config.isolated !== undefined) {
     isolated = config.isolated;
     mode = isolated ? "isolated" : "side-by-side";
   } else if (existing.mode !== undefined) {
     mode = existing.mode as ProjectMode;
-    isolated =
-      existing.isolated !== undefined
-        ? Boolean(existing.isolated)
-        : mode === "isolated" || mode === "companion";
+    isolated = existing.isolated !== undefined ? Boolean(existing.isolated) : mode === "isolated";
   } else if (existing.isolated !== undefined) {
     isolated = Boolean(existing.isolated);
     mode = isolated ? "isolated" : "side-by-side";
@@ -768,16 +823,6 @@ export function saveProjectConfig(
       (typeof existing.watermark === "boolean"
         ? existing.watermark
         : DEFAULT_PROJECT_CONFIG.watermark),
-    ...(config.targetProjectDir !== undefined
-      ? { targetProjectDir: config.targetProjectDir }
-      : typeof existing.targetProjectDir === "string"
-        ? { targetProjectDir: existing.targetProjectDir }
-        : {}),
-    ...(config.test !== undefined
-      ? { test: config.test }
-      : typeof existing.test === "object" && existing.test !== null
-        ? { test: existing.test as AiceProjectConfig["test"] }
-        : {}),
     ...(config.idiomsEnabled !== undefined
       ? { idiomsEnabled: config.idiomsEnabled }
       : typeof existing.idiomsEnabled === "boolean"
@@ -785,12 +830,34 @@ export function saveProjectConfig(
         : {}),
     ...(config.idioms !== undefined
       ? { idioms: config.idioms }
-      : typeof existing.idioms === "object" && existing.idioms !== null && !Array.isArray(existing.idioms)
+      : typeof existing.idioms === "object" &&
+          existing.idioms !== null &&
+          !Array.isArray(existing.idioms)
         ? { idioms: existing.idioms as Record<string, ProjectIdiomDefinition> }
         : {}),
   };
 
   validateConfig(mergedConfig);
+
+  const isPureIdiomsSave =
+    hasIdiomsJson &&
+    !hasAiceConfig &&
+    (config.mode === undefined || config.mode === DEFAULT_PROJECT_CONFIG.mode) &&
+    (config.sourceDir === undefined || config.sourceDir === DEFAULT_PROJECT_CONFIG.sourceDir) &&
+    (config.outDir === undefined || config.outDir === DEFAULT_PROJECT_CONFIG.outDir) &&
+    (config.targetLanguage === undefined ||
+      config.targetLanguage === DEFAULT_PROJECT_CONFIG.targetLanguage) &&
+    (config.isolated === undefined || config.isolated === DEFAULT_PROJECT_CONFIG.isolated) &&
+    (config.watermark === undefined || config.watermark === DEFAULT_PROJECT_CONFIG.watermark);
+
+  if (isPureIdiomsSave) {
+    const idiomsPayload = {
+      idiomsEnabled: mergedConfig.idiomsEnabled ?? true,
+      idioms: mergedConfig.idioms ?? {},
+    };
+    fs.writeFileSync(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`, "utf-8");
+    return mergedConfig;
+  }
 
   const toWrite = {
     ...existing,
@@ -798,6 +865,19 @@ export function saveProjectConfig(
   };
 
   fs.writeFileSync(configPath, `${JSON.stringify(toWrite, null, 2)}\n`, "utf-8");
+
+  if (hasIdiomsJson && (config.idioms !== undefined || config.idiomsEnabled !== undefined)) {
+    try {
+      const idiomsPayload = {
+        idiomsEnabled: mergedConfig.idiomsEnabled ?? true,
+        idioms: mergedConfig.idioms ?? {},
+      };
+      fs.writeFileSync(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`, "utf-8");
+    } catch {
+      // ignore sync error
+    }
+  }
+
   return mergedConfig;
 }
 
@@ -818,17 +898,15 @@ export function isProjectIdiomsEnabled(
 }
 
 /**
- * Persists the idiomsEnabled toggle in `aice.config.json` (and updates `.aice-cache/idioms.json` if present).
+ * Persists the idiomsEnabled toggle in `aice.config.json` or `.aice-idioms.json` (and updates `.aice-cache/idioms.json` if present).
  */
-export function setProjectIdiomsEnabled(
-  projectDir: string,
-  enabled: boolean,
-): AiceProjectConfig {
+export function setProjectIdiomsEnabled(projectDir: string, enabled: boolean): AiceProjectConfig {
   let resolvedDir = findProjectRoot(projectDir);
   if (
     resolvedDir === path.resolve(projectDir) &&
     path.basename(resolvedDir) === "src" &&
-    !fs.existsSync(path.join(resolvedDir, "aice.config.json"))
+    !fs.existsSync(path.join(resolvedDir, "aice.config.json")) &&
+    !fs.existsSync(path.join(resolvedDir, ".aice-idioms.json"))
   ) {
     resolvedDir = path.dirname(resolvedDir);
   }
@@ -910,32 +988,10 @@ function extractRelPathUsingSourceDir(absPath: string, sourceDir: string): strin
 }
 
 /**
- * Derives the companion source filename by stripping target extension and appending `.aice`.
- * E.g.:
- * - `calc.ts` -> `calc.aice`
- * - `Button.tsx` -> `Button.aice`
- * - `calc.test.ts` -> `calc.test.aice`
- * - `main.py` -> `main.aice`
- * - `calc.aice` -> `calc.aice`
- */
-export function deriveSourceFilename(filename: string): string {
-  if (filename.endsWith(".aice")) {
-    return filename;
-  }
-  const ext = path.extname(filename).toLowerCase();
-  if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) {
-    return `${filename.slice(0, -ext.length)}.aice`;
-  }
-  return `${filename}.aice`;
-}
-
-/**
  * Resolves the destination target file path for a source `.aice` file
  * according to project configuration:
  * - For "side-by-side": outputs sibling target path in the source file's directory.
  * - For "isolated": mirrors relative path from `sourceDir` into `outDir` (`.aice-build/`).
- * - For "companion": mirrors relative path of `sourceFile` from `sourceDir` (or config root),
- *   strips `.aice`, appends target extension, and joins with `config.outDir` (resolved against projectRoot).
  */
 export function resolveTargetFile(
   config: AiceProjectConfig,
@@ -954,59 +1010,6 @@ export function resolveTargetFile(
       return targetBase;
     }
     return path.join(dir, targetBase);
-  }
-
-  // Companion mode: mirrors relative path into outDir (resolved against projectRoot)
-  if (config.mode === "companion") {
-    const root = projectRoot ? path.resolve(projectRoot) : undefined;
-    const absOutDir =
-      config.outDir && path.isAbsolute(config.outDir)
-        ? config.outDir
-        : root
-          ? path.resolve(root, config.outDir)
-          : undefined;
-
-    let relPathFromSourceDir: string;
-
-    if (isAbs) {
-      const absSourceDir =
-        config.sourceDir && path.isAbsolute(config.sourceDir)
-          ? config.sourceDir
-          : root
-            ? path.resolve(root, config.sourceDir)
-            : undefined;
-
-      if (
-        absSourceDir &&
-        (sourceFile === absSourceDir ||
-          sourceFile.startsWith(absSourceDir + path.sep) ||
-          sourceFile.startsWith(absSourceDir + "/"))
-      ) {
-        relPathFromSourceDir = path.relative(absSourceDir, sourceFile);
-      } else if (
-        root &&
-        (sourceFile === root ||
-          sourceFile.startsWith(root + path.sep) ||
-          sourceFile.startsWith(root + "/"))
-      ) {
-        const relToRoot = path.relative(root, sourceFile);
-        relPathFromSourceDir = stripSourceDirPrefix(relToRoot, config.sourceDir);
-      } else {
-        relPathFromSourceDir = extractRelPathUsingSourceDir(sourceFile, config.sourceDir);
-      }
-    } else {
-      relPathFromSourceDir = stripSourceDirPrefix(sourceFile, config.sourceDir);
-    }
-
-    const targetRel = deriveTargetPath(relPathFromSourceDir, config.targetLanguage);
-
-    if (absOutDir) {
-      return path.resolve(absOutDir, targetRel);
-    }
-    if (root) {
-      return path.resolve(root, config.outDir, targetRel);
-    }
-    return path.join(config.outDir, targetRel);
   }
 
   // Isolated mode: mirrors relative path from sourceDir into outDir (.aice-build/)
@@ -1079,151 +1082,4 @@ export function resolveTargetOutputPathForConfig(
   projectRoot?: string,
 ): string {
   return resolveTargetFile(config, sourcePath, projectRoot);
-}
-
-/**
- * Resolves the source `.aice` file path corresponding to a target file.
- * - For "side-by-side": returns sibling `.aice` (or dual-extension `.ts.aice` if present).
- * - For "companion": computes relative path of targetFile from `config.outDir`,
- *   strips target extension, appends `.aice`, and joins with `config.sourceDir` (resolved against projectRoot).
- * - For "isolated": computes relative path of targetFile from `config.outDir`,
- *   strips target extension, appends `.aice`, and joins with `config.sourceDir`.
- */
-export function resolveSourceFile(
-  config: AiceProjectConfig,
-  targetFile: string,
-  projectRoot?: string,
-): string {
-  const isAbs = path.isAbsolute(targetFile);
-
-  if (config.mode === "side-by-side") {
-    const dir = path.dirname(targetFile);
-    const base = path.basename(targetFile);
-    const sourceBase = deriveSourceFilename(base);
-    const bareCandidate =
-      dir === "." && !targetFile.includes("/") && !targetFile.includes("\\")
-        ? sourceBase
-        : path.join(dir, sourceBase);
-    const dualCandidate = `${targetFile}.aice`;
-    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
-      return dualCandidate;
-    }
-    return bareCandidate;
-  }
-
-  // Companion or isolated mode
-  const root = projectRoot ? path.resolve(projectRoot) : undefined;
-  const absOutDir =
-    config.outDir && path.isAbsolute(config.outDir)
-      ? config.outDir
-      : root
-        ? path.resolve(root, config.outDir)
-        : undefined;
-
-  const absSourceDir =
-    config.sourceDir && path.isAbsolute(config.sourceDir)
-      ? config.sourceDir
-      : root
-        ? path.resolve(root, config.sourceDir)
-        : undefined;
-
-  let relPathFromOutDir: string;
-
-  if (isAbs) {
-    const absTarget = targetFile;
-    const normTarget = absTarget.replace(/\\/g, "/");
-    const absTargetProjectDir =
-      root && config.targetProjectDir ? path.resolve(root, config.targetProjectDir) : undefined;
-    const normTargetProjectDir = absTargetProjectDir
-      ? absTargetProjectDir.replace(/\\/g, "/")
-      : undefined;
-
-    if (
-      absOutDir &&
-      (targetFile === absOutDir ||
-        targetFile.startsWith(absOutDir + path.sep) ||
-        targetFile.startsWith(absOutDir + "/"))
-    ) {
-      relPathFromOutDir = path.relative(absOutDir, targetFile);
-    } else if (
-      root &&
-      (targetFile === root ||
-        targetFile.startsWith(root + path.sep) ||
-        targetFile.startsWith(root + "/"))
-    ) {
-      const relToRoot = path.relative(root, targetFile);
-      relPathFromOutDir = stripSourceDirPrefix(relToRoot, config.outDir);
-    } else if (
-      normTargetProjectDir &&
-      (normTarget === normTargetProjectDir || normTarget.startsWith(`${normTargetProjectDir}/`))
-    ) {
-      relPathFromOutDir = path.relative(absTargetProjectDir!, absTarget);
-    } else {
-      relPathFromOutDir = extractRelPathUsingSourceDir(targetFile, config.outDir);
-    }
-  } else {
-    // Relative path input
-    relPathFromOutDir = stripSourceDirPrefix(targetFile, config.outDir);
-  }
-
-  // Derive source relative path by stripping target extension and appending .aice
-  const dir = path.dirname(relPathFromOutDir);
-  const base = path.basename(relPathFromOutDir);
-  const sourceBase = deriveSourceFilename(base);
-  const sourceRel =
-    dir === "." && !relPathFromOutDir.includes("/") && !relPathFromOutDir.includes("\\")
-      ? sourceBase
-      : path.join(dir, sourceBase);
-
-  // If absSourceDir exists or can be resolved
-  if (absSourceDir) {
-    const bareCandidate = path.resolve(absSourceDir, sourceRel);
-    const dualCandidate = path.resolve(
-      absSourceDir,
-      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
-    );
-    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
-      return dualCandidate;
-    }
-    return bareCandidate;
-  }
-
-  if (root) {
-    const bareCandidate = path.resolve(root, config.sourceDir, sourceRel);
-    const dualCandidate = path.resolve(
-      root,
-      config.sourceDir,
-      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
-    );
-    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
-      return dualCandidate;
-    }
-    return bareCandidate;
-  }
-
-  if (isAbs) {
-    const normPath = targetFile.replace(/\\/g, "/");
-    const normOutDir = config.outDir
-      .replace(/\\/g, "/")
-      .replace(/^\/+|\/+$/g, "")
-      .replace(/^(?:\.\.?\/)+/, "");
-    const marker = `/${normOutDir}/`;
-    const idx = normPath.lastIndexOf(marker);
-    const inferredRoot = idx !== -1 ? normPath.slice(0, idx) : path.dirname(targetFile);
-    const baseSourceDir =
-      config.sourceDir && path.isAbsolute(config.sourceDir)
-        ? config.sourceDir
-        : path.resolve(inferredRoot, config.sourceDir);
-    const bareCandidate = path.resolve(baseSourceDir, sourceRel);
-    const dualCandidate = path.resolve(
-      baseSourceDir,
-      dir === "." ? `${base}.aice` : path.join(dir, `${base}.aice`),
-    );
-    if (fs.existsSync(dualCandidate) && !fs.existsSync(bareCandidate)) {
-      return dualCandidate;
-    }
-    return bareCandidate;
-  }
-
-  return path.join(config.sourceDir, sourceRel);
 }

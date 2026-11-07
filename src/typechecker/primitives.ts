@@ -1127,7 +1127,10 @@ export const GLOBAL_SYMBOLS: Readonly<Record<string, Type>> = {
       [
         "setItem",
         makeFunctionType(
-          [{ name: "key", type: TYPE_STR }, { name: "val", type: TYPE_STR }],
+          [
+            { name: "key", type: TYPE_STR },
+            { name: "val", type: TYPE_STR },
+          ],
           TYPE_VOID,
         ),
       ],

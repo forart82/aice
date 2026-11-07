@@ -7,31 +7,20 @@
  */
 
 import type {
-  BinaryExpr,
   Block,
-  CallExpr,
   ClassDecl,
   ConstDecl,
   Expr,
   FunctionDecl,
-  IfStmt,
-  ImportDecl,
-  IndexExpr,
-  MemberAccessExpr,
   MethodDecl,
   Module,
   ModuleItem,
-  PropertyDecl,
-  RecordLiteralExpr,
-  ReturnStmt,
   Statement,
   TypeDecl,
   TypeExpr,
-  UnaryExpr,
   VarDecl,
 } from "../core/ast.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
-import { lowerConstructor, lowerMethodCall, lowerPropertyAccess } from "./rewriter.js";
 
 export class CSharpEmitter {
   private ctx: EmitterContext;
@@ -471,13 +460,8 @@ export class CSharpEmitter {
           if (c.body.kind === "Block") {
             this.emitBlock(c.body, isImplicitReturn);
             const lastStmt =
-              c.body.statements.length > 0
-                ? c.body.statements[c.body.statements.length - 1]
-                : null;
-            if (
-              !lastStmt ||
-              (lastStmt.kind !== "ReturnStmt" && lastStmt.kind !== "BreakStmt")
-            ) {
+              c.body.statements.length > 0 ? c.body.statements[c.body.statements.length - 1] : null;
+            if (!lastStmt || (lastStmt.kind !== "ReturnStmt" && lastStmt.kind !== "BreakStmt")) {
               this.ctx.writeLine("break;");
             }
           } else if (isImplicitReturn) {

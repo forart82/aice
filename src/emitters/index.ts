@@ -4,7 +4,11 @@
 
 import type { Module } from "../core/ast.js";
 import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
-import { findProjectRoot, loadProjectConfig, type ProjectIdiomDefinition } from "../config/project-config.js";
+import {
+  findProjectRoot,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/project-config.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import { CppEmitter } from "./cpp-emitter.js";
 import { CSharpEmitter } from "./csharp-emitter.js";

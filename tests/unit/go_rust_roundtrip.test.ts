@@ -6,14 +6,13 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { ClassDecl, ConstDecl, FunctionDecl, Module, VarDecl } from "../../src/core/ast.js";
+import type { ClassDecl, FunctionDecl, VarDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
 import { decompile } from "../../src/decompiler/index.js";
 import { decompileCpp } from "../../src/decompiler/cpp-decompiler.js";
-import { decompileGo, GoDecompiler } from "../../src/decompiler/go-decompiler.js";
-import { decompileRust, RustDecompiler } from "../../src/decompiler/rust-decompiler.js";
+import { decompileGo } from "../../src/decompiler/go-decompiler.js";
+import { decompileRust } from "../../src/decompiler/rust-decompiler.js";
 import { emitTarget, GoEmitter, RustEmitter, TypeScriptEmitter } from "../../src/emitters/index.js";
-import { TypeChecker } from "../../src/typechecker/checker.js";
 
 function normalizeWhitespace(str: string): string {
   return str
@@ -26,9 +25,9 @@ function normalizeWhitespace(str: string): string {
         !l.startsWith("#![allow") &&
         !l.startsWith("package ") &&
         !l.startsWith("import (") &&
-        !l.startsWith('use serde::') &&
-        !l.startsWith('use std::collections') &&
-        !l.startsWith('#[derive(') &&
+        !l.startsWith("use serde::") &&
+        !l.startsWith("use std::collections") &&
+        !l.startsWith("#[derive(") &&
         l !== ")" &&
         l !== '""',
     )
@@ -179,8 +178,12 @@ var CurrentStep int64 = 1
 `;
       const result = decompileGo(goCode, "status.go");
       expect(result.ast.items.some((i) => i.kind === "TypeDecl" && i.isEnum)).toBe(true);
-      expect(result.ast.items.some((i) => i.kind === "ConstDecl" && i.name === "MaxAttempts")).toBe(true);
-      expect(result.ast.items.some((i) => i.kind === "VarDecl" && i.name === "CurrentStep")).toBe(true);
+      expect(result.ast.items.some((i) => i.kind === "ConstDecl" && i.name === "MaxAttempts")).toBe(
+        true,
+      );
+      expect(result.ast.items.some((i) => i.kind === "VarDecl" && i.name === "CurrentStep")).toBe(
+        true,
+      );
     });
 
     it("decompiles Go control flow: conditionals, switch/match, for/while", () => {
@@ -254,7 +257,9 @@ pub const DEFAULT_PORT: i64 = 8080;
 `;
       const result = decompileRust(rustCode, "cmd.rs");
       expect(result.ast.items.some((i) => i.kind === "TypeDecl" && i.isEnum)).toBe(true);
-      expect(result.ast.items.some((i) => i.kind === "ConstDecl" && i.name === "DEFAULT_PORT")).toBe(true);
+      expect(
+        result.ast.items.some((i) => i.kind === "ConstDecl" && i.name === "DEFAULT_PORT"),
+      ).toBe(true);
     });
 
     it("decompiles Rust match expressions, while loops, and ? operator", () => {
@@ -339,7 +344,9 @@ func Clamp(val int64, min int64, max int64) int64 {
 }
 `;
       const roundtrip = executeRoundtrip(originalGo, "go", "clamp.go");
-      expect(roundtrip.reconstructed).toContain("func Clamp(val int64, min int64, max int64) int64 {");
+      expect(roundtrip.reconstructed).toContain(
+        "func Clamp(val int64, min int64, max int64) int64 {",
+      );
       expect(roundtrip.reconstructed).toContain("if (val < min) {");
       expect(roundtrip.reconstructed).toContain("return min");
       expect(roundtrip.reconstructed).toContain("if (val > max) {");
@@ -367,7 +374,7 @@ pub fn classify(code: i64) -> i64 {
   });
 
   describe("Surgeon 3 Audit Fixes Verification", () => {
-    it("decompiles Go multi-return return val, nil into Ok(val) and return 0, fmt.Errorf(\"%v\", err) into Err(err)", () => {
+    it('decompiles Go multi-return return val, nil into Ok(val) and return 0, fmt.Errorf("%v", err) into Err(err)', () => {
       const goCode = `
 package result_test
 
@@ -379,7 +386,9 @@ func FindUser(id int64) (string, error) {
 }
 `;
       const res = decompileGo(goCode, "result_test.go");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "findUser");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "findUser",
+      );
       expect(fn).toBeDefined();
       const stmts = (fn!.body as any).statements;
       // if statement should have return Err("invalid_id")
@@ -408,7 +417,9 @@ func GetNumbers() []int64 {
 }
 `;
       const res = decompileGo(goCode, "slice_test.go");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "getNumbers");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "getNumbers",
+      );
       expect(fn).toBeDefined();
       const ret = (fn!.body as any).statements[0] as any;
       expect(ret.kind).toBe("ReturnStmt");
@@ -432,7 +443,9 @@ func (s *Server) GetPort() int64 {
 }
 `;
       const res = decompileGo(goCode, "server_test.go");
-      const cls = res.ast.items.find((item): item is ClassDecl => item.kind === "ClassDecl" && item.name === "Server");
+      const cls = res.ast.items.find(
+        (item): item is ClassDecl => item.kind === "ClassDecl" && item.name === "Server",
+      );
       expect(cls).toBeDefined();
       const method = cls!.methods.find((m) => m.name === "getPort");
       expect(method).toBeDefined();
@@ -466,7 +479,9 @@ func NewClient(endpoint string) Client {
 }
 `;
       const res = decompileGo(goCode, "factory.go");
-      const fnDecl = res.ast.items.find((item) => item.kind === "FunctionDecl" && item.name === "NewClient");
+      const fnDecl = res.ast.items.find(
+        (item) => item.kind === "FunctionDecl" && item.name === "NewClient",
+      );
       expect(fnDecl).toBeDefined();
     });
 
@@ -480,7 +495,9 @@ pub fn math() -> f64 {
 }
 `;
       const res = decompileRust(rustCode, "math.rs");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "math");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "math",
+      );
       expect(fn).toBeDefined();
       const stmts = (fn!.body as any).statements;
       // let a = 1 + 2
@@ -509,7 +526,9 @@ pub fn test_raw() -> i64 {
 }
 `;
       const res = decompileRust(rustCode, "raw.rs");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "testRaw");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "testRaw",
+      );
       expect(fn).toBeDefined();
       const letStmt = (fn!.body as any).statements[0] as any;
       expect(letStmt.name).toBe("type");
@@ -522,7 +541,9 @@ pub fn pick_min(a: i64, b: i64) -> i64 {
 }
 `;
       const res = decompileRust(rustCode, "min.rs");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "pickMin");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "pickMin",
+      );
       expect(fn).toBeDefined();
       const ret = (fn!.body as any).statements[0] as any;
       expect(ret.value.callee.kind).toBe("IdentifierExpr");
@@ -538,7 +559,9 @@ pub fn cast_val(x: i64) -> i64 {
 }
 `;
       const res = decompileRust(rustCode, "cast.rs");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "castVal");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "castVal",
+      );
       expect(fn).toBeDefined();
       const letY = (fn!.body as any).statements[0] as any;
       expect(letY.init.kind).toBe("IdentifierExpr");
@@ -550,7 +573,9 @@ pub fn cast_val(x: i64) -> i64 {
 pub static mut COUNTER: i64 = 0;
 `;
       const res = decompileRust(rustCode, "static.rs");
-      const v = res.ast.items.find((item): item is VarDecl => item.kind === "VarDecl" && item.name === "COUNTER");
+      const v = res.ast.items.find(
+        (item): item is VarDecl => item.kind === "VarDecl" && item.name === "COUNTER",
+      );
       expect(v).toBeDefined();
       expect(v!.isMut).toBe(true);
     });
@@ -567,7 +592,7 @@ type Scores = List[int]
       const mod = parse(aiceCode, "types.rs.aice");
       const emitter = new RustEmitter();
       const emitted = emitter.emit(mod);
-      expect(emitted).toContain("pub const GREETING: &str = \"hello\";");
+      expect(emitted).toContain('pub const GREETING: &str = "hello";');
       expect(emitted).toContain("pub const FLAG: bool = true;");
       expect(emitted).toContain("pub const RATIO: f64 = 3.14;");
       expect(emitted).toContain("pub type UserRegistry = HashMap<String, i64>;");
@@ -582,7 +607,9 @@ int check(int x) {
 }
 `;
       const res = decompileCpp(cppCode, "check.cpp");
-      const fn = res.ast.items.find((item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "check");
+      const fn = res.ast.items.find(
+        (item): item is FunctionDecl => item.kind === "FunctionDecl" && item.name === "check",
+      );
       expect(fn).toBeDefined();
       const ifStmt = (fn!.body as any).statements[0] as any;
       expect(ifStmt.kind).toBe("IfStmt");

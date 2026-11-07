@@ -18,7 +18,6 @@ import {
   diffFiles,
   generateSemanticPatch,
   patchFile,
-  type SemanticDiffResult,
 } from "../../src/tools/diff-patch.js";
 
 describe("AICE 2.0 Semantic AST Diff & Patch Engine (Step 22)", () => {

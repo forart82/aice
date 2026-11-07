@@ -10,11 +10,7 @@
 import * as os from "node:os";
 import * as path from "node:path";
 import type { Readable, Writable } from "node:stream";
-import {
-  findProjectRoot,
-  loadProjectConfig,
-  setProjectIdiomsEnabled,
-} from "../config/index.js";
+import { findProjectRoot, loadProjectConfig, setProjectIdiomsEnabled } from "../config/index.js";
 import {
   applyProjectIdiomsToDirectory,
   expandProjectIdiomsInDirectory,
@@ -327,7 +323,7 @@ export class AiceMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "aice-mcp", version: "0.8.3" },
+          serverInfo: { name: "aice-mcp", version: "0.8.4" },
         };
       }
 
@@ -499,7 +495,9 @@ export class AiceMcpServer {
           const idiomName = typeof args.name === "string" ? args.name : "";
           const code = typeof args.code === "string" ? args.code : "";
           if (!idiomName || !code) {
-            throw new Error("Must provide 'name' and 'code' arguments for aice_idioms 'update' action");
+            throw new Error(
+              "Must provide 'name' and 'code' arguments for aice_idioms 'update' action",
+            );
           }
           const updateRes = await updateProjectIdiom(projectRoot, idiomName, code, {
             dryRun: Boolean(args.dryRun),
@@ -525,10 +523,8 @@ export class AiceMcpServer {
         if (action === "scan") {
           const scanned = scanProjectIdioms(dir, {
             dryRun: Boolean(args.dryRun),
-            minOccurrences:
-              typeof args.minOccurrences === "number" ? args.minOccurrences : 2,
-            minNetTokenSavings:
-              typeof args.minSavings === "number" ? args.minSavings : 10,
+            minOccurrences: typeof args.minOccurrences === "number" ? args.minOccurrences : 2,
+            minNetTokenSavings: typeof args.minSavings === "number" ? args.minSavings : 10,
           });
           const text =
             formatIdiomsMarkdownSection(scanned.idioms) || "No candidate idioms discovered.";

@@ -10,48 +10,29 @@
 import { getEncoding } from "js-tiktoken";
 import type {
   ArrayLiteralExpr,
-  AssignExpr,
   AssignStmt,
-  AwaitExpr,
   BinaryExpr,
   Block,
   CallExpr,
-  ClassDecl,
-  ClosureExpr,
-  ComponentDecl,
-  ConstDecl,
   DestructureBinding,
   Expr,
   ExprStmt,
-  ForStmt,
-  FunctionDecl,
-  IdentifierExpr,
   IfStmt,
   IndexExpr,
   LayoutNode,
   LetBinding,
-  MatchStmt,
   MemberAccessExpr,
-  MethodDecl,
   Module,
   PostfixTryExpr,
   RecordLiteralExpr,
   ReturnStmt,
   Statement,
-  TemplateLiteralExpr,
   ThrowStmt,
-  TryStmt,
-  UnaryExpr,
-  VarDecl,
-  WhileStmt,
 } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import type { Span } from "../core/span.js";
 import { AiceGenerator } from "../decompiler/aice-generator.js";
-import type {
-  ProjectIdiomDefinition,
-  ProjectIdiomParam,
-} from "../config/project-config.js";
+import type { ProjectIdiomDefinition, ProjectIdiomParam } from "../config/project-config.js";
 
 export interface IdiomFileInput {
   filePath: string;
@@ -160,7 +141,7 @@ export function mineProjectIdioms(
   const acceptedCandidates: AcceptedCandidate[] = [];
 
   // 3. Evaluate Statement & Block Groups
-  for (const [skeletonKey, occurrences] of stmtGroups.entries()) {
+  for (const occurrences of stmtGroups.values()) {
     if (occurrences.length < minOccurrences) continue;
 
     const first = occurrences[0];
@@ -181,9 +162,7 @@ export function mineProjectIdioms(
     candidatesEvaluated++;
 
     const { templateStatements, holeValuesPerOcc, params } = antiResult;
-    const templateAice = templateStatements
-      .map((s) => generator.formatStatement(s))
-      .join("\n");
+    const templateAice = templateStatements.map((s) => generator.formatStatement(s)).join("\n");
 
     const baseName = deriveIdiomName(templateStatements, kind, candidateIndex);
     const defOverheadTokens = countBpeTokens(
@@ -238,7 +217,7 @@ export function mineProjectIdioms(
   }
 
   // 4. Evaluate Compound Expression Groups
-  for (const [skeletonKey, occurrences] of exprGroups.entries()) {
+  for (const occurrences of exprGroups.values()) {
     if (occurrences.length < minOccurrences) continue;
 
     const antiResult = antiUnifyExpressions(
@@ -311,9 +290,7 @@ export function mineProjectIdioms(
 
   const finalIdioms: Record<string, ProjectIdiomDefinition> = {};
   const claimedSpans = new Map<string, Array<{ start: number; end: number }>>();
-  const usedNames = new Set<string>([
-    ...Object.keys(existingIdioms),
-  ]);
+  const usedNames = new Set<string>([...Object.keys(existingIdioms)]);
 
   let totalNetTokenSavings = 0;
 
@@ -341,10 +318,7 @@ export function mineProjectIdioms(
       effectiveNetSavings =
         nonOverlappingOccs.length * cand.definition.tokensPerOccurrenceSaved -
         cand.defOverheadTokens;
-      if (
-        nonOverlappingOccs.length < minOccurrences ||
-        effectiveNetSavings < minNetTokenSavings
-      ) {
+      if (nonOverlappingOccs.length < minOccurrences || effectiveNetSavings < minNetTokenSavings) {
         rejectedByTokenGate++;
         continue;
       }
@@ -415,9 +389,7 @@ function collectModuleCandidates(
       if (stmt.elifBranches && stmt.elifBranches.length > 0) {
         const lastElif = stmt.elifBranches[stmt.elifBranches.length - 1];
         if (lastElif.body.statements.length > 0) {
-          return getRecursiveStmtEnd(
-            lastElif.body.statements[lastElif.body.statements.length - 1],
-          );
+          return getRecursiveStmtEnd(lastElif.body.statements[lastElif.body.statements.length - 1]);
         }
       }
       if (stmt.thenBranch && stmt.thenBranch.statements.length > 0) {
@@ -943,9 +915,7 @@ function antiUnifyStatementWindows(
       }
       case "ReturnStmt": {
         const rets = stmts as ReturnStmt[];
-        const val = rets[0].value
-          ? antiUnifyExprList(rets.map((r) => r.value!))
-          : null;
+        const val = rets[0].value ? antiUnifyExprList(rets.map((r) => r.value!)) : null;
         return { kind: "ReturnStmt", value: val, span: first.span };
       }
       case "LetBinding": {
@@ -1024,7 +994,9 @@ function antiUnifyStatementWindows(
               const elifCond = antiUnifyExprList(ifs.map((i) => i.elifBranches[eIdx].condition));
               const elifBodyStatements: Statement[] = [];
               for (let sIdx = 0; sIdx < first.elifBranches[eIdx].body.statements.length; sIdx++) {
-                const unified = antiUnifyStmtList(ifs.map((i) => i.elifBranches[eIdx].body.statements[sIdx]));
+                const unified = antiUnifyStmtList(
+                  ifs.map((i) => i.elifBranches[eIdx].body.statements[sIdx]),
+                );
                 if (!unified) return null;
                 elifBodyStatements.push(unified);
               }
@@ -1264,11 +1236,7 @@ function antiUnifyExpressions(
 /**
  * Idiom naming heuristics.
  */
-function deriveIdiomName(
-  statements: Statement[],
-  kind: "stmt" | "block",
-  index: number,
-): string {
+function deriveIdiomName(statements: Statement[], kind: "stmt" | "block", index: number): string {
   const first = statements[0];
   if (first.kind === "IfStmt") {
     if (first.condition.kind === "BinaryExpr") {
@@ -1391,9 +1359,7 @@ export function renameIdentifiersInStatement(
         condition: renameIdentifiersInExpr(el.condition, alphaMap),
         body: {
           ...el.body,
-          statements: el.body.statements.map((s) =>
-            renameIdentifiersInStatement(s, alphaMap),
-          ),
+          statements: el.body.statements.map((s) => renameIdentifiersInStatement(s, alphaMap)),
         },
       }));
       if (cloned.elseBranch) {
@@ -1409,9 +1375,7 @@ export function renameIdentifiersInStatement(
       cloned.condition = renameIdentifiersInExpr(cloned.condition, alphaMap);
       cloned.body = {
         ...cloned.body,
-        statements: cloned.body.statements.map((s) =>
-          renameIdentifiersInStatement(s, alphaMap),
-        ),
+        statements: cloned.body.statements.map((s) => renameIdentifiersInStatement(s, alphaMap)),
       };
       break;
     case "ForStmt":
@@ -1421,9 +1385,7 @@ export function renameIdentifiersInStatement(
       cloned.iterable = renameIdentifiersInExpr(cloned.iterable, alphaMap);
       cloned.body = {
         ...cloned.body,
-        statements: cloned.body.statements.map((s) =>
-          renameIdentifiersInStatement(s, alphaMap),
-        ),
+        statements: cloned.body.statements.map((s) => renameIdentifiersInStatement(s, alphaMap)),
       };
       break;
     case "TryStmt":
@@ -1480,10 +1442,7 @@ export function renameIdentifiersInStatement(
 /**
  * Recursively renames identifiers in an expression according to alphaMap.
  */
-export function renameIdentifiersInExpr(
-  expr: Expr,
-  alphaMap: Map<string, string>,
-): Expr {
+export function renameIdentifiersInExpr(expr: Expr, alphaMap: Map<string, string>): Expr {
   if (!expr) return expr;
   const cloned = structuredClone(expr);
   switch (cloned.kind) {
@@ -1530,9 +1489,7 @@ export function renameIdentifiersInExpr(
       cloned.value = renameIdentifiersInExpr(cloned.value, alphaMap);
       break;
     case "TemplateLiteralExpr":
-      cloned.expressions = cloned.expressions.map((e) =>
-        renameIdentifiersInExpr(e, alphaMap),
-      );
+      cloned.expressions = cloned.expressions.map((e) => renameIdentifiersInExpr(e, alphaMap));
       break;
     case "ClosureExpr": {
       const shadowed = new Set(cloned.params.map((p) => p.name));
@@ -1559,20 +1516,14 @@ export function renameIdentifiersInExpr(
 /**
  * Checks if a specific variable name is referenced in a list of statements.
  */
-export function isIdentifierReferencedInStatements(
-  stmts: Statement[],
-  name: string,
-): boolean {
+export function isIdentifierReferencedInStatements(stmts: Statement[], name: string): boolean {
   for (const s of stmts) {
     if (isIdentifierReferencedInStatement(s, name)) return true;
   }
   return false;
 }
 
-export function isIdentifierReferencedInStatement(
-  stmt: Statement,
-  name: string,
-): boolean {
+export function isIdentifierReferencedInStatement(stmt: Statement, name: string): boolean {
   if (!stmt) return false;
   switch (stmt.kind) {
     case "LetBinding":

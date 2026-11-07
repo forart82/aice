@@ -9,7 +9,6 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { program } from "../../bin/aice.js";
 import {
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
   isSameOrDescendant,
@@ -41,7 +40,10 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
     it("resolves omitted argument to config.sourceDir when it exists", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      fs.writeFileSync(path.join(srcDir, "math.aice"), "pub fn add(a: int, b: int) -> int:\n  ret a + b\n");
+      fs.writeFileSync(
+        path.join(srcDir, "math.aice"),
+        "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+      );
 
       saveProjectConfig(tmpDir, {
         mode: "side-by-side",
@@ -288,7 +290,10 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
 
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      fs.writeFileSync(path.join(srcDir, "math.ts.aice"), "pub fn add(a: int, b: int) -> int:\n  ret a + b\n");
+      fs.writeFileSync(
+        path.join(srcDir, "math.ts.aice"),
+        "pub fn add(a: int, b: int) -> int:\n  ret a + b\n",
+      );
 
       const res = resolvePathTargets(undefined, { projectRoot: tmpDir });
 
@@ -385,10 +390,7 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
     it("generateContext packages workspace overview when target is omitted or directory", async () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(srcDir, "util.aice"),
-        "pub fn utilHelper() -> int:\n  ret 42\n",
-      );
+      fs.writeFileSync(path.join(srcDir, "util.aice"), "pub fn utilHelper() -> int:\n  ret 42\n");
       fs.writeFileSync(
         path.join(srcDir, "main.aice"),
         'from "./util" import { utilHelper }\npub fn start():\n  ret utilHelper()\n',

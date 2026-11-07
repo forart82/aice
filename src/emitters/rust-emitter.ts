@@ -192,9 +192,7 @@ export class RustEmitter {
         this.ctx.writeLine(`pub struct ${t.name} {`);
         this.ctx.indent();
         for (const f of t.aliasType.fields) {
-          this.ctx.writeLine(
-            `pub ${this.toSnakeCase(f.name)}: ${this.emitTypeExpr(f.type)},`,
-          );
+          this.ctx.writeLine(`pub ${this.toSnakeCase(f.name)}: ${this.emitTypeExpr(f.type)},`);
         }
         this.ctx.dedent();
         this.ctx.writeLine("}");
@@ -273,7 +271,9 @@ export class RustEmitter {
     const nodeId = `const:${c.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
     const name = c.name.toUpperCase() === c.name ? c.name : this.toSnakeCase(c.name).toUpperCase();
-    const typeStr = c.typeAnnotation ? this.emitTypeExpr(c.typeAnnotation) : this.inferRustType(c.value);
+    const typeStr = c.typeAnnotation
+      ? this.emitTypeExpr(c.typeAnnotation)
+      : this.inferRustType(c.value);
     const valStr =
       typeStr === "&str" && c.value.kind === "LiteralExpr" && c.value.literalKind === "string"
         ? JSON.stringify(c.value.value)
@@ -286,7 +286,9 @@ export class RustEmitter {
     const nodeId = `var:${v.name}`;
     this.ctx.emitLeadingTrivia(nodeId);
     const name = v.name.toUpperCase() === v.name ? v.name : this.toSnakeCase(v.name).toUpperCase();
-    const typeStr = v.typeAnnotation ? this.emitTypeExpr(v.typeAnnotation) : this.inferRustType(v.value);
+    const typeStr = v.typeAnnotation
+      ? this.emitTypeExpr(v.typeAnnotation)
+      : this.inferRustType(v.value);
     const valStr =
       typeStr === "&str" && v.value.kind === "LiteralExpr" && v.value.literalKind === "string"
         ? JSON.stringify(v.value.value)

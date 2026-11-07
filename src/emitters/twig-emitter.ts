@@ -6,12 +6,7 @@
  * Emits clean, canonical .twig from canonical AICE AST (Module -> ComponentDecl -> LayoutNode).
  */
 
-import type {
-  ComponentDecl,
-  Expr,
-  LayoutNode,
-  Module,
-} from "../core/ast.js";
+import type { ComponentDecl, Expr, LayoutNode, Module } from "../core/ast.js";
 import { emptySpan } from "../core/span.js";
 import { EmitterContext, type EmitterOptions } from "./context.js";
 
@@ -43,8 +38,7 @@ export class TwigEmitter {
     // 1. Emit top-level leading comments if present in trivia
     if (this.ctx.trivia) {
       const rootTrivia =
-        this.ctx.trivia.getTrivia("twig_root") ??
-        this.ctx.trivia.getTrivia("html_root");
+        this.ctx.trivia.getTrivia("twig_root") ?? this.ctx.trivia.getTrivia("html_root");
       if (rootTrivia && rootTrivia.leading.length > 0) {
         for (const item of rootTrivia.leading) {
           const content = item.content.trim();
@@ -113,7 +107,9 @@ export class TwigEmitter {
         return;
       }
       if (node.childExpr && node.children.length === 0) {
-        this.ctx.writeLine(`{% block ${name} %}{{ ${this.emitExpr(node.childExpr)} }}{% endblock %}`);
+        this.ctx.writeLine(
+          `{% block ${name} %}{{ ${this.emitExpr(node.childExpr)} }}{% endblock %}`,
+        );
         return;
       }
       this.ctx.writeLine(`{% block ${name} %}`);
@@ -209,7 +205,11 @@ export class TwigEmitter {
     const isVoid = VOID_ELEMENTS.has(tag);
     const attrs = node.attributes
       .map((a) => {
-        if (a.value.kind === "LiteralExpr" && a.value.literalKind === "boolean" && a.value.value === true) {
+        if (
+          a.value.kind === "LiteralExpr" &&
+          a.value.literalKind === "boolean" &&
+          a.value.value === true
+        ) {
           return a.name;
         }
         if (a.value.kind === "LiteralExpr" && a.value.literalKind === "string") {
