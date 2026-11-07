@@ -98,7 +98,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: Token-Efficient Homoiconic Bidirectional Compiler CLI")
-  .version("0.8.1");
+  .version("0.8.2");
 
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
@@ -1794,15 +1794,59 @@ program
             fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
               ? fs.readFileSync(batchCandidatePath, "utf-8")
               : options.batch;
-          const items = JSON.parse(rawJson) as BatchSpliceItem[];
-          const batchRes = await spliceBatch(items, {
-            dryRun: options.dryRun,
-            compile: options.compile,
-            idioms: options.idioms,
-          });
-          console.log(
-            `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+          const rawParts = rawJson.split(/['"]?\s*&&\s*aice\s+idioms?\s+update\s+--batch\s*['"]?/);
+          const allEntries: Array<Record<string, unknown>> = [];
+          for (const part of rawParts) {
+            const parsed = JSON.parse(part.trim());
+            if (Array.isArray(parsed)) {
+              allEntries.push(...parsed);
+            }
+          }
+          const spliceItems = allEntries.filter(
+            (e) => typeof e.file === "string" || typeof e.filePath === "string",
+          ) as unknown as BatchSpliceItem[];
+          const idiomItems = allEntries.filter(
+            (e) =>
+              !e.file &&
+              !e.filePath &&
+              (typeof e.name === "string" || typeof e.idiom === "string"),
           );
+          if (spliceItems.length > 0) {
+            const batchRes = await spliceBatch(spliceItems, {
+              dryRun: options.dryRun,
+              compile: options.compile,
+              idioms: options.idioms,
+            });
+            console.log(
+              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+            );
+          }
+          if (idiomItems.length > 0) {
+            let totalOcc = 0;
+            const modFilesSet = new Set<string>();
+            for (const entry of idiomItems) {
+              const idName = String(entry.name || entry.idiom || "");
+              const idCode = String(
+                entry.code ??
+                  entry.template ??
+                  entry.templateAice ??
+                  entry.aice ??
+                  entry.body ??
+                  entry.content ??
+                  entry.replacement ??
+                  "",
+              );
+              const r = await updateProjectIdiom(process.cwd(), idName, idCode, {
+                dryRun: Boolean(options.dryRun),
+                params: typeof entry.params === "string" ? entry.params : undefined,
+              });
+              totalOcc += r.updatedOccurrences;
+              for (const mf of r.modifiedFiles) modFilesSet.add(mf);
+            }
+            console.log(
+              `✔ Batch updated ${idiomItems.length} idiom(s): ${totalOcc} occurrence(s) across ${modFilesSet.size} file(s)`,
+            );
+          }
           return;
         }
 

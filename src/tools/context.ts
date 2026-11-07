@@ -666,6 +666,37 @@ function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
   }
 }
 
+function unwrapSyntheticContainer(src: string, filePath: string): string {
+  if (!filePath.endsWith(".html") && !filePath.endsWith(".twig") && !filePath.endsWith(".cs")) {
+    return src;
+  }
+  const sLines = src.split("\n");
+  const wrapIdx = sLines.findIndex((l) => {
+    const t = l.trim();
+    return t.startsWith("component ") || t === "pub class Main:" || t === "class Main:";
+  });
+  if (wrapIdx < 0) return src;
+  return sLines
+    .slice(wrapIdx + 1)
+    .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
+    .join("\n")
+    .replace(/^static\s+fn\b/gm, "fn")
+    .trim();
+}
+
+function compactPureAiceSlice(src: string): string {
+  let out = src.replace(/^([ \t]*)if ([^\n:]+):\n\1  ([^\n]+)$/gm, "$1if $2: $3");
+  out = out.replace(
+    /^([ \t]*)if (\w+) < ([^\n:]+): \2 = \3\n\1if \2 > ([^\n:]+): \2 = \4\n\1(\2 = \2 \+ [^\n]+)$/gm,
+    "$1if $2 < $3: $2 = $3; if $2 > $4: $2 = $4; $5",
+  );
+  out = out.replace(
+    /^([ \t]*)([a-z]+\([^\n)]*\)):\n\1  ([a-z]+\([^\n)]*\):\s*"[^"]*")\n\1  ([a-z]+\([^\n)]*\):\s*"[^"]*")$/gm,
+    "$1$2 { $3; $4 }",
+  );
+  return out;
+}
+
 /**
  * Packages a workspace overview context pack covering project configuration,
  * discovered files, module outlines, and dependencies.
@@ -738,18 +769,14 @@ export async function generateWorkspaceContext(
           ) {
             for (const sym of allSyms) {
               try {
-                let sliced = extractSymbolFromAiceSource(fileAice, sym, f)
-                  .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                  .trim();
-                if (f.endsWith(".html")) {
-                  const sLines = sliced.split("\n");
-                  if (sLines[0]?.trim().startsWith("component ")) {
-                    sliced = sLines
-                      .slice(1)
-                      .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
-                      .join("\n")
-                      .trim();
-                  }
+                let sliced = unwrapSyntheticContainer(
+                  extractSymbolFromAiceSource(fileAice, sym, f)
+                    .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                    .trim(),
+                  f,
+                );
+                if (!idiomsActive) {
+                  sliced = compactPureAiceSlice(sliced);
                 }
                 if (sliced) fileSlices.push(sliced);
               } catch {
@@ -758,23 +785,14 @@ export async function generateWorkspaceContext(
             }
           }
           if (fileSlices.length === 0) {
-            let cleanedAll = fileAice
-              .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-              .trim();
-            if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
-              const sLines = cleanedAll.split("\n");
-              if (
-                sLines[0]?.trim().startsWith("component ") ||
-                sLines[0]?.trim() === "pub class Main:" ||
-                sLines[0]?.trim() === "class Main:"
-              ) {
-                cleanedAll = sLines
-                  .slice(1)
-                  .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
-                  .join("\n")
-                  .replace(/^static\s+fn\b/gm, "fn")
-                  .trim();
-              }
+            let cleanedAll = unwrapSyntheticContainer(
+              fileAice
+                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                .trim(),
+              f,
+            );
+            if (!idiomsActive) {
+              cleanedAll = compactPureAiceSlice(cleanedAll);
             }
             fileSlices.push(cleanedAll);
           }
@@ -790,23 +808,14 @@ export async function generateWorkspaceContext(
               }
             }
             try {
-              let sliced = extractSymbolFromAiceSource(fileAice, symSel, f)
-                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                .trim();
-              if (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".cs")) {
-                const sLines = sliced.split("\n");
-                if (
-                  sLines[0]?.trim().startsWith("component ") ||
-                  sLines[0]?.trim() === "pub class Main:" ||
-                  sLines[0]?.trim() === "class Main:"
-                ) {
-                  sliced = sLines
-                    .slice(1)
-                    .map((l) => (l.startsWith("  ") ? l.slice(2) : l))
-                    .join("\n")
-                    .replace(/^static\s+fn\b/, "fn")
-                    .trim();
-                }
+              let sliced = unwrapSyntheticContainer(
+                extractSymbolFromAiceSource(fileAice, symSel, f)
+                  .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                  .trim(),
+                f,
+              );
+              if (!idiomsActive) {
+                sliced = compactPureAiceSlice(sliced);
               }
               fileSlices.push(sliced);
             } catch {
@@ -1273,24 +1282,63 @@ export async function generateContext(
     }
   }
 
-  if (options.symbol && options.symbol.trim() !== "*") {
-    const requestedSymbols = options.symbol
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (requestedSymbols.length === 1) {
-      targetContent = extractSymbolFromAiceSource(targetContent, requestedSymbols[0], fullTargetPath);
-    } else if (requestedSymbols.length > 1) {
-      const slicedBlocks: string[] = [];
-      for (const sym of requestedSymbols) {
-        try {
-          slicedBlocks.push(extractSymbolFromAiceSource(targetContent, sym, fullTargetPath));
-        } catch {
-          // skip symbols not present in this file when multiple symbols are listed
+  if (options.symbol) {
+    if (options.symbol.trim() === "*") {
+      const allSyms = extractFileSymbolList(targetContent, fullTargetPath);
+      if (
+        (fullTargetPath.endsWith(".html") ||
+          fullTargetPath.endsWith(".json") ||
+          fullTargetPath.endsWith(".yaml")) &&
+        allSyms.length > 0
+      ) {
+        const slicedAll: string[] = [];
+        for (const sym of allSyms) {
+          try {
+            const s = unwrapSyntheticContainer(
+              extractSymbolFromAiceSource(targetContent, sym, fullTargetPath)
+                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                .trim(),
+              fullTargetPath,
+            );
+            if (s) slicedAll.push(s);
+          } catch {
+            // ignore
+          }
         }
+        if (slicedAll.length > 0) {
+          targetContent = [`// symbols: ${allSyms.join(", ")}`, ...slicedAll].join("\n\n");
+        }
+      } else {
+        const unwrapped = unwrapSyntheticContainer(
+          targetContent.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
+          fullTargetPath,
+        );
+        targetContent =
+          allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}\n\n${unwrapped}` : unwrapped;
       }
-      if (slicedBlocks.length > 0) {
-        targetContent = slicedBlocks.join("\n\n");
+    } else {
+      const requestedSymbols = options.symbol
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (requestedSymbols.length === 1) {
+        targetContent = extractSymbolFromAiceSource(
+          targetContent,
+          requestedSymbols[0],
+          fullTargetPath,
+        );
+      } else if (requestedSymbols.length > 1) {
+        const slicedBlocks: string[] = [];
+        for (const sym of requestedSymbols) {
+          try {
+            slicedBlocks.push(extractSymbolFromAiceSource(targetContent, sym, fullTargetPath));
+          } catch {
+            // skip symbols not present in this file when multiple symbols are listed
+          }
+        }
+        if (slicedBlocks.length > 0) {
+          targetContent = slicedBlocks.join("\n\n");
+        }
       }
     }
   }
@@ -1309,6 +1357,9 @@ export async function generateContext(
     } catch {
       // ignore expand failures
     }
+  }
+  if (options.symbol && !idiomsActive) {
+    targetContent = compactPureAiceSlice(targetContent);
   }
 
   // Generate target outline

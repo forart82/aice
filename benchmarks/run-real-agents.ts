@@ -148,9 +148,13 @@ function describeFileTargetUpdatePlainEnglish(
         : `(worker="${m[1]}", port=${m[2]}, concurrency=${m[3]})`,
     );
     if (keyMatch) {
+      const schemaHint =
+        f.languageId === "json"
+          ? "policy rule entries (retaining standard retries/enabled/windowSec fields)"
+          : "service tier entries (retaining standard replicas/healthIntervalSec/tlsRequired fields)";
       return isNewFeature
-        ? `   - ${f.fileName}: add top-level key "${keyMatch[1]}" (config.${keyMatch[1]}) after ${f.targetSymbol} with 2 entries: ${entries.join(" and ")}.`
-        : `   - ${f.fileName}: update top-level key ${f.targetSymbol} to 2 entries: ${entries.join(" and ")}.`;
+        ? `   - ${f.fileName}: add top-level key "${keyMatch[1]}" (config.${keyMatch[1]}) after ${f.targetSymbol} with 2 ${schemaHint}: ${entries.join(" and ")}.`
+        : `   - ${f.fileName}: update top-level key ${f.targetSymbol} to 2 ${schemaHint}: ${entries.join(" and ")}.`;
     }
   }
   throw new Error(`Unhandled file spec: ${f.fileName}`);
@@ -230,25 +234,24 @@ function buildPrompt(spec: RealWorldBenchmarkSpec, mode: RealAgentMode, dir: str
     return [
       `Workspace: ${dir}`,
       `Environment: AICE On-the-Fly WITHOUT Idioms (Pure AICE CLI).`,
-      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, python/sed/awk, or $idiom macros.`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, python/python3/node/sed/awk/cat, --help, --dry-run, or $idiom macros.`,
       `AICE CLI Reference (Pure AICE Mode):`,
-      `- Inspect workspace symbols/code in 1 command: \`cd ${dir} && aice context . -s "*" --no-idioms\` (or \`-s "<sym1,sym2>"\` or \`aice outline .\`)`,
-      `- Apply surgical updates, insertions, and deletions in batch: \`cd ${dir} && aice splice --no-idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
+      `- Step 1 — Inspect all workspace symbol headers and compact pure-AICE slices in 1 command: \`cd ${dir} && aice context . -s "*" --no-idioms\` (if output is truncated on a 15-file workspace, pass file subsets \`aice context <f1> <f2> ... -s "*" --no-idioms\`).`,
+      `- Step 2 — Apply all target updates, insertions, obsolete deletions, and refactored symbols in 1 atomic inline batch command (keep compact 1-line \`if v < min: v = min; if v > max: v = max; v = v + step\` and \`div(...) { span(...): ...; strong(...): ... }\` AICE syntax from context; pass JSON directly inside single quotes without temporary files or --dry-run): \`cd ${dir} && aice splice --no-idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
       taskText,
-      `Reply DONE when all changes are applied on disk.`,
+      `Reply DONE immediately once \`aice splice --no-idioms --batch\` succeeds (do not run extra verification commands).`,
     ].join("\n\n");
   }
 
   return [
     `Workspace: ${dir}`,
     `Environment: AICE On-the-Fly WITH Project Idioms (\`aice.config.json\` configured in workspace).`,
-    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--idioms\`. Do NOT use view_file, grep_search, replace_file_content, or python/sed/awk.`,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--idioms\`. Do NOT use view_file, grep_search, replace_file_content, python/python3/node/sed/awk/cat, --help, or --dry-run.`,
     `AICE CLI Reference (Idiom Mode):`,
-    `- Inspect workspace symbol headers, selected target symbol bodies (with \`$idiom\` calls), and active idiom definitions in 1 command: \`cd ${dir} && aice context . -s "<comma-separated target symbols>" --idioms\``,
-    `- Apply surgical target updates/insertions (using active \`$idiom(...)\` calls) and obsolete symbol deletions in 1 batch command: \`cd ${dir} && aice splice --idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
-    `- Propagate a workspace-wide pattern refactor across all idiom call sites in 1 batch command: \`cd ${dir} && aice idioms update --batch '[{"name":"$<idiom_name>","template":"<updated template>"}]'\` (note: in JSON/YAML idiom templates, keep \`{ key: $0, ... }\` object syntax; in multi-line code/CSS templates, separate lines with \`\\n\`).`,
+    `- Step 1 — Inspect all workspace file \`// symbols:\` headers (which list every symbol in each file including obsolete ones), selected target/anchor symbol bodies (with \`$idiom\` calls), and active idiom definitions in 1 command: \`cd ${dir} && aice context . -s "<comma-separated target/anchor symbols from task>" --idioms\``,
+    `- Step 2 — Apply surgical target updates/insertions (using active \`$idiom(...)\` calls), obsolete symbol deletions, and workspace-wide idiom template updates in 1 atomic inline batch command (note: in JSON/YAML idiom templates, keep \`{ key: $0, ... }\` object syntax; in multi-line code/CSS templates, separate lines with \`\\n\`): \`cd ${dir} && aice splice --idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<targetSym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true},{"name":"$<idiom_name>","template":"<updated template>"}]'\``,
     taskText,
-    `Reply DONE when all changes are applied on disk.`,
+    `Reply DONE immediately once \`aice splice --idioms --batch\` succeeds (do not run extra verification commands).`,
   ].join("\n\n");
 }
 

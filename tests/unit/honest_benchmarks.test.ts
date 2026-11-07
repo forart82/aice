@@ -140,24 +140,24 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
         expect(m.zeroAiceFilesLeftOnDisk).toBe(true);
       }
 
-      // Per-scenario uncoached ordering vs withoutAice & working/output token reduction with idioms
+      // Strict per-scenario monotonic ordering: withoutAice > aiceWithoutIdioms >= aiceWithIdioms
       expect(b.aiceWithoutIdioms.llmTurns).toBeLessThan(b.withoutAice.llmTurns);
-      expect(b.aiceWithIdioms.llmTurns).toBeLessThan(b.withoutAice.llmTurns);
+      expect(b.aiceWithIdioms.llmTurns).toBeLessThanOrEqual(b.aiceWithoutIdioms.llmTurns);
 
       expect(b.aiceWithoutIdioms.toolCalls).toBeLessThan(b.withoutAice.toolCalls);
-      expect(b.aiceWithIdioms.toolCalls).toBeLessThan(b.withoutAice.toolCalls);
+      expect(b.aiceWithIdioms.toolCalls).toBeLessThanOrEqual(b.aiceWithoutIdioms.toolCalls);
 
       expect(b.aiceWithoutIdioms.workingTokens).toBeLessThan(b.withoutAice.workingTokens);
       expect(b.aiceWithIdioms.workingTokens).toBeLessThan(b.aiceWithoutIdioms.workingTokens);
 
-      expect(b.aiceWithIdioms.outputTokens).toBeLessThan(b.withoutAice.outputTokens);
+      expect(b.aiceWithoutIdioms.outputTokens).toBeLessThan(b.withoutAice.outputTokens);
       expect(b.aiceWithIdioms.outputTokens).toBeLessThan(b.aiceWithoutIdioms.outputTokens);
 
       expect(b.aiceWithoutIdioms.billableTokens).toBeLessThan(b.withoutAice.billableTokens);
-      expect(b.aiceWithIdioms.billableTokens).toBeLessThan(b.withoutAice.billableTokens);
+      expect(b.aiceWithIdioms.billableTokens).toBeLessThan(b.aiceWithoutIdioms.billableTokens);
 
       expect(b.aiceWithoutIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
-      expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.withoutAice.apiTotalTokens);
+      expect(b.aiceWithIdioms.apiTotalTokens).toBeLessThan(b.aiceWithoutIdioms.apiTotalTokens);
     }
 
     // Strict aggregate ordering: withoutAice > aiceWithoutIdioms > aiceWithIdioms across all metrics

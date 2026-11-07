@@ -3143,7 +3143,9 @@ function spliceDialectNativeSource(
     ]);
 
     const emitTemplateFragment = (): string => {
-      const trimmed = rawSnippet.trim();
+      const trimmed = rawSnippet
+        .trim()
+        .replace(/^([ \t]*)block\s+["']([^"']+)["']\s*:/gm, '$1block(name: "$2"):');
       if (!trimmed) return "";
       if (trimmed.startsWith("<") || trimmed.startsWith("{%")) {
         return trimmed;
@@ -3181,28 +3183,39 @@ function spliceDialectNativeSource(
     }
 
     let sel = anchorSymbol.trim();
+    const isTopLevelCompSnippet = /^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(
+      rawSnippet.trim(),
+    );
+    let spanStart = -1;
+    let spanEnd = -1;
+
     if (
       !sel.startsWith("#") &&
       !sel.startsWith(".") &&
       !sel.startsWith("block:") &&
       /^[A-Z]/.test(sel)
     ) {
-      const blkMatch = rawSnippet.match(/\bblock\s*\(\s*name\s*[:=]\s*["']([^"']+)["']/);
-      const idMatch = rawSnippet.match(/\bid\s*[:=]\s*["']([^"']+)["']/);
-      if (blkMatch) {
-        sel = blkMatch[1];
-      } else if (idMatch) {
-        sel = `#${idMatch[1]}`;
+      if (isTopLevelCompSnippet && !options.insertBefore && !options.insertAfter && !options.delete) {
+        const doctypeMatch = nativeSource.match(/^<!DOCTYPE html>\s*/i);
+        spanStart = doctypeMatch ? doctypeMatch[0].length : 0;
+        spanEnd = nativeSource.length;
+      } else {
+        const blkMatch = rawSnippet.match(
+          /\bblock(?:\s*\(\s*name\s*[:=]\s*|\s+)["']([^"']+)["']/,
+        );
+        const idMatch = rawSnippet.match(/\bid\s*[:=]\s*["']([^"']+)["']/);
+        if (blkMatch) {
+          sel = blkMatch[1];
+        } else if (idMatch) {
+          sel = `#${idMatch[1]}`;
+        }
       }
     }
     const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block:)/, "");
     const escSel = cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-    let spanStart = -1;
-    let spanEnd = -1;
-
     // 1. Check Twig {% block <name> %}...{% endblock %} with balanced nesting support
-    if (targetLang === "twig") {
+    if (spanStart < 0 && targetLang === "twig") {
       const openBlockRe = new RegExp(`\\{%[-~]?\\s*block\\s+${escSel}\\b([^%]*)%\\}`);
       const openMatch = openBlockRe.exec(nativeSource);
       if (openMatch && openMatch.index !== undefined) {

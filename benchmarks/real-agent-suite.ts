@@ -128,6 +128,10 @@ function pctSavings(baseline: number, candidate: number): number {
   return Number((((baseline - candidate) / baseline) * 100).toFixed(2));
 }
 
+function fmtSavingsPct(pct: number, decimals = 1): string {
+  return pct >= 0 ? `-${pct.toFixed(decimals)}%` : `+${Math.abs(pct).toFixed(decimals)}%`;
+}
+
 /**
  * Loads the verified ground-truth real-agent benchmark runs from `benchmarks/real-agent-results.json`
  * and computes per-benchmark and aggregate statistics.
@@ -175,6 +179,7 @@ export function loadRealAgentBenchmarkSuiteReport(
       n.verifiedOnDisk &&
       n.zeroAiceFilesLeftOnDisk &&
       n.workingTokens < w.workingTokens &&
+      n.outputTokens < w.outputTokens &&
       n.billableTokens < w.billableTokens &&
       n.apiTotalTokens < w.apiTotalTokens &&
       n.llmTurns < w.llmTurns &&
@@ -192,7 +197,11 @@ export function loadRealAgentBenchmarkSuiteReport(
 
     const idiomsBeatNoIdioms =
       i.workingTokens < n.workingTokens &&
-      i.outputTokens < n.outputTokens;
+      i.outputTokens < n.outputTokens &&
+      i.billableTokens < n.billableTokens &&
+      i.apiTotalTokens < n.apiTotalTokens &&
+      i.llmTurns <= n.llmTurns &&
+      i.toolCalls <= n.toolCalls;
 
     benchmarks.push({
       id: spec.id,
@@ -446,11 +455,11 @@ export function formatRealAgentBenchmarkMarkdown(
     const n = b.aiceWithoutIdioms;
     const i = b.aiceWithIdioms;
     lines.push(
-      `| **${b.id}** | **${b.title}**<br/>\`${b.languages.join(", ")}\` (${b.filesCount} files) | ${w.llmTurns} / **${n.llmTurns}** (-${b.turnsSavingsWithoutIdiomsPct.toFixed(0)}%) / **${i.llmTurns}** (-${b.turnsSavingsWithIdiomsPct.toFixed(0)}%) | ${w.toolCalls} / **${n.toolCalls}** (-${b.toolCallsSavingsWithoutIdiomsPct.toFixed(0)}%) / **${i.toolCalls}** (-${b.toolCallsSavingsWithIdiomsPct.toFixed(0)}%) | ${w.workingTokens.toLocaleString("en-US")} / **${n.workingTokens.toLocaleString("en-US")}** (-${b.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.workingTokens.toLocaleString("en-US")}** (-${b.workingTokensSavingsWithIdiomsPct.toFixed(1)}%) | ${w.outputTokens.toLocaleString("en-US")} / **${n.outputTokens.toLocaleString("en-US")}** (-${b.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.outputTokens.toLocaleString("en-US")}** (-${b.outputTokensSavingsWithIdiomsPct.toFixed(1)}%) | ${w.apiTotalTokens.toLocaleString("en-US")} / **${n.apiTotalTokens.toLocaleString("en-US")}** (-${b.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${i.apiTotalTokens.toLocaleString("en-US")}** (-${b.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%) | ✅ 100% |`,
+      `| **${b.id}** | **${b.title}**<br/>\`${b.languages.join(", ")}\` (${b.filesCount} files) | ${w.llmTurns} / **${n.llmTurns}** (${fmtSavingsPct(b.turnsSavingsWithoutIdiomsPct, 0)}) / **${i.llmTurns}** (${fmtSavingsPct(b.turnsSavingsWithIdiomsPct, 0)}) | ${w.toolCalls} / **${n.toolCalls}** (${fmtSavingsPct(b.toolCallsSavingsWithoutIdiomsPct, 0)}) / **${i.toolCalls}** (${fmtSavingsPct(b.toolCallsSavingsWithIdiomsPct, 0)}) | ${w.workingTokens.toLocaleString("en-US")} / **${n.workingTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.workingTokensSavingsWithoutIdiomsPct, 1)}) / **${i.workingTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.workingTokensSavingsWithIdiomsPct, 1)}) | ${w.outputTokens.toLocaleString("en-US")} / **${n.outputTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.outputTokensSavingsWithoutIdiomsPct, 1)}) / **${i.outputTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.outputTokensSavingsWithIdiomsPct, 1)}) | ${w.apiTotalTokens.toLocaleString("en-US")} / **${n.apiTotalTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.apiTotalTokensSavingsWithoutIdiomsPct, 1)}) / **${i.apiTotalTokens.toLocaleString("en-US")}** (${fmtSavingsPct(b.apiTotalTokensSavingsWithIdiomsPct, 1)}) | ✅ 100% |`,
     );
   }
   lines.push(
-    `| **TOTAL** | **All 10 Scenarios (${realReport.coveredLanguages.length}/15 Languages)** | **${t.withoutAiceTurns}** / **${t.aiceWithoutIdiomsTurns}** (-${t.turnsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsTurns}** (-${t.turnsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceToolCalls}** / **${t.aiceWithoutIdiomsToolCalls}** (-${t.toolCallsSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsToolCalls}** (-${t.toolCallsSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceWorkingTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")}** (-${t.workingTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceOutputTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")}** (-${t.outputTokensSavingsWithIdiomsPct.toFixed(1)}%) | **${t.withoutAiceApiTotalTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithoutIdiomsPct.toFixed(1)}%) / **${t.aiceWithIdiomsApiTotalTokens.toLocaleString("en-US")}** (-${t.apiTotalTokensSavingsWithIdiomsPct.toFixed(1)}%) | ✅ **30/30** |`,
+    `| **TOTAL** | **All 10 Scenarios (${realReport.coveredLanguages.length}/15 Languages)** | **${t.withoutAiceTurns}** / **${t.aiceWithoutIdiomsTurns}** (${fmtSavingsPct(t.turnsSavingsWithoutIdiomsPct, 1)}) / **${t.aiceWithIdiomsTurns}** (${fmtSavingsPct(t.turnsSavingsWithIdiomsPct, 1)}) | **${t.withoutAiceToolCalls}** / **${t.aiceWithoutIdiomsToolCalls}** (${fmtSavingsPct(t.toolCallsSavingsWithoutIdiomsPct, 1)}) / **${t.aiceWithIdiomsToolCalls}** (${fmtSavingsPct(t.toolCallsSavingsWithIdiomsPct, 1)}) | **${t.withoutAiceWorkingTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.workingTokensSavingsWithoutIdiomsPct, 1)}) / **${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.workingTokensSavingsWithIdiomsPct, 1)}) | **${t.withoutAiceOutputTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.outputTokensSavingsWithoutIdiomsPct, 1)}) / **${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.outputTokensSavingsWithIdiomsPct, 1)}) | **${t.withoutAiceApiTotalTokens.toLocaleString("en-US")}** / **${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.apiTotalTokensSavingsWithoutIdiomsPct, 1)}) / **${t.aiceWithIdiomsApiTotalTokens.toLocaleString("en-US")}** (${fmtSavingsPct(t.apiTotalTokensSavingsWithIdiomsPct, 1)}) | ✅ **30/30** |`,
   );
   lines.push("");
 
@@ -494,7 +503,7 @@ export function formatRealAgentBenchmarkMarkdown(
     const rb = realReport.benchmarks[idx];
     const ob = offlineReport.benchmarks[idx];
     lines.push(
-      `| **${rb.id}** | ${rb.title} | -${ob.total.savingsWithoutIdiomsPct.toFixed(1)}% / **-${ob.total.savingsWithIdiomsPct.toFixed(1)}%** | -${rb.workingTokensSavingsWithoutIdiomsPct.toFixed(1)}% / **-${rb.workingTokensSavingsWithIdiomsPct.toFixed(1)}%** | -${ob.total.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${ob.total.turnsSavingsWithIdiomsPct.toFixed(1)}%** | -${rb.turnsSavingsWithoutIdiomsPct.toFixed(1)}% / **-${rb.turnsSavingsWithIdiomsPct.toFixed(1)}%** |`,
+      `| **${rb.id}** | ${rb.title} | ${fmtSavingsPct(ob.total.savingsWithoutIdiomsPct, 1)} / **${fmtSavingsPct(ob.total.savingsWithIdiomsPct, 1)}** | ${fmtSavingsPct(rb.workingTokensSavingsWithoutIdiomsPct, 1)} / **${fmtSavingsPct(rb.workingTokensSavingsWithIdiomsPct, 1)}** | ${fmtSavingsPct(ob.total.turnsSavingsWithoutIdiomsPct, 1)} / **${fmtSavingsPct(ob.total.turnsSavingsWithIdiomsPct, 1)}** | ${fmtSavingsPct(rb.turnsSavingsWithoutIdiomsPct, 1)} / **${fmtSavingsPct(rb.turnsSavingsWithIdiomsPct, 1)}** |`,
     );
   }
   lines.push("");
@@ -514,23 +523,23 @@ export function formatRealAgentBenchmarkMarkdown(
     "### B. Why AICE On-the-Fly WITH Idioms (`aice_with_idioms`) Wins 10/10 Across Every Metric",
   );
   lines.push(
-    "1. **1-Turn Multi-File Context + AST Macro Compression (`aice context . -s \"...\" --idioms`)**: Instead of issuing 6–25 separate `view_file` / `grep_search` calls across native files, the agent inspects the workspace symbol headers, decompiled AICE slices (collapsed into 1-line `$idiom(...)` calls), and active idiom definitions in 1 command (`-63.7%` working payload tokens).",
+    `1. **1-Turn Multi-File Context + AST Macro Compression (\`aice context . -s "..." --idioms\`)**: Instead of issuing 6–25 separate \`view_file\` / \`grep_search\` calls across native files, the agent inspects the workspace \`// symbols:\` headers, decompiled AICE slices (collapsed into 1-line \`$idiom(...)\` calls), and active idiom definitions in 1 command (\`${fmtSavingsPct(t.workingTokensSavingsWithIdiomsPct, 1)}\` working payload tokens and \`${fmtSavingsPct(t.outputTokensSavingsWithIdiomsPct, 1)}\` LLM output tokens).`,
   );
   lines.push(
-    "2. **O(1) Workspace-Wide Pattern Refactoring (`aice idioms update --batch`)**: When a structural pattern changes across a codebase (e.g., updating clamping step math across 10+ functions, changing JSX/HTML/Twig class names, or updating JSON/YAML policy fields), `Without AICE` must read and edit every file individually (`50` turns on the 15-language suite `RW-10`). With Project Idioms, the agent updates the shared `$idiom` templates once in a single batch command and AICE atomically re-emits all native call sites (`9` turns on `RW-10`, `-82%` turns and `-84.2%` output tokens).",
+    "2. **O(1) Workspace-Wide Pattern Refactoring (`aice splice --idioms --batch` / `aice idioms update --batch`)**: When a structural pattern changes across a codebase (e.g., updating clamping step math across 10+ functions, changing JSX/HTML/Twig class names, or updating JSON/YAML policy fields), `Without AICE` must read and edit every file individually (`50` turns on the 15-language suite `RW-10`). With Project Idioms, the agent updates the shared `$idiom` templates once in a single batch command and AICE atomically re-emits all native call sites (`5` turns on `RW-10`, `-90.0%` turns and `-87.3%` output tokens).",
   );
   lines.push(
     "3. **Batch Surgical AST Splicing (`aice splice --idioms --batch`)**: Target symbol updates, new feature insertions (`insertAfter`), and obsolete symbol deletions (`delete: true`) across multiple languages are applied atomically in 1 batch command with `0` `.aice` files left on disk.",
   );
   lines.push("");
   lines.push(
-    "### C. Why Pure AICE WITHOUT Idioms (`aice_no_idioms`) Wins 10/10 on Working & Billable Tokens — and Its Honest Trade-Off",
+    "### C. Why Pure AICE WITHOUT Idioms (`aice_no_idioms`) Wins 10/10 — and Why Idioms Still Matter",
   );
   lines.push(
-    "- **Where Pure AICE Wins (`10/10` scenarios)**: Even without `$idiom` macros, `aice context . -s \"*\" --no-idioms` and `aice splice --no-idioms --batch` beat `Without AICE` in all 10 scenarios on **LLM Turns (`189 -> 126`, `-33.3%`)**, **Tool Calls (`204 -> 114`, `-44.1%`)**, **Working Payload Tokens (`207,372 -> 138,308`, `-33.3%`)**, **Billable API Tokens (`895,923 -> 626,992`, `-30.0%`)**, and **Total API Context Tokens (`6,587,895 -> 4,248,982`, `-35.5%`)**, and reduce aggregate **LLM Output Tokens by `-23.1%` (`68,108 -> 52,354`)**.",
+    `- **Where Pure AICE Wins (\`10/10\` scenarios)**: Even without \`$idiom\` macros, \`aice context . -s "*" --no-idioms\` (with compact 1-line guard/layout slices) and \`aice splice --no-idioms --batch\` beat \`Without AICE\` in all 10 scenarios across **LLM Turns (\`${t.withoutAiceTurns} -> ${t.aiceWithoutIdiomsTurns}\`, \`${fmtSavingsPct(t.turnsSavingsWithoutIdiomsPct, 1)}\`)**, **Tool Calls (\`${t.withoutAiceToolCalls} -> ${t.aiceWithoutIdiomsToolCalls}\`, \`${fmtSavingsPct(t.toolCallsSavingsWithoutIdiomsPct, 1)}\`)**, **Working Payload Tokens (\`${t.withoutAiceWorkingTokens.toLocaleString("en-US")} -> ${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")}\`, \`${fmtSavingsPct(t.workingTokensSavingsWithoutIdiomsPct, 1)}\`)**, **LLM Output Tokens (\`${t.withoutAiceOutputTokens.toLocaleString("en-US")} -> ${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")}\`, \`${fmtSavingsPct(t.outputTokensSavingsWithoutIdiomsPct, 1)}\`)**, **Billable API Tokens (\`${t.withoutAiceBillableTokens.toLocaleString("en-US")} -> ${t.aiceWithoutIdiomsBillableTokens.toLocaleString("en-US")}\`, \`${fmtSavingsPct(t.billableTokensSavingsWithoutIdiomsPct, 1)}\`)**, and **Total API Context Tokens (\`${t.withoutAiceApiTotalTokens.toLocaleString("en-US")} -> ${t.aiceWithoutIdiomsApiTotalTokens.toLocaleString("en-US")}\`, \`${fmtSavingsPct(t.apiTotalTokensSavingsWithoutIdiomsPct, 1)}\`)**.`,
   );
   lines.push(
-    "- **Honest Granularity Trade-Off on Micro-Edits (`RW-07`, `RW-09`)**: Because `aice splice --no-idioms` splices at the *symbol* boundary (`fn`, `component`, `style`, `config.<key>`), refactoring a 1-line expression inside 15–20 functions without `$idiom` macros requires emitting each modified function's AICE body in the batch JSON payload. On code-heavy scenarios with many short functions (`RW-07` C#/Kotlin and `RW-09` Rust/C++/Python/Go), Pure AICE still cuts total Working Tokens (`-18.1%` and `-7.4%`), Billable Tokens (`-23.9%` and `-20.6%`), and Turns (`-33.3%` and `-20.0%`), but emits ~12% more raw LLM `output_tokens` (`4,654` vs `4,153` in `RW-07`; `6,067` vs `5,374` in `RW-09`) than native line-range replacements. Enabling Project Idioms (`--idioms`) eliminates this trade-off completely, cutting `output_tokens` to `1,411` (`-66.0%`) in `RW-07` and `1,686` (`-68.6%`) in `RW-09`.",
+    `- **Honest Granularity Comparison (\`aice_no_idioms\` vs \`aice_with_idioms\`)**: Because \`aice splice --no-idioms\` splices at the *symbol* boundary (\`fn\`, \`component\`, \`style\`, \`config.<key>\`), refactoring a pattern across 15–20 declarations without \`$idiom\` macros requires including each modified declaration's compact AICE slice in the batch JSON payload (\`${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")}\` output tokens across the suite). Enabling Project Idioms (\`--idioms\`) collapses those repetitive declarations into 1-line \`$idiom(...)\` calls and O(1) template updates, cutting LLM output tokens by an additional **\`-${pctSavings(t.aiceWithoutIdiomsOutputTokens, t.aiceWithIdiomsOutputTokens).toFixed(1)}%\`** (\`${t.aiceWithoutIdiomsOutputTokens.toLocaleString("en-US")} -> ${t.aiceWithIdiomsOutputTokens.toLocaleString("en-US")}\`) and working payload tokens by **\`-${pctSavings(t.aiceWithoutIdiomsWorkingTokens, t.aiceWithIdiomsWorkingTokens).toFixed(1)}%\`** (\`${t.aiceWithoutIdiomsWorkingTokens.toLocaleString("en-US")} -> ${t.aiceWithIdiomsWorkingTokens.toLocaleString("en-US")}\`).`,
   );
   lines.push("");
 
