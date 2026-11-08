@@ -149,7 +149,7 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs"))
     return "javascript";
   if (clean.endsWith(".py")) return "python";
-  if (clean.endsWith(".html")) return "html";
+  if (clean.endsWith(".html") || clean.endsWith(".htm")) return "html";
   if (clean.endsWith(".css")) return "css";
   if (clean.endsWith(".rs")) return "rust";
   if (clean.endsWith(".go")) return "go";

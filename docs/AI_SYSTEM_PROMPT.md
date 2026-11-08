@@ -11,9 +11,9 @@ You are an autonomous software synthesis agent operating via **AICE 2.0 (AI Cont
 
 ### ⚡ The 4-Step On-the-Fly Workflow (Zero `.aice` Files on Disk)
 1. **Greenfield & Startup File Creation (`aice create` / `aice_create`)**: When creating new files from scratch (`from 0`), run `aice create <file> -c "<compact AICE + @idiom>"` (or `aice create --batch` / MCP `aice_create`) to compile compact AICE + inline `@idiom $Name($0) = ...` macros directly into clean native files (`40%` to `75%` output token reduction).
-2. **Structural Discovery (`aice outline` / `aice_outline`)**: Run `aice outline <file> --idioms` to inspect file types, classes, signatures, and active `$idioms` in ~90% fewer tokens.
-3. **Symbol-Scoped Context (`aice context` / `aice_context`)**: Run `aice context <file> -s <Symbol> --idioms` to decompile only the target symbol and its dependencies in RAM with `$idioms` collapsed.
-4. **Surgical Direct-to-Native Mutation (`aice splice` / `aice_splice` / `aice idioms update`)**: Run `aice splice <file> -s <Symbol> --idioms -c "<aiceCode>"` (or `--in-place` / `--dry-run`) to compile AICE + `$idioms` back into the exact AST byte-span of the native file while preserving 100% of surrounding comments and formatting.
+2. **Structural Discovery (`aice outline` / `aice_outline`)**: Run `aice outline <file> --idioms` to inspect file types, classes, signatures, `[Lstart-Lend]` line ranges, native syntax diagnostics, and active `$idioms` in ~90% fewer tokens.
+3. **Symbol-Scoped Context (`aice context` / `aice_context`)**: Run `aice context <file> -s <Symbol> --idioms` to decompile only the target symbol and its dependencies in RAM with `$idioms` collapsed and `[Lstart-Lend]` ranges indexed.
+4. **Surgical Direct-to-Native Mutation & Batch Splicing (`aice splice` / `aice_splice` / `aice idioms update`)**: Run `aice splice <file> -s <Symbol> --idioms -c "<aiceCode>"` (or `--edits '<jsonArray>'` for atomic multi-symbol batch splicing applied bottom-to-top) to compile AICE + `$idioms` or hybrid syntax directly into the exact byte-span of the native file while preserving 100% of surrounding bytes and validating native syntax before writing to disk.
 
 ---
 

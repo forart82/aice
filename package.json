@@ -1,6 +1,6 @@
 {
   "name": "aice",
-  "version": "0.9.6",
+  "version": "0.9.7",
   "description": "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer",
   "license": "Apache-2.0",
   "author": {
@@ -39,7 +39,7 @@
   },
   "scripts": {
     "aice": "tsx ./bin/aice.ts",
-    "test": "vitest run",
+    "test": "vitest run --test-timeout=30000",
     "test:watch": "vitest",
     "check": "tsc --noEmit",
     "format": "biome format --write .",

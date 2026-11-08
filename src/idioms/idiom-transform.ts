@@ -252,7 +252,20 @@ function getOrParseTemplate(def: ProjectIdiomDefinition): ParsedTemplate {
         ? (body.statements[0] as ExprStmt).expr
         : undefined;
   } catch (err) {
-    firstErr = err;
+    try {
+      const normalizedIndented = indented.replace(/::(?=[A-Za-z_])/g, ".");
+      const wrapper = `fn __t():\n${normalizedIndented}\n`;
+      const mod = parse(wrapper, "<template>");
+      const fn = mod.items[0] as FunctionDecl;
+      const body = fn.body as Block;
+      parsedStatements = body.statements;
+      parsedSingleExpr =
+        body.statements.length === 1 && body.statements[0].kind === "ExprStmt"
+          ? (body.statements[0] as ExprStmt).expr
+          : undefined;
+    } catch {
+      firstErr = err;
+    }
   }
 
   try {

@@ -1078,6 +1078,10 @@ program
   .option("--insert-after <symbol>", "Insert after specified symbol")
   .option("--insert-before <symbol>", "Insert before specified symbol")
   .option(
+    "--edits <jsonOrFile>",
+    "Apply multiple symbol edits to a single file in reverse offset order (JSON array or path)",
+  )
+  .option(
     "--batch <fileOrJson>",
     "Execute atomic multi-file batch splice from JSON file or JSON string",
   )
@@ -1101,6 +1105,7 @@ program
         delete?: boolean | string;
         insertAfter?: string;
         insertBefore?: string;
+        edits?: string;
         batch?: string;
         create?: boolean;
         idioms?: boolean;
@@ -1229,12 +1234,34 @@ program
           isPrimaryDelete = true;
         }
 
-        if (code === undefined && options.body === undefined && !isPrimaryDelete) {
+        let parsedEdits: SpliceOptions["edits"];
+        if (options.edits) {
+          const editsCandidatePath = path.resolve(process.cwd(), options.edits);
+          const rawEditsJson =
+            fs.existsSync(editsCandidatePath) && fs.statSync(editsCandidatePath).isFile()
+              ? fs.readFileSync(editsCandidatePath, "utf-8")
+              : options.edits;
+          const parsed = JSON.parse(rawEditsJson.trim());
+          if (!Array.isArray(parsed)) {
+            console.error("❌ Error: --edits must be a JSON array of symbol edit objects.");
+            process.exit(1);
+          }
+          parsedEdits = parsed;
+        }
+
+        if (
+          code === undefined &&
+          options.body === undefined &&
+          !isPrimaryDelete &&
+          (!parsedEdits || parsedEdits.length === 0)
+        ) {
           const stdinContent = await readStdin();
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
           } else {
-            console.error("❌ Error: Must provide --code, --body, --delete, or input via stdin.");
+            console.error(
+              "❌ Error: Must provide --code, --body, --delete, --edits, or input via stdin.",
+            );
             process.exit(1);
           }
         }
@@ -1246,6 +1273,7 @@ program
           delete: isPrimaryDelete,
           insertAfter: options.insertAfter,
           insertBefore: options.insertBefore,
+          edits: parsedEdits,
           create: options.create,
           idioms: effectiveSpliceIdioms,
           dryRun: options.dryRun,

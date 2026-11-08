@@ -8,7 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import ts from "../compat/typescript.js";
+import postcss from "postcss";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -22,10 +22,12 @@ import type { Module, ParamDecl, TypeExpr } from "../core/ast.js";
 import { parseWithTrivia } from "../core/parser.js";
 import { CstTriviaTable } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
-import { detectTargetFromPath } from "../emitters/index.js";
+import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
+import { locateNativeDeclarationSpan } from "./splice.js";
+import { formatNativeSyntaxDiagnosticsMarkdown } from "./syntax-validator.js";
 
 export interface OutlineOptions {
   depth?: number;
@@ -34,12 +36,15 @@ export interface OutlineOptions {
   stats?: boolean;
   projectRoot?: string;
   idioms?: boolean;
+  lineRanges?: boolean;
 }
 
 export interface OutlineSymbol {
   name: string;
   kind: string;
   line: number;
+  endLine?: number;
+  lineRange?: string;
   signature: string;
   children?: OutlineSymbol[];
   docstring?: string;
@@ -174,16 +179,33 @@ export function generateOutline(
         trivia = parsed.trivia;
       } else {
         const targetLang = detectTargetFromPath(filePath);
-        const decompResult = withSuppressedTelemetry(() =>
-          decompile(originalSource, targetLang, { filePath }),
-        );
         try {
-          const parsed = parseWithTrivia(decompResult.aice, filePath);
-          ast = parsed.ast;
-          trivia = parsed.trivia;
-        } catch {
-          ast = decompResult.ast;
-          trivia = decompResult.trivia;
+          const decompResult = withSuppressedTelemetry(() =>
+            decompile(originalSource, targetLang, { filePath }),
+          );
+          try {
+            const parsed = parseWithTrivia(decompResult.aice, filePath);
+            ast = parsed.ast;
+            trivia = parsed.trivia;
+          } catch {
+            ast = decompResult.ast;
+            trivia = decompResult.trivia;
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+            throw err;
+          }
+          ast = {
+            kind: "Module",
+            path: filePath,
+            items: [],
+            span: {
+              file: filePath,
+              start: { line: 1, column: 1, offset: 0 },
+              end: { line: 1, column: 1, offset: 0 },
+            },
+          };
+          trivia = new CstTriviaTable();
         }
       }
     } else {
@@ -196,18 +218,35 @@ export function generateOutline(
 
       if (hasKnownTargetExt && explicitFilePath) {
         const targetLang = detectTargetFromPath(explicitFilePath);
-        const decompResult = withSuppressedTelemetry(() =>
-          decompile(originalSource, targetLang, {
-            filePath: explicitFilePath,
-          }),
-        );
         try {
-          const parsed = parseWithTrivia(decompResult.aice, explicitFilePath);
-          ast = parsed.ast;
-          trivia = parsed.trivia;
-        } catch {
-          ast = decompResult.ast;
-          trivia = decompResult.trivia;
+          const decompResult = withSuppressedTelemetry(() =>
+            decompile(originalSource, targetLang, {
+              filePath: explicitFilePath,
+            }),
+          );
+          try {
+            const parsed = parseWithTrivia(decompResult.aice, explicitFilePath);
+            ast = parsed.ast;
+            trivia = parsed.trivia;
+          } catch {
+            ast = decompResult.ast;
+            trivia = decompResult.trivia;
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+            throw err;
+          }
+          ast = {
+            kind: "Module",
+            path: explicitFilePath,
+            items: [],
+            span: {
+              file: explicitFilePath,
+              start: { line: 1, column: 1, offset: 0 },
+              end: { line: 1, column: 1, offset: 0 },
+            },
+          };
+          trivia = new CstTriviaTable();
         }
       } else {
         try {
@@ -563,10 +602,17 @@ export function generateOutline(
     }
   }
 
+  enrichAndResolveSymbolLineRanges(symbols, ast, originalSource, filePath, maxDepth);
+
   // Generate Skeleton Outline Text
-  const outlineLines: string[] = [];
+  const isRealFile =
+    filePath !== "<anonymous>" && filePath !== "<stdin>" && fs.existsSync(filePath);
+  const includeLineRanges = options.lineRanges !== undefined ? options.lineRanges : isRealFile;
+  const baseOutlineLines: string[] = [];
+  const annotatedOutlineLines: string[] = [];
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
+    const symRangeSuffix = sym.lineRange ? ` # ${sym.lineRange}` : "";
     if (
       i > 0 &&
       (sym.kind === "class" ||
@@ -576,55 +622,72 @@ export function generateOutline(
         sym.kind === "record" ||
         sym.kind === "component")
     ) {
-      outlineLines.push("");
+      baseOutlineLines.push("");
+      annotatedOutlineLines.push("");
     }
 
     if (sym.docstring) {
-      outlineLines.push(sym.docstring);
+      baseOutlineLines.push(sym.docstring);
+      annotatedOutlineLines.push(sym.docstring);
     }
 
     if (sym.kind === "class") {
       if (sym.children && sym.children.length > 0) {
         // Strip trailing ' ...' into ':' for multiline outline
         const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
-        outlineLines.push(header);
+        baseOutlineLines.push(header);
+        annotatedOutlineLines.push(`${header}${symRangeSuffix}`);
         for (const child of sym.children) {
+          const childSuffix = child.lineRange ? ` # ${child.lineRange}` : "";
           if (child.docstring) {
             for (const dLine of child.docstring.split("\n")) {
-              outlineLines.push(`  ${dLine}`);
+              baseOutlineLines.push(`  ${dLine}`);
+              annotatedOutlineLines.push(`  ${dLine}`);
             }
           }
-          outlineLines.push(`  ${child.signature}`);
+          baseOutlineLines.push(`  ${child.signature}`);
+          annotatedOutlineLines.push(`  ${child.signature}${childSuffix}`);
         }
       } else {
-        outlineLines.push(sym.signature);
+        baseOutlineLines.push(sym.signature);
+        annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
       }
     } else if (sym.kind === "enum") {
       if (sym.children && sym.children.length > 0) {
-        outlineLines.push(`enum ${sym.name}:`);
+        baseOutlineLines.push(`enum ${sym.name}:`);
+        annotatedOutlineLines.push(`enum ${sym.name}:${symRangeSuffix}`);
         for (const child of sym.children) {
-          outlineLines.push(`  ${child.signature}`);
+          const childSuffix = child.lineRange ? ` # ${child.lineRange}` : "";
+          baseOutlineLines.push(`  ${child.signature}`);
+          annotatedOutlineLines.push(`  ${child.signature}${childSuffix}`);
         }
       } else {
-        outlineLines.push(sym.signature);
+        baseOutlineLines.push(sym.signature);
+        annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
       }
     } else if (sym.kind === "interface" || sym.kind === "record") {
       if (sym.children && sym.children.length > 0) {
         const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
-        outlineLines.push(header);
+        baseOutlineLines.push(header);
+        annotatedOutlineLines.push(`${header}${symRangeSuffix}`);
         for (const child of sym.children) {
+          const childSuffix = child.lineRange ? ` # ${child.lineRange}` : "";
           if (child.docstring) {
             for (const dLine of child.docstring.split("\n")) {
-              outlineLines.push(`  ${dLine}`);
+              baseOutlineLines.push(`  ${dLine}`);
+              annotatedOutlineLines.push(`  ${dLine}`);
             }
           }
-          outlineLines.push(`  ${child.signature}`);
+          baseOutlineLines.push(`  ${child.signature}`);
+          annotatedOutlineLines.push(`  ${child.signature}${childSuffix}`);
         }
       } else {
-        outlineLines.push(sym.signature);
+        baseOutlineLines.push(sym.signature);
+        annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
       }
     } else {
-      outlineLines.push(sym.signature);
+      baseOutlineLines.push(sym.signature);
+      annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
     }
   }
 
@@ -674,20 +737,23 @@ export function generateOutline(
 
   const referencedIdioms = Array.from(referencedSet);
   if (referencedIdioms.length > 0) {
-    outlineLines.unshift(`// idioms: ${referencedIdioms.join(", ")}`);
+    const idiomHeader = `// idioms: ${referencedIdioms.join(", ")}`;
+    baseOutlineLines.unshift(idiomHeader);
+    annotatedOutlineLines.unshift(idiomHeader);
   }
 
-  const outlineText = outlineLines.join("\n");
+  const baseOutlineText = baseOutlineLines.join("\n");
+  const outlineText = (includeLineRanges ? annotatedOutlineLines : baseOutlineLines).join("\n");
 
-  // Tokenomics Statistics
-  const origForTokens = originalSource || outlineText;
+  // Tokenomics Statistics (measured against base semantic skeleton)
+  const origForTokens = originalSource || baseOutlineText;
   const originalTokens = estimateTokens(origForTokens);
-  const outlineTokens = estimateTokens(outlineText);
+  const outlineTokens = estimateTokens(baseOutlineText);
   const savingsTokens = Math.max(0, originalTokens - outlineTokens);
   const savingsPct =
     originalTokens > 0 ? Number(((savingsTokens / originalTokens) * 100).toFixed(1)) : 0;
   const originalChars = origForTokens.length;
-  const outlineChars = outlineText.length;
+  const outlineChars = baseOutlineText.length;
   const charSavingsPct =
     originalChars > 0
       ? Number((((originalChars - outlineChars) / originalChars) * 100).toFixed(1))
@@ -720,54 +786,400 @@ export function generateOutline(
   };
 }
 
+function escapeRegexForOutline(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function enrichAndResolveSymbolLineRanges(
+  symbols: OutlineSymbol[],
+  ast: Module,
+  originalSource: string,
+  filePath: string,
+  maxDepth: number,
+): void {
+  if (maxDepth < 1) return;
+
+  // Populate initial endLine from AST spans
+  const actionableAstItems = ast.items.filter(
+    (it) => !(it.kind === "FunctionDecl" && it.name === "__top_level__"),
+  );
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = symbols[i];
+    const astItem = actionableAstItems[i];
+    if (astItem?.span?.end?.line) {
+      sym.endLine = Math.max(sym.line, astItem.span.end.line);
+    } else {
+      sym.endLine = sym.line;
+    }
+    if (sym.children) {
+      for (const child of sym.children) {
+        child.endLine = child.endLine ?? child.line;
+      }
+    }
+  }
+
+  const ext = filePath !== "<anonymous>" ? path.extname(filePath).toLowerCase() : "";
+  const isNativeFile =
+    filePath !== "<anonymous>" && !filePath.endsWith(".aice") && KNOWN_TARGET_EXTENSIONS.has(ext);
+  const targetLang: TargetLanguage | undefined = isNativeFile
+    ? detectTargetFromPath(filePath)
+    : undefined;
+  const rawLines = originalSource ? originalSource.split(/\r?\n/) : [];
+  const totalLines = Math.max(1, rawLines.length);
+
+  if (isNativeFile && originalSource && targetLang) {
+    supplementNativeSymbolsFromSource(symbols, originalSource, targetLang, totalLines);
+  }
+
+  // Resolve accurate line & endLine in originalSource
+  for (let i = 0; i < symbols.length; i++) {
+    const sym = symbols[i];
+    if (isNativeFile && originalSource && targetLang) {
+      const resolved = resolveSingleSymbolSpanInNative(
+        sym,
+        originalSource,
+        rawLines,
+        targetLang,
+        filePath,
+      );
+      if (resolved) {
+        sym.line = resolved.startLine;
+        sym.endLine = Math.max(resolved.startLine, resolved.endLine);
+      }
+    }
+    sym.endLine = Math.min(totalLines, Math.max(sym.line, sym.endLine ?? sym.line));
+    sym.lineRange = `[L${sym.line}-L${sym.endLine}]`;
+
+    if (sym.children && sym.children.length > 0) {
+      for (const child of sym.children) {
+        if (isNativeFile && originalSource && targetLang) {
+          const childResolved = resolveChildSymbolSpanInNative(
+            sym,
+            child,
+            originalSource,
+            rawLines,
+            targetLang,
+            filePath,
+          );
+          if (childResolved) {
+            child.line = childResolved.startLine;
+            child.endLine = Math.max(childResolved.startLine, childResolved.endLine);
+          }
+        }
+        child.endLine = Math.min(totalLines, Math.max(child.line, child.endLine ?? child.line));
+        child.lineRange = `[L${child.line}-L${child.endLine}]`;
+      }
+    }
+  }
+
+  if (symbols.length === 0 && isNativeFile && originalSource.trim().length > 0) {
+    const baseName = path.basename(filePath, ext) || "module";
+    symbols.push({
+      name: baseName,
+      kind: "module",
+      line: 1,
+      endLine: totalLines,
+      lineRange: `[L1-L${totalLines}]`,
+      signature: `module ${baseName}: ...`,
+      children: [],
+    });
+  }
+}
+
+function supplementNativeSymbolsFromSource(
+  symbols: OutlineSymbol[],
+  source: string,
+  targetLang: TargetLanguage,
+  totalLines: number,
+): void {
+  const existingNames = new Set<string>();
+  for (const s of symbols) {
+    existingNames.add(s.name);
+    if (s.children) {
+      for (const c of s.children) {
+        existingNames.add(c.name);
+        existingNames.add(`${s.name}.${c.name}`);
+      }
+    }
+  }
+
+  if (targetLang === "css") {
+    try {
+      const root = postcss.parse(source);
+      root.each((node) => {
+        if (node.type === "rule") {
+          const sel = node.selector.replace(/\s+/g, " ").trim();
+          const sanitized = sel.replace(/^[.#]/, "").replace(/[^A-Za-z0-9_]/g, "_");
+          if (!existingNames.has(sel) && !existingNames.has(sanitized)) {
+            const sLine = node.source?.start?.line ?? 1;
+            const eLine = node.source?.end?.line ?? sLine;
+            symbols.push({
+              name: sel,
+              kind: "style",
+              line: sLine,
+              endLine: eLine,
+              lineRange: `[L${sLine}-L${eLine}]`,
+              signature: `style ${sel}: ...`,
+              children: [],
+            });
+            existingNames.add(sel);
+          }
+        } else if (node.type === "atrule") {
+          const atName = `@${node.name}${node.params ? ` ${node.params.replace(/\s+/g, " ").trim()}` : ""}`;
+          if (!existingNames.has(atName)) {
+            const sLine = node.source?.start?.line ?? 1;
+            const eLine = node.source?.end?.line ?? sLine;
+            symbols.push({
+              name: atName,
+              kind: "style",
+              line: sLine,
+              endLine: eLine,
+              lineRange: `[L${sLine}-L${eLine}]`,
+              signature: `style ${atName}: ...`,
+              children: [],
+            });
+            existingNames.add(atName);
+          }
+        }
+      });
+    } catch {
+      // ignore invalid CSS parse in supplement
+    }
+    return;
+  }
+
+  if (targetLang === "twig") {
+    const lines = source.split(/\r?\n/);
+    const blockStack: Array<{ name: string; startLine: number }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const extMatch = line.match(/\{%-?\s*extends\s+(['"][^'"]+['"])\s*-?%\}/);
+      if (extMatch && !existingNames.has(extMatch[1])) {
+        const lNum = i + 1;
+        symbols.push({
+          name: extMatch[1],
+          kind: "import",
+          line: lNum,
+          endLine: lNum,
+          lineRange: `[L${lNum}-L${lNum}]`,
+          signature: `extends ${extMatch[1]}`,
+          children: [],
+        });
+        existingNames.add(extMatch[1]);
+      }
+      const blkMatch = line.match(/\{%-?\s*block\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+      if (blkMatch) {
+        blockStack.push({ name: blkMatch[1], startLine: i + 1 });
+      }
+      if (/\{%-?\s*endblock\b/.test(line) && blockStack.length > 0) {
+        const blk = blockStack.pop()!;
+        if (!existingNames.has(blk.name) && !existingNames.has(`block_${blk.name}`)) {
+          const eLine = i + 1;
+          symbols.push({
+            name: blk.name,
+            kind: "component",
+            line: blk.startLine,
+            endLine: eLine,
+            lineRange: `[L${blk.startLine}-L${eLine}]`,
+            signature: `block ${blk.name}: ...`,
+            children: [],
+          });
+          existingNames.add(blk.name);
+        }
+      }
+    }
+    return;
+  }
+
+  const lines = source.split(/\r?\n/);
+  const declPatterns: Array<{ re: RegExp; kind: string; sigPrefix: string }> = [
+    // Rust macro_rules!, struct, enum, trait, fn
+    {
+      re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+    {
+      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+    {
+      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    // Go func (r *Recv) Name(...) or func Name(...) or type Name struct/interface
+    {
+      re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+    {
+      re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/,
+      kind: "interface",
+      sigPrefix: "type ",
+    },
+    // Kotlin sealed interface, data class, suspend fun, fun
+    {
+      re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    {
+      re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+    // C# record / class / interface
+    {
+      re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    // Python async def / def / class
+    {
+      re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+    // PHP function / class
+    {
+      re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: "fn ",
+    },
+  ];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const pat of declPatterns) {
+      const m = line.match(pat.re);
+      if (m && m[1]) {
+        const name = m[1];
+        if (
+          name === "if" ||
+          name === "for" ||
+          name === "while" ||
+          name === "switch" ||
+          name === "catch" ||
+          name === "match" ||
+          existingNames.has(name)
+        ) {
+          continue;
+        }
+        const span = locateNativeDeclarationSpan(source, targetLang, name);
+        const sLine = span?.startLine ?? i + 1;
+        const eLine = span?.endLine ?? Math.min(totalLines, sLine);
+        symbols.push({
+          name,
+          kind: pat.kind,
+          line: sLine,
+          endLine: eLine,
+          lineRange: `[L${sLine}-L${eLine}]`,
+          signature:
+            pat.kind === "function"
+              ? `${pat.sigPrefix}${name}(...): ...`
+              : `${pat.sigPrefix}${name}: ...`,
+          children: [],
+        });
+        existingNames.add(name);
+        break;
+      }
+    }
+  }
+}
+
+function resolveSingleSymbolSpanInNative(
+  sym: OutlineSymbol,
+  originalSource: string,
+  rawLines: string[],
+  targetLang: TargetLanguage,
+  filePath: string,
+): { startLine: number; endLine: number } | null {
+  if (targetLang === "css" && sym.kind === "style") {
+    try {
+      const root = postcss.parse(originalSource);
+      let matched: { startLine: number; endLine: number } | null = null;
+      const cleanTarget = sym.name.replace(/^[.#]/, "").replace(/[^A-Za-z0-9_]/g, "_");
+      root.walkRules((rule) => {
+        if (matched) return;
+        const sel = rule.selector.replace(/\s+/g, " ").trim();
+        const selClean = sel.replace(/^[.#]/, "").replace(/[^A-Za-z0-9_]/g, "_");
+        if (sel === sym.name || selClean === cleanTarget || sel.includes(sym.name)) {
+          const s = rule.source?.start?.line ?? 1;
+          const e = rule.source?.end?.line ?? s;
+          matched = { startLine: s, endLine: e };
+        }
+      });
+      if (matched) return matched;
+    } catch {
+      // fallback to line search
+    }
+  }
+
+  if (sym.kind !== "import") {
+    const span = locateNativeDeclarationSpan(originalSource, targetLang, sym.name, filePath);
+    if (span) {
+      const sLine = span.startLine ?? 1;
+      const eLine = span.endLine ?? sLine;
+      return { startLine: sLine, endLine: Math.max(sLine, eLine) };
+    }
+  }
+
+  // Fallback line search in originalSource
+  const escaped = escapeRegexForOutline(sym.name);
+  const wordRe = sym.kind === "import" ? new RegExp(escaped) : new RegExp(`\\b${escaped}\\b`);
+  for (let i = 0; i < rawLines.length; i++) {
+    if (wordRe.test(rawLines[i])) {
+      return { startLine: i + 1, endLine: i + 1 };
+    }
+  }
+  return null;
+}
+
+function resolveChildSymbolSpanInNative(
+  parentSym: OutlineSymbol,
+  childSym: OutlineSymbol,
+  originalSource: string,
+  rawLines: string[],
+  targetLang: TargetLanguage,
+  filePath: string,
+): { startLine: number; endLine: number } | null {
+  if (childSym.kind === "method") {
+    const dotted = `${parentSym.name}.${childSym.name}`;
+    const span = locateNativeDeclarationSpan(originalSource, targetLang, dotted, filePath);
+    if (span) {
+      const sLine = span.startLine ?? 1;
+      const eLine = span.endLine ?? sLine;
+      return { startLine: sLine, endLine: Math.max(sLine, eLine) };
+    }
+  }
+
+  const minLine = Math.max(1, parentSym.line);
+  const maxLine = Math.min(rawLines.length, parentSym.endLine ?? rawLines.length);
+  const escaped = escapeRegexForOutline(childSym.name);
+  const wordRe = new RegExp(`(?:\\b|["'])${escaped}(?:\\b|["'])`);
+  for (let i = minLine - 1; i < maxLine; i++) {
+    if (wordRe.test(rawLines[i])) {
+      return { startLine: i + 1, endLine: i + 1 };
+    }
+  }
+  return null;
+}
+
 export function collectNativeSyntaxDiagnostics(
   filePath: string,
   source: string,
 ): string | undefined {
+  if (filePath.endsWith(".aice")) {
+    return undefined;
+  }
   const ext = path.extname(filePath).toLowerCase();
-  if (
-    ext !== ".js" &&
-    ext !== ".mjs" &&
-    ext !== ".cjs" &&
-    ext !== ".ts" &&
-    ext !== ".mts" &&
-    ext !== ".cts" &&
-    ext !== ".jsx" &&
-    ext !== ".tsx"
-  ) {
+  if (!KNOWN_TARGET_EXTENSIONS.has(ext)) {
     return undefined;
   }
-
-  const scriptKind =
-    ext === ".tsx"
-      ? ts.ScriptKind.TSX
-      : ext === ".jsx"
-        ? ts.ScriptKind.JSX
-        : ext === ".js" || ext === ".mjs" || ext === ".cjs"
-          ? ts.ScriptKind.JS
-          : ts.ScriptKind.TS;
-
-  const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
-  const parseDiags =
-    (sf as unknown as { parseDiagnostics?: ts.DiagnosticWithLocation[] }).parseDiagnostics ?? [];
-  if (parseDiags.length === 0) {
-    return undefined;
-  }
-
-  const rawLines = source.split(/\r?\n/);
-  const diagLines: string[] = ["## ⚠️ Native Syntax Diagnostics"];
-  for (const d of parseDiags.slice(0, 10)) {
-    const pos = sf.getLineAndCharacterOfPosition(d.start ?? 0);
-    const lineNum = pos.line + 1;
-    const colNum = pos.character + 1;
-    const msg = ts.flattenDiagnosticMessageText(d.messageText, " ");
-    const offendingLine = (rawLines[pos.line] ?? "").trim();
-    diagLines.push(`- Line ${lineNum}:${colNum} — ${msg}`);
-    if (offendingLine) {
-      diagLines.push(`  \`L${lineNum}: ${offendingLine}\``);
-    }
-  }
-  return diagLines.join("\n");
+  return formatNativeSyntaxDiagnosticsMarkdown(filePath, source);
 }
 
 export async function outlinePath(
@@ -859,12 +1271,17 @@ export async function outlinePath(
     const r = withSuppressedTelemetry(() =>
       generateOutline(targetFile, { ...options, projectRoot }),
     );
-    resultMap.set(relKey, r);
     try {
-      nativeParts.push(fs.readFileSync(targetFile, "utf-8"));
+      const rawText = fs.readFileSync(targetFile, "utf-8");
+      nativeParts.push(rawText);
+      const nativeDiags = collectNativeSyntaxDiagnostics(targetFile, rawText);
+      if (nativeDiags && !options.json) {
+        r.text = r.text ? `${r.text}\n\n${nativeDiags}` : nativeDiags;
+      }
     } catch {
       // ignore
     }
+    resultMap.set(relKey, r);
     aiceParts.push(`// === ${relKey} ===\n\n${r.text}`);
     if ((r.referencedIdioms?.length ?? 0) > 0) {
       anyIdioms = true;

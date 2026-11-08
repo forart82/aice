@@ -126,7 +126,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Surgically replace or insert a named symbol (fn, type, class, method) in a native or .aice file.",
+      "Surgically replace, delete, or batch-edit one or more named symbols (fn, type, class, method, CSS rule) in a native or .aice file.",
     inputSchema: {
       type: "object",
       properties: {
@@ -146,8 +146,23 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           type: "boolean",
           description: "If true, removes the symbol entirely",
         },
+        edits: {
+          type: "array",
+          description:
+            "Optional multi-symbol batch edits applied atomically in reverse offset order (bottom-to-top)",
+          items: {
+            type: "object",
+            properties: {
+              symbol: { type: "string" },
+              code: { type: "string" },
+              body: { type: "string" },
+              delete: { type: "boolean" },
+            },
+            required: ["symbol"],
+          },
+        },
       },
-      required: ["filePath", "symbolSelector"],
+      required: ["filePath"],
     },
   },
   {
@@ -846,33 +861,46 @@ export class AiceMcpServer {
               : undefined;
         const bodyCode = typeof args.body === "string" ? args.body : undefined;
         const deleteFlag = Boolean(args.delete);
+        const batchEdits = Array.isArray(args.edits)
+          ? (args.edits as Array<{
+              symbol: string;
+              code?: string;
+              body?: string;
+              delete?: boolean;
+            }>)
+          : undefined;
 
         const result = await withSuppressedTelemetryAsync(() =>
           splice(filePath, {
-            symbol: symbolSelector,
+            symbol: symbolSelector || undefined,
             code: newAiceCode,
             body: bodyCode,
             delete: deleteFlag,
+            edits: batchEdits,
             compile: true,
             idioms: effectiveIdioms,
             projectRoot,
           }),
         );
 
+        const displaySym = result.symbol || symbolSelector;
         if (!result.success) {
           return {
             content: [
               {
                 type: "text",
-                text: `Splice failed for symbol '${symbolSelector}' in ${rawTargetFile}`,
+                text: `Splice failed for symbol '${displaySym}' in ${rawTargetFile}`,
               },
             ],
             isError: true,
           };
         }
 
-        const respText = `Successfully spliced symbol '${symbolSelector}' in ${rawTargetFile}.${result.diff ? `\n\nDiff:\n${result.diff}` : ""}`;
-        const snippetUsed = newAiceCode ?? bodyCode ?? "";
+        const respText = `Successfully spliced symbol '${displaySym}' in ${rawTargetFile}.${result.diff ? `\n\nDiff:\n${result.diff}` : ""}`;
+        const snippetUsed =
+          newAiceCode ??
+          bodyCode ??
+          (batchEdits ? batchEdits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
         recordTelemetryEvent({
           targetPath: filePath,
           projectRoot,

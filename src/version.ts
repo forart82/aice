@@ -5,4 +5,4 @@
  * Canonical AICE release version.
  */
 
-export const AICE_VERSION = "0.9.6";
+export const AICE_VERSION = "0.9.7";

@@ -44,7 +44,36 @@ import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/inde
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { resolveFirstActionableSymbol } from "./context.js";
-import { createFile } from "./create.js";
+import { createFile, extractInlineIdiomsFromSource } from "./create.js";
+import {
+  isHybridOrNativeSource,
+  preprocessBareCssLossless,
+  preprocessHybridAndIdiomsLossless,
+} from "./preprocessor.js";
+import { validateNativeSyntax } from "./syntax-validator.js";
+
+export interface SymbolSpliceEdit {
+  /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', '.btn-primary') */
+  symbol: string;
+  /** Replacement AICE, hybrid, or native code snippet */
+  code?: string;
+  /** If set, replaces only the body/statements of the function/method */
+  body?: string;
+  /** If true, removes the symbol entirely */
+  delete?: boolean;
+  /** Inserts the new code directly after this symbol */
+  insertAfter?: string;
+  /** Inserts the new code directly before this symbol */
+  insertBefore?: string;
+  /** Aliases for code in JSON payloads */
+  aice?: string;
+  template?: string;
+  snippet?: string;
+  content?: string;
+  replacement?: string;
+  insert_after?: string;
+  insert_before?: string;
+}
 
 export interface SpliceOptions {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'User.id') */
@@ -61,6 +90,8 @@ export interface SpliceOptions {
   insertBefore?: string;
   /** Appends declaration to end of module or class */
   append?: boolean;
+  /** Multi-symbol batch edits for a single file applied in reverse offset order (bottom-to-top) */
+  edits?: SymbolSpliceEdit[];
   /** If true, creates the file from scratch via createFile() */
   create?: boolean;
   /** Does not write file to disk */
@@ -596,6 +627,47 @@ export function spliceSource(
     return spliceNativeSource(source, options, filePath, idioms);
   }
 
+  if (options.edits && options.edits.length > 0) {
+    let currentCode = source;
+    const editedSymbols: string[] = [];
+    for (const edit of options.edits) {
+      const editCode =
+        edit.code ?? edit.aice ?? edit.template ?? edit.snippet ?? edit.content ?? edit.replacement;
+      const singleRes = spliceSource(
+        currentCode,
+        {
+          ...options,
+          edits: undefined,
+          symbol: edit.symbol,
+          code: editCode,
+          body: edit.body,
+          delete: edit.delete,
+          insertAfter: edit.insertAfter ?? edit.insert_after,
+          insertBefore: edit.insertBefore ?? edit.insert_before,
+        },
+        filePath,
+        undefined,
+        undefined,
+        idioms,
+      );
+      currentCode = singleRes.modifiedCode;
+      editedSymbols.push(edit.symbol);
+    }
+    const diff = options.diff ? generateUnifiedDiff(filePath, source, currentCode) : undefined;
+    return {
+      success: true,
+      filePath,
+      symbol: editedSymbols.join(", "),
+      diff,
+      modifiedCode: currentCode,
+      newAiceSource: currentCode,
+      tokensSaved: Math.max(
+        0,
+        estimateTokens(currentCode) - estimateTokens(JSON.stringify(options.edits)),
+      ),
+    };
+  }
+
   const { ast } = parseWithTrivia(source, filePath);
 
   let modifiedCode = source;
@@ -847,10 +919,16 @@ export function spliceSource(
   };
 }
 
-interface NativeSpanInfo {
+export interface NativeSpanInfo {
   declStart: number;
   fullDeclStart?: number;
+  propsDeclStart?: number;
+  propsFullDeclStart?: number;
   declEnd: number;
+  startOffset?: number;
+  endOffset?: number;
+  startLine?: number;
+  endLine?: number;
   tokenStart: number;
   declIndent: string;
   className?: string;
@@ -1076,8 +1154,8 @@ function locateTsDeclarationSpan(
             prevStmt.name.text,
             undefined,
           );
-          spanInfo.declStart = prevSpan.declStart;
-          spanInfo.fullDeclStart = prevSpan.fullDeclStart;
+          spanInfo.propsDeclStart = prevSpan.declStart;
+          spanInfo.propsFullDeclStart = prevSpan.fullDeclStart;
         }
       }
     }
@@ -1109,6 +1187,56 @@ function locateTsDeclarationSpan(
   return undefined;
 }
 
+function scanPythonLineState(
+  line: string,
+  state: { openDelims: number; inTripleQuote: '"""' | "'''" | null },
+): void {
+  let i = 0;
+  const len = line.length;
+  while (i < len) {
+    if (state.inTripleQuote) {
+      const closeIdx = line.indexOf(state.inTripleQuote, i);
+      if (closeIdx >= 0) {
+        i = closeIdx + 3;
+        state.inTripleQuote = null;
+        continue;
+      }
+      return;
+    }
+    const ch = line[i];
+    if (ch === "#") return;
+    if (
+      (ch === '"' && line[i + 1] === '"' && line[i + 2] === '"') ||
+      (ch === "'" && line[i + 1] === "'" && line[i + 2] === "'")
+    ) {
+      const delim = line.slice(i, i + 3) as '"""' | "'''";
+      const closeIdx = line.indexOf(delim, i + 3);
+      if (closeIdx >= 0) {
+        i = closeIdx + 3;
+        continue;
+      }
+      state.inTripleQuote = delim;
+      return;
+    }
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      i++;
+      while (i < len && line[i] !== quote) {
+        if (line[i] === "\\") i += 2;
+        else i++;
+      }
+      if (i < len) i++;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      state.openDelims++;
+    } else if (ch === ")" || ch === "]" || ch === "}") {
+      state.openDelims = Math.max(0, state.openDelims - 1);
+    }
+    i++;
+  }
+}
+
 function locatePythonDeclarationSpan(
   nativeSource: string,
   symbolSelector: string,
@@ -1117,6 +1245,7 @@ function locatePythonDeclarationSpan(
   const parts = symbolSelector.split(/\.|::/);
   const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
   const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  const escMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const lines = nativeSource.split("\n");
   const lineOffsets: number[] = [];
@@ -1131,7 +1260,8 @@ function locatePythonDeclarationSpan(
   let activeClassName = className;
 
   if (className) {
-    const classRegex = new RegExp(`^([ \\t]*)class\\s+${className}\\b`);
+    const escClass = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const classRegex = new RegExp(`^([ \\t]*)class\\s+${escClass}\\b`);
     let foundClassLine = -1;
     let classIndentLen = 0;
     for (let i = 0; i < lines.length; i++) {
@@ -1144,7 +1274,15 @@ function locatePythonDeclarationSpan(
     }
     if (foundClassLine < 0) return undefined;
     searchStartLine = foundClassLine + 1;
+    const clsState: { openDelims: number; inTripleQuote: '"""' | "'''" | null } = {
+      openDelims: 0,
+      inTripleQuote: null,
+    };
+    scanPythonLineState(lines[foundClassLine], clsState);
     for (let i = searchStartLine; i < lines.length; i++) {
+      const wasInside = clsState.openDelims > 0 || clsState.inTripleQuote !== null;
+      scanPythonLineState(lines[i], clsState);
+      if (wasInside) continue;
       const trimmed = lines[i].trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
       const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
@@ -1158,12 +1296,13 @@ function locatePythonDeclarationSpan(
   const pyMemberPattern =
     memberName === "constructor" || memberName === "__init__"
       ? "(?:constructor|__init__)"
-      : memberName;
+      : escMember;
   const defRegex = new RegExp(`^([ \\t]*)(async\\s+)?def\\s+${pyMemberPattern}\\s*\\(`);
   let targetLine = -1;
   let targetIndent = "";
   let isAsync = false;
   let isClassContainer = false;
+  let isVarAssign = false;
 
   for (let i = searchStartLine; i < searchEndLine; i++) {
     const m = lines[i].match(defRegex);
@@ -1185,13 +1324,26 @@ function locatePythonDeclarationSpan(
   }
 
   if (targetLine < 0 && !className) {
-    const topClassRegex = new RegExp(`^([ \\t]*)class\\s+${memberName}\\b`);
+    const topClassRegex = new RegExp(`^([ \\t]*)class\\s+${escMember}\\b`);
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(topClassRegex);
       if (m) {
         targetLine = i;
         targetIndent = m[1];
         isClassContainer = true;
+        break;
+      }
+    }
+  }
+
+  if (targetLine < 0) {
+    const varRegex = new RegExp(`^([ \\t]*)${escMember}\\s*(?::\\s*[^=]+)?=(?!=)`);
+    for (let i = searchStartLine; i < searchEndLine; i++) {
+      const m = lines[i].match(varRegex);
+      if (m && (className || m[1].length === 0)) {
+        targetLine = i;
+        targetIndent = m[1];
+        isVarAssign = true;
         break;
       }
     }
@@ -1216,14 +1368,38 @@ function locatePythonDeclarationSpan(
 
   let endLine = targetLine;
   const baseIndentLen = targetIndent.length;
-  for (let i = targetLine + 1; i < searchEndLine; i++) {
-    const trimmed = lines[i].trim();
-    if (!trimmed) continue;
-    const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
-    if (ind <= baseIndentLen) {
-      break;
+  const scanState: { openDelims: number; inTripleQuote: '"""' | "'''" | null } = {
+    openDelims: 0,
+    inTripleQuote: null,
+  };
+  scanPythonLineState(lines[targetLine], scanState);
+
+  if (isVarAssign) {
+    for (let i = targetLine + 1; i < searchEndLine; i++) {
+      if (scanState.openDelims === 0 && scanState.inTripleQuote === null) {
+        break;
+      }
+      scanPythonLineState(lines[i], scanState);
+      endLine = i;
     }
-    endLine = i;
+  } else {
+    for (let i = targetLine + 1; i < searchEndLine; i++) {
+      const wasInsideContinuation = scanState.openDelims > 0 || scanState.inTripleQuote !== null;
+      scanPythonLineState(lines[i], scanState);
+      if (wasInsideContinuation || scanState.inTripleQuote !== null) {
+        endLine = i;
+        continue;
+      }
+      const trimmed = lines[i].trim();
+      if (!trimmed) continue;
+      const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
+      if (ind <= baseIndentLen) {
+        break;
+      }
+      if (!trimmed.startsWith("#")) {
+        endLine = i;
+      }
+    }
   }
 
   const declStart = lineOffsets[targetLine];
@@ -1424,7 +1600,12 @@ function locateBraceLanguageDeclarationSpan(
     let firstAttrLine = lineIdx;
     for (let k = lineIdx - 1; k >= 0; k--) {
       const t = lines[k].trim();
-      if (t.startsWith("#[") || (t.startsWith("[") && t.endsWith("]")) || t.startsWith("@")) {
+      if (
+        t.startsWith("#[") ||
+        (t.startsWith("[") && t.endsWith("]")) ||
+        t.startsWith("@") ||
+        (targetLang === "cpp" && /^template\s*</.test(t))
+      ) {
         firstAttrLine = k;
       } else {
         break;
@@ -1434,14 +1615,95 @@ function locateBraceLanguageDeclarationSpan(
     const fullDeclStart = lineOffsets[firstAttrLine];
     const tokenStart = declStart + indent.length;
 
-    const openBraceIdx = nativeSource.indexOf("{", tokenStart);
-    if (openBraceIdx < 0) return undefined;
-    let declEnd = findMatchingBraceEnd(nativeSource, openBraceIdx, targetLang);
-    if (extra?.isClassContainer && nativeSource[declEnd] === ";") {
-      declEnd++;
+    let openBraceIdx = -1;
+    let declEnd = -1;
+    let parenDepth = 0;
+    let pos = tokenStart;
+    const len = nativeSource.length;
+
+    while (pos < len) {
+      const ch = nativeSource[pos];
+      const next = nativeSource[pos + 1];
+
+      if (ch === "/" && next === "/") {
+        pos += 2;
+        while (pos < len && nativeSource[pos] !== "\n") pos++;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        pos += 2;
+        while (pos < len && !(nativeSource[pos] === "*" && nativeSource[pos + 1] === "/")) pos++;
+        pos += 2;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        if (
+          ch === "'" &&
+          targetLang === "rust" &&
+          /^'[A-Za-z_][A-Za-z0-9_]*(?!')/.test(nativeSource.slice(pos))
+        ) {
+          pos += 2;
+          continue;
+        }
+        const q = ch;
+        pos++;
+        while (pos < len && nativeSource[pos] !== q) {
+          if (nativeSource[pos] === "\\") pos += 2;
+          else pos++;
+        }
+        if (pos < len) pos++;
+        continue;
+      }
+
+      if (ch === "(") {
+        parenDepth++;
+      } else if (ch === ")") {
+        parenDepth = Math.max(0, parenDepth - 1);
+      } else if (parenDepth === 0) {
+        if (ch === "{") {
+          openBraceIdx = pos;
+          break;
+        }
+        if (ch === ";") {
+          declEnd = pos + 1;
+          break;
+        }
+        if (ch === "\n") {
+          const headerSoFar = nativeSource.slice(tokenStart, pos).trimEnd();
+          const restAfterLine = nativeSource.slice(pos + 1);
+          const nextNonEmpty = restAfterLine.match(/^[ \t]*(?:\r?\n[ \t]*)*([^\s])/)?.[1] ?? "";
+          const isBracelessConstruct =
+            (targetLang === "kotlin" &&
+              (/^(?:public\s+|private\s+|internal\s+)?(?:data\s+|value\s+)class\b/.test(
+                headerSoFar,
+              ) ||
+                /^(?:public\s+|private\s+|internal\s+)?(?:typealias|const\s+val|val|var)\b/.test(
+                  headerSoFar,
+                ) ||
+                (/\bfun\b/.test(headerSoFar) && /\)\s*(?::\s*[^=]+)?=\s*\S/.test(headerSoFar)))) ||
+            (targetLang === "go" &&
+              /^(?:type|const|var)\s+[A-Za-z0-9_]+/.test(headerSoFar) &&
+              !/\b(?:struct|interface)\s*$/.test(headerSoFar));
+          if (isBracelessConstruct && nextNonEmpty !== "{") {
+            declEnd = nativeSource[pos - 1] === "\r" ? pos - 1 : pos;
+            break;
+          }
+        }
+      }
+      pos++;
     }
 
-    const headerSlice = nativeSource.slice(tokenStart, openBraceIdx);
+    if (openBraceIdx >= 0) {
+      declEnd = findMatchingBraceEnd(nativeSource, openBraceIdx, targetLang);
+      if (nativeSource[declEnd] === ";") {
+        declEnd++;
+      }
+    } else if (declEnd < 0) {
+      return undefined;
+    }
+
+    const headerEndPos = openBraceIdx >= 0 ? openBraceIdx : declEnd;
+    const headerSlice = nativeSource.slice(tokenStart, headerEndPos);
     let visibility: "public" | "private" | "protected" | undefined;
     if (/\bpublic\b/.test(headerSlice)) visibility = "public";
     else if (/\bprivate\b/.test(headerSlice)) visibility = "private";
@@ -1471,11 +1733,11 @@ function locateBraceLanguageDeclarationSpan(
     };
   };
 
-  // 1. Go receiver method or top-level func/struct
+  // 1. Go receiver method or top-level func/struct/type/const/var
   if (targetLang === "go") {
     for (let i = 0; i < lines.length; i++) {
       const recvMatch = lines[i].match(
-        /^([ \t]*)func\s*\(\s*([A-Za-z0-9_]+\s+\*?([A-Za-z0-9_]+))\s*\)\s*([A-Za-z0-9_]+)\s*\(/,
+        /^([ \t]*)func\s*\(\s*([A-Za-z0-9_]+\s+\*?([A-Za-z0-9_]+))\s*\)\s*([A-Za-z0-9_]+)\s*(?:\[[^\]]+\])?\s*\(/,
       );
       if (recvMatch) {
         const [, indent, recvSpec, recvType, fnName] = recvMatch;
@@ -1492,16 +1754,21 @@ function locateBraceLanguageDeclarationSpan(
         if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
           return buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], undefined);
         }
-        const structMatch = lines[i].match(
-          /^([ \t]*)type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)\b/,
-        );
+        const structMatch = lines[i].match(/^([ \t]*)type\s+([A-Za-z0-9_]+)\b/);
         if (
           structMatch &&
           (structMatch[2] === memberName || normIdForSpan(structMatch[2]) === normMember)
         ) {
           return buildBraceSpanFromLine(i, structMatch[1], structMatch[2], undefined, {
-            isClassContainer: true,
+            isClassContainer: /\b(?:struct|interface)\b/.test(lines[i]),
           });
+        }
+        const constVarMatch = lines[i].match(/^([ \t]*)(?:const|var)\s+([A-Za-z0-9_]+)\b/);
+        if (
+          constVarMatch &&
+          (constVarMatch[2] === memberName || normIdForSpan(constVarMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, constVarMatch[1], constVarMatch[2], undefined);
         }
       }
     }
@@ -1534,9 +1801,9 @@ function locateBraceLanguageDeclarationSpan(
       const line = lines[i];
       const isRustImpl =
         targetLang === "rust" &&
-        /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
+        /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:<>,\s]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
       const isClassLine =
-        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/.exec(
+        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|trait|object|record|enum)\s+([A-Za-z0-9_]+)\b/.exec(
           line,
         );
 
@@ -1566,30 +1833,50 @@ function locateBraceLanguageDeclarationSpan(
 
     if (targetLang === "rust") {
       const fnMatch = line.match(
-        /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?fn\s+([A-Za-z0-9_]+)\b/,
+        /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)\b/,
       );
       if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], resolvedClassName);
       }
       if (!className) {
         const structMatch = line.match(
-          /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|impl)\s+([A-Za-z0-9_]+)\b/,
+          /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|impl|type|const|static)\s+([A-Za-z0-9_]+)\b/,
         );
         if (
           structMatch &&
           (structMatch[2] === memberName || normIdForSpan(structMatch[2]) === normMember)
         ) {
           return buildBraceSpanFromLine(i, structMatch[1], structMatch[2], undefined, {
-            isClassContainer: true,
+            isClassContainer: /\b(?:struct|enum|trait|impl)\b/.test(line),
           });
+        }
+        const macroMatch = line.match(/^([ \t]*)macro_rules!\s+([A-Za-z0-9_]+)\b/);
+        if (
+          macroMatch &&
+          (macroMatch[2] === memberName || normIdForSpan(macroMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, macroMatch[1], macroMatch[2], undefined);
         }
       }
     } else if (targetLang === "kotlin") {
       const funMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?([A-Za-z0-9_]+)\s*\(/,
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?(?:[A-Za-z0-9_<>?.*]+\.)?([A-Za-z0-9_]+)\s*\(/,
       );
       if (funMatch && (funMatch[2] === memberName || normIdForSpan(funMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, funMatch[1], funMatch[2], resolvedClassName);
+      }
+      if (!className) {
+        const ktTopMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|open\s+|abstract\s+|data\s+|sealed\s+|value\s+|enum\s+)*(?:class|interface|object|typealias|const\s+val|val)\s+([A-Za-z0-9_]+)\b/,
+        );
+        if (
+          ktTopMatch &&
+          (ktTopMatch[2] === memberName || normIdForSpan(ktTopMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, ktTopMatch[1], ktTopMatch[2], undefined, {
+            isClassContainer: /\b(?:class|interface|object)\b/.test(line),
+          });
+        }
       }
     } else if (targetLang === "php") {
       const phpMatch = line.match(
@@ -1597,6 +1884,19 @@ function locateBraceLanguageDeclarationSpan(
       );
       if (phpMatch && (phpMatch[2] === memberName || normIdForSpan(phpMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName);
+      }
+      if (!className) {
+        const phpTopMatch = line.match(
+          /^([ \t]*)(?:final\s+|abstract\s+|readonly\s+)*(?:class|interface|trait|enum)\s+([A-Za-z0-9_]+)\b/,
+        );
+        if (
+          phpTopMatch &&
+          (phpTopMatch[2] === memberName || normIdForSpan(phpTopMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, phpTopMatch[1], phpTopMatch[2], undefined, {
+            isClassContainer: true,
+          });
+        }
       }
     } else if (targetLang === "csharp" || targetLang === "cpp") {
       const trimmed = line.trim();
@@ -1616,7 +1916,7 @@ function locateBraceLanguageDeclarationSpan(
         continue;
       }
       const cMethodMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\(/,
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+|friend\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_~]+)\s*(?:<[^>]+>)?\s*\(/,
       );
       if (
         cMethodMatch &&
@@ -1628,7 +1928,7 @@ function locateBraceLanguageDeclarationSpan(
 
     if (!className) {
       const clsMatch = line.match(
-        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/,
+        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|enum(?:\s+class)?|record(?:\s+class|\s+struct)?)\s+([A-Za-z0-9_]+)\b/,
       );
       if (clsMatch && (clsMatch[2] === memberName || normIdForSpan(clsMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, clsMatch[1], clsMatch[2], undefined, {
@@ -1660,27 +1960,81 @@ function locateBraceLanguageDeclarationSpan(
   return undefined;
 }
 
-function locateNativeDeclarationSpan(
+const KNOWN_TARGET_LANGS_SET = new Set<string>([
+  "typescript",
+  "javascript",
+  "tsx",
+  "python",
+  "html",
+  "css",
+  "rust",
+  "go",
+  "cpp",
+  "csharp",
+  "json",
+  "yaml",
+  "twig",
+  "php",
+  "kotlin",
+]);
+
+function enrichSpanWithOffsetsAndLines(
   nativeSource: string,
-  symbolSelector: string,
-  targetLang: TargetLanguage,
+  span: NativeSpanInfo | undefined,
+): NativeSpanInfo | undefined {
+  if (!span) return undefined;
+  const startOffset = span.declStart;
+  const endOffset = span.declEnd;
+  const startLine = nativeSource.slice(0, startOffset).split(/\r?\n/).length;
+  const endSlice = nativeSource.slice(0, Math.max(startOffset, endOffset)).replace(/\r?\n$/, "");
+  const endLine = Math.max(startLine, endSlice.split(/\r?\n/).length);
+  span.startOffset = startOffset;
+  span.endOffset = endOffset;
+  span.startLine = startLine;
+  span.endLine = endLine;
+  return span;
+}
+
+export function locateNativeDeclarationSpan(
+  nativeSource: string,
+  symbolOrTargetLang: string,
+  targetLangOrSymbol: TargetLanguage | string,
   explicitClassName?: string,
   preferAccessor?: "get" | "set",
 ): NativeSpanInfo | undefined {
+  let symbolSelector: string;
+  let targetLang: TargetLanguage;
+  let classFilter = explicitClassName;
+
+  if (
+    KNOWN_TARGET_LANGS_SET.has(symbolOrTargetLang) &&
+    !KNOWN_TARGET_LANGS_SET.has(targetLangOrSymbol)
+  ) {
+    targetLang = symbolOrTargetLang as TargetLanguage;
+    symbolSelector = targetLangOrSymbol;
+    if (
+      classFilter &&
+      (classFilter.includes("/") || classFilter.includes("\\") || classFilter.includes("."))
+    ) {
+      classFilter = undefined;
+    }
+  } else {
+    symbolSelector = symbolOrTargetLang;
+    targetLang = targetLangOrSymbol as TargetLanguage;
+  }
+
+  let rawSpan: NativeSpanInfo | undefined;
   if (targetLang === "python") {
-    return locatePythonDeclarationSpan(nativeSource, symbolSelector, explicitClassName);
+    rawSpan = locatePythonDeclarationSpan(nativeSource, symbolSelector, classFilter);
+  } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+    rawSpan = locateTsDeclarationSpan(nativeSource, symbolSelector, classFilter, preferAccessor);
+  } else {
+    rawSpan =
+      locateBraceLanguageDeclarationSpan(nativeSource, symbolSelector, targetLang, classFilter) ??
+      locateTsDeclarationSpan(nativeSource, symbolSelector, classFilter, preferAccessor);
   }
-  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    return locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor);
-  }
-  return (
-    locateBraceLanguageDeclarationSpan(
-      nativeSource,
-      symbolSelector,
-      targetLang,
-      explicitClassName,
-    ) ?? locateTsDeclarationSpan(nativeSource, symbolSelector, explicitClassName, preferAccessor)
-  );
+
+  return enrichSpanWithOffsetsAndLines(nativeSource, rawSpan);
 }
 
 function normalizeSelfAndThisInExpr(expr: Expr, useThis: boolean): void {
@@ -2911,6 +3265,88 @@ function parseSnippetToExpandedDecl(
   );
 }
 
+function dedentSnippet(snippet: string): string {
+  const lines = snippet.replace(/\r\n/g, "\n").split("\n");
+  while (lines.length > 0 && lines[0].trim() === "") lines.shift();
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+  if (lines.length <= 1) return lines.join("\n").trim();
+
+  // If line 0 has no leading indent (common when template literals start at col 0)
+  // only dedent lines that share a common indent across all non-empty lines.
+  let minIndent = Number.POSITIVE_INFINITY;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const ind = line.match(/^[ \t]*/)?.[0].length ?? 0;
+    if (ind < minIndent) minIndent = ind;
+  }
+  if (minIndent > 0 && Number.isFinite(minIndent)) {
+    return lines.map((l) => (l.trim() ? l.slice(minIndent) : "")).join("\n");
+  }
+  return lines.join("\n");
+}
+
+function shouldUseLosslessPreprocessorForSnippet(
+  cleanedSnippet: string,
+  targetLang: TargetLanguage,
+  isBodyOnly: boolean,
+  forceLosslessPreprocess: boolean,
+): boolean {
+  if (forceLosslessPreprocess) return true;
+  if (isBodyOnly) return false;
+  const trimmed = cleanedSnippet.trim();
+  if (!trimmed) return false;
+
+  // Pure AICE component or style blocks must use the AICE parser/emitter
+  if (/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:pub\s+)?(?:component|style)\b/m.test(trimmed)) {
+    return false;
+  }
+
+  if (targetLang === "python") {
+    return (
+      /^\s*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/m.test(trimmed) ||
+      /^\s*match\s+[^:\n]+:\s*$/m.test(trimmed) ||
+      /\basync\s+for\b/.test(trimmed) ||
+      trimmed.includes('"""') ||
+      trimmed.includes("'''") ||
+      /\b[A-Za-z0-9_[\]]+\s*\|\s*[A-Za-z0-9_[\]]+/.test(trimmed) ||
+      /^\s*(?:@fn\b|\^fn\b|@cls\b|\^class\b)/.test(trimmed)
+    );
+  }
+
+  return isHybridOrNativeSource(trimmed, targetLang);
+}
+
+function losslessSpliceBodyIntoOriginal(
+  cleanedBody: string,
+  originalSnippet: string,
+  targetLang: TargetLanguage,
+  activeIdioms: Record<string, ProjectIdiomDefinition>,
+  insideClass: boolean,
+): string {
+  const dedentedorig = dedentSnippet(originalSnippet);
+  const preprocessedBody = preprocessHybridAndIdiomsLossless(
+    dedentSnippet(cleanedBody),
+    targetLang,
+    activeIdioms,
+    { insideClass },
+  ).trim();
+
+  if (targetLang === "python") {
+    const colonNewlineIdx = dedentedorig.indexOf(":\n");
+    const header = colonNewlineIdx >= 0 ? dedentedorig.slice(0, colonNewlineIdx + 1) : dedentedorig;
+    return `${header}\n${indentCode(preprocessedBody, "    ")}`;
+  }
+
+  const openBraceIdx = dedentedorig.indexOf("{");
+  const closeBraceIdx = dedentedorig.lastIndexOf("}");
+  if (openBraceIdx >= 0 && closeBraceIdx > openBraceIdx) {
+    const prefix = dedentedorig.slice(0, openBraceIdx + 1);
+    const suffix = dedentedorig.slice(closeBraceIdx);
+    return `${prefix}\n${indentCode(preprocessedBody, "  ")}\n${suffix}`;
+  }
+  return preprocessedBody;
+}
+
 function emitNativeSnippetForContext(
   rawSnippet: string,
   filePath: string,
@@ -2920,23 +3356,60 @@ function emitNativeSnippetForContext(
   originalSnippet: string | undefined,
   isBodyOnly: boolean,
   effectiveClassName?: string,
+  forceLosslessPreprocess = false,
 ): string {
-  if (!isBodyOnly && isPureNativeSnippetWithoutIdioms(rawSnippet, targetLang, effectiveClassName)) {
-    return rawSnippet.trim();
+  const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawSnippet);
+  const mergedIdioms: Record<string, ProjectIdiomDefinition> = {
+    ...(idioms ?? {}),
+    ...inlineIdioms,
+  };
+  const dedented = dedentSnippet(cleanedCode);
+  const insideClass = Boolean(effectiveClassName && !spanInfo?.isClassContainer);
+
+  if (
+    !isBodyOnly &&
+    !forceLosslessPreprocess &&
+    Object.keys(inlineIdioms).length === 0 &&
+    isPureNativeSnippetWithoutIdioms(dedented, targetLang, effectiveClassName)
+  ) {
+    return dedented.trim();
+  }
+
+  if (
+    shouldUseLosslessPreprocessorForSnippet(
+      dedented,
+      targetLang,
+      isBodyOnly,
+      forceLosslessPreprocess,
+    )
+  ) {
+    if (isBodyOnly && originalSnippet) {
+      return losslessSpliceBodyIntoOriginal(
+        dedented,
+        originalSnippet,
+        targetLang,
+        mergedIdioms,
+        insideClass,
+      );
+    }
+    return preprocessHybridAndIdiomsLossless(dedented, targetLang, mergedIdioms, {
+      insideClass,
+      goReceiver: spanInfo?.goReceiver,
+    }).trim();
   }
 
   if (
     !isBodyOnly ||
     /^\s*(?:pub\s+)?(?:type|struct|enum|class|interface|const|val|mut|component|style)\b/.test(
-      rawSnippet,
+      dedented,
     )
   ) {
     const nonCallable = tryEmitNonCallableAiceSnippet(
-      rawSnippet,
+      dedented,
       filePath,
       targetLang,
       effectiveClassName,
-      idioms,
+      mergedIdioms,
       spanInfo?.isClassContainer,
     );
     if (nonCallable !== undefined) {
@@ -2944,36 +3417,56 @@ function emitNativeSnippetForContext(
     }
   }
 
-  const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
-    parseSnippetToExpandedDecl(
-      rawSnippet,
-      filePath,
-      targetLang,
-      effectiveClassName,
-      idioms,
-      originalSnippet,
-      isBodyOnly,
-    );
+  try {
+    const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
+      parseSnippetToExpandedDecl(
+        dedented,
+        filePath,
+        targetLang,
+        effectiveClassName,
+        mergedIdioms,
+        originalSnippet,
+        isBodyOnly,
+      );
 
-  const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
-    visibility: spanInfo?.visibility ?? explicitVisibility,
-    isExported: spanInfo?.isExported ?? isExported,
-    isStatic: spanInfo?.isStatic,
-    isAsync: spanInfo?.isAsync,
-    accessor: explicitAccessor ?? spanInfo?.accessor,
-    memberName: originalSnippet ? spanInfo?.memberName : decl.name,
-    goReceiver: spanInfo?.goReceiver,
-    cppOutOfLine: spanInfo?.cppOutOfLine,
-    origHeader: spanInfo?.origHeader,
-    origSource: originalSnippet,
-    rawSnippet,
-    idioms,
-  });
+    const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
+      visibility: spanInfo?.visibility ?? explicitVisibility,
+      isExported: spanInfo?.isExported ?? isExported,
+      isStatic: spanInfo?.isStatic,
+      isAsync: spanInfo?.isAsync,
+      accessor: explicitAccessor ?? spanInfo?.accessor,
+      memberName: originalSnippet ? spanInfo?.memberName : decl.name,
+      goReceiver: spanInfo?.goReceiver,
+      cppOutOfLine: spanInfo?.cppOutOfLine,
+      origHeader: spanInfo?.origHeader,
+      origSource: originalSnippet,
+      rawSnippet: dedented,
+      idioms: mergedIdioms,
+    });
 
-  if (leadingDecorators.length > 0) {
-    return `${leadingDecorators.join("\n")}\n${emitted}`;
+    if (leadingDecorators.length > 0) {
+      return `${leadingDecorators.join("\n")}\n${emitted}`;
+    }
+    return emitted;
+  } catch (err) {
+    if (isBodyOnly && originalSnippet) {
+      return losslessSpliceBodyIntoOriginal(
+        dedented,
+        originalSnippet,
+        targetLang,
+        mergedIdioms,
+        insideClass,
+      );
+    }
+    const preprocessed = preprocessHybridAndIdiomsLossless(dedented, targetLang, mergedIdioms, {
+      insideClass,
+      goReceiver: spanInfo?.goReceiver,
+    }).trim();
+    if (preprocessed && preprocessed !== dedented) {
+      return preprocessed;
+    }
+    throw err;
   }
-  return emitted;
 }
 
 function spliceDialectNativeSource(
@@ -2983,28 +3476,153 @@ function spliceDialectNativeSource(
   targetLang: TargetLanguage,
   idioms?: Record<string, ProjectIdiomDefinition>,
 ): SpliceResult | undefined {
+  if (options.edits && options.edits.length > 0) {
+    if (targetLang === "json" || targetLang === "yaml") {
+      let currentSource = nativeSource;
+      const editedSymbols: string[] = [];
+      for (const edit of options.edits) {
+        const editCode =
+          edit.code ??
+          edit.aice ??
+          edit.template ??
+          edit.snippet ??
+          edit.content ??
+          edit.replacement;
+        const singleRes = spliceDialectNativeSource(
+          currentSource,
+          {
+            ...options,
+            edits: undefined,
+            symbol: edit.symbol,
+            code: editCode,
+            body: edit.body,
+            delete: edit.delete,
+            insertAfter: edit.insertAfter ?? edit.insert_after,
+            insertBefore: edit.insertBefore ?? edit.insert_before,
+          },
+          filePath,
+          targetLang,
+          idioms,
+        );
+        if (singleRes) {
+          currentSource = singleRes.modifiedCode;
+          editedSymbols.push(edit.symbol);
+        }
+      }
+      return {
+        success: true,
+        filePath,
+        symbol: editedSymbols.join(", "),
+        diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, currentSource) : undefined,
+        modifiedCode: currentSource,
+        newAiceSource: currentSource,
+        tokensSaved: Math.max(
+          0,
+          estimateTokens(currentSource) - estimateTokens(JSON.stringify(options.edits)),
+        ),
+      };
+    }
+
+    // For CSS, HTML, and Twig: resolve each edit's exact byte span against `nativeSource`
+    // and apply in reverse offset order (bottom-to-top).
+    const resolvedDialectEdits: Array<{
+      symbol: string;
+      startOffset: number;
+      endOffset: number;
+      replacement: string;
+    }> = [];
+
+    for (const edit of options.edits) {
+      const editCode =
+        edit.code ?? edit.aice ?? edit.template ?? edit.snippet ?? edit.content ?? edit.replacement;
+      const singleRes = spliceDialectNativeSource(
+        nativeSource,
+        {
+          ...options,
+          edits: undefined,
+          diff: false,
+          symbol: edit.symbol,
+          code: editCode,
+          body: edit.body,
+          delete: edit.delete,
+          insertAfter: edit.insertAfter ?? edit.insert_after,
+          insertBefore: edit.insertBefore ?? edit.insert_before,
+        },
+        filePath,
+        targetLang,
+        idioms,
+      );
+      if (singleRes) {
+        let prefixLen = 0;
+        const minLen = Math.min(nativeSource.length, singleRes.modifiedCode.length);
+        while (
+          prefixLen < minLen &&
+          nativeSource.charCodeAt(prefixLen) === singleRes.modifiedCode.charCodeAt(prefixLen)
+        ) {
+          prefixLen++;
+        }
+        let origSuffixIdx = nativeSource.length;
+        let modSuffixIdx = singleRes.modifiedCode.length;
+        while (
+          origSuffixIdx > prefixLen &&
+          modSuffixIdx > prefixLen &&
+          nativeSource.charCodeAt(origSuffixIdx - 1) ===
+            singleRes.modifiedCode.charCodeAt(modSuffixIdx - 1)
+        ) {
+          origSuffixIdx--;
+          modSuffixIdx--;
+        }
+        resolvedDialectEdits.push({
+          symbol: edit.symbol,
+          startOffset: prefixLen,
+          endOffset: origSuffixIdx,
+          replacement: singleRes.modifiedCode.slice(prefixLen, modSuffixIdx),
+        });
+      }
+    }
+
+    resolvedDialectEdits.sort((a, b) => b.startOffset - a.startOffset || b.endOffset - a.endOffset);
+    let modifiedCode = nativeSource;
+    for (const item of resolvedDialectEdits) {
+      modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+    }
+    const editedSymbols = options.edits.map((e) => e.symbol);
+    return {
+      success: true,
+      filePath,
+      symbol: editedSymbols.join(", "),
+      diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+      modifiedCode,
+      newAiceSource: modifiedCode,
+      tokensSaved: Math.max(
+        0,
+        estimateTokens(modifiedCode) - estimateTokens(JSON.stringify(options.edits)),
+      ),
+    };
+  }
+
   const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
   const rawSnippet = options.code ?? options.body ?? "";
 
   if (targetLang === "css") {
     const root = postcss.parse(nativeSource, { from: filePath });
     const emitCssSnippet = (selectorFallback: string): string => {
-      const trimmed = rawSnippet.trim();
+      const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawSnippet);
+      const mergedIdioms: Record<string, ProjectIdiomDefinition> = {
+        ...(idioms ?? {}),
+        ...inlineIdioms,
+      };
+      const trimmed = cleanedCode.trim();
       if (!trimmed) return "";
-      if (
-        !trimmed.startsWith("style ") &&
-        !trimmed.includes("$") &&
-        trimmed.includes("{") &&
-        trimmed.endsWith("}")
-      ) {
-        return trimmed;
+      if (!trimmed.startsWith("style ") && trimmed.includes("{") && trimmed.endsWith("}")) {
+        return preprocessBareCssLossless(trimmed, mergedIdioms).trim();
       }
       const aiceText = trimmed.startsWith("style ")
         ? trimmed
         : `style ${selectorFallback}:\n${indentCode(trimmed, "  ")}`;
       const mod = parse(aiceText, filePath);
       const expanded =
-        idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+        Object.keys(mergedIdioms).length > 0 ? expandModuleIdioms(mod, mergedIdioms) : mod;
       return emitTarget(expanded, "css", { watermark: false }).trim();
     };
 
@@ -3405,12 +4023,17 @@ function spliceDialectNativeSource(
     ]);
 
     const emitTemplateFragment = (): string => {
-      const trimmed = rawSnippet
+      const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawSnippet);
+      const mergedIdioms: Record<string, ProjectIdiomDefinition> = {
+        ...(idioms ?? {}),
+        ...inlineIdioms,
+      };
+      const trimmed = cleanedCode
         .trim()
         .replace(/^([ \t]*)block\s+["']([^"']+)["']\s*:/gm, '$1block(name: "$2"):');
       if (!trimmed) return "";
       if (trimmed.startsWith("<") || trimmed.startsWith("{%")) {
-        return trimmed;
+        return preprocessHybridAndIdiomsLossless(trimmed, targetLang, mergedIdioms).trim();
       }
       const hasTopLevelComponent = /^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(
         trimmed,
@@ -3420,7 +4043,7 @@ function spliceDialectNativeSource(
         : `component __Frag():\n${indentCode(trimmed, "  ")}`;
       const mod = parse(aiceText, filePath);
       const expanded =
-        idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
+        Object.keys(mergedIdioms).length > 0 ? expandModuleIdioms(mod, mergedIdioms) : mod;
       let emitted = emitTarget(expanded, targetLang, { watermark: false }).trim();
       if (targetLang === "html") {
         emitted = emitted.replace(/^<!DOCTYPE html>\s*/i, "").trim();
@@ -3612,11 +4235,198 @@ function spliceDialectNativeSource(
   return undefined;
 }
 
+interface ResolvedNativeEdit {
+  symbol: string;
+  startOffset: number;
+  endOffset: number;
+  replacement: string;
+  originalSnippet: string;
+  newSnippet: string;
+}
+
+function resolveSingleNativeEditAgainstSource(
+  nativeSource: string,
+  options: SpliceOptions,
+  filePath: string,
+  targetLang: TargetLanguage,
+  idioms: Record<string, ProjectIdiomDefinition> | undefined,
+  forceLosslessPreprocess: boolean,
+): ResolvedNativeEdit {
+  const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
+  const rawSnippet = options.code ?? options.body ?? "";
+  if (!anchorSymbol) {
+    throw new Error("Must specify target symbol with --symbol when splicing native file");
+  }
+
+  const preferAccessor: "get" | "set" | undefined =
+    /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(rawSnippet)
+      ? "get"
+      : /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?set\b/.test(rawSnippet)
+        ? "set"
+        : undefined;
+
+  const spanInfo = locateNativeDeclarationSpan(
+    nativeSource,
+    anchorSymbol,
+    targetLang,
+    undefined,
+    preferAccessor,
+  );
+
+  if (!spanInfo) {
+    throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
+  }
+
+  const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
+
+  if (options.delete) {
+    const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
+    let delEnd = spanInfo.declEnd;
+    if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
+    else if (nativeSource[delEnd] === "\n") delEnd += 1;
+    return {
+      symbol: anchorSymbol,
+      startOffset: delStart,
+      endOffset: delEnd,
+      replacement: "",
+      originalSnippet,
+      newSnippet: "",
+    };
+  }
+
+  if (options.insertBefore || options.insertAfter) {
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when inserting into native file");
+    }
+    const emittedUnindented = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      { ...spanInfo, origHeader: undefined },
+      idioms,
+      undefined,
+      false,
+      spanInfo.className,
+      forceLosslessPreprocess,
+    );
+    const newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+    if (options.insertBefore) {
+      const insStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
+      return {
+        symbol: anchorSymbol,
+        startOffset: insStart,
+        endOffset: insStart,
+        replacement: `${newSnippet}\n\n`,
+        originalSnippet,
+        newSnippet,
+      };
+    }
+    return {
+      symbol: anchorSymbol,
+      startOffset: spanInfo.declEnd,
+      endOffset: spanInfo.declEnd,
+      replacement: `\n\n${newSnippet}`,
+      originalSnippet,
+      newSnippet,
+    };
+  }
+
+  if (options.append && spanInfo.isClassContainer) {
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when appending to class in native file");
+    }
+    const memberIndent =
+      targetLang === "python" ||
+      targetLang === "rust" ||
+      targetLang === "csharp" ||
+      targetLang === "kotlin" ||
+      targetLang === "php"
+        ? `${spanInfo.declIndent}    `
+        : `${spanInfo.declIndent}  `;
+    const emittedUnindented = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      undefined,
+      idioms,
+      undefined,
+      false,
+      spanInfo.memberName,
+      forceLosslessPreprocess,
+    );
+    const newSnippet = indentCode(emittedUnindented, memberIndent);
+    if (targetLang === "python") {
+      return {
+        symbol: anchorSymbol,
+        startOffset: spanInfo.declEnd,
+        endOffset: spanInfo.declEnd,
+        replacement: `\n\n${newSnippet}`,
+        originalSnippet,
+        newSnippet,
+      };
+    }
+    const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
+    const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
+    const insertPos =
+      lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;
+    return {
+      symbol: anchorSymbol,
+      startOffset: insertPos,
+      endOffset: insertPos,
+      replacement: `\n${newSnippet}\n`,
+      originalSnippet,
+      newSnippet,
+    };
+  }
+
+  if (!rawSnippet.trim()) {
+    throw new Error("Must provide non-empty --code or --body when splicing native file");
+  }
+
+  const { cleanedCode } = extractInlineIdiomsFromSource(rawSnippet);
+  const trimmedClean = cleanedCode.trimStart();
+  const isAiceComp = /^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:pub\s+)?component\b/m.test(
+    trimmedClean,
+  );
+  const hasLeadingNativeAttr =
+    /^(?:@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]|#\[|\[[A-Za-z_]|template\s*<)/.test(trimmedClean);
+
+  const replaceStart = isAiceComp
+    ? (spanInfo.propsDeclStart ?? spanInfo.declStart)
+    : hasLeadingNativeAttr
+      ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
+      : spanInfo.declStart;
+
+  const isBodyOnly = options.body !== undefined && options.code === undefined;
+  const emittedUnindented = emitNativeSnippetForContext(
+    rawSnippet,
+    filePath,
+    targetLang,
+    spanInfo,
+    idioms,
+    originalSnippet,
+    isBodyOnly,
+    spanInfo.className,
+    forceLosslessPreprocess,
+  );
+
+  const newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+  return {
+    symbol: anchorSymbol,
+    startOffset: replaceStart,
+    endOffset: spanInfo.declEnd,
+    replacement: newSnippet,
+    originalSnippet,
+    newSnippet,
+  };
+}
+
 export function spliceNativeSource(
   nativeSource: string,
   options: SpliceOptions,
   filePath: string,
   idioms?: Record<string, ProjectIdiomDefinition>,
+  forceLosslessPreprocess = false,
 ): SpliceResult {
   const targetLang = detectTargetFromPath(filePath);
   if (
@@ -3666,6 +4476,82 @@ export function spliceNativeSource(
     if (dialectRes) return dialectRes;
   }
 
+  if (options.edits && options.edits.length > 0) {
+    const resolvedEdits: ResolvedNativeEdit[] = [];
+    for (const edit of options.edits) {
+      const editCode =
+        edit.code ?? edit.aice ?? edit.template ?? edit.snippet ?? edit.content ?? edit.replacement;
+      const singleOpt: SpliceOptions = {
+        ...options,
+        edits: undefined,
+        symbol: edit.symbol,
+        code: editCode,
+        body: edit.body,
+        delete: edit.delete,
+        insertAfter: edit.insertAfter ?? edit.insert_after,
+        insertBefore: edit.insertBefore ?? edit.insert_before,
+      };
+      resolvedEdits.push(
+        resolveSingleNativeEditAgainstSource(
+          nativeSource,
+          singleOpt,
+          filePath,
+          targetLang,
+          idioms,
+          forceLosslessPreprocess,
+        ),
+      );
+    }
+
+    // Sort in reverse offset order (bottom-to-top) so earlier edits never shift later offsets
+    const sortedReverse = [...resolvedEdits].sort(
+      (a, b) => b.startOffset - a.startOffset || b.endOffset - a.endOffset,
+    );
+
+    // Check for overlapping spans
+    for (let i = 0; i < sortedReverse.length - 1; i++) {
+      const lowerInFile = sortedReverse[i];
+      const higherInFile = sortedReverse[i + 1];
+      if (lowerInFile.startOffset < higherInFile.endOffset) {
+        throw new Error(
+          `Overlapping splice edits in ${filePath}: '${higherInFile.symbol}' [${higherInFile.startOffset}..${higherInFile.endOffset}] overlaps with '${lowerInFile.symbol}' [${lowerInFile.startOffset}..${lowerInFile.endOffset}]`,
+        );
+      }
+    }
+
+    let modifiedCode = nativeSource;
+    for (const item of sortedReverse) {
+      modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+    }
+
+    if (!forceLosslessPreprocess) {
+      const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
+      if (!checkRes.valid) {
+        return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+      }
+    }
+
+    const diff = options.diff
+      ? generateUnifiedDiff(filePath, nativeSource, modifiedCode)
+      : undefined;
+    const editedSymbols = options.edits.map((e) => e.symbol).join(", ");
+    const combinedNewSnippets = resolvedEdits.map((e) => e.newSnippet).join("\n\n");
+    const snippetTokens = estimateTokens(combinedNewSnippets || JSON.stringify(options.edits));
+    const modifiedTokens = estimateTokens(modifiedCode);
+
+    return {
+      success: true,
+      filePath,
+      symbol: editedSymbols,
+      originalSnippet: resolvedEdits.map((e) => e.originalSnippet).join("\n\n"),
+      newSnippet: combinedNewSnippets,
+      diff,
+      modifiedCode,
+      newAiceSource: modifiedCode,
+      tokensSaved: Math.max(0, modifiedTokens - snippetTokens),
+    };
+  }
+
   const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
   const rawSnippet = options.code ?? options.body ?? "";
 
@@ -3683,9 +4569,16 @@ export function spliceNativeSource(
       undefined,
       false,
       undefined,
+      forceLosslessPreprocess,
     );
     const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
     const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
+    if (!forceLosslessPreprocess) {
+      const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
+      if (!checkRes.valid) {
+        return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+      }
+    }
     const diff = options.diff
       ? generateUnifiedDiff(filePath, nativeSource, modifiedCode)
       : undefined;
@@ -3702,116 +4595,21 @@ export function spliceNativeSource(
     };
   }
 
-  if (!anchorSymbol) {
-    throw new Error("Must specify target symbol with --symbol when splicing native file");
-  }
-
-  const preferAccessor: "get" | "set" | undefined =
-    /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(rawSnippet)
-      ? "get"
-      : /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?set\b/.test(rawSnippet)
-        ? "set"
-        : undefined;
-
-  const spanInfo = locateNativeDeclarationSpan(
+  const resolved = resolveSingleNativeEditAgainstSource(
     nativeSource,
-    anchorSymbol,
+    options,
+    filePath,
     targetLang,
-    undefined,
-    preferAccessor,
+    idioms,
+    forceLosslessPreprocess,
   );
+  const modifiedCode = `${nativeSource.slice(0, resolved.startOffset)}${resolved.replacement}${nativeSource.slice(resolved.endOffset)}`;
 
-  if (!spanInfo) {
-    throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
-  }
-
-  const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
-  let newSnippet = "";
-  let modifiedCode = nativeSource;
-
-  if (options.delete) {
-    const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
-    let delEnd = spanInfo.declEnd;
-    if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
-    else if (nativeSource[delEnd] === "\n") delEnd += 1;
-    modifiedCode = `${nativeSource.slice(0, delStart)}${nativeSource.slice(delEnd)}`;
-  } else if (options.insertBefore || options.insertAfter) {
-    if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when inserting into native file");
+  if (!forceLosslessPreprocess) {
+    const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
+    if (!checkRes.valid) {
+      return spliceNativeSource(nativeSource, options, filePath, idioms, true);
     }
-    const emittedUnindented = emitNativeSnippetForContext(
-      rawSnippet,
-      filePath,
-      targetLang,
-      { ...spanInfo, origHeader: undefined },
-      idioms,
-      undefined,
-      false,
-      spanInfo.className,
-    );
-    newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
-    if (options.insertBefore) {
-      const insStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
-      modifiedCode = `${nativeSource.slice(0, insStart)}${newSnippet}\n\n${nativeSource.slice(insStart)}`;
-    } else {
-      modifiedCode = `${nativeSource.slice(0, spanInfo.declEnd)}\n\n${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
-    }
-  } else if (options.append && spanInfo.isClassContainer) {
-    if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when appending to class in native file");
-    }
-    const memberIndent =
-      targetLang === "python" ||
-      targetLang === "rust" ||
-      targetLang === "csharp" ||
-      targetLang === "kotlin" ||
-      targetLang === "php"
-        ? `${spanInfo.declIndent}    `
-        : `${spanInfo.declIndent}  `;
-    const emittedUnindented = emitNativeSnippetForContext(
-      rawSnippet,
-      filePath,
-      targetLang,
-      undefined,
-      idioms,
-      undefined,
-      false,
-      spanInfo.memberName,
-    );
-    newSnippet = indentCode(emittedUnindented, memberIndent);
-    if (targetLang === "python") {
-      modifiedCode = `${nativeSource.slice(0, spanInfo.declEnd)}\n\n${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
-    } else {
-      const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
-      const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
-      const insertPos =
-        lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;
-      modifiedCode = `${nativeSource.slice(0, insertPos)}\n${newSnippet}\n${nativeSource.slice(insertPos)}`;
-    }
-  } else {
-    if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code or --body when splicing native file");
-    }
-
-    const replaceStart =
-      rawSnippet.trimStart().startsWith("@") || rawSnippet.trimStart().startsWith("#[")
-        ? (spanInfo.fullDeclStart ?? spanInfo.declStart)
-        : spanInfo.declStart;
-
-    const isBodyOnly = options.body !== undefined && options.code === undefined;
-    const emittedUnindented = emitNativeSnippetForContext(
-      rawSnippet,
-      filePath,
-      targetLang,
-      spanInfo,
-      idioms,
-      originalSnippet,
-      isBodyOnly,
-      spanInfo.className,
-    );
-
-    newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
-    modifiedCode = `${nativeSource.slice(0, replaceStart)}${newSnippet}${nativeSource.slice(spanInfo.declEnd)}`;
   }
 
   let diff: string | undefined;
@@ -3819,16 +4617,21 @@ export function spliceNativeSource(
     diff = generateUnifiedDiff(filePath, nativeSource, modifiedCode);
   }
 
-  const snippetTokens = estimateTokens(newSnippet || options.code || options.body || "");
+  const snippetTokens = estimateTokens(resolved.newSnippet || options.code || options.body || "");
   const modifiedTokens = estimateTokens(modifiedCode);
   const tokensSaved = Math.max(0, modifiedTokens - snippetTokens);
+
+  const startLine = modifiedCode.slice(0, resolved.startOffset).split("\n").length;
+  const endLine = startLine + Math.max(0, resolved.replacement.split("\n").length - 1);
 
   return {
     success: true,
     filePath,
-    symbol: anchorSymbol,
-    originalSnippet,
-    newSnippet,
+    symbol: resolved.symbol,
+    startLine,
+    endLine,
+    originalSnippet: resolved.originalSnippet,
+    newSnippet: resolved.newSnippet,
     diff,
     modifiedCode,
     newAiceSource: modifiedCode,
@@ -3852,7 +4655,11 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   }
 
   const fileExists = fs.existsSync(fullPath);
-  if ((!fileExists && !options.delete) || options.create || options.symbol === "*") {
+  const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
+  if (
+    !hasBatchEdits &&
+    ((!fileExists && !options.delete) || options.create || options.symbol === "*")
+  ) {
     const prevSource = fileExists ? fs.readFileSync(fullPath, "utf-8") : "";
     const created = await createFile(fullPath, {
       code: options.code ?? options.body ?? "",
@@ -3883,7 +4690,10 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   }
 
   const activeIdioms = options.idioms === false ? {} : config.idioms;
-  const snippetInput = options.code ?? options.body ?? "";
+  const snippetInput =
+    options.code ??
+    options.body ??
+    (hasBatchEdits ? options.edits!.map((e) => e.code ?? e.body ?? "").join("\n") : "");
   const idiomsUsedInSnippet = Boolean(
     activeIdioms &&
       Object.keys(activeIdioms).some((k) => {
@@ -3894,9 +4704,25 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
 
   if (!fullPath.endsWith(".aice")) {
     const originalNative = await fs.promises.readFile(fullPath, "utf-8");
+    const targetLang = detectTargetFromPath(fullPath);
+    const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
+
     const result = withSuppressedTelemetry(() =>
       spliceNativeSource(originalNative, options, fullPath, activeIdioms),
     );
+
+    const postValidation = validateNativeSyntax(
+      result.modifiedCode,
+      targetLang,
+      fullPath,
+      activeIdioms,
+    );
+    if (!postValidation.valid && origValidation.valid) {
+      const diagSummary = postValidation.diagnostics.join("; ");
+      throw new Error(
+        `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
+      );
+    }
 
     if (!options.dryRun) {
       const dir = path.dirname(fullPath);

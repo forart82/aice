@@ -793,11 +793,13 @@ export async function generateWorkspaceContext(
           projectRoot,
         }),
       );
-      const outlineBody =
+      const fileDiags = collectNativeSyntaxDiagnostics(f, rawFileContent);
+      const baseOutlineBody =
         symHeader &&
         (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
           ? `${symHeader}\n${oRes.text}`
           : oRes.text;
+      const outlineBody = fileDiags ? `${baseOutlineBody}\n\n${fileDiags}` : baseOutlineBody;
       outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${outlineBody}\n\`\`\``);
 
       if (requestedSelectors.length > 0) {
@@ -1466,6 +1468,7 @@ export async function generateContext(
       includeTypes: true,
       idioms: options.idioms,
       projectRoot,
+      lineRanges: options.maxTokens === undefined,
     }),
   );
   const targetOutline = outlineRes.text;
@@ -1589,6 +1592,16 @@ export async function generateContext(
 
   // Target body selection
   let targetBody = options.outlineTarget ? targetOutline : targetContent;
+  if (!options.outlineTarget && !options.symbol && options.maxTokens === undefined) {
+    const actionableSyms = outlineRes.symbols.filter((s) => s.kind !== "import" && s.lineRange);
+    if (actionableSyms.length > 0 && !/\[L\d+-L\d+\]/.test(targetBody)) {
+      const rangeSummary = actionableSyms
+        .slice(0, 12)
+        .map((s) => `${s.name} ${s.lineRange}`)
+        .join(", ");
+      targetBody = `// line-ranges: ${rangeSummary}\n${targetBody}`;
+    }
+  }
 
   // In symbol-scoped mode, only include idioms referenced in targetBody
   let bundleIdioms = activeIdioms;

@@ -2,14 +2,14 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.6](https://img.shields.io/badge/Version-0.9.6-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.7](https://img.shields.io/badge/Version-0.9.7-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C277%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C289%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -23,11 +23,11 @@ Modern Large Language Models (LLMs) spend **40% to 85% of their context windows,
 **AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **15 languages** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`):
 
 1. **Zero `.aice` Files on Disk**: Your native codebase (`*.ts`, `*.cpp`, `*.py`, `*.rs`, `*.go`, etc.) remains 100% untouched by companion or shadow files. No watchers, no file permission locks, and no build-pipeline disruption.
-2. **In-RAM AST Decompilation & Skeleton Outlines (`aice outline`)**: Summarizes any native file or workspace into a compact AICE structural skeleton in milliseconds (`65%` to `92%` token reduction).
-3. **1-Turn Symbol-Scoped Context Packs (`aice context`)**: Extracts just the target symbol, its imported dependency contracts, and active `$idioms` in a single turn (`-69.0%` to `-83.7%` working payload tokens).
+2. **In-RAM AST Decompilation & Line-Range Skeleton Outlines (`aice outline`)**: Summarizes any native file or workspace into a compact AICE structural skeleton with `[Lstart-Lend]` line-range annotations and multi-language `## ⚠️ Native Syntax Diagnostics` in milliseconds (`65%` to `92%` token reduction).
+3. **1-Turn Symbol-Scoped Context Packs (`aice context`)**: Extracts just the target symbol, its imported dependency contracts, `[Lstart-Lend]` symbol ranges, and active `$idioms` in a single turn (`-69.0%` to `-83.7%` working payload tokens).
 4. **Built-In & Project-Specific `$idioms` (`aice idioms`)**: Automatically collapses both language-level ceremony (e.g., C++ `std::cout << a << b << std::endl` $\leftrightarrow$ `print(a, b)`) and project-specific multi-file AST patterns (`$clampBand`, `$guard`, `$big_out` via `.aice-idioms.json` / `aice.config.json`) using structural anti-unification.
-5. **Surgical Direct-to-Native AST Splicing (`aice splice`)**: Accepts compact AICE + `$idioms`, raw native code, or hybrid syntax and splices the expanded native AST directly into the exact byte-span of the target symbol on disk — preserving 100% of surrounding comments, formatting, and headers.
-6. **Greenfield & Startup File Creation (`aice create` / MCP `aice_create`)**: Compiles compact AICE + inline `@idiom $Name($0) = ...` macros in RAM directly into brand-new native files across all 15 languages / 24 extensions (`from 0`), automatically persisting declared idioms to `aice.config.json` and `.aice-cache/idioms.json`.
+5. **Surgical Direct-to-Native Splicing & Multi-Symbol Batch Edits (`aice splice`)**: Accepts compact AICE + `$idioms`, raw native code, or hybrid syntax and splices the expanded native code directly into the exact byte-span of the target symbol (or an atomic `edits` array of multiple symbols applied bottom-to-top) — preserving 100% of surrounding comments, formatting, and headers byte-for-byte.
+6. **Lossless Preprocessor & Pre-Write Syntax Validation (`aice create` / `aice splice`)**: Lexical-masking preprocessor (`preprocessHybridAndIdiomsLossless`) lowers hybrid AICE shorthands (`pub fn`, `^fn`, `@cls`, `:#`, `:$`, `:?`, `<-`, `ret`, compact CSS properties) and balanced `$idiom(...)` calls directly into native target code without destructive AST round-tripping, guarded by pre-write syntax validation (`validateNativeSyntax`) across all 15 languages / 25 extensions.
 
 ---
 
@@ -447,7 +447,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version      = {0.9.6},
+  version      = {0.9.7},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}
