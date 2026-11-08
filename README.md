@@ -2,11 +2,14 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Version: 0.9.3](https://img.shields.io/badge/Version-0.9.3-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
+[![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C254%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C259%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -194,11 +197,11 @@ Full offline deterministic per-module breakdown: see [`docs/BENCHMARKS_OFFLINE.m
 
 ## 🚀 Quick Start & Universal Linux Installation
 
-### Option 1: One-Step Universal Linux Installer (`./install.sh` — Recommended)
+### Option 1: One-Line Git Clone & Universal Linux Installer (`./install.sh` — Recommended)
 Automatically detects your Linux distro (`apt-get`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), verifies/installs `git`, `curl`, `node >= 20`, and `npm`, registers `~/.local/bin/aice`, optionally offers the interactive Zsh startup cheatsheet (only when running in an active Zsh shell), and wires `aice mcp` + system instructions into your installed CLI coding agents:
 
 ```bash
-./install.sh
+git clone https://github.com/forart82/aice.git && cd aice && ./install.sh
 
 # Non-interactive / CI flags:
 ./install.sh --yes              # Auto-confirm dependencies & Zsh cheatsheet
@@ -246,7 +249,7 @@ aice gain
 | CLI Coding Agent | MCP Server Config | Global System Directive |
 | :--- | :--- | :--- |
 | **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
-| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` |
+| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` |
 | **OpenAI Codex CLI (`codex`)** | `~/.codex/config.toml` (`[mcp_servers.aice]`) | `~/.codex/AGENTS.md` |
 | **OpenCode (`opencode`)** | `~/.config/opencode/opencode.json` (`mcp.aice` & `mcpServers.aice`) | `~/.config/opencode/AGENTS.md` |
 | **Aider (`aider`)** | `~/.aider.conf.yml` (`read:` conventions list) | `~/.aider/CONVENTIONS.md` |
@@ -380,7 +383,11 @@ npm run benchmark
 
 ```
 aice/
+├── LICENSE                     # Apache-2.0 license
+├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
+├── CITATION.cff                # GitHub academic / software citation metadata
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
+├── uninstall.sh                # Universal Linux uninstaller & project config cleaner
 ├── assets/
 │   ├── aice-banner.jpg         # Official wide title banner
 │   ├── aice-cpp-workflow.jpg   # End-to-End C++20 On-the-Fly Workflow diagram
@@ -421,6 +428,29 @@ aice/
 
 ---
 
+## 👤 Author, Citation & Support
+
+- **Author**: Created and maintained by **[@forart82](https://github.com/forart82)**
+- **Repository**: [https://github.com/forart82/aice](https://github.com/forart82/aice)
+- **Star on GitHub**: If AICE saves you tokens, turns, and API cost across your AI coding agents, please consider giving [**forart82/aice**](https://github.com/forart82/aice) a ⭐ on GitHub!
+
+### BibTeX Citation
+
+```bibtex
+@software{forart82_aice_2026,
+  author       = {forart82},
+  title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
+  year         = {2026},
+  version      = {0.9.3},
+  publisher    = {GitHub},
+  url          = {https://github.com/forart82/aice},
+  license      = {Apache-2.0}
+}
+```
+
+---
+
 ## 📜 License
 
-Apache License 2.0. Copyright (c) 2026.
+Licensed under the [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE)).
+Copyright (c) 2026 [forart82](https://github.com/forart82).

@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+title: "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer"
+message: "If you use AICE in your research, benchmarks, or AI coding agent workflows, please cite it using the metadata from this file."
+type: software
+authors:
+  - name: "forart82"
+    alias: "forart82"
+    website: "https://github.com/forart82"
+repository-code: "https://github.com/forart82/aice"
+url: "https://github.com/forart82/aice"
+license: Apache-2.0
+version: "0.9.3"
+date-released: "2026-11-08"
+keywords:
+  - aice
+  - ai-context-engine
+  - model-context-protocol
+  - mcp
+  - ast
+  - token-optimization
+  - llm
+  - coding-agents
+  - idioms

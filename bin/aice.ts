@@ -38,7 +38,7 @@ import {
   scanProjectIdioms,
   updateProjectIdiom,
 } from "../src/idioms/index.js";
-import { AiceMcpServer } from "../src/mcp/index.js";
+import { AICE_VERSION, AiceMcpServer } from "../src/mcp/index.js";
 import {
   buildGainReport,
   formatGlobalGainDashboard,
@@ -86,8 +86,10 @@ const program = new Command();
 
 program
   .name("aice")
-  .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.9.2");
+  .description(
+    "AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI (by @forart82 — https://github.com/forart82/aice)",
+  )
+  .version(AICE_VERSION);
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -2459,6 +2461,8 @@ Step 3: Smart Multi-File Idiom Engine ($idiom), Config & Honest Telemetry
       aice gain <project>
       aice tokens .
       aice benchmark
+
+Author: @forart82 (https://github.com/forart82/aice) | License: Apache-2.0
 `,
 );
 

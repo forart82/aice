@@ -138,4 +138,36 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   });
+
+  it("refreshes an existing # >>> aice-cheatsheet >>> block in ~/.zshrc even when --no-cheatsheet is passed", () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "aice-install-refresh-test-"));
+    try {
+      const zshrcPath = path.join(tmpHome, ".zshrc");
+      fs.writeFileSync(
+        zshrcPath,
+        [
+          "export FOO=1",
+          "# >>> aice-cheatsheet >>>",
+          "aice_cheatsheet() { echo old_banner; }",
+          "# <<< aice-cheatsheet <<<",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const res = spawnSync(INSTALL_SCRIPT, ["--no-cheatsheet", "--no-agents"], {
+        cwd: process.cwd(),
+        env: { ...process.env, HOME: tmpHome },
+        encoding: "utf-8",
+      });
+      expect(res.status).toBe(0);
+
+      const updatedZshrc = fs.readFileSync(zshrcPath, "utf-8");
+      expect(updatedZshrc).toContain("export FOO=1");
+      expect(updatedZshrc).toContain("(@forart82)");
+      expect(updatedZshrc).toContain("https://github.com/forart82/aice");
+      expect(updatedZshrc).not.toContain("old_banner");
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
 });

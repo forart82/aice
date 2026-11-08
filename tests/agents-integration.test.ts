@@ -11,7 +11,7 @@ import {
   removeAgents,
   setupAgents,
 } from "../src/agents/index.js";
-import { AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
+import { AICE_VERSION, AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
 
 describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration", () => {
   let tmpHome: string;
@@ -52,10 +52,28 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       "utf-8",
     );
 
-    fs.mkdirSync(path.join(tmpHome, ".gemini"), { recursive: true });
+    fs.mkdirSync(path.join(tmpHome, ".gemini", "config"), { recursive: true });
     fs.writeFileSync(
       path.join(tmpHome, ".gemini", "settings.json"),
       JSON.stringify({ model: "gemini-2.5-pro", mcpServers: { existing: { command: "foo" } } }),
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(tmpHome, ".gemini", "config", "mcp_config.json"),
+      JSON.stringify(
+        {
+          mcpServers: {
+            context7: { command: "node", args: ["context7-mcp"] },
+            fetch: { command: "uvx", args: ["mcp-server-fetch"] },
+            github: { command: "node", args: ["mcp-server-github"] },
+            memory: { command: "node", args: ["mcp-server-memory"] },
+            playwright: { command: "node", args: ["playwright-mcp", "--headless"] },
+            "sequential-thinking": { command: "node", args: ["mcp-server-sequential-thinking"] },
+          },
+        },
+        null,
+        2,
+      ),
       "utf-8",
     );
     fs.writeFileSync(
@@ -148,6 +166,29 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     expect(geminiSettings.mcpServers.existing).toEqual({ command: "foo" });
     expect(geminiSettings.mcpServers.aice).toEqual({ command: "aice", args: ["mcp"] });
 
+    const agyMcpConfig = JSON.parse(
+      fs.readFileSync(path.join(tmpHome, ".gemini", "config", "mcp_config.json"), "utf-8"),
+    );
+    expect(agyMcpConfig.mcpServers.context7).toEqual({ command: "node", args: ["context7-mcp"] });
+    expect(agyMcpConfig.mcpServers.fetch).toEqual({ command: "uvx", args: ["mcp-server-fetch"] });
+    expect(agyMcpConfig.mcpServers.github).toEqual({
+      command: "node",
+      args: ["mcp-server-github"],
+    });
+    expect(agyMcpConfig.mcpServers.memory).toEqual({
+      command: "node",
+      args: ["mcp-server-memory"],
+    });
+    expect(agyMcpConfig.mcpServers.playwright).toEqual({
+      command: "node",
+      args: ["playwright-mcp", "--headless"],
+    });
+    expect(agyMcpConfig.mcpServers["sequential-thinking"]).toEqual({
+      command: "node",
+      args: ["mcp-server-sequential-thinking"],
+    });
+    expect(agyMcpConfig.mcpServers.aice).toEqual({ command: "aice", args: ["mcp"] });
+
     const geminiMd = fs.readFileSync(path.join(tmpHome, ".gemini", "GEMINI.md"), "utf-8");
     expect(geminiMd).toContain("# User Gemini Notes");
     expect(geminiMd.split(AICE_DIRECTIVE_START).length - 1).toBe(1);
@@ -209,6 +250,13 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     expect(claudeMdAfter).toContain("# User Claude Rules");
     expect(claudeMdAfter).not.toContain(AICE_DIRECTIVE_START);
 
+    const agyMcpAfter = JSON.parse(
+      fs.readFileSync(path.join(tmpHome, ".gemini", "config", "mcp_config.json"), "utf-8"),
+    );
+    expect(agyMcpAfter.mcpServers.context7).toBeDefined();
+    expect(agyMcpAfter.mcpServers.github).toBeDefined();
+    expect(agyMcpAfter.mcpServers.aice).toBeUndefined();
+
     const codexTomlAfter = fs.readFileSync(path.join(tmpHome, ".codex", "config.toml"), "utf-8");
     expect(codexTomlAfter).toContain('model = "o3"');
     expect(codexTomlAfter).toContain("[mcp_servers.other]");
@@ -233,6 +281,31 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     for (const agent of status.agents.filter((a) => a.id !== "claude")) {
       expect(agent.mcpConfigured).toBe(true);
     }
+
+    // Claude's CLAUDE.md still got configured even though .claude.json was malformed
+    expect(claudeEntry?.promptConfigured).toBe(true);
+  });
+
+  it("continues configuring ~/.gemini/config/mcp_config.json and GEMINI.md for agy even if ~/.gemini/settings.json is malformed", () => {
+    fs.mkdirSync(path.join(tmpHome, ".gemini", "config"), { recursive: true });
+    fs.writeFileSync(path.join(tmpHome, ".gemini", "settings.json"), "{ broken json", "utf-8");
+    fs.writeFileSync(
+      path.join(tmpHome, ".gemini", "config", "mcp_config.json"),
+      JSON.stringify({ mcpServers: { context7: { command: "node" } } }),
+      "utf-8",
+    );
+
+    const status = setupAgents({ homeDir: tmpHome, agent: "agy" });
+    expect(status.agents).toHaveLength(1);
+    const agyEntry = status.agents[0];
+    expect(agyEntry?.error).toContain("settings.json");
+    expect(agyEntry?.promptConfigured).toBe(true);
+
+    const agyMcpConfig = JSON.parse(
+      fs.readFileSync(path.join(tmpHome, ".gemini", "config", "mcp_config.json"), "utf-8"),
+    );
+    expect(agyMcpConfig.mcpServers.context7).toEqual({ command: "node" });
+    expect(agyMcpConfig.mcpServers.aice).toEqual({ command: "aice", args: ["mcp"] });
   });
 
   it("allows multi-project paths under $HOME, os.tmpdir(), and declared MCP workspaceFolders while blocking sensitive system paths and traversal", async () => {
@@ -250,10 +323,20 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       const server = new AiceMcpServer(undefined, undefined, { workspaceRoot: initialWorkspace });
 
       // Initialize with workspaceFolders pointing to secondWorkspace
+      const pkg = JSON.parse(
+        fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
+      ) as { version: string; license: string; author?: { name?: string } };
+      expect(AICE_VERSION).toBe(pkg.version);
+      expect(pkg.license).toBe("Apache-2.0");
+      expect(pkg.author?.name).toBe("forart82");
+      expect(fs.existsSync(path.resolve(process.cwd(), "LICENSE"))).toBe(true);
+      expect(fs.existsSync(path.resolve(process.cwd(), "NOTICE"))).toBe(true);
+      expect(fs.existsSync(path.resolve(process.cwd(), "CITATION.cff"))).toBe(true);
+
       const initRes = (await server.handleRequest(1, "initialize", {
         workspaceFolders: [{ uri: `file://${secondWorkspace}`, name: "ws2" }],
       })) as { serverInfo?: { version?: string } };
-      expect(initRes.serverInfo?.version).toBe("0.9.2");
+      expect(initRes.serverInfo?.version).toBe(AICE_VERSION);
 
       // Outline file in secondWorkspace (outside initialWorkspace) succeeds
       const outRes = (await server.handleRequest(2, "tools/call", {

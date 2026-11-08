@@ -41,6 +41,24 @@ import { generateContext } from "../tools/context.js";
 import { outlinePath } from "../tools/outline.js";
 import { splice } from "../tools/splice.js";
 
+function loadPackageVersion(): string {
+  try {
+    const pkgPath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../package.json",
+    );
+    const parsed = JSON.parse(fs.readFileSync(pkgPath, "utf-8")) as { version?: string };
+    if (typeof parsed.version === "string" && parsed.version.trim().length > 0) {
+      return parsed.version.trim();
+    }
+  } catch {
+    // fallback if package.json is unreachable
+  }
+  return "0.9.3";
+}
+
+export const AICE_VERSION = loadPackageVersion();
+
 export interface McpToolDefinition {
   name: string;
   description: string;
@@ -537,7 +555,7 @@ export class AiceMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "aice-mcp", version: "0.9.2" },
+          serverInfo: { name: "aice-mcp", version: AICE_VERSION },
         };
       }
 

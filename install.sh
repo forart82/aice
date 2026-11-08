@@ -270,14 +270,16 @@ aice_cheatsheet() {
   local C_GRAY=$'\033[38;5;245m'
 
   printf "${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE 2.0 — ON-THE-FLY AI CONTEXT ENGINE & TELEMETRY CHEATSHEET (aice-cheat)${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE — ON-THE-FLY AI CONTEXT ENGINE & TELEMETRY CHEATSHEET (@forart82)${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] TELEMETRY, AGENTS & CONFIG${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}85%% AST skeleton${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}1-turn symbol${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}Surgical edit${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect agents${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}Project \$idioms${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}╰───────────────────────────────────────┴──────────────────────────────────────╯${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 }
 alias aice-cheat="aice_cheatsheet"
 if [[ -o interactive ]]; then
@@ -309,6 +311,10 @@ if [[ "$IS_ZSH" -eq 1 ]] && [[ "$NO_CHEATSHEET" -eq 0 ]]; then
   fi
 else
   log_info "Skipping Zsh startup cheatsheet (zsh=${IS_ZSH}, no_cheatsheet=${NO_CHEATSHEET})."
+  if [[ "$DRY_RUN" -eq 0 ]] && [[ -f "${HOME}/.zshrc" ]] && grep -Fq "# >>> aice-cheatsheet >>>" "${HOME}/.zshrc" 2>/dev/null; then
+    log_info "Refreshing existing # >>> aice-cheatsheet >>> block in ${HOME}/.zshrc..."
+    inject_zsh_cheatsheet
+  fi
 fi
 
 # ── Substep 2.5: Post-Install Global Agent Wiring & Smoke Check ──────────────
@@ -330,4 +336,4 @@ else
   "$AICE_BIN" agents status
 fi
 
-log_ok "AICE installation complete!"
+log_ok "AICE installation complete! Created by @forart82 (https://github.com/forart82/aice)"

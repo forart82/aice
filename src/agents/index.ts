@@ -507,6 +507,7 @@ export function getAgentsStatus(
   const claudeBin = detectBinary(["claude"]);
 
   const geminiSettings = path.join(home, ".gemini", "settings.json");
+  const agyMcpConfig = path.join(home, ".gemini", "config", "mcp_config.json");
   const geminiMd = path.join(home, ".gemini", "GEMINI.md");
   const agyBin = detectBinary(["agy", "gemini"]);
 
@@ -544,8 +545,8 @@ export function getAgentsStatus(
       displayName: "Antigravity / Gemini CLI (agy/gemini)",
       binaryDetected: agyBin.found,
       binaryPath: agyBin.path,
-      mcpConfigured: hasJsonMcpServer(geminiSettings),
-      mcpConfigPath: geminiSettings,
+      mcpConfigured: hasJsonMcpServer(geminiSettings) && hasJsonMcpServer(agyMcpConfig),
+      mcpConfigPath: agyMcpConfig,
       promptConfigured: hasMarkdownDirective(geminiMd),
       promptPath: geminiMd,
     },
@@ -636,7 +637,9 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     try {
       fn();
     } catch (err) {
-      errors.set(id, err instanceof Error ? err.message : String(err));
+      const msg = err instanceof Error ? err.message : String(err);
+      const prev = errors.get(id);
+      errors.set(id, prev ? `${prev}; ${msg}` : msg);
     }
   };
 
@@ -644,53 +647,58 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
   if (
     shouldSetup("claude", [path.join(home, ".claude"), path.join(home, ".claude.json")], ["claude"])
   ) {
-    runSafe("claude", () => {
-      upsertJsonMcpServer(path.join(home, ".claude.json"));
-      const claudeSettings = path.join(home, ".claude", "settings.json");
-      if (fs.existsSync(claudeSettings)) {
-        upsertJsonMcpServer(claudeSettings);
-      }
-      upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
-    });
+    runSafe("claude", () => upsertJsonMcpServer(path.join(home, ".claude.json")));
+    const claudeSettings = path.join(home, ".claude", "settings.json");
+    if (fs.existsSync(claudeSettings)) {
+      runSafe("claude", () => upsertJsonMcpServer(claudeSettings));
+    }
+    runSafe("claude", () => upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md")));
   }
 
   // 2. Google Antigravity / Gemini CLI
-  if (shouldSetup("agy", [path.join(home, ".gemini")], ["agy", "gemini"])) {
-    runSafe("agy", () => {
-      upsertJsonMcpServer(path.join(home, ".gemini", "settings.json"));
-      upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
-    });
+  if (
+    shouldSetup(
+      "agy",
+      [path.join(home, ".gemini"), path.join(home, ".gemini", "config", "mcp_config.json")],
+      ["agy", "gemini"],
+    )
+  ) {
+    runSafe("agy", () => upsertJsonMcpServer(path.join(home, ".gemini", "settings.json")));
+    runSafe("agy", () =>
+      upsertJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json")),
+    );
+    runSafe("agy", () => upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md")));
   }
 
   // 3. OpenAI Codex CLI
   if (shouldSetup("codex", [path.join(home, ".codex")], ["codex"])) {
-    runSafe("codex", () => {
-      upsertCodexToml(path.join(home, ".codex", "config.toml"));
-      upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
-      const codexInstr = path.join(home, ".codex", "instructions.md");
-      if (fs.existsSync(codexInstr)) {
-        upsertMarkdownDirective(codexInstr);
-      }
-    });
+    runSafe("codex", () => upsertCodexToml(path.join(home, ".codex", "config.toml")));
+    runSafe("codex", () => upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md")));
+    const codexInstr = path.join(home, ".codex", "instructions.md");
+    if (fs.existsSync(codexInstr)) {
+      runSafe("codex", () => upsertMarkdownDirective(codexInstr));
+    }
   }
 
   // 4. OpenCode
   if (shouldSetup("opencode", [path.join(home, ".config", "opencode")], ["opencode"])) {
-    runSafe("opencode", () => {
-      upsertJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"), true);
-      upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
-    });
+    runSafe("opencode", () =>
+      upsertJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"), true),
+    );
+    runSafe("opencode", () =>
+      upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md")),
+    );
   }
 
   // 5. Aider
   if (
     shouldSetup("aider", [path.join(home, ".aider"), path.join(home, ".aider.conf.yml")], ["aider"])
   ) {
-    runSafe("aider", () => {
-      const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
-      upsertMarkdownDirective(conventionsPath);
-      upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
-    });
+    const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
+    runSafe("aider", () => upsertMarkdownDirective(conventionsPath));
+    runSafe("aider", () =>
+      upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath),
+    );
   }
 
   // 6. Goose
@@ -752,6 +760,7 @@ export function removeAgents(
   if (matches("agy")) {
     runSafe("agy", () => {
       removeJsonMcpServer(path.join(home, ".gemini", "settings.json"));
+      removeJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json"));
       removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
     });
   }
