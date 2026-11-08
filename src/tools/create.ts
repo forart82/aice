@@ -341,7 +341,7 @@ export function parseOptionIdioms(
   const parseSingleSpec = (spec: string) => {
     const trimmed = spec.trim().replace(/^@idiom\s+/, "");
     const m = trimmed.match(
-      /^(\$?[A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*(?:=|:)\s*([\s\S]+)$/,
+      /^(\$?[A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*(?:=>|=|:)\s*([\s\S]+)$/,
     );
     if (!m) {
       throw new Error(

@@ -1054,6 +1054,7 @@ function buildSpanInfoFromTsNode(
 function selectBestTsMember(
   matchingMembers: ts.ClassElement[],
   preferAccessor?: "get" | "set",
+  preferredArity?: number,
 ): ts.ClassElement {
   if (preferAccessor === "get") {
     const getter = matchingMembers.find((m) => ts.isGetAccessorDeclaration(m));
@@ -1062,10 +1063,17 @@ function selectBestTsMember(
     const setter = matchingMembers.find((m) => ts.isSetAccessorDeclaration(m));
     if (setter) return setter;
   }
-  return (
-    matchingMembers.find((m) => (m as { body?: unknown }).body !== undefined) ??
-    matchingMembers[matchingMembers.length - 1]
-  );
+  const withBody = matchingMembers.filter((m) => (m as { body?: unknown }).body !== undefined);
+  const pool = withBody.length > 0 ? withBody : matchingMembers;
+  if (preferredArity !== undefined && pool.length > 1) {
+    const arityMatch = pool.find(
+      (m) =>
+        (ts.isMethodDeclaration(m) || ts.isConstructorDeclaration(m)) &&
+        m.parameters.length === preferredArity,
+    );
+    if (arityMatch) return arityMatch;
+  }
+  return pool[0] ?? matchingMembers[matchingMembers.length - 1];
 }
 
 function locateTsDeclarationSpan(
@@ -1073,6 +1081,7 @@ function locateTsDeclarationSpan(
   symbolSelector: string,
   explicitClassName?: string,
   preferAccessor?: "get" | "set",
+  preferredArity?: number,
 ): NativeSpanInfo | undefined {
   const sf = ts.createSourceFile(
     "file.tsx",
@@ -1081,9 +1090,17 @@ function locateTsDeclarationSpan(
     true,
     ts.ScriptKind.TSX,
   );
-  const parts = symbolSelector.split(/\.|::/);
+  const qualMatch = symbolSelector.trim().match(/^([^(]+)\((.*)\)$/);
+  const baseSelector = qualMatch ? qualMatch[1].trim() : symbolSelector.trim();
+  const explicitArity = qualMatch
+    ? qualMatch[2].trim() === ""
+      ? 0
+      : qualMatch[2].split(",").length
+    : preferredArity;
+
+  const parts = baseSelector.split(/\.|::/);
   const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
-  let memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  let memberName = parts.length >= 2 ? parts.slice(1).join(".") : baseSelector;
   let inferredAccessor = preferAccessor;
   if (memberName.startsWith("get:")) {
     inferredAccessor = "get";
@@ -1115,7 +1132,7 @@ function locateTsDeclarationSpan(
       if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
         const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
         if (matchingMembers.length > 0) {
-          const implMember = selectBestTsMember(matchingMembers, inferredAccessor);
+          const implMember = selectBestTsMember(matchingMembers, inferredAccessor, explicitArity);
           return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, className);
         }
       }
@@ -1178,7 +1195,7 @@ function locateTsDeclarationSpan(
       const parentName = stmt.name?.text;
       const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
       if (matchingMembers.length > 0) {
-        const implMember = selectBestTsMember(matchingMembers, inferredAccessor);
+        const implMember = selectBestTsMember(matchingMembers, inferredAccessor, explicitArity);
         return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, parentName);
       }
     }
@@ -1570,15 +1587,85 @@ function normIdForSpan(s: string): string {
   return s.replace(/_/g, "").toLowerCase();
 }
 
+function countHeaderParams(headerSlice: string): number | undefined {
+  const openParen = headerSlice.indexOf("(");
+  if (openParen < 0) return undefined;
+  let depth = 0;
+  let closeParen = -1;
+  for (let i = openParen; i < headerSlice.length; i++) {
+    const ch = headerSlice[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) {
+        closeParen = i;
+        break;
+      }
+    }
+  }
+  if (closeParen < 0) return undefined;
+  const inner = headerSlice.slice(openParen + 1, closeParen).trim();
+  if (!inner || inner === "void") return 0;
+
+  const params: string[] = [];
+  let cur = "";
+  let angleDepth = 0;
+  let nestDepth = 0;
+  for (let i = 0; i < inner.length; i++) {
+    const ch = inner[i];
+    if (ch === "<") angleDepth++;
+    else if (ch === ">" && inner[i - 1] !== "-") angleDepth = Math.max(0, angleDepth - 1);
+    else if (ch === "(" || ch === "[" || ch === "{") nestDepth++;
+    else if (ch === ")" || ch === "]" || ch === "}") nestDepth = Math.max(0, nestDepth - 1);
+    else if (ch === "," && angleDepth === 0 && nestDepth === 0) {
+      params.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) params.push(cur.trim());
+  const nonReceiver = params.filter((p) => !/^(?:&\s*(?:mut\s+)?)?self$|^cls$/.test(p));
+  return nonReceiver.length;
+}
+
+export function inferSnippetParamArity(rawSnippet: string): number | undefined {
+  const { cleanedCode } = extractInlineIdiomsFromSource(rawSnippet);
+  const lines = cleanedCode
+    .trim()
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(
+      (l) =>
+        l &&
+        !l.startsWith("//") &&
+        !l.startsWith("#") &&
+        !l.startsWith("@") &&
+        !l.startsWith("template"),
+    );
+  if (lines.length === 0) return undefined;
+  const headerText = lines.slice(0, 4).join(" ");
+  return countHeaderParams(headerText);
+}
+
 function locateBraceLanguageDeclarationSpan(
   nativeSource: string,
   symbolSelector: string,
   targetLang: TargetLanguage,
   explicitClassName?: string,
+  preferredArity?: number,
 ): NativeSpanInfo | undefined {
-  const parts = symbolSelector.split(/\.|::/);
+  const qualMatch = symbolSelector.trim().match(/^([^(]+)\((.*)\)$/);
+  const baseSelector = qualMatch ? qualMatch[1].trim() : symbolSelector.trim();
+  const explicitArity = qualMatch
+    ? qualMatch[2].trim() === ""
+      ? 0
+      : qualMatch[2].split(",").length
+    : preferredArity;
+
+  const parts = baseSelector.split(/\.|::/);
   const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
-  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : baseSelector;
   const normMember = normIdForSpan(memberName);
   const normClass = className ? normIdForSpan(className) : undefined;
 
@@ -1824,6 +1911,14 @@ function locateBraceLanguageDeclarationSpan(
   }
 
   // 4. Scan lines within matching container windows (or full file when top-level)
+  const candidates: NativeSpanInfo[] = [];
+  const collectOrReturn = (span: NativeSpanInfo | undefined): NativeSpanInfo | undefined => {
+    if (!span) return undefined;
+    if (explicitArity === undefined) return span;
+    candidates.push(span);
+    return undefined;
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const lineOff = lineOffsets[i];
     if (className && !containerWindows.some((w) => lineOff >= w.start && lineOff < w.end)) {
@@ -1836,7 +1931,10 @@ function locateBraceLanguageDeclarationSpan(
         /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)\b/,
       );
       if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
-        return buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], resolvedClassName);
+        const res = collectOrReturn(
+          buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], resolvedClassName),
+        );
+        if (res) return res;
       }
       if (!className) {
         const structMatch = line.match(
@@ -1863,7 +1961,10 @@ function locateBraceLanguageDeclarationSpan(
         /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?(?:[A-Za-z0-9_<>?.*]+\.)?([A-Za-z0-9_]+)\s*\(/,
       );
       if (funMatch && (funMatch[2] === memberName || normIdForSpan(funMatch[2]) === normMember)) {
-        return buildBraceSpanFromLine(i, funMatch[1], funMatch[2], resolvedClassName);
+        const res = collectOrReturn(
+          buildBraceSpanFromLine(i, funMatch[1], funMatch[2], resolvedClassName),
+        );
+        if (res) return res;
       }
       if (!className) {
         const ktTopMatch = line.match(
@@ -1883,7 +1984,10 @@ function locateBraceLanguageDeclarationSpan(
         /^([ \t]*)(?:public\s+|private\s+|protected\s+|static\s+|final\s+|abstract\s+)*function\s+&?([A-Za-z0-9_]+)\s*\(/,
       );
       if (phpMatch && (phpMatch[2] === memberName || normIdForSpan(phpMatch[2]) === normMember)) {
-        return buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName);
+        const res = collectOrReturn(
+          buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName),
+        );
+        if (res) return res;
       }
       if (!className) {
         const phpTopMatch = line.match(
@@ -1922,7 +2026,10 @@ function locateBraceLanguageDeclarationSpan(
         cMethodMatch &&
         (cMethodMatch[2] === memberName || normIdForSpan(cMethodMatch[2]) === normMember)
       ) {
-        return buildBraceSpanFromLine(i, cMethodMatch[1], cMethodMatch[2], resolvedClassName);
+        const res = collectOrReturn(
+          buildBraceSpanFromLine(i, cMethodMatch[1], cMethodMatch[2], resolvedClassName),
+        );
+        if (res) return res;
       }
     }
 
@@ -1938,6 +2045,16 @@ function locateBraceLanguageDeclarationSpan(
     }
   }
 
+  if (candidates.length > 0) {
+    if (explicitArity !== undefined) {
+      const arityMatch = candidates.find(
+        (c) => countHeaderParams(c.origHeader ?? "") === explicitArity,
+      );
+      if (arityMatch) return arityMatch;
+    }
+    return candidates[0];
+  }
+
   // 5. Fallback: if !className, try finding enclosing class name for a unique method match
   if (!className) {
     for (let i = 0; i < lines.length; i++) {
@@ -1951,6 +2068,7 @@ function locateBraceLanguageDeclarationSpan(
           `${candidateCls}.${memberName}`,
           targetLang,
           candidateCls,
+          explicitArity,
         );
         if (found) return found;
       }
@@ -2001,6 +2119,7 @@ export function locateNativeDeclarationSpan(
   targetLangOrSymbol: TargetLanguage | string,
   explicitClassName?: string,
   preferAccessor?: "get" | "set",
+  preferredArity?: number,
 ): NativeSpanInfo | undefined {
   let symbolSelector: string;
   let targetLang: TargetLanguage;
@@ -2025,13 +2144,32 @@ export function locateNativeDeclarationSpan(
 
   let rawSpan: NativeSpanInfo | undefined;
   if (targetLang === "python") {
-    rawSpan = locatePythonDeclarationSpan(nativeSource, symbolSelector, classFilter);
+    const cleanPySel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
+    rawSpan = locatePythonDeclarationSpan(nativeSource, cleanPySel, classFilter);
   } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    rawSpan = locateTsDeclarationSpan(nativeSource, symbolSelector, classFilter, preferAccessor);
+    rawSpan = locateTsDeclarationSpan(
+      nativeSource,
+      symbolSelector,
+      classFilter,
+      preferAccessor,
+      preferredArity,
+    );
   } else {
     rawSpan =
-      locateBraceLanguageDeclarationSpan(nativeSource, symbolSelector, targetLang, classFilter) ??
-      locateTsDeclarationSpan(nativeSource, symbolSelector, classFilter, preferAccessor);
+      locateBraceLanguageDeclarationSpan(
+        nativeSource,
+        symbolSelector,
+        targetLang,
+        classFilter,
+        preferredArity,
+      ) ??
+      locateTsDeclarationSpan(
+        nativeSource,
+        symbolSelector,
+        classFilter,
+        preferAccessor,
+        preferredArity,
+      );
   }
 
   return enrichSpanWithOffsetsAndLines(nativeSource, rawSpan);
@@ -2791,10 +2929,22 @@ function isPureNativeSnippetWithoutIdioms(
   className?: string,
 ): boolean {
   const trimmed = snippet.trim();
-  if (/\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed) || /\bret\b/.test(trimmed)) {
+  if (
+    /\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed) ||
+    /\bret\b/.test(trimmed) ||
+    /(?:^|\s)(?:@fn|@cls|@type|\^fn|\^class|\^type|\^const|\^val|\^mut|\^let|\^async|\^static)\b/.test(
+      trimmed,
+    ) ||
+    /(?::(?!=)[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\])|->[ \t]*:?[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\]))(?![A-Za-z0-9_])/.test(
+      trimmed,
+    )
+  ) {
     return false;
   }
-  if (targetLang !== "go" && (trimmed.includes(":=") || trimmed.includes("::="))) {
+  if (
+    targetLang !== "go" &&
+    (trimmed.includes(":=") || trimmed.includes("::=") || trimmed.includes("<-"))
+  ) {
     return false;
   }
 
@@ -3309,7 +3459,12 @@ function shouldUseLosslessPreprocessorForSnippet(
       trimmed.includes('"""') ||
       trimmed.includes("'''") ||
       /\b[A-Za-z0-9_[\]]+\s*\|\s*[A-Za-z0-9_[\]]+/.test(trimmed) ||
-      /^\s*(?:@fn\b|\^fn\b|@cls\b|\^class\b)/.test(trimmed)
+      /^\s*(?:@fn\b|\^fn\b|@cls\b|\^class\b)/.test(trimmed) ||
+      (/^\s*(?:async\s+)?(?:def|class)\s+[A-Za-z_]/m.test(trimmed) &&
+        (trimmed.includes("<-") ||
+          /(?::(?!=)[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\])|->[ \t]*:?[ \t]*(?:#|\$|\?|_|\*))(?![A-Za-z0-9_])/.test(
+            trimmed,
+          )))
     );
   }
 
@@ -4265,12 +4420,18 @@ function resolveSingleNativeEditAgainstSource(
         ? "set"
         : undefined;
 
+  const preferredArity =
+    options.code && !options.insertAfter && !options.insertBefore && !options.append
+      ? inferSnippetParamArity(options.code)
+      : undefined;
+
   const spanInfo = locateNativeDeclarationSpan(
     nativeSource,
     anchorSymbol,
     targetLang,
     undefined,
     preferAccessor,
+    preferredArity,
   );
 
   if (!spanInfo) {

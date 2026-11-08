@@ -111,6 +111,7 @@ export interface ContextResult {
   formattedBundle: string;
   tokenCount?: number;
   idioms?: Record<string, ProjectIdiomDefinition>;
+  nativeDiagnostics?: string;
 }
 
 function isExternalSpecifier(specifier: string): boolean {
@@ -1696,6 +1697,7 @@ export async function generateContext(
     formattedBundle,
     tokenCount,
     idioms: activeIdioms,
+    nativeDiagnostics,
   };
 
   recordTelemetryEvent({

@@ -41,7 +41,52 @@ function getLineAndCol(source: string, offset: number): { line: number; column: 
   return { line, column: offset - lastNewline };
 }
 
-function checkBalancedDelimiters(maskedCode: string, originalCode: string): SyntaxDiagnosticItem[] {
+function getOriginalLineAndColFromMaskedOffset(
+  maskedCode: string,
+  maskedOffset: number,
+  maskLengths: number[],
+  originalCode: string,
+): { line: number; column: number } {
+  const MASK_PREFIX = "\uE000";
+  let origOffset = 0;
+  let i = 0;
+  const limit = Math.min(maskedOffset, maskedCode.length);
+  while (i < limit) {
+    if (maskedCode[i] === MASK_PREFIX) {
+      let j = i + 1;
+      let idxStr = "";
+      while (j < maskedCode.length) {
+        const code = maskedCode.charCodeAt(j);
+        if (code >= 0xe010 && code <= 0xe019) {
+          idxStr += String(code - 0xe010);
+          j++;
+        } else {
+          break;
+        }
+      }
+      if (
+        idxStr.length > 0 &&
+        j < maskedCode.length &&
+        (maskedCode[j] === "\uE001" || maskedCode[j] === "\uE002")
+      ) {
+        const idx = Number.parseInt(idxStr, 10);
+        const origLen = maskLengths[idx] ?? j - i + 1;
+        origOffset += origLen;
+        i = j + 1;
+        continue;
+      }
+    }
+    origOffset++;
+    i++;
+  }
+  return getLineAndCol(originalCode, origOffset);
+}
+
+function checkBalancedDelimiters(
+  maskedCode: string,
+  originalCode: string,
+  maskLengths: number[] = [],
+): SyntaxDiagnosticItem[] {
   const diags: SyntaxDiagnosticItem[] = [];
   const stack: Array<{ char: string; expected: string; offset: number }> = [];
   const pairs: Record<string, string> = {
@@ -57,7 +102,7 @@ function checkBalancedDelimiters(maskedCode: string, originalCode: string): Synt
       stack.push({ char: ch, expected: pairs[ch], offset: i });
     } else if (closers.has(ch)) {
       if (stack.length === 0) {
-        const pos = getLineAndCol(originalCode, i);
+        const pos = getOriginalLineAndColFromMaskedOffset(maskedCode, i, maskLengths, originalCode);
         diags.push({
           ...pos,
           message: `Unexpected closing delimiter '${ch}'`,
@@ -65,7 +110,12 @@ function checkBalancedDelimiters(maskedCode: string, originalCode: string): Synt
       } else {
         const top = stack.pop()!;
         if (top.expected !== ch) {
-          const pos = getLineAndCol(originalCode, i);
+          const pos = getOriginalLineAndColFromMaskedOffset(
+            maskedCode,
+            i,
+            maskLengths,
+            originalCode,
+          );
           diags.push({
             ...pos,
             message: `Mismatched delimiter '${ch}': expected '${top.expected}' to close '${top.char}'`,
@@ -76,7 +126,12 @@ function checkBalancedDelimiters(maskedCode: string, originalCode: string): Synt
   }
 
   for (const unclosed of stack) {
-    const pos = getLineAndCol(originalCode, unclosed.offset);
+    const pos = getOriginalLineAndColFromMaskedOffset(
+      maskedCode,
+      unclosed.offset,
+      maskLengths,
+      originalCode,
+    );
     diags.push({
       ...pos,
       message: `Unclosed delimiter '${unclosed.char}' (expected '${unclosed.expected}')`,
@@ -91,6 +146,7 @@ function checkLeakedAiceMarkers(
   originalCode: string,
   targetLang: TargetLanguage,
   activeIdioms?: Record<string, ProjectIdiomDefinition>,
+  maskLengths: number[] = [],
 ): SyntaxDiagnosticItem[] {
   const diags: SyntaxDiagnosticItem[] = [];
 
@@ -102,7 +158,12 @@ function checkLeakedAiceMarkers(
       const esc = cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const re = new RegExp(`\\$${esc}\\s*\\(`, "g");
       for (const m of maskedCode.matchAll(re)) {
-        const pos = getLineAndCol(originalCode, m.index ?? 0);
+        const pos = getOriginalLineAndColFromMaskedOffset(
+          maskedCode,
+          m.index ?? 0,
+          maskLengths,
+          originalCode,
+        );
         diags.push({
           ...pos,
           message: `Unexpanded AICE idiom call '$${cleanName}(...)'`,
@@ -115,14 +176,19 @@ function checkLeakedAiceMarkers(
   const directiveRe =
     /(?:^|(?<=\s))(?:@idiom|@fn|@cls|@type|\^fn|\^class|\^type|\^const|\^val|\^mut|\^let|\^async|\^static)\b/gm;
   for (const m of maskedCode.matchAll(directiveRe)) {
-    const pos = getLineAndCol(originalCode, m.index ?? 0);
+    const pos = getOriginalLineAndColFromMaskedOffset(
+      maskedCode,
+      m.index ?? 0,
+      maskLengths,
+      originalCode,
+    );
     diags.push({
       ...pos,
       message: `Leaked AICE directive '${m[0].trim()}' in native ${targetLang} output`,
     });
   }
 
-  // 3. Check leaked compact type sigils (`:#`, `:$`, `:?`) outside strings/comments in code languages
+  // 3. Check leaked compact type sigils (`:#`, `:$`, `:?`, `[#]`, `[$]`, `[?]`, `-> #`, `-> $`, `-> ?`) outside strings/comments in code languages
   const isCodeLang =
     targetLang !== "css" &&
     targetLang !== "html" &&
@@ -131,12 +197,48 @@ function checkLeakedAiceMarkers(
     targetLang !== "yaml";
 
   if (isCodeLang) {
-    const sigilRe = /:(?!=)\s*(?:#|\$|\?)(?=\s*(?:=|,|;|\)|\]|\}|->|\{|$))/gm;
+    const sigilRe =
+      /(?::(?!=)[ \t]*(?:#|\$|\?|\[[ \t]*(?:#|\$|\?)[ \t]*\])|->[ \t]*(?:#|\$|\?|\[[ \t]*(?:#|\$|\?)[ \t]*\]))(?=[ \t]*(?:=|,|;|\)|\]|\}|->|\{|:|$))/gm;
     for (const m of maskedCode.matchAll(sigilRe)) {
-      const pos = getLineAndCol(originalCode, m.index ?? 0);
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        m.index ?? 0,
+        maskLengths,
+        originalCode,
+      );
       diags.push({
         ...pos,
         message: `Leaked AICE compact type sigil '${m[0].trim()}' in native ${targetLang} output`,
+      });
+    }
+
+    if (targetLang !== "go") {
+      const leakedArrowRetRe = /(?:^\s*|(?:=>|\)\s+|\belse\s+|\{\s*))<-(?=\s+[^\n;]+|\s*;?\s*$)/gm;
+      for (const m of maskedCode.matchAll(leakedArrowRetRe)) {
+        const pos = getOriginalLineAndColFromMaskedOffset(
+          maskedCode,
+          m.index ?? 0,
+          maskLengths,
+          originalCode,
+        );
+        diags.push({
+          ...pos,
+          message: `Leaked AICE return shorthand '<-' in native ${targetLang} output`,
+        });
+      }
+    }
+
+    const leakedRetRe = /^\s*ret(?:\s+[^=;:(\n][^\n]*|\s*;?\s*)$/gm;
+    for (const m of maskedCode.matchAll(leakedRetRe)) {
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        m.index ?? 0,
+        maskLengths,
+        originalCode,
+      );
+      diags.push({
+        ...pos,
+        message: `Leaked AICE return keyword 'ret' in native ${targetLang} output`,
       });
     }
   }
@@ -150,9 +252,15 @@ function checkLeakedAiceMarkers(
     targetLang === "kotlin" ||
     targetLang === "php"
   ) {
-    const pubFnRe = /^\s*pub\s+(?:async\s+|static\s+)?(?:fn|class|type)\s+[A-Za-z_]/gm;
+    const pubFnRe =
+      /^\s*pub\s+(?:async\s+|static\s+|suspend\s+)?(?:fn|class|type|const|val|mut|let)\s+[A-Za-z_]/gm;
     for (const m of maskedCode.matchAll(pubFnRe)) {
-      const pos = getLineAndCol(originalCode, m.index ?? 0);
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        m.index ?? 0,
+        maskLengths,
+        originalCode,
+      );
       diags.push({
         ...pos,
         message: `Leaked AICE declaration keyword '${m[0].trim()}' in native ${targetLang} output`,
@@ -273,7 +381,15 @@ export function validateNativeSyntax(
     }
 
     const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
-    items.push(...checkLeakedAiceMarkers(maskRes.maskedCode, code, targetLang, activeIdioms));
+    items.push(
+      ...checkLeakedAiceMarkers(
+        maskRes.maskedCode,
+        code,
+        targetLang,
+        activeIdioms,
+        maskRes.maskLengths,
+      ),
+    );
     return finish();
   }
 
@@ -281,8 +397,10 @@ export function validateNativeSyntax(
   if (targetLang === "css") {
     const maskRes = maskSourceLexically(code, "css", activeIdioms);
     items.push(...maskRes.unterminatedDiagnostics);
-    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code));
-    items.push(...checkLeakedAiceMarkers(maskRes.maskedCode, code, "css", activeIdioms));
+    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
+    items.push(
+      ...checkLeakedAiceMarkers(maskRes.maskedCode, code, "css", activeIdioms, maskRes.maskLengths),
+    );
     try {
       postcss.parse(code, { from: filePath });
     } catch (err) {
@@ -299,13 +417,16 @@ export function validateNativeSyntax(
   // 4. HTML & Twig
   if (targetLang === "html" || targetLang === "twig") {
     const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
+    const masked = maskRes.maskedCode;
     items.push(...maskRes.unterminatedDiagnostics);
-    items.push(...checkLeakedAiceMarkers(maskRes.maskedCode, code, targetLang, activeIdioms));
+    items.push(
+      ...checkLeakedAiceMarkers(masked, code, targetLang, activeIdioms, maskRes.maskLengths),
+    );
 
     for (const tag of ["script", "style"]) {
-      const openCount = (code.match(new RegExp(`<${tag}\\b(?![^>]*\\/>)[^>]*>`, "gi")) ?? [])
+      const openCount = (masked.match(new RegExp(`<${tag}\\b(?![^>]*\\/>)[^>]*>`, "gi")) ?? [])
         .length;
-      const closeCount = (code.match(new RegExp(`<\\/${tag}\\s*>`, "gi")) ?? []).length;
+      const closeCount = (masked.match(new RegExp(`<\\/${tag}\\s*>`, "gi")) ?? []).length;
       if (openCount !== closeCount) {
         items.push({
           line: 1,
@@ -315,9 +436,23 @@ export function validateNativeSyntax(
       }
     }
 
-    if (targetLang === "twig" || code.includes("{%") || code.includes("{{")) {
-      const openStmt = (code.match(/\{%/g) ?? []).length;
-      const closeStmt = (code.match(/%\}/g) ?? []).length;
+    if (
+      targetLang === "twig" ||
+      masked.includes("{%") ||
+      masked.includes("{{") ||
+      masked.includes("%}")
+    ) {
+      let openStmt = 0;
+      let closeStmt = 0;
+      for (let i = 0; i < masked.length - 1; i++) {
+        if (masked[i] === "{" && masked[i + 1] === "%") {
+          openStmt++;
+          i++;
+        } else if (masked[i] === "%" && masked[i + 1] === "}") {
+          closeStmt++;
+          i++;
+        }
+      }
       if (openStmt !== closeStmt) {
         items.push({
           line: 1,
@@ -325,13 +460,58 @@ export function validateNativeSyntax(
           message: `Unbalanced Twig '{% ... %}' delimiters (${openStmt} '{%' vs ${closeStmt} '%}')`,
         });
       }
-      const openExpr = (code.match(/\{\{/g) ?? []).length;
-      const closeExpr = (code.match(/\}\}/g) ?? []).length;
-      if (openExpr !== closeExpr) {
+
+      const braceStack: Array<{ token: "{{" | "{"; offset: number }> = [];
+      let unexpectedCloseTwig = 0;
+      for (let i = 0; i < masked.length; i++) {
+        if (masked[i] === "{" && masked[i + 1] === "%") {
+          i++;
+          continue;
+        }
+        if (masked[i] === "%" && masked[i + 1] === "}") {
+          i++;
+          continue;
+        }
+        if (masked[i] === "{" && masked[i + 1] === "{") {
+          braceStack.push({ token: "{{", offset: i });
+          i++;
+          continue;
+        }
+        if (masked[i] === "{") {
+          braceStack.push({ token: "{", offset: i });
+          continue;
+        }
+        if (masked[i] === "}") {
+          const top = braceStack[braceStack.length - 1];
+          if (top?.token === "{{" && masked[i + 1] === "}") {
+            braceStack.pop();
+            i++;
+            continue;
+          }
+          if (top?.token === "{") {
+            braceStack.pop();
+            continue;
+          }
+          if (masked[i + 1] === "}") {
+            unexpectedCloseTwig++;
+            i++;
+          }
+        }
+      }
+      const unclosedTwigExprs = braceStack.filter((b) => b.token === "{{");
+      if (unclosedTwigExprs.length > 0 || unexpectedCloseTwig > 0) {
+        const firstPos =
+          unclosedTwigExprs.length > 0
+            ? getOriginalLineAndColFromMaskedOffset(
+                masked,
+                unclosedTwigExprs[0].offset,
+                maskRes.maskLengths,
+                code,
+              )
+            : { line: 1, column: 1 };
         items.push({
-          line: 1,
-          column: 1,
-          message: `Unbalanced Twig '{{ ... }}' delimiters (${openExpr} '{{' vs ${closeExpr} '}}')`,
+          ...firstPos,
+          message: `Unbalanced Twig '{{ ... }}' delimiters (${unclosedTwigExprs.length} unclosed '{{', ${unexpectedCloseTwig} unexpected '}}')`,
         });
       }
     }
@@ -342,8 +522,16 @@ export function validateNativeSyntax(
   // 5. Python, Rust, Go, C++, C#, Kotlin, PHP
   const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
   items.push(...maskRes.unterminatedDiagnostics);
-  items.push(...checkBalancedDelimiters(maskRes.maskedCode, code));
-  items.push(...checkLeakedAiceMarkers(maskRes.maskedCode, code, targetLang, activeIdioms));
+  items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
+  items.push(
+    ...checkLeakedAiceMarkers(
+      maskRes.maskedCode,
+      code,
+      targetLang,
+      activeIdioms,
+      maskRes.maskLengths,
+    ),
+  );
 
   return finish();
 }

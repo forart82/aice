@@ -20,11 +20,15 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   createBatch,
   createFile,
+  extractInlineIdiomsFromSource,
   generateContext,
   locateNativeDeclarationSpan,
   type OutlineResult,
   outlinePath,
+  parseOptionIdioms,
+  preprocessHybridAndIdiomsLossless,
   splice,
+  spliceNativeSource,
   validateNativeSyntax,
 } from "../src/tools/index.js";
 
@@ -990,5 +994,121 @@ describe("15-Language / 24-Extension Enterprise Polyglot Torture Suite (v0.9.7)"
     expect(brokenOut.text).toContain("## ⚠️ Native Syntax Diagnostics");
     const brokenCtx = await generateContext(brokenCss, { projectRoot: tmpDir });
     expect(brokenCtx.formattedBundle).toContain("## ⚠️ Native Syntax Diagnostics");
+    expect(brokenCtx.nativeDiagnostics).toContain("## ⚠️ Native Syntax Diagnostics");
+  });
+
+  it("13. Deep Edge-Case Regressions: regex/comments inside template `${...}`, `-> :#` & `[#]` sigils, Twig nested CSS `}}`, multi-line docstring diagnostic offsets, `=>` option idioms, match-arm `$idioms`, `<-` native splices, void C#/C++ fns, and C++ method overloads", () => {
+    // 1. Regex with quotes/braces and block comments with `}` inside JS/TS template literal `${...}`
+    const tplSrc =
+      "export const check = (s: string) => `res: ${ /don't/.test(s) && /}/g.test(s) && /* } */ true }`;";
+    const tplOut = preprocessHybridAndIdiomsLossless(tplSrc, "typescript");
+    expect(tplOut).toBe(tplSrc);
+    expect(validateNativeSyntax(tplOut, "typescript", "check.ts").valid).toBe(true);
+
+    // 2. Return type compact sigil `-> :#` in Rust, TypeScript, and PHP
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn calc(x: :#) -> :# {\n  <- x + 1.0\n}", "rust"),
+    ).toContain("pub fn calc(x: f64) -> f64 {");
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn calc(x: :#) -> :# {\n  <- x + 1\n}", "typescript"),
+    ).toContain("export function calc(x: number): number {");
+
+    // 3. Array compact sigils `[#]` in C++, C#, and PHP
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn sum(xs: [#]) -> :# {\n  <- 0.0;\n}", "cpp"),
+    ).toContain("double sum(std::vector<double> xs) {");
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn sum(xs: [#]) -> :# {\n  <- 0.0;\n}", "csharp"),
+    ).toContain("public double sum(double[] xs) {");
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn sum($xs: [#]) -> :# {\n  <- 0.0;\n}", "php"),
+    ).toContain("public function sum(array $xs): float {");
+
+    // 4. Twig comment with `{%` and nested CSS `@media { .card { ... }}` alongside `{{ title }}`
+    const twigWithNestedCss =
+      "{# comment with {% if x %} #}\n<style>@media (max-width: 600px) { .card { color: #fff; }}</style>\n<div>{{ title }}</div>";
+    expect(validateNativeSyntax(twigWithNestedCss, "twig", "nested.html.twig").valid).toBe(true);
+
+    // 5. Accurate line/column diagnostic offset after multi-line Python docstring
+    const pyBroken = [
+      '"""',
+      "Line 2 of docstring",
+      "Line 3 of docstring",
+      "Line 4 of docstring",
+      '"""',
+      "def broken_fn(x: int) -> int:",
+      "    return (x + 1",
+    ].join("\n");
+    const pyDiag = validateNativeSyntax(pyBroken, "python", "broken.py");
+    expect(pyDiag.valid).toBe(false);
+    expect(pyDiag.items[0]?.line).toBe(7);
+
+    // 6. `parseOptionIdioms` with `=>` arrow separator
+    const parsedIdioms = parseOptionIdioms("$clamp($0,$1,$2) => Math.max($1, Math.min($2, $0))");
+    expect(parsedIdioms.$clamp.templateAice).toBe("Math.max($1, Math.min($2, $0))");
+
+    // 7. Inline `@idiom` with `return` expanded inside Rust `match` arm
+    const rsIdiomMatch = [
+      "@idiom $bail($0) = return Err($0)",
+      "pub fn check(x: Option<i32>) -> Result<i32, &str> {",
+      "    match x {",
+      "        Some(v) => Ok(v),",
+      '        None => $bail("missing"),',
+      "    }",
+      "}",
+    ].join("\n");
+    const ex = extractInlineIdiomsFromSource(rsIdiomMatch);
+    const rsExpanded = preprocessHybridAndIdiomsLossless(ex.cleanedCode, "rust", ex.inlineIdioms);
+    expect(rsExpanded).toContain('None => return Err("missing"),');
+
+    // 8. Splicing native Rust and Python functions containing `<-` return shorthands
+    const rsOrig = "pub fn calc(x: f64) -> f64 {\n    return x;\n}\n";
+    const rsSpliced = spliceNativeSource(
+      rsOrig,
+      { symbol: "calc", code: "pub fn calc(x: f64) -> f64 {\n    <- x + 1.0;\n}" },
+      "calc.rs",
+    );
+    expect(rsSpliced.modifiedCode).toContain("return x + 1.0;");
+
+    const pyOrig = "def calc(x: float) -> float:\n    return x\n";
+    const pySpliced = spliceNativeSource(
+      pyOrig,
+      { symbol: "calc", code: "def calc(x: float) -> float:\n    <- x + 1.0" },
+      "calc.py",
+    );
+    expect(pySpliced.modifiedCode).toContain("return x + 1.0");
+
+    // 9. Void hybrid `pub fn` without `->` in C# and C++
+    expect(
+      preprocessHybridAndIdiomsLossless("pub fn reset(x: :#) {\n  ret;\n}", "csharp"),
+    ).toContain("public void reset(double x) {");
+    expect(preprocessHybridAndIdiomsLossless("pub fn reset(x: :#) {\n  ret;\n}", "cpp")).toContain(
+      "void reset(double x) {",
+    );
+
+    // 10. Overloaded method resolution in C++
+    const cppOverloads = [
+      "class Calc {",
+      "public:",
+      "  int compute(int a) {",
+      "    return a;",
+      "  }",
+      "  int compute(int a, int b) {",
+      "    return a + b;",
+      "  }",
+      "};",
+    ].join("\n");
+    const span2 = locateNativeDeclarationSpan(cppOverloads, "Calc.compute(int, int)", "cpp");
+    expect(span2?.origHeader?.trim()).toBe("int compute(int a, int b)");
+
+    const splicedOverload = spliceNativeSource(
+      cppOverloads,
+      { symbol: "Calc.compute", code: "int compute(int a, int b) {\n  return a * b;\n}" },
+      "calc.cpp",
+    );
+    expect(splicedOverload.modifiedCode).toContain("int compute(int a) {\n    return a;\n  }");
+    expect(splicedOverload.modifiedCode).toContain(
+      "int compute(int a, int b) {\n    return a * b;\n  }",
+    );
   });
 });

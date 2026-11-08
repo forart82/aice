@@ -747,6 +747,9 @@ export class AiceMcpServer {
         if (effectiveIdioms && result.idioms && Object.keys(result.idioms).length > 0) {
           text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
         }
+        if (result.nativeDiagnostics) {
+          text += `\n\n${result.nativeDiagnostics}`;
+        }
 
         let nativeText = "";
         try {

@@ -1068,7 +1068,7 @@ function supplementNativeSymbolsFromSource(
         ) {
           continue;
         }
-        const span = locateNativeDeclarationSpan(source, targetLang, name);
+        const span = locateNativeDeclarationSpan(source, name, targetLang);
         const sLine = span?.startLine ?? i + 1;
         const eLine = span?.endLine ?? Math.min(totalLines, sLine);
         symbols.push({
@@ -1095,7 +1095,7 @@ function resolveSingleSymbolSpanInNative(
   originalSource: string,
   rawLines: string[],
   targetLang: TargetLanguage,
-  filePath: string,
+  _filePath: string,
 ): { startLine: number; endLine: number } | null {
   if (targetLang === "css" && sym.kind === "style") {
     try {
@@ -1119,7 +1119,7 @@ function resolveSingleSymbolSpanInNative(
   }
 
   if (sym.kind !== "import") {
-    const span = locateNativeDeclarationSpan(originalSource, targetLang, sym.name, filePath);
+    const span = locateNativeDeclarationSpan(originalSource, sym.name, targetLang);
     if (span) {
       const sLine = span.startLine ?? 1;
       const eLine = span.endLine ?? sLine;
@@ -1144,11 +1144,11 @@ function resolveChildSymbolSpanInNative(
   originalSource: string,
   rawLines: string[],
   targetLang: TargetLanguage,
-  filePath: string,
+  _filePath: string,
 ): { startLine: number; endLine: number } | null {
   if (childSym.kind === "method") {
     const dotted = `${parentSym.name}.${childSym.name}`;
-    const span = locateNativeDeclarationSpan(originalSource, targetLang, dotted, filePath);
+    const span = locateNativeDeclarationSpan(originalSource, dotted, targetLang, parentSym.name);
     if (span) {
       const sLine = span.startLine ?? 1;
       const eLine = span.endLine ?? sLine;

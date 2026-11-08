@@ -34,6 +34,7 @@ export interface LexicalScanDiagnostic {
 export interface LexicalMaskResult {
   maskedCode: string;
   maskTable: string[];
+  maskLengths: number[];
   unterminatedDiagnostics: LexicalScanDiagnostic[];
 }
 
@@ -163,6 +164,127 @@ function canStartRegexInJsTs(
   return false;
 }
 
+function scanJsTsTemplateExprClose(
+  source: string,
+  exprStart: number,
+  targetLang: TargetLanguage,
+): number {
+  const len = source.length;
+  let j = exprStart;
+  let braceDepth = 1;
+
+  while (j < len && braceDepth > 0) {
+    const ec = source[j];
+    const next = source[j + 1];
+
+    if (ec === "\\" && j + 1 < len) {
+      j += 2;
+      continue;
+    }
+
+    // Line comment `// ...`
+    if (ec === "/" && next === "/") {
+      j += 2;
+      while (j < len && source[j] !== "\n" && source[j] !== "\r") j++;
+      continue;
+    }
+
+    // Block comment `/* ... */`
+    if (ec === "/" && next === "*") {
+      const closeComment = source.indexOf("*/", j + 2);
+      if (closeComment < 0) {
+        return len;
+      }
+      j = closeComment + 2;
+      continue;
+    }
+
+    // Regex literal `/pattern/flags`
+    if (ec === "/" && next !== "/" && next !== "*" && next !== "=") {
+      if (canStartRegexInJsTs(source, j, targetLang)) {
+        let rj = j + 1;
+        let inCharClass = false;
+        let foundClose = false;
+        while (rj < len && source[rj] !== "\n" && source[rj] !== "\r") {
+          const rc = source[rj];
+          if (rc === "\\" && rj + 1 < len && source[rj + 1] !== "\n") {
+            rj += 2;
+            continue;
+          }
+          if (rc === "[") {
+            inCharClass = true;
+          } else if (rc === "]") {
+            inCharClass = false;
+          } else if (rc === "/" && !inCharClass) {
+            foundClose = true;
+            rj++;
+            while (rj < len && /[dgimsuvy]/.test(source[rj])) {
+              rj++;
+            }
+            break;
+          }
+          rj++;
+        }
+        if (foundClose) {
+          j = rj;
+          continue;
+        }
+      }
+    }
+
+    // Single or double quoted string
+    if (ec === '"' || ec === "'") {
+      const q = ec;
+      j++;
+      while (j < len && source[j] !== q && source[j] !== "\n" && source[j] !== "\r") {
+        if (source[j] === "\\") j += 2;
+        else j++;
+      }
+      if (j < len && source[j] === q) j++;
+      continue;
+    }
+
+    // Nested template literal `` `...${...}...` ``
+    if (ec === "`") {
+      j++;
+      while (j < len) {
+        if (source[j] === "\\" && j + 1 < len) {
+          j += 2;
+          continue;
+        }
+        if (source[j] === "`") {
+          j++;
+          break;
+        }
+        if (source[j] === "$" && source[j + 1] === "{") {
+          j = scanJsTsTemplateExprClose(source, j + 2, targetLang);
+          if (j < len && source[j] === "}") j++;
+          continue;
+        }
+        j++;
+      }
+      continue;
+    }
+
+    if (ec === "{") {
+      braceDepth++;
+      j++;
+      continue;
+    }
+    if (ec === "}") {
+      braceDepth--;
+      if (braceDepth === 0) {
+        return j;
+      }
+      j++;
+      continue;
+    }
+    j++;
+  }
+
+  return j;
+}
+
 /**
  * Lexically masks comments, strings, raw strings, and template literals so that
  * hybrid shorthand lowering and syntax checks only inspect real code tokens.
@@ -172,12 +294,15 @@ export function maskSourceLexically(
   targetLang: TargetLanguage,
   activeIdioms: Record<string, ProjectIdiomDefinition> = {},
   existingMaskTable?: string[],
+  existingMaskLengths?: number[],
 ): LexicalMaskResult {
   const maskTable = existingMaskTable ?? [];
+  const maskLengths = existingMaskLengths ?? [];
   const unterminatedDiagnostics: LexicalScanDiagnostic[] = [];
-  const addMask = (raw: string, kind: "str" | "cmt"): string => {
+  const addMask = (raw: string, kind: "str" | "cmt", origLength = raw.length): string => {
     const idx = maskTable.length;
     maskTable.push(raw);
+    maskLengths.push(origLength);
     return encodeMaskToken(idx, kind);
   };
 
@@ -410,35 +535,14 @@ export function maskSourceLexically(
           }
           if (c === "$" && source[j + 1] === "{") {
             tpl += "${";
-            j += 2;
-            const exprStart = j;
-            let braceDepth = 1;
-            while (j < len && braceDepth > 0) {
-              const ec = source[j];
-              if (ec === "\\" && j + 1 < len) {
-                j += 2;
-                continue;
-              }
-              if (ec === '"' || ec === "'" || ec === "`") {
-                const q = ec;
-                j++;
-                while (j < len && source[j] !== q) {
-                  if (source[j] === "\\") j += 2;
-                  else j++;
-                }
-                if (j < len) j++;
-                continue;
-              }
-              if (ec === "{") braceDepth++;
-              else if (ec === "}") braceDepth--;
-              if (braceDepth > 0) j++;
-            }
+            const exprStart = j + 2;
+            j = scanJsTsTemplateExprClose(source, exprStart, targetLang);
             const rawInner = source.slice(exprStart, j);
-            const processedInner = preprocessHybridAndIdiomsLossless(
-              rawInner,
-              targetLang,
-              activeIdioms,
-            ).trim();
+            const leadWs = rawInner.match(/^\s*/)?.[0] ?? "";
+            const trailWs = rawInner.match(/\s*$/)?.[0] ?? "";
+            const processedInner = rawInner.trim()
+              ? `${leadWs}${preprocessHybridAndIdiomsLossless(rawInner.trim(), targetLang, activeIdioms).trim()}${trailWs}`
+              : rawInner;
             tpl += `${processedInner}}`;
             if (j < len && source[j] === "}") j++;
             continue;
@@ -453,7 +557,7 @@ export function maskSourceLexically(
             message: "Unterminated template literal '`'",
           });
         }
-        out += addMask(tpl, "str");
+        out += addMask(tpl, "str", j - i);
         i = j;
         continue;
       }
@@ -604,7 +708,7 @@ export function maskSourceLexically(
     i++;
   }
 
-  return { maskedCode: out, maskTable, unterminatedDiagnostics };
+  return { maskedCode: out, maskTable, maskLengths, unterminatedDiagnostics };
 }
 
 function splitBalancedMaskedArgs(rawArgs: string): string[] {
@@ -636,12 +740,20 @@ function splitBalancedMaskedArgs(rawArgs: string): string[] {
   return args;
 }
 
+function lowerIdiomTemplateStatementShards(stmt: string, targetLang: TargetLanguage): string {
+  if (targetLang === "go") {
+    return stmt.replace(/^(\s*)ret\s+(.+)$/, "$1return $2").replace(/^(\s*)ret\s*$/, "$1return");
+  }
+  return stmt
+    .replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2")
+    .replace(/^(\s*)(?:ret|<-)\s*$/, "$1return");
+}
+
 function lowerIdiomTemplateAiceBlocksForBraceTarget(
   templateMasked: string,
   targetLang: TargetLanguage,
 ): string {
   if (
-    targetLang === "python" ||
     targetLang === "css" ||
     targetLang === "html" ||
     targetLang === "twig" ||
@@ -649,6 +761,18 @@ function lowerIdiomTemplateAiceBlocksForBraceTarget(
     targetLang === "yaml"
   ) {
     return templateMasked;
+  }
+
+  if (targetLang === "python") {
+    return templateMasked
+      .split(/\r?\n/)
+      .map((l) =>
+        l
+          .replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2")
+          .replace(/^(\s*)(?:ret|<-)\s*$/, "$1return")
+          .replace(/:\s*(?:ret|<-)\s+(.+)$/, ": return $1"),
+      )
+      .join("\n");
   }
 
   const noParenCond = targetLang === "rust" || targetLang === "go";
@@ -669,9 +793,9 @@ function lowerIdiomTemplateAiceBlocksForBraceTarget(
     const line = lines[i];
     const singleIf = line.match(/^(\s*)if\s+([^:{]+):\s*(.+)$/);
     if (singleIf) {
-      const [, ind, cond, body] = singleIf;
-      const cleanBody =
-        body.trim().endsWith(";") || targetLang === "go" ? body.trim() : `${body.trim()};`;
+      const [, ind, cond, rawBody] = singleIf;
+      const body = lowerIdiomTemplateStatementShards(rawBody.trim(), targetLang);
+      const cleanBody = body.endsWith(";") || targetLang === "go" ? body : `${body};`;
       outLines.push(`${ind}if ${formatCond(cond)} { ${cleanBody} }`);
       i++;
       continue;
@@ -691,7 +815,7 @@ function lowerIdiomTemplateAiceBlocksForBraceTarget(
         }
         const nInd = nl.match(/^(\s*)/)?.[1].length ?? 0;
         if (nInd <= baseIndent) break;
-        const stmt = nl.trim();
+        const stmt = lowerIdiomTemplateStatementShards(nl.trim(), targetLang);
         const terminated =
           stmt.endsWith(";") || stmt.endsWith("}") || targetLang === "go" ? stmt : `${stmt};`;
         blockLines.push(`${ind}  ${terminated}`);
@@ -701,7 +825,7 @@ function lowerIdiomTemplateAiceBlocksForBraceTarget(
       continue;
     }
 
-    outLines.push(line);
+    outLines.push(lowerIdiomTemplateStatementShards(line, targetLang));
     i++;
   }
 
@@ -713,6 +837,7 @@ function expandMaskedIdioms(
   activeIdioms: Record<string, ProjectIdiomDefinition>,
   targetLang: TargetLanguage,
   maskTable: string[],
+  maskLengths?: number[],
 ): string {
   if (!maskedCode.includes("$") || Object.keys(activeIdioms).length === 0) {
     return maskedCode;
@@ -760,6 +885,7 @@ function expandMaskedIdioms(
                   targetLang,
                   activeIdioms,
                   maskTable,
+                  maskLengths,
                 );
                 let expanded = lowerIdiomTemplateAiceBlocksForBraceTarget(
                   maskedTplRes.maskedCode,
@@ -824,7 +950,10 @@ function expandMaskedIdioms(
 
 function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): string {
   // Collapse `: :#`, `: :$`, `: :?`, `: :_`, `: :*` into `:#`, `:$`, `:?`, `:_`, `:*`
-  let out = line.replace(/:\s*:(?=\s*(?:#|\$|\?|_|\*|\[\s*(?:#|\$|\?|_|\*)\s*\]))/g, ":");
+  // and `-> :#`, `-> :$`, `-> :?`, `-> :_`, `-> :*` into `-> #`, `-> $`, `-> ?`, `-> _`, `-> *`
+  let out = line
+    .replace(/:\s*:(?=\s*(?:#|\$|\?|_|\*|\[\s*(?:#|\$|\?|_|\*)\s*\]))/g, ":")
+    .replace(/->\s*:(?=\s*(?:#|\$|\?|_|\*|\[\s*(?:#|\$|\?|_|\*)\s*\]))/g, "-> ");
 
   if (targetLang === "javascript") {
     return out
@@ -845,11 +974,11 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": boolean")
       .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": void")
       .replace(/:(?!=)\s*\*(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": any")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, ": number")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, ": string")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, ": boolean")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, ": void")
-      .replace(/->\s*\*(?![A-Za-z0-9_])/g, ": any")
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, ": number")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": string")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": boolean")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, ": void")
+      .replace(/\s*->\s*\*(?![A-Za-z0-9_])/g, ": any")
       .replace(/\)\s*->\s*([^{=;]+?)(\s*(?:\{|=>))/g, "): $1$2");
   }
 
@@ -864,11 +993,11 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/:(?!=)\s*\?(?=\s*(?:=|,|\)|\]|\}|->|:|$))/g, ": bool")
       .replace(/:(?!=)\s*_(?=\s*(?:=|,|\)|\]|\}|->|:|$))/g, ": None")
       .replace(/:(?!=)\s*\*(?=\s*(?:=|,|\)|\]|\}|->|:|$))/g, ": Any")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, " -> float")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, " -> str")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, " -> bool")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, " -> None")
-      .replace(/->\s*\*(?![A-Za-z0-9_])/g, " -> Any");
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, " -> float")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, " -> str")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, " -> bool")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, " -> None")
+      .replace(/\s*->\s*\*(?![A-Za-z0-9_])/g, " -> Any");
   }
 
   if (targetLang === "rust") {
@@ -880,24 +1009,27 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/:(?!=)\s*\$(?=\s*(?:=|,|;|\)|\]|\}|->|\{|$))/g, ": String")
       .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|$))/g, ": bool")
       .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|$))/g, ": ()")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, " -> f64")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, " -> String")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, " -> bool")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, " -> ()");
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, " -> f64")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, " -> String")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, " -> bool")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, " -> ()");
   }
 
   if (targetLang === "go") {
     return out
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*#\s*\](?=\s*(?:,|\)|$))/g, "$1 []float64")
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*\$\s*\](?=\s*(?:,|\)|$))/g, "$1 []string")
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*\?\s*\](?=\s*(?:,|\)|$))/g, "$1 []bool")
       .replace(/(:\s*|->\s*)\[\s*#\s*\]/g, "$1[]float64")
       .replace(/(:\s*|->\s*)\[\s*\$\s*\]/g, "$1[]string")
       .replace(/(:\s*|->\s*)\[\s*\?\s*\]/g, "$1[]bool")
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*#(?=\s*(?:,|\)|$))/g, "$1 float64")
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\$(?=\s*(?:,|\)|$))/g, "$1 string")
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\?(?=\s*(?:,|\)|$))/g, "$1 bool")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, " float64")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, " string")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, " bool")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, "")
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, " float64")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, " string")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, " bool")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, "")
       .replace(/\)\s*->\s*([^{]+?)(\s*\{)/g, ") $1$2");
   }
 
@@ -911,25 +1043,30 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/:(?!=)\s*\?(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": Boolean")
       .replace(/:(?!=)\s*_(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": Unit")
       .replace(/:(?!=)\s*\*(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": Any")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, ": Double")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, ": String")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, ": Boolean")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, ": Unit")
-      .replace(/->\s*\*(?![A-Za-z0-9_])/g, ": Any")
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, ": Double")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": String")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": Boolean")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, ": Unit")
+      .replace(/\s*->\s*\*(?![A-Za-z0-9_])/g, ": Any")
       .replace(/\)\s*->\s*([^{=]+?)(\s*\{)/g, "): $1$2");
   }
 
   if (targetLang === "php") {
     return out
+      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*(?:#|\$|\?|_|\*)\s*\]/g, "array $1")
+      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*)\s*:\s*#(?=\s*(?:=|,|\)|$))/g, "float $1")
+      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*)\s*:\s*\$(?=\s*(?:=|,|\)|$))/g, "string $1")
+      .replace(/(\$[A-Za-z_][A-Za-z0-9_]*)\s*:\s*\?(?=\s*(?:=|,|\)|$))/g, "bool $1")
+      .replace(/(:\s*|\s*->\s*)\[\s*(?:#|\$|\?|_|\*)\s*\]/g, ": array")
       .replace(/:(?!=)\s*#(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": float")
       .replace(/:(?!=)\s*\$(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": string")
       .replace(/:(?!=)\s*\?(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": bool")
       .replace(/:(?!=)\s*_(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": void")
       .replace(/:(?!=)\s*\*(?=\s*(?:=|,|\)|\]|\}|->|\{|$))/g, ": mixed")
-      .replace(/->\s*#(?![A-Za-z0-9_])/g, ": float")
-      .replace(/->\s*\$(?![A-Za-z0-9_])/g, ": string")
-      .replace(/->\s*\?(?![A-Za-z0-9_])/g, ": bool")
-      .replace(/->\s*_(?![A-Za-z0-9_])/g, ": void")
+      .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, ": float")
+      .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": string")
+      .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": bool")
+      .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, ": void")
       .replace(/\)\s*->\s*([^{]+?)(\s*\{)/g, "): $1$2");
   }
 
@@ -937,7 +1074,16 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
     const numType = "double";
     const strType = targetLang === "cpp" ? "std::string" : "string";
     const boolType = "bool";
+    const numArr = targetLang === "cpp" ? "std::vector<double>" : "double[]";
+    const strArr = targetLang === "cpp" ? "std::vector<std::string>" : "string[]";
+    const boolArr = targetLang === "cpp" ? "std::vector<bool>" : "bool[]";
     out = out
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*#\s*\](?=\s*(?:,|\)|=|$))/g, `${numArr} $1`)
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*\$\s*\](?=\s*(?:,|\)|=|$))/g, `${strArr} $1`)
+      .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\[\s*\?\s*\](?=\s*(?:,|\)|=|$))/g, `${boolArr} $1`)
+      .replace(/->\s*\[\s*#\s*\]/g, `-> ${numArr}`)
+      .replace(/->\s*\[\s*\$\s*\]/g, `-> ${strArr}`)
+      .replace(/->\s*\[\s*\?\s*\]/g, `-> ${boolArr}`)
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*#(?=\s*(?:,|\)|=|$))/g, `${numType} $1`)
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\$(?=\s*(?:,|\)|=|$))/g, `${strType} $1`)
       .replace(/([A-Za-z_][A-Za-z0-9_]*)\s*:\s*\?(?=\s*(?:,|\)|=|$))/g, `${boolType} $1`)
@@ -970,6 +1116,10 @@ function lowerHybridLineForTarget(
     out = out.replace(
       /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+|@cls\s+)([A-Za-z_][A-Za-z0-9_]*)/,
       "$1class $2",
+    );
+    out = out.replace(
+      /^(\s*)(?:@type\s+\^|\^type\s+|pub\s+type\s+|@type\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+      "$1type $2",
     );
     out = out.replace(/^(\s*)(?:pub\s+)?(?:\^?(?:const|val|mut|let)\s+(?:mut\s+)?)/, "$1");
     out = out.replace(
@@ -1010,6 +1160,8 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:\^(?:const|val)\s+|(?:const|val)\s+\^|pub\s+val\s+)/,
       "$1pub const ",
     );
+    out = out.replace(/^(\s*)(?:pub\s+let\s+mut\s+|pub\s+mut\s+|\^mut\s+)/, "$1let mut ");
+    out = out.replace(/^(\s*)(?:pub\s+let\s+|\^let\s+)/, "$1let ");
     out = out.replace(
       /^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+)=\s*(.+)$/,
       "$1let $2: $3 = $4",
@@ -1032,7 +1184,8 @@ function lowerHybridLineForTarget(
     out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::=\s*(.+)$/, "$1let mut $2 = $3");
     out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
     out = out.replace(/^(\s*)(?:ret|<-)\s*;?\s*$/, "$1return;");
-    out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)(?=\s*(?:;|,|\}|$))/g, "$1return");
     out = out.replace(/^(\s*\}\s*)elif\b/, "$1else if");
     out = out.replace(/^(\s*)elif\b/, "$1else if");
     return lowerCompactSigilsForTarget(out, targetLang);
@@ -1044,13 +1197,24 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+|@fn\s+|fn\s+)([A-Za-z_][A-Za-z0-9_]*)/,
       `$1func ${goRecv}$2`,
     );
+    out = out.replace(
+      /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+|@cls\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\{/,
+      "$1type $2 struct {",
+    );
+    out = out.replace(
+      /^(\s*)(?:@type\s+\^|\^type\s+|pub\s+type\s+|@type\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+      "$1type $2",
+    );
+    out = out.replace(/^(\s*)(?:pub\s+const\s+|\^const\s+|pub\s+val\s+)/, "$1const ");
+    out = out.replace(/^(\s*)(?:pub\s+let\s+|pub\s+mut\s+|\^let\s+|\^mut\s+)/, "$1var ");
     out = out.replace(/^(\s*)::?=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 := $3");
     out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::=\s*(.+)$/, "$1$2 := $3");
     out = out.replace(/^(\s*)(?:val|mut|let)\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 := $3");
     // In Go, `<-ch` and `msg := <-ch` are native channel receives! Only lower `ret`.
     out = out.replace(/^(\s*)ret\s+(.+)$/, "$1return $2");
     out = out.replace(/^(\s*)ret\s*$/, "$1return");
-    out = out.replace(/(\{\s*)ret\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(\{\s*|\belse\s+)ret\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(\{\s*|\belse\s+)ret(?=\s*(?:\}|$))/g, "$1return");
     out = out.replace(/^(\s*\}\s*)elif\b/, "$1else if");
     out = out.replace(/^(\s*)elif\b/, "$1else if");
     return lowerCompactSigilsForTarget(out, targetLang);
@@ -1069,6 +1233,15 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+|@cls\s+)([A-Za-z_][A-Za-z0-9_]*)/,
       "$1class $2",
     );
+    out = out.replace(
+      /^(\s*)(?:@type\s+\^|\^type\s+|pub\s+type\s+|@type\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+      "$1typealias $2",
+    );
+    out = out.replace(
+      /^(\s*)(?:pub\s+const\s+|\^const\s+|pub\s+val\s+|pub\s+let\s+|\^let\s+)/,
+      "$1val ",
+    );
+    out = out.replace(/^(\s*)(?:pub\s+mut\s+|\^mut\s+)/, "$1var ");
     out = out.replace(/^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1val $2 = $3");
     out = out.replace(/^(\s*)::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1var $2 = $3");
     out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(.+)$/, "$1val $2 = $3");
@@ -1076,7 +1249,11 @@ function lowerHybridLineForTarget(
     out = out.replace(/^(\s*)mut\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1var $2");
     out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
     out = out.replace(/^(\s*)(?:ret|<-)\s*$/, "$1return");
-    out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|->\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(
+      /(=>\s*|->\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g,
+      "$1return",
+    );
     return lowerCompactSigilsForTarget(out, targetLang);
   }
 
@@ -1095,11 +1272,14 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+|@cls\s+)([A-Za-z_][A-Za-z0-9_]*)/,
       "$1class $2",
     );
+    out = out.replace(/^(\s*)(?:pub\s+const\s+|\^const\s+)/, "$1public const ");
+    out = out.replace(/^(\s*)(?:pub\s+let\s+|pub\s+mut\s+|\^let\s+|\^mut\s+)/, "$1public ");
     out = out.replace(/^(\s*)::?=\s+(\$[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 = $3");
     out = out.replace(/^(\s*)(\$[A-Za-z_][A-Za-z0-9_]*)\s*::?=\s*(.+)$/, "$1$2 = $3");
     out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
     out = out.replace(/^(\s*)(?:ret|<-)\s*;?\s*$/, "$1return;");
-    out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
     return lowerCompactSigilsForTarget(out, targetLang);
   }
 
@@ -1111,22 +1291,40 @@ function lowerHybridLineForTarget(
         "$1public async $4 $2($3) {",
       );
       out = out.replace(
+        /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|pub\s+async\s+fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{/,
+        "$1public async Task $2($3) {",
+      );
+      out = out.replace(
         /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|pub\s+static\s+fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([^{]+?)\s*\{/,
         "$1public static $4 $2($3) {",
+      );
+      out = out.replace(
+        /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|pub\s+static\s+fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{/,
+        "$1public static void $2($3) {",
       );
       out = out.replace(
         /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([^{]+?)\s*\{/,
         "$1public $4 $2($3) {",
       );
       out = out.replace(
+        /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{/,
+        "$1public void $2($3) {",
+      );
+      out = out.replace(
         /^(\s*)(?:@fn\s+|fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([^{]+?)\s*\{/,
         "$1$4 $2($3) {",
+      );
+      out = out.replace(
+        /^(\s*)(?:@fn\s+|fn\s+)([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*\{/,
+        "$1void $2($3) {",
       );
       out = out.replace(
         /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+)([A-Za-z_][A-Za-z0-9_]*)/,
         "$1public class $2",
       );
       out = out.replace(/^(\s*)@cls\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1class $2");
+      out = out.replace(/^(\s*)(?:pub\s+const\s+|\^const\s+|pub\s+val\s+)/, "$1public const ");
+      out = out.replace(/^(\s*)(?:pub\s+let\s+|pub\s+mut\s+|\^let\s+|\^mut\s+)/, "$1public var ");
       out = out.replace(/^(\s*)::?=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1var $2 = $3");
       out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::?=\s*(.+)$/, "$1var $2 = $3");
     } else {
@@ -1135,9 +1333,20 @@ function lowerHybridLineForTarget(
         "$1$4 $2($3) {",
       );
       out = out.replace(
+        /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+|@fn\s+|fn\s+)([A-Za-z_][A-Za-z0-9_:]*)\s*\(([^)]*)\)\s*\{/,
+        "$1void $2($3) {",
+      );
+      out = out.replace(
         /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+|@cls\s+)([A-Za-z_][A-Za-z0-9_]*)/,
         "$1class $2",
       );
+      out = out.replace(
+        /^(\s*)(?:@type\s+\^|\^type\s+|pub\s+type\s+|@type\s+)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/,
+        "$1using $2 = $3",
+      );
+      out = out.replace(/^(\s*)(?:pub\s+const\s+|\^const\s+|pub\s+val\s+)/, "$1constexpr auto ");
+      out = out.replace(/^(\s*)(?:pub\s+let\s+|\^let\s+)/, "$1const auto ");
+      out = out.replace(/^(\s*)(?:pub\s+mut\s+|\^mut\s+)/, "$1auto ");
       out = out.replace(/^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1const auto $2 = $3");
       out = out.replace(/^(\s*)::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1auto $2 = $3");
       out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:=\s*(.+)$/, "$1const auto $2 = $3");
@@ -1145,7 +1354,8 @@ function lowerHybridLineForTarget(
     }
     out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
     out = out.replace(/^(\s*)(?:ret|<-)\s*;?\s*$/, "$1return;");
-    out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+    out = out.replace(/(=>\s*|\)\s+|\belse\s+|\{\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
     return out;
   }
 
@@ -1245,8 +1455,8 @@ function lowerHybridLineForTarget(
   // Return & control-flow shorthands
   out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
   out = out.replace(/^(\s*)(?:ret|<-)\s*;?\s*$/, "$1return;");
-  out = out.replace(/(\)\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
-  out = out.replace(/(\)\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
+  out = out.replace(/(=>\s*|\)\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+  out = out.replace(/(=>\s*|\)\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
   out = out.replace(/(\belse\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
   out = out.replace(/(\belse\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
   out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
@@ -1273,6 +1483,7 @@ export function preprocessBareCssLossless(
     activeIdioms,
     "css",
     maskRes.maskTable,
+    maskRes.maskLengths,
   );
   const idiomExpanded = unmaskLexicalTokens(expandedMasked, maskRes.maskTable);
 
@@ -1337,6 +1548,7 @@ export function preprocessHybridAndIdiomsLossless(
     activeIdioms,
     targetLang,
     maskRes.maskTable,
+    maskRes.maskLengths,
   );
 
   if (
@@ -1436,7 +1648,11 @@ export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLa
       /^\s*match\s+[^:\n]+:\s*$/m.test(masked) ||
       /^\s*(?:from\s+\S+\s+import\s+|import\s+[A-Za-z_])/m.test(masked) ||
       cleanedCode.includes('"""') ||
-      cleanedCode.includes("'''")
+      cleanedCode.includes("'''") ||
+      (cleanedCode.includes("class ") &&
+        (/^\s*(?:async\s+)?def\s+/m.test(masked) ||
+          /\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked) ||
+          /(?:^|\s)(?:ret|<-)\b/m.test(masked)))
     );
   }
 
