@@ -253,7 +253,7 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       const initRes = (await server.handleRequest(1, "initialize", {
         workspaceFolders: [{ uri: `file://${secondWorkspace}`, name: "ws2" }],
       })) as { serverInfo?: { version?: string } };
-      expect(initRes.serverInfo?.version).toBe("0.9.1");
+      expect(initRes.serverInfo?.version).toBe("0.9.2");
 
       // Outline file in secondWorkspace (outside initialWorkspace) succeeds
       const outRes = (await server.handleRequest(2, "tools/call", {

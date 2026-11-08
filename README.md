@@ -207,6 +207,19 @@ Automatically detects your Linux distro (`apt-get`, `dnf`/`yum`, `pacman`, `zypp
 ./install.sh --dry-run          # Preview all actions without mutating disk
 ```
 
+### Universal Linux Uninstaller (`./uninstall.sh`)
+Cleanly removes the `~/.local/bin/aice` symlink, CLI coding agent MCP/prompt registrations (`aice agents remove`), the Zsh startup cheatsheet in `~/.zshrc`, global `~/.aice` telemetry state, and all `aice.config.json` files across your projects:
+
+```bash
+./uninstall.sh
+
+# Optional flags:
+./uninstall.sh --projects-dir ~/dev     # Scan a specific root directory for aice.config.json files
+./uninstall.sh --keep-project-configs   # Preserve project aice.config.json files
+./uninstall.sh --keep-telemetry         # Preserve ~/.aice telemetry ledger
+./uninstall.sh --dry-run                # Preview all files/configs that would be removed
+```
+
 ### Option 2: Manual Symlink or Standalone Single Binary
 ```bash
 # Manual symlink:

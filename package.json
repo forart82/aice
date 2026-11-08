@@ -1,6 +1,6 @@
 {
   "name": "aice",
-  "version": "0.9.1",
+  "version": "0.9.2",
   "description": "AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI",
   "type": "module",
   "main": "./src/index.ts",

@@ -537,7 +537,7 @@ export class AiceMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "aice-mcp", version: "0.9.1" },
+          serverInfo: { name: "aice-mcp", version: "0.9.2" },
         };
       }
 

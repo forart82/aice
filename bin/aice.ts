@@ -87,7 +87,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.9.1");
+  .version("0.9.2");
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
