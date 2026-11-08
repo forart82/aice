@@ -292,7 +292,11 @@ export class TwigEmitter {
       }
       case "RecordLiteralExpr": {
         const props = expr.properties
-          .map((p) => (p.key ? `${p.key}: ${this.emitExpr(p.value)}` : this.emitExpr(p.value)))
+          .map((p) => {
+            if (!p.key) return this.emitExpr(p.value);
+            const fmtKey = /^[A-Za-z_][A-Za-z0-9_]*$/.test(p.key) ? p.key : JSON.stringify(p.key);
+            return `${fmtKey}: ${this.emitExpr(p.value)}`;
+          })
           .join(", ");
         return `{ ${props} }`;
       }

@@ -16,13 +16,21 @@ import {
   loadProjectConfig,
   setProjectAiceEnabled,
 } from "../src/config/index.js";
+import { emitTarget, parse } from "../src/index.js";
 import { AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
 import {
   buildGainReport,
   formatGlobalGainDashboard,
   readTelemetryEvents,
 } from "../src/telemetry/index.js";
-import { createBatch, createFile, splice, spliceBatch } from "../src/tools/index.js";
+import {
+  createBatch,
+  createFile,
+  generateContext,
+  outlinePath,
+  splice,
+  spliceBatch,
+} from "../src/tools/index.js";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin/aice.ts");
 const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
@@ -648,6 +656,161 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(fs.existsSync(path.join(proj1, "AGENTS.md"))).toBe(false);
       expect(fs.existsSync(path.join(proj1, ".agents", "rules", "aice.md"))).toBe(false);
       expect(fs.readFileSync(path.join(proj1, "CLAUDE.md"), "utf-8")).toBe("# Team Rules\n");
+    });
+  });
+
+  describe("AICE v0.9.6 Real-World Regression Suite (aice_tetris Findings)", () => {
+    it("1. expands bare CSS selectors and compact CSS shorthands with hex colors via `aice create`", async () => {
+      const cssPath = path.join(tmpDir, "out.css");
+      const res = await createFile(cssPath, {
+        code: ".box { d: flex; jc: center; ai: center; bg: #111; c: #fff; p: 10px; br: 8px; }",
+        projectRoot: tmpDir,
+      });
+
+      expect(res.nativeCode).toContain(".box");
+      expect(res.nativeCode).toContain("display: flex");
+      expect(res.nativeCode).toContain("justify-content: center");
+      expect(res.nativeCode).toContain("align-items: center");
+      expect(res.nativeCode).toContain("background: #111");
+      expect(res.nativeCode).toContain("color: #fff");
+      expect(res.nativeCode).toContain("padding: 10px");
+      expect(res.nativeCode).toContain("border-radius: 8px");
+
+      // Also test CLI invocation directly
+      const cliCssPath = path.join(tmpDir, "cli-out.css");
+      const cliRes = runCli(
+        [
+          "create",
+          cliCssPath,
+          "-c",
+          ".box { d: flex; jc: center; ai: center; bg: #111; c: #fff; p: 10px; br: 8px; }",
+        ],
+        tmpDir,
+      );
+      expect(cliRes.status).toBe(0);
+      const writtenCss = fs.readFileSync(cliCssPath, "utf-8");
+      expect(writtenCss).toContain("display: flex;");
+      expect(writtenCss).toContain("background: #111;");
+    });
+
+    it("2. preserves quotes on JS/TS and multi-language object literal keys containing operators or hyphens", async () => {
+      const jsPath = path.join(tmpDir, "kicks.js");
+      const res = await createFile(jsPath, {
+        code: 'const KICKS = { "0>1": [[0, 0], [-1, 0]], "1>0": [[0, 0]], "soft-drop": 1 }',
+        projectRoot: tmpDir,
+      });
+
+      expect(res.nativeCode).toContain('"0>1":');
+      expect(res.nativeCode).toContain('"1>0":');
+      expect(res.nativeCode).toContain('"soft-drop": 1');
+      expect(res.nativeCode).not.toContain("0>1:");
+      expect(res.nativeCode).not.toContain("soft-drop:");
+
+      // Verify emitted JS parses and runs cleanly in Node
+      const nodeCheck = spawnSync("node", ["--check", jsPath], { encoding: "utf-8" });
+      expect(nodeCheck.status).toBe(0);
+
+      // Verify multi-language emitters also quote non-identifier keys
+      const aiceMap = ':= KICKS = { "0>1": [[0, 0]], "soft-drop": 1 }';
+      for (const target of [
+        "typescript",
+        "javascript",
+        "python",
+        "php",
+        "csharp",
+        "go",
+        "cpp",
+        "rust",
+        "kotlin",
+        "twig",
+      ] as const) {
+        const out = emitTarget(parse(aiceMap), target, { watermark: false });
+        expect(out).not.toMatch(/[^"']0>1['"]?\s*:/);
+        expect(out).not.toMatch(/[^"']soft-drop['"]?\s*:/);
+      }
+    });
+
+    it("3. compiles hybrid AICE + brace JS without `pub;` / `fn;` statements or file duplication and executes cleanly in Node ESM", async () => {
+      const mjsPath = path.join(tmpDir, "audio.mjs");
+      const hybridCode = [
+        "@idiom $env(g, t) = g.setValueAtTime(0.001, t)",
+        "pub const COLS = 10",
+        "pub fn midiToHz(midi) {",
+        "  ret 440 * Math.pow(2, (midi - 69) / 12)",
+        "}",
+        "pub fn applyEnv(gainParam, now) {",
+        "  $env(gainParam, now)",
+        "  ret true",
+        "}",
+      ].join("\n");
+
+      const res = await createFile(mjsPath, {
+        code: hybridCode,
+        projectRoot: tmpDir,
+      });
+
+      expect(res.nativeCode).not.toMatch(/(?:^|\n)\s*pub\s*;/);
+      expect(res.nativeCode).not.toMatch(/(?:^|\n)\s*fn\s*;/);
+      expect(res.nativeCode).toContain("export const COLS = 10");
+      expect(res.nativeCode).toContain("export function midiToHz");
+      expect(res.nativeCode).toContain("setValueAtTime(0.001, now)");
+
+      // Ensure function is emitted exactly once (zero file duplication)
+      const matches = res.nativeCode.match(/function midiToHz/g) ?? [];
+      expect(matches.length).toBe(1);
+
+      // Execute via Node ESM import to prove runtime validity
+      const evalRes = spawnSync(
+        "node",
+        [
+          "--input-type=module",
+          "-e",
+          `import { COLS, midiToHz } from ${JSON.stringify(mjsPath)}; if (COLS !== 10 || Math.round(midiToHz(69)) !== 440) process.exit(1);`,
+        ],
+        { encoding: "utf-8" },
+      );
+      expect(evalRes.status).toBe(0);
+    });
+
+    it("4. surfaces `Native Syntax Diagnostics` in `aice context` and `aice outline` when a JS file on disk contains a syntax error", async () => {
+      const brokenJs = path.join(tmpDir, "broken.js");
+      fs.writeFileSync(
+        brokenJs,
+        'export const KICKS = {\n  0>1: [[0, 0]],\n  "valid": 1\n};\n',
+        "utf-8",
+      );
+
+      const ctxRes = await generateContext(brokenJs);
+      expect(ctxRes.formattedBundle).toContain("## ⚠️ Native Syntax Diagnostics");
+      expect(ctxRes.formattedBundle).toContain("Line 2:");
+      expect(ctxRes.formattedBundle).toContain("0>1: [[0, 0]],");
+
+      const outRes = await outlinePath(brokenJs);
+      const outText = "text" in outRes ? outRes.text : "";
+      expect(outText).toContain("## ⚠️ Native Syntax Diagnostics");
+      expect(outText).toContain("Line 2:");
+    });
+
+    it("5. supports hybrid AICE + brace syntax in `aice splice`, guards against broken JS writes, and includes subagent + modular file rules in AICE_SYSTEM_DIRECTIVE", async () => {
+      const mjsPath = path.join(tmpDir, "spliced.mjs");
+      await createFile(mjsPath, {
+        code: "pub fn calc(x) {\n  ret x + 1\n}",
+        projectRoot: tmpDir,
+      });
+
+      const spliceRes = await splice(mjsPath, {
+        symbol: "calc",
+        code: 'pub fn calc(x) {\n  const table = { "0>1": 10, "soft-drop": 5 }\n  ret x + table["0>1"] + table["soft-drop"]\n}',
+      });
+      expect(spliceRes.modifiedCode).toContain('"0>1": 10');
+      expect(spliceRes.modifiedCode).toContain('"soft-drop": 5');
+      expect(spliceRes.modifiedCode).not.toMatch(/(?:^|\n)\s*pub\s*;/);
+
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("150 lines");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("test-runner");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("fast-scout");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("code-surgeon");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("deep-auditor");
     });
   });
 });

@@ -757,6 +757,16 @@ export class GoEmitter {
         return `[]any{${elems}}`;
       }
       case "RecordLiteralExpr": {
+        const hasSpecialKey = expr.properties.some(
+          (p) => !p.isSpread && p.key !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(p.key),
+        );
+        if (hasSpecialKey) {
+          const entries = expr.properties
+            .filter((p) => !p.isSpread)
+            .map((p) => `${JSON.stringify(p.key ?? "")}: ${this.emitExpr(p.value)}`)
+            .join(", ");
+          return `map[string]any{ ${entries} }`;
+        }
         const fields = expr.properties
           .map((p) => {
             if (p.isSpread) {

@@ -594,6 +594,16 @@ export class CSharpEmitter {
         return `new[] { ${elements} }`;
       }
       case "RecordLiteralExpr": {
+        const hasSpecialKey = expr.properties.some(
+          (p) => !p.isSpread && p.key !== undefined && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(p.key),
+        );
+        if (hasSpecialKey) {
+          const entries = expr.properties
+            .filter((p) => !p.isSpread)
+            .map((p) => `[${JSON.stringify(p.key ?? "")}] = ${this.emitExpr(p.value)}`)
+            .join(", ");
+          return `new Dictionary<string, object> { ${entries} }`;
+        }
         const props = expr.properties.map((p) => `${p.key} = ${this.emitExpr(p.value)}`).join(", ");
         return `new { ${props} }`;
       }

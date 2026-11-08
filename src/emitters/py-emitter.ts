@@ -1096,7 +1096,8 @@ export class PythonEmitter {
             if (p.isSpread) {
               return `**${this.emitExpr(p.value)}`;
             }
-            const keyOut = /^\d+(\.\d+)?$/.test(p.key ?? "") ? p.key : JSON.stringify(p.key);
+            const rawKey = p.key ?? "";
+            const keyOut = /^\d+(\.\d+)?$/.test(rawKey) ? rawKey : JSON.stringify(rawKey);
             return `${keyOut}: ${this.emitExpr(p.value)}`;
           })
           .join(", ");

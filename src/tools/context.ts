@@ -39,7 +39,7 @@ import {
 } from "../idioms/index.js";
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
-import { generateOutline, type OutlineSymbol } from "./outline.js";
+import { collectNativeSyntaxDiagnostics, generateOutline, type OutlineSymbol } from "./outline.js";
 
 export interface ContextOptions {
   /**
@@ -467,6 +467,7 @@ function formatBundle(
   dependencies: DependencyContract[],
   callers: CallerSummary[],
   idioms?: Record<string, ProjectIdiomDefinition>,
+  nativeDiagnostics?: string,
 ): string {
   const lines: string[] = [];
 
@@ -510,6 +511,11 @@ function formatBundle(
   if (idioms && Object.keys(idioms).length > 0) {
     lines.push("");
     lines.push(formatIdiomsMarkdownSection(idioms));
+  }
+
+  if (nativeDiagnostics) {
+    lines.push("");
+    lines.push(nativeDiagnostics);
   }
 
   return lines.join("\n");
@@ -1347,6 +1353,7 @@ export async function generateContext(
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
+  const nativeDiagnostics = collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
   let targetContent = rawFileContent;
   if (!fullTargetPath.endsWith(".aice")) {
@@ -1404,11 +1411,15 @@ export async function generateContext(
         .map((s) => s.trim())
         .filter(Boolean);
       if (requestedSymbols.length === 1) {
-        targetContent = extractSymbolFromAiceSource(
-          targetContent,
-          requestedSymbols[0],
-          fullTargetPath,
-        );
+        try {
+          targetContent = extractSymbolFromAiceSource(
+            targetContent,
+            requestedSymbols[0],
+            fullTargetPath,
+          );
+        } catch (err) {
+          if (!nativeDiagnostics) throw err;
+        }
       } else if (requestedSymbols.length > 1) {
         const slicedBlocks: string[] = [];
         for (const sym of requestedSymbols) {
@@ -1599,6 +1610,7 @@ export async function generateContext(
     dependencies,
     callers,
     bundleIdioms,
+    nativeDiagnostics,
   );
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -1612,6 +1624,7 @@ export async function generateContext(
         dependencies,
         callers,
         bundleIdioms,
+        nativeDiagnostics,
       );
       tokenCount = estimateTokens(formattedBundle);
     }
@@ -1629,6 +1642,7 @@ export async function generateContext(
           dependencies,
           callers,
           activeIdioms,
+          nativeDiagnostics,
         );
         tokenCount = estimateTokens(formattedBundle);
       }

@@ -593,10 +593,27 @@ export class Parser {
       this.peek(1).kind !== "QUESTION_DOT" &&
       !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead());
 
-    if (isExported && (this.check("LET") || isValDecl)) {
+    const isMutDecl =
+      this.check("MUT") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      this.peek(1).kind !== "EQUAL" &&
+      this.peek(1).kind !== "DOT" &&
+      this.peek(1).kind !== "COLON_COLON" &&
+      this.peek(1).kind !== "QUESTION_DOT" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead());
+
+    if (
+      isExported &&
+      (this.check("LET") ||
+        isValDecl ||
+        isMutDecl ||
+        this.check("COLON_EQUAL") ||
+        this.check("COLON_COLON_EQUAL"))
+    ) {
       return this.parseVarDecl(isExported);
     }
-    if (isValDecl) {
+    if (isValDecl || isMutDecl || this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
       return this.parseVarDecl(isExported);
     }
     if (
@@ -1749,7 +1766,7 @@ export class Parser {
 
     const params: ParamDecl[] = [];
     while (!this.check("RPAREN") && !this.check("EOF")) {
-      params.push(this.parseParamDecl(false));
+      params.push(this.parseParamDecl(false, true));
       if (this.check("COMMA")) {
         this.advance();
       } else {
@@ -2286,7 +2303,19 @@ export class Parser {
     let name: string;
     let typeAnnotation: TypeExpr | undefined;
 
-    if (this.check("LET")) {
+    if (this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
+      isMut = this.advance().kind === "COLON_COLON_EQUAL";
+      name = this.parseContextualIdentOrString("Expected variable identifier");
+      if (this.check("COLON")) {
+        this.advance();
+        typeAnnotation = this.parseTypeExpr();
+      }
+      if (this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
+        this.advance();
+      } else {
+        this.consume("EQUAL", "Expected '=' in variable declaration");
+      }
+    } else if (this.check("LET")) {
       this.advance();
       if (this.check("MUT") && this.peek(1).kind !== "EQUAL" && this.peek(1).kind !== "COLON") {
         this.advance();
@@ -2312,6 +2341,25 @@ export class Parser {
         typeAnnotation = this.parseTypeExpr();
       }
       this.consume("EQUAL", "Expected '=' in variable declaration");
+    } else if (
+      this.check("MUT") &&
+      this.peek(1).kind !== "COLON_EQUAL" &&
+      this.peek(1).kind !== "COLON_COLON_EQUAL" &&
+      this.peek(1).kind !== "EQUAL" &&
+      !(this.peek(1).kind === "COLON" && this.isTypedDeclarationAhead())
+    ) {
+      this.advance();
+      isMut = true;
+      name = this.parseContextualIdentOrString("Expected variable identifier");
+      if (this.check("COLON")) {
+        this.advance();
+        typeAnnotation = this.parseTypeExpr();
+      }
+      if (this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
+        this.advance();
+      } else {
+        this.consume("EQUAL", "Expected '=' in variable declaration");
+      }
     } else {
       name = this.parseContextualIdentOrString("Expected variable identifier");
       if (this.check("COLON_EQUAL")) {
@@ -2453,7 +2501,14 @@ export class Parser {
         this.peek(2).kind === "COLON_COLON_EQUAL" ||
         this.peek(2).kind === "COLON");
 
-    if (this.check("LET") || isValKeywordDecl || isMutKeywordDecl || this.check("CONST")) {
+    if (
+      this.check("LET") ||
+      isValKeywordDecl ||
+      isMutKeywordDecl ||
+      this.check("CONST") ||
+      this.check("COLON_EQUAL") ||
+      this.check("COLON_COLON_EQUAL")
+    ) {
       return this.parseLetBinding();
     }
     if (this.check("RET")) {
@@ -2877,7 +2932,9 @@ export class Parser {
     const startSpan = this.current().span;
 
     let isMut = false;
-    if (this.check("VAL") || this.check("CONST")) {
+    if (this.check("COLON_EQUAL") || this.check("COLON_COLON_EQUAL")) {
+      isMut = this.advance().kind === "COLON_COLON_EQUAL";
+    } else if (this.check("VAL") || this.check("CONST")) {
       this.advance();
       isMut = false;
     } else if (this.check("MUT")) {
@@ -2928,7 +2985,8 @@ export class Parser {
       !this.check("SEMICOLON") &&
       !this.check("DEDENT") &&
       !this.check("RBRACE") &&
-      !this.check("EOF")
+      !this.check("EOF") &&
+      this.current().span.start.line === startSpan.end.line
     ) {
       value = this.parseExpr();
     }
@@ -2981,18 +3039,29 @@ export class Parser {
     this.consume("IF");
 
     const condition = this.parseExpr();
-    this.consume("COLON", "Expected ':' after if condition");
-    this.consumeStatementSeparator();
+    if (this.check("COLON")) {
+      this.advance();
+      this.consumeStatementSeparator();
+    } else if (!this.check("LBRACE")) {
+      this.consume("COLON", "Expected ':' after if condition");
+    }
     const thenBranch = this.parseBlock();
 
     const elifBranches: { condition: Expr; body: Block; span: Span }[] = [];
 
     this.consumeStatementSeparator();
-    while (this.check("ELIF")) {
+    while (this.check("ELIF") || (this.check("ELSE") && this.peek(1).kind === "IF")) {
       const eSpan = this.advance().span;
+      if (this.check("IF")) {
+        this.advance();
+      }
       const eCond = this.parseExpr();
-      this.consume("COLON", "Expected ':' after elif condition");
-      this.consumeStatementSeparator();
+      if (this.check("COLON")) {
+        this.advance();
+        this.consumeStatementSeparator();
+      } else if (!this.check("LBRACE")) {
+        this.consume("COLON", "Expected ':' after elif condition");
+      }
       const eBody = this.parseBlock();
       elifBranches.push({
         condition: eCond,
@@ -3005,8 +3074,12 @@ export class Parser {
     let elseBranch: Block | null = null;
     if (this.check("ELSE")) {
       this.advance();
-      this.consume("COLON", "Expected ':' after else");
-      this.consumeStatementSeparator();
+      if (this.check("COLON")) {
+        this.advance();
+        this.consumeStatementSeparator();
+      } else if (!this.check("LBRACE")) {
+        this.consume("COLON", "Expected ':' after else");
+      }
       elseBranch = this.parseBlock();
     }
 
@@ -3236,8 +3309,12 @@ export class Parser {
 
     this.consume("IN", "Expected 'in' in for loop");
     const iterable = this.parseExpr();
-    this.consume("COLON", "Expected ':' after for loop iterable");
-    this.consumeStatementSeparator();
+    if (this.check("COLON")) {
+      this.advance();
+      this.consumeStatementSeparator();
+    } else if (!this.check("LBRACE")) {
+      this.consume("COLON", "Expected ':' after for loop iterable");
+    }
     const body = this.parseBlock();
 
     return {
@@ -3254,8 +3331,12 @@ export class Parser {
     this.consume("WHILE");
 
     const condition = this.parseExpr();
-    this.consume("COLON", "Expected ':' after while condition");
-    this.consumeStatementSeparator();
+    if (this.check("COLON")) {
+      this.advance();
+      this.consumeStatementSeparator();
+    } else if (!this.check("LBRACE")) {
+      this.consume("COLON", "Expected ':' after while condition");
+    }
     const body = this.parseBlock();
 
     return {

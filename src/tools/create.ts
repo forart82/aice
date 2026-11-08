@@ -11,7 +11,9 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import postcss from "postcss";
 import YAML from "yaml";
+import ts from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -27,6 +29,11 @@ import {
 import type { Module } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
+import {
+  CSS_LAYOUT_MACROS,
+  CSS_PROPERTY_ALIASES,
+  expandCssTokenValue,
+} from "../emitters/css-emitter.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import {
   expandModuleIdioms,
@@ -420,8 +427,12 @@ function normalizeCompactAiceLine(line: string): string {
   );
   out = out.replace(/^(\s*)@type\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1type $2");
   out = out.replace(
-    /^(\s*)(?:\^(const|val|mut)\s+|(const|val|mut)\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(\s*)(?:\^(const|val)\s+|(const|val)\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
     "$1pub $2$3 $4",
+  );
+  out = out.replace(
+    /^(\s*)(?:\^(?:mut|let)\s+|(?:mut|let)\s+\^|pub\s+mut\s+|pub\s+let\s+(?!mut\b)|export\s+let\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+    "$1pub let mut $2",
   );
 
   // Hybrid native keywords
@@ -435,7 +446,7 @@ function normalizeCompactAiceLine(line: string): string {
   out = out.replace(/^(\s*)export\s+const\s+/, "$1pub const ");
   out = out.replace(/^(\s*)(async\s+)?def\s+/, "$1$2fn ");
 
-  // Statement shorthands at line start or after `:` in single-line blocks (`if cond: <- expr`)
+  // Statement shorthands at line start or after `:` / `{` in single-line blocks (`if cond: <- expr`)
   out = out.replace(/^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 := $3");
   out = out.replace(/^(\s*)::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 ::= $3");
   out = out.replace(
@@ -452,6 +463,8 @@ function normalizeCompactAiceLine(line: string): string {
   out = out.replace(/:\s*<-\s+(.+)$/, ": ret $1");
   out = out.replace(/:\s*<-\s*$/, ": ret");
   out = out.replace(/:\s*return\b/, ": ret");
+  out = out.replace(/\{\s*<-\s+([^}]+)\}/, "{ ret $1 }");
+  out = out.replace(/\{\s*return\s+([^}]+)\}/, "{ ret $1 }");
   out = out.replace(/:\s*:=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, ": $1 := $2");
   out = out.replace(/:\s*::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, ": $1 ::= $2");
 
@@ -598,6 +611,398 @@ function normalizeHybridSourceToAice(rawCode: string, targetLang: TargetLanguage
   return lines.map((line) => normalizeCompactAiceLine(line)).join("\n");
 }
 
+const COMPACT_CSS_SHORTHANDS: Readonly<Record<string, string>> = {
+  ...CSS_PROPERTY_ALIASES,
+  d: "display",
+  jc: "justify-content",
+  ai: "align-items",
+  fd: "flex-direction",
+  fw: "flex-wrap",
+  g: "gap",
+  bg: "background",
+  c: "color",
+  p: "padding",
+  m: "margin",
+  w: "width",
+  h: "height",
+  br: "border-radius",
+  b: "border",
+  fs: "font-size",
+  ta: "text-align",
+  pos: "position",
+  z: "z-index",
+  ov: "overflow",
+  op: "opacity",
+  tr: "transition",
+  sh: "box-shadow",
+};
+
+function splitBalancedArgs(rawArgs: string): string[] {
+  const args: string[] = [];
+  let cur = "";
+  let depth = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < rawArgs.length; i++) {
+    const ch = rawArgs[i];
+    if (quote) {
+      cur += ch;
+      if (ch === "\\" && i + 1 < rawArgs.length) {
+        cur += rawArgs[++i];
+      } else if (ch === quote) {
+        quote = null;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[" || ch === "{") {
+      depth++;
+      cur += ch;
+      continue;
+    }
+    if (ch === ")" || ch === "]" || ch === "}") {
+      depth = Math.max(0, depth - 1);
+      cur += ch;
+      continue;
+    }
+    if (ch === "," && depth === 0) {
+      args.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim().length > 0 || args.length > 0) {
+    args.push(cur.trim());
+  }
+  return args;
+}
+
+function expandTextIdioms(
+  code: string,
+  activeIdioms: Record<string, ProjectIdiomDefinition>,
+  targetLang: TargetLanguage,
+): string {
+  if (!code.includes("$") || Object.keys(activeIdioms).length === 0) {
+    return code;
+  }
+
+  const idiomMap = new Map<string, ProjectIdiomDefinition>();
+  for (const [k, def] of Object.entries(activeIdioms)) {
+    const cleanName = (def.name || k).replace(/^\$/, "");
+    idiomMap.set(cleanName, def);
+  }
+
+  let current = code;
+  for (let pass = 0; pass < 8; pass++) {
+    let changed = false;
+    let out = "";
+    let i = 0;
+    while (i < current.length) {
+      if (current[i] === "$") {
+        const nameMatch = current.slice(i + 1).match(/^([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+        if (nameMatch) {
+          const idName = nameMatch[1];
+          const def = idiomMap.get(idName);
+          if (def) {
+            const openParenIdx = i + 1 + nameMatch[0].length - 1;
+            let depth = 1;
+            let j = openParenIdx + 1;
+            let quote: string | null = null;
+            while (j < current.length && depth > 0) {
+              const ch = current[j];
+              if (quote) {
+                if (ch === "\\" && j + 1 < current.length) j++;
+                else if (ch === quote) quote = null;
+              } else if (ch === '"' || ch === "'" || ch === "`") {
+                quote = ch;
+              } else if (ch === "(") {
+                depth++;
+              } else if (ch === ")") {
+                depth--;
+              }
+              j++;
+            }
+            if (depth === 0) {
+              const rawArgs = current.slice(openParenIdx + 1, j - 1);
+              const parsedArgs = rawArgs.trim() ? splitBalancedArgs(rawArgs) : [];
+              let expanded = def.templateAice;
+
+              const subMap = new Map<string, string>();
+              def.params.forEach((p, idx) => {
+                const argVal = parsedArgs[idx] ?? p.defaultValue ?? "";
+                subMap.set(p.name, argVal);
+                subMap.set(`$${idx}`, argVal);
+              });
+
+              const sortedKeys = Array.from(subMap.keys()).sort((a, b) => b.length - a.length);
+              if (sortedKeys.length > 0) {
+                const pattern = sortedKeys
+                  .map((k) => {
+                    const esc = k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                    return k.startsWith("$") ? `${esc}\\b` : `\\b${esc}\\b`;
+                  })
+                  .join("|");
+                expanded = expanded.replace(new RegExp(pattern, "g"), (m) => subMap.get(m) ?? m);
+              }
+
+              if (targetLang !== "css") {
+                expanded = normalizeHybridToNative(expanded, targetLang).trim();
+                if (!expanded.includes("\n") && expanded.endsWith(";")) {
+                  expanded = expanded.slice(0, -1);
+                }
+              }
+
+              out += expanded;
+              i = j;
+              changed = true;
+              continue;
+            }
+          }
+        }
+      }
+      out += current[i];
+      i++;
+    }
+    current = out;
+    if (!changed) break;
+  }
+
+  return current;
+}
+
+function expandBareCssRules(
+  rawCss: string,
+  activeIdioms: Record<string, ProjectIdiomDefinition>,
+): string {
+  const idiomExpanded = expandTextIdioms(rawCss, activeIdioms, "css");
+  try {
+    const root = postcss.parse(idiomExpanded);
+    root.walkDecls((decl) => {
+      const propKey = decl.prop.trim().toLowerCase();
+      const macro = CSS_LAYOUT_MACROS[propKey];
+      if (macro) {
+        for (const [mProp, mVal] of macro) {
+          decl.cloneBefore({ prop: mProp, value: mVal });
+        }
+        decl.remove();
+        return;
+      }
+      if (propKey === "fw" && /^(?:normal|bold|bolder|lighter|[1-9]00)$/i.test(decl.value.trim())) {
+        decl.prop = "font-weight";
+      } else if (COMPACT_CSS_SHORTHANDS[propKey]) {
+        decl.prop = COMPACT_CSS_SHORTHANDS[propKey];
+      }
+      decl.value = expandCssTokenValue(decl.value);
+    });
+    const out = root.toString().trim();
+    return `${out}\n`;
+  } catch {
+    const out = idiomExpanded.replace(
+      /(^|[{;]\s*)([a-zA-Z_-]+)(\s*:\s*)([^;}]+)/gm,
+      (full, prefix: string, prop: string, sep: string, val: string) => {
+        const lower = prop.toLowerCase();
+        const mapped =
+          lower === "fw" && /^(?:normal|bold|bolder|lighter|[1-9]00)$/i.test(val.trim())
+            ? "font-weight"
+            : (COMPACT_CSS_SHORTHANDS[lower] ?? prop);
+        return `${prefix}${mapped}${sep}${expandCssTokenValue(val)}`;
+      },
+    );
+    return out.endsWith("\n") ? out : `${out}\n`;
+  }
+}
+
+function normalizeHybridToNative(rawCode: string, targetLang: TargetLanguage): string {
+  const isJs = targetLang === "javascript";
+  const lines = rawCode.split(/\r?\n/);
+
+  if (targetLang === "python") {
+    return lines
+      .map((line) => {
+        let out = line;
+        out = out.replace(/^(\s*)(?:pub\s+)?(async\s+)?fn\s+/, "$1$2def ");
+        out = out.replace(/^(\s*)(?:pub\s+)?class\s+/, "$1class ");
+        out = out.replace(/^(\s*)(?:pub\s+)?(?:const|val|mut|let)\s+/, "$1");
+        out = out.replace(/^(\s*)::?=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 = $3");
+        out = out.replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::?=\s*(.+)$/, "$1$2 = $3");
+        out = out.replace(/^(\s*)(?:ret|<-)\b/, "$1return");
+        return out;
+      })
+      .join("\n");
+  }
+
+  return lines
+    .map((line) => {
+      let out = line;
+
+      // Declaration shorthands with C/JS braces or standalone statements
+      out = out.replace(
+        /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|async\s+\^fn\s+|async\s+fn\s+\^|pub\s+async\s+fn\s+|pub\s+async\s+function\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1export async function $2",
+      );
+      out = out.replace(
+        /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+|pub\s+function\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1export function $2",
+      );
+      out = out.replace(
+        /^(\s*)(?:@fn\s+async\s+|async\s+fn\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1async function $2",
+      );
+      out = out.replace(
+        /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|static\s+\^fn\s+|static\s+fn\s+\^|pub\s+static\s+fn\s+|@fn\s+static\s+|static\s+fn\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1static $2",
+      );
+      out = out.replace(/^(\s*)(?:@fn\s+|fn\s+)([A-Za-z_$][A-Za-z0-9_$]*)/, "$1function $2");
+      out = out.replace(
+        /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^|pub\s+class\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1export class $2",
+      );
+      out = out.replace(/^(\s*)@cls\s+([A-Za-z_$][A-Za-z0-9_$]*)/, "$1class $2");
+      out = out.replace(
+        /^(\s*)(?:@type\s+\^|\^type\s+|type\s+\^|pub\s+type\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
+        "$1export type $2",
+      );
+      out = out.replace(/^(\s*)@type\s+([A-Za-z_$][A-Za-z0-9_$]*)/, "$1type $2");
+      out = out.replace(/^(\s*)pub\s+interface\s+/, "$1export interface ");
+      out = out.replace(/^(\s*)pub\s+enum\s+/, "$1export enum ");
+      out = out.replace(
+        /^(\s*)(?:\^(?:const|val)\s+|(?:const|val)\s+\^|pub\s+(?:const|val)\s+)/,
+        "$1export const ",
+      );
+      out = out.replace(
+        /^(\s*)(?:\^(?:let|mut)\s+|(?:let|mut)\s+\^|pub\s+let\s+mut\s+|pub\s+(?:let|mut|var)\s+)/,
+        "$1export let ",
+      );
+      out = out.replace(/^(\s*)let\s+mut\s+/, "$1let ");
+      out = out.replace(/^(\s*)val\s+(?=[A-Za-z_$[{])/, "$1const ");
+      out = out.replace(/^(\s*)mut\s+(?=[A-Za-z_$[{])/, "$1let ");
+
+      // Variable bindings := and ::=
+      out = out.replace(
+        /^(\s*):=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+)=\s*(.+)$/,
+        isJs ? "$1const $2 = $4" : "$1const $2: $3 = $4",
+      );
+      out = out.replace(
+        /^(\s*)::=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+)=\s*(.+)$/,
+        isJs ? "$1let $2 = $4" : "$1let $2: $3 = $4",
+      );
+      out = out.replace(/^(\s*):=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/, "$1const $2 = $3");
+      out = out.replace(/^(\s*)::=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/, "$1let $2 = $3");
+      out = out.replace(
+        /^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=:]+?)\s*:=\s*(.+)$/,
+        isJs ? "$1const $2 = $4" : "$1const $2: $3 = $4",
+      );
+      out = out.replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*(.+)$/, "$1const $2 = $3");
+      out = out.replace(
+        /^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=:]+?)\s*::=\s*(.+)$/,
+        isJs ? "$1let $2 = $4" : "$1let $2: $3 = $4",
+      );
+      out = out.replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*(.+)$/, "$1let $2 = $3");
+
+      // Return & control-flow shorthands
+      out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
+      out = out.replace(/^(\s*)(?:ret|<-)\s*;?\s*$/, "$1return;");
+      out = out.replace(/(\)\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+      out = out.replace(/(\)\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
+      out = out.replace(/(\belse\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+      out = out.replace(/(\belse\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
+      out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+      out = out.replace(/(\{\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
+      out = out.replace(/^(\s*\}\s*)elif\b/, "$1else if");
+      out = out.replace(/^(\s*)elif\b/, "$1else if");
+
+      // Inline anonymous fn expressions
+      out = out.replace(/\basync\s+fn\s*\(([^)]*)\)\s*=>/g, "async ($1) =>");
+      out = out.replace(/\bfn\s*\(([^)]*)\)\s*=>/g, "($1) =>");
+      out = out.replace(/\basync\s+fn\s*\(/g, "async function(");
+      out = out.replace(/\bfn\s*\(/g, "function(");
+
+      // Compact type sigils in declarations
+      if (
+        /^\s*(?:export\s+)?(?:async\s+)?(?:function|const|let|var|class|type|interface)\b/.test(out)
+      ) {
+        if (isJs) {
+          out = out
+            .replace(/:\s*(?:#|\$|\?|_|\*|\[(?:#|\$|\?|_|\*)\])(?=\s*(?:=|,|\)|\]|\}|->|$))/g, "")
+            .replace(/\)\s*->\s*[^{=]+(\{|=>)/g, ") $1");
+        } else {
+          out = out
+            .replace(/\[\s*#\s*\]/g, "number[]")
+            .replace(/\[\s*\$\s*\]/g, "string[]")
+            .replace(/\[\s*\?\s*\]/g, "boolean[]")
+            .replace(/\[\s*_\s*\]/g, "void[]")
+            .replace(/\[\s*\*\s*\]/g, "any[]")
+            .replace(/:(?!=)\s*#(?=\s*(?:=|,|\)|\]|\}|->|$))/g, ": number")
+            .replace(/:(?!=)\s*\$(?![A-Za-z0-9_])/g, ": string")
+            .replace(/:(?!=)\s*\?(?![A-Za-z0-9_.?])/g, ": boolean")
+            .replace(/:(?!=)\s*_(?![A-Za-z0-9_])/g, ": void")
+            .replace(/:(?!=)\s*\*(?![A-Za-z0-9_])/g, ": any")
+            .replace(/->\s*#(?![A-Za-z0-9_])/g, ": number")
+            .replace(/->\s*\$(?![A-Za-z0-9_])/g, ": string")
+            .replace(/->\s*\?(?![A-Za-z0-9_])/g, ": boolean")
+            .replace(/->\s*_(?![A-Za-z0-9_])/g, ": void")
+            .replace(/->\s*\*(?![A-Za-z0-9_])/g, ": any")
+            .replace(/\)\s*->\s*([^{=]+?)(\s*\{)/g, "): $1$2");
+        }
+      }
+
+      return out;
+    })
+    .join("\n");
+}
+
+function verifyNativeJsTsSyntax(
+  code: string,
+  fullPath: string,
+  targetLang: TargetLanguage,
+): { valid: boolean; diagnostics: string[] } {
+  const scriptKind =
+    targetLang === "tsx" || fullPath.endsWith(".tsx") || fullPath.endsWith(".jsx")
+      ? ts.ScriptKind.TSX
+      : targetLang === "javascript" ||
+          fullPath.endsWith(".js") ||
+          fullPath.endsWith(".mjs") ||
+          fullPath.endsWith(".cjs")
+        ? ts.ScriptKind.JS
+        : ts.ScriptKind.TS;
+
+  const sf = ts.createSourceFile(fullPath, code, ts.ScriptTarget.Latest, true, scriptKind);
+  const parseDiags =
+    (sf as unknown as { parseDiagnostics?: ts.DiagnosticWithLocation[] }).parseDiagnostics ?? [];
+  const diagnostics: string[] = [];
+
+  for (const d of parseDiags) {
+    const pos = sf.getLineAndCharacterOfPosition(d.start ?? 0);
+    const msg = ts.flattenDiagnosticMessageText(d.messageText, " ");
+    diagnostics.push(`Line ${pos.line + 1}:${pos.character + 1} - ${msg}`);
+  }
+
+  for (const stmt of sf.statements) {
+    if (ts.isExpressionStatement(stmt) && ts.isIdentifier(stmt.expression)) {
+      const id = stmt.expression.text;
+      if (id === "pub" || id === "fn" || id === "ret" || id === "val" || id === "mut") {
+        const pos = sf.getLineAndCharacterOfPosition(stmt.getStart(sf));
+        diagnostics.push(
+          `Line ${pos.line + 1}:${pos.character + 1} - Stray AICE keyword '${id};' emitted as invalid statement`,
+        );
+      }
+    }
+  }
+
+  if (/\bfunction\s+__top_level__\s*\(/.test(code)) {
+    diagnostics.push("Unexpected synthetic '__top_level__' wrapper emitted in JS/TS output");
+  }
+
+  return {
+    valid: diagnostics.length === 0,
+    diagnostics,
+  };
+}
+
 function compileAiceOrHybridToNative(
   cleanedCode: string,
   fullPath: string,
@@ -657,6 +1062,18 @@ function compileAiceOrHybridToNative(
     return trimmed.endsWith("\n") ? trimmed : `${trimmed}\n`;
   }
 
+  // Special handling for bare CSS selectors/rules & compact CSS property shorthands
+  if (
+    targetLang === "css" &&
+    trimmed.includes("{") &&
+    !/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:style|tokens)\s+/m.test(trimmed)
+  ) {
+    return expandBareCssRules(cleanedCode, activeIdioms);
+  }
+
+  const isJsTsTarget =
+    targetLang === "javascript" || targetLang === "typescript" || targetLang === "tsx";
+
   // Primary path: Parse normalized AICE -> Expand $idioms -> Emit Target Language
   const normalizedAice = normalizeHybridSourceToAice(cleanedCode, targetLang);
   let parsedMod: Module | undefined;
@@ -669,17 +1086,24 @@ function compileAiceOrHybridToNative(
   }
 
   if (parsedMod && parsedMod.items.length > 0) {
-    const expanded =
-      Object.keys(activeIdioms).length > 0
-        ? expandModuleIdioms(parsedMod, activeIdioms)
-        : parsedMod;
-    return emitTarget(expanded, targetLang, {
-      watermark: false,
-      idioms: activeIdioms,
-    });
+    try {
+      const expanded =
+        Object.keys(activeIdioms).length > 0
+          ? expandModuleIdioms(parsedMod, activeIdioms)
+          : parsedMod;
+      const emitted = emitTarget(expanded, targetLang, {
+        watermark: false,
+        idioms: activeIdioms,
+      });
+      if (!isJsTsTarget || verifyNativeJsTsSyntax(emitted, fullPath, targetLang).valid) {
+        return emitted;
+      }
+    } catch (emitErr) {
+      parseErr = parseErr ?? emitErr;
+    }
   }
 
-  // Secondary path: Hybrid or Native code with $idioms or := / ret
+  // Secondary path: Hybrid or Native code with $idioms or := / ret / pub fn ... { ... }
   try {
     const decompLang =
       targetLang === "python"
@@ -694,37 +1118,84 @@ function compileAiceOrHybridToNative(
           ? targetLang
           : "typescript";
 
-    const placeholderProtected = cleanedCode.replace(
+    const hybridNormalized = normalizeHybridToNative(
+      cleanedCode,
+      decompLang === "typescript" ? "typescript" : targetLang,
+    );
+    const placeholderProtected = hybridNormalized.replace(
       /\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/g,
       "__aice_idiom__$1(",
     );
+    if (decompLang === "typescript") {
+      const checkPath = fullPath.replace(/\.(?:m|c)?js(x?)$/i, ".ts$1");
+      const preCheck = verifyNativeJsTsSyntax(placeholderProtected, checkPath, "typescript");
+      if (!preCheck.valid) {
+        throw new Error(`Invalid hybrid/native TS syntax: ${preCheck.diagnostics.join("; ")}`);
+      }
+    }
     const decomp = decompile(placeholderProtected, decompLang, { filePath: fullPath });
     const restoredAice = decomp.aice.replace(/__aice_idiom__([A-Za-z_][A-Za-z0-9_]*)/g, "$$$1");
     const mod = parse(restoredAice, fullPath);
     const expanded =
       Object.keys(activeIdioms).length > 0 ? expandModuleIdioms(mod, activeIdioms) : mod;
-    return emitTarget(expanded, targetLang, {
+    const emitted = emitTarget(expanded, targetLang, {
       watermark: false,
       idioms: activeIdioms,
     });
-  } catch {
-    // If the input has no unexpanded $idioms or AICE-only syntax markers and looks like valid native code, allow clean passthrough
-    const hasAiceMarkers =
-      cleanedCode.includes("$") ||
-      /(?:^|\s)(?:@cls|@fn|@type|@idiom|\^fn|\^class|\^type|\^const|\^val|\^mut|\^async|\^static|pub\s+(?:fn|class|type|const|val|mut)|fn\s+\^?[A-Za-z_]|<-|:=|::=)/m.test(
-        cleanedCode,
-      ) ||
-      /:(?!=)\s*[#$?_*](?=\s*(?:=|,|\)|\]|\}|->|$))/m.test(cleanedCode) ||
-      /->\s*[#$?_*](?![A-Za-z0-9_])/m.test(cleanedCode);
-    if (!hasAiceMarkers) {
-      return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
+    if (!isJsTsTarget || verifyNativeJsTsSyntax(emitted, fullPath, targetLang).valid) {
+      return emitted;
     }
+  } catch (secErr) {
+    parseErr = parseErr ?? secErr;
+  }
+
+  // Substep 2.2 Guard & Repair for JS/TS hybrid code
+  if (isJsTsTarget) {
+    const repaired = expandTextIdioms(
+      normalizeHybridToNative(cleanedCode, targetLang),
+      activeIdioms,
+      targetLang,
+    );
+    const hasUnexpandedMarkers =
+      /\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/.test(repaired) &&
+      Object.keys(activeIdioms).some((k) => repaired.includes(k.startsWith("$") ? k : `$${k}`));
+    const hasBrokenAiceDirectives =
+      /(?:^|\s)(?:@cls|@fn|@type|@idiom|\^fn|\^class|\^type|\^const|\^val|\^mut|\^async|\^static)\b/m.test(
+        repaired,
+      );
+    const syntaxCheck = verifyNativeJsTsSyntax(repaired, fullPath, targetLang);
+    if (!hasUnexpandedMarkers && !hasBrokenAiceDirectives && syntaxCheck.valid) {
+      return repaired.endsWith("\n") ? repaired : `${repaired}\n`;
+    }
+    const diagSummary =
+      syntaxCheck.diagnostics.length > 0 ? ` (${syntaxCheck.diagnostics.join("; ")})` : "";
     throw new Error(
       `Failed to compile AICE source for ${fullPath}: ${
         parseErr instanceof Error ? parseErr.message : String(parseErr)
-      }`,
+      }${diagSummary}`,
     );
   }
+
+  // If the input has no unexpanded $idioms or AICE-only syntax markers and looks like valid native code, allow clean passthrough
+  const isMarkupOrDataTarget = ["css", "html", "twig", "json", "yaml"].includes(
+    targetLang as string,
+  );
+  const hasAiceMarkers =
+    cleanedCode.includes("$") ||
+    /(?:^|\s)(?:@cls|@fn|@type|@idiom|\^fn|\^class|\^type|\^const|\^val|\^mut|\^async|\^static|pub\s+(?:fn|class|type|const|val|mut)|fn\s+\^?[A-Za-z_]|<-|:=|::=)/m.test(
+      cleanedCode,
+    ) ||
+    (!isMarkupOrDataTarget &&
+      (/:(?!=)\s*[#$?_*](?=\s*(?:=|,|\)|\]|\}|->|$))/m.test(cleanedCode) ||
+        /->\s*[#$?_*](?![A-Za-z0-9_])/m.test(cleanedCode)));
+  if (!hasAiceMarkers) {
+    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
+  }
+  throw new Error(
+    `Failed to compile AICE source for ${fullPath}: ${
+      parseErr instanceof Error ? parseErr.message : String(parseErr)
+    }`,
+  );
 }
 
 function persistDeclaredIdioms(
@@ -926,6 +1397,10 @@ export async function createFile(
       idiomsUsed,
       nativeText: nativeCode,
       aiceText: rawPayload,
+      nativeCl100k: nativeTokens,
+      aiceCl100k: aiceTokens,
+      nativeO200k: nativeO200kTokens,
+      aiceO200k: aiceO200kTokens,
     });
   }
 

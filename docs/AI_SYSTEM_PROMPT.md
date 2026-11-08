@@ -246,17 +246,21 @@ When `aice agents setup` configures Claude Code (`~/.claude/CLAUDE.md`), Antigra
 
 ```markdown
 <!-- AICE:START -->
-## AICE 2.0 — Automatic Token-Efficient AST Context & Mutation Rules
-For all 24 supported file extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs, .py, .rs, .go, .cpp, .hpp, .cc, .cxx, .h, .cs, .html, .css, .json, .yaml, .yml, .twig, .php, .kt, .kts):
-1. **Project Opt-Out Check**: Before using AICE on a repository, respect `aice.config.json`:
+## AICE 2.0 — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+**MANDATORY OVERRIDE**: For all 24 supported file extensions (.ts, .tsx, .py, .rs, .go, .cpp, .hpp, .cc, .cxx, .h, .cs, .html, .css, .js, .jsx, .mjs, .cjs, .json, .yaml, .yml, .twig, .php, .kt, .kts), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
+1. **Project Opt-Out Check**: Respect `aice.config.json` in the workspace root:
    - If `"enabled": false`, bypass AICE completely and use native file tools.
-   - If `"idiomsEnabled": false` (or `"idioms": false`), do not collapse or expand `$idiom` macros.
-2. **Explore & Read (85-90% Token Savings)**:
-   - Prefer MCP `aice_outline` (or CLI `aice outline <path>`) to inspect file/directory AST structure before reading raw files.
-   - Prefer MCP `aice_context` (or CLI `aice context <file> -s <symbol>`) for 1-turn symbol-scoped code + dependency contracts + callers.
-3. **Surgical Edits (90%+ Output Token Savings)**:
-   - Prefer MCP `aice_splice` (or CLI `aice splice <file> -s <symbol> -c "<code>"`) for symbol-targeted AST replacements, insertions, or deletions.
-   - Prefer MCP `aice_idioms` (or CLI `aice idioms list|read|update`) for recurring multi-file AST patterns.
+   - If `"idiomsEnabled": false` (or `"idioms": false`), disable `$idiom` macros (`--no-idioms`).
+2. **Startup & New File Creation (`from 0` — 40-75% Output Token Savings)**:
+   - When creating new code files (`.ts`, `.tsx`, `.py`, `.rs`, `.go`, `.cpp`, `.cs`, `.html`, `.css`, `.js`, `.json`, `.yaml`, `.twig`, `.php`, `.kt`), you **MUST** use `aice create <file> -c "<compact AICE>"` (or `aice create --batch` / MCP `aice_create`) instead of raw `write_file` whenever expressing logic, classes, functions, styles, or templates in compact AICE + `$idioms` (including inline `@idiom $Name($0) = ...`) saves output tokens.
+   - **Modular Creation for Large Files (>150 lines)**: Avoid streaming massive 10,000-token monolithic JSON strings in a single `aice_create` tool call (which stalls LLM output streaming for 60–120s); instead, create the compact skeleton + `@idiom` macros via `aice create` / `aice_create` and add/update functions modularly via `aice splice` / `aice_splice`.
+3. **Explore & Read Existing Files (85-90% Read Token Savings)**:
+   - Before calling `read_file` / `view_file` on any existing supported file, you **MUST** run `aice outline <path>` (or MCP `aice_outline`) for structure discovery and `aice context <file> -s <symbol>` (or MCP `aice_context`) for 1-turn symbol-scoped code + dependency contracts + callers.
+4. **Surgical Edits on Existing Files (90%+ Edit Token Savings)**:
+   - When modifying, inserting, or deleting a function/method/class/rule in an existing supported file, you **MUST** use `aice splice <file> -s <symbol> -c "<compact AICE>" --in-place` (or MCP `aice_splice`) instead of `edit_file` / `replace_file_content`.
+   - Use `aice idioms list|read|update` (or MCP `aice_idioms`) for recurring multi-file AST patterns.
+5. **Subagent Propagation (`invoke_subagent` / `test-runner` / `fast-scout` / `code-surgeon` / `deep-auditor`)**:
+   - ALL subagents (`test-runner`, `fast-scout`, `code-surgeon`, `deep-auditor`) **MUST** use `aice outline` and `aice context` instead of `read_file` / `view_file`, and `aice create` / `aice splice` instead of `write_file` / `edit_file`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
 <!-- AICE:END -->
 ```
 

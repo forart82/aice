@@ -66,6 +66,10 @@ export interface RecordTelemetryInput {
   idiomsUsed?: boolean;
   nativeText: string;
   aiceText: string;
+  nativeCl100k?: number;
+  aiceCl100k?: number;
+  nativeO200k?: number;
+  aiceO200k?: number;
   telemetryPath?: string;
 }
 
@@ -348,12 +352,12 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
   const aiceChars = input.aiceText.length;
   const savedChars = nativeChars - aiceChars;
 
-  const nativeCl100k = estimateTokens(input.nativeText, "cl100k_base");
-  const aiceCl100k = estimateTokens(input.aiceText, "cl100k_base");
+  const nativeCl100k = input.nativeCl100k ?? estimateTokens(input.nativeText, "cl100k_base");
+  const aiceCl100k = input.aiceCl100k ?? estimateTokens(input.aiceText, "cl100k_base");
   const savedCl100k = nativeCl100k - aiceCl100k;
 
-  const nativeO200k = estimateTokens(input.nativeText, "o200k_base");
-  const aiceO200k = estimateTokens(input.aiceText, "o200k_base");
+  const nativeO200k = input.nativeO200k ?? estimateTokens(input.nativeText, "o200k_base");
+  const aiceO200k = input.aiceO200k ?? estimateTokens(input.aiceText, "o200k_base");
   const savedO200k = nativeO200k - aiceO200k;
 
   const contentHash = crypto

@@ -1578,6 +1578,16 @@ export class TypeScriptEmitter {
       case "RecordLiteralExpr": {
         if (expr.properties.length === 0) return "{}";
 
+        const isValidJsIdent = (k: string): boolean => /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k);
+        const formatKey = (rawKey?: string): string => {
+          const k = rawKey ?? "";
+          if (k.startsWith("[") && k.endsWith("]")) return k;
+          if ((k.startsWith('"') && k.endsWith('"')) || (k.startsWith("'") && k.endsWith("'"))) {
+            return k;
+          }
+          return isValidJsIdent(k) ? k : JSON.stringify(k);
+        };
+
         const spreadProp = expr.properties.find((p) => p.isSpread);
         if (spreadProp && spreadProp.value.kind === "IdentifierExpr") {
           const targetName = spreadProp.value.name;
@@ -1591,14 +1601,18 @@ export class TypeScriptEmitter {
               }
             }
             const props = structFields.map((fName) => {
+              const fmtKey = formatKey(fName);
               const val = overrideMap.get(fName);
               if (val) {
-                if (val.kind === "IdentifierExpr" && val.name === fName) {
+                if (isValidJsIdent(fName) && val.kind === "IdentifierExpr" && val.name === fName) {
                   return fName;
                 }
-                return `${fName}: ${this.emitExpr(val)}`;
+                return `${fmtKey}: ${this.emitExpr(val)}`;
               }
-              return `${fName}: ${targetName}.${fName}`;
+              const memberAccess = isValidJsIdent(fName)
+                ? `${targetName}.${fName}`
+                : `${targetName}[${JSON.stringify(fName)}]`;
+              return `${fmtKey}: ${memberAccess}`;
             });
             return `{ ${props.join(", ")} }`;
           }
@@ -1609,10 +1623,15 @@ export class TypeScriptEmitter {
             if (p.isSpread) {
               return `...${this.emitExpr(p.value)}`;
             }
-            if (p.value.kind === "IdentifierExpr" && p.value.name === p.key) {
+            if (
+              p.key &&
+              isValidJsIdent(p.key) &&
+              p.value.kind === "IdentifierExpr" &&
+              p.value.name === p.key
+            ) {
               return p.key;
             }
-            return `${p.key}: ${this.emitExpr(p.value)}`;
+            return `${formatKey(p.key)}: ${this.emitExpr(p.value)}`;
           })
           .join(", ");
         return `{ ${props} }`;

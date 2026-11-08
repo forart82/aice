@@ -42,6 +42,8 @@ import { type BatchCreateItem, createBatch, createFile } from "../tools/create.j
 import { outlinePath } from "../tools/outline.js";
 import { splice } from "../tools/splice.js";
 
+import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
+
 function loadPackageVersion(): string {
   try {
     const pkgPath = path.resolve(
@@ -55,7 +57,7 @@ function loadPackageVersion(): string {
   } catch {
     // fallback if package.json is unreachable
   }
-  return "0.9.5";
+  return DEFAULT_AICE_VERSION;
 }
 
 export const AICE_VERSION = loadPackageVersion();

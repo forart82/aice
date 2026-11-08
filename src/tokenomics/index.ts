@@ -26,6 +26,10 @@ import { withSuppressedTelemetry } from "../telemetry/index.js";
 let cl100k: ReturnType<typeof getEncoding> | undefined;
 let o200k: ReturnType<typeof getEncoding> | undefined;
 
+const MAX_TOKEN_CACHE_ENTRIES = 512;
+const MAX_CACHEABLE_TEXT_LENGTH = 200_000;
+const tokenCountCache = new Map<string, number>();
+
 function getTokenizerEncoding(encoding: "cl100k_base" | "o200k_base" = "cl100k_base") {
   if (encoding === "o200k_base") {
     if (!o200k) o200k = getEncoding("o200k_base");
@@ -39,6 +43,26 @@ export function estimateTokens(
   text: string,
   encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
 ): number {
+  if (!text) return 0;
+  if (text.length <= MAX_CACHEABLE_TEXT_LENGTH) {
+    const cacheKey = `${encoding}:${text}`;
+    const cached = tokenCountCache.get(cacheKey);
+    if (cached !== undefined) {
+      // Refresh LRU position
+      tokenCountCache.delete(cacheKey);
+      tokenCountCache.set(cacheKey, cached);
+      return cached;
+    }
+    const count = getTokenizerEncoding(encoding).encode(text).length;
+    if (tokenCountCache.size >= MAX_TOKEN_CACHE_ENTRIES) {
+      const oldestKey = tokenCountCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        tokenCountCache.delete(oldestKey);
+      }
+    }
+    tokenCountCache.set(cacheKey, count);
+    return count;
+  }
   return getTokenizerEncoding(encoding).encode(text).length;
 }
 

@@ -110,6 +110,7 @@ export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
   tsh: "text-shadow",
 
   // Layout & Positioning
+  d: "display",
   disp: "display",
   pos: "position",
   t: "top",
@@ -120,6 +121,7 @@ export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
 
   // Flexbox & Grid
   fl: "flex",
+  fd: "flex-direction",
   fld: "flex-direction",
   flw: "flex-wrap",
   flf: "flex-flow",
@@ -131,6 +133,7 @@ export const CSS_PROPERTY_ALIASES: Readonly<Record<string, string>> = {
   ac: "align-content",
   as: "align-self",
   js: "justify-self",
+  g: "gap",
   gap: "gap",
   gtc: "grid-template-columns",
   gtr: "grid-template-rows",

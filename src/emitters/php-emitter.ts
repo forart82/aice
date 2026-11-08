@@ -684,7 +684,8 @@ export class PhpEmitter {
       case "RecordLiteralExpr":
         return `[${expr.properties
           .map((p) => {
-            const keyStr = p.key ? `'${p.key}' => ` : "";
+            const escapedKey = p.key ? p.key.replace(/\\/g, "\\\\").replace(/'/g, "\\'") : "";
+            const keyStr = p.key ? `'${escapedKey}' => ` : "";
             return `${keyStr}${this.emitExpr(p.value)}`;
           })
           .join(", ")}]`;

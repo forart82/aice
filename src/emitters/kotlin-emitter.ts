@@ -916,7 +916,7 @@ export class KotlinEmitter {
       return "emptyMap()";
     }
     const entries = expr.properties
-      .map((p) => `${JSON.stringify(p.key)} to ${this.emitExpr(p.value)}`)
+      .map((p) => `${JSON.stringify(p.key ?? "")} to ${this.emitExpr(p.value)}`)
       .join(", ");
     return `mapOf(${entries})`;
   }

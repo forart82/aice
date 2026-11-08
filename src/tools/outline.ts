@@ -8,6 +8,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import ts from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -719,6 +720,56 @@ export function generateOutline(
   };
 }
 
+export function collectNativeSyntaxDiagnostics(
+  filePath: string,
+  source: string,
+): string | undefined {
+  const ext = path.extname(filePath).toLowerCase();
+  if (
+    ext !== ".js" &&
+    ext !== ".mjs" &&
+    ext !== ".cjs" &&
+    ext !== ".ts" &&
+    ext !== ".mts" &&
+    ext !== ".cts" &&
+    ext !== ".jsx" &&
+    ext !== ".tsx"
+  ) {
+    return undefined;
+  }
+
+  const scriptKind =
+    ext === ".tsx"
+      ? ts.ScriptKind.TSX
+      : ext === ".jsx"
+        ? ts.ScriptKind.JSX
+        : ext === ".js" || ext === ".mjs" || ext === ".cjs"
+          ? ts.ScriptKind.JS
+          : ts.ScriptKind.TS;
+
+  const sf = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true, scriptKind);
+  const parseDiags =
+    (sf as unknown as { parseDiagnostics?: ts.DiagnosticWithLocation[] }).parseDiagnostics ?? [];
+  if (parseDiags.length === 0) {
+    return undefined;
+  }
+
+  const rawLines = source.split(/\r?\n/);
+  const diagLines: string[] = ["## ⚠️ Native Syntax Diagnostics"];
+  for (const d of parseDiags.slice(0, 10)) {
+    const pos = sf.getLineAndCharacterOfPosition(d.start ?? 0);
+    const lineNum = pos.line + 1;
+    const colNum = pos.character + 1;
+    const msg = ts.flattenDiagnosticMessageText(d.messageText, " ");
+    const offendingLine = (rawLines[pos.line] ?? "").trim();
+    diagLines.push(`- Line ${lineNum}:${colNum} — ${msg}`);
+    if (offendingLine) {
+      diagLines.push(`  \`L${lineNum}: ${offendingLine}\``);
+    }
+  }
+  return diagLines.join("\n");
+}
+
 export async function outlinePath(
   targetPath: string,
   options: OutlineOptions = {},
@@ -741,6 +792,10 @@ export async function outlinePath(
       generateOutline(fullPath, { ...options, projectRoot }),
     );
     const nativeText = fs.readFileSync(fullPath, "utf-8");
+    const nativeDiags = collectNativeSyntaxDiagnostics(fullPath, nativeText);
+    if (nativeDiags && !options.json) {
+      res.text = res.text ? `${res.text}\n\n${nativeDiags}` : nativeDiags;
+    }
     recordTelemetryEvent({
       targetPath: fullPath,
       projectRoot,

@@ -2604,6 +2604,7 @@ function convertFrankensteinToNativeForDecompile(
   snippet: string,
   targetLang: TargetLanguage,
   isBodyOnly = false,
+  isClassMethod = false,
 ): string {
   const lines = snippet.trim().split("\n");
   if (targetLang === "python") {
@@ -2614,9 +2615,10 @@ function convertFrankensteinToNativeForDecompile(
           out = out.replace(/^(\s*)(?:pub\s+)?(async\s+)?fn\s+/, "$1$2def ");
         }
         out = out
+          .replace(/^(\s*)::?=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 = $3")
           .replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*[^=]+?\s*::?=\s*(.+)$/, "$1$2 = $3")
           .replace(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*::?=\s*(.+)$/, "$1$2 = $3")
-          .replace(/^(\s*)ret\b/, "$1return");
+          .replace(/^(\s*)(?:ret|<-)\b/, "$1return");
         return out;
       })
       .join("\n");
@@ -2624,14 +2626,29 @@ function convertFrankensteinToNativeForDecompile(
 
   return lines
     .map((line, idx) => {
-      let out = line;
+      let out = line.replace(/\$([A-Za-z_][A-Za-z0-9_]*)\s*\(/g, "__aice_idiom__$1(");
       if (idx === 0 && !isBodyOnly) {
-        out = out
-          .replace(/^(\s*)pub\s+fn\s+/, "$1public ")
-          .replace(/^(\s*)fn\s+/, "$1function ")
-          .replace(/\)\s*->\s*([^{:]+)\s*\{\s*$/, "): $1 {");
+        if (isClassMethod) {
+          out = out
+            .replace(/^(\s*)pub\s+async\s+fn\s+/, "$1public async ")
+            .replace(/^(\s*)pub\s+fn\s+/, "$1public ")
+            .replace(/^(\s*)async\s+fn\s+/, "$1async ")
+            .replace(/^(\s*)fn\s+/, "$1")
+            .replace(/\)\s*->\s*([^{:]+)\s*\{\s*$/, "): $1 {");
+        } else {
+          out = out
+            .replace(/^(\s*)pub\s+async\s+fn\s+/, "$1export async function ")
+            .replace(/^(\s*)pub\s+fn\s+/, "$1export function ")
+            .replace(/^(\s*)async\s+fn\s+/, "$1async function ")
+            .replace(/^(\s*)fn\s+/, "$1function ")
+            .replace(/\)\s*->\s*([^{:]+)\s*\{\s*$/, "): $1 {");
+        }
       }
       out = out
+        .replace(/^(\s*)val\s+(?=[A-Za-z_$[{])/, "$1const ")
+        .replace(/^(\s*)(?:let\s+)?mut\s+(?=[A-Za-z_$[{])/, "$1let ")
+        .replace(/^(\s*):=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/, "$1const $2 = $3")
+        .replace(/^(\s*)::=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*(.+)$/, "$1let $2 = $3")
         .replace(
           /^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+?)\s*:=\s*(.+)$/,
           "$1const $2: $3 = $4",
@@ -2642,7 +2659,9 @@ function convertFrankensteinToNativeForDecompile(
           "$1let $2: $3 = $4",
         )
         .replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*(.+)$/, "$1let $2 = $3")
-        .replace(/^(\s*)ret\b/, "$1return");
+        .replace(/^(\s*)(?:ret|<-)\b/, "$1return")
+        .replace(/(\)\s+)(?:ret|<-)\b/g, "$1return")
+        .replace(/(\{\s*)(?:ret|<-)\b/g, "$1return");
       return out;
     })
     .join("\n");
@@ -2844,7 +2863,12 @@ function parseSnippetToExpandedDecl(
   if (!hasFnOrClassDecl(parsedMod)) {
     try {
       const decompLang = targetLang === "python" ? "python" : "typescript";
-      const preparedNative = convertFrankensteinToNativeForDecompile(rawSnippet, decompLang, false);
+      const preparedNative = convertFrankensteinToNativeForDecompile(
+        rawSnippet,
+        decompLang,
+        false,
+        Boolean(className),
+      );
       const wrappedNative =
         className && decompLang === "typescript"
           ? `class ${className} {\n${preparedNative}\n}`
