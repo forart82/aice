@@ -869,6 +869,39 @@ export function saveProjectConfig(
         ? existing.idioms
         : undefined;
 
+  let normalizedExistingIdioms: Record<string, ProjectIdiomDefinition> | undefined;
+  if (
+    typeof existing.idioms === "object" &&
+    existing.idioms !== null &&
+    !Array.isArray(existing.idioms)
+  ) {
+    const rawMap = existing.idioms as Record<string, unknown>;
+    const normalizedMap: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(rawMap)) {
+      if (typeof val === "string") {
+        const shaped = normalizeShapedIdiom(key, val);
+        if (shaped) normalizedMap[shaped.name] = shaped;
+      } else if (val && typeof val === "object" && !Array.isArray(val)) {
+        const entry = { ...(val as Record<string, unknown>) };
+        if (entry.templateAice === undefined && typeof entry.template === "string") {
+          entry.templateAice = entry.template;
+        }
+        if (entry.params === undefined && typeof entry.templateAice === "string") {
+          entry.params = inferParamsFromTemplate(entry.templateAice);
+        } else if (Array.isArray(entry.params)) {
+          entry.params = entry.params.map((p) => (typeof p === "string" ? { name: p } : p));
+        }
+        if (entry.occurrences === undefined) entry.occurrences = 0;
+        if (entry.tokensPerOccurrenceSaved === undefined) entry.tokensPerOccurrenceSaved = 0;
+        if (entry.netTokenSavings === undefined) entry.netTokenSavings = 0;
+        normalizedMap[key] = entry;
+      } else {
+        normalizedMap[key] = val;
+      }
+    }
+    normalizedExistingIdioms = normalizedMap as Record<string, ProjectIdiomDefinition>;
+  }
+
   const mergedConfig: AiceProjectConfig = {
     ...(config.enabled !== undefined
       ? { enabled: config.enabled }
@@ -896,10 +929,8 @@ export function saveProjectConfig(
         : {}),
     ...(config.idioms !== undefined
       ? { idioms: config.idioms }
-      : typeof existing.idioms === "object" &&
-          existing.idioms !== null &&
-          !Array.isArray(existing.idioms)
-        ? { idioms: existing.idioms as Record<string, ProjectIdiomDefinition> }
+      : normalizedExistingIdioms !== undefined
+        ? { idioms: normalizedExistingIdioms }
         : {}),
   };
 
@@ -949,22 +980,43 @@ export function saveProjectConfig(
     toWrite.idiomsEnabled = mergedConfig.idiomsEnabled;
   }
   if (!stripLegacy) {
-    if (config.mode !== undefined || config.isolated !== undefined || existing.mode !== undefined) {
+    if (
+      config.mode !== undefined ||
+      config.isolated !== undefined ||
+      (existing.mode !== undefined && existing.mode !== DEFAULT_PROJECT_CONFIG.mode) ||
+      (existing.isolated !== undefined && existing.isolated !== DEFAULT_PROJECT_CONFIG.isolated)
+    ) {
       toWrite.mode = mergedConfig.mode;
     }
-    if (config.sourceDir !== undefined || existing.sourceDir !== undefined) {
+    if (
+      config.sourceDir !== undefined ||
+      (existing.sourceDir !== undefined && existing.sourceDir !== DEFAULT_PROJECT_CONFIG.sourceDir)
+    ) {
       toWrite.sourceDir = mergedConfig.sourceDir;
     }
-    if (config.outDir !== undefined || existing.outDir !== undefined) {
+    if (
+      config.outDir !== undefined ||
+      (existing.outDir !== undefined && existing.outDir !== DEFAULT_PROJECT_CONFIG.outDir)
+    ) {
       toWrite.outDir = mergedConfig.outDir;
     }
-    if (config.targetLanguage !== undefined || existing.targetLanguage !== undefined) {
+    if (
+      config.targetLanguage !== undefined ||
+      (existing.targetLanguage !== undefined &&
+        existing.targetLanguage !== DEFAULT_PROJECT_CONFIG.targetLanguage)
+    ) {
       toWrite.targetLanguage = mergedConfig.targetLanguage;
     }
-    if (config.isolated !== undefined || existing.isolated !== undefined) {
+    if (
+      config.isolated !== undefined ||
+      (existing.isolated !== undefined && existing.isolated !== DEFAULT_PROJECT_CONFIG.isolated)
+    ) {
       toWrite.isolated = mergedConfig.isolated;
     }
-    if (config.watermark !== undefined || existing.watermark !== undefined) {
+    if (
+      config.watermark !== undefined ||
+      (existing.watermark !== undefined && existing.watermark !== DEFAULT_PROJECT_CONFIG.watermark)
+    ) {
       toWrite.watermark = mergedConfig.watermark;
     }
   }

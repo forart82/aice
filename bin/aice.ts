@@ -1986,6 +1986,16 @@ program
             try {
               const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
               delete raw.idioms;
+              for (const legacyKey of [
+                "mode",
+                "sourceDir",
+                "outDir",
+                "targetLanguage",
+                "isolated",
+                "watermark",
+              ]) {
+                delete raw[legacyKey];
+              }
               fs.writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
             } catch {
               // ignore

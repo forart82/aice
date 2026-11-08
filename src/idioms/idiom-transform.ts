@@ -2971,10 +2971,14 @@ export function scanProjectIdioms(
 
   if (!options?.dryRun) {
     if (Object.keys(allIdioms).length > 0) {
-      saveProjectConfig(resolvedDir, {
-        idiomsEnabled,
-        idioms: allIdioms,
-      });
+      saveProjectConfig(
+        resolvedDir,
+        {
+          idiomsEnabled,
+          idioms: allIdioms,
+        },
+        { stripLegacyKeys: true },
+      );
     }
     writeIdiomCache(resolvedDir, {
       version: 1,
@@ -3447,9 +3451,13 @@ export async function updateProjectIdiom(
       delete finalIdioms[oldKey];
       finalIdioms[normName] = updatedDef;
 
-      saveProjectConfig(resolvedDir, {
-        idioms: finalIdioms,
-      });
+      saveProjectConfig(
+        resolvedDir,
+        {
+          idioms: finalIdioms,
+        },
+        { stripLegacyKeys: true },
+      );
 
       // Refresh provenance cache with updated native files
       const refreshed = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);

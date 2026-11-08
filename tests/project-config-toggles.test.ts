@@ -117,6 +117,42 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
       enabled: true,
       idiomsEnabled: true,
     });
+
+    // Legacy 0.9.3 default keys + shorthand string idioms + custom non-legacy fields
+    fs.writeFileSync(
+      path.join(tmpDir, "aice.config.json"),
+      JSON.stringify(
+        {
+          enabled: true,
+          mode: "side-by-side",
+          sourceDir: "src",
+          outDir: ".aice-build",
+          targetLanguage: "typescript",
+          isolated: false,
+          watermark: true,
+          customField: "keep-me",
+          idioms: {
+            $clamp: "Math.min(Math.max($0, $1), $2)",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    const savedWithShorthand = saveProjectConfig(tmpDir, { idiomsEnabled: true });
+    expect(savedWithShorthand.idioms?.$clamp?.templateAice).toBe("Math.min(Math.max($0, $1), $2)");
+    const rawCleaned = JSON.parse(fs.readFileSync(path.join(tmpDir, "aice.config.json"), "utf-8"));
+    expect(rawCleaned.mode).toBeUndefined();
+    expect(rawCleaned.sourceDir).toBeUndefined();
+    expect(rawCleaned.outDir).toBeUndefined();
+    expect(rawCleaned.targetLanguage).toBeUndefined();
+    expect(rawCleaned.isolated).toBeUndefined();
+    expect(rawCleaned.watermark).toBeUndefined();
+    expect(rawCleaned.customField).toBe("keep-me");
+    expect(rawCleaned.enabled).toBe(true);
+    expect(rawCleaned.idiomsEnabled).toBe(true);
+    expect(rawCleaned.idioms.$clamp.name).toBe("$clamp");
   });
 
   it("refuses tool execution with AICE_DISABLED_MESSAGE when enabled is false in aice.config.json", async () => {
