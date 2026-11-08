@@ -1254,9 +1254,9 @@ program
           projectRoot: spliceProjectRoot,
         };
 
-        const result = await splice(targetPath, spliceOpts);
+        const result = await splice(fullSpliceTarget, spliceOpts);
         if (extraDeleteSymbol) {
-          await splice(targetPath, {
+          await splice(fullSpliceTarget, {
             symbol: extraDeleteSymbol,
             delete: true,
             idioms: effectiveSpliceIdioms,
@@ -1339,26 +1339,19 @@ program
     ) => {
       try {
         if (options.batch) {
-          const batchProjectRoot = findProjectRoot(process.cwd());
-          const batchProjectConfig = loadProjectConfig(batchProjectRoot);
-          if (!isProjectAiceEnabled(batchProjectConfig)) {
-            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
-            process.exit(1);
-          }
-          const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
           const batchCandidatePath = path.resolve(process.cwd(), options.batch);
           const rawJson =
             fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
               ? fs.readFileSync(batchCandidatePath, "utf-8")
               : options.batch;
           const parsed = JSON.parse(rawJson);
-          let items: BatchCreateItem[];
+          let rawItems: BatchCreateItem[];
           if (Array.isArray(parsed)) {
-            items = parsed as BatchCreateItem[];
+            rawItems = parsed as BatchCreateItem[];
           } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.files)) {
-            items = parsed.files as BatchCreateItem[];
+            rawItems = parsed.files as BatchCreateItem[];
           } else if (parsed && typeof parsed === "object") {
-            items = Object.entries(parsed).map(([fp, codeVal]) =>
+            rawItems = Object.entries(parsed).map(([fp, codeVal]) =>
               typeof codeVal === "string"
                 ? { filePath: fp, code: codeVal }
                 : { filePath: fp, ...(codeVal as object) },
@@ -1368,6 +1361,27 @@ program
               "--batch must be a JSON array of { filePath, code } items or a { [filePath]: code } map",
             );
           }
+
+          const items: BatchCreateItem[] = rawItems.map((it) => {
+            const rawFp = it.filePath || it.file || it.path || "";
+            return {
+              ...it,
+              filePath: rawFp ? path.resolve(process.cwd(), rawFp) : rawFp,
+              ...(it.from ? { from: path.resolve(process.cwd(), it.from) } : {}),
+            };
+          });
+
+          const firstFp = items[0]?.filePath;
+          const batchProjectRoot = findProjectRoot(
+            firstFp ? path.dirname(firstFp) : process.cwd(),
+            process.cwd(),
+          );
+          const batchProjectConfig = loadProjectConfig(batchProjectRoot);
+          if (!isProjectAiceEnabled(batchProjectConfig)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
+          const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
 
           const batchRes = await createBatch(items, {
             dryRun: options.dryRun,
@@ -1422,9 +1436,9 @@ program
           }
         }
 
-        const result = await createFile(filePathArg, {
+        const result = await createFile(fullTarget, {
           code,
-          from: options.from,
+          from: options.from ? path.resolve(process.cwd(), options.from) : undefined,
           inlineIdioms: options.idiom,
           idioms: effectiveCreateIdioms,
           dryRun: options.dryRun,

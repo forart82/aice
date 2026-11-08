@@ -60,6 +60,8 @@ export interface CreateFileOptions {
   surface?: TelemetrySurface;
   /** Optional target language override */
   targetLanguage?: TargetLanguage;
+  /** Internal flag to defer telemetry during atomic batch execution */
+  suppressTelemetry?: boolean;
 }
 
 export interface CreateFileResult {
@@ -180,7 +182,12 @@ function buildIdiomDefinition(
   sourceToCountIn?: string,
 ): ProjectIdiomDefinition {
   const normName = rawName.trim().startsWith("$") ? rawName.trim() : `$${rawName.trim()}`;
-  const cleanedRawTemplate = rawTemplate.trim().replace(/^\(\s*(\{[\s\S]*\})\s*\)$/, "$1");
+  const cleanedRawTemplate = rawTemplate
+    .trim()
+    .replace(/^\(\s*(\{[\s\S]*\})\s*\)$/, "$1")
+    .split(/\r?\n/)
+    .map((line) => normalizeCompactAiceLine(line))
+    .join("\n");
   const { params, normalizedTemplate } = parseParamSpecList(rawParamSpec, cleanedRawTemplate);
   const isMultiLine = normalizedTemplate.includes("\n");
   const kind: "expr" | "stmt" | "block" = isMultiLine ? "block" : "stmt";
@@ -391,14 +398,31 @@ export function parseOptionIdioms(
 function normalizeCompactAiceLine(line: string): string {
   let out = line;
 
-  // Declaration keyword shorthands: ^fn, @fn ^name, fn ^name, @cls ^Name, ^class Name
+  // Declaration keyword shorthands: ^fn, @fn ^name, fn ^name, ^async fn, ^static fn, @cls ^Name, ^class Name, @type ^Name, ^type Name, ^const
+  out = out.replace(
+    /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|async\s+\^fn\s+|async\s+fn\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
+    "$1pub async fn $2",
+  );
+  out = out.replace(
+    /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|static\s+\^fn\s+|static\s+fn\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
+    "$1pub static fn $2",
+  );
   out = out.replace(/^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^)([A-Za-z_][A-Za-z0-9_]*)/, "$1pub fn $2");
-  out = out.replace(/^(\s*)@fn\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1fn $2");
+  out = out.replace(/^(\s*)@fn\s+(async\s+|static\s+)?([A-Za-z_][A-Za-z0-9_]*)/, "$1$2fn $3");
   out = out.replace(
     /^(\s*)(?:@cls\s+\^|\^class\s+|class\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
     "$1pub class $2",
   );
   out = out.replace(/^(\s*)@cls\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1class $2");
+  out = out.replace(
+    /^(\s*)(?:@type\s+\^|\^type\s+|type\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
+    "$1pub type $2",
+  );
+  out = out.replace(/^(\s*)@type\s+([A-Za-z_][A-Za-z0-9_]*)/, "$1type $2");
+  out = out.replace(
+    /^(\s*)(?:\^(const|val|mut)\s+|(const|val|mut)\s+\^)([A-Za-z_][A-Za-z0-9_]*)/,
+    "$1pub $2$3 $4",
+  );
 
   // Hybrid native keywords
   out = out.replace(/^(\s*)export\s+async\s+function\s+/, "$1pub async fn ");
@@ -411,17 +435,44 @@ function normalizeCompactAiceLine(line: string): string {
   out = out.replace(/^(\s*)export\s+const\s+/, "$1pub const ");
   out = out.replace(/^(\s*)(async\s+)?def\s+/, "$1$2fn ");
 
-  // Statement shorthands: `:= x = expr`, `::= x = expr`, `<- expr`, `return expr`
+  // Statement shorthands at line start or after `:` in single-line blocks (`if cond: <- expr`)
   out = out.replace(/^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 := $3");
   out = out.replace(/^(\s*)::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, "$1$2 ::= $3");
+  out = out.replace(
+    /^(\s*):=\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+)=\s*(.+)$/,
+    "$1val $2: $3 = $4",
+  );
+  out = out.replace(
+    /^(\s*)::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+)=\s*(.+)$/,
+    "$1mut $2: $3 = $4",
+  );
   out = out.replace(/^(\s*)<-\s+(.+)$/, "$1ret $2");
   out = out.replace(/^(\s*)<-\s*$/, "$1ret");
   out = out.replace(/^(\s*)return\b/, "$1ret");
+  out = out.replace(/:\s*<-\s+(.+)$/, ": ret $1");
+  out = out.replace(/:\s*<-\s*$/, ": ret");
+  out = out.replace(/:\s*return\b/, ": ret");
+  out = out.replace(/:\s*:=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, ": $1 := $2");
+  out = out.replace(/:\s*::=\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/, ": $1 ::= $2");
 
-  // Compact type sigils in parameter & return type annotations: :#, :$, :?, :_, :*, ->#, ->$, ->?, ->_, ->*
-  if (/^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?(?:fn|class|type)\b/.test(out)) {
+  // Compact type sigils in declarations, class/type fields, parameters & return types:
+  // :#, :$, :?, :_, :*, [#], [$], [?], [*], ->#, ->$, ->?, ->_, ->*
+  const isDeclOrFieldLine =
+    /^\s*(?:pub\s+)?(?:static\s+)?(?:async\s+)?(?:fn|class|type|const|val|mut|let|var)\b/.test(
+      out,
+    ) ||
+    /^\s*(?:pub\s+|priv\s+)?(?:static\s+)?(?:readonly\s+)?(?!if\b|elif\b|else\b|for\b|while\b|try\b|catch\b|finally\b|match\b|case\b|default\b|ret\b|return\b)[A-Za-z_][A-Za-z0-9_]*\s*\??\s*:\s*(?:#|\$|\?|_|\*|\[(?:#|\$|\?|_|\*)\])(?=\s*(?:=|,|\)|\]|\}|->|$))/.test(
+      out,
+    );
+
+  if (isDeclOrFieldLine) {
     out = out
-      .replace(/:(?!=)\s*#(?![A-Za-z0-9_])/g, ": num")
+      .replace(/\[\s*#\s*\]/g, "[num]")
+      .replace(/\[\s*\$\s*\]/g, "[str]")
+      .replace(/\[\s*\?\s*\]/g, "[bool]")
+      .replace(/\[\s*_\s*\]/g, "[void]")
+      .replace(/\[\s*\*\s*\]/g, "[any]")
+      .replace(/:(?!=)\s*#(?=\s*(?:=|,|\)|\]|\}|->|$))/g, ": num")
       .replace(/:(?!=)\s*\$(?![A-Za-z0-9_])/g, ": str")
       .replace(/:(?!=)\s*\?(?![A-Za-z0-9_.?])/g, ": bool")
       .replace(/:(?!=)\s*_(?![A-Za-z0-9_])/g, ": void")
@@ -433,11 +484,17 @@ function normalizeCompactAiceLine(line: string): string {
       .replace(/->\s*\*(?![A-Za-z0-9_])/g, " -> any");
   }
 
-  // Ensure block-indented class / fn headers end with `:` when not expression-bodied or brace-delimited
+  // Ensure block-indented class / type / fn headers end with `:` when not expression-bodied or brace-delimited
   if (
     /^\s*(?:pub\s+)?class\s+[A-Za-z_][A-Za-z0-9_]*(?:\s*\([^)]*\))?(?:\s*:\s*[A-Za-z0-9_.,\s]+)?$/.test(
       out,
     ) &&
+    !out.trimEnd().endsWith(":") &&
+    !out.trimEnd().endsWith("{")
+  ) {
+    out = `${out.trimEnd()}:`;
+  } else if (
+    /^\s*(?:pub\s+)?type\s+[A-Za-z_][A-Za-z0-9_]*(?:\[[^\]]+\])?$/.test(out) &&
     !out.trimEnd().endsWith(":") &&
     !out.trimEnd().endsWith("{")
   ) {
@@ -651,8 +708,15 @@ function compileAiceOrHybridToNative(
       idioms: activeIdioms,
     });
   } catch {
-    // If the input has no unexpanded $idioms and looks like valid native code, allow clean passthrough
-    if (!cleanedCode.includes("$") && !/\bfn\s+[A-Za-z_]/.test(cleanedCode)) {
+    // If the input has no unexpanded $idioms or AICE-only syntax markers and looks like valid native code, allow clean passthrough
+    const hasAiceMarkers =
+      cleanedCode.includes("$") ||
+      /(?:^|\s)(?:@cls|@fn|@type|@idiom|\^fn|\^class|\^type|\^const|\^val|\^mut|\^async|\^static|pub\s+(?:fn|class|type|const|val|mut)|fn\s+\^?[A-Za-z_]|<-|:=|::=)/m.test(
+        cleanedCode,
+      ) ||
+      /:(?!=)\s*[#$?_*](?=\s*(?:=|,|\)|\]|\}|->|$))/m.test(cleanedCode) ||
+      /->\s*[#$?_*](?![A-Za-z0-9_])/m.test(cleanedCode);
+    if (!hasAiceMarkers) {
       return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     }
     throw new Error(
@@ -789,17 +853,19 @@ export async function createFile(
     ...cliInlineIdioms,
   };
 
-  // Merge project idioms + inline idioms (always expand inline idioms and existing idioms for grace)
-  const activeIdioms: Record<string, ProjectIdiomDefinition> =
-    options.idioms === false
-      ? {}
-      : {
-          ...(config.idioms ?? {}),
-          ...declaredIdioms,
-        };
+  // Merge project idioms + inline idioms when idioms are enabled for this project/call
+  const activeIdioms: Record<string, ProjectIdiomDefinition> = !idiomsEnabled
+    ? {}
+    : {
+        ...(config.idioms ?? {}),
+        ...declaredIdioms,
+      };
 
   if (Object.keys(declaredIdioms).length > 0) {
-    validateIdiomDefinitions(activeIdioms);
+    validateIdiomDefinitions({
+      ...(config.idioms ?? {}),
+      ...declaredIdioms,
+    });
   }
 
   const checkPath = fullPath.replace(/\.aice$/, "");
@@ -818,6 +884,7 @@ export async function createFile(
   );
 
   const dryRun = Boolean(options.dryRun);
+  const persistedIdioms: string[] = [];
   if (!dryRun) {
     const dir = path.dirname(fullPath);
     await fs.promises.mkdir(dir, { recursive: true });
@@ -830,15 +897,17 @@ export async function createFile(
 
     if (idiomsEnabled && Object.keys(declaredIdioms).length > 0) {
       persistDeclaredIdioms(root, declaredIdioms, fullPath, nativeCode, cleanedCode);
+      persistedIdioms.push(...Object.keys(declaredIdioms));
     }
   }
 
   const idiomsUsed =
-    Object.keys(declaredIdioms).length > 0 ||
-    Object.keys(activeIdioms).some((k) => {
-      const norm = k.startsWith("$") ? k : `$${k}`;
-      return rawPayload.includes(norm);
-    });
+    idiomsEnabled &&
+    (Object.keys(declaredIdioms).length > 0 ||
+      Object.keys(activeIdioms).some((k) => {
+        const norm = k.startsWith("$") ? k : `$${k}`;
+        return rawPayload.includes(norm);
+      }));
 
   const nativeTokens = estimateTokens(nativeCode, "cl100k_base");
   const aiceTokens = estimateTokens(rawPayload, "cl100k_base");
@@ -848,15 +917,17 @@ export async function createFile(
   const aiceO200kTokens = estimateTokens(rawPayload, "o200k_base");
   const o200kTokensSaved = nativeO200kTokens - aiceO200kTokens;
 
-  recordTelemetryEvent({
-    targetPath: fullPath,
-    projectRoot: root,
-    operation: "create",
-    surface: options.surface ?? "cli",
-    idiomsUsed,
-    nativeText: nativeCode,
-    aiceText: rawPayload,
-  });
+  if (!dryRun && !options.suppressTelemetry) {
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot: root,
+      operation: "create",
+      surface: options.surface ?? "cli",
+      idiomsUsed,
+      nativeText: nativeCode,
+      aiceText: rawPayload,
+    });
+  }
 
   return {
     success: true,
@@ -867,7 +938,7 @@ export async function createFile(
     newFileContent: nativeCode,
     aiceInput: rawPayload,
     declaredIdioms,
-    persistedIdioms: Object.keys(declaredIdioms),
+    persistedIdioms,
     idiomsUsed,
     nativeTokens,
     aiceTokens,
@@ -887,7 +958,7 @@ export async function createFile(
 
 /**
  * Creates multiple native files atomically from a batch array of `{ filePath, code }` items.
- * If any item in the batch fails, all newly created or overwritten files are rolled back.
+ * If any item in the batch fails, all newly created or overwritten files and idiom config/cache updates are rolled back.
  */
 export async function createBatch(
   items: BatchCreateItem[],
@@ -900,6 +971,16 @@ export async function createBatch(
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const existingBackups = new Map<string, string>();
   const newlyCreatedPaths: string[] = [];
+  const configSnapshots = new Map<string, string | null>();
+
+  const snapshotConfigFile = (filePathToSnap: string) => {
+    if (!configSnapshots.has(filePathToSnap)) {
+      configSnapshots.set(
+        filePathToSnap,
+        fs.existsSync(filePathToSnap) ? fs.readFileSync(filePathToSnap, "utf-8") : null,
+      );
+    }
+  };
 
   for (const item of items) {
     const rawFp = item.filePath || item.file || item.path || "";
@@ -908,10 +989,26 @@ export async function createBatch(
     if (fs.existsSync(fullPath) && !existingBackups.has(fullPath)) {
       existingBackups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
+    const itemRoot =
+      item.projectRoot ??
+      options.projectRoot ??
+      findProjectRoot(path.dirname(fullPath), process.cwd());
+    const resolvedRoot = path.resolve(itemRoot);
+    snapshotConfigFile(path.join(resolvedRoot, "aice.config.json"));
+    snapshotConfigFile(path.join(resolvedRoot, ".aice-idioms.json"));
+    snapshotConfigFile(path.join(resolvedRoot, ".aice-cache", "idioms.json"));
   }
 
   const results: CreateFileResult[] = [];
   const createdFiles: string[] = [];
+  const pendingTelemetry: Array<{
+    targetPath: string;
+    projectRoot: string;
+    surface: TelemetrySurface;
+    idiomsUsed: boolean;
+    nativeText: string;
+    aiceText: string;
+  }> = [];
   let totalNativeTokens = 0;
   let totalAiceTokens = 0;
   let totalTokensSaved = 0;
@@ -927,21 +1024,36 @@ export async function createBatch(
 
       const resolvedCode =
         item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? options.code;
+      const itemProjectRoot =
+        item.projectRoot ??
+        options.projectRoot ??
+        findProjectRoot(path.dirname(fullPath), process.cwd());
 
-      const res = await createFile(rawFp, {
+      const res = await createFile(fullPath, {
         ...options,
         ...item,
         code: resolvedCode,
-        projectRoot: item.projectRoot ?? options.projectRoot,
+        projectRoot: itemProjectRoot,
         dryRun: item.dryRun ?? options.dryRun,
         idioms: item.idioms ?? options.idioms,
         inlineIdioms: item.inlineIdioms ?? options.inlineIdioms,
         idiom: item.idiom ?? options.idiom,
         surface: item.surface ?? options.surface,
+        suppressTelemetry: true,
       });
 
       if (!existedBefore && !res.dryRun) {
         newlyCreatedPaths.push(fullPath);
+      }
+      if (!res.dryRun) {
+        pendingTelemetry.push({
+          targetPath: res.filePath,
+          projectRoot: path.resolve(itemProjectRoot),
+          surface: item.surface ?? options.surface ?? "cli",
+          idiomsUsed: res.idiomsUsed,
+          nativeText: res.nativeCode,
+          aiceText: res.aiceInput,
+        });
       }
 
       results.push(res);
@@ -968,8 +1080,42 @@ export async function createBatch(
           // ignore restore error
         }
       }
+      for (const [cfgFp, prevContent] of configSnapshots.entries()) {
+        try {
+          if (prevContent === null) {
+            if (fs.existsSync(cfgFp)) {
+              fs.unlinkSync(cfgFp);
+              const parentDir = path.dirname(cfgFp);
+              if (
+                path.basename(parentDir) === ".aice-cache" &&
+                fs.existsSync(parentDir) &&
+                fs.readdirSync(parentDir).length === 0
+              ) {
+                fs.rmdirSync(parentDir);
+              }
+            }
+          } else {
+            fs.mkdirSync(path.dirname(cfgFp), { recursive: true });
+            fs.writeFileSync(cfgFp, prevContent, "utf-8");
+          }
+        } catch {
+          // ignore config restore error
+        }
+      }
     }
     throw err;
+  }
+
+  for (const ev of pendingTelemetry) {
+    recordTelemetryEvent({
+      targetPath: ev.targetPath,
+      projectRoot: ev.projectRoot,
+      operation: "create",
+      surface: ev.surface,
+      idiomsUsed: ev.idiomsUsed,
+      nativeText: ev.nativeText,
+      aiceText: ev.aiceText,
+    });
   }
 
   return {

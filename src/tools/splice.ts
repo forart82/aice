@@ -3830,7 +3830,7 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   const fileExists = fs.existsSync(fullPath);
   if ((!fileExists && !options.delete) || options.create || options.symbol === "*") {
     const prevSource = fileExists ? fs.readFileSync(fullPath, "utf-8") : "";
-    const created = await createFile(filePath, {
+    const created = await createFile(fullPath, {
       code: options.code ?? options.body ?? "",
       idioms: options.idioms,
       dryRun: options.dryRun,

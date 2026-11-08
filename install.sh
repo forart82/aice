@@ -212,7 +212,7 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
     git -C "$SCRIPT_DIR" fetch --quiet origin main --tags 2>/dev/null || true
     BEHIND_COUNT="$(git -C "$SCRIPT_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)"
     if [[ "$BEHIND_COUNT" =~ ^[0-9]+$ ]] && [[ "$BEHIND_COUNT" -gt 0 ]]; then
-      LOCAL_VER="$(node -e 'try{console.log(require("./package.json").version)}catch{console.log("unknown")}' 2>/dev/null || echo "unknown")"
+      LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "unknown")"
       REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:package.json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).version)}catch{console.log("latest")}})' 2>/dev/null || echo "latest")"
       log_warn "Remote git repository (origin/main) is ahead by ${BEHIND_COUNT} commit(s) (local: v${LOCAL_VER} -> remote: v${REMOTE_VER})."
       DO_UPDATE=0
@@ -221,7 +221,9 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
         DO_UPDATE=1
       else
         printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] '
-        if IFS= read -t 30 -r ans; then
+        READ_TIMEOUT=1
+        [[ -t 0 ]] && READ_TIMEOUT=30
+        if IFS= read -t "$READ_TIMEOUT" -r ans; then
           case "$ans" in
             ""|[Yy]|[Yy][Ee][Ss]) DO_UPDATE=1 ;;
             *) DO_UPDATE=0 ;;

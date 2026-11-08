@@ -1093,9 +1093,17 @@ export class AiceMcpServer {
             config,
             typeof args.idioms === "boolean" ? args.idioms : undefined,
           );
+          const inlineIdiomsArg = (args.inlineIdioms ??
+            args.idiom ??
+            (typeof args.idioms !== "boolean" ? args.idioms : undefined)) as
+            | string
+            | string[]
+            | Record<string, string>
+            | undefined;
           const batchRes = await createBatch(safeItems, {
             dryRun,
             idioms: effectiveIdioms,
+            inlineIdioms: inlineIdiomsArg,
             projectRoot,
             surface: "mcp",
           });
@@ -1126,12 +1134,20 @@ export class AiceMcpServer {
           config,
           typeof args.idioms === "boolean" ? args.idioms : undefined,
         );
+        const inlineIdiomsArg = (args.inlineIdioms ??
+          args.idiom ??
+          (typeof args.idioms !== "boolean" ? args.idioms : undefined)) as
+          | string
+          | string[]
+          | Record<string, string>
+          | undefined;
         const codeStr = String(
           args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
         );
         const res = await createFile(safeFilePath, {
           code: codeStr,
           idioms: effectiveIdioms,
+          inlineIdioms: inlineIdiomsArg,
           dryRun,
           projectRoot,
           surface: "mcp",

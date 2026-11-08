@@ -265,44 +265,107 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       expect(res.dryRun).toBe(true);
       expect(res.newFileContent).toContain("n * 2");
+      expect(res.persistedIdioms).toEqual([]);
       expect(fs.existsSync(targetPath)).toBe(false);
       expect(fs.existsSync(path.join(tmpDir, "aice.config.json"))).toBe(false);
+      expect(readTelemetryEvents(telemetryFile).length).toBe(0);
     });
 
-    it("supports createBatch and rolls back atomically on failure", async () => {
-      const fileA = path.join(tmpDir, "batch", "a.ts");
-      const fileB = path.join(tmpDir, "batch", "b.py");
+    it("supports compact type sigils on class/type fields & ^const, shorthands inside @idiom templates, and rejects cyclic @idioms or broken @cls syntax", async () => {
+      const targetPath = path.join(tmpDir, "src", "entity.ts");
+      const code = [
+        "@idiom $guardPos($0) = if $0 < 0: <- 0",
+        "@type ^Vec2",
+        "  x:#",
+        "  y:#",
+        "^const MAX_ENTITIES:# = 64",
+        "@cls ^Player",
+        "  x:# = 0",
+        '  name:$ = "hero"',
+        "  active:? = true",
+        "  scores:[#] = []",
+        "  ^fn step(dx:#)->#",
+        "    $guardPos(dx)",
+        "    self.x = self.x + dx",
+        "    <- self.x",
+      ].join("\n");
+
+      const res = await createFile(targetPath, {
+        code,
+        projectRoot: tmpDir,
+      });
+
+      expect(res.newFileContent).toContain("export interface Vec2");
+      expect(res.newFileContent).toContain("export const MAX_ENTITIES: number = 64;");
+      expect(res.newFileContent).toContain("export class Player");
+      expect(res.newFileContent).toContain("x: number = 0;");
+      expect(res.newFileContent).toContain('name: string = "hero";');
+      expect(res.newFileContent).toContain("active: boolean = true;");
+      expect(res.newFileContent).toContain("if ((dx < 0)) {\n      return 0;\n    }");
+
+      // Mutually recursive inline @idioms must be rejected before writing to disk
+      const cycleFile = path.join(tmpDir, "src", "cycle.ts");
+      await expect(
+        createFile(cycleFile, {
+          code: "@idiom $a($0) = $b($0)\n@idiom $b($0) = $a($0)\n^fn f(x:#)-># => $a(x)",
+          projectRoot: tmpDir,
+        }),
+      ).rejects.toThrow(/Idiom recursion cycle detected/);
+      expect(fs.existsSync(cycleFile)).toBe(false);
+
+      // Broken AICE class syntax without `fn` must throw rather than writing raw @cls to disk
+      const brokenFile = path.join(tmpDir, "src", "broken.ts");
+      await expect(
+        createFile(brokenFile, {
+          code: "@cls ^Broken\n  x:# = @@@",
+          projectRoot: tmpDir,
+        }),
+      ).rejects.toThrow(/Failed to compile AICE source/);
+      expect(fs.existsSync(brokenFile)).toBe(false);
+    });
+
+    it("supports createBatch and rolls back files, aice.config.json, .aice-cache/idioms.json, and telemetry atomically on failure", async () => {
+      const batchRoot = path.join(tmpDir, "batch-proj");
+      const fileA = path.join(batchRoot, "a.ts");
+      const fileB = path.join(batchRoot, "b.py");
 
       const okBatch = await createBatch(
         [
           { filePath: fileA, code: "^fn alpha(x:#)-># => x + 1" },
           { filePath: fileB, code: "fn beta(x:#)-># => x * 2" },
         ],
-        { projectRoot: tmpDir },
+        { projectRoot: batchRoot },
       );
 
       expect(okBatch.totalFiles).toBe(2);
       expect(fs.existsSync(fileA)).toBe(true);
       expect(fs.existsSync(fileB)).toBe(true);
+      const eventsBeforeFail = readTelemetryEvents(telemetryFile).length;
 
-      // Now test rollback when one item in a batch fails (unsupported extension)
-      const fileC = path.join(tmpDir, "batch", "c.ts");
-      const badFile = path.join(tmpDir, "batch", "invalid.unknownext");
+      // Now test rollback when an early item declares an @idiom and a later item in the batch fails
+      const fileC = path.join(batchRoot, "c.ts");
+      const badFile = path.join(batchRoot, "invalid.unknownext");
       const originalA = fs.readFileSync(fileA, "utf-8");
 
       await expect(
         createBatch(
           [
             { filePath: fileA, code: "^fn alphaChanged(x:#)-># => x + 999" },
-            { filePath: fileC, code: "^fn gamma(x:#)-># => x + 3" },
+            {
+              filePath: fileC,
+              code: "@idiom $tri($0) = $0 * 3\n^fn gamma(x:#)-># => $tri(x)",
+            },
             { filePath: badFile, code: "^fn bad()-># => 0" },
           ],
-          { projectRoot: tmpDir },
+          { projectRoot: batchRoot },
         ),
       ).rejects.toThrow(/Unsupported target extension/);
 
       expect(fs.readFileSync(fileA, "utf-8")).toBe(originalA);
       expect(fs.existsSync(fileC)).toBe(false);
+      expect(fs.existsSync(path.join(batchRoot, "aice.config.json"))).toBe(false);
+      expect(fs.existsSync(path.join(batchRoot, ".aice-cache", "idioms.json"))).toBe(false);
+      expect(readTelemetryEvents(telemetryFile).length).toBe(eventsBeforeFail);
     });
   });
 
@@ -347,49 +410,62 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
   });
 
   describe("Substep 1.3 & 1.4: CLI `aice create` and MCP `aice_create`", () => {
-    it(
-      "executes `aice create` (and alias `aice new`) via CLI including --batch and --json",
-      () => {
-        const cliFile = path.join(tmpDir, "cli", "math.ts");
-        const out = runCli(
-          [
-            "create",
-            cliFile,
-            "-c",
-            "@idiom $sq($0) = $0 * $0\n^fn hypotSq(a:#,b:#)-># => $sq(a) + $sq(b)",
-            "--json",
-          ],
-          tmpDir,
-        );
-        expect(out.status).toBe(0);
-        const parsed = JSON.parse(out.stdout);
-        expect(parsed.filePath).toBe(path.resolve(cliFile));
-        expect(fs.existsSync(cliFile)).toBe(true);
-        expect(fs.readFileSync(cliFile, "utf-8")).toContain("((a * a) + (b * b))");
+    it("executes `aice create` (and alias `aice new`) via CLI including --batch and --json", () => {
+      const cliFile = path.join(tmpDir, "cli", "math.ts");
+      const out = runCli(
+        [
+          "create",
+          cliFile,
+          "-c",
+          "@idiom $sq($0) = $0 * $0\n^fn hypotSq(a:#,b:#)-># => $sq(a) + $sq(b)",
+          "--json",
+        ],
+        tmpDir,
+      );
+      expect(out.status).toBe(0);
+      const parsed = JSON.parse(out.stdout);
+      expect(parsed.filePath).toBe(path.resolve(cliFile));
+      expect(fs.existsSync(cliFile)).toBe(true);
+      expect(fs.readFileSync(cliFile, "utf-8")).toContain("((a * a) + (b * b))");
 
-        // Test batch via CLI
-        const batchSpec = JSON.stringify([
-          { filePath: path.join(tmpDir, "cli", "one.py"), code: "fn one()-># => 1" },
-          { filePath: path.join(tmpDir, "cli", "two.rs"), code: "^fn two()-># => 2" },
-        ]);
-        const batchOut = runCli(["new", "--batch", batchSpec, "--json"], tmpDir);
-        expect(batchOut.status).toBe(0);
-        const batchParsed = JSON.parse(batchOut.stdout);
-        expect(batchParsed.totalFiles).toBe(2);
-        expect(fs.existsSync(path.join(tmpDir, "cli", "one.py"))).toBe(true);
-        expect(fs.existsSync(path.join(tmpDir, "cli", "two.rs"))).toBe(true);
+      // Test batch via CLI
+      const batchSpec = JSON.stringify([
+        { filePath: path.join(tmpDir, "cli", "one.py"), code: "fn one()-># => 1" },
+        { filePath: path.join(tmpDir, "cli", "two.rs"), code: "^fn two()-># => 2" },
+      ]);
+      const batchOut = runCli(["new", "--batch", batchSpec, "--json"], tmpDir);
+      expect(batchOut.status).toBe(0);
+      const batchParsed = JSON.parse(batchOut.stdout);
+      expect(batchParsed.totalFiles).toBe(2);
+      expect(fs.existsSync(path.join(tmpDir, "cli", "one.py"))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "cli", "two.rs"))).toBe(true);
 
-        // Respects project disable
-        setProjectAiceEnabled(tmpDir, false);
-        const disabledOut = runCli(
-          ["create", path.join(tmpDir, "cli", "blocked.ts"), "-c", "^fn x()-># => 1"],
-          tmpDir,
-        );
-        expect(disabledOut.status).not.toBe(0);
-        expect(disabledOut.stderr).toContain("AICE is disabled for this project");
-      },
-      20000,
-    );
+      // Test relative paths when CLI is invoked from a nested project subdirectory
+      fs.writeFileSync(path.join(tmpDir, "package.json"), "{}", "utf-8");
+      const subDir = path.join(tmpDir, "packages", "sub");
+      fs.mkdirSync(subDir, { recursive: true });
+      const subCreateOut = runCli(["create", "rel.ts", "-c", "^fn subFn()-># => 42"], subDir);
+      expect(subCreateOut.status).toBe(0);
+      expect(fs.existsSync(path.join(subDir, "rel.ts"))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "rel.ts"))).toBe(false);
+
+      const subSpliceOut = runCli(
+        ["splice", "rel-splice.ts", "-s", "*", "-c", "^fn spFn()-># => 7"],
+        subDir,
+      );
+      expect(subSpliceOut.status).toBe(0);
+      expect(fs.existsSync(path.join(subDir, "rel-splice.ts"))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, "rel-splice.ts"))).toBe(false);
+
+      // Respects project disable
+      setProjectAiceEnabled(tmpDir, false);
+      const disabledOut = runCli(
+        ["create", path.join(tmpDir, "cli", "blocked.ts"), "-c", "^fn x()-># => 1"],
+        tmpDir,
+      );
+      expect(disabledOut.status).not.toBe(0);
+      expect(disabledOut.stderr).toContain("AICE is disabled for this project");
+    }, 20000);
 
     it("exposes `aice_create` in AiceMcpServer.getToolDefinitions() and executes single & batch creation via executeToolCall()", async () => {
       const staticTools = AiceMcpServer.getToolDefinitions();
