@@ -2182,7 +2182,6 @@ program
                 enabled,
                 idiomsEnabled,
                 idiomsCount,
-                mode: config.mode,
               },
               null,
               2,
@@ -2195,7 +2194,6 @@ program
         console.log(`  AICE Status:    ${enabled ? "ENABLED" : "DISABLED (opt-out)"}`);
         console.log(`  Idioms Status:  ${idiomsEnabled ? "ENABLED" : "DISABLED"}`);
         console.log(`  Active Idioms:  ${idiomsCount}`);
-        console.log(`  Mode:           ${config.mode}`);
       } catch (err: unknown) {
         console.error(
           `❌ Error reading project config: ${err instanceof Error ? err.message : String(err)}`,

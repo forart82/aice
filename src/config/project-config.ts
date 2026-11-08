@@ -796,6 +796,7 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
 export function saveProjectConfig(
   projectDir: string,
   config: Partial<AiceProjectConfig>,
+  options?: { stripLegacyKeys?: boolean },
 ): AiceProjectConfig {
   const resolvedDir = path.resolve(projectDir);
   if (!fs.existsSync(resolvedDir)) {
@@ -861,6 +862,13 @@ export function saveProjectConfig(
     isolated = DEFAULT_PROJECT_CONFIG.isolated;
   }
 
+  const existingIdiomsEnabled =
+    typeof existing.idiomsEnabled === "boolean"
+      ? existing.idiomsEnabled
+      : typeof existing.idioms === "boolean"
+        ? existing.idioms
+        : undefined;
+
   const mergedConfig: AiceProjectConfig = {
     ...(config.enabled !== undefined
       ? { enabled: config.enabled }
@@ -883,8 +891,8 @@ export function saveProjectConfig(
         : DEFAULT_PROJECT_CONFIG.watermark),
     ...(config.idiomsEnabled !== undefined
       ? { idiomsEnabled: config.idiomsEnabled }
-      : typeof existing.idiomsEnabled === "boolean"
-        ? { idiomsEnabled: existing.idiomsEnabled }
+      : existingIdiomsEnabled !== undefined
+        ? { idiomsEnabled: existingIdiomsEnabled }
         : {}),
     ...(config.idioms !== undefined
       ? { idioms: config.idioms }
@@ -918,10 +926,51 @@ export function saveProjectConfig(
     return mergedConfig;
   }
 
-  const toWrite = {
-    ...existing,
-    ...mergedConfig,
-  };
+  const stripLegacy = Boolean(options?.stripLegacyKeys);
+  const LEGACY_CONFIG_KEYS = new Set([
+    "mode",
+    "sourceDir",
+    "outDir",
+    "targetLanguage",
+    "isolated",
+    "watermark",
+  ]);
+  const toWrite: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(existing)) {
+    if (!LEGACY_CONFIG_KEYS.has(k) && k !== "enabled" && k !== "idiomsEnabled" && k !== "idioms") {
+      toWrite[k] = v;
+    }
+  }
+
+  if (mergedConfig.enabled !== undefined) {
+    toWrite.enabled = mergedConfig.enabled;
+  }
+  if (mergedConfig.idiomsEnabled !== undefined) {
+    toWrite.idiomsEnabled = mergedConfig.idiomsEnabled;
+  }
+  if (!stripLegacy) {
+    if (config.mode !== undefined || config.isolated !== undefined || existing.mode !== undefined) {
+      toWrite.mode = mergedConfig.mode;
+    }
+    if (config.sourceDir !== undefined || existing.sourceDir !== undefined) {
+      toWrite.sourceDir = mergedConfig.sourceDir;
+    }
+    if (config.outDir !== undefined || existing.outDir !== undefined) {
+      toWrite.outDir = mergedConfig.outDir;
+    }
+    if (config.targetLanguage !== undefined || existing.targetLanguage !== undefined) {
+      toWrite.targetLanguage = mergedConfig.targetLanguage;
+    }
+    if (config.isolated !== undefined || existing.isolated !== undefined) {
+      toWrite.isolated = mergedConfig.isolated;
+    }
+    if (config.watermark !== undefined || existing.watermark !== undefined) {
+      toWrite.watermark = mergedConfig.watermark;
+    }
+  }
+  if (mergedConfig.idioms !== undefined) {
+    toWrite.idioms = mergedConfig.idioms;
+  }
 
   fs.writeFileSync(configPath, `${JSON.stringify(toWrite, null, 2)}\n`, "utf-8");
 
@@ -974,7 +1023,15 @@ export function setProjectAiceEnabled(projectDir: string, enabled: boolean): Aic
   ) {
     resolvedDir = path.dirname(resolvedDir);
   }
-  return saveProjectConfig(resolvedDir, { enabled });
+  const current = loadProjectConfig(resolvedDir);
+  return saveProjectConfig(
+    resolvedDir,
+    {
+      enabled,
+      idiomsEnabled: current.idiomsEnabled ?? true,
+    },
+    { stripLegacyKeys: true },
+  );
 }
 
 /**
@@ -1009,7 +1066,20 @@ export function setProjectIdiomsEnabled(projectDir: string, enabled: boolean): A
   ) {
     resolvedDir = path.dirname(resolvedDir);
   }
-  const updated = saveProjectConfig(resolvedDir, { idiomsEnabled: enabled });
+  const hasAiceConfig = fs.existsSync(path.join(resolvedDir, "aice.config.json"));
+  const hasIdiomsJson = fs.existsSync(path.join(resolvedDir, ".aice-idioms.json"));
+  const current = loadProjectConfig(resolvedDir);
+  const updated =
+    hasIdiomsJson && !hasAiceConfig
+      ? saveProjectConfig(resolvedDir, { idiomsEnabled: enabled })
+      : saveProjectConfig(
+          resolvedDir,
+          {
+            enabled: current.enabled ?? true,
+            idiomsEnabled: enabled,
+          },
+          { stripLegacyKeys: true },
+        );
 
   const cachePath = path.join(resolvedDir, ".aice-cache", "idioms.json");
   if (fs.existsSync(cachePath)) {

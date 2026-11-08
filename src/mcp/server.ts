@@ -54,7 +54,7 @@ function loadPackageVersion(): string {
   } catch {
     // fallback if package.json is unreachable
   }
-  return "0.9.3";
+  return "0.9.4";
 }
 
 export const AICE_VERSION = loadPackageVersion();
@@ -1030,8 +1030,6 @@ export class AiceMcpServer {
           enabled: isProjectAiceEnabled(updated),
           idiomsEnabled: isProjectIdiomsEnabled(updated),
           activeIdiomsCount: updated.idioms ? Object.keys(updated.idioms).length : 0,
-          mode: updated.mode,
-          targetLanguage: updated.targetLanguage,
         };
         return {
           content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],

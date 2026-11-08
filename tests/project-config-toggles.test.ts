@@ -101,13 +101,27 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     expect(updatedEnabled.enabled).toBe(true);
     expect(isProjectAiceEnabled(updatedEnabled)).toBe(true);
     expect(isProjectAiceEnabled(tmpDir)).toBe(true);
+
+    // Persisted aice.config.json contains only clean on-the-fly keys (no legacy side-by-side / .aice-build keys)
+    const rawOnDisk = JSON.parse(fs.readFileSync(path.join(tmpDir, "aice.config.json"), "utf-8"));
+    expect(rawOnDisk).toEqual({
+      enabled: true,
+      idiomsEnabled: false,
+    });
+
+    setProjectIdiomsEnabled(tmpDir, true);
+    const rawAfterIdiomsOn = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, "aice.config.json"), "utf-8"),
+    );
+    expect(rawAfterIdiomsOn).toEqual({
+      enabled: true,
+      idiomsEnabled: true,
+    });
   });
 
   it("refuses tool execution with AICE_DISABLED_MESSAGE when enabled is false in aice.config.json", async () => {
     saveProjectConfig(tmpDir, {
       enabled: false,
-      mode: "twinless",
-      sourceDir: "src",
       idiomsEnabled: true,
       idioms: { $drawCircle: sampleIdiom },
     });
@@ -145,10 +159,24 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     const parsedCfg = JSON.parse(configRes.stdout);
     expect(parsedCfg.enabled).toBe(false);
     expect(parsedCfg.idiomsEnabled).toBe(false);
+    expect(parsedCfg.mode).toBeUndefined();
+
+    const configTextRes = runCli(["config", tmpDir], tmpDir);
+    expect(configTextRes.status).toBe(0);
+    expect(configTextRes.stdout).toContain("AICE Status:");
+    expect(configTextRes.stdout).not.toContain("Mode:");
 
     const enableRes = runCli(["enable", tmpDir], tmpDir);
     expect(enableRes.status).toBe(0);
     expect(isProjectAiceEnabled(tmpDir)).toBe(true);
+
+    const persistedAfterEnable = JSON.parse(
+      fs.readFileSync(path.join(tmpDir, "aice.config.json"), "utf-8"),
+    );
+    expect(persistedAfterEnable).toEqual({
+      enabled: true,
+      idiomsEnabled: true,
+    });
 
     const outlineWhileEnabled = runCli(["outline", tsFile], tmpDir);
     expect(outlineWhileEnabled.status).toBe(0);
