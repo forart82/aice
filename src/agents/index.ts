@@ -14,7 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import YAML from "yaml";
-import { KNOWN_TARGET_EXTENSIONS } from "../config/index.js";
+import { KNOWN_TARGET_EXTENSIONS, stripJsonComments } from "../config/index.js";
 
 export type SupportedAgentId =
   | "claude"
@@ -54,6 +54,7 @@ export interface AgentStatusEntry {
   mcpConfigPath: string;
   promptConfigured: boolean;
   promptPath?: string;
+  error?: string;
 }
 
 export interface AgentSetupOptions {
@@ -152,11 +153,13 @@ export function upsertJsonMcpServer(filePath: string, alsoSetMcpKey = false): vo
   let data: Record<string, unknown> = {};
   if (fs.existsSync(filePath)) {
     try {
-      const raw = fs.readFileSync(filePath, "utf-8").trim();
+      const raw = stripJsonComments(fs.readFileSync(filePath, "utf-8")).trim();
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
           data = parsed as Record<string, unknown>;
+        } else {
+          throw new Error("Root JSON value is not an object");
         }
       }
     } catch {
@@ -194,7 +197,7 @@ export function upsertJsonMcpServer(filePath: string, alsoSetMcpKey = false): vo
 export function removeJsonMcpServer(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   try {
-    const raw = fs.readFileSync(filePath, "utf-8").trim();
+    const raw = stripJsonComments(fs.readFileSync(filePath, "utf-8")).trim();
     if (!raw) return false;
     const data = JSON.parse(raw) as Record<string, unknown>;
     let modified = false;
@@ -226,7 +229,9 @@ export function removeJsonMcpServer(filePath: string): boolean {
 export function hasJsonMcpServer(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   try {
-    const data = JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<string, unknown>;
+    const raw = stripJsonComments(fs.readFileSync(filePath, "utf-8")).trim();
+    if (!raw) return false;
+    const data = JSON.parse(raw) as Record<string, unknown>;
     const servers = data.mcpServers as Record<string, unknown> | undefined;
     const mcp = data.mcp as Record<string, unknown> | undefined;
     return Boolean(
@@ -236,6 +241,16 @@ export function hasJsonMcpServer(filePath: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isTomlTableHeader(line: string): boolean {
+  const trimmed = line.trim();
+  if (trimmed === '["mcp"]') return false;
+  return /^\[[^[\]]+\](?:\s*#.*)?$/.test(trimmed) || /^\[\[[^[\]]+\]\](?:\s*#.*)?$/.test(trimmed);
+}
+
+function isAiceTomlTableHeader(line: string): boolean {
+  return /^\[mcp_servers\.aice\](?:\s*#.*)?$/.test(line.trim());
 }
 
 /**
@@ -248,16 +263,41 @@ export function upsertCodexToml(filePath: string): void {
     existing = fs.readFileSync(filePath, "utf-8");
   }
 
-  const sectionBlock = `[mcp_servers.aice]\ncommand = "aice"\nargs = ["mcp"]`;
-  const sectionRegex = /^\[mcp_servers\.aice\]\s*\n(?:[^[]*)/m;
+  const sectionLines = ["[mcp_servers.aice]", 'command = "aice"', 'args = ["mcp"]'];
+  const lines = existing.split(/\r?\n/);
+  const out: string[] = [];
+  let inAiceSection = false;
+  let replaced = false;
 
-  if (sectionRegex.test(existing)) {
-    const updated = existing.replace(sectionRegex, `${sectionBlock}\n\n`);
-    fs.writeFileSync(filePath, `${updated.trimEnd()}\n`, "utf-8");
+  for (const line of lines) {
+    if (isAiceTomlTableHeader(line)) {
+      inAiceSection = true;
+      if (!replaced) {
+        out.push(...sectionLines);
+        replaced = true;
+      }
+      continue;
+    }
+    if (inAiceSection) {
+      if (isTomlTableHeader(line)) {
+        inAiceSection = false;
+        if (out.length > 0 && out[out.length - 1] !== "") {
+          out.push("");
+        }
+        out.push(line);
+      }
+      continue;
+    }
+    out.push(line);
+  }
+
+  if (replaced) {
+    fs.writeFileSync(filePath, `${out.join("\n").trimEnd()}\n`, "utf-8");
     return;
   }
 
   const trimmed = existing.trimEnd();
+  const sectionBlock = sectionLines.join("\n");
   const updated = trimmed ? `${trimmed}\n\n${sectionBlock}\n` : `${sectionBlock}\n`;
   fs.writeFileSync(filePath, updated, "utf-8");
 }
@@ -265,9 +305,32 @@ export function upsertCodexToml(filePath: string): void {
 export function removeCodexToml(filePath: string): boolean {
   if (!fs.existsSync(filePath)) return false;
   const existing = fs.readFileSync(filePath, "utf-8");
-  const sectionRegex = /\n*^\[mcp_servers\.aice\]\s*\n(?:[^[]*)/m;
-  if (!sectionRegex.test(existing)) return false;
-  const updated = existing.replace(sectionRegex, "\n").trim();
+  const lines = existing.split(/\r?\n/);
+  const out: string[] = [];
+  let inAiceSection = false;
+  let found = false;
+
+  for (const line of lines) {
+    if (isAiceTomlTableHeader(line)) {
+      inAiceSection = true;
+      found = true;
+      continue;
+    }
+    if (inAiceSection) {
+      if (isTomlTableHeader(line)) {
+        inAiceSection = false;
+        out.push(line);
+      }
+      continue;
+    }
+    out.push(line);
+  }
+
+  if (!found) return false;
+  const updated = out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
   fs.writeFileSync(filePath, updated ? `${updated}\n` : "", "utf-8");
   return true;
 }
@@ -568,60 +631,90 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     return detectBinary(binNames).found;
   };
 
+  const errors = new Map<SupportedAgentId, string>();
+  const runSafe = (id: SupportedAgentId, fn: () => void) => {
+    try {
+      fn();
+    } catch (err) {
+      errors.set(id, err instanceof Error ? err.message : String(err));
+    }
+  };
+
   // 1. Claude Code
   if (
     shouldSetup("claude", [path.join(home, ".claude"), path.join(home, ".claude.json")], ["claude"])
   ) {
-    upsertJsonMcpServer(path.join(home, ".claude.json"));
-    const claudeSettings = path.join(home, ".claude", "settings.json");
-    if (fs.existsSync(claudeSettings)) {
-      upsertJsonMcpServer(claudeSettings);
-    }
-    upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
+    runSafe("claude", () => {
+      upsertJsonMcpServer(path.join(home, ".claude.json"));
+      const claudeSettings = path.join(home, ".claude", "settings.json");
+      if (fs.existsSync(claudeSettings)) {
+        upsertJsonMcpServer(claudeSettings);
+      }
+      upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
+    });
   }
 
   // 2. Google Antigravity / Gemini CLI
   if (shouldSetup("agy", [path.join(home, ".gemini")], ["agy", "gemini"])) {
-    upsertJsonMcpServer(path.join(home, ".gemini", "settings.json"));
-    upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
+    runSafe("agy", () => {
+      upsertJsonMcpServer(path.join(home, ".gemini", "settings.json"));
+      upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
+    });
   }
 
   // 3. OpenAI Codex CLI
   if (shouldSetup("codex", [path.join(home, ".codex")], ["codex"])) {
-    upsertCodexToml(path.join(home, ".codex", "config.toml"));
-    upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
-    const codexInstr = path.join(home, ".codex", "instructions.md");
-    if (fs.existsSync(codexInstr)) {
-      upsertMarkdownDirective(codexInstr);
-    }
+    runSafe("codex", () => {
+      upsertCodexToml(path.join(home, ".codex", "config.toml"));
+      upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
+      const codexInstr = path.join(home, ".codex", "instructions.md");
+      if (fs.existsSync(codexInstr)) {
+        upsertMarkdownDirective(codexInstr);
+      }
+    });
   }
 
   // 4. OpenCode
   if (shouldSetup("opencode", [path.join(home, ".config", "opencode")], ["opencode"])) {
-    upsertJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"), true);
-    upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
+    runSafe("opencode", () => {
+      upsertJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"), true);
+      upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
+    });
   }
 
   // 5. Aider
   if (
     shouldSetup("aider", [path.join(home, ".aider"), path.join(home, ".aider.conf.yml")], ["aider"])
   ) {
-    const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
-    upsertMarkdownDirective(conventionsPath);
-    upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
+    runSafe("aider", () => {
+      const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
+      upsertMarkdownDirective(conventionsPath);
+      upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
+    });
   }
 
   // 6. Goose
   if (shouldSetup("goose", [path.join(home, ".config", "goose")], ["goose"])) {
-    upsertGooseConfigYaml(path.join(home, ".config", "goose", "config.yaml"));
+    runSafe("goose", () => {
+      upsertGooseConfigYaml(path.join(home, ".config", "goose", "config.yaml"));
+    });
   }
 
   // 7. Cursor
   if (shouldSetup("cursor", [path.join(home, ".cursor")], ["cursor"])) {
-    upsertJsonMcpServer(path.join(home, ".cursor", "mcp.json"));
+    runSafe("cursor", () => {
+      upsertJsonMcpServer(path.join(home, ".cursor", "mcp.json"));
+    });
   }
 
-  return getAgentsStatus({ homeDir: home });
+  const res = getAgentsStatus({ homeDir: home, agent: options.agent });
+  for (const entry of res.agents) {
+    const err = errors.get(entry.id);
+    if (err) {
+      entry.error = err;
+    }
+  }
+  return res;
 }
 
 /**
@@ -632,6 +725,7 @@ export function removeAgents(
 ): AgentActionResult {
   const home = resolveHomeDir(options.homeDir);
   const requested = options.agent?.toLowerCase().trim();
+  const errors = new Map<SupportedAgentId, string>();
 
   const matches = (id: SupportedAgentId): boolean => {
     if (!requested) return true;
@@ -639,43 +733,72 @@ export function removeAgents(
     return requested === id;
   };
 
+  const runSafe = (id: SupportedAgentId, fn: () => void) => {
+    try {
+      fn();
+    } catch (err) {
+      errors.set(id, err instanceof Error ? err.message : String(err));
+    }
+  };
+
   if (matches("claude")) {
-    removeJsonMcpServer(path.join(home, ".claude.json"));
-    removeJsonMcpServer(path.join(home, ".claude", "settings.json"));
-    removeMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
+    runSafe("claude", () => {
+      removeJsonMcpServer(path.join(home, ".claude.json"));
+      removeJsonMcpServer(path.join(home, ".claude", "settings.json"));
+      removeMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
+    });
   }
 
   if (matches("agy")) {
-    removeJsonMcpServer(path.join(home, ".gemini", "settings.json"));
-    removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
+    runSafe("agy", () => {
+      removeJsonMcpServer(path.join(home, ".gemini", "settings.json"));
+      removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
+    });
   }
 
   if (matches("codex")) {
-    removeCodexToml(path.join(home, ".codex", "config.toml"));
-    removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
-    removeMarkdownDirective(path.join(home, ".codex", "instructions.md"));
+    runSafe("codex", () => {
+      removeCodexToml(path.join(home, ".codex", "config.toml"));
+      removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
+      removeMarkdownDirective(path.join(home, ".codex", "instructions.md"));
+    });
   }
 
   if (matches("opencode")) {
-    removeJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"));
-    removeMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
+    runSafe("opencode", () => {
+      removeJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"));
+      removeMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
+    });
   }
 
   if (matches("aider")) {
-    const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
-    removeMarkdownDirective(conventionsPath);
-    removeAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
+    runSafe("aider", () => {
+      const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
+      removeMarkdownDirective(conventionsPath);
+      removeAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
+    });
   }
 
   if (matches("goose")) {
-    removeGooseConfigYaml(path.join(home, ".config", "goose", "config.yaml"));
+    runSafe("goose", () => {
+      removeGooseConfigYaml(path.join(home, ".config", "goose", "config.yaml"));
+    });
   }
 
   if (matches("cursor")) {
-    removeJsonMcpServer(path.join(home, ".cursor", "mcp.json"));
+    runSafe("cursor", () => {
+      removeJsonMcpServer(path.join(home, ".cursor", "mcp.json"));
+    });
   }
 
-  return getAgentsStatus({ homeDir: home });
+  const res = getAgentsStatus({ homeDir: home, agent: options.agent });
+  for (const entry of res.agents) {
+    const err = errors.get(entry.id);
+    if (err) {
+      entry.error = err;
+    }
+  }
+  return res;
 }
 
 /**
@@ -697,6 +820,9 @@ export function formatAgentsStatusTable(result: AgentActionResult): string {
     lines.push(
       `  ${a.displayName.padEnd(36)} ${binStr.padEnd(10)} ${mcpStr.padEnd(14)} ${promptStr.padEnd(14)}`,
     );
+    if (a.error) {
+      lines.push(`    ! Warning: ${a.error}`);
+    }
   }
   lines.push("--------------------------------------------------------------------------------");
   lines.push("Commands: `aice agents setup [--all]` | `aice agents status` | `aice agents remove`");

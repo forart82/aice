@@ -473,26 +473,27 @@ function matchesProjectFilter(event: TelemetryEvent, filterStr: string): boolean
     const cwdRoot = findProjectRoot(process.cwd());
     return path.resolve(event.projectRoot) === path.resolve(cwdRoot);
   }
+  if (
+    event.projectName.toLowerCase() === trimmed.toLowerCase() ||
+    path.basename(event.projectRoot).toLowerCase() === trimmed.toLowerCase()
+  ) {
+    return true;
+  }
   const resolvedCandidate = path.resolve(trimmed);
   const resolvedEventRoot = path.resolve(event.projectRoot);
   if (
     resolvedEventRoot === resolvedCandidate ||
-    resolvedEventRoot.startsWith(`${resolvedCandidate}${path.sep}`)
+    resolvedCandidate.startsWith(`${resolvedEventRoot}${path.sep}`)
   ) {
     return true;
   }
-  const candidateRoot = findProjectRoot(resolvedCandidate);
-  if (
-    fs.existsSync(resolvedCandidate) &&
-    (resolvedEventRoot === path.resolve(candidateRoot) ||
-      resolvedEventRoot.startsWith(`${path.resolve(candidateRoot)}${path.sep}`))
-  ) {
-    return true;
+  if (fs.existsSync(resolvedCandidate)) {
+    const candidateRoot = path.resolve(findProjectRoot(resolvedCandidate));
+    if (resolvedEventRoot === candidateRoot) {
+      return true;
+    }
   }
-  return (
-    event.projectName.toLowerCase() === trimmed.toLowerCase() ||
-    path.basename(event.projectRoot).toLowerCase() === trimmed.toLowerCase()
-  );
+  return false;
 }
 
 function buildProjectDetail(

@@ -1128,7 +1128,7 @@ export function resolveTargetFile(
       absSourceDir &&
       (sourceFile === absSourceDir ||
         sourceFile.startsWith(absSourceDir + path.sep) ||
-        sourceFile.startsWith(absSourceDir + "/"))
+        sourceFile.startsWith(`${absSourceDir}/`))
     ) {
       relPathFromSourceDir = path.relative(absSourceDir, sourceFile);
       baseOutDir =
@@ -1141,7 +1141,7 @@ export function resolveTargetFile(
       root &&
       (sourceFile === root ||
         sourceFile.startsWith(root + path.sep) ||
-        sourceFile.startsWith(root + "/"))
+        sourceFile.startsWith(`${root}/`))
     ) {
       const relToRoot = path.relative(root, sourceFile);
       relPathFromSourceDir = stripSourceDirPrefix(relToRoot, config.sourceDir);

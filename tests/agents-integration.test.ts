@@ -157,6 +157,8 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     expect(codexToml).toContain('model = "o3"');
     expect(codexToml).toContain("[mcp_servers.other]");
     expect(codexToml.split("[mcp_servers.aice]").length - 1).toBe(1);
+    expect(codexToml.split('args = ["mcp"]').length - 1).toBe(1);
+    expect(codexToml).not.toMatch(/^\["mcp"\]$/m);
     expect(fs.readFileSync(path.join(tmpHome, ".codex", "instructions.md"), "utf-8")).toContain(
       AICE_DIRECTIVE_START,
     );
@@ -211,10 +213,26 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     expect(codexTomlAfter).toContain('model = "o3"');
     expect(codexTomlAfter).toContain("[mcp_servers.other]");
     expect(codexTomlAfter).not.toContain("[mcp_servers.aice]");
+    expect(codexTomlAfter).not.toContain('["mcp"]');
 
     const statusCheck = getAgentsStatus({ homeDir: tmpHome, agent: "gemini" });
     expect(statusCheck.agents).toHaveLength(1);
     expect(statusCheck.agents[0]?.id).toBe("agy");
+  });
+
+  it("isolates per-agent failures so a malformed or read-only config in one agent does not abort setup of remaining agents", () => {
+    fs.writeFileSync(path.join(tmpHome, ".claude.json"), "{ invalid json ", "utf-8");
+
+    const status = setupAgents({ homeDir: tmpHome, all: true });
+    expect(status.agents).toHaveLength(7);
+
+    const claudeEntry = status.agents.find((a) => a.id === "claude");
+    expect(claudeEntry?.error).toBeDefined();
+
+    // All other 6 agents still got configured despite Claude's malformed JSON
+    for (const agent of status.agents.filter((a) => a.id !== "claude")) {
+      expect(agent.mcpConfigured).toBe(true);
+    }
   });
 
   it("allows multi-project paths under $HOME, os.tmpdir(), and declared MCP workspaceFolders while blocking sensitive system paths and traversal", async () => {
@@ -235,7 +253,7 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       const initRes = (await server.handleRequest(1, "initialize", {
         workspaceFolders: [{ uri: `file://${secondWorkspace}`, name: "ws2" }],
       })) as { serverInfo?: { version?: string } };
-      expect(initRes.serverInfo?.version).toBe("0.9.0");
+      expect(initRes.serverInfo?.version).toBe("0.9.1");
 
       // Outline file in secondWorkspace (outside initialWorkspace) succeeds
       const outRes = (await server.handleRequest(2, "tools/call", {
@@ -267,6 +285,26 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
         server.handleRequest(5, "tools/call", {
           name: "aice_outline",
           arguments: { path: symlinkEscape },
+        }),
+      ).rejects.toThrow("Access denied");
+
+      // Dangling symlink pointing to `/etc/non_existent_secret.ts` is also rejected
+      const danglingEscape = path.join(initialWorkspace, "dangling_etc.ts");
+      fs.symlinkSync("/etc/non_existent_secret.ts", danglingEscape);
+      await expect(
+        server.handleRequest(6, "tools/call", {
+          name: "aice_outline",
+          arguments: { path: danglingEscape },
+        }),
+      ).rejects.toThrow("Access denied");
+
+      // Deep non-existent path under a directory symlink pointing to `/etc` is rejected
+      const etcDirLink = path.join(initialWorkspace, "etc_dir_link");
+      fs.symlinkSync("/etc", etcDirLink);
+      await expect(
+        server.handleRequest(7, "tools/call", {
+          name: "aice_outline",
+          arguments: { path: path.join(etcDirLink, "nested", "deep", "target.ts") },
         }),
       ).rejects.toThrow("Access denied");
     } finally {

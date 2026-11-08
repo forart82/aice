@@ -99,12 +99,18 @@ export interface TokenomicsAuditReport {
 }
 
 export function detectLanguageName(targetPath: string): string {
-  const ext = path.extname(targetPath);
+  const ext = path.extname(targetPath).toLowerCase();
   switch (ext) {
     case ".ts":
       return "TypeScript";
     case ".tsx":
       return "React TSX";
+    case ".js":
+    case ".mjs":
+    case ".cjs":
+      return "JavaScript";
+    case ".jsx":
+      return "React JSX";
     case ".py":
       return "Python";
     case ".css":
@@ -123,6 +129,18 @@ export function detectLanguageName(targetPath: string): string {
       return "C++20";
     case ".cs":
       return "C#";
+    case ".json":
+      return "JSON";
+    case ".yaml":
+    case ".yml":
+      return "YAML";
+    case ".twig":
+      return "Twig";
+    case ".php":
+      return "PHP";
+    case ".kt":
+    case ".kts":
+      return "Kotlin";
     default:
       return ext || "unknown";
   }

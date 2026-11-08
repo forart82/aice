@@ -317,6 +317,41 @@ export class AiceMcpServer {
     }
   }
 
+  private resolveCanonicalTarget(candidatePath: string, depth = 0): string {
+    if (depth > 32) {
+      throw new Error(`Access denied: symlink loop detected for '${candidatePath}'`);
+    }
+    const resolved = path.resolve(candidatePath);
+    try {
+      return fs.realpathSync(resolved);
+    } catch {
+      // Target or an ancestor does not exist, or target is a dangling symlink
+    }
+
+    const trailingSegments: string[] = [];
+    let cur = resolved;
+    while (true) {
+      try {
+        const lstat = fs.lstatSync(cur);
+        if (lstat.isSymbolicLink()) {
+          const linkTarget = path.resolve(path.dirname(cur), fs.readlinkSync(cur));
+          const combined =
+            trailingSegments.length > 0 ? path.join(linkTarget, ...trailingSegments) : linkTarget;
+          return this.resolveCanonicalTarget(combined, depth + 1);
+        }
+        const realBase = fs.realpathSync(cur);
+        return trailingSegments.length > 0 ? path.join(realBase, ...trailingSegments) : realBase;
+      } catch {
+        const parent = path.dirname(cur);
+        if (parent === cur) {
+          return resolved;
+        }
+        trailingSegments.unshift(path.basename(cur));
+        cur = parent;
+      }
+    }
+  }
+
   public resolveSafePath(rawPath: string): string {
     if (rawPath.includes("\0")) {
       throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
@@ -364,13 +399,9 @@ export class AiceMcpServer {
       throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
     }
 
-    // Defeat symlink escape attacks by checking realpath when target or parent exists
+    // Defeat symlink escape attacks (including dangling symlinks and deeply nested missing dirs)
     try {
-      const realCandidate = fs.existsSync(resolved)
-        ? fs.realpathSync(resolved)
-        : fs.existsSync(path.dirname(resolved))
-          ? path.join(fs.realpathSync(path.dirname(resolved)), path.basename(resolved))
-          : resolved;
+      const realCandidate = this.resolveCanonicalTarget(resolved);
       if (this.isBlockedSystemPath(realCandidate) || !isWithinAllowed(realCandidate)) {
         throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
       }
@@ -506,7 +537,7 @@ export class AiceMcpServer {
         return {
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
-          serverInfo: { name: "aice-mcp", version: "0.9.0" },
+          serverInfo: { name: "aice-mcp", version: "0.9.1" },
         };
       }
 

@@ -13,6 +13,7 @@ import {
   recordTelemetryEvent,
   resetTelemetryHistory,
 } from "../src/telemetry/index.js";
+import { detectLanguageName } from "../src/tokenomics/index.js";
 import { generateContext, outlinePath, splice } from "../src/tools/index.js";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin/aice.ts");
@@ -109,10 +110,13 @@ describe("Phase 5: Honest, Truth-Based Global & Per-Project Token Savings Teleme
     expect(globalText).toContain("beta-tiny");
 
     // Per-project drill-down for beta-tiny shows negative delta honestly
+    // Even if parent tmpDir has a package.json, filtering by project name must not match sibling projects
+    fs.writeFileSync(path.join(tmpDir, "package.json"), '{"name":"monorepo-root"}', "utf-8");
     const betaDetailReport = buildGainReport({
       telemetryPath: telemetryFile,
       project: "beta-tiny",
     });
+    expect(betaDetailReport.totalOperations).toBe(1);
     expect(betaDetailReport.projectDetail).toBeDefined();
     expect(betaDetailReport.projectDetail?.summary.savedCl100k).toBeLessThan(0);
     expect(betaDetailReport.projectDetail?.summary.overheadCalls).toBe(1);
@@ -213,7 +217,18 @@ describe("Phase 5: Honest, Truth-Based Global & Per-Project Token Savings Teleme
       env: { ...process.env, AICE_TELEMETRY_PATH: telemetryFile },
     });
     expect(resetRes.status).toBe(0);
+    expect(resetRes.stdout).toContain(telemetryFile);
+    expect(resetRes.stdout).not.toContain("[object Object]");
     expect(readTelemetryEvents(telemetryFile)).toHaveLength(0);
+
+    // Verify all 24 supported language extensions resolve to canonical language names
+    expect(detectLanguageName("app.kt")).toBe("Kotlin");
+    expect(detectLanguageName("build.gradle.kts")).toBe("Kotlin");
+    expect(detectLanguageName("index.php")).toBe("PHP");
+    expect(detectLanguageName("view.twig")).toBe("Twig");
+    expect(detectLanguageName("config.yaml")).toBe("YAML");
+    expect(detectLanguageName("package.json")).toBe("JSON");
+    expect(detectLanguageName("mod.mjs")).toBe("JavaScript");
 
     // Direct helper verification
     const ev = computeTelemetryEvent({

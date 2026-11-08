@@ -195,9 +195,11 @@ export function generateOutline(
 
       if (hasKnownTargetExt && explicitFilePath) {
         const targetLang = detectTargetFromPath(explicitFilePath);
-        const decompResult = decompile(originalSource, targetLang, {
-          filePath: explicitFilePath,
-        });
+        const decompResult = withSuppressedTelemetry(() =>
+          decompile(originalSource, targetLang, {
+            filePath: explicitFilePath,
+          }),
+        );
         try {
           const parsed = parseWithTrivia(decompResult.aice, explicitFilePath);
           ast = parsed.ast;
@@ -217,7 +219,9 @@ export function generateOutline(
               explicitFilePath && !explicitFilePath.endsWith(".aice")
                 ? detectTargetFromPath(explicitFilePath)
                 : "typescript";
-            const decompResult = decompile(originalSource, targetLang, { filePath });
+            const decompResult = withSuppressedTelemetry(() =>
+              decompile(originalSource, targetLang, { filePath }),
+            );
             try {
               const parsed = parseWithTrivia(decompResult.aice, filePath);
               ast = parsed.ast;

@@ -87,7 +87,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.9.0");
+  .version("0.9.1");
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -651,9 +651,11 @@ program
 
       const source = fs.readFileSync(fullPath, "utf-8");
       const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
+      const effectiveIdioms = isProjectIdiomsEnabled(projectConfig, options.idioms);
       const result = decompile(source, targetLang, {
         filePath: file,
-        idioms: options.idioms,
+        idioms: effectiveIdioms,
+        projectRoot,
       });
 
       const outPath = options.out
@@ -2323,11 +2325,23 @@ program
               return;
             }
           }
-          const clearedPath = resetTelemetryHistory();
+          const cleared = resetTelemetryHistory();
           if (options.json) {
-            console.log(JSON.stringify({ reset: true, path: clearedPath }, null, 2));
+            console.log(
+              JSON.stringify(
+                {
+                  reset: true,
+                  path: cleared.telemetryPath,
+                  deletedCount: cleared.deletedCount,
+                },
+                null,
+                2,
+              ),
+            );
           } else {
-            console.log(`✔ Reset AICE telemetry ledger (${clearedPath})`);
+            console.log(
+              `✔ Reset AICE telemetry ledger (${cleared.telemetryPath}, removed ${cleared.deletedCount} record(s))`,
+            );
           }
           return;
         }

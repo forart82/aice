@@ -3013,6 +3013,10 @@ export function applyProjectIdiomsToDirectory(
   // If no .aice files exist on disk, run native-first twinless idiom discovery!
   if (aiceFilePaths.length === 0) {
     const scanRes = scanProjectIdioms(dir, options);
+    const modContents = scanRes.modifiedFiles
+      .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
+      .join("\n");
+    const summaryMsg = `Applied idioms: ${scanRes.totalCollapsedCalls} calls collapsed, saved ~${scanRes.totalNetTokenSavings} tokens across ${scanRes.modifiedFiles.length} files.`;
     recordTelemetryEvent({
       targetPath: resolvedDir,
       projectRoot: resolvedDir,
@@ -3020,8 +3024,8 @@ export function applyProjectIdiomsToDirectory(
       operation: "idioms_apply",
       surface: "cli",
       idiomsUsed: true,
-      nativeText: JSON.stringify(scanRes.occurrences ?? {}),
-      aiceText: JSON.stringify(scanRes.idioms ?? {}),
+      nativeText: modContents || summaryMsg,
+      aiceText: `${formatIdiomsMarkdownSection(scanRes.idioms)}\n${summaryMsg}`.trim(),
     });
     return scanRes;
   }
