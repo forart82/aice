@@ -2,14 +2,14 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.4](https://img.shields.io/badge/Version-0.9.4-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.5](https://img.shields.io/badge/Version-0.9.5-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C259%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C271%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -27,6 +27,7 @@ Modern Large Language Models (LLMs) spend **40% to 85% of their context windows,
 3. **1-Turn Symbol-Scoped Context Packs (`aice context`)**: Extracts just the target symbol, its imported dependency contracts, and active `$idioms` in a single turn (`-69.0%` to `-83.7%` working payload tokens).
 4. **Built-In & Project-Specific `$idioms` (`aice idioms`)**: Automatically collapses both language-level ceremony (e.g., C++ `std::cout << a << b << std::endl` $\leftrightarrow$ `print(a, b)`) and project-specific multi-file AST patterns (`$clampBand`, `$guard`, `$big_out` via `.aice-idioms.json` / `aice.config.json`) using structural anti-unification.
 5. **Surgical Direct-to-Native AST Splicing (`aice splice`)**: Accepts compact AICE + `$idioms`, raw native code, or hybrid syntax and splices the expanded native AST directly into the exact byte-span of the target symbol on disk — preserving 100% of surrounding comments, formatting, and headers.
+6. **Greenfield & Startup File Creation (`aice create` / MCP `aice_create`)**: Compiles compact AICE + inline `@idiom $Name($0) = ...` macros in RAM directly into brand-new native files across all 15 languages / 24 extensions (`from 0`), automatically persisting declared idioms to `aice.config.json` and `.aice-cache/idioms.json`.
 
 ---
 
@@ -249,7 +250,7 @@ aice gain
 | CLI Coding Agent | MCP Server Config | Global System Directive |
 | :--- | :--- | :--- |
 | **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
-| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` |
+| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` & `~/.gemini/config/rules/aice.md` |
 | **OpenAI Codex CLI (`codex`)** | `~/.codex/config.toml` (`[mcp_servers.aice]`) | `~/.codex/AGENTS.md` |
 | **OpenCode (`opencode`)** | `~/.config/opencode/opencode.json` (`mcp.aice` & `mcpServers.aice`) | `~/.config/opencode/AGENTS.md` |
 | **Aider (`aider`)** | `~/.aider.conf.yml` (`read:` conventions list) | `~/.aider/CONVENTIONS.md` |
@@ -277,8 +278,8 @@ Every CLI command and MCP tool (`aice_outline`, `aice_context`, `aice_splice`, `
   ```
   Or toggle via CLI:
   ```bash
-  aice disable [dir]            # Sets "enabled": false in aice.config.json
-  aice enable [dir]             # Sets "enabled": true in aice.config.json
+  aice disable [dir]            # Sets "enabled": false and strips workspace AICE rules
+  aice enable [dir]             # Sets "enabled": true and injects AGENTS.md & .agents/rules/aice.md
   aice config [dir]             # Inspect current project AICE & $idioms status
   ```
 - **Disable only `$idioms` while keeping AICE AST tools active (`"idiomsEnabled": false` or `"idioms": false`)**:
@@ -312,8 +313,12 @@ aice gain --reset --yes         # Clear telemetry ledger
 
 ## 💻 CLI Command Reference
 
-### 1. On-the-Fly Context, Skeleton Outlines & Surgical Splicing
+### 1. Greenfield File Creation, On-the-Fly Context, Skeleton Outlines & Surgical Splicing
 ```bash
+# Create brand-new native files from compact AICE + inline @idiom macros (single file or --batch):
+aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
+aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
+
 # Generate structural skeleton outline of any native file or directory (65-92% token reduction):
 aice outline src/telemetry_report.cpp --idioms --stats
 

@@ -816,6 +816,9 @@ function expandModuleIdiomsInternal(
       subst.set(pName, arg);
       subst.set(`$${i}`, arg);
     }
+    for (let i = rawParams.length; i < args.length; i++) {
+      subst.set(`$${i}`, args[i]);
+    }
     return subst;
   }
 
@@ -2628,7 +2631,7 @@ function getIdiomCachePath(projectRoot: string): string {
   return path.join(projectRoot, ".aice-cache", "idioms.json");
 }
 
-function readIdiomCache(projectRoot: string): IdiomCacheData | null {
+export function readIdiomCache(projectRoot: string): IdiomCacheData | null {
   const cachePath = getIdiomCachePath(projectRoot);
   if (!fs.existsSync(cachePath)) return null;
   try {
@@ -2638,7 +2641,7 @@ function readIdiomCache(projectRoot: string): IdiomCacheData | null {
   }
 }
 
-function writeIdiomCache(projectRoot: string, data: IdiomCacheData): void {
+export function writeIdiomCache(projectRoot: string, data: IdiomCacheData): void {
   const cacheDir = path.join(projectRoot, ".aice-cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });

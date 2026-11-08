@@ -38,6 +38,7 @@ import {
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
 import { generateContext } from "../tools/context.js";
+import { type BatchCreateItem, createBatch, createFile } from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
 import { splice } from "../tools/splice.js";
 
@@ -54,7 +55,7 @@ function loadPackageVersion(): string {
   } catch {
     // fallback if package.json is unreachable
   }
-  return "0.9.4";
+  return "0.9.5";
 }
 
 export const AICE_VERSION = loadPackageVersion();
@@ -188,6 +189,44 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
+    name: "aice_create",
+    description:
+      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 15 languages (40-75% output token savings).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        filePath: {
+          type: "string",
+          description: "Target native file path for single-file creation",
+        },
+        code: {
+          type: "string",
+          description: "Compact AICE, $idiom, or hybrid code string for single-file creation",
+        },
+        files: {
+          type: "array",
+          description: "Optional array of { filePath, code } items for multi-file batch creation",
+          items: {
+            type: "object",
+            properties: {
+              filePath: { type: "string" },
+              code: { type: "string" },
+            },
+            required: ["filePath", "code"],
+          },
+        },
+        idioms: {
+          type: "boolean",
+          description: "Optional override to enable or disable project/inline $idioms",
+        },
+        dryRun: {
+          type: "boolean",
+          description: "If true, preview compiled native code without writing to disk",
+        },
+      },
+    },
+  },
+  {
     name: "aice_gain",
     description:
       "Inspect honest global or per-project BPE token-reduction telemetry (cl100k_base & o200k_base).",
@@ -212,13 +251,18 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_project_config",
     description:
-      "Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled') in aice.config.json.",
+      "Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled') and workspace rules in aice.config.json.",
     inputSchema: {
       type: "object",
       properties: {
         dir: {
           type: "string",
           description: "Project directory (default: workspaceRoot)",
+        },
+        action: {
+          type: "string",
+          enum: ["enable", "disable", "status"],
+          description: "Optional action ('enable' | 'disable' | 'status')",
         },
         enabled: {
           type: "boolean",
@@ -250,6 +294,14 @@ export class AiceMcpServer {
   private readonly declaredRoots: Set<string> = new Set();
   private readonly constructedWithZeroArgs: boolean;
   private initializedWithParams = false;
+
+  public static getToolDefinitions(): McpToolDefinition[] {
+    return AICE_MCP_TOOLS;
+  }
+
+  public getToolDefinitions(): McpToolDefinition[] {
+    return AICE_MCP_TOOLS;
+  }
 
   constructor(
     inStreamOrOptions?: Readable | { workspaceRoot?: string },
@@ -542,25 +594,35 @@ export class AiceMcpServer {
   }
 
   public async handleRequest(
-    _id: number | string,
-    method: string,
-    params: unknown,
+    idOrReq:
+      | number
+      | string
+      | { jsonrpc?: string; id?: number | string; method: string; params?: unknown },
+    methodArg?: string,
+    paramsArg?: unknown,
   ): Promise<unknown> {
+    const isObjCall =
+      typeof idOrReq === "object" && idOrReq !== null && typeof idOrReq.method === "string";
+    const method = isObjCall ? idOrReq.method : (methodArg as string);
+    const params = isObjCall ? idOrReq.params : paramsArg;
+    const wrapOut = (res: unknown) =>
+      isObjCall ? { jsonrpc: "2.0", id: idOrReq.id ?? 1, result: res } : res;
+
     switch (method) {
       case "initialize": {
         if (params && typeof params === "object" && Object.keys(params as object).length > 0) {
           this.initializedWithParams = true;
         }
         this.captureInitializeRoots(params);
-        return {
+        return wrapOut({
           protocolVersion: "2024-11-05",
           capabilities: { tools: {} },
           serverInfo: { name: "aice-mcp", version: AICE_VERSION },
-        };
+        });
       }
 
       case "ping": {
-        return {};
+        return wrapOut({});
       }
 
       case "tools/list": {
@@ -571,14 +633,15 @@ export class AiceMcpServer {
           !listParams.includeManagementTools &&
           !listParams.all
         ) {
-          return { tools: AICE_MCP_TOOLS.slice(0, 4) };
+          return wrapOut({ tools: AICE_MCP_TOOLS.slice(0, 4) });
         }
-        return { tools: AICE_MCP_TOOLS };
+        return wrapOut({ tools: AICE_MCP_TOOLS });
       }
 
       case "tools/call": {
         const callParams = params as { name: string; arguments?: Record<string, unknown> };
-        return this.executeToolCall(callParams?.name, callParams?.arguments ?? {});
+        const res = await this.executeToolCall(callParams?.name, callParams?.arguments ?? {});
+        return wrapOut(res);
       }
 
       default: {
@@ -994,6 +1057,92 @@ export class AiceMcpServer {
         throw new Error(`Unknown idiom action: ${action}`);
       }
 
+      case "aice_create": {
+        const dryRun = Boolean(args.dryRun);
+        if (Array.isArray(args.files)) {
+          const rawFiles = args.files as Array<Record<string, unknown>>;
+          if (rawFiles.length === 0) {
+            throw new Error("aice_create 'files' array must not be empty");
+          }
+          const safeItems: BatchCreateItem[] = [];
+          let firstSafePath = this.workspaceRoot;
+          for (const entry of rawFiles) {
+            const rawFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
+            if (!rawFp) {
+              throw new Error("Each item in 'files' must specify 'filePath'");
+            }
+            const safeFp = this.resolveSafePath(rawFp);
+            if (safeItems.length === 0) firstSafePath = path.dirname(safeFp);
+            const itemCode = String(
+              entry.code ?? entry.aice ?? entry.template ?? entry.content ?? "",
+            );
+            safeItems.push({
+              filePath: safeFp,
+              code: itemCode,
+            });
+          }
+          const projectRoot = this.resolveProjectRoot(firstSafePath);
+          const config = loadProjectConfig(projectRoot);
+          if (!isProjectAiceEnabled(config)) {
+            return {
+              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+              isError: true,
+            };
+          }
+          const effectiveIdioms = isProjectIdiomsEnabled(
+            config,
+            typeof args.idioms === "boolean" ? args.idioms : undefined,
+          );
+          const batchRes = await createBatch(safeItems, {
+            dryRun,
+            idioms: effectiveIdioms,
+            projectRoot,
+            surface: "mcp",
+          });
+          const deltaStr =
+            batchRes.totalTokensSaved >= 0
+              ? `+${batchRes.totalTokensSaved}`
+              : String(batchRes.totalTokensSaved);
+          const msg = `${dryRun ? "[Dry Run] Previewed" : "Created"} ${batchRes.results.length} native file(s) via aice_create (Native: ${batchRes.totalNativeTokens} -> AICE: ${batchRes.totalAiceTokens} cl100k tokens, net saved: ${deltaStr}).`;
+          return {
+            content: [{ type: "text", text: msg }],
+          };
+        }
+
+        const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+        if (!rawTargetFile) {
+          throw new Error("Must provide 'filePath' or 'files' array for aice_create");
+        }
+        const safeFilePath = this.resolveSafePath(rawTargetFile);
+        const projectRoot = this.resolveProjectRoot(path.dirname(safeFilePath));
+        const config = loadProjectConfig(projectRoot);
+        if (!isProjectAiceEnabled(config)) {
+          return {
+            content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+            isError: true,
+          };
+        }
+        const effectiveIdioms = isProjectIdiomsEnabled(
+          config,
+          typeof args.idioms === "boolean" ? args.idioms : undefined,
+        );
+        const codeStr = String(
+          args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
+        );
+        const res = await createFile(safeFilePath, {
+          code: codeStr,
+          idioms: effectiveIdioms,
+          dryRun,
+          projectRoot,
+          surface: "mcp",
+        });
+        const deltaStr = res.tokensSaved >= 0 ? `+${res.tokensSaved}` : String(res.tokensSaved);
+        const respText = `${dryRun ? `[Dry Run] Previewed ${rawTargetFile}` : `Successfully created ${rawTargetFile}`} (Native: ${res.nativeTokens} -> AICE: ${res.aiceTokens} cl100k tokens, net saved: ${deltaStr}).${dryRun ? `\n\n${res.nativeCode}` : ""}`;
+        return {
+          content: [{ type: "text", text: respText }],
+        };
+      }
+
       case "aice_gain": {
         const project = typeof args.project === "string" ? args.project : undefined;
         const unique = Boolean(args.unique);
@@ -1018,7 +1167,12 @@ export class AiceMcpServer {
               : this.workspaceRoot;
         const dir = this.resolveSafePath(rawDir);
         const projectRoot = this.resolveProjectRoot(dir);
-        if (typeof args.enabled === "boolean") {
+        const action = typeof args.action === "string" ? args.action.toLowerCase() : undefined;
+        if (action === "enable") {
+          setProjectAiceEnabled(projectRoot, true);
+        } else if (action === "disable") {
+          setProjectAiceEnabled(projectRoot, false);
+        } else if (typeof args.enabled === "boolean") {
           setProjectAiceEnabled(projectRoot, args.enabled);
         }
         if (typeof args.idiomsEnabled === "boolean") {

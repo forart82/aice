@@ -14,7 +14,36 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import YAML from "yaml";
-import { KNOWN_TARGET_EXTENSIONS, stripJsonComments } from "../config/index.js";
+import {
+  AICE_DIRECTIVE_END,
+  AICE_DIRECTIVE_START,
+  AICE_SYSTEM_DIRECTIVE,
+  ALWAYS_ON_AICE_RULE_FILE,
+  CANONICAL_AICE_AGENT_DIRECTIVE,
+  hasMarkdownDirective,
+  removeAlwaysOnRuleFile,
+  removeMarkdownDirective,
+  SUPPORTED_EXTENSIONS_LIST,
+  stripJsonComments,
+  syncProjectWorkspaceRules,
+  upsertAlwaysOnRuleFile,
+  upsertMarkdownDirective,
+} from "../config/index.js";
+
+export {
+  AICE_DIRECTIVE_END,
+  AICE_DIRECTIVE_START,
+  AICE_SYSTEM_DIRECTIVE,
+  ALWAYS_ON_AICE_RULE_FILE,
+  CANONICAL_AICE_AGENT_DIRECTIVE,
+  hasMarkdownDirective,
+  removeAlwaysOnRuleFile,
+  removeMarkdownDirective,
+  SUPPORTED_EXTENSIONS_LIST,
+  syncProjectWorkspaceRules,
+  upsertAlwaysOnRuleFile,
+  upsertMarkdownDirective,
+};
 
 export type SupportedAgentId =
   | "claude"
@@ -25,25 +54,6 @@ export type SupportedAgentId =
   | "aider"
   | "goose"
   | "cursor";
-
-export const AICE_DIRECTIVE_START = "<!-- AICE:START -->";
-export const AICE_DIRECTIVE_END = "<!-- AICE:END -->";
-
-export const SUPPORTED_EXTENSIONS_LIST = Array.from(KNOWN_TARGET_EXTENSIONS).join(", ");
-
-export const CANONICAL_AICE_AGENT_DIRECTIVE = `${AICE_DIRECTIVE_START}
-## AICE 2.0 — Automatic Token-Efficient AST Context & Mutation Rules
-For all 24 supported file extensions (${SUPPORTED_EXTENSIONS_LIST}):
-1. **Project Opt-Out Check**: Before using AICE on a repository, respect \`aice.config.json\`:
-   - If \`"enabled": false\`, bypass AICE completely and use native file tools.
-   - If \`"idiomsEnabled": false\` (or \`"idioms": false\`), do not collapse or expand \`$idiom\` macros.
-2. **Explore & Read (85-90% Token Savings)**:
-   - Prefer MCP \`aice_outline\` (or CLI \`aice outline <path>\`) to inspect file/directory AST structure before reading raw files.
-   - Prefer MCP \`aice_context\` (or CLI \`aice context <file> -s <symbol>\`) for 1-turn symbol-scoped code + dependency contracts + callers.
-3. **Surgical Edits (90%+ Output Token Savings)**:
-   - Prefer MCP \`aice_splice\` (or CLI \`aice splice <file> -s <symbol> -c "<code>"\`) for symbol-targeted AST replacements, insertions, or deletions.
-   - Prefer MCP \`aice_idioms\` (or CLI \`aice idioms list|read|update\`) for recurring multi-file AST patterns.
-${AICE_DIRECTIVE_END}`;
 
 export interface AgentStatusEntry {
   id: SupportedAgentId;
@@ -86,63 +96,6 @@ function detectBinary(binNames: string[]): { found: boolean; path?: string } {
     }
   }
   return { found: false };
-}
-
-/**
- * Idempotently upserts the `<!-- AICE:START -->...<!-- AICE:END -->` block into a Markdown file.
- */
-export function upsertMarkdownDirective(
-  filePath: string,
-  directiveBlock: string = CANONICAL_AICE_AGENT_DIRECTIVE,
-): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  let existing = "";
-  if (fs.existsSync(filePath)) {
-    existing = fs.readFileSync(filePath, "utf-8");
-  }
-
-  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
-  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-    const before = existing.slice(0, startIdx);
-    const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length);
-    const updated = `${before}${directiveBlock}${after}`;
-    fs.writeFileSync(filePath, updated, "utf-8");
-    return;
-  }
-
-  const trimmed = existing.trimEnd();
-  const updated = trimmed ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
-  fs.writeFileSync(filePath, updated, "utf-8");
-}
-
-/**
- * Cleanly removes the `<!-- AICE:START -->...<!-- AICE:END -->` block from a Markdown file.
- */
-export function removeMarkdownDirective(filePath: string): boolean {
-  if (!fs.existsSync(filePath)) return false;
-  const existing = fs.readFileSync(filePath, "utf-8");
-  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
-  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-  if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
-    return false;
-  }
-  const before = existing.slice(0, startIdx).replace(/\n+$/, "");
-  const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\n+/, "");
-  const combined = [before, after].filter(Boolean).join("\n\n");
-  fs.writeFileSync(filePath, combined ? `${combined}\n` : "", "utf-8");
-  return true;
-}
-
-export function hasMarkdownDirective(filePath: string): boolean {
-  if (!fs.existsSync(filePath)) return false;
-  try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return content.includes(AICE_DIRECTIVE_START) && content.includes(AICE_DIRECTIVE_END);
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -508,6 +461,7 @@ export function getAgentsStatus(
 
   const geminiSettings = path.join(home, ".gemini", "settings.json");
   const agyMcpConfig = path.join(home, ".gemini", "config", "mcp_config.json");
+  const agyRuleMd = path.join(home, ".gemini", "config", "rules", "aice.md");
   const geminiMd = path.join(home, ".gemini", "GEMINI.md");
   const agyBin = detectBinary(["agy", "gemini"]);
 
@@ -547,7 +501,7 @@ export function getAgentsStatus(
       binaryPath: agyBin.path,
       mcpConfigured: hasJsonMcpServer(geminiSettings) && hasJsonMcpServer(agyMcpConfig),
       mcpConfigPath: agyMcpConfig,
-      promptConfigured: hasMarkdownDirective(geminiMd),
+      promptConfigured: hasMarkdownDirective(geminiMd) && hasMarkdownDirective(agyRuleMd),
       promptPath: geminiMd,
     },
     {
@@ -668,6 +622,9 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
       upsertJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json")),
     );
     runSafe("agy", () => upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md")));
+    runSafe("agy", () =>
+      upsertAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md")),
+    );
   }
 
   // 3. OpenAI Codex CLI
@@ -762,6 +719,7 @@ export function removeAgents(
       removeJsonMcpServer(path.join(home, ".gemini", "settings.json"));
       removeJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json"));
       removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
+      removeAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md"));
     });
   }
 

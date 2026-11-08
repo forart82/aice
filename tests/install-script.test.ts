@@ -28,6 +28,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     });
     expect(helpRes.status).toBe(0);
     expect(helpRes.stdout).toContain("Usage: ./install.sh [options]");
+    expect(helpRes.stdout).toContain("--no-update");
     expect(helpRes.stdout).toContain("--no-cheatsheet");
     expect(helpRes.stdout).toContain("--no-agents");
     expect(helpRes.stdout).toContain("--dry-run");
@@ -154,7 +155,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
         "utf-8",
       );
 
-      const res = spawnSync(INSTALL_SCRIPT, ["--no-cheatsheet", "--no-agents"], {
+      const res = spawnSync(INSTALL_SCRIPT, ["--no-update", "--no-cheatsheet", "--no-agents"], {
         cwd: process.cwd(),
         env: { ...process.env, HOME: tmpHome },
         encoding: "utf-8",
@@ -165,9 +166,94 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       expect(updatedZshrc).toContain("export FOO=1");
       expect(updatedZshrc).toContain("(@forart82)");
       expect(updatedZshrc).toContain("https://github.com/forart82/aice");
+      expect(updatedZshrc).toContain("aice create <file>");
       expect(updatedZshrc).not.toContain("old_banner");
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
-  });
+  }, 20000);
+
+  it("detects when origin/main is ahead of HEAD, prompts the user to update, and pulls the newest commit when confirmed", () => {
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aice-install-git-update-"));
+    try {
+      const remoteDir = path.join(tmpRoot, "remote.git");
+      const cloneDir = path.join(tmpRoot, "clone");
+      const fakeHome = path.join(tmpRoot, "home");
+      const fakeBin = path.join(tmpRoot, "bin");
+      fs.mkdirSync(fakeHome, { recursive: true });
+      fs.mkdirSync(fakeBin, { recursive: true });
+
+      // Stub npm in fakeBin so the test runs in milliseconds without network npm install
+      fs.writeFileSync(
+        path.join(fakeBin, "npm"),
+        '#!/usr/bin/env bash\nif [[ "$1" == "-v" ]]; then echo "10.0.0"; exit 0; fi\nexit 0\n',
+        { mode: 0o755 },
+      );
+
+      // Initialize bare remote and seed repository on branch main
+      const seedDir = path.join(tmpRoot, "seed");
+      fs.mkdirSync(path.join(seedDir, "bin"), { recursive: true });
+      fs.copyFileSync(INSTALL_SCRIPT, path.join(seedDir, "install.sh"));
+      fs.chmodSync(path.join(seedDir, "install.sh"), 0o755);
+      fs.writeFileSync(path.join(seedDir, "bin", "aice.mjs"), "#!/usr/bin/env node\n", {
+        mode: 0o755,
+      });
+      fs.writeFileSync(
+        path.join(seedDir, "package.json"),
+        JSON.stringify({ name: "aice", version: "0.9.4" }, null, 2),
+        "utf-8",
+      );
+
+      const gitEnv = {
+        ...process.env,
+        GIT_AUTHOR_NAME: "Test",
+        GIT_AUTHOR_EMAIL: "test@example.com",
+        GIT_COMMITTER_NAME: "Test",
+        GIT_COMMITTER_EMAIL: "test@example.com",
+      };
+
+      spawnSync("git", ["init", "--bare", "-b", "main", remoteDir], { env: gitEnv });
+      spawnSync("git", ["init", "-b", "main", seedDir], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "add", "."], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "commit", "-m", "v0.9.4"], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "remote", "add", "origin", remoteDir], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "push", "-u", "origin", "main"], { env: gitEnv });
+
+      // Clone into cloneDir (currently at v0.9.4)
+      spawnSync("git", ["clone", remoteDir, cloneDir], { env: gitEnv });
+
+      // Advance origin/main from seedDir to v0.9.5
+      fs.writeFileSync(
+        path.join(seedDir, "package.json"),
+        JSON.stringify({ name: "aice", version: "0.9.5" }, null, 2),
+        "utf-8",
+      );
+      spawnSync("git", ["-C", seedDir, "add", "package.json"], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "commit", "-m", "v0.9.5"], { env: gitEnv });
+      spawnSync("git", ["-C", seedDir, "push", "origin", "main"], { env: gitEnv });
+
+      // Run cloneDir/install.sh answering "y\n" to the update prompt
+      const res = spawnSync(path.join(cloneDir, "install.sh"), ["--no-cheatsheet", "--no-agents"], {
+        cwd: cloneDir,
+        input: "y\n",
+        env: {
+          ...gitEnv,
+          HOME: fakeHome,
+          PATH: `${fakeBin}:${process.env.PATH ?? ""}`,
+        },
+        encoding: "utf-8",
+      });
+
+      expect(res.status).toBe(0);
+      expect(res.stdout).toContain(
+        "A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n]",
+      );
+      expect(res.stdout).toContain("Updated AICE git repository to newest version (v0.9.5)");
+
+      const updatedPkg = JSON.parse(fs.readFileSync(path.join(cloneDir, "package.json"), "utf-8"));
+      expect(updatedPkg.version).toBe("0.9.5");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }, 20000);
 });

@@ -1062,8 +1062,160 @@ export function isProjectAiceEnabled(
   return configOrDir.enabled !== false;
 }
 
+export const AICE_DIRECTIVE_START = "<!-- AICE:START -->";
+export const AICE_DIRECTIVE_END = "<!-- AICE:END -->";
+
+export const SUPPORTED_EXTENSIONS_LIST = Array.from(KNOWN_TARGET_EXTENSIONS).join(", ");
+
+export const AICE_SYSTEM_DIRECTIVE = `${AICE_DIRECTIVE_START}
+## AICE 2.0 — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+**MANDATORY OVERRIDE**: For all 24 supported file extensions (${SUPPORTED_EXTENSIONS_LIST}), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
+1. **Project Opt-Out Check**: Respect \`aice.config.json\` in the workspace root:
+   - If \`"enabled": false\`, bypass AICE completely and use native file tools.
+   - If \`"idiomsEnabled": false\` (or \`"idioms": false\`), disable \`$idiom\` macros (\`--no-idioms\`).
+2. **Startup & New File Creation (\`from 0\` — 40-75% Output Token Savings)**:
+   - When creating new code files (\`.ts\`, \`.tsx\`, \`.py\`, \`.rs\`, \`.go\`, \`.cpp\`, \`.cs\`, \`.html\`, \`.css\`, \`.js\`, \`.json\`, \`.yaml\`, \`.twig\`, \`.php\`, \`.kt\`), you **MUST** use \`aice create <file> -c "<compact AICE>"\` (or \`aice create --batch\` / MCP \`aice_create\`) instead of raw \`write_file\` whenever expressing logic, classes, functions, styles, or templates in compact AICE + \`$idioms\` (including inline \`@idiom $Name($0) = ...\`) saves output tokens.
+3. **Explore & Read Existing Files (85-90% Read Token Savings)**:
+   - Before calling \`read_file\` / \`view_file\` on any existing supported file, you **MUST** run \`aice outline <path>\` (or MCP \`aice_outline\`) for structure discovery and \`aice context <file> -s <symbol>\` (or MCP \`aice_context\`) for 1-turn symbol-scoped code + dependency contracts + callers.
+4. **Surgical Edits on Existing Files (90%+ Edit Token Savings)**:
+   - When modifying, inserting, or deleting a function/method/class/rule in an existing supported file, you **MUST** use \`aice splice <file> -s <symbol> -c "<compact AICE>" --in-place\` (or MCP \`aice_splice\`) instead of \`edit_file\` / \`replace_file_content\`.
+   - Use \`aice idioms list|read|update\` (or MCP \`aice_idioms\`) for recurring multi-file AST patterns.
+5. **Subagent Propagation (\`invoke_subagent\` / \`DeepCoder\` / \`code-surgeon\` / \`fast-scout\`)**:
+   - Whenever spawning any subagent for coding or exploration, you **MUST** include the requirement in the subagent's prompt to use \`aice create\`, \`aice outline\`, \`aice context\`, and \`aice splice\` via CLI (\`run_command\`) or MCP.
+${AICE_DIRECTIVE_END}`;
+
+export const CANONICAL_AICE_AGENT_DIRECTIVE = AICE_SYSTEM_DIRECTIVE;
+
+export const ALWAYS_ON_AICE_RULE_FILE = `---
+trigger: always_on
+description: Mandatory AICE 2.0 token-efficient AST file creation, exploration, context, and surgical splicing rules
+---
+
+${AICE_SYSTEM_DIRECTIVE}
+`;
+
 /**
- * Creates or updates `aice.config.json` with `"enabled": true | false`.
+ * Idempotently upserts the `<!-- AICE:START -->...<!-- AICE:END -->` block into a Markdown file.
+ */
+export function upsertMarkdownDirective(
+  filePath: string,
+  directiveBlock: string = CANONICAL_AICE_AGENT_DIRECTIVE,
+): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  let existing = "";
+  if (fs.existsSync(filePath)) {
+    existing = fs.readFileSync(filePath, "utf-8");
+  }
+
+  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
+  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+    const before = existing.slice(0, startIdx);
+    const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length);
+    const updated = `${before}${directiveBlock}${after}`;
+    fs.writeFileSync(filePath, updated, "utf-8");
+    return;
+  }
+
+  const trimmed = existing.trimEnd();
+  const updated = trimmed ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
+  fs.writeFileSync(filePath, updated, "utf-8");
+}
+
+/**
+ * Cleanly removes the `<!-- AICE:START -->...<!-- AICE:END -->` block from a Markdown file.
+ */
+export function removeMarkdownDirective(filePath: string, deleteIfEmpty = false): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  const existing = fs.readFileSync(filePath, "utf-8");
+  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
+  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
+  if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
+    return false;
+  }
+  const before = existing.slice(0, startIdx).replace(/\n+$/, "");
+  const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\n+/, "");
+  const combined = [before, after].filter(Boolean).join("\n\n");
+  if (!combined.trim() && deleteIfEmpty) {
+    fs.unlinkSync(filePath);
+  } else {
+    fs.writeFileSync(filePath, combined ? `${combined}\n` : "", "utf-8");
+  }
+  return true;
+}
+
+export function hasMarkdownDirective(filePath: string): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    const content = fs.readFileSync(filePath, "utf-8");
+    return content.includes(AICE_DIRECTIVE_START) && content.includes(AICE_DIRECTIVE_END);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Writes an always-on agent rule file (`trigger: always_on` frontmatter + `<!-- AICE:START -->...<!-- AICE:END -->`).
+ */
+export function upsertAlwaysOnRuleFile(filePath: string): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, ALWAYS_ON_AICE_RULE_FILE, "utf-8");
+}
+
+/**
+ * Removes an always-on agent rule file and cleans up empty parent rule directories if empty.
+ */
+export function removeAlwaysOnRuleFile(filePath: string, cleanEmptyParents = false): boolean {
+  if (!fs.existsSync(filePath)) return false;
+  try {
+    fs.unlinkSync(filePath);
+    if (cleanEmptyParents) {
+      let dir = path.dirname(filePath);
+      for (let i = 0; i < 2; i++) {
+        if (fs.existsSync(dir) && fs.readdirSync(dir).length === 0) {
+          fs.rmdirSync(dir);
+          dir = path.dirname(dir);
+        } else {
+          break;
+        }
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Synchronizes project-level AI agent rules (`AGENTS.md`, `.agents/rules/aice.md`, and existing `CLAUDE.md` / `GEMINI.md`).
+ */
+export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean): void {
+  const resolvedDir = path.resolve(projectDir);
+  const agentsMdPath = path.join(resolvedDir, "AGENTS.md");
+  const claudeMdPath = path.join(resolvedDir, "CLAUDE.md");
+  const geminiMdPath = path.join(resolvedDir, "GEMINI.md");
+  const ruleFilePath = path.join(resolvedDir, ".agents", "rules", "aice.md");
+
+  if (enabled) {
+    upsertMarkdownDirective(agentsMdPath);
+    upsertAlwaysOnRuleFile(ruleFilePath);
+    if (fs.existsSync(claudeMdPath)) {
+      upsertMarkdownDirective(claudeMdPath);
+    }
+    if (fs.existsSync(geminiMdPath)) {
+      upsertMarkdownDirective(geminiMdPath);
+    }
+  } else {
+    removeMarkdownDirective(agentsMdPath, true);
+    removeMarkdownDirective(claudeMdPath, false);
+    removeMarkdownDirective(geminiMdPath, false);
+    removeAlwaysOnRuleFile(ruleFilePath, true);
+  }
+}
+
+/**
+ * Creates or updates `aice.config.json` with `"enabled": true | false` and synchronizes workspace agent rules.
  */
 export function setProjectAiceEnabled(projectDir: string, enabled: boolean): AiceProjectConfig {
   let resolvedDir = findProjectRoot(projectDir);
@@ -1076,7 +1228,7 @@ export function setProjectAiceEnabled(projectDir: string, enabled: boolean): Aic
     resolvedDir = path.dirname(resolvedDir);
   }
   const current = loadProjectConfig(resolvedDir);
-  return saveProjectConfig(
+  const saved = saveProjectConfig(
     resolvedDir,
     {
       enabled,
@@ -1084,6 +1236,8 @@ export function setProjectAiceEnabled(projectDir: string, enabled: boolean): Aic
     },
     { stripLegacyKeys: true },
   );
+  syncProjectWorkspaceRules(resolvedDir, enabled);
+  return saved;
 }
 
 /**

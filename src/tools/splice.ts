@@ -44,6 +44,7 @@ import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/inde
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { resolveFirstActionableSymbol } from "./context.js";
+import { createFile } from "./create.js";
 
 export interface SpliceOptions {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'User.id') */
@@ -60,6 +61,8 @@ export interface SpliceOptions {
   insertBefore?: string;
   /** Appends declaration to end of module or class */
   append?: boolean;
+  /** If true, creates the file from scratch via createFile() */
+  create?: boolean;
   /** Does not write file to disk */
   dryRun?: boolean;
   /** Generates unified diff */
@@ -102,10 +105,13 @@ export interface SpliceResult {
   success: boolean;
   filePath: string;
   symbol?: string;
+  startLine?: number;
+  endLine?: number;
   originalSnippet?: string;
   newSnippet?: string;
   diff?: string;
   modifiedCode: string;
+  newFileContent?: string;
   newAiceSource: string;
   tokensSaved?: number;
 }
@@ -3815,15 +3821,43 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
 
-  if (!fs.existsSync(fullPath)) {
-    throw new Error(`Source file not found: ${filePath}`);
-  }
-
   const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
   const config = loadProjectConfig(root);
   if (!isProjectAiceEnabled(config)) {
     throw new Error(AICE_DISABLED_MESSAGE);
   }
+
+  const fileExists = fs.existsSync(fullPath);
+  if ((!fileExists && !options.delete) || options.create || options.symbol === "*") {
+    const prevSource = fileExists ? fs.readFileSync(fullPath, "utf-8") : "";
+    const created = await createFile(filePath, {
+      code: options.code ?? options.body ?? "",
+      idioms: options.idioms,
+      dryRun: options.dryRun,
+      projectRoot: root,
+    });
+    return {
+      success: true,
+      filePath: created.filePath,
+      symbol: options.symbol ?? "*",
+      startLine: 1,
+      endLine: created.nativeCode.split(/\r?\n/).length,
+      originalSnippet: fileExists ? prevSource : undefined,
+      newSnippet: created.nativeCode,
+      diff: options.diff
+        ? generateUnifiedDiff(filePath, prevSource, created.nativeCode)
+        : undefined,
+      modifiedCode: created.nativeCode,
+      newFileContent: created.nativeCode,
+      newAiceSource: created.nativeCode,
+      tokensSaved: Math.max(0, created.tokensSaved),
+    };
+  }
+
+  if (!fileExists) {
+    throw new Error(`Source file not found: ${filePath}`);
+  }
+
   const activeIdioms = options.idioms === false ? {} : config.idioms;
   const snippetInput = options.code ?? options.body ?? "";
   const idiomsUsedInSnippet = Boolean(
@@ -3942,10 +3976,13 @@ export async function spliceBatch(
 
   const results: SpliceResult[] = [];
   const modifiedSet = new Set<string>();
+  const newlyCreatedFiles: string[] = [];
 
   try {
     for (const item of items) {
       const rawFp = item.filePath || item.file || item.path || "";
+      const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
+      const existedBefore = backups.has(fullPath) || fs.existsSync(fullPath);
       const resolvedCode =
         item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
       const res = await splice(rawFp, {
@@ -3958,12 +3995,24 @@ export async function spliceBatch(
         compile: item.compile ?? options.compile,
         idioms: item.idioms ?? options.idioms,
       });
+      if (!existedBefore && !(item.dryRun ?? options.dryRun)) {
+        newlyCreatedFiles.push(fullPath);
+      }
       results.push(res);
       modifiedSet.add(res.filePath);
     }
   } catch (err) {
     // Atomic rollback of all touched files!
     if (!options.dryRun) {
+      for (const createdFp of newlyCreatedFiles) {
+        try {
+          if (fs.existsSync(createdFp)) {
+            fs.unlinkSync(createdFp);
+          }
+        } catch {
+          // ignore
+        }
+      }
       for (const [fp, origContent] of backups.entries()) {
         try {
           fs.writeFileSync(fp, origContent, "utf-8");

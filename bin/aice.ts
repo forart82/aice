@@ -54,8 +54,11 @@ import {
   formatTokenomicsTerminalTable,
 } from "../src/tokenomics/index.js";
 import {
+  type BatchCreateItem,
   type BatchSpliceItem,
   type ContextOptions,
+  createBatch,
+  createFile,
   type DiffOptions,
   diffFiles,
   type FmtOptions,
@@ -1078,6 +1081,7 @@ program
     "--batch <fileOrJson>",
     "Execute atomic multi-file batch splice from JSON file or JSON string",
   )
+  .option("--create", "Create target native file from scratch if it does not exist or overwrite")
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .option("--in-place", "Apply splice mutation directly to the file on disk (default)")
@@ -1098,6 +1102,7 @@ program
         insertAfter?: string;
         insertBefore?: string;
         batch?: string;
+        create?: boolean;
         idioms?: boolean;
         dryRun?: boolean;
         diff?: boolean;
@@ -1241,6 +1246,7 @@ program
           delete: isPrimaryDelete,
           insertAfter: options.insertAfter,
           insertBefore: options.insertBefore,
+          create: options.create,
           idioms: effectiveSpliceIdioms,
           dryRun: options.dryRun,
           diff: options.diff,
@@ -1289,6 +1295,163 @@ program
       } catch (err: unknown) {
         console.error(
           `❌ Error splicing ${rawTargetPath ?? options.file ?? options.batch}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: create [filePath]
+program
+  .command("create [filePath]")
+  .alias("new")
+  .description(
+    "Create greenfield/startup native files from compact AICE syntax, $idiom macros, or hybrid code (40-75% token reduction)",
+  )
+  .option("-c, --code <codeString>", "Compact AICE, $idiom, or hybrid code string")
+  .option("-f, --from <file>", "Read AICE payload from an input file")
+  .option("--stdin", "Read AICE payload from standard input")
+  .option(
+    "--idiom <spec...>",
+    "Define one or more inline $idioms (e.g. '$clamp($0,$1,$2)=Math.min(Math.max($0,$1),$2)')",
+  )
+  .option(
+    "--batch <jsonOrFile>",
+    "Create multiple native files atomically from JSON array/object or JSON file",
+  )
+  .option("--idioms", "Force-enable project and inline $idioms")
+  .option("--no-idioms", "Disable $idiom expansion and persistence")
+  .option("--dry-run", "Preview compiled native code without writing to disk")
+  .option("--json", "Output structured creation result as JSON")
+  .action(
+    async (
+      filePathArg: string | undefined,
+      options: {
+        code?: string;
+        from?: string;
+        stdin?: boolean;
+        idiom?: string[];
+        batch?: string;
+        idioms?: boolean;
+        dryRun?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        if (options.batch) {
+          const batchProjectRoot = findProjectRoot(process.cwd());
+          const batchProjectConfig = loadProjectConfig(batchProjectRoot);
+          if (!isProjectAiceEnabled(batchProjectConfig)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
+          const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
+          const batchCandidatePath = path.resolve(process.cwd(), options.batch);
+          const rawJson =
+            fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
+              ? fs.readFileSync(batchCandidatePath, "utf-8")
+              : options.batch;
+          const parsed = JSON.parse(rawJson);
+          let items: BatchCreateItem[];
+          if (Array.isArray(parsed)) {
+            items = parsed as BatchCreateItem[];
+          } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.files)) {
+            items = parsed.files as BatchCreateItem[];
+          } else if (parsed && typeof parsed === "object") {
+            items = Object.entries(parsed).map(([fp, codeVal]) =>
+              typeof codeVal === "string"
+                ? { filePath: fp, code: codeVal }
+                : { filePath: fp, ...(codeVal as object) },
+            );
+          } else {
+            throw new Error(
+              "--batch must be a JSON array of { filePath, code } items or a { [filePath]: code } map",
+            );
+          }
+
+          const batchRes = await createBatch(items, {
+            dryRun: options.dryRun,
+            idioms: batchEffectiveIdioms,
+            inlineIdioms: options.idiom,
+            projectRoot: batchProjectRoot,
+            surface: "cli",
+          });
+
+          if (options.json) {
+            console.log(JSON.stringify(batchRes, null, 2));
+            return;
+          }
+
+          if (options.dryRun) {
+            console.log(
+              `[Dry Run] Previewed batch creation of ${batchRes.results.length} file(s) (net saved: ${batchRes.totalTokensSaved >= 0 ? `+${batchRes.totalTokensSaved}` : batchRes.totalTokensSaved} tokens)`,
+            );
+            for (const r of batchRes.results) {
+              console.log(`\n// === ${r.filePath} ===\n${r.nativeCode}`);
+            }
+          } else {
+            console.log(
+              `✔ Batch created ${batchRes.results.length} native file(s) (Native: ${batchRes.totalNativeTokens} -> AICE: ${batchRes.totalAiceTokens} cl100k tokens, net saved: ${batchRes.totalTokensSaved >= 0 ? `+${batchRes.totalTokensSaved}` : batchRes.totalTokensSaved})`,
+            );
+          }
+          return;
+        }
+
+        if (!filePathArg) {
+          console.error("❌ Error: Must provide <filePath> or --batch <jsonOrFile>.");
+          process.exit(1);
+        }
+
+        const fullTarget = path.resolve(process.cwd(), filePathArg);
+        const createProjectRoot = findProjectRoot(path.dirname(fullTarget), process.cwd());
+        const createProjectConfig = loadProjectConfig(createProjectRoot);
+        if (!isProjectAiceEnabled(createProjectConfig)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
+        const effectiveCreateIdioms = isProjectIdiomsEnabled(createProjectConfig, options.idioms);
+
+        let code = options.code;
+        if (code === undefined && !options.from) {
+          const stdinContent = options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin();
+          if (stdinContent && stdinContent.trim().length > 0) {
+            code = stdinContent;
+          } else {
+            console.error("❌ Error: Must provide -c/--code, --from <file>, or input via stdin.");
+            process.exit(1);
+          }
+        }
+
+        const result = await createFile(filePathArg, {
+          code,
+          from: options.from,
+          inlineIdioms: options.idiom,
+          idioms: effectiveCreateIdioms,
+          dryRun: options.dryRun,
+          projectRoot: createProjectRoot,
+          surface: "cli",
+        });
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+
+        const deltaStr =
+          result.tokensSaved >= 0 ? `+${result.tokensSaved}` : String(result.tokensSaved);
+        if (options.dryRun) {
+          console.log(
+            `[Dry Run] Previewed ${filePathArg} (Native: ${result.nativeTokens} -> AICE: ${result.aiceTokens} cl100k tokens, net saved: ${deltaStr})`,
+          );
+          console.log(result.nativeCode);
+        } else {
+          console.log(
+            `✔ Created ${filePathArg} (Native: ${result.nativeTokens} -> AICE: ${result.aiceTokens} cl100k tokens, net saved: ${deltaStr})`,
+          );
+        }
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error creating ${filePathArg ?? options.batch ?? "<file>"}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
@@ -2447,7 +2610,10 @@ Step 1: On-the-Fly AST Discovery & Context Compression (Zero .aice Files on Disk
       aice agents setup
       aice agents status
 
-Step 2: Surgical In-Place AST Mutation
+Step 2: Greenfield Creation & Surgical In-Place AST Mutation
+  • Create greenfield native files from compact AICE + $idioms (40-75% token reduction):
+      aice create src/app.ts -c "pub fn add(a: int, b: int) -> int = a + b"
+      aice create --batch files.json
   • Forgiving surgical in-place AST mutation (accepts AICE, $idioms, or native syntax):
       aice splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
       aice splice --batch edits.json

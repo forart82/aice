@@ -6,6 +6,7 @@
  */
 
 export * from "./context.js";
+export * from "./create.js";
 export * from "./diff-patch.js";
 export * from "./fmt.js";
 export * from "./outline.js";

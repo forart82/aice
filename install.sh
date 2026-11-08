@@ -8,6 +8,7 @@ set -euo pipefail
 AUTO_YES=0
 NO_CHEATSHEET=0
 NO_AGENTS=0
+NO_UPDATE=0
 DRY_RUN=0
 
 print_help() {
@@ -15,7 +16,8 @@ print_help() {
 Usage: ./install.sh [options]
 
 Options:
-  -y, --yes             Auto-confirm dependency installation and Zsh cheatsheet
+  -y, --yes             Auto-confirm dependency installation, git update, and Zsh cheatsheet
+      --no-update       Skip checking the remote git repository for newer versions
       --no-cheatsheet   Skip the Zsh startup cheatsheet prompt/injection
       --no-agents       Skip automatic CLI coding agent configuration (aice agents setup)
       --dry-run         Print actions that would be performed without mutating the system
@@ -27,6 +29,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes)
       AUTO_YES=1
+      shift
+      ;;
+    --no-update)
+      NO_UPDATE=1
       shift
       ;;
     --no-cheatsheet)
@@ -197,6 +203,49 @@ fi
 
 log_ok "Prerequisites verified: git ($(git --version 2>/dev/null | head -n1 || echo ok)), curl, node ($(node -v 2>/dev/null || echo '>=20')), npm ($(npm -v 2>/dev/null || echo 'ok'))"
 
+# ── Substep 2.2b: Check Remote Git Repository for Newer Version ───────────────
+if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >/dev/null 2>&1; then
+  log_info "Checking git repository for newer AICE updates..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  [dry-run] git fetch --quiet origin main --tags\n'
+  else
+    git -C "$SCRIPT_DIR" fetch --quiet origin main --tags 2>/dev/null || true
+    BEHIND_COUNT="$(git -C "$SCRIPT_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)"
+    if [[ "$BEHIND_COUNT" =~ ^[0-9]+$ ]] && [[ "$BEHIND_COUNT" -gt 0 ]]; then
+      LOCAL_VER="$(node -e 'try{console.log(require("./package.json").version)}catch{console.log("unknown")}' 2>/dev/null || echo "unknown")"
+      REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:package.json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).version)}catch{console.log("latest")}})' 2>/dev/null || echo "latest")"
+      log_warn "Remote git repository (origin/main) is ahead by ${BEHIND_COUNT} commit(s) (local: v${LOCAL_VER} -> remote: v${REMOTE_VER})."
+      DO_UPDATE=0
+      if [[ "$AUTO_YES" -eq 1 ]]; then
+        printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] y\n'
+        DO_UPDATE=1
+      else
+        printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] '
+        if IFS= read -t 30 -r ans; then
+          case "$ans" in
+            ""|[Yy]|[Yy][Ee][Ss]) DO_UPDATE=1 ;;
+            *) DO_UPDATE=0 ;;
+          esac
+        else
+          printf '\n'
+          log_info "Non-interactive session without --yes; skipping git update."
+        fi
+      fi
+
+      if [[ "$DO_UPDATE" -eq 1 ]]; then
+        log_info "Updating repository from origin/main..."
+        if git -C "$SCRIPT_DIR" pull --ff-only origin main; then
+          log_ok "Updated AICE git repository to newest version (v${REMOTE_VER})."
+        else
+          log_warn "Could not fast-forward pull from origin/main; continuing with current working tree."
+        fi
+      else
+        log_info "Skipping git repository update; continuing with local version (v${LOCAL_VER})."
+      fi
+    fi
+  fi
+fi
+
 # ── Substep 2.3: Build & Global Symlink Registration ─────────────────────────
 log_info "Installing npm dependencies in ${SCRIPT_DIR}..."
 run_cmd npm install --no-fund --no-audit
@@ -273,10 +322,11 @@ aice_cheatsheet() {
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE — ON-THE-FLY AI CONTEXT ENGINE & TELEMETRY CHEATSHEET (@forart82)${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] TELEMETRY, AGENTS & CONFIG${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}85%% AST skeleton${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}1-turn symbol${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}Surgical edit${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect agents${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}Project \$idioms${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file from 0${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}85%% AST skeleton${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}1-turn symbol${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect agents${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}Surgical edit${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}Project \$idioms${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms on|off${C_RESET}   ${C_GRAY}Toggle \$idioms${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"

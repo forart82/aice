@@ -30,8 +30,10 @@ export {
   IdiomCycleError,
   type IdiomReadResult,
   type IdiomUpdateResult,
+  readIdiomCache,
   readProjectIdiom,
   scanProjectIdioms,
   updateProjectIdiom,
   validateIdiomDefinitions,
+  writeIdiomCache,
 } from "./idiom-transform.js";

@@ -20,6 +20,7 @@ import {
 import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
 
 export type TelemetryOperation =
+  | "create"
   | "outline"
   | "context"
   | "decompile"
@@ -293,6 +294,7 @@ function getCategoryForOperation(op: TelemetryOperation): TelemetryCategory {
     case "context":
     case "decompile":
       return "read";
+    case "create":
     case "splice":
     case "patch":
     case "idioms_apply":

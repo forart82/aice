@@ -117,6 +117,10 @@ if [[ "$KEEP_AGENTS" -eq 0 ]]; then
   else
     log_info "No aice runner found for 'aice agents remove'; skipping agent unwiring."
   fi
+  if [[ -f "${HOME}/.gemini/config/rules/aice.md" ]]; then
+    run_cmd rm -f "${HOME}/.gemini/config/rules/aice.md"
+    log_ok "Removed global Antigravity rule: ${HOME}/.gemini/config/rules/aice.md"
+  fi
 else
   log_info "Skipping CLI coding agent unwiring (--keep-agents)."
 fi
@@ -213,6 +217,96 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
         [[ -z "$cdir" ]] && continue
         run_cmd rm -rf "$cdir"
         log_ok "Removed project idiom cache: ${cdir}"
+      done
+    fi
+
+    # Also remove project-level .agents/rules/aice.md files (and empty .agents/rules & .agents dirs)
+    mapfile -t PROJECT_RULE_FILES < <(
+      find "$PROJECTS_DIR" \
+        \( \
+          -name "node_modules" -o \
+          -name ".git" -o \
+          -name ".cache" -o \
+          -name ".local" -o \
+          -name ".npm" -o \
+          -name ".cargo" -o \
+          -name ".rustup" -o \
+          -name ".nvm" -o \
+          -name ".bun" -o \
+          -name ".venv" -o \
+          -name "venv" \
+        \) -prune -o \
+        -type f -path "*/.agents/rules/aice.md" \
+        -print 2>/dev/null || true
+    )
+    if [[ ${#PROJECT_RULE_FILES[@]} -gt 0 ]]; then
+      for rfile in "${PROJECT_RULE_FILES[@]}"; do
+        [[ -z "$rfile" ]] && continue
+        run_cmd rm -f "$rfile"
+        if [[ "$DRY_RUN" -eq 0 ]]; then
+          rdir="$(dirname "$rfile")"
+          rmdir "$rdir" 2>/dev/null || true
+          rmdir "$(dirname "$rdir")" 2>/dev/null || true
+        fi
+        log_ok "Removed project rule file: ${rfile}"
+      done
+    fi
+
+    # Strip <!-- AICE:START --> ... <!-- AICE:END --> from project AGENTS.md, CLAUDE.md, and GEMINI.md
+    mapfile -t PROJECT_MD_FILES < <(
+      find "$PROJECTS_DIR" \
+        \( \
+          -name "node_modules" -o \
+          -name ".git" -o \
+          -name ".cache" -o \
+          -name ".local" -o \
+          -name ".npm" -o \
+          -name ".cargo" -o \
+          -name ".rustup" -o \
+          -name ".nvm" -o \
+          -name ".bun" -o \
+          -name ".venv" -o \
+          -name "venv" -o \
+          -name ".claude" -o \
+          -name ".gemini" -o \
+          -name ".codex" \
+        \) -prune -o \
+        -type f \( -name "AGENTS.md" -o -name "CLAUDE.md" -o -name "GEMINI.md" \) \
+        -print 2>/dev/null || true
+    )
+    if [[ ${#PROJECT_MD_FILES[@]} -gt 0 ]]; then
+      for mdfile in "${PROJECT_MD_FILES[@]}"; do
+        [[ -z "$mdfile" ]] && continue
+        if grep -Fq "<!-- AICE:START -->" "$mdfile" 2>/dev/null; then
+          if [[ "$DRY_RUN" -eq 1 ]]; then
+            printf '  [dry-run] strip <!-- AICE:START --> block from %s\n' "$mdfile"
+          elif command -v node >/dev/null 2>&1; then
+            node -e '
+              const fs = require("fs");
+              const path = require("path");
+              const file = process.argv[1];
+              let content = fs.readFileSync(file, "utf8");
+              const startIdx = content.indexOf("<!-- AICE:START -->");
+              const endIdx = content.indexOf("<!-- AICE:END -->");
+              if (startIdx !== -1 && endIdx !== -1) {
+                const before = content.slice(0, startIdx).trimEnd();
+                const after = content.slice(endIdx + "<!-- AICE:END -->".length).trimStart();
+                const next = [before, after].filter(Boolean).join("\n\n");
+                if (!next.trim() && path.basename(file) === "AGENTS.md") {
+                  fs.unlinkSync(file);
+                } else {
+                  fs.writeFileSync(file, next ? next + "\n" : "", "utf8");
+                }
+              }
+            ' "$mdfile"
+          else
+            sed -i '/<!-- AICE:START -->/,/<!-- AICE:END -->/d' "$mdfile"
+            if [[ "$(basename "$mdfile")" == "AGENTS.md" ]] && [[ -z "$(tr -d '[:space:]' < "$mdfile")" ]]; then
+              rm -f "$mdfile"
+            fi
+          fi
+          log_ok "Cleaned AICE directive from project file: ${mdfile}"
+        fi
       done
     fi
   else
