@@ -2,27 +2,27 @@
  * Unified Emitter Hub for AICE 2.0 Multi-Language Forward Transpilation.
  */
 
-import type { Module } from "../core/ast.js";
-import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
 import {
   findProjectRoot,
   loadProjectConfig,
   type ProjectIdiomDefinition,
 } from "../config/project-config.js";
+import type { Module } from "../core/ast.js";
 import { expandModuleIdioms } from "../idioms/index.js";
+import { detectTargetFromPath, type EmitterOptions, type TargetLanguage } from "./context.js";
 import { CppEmitter } from "./cpp-emitter.js";
 import { CSharpEmitter } from "./csharp-emitter.js";
 import { CssEmitter } from "./css-emitter.js";
 import { GoEmitter } from "./go-emitter.js";
 import { HtmlEmitter } from "./html-emitter.js";
 import { JsonEmitter } from "./json-emitter.js";
+import { KotlinEmitter } from "./kotlin-emitter.js";
+import { PhpEmitter } from "./php-emitter.js";
 import { PythonEmitter } from "./py-emitter.js";
 import { RustEmitter } from "./rust-emitter.js";
 import { TypeScriptEmitter } from "./ts-emitter.js";
 import { TwigEmitter } from "./twig-emitter.js";
 import { YamlEmitter } from "./yaml-emitter.js";
-import { PhpEmitter } from "./php-emitter.js";
-import { KotlinEmitter } from "./kotlin-emitter.js";
 
 export * from "./context.js";
 export * from "./cpp-emitter.js";
@@ -41,7 +41,7 @@ export * from "./twig-emitter.js";
 export * from "./yaml-emitter.js";
 
 // Convenience aliases
-export { PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter, KotlinEmitter as KtEmitter };
+export { KotlinEmitter as KtEmitter, PythonEmitter as PyEmitter, TypeScriptEmitter as TsEmitter };
 
 export interface EmitOptions extends EmitterOptions {
   idioms?: Record<string, ProjectIdiomDefinition>;

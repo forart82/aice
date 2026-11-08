@@ -10,7 +10,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
+  isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   type ProjectIdiomDefinition,
@@ -35,6 +37,7 @@ import {
   formatIdiomsMarkdownSection,
   scanProjectIdioms,
 } from "../idioms/index.js";
+import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { generateOutline, type OutlineSymbol } from "./outline.js";
 
@@ -273,7 +276,9 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
 }
 
 function extractExportedContract(resolvedPath: string, importedSymbols: string[]): string {
-  const outlineRes = generateOutline(resolvedPath, { includeTypes: true });
+  const outlineRes = withSuppressedTelemetry(() =>
+    generateOutline(resolvedPath, { includeTypes: true }),
+  );
   const nonImports = outlineRes.symbols.filter((s) => s.kind !== "import");
 
   const hasExplicitExports = nonImports.some(
@@ -352,7 +357,7 @@ function extractImportsFromFile(filePath: string, preReadContent?: string): Impo
     }
 
     const targetLang = detectTargetFromPath(filePath);
-    const decomp = decompile(content, targetLang, { filePath });
+    const decomp = withSuppressedTelemetry(() => decompile(content, targetLang, { filePath }));
     const mod = parse(decomp.aice, filePath);
     return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
   } catch {
@@ -693,13 +698,13 @@ function unwrapSyntheticContainer(src: string, filePath: string): string {
 }
 
 function compactPureAiceSlice(src: string): string {
-  let out = src.replace(/^([ \t]*)if ([^\n:]+):\n\1  ([^\n]+)$/gm, "$1if $2: $3");
+  let out = src.replace(/^([ \t]*)if ([^\n:]+):\n\1 {2}([^\n]+)$/gm, "$1if $2: $3");
   out = out.replace(
     /^([ \t]*)if (\w+) < ([^\n:]+): \2 = \3\n\1if \2 > ([^\n:]+): \2 = \4\n\1(\2 = \2 \+ [^\n]+)$/gm,
     "$1if $2 < $3: $2 = $3; if $2 > $4: $2 = $4; $5",
   );
   out = out.replace(
-    /^([ \t]*)([a-z]+\([^\n)]*\)):\n\1  ([a-z]+\([^\n)]*\):\s*"[^"]*")\n\1  ([a-z]+\([^\n)]*\):\s*"[^"]*")$/gm,
+    /^([ \t]*)([a-z]+\([^\n)]*\)):\n\1 {2}([a-z]+\([^\n)]*\):\s*"[^"]*")\n\1 {2}([a-z]+\([^\n)]*\):\s*"[^"]*")$/gm,
     "$1$2 { $3; $4 }",
   );
   return out;
@@ -720,20 +725,21 @@ export async function generateWorkspaceContext(
 
   const projectRoot = resolved.projectRoot;
   const config = resolved.config;
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
   const displayTargetPath = formatDisplayPath(resolved.resolvedPath, projectRoot);
 
   const outlines: string[] = [];
   const symbolSlices: string[] = [];
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
+  const rawWorkspaceTexts: string[] = [];
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
   let activeIdioms = idiomsActive ? config.idioms : undefined;
-  if (
-    options.idioms === true &&
-    (!activeIdioms || Object.keys(activeIdioms).length === 0)
-  ) {
+  if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
-      const scanRes = scanProjectIdioms(projectRoot);
+      const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
@@ -754,10 +760,13 @@ export async function generateWorkspaceContext(
     const relFile = formatDisplayPath(f, projectRoot);
     try {
       const rawFileContent = fs.readFileSync(f, "utf-8");
+      rawWorkspaceTexts.push(rawFileContent);
       let fileAice = rawFileContent;
       if (!f.endsWith(".aice")) {
         const targetLang = detectTargetFromPath(f);
-        const decomp = decompile(rawFileContent, targetLang, { filePath: f });
+        const decomp = withSuppressedTelemetry(() =>
+          decompile(rawFileContent, targetLang, { filePath: f }),
+        );
         fileAice = decomp.aice;
       }
       if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
@@ -770,12 +779,14 @@ export async function generateWorkspaceContext(
       const allSyms = extractFileSymbolList(fileAice, f);
       const symHeader = allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}` : "";
 
-      const oRes = generateOutline(f, {
-        includeTypes: true,
-        depth: options.depth,
-        idioms: options.idioms,
-        projectRoot,
-      });
+      const oRes = withSuppressedTelemetry(() =>
+        generateOutline(f, {
+          includeTypes: true,
+          depth: options.depth,
+          idioms: options.idioms,
+          projectRoot,
+        }),
+      );
       const outlineBody =
         symHeader &&
         (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
@@ -854,7 +865,7 @@ export async function generateWorkspaceContext(
         const specifier = imp.source;
         const importedSymbols = imp.specifiers.map((s) => s.name);
         const isExternal = isExternalSpecifier(specifier);
-        let resolvedImportPath: string | undefined = undefined;
+        let resolvedImportPath: string | undefined;
 
         if (!isExternal) {
           resolvedImportPath = resolveImportPath(f, specifier, config, projectRoot);
@@ -875,7 +886,7 @@ export async function generateWorkspaceContext(
           }
         } else {
           let contract: string;
-          let displayDepPath: string | undefined = undefined;
+          let displayDepPath: string | undefined;
 
           if (isExternal) {
             contract = generateExternalContract(specifier, importedSymbols);
@@ -985,7 +996,7 @@ export async function generateWorkspaceContext(
 
   const targetContent = resolved.files.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
 
-  return {
+  const resObj: ContextResult = {
     targetPath: displayTargetPath,
     targetContent,
     targetOutline: outlines.join("\n\n"),
@@ -995,6 +1006,19 @@ export async function generateWorkspaceContext(
     tokenCount,
     idioms: activeIdioms,
   };
+
+  recordTelemetryEvent({
+    targetPath: resolved.resolvedPath,
+    projectRoot,
+    filePath: "<directory>",
+    operation: "context",
+    surface: "cli",
+    idiomsUsed: Boolean(activeIdioms && Object.keys(activeIdioms).length > 0),
+    nativeText: rawWorkspaceTexts.join("\n"),
+    aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
+  });
+
+  return resObj;
 }
 
 function normalizeIdentForMatch(s: string): string {
@@ -1304,14 +1328,14 @@ export async function generateContext(
 
   const projectRoot = resolved.projectRoot;
   const config = resolved.config;
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
   let activeIdioms = idiomsActive ? config.idioms : undefined;
-  if (
-    options.idioms === true &&
-    (!activeIdioms || Object.keys(activeIdioms).length === 0)
-  ) {
+  if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
-      const scanRes = scanProjectIdioms(projectRoot);
+      const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
@@ -1330,7 +1354,9 @@ export async function generateContext(
       const targetLang = detectTargetFromPath(fullTargetPath);
       const isRawTemplate = targetLang === "twig";
       if (!isRawTemplate || options.symbol || options.idioms) {
-        const decomp = decompile(rawFileContent, targetLang, { filePath: fullTargetPath });
+        const decomp = withSuppressedTelemetry(() =>
+          decompile(rawFileContent, targetLang, { filePath: fullTargetPath }),
+        );
         targetContent = decomp.aice;
       }
     } catch {
@@ -1424,11 +1450,13 @@ export async function generateContext(
   }
 
   // Generate target outline
-  const outlineRes = generateOutline(fullTargetPath, {
-    includeTypes: true,
-    idioms: options.idioms,
-    projectRoot,
-  });
+  const outlineRes = withSuppressedTelemetry(() =>
+    generateOutline(fullTargetPath, {
+      includeTypes: true,
+      idioms: options.idioms,
+      projectRoot,
+    }),
+  );
   const targetOutline = outlineRes.text;
 
   // Dependency discovery BFS
@@ -1474,7 +1502,7 @@ export async function generateContext(
       }
 
       const isExternal = isExternalSpecifier(specifier);
-      let resolvedPath: string | undefined = undefined;
+      let resolvedPath: string | undefined;
 
       if (!isExternal) {
         resolvedPath = resolveImportPath(item.filePath, specifier, config, projectRoot);
@@ -1507,7 +1535,7 @@ export async function generateContext(
         }
       } else {
         let contract: string;
-        let displayDepPath: string | undefined = undefined;
+        let displayDepPath: string | undefined;
 
         if (isExternal) {
           contract = generateExternalContract(specifier, importedSymbols);
@@ -1632,7 +1660,7 @@ export async function generateContext(
     }
   }
 
-  return {
+  const resObj: ContextResult = {
     targetPath: displayTargetPath,
     targetContent,
     targetOutline,
@@ -1642,6 +1670,18 @@ export async function generateContext(
     tokenCount,
     idioms: activeIdioms,
   };
+
+  recordTelemetryEvent({
+    targetPath: fullTargetPath,
+    projectRoot,
+    operation: "context",
+    surface: "cli",
+    idiomsUsed: Boolean(bundleIdioms && Object.keys(bundleIdioms).length > 0),
+    nativeText: rawFileContent,
+    aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
+  });
+
+  return resObj;
 }
 
 export const packContext = generateContext;

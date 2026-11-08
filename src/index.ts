@@ -1,3 +1,4 @@
+export * from "./agents/index.js";
 export * from "./cache/index.js";
 export * from "./config/index.js";
 export * from "./core/ast.js";
@@ -10,6 +11,7 @@ export * from "./decompiler/index.js";
 export * from "./emitters/index.js";
 export * from "./idioms/index.js";
 export * from "./mcp/index.js";
+export * from "./telemetry/index.js";
 export * from "./tokenomics/index.js";
 export * from "./tools/index.js";
 export * from "./typechecker/index.js";

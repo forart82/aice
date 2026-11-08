@@ -9,7 +9,9 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import {
+  AICE_DISABLED_MESSAGE,
   findProjectRoot,
+  isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
@@ -21,6 +23,7 @@ import { CstTriviaTable } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
+import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 
 export interface OutlineOptions {
@@ -170,7 +173,9 @@ export function generateOutline(
         trivia = parsed.trivia;
       } else {
         const targetLang = detectTargetFromPath(filePath);
-        const decompResult = decompile(originalSource, targetLang, { filePath });
+        const decompResult = withSuppressedTelemetry(() =>
+          decompile(originalSource, targetLang, { filePath }),
+        );
         try {
           const parsed = parseWithTrivia(decompResult.aice, filePath);
           ast = parsed.ast;
@@ -621,18 +626,25 @@ export function generateOutline(
   let idiomsConfig: Record<string, ProjectIdiomDefinition> | undefined;
   let idiomsActive = true;
   try {
+    const hasScopedTarget =
+      Boolean(options.projectRoot) || (filePath !== "<anonymous>" && fs.existsSync(filePath));
     const root =
       options.projectRoot ??
       (filePath !== "<anonymous>" && fs.existsSync(filePath)
         ? findProjectRoot(path.dirname(path.resolve(filePath)))
         : findProjectRoot(process.cwd()));
     const cfg = loadProjectConfig(root);
+    if (hasScopedTarget && !isProjectAiceEnabled(cfg)) {
+      throw new Error(AICE_DISABLED_MESSAGE);
+    }
     idiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
     if (idiomsActive) {
       idiomsConfig = cfg.idioms;
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+      throw err;
+    }
   }
 
   const referencedSet = new Set<string>();
@@ -713,8 +725,28 @@ export async function outlinePath(
   }
 
   const stat = fs.statSync(fullPath);
+  const projectRoot =
+    options.projectRoot ?? findProjectRoot(stat.isDirectory() ? fullPath : path.dirname(fullPath));
+  const cfg = loadProjectConfig(projectRoot);
+  if (!isProjectAiceEnabled(cfg)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
+
   if (stat.isFile()) {
-    return generateOutline(fullPath, options);
+    const res = withSuppressedTelemetry(() =>
+      generateOutline(fullPath, { ...options, projectRoot }),
+    );
+    const nativeText = fs.readFileSync(fullPath, "utf-8");
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot,
+      operation: "outline",
+      surface: "cli",
+      idiomsUsed: (res.referencedIdioms?.length ?? 0) > 0,
+      nativeText,
+      aiceText: res.text,
+    });
+    return res;
   }
 
   const resultMap = new Map<string, OutlineResult>();
@@ -759,9 +791,46 @@ export async function outlinePath(
 
   walk(fullPath);
 
+  const nativeParts: string[] = [];
+  const aiceParts: string[] = [];
+  let anyIdioms = false;
+
   for (const targetFile of targetCandidates.sort()) {
     const relKey = path.relative(process.cwd(), targetFile);
-    resultMap.set(relKey, generateOutline(targetFile, options));
+    const r = withSuppressedTelemetry(() =>
+      generateOutline(targetFile, { ...options, projectRoot }),
+    );
+    resultMap.set(relKey, r);
+    try {
+      nativeParts.push(fs.readFileSync(targetFile, "utf-8"));
+    } catch {
+      // ignore
+    }
+    aiceParts.push(`// === ${relKey} ===\n\n${r.text}`);
+    if ((r.referencedIdioms?.length ?? 0) > 0) {
+      anyIdioms = true;
+    }
+  }
+
+  if (targetCandidates.length > 0) {
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot,
+      filePath: "<directory>",
+      operation: "outline",
+      surface: "cli",
+      idiomsUsed: anyIdioms,
+      nativeText: nativeParts.join("\n"),
+      aiceText: options.json
+        ? JSON.stringify(
+            Array.from(resultMap.values()).map(
+              (r) => r.json ?? { file: r.file, symbols: r.symbols },
+            ),
+            null,
+            2,
+          )
+        : aiceParts.join("\n\n"),
+    });
   }
 
   return resultMap;

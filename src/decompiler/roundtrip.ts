@@ -18,12 +18,12 @@ import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
 import { JsonDecompiler } from "./json-decompiler.js";
+import { KotlinDecompiler } from "./kotlin-decompiler.js";
+import { PhpDecompiler } from "./php-decompiler.js";
+import { PythonDecompiler } from "./py-decompiler.js";
 import { TsDecompiler } from "./ts-decompiler.js";
 import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler } from "./yaml-decompiler.js";
-import { PhpDecompiler } from "./php-decompiler.js";
-import { PythonDecompiler } from "./py-decompiler.js";
-import { KotlinDecompiler } from "./kotlin-decompiler.js";
 
 export interface RoundtripResult {
   target: TargetLanguage;

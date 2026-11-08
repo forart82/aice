@@ -12,11 +12,14 @@ import postcss from "postcss";
 import YAML from "yaml";
 import ts from "../compat/typescript.js";
 import {
+  AICE_DISABLED_MESSAGE,
   findProjectRoot,
+  isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  stripJsonComments,
   type ProjectIdiomDefinition,
+  stripJsonComments,
 } from "../config/index.js";
 import type {
   Block,
@@ -37,9 +40,10 @@ import { parse, parseWithTrivia } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
+import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
-import { resolveFirstActionableSymbol } from "./context.js";
 import { TypeChecker } from "../typechecker/checker.js";
+import { resolveFirstActionableSymbol } from "./context.js";
 
 export interface SpliceOptions {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'User.id') */
@@ -564,7 +568,7 @@ export function spliceSource(
 ): SpliceResult {
   let options: SpliceOptions;
   let filePath: string;
-  let idioms: Record<string, ProjectIdiomDefinition> | undefined = maybeIdioms;
+  const idioms: Record<string, ProjectIdiomDefinition> | undefined = maybeIdioms;
 
   if (typeof optionsOrSymbol === "string") {
     const codeStr = filePathOrCode;
@@ -994,7 +998,7 @@ function locateTsDeclarationSpan(
     ts.ScriptKind.TSX,
   );
   const parts = symbolSelector.split(/\.|::/);
-  let className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
   let memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
   let inferredAccessor = preferAccessor;
   if (memberName.startsWith("get:")) {
@@ -1199,7 +1203,6 @@ function locatePythonDeclarationSpan(
         isStatic = true;
       }
     } else if (trimmed === "") {
-      continue;
     } else {
       break;
     }
@@ -1525,12 +1528,11 @@ function locateBraceLanguageDeclarationSpan(
       const line = lines[i];
       const isRustImpl =
         targetLang === "rust" &&
-        new RegExp(
-          `^\\s*impl(?:\\s*<[^>]*>)?\\s+(?:[A-Za-z0-9_:]+\\s+for\\s+)?([A-Za-z0-9_]+)\\b`,
-        ).exec(line);
-      const isClassLine = new RegExp(
-        `^\\s*(?:pub\\s+|public\\s+|private\\s+|protected\\s+|internal\\s+|static\\s+|partial\\s+|final\\s+|abstract\\s+|open\\s+|data\\s+|sealed\\s+)*(?:class|struct)\\s+([A-Za-z0-9_]+)\\b`,
-      ).exec(line);
+        /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
+      const isClassLine =
+        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+)*(?:class|struct)\s+([A-Za-z0-9_]+)\b/.exec(
+          line,
+        );
 
       const m = isRustImpl || isClassLine;
       if (m && (m[1] === className || normIdForSpan(m[1]) === normClass)) {
@@ -1608,7 +1610,7 @@ function locateBraceLanguageDeclarationSpan(
         continue;
       }
       const cMethodMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+)*(?:[A-Za-z0-9_:<>*&\[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\(/,
+        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:<[^>]+>)?\s*\(/,
       );
       if (
         cMethodMatch &&
@@ -3467,8 +3469,8 @@ function spliceDialectNativeSource(
           const tokenRe = /\{%[-~]?\s*(block|endblock)\b([^%]*)%\}/g;
           tokenRe.lastIndex = openMatch.index + openMatch[0].length;
           let depth = 1;
-          let tokMatch: RegExpExecArray | null = null;
-          while (depth > 0 && (tokMatch = tokenRe.exec(nativeSource)) !== null) {
+          let tokMatch: RegExpExecArray | null = tokenRe.exec(nativeSource);
+          while (depth > 0 && tokMatch !== null) {
             const kw = tokMatch[1];
             const rest = (tokMatch[2] ?? "").replace(/[-~]$/, "").trim();
             if (kw === "block") {
@@ -3483,6 +3485,7 @@ function spliceDialectNativeSource(
                 break;
               }
             }
+            tokMatch = tokenRe.exec(nativeSource);
           }
         }
       }
@@ -3491,8 +3494,8 @@ function spliceDialectNativeSource(
     // 2. Check HTML/Twig element by id, class, or tag name (ignoring '>' inside quoted attributes)
     if (spanStart < 0) {
       const openTagRe = /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?)\s*(\/?)>/g;
-      let match: RegExpExecArray | null = null;
-      while ((match = openTagRe.exec(nativeSource)) !== null) {
+      let match: RegExpExecArray | null = openTagRe.exec(nativeSource);
+      while (match !== null) {
         const tag = match[1];
         const attrs = match[2] ?? "";
         const selfCloseSlash = match[3] ?? "";
@@ -3516,8 +3519,8 @@ function spliceDialectNativeSource(
             const tagRe = new RegExp(`<(\\/?)${escTag}\\b((?:[^>"']|"[^"]*"|'[^']*')*)>`, "gi");
             tagRe.lastIndex = match.index + match[0].length;
             let depth = 1;
-            let tMatch: RegExpExecArray | null = null;
-            while (depth > 0 && (tMatch = tagRe.exec(nativeSource)) !== null) {
+            let tMatch: RegExpExecArray | null = tagRe.exec(nativeSource);
+            while (depth > 0 && tMatch !== null) {
               const isClosing = tMatch[1] === "/";
               const innerTail = (tMatch[2] ?? "").trimEnd();
               if (isClosing) {
@@ -3529,10 +3532,12 @@ function spliceDialectNativeSource(
               } else if (!innerTail.endsWith("/") && !HTML_VOID_ELEMENTS.has(lowerTag)) {
                 depth++;
               }
+              tMatch = tagRe.exec(nativeSource);
             }
           }
           break;
         }
+        match = openTagRe.exec(nativeSource);
       }
     }
 
@@ -3816,11 +3821,24 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
 
   const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
   const config = loadProjectConfig(root);
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
   const activeIdioms = options.idioms === false ? {} : config.idioms;
+  const snippetInput = options.code ?? options.body ?? "";
+  const idiomsUsedInSnippet = Boolean(
+    activeIdioms &&
+      Object.keys(activeIdioms).some((k) => {
+        const norm = k.startsWith("$") ? k : `$${k}`;
+        return snippetInput.includes(norm);
+      }),
+  );
 
   if (!fullPath.endsWith(".aice")) {
     const originalNative = await fs.promises.readFile(fullPath, "utf-8");
-    const result = spliceNativeSource(originalNative, options, fullPath, activeIdioms);
+    const result = withSuppressedTelemetry(() =>
+      spliceNativeSource(originalNative, options, fullPath, activeIdioms),
+    );
 
     if (!options.dryRun) {
       const dir = path.dirname(fullPath);
@@ -3832,11 +3850,22 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
       await fs.promises.rename(tmpFile, fullPath);
     }
 
+    const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot: root,
+      operation: "splice",
+      surface: "cli",
+      idiomsUsed: idiomsUsedInSnippet,
+      nativeText: result.modifiedCode,
+      aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+    });
+
     return result;
   }
 
   const originalSource = await fs.promises.readFile(fullPath, "utf-8");
-  const result = spliceSource(originalSource, options, fullPath);
+  const result = withSuppressedTelemetry(() => spliceSource(originalSource, options, fullPath));
 
   // Write atomically to disk unless dryRun
   if (!options.dryRun) {
@@ -3851,7 +3880,9 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
 
   if (options.compile) {
     const { ast: mod, trivia } = parseWithTrivia(result.modifiedCode, fullPath);
-    const expandedMod = config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
+    const shouldExpand = isProjectIdiomsEnabled(config, options.idioms);
+    const expandedMod =
+      shouldExpand && config?.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
     const checker = new TypeChecker();
     checker.checkModule(expandedMod);
 
@@ -3868,12 +3899,23 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
     const emitted = emitTarget(expandedMod, targetLang, {
       trivia,
       watermark: config.watermark,
-      idioms: config.idioms,
+      idioms: shouldExpand ? config.idioms : undefined,
     });
 
     const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
     await fs.promises.writeFile(outPath, emitted, "utf-8");
   }
+
+  const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+  recordTelemetryEvent({
+    targetPath: fullPath,
+    projectRoot: root,
+    operation: "splice",
+    surface: "cli",
+    idiomsUsed: idiomsUsedInSnippet,
+    nativeText: result.modifiedCode,
+    aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+  });
 
   return result;
 }

@@ -41,6 +41,7 @@ export interface ProjectIdiomDefinition {
 }
 
 export interface AiceProjectConfig {
+  enabled?: boolean;
   mode: ProjectMode;
   sourceDir: string;
   outDir: string;
@@ -50,6 +51,9 @@ export interface AiceProjectConfig {
   idiomsEnabled?: boolean;
   idioms?: Record<string, ProjectIdiomDefinition>;
 }
+
+export const AICE_DISABLED_MESSAGE =
+  "AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.";
 
 export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
   "side-by-side",
@@ -74,14 +78,22 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "kotlin",
 ]);
 
-export const DEFAULT_PROJECT_CONFIG: Readonly<AiceProjectConfig> = Object.freeze({
+const _defaultProjectConfig: AiceProjectConfig = {
   mode: "side-by-side",
   sourceDir: "src",
   outDir: ".aice-build",
   targetLanguage: "typescript",
   isolated: false,
   watermark: true,
+};
+Object.defineProperty(_defaultProjectConfig, "enabled", {
+  value: true,
+  enumerable: false,
+  writable: false,
+  configurable: false,
 });
+export const DEFAULT_PROJECT_CONFIG: Readonly<AiceProjectConfig> =
+  Object.freeze(_defaultProjectConfig);
 
 export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
@@ -383,7 +395,17 @@ export function validateConfig(config: Partial<AiceProjectConfig>): void {
     throw new Error(`Invalid watermark: expected boolean, received ${typeof config.watermark}`);
   }
 
-  if (config.idioms !== undefined) {
+  if (config.enabled !== undefined && typeof config.enabled !== "boolean") {
+    throw new Error(`Invalid enabled: expected boolean, received ${typeof config.enabled}`);
+  }
+
+  if (config.idiomsEnabled !== undefined && typeof config.idiomsEnabled !== "boolean") {
+    throw new Error(
+      `Invalid idiomsEnabled: expected boolean, received ${typeof config.idiomsEnabled}`,
+    );
+  }
+
+  if (config.idioms !== undefined && typeof (config.idioms as unknown) !== "boolean") {
     if (
       typeof config.idioms !== "object" ||
       config.idioms === null ||
@@ -609,6 +631,13 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     }
   }
 
+  if (rawConfig && typeof rawConfig.idioms === "boolean") {
+    if (rawConfig.idiomsEnabled === undefined) {
+      rawConfig.idiomsEnabled = rawConfig.idioms;
+    }
+    delete rawConfig.idioms;
+  }
+
   // 4. Merge .aice-idioms.json if present
   const idiomsJsonPath = path.join(resolvedDir, ".aice-idioms.json");
   if (fs.existsSync(idiomsJsonPath)) {
@@ -651,7 +680,30 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     }
   }
 
-  const configToProcess = rawConfig ?? {};
+  const configToProcess: Record<string, unknown> = rawConfig ? { ...rawConfig } : {};
+
+  // Support "idioms": false | true as boolean alias for "idiomsEnabled"
+  if (typeof configToProcess.idioms === "boolean") {
+    if (configToProcess.idiomsEnabled === undefined) {
+      configToProcess.idiomsEnabled = configToProcess.idioms;
+    }
+    delete configToProcess.idioms;
+  }
+
+  if (configToProcess.enabled !== undefined && typeof configToProcess.enabled !== "boolean") {
+    throw new Error(
+      `Invalid enabled: expected boolean, received ${typeof configToProcess.enabled}`,
+    );
+  }
+
+  if (
+    configToProcess.idiomsEnabled !== undefined &&
+    typeof configToProcess.idiomsEnabled !== "boolean"
+  ) {
+    throw new Error(
+      `Invalid idiomsEnabled: expected boolean, received ${typeof configToProcess.idiomsEnabled}`,
+    );
+  }
 
   // Normalize any idiom definitions missing optional numeric telemetry fields
   if (
@@ -705,6 +757,7 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
   }
 
   const finalConfig: AiceProjectConfig = {
+    ...(typeof configToProcess.enabled === "boolean" ? { enabled: configToProcess.enabled } : {}),
     mode,
     sourceDir:
       typeof configToProcess.sourceDir === "string"
@@ -809,6 +862,11 @@ export function saveProjectConfig(
   }
 
   const mergedConfig: AiceProjectConfig = {
+    ...(config.enabled !== undefined
+      ? { enabled: config.enabled }
+      : typeof existing.enabled === "boolean"
+        ? { enabled: existing.enabled }
+        : {}),
     mode,
     sourceDir:
       config.sourceDir ?? (existing.sourceDir as string) ?? DEFAULT_PROJECT_CONFIG.sourceDir,
@@ -842,6 +900,7 @@ export function saveProjectConfig(
   const isPureIdiomsSave =
     hasIdiomsJson &&
     !hasAiceConfig &&
+    config.enabled === undefined &&
     (config.mode === undefined || config.mode === DEFAULT_PROJECT_CONFIG.mode) &&
     (config.sourceDir === undefined || config.sourceDir === DEFAULT_PROJECT_CONFIG.sourceDir) &&
     (config.outDir === undefined || config.outDir === DEFAULT_PROJECT_CONFIG.outDir) &&
@@ -882,6 +941,43 @@ export function saveProjectConfig(
 }
 
 /**
+ * Returns whether AICE is enabled for a project (true unless `enabled === false` in config).
+ */
+export function isProjectAiceEnabled(
+  configOrDir?: Partial<AiceProjectConfig> | string | null,
+): boolean {
+  if (!configOrDir) {
+    return true;
+  }
+  if (typeof configOrDir === "string") {
+    try {
+      const root = findProjectRoot(configOrDir);
+      const cfg = loadProjectConfig(root);
+      return cfg.enabled !== false;
+    } catch {
+      return true;
+    }
+  }
+  return configOrDir.enabled !== false;
+}
+
+/**
+ * Creates or updates `aice.config.json` with `"enabled": true | false`.
+ */
+export function setProjectAiceEnabled(projectDir: string, enabled: boolean): AiceProjectConfig {
+  let resolvedDir = findProjectRoot(projectDir);
+  if (
+    resolvedDir === path.resolve(projectDir) &&
+    path.basename(resolvedDir) === "src" &&
+    !fs.existsSync(path.join(resolvedDir, "aice.config.json")) &&
+    !fs.existsSync(path.join(resolvedDir, ".aice-idioms.json"))
+  ) {
+    resolvedDir = path.dirname(resolvedDir);
+  }
+  return saveProjectConfig(resolvedDir, { enabled });
+}
+
+/**
  * Returns whether project idioms are currently enabled, honoring an optional per-call override flag.
  */
 export function isProjectIdiomsEnabled(
@@ -893,6 +989,9 @@ export function isProjectIdiomsEnabled(
   }
   if (!config) {
     return true;
+  }
+  if (config.enabled === false) {
+    return false;
   }
   return config.idiomsEnabled !== false;
 }

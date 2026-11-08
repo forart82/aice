@@ -1808,20 +1808,21 @@ export class TypeScriptEmitter {
   private normalizeArrowTypes(str: string): string {
     const stringLitRegex = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
     const stringRanges: [number, number][] = [];
-    let m: RegExpExecArray | null;
-    while ((m = stringLitRegex.exec(str)) !== null) {
+    let m: RegExpExecArray | null = stringLitRegex.exec(str);
+    while (m !== null) {
       stringRanges.push([m.index, m.index + m[0].length]);
+      m = stringLitRegex.exec(str);
     }
     const isInsideString = (idx: number) =>
       stringRanges.some(([start, end]) => idx >= start && idx < end);
 
     const arrowIndices: number[] = [];
-    let searchIdx = 0;
-    while ((searchIdx = str.indexOf("=>", searchIdx)) !== -1) {
+    let searchIdx = str.indexOf("=>", 0);
+    while (searchIdx !== -1) {
       if (!isInsideString(searchIdx)) {
         arrowIndices.push(searchIdx);
       }
-      searchIdx += 2;
+      searchIdx = str.indexOf("=>", searchIdx + 2);
     }
 
     for (let k = arrowIndices.length - 1; k >= 0; k--) {
@@ -1874,7 +1875,6 @@ export class TypeScriptEmitter {
   private rewriteTypePrimitivesAndArrows(name: string): string {
     const stringLitRegex = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g;
     let lastIdx = 0;
-    let match: RegExpExecArray | null;
     let result = "";
 
     const primitiveMap: Record<string, string> = {
@@ -1888,7 +1888,8 @@ export class TypeScriptEmitter {
       nil: "null",
     };
 
-    while ((match = stringLitRegex.exec(name)) !== null) {
+    let match: RegExpExecArray | null = stringLitRegex.exec(name);
+    while (match !== null) {
       const nonString = name.slice(lastIdx, match.index);
       const replaced = nonString
         .replace(/->/g, "=>")
@@ -1898,6 +1899,7 @@ export class TypeScriptEmitter {
         );
       result += replaced + match[0];
       lastIdx = match.index + match[0].length;
+      match = stringLitRegex.exec(name);
     }
 
     const tail = name.slice(lastIdx);
@@ -1967,7 +1969,7 @@ export class TypeScriptEmitter {
           const args = t.typeArgs.map((ta) => this.emitTypeExpr(ta)).join(", ");
           return `${t.name}<${args}>`;
         }
-        let name = t.name;
+        const name = t.name;
         if (
           name.includes("{") ||
           name.includes("|") ||

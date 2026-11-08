@@ -1969,7 +1969,7 @@ export class PythonDecompiler {
 
   // Expressions & Precedence Climbing
   private parseExpr(): Expr {
-    let left = this.parseBinaryExpr(0);
+    const left = this.parseBinaryExpr(0);
     if (this.check("IF")) {
       this.advance();
       const condition = this.parseBinaryExpr(0);

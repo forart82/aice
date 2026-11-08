@@ -18,9 +18,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   isProjectIdiomsEnabled,
   loadProjectConfig,
+  type ProjectIdiomDefinition,
   saveProjectConfig,
   setProjectIdiomsEnabled,
-  type ProjectIdiomDefinition,
 } from "../../src/config/project-config.js";
 import {
   expandAiceSourceIdioms,

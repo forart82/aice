@@ -6,32 +6,32 @@
  */
 
 export type {
+  IdiomOccurrence,
   ProjectIdiomDefinition,
   ProjectIdiomParam,
-  IdiomOccurrence,
 } from "../config/project-config.js";
 export {
-  mineProjectIdioms,
+  type IdiomFileInput,
   type MineIdiomsOptions,
   type MineIdiomsResult,
-  type IdiomFileInput,
+  mineProjectIdioms,
 } from "./idiom-miner.js";
 export {
-  IdiomCycleError,
-  validateIdiomDefinitions,
-  expandModuleIdioms,
-  collapseModuleIdioms,
-  expandAiceSourceIdioms,
-  collapseAiceSourceIdioms,
-  scanProjectIdioms,
-  readProjectIdiom,
-  updateProjectIdiom,
-  applyProjectIdiomsToDirectory,
-  expandProjectIdiomsInDirectory,
-  formatIdiomsMarkdownSection,
   type ApplyProjectIdiomsOptions,
   type ApplyProjectIdiomsResult,
+  applyProjectIdiomsToDirectory,
+  collapseAiceSourceIdioms,
+  collapseModuleIdioms,
+  expandAiceSourceIdioms,
+  expandModuleIdioms,
+  expandProjectIdiomsInDirectory,
+  formatIdiomsMarkdownSection,
   type IdiomCacheData,
+  IdiomCycleError,
   type IdiomReadResult,
   type IdiomUpdateResult,
+  readProjectIdiom,
+  scanProjectIdioms,
+  updateProjectIdiom,
+  validateIdiomDefinitions,
 } from "./idiom-transform.js";

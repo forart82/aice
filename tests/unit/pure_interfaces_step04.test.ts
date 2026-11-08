@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { parse } from "../../src/core/parser.js";
 import type { TypeDecl } from "../../src/core/ast.js";
+import { parse } from "../../src/core/parser.js";
 import { emitTarget } from "../../src/emitters/index.js";
 import { TypeScriptEmitter } from "../../src/emitters/ts-emitter.js";
 

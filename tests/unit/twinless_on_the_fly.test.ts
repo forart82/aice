@@ -16,7 +16,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { saveProjectConfig, type ProjectIdiomDefinition } from "../../src/config/project-config.js";
+import { type ProjectIdiomDefinition, saveProjectConfig } from "../../src/config/project-config.js";
 import { scanProjectIdioms, updateProjectIdiom } from "../../src/idioms/index.js";
 import { generateContext } from "../../src/tools/context.js";
 import { splice, spliceBatch } from "../../src/tools/splice.js";

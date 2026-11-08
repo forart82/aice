@@ -13,8 +13,8 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type AiceProjectConfig,
-  DEFAULT_PROJECT_CONFIG,
   autoDetectProjectMode,
+  DEFAULT_PROJECT_CONFIG,
   deriveTargetFilename,
   findProjectRoot,
   getExtensionForTarget,

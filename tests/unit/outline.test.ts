@@ -11,7 +11,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
 import { parse } from "../../src/core/parser.js";
-import { generateOutline, outlinePath, type OutlineResult } from "../../src/tools/outline.js";
+import { generateOutline, type OutlineResult, outlinePath } from "../../src/tools/outline.js";
 
 describe("AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18)", () => {
   describe("Outlining Functions", () => {

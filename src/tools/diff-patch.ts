@@ -10,11 +10,20 @@
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { findProjectRoot, KNOWN_TARGET_EXTENSIONS, loadProjectConfig } from "../config/index.js";
+import {
+  AICE_DISABLED_MESSAGE,
+  findProjectRoot,
+  isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
+  KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
+} from "../config/index.js";
 import type { Block, Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
-import { type Span } from "../core/span.js";
+import type { Span } from "../core/span.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
+import { expandModuleIdioms } from "../idioms/index.js";
+import { recordTelemetryEvent } from "../telemetry/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import {
   findSpliceTargetSymbol,
@@ -871,7 +880,7 @@ export async function diffFiles(
   let oldSource = "";
   let newSource = "";
   let actualOldPath = oldPath;
-  let actualNewPath = newPath ?? oldPath;
+  const actualNewPath = newPath ?? oldPath;
 
   if (newPath) {
     const resolvedNewPath = path.resolve(process.cwd(), newPath);
@@ -940,6 +949,12 @@ export async function patchFile(
     throw new Error(`Target file not found: ${targetPath}`);
   }
 
+  const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
+  const config = loadProjectConfig(root);
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
+
   const originalSource = await fs.promises.readFile(fullPath, "utf-8");
   const result = applyPatch(originalSource, patchText, {
     ...options,
@@ -958,12 +973,12 @@ export async function patchFile(
     await fs.promises.rename(tmpFile, fullPath);
 
     if (options.compile && fullPath.endsWith(".aice")) {
-      const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
-      const config = loadProjectConfig(root);
-
       const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, fullPath);
+      const shouldExpand = isProjectIdiomsEnabled(config);
+      const expandedMod =
+        shouldExpand && config.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
       const checker = new TypeChecker();
-      checker.checkModule(mod);
+      checker.checkModule(expandedMod);
 
       let targetLang: TargetLanguage;
       const base = path.basename(fullPath);
@@ -975,14 +990,28 @@ export async function patchFile(
         targetLang = config.targetLanguage ?? detectTargetFromPath(fullPath);
       }
 
-      const emitted = emitTarget(mod, targetLang, {
+      const emitted = emitTarget(expandedMod, targetLang, {
         trivia,
         watermark: config.watermark,
+        idioms: shouldExpand ? config.idioms : undefined,
       });
 
       const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
       await fs.promises.writeFile(outPath, emitted, "utf-8");
     }
+  }
+
+  if (result.success) {
+    const responsePayload = `✔ Applied ${result.appliedHunks}/${result.totalHunks} hunk(s) to ${targetPath}`;
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot: root,
+      operation: "patch",
+      surface: "cli",
+      idiomsUsed: false,
+      nativeText: result.modifiedSource,
+      aiceText: `${patchText}\n${responsePayload}`,
+    });
   }
 
   return result;

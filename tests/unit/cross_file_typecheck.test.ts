@@ -1,11 +1,11 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
+import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "../../src/core/parser.js";
-import { TypeChecker, TypeCheckError } from "../../src/typechecker/checker.js";
-import { generateCandidateRepair } from "../../src/typechecker/diagnostics.js";
 import { createPosition, createSpan } from "../../src/core/span.js";
+import { TypeCheckError, TypeChecker } from "../../src/typechecker/checker.js";
+import { generateCandidateRepair } from "../../src/typechecker/diagnostics.js";
 
 describe("Cross-File Module Symbol Resolution in TypeChecker", () => {
   let tempDir: string;

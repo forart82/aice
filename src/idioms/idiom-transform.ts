@@ -6,8 +6,21 @@
  * Expands and collapses idioms in ASTs, source strings, and project workspaces.
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import {
+  AICE_DISABLED_MESSAGE,
+  type AiceProjectConfig,
+  findProjectRoot,
+  type IdiomOccurrence,
+  isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+  type ProjectIdiomParam,
+  saveProjectConfig,
+} from "../config/project-config.js";
 import type {
   ArrayLiteralExpr,
   AssignExpr,
@@ -43,31 +56,21 @@ import type {
   UnaryExpr,
   WhileStmt,
 } from "../core/ast.js";
-import { createHash } from "node:crypto";
 import { parse } from "../core/parser.js";
-import { type Span } from "../core/span.js";
+import type { Span } from "../core/span.js";
 import { AiceGenerator } from "../decompiler/aice-generator.js";
 import { decompile } from "../decompiler/index.js";
 import { CSS_PROPERTY_ALIASES } from "../emitters/css-emitter.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
+import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
+import { spliceNativeSymbolFromExpandedAst } from "../tools/splice.js";
 import {
-  findProjectRoot,
-  isProjectIdiomsEnabled,
-  loadProjectConfig,
-  saveProjectConfig,
-  type AiceProjectConfig,
-  type IdiomOccurrence,
-  type ProjectIdiomDefinition,
-  type ProjectIdiomParam,
-} from "../config/project-config.js";
-import {
-  mineProjectIdioms,
+  collectIdentifiersInStatement,
   type IdiomFileInput,
   isIdentifierReferencedInStatements,
-  collectIdentifiersInStatement,
+  mineProjectIdioms,
   renameIdentifiersInStatement,
 } from "./idiom-miner.js";
-import { spliceNativeSymbolFromExpandedAst } from "../tools/splice.js";
 
 export class IdiomCycleError extends Error {
   constructor(message: string) {
@@ -126,14 +129,15 @@ function extractReferencedIdiomNamesFromTemplate(
 ): string[] {
   const refs: string[] = [];
   const regex = /(\$[a-zA-Z_][a-zA-Z0-9_]*)\s*\(/g;
-  let match: RegExpExecArray | null = null;
-  while ((match = regex.exec(templateAice)) !== null) {
+  let match: RegExpExecArray | null = regex.exec(templateAice);
+  while (match !== null) {
     const candidate = match[1];
     if (knownIdioms.has(candidate)) {
       refs.push(candidate);
     } else if (knownIdioms.has(candidate.slice(1))) {
       refs.push(candidate.slice(1));
     }
+    match = regex.exec(templateAice);
   }
   return refs;
 }
@@ -2695,7 +2699,9 @@ function loadAndDecompileWorkspaceFiles(
         aiceSource = existingCache.decompiledAice[relPath];
       } else {
         const targetLang = detectTargetFromPath(fp);
-        const decomp = decompile(rawSource, targetLang, { filePath: fp });
+        const decomp = withSuppressedTelemetry(() =>
+          decompile(rawSource, targetLang, { filePath: fp }),
+        );
         aiceSource = decomp.aice;
       }
 
@@ -2911,6 +2917,9 @@ function resolveIdiomWorkspace(dir: string): {
     projectRoot = path.dirname(resolvedInput);
   }
   const config = loadProjectConfig(projectRoot);
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
   if (resolvedInput !== projectRoot && fs.existsSync(resolvedInput)) {
     return { projectRoot, config, searchDir: resolvedInput };
   }
@@ -3003,14 +3012,28 @@ export function applyProjectIdiomsToDirectory(
 
   // If no .aice files exist on disk, run native-first twinless idiom discovery!
   if (aiceFilePaths.length === 0) {
-    return scanProjectIdioms(dir, options);
+    const scanRes = scanProjectIdioms(dir, options);
+    recordTelemetryEvent({
+      targetPath: resolvedDir,
+      projectRoot: resolvedDir,
+      filePath: "<directory>",
+      operation: "idioms_apply",
+      surface: "cli",
+      idiomsUsed: true,
+      nativeText: JSON.stringify(scanRes.occurrences ?? {}),
+      aiceText: JSON.stringify(scanRes.idioms ?? {}),
+    });
+    return scanRes;
   }
 
   const files: IdiomFileInput[] = [];
+  const rawSources: string[] = [];
+  const collapsedSources: string[] = [];
   for (const fp of aiceFilePaths) {
     try {
       const source = fs.readFileSync(fp, "utf-8");
       files.push({ filePath: fp, source });
+      rawSources.push(source);
     } catch {
       // Skip unreadable files
     }
@@ -3038,6 +3061,7 @@ export function applyProjectIdiomsToDirectory(
       allIdioms,
       file.filePath,
     );
+    collapsedSources.push(aice);
     if (collapsedCount > 0) {
       totalCollapsedCalls += collapsedCount;
       modifiedFiles.push(file.filePath);
@@ -3050,6 +3074,17 @@ export function applyProjectIdiomsToDirectory(
   if (!options?.dryRun && Object.keys(mineResult.idioms).length > 0) {
     saveProjectConfig(resolvedDir, { idioms: allIdioms });
   }
+
+  recordTelemetryEvent({
+    targetPath: resolvedDir,
+    projectRoot: resolvedDir,
+    filePath: "<directory>",
+    operation: "idioms_apply",
+    surface: "cli",
+    idiomsUsed: true,
+    nativeText: rawSources.join("\n"),
+    aiceText: collapsedSources.join("\n"),
+  });
 
   return {
     idioms: mineResult.idioms,
@@ -3449,6 +3484,20 @@ export async function updateProjectIdiom(
       throw err;
     }
   }
+
+  const nativeModifiedContents = Array.from(pendingWrites.values()).join("\n");
+  const summaryText = `✔ Updated idiom ${updatedDef.name}: ${updatedOccurrences} occurrence(s) across ${modifiedFiles.length} file(s)`;
+  recordTelemetryEvent({
+    targetPath: modifiedFiles[0] ?? resolvedDir,
+    projectRoot: resolvedDir,
+    filePath:
+      modifiedFiles.length === 1 ? path.relative(resolvedDir, modifiedFiles[0]) : "<directory>",
+    operation: "idioms_update",
+    surface: "cli",
+    idiomsUsed: true,
+    nativeText: nativeModifiedContents || rawNewTemplateAice,
+    aiceText: `${rawNewTemplateAice}\n${summaryText}`,
+  });
 
   return {
     idiom: updatedDef,

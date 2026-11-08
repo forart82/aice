@@ -19,8 +19,8 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   loadProjectConfig,
-  saveProjectConfig,
   type ProjectIdiomDefinition,
+  saveProjectConfig,
 } from "../../src/config/project-config.js";
 import { scanProjectIdioms } from "../../src/idioms/idiom-transform.js";
 import { generateContext, generateWorkspaceContext } from "../../src/tools/context.js";

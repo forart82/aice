@@ -2447,10 +2447,10 @@ export class KotlinDecompiler {
   }
 
   public parseTypeExpr(): TypeExpr {
-    let baseName = this.advance().value;
+    const baseName = this.advance().value;
 
     // Handle generic type arguments: List<String> or Map<String, Int>
-    let typeArgs: TypeExpr[] = [];
+    const typeArgs: TypeExpr[] = [];
     if (this.check("LT")) {
       this.advance();
       while (!this.check("GT") && !this.check("EOF")) {

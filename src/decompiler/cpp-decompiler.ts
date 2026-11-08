@@ -7,8 +7,6 @@
  * extracts comments into CstTriviaTable, and produces an AICE Module AST.
  */
 
-import { emptySpan } from "../core/span.js";
-import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
 import type {
   AssignOp,
   BinaryOp,
@@ -24,6 +22,8 @@ import type {
   Statement,
   TypeExpr,
 } from "../core/ast.js";
+import { emptySpan } from "../core/span.js";
+import { CstTriviaTable, type TriviaItem } from "../core/trivia.js";
 
 export class CppDecompiler {
   private source: string;
@@ -875,7 +875,7 @@ export class CppDecompiler {
     const statements: Statement[] = [];
     for (let i = 0; i < lines.length; i++) {
       const line = this.stripLineComment(lines[i]);
-      let trimmed = line.trim();
+      const trimmed = line.trim();
       if (
         !trimmed ||
         trimmed.startsWith("//") ||
@@ -926,7 +926,7 @@ export class CppDecompiler {
         }
 
         let catchParam = "err";
-        let catchStmts: Statement[] | undefined = undefined;
+        let catchStmts: Statement[] | undefined;
         while (lineIdx + 1 < lines.length) {
           const nextTrimmed = this.stripLineComment(lines[lineIdx + 1]).trim();
           if (nextTrimmed.startsWith("catch")) {
@@ -1245,7 +1245,7 @@ export class CppDecompiler {
           }
 
           let ifStmt: IfStmt | null = null;
-          let defaultStmts: Statement[] | undefined = undefined;
+          let defaultStmts: Statement[] | undefined;
           for (const g of groups) {
             const cleanLines = g.lines.filter((l) => l && l !== "break;");
             const cStmts = this.parseCppBlock(cleanLines);
@@ -1616,7 +1616,7 @@ export class CppDecompiler {
 
     while (i < lines.length) {
       const line = lines[i];
-      let trimmed = line.trim();
+      const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("/*")) {
         i++;
         continue;
@@ -1806,7 +1806,7 @@ export class CppDecompiler {
         continue;
       }
 
-      let trimmed = this.stripLineComment(line).trim();
+      const trimmed = this.stripLineComment(line).trim();
       if (!trimmed || trimmed.startsWith("#pragma")) {
         i++;
         continue;

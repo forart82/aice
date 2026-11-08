@@ -332,6 +332,10 @@ aice roundtrip <targetFile>                                 # Verifies Put/Get l
 aice verify <file> [--json]                                 # Verifies types, immutability, and syntax soundness
 aice fix <file> [--dry-run]                                 # Autonomously self-repairs fixable diagnostics
 aice tokens [file|dir]                                      # Audits token efficiency for a specific file or folder
+aice enable [dir] / aice disable [dir]                      # Toggle project-level AICE ("enabled": true|false in aice.config.json)
+aice config [dir] [--json]                                  # Inspect or toggle project-level enabled & idiomsEnabled settings
+aice agents <setup|status|remove> [--all]                   # Auto-integrate MCP & directive across Linux CLI coding agents
+aice gain [project] [--unique] [--json] [--reset]           # Honest BPE token-savings telemetry dashboard (global & per-project)
 aice mcp                                                    # Starts Model Context Protocol server over stdio
 
 # Benchmarks & Quality Gates
@@ -340,3 +344,28 @@ npx vitest run                                              # Run unit test suit
 npm run benchmark:offline                                   # Run deterministic 3-way offline benchmark (RW-01..RW-10)
 npm run benchmark                                           # Run live real-agent 3-way benchmark (RW-01..RW-10)
 ```
+
+---
+
+## 9. Project Configuration Schema (`aice.config.json`), MCP Tools & Honest Telemetry (`aice gain`)
+
+### 9.1 `aice.config.json` Schema (`enabled` & `idiomsEnabled`)
+Projects may customize or opt out of AICE via `aice.config.json`, `.aicerc`, or `package.json#aice`:
+- `enabled?: boolean` (default `true`): When set to `false` (`aice disable`), all AICE CLI commands and MCP tools cleanly refuse transformation with:
+  `AICE is disabled for this project via aice.config.json ("enabled": false). Use native tools or run 'aice enable'.`
+- `idiomsEnabled?: boolean` (default `true`, boolean alias `"idioms": false`): When `false` (`aice idioms off` or `"enabled": false`), `$idiom` collapsing and expansion are disabled across `outline`, `context`, `decompile`, `compile`, `splice`, and `tokens` unless explicitly overridden by `--idioms`.
+
+### 9.2 Model Context Protocol (`aice mcp`) Tools
+The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `workspaceRoot`, MCP `initialize` roots (`rootUri`, `rootPath`, `workspaceFolders`), `$HOME`, and `os.tmpdir()` (while blocking `/etc`, `/proc`, `/sys`, `/dev`, `/root`, and symlink/relative path traversal), and exposes 6 tools:
+1. `aice_outline`: AST skeleton outline with token-reduction metrics.
+2. `aice_context`: 1-turn symbol-scoped code + dependency contracts + callers + active `$idioms`.
+3. `aice_splice`: Surgical in-place AST symbol replacement, insertion, or deletion.
+4. `aice_idioms`: Mine, list, read, update, apply, expand, or toggle project `$idioms`.
+5. `aice_gain`: Global or per-project BPE token-reduction telemetry report.
+6. `aice_project_config`: Inspect or toggle `enabled` and `idiomsEnabled` for a project root.
+
+### 9.3 Honest BPE Telemetry Ledger (`src/telemetry/index.ts` & `aice gain`)
+- Stores append-only JSON Lines in `~/.aice/telemetry/gains.jsonl` (overridable via `AICE_TELEMETRY_PATH` or `AICE_HOME`).
+- Computes signed BPE token deltas (`nativeCl100k - aiceCl100k` and `nativeO200k - aiceO200k`) using `js-tiktoken`.
+- **Zero Fake Wins**: For read operations (`outline`, `context`, `decompile`), `aiceText` is the exact stdout/MCP payload including headers and `$idiom` legends. If an operation produces more tokens than the raw file, the negative delta is recorded honestly and counted under `overheadOperations`.
+- **Zero Double-Counting**: MCP tool calls suppress nested CLI/tool telemetry via `withSuppressedTelemetryAsync` so each operation records exactly one `TelemetryEvent`.

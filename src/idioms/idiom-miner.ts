@@ -8,6 +8,7 @@
  */
 
 import { getEncoding } from "js-tiktoken";
+import type { ProjectIdiomDefinition, ProjectIdiomParam } from "../config/project-config.js";
 import type {
   ArrayLiteralExpr,
   AssignStmt,
@@ -34,7 +35,6 @@ import type {
 import { parse } from "../core/parser.js";
 import type { Span } from "../core/span.js";
 import { AiceGenerator } from "../decompiler/aice-generator.js";
-import type { ProjectIdiomDefinition, ProjectIdiomParam } from "../config/project-config.js";
 
 export interface IdiomFileInput {
   filePath: string;
@@ -890,9 +890,7 @@ function formatCompactLayoutNode(node: LayoutNode, generator: AiceGenerator): st
     const val = getLayoutChildValueExprString(node, generator);
     return `${head}: ${val}`;
   }
-  const childrenStr = node.children
-    .map((ch) => formatCompactLayoutNode(ch, generator))
-    .join("; ");
+  const childrenStr = node.children.map((ch) => formatCompactLayoutNode(ch, generator)).join("; ");
   return `${head} { ${childrenStr} }`;
 }
 

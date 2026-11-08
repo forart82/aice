@@ -5,25 +5,35 @@
  * Universal Decompiler & Bidirectional Transpiler Hub for AICE 2.0.
  */
 
-import { promises as fs } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, promises as fs } from "node:fs";
+import { dirname, resolve } from "node:path";
+import {
+  AICE_DISABLED_MESSAGE,
+  findProjectRoot,
+  isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/index.js";
 import type { Module } from "../core/ast.js";
 import type { CstTriviaTable } from "../core/trivia.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
+import { recordTelemetryEvent } from "../telemetry/index.js";
 import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
 import { CppDecompiler } from "./cpp-decompiler.js";
 import { CSharpDecompiler } from "./csharp-decompiler.js";
 import { CssDecompiler } from "./css-decompiler.js";
+import { GoDecompiler } from "./go-decompiler.js";
 import { HtmlDecompiler } from "./html-decompiler.js";
 import { JsonDecompiler, type JsonDecompilerOptions } from "./json-decompiler.js";
+import { KotlinDecompiler } from "./kotlin-decompiler.js";
+import { PhpDecompiler } from "./php-decompiler.js";
+import { PythonDecompiler } from "./py-decompiler.js";
+import { RustDecompiler } from "./rust-decompiler.js";
 import { TsDecompiler, type TsDecompilerOptions } from "./ts-decompiler.js";
 import { decompileTwig } from "./twig-decompiler.js";
 import { YamlDecompiler, type YamlDecompilerOptions } from "./yaml-decompiler.js";
-import { PhpDecompiler } from "./php-decompiler.js";
-import { PythonDecompiler } from "./py-decompiler.js";
-import { KotlinDecompiler } from "./kotlin-decompiler.js";
-import { GoDecompiler } from "./go-decompiler.js";
-import { RustDecompiler } from "./rust-decompiler.js";
 
 export * from "./aice-generator.js";
 export * from "./cpp-decompiler.js";
@@ -49,6 +59,8 @@ export interface DecompileOptions
   filePath?: string;
   target?: TargetLanguage;
   constName?: string;
+  idioms?: boolean;
+  projectRoot?: string;
 }
 
 export interface DecompileResult {
@@ -63,6 +75,27 @@ export function decompile(
   options: DecompileOptions = {},
 ): DecompileResult {
   const filePath = options.filePath ?? "source";
+  let projectRoot: string | undefined = options.projectRoot;
+  let idiomsToCollapse: Record<string, ProjectIdiomDefinition> | undefined;
+
+  if (options.projectRoot || (filePath !== "source" && existsSync(filePath))) {
+    try {
+      const root = options.projectRoot ?? findProjectRoot(dirname(resolve(filePath)));
+      projectRoot = root;
+      const cfg = loadProjectConfig(root);
+      if (!isProjectAiceEnabled(cfg)) {
+        throw new Error(AICE_DISABLED_MESSAGE);
+      }
+      if (options.idioms === true && isProjectIdiomsEnabled(cfg, options.idioms) && cfg.idioms) {
+        idiomsToCollapse = cfg.idioms;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+        throw err;
+      }
+    }
+  }
+
   let ast: Module;
   let trivia: CstTriviaTable;
 
@@ -166,8 +199,33 @@ export function decompile(
       throw new Error(`Unsupported target language for decompilation: ${target}`);
   }
 
+  let idiomsUsed = false;
+  if (idiomsToCollapse && Object.keys(idiomsToCollapse).length > 0) {
+    try {
+      const collapsed = collapseModuleIdioms(ast, idiomsToCollapse);
+      if (collapsed.collapsedCount > 0) {
+        ast = collapsed.ast;
+        idiomsUsed = true;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const generator = new AiceGenerator({ ...options, trivia });
   const aice = generator.generate(ast);
+
+  if (filePath !== "source" && existsSync(filePath)) {
+    recordTelemetryEvent({
+      targetPath: resolve(filePath),
+      projectRoot,
+      operation: "decompile",
+      surface: "cli",
+      idiomsUsed,
+      nativeText: source,
+      aiceText: aice,
+    });
+  }
 
   return { ast, aice, trivia };
 }

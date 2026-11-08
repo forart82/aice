@@ -8,9 +8,9 @@
 import { describe, expect, it } from "vitest";
 import type { ClassDecl, FunctionDecl, VarDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
-import { decompile } from "../../src/decompiler/index.js";
 import { decompileCpp } from "../../src/decompiler/cpp-decompiler.js";
 import { decompileGo } from "../../src/decompiler/go-decompiler.js";
+import { decompile } from "../../src/decompiler/index.js";
 import { decompileRust } from "../../src/decompiler/rust-decompiler.js";
 import { emitTarget, GoEmitter, RustEmitter, TypeScriptEmitter } from "../../src/emitters/index.js";
 

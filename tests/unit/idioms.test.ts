@@ -5,30 +5,30 @@
  * Unit tests for AICE 2.0 Project Idiom Subsystem.
  */
 
-import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
-import { tokenize } from "../../src/core/lexer.js";
-import { parse } from "../../src/core/parser.js";
-import {
-  mineProjectIdioms,
-  expandModuleIdioms,
-  expandAiceSourceIdioms,
-  collapseAiceSourceIdioms,
-  applyProjectIdiomsToDirectory,
-  expandProjectIdiomsInDirectory,
-  formatIdiomsMarkdownSection,
-  type ProjectIdiomDefinition,
-} from "../../src/idioms/index.js";
-import { emitTarget } from "../../src/emitters/index.js";
-import { check } from "../../src/typechecker/checker.js";
+import * as path from "node:path";
+import { describe, expect, it } from "vitest";
 import {
   loadProjectConfig,
   saveProjectConfig,
   validateProjectConfig,
 } from "../../src/config/project-config.js";
+import { tokenize } from "../../src/core/lexer.js";
+import { parse } from "../../src/core/parser.js";
+import { emitTarget } from "../../src/emitters/index.js";
 import { templateCache } from "../../src/idioms/idiom-transform.js";
+import {
+  applyProjectIdiomsToDirectory,
+  collapseAiceSourceIdioms,
+  expandAiceSourceIdioms,
+  expandModuleIdioms,
+  expandProjectIdiomsInDirectory,
+  formatIdiomsMarkdownSection,
+  mineProjectIdioms,
+  type ProjectIdiomDefinition,
+} from "../../src/idioms/index.js";
+import { check } from "../../src/typechecker/checker.js";
 
 describe("AICE 2.0 Project Idioms Subsystem", () => {
   describe("1. Core Lexer & Parser: $ Identifier Support", () => {

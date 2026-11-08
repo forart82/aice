@@ -6,7 +6,7 @@
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C242%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C254%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -192,24 +192,104 @@ Full offline deterministic per-module breakdown: see [`docs/BENCHMARKS_OFFLINE.m
 
 ---
 
-## 🚀 Quick Start & Installation
+## 🚀 Quick Start & Universal Linux Installation
 
-### Option 1: Local Link (Recommended for Development)
+### Option 1: One-Step Universal Linux Installer (`./install.sh` — Recommended)
+Automatically detects your Linux distro (`apt-get`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), verifies/installs `git`, `curl`, `node >= 20`, and `npm`, registers `~/.local/bin/aice`, optionally offers the interactive Zsh startup cheatsheet (only when running in an active Zsh shell), and wires `aice mcp` + system instructions into your installed CLI coding agents:
+
 ```bash
-cd /path/to/aice
-ln -sf $(pwd)/bin/aice.mjs ~/.local/bin/aice
+./install.sh
+
+# Non-interactive / CI flags:
+./install.sh --yes              # Auto-confirm dependencies & Zsh cheatsheet
+./install.sh --no-cheatsheet    # Skip Zsh startup cheatsheet prompt
+./install.sh --no-agents        # Skip automatic CLI agent configuration
+./install.sh --dry-run          # Preview all actions without mutating disk
 ```
-*(Or with Bun: `bun link`)*
 
-### Option 2: Standalone Single Binary (Zero Dependencies)
+### Option 2: Manual Symlink or Standalone Single Binary
 ```bash
+# Manual symlink:
+cd /path/to/aice
+ln -sf "$(pwd)/bin/aice.mjs" ~/.local/bin/aice
+
+# Or compile a standalone single binary with Bun:
 bun build --compile /path/to/aice/bin/aice.ts --outfile ~/.local/bin/aice
 ```
 
-Verify installation:
+Verify installation & agent integration:
 ```bash
 aice --version
-aice --help
+aice agents status
+aice gain
+```
+
+---
+
+## 🤖 Automatic CLI Coding Agent Integration (`aice agents`)
+
+`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical `<!-- AICE:START --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 24 supported file extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`):
+
+| CLI Coding Agent | MCP Server Config | Global System Directive |
+| :--- | :--- | :--- |
+| **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
+| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` |
+| **OpenAI Codex CLI (`codex`)** | `~/.codex/config.toml` (`[mcp_servers.aice]`) | `~/.codex/AGENTS.md` |
+| **OpenCode (`opencode`)** | `~/.config/opencode/opencode.json` (`mcp.aice` & `mcpServers.aice`) | `~/.config/opencode/AGENTS.md` |
+| **Aider (`aider`)** | `~/.aider.conf.yml` (`read:` conventions list) | `~/.aider/CONVENTIONS.md` |
+| **Goose CLI (`goose`)** | `~/.config/goose/config.yaml` (`extensions.aice`) | MCP tool descriptions |
+| **Cursor Agent (`cursor`)** | `~/.cursor/mcp.json` (`mcpServers.aice`) | MCP tool descriptions |
+
+```bash
+aice agents setup               # Configure installed CLI coding agents idempotently
+aice agents setup --all         # Pre-configure all 7 agent paths
+aice agents status [--json]     # Inspect binary detection, MCP config, and prompt status
+aice agents remove              # Cleanly strip AICE entries without losing user settings
+```
+
+---
+
+## ⚙️ Project-Level Controls & Opt-Out (`aice.config.json`)
+
+Every CLI command and MCP tool (`aice_outline`, `aice_context`, `aice_splice`, `aice_idioms`, `aice_project_config`) respects project-level configuration in `aice.config.json` (or `.aicerc` / `package.json#aice`):
+
+- **Disable AICE completely for a project (`"enabled": false`)**:
+  ```json
+  {
+    "enabled": false
+  }
+  ```
+  Or toggle via CLI:
+  ```bash
+  aice disable [dir]            # Sets "enabled": false in aice.config.json
+  aice enable [dir]             # Sets "enabled": true in aice.config.json
+  aice config [dir]             # Inspect current project AICE & $idioms status
+  ```
+- **Disable only `$idioms` while keeping AICE AST tools active (`"idiomsEnabled": false` or `"idioms": false`)**:
+  ```json
+  {
+    "enabled": true,
+    "idiomsEnabled": false
+  }
+  ```
+  Or toggle via CLI:
+  ```bash
+  aice idioms off [dir]         # Sets "idiomsEnabled": false
+  aice idioms on [dir]          # Sets "idiomsEnabled": true
+  ```
+
+---
+
+## 📈 Honest BPE Token-Savings Telemetry (`aice gain`)
+
+`aice gain` (aliases `aice gains`, `aice stats`, and MCP tool `aice_gain`) tracks real-world token reductions in `~/.aice/telemetry/gains.jsonl` using exact `cl100k_base` and `o200k_base` BPE tokenizers with **100% honest signed accounting** (never clamping negative overhead calls to zero and never double-counting MCP-to-CLI internal calls):
+
+```bash
+aice gain                       # Global summary banner, operation/surface table, language table & ranked projects
+aice gain <project-name-or-.>   # Per-project drill-down: read/write/idiom split, top files & last 15 operations
+aice gain --unique              # Deduplicate repeated identical operations by SHA-256 contentHash
+aice gain --json                # Emit full structured JSON telemetry report
+aice gain --reset --yes         # Clear telemetry ledger
 ```
 
 ---
@@ -234,7 +314,7 @@ aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
 aice splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]' --idioms
 ```
 
-### 2. Smart Multi-File Idioms (`$idioms`)
+### 2. Smart Multi-File Idioms (`$idioms`) & Project Toggles
 ```bash
 # Scan native workspace to discover repetitive AST templates & build .aice-cache/idioms.json:
 aice idioms scan [dir] --min-occurrences 3 --min-savings 10
@@ -247,13 +327,24 @@ aice idioms list [dir]
 aice idioms update '$clamp' "Math.max($1, Math.min($2, $0))" [dir]
 aice idioms update --batch '[{"name":"$clamp","newTemplate":"Math.max($1, Math.min($2, $0))"}]' [dir]
 
-# Toggle on-the-fly $idiom collapsing in aice.config.json / .aice-idioms.json:
+# Toggle project-level AICE or $idiom collapsing in aice.config.json:
+aice enable [dir]
+aice disable [dir]
 aice idioms on [dir]
 aice idioms off [dir]
 ```
 
-### 3. Semantic Diff, Patch, Tokenomics & MCP Server
+### 3. Telemetry, Agent Integration, Semantic Diff, Patch & MCP Server
 ```bash
+# Inspect honest BPE token-savings telemetry (global or per-project):
+aice gain
+aice gain <project>
+
+# Manage global CLI coding agent integrations:
+aice agents setup
+aice agents status
+aice agents remove
+
 # Structural AST diff & reversible patch application:
 aice diff src/old.ts src/new.ts
 aice patch src/target.ts patch.json
@@ -276,6 +367,7 @@ npm run benchmark
 
 ```
 aice/
+├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
 ├── assets/
 │   ├── aice-banner.jpg         # Official wide title banner
 │   ├── aice-cpp-workflow.jpg   # End-to-End C++20 On-the-Fly Workflow diagram
@@ -288,7 +380,7 @@ aice/
 │   └── run.ts                  # CLI runner for full benchmark suite
 ├── bin/
 │   ├── aice.ts                 # AICE CLI entrypoint
-│   └── aice.mjs                # Node/Bun executable wrapper
+│   └── aice.mjs                # Node/Bun executable wrapper (symlink-safe)
 ├── docs/
 │   ├── AICE_SPEC.md            # Normative language & AST specification (EBNF)
 │   ├── AI_SYSTEM_PROMPT.md     # System prompt for LLM code generation & CLI usage
@@ -297,19 +389,21 @@ aice/
 │   ├── CST_TRIVIA_SPEC.md      # Bidirectional lens and CST trivia table specification
 │   └── RESEARCH_SYNTHESIS.md   # Tokenomics and AST anti-unification research synthesis
 ├── src/
+│   ├── agents/                 # Global CLI coding agent integration engine (claude, agy/gemini, codex, opencode, aider, goose, cursor)
 │   ├── cache/                  # Persistent AST & idiom provenance disk cache
-│   ├── config/                 # Project config (aice.config.json / .aice-idioms.json) & path resolver
+│   ├── config/                 # Project config (aice.config.json / enabled / idiomsEnabled) & path resolver
 │   ├── core/                   # Lexer, Pratt Parser, AST, Tokens, Span, CST Trivia
 │   ├── decompiler/             # On-the-fly reverse transpilers across 15 languages
 │   ├── emitters/               # Multi-target native code generators across 15 languages
 │   ├── idioms/                 # BPE-gated AST anti-unification idiom miner & transformer
-│   ├── mcp/                    # Model Context Protocol (MCP) stdio server
+│   ├── mcp/                    # Multi-project Model Context Protocol (MCP) stdio server
+│   ├── telemetry/              # Honest BPE token-savings telemetry engine (aice gain)
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
 │   ├── tools/                  # On-the-fly tools: outline, context, splice, fmt, parity-gate
 │   └── typechecker/            # Static typechecker & autonomous self-repair engine
 └── tests/
-    ├── unit/                   # 43 unit test suites
-    └── integration/            # 3 multi-file roundtrip & operator pipeline integration suites
+    ├── unit/                   # Unit test suites
+    └── integration/            # Multi-file roundtrip & operator pipeline integration suites
 ```
 
 ---

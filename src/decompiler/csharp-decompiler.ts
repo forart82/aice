@@ -568,7 +568,7 @@ export class CSharpDecompiler {
 
     while (i < lines.length) {
       const line = lines[i];
-      let trimmed = line.trim();
+      const trimmed = line.trim();
 
       if (!trimmed) {
         i++;
@@ -1117,7 +1117,7 @@ export class CSharpDecompiler {
         quasis.push(curQuasi);
         curQuasi = "";
         i++;
-        let exprStart = i;
+        const exprStart = i;
         let braceDepth = 1;
         let inExprStr = false;
         let exprQuote = "";
@@ -1695,8 +1695,8 @@ export class CSharpDecompiler {
         }
 
         let catchParam = "err";
-        let catchStmts: Statement[] | undefined = undefined;
-        let finallyStmts: Statement[] | undefined = undefined;
+        let catchStmts: Statement[] | undefined;
+        let finallyStmts: Statement[] | undefined;
 
         while (lineIdx + 1 < expandedLines.length) {
           const nextTrimmed = this.stripLineComment(expandedLines[lineIdx + 1]).trim();
@@ -1960,7 +1960,7 @@ export class CSharpDecompiler {
 
           // Build IfStmt from groups
           let ifStmt: IfStmt | null = null;
-          let defaultStmts: Statement[] | undefined = undefined;
+          let defaultStmts: Statement[] | undefined;
 
           for (const g of groups) {
             let cleanLines = g.lines.map((l) => l.trim()).filter((l) => l && l !== "break;");
@@ -2718,7 +2718,7 @@ export class CSharpDecompiler {
           .replace(/^out\s+/, "")
           .replace(/^ref\s+/, "")
           .replace(/^in\s+/, "");
-        let defaultValue: Expr | undefined = undefined;
+        let defaultValue: Expr | undefined;
         if (clean.includes("=")) {
           const eqIdx = clean.indexOf("=");
           defaultValue = this.parseCSharpExpr(clean.slice(eqIdx + 1).trim());
@@ -2754,7 +2754,7 @@ export class CSharpDecompiler {
     if (str[openIndex] !== "(") return null;
     let depth = 1;
     let inString = false;
-    let start = openIndex + 1;
+    const start = openIndex + 1;
 
     for (let i = start; i < str.length; i++) {
       const c = str[i];
@@ -2776,7 +2776,7 @@ export class CSharpDecompiler {
   }
 
   private parseCSharpType(typeStr: string): TypeExpr {
-    let clean = typeStr
+    const clean = typeStr
       .trim()
       .replace(/^readonly\s+/, "")
       .replace(/^ref\s+/, "")

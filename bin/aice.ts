@@ -5,30 +5,46 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import {
+  formatAgentsStatusTable,
+  getAgentsStatus,
+  removeAgents,
+  setupAgents,
+} from "../src/agents/index.js";
+import {
+  AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
   findProjectRoot,
+  isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-  setProjectIdiomsEnabled,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
+  setProjectAiceEnabled,
+  setProjectIdiomsEnabled,
 } from "../src/config/index.js";
 import { parse, parseWithTrivia } from "../src/core/parser.js";
 import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../src/emitters/index.js";
-import { AiceMcpServer } from "../src/mcp/index.js";
 import {
   applyProjectIdiomsToDirectory,
-  expandProjectIdiomsInDirectory,
   expandModuleIdioms,
+  expandProjectIdiomsInDirectory,
   readProjectIdiom,
   scanProjectIdioms,
   updateProjectIdiom,
 } from "../src/idioms/index.js";
+import { AiceMcpServer } from "../src/mcp/index.js";
+import {
+  buildGainReport,
+  formatGlobalGainDashboard,
+  formatProjectGainDetail,
+  resetTelemetryHistory,
+} from "../src/telemetry/index.js";
 import {
   auditTokenomics,
   formatProjectsMarkdownTable,
@@ -71,7 +87,7 @@ const program = new Command();
 program
   .name("aice")
   .description("AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI")
-  .version("0.8.5");
+  .version("0.9.0");
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -94,6 +110,7 @@ export function executeCompile(
     pureInterfaces?: boolean;
     watermark?: boolean;
     check?: boolean;
+    idioms?: boolean;
   },
 ): void {
   try {
@@ -108,6 +125,11 @@ export function executeCompile(
 
       const projectRoot = resolved.projectRoot;
       const config = resolved.config;
+      const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(path.resolve(file))));
+      if (!isProjectAiceEnabled(projectConfig) || !isProjectAiceEnabled(config)) {
+        console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+        process.exit(1);
+      }
 
       let source = fs.readFileSync(file, "utf-8");
 
@@ -124,8 +146,8 @@ export function executeCompile(
       }
 
       const { ast: mod, trivia } = parseWithTrivia(source, file);
-      const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(path.resolve(file))));
-      const effectiveIdioms = projectConfig.idioms ?? config.idioms;
+      const idiomsActive = isProjectIdiomsEnabled(projectConfig, options.idioms);
+      const effectiveIdioms = idiomsActive ? (projectConfig.idioms ?? config.idioms) : undefined;
       const expandedMod = effectiveIdioms ? expandModuleIdioms(mod, effectiveIdioms) : mod;
 
       // Sound type check
@@ -208,6 +230,12 @@ export function executeCompile(
 
     const projectRoot = resolved.projectRoot;
     const config = resolved.config;
+    if (!isProjectAiceEnabled(config)) {
+      console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+      process.exit(1);
+    }
+    const dirIdiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+    const dirEffectiveIdioms = dirIdiomsActive ? config.idioms : undefined;
 
     let successCount = 0;
     let failCount = 0;
@@ -226,7 +254,7 @@ export function executeCompile(
         }
 
         const { ast: mod, trivia } = parseWithTrivia(source, relPath);
-        const expandedMod = config.idioms ? expandModuleIdioms(mod, config.idioms) : mod;
+        const expandedMod = dirEffectiveIdioms ? expandModuleIdioms(mod, dirEffectiveIdioms) : mod;
         try {
           const tc = new TypeChecker();
           tc.checkModule(expandedMod);
@@ -256,7 +284,7 @@ export function executeCompile(
           trivia,
           pureInterfaces: options.pureInterfaces,
           watermark,
-          idioms: config.idioms,
+          idioms: dirEffectiveIdioms,
         });
 
         // Output path: CLI flag --out-dir retains highest priority
@@ -327,6 +355,8 @@ program
   )
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
   .option("--check", "Perform strict type checking and abort compilation on type errors")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .action(
     (
       target: string | undefined,
@@ -338,6 +368,7 @@ program
         pureInterfaces?: boolean;
         watermark?: boolean;
         check?: boolean;
+        idioms?: boolean;
       },
     ) => {
       executeCompile(target, options);
@@ -360,6 +391,8 @@ program
     "Emit pure TypeScript interfaces without artificial factory constructor functions",
   )
   .option("--no-watermark", "Disable generated watermark header in emitted target files")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .action(
     (
       dir: string,
@@ -370,6 +403,7 @@ program
         fix?: boolean;
         pureInterfaces?: boolean;
         watermark?: boolean;
+        idioms?: boolean;
       },
     ) => {
       executeCompile(dir, options);
@@ -484,9 +518,15 @@ program
 
         const mod = parse(source, file);
         const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(fullPath)));
-        const expandedMod = projectConfig.idioms
-          ? expandModuleIdioms(mod, projectConfig.idioms)
-          : mod;
+        if (!isProjectAiceEnabled(projectConfig)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
+        const idiomsActive = isProjectIdiomsEnabled(projectConfig);
+        const expandedMod =
+          idiomsActive && projectConfig.idioms
+            ? expandModuleIdioms(mod, projectConfig.idioms)
+            : mod;
         const tc = new TypeChecker();
         tc.checkModule(expandedMod);
 
@@ -592,7 +632,9 @@ program
     "-t, --target <target>",
     "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
   )
-  .action((file: string, options: { out?: string; target?: string }) => {
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
+  .action((file: string, options: { out?: string; target?: string; idioms?: boolean }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -600,9 +642,19 @@ program
         process.exit(1);
       }
 
+      const projectRoot = findProjectRoot(path.dirname(fullPath));
+      const projectConfig = loadProjectConfig(projectRoot);
+      if (!isProjectAiceEnabled(projectConfig)) {
+        console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+        process.exit(1);
+      }
+
       const source = fs.readFileSync(fullPath, "utf-8");
       const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
-      const result = decompile(source, targetLang, { filePath: file });
+      const result = decompile(source, targetLang, {
+        filePath: file,
+        idioms: options.idioms,
+      });
 
       const outPath = options.out
         ? path.resolve(process.cwd(), options.out)
@@ -634,6 +686,13 @@ program
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
         console.error(`❌ Error: Source file not found: ${file}`);
+        process.exit(1);
+      }
+
+      const projectRoot = findProjectRoot(path.dirname(fullPath));
+      const projectConfig = loadProjectConfig(projectRoot);
+      if (!isProjectAiceEnabled(projectConfig)) {
+        console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
         process.exit(1);
       }
 
@@ -686,6 +745,8 @@ program
   .option("--json", "Output machine-readable JSON telemetry for CI pipelines")
   .option("--benchmark", "Run toolchain token reduction empirical benchmark suite")
   .option("--tools <list>", "Filter specific tools to benchmark (e.g. outline,splice,dsl)")
+  .option("--idioms", "Force-enable project idioms")
+  .option("--no-idioms", "Temporarily disable project idioms")
   .action(
     async (
       targetPath: string,
@@ -697,6 +758,7 @@ program
         json?: boolean;
         benchmark?: boolean;
         tools?: string;
+        idioms?: boolean;
       },
     ) => {
       try {
@@ -728,12 +790,19 @@ program
           }
         }
         const isFile = fs.statSync(fullTarget).isFile();
+        const projectRoot = findProjectRoot(isFile ? path.dirname(fullTarget) : fullTarget);
+        const projectConfig = loadProjectConfig(projectRoot);
+        if (!isProjectAiceEnabled(projectConfig)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
         const isTTY = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
         const terminalWidth = process.stdout.columns || 80;
 
         const report = auditTokenomics(targetPath, {
           minSavings: options.minSavings,
           checkDrift: options.checkDrift,
+          idioms: options.idioms,
         });
 
         if (options.json) {
@@ -871,6 +940,11 @@ program
 
         if (!fs.existsSync(outlineTarget)) {
           console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
+          process.exit(1);
+        }
+
+        if (!isProjectAiceEnabled(resolved.config)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
         }
 
@@ -1028,6 +1102,13 @@ program
     ) => {
       try {
         if (options.batch) {
+          const batchProjectRoot = findProjectRoot(process.cwd());
+          const batchProjectConfig = loadProjectConfig(batchProjectRoot);
+          if (!isProjectAiceEnabled(batchProjectConfig)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
+          const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
           const batchCandidatePath = path.resolve(process.cwd(), options.batch);
           const rawJson =
             fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
@@ -1052,7 +1133,7 @@ program
             const batchRes = await spliceBatch(spliceItems, {
               dryRun: options.dryRun,
               compile: options.compile,
-              idioms: options.idioms,
+              idioms: batchEffectiveIdioms,
             });
             console.log(
               `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
@@ -1106,6 +1187,19 @@ program
           process.exit(1);
         }
 
+        const fullSpliceTarget = path.resolve(process.cwd(), targetPath);
+        const spliceProjectRoot = findProjectRoot(
+          fs.existsSync(fullSpliceTarget) && fs.statSync(fullSpliceTarget).isDirectory()
+            ? fullSpliceTarget
+            : path.dirname(fullSpliceTarget),
+        );
+        const spliceProjectConfig = loadProjectConfig(spliceProjectRoot);
+        if (!isProjectAiceEnabled(spliceProjectConfig)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
+        const effectiveSpliceIdioms = isProjectIdiomsEnabled(spliceProjectConfig, options.idioms);
+
         let code = options.code ?? options.template;
         let extraDeleteSymbol: string | undefined;
         let isPrimaryDelete = false;
@@ -1143,10 +1237,11 @@ program
           delete: isPrimaryDelete,
           insertAfter: options.insertAfter,
           insertBefore: options.insertBefore,
-          idioms: options.idioms,
+          idioms: effectiveSpliceIdioms,
           dryRun: options.dryRun,
           diff: options.diff,
           compile: options.compile,
+          projectRoot: spliceProjectRoot,
         };
 
         const result = await splice(targetPath, spliceOpts);
@@ -1154,9 +1249,10 @@ program
           await splice(targetPath, {
             symbol: extraDeleteSymbol,
             delete: true,
-            idioms: options.idioms,
+            idioms: effectiveSpliceIdioms,
             dryRun: options.dryRun,
             compile: options.compile,
+            projectRoot: spliceProjectRoot,
           });
         }
 
@@ -1236,6 +1332,10 @@ program
         const results = [];
         for (const targetPath of rawTargets) {
           const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          if (!isProjectAiceEnabled(resolved.config)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
           const contextOpts: ContextOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : 1,
             symbol: options.symbol,
@@ -1328,6 +1428,10 @@ program
         }
 
         const resolved = resolvePathTargets(targetPath);
+        if (!isProjectAiceEnabled(resolved.config)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
         const fmtTarget = resolved.resolvedPath;
 
         if (!fs.existsSync(fmtTarget)) {
@@ -1401,6 +1505,10 @@ program
     ) => {
       try {
         const resolved = resolvePathTargets(oldPath);
+        if (!isProjectAiceEnabled(resolved.config)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
 
         if (resolved.isSingleFile) {
           const fileToDiff = resolved.resolvedPath;
@@ -1690,6 +1798,13 @@ program
           return;
         }
 
+        const idiomsProjectRoot = findProjectRoot(targetDir);
+        const idiomsProjectConfig = loadProjectConfig(idiomsProjectRoot);
+        if (!isProjectAiceEnabled(idiomsProjectConfig)) {
+          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+          process.exit(1);
+        }
+
         if (action === "read") {
           if (!idiomNameArg) {
             console.error("❌ Error: Must specify idiom name: `aice idioms read <$name> [dir]`");
@@ -1946,6 +2061,351 @@ program
     },
   );
 
+// Command: enable [dir]
+program
+  .command("enable [dir]")
+  .description('Enable AICE for a project in aice.config.json ("enabled": true)')
+  .option("--json", "Output updated project configuration as JSON")
+  .action((dirArg: string | undefined, options: { json?: boolean }) => {
+    try {
+      const targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+      const projectRoot = findProjectRoot(targetDir);
+      const updated = setProjectAiceEnabled(projectRoot, true);
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              projectRoot,
+              enabled: isProjectAiceEnabled(updated),
+              idiomsEnabled: isProjectIdiomsEnabled(updated),
+              idiomsCount: Object.keys(updated.idioms ?? {}).length,
+            },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+      console.log(
+        `✔ AICE ENABLED ("enabled": true) in ${path.join(path.relative(process.cwd(), projectRoot) || ".", "aice.config.json")}`,
+      );
+    } catch (err: unknown) {
+      console.error(`❌ Error enabling AICE: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// Command: disable [dir]
+program
+  .command("disable [dir]")
+  .description('Disable AICE for a project in aice.config.json ("enabled": false)')
+  .option("--json", "Output updated project configuration as JSON")
+  .action((dirArg: string | undefined, options: { json?: boolean }) => {
+    try {
+      const targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+      const projectRoot = findProjectRoot(targetDir);
+      const updated = setProjectAiceEnabled(projectRoot, false);
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            {
+              projectRoot,
+              enabled: isProjectAiceEnabled(updated),
+              idiomsEnabled: isProjectIdiomsEnabled(updated),
+              idiomsCount: Object.keys(updated.idioms ?? {}).length,
+            },
+            null,
+            2,
+          ),
+        );
+        return;
+      }
+      console.log(
+        `✔ AICE DISABLED ("enabled": false) in ${path.join(path.relative(process.cwd(), projectRoot) || ".", "aice.config.json")}`,
+      );
+    } catch (err: unknown) {
+      console.error(`❌ Error disabling AICE: ${err instanceof Error ? err.message : String(err)}`);
+      process.exit(1);
+    }
+  });
+
+// Command: config [dir]
+program
+  .command("config [dir]")
+  .description("Inspect or toggle project-level AICE and $idioms configuration in aice.config.json")
+  .option("--enable", 'Set "enabled": true in aice.config.json')
+  .option("--disable", 'Set "enabled": false in aice.config.json')
+  .option("--idioms-on", 'Set "idiomsEnabled": true in aice.config.json')
+  .option("--idioms-off", 'Set "idiomsEnabled": false in aice.config.json')
+  .option("--json", "Output project configuration status in JSON format")
+  .action(
+    (
+      dirArg: string | undefined,
+      options: {
+        enable?: boolean;
+        disable?: boolean;
+        idiomsOn?: boolean;
+        idiomsOff?: boolean;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const targetDir = path.resolve(process.cwd(), dirArg ?? ".");
+        const projectRoot = findProjectRoot(targetDir);
+        let config = loadProjectConfig(projectRoot);
+
+        if (options.enable) {
+          config = setProjectAiceEnabled(projectRoot, true);
+        } else if (options.disable) {
+          config = setProjectAiceEnabled(projectRoot, false);
+        }
+
+        if (options.idiomsOn) {
+          config = setProjectIdiomsEnabled(projectRoot, true);
+        } else if (options.idiomsOff) {
+          config = setProjectIdiomsEnabled(projectRoot, false);
+        }
+
+        const enabled = isProjectAiceEnabled(config);
+        const idiomsEnabled = isProjectIdiomsEnabled(config);
+        const idiomsCount = Object.keys(config.idioms ?? {}).length;
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              {
+                projectRoot,
+                enabled,
+                idiomsEnabled,
+                idiomsCount,
+                mode: config.mode,
+              },
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+
+        console.log(`\n=== AICE Project Config: ${projectRoot} ===`);
+        console.log(`  AICE Status:    ${enabled ? "ENABLED" : "DISABLED (opt-out)"}`);
+        console.log(`  Idioms Status:  ${idiomsEnabled ? "ENABLED" : "DISABLED"}`);
+        console.log(`  Active Idioms:  ${idiomsCount}`);
+        console.log(`  Mode:           ${config.mode}`);
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error reading project config: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: agents [action]
+program
+  .command("agents [action]")
+  .description(
+    "Auto-integrate or inspect global AICE MCP server & system prompt across Linux CLI coding agents (claude, agy/gemini, codex, opencode, aider, goose, cursor)",
+  )
+  .option("--all", "Configure all supported CLI agent paths even if binary is not yet installed")
+  .option("-a, --agent <name>", "Target a specific CLI agent (e.g. claude, gemini, codex)")
+  .option("--json", "Output agent integration status in JSON format")
+  .action(
+    (actionArg: string | undefined, options: { all?: boolean; agent?: string; json?: boolean }) => {
+      try {
+        const action = (actionArg ?? "status").toLowerCase();
+        if (action === "setup" || action === "install") {
+          const statuses = setupAgents({
+            all: Boolean(options.all),
+            agent: options.agent,
+          });
+          if (options.json) {
+            console.log(JSON.stringify(statuses, null, 2));
+            return;
+          }
+          console.log(formatAgentsStatusTable(statuses));
+          const configuredCount = statuses.agents.filter(
+            (s) => s.mcpConfigured || s.promptConfigured,
+          ).length;
+          console.log(
+            `\n✔ AICE global CLI agent integration complete (${configuredCount} agent(s) active).`,
+          );
+          return;
+        }
+
+        if (action === "status" || action === "list") {
+          const statuses = getAgentsStatus({
+            agent: options.agent,
+          });
+          if (options.json) {
+            console.log(JSON.stringify(statuses, null, 2));
+            return;
+          }
+          console.log(formatAgentsStatusTable(statuses));
+          return;
+        }
+
+        if (action === "remove" || action === "uninstall") {
+          const statuses = removeAgents({
+            agent: options.agent,
+          });
+          if (options.json) {
+            console.log(JSON.stringify(statuses, null, 2));
+            return;
+          }
+          console.log(formatAgentsStatusTable(statuses));
+          console.log(
+            "\n✔ Stripped AICE MCP entries and system directive blocks cleanly without losing user settings.",
+          );
+          return;
+        }
+
+        console.error(
+          `❌ Unknown agents action: '${action}'. Supported actions: setup | status | remove`,
+        );
+        process.exit(1);
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error in aice agents: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
+async function promptLine(question: string): Promise<string> {
+  if (!process.stdin.isTTY) return "";
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(answer.trim());
+    });
+  });
+}
+
+// Command: gain [project]
+program
+  .command("gain [project]")
+  .aliases(["gains", "stats"])
+  .description(
+    "100% honest BPE token-savings telemetry dashboard (global overview & per-project drill-down)",
+  )
+  .option("-p, --project <pathOrName>", "Filter or drill down to a specific project")
+  .option("--unique", "Deduplicate repeated identical operations by contentHash")
+  .option("--all", "Include all cumulative operations (default)")
+  .option("-i, --interactive", "Interactively select a project to drill down in TTY")
+  .option("--json", "Emit full structured JSON telemetry report")
+  .option("--reset", "Clear telemetry history")
+  .option("-y, --yes", "Auto-confirm telemetry history reset")
+  .action(
+    async (
+      projectArg: string | undefined,
+      options: {
+        project?: string;
+        unique?: boolean;
+        all?: boolean;
+        interactive?: boolean;
+        json?: boolean;
+        reset?: boolean;
+        yes?: boolean;
+      },
+    ) => {
+      try {
+        if (options.reset) {
+          if (!options.yes && process.stdin.isTTY) {
+            const ans = await promptLine("Clear all AICE telemetry history? [y/N]: ");
+            if (!/^y(es)?$/i.test(ans)) {
+              console.log("Aborted telemetry reset.");
+              return;
+            }
+          }
+          const clearedPath = resetTelemetryHistory();
+          if (options.json) {
+            console.log(JSON.stringify({ reset: true, path: clearedPath }, null, 2));
+          } else {
+            console.log(`✔ Reset AICE telemetry ledger (${clearedPath})`);
+          }
+          return;
+        }
+
+        const unique = Boolean(options.unique && !options.all);
+        const requestedProject = options.project ?? projectArg;
+        const isInteractivePick =
+          Boolean(options.interactive) ||
+          requestedProject === "select" ||
+          requestedProject === "pick";
+
+        const effectiveProjectQuery = isInteractivePick ? undefined : requestedProject;
+
+        const report = buildGainReport({
+          unique,
+          project: effectiveProjectQuery,
+        });
+
+        if (options.json) {
+          console.log(
+            JSON.stringify(
+              effectiveProjectQuery && report.projectDetail
+                ? {
+                    unique: report.unique,
+                    telemetryPath: report.telemetryPath,
+                    project: report.projectDetail,
+                  }
+                : report,
+              null,
+              2,
+            ),
+          );
+          return;
+        }
+
+        if (effectiveProjectQuery) {
+          if (!report.projectDetail || report.projectDetail.summary.totalCalls === 0) {
+            console.log(`No recorded AICE telemetry found for project '${effectiveProjectQuery}'.`);
+            return;
+          }
+          console.log(formatProjectGainDetail(report.projectDetail));
+          return;
+        }
+
+        console.log(formatGlobalGainDashboard(report));
+
+        if (isInteractivePick && process.stdin.isTTY && report.projects.length > 0) {
+          const choice = await promptLine(
+            `Select a project [1-${report.projects.length}] to drill down (or press Enter to exit): `,
+          );
+          if (choice) {
+            const idx = Number.parseInt(choice, 10);
+            const selected =
+              !Number.isNaN(idx) && idx >= 1 && idx <= report.projects.length
+                ? report.projects[idx - 1]
+                : report.projects.find(
+                    (p) =>
+                      p.projectName.toLowerCase() === choice.toLowerCase() ||
+                      p.projectRoot === choice,
+                  );
+            if (selected) {
+              const detailReport = buildGainReport({
+                unique,
+                project: selected.projectRoot,
+              });
+              if (detailReport.projectDetail) {
+                console.log(formatProjectGainDetail(detailReport.projectDetail));
+              }
+            }
+          }
+        }
+      } catch (err: unknown) {
+        console.error(`❌ Error in aice gain: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+    },
+  );
+
 program.addHelpText(
   "after",
   `
@@ -1958,8 +2418,10 @@ Step 1: On-the-Fly AST Discovery & Context Compression (Zero .aice Files on Disk
       aice outline src/
   • 1-turn bounded context pack (auto-decompiles native files & collapses $idioms):
       aice context src/app.ts -s myFunction
-  • Model Context Protocol stdio server for AI coding agents:
+  • Model Context Protocol stdio server & global CLI agent setup:
       aice mcp
+      aice agents setup
+      aice agents status
 
 Step 2: Surgical In-Place AST Mutation
   • Forgiving surgical in-place AST mutation (accepts AICE, $idioms, or native syntax):
@@ -1969,17 +2431,18 @@ Step 2: Surgical In-Place AST Mutation
       aice diff src/old.ts src/new.ts --ast
       aice patch src/app.ts changes.patch
 
-Step 3: Smart Multi-File Idiom Engine ($idiom) & Tokenomics
+Step 3: Smart Multi-File Idiom Engine ($idiom), Config & Honest Telemetry
   • Mine recurring AST idioms across native files (cached in .aice-cache/idioms.json):
       aice idioms scan src/
-  • Toggle idioms on/off globally for on-the-fly reads:
-      aice idioms on
-      aice idioms off
-  • Multi-file idiom read (inspect all call sites & bound arguments across repo):
+  • Toggle AICE or $idioms on/off per project in aice.config.json:
+      aice enable / aice disable
+      aice idioms on / aice idioms off
+  • Multi-file idiom read & smart atomic refactor:
       aice idioms read '$guard'
-  • Smart multi-file idiom refactor (update pattern across all files atomically):
       aice idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
-  • Audit token savings & run benchmarks:
+  • View 100% honest BPE token-savings telemetry & run benchmarks:
+      aice gain
+      aice gain <project>
       aice tokens .
       aice benchmark
 `,

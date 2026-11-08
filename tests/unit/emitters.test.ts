@@ -5,6 +5,8 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse, parseWithTrivia } from "../../src/core/parser.js";
+import { AiceGenerator } from "../../src/decompiler/aice-generator.js";
+import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
 import {
   detectTargetFromPath,
   emitTarget,
@@ -14,8 +16,6 @@ import {
   lowerMethodCall,
   lowerPropertyAccess,
 } from "../../src/emitters/index.js";
-import { TsDecompiler } from "../../src/decompiler/ts-decompiler.js";
-import { AiceGenerator } from "../../src/decompiler/aice-generator.js";
 import { TypeScriptEmitter } from "../../src/emitters/ts-emitter.js";
 import { TypeChecker } from "../../src/typechecker/checker.js";
 

@@ -10,11 +10,18 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
-import { findProjectRoot, isProjectIdiomsEnabled, loadProjectConfig } from "../config/index.js";
+import {
+  AICE_DISABLED_MESSAGE,
+  findProjectRoot,
+  isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
+  loadProjectConfig,
+} from "../config/index.js";
 import { parse } from "../core/parser.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 import { collapseAiceSourceIdioms } from "../idioms/index.js";
+import { withSuppressedTelemetry } from "../telemetry/index.js";
 
 let cl100k: ReturnType<typeof getEncoding> | undefined;
 let o200k: ReturnType<typeof getEncoding> | undefined;
@@ -189,6 +196,7 @@ export function calculateFileTokenomics(
 export interface TokenomicsAuditOptions {
   minSavings?: number;
   checkDrift?: boolean;
+  idioms?: boolean;
 }
 
 export function auditTokenomics(
@@ -204,7 +212,10 @@ export function auditTokenomics(
   const files: TokenomicsFileResult[] = [];
   const projectRoot = findProjectRoot(stat.isDirectory() ? resolved : path.dirname(resolved));
   const config = loadProjectConfig(projectRoot);
-  const activeIdioms = isProjectIdiomsEnabled(config) ? config.idioms : undefined;
+  if (!isProjectAiceEnabled(config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
+  const activeIdioms = isProjectIdiomsEnabled(config, options.idioms) ? config.idioms : undefined;
 
   if (stat.isFile()) {
     const isAice = resolved.endsWith(".aice");
@@ -230,7 +241,9 @@ export function auditTokenomics(
       targetContent = fs.readFileSync(targetFile, "utf-8");
       const targetLang = detectTargetFromPath(targetFile);
       try {
-        const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
+        const decomp = withSuppressedTelemetry(() =>
+          decompile(targetContent, targetLang, { filePath: targetFile }),
+        );
         aiceContent = decomp.aice;
         if (activeIdioms && Object.keys(activeIdioms).length > 0) {
           aiceContent = collapseAiceSourceIdioms(aiceContent, activeIdioms, targetFile).aice;
@@ -350,7 +363,9 @@ export function auditTokenomics(
         const targetLang = detectTargetFromPath(targetFile);
         try {
           const targetContent = fs.readFileSync(targetFile, "utf-8");
-          const decomp = decompile(targetContent, targetLang, { filePath: targetFile });
+          const decomp = withSuppressedTelemetry(() =>
+            decompile(targetContent, targetLang, { filePath: targetFile }),
+          );
           let aiceContent = decomp.aice;
           if (activeIdioms && Object.keys(activeIdioms).length > 0) {
             aiceContent = collapseAiceSourceIdioms(aiceContent, activeIdioms, targetFile).aice;

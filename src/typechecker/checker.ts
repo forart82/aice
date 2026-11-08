@@ -3,6 +3,14 @@
  * Conforms to Section 3 of docs/AICE_SPEC.md and Pillar 4 of docs/RESEARCH_SYNTHESIS.md.
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { computeSourceHash, parseCached } from "../cache/index.js";
+import {
+  findProjectRoot,
+  loadProjectConfig,
+  type ProjectIdiomDefinition,
+} from "../config/project-config.js";
 import type {
   ArrayLiteralExpr,
   AssignOp,
@@ -18,15 +26,7 @@ import type {
   TypeExpr,
   UnaryExpr,
 } from "../core/ast.js";
-import * as fs from "node:fs";
-import * as path from "node:path";
 import type { Span } from "../core/span.js";
-import { computeSourceHash, parseCached } from "../cache/index.js";
-import {
-  findProjectRoot,
-  loadProjectConfig,
-  type ProjectIdiomDefinition,
-} from "../config/project-config.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import { GLOBAL_SYMBOLS, getMethodType, getPropertyType } from "./primitives.js";
 import {
@@ -380,7 +380,7 @@ export class TypeChecker {
     let idioms = options?.idioms;
     this.currentIdioms = idioms;
     const filePath = mod.span?.file;
-    let baseDir: string | undefined = undefined;
+    let baseDir: string | undefined;
     if (options?.baseDir) {
       baseDir = path.resolve(options.baseDir);
     } else if (
@@ -1992,7 +1992,8 @@ export class TypeChecker {
         }
         if (expr.literalKind === "string") {
           if (expectedType) {
-            let targetType = expectedType.kind === "option" ? expectedType.innerType : expectedType;
+            const targetType =
+              expectedType.kind === "option" ? expectedType.innerType : expectedType;
             if (this.isMatchingStringContext(expr.value, targetType, env)) {
               return { kind: "named", name: JSON.stringify(expr.value) };
             }
@@ -2025,7 +2026,7 @@ export class TypeChecker {
       case "StringLiteralExpr" as any: {
         const strVal = (expr as any).value;
         if (expectedType) {
-          let targetType = expectedType.kind === "option" ? expectedType.innerType : expectedType;
+          const targetType = expectedType.kind === "option" ? expectedType.innerType : expectedType;
           if (this.isMatchingStringContext(strVal, targetType, env)) {
             return { kind: "named", name: JSON.stringify(strVal) };
           }

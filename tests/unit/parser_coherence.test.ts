@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { parse } from "../../src/core/parser.js";
-import { TypeChecker } from "../../src/typechecker/checker.js";
 import type {
   Block,
   ClassDecl,
@@ -12,6 +10,8 @@ import type {
   TypeDecl,
   VarDecl,
 } from "../../src/core/ast.js";
+import { parse } from "../../src/core/parser.js";
+import { TypeChecker } from "../../src/typechecker/checker.js";
 
 describe("Parser Coherence & Grammar Resolution", () => {
   describe("Mission 1: 'nil' in Type Expressions", () => {

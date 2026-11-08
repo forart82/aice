@@ -5,5 +5,5 @@
  * AICE 2.0 Configuration Module Hub.
  */
 
-export * from "./project-config.js";
 export * from "./path-resolver.js";
+export * from "./project-config.js";

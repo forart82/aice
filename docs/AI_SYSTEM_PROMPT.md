@@ -236,3 +236,26 @@ When operating on any native codebase (zero `.aice` files on disk):
    - Run `aice idioms update '$name' "<newTemplate>"` to update an idiom's logic across all native files in a single atomic operation.
 4. **Surgical Direct-to-Native Edits (`aice splice`)**:
    - Run `aice splice <file> -s <Class.method> --idioms -c "<aiceOrHybridCode>"` (or `--body "<statements>"` / `--batch <json>` / `--in-place`) to surgically update only the target symbol in the native file while preserving 100% of surrounding comments, decorators, and formatting.
+
+---
+
+## 6. Canonical Global CLI Agent Directive (`aice agents setup`)
+
+When `aice agents setup` configures Claude Code (`~/.claude/CLAUDE.md`), Antigravity / Gemini CLI (`~/.gemini/GEMINI.md`), OpenAI Codex CLI (`~/.codex/AGENTS.md`), OpenCode (`~/.config/opencode/AGENTS.md`), and Aider (`~/.aider/CONVENTIONS.md`), it idempotently injects the following canonical directive block:
+
+```markdown
+<!-- AICE:START -->
+## AICE 2.0 — Automatic Token-Efficient AST Context & Mutation Rules
+For all 24 supported file extensions (.ts, .tsx, .js, .jsx, .mjs, .cjs, .py, .rs, .go, .cpp, .hpp, .cc, .cxx, .h, .cs, .html, .css, .json, .yaml, .yml, .twig, .php, .kt, .kts):
+1. **Project Opt-Out Check**: Before using AICE on a repository, respect `aice.config.json`:
+   - If `"enabled": false`, bypass AICE completely and use native file tools.
+   - If `"idiomsEnabled": false` (or `"idioms": false`), do not collapse or expand `$idiom` macros.
+2. **Explore & Read (85-90% Token Savings)**:
+   - Prefer MCP `aice_outline` (or CLI `aice outline <path>`) to inspect file/directory AST structure before reading raw files.
+   - Prefer MCP `aice_context` (or CLI `aice context <file> -s <symbol>`) for 1-turn symbol-scoped code + dependency contracts + callers.
+3. **Surgical Edits (90%+ Output Token Savings)**:
+   - Prefer MCP `aice_splice` (or CLI `aice splice <file> -s <symbol> -c "<code>"`) for symbol-targeted AST replacements, insertions, or deletions.
+   - Prefer MCP `aice_idioms` (or CLI `aice idioms list|read|update`) for recurring multi-file AST patterns.
+<!-- AICE:END -->
+```
+

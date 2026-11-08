@@ -879,7 +879,7 @@ export class TwigDecompiler {
           const loopStr = tagContent.slice(3).trim();
           const match = /^([a-zA-Z0-9_,\s]+)\s+in\s+([\s\S]+)$/.exec(loopStr);
           let varName = "item";
-          let keyName: string | undefined = undefined;
+          let keyName: string | undefined;
           let inExprStr = "items";
 
           if (match) {
@@ -1091,13 +1091,14 @@ export class TwigDecompiler {
     if (!attrsStr || attrsStr.trim().length === 0) return attributes;
 
     const attrRegex = /([a-zA-Z0-9_:-]+)(?:=(?:"([^"]*)"|'([^']*)'|(\{\{[^}]*\}\})|([^\s>]+)))?/g;
-    let match: RegExpExecArray | null;
+    let match: RegExpExecArray | null = attrRegex.exec(attrsStr);
 
-    while ((match = attrRegex.exec(attrsStr)) !== null) {
+    while (match !== null) {
       const name = match[1];
       const quotedVal = match[2] ?? match[3];
       const twigVal = match[4];
       const bareVal = match[5];
+      match = attrRegex.exec(attrsStr);
 
       if (quotedVal !== undefined) {
         // Check if value is purely an interpolation: "{{ expr }}"
