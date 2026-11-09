@@ -4664,12 +4664,72 @@ function resolveSingleNativeEditAgainstSource(
       }
     }
 
+    let finalStartOffset = startOffset;
+    let finalEndOffset = endOffset;
+    let finalOriginalSnippet = originalSnippet;
+
+    const literalCandidate = `${nativeSource.slice(0, startOffset)}${processedCode}${nativeSource.slice(endOffset)}`;
+    if (!validateNativeSyntax(literalCandidate, targetLang, filePath, idioms).valid) {
+      const procLineList = processedCode.trim().split(/\r?\n/);
+      const procLineCount = Math.max(1, procLineList.length);
+      const origSpanCount = Math.max(1, endLine - startLine + 1);
+      const spanLengths =
+        procLineCount === origSpanCount ? [procLineCount] : [procLineCount, origSpanCount];
+      const procTokens = new Set(
+        (processedCode.match(/[A-Za-z_$][A-Za-z0-9_$-]{2,}/g) ?? []).map((t) => t.toLowerCase()),
+      );
+
+      let bestScore = 0;
+      let bestStart = -1;
+      let bestEnd = -1;
+
+      const minLine = Math.max(1, startLine - 12);
+      const maxLine = Math.min(rawLines.length, startLine + 12);
+      for (const spanLen of spanLengths) {
+        for (let candStartLine = minLine; candStartLine <= maxLine; candStartLine++) {
+          const candEndLine = Math.min(rawLines.length, candStartLine + spanLen - 1);
+          if (candStartLine === startLine && candEndLine === endLine) continue;
+          const cStartOff = lineStarts[candStartLine - 1];
+          const cEndOff =
+            candEndLine < lineStarts.length ? lineStarts[candEndLine] : nativeSource.length;
+          const candSlice = nativeSource.slice(cStartOff, cEndOff);
+          const candTokens = (candSlice.match(/[A-Za-z_$][A-Za-z0-9_$-]{2,}/g) ?? []).map((t) =>
+            t.toLowerCase(),
+          );
+          let overlap = 0;
+          for (const tok of candTokens) {
+            if (procTokens.has(tok)) overlap++;
+          }
+          if (procLineList[0] && rawLines[candStartLine - 1]?.trim() === procLineList[0].trim()) {
+            overlap += 10;
+          }
+          if (overlap <= 0) continue;
+          const distPenalty = Math.abs(candStartLine - startLine) * 0.1;
+          const score = overlap - distPenalty;
+          if (score > bestScore) {
+            const testModified = `${nativeSource.slice(0, cStartOff)}${processedCode}${nativeSource.slice(cEndOff)}`;
+            if (validateNativeSyntax(testModified, targetLang, filePath, idioms).valid) {
+              bestScore = score;
+              bestStart = cStartOff;
+              bestEnd = cEndOff;
+            }
+          }
+        }
+      }
+
+      if (bestStart >= 0 && bestEnd >= bestStart) {
+        finalStartOffset = bestStart;
+        finalEndOffset = bestEnd;
+        finalOriginalSnippet = nativeSource.slice(bestStart, bestEnd);
+      }
+    }
+
     return {
       symbol: anchorSymbol,
-      startOffset,
-      endOffset,
+      startOffset: finalStartOffset,
+      endOffset: finalEndOffset,
       replacement: processedCode,
-      originalSnippet,
+      originalSnippet: finalOriginalSnippet,
       newSnippet: processedCode,
     };
   }
@@ -4711,6 +4771,31 @@ function resolveSingleNativeEditAgainstSource(
         spanInfo = classSpan;
         autoAppendToClass = true;
       }
+    } else if (
+      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmedAnchor) &&
+      rawSnippet.trim() &&
+      new RegExp(`\\b${trimmedAnchor}\\b`).test(rawSnippet)
+    ) {
+      const emitted = emitNativeSnippetForContext(
+        rawSnippet,
+        filePath,
+        targetLang,
+        undefined,
+        idioms,
+        undefined,
+        false,
+        undefined,
+        forceLosslessPreprocess,
+      );
+      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: nativeSource.length,
+        endOffset: nativeSource.length,
+        replacement: `${sep}${emitted}\n`,
+        originalSnippet: "",
+        newSnippet: emitted,
+      };
     }
   }
 
@@ -5223,6 +5308,67 @@ export async function splice(
     const result = withSuppressedTelemetry(() =>
       spliceNativeSource(originalNative, options, fullPath, activeIdioms),
     );
+
+    if (targetLang === "typescript" || targetLang === "tsx" || targetLang === "javascript") {
+      const snippetIdents = new Set(
+        (result.newSnippet ?? snippetInput).match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? [],
+      );
+      const origIdents = new Set(originalNative.match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? []);
+      const missingIdents = Array.from(snippetIdents).filter(
+        (id) => !origIdents.has(id) && (/^[A-Z]/.test(id) || id.includes("_")),
+      );
+      if (missingIdents.length > 0) {
+        const importRe = /^(import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]\s*;?)/gm;
+        let updatedCode = result.modifiedCode;
+        let match: RegExpExecArray | null;
+        while ((match = importRe.exec(result.modifiedCode)) !== null) {
+          const fullImp = match[1];
+          const specList = match[2]
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const relMod = match[3];
+          const baseModPath = path.resolve(path.dirname(fullPath), relMod);
+          const candidates = [
+            baseModPath,
+            `${baseModPath}.ts`,
+            `${baseModPath}.tsx`,
+            `${baseModPath}.js`,
+            `${baseModPath.replace(/\.[cm]?js$/, "")}.ts`,
+            `${baseModPath.replace(/\.[cm]?js$/, "")}.tsx`,
+          ];
+          const resolvedSibling = candidates.find(
+            (c) => fs.existsSync(c) && fs.statSync(c).isFile(),
+          );
+          if (!resolvedSibling) continue;
+          let sibContent = "";
+          try {
+            sibContent = fs.readFileSync(resolvedSibling, "utf-8");
+          } catch {
+            continue;
+          }
+          const addedSpecs: string[] = [];
+          for (const id of missingIdents) {
+            if (specList.includes(id)) continue;
+            const exportRe = new RegExp(
+              `\\bexport\\s+(?:type|interface|const|let|var|class|enum|function)\\s+${id}\\b`,
+            );
+            if (exportRe.test(sibContent)) {
+              addedSpecs.push(id);
+            }
+          }
+          if (addedSpecs.length > 0) {
+            const newImp = fullImp.replace(
+              /\{[^}]+\}/,
+              `{ ${[...specList, ...addedSpecs].join(", ")} }`,
+            );
+            updatedCode = updatedCode.replace(fullImp, newImp);
+          }
+        }
+        result.modifiedCode = updatedCode;
+        result.newAiceSource = updatedCode;
+      }
+    }
 
     const postValidation = validateNativeSyntax(
       result.modifiedCode,
