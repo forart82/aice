@@ -1,0 +1,218 @@
+import { execFileSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { saveProjectConfig } from "../src/config/index.js";
+import {
+  analyzeProject,
+  formatAnalyzeReport,
+  loadTelemetryErrors,
+  recordTelemetryError,
+  recordTelemetryEvent,
+} from "../src/telemetry/index.js";
+
+describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Telemetry", () => {
+  let tmpDir = "";
+  let ledgerPath = "";
+  let transcriptsDir = "";
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-analyze-test-"));
+    ledgerPath = path.join(tmpDir, "telemetry", "gains.jsonl");
+    transcriptsDir = path.join(tmpDir, "brain");
+    fs.mkdirSync(transcriptsDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    if (tmpDir && fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("1. records and loads failed AICE operation errors via recordTelemetryError / loadTelemetryErrors", () => {
+    const projRoot = path.join(tmpDir, "game_proj");
+    fs.mkdirSync(projRoot, { recursive: true });
+
+    const recorded = recordTelemetryError({
+      targetPath: path.join(projRoot, "src/board.ts"),
+      projectRoot: projRoot,
+      operation: "splice",
+      surface: "cli",
+      agent: "agy",
+      errorMessage: "Symbol 'Board.missingMethod' not found in src/board.ts",
+      telemetryPath: ledgerPath,
+    });
+
+    expect(recorded).not.toBeNull();
+    expect(recorded?.projectName).toBe("game_proj");
+    expect(recorded?.operation).toBe("splice");
+    expect(recorded?.filePath).toBe("src/board.ts");
+
+    const errors = loadTelemetryErrors(projRoot, ledgerPath);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].errorMessage).toContain("Symbol 'Board.missingMethod' not found");
+  });
+
+  it("2. reconstructs session count, LLM turns, API tokens, AICE compliance, and friction audit from transcripts and telemetry", () => {
+    const projRoot = path.join(tmpDir, "my_game");
+    fs.mkdirSync(path.join(projRoot, "src"), { recursive: true });
+    saveProjectConfig(projRoot, { enabled: true, idiomsEnabled: true });
+    fs.writeFileSync(
+      path.join(projRoot, "src/engine.ts"),
+      "export class Engine {\n  public step(): number {\n    return 1;\n  }\n}\n",
+      "utf-8",
+    );
+
+    recordTelemetryEvent({
+      targetPath: path.join(projRoot, "src/engine.ts"),
+      projectRoot: projRoot,
+      operation: "create",
+      surface: "cli",
+      agent: "agy",
+      nativeText: "export class Engine {\n  public step(): number {\n    return 1;\n  }\n}\n".repeat(4),
+      aiceText: "pub class Engine:\n  pub fn step() -> int = 1\n",
+      telemetryPath: ledgerPath,
+    });
+
+    recordTelemetryError({
+      targetPath: path.join(projRoot, "src/engine.ts"),
+      projectRoot: projRoot,
+      operation: "splice",
+      surface: "cli",
+      agent: "agy",
+      errorMessage: "Invalid line range L1-L99",
+      telemetryPath: ledgerPath,
+    });
+
+    const convLogDir = path.join(
+      transcriptsDir,
+      "11111111-2222-3333-4444-555555555555",
+      ".system_generated",
+      "logs",
+    );
+    fs.mkdirSync(convLogDir, { recursive: true });
+    const steps = [
+      {
+        step_index: 0,
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:00Z",
+        content: `Command Working Directory: ${projRoot}\nBuild Engine`,
+      },
+      {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:10Z",
+        input_tokens: 5000,
+        cache_read_tokens: 20000,
+        output_tokens: 1200,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine: "aice create --stdin << 'EOF'\n=== src/engine.ts ===\nEOF",
+            },
+          },
+        ],
+      },
+      {
+        step_index: 2,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:25Z",
+        input_tokens: 3000,
+        cache_read_tokens: 25000,
+        output_tokens: 400,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine: "aice splice src/engine.ts -s Engine.step -c 'public step(): number { return 2; }'",
+            },
+          },
+        ],
+      },
+      {
+        step_index: 3,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:30Z",
+        input_tokens: 2000,
+        cache_read_tokens: 28000,
+        output_tokens: 150,
+        content: "Done.",
+        tool_calls: [],
+      },
+    ];
+    fs.writeFileSync(
+      path.join(convLogDir, "transcript.jsonl"),
+      `${steps.map((s) => JSON.stringify(s)).join("\n")}\n`,
+      "utf-8",
+    );
+
+    const report = analyzeProject({
+      project: projRoot,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+
+    expect(report.projectName).toBe("my_game");
+    expect(report.configStatus.enabled).toBe(true);
+    expect(report.workspaceStats.fileCount).toBe(1);
+    expect(report.sessionSummary.sessionCount).toBe(1);
+    expect(report.sessionSummary.totalTurns).toBe(3);
+    expect(report.sessionSummary.wallClockSeconds).toBe(30);
+    expect(report.sessionSummary.inputTokensUncached).toBe(10000);
+    expect(report.sessionSummary.cacheReadTokens).toBe(73000);
+    expect(report.sessionSummary.outputTokens).toBe(1750);
+    expect(report.sessionSummary.totalBillableTokens).toBe(11750);
+    expect(report.sessionSummary.aiceSubcommands).toEqual({ create: 1, splice: 1 });
+    expect(report.sessionSummary.aiceCompliancePct).toBe(100);
+    expect(report.bpeSavings.totalCalls).toBe(1);
+    expect(report.bpeSavings.savedCl100k).toBeGreaterThan(0);
+    expect(report.frictionAudit.totalErrors).toBe(1);
+
+    const text = formatAnalyzeReport(report);
+    expect(text).toContain("AICE POST-SESSION PROJECT ANALYZER — my_game");
+    expect(text).toContain("Total Billable Tokens  : 11,750");
+    expect(text).toContain("create:1, splice:1");
+    expect(text).toContain("Invalid line range L1-L99");
+  });
+
+  it("3. executes `aice analyze <project> --json` via CLI and captures failed CLI splice in error telemetry", () => {
+    const projRoot = path.join(tmpDir, "cli_proj");
+    fs.mkdirSync(projRoot, { recursive: true });
+    saveProjectConfig(projRoot, { enabled: true });
+    const tsFile = path.join(projRoot, "index.ts");
+    fs.writeFileSync(tsFile, "export function hello(): string { return 'hi'; }\n", "utf-8");
+
+    const cliBin = path.resolve("bin/aice.mjs");
+    const env = {
+      ...process.env,
+      AICE_TELEMETRY_PATH: ledgerPath,
+      AICE_TRANSCRIPTS_DIR: transcriptsDir,
+    };
+
+    try {
+      execFileSync(process.execPath, [cliBin, "splice", tsFile, "-s", "doesNotExist", "-c", "const x = 1;"], {
+        cwd: projRoot,
+        env,
+        stdio: "pipe",
+      });
+    } catch {
+      // expected failure
+    }
+
+    const rawJson = execFileSync(
+      process.execPath,
+      [cliBin, "analyze", projRoot, "--json"],
+      { cwd: projRoot, env, encoding: "utf-8" },
+    );
+    const parsed = JSON.parse(rawJson);
+    expect(parsed.projectName).toBe("cli_proj");
+    expect(parsed.frictionAudit.telemetryErrors.length).toBeGreaterThanOrEqual(1);
+    expect(parsed.frictionAudit.telemetryErrors[0].operation).toBe("splice");
+  });
+});

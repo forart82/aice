@@ -1035,3 +1035,4 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
 
   return lines.join("\n");
 }
+export * from "./analyze.js";

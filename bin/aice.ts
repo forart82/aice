@@ -40,9 +40,12 @@ import {
 } from "../src/idioms/index.js";
 import { AICE_VERSION, AiceMcpServer } from "../src/mcp/index.js";
 import {
+  analyzeProject,
   buildGainReport,
+  formatAnalyzeReport,
   formatGlobalGainDashboard,
   formatProjectGainDetail,
+  recordTelemetryError,
   resetTelemetryHistory,
 } from "../src/telemetry/index.js";
 import {
@@ -1124,9 +1127,14 @@ program
           console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
         }
       } catch (err: unknown) {
-        console.error(
-          `❌ Error outlining ${rawTargets.join(", ")}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        recordTelemetryError({
+          targetPath: rawTargets[0],
+          operation: "outline",
+          surface: "cli",
+          errorMessage: msg,
+        });
+        console.error(`❌ Error outlining ${rawTargets.join(", ")}: ${msg}`);
         process.exit(1);
       }
     },
@@ -1519,9 +1527,15 @@ Examples:
           }
         }
       } catch (err: unknown) {
-        console.error(
-          `❌ Error splicing ${rawTargetPath ?? options.file ?? options.batch ?? "<stdin>"}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        const errTarget = rawTargetPath ?? options.file ?? options.batch;
+        recordTelemetryError({
+          targetPath: errTarget,
+          operation: "splice",
+          surface: "cli",
+          errorMessage: msg,
+        });
+        console.error(`❌ Error splicing ${errTarget ?? "<stdin>"}: ${msg}`);
         process.exit(1);
       }
     },
@@ -1763,9 +1777,16 @@ program
           }
         }
       } catch (err: unknown) {
-        console.error(
-          `❌ Error creating ${filePathArg ?? options.batch ?? "<file>"}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        const errTarget =
+          filePathArg ?? (typeof options.batch === "string" ? options.batch : undefined);
+        recordTelemetryError({
+          targetPath: errTarget,
+          operation: "create",
+          surface: "cli",
+          errorMessage: msg,
+        });
+        console.error(`❌ Error creating ${errTarget ?? "<file>"}: ${msg}`);
         process.exit(1);
       }
     },
@@ -1860,9 +1881,14 @@ program
           }
         }
       } catch (err: unknown) {
-        console.error(
-          `❌ Error packaging context for ${rawTargets.join(", ")}: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        recordTelemetryError({
+          targetPath: rawTargets[0],
+          operation: "context",
+          surface: "cli",
+          errorMessage: msg,
+        });
+        console.error(`❌ Error packaging context for ${rawTargets.join(", ")}: ${msg}`);
         process.exit(1);
       }
     },
@@ -2921,6 +2947,43 @@ program
     },
   );
 
+// Command: analyze [project]
+program
+  .command("analyze [project]")
+  .description(
+    "Post-session project analyzer (scans AICE telemetry, agent session transcripts, token usage & friction audit)",
+  )
+  .option("-p, --project <pathOrName>", "Target project directory or name (defaults to cwd)")
+  .option("--transcripts-dir <dir>", "Optional custom agent transcripts directory")
+  .option("--json", "Emit structured JSON analysis report")
+  .action(
+    (
+      projectArg: string | undefined,
+      options: {
+        project?: string;
+        transcriptsDir?: string;
+        json?: boolean;
+      },
+    ) => {
+      try {
+        const report = analyzeProject({
+          project: options.project ?? projectArg,
+          transcriptsDir: options.transcriptsDir,
+        });
+        if (options.json) {
+          console.log(JSON.stringify(report, null, 2));
+          return;
+        }
+        console.log(formatAnalyzeReport(report));
+      } catch (err: unknown) {
+        console.error(
+          `❌ Error in aice analyze: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        process.exit(1);
+      }
+    },
+  );
+
 program.addHelpText(
   "after",
   `
@@ -2958,9 +3021,9 @@ Step 3: Smart Multi-File Idiom Engine ($idiom), Config & Honest Telemetry
   • Multi-file idiom read & smart atomic refactor:
       aice idioms read '$guard'
       aice idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
-  • View 100% honest BPE token-savings telemetry & run benchmarks:
-      aice gain
-      aice gain <project>
+  • View 100% honest BPE token-savings telemetry, post-session analysis & benchmarks:
+      aice gain [project]
+      aice analyze [project]
       aice tokens .
       aice benchmark
 
