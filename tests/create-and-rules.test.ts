@@ -992,5 +992,27 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(multiLineImpRes.modifiedCode).toContain("import { Board } from './board';");
       expect(multiLineImpRes.modifiedCode).toContain("export class PieceBag");
     });
+
+    it("11. v0.9.17 supports companion project manifest files (Cargo.toml, go.mod, CMakeLists.txt, .csproj) inside multi-file create streams without batch rollback", async () => {
+      const polyDir = path.join(tmpDir, "poly-manifests");
+      const stream = [
+        "=== Cargo.toml ===",
+        '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"',
+        "=== go.mod ===",
+        "module example.com/demo\n\ngo 1.22",
+        "=== CMakeLists.txt ===",
+        "cmake_minimum_required(VERSION 3.20)\nproject(demo)",
+        "=== Demo.csproj ===",
+        '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>',
+        "=== src/main.rs ===",
+        'fn main() {\n    println!("ok");\n}',
+      ].join("\n");
+      const batchRes = await createBatch(stream, { projectRoot: polyDir });
+      expect(batchRes.success).toBe(true);
+      expect(batchRes.totalFiles).toBe(5);
+      expect(batchRes.totalFiles).toBe(5);
+      expect(fs.readFileSync(path.join(polyDir, "Cargo.toml"), "utf-8")).toContain('name = "demo"');
+      expect(fs.readFileSync(path.join(polyDir, "go.mod"), "utf-8")).toContain("module example.com/demo");
+    });
   });
 });

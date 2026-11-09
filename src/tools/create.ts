@@ -902,7 +902,54 @@ export async function createFile(
 
   const checkPath = fullPath.replace(/\.aice$/, "");
   const ext = path.extname(checkPath).toLowerCase();
-  if (!options.targetLanguage && !fullPath.endsWith(".aice") && !KNOWN_TARGET_EXTENSIONS.has(ext)) {
+  const baseName = path.basename(checkPath);
+  const PASSTHROUGH_PROJECT_EXTENSIONS = new Set([
+    ".toml",
+    ".mod",
+    ".sum",
+    ".csproj",
+    ".sln",
+    ".props",
+    ".targets",
+    ".xml",
+    ".gradle",
+    ".properties",
+    ".cmake",
+    ".mk",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".sql",
+    ".sh",
+    ".txt",
+    ".lock",
+  ]);
+  const PASSTHROUGH_PROJECT_FILENAMES = new Set([
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "CMakeLists.txt",
+    "Makefile",
+    "Dockerfile",
+    ".gitignore",
+    ".dockerignore",
+    ".editorconfig",
+    ".env",
+  ]);
+  const isPassthroughManifest =
+    !options.targetLanguage &&
+    !fullPath.endsWith(".aice") &&
+    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
+    (PASSTHROUGH_PROJECT_EXTENSIONS.has(ext) || PASSTHROUGH_PROJECT_FILENAMES.has(baseName));
+
+  if (
+    !options.targetLanguage &&
+    !fullPath.endsWith(".aice") &&
+    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
+    !isPassthroughManifest
+  ) {
     throw new Error(
       `Unsupported target extension "${ext || path.basename(fullPath)}". Supported extensions: ${Array.from(KNOWN_TARGET_EXTENSIONS).join(", ")}`,
     );
@@ -911,9 +958,11 @@ export async function createFile(
   const targetLang = options.targetLanguage ?? detectTargetFromPath(fullPath);
   const language = detectLanguageName(fullPath.replace(/\.aice$/, ""));
 
-  const nativeCode = withSuppressedTelemetry(() =>
-    compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms),
-  );
+  const nativeCode = isPassthroughManifest
+    ? `${cleanedCode.trim()}\n`
+    : withSuppressedTelemetry(() =>
+        compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms),
+      );
 
   const dryRun = Boolean(options.dryRun);
   const persistedIdioms: string[] = [];
@@ -1015,6 +1064,16 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
     if (!clean || /\s/.test(clean)) return false;
+    const base = path.basename(clean);
+    if (
+      base === "Cargo.toml" ||
+      base === "go.mod" ||
+      base === "CMakeLists.txt" ||
+      base === "Makefile" ||
+      base === "Dockerfile"
+    ) {
+      return true;
+    }
     const ext = path.extname(clean).toLowerCase();
     if (!ext) return false;
     return KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice" || /^\.[a-z0-9]{1,8}$/i.test(ext);
