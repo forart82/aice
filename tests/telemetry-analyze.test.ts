@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { saveProjectConfig } from "../src/config/index.js";
+import { AiceMcpServer } from "../src/mcp/index.js";
 import {
   analyzeProject,
   formatAnalyzeReport,
@@ -214,5 +215,154 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     expect(parsed.projectName).toBe("cli_proj");
     expect(parsed.frictionAudit.telemetryErrors.length).toBeGreaterThanOrEqual(1);
     expect(parsed.frictionAudit.telemetryErrors[0].operation).toBe("splice");
+  });
+
+  it("4. prevents substring path prefix collisions, resolves Antigravity conversations/<cid>.db workspaces, isolates nested monorepo packages, and computes thinking/payload split + transcript BPE fallback + MCP error telemetry", async () => {
+    const proj1 = path.join(tmpDir, "aice_project1");
+    const proj10 = path.join(tmpDir, "aice_project10");
+    const monoRoot = path.join(tmpDir, "monorepo");
+    const monoSub = path.join(monoRoot, "packages", "sub");
+    const monoSubSrc = path.join(monoSub, "src");
+    fs.mkdirSync(proj1, { recursive: true });
+    fs.mkdirSync(proj10, { recursive: true });
+    fs.mkdirSync(monoSubSrc, { recursive: true });
+    saveProjectConfig(proj1, { enabled: true });
+    saveProjectConfig(proj10, { enabled: true });
+    saveProjectConfig(monoRoot, { enabled: true });
+    saveProjectConfig(monoSub, { enabled: true });
+
+    const convDbDir = path.join(tmpDir, "conversations");
+    fs.mkdirSync(convDbDir, { recursive: true });
+
+    const cidA = "aaaaaaaa-1111-2222-3333-444444444444";
+    fs.writeFileSync(
+      path.join(convDbDir, `${cidA}.db`),
+      `Command Working Directory: ${proj1}\nCode relating to the user's requests\n`,
+      "utf-8",
+    );
+    const logDirA = path.join(transcriptsDir, cidA, ".system_generated", "logs");
+    fs.mkdirSync(logDirA, { recursive: true });
+    fs.writeFileSync(
+      path.join(logDirA, "transcript.jsonl"),
+      [
+        JSON.stringify({
+          step_index: 0,
+          type: "USER_INPUT",
+          status: "DONE",
+          created_at: "2026-11-09T11:00:00Z",
+          content: "Build relative files in current directory",
+        }),
+        JSON.stringify({
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          status: "DONE",
+          created_at: "2026-11-09T11:00:10Z",
+          input_tokens: 4000,
+          cache_read_tokens: 10000,
+          output_tokens: 1000,
+          tool_calls: [
+            {
+              name: "run_command",
+              args: { CommandLine: "aice create --stdin << 'EOF'\n=== src/app.ts ===\nEOF" },
+            },
+          ],
+        }),
+        JSON.stringify({
+          step_index: 2,
+          type: "GENERIC",
+          status: "DONE",
+          created_at: "2026-11-09T11:00:12Z",
+          content:
+            "✔ Batch created 1 native file(s) (Native: 500 -> AICE: 300 cl100k tokens, net saved: +200)",
+        }),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const cidB = "bbbbbbbb-1111-2222-3333-444444444444";
+    const logDirB = path.join(transcriptsDir, cidB, ".system_generated", "logs");
+    fs.mkdirSync(logDirB, { recursive: true });
+    fs.writeFileSync(
+      path.join(logDirB, "transcript.jsonl"),
+      `${JSON.stringify({
+        step_index: 0,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T11:01:00Z",
+        input_tokens: 2000,
+        output_tokens: 500,
+        content: `Updated [Models.cs](file://${proj10}/Models.cs)`,
+        tool_calls: [],
+      })}\n`,
+      "utf-8",
+    );
+
+    const cidC = "cccccccc-1111-2222-3333-444444444444";
+    const logDirC = path.join(transcriptsDir, cidC, ".system_generated", "logs");
+    fs.mkdirSync(logDirC, { recursive: true });
+    fs.writeFileSync(
+      path.join(logDirC, "transcript.jsonl"),
+      `${JSON.stringify({
+        step_index: 0,
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-09T11:02:00Z",
+        content: `Command Working Directory: ${monoSubSrc}\nBuild sub-package`,
+      })}\n${JSON.stringify({
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T11:02:05Z",
+        input_tokens: 1500,
+        output_tokens: 300,
+        tool_calls: [{ name: "run_command", args: { CommandLine: "aice outline src/index.ts" } }],
+      })}\n`,
+      "utf-8",
+    );
+
+    const rep1 = analyzeProject({
+      project: proj1,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+    expect(rep1.sessions.map((s) => s.conversationId)).toEqual([cidA]);
+    expect(rep1.sessionSummary.thinkingTokensEst).toBeGreaterThan(0);
+    expect(rep1.sessionSummary.toolPayloadTokensEst).toBeGreaterThan(0);
+    expect(rep1.sessionSummary.thinkingRatioPct + rep1.sessionSummary.toolPayloadRatioPct).toBe(100);
+    expect(rep1.bpeSavings.totalCalls).toBe(1);
+    expect(rep1.bpeSavings.savedCl100k).toBe(200);
+
+    const repSub = analyzeProject({
+      project: monoSubSrc,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+    expect(repSub.projectRoot).toBe(monoSub);
+    expect(repSub.sessions.map((s) => s.conversationId)).toEqual([cidC]);
+
+    const repRoot = analyzeProject({
+      project: monoRoot,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+    expect(repRoot.sessions).toHaveLength(0);
+
+    const prevEnv = process.env.AICE_TELEMETRY_PATH;
+    process.env.AICE_TELEMETRY_PATH = ledgerPath;
+    try {
+      fs.writeFileSync(path.join(proj1, "existing.ts"), "export const a = 1;\n", "utf-8");
+      const mcp = new AiceMcpServer({ workspaceRoot: proj1 });
+      await expect(
+        mcp.handleRequest(1, "tools/call", {
+          name: "aice_splice",
+          arguments: { path: "existing.ts", symbol: "doesNotExist", code: "const x = 1;" },
+        }),
+      ).rejects.toThrow();
+      const errs = loadTelemetryErrors(proj1, ledgerPath);
+      expect(errs.some((e) => e.surface === "mcp" && e.operation === "splice")).toBe(true);
+    } finally {
+      if (prevEnv === undefined) delete process.env.AICE_TELEMETRY_PATH;
+      else process.env.AICE_TELEMETRY_PATH = prevEnv;
+    }
   });
 });

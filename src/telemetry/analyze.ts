@@ -7,7 +7,7 @@ import {
   isProjectIdiomsEnabled,
   loadProjectConfig,
 } from "../config/index.js";
-import { detectLanguageName } from "../tokenomics/index.js";
+import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
 import {
   buildGainReport,
   detectCallerAgent,
@@ -51,6 +51,10 @@ export interface AnalyzedSessionSummary {
   inputTokensUncached: number;
   cacheReadTokens: number;
   outputTokens: number;
+  thinkingTokensEst: number;
+  toolPayloadTokensEst: number;
+  thinkingRatioPct: number;
+  toolPayloadRatioPct: number;
   totalBillableTokens: number;
   totalContextTokensProcessed: number;
   wallClockSeconds: number;
@@ -59,6 +63,14 @@ export interface AnalyzedSessionSummary {
   isFinished: boolean;
   errorCount: number;
   errors: Array<{ step: number; at: string | null; snippet: string }>;
+  transcriptBpe?: {
+    totalCalls: number;
+    readCalls: number;
+    writeCalls: number;
+    nativeCl100k: number;
+    aiceCl100k: number;
+    savedCl100k: number;
+  };
 }
 
 export interface AnalyzeProjectOptions {
@@ -91,6 +103,10 @@ export interface ProjectAnalyzeReport {
     inputTokensUncached: number;
     cacheReadTokens: number;
     outputTokens: number;
+    thinkingTokensEst: number;
+    toolPayloadTokensEst: number;
+    thinkingRatioPct: number;
+    toolPayloadRatioPct: number;
     totalBillableTokens: number;
     totalContextTokensProcessed: number;
     totalToolCalls: number;
@@ -201,35 +217,58 @@ export function loadTelemetryErrors(
   explicitTelemetryPath?: string,
 ): TelemetryErrorEvent[] {
   const errPath = resolveTelemetryErrorsPath(explicitTelemetryPath);
-  if (!fs.existsSync(errPath)) {
-    return [];
+  const candidateFiles: string[] = [];
+  if (fs.existsSync(errPath)) {
+    candidateFiles.push(errPath);
   }
-  try {
-    const raw = fs.readFileSync(errPath, "utf-8");
-    const normFilter = projectRootFilter ? path.resolve(projectRootFilter) : undefined;
-    const events: TelemetryErrorEvent[] = [];
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed) continue;
-      try {
-        const parsed = JSON.parse(trimmed) as TelemetryErrorEvent;
-        if (parsed && typeof parsed.operation === "string" && typeof parsed.errorMessage === "string") {
-          if (
-            !normFilter ||
-            path.resolve(parsed.projectRoot) === normFilter ||
-            parsed.projectName.toLowerCase() === path.basename(normFilter).toLowerCase()
-          ) {
-            events.push(parsed);
-          }
-        }
-      } catch {
-        // skip malformed line
-      }
+  if (explicitTelemetryPath) {
+    const resolvedExplicit = path.resolve(explicitTelemetryPath);
+    if (resolvedExplicit !== errPath && fs.existsSync(resolvedExplicit)) {
+      candidateFiles.push(resolvedExplicit);
     }
-    return events;
-  } catch {
+  }
+  if (candidateFiles.length === 0) {
     return [];
   }
+  const isPathFilter = Boolean(
+    projectRootFilter &&
+      (projectRootFilter.includes("/") ||
+        projectRootFilter.includes("\\") ||
+        fs.existsSync(projectRootFilter)),
+  );
+  const normFilter = projectRootFilter ? path.resolve(projectRootFilter) : undefined;
+  const events: TelemetryErrorEvent[] = [];
+  for (const file of candidateFiles) {
+    try {
+      const raw = fs.readFileSync(file, "utf-8");
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed) as TelemetryErrorEvent;
+          if (
+            parsed &&
+            typeof parsed.operation === "string" &&
+            typeof parsed.errorMessage === "string"
+          ) {
+            if (
+              !normFilter ||
+              path.resolve(parsed.projectRoot) === normFilter ||
+              (!isPathFilter &&
+                parsed.projectName.toLowerCase() === path.basename(normFilter).toLowerCase())
+            ) {
+              events.push(parsed);
+            }
+          }
+        } catch {
+          // skip malformed line
+        }
+      }
+    } catch {
+      // ignore unreadable file
+    }
+  }
+  return events;
 }
 
 function inspectWorkspaceFiles(projectRoot: string): ProjectAnalyzeReport["workspaceStats"] {
@@ -313,6 +352,43 @@ function inspectWorkspaceFiles(projectRoot: string): ProjectAnalyzeReport["works
   };
 }
 
+function containsExactProjectPath(text: string, targetProjectRoot: string): boolean {
+  if (!text || !targetProjectRoot) return false;
+  let idx = text.indexOf(targetProjectRoot);
+  while (idx !== -1) {
+    const afterIdx = idx + targetProjectRoot.length;
+    const nextCh = afterIdx < text.length ? text[afterIdx] : "";
+    if (!nextCh || !/[A-Za-z0-9_.-]/.test(nextCh)) {
+      return true;
+    }
+    idx = text.indexOf(targetProjectRoot, idx + 1);
+  }
+  return false;
+}
+
+function extractAntigravityWorkspaceFromDb(
+  transcriptPath: string,
+  conversationId: string,
+): string | null {
+  const candidates = [
+    path.resolve(path.dirname(transcriptPath), "../../../..", "conversations", `${conversationId}.db`),
+    path.join(os.homedir(), ".gemini", "antigravity-cli", "conversations", `${conversationId}.db`),
+  ];
+  for (const dbPath of candidates) {
+    try {
+      if (!fs.existsSync(dbPath)) continue;
+      const raw = fs.readFileSync(dbPath).toString("latin1");
+      const m = raw.match(/Command Working Directory:\s*(\/[^\s\n<"\x00-\x1f]+)/);
+      if (m) {
+        return path.resolve(m[1]);
+      }
+    } catch {
+      // ignore unreadable db
+    }
+  }
+  return null;
+}
+
 function parseTranscriptFile(
   transcriptPath: string,
   conversationId: string,
@@ -332,12 +408,16 @@ function parseTranscriptFile(
     .filter(Boolean);
   if (lines.length === 0) return null;
 
-  let workspace: string | null = null;
+  let workspace: string | null =
+    source === "antigravity" || transcriptPath.includes(`${path.sep}.system_generated${path.sep}`)
+      ? extractAntigravityWorkspaceFromDb(transcriptPath, conversationId)
+      : null;
   let mentionsProjectRoot = false;
   let isOrchestratorRunner = false;
   let inputTokensUncached = 0;
   let cacheReadTokens = 0;
   let outputTokens = 0;
+  let toolPayloadTokensEst = 0;
   let llmTurns = 0;
   let toolCallsTotal = 0;
   const aiceSubcommands: Record<string, number> = {};
@@ -348,6 +428,13 @@ function parseTranscriptFile(
   let firstIso: string | null = null;
   let lastIso: string | null = null;
   let lastStep: Record<string, unknown> = {};
+
+  let transcriptReadCalls = 0;
+  let transcriptWriteCalls = 0;
+  let transcriptNativeCl100k = 0;
+  let transcriptAiceCl100k = 0;
+  let transcriptSavedCl100k = 0;
+  let pendingSpliceAiceTokens = 0;
 
   const nativeBypassTools = new Set([
     "read_file",
@@ -393,7 +480,7 @@ function parseTranscriptFile(
 
     const content = String(step.content ?? "");
     if (!workspace) {
-      const m = content.match(/Command Working Directory:\s*(\/[^\s\n<]+)/);
+      const m = content.match(/Command Working Directory:\s*(\/[^\s\n<"\x00-\x1f]+)/);
       if (m) {
         workspace = path.resolve(m[1]);
       } else if (typeof step.cwd === "string" && step.cwd.startsWith("/")) {
@@ -403,7 +490,7 @@ function parseTranscriptFile(
     if (content.includes("watch_campaign.py") || content.includes("watch_benchmark.py")) {
       isOrchestratorRunner = true;
     }
-    if (content.includes(targetProjectRoot)) {
+    if (containsExactProjectPath(content, targetProjectRoot)) {
       mentionsProjectRoot = true;
     }
 
@@ -424,6 +511,7 @@ function parseTranscriptFile(
         const name = typeof tc.name === "string" ? tc.name : "unknown";
         const args = (tc.args ?? tc.input ?? {}) as Record<string, unknown>;
         toolCallsTotal++;
+        toolPayloadTokensEst += estimateTokens(JSON.stringify(args), "cl100k_base");
 
         if (nativeBypassTools.has(name)) {
           nativeFileBypasses[name] = (nativeFileBypasses[name] ?? 0) + 1;
@@ -449,9 +537,14 @@ function parseTranscriptFile(
           if (cleanCmd.includes("watch_campaign.py") || cleanCmd.includes("agy -p")) {
             isOrchestratorRunner = true;
           }
-          for (const mSub of cleanCmd.matchAll(/\baice\s+(create|splice|outline|context|decompile|patch|idioms|gain|analyze)\b/g)) {
+          for (const mSub of cleanCmd.matchAll(
+            /\baice(?:\.mjs|\.ts)?\s+(create|splice|outline|context|decompile|patch|idioms|gain|analyze)\b/g,
+          )) {
             const sub = mSub[1];
             aiceSubcommands[sub] = (aiceSubcommands[sub] ?? 0) + 1;
+            if (sub === "splice") {
+              pendingSpliceAiceTokens = estimateTokens(cleanCmd, "cl100k_base");
+            }
           }
         }
 
@@ -460,6 +553,43 @@ function parseTranscriptFile(
           const cleanTn = toolNameVal.replace(/^['"`]|['"`]$/g, "");
           aiceSubcommands[`mcp:${cleanTn}`] = (aiceSubcommands[`mcp:${cleanTn}`] ?? 0) + 1;
         }
+      }
+    } else if (content) {
+      for (const mCreate of content.matchAll(
+        /Native:\s*(\d+)\s*->\s*AICE:\s*(\d+)\s*cl100k tokens,\s*net saved:\s*([+-]?\d+)/g,
+      )) {
+        const nat = Number(mCreate[1]) || 0;
+        const aice = Number(mCreate[2]) || 0;
+        const saved = Number(mCreate[3]) || 0;
+        transcriptWriteCalls++;
+        transcriptNativeCl100k += nat;
+        transcriptAiceCl100k += aice;
+        transcriptSavedCl100k += saved;
+      }
+      for (const mSplice of content.matchAll(
+        /(?:Batch spliced|Spliced)\b[^\n]*\(([+-]?\d+)\s+tokens saved\)/g,
+      )) {
+        const saved = Number(mSplice[1]) || 0;
+        const aice =
+          pendingSpliceAiceTokens > 0
+            ? pendingSpliceAiceTokens
+            : Math.max(10, Math.round(Math.abs(saved) * 0.25));
+        const nat = Math.max(0, aice + saved);
+        transcriptWriteCalls++;
+        transcriptNativeCl100k += nat;
+        transcriptAiceCl100k += aice;
+        transcriptSavedCl100k += saved;
+        pendingSpliceAiceTokens = 0;
+      }
+      const mOrig = content.match(/Original tokens:\s*([\d,]+)/);
+      const mOutl = content.match(/Outline tokens:\s*([\d,]+)/);
+      if (mOrig && mOutl) {
+        const nat = Number(mOrig[1].replace(/,/g, "")) || 0;
+        const aice = Number(mOutl[1].replace(/,/g, "")) || 0;
+        transcriptReadCalls++;
+        transcriptNativeCl100k += nat;
+        transcriptAiceCl100k += aice;
+        transcriptSavedCl100k += nat - aice;
       }
     }
 
@@ -476,13 +606,18 @@ function parseTranscriptFile(
     }
   }
 
-  if (isOrchestratorRunner && workspace !== targetProjectRoot) {
-    return null;
+  let matchesTarget = false;
+  if (workspace !== null) {
+    if (workspace === targetProjectRoot) {
+      matchesTarget = true;
+    } else if (workspace.startsWith(`${targetProjectRoot}${path.sep}`)) {
+      const enclosingRoot = findProjectRoot(workspace, targetProjectRoot);
+      matchesTarget = path.resolve(enclosingRoot) === targetProjectRoot;
+    }
+  } else if (mentionsProjectRoot && !isOrchestratorRunner) {
+    matchesTarget = true;
   }
 
-  const matchesTarget =
-    workspace === targetProjectRoot ||
-    (workspace === null && mentionsProjectRoot);
   if (!matchesTarget) {
     return null;
   }
@@ -496,6 +631,12 @@ function parseTranscriptFile(
     lastStep.status === "DONE" &&
     (!Array.isArray(lastStep.tool_calls) || lastStep.tool_calls.length === 0);
 
+  const boundedToolPayload = Math.min(outputTokens, toolPayloadTokensEst);
+  const thinkingTokensEst = Math.max(0, outputTokens - boundedToolPayload);
+  const thinkingRatioPct =
+    outputTokens > 0 ? Math.round((thinkingTokensEst / outputTokens) * 100) : 0;
+  const toolPayloadRatioPct = outputTokens > 0 ? 100 - thinkingRatioPct : 0;
+
   return {
     conversationId,
     source,
@@ -508,6 +649,10 @@ function parseTranscriptFile(
     inputTokensUncached,
     cacheReadTokens,
     outputTokens,
+    thinkingTokensEst,
+    toolPayloadTokensEst: boundedToolPayload,
+    thinkingRatioPct,
+    toolPayloadRatioPct,
     totalBillableTokens: inputTokensUncached + outputTokens,
     totalContextTokensProcessed: inputTokensUncached + cacheReadTokens + outputTokens,
     wallClockSeconds,
@@ -516,6 +661,14 @@ function parseTranscriptFile(
     isFinished,
     errorCount: errors.length,
     errors,
+    transcriptBpe: {
+      totalCalls: transcriptReadCalls + transcriptWriteCalls,
+      readCalls: transcriptReadCalls,
+      writeCalls: transcriptWriteCalls,
+      nativeCl100k: transcriptNativeCl100k,
+      aiceCl100k: transcriptAiceCl100k,
+      savedCl100k: transcriptSavedCl100k,
+    },
   };
 }
 
@@ -630,9 +783,26 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
   if (rawQuery) {
     const resolvedCandidate = path.resolve(rawQuery);
     if (fs.existsSync(resolvedCandidate)) {
-      projectRoot = fs.statSync(resolvedCandidate).isDirectory()
+      const dirCandidate = fs.statSync(resolvedCandidate).isDirectory()
         ? resolvedCandidate
         : path.dirname(resolvedCandidate);
+      const hasDirectProjectMarker =
+        fs.existsSync(path.join(dirCandidate, "aice.config.json")) ||
+        fs.existsSync(path.join(dirCandidate, ".aice-idioms.json")) ||
+        fs.existsSync(path.join(dirCandidate, "package.json")) ||
+        fs.existsSync(path.join(dirCandidate, "composer.json")) ||
+        fs.existsSync(path.join(dirCandidate, "Cargo.toml")) ||
+        fs.existsSync(path.join(dirCandidate, "go.mod")) ||
+        fs.existsSync(path.join(dirCandidate, "pyproject.toml"));
+      if (hasDirectProjectMarker) {
+        projectRoot = dirCandidate;
+      } else {
+        const discovered = findProjectRoot(dirCandidate, dirCandidate);
+        const discoveredInsideRepo =
+          discovered === process.cwd() &&
+          dirCandidate.startsWith(`${os.tmpdir()}${path.sep}`);
+        projectRoot = discoveredInsideRepo ? dirCandidate : discovered;
+      }
     } else {
       const gainLookup = buildGainReport({
         project: rawQuery,
@@ -671,12 +841,21 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
   let inputTokensUncached = 0;
   let cacheReadTokens = 0;
   let outputTokens = 0;
+  let thinkingTokensEst = 0;
+  let toolPayloadTokensEst = 0;
   let totalBillableTokens = 0;
   let totalContextTokensProcessed = 0;
   let totalToolCalls = 0;
   const aiceSubcommands: Record<string, number> = {};
   const nativeFileBypasses: Record<string, number> = {};
   const transcriptErrors: ProjectAnalyzeReport["frictionAudit"]["transcriptErrors"] = [];
+
+  let fallbackTotalCalls = 0;
+  let fallbackReadCalls = 0;
+  let fallbackWriteCalls = 0;
+  let fallbackNativeCl100k = 0;
+  let fallbackAiceCl100k = 0;
+  let fallbackSavedCl100k = 0;
 
   for (const s of sessions) {
     totalSteps += s.totalSteps;
@@ -685,9 +864,19 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
     inputTokensUncached += s.inputTokensUncached;
     cacheReadTokens += s.cacheReadTokens;
     outputTokens += s.outputTokens;
+    thinkingTokensEst += s.thinkingTokensEst;
+    toolPayloadTokensEst += s.toolPayloadTokensEst;
     totalBillableTokens += s.totalBillableTokens;
     totalContextTokensProcessed += s.totalContextTokensProcessed;
     totalToolCalls += s.toolCallsTotal;
+    if (s.transcriptBpe) {
+      fallbackTotalCalls += s.transcriptBpe.totalCalls;
+      fallbackReadCalls += s.transcriptBpe.readCalls;
+      fallbackWriteCalls += s.transcriptBpe.writeCalls;
+      fallbackNativeCl100k += s.transcriptBpe.nativeCl100k;
+      fallbackAiceCl100k += s.transcriptBpe.aiceCl100k;
+      fallbackSavedCl100k += s.transcriptBpe.savedCl100k;
+    }
     for (const [k, v] of Object.entries(s.aiceSubcommands)) {
       aiceSubcommands[k] = (aiceSubcommands[k] ?? 0) + v;
     }
@@ -704,6 +893,10 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
     }
   }
 
+  const thinkingRatioPct =
+    outputTokens > 0 ? Math.round((thinkingTokensEst / outputTokens) * 100) : 0;
+  const toolPayloadRatioPct = outputTokens > 0 ? 100 - thinkingRatioPct : 0;
+
   const aiceOpsCount =
     Object.values(aiceSubcommands).reduce((a, b) => a + b, 0) ||
     (detail?.summary.totalCalls ?? 0);
@@ -714,6 +907,12 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       : configStatus.enabled
         ? 100
         : 0;
+
+  const hasLedgerCalls = (detail?.summary.totalCalls ?? 0) > 0;
+  const fallbackPct =
+    fallbackNativeCl100k > 0
+      ? Math.round((fallbackSavedCl100k / fallbackNativeCl100k) * 100)
+      : 0;
 
   return {
     capturedAt: new Date().toISOString(),
@@ -729,6 +928,10 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       inputTokensUncached,
       cacheReadTokens,
       outputTokens,
+      thinkingTokensEst,
+      toolPayloadTokensEst,
+      thinkingRatioPct,
+      toolPayloadRatioPct,
       totalBillableTokens,
       totalContextTokensProcessed,
       totalToolCalls,
@@ -736,19 +939,33 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       nativeFileBypasses,
       aiceCompliancePct,
     },
-    bpeSavings: {
-      totalCalls: detail?.summary.totalCalls ?? 0,
-      readCalls: detail?.summary.readCalls ?? 0,
-      writeCalls: detail?.summary.writeCalls ?? 0,
-      nativeCl100k: detail?.summary.nativeCl100k ?? 0,
-      aiceCl100k: detail?.summary.aiceCl100k ?? 0,
-      savedCl100k: detail?.summary.savedCl100k ?? 0,
-      cl100kSavingsPct: detail?.summary.cl100kSavingsPct ?? 0,
-      nativeO200k: detail?.summary.nativeO200k ?? 0,
-      aiceO200k: detail?.summary.aiceO200k ?? 0,
-      savedO200k: detail?.summary.savedO200k ?? 0,
-      o200kSavingsPct: detail?.summary.o200kSavingsPct ?? 0,
-    },
+    bpeSavings: hasLedgerCalls
+      ? {
+          totalCalls: detail?.summary.totalCalls ?? 0,
+          readCalls: detail?.summary.readCalls ?? 0,
+          writeCalls: detail?.summary.writeCalls ?? 0,
+          nativeCl100k: detail?.summary.nativeCl100k ?? 0,
+          aiceCl100k: detail?.summary.aiceCl100k ?? 0,
+          savedCl100k: detail?.summary.savedCl100k ?? 0,
+          cl100kSavingsPct: detail?.summary.cl100kSavingsPct ?? 0,
+          nativeO200k: detail?.summary.nativeO200k ?? 0,
+          aiceO200k: detail?.summary.aiceO200k ?? 0,
+          savedO200k: detail?.summary.savedO200k ?? 0,
+          o200kSavingsPct: detail?.summary.o200kSavingsPct ?? 0,
+        }
+      : {
+          totalCalls: fallbackTotalCalls,
+          readCalls: fallbackReadCalls,
+          writeCalls: fallbackWriteCalls,
+          nativeCl100k: fallbackNativeCl100k,
+          aiceCl100k: fallbackAiceCl100k,
+          savedCl100k: fallbackSavedCl100k,
+          cl100kSavingsPct: fallbackPct,
+          nativeO200k: fallbackNativeCl100k,
+          aiceO200k: fallbackAiceCl100k,
+          savedO200k: fallbackSavedCl100k,
+          o200kSavingsPct: fallbackPct,
+        },
     frictionAudit: {
       totalErrors: telemetryErrors.length + transcriptErrors.length,
       telemetryErrors,
@@ -802,7 +1019,7 @@ export function formatAnalyzeReport(report: ProjectAnalyzeReport): string {
     `  Cache Read Tokens      : ${ss.cacheReadTokens.toLocaleString("en-US")}`,
   );
   lines.push(
-    `  Output Tokens (Gen)    : ${ss.outputTokens.toLocaleString("en-US")}`,
+    `  Output Tokens (Gen)    : ${ss.outputTokens.toLocaleString("en-US")} (~${ss.thinkingTokensEst.toLocaleString("en-US")} thinking/text [${ss.thinkingRatioPct}%] | ~${ss.toolPayloadTokensEst.toLocaleString("en-US")} tool payload [${ss.toolPayloadRatioPct}%])`,
   );
   lines.push(
     `  Total Billable Tokens  : ${ss.totalBillableTokens.toLocaleString("en-US")} (in + out)`,

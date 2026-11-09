@@ -33,7 +33,9 @@ import {
   buildGainReport,
   formatGlobalGainDashboard,
   formatProjectGainDetail,
+  recordTelemetryError,
   recordTelemetryEvent,
+  type TelemetryOperation,
   withSuppressedTelemetry,
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
@@ -667,8 +669,35 @@ export class AiceMcpServer {
 
       case "tools/call": {
         const callParams = params as { name: string; arguments?: Record<string, unknown> };
-        const res = await this.executeToolCall(callParams?.name, callParams?.arguments ?? {});
-        return wrapOut(res);
+        const toolArgs = callParams?.arguments ?? {};
+        try {
+          const res = await this.executeToolCall(callParams?.name, toolArgs);
+          return wrapOut(res);
+        } catch (err: unknown) {
+          const toolToOp: Record<string, TelemetryOperation> = {
+            aice_outline: "outline",
+            aice_context: "context",
+            aice_splice: "splice",
+            aice_create: "create",
+            aice_decompile: "decompile",
+            aice_patch: "patch",
+            aice_idioms: "idioms_apply",
+          };
+          const op = toolToOp[callParams?.name ?? ""];
+          if (op) {
+            const rawTarget = String(
+              toolArgs.filePath ?? toolArgs.path ?? toolArgs.file ?? toolArgs.dir ?? this.workspaceRoot,
+            );
+            recordTelemetryError({
+              targetPath: path.resolve(this.workspaceRoot, rawTarget),
+              projectRoot: this.resolveProjectRoot(this.workspaceRoot),
+              operation: op,
+              surface: "mcp",
+              errorMessage: err instanceof Error ? err.message : String(err),
+            });
+          }
+          throw err;
+        }
       }
 
       default: {

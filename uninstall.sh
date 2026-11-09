@@ -48,10 +48,15 @@ while [[ $# -gt 0 ]]; do
       ;;
     --keep-project-configs)
       KEEP_PROJECT_CONFIGS=1
+      KEEP_TELEMETRY=1
       shift
       ;;
     --keep-telemetry)
       KEEP_TELEMETRY=1
+      shift
+      ;;
+    --purge-telemetry)
+      KEEP_TELEMETRY=0
       shift
       ;;
     --keep-agents)
