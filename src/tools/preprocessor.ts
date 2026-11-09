@@ -1658,7 +1658,11 @@ function lowerHybridLineForTarget(
   // Variable bindings := and ::= (including inside `for (...)` and after `;` / `{`)
   out = out
     .replace(/(\bfor\s*\(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*/g, "$1let $2 = ")
-    .replace(/(\bfor\s*\(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*/g, "$1const $2 = ");
+    .replace(/(\bfor\s*\(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*/g, "$1const $2 = ")
+    .replace(
+      /(\bfor\s*\(\s*)(?!(?:const|let|var)\b)([A-Za-z_$][A-Za-z0-9_$]*|\[\s*[A-Za-z_$][^\]]*\]|\{\s*[A-Za-z_$][^}]*\})\s+(of|in)\b/g,
+      "$1const $2 $3",
+    );
   out = out.replace(
     /^(\s*):=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+)=\s*(.+)$/,
     isJs ? "$1const $2 = $4" : "$1const $2: $3 = $4",

@@ -973,6 +973,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
           "  priv refillBag():_ {",
           "    types: string[] = ['I', 'O', 'T'];",
           "    count:# = types.length;",
+          "    for (t of types) { this.bag.push(t); }",
           "    this.bag = types.slice(0, count);",
           "  }",
           "}",
@@ -981,7 +982,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       });
       expect(bagRes.nativeCode).toContain("let types: string[] = ['I', 'O', 'T'];");
       expect(bagRes.nativeCode).toContain("let count: number = types.length;");
-
+      expect(bagRes.nativeCode).toContain("for (const t of types)");
       const multiLineImpRes = await splice(bagFile, {
         symbol: "imports",
         code: "import {\n  TetrominoType,\n  LINE_POINTS,\n  COMBO_BONUS\n} from './constants';",

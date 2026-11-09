@@ -5443,7 +5443,10 @@ export function parseMultiBlockSpliceStream(
 
   let lastExplicitFilePath: string | undefined;
   const resolvedBlocks = sections.map((sec) => {
-    const body = sec.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    const body = sec.lines
+      .join("\n")
+      .replace(/^\n+|\n+$/g, "")
+      .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
     const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
     if (sec.filePath) {
       lastExplicitFilePath = sec.filePath;

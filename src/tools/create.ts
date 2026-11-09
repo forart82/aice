@@ -1049,7 +1049,10 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   }
 
   return sections.map((sec) => {
-    const body = sec.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    const body = sec.lines
+      .join("\n")
+      .replace(/^\n+|\n+$/g, "")
+      .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
     const ext = path.extname(sec.filePath).toLowerCase();
     const canHaveIdioms = ext !== ".json" && ext !== ".yaml" && ext !== ".yml";
     const fullCode = preIdiomPrefix && canHaveIdioms ? `${preIdiomPrefix}\n${body}` : body;
