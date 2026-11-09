@@ -55,6 +55,8 @@ export interface CreateFileOptions {
   idioms?: boolean | string | string[] | Record<string, string | ProjectIdiomDefinition>;
   /** Preview generated native code without writing to disk */
   dryRun?: boolean;
+  /** Force overwrite if target file already exists (>25 lines) */
+  overwrite?: boolean;
   /** Project root directory override */
   projectRoot?: string;
   /** Telemetry surface ('cli' | 'mcp') */
@@ -836,6 +838,17 @@ export async function createFile(
   const config = loadProjectConfig(root);
   if (!isProjectAiceEnabled(config)) {
     throw new Error(AICE_DISABLED_MESSAGE);
+  }
+
+  const overwrite = options.overwrite ?? true;
+  if (!overwrite && !options.dryRun && fs.existsSync(fullPath)) {
+    const existingContent = fs.readFileSync(fullPath, "utf-8");
+    const existingLineCount = existingContent.split(/\r?\n/).length;
+    if (existingLineCount > 25) {
+      throw new Error(
+        `Target file '${filePath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${filePath} -s <SymbolOrClass.member> --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${filePath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${filePath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite to force full-file replacement.)`,
+      );
+    }
   }
 
   let rawPayload = options.code;

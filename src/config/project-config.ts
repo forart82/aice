@@ -1064,38 +1064,25 @@ export function isProjectAiceEnabled(
   return configOrDir.enabled !== false;
 }
 
-export const AICE_DIRECTIVE_START = "<!-- AICE:START -->";
-export const AICE_DIRECTIVE_END = "<!-- AICE:END -->";
-
 export const SUPPORTED_EXTENSIONS_LIST = Array.from(KNOWN_TARGET_EXTENSIONS).join(", ");
 
-export const AICE_SYSTEM_DIRECTIVE = `${AICE_DIRECTIVE_START}
-## AICE 2.0 — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
-**MANDATORY OVERRIDE**: For all 24 supported file extensions (${SUPPORTED_EXTENSIONS_LIST}), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
-1. **Project Opt-Out Check**: Respect \`aice.config.json\` in the workspace root:
-   - If \`"enabled": false\`, bypass AICE completely and use native file tools.
-   - If \`"idiomsEnabled": false\` (or \`"idioms": false\`), disable \`$idiom\` macros (\`--no-idioms\`).
-2. **Startup & New File Creation (\`from 0\` — 40-75% Output Token Savings)**:
-   - When creating new code files (\`.ts\`, \`.tsx\`, \`.py\`, \`.rs\`, \`.go\`, \`.cpp\`, \`.cs\`, \`.html\`, \`.css\`, \`.js\`, \`.json\`, \`.yaml\`, \`.twig\`, \`.php\`, \`.kt\`), you **MUST** use \`aice create <file> -c "<compact AICE>"\` (or \`aice create --batch\` / MCP \`aice_create\`) instead of raw \`write_file\` whenever expressing logic, classes, functions, styles, or templates in compact AICE + \`$idioms\` (including inline \`@idiom $Name($0) = ...\`) saves output tokens.
-   - **Modular Creation for Large Files (>150 lines)**: Avoid streaming massive 10,000-token monolithic JSON strings in a single \`aice_create\` tool call (which stalls LLM output streaming for 60–120s); instead, create the compact skeleton + \`@idiom\` macros via \`aice create\` / \`aice_create\` and add/update functions modularly via \`aice splice\` / \`aice_splice\`.
-3. **Explore & Read Existing Files (85-90% Read Token Savings)**:
-   - Before calling \`read_file\` / \`view_file\` on any existing supported file, you **MUST** run \`aice outline <path>\` (or MCP \`aice_outline\`) for structure discovery and \`aice context <file> -s <symbol>\` (or MCP \`aice_context\`) for 1-turn symbol-scoped code + dependency contracts + callers.
-4. **Surgical Edits on Existing Files (90%+ Edit Token Savings)**:
-   - When modifying, inserting, or deleting a function/method/class/rule in an existing supported file, you **MUST** use \`aice splice <file> -s <symbol> -c "<compact AICE>" --in-place\` (or MCP \`aice_splice\`) instead of \`edit_file\` / \`replace_file_content\`.
-   - Use \`aice idioms list|read|update\` (or MCP \`aice_idioms\`) for recurring multi-file AST patterns.
-5. **Subagent Propagation (\`invoke_subagent\` / \`test-runner\` / \`fast-scout\` / \`code-surgeon\` / \`deep-auditor\`)**:
-   - ALL subagents (\`test-runner\`, \`fast-scout\`, \`code-surgeon\`, \`deep-auditor\`) **MUST** use \`aice outline\` and \`aice context\` instead of \`read_file\` / \`view_file\`, and \`aice create\` / \`aice splice\` instead of \`write_file\` / \`edit_file\`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
-${AICE_DIRECTIVE_END}`;
+import {
+  AICE_DIRECTIVE_END,
+  AICE_DIRECTIVE_START,
+  AICE_SYSTEM_DIRECTIVE,
+  ALWAYS_ON_AICE_RULE_FILE,
+  CANONICAL_AICE_AGENT_DIRECTIVE,
+  MANDATORY_AGENT_RULES_MARKDOWN,
+} from "../rules/mandatory-rules.js";
 
-export const CANONICAL_AICE_AGENT_DIRECTIVE = AICE_SYSTEM_DIRECTIVE;
-
-export const ALWAYS_ON_AICE_RULE_FILE = `---
-trigger: always_on
-description: Mandatory AICE 2.0 token-efficient AST file creation, exploration, context, and surgical splicing rules
----
-
-${AICE_SYSTEM_DIRECTIVE}
-`;
+export {
+  AICE_DIRECTIVE_END,
+  AICE_DIRECTIVE_START,
+  AICE_SYSTEM_DIRECTIVE,
+  ALWAYS_ON_AICE_RULE_FILE,
+  CANONICAL_AICE_AGENT_DIRECTIVE,
+  MANDATORY_AGENT_RULES_MARKDOWN,
+};
 
 /**
  * Idempotently upserts the `<!-- AICE:START -->...<!-- AICE:END -->` block into a Markdown file.

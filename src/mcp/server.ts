@@ -136,7 +136,8 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         },
         symbolSelector: {
           type: "string",
-          description: "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step')",
+          description:
+            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'InputHandler.isListening', 'imports', or line range 'L1-L1', '[L5-L10]')",
         },
         newAiceCode: {
           type: "string",
@@ -239,6 +240,10 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         dryRun: {
           type: "boolean",
           description: "If true, preview compiled native code without writing to disk",
+        },
+        overwrite: {
+          type: "boolean",
+          description: "If true, allows full-file overwrite of existing files with > 25 lines",
         },
       },
     },
@@ -1092,6 +1097,7 @@ export class AiceMcpServer {
 
       case "aice_create": {
         const dryRun = Boolean(args.dryRun);
+        const overwrite = typeof args.overwrite === "boolean" ? args.overwrite : undefined;
         if (Array.isArray(args.files)) {
           const rawFiles = args.files as Array<Record<string, unknown>>;
           if (rawFiles.length === 0) {
@@ -1112,6 +1118,7 @@ export class AiceMcpServer {
             safeItems.push({
               filePath: safeFp,
               code: itemCode,
+              ...(overwrite !== undefined ? { overwrite } : {}),
             });
           }
           const projectRoot = this.resolveProjectRoot(firstSafePath);
@@ -1182,6 +1189,7 @@ export class AiceMcpServer {
           idioms: effectiveIdioms,
           inlineIdioms: inlineIdiomsArg,
           dryRun,
+          ...(overwrite !== undefined ? { overwrite } : {}),
           projectRoot,
           surface: "mcp",
         });

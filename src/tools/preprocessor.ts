@@ -1675,7 +1675,8 @@ export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLa
     /(?:^|\s)(?:pub\s+|export\s+|async\s+|static\s+|suspend\s+|public\s+|private\s+|protected\s+|@fn\s+|\^fn\s+|@cls\s+|\^class\s+)*(?:fn|function|func|fun|class|struct|interface|enum|impl|trait|namespace|mod|if|for|while|switch|match|try)\b[^{;\n]*\{/m.test(
       masked,
     ) ||
-    /\)\s*(?:->\s*[^{;\n]+|:\s*[^{;\n]+)?\s*\{/m.test(masked)
+    /\)\s*(?:->\s*[^{;\n]+|:\s*[^{;\n]+)?\s*\{/m.test(masked) ||
+    /=>\s*\{/m.test(masked)
   ) {
     return true;
   }

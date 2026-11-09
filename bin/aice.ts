@@ -1074,6 +1074,8 @@ program
   .option("-c, --code <code>", "Replacement AICE or native declaration snippet")
   .option("-t, --template <code>", "Alias for --code")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
+  .option("--from <file>", "Read replacement payload from a file")
+  .option("--stdin", "Read replacement AICE, $idiom, or native code from standard input")
   .option("-d, --delete [symbol]", "Delete the symbol (or specify an additional symbol to delete)")
   .option("--insert-after <symbol>", "Insert after specified symbol")
   .option("--insert-before <symbol>", "Insert before specified symbol")
@@ -1092,6 +1094,24 @@ program
   .option("--dry-run", "Output result without modifying file")
   .option("--diff", "Display unified diff")
   .option("--compile", "Automatically recompile target after splice")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  • Replace function via stdin heredoc:
+      aice splice src/app.ts -s myFunction --stdin << 'EOF'
+      pub fn myFunction(x:#)-># => x * 2
+      EOF
+  • Replace specific line range:
+      aice splice src/app.ts -s L10-L12 -c "const total = a + b;"
+  • Delete class field/property cleanly:
+      aice splice src/app.ts -s InputHandler.isListening --delete
+  • Update contiguous imports block:
+      aice splice src/app.ts -s imports -c "import * as fs from 'node:fs';\\nimport * as path from 'node:path';"
+  • Atomic multi-symbol batch edits (applied bottom-to-top):
+      aice splice src/app.ts --edits '[{"symbol":"calc","code":"..."},{"symbol":"L1-L1","delete":true}]'
+`,
+  )
   .action(
     async (
       rawTargetPath: string | undefined,
@@ -1102,6 +1122,8 @@ program
         code?: string;
         template?: string;
         body?: string;
+        from?: string;
+        stdin?: boolean;
         delete?: boolean | string;
         insertAfter?: string;
         insertBefore?: string;
@@ -1234,8 +1256,32 @@ program
           isPrimaryDelete = true;
         }
 
+        if (options.from) {
+          const fromPath = path.resolve(process.cwd(), options.from);
+          if (!fs.existsSync(fromPath)) {
+            console.error(`❌ Error: --from file not found: ${options.from}`);
+            process.exit(1);
+          }
+          code = fs.readFileSync(fromPath, "utf-8");
+        }
+
         let parsedEdits: SpliceOptions["edits"];
-        if (options.edits) {
+        if (
+          options.edits === "-" ||
+          (options.stdin && !options.symbol && code === undefined && options.body === undefined)
+        ) {
+          const stdinRaw = fs.readFileSync(0, "utf-8");
+          try {
+            const parsed = JSON.parse(stdinRaw.trim());
+            if (Array.isArray(parsed)) {
+              parsedEdits = parsed;
+            } else {
+              code = stdinRaw;
+            }
+          } catch {
+            code = stdinRaw;
+          }
+        } else if (options.edits) {
           const editsCandidatePath = path.resolve(process.cwd(), options.edits);
           const rawEditsJson =
             fs.existsSync(editsCandidatePath) && fs.statSync(editsCandidatePath).isFile()
@@ -1249,6 +1295,10 @@ program
           parsedEdits = parsed;
         }
 
+        if (options.stdin && code === undefined && !parsedEdits) {
+          code = fs.readFileSync(0, "utf-8");
+        }
+
         if (
           code === undefined &&
           options.body === undefined &&
@@ -1260,7 +1310,7 @@ program
             code = stdinContent;
           } else {
             console.error(
-              "❌ Error: Must provide --code, --body, --delete, --edits, or input via stdin.",
+              "❌ Error: Must provide --code, --from, --stdin, --body, --delete, or --edits.",
             );
             process.exit(1);
           }
@@ -1344,9 +1394,11 @@ program
     "Define one or more inline $idioms (e.g. '$clamp($0,$1,$2)=Math.min(Math.max($0,$1),$2)')",
   )
   .option(
-    "--batch <jsonOrFile>",
+    "--batch [jsonOrFile]",
     "Create multiple native files atomically from JSON array/object or JSON file",
   )
+  .option("--overwrite", "Force full-file replacement if target file already exists (>25 lines)")
+  .option("--force", "Alias for --overwrite")
   .option("--idioms", "Force-enable project and inline $idioms")
   .option("--no-idioms", "Disable $idiom expansion and persistence")
   .option("--dry-run", "Preview compiled native code without writing to disk")
@@ -1359,19 +1411,36 @@ program
         from?: string;
         stdin?: boolean;
         idiom?: string[];
-        batch?: string;
+        batch?: string | boolean;
+        overwrite?: boolean;
+        force?: boolean;
         idioms?: boolean;
         dryRun?: boolean;
         json?: boolean;
       },
     ) => {
       try {
-        if (options.batch) {
-          const batchCandidatePath = path.resolve(process.cwd(), options.batch);
-          const rawJson =
-            fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
-              ? fs.readFileSync(batchCandidatePath, "utf-8")
-              : options.batch;
+        const isBatch =
+          options.batch !== undefined ||
+          filePathArg === "--batch" ||
+          (Boolean(options.stdin) && !filePathArg && !options.code);
+        if (isBatch) {
+          let rawJson = "";
+          const batchArg =
+            options.batch !== undefined
+              ? options.batch
+              : filePathArg === "--batch"
+                ? "-"
+                : undefined;
+          if (batchArg === "-" || batchArg === true || options.stdin || !batchArg) {
+            rawJson = fs.readFileSync(0, "utf-8");
+          } else {
+            const batchCandidatePath = path.resolve(process.cwd(), String(batchArg));
+            rawJson =
+              fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
+                ? fs.readFileSync(batchCandidatePath, "utf-8")
+                : String(batchArg);
+          }
           const parsed = JSON.parse(rawJson);
           let rawItems: BatchCreateItem[];
           if (Array.isArray(parsed)) {
@@ -1413,6 +1482,7 @@ program
 
           const batchRes = await createBatch(items, {
             dryRun: options.dryRun,
+            overwrite: Boolean(options.overwrite || options.force),
             idioms: batchEffectiveIdioms,
             inlineIdioms: options.idiom,
             projectRoot: batchProjectRoot,
@@ -1469,6 +1539,7 @@ program
           from: options.from ? path.resolve(process.cwd(), options.from) : undefined,
           inlineIdioms: options.idiom,
           idioms: effectiveCreateIdioms,
+          overwrite: Boolean(options.overwrite || options.force),
           dryRun: options.dryRun,
           projectRoot: createProjectRoot,
           surface: "cli",
@@ -1490,6 +1561,30 @@ program
           console.log(
             `✔ Created ${filePathArg} (Native: ${result.nativeTokens} -> AICE: ${result.aiceTokens} cl100k tokens, net saved: ${deltaStr})`,
           );
+          const eligibleTipExts = new Set([
+            ".ts",
+            ".tsx",
+            ".js",
+            ".jsx",
+            ".py",
+            ".rs",
+            ".go",
+            ".cpp",
+            ".cs",
+            ".kt",
+            ".php",
+            ".css",
+          ]);
+          const targetExt = path.extname(fullTarget).toLowerCase();
+          if (
+            eligibleTipExts.has(targetExt) &&
+            result.nativeTokens >= 120 &&
+            result.tokensSaved === 0
+          ) {
+            console.log(
+              "💡 Tip: 0 tokens saved (verbose native input). Use AICE shorthands (pub fn, fn, <-, :#, :$, :?, d:flex;jc:center) or @idiom macros to save 40-65% output tokens.",
+            );
+          }
         }
       } catch (err: unknown) {
         console.error(

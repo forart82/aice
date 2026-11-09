@@ -12,11 +12,25 @@
  * - Pre-write syntax validation gate (`validateNativeSyntax`) rejecting malformed syntax before disk write
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+const CLI_PATH = path.resolve(process.cwd(), "bin/aice.ts");
+const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
+
+function runCli(args: string[], cwd: string, input?: string) {
+  return spawnSync(TSX_BIN, [CLI_PATH, ...args], {
+    cwd,
+    input,
+    encoding: "utf-8",
+    timeout: 20000,
+  });
+}
+
 import {
   createBatch,
   createFile,
@@ -1110,5 +1124,161 @@ describe("15-Language / 24-Extension Enterprise Polyglot Torture Suite (v0.9.7)"
     expect(splicedOverload.modifiedCode).toContain(
       "int compute(int a, int b) {\n    return a * b;\n  }",
     );
+  });
+
+  it("14. AICE v0.9.8 Regressions: Line-Range Splicing, Imports Block Splicing, Class Field & Arrow-Property Splicing, CLI `--stdin`, and Create Overwrite Guard (>25 lines)", async () => {
+    // 1. Line-range splicing on TypeScript file
+    const lineRangeFile = path.join(tmpDir, "lines.ts");
+    fs.writeFileSync(
+      lineRangeFile,
+      [
+        "// Header comment",
+        "export const alpha = 1;",
+        "export const beta = 2;",
+        "export const gamma = 3;",
+        "export function calc() {",
+        "    const x = 10;",
+        "    return x * 2;",
+        "}",
+        "export const delta = 4;",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    // Replace L2-L2 (alpha)
+    const spL2 = await splice(lineRangeFile, {
+      symbol: "L2-L2",
+      code: "export const alpha = 99;",
+      projectRoot: tmpDir,
+    });
+    expect(spL2.modifiedCode).toContain("export const alpha = 99;");
+    expect(spL2.modifiedCode).not.toContain("export const alpha = 1;");
+
+    // Replace [L5-L7] (calc function header through inner statement)
+    const spBracket = await splice(lineRangeFile, {
+      symbol: "[L5-L7]",
+      code: "export function calc() {\n    const x = 50;\n    return x + 5;",
+      projectRoot: tmpDir,
+    });
+    expect(spBracket.modifiedCode).toContain("const x = 50;\n    return x + 5;");
+
+    // Delete L3 (beta)
+    const spDelL3 = await splice(lineRangeFile, {
+      symbol: "L3",
+      delete: true,
+      projectRoot: tmpDir,
+    });
+    expect(spDelL3.modifiedCode).not.toContain("export const beta = 2;");
+    expect(spDelL3.modifiedCode).not.toMatch(/\n\n\n/);
+
+    // 2. Imports block splicing
+    const importFile = path.join(tmpDir, "imports_target.ts");
+    fs.writeFileSync(
+      importFile,
+      [
+        "import * as fs from 'node:fs';",
+        "import * as path from 'node:path';",
+        "",
+        "export function read(p: string) {",
+        "  return fs.readFileSync(path.resolve(p), 'utf-8');",
+        "}",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const spImports = await splice(importFile, {
+      symbol: "imports",
+      code: "import * as fs from 'node:fs';\nimport * as os from 'node:os';\nimport * as path from 'node:path';",
+      projectRoot: tmpDir,
+    });
+    expect(spImports.modifiedCode).toContain("import * as os from 'node:os';");
+    expect(spImports.modifiedCode).toContain("export function read");
+
+    // 3. Class field & arrow-property splicing and deletion
+    const classFile = path.join(tmpDir, "handler.ts");
+    fs.writeFileSync(
+      classFile,
+      [
+        "export class InputHandler {",
+        "  private isListening: boolean = false;",
+        "  private loop = (t: number) => {",
+        "    console.log(t);",
+        "  };",
+        "",
+        "  public start(): void {",
+        "    this.isListening = true;",
+        "  }",
+        "}",
+      ].join("\n"),
+      "utf-8",
+    );
+
+    // Replace arrow function property
+    const spArrow = await splice(classFile, {
+      symbol: "InputHandler.loop",
+      code: "private loop = (t: number) => {\n  console.log('updated', t);\n};",
+      projectRoot: tmpDir,
+    });
+    expect(spArrow.modifiedCode).toContain("console.log('updated', t);");
+
+    // Delete field InputHandler.isListening
+    const spDelField = await splice(classFile, {
+      symbol: "InputHandler.isListening",
+      delete: true,
+      projectRoot: tmpDir,
+    });
+    expect(spDelField.modifiedCode).not.toContain("isListening: boolean");
+    expect(spDelField.modifiedCode).toContain("export class InputHandler {");
+
+    // Polyglot field splicing in Python
+    const pyClassFile = path.join(tmpDir, "service.py");
+    fs.writeFileSync(
+      pyClassFile,
+      [
+        "class WorkerService:",
+        "    max_retries: int = 3",
+        "    timeout = 30",
+        "",
+        "    def run(self):",
+        "        pass",
+      ].join("\n"),
+      "utf-8",
+    );
+    const spPyField = await splice(pyClassFile, {
+      symbol: "WorkerService.max_retries",
+      code: "max_retries: int = 10",
+      projectRoot: tmpDir,
+    });
+    expect(spPyField.modifiedCode).toContain("max_retries: int = 10");
+
+    // 4. CLI `aice splice <file> -s <sym> --stdin`
+    const cliSpliceFile = path.join(tmpDir, "cli_splice.ts");
+    fs.writeFileSync(cliSpliceFile, "export function compute() {\n  return 1;\n}\n", "utf-8");
+    const cliSpliceRes = runCli(
+      ["splice", cliSpliceFile, "-s", "compute", "--stdin"],
+      tmpDir,
+      "export function compute() {\n  return 42;\n}\n",
+    );
+    expect(cliSpliceRes.status).toBe(0);
+    expect(fs.readFileSync(cliSpliceFile, "utf-8")).toContain("return 42;");
+
+    // 5. CLI `aice create` Overwrite Guard on >25-line files
+    const largeFile = path.join(tmpDir, "large_existing.ts");
+    const largeLines = Array.from({ length: 30 }, (_, i) => `export const val${i} = ${i};`);
+    fs.writeFileSync(largeFile, `${largeLines.join("\n")}\n`, "utf-8");
+
+    // Fails without --overwrite / --force
+    const failCreateRes = runCli(["create", largeFile, "-c", "export const val0 = 999;"], tmpDir);
+    expect(failCreateRes.status).toBe(1);
+    expect(failCreateRes.stderr).toContain("already exists (31 lines)");
+    expect(failCreateRes.stderr).toContain("Do NOT rewrite existing files with 'aice create'");
+
+    // Succeeds with --overwrite
+    const okCreateRes = runCli(
+      ["create", largeFile, "-c", "export const val0 = 999;", "--overwrite"],
+      tmpDir,
+    );
+    expect(okCreateRes.status).toBe(0);
+    expect(fs.readFileSync(largeFile, "utf-8")).toContain("export const val0 = 999;");
   });
 });

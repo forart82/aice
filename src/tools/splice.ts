@@ -1354,7 +1354,7 @@ function locatePythonDeclarationSpan(
   }
 
   if (targetLine < 0) {
-    const varRegex = new RegExp(`^([ \\t]*)${escMember}\\s*(?::\\s*[^=]+)?=(?!=)`);
+    const varRegex = new RegExp(`^([ \\t]*)${escMember}\\s*(?::[^\\n=]+(?:=[^\\n]*)?|=(?!=)|$)`);
     for (let i = searchStartLine; i < searchEndLine; i++) {
       const m = lines[i].match(varRegex);
       if (m && (className || m[1].length === 0)) {
@@ -1751,7 +1751,7 @@ function locateBraceLanguageDeclarationSpan(
           openBraceIdx = pos;
           break;
         }
-        if (ch === ";") {
+        if (ch === ";" || (enclosingClass && ch === ",")) {
           declEnd = pos + 1;
           break;
         }
@@ -1936,6 +1936,17 @@ function locateBraceLanguageDeclarationSpan(
         );
         if (res) return res;
       }
+      if (className) {
+        const fieldMatch = line.match(
+          /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?([A-Za-z0-9_]+)\s*:\s*[^,;]+[,;]?/,
+        );
+        if (
+          fieldMatch &&
+          (fieldMatch[2] === memberName || normIdForSpan(fieldMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, fieldMatch[1], fieldMatch[2], resolvedClassName);
+        }
+      }
       if (!className) {
         const structMatch = line.match(
           /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:struct|enum|trait|impl|type|const|static)\s+([A-Za-z0-9_]+)\b/,
@@ -1966,6 +1977,17 @@ function locateBraceLanguageDeclarationSpan(
         );
         if (res) return res;
       }
+      if (className) {
+        const propMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|final\s+|lateinit\s+|const\s+)*(?:val|var)\s+([A-Za-z0-9_]+)\b/,
+        );
+        if (
+          propMatch &&
+          (propMatch[2] === memberName || normIdForSpan(propMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, propMatch[1], propMatch[2], resolvedClassName);
+        }
+      }
       if (!className) {
         const ktTopMatch = line.match(
           /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|open\s+|abstract\s+|data\s+|sealed\s+|value\s+|enum\s+)*(?:class|interface|object|typealias|const\s+val|val)\s+([A-Za-z0-9_]+)\b/,
@@ -1988,6 +2010,17 @@ function locateBraceLanguageDeclarationSpan(
           buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName),
         );
         if (res) return res;
+      }
+      if (className) {
+        const phpPropMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|static\s+|readonly\s+|var\s+)*(?:[A-Za-z0-9_\\|?]+\s+)*\$?([A-Za-z0-9_]+)\s*(?:=[^;]+)?;?/,
+        );
+        if (
+          phpPropMatch &&
+          (phpPropMatch[2] === memberName || normIdForSpan(phpPropMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, phpPropMatch[1], phpPropMatch[2], resolvedClassName);
+        }
       }
       if (!className) {
         const phpTopMatch = line.match(
@@ -2030,6 +2063,17 @@ function locateBraceLanguageDeclarationSpan(
           buildBraceSpanFromLine(i, cMethodMatch[1], cMethodMatch[2], resolvedClassName),
         );
         if (res) return res;
+      }
+      if (className) {
+        const cFieldMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|readonly\s+|volatile\s+|const\s+|constexpr\s+|inline\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:=|;|\{|=>)/,
+        );
+        if (
+          cFieldMatch &&
+          (cFieldMatch[2] === memberName || normIdForSpan(cFieldMatch[2]) === normMember)
+        ) {
+          return buildBraceSpanFromLine(i, cFieldMatch[1], cFieldMatch[2], resolvedClassName);
+        }
       }
     }
 
@@ -2113,6 +2157,148 @@ function enrichSpanWithOffsetsAndLines(
   return span;
 }
 
+export function locateImportBlockSpan(
+  nativeSource: string,
+  targetLang: TargetLanguage,
+): NativeSpanInfo | undefined {
+  const lines = nativeSource.split("\n");
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  const isImportLine = (line: string): boolean => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    switch (targetLang) {
+      case "typescript":
+      case "javascript":
+      case "tsx":
+        return /^import\b|^from\b/.test(trimmed);
+      case "python":
+        return /^import\b|^from\b/.test(trimmed);
+      case "cpp":
+        return /^#\s*include\b/.test(trimmed);
+      case "csharp":
+        return /^using\b(?!\s*\()/.test(trimmed);
+      case "rust":
+        return /^(?:pub\s+)?use\b/.test(trimmed);
+      case "go":
+        return /^import\b/.test(trimmed);
+      case "kotlin":
+        return /^import\b/.test(trimmed);
+      case "php":
+        return /^use\b/.test(trimmed);
+      default:
+        return /^import\b|^use\b|^using\b|^#\s*include\b|^from\b/.test(trimmed);
+    }
+  };
+
+  let firstImportLine = -1;
+  let lastImportLine = -1;
+  let inParenGroup = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (inParenGroup) {
+      lastImportLine = i;
+      if (trimmed.includes(")") || trimmed.includes("};")) {
+        inParenGroup = false;
+      }
+      continue;
+    }
+
+    if (isImportLine(line)) {
+      if (firstImportLine === -1) {
+        firstImportLine = i;
+      }
+      lastImportLine = i;
+      if (
+        trimmed.startsWith("import (") ||
+        trimmed === "import (" ||
+        (trimmed.includes("{") && !trimmed.includes("}")) ||
+        (trimmed.includes("(") && !trimmed.includes(")"))
+      ) {
+        inParenGroup = true;
+      }
+    } else if (firstImportLine !== -1) {
+      if (
+        trimmed === "" ||
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("/*") ||
+        trimmed.startsWith("*")
+      ) {
+        let hasMoreImports = false;
+        for (let j = i + 1; j < Math.min(lines.length, i + 15); j++) {
+          if (isImportLine(lines[j])) {
+            hasMoreImports = true;
+            break;
+          }
+          const t = lines[j].trim();
+          if (
+            t !== "" &&
+            !t.startsWith("//") &&
+            !t.startsWith("#") &&
+            !t.startsWith("/*") &&
+            !t.startsWith("*")
+          ) {
+            break;
+          }
+        }
+        if (hasMoreImports) {
+          continue;
+        }
+      }
+      break;
+    }
+  }
+
+  if (firstImportLine === -1) {
+    let insertLine = 0;
+    if (lines.length > 0 && lines[0].startsWith("#!")) {
+      insertLine = 1;
+    } else if (targetLang === "go") {
+      for (let k = 0; k < lines.length; k++) {
+        if (/^package\s+/.test(lines[k].trim())) {
+          insertLine = k + 1;
+          break;
+        }
+      }
+    }
+    const insertPos = insertLine < lineOffsets.length ? lineOffsets[insertLine] : 0;
+    return {
+      declStart: insertPos,
+      fullDeclStart: insertPos,
+      declEnd: insertPos,
+      tokenStart: insertPos,
+      declIndent: "",
+      memberName: "imports",
+    };
+  }
+
+  const declStart = lineOffsets[firstImportLine];
+  let declEnd: number;
+  if (lastImportLine + 1 < lineOffsets.length) {
+    declEnd = lineOffsets[lastImportLine + 1];
+  } else {
+    declEnd = nativeSource.length;
+  }
+
+  return {
+    declStart,
+    fullDeclStart: declStart,
+    declEnd,
+    tokenStart: declStart,
+    declIndent: "",
+    memberName: "imports",
+  };
+}
+
 export function locateNativeDeclarationSpan(
   nativeSource: string,
   symbolOrTargetLang: string,
@@ -2140,6 +2326,13 @@ export function locateNativeDeclarationSpan(
   } else {
     symbolSelector = symbolOrTargetLang;
     targetLang = targetLangOrSymbol as TargetLanguage;
+  }
+
+  if (symbolSelector.toLowerCase() === "imports" || symbolSelector.toLowerCase() === "import") {
+    const importSpan = locateImportBlockSpan(nativeSource, targetLang);
+    if (importSpan) {
+      return enrichSpanWithOffsetsAndLines(nativeSource, importSpan);
+    }
   }
 
   let rawSpan: NativeSpanInfo | undefined;
@@ -3617,7 +3810,7 @@ function emitNativeSnippetForContext(
       insideClass,
       goReceiver: spanInfo?.goReceiver,
     }).trim();
-    if (preprocessed && preprocessed !== dedented) {
+    if (preprocessed) {
       return preprocessed;
     }
     throw err;
@@ -4413,6 +4606,89 @@ function resolveSingleNativeEditAgainstSource(
     throw new Error("Must specify target symbol with --symbol when splicing native file");
   }
 
+  const lineRangeMatch = anchorSymbol.trim().match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
+  if (lineRangeMatch) {
+    const startLine = parseInt(lineRangeMatch[1], 10);
+    const endLine = lineRangeMatch[2] ? parseInt(lineRangeMatch[2], 10) : startLine;
+
+    const rawLines = nativeSource.split(/\r?\n/);
+    const totalLines = rawLines.length;
+
+    if (startLine < 1 || endLine > totalLines || startLine > endLine) {
+      throw new Error(
+        `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive)`,
+      );
+    }
+
+    const lineStarts: number[] = [0];
+    for (let i = 0; i < nativeSource.length; i++) {
+      if (nativeSource[i] === "\n") {
+        lineStarts.push(i + 1);
+      }
+    }
+
+    const startOffset = lineStarts[startLine - 1];
+    const endOffset = endLine < lineStarts.length ? lineStarts[endLine] : nativeSource.length;
+    const originalSnippet = nativeSource.slice(startOffset, endOffset);
+
+    if (options.delete) {
+      let delStart = startOffset;
+      const delEnd = endOffset;
+      if (endLine >= lineStarts.length && startOffset > 0) {
+        if (startOffset >= 2 && nativeSource[startOffset - 2] === "\r") {
+          delStart = startOffset - 2;
+        } else {
+          delStart = startOffset - 1;
+        }
+      }
+      return {
+        symbol: anchorSymbol,
+        startOffset: delStart,
+        endOffset: delEnd,
+        replacement: "",
+        originalSnippet,
+        newSnippet: "",
+      };
+    }
+
+    let processedCode = preprocessHybridAndIdiomsLossless(rawSnippet, targetLang, idioms);
+
+    const origFirstLine = rawLines[startLine - 1] ?? "";
+    const origIndent = origFirstLine.match(/^[ \t]*/)?.[0] ?? "";
+    if (origIndent.length > 0) {
+      const procLines = processedCode.split(/\r?\n/);
+      if (procLines.length > 0 && procLines[0].length > 0 && !/^[ \t]/.test(procLines[0])) {
+        processedCode = procLines
+          .map((line) => (line.length > 0 && !/^[ \t]/.test(line) ? `${origIndent}${line}` : line))
+          .join("\n");
+      }
+    }
+
+    const isCrLf =
+      (endOffset > 0 && nativeSource.slice(0, endOffset).endsWith("\r\n")) ||
+      nativeSource.includes("\r\n");
+    const nl = isCrLf ? "\r\n" : "\n";
+
+    if (isCrLf) {
+      processedCode = processedCode.replace(/\r?\n/g, "\r\n");
+    }
+
+    if (endLine < lineStarts.length) {
+      if (!processedCode.endsWith("\n") && !processedCode.endsWith("\r\n")) {
+        processedCode += nl;
+      }
+    }
+
+    return {
+      symbol: anchorSymbol,
+      startOffset,
+      endOffset,
+      replacement: processedCode,
+      originalSnippet,
+      newSnippet: processedCode,
+    };
+  }
+
   const preferAccessor: "get" | "set" | undefined =
     /^\s*(?:pub\s+|public\s+|private\s+|protected\s+)?get\b/.test(rawSnippet)
       ? "get"
@@ -4443,6 +4719,12 @@ function resolveSingleNativeEditAgainstSource(
   if (options.delete) {
     const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
     let delEnd = spanInfo.declEnd;
+    while (
+      delEnd < nativeSource.length &&
+      (nativeSource[delEnd] === " " || nativeSource[delEnd] === "\t")
+    ) {
+      delEnd++;
+    }
     if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
     else if (nativeSource[delEnd] === "\n") delEnd += 1;
     return {
@@ -4620,12 +4902,18 @@ export function spliceNativeSource(
       // fall through
     }
   }
+  const isLineRange =
+    Boolean(options.symbol?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i)) ||
+    Boolean(options.insertAfter?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i)) ||
+    Boolean(options.insertBefore?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i));
+
   if (
-    targetLang === "css" ||
-    targetLang === "json" ||
-    targetLang === "yaml" ||
-    targetLang === "html" ||
-    targetLang === "twig"
+    !isLineRange &&
+    (targetLang === "css" ||
+      targetLang === "json" ||
+      targetLang === "yaml" ||
+      targetLang === "html" ||
+      targetLang === "twig")
   ) {
     const dialectRes = spliceDialectNativeSource(
       nativeSource,
