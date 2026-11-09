@@ -816,7 +816,7 @@ function enrichAndResolveSymbolLineRanges(
   if (maxDepth < 1) return;
 
   for (let i = symbols.length - 1; i >= 0; i--) {
-    if (symbols[i].kind === "var" && symbols[i].name === "_") {
+    if ((symbols[i].kind === "var" || symbols[i].kind === "const") && symbols[i].name === "_") {
       symbols.splice(i, 1);
     }
   }
@@ -824,9 +824,8 @@ function enrichAndResolveSymbolLineRanges(
   const actionableAstItems = ast.items.filter(
     (it) =>
       !(it.kind === "FunctionDecl" && it.name === "__top_level__") &&
-      !(it.kind === "VarDecl" && it.name === "_"),
+      !((it.kind === "VarDecl" || it.kind === "ConstDecl") && it.name === "_"),
   );
-
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
     const astItem = actionableAstItems[i];

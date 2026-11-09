@@ -114,13 +114,22 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_outline",
     description:
-      "Generate structural skeleton outline of an .aice or native file or project directory achieving 85-90%+ token reduction.",
+      "Generate structural skeleton outline of one or more .aice or native files or project directories achieving 85-90%+ token reduction.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Path to .aice or native file or project directory",
+          description: "Path (or comma-separated paths) to .aice or native file or project directory",
+        },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional array of file or directory paths (e.g., ['src', 'tests'])",
+        },
+        compact: {
+          type: "boolean",
+          description: "Optional compact directory mode override (auto-enabled for 60+ files)",
         },
         idioms: {
           type: "boolean",
@@ -763,7 +772,14 @@ export class AiceMcpServer {
         if (symbolFilter) {
           text = `## Focused Symbol: ${symbolFilter}\n\n${text}`;
           if (callers) {
-            callers = callers.filter((c) => c.importedSymbols.includes(symbolFilter));
+            const rootSym = symbolFilter.split(/\.|::/)[0]?.trim() ?? symbolFilter;
+            callers = callers.filter(
+              (c) =>
+                c.importedSymbols.includes(symbolFilter) ||
+                c.importedSymbols.includes(rootSym) ||
+                c.importedSymbols.includes("*") ||
+                (c.callSiteLines && c.callSiteLines.length > 0),
+            );
           }
         }
         if (result.targetOutline) {
@@ -780,7 +796,13 @@ export class AiceMcpServer {
           text +=
             `\n\n## Downstream Callers\n` +
             callers
-              .map((c) => `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})`)
+              .map((c) => {
+                const callSitesSuffix =
+                  c.usedSymbol && c.callSiteLines && c.callSiteLines.length > 0
+                    ? ` (uses ${c.usedSymbol} at [${c.callSiteLines.map((l) => `L${l}`).join(", ")}])`
+                    : "";
+                return `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})${callSitesSuffix}`;
+              })
               .join("\n");
         }
         if (effectiveIdioms && result.idioms && Object.keys(result.idioms).length > 0) {
@@ -847,6 +869,7 @@ export class AiceMcpServer {
             outlinePath(fullPath, {
               json: false,
               stats: true,
+              compact: typeof args.compact === "boolean" ? args.compact : undefined,
               idioms: effectiveIdioms,
               projectRoot,
             }),

@@ -465,5 +465,135 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
         fs.rmSync(tmpHome, { recursive: true, force: true });
       }
     }, 30000);
+
+    it("handles install.sh ${#arr[@]} brace spans, heredoc masking, 4-backtick nested markdown fences, test.each blocks, non-destructive auto-append, and multi-line import exclusion in Downstream Callers", async () => {
+      // 1. Real install.sh outline & context span for install_sys_packages (contains ${#SUDO_CMD[@]}) and Substep 2.2b
+      const installShPath = path.resolve(process.cwd(), "install.sh");
+      const installOutline = generateOutline(installShPath);
+      expect(installOutline.text).toContain("fn install_sys_packages()");
+      expect(installOutline.text).not.toContain("fn install_sys_packages() # [L118-L118]");
+      expect(installOutline.text).toContain("Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update");
+      expect(installOutline.text).not.toContain("fn aice_cheatsheet()");
+
+      const sysPkgCtx = await generateContext(installShPath, {
+        symbol: "install_sys_packages",
+        includeCallers: false,
+      });
+      expect(sysPkgCtx.targetContent.split("\n").length).toBeGreaterThan(25);
+      expect(sysPkgCtx.targetContent).toContain("SUDO_CMD");
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-v0920-edge-"));
+      try {
+        // 2. test.each / describe.each / tagged template test.each`...` blocks
+        const paramTestFile = path.join(tmpDir, "param.test.ts");
+        fs.writeFileSync(
+          paramTestFile,
+          [
+            'import { describe, expect, test } from "vitest";',
+            'describe.each([[1, 2]])("Suite %i", (a, b) => {',
+            '  test.each([[1, 1], [2, 2]])("TC-EACH-001: compares %i and %i", (x, y) => {',
+            "    expect(x).toBe(y);",
+            "  });",
+            "  test.each`",
+            "    val  | expected",
+            "    ${1} | ${1}",
+            '  `("TC-TAG-002: tagged template test, with comma", ({ val, expected }) => {',
+            "    expect(val).toBe(expected);",
+            "  });",
+            "});",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+        const paramOutline = generateOutline(paramTestFile);
+        expect(paramOutline.text).toContain('describe "Suite %i" # [L2-L12]');
+        expect(paramOutline.text).toContain('test "TC-EACH-001: compares %i and %i" # [L3-L5]');
+        expect(paramOutline.text).toContain('test "TC-TAG-002: tagged template test, with comma" # [L6-L11]');
+
+        const taggedCtx = await generateContext(paramTestFile, {
+          symbol: "TC-TAG-002: tagged template test, with comma",
+          includeCallers: false,
+        });
+        expect(taggedCtx.targetContent).toContain("TC-TAG-002");
+
+        // 3. 4-backtick outer fence wrapping 3-backtick inner fence & non-destructive auto-append on .md
+        const mdFile = path.join(tmpDir, "GUIDE.md");
+        fs.writeFileSync(
+          mdFile,
+          [
+            "# Project Setup Guide",
+            "Intro paragraph.",
+            "",
+            "````markdown",
+            "```bash",
+            "# Inside nested code block - NOT a heading!",
+            "=== fake/header.ts ===",
+            "```",
+            "````",
+            "",
+            "## Commands",
+            "Run build.",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+        const mdOutline = generateOutline(mdFile);
+        expect(mdOutline.text).not.toContain("Inside nested code block");
+        expect(mdOutline.text).toContain("# Project Setup Guide # [L1-L13]");
+        expect(mdOutline.text).toContain("## Commands # [L11-L13]");
+
+        // Auto-appending '## Setup' must NOT overwrite '# Project Setup Guide'
+        await splice(mdFile, {
+          symbol: "Setup",
+          code: "## Setup\nRun npm install.",
+          projectRoot: tmpDir,
+        });
+        const updatedMd = fs.readFileSync(mdFile, "utf-8");
+        expect(updatedMd).toContain("# Project Setup Guide");
+        expect(updatedMd).toContain("## Commands");
+        expect(updatedMd).toContain("## Setup\nRun npm install.");
+
+        // 4. Multi-line import exclusion in Downstream Callers & /pattern:with:colon/ workspace search
+        const modFile = path.join(tmpDir, "engine.ts");
+        fs.writeFileSync(
+          modFile,
+          "export function runEngineStep(): number {\n  return 42;\n}\n",
+          "utf-8",
+        );
+        const callerMulti = path.join(tmpDir, "caller.ts");
+        fs.writeFileSync(
+          callerMulti,
+          [
+            "import {",
+            "  runEngineStep,",
+            '} from "./engine.js";',
+            "",
+            "export function execute(): number {",
+            "  return runEngineStep();",
+            "}",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+        const engineCtx = await generateContext(modFile, {
+          symbol: "runEngineStep",
+          includeCallers: true,
+          projectRoot: tmpDir,
+        });
+        // Line 2 is inside multi-line import; only Line 6 is the actual call site!
+        expect(engineCtx.formattedBundle).toContain("(uses runEngineStep at [L6])");
+        expect(engineCtx.formattedBundle).not.toContain("[L2");
+
+        const colonSearch = await generateWorkspaceContext(tmpDir, {
+          symbol: "/execute\\(\\): number/",
+          projectRoot: tmpDir,
+        });
+        expect(colonSearch.formattedBundle).toContain("caller.ts");
+        expect(colonSearch.formattedBundle).toContain("[L5]");
+        expect(colonSearch.formattedBundle).not.toContain("GUIDE.md");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
   });
 });

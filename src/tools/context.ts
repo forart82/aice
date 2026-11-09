@@ -367,6 +367,92 @@ function extractImportsFromFile(filePath: string, preReadContent?: string): Impo
   }
 }
 
+function splitSymbolSelectors(rawSymbol: string): string[] {
+  const trimmed = rawSymbol.trim();
+  if (!trimmed) return [];
+  if (/^\/.+\/[gimsuy]*$/.test(trimmed)) {
+    return [trimmed];
+  }
+  const out: string[] = [];
+  let current = "";
+  let inRegex = false;
+  let inQuote: string | null = null;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i]!;
+    const prev = i > 0 ? trimmed[i - 1] : "";
+    if (inQuote) {
+      current += ch;
+      if (ch === inQuote && prev !== "\\") {
+        inQuote = null;
+      }
+      continue;
+    }
+    if (inRegex) {
+      current += ch;
+      if (ch === "/" && prev !== "\\") {
+        inRegex = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inQuote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "/" && current.trim() === "") {
+      inRegex = true;
+      current += ch;
+      continue;
+    }
+    if (ch === ",") {
+      const piece = current.trim();
+      if (piece) out.push(piece);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  const last = current.trim();
+  if (last) out.push(last);
+  return out;
+}
+
+function collectImportLineSet(fileLines: string[], imports: ImportDecl[]): Set<number> {
+  const importLines = new Set<number>();
+  for (const imp of imports) {
+    const sLine = imp.span?.start?.line;
+    const eLine = imp.span?.end?.line ?? sLine;
+    if (sLine && eLine) {
+      for (let l = sLine; l <= eLine; l++) {
+        importLines.add(l);
+      }
+    }
+  }
+  let inMultilineImport = false;
+  for (let idx = 0; idx < fileLines.length; idx++) {
+    const ln = fileLines[idx]!;
+    if (inMultilineImport) {
+      importLines.add(idx + 1);
+      if (/\bfrom\s+['"]/.test(ln) || ln.includes(";")) {
+        inMultilineImport = false;
+      }
+      continue;
+    }
+    if (/^\s*(?:import\b|export\s+\{|from\b)/.test(ln)) {
+      importLines.add(idx + 1);
+      if (
+        ln.includes("{") &&
+        !ln.includes("}") &&
+        !/\bfrom\s+['"]/.test(ln) &&
+        !ln.trimEnd().endsWith(";")
+      ) {
+        inMultilineImport = true;
+      }
+    }
+  }
+  return importLines;
+}
+
 function scanWorkspaceCallers(
   targetFullPath: string,
   projectRoot: string,
@@ -375,20 +461,21 @@ function scanWorkspaceCallers(
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
   const filesToScan: string[] = [];
+
   const resolvedRoot = path.resolve(projectRoot);
   const visitedDirs = new Set<string>();
 
-  function walk(dir: string): void {
+  const walk = (dir: string) => {
     let realDir: string;
     try {
       realDir = fs.realpathSync(dir);
     } catch {
-      realDir = dir;
+      return;
     }
     if (visitedDirs.has(realDir)) return;
     visitedDirs.add(realDir);
 
-    let entries: fs.Dirent[] = [];
+    let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
@@ -396,40 +483,35 @@ function scanWorkspaceCallers(
     }
 
     for (const entry of entries) {
-      const full = path.join(dir, entry.name);
+      if (entry.name.startsWith(".")) continue;
+      if (
+        entry.name === "node_modules" ||
+        entry.name === "dist" ||
+        entry.name === "build" ||
+        entry.name === "coverage" ||
+        entry.name === "target" ||
+        entry.name === "vendor"
+      ) {
+        continue;
+      }
+      const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        if (
-          entry.name === "node_modules" ||
-          entry.name === ".git" ||
-          entry.name === "dist" ||
-          entry.name === "build" ||
-          entry.name === ".aice-build" ||
-          entry.name.startsWith(".")
-        ) {
-          continue;
-        }
-        walk(full);
+        walk(fullPath);
       } else if (entry.isFile()) {
-        if (entry.name.endsWith(".trivia.json") || entry.name === "aice.config.json") {
-          continue;
-        }
-        if (entry.name.endsWith(".aice")) {
-          filesToScan.push(full);
-        } else {
-          const ext = path.extname(entry.name).toLowerCase();
-          if (KNOWN_TARGET_EXTENSIONS.has(ext) && !fs.existsSync(`${full}.aice`)) {
-            filesToScan.push(full);
-          }
+        const ext = path.extname(entry.name).toLowerCase();
+        if (entry.name.endsWith(".aice") || KNOWN_TARGET_EXTENSIONS.has(ext)) {
+          filesToScan.push(fullPath);
         }
       }
     }
-  }
+  };
 
   walk(resolvedRoot);
 
+  // Extract leaf symbol/member name when queriedSymbol is provided (e.g. "GameApp.getCoreConstants" -> "getCoreConstants")
   let queriedLeaf: string | undefined;
   if (queriedSymbol) {
-    const firstSym = queriedSymbol.split(",")[0].trim();
+    const firstSym = splitSymbolSelectors(queriedSymbol)[0]?.trim() ?? "";
     if (
       firstSym &&
       firstSym !== "*" &&
@@ -479,7 +561,7 @@ function scanWorkspaceCallers(
       continue;
     }
 
-    let rawContent: string;
+    let rawContent = "";
     try {
       rawContent = fs.readFileSync(file, "utf-8");
     } catch {
@@ -505,20 +587,16 @@ function scanWorkspaceCallers(
             const escLeaf = queriedLeaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             const leafRe = new RegExp(`\\b${escLeaf}\\b`);
             const fileLines = rawContent.split(/\r?\n/);
+            const importLineSet = collectImportLineSet(fileLines, imports);
             const nonImportHits: number[] = [];
-            const allHits: number[] = [];
             for (let idx = 0; idx < fileLines.length; idx++) {
-              const ln = fileLines[idx];
-              if (leafRe.test(ln)) {
-                allHits.push(idx + 1);
-                if (!/^\s*(?:import\b|from\b|export\s+\{)/.test(ln)) {
-                  nonImportHits.push(idx + 1);
-                }
+              const ln = fileLines[idx]!;
+              if (leafRe.test(ln) && !importLineSet.has(idx + 1)) {
+                nonImportHits.push(idx + 1);
               }
             }
-            const effectiveHits = nonImportHits.length > 0 ? nonImportHits : allHits;
-            if (effectiveHits.length > 0) {
-              callSiteLines = effectiveHits;
+            if (nonImportHits.length > 0) {
+              callSiteLines = nonImportHits;
             }
           }
           callers.push({
@@ -535,7 +613,9 @@ function scanWorkspaceCallers(
   }
 
   callers.sort((a, b) => {
-    if (a.filePath !== b.filePath) return a.filePath.localeCompare(b.filePath);
+    if (a.filePath !== b.filePath) {
+      return a.filePath.localeCompare(b.filePath);
+    }
     return a.line - b.line;
   });
 
@@ -842,13 +922,7 @@ export async function generateWorkspaceContext(
       // ignore scan errors
     }
   }
-
-  const requestedSelectors = options.symbol
-    ? options.symbol
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean)
-    : [];
+  const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
 
   for (const f of resolved.files) {
     const relFile = formatDisplayPath(f, projectRoot);
@@ -924,11 +998,24 @@ export async function generateWorkspaceContext(
           for (const rawSel of requestedSelectors) {
             let symSel = rawSel;
             const colonIdx = rawSel.indexOf(":");
-            if (colonIdx > 0 && !rawSel.startsWith("block:") && !rawSel.includes("::")) {
-              const fileFilter = rawSel.slice(0, colonIdx).trim();
-              symSel = rawSel.slice(colonIdx + 1).trim();
-              if (path.basename(f) !== fileFilter && relFile !== fileFilter) {
-                continue;
+            if (
+              colonIdx > 0 &&
+              !rawSel.startsWith("block:") &&
+              !rawSel.startsWith("/") &&
+              !rawSel.startsWith("#") &&
+              !rawSel.includes("::")
+            ) {
+              const candidateFilter = rawSel.slice(0, colonIdx).trim();
+              const matchesKnownFile = resolved.files.some(
+                (cand) =>
+                  path.basename(cand) === candidateFilter ||
+                  formatDisplayPath(cand, projectRoot) === candidateFilter,
+              );
+              if (matchesKnownFile) {
+                symSel = rawSel.slice(colonIdx + 1).trim();
+                if (path.basename(f) !== candidateFilter && relFile !== candidateFilter) {
+                  continue;
+                }
               }
             }
             if (symSel === "@first" || symSel === "@1") {
@@ -965,9 +1052,11 @@ export async function generateWorkspaceContext(
             }
           }
         }
-        const sliceBody = [symHeader, ...fileSlices].filter(Boolean).join("\n\n");
-        if (sliceBody) {
-          symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+        if (fileSlices.length > 0) {
+          const sliceBody = [symHeader, ...fileSlices].filter(Boolean).join("\n\n");
+          if (sliceBody) {
+            symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+          }
         }
       }
 
@@ -1659,10 +1748,7 @@ export async function generateContext(
           allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}\n\n${unwrapped}` : unwrapped;
       }
     } else {
-      const requestedSymbols = options.symbol
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
+      const requestedSymbols = splitSymbolSelectors(options.symbol);
       if (requestedSymbols.length === 1) {
         try {
           targetContent = extractSymbolFromAiceSource(
@@ -1675,14 +1761,27 @@ export async function generateContext(
         }
       } else if (requestedSymbols.length > 1) {
         const slicedBlocks: string[] = [];
+        let anyFailed = false;
         for (const sym of requestedSymbols) {
           try {
             slicedBlocks.push(extractSymbolFromAiceSource(targetContent, sym, fullTargetPath));
           } catch {
-            // skip symbols not present in this file when multiple symbols are listed
+            anyFailed = true;
           }
         }
-        if (slicedBlocks.length > 0) {
+        if (anyFailed && requestedSymbols.some((s) => /\s/.test(s))) {
+          try {
+            targetContent = extractSymbolFromAiceSource(
+              targetContent,
+              options.symbol.trim(),
+              fullTargetPath,
+            );
+          } catch {
+            if (slicedBlocks.length > 0) {
+              targetContent = slicedBlocks.join("\n\n");
+            }
+          }
+        } else if (slicedBlocks.length > 0) {
           targetContent = slicedBlocks.join("\n\n");
         }
       }

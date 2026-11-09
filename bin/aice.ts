@@ -928,7 +928,8 @@ program
     "Path(s) to source file(s) or directories (e.g., 'aice outline src tests')",
   )
   .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
-  .option("--compact", "Compact token-bounded directory mode (auto-enabled for 100+ files)")
+  .option("--compact", "Compact token-bounded directory mode (auto-enabled for 60+ files)")
+  .option("--no-compact", "Disable compact directory mode even for 60+ files")
   .option("--no-types", "Exclude type annotations")
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
@@ -979,7 +980,7 @@ Examples:
 
           const outlineOpts: OutlineOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
-            compact: !!options.compact,
+            compact: options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
             json: !!options.json,
@@ -1093,7 +1094,7 @@ Examples:
         if (hasDirectoryTarget || options.compact) {
           const outlineOpts: OutlineOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
-            compact: !!options.compact,
+            compact: options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
             json: !!options.json,
@@ -1129,7 +1130,7 @@ Examples:
           for (const item of resolvedTargets) {
             const outlineOpts: OutlineOptions = {
               depth: options.depth !== undefined ? Number(options.depth) : undefined,
-              compact: !!options.compact,
+              compact: options.compact,
               includeTypes: options.types !== false,
               idioms: options.idioms,
               json: !!options.json,

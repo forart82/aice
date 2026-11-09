@@ -1118,17 +1118,21 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     ".env",
     ".sql",
     ".sh",
+    ".bash",
+    ".zsh",
+    ".ps1",
+    ".cmd",
+    ".bat",
+    ".md",
+    ".markdown",
     ".txt",
     ".lock",
   ]);
-
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
     if (!clean || /\s/.test(clean)) return false;
     const base = path.basename(clean);
-    if (passthroughFilenames.has(base)) {
-      return true;
-    }
+    if (passthroughFilenames.has(base)) return true;
     const ext = path.extname(clean).toLowerCase();
     if (!ext) return false;
     return (
@@ -1141,12 +1145,46 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
 
   const preHeaderLines: string[] = [];
   const sections: Array<{ filePath: string; lines: string[] }> = [];
+  let inMdFence = false;
+  let mdFenceChar = "";
+  let mdFenceLen = 0;
 
   for (const line of lines) {
+    const activeFp = sections.length > 0 ? sections[sections.length - 1].filePath : undefined;
+    const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
+    if (isMdSection && sections.length > 0) {
+      if (!inMdFence) {
+        const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+        if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
+          inMdFence = true;
+          mdFenceChar = openMatch[1][0];
+          mdFenceLen = openMatch[1].length;
+          sections[sections.length - 1].lines.push(line);
+          continue;
+        }
+      } else {
+        const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+        if (
+          closeMatch &&
+          closeMatch[1][0] === mdFenceChar &&
+          closeMatch[1].length >= mdFenceLen
+        ) {
+          inMdFence = false;
+          mdFenceChar = "";
+          mdFenceLen = 0;
+        }
+        sections[sections.length - 1].lines.push(line);
+        continue;
+      }
+    }
+
     const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
       const cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
       if (isTargetFilePath(cand)) {
+        inMdFence = false;
+        mdFenceChar = "";
+        mdFenceLen = 0;
         sections.push({ filePath: cand, lines: [] });
         continue;
       }

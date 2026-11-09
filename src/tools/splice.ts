@@ -1077,11 +1077,16 @@ export interface NativeTestBlockInfo {
 
 function getTestRunnerRootKind(expr: ts.Expression): "describe" | "test" | "it" | undefined {
   let cur: ts.Expression = expr;
-  if (ts.isCallExpression(cur)) {
-    cur = cur.expression;
-  }
-  while (ts.isPropertyAccessExpression(cur)) {
-    cur = cur.expression;
+  while (
+    ts.isCallExpression(cur) ||
+    ts.isTaggedTemplateExpression(cur) ||
+    ts.isPropertyAccessExpression(cur)
+  ) {
+    if (ts.isCallExpression(cur) || ts.isPropertyAccessExpression(cur)) {
+      cur = cur.expression;
+    } else {
+      cur = cur.tag;
+    }
   }
   if (ts.isIdentifier(cur)) {
     if (cur.text === "describe" || cur.text === "test" || cur.text === "it") {
@@ -1151,9 +1156,12 @@ export function matchNativeTestBlockSpan(
 ): NativeSpanInfo | undefined {
   let q = rawSelector.trim();
   if (!q) return undefined;
+  const hasExplicitRunnerPrefix = /^(?:describe|test|it)\s+/i.test(q);
   q = q.replace(/^(?:describe|test|it)\s+/i, "").trim();
   q = q.replace(/^["'`]|["'`]$/g, "").trim();
-  if (!q) return undefined;
+  if (!q || /^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
+    return undefined;
+  }
 
   const blocks = extractNativeTestBlocks(nativeSource);
   if (blocks.length === 0) return undefined;
@@ -1165,19 +1173,33 @@ export function matchNativeTestBlockSpan(
     blocks.find((b) => b.title.toLowerCase() === lowerQ);
   if (exact) return exact.spanInfo;
 
-  const idOrPrefix =
-    blocks.find(
-      (b) =>
-        b.title.startsWith(`${q}:`) ||
-        b.title.startsWith(`${q} `) ||
-        b.title.startsWith(`${q}-`) ||
-        b.title.startsWith(q),
-    ) ??
-    blocks.find((b) => b.title.toLowerCase().startsWith(lowerQ)) ??
-    blocks.find((b) => b.title.includes(q)) ??
-    blocks.find((b) => b.title.toLowerCase().includes(lowerQ));
+  const delimitedPrefixMatches = blocks.filter((b) => {
+    if (!b.title.toLowerCase().startsWith(lowerQ)) return false;
+    const nextChar = b.title[q.length];
+    return nextChar === ":" || nextChar === " " || nextChar === "-" || nextChar === ".";
+  });
+  if (delimitedPrefixMatches.length > 0) {
+    return (
+      delimitedPrefixMatches.find((b) => b.title.startsWith(q)) ?? delimitedPrefixMatches[0]
+    )?.spanInfo;
+  }
 
-  return idOrPrefix?.spanInfo;
+  const startsWithMatches = blocks.filter((b) => b.title.toLowerCase().startsWith(lowerQ));
+  if (
+    startsWithMatches.length === 1 &&
+    (q.length >= 4 || hasExplicitRunnerPrefix || /\s/.test(q))
+  ) {
+    return startsWithMatches[0].spanInfo;
+  }
+
+  if (hasExplicitRunnerPrefix || /\s/.test(q) || /[-_:]/.test(q)) {
+    const substrMatches = blocks.filter((b) => b.title.toLowerCase().includes(lowerQ));
+    if (substrMatches.length === 1) {
+      return substrMatches[0].spanInfo;
+    }
+  }
+
+  return undefined;
 }
 
 export interface ScriptOrMarkdownSymbolInfo {
@@ -1222,22 +1244,31 @@ export function extractScriptOrMarkdownSymbols(
       rawLine: string;
     }> = [];
     let inFence = false;
-    let fenceMarker = "";
+    let fenceChar = "";
+    let fenceLen = 0;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
-      if (fenceMatch) {
-        const marker = fenceMatch[1][0];
-        if (!inFence) {
+      if (!inFence) {
+        const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+        if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
           inFence = true;
-          fenceMarker = marker;
-        } else if (marker === fenceMarker) {
+          fenceChar = openMatch[1][0];
+          fenceLen = openMatch[1].length;
+          continue;
+        }
+      } else {
+        const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+        if (
+          closeMatch &&
+          closeMatch[1][0] === fenceChar &&
+          closeMatch[1].length >= fenceLen
+        ) {
           inFence = false;
-          fenceMarker = "";
+          fenceChar = "";
+          fenceLen = 0;
         }
         continue;
       }
-      if (inFence) continue;
       const m = line.match(/^(\s*)(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
       if (m) {
         rawHeadings.push({
@@ -1284,21 +1315,43 @@ export function extractScriptOrMarkdownSymbols(
     return results;
   }
 
+  // Precompute heredoc line mask for shell scripts so inner heredoc lines aren't parsed as top-level symbols
+  const heredocMask = new Array<boolean>(lines.length).fill(false);
+  if (targetLang === "shell") {
+    let activeHeredocDelim: string | null = null;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (activeHeredocDelim !== null) {
+        heredocMask[i] = true;
+        if (line.trim() === activeHeredocDelim) {
+          activeHeredocDelim = null;
+        }
+        continue;
+      }
+      if (/^\s*#/.test(line)) continue;
+      const hdMatch = line.match(/<<-?\s*(?:['"]([^'"]+)['"]|\\?([A-Za-z_][A-Za-z0-9_]*))/);
+      if (hdMatch && !line.includes("<<<")) {
+        activeHeredocDelim = hdMatch[1] ?? hdMatch[2] ?? null;
+      }
+    }
+  }
+
   // Extract section banner headers for shell, powershell, and batch (`# ── Section`, `REM ── Section`, `:: ── Section`)
   const rawSections: Array<{ lineIdx: number; indent: string; title: string; rawLine: string }> =
     [];
   for (let i = 0; i < lines.length; i++) {
+    if (heredocMask[i]) continue;
     const line = lines[i];
     const secMatch =
       targetLang === "batch"
         ? line.match(
-            /^([ \t]*)(?:REM|::)\s*(?:[─━═=-]{2,}\s*)([A-Za-z0-9_][^\r\n─━═=-]*?)(?:\s*[─━═=-]{2,})?\s*$/i,
+            /^([ \t]*)(?:REM|::)\s*(?:[─━═=-]{2,}\s+)([A-Za-z0-9_][^\r\n─━═=]*?)(?:\s*[─━═=-]+)?\s*$/i,
           )
         : line.match(
-            /^([ \t]*)#\s*(?:[─━═=-]{2,}\s*)([A-Za-z0-9_][^\r\n─━═=-]*?)(?:\s*[─━═=-]{2,})?\s*$/,
+            /^([ \t]*)#\s*(?:[─━═=-]{2,}\s+)([A-Za-z0-9_][^\r\n─━═=]*?)(?:\s*[─━═=-]+)?\s*$/,
           );
     if (secMatch) {
-      const title = secMatch[2].trim();
+      const title = secMatch[2].replace(/\s*[─━═=-]+\s*$/, "").trim();
       if (title && !/^[─━═=-]+$/.test(title)) {
         rawSections.push({
           lineIdx: i,
@@ -1388,11 +1441,14 @@ export function extractScriptOrMarkdownSymbols(
     "fi",
   ]);
   for (let i = 0; i < lines.length; i++) {
+    if (heredocMask[i]) continue;
     const line = lines[i];
     let indent = "";
     let fnName = "";
     if (targetLang === "powershell") {
-      const pm = line.match(/^([ \t]*)(?:function|filter)\s+([A-Za-z_][A-Za-z0-9_-]*)\b/i);
+      const pm = line.match(
+        /^([ \t]*)(?:function|filter)\s+(?:[A-Za-z]+:)?([A-Za-z_][A-Za-z0-9_-]*)\b/i,
+      );
       if (pm) {
         indent = pm[1];
         fnName = pm[2];
@@ -1412,12 +1468,16 @@ export function extractScriptOrMarkdownSymbols(
     let sawOpen = false;
     let endIdx = i;
     for (let j = i; j < lines.length; j++) {
+      if (j > i && heredocMask[j]) continue;
       const scanLine = lines[j];
       let inSingle = false;
       let inDouble = false;
       for (let c = 0; c < scanLine.length; c++) {
         const ch = scanLine[c];
-        if (ch === "\\" && (inSingle || inDouble)) {
+        if (
+          (ch === "\\" && (inSingle || inDouble)) ||
+          (targetLang === "powershell" && ch === "`" && inDouble)
+        ) {
           c++;
           continue;
         }
@@ -1430,7 +1490,9 @@ export function extractScriptOrMarkdownSymbols(
           continue;
         }
         if (!inSingle && !inDouble) {
-          if (ch === "#") break;
+          if (ch === "#" && (c === 0 || /[\s;&|()]/.test(scanLine[c - 1]))) {
+            break;
+          }
           if (ch === "{") {
             braceDepth++;
             sawOpen = true;
@@ -1468,9 +1530,12 @@ export function locateScriptOrMarkdownSpan(
   source: string,
   rawSelector: string,
   targetLang: TargetLanguage,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
   let q = rawSelector.trim();
   if (!q) return undefined;
+  const levelMatch = q.match(/^(#{1,6})\s+/);
+  const explicitLevel = levelMatch ? levelMatch[1].length : undefined;
   q = q
     .replace(/^(?:fn|function|filter|section)\s+/i, "")
     .replace(/\(\s*\)$/, "")
@@ -1480,17 +1545,53 @@ export function locateScriptOrMarkdownSpan(
     .replace(/\s*[─━═=-]+\s*$/, "")
     .replace(/^["'`]|["'`]$/g, "")
     .trim();
-  if (!q) return undefined;
+  if (!q || /^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
+    return undefined;
+  }
 
   const symbols = extractScriptOrMarkdownSymbols(source, targetLang);
   if (symbols.length === 0) return undefined;
 
   const lowerQ = q.toLowerCase();
-  const matched =
+  const levelFiltered = explicitLevel
+    ? symbols.filter((s) => s.headingLevel === explicitLevel)
+    : symbols;
+  const pool = levelFiltered.length > 0 ? levelFiltered : symbols;
+
+  let matched =
+    pool.find((s) => s.name === q || s.displaySignature === rawSelector.trim()) ??
+    pool.find((s) => s.name.toLowerCase() === lowerQ) ??
     symbols.find((s) => s.name === q || s.displaySignature === rawSelector.trim()) ??
-    symbols.find((s) => s.name.toLowerCase() === lowerQ) ??
-    symbols.find((s) => s.name.toLowerCase().startsWith(lowerQ)) ??
-    symbols.find((s) => s.name.toLowerCase().includes(lowerQ));
+    symbols.find((s) => s.name.toLowerCase() === lowerQ);
+
+  if (!matched) {
+    const prefixCandidates = pool.filter((s) => {
+      if (strictForSplice && s.kind !== "section") return false;
+      if (!s.name.toLowerCase().startsWith(lowerQ)) return false;
+      const nextCh = s.name[q.length];
+      return (
+        nextCh === undefined ||
+        nextCh === ":" ||
+        nextCh === " " ||
+        nextCh === "-" ||
+        nextCh === "—" ||
+        nextCh === "."
+      );
+    });
+    if (prefixCandidates.length > 0) {
+      matched =
+        prefixCandidates.find((s) => s.name.startsWith(q)) ?? prefixCandidates[0];
+    }
+  }
+
+  if (!matched && !strictForSplice) {
+    const nonH1 = pool.filter((s) => s.headingLevel !== 1);
+    matched =
+      nonH1.find((s) => s.name.toLowerCase().startsWith(lowerQ)) ??
+      pool.find((s) => s.name.toLowerCase().startsWith(lowerQ)) ??
+      nonH1.find((s) => s.name.toLowerCase().includes(lowerQ)) ??
+      pool.find((s) => s.name.toLowerCase().includes(lowerQ));
+  }
 
   if (!matched) return undefined;
 
@@ -5220,15 +5321,25 @@ function resolveSingleNativeEditAgainstSource(
     options.code && !options.insertAfter && !options.insertBefore && !options.append
       ? inferSnippetParamArity(options.code)
       : undefined;
-
-  let spanInfo = locateNativeDeclarationSpan(
-    nativeSource,
-    anchorSymbol,
-    targetLang,
-    undefined,
-    preferAccessor,
-    preferredArity,
-  );
+  let spanInfo =
+    (targetLang === "markdown" ||
+      targetLang === "shell" ||
+      targetLang === "powershell" ||
+      targetLang === "batch") &&
+    !options.insertBefore &&
+    !options.insertAfter
+      ? enrichSpanWithOffsetsAndLines(
+          nativeSource,
+          locateScriptOrMarkdownSpan(nativeSource, anchorSymbol, targetLang, true),
+        )
+      : locateNativeDeclarationSpan(
+          nativeSource,
+          anchorSymbol,
+          targetLang,
+          undefined,
+          preferAccessor,
+          preferredArity,
+        );
   let autoAppendToClass = false;
 
   if (!spanInfo && !options.delete && !options.insertBefore && !options.insertAfter) {
@@ -6153,7 +6264,40 @@ export function parseMultiBlockSpliceStream(
     lines: string[];
   }> = [];
 
+  let inMdFence = false;
+  let mdFenceChar = "";
+  let mdFenceLen = 0;
+
   for (const line of lines) {
+    const activeFp =
+      sections.length > 0 ? (sections[sections.length - 1].filePath ?? defaultFilePath) : defaultFilePath;
+    const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
+    if (isMdSection && sections.length > 0) {
+      if (!inMdFence) {
+        const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+        if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
+          inMdFence = true;
+          mdFenceChar = openMatch[1][0];
+          mdFenceLen = openMatch[1].length;
+          sections[sections.length - 1].lines.push(line);
+          continue;
+        }
+      } else {
+        const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+        if (
+          closeMatch &&
+          closeMatch[1][0] === mdFenceChar &&
+          closeMatch[1].length >= mdFenceLen
+        ) {
+          inMdFence = false;
+          mdFenceChar = "";
+          mdFenceLen = 0;
+        }
+        sections[sections.length - 1].lines.push(line);
+        continue;
+      }
+    }
+
     const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
       let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
@@ -6180,6 +6324,9 @@ export function parseMultiBlockSpliceStream(
           /^[.#@]/.test(blockSymbol) ||
           (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
       if (isValidSymbol) {
+        inMdFence = false;
+        mdFenceChar = "";
+        mdFenceLen = 0;
         sections.push({
           filePath: blockFilePath,
           symbol: blockSymbol,
