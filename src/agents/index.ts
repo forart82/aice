@@ -44,6 +44,24 @@ export {
   upsertAlwaysOnRuleFile,
   upsertMarkdownDirective,
 };
+import { AICE_VERSION, VERSION } from "../version.js";
+
+export { VERSION };
+
+export function extractMarkdownDirectiveVersion(filePath: string): string | undefined {
+  if (!fs.existsSync(filePath)) return undefined;
+  try {
+    const text = fs.readFileSync(filePath, "utf-8");
+    const verMatch = text.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/);
+    if (verMatch?.[1]) return verMatch[1];
+    const headingMatch = text.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
+    if (headingMatch?.[1]) return headingMatch[1];
+    if (text.includes(AICE_DIRECTIVE_START)) return "legacy";
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type SupportedAgentId =
   | "claude"
@@ -64,6 +82,8 @@ export interface AgentStatusEntry {
   mcpConfigPath: string;
   promptConfigured: boolean;
   promptPath?: string;
+  rulesVersion?: string;
+  rulesUpToDate?: boolean;
   error?: string;
 }
 
@@ -75,6 +95,9 @@ export interface AgentSetupOptions {
 
 export interface AgentActionResult {
   homeDir: string;
+  version: string;
+  allRulesUpToDate: boolean;
+  updateRecommendation?: string;
   agents: AgentStatusEntry[];
 }
 
@@ -483,6 +506,21 @@ export function getAgentsStatus(
   const cursorMcp = path.join(home, ".cursor", "mcp.json");
   const cursorBin = detectBinary(["cursor"]);
 
+  const buildPromptMeta = (pPath: string, configured: boolean) => {
+    if (!configured) return {};
+    const rulesVersion = extractMarkdownDirectiveVersion(pPath);
+    return {
+      rulesVersion,
+      rulesUpToDate: rulesVersion === AICE_VERSION,
+    };
+  };
+
+  const claudePromptOk = hasMarkdownDirective(claudeMd);
+  const agyPromptOk = hasMarkdownDirective(geminiMd) && hasMarkdownDirective(agyRuleMd);
+  const codexPromptOk = hasMarkdownDirective(codexAgentsMd);
+  const opencodePromptOk = hasMarkdownDirective(opencodeAgentsMd);
+  const aiderPromptOk = hasMarkdownDirective(aiderConventions);
+
   const agents: AgentStatusEntry[] = [
     {
       id: "claude",
@@ -491,8 +529,9 @@ export function getAgentsStatus(
       binaryPath: claudeBin.path,
       mcpConfigured: hasJsonMcpServer(claudeJson),
       mcpConfigPath: claudeJson,
-      promptConfigured: hasMarkdownDirective(claudeMd),
+      promptConfigured: claudePromptOk,
       promptPath: claudeMd,
+      ...buildPromptMeta(claudeMd, claudePromptOk),
     },
     {
       id: "agy",
@@ -501,8 +540,9 @@ export function getAgentsStatus(
       binaryPath: agyBin.path,
       mcpConfigured: hasJsonMcpServer(geminiSettings) && hasJsonMcpServer(agyMcpConfig),
       mcpConfigPath: agyMcpConfig,
-      promptConfigured: hasMarkdownDirective(geminiMd) && hasMarkdownDirective(agyRuleMd),
+      promptConfigured: agyPromptOk,
       promptPath: geminiMd,
+      ...buildPromptMeta(geminiMd, agyPromptOk),
     },
     {
       id: "codex",
@@ -511,8 +551,9 @@ export function getAgentsStatus(
       binaryPath: codexBin.path,
       mcpConfigured: hasCodexToml(codexToml),
       mcpConfigPath: codexToml,
-      promptConfigured: hasMarkdownDirective(codexAgentsMd),
+      promptConfigured: codexPromptOk,
       promptPath: codexAgentsMd,
+      ...buildPromptMeta(codexAgentsMd, codexPromptOk),
     },
     {
       id: "opencode",
@@ -521,8 +562,9 @@ export function getAgentsStatus(
       binaryPath: opencodeBin.path,
       mcpConfigured: hasJsonMcpServer(opencodeJson),
       mcpConfigPath: opencodeJson,
-      promptConfigured: hasMarkdownDirective(opencodeAgentsMd),
+      promptConfigured: opencodePromptOk,
       promptPath: opencodeAgentsMd,
+      ...buildPromptMeta(opencodeAgentsMd, opencodePromptOk),
     },
     {
       id: "aider",
@@ -531,8 +573,9 @@ export function getAgentsStatus(
       binaryPath: aiderBin.path,
       mcpConfigured: hasAiderConfigYaml(aiderConf, aiderConventions),
       mcpConfigPath: aiderConf,
-      promptConfigured: hasMarkdownDirective(aiderConventions),
+      promptConfigured: aiderPromptOk,
       promptPath: aiderConventions,
+      ...buildPromptMeta(aiderConventions, aiderPromptOk),
     },
     {
       id: "goose",
@@ -558,7 +601,21 @@ export function getAgentsStatus(
     ? agents.filter((a) => (requested === "gemini" && a.id === "agy") || a.id === requested)
     : agents;
 
-  return { homeDir: home, agents: filtered };
+  const configuredPrompts = filtered.filter((a) => a.promptPath && a.promptConfigured);
+  const allRulesUpToDate =
+    configuredPrompts.length > 0 && configuredPrompts.every((a) => a.rulesUpToDate === true);
+
+  return {
+    homeDir: home,
+    version: AICE_VERSION,
+    allRulesUpToDate,
+    ...(allRulesUpToDate
+      ? {}
+      : {
+          updateRecommendation: `Run './install.sh -y' or 'aice agents setup' to refresh agent rules to v${AICE_VERSION}`,
+        }),
+    agents: filtered,
+  };
 }
 
 /**
@@ -773,25 +830,39 @@ export function removeAgents(
  */
 export function formatAgentsStatusTable(result: AgentActionResult): string {
   const lines: string[] = [];
+  const ver = result.version ?? AICE_VERSION;
   lines.push("================================================================================");
-  lines.push(`AICE GLOBAL CLI AGENT INTEGRATION STATUS (Home: ${result.homeDir})`);
+  lines.push(`AICE v${ver} GLOBAL CLI AGENT INTEGRATION STATUS (Home: ${result.homeDir})`);
   lines.push("================================================================================");
   lines.push(
-    `  ${"Agent".padEnd(36)} ${"Binary".padEnd(10)} ${"MCP Config".padEnd(14)} ${"System Prompt".padEnd(14)}`,
+    `  ${"Agent".padEnd(36)} ${"Binary".padEnd(10)} ${"MCP Config".padEnd(14)} ${"System Prompt"}`,
   );
   lines.push("--------------------------------------------------------------------------------");
   for (const a of result.agents) {
     const binStr = a.binaryDetected ? "FOUND" : "not in PATH";
     const mcpStr = a.mcpConfigured ? "CONFIGURED" : "not set";
-    const promptStr = a.promptPath ? (a.promptConfigured ? "CONFIGURED" : "not set") : "N/A (MCP)";
+    const promptStr = a.promptPath
+      ? a.promptConfigured
+        ? a.rulesUpToDate === false
+          ? `OUTDATED (v${a.rulesVersion ?? "old"} -> v${ver})`
+          : `CONFIGURED (v${a.rulesVersion ?? ver})`
+        : "not set"
+      : "N/A (MCP)";
     lines.push(
-      `  ${a.displayName.padEnd(36)} ${binStr.padEnd(10)} ${mcpStr.padEnd(14)} ${promptStr.padEnd(14)}`,
+      `  ${a.displayName.padEnd(36)} ${binStr.padEnd(10)} ${mcpStr.padEnd(14)} ${promptStr}`,
     );
     if (a.error) {
       lines.push(`    ! Warning: ${a.error}`);
     }
   }
   lines.push("--------------------------------------------------------------------------------");
-  lines.push("Commands: `aice agents setup [--all]` | `aice agents status` | `aice agents remove`");
+  if (result.allRulesUpToDate) {
+    lines.push(`Rules Status: UP TO DATE (v${ver})`);
+  } else if (result.updateRecommendation) {
+    lines.push(`Rules Status: UPDATE AVAILABLE -> ${result.updateRecommendation}`);
+  }
+  lines.push(
+    "Commands: `aice agents setup [--all]` | `aice agents status` | `aice agents remove` | `./install.sh -y`",
+  );
   return lines.join("\n");
 }

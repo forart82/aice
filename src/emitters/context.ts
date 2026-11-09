@@ -19,7 +19,11 @@ export type TargetLanguage =
   | "yaml"
   | "twig"
   | "php"
-  | "kotlin";
+  | "kotlin"
+  | "shell"
+  | "powershell"
+  | "batch"
+  | "markdown";
 
 export interface EmitterOptions {
   target?: TargetLanguage;
@@ -143,30 +147,33 @@ export class EmitterContext {
  * Detects target language from an AICE file path (e.g. foo.ts.aice -> typescript).
  */
 export function detectTargetFromPath(filePath: string): TargetLanguage {
-  const clean = filePath.replace(/\.aice$/, "");
-  if (clean.endsWith(".tsx") || clean.endsWith(".jsx")) return "tsx";
-  if (clean.endsWith(".ts")) return "typescript";
-  if (clean.endsWith(".js") || clean.endsWith(".mjs") || clean.endsWith(".cjs"))
+  const lower = filePath.toLowerCase().replace(/\.aice$/, "");
+  if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "tsx";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs"))
     return "javascript";
-  if (clean.endsWith(".py")) return "python";
-  if (clean.endsWith(".html") || clean.endsWith(".htm")) return "html";
-  if (clean.endsWith(".css")) return "css";
-  if (clean.endsWith(".rs")) return "rust";
-  if (clean.endsWith(".go")) return "go";
+  if (lower.endsWith(".py") || lower.endsWith(".pyi")) return "python";
+  if (lower.endsWith(".rs")) return "rust";
+  if (lower.endsWith(".go")) return "go";
   if (
-    clean.endsWith(".cpp") ||
-    clean.endsWith(".hpp") ||
-    clean.endsWith(".cc") ||
-    clean.endsWith(".cxx") ||
-    clean.endsWith(".h")
+    lower.endsWith(".cpp") ||
+    lower.endsWith(".cc") ||
+    lower.endsWith(".cxx") ||
+    lower.endsWith(".hpp") ||
+    lower.endsWith(".h")
   )
     return "cpp";
-  if (clean.endsWith(".cs")) return "csharp";
-  if (clean.endsWith(".json")) return "json";
-  if (clean.endsWith(".yaml") || clean.endsWith(".yml")) return "yaml";
-  if (clean.endsWith(".twig")) return "twig";
-  if (clean.endsWith(".php")) return "php";
-  if (clean.endsWith(".kt") || clean.endsWith(".kts")) return "kotlin";
+  if (lower.endsWith(".cs")) return "csharp";
+  if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
+  if (lower.endsWith(".php")) return "php";
+  if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "twig";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (lower.endsWith(".css")) return "css";
+  if (lower.endsWith(".json")) return "json";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
+  if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
+  if (lower.endsWith(".ps1")) return "powershell";
+  if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
   return "typescript";
 }
 

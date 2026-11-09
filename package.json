@@ -1,15 +1,11 @@
 {
-  "name": "aice",
-  "version": "0.9.19",
-  "description": "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer",
+  "name": "aice-compiler",
+  "version": "0.9.20",
+  "description": "AI-Compact Expression (AICE 2.0) — High-Efficiency Agent-Native Language, Decompiler, and Tokenomics Engine",
   "license": "Apache-2.0",
   "author": {
     "name": "forart82",
     "url": "https://github.com/forart82"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/forart82/aice.git"
   },
   "homepage": "https://github.com/forart82/aice",
   "bugs": {

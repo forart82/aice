@@ -15,9 +15,9 @@ import {
   loadProjectConfig,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
-import type { Module } from "../core/ast.js";
-import type { CstTriviaTable } from "../core/trivia.js";
-import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+  import type { Module } from "../core/ast.js";
+  import { CstTriviaTable } from "../core/trivia.js";
+  import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent } from "../telemetry/index.js";
 import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
@@ -99,104 +99,103 @@ export function decompile(
   let ast: Module;
   let trivia: CstTriviaTable;
 
-  switch (target) {
-    case "typescript":
-    case "javascript":
-    case "tsx": {
-      const decompiler = new TsDecompiler(source, filePath, {
-        isTsx: target === "tsx" || options.isTsx,
-        convertStringUnionsToEnum: options.convertStringUnionsToEnum,
+  if (target === "typescript" || target === "javascript" || target === "tsx") {
+    const decompiler = new TsDecompiler(source, filePath, {
+      isTsx: target === "tsx" || options.isTsx,
+      convertStringUnionsToEnum: options.convertStringUnionsToEnum,
+    });
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "css") {
+    const decompiler = new CssDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "cpp") {
+    const decompiler = new CppDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "csharp") {
+    const decompiler = new CSharpDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "html") {
+    const decompiler = new HtmlDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "json") {
+    const decompiler = new JsonDecompiler(source, filePath, options);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "yaml") {
+    const decompiler = new YamlDecompiler(source, filePath, options);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "twig") {
+    const result = decompileTwig(source, filePath, options);
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "php") {
+    const decompiler = new PhpDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "python") {
+    const decompiler = new PythonDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "kotlin") {
+    const decompiler = new KotlinDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "go") {
+    const decompiler = new GoDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (target === "rust") {
+    const decompiler = new RustDecompiler(source, filePath);
+    const result = decompiler.decompile();
+    ast = result.ast;
+    trivia = result.trivia;
+  } else if (
+    target === "shell" ||
+    target === "powershell" ||
+    target === "batch" ||
+    target === "markdown"
+  ) {
+    trivia = new CstTriviaTable();
+    trivia.setOriginalSource(source);
+    trivia.setSourceSlice("module", source);
+    const lineCount = source.split(/\r?\n/).length;
+    const span = {
+      file: filePath,
+      start: { offset: 0, line: 1, column: 1 },
+      end: { offset: source.length, line: lineCount, column: 1 },
+    };
+    ast = { kind: "Module", path: filePath, items: [], span };
+    if (filePath !== "source" && existsSync(filePath)) {
+      recordTelemetryEvent({
+        targetPath: resolve(filePath),
+        projectRoot,
+        operation: "decompile",
+        surface: "cli",
+        idiomsUsed: false,
+        nativeText: source,
+        aiceText: source,
       });
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
     }
-    case "css": {
-      const decompiler = new CssDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "cpp": {
-      const decompiler = new CppDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "csharp": {
-      const decompiler = new CSharpDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "html": {
-      const decompiler = new HtmlDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "json": {
-      const decompiler = new JsonDecompiler(source, filePath, options);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "yaml": {
-      const decompiler = new YamlDecompiler(source, filePath, options);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "twig": {
-      const result = decompileTwig(source, filePath, options);
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "php": {
-      const decompiler = new PhpDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "python": {
-      const decompiler = new PythonDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "kotlin": {
-      const decompiler = new KotlinDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "go": {
-      const decompiler = new GoDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    case "rust": {
-      const decompiler = new RustDecompiler(source, filePath);
-      const result = decompiler.decompile();
-      ast = result.ast;
-      trivia = result.trivia;
-      break;
-    }
-    default:
-      throw new Error(`Unsupported target language for decompilation: ${target}`);
+    return { ast, aice: source, trivia };
+  } else {
+    throw new Error(`Unsupported target language for decompilation: ${target}`);
   }
 
   let idiomsUsed = false;

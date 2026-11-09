@@ -60,15 +60,15 @@ export const VALID_PROJECT_MODES: ReadonlySet<ProjectMode> = new Set([
   "isolated",
   "twinless",
 ]);
-
 export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "typescript",
+  "javascript",
   "tsx",
   "python",
   "html",
   "css",
-  "rust",
   "go",
+  "rust",
   "cpp",
   "csharp",
   "json",
@@ -76,8 +76,11 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "twig",
   "php",
   "kotlin",
+  "shell",
+  "powershell",
+  "batch",
+  "markdown",
 ]);
-
 const _defaultProjectConfig: AiceProjectConfig = {
   mode: "side-by-side",
   sourceDir: "src",
@@ -99,6 +102,7 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".ts",
   ".tsx",
   ".py",
+  ".pyi",
   ".rs",
   ".go",
   ".cpp",
@@ -121,6 +125,14 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".php",
   ".kt",
   ".kts",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".ps1",
+  ".cmd",
+  ".bat",
+  ".md",
+  ".markdown",
 ]);
 
 export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
@@ -131,6 +143,7 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".mjs": "typescript",
   ".cjs": "typescript",
   ".py": "python",
+  ".pyi": "python",
   ".rs": "rust",
   ".go": "go",
   ".cpp": "cpp",
@@ -149,6 +162,14 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".php": "php",
   ".kt": "kotlin",
   ".kts": "kotlin",
+  ".sh": "shell",
+  ".bash": "shell",
+  ".zsh": "shell",
+  ".ps1": "powershell",
+  ".cmd": "batch",
+  ".bat": "batch",
+  ".md": "markdown",
+  ".markdown": "markdown",
 });
 
 const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
@@ -169,6 +190,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
   switch (target) {
     case "typescript":
       return ".ts";
+    case "javascript":
+      return ".js";
     case "tsx":
       return ".tsx";
     case "python":
@@ -181,6 +204,12 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".cpp";
     case "csharp":
       return ".cs";
+    case "kotlin":
+      return ".kt";
+    case "php":
+      return ".php";
+    case "twig":
+      return ".twig";
     case "html":
       return ".html";
     case "css":
@@ -189,14 +218,14 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".json";
     case "yaml":
       return ".yaml";
-    case "twig":
-      return ".twig";
-    case "php":
-      return ".php";
-    case "kotlin":
-      return ".kt";
-    default:
-      return ".ts";
+    case "shell":
+      return ".sh";
+    case "powershell":
+      return ".ps1";
+    case "batch":
+      return ".cmd";
+    case "markdown":
+      return ".md";
   }
 }
 
@@ -556,7 +585,6 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
   } catch {
     cur = path.dirname(cur);
   }
-
   const initialDir = cur;
   const cwd = path.resolve(process.cwd());
   const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
@@ -590,7 +618,17 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
     cur = parent;
   }
 
-  return fallbackDir ? path.resolve(fallbackDir) : initialDir;
+  if (
+    (path.basename(initialDir) === "src" || path.basename(initialDir) === "tests") &&
+    fs.existsSync(path.join(path.dirname(initialDir), "src")) &&
+    fs.existsSync(path.join(path.dirname(initialDir), "tests"))
+  ) {
+    return path.dirname(initialDir);
+  }
+  if (fallbackDir) {
+    return path.resolve(fallbackDir);
+  }
+  return initialDir;
 }
 
 /**
@@ -1098,63 +1136,75 @@ export {
   CANONICAL_AICE_AGENT_DIRECTIVE,
   MANDATORY_AGENT_RULES_MARKDOWN,
 };
-
-/**
- * Idempotently upserts the `<!-- AICE:START -->...<!-- AICE:END -->` block into a Markdown file.
- */
-export function upsertMarkdownDirective(
-  filePath: string,
-  directiveBlock: string = CANONICAL_AICE_AGENT_DIRECTIVE,
-): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+ export function upsertMarkdownDirective(mdPath: string, blockText?: string): void {
+  const directiveBlock = blockText ?? MANDATORY_AGENT_RULES_MARKDOWN;
+  fs.mkdirSync(path.dirname(mdPath), { recursive: true });
   let existing = "";
-  if (fs.existsSync(filePath)) {
-    existing = fs.readFileSync(filePath, "utf-8");
+  if (fs.existsSync(mdPath)) {
+    existing = fs.readFileSync(mdPath, "utf-8");
   }
-
+  const versionedStartMatch = existing.match(/<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/);
   const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
+  const effectiveStartIdx =
+    startIdx !== -1
+      ? startIdx
+      : versionedStartMatch?.index !== undefined
+        ? versionedStartMatch.index
+        : -1;
   const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-
-  if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
-    const before = existing.slice(0, startIdx);
-    const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length);
-    const updated = `${before}${directiveBlock}${after}`;
-    fs.writeFileSync(filePath, updated, "utf-8");
+  if (effectiveStartIdx !== -1 && endIdx !== -1 && endIdx > effectiveStartIdx) {
+    const before = existing.slice(0, effectiveStartIdx).replace(/\s*$/, "");
+    const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\s*/, "");
+    const parts: string[] = [];
+    if (before.length > 0) parts.push(before);
+    parts.push(directiveBlock);
+    if (after.length > 0) parts.push(after);
+    fs.writeFileSync(mdPath, `${parts.join("\n\n")}\n`, "utf-8");
     return;
   }
 
   const trimmed = existing.trimEnd();
-  const updated = trimmed ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
-  fs.writeFileSync(filePath, updated, "utf-8");
-}
+  const nextContent =
+    trimmed.length > 0 ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
+  fs.writeFileSync(mdPath, nextContent, "utf-8");
+ }
 
-/**
+ /**
  * Cleanly removes the `<!-- AICE:START -->...<!-- AICE:END -->` block from a Markdown file.
  */
-export function removeMarkdownDirective(filePath: string, deleteIfEmpty = false): boolean {
-  if (!fs.existsSync(filePath)) return false;
-  const existing = fs.readFileSync(filePath, "utf-8");
+ export function removeMarkdownDirective(mdPath: string, _removeIfEmpty: boolean = false): void {
+  if (!fs.existsSync(mdPath)) return;
+  const existing = fs.readFileSync(mdPath, "utf-8");
+  const versionedStartMatch = existing.match(/<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/);
   const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
+  const effectiveStartIdx =
+    startIdx !== -1
+      ? startIdx
+      : versionedStartMatch?.index !== undefined
+        ? versionedStartMatch.index
+        : -1;
   const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-  if (startIdx === -1 || endIdx === -1 || endIdx < startIdx) {
-    return false;
-  }
-  const before = existing.slice(0, startIdx).replace(/\n+$/, "");
-  const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\n+/, "");
-  const combined = [before, after].filter(Boolean).join("\n\n");
-  if (!combined.trim() && deleteIfEmpty) {
-    fs.unlinkSync(filePath);
-  } else {
-    fs.writeFileSync(filePath, combined ? `${combined}\n` : "", "utf-8");
-  }
-  return true;
-}
+  if (effectiveStartIdx === -1 || endIdx === -1 || endIdx < effectiveStartIdx) return;
 
-export function hasMarkdownDirective(filePath: string): boolean {
-  if (!fs.existsSync(filePath)) return false;
+  const before = existing.slice(0, effectiveStartIdx).replace(/\s*$/, "");
+  const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\s*/, "");
+  const combined = [before, after].filter((s) => s.length > 0).join("\n\n");
+  if (combined.trim().length === 0) {
+    fs.unlinkSync(mdPath);
+  } else {
+    fs.writeFileSync(mdPath, `${combined}\n`, "utf-8");
+  }
+ }
+
+export function hasMarkdownDirective(mdPath: string): boolean {
+  if (!fs.existsSync(mdPath)) return false;
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return content.includes(AICE_DIRECTIVE_START) && content.includes(AICE_DIRECTIVE_END);
+    const text = fs.readFileSync(mdPath, "utf-8");
+    return (
+      (text.includes(AICE_DIRECTIVE_START) ||
+        /<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/.test(text)) &&
+      text.includes(AICE_DIRECTIVE_END)
+    );
   } catch {
     return false;
   }
@@ -1200,8 +1250,8 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
   const agentsMdPath = path.join(resolvedDir, "AGENTS.md");
   const claudeMdPath = path.join(resolvedDir, "CLAUDE.md");
   const geminiMdPath = path.join(resolvedDir, "GEMINI.md");
+  const dotGeminiMdPath = path.join(resolvedDir, ".GEMINI.md");
   const ruleFilePath = path.join(resolvedDir, ".agents", "rules", "aice.md");
-
   if (enabled) {
     upsertMarkdownDirective(agentsMdPath);
     upsertAlwaysOnRuleFile(ruleFilePath);
@@ -1211,10 +1261,14 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
     if (fs.existsSync(geminiMdPath)) {
       upsertMarkdownDirective(geminiMdPath);
     }
+    if (fs.existsSync(dotGeminiMdPath)) {
+      upsertMarkdownDirective(dotGeminiMdPath);
+    }
   } else {
     removeMarkdownDirective(agentsMdPath, true);
     removeMarkdownDirective(claudeMdPath, false);
     removeMarkdownDirective(geminiMdPath, false);
+    removeMarkdownDirective(dotGeminiMdPath, false);
     removeAlwaysOnRuleFile(ruleFilePath, true);
   }
 }

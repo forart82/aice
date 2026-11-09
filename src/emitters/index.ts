@@ -139,6 +139,22 @@ export function emitTarget(
       const emitter = new KotlinEmitter(options);
       return emitter.emit(mod);
     }
+    case "shell":
+    case "powershell":
+    case "batch":
+    case "markdown": {
+      if (options.trivia) {
+        const modTrivia = options.trivia.getTrivia("module");
+        if (modTrivia?.sourceSlice !== undefined) {
+          return modTrivia.sourceSlice;
+        }
+        const orig = options.trivia.getOriginalSource();
+        if (orig !== undefined) {
+          return orig;
+        }
+      }
+      return "";
+    }
     default: {
       const exhaustiveCheck: never = chosenTarget;
       throw new Error(`Unsupported target language: ${exhaustiveCheck}`);

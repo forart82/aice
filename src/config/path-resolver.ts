@@ -16,6 +16,7 @@ import {
   loadProjectConfig,
 } from "./project-config.js";
 
+export { KNOWN_TARGET_EXTENSIONS };
 export interface PathResolverOptions {
   /**
    * Extensions to filter when scanning directories (default: [".aice"]).
@@ -215,11 +216,15 @@ export function scanDirectoryFiles(
         if (
           entry.name.endsWith(".trivia.json") ||
           entry.name === "aice.config.json" ||
-          entry.name === "package-lock.json" ||
+          entry.name === "package.json" ||
           entry.name === "tsconfig.json" ||
           entry.name === "jsconfig.json" ||
           entry.name === "biome.json" ||
-          entry.name === "rome.json"
+          entry.name === "rome.json" ||
+          entry.name === "AGENTS.md" ||
+          entry.name === "CLAUDE.md" ||
+          entry.name === "GEMINI.md" ||
+          entry.name === ".GEMINI.md"
         ) {
           continue;
         }
@@ -230,12 +235,9 @@ export function scanDirectoryFiles(
           if (customExts.some((ext) => lowerName.endsWith(ext))) {
             customFiles.push(fullPath);
           }
-        } else {
-          if (lowerName.endsWith(".aice")) {
-            aiceFiles.push(fullPath);
-          }
+        } else if (lowerName.endsWith(".aice")) {
+          aiceFiles.push(fullPath);
         }
-
         if (options.includeTargets) {
           const ext = path.extname(lowerName);
           if (ext && KNOWN_TARGET_EXTENSIONS.has(ext) && !lowerName.endsWith(".aice")) {

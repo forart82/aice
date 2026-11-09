@@ -590,7 +590,6 @@ function normalizeHybridSourceToAice(rawCode: string, targetLang: TargetLanguage
       !trimmed.startsWith("[") &&
       !/^(?:pub\s+)?(?:const|val|mut)\s+/.test(trimmed)
     ) {
-      // Check if it's a single AICE expression or key-value
       if (
         trimmed.startsWith("config ") ||
         trimmed.startsWith("config:") ||
@@ -624,6 +623,20 @@ function compileAiceOrHybridToNative(
     return "";
   }
 
+  if (targetLang === "markdown") {
+    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
+  }
+
+  if (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") {
+    const out = cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
+    const check = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
+    if (!check.valid) {
+      throw new Error(
+        `Failed pre-write syntax validation for ${fullPath}: ${check.diagnostics.join("; ")}`,
+      );
+    }
+    return out;
+  }
   // Special handling for raw JSON / YAML when not written in AICE AST syntax
   if (targetLang === "json" || targetLang === "yaml") {
     const idiomPreprocessed = preprocessHybridAndIdiomsLossless(
@@ -872,8 +885,23 @@ export async function createFile(
   const idiomsToggleOverride = typeof options.idioms === "boolean" ? options.idioms : undefined;
   const idiomsEnabled = isProjectIdiomsEnabled(config, idiomsToggleOverride);
 
-  // Extract inline `@idiom` definitions from payload and `--idiom` option
-  const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawPayload);
+  const checkPath = fullPath.replace(/\.aice$/, "");
+  const ext = path.extname(checkPath).toLowerCase();
+  const baseName = path.basename(checkPath);
+  const isScriptOrMarkdown =
+    ext === ".md" ||
+    ext === ".markdown" ||
+    ext === ".sh" ||
+    ext === ".bash" ||
+    ext === ".zsh" ||
+    ext === ".ps1" ||
+    ext === ".cmd" ||
+    ext === ".bat";
+
+  // Extract inline `@idiom` definitions from payload and `--idiom` option (skip for Markdown/scripts)
+  const { cleanedCode, inlineIdioms } = isScriptOrMarkdown
+    ? { cleanedCode: rawPayload, inlineIdioms: {} as Record<string, ProjectIdiomDefinition> }
+    : extractInlineIdiomsFromSource(rawPayload);
   const cliInlineIdioms = {
     ...parseOptionIdioms(options.inlineIdioms, cleanedCode),
     ...parseOptionIdioms(options.idiom, cleanedCode),
@@ -900,9 +928,6 @@ export async function createFile(
     });
   }
 
-  const checkPath = fullPath.replace(/\.aice$/, "");
-  const ext = path.extname(checkPath).toLowerCase();
-  const baseName = path.basename(checkPath);
   const PASSTHROUGH_PROJECT_EXTENSIONS = new Set([
     ".toml",
     ".mod",

@@ -1,34 +1,40 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# AICE Universal Linux Installer (install.sh)
-# Idempotent setup for AICE CLI, MCP Server, CLI Agents, & Optional Zsh Cheatsheet
+# AICE Universal Linux Installer & In-Place Updater (install.sh)
+# Idempotent setup & update for AICE CLI, MCP Server, CLI Agents, & Workspaces
 # ==============================================================================
 set -euo pipefail
 
 AUTO_YES=0
+FORCE_UPDATE=0
 NO_CHEATSHEET=0
 NO_AGENTS=0
 NO_UPDATE=0
 DRY_RUN=0
 
 print_help() {
-  cat <<'EOF'
+  cat <<'HELP_EOF'
 Usage: ./install.sh [options]
 
 Options:
   -y, --yes             Auto-confirm dependency installation, git update, and Zsh cheatsheet
+  -u, --update          Force in-place update check against origin/main and refresh all rules/schemas
       --no-update       Skip checking the remote git repository for newer versions
       --no-cheatsheet   Skip the Zsh startup cheatsheet prompt/injection
       --no-agents       Skip automatic CLI coding agent configuration (aice agents setup)
       --dry-run         Print actions that would be performed without mutating the system
   -h, --help            Display this help message
-EOF
+HELP_EOF
 }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -y|--yes)
       AUTO_YES=1
+      shift
+      ;;
+    -u|--update)
+      FORCE_UPDATE=1
       shift
       ;;
     --no-update)
@@ -79,18 +85,13 @@ run_cmd() {
 DISTRO_ID="unknown"
 DISTRO_NAME="Linux"
 if [[ -f /etc/os-release ]]; then
-  # Parse key-value safely without arbitrary code execution
-  while IFS='=' read -r k v; do
-    v="${v%\"}"
-    v="${v#\"}"
-    case "$k" in
-      ID) DISTRO_ID="$v" ;;
-      PRETTY_NAME) DISTRO_NAME="$v" ;;
-    esac
-  done < /etc/os-release
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  DISTRO_ID="${ID:-unknown}"
+  DISTRO_NAME="${PRETTY_NAME:-${NAME:-Linux}}"
 fi
 
-PKG_MGR="none"
+PKG_MGR="unknown"
 if command -v apt-get >/dev/null 2>&1; then
   PKG_MGR="apt-get"
 elif command -v dnf >/dev/null 2>&1; then
@@ -105,7 +106,7 @@ elif command -v apk >/dev/null 2>&1; then
   PKG_MGR="apk"
 fi
 
-log_info "Detected OS: ${DISTRO_NAME} (id=${DISTRO_ID}, pkg_manager=${PKG_MGR})"
+log_info "Detected OS: ${DISTRO_NAME} (id=${DISTRO_ID}, pkg=${PKG_MGR})"
 
 SUDO_CMD=()
 if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -116,38 +117,43 @@ fi
 
 install_sys_packages() {
   local pkgs=("$@")
-  if [[ ${#pkgs[@]} -eq 0 ]]; then
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  [dry-run] install system packages via %s: %s\n' "$PKG_MGR" "${pkgs[*]}"
     return 0
   fi
-  log_info "Installing missing system packages (${pkgs[*]}) via ${PKG_MGR}..."
+
+  if [[ "${EUID:-$(id -u)}" -ne 0 ]] && [[ ${#SUDO_CMD[@]} -eq 0 ]]; then
+    log_err "Root privileges or sudo required to install system packages: ${pkgs[*]}"
+    exit 1
+  fi
+
   case "$PKG_MGR" in
     apt-get)
-      run_cmd "${SUDO_CMD[@]}" apt-get update -y
-      run_cmd "${SUDO_CMD[@]}" apt-get install -y "${pkgs[@]}"
+      "${SUDO_CMD[@]}" apt-get update -y
+      "${SUDO_CMD[@]}" apt-get install -y "${pkgs[@]}"
       ;;
     dnf)
-      run_cmd "${SUDO_CMD[@]}" dnf install -y "${pkgs[@]}"
+      "${SUDO_CMD[@]}" dnf install -y "${pkgs[@]}"
       ;;
     yum)
-      run_cmd "${SUDO_CMD[@]}" yum install -y "${pkgs[@]}"
+      "${SUDO_CMD[@]}" yum install -y "${pkgs[@]}"
       ;;
     pacman)
-      run_cmd "${SUDO_CMD[@]}" pacman -Sy --noconfirm "${pkgs[@]}"
+      "${SUDO_CMD[@]}" pacman -Sy --noconfirm "${pkgs[@]}"
       ;;
     zypper)
-      run_cmd "${SUDO_CMD[@]}" zypper --non-interactive install "${pkgs[@]}"
+      "${SUDO_CMD[@]}" zypper --non-interactive install "${pkgs[@]}"
       ;;
     apk)
-      run_cmd "${SUDO_CMD[@]}" apk add --no-cache "${pkgs[@]}"
+      "${SUDO_CMD[@]}" apk add --no-cache "${pkgs[@]}"
       ;;
     *)
-      log_err "No supported Linux package manager found to install: ${pkgs[*]}"
+      log_err "Unsupported package manager (${PKG_MGR}). Please install manually: ${pkgs[*]}"
       exit 1
       ;;
   esac
 }
 
-# ── Substep 2.2: Verify & Auto-Install git, curl, node (>= 20), and npm ──────
 get_node_major() {
   if ! command -v node >/dev/null 2>&1; then
     echo 0
@@ -160,7 +166,7 @@ get_node_major() {
 }
 
 MISSING_PKGS=()
-command -v git >/dev/null 2>&1  || MISSING_PKGS+=(git)
+command -v git >/dev/null 2>&1 || MISSING_PKGS+=(git)
 command -v curl >/dev/null 2>&1 || MISSING_PKGS+=(curl)
 
 NODE_MAJOR="$(get_node_major)"
@@ -169,19 +175,28 @@ if [[ "$NODE_MAJOR" -lt 20 ]] || ! command -v npm >/dev/null 2>&1; then
   NEED_NODE=1
 fi
 
-if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
-  install_sys_packages "${MISSING_PKGS[@]}"
-fi
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]] || [[ "$NEED_NODE" -eq 1 ]]; then
+  log_warn "Missing or outdated prerequisites (git/curl/node>=20/npm)."
+  if [[ "$AUTO_YES" -eq 0 ]] && [[ "$DRY_RUN" -eq 0 ]] && [[ -t 0 ]]; then
+    printf 'Install missing system prerequisites now? [Y/n] '
+    read -r confirm || confirm="y"
+    case "$confirm" in
+      [nN]|[nN][oO])
+        log_err "Installation aborted by user."
+        exit 1
+        ;;
+    esac
+  fi
 
-if [[ "$NEED_NODE" -eq 1 ]]; then
-  log_warn "Node.js >= 20 and npm are required (found node major=${NODE_MAJOR}). Installing..."
-  if [[ "$DRY_RUN" -eq 1 ]]; then
-    printf '  [dry-run] install nodejs >= 20 and npm via %s / NodeSource / nvm\n' "$PKG_MGR"
-  else
-    install_sys_packages nodejs npm || true
-    NODE_MAJOR="$(get_node_major)"
-    if [[ "$NODE_MAJOR" -lt 20 ]]; then
-      log_info "Distro Node.js is < 20 (v${NODE_MAJOR}); attempting NodeSource / NVM fallback..."
+  if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+    install_sys_packages "${MISSING_PKGS[@]}"
+  fi
+
+  if [[ "$NEED_NODE" -eq 1 ]]; then
+    log_info "Installing Node.js >= 20 and npm..."
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      printf '  [dry-run] install nodejs >= 20 and npm via %s or NodeSource/nvm\n' "$PKG_MGR"
+    else
       if [[ "$PKG_MGR" == "apt-get" ]] && [[ ${#SUDO_CMD[@]} -gt 0 || "${EUID:-$(id -u)}" -eq 0 ]]; then
         curl -fsSL https://deb.nodesource.com/setup_20.x | "${SUDO_CMD[@]}" -E bash -
         "${SUDO_CMD[@]}" apt-get install -y nodejs
@@ -203,21 +218,44 @@ fi
 
 log_ok "Prerequisites verified: git ($(git --version 2>/dev/null | head -n1 || echo ok)), curl, node ($(node -v 2>/dev/null || echo '>=20')), npm ($(npm -v 2>/dev/null || echo 'ok'))"
 
-# ── Substep 2.2b: Check Remote Git Repository for Newer Version ───────────────
+# ── Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update ─
+LOCAL_BIN="${HOME}/.local/bin"
+AICE_BIN="${LOCAL_BIN}/aice"
+INSTALLED_VER="none"
+if [[ -x "$AICE_BIN" ]]; then
+  INSTALLED_VER="$("$AICE_BIN" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "none")"
+elif command -v aice >/dev/null 2>&1; then
+  INSTALLED_VER="$(aice --version 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "none")"
+fi
+
+LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "unknown")"
+REMOTE_VER="$LOCAL_VER"
+
+if [[ "$INSTALLED_VER" != "none" ]]; then
+  log_info "Detected existing AICE installation: installed=v${INSTALLED_VER}, working-tree=v${LOCAL_VER} (in-place update/refresh mode)"
+else
+  log_info "Detected fresh AICE installation: working-tree=v${LOCAL_VER}"
+fi
+
 if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >/dev/null 2>&1; then
-  log_info "Checking git repository for newer AICE updates..."
+  log_info "Checking git repository (origin/main) for newer AICE commits/versions..."
   if [[ "$DRY_RUN" -eq 1 ]]; then
     printf '  [dry-run] git fetch --quiet origin main --tags\n'
   else
     git -C "$SCRIPT_DIR" fetch --quiet origin main --tags 2>/dev/null || true
     BEHIND_COUNT="$(git -C "$SCRIPT_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)"
-    if [[ "$BEHIND_COUNT" =~ ^[0-9]+$ ]] && [[ "$BEHIND_COUNT" -gt 0 ]]; then
-      LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "unknown")"
-      REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:package.json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).version)}catch{console.log("latest")}})' 2>/dev/null || echo "latest")"
-      log_warn "Remote git repository (origin/main) is ahead by ${BEHIND_COUNT} commit(s) (local: v${LOCAL_VER} -> remote: v${REMOTE_VER})."
+    REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:package.json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).version)}catch{console.log("latest")}})' 2>/dev/null || echo "$LOCAL_VER")"
+    if [[ "$BEHIND_COUNT" =~ ^[0-9]+$ ]] && { [[ "$BEHIND_COUNT" -gt 0 ]] || [[ "$FORCE_UPDATE" -eq 1 ]]; }; then
+      if [[ "$BEHIND_COUNT" -gt 0 ]]; then
+        log_warn "Remote git repository (origin/main) is ahead by ${BEHIND_COUNT} commit(s) (installed: v${INSTALLED_VER}, local: v${LOCAL_VER} -> remote: v${REMOTE_VER})."
+      else
+        log_info "Force update (--update) requested (installed: v${INSTALLED_VER}, local: v${LOCAL_VER}, remote: v${REMOTE_VER})."
+      fi
       DO_UPDATE=0
-      if [[ "$AUTO_YES" -eq 1 ]]; then
-        printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] y\n'
+      if [[ "$AUTO_YES" -eq 1 ]] || [[ "$FORCE_UPDATE" -eq 1 ]]; then
+        if [[ "$BEHIND_COUNT" -gt 0 ]]; then
+          printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] y\n'
+        fi
         DO_UPDATE=1
       else
         printf 'A newer version of AICE is available in the git repository. Do you want to update to the newest version? [Y/n] '
@@ -234,31 +272,44 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
         fi
       fi
 
-      if [[ "$DO_UPDATE" -eq 1 ]]; then
-        log_info "Updating repository from origin/main..."
-        if git -C "$SCRIPT_DIR" pull --ff-only origin main; then
-          log_ok "Updated AICE git repository to newest version (v${REMOTE_VER})."
-        else
-          log_warn "Could not fast-forward pull from origin/main; continuing with current working tree."
+      if [[ "$DO_UPDATE" -eq 1 ]] && [[ "$BEHIND_COUNT" -gt 0 ]]; then
+        log_info "Fast-forward pulling origin/main (preserving local state safely)..."
+        STASHED=0
+        if ! git -C "$SCRIPT_DIR" diff --quiet 2>/dev/null || ! git -C "$SCRIPT_DIR" diff --cached --quiet 2>/dev/null; then
+          if git -C "$SCRIPT_DIR" stash push -m "aice-install-auto-stash" >/dev/null 2>&1; then
+            STASHED=1
+          fi
         fi
+        if git -C "$SCRIPT_DIR" pull --ff-only origin main; then
+          LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "$REMOTE_VER")"
+          log_ok "Updated AICE git repository to newest version (v${LOCAL_VER})."
+        else
+          log_warn "Could not fast-forward pull from origin/main; continuing with current working tree (v${LOCAL_VER})."
+        fi
+        if [[ "$STASHED" -eq 1 ]]; then
+          git -C "$SCRIPT_DIR" stash pop >/dev/null 2>&1 || true
+        fi
+      elif [[ "$DO_UPDATE" -eq 1 ]]; then
+        log_ok "Git working tree is already at latest commit on origin/main (v${LOCAL_VER})."
       else
         log_info "Skipping git repository update; continuing with local version (v${LOCAL_VER})."
       fi
+    else
+      log_ok "Git repository is up to date with origin/main (v${LOCAL_VER})."
     fi
   fi
 fi
 
-# ── Substep 2.3: Build & Global Symlink Registration ─────────────────────────
-log_info "Installing npm dependencies in ${SCRIPT_DIR}..."
+# ── Substep 2.3: Build & Global Symlink Registration (Always Executed) ────────
+log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
 run_cmd npm install --no-fund --no-audit
 
 log_info "Setting executable permissions on bin/aice.mjs..."
 run_cmd chmod +x "$(pwd)/bin/aice.mjs"
 
-LOCAL_BIN="${HOME}/.local/bin"
 run_cmd mkdir -p "$LOCAL_BIN"
 run_cmd ln -sf "$(pwd)/bin/aice.mjs" "${LOCAL_BIN}/aice"
-log_ok "Linked global binary: ${LOCAL_BIN}/aice -> $(pwd)/bin/aice.mjs"
+log_ok "Linked global binary: ${LOCAL_BIN}/aice -> $(pwd)/bin/aice.mjs (v${LOCAL_VER})"
 
 # Ensure $HOME/.local/bin is in PATH
 if [[ ":${PATH}:" != *":${LOCAL_BIN}:"* ]]; then
@@ -292,43 +343,38 @@ inject_zsh_cheatsheet() {
     printf '  [dry-run] inject # >>> aice-cheatsheet >>> block into %s\n' "$zshrc"
     return 0
   fi
+
   touch "$zshrc"
-  # Strip any prior # >>> aice-cheatsheet >>> ... # <<< aice-cheatsheet <<< block
   if grep -Fq "# >>> aice-cheatsheet >>>" "$zshrc" 2>/dev/null; then
     node -e '
       const fs = require("fs");
-      const file = process.argv[1];
-      let content = fs.readFileSync(file, "utf8");
-      content = content.replace(/\n?# >>> aice-cheatsheet >>>[\s\S]*?# <<< aice-cheatsheet <<<\n?/g, "\n");
-      fs.writeFileSync(file, content, "utf8");
+      const p = process.argv[1];
+      let c = fs.readFileSync(p, "utf-8");
+      c = c.replace(/\n?# >>> aice-cheatsheet >>>[\s\S]*?# <<< aice-cheatsheet <<<\n?/g, "\n");
+      fs.writeFileSync(p, c, "utf-8");
     ' "$zshrc"
   fi
 
-  cat >> "$zshrc" <<'CHEATSHEET_EOF'
+  cat <<'CHEATSHEET_EOF' >> "$zshrc"
 
 # >>> aice-cheatsheet >>>
 aice_cheatsheet() {
-  emulate -L zsh
-  setopt localoptions no_sh_word_split
-
-  local cols="${1:-${COLUMNS:-100}}"
-  local C_RESET=$'\033[0m'
-  local C_BOLD=$'\033[1m'
-  local C_CYAN=$'\033[38;5;51m'
-  local C_GREEN=$'\033[38;5;84m'
-  local C_YELLOW=$'\033[38;5;220m'
-  local C_MAGENTA=$'\033[38;5;213m'
-  local C_GRAY=$'\033[38;5;245m'
-
-  printf "${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
+  local C_RESET="\033[0m"
+  local C_CYAN="\033[1;36m"
+  local C_GREEN="\033[1;32m"
+  local C_YELLOW="\033[1;33m"
+  local C_MAGENTA="\033[1;35m"
+  local C_BOLD="\033[1m"
+  local C_GRAY="\033[0;90m"
+  printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE — ON-THE-FLY AI CONTEXT ENGINE & TELEMETRY CHEATSHEET (@forart82)${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] TELEMETRY, AGENTS & CONFIG${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file from 0${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}85%% AST skeleton${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}1-turn symbol${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}Surgical edit${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect agents${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}Project \$idioms${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file/--stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}src tests / 85%%${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}-s sym/TC/L/pat${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}:m/:TC/:L/:eof${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.20${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}32 exts (.ts..md)${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
@@ -369,11 +415,12 @@ else
   fi
 fi
 
-# ── Substep 2.5: Post-Install Global Agent Wiring & Smoke Check ──────────────
-AICE_BIN="${LOCAL_BIN}/aice"
+# ── Substep 2.5: Global Agent Wiring, MCP Schemas & Workspace Rule Refresh ───
 if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$NO_AGENTS" -eq 0 ]]; then
     printf '  [dry-run] %s agents setup\n' "$AICE_BIN"
+    printf '  [dry-run] regenerate MCP schemas in ~/.gemini/antigravity-cli/mcp/aice/\n'
+    printf '  [dry-run] refresh AICE rule blocks across ~/dev/* AICE-enabled projects\n'
   fi
   printf '  [dry-run] %s --version\n' "$AICE_BIN"
   printf '  [dry-run] %s agents status\n' "$AICE_BIN"
@@ -381,6 +428,51 @@ else
   if [[ "$NO_AGENTS" -eq 0 ]]; then
     log_info "Configuring global CLI coding agents (aice agents setup)..."
     "$AICE_BIN" agents setup
+
+    log_info "Regenerating MCP tool schemas and refreshing AICE-enabled workspaces in ~/dev/*..."
+    npx tsx -e '
+      import * as fs from "node:fs";
+      import * as os from "node:os";
+      import * as path from "node:path";
+      import { AICE_MCP_TOOLS, AICE_VERSION } from "./src/mcp/server.ts";
+      import { loadProjectConfig, isProjectAiceEnabled, syncProjectWorkspaceRules } from "./src/config/project-config.ts";
+
+      const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
+      const mcpSchemaDir = path.join(homeDir, ".gemini", "antigravity-cli", "mcp", "aice");
+      fs.mkdirSync(mcpSchemaDir, { recursive: true });
+      for (const tool of AICE_MCP_TOOLS) {
+        fs.writeFileSync(
+          path.join(mcpSchemaDir, `${tool.name}.json`),
+          JSON.stringify({ ...tool, version: AICE_VERSION }, null, 2) + "\n",
+          "utf-8",
+        );
+      }
+      fs.writeFileSync(
+        path.join(mcpSchemaDir, "tools.json"),
+        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) + "\n",
+        "utf-8",
+      );
+
+      const devDir = process.env.AICE_PROJECTS_DIR
+        ? path.resolve(process.env.AICE_PROJECTS_DIR)
+        : path.join(homeDir, "dev");
+      let refreshedCount = 0;
+      if (fs.existsSync(devDir) && fs.statSync(devDir).isDirectory()) {
+        for (const entry of fs.readdirSync(devDir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const projPath = path.join(devDir, entry.name);
+          const cfgPath = path.join(projPath, "aice.config.json");
+          if (fs.existsSync(cfgPath)) {
+            const cfg = loadProjectConfig(projPath);
+            if (isProjectAiceEnabled(cfg)) {
+              syncProjectWorkspaceRules(projPath, true);
+              refreshedCount++;
+            }
+          }
+        }
+      }
+      console.log(`[✔] Regenerated ${AICE_MCP_TOOLS.length} MCP schema(s) (v${AICE_VERSION}) in ${mcpSchemaDir} and refreshed ${refreshedCount} workspace(s) in ${devDir}`);
+    '
   fi
   log_info "Running post-install smoke checks..."
   VER="$("$AICE_BIN" --version)"
@@ -388,4 +480,4 @@ else
   "$AICE_BIN" agents status
 fi
 
-log_ok "AICE installation complete! Created by @forart82 (https://github.com/forart82/aice)"
+log_ok "AICE installation complete! (v${LOCAL_VER}) Created by @forart82 (https://github.com/forart82/aice)"

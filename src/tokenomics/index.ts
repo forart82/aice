@@ -122,54 +122,37 @@ export interface TokenomicsAuditReport {
   files: TokenomicsFileResult[];
 }
 
-export function detectLanguageName(targetPath: string): string {
-  const ext = path.extname(targetPath).toLowerCase();
-  switch (ext) {
-    case ".ts":
-      return "TypeScript";
-    case ".tsx":
-      return "React TSX";
-    case ".js":
-    case ".mjs":
-    case ".cjs":
-      return "JavaScript";
-    case ".jsx":
-      return "React JSX";
-    case ".py":
-      return "Python";
-    case ".css":
-      return "CSS3";
-    case ".html":
-      return "HTML5";
-    case ".go":
-      return "Go";
-    case ".rs":
-      return "Rust";
-    case ".cpp":
-    case ".hpp":
-    case ".h":
-    case ".cc":
-    case ".cxx":
-      return "C++20";
-    case ".cs":
-      return "C#";
-    case ".json":
-      return "JSON";
-    case ".yaml":
-    case ".yml":
-      return "YAML";
-    case ".twig":
-      return "Twig";
-    case ".php":
-      return "PHP";
-    case ".kt":
-    case ".kts":
-      return "Kotlin";
-    default:
-      return ext || "unknown";
-  }
+export function detectLanguageName(filePath: string): string {
+  const lower = filePath.toLowerCase();
+  if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "TSX / React";
+  if (lower.endsWith(".ts") || lower.endsWith(".d.ts")) return "TypeScript";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) return "JavaScript";
+  if (lower.endsWith(".py") || lower.endsWith(".pyi")) return "Python";
+  if (lower.endsWith(".rs")) return "Rust";
+  if (lower.endsWith(".go")) return "Go";
+  if (
+    lower.endsWith(".cpp") ||
+    lower.endsWith(".cc") ||
+    lower.endsWith(".cxx") ||
+    lower.endsWith(".hpp") ||
+    lower.endsWith(".h")
+  )
+    return "C++20";
+  if (lower.endsWith(".cs")) return "C#";
+  if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "Kotlin";
+  if (lower.endsWith(".php")) return "PHP";
+  if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "Twig";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "HTML";
+  if (lower.endsWith(".css")) return "CSS";
+  if (lower.endsWith(".json")) return "JSON";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "YAML";
+  if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "Shell";
+  if (lower.endsWith(".ps1")) return "PowerShell";
+  if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "Batch";
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "Markdown";
+  if (lower.endsWith(".aice")) return "AICE";
+  return "TypeScript";
 }
-
 export function calculateFileTokenomics(
   aiceContent: string,
   targetContent: string,

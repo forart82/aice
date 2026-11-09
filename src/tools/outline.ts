@@ -26,19 +26,24 @@ import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js"
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
-import { locateNativeDeclarationSpan } from "./splice.js";
+import {
+  extractNativeTestBlocks,
+  extractScriptOrMarkdownSymbols,
+  locateNativeDeclarationSpan,
+} from "./splice.js";
 import { formatNativeSyntaxDiagnosticsMarkdown } from "./syntax-validator.js";
 
 export interface OutlineOptions {
   depth?: number;
   includeTypes?: boolean;
+  idioms?: boolean;
   json?: boolean;
   stats?: boolean;
-  projectRoot?: string;
-  idioms?: boolean;
   lineRanges?: boolean;
+  compact?: boolean;
+  projectRoot?: string;
+  filePath?: string;
 }
-
 export interface OutlineSymbol {
   name: string;
   kind: string;
@@ -137,14 +142,15 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   return comments.length > 0 ? comments.join("\n") : undefined;
 }
 
-export function generateOutline(
+    export function generateOutline(
   sourceOrMod: string | Module,
   filePathOrOptions: string | OutlineOptions = {},
   maybeOptions: OutlineOptions = {},
-): OutlineResult {
-  const explicitFilePath = typeof filePathOrOptions === "string" ? filePathOrOptions : undefined;
+    ): OutlineResult {
   const options: OutlineOptions =
     typeof filePathOrOptions === "string" ? maybeOptions : filePathOrOptions;
+  const explicitFilePath =
+    options.filePath ?? (typeof filePathOrOptions === "string" ? filePathOrOptions : undefined);
 
   const includeTypes = options.includeTypes !== false;
   const maxDepth = options.depth !== undefined ? options.depth : Infinity;
@@ -685,6 +691,16 @@ export function generateOutline(
         baseOutlineLines.push(sym.signature);
         annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
       }
+    } else if (
+      sym.kind === "test" ||
+      sym.kind === "describe" ||
+      sym.kind === "section" ||
+      sym.kind === "label"
+    ) {
+      baseOutlineLines.push(
+        options.lineRanges === false ? sym.signature : `${sym.signature}${symRangeSuffix}`,
+      );
+      annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
     } else {
       baseOutlineLines.push(sym.signature);
       annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
@@ -799,10 +815,18 @@ function enrichAndResolveSymbolLineRanges(
 ): void {
   if (maxDepth < 1) return;
 
-  // Populate initial endLine from AST spans
+  for (let i = symbols.length - 1; i >= 0; i--) {
+    if (symbols[i].kind === "var" && symbols[i].name === "_") {
+      symbols.splice(i, 1);
+    }
+  }
+
   const actionableAstItems = ast.items.filter(
-    (it) => !(it.kind === "FunctionDecl" && it.name === "__top_level__"),
+    (it) =>
+      !(it.kind === "FunctionDecl" && it.name === "__top_level__") &&
+      !(it.kind === "VarDecl" && it.name === "_"),
   );
+
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
     const astItem = actionableAstItems[i];
@@ -824,17 +848,22 @@ function enrichAndResolveSymbolLineRanges(
   const targetLang: TargetLanguage | undefined = isNativeFile
     ? detectTargetFromPath(filePath)
     : undefined;
-  const rawLines = originalSource ? originalSource.split(/\r?\n/) : [];
+  const rawLines = originalSource !== "" ? originalSource.split(/\r?\n/) : [];
   const totalLines = Math.max(1, rawLines.length);
 
-  if (isNativeFile && originalSource && targetLang) {
+  if (isNativeFile && originalSource !== "" && targetLang) {
     supplementNativeSymbolsFromSource(symbols, originalSource, targetLang, totalLines);
+  } else if (
+    !isNativeFile &&
+    originalSource !== "" &&
+    /\b(?:describe|test|it)\s*(?:\.[A-Za-z0-9_]+)*\s*\(/.test(originalSource)
+  ) {
+    supplementNativeSymbolsFromSource(symbols, originalSource, "typescript", totalLines);
   }
 
-  // Resolve accurate line & endLine in originalSource
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
-    if (isNativeFile && originalSource && targetLang) {
+    if (isNativeFile && originalSource !== "" && targetLang) {
       const resolved = resolveSingleSymbolSpanInNative(
         sym,
         originalSource,
@@ -852,7 +881,7 @@ function enrichAndResolveSymbolLineRanges(
 
     if (sym.children && sym.children.length > 0) {
       for (const child of sym.children) {
-        if (isNativeFile && originalSource && targetLang) {
+        if (isNativeFile && originalSource !== "" && targetLang) {
           const childResolved = resolveChildSymbolSpanInNative(
             sym,
             child,
@@ -903,6 +932,31 @@ function supplementNativeSymbolsFromSource(
     }
   }
 
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "markdown"
+  ) {
+    const scriptSyms = extractScriptOrMarkdownSymbols(source, targetLang);
+    for (const s of scriptSyms) {
+      const key = `${s.kind}:${s.name}:${s.startLine}`;
+      if (!existingNames.has(key)) {
+        symbols.push({
+          name: s.name,
+          kind: s.kind,
+          line: s.startLine,
+          endLine: s.endLine,
+          lineRange: `[L${s.startLine}-L${s.endLine}]`,
+          signature: s.displaySignature,
+          children: [],
+        });
+        existingNames.add(key);
+      }
+    }
+    return;
+  }
+
   if (targetLang === "css") {
     try {
       const root = postcss.parse(source);
@@ -943,7 +997,7 @@ function supplementNativeSymbolsFromSource(
         }
       });
     } catch {
-      // ignore invalid CSS parse in supplement
+      // ignore CSS parse errors
     }
     return;
   }
@@ -991,64 +1045,39 @@ function supplementNativeSymbolsFromSource(
     return;
   }
 
+  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+    const testBlocks = extractNativeTestBlocks(source);
+    for (const tb of testBlocks) {
+      const sig = `${tb.outlineKind} "${tb.title.replace(/"/g, '\\"')}"`;
+      const key = `${tb.outlineKind}:${tb.title}:${tb.startLine}`;
+      if (!existingNames.has(key)) {
+        symbols.push({
+          name: tb.title,
+          kind: tb.outlineKind,
+          line: tb.startLine,
+          endLine: tb.endLine,
+          lineRange: `[L${tb.startLine}-L${tb.endLine}]`,
+          signature: sig,
+          children: [],
+        });
+        existingNames.add(key);
+        existingNames.add(tb.title);
+      }
+    }
+  }
+
   const lines = source.split(/\r?\n/);
   const declPatterns: Array<{ re: RegExp; kind: string; sigPrefix: string }> = [
-    // Rust macro_rules!, struct, enum, trait, fn
-    {
-      re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
-    {
-      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
-    {
-      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/,
-      kind: "class",
-      sigPrefix: "class ",
-    },
-    // Go func (r *Recv) Name(...) or func Name(...) or type Name struct/interface
-    {
-      re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
-    {
-      re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/,
-      kind: "interface",
-      sigPrefix: "type ",
-    },
-    // Kotlin sealed interface, data class, suspend fun, fun
-    {
-      re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/,
-      kind: "class",
-      sigPrefix: "class ",
-    },
-    {
-      re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
-    // C# record / class / interface
-    {
-      re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/,
-      kind: "class",
-      sigPrefix: "class ",
-    },
-    // Python async def / def / class
-    {
-      re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
-    // PHP function / class
-    {
-      re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
-      kind: "function",
-      sigPrefix: "fn ",
-    },
+    { re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "function", sigPrefix: "fn " },
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "function", sigPrefix: "fn " },
+    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
+    { re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
+    { re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/, kind: "interface", sigPrefix: "type " },
+    { re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
+    { re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
+    { re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
+    { re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
+    { re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
   ];
 
   for (let i = 0; i < lines.length; i++) {
@@ -1069,6 +1098,12 @@ function supplementNativeSymbolsFromSource(
           continue;
         }
         const span = locateNativeDeclarationSpan(source, name, targetLang);
+        if (
+          !span &&
+          (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
+        ) {
+          continue;
+        }
         const sLine = span?.startLine ?? i + 1;
         const eLine = span?.endLine ?? Math.min(totalLines, sLine);
         symbols.push({
@@ -1078,9 +1113,7 @@ function supplementNativeSymbolsFromSource(
           endLine: eLine,
           lineRange: `[L${sLine}-L${eLine}]`,
           signature:
-            pat.kind === "function"
-              ? `${pat.sigPrefix}${name}(...): ...`
-              : `${pat.sigPrefix}${name}: ...`,
+            pat.kind === "function" ? `${pat.sigPrefix}${name}(...): ...` : `${pat.sigPrefix}${name}: ...`,
           children: [],
         });
         existingNames.add(name);
@@ -1096,11 +1129,22 @@ function resolveSingleSymbolSpanInNative(
   rawLines: string[],
   targetLang: TargetLanguage,
   _filePath: string,
-): { startLine: number; endLine: number } | null {
+): { startLine: number; endLine: number } | undefined {
+  if (
+    (sym.kind === "test" ||
+      sym.kind === "describe" ||
+      sym.kind === "section" ||
+      sym.kind === "label") &&
+    sym.line &&
+    sym.endLine
+  ) {
+    return { startLine: sym.line, endLine: Math.max(sym.line, sym.endLine) };
+  }
+
   if (targetLang === "css" && sym.kind === "style") {
     try {
       const root = postcss.parse(originalSource);
-      let matched: { startLine: number; endLine: number } | null = null;
+      let matched: { startLine: number; endLine: number } | undefined;
       const cleanTarget = sym.name.replace(/^[.#]/, "").replace(/[^A-Za-z0-9_]/g, "_");
       root.walkRules((rule) => {
         if (matched) return;
@@ -1114,7 +1158,7 @@ function resolveSingleSymbolSpanInNative(
       });
       if (matched) return matched;
     } catch {
-      // fallback to line search
+      // ignore
     }
   }
 
@@ -1127,7 +1171,6 @@ function resolveSingleSymbolSpanInNative(
     }
   }
 
-  // Fallback line search in originalSource
   const escaped = escapeRegexForOutline(sym.name);
   const wordRe = sym.kind === "import" ? new RegExp(escaped) : new RegExp(`\\b${escaped}\\b`);
   for (let i = 0; i < rawLines.length; i++) {
@@ -1142,7 +1185,8 @@ function resolveSingleSymbolSpanInNative(
       return { startLine: i + 1, endLine: i + 1 };
     }
   }
-  return null;
+
+  return undefined;
 }
 
 function resolveChildSymbolSpanInNative(
@@ -1189,33 +1233,40 @@ export function collectNativeSyntaxDiagnostics(
 }
 
 export async function outlinePath(
-  targetPath: string,
+  targetPath: string | string[],
   options: OutlineOptions = {},
 ): Promise<OutlineResult | Map<string, OutlineResult>> {
-  const fullPath = path.resolve(process.cwd(), targetPath);
-  if (!fs.existsSync(fullPath)) {
-    throw new Error(`File or directory not found: ${targetPath}`);
+  const inputPaths = Array.isArray(targetPath)
+    ? targetPath.filter((p) => Boolean(p?.trim()))
+    : [targetPath];
+  if (inputPaths.length === 0) {
+    throw new Error("No target path provided to outlinePath");
+  }
+  const firstFullPath = path.resolve(process.cwd(), inputPaths[0]);
+  if (!fs.existsSync(firstFullPath)) {
+    throw new Error(`File or directory not found: ${inputPaths[0]}`);
   }
 
-  const stat = fs.statSync(fullPath);
-  const projectRoot =
-    options.projectRoot ?? findProjectRoot(stat.isDirectory() ? fullPath : path.dirname(fullPath));
+  const firstStat = fs.statSync(firstFullPath);
+  const projectRoot = options.projectRoot
+    ? path.resolve(options.projectRoot)
+    : findProjectRoot(firstStat.isDirectory() ? firstFullPath : path.dirname(firstFullPath));
   const cfg = loadProjectConfig(projectRoot);
   if (!isProjectAiceEnabled(cfg)) {
     throw new Error(AICE_DISABLED_MESSAGE);
   }
 
-  if (stat.isFile()) {
+  if (!Array.isArray(targetPath) && firstStat.isFile()) {
     const res = withSuppressedTelemetry(() =>
-      generateOutline(fullPath, { ...options, projectRoot }),
+      generateOutline(firstFullPath, { ...options, projectRoot }),
     );
-    const nativeText = fs.readFileSync(fullPath, "utf-8");
-    const nativeDiags = collectNativeSyntaxDiagnostics(fullPath, nativeText);
+    const nativeText = fs.readFileSync(firstFullPath, "utf-8");
+    const nativeDiags = collectNativeSyntaxDiagnostics(firstFullPath, nativeText);
     if (nativeDiags && !options.json) {
       res.text = res.text ? `${res.text}\n\n${nativeDiags}` : nativeDiags;
     }
     recordTelemetryEvent({
-      targetPath: fullPath,
+      targetPath: firstFullPath,
       projectRoot,
       operation: "outline",
       surface: "cli",
@@ -1227,55 +1278,81 @@ export async function outlinePath(
   }
 
   const resultMap = new Map<string, OutlineResult>();
-  const targetCandidates: string[] = [];
+  const targetCandidatesSet = new Set<string>();
 
-  function walk(currentDir: string): void {
-    const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+  const walk = (dir: string) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (
         entry.name === "node_modules" ||
         entry.name === ".git" ||
         entry.name === "dist" ||
         entry.name === "build" ||
-        entry.name === ".next" ||
-        entry.name === ".turbo" ||
+        entry.name === ".aice-build" ||
+        entry.name === "coverage" ||
         entry.name.startsWith(".")
       ) {
         continue;
       }
-      const entryPath = path.join(currentDir, entry.name);
+      const p = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(entryPath);
+        walk(p);
       } else if (entry.isFile()) {
         if (
-          entry.name.endsWith(".trivia.json") ||
           entry.name === "aice.config.json" ||
           entry.name === "package-lock.json" ||
-          entry.name === "tsconfig.json" ||
-          entry.name === "jsconfig.json" ||
-          entry.name === "biome.json" ||
-          entry.name === "rome.json"
+          entry.name.endsWith(".trivia.json") ||
+          entry.name === "AGENTS.md" ||
+          entry.name === "CLAUDE.md" ||
+          entry.name === "GEMINI.md" ||
+          entry.name === ".GEMINI.md"
         ) {
           continue;
         }
-        const ext = path.extname(entry.name).toLowerCase();
-        if (KNOWN_TARGET_EXTENSIONS.has(ext) || entry.name.endsWith(".aice")) {
-          targetCandidates.push(entryPath);
+        if (entry.name.endsWith(".aice")) {
+          targetCandidatesSet.add(p);
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (KNOWN_TARGET_EXTENSIONS.has(ext) && !fs.existsSync(`${p}.aice`)) {
+            targetCandidatesSet.add(p);
+          }
         }
       }
     }
+  };
+
+  for (const rawP of inputPaths) {
+    const fullP = path.resolve(process.cwd(), rawP);
+    if (!fs.existsSync(fullP)) {
+      throw new Error(`File or directory not found: ${rawP}`);
+    }
+    const st = fs.statSync(fullP);
+    if (st.isDirectory()) {
+      walk(fullP);
+    } else if (st.isFile()) {
+      targetCandidatesSet.add(fullP);
+    }
   }
 
-  walk(fullPath);
+  const targetCandidates = Array.from(targetCandidatesSet).sort();
+  const isCompactMode =
+    options.compact === true || (options.compact !== false && targetCandidates.length >= 100);
 
   const nativeParts: string[] = [];
   const aiceParts: string[] = [];
   let anyIdioms = false;
 
-  for (const targetFile of targetCandidates.sort()) {
-    const relKey = path.relative(process.cwd(), targetFile);
+  for (const targetFile of targetCandidates) {
+    let relKey = path.relative(process.cwd(), targetFile).replace(/\\/g, "/");
+    if (relKey.startsWith("..") && options.projectRoot) {
+      relKey = path.relative(projectRoot, targetFile).replace(/\\/g, "/");
+    }
     const r = withSuppressedTelemetry(() =>
-      generateOutline(targetFile, { ...options, projectRoot }),
+      generateOutline(targetFile, {
+        ...options,
+        depth: isCompactMode && options.depth === undefined ? 1 : options.depth,
+        projectRoot,
+      }),
     );
     try {
       const rawText = fs.readFileSync(targetFile, "utf-8");
@@ -1287,8 +1364,18 @@ export async function outlinePath(
     } catch {
       // ignore
     }
+    if (isCompactMode && !options.json && r.text) {
+      const nonImportLines = r.text
+        .split(/\r?\n/)
+        .filter((l) => l.trim().length > 0 && !/^\s*(?:from\s+["']|import\s+["']|extends\s+["'])/.test(l));
+      if (nonImportLines.length > 20) {
+        r.text = `${nonImportLines.slice(0, 20).join("\n")}\n// ... (+${nonImportLines.length - 20} more symbols)`;
+      } else if (nonImportLines.length > 0) {
+        r.text = nonImportLines.join("\n");
+      }
+    }
     resultMap.set(relKey, r);
-    aiceParts.push(`// === ${relKey} ===\n\n${r.text}`);
+    aiceParts.push(`// === ${relKey} ===\n${r.text}`);
     if ((r.referencedIdioms?.length ?? 0) > 0) {
       anyIdioms = true;
     }
@@ -1296,13 +1383,13 @@ export async function outlinePath(
 
   if (targetCandidates.length > 0) {
     recordTelemetryEvent({
-      targetPath: fullPath,
+      targetPath: firstFullPath,
       projectRoot,
       filePath: "<directory>",
       operation: "outline",
       surface: "cli",
       idiomsUsed: anyIdioms,
-      nativeText: nativeParts.join("\n"),
+      nativeText: nativeParts.join("\n\n"),
       aiceText: options.json
         ? JSON.stringify(
             Array.from(resultMap.values()).map(

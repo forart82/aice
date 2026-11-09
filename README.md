@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.11](https://img.shields.io/badge/Version-0.9.11-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.20](https://img.shields.io/badge/Version-0.9.20-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -20,14 +20,13 @@
 
 Modern Large Language Models (LLMs) spend **40% to 85% of their context windows, tool calls, and output token budgets on syntactic noise and full-file re-reads**: closing XML/HTML tags (`</div>`, `</section>`), redundant curly braces (`{ ... }`), verbose language ceremony (`std::cout << ... << std::endl`, `export interface`, `public readonly`), and repetitive multi-file patterns.
 
-**AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **15 languages** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`):
+**AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **19 languages & 32 file extensions** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`, `Shell (.sh/.bash/.zsh)`, `PowerShell (.ps1)`, `Batch (.cmd/.bat)`, and `Markdown (.md/.markdown)`):
 
-1. **Zero `.aice` Files on Disk**: Your native codebase (`*.ts`, `*.cpp`, `*.py`, `*.rs`, `*.go`, etc.) remains 100% untouched by companion or shadow files. No watchers, no file permission locks, and no build-pipeline disruption.
-2. **In-RAM AST Decompilation & Line-Range Skeleton Outlines (`aice outline`)**: Summarizes any native file or workspace into a compact AICE structural skeleton with `[Lstart-Lend]` line-range annotations and multi-language `## ⚠️ Native Syntax Diagnostics` in milliseconds (`65%` to `92%` token reduction).
-3. **1-Turn Symbol-Scoped Context Packs (`aice context`)**: Extracts just the target symbol, its imported dependency contracts, `[Lstart-Lend]` symbol ranges, and active `$idioms` in a single turn (`-69.0%` to `-83.7%` working payload tokens).
-4. **Built-In & Project-Specific `$idioms` (`aice idioms`)**: Automatically collapses both language-level ceremony (e.g., C++ `std::cout << a << b << std::endl` $\leftrightarrow$ `print(a, b)`) and project-specific multi-file AST patterns (`$clampBand`, `$guard`, `$big_out` via `.aice-idioms.json` / `aice.config.json`) using structural anti-unification.
-5. **Surgical Direct-to-Native Splicing & Multi-Symbol Batch Edits (`aice splice`)**: Accepts compact AICE + `$idioms`, raw native code, or hybrid syntax and splices the expanded native code directly into the exact byte-span of the target symbol (or an atomic `edits` array of multiple symbols applied bottom-to-top) — preserving 100% of surrounding comments, formatting, and headers byte-for-byte.
-6. **Lossless Preprocessor & Pre-Write Syntax Validation (`aice create` / `aice splice`)**: Lexical-masking preprocessor (`preprocessHybridAndIdiomsLossless`) lowers hybrid AICE shorthands (`pub fn`, `^fn`, `@cls`, `:#`, `:$`, `:?`, `<-`, `ret`, compact CSS properties) and balanced `$idiom(...)` calls directly into native target code without destructive AST round-tripping, guarded by pre-write syntax validation (`validateNativeSyntax`) across all 15 languages / 25 extensions.
+1. **Zero `.aice` Files on Disk**: Your native codebase (`*.ts`, `*.cpp`, `*.py`, `*.rs`, `*.go`, `*.sh`, `*.md`, etc.) remains 100% untouched by companion or shadow files. No watchers, no file permission locks, and no build-pipeline disruption.
+2. **In-RAM AST Decompilation & Line-Range Skeleton Outlines (`aice outline`)**: Summarizes any native file or multi-directory workspace (`aice outline src tests`) into a compact AICE structural skeleton with `[Lstart-Lend]` line-range annotations, named `test "..." # [Lstart-Lend]` / `describe "..." # [Lstart-Lend]` blocks, Markdown ATX section headings (`# Heading # [Lstart-Lend]`), shell/PowerShell/batch functions & labels, and multi-language `## ⚠️ Native Syntax Diagnostics` in milliseconds (**85–90% read token reduction**).
+3. **1-Turn Dependency Contract Packager, Call-Site Tracker & Search (`aice context`)**: Extracts any target symbol, `Class.method`, test ID (`-s "TC-MENU-001"`), Markdown heading (`-s "Quick Start"`), exact line range (`-s "L180-L240"`), or regex/substring search (`-s "/pattern/"`) along with its imported dependency signatures and **exact downstream caller line numbers** (`uses getCoreConstants at [L14]`) in a single tool call — completely eliminating `grep -n`, `grep -rn`, `sed -n`, `cat`, and `ls`.
+4. **Lossless Multi-Language Surgical Splicing (`aice splice`)**: Applies surgical AST replacements, insertions, or deletions in RAM by symbol (`:Class.method`), test ID (`:TC-MENU-001`), Markdown heading (`:Heading Title`), script function/label, line range (`:Lstart-Lend`), `:imports`, or `:eof`, and writes back **100% standard, compiler-ready native code** while preserving untouched formatting, comments, and line endings byte-for-byte (**90%+ write token reduction**).
+5. **Smart Multi-File Idioms (`$idioms` / `aice idioms`)**: Automatically discovers or lets you define parameterized project-wide AST macros (such as `$clamp($0, $1, $2)` or `$guard_pos($0)`). Every occurrence across all files is collapsed into a 1-line `$idiom(...)` call during `outline`/`context`, expanded back to native code during `create`/`splice`, and can be mutated across the entire repository in **1 turn** via `aice idioms update`.
 
 ---
 
@@ -199,13 +198,15 @@ Full offline deterministic per-module breakdown: see [`docs/BENCHMARKS_OFFLINE.m
 ## 🚀 Quick Start & Universal Linux Installation
 
 ### Option 1: One-Line Git Clone & Universal Linux Installer (`./install.sh` — Recommended)
-Automatically detects your Linux distro (`apt-get`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), verifies/installs `git`, `curl`, `node >= 20`, and `npm`, registers `~/.local/bin/aice`, optionally offers the interactive Zsh startup cheatsheet (only when running in an active Zsh shell), and wires `aice mcp` + system instructions into your installed CLI coding agents:
+Automatically detects your Linux distro (`apt-get`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), verifies/installs `git`, `curl`, `node >= 20`, and `npm`, detects installed vs. local vs. `origin/main` versions, registers `~/.local/bin/aice`, regenerates MCP tool schemas (`~/.gemini/antigravity-cli/mcp/aice/`), refreshes AICE rule blocks across all existing AICE-enabled projects in `~/dev/*`, and wires `aice mcp` + system instructions into your installed CLI coding agents:
 
 ```bash
 git clone https://github.com/forart82/aice.git && cd aice && ./install.sh
 
-# Non-interactive / CI flags:
-./install.sh --yes              # Auto-confirm dependencies & Zsh cheatsheet
+# In-place update & non-interactive / CI flags (works even when AICE is already installed):
+./install.sh --update           # Pull newest origin/main (if ahead) & refresh binary, MCP schemas, global agents & ~/dev/* rules
+./install.sh --yes              # Auto-confirm dependencies, git update & Zsh cheatsheet
+./install.sh --no-update        # Skip remote git check and refresh local working tree in-place
 ./install.sh --no-cheatsheet    # Skip Zsh startup cheatsheet prompt
 ./install.sh --no-agents        # Skip automatic CLI agent configuration
 ./install.sh --dry-run          # Preview all actions without mutating disk
@@ -245,7 +246,7 @@ aice gain
 
 ## 🤖 Automatic CLI Coding Agent Integration (`aice agents`)
 
-`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical `<!-- AICE:START --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 24 supported file extensions (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`):
+`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.20 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 32 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`):
 
 | CLI Coding Agent | MCP Server Config | Global System Directive |
 | :--- | :--- | :--- |
@@ -260,7 +261,7 @@ aice gain
 ```bash
 aice agents setup               # Configure installed CLI coding agents idempotently
 aice agents setup --all         # Pre-configure all 7 agent paths
-aice agents status [--json]     # Inspect binary detection, MCP config, and prompt status
+aice agents status [--json]     # Inspect binary detection, MCP config, and rule version sync status (v0.9.20)
 aice agents remove              # Cleanly strip AICE entries without losing user settings
 ```
 
@@ -315,25 +316,29 @@ aice gain --reset --yes         # Clear telemetry ledger
 
 ### 1. Greenfield File Creation, On-the-Fly Context, Skeleton Outlines & Surgical Splicing
 ```bash
-# Create brand-new native files from compact AICE, hybrid braces, or compact CSS shorthands (single file or --batch):
+# Create brand-new native files from compact AICE, hybrid braces, or multi-file --stdin across 32 extensions:
 aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
 aice create src/style.css -c '.box { d: flex; jc: center; ai: center; bg: #111; c: #fff; p: 10px; br: 8px; }'
 aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
 
-# Generate structural skeleton outline of any native file or directory (65-92% token reduction):
-aice outline src/telemetry_report.cpp --idioms --stats
+# Generate structural skeleton outline across files or multiple directories (replaces 'ls src tests' & 'grep -n'):
+aice outline src tests
+aice outline src tests --compact
+aice outline tests/app.test.ts          # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
+aice outline install.sh README.md       # Emits shell functions, batch :labels, and Markdown ATX headings
 
-# Generate 1-turn token-bounded context pack from a native file (or single symbol with -s):
-aice context src/telemetry_report.cpp --symbol buildNodeReport --idioms
-aice context . --symbol "*" --idioms
+# Generate 1-turn token-bounded context pack (replaces 'sed -n', 'grep -n', and 'grep -rn'):
+aice context src/app.ts -s "GameApp.getCoreConstants"   # Includes Downstream Callers with exact call-site [L14]
+aice context tests/app.test.ts -s "TC-MENU-001"         # Extract test block by test ID or title prefix
+aice context src/app.ts -s "L180-L240"                  # Extract exact 1-based line range
+aice context src -s "/OracleIncoherenceAuditor/"        # 1-turn regex/substring search across file or directory
+aice context README.md -s "Quick Start"                 # Extract Markdown section by heading
 
-# Preview surgical AST replacement with unified diff (--dry-run --diff):
-aice splice src/telemetry_report.cpp -s buildNodeReport -c "pub fn buildNodeReport(m: TelemetryMetrics) -> str: ..." --idioms --dry-run --diff
-
-# Apply surgical AST replacement in-place directly on the native file:
+# Apply surgical AST replacements in-place (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
 aice splice src/telemetry_report.cpp -s buildNodeReport -c "pub fn buildNodeReport(m: TelemetryMetrics) -> str: ..." --idioms --in-place
+aice splice tests/app.test.ts -s "TC-MENU-001" -c 'test("TC-MENU-001: GameApp initializes at 60Hz", () => { expect(true).toBe(true); });'
+aice splice README.md -s "Quick Start" -c "## Quick Start\nRun ./install.sh -y"
 aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
-aice splice --batch '[{"filePath":"src/a.ts","symbol":"fnA","code":"pub fn fnA() -> int: ret 1"}]' --idioms
 ```
 
 ### 2. Smart Multi-File Idioms (`$idioms`) & Project Toggles

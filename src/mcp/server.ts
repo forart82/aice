@@ -280,7 +280,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_project_config",
     description:
-      "Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled') and workspace rules in aice.config.json.",
+      `Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled'), rule sync status, and AICE version (v${AICE_VERSION}) in aice.config.json.`,
     inputSchema: {
       type: "object",
       properties: {
@@ -1359,11 +1359,37 @@ export class AiceMcpServer {
           setProjectIdiomsEnabled(projectRoot, args.idiomsEnabled);
         }
         const updated = loadProjectConfig(projectRoot);
+        const agentsMdPath = path.join(projectRoot, "AGENTS.md");
+        let rulesVersion: string | undefined;
+        if (fs.existsSync(agentsMdPath)) {
+          try {
+            const mdText = fs.readFileSync(agentsMdPath, "utf-8");
+            const verMatch =
+              mdText.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/) ??
+              mdText.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
+            if (verMatch?.[1]) {
+              rulesVersion = verMatch[1];
+            } else if (mdText.includes("<!-- AICE:START")) {
+              rulesVersion = "legacy";
+            }
+          } catch {
+            // ignore
+          }
+        }
+        const rulesUpToDate = !rulesVersion || rulesVersion === AICE_VERSION;
         const payload = {
           projectRoot,
+          version: AICE_VERSION,
           enabled: isProjectAiceEnabled(updated),
           idiomsEnabled: isProjectIdiomsEnabled(updated),
           activeIdiomsCount: updated.idioms ? Object.keys(updated.idioms).length : 0,
+          rulesVersion: rulesVersion ?? AICE_VERSION,
+          rulesUpToDate,
+          ...(!rulesUpToDate
+            ? {
+                updateRecommendation: `Run './install.sh -y' or 'aice agents setup' to refresh agent rules to v${AICE_VERSION}`,
+              }
+            : {}),
         };
         return {
           content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],

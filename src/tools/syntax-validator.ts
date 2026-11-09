@@ -3,12 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * AICE Multi-Language Pre-Write Syntax Validation Gate (`validateNativeSyntax`).
- *
- * Validates emitted or preprocessed native code across all 15 supported languages
- * before `createFile()` or `splice()` writes to disk, and powers `aice outline` /
- * `aice context` native syntax diagnostics.
  */
 
+import { spawnSync } from "node:child_process";
 import * as path from "node:path";
 import postcss from "postcss";
 import YAML from "yaml";
@@ -16,7 +13,6 @@ import ts from "../compat/typescript.js";
 import { type ProjectIdiomDefinition, stripJsonComments } from "../config/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { maskSourceLexically } from "./preprocessor.js";
-
 export interface SyntaxDiagnosticItem {
   line: number;
   column: number;
@@ -516,6 +512,36 @@ export function validateNativeSyntax(
       }
     }
 
+    return finish();
+  }
+
+  // 4b. Shell, PowerShell, Batch, Markdown
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "markdown"
+  ) {
+    if (targetLang === "shell" && !filePath.toLowerCase().endsWith(".zsh")) {
+      try {
+        const res = spawnSync("bash", ["-n"], {
+          input: code,
+          encoding: "utf-8",
+          timeout: 2500,
+        });
+        if (res.status !== null && res.status !== 0 && !res.error) {
+          const stderr = (res.stderr ?? "").trim();
+          const lineMatch = stderr.match(/line\s+(\d+):\s*(.+)/i);
+          items.push({
+            line: lineMatch ? Number.parseInt(lineMatch[1], 10) : 1,
+            column: 1,
+            message: lineMatch ? lineMatch[2].trim() : stderr || "Shell syntax error",
+          });
+        }
+      } catch {
+        // bash binary unavailable; skip external syntax check
+      }
+    }
     return finish();
   }
 

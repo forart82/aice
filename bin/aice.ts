@@ -634,15 +634,10 @@ program
 program
   .command("decompile")
   .description(
-    "Decompile a target language file (.ts, .tsx, .css, .html, .cpp, .cs, .py, .php, .kt, .go, .rs) into an .aice source file",
+    "Decompile a target language file (.ts, .tsx, .js, .jsx, .py, .rs, .go, .cpp, .cs, .kt, .php, .html, .twig, .css, .json, .yaml, .sh, .ps1, .cmd, .md) into an .aice representation",
   )
-  .argument("<file>", "Path to the target source file")
-  .option("-o, --out <out>", "Output .aice file path")
-  .option(
-    "-t, --target <target>",
-    "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
-  )
-  .option("--idioms", "Force-enable project idioms")
+  .argument("<file>", "Path to target source file")
+  .option("-o, --out <path>", "Output .aice file path")
   .option("--no-idioms", "Temporarily disable project idioms")
   .action((file: string, options: { out?: string; target?: string; idioms?: boolean }) => {
     try {
@@ -926,23 +921,39 @@ program
 program
   .command("outline")
   .description(
-    "Semantic skeletonization: generate token-dense AST skeleton outline (85-90% token reduction)",
+    "Semantic skeletonization: generate token-dense AST skeleton outline across 32 extensions (85-90% token reduction)",
   )
   .argument(
     "[targets...]",
-    "Path(s) to source file(s) or directory (omitted for workspace sourceDir)",
+    "Path(s) to source file(s) or directories (e.g., 'aice outline src tests')",
   )
   .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
+  .option("--compact", "Compact token-bounded directory mode (auto-enabled for 100+ files)")
   .option("--no-types", "Exclude type annotations")
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .option("--json", "Output structured JSON symbol hierarchy")
   .option("--stats", "Display token reduction savings metrics")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  • Multi-directory skeleton map (replaces 'ls src tests'):
+      aice outline src tests
+  • Compact mode for large repositories (100+ files):
+      aice outline src tests --compact
+  • Outline test file with named test/describe titles & [Lstart-Lend]:
+      aice outline tests/app.test.ts
+  • Outline shell/PowerShell/batch script or Markdown headings:
+      aice outline install.sh README.md
+`,
+  )
   .action(
     async (
       targetPaths: string[] | undefined,
       options: {
         depth?: number;
+        compact?: boolean;
         types?: boolean;
         idioms?: boolean;
         json?: boolean;
@@ -968,6 +979,7 @@ program
 
           const outlineOpts: OutlineOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            compact: !!options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
             json: !!options.json,
@@ -1055,6 +1067,7 @@ program
         let totalOutline = 0;
         let totalFilesCount = 0;
 
+        const resolvedTargets: Array<{ raw: string | undefined; abs: string; root: string }> = [];
         for (const targetPath of rawTargets) {
           const resolved = resolvePathTargets(targetPath, { includeTargets: true });
           const outlineTarget = resolved.resolvedPath;
@@ -1066,17 +1079,33 @@ program
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
           }
+          resolvedTargets.push({
+            raw: targetPath,
+            abs: outlineTarget,
+            root: resolved.projectRoot,
+          });
+        }
+
+        const hasDirectoryTarget = resolvedTargets.some((t) =>
+          fs.statSync(t.abs).isDirectory(),
+        );
+
+        if (hasDirectoryTarget || options.compact) {
           const outlineOpts: OutlineOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            compact: !!options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
             json: !!options.json,
             stats: !!options.stats,
-            projectRoot: resolved.projectRoot,
+            projectRoot: resolvedTargets[0].root,
           };
-          const result = await outlinePath(outlineTarget, outlineOpts);
-          if (result instanceof Map) {
-            for (const [relPath, res] of result.entries()) {
+          const combinedResult = await outlinePath(
+            resolvedTargets.map((t) => t.abs),
+            outlineOpts,
+          );
+          if (combinedResult instanceof Map) {
+            for (const [relPath, res] of combinedResult.entries()) {
               totalFilesCount++;
               if (res.stats) {
                 totalOrig += res.stats.originalTokens;
@@ -1095,36 +1124,59 @@ program
                 console.log(res.text);
               }
             }
-          } else {
-            totalFilesCount++;
-            if (result.stats) {
-              totalOrig += result.stats.originalTokens;
-              totalOutline += result.stats.outlineTokens;
-            }
-            if (options.json) {
-              allJsonItems.push(
-                result.json ?? {
-                  file: result.file,
-                  symbols: result.symbols,
-                  ...(result.stats ? { stats: result.stats } : {}),
-                },
-              );
+          }
+        } else {
+          for (const item of resolvedTargets) {
+            const outlineOpts: OutlineOptions = {
+              depth: options.depth !== undefined ? Number(options.depth) : undefined,
+              compact: !!options.compact,
+              includeTypes: options.types !== false,
+              idioms: options.idioms,
+              json: !!options.json,
+              stats: !!options.stats,
+              projectRoot: item.root,
+            };
+            const result = await outlinePath(item.abs, outlineOpts);
+            if (result instanceof Map) {
+              for (const [relPath, res] of result.entries()) {
+                totalFilesCount++;
+                if (res.stats) {
+                  totalOrig += res.stats.originalTokens;
+                  totalOutline += res.stats.outlineTokens;
+                }
+                if (options.json) {
+                  allJsonItems.push(
+                    res.json ?? {
+                      file: res.file,
+                      symbols: res.symbols,
+                      ...(res.stats ? { stats: res.stats } : {}),
+                    },
+                  );
+                } else {
+                  console.log(`\n// === ${relPath} ===\n`);
+                  console.log(res.text);
+                }
+              }
             } else {
-              console.log(`\n// === ${targetPath ?? result.file} ===\n`);
-              console.log(result.text);
+              totalFilesCount++;
+              if (result.stats) {
+                totalOrig += result.stats.originalTokens;
+                totalOutline += result.stats.outlineTokens;
+              }
+              if (options.json) {
+                allJsonItems.push(
+                  result.json ?? {
+                    file: result.file,
+                    symbols: result.symbols,
+                    ...(result.stats ? { stats: result.stats } : {}),
+                  },
+                );
+              } else {
+                console.log(`\n// === ${item.raw ?? result.file} ===\n`);
+                console.log(result.text);
+              }
             }
           }
-        }
-
-        if (options.json) {
-          console.log(JSON.stringify(allJsonItems, null, 2));
-        } else if (options.stats) {
-          const savings = Math.max(0, totalOrig - totalOutline);
-          const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
-          console.log(`\n📊 Aggregate Token Reduction Metrics (${totalFilesCount} files):`);
-          console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
-          console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
-          console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -1166,7 +1218,10 @@ program
   .argument("[path]", "Path to source file (optional when --batch or -f is provided)")
   .argument("[symbol]", "Target symbol identifier (optional shorthand for -s/--symbol)")
   .option("-f, --file <path>", "Path to source file")
-  .option("-s, --symbol <symbol>", "Target symbol identifier")
+  .option(
+    "-s, --symbol <symbol>",
+    "Target selector: Class.method, test title/ID (TC-MENU-001), Markdown Heading, Lstart-Lend, eof, or imports",
+  )
   .option("-c, --code <code>", "Replacement AICE or native declaration snippet")
   .option("-t, --template <code>", "Alias for --code")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
@@ -1194,18 +1249,22 @@ program
     "after",
     `
 Examples:
-  • Replace function via stdin heredoc:
-      aice splice src/app.ts -s myFunction --stdin << 'EOF'
-      pub fn myFunction(x:#)-># => x * 2
+  • Multi-block heredoc stream across 32 extensions (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
+      aice splice --stdin << 'EOF'
+      === src/app.ts:GameApp.init ===
+      public init(): void { this.ready = true; }
+      === tests/app.test.ts:TC-MENU-001 ===
+      test("TC-MENU-001: GameApp initializes at 60Hz", () => { expect(true).toBe(true); });
+      === README.md:Quick Start ===
+      ## Quick Start
+      Run \`./install.sh -y\`.
       EOF
   • Replace specific line range:
       aice splice src/app.ts -s L10-L12 -c "const total = a + b;"
   • Delete class field/property cleanly:
       aice splice src/app.ts -s InputHandler.isListening --delete
   • Update contiguous imports block:
-      aice splice src/app.ts -s imports -c "import * as fs from 'node:fs';\\nimport * as path from 'node:path';"
-  • Atomic multi-symbol batch edits (applied bottom-to-top):
-      aice splice src/app.ts --edits '[{"symbol":"calc","code":"..."},{"symbol":"L1-L1","delete":true}]'
+      aice splice src/app.ts -s imports -c "import * as fs from 'node:fs';"
 `,
   )
   .action(
@@ -1795,7 +1854,9 @@ program
 // Command: context [target]
 program
   .command("context")
-  .description("Dependency contract packager in 1 turn for AI context windows")
+  .description(
+    "Dependency contract packager, symbol/test/heading extractor & /pattern/ search in 1 turn across 32 extensions",
+  )
   .argument(
     "[targets...]",
     "Path(s) to target source file(s) or directory (omitted for workspace overview context)",
@@ -1806,7 +1867,10 @@ program
     (val) => Number.parseInt(val, 10),
     1,
   )
-  .option("-s, --symbol <symbol>", "Extract symbol-scoped context (e.g., ClassName.methodName)")
+  .option(
+    "-s, --symbol <symbol>",
+    "Selector: Class.method, test ID (TC-MENU-001), Markdown heading, line range (L180-L240), or regex (/pattern/)",
+  )
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .option("--no-callers", "Skip reverse caller lookup")
@@ -1814,6 +1878,23 @@ program
   .option("--max-tokens <number>", "Maximum token limit", (val) => Number.parseInt(val, 10))
   .option("--json", "Output as JSON bundle")
   .option("--stats", "Output token count statistics")
+  .addHelpText(
+    "after",
+    `
+Examples:
+  • Extract method with downstream caller call-site line numbers ([L14]):
+      aice context src/app.ts -s "GameApp.getCoreConstants"
+  • Extract test block by test ID or title prefix (replaces grep -n):
+      aice context tests/app.test.ts -s "TC-MENU-001"
+  • Extract exact line range (replaces sed -n '180,240p'):
+      aice context src/app.ts -s "L180-L240"
+  • Search file or directory by regex/substring in 1 turn (replaces grep -rn):
+      aice context src -s "/OracleIncoherenceAuditor/"
+  • Extract Markdown section or shell/PowerShell/batch function:
+      aice context README.md -s "Quick Start"
+      aice context install.sh -s "install_sys_packages"
+`,
+  )
   .action(
     async (
       targetPaths: string[] | undefined,

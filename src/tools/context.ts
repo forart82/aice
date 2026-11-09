@@ -101,6 +101,8 @@ export interface CallerSummary {
   filePath: string;
   importedSymbols: string[];
   line: number;
+  usedSymbol?: string;
+  callSiteLines?: number[];
 }
 
 export interface ContextResult {
@@ -369,57 +371,88 @@ function scanWorkspaceCallers(
   targetFullPath: string,
   projectRoot: string,
   config: AiceProjectConfig,
+  queriedSymbol?: string,
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
   const filesToScan: string[] = [];
-  const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
   const resolvedRoot = path.resolve(projectRoot);
-  if (resolvedRoot === "/" || (homeDir && resolvedRoot === homeDir)) {
-    return [];
-  }
+  const visitedDirs = new Set<string>();
 
-  function walk(currentDir: string): void {
-    if (filesToScan.length >= 500) {
-      return;
-    }
-    let entries: fs.Dirent[];
+  function walk(dir: string): void {
+    let realDir: string;
     try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+      realDir = fs.realpathSync(dir);
+    } catch {
+      realDir = dir;
+    }
+    if (visitedDirs.has(realDir)) return;
+    visitedDirs.add(realDir);
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
+
     for (const entry of entries) {
-      if (filesToScan.length >= 500) {
-        return;
-      }
-      if (
-        entry.name === "node_modules" ||
-        entry.name === ".git" ||
-        entry.name === "dist" ||
-        entry.name === "build" ||
-        entry.name === ".aice-build" ||
-        entry.name === ".next" ||
-        entry.name === ".turbo" ||
-        entry.name === "coverage" ||
-        entry.name === "vendor" ||
-        entry.name.startsWith(".")
-      ) {
-        continue;
-      }
-      const entryPath = path.join(currentDir, entry.name);
+      const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(entryPath);
+        if (
+          entry.name === "node_modules" ||
+          entry.name === ".git" ||
+          entry.name === "dist" ||
+          entry.name === "build" ||
+          entry.name === ".aice-build" ||
+          entry.name.startsWith(".")
+        ) {
+          continue;
+        }
+        walk(full);
       } else if (entry.isFile()) {
-        if (entry.name.endsWith(".trivia.json")) continue;
-        const ext = path.extname(entry.name).toLowerCase();
-        if (KNOWN_TARGET_EXTENSIONS.has(ext) || entry.name.endsWith(".aice")) {
-          filesToScan.push(entryPath);
+        if (entry.name.endsWith(".trivia.json") || entry.name === "aice.config.json") {
+          continue;
+        }
+        if (entry.name.endsWith(".aice")) {
+          filesToScan.push(full);
+        } else {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (KNOWN_TARGET_EXTENSIONS.has(ext) && !fs.existsSync(`${full}.aice`)) {
+            filesToScan.push(full);
+          }
         }
       }
     }
   }
 
   walk(resolvedRoot);
+
+  let queriedLeaf: string | undefined;
+  if (queriedSymbol) {
+    const firstSym = queriedSymbol.split(",")[0].trim();
+    if (
+      firstSym &&
+      firstSym !== "*" &&
+      firstSym !== "@first" &&
+      firstSym !== "@1" &&
+      firstSym.toLowerCase() !== "imports" &&
+      !/^\[?L\d+/i.test(firstSym) &&
+      !firstSym.startsWith("/")
+    ) {
+      const withoutFile =
+        firstSym.includes(":") && !firstSym.includes("::")
+          ? firstSym.slice(firstSym.indexOf(":") + 1).trim()
+          : firstSym;
+      const parts = withoutFile
+        .split(/\.|::/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+      const leaf = parts[parts.length - 1];
+      if (leaf && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(leaf)) {
+        queriedLeaf = leaf;
+      }
+    }
+  }
 
   const resolvedTarget = path.resolve(targetFullPath);
   const targetBase = resolvedTarget.replace(/\.aice$/, "");
@@ -433,12 +466,16 @@ function scanWorkspaceCallers(
       : undefined;
 
   for (const file of filesToScan) {
-    if (path.resolve(file) === resolvedTarget) {
-      continue;
-    }
-
+    if (path.resolve(file) === resolvedTarget) continue;
     const fileExt = path.extname(file).toLowerCase();
-    if (fileExt === ".json" || fileExt === ".yaml" || fileExt === ".yml" || fileExt === ".css") {
+    if (
+      fileExt === ".json" ||
+      fileExt === ".yaml" ||
+      fileExt === ".yml" ||
+      fileExt === ".css" ||
+      fileExt === ".md" ||
+      fileExt === ".markdown"
+    ) {
       continue;
     }
 
@@ -463,10 +500,34 @@ function scanWorkspaceCallers(
         const resolvedBase = path.resolve(resolved).replace(/\.aice$/, "");
         if (path.resolve(resolved) === resolvedTarget || resolvedBase === targetBase) {
           const symbols = imp.specifiers.map((s) => s.name);
+          let callSiteLines: number[] | undefined;
+          if (queriedLeaf) {
+            const escLeaf = queriedLeaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const leafRe = new RegExp(`\\b${escLeaf}\\b`);
+            const fileLines = rawContent.split(/\r?\n/);
+            const nonImportHits: number[] = [];
+            const allHits: number[] = [];
+            for (let idx = 0; idx < fileLines.length; idx++) {
+              const ln = fileLines[idx];
+              if (leafRe.test(ln)) {
+                allHits.push(idx + 1);
+                if (!/^\s*(?:import\b|from\b|export\s+\{)/.test(ln)) {
+                  nonImportHits.push(idx + 1);
+                }
+              }
+            }
+            const effectiveHits = nonImportHits.length > 0 ? nonImportHits : allHits;
+            if (effectiveHits.length > 0) {
+              callSiteLines = effectiveHits;
+            }
+          }
           callers.push({
             filePath: formatDisplayPath(file, projectRoot),
             importedSymbols: symbols,
             line: imp.span?.start?.line ?? 1,
+            ...(queriedLeaf && callSiteLines && callSiteLines.length > 0
+              ? { usedSymbol: queriedLeaf, callSiteLines }
+              : {}),
           });
         }
       }
@@ -524,7 +585,14 @@ function formatBundle(
   } else {
     for (const caller of callers) {
       const symStr = caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
-      lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
+      if (caller.usedSymbol && caller.callSiteLines && caller.callSiteLines.length > 0) {
+        const lineTags = caller.callSiteLines.map((l) => `L${l}`).join(", ");
+        lines.push(
+          `- ${caller.filePath} imports: ${symStr} (uses ${caller.usedSymbol} at [${lineTags}])`,
+        );
+      } else {
+        lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
+      }
     }
   }
 
@@ -869,13 +937,28 @@ export async function generateWorkspaceContext(
               symSel = firstSym;
             }
             try {
-              let sliced = unwrapSyntheticContainer(
-                extractSymbolFromAiceSource(fileAice, symSel, f)
-                  .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                  .trim(),
-                f,
-              );
-              sliced = compactPureAiceSlice(sliced);
+              const rawExtracted = extractSymbolFromAiceSource(fileAice, symSel, f);
+              const isRawOrMatch =
+                rawExtracted.startsWith("// match at [") ||
+                f.endsWith(".md") ||
+                f.endsWith(".markdown") ||
+                f.endsWith(".sh") ||
+                f.endsWith(".bash") ||
+                f.endsWith(".zsh") ||
+                f.endsWith(".ps1") ||
+                f.endsWith(".cmd") ||
+                f.endsWith(".bat");
+              let sliced = isRawOrMatch
+                ? rawExtracted.trim()
+                : unwrapSyntheticContainer(
+                    rawExtracted
+                      .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                      .trim(),
+                    f,
+                  );
+              if (!isRawOrMatch) {
+                sliced = compactPureAiceSlice(sliced);
+              }
               fileSlices.push(sliced);
             } catch {
               // symbol lives in another file
@@ -1145,6 +1228,67 @@ function sliceRecordLiteralByPath(
   return { leafName: lastKey, value: cur };
 }
 
+function extractPatternMatchesFromSource(
+  rawSource: string,
+  rawQuery: string,
+  contextRadius = 2,
+): string | undefined {
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return undefined;
+  const regexMatch = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
+  let matcher: (line: string) => boolean;
+  if (regexMatch) {
+    try {
+      const flags = regexMatch[2].replace(/[gy]/g, "");
+      const re = new RegExp(regexMatch[1], flags);
+      matcher = (line: string) => re.test(line);
+    } catch {
+      const sub = regexMatch[1].toLowerCase();
+      matcher = (line: string) => line.toLowerCase().includes(sub);
+    }
+  } else {
+    if (/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmed)) {
+      return undefined;
+    }
+    const lower = trimmed.toLowerCase();
+    matcher = (line: string) => line.includes(trimmed) || line.toLowerCase().includes(lower);
+  }
+
+  const lines = rawSource.split(/\r?\n/);
+  const hitLines: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (matcher(lines[i])) {
+      hitLines.push(i + 1);
+    }
+  }
+  if (hitLines.length === 0) return undefined;
+
+  const windows: Array<{ start: number; end: number; hits: number[] }> = [];
+  for (const lineNum of hitLines) {
+    const s = Math.max(1, lineNum - contextRadius);
+    const e = Math.min(lines.length, lineNum + contextRadius);
+    const last = windows[windows.length - 1];
+    if (last && s <= last.end + 1) {
+      last.end = Math.max(last.end, e);
+      last.hits.push(lineNum);
+    } else {
+      windows.push({ start: s, end: e, hits: [lineNum] });
+    }
+  }
+
+  return windows
+    .slice(0, 25)
+    .map((w) => {
+      const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
+      const body = lines
+        .slice(w.start - 1, w.end)
+        .map((text, idx) => `L${w.start + idx}: ${text}`)
+        .join("\n");
+      return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]\n${body}`;
+    })
+    .join("\n\n");
+}
+
 export function extractSymbolFromAiceSource(
   aiceSource: string,
   symbolSelector: string,
@@ -1152,15 +1296,16 @@ export function extractSymbolFromAiceSource(
   preParsedMod?: Module,
 ): string {
   let trimmedSel = symbolSelector.trim();
+  const rawFileSource =
+    !filePath.endsWith(".aice") && fs.existsSync(filePath)
+      ? fs.readFileSync(filePath, "utf-8")
+      : aiceSource;
+
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = Number.parseInt(lineRangeMatch[1], 10);
     const endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
-    const rawSource =
-      !filePath.endsWith(".aice") && fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, "utf-8")
-        : aiceSource;
-    const rawLines = rawSource.split(/\r?\n/);
+    const rawLines = rawFileSource.split(/\r?\n/);
     if (startLine < 1 || startLine > rawLines.length || startLine > endLine) {
       throw new Error(
         `Invalid line range L${startLine}-L${endLine}: file has ${rawLines.length} line(s) (1-based inclusive)`,
@@ -1168,6 +1313,30 @@ export function extractSymbolFromAiceSource(
     }
     const clampedEnd = Math.min(endLine, rawLines.length);
     return rawLines.slice(startLine - 1, clampedEnd).join("\n");
+  }
+
+  if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
+    const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    if (matched) return matched;
+    throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}`);
+  }
+
+  if (!filePath.endsWith(".aice")) {
+    const targetLang = detectTargetFromPath(filePath);
+    if (
+      targetLang === "markdown" ||
+      targetLang === "shell" ||
+      targetLang === "powershell" ||
+      targetLang === "batch"
+    ) {
+      const spanInfo = locateNativeDeclarationSpan(rawFileSource, trimmedSel, targetLang);
+      if (spanInfo) {
+        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+      }
+      const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+      if (patternFallback) return patternFallback;
+      throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+    }
   }
 
   let mod: Module | undefined = preParsedMod;
@@ -1180,16 +1349,17 @@ export function extractSymbolFromAiceSource(
   }
   if (!mod) {
     if (!filePath.endsWith(".aice")) {
-      const rawSource = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : aiceSource;
       const spanInfo = locateNativeDeclarationSpan(
-        rawSource,
+        rawFileSource,
         trimmedSel,
         detectTargetFromPath(filePath),
       );
       if (spanInfo) {
-        return rawSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
       }
     }
+    const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    if (patternFallback) return patternFallback;
     throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
@@ -1207,7 +1377,6 @@ export function extractSymbolFromAiceSource(
       });
     }
   }
-  // Check StyleDecl first because CSS selectors often start with '.' (e.g. '.btn-primary')
   for (const item of mod.items) {
     if (item.kind === "StyleDecl") {
       const bareItem = item.name.replace(/^[.#]/, "");
@@ -1365,16 +1534,17 @@ export function extractSymbolFromAiceSource(
   }
   if (matchedItems.length === 0) {
     if (!filePath.endsWith(".aice")) {
-      const rawSource = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : aiceSource;
       const spanInfo = locateNativeDeclarationSpan(
-        rawSource,
+        rawFileSource,
         trimmedSel,
         detectTargetFromPath(filePath),
       );
       if (spanInfo) {
-        return rawSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
       }
     }
+    const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    if (patternFallback) return patternFallback;
     throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
   }
   const scopedMod: Module = {
@@ -1539,7 +1709,19 @@ export async function generateContext(
       // ignore expand failures
     }
   }
-  if (options.symbol && !idiomsActive && !isPureLineRangeSymbol) {
+  const detectedLangForSlice = !fullTargetPath.endsWith(".aice")
+    ? detectTargetFromPath(fullTargetPath)
+    : undefined;
+  if (
+    options.symbol &&
+    !idiomsActive &&
+    !isPureLineRangeSymbol &&
+    detectedLangForSlice !== "markdown" &&
+    detectedLangForSlice !== "shell" &&
+    detectedLangForSlice !== "powershell" &&
+    detectedLangForSlice !== "batch" &&
+    !targetContent.startsWith("// match at [")
+  ) {
     targetContent = compactPureAiceSlice(targetContent);
   }
 
@@ -1668,7 +1850,7 @@ export async function generateContext(
   // Caller lookup
   const callers: CallerSummary[] =
     options.includeCallers !== false
-      ? scanWorkspaceCallers(fullTargetPath, projectRoot, config)
+      ? scanWorkspaceCallers(fullTargetPath, projectRoot, config, options.symbol)
       : [];
 
   // Target body selection

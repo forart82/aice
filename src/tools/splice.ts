@@ -76,34 +76,21 @@ export interface SymbolSpliceEdit {
 }
 
 export interface SpliceOptions {
-  /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'User.id') */
   symbol?: string;
-  /** Replacement AICE code snippet */
   code?: string;
-  /** If set, replaces only the body/statements of the function/method rather than the entire declaration signature */
   body?: string;
-  /** If true, removes the symbol entirely */
   delete?: boolean;
-  /** Inserts the new code directly after this symbol */
   insertAfter?: string;
-  /** Inserts the new code directly before this symbol */
   insertBefore?: string;
-  /** Appends declaration to end of module or class */
   append?: boolean;
-  /** Multi-symbol batch edits for a single file applied in reverse offset order (bottom-to-top) */
   edits?: SymbolSpliceEdit[];
-  /** If true, creates the file from scratch via createFile() */
   create?: boolean;
-  /** Does not write file to disk */
-  dryRun?: boolean;
-  /** Generates unified diff */
-  diff?: boolean;
-  /** Automatically triggers compilation of target after splicing */
-  compile?: boolean;
-  /** Project root directory */
-  projectRoot?: string;
-  /** Optional idioms toggle override */
   idioms?: boolean;
+  inPlace?: boolean;
+  dryRun?: boolean;
+  diff?: boolean;
+  compile?: boolean;
+  projectRoot?: string;
 }
 
 export interface BatchSpliceItem extends SpliceOptions {
@@ -1076,6 +1063,450 @@ function selectBestTsMember(
   return pool[0] ?? matchingMembers[matchingMembers.length - 1];
 }
 
+export interface NativeTestBlockInfo {
+  runnerKind: "describe" | "test" | "it";
+  outlineKind: "describe" | "test";
+  title: string;
+  startLine: number;
+  endLine: number;
+  startOffset: number;
+  endOffset: number;
+  indent: string;
+  spanInfo: NativeSpanInfo;
+}
+
+function getTestRunnerRootKind(expr: ts.Expression): "describe" | "test" | "it" | undefined {
+  let cur: ts.Expression = expr;
+  if (ts.isCallExpression(cur)) {
+    cur = cur.expression;
+  }
+  while (ts.isPropertyAccessExpression(cur)) {
+    cur = cur.expression;
+  }
+  if (ts.isIdentifier(cur)) {
+    if (cur.text === "describe" || cur.text === "test" || cur.text === "it") {
+      return cur.text;
+    }
+  }
+  return undefined;
+}
+
+export function extractNativeTestBlocks(nativeSource: string): NativeTestBlockInfo[] {
+  const results: NativeTestBlockInfo[] = [];
+  let sf: ts.SourceFile;
+  try {
+    sf = ts.createSourceFile(
+      "file.tsx",
+      nativeSource,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+  } catch {
+    return results;
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isExpressionStatement(node) && ts.isCallExpression(node.expression)) {
+      const callExpr = node.expression;
+      const runnerKind = getTestRunnerRootKind(callExpr.expression);
+      if (runnerKind && callExpr.arguments.length >= 1) {
+        const arg0 = callExpr.arguments[0];
+        let title: string | undefined;
+        if (ts.isStringLiteral(arg0) || ts.isNoSubstitutionTemplateLiteral(arg0)) {
+          title = arg0.text;
+        } else if (ts.isTemplateExpression(arg0)) {
+          const rawText = arg0.getText(sf);
+          title = rawText.length >= 2 ? rawText.slice(1, -1) : rawText;
+        }
+        if (title !== undefined && title.trim().length > 0) {
+          const rawSpan = buildSpanInfoFromTsNode(node, sf, nativeSource, title, undefined);
+          const spanInfo = enrichSpanWithOffsetsAndLines(nativeSource, rawSpan);
+          if (spanInfo && spanInfo.startLine !== undefined && spanInfo.endLine !== undefined) {
+            results.push({
+              runnerKind,
+              outlineKind: runnerKind === "describe" ? "describe" : "test",
+              title,
+              startLine: spanInfo.startLine,
+              endLine: spanInfo.endLine,
+              startOffset: spanInfo.declStart,
+              endOffset: spanInfo.declEnd,
+              indent: spanInfo.declIndent,
+              spanInfo,
+            });
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sf);
+  return results;
+}
+
+export function matchNativeTestBlockSpan(
+  nativeSource: string,
+  rawSelector: string,
+): NativeSpanInfo | undefined {
+  let q = rawSelector.trim();
+  if (!q) return undefined;
+  q = q.replace(/^(?:describe|test|it)\s+/i, "").trim();
+  q = q.replace(/^["'`]|["'`]$/g, "").trim();
+  if (!q) return undefined;
+
+  const blocks = extractNativeTestBlocks(nativeSource);
+  if (blocks.length === 0) return undefined;
+
+  const lowerQ = q.toLowerCase();
+  const exact =
+    blocks.find((b) => b.title === q) ??
+    blocks.find((b) => `${b.outlineKind} "${b.title}"` === rawSelector.trim()) ??
+    blocks.find((b) => b.title.toLowerCase() === lowerQ);
+  if (exact) return exact.spanInfo;
+
+  const idOrPrefix =
+    blocks.find(
+      (b) =>
+        b.title.startsWith(`${q}:`) ||
+        b.title.startsWith(`${q} `) ||
+        b.title.startsWith(`${q}-`) ||
+        b.title.startsWith(q),
+    ) ??
+    blocks.find((b) => b.title.toLowerCase().startsWith(lowerQ)) ??
+    blocks.find((b) => b.title.includes(q)) ??
+    blocks.find((b) => b.title.toLowerCase().includes(lowerQ));
+
+  return idOrPrefix?.spanInfo;
+}
+
+export interface ScriptOrMarkdownSymbolInfo {
+  kind: "function" | "label" | "section";
+  name: string;
+  displaySignature: string;
+  startLine: number;
+  endLine: number;
+  startOffset: number;
+  endOffset: number;
+  indent: string;
+  headingLevel?: number;
+  rawHeadingLine?: string;
+}
+
+export function extractScriptOrMarkdownSymbols(
+  source: string,
+  targetLang: TargetLanguage,
+): ScriptOrMarkdownSymbolInfo[] {
+  const lines = source.split(/\r?\n/);
+  const lineStarts: number[] = [];
+  const lineEnds: number[] = [];
+  let offset = 0;
+  for (let i = 0; i < lines.length; i++) {
+    lineStarts.push(offset);
+    const len = lines[i].length;
+    lineEnds.push(offset + len);
+    offset += len;
+    if (offset < source.length && source[offset] === "\r") offset++;
+    if (offset < source.length && source[offset] === "\n") offset++;
+  }
+
+  const results: ScriptOrMarkdownSymbolInfo[] = [];
+
+  if (targetLang === "markdown") {
+    const rawHeadings: Array<{
+      lineIdx: number;
+      indent: string;
+      level: number;
+      hashes: string;
+      title: string;
+      rawLine: string;
+    }> = [];
+    let inFence = false;
+    let fenceMarker = "";
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+      if (fenceMatch) {
+        const marker = fenceMatch[1][0];
+        if (!inFence) {
+          inFence = true;
+          fenceMarker = marker;
+        } else if (marker === fenceMarker) {
+          inFence = false;
+          fenceMarker = "";
+        }
+        continue;
+      }
+      if (inFence) continue;
+      const m = line.match(/^(\s*)(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/);
+      if (m) {
+        rawHeadings.push({
+          lineIdx: i,
+          indent: m[1],
+          level: m[2].length,
+          hashes: m[2],
+          title: m[3].trim(),
+          rawLine: line,
+        });
+      }
+    }
+
+    for (let k = 0; k < rawHeadings.length; k++) {
+      const cur = rawHeadings[k];
+      let nextEqualOrHigher: (typeof rawHeadings)[number] | undefined;
+      for (let j = k + 1; j < rawHeadings.length; j++) {
+        if (rawHeadings[j].level <= cur.level) {
+          nextEqualOrHigher = rawHeadings[j];
+          break;
+        }
+      }
+      const startLine = cur.lineIdx + 1;
+      const endLine = nextEqualOrHigher
+        ? Math.max(startLine, nextEqualOrHigher.lineIdx)
+        : Math.max(startLine, lines.length);
+      let lastContentIdx = endLine - 1;
+      while (lastContentIdx > cur.lineIdx && lines[lastContentIdx].trim() === "") {
+        lastContentIdx--;
+      }
+      results.push({
+        kind: "section",
+        name: cur.title,
+        displaySignature: `${cur.hashes} ${cur.title}`,
+        startLine,
+        endLine,
+        startOffset: lineStarts[cur.lineIdx] ?? 0,
+        endOffset: lineEnds[lastContentIdx] ?? source.length,
+        indent: cur.indent,
+        headingLevel: cur.level,
+        rawHeadingLine: cur.rawLine,
+      });
+    }
+    return results;
+  }
+
+  // Extract section banner headers for shell, powershell, and batch (`# ── Section`, `REM ── Section`, `:: ── Section`)
+  const rawSections: Array<{ lineIdx: number; indent: string; title: string; rawLine: string }> =
+    [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const secMatch =
+      targetLang === "batch"
+        ? line.match(
+            /^([ \t]*)(?:REM|::)\s*(?:[─━═=-]{2,}\s*)([A-Za-z0-9_][^\r\n─━═=-]*?)(?:\s*[─━═=-]{2,})?\s*$/i,
+          )
+        : line.match(
+            /^([ \t]*)#\s*(?:[─━═=-]{2,}\s*)([A-Za-z0-9_][^\r\n─━═=-]*?)(?:\s*[─━═=-]{2,})?\s*$/,
+          );
+    if (secMatch) {
+      const title = secMatch[2].trim();
+      if (title && !/^[─━═=-]+$/.test(title)) {
+        rawSections.push({
+          lineIdx: i,
+          indent: secMatch[1],
+          title,
+          rawLine: line,
+        });
+      }
+    }
+  }
+
+  for (let k = 0; k < rawSections.length; k++) {
+    const cur = rawSections[k];
+    const nextSec = rawSections[k + 1];
+    const startLine = cur.lineIdx + 1;
+    const endLine = nextSec
+      ? Math.max(startLine, nextSec.lineIdx)
+      : Math.max(startLine, lines.length);
+    let lastContentIdx = endLine - 1;
+    while (lastContentIdx > cur.lineIdx && lines[lastContentIdx].trim() === "") {
+      lastContentIdx--;
+    }
+    results.push({
+      kind: "section",
+      name: cur.title,
+      displaySignature: `# ── ${cur.title}`,
+      startLine,
+      endLine,
+      startOffset: lineStarts[cur.lineIdx] ?? 0,
+      endOffset: lineEnds[lastContentIdx] ?? source.length,
+      indent: cur.indent,
+      rawHeadingLine: cur.rawLine,
+    });
+  }
+
+  if (targetLang === "batch") {
+    const rawLabels: Array<{ lineIdx: number; indent: string; name: string }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^([ \t]*):([A-Za-z_][A-Za-z0-9_.-]*)\b/);
+      if (m && m[2].toLowerCase() !== "eof") {
+        rawLabels.push({ lineIdx: i, indent: m[1], name: m[2] });
+      }
+    }
+    for (let k = 0; k < rawLabels.length; k++) {
+      const cur = rawLabels[k];
+      const nextLabel = rawLabels[k + 1];
+      const limitIdx = nextLabel ? nextLabel.lineIdx - 1 : lines.length - 1;
+      let endIdx = limitIdx;
+      for (let j = cur.lineIdx + 1; j <= limitIdx; j++) {
+        if (/^\s*(?:goto\s+:?eof|exit\s+\/b)\b/i.test(lines[j])) {
+          endIdx = j;
+          break;
+        }
+      }
+      while (endIdx > cur.lineIdx && lines[endIdx].trim() === "") {
+        endIdx--;
+      }
+      results.push({
+        kind: "label",
+        name: cur.name,
+        displaySignature: `:${cur.name}`,
+        startLine: cur.lineIdx + 1,
+        endLine: endIdx + 1,
+        startOffset: lineStarts[cur.lineIdx] ?? 0,
+        endOffset: lineEnds[endIdx] ?? source.length,
+        indent: cur.indent,
+      });
+    }
+    return results.sort((a, b) => a.startLine - b.startLine);
+  }
+
+  // Shell & PowerShell functions
+  const shellKeywords = new Set([
+    "if",
+    "for",
+    "while",
+    "until",
+    "case",
+    "select",
+    "time",
+    "function",
+    "do",
+    "done",
+    "then",
+    "else",
+    "elif",
+    "fi",
+  ]);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let indent = "";
+    let fnName = "";
+    if (targetLang === "powershell") {
+      const pm = line.match(/^([ \t]*)(?:function|filter)\s+([A-Za-z_][A-Za-z0-9_-]*)\b/i);
+      if (pm) {
+        indent = pm[1];
+        fnName = pm[2];
+      }
+    } else {
+      const sm = line.match(
+        /^([ \t]*)(?:function\s+([A-Za-z_][A-Za-z0-9_-]*)\s*(?:\(\s*\))?|([A-Za-z_][A-Za-z0-9_-]*)\s*\(\s*\))\s*(?:\{|$|#)/,
+      );
+      if (sm) {
+        indent = sm[1];
+        fnName = sm[2] ?? sm[3] ?? "";
+      }
+    }
+    if (!fnName || shellKeywords.has(fnName)) continue;
+
+    let braceDepth = 0;
+    let sawOpen = false;
+    let endIdx = i;
+    for (let j = i; j < lines.length; j++) {
+      const scanLine = lines[j];
+      let inSingle = false;
+      let inDouble = false;
+      for (let c = 0; c < scanLine.length; c++) {
+        const ch = scanLine[c];
+        if (ch === "\\" && (inSingle || inDouble)) {
+          c++;
+          continue;
+        }
+        if (ch === "'" && !inDouble) {
+          inSingle = !inSingle;
+          continue;
+        }
+        if (ch === '"' && !inSingle) {
+          inDouble = !inDouble;
+          continue;
+        }
+        if (!inSingle && !inDouble) {
+          if (ch === "#") break;
+          if (ch === "{") {
+            braceDepth++;
+            sawOpen = true;
+          } else if (ch === "}") {
+            braceDepth--;
+            if (sawOpen && braceDepth <= 0) {
+              endIdx = j;
+              break;
+            }
+          }
+        }
+      }
+      if (sawOpen && braceDepth <= 0) {
+        endIdx = j;
+        break;
+      }
+    }
+
+    results.push({
+      kind: "function",
+      name: fnName,
+      displaySignature: `fn ${fnName}()`,
+      startLine: i + 1,
+      endLine: endIdx + 1,
+      startOffset: lineStarts[i] ?? 0,
+      endOffset: lineEnds[endIdx] ?? source.length,
+      indent,
+    });
+  }
+
+  return results.sort((a, b) => a.startLine - b.startLine || a.startOffset - b.startOffset);
+}
+
+export function locateScriptOrMarkdownSpan(
+  source: string,
+  rawSelector: string,
+  targetLang: TargetLanguage,
+): NativeSpanInfo | undefined {
+  let q = rawSelector.trim();
+  if (!q) return undefined;
+  q = q
+    .replace(/^(?:fn|function|filter|section)\s+/i, "")
+    .replace(/\(\s*\)$/, "")
+    .replace(/^:+/, "")
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^#\s*[─━═=-]+\s*/, "")
+    .replace(/\s*[─━═=-]+\s*$/, "")
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
+  if (!q) return undefined;
+
+  const symbols = extractScriptOrMarkdownSymbols(source, targetLang);
+  if (symbols.length === 0) return undefined;
+
+  const lowerQ = q.toLowerCase();
+  const matched =
+    symbols.find((s) => s.name === q || s.displaySignature === rawSelector.trim()) ??
+    symbols.find((s) => s.name.toLowerCase() === lowerQ) ??
+    symbols.find((s) => s.name.toLowerCase().startsWith(lowerQ)) ??
+    symbols.find((s) => s.name.toLowerCase().includes(lowerQ));
+
+  if (!matched) return undefined;
+
+  return {
+    declStart: matched.startOffset,
+    fullDeclStart: matched.startOffset,
+    declEnd: matched.endOffset,
+    tokenStart: matched.startOffset,
+    declIndent: matched.indent,
+    memberName: matched.name,
+    origHeader: matched.rawHeadingLine,
+    startLine: matched.startLine,
+    endLine: matched.endLine,
+  };
+}
+
 function locateTsDeclarationSpan(
   nativeSource: string,
   symbolSelector: string,
@@ -1111,7 +1542,7 @@ function locateTsDeclarationSpan(
   }
 
   const allStmts: ts.Statement[] = [];
-  const collectStmts = (stmts: readonly ts.Statement[]) => {
+  const collectStmts = (stmts: ts.NodeArray<ts.Statement> | ts.Statement[]) => {
     for (const s of stmts) {
       allStmts.push(s);
       if (ts.isModuleDeclaration(s)) {
@@ -1137,12 +1568,18 @@ function locateTsDeclarationSpan(
         }
       }
     }
-    return undefined;
+    if (explicitClassName) {
+      return undefined;
+    }
   }
 
-  // 1. Top-level declaration search (prefer implementation with .body over overload signature headers)
   const matchingTopStmts = allStmts.filter(
-    (stmt) =>
+    (stmt): stmt is
+      | ts.FunctionDeclaration
+      | ts.ClassDeclaration
+      | ts.InterfaceDeclaration
+      | ts.TypeAliasDeclaration
+      | ts.EnumDeclaration =>
       (ts.isFunctionDeclaration(stmt) ||
         ts.isClassDeclaration(stmt) ||
         ts.isInterfaceDeclaration(stmt) ||
@@ -1152,7 +1589,7 @@ function locateTsDeclarationSpan(
   );
   if (matchingTopStmts.length > 0) {
     const implStmt =
-      matchingTopStmts.find((s) => (s as { body?: unknown }).body !== undefined) ??
+      matchingTopStmts.find((s) => "body" in s && s.body !== undefined) ??
       matchingTopStmts[matchingTopStmts.length - 1];
     const spanInfo = buildSpanInfoFromTsNode(implStmt, sf, nativeSource, memberName, undefined);
     if (
@@ -1189,7 +1626,6 @@ function locateTsDeclarationSpan(
     }
   }
 
-  // 2. Fallback: unique class member search
   for (const stmt of allStmts) {
     if (ts.isClassDeclaration(stmt)) {
       const parentName = stmt.name?.text;
@@ -1201,7 +1637,7 @@ function locateTsDeclarationSpan(
     }
   }
 
-  return undefined;
+  return matchNativeTestBlockSpan(nativeSource, symbolSelector);
 }
 
 function scanPythonLineState(
@@ -2138,6 +2574,10 @@ const KNOWN_TARGET_LANGS_SET = new Set<string>([
   "twig",
   "php",
   "kotlin",
+  "shell",
+  "powershell",
+  "batch",
+  "markdown",
 ]);
 
 function enrichSpanWithOffsetsAndLines(
@@ -2336,7 +2776,14 @@ export function locateNativeDeclarationSpan(
   }
 
   let rawSpan: NativeSpanInfo | undefined;
-  if (targetLang === "python") {
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "markdown"
+  ) {
+    rawSpan = locateScriptOrMarkdownSpan(nativeSource, symbolSelector, targetLang);
+  } else if (targetLang === "python") {
     const cleanPySel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
     rawSpan = locatePythonDeclarationSpan(nativeSource, cleanPySel, classFilter);
   } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
@@ -3607,6 +4054,17 @@ function emitNativeSnippetForContext(
   effectiveClassName?: string,
   forceLosslessPreprocess = false,
 ): string {
+  if (targetLang === "markdown") {
+    const dedentedMd = dedentSnippet(rawSnippet).trim();
+    if (spanInfo?.origHeader && !/^#{1,6}\s+/.test(dedentedMd)) {
+      return `${spanInfo.origHeader}\n${dedentedMd}`;
+    }
+    return dedentedMd;
+  }
+  if (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") {
+    return dedentSnippet(rawSnippet).trim();
+  }
+
   const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawSnippet);
   const mergedIdioms: Record<string, ProjectIdiomDefinition> = {
     ...(idioms ?? {}),
@@ -3615,7 +4073,6 @@ function emitNativeSnippetForContext(
   const dedented = dedentSnippet(cleanedCode);
   const insideClass = Boolean(effectiveClassName && !spanInfo?.isClassContainer);
 
-  // Stage W3: Route native/hybrid snippets directly through the single-pass language-isolated preprocessor.
   if (
     shouldUseLosslessPreprocessorForSnippet(
       dedented,
@@ -3669,24 +4126,28 @@ function emitNativeSnippetForContext(
   }
 
   try {
-    const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
-      parseSnippetToExpandedDecl(
-        dedented,
-        filePath,
-        targetLang,
-        effectiveClassName,
-        mergedIdioms,
-        originalSnippet,
-        isBodyOnly,
-      );
-
+    const {
+      decl,
+      explicitVisibility,
+      isExported,
+      explicitAccessor,
+      leadingDecorators,
+    } = parseSnippetToExpandedDecl(
+      dedented,
+      filePath,
+      targetLang,
+      effectiveClassName,
+      mergedIdioms,
+      originalSnippet,
+      isBodyOnly,
+    );
     const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
       visibility: spanInfo?.visibility ?? explicitVisibility,
       isExported: spanInfo?.isExported ?? isExported,
       isStatic: spanInfo?.isStatic,
       isAsync: spanInfo?.isAsync,
       accessor: explicitAccessor ?? spanInfo?.accessor,
-      memberName: originalSnippet ? spanInfo?.memberName : decl.name,
+      memberName: originalSnippet ? (spanInfo?.memberName ?? decl.name) : decl.name,
       goReceiver: spanInfo?.goReceiver,
       cppOutOfLine: spanInfo?.cppOutOfLine,
       origHeader: spanInfo?.origHeader,
@@ -3694,7 +4155,6 @@ function emitNativeSnippetForContext(
       rawSnippet: dedented,
       idioms: mergedIdioms,
     });
-
     if (leadingDecorators.length > 0) {
       return `${leadingDecorators.join("\n")}\n${emitted}`;
     }
@@ -4773,6 +5233,42 @@ function resolveSingleNativeEditAgainstSource(
 
   if (!spanInfo && !options.delete && !options.insertBefore && !options.insertAfter) {
     const trimmedAnchor = anchorSymbol.trim();
+    if (
+      targetLang === "markdown" &&
+      rawSnippet.trim() &&
+      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
+    ) {
+      const headingPrefix = trimmedAnchor.startsWith("#") ? trimmedAnchor : `## ${trimmedAnchor}`;
+      const bodyTrimmed = rawSnippet.trim();
+      const emitted = /^#{1,6}\s+/.test(bodyTrimmed)
+        ? bodyTrimmed
+        : `${headingPrefix}\n${bodyTrimmed}`;
+      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: nativeSource.length,
+        endOffset: nativeSource.length,
+        replacement: `${sep}${emitted}\n`,
+        originalSnippet: "",
+        newSnippet: emitted,
+      };
+    }
+    if (
+      (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") &&
+      rawSnippet.trim() &&
+      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
+    ) {
+      const emitted = rawSnippet.trim();
+      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: nativeSource.length,
+        endOffset: nativeSource.length,
+        replacement: `${sep}${emitted}\n`,
+        originalSnippet: "",
+        newSnippet: emitted,
+      };
+    }
     const plusMatch = trimmedAnchor.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\+$/);
     const dotIdx = trimmedAnchor.indexOf(".");
     const scopeIdx = trimmedAnchor.indexOf("::");
@@ -4817,7 +5313,10 @@ function resolveSingleNativeEditAgainstSource(
     } else if (
       !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor) &&
       rawSnippet.trim() &&
-      new RegExp(`\\b${trimmedAnchor}\\b`).test(rawSnippet)
+      (rawSnippet.includes(trimmedAnchor) ||
+        new RegExp(`\\b${trimmedAnchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(
+          rawSnippet,
+        ))
     ) {
       const emitted = emitNativeSnippetForContext(
         rawSnippet,
@@ -4850,14 +5349,6 @@ function resolveSingleNativeEditAgainstSource(
   if (options.delete) {
     const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
     let delEnd = spanInfo.declEnd;
-    while (
-      delEnd < nativeSource.length &&
-      (nativeSource[delEnd] === " " || nativeSource[delEnd] === "\t")
-    ) {
-      delEnd++;
-    }
-    if (nativeSource[delEnd] === "\r" && nativeSource[delEnd + 1] === "\n") delEnd += 2;
-    else if (nativeSource[delEnd] === "\n") delEnd += 1;
     return {
       symbol: anchorSymbol,
       startOffset: delStart,
@@ -5683,7 +6174,11 @@ export function parseMultiBlockSpliceStream(
         }
       }
       const isValidSymbol =
-        Boolean(blockSymbol) && (!/\s/.test(blockSymbol) || /^[.#@]/.test(blockSymbol));
+        Boolean(blockSymbol) &&
+        (Boolean(blockFilePath) ||
+          !/\s/.test(blockSymbol) ||
+          /^[.#@]/.test(blockSymbol) ||
+          (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
       if (isValidSymbol) {
         sections.push({
           filePath: blockFilePath,
@@ -5728,7 +6223,7 @@ export function parseMultiBlockSpliceStream(
   });
 
   if (resolvedBlocks.some((b) => !b.filePath)) {
-    if (!defaultFilePath) {
+    if (defaultFilePath === "") {
       return {
         singleFileEdits: resolvedBlocks.map((b) => ({
           symbol: b.symbol,
@@ -5737,13 +6232,13 @@ export function parseMultiBlockSpliceStream(
         })),
       };
     }
+    return null;
   }
 
   const allSameDefault =
     Boolean(defaultFilePath) &&
     resolvedBlocks.every(
-      (b) =>
-        !b.explicitFilePath || path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
+      (b) => !b.explicitFilePath || path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
     );
 
   if (allSameDefault) {
