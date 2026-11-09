@@ -334,6 +334,7 @@ function parseTranscriptFile(
 
   let workspace: string | null = null;
   let mentionsProjectRoot = false;
+  let isOrchestratorRunner = false;
   let inputTokensUncached = 0;
   let cacheReadTokens = 0;
   let outputTokens = 0;
@@ -399,6 +400,9 @@ function parseTranscriptFile(
         workspace = path.resolve(step.cwd);
       }
     }
+    if (content.includes("watch_campaign.py") || content.includes("watch_benchmark.py")) {
+      isOrchestratorRunner = true;
+    }
     if (content.includes(targetProjectRoot)) {
       mentionsProjectRoot = true;
     }
@@ -428,17 +432,22 @@ function parseTranscriptFile(
         const pVal = args.Path ?? args.file_path ?? args.target_file;
         if (typeof pVal === "string") {
           const cleanP = pVal.replace(/^['"`]|['"`]$/g, "");
-          if (cleanP.startsWith(targetProjectRoot)) {
+          if (cleanP.startsWith(`${targetProjectRoot}/`) || cleanP === targetProjectRoot) {
             mentionsProjectRoot = true;
             if (!workspace) workspace = targetProjectRoot;
+          } else if (!workspace && cleanP.startsWith("/home/")) {
+            const parts = cleanP.split("/");
+            if (parts.length >= 5) {
+              workspace = parts.slice(0, 5).join("/");
+            }
           }
         }
 
         const cmdVal = args.CommandLine ?? args.command;
         if (typeof cmdVal === "string") {
           const cleanCmd = cmdVal.replace(/^['"`]|['"`]$/g, "");
-          if (cleanCmd.includes(targetProjectRoot)) {
-            mentionsProjectRoot = true;
+          if (cleanCmd.includes("watch_campaign.py") || cleanCmd.includes("agy -p")) {
+            isOrchestratorRunner = true;
           }
           for (const mSub of cleanCmd.matchAll(/\baice\s+(create|splice|outline|context|decompile|patch|idioms|gain|analyze)\b/g)) {
             const sub = mSub[1];
@@ -456,11 +465,8 @@ function parseTranscriptFile(
 
     if (
       status === "ERROR" ||
-      content.includes("❌ Error") ||
-      content.includes("Command exited with code 1") ||
-      content.includes("Command exited with code 2") ||
-      content.includes("error TS") ||
-      content.includes("Parse error:")
+      /^❌ Error\b/m.test(content) ||
+      /^Command exited with code [1-9]\d*/m.test(content)
     ) {
       errors.push({
         step: idx,
@@ -468,6 +474,10 @@ function parseTranscriptFile(
         snippet: content.slice(0, 350),
       });
     }
+  }
+
+  if (isOrchestratorRunner && workspace !== targetProjectRoot) {
+    return null;
   }
 
   const matchesTarget =
