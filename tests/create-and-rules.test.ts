@@ -888,5 +888,75 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       const ctxRange = await generateContext(f2, { symbol: "L1-L3", projectRoot: tmpDir });
       expect(ctxRange.targetContent).toContain("export class Board");
     });
+
+    it("9. v0.9.10 expanded CSS/TS shorthands, token savings accounting, and incremental :imports merge", async () => {
+      const cssFile = path.join(tmpDir, "v0910.css");
+      const cssRes = await createFile(cssFile, {
+        code: "* { bs:border-box; m:0; p:0; }\n.panel { d:flex; fd:column; jc:center; ai:center; g:20px; p:16px; bg:#070810; c:#f0f4fc; r:8px; w:100%; mh:100vh; pos:relative; bd:1px solid #1e2340; ta:center; tt:uppercase; ls:2px; mb:12px; mt:8px; ov:hidden; cur:pointer; ff:sans-serif; lh:1.5; fw:700; bf:blur(6px); pe:none; ts:0 0 8px #0ff; }",
+        projectRoot: tmpDir,
+      });
+      expect(cssRes.nativeCode).toContain("box-sizing:border-box");
+      expect(cssRes.nativeCode).toContain("border-radius:8px");
+      expect(cssRes.nativeCode).toContain("min-height:100vh");
+      expect(cssRes.nativeCode).toContain("border:1px solid #1e2340");
+      expect(cssRes.nativeCode).toContain("text-align:center");
+      expect(cssRes.nativeCode).toContain("text-transform:uppercase");
+      expect(cssRes.nativeCode).toContain("letter-spacing:2px");
+      expect(cssRes.nativeCode).toContain("margin-bottom:12px");
+      expect(cssRes.nativeCode).toContain("margin-top:8px");
+      expect(cssRes.nativeCode).toContain("overflow:hidden");
+      expect(cssRes.nativeCode).toContain("cursor:pointer");
+      expect(cssRes.nativeCode).toContain("font-family:sans-serif");
+      expect(cssRes.nativeCode).toContain("line-height:1.5");
+      expect(cssRes.nativeCode).toContain("font-weight:700");
+      expect(cssRes.nativeCode).toContain("backdrop-filter:blur(6px)");
+      expect(cssRes.nativeCode).toContain("pointer-events:none");
+      expect(cssRes.nativeCode).toContain("text-shadow:0 0 8px #0ff");
+      expect(cssRes.tokensSaved).toBeGreaterThan(15);
+
+      const tsFile = path.join(tmpDir, "v0910.ts");
+      const tsRes = await createFile(tsFile, {
+        code: [
+          "import { LINE_POINTS } from './constants';",
+          "import { Board } from './board';",
+          "import { SoundManager } from './audio';",
+          "",
+          "pub const A = 1; pub const B = 2;",
+          "pub class Engine {",
+          "  pub grid: ($ | null)[][] = [];",
+          "  priv score:# = 0; priv active:? = true;",
+          "  pub step(matrix:#[][]):_ {",
+          "    for (r ::= 0; r < matrix.length; r++) {",
+          "      next := this.score + r;",
+          "      this.score = next;",
+          "    }",
+          "    <-;",
+          "  }",
+          "}",
+        ].join("\n"),
+        projectRoot: tmpDir,
+      });
+      expect(tsRes.nativeCode).toContain("export const A = 1; export const B = 2;");
+      expect(tsRes.nativeCode).toContain("public grid: (string | null)[][] = [];");
+      expect(tsRes.nativeCode).toContain(
+        "private score: number = 0; private active: boolean = true;",
+      );
+      expect(tsRes.nativeCode).toContain("public step(matrix: number[][]): void {");
+      expect(tsRes.nativeCode).toContain("for (let r = 0; r < matrix.length; r++) {");
+      expect(tsRes.nativeCode).toContain("const next = this.score + r;");
+      expect(tsRes.tokensSaved).toBeGreaterThan(0);
+
+      // Incremental :imports splice preserves other existing imports
+      const impRes = await splice(tsFile, {
+        symbol: "imports",
+        code: "import { COMBO_BONUS, LINE_POINTS } from './constants';",
+        projectRoot: tmpDir,
+      });
+      expect(impRes.modifiedCode).toContain(
+        "import { COMBO_BONUS, LINE_POINTS } from './constants';",
+      );
+      expect(impRes.modifiedCode).toContain("import { Board } from './board';");
+      expect(impRes.modifiedCode).toContain("import { SoundManager } from './audio';");
+    });
   });
 });

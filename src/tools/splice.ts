@@ -4907,7 +4907,47 @@ function resolveSingleNativeEditAgainstSource(
     forceLosslessPreprocess,
   );
 
-  const newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+  let newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
+  if (
+    spanInfo.memberName === "imports" &&
+    (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
+  ) {
+    const origLines = originalSnippet
+      .trim()
+      .split(/\r?\n/)
+      .filter((l) => l.trim().length > 0);
+    const newLines = newSnippet
+      .trim()
+      .split(/\r?\n/)
+      .filter((l) => l.trim().length > 0);
+    const extractModSpec = (line: string): string | undefined => {
+      const m = line.match(/\bfrom\s+['"]([^'"]+)['"]/);
+      return m ? m[1] : undefined;
+    };
+    if (
+      origLines.length >= 2 &&
+      newLines.length >= 1 &&
+      newLines.length < origLines.length &&
+      newLines.every((l) => Boolean(extractModSpec(l)))
+    ) {
+      const merged = [...origLines];
+      for (const nl of newLines) {
+        const spec = extractModSpec(nl);
+        const existingIdx = merged.findIndex((ol) => extractModSpec(ol) === spec);
+        if (existingIdx >= 0) {
+          merged[existingIdx] = nl;
+        } else {
+          merged.push(nl);
+        }
+      }
+      const trailingNl = originalSnippet.endsWith("\r\n")
+        ? "\r\n"
+        : originalSnippet.endsWith("\n")
+          ? "\n"
+          : "";
+      newSnippet = `${merged.join("\n")}${trailingNl}`;
+    }
+  }
   return {
     symbol: anchorSymbol,
     startOffset: replaceStart,
@@ -4959,7 +4999,8 @@ export function spliceNativeSource(
   const isLineRange =
     Boolean(options.symbol?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i)) ||
     Boolean(options.insertAfter?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i)) ||
-    Boolean(options.insertBefore?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i));
+    Boolean(options.insertBefore?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i)) ||
+    Boolean(options.edits?.some((e) => /^\[?L?(\d+)(?:-L?(\d+))?\]?$/i.test(e.symbol)));
 
   if (
     !isLineRange &&

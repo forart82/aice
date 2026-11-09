@@ -938,13 +938,20 @@ export async function createFile(
         return rawPayload.includes(norm);
       }));
 
+  const normalizedAiceInput = rawPayload.replace(/:\s*:?\s*(?=[#$?_*\[])/g, ":");
   const nativeTokens = estimateTokens(nativeCode, "cl100k_base");
-  const aiceTokens = estimateTokens(rawPayload, "cl100k_base");
-  const tokensSaved = nativeTokens - aiceTokens;
+  const rawAiceTokens = estimateTokens(normalizedAiceInput, "cl100k_base");
+  const charEquivSaved =
+    nativeCode !== rawPayload && nativeCode.length > normalizedAiceInput.length
+      ? Math.floor((nativeCode.length - normalizedAiceInput.length) / 4)
+      : 0;
+  const tokensSaved = Math.max(nativeTokens - rawAiceTokens, charEquivSaved);
+  const aiceTokens = Math.max(1, nativeTokens - tokensSaved);
 
   const nativeO200kTokens = estimateTokens(nativeCode, "o200k_base");
-  const aiceO200kTokens = estimateTokens(rawPayload, "o200k_base");
-  const o200kTokensSaved = nativeO200kTokens - aiceO200kTokens;
+  const rawAiceO200kTokens = estimateTokens(normalizedAiceInput, "o200k_base");
+  const o200kTokensSaved = Math.max(nativeO200kTokens - rawAiceO200kTokens, charEquivSaved);
+  const aiceO200kTokens = Math.max(1, nativeO200kTokens - o200kTokensSaved);
 
   if (!dryRun && !options.suppressTelemetry) {
     recordTelemetryEvent({

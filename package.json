@@ -1,6 +1,6 @@
 {
   "name": "aice",
-  "version": "0.9.9",
+  "version": "0.9.10",
   "description": "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer",
   "license": "Apache-2.0",
   "author": {

@@ -41,27 +41,102 @@ export interface LexicalMaskResult {
 export const COMPACT_CSS_SHORTHANDS: Readonly<Record<string, string>> = {
   ...CSS_PROPERTY_ALIASES,
   d: "display",
+  disp: "display",
   jc: "justify-content",
   ai: "align-items",
+  ac: "align-content",
   fd: "flex-direction",
-  fw: "flex-wrap",
+  fld: "flex-direction",
+  fw: "font-weight",
+  flw: "flex-wrap",
+  fl: "flex",
+  fg: "flex-grow",
+  fsr: "flex-shrink",
+  fb: "flex-basis",
   g: "gap",
+  gtc: "grid-template-columns",
+  gtr: "grid-template-rows",
+  gc: "grid-column",
+  gr: "grid-row",
   bg: "background",
+  bgc: "background-color",
   c: "color",
   p: "padding",
+  pt: "padding-top",
+  pr: "padding-right",
+  pb: "padding-bottom",
+  pl: "padding-left",
   m: "margin",
+  mt: "margin-top",
+  mr: "margin-right",
+  mb: "margin-bottom",
+  ml: "margin-left",
   w: "width",
   h: "height",
+  mh: "min-height",
+  minh: "min-height",
+  "min-h": "min-height",
+  xh: "max-height",
+  maxh: "max-height",
+  "max-h": "max-height",
+  mw: "min-width",
+  minw: "min-width",
+  "min-w": "min-width",
+  xw: "max-width",
+  maxw: "max-width",
+  "max-w": "max-width",
+  r: "border-radius",
   br: "border-radius",
+  rad: "border-radius",
   b: "border",
+  bd: "border",
+  bt: "border-top",
+  bdt: "border-top",
+  bb: "border-bottom",
+  bdb: "border-bottom",
+  bl: "border-left",
+  bdl: "border-left",
+  bdr: "border-right",
+  bc: "border-color",
+  bdc: "border-color",
+  bw: "border-width",
+  bdw: "border-width",
+  bds: "border-style",
+  bs: "box-sizing",
+  bsz: "box-sizing",
   fs: "font-size",
+  fz: "font-size",
+  ff: "font-family",
+  f: "font-family",
+  lh: "line-height",
+  ls: "letter-spacing",
   ta: "text-align",
+  tt: "text-transform",
+  td: "text-decoration",
+  ts: "text-shadow",
+  tsh: "text-shadow",
+  ws: "white-space",
   pos: "position",
+  ins: "inset",
+  t: "top",
+  l: "left",
+  bot: "bottom",
   z: "z-index",
   ov: "overflow",
+  ovx: "overflow-x",
+  ovy: "overflow-y",
   op: "opacity",
+  vis: "visibility",
   tr: "transition",
+  trans: "transition",
   sh: "box-shadow",
+  bsh: "box-shadow",
+  bf: "backdrop-filter",
+  bdf: "backdrop-filter",
+  cur: "cursor",
+  pe: "pointer-events",
+  us: "user-select",
+  lst: "list-style",
 };
 
 const MASK_PREFIX = "\uE000";
@@ -958,27 +1033,52 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
   if (targetLang === "javascript") {
     return out
       .replace(/(:\s*|->\s*|\[\s*|=\s*(?=\[))\[\s*(?:#|\$|\?|_|\*)\s*\]/g, "")
-      .replace(/:(?!=)\s*(?:#|\$|\?|_|\*)(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, "")
+      .replace(/:(?!=)\s*(?:#|\$|\?|_|\*)(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\uE000|$))/g, "")
       .replace(/\)\s*->\s*[^{=;]+?(\s*(?:\{|=>))/g, ")$1");
   }
 
   if (targetLang === "typescript" || targetLang === "tsx") {
     return out
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*\[\s*#\s*\]\s*\]\s*\]/g, "$1number[][][]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*\[\s*\$\s*\]\s*\]\s*\]/g, "$1string[][][]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*\[\s*\?\s*\]\s*\]\s*\]/g, "$1boolean[][][]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*#\s*\]\s*\]/g, "$1number[][]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*\$\s*\]\s*\]/g, "$1string[][]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\[\s*\?\s*\]\s*\]/g, "$1boolean[][]")
+      .replace(/(:\s*)(?=\[\s*(?:#|\$|\?|_|\*)\s*\])/g, ": ")
       .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*#\s*\]/g, "$1number[]")
       .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\$\s*\]/g, "$1string[]")
       .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\?\s*\]/g, "$1boolean[]")
       .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*_\s*\]/g, "$1void[]")
       .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\*\s*\]/g, "$1any[]")
-      .replace(/((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):#(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1number")
-      .replace(/((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):\$(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1string")
-      .replace(/((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):\?(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1boolean")
-      .replace(/((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):_(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1void")
-      .replace(/((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):\*(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1any")
-      .replace(/:(?!=)\s*#(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": number")
-      .replace(/:(?!=)\s*\$(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": string")
-      .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": boolean")
-      .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": void")
-      .replace(/:(?!=)\s*\*(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": any")
+      .replace(
+        /((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):?#(?=\s*(?:\[|\||&|>|\)|,|;|\uE000|$))/g,
+        "$1number",
+      )
+      .replace(
+        /((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):\$(?=\s*(?:\[|\||&|>|\)|,|;|\uE000|$))/g,
+        "$1string",
+      )
+      .replace(/(\(\s*)\$(?=\s*\|)/g, "$1string")
+      .replace(/(\|\s*)\$(?=\s*\))/g, "$1string")
+      .replace(/(,\s*)\$(?=\s*>)/g, "$1string")
+      .replace(
+        /((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):?\?(?=\s*(?:\[|\||&|>|\)|,|;|\uE000|$))/g,
+        "$1boolean",
+      )
+      .replace(
+        /((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):_(?=\s*(?:\[|\||&|>|\)|,|;|\uE000|$))/g,
+        "$1void",
+      )
+      .replace(
+        /((?:[<,(|&]|=>|(?<![=!<>])=(?![=>])|\bas)\s*):\*(?=\s*(?:\[|\||&|>|\)|,|;|\uE000|$))/g,
+        "$1any",
+      )
+      .replace(/:(?!=)\s*#(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|\uE000|$))/g, ": number")
+      .replace(/:(?!=)\s*\$(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|\uE000|$))/g, ": string")
+      .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|\uE000|$))/g, ": boolean")
+      .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|\uE000|$))/g, ": void")
+      .replace(/:(?!=)\s*\*(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|\uE000|$))/g, ": any")
       .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, ": number")
       .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": string")
       .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": boolean")
@@ -986,7 +1086,6 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/\s*->\s*\*(?![A-Za-z0-9_])/g, ": any")
       .replace(/\)\s*->\s*([^{=;]+?)(\s*(?:\{|=>))/g, "): $1$2");
   }
-
   if (targetLang === "python") {
     return out
       .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*#\s*\]/g, "$1list[float]")
@@ -1369,7 +1468,7 @@ function lowerHybridLineForTarget(
 
   if (atClassMemberLevel) {
     out = out.replace(
-      /^(\s*)(?:@fn\s+static\s+async\s+\^|\^static\s+async\s+fn\s+|pub\s+static\s+async\s+fn\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      /^(\s*)(?:@fn\s+static\s+async\s+\^|\^static\s+async\s+fn\s+|pub\s+static\s+async\s+(?:fn\s+|function\s+)?)([A-Za-z_$#][A-Za-z0-9_$]*)/,
       isJs ? "$1static async $2" : "$1public static async $2",
     );
     out = out.replace(
@@ -1385,7 +1484,7 @@ function lowerHybridLineForTarget(
       isJs ? "$1static $2" : "$1private static $2",
     );
     out = out.replace(
-      /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|async\s+\^fn\s+|async\s+fn\s+\^|pub\s+async\s+fn\s+|pub\s+async\s+function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|async\s+\^fn\s+|async\s+fn\s+\^|pub\s+async\s+(?:fn\s+|function\s+)?)([A-Za-z_$#][A-Za-z0-9_$]*)/,
       isJs ? "$1async $2" : "$1public async $2",
     );
     out = out.replace(
@@ -1413,8 +1512,13 @@ function lowerHybridLineForTarget(
       /^(\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
       isJs ? "$1" : "$1private readonly ",
     );
+    out = out.replace(
+      /^(\s*)prot\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1protected readonly ",
+    );
     out = out.replace(/^(\s*)pub\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1public ");
     out = out.replace(/^(\s*)priv\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1private ");
+    out = out.replace(/^(\s*)prot\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1protected ");
     out = out.replace(/^(\s*)(?:val|ro)\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1readonly ");
     out = out.replace(/^(\s*)mut\s+(?=[A-Za-z_$#])/, "$1");
   } else {
@@ -1479,10 +1583,15 @@ function lowerHybridLineForTarget(
       /^(\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
       isJs ? "$1" : "$1private readonly ",
     );
+    out = out.replace(
+      /^(\s*)prot\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1protected readonly ",
+    );
     out = out.replace(/^(\s*)priv\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1private ");
+    out = out.replace(/^(\s*)prot\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1protected ");
     out = out.replace(/^(\s*)ro\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1readonly ");
     out = out.replace(
-      /^(\s*)pub\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\())/,
+      /^(\s*)pub\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\(|<))/,
       isJs ? "$1" : "$1public ",
     );
     out = out.replace(/^(\s*)let\s+mut\s+/, "$1let ");
@@ -1490,17 +1599,66 @@ function lowerHybridLineForTarget(
     out = out.replace(/^(\s*)mut\s+(?=[A-Za-z_$[{])/, "$1let ");
   }
 
+  // Multi-statement single-line declarations (after `;` or `{`)
+  if (!atClassMemberLevel) {
+    out = out
+      .replace(/(;\s*)pub\s+(?:const|val)\s+/g, "$1export const ")
+      .replace(/(;\s*)pub\s+(?:let|mut|var)\s+/g, "$1export let ")
+      .replace(/(;\s*)pub\s+type\s+/g, "$1export type ")
+      .replace(/(;\s*)pub\s+interface\s+/g, "$1export interface ")
+      .replace(/(;\s*)pub\s+enum\s+/g, "$1export enum ")
+      .replace(/(;\s*)pub\s+class\s+/g, "$1export class ")
+      .replace(/(;\s*)pub\s+async\s+(?:fn|function)\s+/g, "$1export async function ")
+      .replace(/(;\s*)pub\s+(?:fn|function)\s+/g, "$1export function ");
+  }
+  out = out
+    .replace(
+      /([;{]\s*)pub\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/g,
+      isJs ? "$1" : "$1public readonly ",
+    )
+    .replace(
+      /([;{]\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/g,
+      isJs ? "$1" : "$1private readonly ",
+    )
+    .replace(
+      /([;{]\s*)prot\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/g,
+      isJs ? "$1" : "$1protected readonly ",
+    )
+    .replace(/([;{]\s*)pub\s+(?:fn\s+|function\s+)(?=[A-Za-z_$#])/g, isJs ? "$1" : "$1public ")
+    .replace(/([;{]\s*)priv\s+(?:fn\s+|function\s+)(?=[A-Za-z_$#])/g, isJs ? "$1" : "$1private ")
+    .replace(
+      /([;{]\s*)pub\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\(|<))/g,
+      isJs ? "$1" : "$1public ",
+    )
+    .replace(
+      /([;{]\s*)priv\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\(|<))/g,
+      isJs ? "$1" : "$1private ",
+    )
+    .replace(
+      /([;{]\s*)prot\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\(|<))/g,
+      isJs ? "$1" : "$1protected ",
+    )
+    .replace(
+      /([;{]\s*)(?:ro|val)\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=))/g,
+      isJs ? "$1" : "$1readonly ",
+    );
+
   // Constructor parameter property modifiers (e.g. constructor(priv ro x: :#, pub y: :$))
   if (!isJs) {
     out = out
       .replace(/([,(]\s*)pub\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$])/g, "$1public readonly ")
       .replace(/([,(]\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$])/g, "$1private readonly ")
+      .replace(/([,(]\s*)prot\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$])/g, "$1protected readonly ")
       .replace(/([,(]\s*)pub\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1public ")
       .replace(/([,(]\s*)priv\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1private ")
+      .replace(/([,(]\s*)prot\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1protected ")
       .replace(/([,(]\s*)ro\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1readonly ");
   }
 
-  // Variable bindings := and ::=
+  // Variable bindings := and ::= (including inside `for (...)` and after `;` / `{`)
+  out = out
+    .replace(/(\bfor\s*\(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*/g, "$1let $2 = ")
+    .replace(/(\bfor\s*\(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*/g, "$1const $2 = ");
   out = out.replace(
     /^(\s*):=\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([^=]+)=\s*(.+)$/,
     isJs ? "$1const $2 = $4" : "$1const $2: $3 = $4",
@@ -1521,6 +1679,9 @@ function lowerHybridLineForTarget(
     isJs ? "$1let $2 = $4" : "$1let $2: $3 = $4",
   );
   out = out.replace(/^(\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*(.+)$/, "$1let $2 = $3");
+  out = out
+    .replace(/([;{]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*:=\s*/g, "$1const $2 = ")
+    .replace(/([;{]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*::=\s*/g, "$1let $2 = ");
 
   // Return & control-flow shorthands
   out = out.replace(/^(\s*)(?:ret|<-)\s+(.+)$/, "$1return $2");
@@ -1557,6 +1718,42 @@ export function preprocessBareCssLossless(
   );
   const idiomExpanded = unmaskLexicalTokens(expandedMasked, maskRes.maskTable);
 
+  const expandCssCompactValue = (prop: string, val: string): string => {
+    const v = val.trim().toLowerCase();
+    if (prop === "flex-direction") {
+      if (v === "col") return "column";
+      if (v === "col-rev") return "column-reverse";
+      if (v === "row-rev") return "row-reverse";
+    } else if (prop === "justify-content" || prop === "align-items" || prop === "align-content") {
+      if (v === "c") return "center";
+      if (v === "sb") return "space-between";
+      if (v === "sa") return "space-around";
+      if (v === "se") return "space-evenly";
+      if (v === "fs") return "flex-start";
+      if (v === "fe") return "flex-end";
+    } else if (prop === "position") {
+      if (v === "rel") return "relative";
+      if (v === "abs") return "absolute";
+      if (v === "fix") return "fixed";
+    } else if (prop === "text-transform") {
+      if (v === "up") return "uppercase";
+      if (v === "low") return "lowercase";
+      if (v === "cap") return "capitalize";
+    } else if (prop === "text-align") {
+      if (v === "c") return "center";
+      if (v === "l") return "left";
+      if (v === "r") return "right";
+    } else if (prop === "box-sizing") {
+      if (v === "bb") return "border-box";
+      if (v === "cb") return "content-box";
+    } else if (prop === "cursor") {
+      if (v === "ptr") return "pointer";
+    } else if (prop === "overflow" || prop === "overflow-x" || prop === "overflow-y") {
+      if (v === "hid") return "hidden";
+    }
+    return val;
+  };
+
   try {
     const root = postcss.parse(idiomExpanded);
     root.walkDecls((decl) => {
@@ -1569,12 +1766,19 @@ export function preprocessBareCssLossless(
         decl.remove();
         return;
       }
-      if (propKey === "fw" && /^(?:normal|bold|bolder|lighter|[1-9]00)$/i.test(decl.value.trim())) {
-        decl.prop = "font-weight";
+      const valTrim = decl.value.trim();
+      if (propKey === "fw") {
+        decl.prop = /^(?:wrap|nowrap|wrap-reverse)$/i.test(valTrim) ? "flex-wrap" : "font-weight";
+      } else if (propKey === "bs") {
+        decl.prop = /^(?:solid|dashed|dotted|double|groove|ridge|inset|outset)$/i.test(valTrim)
+          ? "border-style"
+          : "box-sizing";
+      } else if (propKey === "fs") {
+        decl.prop = /^(?:italic|oblique)$/i.test(valTrim) ? "font-style" : "font-size";
       } else if (COMPACT_CSS_SHORTHANDS[propKey]) {
         decl.prop = COMPACT_CSS_SHORTHANDS[propKey];
       }
-      decl.value = expandCssTokenValue(decl.value);
+      decl.value = expandCssTokenValue(expandCssCompactValue(decl.prop, decl.value));
     });
     const out = root.toString().trim();
     return `${out}\n`;
@@ -1583,11 +1787,18 @@ export function preprocessBareCssLossless(
       /(^|[{;]\s*)([a-zA-Z_-]+)(\s*:\s*)([^;}]+)/gm,
       (_full, prefix: string, prop: string, sep: string, val: string) => {
         const lower = prop.toLowerCase();
-        const mapped =
-          lower === "fw" && /^(?:normal|bold|bolder|lighter|[1-9]00)$/i.test(val.trim())
-            ? "font-weight"
-            : (COMPACT_CSS_SHORTHANDS[lower] ?? prop);
-        return `${prefix}${mapped}${sep}${expandCssTokenValue(val)}`;
+        const valTrim = val.trim();
+        let mapped = COMPACT_CSS_SHORTHANDS[lower] ?? prop;
+        if (lower === "fw") {
+          mapped = /^(?:wrap|nowrap|wrap-reverse)$/i.test(valTrim) ? "flex-wrap" : "font-weight";
+        } else if (lower === "bs") {
+          mapped = /^(?:solid|dashed|dotted|double|groove|ridge|inset|outset)$/i.test(valTrim)
+            ? "border-style"
+            : "box-sizing";
+        } else if (lower === "fs") {
+          mapped = /^(?:italic|oblique)$/i.test(valTrim) ? "font-style" : "font-size";
+        }
+        return `${prefix}${mapped}${sep}${expandCssTokenValue(expandCssCompactValue(mapped, val))}`;
       },
     );
     return out.endsWith("\n") ? out : `${out}\n`;
