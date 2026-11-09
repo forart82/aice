@@ -357,11 +357,9 @@ function extractImportsFromFile(filePath: string, preReadContent?: string): Impo
       const mod = parse(content, filePath);
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
     }
-
     const targetLang = detectTargetFromPath(filePath);
     const decomp = withSuppressedTelemetry(() => decompile(content, targetLang, { filePath }));
-    const mod = parse(decomp.aice, filePath);
-    return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+    return decomp.ast.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
   } catch {
     return [];
   }
@@ -374,8 +372,16 @@ function scanWorkspaceCallers(
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
   const filesToScan: string[] = [];
+  const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
+  const resolvedRoot = path.resolve(projectRoot);
+  if (resolvedRoot === "/" || (homeDir && resolvedRoot === homeDir)) {
+    return [];
+  }
 
   function walk(currentDir: string): void {
+    if (filesToScan.length >= 500) {
+      return;
+    }
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(currentDir, { withFileTypes: true });
@@ -383,6 +389,9 @@ function scanWorkspaceCallers(
       return;
     }
     for (const entry of entries) {
+      if (filesToScan.length >= 500) {
+        return;
+      }
       if (
         entry.name === "node_modules" ||
         entry.name === ".git" ||
@@ -392,6 +401,7 @@ function scanWorkspaceCallers(
         entry.name === ".next" ||
         entry.name === ".turbo" ||
         entry.name === "coverage" ||
+        entry.name === "vendor" ||
         entry.name.startsWith(".")
       ) {
         continue;
@@ -409,13 +419,18 @@ function scanWorkspaceCallers(
     }
   }
 
-  walk(projectRoot);
+  walk(resolvedRoot);
 
   const resolvedTarget = path.resolve(targetFullPath);
   const targetBase = resolvedTarget.replace(/\.aice$/, "");
   const targetFileName = path.basename(targetBase);
   const targetExt = path.extname(targetFileName);
   const targetStem = targetExt ? targetFileName.slice(0, -targetExt.length) : targetFileName;
+  const escapedStem = targetStem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const importHintRegex =
+    targetStem !== "index"
+      ? new RegExp(`(?:from|import|require|use|#include)[^\\n;]*\\b${escapedStem}\\b`)
+      : undefined;
 
   for (const file of filesToScan) {
     if (path.resolve(file) === resolvedTarget) {
@@ -435,6 +450,9 @@ function scanWorkspaceCallers(
     }
 
     if (targetStem !== "index" && !rawContent.includes(targetStem)) {
+      continue;
+    }
+    if (importHintRegex && !importHintRegex.test(rawContent)) {
       continue;
     }
 

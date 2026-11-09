@@ -1171,7 +1171,7 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
       .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": string")
       .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": bool")
       .replace(/\s*->\s*_(?![A-Za-z0-9_])/g, ": void")
-      .replace(/\)\s*->\s*([^{]+?)(\s*\{)/g, "): $1$2");
+      .replace(/\)\s*->\s*([?A-Za-z_\\][A-Za-z0-9_\\|?]*)(\s*\{)/g, "): $1$2");
   }
 
   if (targetLang === "cpp" || targetLang === "csharp") {

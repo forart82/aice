@@ -3743,10 +3743,20 @@ function emitNativeSnippetForContext(
         insideClass,
       );
     }
-    return preprocessHybridAndIdiomsLossless(dedented, targetLang, mergedIdioms, {
+    const preprocessed = preprocessHybridAndIdiomsLossless(dedented, targetLang, mergedIdioms, {
       insideClass,
       goReceiver: spanInfo?.goReceiver,
     }).trim();
+    if (!insideClass) {
+      const preCheck = validateNativeSyntax(preprocessed, targetLang, filePath, mergedIdioms);
+      if (
+        !preCheck.valid &&
+        validateNativeSyntax(dedented.trim(), targetLang, filePath, mergedIdioms).valid
+      ) {
+        return dedented.trim();
+      }
+    }
+    return preprocessed;
   }
 
   if (
@@ -4687,7 +4697,10 @@ function resolveSingleNativeEditAgainstSource(
       };
     }
 
-    let processedCode = preprocessHybridAndIdiomsLossless(rawSnippet, targetLang, idioms);
+    let processedCode =
+      options.idioms === false
+        ? rawSnippet
+        : preprocessHybridAndIdiomsLossless(rawSnippet, targetLang, idioms);
 
     const origFirstLine = rawLines[startLine - 1] ?? "";
     const origIndent = origFirstLine.match(/^[ \t]*/)?.[0] ?? "";

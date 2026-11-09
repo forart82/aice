@@ -558,15 +558,30 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
   }
 
   const initialDir = cur;
+  const cwd = path.resolve(process.cwd());
+  const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
+  const startedInCwd = initialDir === cwd || initialDir.startsWith(`${cwd}${path.sep}`);
+
   while (true) {
+    if (homeDir && cur === homeDir && initialDir !== homeDir) {
+      break;
+    }
     if (
       fs.existsSync(path.join(cur, "aice.config.json")) ||
       fs.existsSync(path.join(cur, ".aice-idioms.json")) ||
       fs.existsSync(path.join(cur, ".aicerc")) ||
       fs.existsSync(path.join(cur, ".aice-build")) ||
-      fs.existsSync(path.join(cur, "package.json"))
+      fs.existsSync(path.join(cur, "package.json")) ||
+      fs.existsSync(path.join(cur, "composer.json")) ||
+      fs.existsSync(path.join(cur, "Cargo.toml")) ||
+      fs.existsSync(path.join(cur, "go.mod")) ||
+      fs.existsSync(path.join(cur, "pyproject.toml")) ||
+      fs.existsSync(path.join(cur, ".git"))
     ) {
       return cur;
+    }
+    if (startedInCwd && cur === cwd) {
+      break;
     }
     const parent = path.dirname(cur);
     if (parent === cur) {

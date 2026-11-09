@@ -681,12 +681,15 @@ function compileAiceOrHybridToNative(
   }
 
   // Substep 1.2: Route native/hybrid code (any code using `{ ... }` blocks, native constructs,
-  // bare CSS rules, or `$idioms` in native code) directly through `preprocessHybridAndIdiomsLossless()` first.
   if (isHybridOrNativeSource(cleanedCode, targetLang)) {
     const lossless = preprocessHybridAndIdiomsLossless(cleanedCode, targetLang, activeIdioms);
     const syntaxCheck = validateNativeSyntax(lossless, targetLang, fullPath, activeIdioms);
     if (syntaxCheck.valid) {
       return lossless.endsWith("\n") ? lossless : `${lossless}\n`;
+    }
+    const rawCheck = validateNativeSyntax(cleanedCode, targetLang, fullPath, activeIdioms);
+    if (rawCheck.valid) {
+      return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     }
     throw new Error(
       `Failed pre-write syntax validation for ${fullPath}: ${syntaxCheck.diagnostics.join("; ")}`,
