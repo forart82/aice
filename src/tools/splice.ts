@@ -4029,6 +4029,23 @@ function spliceDialectNativeSource(
     });
 
     if (!matchedRule || !matchedRule.source?.start || !matchedRule.source?.end) {
+      if (!options.delete && !options.insertBefore && !options.insertAfter) {
+        const emitted = emitCssSnippet(anchorSymbol.trim());
+        const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+        const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
+        return {
+          success: true,
+          filePath,
+          symbol: anchorSymbol,
+          newSnippet: emitted,
+          modifiedCode,
+          newAiceSource: modifiedCode,
+          tokensSaved: Math.max(
+            0,
+            estimateTokens(modifiedCode) - estimateTokens(rawSnippet || emitted),
+          ),
+        };
+      }
       throw new Error(`CSS selector '${anchorSymbol}' not found in ${filePath}`);
     }
 
@@ -4130,7 +4147,10 @@ function spliceDialectNativeSource(
         doc.contents = doc.createNode({}) as any;
       }
 
-      if (options.append && !anchorSymbol) {
+      if (
+        (options.append && !anchorSymbol) ||
+        (anchorSymbol && /^(?:eof|end|append)$/i.test(anchorSymbol.trim()))
+      ) {
         const { declName, value: newVal } = parseSnippetMeta();
         if (declName && declName !== "config") {
           doc.setIn([declName], doc.createNode(newVal));
@@ -4166,13 +4186,7 @@ function spliceDialectNativeSource(
 
       const isRootConfig =
         keyParts.length === 1 && keyParts[0] === "config" && !doc.hasIn(["config"]);
-      if (
-        !options.append &&
-        !options.insertAfter &&
-        !options.insertBefore &&
-        !isRootConfig &&
-        !doc.hasIn(keyParts)
-      ) {
+      if (options.delete && !isRootConfig && !doc.hasIn(keyParts)) {
         throw new Error(`Key '${anchorSymbol}' not found in ${filePath}`);
       }
 
@@ -4181,15 +4195,29 @@ function spliceDialectNativeSource(
         origNode && typeof (origNode as { toJSON?: () => unknown }).toJSON === "function"
           ? (origNode as { toJSON: () => unknown }).toJSON()
           : origNode;
-      const originalSnippet = YAML.stringify(origVal).trimEnd();
+      const originalSnippet = origVal !== undefined ? YAML.stringify(origVal).trimEnd() : "";
 
       let newSnippet = "";
       if (options.delete) {
         const normKeys = keyParts.map((k) => (/^\d+$/.test(k) ? Number(k) : k));
         doc.deleteIn(normKeys);
       } else {
-        const { declName, value: newVal } = parseSnippetMeta();
+        const parsedMeta = parseSnippetMeta();
+        const declName = parsedMeta.declName;
         const leaf = keyParts[keyParts.length - 1];
+        let newVal = parsedMeta.value;
+        if (
+          typeof newVal === "object" &&
+          newVal !== null &&
+          !Array.isArray(newVal) &&
+          Object.keys(newVal).length === 1 &&
+          Object.keys(newVal)[0] === leaf &&
+          (!origVal ||
+            typeof origVal !== "object" ||
+            !(leaf in (origVal as Record<string, unknown>)))
+        ) {
+          newVal = (newVal as Record<string, unknown>)[leaf];
+        }
         if (
           (options.insertAfter || options.insertBefore) &&
           declName &&
@@ -4257,7 +4285,10 @@ function spliceDialectNativeSource(
       }
     }
 
-    if (options.append && !anchorSymbol) {
+    if (
+      (options.append && !anchorSymbol) ||
+      (anchorSymbol && /^(?:eof|end|append)$/i.test(anchorSymbol.trim()))
+    ) {
       const { declName, value: newVal } = parseSnippetMeta();
       if (declName && declName !== "config") {
         docObj[declName] = newVal;
@@ -4301,9 +4332,7 @@ function spliceDialectNativeSource(
 
     const leafKey = keyParts[keyParts.length - 1];
     if (
-      !options.append &&
-      !options.insertAfter &&
-      !options.insertBefore &&
+      options.delete &&
       !(leafKey in parent) &&
       !(keyParts.length === 1 && leafKey === "config")
     ) {
@@ -4311,7 +4340,7 @@ function spliceDialectNativeSource(
     }
 
     const origVal = leafKey === "config" && !(leafKey in parent) ? docObj : parent[leafKey];
-    const originalSnippet = JSON.stringify(origVal, null, 2);
+    const originalSnippet = origVal !== undefined ? JSON.stringify(origVal, null, 2) : "";
 
     let newSnippet = "";
     if (options.delete) {
@@ -4321,7 +4350,21 @@ function spliceDialectNativeSource(
         delete parent[leafKey];
       }
     } else {
-      const { declName, value: newVal } = parseSnippetMeta();
+      const parsedMeta = parseSnippetMeta();
+      const declName = parsedMeta.declName;
+      let newVal = parsedMeta.value;
+      if (
+        typeof newVal === "object" &&
+        newVal !== null &&
+        !Array.isArray(newVal) &&
+        Object.keys(newVal).length === 1 &&
+        Object.keys(newVal)[0] === leafKey &&
+        (!origVal ||
+          typeof origVal !== "object" ||
+          !(leafKey in (origVal as Record<string, unknown>)))
+      ) {
+        newVal = (newVal as Record<string, unknown>)[leafKey];
+      }
       if (
         (options.insertAfter || options.insertBefore) &&
         declName &&
@@ -4416,7 +4459,10 @@ function spliceDialectNativeSource(
       return emitted;
     };
 
-    if (options.append && !anchorSymbol) {
+    if (
+      (options.append && !anchorSymbol) ||
+      (anchorSymbol && /^(?:eof|end|append)$/i.test(anchorSymbol.trim()))
+    ) {
       const emitted = emitTemplateFragment();
       const modifiedCode = `${nativeSource.trimEnd()}\n${emitted}\n`;
       return {
