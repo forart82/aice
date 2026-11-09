@@ -38,9 +38,14 @@ import {
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
 import { generateContext } from "../tools/context.js";
-import { type BatchCreateItem, createBatch, createFile } from "../tools/create.js";
+import {
+  type BatchCreateItem,
+  createBatch,
+  createFile,
+  parseMultiFileCreateStream,
+} from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
-import { splice } from "../tools/splice.js";
+import { parseMultiBlockSpliceStream, splice } from "../tools/splice.js";
 
 import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
 
@@ -782,9 +787,17 @@ export class AiceMcpServer {
       }
 
       case "aice_outline": {
-        const targetPath = String(args.path ?? "");
-        const fullPath = this.resolveSafePath(targetPath);
-        const projectRoot = this.resolveProjectRoot(fullPath);
+        const rawPaths: string[] = Array.isArray(args.paths)
+          ? (args.paths as unknown[]).map((p) => String(p))
+          : String(args.path ?? "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+        if (rawPaths.length === 0) {
+          rawPaths.push(".");
+        }
+        const firstFullPath = this.resolveSafePath(rawPaths[0]!);
+        const projectRoot = this.resolveProjectRoot(firstFullPath);
         const config = loadProjectConfig(projectRoot);
         if (!isProjectAiceEnabled(config)) {
           return {
@@ -796,46 +809,59 @@ export class AiceMcpServer {
           config,
           typeof args.idioms === "boolean" ? args.idioms : undefined,
         );
-        const result = await withSuppressedTelemetryAsync(() =>
-          outlinePath(fullPath, {
-            json: false,
-            stats: true,
-            idioms: effectiveIdioms,
-            projectRoot,
-          }),
-        );
-        const outlineText =
-          result instanceof Map
-            ? Array.from(result.values())
-                .map((r) => r.text)
-                .join("\n\n")
-            : result.text || JSON.stringify(result);
-
-        let nativeText = "";
-        try {
-          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-            nativeText = fs.readFileSync(fullPath, "utf-8");
-          } else if (result instanceof Map) {
-            const parts: string[] = [];
-            for (const r of result.values()) {
-              if (fs.existsSync(r.file)) {
-                parts.push(fs.readFileSync(r.file, "utf-8"));
+        const outlineSections: string[] = [];
+        const nativeParts: string[] = [];
+        let anyIdiomsUsed = false;
+        for (const rawTarget of rawPaths) {
+          const fullPath = this.resolveSafePath(rawTarget);
+          const result = await withSuppressedTelemetryAsync(() =>
+            outlinePath(fullPath, {
+              json: false,
+              stats: true,
+              idioms: effectiveIdioms,
+              projectRoot,
+            }),
+          );
+          const singleText =
+            result instanceof Map
+              ? Array.from(result.values())
+                  .map((r) => r.text)
+                  .join("\n\n")
+              : result.text || JSON.stringify(result);
+          outlineSections.push(
+            rawPaths.length > 1 && !(result instanceof Map)
+              ? `// === ${rawTarget} ===\n\n${singleText}`
+              : singleText,
+          );
+          if (
+            result instanceof Map
+              ? Array.from(result.values()).some((r) => (r.referencedIdioms?.length ?? 0) > 0)
+              : (result.referencedIdioms?.length ?? 0) > 0
+          ) {
+            anyIdiomsUsed = true;
+          }
+          try {
+            if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
+              nativeParts.push(fs.readFileSync(fullPath, "utf-8"));
+            } else if (result instanceof Map) {
+              for (const r of result.values()) {
+                if (fs.existsSync(r.file)) {
+                  nativeParts.push(fs.readFileSync(r.file, "utf-8"));
+                }
               }
             }
-            nativeText = parts.join("\n");
+          } catch {
+            // ignore
           }
-        } catch {
-          // ignore
         }
+        const outlineText = outlineSections.join("\n\n");
+        const nativeText = nativeParts.join("\n");
         recordTelemetryEvent({
-          targetPath: fullPath,
+          targetPath: firstFullPath,
           projectRoot,
           operation: "outline",
           surface: "mcp",
-          idiomsUsed:
-            result instanceof Map
-              ? Array.from(result.values()).some((r) => (r.referencedIdioms?.length ?? 0) > 0)
-              : (result.referencedIdioms?.length ?? 0) > 0,
+          idiomsUsed: anyIdiomsUsed,
           nativeText: nativeText || outlineText,
           aiceText: outlineText,
         });
@@ -847,6 +873,64 @@ export class AiceMcpServer {
 
       case "aice_splice": {
         const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+        const symbolSelector = String(args.symbolSelector ?? args.symbol ?? "");
+        const newAiceCode =
+          typeof args.newAiceCode === "string"
+            ? args.newAiceCode
+            : typeof args.code === "string"
+              ? args.code
+              : undefined;
+        const bodyCode = typeof args.body === "string" ? args.body : undefined;
+        const deleteFlag = Boolean(args.delete);
+        const parsedStream =
+          newAiceCode && !symbolSelector
+            ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || undefined)
+            : null;
+
+        if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
+          const firstRawFp = String(parsedStream.batchItems[0]!.filePath ?? "");
+          const firstSafeFp = this.resolveSafePath(firstRawFp);
+          const projectRoot = this.resolveProjectRoot(firstSafeFp);
+          const config = loadProjectConfig(projectRoot);
+          if (!isProjectAiceEnabled(config)) {
+            return {
+              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+              isError: true,
+            };
+          }
+          const effectiveIdioms = isProjectIdiomsEnabled(
+            config,
+            typeof args.idioms === "boolean" ? args.idioms : undefined,
+          );
+          const summaries: string[] = [];
+          for (const item of parsedStream.batchItems) {
+            const rawFp = String(item.filePath ?? "");
+            const safeFp = this.resolveSafePath(rawFp);
+            const res = await withSuppressedTelemetryAsync(() =>
+              splice(safeFp, {
+                symbol: item.symbol,
+                code: item.code,
+                delete: item.delete,
+                edits: item.edits,
+                compile: true,
+                idioms: effectiveIdioms,
+                projectRoot,
+              }),
+            );
+            if (!res.success) {
+              return {
+                content: [{ type: "text", text: `Splice failed in ${rawFp}` }],
+                isError: true,
+              };
+            }
+            const count = item.edits ? item.edits.length : 1;
+            summaries.push(`Successfully spliced ${count} symbol(s) in ${rawFp}.`);
+          }
+          return {
+            content: [{ type: "text", text: summaries.join("\n") }],
+          };
+        }
+
         const filePath = this.resolveSafePath(rawTargetFile);
         const projectRoot = this.resolveProjectRoot(filePath);
         const config = loadProjectConfig(projectRoot);
@@ -860,28 +944,22 @@ export class AiceMcpServer {
           config,
           typeof args.idioms === "boolean" ? args.idioms : undefined,
         );
-        const symbolSelector = String(args.symbolSelector ?? args.symbol ?? "");
-        const newAiceCode =
-          typeof args.newAiceCode === "string"
-            ? args.newAiceCode
-            : typeof args.code === "string"
-              ? args.code
+        const batchEdits =
+          parsedStream?.singleFileEdits && parsedStream.singleFileEdits.length > 0
+            ? parsedStream.singleFileEdits
+            : Array.isArray(args.edits)
+              ? (args.edits as Array<{
+                  symbol: string;
+                  code?: string;
+                  body?: string;
+                  delete?: boolean;
+                }>)
               : undefined;
-        const bodyCode = typeof args.body === "string" ? args.body : undefined;
-        const deleteFlag = Boolean(args.delete);
-        const batchEdits = Array.isArray(args.edits)
-          ? (args.edits as Array<{
-              symbol: string;
-              code?: string;
-              body?: string;
-              delete?: boolean;
-            }>)
-          : undefined;
 
         const result = await withSuppressedTelemetryAsync(() =>
           splice(filePath, {
-            symbol: symbolSelector || undefined,
-            code: newAiceCode,
+            symbol: batchEdits ? undefined : symbolSelector || undefined,
+            code: batchEdits ? undefined : newAiceCode,
             body: bodyCode,
             delete: deleteFlag,
             edits: batchEdits,
@@ -1098,8 +1176,19 @@ export class AiceMcpServer {
       case "aice_create": {
         const dryRun = Boolean(args.dryRun);
         const overwrite = typeof args.overwrite === "boolean" ? args.overwrite : undefined;
-        if (Array.isArray(args.files)) {
-          const rawFiles = args.files as Array<Record<string, unknown>>;
+        const rawCodeCandidate = String(
+          args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
+        );
+        const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+        const streamItems =
+          !Array.isArray(args.files) &&
+          (!rawTargetFile || /^\s*(?:===|---|\/\/\s*FILE:)/m.test(rawCodeCandidate))
+            ? parseMultiFileCreateStream(rawCodeCandidate)
+            : null;
+        if (Array.isArray(args.files) || (streamItems && streamItems.length > 0)) {
+          const rawFiles = Array.isArray(args.files)
+            ? (args.files as Array<Record<string, unknown>>)
+            : (streamItems as Array<Record<string, unknown>>);
           if (rawFiles.length === 0) {
             throw new Error("aice_create 'files' array must not be empty");
           }
@@ -1157,7 +1246,6 @@ export class AiceMcpServer {
           };
         }
 
-        const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
         if (!rawTargetFile) {
           throw new Error("Must provide 'filePath' or 'files' array for aice_create");
         }
@@ -1181,9 +1269,7 @@ export class AiceMcpServer {
           | string[]
           | Record<string, string>
           | undefined;
-        const codeStr = String(
-          args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
-        );
+        const codeStr = rawCodeCandidate;
         const res = await createFile(safeFilePath, {
           code: codeStr,
           idioms: effectiveIdioms,

@@ -3143,7 +3143,10 @@ function isPureNativeSnippetWithoutIdioms(
 
   if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
     if (
-      /^(?:pub\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(trimmed) ||
+      /^(?:pub\s+|priv\s+|ro\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(
+        trimmed,
+      ) ||
+      /^(?:pub\s+|priv\s+|ro\s+|val\s+|mut\s+)/.test(trimmed) ||
       /^(?:pub\s+)?(?:rec|enum|type|class|component)\b/.test(trimmed)
     ) {
       return false;
@@ -4606,6 +4609,35 @@ function resolveSingleNativeEditAgainstSource(
     throw new Error("Must specify target symbol with --symbol when splicing native file");
   }
 
+  if (/^(?:eof|end|append)$/i.test(anchorSymbol.trim())) {
+    if (options.delete) {
+      throw new Error(`Cannot delete '${anchorSymbol}'`);
+    }
+    if (!rawSnippet.trim()) {
+      throw new Error("Must provide non-empty --code when appending to native file");
+    }
+    const emitted = emitNativeSnippetForContext(
+      rawSnippet,
+      filePath,
+      targetLang,
+      undefined,
+      idioms,
+      undefined,
+      false,
+      undefined,
+      forceLosslessPreprocess,
+    );
+    const prefix = nativeSource.length === 0 || nativeSource.endsWith("\n") ? "" : "\n";
+    return {
+      symbol: anchorSymbol,
+      startOffset: nativeSource.length,
+      endOffset: nativeSource.length,
+      replacement: `${prefix}${emitted}\n`,
+      originalSnippet: "",
+      newSnippet: emitted,
+    };
+  }
+
   const lineRangeMatch = anchorSymbol.trim().match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = parseInt(lineRangeMatch[1], 10);
@@ -4701,7 +4733,7 @@ function resolveSingleNativeEditAgainstSource(
       ? inferSnippetParamArity(options.code)
       : undefined;
 
-  const spanInfo = locateNativeDeclarationSpan(
+  let spanInfo = locateNativeDeclarationSpan(
     nativeSource,
     anchorSymbol,
     targetLang,
@@ -4709,11 +4741,29 @@ function resolveSingleNativeEditAgainstSource(
     preferAccessor,
     preferredArity,
   );
+  let autoAppendToClass = false;
+
+  if (!spanInfo && !options.delete && !options.insertBefore && !options.insertAfter) {
+    const trimmedAnchor = anchorSymbol.trim();
+    const plusMatch = trimmedAnchor.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\+$/);
+    const dotIdx = trimmedAnchor.indexOf(".");
+    const candidateClassName = plusMatch
+      ? plusMatch[1]
+      : dotIdx > 0
+        ? trimmedAnchor.slice(0, dotIdx).trim()
+        : undefined;
+    if (candidateClassName) {
+      const classSpan = locateNativeDeclarationSpan(nativeSource, candidateClassName, targetLang);
+      if (classSpan && classSpan.isClassContainer) {
+        spanInfo = classSpan;
+        autoAppendToClass = true;
+      }
+    }
+  }
 
   if (!spanInfo) {
     throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
   }
-
   const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
 
   if (options.delete) {
@@ -4774,7 +4824,7 @@ function resolveSingleNativeEditAgainstSource(
     };
   }
 
-  if (options.append && spanInfo.isClassContainer) {
+  if ((options.append || autoAppendToClass) && spanInfo.isClassContainer) {
     if (!rawSnippet.trim()) {
       throw new Error("Must provide non-empty --code when appending to class in native file");
     }
@@ -5093,7 +5143,21 @@ export function spliceNativeSource(
  * Directly splices native files (`.ts`, `.py`, `.rs`, `.go`, `.cpp`, `.cs`, `.kt`, `.php`, `.json`, `.yaml`, `.html`, `.twig`, `.css`)
  * as well as standalone `.aice` files in memory.
  */
-export async function splice(filePath: string, options: SpliceOptions = {}): Promise<SpliceResult> {
+export async function splice(
+  filePath: string,
+  rawOptions: SpliceOptions = {},
+): Promise<SpliceResult> {
+  let options = rawOptions;
+  if (!options.symbol && (!options.edits || options.edits.length === 0) && options.code) {
+    const parsedMulti = parseMultiBlockSpliceStream(options.code, filePath);
+    if (parsedMulti?.singleFileEdits && parsedMulti.singleFileEdits.length > 0) {
+      options = {
+        ...options,
+        edits: parsedMulti.singleFileEdits,
+        code: undefined,
+      };
+    }
+  }
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
 
@@ -5253,14 +5317,163 @@ export async function splice(filePath: string, options: SpliceOptions = {}): Pro
   return result;
 }
 
+export interface ParsedMultiBlockSpliceStream {
+  singleFileEdits?: SymbolSpliceEdit[];
+  batchItems?: BatchSpliceItem[];
+}
+
+/**
+ * Parses a multi-block splice heredoc/stream delimited by `=== <symbol> ===`,
+ * `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
+ */
+export function parseMultiBlockSpliceStream(
+  rawStream: string,
+  defaultFilePath?: string,
+): ParsedMultiBlockSpliceStream | null {
+  if (!rawStream || !rawStream.trim()) return null;
+  const lines = rawStream.split(/\r?\n/);
+  const headerRe =
+    /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^=\r\n]+?)\s*={3,}|-{3,}\s*([^-\r\n]+?)\s*-{3,}|(?:\/\/|#)\s*(?:FILE|SYMBOL|EDIT):\s*([^\r\n]+?))\s*$/i;
+
+  const preHeaderLines: string[] = [];
+  const sections: Array<{
+    filePath?: string;
+    symbol: string;
+    isDelete: boolean;
+    lines: string[];
+  }> = [];
+
+  for (const line of lines) {
+    const m = line.match(headerRe);
+    if (m) {
+      let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      let isDelete = false;
+      if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
+        isDelete = true;
+        spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
+      }
+      let blockFilePath: string | undefined;
+      let blockSymbol = spec;
+      const fileSymMatch = spec.match(/^([^\s:#]+\.[a-zA-Z0-9]{1,10})(?:\s*(?::+|#)\s*|\s+)(.+)$/);
+      if (fileSymMatch) {
+        const candFile = fileSymMatch[1].trim();
+        const ext = path.extname(candFile).toLowerCase();
+        if (KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice") {
+          blockFilePath = candFile;
+          blockSymbol = fileSymMatch[2].trim();
+        }
+      }
+      const isValidSymbol =
+        Boolean(blockSymbol) && (!/\s/.test(blockSymbol) || /^[.#@]/.test(blockSymbol));
+      if (isValidSymbol) {
+        sections.push({
+          filePath: blockFilePath,
+          symbol: blockSymbol,
+          isDelete,
+          lines: [],
+        });
+        continue;
+      }
+    }
+    if (sections.length === 0) {
+      preHeaderLines.push(line);
+    } else {
+      sections[sections.length - 1].lines.push(line);
+    }
+  }
+
+  if (sections.length === 0) return null;
+
+  const meaningfulPre = preHeaderLines.filter(
+    (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
+  );
+  if (meaningfulPre.length > 0) return null;
+
+  const resolvedBlocks = sections.map((sec) => {
+    const body = sec.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
+    return {
+      filePath: sec.filePath ?? defaultFilePath,
+      explicitFilePath: sec.filePath,
+      symbol: sec.symbol,
+      code: del ? undefined : body,
+      delete: del || undefined,
+    };
+  });
+
+  if (resolvedBlocks.some((b) => !b.filePath)) {
+    if (!defaultFilePath) {
+      return {
+        singleFileEdits: resolvedBlocks.map((b) => ({
+          symbol: b.symbol,
+          code: b.code,
+          delete: b.delete,
+        })),
+      };
+    }
+  }
+
+  const allSameDefault =
+    Boolean(defaultFilePath) &&
+    resolvedBlocks.every(
+      (b) =>
+        !b.explicitFilePath || path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
+    );
+
+  if (allSameDefault) {
+    return {
+      singleFileEdits: resolvedBlocks.map((b) => ({
+        symbol: b.symbol,
+        code: b.code,
+        delete: b.delete,
+      })),
+    };
+  }
+
+  const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
+  for (const b of resolvedBlocks) {
+    const fp = b.filePath!;
+    const list = groupedByFile.get(fp) ?? [];
+    list.push({
+      symbol: b.symbol,
+      code: b.code,
+      delete: b.delete,
+    });
+    groupedByFile.set(fp, list);
+  }
+
+  const batchItems: BatchSpliceItem[] = [];
+  for (const [fp, edits] of groupedByFile.entries()) {
+    if (edits.length === 1) {
+      batchItems.push({
+        filePath: fp,
+        symbol: edits[0].symbol,
+        code: edits[0].code,
+        delete: edits[0].delete,
+      });
+    } else {
+      batchItems.push({
+        filePath: fp,
+        edits,
+      });
+    }
+  }
+
+  return { batchItems };
+}
+
 /**
  * Executes a batch of splices across one or more files atomically.
  * If any splice item in the batch fails, all modified files are rolled back to their exact original bytes.
  */
 export async function spliceBatch(
-  items: BatchSpliceItem[],
+  itemsOrStream: BatchSpliceItem[] | string,
   options: BatchSpliceOptions = {},
 ): Promise<BatchSpliceResult> {
+  const items: BatchSpliceItem[] =
+    typeof itemsOrStream === "string"
+      ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
+      : itemsOrStream;
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const backups = new Map<string, string>();
 

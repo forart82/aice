@@ -991,17 +991,84 @@ export async function createFile(
 }
 
 /**
- * Creates multiple native files atomically from a batch array of `{ filePath, code }` items.
+ /**
+ * Parses a multi-file heredoc/stream payload delimited by `=== <filePath> ===`,
+ * `--- <filePath> ---`, or `// FILE: <filePath>` / `# FILE: <filePath>` headers.
+ */
+export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[] | null {
+  if (!rawStream || !rawStream.trim()) return null;
+  const lines = rawStream.split(/\r?\n/);
+  const headerRe =
+    /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}|-{3,}\s*([^\s-][^-\r\n]*?)\s*-{3,}|(?:\/\/|#|<!--)\s*FILE:\s*([^\s>][^\r\n>]*?)(?:\s*-->)?)\s*$/i;
+
+  const isTargetFilePath = (cand: string): boolean => {
+    const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
+    if (!clean || /\s/.test(clean)) return false;
+    const ext = path.extname(clean).toLowerCase();
+    if (!ext) return false;
+    return KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice" || /^\.[a-z0-9]{1,8}$/i.test(ext);
+  };
+
+  const preHeaderLines: string[] = [];
+  const sections: Array<{ filePath: string; lines: string[] }> = [];
+
+  for (const line of lines) {
+    const m = line.match(headerRe);
+    if (m) {
+      const cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      if (isTargetFilePath(cand)) {
+        sections.push({ filePath: cand, lines: [] });
+        continue;
+      }
+    }
+    if (sections.length === 0) {
+      preHeaderLines.push(line);
+    } else {
+      sections[sections.length - 1].lines.push(line);
+    }
+  }
+
+  if (sections.length === 0) return null;
+
+  const meaningfulPre = preHeaderLines.filter(
+    (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
+  );
+  const preIdiomPrefix = meaningfulPre.every((l) => /^\s*@idiom\b/.test(l) || /^\s+/.test(l))
+    ? preHeaderLines.join("\n").trim()
+    : null;
+  if (preIdiomPrefix === null && meaningfulPre.length > 0) {
+    return null;
+  }
+
+  return sections.map((sec) => {
+    const body = sec.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    const ext = path.extname(sec.filePath).toLowerCase();
+    const canHaveIdioms = ext !== ".json" && ext !== ".yaml" && ext !== ".yml";
+    const fullCode = preIdiomPrefix && canHaveIdioms ? `${preIdiomPrefix}\n${body}` : body;
+    return {
+      filePath: sec.filePath,
+      code: fullCode,
+    };
+  });
+}
+
+/**
+ * Creates multiple native files atomically from a batch array of `{ filePath, code }` items
+ * or a multi-file heredoc stream (`=== <filePath> ===`).
  * If any item in the batch fails, all newly created or overwritten files and idiom config/cache updates are rolled back.
  */
 export async function createBatch(
-  items: BatchCreateItem[],
+  itemsOrStream: BatchCreateItem[] | string,
   optionsOrProjectRoot: CreateFileOptions | string = {},
 ): Promise<BatchCreateResult> {
   const options: CreateFileOptions =
     typeof optionsOrProjectRoot === "string"
       ? { projectRoot: optionsOrProjectRoot }
       : optionsOrProjectRoot;
+  const items: BatchCreateItem[] =
+    typeof itemsOrStream === "string"
+      ? (parseMultiFileCreateStream(itemsOrStream) ?? [])
+      : itemsOrStream;
   if (!Array.isArray(items) || items.length === 0) {
     throw new Error("createBatch requires a non-empty array of file creation items");
   }
@@ -1010,7 +1077,6 @@ export async function createBatch(
   const existingBackups = new Map<string, string>();
   const newlyCreatedPaths: string[] = [];
   const configSnapshots = new Map<string, string | null>();
-
   const snapshotConfigFile = (filePathToSnap: string) => {
     if (!configSnapshots.has(filePathToSnap)) {
       configSnapshots.set(
@@ -1019,7 +1085,6 @@ export async function createBatch(
       );
     }
   };
-
   for (const item of items) {
     const rawFp = item.filePath || item.file || item.path || "";
     if (!rawFp) continue;

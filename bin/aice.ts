@@ -71,6 +71,8 @@ import {
   type OutlineOptions,
   outlinePath,
   type PatchOptions,
+  parseMultiBlockSpliceStream,
+  parseMultiFileCreateStream,
   patchFile,
   runParityGate,
   type SpliceOptions,
@@ -923,7 +925,10 @@ program
   .description(
     "Semantic skeletonization: generate token-dense AST skeleton outline (85-90% token reduction)",
   )
-  .argument("[target]", "Path to source file or directory (omitted for workspace sourceDir)")
+  .argument(
+    "[targets...]",
+    "Path(s) to source file(s) or directory (omitted for workspace sourceDir)",
+  )
   .option("-d, --depth <number>", "Maximum symbol nesting depth", (val) => Number.parseInt(val, 10))
   .option("--no-types", "Exclude type annotations")
   .option("--idioms", "Force-enable project idioms")
@@ -932,7 +937,7 @@ program
   .option("--stats", "Display token reduction savings metrics")
   .action(
     async (
-      targetPath: string | undefined,
+      targetPaths: string[] | undefined,
       options: {
         depth?: number;
         types?: boolean;
@@ -941,103 +946,186 @@ program
         stats?: boolean;
       },
     ) => {
+      const rawTargets = targetPaths && targetPaths.length > 0 ? targetPaths : [undefined];
       try {
-        const resolved = resolvePathTargets(targetPath, { includeTargets: true });
-        const outlineTarget = resolved.resolvedPath;
+        if (rawTargets.length === 1) {
+          const targetPath = rawTargets[0];
+          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const outlineTarget = resolved.resolvedPath;
 
-        if (!fs.existsSync(outlineTarget)) {
-          console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
-          process.exit(1);
-        }
+          if (!fs.existsSync(outlineTarget)) {
+            console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
+            process.exit(1);
+          }
 
-        if (!isProjectAiceEnabled(resolved.config)) {
-          console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
-          process.exit(1);
-        }
+          if (!isProjectAiceEnabled(resolved.config)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
 
-        const outlineOpts: OutlineOptions = {
-          depth: options.depth !== undefined ? Number(options.depth) : undefined,
-          includeTypes: options.types !== false,
-          idioms: options.idioms,
-          json: !!options.json,
-          stats: !!options.stats,
-          projectRoot: resolved.projectRoot,
-        };
+          const outlineOpts: OutlineOptions = {
+            depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            includeTypes: options.types !== false,
+            idioms: options.idioms,
+            json: !!options.json,
+            stats: !!options.stats,
+            projectRoot: resolved.projectRoot,
+          };
 
-        const result = await outlinePath(outlineTarget, outlineOpts);
+          const result = await outlinePath(outlineTarget, outlineOpts);
 
-        if (result instanceof Map) {
-          // Directory output
-          if (options.json) {
-            const arr = Array.from(result.values()).map(
-              (r) =>
-                r.json ?? {
-                  file: r.file,
-                  symbols: r.symbols,
-                  ...(r.stats ? { stats: r.stats } : {}),
-                },
-            );
-            console.log(JSON.stringify(arr, null, 2));
-          } else {
-            for (const [relPath, res] of result.entries()) {
-              console.log(`\n// === ${relPath} ===\n`);
-              console.log(res.text);
-              if (options.stats && res.stats) {
+          if (result instanceof Map) {
+            if (options.json) {
+              const arr = Array.from(result.values()).map(
+                (r) =>
+                  r.json ?? {
+                    file: r.file,
+                    symbols: r.symbols,
+                    ...(r.stats ? { stats: r.stats } : {}),
+                  },
+              );
+              console.log(JSON.stringify(arr, null, 2));
+            } else {
+              for (const [relPath, res] of result.entries()) {
+                console.log(`\n// === ${relPath} ===\n`);
+                console.log(res.text);
+                if (options.stats && res.stats) {
+                  console.log(
+                    `\n[Tokens: ${res.stats.originalTokens} -> ${res.stats.outlineTokens} (-${res.stats.savingsPct}%)]`,
+                  );
+                }
+              }
+              if (options.stats) {
+                let totalOrig = 0;
+                let totalOutline = 0;
+                for (const res of result.values()) {
+                  if (res.stats) {
+                    totalOrig += res.stats.originalTokens;
+                    totalOutline += res.stats.outlineTokens;
+                  }
+                }
+                const savings = Math.max(0, totalOrig - totalOutline);
+                const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
+                console.log(`\n📊 Aggregate Token Reduction Metrics (${result.size} files):`);
+                console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
+                console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
                 console.log(
-                  `\n[Tokens: ${res.stats.originalTokens} -> ${res.stats.outlineTokens} (-${res.stats.savingsPct}%)]`,
+                  `  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`,
                 );
               }
             }
-            if (options.stats) {
-              let totalOrig = 0;
-              let totalOutline = 0;
-              for (const res of result.values()) {
-                if (res.stats) {
-                  totalOrig += res.stats.originalTokens;
-                  totalOutline += res.stats.outlineTokens;
-                }
+          } else {
+            if (options.json) {
+              console.log(
+                JSON.stringify(
+                  result.json ?? {
+                    file: result.file,
+                    symbols: result.symbols,
+                    ...(result.stats ? { stats: result.stats } : {}),
+                  },
+                  null,
+                  2,
+                ),
+              );
+            } else {
+              console.log(result.text);
+              if (options.stats && result.stats) {
+                console.log(`\n📊 Token Reduction Metrics for ${result.file}:`);
+                console.log(`  Original tokens: ${result.stats.originalTokens.toLocaleString()}`);
+                console.log(`  Outline tokens:  ${result.stats.outlineTokens.toLocaleString()}`);
+                console.log(
+                  `  Token savings:   ${result.stats.savingsTokens.toLocaleString()} tokens (${result.stats.savingsPct}%)`,
+                );
+                console.log(`  Original chars:  ${result.stats.originalChars.toLocaleString()}`);
+                console.log(
+                  `  Outline chars:   ${result.stats.outlineChars.toLocaleString()} (${result.stats.charSavingsPct}%)`,
+                );
               }
-              const savings = Math.max(0, totalOrig - totalOutline);
-              const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
-              console.log(`\n📊 Aggregate Token Reduction Metrics (${result.size} files):`);
-              console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
-              console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
-              console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
             }
           }
-        } else {
-          // Single file output
-          if (options.json) {
-            console.log(
-              JSON.stringify(
+          return;
+        }
+
+        // Multiple targets passed: `aice outline f1 f2 f3`
+        const allJsonItems: unknown[] = [];
+        let totalOrig = 0;
+        let totalOutline = 0;
+        let totalFilesCount = 0;
+
+        for (const targetPath of rawTargets) {
+          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const outlineTarget = resolved.resolvedPath;
+          if (!fs.existsSync(outlineTarget)) {
+            console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
+            process.exit(1);
+          }
+          if (!isProjectAiceEnabled(resolved.config)) {
+            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+            process.exit(1);
+          }
+          const outlineOpts: OutlineOptions = {
+            depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            includeTypes: options.types !== false,
+            idioms: options.idioms,
+            json: !!options.json,
+            stats: !!options.stats,
+            projectRoot: resolved.projectRoot,
+          };
+          const result = await outlinePath(outlineTarget, outlineOpts);
+          if (result instanceof Map) {
+            for (const [relPath, res] of result.entries()) {
+              totalFilesCount++;
+              if (res.stats) {
+                totalOrig += res.stats.originalTokens;
+                totalOutline += res.stats.outlineTokens;
+              }
+              if (options.json) {
+                allJsonItems.push(
+                  res.json ?? {
+                    file: res.file,
+                    symbols: res.symbols,
+                    ...(res.stats ? { stats: res.stats } : {}),
+                  },
+                );
+              } else {
+                console.log(`\n// === ${relPath} ===\n`);
+                console.log(res.text);
+              }
+            }
+          } else {
+            totalFilesCount++;
+            if (result.stats) {
+              totalOrig += result.stats.originalTokens;
+              totalOutline += result.stats.outlineTokens;
+            }
+            if (options.json) {
+              allJsonItems.push(
                 result.json ?? {
                   file: result.file,
                   symbols: result.symbols,
                   ...(result.stats ? { stats: result.stats } : {}),
                 },
-                null,
-                2,
-              ),
-            );
-          } else {
-            console.log(result.text);
-            if (options.stats && result.stats) {
-              console.log(`\n📊 Token Reduction Metrics for ${result.file}:`);
-              console.log(`  Original tokens: ${result.stats.originalTokens.toLocaleString()}`);
-              console.log(`  Outline tokens:  ${result.stats.outlineTokens.toLocaleString()}`);
-              console.log(
-                `  Token savings:   ${result.stats.savingsTokens.toLocaleString()} tokens (${result.stats.savingsPct}%)`,
               );
-              console.log(`  Original chars:  ${result.stats.originalChars.toLocaleString()}`);
-              console.log(
-                `  Outline chars:   ${result.stats.outlineChars.toLocaleString()} (${result.stats.charSavingsPct}%)`,
-              );
+            } else {
+              console.log(`\n// === ${targetPath ?? result.file} ===\n`);
+              console.log(result.text);
             }
           }
         }
+
+        if (options.json) {
+          console.log(JSON.stringify(allJsonItems, null, 2));
+        } else if (options.stats) {
+          const savings = Math.max(0, totalOrig - totalOutline);
+          const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
+          console.log(`\n📊 Aggregate Token Reduction Metrics (${totalFilesCount} files):`);
+          console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
+          console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
+          console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
+        }
       } catch (err: unknown) {
         console.error(
-          `❌ Error outlining ${targetPath}: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error outlining ${rawTargets.join(", ")}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }
@@ -1217,9 +1305,46 @@ Examples:
             options.symbol = positionalSymbol;
           }
         }
-
-        if (!targetPath) {
-          console.error("❌ Error: Must provide <path> or --batch <fileOrJson>.");
+        if (!targetPath || targetPath === "-") {
+          const rawCrossStream =
+            options.code ??
+            options.template ??
+            (options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin());
+          if (rawCrossStream && rawCrossStream.trim().length > 0) {
+            const batchProjectRoot = findProjectRoot(process.cwd());
+            const batchProjectConfig = loadProjectConfig(batchProjectRoot);
+            if (!isProjectAiceEnabled(batchProjectConfig)) {
+              console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+              process.exit(1);
+            }
+            const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
+            const parsedStream = parseMultiBlockSpliceStream(rawCrossStream);
+            let spliceItems: BatchSpliceItem[] | undefined = parsedStream?.batchItems;
+            if (!spliceItems || spliceItems.length === 0) {
+              try {
+                const parsedJson = JSON.parse(rawCrossStream.trim());
+                if (Array.isArray(parsedJson)) {
+                  spliceItems = parsedJson as BatchSpliceItem[];
+                }
+              } catch {
+                // ignore
+              }
+            }
+            if (spliceItems && spliceItems.length > 0) {
+              const batchRes = await spliceBatch(spliceItems, {
+                dryRun: options.dryRun,
+                compile: options.compile,
+                idioms: batchEffectiveIdioms,
+              });
+              console.log(
+                `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+              );
+              return;
+            }
+          }
+          console.error(
+            "❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe '=== <filePath>:<symbol> ===' blocks via --stdin.",
+          );
           process.exit(1);
         }
 
@@ -1313,6 +1438,26 @@ Examples:
               "❌ Error: Must provide --code, --from, --stdin, --body, --delete, or --edits.",
             );
             process.exit(1);
+          }
+        }
+
+        if (!options.symbol && (!parsedEdits || parsedEdits.length === 0) && code) {
+          const multiStream = parseMultiBlockSpliceStream(code, targetPath);
+          if (multiStream?.batchItems && multiStream.batchItems.length > 0) {
+            const batchRes = await spliceBatch(multiStream.batchItems, {
+              dryRun: options.dryRun,
+              compile: options.compile,
+              idioms: effectiveSpliceIdioms,
+              projectRoot: spliceProjectRoot,
+            });
+            console.log(
+              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+            );
+            return;
+          }
+          if (multiStream?.singleFileEdits && multiStream.singleFileEdits.length > 0) {
+            parsedEdits = multiStream.singleFileEdits;
+            code = undefined;
           }
         }
 
@@ -1420,45 +1565,7 @@ program
       },
     ) => {
       try {
-        const isBatch =
-          options.batch !== undefined ||
-          filePathArg === "--batch" ||
-          (Boolean(options.stdin) && !filePathArg && !options.code);
-        if (isBatch) {
-          let rawJson = "";
-          const batchArg =
-            options.batch !== undefined
-              ? options.batch
-              : filePathArg === "--batch"
-                ? "-"
-                : undefined;
-          if (batchArg === "-" || batchArg === true || options.stdin || !batchArg) {
-            rawJson = fs.readFileSync(0, "utf-8");
-          } else {
-            const batchCandidatePath = path.resolve(process.cwd(), String(batchArg));
-            rawJson =
-              fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
-                ? fs.readFileSync(batchCandidatePath, "utf-8")
-                : String(batchArg);
-          }
-          const parsed = JSON.parse(rawJson);
-          let rawItems: BatchCreateItem[];
-          if (Array.isArray(parsed)) {
-            rawItems = parsed as BatchCreateItem[];
-          } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.files)) {
-            rawItems = parsed.files as BatchCreateItem[];
-          } else if (parsed && typeof parsed === "object") {
-            rawItems = Object.entries(parsed).map(([fp, codeVal]) =>
-              typeof codeVal === "string"
-                ? { filePath: fp, code: codeVal }
-                : { filePath: fp, ...(codeVal as object) },
-            );
-          } else {
-            throw new Error(
-              "--batch must be a JSON array of { filePath, code } items or a { [filePath]: code } map",
-            );
-          }
-
+        const runCreateBatchItems = async (rawItems: BatchCreateItem[]) => {
           const items: BatchCreateItem[] = rawItems.map((it) => {
             const rawFp = it.filePath || it.file || it.path || "";
             return {
@@ -1506,6 +1613,64 @@ program
               `✔ Batch created ${batchRes.results.length} native file(s) (Native: ${batchRes.totalNativeTokens} -> AICE: ${batchRes.totalAiceTokens} cl100k tokens, net saved: ${batchRes.totalTokensSaved >= 0 ? `+${batchRes.totalTokensSaved}` : batchRes.totalTokensSaved})`,
             );
           }
+        };
+
+        const isBatch =
+          options.batch !== undefined ||
+          filePathArg === "--batch" ||
+          filePathArg === "-" ||
+          (!filePathArg && !options.from);
+        if (isBatch) {
+          let rawInput = "";
+          const batchArg =
+            options.batch !== undefined
+              ? options.batch
+              : filePathArg === "--batch" || filePathArg === "-"
+                ? "-"
+                : undefined;
+          if (options.code && !batchArg) {
+            rawInput = options.code;
+          } else if (batchArg === "-" || batchArg === true || options.stdin || !batchArg) {
+            rawInput = options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin();
+          } else {
+            const batchCandidatePath = path.resolve(process.cwd(), String(batchArg));
+            rawInput =
+              fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
+                ? fs.readFileSync(batchCandidatePath, "utf-8")
+                : String(batchArg);
+          }
+
+          if (!rawInput || !rawInput.trim()) {
+            console.error(
+              "❌ Error: Must provide <filePath>, --batch <jsonOrFile>, or pipe multi-file '=== <filePath> ===' blocks via stdin.",
+            );
+            process.exit(1);
+          }
+
+          const streamItems = parseMultiFileCreateStream(rawInput);
+          let rawItems: BatchCreateItem[];
+          if (streamItems && streamItems.length > 0) {
+            rawItems = streamItems;
+          } else {
+            const parsed = JSON.parse(rawInput);
+            if (Array.isArray(parsed)) {
+              rawItems = parsed as BatchCreateItem[];
+            } else if (parsed && typeof parsed === "object" && Array.isArray(parsed.files)) {
+              rawItems = parsed.files as BatchCreateItem[];
+            } else if (parsed && typeof parsed === "object") {
+              rawItems = Object.entries(parsed).map(([fp, codeVal]) =>
+                typeof codeVal === "string"
+                  ? { filePath: fp, code: codeVal }
+                  : { filePath: fp, ...(codeVal as object) },
+              );
+            } else {
+              throw new Error(
+                "--batch must be a multi-file '=== <filePath> ===' stream, JSON array of { filePath, code } items, or { [filePath]: code } map",
+              );
+            }
+          }
+
+          await runCreateBatchItems(rawItems);
           return;
         }
 
@@ -1531,6 +1696,14 @@ program
           } else {
             console.error("❌ Error: Must provide -c/--code, --from <file>, or input via stdin.");
             process.exit(1);
+          }
+        }
+
+        if (code) {
+          const streamItems = parseMultiFileCreateStream(code);
+          if (streamItems && streamItems.length > 1) {
+            await runCreateBatchItems(streamItems);
+            return;
           }
         }
 
@@ -1634,7 +1807,22 @@ program
       const rawTargets = targetPaths && targetPaths.length > 0 ? targetPaths : [undefined];
       try {
         const results = [];
-        for (const targetPath of rawTargets) {
+        for (const rawTarget of rawTargets) {
+          let targetPath = rawTarget;
+          let inlineSymbol: string | undefined;
+          if (
+            typeof rawTarget === "string" &&
+            rawTarget.includes(":") &&
+            !/^[a-zA-Z]:[\\/]/.test(rawTarget)
+          ) {
+            const colonIdx = rawTarget.indexOf(":");
+            const candidateFile = rawTarget.slice(0, colonIdx);
+            const candidateSym = rawTarget.slice(colonIdx + 1).trim();
+            if (candidateFile && candidateSym && fs.existsSync(path.resolve(candidateFile))) {
+              targetPath = candidateFile;
+              inlineSymbol = candidateSym;
+            }
+          }
           const resolved = resolvePathTargets(targetPath, { includeTargets: true });
           if (!isProjectAiceEnabled(resolved.config)) {
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1642,7 +1830,7 @@ program
           }
           const contextOpts: ContextOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : 1,
-            symbol: options.symbol,
+            symbol: inlineSymbol ?? options.symbol,
             idioms: options.idioms,
             includeCallers: options.callers !== false,
             outlineTarget: !!options.outlineTarget,

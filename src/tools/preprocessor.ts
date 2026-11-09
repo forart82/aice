@@ -964,16 +964,21 @@ function lowerCompactSigilsForTarget(line: string, targetLang: TargetLanguage): 
 
   if (targetLang === "typescript" || targetLang === "tsx") {
     return out
-      .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*#\s*\]/g, "$1number[]")
-      .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*\$\s*\]/g, "$1string[]")
-      .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*\?\s*\]/g, "$1boolean[]")
-      .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*_\s*\]/g, "$1void[]")
-      .replace(/(:\s*|->\s*|\[\s*|=\s*)\[\s*\*\s*\]/g, "$1any[]")
-      .replace(/:(?!=)\s*#(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": number")
-      .replace(/:(?!=)\s*\$(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": string")
-      .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": boolean")
-      .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": void")
-      .replace(/:(?!=)\s*\*(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|$))/g, ": any")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*#\s*\]/g, "$1number[]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\$\s*\]/g, "$1string[]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\?\s*\]/g, "$1boolean[]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*_\s*\]/g, "$1void[]")
+      .replace(/(:\s*|->\s*|[<,(|[\s]|=\s*)\[\s*\*\s*\]/g, "$1any[]")
+      .replace(/([<,(|&]\s*):#(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1number")
+      .replace(/([<,(|&]\s*):\$(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1string")
+      .replace(/([<,(|&]\s*):\?(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1boolean")
+      .replace(/([<,(|&]\s*):_(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1void")
+      .replace(/([<,(|&]\s*):\*(?=\s*(?:\[|\||&|>|\)|,|;|$))/g, "$1any")
+      .replace(/:(?!=)\s*#(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": number")
+      .replace(/:(?!=)\s*\$(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": string")
+      .replace(/:(?!=)\s*\?(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": boolean")
+      .replace(/:(?!=)\s*_(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": void")
+      .replace(/:(?!=)\s*\*(?=\s*(?:=|,|;|\)|\]|\}|->|\{|=>|\[|\||&|>|$))/g, ": any")
       .replace(/\s*->\s*#(?![A-Za-z0-9_])/g, ": number")
       .replace(/\s*->\s*\$(?![A-Za-z0-9_])/g, ": string")
       .replace(/\s*->\s*\?(?![A-Za-z0-9_])/g, ": boolean")
@@ -1368,12 +1373,24 @@ function lowerHybridLineForTarget(
       isJs ? "$1static async $2" : "$1public static async $2",
     );
     out = out.replace(
+      /^(\s*)priv\s+static\s+async\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1static async $2" : "$1private static async $2",
+    );
+    out = out.replace(
       /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|static\s+\^fn\s+|static\s+fn\s+\^|pub\s+static\s+fn\s+|@fn\s+static\s+|static\s+fn\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
       "$1static $2",
     );
     out = out.replace(
+      /^(\s*)priv\s+static\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1static $2" : "$1private static $2",
+    );
+    out = out.replace(
       /^(\s*)(?:@fn\s+async\s+\^|\^async\s+fn\s+|async\s+\^fn\s+|async\s+fn\s+\^|pub\s+async\s+fn\s+|pub\s+async\s+function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
       isJs ? "$1async $2" : "$1public async $2",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+async\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1async $2" : "$1private async $2",
     );
     out = out.replace(
       /^(\s*)(?:@fn\s+async\s+|async\s+fn\s+|async\s+function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
@@ -1383,9 +1400,22 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:@fn\s+\^|\^fn\s+|fn\s+\^|pub\s+fn\s+|pub\s+function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
       isJs ? "$1$2" : "$1public $2",
     );
+    out = out.replace(
+      /^(\s*)priv\s+(?:fn\s+|function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1$2" : "$1private $2",
+    );
     out = out.replace(/^(\s*)(?:@fn\s+|fn\s+|function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/, "$1$2");
+    out = out.replace(
+      /^(\s*)pub\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1public readonly ",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1private readonly ",
+    );
     out = out.replace(/^(\s*)pub\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1public ");
-    out = out.replace(/^(\s*)val\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1readonly ");
+    out = out.replace(/^(\s*)priv\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1private ");
+    out = out.replace(/^(\s*)(?:val|ro)\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1readonly ");
     out = out.replace(/^(\s*)mut\s+(?=[A-Za-z_$#])/, "$1");
   } else {
     out = out.replace(
@@ -1403,6 +1433,22 @@ function lowerHybridLineForTarget(
     out = out.replace(
       /^(\s*)(?:@fn\s+static\s+\^|\^static\s+fn\s+|static\s+\^fn\s+|static\s+fn\s+\^|pub\s+static\s+fn\s+|@fn\s+static\s+|static\s+fn\s+)([A-Za-z_$][A-Za-z0-9_$]*)/,
       "$1static $2",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+static\s+async\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1static async $2" : "$1private static async $2",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+static\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1static $2" : "$1private static $2",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+async\s+(?:fn\s+|function\s+)?([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1async $2" : "$1private async $2",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+(?:fn\s+|function\s+)([A-Za-z_$#][A-Za-z0-9_$]*)/,
+      isJs ? "$1$2" : "$1private $2",
     );
     out = out.replace(/^(\s*)(?:@fn|fn)(\*?\s+)([A-Za-z_$][A-Za-z0-9_$]*)/, "$1function$2$3");
     out = out.replace(
@@ -1425,9 +1471,33 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:\^(?:let|mut)\s+|(?:let|mut)\s+\^|pub\s+let\s+mut\s+|pub\s+(?:let|mut|var)\s+)/,
       "$1export let ",
     );
+    out = out.replace(
+      /^(\s*)pub\s+(?:ro|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1public readonly ",
+    );
+    out = out.replace(
+      /^(\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$#])/,
+      isJs ? "$1" : "$1private readonly ",
+    );
+    out = out.replace(/^(\s*)priv\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1private ");
+    out = out.replace(/^(\s*)ro\s+(?=[A-Za-z_$#])/, isJs ? "$1" : "$1readonly ");
+    out = out.replace(
+      /^(\s*)pub\s+(?=[A-Za-z_$#][A-Za-z0-9_$]*\s*(?:\??\s*:|=|\())/,
+      isJs ? "$1" : "$1public ",
+    );
     out = out.replace(/^(\s*)let\s+mut\s+/, "$1let ");
     out = out.replace(/^(\s*)val\s+(?=[A-Za-z_$[{])/, "$1const ");
     out = out.replace(/^(\s*)mut\s+(?=[A-Za-z_$[{])/, "$1let ");
+  }
+
+  // Constructor parameter property modifiers (e.g. constructor(priv ro x: :#, pub y: :$))
+  if (!isJs) {
+    out = out
+      .replace(/([,(]\s*)pub\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$])/g, "$1public readonly ")
+      .replace(/([,(]\s*)priv\s+(?:ro|val|readonly)\s+(?=[A-Za-z_$])/g, "$1private readonly ")
+      .replace(/([,(]\s*)pub\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1public ")
+      .replace(/([,(]\s*)priv\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1private ")
+      .replace(/([,(]\s*)ro\s+(?=[A-Za-z_$][A-Za-z0-9_$]*\s*\??\s*:)/g, "$1readonly ");
   }
 
   // Variable bindings := and ::=
@@ -1459,8 +1529,8 @@ function lowerHybridLineForTarget(
   out = out.replace(/(=>\s*|\)\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
   out = out.replace(/(\belse\s+)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
   out = out.replace(/(\belse\s+)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
-  out = out.replace(/(\{\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
-  out = out.replace(/(\{\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
+  out = out.replace(/(\{\s*|;\s*)(?:ret|<-)\s+([^;}\n]+)/g, "$1return $2");
+  out = out.replace(/(\{\s*|;\s*)(?:ret|<-)(?=\s*(?:;|\}|$))/g, "$1return");
   out = out.replace(/^(\s*\}\s*)elif\b/, "$1else if");
   out = out.replace(/^(\s*)elif\b/, "$1else if");
 
@@ -1681,10 +1751,16 @@ export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLa
     return true;
   }
 
-  // Native language constructs without indentation-based AICE headers
+  // Native language constructs or hybrid shorthands without indentation-based AICE headers
   if (
     /^\s*(?:import\s+|export\s+|package\s+|using\s+|namespace\s+|#include\b|from\s+|<\?php\b|#\[)/m.test(
       cleanedCode,
+    ) ||
+    /^\s*(?:pub\s+(?:const|let|val|mut|var|type|interface|enum|ro)\b|priv\s+|ro\s+|public\s+|private\s+|protected\s+|readonly\s+|const\s+|let\s+|var\s+|interface\s+|type\s+[A-Za-z_$][^\n]*=)/m.test(
+      masked,
+    ) ||
+    /^\s*pub\s+(?!(?:fn|function|func|fun|class|struct|component|style|async|static)\b)[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\??\s*:|=)/m.test(
+      masked,
     )
   ) {
     return true;

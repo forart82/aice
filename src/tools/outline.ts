@@ -1132,6 +1132,13 @@ function resolveSingleSymbolSpanInNative(
   const wordRe = sym.kind === "import" ? new RegExp(escaped) : new RegExp(`\\b${escaped}\\b`);
   for (let i = 0; i < rawLines.length; i++) {
     if (wordRe.test(rawLines[i])) {
+      if (sym.kind === "import") {
+        let s = i;
+        while (s > 0 && !/^\s*(?:import|from|#include|use|require)\b/.test(rawLines[s])) {
+          s--;
+        }
+        return { startLine: s + 1, endLine: Math.max(s + 1, i + 1) };
+      }
       return { startLine: i + 1, endLine: i + 1 };
     }
   }
@@ -1145,8 +1152,8 @@ function resolveChildSymbolSpanInNative(
   rawLines: string[],
   targetLang: TargetLanguage,
   _filePath: string,
-): { startLine: number; endLine: number } | null {
-  if (childSym.kind === "method") {
+): { startLine: number; endLine: number } | undefined {
+  if (childSym.kind === "method" || childSym.kind === "property") {
     const dotted = `${parentSym.name}.${childSym.name}`;
     const span = locateNativeDeclarationSpan(originalSource, dotted, targetLang, parentSym.name);
     if (span) {
@@ -1155,17 +1162,16 @@ function resolveChildSymbolSpanInNative(
       return { startLine: sLine, endLine: Math.max(sLine, eLine) };
     }
   }
-
   const minLine = Math.max(1, parentSym.line);
   const maxLine = Math.min(rawLines.length, parentSym.endLine ?? rawLines.length);
   const escaped = escapeRegexForOutline(childSym.name);
   const wordRe = new RegExp(`(?:\\b|["'])${escaped}(?:\\b|["'])`);
   for (let i = minLine - 1; i < maxLine; i++) {
-    if (wordRe.test(rawLines[i])) {
+    if (wordRe.test(rawLines[i]!)) {
       return { startLine: i + 1, endLine: i + 1 };
     }
   }
-  return null;
+  return undefined;
 }
 
 export function collectNativeSyntaxDiagnostics(

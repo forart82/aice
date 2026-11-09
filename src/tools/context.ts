@@ -40,6 +40,7 @@ import {
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { collectNativeSyntaxDiagnostics, generateOutline, type OutlineSymbol } from "./outline.js";
+import { locateNativeDeclarationSpan } from "./splice.js";
 
 export interface ContextOptions {
   /**
@@ -1133,12 +1134,61 @@ export function extractSymbolFromAiceSource(
   preParsedMod?: Module,
 ): string {
   let trimmedSel = symbolSelector.trim();
-  const mod = preParsedMod ?? parse(aiceSource, filePath);
+  const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
+  if (lineRangeMatch) {
+    const startLine = Number.parseInt(lineRangeMatch[1], 10);
+    const endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
+    const rawSource =
+      !filePath.endsWith(".aice") && fs.existsSync(filePath)
+        ? fs.readFileSync(filePath, "utf-8")
+        : aiceSource;
+    const rawLines = rawSource.split(/\r?\n/);
+    if (startLine < 1 || startLine > rawLines.length || startLine > endLine) {
+      throw new Error(
+        `Invalid line range L${startLine}-L${endLine}: file has ${rawLines.length} line(s) (1-based inclusive)`,
+      );
+    }
+    const clampedEnd = Math.min(endLine, rawLines.length);
+    return rawLines.slice(startLine - 1, clampedEnd).join("\n");
+  }
+
+  let mod: Module | undefined = preParsedMod;
+  if (!mod) {
+    try {
+      mod = parse(aiceSource, filePath);
+    } catch {
+      mod = undefined;
+    }
+  }
+  if (!mod) {
+    if (!filePath.endsWith(".aice")) {
+      const rawSource = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : aiceSource;
+      const spanInfo = locateNativeDeclarationSpan(
+        rawSource,
+        trimmedSel,
+        detectTargetFromPath(filePath),
+      );
+      if (spanInfo) {
+        return rawSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+      }
+    }
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+  }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first = resolveFirstActionableSymbol(aiceSource, filePath, mod);
     if (first) trimmedSel = first;
   }
-
+  if (trimmedSel.toLowerCase() === "imports" || trimmedSel.toLowerCase() === "import") {
+    const impItems = mod.items.filter((it) => it.kind === "ImportDecl");
+    if (impItems.length > 0) {
+      return AiceGenerator.generate({
+        kind: "Module",
+        path: mod.path,
+        items: impItems,
+        span: mod.span,
+      });
+    }
+  }
   // Check StyleDecl first because CSS selectors often start with '.' (e.g. '.btn-primary')
   for (const item of mod.items) {
     if (item.kind === "StyleDecl") {
@@ -1295,11 +1345,20 @@ export function extractSymbolFromAiceSource(
       }
     }
   }
-
   if (matchedItems.length === 0) {
+    if (!filePath.endsWith(".aice")) {
+      const rawSource = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf-8") : aiceSource;
+      const spanInfo = locateNativeDeclarationSpan(
+        rawSource,
+        trimmedSel,
+        detectTargetFromPath(filePath),
+      );
+      if (spanInfo) {
+        return rawSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+      }
+    }
     throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
   }
-
   const scopedMod: Module = {
     kind: "Module",
     path: mod.path,
@@ -1358,8 +1417,11 @@ export async function generateContext(
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
   const nativeDiagnostics = collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
+  const isPureLineRangeSymbol =
+    Boolean(options.symbol) && /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i.test(options.symbol!.trim());
+
   let targetContent = rawFileContent;
-  if (!fullTargetPath.endsWith(".aice")) {
+  if (!fullTargetPath.endsWith(".aice") && !isPureLineRangeSymbol) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
       const isRawTemplate = targetLang === "twig";
@@ -1459,7 +1521,7 @@ export async function generateContext(
       // ignore expand failures
     }
   }
-  if (options.symbol && !idiomsActive) {
+  if (options.symbol && !idiomsActive && !isPureLineRangeSymbol) {
     targetContent = compactPureAiceSlice(targetContent);
   }
 
