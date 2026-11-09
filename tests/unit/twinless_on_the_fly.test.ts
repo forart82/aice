@@ -934,6 +934,37 @@ export class GameEngine {
       expect(updatedEndpoints.svcA.retries).toBe(5);
       expect(updatedEndpoints.svcB.timeoutMs).toBe(9000);
       expect(updatedEndpoints.svcC.retries).toBe(5);
+
+      // 5. Rust impl method auto-insertion & Go receiver method top-level auto-insertion
+      const rsFile = path.join(tmpDir, "counter.rs");
+      fs.writeFileSync(
+        rsFile,
+        `pub struct Counter {\n    pub count: i32,\n}\n\nimpl Counter {\n    pub fn inc(&mut self) {\n        self.count += 1;\n    }\n}\n`,
+        "utf-8",
+      );
+      await splice(rsFile, {
+        projectRoot: tmpDir,
+        symbol: "Counter.reset",
+        code: `pub fn reset(&mut self) {\n    self.count = 0;\n}`,
+      });
+      const updatedRs = fs.readFileSync(rsFile, "utf-8");
+      expect(updatedRs).toContain("pub struct Counter {\n    pub count: i32,\n}");
+      expect(updatedRs).toContain("pub fn reset(&mut self)");
+
+      const goFile = path.join(tmpDir, "counter.go");
+      fs.writeFileSync(
+        goFile,
+        `package main\n\ntype Counter struct {\n\tCount int\n}\n\nfunc (c *Counter) Inc() {\n\tc.Count++\n}\n`,
+        "utf-8",
+      );
+      await splice(goFile, {
+        projectRoot: tmpDir,
+        symbol: "Counter.Reset",
+        code: `func (c *Counter) Reset() {\n\tc.Count = 0\n}`,
+      });
+      const updatedGoStruct = fs.readFileSync(goFile, "utf-8");
+      expect(updatedGoStruct).toContain("type Counter struct {\n\tCount int\n}");
+      expect(updatedGoStruct).toContain("func (c *Counter) Reset()");
     });
   });
 });

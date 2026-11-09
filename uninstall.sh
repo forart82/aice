@@ -186,6 +186,10 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     if [[ ${#CONFIG_FILES[@]} -gt 0 ]]; then
       for cfg in "${CONFIG_FILES[@]}"; do
         [[ -z "$cfg" ]] && continue
+        cfg_dir="$(dirname "$cfg")"
+        if [[ -f "${cfg_dir}/bin/aice.ts" && -f "${cfg_dir}/src/tools/splice.ts" ]]; then
+          continue
+        fi
         run_cmd rm -f "$cfg"
         log_ok "Removed project config: ${cfg}"
       done

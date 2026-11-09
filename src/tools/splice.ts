@@ -4671,10 +4671,9 @@ function resolveSingleNativeEditAgainstSource(
     const literalCandidate = `${nativeSource.slice(0, startOffset)}${processedCode}${nativeSource.slice(endOffset)}`;
     if (!validateNativeSyntax(literalCandidate, targetLang, filePath, idioms).valid) {
       const procLineList = processedCode.trim().split(/\r?\n/);
-      const procLineCount = Math.max(1, procLineList.length);
       const origSpanCount = Math.max(1, endLine - startLine + 1);
-      const spanLengths =
-        procLineCount === origSpanCount ? [procLineCount] : [procLineCount, origSpanCount];
+      const procFirstTrim = procLineList[0]?.trim() ?? "";
+      const procLastTrim = procLineList[procLineList.length - 1]?.trim() ?? "";
       const procTokens = new Set(
         (processedCode.match(/[A-Za-z_$][A-Za-z0-9_$-]{2,}/g) ?? []).map((t) => t.toLowerCase()),
       );
@@ -4683,10 +4682,13 @@ function resolveSingleNativeEditAgainstSource(
       let bestStart = -1;
       let bestEnd = -1;
 
-      const minLine = Math.max(1, startLine - 12);
-      const maxLine = Math.min(rawLines.length, startLine + 12);
-      for (const spanLen of spanLengths) {
-        for (let candStartLine = minLine; candStartLine <= maxLine; candStartLine++) {
+      const minStart = Math.max(1, startLine - 10);
+      const maxStart = Math.min(rawLines.length, startLine + 10);
+      const minSpanLen = Math.max(1, origSpanCount - 3);
+      const maxSpanLen = origSpanCount + 3;
+
+      for (let candStartLine = minStart; candStartLine <= maxStart; candStartLine++) {
+        for (let spanLen = minSpanLen; spanLen <= maxSpanLen; spanLen++) {
           const candEndLine = Math.min(rawLines.length, candStartLine + spanLen - 1);
           if (candStartLine === startLine && candEndLine === endLine) continue;
           const cStartOff = lineStarts[candStartLine - 1];
@@ -4700,11 +4702,16 @@ function resolveSingleNativeEditAgainstSource(
           for (const tok of candTokens) {
             if (procTokens.has(tok)) overlap++;
           }
-          if (procLineList[0] && rawLines[candStartLine - 1]?.trim() === procLineList[0].trim()) {
-            overlap += 10;
+          if (procFirstTrim && rawLines[candStartLine - 1]?.trim() === procFirstTrim) {
+            overlap += 20;
+          }
+          if (procLastTrim && rawLines[candEndLine - 1]?.trim() === procLastTrim) {
+            overlap += 15;
           }
           if (overlap <= 0) continue;
-          const distPenalty = Math.abs(candStartLine - startLine) * 0.1;
+          const distPenalty =
+            Math.abs(candStartLine - startLine) * 0.5 +
+            Math.abs(spanLen - origSpanCount) * 0.5;
           const score = overlap - distPenalty;
           if (score > bestScore) {
             const testModified = `${nativeSource.slice(0, cStartOff)}${processedCode}${nativeSource.slice(cEndOff)}`;
@@ -4773,6 +4780,7 @@ function resolveSingleNativeEditAgainstSource(
       }
     } else if (
       /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmedAnchor) &&
+      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor) &&
       rawSnippet.trim() &&
       new RegExp(`\\b${trimmedAnchor}\\b`).test(rawSnippet)
     ) {
@@ -4865,6 +4873,112 @@ function resolveSingleNativeEditAgainstSource(
   if ((options.append || autoAppendToClass) && spanInfo.isClassContainer) {
     if (!rawSnippet.trim()) {
       throw new Error("Must provide non-empty --code when appending to class in native file");
+    }
+    if (
+      targetLang === "go" &&
+      /^\s*(?:func|pub\s+fn|fn|@fn|\^fn)\b/m.test(rawSnippet)
+    ) {
+      const clsName = spanInfo.memberName;
+      const recvRe = new RegExp(
+        `^\\s*func\\s*\\(\\s*([A-Za-z0-9_]+\\s+\\*?${clsName})\\s*\\)`,
+        "m",
+      );
+      const recvMatch = recvRe.exec(nativeSource);
+      const inferredRecv = recvMatch?.[1]
+        ? `(${recvMatch[1]})`
+        : `(${clsName[0].toLowerCase()} *${clsName})`;
+      let emittedGo = emitNativeSnippetForContext(
+        rawSnippet,
+        filePath,
+        targetLang,
+        { ...spanInfo, goReceiver: inferredRecv },
+        idioms,
+        undefined,
+        false,
+        clsName,
+        forceLosslessPreprocess,
+      );
+      if (/^\s*func\s+[A-Za-z0-9_]+\s*\(/.test(emittedGo)) {
+        emittedGo = emittedGo.replace(/^(\s*func\s+)([A-Za-z0-9_]+\s*\()/, `$1${inferredRecv} $2`);
+      }
+      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: nativeSource.length,
+        endOffset: nativeSource.length,
+        replacement: `${sep}${emittedGo}\n`,
+        originalSnippet,
+        newSnippet: emittedGo,
+      };
+    }
+    if (
+      targetLang === "rust" &&
+      /^\s*(?:#\[[^\]]+\]\s*)*(?:pub(?:\([^)]*\))?\s+|@fn\s+|\^fn\s+|async\s+|const\s+|unsafe\s+)*fn\b/m.test(
+        rawSnippet,
+      )
+    ) {
+      const clsName = spanInfo.memberName;
+      const emittedUnindented = emitNativeSnippetForContext(
+        rawSnippet,
+        filePath,
+        targetLang,
+        undefined,
+        idioms,
+        undefined,
+        false,
+        clsName,
+        forceLosslessPreprocess,
+      );
+      const lines = nativeSource.split("\n");
+      let lineOff = 0;
+      let implOpenBrace = -1;
+      let implIndent = "";
+      for (const l of lines) {
+        const inherentMatch = new RegExp(
+          `^([ \\t]*)impl(?:\\s*<[^>]*>)?\\s+${clsName}\\b(?![^{]*\\bfor\\b)`,
+        ).exec(l);
+        const traitMatch = new RegExp(
+          `^([ \\t]*)impl(?:\\s*<[^>]*>)?\\s+[^{]+\\bfor\\s+${clsName}\\b`,
+        ).exec(l);
+        const m = inherentMatch || (implOpenBrace < 0 ? traitMatch : null);
+        if (m) {
+          const ob = nativeSource.indexOf("{", lineOff);
+          if (ob >= 0) {
+            implOpenBrace = ob;
+            implIndent = m[1];
+            if (inherentMatch) break;
+          }
+        }
+        lineOff += l.length + 1;
+      }
+      if (implOpenBrace >= 0) {
+        const implEnd = findMatchingBraceEnd(nativeSource, implOpenBrace, "rust");
+        const memberIndent = `${implIndent}    `;
+        const newSnippet = indentCode(emittedUnindented, memberIndent);
+        const closeBracePos = nativeSource.lastIndexOf("}", implEnd);
+        const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
+        const insertPos =
+          lineStartBeforeClose >= implOpenBrace ? lineStartBeforeClose + 1 : closeBracePos;
+        return {
+          symbol: anchorSymbol,
+          startOffset: insertPos,
+          endOffset: insertPos,
+          replacement: `\n${newSnippet}\n`,
+          originalSnippet: nativeSource.slice(implOpenBrace, implEnd),
+          newSnippet,
+        };
+      }
+      const memberIndent = `${spanInfo.declIndent}    `;
+      const newSnippet = indentCode(emittedUnindented, memberIndent);
+      const implBlock = `${spanInfo.declIndent}impl ${clsName} {\n${newSnippet}\n${spanInfo.declIndent}}`;
+      return {
+        symbol: anchorSymbol,
+        startOffset: spanInfo.declEnd,
+        endOffset: spanInfo.declEnd,
+        replacement: `\n\n${implBlock}`,
+        originalSnippet,
+        newSnippet: implBlock,
+      };
     }
     const memberIndent =
       targetLang === "python" ||
