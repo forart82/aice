@@ -157,6 +157,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     mapfile -t CONFIG_FILES < <(
       find "$PROJECTS_DIR" \
         \( \
+          -path "$SCRIPT_DIR" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
@@ -197,6 +198,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     mapfile -t CACHE_DIRS < <(
       find "$PROJECTS_DIR" \
         \( \
+          -path "$SCRIPT_DIR" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
@@ -224,6 +226,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     mapfile -t PROJECT_RULE_FILES < <(
       find "$PROJECTS_DIR" \
         \( \
+          -path "$SCRIPT_DIR" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
@@ -256,6 +259,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     mapfile -t PROJECT_MD_FILES < <(
       find "$PROJECTS_DIR" \
         \( \
+          -path "$SCRIPT_DIR" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
