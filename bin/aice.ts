@@ -1259,8 +1259,9 @@ Examples:
               compile: options.compile,
               idioms: batchEffectiveIdioms,
             });
+            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
             console.log(
-              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
             );
           }
           if (idiomItems.length > 0) {
@@ -1336,8 +1337,9 @@ Examples:
                 compile: options.compile,
                 idioms: batchEffectiveIdioms,
               });
+              const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
               console.log(
-                `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+                `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
               );
               return;
             }
@@ -1450,8 +1452,9 @@ Examples:
               idioms: effectiveSpliceIdioms,
               projectRoot: spliceProjectRoot,
             });
+            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
             console.log(
-              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s)`,
+              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
             );
             return;
           }
@@ -1517,7 +1520,7 @@ Examples:
         }
       } catch (err: unknown) {
         console.error(
-          `❌ Error splicing ${rawTargetPath ?? options.file ?? options.batch}: ${err instanceof Error ? err.message : String(err)}`,
+          `❌ Error splicing ${rawTargetPath ?? options.file ?? options.batch ?? "<stdin>"}: ${err instanceof Error ? err.message : String(err)}`,
         );
         process.exit(1);
       }

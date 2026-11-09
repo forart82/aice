@@ -45,7 +45,7 @@ import {
   parseMultiFileCreateStream,
 } from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
-import { parseMultiBlockSpliceStream, splice } from "../tools/splice.js";
+import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../tools/splice.js";
 
 import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
 
@@ -902,29 +902,37 @@ export class AiceMcpServer {
             config,
             typeof args.idioms === "boolean" ? args.idioms : undefined,
           );
+          const safeBatchItems = parsedStream.batchItems.map((item) => ({
+            ...item,
+            filePath: this.resolveSafePath(String(item.filePath ?? "")),
+            rawFilePath: String(item.filePath ?? ""),
+          }));
+          const batchRes = await withSuppressedTelemetryAsync(() =>
+            spliceBatch(safeBatchItems, {
+              compile: true,
+              idioms: effectiveIdioms,
+              projectRoot,
+            }),
+          );
           const summaries: string[] = [];
-          for (const item of parsedStream.batchItems) {
-            const rawFp = String(item.filePath ?? "");
-            const safeFp = this.resolveSafePath(rawFp);
-            const res = await withSuppressedTelemetryAsync(() =>
-              splice(safeFp, {
-                symbol: item.symbol,
-                code: item.code,
-                delete: item.delete,
-                edits: item.edits,
-                compile: true,
-                idioms: effectiveIdioms,
-                projectRoot,
-              }),
-            );
-            if (!res.success) {
-              return {
-                content: [{ type: "text", text: `Splice failed in ${rawFp}` }],
-                isError: true,
-              };
-            }
+          for (let idx = 0; idx < batchRes.results.length; idx++) {
+            const res = batchRes.results[idx]!;
+            const item = safeBatchItems[idx]!;
             const count = item.edits ? item.edits.length : 1;
-            summaries.push(`Successfully spliced ${count} symbol(s) in ${rawFp}.`);
+            const respLine = `Successfully spliced ${count} symbol(s) in ${item.rawFilePath} (${res.tokensSaved ?? 0} tokens saved).`;
+            summaries.push(respLine);
+            const itemSnippet =
+              item.code ??
+              (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+            recordTelemetryEvent({
+              targetPath: item.filePath,
+              projectRoot,
+              operation: "splice",
+              surface: "mcp",
+              idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
+              nativeText: res.modifiedCode,
+              aiceText: itemSnippet ? `${itemSnippet}\n${respLine}` : respLine,
+            });
           }
           return {
             content: [{ type: "text", text: summaries.join("\n") }],

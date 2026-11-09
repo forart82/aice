@@ -3977,13 +3977,17 @@ function spliceDialectNativeSource(
       return emitTarget(expanded, "css", { watermark: false }).trim();
     };
 
-    if (options.append && !anchorSymbol) {
+    if (
+      (options.append && !anchorSymbol) ||
+      (anchorSymbol && /^(?:eof|end|append)$/i.test(anchorSymbol.trim()))
+    ) {
       const emitted = emitCssSnippet(".rule");
       const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
       const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
       return {
         success: true,
         filePath,
+        symbol: anchorSymbol ?? "eof",
         newSnippet: emitted,
         modifiedCode,
         newAiceSource: modifiedCode,
@@ -5002,10 +5006,18 @@ export function spliceNativeSource(
       );
     }
 
-    // Sort in reverse offset order (bottom-to-top) so earlier edits never shift later offsets
-    const sortedReverse = [...resolvedEdits].sort(
-      (a, b) => b.startOffset - a.startOffset || b.endOffset - a.endOffset,
-    );
+    // Sort in reverse offset order (bottom-to-top) so earlier edits never shift later offsets;
+    // when two zero-width insertions share the exact same offset, apply later stream items first
+    // so the final file preserves top-to-bottom stream order.
+    const indexedEdits = resolvedEdits.map((edit, idx) => ({ edit, idx }));
+    const sortedReverse = indexedEdits
+      .sort(
+        (a, b) =>
+          b.edit.startOffset - a.edit.startOffset ||
+          b.edit.endOffset - a.edit.endOffset ||
+          b.idx - a.idx,
+      )
+      .map((entry) => entry.edit);
 
     // Check for overlapping spans
     for (let i = 0; i < sortedReverse.length - 1; i++) {
@@ -5389,12 +5401,16 @@ export function parseMultiBlockSpliceStream(
   );
   if (meaningfulPre.length > 0) return null;
 
+  let lastExplicitFilePath: string | undefined;
   const resolvedBlocks = sections.map((sec) => {
     const body = sec.lines.join("\n").replace(/^\n+|\n+$/g, "");
     const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
+    if (sec.filePath) {
+      lastExplicitFilePath = sec.filePath;
+    }
     return {
-      filePath: sec.filePath ?? defaultFilePath,
-      explicitFilePath: sec.filePath,
+      filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
+      explicitFilePath: sec.filePath ?? lastExplicitFilePath,
       symbol: sec.symbol,
       code: del ? undefined : body,
       delete: del || undefined,

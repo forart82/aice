@@ -816,53 +816,71 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
     it("6. supports v0.9.9 multi-file create streams (`=== file ===`), multi-block cross-file splice streams (`=== file:symbol ===`, `:eof`, `:Class.newMember`), and class member shorthands (`priv`, `ro`)", async () => {
       const f1 = path.join(tmpDir, "constants.ts");
       const f2 = path.join(tmpDir, "board.ts");
+      const fCss = path.join(tmpDir, "style.css");
       const multiCreateStream = [
         `=== ${f1} ===`,
         "pub const COLS = 10;",
         "pub type CellMap = Record<string, :$>;",
+        "pub type Action = :$ | null;",
         `=== ${f2} ===`,
-        "import { COLS } from './constants';",
+        "import { COLS, Action } from './constants';",
         "pub class Board {",
         "  pub grid: (:$ | null)[][] = [];",
         "  priv ro width: :# = COLS;",
+        "  priv onAction?: (a: Action) => :_;",
         "  pub reset(): :_ { this.grid = []; }",
-        "  pub getWidth(): :# { const w = this.width; <- w; }",
+        "  pub getWidth(): :# { const w = this.width as :#; <- w; }",
         "}",
+        `=== ${fCss} ===`,
+        ".board { d:flex; fd:column; }",
       ].join("\n");
 
       const batchCreateRes = await createBatch(multiCreateStream, { projectRoot: tmpDir });
       expect(batchCreateRes.success).toBe(true);
-      expect(batchCreateRes.results.length).toBe(2);
+      expect(batchCreateRes.results.length).toBe(3);
+
+      const constantsCode = fs.readFileSync(f1, "utf-8");
+      expect(constantsCode).toContain("export type Action = string | null;");
 
       const boardCode = fs.readFileSync(f2, "utf-8");
       expect(boardCode).toContain("public grid: (string | null)[][] = [];");
       expect(boardCode).toContain("private readonly width: number = COLS;");
+      expect(boardCode).toContain("private onAction?: (a: Action) => void;");
+      expect(boardCode).toContain("const w = this.width as number;");
       expect(boardCode).toContain("return w;");
 
       const multiSpliceStream = [
         `=== ${f1}:eof ===`,
         "pub const COMBO_BONUS = 50;",
         `=== ${f2}:imports ===`,
-        "import { COLS, COMBO_BONUS } from './constants';",
+        "import { COLS, COMBO_BONUS, Action } from './constants';",
         `=== ${f2}:Board.combo ===`,
         "priv combo: :# = -1;",
-        `=== ${f2}:Board.isBoardEmpty ===`,
+        "=== Board.isBoardEmpty ===",
         "pub isBoardEmpty(): :? {",
         "  <- this.grid.every((r) => r.every((c) => c === null));",
         "}",
+        `=== ${fCss}:eof ===`,
+        ".hidden { d:none; }",
       ].join("\n");
 
       const batchSpliceRes = await spliceBatch(multiSpliceStream, { projectRoot: tmpDir });
-      expect(batchSpliceRes.results.length).toBe(2);
+      expect(batchSpliceRes.results.length).toBe(3);
 
       const updatedConstants = fs.readFileSync(f1, "utf-8");
       expect(updatedConstants).toContain("export const COMBO_BONUS = 50;");
 
       const updatedBoard = fs.readFileSync(f2, "utf-8");
-      expect(updatedBoard).toContain("import { COLS, COMBO_BONUS } from './constants';");
+      expect(updatedBoard).toContain("import { COLS, COMBO_BONUS, Action } from './constants';");
       expect(updatedBoard).toContain("private combo: number = -1;");
       expect(updatedBoard).toContain("public isBoardEmpty(): boolean {");
       expect(updatedBoard).toContain("return this.grid.every");
+      expect(updatedBoard.indexOf("private combo: number = -1;")).toBeLessThan(
+        updatedBoard.indexOf("public isBoardEmpty(): boolean"),
+      );
+
+      const updatedCss = fs.readFileSync(fCss, "utf-8");
+      expect(updatedCss).toContain("display:none;");
 
       const ctxImports = await generateContext(f2, { symbol: "imports", projectRoot: tmpDir });
       expect(ctxImports.targetContent).toContain("COMBO_BONUS");
