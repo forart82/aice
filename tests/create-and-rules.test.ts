@@ -958,5 +958,38 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(impRes.modifiedCode).toContain("import { Board } from './board';");
       expect(impRes.modifiedCode).toContain("import { SoundManager } from './audio';");
     });
+
+    it("10. v0.9.11 bare typed local variable lowering in methods, multi-line :imports incremental merge, unindented stream headers, and aice.config.json activation rule", async () => {
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice.config.json");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain('"enabled": true');
+
+      const bagFile = path.join(tmpDir, "bag.ts");
+      const bagRes = await createFile(bagFile, {
+        code: [
+          "import {\n  TetrominoType,\n  LINE_POINTS\n} from './constants';",
+          "import { Board } from './board';",
+          "pub class PieceBag {",
+          "  priv bag: string[] = [];",
+          "  priv refillBag():_ {",
+          "    types: string[] = ['I', 'O', 'T'];",
+          "    count:# = types.length;",
+          "    this.bag = types.slice(0, count);",
+          "  }",
+          "}",
+        ].join("\n"),
+        projectRoot: tmpDir,
+      });
+      expect(bagRes.nativeCode).toContain("let types: string[] = ['I', 'O', 'T'];");
+      expect(bagRes.nativeCode).toContain("let count: number = types.length;");
+
+      const multiLineImpRes = await splice(bagFile, {
+        symbol: "imports",
+        code: "import {\n  TetrominoType,\n  LINE_POINTS,\n  COMBO_BONUS\n} from './constants';",
+        projectRoot: tmpDir,
+      });
+      expect(multiLineImpRes.modifiedCode).toContain("COMBO_BONUS");
+      expect(multiLineImpRes.modifiedCode).toContain("import { Board } from './board';");
+      expect(multiLineImpRes.modifiedCode).toContain("export class PieceBag");
+    });
   });
 });

@@ -247,7 +247,7 @@ When `aice agents setup` configures Claude Code (`~/.claude/CLAUDE.md`), Antigra
 ```markdown
 <!-- AICE:START -->
 ## AICE 2.0 — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
-**MANDATORY OVERRIDE**: For all 24 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
+**MANDATORY OVERRIDE**: When active (see Rule 1), for all 24 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 
 ### 0. Zero-Discovery, Zero-Probe & Minimum-Turn Execution Rules
 - **FORBIDDEN COMMANDS**: Never waste turns running `aice --help`, `aice --version`, `which aice`, `ls -la`, `ls src`, `find .`, `git status`, or creating throwaway probe files.
@@ -255,10 +255,10 @@ When `aice agents setup` configures Claude Code (`~/.claude/CLAUDE.md`), Antigra
 - **Combine Install & Build in 1 Turn**: Always run `npm install && npm run build` in a **single** `run_command` call instead of splitting `npm install` and `npm run build` across 2 turns.
 - **Stop Immediately After Final Build**: Once your final verification build (`npm run build` / `pytest` / `cargo test`) exits `0`, respond to the user immediately — NEVER run trailing `git status` or `ls` checks.
 
-### 1. Project Opt-Out Check
-- Respect `aice.config.json` in workspace root:
-  - If `"enabled": false`, bypass AICE completely and use native file tools.
-  - If `"idiomsEnabled": false` (or `"idioms": false`), disable `$idiom` macros (`--no-idioms`).
+### 1. Project Activation Rule (`aice.config.json`)
+- **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an `aice.config.json` file with `"enabled": true` (pre-provisioned in all AICE project folders such as `aice_*` / `aice`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count `aice.config.json` against project file limits).
+- **Non-AICE Bypass**: If `aice.config.json` with `"enabled": true` is **not** present in the project folder (e.g. `*_nonaice` folders or when `"enabled": false`), bypass AICE completely and use standard native file tools (`write_file`, `edit_file`, `read_file`, `view_file`).
+- **Idioms Toggle**: If `"idiomsEnabled": false` (or `"idioms": false`), disable `$idiom` macros (`--no-idioms`).
 
 ### 2. Multi-File Creation in 1–2 Turns (`from 0` — 40-75% Output Token Savings)
 - **Preferred Multi-File Heredoc Stream (Zero JSON Escaping)**: Create all project files in 1–2 `aice create --stdin << 'EOF'` calls using `=== <filePath> ===` headers (e.g. Batch 1: config/HTML/CSS/constants/models; Batch 2: core engine/UI/main), then immediately run `npm install && npm run build` without running `ls`:
@@ -280,13 +280,14 @@ When `aice agents setup` configures Claude Code (`~/.claude/CLAUDE.md`), Antigra
 
 ### 3. MANDATORY Compact Hybrid Shorthands inside `aice create` & `aice splice`
 You **MUST** actively write compact hybrid shorthands inside `aice create` and `aice splice` payloads instead of verbose native keywords (AICE compiles them losslessly to clean native TypeScript/JS/Python/Rust/Go/CSS on disk):
-- **Declarations & Modifiers**: `pub class`, `pub interface`, `pub type`, `pub enum`, `pub const`, `pub let`, `pub fn`, `pub async fn`, `fn`, `pub `, `priv `, `ro `, `pub ro `, `priv ro `
+- **Declarations & Modifiers**: `pub class`, `pub interface`, `pub type`, `pub enum`, `pub const`, `pub let`, `pub fn`, `pub async fn`, `fn`, `pub `, `priv `, `ro `, `pub ro `, `priv ro ` (under TypeScript `noUnusedLocals`, use `pub` instead of `priv` for fields only assigned in the constructor so `tsc` does not flag TS6133).
 - **Variables & Returns**: `x := expr` (`const x = expr`), `i ::= 0` (`let i = 0`, including `for (i ::= 0; ...)`), `<- expr` (`return expr`), `<-;` (`return;`)
 - **Type Sigils (attach directly with single colon — NO space before sigil)**: `:#` (`: number`), `:$` (`: string`), `:?` (`: boolean`), `:_` (`: void`), `:*` (`: any`), `:#[][]` (`: number[][]`), `:[#]` (`: number[]`), `:[$]` (`: string[]`), `(:$ | null)[][]` (`(string | null)[][]`)
 - **CSS Shorthands**: `d:flex;` (`display: flex;`), `fd:column;` (`flex-direction: column;`), `jc:center;` (`justify-content: center;`), `ai:center;` (`align-items: center;`), `g:20px;` (`gap`), `p:16px;` (`padding`), `m:0;` (`margin`), `mb:12px;` (`margin-bottom`), `mt:8px;` (`margin-top`), `bg:#070810;` (`background`), `c:#f0f4fc;` (`color`), `r:8px;` (`border-radius`), `bd:1px solid #333;` (`border`), `bs:border-box;` (`box-sizing: border-box;`), `w:100%;` (`width`), `h:100%;` (`height`), `mh:100vh;` (`min-height`), `pos:relative;` (`position`), `z:10;` (`z-index`), `ov:hidden;` (`overflow: hidden;`), `op:0.9;` (`opacity`), `tr:all 0.2s;` (`transition`), `sh:0 0 10px #0ff;` (`box-shadow`), `ts:0 0 8px #0ff;` (`text-shadow`), `fs:14px;` (`font-size`), `fw:700;` (`font-weight`), `ff:sans-serif;` (`font-family`), `lh:1.5;` (`line-height`), `ls:2px;` (`letter-spacing`), `ta:center;` (`text-align: center;`), `tt:uppercase;` (`text-transform: uppercase;`), `cur:pointer;` (`cursor: pointer;`), `pe:none;` (`pointer-events: none;`), `bf:blur(6px);` (`backdrop-filter`)
 
 ### 4. 1-Turn Exploration (85-90% Read Token Savings)
-- **Known Target Methods -> Direct `aice context`**: When you already know the target `Class.method` names (e.g. in files you just created or from the prompt spec), call `aice context <file> -s "Class.m1,Class.m2"` directly **without** running `aice outline` first.
+- **Zero-Read Splicing on Files You Just Created**: When upgrading files you ALREADY created in the current session, do **NOT** call `aice outline` or `aice context` — stream all surgical edits directly into `aice splice --stdin << 'EOF' && npm run build`!
+- **Known Target Methods -> Direct `aice context`**: When exploring existing files where you know the target `Class.method` names, call `aice context <file> -s "Class.m1,Class.m2"` directly without running `aice outline` first.
 - **Unknown File Structure -> Multi-File `aice outline`**: Only run `aice outline <file1> <file2> ...` when exploring unfamiliar files.
 - **Skip Redundant Reads**: You do NOT need to run `outline` or `context` just to append to a file (`:eof`) or add a new field/method to a class (`:ClassName.newMember`).
 
@@ -309,7 +310,7 @@ You **MUST** actively write compact hybrid shorthands inside `aice create` and `
 - **Supported `<symbol>` Selectors**:
   - `<FuncOrClass.method>` or `<Class.field>`: Replaces existing member OR **auto-inserts a new field/method into `<Class>`** if not yet present!
   - `eof` (or `append`): Appends code to the end of the file.
-  - `imports`: Updates/merges imports in the file's top import block.
+  - `imports`: Updates/merges imports in the file's top import block (pass only the updated/added import line(s) or full block).
   - `L<start>-L<end>`: Replaces exact 1-based inclusive line range.
   - Single-edit shorthand: `aice splice <file> -s <symbol> -c "<replacement>"` (or `--delete`).
 

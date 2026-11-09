@@ -1700,10 +1700,16 @@ function lowerHybridLineForTarget(
   out = out.replace(/\bfn\s*\(([^)]*)\)\s*=>/g, "($1) =>");
   out = out.replace(/\basync\s+fn\s*\(/g, "async function(");
   out = out.replace(/\bfn\s*\(/g, "function(");
-
-  return lowerCompactSigilsForTarget(out, targetLang);
+  out = lowerCompactSigilsForTarget(out, targetLang);
+  out = lowerCompactSigilsForTarget(out, targetLang);
+  if (!atClassMemberLevel) {
+    out = out.replace(
+      /^(\s*)(?!(?:case|default|return|throw|const|let|var|public|private|protected|readonly|static|type|interface)\b)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([A-Za-z_$][A-Za-z0-9_$<>[\],\s|&]*?)\s*=\s*(?!=)([^;]+;\s*(?:\uE000\d+\uE001\s*)*)$/,
+      isJs ? "$1let $2 = $4" : "$1let $2: $3 = $4",
+    );
+  }
+  return out;
 }
-
 export function preprocessBareCssLossless(
   rawCss: string,
   activeIdioms: Record<string, ProjectIdiomDefinition> = {},

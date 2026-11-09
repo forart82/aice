@@ -1007,6 +1007,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   const lines = rawStream.split(/\r?\n/);
   const headerRe =
     /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}|-{3,}\s*([^\s-][^-\r\n]*?)\s*-{3,}|(?:\/\/|#|<!--)\s*FILE:\s*([^\s>][^\r\n>]*?)(?:\s*-->)?)\s*$/i;
+  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
 
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
@@ -1020,7 +1021,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   const sections: Array<{ filePath: string; lines: string[] }> = [];
 
   for (const line of lines) {
-    const m = line.match(headerRe);
+    const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
       const cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
       if (isTargetFilePath(cand)) {

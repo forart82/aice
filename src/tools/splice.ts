@@ -2206,7 +2206,7 @@ export function locateImportBlockSpan(
 
     if (inParenGroup) {
       lastImportLine = i;
-      if (trimmed.includes(")") || trimmed.includes("};")) {
+      if (trimmed.includes(")") || trimmed.includes("}")) {
         inParenGroup = false;
       }
       continue;
@@ -4912,32 +4912,30 @@ function resolveSingleNativeEditAgainstSource(
     spanInfo.memberName === "imports" &&
     (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
   ) {
-    const origLines = originalSnippet
-      .trim()
-      .split(/\r?\n/)
-      .filter((l) => l.trim().length > 0);
-    const newLines = newSnippet
-      .trim()
-      .split(/\r?\n/)
-      .filter((l) => l.trim().length > 0);
-    const extractModSpec = (line: string): string | undefined => {
-      const m = line.match(/\bfrom\s+['"]([^'"]+)['"]/);
-      return m ? m[1] : undefined;
+    const splitTsImports = (src: string): string[] => {
+      const matches = src.match(/import\s+(?:[\s\S]*?\s+from\s+)?['"][^'"]+['"]\s*;?/g);
+      return matches ? matches.map((m) => m.trim()) : [];
+    };
+    const origStmts = splitTsImports(originalSnippet);
+    const newStmts = splitTsImports(newSnippet);
+    const extractModSpec = (stmt: string): string | undefined => {
+      const m = stmt.match(/\bfrom\s+['"]([^'"]+)['"]|^import\s+['"]([^'"]+)['"]/);
+      return m ? (m[1] ?? m[2]) : undefined;
     };
     if (
-      origLines.length >= 2 &&
-      newLines.length >= 1 &&
-      newLines.length < origLines.length &&
-      newLines.every((l) => Boolean(extractModSpec(l)))
+      origStmts.length >= 2 &&
+      newStmts.length >= 1 &&
+      newStmts.length < origStmts.length &&
+      newStmts.every((s) => Boolean(extractModSpec(s)))
     ) {
-      const merged = [...origLines];
-      for (const nl of newLines) {
-        const spec = extractModSpec(nl);
-        const existingIdx = merged.findIndex((ol) => extractModSpec(ol) === spec);
+      const merged = [...origStmts];
+      for (const ns of newStmts) {
+        const spec = extractModSpec(ns);
+        const existingIdx = merged.findIndex((os) => extractModSpec(os) === spec);
         if (existingIdx >= 0) {
-          merged[existingIdx] = nl;
+          merged[existingIdx] = ns;
         } else {
-          merged.push(nl);
+          merged.push(ns);
         }
       }
       const trailingNl = originalSnippet.endsWith("\r\n")
@@ -5387,6 +5385,7 @@ export function parseMultiBlockSpliceStream(
   const lines = rawStream.split(/\r?\n/);
   const headerRe =
     /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^=\r\n]+?)\s*={3,}|-{3,}\s*([^-\r\n]+?)\s*-{3,}|(?:\/\/|#)\s*(?:FILE|SYMBOL|EDIT):\s*([^\r\n]+?))\s*$/i;
+  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
 
   const preHeaderLines: string[] = [];
   const sections: Array<{
@@ -5397,7 +5396,7 @@ export function parseMultiBlockSpliceStream(
   }> = [];
 
   for (const line of lines) {
-    const m = line.match(headerRe);
+    const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
       let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
       let isDelete = false;
