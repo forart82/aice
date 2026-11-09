@@ -203,25 +203,48 @@ function canStartRegexInJsTs(
   source: string,
   slashIdx: number,
   targetLang: TargetLanguage,
+  maskedPrefix?: string,
 ): boolean {
   if (targetLang === "tsx" && slashIdx > 0 && source[slashIdx - 1] === "<") {
     return false;
   }
-  let p = slashIdx - 1;
-  while (p >= 0 && /\s/.test(source[p])) {
+  const scanBuf = maskedPrefix ? maskedPrefix.replace(/\uE000\d+_cmt\uE001/g, " ") : source;
+  let p = (maskedPrefix ? scanBuf.length : slashIdx) - 1;
+  while (p >= 0 && /\s/.test(scanBuf[p])) {
     p--;
   }
   if (p < 0) return true;
-  const ch = source[p];
+  const ch = scanBuf[p];
   if ("(,=:[!&|?{};~^%+*-<>".includes(ch)) {
     return true;
   }
+  if (ch === ")") {
+    let depth = 1;
+    let q = p - 1;
+    while (q >= 0 && depth > 0) {
+      if (scanBuf[q] === ")") depth++;
+      else if (scanBuf[q] === "(") depth--;
+      q--;
+    }
+    if (depth === 0) {
+      while (q >= 0 && /\s/.test(scanBuf[q])) q--;
+      if (q >= 0 && /[A-Za-z0-9_$]/.test(scanBuf[q])) {
+        let kwStart = q;
+        while (kwStart > 0 && /[A-Za-z0-9_$]/.test(scanBuf[kwStart - 1])) kwStart--;
+        const kw = scanBuf.slice(kwStart, q + 1);
+        if (kw === "if" || kw === "while" || kw === "for" || kw === "switch" || kw === "catch") {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
   if (/[A-Za-z0-9_$]/.test(ch)) {
     let kwStart = p;
-    while (kwStart > 0 && /[A-Za-z0-9_$]/.test(source[kwStart - 1])) {
+    while (kwStart > 0 && /[A-Za-z0-9_$]/.test(scanBuf[kwStart - 1])) {
       kwStart--;
     }
-    const word = source.slice(kwStart, p + 1);
+    const word = scanBuf.slice(kwStart, p + 1);
     return new Set([
       "return",
       "ret",
@@ -656,7 +679,7 @@ export function maskSourceLexically(
 
     // 11. JS/TS Regex literal `/pattern/flags`
     if (isJsTs && ch === "/" && next !== "/" && next !== "*" && next !== "=") {
-      if (canStartRegexInJsTs(source, i, targetLang)) {
+      if (canStartRegexInJsTs(source, i, targetLang, out)) {
         let j = i + 1;
         let inCharClass = false;
         let foundClose = false;
@@ -1819,6 +1842,41 @@ export function preprocessBareCssLossless(
  * Losslessly transforms hybrid AICE shorthands + `$idioms` + native code into
  * target native code without AST round-tripping.
  */
+export const maskStringsAndComments = maskSourceLexically;
+
+export const PREPROCESSORS_BY_LANG: Readonly<
+  Record<
+    TargetLanguage,
+    (line: string, atClassMemberLevel: boolean, options?: LosslessPreprocessOptions) => string
+  >
+> = {
+  typescript: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "typescript", atClassMemberLevel, options),
+  tsx: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "tsx", atClassMemberLevel, options),
+  javascript: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "javascript", atClassMemberLevel, options),
+  python: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "python", atClassMemberLevel, options),
+  rust: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "rust", atClassMemberLevel, options),
+  go: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "go", atClassMemberLevel, options),
+  kotlin: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "kotlin", atClassMemberLevel, options),
+  php: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "php", atClassMemberLevel, options),
+  cpp: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "cpp", atClassMemberLevel, options),
+  csharp: (line, atClassMemberLevel, options) =>
+    lowerHybridLineForTarget(line, "csharp", atClassMemberLevel, options),
+  css: (line) => preprocessBareCssLossless(line),
+  html: (line) => line,
+  twig: (line) => line,
+  json: (line) => line,
+  yaml: (line) => line,
+};
+
 export function preprocessHybridAndIdiomsLossless(
   rawCode: string,
   targetLang: TargetLanguage,
@@ -1851,6 +1909,7 @@ export function preprocessHybridAndIdiomsLossless(
     return unmaskLexicalTokens(idiomExpanded, maskRes.maskTable);
   }
 
+  const linePreprocessor = PREPROCESSORS_BY_LANG[targetLang];
   const lines = idiomExpanded.split(/\r?\n/);
   const loweredLines: string[] = [];
   let braceDepth = options?.insideClass ? 1 : 0;
@@ -1860,7 +1919,7 @@ export function preprocessHybridAndIdiomsLossless(
     const atClassMemberLevel =
       classBraceDepths.length > 0 && braceDepth === classBraceDepths[classBraceDepths.length - 1];
 
-    const lowered = lowerHybridLineForTarget(line, targetLang, atClassMemberLevel, options);
+    const lowered = linePreprocessor(line, atClassMemberLevel, options);
     loweredLines.push(lowered);
 
     const opensClass = /(?:^|\b)class\s+[A-Za-z_$]/.test(lowered) && lowered.includes("{");

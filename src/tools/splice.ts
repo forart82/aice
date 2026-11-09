@@ -3116,110 +3116,6 @@ export function spliceNativeSymbolFromExpandedAst(
   return `${nativeSource.slice(0, spanInfo.declStart)}${indented}${nativeSource.slice(spanInfo.declEnd)}`;
 }
 
-function isPureNativeSnippetWithoutIdioms(
-  snippet: string,
-  targetLang: TargetLanguage,
-  className?: string,
-): boolean {
-  const trimmed = snippet.trim();
-  if (
-    /\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed) ||
-    /\bret\b/.test(trimmed) ||
-    /(?:^|\s)(?:@fn|@cls|@type|\^fn|\^class|\^type|\^const|\^val|\^mut|\^let|\^async|\^static)\b/.test(
-      trimmed,
-    ) ||
-    /(?::(?!=)[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\])|->[ \t]*:?[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\]))(?![A-Za-z0-9_])/.test(
-      trimmed,
-    )
-  ) {
-    return false;
-  }
-  if (
-    targetLang !== "go" &&
-    (trimmed.includes(":=") || trimmed.includes("::=") || trimmed.includes("<-"))
-  ) {
-    return false;
-  }
-
-  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    if (
-      /^(?:pub\s+|priv\s+|ro\s+|public\s+|private\s+|protected\s+|static\s+|async\s+)*fn\b/.test(
-        trimmed,
-      ) ||
-      /^(?:pub\s+|priv\s+|ro\s+|val\s+|mut\s+)/.test(trimmed) ||
-      /^(?:pub\s+)?(?:rec|enum|type|class|component)\b/.test(trimmed)
-    ) {
-      return false;
-    }
-    const isTopLevelConstruct =
-      /^(?:export\s+)?(?:interface|type|enum|class|function|const|let|var)\b/.test(trimmed);
-    if (
-      !isTopLevelConstruct &&
-      !trimmed.includes("{") &&
-      !trimmed.includes("=>") &&
-      !trimmed.endsWith(";")
-    ) {
-      return false;
-    }
-    const wrapped =
-      className && !isTopLevelConstruct ? `class ${className} {\n${trimmed}\n}` : trimmed;
-    const sf = ts.createSourceFile(
-      "check.tsx",
-      wrapped,
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
-    const diags = (sf as unknown as { parseDiagnostics?: unknown[] }).parseDiagnostics;
-    return !diags || diags.length === 0;
-  }
-
-  if (targetLang === "go") {
-    return /^func\b/.test(trimmed) && trimmed.endsWith("}");
-  }
-  if (targetLang === "rust") {
-    return (
-      /^(?:#\[[^\]]+\]\s*)*(?:pub\s+)?(?:async\s+)?fn\b/.test(trimmed) &&
-      trimmed.includes("{") &&
-      trimmed.endsWith("}") &&
-      !/:\s*\n/.test(trimmed)
-    );
-  }
-  if (targetLang === "kotlin") {
-    return (
-      /^(?:@[A-Za-z0-9_]+(?:\([^)]*\))?\s*)*(?:public\s+|private\s+|protected\s+|override\s+|suspend\s+|inline\s+)*fun\b/.test(
-        trimmed,
-      ) &&
-      trimmed.includes("{") &&
-      trimmed.endsWith("}")
-    );
-  }
-  if (targetLang === "php") {
-    return (
-      /^(?:public\s+|private\s+|protected\s+|static\s+)*function\b/.test(trimmed) &&
-      trimmed.includes("{") &&
-      trimmed.endsWith("}")
-    );
-  }
-  if (targetLang === "csharp" || targetLang === "cpp") {
-    return (
-      !/^(?:pub\s+|async\s+|static\s+)*fn\b/.test(trimmed) &&
-      trimmed.includes("(") &&
-      trimmed.includes("{") &&
-      (trimmed.endsWith("}") || trimmed.endsWith("};"))
-    );
-  }
-  if (targetLang === "python") {
-    return (
-      /^(?:@[A-Za-z0-9_.]+\s*\n\s*)*(?:async\s+)?def\s+[A-Za-z0-9_]+\s*\(/.test(trimmed) &&
-      !trimmed.includes(":=") &&
-      !/\bret\b/.test(trimmed)
-    );
-  }
-
-  return false;
-}
-
 function normalizeFrankensteinSnippetToAice(snippet: string): {
   normalizedAice: string;
   explicitVisibility?: "public" | "private" | "protected";
@@ -3642,7 +3538,6 @@ function shouldUseLosslessPreprocessorForSnippet(
   const trimmed = cleanedSnippet.trim();
   if (!trimmed) return false;
 
-  // Pure AICE component or style blocks must use the AICE parser/emitter
   if (/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:pub\s+)?(?:component|style)\b/m.test(trimmed)) {
     return false;
   }
@@ -3660,7 +3555,10 @@ function shouldUseLosslessPreprocessorForSnippet(
         (trimmed.includes("<-") ||
           /(?::(?!=)[ \t]*(?:#|\$|\?|_|\*|\[[ \t]*(?:#|\$|\?|_|\*)[ \t]*\])|->[ \t]*:?[ \t]*(?:#|\$|\?|_|\*))(?![A-Za-z0-9_])/.test(
             trimmed,
-          )))
+          ) ||
+          (!trimmed.includes(":=") &&
+            !/\bret\b/.test(trimmed) &&
+            !/\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed))))
     );
   }
 
@@ -3717,15 +3615,7 @@ function emitNativeSnippetForContext(
   const dedented = dedentSnippet(cleanedCode);
   const insideClass = Boolean(effectiveClassName && !spanInfo?.isClassContainer);
 
-  if (
-    !isBodyOnly &&
-    !forceLosslessPreprocess &&
-    Object.keys(inlineIdioms).length === 0 &&
-    isPureNativeSnippetWithoutIdioms(dedented, targetLang, effectiveClassName)
-  ) {
-    return dedented.trim();
-  }
-
+  // Stage W3: Route native/hybrid snippets directly through the single-pass language-isolated preprocessor.
   if (
     shouldUseLosslessPreprocessorForSnippet(
       dedented,

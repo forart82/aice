@@ -277,12 +277,22 @@ export function resolvePathTargets(
   inputPath?: string,
   options: PathResolverOptions = {},
 ): ResolvedPathTargets {
+  const cwd = path.resolve(process.cwd());
+  const clampRootToCwd = (candidateRoot: string, targetPath: string): string => {
+    const resolvedRoot = path.resolve(candidateRoot);
+    if (isSameOrDescendant(cwd, targetPath) && !isSameOrDescendant(cwd, resolvedRoot)) {
+      return cwd;
+    }
+    return resolvedRoot;
+  };
+
   const isOmitted = inputPath === undefined || inputPath === null || inputPath.trim() === "";
 
   if (isOmitted) {
-    const projectRoot = options.projectRoot
+    const rawRoot = options.projectRoot
       ? path.resolve(options.projectRoot)
-      : findProjectRoot(process.cwd());
+      : findProjectRoot(cwd, cwd);
+    const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, cwd);
     const config = options.config ?? loadProjectConfig(projectRoot);
 
     const candidateSourceDir = config.sourceDir
@@ -292,7 +302,6 @@ export function resolvePathTargets(
     let targetDir = fs.existsSync(candidateSourceDir) ? candidateSourceDir : projectRoot;
     let files = scanDirectoryFiles(targetDir, options, config, projectRoot);
 
-    // If sourceDir exists but yielded 0 files, check if projectRoot has matching files
     if (files.length === 0 && targetDir !== projectRoot && fs.existsSync(projectRoot)) {
       const rootFiles = scanDirectoryFiles(projectRoot, options, config, projectRoot);
       if (rootFiles.length > 0) {
@@ -313,7 +322,7 @@ export function resolvePathTargets(
   }
 
   const trimmed = inputPath.trim();
-  let absPath = path.resolve(process.cwd(), trimmed);
+  let absPath = path.resolve(cwd, trimmed);
   if (
     options.projectRoot &&
     !path.isAbsolute(trimmed) &&
@@ -334,7 +343,6 @@ export function resolvePathTargets(
       isDir = false;
     }
   } else {
-    // Non-existent path: infer from trailing slash or missing extension
     isDir =
       trimmed.endsWith("/") ||
       trimmed.endsWith("\\") ||
@@ -342,10 +350,11 @@ export function resolvePathTargets(
   }
 
   if (isDir) {
-    const fallbackDir = isSameOrDescendant(process.cwd(), absPath) ? process.cwd() : absPath;
-    const projectRoot = options.projectRoot
+    const fallbackDir = isSameOrDescendant(cwd, absPath) ? cwd : absPath;
+    const rawRoot = options.projectRoot
       ? path.resolve(options.projectRoot)
       : findProjectRoot(absPath, fallbackDir);
+    const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, absPath);
     const config = options.config ?? loadProjectConfig(projectRoot);
 
     const files = fs.existsSync(absPath)
@@ -363,13 +372,11 @@ export function resolvePathTargets(
     };
   }
 
-  // Single file target
-  const fallbackFileDir = isSameOrDescendant(process.cwd(), absPath)
-    ? process.cwd()
-    : path.dirname(absPath);
-  const projectRoot = options.projectRoot
+  const fallbackFileDir = isSameOrDescendant(cwd, absPath) ? cwd : path.dirname(absPath);
+  const rawRoot = options.projectRoot
     ? path.resolve(options.projectRoot)
     : findProjectRoot(path.dirname(absPath), fallbackFileDir);
+  const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, absPath);
   const config = options.config ?? loadProjectConfig(projectRoot);
 
   return {
