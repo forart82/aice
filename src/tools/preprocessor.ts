@@ -2033,7 +2033,7 @@ export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLa
 
   // Native language constructs or hybrid shorthands without indentation-based AICE headers
   if (
-    /^\s*(?:import\s+|export\s+|package\s+|using\s+|namespace\s+|#include\b|from\s+|<\?php\b|#\[)/m.test(
+    /^\s*(?:import\s+|export\s+|package\s+|using\s+|namespace\s+|#include\b|#pragma\b|from\s+|<\?php\b|#\[)/m.test(
       cleanedCode,
     ) ||
     /^\s*(?:pub\s+(?:const|let|val|mut|var|type|interface|enum|ro)\b|priv\s+|ro\s+|public\s+|private\s+|protected\s+|readonly\s+|const\s+|let\s+|var\s+|interface\s+|type\s+[A-Za-z_$][^\n]*=)/m.test(
@@ -2041,7 +2041,16 @@ export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLa
     ) ||
     /^\s*pub\s+(?!(?:fn|function|func|fun|class|struct|component|style|async|static)\b)[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\??\s*:|=)/m.test(
       masked,
-    )
+    ) ||
+    (targetLang === "kotlin" &&
+      /^\s*(?:(?:public|private|protected|internal|override|open|abstract|final|suspend|inline|tailrec|operator|infix|external|data|sealed|enum|value|annotation)\s+)*(?:fun|val|var|class|interface|object)\b/m.test(
+        masked,
+      )) ||
+    (targetLang === "cpp" &&
+      /;\s*$/.test(masked) &&
+      !/^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?(?:fn|type|component|style)\b/m.test(
+        masked,
+      ))
   ) {
     return true;
   }

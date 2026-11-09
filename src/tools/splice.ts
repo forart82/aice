@@ -4591,17 +4591,25 @@ function resolveSingleNativeEditAgainstSource(
   const lineRangeMatch = anchorSymbol.trim().match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = parseInt(lineRangeMatch[1], 10);
-    const endLine = lineRangeMatch[2] ? parseInt(lineRangeMatch[2], 10) : startLine;
+    let endLine = lineRangeMatch[2] ? parseInt(lineRangeMatch[2], 10) : startLine;
 
     const rawLines = nativeSource.split(/\r?\n/);
     const totalLines = rawLines.length;
+
+    if (
+      endLine > totalLines &&
+      endLine <= totalLines + 5 &&
+      startLine >= 1 &&
+      startLine <= totalLines
+    ) {
+      endLine = totalLines;
+    }
 
     if (startLine < 1 || endLine > totalLines || startLine > endLine) {
       throw new Error(
         `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive)`,
       );
     }
-
     const lineStarts: number[] = [0];
     for (let i = 0; i < nativeSource.length; i++) {
       if (nativeSource[i] === "\n") {
@@ -4767,19 +4775,46 @@ function resolveSingleNativeEditAgainstSource(
     const trimmedAnchor = anchorSymbol.trim();
     const plusMatch = trimmedAnchor.match(/^([A-Za-z_$][A-Za-z0-9_$]*)\+$/);
     const dotIdx = trimmedAnchor.indexOf(".");
+    const scopeIdx = trimmedAnchor.indexOf("::");
     const candidateClassName = plusMatch
       ? plusMatch[1]
       : dotIdx > 0
         ? trimmedAnchor.slice(0, dotIdx).trim()
-        : undefined;
+        : scopeIdx > 0
+          ? trimmedAnchor.slice(0, scopeIdx).trim()
+          : undefined;
     if (candidateClassName) {
       const classSpan = locateNativeDeclarationSpan(nativeSource, candidateClassName, targetLang);
       if (classSpan && classSpan.isClassContainer) {
         spanInfo = classSpan;
         autoAppendToClass = true;
+      } else if (
+        targetLang === "cpp" &&
+        rawSnippet.trim() &&
+        !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
+      ) {
+        const emitted = emitNativeSnippetForContext(
+          rawSnippet,
+          filePath,
+          targetLang,
+          undefined,
+          idioms,
+          undefined,
+          false,
+          undefined,
+          forceLosslessPreprocess,
+        );
+        const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+        return {
+          symbol: anchorSymbol,
+          startOffset: nativeSource.length,
+          endOffset: nativeSource.length,
+          replacement: `${sep}${emitted}\n`,
+          originalSnippet: "",
+          newSnippet: emitted,
+        };
       }
     } else if (
-      /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmedAnchor) &&
       !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor) &&
       rawSnippet.trim() &&
       new RegExp(`\\b${trimmedAnchor}\\b`).test(rawSnippet)
@@ -5011,6 +5046,29 @@ function resolveSingleNativeEditAgainstSource(
       };
     }
     const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
+    if (closeBracePos < spanInfo.declStart) {
+      let bodyStartPos = spanInfo.declEnd;
+      while (
+        bodyStartPos > spanInfo.declStart &&
+        (nativeSource[bodyStartPos - 1] === "\n" ||
+          nativeSource[bodyStartPos - 1] === "\r" ||
+          nativeSource[bodyStartPos - 1] === " " ||
+          nativeSource[bodyStartPos - 1] === "\t")
+      ) {
+        bodyStartPos--;
+      }
+      const trailingSemi =
+        bodyStartPos > spanInfo.declStart && nativeSource[bodyStartPos - 1] === ";";
+      const repStart = trailingSemi ? bodyStartPos - 1 : bodyStartPos;
+      return {
+        symbol: anchorSymbol,
+        startOffset: repStart,
+        endOffset: bodyStartPos,
+        replacement: ` {\n${newSnippet}\n${spanInfo.declIndent}}${trailingSemi ? ";" : ""}`,
+        originalSnippet,
+        newSnippet,
+      };
+    }
     const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeBracePos);
     const insertPos =
       lineStartBeforeClose >= spanInfo.declStart ? lineStartBeforeClose + 1 : closeBracePos;

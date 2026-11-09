@@ -976,7 +976,7 @@ export async function createFile(
     await fs.promises.writeFile(tmpFile, nativeCode, "utf-8");
     await fs.promises.rename(tmpFile, fullPath);
 
-    if (idiomsEnabled && Object.keys(declaredIdioms).length > 0) {
+    if (!isPassthroughManifest && idiomsEnabled && Object.keys(declaredIdioms).length > 0) {
       persistDeclaredIdioms(root, declaredIdioms, fullPath, nativeCode, cleanedCode);
       persistedIdioms.push(...Object.keys(declaredIdioms));
     }
@@ -1061,22 +1061,57 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}|-{3,}\s*([^\s-][^-\r\n]*?)\s*-{3,}|(?:\/\/|#|<!--)\s*FILE:\s*([^\s>][^\r\n>]*?)(?:\s*-->)?)\s*$/i;
   const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
 
+  const passthroughFilenames = new Set([
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "CMakeLists.txt",
+    "Makefile",
+    "Dockerfile",
+    ".gitignore",
+    ".dockerignore",
+    ".editorconfig",
+    ".env",
+  ]);
+  const passthroughExtensions = new Set([
+    ".toml",
+    ".mod",
+    ".sum",
+    ".csproj",
+    ".sln",
+    ".props",
+    ".targets",
+    ".xml",
+    ".gradle",
+    ".properties",
+    ".cmake",
+    ".mk",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".sql",
+    ".sh",
+    ".txt",
+    ".lock",
+  ]);
+
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
     if (!clean || /\s/.test(clean)) return false;
     const base = path.basename(clean);
-    if (
-      base === "Cargo.toml" ||
-      base === "go.mod" ||
-      base === "CMakeLists.txt" ||
-      base === "Makefile" ||
-      base === "Dockerfile"
-    ) {
+    if (passthroughFilenames.has(base)) {
       return true;
     }
     const ext = path.extname(clean).toLowerCase();
     if (!ext) return false;
-    return KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice" || /^\.[a-z0-9]{1,8}$/i.test(ext);
+    return (
+      KNOWN_TARGET_EXTENSIONS.has(ext) ||
+      passthroughExtensions.has(ext) ||
+      ext === ".aice" ||
+      /^\.[a-z0-9]{1,8}$/i.test(ext)
+    );
   };
 
   const preHeaderLines: string[] = [];
@@ -1116,7 +1151,13 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
       .replace(/^\n+|\n+$/g, "")
       .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
     const ext = path.extname(sec.filePath).toLowerCase();
-    const canHaveIdioms = ext !== ".json" && ext !== ".yaml" && ext !== ".yml";
+    const base = path.basename(sec.filePath);
+    const canHaveIdioms =
+      ext !== ".json" &&
+      ext !== ".yaml" &&
+      ext !== ".yml" &&
+      !passthroughExtensions.has(ext) &&
+      !passthroughFilenames.has(base);
     const fullCode = preIdiomPrefix && canHaveIdioms ? `${preIdiomPrefix}\n${body}` : body;
     return {
       filePath: sec.filePath,

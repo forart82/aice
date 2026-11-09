@@ -993,9 +993,12 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(multiLineImpRes.modifiedCode).toContain("export class PieceBag");
     });
 
-    it("11. v0.9.17 supports companion project manifest files (Cargo.toml, go.mod, CMakeLists.txt, .csproj) inside multi-file create streams without batch rollback", async () => {
+    it("11. v0.9.17 supports companion project manifest files (Cargo.toml, go.mod, CMakeLists.txt, .csproj, .gitignore) inside multi-file create streams without batch rollback", async () => {
       const polyDir = path.join(tmpDir, "poly-manifests");
       const stream = [
+        "@idiom $ok() => println!(\"ok\");",
+        "=== .gitignore ===",
+        "target/\nnode_modules/",
         "=== Cargo.toml ===",
         '[package]\nname = "demo"\nversion = "0.1.0"\nedition = "2021"',
         "=== go.mod ===",
@@ -1009,10 +1012,48 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       ].join("\n");
       const batchRes = await createBatch(stream, { projectRoot: polyDir });
       expect(batchRes.success).toBe(true);
-      expect(batchRes.totalFiles).toBe(5);
-      expect(batchRes.totalFiles).toBe(5);
+      expect(batchRes.totalFiles).toBe(6);
+      expect(fs.readFileSync(path.join(polyDir, ".gitignore"), "utf-8")).toContain("target/");
       expect(fs.readFileSync(path.join(polyDir, "Cargo.toml"), "utf-8")).toContain('name = "demo"');
       expect(fs.readFileSync(path.join(polyDir, "go.mod"), "utf-8")).toContain("module example.com/demo");
+      expect(fs.readFileSync(path.join(polyDir, "CMakeLists.txt"), "utf-8")).toContain("project(demo)");
+      expect(fs.readFileSync(path.join(polyDir, "Demo.csproj"), "utf-8")).toContain("net8.0");
+    });
+
+    it("12. v0.9.18 supports C++ header method prototype auto-insert, out-of-line .cpp method auto-append, and Kotlin single-expression & bodyless data class splicing", async () => {
+      const { spliceNativeSource } = await import("../src/tools/splice.js");
+      const hpp = `#pragma once\nclass OrderBook {\npublic:\n  double bestBid() const;\n};\n`;
+      const hppRes = spliceNativeSource(
+        hpp,
+        { symbol: "OrderBook.calculateVwap", code: "double calculateVwap(int side) const;" },
+        "include/book.hpp",
+      );
+      expect(hppRes.modifiedCode).toContain("double calculateVwap(int side) const;");
+      expect(hppRes.modifiedCode).not.toContain("unknown");
+
+      const cpp = `#include "book.hpp"\ndouble OrderBook::bestBid() const { return 0.0; }\n`;
+      const cppRes = spliceNativeSource(
+        cpp,
+        {
+          symbol: "OrderBook.calculateVwap",
+          code: "double OrderBook::calculateVwap(int side) const {\n  return 1.5;\n}",
+        },
+        "src/book.cpp",
+      );
+      expect(cppRes.modifiedCode).toContain("double OrderBook::calculateVwap(int side) const");
+
+      const ktModels = `data class FocusSession(val id: String, val durationMinutes: Int, val completed: Boolean)\n`;
+      const ktRes = spliceNativeSource(
+        ktModels,
+        {
+          symbol: "FocusSession.isDeepWork",
+          code: "fun isDeepWork(): Boolean = completed && durationMinutes >= 25",
+        },
+        "src/Models.kt",
+      );
+      expect(ktRes.modifiedCode).toContain(
+        "fun isDeepWork(): Boolean = completed && durationMinutes >= 25",
+      );
     });
   });
 });
