@@ -39,7 +39,12 @@ import {
   withSuppressedTelemetry,
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
-import { generateContext } from "../tools/context.js";
+import {
+  generateContext,
+  generateMultiContext,
+  parseTargetWithInlineSymbol,
+  splitContextTargets,
+} from "../tools/context.js";
 import {
   type BatchCreateItem,
   createBatch,
@@ -48,7 +53,6 @@ import {
 } from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
 import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../tools/splice.js";
-
 import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
 
 function loadPackageVersion(): string {
@@ -83,13 +87,20 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_context",
     description:
-      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers.",
+      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers (supports single or multi-file targets with inline ':symbol' selectors).",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Target .aice or target language file path",
+          description:
+            "Target .aice or target language file path (supports inline 'file:sym1,sym2' or space-separated multi-target paths)",
+        },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional array of target file paths with optional inline ':symbol' selectors (e.g. ['src/a.aipl:fnA,fnB', 'src/b.aipl:L10-L50'])",
         },
         symbol: {
           type: "string",
@@ -739,7 +750,87 @@ export class AiceMcpServer {
   ): Promise<McpToolCallResult> {
     switch (name) {
       case "aice_context": {
-        const targetPath = String(args.path ?? "");
+        const symbolFilter =
+          typeof args.symbol === "string" && args.symbol.trim().length > 0
+            ? args.symbol.trim()
+            : undefined;
+
+        let rawTargets: string[] = [];
+        if (Array.isArray(args.paths) && args.paths.length > 0) {
+          rawTargets = (args.paths as unknown[])
+            .map((p) => String(p).trim())
+            .filter(Boolean);
+        } else {
+          const rawPathStr = String(args.path ?? "").trim();
+          rawTargets = splitContextTargets(rawPathStr, this.workspaceRoot);
+          if (rawTargets.length === 0) {
+            rawTargets = [rawPathStr];
+          }
+        }
+        if (rawTargets.length > 1) {
+          const safeTargets: Array<{ path: string; symbol?: string }> = [];
+          let firstSafePath = this.workspaceRoot;
+          for (const rawT of rawTargets) {
+            const parsed = parseTargetWithInlineSymbol(rawT, this.workspaceRoot);
+            const safeFp = this.resolveSafePath(parsed.targetPath);
+            if (safeTargets.length === 0) firstSafePath = safeFp;
+            safeTargets.push({
+              path: safeFp,
+              symbol: parsed.inlineSymbol ?? symbolFilter,
+            });
+          }
+          const projectRoot = this.resolveProjectRoot(firstSafePath);
+          const config = loadProjectConfig(projectRoot);
+          if (!isProjectAiceEnabled(config)) {
+            return {
+              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+              isError: true,
+            };
+          }
+          const effectiveIdioms = isProjectIdiomsEnabled(
+            config,
+            typeof args.idioms === "boolean" ? args.idioms : undefined,
+          );
+          const multiRes = await withSuppressedTelemetryAsync(() =>
+            generateMultiContext(safeTargets, {
+              depth: typeof args.depth === "number" ? args.depth : 1,
+              maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+              idioms: effectiveIdioms,
+              projectRoot,
+            }),
+          );
+          const nativeTexts = safeTargets
+            .map((t) => {
+              try {
+                return fs.existsSync(t.path) && fs.statSync(t.path).isFile()
+                  ? fs.readFileSync(t.path, "utf-8")
+                  : "";
+              } catch {
+                return "";
+              }
+            })
+            .filter(Boolean)
+            .join("\n");
+          recordTelemetryEvent({
+            targetPath: firstSafePath,
+            projectRoot,
+            operation: "context",
+            surface: "mcp",
+            idiomsUsed: Boolean(
+              effectiveIdioms && multiRes.idioms && Object.keys(multiRes.idioms).length > 0,
+            ),
+            nativeText: nativeTexts || multiRes.targetContent,
+            aiceText: multiRes.formattedBundle,
+          });
+          return {
+            content: [{ type: "text", text: multiRes.formattedBundle }],
+          };
+        }
+
+        const singleRaw = rawTargets[0] ?? String(args.path ?? "");
+        const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
+        const targetPath = parsedSingle.targetPath;
+        const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
         const fullPath = this.resolveSafePath(targetPath);
         const projectRoot = this.resolveProjectRoot(fullPath);
         const config = loadProjectConfig(projectRoot);
@@ -753,15 +844,11 @@ export class AiceMcpServer {
           config,
           typeof args.idioms === "boolean" ? args.idioms : undefined,
         );
-        const symbolFilter =
-          typeof args.symbol === "string" && args.symbol.trim().length > 0
-            ? args.symbol.trim()
-            : undefined;
         const result = await withSuppressedTelemetryAsync(() =>
           generateContext(fullPath, {
             depth: typeof args.depth === "number" ? args.depth : 1,
             maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
-            symbol: symbolFilter,
+            symbol: effectiveSymbol,
             idioms: effectiveIdioms,
             projectRoot,
           }),
@@ -769,13 +856,13 @@ export class AiceMcpServer {
 
         let text = result.targetContent;
         let callers = result.callers;
-        if (symbolFilter) {
-          text = `## Focused Symbol: ${symbolFilter}\n\n${text}`;
+        if (effectiveSymbol) {
+          text = `## Focused Symbol: ${effectiveSymbol}\n\n${text}`;
           if (callers) {
-            const rootSym = symbolFilter.split(/\.|::/)[0]?.trim() ?? symbolFilter;
+            const rootSym = effectiveSymbol.split(/\.|::/)[0]?.trim() ?? effectiveSymbol;
             callers = callers.filter(
               (c) =>
-                c.importedSymbols.includes(symbolFilter) ||
+                c.importedSymbols.includes(effectiveSymbol) ||
                 c.importedSymbols.includes(rootSym) ||
                 c.importedSymbols.includes("*") ||
                 (c.callSiteLines && c.callSiteLines.length > 0),
@@ -1245,7 +1332,50 @@ export class AiceMcpServer {
           (!rawTargetFile || /^\s*(?:===|---|\/\/\s*FILE:)/m.test(rawCodeCandidate))
             ? parseMultiFileCreateStream(rawCodeCandidate)
             : null;
-        if (Array.isArray(args.files) || (streamItems && streamItems.length > 0)) {
+        if (!Array.isArray(args.files) && !streamItems && rawCodeCandidate) {
+          const spliceStream = parseMultiBlockSpliceStream(
+            rawCodeCandidate,
+            rawTargetFile || undefined,
+          );
+          if (spliceStream?.batchItems && spliceStream.batchItems.length > 0) {
+            const firstRawFp = String(spliceStream.batchItems[0]!.filePath ?? "");
+            const firstSafeFp = this.resolveSafePath(firstRawFp);
+            const projectRoot = this.resolveProjectRoot(firstSafeFp);
+            const config = loadProjectConfig(projectRoot);
+            if (!isProjectAiceEnabled(config)) {
+              return {
+                content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+                isError: true,
+              };
+            }
+            const effectiveIdioms = isProjectIdiomsEnabled(
+              config,
+              typeof args.idioms === "boolean" ? args.idioms : undefined,
+            );
+            const safeBatchItems = spliceStream.batchItems.map((item) => ({
+              ...item,
+              filePath: this.resolveSafePath(String(item.filePath ?? "")),
+            }));
+            const batchRes = await spliceBatch(safeBatchItems, {
+              dryRun,
+              idioms: effectiveIdioms,
+              projectRoot,
+            });
+            const totalSaved = batchRes.results.reduce(
+              (acc, r) => acc + (r.tokensSaved ?? 0),
+              0,
+            );
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
+                },
+              ],
+            };
+          }
+        }
+        if (Array.isArray(args.files) || (streamItems && streamItems.length >= 1)) {
           const rawFiles = Array.isArray(args.files)
             ? (args.files as Array<Record<string, unknown>>)
             : (streamItems as Array<Record<string, unknown>>);
@@ -1296,11 +1426,13 @@ export class AiceMcpServer {
             projectRoot,
             surface: "mcp",
           });
-          const deltaStr =
-            batchRes.totalTokensSaved >= 0
-              ? `+${batchRes.totalTokensSaved}`
-              : String(batchRes.totalTokensSaved);
-          const msg = `${dryRun ? "[Dry Run] Previewed" : "Created"} ${batchRes.results.length} native file(s) via aice_create (Native: ${batchRes.totalNativeTokens} -> AICE: ${batchRes.totalAiceTokens} cl100k tokens, net saved: ${deltaStr}).`;
+          const msg = dryRun
+            ? `[Dry Run] Previewed batch creation of ${batchRes.results.length} file(s) (${batchRes.totalAiceTokens} cl100k tokens${batchRes.totalTokensSaved > 0 ? `, saved: +${batchRes.totalTokensSaved}` : ""})`
+            : batchRes.totalTokensSaved > 0
+              ? `✔ Batch created ${batchRes.results.length} file(s) (${batchRes.totalAiceTokens} cl100k tokens, saved: +${batchRes.totalTokensSaved}${batchRes.results.length > 1 ? `, ${batchRes.results.length - 1} turn(s) saved` : ""})`
+              : batchRes.results.length > 1
+                ? `✔ Batch created ${batchRes.results.length} file(s) in 1 turn (${batchRes.totalAiceTokens} cl100k tokens, ${batchRes.results.length - 1} turn(s) saved)`
+                : `✔ Created 1 file: ${batchRes.results[0]?.filePath ?? ""} (${batchRes.totalAiceTokens} cl100k tokens)`;
           return {
             content: [{ type: "text", text: msg }],
           };
@@ -1339,8 +1471,9 @@ export class AiceMcpServer {
           projectRoot,
           surface: "mcp",
         });
-        const deltaStr = res.tokensSaved >= 0 ? `+${res.tokensSaved}` : String(res.tokensSaved);
-        const respText = `${dryRun ? `[Dry Run] Previewed ${rawTargetFile}` : `Successfully created ${rawTargetFile}`} (Native: ${res.nativeTokens} -> AICE: ${res.aiceTokens} cl100k tokens, net saved: ${deltaStr}).${dryRun ? `\n\n${res.nativeCode}` : ""}`;
+        const respText = dryRun
+          ? `[Dry Run] Previewed ${rawTargetFile} (${res.aiceTokens} cl100k tokens${res.tokensSaved > 0 ? `, saved: +${res.tokensSaved}` : ""})\n\n${res.nativeCode}`
+          : `✔ Created ${rawTargetFile} (${res.aiceTokens} cl100k tokens${res.tokensSaved > 0 ? `, saved: +${res.tokensSaved}` : ""})`;
         return {
           content: [{ type: "text", text: respText }],
         };

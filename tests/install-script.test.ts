@@ -165,9 +165,9 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       const updatedZshrc = fs.readFileSync(zshrcPath, "utf-8");
       expect(updatedZshrc).toContain("export FOO=1");
       expect(updatedZshrc).toContain(
-        "AICE v0.9.22 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
+        "AICE v0.9.23 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
       );
-      expect(updatedZshrc).toContain("Inspect v0.9.22");
+      expect(updatedZshrc).toContain("Inspect v0.9.23");
       expect(updatedZshrc).toContain("(@forart82)");
       expect(updatedZshrc).toContain("https://github.com/forart82/aice");
       expect(updatedZshrc).toContain("aice create <file>");
@@ -310,16 +310,15 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     const lines = stripped.split("\n").filter((line) => line.trim().length > 0);
     expect(lines.length).toBe(12);
 
-    // Top title row must prominently include the AICE version number matching package.json (v0.9.22)
+    // Top title row must prominently include the AICE version number matching package.json (v0.9.23)
     expect(lines[1]).toContain(
       `AICE v${pkg.version} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`,
     );
     expect(lines[1]).toContain(
-      "AICE v0.9.22 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
+      "AICE v0.9.23 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
     );
     expect(lines[7]).toContain(`Inspect v${pkg.version}`);
-    expect(lines[7]).toContain("Inspect v0.9.22");
-
+    expect(lines[7]).toContain("Inspect v0.9.23");
     for (const [idx, line] of lines.entries()) {
       expect([...line].length, `Line ${idx + 1} visible width: ${line}`).toBe(80);
       expect(line[0]).toMatch(/[╭│├╰]/);

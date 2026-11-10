@@ -12,9 +12,11 @@ import * as path from "node:path";
 import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
+  findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
   type ProjectIdiomDefinition,
   resolvePathTargets,
 } from "../config/index.js";
@@ -145,42 +147,11 @@ function formatDisplayPath(filePath: string, projectRoot: string): string {
   return filePath;
 }
 
-export function resolveImportPath(
-  fromFilePath: string,
-  specifier: string,
-  config: AiceProjectConfig,
-  projectRoot: string,
-): string | undefined {
-  if (isExternalSpecifier(specifier)) {
-    return undefined;
-  }
-
-  const fromDir = path.dirname(path.resolve(fromFilePath));
-  let candidateBase: string;
-
-  if (specifier.startsWith(".")) {
-    candidateBase = path.resolve(fromDir, specifier);
-  } else if (path.isAbsolute(specifier)) {
-    candidateBase = path.resolve(specifier);
-  } else {
-    // Relative to projectRoot or sourceDir
-    const rootCandidate = path.resolve(projectRoot, specifier);
-    const srcCandidate = path.resolve(projectRoot, config.sourceDir, specifier);
-    if (fs.existsSync(rootCandidate)) {
-      candidateBase = rootCandidate;
-    } else if (fs.existsSync(srcCandidate)) {
-      candidateBase = srcCandidate;
-    } else {
-      candidateBase = rootCandidate;
-    }
-  }
-
-  // 1. If candidateBase already exists as a file
+function probeCandidatePath(candidateBase: string, includeAiplMod = false): string | undefined {
   if (fs.existsSync(candidateBase) && fs.statSync(candidateBase).isFile()) {
     return candidateBase;
   }
 
-  // 2. Probes with extensions
   const ext = path.extname(candidateBase).toLowerCase();
   const baseWithoutExt = ext ? candidateBase.slice(0, -ext.length) : candidateBase;
 
@@ -195,6 +166,7 @@ export function resolveImportPath(
     probeList.push(`${baseWithoutExt}.cs`);
     probeList.push(`${baseWithoutExt}.kt`);
     probeList.push(`${baseWithoutExt}.php`);
+    probeList.push(`${baseWithoutExt}.aipl`);
     probeList.push(`${baseWithoutExt}.aice`);
   }
 
@@ -214,12 +186,18 @@ export function resolveImportPath(
   probeList.push(`${candidateBase}.json`);
   probeList.push(`${candidateBase}.yaml`);
   probeList.push(`${candidateBase}.yml`);
+  probeList.push(`${candidateBase}.aipl`);
   probeList.push(`${candidateBase}.aice`);
 
-  // Directory index probes
+  // Directory index / module probes
   probeList.push(path.join(candidateBase, "index.ts"));
   probeList.push(path.join(candidateBase, "index.tsx"));
   probeList.push(path.join(candidateBase, "index.js"));
+  probeList.push(path.join(candidateBase, "index.aipl"));
+  probeList.push(path.join(candidateBase, "mod.aipl"));
+  if (includeAiplMod) {
+    probeList.push(path.join(candidateBase, "lib.aipl"));
+  }
   probeList.push(path.join(candidateBase, "index.aice"));
 
   for (const p of probeList) {
@@ -229,6 +207,105 @@ export function resolveImportPath(
   }
 
   return undefined;
+}
+
+export function resolveImportPath(
+  fromFilePathOrSpec: string,
+  specifierOrFromFile: string,
+  configOrProjectRoot?: AiceProjectConfig | string,
+  maybeProjectRoot?: string,
+): string | undefined {
+  let fromFilePath = fromFilePathOrSpec;
+  let specifier = specifierOrFromFile;
+  if (
+    typeof configOrProjectRoot === "string" &&
+    maybeProjectRoot === undefined &&
+    !fs.existsSync(fromFilePathOrSpec) &&
+    (fs.existsSync(specifierOrFromFile) || path.isAbsolute(specifierOrFromFile))
+  ) {
+    specifier = fromFilePathOrSpec;
+    fromFilePath = specifierOrFromFile;
+  }
+  const projectRoot =
+    maybeProjectRoot ??
+    (typeof configOrProjectRoot === "string"
+      ? configOrProjectRoot
+      : findProjectRoot(path.dirname(path.resolve(fromFilePath)), process.cwd()));
+  const config: AiceProjectConfig =
+    configOrProjectRoot && typeof configOrProjectRoot === "object"
+      ? configOrProjectRoot
+      : loadProjectConfig(projectRoot);
+
+  const fromDir = path.dirname(path.resolve(fromFilePath));
+  const isAiplFrom = fromFilePath.toLowerCase().endsWith(".aipl");
+  const normalizedSpec =
+    isAiplFrom &&
+    !specifier.includes("/") &&
+    !specifier.startsWith(".") &&
+    specifier.includes(".") &&
+    !specifier.toLowerCase().endsWith(".aipl")
+      ? specifier.replace(/\./g, "/")
+      : specifier;
+
+  if (normalizedSpec.startsWith("std/") || (isAiplFrom && normalizedSpec === "std")) {
+    const stdSubpath = normalizedSpec.startsWith("std/") ? normalizedSpec.slice(4) : "";
+    const stdCandidates: string[] = [
+      path.resolve(projectRoot, normalizedSpec),
+      path.resolve(fromDir, normalizedSpec),
+      path.resolve(projectRoot, "../aipl", normalizedSpec),
+      path.resolve(fromDir, "../aipl", normalizedSpec),
+      path.resolve(fromDir, "../../aipl", normalizedSpec),
+      path.resolve(fromDir, "../../../aipl", normalizedSpec),
+    ];
+    if (process.env.AIPL_HOME) {
+      stdCandidates.push(path.resolve(process.env.AIPL_HOME, normalizedSpec));
+      if (stdSubpath) {
+        stdCandidates.push(path.resolve(process.env.AIPL_HOME, "std", stdSubpath));
+      }
+    }
+    stdCandidates.push(path.resolve("/home/forart/dev/aipl", normalizedSpec));
+    for (const cand of stdCandidates) {
+      const hit = probeCandidatePath(cand, true);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  if (isExternalSpecifier(normalizedSpec)) {
+    if (isAiplFrom && !normalizedSpec.startsWith("node:")) {
+      const aiplCandidates = [
+        path.resolve(fromDir, normalizedSpec),
+        path.resolve(projectRoot, normalizedSpec),
+        path.resolve(projectRoot, config.sourceDir || "src", normalizedSpec),
+      ];
+      for (const cand of aiplCandidates) {
+        const hit = probeCandidatePath(cand, true);
+        if (hit) return hit;
+      }
+    }
+    return undefined;
+  }
+
+  let candidateBase: string;
+
+  if (normalizedSpec.startsWith(".")) {
+    candidateBase = path.resolve(fromDir, normalizedSpec);
+  } else if (path.isAbsolute(normalizedSpec)) {
+    candidateBase = path.resolve(normalizedSpec);
+  } else {
+    // Relative to projectRoot or sourceDir
+    const rootCandidate = path.resolve(projectRoot, normalizedSpec);
+    const srcCandidate = path.resolve(projectRoot, config.sourceDir, normalizedSpec);
+    if (fs.existsSync(rootCandidate)) {
+      candidateBase = rootCandidate;
+    } else if (fs.existsSync(srcCandidate)) {
+      candidateBase = srcCandidate;
+    } else {
+      candidateBase = rootCandidate;
+    }
+  }
+
+  return probeCandidatePath(candidateBase, isAiplFrom);
 }
 
 function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
@@ -251,12 +328,10 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
     if (sym.kind === "class" || sym.kind === "interface" || sym.kind === "record") {
       if (sym.children && sym.children.length > 0) {
         const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
-        outlineLines.push(header.endsWith(":") ? header : `${header}:`);
+        outlineLines.push(header);
         for (const child of sym.children) {
           if (child.docstring) {
-            for (const dLine of child.docstring.split("\n")) {
-              outlineLines.push(`  ${dLine}`);
-            }
+            outlineLines.push(`  ${child.docstring}`);
           }
           outlineLines.push(`  ${child.signature}`);
         }
@@ -265,10 +340,8 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
       }
     } else if (sym.kind === "enum") {
       if (sym.children && sym.children.length > 0) {
-        outlineLines.push(`enum ${sym.name}:`);
-        for (const child of sym.children) {
-          outlineLines.push(`  ${child.signature}`);
-        }
+        const header = sym.signature.endsWith(": ...") ? sym.signature.slice(0, -4) : sym.signature;
+        outlineLines.push(`${header} ${sym.children.map((c) => c.signature).join(" | ")}`);
       } else {
         outlineLines.push(sym.signature);
       }
@@ -283,7 +356,7 @@ function extractExportedContract(resolvedPath: string, importedSymbols: string[]
   const outlineRes = withSuppressedTelemetry(() =>
     generateOutline(resolvedPath, { includeTypes: true }),
   );
-  const nonImports = outlineRes.symbols.filter((s) => s.kind !== "import");
+  const nonImports = outlineRes.symbols.filter((s) => s.kind !== "import" && s.kind !== "module");
 
   const hasExplicitExports = nonImports.some(
     (s) => s.signature.startsWith("pub ") || s.signature.startsWith("export "),
@@ -304,7 +377,8 @@ function extractExportedContract(resolvedPath: string, importedSymbols: string[]
           (s.kind === "interface" ||
             s.kind === "record" ||
             s.kind === "type" ||
-            s.kind === "enum") &&
+            s.kind === "enum" ||
+            s.signature.startsWith("struct ")) &&
           new RegExp(`\\b${s.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(matchedSigs)
         ) {
           return true;
@@ -319,7 +393,8 @@ function extractExportedContract(resolvedPath: string, importedSymbols: string[]
           s.kind === "interface" ||
           s.kind === "record" ||
           s.kind === "type" ||
-          s.kind === "enum",
+          s.kind === "enum" ||
+          s.signature.startsWith("struct "),
       );
     } else {
       filtered = nonImports;
@@ -329,7 +404,13 @@ function extractExportedContract(resolvedPath: string, importedSymbols: string[]
       if (s.signature.startsWith("pub ") || s.signature.startsWith("export ")) {
         return true;
       }
-      if (s.kind === "interface" || s.kind === "record" || s.kind === "type" || s.kind === "enum") {
+      if (
+        s.kind === "interface" ||
+        s.kind === "record" ||
+        s.kind === "type" ||
+        s.kind === "enum" ||
+        s.signature.startsWith("struct ")
+      ) {
         return true;
       }
       return false;
@@ -352,21 +433,209 @@ function generateExternalContract(specifier: string, importedSymbols: string[]):
   return `// external: ${specifier}\nfrom "${specifier}" import { ${importedSymbols.join(", ")} }`;
 }
 
-function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
+function extractAiplImports(content: string): ImportDecl[] {
+  const lines = content.split(/\r?\n/);
+  const imports: ImportDecl[] = [];
+
+  const stripLineComment = (raw: string): string => {
+    let inQuote: string | null = null;
+    for (let k = 0; k < raw.length; k++) {
+      const ch = raw[k]!;
+      if (inQuote) {
+        if (ch === "\\" && k + 1 < raw.length) {
+          k++;
+          continue;
+        }
+        if (ch === inQuote) inQuote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        continue;
+      }
+      if (ch === "/" && raw[k + 1] === "/") {
+        return raw.slice(0, k);
+      }
+    }
+    return raw;
+  };
+
+  const makeSpan = (startLine: number, endLine: number) => ({
+    file: "<aipl>",
+    start: { line: startLine, column: 1, offset: 0 },
+    end: { line: endLine, column: 1, offset: 0 },
+  });
+
+  const parseSpecifiers = (rawSpecs: string, span: ReturnType<typeof makeSpan>) => {
+    return rawSpecs
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((piece) => {
+        const asMatch = piece.match(/^([A-Za-z_][A-Za-z0-9_]*|\*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
+        if (asMatch) {
+          return {
+            name: asMatch[1]!,
+            alias: asMatch[2]!,
+            isWildcard: asMatch[1] === "*",
+            span,
+          };
+        }
+        return {
+          name: piece,
+          isWildcard: piece === "*",
+          span,
+        };
+      });
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const clean = stripLineComment(lines[i] ?? "").trim();
+    if (!clean) {
+      i++;
+      continue;
+    }
+
+    // 1. Single-line or multi-line `import { sym1, sym2 } from "specifier"`
+    if (/^(?:pub\s+)?import\s*\{/.test(clean)) {
+      const startLine = i + 1;
+      let endLine = startLine;
+      const chunks: string[] = [];
+      let j = i;
+      let matched = false;
+      while (j < lines.length) {
+        chunks.push(stripLineComment(lines[j] ?? "").trim());
+        const joined = chunks.join(" ");
+        const m = joined.match(
+          /^(?:pub\s+)?import\s*\{([\s\S]*?)\}\s*from\s*(?:["']([^"']+)["']|([A-Za-z0-9_./-]+))/,
+        );
+        if (m) {
+          endLine = j + 1;
+          const span = makeSpan(startLine, endLine);
+          const source = (m[2] ?? m[3] ?? "").trim();
+          const specifiers = parseSpecifiers(m[1] ?? "", span);
+          if (source) {
+            imports.push({
+              kind: "ImportDecl",
+              source,
+              specifiers,
+              isExported: clean.startsWith("pub "),
+              span,
+            });
+          }
+          i = j + 1;
+          matched = true;
+          break;
+        }
+        j++;
+      }
+      if (matched) continue;
+    }
+
+    // 2. Single-line or multi-line `from "specifier" import { sym1, sym2 }` or `from mod import a, b`
+    if (/^(?:pub\s+)?from\s+(?:["'][^"']+["']|[A-Za-z0-9_./-]+)\s+import\b/.test(clean)) {
+      const startLine = i + 1;
+      let endLine = startLine;
+      const chunks: string[] = [clean];
+      let j = i;
+      while (chunks.join(" ").includes("{") && !chunks.join(" ").includes("}") && j + 1 < lines.length) {
+        j++;
+        chunks.push(stripLineComment(lines[j] ?? "").trim());
+      }
+      endLine = j + 1;
+      const joined = chunks.join(" ");
+      const m = joined.match(
+        /^(?:pub\s+)?from\s+(?:["']([^"']+)["']|([A-Za-z0-9_./-]+))\s+import\s+(?:\{([\s\S]*?)\}|(.+))$/,
+      );
+      if (m) {
+        const span = makeSpan(startLine, endLine);
+        const source = (m[1] ?? m[2] ?? "").trim();
+        const specifiers = parseSpecifiers(m[3] ?? m[4] ?? "", span);
+        if (source) {
+          imports.push({
+            kind: "ImportDecl",
+            source,
+            specifiers,
+            isExported: clean.startsWith("pub "),
+            span,
+          });
+        }
+        i = j + 1;
+        continue;
+      }
+    }
+
+    // 3. `import * as ns from "specifier"`, `import defaultSym from "specifier"`, or `import "specifier"`
+    const stringImpMatch = clean.match(
+      /^(?:pub\s+)?import\s+(?:\*\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s+from\s+|([A-Za-z_][A-Za-z0-9_]*)\s+from\s+)?["']([^"']+)["']/,
+    );
+    if (stringImpMatch) {
+      const span = makeSpan(i + 1, i + 1);
+      const nsAlias = stringImpMatch[1];
+      const defIdent = stringImpMatch[2];
+      const source = stringImpMatch[3]!.trim();
+      const specifiers = nsAlias
+        ? [{ name: "*", alias: nsAlias, isWildcard: true, span }]
+        : defIdent
+          ? [{ name: defIdent, isDefault: true, span }]
+          : [{ name: "*", isWildcard: true, span }];
+      imports.push({
+        kind: "ImportDecl",
+        source,
+        specifiers,
+        isExported: clean.startsWith("pub "),
+        span,
+      });
+      i++;
+      continue;
+    }
+
+    // 4. `import mod.path` or `import mod.path as alias`
+    const modImpMatch = clean.match(
+      /^(?:pub\s+)?import\s+([A-Za-z_][A-Za-z0-9_./]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/,
+    );
+    if (modImpMatch) {
+      const span = makeSpan(i + 1, i + 1);
+      const source = modImpMatch[1]!.trim();
+      const alias = modImpMatch[2]?.trim();
+      imports.push({
+        kind: "ImportDecl",
+        source,
+        specifiers: [{ name: "*", ...(alias ? { alias } : {}), isWildcard: true, span }],
+        isExported: clean.startsWith("pub "),
+        span,
+      });
+      i++;
+      continue;
+    }
+
+    i++;
+  }
+
+  return imports;
+}
+
+export function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
   try {
     const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
+    if (filePath.toLowerCase().endsWith(".aipl")) {
+      return extractAiplImports(content);
+    }
     if (filePath.endsWith(".aice")) {
       const mod = parse(content, filePath);
       return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
     }
     const targetLang = detectTargetFromPath(filePath);
+    if (targetLang === "aipl") {
+      return extractAiplImports(content);
+    }
     const decomp = withSuppressedTelemetry(() => decompile(content, targetLang, { filePath }));
     return decomp.ast.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
   } catch {
     return [];
   }
 }
-
 function splitSymbolSelectors(rawSymbol: string): string[] {
   const trimmed = rawSymbol.trim();
   if (!trimmed) return [];
@@ -541,11 +810,11 @@ function scanWorkspaceCallers(
   const targetFileName = path.basename(targetBase);
   const targetExt = path.extname(targetFileName);
   const targetStem = targetExt ? targetFileName.slice(0, -targetExt.length) : targetFileName;
+  const isIndexStem = targetStem === "index" || targetStem === "mod" || targetStem === "lib";
   const escapedStem = targetStem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const importHintRegex =
-    targetStem !== "index"
-      ? new RegExp(`(?:from|import|require|use|#include)[^\\n;]*\\b${escapedStem}\\b`)
-      : undefined;
+  const importHintRegex = !isIndexStem
+    ? new RegExp(`(?:from|import|require|use|#include)[^\\n;]*\\b${escapedStem}\\b`)
+    : undefined;
 
   for (const file of filesToScan) {
     if (path.resolve(file) === resolvedTarget) continue;
@@ -568,7 +837,7 @@ function scanWorkspaceCallers(
       continue;
     }
 
-    if (targetStem !== "index" && !rawContent.includes(targetStem)) {
+    if (!isIndexStem && !rawContent.includes(targetStem)) {
       continue;
     }
     if (importHintRegex && !importHintRegex.test(rawContent)) {
@@ -1387,7 +1656,12 @@ export async function generateWorkspaceContext(
     tokenCount = estimateTokens(formattedBundle);
   }
 
-  const targetContent = workspaceFiles.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
+  const targetContent =
+    requestedSelectors.length > 0
+      ? symbolSlices.length > 0
+        ? symbolSlices.join("\n\n")
+        : outlines.join("\n\n")
+      : workspaceFiles.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
 
   const resObj: ContextResult = {
     targetPath: displayTargetPath,
@@ -1399,17 +1673,6 @@ export async function generateWorkspaceContext(
     tokenCount,
     idioms: activeIdioms,
   };
-
-  recordTelemetryEvent({
-    targetPath: resolved.resolvedPath,
-    projectRoot,
-    filePath: "<directory>",
-    operation: "context",
-    surface: "cli",
-    idiomsUsed: Boolean(activeIdioms && Object.keys(activeIdioms).length > 0),
-    nativeText: rawWorkspaceTexts.join("\n"),
-    aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
-  });
 
   return resObj;
 }
@@ -1856,13 +2119,92 @@ export function extractSymbolFromAiceSource(
  * Packages dependency contracts, target file content, and downstream callers into a 1-turn context pack.
  * If targetPath is omitted or points to a directory, packages a workspace overview context pack.
  */
-export async function generateContext(
-  targetPath?: string,
-  options: ContextOptions = {},
-): Promise<ContextResult> {
-  if (!targetPath || targetPath.trim() === "") {
-    return generateWorkspaceContext(undefined, options);
+export function parseTargetWithInlineSymbol(
+  rawTarget: string,
+  baseDir = process.cwd(),
+): { targetPath: string; inlineSymbol?: string } {
+  const trimmed = rawTarget.trim();
+  const searchStart = /^[a-zA-Z]:[\\/]/.test(trimmed) ? 2 : 0;
+  const colonIdx = trimmed.indexOf(":", searchStart);
+  if (colonIdx > 0) {
+    const candidateFile = trimmed.slice(0, colonIdx).trim();
+    const candidateSym = trimmed.slice(colonIdx + 1).trim();
+    if (candidateFile && candidateSym) {
+      const absCand = path.isAbsolute(candidateFile)
+        ? candidateFile
+        : path.resolve(baseDir, candidateFile);
+      const ext = path.extname(candidateFile).toLowerCase();
+      if (
+        fs.existsSync(absCand) ||
+        KNOWN_TARGET_EXTENSIONS.has(ext) ||
+        ext === ".aice"
+      ) {
+        return { targetPath: candidateFile, inlineSymbol: candidateSym };
+      }
+    }
   }
+  return { targetPath: trimmed };
+}
+
+export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd()): string[] {
+  const trimmed = rawTargetStr.trim();
+  if (!trimmed || !/\s+/.test(trimmed)) {
+    return trimmed ? [trimmed] : [];
+  }
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  if (tokens.length > 1) {
+    const allLookLikeTargets = tokens.every((tok) => {
+      const p = parseTargetWithInlineSymbol(tok, baseDir).targetPath;
+      const abs = path.isAbsolute(p) ? p : path.resolve(baseDir, p);
+      const ext = path.extname(p).toLowerCase();
+      return fs.existsSync(abs) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice";
+    });
+    if (allLookLikeTargets) {
+      return tokens;
+    }
+    const wholeCheck = parseTargetWithInlineSymbol(trimmed, baseDir);
+    const wholeAbs = path.isAbsolute(wholeCheck.targetPath)
+      ? wholeCheck.targetPath
+      : path.resolve(baseDir, wholeCheck.targetPath);
+    if (!fs.existsSync(wholeAbs)) {
+      return tokens;
+    }
+  }
+  return [trimmed];
+}
+
+export async function generateContext(
+  rawTargetPath?: string | string[],
+  rawOptions: ContextOptions = {},
+): Promise<ContextResult> {
+  if (Array.isArray(rawTargetPath)) {
+    const filtered = rawTargetPath.map((t) => String(t).trim()).filter(Boolean);
+    if (filtered.length === 0) {
+      return generateWorkspaceContext(undefined, rawOptions);
+    }
+    if (filtered.length === 1) {
+      return generateContext(filtered[0], rawOptions);
+    }
+    return generateMultiContext(filtered, rawOptions);
+  }
+
+  if (!rawTargetPath || rawTargetPath.trim() === "") {
+    return generateWorkspaceContext(undefined, rawOptions);
+  }
+
+  const baseDir = rawOptions.projectRoot ? path.resolve(rawOptions.projectRoot) : process.cwd();
+  if (/\s+/.test(rawTargetPath.trim())) {
+    const tokens = splitContextTargets(rawTargetPath, baseDir);
+    if (tokens.length > 1) {
+      return generateMultiContext(tokens, rawOptions);
+    }
+  }
+
+  const parsedTarget = parseTargetWithInlineSymbol(rawTargetPath, baseDir);
+  const targetPath = parsedTarget.targetPath;
+  const options: ContextOptions = parsedTarget.inlineSymbol
+    ? { ...rawOptions, symbol: parsedTarget.inlineSymbol }
+    : rawOptions;
 
   const resolved = resolvePathTargets(targetPath, {
     includeTargets: true,
@@ -2084,12 +2426,8 @@ export async function generateContext(
         importedSymbols = usedSpecs.map((s) => s.name);
       }
 
-      const isExternal = isExternalSpecifier(specifier);
-      let resolvedPath: string | undefined;
-
-      if (!isExternal) {
-        resolvedPath = resolveImportPath(item.filePath, specifier, config, projectRoot);
-      }
+      const resolvedPath = resolveImportPath(item.filePath, specifier, config, projectRoot);
+      const isExternal = !resolvedPath && isExternalSpecifier(specifier);
 
       // Skip circular back-reference to the target file itself
       if (resolvedPath) {
@@ -2283,3 +2621,224 @@ export async function generateContext(
 
 export const packContext = generateContext;
 export const packageContext = generateContext;
+export function mergeMultiContextResults(
+  results: ContextResult[],
+  options: ContextOptions = {},
+): ContextResult & { results: ContextResult[] } {
+  if (results.length === 0) {
+    return {
+      targetPath: "",
+      targetContent: "",
+      dependencies: [],
+      callers: [],
+      formattedBundle: "# AICE Multi-File Context Stream (0 targets)\n",
+      tokenCount: 0,
+      results: [],
+    };
+  }
+  if (results.length === 1) {
+    return { ...results[0]!, results };
+  }
+
+  // 1. Merge & deduplicate Imported Dependency Contracts across all targets
+  const mergedDeps: DependencyContract[] = [];
+  const depByKey = new Map<string, DependencyContract>();
+
+  for (const res of results) {
+    for (const dep of res.dependencies) {
+      const key = dep.isExternal
+        ? `ext:${dep.specifier}`
+        : dep.resolvedPath
+          ? `res:${dep.resolvedPath}`
+          : `spec:${dep.specifier}`;
+      const existing = depByKey.get(key);
+      if (!existing) {
+        const cloned: DependencyContract = {
+          ...dep,
+          importedSymbols: [...dep.importedSymbols],
+        };
+        depByKey.set(key, cloned);
+        mergedDeps.push(cloned);
+      } else {
+        let addedNewSym = false;
+        for (const sym of dep.importedSymbols) {
+          if (!existing.importedSymbols.includes(sym)) {
+            existing.importedSymbols.push(sym);
+            addedNewSym = true;
+          }
+        }
+        if (dep.contract && dep.contract !== existing.contract) {
+          if (existing.isExternal) {
+            existing.contract = generateExternalContract(
+              existing.specifier,
+              existing.importedSymbols,
+            );
+          } else if (addedNewSym && existing.resolvedPath) {
+            const existingLines = new Set(existing.contract.split("\n").map((l) => l.trim()));
+            const extraLines = dep.contract
+              .split("\n")
+              .filter((l) => l.trim().length > 0 && !existingLines.has(l.trim()));
+            if (extraLines.length > 0) {
+              existing.contract = `${existing.contract}\n${extraLines.join("\n")}`;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Merge & deduplicate Downstream Callers across all targets
+  const mergedCallers: CallerSummary[] = [];
+  const callerByKey = new Map<string, CallerSummary>();
+
+  for (const res of results) {
+    for (const caller of res.callers) {
+      const key = `${caller.filePath}::${caller.usedSymbol ?? ""}`;
+      const existing = callerByKey.get(key);
+      if (!existing) {
+        const cloned: CallerSummary = {
+          ...caller,
+          importedSymbols: [...caller.importedSymbols],
+          ...(caller.callSiteLines ? { callSiteLines: [...caller.callSiteLines] } : {}),
+        };
+        callerByKey.set(key, cloned);
+        mergedCallers.push(cloned);
+      } else {
+        for (const sym of caller.importedSymbols) {
+          if (!existing.importedSymbols.includes(sym)) {
+            existing.importedSymbols.push(sym);
+          }
+        }
+        if (caller.callSiteLines && caller.callSiteLines.length > 0) {
+          const lineSet = new Set<number>(existing.callSiteLines ?? []);
+          for (const l of caller.callSiteLines) lineSet.add(l);
+          existing.callSiteLines = Array.from(lineSet).sort((a, b) => a - b);
+        }
+        if (caller.line < existing.line) {
+          existing.line = caller.line;
+        }
+      }
+    }
+  }
+
+  // 3. Merge idioms & diagnostics
+  const mergedIdioms: Record<string, ProjectIdiomDefinition> = {};
+  const diagParts: string[] = [];
+  for (const res of results) {
+    if (res.idioms) {
+      Object.assign(mergedIdioms, res.idioms);
+    }
+    if (res.nativeDiagnostics) {
+      diagParts.push(res.nativeDiagnostics);
+    }
+  }
+
+  const targetPathsList = results.map((r) => r.targetPath);
+  const lines: string[] = [];
+  lines.push(
+    `# AICE Multi-File Context Stream (${results.length} targets: ${targetPathsList.join(", ")})`,
+  );
+  lines.push("");
+  lines.push(`## Imported Dependency Contracts (${mergedDeps.length}):`);
+  if (mergedDeps.length === 0) {
+    lines.push("None");
+  } else {
+    for (let i = 0; i < mergedDeps.length; i++) {
+      const dep = mergedDeps[i]!;
+      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
+      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
+      lines.push("```aice");
+      lines.push(dep.contract);
+      lines.push("```");
+      if (i < mergedDeps.length - 1) {
+        lines.push("");
+      }
+    }
+  }
+  lines.push("");
+  lines.push(`## Target File Content (${results.length} files):`);
+  const combinedTargetContents: string[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i]!;
+    const body = options.outlineTarget && r.targetOutline ? r.targetOutline : r.targetContent;
+    combinedTargetContents.push(`// === ${r.targetPath} ===\n${body}`);
+    lines.push(`### Target: \`${r.targetPath}\``);
+    lines.push("```aice");
+    lines.push(body);
+    lines.push("```");
+    if (i < results.length - 1) {
+      lines.push("");
+    }
+  }
+  lines.push("");
+  lines.push(`## Downstream Callers (${mergedCallers.length}):`);
+  if (mergedCallers.length === 0) {
+    lines.push("None");
+  } else {
+    for (const caller of mergedCallers) {
+      const symStr = caller.importedSymbols.length > 0 ? caller.importedSymbols.join(", ") : "*";
+      if (caller.usedSymbol && caller.callSiteLines && caller.callSiteLines.length > 0) {
+        const lineTags = caller.callSiteLines.map((l) => `L${l}`).join(", ");
+        lines.push(
+          `- ${caller.filePath} imports: ${symStr} (uses ${caller.usedSymbol} at [${lineTags}])`,
+        );
+      } else {
+        lines.push(`- \`${caller.filePath}\` imports: \`${symStr}\``);
+      }
+    }
+  }
+
+  if (Object.keys(mergedIdioms).length > 0) {
+    lines.push("");
+    lines.push(formatIdiomsMarkdownSection(mergedIdioms));
+  }
+  if (diagParts.length > 0) {
+    lines.push("");
+    lines.push(diagParts.join("\n\n"));
+  }
+
+  const formattedBundle = lines.join("\n");
+  const tokenCount = estimateTokens(formattedBundle);
+
+  return {
+    targetPath: targetPathsList.join(", "),
+    targetContent: combinedTargetContents.join("\n\n"),
+    dependencies: mergedDeps,
+    callers: mergedCallers,
+    formattedBundle,
+    tokenCount,
+    idioms: Object.keys(mergedIdioms).length > 0 ? mergedIdioms : undefined,
+    nativeDiagnostics: diagParts.length > 0 ? diagParts.join("\n\n") : undefined,
+    results,
+  };
+}
+
+export async function generateMultiContext(
+  targets: Array<string | { path: string; symbol?: string }>,
+  options: ContextOptions = {},
+): Promise<ContextResult & { results: ContextResult[] }> {
+  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const individualResults: ContextResult[] = [];
+
+  for (const item of targets) {
+    const rawStr = typeof item === "string" ? item : item.path;
+    const explicitSym = typeof item === "string" ? undefined : item.symbol;
+    const parsed = parseTargetWithInlineSymbol(rawStr, baseDir);
+    const resolved = resolvePathTargets(parsed.targetPath, {
+      includeTargets: true,
+      projectRoot: options.projectRoot,
+    });
+    if (!isProjectAiceEnabled(resolved.config)) {
+      throw new Error(AICE_DISABLED_MESSAGE);
+    }
+    const itemOpts: ContextOptions = {
+      ...options,
+      symbol: explicitSym ?? parsed.inlineSymbol ?? options.symbol,
+      projectRoot: resolved.projectRoot,
+    };
+    const res = await generateContext(resolved.resolvedPath, itemOpts);
+    individualResults.push(res);
+  }
+
+  return mergeMultiContextResults(individualResults, options);
+}

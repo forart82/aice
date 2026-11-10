@@ -264,10 +264,10 @@ pub fn getRadius(light: PointLight25D): float:
     });
   });
 
-  describe("Step 3: Zero-Grep & Zero-Sed Directives in MANDATORY_AGENT_RULES_MARKDOWN (v0.9.22)", () => {
-    it("bumps version to 0.9.22 and includes explicit .aipl grep/sed replacement directives", () => {
-      expect(AICE_VERSION).toBe("0.9.22");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.22 -->");
+  describe("Step 3: Zero-Grep & Zero-Sed Directives in MANDATORY_AGENT_RULES_MARKDOWN (v0.9.23)", () => {
+    it("bumps version to 0.9.23 and includes explicit .aipl grep/sed replacement directives", () => {
+      expect(AICE_VERSION).toBe("0.9.23");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.23 -->");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
         'Replace `grep -n -C 10 "sym" file.aipl` -> `aice context file.aipl -s "sym"`',
       );

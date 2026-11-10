@@ -117,6 +117,7 @@ export interface BatchSpliceResult {
   success: boolean;
   results: SpliceResult[];
   modifiedFiles: string[];
+  totalEdits: number;
 }
 
 export interface SpliceResult {
@@ -6366,11 +6367,18 @@ export async function splice(
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
   if (
     !hasBatchEdits &&
-    ((!fileExists && !options.delete) || options.create || options.symbol === "*")
+    !options.append &&
+    !options.insertAfter &&
+    !options.insertBefore &&
+    !options.delete &&
+    (!fileExists ||
+      options.create ||
+      (Boolean(options.symbol) && isCreateOrOverwriteSymbol(options.symbol)))
   ) {
     const prevSource = fileExists ? fs.readFileSync(fullPath, "utf-8") : "";
     const created = await createFile(fullPath, {
       code: options.code ?? options.body ?? "",
+      overwrite: true,
       idioms: options.idioms,
       dryRun: options.dryRun,
       projectRoot: root,
@@ -6585,15 +6593,90 @@ export interface ParsedMultiBlockSpliceStream {
   singleFileEdits?: SymbolSpliceEdit[];
   batchItems?: BatchSpliceItem[];
 }
+  export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
+  if (!sym) return true;
+  const norm = sym.trim().toLowerCase();
+  return (
+    norm === "" ||
+    norm === "*" ||
+    norm === "create" ||
+    norm === ":create" ||
+    norm === "overwrite" ||
+    norm === ":overwrite"
+  );
+  }
 
-/**
+  const SPLICE_PASSTHROUGH_FILENAMES = new Set([
+  "Cargo.toml",
+  "Cargo.lock",
+  "go.mod",
+  "go.sum",
+  "CMakeLists.txt",
+  "Makefile",
+  "Dockerfile",
+  ".gitignore",
+  ".dockerignore",
+  ".editorconfig",
+  ".env",
+  ]);
+
+  const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
+  ".toml",
+  ".mod",
+  ".sum",
+  ".csproj",
+  ".sln",
+  ".props",
+  ".targets",
+  ".xml",
+  ".gradle",
+  ".properties",
+  ".cmake",
+  ".mk",
+  ".ini",
+  ".cfg",
+  ".conf",
+  ".env",
+  ".sql",
+  ".txt",
+  ".lock",
+  ]);
+
+  function isSpliceTargetFileCandidate(cand: string): boolean {
+  const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
+  if (!clean || /\s/.test(clean)) return false;
+  const base = path.basename(clean);
+  if (SPLICE_PASSTHROUGH_FILENAMES.has(base)) return true;
+  const ext = path.extname(clean).toLowerCase();
+  if (!ext) return false;
+  return (
+    KNOWN_TARGET_EXTENSIONS.has(ext) ||
+    SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) ||
+    ext === ".aice"
+  );
+  }
+
+  function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): boolean {
+  if (!isSpliceTargetFileCandidate(spec)) return false;
+  if (!defaultFilePath) return true;
+  if (spec.includes("/") || spec.includes("\\")) return true;
+  if (
+    path.resolve(spec) === path.resolve(defaultFilePath) ||
+    path.basename(spec) === path.basename(defaultFilePath)
+  ) {
+    return true;
+  }
+  return !/^[A-Z][A-Za-z0-9_]*\.[a-z]{1,4}$/.test(spec);
+  }
+
+  /**
  * Parses a multi-block splice heredoc/stream delimited by `=== <symbol> ===`,
- * `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
+ * `=== <filePath> ===`, `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
  */
-export function parseMultiBlockSpliceStream(
+  export function parseMultiBlockSpliceStream(
   rawStream: string,
   defaultFilePath?: string,
-): ParsedMultiBlockSpliceStream | null {
+  ): ParsedMultiBlockSpliceStream | null {
   if (!rawStream || !rawStream.trim()) return null;
   const lines = rawStream.split(/\r?\n/);
   const headerRe =
@@ -6614,7 +6697,9 @@ export function parseMultiBlockSpliceStream(
 
   for (const line of lines) {
     const activeFp =
-      sections.length > 0 ? (sections[sections.length - 1].filePath ?? defaultFilePath) : defaultFilePath;
+      sections.length > 0
+        ? (sections[sections.length - 1].filePath ?? defaultFilePath)
+        : defaultFilePath;
     const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
     if (isMdSection && sections.length > 0) {
       if (!inMdFence) {
@@ -6652,14 +6737,18 @@ export function parseMultiBlockSpliceStream(
       }
       let blockFilePath: string | undefined;
       let blockSymbol = spec;
-      const fileSymMatch = spec.match(/^([^\s:#]+\.[a-zA-Z0-9]{1,10})(?:\s*(?::+|#)\s*|\s+)(.+)$/);
+      const fileSymMatch = spec.match(
+        /^([^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile))(?:\s*(?::+|#)\s*|\s+)(.+)$/,
+      );
       if (fileSymMatch) {
         const candFile = fileSymMatch[1].trim();
-        const ext = path.extname(candFile).toLowerCase();
-        if (KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice") {
+        if (isSpliceTargetFileCandidate(candFile)) {
           blockFilePath = candFile;
           blockSymbol = fileSymMatch[2].trim();
         }
+      } else if (!isDelete && isBareSpliceStreamFileHeader(spec, defaultFilePath)) {
+        blockFilePath = spec;
+        blockSymbol = ":create";
       }
       const isValidSymbol =
         Boolean(blockSymbol) &&
@@ -6726,10 +6815,17 @@ export function parseMultiBlockSpliceStream(
     return null;
   }
 
+  const hasCreateOrOverwriteBlock = resolvedBlocks.some((b) =>
+    isCreateOrOverwriteSymbol(b.symbol),
+  );
+
   const allSameDefault =
+    !hasCreateOrOverwriteBlock &&
     Boolean(defaultFilePath) &&
     resolvedBlocks.every(
-      (b) => !b.explicitFilePath || path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
+      (b) =>
+        !b.explicitFilePath ||
+        path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
     );
 
   if (allSameDefault) {
@@ -6742,115 +6838,218 @@ export function parseMultiBlockSpliceStream(
     };
   }
 
-  const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
-  for (const b of resolvedBlocks) {
-    const fp = b.filePath!;
-    const list = groupedByFile.get(fp) ?? [];
-    list.push({
-      symbol: b.symbol,
-      code: b.code,
-      delete: b.delete,
-    });
-    groupedByFile.set(fp, list);
-  }
-
   const batchItems: BatchSpliceItem[] = [];
-  for (const [fp, edits] of groupedByFile.entries()) {
-    if (edits.length === 1) {
-      batchItems.push({
-        filePath: fp,
-        symbol: edits[0].symbol,
-        code: edits[0].code,
-        delete: edits[0].delete,
+  if (!hasCreateOrOverwriteBlock) {
+    const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
+    for (const b of resolvedBlocks) {
+      const fp = b.filePath!;
+      const list = groupedByFile.get(fp) ?? [];
+      list.push({
+        symbol: b.symbol,
+        code: b.code,
+        delete: b.delete,
       });
-    } else {
-      batchItems.push({
-        filePath: fp,
-        edits,
-      });
+      groupedByFile.set(fp, list);
+    }
+
+    for (const [fp, edits] of groupedByFile.entries()) {
+      if (edits.length === 1) {
+        batchItems.push({
+          filePath: fp,
+          symbol: edits[0].symbol,
+          code: edits[0].code,
+          delete: edits[0].delete,
+        });
+      } else {
+        batchItems.push({
+          filePath: fp,
+          edits,
+        });
+      }
+    }
+  } else {
+    let idx = 0;
+    while (idx < resolvedBlocks.length) {
+      const b = resolvedBlocks[idx]!;
+      const fp = b.filePath!;
+      if (isCreateOrOverwriteSymbol(b.symbol)) {
+        batchItems.push({
+          filePath: fp,
+          symbol: b.symbol,
+          code: b.code,
+          create: true,
+        });
+        idx++;
+        continue;
+      }
+      const edits: SymbolSpliceEdit[] = [];
+      while (
+        idx < resolvedBlocks.length &&
+        resolvedBlocks[idx]!.filePath === fp &&
+        !isCreateOrOverwriteSymbol(resolvedBlocks[idx]!.symbol)
+      ) {
+        const cur = resolvedBlocks[idx]!;
+        edits.push({
+          symbol: cur.symbol,
+          code: cur.code,
+          delete: cur.delete,
+        });
+        idx++;
+      }
+      if (edits.length === 1) {
+        batchItems.push({
+          filePath: fp,
+          symbol: edits[0].symbol,
+          code: edits[0].code,
+          delete: edits[0].delete,
+        });
+      } else {
+        batchItems.push({
+          filePath: fp,
+          edits,
+        });
+      }
     }
   }
 
   return { batchItems };
-}
-
-/**
- * Executes a batch of splices across one or more files atomically.
- * If any splice item in the batch fails, all modified files are rolled back to their exact original bytes.
- */
-export async function spliceBatch(
-  itemsOrStream: BatchSpliceItem[] | string,
-  options: BatchSpliceOptions = {},
-): Promise<BatchSpliceResult> {
-  const items: BatchSpliceItem[] =
-    typeof itemsOrStream === "string"
-      ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
-      : itemsOrStream;
-  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-  const backups = new Map<string, string>();
-
-  // Snapshot original contents of all existing target files before applying any changes
-  for (const item of items) {
-    const rawFp = item.filePath || item.file || item.path || "";
-    const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
-    if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
-      backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
-    }
   }
 
-  const results: SpliceResult[] = [];
-  const modifiedSet = new Set<string>();
-  const newlyCreatedFiles: string[] = [];
+  /**
+ * Executes a batch of splices and/or file creations across one or more files atomically.
+ * If any item in the batch fails, all created and modified files are rolled back to their exact original state.
+ */
+  export async function spliceBatch(
+    itemsOrStream: BatchSpliceItem[] | string,
+    optionsOrProjectRoot: BatchSpliceOptions | string = {},
+  ): Promise<BatchSpliceResult> {
+    const options: BatchSpliceOptions =
+      typeof optionsOrProjectRoot === "string"
+        ? { projectRoot: optionsOrProjectRoot }
+        : optionsOrProjectRoot;
+    const items: BatchSpliceItem[] =
+      typeof itemsOrStream === "string"
+        ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
+        : itemsOrStream;
+    const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+    const backups = new Map<string, string>();
 
-  try {
+    // Snapshot original contents of all existing target files before applying any changes
     for (const item of items) {
       const rawFp = item.filePath || item.file || item.path || "";
       const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
-      const existedBefore = backups.has(fullPath) || fs.existsSync(fullPath);
-      const resolvedCode =
-        item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
-      const res = await splice(rawFp, {
-        ...item,
-        code: resolvedCode,
-        insertAfter: item.insertAfter ?? item.insert_after,
-        insertBefore: item.insertBefore ?? item.insert_before,
-        projectRoot: item.projectRoot ?? options.projectRoot,
-        dryRun: item.dryRun ?? options.dryRun,
-        compile: item.compile ?? options.compile,
-        idioms: item.idioms ?? options.idioms,
-      });
-      if (!existedBefore && !(item.dryRun ?? options.dryRun)) {
-        newlyCreatedFiles.push(fullPath);
-      }
-      results.push(res);
-      modifiedSet.add(res.filePath);
-    }
-  } catch (err) {
-    // Atomic rollback of all touched files!
-    if (!options.dryRun) {
-      for (const createdFp of newlyCreatedFiles) {
-        try {
-          if (fs.existsSync(createdFp)) {
-            fs.unlinkSync(createdFp);
-          }
-        } catch {
-          // ignore
-        }
-      }
-      for (const [fp, origContent] of backups.entries()) {
-        try {
-          fs.writeFileSync(fp, origContent, "utf-8");
-        } catch {
-          // ignore
-        }
+      if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
+        backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
       }
     }
-    throw err;
-  }
 
-  return {
-    success: true,
-    results,
-    modifiedFiles: Array.from(modifiedSet),
-  };
-}
+    const results: SpliceResult[] = [];
+    const modifiedSet = new Set<string>();
+    const newlyCreatedFiles: string[] = [];
+
+    try {
+      for (const item of items) {
+        const rawFp = item.filePath || item.file || item.path || "";
+        const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
+        const existedBeforeBatch = backups.has(fullPath);
+        const fileExistsNow = fs.existsSync(fullPath);
+        const resolvedCode =
+          item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
+
+        const isCreateRoute =
+          !item.delete &&
+          !item.append &&
+          !item.insertAfter &&
+          !item.insert_after &&
+          !item.insertBefore &&
+          !item.insert_before &&
+          (((!item.edits || item.edits.length === 0) && isCreateOrOverwriteSymbol(item.symbol)) ||
+            !fileExistsNow);
+
+        if (isCreateRoute) {
+          const createPayload =
+            resolvedCode ??
+            (item.edits
+              ? item.edits
+                  .filter((e) => !e.delete)
+                  .map((e) => e.code ?? e.body ?? "")
+                  .filter(Boolean)
+                  .join("\n\n")
+              : "");
+          const createRes = await createFile(fullPath, {
+            code: createPayload,
+            overwrite: true,
+            dryRun: item.dryRun ?? options.dryRun,
+            idioms: item.idioms ?? options.idioms,
+            projectRoot: item.projectRoot ?? options.projectRoot,
+          });
+          if (
+            !existedBeforeBatch &&
+            !(item.dryRun ?? options.dryRun) &&
+            !newlyCreatedFiles.includes(fullPath)
+          ) {
+            newlyCreatedFiles.push(fullPath);
+          }
+          results.push({
+            success: true,
+            filePath: createRes.filePath,
+            symbol: item.symbol || ":create",
+            modifiedCode: createRes.nativeCode,
+            newFileContent: createRes.nativeCode,
+            newAiceSource: createRes.aiceInput,
+            tokensSaved: createRes.tokensSaved,
+          });
+          modifiedSet.add(createRes.filePath);
+          continue;
+        }
+
+        const res = await splice(rawFp, {
+          ...item,
+          code: resolvedCode,
+          insertAfter: item.insertAfter ?? item.insert_after,
+          insertBefore: item.insertBefore ?? item.insert_before,
+          projectRoot: item.projectRoot ?? options.projectRoot,
+          dryRun: item.dryRun ?? options.dryRun,
+          compile: item.compile ?? options.compile,
+          idioms: item.idioms ?? options.idioms,
+        });
+        if (
+          !existedBeforeBatch &&
+          !(item.dryRun ?? options.dryRun) &&
+          !newlyCreatedFiles.includes(fullPath)
+        ) {
+          newlyCreatedFiles.push(fullPath);
+        }
+        results.push(res);
+        modifiedSet.add(res.filePath);
+      }
+    } catch (err) {
+      // Atomic rollback of all touched files!
+      if (!options.dryRun) {
+        for (const createdFp of newlyCreatedFiles) {
+          try {
+            if (fs.existsSync(createdFp)) {
+              fs.unlinkSync(createdFp);
+            }
+          } catch {
+            // ignore
+          }
+        }
+        for (const [fp, origContent] of backups.entries()) {
+          try {
+            fs.writeFileSync(fp, origContent, "utf-8");
+          } catch {
+            // ignore
+          }
+        }
+      }
+      throw err;
+    }
+
+    return {
+      success: true,
+      results,
+      modifiedFiles: Array.from(modifiedSet),
+      totalEdits: results.length,
+    };
+  }

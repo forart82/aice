@@ -1252,10 +1252,12 @@ function supplementNativeSymbolsFromSource(
   const existingNames = new Set<string>();
   for (const s of symbols) {
     existingNames.add(s.name);
+    existingNames.add(`${s.kind}:${s.name}:${s.line}`);
     if (s.children) {
       for (const c of s.children) {
         existingNames.add(c.name);
         existingNames.add(`${s.name}.${c.name}`);
+        existingNames.add(`${c.kind}:${c.name}:${c.line}`);
       }
     }
   }
@@ -1278,7 +1280,6 @@ function supplementNativeSymbolsFromSource(
     }
     return;
   }
-
   if (
     targetLang === "shell" ||
     targetLang === "powershell" ||

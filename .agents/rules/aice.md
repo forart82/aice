@@ -1,11 +1,11 @@
 ---
 trigger: always_on
-description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.22)
+description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.23)
 ---
 
 <!-- AICE:START -->
-<!-- AICE:START v0.9.22 -->
-## AICE 2.0 (v0.9.22) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+<!-- AICE:START v0.9.23 -->
+## AICE 2.0 (v0.9.23) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (`sed` / `ls` / `grep` Ban)
 - **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run `sed -n`, `awk`, `head`, `tail`, `cat`, `grep -n`, `grep -rn`, `grep -C`, `ls`, `ls -la`, `ls src`, `find`, `aice --help`, `aice --version`, `which aice`, or `git status` on supported files and directories (`aice context` works seamlessly across all 33 file extensions including `.aipl`):
@@ -20,8 +20,8 @@ description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Ru
 - **Non-AICE Bypass**: If `aice.config.json` with `"enabled": true` is **not** present in the project folder (e.g. `*_nonaice` folders or when `"enabled": false`), bypass AICE completely and use standard native file tools (`write_file`, `edit_file`, `read_file`, `view_file`).
 - **Idioms Toggle**: If `"idiomsEnabled": false` (or `"idioms": false`), disable `$idiom` macros (`--no-idioms`).
 
-### 2. Multi-File Creation in 1–2 Turns (`from 0` — 40-75% Output Token Savings)
-- **Preferred Multi-File Heredoc Stream (Zero JSON Escaping)**: Write clean, native language syntax inside 1–2 `aice create --stdin << 'EOF'` calls using `=== <filePath> ===` headers (e.g. Batch 1: config/HTML/CSS/constants/models; Batch 2: core engine/UI/main/scripts/docs), then immediately run `npm install && npm run build` without running `ls`:
+### 2. Multi-File Creation & Unified Mixed Stream in 1–2 Turns (`from 0` — 40-75% Output Token Savings)
+- **Preferred Multi-File Heredoc Stream (Zero JSON Escaping)**: Write clean, native language syntax inside 1–2 `aice create --stdin << 'EOF'` or `aice splice --stdin << 'EOF'` calls using `=== <filePath> ===` headers (e.g. Batch 1: config/HTML/CSS/constants/models; Batch 2: core engine/UI/main/scripts/docs), then immediately run `npm install && npm run build` without running `ls`:
   ```bash
   aice create --stdin << 'EOF'
   === src/models.ts ===
@@ -38,16 +38,23 @@ description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Ru
   ```
 - **NEVER overwrite existing files (>25 lines) with `aice create`**: Use `aice splice` for updates. For modular files (>150 lines), create clean methods or splice additions via `aice splice`.
 
-### 3. 1-Turn Exploration (85-90% Read Token Savings)
+### 3. 1-Turn Multi-File Stream Exploration (85-90% Read Token Savings)
+- **Default Multi-File `aice context` Stream**: Read multiple files, symbols, or line ranges in **1 single turn** with deduplicated dependency contracts and downstream callers via inline `file:sym1,sym2` or `file:Lstart-Lend` selectors:
+  ```bash
+  aice context f1:s1 f2:s2
+  aice context src/a.aipl:fnA,fnB src/b.aipl:L10-L50 src/c.aipl
+  ```
 - **Zero-Read Splicing on Files You Just Created**: When upgrading files you ALREADY created in the current session, do **NOT** call `aice outline` or `aice context` — stream all surgical edits directly into `aice splice --stdin << 'EOF'` (putting `EOF` alone on its own line, followed by `npm run build` on the next line)!
 - **Known Target Methods / Tests / Sections -> Direct `aice context`**: Call `aice context <file> -s "Class.m1,Class.m2"` (includes downstream caller call-site line numbers `[L14]`), `aice context <testFile> -s "TC-MENU-001"`, `aice context <doc.md> -s "Heading"`, or `aice context <dir> -s "/pattern/"` directly without running `aice outline` first.
 - **Unknown File or Directory Structure -> Multi-Target `aice outline`**: Run `aice outline src tests` or `aice outline <file1> <file2> ...` when exploring unfamiliar files or directories.
 - **Skip Redundant Reads**: You do NOT need to run `outline` or `context` just to append to a file (`:eof`) or add a new field/method/section (`:ClassName.newMember` or `:New Heading`).
 
-### 4. 1-Turn Multi-Symbol & Cross-File Surgical Splicing (90%+ Edit Token Savings)
-- **Multi-Block Heredoc Stream (Zero JSON Escaping)**: Apply all surgical edits across one or more files in **1 single turn** using `=== <filePath>:<symbol> ===` headers and clean native language syntax:
+### 4. 1-Turn Unified Mixed Create + Surgical Splice Stream (90%+ Edit Token Savings)
+- **Default Multi-Block Heredoc Stream (Mixing New `=== file ===` & Edited `=== file:sym ===` Blocks in 1 Turn)**: Apply both new file creations (`=== <filePath> ===` or `=== <filePath>:create ===`) and surgical edits (`=== <filePath>:<symbol> ===`) across multiple files in **1 single turn**:
   ```bash
   aice splice --stdin << 'EOF'
+  === src/new_helper.ts ===
+  export const BONUS_MULTIPLIER = 2;
   === src/constants.ts:eof ===
   export const COMBO_BONUS = 50;
   === src/board.ts:Board.isBoardEmpty ===
@@ -64,6 +71,7 @@ description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Ru
   EOF
   ```
 - **Supported `<symbol>` Selectors**:
+  - `=== <filePath> ===` (or `:create` / `:overwrite`): Creates or overwrites the target file atomically within the same `aice splice --stdin` batch.
   - `<FuncOrClass.method>` or `<Class.field>`: Replaces existing member OR **auto-inserts a new field/method into `<Class>`** if not yet present!
   - `<testIdOrTitle>`: Replaces matching `test(...)` / `it(...)` / `describe(...)` block by exact title or unique prefix/ID (e.g. `TC-MENU-001`).
   - `<Heading Title>` / `<function_or_label>`: Replaces or auto-appends Markdown `## Heading` sections (`.md`), shell/PowerShell functions (`.sh`, `.ps1`), or Batch `:label` blocks (`.cmd`, `.bat`).

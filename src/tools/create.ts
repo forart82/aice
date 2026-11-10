@@ -899,6 +899,11 @@ export async function createFile(
     throw new Error(`Must provide --code, --from, or stdin payload to create ${filePath}`);
   }
 
+  const singleStream = parseMultiFileCreateStream(rawPayload);
+  if (singleStream && singleStream.length === 1 && singleStream[0]?.code !== undefined) {
+    rawPayload = singleStream[0].code;
+  }
+
   const idiomsToggleOverride = typeof options.idioms === "boolean" ? options.idioms : undefined;
   const idiomsEnabled = isProjectIdiomsEnabled(config, idiomsToggleOverride);
 
@@ -1197,10 +1202,18 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         continue;
       }
     }
-
     const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
-      const cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      let cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      if (/:(?:create|overwrite)$/i.test(cand)) {
+        cand = cand.replace(/:(?:create|overwrite)$/i, "").trim();
+      } else {
+        const searchStart = /^[a-zA-Z]:[\\/]/.test(cand) ? 2 : 0;
+        const colonIdx = cand.indexOf(":", searchStart);
+        if (colonIdx > 0 && isTargetFilePath(cand.slice(0, colonIdx))) {
+          return null;
+        }
+      }
       if (isTargetFilePath(cand)) {
         inMdFence = false;
         mdFenceChar = "";

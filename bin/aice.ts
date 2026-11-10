@@ -71,14 +71,17 @@ import {
   formatParitySummaryTerminal,
   generateContext,
   generateUnifiedDiff,
+  mergeMultiContextResults,
   type OutlineOptions,
   outlinePath,
   type PatchOptions,
   parseMultiBlockSpliceStream,
   parseMultiFileCreateStream,
+  parseTargetWithInlineSymbol,
   patchFile,
   runParityGate,
   type SpliceOptions,
+  splitContextTargets,
   splice,
   spliceBatch,
 } from "../src/tools/index.js";
@@ -1735,6 +1738,40 @@ program
           if (streamItems && streamItems.length > 0) {
             rawItems = streamItems;
           } else {
+            const spliceStream = parseMultiBlockSpliceStream(rawInput);
+            if (spliceStream?.batchItems && spliceStream.batchItems.length > 0) {
+              const firstFp = spliceStream.batchItems[0]?.filePath;
+              const batchProjectRoot = findProjectRoot(
+                firstFp ? path.dirname(path.resolve(process.cwd(), firstFp)) : process.cwd(),
+                process.cwd(),
+              );
+              const batchProjectConfig = loadProjectConfig(batchProjectRoot);
+              if (!isProjectAiceEnabled(batchProjectConfig)) {
+                console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
+                process.exit(1);
+              }
+              const batchEffectiveIdioms = isProjectIdiomsEnabled(
+                batchProjectConfig,
+                options.idioms,
+              );
+              const batchRes = await spliceBatch(spliceStream.batchItems, {
+                dryRun: options.dryRun,
+                idioms: batchEffectiveIdioms,
+                projectRoot: batchProjectRoot,
+              });
+              if (options.json) {
+                console.log(JSON.stringify(batchRes, null, 2));
+                return;
+              }
+              const totalSaved = batchRes.results.reduce(
+                (acc, r) => acc + (r.tokensSaved ?? 0),
+                0,
+              );
+              console.log(
+                `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
+              );
+              return;
+            }
             const parsed = JSON.parse(rawInput);
             if (Array.isArray(parsed)) {
               rawItems = parsed as BatchCreateItem[];
@@ -1784,8 +1821,34 @@ program
 
         if (code) {
           const streamItems = parseMultiFileCreateStream(code);
-          if (streamItems && streamItems.length > 1) {
+          if (streamItems && streamItems.length >= 1) {
             await runCreateBatchItems(streamItems);
+            return;
+          }
+          const spliceStream = parseMultiBlockSpliceStream(code, filePathArg);
+          const batchSpliceItems =
+            spliceStream?.batchItems && spliceStream.batchItems.length > 0
+              ? spliceStream.batchItems
+              : spliceStream?.singleFileEdits && spliceStream.singleFileEdits.length > 0
+                ? [{ filePath: fullTarget, edits: spliceStream.singleFileEdits }]
+                : undefined;
+          if (batchSpliceItems && batchSpliceItems.length > 0) {
+            const batchRes = await spliceBatch(batchSpliceItems, {
+              dryRun: options.dryRun,
+              idioms: effectiveCreateIdioms,
+              projectRoot: createProjectRoot,
+            });
+            if (options.json) {
+              console.log(JSON.stringify(batchRes, null, 2));
+              return;
+            }
+            const totalSaved = batchRes.results.reduce(
+              (acc, r) => acc + (r.tokensSaved ?? 0),
+              0,
+            );
+            console.log(
+              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
+            );
             return;
           }
         }
@@ -1914,24 +1977,31 @@ Examples:
         stats?: boolean;
       },
     ) => {
-      const rawTargets = targetPaths && targetPaths.length > 0 ? targetPaths : [undefined];
+      const expandedTargets: Array<string | undefined> = [];
+      if (targetPaths && targetPaths.length > 0) {
+        for (const rawT of targetPaths) {
+          if (typeof rawT === "string" && /\s+/.test(rawT.trim())) {
+            const splitTokens = splitContextTargets(rawT, process.cwd());
+            if (splitTokens.length > 1) {
+              expandedTargets.push(...splitTokens);
+              continue;
+            }
+          }
+          expandedTargets.push(rawT);
+        }
+      } else {
+        expandedTargets.push(undefined);
+      }
+      const rawTargets = expandedTargets;
       try {
         const results = [];
         for (const rawTarget of rawTargets) {
           let targetPath = rawTarget;
           let inlineSymbol: string | undefined;
-          if (
-            typeof rawTarget === "string" &&
-            rawTarget.includes(":") &&
-            !/^[a-zA-Z]:[\\/]/.test(rawTarget)
-          ) {
-            const colonIdx = rawTarget.indexOf(":");
-            const candidateFile = rawTarget.slice(0, colonIdx);
-            const candidateSym = rawTarget.slice(colonIdx + 1).trim();
-            if (candidateFile && candidateSym && fs.existsSync(path.resolve(candidateFile))) {
-              targetPath = candidateFile;
-              inlineSymbol = candidateSym;
-            }
+          if (typeof rawTarget === "string") {
+            const parsed = parseTargetWithInlineSymbol(rawTarget, process.cwd());
+            targetPath = parsed.targetPath;
+            inlineSymbol = parsed.inlineSymbol;
           }
           const resolved = resolvePathTargets(targetPath, { includeTargets: true });
           if (!isProjectAiceEnabled(resolved.config)) {
@@ -1954,6 +2024,18 @@ Examples:
 
         if (options.json) {
           console.log(JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
+        } else if (results.length > 1) {
+          const merged = mergeMultiContextResults(results, {
+            outlineTarget: !!options.outlineTarget,
+          });
+          console.log(merged.formattedBundle);
+          if (options.stats) {
+            console.log("\n📊 Context Pack Token Telemetry:");
+            console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
+            console.log(`  Dependencies:      ${merged.dependencies.length}`);
+            console.log(`  Downstream callers:${merged.callers.length}`);
+            console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
+          }
         } else {
           for (const result of results) {
             console.log(result.formattedBundle);
