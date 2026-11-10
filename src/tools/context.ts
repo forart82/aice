@@ -434,7 +434,61 @@ function generateExternalContract(specifier: string, importedSymbols: string[]):
 }
 
 function extractAiplImports(content: string): ImportDecl[] {
-  const lines = content.split(/\r?\n/);
+  const stripBlockCommentsPreserveLines = (src: string): string => {
+    let out = "";
+    let inQuote: string | null = null;
+    let inLineComment = false;
+    let inBlockComment = false;
+    for (let k = 0; k < src.length; k++) {
+      const ch = src[k]!;
+      const next = src[k + 1];
+      if (inLineComment) {
+        out += ch;
+        if (ch === "\n") inLineComment = false;
+        continue;
+      }
+      if (inBlockComment) {
+        if (ch === "*" && next === "/") {
+          inBlockComment = false;
+          out += "  ";
+          k++;
+          continue;
+        }
+        out += ch === "\n" ? "\n" : " ";
+        continue;
+      }
+      if (inQuote) {
+        out += ch;
+        if (ch === "\\" && k + 1 < src.length) {
+          out += src[k + 1]!;
+          k++;
+          continue;
+        }
+        if (ch === inQuote) inQuote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        out += ch;
+        continue;
+      }
+      if ((ch === "/" && next === "/") || ch === "#") {
+        inLineComment = true;
+        out += ch;
+        continue;
+      }
+      if (ch === "/" && next === "*") {
+        inBlockComment = true;
+        out += "  ";
+        k++;
+        continue;
+      }
+      out += ch;
+    }
+    return out;
+  };
+
+  const lines = stripBlockCommentsPreserveLines(content).split(/\r?\n/);
   const imports: ImportDecl[] = [];
 
   const stripLineComment = (raw: string): string => {
@@ -453,7 +507,7 @@ function extractAiplImports(content: string): ImportDecl[] {
         inQuote = ch;
         continue;
       }
-      if (ch === "/" && raw[k + 1] === "/") {
+      if ((ch === "/" && raw[k + 1] === "/") || ch === "#") {
         return raw.slice(0, k);
       }
     }
@@ -468,6 +522,7 @@ function extractAiplImports(content: string): ImportDecl[] {
 
   const parseSpecifiers = (rawSpecs: string, span: ReturnType<typeof makeSpan>) => {
     return rawSpecs
+      .replace(/;+\s*$/, "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
@@ -508,7 +563,7 @@ function extractAiplImports(content: string): ImportDecl[] {
         chunks.push(stripLineComment(lines[j] ?? "").trim());
         const joined = chunks.join(" ");
         const m = joined.match(
-          /^(?:pub\s+)?import\s*\{([\s\S]*?)\}\s*from\s*(?:["']([^"']+)["']|([A-Za-z0-9_./-]+))/,
+          /^(?:pub\s+)?import\s*\{([\s\S]*?)\}\s*from\s*(?:["']([^"']+)["']|([A-Za-z0-9_./-]+))\s*;?\s*$/,
         );
         if (m) {
           endLine = j + 1;
@@ -544,7 +599,7 @@ function extractAiplImports(content: string): ImportDecl[] {
         chunks.push(stripLineComment(lines[j] ?? "").trim());
       }
       endLine = j + 1;
-      const joined = chunks.join(" ");
+      const joined = chunks.join(" ").replace(/;+\s*$/, "");
       const m = joined.match(
         /^(?:pub\s+)?from\s+(?:["']([^"']+)["']|([A-Za-z0-9_./-]+))\s+import\s+(?:\{([\s\S]*?)\}|(.+))$/,
       );
@@ -568,7 +623,7 @@ function extractAiplImports(content: string): ImportDecl[] {
 
     // 3. `import * as ns from "specifier"`, `import defaultSym from "specifier"`, or `import "specifier"`
     const stringImpMatch = clean.match(
-      /^(?:pub\s+)?import\s+(?:\*\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s+from\s+|([A-Za-z_][A-Za-z0-9_]*)\s+from\s+)?["']([^"']+)["']/,
+      /^(?:pub\s+)?import\s+(?:\*\s+as\s+([A-Za-z_][A-Za-z0-9_]*)\s+from\s+|([A-Za-z_][A-Za-z0-9_]*)\s+from\s+)?["']([^"']+)["']\s*;?\s*$/,
     );
     if (stringImpMatch) {
       const span = makeSpan(i + 1, i + 1);
@@ -593,7 +648,7 @@ function extractAiplImports(content: string): ImportDecl[] {
 
     // 4. `import mod.path` or `import mod.path as alias`
     const modImpMatch = clean.match(
-      /^(?:pub\s+)?import\s+([A-Za-z_][A-Za-z0-9_./]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$/,
+      /^(?:pub\s+)?import\s+([A-Za-z_][A-Za-z0-9_./]*)(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*;?\s*$/,
     );
     if (modImpMatch) {
       const span = makeSpan(i + 1, i + 1);
@@ -2151,23 +2206,136 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
   if (!trimmed || !/\s+/.test(trimmed)) {
     return trimmed ? [trimmed] : [];
   }
-  const tokens = trimmed.split(/\s+/).filter(Boolean);
-  if (tokens.length > 1) {
-    const allLookLikeTargets = tokens.every((tok) => {
+
+  // Tokenize respecting double/single quotes
+  const rawTokens: string[] = [];
+  let hadQuotes = false;
+  let cur = "";
+  let quoteChar: string | null = null;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i]!;
+    if (quoteChar) {
+      if (ch === "\\" && i + 1 < trimmed.length) {
+        cur += trimmed[i + 1]!;
+        i++;
+        continue;
+      }
+      if (ch === quoteChar) {
+        quoteChar = null;
+        continue;
+      }
+      cur += ch;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quoteChar = ch;
+      hadQuotes = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (cur) {
+        rawTokens.push(cur);
+        cur = "";
+      }
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur) rawTokens.push(cur);
+
+  if (rawTokens.length <= 1) {
+    return rawTokens.length === 1 ? [rawTokens[0]!] : [trimmed];
+  }
+  if (hadQuotes) {
+    return rawTokens;
+  }
+
+  const targetExistsOnDisk = (targetCandidate: string): boolean => {
+    const abs = path.isAbsolute(targetCandidate)
+      ? targetCandidate
+      : path.resolve(baseDir, targetCandidate);
+    return fs.existsSync(abs) || fs.existsSync(`${abs}.aice`);
+  };
+
+  // First check if the entire unquoted string is a single existing target (e.g. path with spaces)
+  const wholeCheck = parseTargetWithInlineSymbol(trimmed, baseDir);
+  if (targetExistsOnDisk(wholeCheck.targetPath)) {
+    if (!wholeCheck.inlineSymbol || !/\s/.test(wholeCheck.inlineSymbol)) {
+      return [trimmed];
+    }
+    // Whole targetPath exists and inlineSymbol contains spaces (e.g. `README.md:Update Makefile` or `src/a.ts:fnA src/b.ts:fnB`)
+    const symWords = wholeCheck.inlineSymbol.split(/\s+/).filter(Boolean);
+    const tailWords = symWords.slice(1);
+    const hasExplicitNextTarget = tailWords.some((w) => {
+      const parsedW = parseTargetWithInlineSymbol(w, baseDir);
+      if (parsedW.inlineSymbol) return true;
+      if (w.includes("/") || w.includes("\\")) return true;
+      const extW = path.extname(parsedW.targetPath).toLowerCase();
+      const firstExt = path.extname(wholeCheck.targetPath).toLowerCase();
+      const isDocOrTest =
+        firstExt === ".md" ||
+        firstExt === ".markdown" ||
+        /\.(?:test|spec)\.[a-z0-9]+$/i.test(wholeCheck.targetPath);
+      if (!isDocOrTest && (KNOWN_TARGET_EXTENSIONS.has(extW) || extW === ".aice")) {
+        return true;
+      }
+      return false;
+    });
+    if (!hasExplicitNextTarget) {
+      return [trimmed];
+    }
+  }
+
+  // Greedily recombine tokens if a path with spaces exists on disk (e.g. `/tmp/my dir/a.ts:fnA /tmp/my dir/b.ts:fnB`)
+  const mergedTokens: string[] = [];
+  let idx = 0;
+  while (idx < rawTokens.length) {
+    const tok = rawTokens[idx]!;
+    const tokParsed = parseTargetWithInlineSymbol(tok, baseDir);
+    const tokExt = path.extname(tokParsed.targetPath).toLowerCase();
+    const tokIsFile =
+      (targetExistsOnDisk(tokParsed.targetPath) &&
+        (() => {
+          try {
+            const abs = path.isAbsolute(tokParsed.targetPath)
+              ? tokParsed.targetPath
+              : path.resolve(baseDir, tokParsed.targetPath);
+            return fs.existsSync(abs) && fs.statSync(abs).isFile();
+          } catch {
+            return false;
+          }
+        })()) ||
+      KNOWN_TARGET_EXTENSIONS.has(tokExt) ||
+      tokExt === ".aice";
+    if (!tokIsFile && idx + 1 < rawTokens.length) {
+      let combined = tok;
+      let matchedSpan = -1;
+      for (let j = idx + 1; j < rawTokens.length; j++) {
+        combined += ` ${rawTokens[j]!}`;
+        const combParsed = parseTargetWithInlineSymbol(combined, baseDir);
+        if (targetExistsOnDisk(combParsed.targetPath) && (!combParsed.inlineSymbol || !/\s/.test(combParsed.inlineSymbol))) {
+          matchedSpan = j;
+          break;
+        }
+      }
+      if (matchedSpan > idx) {
+        mergedTokens.push(rawTokens.slice(idx, matchedSpan + 1).join(" "));
+        idx = matchedSpan + 1;
+        continue;
+      }
+    }
+    mergedTokens.push(tok);
+    idx++;
+  }
+
+  if (mergedTokens.length > 1) {
+    const allLookLikeTargets = mergedTokens.every((tok) => {
       const p = parseTargetWithInlineSymbol(tok, baseDir).targetPath;
-      const abs = path.isAbsolute(p) ? p : path.resolve(baseDir, p);
       const ext = path.extname(p).toLowerCase();
-      return fs.existsSync(abs) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice";
+      return targetExistsOnDisk(p) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice";
     });
     if (allLookLikeTargets) {
-      return tokens;
-    }
-    const wholeCheck = parseTargetWithInlineSymbol(trimmed, baseDir);
-    const wholeAbs = path.isAbsolute(wholeCheck.targetPath)
-      ? wholeCheck.targetPath
-      : path.resolve(baseDir, wholeCheck.targetPath);
-    if (!fs.existsSync(wholeAbs)) {
-      return tokens;
+      return mergedTokens;
     }
   }
   return [trimmed];

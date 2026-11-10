@@ -1327,6 +1327,7 @@ Examples:
               dryRun: options.dryRun,
               compile: options.compile,
               idioms: batchEffectiveIdioms,
+              projectRoot: batchProjectRoot,
             });
             const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
             console.log(
@@ -1405,6 +1406,7 @@ Examples:
                 dryRun: options.dryRun,
                 compile: options.compile,
                 idioms: batchEffectiveIdioms,
+                projectRoot: batchProjectRoot,
               });
               const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
               console.log(
@@ -1822,6 +1824,17 @@ program
         if (code) {
           const streamItems = parseMultiFileCreateStream(code);
           if (streamItems && streamItems.length >= 1) {
+            if (streamItems.length === 1 && filePathArg) {
+              const firstItem = streamItems[0]!;
+              const itemFp = String(firstItem.filePath ?? firstItem.file ?? firstItem.path ?? "");
+              if (
+                !itemFp ||
+                (!itemFp.includes("/") && !itemFp.includes("\\")) ||
+                path.basename(itemFp) === path.basename(filePathArg)
+              ) {
+                firstItem.filePath = filePathArg;
+              }
+            }
             await runCreateBatchItems(streamItems);
             return;
           }

@@ -11,6 +11,7 @@ import {
   generateMultiContext,
   parseTargetWithInlineSymbol,
   resolveImportPath,
+  splitContextTargets,
 } from "../../src/tools/context.js";
 import { createFile, parseMultiFileCreateStream } from "../../src/tools/create.js";
 import { parseMultiBlockSpliceStream, spliceBatch } from "../../src/tools/splice.js";
@@ -486,12 +487,126 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
     });
   });
 
-  describe("Step 4: Stream-First Mandatory Rules & Version 0.9.23", () => {
+  describe("Step 4: Stream-First Mandatory Rules, Edge Cases & Version 0.9.23", () => {
     it("exports AICE_VERSION 0.9.23 and documents stream-first context and mixed splice in MANDATORY_AGENT_RULES_MARKDOWN", () => {
       expect(AICE_VERSION).toBe("0.9.23");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.23 -->");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice context f1:s1 f2:s2");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
+    });
+
+    it("handles AIPL block comments /* ... */, # line comments, and trailing semicolons in extractImportsFromFile", () => {
+      const aiplPath = path.join(tmpDir, "src", "commented.aipl");
+      fs.mkdirSync(path.dirname(aiplPath), { recursive: true });
+      const aiplSource = [
+        "import {",
+        "  symA, # hash comment inside import",
+        "  /* multi-line",
+        "     block comment */ symB as aliasB,",
+        "  symC /* inline block */",
+        '} from "std/math";',
+        'from "std/io" import { readAll, /* comment */ writeAll };',
+        "import pkg.utils;",
+      ].join("\n");
+      fs.writeFileSync(aiplPath, aiplSource, "utf-8");
+
+      const extracted = extractImportsFromFile(aiplPath);
+      expect(extracted.length).toBe(3);
+      expect(extracted[0]?.source).toBe("std/math");
+      expect(extracted[0]?.span.start.line).toBe(1);
+      expect(extracted[0]?.span.end.line).toBe(6);
+      expect(extracted[0]?.specifiers.map((s) => ({ name: s.name, alias: s.alias }))).toEqual([
+        { name: "symA", alias: undefined },
+        { name: "symB", alias: "aliasB" },
+        { name: "symC", alias: undefined },
+      ]);
+      expect(extracted[1]?.source).toBe("std/io");
+      expect(extracted[1]?.specifiers.map((s) => s.name)).toEqual(["readAll", "writeAll"]);
+      expect(extracted[2]?.source).toBe("pkg.utils");
+    });
+
+    it("handles splitContextTargets on markdown headings with Makefile, paths with spaces, and MCP single-file surgical create", async () => {
+      fs.writeFileSync(path.join(tmpDir, "README.md"), "# Doc\n## Update Makefile\nRun make.\n", "utf-8");
+      fs.writeFileSync(path.join(tmpDir, "Makefile"), "all:\n\techo ok\n", "utf-8");
+
+      // Should NOT split `README.md:Update Makefile` into two targets even when `Makefile` exists in cwd
+      expect(splitContextTargets("README.md:Update Makefile", tmpDir)).toEqual([
+        "README.md:Update Makefile",
+      ]);
+
+      // Should NOT split `/tmp/.../my dir/file.ts:fnA` even when `/tmp/.../my` directory exists on disk
+      fs.mkdirSync(path.join(tmpDir, "my"), { recursive: true });
+      const spacedDir = path.join(tmpDir, "my dir");
+      fs.mkdirSync(spacedDir, { recursive: true });
+      const spacedFile = path.join(spacedDir, "file.ts");
+      fs.writeFileSync(spacedFile, "export function fnA(): number { return 1; }\n", "utf-8");
+
+      expect(splitContextTargets(`${spacedFile}:fnA`, tmpDir)).toEqual([`${spacedFile}:fnA`]);
+
+      // Quoted paths with spaces should split cleanly into 2 unquoted targets
+      const spacedFileB = path.join(spacedDir, "fileB.ts");
+      fs.writeFileSync(spacedFileB, "export function fnB(): number { return 2; }\n", "utf-8");
+      expect(splitContextTargets(`"${spacedFile}:fnA" "${spacedFileB}:fnB"`, tmpDir)).toEqual([
+        `${spacedFile}:fnA`,
+        `${spacedFileB}:fnB`,
+      ]);
+
+      // ClassName.markdown with >4 char method name matching extension must be treated as symbol edit when defaultFilePath is given
+      const docEdit = parseMultiBlockSpliceStream(
+        "=== Doc.markdown ===\npublic markdown(): string { return '# ok'; }",
+        "src/doc.ts",
+      );
+      expect(docEdit?.singleFileEdits).toEqual([
+        {
+          symbol: "Doc.markdown",
+          code: "public markdown(): string { return '# ok'; }",
+          delete: undefined,
+        },
+      ]);
+
+      // MCP aice_create with explicit filePath and single-file surgical `=== src/svc.ts:Svc.ping ===` routes to spliceBatch
+      const svcPath = path.join(tmpDir, "src", "svc.ts");
+      fs.mkdirSync(path.dirname(svcPath), { recursive: true });
+      fs.writeFileSync(
+        svcPath,
+        "export class Svc {\n  public ping(): string {\n    return 'old';\n  }\n}\n",
+        "utf-8",
+      );
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+      const mcpSurgicalRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 99,
+        method: "tools/call",
+        params: {
+          name: "aice_create",
+          arguments: {
+            filePath: "src/svc.ts",
+            code: "=== src/svc.ts:Svc.ping ===\npublic ping(): string {\n  return 'mcp-surgical-pong';\n}",
+          },
+        },
+      })) as { result: McpToolCallResult };
+      expect(mcpSurgicalRes.result.isError).toBeFalsy();
+      expect(fs.readFileSync(svcPath, "utf-8")).toContain("mcp-surgical-pong");
+      expect(fs.readFileSync(svcPath, "utf-8")).not.toContain("===");
+
+      // MCP aice_create with filePath in subdirectory and bare `=== single.ts ===` header preserves subdirectory
+      const mcpSubRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 100,
+        method: "tools/call",
+        params: {
+          name: "aice_create",
+          arguments: {
+            filePath: "src/sub/single.ts",
+            code: "=== single.ts ===\nexport const SUB_OK = 77;\n",
+          },
+        },
+      })) as { result: McpToolCallResult };
+      expect(mcpSubRes.result.isError).toBeFalsy();
+      const subFile = path.join(tmpDir, "src", "sub", "single.ts");
+      expect(fs.existsSync(subFile)).toBe(true);
+      expect(fs.readFileSync(subFile, "utf-8")).toContain("export const SUB_OK = 77;");
+      expect(fs.readFileSync(subFile, "utf-8")).not.toContain("===");
     });
   });
 });

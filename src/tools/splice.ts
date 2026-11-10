@@ -6657,16 +6657,16 @@ export interface ParsedMultiBlockSpliceStream {
   }
 
   function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): boolean {
-  if (!isSpliceTargetFileCandidate(spec)) return false;
-  if (!defaultFilePath) return true;
-  if (spec.includes("/") || spec.includes("\\")) return true;
-  if (
-    path.resolve(spec) === path.resolve(defaultFilePath) ||
-    path.basename(spec) === path.basename(defaultFilePath)
-  ) {
-    return true;
-  }
-  return !/^[A-Z][A-Za-z0-9_]*\.[a-z]{1,4}$/.test(spec);
+    if (!isSpliceTargetFileCandidate(spec)) return false;
+    if (!defaultFilePath) return true;
+    if (spec.includes("/") || spec.includes("\\")) return true;
+    if (
+      path.resolve(spec) === path.resolve(defaultFilePath) ||
+      path.basename(spec) === path.basename(defaultFilePath)
+    ) {
+      return true;
+    }
+    return !/^[A-Z][A-Za-z0-9_]*\.[a-zA-Z0-9_]+$/i.test(spec);
   }
 
   /**
@@ -6958,13 +6958,14 @@ export interface ParsedMultiBlockSpliceStream {
 
         const isCreateRoute =
           !item.delete &&
-          !item.append &&
-          !item.insertAfter &&
-          !item.insert_after &&
-          !item.insertBefore &&
-          !item.insert_before &&
-          (((!item.edits || item.edits.length === 0) && isCreateOrOverwriteSymbol(item.symbol)) ||
-            !fileExistsNow);
+          (!fileExistsNow ||
+            (!item.append &&
+              !item.insertAfter &&
+              !item.insert_after &&
+              !item.insertBefore &&
+              !item.insert_before &&
+              (!item.edits || item.edits.length === 0) &&
+              isCreateOrOverwriteSymbol(item.symbol)));
 
         if (isCreateRoute) {
           const createPayload =
@@ -7003,7 +7004,7 @@ export interface ParsedMultiBlockSpliceStream {
           continue;
         }
 
-        const res = await splice(rawFp, {
+        const res = await splice(fullPath, {
           ...item,
           code: resolvedCode,
           insertAfter: item.insertAfter ?? item.insert_after,

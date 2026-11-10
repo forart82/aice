@@ -1328,8 +1328,7 @@ export class AiceMcpServer {
         );
         const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
         const streamItems =
-          !Array.isArray(args.files) &&
-          (!rawTargetFile || /^\s*(?:===|---|\/\/\s*FILE:)/m.test(rawCodeCandidate))
+          !Array.isArray(args.files) && rawCodeCandidate
             ? parseMultiFileCreateStream(rawCodeCandidate)
             : null;
         if (!Array.isArray(args.files) && !streamItems && rawCodeCandidate) {
@@ -1337,8 +1336,16 @@ export class AiceMcpServer {
             rawCodeCandidate,
             rawTargetFile || undefined,
           );
-          if (spliceStream?.batchItems && spliceStream.batchItems.length > 0) {
-            const firstRawFp = String(spliceStream.batchItems[0]!.filePath ?? "");
+          const effectiveBatchItems =
+            spliceStream?.batchItems && spliceStream.batchItems.length > 0
+              ? spliceStream.batchItems
+              : spliceStream?.singleFileEdits &&
+                  spliceStream.singleFileEdits.length > 0 &&
+                  rawTargetFile
+                ? [{ filePath: rawTargetFile, edits: spliceStream.singleFileEdits }]
+                : undefined;
+          if (effectiveBatchItems && effectiveBatchItems.length > 0) {
+            const firstRawFp = String(effectiveBatchItems[0]!.filePath ?? "");
             const firstSafeFp = this.resolveSafePath(firstRawFp);
             const projectRoot = this.resolveProjectRoot(firstSafeFp);
             const config = loadProjectConfig(projectRoot);
@@ -1352,30 +1359,60 @@ export class AiceMcpServer {
               config,
               typeof args.idioms === "boolean" ? args.idioms : undefined,
             );
-            const safeBatchItems = spliceStream.batchItems.map((item) => ({
+            const safeBatchItems = effectiveBatchItems.map((item) => ({
               ...item,
               filePath: this.resolveSafePath(String(item.filePath ?? "")),
             }));
-            const batchRes = await spliceBatch(safeBatchItems, {
-              dryRun,
-              idioms: effectiveIdioms,
-              projectRoot,
-            });
+            const batchRes = await withSuppressedTelemetryAsync(() =>
+              spliceBatch(safeBatchItems, {
+                dryRun,
+                idioms: effectiveIdioms,
+                projectRoot,
+              }),
+            );
             const totalSaved = batchRes.results.reduce(
               (acc, r) => acc + (r.tokensSaved ?? 0),
               0,
             );
+            const msg = `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`;
+            for (let idx = 0; idx < batchRes.results.length; idx++) {
+              const res = batchRes.results[idx]!;
+              const item = safeBatchItems[idx]!;
+              const itemSnippet =
+                item.code ??
+                (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+              recordTelemetryEvent({
+                targetPath: item.filePath,
+                projectRoot,
+                operation: "splice",
+                surface: "mcp",
+                idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
+                nativeText: res.modifiedCode,
+                aiceText: itemSnippet ? `${itemSnippet}\n${msg}` : msg,
+              });
+            }
             return {
               content: [
                 {
                   type: "text",
-                  text: `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
+                  text: msg,
                 },
               ],
             };
           }
         }
         if (Array.isArray(args.files) || (streamItems && streamItems.length >= 1)) {
+          if (streamItems && streamItems.length === 1 && rawTargetFile) {
+            const firstEntry = streamItems[0]!;
+            const entryFp = String(firstEntry.filePath ?? firstEntry.file ?? firstEntry.path ?? "");
+            if (
+              !entryFp ||
+              (!entryFp.includes("/") && !entryFp.includes("\\")) ||
+              path.basename(entryFp) === path.basename(rawTargetFile)
+            ) {
+              firstEntry.filePath = rawTargetFile;
+            }
+          }
           const rawFiles = Array.isArray(args.files)
             ? (args.files as Array<Record<string, unknown>>)
             : (streamItems as Array<Record<string, unknown>>);
