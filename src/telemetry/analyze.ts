@@ -152,11 +152,7 @@ export function resolveTelemetryErrorsPath(explicitTelemetryPath?: string): stri
 }
 
 function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolean {
-  if (
-    explicitPath ||
-    process.env.AICE_TELEMETRY_PATH ||
-    process.env.AICE_TELEMETRY_ERRORS_PATH
-  ) {
+  if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_TELEMETRY_ERRORS_PATH) {
     return false;
   }
   return Boolean(process.env.VITEST || process.env.NODE_ENV === "test");
@@ -371,7 +367,12 @@ function extractAntigravityWorkspaceFromDb(
   conversationId: string,
 ): string | null {
   const candidates = [
-    path.resolve(path.dirname(transcriptPath), "../../../..", "conversations", `${conversationId}.db`),
+    path.resolve(
+      path.dirname(transcriptPath),
+      "../../../..",
+      "conversations",
+      `${conversationId}.db`,
+    ),
     path.join(os.homedir(), ".gemini", "antigravity-cli", "conversations", `${conversationId}.db`),
   ];
   for (const dbPath of candidates) {
@@ -498,8 +499,7 @@ function parseTranscriptFile(
       llmTurns++;
       const usage = (step.usage as Record<string, unknown> | undefined) ?? step;
       const it = Number(usage.input_tokens ?? 0) || 0;
-      const ct =
-        Number(usage.cache_read_tokens ?? usage.cache_read_input_tokens ?? 0) || 0;
+      const ct = Number(usage.cache_read_tokens ?? usage.cache_read_input_tokens ?? 0) || 0;
       const ot = Number(usage.output_tokens ?? 0) || 0;
       inputTokensUncached += it;
       cacheReadTokens += ct;
@@ -561,6 +561,18 @@ function parseTranscriptFile(
         const nat = Number(mCreate[1]) || 0;
         const aice = Number(mCreate[2]) || 0;
         const saved = Number(mCreate[3]) || 0;
+        transcriptWriteCalls++;
+        transcriptNativeCl100k += nat;
+        transcriptAiceCl100k += aice;
+        transcriptSavedCl100k += saved;
+      }
+      for (const mCreateClean of content.matchAll(
+        /(?:Batch created|Created)\b[^\n]*?\((\d+)\s*cl100k tokens(?:,\s*saved:\s*([+-]?\d+))?/g,
+      )) {
+        if (mCreateClean[0].includes("Native:")) continue;
+        const aice = Number(mCreateClean[1]) || 0;
+        const saved = Number(mCreateClean[2]) || 0;
+        const nat = aice + saved;
         transcriptWriteCalls++;
         transcriptNativeCl100k += nat;
         transcriptAiceCl100k += aice;
@@ -799,8 +811,7 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       } else {
         const discovered = findProjectRoot(dirCandidate, dirCandidate);
         const discoveredInsideRepo =
-          discovered === process.cwd() &&
-          dirCandidate.startsWith(`${os.tmpdir()}${path.sep}`);
+          discovered === process.cwd() && dirCandidate.startsWith(`${os.tmpdir()}${path.sep}`);
         projectRoot = discoveredInsideRepo ? dirCandidate : discovered;
       }
     } else {
@@ -898,8 +909,7 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
   const toolPayloadRatioPct = outputTokens > 0 ? 100 - thinkingRatioPct : 0;
 
   const aiceOpsCount =
-    Object.values(aiceSubcommands).reduce((a, b) => a + b, 0) ||
-    (detail?.summary.totalCalls ?? 0);
+    Object.values(aiceSubcommands).reduce((a, b) => a + b, 0) || (detail?.summary.totalCalls ?? 0);
   const bypassOpsCount = Object.values(nativeFileBypasses).reduce((a, b) => a + b, 0);
   const aiceCompliancePct =
     aiceOpsCount + bypassOpsCount > 0
@@ -910,9 +920,7 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
 
   const hasLedgerCalls = (detail?.summary.totalCalls ?? 0) > 0;
   const fallbackPct =
-    fallbackNativeCl100k > 0
-      ? Math.round((fallbackSavedCl100k / fallbackNativeCl100k) * 100)
-      : 0;
+    fallbackNativeCl100k > 0 ? Math.round((fallbackSavedCl100k / fallbackNativeCl100k) * 100) : 0;
 
   return {
     capturedAt: new Date().toISOString(),
@@ -991,9 +999,7 @@ export function formatAnalyzeReport(report: ProjectAnalyzeReport): string {
   const subSep = "--------------------------------------------------------------------------------";
 
   lines.push(sep);
-  lines.push(
-    `AICE POST-SESSION PROJECT ANALYZER — ${report.projectName} (${report.projectRoot})`,
-  );
+  lines.push(`AICE POST-SESSION PROJECT ANALYZER — ${report.projectName} (${report.projectRoot})`);
   lines.push(sep);
   lines.push(
     `  Config Status   : AICE=${report.configStatus.enabled ? "ENABLED" : "DISABLED"} | Idioms=${report.configStatus.idiomsEnabled ? "ON" : "OFF"} (${report.configStatus.activeIdiomsCount} active)`,
@@ -1012,12 +1018,8 @@ export function formatAnalyzeReport(report: ProjectAnalyzeReport): string {
   lines.push(
     `  Active Coding Time     : ${formatDuration(ss.wallClockSeconds)} (${ss.wallClockSeconds}s)`,
   );
-  lines.push(
-    `  Uncached Input Tokens  : ${ss.inputTokensUncached.toLocaleString("en-US")}`,
-  );
-  lines.push(
-    `  Cache Read Tokens      : ${ss.cacheReadTokens.toLocaleString("en-US")}`,
-  );
+  lines.push(`  Uncached Input Tokens  : ${ss.inputTokensUncached.toLocaleString("en-US")}`);
+  lines.push(`  Cache Read Tokens      : ${ss.cacheReadTokens.toLocaleString("en-US")}`);
   lines.push(
     `  Output Tokens (Gen)    : ${ss.outputTokens.toLocaleString("en-US")} (~${ss.thinkingTokensEst.toLocaleString("en-US")} thinking/text [${ss.thinkingRatioPct}%] | ~${ss.toolPayloadTokensEst.toLocaleString("en-US")} tool payload [${ss.toolPayloadRatioPct}%])`,
   );

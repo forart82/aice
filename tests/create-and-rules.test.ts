@@ -454,9 +454,54 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       fs.mkdirSync(subDir, { recursive: true });
       const subCreateOut = runCli(["create", "rel.ts", "-c", "^fn subFn()-># => 42"], subDir);
       expect(subCreateOut.status).toBe(0);
+      expect(subCreateOut.stdout).toMatch(/✔ Created rel\.ts \(\d+ cl100k tokens/);
+      expect(subCreateOut.stdout).not.toContain("Native:");
+      expect(subCreateOut.stdout).not.toContain("net saved: +0");
       expect(fs.existsSync(path.join(subDir, "rel.ts"))).toBe(true);
       expect(fs.existsSync(path.join(tmpDir, "rel.ts"))).toBe(false);
 
+      const dryCreateOut = runCli(
+        ["create", "dry.ts", "-c", "export const x = 1;\n", "--dry-run"],
+        subDir,
+      );
+      expect(dryCreateOut.status).toBe(0);
+      expect(dryCreateOut.stdout).toMatch(/\[Dry Run\] Previewed dry\.ts \(\d+ cl100k tokens\)/);
+      expect(dryCreateOut.stdout).not.toContain("Native:");
+
+      const batchZeroSaved = runCli(
+        ["create", "-c", "=== a.ts ===\nexport const a = 1;\n=== b.ts ===\nexport const b = 2;\n"],
+        subDir,
+      );
+      expect(batchZeroSaved.status).toBe(0);
+      expect(batchZeroSaved.stdout).toMatch(
+        /✔ Batch created 2 file\(s\) in 1 turn \(\d+ cl100k tokens, 1 turn\(s\) saved\)/,
+      );
+
+      const batchSingleZeroSaved = runCli(
+        [
+          "create",
+          "--batch",
+          JSON.stringify([{ filePath: "single.ts", code: "export const s = 1;\n" }]),
+        ],
+        subDir,
+      );
+      expect(batchSingleZeroSaved.status).toBe(0);
+      expect(batchSingleZeroSaved.stdout).toMatch(
+        /✔ Created 1 file: .*single\.ts \(\d+ cl100k tokens\)/,
+      );
+
+      const batchPositiveSaved = runCli(
+        [
+          "create",
+          "-c",
+          "=== c.ts ===\n^fn add(a:#,b:#)-># => a+b\n=== d.ts ===\n^fn mul(a:#,b:#)-># => a*b\n",
+        ],
+        subDir,
+      );
+      expect(batchPositiveSaved.status).toBe(0);
+      expect(batchPositiveSaved.stdout).toMatch(
+        /✔ Batch created 2 file\(s\) \(\d+ cl100k tokens, saved: \+\d+, 1 turn\(s\) saved\)/,
+      );
       const subSpliceOut = runCli(
         ["splice", "rel-splice.ts", "-s", "*", "-c", "^fn spFn()-># => 7"],
         subDir,
@@ -996,7 +1041,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
     it("11. v0.9.17 supports companion project manifest files (Cargo.toml, go.mod, CMakeLists.txt, .csproj, .gitignore) inside multi-file create streams without batch rollback", async () => {
       const polyDir = path.join(tmpDir, "poly-manifests");
       const stream = [
-        "@idiom $ok() => println!(\"ok\");",
+        '@idiom $ok() => println!("ok");',
         "=== .gitignore ===",
         "target/\nnode_modules/",
         "=== Cargo.toml ===",
@@ -1015,8 +1060,12 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(batchRes.totalFiles).toBe(6);
       expect(fs.readFileSync(path.join(polyDir, ".gitignore"), "utf-8")).toContain("target/");
       expect(fs.readFileSync(path.join(polyDir, "Cargo.toml"), "utf-8")).toContain('name = "demo"');
-      expect(fs.readFileSync(path.join(polyDir, "go.mod"), "utf-8")).toContain("module example.com/demo");
-      expect(fs.readFileSync(path.join(polyDir, "CMakeLists.txt"), "utf-8")).toContain("project(demo)");
+      expect(fs.readFileSync(path.join(polyDir, "go.mod"), "utf-8")).toContain(
+        "module example.com/demo",
+      );
+      expect(fs.readFileSync(path.join(polyDir, "CMakeLists.txt"), "utf-8")).toContain(
+        "project(demo)",
+      );
       expect(fs.readFileSync(path.join(polyDir, "Demo.csproj"), "utf-8")).toContain("net8.0");
     });
 

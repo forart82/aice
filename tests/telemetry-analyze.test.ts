@@ -71,7 +71,8 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
       operation: "create",
       surface: "cli",
       agent: "agy",
-      nativeText: "export class Engine {\n  public step(): number {\n    return 1;\n  }\n}\n".repeat(4),
+      nativeText:
+        "export class Engine {\n  public step(): number {\n    return 1;\n  }\n}\n".repeat(4),
       aiceText: "pub class Engine:\n  pub fn step() -> int = 1\n",
       telemetryPath: ledgerPath,
     });
@@ -130,7 +131,8 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
           {
             name: "run_command",
             args: {
-              CommandLine: "aice splice src/engine.ts -s Engine.step -c 'public step(): number { return 2; }'",
+              CommandLine:
+                "aice splice src/engine.ts -s Engine.step -c 'public step(): number { return 2; }'",
             },
           },
         ],
@@ -197,20 +199,24 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     };
 
     try {
-      execFileSync(process.execPath, [cliBin, "splice", tsFile, "-s", "doesNotExist", "-c", "const x = 1;"], {
-        cwd: projRoot,
-        env,
-        stdio: "pipe",
-      });
+      execFileSync(
+        process.execPath,
+        [cliBin, "splice", tsFile, "-s", "doesNotExist", "-c", "const x = 1;"],
+        {
+          cwd: projRoot,
+          env,
+          stdio: "pipe",
+        },
+      );
     } catch {
       // expected failure
     }
 
-    const rawJson = execFileSync(
-      process.execPath,
-      [cliBin, "analyze", projRoot, "--json"],
-      { cwd: projRoot, env, encoding: "utf-8" },
-    );
+    const rawJson = execFileSync(process.execPath, [cliBin, "analyze", projRoot, "--json"], {
+      cwd: projRoot,
+      env,
+      encoding: "utf-8",
+    });
     const parsed = JSON.parse(rawJson);
     expect(parsed.projectName).toBe("cli_proj");
     expect(parsed.frictionAudit.telemetryErrors.length).toBeGreaterThanOrEqual(1);
@@ -272,8 +278,12 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
           type: "GENERIC",
           status: "DONE",
           created_at: "2026-11-09T11:00:12Z",
-          content:
+          content: [
             "✔ Batch created 1 native file(s) (Native: 500 -> AICE: 300 cl100k tokens, net saved: +200)",
+            "✔ Batch created 2 file(s) (180 cl100k tokens, saved: +70, 1 turn(s) saved)",
+            "✔ Batch created 2 file(s) in 1 turn (120 cl100k tokens, 1 turn(s) saved)",
+            "✔ Created src/util.ts (50 cl100k tokens)",
+          ].join("\n"),
         }),
       ].join("\n") + "\n",
       "utf-8",
@@ -328,9 +338,13 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     expect(rep1.sessions.map((s) => s.conversationId)).toEqual([cidA]);
     expect(rep1.sessionSummary.thinkingTokensEst).toBeGreaterThan(0);
     expect(rep1.sessionSummary.toolPayloadTokensEst).toBeGreaterThan(0);
-    expect(rep1.sessionSummary.thinkingRatioPct + rep1.sessionSummary.toolPayloadRatioPct).toBe(100);
-    expect(rep1.bpeSavings.totalCalls).toBe(1);
-    expect(rep1.bpeSavings.savedCl100k).toBe(200);
+    expect(rep1.sessionSummary.thinkingRatioPct + rep1.sessionSummary.toolPayloadRatioPct).toBe(
+      100,
+    );
+    expect(rep1.bpeSavings.totalCalls).toBe(4);
+    expect(rep1.bpeSavings.savedCl100k).toBe(270);
+    expect(rep1.bpeSavings.aiceCl100k).toBe(650);
+    expect(rep1.bpeSavings.nativeCl100k).toBe(920);
 
     const repSub = analyzeProject({
       project: monoSubSrc,

@@ -1087,9 +1087,7 @@ Examples:
           });
         }
 
-        const hasDirectoryTarget = resolvedTargets.some((t) =>
-          fs.statSync(t.abs).isDirectory(),
-        );
+        const hasDirectoryTarget = resolvedTargets.some((t) => fs.statSync(t.abs).isDirectory());
 
         if (hasDirectoryTarget || options.compact) {
           const outlineOpts: OutlineOptions = {
@@ -1680,14 +1678,22 @@ program
 
           if (options.dryRun) {
             console.log(
-              `[Dry Run] Previewed batch creation of ${batchRes.results.length} file(s) (net saved: ${batchRes.totalTokensSaved >= 0 ? `+${batchRes.totalTokensSaved}` : batchRes.totalTokensSaved} tokens)`,
+              `[Dry Run] Previewed batch creation of ${batchRes.results.length} file(s) (${batchRes.totalAiceTokens} cl100k tokens${batchRes.totalTokensSaved > 0 ? `, saved: +${batchRes.totalTokensSaved}` : ""})`,
             );
             for (const r of batchRes.results) {
               console.log(`\n// === ${r.filePath} ===\n${r.nativeCode}`);
             }
+          } else if (batchRes.totalTokensSaved > 0) {
+            console.log(
+              `✔ Batch created ${batchRes.results.length} file(s) (${batchRes.totalAiceTokens} cl100k tokens, saved: +${batchRes.totalTokensSaved}${batchRes.results.length > 1 ? `, ${batchRes.results.length - 1} turn(s) saved` : ""})`,
+            );
+          } else if (batchRes.results.length > 1) {
+            console.log(
+              `✔ Batch created ${batchRes.results.length} file(s) in 1 turn (${batchRes.totalAiceTokens} cl100k tokens, ${batchRes.results.length - 1} turn(s) saved)`,
+            );
           } else {
             console.log(
-              `✔ Batch created ${batchRes.results.length} native file(s) (Native: ${batchRes.totalNativeTokens} -> AICE: ${batchRes.totalAiceTokens} cl100k tokens, net saved: ${batchRes.totalTokensSaved >= 0 ? `+${batchRes.totalTokensSaved}` : batchRes.totalTokensSaved})`,
+              `✔ Created 1 file: ${batchRes.results[0]?.filePath ?? ""} (${batchRes.totalAiceTokens} cl100k tokens)`,
             );
           }
         };
@@ -1800,16 +1806,14 @@ program
           return;
         }
 
-        const deltaStr =
-          result.tokensSaved >= 0 ? `+${result.tokensSaved}` : String(result.tokensSaved);
         if (options.dryRun) {
           console.log(
-            `[Dry Run] Previewed ${filePathArg} (Native: ${result.nativeTokens} -> AICE: ${result.aiceTokens} cl100k tokens, net saved: ${deltaStr})`,
+            `[Dry Run] Previewed ${filePathArg} (${result.aiceTokens} cl100k tokens${result.tokensSaved > 0 ? `, saved: +${result.tokensSaved}` : ""})`,
           );
           console.log(result.nativeCode);
         } else {
           console.log(
-            `✔ Created ${filePathArg} (Native: ${result.nativeTokens} -> AICE: ${result.aiceTokens} cl100k tokens, net saved: ${deltaStr})`,
+            `✔ Created ${filePathArg} (${result.aiceTokens} cl100k tokens${result.tokensSaved > 0 ? `, saved: +${result.tokensSaved}` : ""})`,
           );
           const eligibleTipExts = new Set([
             ".ts",
