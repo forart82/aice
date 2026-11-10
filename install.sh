@@ -385,6 +385,26 @@ if [[ -o interactive ]]; then
 fi
 # <<< aice-cheatsheet <<<
 CHEATSHEET_EOF
+  if [[ -n "${LOCAL_VER:-}" ]] && [[ "${LOCAL_VER}" != "unknown" ]]; then
+    node -e '
+      const fs = require("fs");
+      const [p, ver] = process.argv.slice(1);
+      let c = fs.readFileSync(p, "utf-8");
+      const title = `AICE v${ver} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`;
+      const titlePad = " ".repeat(Math.max(1, 77 - [...title].length));
+      c = c.replace(
+        /AICE v[^ ]+ — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET \(@forart82\)\$\{C_RESET\}\s+/,
+        `${title}\${C_RESET}${titlePad}`,
+      );
+      const inspect = `Inspect v${ver}`;
+      const inspectPad = " ".repeat(Math.max(0, 16 - [...inspect].length));
+      c = c.replace(
+        /Inspect v[^$]+\$\{C_RESET\}\s*/,
+        `${inspect}\${C_RESET}${inspectPad}`,
+      );
+      fs.writeFileSync(p, c, "utf-8");
+    ' "$zshrc" "$LOCAL_VER"
+  fi
   log_ok "Installed aice_cheatsheet block into ${zshrc}"
 }
 

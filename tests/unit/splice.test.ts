@@ -462,6 +462,36 @@ fn funcF(): return 6
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
+
+    it("preserves executable POSIX file mode (0o755) when splicing shell scripts", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_mode_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }, null, 2),
+          "utf-8",
+        );
+        const scriptFile = path.join(tmpDir, "run.sh");
+        fs.writeFileSync(
+          scriptFile,
+          "#!/usr/bin/env bash\ngreet() {\n  echo old\n}\ngreet\n",
+          { encoding: "utf-8", mode: 0o755 },
+        );
+        fs.chmodSync(scriptFile, 0o755);
+
+        const res = await splice(scriptFile, {
+          symbol: "greet",
+          code: "greet() {\n  echo new\n}",
+          projectRoot: tmpDir,
+        });
+        expect(res.success).toBe(true);
+        expect(fs.readFileSync(scriptFile, "utf-8")).toContain("echo new");
+        const modeAfter = fs.statSync(scriptFile).mode & 0o777;
+        expect(modeAfter & 0o111).toBe(0o111);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
   });
 
   describe("CLI Command Registration & Options", () => {

@@ -1011,11 +1011,18 @@ export async function createFile(
   if (!dryRun) {
     const dir = path.dirname(fullPath);
     await fs.promises.mkdir(dir, { recursive: true });
+    const existingMode = fs.existsSync(fullPath)
+      ? (await fs.promises.stat(fullPath)).mode
+      : undefined;
     const tmpFile = path.join(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
-    await fs.promises.writeFile(tmpFile, nativeCode, "utf-8");
+    await fs.promises.writeFile(
+      tmpFile,
+      nativeCode,
+      existingMode !== undefined ? { encoding: "utf-8", mode: existingMode } : "utf-8",
+    );
     await fs.promises.rename(tmpFile, fullPath);
 
     if (!isPassthroughManifest && idiomsEnabled && Object.keys(declaredIdioms).length > 0) {

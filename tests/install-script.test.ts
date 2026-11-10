@@ -164,6 +164,10 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
 
       const updatedZshrc = fs.readFileSync(zshrcPath, "utf-8");
       expect(updatedZshrc).toContain("export FOO=1");
+      expect(updatedZshrc).toContain(
+        "AICE v0.9.22 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
+      );
+      expect(updatedZshrc).toContain("Inspect v0.9.22");
       expect(updatedZshrc).toContain("(@forart82)");
       expect(updatedZshrc).toContain("https://github.com/forart82/aice");
       expect(updatedZshrc).toContain("aice create <file>");
@@ -182,6 +186,14 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       const fakeBin = path.join(tmpRoot, "bin");
       fs.mkdirSync(fakeHome, { recursive: true });
       fs.mkdirSync(fakeBin, { recursive: true });
+
+      // Seed existing cheatsheet in fakeHome/.zshrc so we verify dynamic LOCAL_VER padding on update
+      const fakeZshrc = path.join(fakeHome, ".zshrc");
+      fs.writeFileSync(
+        fakeZshrc,
+        "# >>> aice-cheatsheet >>>\naice_cheatsheet() { echo old; }\n# <<< aice-cheatsheet <<<\n",
+        "utf-8",
+      );
 
       // Stub npm in fakeBin so the test runs in milliseconds without network npm install
       fs.writeFileSync(
@@ -252,12 +264,34 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
 
       const updatedPkg = JSON.parse(fs.readFileSync(path.join(cloneDir, "package.json"), "utf-8"));
       expect(updatedPkg.version).toBe("0.9.5");
+
+      // Verify fakeHome/.zshrc cheatsheet was dynamically padded to 80 columns for v0.9.5 (5-char version)
+      const zshrcContent = fs.readFileSync(fakeZshrc, "utf-8");
+      const csMatch = zshrcContent.match(
+        /# >>> aice-cheatsheet >>>\n([\s\S]*?)# <<< aice-cheatsheet <<</,
+      );
+      expect(csMatch).not.toBeNull();
+      const csRes = spawnSync("bash", ["-c", `${csMatch?.[1] ?? ""}\naice_cheatsheet`], {
+        encoding: "utf-8",
+      });
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+      const csLines = csRes.stdout.replace(/\x1b\[[0-9;]*m/g, "").split("\n").filter((l) => l.trim().length > 0);
+      expect(csLines[1]).toContain(
+        "AICE v0.9.5 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
+      );
+      expect(csLines[7]).toContain("Inspect v0.9.5");
+      for (const [idx, line] of csLines.entries()) {
+        expect([...line].length, `v0.9.5 Line ${idx + 1} visible width: ${line}`).toBe(80);
+      }
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   }, 20000);
 
   it("renders aice_cheatsheet() with strict 80-char width and aligned column dividers at index 40 and 79", () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
+    ) as { version: string };
     const scriptContent = fs.readFileSync(INSTALL_SCRIPT, "utf-8");
     const match = scriptContent.match(
       /# >>> aice-cheatsheet >>>\n([\s\S]*?)# <<< aice-cheatsheet <<</,
@@ -276,10 +310,14 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     const lines = stripped.split("\n").filter((line) => line.trim().length > 0);
     expect(lines.length).toBe(12);
 
-    // Top title row must prominently include the AICE version number
+    // Top title row must prominently include the AICE version number matching package.json (v0.9.22)
+    expect(lines[1]).toContain(
+      `AICE v${pkg.version} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`,
+    );
     expect(lines[1]).toContain(
       "AICE v0.9.22 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
     );
+    expect(lines[7]).toContain(`Inspect v${pkg.version}`);
     expect(lines[7]).toContain("Inspect v0.9.22");
 
     for (const [idx, line] of lines.entries()) {
