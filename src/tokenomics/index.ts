@@ -7,6 +7,7 @@
  * and enforces zero target drift.
  */
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { getEncoding } from "js-tiktoken";
@@ -27,7 +28,7 @@ let cl100k: ReturnType<typeof getEncoding> | undefined;
 let o200k: ReturnType<typeof getEncoding> | undefined;
 
 const MAX_TOKEN_CACHE_ENTRIES = 512;
-const MAX_CACHEABLE_TEXT_LENGTH = 200_000;
+const MAX_CACHEABLE_TEXT_LENGTH = 500_000;
 const tokenCountCache = new Map<string, number>();
 
 function getTokenizerEncoding(encoding: "cl100k_base" | "o200k_base" = "cl100k_base") {
@@ -45,10 +46,12 @@ export function estimateTokens(
 ): number {
   if (!text) return 0;
   if (text.length <= MAX_CACHEABLE_TEXT_LENGTH) {
-    const cacheKey = `${encoding}:${text}`;
+    const cacheKey =
+      text.length <= 128
+        ? `${encoding}:s:${text}`
+        : `${encoding}:h:${text.length}:${createHash("sha256").update(text, "utf-8").digest("hex").slice(0, 32)}`;
     const cached = tokenCountCache.get(cacheKey);
     if (cached !== undefined) {
-      // Refresh LRU position
       tokenCountCache.delete(cacheKey);
       tokenCountCache.set(cacheKey, cached);
       return cached;
@@ -126,7 +129,8 @@ export function detectLanguageName(filePath: string): string {
   const lower = filePath.toLowerCase();
   if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "TSX / React";
   if (lower.endsWith(".ts") || lower.endsWith(".d.ts")) return "TypeScript";
-  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) return "JavaScript";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs"))
+    return "JavaScript";
   if (lower.endsWith(".py") || lower.endsWith(".pyi")) return "Python";
   if (lower.endsWith(".rs")) return "Rust";
   if (lower.endsWith(".go")) return "Go";

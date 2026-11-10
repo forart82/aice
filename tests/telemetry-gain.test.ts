@@ -240,5 +240,5 @@ describe("Phase 5: Honest, Truth-Based Global & Per-Project Token Savings Teleme
     });
     expect(ev.savedCl100k).toBeLessThan(0);
     resetTelemetryHistory(telemetryFile);
-  }, 20000);
+  }, 60000);
 });

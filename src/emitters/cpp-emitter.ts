@@ -642,6 +642,8 @@ export class CppEmitter {
         const val = this.emitExpr(expr.value);
         return `(${target} ${expr.op ?? "="} ${val})`;
       }
+      case "ConditionalExpr":
+        return `(${this.emitExpr(expr.condition)} ? ${this.emitExpr(expr.whenTrue)} : ${this.emitExpr(expr.whenFalse)})`;
       default:
         return "/* expr */";
     }

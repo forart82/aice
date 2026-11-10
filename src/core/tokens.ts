@@ -80,6 +80,9 @@ export type TokenKind =
   // Arithmetic Operators
   | "PLUS" // +
   | "MINUS" // -
+  | "PLUS_PLUS" // ++
+  | "MINUS_MINUS" // --
+  | "TILDE" // ~
   | "STAR" // *
   | "SLASH" // /
   | "PERCENT" // %

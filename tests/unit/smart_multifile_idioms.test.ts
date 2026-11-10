@@ -628,5 +628,59 @@ export class Enemy {
       expect(readRes.totalOccurrences).toBe(3);
       expect(readRes.occurrences[0].filePath).toBe("src/audio.ts");
     });
+
+    it("keeps readProjectIdiom read-only, omits decompiledAice from disk cache, and survives symlink loops", () => {
+      const srcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+      // Recursive symlink cycle inside src/
+      fs.symlinkSync(tmpDir, path.join(srcDir, "recursive_root"));
+
+      const tsCode = `export class Gate {
+  checkA(flag: boolean): number {
+    return flag ? 0 : 99;
+  }
+  checkB(flag: boolean): number {
+    return flag ? 0 : 99;
+  }
+  checkC(flag: boolean): number {
+    return flag ? 0 : 99;
+  }
+}
+`;
+      fs.writeFileSync(path.join(srcDir, "gate.ts"), tsCode, "utf-8");
+
+      scanProjectIdioms(tmpDir, { minOccurrences: 3, minNetTokenSavings: 1 });
+      const cachePath = path.join(tmpDir, ".aice-cache", "idioms.json");
+      expect(fs.existsSync(cachePath)).toBe(true);
+      const parsedCache = JSON.parse(fs.readFileSync(cachePath, "utf-8")) as {
+        decompiledAice?: Record<string, string>;
+      };
+      expect(Object.keys(parsedCache.decompiledAice ?? {})).toHaveLength(0);
+
+      // Configure an explicit ConditionalExpr idiom and remove .aice-cache/idioms.json
+      saveProjectConfig(tmpDir, {
+        mode: "twinless",
+        sourceDir: "src",
+        idiomsEnabled: true,
+        idioms: {
+          $zeroOrFallback: {
+            name: "$zeroOrFallback",
+            kind: "expr",
+            params: [{ name: "$0" }],
+            templateAice: "$0 ? 0 : 99",
+            occurrences: 3,
+            tokensPerOccurrenceSaved: 3,
+            netTokenSavings: 9,
+          },
+        },
+      });
+      fs.rmSync(cachePath, { force: true });
+      expect(fs.existsSync(cachePath)).toBe(false);
+
+      const readRes = readProjectIdiom(tmpDir, "$zeroOrFallback");
+      expect(readRes.totalOccurrences).toBe(3);
+      // readProjectIdiom must NOT recreate or mutate .aice-cache/idioms.json on disk
+      expect(fs.existsSync(cachePath)).toBe(false);
+    });
   });
 });

@@ -728,6 +728,11 @@ function collectModuleCandidates(
       case "AwaitExpr":
         visitExpr(expr.operand);
         break;
+      case "ConditionalExpr":
+        visitExpr(expr.condition);
+        visitExpr(expr.whenTrue);
+        visitExpr(expr.whenFalse);
+        break;
       case "AssignExpr":
         visitExpr(expr.target);
         visitExpr(expr.value);
@@ -1126,6 +1131,8 @@ function getExprSkeleton(expr: Expr, generalizeMemberProperty = false): string {
       return `Tpl(${expr.expressions.length})`;
     case "ClosureExpr":
       return `Closure(${expr.params.length})`;
+    case "ConditionalExpr":
+      return `Cond(${getExprSkeleton(expr.condition, generalizeMemberProperty)},${getExprSkeleton(expr.whenTrue, generalizeMemberProperty)},${getExprSkeleton(expr.whenFalse, generalizeMemberProperty)})`;
     case "AssignExpr":
       return `AssignExpr(${getExprSkeleton(expr.target, generalizeMemberProperty)},${getExprSkeleton(expr.value, generalizeMemberProperty)})`;
     case "AwaitExpr":
@@ -1839,6 +1846,11 @@ export function renameIdentifiersInExpr(expr: Expr, alphaMap: Map<string, string
     case "AwaitExpr":
       cloned.operand = renameIdentifiersInExpr(cloned.operand, alphaMap);
       break;
+    case "ConditionalExpr":
+      cloned.condition = renameIdentifiersInExpr(cloned.condition, alphaMap);
+      cloned.whenTrue = renameIdentifiersInExpr(cloned.whenTrue, alphaMap);
+      cloned.whenFalse = renameIdentifiersInExpr(cloned.whenFalse, alphaMap);
+      break;
     case "AssignExpr":
       cloned.target = renameIdentifiersInExpr(cloned.target, alphaMap);
       cloned.value = renameIdentifiersInExpr(cloned.value, alphaMap);
@@ -1983,6 +1995,12 @@ export function isIdentifierReferencedInExpr(expr: Expr, name: string): boolean 
       return false;
     case "AwaitExpr":
       return isIdentifierReferencedInExpr(expr.operand, name);
+    case "ConditionalExpr":
+      return (
+        isIdentifierReferencedInExpr(expr.condition, name) ||
+        isIdentifierReferencedInExpr(expr.whenTrue, name) ||
+        isIdentifierReferencedInExpr(expr.whenFalse, name)
+      );
     case "AssignExpr":
       return (
         isIdentifierReferencedInExpr(expr.target, name) ||
@@ -2110,6 +2128,11 @@ export function collectIdentifiersInExpr(expr: Expr, set: Set<string>): void {
       break;
     case "AwaitExpr":
       collectIdentifiersInExpr(expr.operand, set);
+      break;
+    case "ConditionalExpr":
+      collectIdentifiersInExpr(expr.condition, set);
+      collectIdentifiersInExpr(expr.whenTrue, set);
+      collectIdentifiersInExpr(expr.whenFalse, set);
       break;
     case "AssignExpr":
       collectIdentifiersInExpr(expr.target, set);

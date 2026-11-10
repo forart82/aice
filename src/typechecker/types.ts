@@ -203,17 +203,28 @@ export function isStringLiteralUnion(name: string): boolean {
 }
 
 export const TYPE_ALIAS_REGISTRY = new Map<string, Type>();
+let activeTypeAliasRegistry: Map<string, Type> = TYPE_ALIAS_REGISTRY;
+
+export function withTypeAliasRegistry<T>(registry: Map<string, Type>, callback: () => T): T {
+  const prev = activeTypeAliasRegistry;
+  activeTypeAliasRegistry = registry;
+  try {
+    return callback();
+  } finally {
+    activeTypeAliasRegistry = prev;
+  }
+}
 
 export function registerTypeAlias(name: string, type: Type): void {
-  TYPE_ALIAS_REGISTRY.set(name, type);
+  activeTypeAliasRegistry.set(name, type);
 }
 
 export function lookupTypeAlias(name: string): Type | undefined {
-  return TYPE_ALIAS_REGISTRY.get(name);
+  return activeTypeAliasRegistry.get(name);
 }
 
 export function clearTypeAliases(): void {
-  TYPE_ALIAS_REGISTRY.clear();
+  activeTypeAliasRegistry.clear();
 }
 
 const NON_OPAQUE_TYPE_NAMES = new Set([
@@ -269,7 +280,7 @@ export function isStringLiteralOrUnionType(type: Type): boolean {
   }
   if (type.kind === "named") {
     if (isStringLiteralType(type.name) || isStringLiteralUnion(type.name)) return true;
-    const resolved = TYPE_ALIAS_REGISTRY.get(type.name);
+    const resolved = lookupTypeAlias(type.name);
     if (resolved && resolved !== type) {
       return isStringLiteralOrUnionType(resolved);
     }
@@ -468,9 +479,9 @@ export function isAssignable(
     return target.name === source.name;
   }
 
-  // String literal compatibility with string literal union aliases and enums in TYPE_ALIAS_REGISTRY
+  // String literal compatibility with string literal union aliases and enums in active alias registry
   if (target.kind === "named") {
-    const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
+    const resolvedTarget = lookupTypeAlias(target.name);
     if (resolvedTarget && resolvedTarget !== target) {
       if (isAssignable(resolvedTarget, source, visited)) {
         return true;
@@ -481,7 +492,7 @@ export function isAssignable(
   }
 
   if (source.kind === "named") {
-    const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
+    const resolvedSource = lookupTypeAlias(source.name);
     if (resolvedSource && resolvedSource !== source) {
       if (isAssignable(target, resolvedSource, visited)) {
         return true;
@@ -656,11 +667,11 @@ export function isAssignable(
       if (target.name.includes("=>") && source.name.includes("=>")) {
         return true;
       }
-      const resolvedTarget = TYPE_ALIAS_REGISTRY.get(target.name);
+      const resolvedTarget = lookupTypeAlias(target.name);
       if (resolvedTarget && resolvedTarget !== target) {
         if (isAssignable(resolvedTarget, source, visited)) return true;
       }
-      const resolvedSource = TYPE_ALIAS_REGISTRY.get(source.name);
+      const resolvedSource = lookupTypeAlias(source.name);
       if (resolvedSource && resolvedSource !== source) {
         if (isAssignable(target, resolvedSource, visited)) return true;
       }

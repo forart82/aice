@@ -545,6 +545,13 @@ export class GoEmitter {
               }
             }
             this.ctx.writeLine(`return ${this.emitExpr(valExpr)}, nil`);
+          } else if (valExpr.kind === "ConditionalExpr") {
+            this.ctx.writeLine(`if ${this.emitExpr(valExpr.condition)} {`);
+            this.ctx.indent();
+            this.ctx.writeLine(`return ${this.emitExpr(valExpr.whenTrue)}`);
+            this.ctx.dedent();
+            this.ctx.writeLine("}");
+            this.ctx.writeLine(`return ${this.emitExpr(valExpr.whenFalse)}`);
           } else {
             this.ctx.writeLine(`return ${this.emitExpr(valExpr)}`);
           }
@@ -709,6 +716,28 @@ export class GoEmitter {
       }
       case "AssignExpr":
         return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
+      case "ConditionalExpr": {
+        let goRet = "any";
+        if (expr.whenTrue.kind === "LiteralExpr" && expr.whenFalse.kind === "LiteralExpr") {
+          if (expr.whenTrue.literalKind === "number" && expr.whenFalse.literalKind === "number") {
+            goRet =
+              expr.whenTrue.rawValue?.includes(".") || expr.whenFalse.rawValue?.includes(".")
+                ? "float64"
+                : "int64";
+          } else if (
+            expr.whenTrue.literalKind === "string" &&
+            expr.whenFalse.literalKind === "string"
+          ) {
+            goRet = "string";
+          } else if (
+            expr.whenTrue.literalKind === "boolean" &&
+            expr.whenFalse.literalKind === "boolean"
+          ) {
+            goRet = "bool";
+          }
+        }
+        return `func() ${goRet} { if ${this.emitExpr(expr.condition)} { return ${this.emitExpr(expr.whenTrue)} }; return ${this.emitExpr(expr.whenFalse)} }()`;
+      }
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);

@@ -31,6 +31,7 @@ import type {
   CallExpr,
   ClassDecl,
   ClosureExpr,
+  ConditionalExpr,
   DestructureBinding,
   Expr,
   ExprStmt,
@@ -609,6 +610,11 @@ function substituteExpr(expr: Expr, subst: Map<string, Expr>, callSpan: Span): E
     case "AwaitExpr":
       cloned.operand = substituteExpr(cloned.operand, subst, callSpan);
       break;
+    case "ConditionalExpr":
+      cloned.condition = substituteExpr(cloned.condition, subst, callSpan);
+      cloned.whenTrue = substituteExpr(cloned.whenTrue, subst, callSpan);
+      cloned.whenFalse = substituteExpr(cloned.whenFalse, subst, callSpan);
+      break;
     case "AssignExpr":
       cloned.target = substituteExpr(cloned.target, subst, callSpan);
       cloned.value = substituteExpr(cloned.value, subst, callSpan);
@@ -922,6 +928,11 @@ function expandModuleIdiomsInternal(
         break;
       case "AwaitExpr":
         expr.operand = transformExpr(expr.operand, depth);
+        break;
+      case "ConditionalExpr":
+        expr.condition = transformExpr(expr.condition, depth);
+        expr.whenTrue = transformExpr(expr.whenTrue, depth);
+        expr.whenFalse = transformExpr(expr.whenFalse, depth);
         break;
       case "AssignExpr":
         expr.target = transformExpr(expr.target, depth);
@@ -1600,6 +1611,15 @@ function matchExprTemplate(
       const tg = targetExpr as AwaitExpr;
       return matchExprTemplate(t.operand, tg.operand, bindings, holeNames, generator, alphaMap);
     }
+    case "ConditionalExpr": {
+      const t = templateExpr as ConditionalExpr;
+      const tg = targetExpr as ConditionalExpr;
+      return (
+        matchExprTemplate(t.condition, tg.condition, bindings, holeNames, generator, alphaMap) &&
+        matchExprTemplate(t.whenTrue, tg.whenTrue, bindings, holeNames, generator, alphaMap) &&
+        matchExprTemplate(t.whenFalse, tg.whenFalse, bindings, holeNames, generator, alphaMap)
+      );
+    }
     case "AssignExpr": {
       const t = templateExpr as AssignExpr;
       const tg = targetExpr as AssignExpr;
@@ -2189,6 +2209,11 @@ export function collapseModuleIdioms(
       case "AwaitExpr":
         expr.operand = collapseExpr(expr.operand);
         break;
+      case "ConditionalExpr":
+        expr.condition = collapseExpr(expr.condition);
+        expr.whenTrue = collapseExpr(expr.whenTrue);
+        expr.whenFalse = collapseExpr(expr.whenFalse);
+        break;
       case "AssignExpr":
         expr.target = collapseExpr(expr.target);
         expr.value = collapseExpr(expr.value);
@@ -2566,23 +2591,47 @@ function computeSha256(content: string): string {
 /**
  * Recursively locates all .aice files in a directory.
  */
-function scanAiceFiles(dir: string): string[] {
+const IDIOM_SCAN_SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  ".aice-build",
+  ".aice-cache",
+  "dist",
+  "build",
+  "coverage",
+  "target",
+  "vendor",
+  ".next",
+  ".turbo",
+  "out",
+  "benchmarks",
+]);
+
+function scanAiceFiles(dir: string, visitedDirs = new Set<string>()): string[] {
   const results: string[] = [];
   if (!fs.existsSync(dir)) return results;
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  let realDir: string;
+  try {
+    realDir = fs.realpathSync(dir);
+  } catch {
+    return results;
+  }
+  if (visitedDirs.has(realDir)) return results;
+  visitedDirs.add(realDir);
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (
-        entry.name !== "node_modules" &&
-        entry.name !== ".git" &&
-        entry.name !== ".aice-build" &&
-        entry.name !== ".aice-cache" &&
-        entry.name !== "dist" &&
-        entry.name !== "build"
-      ) {
-        results.push(...scanAiceFiles(full));
+      if (!IDIOM_SCAN_SKIP_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
+        results.push(...scanAiceFiles(full, visitedDirs));
       }
     } else if (entry.isFile() && entry.name.endsWith(".aice")) {
       results.push(full);
@@ -2594,25 +2643,31 @@ function scanAiceFiles(dir: string): string[] {
 /**
  * Recursively locates native source code files that do not have a .aice sibling.
  */
-function scanNativeCodeFiles(dir: string): string[] {
+function scanNativeCodeFiles(dir: string, visitedDirs = new Set<string>()): string[] {
   const results: string[] = [];
   if (!fs.existsSync(dir)) return results;
 
-  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  let realDir: string;
+  try {
+    realDir = fs.realpathSync(dir);
+  } catch {
+    return results;
+  }
+  if (visitedDirs.has(realDir)) return results;
+  visitedDirs.add(realDir);
+
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return results;
+  }
   for (const entry of entries) {
     const full = path.join(dir, entry.name);
+    if (entry.isSymbolicLink()) continue;
     if (entry.isDirectory()) {
-      if (
-        entry.name !== "node_modules" &&
-        entry.name !== ".git" &&
-        entry.name !== ".aice-build" &&
-        entry.name !== ".aice-cache" &&
-        entry.name !== "dist" &&
-        entry.name !== "build" &&
-        entry.name !== "coverage" &&
-        !entry.name.startsWith(".")
-      ) {
-        results.push(...scanNativeCodeFiles(full));
+      if (!IDIOM_SCAN_SKIP_DIRS.has(entry.name) && !entry.name.startsWith(".")) {
+        results.push(...scanNativeCodeFiles(full, visitedDirs));
       }
     } else if (entry.isFile()) {
       if (
@@ -2654,13 +2709,40 @@ export function readIdiomCache(projectRoot: string): IdiomCacheData | null {
   }
 }
 
+const MAX_IN_MEMORY_IDIOM_DECOMPILE_CACHE = 256;
+const inMemoryDecompiledAiceCache = new Map<string, string>();
+
+function getCachedMemoryDecompile(key: string): string | undefined {
+  const hit = inMemoryDecompiledAiceCache.get(key);
+  if (hit !== undefined) {
+    inMemoryDecompiledAiceCache.delete(key);
+    inMemoryDecompiledAiceCache.set(key, hit);
+  }
+  return hit;
+}
+
+function setCachedMemoryDecompile(key: string, aice: string): void {
+  if (inMemoryDecompiledAiceCache.has(key)) {
+    inMemoryDecompiledAiceCache.delete(key);
+  } else if (inMemoryDecompiledAiceCache.size >= MAX_IN_MEMORY_IDIOM_DECOMPILE_CACHE) {
+    const oldest = inMemoryDecompiledAiceCache.keys().next().value;
+    if (oldest !== undefined) inMemoryDecompiledAiceCache.delete(oldest);
+  }
+  inMemoryDecompiledAiceCache.set(key, aice);
+}
+
 export function writeIdiomCache(projectRoot: string, data: IdiomCacheData): void {
   const cacheDir = path.join(projectRoot, ".aice-cache");
   if (!fs.existsSync(cacheDir)) {
     fs.mkdirSync(cacheDir, { recursive: true });
   }
   const cachePath = path.join(cacheDir, "idioms.json");
-  fs.writeFileSync(cachePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  const compactData: IdiomCacheData = {
+    ...data,
+    // Omit multi-MB decompiledAice payloads from disk provenance index
+    decompiledAice: {},
+  };
+  fs.writeFileSync(cachePath, `${JSON.stringify(compactData, null, 2)}\n`, "utf-8");
 }
 
 function loadAndDecompileWorkspaceFiles(
@@ -2707,18 +2789,25 @@ function loadAndDecompileWorkspaceFiles(
       const fileHash = computeSha256(rawSource);
       fileHashes[relPath] = fileHash;
 
+      const memKey = `${fp}:${fileHash}`;
+      const memHit = getCachedMemoryDecompile(memKey);
       let aiceSource: string;
-      if (
+      if (memHit !== undefined) {
+        aiceSource = memHit;
+      } else if (
         existingCache?.fileHashes?.[relPath] === fileHash &&
-        typeof existingCache?.decompiledAice?.[relPath] === "string"
+        typeof existingCache?.decompiledAice?.[relPath] === "string" &&
+        existingCache.decompiledAice[relPath].length > 0
       ) {
         aiceSource = existingCache.decompiledAice[relPath];
+        setCachedMemoryDecompile(memKey, aiceSource);
       } else {
         const targetLang = detectTargetFromPath(fp);
         const decomp = withSuppressedTelemetry(() =>
           decompile(rawSource, targetLang, { filePath: fp }),
         );
         aiceSource = decomp.aice;
+        setCachedMemoryDecompile(memKey, aiceSource);
       }
 
       decompiledAice[relPath] = aiceSource;
@@ -2787,6 +2876,11 @@ function collectOccurrencesAcrossFiles(
         case "AwaitExpr":
         case "PostfixTryExpr":
           collectExistingCallsInExpr(expr.operand, sym);
+          break;
+        case "ConditionalExpr":
+          collectExistingCallsInExpr(expr.condition, sym);
+          collectExistingCallsInExpr(expr.whenTrue, sym);
+          collectExistingCallsInExpr(expr.whenFalse, sym);
           break;
         case "AssignExpr":
           collectExistingCallsInExpr(expr.target, sym);
@@ -3140,10 +3234,7 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
     name: normName,
   };
 
-  const { files, fileHashes, decompiledAice } = loadAndDecompileWorkspaceFiles(
-    resolvedDir,
-    searchDir,
-  );
+  const { files } = loadAndDecompileWorkspaceFiles(resolvedDir, searchDir);
 
   const allIdioms = config.idioms ?? { [normName]: canonicalIdiom };
   const occurrencesMap = collectOccurrencesAcrossFiles(files, {
@@ -3152,15 +3243,6 @@ export function readProjectIdiom(dir: string, idiomName: string): IdiomReadResul
   });
   const occList = occurrencesMap[normName] ?? [];
   const idiomsEnabled = isProjectIdiomsEnabled(config);
-
-  writeIdiomCache(resolvedDir, {
-    version: 1,
-    idiomsEnabled,
-    fileHashes,
-    decompiledAice,
-    idioms: allIdioms,
-    occurrences: occurrencesMap,
-  });
 
   const uniqueFiles = new Set(occList.map((o) => o.filePath));
   const paramsStr = canonicalIdiom.params.map((p) => p.name).join(", ");

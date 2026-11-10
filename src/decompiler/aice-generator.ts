@@ -90,6 +90,8 @@ export function getExprPrecedence(expr: Expr): number {
       return Precedence.PREFIX; // 15
     case "BinaryExpr":
       return getBinaryOpPrecedence(expr.operator);
+    case "ConditionalExpr":
+      return Precedence.TERNARY; // 3
     case "AssignExpr":
       return Precedence.ASSIGN; // 2
     case "ClosureExpr":
@@ -1028,20 +1030,50 @@ export class AiceGenerator {
           : this.formatExpr(expr.right);
         return `${leftStr} ${op} ${rightStr}`;
       }
+      case "ConditionalExpr": {
+        const condNeedsParen =
+          expr.condition.kind === "ConditionalExpr" ||
+          expr.condition.kind === "AssignExpr" ||
+          expr.condition.kind === "ClosureExpr";
+        const condStr = condNeedsParen
+          ? `(${this.formatExpr(expr.condition)})`
+          : this.formatExpr(expr.condition);
+        const trueStr =
+          expr.whenTrue.kind === "AssignExpr"
+            ? `(${this.formatExpr(expr.whenTrue)})`
+            : this.formatExpr(expr.whenTrue);
+        const falseStr =
+          expr.whenFalse.kind === "AssignExpr"
+            ? `(${this.formatExpr(expr.whenFalse)})`
+            : this.formatExpr(expr.whenFalse);
+        return `${condStr} ? ${trueStr} : ${falseStr}`;
+      }
       case "UnaryExpr": {
         if (expr.operator === "...") {
           return `...${this.formatExpr(expr.operand)}`;
         }
+        const operand = this.formatExpr(expr.operand);
+        if (expr.isPostfix) {
+          const needsPostfixParen =
+            expr.operand.kind === "BinaryExpr" ||
+            expr.operand.kind === "ConditionalExpr" ||
+            expr.operand.kind === "AssignExpr" ||
+            expr.operand.kind === "ClosureExpr";
+          return needsPostfixParen ? `(${operand})${expr.operator}` : `${operand}${expr.operator}`;
+        }
         const op =
           expr.operator === "!" ? "not " : expr.operator === "not" ? "not " : expr.operator;
-        const operand = this.formatExpr(expr.operand);
         if (
           expr.operand.kind === "BinaryExpr" ||
+          expr.operand.kind === "ConditionalExpr" ||
           expr.operand.kind === "AssignExpr" ||
           expr.operand.kind === "ClosureExpr" ||
           (expr.operator === "-" &&
             expr.operand.kind === "UnaryExpr" &&
-            expr.operand.operator === "-")
+            (expr.operand.operator === "-" || expr.operand.operator === "--")) ||
+          (expr.operator === "+" &&
+            expr.operand.kind === "UnaryExpr" &&
+            (expr.operand.operator === "+" || expr.operand.operator === "++"))
         ) {
           return `${op}(${operand})`;
         }
@@ -1051,19 +1083,12 @@ export class AiceGenerator {
         const operandStr = this.formatExpr(expr.operand);
         const needsParen =
           expr.operand.kind === "AssignExpr" ||
+          expr.operand.kind === "ConditionalExpr" ||
           expr.operand.kind === "BinaryExpr" ||
           expr.operand.kind === "ClosureExpr";
         return needsParen ? `(${operandStr})?` : `${operandStr}?`;
       }
       case "CallExpr": {
-        const args = expr.args
-          .map((a) => {
-            if (a.kind === "AssignExpr") {
-              return `(${this.formatExpr(a)})`;
-            }
-            return this.formatExpr(a);
-          })
-          .join(", ");
         const needsParen =
           expr.callee.kind !== "IdentifierExpr" &&
           expr.callee.kind !== "MemberAccessExpr" &&
@@ -1072,6 +1097,21 @@ export class AiceGenerator {
         const calleeStr = needsParen
           ? `(${this.formatExpr(expr.callee)})`
           : this.formatExpr(expr.callee);
+        if (
+          expr.isTaggedTemplate &&
+          expr.args.length === 1 &&
+          expr.args[0].kind === "TemplateLiteralExpr"
+        ) {
+          return `${calleeStr}${this.formatExpr(expr.args[0])}`;
+        }
+        const args = expr.args
+          .map((a) => {
+            if (a.kind === "AssignExpr") {
+              return `(${this.formatExpr(a)})`;
+            }
+            return this.formatExpr(a);
+          })
+          .join(", ");
         const opt = expr.isOptional ? "?." : "";
         return `${calleeStr}${opt}(${args})`;
       }
@@ -1079,6 +1119,7 @@ export class AiceGenerator {
         const dot = expr.isSafeNav ? "?." : ".";
         const needsParen =
           expr.object.kind === "BinaryExpr" ||
+          expr.object.kind === "ConditionalExpr" ||
           expr.object.kind === "UnaryExpr" ||
           expr.object.kind === "AssignExpr" ||
           expr.object.kind === "ClosureExpr";
@@ -1090,6 +1131,7 @@ export class AiceGenerator {
       case "IndexExpr": {
         const needsParen =
           expr.object.kind === "BinaryExpr" ||
+          expr.object.kind === "ConditionalExpr" ||
           expr.object.kind === "UnaryExpr" ||
           expr.object.kind === "AssignExpr" ||
           expr.object.kind === "ClosureExpr";
@@ -1231,6 +1273,7 @@ export class AiceGenerator {
         const operandStr = this.formatExpr(expr.operand);
         const needsParen =
           expr.operand.kind === "AssignExpr" ||
+          expr.operand.kind === "ConditionalExpr" ||
           expr.operand.kind === "BinaryExpr" ||
           expr.operand.kind === "ClosureExpr";
         return needsParen ? `await (${operandStr})` : `await ${operandStr}`;

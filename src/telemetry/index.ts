@@ -71,6 +71,8 @@ export interface RecordTelemetryInput {
   idiomsUsed?: boolean;
   nativeText: string;
   aiceText: string;
+  nativeChars?: number;
+  aiceChars?: number;
   nativeCl100k?: number;
   aiceCl100k?: number;
   nativeO200k?: number;
@@ -261,7 +263,12 @@ export function resolveTelemetryPath(explicitPath?: string): string {
  * Checks whether we are running inside a unit test without an explicit telemetry path override.
  */
 export function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolean {
-  if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_HOME) {
+  if (
+    explicitPath ||
+    process.env.AICE_TELEMETRY_PATH ||
+    process.env.AICE_TELEMETRY_ERRORS_PATH ||
+    process.env.AICE_HOME
+  ) {
     return false;
   }
   return Boolean(process.env.VITEST || process.env.NODE_ENV === "test");
@@ -361,8 +368,8 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
   const category = getCategoryForOperation(input.operation);
   const idiomsUsed = Boolean(input.idiomsUsed);
 
-  const nativeChars = input.nativeText.length;
-  const aiceChars = input.aiceText.length;
+  const nativeChars = input.nativeChars ?? input.nativeText.length;
+  const aiceChars = input.aiceChars ?? input.aiceText.length;
   const savedChars = nativeChars - aiceChars;
 
   const nativeCl100k = input.nativeCl100k ?? estimateTokens(input.nativeText, "cl100k_base");
@@ -439,13 +446,36 @@ export function recordTelemetryEvent(
 /**
  * Loads all valid `TelemetryEvent` records from the JSONL ledger.
  */
+const MAX_TELEMETRY_LEDGER_READ_BYTES = 20 * 1024 * 1024;
+
 export function loadTelemetryEvents(explicitPath?: string): TelemetryEvent[] {
   const ledgerPath = resolveTelemetryPath(explicitPath);
   if (!fs.existsSync(ledgerPath)) {
     return [];
   }
   try {
-    const raw = fs.readFileSync(ledgerPath, "utf-8");
+    let raw = "";
+    const st = fs.statSync(ledgerPath);
+    if (st.size > MAX_TELEMETRY_LEDGER_READ_BYTES) {
+      const fd = fs.openSync(ledgerPath, "r");
+      try {
+        const buf = Buffer.allocUnsafe(MAX_TELEMETRY_LEDGER_READ_BYTES);
+        const bytesRead = fs.readSync(
+          fd,
+          buf,
+          0,
+          MAX_TELEMETRY_LEDGER_READ_BYTES,
+          st.size - MAX_TELEMETRY_LEDGER_READ_BYTES,
+        );
+        const tailText = buf.subarray(0, bytesRead).toString("utf-8");
+        const firstNl = tailText.indexOf("\n");
+        raw = firstNl >= 0 ? tailText.slice(firstNl + 1) : tailText;
+      } finally {
+        fs.closeSync(fd);
+      }
+    } else {
+      raw = fs.readFileSync(ledgerPath, "utf-8");
+    }
     const events: TelemetryEvent[] = [];
     for (const line of raw.split("\n")) {
       const trimmed = line.trim();
@@ -764,7 +794,7 @@ export function buildGainReport(
     savedO200k += ev.savedO200k;
 
     const realNat = ev.realisticNativeCl100k ?? ev.nativeCl100k;
-    const realSaved = ev.realisticSavedCl100k ?? (realNat - ev.aiceCl100k);
+    const realSaved = ev.realisticSavedCl100k ?? realNat - ev.aiceCl100k;
     totalRealisticNativeCl100k += realNat;
     totalRealisticSavedCl100k += realSaved;
     totalPreservedTriviaTokens += ev.preservedTriviaTokens ?? 0;

@@ -387,6 +387,7 @@ export type Expr =
   | TemplateLiteralExpr
   | IdentifierExpr
   | BinaryExpr
+  | ConditionalExpr
   | UnaryExpr
   | PostfixTryExpr
   | CallExpr
@@ -397,6 +398,14 @@ export type Expr =
   | ClosureExpr
   | AssignExpr
   | AwaitExpr;
+
+export interface ConditionalExpr {
+  kind: "ConditionalExpr";
+  condition: Expr;
+  whenTrue: Expr;
+  whenFalse: Expr;
+  span: Span;
+}
 
 export interface TemplateLiteralExpr {
   kind: "TemplateLiteralExpr";
@@ -470,7 +479,8 @@ export interface BinaryExpr {
 
 export interface UnaryExpr {
   kind: "UnaryExpr";
-  operator: "not" | "-" | "!" | "...";
+  operator: "not" | "-" | "+" | "~" | "!" | "..." | "++" | "--";
+  isPostfix?: boolean;
   operand: Expr;
   span: Span;
 }
@@ -486,6 +496,7 @@ export interface CallExpr {
   callee: Expr;
   args: Expr[];
   isOptional?: boolean;
+  isTaggedTemplate?: boolean;
   span: Span;
 }
 

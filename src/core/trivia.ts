@@ -214,7 +214,9 @@ export function extractDeclarationTriviaLens(
   // 2. Python docstrings live *inside* the function/class body immediately after the def/class header
   if (isPython) {
     const declBody = nativeSource.slice(span.declStart, span.end);
-    const docMatch = declBody.match(/^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:("""[\s\S]*?"""|'''[\s\S]*?'''))/);
+    const docMatch = declBody.match(
+      /^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:("""[\s\S]*?"""|'''[\s\S]*?'''))/,
+    );
     if (docMatch && docMatch[1]) {
       return {
         leadingDocComment: docMatch[1],
@@ -257,7 +259,6 @@ export function extractDeclarationTriviaLens(
         if (line.startsWith("///") || line.startsWith("//!")) {
           docLines.unshift(line);
         } else if (line.length === 0 && docLines.length === 0) {
-          continue;
         } else {
           break;
         }
@@ -297,11 +298,16 @@ export function applyTriviaLensToReplacement(
   const isPython = normLang === "python" || normLang === "py";
 
   if (isPython) {
-    const hasExistingDoc = /^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:"""[\s\S]*?"""|'''[\s\S]*?''')/.test(replacementSnippet);
+    const hasExistingDoc =
+      /^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:"""[\s\S]*?"""|'''[\s\S]*?''')/.test(
+        replacementSnippet,
+      );
     if (hasExistingDoc) {
       return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
     }
-    const headerMatch = replacementSnippet.match(/^([ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?)([ \t]*(?:\r?\n|$))/);
+    const headerMatch = replacementSnippet.match(
+      /^([ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?)([ \t]*(?:\r?\n|$))/,
+    );
     if (headerMatch) {
       const bodyIndent = trivia.indentation + "    ";
       const docLines = trivia.leadingDocComment.split(/\r?\n/);
@@ -332,7 +338,10 @@ export function applyTriviaLensToReplacement(
   }
 
   const trimmedSnippet = replacementSnippet.trimStart();
-  const hasExistingDoc = trimmedSnippet.startsWith("/**") || trimmedSnippet.startsWith("///") || trimmedSnippet.startsWith("//!");
+  const hasExistingDoc =
+    trimmedSnippet.startsWith("/**") ||
+    trimmedSnippet.startsWith("///") ||
+    trimmedSnippet.startsWith("//!");
   if (hasExistingDoc) {
     return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
   }

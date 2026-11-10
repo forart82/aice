@@ -9,6 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import postcss from "postcss";
+import { getCachedTsSymbolIndex, type TsFileSymbolIndex } from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -43,6 +44,11 @@ export interface OutlineOptions {
   compact?: boolean;
   projectRoot?: string;
   filePath?: string;
+  preReadSource?: string;
+  skipTokenStats?: boolean;
+  preloadedConfigChecked?: boolean;
+  preloadedIdiomsActive?: boolean;
+  preloadedIdiomsConfig?: Record<string, ProjectIdiomDefinition>;
 }
 export interface OutlineSymbol {
   name: string;
@@ -142,11 +148,11 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   return comments.length > 0 ? comments.join("\n") : undefined;
 }
 
-    export function generateOutline(
+export function generateOutline(
   sourceOrMod: string | Module,
   filePathOrOptions: string | OutlineOptions = {},
   maybeOptions: OutlineOptions = {},
-    ): OutlineResult {
+): OutlineResult {
   const options: OutlineOptions =
     typeof filePathOrOptions === "string" ? maybeOptions : filePathOrOptions;
   const explicitFilePath =
@@ -161,10 +167,51 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   let ast: Module;
   let trivia = new CstTriviaTable();
 
+  const symbolAstEndLines = new WeakMap<OutlineSymbol, number>();
+
+  let idiomsResolved = Boolean(options.preloadedConfigChecked);
+  let idiomsConfig: Record<string, ProjectIdiomDefinition> | undefined =
+    options.preloadedIdiomsConfig;
+  let idiomsActive = options.preloadedConfigChecked
+    ? (options.preloadedIdiomsActive ?? false)
+    : true;
+
+  const ensureIdiomsResolved = (targetPath: string) => {
+    if (idiomsResolved) return;
+    idiomsResolved = true;
+    try {
+      const hasScopedTarget =
+        Boolean(options.projectRoot) || (targetPath !== "<anonymous>" && fs.existsSync(targetPath));
+      const root =
+        options.projectRoot ??
+        (targetPath !== "<anonymous>" && fs.existsSync(targetPath)
+          ? findProjectRoot(path.dirname(path.resolve(targetPath)))
+          : findProjectRoot(process.cwd()));
+      const cfg = loadProjectConfig(root);
+      if (hasScopedTarget && !isProjectAiceEnabled(cfg)) {
+        throw new Error(AICE_DISABLED_MESSAGE);
+      }
+      idiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
+      if (idiomsActive) {
+        idiomsConfig = cfg.idioms;
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+        throw err;
+      }
+    }
+  };
+
+  const hasActiveIdiomsForOutline = () =>
+    idiomsActive && Boolean(idiomsConfig && Object.keys(idiomsConfig).length > 0);
+
   if (typeof sourceOrMod === "object" && sourceOrMod !== null && sourceOrMod.kind === "Module") {
     ast = sourceOrMod;
     filePath = ast.path || explicitFilePath || "<anonymous>";
-    if (filePath !== "<anonymous>" && fs.existsSync(filePath)) {
+    ensureIdiomsResolved(filePath);
+    if (options.preReadSource !== undefined) {
+      originalSource = options.preReadSource;
+    } else if (filePath !== "<anonymous>" && fs.existsSync(filePath)) {
       try {
         originalSource = fs.readFileSync(filePath, "utf-8");
       } catch {
@@ -178,7 +225,8 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
       fs.statSync(sourceOrMod).isFile();
     if (isFile) {
       filePath = sourceOrMod;
-      originalSource = fs.readFileSync(filePath, "utf-8");
+      ensureIdiomsResolved(filePath);
+      originalSource = options.preReadSource ?? fs.readFileSync(filePath, "utf-8");
       if (filePath.endsWith(".aice")) {
         const parsed = parseWithTrivia(originalSource, filePath);
         ast = parsed.ast;
@@ -187,16 +235,14 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
         const targetLang = detectTargetFromPath(filePath);
         try {
           const decompResult = withSuppressedTelemetry(() =>
-            decompile(originalSource, targetLang, { filePath }),
+            decompile(originalSource, targetLang, {
+              filePath,
+              skipCodeGen: true,
+              skeletonOnly: !hasActiveIdiomsForOutline(),
+            }),
           );
-          try {
-            const parsed = parseWithTrivia(decompResult.aice, filePath);
-            ast = parsed.ast;
-            trivia = parsed.trivia;
-          } catch {
-            ast = decompResult.ast;
-            trivia = decompResult.trivia;
-          }
+          ast = decompResult.ast;
+          trivia = decompResult.trivia;
         } catch (err) {
           if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
             throw err;
@@ -216,6 +262,7 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
       }
     } else {
       filePath = explicitFilePath || "<anonymous>";
+      ensureIdiomsResolved(filePath);
       originalSource = sourceOrMod;
       const hasKnownTargetExt =
         explicitFilePath !== undefined &&
@@ -228,16 +275,12 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
           const decompResult = withSuppressedTelemetry(() =>
             decompile(originalSource, targetLang, {
               filePath: explicitFilePath,
+              skipCodeGen: true,
+              skeletonOnly: !hasActiveIdiomsForOutline(),
             }),
           );
-          try {
-            const parsed = parseWithTrivia(decompResult.aice, explicitFilePath);
-            ast = parsed.ast;
-            trivia = parsed.trivia;
-          } catch {
-            ast = decompResult.ast;
-            trivia = decompResult.trivia;
-          }
+          ast = decompResult.ast;
+          trivia = decompResult.trivia;
         } catch (err) {
           if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
             throw err;
@@ -266,16 +309,14 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                 ? detectTargetFromPath(explicitFilePath)
                 : "typescript";
             const decompResult = withSuppressedTelemetry(() =>
-              decompile(originalSource, targetLang, { filePath }),
+              decompile(originalSource, targetLang, {
+                filePath,
+                skipCodeGen: true,
+                skeletonOnly: !hasActiveIdiomsForOutline(),
+              }),
             );
-            try {
-              const parsed = parseWithTrivia(decompResult.aice, filePath);
-              ast = parsed.ast;
-              trivia = parsed.trivia;
-            } catch {
-              ast = decompResult.ast;
-              trivia = decompResult.trivia;
-            }
+            ast = decompResult.ast;
+            trivia = decompResult.trivia;
           } catch {
             throw err;
           }
@@ -287,6 +328,16 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   }
 
   const symbols: OutlineSymbol[] = [];
+  const pushTrackedSymbol = (
+    targetList: OutlineSymbol[],
+    sym: OutlineSymbol,
+    spanEndLine?: number,
+  ) => {
+    if (spanEndLine !== undefined && spanEndLine >= sym.line) {
+      symbolAstEndLines.set(sym, spanEndLine);
+    }
+    targetList.push(sym);
+  };
 
   if (maxDepth >= 1) {
     for (const item of ast.items) {
@@ -297,13 +348,17 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
             item.specifiers.length === 0
               ? `import "${item.source}"`
               : `from "${item.source}" import { ${item.specifiers.map((s) => (s.alias ? `${s.name} as ${s.alias}` : s.name)).join(", ")} }`;
-          symbols.push({
-            name: item.source,
-            kind: "import",
-            line,
-            signature: sig,
-            children: [],
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.source,
+              kind: "import",
+              line,
+              signature: sig,
+              children: [],
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "FunctionDecl": {
@@ -316,16 +371,21 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
           const paramsStr = item.params.map((p) => formatParam(p, includeTypes)).join(", ");
           const retStr =
             includeTypes && item.returnType ? ` -> ${formatTypeExpr(item.returnType)}` : "";
-          const sig = `${pub}${asy}fn ${item.name}${typeParams}(${paramsStr})${retStr}: ...`;
+          const fnKeyword = "fn";
+          const sig = `${pub}${asy}${fnKeyword} ${item.name}${typeParams}(${paramsStr})${retStr}: ...`;
           const docstring = getLeadingTriviaDoc(trivia, `fn:${item.name}`);
-          symbols.push({
-            name: item.name,
-            kind: "function",
-            line,
-            signature: sig,
-            children: [],
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "function",
+              line,
+              signature: sig,
+              children: [],
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "ClassDecl": {
@@ -356,14 +416,18 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                 includeTypes && p.typeAnnotation ? `: ${formatTypeExpr(p.typeAnnotation)}` : "";
               const propSig = `${st}${ro}${p.name}${opt}${typeAnn}`;
               const propDoc = getLeadingTriviaDoc(trivia, `field:${item.name}.${p.name}`);
-              children.push({
-                name: p.name,
-                kind: "property",
-                line: pLine,
-                signature: propSig,
-                children: [],
-                docstring: propDoc,
-              });
+              pushTrackedSymbol(
+                children,
+                {
+                  name: p.name,
+                  kind: "property",
+                  line: pLine,
+                  signature: propSig,
+                  children: [],
+                  docstring: propDoc,
+                },
+                p.span?.end?.line,
+              );
             }
 
             for (const m of item.methods) {
@@ -376,27 +440,36 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
               const paramsStr = m.params.map((p) => formatParam(p, includeTypes)).join(", ");
               const retStr =
                 includeTypes && m.returnType ? ` -> ${formatTypeExpr(m.returnType)}` : "";
-              const methSig = `${st}${asy}${acc}fn ${m.name}${mTypeParams}(${paramsStr})${retStr}: ...`;
+              const fnKeyword = "fn";
+              const methSig = `${st}${asy}${acc}${fnKeyword} ${m.name}${mTypeParams}(${paramsStr})${retStr}: ...`;
               const methDoc = getLeadingTriviaDoc(trivia, `method:${item.name}.${m.name}`);
-              children.push({
-                name: m.name,
-                kind: "method",
-                line: mLine,
-                signature: methSig,
-                children: [],
-                docstring: methDoc,
-              });
+              pushTrackedSymbol(
+                children,
+                {
+                  name: m.name,
+                  kind: "method",
+                  line: mLine,
+                  signature: methSig,
+                  children: [],
+                  docstring: methDoc,
+                },
+                m.span?.end?.line,
+              );
             }
           }
 
-          symbols.push({
-            name: item.name,
-            kind: "class",
-            line,
-            signature: sig,
-            children,
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "class",
+              line,
+              signature: sig,
+              children,
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "TypeDecl": {
@@ -413,23 +486,31 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                   includeTypes && v.payloadTypes && v.payloadTypes.length > 0
                     ? `(${v.payloadTypes.map((pt) => formatTypeExpr(pt)).join(", ")})`
                     : "";
-                children.push({
-                  name: v.name,
-                  kind: "variant",
-                  line: vLine,
-                  signature: `${v.name}${vPayload}`,
-                  children: [],
-                });
+                pushTrackedSymbol(
+                  children,
+                  {
+                    name: v.name,
+                    kind: "variant",
+                    line: vLine,
+                    signature: `${v.name}${vPayload}`,
+                    children: [],
+                  },
+                  v.span?.end?.line,
+                );
               }
             }
-            symbols.push({
-              name: item.name,
-              kind: "enum",
-              line,
-              signature: sig,
-              children,
-              docstring,
-            });
+            pushTrackedSymbol(
+              symbols,
+              {
+                name: item.name,
+                kind: "enum",
+                line,
+                signature: sig,
+                children,
+                docstring,
+              },
+              item.span?.end?.line,
+            );
           } else if (item.aliasType) {
             const typeParams =
               item.typeParams && item.typeParams.length > 0
@@ -437,16 +518,19 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                 : "";
             const aliasStr = includeTypes ? ` = ${formatTypeExpr(item.aliasType)}` : "";
             const sig = `type ${item.name}${typeParams}${aliasStr}`;
-            symbols.push({
-              name: item.name,
-              kind: "type",
-              line,
-              signature: sig,
-              children: [],
-              docstring,
-            });
+            pushTrackedSymbol(
+              symbols,
+              {
+                name: item.name,
+                kind: "type",
+                line,
+                signature: sig,
+                children: [],
+                docstring,
+              },
+              item.span?.end?.line,
+            );
           } else {
-            // Struct / Interface / Record
             const typeParams =
               item.typeParams && item.typeParams.length > 0
                 ? `[${item.typeParams.join(", ")}]`
@@ -466,29 +550,38 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                 const typeAnn =
                   includeTypes && f.typeAnnotation ? `: ${formatTypeExpr(f.typeAnnotation)}` : "";
                 const fDoc = getLeadingTriviaDoc(trivia, `field:${item.name}.${f.name}`);
-                children.push({
-                  name: f.name,
-                  kind: "field",
-                  line: fLine,
-                  signature: `${f.name}${opt}${typeAnn}`,
-                  children: [],
-                  docstring: fDoc,
-                });
+                pushTrackedSymbol(
+                  children,
+                  {
+                    name: f.name,
+                    kind: "field",
+                    line: fLine,
+                    signature: `${f.name}${opt}${typeAnn}`,
+                    children: [],
+                    docstring: fDoc,
+                  },
+                  f.span?.end?.line,
+                );
               }
             }
 
-            symbols.push({
-              name: item.name,
-              kind,
-              line,
-              signature: sig,
-              children,
-              docstring,
-            });
+            pushTrackedSymbol(
+              symbols,
+              {
+                name: item.name,
+                kind,
+                line,
+                signature: sig,
+                children,
+                docstring,
+              },
+              item.span?.end?.line,
+            );
           }
           break;
         }
         case "ConstDecl": {
+          if (item.name === "_") break;
           const line = item.span?.start?.line || 1;
           const pub = item.isExported ? "pub " : "";
           const typeAnn =
@@ -508,26 +601,35 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                     : prop.value.kind === "LiteralExpr"
                       ? prop.value.literalKind
                       : "...";
-              children.push({
-                name: prop.key,
-                kind: "field",
-                line: pLine,
-                signature: `${prop.key}: ${valDesc}`,
-                children: [],
-              });
+              pushTrackedSymbol(
+                children,
+                {
+                  name: prop.key,
+                  kind: "field",
+                  line: pLine,
+                  signature: `${prop.key}: ${valDesc}`,
+                  children: [],
+                },
+                prop.span?.end?.line,
+              );
             }
           }
-          symbols.push({
-            name: item.name,
-            kind: "const",
-            line,
-            signature: sig,
-            children,
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "const",
+              line,
+              signature: sig,
+              children,
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "VarDecl": {
+          if (item.name === "_") break;
           const line = item.span?.start?.line || 1;
           const pub = item.isExported ? "pub " : "";
           const kw = item.isMut ? "mut " : "val ";
@@ -535,14 +637,18 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
             includeTypes && item.typeAnnotation ? `: ${formatTypeExpr(item.typeAnnotation)}` : "";
           const sig = `${pub}${kw}${item.name}${typeAnn}`;
           const docstring = getLeadingTriviaDoc(trivia, `var:${item.name}`);
-          symbols.push({
-            name: item.name,
-            kind: "var",
-            line,
-            signature: sig,
-            children: [],
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "var",
+              line,
+              signature: sig,
+              children: [],
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "ComponentDecl": {
@@ -571,44 +677,56 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
                 cClass?.value.kind === "LiteralExpr" && typeof cClass.value.value === "string"
                   ? `.${cClass.value.value.trim().split(/\s+/)[0]}`
                   : "";
-              children.push({
-                name: `${c.tag}${cIdPart}${cClassPart}`,
-                kind: "layout",
-                line: cLine,
-                signature: `${c.tag}${cIdPart}${cClassPart}: ...`,
-                children: [],
-              });
+              pushTrackedSymbol(
+                children,
+                {
+                  name: `${c.tag}${cIdPart}${cClassPart}`,
+                  kind: "layout",
+                  line: cLine,
+                  signature: `${c.tag}${cIdPart}${cClassPart}: ...`,
+                  children: [],
+                },
+                c.span?.end?.line,
+              );
             }
           }
-          symbols.push({
-            name: item.name,
-            kind: "component",
-            line,
-            signature: sig,
-            children,
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "component",
+              line,
+              signature: sig,
+              children,
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
         case "StyleDecl": {
           const line = item.span?.start?.line || 1;
           const sig = `style ${item.name}: ...`;
           const docstring = getLeadingTriviaDoc(trivia, `style:${item.name}`);
-          symbols.push({
-            name: item.name,
-            kind: "style",
-            line,
-            signature: sig,
-            children: [],
-            docstring,
-          });
+          pushTrackedSymbol(
+            symbols,
+            {
+              name: item.name,
+              kind: "style",
+              line,
+              signature: sig,
+              children: [],
+              docstring,
+            },
+            item.span?.end?.line,
+          );
           break;
         }
       }
     }
   }
 
-  enrichAndResolveSymbolLineRanges(symbols, ast, originalSource, filePath, maxDepth);
+  enrichAndResolveSymbolLineRanges(symbols, symbolAstEndLines, originalSource, filePath, maxDepth);
 
   // Generate Skeleton Outline Text
   const isRealFile =
@@ -707,32 +825,10 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
     }
   }
 
-  let idiomsConfig: Record<string, ProjectIdiomDefinition> | undefined;
-  let idiomsActive = true;
-  try {
-    const hasScopedTarget =
-      Boolean(options.projectRoot) || (filePath !== "<anonymous>" && fs.existsSync(filePath));
-    const root =
-      options.projectRoot ??
-      (filePath !== "<anonymous>" && fs.existsSync(filePath)
-        ? findProjectRoot(path.dirname(path.resolve(filePath)))
-        : findProjectRoot(process.cwd()));
-    const cfg = loadProjectConfig(root);
-    if (hasScopedTarget && !isProjectAiceEnabled(cfg)) {
-      throw new Error(AICE_DISABLED_MESSAGE);
-    }
-    idiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
-    if (idiomsActive) {
-      idiomsConfig = cfg.idioms;
-    }
-  } catch (err) {
-    if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
-      throw err;
-    }
-  }
+  ensureIdiomsResolved(filePath);
 
   const referencedSet = new Set<string>();
-  if (idiomsActive && idiomsConfig) {
+  if (idiomsActive && idiomsConfig && Object.keys(idiomsConfig).length > 0) {
     if (originalSource) {
       for (const idiomName of Object.keys(idiomsConfig)) {
         const cleanName = idiomName.startsWith("$") ? idiomName.slice(1) : idiomName;
@@ -763,8 +859,12 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
 
   // Tokenomics Statistics (measured against base semantic skeleton)
   const origForTokens = originalSource || baseOutlineText;
-  const originalTokens = estimateTokens(origForTokens);
-  const outlineTokens = estimateTokens(baseOutlineText);
+  const originalTokens = options.skipTokenStats
+    ? Math.ceil(origForTokens.length / 4)
+    : estimateTokens(origForTokens);
+  const outlineTokens = options.skipTokenStats
+    ? Math.ceil(baseOutlineText.length / 4)
+    : estimateTokens(baseOutlineText);
   const savingsTokens = Math.max(0, originalTokens - outlineTokens);
   const savingsPct =
     originalTokens > 0 ? Number(((savingsTokens / originalTokens) * 100).toFixed(1)) : 0;
@@ -808,7 +908,7 @@ function escapeRegexForOutline(str: string): string {
 
 function enrichAndResolveSymbolLineRanges(
   symbols: OutlineSymbol[],
-  ast: Module,
+  symbolAstEndLines: WeakMap<OutlineSymbol, number>,
   originalSource: string,
   filePath: string,
   maxDepth: number,
@@ -821,22 +921,16 @@ function enrichAndResolveSymbolLineRanges(
     }
   }
 
-  const actionableAstItems = ast.items.filter(
-    (it) =>
-      !(it.kind === "FunctionDecl" && it.name === "__top_level__") &&
-      !((it.kind === "VarDecl" || it.kind === "ConstDecl") && it.name === "_"),
-  );
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
-    const astItem = actionableAstItems[i];
-    if (astItem?.span?.end?.line) {
-      sym.endLine = Math.max(sym.line, astItem.span.end.line);
-    } else {
-      sym.endLine = sym.line;
-    }
+    const trackedEnd = symbolAstEndLines.get(sym);
+    sym.endLine = trackedEnd !== undefined ? Math.max(sym.line, trackedEnd) : sym.line;
     if (sym.children) {
       for (const child of sym.children) {
-        child.endLine = child.endLine ?? child.line;
+        const childTrackedEnd = symbolAstEndLines.get(child);
+        child.endLine =
+          child.endLine ??
+          (childTrackedEnd !== undefined ? Math.max(child.line, childTrackedEnd) : child.line);
       }
     }
   }
@@ -850,14 +944,43 @@ function enrichAndResolveSymbolLineRanges(
   const rawLines = originalSource !== "" ? originalSource.split(/\r?\n/) : [];
   const totalLines = Math.max(1, rawLines.length);
 
+  const isTsLike =
+    targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx";
+  const tsIndex: TsFileSymbolIndex | undefined =
+    isTsLike && originalSource !== ""
+      ? getCachedTsSymbolIndex(originalSource, filePath)
+      : undefined;
+
+  let cssRoot: postcss.Root | undefined;
+  if (targetLang === "css" && originalSource !== "") {
+    try {
+      cssRoot = postcss.parse(originalSource);
+    } catch {
+      // ignore CSS parse errors
+    }
+  }
+
   if (isNativeFile && originalSource !== "" && targetLang) {
-    supplementNativeSymbolsFromSource(symbols, originalSource, targetLang, totalLines);
+    supplementNativeSymbolsFromSource(
+      symbols,
+      originalSource,
+      targetLang,
+      totalLines,
+      tsIndex,
+      cssRoot,
+    );
   } else if (
     !isNativeFile &&
     originalSource !== "" &&
     /\b(?:describe|test|it)\s*(?:\.[A-Za-z0-9_]+)*\s*\(/.test(originalSource)
   ) {
-    supplementNativeSymbolsFromSource(symbols, originalSource, "typescript", totalLines);
+    supplementNativeSymbolsFromSource(
+      symbols,
+      originalSource,
+      "typescript",
+      totalLines,
+      getCachedTsSymbolIndex(originalSource, "inline.test.ts"),
+    );
   }
 
   for (let i = 0; i < symbols.length; i++) {
@@ -869,6 +992,8 @@ function enrichAndResolveSymbolLineRanges(
         rawLines,
         targetLang,
         filePath,
+        tsIndex,
+        cssRoot,
       );
       if (resolved) {
         sym.line = resolved.startLine;
@@ -888,6 +1013,7 @@ function enrichAndResolveSymbolLineRanges(
             rawLines,
             targetLang,
             filePath,
+            tsIndex,
           );
           if (childResolved) {
             child.line = childResolved.startLine;
@@ -1018,7 +1144,10 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
         }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
         if (subIndent <= indentLen) {
-          if (subIndent === indentLen && (subTrimmed.startsWith(")") || subTrimmed.startsWith("}"))) {
+          if (
+            subIndent === indentLen &&
+            (subTrimmed.startsWith(")") || subTrimmed.startsWith("}"))
+          ) {
             endLine = j + 1;
             j++;
           }
@@ -1027,7 +1156,9 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
         endLine = j + 1;
         const cleanSubLine = stripComment(lines[j]);
         const fieldMatches = Array.from(
-          cleanSubLine.matchAll(/(?:^|[,(\s{])(?:pub\s+|val\s+|var\s+|let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,)\n}]+)/g),
+          cleanSubLine.matchAll(
+            /(?:^|[,(\s{])(?:pub\s+|val\s+|var\s+|let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,)\n}]+)/g,
+          ),
         );
         for (const fm of fieldMatches) {
           const cleanFieldType = fm[2]
@@ -1080,7 +1211,9 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
           break;
         }
         endLine = j + 1;
-        const variantMatch = stripComment(subTrimmed).trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        const variantMatch = stripComment(subTrimmed)
+          .trim()
+          .match(/^([A-Za-z_][A-Za-z0-9_]*)/);
         if (variantMatch) {
           children.push({
             name: variantMatch[1],
@@ -1176,8 +1309,7 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
         .replace(/\s+/g, " ")
         .replace(/\s*,\s*/g, ", ")
         .trim();
-      const afterParens =
-        closeParenPos >= 0 ? joinedHeader.slice(closeParenPos + 1).trim() : "";
+      const afterParens = closeParenPos >= 0 ? joinedHeader.slice(closeParenPos + 1).trim() : "";
       const retMatch = afterParens.match(/^(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+?)\s*:?\s*$/);
       const rawRet = retMatch?.[1]?.trim().replace(/:$/, "").trim();
       const retType = rawRet || "void";
@@ -1252,6 +1384,8 @@ function supplementNativeSymbolsFromSource(
   source: string,
   targetLang: TargetLanguage,
   totalLines: number,
+  tsIndex?: TsFileSymbolIndex,
+  preParsedCssRoot?: postcss.Root,
 ): void {
   const existingNames = new Set<string>();
   for (const s of symbols) {
@@ -1311,7 +1445,7 @@ function supplementNativeSymbolsFromSource(
 
   if (targetLang === "css") {
     try {
-      const root = postcss.parse(source);
+      const root = preParsedCssRoot ?? postcss.parse(source);
       root.each((node) => {
         if (node.type === "rule") {
           const sel = node.selector.replace(/\s+/g, " ").trim();
@@ -1398,38 +1532,102 @@ function supplementNativeSymbolsFromSource(
   }
 
   if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    const testBlocks = extractNativeTestBlocks(source);
-    for (const tb of testBlocks) {
-      const sig = `${tb.outlineKind} "${tb.title.replace(/"/g, '\\"')}"`;
-      const key = `${tb.outlineKind}:${tb.title}:${tb.startLine}`;
-      if (!existingNames.has(key)) {
-        symbols.push({
-          name: tb.title,
-          kind: tb.outlineKind,
-          line: tb.startLine,
-          endLine: tb.endLine,
-          lineRange: `[L${tb.startLine}-L${tb.endLine}]`,
-          signature: sig,
-          children: [],
-        });
-        existingNames.add(key);
-        existingNames.add(tb.title);
+    if (/\b(?:describe|test|it)\b/.test(source)) {
+      if (tsIndex) {
+        for (const tb of tsIndex.testBlocks) {
+          const sig = `${tb.kind} "${tb.title.replace(/"/g, '\\"')}"`;
+          const key = `${tb.kind}:${tb.title}:${tb.startLine}`;
+          if (!existingNames.has(key)) {
+            symbols.push({
+              name: tb.title,
+              kind: tb.kind,
+              line: tb.startLine,
+              endLine: tb.endLine,
+              lineRange: `[L${tb.startLine}-L${tb.endLine}]`,
+              signature: sig,
+              children: [],
+            });
+            existingNames.add(key);
+            existingNames.add(tb.title);
+          }
+        }
+      } else {
+        const testBlocks = extractNativeTestBlocks(source);
+        for (const tb of testBlocks) {
+          const sig = `${tb.outlineKind} "${tb.title.replace(/"/g, '\\"')}"`;
+          const key = `${tb.outlineKind}:${tb.title}:${tb.startLine}`;
+          if (!existingNames.has(key)) {
+            symbols.push({
+              name: tb.title,
+              kind: tb.outlineKind,
+              line: tb.startLine,
+              endLine: tb.endLine,
+              lineRange: `[L${tb.startLine}-L${tb.endLine}]`,
+              signature: sig,
+              children: [],
+            });
+            existingNames.add(key);
+            existingNames.add(tb.title);
+          }
+        }
       }
     }
+    return;
   }
 
   const lines = source.split(/\r?\n/);
+  const fnPrefix = "fn ";
   const declPatterns: Array<{ re: RegExp; kind: string; sigPrefix: string }> = [
-    { re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "function", sigPrefix: "fn " },
-    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "function", sigPrefix: "fn " },
-    { re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
-    { re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
-    { re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/, kind: "interface", sigPrefix: "type " },
-    { re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
-    { re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
-    { re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/, kind: "class", sigPrefix: "class " },
-    { re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
-    { re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/, kind: "function", sigPrefix: "fn " },
+    {
+      re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
+    {
+      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
+    {
+      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    {
+      re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
+    {
+      re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/,
+      kind: "interface",
+      sigPrefix: "type ",
+    },
+    {
+      re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    {
+      re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
+    {
+      re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    {
+      re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
+    {
+      re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+      kind: "function",
+      sigPrefix: fnPrefix,
+    },
   ];
 
   for (let i = 0; i < lines.length; i++) {
@@ -1450,12 +1648,6 @@ function supplementNativeSymbolsFromSource(
           continue;
         }
         const span = locateNativeDeclarationSpan(source, name, targetLang);
-        if (
-          !span &&
-          (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
-        ) {
-          continue;
-        }
         const sLine = span?.startLine ?? i + 1;
         const eLine = span?.endLine ?? Math.min(totalLines, sLine);
         symbols.push({
@@ -1465,7 +1657,9 @@ function supplementNativeSymbolsFromSource(
           endLine: eLine,
           lineRange: `[L${sLine}-L${eLine}]`,
           signature:
-            pat.kind === "function" ? `${pat.sigPrefix}${name}(...): ...` : `${pat.sigPrefix}${name}: ...`,
+            pat.kind === "function"
+              ? `${pat.sigPrefix}${name}(...): ...`
+              : `${pat.sigPrefix}${name}: ...`,
           children: [],
         });
         existingNames.add(name);
@@ -1481,6 +1675,8 @@ function resolveSingleSymbolSpanInNative(
   rawLines: string[],
   targetLang: TargetLanguage,
   _filePath: string,
+  tsIndex?: TsFileSymbolIndex,
+  preParsedCssRoot?: postcss.Root,
 ): { startLine: number; endLine: number } | undefined {
   if (
     (targetLang === "aipl" ||
@@ -1493,9 +1689,28 @@ function resolveSingleSymbolSpanInNative(
   ) {
     return { startLine: sym.line, endLine: Math.max(sym.line, sym.endLine) };
   }
+  if (tsIndex) {
+    if (sym.kind === "import") {
+      const impHit = tsIndex.imports.find((im) => im.source === sym.name);
+      if (impHit) {
+        return {
+          startLine: impHit.startLine,
+          endLine: Math.max(impHit.startLine, impHit.endLine),
+        };
+      }
+    } else {
+      const declHit = tsIndex.topLevelByName.get(sym.name)?.[0];
+      if (declHit) {
+        return {
+          startLine: declHit.startLine,
+          endLine: Math.max(declHit.startLine, declHit.endLine),
+        };
+      }
+    }
+  }
   if (targetLang === "css" && sym.kind === "style") {
     try {
-      const root = postcss.parse(originalSource);
+      const root = preParsedCssRoot ?? postcss.parse(originalSource);
       let matched: { startLine: number; endLine: number } | undefined;
       const cleanTarget = sym.name.replace(/^[.#]/, "").replace(/[^A-Za-z0-9_]/g, "_");
       root.walkRules((rule) => {
@@ -1514,7 +1729,7 @@ function resolveSingleSymbolSpanInNative(
     }
   }
 
-  if (sym.kind !== "import") {
+  if (sym.kind !== "import" && !tsIndex) {
     const span = locateNativeDeclarationSpan(originalSource, sym.name, targetLang);
     if (span) {
       const sLine = span.startLine ?? 1;
@@ -1548,14 +1763,30 @@ function resolveChildSymbolSpanInNative(
   rawLines: string[],
   targetLang: TargetLanguage,
   _filePath: string,
+  tsIndex?: TsFileSymbolIndex,
 ): { startLine: number; endLine: number } | undefined {
-  if (childSym.kind === "method" || childSym.kind === "property" || childSym.kind === "field") {
+  if (
+    childSym.kind === "method" ||
+    childSym.kind === "property" ||
+    childSym.kind === "field" ||
+    childSym.kind === "variant"
+  ) {
     const dotted = `${parentSym.name}.${childSym.name}`;
-    const span = locateNativeDeclarationSpan(originalSource, dotted, targetLang, parentSym.name);
-    if (span) {
-      const sLine = span.startLine ?? 1;
-      const eLine = span.endLine ?? sLine;
-      return { startLine: sLine, endLine: Math.max(sLine, eLine) };
+    if (tsIndex) {
+      const childHit = tsIndex.membersByQualifiedName.get(dotted)?.[0];
+      if (childHit) {
+        return {
+          startLine: childHit.startLine,
+          endLine: Math.max(childHit.startLine, childHit.endLine),
+        };
+      }
+    } else {
+      const span = locateNativeDeclarationSpan(originalSource, dotted, targetLang, parentSym.name);
+      if (span) {
+        const sLine = span.startLine ?? 1;
+        const eLine = span.endLine ?? sLine;
+        return { startLine: sLine, endLine: Math.max(sLine, eLine) };
+      }
     }
   }
   const minLine = Math.max(1, parentSym.line);
@@ -1601,6 +1832,23 @@ export function collectNativeSyntaxDiagnostics(
   return formatNativeSyntaxDiagnosticsMarkdown(filePath, source);
 }
 
+const OUTLINE_IGNORED_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "dist",
+  "build",
+  ".aice-build",
+  ".aice-cache",
+  "coverage",
+  "target",
+  "vendor",
+  ".next",
+  ".turbo",
+  "out",
+  "benchmarks",
+  "__pycache__",
+]);
+
 export async function outlinePath(
   targetPath: string | string[],
   options: OutlineOptions = {},
@@ -1626,17 +1874,18 @@ export async function outlinePath(
   }
 
   if (!Array.isArray(targetPath) && firstStat.isFile()) {
-    const res = withSuppressedTelemetry(() =>
-      generateOutline(firstFullPath, { ...options, projectRoot }),
-    );
     const nativeText = fs.readFileSync(firstFullPath, "utf-8");
+    const res = withSuppressedTelemetry(() =>
+      generateOutline(firstFullPath, { ...options, preReadSource: nativeText, projectRoot }),
+    );
     const nativeDiags = collectNativeSyntaxDiagnostics(firstFullPath, nativeText);
     if (nativeDiags && !options.json) {
       res.text = res.text ? `${res.text}\n\n${nativeDiags}` : nativeDiags;
     }
-    const nativeCl100k = estimateTokens(nativeText, "cl100k_base");
+    const nativeCl100k = res.stats?.originalTokens ?? estimateTokens(nativeText, "cl100k_base");
     const aiceCl100k = estimateTokens(res.text, "cl100k_base");
-    const structuralCompressionPct = nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
+    const structuralCompressionPct =
+      nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -1644,7 +1893,10 @@ export async function outlinePath(
       surface: "cli",
       idiomsUsed: (res.referencedIdioms?.length ?? 0) > 0,
       nativeText,
+      nativeCl100k,
+      aiceCl100k,
       realisticNativeText: nativeText,
+      realisticNativeCl100k: nativeCl100k,
       structuralCompressionPct,
       aiceText: res.text,
     });
@@ -1653,19 +1905,27 @@ export async function outlinePath(
 
   const resultMap = new Map<string, OutlineResult>();
   const targetCandidatesSet = new Set<string>();
+  const visitedDirs = new Set<string>();
 
   const walk = (dir: string) => {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    let realDir: string;
+    try {
+      realDir = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (visitedDirs.has(realDir)) return;
+    visitedDirs.add(realDir);
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
-      if (
-        entry.name === "node_modules" ||
-        entry.name === ".git" ||
-        entry.name === "dist" ||
-        entry.name === "build" ||
-        entry.name === ".aice-build" ||
-        entry.name === "coverage" ||
-        entry.name.startsWith(".")
-      ) {
+      if (entry.isSymbolicLink()) continue;
+      if (entry.name.startsWith(".") || OUTLINE_IGNORED_DIRS.has(entry.name)) {
         continue;
       }
       const p = path.join(dir, entry.name);
@@ -1710,38 +1970,80 @@ export async function outlinePath(
 
   const targetCandidates = Array.from(targetCandidatesSet).sort();
   const isCompactMode =
-    options.compact === true || (options.compact !== false && targetCandidates.length >= 100);
+    options.compact === true || (options.compact !== false && targetCandidates.length >= 60);
 
-  const nativeParts: string[] = [];
   const aiceParts: string[] = [];
   let anyIdioms = false;
+  let totalNativeChars = 0;
+  const rawTextsForSmallBatch: string[] = [];
+  let sampleNativeBuf = "";
+  let countedFiles = 0;
+
+  let preloadedConfigChecked = false;
+  let preloadedIdiomsActive = false;
+  let preloadedIdiomsConfig: Record<string, ProjectIdiomDefinition> | undefined;
+  if (targetCandidates.length > 10) {
+    try {
+      const cfg = loadProjectConfig(projectRoot);
+      if (isProjectAiceEnabled(cfg)) {
+        preloadedConfigChecked = true;
+        preloadedIdiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
+        if (preloadedIdiomsActive) {
+          preloadedIdiomsConfig = cfg.idioms;
+        }
+      }
+    } catch {
+      // fallback to per-file config resolution
+    }
+  }
 
   for (const targetFile of targetCandidates) {
     let relKey = path.relative(process.cwd(), targetFile).replace(/\\/g, "/");
     if (relKey.startsWith("..") && options.projectRoot) {
       relKey = path.relative(projectRoot, targetFile).replace(/\\/g, "/");
     }
+    let rawText = "";
+    try {
+      rawText = fs.readFileSync(targetFile, "utf-8");
+    } catch {
+      continue;
+    }
     const r = withSuppressedTelemetry(() =>
       generateOutline(targetFile, {
         ...options,
+        preReadSource: rawText,
+        skipTokenStats: !options.stats,
+        preloadedConfigChecked,
+        preloadedIdiomsActive,
+        preloadedIdiomsConfig,
         depth: isCompactMode && options.depth === undefined ? 1 : options.depth,
         projectRoot,
       }),
     );
-    try {
-      const rawText = fs.readFileSync(targetFile, "utf-8");
-      nativeParts.push(rawText);
+    totalNativeChars += rawText.length + (countedFiles > 0 ? 2 : 0);
+    if (totalNativeChars <= 64_000) {
+      rawTextsForSmallBatch.push(rawText);
+    } else {
+      rawTextsForSmallBatch.length = 0;
+    }
+    if (sampleNativeBuf.length < 32_000) {
+      const needed = 32_000 - sampleNativeBuf.length;
+      sampleNativeBuf += rawText.length <= needed ? rawText : rawText.slice(0, needed);
+    }
+    countedFiles++;
+
+    if (targetCandidates.length === 1 && !options.json) {
       const nativeDiags = collectNativeSyntaxDiagnostics(targetFile, rawText);
-      if (nativeDiags && !options.json) {
+      if (nativeDiags) {
         r.text = r.text ? `${r.text}\n\n${nativeDiags}` : nativeDiags;
       }
-    } catch {
-      // ignore
     }
     if (isCompactMode && !options.json && r.text) {
       const nonImportLines = r.text
         .split(/\r?\n/)
-        .filter((l) => l.trim().length > 0 && !/^\s*(?:from\s+["']|import\s+["']|extends\s+["'])/.test(l));
+        .filter(
+          (l) => l.trim().length > 0 && !/^\s*(?:from\s+["']|import\s+["']|extends\s+["'])/.test(l),
+        );
       if (nonImportLines.length > 20) {
         r.text = `${nonImportLines.slice(0, 20).join("\n")}\n// ... (+${nonImportLines.length - 20} more symbols)`;
       } else if (nonImportLines.length > 0) {
@@ -1756,19 +2058,30 @@ export async function outlinePath(
   }
 
   if (targetCandidates.length > 0) {
-    const fullNativeText = nativeParts.join("\n\n");
     const aiceTextPayload = options.json
       ? JSON.stringify(
-          Array.from(resultMap.values()).map(
-            (r) => r.json ?? { file: r.file, symbols: r.symbols },
-          ),
+          Array.from(resultMap.values()).map((r) => r.json ?? { file: r.file, symbols: r.symbols }),
           null,
           2,
         )
       : aiceParts.join("\n\n");
-    const nativeCl100k = estimateTokens(fullNativeText, "cl100k_base");
     const aiceCl100k = estimateTokens(aiceTextPayload, "cl100k_base");
-    const structuralCompressionPct = nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
+    let totalNativeCl100k = 0;
+    let totalNativeO200k = 0;
+    if (totalNativeChars <= 64_000 && rawTextsForSmallBatch.length > 0) {
+      const joinedSmall = rawTextsForSmallBatch.join("\n\n");
+      totalNativeCl100k = estimateTokens(joinedSmall, "cl100k_base");
+      totalNativeO200k = estimateTokens(joinedSmall, "o200k_base");
+    } else if (sampleNativeBuf.length > 0) {
+      const sampleTokens = estimateTokens(sampleNativeBuf, "cl100k_base");
+      const tokensPerChar = sampleTokens / sampleNativeBuf.length;
+      totalNativeCl100k = Math.max(1, Math.round(totalNativeChars * tokensPerChar));
+      totalNativeO200k = Math.max(1, Math.round(totalNativeCl100k * 0.98));
+    }
+    const structuralCompressionPct =
+      totalNativeCl100k > 0
+        ? Math.round(((totalNativeCl100k - aiceCl100k) / totalNativeCl100k) * 100)
+        : 0;
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -1776,10 +2089,14 @@ export async function outlinePath(
       operation: "outline",
       surface: "cli",
       idiomsUsed: anyIdioms,
-      nativeText: fullNativeText,
-      realisticNativeText: fullNativeText,
+      nativeText: "",
+      nativeChars: totalNativeChars,
+      nativeCl100k: totalNativeCl100k,
+      nativeO200k: totalNativeO200k,
+      realisticNativeCl100k: totalNativeCl100k,
       structuralCompressionPct,
       aiceText: aiceTextPayload,
+      aiceCl100k,
     });
   }
   return resultMap;

@@ -691,6 +691,8 @@ export class PhpEmitter {
           .join(", ")}]`;
       case "AssignExpr":
         return `${this.emitExpr(expr.target)} = ${this.emitExpr(expr.value)}`;
+      case "ConditionalExpr":
+        return `(${this.emitExpr(expr.condition)} ? ${this.emitExpr(expr.whenTrue)} : ${this.emitExpr(expr.whenFalse)})`;
       case "ClosureExpr":
         return this.emitClosureExpr(expr);
       case "TemplateLiteralExpr":

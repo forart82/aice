@@ -9,6 +9,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { extractFastTsImports, isTsLikeFilePath } from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
@@ -39,10 +40,20 @@ import {
   formatIdiomsMarkdownSection,
   scanProjectIdioms,
 } from "../idioms/index.js";
-import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
+import {
+  recordTelemetryEvent,
+  withSuppressedTelemetry,
+  withSuppressedTelemetryAsync,
+} from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { collectNativeSyntaxDiagnostics, generateOutline, type OutlineSymbol } from "./outline.js";
 import { locateNativeDeclarationSpan } from "./splice.js";
+
+export interface WorkspaceCallerScanCache {
+  filesByRoot: Map<string, string[]>;
+  fileContentByPath: Map<string, string>;
+  importsByPath: Map<string, ImportDecl[]>;
+}
 
 export interface ContextOptions {
   /**
@@ -89,6 +100,11 @@ export interface ContextOptions {
    * Optional override for enabling/disabling project idioms (--idioms / --no-idioms).
    */
   idioms?: boolean;
+
+  /**
+   * Optional shared workspace scan cache for multi-file context calls.
+   */
+  workspaceScanCache?: WorkspaceCallerScanCache;
 }
 
 export interface DependencyContract {
@@ -263,7 +279,6 @@ export function resolveImportPath(
         stdCandidates.push(path.resolve(process.env.AIPL_HOME, "std", stdSubpath));
       }
     }
-    stdCandidates.push(path.resolve("/home/forart/dev/aipl", normalizedSpec));
     for (const cand of stdCandidates) {
       const hit = probeCandidatePath(cand, true);
       if (hit) return hit;
@@ -564,7 +579,9 @@ function extractAiplImports(content: string): ImportDecl[] {
       .map((s) => s.trim())
       .filter(Boolean)
       .map((piece) => {
-        const asMatch = piece.match(/^([A-Za-z_][A-Za-z0-9_]*|\*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/);
+        const asMatch = piece.match(
+          /^([A-Za-z_][A-Za-z0-9_]*|\*)\s+as\s+([A-Za-z_][A-Za-z0-9_]*)$/,
+        );
         if (asMatch) {
           return {
             name: asMatch[1]!,
@@ -631,7 +648,11 @@ function extractAiplImports(content: string): ImportDecl[] {
       let endLine = startLine;
       const chunks: string[] = [clean];
       let j = i;
-      while (chunks.join(" ").includes("{") && !chunks.join(" ").includes("}") && j + 1 < lines.length) {
+      while (
+        chunks.join(" ").includes("{") &&
+        !chunks.join(" ").includes("}") &&
+        j + 1 < lines.length
+      ) {
         j++;
         chunks.push(stripLineComment(lines[j] ?? "").trim());
       }
@@ -708,8 +729,40 @@ function extractAiplImports(content: string): ImportDecl[] {
   return imports;
 }
 
+const NON_IMPORTING_EXTENSIONS = new Set([
+  ".json",
+  ".yaml",
+  ".yml",
+  ".md",
+  ".markdown",
+  ".css",
+  ".html",
+  ".twig",
+  ".sh",
+  ".bash",
+  ".zsh",
+  ".ps1",
+  ".cmd",
+  ".bat",
+  ".toml",
+  ".txt",
+]);
+
 export function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
   try {
+    if (!filePath.endsWith(".aice")) {
+      const ext = path.extname(filePath).toLowerCase();
+      if (NON_IMPORTING_EXTENSIONS.has(ext)) {
+        return [];
+      }
+      if (isTsLikeFilePath(filePath)) {
+        const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
+        if (!/\b(?:import|export|require)\b/.test(content)) {
+          return [];
+        }
+        return extractFastTsImports(content, filePath);
+      }
+    }
     const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
     if (filePath.toLowerCase().endsWith(".aipl")) {
       return extractAiplImports(content);
@@ -838,62 +891,72 @@ function collectImportLineSet(fileLines: string[], imports: ImportDecl[]): Set<n
   return importLines;
 }
 
+const CALLER_IGNORED_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  "target",
+  "vendor",
+  "benchmarks",
+  "out",
+  "__pycache__",
+]);
+
 function scanWorkspaceCallers(
   targetFullPath: string,
   projectRoot: string,
   config: AiceProjectConfig,
   queriedSymbol?: string,
+  scanCache?: WorkspaceCallerScanCache,
 ): CallerSummary[] {
   const callers: CallerSummary[] = [];
-  const filesToScan: string[] = [];
-
   const resolvedRoot = path.resolve(projectRoot);
-  const visitedDirs = new Set<string>();
+  let filesToScan = scanCache?.filesByRoot.get(resolvedRoot);
 
-  const walk = (dir: string) => {
-    let realDir: string;
-    try {
-      realDir = fs.realpathSync(dir);
-    } catch {
-      return;
-    }
-    if (visitedDirs.has(realDir)) return;
-    visitedDirs.add(realDir);
+  if (!filesToScan) {
+    filesToScan = [];
+    const visitedDirs = new Set<string>();
 
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (entry.name.startsWith(".")) continue;
-      if (
-        entry.name === "node_modules" ||
-        entry.name === "dist" ||
-        entry.name === "build" ||
-        entry.name === "coverage" ||
-        entry.name === "target" ||
-        entry.name === "vendor"
-      ) {
-        continue;
+    const walk = (dir: string) => {
+      let realDir: string;
+      try {
+        realDir = fs.realpathSync(dir);
+      } catch {
+        return;
       }
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walk(fullPath);
-      } else if (entry.isFile()) {
-        const ext = path.extname(entry.name).toLowerCase();
-        if (entry.name.endsWith(".aice") || KNOWN_TARGET_EXTENSIONS.has(ext)) {
-          filesToScan.push(fullPath);
+      if (visitedDirs.has(realDir)) return;
+      visitedDirs.add(realDir);
+
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const entry of entries) {
+        if (entry.isSymbolicLink()) continue;
+        if (entry.name.startsWith(".") || CALLER_IGNORED_DIRS.has(entry.name)) continue;
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(fullPath);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (
+            entry.name.endsWith(".aice") ||
+            (KNOWN_TARGET_EXTENSIONS.has(ext) && !NON_IMPORTING_EXTENSIONS.has(ext))
+          ) {
+            filesToScan!.push(fullPath);
+          }
         }
       }
-    }
-  };
+    };
 
-  walk(resolvedRoot);
+    walk(resolvedRoot);
+    scanCache?.filesByRoot.set(resolvedRoot, filesToScan);
+  }
 
-  // Extract leaf symbol/member name when queriedSymbol is provided (e.g. "GameApp.getCoreConstants" -> "getCoreConstants")
   let queriedLeaf: string | undefined;
   if (queriedSymbol) {
     const firstSym = splitSymbolSelectors(queriedSymbol)[0]?.trim() ?? "";
@@ -933,24 +996,21 @@ function scanWorkspaceCallers(
     : undefined;
 
   for (const file of filesToScan) {
-    if (path.resolve(file) === resolvedTarget) continue;
+    const resolvedCandidate = path.resolve(file);
+    if (resolvedCandidate === resolvedTarget) continue;
     const fileExt = path.extname(file).toLowerCase();
-    if (
-      fileExt === ".json" ||
-      fileExt === ".yaml" ||
-      fileExt === ".yml" ||
-      fileExt === ".css" ||
-      fileExt === ".md" ||
-      fileExt === ".markdown"
-    ) {
+    if (!file.endsWith(".aice") && NON_IMPORTING_EXTENSIONS.has(fileExt)) {
       continue;
     }
 
-    let rawContent = "";
-    try {
-      rawContent = fs.readFileSync(file, "utf-8");
-    } catch {
-      continue;
+    let rawContent = scanCache?.fileContentByPath.get(resolvedCandidate);
+    if (rawContent === undefined) {
+      try {
+        rawContent = fs.readFileSync(file, "utf-8");
+        scanCache?.fileContentByPath.set(resolvedCandidate, rawContent);
+      } catch {
+        continue;
+      }
     }
 
     if (!isIndexStem && !rawContent.includes(targetStem)) {
@@ -960,7 +1020,12 @@ function scanWorkspaceCallers(
       continue;
     }
 
-    const imports = extractImportsFromFile(file, rawContent);
+    let imports = scanCache?.importsByPath.get(resolvedCandidate);
+    if (!imports) {
+      imports = extractImportsFromFile(file, rawContent);
+      scanCache?.importsByPath.set(resolvedCandidate, imports);
+    }
+
     for (const imp of imports) {
       const resolved = resolveImportPath(file, imp.source, config, projectRoot);
       if (resolved) {
@@ -1016,11 +1081,7 @@ function formatBundle(
   nativeDiagnostics?: string,
   options?: { minimalEnvelope?: boolean; symbolSelector?: string },
 ): string {
-  if (
-    options?.minimalEnvelope &&
-    dependencies.length === 0 &&
-    callers.length === 0
-  ) {
+  if (options?.minimalEnvelope && dependencies.length === 0 && callers.length === 0) {
     const headerLabel = options.symbolSelector
       ? `${displayTargetPath}:${options.symbolSelector}`
       : displayTargetPath;
@@ -1653,9 +1714,7 @@ export async function generateWorkspaceContext(
               let sliced = isRawOrMatch
                 ? rawExtracted.trim()
                 : unwrapSyntheticContainer(
-                    rawExtracted
-                      .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                      .trim(),
+                    rawExtracted.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
                     f,
                   );
               if (!isRawOrMatch) {
@@ -1708,9 +1767,21 @@ export async function generateWorkspaceContext(
 
         if (depMap.has(key)) {
           const existing = depMap.get(key)!;
+          let added = false;
           for (const sym of importedSymbols) {
             if (!existing.importedSymbols.includes(sym)) {
               existing.importedSymbols.push(sym);
+              added = true;
+            }
+          }
+          if (added) {
+            if (isExternal) {
+              existing.contract = generateExternalContract(specifier, existing.importedSymbols);
+            } else if (resolvedImportPath) {
+              existing.contract = extractExportedContract(
+                resolvedImportPath,
+                existing.importedSymbols,
+              );
             }
           }
         } else {
@@ -1965,6 +2036,12 @@ function sliceRecordLiteralByPath(
   return { leafName: lastKey, value: cur };
 }
 
+function hasCatastrophicNestedQuantifiers(pattern: string): boolean {
+  if (pattern.length > 512) return true;
+  if (/(\.\*){4,}/.test(pattern)) return true;
+  return /\([^()]*[+*][^()]*\)\s*[+*?{]/.test(pattern);
+}
+
 function extractPatternMatchesFromSource(
   rawSource: string,
   rawQuery: string,
@@ -1975,18 +2052,29 @@ function extractPatternMatchesFromSource(
   const regexMatch = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
   let matcher: (line: string) => boolean;
   if (regexMatch) {
+    const rawBody = regexMatch[1];
+    if (hasCatastrophicNestedQuantifiers(rawBody)) {
+      throw new Error(`Unsafe or overly complex regex selector '${trimmed}'`);
+    }
+    const flags = regexMatch[2].replace(/[gy]/g, "");
+    let re: RegExp;
     try {
-      const flags = regexMatch[2].replace(/[gy]/g, "");
-      const re = new RegExp(regexMatch[1], flags);
-      matcher = (line: string) => re.test(line);
-    } catch {
-      const sub = regexMatch[1].toLowerCase();
-      matcher = (line: string) => line.toLowerCase().includes(sub);
+      re = new RegExp(rawBody, flags);
+    } catch (err) {
+      throw new Error(
+        `Invalid regex selector '${trimmed}': ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+    matcher = (line: string) => re.test(line);
+  } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+    const esc = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const identRe = new RegExp(`\\b${esc}\\b`);
+    matcher = (line: string) => {
+      const t = line.trim();
+      if (t.startsWith("//") || t.startsWith("#") || t.startsWith("*")) return false;
+      return identRe.test(line);
+    };
   } else {
-    if (/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmed)) {
-      return undefined;
-    }
     const lower = trimmed.toLowerCase();
     matcher = (line: string) => line.includes(trimmed) || line.toLowerCase().includes(lower);
   }
@@ -2186,7 +2274,7 @@ export function extractSymbolFromAiceSource(
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = Number.parseInt(lineRangeMatch[1], 10);
-    let endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
+    const endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
     const rawLines = rawFileSource.split(/\r?\n/);
     const totalLines = rawLines.length;
     if (startLine < 1) {
@@ -2249,8 +2337,7 @@ export function extractSymbolFromAiceSource(
       const spanInfo = locateNativeDeclarationSpan(rawFileSource, trimmedSel, targetLang);
       if (spanInfo) {
         const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
-        const sLine =
-          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        const sLine = spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
         return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
       }
       if (className) {
@@ -2278,8 +2365,7 @@ export function extractSymbolFromAiceSource(
     if (spanInfo) {
       const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
       const rawSlice = rawFileSource.slice(startOff, spanInfo.declEnd);
-      const sLine =
-        spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+      const sLine = spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
       if (rawSlice.split(/\r?\n/).length > 25) {
         return finalizeExtracted(rawSlice, sLine);
       }
@@ -2321,8 +2407,7 @@ export function extractSymbolFromAiceSource(
       );
       if (spanInfo) {
         const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
-        const sLine =
-          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        const sLine = spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
         return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
       }
       if (className) {
@@ -2411,8 +2496,7 @@ export function extractSymbolFromAiceSource(
             const propSlice = rawFileSource.slice(startOff, nativePropSpan.declEnd);
             if (propSlice.includes("=>") || propSlice.split(/\r?\n/).length > 1) {
               const sLine =
-                nativePropSpan.startLine ??
-                rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+                nativePropSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
               return finalizeExtracted(propSlice, sLine);
             }
           }
@@ -2534,8 +2618,7 @@ export function extractSymbolFromAiceSource(
       );
       if (spanInfo) {
         const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
-        const sLine =
-          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        const sLine = spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
         return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
       }
     }
@@ -2576,8 +2659,7 @@ export function extractSymbolFromAiceSource(
       const startOff = natSpan.fullDeclStart ?? natSpan.declStart;
       const rawSlice = rawFileSource.slice(startOff, natSpan.declEnd);
       if (rawSlice.split(/\r?\n/).length > 25) {
-        const sLine =
-          natSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        const sLine = natSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
         return finalizeExtracted(rawSlice, sLine);
       }
     }
@@ -2604,11 +2686,7 @@ export function parseTargetWithInlineSymbol(
         ? candidateFile
         : path.resolve(baseDir, candidateFile);
       const ext = path.extname(candidateFile).toLowerCase();
-      if (
-        fs.existsSync(absCand) ||
-        KNOWN_TARGET_EXTENSIONS.has(ext) ||
-        ext === ".aice"
-      ) {
+      if (fs.existsSync(absCand) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice") {
         return { targetPath: candidateFile, inlineSymbol: candidateSym };
       }
     }
@@ -2728,7 +2806,10 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
       for (let j = idx + 1; j < rawTokens.length; j++) {
         combined += ` ${rawTokens[j]!}`;
         const combParsed = parseTargetWithInlineSymbol(combined, baseDir);
-        if (targetExistsOnDisk(combParsed.targetPath) && (!combParsed.inlineSymbol || !/\s/.test(combParsed.inlineSymbol))) {
+        if (
+          targetExistsOnDisk(combParsed.targetPath) &&
+          (!combParsed.inlineSymbol || !/\s/.test(combParsed.inlineSymbol))
+        ) {
           matchedSpan = j;
           break;
         }
@@ -2833,9 +2914,7 @@ export async function generateContext(
     splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
   const isFastPathSelector = isPureLineRangeSymbol || isPureRegexSymbol;
   const isLargeFileSymbolQuery =
-    Boolean(options.symbol) &&
-    options.symbol!.trim() !== "*" &&
-    rawFileContent.length > 50_000;
+    Boolean(options.symbol) && options.symbol!.trim() !== "*" && rawFileContent.length > 50_000;
   const nativeDiagnostics =
     isFastPathSelector || isLargeFileSymbolQuery
       ? undefined
@@ -2896,7 +2975,11 @@ export async function generateContext(
     } else {
       const requestedSymbols = splitSymbolSelectors(options.symbol);
       const extractOpts = { numberLines: true, clampOutOfBounds: true };
-      if (requestedSymbols.length === 1) {
+      if (requestedSymbols.length === 0) {
+        if (!nativeDiagnostics) {
+          throw new Error(`Symbol '${options.symbol}' not found in ${fullTargetPath}`);
+        }
+      } else if (requestedSymbols.length === 1) {
         try {
           targetContent = extractSymbolFromAiceSource(
             targetContent,
@@ -2908,9 +2991,9 @@ export async function generateContext(
         } catch (err) {
           if (!nativeDiagnostics) throw err;
         }
-      } else if (requestedSymbols.length > 1) {
+      } else {
         const slicedBlocks: string[] = [];
-        let anyFailed = false;
+        let firstMissingErr: unknown;
         for (const sym of requestedSymbols) {
           try {
             slicedBlocks.push(
@@ -2922,23 +3005,32 @@ export async function generateContext(
                 extractOpts,
               ),
             );
-          } catch {
-            anyFailed = true;
+          } catch (err) {
+            if (firstMissingErr === undefined) {
+              firstMissingErr = err;
+            }
           }
         }
-        if (anyFailed && requestedSymbols.some((s) => /\s/.test(s))) {
-          try {
-            targetContent = extractSymbolFromAiceSource(
-              targetContent,
-              options.symbol.trim(),
-              fullTargetPath,
-              preParsedMod,
-              extractOpts,
-            );
-          } catch {
-            if (slicedBlocks.length > 0) {
-              targetContent = slicedBlocks.join("\n\n");
+        if (firstMissingErr !== undefined) {
+          if (requestedSymbols.some((s) => /\s/.test(s))) {
+            try {
+              targetContent = extractSymbolFromAiceSource(
+                targetContent,
+                options.symbol.trim(),
+                fullTargetPath,
+                preParsedMod,
+                extractOpts,
+              );
+              firstMissingErr = undefined;
+            } catch {
+              // keep firstMissingErr
             }
+          }
+          if (firstMissingErr !== undefined && !nativeDiagnostics) {
+            throw firstMissingErr;
+          }
+          if (firstMissingErr !== undefined && slicedBlocks.length > 0) {
+            targetContent = slicedBlocks.join("\n\n");
           }
         } else if (slicedBlocks.length > 0) {
           targetContent = slicedBlocks.join("\n\n");
@@ -2983,42 +3075,50 @@ export async function generateContext(
     targetContent = compactPureAiceSlice(targetContent);
   }
 
-  // Generate target outline (skip on symbol/line-range/regex queries unless outlineTarget or maxTokens is requested)
+  const targetExtLower = path.extname(fullTargetPath).toLowerCase();
+  const isDataOrDocExt =
+    targetExtLower === ".json" ||
+    targetExtLower === ".yaml" ||
+    targetExtLower === ".yml" ||
+    targetExtLower === ".md" ||
+    targetExtLower === ".markdown";
   const shouldSkipFullOutline =
-    (isFastPathSelector || Boolean(options.symbol) || rawFileContent.length > 50_000) &&
+    (isFastPathSelector ||
+      Boolean(options.symbol) ||
+      isDataOrDocExt ||
+      rawFileContent.length > 50_000) &&
     !options.outlineTarget &&
     options.maxTokens === undefined;
-  const outlineRes =
-    shouldSkipFullOutline
-      ? {
-          file: fullTargetPath,
-          text: "",
-          symbols: [] as OutlineSymbol[],
-          referencedIdioms: [] as string[],
-          json: { file: fullTargetPath, symbols: [] as OutlineSymbol[] },
-          stats: {
-            originalTokens: 0,
-            outlineTokens: 0,
-            savingsTokens: 0,
-            savingsPct: 0,
-            originalChars: 0,
-            outlineChars: 0,
-            charSavingsPct: 0,
-          },
-        }
-      : withSuppressedTelemetry(() =>
-          generateOutline(fullTargetPath, {
-            includeTypes: true,
-            idioms: options.idioms,
-            projectRoot,
-            lineRanges: options.maxTokens === undefined,
-          }),
-        );
+  const outlineRes = shouldSkipFullOutline
+    ? {
+        file: fullTargetPath,
+        text: "",
+        symbols: [] as OutlineSymbol[],
+        referencedIdioms: [] as string[],
+        json: { file: fullTargetPath, symbols: [] as OutlineSymbol[] },
+        stats: {
+          originalTokens: 0,
+          outlineTokens: 0,
+          savingsTokens: 0,
+          savingsPct: 0,
+          originalChars: 0,
+          outlineChars: 0,
+          charSavingsPct: 0,
+        },
+      }
+    : withSuppressedTelemetry(() =>
+        generateOutline(fullTargetPath, {
+          includeTypes: true,
+          idioms: options.idioms,
+          projectRoot,
+          preReadSource: rawFileContent,
+          lineRanges: options.maxTokens === undefined,
+        }),
+      );
   const targetOutline = outlineRes.text;
 
   // Dependency discovery BFS (default depth = 0 on line-range/regex fast-path)
-  const effectiveDepth =
-    options.depth !== undefined ? options.depth : isFastPathSelector ? 0 : 1;
+  const effectiveDepth = options.depth !== undefined ? options.depth : isFastPathSelector ? 0 : 1;
   const maxDepth = Math.max(0, effectiveDepth);
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
@@ -3083,9 +3183,18 @@ export async function generateContext(
 
       if (depMap.has(key)) {
         const existing = depMap.get(key)!;
+        let added = false;
         for (const sym of importedSymbols) {
           if (!existing.importedSymbols.includes(sym)) {
             existing.importedSymbols.push(sym);
+            added = true;
+          }
+        }
+        if (added) {
+          if (isExternal) {
+            existing.contract = generateExternalContract(specifier, existing.importedSymbols);
+          } else if (resolvedPath) {
+            existing.contract = extractExportedContract(resolvedPath, existing.importedSymbols);
           }
         }
       } else {
@@ -3125,11 +3234,19 @@ export async function generateContext(
     }
   }
 
-  // Caller lookup (skip by default on line-range/regex fast-path)
+  // Caller lookup (skip by default on line-range/regex fast-path or non-imported data/doc files)
   const effectiveIncludeCallers =
-    options.includeCallers !== undefined ? options.includeCallers : !isFastPathSelector;
+    options.includeCallers !== undefined
+      ? options.includeCallers
+      : !isFastPathSelector && !isDataOrDocExt;
   const callers: CallerSummary[] = effectiveIncludeCallers
-    ? scanWorkspaceCallers(fullTargetPath, projectRoot, config, options.symbol)
+    ? scanWorkspaceCallers(
+        fullTargetPath,
+        projectRoot,
+        config,
+        options.symbol,
+        options.workspaceScanCache,
+      )
     : [];
 
   const isSmallFile =
@@ -3139,11 +3256,7 @@ export async function generateContext(
 
   // Target body selection
   let targetBody = options.outlineTarget ? targetOutline : targetContent;
-  if (
-    !options.outlineTarget &&
-    !options.symbol &&
-    options.maxTokens === undefined
-  ) {
+  if (!options.outlineTarget && !options.symbol && options.maxTokens === undefined) {
     const actionableSyms = outlineRes.symbols.filter((s) => s.kind !== "import" && s.lineRange);
     if (actionableSyms.length > 0 && !/\[L\d+-L\d+\]/.test(targetBody)) {
       const rangeSummary = actionableSyms
@@ -3221,7 +3334,7 @@ export async function generateContext(
           targetBody,
           dependencies,
           callers,
-          activeIdioms,
+          bundleIdioms,
           nativeDiagnostics,
           bundleFormatOpts,
         );
@@ -3475,8 +3588,28 @@ export function mergeMultiContextResults(
     lines.push(diagParts.join("\n\n"));
   }
 
-  const formattedBundle = lines.join("\n");
-  const tokenCount = estimateTokens(formattedBundle);
+  let formattedBundle = lines.join("\n");
+  let tokenCount = estimateTokens(formattedBundle);
+
+  if (options.maxTokens !== undefined && tokenCount > options.maxTokens) {
+    const truncatedFooter = "\n\n// ... [truncated to fit maxTokens]";
+    let chars = formattedBundle.length;
+    while (
+      chars > 0 &&
+      estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) > options.maxTokens
+    ) {
+      chars = Math.floor(chars * 0.7);
+    }
+    if (estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens) {
+      formattedBundle = (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter;
+    } else {
+      formattedBundle = truncatedFooter;
+      while (formattedBundle.length > 0 && estimateTokens(formattedBundle) > options.maxTokens) {
+        formattedBundle = formattedBundle.slice(0, -1);
+      }
+    }
+    tokenCount = estimateTokens(formattedBundle);
+  }
 
   return {
     targetPath: targetPathsList.join(", "),
@@ -3497,8 +3630,21 @@ export async function generateMultiContext(
 ): Promise<ContextResult & { results: ContextResult[] }> {
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const individualResults: ContextResult[] = [];
+  const sharedScanCache: WorkspaceCallerScanCache = options.workspaceScanCache ?? {
+    filesByRoot: new Map(),
+    fileContentByPath: new Map(),
+    importsByPath: new Map(),
+  };
 
-  for (const item of targets) {
+  let firstResolvedPath = "";
+  let firstProjectRoot = baseDir;
+  let totalNativeChars = 0;
+  let totalNativeCl100k = 0;
+  let totalNativeO200k = 0;
+  const suppressIndividualTelemetry = targets.length > 1;
+
+  for (let idx = 0; idx < targets.length; idx++) {
+    const item = targets[idx]!;
     const rawStr = typeof item === "string" ? item : item.path;
     const explicitSym = typeof item === "string" ? undefined : item.symbol;
     const parsed = parseTargetWithInlineSymbol(rawStr, baseDir);
@@ -3509,14 +3655,53 @@ export async function generateMultiContext(
     if (!isProjectAiceEnabled(resolved.config)) {
       throw new Error(AICE_DISABLED_MESSAGE);
     }
+    if (!firstResolvedPath) {
+      firstResolvedPath = resolved.resolvedPath;
+      firstProjectRoot = resolved.projectRoot;
+    }
     const itemOpts: ContextOptions = {
       ...options,
       symbol: explicitSym ?? parsed.inlineSymbol ?? options.symbol,
       projectRoot: resolved.projectRoot,
+      workspaceScanCache: sharedScanCache,
     };
-    const res = await generateContext(resolved.resolvedPath, itemOpts);
+    const res = suppressIndividualTelemetry
+      ? await withSuppressedTelemetryAsync(() => generateContext(resolved.resolvedPath, itemOpts))
+      : await generateContext(resolved.resolvedPath, itemOpts);
     individualResults.push(res);
+
+    if (suppressIndividualTelemetry) {
+      try {
+        if (fs.existsSync(resolved.resolvedPath) && fs.statSync(resolved.resolvedPath).isFile()) {
+          const rawText = fs.readFileSync(resolved.resolvedPath, "utf-8");
+          totalNativeChars += rawText.length + (idx > 0 ? 2 : 0);
+          totalNativeCl100k += estimateTokens(rawText, "cl100k_base");
+          totalNativeO200k += estimateTokens(rawText, "o200k_base");
+        }
+      } catch {
+        // ignore unreadable target
+      }
+    }
   }
 
-  return mergeMultiContextResults(individualResults, options);
+  const merged = mergeMultiContextResults(individualResults, options);
+  if (suppressIndividualTelemetry && individualResults.length > 1 && firstResolvedPath) {
+    const aicePayload = options.json ? JSON.stringify(merged, null, 2) : merged.formattedBundle;
+    recordTelemetryEvent({
+      targetPath: firstResolvedPath,
+      projectRoot: firstProjectRoot,
+      filePath: "<multi-context>",
+      operation: "context",
+      surface: "cli",
+      idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
+      nativeText: "",
+      nativeChars: totalNativeChars,
+      nativeCl100k: totalNativeCl100k,
+      nativeO200k: totalNativeO200k,
+      realisticNativeCl100k: totalNativeCl100k,
+      aiceText: aicePayload,
+      aiceCl100k: merged.tokenCount,
+    });
+  }
+  return merged;
 }

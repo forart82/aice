@@ -14,6 +14,7 @@ import type {
   ClassDecl,
   ClosureExpr,
   ComponentDecl,
+  ConditionalExpr,
   ConstDecl,
   ContinueStmt,
   EnumVariantDecl,
@@ -111,6 +112,8 @@ const PRECEDENCES: Partial<Record<TokenKind, Precedence>> = {
   PERCENT: Precedence.PRODUCT,
   STAR_STAR: Precedence.EXPONENT,
   QUESTION: Precedence.POSTFIX,
+  PLUS_PLUS: Precedence.POSTFIX,
+  MINUS_MINUS: Precedence.POSTFIX,
   LPAREN: Precedence.POSTFIX,
   DOT: Precedence.POSTFIX,
   COLON_COLON: Precedence.POSTFIX,
@@ -2622,13 +2625,11 @@ export class Parser {
 
     if (expr.kind === "AssignExpr") {
       this.consumeStatementSeparator();
-      const ternary = (
-        expr.value as Expr & { _ternary?: { cond: Expr; whenTrue: Expr; whenFalse: Expr } }
-      )._ternary;
-      if (ternary) {
+      if (expr.value.kind === "ConditionalExpr") {
+        const ternary = expr.value;
         return {
           kind: "IfStmt",
-          condition: ternary.cond,
+          condition: ternary.condition,
           thenBranch: {
             kind: "Block",
             statements: [
@@ -2992,40 +2993,6 @@ export class Parser {
     }
 
     this.consumeStatementSeparator();
-
-    const ternary = value
-      ? (value as Expr & { _ternary?: { cond: Expr; whenTrue: Expr; whenFalse: Expr } })._ternary
-      : undefined;
-    if (ternary && value) {
-      return {
-        kind: "IfStmt",
-        condition: ternary.cond,
-        thenBranch: {
-          kind: "Block",
-          statements: [
-            {
-              kind: "ReturnStmt",
-              value: ternary.whenTrue,
-              span: ternary.whenTrue.span,
-            },
-          ],
-          span: ternary.whenTrue.span,
-        },
-        elifBranches: [],
-        elseBranch: {
-          kind: "Block",
-          statements: [
-            {
-              kind: "ReturnStmt",
-              value: ternary.whenFalse,
-              span: ternary.whenFalse.span,
-            },
-          ],
-          span: ternary.whenFalse.span,
-        },
-        span: mergeSpans(startSpan, value.span),
-      };
-    }
 
     return {
       kind: "ReturnStmt",
@@ -3451,10 +3418,23 @@ export class Parser {
   }
 
   private currentPrecedence(): Precedence {
-    if (this.current().kind === "QUESTION" && this.isTernaryQuestion()) {
+    const cur = this.current();
+    if (cur.kind === "QUESTION" && this.isTernaryQuestion()) {
       return Precedence.TERNARY;
     }
-    return PRECEDENCES[this.current().kind] ?? Precedence.LOWEST;
+    if (cur.kind === "PLUS_PLUS" || cur.kind === "MINUS_MINUS") {
+      if (this.cursor > 0 && cur.span.start.line === this.previous().span.end.line) {
+        return Precedence.POSTFIX;
+      }
+      return Precedence.LOWEST;
+    }
+    if (cur.kind === "TEMPLATE_NO_SUBST" || cur.kind === "TEMPLATE_HEAD") {
+      if (this.cursor > 0 && cur.span.start.line === this.previous().span.end.line) {
+        return Precedence.POSTFIX;
+      }
+      return Precedence.LOWEST;
+    }
+    return PRECEDENCES[cur.kind] ?? Precedence.LOWEST;
   }
 
   private isTernaryQuestion(): boolean {
@@ -3661,7 +3641,12 @@ export class Parser {
       };
     }
 
-    if (tok.kind === "IDENT" || tok.kind === "IMPORT" || this.isContextualIdentifier(tok)) {
+    if (
+      tok.kind === "IDENT" ||
+      tok.kind === "IMPORT" ||
+      tok.kind === "TYPE_VOID" ||
+      this.isContextualIdentifier(tok)
+    ) {
       this.advance();
       return {
         kind: "IdentifierExpr",
@@ -3670,9 +3655,13 @@ export class Parser {
       };
     }
 
-    // 3. Unary Operators (-, not, !, ...)
+    // 3. Unary Operators (-, +, ~, ++, --, not, !, ...)
     if (
       tok.kind === "MINUS" ||
+      tok.kind === "PLUS" ||
+      tok.kind === "TILDE" ||
+      tok.kind === "PLUS_PLUS" ||
+      tok.kind === "MINUS_MINUS" ||
       tok.kind === "NOT" ||
       tok.kind === "BANG" ||
       tok.kind === "ELLIPSIS"
@@ -3701,11 +3690,19 @@ export class Parser {
       const op =
         tok.kind === "MINUS"
           ? "-"
-          : tok.kind === "BANG"
-            ? "!"
-            : tok.kind === "ELLIPSIS"
-              ? "..."
-              : "not";
+          : tok.kind === "PLUS"
+            ? "+"
+            : tok.kind === "TILDE"
+              ? "~"
+              : tok.kind === "PLUS_PLUS"
+                ? "++"
+                : tok.kind === "MINUS_MINUS"
+                  ? "--"
+                  : tok.kind === "BANG"
+                    ? "!"
+                    : tok.kind === "ELLIPSIS"
+                      ? "..."
+                      : "not";
       const operand = this.parseExpr(Precedence.PREFIX);
       return {
         kind: "UnaryExpr",
@@ -3862,28 +3859,44 @@ export class Parser {
         const whenTrue = this.parseExpr(Precedence.LOWEST);
         this.consume("COLON", "Expected ':' in ternary expression");
         const whenFalse = this.parseExpr(Precedence.TERNARY - 1);
-        const span = mergeSpans(left.span, whenFalse.span);
-        const binExpr: Expr & { _ternary?: { cond: Expr; whenTrue: Expr; whenFalse: Expr } } = {
-          kind: "BinaryExpr",
-          operator: "or",
-          left: {
-            kind: "BinaryExpr",
-            operator: "and",
-            left,
-            right: whenTrue,
-            span: mergeSpans(left.span, whenTrue.span),
-          },
-          right: whenFalse,
-          span,
-          _ternary: { cond: left, whenTrue, whenFalse },
+        const condExpr: ConditionalExpr = {
+          kind: "ConditionalExpr",
+          condition: left,
+          whenTrue,
+          whenFalse,
+          span: mergeSpans(left.span, whenFalse.span),
         };
-        return binExpr;
+        return condExpr;
       }
       this.advance();
       return {
         kind: "PostfixTryExpr",
         operand: left,
         span: mergeSpans(left.span, tok.span),
+      };
+    }
+
+    // 1b. Postfix ++ / --
+    if (tok.kind === "PLUS_PLUS" || tok.kind === "MINUS_MINUS") {
+      this.advance();
+      return {
+        kind: "UnaryExpr",
+        operator: tok.kind === "PLUS_PLUS" ? "++" : "--",
+        isPostfix: true,
+        operand: left,
+        span: mergeSpans(left.span, tok.span),
+      };
+    }
+
+    // 1c. Tagged Template Literal: tag`...`
+    if (tok.kind === "TEMPLATE_NO_SUBST" || tok.kind === "TEMPLATE_HEAD") {
+      const tplExpr = this.parsePrefix();
+      return {
+        kind: "CallExpr",
+        callee: left,
+        args: [tplExpr],
+        isTaggedTemplate: true,
+        span: mergeSpans(left.span, tplExpr.span),
       };
     }
 

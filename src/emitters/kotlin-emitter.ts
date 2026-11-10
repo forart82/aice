@@ -806,6 +806,8 @@ export class KotlinEmitter {
         const op = expr.op ?? "=";
         return `${this.emitExpr(expr.target)} ${op} ${this.emitExpr(expr.value)}`;
       }
+      case "ConditionalExpr":
+        return `(if (${this.emitExpr(expr.condition)}) ${this.emitExpr(expr.whenTrue)} else ${this.emitExpr(expr.whenFalse)})`;
       default:
         if ((expr as any).kind === "MatchExpr") {
           return this.emitMatchExpr(expr as any);

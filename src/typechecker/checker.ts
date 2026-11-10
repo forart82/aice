@@ -62,6 +62,7 @@ import {
   TYPE_VOID,
   type Type,
   unquoteStringLiteral,
+  withTypeAliasRegistry,
 } from "./types.js";
 
 export function isPromiseType(t: Type | null | undefined): t is NamedTypeRep {
@@ -246,7 +247,6 @@ export class TypeChecker {
   private moduleEnvCache = new Map<string, TypeEnv>();
   private resolvingModules = new Set<string>();
   private currentCycleFallbackOccurred = false;
-
   constructor() {
     this.globalEnv = new TypeEnv();
     const intrinsics = [
@@ -283,6 +283,8 @@ export class TypeChecker {
       "ArrayBuffer",
       "Buffer",
       "typeof",
+      "delete",
+      "void",
       "undefined",
       "NaN",
       "Infinity",
@@ -443,18 +445,21 @@ export class TypeChecker {
         mod = expandModuleIdioms(mod, idioms);
       }
 
-      clearTypeAliases();
-      const env = new TypeEnv(this.globalEnv);
+      const runRegistry = new Map<string, Type>();
+      withTypeAliasRegistry(runRegistry, () => {
+        clearTypeAliases();
+        const env = new TypeEnv(this.globalEnv);
 
-      // Pass 1: Declare all types and function signatures
-      for (const item of mod.items) {
-        this.declareItem(item, env);
-      }
+        // Pass 1: Declare all types and function signatures
+        for (const item of mod.items) {
+          this.declareItem(item, env);
+        }
 
-      // Pass 2: Typecheck bodies
-      for (const item of mod.items) {
-        this.checkItem(item, env);
-      }
+        // Pass 2: Typecheck bodies
+        for (const item of mod.items) {
+          this.checkItem(item, env);
+        }
+      });
     } finally {
       if (isRootTracking && resolvedMainPath) {
         this.resolvingModules.delete(resolvedMainPath);
@@ -2312,8 +2317,21 @@ export class TypeChecker {
           }
           return opType;
         }
-        if (expr.operator === "-" && isNumeric(opType)) {
+        if (
+          (expr.operator === "-" ||
+            expr.operator === "+" ||
+            expr.operator === "~" ||
+            expr.operator === "++" ||
+            expr.operator === "--") &&
+          isNumeric(opType)
+        ) {
           return opType;
+        }
+        if (expr.operator === "+") {
+          return TYPE_NUM;
+        }
+        if (expr.operator === "~" || expr.operator === "++" || expr.operator === "--") {
+          return TYPE_INT;
         }
         if (expr.operator === "not" || expr.operator === "!") {
           if (
@@ -2430,11 +2448,24 @@ export class TypeChecker {
             "AICE_E2010_NOT_CALLABLE",
           );
         }
+        if (expr.isTaggedTemplate) {
+          for (const arg of expr.args) {
+            this.checkExpr(arg, env);
+          }
+          return calleeType.returnType;
+        }
 
         return this.typecheckInvocation(calleeType, expr.args, expr.span, env);
       }
 
       case "MemberAccessExpr": {
+        if (
+          expr.object.kind === "IdentifierExpr" &&
+          ((expr.object.name === "import" && expr.property === "meta") ||
+            (expr.object.name === "new" && expr.property === "target"))
+        ) {
+          return TYPE_UNKNOWN;
+        }
         const objType = this.checkExpr(expr.object, env);
         if (objType.kind === "unknown" || objType.kind === "nil") {
           return TYPE_UNKNOWN;
@@ -2794,6 +2825,15 @@ export class TypeChecker {
           params,
           returnType ?? (isAsyncClosure ? makeNamedType("Promise", [TYPE_VOID]) : TYPE_VOID),
         );
+      }
+
+      case "ConditionalExpr": {
+        this.checkExpr(expr.condition, env);
+        const trueType = this.checkExpr(expr.whenTrue, env, expectedType);
+        const falseType = this.checkExpr(expr.whenFalse, env, expectedType);
+        if (isAssignable(trueType, falseType)) return trueType;
+        if (isAssignable(falseType, trueType)) return falseType;
+        return TYPE_UNKNOWN;
       }
 
       case "AssignExpr": {

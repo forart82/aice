@@ -1431,6 +1431,9 @@ export class TypeScriptEmitter {
       case "AssignExpr":
         return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
 
+      case "ConditionalExpr":
+        return `(${this.emitExpr(expr.condition)} ? ${this.emitExpr(expr.whenTrue)} : ${this.emitExpr(expr.whenFalse)})`;
+
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
@@ -1447,12 +1450,30 @@ export class TypeScriptEmitter {
         if (expr.operator === "...") {
           return `...${operand}`;
         }
+        if (expr.isPostfix) {
+          return `(${operand}${expr.operator})`;
+        }
+        if (expr.operator === "++" || expr.operator === "--") {
+          return `(${expr.operator}${operand})`;
+        }
         const op = expr.operator === "not" ? "!" : expr.operator;
         return `${op}(${operand})`;
       }
 
       case "CallExpr": {
         const argCodes = expr.args.map((a) => this.emitExpr(a));
+
+        if (
+          expr.isTaggedTemplate &&
+          expr.args.length === 1 &&
+          expr.args[0].kind === "TemplateLiteralExpr"
+        ) {
+          let tagCallee = this.emitExpr(expr.callee, true);
+          if (expr.callee.kind === "ClosureExpr") {
+            tagCallee = `(${tagCallee})`;
+          }
+          return `${tagCallee}${argCodes[0]}`;
+        }
 
         // Method lowering
         if (expr.callee.kind === "MemberAccessExpr") {
@@ -1503,6 +1524,12 @@ export class TypeScriptEmitter {
 
           if (expr.callee.name === "typeof" && expr.args.length === 1) {
             return `typeof (${argCodes[0]})`;
+          }
+          if (expr.callee.name === "delete" && expr.args.length === 1) {
+            return `delete ${argCodes[0]}`;
+          }
+          if (expr.callee.name === "void" && expr.args.length === 1) {
+            return `void (${argCodes[0]})`;
           }
 
           if (

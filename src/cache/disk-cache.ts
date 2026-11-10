@@ -81,6 +81,8 @@ export class AiceAstCache {
     if (!options?.bypassCache && this.entries.has(key)) {
       this.hits++;
       const cached = this.entries.get(key)!;
+      this.entries.delete(key);
+      this.entries.set(key, cached);
       return options?.clone === false ? cached.ast : structuredClone(cached.ast);
     }
 

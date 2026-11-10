@@ -7,8 +7,7 @@
  * extracts CST trivia (comments, JSDoc) into CstTriviaTable,
  * and lowers the AST into an AICE Module AST.
  */
-
-import ts from "../compat/typescript.js";
+import ts, { getCachedTsSourceFile } from "../compat/typescript.js";
 import type {
   AssignOp,
   BinaryOp,
@@ -58,6 +57,7 @@ export interface TsDecompilerOptions {
   modulePath?: string;
   isTsx?: boolean;
   convertStringUnionsToEnum?: boolean;
+  skeletonOnly?: boolean;
 }
 
 export class TsDecompiler {
@@ -65,6 +65,7 @@ export class TsDecompiler {
   private filePath: string;
   private isTsx: boolean;
   private convertStringUnionsToEnum: boolean;
+  private skeletonOnly: boolean;
   private sourceFile!: ts.SourceFile;
   private trivia = new CstTriviaTable();
   private knownTypeNames = new Set<string>();
@@ -150,6 +151,7 @@ export class TsDecompiler {
     this.filePath = filePath;
     this.isTsx = options.isTsx ?? (filePath.endsWith(".tsx") || source.includes("<"));
     this.convertStringUnionsToEnum = options.convertStringUnionsToEnum ?? false;
+    this.skeletonOnly = options.skeletonOnly ?? false;
   }
 
   static decompile(
@@ -169,13 +171,7 @@ export class TsDecompiler {
     this.knownTypeNames.clear();
     this.variableScopeStack = [new Map()];
     const scriptKind = this.isTsx ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
-    this.sourceFile = ts.createSourceFile(
-      this.filePath,
-      this.source,
-      ts.ScriptTarget.ES2022,
-      true,
-      scriptKind,
-    );
+    this.sourceFile = getCachedTsSourceFile(this.source, this.filePath, scriptKind);
 
     const items: ModuleItem[] = [];
 
@@ -316,6 +312,7 @@ export class TsDecompiler {
     }
 
     if (ts.isExpressionStatement(stmt)) {
+      if (this.skeletonOnly) return null;
       return {
         kind: "ConstDecl",
         name: "_",
@@ -326,6 +323,7 @@ export class TsDecompiler {
     }
 
     if (ts.isIfStatement(stmt)) {
+      if (this.skeletonOnly) return null;
       const cond = this.convertExpression(stmt.expression);
       let thenExpr: Expr | null = null;
       if (ts.isExpressionStatement(stmt.thenStatement)) {
@@ -1398,6 +1396,9 @@ export class TsDecompiler {
   }
 
   private convertBlock(block: ts.Block): Block {
+    if (this.skeletonOnly) {
+      return { kind: "Block", statements: [], span: this.getSpan(block) };
+    }
     const statements: Statement[] = [];
     for (const stmt of block.statements) {
       if (ts.isVariableStatement(stmt) && stmt.declarationList.declarations.length > 1) {
@@ -2987,6 +2988,80 @@ export class TsDecompiler {
       };
     }
 
+    // Satisfies Expressions (expr satisfies T -> expr)
+    if (ts.isSatisfiesExpression(expr)) {
+      return this.convertExpression(expr.expression);
+    }
+
+    // MetaProperty Expressions (import.meta, new.target)
+    if (ts.isMetaProperty(expr)) {
+      const kwName = expr.keywordToken === ts.SyntaxKind.ImportKeyword ? "import" : "new";
+      return {
+        kind: "MemberAccessExpr",
+        object: {
+          kind: "IdentifierExpr",
+          name: kwName,
+          span: this.getSpan(expr),
+        },
+        property: expr.name.text,
+        isSafeNav: false,
+        span: this.getSpan(expr),
+      };
+    }
+
+    // Delete Expressions (delete obj.prop)
+    if (ts.isDeleteExpression(expr)) {
+      return {
+        kind: "CallExpr",
+        callee: {
+          kind: "IdentifierExpr",
+          name: "delete",
+          span: this.getSpan(expr),
+        },
+        args: [this.convertExpression(expr.expression)],
+        span: this.getSpan(expr),
+      };
+    }
+
+    // Void Expressions (void expr)
+    if (ts.isVoidExpression(expr)) {
+      return {
+        kind: "CallExpr",
+        callee: {
+          kind: "IdentifierExpr",
+          name: "void",
+          span: this.getSpan(expr),
+        },
+        args: [this.convertExpression(expr.expression)],
+        span: this.getSpan(expr),
+      };
+    }
+
+    // Tagged Template Expressions (tag`...`)
+    if (ts.isTaggedTemplateExpression(expr)) {
+      let tplArg: Expr;
+      if (ts.isNoSubstitutionTemplateLiteral(expr.template)) {
+        const rawText =
+          (expr.template as ts.NoSubstitutionTemplateLiteral & { rawText?: string }).rawText ??
+          expr.template.text;
+        tplArg = {
+          kind: "TemplateLiteralExpr",
+          quasis: [rawText],
+          expressions: [],
+          span: this.getSpan(expr.template),
+        };
+      } else {
+        tplArg = this.convertExpression(expr.template);
+      }
+      return {
+        kind: "CallExpr",
+        callee: this.convertExpression(expr.tag),
+        args: [tplArg],
+        isTaggedTemplate: true,
+        span: this.getSpan(expr),
+      };
+    }
+
     // TypeOf Expressions
     if (ts.isTypeOfExpression(expr)) {
       return {
@@ -3003,20 +3078,36 @@ export class TsDecompiler {
 
     // Conditional Expressions (Ternary)
     if (ts.isConditionalExpression(expr)) {
-      const cond = this.ensureBooleanCondition(expr.condition);
-      const whenTrue = this.convertExpression(expr.whenTrue);
-      const whenFalse = this.convertExpression(expr.whenFalse);
-      return {
-        kind: "BinaryExpr",
-        operator: "or",
-        left: {
+      let outer: ts.Node = expr;
+      while (outer.parent && ts.isParenthesizedExpression(outer.parent)) {
+        outer = outer.parent;
+      }
+      if (
+        outer.parent &&
+        ts.isCallExpression(outer.parent) &&
+        outer.parent.expression === outer &&
+        ts.isIdentifier(expr.whenTrue) &&
+        ts.isIdentifier(expr.whenFalse)
+      ) {
+        return {
           kind: "BinaryExpr",
-          operator: "and",
-          left: cond,
-          right: whenTrue,
+          operator: "or",
+          left: {
+            kind: "BinaryExpr",
+            operator: "and",
+            left: this.convertExpression(expr.condition),
+            right: this.convertExpression(expr.whenTrue),
+            span: this.getSpan(expr),
+          },
+          right: this.convertExpression(expr.whenFalse),
           span: this.getSpan(expr),
-        },
-        right: whenFalse,
+        };
+      }
+      return {
+        kind: "ConditionalExpr",
+        condition: this.convertExpression(expr.condition),
+        whenTrue: this.convertExpression(expr.whenTrue),
+        whenFalse: this.convertExpression(expr.whenFalse),
         span: this.getSpan(expr),
       };
     }
@@ -3035,7 +3126,74 @@ export class TsDecompiler {
       }
 
       if (expr.operatorToken.kind === ts.SyntaxKind.CommaToken) {
-        return this.convertExpression(expr.right);
+        const parts: ts.Expression[] = [];
+        const collectComma = (node: ts.Expression) => {
+          if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+            collectComma(node.left);
+            collectComma(node.right);
+          } else {
+            parts.push(node);
+          }
+        };
+        collectComma(expr);
+        const leadingSideEffects = parts.slice(0, -1).filter((p) => {
+          return !(
+            ts.isNumericLiteral(p) ||
+            ts.isStringLiteral(p) ||
+            ts.isIdentifier(p) ||
+            p.kind === ts.SyntaxKind.TrueKeyword ||
+            p.kind === ts.SyntaxKind.FalseKeyword ||
+            p.kind === ts.SyntaxKind.NullKeyword ||
+            p.kind === ts.SyntaxKind.UndefinedKeyword
+          );
+        });
+        const lastExpr = this.convertExpression(parts[parts.length - 1]);
+        if (leadingSideEffects.length === 0) {
+          return lastExpr;
+        }
+        const stmts: Statement[] = leadingSideEffects.map((se) =>
+          this.convertExpressionToStatement(se),
+        );
+        stmts.push({
+          kind: "ReturnStmt",
+          value: lastExpr,
+          span: lastExpr.span,
+        });
+        let hasAwait = false;
+        const scanAwait = (n: ts.Node) => {
+          if (hasAwait) return;
+          if (ts.isFunctionLike(n)) return;
+          if (ts.isAwaitExpression(n)) {
+            hasAwait = true;
+            return;
+          }
+          ts.forEachChild(n, scanAwait);
+        };
+        ts.forEachChild(expr, scanAwait);
+        const iifeCall: Expr = {
+          kind: "CallExpr",
+          callee: {
+            kind: "ClosureExpr",
+            isAsync: hasAwait || undefined,
+            params: [],
+            returnType: null,
+            body: {
+              kind: "Block",
+              statements: stmts,
+              span: this.getSpan(expr),
+            },
+            span: this.getSpan(expr),
+          },
+          args: [],
+          span: this.getSpan(expr),
+        };
+        return hasAwait
+          ? {
+              kind: "AwaitExpr",
+              operand: iifeCall,
+              span: this.getSpan(expr),
+            }
+          : iifeCall;
       }
 
       if (expr.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
@@ -3059,17 +3217,27 @@ export class TsDecompiler {
 
     // Unary Expressions
     if (ts.isPostfixUnaryExpression(expr)) {
-      return this.convertExpression(expr.operand);
+      const op = expr.operator === ts.SyntaxKind.PlusPlusToken ? "++" : "--";
+      return {
+        kind: "UnaryExpr",
+        operator: op,
+        isPostfix: true,
+        operand: this.convertExpression(expr.operand),
+        span: this.getSpan(expr),
+      };
     }
 
     if (ts.isPrefixUnaryExpression(expr)) {
-      if (
-        expr.operator === ts.SyntaxKind.PlusPlusToken ||
-        expr.operator === ts.SyntaxKind.MinusMinusToken
-      ) {
-        return this.convertExpression(expr.operand);
-      }
-      const op = expr.operator === ts.SyntaxKind.ExclamationToken ? "not" : "-";
+      const op =
+        expr.operator === ts.SyntaxKind.PlusPlusToken
+          ? "++"
+          : expr.operator === ts.SyntaxKind.MinusMinusToken
+            ? "--"
+            : expr.operator === ts.SyntaxKind.ExclamationToken
+              ? "not"
+              : expr.operator === ts.SyntaxKind.PlusToken
+                ? "+"
+                : "-";
       return {
         kind: "UnaryExpr",
         operator: op,

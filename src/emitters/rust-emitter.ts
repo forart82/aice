@@ -690,6 +690,8 @@ export class RustEmitter {
       }
       case "AssignExpr":
         return `(${this.emitExpr(expr.target)} ${expr.op ?? "="} ${this.emitExpr(expr.value)})`;
+      case "ConditionalExpr":
+        return `(if ${this.emitExpr(expr.condition)} { ${this.emitExpr(expr.whenTrue)} } else { ${this.emitExpr(expr.whenFalse)} })`;
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
@@ -710,7 +712,17 @@ export class RustEmitter {
         if (expr.operator === "...") {
           return `...${operand}`;
         }
-        const op = expr.operator === "not" ? "!" : expr.operator;
+        if (expr.operator === "++") {
+          return expr.isPostfix
+            ? `{ let _old = ${operand}; ${operand} += 1; _old }`
+            : `{ ${operand} += 1; ${operand} }`;
+        }
+        if (expr.operator === "--") {
+          return expr.isPostfix
+            ? `{ let _old = ${operand}; ${operand} -= 1; _old }`
+            : `{ ${operand} -= 1; ${operand} }`;
+        }
+        const op = expr.operator === "not" || expr.operator === "~" ? "!" : expr.operator;
         return `${op}${operand}`;
       }
       case "PostfixTryExpr": {

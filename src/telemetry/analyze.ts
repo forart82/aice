@@ -12,6 +12,7 @@ import {
   buildGainReport,
   detectCallerAgent,
   isTelemetrySuppressed,
+  isTestEnvWithoutExplicitTelemetry,
   resolveTelemetryPath,
   type TelemetryOperation,
   type TelemetrySurface,
@@ -151,11 +152,14 @@ export function resolveTelemetryErrorsPath(explicitTelemetryPath?: string): stri
   return path.join(path.dirname(baseLedger), "errors.jsonl");
 }
 
-function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolean {
-  if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_TELEMETRY_ERRORS_PATH) {
-    return false;
+function stripTrailingControlChars(rawPath: string): string {
+  for (let i = 0; i < rawPath.length; i++) {
+    const code = rawPath.charCodeAt(i);
+    if (code < 32 || code === 127) {
+      return rawPath.slice(0, i);
+    }
   }
-  return Boolean(process.env.VITEST || process.env.NODE_ENV === "test");
+  return rawPath;
 }
 
 export function recordTelemetryError(
@@ -379,9 +383,12 @@ function extractAntigravityWorkspaceFromDb(
     try {
       if (!fs.existsSync(dbPath)) continue;
       const raw = fs.readFileSync(dbPath).toString("latin1");
-      const m = raw.match(/Command Working Directory:\s*(\/[^\s\n<"\x00-\x1f]+)/);
+      const m = raw.match(/Command Working Directory:\s*(\/[^\s<"]+)/);
       if (m) {
-        return path.resolve(m[1]);
+        const cleaned = stripTrailingControlChars(m[1]);
+        if (cleaned.startsWith("/")) {
+          return path.resolve(cleaned);
+        }
       }
     } catch {
       // ignore unreadable db
@@ -481,9 +488,10 @@ function parseTranscriptFile(
 
     const content = String(step.content ?? "");
     if (!workspace) {
-      const m = content.match(/Command Working Directory:\s*(\/[^\s\n<"\x00-\x1f]+)/);
-      if (m) {
-        workspace = path.resolve(m[1]);
+      const m = content.match(/Command Working Directory:\s*(\/[^\s<"]+)/);
+      const cleaned = m ? stripTrailingControlChars(m[1]) : "";
+      if (cleaned.startsWith("/")) {
+        workspace = path.resolve(cleaned);
       } else if (typeof step.cwd === "string" && step.cwd.startsWith("/")) {
         workspace = path.resolve(step.cwd);
       }

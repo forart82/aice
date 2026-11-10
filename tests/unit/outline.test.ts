@@ -457,4 +457,117 @@ class DataPipeline:
       expect(outlineCmd?.description()).toContain("Semantic skeletonization");
     });
   });
+
+  describe("Directory Safety, Symlink Cycles, Compact Mode & Span Alignment Regressions", () => {
+    it("survives directory symlink cycles and skips ignored build/worktree directories", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-outline-cycle-"));
+      try {
+        const srcDir = path.join(tmpDir, "src");
+        const ignoredDist = path.join(tmpDir, "dist");
+        const ignoredWorktrees = path.join(tmpDir, ".worktrees");
+        fs.mkdirSync(srcDir, { recursive: true });
+        fs.mkdirSync(ignoredDist, { recursive: true });
+        fs.mkdirSync(ignoredWorktrees, { recursive: true });
+
+        fs.writeFileSync(
+          path.join(srcDir, "core.ts"),
+          "export function runCore(x: number): number {\n  return x + 1;\n}\n",
+          "utf-8",
+        );
+        fs.writeFileSync(
+          path.join(ignoredDist, "bundle.js"),
+          "export function ignoredDistFn() { return 0; }\n",
+          "utf-8",
+        );
+        fs.writeFileSync(
+          path.join(ignoredWorktrees, "ghost.ts"),
+          "export function ignoredWorktreeFn() { return 0; }\n",
+          "utf-8",
+        );
+
+        // Create recursive symlink pointing back to root
+        fs.symlinkSync(tmpDir, path.join(srcDir, "loop_to_root"));
+
+        const resMap = (await outlinePath(tmpDir)) as Map<string, OutlineResult>;
+        expect(resMap).toBeInstanceOf(Map);
+        const keys = Array.from(resMap.keys());
+        expect(keys.some((k) => k.endsWith("src/core.ts"))).toBe(true);
+        expect(keys.some((k) => k.includes("dist/"))).toBe(false);
+        expect(keys.some((k) => k.includes(".worktrees/"))).toBe(false);
+        expect(keys.some((k) => k.includes("loop_to_root"))).toBe(false);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("auto-enables compact mode at >= 60 files and caps dense files cleanly", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-outline-compact60-"));
+      try {
+        const manyFns = Array.from(
+          { length: 25 },
+          (_, idx) => `export function helper${idx}(v: number): number { return v + ${idx}; }`,
+        ).join("\n");
+        fs.writeFileSync(path.join(tmpDir, "f00.ts"), `${manyFns}\n`, "utf-8");
+        for (let i = 1; i < 60; i++) {
+          const name = `f${String(i).padStart(2, "0")}.ts`;
+          fs.writeFileSync(path.join(tmpDir, name), `export const VAL_${i} = ${i};\n`, "utf-8");
+        }
+
+        const resMap = (await outlinePath(tmpDir)) as Map<string, OutlineResult>;
+        expect(resMap.size).toBe(60);
+        const denseKey = Array.from(resMap.keys()).find((k) => k.endsWith("f00.ts"))!;
+        expect(resMap.get(denseKey)?.text).toContain("// ... (+5 more symbols)");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves exact [Lstart-Lend] spans when top-level statements precede functions and in TS classes/tests", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-outline-spans-"));
+      try {
+        const tsFile = path.join(tmpDir, "service.test.ts");
+        const content = [
+          'console.log("module-init");',
+          "if (Date.now() > 0) {",
+          '  console.log("booted");',
+          "}",
+          "export class MathBox {",
+          "  private base = 10;",
+          "  public add(v: number): number {",
+          "    return this.base + v;",
+          "  }",
+          "}",
+          "export function computeTotal(a: number, b: number): number {",
+          "  const sum = a + b;",
+          "  return sum;",
+          "}",
+          'describe("MathBox suite", () => {',
+          '  it("TC-SPAN-01: adds values", () => {',
+          "    expect(new MathBox().add(5)).toBe(15);",
+          "  });",
+          "});",
+          "",
+        ].join("\n");
+        fs.writeFileSync(tsFile, content, "utf-8");
+
+        const res = generateOutline(tsFile);
+        const cls = res.symbols.find((s) => s.name === "MathBox");
+        expect(cls?.line).toBe(5);
+        expect(cls?.endLine).toBe(10);
+        const addMethod = cls?.children?.find((c) => c.name === "add");
+        expect(addMethod?.line).toBe(7);
+        expect(addMethod?.endLine).toBe(9);
+
+        const totalSym = res.symbols.find((s) => s.name === "computeTotal");
+        expect(totalSym?.line).toBe(11);
+        expect(totalSym?.endLine).toBe(14);
+
+        const testSym = res.symbols.find((s) => s.kind === "test" && s.name.includes("TC-SPAN-01"));
+        expect(testSym?.line).toBe(16);
+        expect(testSym?.endLine).toBe(18);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
 });

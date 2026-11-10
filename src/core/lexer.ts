@@ -522,10 +522,22 @@ export function scanRawTokens(
     const startPos = currentPos();
 
     // 2-character operators
+    if (ch === "+" && peek(1) === "+") {
+      advance();
+      advance();
+      rawTokens.push({ kind: "PLUS_PLUS", value: "++", span: makeSpan(startPos) });
+      continue;
+    }
     if (ch === "+" && peek(1) === "=") {
       advance();
       advance();
       rawTokens.push({ kind: "PLUS_EQUAL", value: "+=", span: makeSpan(startPos) });
+      continue;
+    }
+    if (ch === "-" && peek(1) === "-") {
+      advance();
+      advance();
+      rawTokens.push({ kind: "MINUS_MINUS", value: "--", span: makeSpan(startPos) });
       continue;
     }
     if (ch === "-" && peek(1) === "=") {
@@ -836,6 +848,9 @@ export function scanRawTokens(
         break;
       case "!":
         rawTokens.push({ kind: "BANG", value: "!", span: makeSpan(startPos) });
+        break;
+      case "~":
+        rawTokens.push({ kind: "TILDE", value: "~", span: makeSpan(startPos) });
         break;
       case "?":
         rawTokens.push({ kind: "QUESTION", value: "?", span: makeSpan(startPos) });

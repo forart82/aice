@@ -952,6 +952,9 @@ export class PythonEmitter {
         return `(${target} ${expr.op} ${val})`;
       }
 
+      case "ConditionalExpr":
+        return `(${this.emitExpr(expr.whenTrue)} if ${this.emitExpr(expr.condition)} else ${this.emitExpr(expr.whenFalse)})`;
+
       case "BinaryExpr": {
         const left = this.emitExpr(expr.left);
         const right = this.emitExpr(expr.right);
@@ -972,6 +975,16 @@ export class PythonEmitter {
         const operand = this.emitExpr(expr.operand);
         if (expr.operator === "...") {
           return `*${operand}`;
+        }
+        if (expr.operator === "++") {
+          return expr.isPostfix
+            ? `((${operand} := ${operand} + 1) - 1)`
+            : `(${operand} := ${operand} + 1)`;
+        }
+        if (expr.operator === "--") {
+          return expr.isPostfix
+            ? `((${operand} := ${operand} - 1) + 1)`
+            : `(${operand} := ${operand} - 1)`;
         }
         const op = expr.operator === "!" || expr.operator === "not" ? "not " : expr.operator;
         return `(${op}${operand})`;

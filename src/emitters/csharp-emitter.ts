@@ -612,6 +612,8 @@ export class CSharpEmitter {
         const val = this.emitExpr(expr.value);
         return `(${target} ${expr.op ?? "="} ${val})`;
       }
+      case "ConditionalExpr":
+        return `(${this.emitExpr(expr.condition)} ? ${this.emitExpr(expr.whenTrue)} : ${this.emitExpr(expr.whenFalse)})`;
       case "ClosureExpr": {
         const params = expr.params.map((p) => p.name).join(", ");
         const paramStr = expr.params.length === 1 ? params : `(${params})`;

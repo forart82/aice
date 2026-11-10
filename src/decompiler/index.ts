@@ -15,9 +15,9 @@ import {
   loadProjectConfig,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
-  import type { Module } from "../core/ast.js";
-  import { CstTriviaTable } from "../core/trivia.js";
-  import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import type { Module } from "../core/ast.js";
+import { CstTriviaTable } from "../core/trivia.js";
+import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent } from "../telemetry/index.js";
 import { AiceGenerator, type AiceGeneratorOptions } from "./aice-generator.js";
@@ -61,6 +61,7 @@ export interface DecompileOptions
   constName?: string;
   idioms?: boolean;
   projectRoot?: string;
+  skipCodeGen?: boolean;
 }
 
 export interface DecompileResult {
@@ -103,6 +104,7 @@ export function decompile(
     const decompiler = new TsDecompiler(source, filePath, {
       isTsx: target === "tsx" || options.isTsx,
       convertStringUnionsToEnum: options.convertStringUnionsToEnum,
+      skeletonOnly: options.skeletonOnly,
     });
     const result = decompiler.decompile();
     ast = result.ast;
@@ -211,10 +213,9 @@ export function decompile(
     }
   }
 
-  const generator = new AiceGenerator({ ...options, trivia });
-  const aice = generator.generate(ast);
+  const aice = options.skipCodeGen ? "" : new AiceGenerator({ ...options, trivia }).generate(ast);
 
-  if (filePath !== "source" && existsSync(filePath)) {
+  if (!options.skipCodeGen && filePath !== "source" && existsSync(filePath)) {
     recordTelemetryEvent({
       targetPath: resolve(filePath),
       projectRoot,
