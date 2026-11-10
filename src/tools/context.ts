@@ -353,6 +353,43 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
 }
 
 function extractExportedContract(resolvedPath: string, importedSymbols: string[]): string {
+  if (
+    importedSymbols.length > 0 &&
+    !importedSymbols.includes("*") &&
+    !resolvedPath.endsWith(".aice")
+  ) {
+    try {
+      const stat = fs.statSync(resolvedPath);
+      if (stat.size > 50_000) {
+        const rawDep = fs.readFileSync(resolvedPath, "utf-8");
+        const depLang = detectTargetFromPath(resolvedPath);
+        const snippets: string[] = [];
+        for (const sym of importedSymbols) {
+          const span = locateNativeDeclarationSpan(rawDep, sym, depLang);
+          if (span) {
+            snippets.push(rawDep.slice(span.fullDeclStart ?? span.declStart, span.declEnd));
+          }
+        }
+        if (snippets.length > 0) {
+          const miniSource = snippets.join("\n\n");
+          const decomp = withSuppressedTelemetry(() =>
+            decompile(miniSource, depLang, { filePath: resolvedPath }),
+          );
+          const miniOutline = withSuppressedTelemetry(() =>
+            generateOutline(decomp.ast, { includeTypes: true }),
+          );
+          const miniSyms = miniOutline.symbols.filter(
+            (s) => s.kind !== "import" && s.kind !== "module",
+          );
+          const renderedMini = renderSymbolsOutline(miniSyms);
+          if (renderedMini) return renderedMini;
+        }
+      }
+    } catch {
+      // fall through to full outline
+    }
+  }
+
   const outlineRes = withSuppressedTelemetry(() =>
     generateOutline(resolvedPath, { includeTypes: true }),
   );
@@ -685,7 +722,31 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
     if (targetLang === "aipl") {
       return extractAiplImports(content);
     }
-    const decomp = withSuppressedTelemetry(() => decompile(content, targetLang, { filePath }));
+    let sourceToDecompile = content;
+    if (content.length > 6_000) {
+      if (!/\b(?:import|from|require|use|include|using)\b/.test(content)) {
+        return [];
+      }
+      const lines = content.split(/\r?\n/);
+      let lastImportLine = -1;
+      for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i]!.trim();
+        if (
+          /^(?:import\b|export\s+(?:\*|type\b|\{)[^;]*\bfrom\b|from\s+\S+\s+import\b|(?:pub\s+)?use\s+|#include\b|using\s+|(?:const|let|var)\s+[^=]+=\s*require\s*\()/.test(
+            trimmed,
+          )
+        ) {
+          lastImportLine = i;
+        }
+      }
+      if (lastImportLine < 0) {
+        return [];
+      }
+      sourceToDecompile = lines.slice(0, Math.min(lines.length, lastImportLine + 35)).join("\n");
+    }
+    const decomp = withSuppressedTelemetry(() =>
+      decompile(sourceToDecompile, targetLang, { filePath }),
+    );
     return decomp.ast.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
   } catch {
     return [];
@@ -2211,6 +2272,38 @@ export function extractSymbolFromAiceSource(
     }
   }
 
+  if (!filePath.endsWith(".aice") && rawFileSource.length > 50_000 && !preParsedMod) {
+    const targetLang = detectTargetFromPath(filePath);
+    const spanInfo = locateNativeDeclarationSpan(rawFileSource, trimmedSel, targetLang);
+    if (spanInfo) {
+      const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+      const rawSlice = rawFileSource.slice(startOff, spanInfo.declEnd);
+      const sLine =
+        spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+      if (rawSlice.split(/\r?\n/).length > 25) {
+        return finalizeExtracted(rawSlice, sLine);
+      }
+      try {
+        const snippetToDecompile =
+          spanInfo.className &&
+          !/^(?:export\s+|function\s+|class\s+|const\s+|let\s+|var\s+|interface\s+|type\s+)/.test(
+            rawSlice.trim(),
+          )
+            ? `class ${spanInfo.className} {\n${rawSlice}\n}`
+            : rawSlice;
+        const miniDecomp = withSuppressedTelemetry(() =>
+          decompile(snippetToDecompile, targetLang, { filePath }),
+        );
+        if (miniDecomp.ast.items.length > 0) {
+          return finalizeExtracted(AiceGenerator.generate(miniDecomp.ast), sLine);
+        }
+      } catch {
+        // fall back to rawSlice
+      }
+      return finalizeExtracted(rawSlice, sLine);
+    }
+  }
+
   let mod: Module | undefined = preParsedMod;
   if (!mod) {
     try {
@@ -2739,12 +2832,18 @@ export async function generateContext(
     splitSymbolSelectors(options.symbol!).length > 0 &&
     splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
   const isFastPathSelector = isPureLineRangeSymbol || isPureRegexSymbol;
-  const nativeDiagnostics = isFastPathSelector
-    ? undefined
-    : collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
+  const isLargeFileSymbolQuery =
+    Boolean(options.symbol) &&
+    options.symbol!.trim() !== "*" &&
+    rawFileContent.length > 50_000;
+  const nativeDiagnostics =
+    isFastPathSelector || isLargeFileSymbolQuery
+      ? undefined
+      : collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
   let targetContent = rawFileContent;
-  if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector) {
+  let preParsedMod: Module | undefined;
+  if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector && !isLargeFileSymbolQuery) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
       const isRawTemplate = targetLang === "twig";
@@ -2753,6 +2852,7 @@ export async function generateContext(
           decompile(rawFileContent, targetLang, { filePath: fullTargetPath }),
         );
         targetContent = decomp.aice;
+        preParsedMod = decomp.ast;
       }
     } catch {
       targetContent = rawFileContent;
@@ -2772,7 +2872,7 @@ export async function generateContext(
         for (const sym of allSyms) {
           try {
             const s = unwrapSyntheticContainer(
-              extractSymbolFromAiceSource(targetContent, sym, fullTargetPath)
+              extractSymbolFromAiceSource(targetContent, sym, fullTargetPath, preParsedMod)
                 .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
                 .trim(),
               fullTargetPath,
@@ -2802,7 +2902,7 @@ export async function generateContext(
             targetContent,
             requestedSymbols[0],
             fullTargetPath,
-            undefined,
+            preParsedMod,
             extractOpts,
           );
         } catch (err) {
@@ -2818,7 +2918,7 @@ export async function generateContext(
                 targetContent,
                 sym,
                 fullTargetPath,
-                undefined,
+                preParsedMod,
                 extractOpts,
               ),
             );
@@ -2832,7 +2932,7 @@ export async function generateContext(
               targetContent,
               options.symbol.trim(),
               fullTargetPath,
-              undefined,
+              preParsedMod,
               extractOpts,
             );
           } catch {
@@ -2883,9 +2983,13 @@ export async function generateContext(
     targetContent = compactPureAiceSlice(targetContent);
   }
 
-  // Generate target outline (skip on line-range/regex fast-path unless outlineTarget is explicitly requested)
+  // Generate target outline (skip on symbol/line-range/regex queries unless outlineTarget or maxTokens is requested)
+  const shouldSkipFullOutline =
+    (isFastPathSelector || Boolean(options.symbol) || rawFileContent.length > 50_000) &&
+    !options.outlineTarget &&
+    options.maxTokens === undefined;
   const outlineRes =
-    isFastPathSelector && !options.outlineTarget
+    shouldSkipFullOutline
       ? {
           file: fullTargetPath,
           text: "",
@@ -3159,7 +3263,7 @@ export async function generateContext(
     callers,
     formattedBundle,
     tokenCount,
-    idioms: activeIdioms,
+    idioms: bundleIdioms,
     nativeDiagnostics,
   };
 

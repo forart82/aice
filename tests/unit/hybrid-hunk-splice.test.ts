@@ -435,5 +435,95 @@ describe("AICE v0.9.24 Hybrid Hunk + Line Splicing Engine, MCP Multi-File Stream
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("STRICT ANTI-LOOP MANDATE");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("AST-Scoped Hunk Splicing (`<<< / === / >>>` inside `:symbol`)");
     });
+
+    it("selects the implementation body (skipping overload signatures and object return-type braces) and runs symbol context + hunk splice in <100ms on >50KB TypeScript files", async () => {
+      const bigLines: string[] = ["export class OverloadedEngine {"];
+      for (let i = 1; i <= 7200; i++) {
+        bigLines.push(`  public prop_${i} = ${i};`);
+      }
+      bigLines.push(
+        "  public compute(x: boolean): { val: number };",
+        "  public compute(x: number): { val: number } | undefined;",
+        "  public compute(x: string): { val: number } | undefined;",
+        "  public compute(x: number | string | boolean): { val: number } | undefined {",
+        "    const parsed = Number(x);",
+        "    return { val: parsed };",
+        "  }",
+        "}",
+        "",
+      );
+      const hugeFile = path.join(tmpDir, "overloaded_huge.ts");
+      fs.writeFileSync(hugeFile, bigLines.join("\n"), "utf-8");
+
+      const tCtx0 = performance.now();
+      const ctx = await generateContext(hugeFile, {
+        symbol: "OverloadedEngine.compute",
+        projectRoot: tmpDir,
+      });
+      const ctxElapsed = performance.now() - tCtx0;
+      expect(ctxElapsed).toBeLessThan(100);
+      expect(ctx.targetContent).toContain("parsed");
+
+      const tSplice0 = performance.now();
+      await splice(hugeFile, {
+        symbol: "OverloadedEngine.compute",
+        code: [
+          "<<<",
+          "    const parsed = Number(x);",
+          "===",
+          "    const parsed = Number(x) + 10;",
+          ">>>",
+        ].join("\n"),
+        projectRoot: tmpDir,
+      });
+      const spliceElapsed = performance.now() - tSplice0;
+      expect(spliceElapsed).toBeLessThan(100);
+
+      const updated = fs.readFileSync(hugeFile, "utf-8");
+      expect(updated).toContain("public compute(x: number): { val: number } | undefined;");
+      expect(updated).toContain("const parsed = Number(x) + 10;");
+    });
+
+    it("matches exact line indentation before substring offset when duplicate lines exist at different nesting depths, and avoids duplicate directory outlines in MCP aice_context", async () => {
+      const file = path.join(tmpDir, "indent_match.ts");
+      fs.writeFileSync(
+        file,
+        [
+          "export function score(x: number): number {",
+          "  if (x < 0) {",
+          "    return 0;",
+          "  }",
+          "  return 0;",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      await splice(file, {
+        symbol: "score",
+        code: ["<<<", "  return 0;", "===", "  return 1;", ">>>"].join("\n"),
+        projectRoot: tmpDir,
+      });
+      const after = fs.readFileSync(file, "utf-8");
+      expect(after).toContain("  if (x < 0) {\n    return 0;\n  }\n  return 1;");
+
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+      const dirRes = (await server.handleRequest(20, "tools/call", {
+        name: "aice_context",
+        arguments: { path: tmpDir },
+      })) as McpToolCallResult;
+      expect(dirRes.isError).toBeFalsy();
+      expect(dirRes.content[0]?.text).toContain("# AICE Directory Outline:");
+      expect(dirRes.content[0]?.text).not.toContain("## Target Outline");
+
+      const sliceRes = (await server.handleRequest(21, "tools/call", {
+        name: "aice_context",
+        arguments: { path: "indent_match.ts", symbol: "score" },
+      })) as McpToolCallResult;
+      expect(sliceRes.isError).toBeFalsy();
+      expect(sliceRes.content[0]?.text.startsWith("// === indent_match.ts:score ===")).toBe(true);
+      expect(sliceRes.content[0]?.text).not.toContain("## Target Outline");
+    });
   });
 });

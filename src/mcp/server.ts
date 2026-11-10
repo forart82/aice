@@ -900,62 +900,69 @@ export class AiceMcpServer {
 
         let text = result.targetContent;
         let callers = result.callers;
-        if (effectiveSymbol) {
-          text = `## Focused Symbol: ${effectiveSymbol}\n\n${text}`;
-          if (callers) {
-            const rootSym = effectiveSymbol.split(/\.|::/)[0]?.trim() ?? effectiveSymbol;
-            callers = callers.filter(
-              (c) =>
-                c.importedSymbols.includes(effectiveSymbol) ||
-                c.importedSymbols.includes(rootSym) ||
-                c.importedSymbols.includes("*") ||
-                (c.callSiteLines && c.callSiteLines.length > 0),
-            );
-          }
-        }
-        if (result.targetOutline) {
-          text += `\n\n## Target Outline\n${result.targetOutline}`;
-        }
-        if (result.dependencies && result.dependencies.length > 0) {
-          text +=
-            `\n\n## Dependencies\n` +
-            result.dependencies
-              .map((d) => `### ${d.specifier}\n\`\`\`aice\n${d.contract}\n\`\`\``)
-              .join("\n\n");
-        }
-        if (callers && callers.length > 0) {
-          text +=
-            `\n\n## Downstream Callers\n` +
-            callers
-              .map((c) => {
-                const callSitesSuffix =
-                  c.usedSymbol && c.callSiteLines && c.callSiteLines.length > 0
-                    ? ` (uses ${c.usedSymbol} at [${c.callSiteLines.map((l) => `L${l}`).join(", ")}])`
-                    : "";
-                return `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})${callSitesSuffix}`;
-              })
-              .join("\n");
-        }
-        const isSmallNoExtras =
-          !isDirTarget &&
-          nativeText.length > 0 &&
-          Math.ceil(nativeText.length / 4) < 120 &&
-          (!result.dependencies || result.dependencies.length === 0) &&
-          (!callers || callers.length === 0);
-        if (
-          !isDirTarget &&
-          !isSmallNoExtras &&
-          effectiveIdioms &&
-          result.idioms &&
-          Object.keys(result.idioms).length > 0
-        ) {
-          text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
-        }
-        if (result.nativeDiagnostics) {
-          text += `\n\n${result.nativeDiagnostics}`;
-        }
-        if (isSmallNoExtras && !effectiveSymbol) {
+        if (isDirTarget && !effectiveSymbol) {
           text = result.formattedBundle;
+        } else {
+          if (effectiveSymbol) {
+            text = `## Focused Symbol: ${effectiveSymbol}\n\n${text}`;
+            if (callers) {
+              const rootSym = effectiveSymbol.split(/\.|::/)[0]?.trim() ?? effectiveSymbol;
+              callers = callers.filter(
+                (c) =>
+                  c.importedSymbols.includes(effectiveSymbol) ||
+                  c.importedSymbols.includes(rootSym) ||
+                  c.importedSymbols.includes("*") ||
+                  (c.callSiteLines && c.callSiteLines.length > 0),
+              );
+            }
+          }
+          if (result.targetOutline && !effectiveSymbol) {
+            text += `\n\n## Target Outline\n${result.targetOutline}`;
+          }
+          if (result.dependencies && result.dependencies.length > 0) {
+            text +=
+              `\n\n## Dependencies\n` +
+              result.dependencies
+                .map((d) => `### ${d.specifier}\n\`\`\`aice\n${d.contract}\n\`\`\``)
+                .join("\n\n");
+          }
+          if (callers && callers.length > 0) {
+            text +=
+              `\n\n## Downstream Callers\n` +
+              callers
+                .map((c) => {
+                  const callSitesSuffix =
+                    c.usedSymbol && c.callSiteLines && c.callSiteLines.length > 0
+                      ? ` (uses ${c.usedSymbol} at [${c.callSiteLines.map((l) => `L${l}`).join(", ")}])`
+                      : "";
+                  return `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})${callSitesSuffix}`;
+                })
+                .join("\n");
+          }
+          const hasZeroExtras =
+            (!result.dependencies || result.dependencies.length === 0) &&
+            (!callers || callers.length === 0) &&
+            (!result.idioms || Object.keys(result.idioms).length === 0);
+          const isSmallNoExtras =
+            !isDirTarget &&
+            nativeText.length > 0 &&
+            Math.ceil(nativeText.length / 4) < 120 &&
+            hasZeroExtras;
+          if (
+            !isDirTarget &&
+            !isSmallNoExtras &&
+            effectiveIdioms &&
+            result.idioms &&
+            Object.keys(result.idioms).length > 0
+          ) {
+            text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
+          }
+          if (result.nativeDiagnostics) {
+            text += `\n\n${result.nativeDiagnostics}`;
+          }
+          if ((isSmallNoExtras || Boolean(effectiveSymbol)) && hasZeroExtras) {
+            text = result.formattedBundle;
+          }
         }
 
         recordTelemetryEvent({

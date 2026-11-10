@@ -2576,6 +2576,7 @@ function locateBraceLanguageDeclarationSpan(
     let openBraceIdx = -1;
     let declEnd = -1;
     let parenDepth = 0;
+    let sawParamParen = false;
     let pos = tokenStart;
     const len = nativeSource.length;
 
@@ -2615,10 +2616,22 @@ function locateBraceLanguageDeclarationSpan(
 
       if (ch === "(") {
         parenDepth++;
+        sawParamParen = true;
       } else if (ch === ")") {
         parenDepth = Math.max(0, parenDepth - 1);
       } else if (parenDepth === 0) {
         if (ch === "{") {
+          if (
+            sawParamParen &&
+            (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
+          ) {
+            const candidateEnd = findMatchingBraceEnd(nativeSource, pos, targetLang);
+            const afterTypeBrace = nativeSource.slice(candidateEnd, Math.min(len, candidateEnd + 160));
+            if (/^[ \t\r\n]*(?:[|&][^{;]+|\[\])*[ \t\r\n]*[;{]/.test(afterTypeBrace)) {
+              pos = candidateEnd;
+              continue;
+            }
+          }
           openBraceIdx = pos;
           break;
         }
@@ -2761,7 +2774,7 @@ function locateBraceLanguageDeclarationSpan(
         targetLang === "rust" &&
         /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:<>,\s]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
       const isClassLine =
-        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|trait|object|record|enum)\s+([A-Za-z0-9_]+)\b/.exec(
+        /^\s*(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|trait|object|record|enum)\s+([A-Za-z0-9_$]+)\b/.exec(
           line,
         );
 
@@ -2906,6 +2919,91 @@ function locateBraceLanguageDeclarationSpan(
           });
         }
       }
+    } else if (
+      targetLang === "typescript" ||
+      targetLang === "javascript" ||
+      targetLang === "tsx"
+    ) {
+      const trimmed = line.trim();
+      if (
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("/*") ||
+        trimmed.startsWith("*") ||
+        /^(?:if|for|while|switch|catch|return|super|new|throw|typeof|delete|void)\b/.test(trimmed)
+      ) {
+        continue;
+      }
+      if (!className) {
+        const tsFnMatch = line.match(
+          /^([ \t]*)(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)\b/,
+        );
+        if (tsFnMatch && (tsFnMatch[2] === memberName || normIdForSpan(tsFnMatch[2]) === normMember)) {
+          const span = buildBraceSpanFromLine(i, tsFnMatch[1], tsFnMatch[2], undefined);
+          if (span) {
+            const hasBraceBody =
+              span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
+            const isOverloadHeader = !hasBraceBody && !/\bdeclare\s+/.test(line);
+            if (isOverloadHeader) {
+              candidates.push(span);
+            } else {
+              const res = collectOrReturn(span);
+              if (res) return res;
+            }
+          }
+        }
+        const tsVarOrTypeMatch = line.match(
+          /^([ \t]*)(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:const|let|var|type)\s+([A-Za-z_$][A-Za-z0-9_$]*)\b/,
+        );
+        if (
+          tsVarOrTypeMatch &&
+          (tsVarOrTypeMatch[2] === memberName || normIdForSpan(tsVarOrTypeMatch[2]) === normMember)
+        ) {
+          const span = buildBraceSpanFromLine(
+            i,
+            tsVarOrTypeMatch[1],
+            tsVarOrTypeMatch[2],
+            undefined,
+          );
+          if (span) return span;
+        }
+      } else {
+        const tsMethodMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|readonly\s+|static\s+|override\s+|abstract\s+|async\s+)*(?:(get|set)\s+)?\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:<[^>]*>)?\s*\(/,
+        );
+        if (
+          tsMethodMatch &&
+          (tsMethodMatch[3] === memberName || normIdForSpan(tsMethodMatch[3]) === normMember)
+        ) {
+          const span = buildBraceSpanFromLine(
+            i,
+            tsMethodMatch[1],
+            tsMethodMatch[3],
+            resolvedClassName,
+            tsMethodMatch[2] ? { accessor: tsMethodMatch[2] as "get" | "set" } : undefined,
+          );
+          if (span) {
+            const hasBraceBody =
+              span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
+            const isOverloadHeader = !hasBraceBody && !/\babstract\s+/.test(line);
+            if (isOverloadHeader) {
+              candidates.push(span);
+            } else {
+              const res = collectOrReturn(span);
+              if (res) return res;
+            }
+          }
+        }
+        const tsPropMatch = line.match(
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|readonly\s+|static\s+|override\s+|declare\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*[?!]?\s*(?::[^=;]+)?\s*(?:=|;)/,
+        );
+        if (
+          tsPropMatch &&
+          (tsPropMatch[2] === memberName || normIdForSpan(tsPropMatch[2]) === normMember)
+        ) {
+          const span = buildBraceSpanFromLine(i, tsPropMatch[1], tsPropMatch[2], resolvedClassName);
+          if (span) return span;
+        }
+      }
     } else if (targetLang === "csharp" || targetLang === "cpp") {
       const trimmed = line.trim();
       if (
@@ -2950,7 +3048,7 @@ function locateBraceLanguageDeclarationSpan(
 
     if (!className) {
       const clsMatch = line.match(
-        /^([ \t]*)(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|enum(?:\s+class)?|record(?:\s+class|\s+struct)?)\s+([A-Za-z0-9_]+)\b/,
+        /^([ \t]*)(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|enum(?:\s+class)?|record(?:\s+class|\s+struct)?)\s+([A-Za-z0-9_$]+)\b/,
       );
       if (clsMatch && (clsMatch[2] === memberName || normIdForSpan(clsMatch[2]) === normMember)) {
         return buildBraceSpanFromLine(i, clsMatch[1], clsMatch[2], undefined, {
@@ -2961,20 +3059,24 @@ function locateBraceLanguageDeclarationSpan(
   }
 
   if (candidates.length > 0) {
+    const withBody = candidates.filter(
+      (c) => c.tokenStart + (c.origHeader?.length ?? 0) < c.declEnd,
+    );
+    const pool = withBody.length > 0 ? withBody : candidates;
     if (explicitArity !== undefined) {
-      const arityMatch = candidates.find(
+      const arityMatch = pool.find(
         (c) => countHeaderParams(c.origHeader ?? "") === explicitArity,
       );
       if (arityMatch) return arityMatch;
     }
-    return candidates[0];
+    return pool[0];
   }
 
   // 5. Fallback: if !className, try finding enclosing class name for a unique method match
   if (!className) {
     for (let i = 0; i < lines.length; i++) {
       const clsMatch = lines[i].match(
-        /^\s*(?:pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_]+)\b/,
+        /^\s*(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_$]+)\b/,
       );
       if (clsMatch) {
         const candidateCls = clsMatch[1];
@@ -5579,14 +5681,7 @@ export function applyHunksToScope(
       );
     }
 
-    // 1. Exact substring match first
-    const exactIdx = current.indexOf(searchNorm);
-    if (exactIdx >= 0) {
-      current = `${current.slice(0, exactIdx)}${replaceNorm}${current.slice(exactIdx + searchNorm.length)}`;
-      continue;
-    }
-
-    // 2. Indentation-normalized line matching fallback
+    // 1. Line-aligned exact match first (prevents matching a less-indented search string at offset +2 inside a more-indented line)
     const scopeLines = current.split("\n");
     let searchLines = searchNorm.split("\n");
     while (searchLines.length > 0 && searchLines[0]!.trim() === "") {
@@ -5599,6 +5694,40 @@ export function applyHunksToScope(
     let matchStart = -1;
     let matchEnd = -1;
     if (searchLines.length > 0 && searchLines.length <= scopeLines.length) {
+      for (let s = 0; s <= scopeLines.length - searchLines.length; s++) {
+        let exactLineMatch = true;
+        for (let k = 0; k < searchLines.length; k++) {
+          if (scopeLines[s + k] !== searchLines[k]) {
+            exactLineMatch = false;
+            break;
+          }
+        }
+        if (exactLineMatch) {
+          matchStart = s;
+          matchEnd = s + searchLines.length;
+          break;
+        }
+      }
+    }
+
+    // 1b. Exact substring match if not line-aligned (e.g. inline partial-line hunk)
+    if (matchStart < 0) {
+      const exactIdx = current.indexOf(searchNorm);
+      if (exactIdx >= 0) {
+        const beforeChar = exactIdx > 0 ? current[exactIdx - 1] : "\n";
+        const afterIdx = exactIdx + searchNorm.length;
+        const afterChar = afterIdx < current.length ? current[afterIdx] : "\n";
+        const isPartialIndentMatch =
+          (beforeChar === " " || beforeChar === "\t") && /^[ \t]/.test(searchNorm);
+        if (!isPartialIndentMatch && (beforeChar === "\n" || afterChar !== "\n")) {
+          current = `${current.slice(0, exactIdx)}${replaceNorm}${current.slice(afterIdx)}`;
+          continue;
+        }
+      }
+    }
+
+    // 2. Indentation-normalized line matching fallback
+    if (matchStart < 0 && searchLines.length > 0 && searchLines.length <= scopeLines.length) {
       for (let s = 0; s <= scopeLines.length - searchLines.length; s++) {
         let allMatch = true;
         for (let k = 0; k < searchLines.length; k++) {
@@ -5732,8 +5861,8 @@ function resolveSingleNativeEditAgainstSource(
         startOffset: 0,
         endOffset: nativeSource.length,
         replacement: updated,
-        originalSnippet: nativeSource,
-        newSnippet: updated,
+        originalSnippet: hunks.map((h) => h.search).join("\n\n"),
+        newSnippet: rawSnippet,
       };
     }
   }
