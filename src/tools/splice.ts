@@ -6494,12 +6494,16 @@ export async function splice(
     }
 
     if (!options.dryRun) {
+      const origMode = (await fs.promises.stat(fullPath)).mode;
       const dir = path.dirname(fullPath);
       const tmpFile = path.join(
         dir,
         `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
       );
-      await fs.promises.writeFile(tmpFile, result.modifiedCode, "utf-8");
+      await fs.promises.writeFile(tmpFile, result.modifiedCode, {
+        encoding: "utf-8",
+        mode: origMode,
+      });
       await fs.promises.rename(tmpFile, fullPath);
     }
 
@@ -6522,12 +6526,16 @@ export async function splice(
 
   // Write atomically to disk unless dryRun
   if (!options.dryRun) {
+    const origMode = (await fs.promises.stat(fullPath)).mode;
     const dir = path.dirname(fullPath);
     const tmpFile = path.join(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
-    await fs.promises.writeFile(tmpFile, result.modifiedCode, "utf-8");
+    await fs.promises.writeFile(tmpFile, result.modifiedCode, {
+      encoding: "utf-8",
+      mode: origMode,
+    });
     await fs.promises.rename(tmpFile, fullPath);
   }
 

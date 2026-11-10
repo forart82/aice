@@ -367,7 +367,7 @@ aice_cheatsheet() {
   local C_BOLD="\033[1m"
   local C_GRAY="\033[0;90m"
   printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE — ON-THE-FLY AI CONTEXT ENGINE & TELEMETRY CHEATSHEET (@forart82)${C_RESET}       ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.22 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file/--stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
