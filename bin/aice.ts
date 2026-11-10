@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * AICE CLI: On-the-Fly AI Context Engine & Multi-File Idiom Tool.
  */
 

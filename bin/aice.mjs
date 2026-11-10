@@ -1,4 +1,9 @@
 #!/usr/bin/env node
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 import { spawnSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { constants as osConstants } from "node:os";

@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 export * from "./agents/index.js";
 export * from "./cache/index.js";
 export * from "./config/index.js";

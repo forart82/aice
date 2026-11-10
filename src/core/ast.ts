@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Universal Abstract Syntax Tree (AST) definitions for AICE 2.0.
  * Conforms to the formal EBNF grammar in docs/AICE_SPEC.md.
  */

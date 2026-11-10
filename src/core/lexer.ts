@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Two-Stage Decoupled Lexer for AICE 2.0.
  *
  * Stage 1: scanRawTokens (Stateless Scanner)

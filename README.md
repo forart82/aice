@@ -234,6 +234,8 @@ ln -sf "$(pwd)/bin/aice.mjs" ~/.local/bin/aice
 bun build --compile /path/to/aice/bin/aice.ts --outfile ~/.local/bin/aice
 ```
 
+> **Note for standalone binary distribution:** When distributing standalone binaries compiled with `bun build --compile`, accompany the executable with [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) to satisfy third-party licenses (MIT, BSD, ISC, Apache-2.0, Bun runtime).
+
 Verify installation & agent integration:
 ```bash
 aice --version
@@ -512,5 +514,5 @@ aice/
 
 ## 📜 License
 
-Licensed under the [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE)).
+Licensed under the [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt)).
 Copyright (c) 2026 [forart82](https://github.com/forart82).

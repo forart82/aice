@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Emitter Context & State Management for Multi-Language Forward Transpilation.
  */
 

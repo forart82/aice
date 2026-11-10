@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Compatibility shim providing the TypeScript AST & Compiler API, plus bounded
  * LRU SourceFile memoization and single-pass symbol/import/test indexing.
  * In TypeScript 7+, the compiler binary is native; the AST parser is provided via typescript-legacy.

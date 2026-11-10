@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Canonical Standard Library (CSL) primitive types and signature registry.
  * Conforms to Section 2 of docs/AICE_SPEC.md.
  */

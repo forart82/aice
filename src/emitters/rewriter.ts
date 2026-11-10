@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Declarative Term Rewriting & Canonical API Lowering Engine for AICE 2.0.
  * Conforms to Pillar 2 of docs/RESEARCH_SYNTHESIS.md and Section 2 of docs/AICE_SPEC.md.
  */

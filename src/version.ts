@@ -1,3 +1,8 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
 // ── Single Source of Truth for AICE Version ──
 export const AICE_VERSION = "0.9.24";
 export const VERSION = AICE_VERSION;

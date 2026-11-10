@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * TypeScript ES2022 & React 19 JSX Forward Emitter for AICE 2.0.
  */
 

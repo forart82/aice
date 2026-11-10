@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Source position and span tracking for AICE tokens and AST nodes.
  */
 

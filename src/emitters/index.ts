@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Unified Emitter Hub for AICE 2.0 Multi-Language Forward Transpilation.
  */
 

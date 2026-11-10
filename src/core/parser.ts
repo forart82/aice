@@ -1,4 +1,7 @@
 /**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ *
  * Pratt Parser & Universal AST Generator for AICE 2.0.
  *
  * Implements Top-Down Operator Precedence (Pratt) parsing for expressions
