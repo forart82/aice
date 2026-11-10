@@ -190,3 +190,157 @@ export function getNodeTriviaId(item: unknown): string {
       return "";
   }
 }
+export interface DeclarationTriviaSlice {
+  leadingDocComment?: string;
+  leadingAttributes?: string[];
+  indentation: string;
+}
+
+export function extractDeclarationTriviaLens(
+  nativeSource: string,
+  span: { fullStart: number; declStart: number; end: number },
+  lang?: string,
+): DeclarationTriviaSlice {
+  const normLang = (lang ?? "").toLowerCase();
+  const isPython = normLang === "python" || normLang === "py";
+
+  // 1. Detect indentation from line start of declStart
+  const beforeDecl = nativeSource.slice(0, span.declStart);
+  const lastNl = beforeDecl.lastIndexOf("\n");
+  const linePrefix = lastNl >= 0 ? beforeDecl.slice(lastNl + 1) : beforeDecl;
+  const indentMatch = linePrefix.match(/^[ \t]*/);
+  const indentation = indentMatch ? indentMatch[0] : "";
+
+  // 2. Python docstrings live *inside* the function/class body immediately after the def/class header
+  if (isPython) {
+    const declBody = nativeSource.slice(span.declStart, span.end);
+    const docMatch = declBody.match(/^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:("""[\s\S]*?"""|'''[\s\S]*?'''))/);
+    if (docMatch && docMatch[1]) {
+      return {
+        leadingDocComment: docMatch[1],
+        indentation,
+      };
+    }
+  }
+
+  // 3. For JS/TS, C++, C#, Rust, Go, PHP, etc., look in span.fullStart..span.declStart or immediately before span.declStart
+  const leadingRegion = nativeSource.slice(span.fullStart, span.declStart);
+  let leadingDocComment: string | undefined;
+
+  const blockDocMatch = leadingRegion.match(/\/\*\*[\s\S]*?\*\//);
+  if (blockDocMatch) {
+    leadingDocComment = blockDocMatch[0];
+  } else {
+    const lineDocLines: string[] = [];
+    const lines = leadingRegion.split(/\r?\n/);
+    for (const l of lines) {
+      const trimmed = l.trim();
+      if (trimmed.startsWith("///") || trimmed.startsWith("//!")) {
+        lineDocLines.push(trimmed);
+      }
+    }
+    if (lineDocLines.length > 0) {
+      leadingDocComment = lineDocLines.join("\n");
+    }
+  }
+
+  if (!leadingDocComment && span.fullStart >= span.declStart) {
+    const lookback = nativeSource.slice(Math.max(0, span.declStart - 1000), span.declStart);
+    const precedingBlock = lookback.match(/\/\*\*[\s\S]*?\*\/\s*$/);
+    if (precedingBlock) {
+      leadingDocComment = precedingBlock[0].trim();
+    } else {
+      const precedingLines = lookback.split(/\r?\n/);
+      const docLines: string[] = [];
+      for (let i = precedingLines.length - 1; i >= 0; i--) {
+        const line = precedingLines[i].trim();
+        if (line.startsWith("///") || line.startsWith("//!")) {
+          docLines.unshift(line);
+        } else if (line.length === 0 && docLines.length === 0) {
+          continue;
+        } else {
+          break;
+        }
+      }
+      if (docLines.length > 0) {
+        leadingDocComment = docLines.join("\n");
+      }
+    }
+  }
+
+  return {
+    leadingDocComment,
+    indentation,
+  };
+}
+
+export function applyTriviaLensToReplacement(
+  trivia: DeclarationTriviaSlice,
+  replacementSnippet: string,
+  options?: { preserveDocs?: boolean; lang?: string },
+): { mergedSnippet: string; preservedTriviaText: string } {
+  if (options?.preserveDocs === false) {
+    return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
+  }
+  if (replacementSnippet.includes("@replace-docs") || replacementSnippet.includes("@strip-docs")) {
+    const cleaned = replacementSnippet
+      .replace(/[ \t]*(?:\/\/|#)?\s*@(replace-docs|strip-docs)[ \t]*(?:\r?\n|$)/g, "")
+      .trim();
+    return { mergedSnippet: cleaned, preservedTriviaText: "" };
+  }
+
+  if (!trivia.leadingDocComment) {
+    return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
+  }
+
+  const normLang = (options?.lang ?? "").toLowerCase();
+  const isPython = normLang === "python" || normLang === "py";
+
+  if (isPython) {
+    const hasExistingDoc = /^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:"""[\s\S]*?"""|'''[\s\S]*?''')/.test(replacementSnippet);
+    if (hasExistingDoc) {
+      return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
+    }
+    const headerMatch = replacementSnippet.match(/^([ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?)([ \t]*(?:\r?\n|$))/);
+    if (headerMatch) {
+      const bodyIndent = trivia.indentation + "    ";
+      const docLines = trivia.leadingDocComment.split(/\r?\n/);
+      let minIndent: number | undefined;
+      for (let i = 1; i < docLines.length; i++) {
+        const line = docLines[i];
+        if (line.trim().length === 0) continue;
+        const indentLen = line.match(/^[ \t]*/)?.[0].length ?? 0;
+        if (minIndent === undefined || indentLen < minIndent) {
+          minIndent = indentLen;
+        }
+      }
+      const baseIndent = minIndent ?? 0;
+      const docstringWithIndent = docLines
+        .map((line, idx) => {
+          if (line.trim().length === 0) return "";
+          if (idx === 0) return `${bodyIndent}${line.trimStart()}`;
+          const relIndent = line.slice(Math.min(line.length, baseIndent));
+          return `${bodyIndent}${relIndent}`;
+        })
+        .join("\n");
+      const beforeHeader = headerMatch[1];
+      const afterHeader = replacementSnippet.slice(headerMatch[0].length);
+      const mergedSnippet = `${beforeHeader}\n${docstringWithIndent}\n${afterHeader}`;
+      return { mergedSnippet, preservedTriviaText: trivia.leadingDocComment };
+    }
+    return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
+  }
+
+  const trimmedSnippet = replacementSnippet.trimStart();
+  const hasExistingDoc = trimmedSnippet.startsWith("/**") || trimmedSnippet.startsWith("///") || trimmedSnippet.startsWith("//!");
+  if (hasExistingDoc) {
+    return { mergedSnippet: replacementSnippet, preservedTriviaText: "" };
+  }
+
+  const docLines = trivia.leadingDocComment.split(/\r?\n/);
+  const formattedDoc = docLines
+    .map((line) => (trivia.indentation ? `${trivia.indentation}${line.trimStart()}` : line))
+    .join("\n");
+  const mergedSnippet = `${formattedDoc}\n${replacementSnippet}`;
+  return { mergedSnippet, preservedTriviaText: trivia.leadingDocComment };
+}

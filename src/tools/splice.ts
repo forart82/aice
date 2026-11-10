@@ -51,6 +51,10 @@ import {
   preprocessHybridAndIdiomsLossless,
 } from "./preprocessor.js";
 import { validateNativeSyntax } from "./syntax-validator.js";
+import {
+  applyTriviaLensToReplacement,
+  extractDeclarationTriviaLens,
+} from "../core/trivia.js";
 
 export interface SymbolSpliceEdit {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', '.btn-primary') */
@@ -65,6 +69,10 @@ export interface SymbolSpliceEdit {
   insertAfter?: string;
   /** Inserts the new code directly before this symbol */
   insertBefore?: string;
+  /** Clone source symbol */
+  cloneFrom?: string;
+  /** Whether to preserve original doc comments / JSDocs */
+  preserveDocs?: boolean;
   /** Aliases for code in JSON payloads */
   aice?: string;
   template?: string;
@@ -82,6 +90,8 @@ export interface SpliceOptions {
   delete?: boolean;
   insertAfter?: string;
   insertBefore?: string;
+  cloneFrom?: string;
+  preserveDocs?: boolean;
   append?: boolean;
   edits?: SymbolSpliceEdit[];
   create?: boolean;
@@ -111,6 +121,7 @@ export interface BatchSpliceOptions {
   dryRun?: boolean;
   compile?: boolean;
   idioms?: boolean;
+  preserveDocs?: boolean;
 }
 
 export interface BatchSpliceResult {
@@ -133,6 +144,8 @@ export interface SpliceResult {
   newFileContent?: string;
   newAiceSource: string;
   tokensSaved?: number;
+  preservedTriviaTokens?: number;
+  realisticTokensSaved?: number;
 }
 
 export interface TargetSymbolInfo {
@@ -1011,7 +1024,7 @@ function buildSpanInfoFromTsNode(
   memberName: string,
   className?: string,
 ): NativeSpanInfo {
-  const rawTokenStart = targetNode.getStart(sf, false);
+  const rawTokenStart = targetNode.getStart(sf, true);
   const rawLineStart = nativeSource.lastIndexOf("\n", rawTokenStart - 1) + 1;
   const rawLeading = nativeSource.slice(rawLineStart, rawTokenStart);
   const fullDeclStart = /^[ \t]*$/.test(rawLeading) ? rawLineStart : rawTokenStart;
@@ -5378,6 +5391,8 @@ interface ResolvedNativeEdit {
   replacement: string;
   originalSnippet: string;
   newSnippet: string;
+  isInsertion?: boolean;
+  preservedTriviaText?: string;
 }
 
 function resolveSingleNativeEditAgainstSource(
@@ -5389,9 +5404,131 @@ function resolveSingleNativeEditAgainstSource(
   forceLosslessPreprocess: boolean,
 ): ResolvedNativeEdit {
   const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
-  const rawSnippet = options.code ?? options.body ?? "";
+  let rawSnippet = options.code ?? options.body ?? "";
   if (!anchorSymbol) {
     throw new Error("Must specify target symbol with --symbol when splicing native file");
+  }
+
+  if (options.cloneFrom) {
+    const cloneSym = options.cloneFrom.trim();
+    let cloneSpan = locateNativeDeclarationSpan(nativeSource, cloneSym, targetLang);
+    let clonedSlice = "";
+    let insertPos = -1;
+    let isTest = false;
+
+    if (!cloneSpan) {
+      const testBlocks = extractNativeTestBlocks(nativeSource);
+      const tb = testBlocks.find(
+        (t) => t.title === cloneSym || t.title.startsWith(cloneSym),
+      );
+      if (tb) {
+        clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
+        insertPos = tb.endOffset;
+        isTest = true;
+      } else {
+        throw new Error(`Symbol to clone '${cloneSym}' not found in ${filePath}`);
+      }
+    } else {
+      const testBlocks = extractNativeTestBlocks(nativeSource);
+      const tb = testBlocks.find(
+        (t) =>
+          t.title === cloneSym ||
+          t.title.startsWith(cloneSym) ||
+          (t.startOffset === cloneSpan!.declStart && t.endOffset === cloneSpan!.declEnd),
+      );
+      if (tb) {
+        clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
+        insertPos = tb.endOffset;
+        isTest = true;
+      } else {
+        clonedSlice = nativeSource.slice(cloneSpan.declStart, cloneSpan.declEnd);
+        insertPos = cloneSpan.declEnd;
+      }
+    }
+
+    const ruleLines = rawSnippet.split(/\r?\n/);
+    const rules: Array<{ from: string; to: string }> = [];
+    for (const line of ruleLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("#")) continue;
+      const arrowMatch = trimmed.match(
+        /^(?:"([^"]*)"|'([^']*)'|(.+?))\s*->\s*(?:"([^"]*)"|'([^']*)'|(.+))$/,
+      );
+      if (arrowMatch) {
+        const from =
+          arrowMatch[1] !== undefined
+            ? arrowMatch[1]
+            : arrowMatch[2] !== undefined
+              ? arrowMatch[2]
+              : (arrowMatch[3] ?? "").trim();
+        const to =
+          arrowMatch[4] !== undefined
+            ? arrowMatch[4]
+            : arrowMatch[5] !== undefined
+              ? arrowMatch[5]
+              : (arrowMatch[6] ?? "").trim();
+        if (from.length > 0) {
+          rules.push({ from, to });
+        }
+      }
+    }
+
+    if (rules.length > 0) {
+      const sortedRules = [...rules].sort((a, b) => b.from.length - a.from.length);
+      const pattern = sortedRules
+        .map((r) => r.from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("|");
+      const ruleMap = new Map(rules.map((r) => [r.from, r.to]));
+      clonedSlice = clonedSlice.replace(new RegExp(pattern, "g"), (m) => ruleMap.get(m) ?? m);
+    }
+
+    if (isTest) {
+      if (!rules.some((r) => r.from === cloneSym) && clonedSlice.includes(cloneSym)) {
+        clonedSlice = clonedSlice.replace(cloneSym, () => anchorSymbol);
+      }
+      const sep = nativeSource.slice(insertPos).startsWith("\n\n")
+        ? ""
+        : nativeSource.slice(insertPos).startsWith("\n")
+          ? "\n"
+          : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: insertPos,
+        endOffset: insertPos,
+        replacement: `${sep}${clonedSlice}`,
+        originalSnippet: "",
+        newSnippet: clonedSlice,
+        isInsertion: true,
+      };
+    }
+
+    const cloneShort = cloneSym.split(/[.:]/).pop()?.trim();
+    const targetShort = anchorSymbol.split(/[.:]/).pop()?.trim();
+    if (cloneShort && targetShort && cloneShort !== targetShort) {
+      if (!rules.some((r) => r.from === cloneShort)) {
+        const escaped = cloneShort.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        clonedSlice = clonedSlice.replace(new RegExp(`\\b${escaped}\\b`), () => targetShort);
+      }
+    }
+
+    const targetSpan = locateNativeDeclarationSpan(nativeSource, anchorSymbol, targetLang);
+    if (!targetSpan) {
+      const sep = nativeSource.slice(insertPos).startsWith("\n\n")
+        ? ""
+        : nativeSource.slice(insertPos).startsWith("\n")
+          ? "\n"
+          : "\n\n";
+      return {
+        symbol: anchorSymbol,
+        startOffset: insertPos,
+        endOffset: insertPos,
+        replacement: `${sep}${clonedSlice}`,
+        originalSnippet: "",
+        newSnippet: clonedSlice,
+        isInsertion: true,
+      };
+    }
+    rawSnippet = clonedSlice;
   }
 
   if (/^(?:eof|end|append)$/i.test(anchorSymbol.trim())) {
@@ -6086,9 +6223,86 @@ function resolveSingleNativeEditAgainstSource(
       newSnippet = `${merged.join("\n")}${trailingNl}`;
     }
   }
+
+  const trivia = extractDeclarationTriviaLens(
+    nativeSource,
+    {
+      fullStart: spanInfo.fullDeclStart ?? spanInfo.declStart,
+      declStart: spanInfo.declStart,
+      end: spanInfo.declEnd,
+    },
+    targetLang,
+  );
+
+  let finalReplaceStart = replaceStart;
+  let preservedTriviaText = "";
+
+  const trimmedNew = newSnippet.trimStart();
+  const hasNewDoc =
+    trimmedNew.startsWith("/**") ||
+    trimmedNew.startsWith("///") ||
+    trimmedNew.startsWith("//!");
+
+  if (targetLang !== "python" && (hasNewDoc || Boolean(trivia.leadingDocComment))) {
+    let docStartPos: number | undefined;
+    if (trivia.leadingDocComment) {
+      const beforeDecl = nativeSource.slice(0, spanInfo.declStart);
+      const oldDocIdx = beforeDecl.lastIndexOf(trivia.leadingDocComment);
+      if (oldDocIdx >= 0) {
+        const docLineStart = nativeSource.lastIndexOf("\n", oldDocIdx - 1) + 1;
+        const leadingWs = nativeSource.slice(docLineStart, oldDocIdx);
+        docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : oldDocIdx;
+      }
+    }
+    if (docStartPos === undefined && spanInfo.fullDeclStart !== undefined && spanInfo.fullDeclStart < spanInfo.declStart) {
+      docStartPos = spanInfo.fullDeclStart;
+    }
+    if (docStartPos === undefined) {
+      const prefixBefore = nativeSource.slice(0, spanInfo.declStart);
+      const matchPrevDoc = prefixBefore.match(/(?:\/\*\*[\s\S]*?\*\/|(?:[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+)[ \t]*$/);
+      if (matchPrevDoc && matchPrevDoc.index !== undefined) {
+        const docStart = matchPrevDoc.index;
+        const docLineStart = nativeSource.lastIndexOf("\n", docStart - 1) + 1;
+        const leadingWs = nativeSource.slice(docLineStart, docStart);
+        docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : docStart;
+      }
+    }
+
+    if (docStartPos !== undefined && docStartPos < finalReplaceStart) {
+      if (trivia.leadingDocComment) {
+        const oldDocIdx = nativeSource.indexOf(trivia.leadingDocComment, docStartPos);
+        if (oldDocIdx >= 0) {
+          const docEnd = oldDocIdx + trivia.leadingDocComment.length;
+          const between = nativeSource.slice(docEnd, spanInfo.declStart);
+          const hasDecoratorsBetween = /^[ \t\r\n]*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/.test(between);
+          if (hasDecoratorsBetween && !hasLeadingNativeAttr && !trimmedNew.startsWith("@")) {
+            const decoratorsSlice = between.replace(/^[ \t\r\n]+/, "");
+            const newDocMatch = newSnippet.match(/^(?:[ \t]*\/\*\*[\s\S]*?\*\/\r?\n|[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+/);
+            if (newDocMatch) {
+              const afterDoc = newSnippet.slice(newDocMatch[0].length);
+              newSnippet = `${newDocMatch[0]}${decoratorsSlice}${afterDoc}`;
+            } else {
+              newSnippet = `${decoratorsSlice}${newSnippet}`;
+            }
+          }
+        }
+      }
+      finalReplaceStart = docStartPos;
+    }
+  }
+
+  if (trivia.leadingDocComment) {
+    const applied = applyTriviaLensToReplacement(trivia, newSnippet, {
+      preserveDocs: options.preserveDocs,
+      lang: targetLang,
+    });
+    newSnippet = applied.mergedSnippet;
+    preservedTriviaText = applied.preservedTriviaText;
+  }
+
   return {
     symbol: anchorSymbol,
-    startOffset: replaceStart,
+    startOffset: finalReplaceStart,
     endOffset: spanInfo.declEnd,
     replacement:
       targetLang === "aipl" &&
@@ -6100,6 +6314,7 @@ function resolveSingleNativeEditAgainstSource(
         : newSnippet,
     originalSnippet,
     newSnippet,
+    preservedTriviaText,
   };
 }
 
@@ -6177,6 +6392,8 @@ export function spliceNativeSource(
         code: editCode,
         body: edit.body,
         delete: edit.delete,
+        cloneFrom: edit.cloneFrom,
+        preserveDocs: edit.preserveDocs ?? options.preserveDocs,
         insertAfter: edit.insertAfter ?? edit.insert_after,
         insertBefore: edit.insertBefore ?? edit.insert_before,
       };
@@ -6233,6 +6450,21 @@ export function spliceNativeSource(
     const combinedNewSnippets = resolvedEdits.map((e) => e.newSnippet).join("\n\n");
     const snippetTokens = estimateTokens(combinedNewSnippets || JSON.stringify(options.edits));
     const modifiedTokens = estimateTokens(modifiedCode);
+    const totalPreservedTriviaTokens = resolvedEdits.reduce(
+      (sum, e) => sum + (e.preservedTriviaText ? estimateTokens(e.preservedTriviaText) : 0),
+      0,
+    );
+    const realisticNativePayload = JSON.stringify(
+      resolvedEdits.map((e) => ({
+        path: filePath,
+        old_string: e.originalSnippet ?? "",
+        new_string: e.newSnippet ?? "",
+      })),
+    );
+    const realisticTokensSaved = Math.max(
+      0,
+      estimateTokens(realisticNativePayload) - snippetTokens,
+    );
 
     return {
       success: true,
@@ -6244,6 +6476,8 @@ export function spliceNativeSource(
       modifiedCode,
       newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, modifiedTokens - snippetTokens),
+      preservedTriviaTokens: totalPreservedTriviaTokens,
+      realisticTokensSaved,
     };
   }
 
@@ -6279,6 +6513,12 @@ export function spliceNativeSource(
       : undefined;
     const snippetTokens = estimateTokens(emitted);
     const modifiedTokens = estimateTokens(modifiedCode);
+    const realisticNativePayload = JSON.stringify({
+      path: filePath,
+      old_string: "",
+      new_string: emitted,
+    });
+    const realisticTokensSaved = Math.max(0, estimateTokens(realisticNativePayload) - snippetTokens);
     return {
       success: true,
       filePath,
@@ -6287,9 +6527,10 @@ export function spliceNativeSource(
       modifiedCode,
       newAiceSource: modifiedCode,
       tokensSaved: Math.max(0, modifiedTokens - snippetTokens),
+      preservedTriviaTokens: 0,
+      realisticTokensSaved,
     };
   }
-
   const resolved = resolveSingleNativeEditAgainstSource(
     nativeSource,
     options,
@@ -6315,6 +6556,16 @@ export function spliceNativeSource(
   const snippetTokens = estimateTokens(resolved.newSnippet || options.code || options.body || "");
   const modifiedTokens = estimateTokens(modifiedCode);
   const tokensSaved = Math.max(0, modifiedTokens - snippetTokens);
+  const preservedTriviaTokens = resolved.preservedTriviaText
+    ? estimateTokens(resolved.preservedTriviaText)
+    : 0;
+
+  const realisticNativePayload = options.delete
+    ? JSON.stringify({ path: filePath, old_string: resolved.originalSnippet ?? "", new_string: "" })
+    : (resolved.originalSnippet
+        ? JSON.stringify({ path: filePath, old_string: resolved.originalSnippet, new_string: resolved.newSnippet ?? rawSnippet })
+        : JSON.stringify({ path: filePath, old_string: "", new_string: rawSnippet }));
+  const realisticTokensSaved = Math.max(0, estimateTokens(realisticNativePayload) - snippetTokens);
 
   const startLine = modifiedCode.slice(0, resolved.startOffset).split("\n").length;
   const endLine = startLine + Math.max(0, resolved.replacement.split("\n").length - 1);
@@ -6331,14 +6582,10 @@ export function spliceNativeSource(
     modifiedCode,
     newAiceSource: modifiedCode,
     tokensSaved,
+    preservedTriviaTokens,
+    realisticTokensSaved,
   };
 }
-
-/**
- * Executes AST surgical splice on a file with optional atomic disk write.
- * Directly splices native files (`.ts`, `.py`, `.rs`, `.go`, `.cpp`, `.cs`, `.kt`, `.php`, `.json`, `.yaml`, `.html`, `.twig`, `.css`)
- * as well as standalone `.aice` files in memory.
- */
 export async function splice(
   filePath: string,
   rawOptions: SpliceOptions = {},
@@ -6516,6 +6763,11 @@ export async function splice(
     }
 
     const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+    const realisticNativePayload = options.delete
+      ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet ?? "", new_string: "" })
+      : (result.originalSnippet
+          ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet, new_string: result.newSnippet ?? snippetInput })
+          : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput }));
     recordTelemetryEvent({
       targetPath: fullPath,
       projectRoot: root,
@@ -6523,9 +6775,10 @@ export async function splice(
       surface: "cli",
       idiomsUsed: idiomsUsedInSnippet,
       nativeText: result.modifiedCode,
+      realisticNativeText: realisticNativePayload,
+      preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
       aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
     });
-
     return result;
   }
 
@@ -6576,6 +6829,11 @@ export async function splice(
   }
 
   const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+  const realisticNativePayload = options.delete
+    ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet ?? "", new_string: "" })
+    : (result.originalSnippet
+        ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet, new_string: result.newSnippet ?? snippetInput })
+        : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput }));
   recordTelemetryEvent({
     targetPath: fullPath,
     projectRoot: root,
@@ -6583,6 +6841,8 @@ export async function splice(
     surface: "cli",
     idiomsUsed: idiomsUsedInSnippet,
     nativeText: result.modifiedCode,
+    realisticNativeText: realisticNativePayload,
+    preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
     aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
   });
 
@@ -6593,7 +6853,8 @@ export interface ParsedMultiBlockSpliceStream {
   singleFileEdits?: SymbolSpliceEdit[];
   batchItems?: BatchSpliceItem[];
 }
-  export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
+
+export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
   if (!sym) return true;
   const norm = sym.trim().toLowerCase();
   return (
@@ -6674,245 +6935,262 @@ export interface ParsedMultiBlockSpliceStream {
  * `=== <filePath> ===`, `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
  */
   export function parseMultiBlockSpliceStream(
-  rawStream: string,
-  defaultFilePath?: string,
+    rawStream: string,
+    defaultFilePath?: string,
   ): ParsedMultiBlockSpliceStream | null {
-  if (!rawStream || !rawStream.trim()) return null;
-  const lines = rawStream.split(/\r?\n/);
-  const headerRe =
-    /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^=\r\n]+?)\s*={3,}|-{3,}\s*([^-\r\n]+?)\s*-{3,}|(?:\/\/|#)\s*(?:FILE|SYMBOL|EDIT):\s*([^\r\n]+?))\s*$/i;
-  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
+    if (!rawStream || !rawStream.trim()) return null;
+    const lines = rawStream.split(/\r?\n/);
+    const headerRe =
+      /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^=\r\n]+?)\s*={3,}|-{3,}\s*([^-\r\n]+?)\s*-{3,}|(?:\/\/|#)\s*(?:FILE|SYMBOL|EDIT):\s*([^\r\n]+?))\s*$/i;
+    const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
 
-  const preHeaderLines: string[] = [];
-  const sections: Array<{
-    filePath?: string;
-    symbol: string;
-    isDelete: boolean;
-    lines: string[];
-  }> = [];
+    const preHeaderLines: string[] = [];
+    const sections: Array<{
+      filePath?: string;
+      symbol: string;
+      cloneFrom?: string;
+      isDelete: boolean;
+      lines: string[];
+    }> = [];
 
-  let inMdFence = false;
-  let mdFenceChar = "";
-  let mdFenceLen = 0;
+    let inMdFence = false;
+    let mdFenceChar = "";
+    let mdFenceLen = 0;
 
-  for (const line of lines) {
-    const activeFp =
-      sections.length > 0
-        ? (sections[sections.length - 1].filePath ?? defaultFilePath)
-        : defaultFilePath;
-    const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
-    if (isMdSection && sections.length > 0) {
-      if (!inMdFence) {
-        const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-        if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
-          inMdFence = true;
-          mdFenceChar = openMatch[1][0];
-          mdFenceLen = openMatch[1].length;
+    for (const line of lines) {
+      const activeFp =
+        sections.length > 0
+          ? (sections[sections.length - 1].filePath ?? defaultFilePath)
+          : defaultFilePath;
+      const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
+      if (isMdSection && sections.length > 0) {
+        if (!inMdFence) {
+          const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+          if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
+            inMdFence = true;
+            mdFenceChar = openMatch[1][0];
+            mdFenceLen = openMatch[1].length;
+            sections[sections.length - 1].lines.push(line);
+            continue;
+          }
+        } else {
+          const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+          if (
+            closeMatch &&
+            closeMatch[1][0] === mdFenceChar &&
+            closeMatch[1].length >= mdFenceLen
+          ) {
+            inMdFence = false;
+            mdFenceChar = "";
+            mdFenceLen = 0;
+          }
           sections[sections.length - 1].lines.push(line);
           continue;
         }
-      } else {
-        const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-        if (
-          closeMatch &&
-          closeMatch[1][0] === mdFenceChar &&
-          closeMatch[1].length >= mdFenceLen
-        ) {
+      }
+
+      const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
+      if (m) {
+        let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+        let isDelete = false;
+        if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
+          isDelete = true;
+          spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
+        }
+        let cloneFrom: string | undefined;
+        const cloneMatch = spec.match(
+          /\s*(?:@clone|\(clone)\s*\(\s*([^()]+)\s*\)|\s*\(clone\s+([^()]+)\)|\s+@clone\s+([^\s()]+)/i,
+        );
+        if (cloneMatch) {
+          cloneFrom = (cloneMatch[1] || cloneMatch[2] || cloneMatch[3]).trim();
+          spec = spec.replace(cloneMatch[0], "").trim();
+        }
+        let blockFilePath: string | undefined;
+        let blockSymbol = spec;
+        const fileSymMatch = spec.match(
+          /^([^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile))(?:\s*(?::+|#)\s*|\s+)(.+)$/,
+        );
+        if (fileSymMatch) {
+          const candFile = fileSymMatch[1].trim();
+          if (isSpliceTargetFileCandidate(candFile)) {
+            blockFilePath = candFile;
+            blockSymbol = fileSymMatch[2].trim();
+          }
+        } else if (!isDelete && isBareSpliceStreamFileHeader(spec, defaultFilePath)) {
+          blockFilePath = spec;
+          blockSymbol = ":create";
+        }
+        const isValidSymbol =
+          Boolean(blockSymbol) &&
+          (Boolean(blockFilePath) ||
+            !/\s/.test(blockSymbol) ||
+            /^[.#@]/.test(blockSymbol) ||
+            (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
+        if (isValidSymbol) {
           inMdFence = false;
           mdFenceChar = "";
           mdFenceLen = 0;
+          sections.push({
+            filePath: blockFilePath,
+            symbol: blockSymbol,
+            cloneFrom,
+            isDelete,
+            lines: [],
+          });
+          continue;
         }
+      }
+      if (sections.length === 0) {
+        preHeaderLines.push(line);
+      } else {
         sections[sections.length - 1].lines.push(line);
-        continue;
       }
     }
 
-    const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
-    if (m) {
-      let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
-      let isDelete = false;
-      if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
-        isDelete = true;
-        spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
+    if (sections.length === 0) return null;
+
+    const meaningfulPre = preHeaderLines.filter(
+      (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
+    );
+    if (meaningfulPre.length > 0) return null;
+
+    let lastExplicitFilePath: string | undefined;
+    const resolvedBlocks = sections.map((sec) => {
+      const body = sec.lines
+        .join("\n")
+        .replace(/^\n+|\n+$/g, "")
+        .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
+      const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
+      if (sec.filePath) {
+        lastExplicitFilePath = sec.filePath;
       }
-      let blockFilePath: string | undefined;
-      let blockSymbol = spec;
-      const fileSymMatch = spec.match(
-        /^([^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile))(?:\s*(?::+|#)\s*|\s+)(.+)$/,
+      return {
+        filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
+        explicitFilePath: sec.filePath ?? lastExplicitFilePath,
+        symbol: sec.symbol,
+        cloneFrom: sec.cloneFrom,
+        code: del ? undefined : body,
+        delete: del || undefined,
+      };
+    });
+
+    if (resolvedBlocks.some((b) => !b.filePath)) {
+      if (defaultFilePath === "") {
+        return {
+          singleFileEdits: resolvedBlocks.map((b) => ({
+            symbol: b.symbol,
+            cloneFrom: b.cloneFrom,
+            code: b.code,
+            delete: b.delete,
+          })),
+        };
+      }
+      return null;
+    }
+
+    const hasCreateOrOverwriteBlock = resolvedBlocks.some((b) =>
+      isCreateOrOverwriteSymbol(b.symbol),
+    );
+
+    const allSameDefault =
+      !hasCreateOrOverwriteBlock &&
+      Boolean(defaultFilePath) &&
+      resolvedBlocks.every(
+        (b) =>
+          !b.explicitFilePath ||
+          path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
       );
-      if (fileSymMatch) {
-        const candFile = fileSymMatch[1].trim();
-        if (isSpliceTargetFileCandidate(candFile)) {
-          blockFilePath = candFile;
-          blockSymbol = fileSymMatch[2].trim();
-        }
-      } else if (!isDelete && isBareSpliceStreamFileHeader(spec, defaultFilePath)) {
-        blockFilePath = spec;
-        blockSymbol = ":create";
-      }
-      const isValidSymbol =
-        Boolean(blockSymbol) &&
-        (Boolean(blockFilePath) ||
-          !/\s/.test(blockSymbol) ||
-          /^[.#@]/.test(blockSymbol) ||
-          (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
-      if (isValidSymbol) {
-        inMdFence = false;
-        mdFenceChar = "";
-        mdFenceLen = 0;
-        sections.push({
-          filePath: blockFilePath,
-          symbol: blockSymbol,
-          isDelete,
-          lines: [],
-        });
-        continue;
-      }
-    }
-    if (sections.length === 0) {
-      preHeaderLines.push(line);
-    } else {
-      sections[sections.length - 1].lines.push(line);
-    }
-  }
 
-  if (sections.length === 0) return null;
-
-  const meaningfulPre = preHeaderLines.filter(
-    (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
-  );
-  if (meaningfulPre.length > 0) return null;
-
-  let lastExplicitFilePath: string | undefined;
-  const resolvedBlocks = sections.map((sec) => {
-    const body = sec.lines
-      .join("\n")
-      .replace(/^\n+|\n+$/g, "")
-      .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
-    const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
-    if (sec.filePath) {
-      lastExplicitFilePath = sec.filePath;
-    }
-    return {
-      filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
-      explicitFilePath: sec.filePath ?? lastExplicitFilePath,
-      symbol: sec.symbol,
-      code: del ? undefined : body,
-      delete: del || undefined,
-    };
-  });
-
-  if (resolvedBlocks.some((b) => !b.filePath)) {
-    if (defaultFilePath === "") {
+    if (allSameDefault) {
       return {
         singleFileEdits: resolvedBlocks.map((b) => ({
           symbol: b.symbol,
+          cloneFrom: b.cloneFrom,
           code: b.code,
           delete: b.delete,
         })),
       };
     }
-    return null;
-  }
 
-  const hasCreateOrOverwriteBlock = resolvedBlocks.some((b) =>
-    isCreateOrOverwriteSymbol(b.symbol),
-  );
-
-  const allSameDefault =
-    !hasCreateOrOverwriteBlock &&
-    Boolean(defaultFilePath) &&
-    resolvedBlocks.every(
-      (b) =>
-        !b.explicitFilePath ||
-        path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
-    );
-
-  if (allSameDefault) {
-    return {
-      singleFileEdits: resolvedBlocks.map((b) => ({
-        symbol: b.symbol,
-        code: b.code,
-        delete: b.delete,
-      })),
-    };
-  }
-
-  const batchItems: BatchSpliceItem[] = [];
-  if (!hasCreateOrOverwriteBlock) {
-    const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
-    for (const b of resolvedBlocks) {
-      const fp = b.filePath!;
-      const list = groupedByFile.get(fp) ?? [];
-      list.push({
-        symbol: b.symbol,
-        code: b.code,
-        delete: b.delete,
-      });
-      groupedByFile.set(fp, list);
-    }
-
-    for (const [fp, edits] of groupedByFile.entries()) {
-      if (edits.length === 1) {
-        batchItems.push({
-          filePath: fp,
-          symbol: edits[0].symbol,
-          code: edits[0].code,
-          delete: edits[0].delete,
-        });
-      } else {
-        batchItems.push({
-          filePath: fp,
-          edits,
-        });
-      }
-    }
-  } else {
-    let idx = 0;
-    while (idx < resolvedBlocks.length) {
-      const b = resolvedBlocks[idx]!;
-      const fp = b.filePath!;
-      if (isCreateOrOverwriteSymbol(b.symbol)) {
-        batchItems.push({
-          filePath: fp,
+    const batchItems: BatchSpliceItem[] = [];
+    if (!hasCreateOrOverwriteBlock) {
+      const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
+      for (const b of resolvedBlocks) {
+        const fp = b.filePath!;
+        const list = groupedByFile.get(fp) ?? [];
+        list.push({
           symbol: b.symbol,
+          cloneFrom: b.cloneFrom,
           code: b.code,
-          create: true,
+          delete: b.delete,
         });
-        idx++;
-        continue;
+        groupedByFile.set(fp, list);
       }
-      const edits: SymbolSpliceEdit[] = [];
-      while (
-        idx < resolvedBlocks.length &&
-        resolvedBlocks[idx]!.filePath === fp &&
-        !isCreateOrOverwriteSymbol(resolvedBlocks[idx]!.symbol)
-      ) {
-        const cur = resolvedBlocks[idx]!;
-        edits.push({
-          symbol: cur.symbol,
-          code: cur.code,
-          delete: cur.delete,
-        });
-        idx++;
+
+      for (const [fp, edits] of groupedByFile.entries()) {
+        if (edits.length === 1) {
+          batchItems.push({
+            filePath: fp,
+            symbol: edits[0].symbol,
+            cloneFrom: edits[0].cloneFrom,
+            code: edits[0].code,
+            delete: edits[0].delete,
+          });
+        } else {
+          batchItems.push({
+            filePath: fp,
+            edits,
+          });
+        }
       }
-      if (edits.length === 1) {
-        batchItems.push({
-          filePath: fp,
-          symbol: edits[0].symbol,
-          code: edits[0].code,
-          delete: edits[0].delete,
-        });
-      } else {
-        batchItems.push({
-          filePath: fp,
-          edits,
-        });
+    } else {
+      let idx = 0;
+      while (idx < resolvedBlocks.length) {
+        const b = resolvedBlocks[idx]!;
+        const fp = b.filePath!;
+        if (isCreateOrOverwriteSymbol(b.symbol)) {
+          batchItems.push({
+            filePath: fp,
+            symbol: b.symbol,
+            code: b.code,
+            create: true,
+          });
+          idx++;
+          continue;
+        }
+        const edits: SymbolSpliceEdit[] = [];
+        while (
+          idx < resolvedBlocks.length &&
+          resolvedBlocks[idx]!.filePath === fp &&
+          !isCreateOrOverwriteSymbol(resolvedBlocks[idx]!.symbol)
+        ) {
+          const cur = resolvedBlocks[idx]!;
+          edits.push({
+            symbol: cur.symbol,
+            cloneFrom: cur.cloneFrom,
+            code: cur.code,
+            delete: cur.delete,
+          });
+          idx++;
+        }
+        if (edits.length === 1) {
+          batchItems.push({
+            filePath: fp,
+            symbol: edits[0].symbol,
+            cloneFrom: edits[0].cloneFrom,
+            code: edits[0].code,
+            delete: edits[0].delete,
+          });
+        } else {
+          batchItems.push({
+            filePath: fp,
+            edits,
+          });
+        }
       }
     }
-  }
 
-  return { batchItems };
+    return { batchItems };
   }
 
   /**
@@ -7013,6 +7291,7 @@ export interface ParsedMultiBlockSpliceStream {
           dryRun: item.dryRun ?? options.dryRun,
           compile: item.compile ?? options.compile,
           idioms: item.idioms ?? options.idioms,
+          preserveDocs: item.preserveDocs ?? options.preserveDocs,
         });
         if (
           !existedBeforeBatch &&

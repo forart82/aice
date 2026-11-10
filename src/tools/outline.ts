@@ -1613,6 +1613,9 @@ export async function outlinePath(
     if (nativeDiags && !options.json) {
       res.text = res.text ? `${res.text}\n\n${nativeDiags}` : nativeDiags;
     }
+    const nativeCl100k = estimateTokens(nativeText, "cl100k_base");
+    const aiceCl100k = estimateTokens(res.text, "cl100k_base");
+    const structuralCompressionPct = nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -1620,6 +1623,8 @@ export async function outlinePath(
       surface: "cli",
       idiomsUsed: (res.referencedIdioms?.length ?? 0) > 0,
       nativeText,
+      realisticNativeText: nativeText,
+      structuralCompressionPct,
       aiceText: res.text,
     });
     return res;
@@ -1730,6 +1735,19 @@ export async function outlinePath(
   }
 
   if (targetCandidates.length > 0) {
+    const fullNativeText = nativeParts.join("\n\n");
+    const aiceTextPayload = options.json
+      ? JSON.stringify(
+          Array.from(resultMap.values()).map(
+            (r) => r.json ?? { file: r.file, symbols: r.symbols },
+          ),
+          null,
+          2,
+        )
+      : aiceParts.join("\n\n");
+    const nativeCl100k = estimateTokens(fullNativeText, "cl100k_base");
+    const aiceCl100k = estimateTokens(aiceTextPayload, "cl100k_base");
+    const structuralCompressionPct = nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -1737,18 +1755,11 @@ export async function outlinePath(
       operation: "outline",
       surface: "cli",
       idiomsUsed: anyIdioms,
-      nativeText: nativeParts.join("\n\n"),
-      aiceText: options.json
-        ? JSON.stringify(
-            Array.from(resultMap.values()).map(
-              (r) => r.json ?? { file: r.file, symbols: r.symbols },
-            ),
-            null,
-            2,
-          )
-        : aiceParts.join("\n\n"),
+      nativeText: fullNativeText,
+      realisticNativeText: fullNativeText,
+      structuralCompressionPct,
+      aiceText: aiceTextPayload,
     });
   }
-
   return resultMap;
 }

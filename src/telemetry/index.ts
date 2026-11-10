@@ -53,6 +53,11 @@ export interface TelemetryEvent {
   aiceO200k: number;
   savedO200k: number;
   contentHash: string;
+  realisticNativeText?: string;
+  realisticNativeCl100k?: number;
+  realisticSavedCl100k?: number;
+  preservedTriviaTokens?: number;
+  structuralCompressionPct?: number;
 }
 
 export interface RecordTelemetryInput {
@@ -71,8 +76,12 @@ export interface RecordTelemetryInput {
   nativeO200k?: number;
   aiceO200k?: number;
   telemetryPath?: string;
+  realisticNativeText?: string;
+  realisticNativeCl100k?: number;
+  realisticSavedCl100k?: number;
+  preservedTriviaTokens?: number;
+  structuralCompressionPct?: number;
 }
-
 export interface OperationBucket {
   operation: TelemetryOperation;
   surface: TelemetrySurface | "all";
@@ -196,6 +205,10 @@ export interface GainReport {
   byLanguage: LanguageBucket[];
   projects: ProjectGainSummary[];
   projectDetail?: ProjectDetailReport;
+  totalRealisticNativeCl100k?: number;
+  totalRealisticSavedCl100k?: number;
+  realisticSavedCl100kPct?: number;
+  totalPreservedTriviaTokens?: number;
 }
 
 let telemetrySuppressionDepth = 0;
@@ -365,6 +378,15 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
     .update(`${projectRoot}|${filePath}|${input.operation}|${nativeChars}|${aiceChars}`)
     .digest("hex");
 
+  const realisticNativeCl100k =
+    input.realisticNativeCl100k ??
+    (input.realisticNativeText !== undefined
+      ? estimateTokens(input.realisticNativeText, "cl100k_base")
+      : undefined);
+  const realisticSavedCl100k =
+    input.realisticSavedCl100k ??
+    (realisticNativeCl100k !== undefined ? realisticNativeCl100k - aiceCl100k : undefined);
+
   return {
     timestamp: new Date().toISOString(),
     projectRoot,
@@ -386,13 +408,13 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
     aiceO200k,
     savedO200k,
     contentHash,
+    realisticNativeText: input.realisticNativeText,
+    realisticNativeCl100k,
+    realisticSavedCl100k,
+    preservedTriviaTokens: input.preservedTriviaTokens ?? 0,
+    structuralCompressionPct: input.structuralCompressionPct,
   };
 }
-
-/**
- * Appends a `TelemetryEvent` atomically to `~/.aice/telemetry/gains.jsonl`.
- * Skips recording when telemetry is suppressed (inner helper call) or in unit tests without `AICE_TELEMETRY_PATH`.
- */
 export function recordTelemetryEvent(
   input: RecordTelemetryInput,
   forceEvenIfSuppressed = false,
@@ -714,6 +736,9 @@ export function buildGainReport(
   let nativeO200k = 0;
   let aiceO200k = 0;
   let savedO200k = 0;
+  let totalRealisticNativeCl100k = 0;
+  let totalRealisticSavedCl100k = 0;
+  let totalPreservedTriviaTokens = 0;
 
   const opMap = new Map<string, OperationBucket>();
   const langMap = new Map<string, LanguageBucket>();
@@ -737,6 +762,12 @@ export function buildGainReport(
     nativeO200k += ev.nativeO200k;
     aiceO200k += ev.aiceO200k;
     savedO200k += ev.savedO200k;
+
+    const realNat = ev.realisticNativeCl100k ?? ev.nativeCl100k;
+    const realSaved = ev.realisticSavedCl100k ?? (realNat - ev.aiceCl100k);
+    totalRealisticNativeCl100k += realNat;
+    totalRealisticSavedCl100k += realSaved;
+    totalPreservedTriviaTokens += ev.preservedTriviaTokens ?? 0;
 
     const opKey = `${ev.operation}:${ev.surface}`;
     const opBucket = opMap.get(opKey) ?? {
@@ -872,6 +903,10 @@ export function buildGainReport(
     aiceO200k,
     savedO200k,
     o200kSavingsPct: calcPct(savedO200k, nativeO200k),
+    totalRealisticNativeCl100k,
+    totalRealisticSavedCl100k,
+    realisticSavedCl100kPct: calcPct(totalRealisticSavedCl100k, totalRealisticNativeCl100k),
+    totalPreservedTriviaTokens,
     byOperation,
     byLanguage,
     projects,
@@ -887,9 +922,6 @@ function fmtPct(pct: number): string {
   return pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
 }
 
-/**
- * Formats the Global `aice gain` Dashboard for terminal output.
- */
 export function formatGlobalGainDashboard(report: GainReport): string {
   const lines: string[] = [];
   const modeLabel = report.unique ? "Deduplicated (--unique)" : "Cumulative (--all)";
@@ -922,6 +954,11 @@ export function formatGlobalGainDashboard(report: GainReport): string {
   lines.push(
     `  o200k_base Tokens:      Native ${report.nativeO200k.toLocaleString()} -> AICE ${report.aiceO200k.toLocaleString()} | Net Saved: ${fmtSigned(report.savedO200k)} (${fmtPct(report.o200kSavingsPct)})`,
   );
+  if (report.totalRealisticSavedCl100k !== undefined) {
+    lines.push(
+      `  Realistic Tool Savings: Net Saved: ${fmtSigned(report.totalRealisticSavedCl100k)} (${fmtPct(report.realisticSavedCl100kPct ?? 0)}) | Preserved Trivia: +${(report.totalPreservedTriviaTokens ?? 0).toLocaleString()} tokens`,
+    );
+  }
   lines.push(
     `  Character Delta:        Native ${report.nativeChars.toLocaleString()} -> AICE ${report.aiceChars.toLocaleString()} | Net Saved: ${fmtSigned(report.savedChars)} (${fmtPct(report.charSavingsPct)})`,
   );
@@ -1036,3 +1073,4 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
   return lines.join("\n");
 }
 export * from "./analyze.js";
+export const formatGainReport = formatGlobalGainDashboard;

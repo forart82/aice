@@ -126,3 +126,8 @@ $$C \cong A \times \Omega$$
   `ScopePrefix "#" EntitySelector ("." PathSegment)*` (e.g. `mod:app/auth#fn:login.body.stmt:0`).
 - Classifies trivia into `leading`, `trailing`, and `dangling` (inside empty nodes).
 - Automated verification via property-based testing (`fast-check`) asserting 1,000 arbitrary source files roundtrip with zero git diff.
+
+### 5.3 Active Doc-Preserving CST Trivia Lenses in `splice` & Asymmetric Codec
+- **Asymmetric Codec**: Read via high-density token-compact AICE syntax; write/edit via native target syntax (`.ts`, `.py`, `.rs`, `.go`, etc.) or `$idiom` macros directly in `aice splice` without cognitive translation overhead.
+- **Active Trivia Lens**: When an AI agent splices a declaration (TypeScript/Rust/C# doc comment or Python docstring) and omits the documentation in the replacement snippet, `aice splice` automatically extracts and re-attaches the original leading JSDoc / docstring with proper indentation. If the replacement explicitly provides updated documentation, the old doc comment is replaced rather than duplicated.
+- **Broad Multi-Language Coverage**: Lossless CST trivia retention and surgical splicing supported across **33 file extensions in 18 languages** (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `.cs`, `.kt`, `.kts`, `.php`, `.html`, `.twig`, `.css`, `.json`, `.yaml`, `.yml`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`).

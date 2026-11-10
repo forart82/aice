@@ -979,6 +979,18 @@ function formatBundle(
 
   lines.push("## Target File Content:");
   lines.push("```aice");
+  if (idioms && Object.keys(idioms).length > 0 && !targetBody.includes("# @idioms available:")) {
+    const idiomNames = Object.entries(idioms)
+      .map(([name, def]) => {
+        const normName = name.startsWith("$") ? name : `$${name}`;
+        const params = (def.params ?? []).map((p) => p.name).join(", ");
+        return `${normName}(${params})`;
+      })
+      .join(", ");
+    if (idiomNames) {
+      lines.push(`# @idioms available: ${idiomNames}`);
+    }
+  }
   lines.push(targetBody);
   lines.push("```");
   lines.push("");
@@ -2932,6 +2944,22 @@ export function mergeMultiContextResults(
     combinedTargetContents.push(`// === ${r.targetPath} ===\n${body}`);
     lines.push(`### Target: \`${r.targetPath}\``);
     lines.push("```aice");
+    if (
+      mergedIdioms &&
+      Object.keys(mergedIdioms).length > 0 &&
+      !body.includes("# @idioms available:")
+    ) {
+      const idiomNames = Object.entries(mergedIdioms)
+        .map(([name, def]) => {
+          const normName = name.startsWith("$") ? name : `$${name}`;
+          const params = (def.params ?? []).map((p) => p.name).join(", ");
+          return `${normName}(${params})`;
+        })
+        .join(", ");
+      if (idiomNames) {
+        lines.push(`# @idioms available: ${idiomNames}`);
+      }
+    }
     lines.push(body);
     lines.push("```");
     if (i < results.length - 1) {

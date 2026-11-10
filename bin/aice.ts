@@ -1247,6 +1247,10 @@ program
   .option("--dry-run", "Output result without modifying file")
   .option("--diff", "Display unified diff")
   .option("--compile", "Automatically recompile target after splice")
+  .option(
+    "--no-preserve-docs",
+    "Do not preserve leading JSDoc/docstrings when omitted in replacement",
+  )
   .addHelpText(
     "after",
     `
@@ -1291,6 +1295,7 @@ Examples:
         dryRun?: boolean;
         diff?: boolean;
         compile?: boolean;
+        preserveDocs?: boolean;
       },
     ) => {
       try {
@@ -1327,6 +1332,7 @@ Examples:
               dryRun: options.dryRun,
               compile: options.compile,
               idioms: batchEffectiveIdioms,
+              preserveDocs: options.preserveDocs,
               projectRoot: batchProjectRoot,
             });
             const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
@@ -1406,6 +1412,7 @@ Examples:
                 dryRun: options.dryRun,
                 compile: options.compile,
                 idioms: batchEffectiveIdioms,
+                preserveDocs: options.preserveDocs,
                 projectRoot: batchProjectRoot,
               });
               const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
@@ -1521,6 +1528,7 @@ Examples:
               dryRun: options.dryRun,
               compile: options.compile,
               idioms: effectiveSpliceIdioms,
+              preserveDocs: options.preserveDocs,
               projectRoot: spliceProjectRoot,
             });
             const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
@@ -1548,6 +1556,7 @@ Examples:
           dryRun: options.dryRun,
           diff: options.diff,
           compile: options.compile,
+          preserveDocs: options.preserveDocs,
           projectRoot: spliceProjectRoot,
         };
 

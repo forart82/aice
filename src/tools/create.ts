@@ -1060,6 +1060,7 @@ export async function createFile(
   const aiceO200kTokens = Math.max(1, nativeO200kTokens - o200kTokensSaved);
 
   if (!dryRun && !options.suppressTelemetry) {
+    const realisticWriteFilePayload = JSON.stringify({ path: fullPath, content: nativeCode });
     recordTelemetryEvent({
       targetPath: fullPath,
       projectRoot: root,
@@ -1067,6 +1068,7 @@ export async function createFile(
       surface: options.surface ?? "cli",
       idiomsUsed,
       nativeText: nativeCode,
+      realisticNativeText: realisticWriteFilePayload,
       aiceText: rawPayload,
       nativeCl100k: nativeTokens,
       aiceCl100k: aiceTokens,
@@ -1420,6 +1422,10 @@ export async function createBatch(
   }
 
   for (const ev of pendingTelemetry) {
+    const realisticWriteFilePayload = JSON.stringify({
+      path: ev.targetPath,
+      content: ev.nativeText,
+    });
     recordTelemetryEvent({
       targetPath: ev.targetPath,
       projectRoot: ev.projectRoot,
@@ -1427,10 +1433,10 @@ export async function createBatch(
       surface: ev.surface,
       idiomsUsed: ev.idiomsUsed,
       nativeText: ev.nativeText,
+      realisticNativeText: realisticWriteFilePayload,
       aiceText: ev.aiceText,
     });
   }
-
   return {
     success: true,
     totalFiles: results.length,

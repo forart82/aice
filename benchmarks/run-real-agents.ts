@@ -574,7 +574,7 @@ function buildPrompt(
       `  - Insert: \`{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<pure AICE>"}\``,
       `  - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
       taskText,
-      `Reply DONE immediately once \`aice splice --no-idioms\` succeeds (do not run extra verification commands).`,
+      `Reply DONE when all changes are saved to disk.`,
     ].join("\n\n");
   }
 
@@ -590,7 +590,7 @@ function buildPrompt(
     `  - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
     `  - Idiom template refactor: \`{"name":"$<discovered_idiom>","template":"<updated template>"}\``,
     taskText,
-    `Reply DONE immediately once \`aice splice --idioms\` succeeds (do not run extra verification commands).`,
+    `Reply DONE when all changes are saved to disk.`,
   ].join("\n\n");
 }
 
