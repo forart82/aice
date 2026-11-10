@@ -467,6 +467,7 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
         // 1. Real install.sh outline & context span for install_sys_packages (contains ${#SUDO_CMD[@]}) and Substep 2.2b
         const installShPath = path.resolve(process.cwd(), "install.sh");
         const installOutline = generateOutline(installShPath);
+        expect(installOutline.text).toContain("fn install_sys_packages()");
         expect(installOutline.text).not.toContain("fn install_sys_packages() # [L118-L118]");
         expect(installOutline.text).toContain(
           "Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update",

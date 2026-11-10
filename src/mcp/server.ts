@@ -276,7 +276,6 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: [],
     },
   },
   {
