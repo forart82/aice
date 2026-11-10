@@ -256,4 +256,38 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
   }, 20000);
+
+  it("renders aice_cheatsheet() with strict 80-char width and aligned column dividers at index 40 and 79", () => {
+    const scriptContent = fs.readFileSync(INSTALL_SCRIPT, "utf-8");
+    const match = scriptContent.match(
+      /# >>> aice-cheatsheet >>>\n([\s\S]*?)# <<< aice-cheatsheet <<</,
+    );
+    expect(match).not.toBeNull();
+    const cheatsheetBlock = match?.[1] ?? "";
+
+    const res = spawnSync("bash", ["-c", `${cheatsheetBlock}\naice_cheatsheet`], {
+      encoding: "utf-8",
+    });
+    expect(res.status).toBe(0);
+
+    // Strip ANSI escape sequences
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
+    const stripped = res.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+    const lines = stripped.split("\n").filter((line) => line.trim().length > 0);
+    expect(lines.length).toBe(12);
+
+    for (const [idx, line] of lines.entries()) {
+      expect([...line].length, `Line ${idx + 1} visible width: ${line}`).toBe(80);
+      expect(line[0]).toMatch(/[╭│├╰]/);
+      expect(line[79]).toMatch(/[╮│┤╯]/);
+    }
+
+    // 2-column rows: index 2 (├...┬...┤), indices 3..8 (6 content rows), index 9 (├...┴...┤)
+    const twoColIndices = [2, 3, 4, 5, 6, 7, 8, 9];
+    for (const rowIdx of twoColIndices) {
+      const line = lines[rowIdx];
+      expect(line[40], `Row ${rowIdx + 1} center divider at idx 40: ${line}`).toMatch(/[┬│┴]/);
+      expect(line[79], `Row ${rowIdx + 1} right border at idx 79: ${line}`).toMatch(/[┤│]/);
+    }
+  });
 });
