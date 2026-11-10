@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HTML_VOID_TAGS, validateNativeSyntax } from "../../src/tools/syntax-validator.js";
+
 describe("Hardened HTML & WebGL/Canvas Shell Pre-Write Validator", () => {
   const complexWebGLShell = `<!DOCTYPE html>
 <html lang="en">

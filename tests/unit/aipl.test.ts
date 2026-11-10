@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { generateOutline } from "../../src/tools/outline.js";
 import { extractSymbolFromAiceSource } from "../../src/tools/context.js";
+import { generateOutline } from "../../src/tools/outline.js";
 import { spliceSource } from "../../src/tools/splice.js";
 import { validateNativeSyntax } from "../../src/tools/syntax-validator.js";
+
 describe("AIPL (.aipl) Dialect Support (33 extensions)", () => {
   const sampleAipl = `module GameState
 
@@ -60,15 +61,9 @@ fn secret_roll(d: i32): i32:
   });
 
   it("appends new members to AIPL structs", () => {
-    const res = spliceSource(
-      sampleAipl,
-      "Hero",
-      `mana: i32`,
-      false,
-      "game.aipl",
-      undefined,
-      { append: true },
-    );
+    const res = spliceSource(sampleAipl, "Hero", `mana: i32`, false, "game.aipl", undefined, {
+      append: true,
+    });
     expect(res.success).toBe(true);
     expect(res.modifiedCode).toContain("mana: i32");
   });
@@ -80,7 +75,9 @@ fn secret_roll(d: i32): i32:
     const invalidColons = `pub struct BrokenStruct\n  hp: i32\n\npub fn bad_func(x: i32)\n  x + 1\n`;
     const invalidColonsRes = validateNativeSyntax(invalidColons, "aipl", "broken.aipl");
     expect(invalidColonsRes.valid).toBe(false);
-    expect(invalidColonsRes.diagnostics.some((d) => d.includes("signature must end with ':'"))).toBe(true);
+    expect(
+      invalidColonsRes.diagnostics.some((d) => d.includes("signature must end with ':'")),
+    ).toBe(true);
 
     const mixedTabs = `pub fn test_tab():\n \tlet x = 1\n  x\n`;
     const mixedTabsRes = validateNativeSyntax(mixedTabs, "aipl", "tab.aipl");
@@ -90,12 +87,20 @@ fn secret_roll(d: i32): i32:
     const badIndent = `let x = 1\n  let y = 2\n`;
     const badIndentRes = validateNativeSyntax(badIndent, "aipl", "indent.aipl");
     expect(badIndentRes.valid).toBe(false);
-    expect(badIndentRes.diagnostics.some((d) => d.includes("unexpected indent increase without preceding colon"))).toBe(true);
+    expect(
+      badIndentRes.diagnostics.some((d) =>
+        d.includes("unexpected indent increase without preceding colon"),
+      ),
+    ).toBe(true);
 
     const misalignedDedent = `pub fn test_dedent():\n    let x = 1\n  let y = 2\n`;
     const misalignedRes = validateNativeSyntax(misalignedDedent, "aipl", "dedent.aipl");
     expect(misalignedRes.valid).toBe(false);
-    expect(misalignedRes.diagnostics.some((d) => d.includes("unindent does not match any outer indentation level"))).toBe(true);
+    expect(
+      misalignedRes.diagnostics.some((d) =>
+        d.includes("unindent does not match any outer indentation level"),
+      ),
+    ).toBe(true);
   });
 
   it("does not emit nested helper functions as top-level outline symbols", () => {

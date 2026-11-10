@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extractSymbolFromAiceSource } from "../../src/tools/context.js";
 import { spliceSource } from "../../src/tools/splice.js";
+
 describe("Self-Healing Line Range Clamping & Tolerant Splicing", () => {
   const shortSource = `line 1
 line 2

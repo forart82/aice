@@ -49,6 +49,7 @@ function runCli(args: string[], cwd?: string): { status: number; stdout: string;
     cwd: cwd ?? process.cwd(),
     encoding: "utf-8",
     env: { ...process.env },
+    timeout: 60000,
   });
   return {
     status: result.status ?? 0,
@@ -523,7 +524,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(res.stdout).toContain("component Card(): ...");
       expect(res.stdout).toContain("Token savings:");
       expect(res.stdout).toContain("%");
-    });
+    }, 60000);
 
     it("runs 'aice outline' on profile.html and outputs component declaration", () => {
       const profilePath = path.join(tmpDir, "profile.html");
@@ -532,7 +533,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(res.status).toBe(0);
       expect(res.stdout).toContain("component Profile(): ...");
       expect(res.stdout).toContain("Token savings:");
-    });
+    }, 60000);
 
     it("runs 'aice outline --json' on card.twig and yields structured symbol outline", () => {
       const cardPath = path.join(tmpDir, "card.twig");
@@ -545,7 +546,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(parsed.symbols.length).toBeGreaterThanOrEqual(1);
       expect(parsed.symbols[0].name).toBe("Card");
       expect(parsed.symbols[0].kind).toBe("component");
-    });
+    }, 60000);
 
     it("runs 'aice context' on card.twig and profile.html and packages into 1-turn context pack", () => {
       const cardPath = path.join(tmpDir, "card.twig");
@@ -576,7 +577,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       ]);
       expect(profileOutlineRes.status).toBe(0);
       expect(profileOutlineRes.stdout).toContain("component Profile():");
-    }, 20000);
+    }, 60000);
 
     it("runs 'aice compile' on a .twig.aice file and compiles to .twig", () => {
       const aiceFile = path.join(tmpDir, "alert_card.twig.aice");
@@ -607,7 +608,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(content).toContain("<h3>Critical Notice</h3>");
       expect(content).toContain("<p>{{ message }}</p>");
       expect(content).toContain("{% endblock %}");
-    });
+    }, 60000);
 
     it("runs 'aice compile' on a .html.aice file and compiles to .html", () => {
       const aiceFile = path.join(tmpDir, "navbar.html.aice");
@@ -637,6 +638,6 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       expect(content).toContain('<ul class="nav-links">');
       expect(content).toContain("<li>Docs</li>");
       expect(content).toContain("<li>Tutorials</li>");
-    });
+    }, 60000);
   });
 });

@@ -472,11 +472,10 @@ fn funcF(): return 6
           "utf-8",
         );
         const scriptFile = path.join(tmpDir, "run.sh");
-        fs.writeFileSync(
-          scriptFile,
-          "#!/usr/bin/env bash\ngreet() {\n  echo old\n}\ngreet\n",
-          { encoding: "utf-8", mode: 0o755 },
-        );
+        fs.writeFileSync(scriptFile, "#!/usr/bin/env bash\ngreet() {\n  echo old\n}\ngreet\n", {
+          encoding: "utf-8",
+          mode: 0o755,
+        });
         fs.chmodSync(scriptFile, 0o755);
 
         const res = await splice(scriptFile, {
