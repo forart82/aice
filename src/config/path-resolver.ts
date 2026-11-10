@@ -9,14 +9,16 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import {
+  import {
   type AiceProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
-} from "./project-config.js";
+  type TargetLanguage,
+  } from "./project-config.js";
 
-export { KNOWN_TARGET_EXTENSIONS };
+  export { KNOWN_TARGET_EXTENSIONS };
+  export type { TargetLanguage };
 export interface PathResolverOptions {
   /**
    * Extensions to filter when scanning directories (default: [".aice"]).

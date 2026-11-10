@@ -1,6 +1,6 @@
 {
   "name": "aice-compiler",
-  "version": "0.9.20",
+  "version": "0.9.21",
   "description": "AI-Compact Expression (AICE 2.0) — High-Efficiency Agent-Native Language, Decompiler, and Tokenomics Engine",
   "license": "Apache-2.0",
   "author": {
@@ -8,9 +8,6 @@
     "url": "https://github.com/forart82"
   },
   "homepage": "https://github.com/forart82/aice",
-  "bugs": {
-    "url": "https://github.com/forart82/aice/issues"
-  },
   "keywords": [
     "aice",
     "ai-context-engine",

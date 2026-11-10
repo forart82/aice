@@ -1283,6 +1283,7 @@ export function extractScriptOrMarkdownSymbols(
     }
 
     for (let k = 0; k < rawHeadings.length; k++) {
+    for (let k = 0; k < rawHeadings.length; k++) {
       const cur = rawHeadings[k];
       let nextEqualOrHigher: (typeof rawHeadings)[number] | undefined;
       for (let j = k + 1; j < rawHeadings.length; j++) {
@@ -1299,6 +1300,10 @@ export function extractScriptOrMarkdownSymbols(
       while (lastContentIdx > cur.lineIdx && lines[lastContentIdx].trim() === "") {
         lastContentIdx--;
       }
+      let endOffset = lineEnds[lastContentIdx] ?? source.length;
+      if (nextEqualOrHigher && lineStarts[nextEqualOrHigher.lineIdx] !== undefined) {
+        endOffset = Math.min(endOffset, lineStarts[nextEqualOrHigher.lineIdx]);
+      }
       results.push({
         kind: "section",
         name: cur.title,
@@ -1306,11 +1311,13 @@ export function extractScriptOrMarkdownSymbols(
         startLine,
         endLine,
         startOffset: lineStarts[cur.lineIdx] ?? 0,
-        endOffset: lineEnds[lastContentIdx] ?? source.length,
+        endOffset,
         indent: cur.indent,
         headingLevel: cur.level,
         rawHeadingLine: cur.rawLine,
       });
+    }
+    return results;
     }
     return results;
   }
@@ -1973,6 +1980,158 @@ function locatePythonDeclarationSpan(
     memberName,
     isAsync,
     isStatic,
+    isClassContainer,
+  };
+}
+
+function locateAiplDeclarationSpan(
+  nativeSource: string,
+  symbolSelector: string,
+  explicitClassName?: string,
+): NativeSpanInfo | undefined {
+  const parts = symbolSelector.split(/\.|::/);
+  const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
+  const escMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  const lines = nativeSource.split("\n");
+  const lineOffsets: number[] = [];
+  let offset = 0;
+  for (const line of lines) {
+    lineOffsets.push(offset);
+    offset += line.length + 1;
+  }
+
+  let searchStartLine = 0;
+  let searchEndLine = lines.length;
+  let activeClassName = className;
+
+  if (className) {
+    const escClass = className.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const structRegex = new RegExp(`^([ \\t]*)(?:pub\\s+)?(?:struct|enum)\\s+${escClass}\\b`);
+    let foundClassLine = -1;
+    let classIndentLen = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(structRegex);
+      if (m) {
+        foundClassLine = i;
+        classIndentLen = m[1].length;
+        break;
+      }
+    }
+    if (foundClassLine < 0) return undefined;
+    searchStartLine = foundClassLine + 1;
+    for (let i = searchStartLine; i < lines.length; i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed || trimmed.startsWith("//")) continue;
+      const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
+      if (ind <= classIndentLen) {
+        searchEndLine = i;
+        break;
+      }
+    }
+  }
+
+  const fnRegex = new RegExp(`^([ \\t]*)(?:pub\\s+)?fn\\s+${escMember}\\b`);
+  let targetLine = -1;
+  let targetIndent = "";
+  let isClassContainer = false;
+  let isField = false;
+
+  for (let i = searchStartLine; i < searchEndLine; i++) {
+    const m = lines[i].match(fnRegex);
+    if (m) {
+      if (!className && m[1].length > 0) {
+        for (let k = i - 1; k >= 0; k--) {
+          const cm = lines[k].match(/^([ \\t]*)(?:pub\\s+)?(?:struct|enum)\\s+([A-Za-z0-9_]+)\b/);
+          if (cm && cm[1].length < m[1].length) {
+            activeClassName = cm[2];
+            break;
+          }
+        }
+      }
+      targetLine = i;
+      targetIndent = m[1];
+      break;
+    }
+  }
+
+  if (targetLine < 0 && !className) {
+    const topStructRegex = new RegExp(`^([ \\t]*)(?:pub\\s+)?(?:struct|enum)\\s+${escMember}\\b`);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(topStructRegex);
+      if (m) {
+        targetLine = i;
+        targetIndent = m[1];
+        isClassContainer = true;
+        break;
+      }
+    }
+  }
+
+  if (targetLine < 0 && !className) {
+    const modRegex = new RegExp(`^([ \\t]*)module\\s+${escMember}\\b`);
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(modRegex);
+      if (m) {
+        targetLine = i;
+        targetIndent = m[1];
+        break;
+      }
+    }
+  }
+
+  if (targetLine < 0) {
+    const fieldRegex = new RegExp(`^([ \\t]*)(?:pub\\s+)?${escMember}\\s*:[^\\n]*`);
+    for (let i = searchStartLine; i < searchEndLine; i++) {
+      const m = lines[i].match(fieldRegex);
+      if (m && (className || m[1].length === 0)) {
+        targetLine = i;
+        targetIndent = m[1];
+        isField = true;
+        break;
+      }
+    }
+  }
+
+  if (targetLine < 0) return undefined;
+
+  let endLine = targetLine;
+  const baseIndentLen = targetIndent.length;
+
+  if (isField) {
+    endLine = targetLine;
+  } else {
+    for (let i = targetLine + 1; i < searchEndLine; i++) {
+      const trimmed = lines[i].trim();
+      if (!trimmed) continue;
+      const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
+      if (ind <= baseIndentLen) {
+        break;
+      }
+      if (!trimmed.startsWith("//")) {
+        endLine = i;
+      }
+    }
+  }
+
+  const declStart = lineOffsets[targetLine];
+  const fullDeclStart = declStart;
+  const tokenStart = declStart + targetIndent.length;
+  const endLineStr = lines[endLine];
+  const cleanEndLen = endLineStr.endsWith("\r") ? endLineStr.length - 1 : endLineStr.length;
+  const declEnd = lineOffsets[endLine] + cleanEndLen;
+
+  return {
+    declStart,
+    fullDeclStart,
+    declEnd,
+    tokenStart,
+    declIndent: targetIndent,
+    className: activeClassName,
+    memberName,
+    isAsync: false,
+    isStatic: false,
     isClassContainer,
   };
 }
@@ -2887,6 +3046,9 @@ export function locateNativeDeclarationSpan(
   } else if (targetLang === "python") {
     const cleanPySel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
     rawSpan = locatePythonDeclarationSpan(nativeSource, cleanPySel, classFilter);
+  } else if (targetLang === "aipl") {
+    const cleanAiplSel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
+    rawSpan = locateAiplDeclarationSpan(nativeSource, cleanAiplSel, classFilter);
   } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
     rawSpan = locateTsDeclarationSpan(
       nativeSource,
@@ -4162,7 +4324,12 @@ function emitNativeSnippetForContext(
     }
     return dedentedMd;
   }
-  if (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") {
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "aipl"
+  ) {
     return dedentSnippet(rawSnippet).trim();
   }
 
@@ -4366,13 +4533,6 @@ function spliceDialectNativeSource(
       );
       if (singleRes) {
         let prefixLen = 0;
-        const minLen = Math.min(nativeSource.length, singleRes.modifiedCode.length);
-        while (
-          prefixLen < minLen &&
-          nativeSource.charCodeAt(prefixLen) === singleRes.modifiedCode.charCodeAt(prefixLen)
-        ) {
-          prefixLen++;
-        }
         let origSuffixIdx = nativeSource.length;
         let modSuffixIdx = singleRes.modifiedCode.length;
         while (
@@ -4394,6 +4554,13 @@ function spliceDialectNativeSource(
     }
 
     resolvedDialectEdits.sort((a, b) => b.startOffset - a.startOffset || b.endOffset - a.endOffset);
+    for (let i = 0; i < resolvedDialectEdits.length - 1; i++) {
+      const lowerInFile = resolvedDialectEdits[i];
+      const higherInFile = resolvedDialectEdits[i + 1];
+      if (lowerInFile.startOffset < higherInFile.endOffset) {
+        higherInFile.endOffset = Math.max(higherInFile.startOffset, lowerInFile.startOffset);
+      }
+    }
     let modifiedCode = nativeSource;
     for (const item of resolvedDialectEdits) {
       modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
@@ -5157,16 +5324,16 @@ function resolveSingleNativeEditAgainstSource(
     const rawLines = nativeSource.split(/\r?\n/);
     const totalLines = rawLines.length;
 
-    if (
-      endLine > totalLines &&
-      endLine <= totalLines + 5 &&
-      startLine >= 1 &&
-      startLine <= totalLines
-    ) {
+    if (startLine > totalLines) {
+      throw new Error(
+        `Invalid line range L${startLine}-L${endLine}: file only has ${totalLines} line(s). To append to the end of the file, use ':eof' or ':append'.`,
+      );
+    }
+    if (endLine > totalLines) {
       endLine = totalLines;
     }
 
-    if (startLine < 1 || endLine > totalLines || startLine > endLine) {
+    if (startLine < 1 || startLine > endLine) {
       throw new Error(
         `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive)`,
       );
@@ -5647,6 +5814,16 @@ function resolveSingleNativeEditAgainstSource(
         newSnippet,
       };
     }
+    if (targetLang === "aipl") {
+      return {
+        symbol: anchorSymbol,
+        startOffset: spanInfo.declEnd,
+        endOffset: spanInfo.declEnd,
+        replacement: `\n${newSnippet}`,
+        originalSnippet,
+        newSnippet,
+      };
+    }
     const closeBracePos = nativeSource.lastIndexOf("}", spanInfo.declEnd);
     if (closeBracePos < spanInfo.declStart) {
       let bodyStartPos = spanInfo.declEnd;
@@ -5866,14 +6043,12 @@ export function spliceNativeSource(
       )
       .map((entry) => entry.edit);
 
-    // Check for overlapping spans
+    // Auto-sort and de-overlap multi-block splice edits when child symbols fall within the same file span
     for (let i = 0; i < sortedReverse.length - 1; i++) {
       const lowerInFile = sortedReverse[i];
       const higherInFile = sortedReverse[i + 1];
       if (lowerInFile.startOffset < higherInFile.endOffset) {
-        throw new Error(
-          `Overlapping splice edits in ${filePath}: '${higherInFile.symbol}' [${higherInFile.startOffset}..${higherInFile.endOffset}] overlaps with '${lowerInFile.symbol}' [${lowerInFile.startOffset}..${lowerInFile.endOffset}]`,
-        );
+        higherInFile.endOffset = Math.max(higherInFile.startOffset, lowerInFile.startOffset);
       }
     }
 

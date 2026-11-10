@@ -4,7 +4,6 @@
  *
  * AICE Multi-Language Pre-Write Syntax Validation Gate (`validateNativeSyntax`).
  */
-
 import { spawnSync } from "node:child_process";
 import * as path from "node:path";
 import postcss from "postcss";
@@ -13,6 +12,23 @@ import ts from "../compat/typescript.js";
 import { type ProjectIdiomDefinition, stripJsonComments } from "../config/index.js";
 import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
 import { maskSourceLexically } from "./preprocessor.js";
+export const HTML_VOID_TAGS: ReadonlySet<string> = new Set([
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
+]);
+
 export interface SyntaxDiagnosticItem {
   line: number;
   column: number;
@@ -290,9 +306,146 @@ function collectJsTsAstArtifacts(sf: ts.SourceFile): SyntaxDiagnosticItem[] {
   return diags;
 }
 
-/**
- * Validates native syntax across all 15 supported target languages.
- */
+function checkHtmlScriptAndStyleTags(code: string): SyntaxDiagnosticItem[] {
+  const items: SyntaxDiagnosticItem[] = [];
+
+  for (const tag of ["script", "style"]) {
+    let openCount = 0;
+    let closeCount = 0;
+    let i = 0;
+    const len = code.length;
+    const isScript = tag === "script";
+
+    while (i < len) {
+      if (
+        code[i] === "<" &&
+        code.slice(i + 1, i + 1 + tag.length).toLowerCase() === tag &&
+        (i + 1 + tag.length === len || /[\s>/]/.test(code[i + 1 + tag.length]))
+      ) {
+        const tagEnd = code.indexOf(">", i + 1 + tag.length);
+        if (tagEnd < 0) {
+          items.push({
+            line: getLineAndCol(code, i).line,
+            column: getLineAndCol(code, i).column,
+            message: `Unterminated <${tag}> tag opening`,
+          });
+          break;
+        }
+
+        if (code[tagEnd - 1] === "/") {
+          i = tagEnd + 1;
+          continue;
+        }
+
+        openCount++;
+        i = tagEnd + 1;
+
+        let closed = false;
+        while (i < len) {
+          const ch = code[i];
+
+          if (isScript && ch === "/" && code[i + 1] === "/") {
+            let nextNl = code.indexOf("\n", i + 2);
+            if (nextNl < 0) nextNl = len;
+            i = nextNl;
+            continue;
+          }
+
+          if (ch === "/" && code[i + 1] === "*") {
+            const closeCmt = code.indexOf("*/", i + 2);
+            if (closeCmt < 0) {
+              i = len;
+              break;
+            }
+            i = closeCmt + 2;
+            continue;
+          }
+
+          if (ch === "'") {
+            let j = i + 1;
+            while (j < len && code[j] !== "'") {
+              if (code[j] === "\\" && j + 1 < len) j += 2;
+              else if (code[j] === "\n" || code[j] === "\r") break;
+              else j++;
+            }
+            if (j < len && code[j] === "'") j++;
+            i = j;
+            continue;
+          }
+
+          if (ch === '"') {
+            let j = i + 1;
+            while (j < len && code[j] !== '"') {
+              if (code[j] === "\\" && j + 1 < len) j += 2;
+              else if (code[j] === "\n" || code[j] === "\r") break;
+              else j++;
+            }
+            if (j < len && code[j] === '"') j++;
+            i = j;
+            continue;
+          }
+
+          if (isScript && ch === "`") {
+            let j = i + 1;
+            while (j < len && code[j] !== "`") {
+              if (code[j] === "\\" && j + 1 < len) j += 2;
+              else j++;
+            }
+            if (j < len && code[j] === "`") j++;
+            i = j;
+            continue;
+          }
+
+          if (
+            ch === "<" &&
+            code[i + 1] === "/" &&
+            code.slice(i + 2, i + 2 + tag.length).toLowerCase() === tag &&
+            (i + 2 + tag.length === len || /[\s>]/.test(code[i + 2 + tag.length]))
+          ) {
+            const closeEnd = code.indexOf(">", i + 2 + tag.length);
+            if (closeEnd >= 0) {
+              closeCount++;
+              closed = true;
+              i = closeEnd + 1;
+              break;
+            }
+          }
+
+          i++;
+        }
+
+        if (!closed) {
+          break;
+        }
+        continue;
+      }
+
+      if (
+        code[i] === "<" &&
+        code[i + 1] === "/" &&
+        code.slice(i + 2, i + 2 + tag.length).toLowerCase() === tag &&
+        (i + 2 + tag.length === len || /[\s>]/.test(code[i + 2 + tag.length]))
+      ) {
+        closeCount++;
+        const closeEnd = code.indexOf(">", i + 2 + tag.length);
+        i = closeEnd >= 0 ? closeEnd + 1 : i + 2 + tag.length;
+        continue;
+      }
+
+      i++;
+    }
+
+    if (openCount !== closeCount) {
+      items.push({
+        line: 1,
+        column: 1,
+        message: `Unbalanced <${tag}> tags (${openCount} open vs ${closeCount} close)`,
+      });
+    }
+  }
+
+  return items;
+}
 export function validateNativeSyntax(
   code: string,
   targetLang: TargetLanguage,
@@ -414,23 +567,7 @@ export function validateNativeSyntax(
   if (targetLang === "html" || targetLang === "twig") {
     const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
     const masked = maskRes.maskedCode;
-    items.push(...maskRes.unterminatedDiagnostics);
-    items.push(
-      ...checkLeakedAiceMarkers(masked, code, targetLang, activeIdioms, maskRes.maskLengths),
-    );
-
-    for (const tag of ["script", "style"]) {
-      const openCount = (masked.match(new RegExp(`<${tag}\\b(?![^>]*\\/>)[^>]*>`, "gi")) ?? [])
-        .length;
-      const closeCount = (masked.match(new RegExp(`<\\/${tag}\\s*>`, "gi")) ?? []).length;
-      if (openCount !== closeCount) {
-        items.push({
-          line: 1,
-          column: 1,
-          message: `Unbalanced <${tag}> tags (${openCount} open vs ${closeCount} close)`,
-        });
-      }
-    }
+    items.push(...checkHtmlScriptAndStyleTags(code));
 
     if (
       targetLang === "twig" ||
@@ -545,6 +682,41 @@ export function validateNativeSyntax(
     return finish();
   }
 
+  // 4c. AIPL validation
+  if (targetLang === "aipl") {
+    const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
+    items.push(...maskRes.unterminatedDiagnostics);
+    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
+
+    const lines = code.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("//")) continue;
+
+      if (/^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
+        if (!trimmed.endsWith(":")) {
+          items.push({
+            line: i + 1,
+            column: line.length,
+            message: `AIPL function signature must end with ':' before indented body`,
+          });
+        }
+      }
+
+      if (/^(?:pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed)) {
+        if (!trimmed.endsWith(":")) {
+          items.push({
+            line: i + 1,
+            column: line.length,
+            message: `AIPL struct signature must end with ':' before indented body`,
+          });
+        }
+      }
+    }
+
+    return finish();
+  }
   // 5. Python, Rust, Go, C++, C#, Kotlin, PHP
   const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
   items.push(...maskRes.unterminatedDiagnostics);

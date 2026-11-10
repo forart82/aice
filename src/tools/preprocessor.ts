@@ -1879,6 +1879,7 @@ export const PREPROCESSORS_BY_LANG: Readonly<
   powershell: (line) => line,
   batch: (line) => line,
   markdown: (line) => line,
+  aipl: (line) => line,
 };
 
   export function preprocessHybridAndIdiomsLossless(

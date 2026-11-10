@@ -23,8 +23,8 @@ export type TargetLanguage =
   | "shell"
   | "powershell"
   | "batch"
-  | "markdown";
-
+  | "markdown"
+  | "aipl";
 export interface EmitterOptions {
   target?: TargetLanguage;
   indent?: string;
@@ -174,6 +174,7 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (lower.endsWith(".ps1")) return "powershell";
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";
   if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
+  if (lower.endsWith(".aipl")) return "aipl";
   return "typescript";
 }
 

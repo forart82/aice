@@ -1609,7 +1609,7 @@ program
     "Create greenfield/startup native files from compact AICE syntax, $idiom macros, or hybrid code (40-75% token reduction)",
   )
   .option("-c, --code <codeString>", "Compact AICE, $idiom, or hybrid code string")
-  .option("-f, --from <file>", "Read AICE payload from an input file")
+  .option("-F, --from <file>", "Read AICE payload from an input file")
   .option("--stdin", "Read AICE payload from standard input")
   .option(
     "--idiom <spec...>",
@@ -1619,8 +1619,8 @@ program
     "--batch [jsonOrFile]",
     "Create multiple native files atomically from JSON array/object or JSON file",
   )
-  .option("--overwrite", "Force full-file replacement if target file already exists (>25 lines)")
-  .option("--force", "Alias for --overwrite")
+  .option("-f, --force", "Force full-file replacement if target file already exists (>25 lines)")
+  .option("--overwrite", "Alias for --force")
   .option("--idioms", "Force-enable project and inline $idioms")
   .option("--no-idioms", "Disable $idiom expansion and persistence")
   .option("--dry-run", "Preview compiled native code without writing to disk")

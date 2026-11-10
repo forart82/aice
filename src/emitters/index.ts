@@ -142,7 +142,8 @@ export function emitTarget(
     case "shell":
     case "powershell":
     case "batch":
-    case "markdown": {
+    case "markdown":
+    case "aipl": {
       if (options.trivia) {
         const modTrivia = options.trivia.getTrivia("module");
         if (modTrivia?.sourceSlice !== undefined) {

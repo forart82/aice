@@ -914,6 +914,160 @@ function enrichAndResolveSymbolLineRanges(
   }
 }
 
+function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[] {
+  const lines = source.split(/\r?\n/);
+  const symbols: OutlineSymbol[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("//")) continue;
+
+    const modMatch = line.match(/^(\s*)module\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (modMatch) {
+      const name = modMatch[2];
+      symbols.push({
+        name,
+        kind: "module",
+        line: i + 1,
+        endLine: i + 1,
+        lineRange: `[L${i + 1}-L${i + 1}]`,
+        signature: `module ${name}`,
+        children: [],
+      });
+      continue;
+    }
+
+    const structMatch = line.match(/^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (structMatch) {
+      const indentLen = structMatch[1].length;
+      const name = structMatch[2];
+      let endLine = i + 1;
+      const children: OutlineSymbol[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const subTrimmed = lines[j].trim();
+        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
+        if (subIndent <= indentLen) break;
+        endLine = j + 1;
+        const fieldMatch = lines[j].match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
+        if (fieldMatch) {
+          children.push({
+            name: fieldMatch[2],
+            kind: "field",
+            line: j + 1,
+            endLine: j + 1,
+            lineRange: `[L${j + 1}-L${j + 1}]`,
+            signature: `val ${fieldMatch[2]}: ${fieldMatch[3].trim()}`,
+            children: [],
+          });
+        }
+      }
+      symbols.push({
+        name,
+        kind: "class",
+        line: i + 1,
+        endLine,
+        lineRange: `[L${i + 1}-L${endLine}]`,
+        signature: `struct ${name}: ...`,
+        children,
+      });
+      continue;
+    }
+
+    const enumMatch = line.match(/^(\s*)(?:pub\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (enumMatch) {
+      const indentLen = enumMatch[1].length;
+      const name = enumMatch[2];
+      let endLine = i + 1;
+      const children: OutlineSymbol[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        const subTrimmed = lines[j].trim();
+        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
+        if (subIndent <= indentLen) break;
+        endLine = j + 1;
+        const variantMatch = subTrimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        if (variantMatch) {
+          children.push({
+            name: variantMatch[1],
+            kind: "variant",
+            line: j + 1,
+            endLine: j + 1,
+            lineRange: `[L${j + 1}-L${j + 1}]`,
+            signature: variantMatch[1],
+            children: [],
+          });
+        }
+      }
+      symbols.push({
+        name,
+        kind: "enum",
+        line: i + 1,
+        endLine,
+        lineRange: `[L${i + 1}-L${endLine}]`,
+        signature: `enum ${name}: ...`,
+        children,
+      });
+      continue;
+    }
+
+    const fnMatch = line.match(
+      /^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*:\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
+    );
+    if (fnMatch) {
+      const indentLen = fnMatch[1].length;
+      const name = fnMatch[2];
+      const params = fnMatch[3] ?? "";
+      const retType = fnMatch[4]?.trim() ?? "void";
+      let endLine = i + 1;
+      for (let j = i + 1; j < lines.length; j++) {
+        const subTrimmed = lines[j].trim();
+        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
+        if (subIndent <= indentLen) break;
+        endLine = j + 1;
+      }
+      symbols.push({
+        name,
+        kind: "function",
+        line: i + 1,
+        endLine,
+        lineRange: `[L${i + 1}-L${endLine}]`,
+        signature: `fn ${name}(${params}): ${retType}`,
+        children: [],
+      });
+      continue;
+    }
+
+    const typeMatch = line.match(/^(\s*)(?:pub\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    if (typeMatch) {
+      const indentLen = typeMatch[1].length;
+      const name = typeMatch[2];
+      let endLine = i + 1;
+      for (let j = i + 1; j < lines.length; j++) {
+        const subTrimmed = lines[j].trim();
+        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
+        if (subIndent <= indentLen) break;
+        endLine = j + 1;
+      }
+      symbols.push({
+        name,
+        kind: "type",
+        line: i + 1,
+        endLine,
+        lineRange: `[L${i + 1}-L${endLine}]`,
+        signature: `type ${name}: ...`,
+        children: [],
+      });
+      continue;
+    }
+  }
+
+  return symbols;
+}
+
 function supplementNativeSymbolsFromSource(
   symbols: OutlineSymbol[],
   source: string,
@@ -929,6 +1083,25 @@ function supplementNativeSymbolsFromSource(
         existingNames.add(`${s.name}.${c.name}`);
       }
     }
+  }
+
+  if (targetLang === "aipl") {
+    const aiplSyms = extractAiplSymbols(source, totalLines);
+    for (const s of aiplSyms) {
+      const key = `${s.kind}:${s.name}:${s.line}`;
+      if (!existingNames.has(key)) {
+        symbols.push(s);
+        existingNames.add(key);
+        existingNames.add(s.name);
+        if (s.children) {
+          for (const c of s.children) {
+            existingNames.add(c.name);
+            existingNames.add(`${s.name}.${c.name}`);
+          }
+        }
+      }
+    }
+    return;
   }
 
   if (

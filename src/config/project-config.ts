@@ -11,6 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
+export type { TargetLanguage };
 
 export type ProjectMode = "side-by-side" | "isolated" | "twinless";
 
@@ -19,7 +20,6 @@ export interface ProjectIdiomParam {
   type?: string;
   defaultValue?: string;
 }
-
 export interface IdiomOccurrence {
   filePath: string;
   symbol?: string;
@@ -80,6 +80,7 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "powershell",
   "batch",
   "markdown",
+  "aipl",
 ]);
 const _defaultProjectConfig: AiceProjectConfig = {
   mode: "side-by-side",
@@ -133,8 +134,8 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".bat",
   ".md",
   ".markdown",
+  ".aipl",
 ]);
-
 export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
   ".ts": "typescript",
   ".tsx": "tsx",
@@ -170,8 +171,8 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".bat": "batch",
   ".md": "markdown",
   ".markdown": "markdown",
+  ".aipl": "aipl",
 });
-
 const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   "node_modules",
   ".git",
@@ -183,6 +184,7 @@ const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   ".turbo",
 ]);
 
+/**
 /**
  * Returns the default file extension for a given TargetLanguage.
  */
@@ -226,17 +228,10 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".cmd";
     case "markdown":
       return ".md";
+    case "aipl":
+      return ".aipl";
   }
 }
-
-/**
- * Derives target filename by stripping `.aice` or applying target language extension.
- * E.g.:
- * - `App.tsx.aice` -> `App.tsx`
- * - `calc.ts.aice` -> `calc.ts`
- * - `calc.aice` (targetLanguage = "python") -> `calc.py`
- * - `calc.aice` (targetLanguage = "typescript") -> `calc.ts`
- */
 export function deriveTargetFilename(
   filename: string,
   targetLanguage: TargetLanguage = "typescript",

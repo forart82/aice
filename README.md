@@ -19,10 +19,7 @@
 ## ⚡ Executive Summary
 
 Modern Large Language Models (LLMs) spend **40% to 85% of their context windows, tool calls, and output token budgets on syntactic noise and full-file re-reads**: closing XML/HTML tags (`</div>`, `</section>`), redundant curly braces (`{ ... }`), verbose language ceremony (`std::cout << ... << std::endl`, `export interface`, `public readonly`), and repetitive multi-file patterns.
-
-**AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **19 languages & 32 file extensions** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`, `Shell (.sh/.bash/.zsh)`, `PowerShell (.ps1)`, `Batch (.cmd/.bat)`, and `Markdown (.md/.markdown)`):
-
-1. **Zero `.aice` Files on Disk**: Your native codebase (`*.ts`, `*.cpp`, `*.py`, `*.rs`, `*.go`, `*.sh`, `*.md`, etc.) remains 100% untouched by companion or shadow files. No watchers, no file permission locks, and no build-pipeline disruption.
+**AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **20 languages & 33 file extensions** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`, `Shell (.sh/.bash/.zsh)`, `PowerShell (.ps1)`, `Batch (.cmd/.bat)`, `Markdown (.md/.markdown)`, and `AIPL (.aipl)`):
 2. **In-RAM AST Decompilation & Line-Range Skeleton Outlines (`aice outline`)**: Summarizes any native file or multi-directory workspace (`aice outline src tests`) into a compact AICE structural skeleton with `[Lstart-Lend]` line-range annotations, named `test "..." # [Lstart-Lend]` / `describe "..." # [Lstart-Lend]` blocks, Markdown ATX section headings (`# Heading # [Lstart-Lend]`), shell/PowerShell/batch functions & labels, and multi-language `## ⚠️ Native Syntax Diagnostics` in milliseconds (**85–90% read token reduction**).
 3. **1-Turn Dependency Contract Packager, Call-Site Tracker & Search (`aice context`)**: Extracts any target symbol, `Class.method`, test ID (`-s "TC-MENU-001"`), Markdown heading (`-s "Quick Start"`), exact line range (`-s "L180-L240"`), or regex/substring search (`-s "/pattern/"`) along with its imported dependency signatures and **exact downstream caller line numbers** (`uses getCoreConstants at [L14]`) in a single tool call — completely eliminating `grep -n`, `grep -rn`, `sed -n`, `cat`, and `ls`.
 4. **Lossless Multi-Language Surgical Splicing (`aice splice`)**: Applies surgical AST replacements, insertions, or deletions in RAM by symbol (`:Class.method`), test ID (`:TC-MENU-001`), Markdown heading (`:Heading Title`), script function/label, line range (`:Lstart-Lend`), `:imports`, or `:eof`, and writes back **100% standard, compiler-ready native code** while preserving untouched formatting, comments, and line endings byte-for-byte (**90%+ write token reduction**).
@@ -246,9 +243,7 @@ aice gain
 
 ## 🤖 Automatic CLI Coding Agent Integration (`aice agents`)
 
-`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.20 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 32 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`):
-
-| CLI Coding Agent | MCP Server Config | Global System Directive |
+`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.21 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 33 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`):
 | :--- | :--- | :--- |
 | **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
 | **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` & `~/.gemini/config/rules/aice.md` |
@@ -315,10 +310,8 @@ aice gain --reset --yes         # Clear telemetry ledger
 ## 💻 CLI Command Reference
 
 ### 1. Greenfield File Creation, On-the-Fly Context, Skeleton Outlines & Surgical Splicing
-```bash
-# Create brand-new native files from compact AICE, hybrid braces, or multi-file --stdin across 32 extensions:
+# Create brand-new native files from compact AICE, hybrid braces, or multi-file --stdin across 33 extensions:
 aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
-aice create src/style.css -c '.box { d: flex; jc: center; ai: center; bg: #111; c: #fff; p: 10px; br: 8px; }'
 aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
 
 # Generate structural skeleton outline across files or multiple directories (replaces 'ls src tests' & 'grep -n'):

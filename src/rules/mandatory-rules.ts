@@ -1,8 +1,9 @@
 /**
  * @license
+ * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Mandatory Agent Rules Specification (v0.9.20).
+ * AICE 2.0 Mandatory Agent Rules Specification (v0.9.21).
  * Defines the zero-discovery, token-dense rules injected into AGENTS.md,
  * CLAUDE.md, and ~/.gemini/config/rules/aice.md.
  */
@@ -16,8 +17,7 @@ export const AICE_DIRECTIVE_END = "<!-- AICE:END -->";
 export const MANDATORY_AGENT_RULES_MARKDOWN = `${AICE_DIRECTIVE_START}
 ${AICE_VERSIONED_DIRECTIVE_START}
 ## AICE 2.0 (v${AICE_VERSION}) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
-**MANDATORY OVERRIDE**: When active (see Rule 1), for all 32 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
-
+**MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (\`sed\` / \`ls\` / \`grep\` Ban)
 - **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run \`sed -n\`, \`awk\`, \`head\`, \`tail\`, \`cat\`, \`grep -n\`, \`grep -rn\`, \`grep -C\`, \`ls\`, \`ls -la\`, \`ls src\`, \`find\`, \`aice --help\`, \`aice --version\`, \`which aice\`, or \`git status\` on supported files and directories:
   - Replace \`ls src tests\` -> \`aice outline src tests\`

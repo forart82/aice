@@ -1393,14 +1393,23 @@ export function extractSymbolFromAiceSource(
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = Number.parseInt(lineRangeMatch[1], 10);
-    const endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
+    let endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
     const rawLines = rawFileSource.split(/\r?\n/);
-    if (startLine < 1 || startLine > rawLines.length || startLine > endLine) {
+    const totalLines = rawLines.length;
+    if (startLine < 1) {
+      throw new Error(`Invalid line range L${startLine}-L${endLine}: start line must be >= 1`);
+    }
+    if (startLine > totalLines) {
       throw new Error(
-        `Invalid line range L${startLine}-L${endLine}: file has ${rawLines.length} line(s) (1-based inclusive)`,
+        `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive). Start line ${startLine} exceeds file length. Use ':eof\ or ':append\ to add content at end of file.`,
       );
     }
-    const clampedEnd = Math.min(endLine, rawLines.length);
+    if (startLine > endLine) {
+      throw new Error(
+        `Invalid line range L${startLine}-L${endLine}: start line (${startLine}) cannot be greater than end line (${endLine})`,
+      );
+    }
+    const clampedEnd = Math.min(endLine, totalLines);
     return rawLines.slice(startLine - 1, clampedEnd).join("\n");
   }
 
@@ -1416,7 +1425,8 @@ export function extractSymbolFromAiceSource(
       targetLang === "markdown" ||
       targetLang === "shell" ||
       targetLang === "powershell" ||
-      targetLang === "batch"
+      targetLang === "batch" ||
+      targetLang === "aipl"
     ) {
       const spanInfo = locateNativeDeclarationSpan(rawFileSource, trimmedSel, targetLang);
       if (spanInfo) {

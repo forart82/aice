@@ -57,6 +57,7 @@ export interface CreateFileOptions {
   dryRun?: boolean;
   /** Force overwrite if target file already exists (>25 lines) */
   overwrite?: boolean;
+  force?: boolean;
   /** Project root directory override */
   projectRoot?: string;
   /** Telemetry surface ('cli' | 'mcp') */
@@ -834,13 +835,13 @@ function persistDeclaredIdioms(
   });
 }
 
-/**
+  /**
  * Creates a native source file from compact AICE syntax, `$idiom` macros, or hybrid AICE/native code.
  */
-export async function createFile(
+  export async function createFile(
   filePath: string,
   options: CreateFileOptions = {},
-): Promise<CreateFileResult> {
+  ): Promise<CreateFileResult> {
   if (!filePath?.trim()) {
     throw new Error("Must provide target filePath for aice create");
   }
@@ -856,13 +857,24 @@ export async function createFile(
     throw new Error(AICE_DISABLED_MESSAGE);
   }
 
-  const overwrite = options.overwrite ?? true;
+  const overwrite = Boolean(options.overwrite || options.force);
   if (!overwrite && !options.dryRun && fs.existsSync(fullPath)) {
     const existingContent = fs.readFileSync(fullPath, "utf-8");
     const existingLineCount = existingContent.split(/\r?\n/).length;
     if (existingLineCount > 25) {
+      const payloadCandidate = options.code ?? "";
+      let targetSymbol = "<SymbolOrClass.member>";
+      if (filePath.includes(":")) {
+        targetSymbol = filePath.split(":")[1];
+      } else {
+        const headerMatch = payloadCandidate.match(/^===\s*[^:\s=]+:([^\s=]+)\s*===/m);
+        if (headerMatch) {
+          targetSymbol = headerMatch[1];
+        }
+      }
+      const cleanPath = filePath.split(":")[0];
       throw new Error(
-        `Target file '${filePath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${filePath} -s <SymbolOrClass.member> --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${filePath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${filePath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite to force full-file replacement.)`,
+        `Target file '${cleanPath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${cleanPath} -s ${targetSymbol} --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${cleanPath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${cleanPath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite or -f/--force to force full-file replacement.)`,
       );
     }
   }
