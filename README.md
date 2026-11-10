@@ -2,14 +2,14 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.20](https://img.shields.io/badge/Version-0.9.20-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.24](https://img.shields.io/badge/Version-0.9.24-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C291%20passing-brightgreen)](tests/)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C400%2B%20passing-brightgreen)](tests/)
 [![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
@@ -20,9 +20,11 @@
 
 Modern Large Language Models (LLMs) spend **40% to 85% of their context windows, tool calls, and output token budgets on syntactic noise and full-file re-reads**: closing XML/HTML tags (`</div>`, `</section>`), redundant curly braces (`{ ... }`), verbose language ceremony (`std::cout << ... << std::endl`, `export interface`, `public readonly`), and repetitive multi-file patterns.
 **AICE (AI Context Engine)** is a pure **On-the-Fly AI Context & Mutation Tool** that operates directly on native source files in RAM across **20 languages & 33 file extensions** (`TypeScript`, `TSX`, `JavaScript`, `Python`, `Go`, `Rust`, `C++20`, `C#`, `Kotlin`, `PHP`, `CSS`, `HTML`, `Twig`, `JSON`, `YAML`, `Shell (.sh/.bash/.zsh)`, `PowerShell (.ps1)`, `Batch (.cmd/.bat)`, `Markdown (.md/.markdown)`, and `AIPL (.aipl)`):
+
+1. **Greenfield & Startup File Creation (`aice create`)**: Compiles compact AICE, inline `@idiom` macros, hybrid brace syntax, or unified multi-file `--stdin` streams (`=== <filePath> ===`) directly into clean, compiler-ready native files across all 33 extensions (**40–75% output token reduction**).
 2. **In-RAM AST Decompilation & Line-Range Skeleton Outlines (`aice outline`)**: Summarizes any native file or multi-directory workspace (`aice outline src tests`) into a compact AICE structural skeleton with `[Lstart-Lend]` line-range annotations, named `test "..." # [Lstart-Lend]` / `describe "..." # [Lstart-Lend]` blocks, Markdown ATX section headings (`# Heading # [Lstart-Lend]`), shell/PowerShell/batch functions & labels, and multi-language `## ⚠️ Native Syntax Diagnostics` in milliseconds (**85–90% read token reduction**).
-3. **1-Turn Dependency Contract Packager, Call-Site Tracker & Search (`aice context`)**: Extracts any target symbol, `Class.method`, test ID (`-s "TC-MENU-001"`), Markdown heading (`-s "Quick Start"`), exact line range (`-s "L180-L240"`), or regex/substring search (`-s "/pattern/"`) along with its imported dependency signatures and **exact downstream caller line numbers** (`uses getCoreConstants at [L14]`) in a single tool call — completely eliminating `grep -n`, `grep -rn`, `sed -n`, `cat`, and `ls`.
-4. **Lossless Multi-Language Surgical Splicing (`aice splice`)**: Applies surgical AST replacements, insertions, or deletions in RAM by symbol (`:Class.method`), test ID (`:TC-MENU-001`), Markdown heading (`:Heading Title`), script function/label, line range (`:Lstart-Lend`), `:imports`, or `:eof`, and writes back **100% standard, compiler-ready native code** while preserving untouched formatting, comments, and line endings byte-for-byte (**90%+ write token reduction**).
+3. **1-Turn Multi-File Context Stream, Dependency Packager & Call-Site Tracker (`aice context`)**: Extracts single or multi-file targets (`aice context f1:s1 f2:s2`), `Class.method`, test IDs (`-s "TC-MENU-001"`), Markdown headings (`-s "Quick Start"`), zero-bloat exact line ranges (`-s "L180-L240"`), or regex/substring searches (`-s "/pattern/"`) along with deduplicated imported dependency contracts and **exact downstream caller line numbers** (`uses getCoreConstants at [L14]`) in a single tool call — completely eliminating `grep -n`, `grep -rn`, `sed -n`, `cat`, and `ls`.
+4. **Unified Mixed Stream & Lossless AST Surgical Splicing (`aice splice`)**: Applies single-file or multi-file `--stdin` mixed create+splice edits in RAM by symbol (`:Class.method`), AST-scoped hunk (`<<< / === / >>>`), substitution clone (`@clone(SourceSym)`), test ID (`:TC-MENU-001`), Markdown heading (`:Heading Title`), script function/label, gutter-stripped line range (`:Lstart-Lend`), `:imports`, `:eof`, or `:overwrite`, preserving leading JSDoc/docstrings via the CST Trivia Lens (unless `@replace-docs` / `--no-preserve-docs` is set) and writing **100% standard, compiler-ready native code** (**90%+ write token reduction**).
 5. **Smart Multi-File Idioms (`$idioms` / `aice idioms`)**: Automatically discovers or lets you define parameterized project-wide AST macros (such as `$clamp($0, $1, $2)` or `$guard_pos($0)`). Every occurrence across all files is collapsed into a 1-line `$idiom(...)` call during `outline`/`context`, expanded back to native code during `create`/`splice`, and can be mutated across the entire repository in **1 turn** via `aice idioms update`.
 
 ---
@@ -243,7 +245,9 @@ aice gain
 
 ## 🤖 Automatic CLI Coding Agent Integration (`aice agents`)
 
-`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.21 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 33 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`):
+`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.24 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 33 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`):
+
+| CLI Coding Agent | MCP Server Config | System Prompt / Rules |
 | :--- | :--- | :--- |
 | **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
 | **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` & `~/.gemini/config/rules/aice.md` |
@@ -255,16 +259,26 @@ aice gain
 
 ```bash
 aice agents setup               # Configure installed CLI coding agents idempotently
-aice agents setup --all         # Pre-configure all 7 agent paths
-aice agents status [--json]     # Inspect binary detection, MCP config, and rule version sync status (v0.9.20)
+aice agents setup --all         # Pre-configure all 8 agent targets
+aice agents status [--json]     # Inspect binary detection, MCP config, and rule version sync status (v0.9.24)
 aice agents remove              # Cleanly strip AICE entries without losing user settings
 ```
 
 ---
 
-## ⚙️ Project-Level Controls & Opt-Out (`aice.config.json`)
+## ⚙️ Project-Level Controls (`aice.config.json`) & First-Class MCP Server (`aice mcp`)
 
-Every CLI command and MCP tool (`aice_outline`, `aice_context`, `aice_splice`, `aice_idioms`, `aice_project_config`) respects project-level configuration in `aice.config.json` (or `.aicerc` / `package.json#aice`):
+Every CLI command and all **7 First-Class MCP tools** (`aice_context`, `aice_outline`, `aice_splice`, `aice_create`, `aice_idioms`, `aice_gain`, `aice_project_config`) enforce strict workspace path sandboxing and respect project-level configuration in `aice.config.json` (or `.aicerc` / `package.json#aice`):
+
+| MCP Tool | Capabilities |
+| :--- | :--- |
+| `aice_context` | Single or multi-file context stream (`paths` array or space-separated `path` with inline `:symbol` / `:Lstart-Lend` / `:/pattern/` selectors), deduplicated dependency contracts, and `[Lline]` downstream callers |
+| `aice_outline` | Structural skeleton outlines across one or more files or directories (`path` / `paths`) with `[Lstart-Lend]` spans, `compact` mode, `depth`, and syntax diagnostics |
+| `aice_splice` | Surgical in-place AST replacement, deletion, `<<< / === / >>>` hunk patching, `@clone(SourceSym)` cloning, or unified multi-file `=== <filePath>:<symbol> ===` / `edits` / `files` batch streams (`dryRun`, `preserveDocs`, `insertBefore`/`insertAfter`) |
+| `aice_create` | Greenfield single-file or multi-file `=== <filePath> ===` / `files` batch creation across all 20 languages & 33 extensions with inline `@idiom` expansion (`dryRun`, `overwrite`) |
+| `aice_idioms` | Project `$idiom` lifecycle: `scan`, `list`, `read`, `update`, `apply`, `expand`, `on`, and `off` |
+| `aice_gain` | Honest signed `cl100k_base` & `o200k_base` BPE token-savings telemetry (`project` drill-down, `unique` SHA-256 deduplication, `json` export) |
+| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.24`) |
 
 - **Disable AICE completely for a project (`"enabled": false`)**:
   ```json
@@ -293,16 +307,20 @@ Every CLI command and MCP tool (`aice_outline`, `aice_context`, `aice_splice`, `
 
 ---
 
-## 📈 Honest BPE Token-Savings Telemetry (`aice gain`)
+## 📈 Honest BPE Token-Savings Telemetry & Session Analyzer (`aice gain` & `aice analyze`)
 
-`aice gain` (aliases `aice gains`, `aice stats`, and MCP tool `aice_gain`) tracks real-world token reductions in `~/.aice/telemetry/gains.jsonl` using exact `cl100k_base` and `o200k_base` BPE tokenizers with **100% honest signed accounting** (never clamping negative overhead calls to zero and never double-counting MCP-to-CLI internal calls):
+`aice gain` (aliases `aice gains`, `aice stats`, and MCP tool `aice_gain`) tracks real-world token reductions in `~/.aice/telemetry/gains.jsonl` using exact `cl100k_base` and `o200k_base` BPE tokenizers with **100% honest signed accounting** (never clamping negative overhead calls to zero and never double-counting MCP-to-CLI internal calls). `aice analyze` reconstructs post-session agent transcripts alongside `~/.aice/telemetry` (including CLI/MCP failure & error telemetry) to audit session count, LLM turns, thinking vs. working payload tokens, AICE compliance rate, and tool friction:
 
 ```bash
-aice gain                       # Global summary banner, operation/surface table, language table & ranked projects
-aice gain <project-name-or-.>   # Per-project drill-down: read/write/idiom split, top files & last 15 operations
-aice gain --unique              # Deduplicate repeated identical operations by SHA-256 contentHash
-aice gain --json                # Emit full structured JSON telemetry report
-aice gain --reset --yes         # Clear telemetry ledger
+aice gain                                 # Global summary banner, operation/surface table, language table & ranked projects
+aice gain <project-name-or-.>             # Per-project drill-down: read/write/idiom split, top files & last 15 operations
+aice gain --unique                        # Deduplicate repeated identical operations by SHA-256 contentHash
+aice gain --json                          # Emit full structured JSON telemetry report
+aice gain --reset --yes                   # Clear telemetry ledger
+
+aice analyze [project-or-dir]             # Reconstruct sessions, token split, AICE compliance & failure/friction audit
+aice analyze <project> --json             # Emit structured JSON post-session & error-telemetry analysis report
+aice analyze . --transcripts-dir <dir>    # Scan a custom agent conversation transcripts directory
 ```
 
 ---
@@ -310,42 +328,70 @@ aice gain --reset --yes         # Clear telemetry ledger
 ## 💻 CLI Command Reference
 
 ### 1. Greenfield File Creation, On-the-Fly Context, Skeleton Outlines & Surgical Splicing
+```bash
 # Create brand-new native files from compact AICE, hybrid braces, or multi-file --stdin across 33 extensions:
 aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
 aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
+aice create src/config.ts -c 'export const MAX_RETRIES = 5;' --overwrite
 
 # Generate structural skeleton outline across files or multiple directories (replaces 'ls src tests' & 'grep -n'):
 aice outline src tests
 aice outline src tests --compact
-aice outline tests/app.test.ts          # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
-aice outline install.sh README.md       # Emits shell functions, batch :labels, and Markdown ATX headings
+aice outline tests/app.test.ts                          # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
+aice outline install.sh README.md                       # Emits shell functions, batch :labels, and Markdown ATX headings
 
-# Generate 1-turn token-bounded context pack (replaces 'sed -n', 'grep -n', and 'grep -rn'):
+# Generate 1-turn token-bounded context stream (replaces 'sed -n', 'grep -n', and 'grep -rn'):
+aice context src/a.ts:fnA,fnB src/b.ts:L10-L50          # 1-turn multi-file stream with deduplicated dependency contracts
 aice context src/app.ts -s "GameApp.getCoreConstants"   # Includes Downstream Callers with exact call-site [L14]
 aice context tests/app.test.ts -s "TC-MENU-001"         # Extract test block by test ID or title prefix
-aice context src/app.ts -s "L180-L240"                  # Extract exact 1-based line range
+aice context src/app.ts -s "L180-L240"                  # Zero-bloat fast-path 1-based numbered line range (180│ ...)
 aice context src -s "/OracleIncoherenceAuditor/"        # 1-turn regex/substring search across file or directory
 aice context README.md -s "Quick Start"                 # Extract Markdown section by heading
 
-# Apply surgical AST replacements in-place (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
+# 1-turn unified mixed create + surgical splice stream (:Class.method, @clone, :testId, :Heading, :Lstart-Lend, :eof, :imports, :overwrite):
+aice splice --stdin << 'EOF'
+=== src/new_helper.ts ===
+export const BONUS_MULTIPLIER = 2;
+=== src/constants.ts:eof ===
+export const COMBO_BONUS = 50;
+=== src/app.ts:imports ===
+import { BONUS_MULTIPLIER } from "./new_helper.js";
+=== src/board.ts:Board.isBoardEmpty ===
+public isBoardEmpty(): boolean {
+  return this.grid.every((row) => row.every((cell) => cell === null));
+}
+=== tests/board.test.ts:TC-BOARD-002 @clone(TC-BOARD-001) ===
+"empty" -> "initialized"
+true -> false
+=== src/app.ts:L35-L42 ===
+const scaledScore = baseScore * BONUS_MULTIPLIER;
+=== src/generated.ts:overwrite ===
+export const SCHEMA_VERSION = 2;
+EOF
+
+# AST-scoped hunk splicing (<<< / === / >>> inside :symbol — strictly scoped to AST span & immune to line shifts):
+aice splice src/engine.ts -s GameEngine.step -c $'<<<\n  this.tickCount += 1;\n===\n  this.tickCount += BONUS_MULTIPLIER;\n>>>'
+
+# Single-target splice, JSDoc/docstring replacement (@replace-docs / --no-preserve-docs), Markdown heading & symbol deletion:
 aice splice src/telemetry_report.cpp -s buildNodeReport -c "pub fn buildNodeReport(m: TelemetryMetrics) -> str: ..." --idioms --in-place
-aice splice tests/app.test.ts -s "TC-MENU-001" -c 'test("TC-MENU-001: GameApp initializes at 60Hz", () => { expect(true).toBe(true); });'
+aice splice src/tax.ts -s calculateTax -c "// @replace-docs\nexport function calculateTax(n: number): number { return n * 1.2; }"
+aice splice src/tax.ts -s calculateTax -c "export function calculateTax(n: number): number { return n * 1.2; }" --no-preserve-docs
 aice splice README.md -s "Quick Start" -c "## Quick Start\nRun ./install.sh -y"
 aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
 ```
 
 ### 2. Smart Multi-File Idioms (`$idioms`) & Project Toggles
 ```bash
-# Scan native workspace to discover repetitive AST templates & build .aice-cache/idioms.json:
-aice idioms scan [dir] --min-occurrences 3 --min-savings 10
+# Scan native workspace to discover repetitive AST templates & persist to aice.config.json / .aice-cache/idioms.json:
+aice idioms scan [dir] --save --min-occurrences 3 --min-savings 10
 
 # Inspect an idiom's template, parameters, and every file:line occurrence across the project:
 aice idioms read '$clamp' [dir]
 aice idioms list [dir]
 
 # Mutate an idiom's template and rewrite all occurrences across all native files atomically:
-aice idioms update '$clamp' "Math.max($1, Math.min($2, $0))" [dir]
-aice idioms update --batch '[{"name":"$clamp","newTemplate":"Math.max($1, Math.min($2, $0))"}]' [dir]
+aice idioms update '$clamp' -c "Math.max($1, Math.min($2, $0))" [dir]
+aice idioms update --batch '[{"name":"$clamp","code":"Math.max($1, Math.min($2, $0))"}]' [dir]
 
 # Toggle project-level AICE or $idiom collapsing in aice.config.json:
 aice enable [dir]
@@ -354,11 +400,13 @@ aice idioms on [dir]
 aice idioms off [dir]
 ```
 
-### 3. Telemetry, Agent Integration, Semantic Diff, Patch & MCP Server
+### 3. Telemetry, Session Analyzer, Agent Integration, Semantic Diff, Patch & MCP Server
 ```bash
-# Inspect honest BPE token-savings telemetry (global or per-project):
+# Inspect honest BPE token-savings telemetry & post-session friction/error analysis:
 aice gain
 aice gain <project>
+aice analyze [project]
+aice analyze <project> --json
 
 # Manage global CLI coding agent integrations:
 aice agents setup
@@ -389,14 +437,19 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.24)
+├── AGENTS.md                   # Canonical workspace AICE 2.0 mandatory agent rules
+├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
 ├── uninstall.sh                # Universal Linux uninstaller & project config cleaner
+├── .agents/
+│   └── rules/aice.md           # Always-on workspace agent rule file
 ├── assets/
 │   ├── aice-banner.jpg         # Official wide title banner
 │   ├── aice-cpp-workflow.jpg   # End-to-End C++20 On-the-Fly Workflow diagram
 │   └── aice-logo.jpg           # Official square logo
 ├── benchmarks/
+│   ├── index.ts                # Benchmark suite public exports
 │   ├── offline-suite.ts        # Deterministic 10-scenario / 15-language BPE benchmark engine
 │   ├── real-agent-suite.ts     # Live 33-session autonomous agent benchmark verifier
 │   ├── run-offline.ts          # CLI runner for offline benchmarks
@@ -413,18 +466,21 @@ aice/
 │   ├── CST_TRIVIA_SPEC.md      # Bidirectional lens and CST trivia table specification
 │   └── RESEARCH_SYNTHESIS.md   # Tokenomics and AST anti-unification research synthesis
 ├── src/
-│   ├── agents/                 # Global CLI coding agent integration engine (claude, agy/gemini, codex, opencode, aider, goose, cursor)
+│   ├── agents/                 # Global CLI coding agent integration engine (8 targets)
 │   ├── cache/                  # Persistent AST & idiom provenance disk cache
+│   ├── compat/                 # TypeScript compiler API compatibility layer
 │   ├── config/                 # Project config (aice.config.json / enabled / idiomsEnabled) & path resolver
-│   ├── core/                   # Lexer, Pratt Parser, AST, Tokens, Span, CST Trivia
-│   ├── decompiler/             # On-the-fly reverse transpilers across 15 languages
-│   ├── emitters/               # Multi-target native code generators across 15 languages
+│   ├── core/                   # Lexer, Pratt Parser, AST, Tokens, Span, CST Trivia Lens
+│   ├── decompiler/             # On-the-fly reverse transpilers across 20 languages / 33 extensions
+│   ├── emitters/               # Multi-target native code generators across 20 languages / 33 extensions
 │   ├── idioms/                 # BPE-gated AST anti-unification idiom miner & transformer
-│   ├── mcp/                    # Multi-project Model Context Protocol (MCP) stdio server
-│   ├── telemetry/              # Honest BPE token-savings telemetry engine (aice gain)
+│   ├── mcp/                    # Workspace-sandboxed Model Context Protocol (MCP) stdio server (7 tools)
+│   ├── rules/                  # Canonical versioned mandatory agent rules SSOT (mandatory-rules.ts)
+│   ├── telemetry/              # Honest BPE token-savings ledger (aice gain) & session analyzer (aice analyze)
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
-│   ├── tools/                  # On-the-fly tools: outline, context, splice, fmt, parity-gate
-│   └── typechecker/            # Static typechecker & autonomous self-repair engine
+│   ├── tools/                  # On-the-fly tools: create, outline, context, splice, diff-patch, fmt, parity-gate
+│   ├── typechecker/            # Static typechecker & autonomous self-repair engine
+│   └── version.ts              # Single source of truth for AICE_VERSION (0.9.24)
 └── tests/
     ├── unit/                   # Unit test suites
     └── integration/            # Multi-file roundtrip & operator pipeline integration suites
@@ -445,7 +501,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version      = {0.9.11},
+  version      = {0.9.24},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}
