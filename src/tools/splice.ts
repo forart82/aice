@@ -7229,30 +7229,78 @@ function resolveSingleNativeEditAgainstSource(
       !replaceAllImports &&
       (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
     ) {
+      interface TsImportEntry {
+        leadingTrivia: string;
+        codeText: string;
+        text: string;
+        spec?: string;
+        isTypeOnly: boolean;
+      }
       const parseTsImportEntries = (
         src: string,
-      ): Array<{ text: string; spec?: string; isTypeOnly: boolean }> => {
+      ): { entries: TsImportEntry[]; trailingAfterLast: string } => {
         const parsedSf = getCachedTsSourceFile(src);
-        const entries: Array<{ text: string; spec?: string; isTypeOnly: boolean }> = [];
-        for (const st of parsedSf.statements) {
-          if (ts.isImportDeclaration(st)) {
-            const spec = ts.isStringLiteral(st.moduleSpecifier)
-              ? st.moduleSpecifier.text
-              : undefined;
-            const isTypeOnly = Boolean(st.importClause?.isTypeOnly);
-            entries.push({ text: st.getText(parsedSf).trim(), spec, isTypeOnly });
-          } else if (ts.isImportEqualsDeclaration(st)) {
-            entries.push({
-              text: st.getText(parsedSf).trim(),
-              spec: st.name.text,
-              isTypeOnly: st.isTypeOnly,
-            });
+        const importNodes = parsedSf.statements.filter(
+          (st): st is ts.ImportDeclaration | ts.ImportEqualsDeclaration =>
+            ts.isImportDeclaration(st) || ts.isImportEqualsDeclaration(st),
+        );
+        const entries: TsImportEntry[] = [];
+        let cursor = 0;
+        for (let idx = 0; idx < importNodes.length; idx++) {
+          const st = importNodes[idx];
+          const tokStart = st.getStart(parsedSf, false);
+          const lineStart = src.lastIndexOf("\n", tokStart - 1) + 1;
+          const stmtCodeStart =
+            lineStart >= cursor && /^[ \t]*$/.test(src.slice(lineStart, tokStart))
+              ? lineStart
+              : tokStart;
+          let rawLeading = src.slice(cursor, stmtCodeStart);
+          if (idx === 0) {
+            rawLeading = rawLeading.replace(/^(?:[ \t]*\r?\n)+/, "");
           }
+          const leadingTrivia = rawLeading.replace(/\r?\n/g, fileNl);
+
+          const nextNode = importNodes[idx + 1];
+          const nextTokStart = nextNode ? nextNode.getStart(parsedSf, false) : src.length;
+          let stmtEnd = st.getEnd();
+          while (
+            stmtEnd < nextTokStart &&
+            stmtEnd < src.length &&
+            src[stmtEnd] !== "\n" &&
+            src[stmtEnd] !== "\r"
+          ) {
+            stmtEnd++;
+          }
+          const codeText = src.slice(stmtCodeStart, stmtEnd).trimEnd().replace(/\r?\n/g, fileNl);
+          let nextCursor = stmtEnd;
+          if (src[nextCursor] === "\r") nextCursor++;
+          if (src[nextCursor] === "\n") nextCursor++;
+          cursor = nextCursor;
+
+          const spec = ts.isImportDeclaration(st)
+            ? ts.isStringLiteral(st.moduleSpecifier)
+              ? st.moduleSpecifier.text
+              : undefined
+            : st.name.text;
+          const isTypeOnly = ts.isImportDeclaration(st)
+            ? Boolean(st.importClause?.isTypeOnly)
+            : st.isTypeOnly;
+          entries.push({
+            leadingTrivia,
+            codeText,
+            text: `${leadingTrivia}${codeText}`,
+            spec,
+            isTypeOnly,
+          });
         }
-        return entries;
+        const rawRest = src.slice(cursor).replace(/(?:\r?\n)+$/, "");
+        const trailingAfterLast = rawRest.trim()
+          ? `${fileNl}${rawRest.replace(/\r?\n/g, fileNl)}`
+          : "";
+        return { entries, trailingAfterLast };
       };
-      const origEntries = parseTsImportEntries(originalSnippet);
-      const newEntries = parseTsImportEntries(newSnippet);
+      const { entries: origEntries, trailingAfterLast } = parseTsImportEntries(originalSnippet);
+      const { entries: newEntries } = parseTsImportEntries(newSnippet);
       if (
         origEntries.length >= 1 &&
         newEntries.length >= 1 &&
@@ -7277,7 +7325,16 @@ function resolveSingleNativeEditAgainstSource(
             }
           }
           if (existingIdx >= 0) {
-            merged[existingIdx] = ne;
+            const prevEntry = merged[existingIdx];
+            const preservedLeading =
+              ne.leadingTrivia.trim().length > 0
+                ? ne.leadingTrivia
+                : (prevEntry?.leadingTrivia ?? "");
+            merged[existingIdx] = {
+              ...ne,
+              leadingTrivia: preservedLeading,
+              text: `${preservedLeading}${ne.codeText}`,
+            };
           } else {
             merged.push(ne);
           }
@@ -7287,7 +7344,7 @@ function resolveSingleNativeEditAgainstSource(
           : originalSnippet.endsWith("\n")
             ? "\n"
             : "";
-        newSnippet = `${merged.map((m) => m.text).join(fileNl)}${trailingNl}`;
+        newSnippet = `${merged.map((m) => m.text).join(fileNl)}${trailingAfterLast}${trailingNl}`;
       }
     } else if (!replaceAllImports && originalSnippet.trim().length > 0) {
       const origImportLines = originalSnippet

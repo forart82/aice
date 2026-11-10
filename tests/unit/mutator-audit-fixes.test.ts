@@ -265,6 +265,50 @@ describe("Mutator Audit Fixes (#7 §1 items 1–17)", () => {
     expect(clientRes.modifiedCode).toContain("useState");
     expect(clientRes.modifiedCode).toContain("useMemo");
 
+    // Interleaved comments (//, /* */, @ts-expect-error, inline comments) preserved on both append-new and replace-same-spec
+    const commentedImpSrc = [
+      'import { a } from "./a.js"; // inline a',
+      "// @ts-expect-error legacy untyped module",
+      'import legacy from "legacy-untyped";',
+      "/* group: utils */",
+      'import { u } from "./u.js";',
+      "",
+      "export const VAL = [a, legacy, u];",
+      "",
+    ].join("\n");
+
+    const appendImpRes = spliceNativeSource(
+      commentedImpSrc,
+      { symbol: "imports", code: 'import { b } from "./b.js";' },
+      "commented.ts",
+    );
+    expect(appendImpRes.modifiedCode).toContain("// inline a");
+    expect(appendImpRes.modifiedCode).toContain(
+      '// @ts-expect-error legacy untyped module\nimport legacy from "legacy-untyped";',
+    );
+    expect(appendImpRes.modifiedCode).toContain('/* group: utils */\nimport { u } from "./u.js";');
+    expect(appendImpRes.modifiedCode).toContain('import { b } from "./b.js";');
+
+    const replaceImpRes = spliceNativeSource(
+      appendImpRes.modifiedCode,
+      {
+        symbol: "imports",
+        code: [
+          'import legacy, { legacyExtra } from "legacy-untyped";',
+          'import { u, u2 } from "./u.js";',
+        ].join("\n"),
+      },
+      "commented.ts",
+    );
+    expect(replaceImpRes.modifiedCode).toContain("// inline a");
+    expect(replaceImpRes.modifiedCode).toContain(
+      '// @ts-expect-error legacy untyped module\nimport legacy, { legacyExtra } from "legacy-untyped";',
+    );
+    expect(replaceImpRes.modifiedCode).toContain(
+      '/* group: utils */\nimport { u, u2 } from "./u.js";',
+    );
+    expect(replaceImpRes.modifiedCode).toContain('import { b } from "./b.js";');
+
     // Python multi-line import with ')' in comment
     const pySrc = [
       "from pkg import (",
