@@ -699,7 +699,30 @@ export function validateNativeSyntax(
       const line = lines[i];
       const rawTrimmed = line.trim();
       if (!rawTrimmed || rawTrimmed.startsWith("//")) continue;
-      const trimmed = rawTrimmed.replace(/\s*\/\/.*$/, "").trim();
+      let commentCutIdx = -1;
+      let scanQuote: string | null = null;
+      for (let c = 0; c < rawTrimmed.length; c++) {
+        const ch = rawTrimmed[c];
+        if (scanQuote) {
+          if (ch === "\\" && c + 1 < rawTrimmed.length) {
+            c++;
+            continue;
+          }
+          if (ch === scanQuote) {
+            scanQuote = null;
+          }
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          scanQuote = ch;
+          continue;
+        }
+        if (ch === "/" && rawTrimmed[c + 1] === "/") {
+          commentCutIdx = c;
+          break;
+        }
+      }
+      const trimmed = (commentCutIdx >= 0 ? rawTrimmed.slice(0, commentCutIdx) : rawTrimmed).trim();
       if (!trimmed) continue;
 
       const indentMatch = line.match(/^[ \t]*/);
@@ -748,9 +771,12 @@ export function validateNativeSyntax(
       let inStrQuote: string | null = null;
       for (let c = 0; c < trimmed.length; c++) {
         const ch = trimmed[c];
-        const prevCh = c > 0 ? trimmed[c - 1] : "";
         if (inStrQuote) {
-          if (ch === inStrQuote && prevCh !== "\\") {
+          if (ch === "\\" && c + 1 < trimmed.length) {
+            c++;
+            continue;
+          }
+          if (ch === inStrQuote) {
             inStrQuote = null;
           }
           continue;
@@ -785,11 +811,11 @@ export function validateNativeSyntax(
       }
 
       if (openDelimsBefore === 0 && /^(?:pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed)) {
-        const isSingleLineTupleStruct = /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\([^)]*\)\s*$/.test(
-          trimmed,
-        );
-        const isMultiLineTupleStruct =
-          /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\(/.test(trimmed) && openDelims > 0;
+        const hasTupleOpen = /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\(/.test(trimmed);
+        const isSingleLineTupleStruct =
+          /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\([^)]*\)\s*$/.test(trimmed) ||
+          (hasTupleOpen && openDelims === 0 && trimmed.endsWith(")"));
+        const isMultiLineTupleStruct = hasTupleOpen && openDelims > 0;
         if (!isSingleLineTupleStruct && !isMultiLineTupleStruct && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
@@ -802,8 +828,6 @@ export function validateNativeSyntax(
       prevTrimmed = trimmed;
       prevLineNum = i + 1;
     }
-
-    return finish();
 
     return finish();
   }

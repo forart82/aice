@@ -2006,6 +2006,29 @@ function locateAiplDeclarationSpan(
   symbolSelector: string,
   explicitClassName?: string,
 ): NativeSpanInfo | undefined {
+  const stripAiplComment = (raw: string): string => {
+    let inQuote: string | null = null;
+    for (let k = 0; k < raw.length; k++) {
+      const ch = raw[k];
+      if (inQuote) {
+        if (ch === "\\" && k + 1 < raw.length) {
+          k++;
+          continue;
+        }
+        if (ch === inQuote) inQuote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        continue;
+      }
+      if (ch === "/" && raw[k + 1] === "/") {
+        return raw.slice(0, k);
+      }
+    }
+    return raw;
+  };
+
   const parts = symbolSelector.split(/\.|::/);
   const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
   const memberName = parts.length >= 2 ? parts.slice(1).join(".") : symbolSelector;
@@ -2037,6 +2060,30 @@ function locateAiplDeclarationSpan(
       }
     }
     if (foundClassLine < 0) return undefined;
+
+    const cleanClassHeader = stripAiplComment(lines[foundClassLine]);
+    const singleTupleFieldRe = new RegExp(
+      `[(,]\\s*(?:pub\\s+)?(${escMember}\\s*:\\s*[^,)]+)`,
+    );
+    if (singleTupleFieldRe.test(cleanClassHeader)) {
+      const fldIndent = lines[foundClassLine].match(/^[ \t]*/)?.[0] ?? "";
+      const fldStart = lineOffsets[foundClassLine];
+      const endLineStr = lines[foundClassLine];
+      const cleanEndLen = endLineStr.endsWith("\r") ? endLineStr.length - 1 : endLineStr.length;
+      const fldEnd = fldStart + cleanEndLen;
+      return {
+        declStart: fldStart,
+        fullDeclStart: fldStart,
+        declEnd: fldEnd,
+        tokenStart: fldStart + fldIndent.length,
+        declIndent: fldIndent,
+        className: activeClassName,
+        memberName,
+        isAsync: false,
+        isStatic: false,
+        isClassContainer: false,
+      };
+    }
     searchStartLine = foundClassLine + 1;
     for (let i = searchStartLine; i < lines.length; i++) {
       const trimmed = lines[i].trim();
@@ -2087,6 +2134,23 @@ function locateAiplDeclarationSpan(
   }
 
   if (targetLine < 0 && !className) {
+    const typeOrConstRegex = new RegExp(
+      `^([ \\t]*)(?:pub\\s+)?(?:type|const|let)\\s+${escMember}\\b`,
+    );
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(typeOrConstRegex);
+      if (m) {
+        targetLine = i;
+        targetIndent = m[1];
+        if (/^(?:[ \t]*)(?:pub\s+)?(?:const|let)\b/.test(lines[i])) {
+          isField = true;
+        }
+        break;
+      }
+    }
+  }
+
+  if (targetLine < 0 && !className) {
     const modRegex = new RegExp(`^([ \\t]*)module\\s+${escMember}\\b`);
     for (let i = 0; i < lines.length; i++) {
       const m = lines[i].match(modRegex);
@@ -2122,10 +2186,24 @@ function locateAiplDeclarationSpan(
     let headerEndLine = targetLine;
     let openParens = 0;
     while (headerEndLine < searchEndLine) {
-      const hLine = lines[headerEndLine].replace(/\s*\/\/.*$/, "");
+      const hLine = stripAiplComment(lines[headerEndLine]);
+      let inQuote: string | null = null;
       for (let c = 0; c < hLine.length; c++) {
-        if (hLine[c] === "(") openParens++;
-        else if (hLine[c] === ")") openParens = Math.max(0, openParens - 1);
+        const ch = hLine[c];
+        if (inQuote) {
+          if (ch === "\\" && c + 1 < hLine.length) {
+            c++;
+            continue;
+          }
+          if (ch === inQuote) inQuote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          inQuote = ch;
+          continue;
+        }
+        if (ch === "(") openParens++;
+        else if (ch === ")") openParens = Math.max(0, openParens - 1);
       }
       endLine = headerEndLine;
       if (openParens === 0) break;
@@ -5843,6 +5921,54 @@ function resolveSingleNativeEditAgainstSource(
       };
     }
     if (targetLang === "aipl") {
+      const trimmedOrig = originalSnippet.trimStart();
+      const origWithoutLastLineCmt = originalSnippet.replace(/\s*\/\/[^\n]*$/, "");
+      if (
+        /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\(/.test(trimmedOrig) &&
+        origWithoutLastLineCmt.trimEnd().endsWith(")")
+      ) {
+        const closeSearchEnd = spanInfo.declStart + origWithoutLastLineCmt.length;
+        const closeParenPos = nativeSource.lastIndexOf(")", closeSearchEnd);
+        if (!originalSnippet.includes("\n") && closeParenPos > spanInfo.declStart) {
+          const openParenPos = nativeSource.indexOf("(", spanInfo.declStart);
+          const inner =
+            openParenPos >= 0 ? nativeSource.slice(openParenPos + 1, closeParenPos).trim() : "";
+          const inlineField = emittedUnindented.trim().replace(/^val\s+/, "").replace(/,\s*$/, "");
+          const sep = inner.length > 0 && !inner.endsWith(",") ? ", " : "";
+          return {
+            symbol: anchorSymbol,
+            startOffset: closeParenPos,
+            endOffset: closeParenPos,
+            replacement: `${sep}${inlineField}`,
+            originalSnippet,
+            newSnippet: inlineField,
+          };
+        }
+        const lineStartBeforeClose = nativeSource.lastIndexOf("\n", closeParenPos);
+        if (lineStartBeforeClose >= spanInfo.declStart) {
+          let prevEnd = lineStartBeforeClose;
+          while (
+            prevEnd > spanInfo.declStart &&
+            (nativeSource[prevEnd - 1] === "\r" ||
+              nativeSource[prevEnd - 1] === " " ||
+              nativeSource[prevEnd - 1] === "\t")
+          ) {
+            prevEnd--;
+          }
+          const needsComma =
+            prevEnd > spanInfo.declStart &&
+            nativeSource[prevEnd - 1] !== "," &&
+            nativeSource[prevEnd - 1] !== "(";
+          return {
+            symbol: anchorSymbol,
+            startOffset: prevEnd,
+            endOffset: lineStartBeforeClose,
+            replacement: `${needsComma ? "," : ""}\n${newSnippet}`,
+            originalSnippet,
+            newSnippet,
+          };
+        }
+      }
       return {
         symbol: anchorSymbol,
         startOffset: spanInfo.declEnd,
@@ -5963,7 +6089,14 @@ function resolveSingleNativeEditAgainstSource(
     symbol: anchorSymbol,
     startOffset: replaceStart,
     endOffset: spanInfo.declEnd,
-    replacement: newSnippet,
+    replacement:
+      targetLang === "aipl" &&
+      !originalSnippet.includes("\n") &&
+      originalSnippet.trimEnd().endsWith(",") &&
+      !newSnippet.includes("\n") &&
+      !newSnippet.trimEnd().endsWith(",")
+        ? `${newSnippet.trimEnd()},`
+        : newSnippet,
     originalSnippet,
     newSnippet,
   };

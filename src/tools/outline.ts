@@ -914,7 +914,30 @@ function enrichAndResolveSymbolLineRanges(
   }
 }
 
-function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[] {
+function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[] {
+  const stripComment = (raw: string): string => {
+    let inQuote: string | null = null;
+    for (let k = 0; k < raw.length; k++) {
+      const ch = raw[k];
+      if (inQuote) {
+        if (ch === "\\" && k + 1 < raw.length) {
+          k++;
+          continue;
+        }
+        if (ch === inQuote) inQuote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inQuote = ch;
+        continue;
+      }
+      if (ch === "/" && raw[k + 1] === "/") {
+        return raw.slice(0, k);
+      }
+    }
+    return raw;
+  };
+
   const lines = source.split(/\r?\n/);
   const symbols: OutlineSymbol[] = [];
   let i = 0;
@@ -927,7 +950,9 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const modMatch = line.match(/^(\s*)module\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    const cleanLine = stripComment(line);
+
+    const modMatch = cleanLine.match(/^(\s*)module\s+([A-Za-z_][A-Za-z0-9_]*)/);
     if (modMatch) {
       const name = modMatch[2];
       symbols.push({
@@ -943,14 +968,14 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const structMatch = line.match(/^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    const structMatch = cleanLine.match(/^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)/);
     if (structMatch) {
       const indentLen = structMatch[1].length;
       const name = structMatch[2];
       let endLine = i + 1;
       const children: OutlineSymbol[] = [];
-      const singleTupleMatch = line.match(
-        /^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*$/,
+      const singleTupleMatch = cleanLine.match(
+        /^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$/,
       );
       if (singleTupleMatch) {
         const rawFields = singleTupleMatch[3]
@@ -1000,9 +1025,14 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
           break;
         }
         endLine = j + 1;
-        const fieldMatch = lines[j].match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
+        const cleanSubLine = stripComment(lines[j]);
+        const fieldMatch = cleanSubLine.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
         if (fieldMatch) {
-          const cleanFieldType = fieldMatch[3].trim().replace(/,\s*$/, "").trim();
+          const cleanFieldType = fieldMatch[3]
+            .trim()
+            .replace(/\)\s*$/, "")
+            .replace(/,\s*$/, "")
+            .trim();
           children.push({
             name: fieldMatch[2],
             kind: "field",
@@ -1028,7 +1058,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const enumMatch = line.match(/^(\s*)(?:pub\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    const enumMatch = cleanLine.match(/^(\s*)(?:pub\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)/);
     if (enumMatch) {
       const indentLen = enumMatch[1].length;
       const name = enumMatch[2];
@@ -1046,7 +1076,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
           break;
         }
         endLine = j + 1;
-        const variantMatch = subTrimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
+        const variantMatch = stripComment(subTrimmed).trim().match(/^([A-Za-z_][A-Za-z0-9_]*)/);
         if (variantMatch) {
           children.push({
             name: variantMatch[1],
@@ -1073,7 +1103,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const fnOpenMatch = line.match(/^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    const fnOpenMatch = cleanLine.match(/^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
     if (fnOpenMatch) {
       const indentLen = fnOpenMatch[1].length;
       const name = fnOpenMatch[2];
@@ -1081,24 +1111,71 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       let openParens = 0;
       const headerPieces: string[] = [];
       while (headerEndIdx < lines.length) {
-        const hLine = lines[headerEndIdx].replace(/\s*\/\/.*$/, "").trim();
+        const hLine = stripComment(lines[headerEndIdx]).trim();
         if (hLine) headerPieces.push(hLine);
+        let inQuote: string | null = null;
         for (let c = 0; c < hLine.length; c++) {
-          if (hLine[c] === "(") openParens++;
-          else if (hLine[c] === ")") openParens = Math.max(0, openParens - 1);
+          const ch = hLine[c];
+          if (inQuote) {
+            if (ch === "\\" && c + 1 < hLine.length) {
+              c++;
+              continue;
+            }
+            if (ch === inQuote) inQuote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") {
+            inQuote = ch;
+            continue;
+          }
+          if (ch === "(") openParens++;
+          else if (ch === ")") openParens = Math.max(0, openParens - 1);
         }
         if (openParens === 0) break;
         headerEndIdx++;
       }
       const joinedHeader = headerPieces.join(" ");
-      const parsedHeader = joinedHeader.match(
-        /^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^)]*)\)(?:\s*(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
-      );
-      const params = (parsedHeader?.[1] ?? "")
+      const openParenPos = joinedHeader.indexOf("(");
+      let closeParenPos = -1;
+      if (openParenPos >= 0) {
+        let depth = 0;
+        let inQuote: string | null = null;
+        for (let c = openParenPos; c < joinedHeader.length; c++) {
+          const ch = joinedHeader[c];
+          if (inQuote) {
+            if (ch === "\\" && c + 1 < joinedHeader.length) {
+              c++;
+              continue;
+            }
+            if (ch === inQuote) inQuote = null;
+            continue;
+          }
+          if (ch === '"' || ch === "'") {
+            inQuote = ch;
+            continue;
+          }
+          if (ch === "(") depth++;
+          else if (ch === ")") {
+            depth--;
+            if (depth === 0) {
+              closeParenPos = c;
+              break;
+            }
+          }
+        }
+      }
+      const rawParams =
+        openParenPos >= 0 && closeParenPos > openParenPos
+          ? joinedHeader.slice(openParenPos + 1, closeParenPos)
+          : "";
+      const params = rawParams
         .replace(/\s+/g, " ")
         .replace(/\s*,\s*/g, ", ")
         .trim();
-      const rawRet = parsedHeader?.[2]?.trim().replace(/:$/, "").trim();
+      const afterParens =
+        closeParenPos >= 0 ? joinedHeader.slice(closeParenPos + 1).trim() : "";
+      const retMatch = afterParens.match(/^(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+?)\s*:?\s*$/);
+      const rawRet = retMatch?.[1]?.trim().replace(/:$/, "").trim();
       const retType = rawRet || "void";
       let endLine = Math.min(lines.length, headerEndIdx + 1);
       let j = headerEndIdx + 1;
@@ -1128,7 +1205,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const typeMatch = line.match(/^(\s*)(?:pub\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)/);
+    const typeMatch = cleanLine.match(/^(\s*)(?:pub\s+)?type\s+([A-Za-z_][A-Za-z0-9_]*)/);
     if (typeMatch) {
       const indentLen = typeMatch[1].length;
       const name = typeMatch[2];
@@ -1401,7 +1478,8 @@ function resolveSingleSymbolSpanInNative(
   _filePath: string,
 ): { startLine: number; endLine: number } | undefined {
   if (
-    (sym.kind === "test" ||
+    (targetLang === "aipl" ||
+      sym.kind === "test" ||
       sym.kind === "describe" ||
       sym.kind === "section" ||
       sym.kind === "label") &&
@@ -1410,7 +1488,6 @@ function resolveSingleSymbolSpanInNative(
   ) {
     return { startLine: sym.line, endLine: Math.max(sym.line, sym.endLine) };
   }
-
   if (targetLang === "css" && sym.kind === "style") {
     try {
       const root = postcss.parse(originalSource);

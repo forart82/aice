@@ -843,17 +843,17 @@ function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
       }
     }
     if (out.length === 0 && filePath.endsWith(".aipl")) {
-      return withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols.map(
-        (s) => s.name,
-      );
+      const syms = withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols;
+      const nonMod = syms.filter((s) => s.kind !== "module").map((s) => s.name);
+      return nonMod.length > 0 ? nonMod : syms.map((s) => s.name);
     }
     return out;
   } catch {
     if (filePath.endsWith(".aipl")) {
       try {
-        return withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols.map(
-          (s) => s.name,
-        );
+        const syms = withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols;
+        const nonMod = syms.filter((s) => s.kind !== "module").map((s) => s.name);
+        return nonMod.length > 0 ? nonMod : syms.map((s) => s.name);
       } catch {
         return [];
       }
@@ -1610,6 +1610,10 @@ export function extractSymbolFromAiceSource(
     const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (matched) return matched;
     throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}`);
+  }
+  if (trimmedSel === "@first" || trimmedSel === "@1") {
+    const first = resolveFirstActionableSymbol(rawFileSource, filePath, preParsedMod);
+    if (first) trimmedSel = first;
   }
 
   if (!filePath.endsWith(".aice")) {
