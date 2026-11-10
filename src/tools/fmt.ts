@@ -288,8 +288,8 @@ export function formatAiceSource(source: string, options: FmtOptions = {}): stri
       (firstTok.kind === "RPAREN" || firstTok.kind === "RBRACKET" || firstTok.kind === "RBRACE") &&
       bracketStack.length > 0
     ) {
-      const top = bracketStack.pop()!;
-      level = top.level;
+      const top = bracketStack.pop();
+      level = top ? top.level : 0;
       while (indentStack.length > 1 && indentStack[indentStack.length - 1] > rawLeading) {
         indentStack.pop();
       }

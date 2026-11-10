@@ -208,7 +208,9 @@ function canStartRegexInJsTs(
   if (targetLang === "tsx" && slashIdx > 0 && source[slashIdx - 1] === "<") {
     return false;
   }
-  const scanBuf = maskedPrefix ? maskedPrefix.replace(/\uE000\d+_cmt\uE001/g, " ") : source;
+  const scanBuf = maskedPrefix
+    ? maskedPrefix.replace(/\uE000[\uE010-\uE019]+\uE002/g, " ")
+    : source;
   let p = (maskedPrefix ? scanBuf.length : slashIdx) - 1;
   while (p >= 0 && /\s/.test(scanBuf[p])) {
     p--;
@@ -1728,10 +1730,9 @@ function lowerHybridLineForTarget(
   out = out.replace(/\basync\s+fn\s*\(/g, "async function(");
   out = out.replace(/\bfn\s*\(/g, "function(");
   out = lowerCompactSigilsForTarget(out, targetLang);
-  out = lowerCompactSigilsForTarget(out, targetLang);
   if (!atClassMemberLevel) {
     out = out.replace(
-      /^(\s*)(?!(?:case|default|return|throw|const|let|var|public|private|protected|readonly|static|type|interface)\b)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([A-Za-z_$][A-Za-z0-9_$<>[\],\s|&]*?)\s*=\s*(?!=)([^;]+;\s*(?:\uE000\d+\uE001\s*)*)$/,
+      /^(\s*)(?!(?:case|default|return|throw|const|let|var|public|private|protected|readonly|static|type|interface)\b)([A-Za-z_$][A-Za-z0-9_$]*)\s*:\s*([A-Za-z_$][A-Za-z0-9_$<>[\],\s|&]*?)\s*=\s*(?!=)([^;]+;\s*(?:\uE000[\uE010-\uE019]+[\uE001\uE002]\s*)*)$/,
       isJs ? "$1let $2 = $4" : "$1let $2: $3 = $4",
     );
   }

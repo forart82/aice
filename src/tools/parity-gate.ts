@@ -375,14 +375,14 @@ export async function runParityGate(
 function setupLanguageAliases(
   resultsByLanguage: Record<string, { total: number; passed: number; parityRate: number }>,
 ) {
-  if (resultsByLanguage["cpp"] && !resultsByLanguage["c++"]) {
-    resultsByLanguage["c++"] = resultsByLanguage["cpp"];
+  if (resultsByLanguage.cpp && !resultsByLanguage["c++"]) {
+    resultsByLanguage["c++"] = resultsByLanguage.cpp;
   }
-  if (resultsByLanguage["csharp"] && !resultsByLanguage["c#"]) {
-    resultsByLanguage["c#"] = resultsByLanguage["csharp"];
+  if (resultsByLanguage.csharp && !resultsByLanguage["c#"]) {
+    resultsByLanguage["c#"] = resultsByLanguage.csharp;
   }
-  if (resultsByLanguage["typescript"] && !resultsByLanguage["ts"]) {
-    resultsByLanguage["ts"] = resultsByLanguage["typescript"];
+  if (resultsByLanguage.typescript && !resultsByLanguage.ts) {
+    resultsByLanguage.ts = resultsByLanguage.typescript;
   }
 }
 

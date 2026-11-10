@@ -1,14 +1,18 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { applyTriviaLensToReplacement } from "../../src/core/trivia.js";
 import {
-  spliceNativeSource,
-  parseMultiBlockSpliceStream,
-} from "../../src/tools/splice.js";
-import {
-  computeTelemetryEvent,
   buildGainReport,
+  computeTelemetryEvent,
   formatGlobalGainDashboard,
 } from "../../src/telemetry/index.js";
+import {
+  parseMultiBlockSpliceStream,
+  spliceBatch,
+  spliceNativeSource,
+} from "../../src/tools/splice.js";
 
 describe("Component 1: Active CST Trivia Lens in trivia.ts & splice.ts", () => {
   it("preserves leading JSDoc when TypeScript function replacement omits it", () => {
@@ -158,11 +162,7 @@ describe("Component 1: Active CST Trivia Lens in trivia.ts & splice.ts", () => {
       "    return round(amount * rate, 2)",
     ].join("\n");
 
-    const res = spliceNativeSource(
-      source,
-      { symbol: "compute_tax", code: replacement },
-      "tax.py",
-    );
+    const res = spliceNativeSource(source, { symbol: "compute_tax", code: replacement }, "tax.py");
     expect(res.success).toBe(true);
     expect(res.modifiedCode).toContain('"""Calculates tax based on the given rate.');
     expect(res.modifiedCode).toContain("Supports standard VAT rates.");
@@ -246,7 +246,9 @@ describe("Component 3: Native-Ergonomic Idioms & @clone Splicing", () => {
     ].join("\n");
 
     const parsed = parseMultiBlockSpliceStream(stream, "service.ts");
-    const edit = parsed?.singleFileEdits?.[0]!;
+    const edit = parsed?.singleFileEdits?.[0];
+    expect(edit).toBeDefined();
+    if (!edit) throw new Error("Expected parsed @clone edit");
     const res = spliceNativeSource(source, edit, "service.ts");
 
     expect(res.success).toBe(true);
@@ -262,19 +264,75 @@ describe("Component 3: Native-Ergonomic Idioms & @clone Splicing", () => {
       "});",
     ].join("\n");
 
-    const stream = [
-      "=== TC-MATH-002 @clone(TC-MATH-001) ===",
-      "1, 2 -> 2, 3",
-      "3 -> 5",
-    ].join("\n");
+    const stream = ["=== TC-MATH-002 @clone(TC-MATH-001) ===", "1, 2 -> 2, 3", "3 -> 5"].join("\n");
 
     const parsed = parseMultiBlockSpliceStream(stream, "math.test.ts");
-    const edit = parsed?.singleFileEdits?.[0]!;
+    const edit = parsed?.singleFileEdits?.[0];
+    expect(edit).toBeDefined();
+    if (!edit) throw new Error("Expected parsed @clone test edit");
     const res = spliceNativeSource(source, edit, "math.test.ts");
 
     expect(res.success).toBe(true);
     expect(res.modifiedCode).toContain("TC-MATH-001");
     expect(res.modifiedCode).toContain("TC-MATH-002");
     expect(res.modifiedCode).toContain("add(2, 3)).toBe(5)");
+  });
+
+  it("executes @clone end-to-end via spliceBatch on disk, preserves CRLF line endings, and rolls back atomically on missing @clone source", async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-clone-e2e-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmpDir, "aice.config.json"),
+        JSON.stringify({ enabled: true, idiomsEnabled: true }, null, 2),
+        "utf-8",
+      );
+      const authFile = path.join(tmpDir, "auth.ts");
+      const crlfOriginal = [
+        "export class AuthSvc {",
+        "  public loginUser(email: string): string {",
+        '    return "user:" + email;',
+        "  }",
+        "}",
+        "",
+      ].join("\r\n");
+      fs.writeFileSync(authFile, crlfOriginal, "utf-8");
+
+      const parsedOk = parseMultiBlockSpliceStream(
+        [
+          `=== ${authFile}:AuthSvc.loginAdmin @clone(AuthSvc.loginUser) ===`,
+          '"user:" -> "admin:"',
+        ].join("\r\n"),
+      );
+      expect(parsedOk?.batchItems).toHaveLength(1);
+      await spliceBatch(parsedOk?.batchItems ?? [], { projectRoot: tmpDir });
+
+      const written = fs.readFileSync(authFile, "utf-8");
+      expect(written).toContain("public loginUser(email: string): string");
+      expect(written).toContain("public loginAdmin(email: string): string");
+      expect(written).toContain('"admin:" + email');
+      expect(written.includes("\r\n")).toBe(true);
+      expect(written.replace(/\r\n/g, "")).not.toContain("\n");
+
+      const secondFile = path.join(tmpDir, "second.ts");
+      fs.writeFileSync(secondFile, "export const KEEP_ME = 1;\n", "utf-8");
+      const snapshotAuth = fs.readFileSync(authFile, "utf-8");
+
+      const parsedFail = parseMultiBlockSpliceStream(
+        [
+          `=== ${secondFile}:KEEP_ME ===`,
+          "export const KEEP_ME = 999;",
+          `=== ${authFile}:AuthSvc.loginSuper @clone(AuthSvc.nonExistentMethod) ===`,
+          '"user" -> "super"',
+        ].join("\n"),
+      );
+      await expect(
+        spliceBatch(parsedFail?.batchItems ?? [], { projectRoot: tmpDir }),
+      ).rejects.toThrow(/not found/i);
+
+      expect(fs.readFileSync(secondFile, "utf-8")).toBe("export const KEEP_ME = 1;\n");
+      expect(fs.readFileSync(authFile, "utf-8")).toBe(snapshotAuth);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

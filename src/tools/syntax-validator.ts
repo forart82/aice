@@ -120,8 +120,8 @@ function checkBalancedDelimiters(
           message: `Unexpected closing delimiter '${ch}'`,
         });
       } else {
-        const top = stack.pop()!;
-        if (top.expected !== ch) {
+        const top = stack.pop();
+        if (top && top.expected !== ch) {
           const pos = getOriginalLineAndColFromMaskedOffset(
             maskedCode,
             i,
@@ -317,6 +317,16 @@ function checkHtmlScriptAndStyleTags(code: string): SyntaxDiagnosticItem[] {
     const isScript = tag === "script";
 
     while (i < len) {
+      if (code.startsWith("<!--", i)) {
+        const closeHtmlComment = code.indexOf("-->", i + 4);
+        i = closeHtmlComment >= 0 ? closeHtmlComment + 3 : len;
+        continue;
+      }
+      if (code.startsWith("{#", i)) {
+        const closeTwigComment = code.indexOf("#}", i + 2);
+        i = closeTwigComment >= 0 ? closeTwigComment + 2 : len;
+        continue;
+      }
       if (
         code[i] === "<" &&
         code.slice(i + 1, i + 1 + tag.length).toLowerCase() === tag &&
@@ -785,7 +795,8 @@ export function validateNativeSyntax(
             items.push({
               line: i + 1,
               column: curIndent + 1,
-              message: "AIPL indentation error: unindent does not match any outer indentation level",
+              message:
+                "AIPL indentation error: unindent does not match any outer indentation level",
             });
           }
         }

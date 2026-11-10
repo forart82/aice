@@ -39,7 +39,11 @@ import {
   withSuppressedTelemetry,
 } from "../telemetry/index.js";
 import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
-import { isHybridOrNativeSource, preprocessHybridAndIdiomsLossless } from "./preprocessor.js";
+import {
+  isHybridOrNativeSource,
+  maskSourceLexically,
+  preprocessHybridAndIdiomsLossless,
+} from "./preprocessor.js";
 import { validateNativeSyntax } from "./syntax-validator.js";
 
 export interface CreateFileOptions {
@@ -245,18 +249,73 @@ export function extractInlineIdiomsFromSource(rawCode: string): {
   cleanedCode: string;
   inlineIdioms: Record<string, ProjectIdiomDefinition>;
 } {
+  const maskRes = maskSourceLexically(rawCode, "typescript");
+  const protectedSpans: Array<{ start: number; end: number }> = [];
+  let origCursor = 0;
+  let mIdx = 0;
+  const maskedCode = maskRes.maskedCode;
+  while (mIdx < maskedCode.length) {
+    if (maskedCode.charCodeAt(mIdx) === 0xe000) {
+      let idVal = 0;
+      let k = mIdx + 1;
+      while (
+        k < maskedCode.length &&
+        maskedCode.charCodeAt(k) >= 0xe010 &&
+        maskedCode.charCodeAt(k) <= 0xe019
+      ) {
+        idVal = idVal * 10 + (maskedCode.charCodeAt(k) - 0xe010);
+        k++;
+      }
+      const term = k < maskedCode.length ? maskedCode.charCodeAt(k) : 0;
+      if (term === 0xe001 || term === 0xe002) {
+        const origLen = maskRes.maskLengths[idVal] ?? 0;
+        const origText = maskRes.maskTable[idVal] ?? "";
+        const isStringOrBlockComment =
+          term === 0xe001 || origText.startsWith("/*") || origText.includes("\n");
+        if (isStringOrBlockComment && origLen > 0) {
+          protectedSpans.push({ start: origCursor, end: origCursor + origLen });
+        }
+        origCursor += origLen;
+        mIdx = k + 1;
+        continue;
+      }
+    }
+    origCursor++;
+    mIdx++;
+  }
+
   const lines = rawCode.split(/\r?\n/);
+  const lineStartOffsets: number[] = [];
+  let searchPos = 0;
+  for (const l of lines) {
+    lineStartOffsets.push(searchPos);
+    searchPos += l.length;
+    if (rawCode[searchPos] === "\r") searchPos++;
+    if (rawCode[searchPos] === "\n") searchPos++;
+  }
+  const isLineInsideLiteralOrBlockComment = (lineIdx: number): boolean => {
+    const startOff = lineStartOffsets[lineIdx] ?? 0;
+    const firstNonWs = lines[lineIdx]?.search(/\S/) ?? -1;
+    const tokenOff = firstNonWs >= 0 ? startOff + firstNonWs : startOff;
+    return protectedSpans.some((sp) => tokenOff >= sp.start && tokenOff < sp.end);
+  };
+
   const keptLines: string[] = [];
   const rawDecls: Array<{ name: string; paramSpec?: string; template: string }> = [];
 
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
+    if (isLineInsideLiteralOrBlockComment(i)) {
+      keptLines.push(line);
+      i++;
+      continue;
+    }
     const trimmed = line.trim();
 
     // Match `@idiom $Name(params) = template`, `@idiom $Name(params) => template`, or `@idiom $Name(params): template`
     const inlineMatch = trimmed.match(
-      /^@idiom\s+(\$?[A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*(?:=>|=|:)\s*(.*)$/,
+      /^(?:(?:\/\/|#)\s*)?@idiom\s+(\$?[A-Za-z_][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?\s*(?:=>|=|:)\s*(.*)$/,
     );
     if (inlineMatch) {
       const [, rawName, rawParams, inlineRest] = inlineMatch;
@@ -402,7 +461,19 @@ export function parseOptionIdioms(
 }
 
 function normalizeCompactAiceLine(line: string): string {
-  let out = line;
+  const stringLiterals: string[] = [];
+  const encodeLitIdx = (idx: number): string => {
+    const digits = String(idx)
+      .split("")
+      .map((d) => String.fromCharCode(0xe010 + Number(d)))
+      .join("");
+    return `\uE000${digits}\uE001`;
+  };
+  let out = line.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|(?!\$\{)[^`\\])*`/g, (m) => {
+    const idx = stringLiterals.length;
+    stringLiterals.push(m);
+    return encodeLitIdx(idx);
+  });
 
   // Declaration keyword shorthands: ^fn, @fn ^name, fn ^name, ^async fn, ^static fn, @cls ^Name, ^class Name, @type ^Name, ^type Name, ^const
   out = out.replace(
@@ -524,6 +595,16 @@ function normalizeCompactAiceLine(line: string): string {
 
   // Strip redundant outer parens around record literals in arrow bodies: `=> ({ a: 1 })` -> `=> { a: 1 }`
   out = out.replace(/(=>|=\s*|\bret\s+)\(\s*(\{[\s\S]*\})\s*\)\s*$/, "$1$2");
+
+  if (stringLiterals.length > 0) {
+    out = out.replace(/\uE000([\uE010-\uE019]+)\uE001/g, (full, encoded: string) => {
+      let idx = 0;
+      for (let c = 0; c < encoded.length; c++) {
+        idx = idx * 10 + (encoded.charCodeAt(c) - 0xe010);
+      }
+      return stringLiterals[idx] ?? full;
+    });
+  }
 
   return out;
 }
@@ -862,8 +943,32 @@ export async function createFile(
     throw new Error(AICE_DISABLED_MESSAGE);
   }
 
-  const overwrite = Boolean(options.overwrite || options.force);
-  if (!overwrite && !options.dryRun && fs.existsSync(fullPath)) {
+  let rawPayload = options.code;
+  if ((rawPayload === undefined || rawPayload === "") && options.from) {
+    const fromPath = path.isAbsolute(options.from)
+      ? options.from
+      : path.resolve(baseDir, options.from);
+    if (!fs.existsSync(fromPath)) {
+      throw new Error(`Input file --from not found: ${options.from}`);
+    }
+    rawPayload = fs.readFileSync(fromPath, "utf-8");
+  }
+
+  if (rawPayload === undefined) {
+    throw new Error(`Must provide --code, --from, or stdin payload to create ${filePath}`);
+  }
+
+  const singleStream = parseMultiFileCreateStream(rawPayload);
+  let headerOverwrite = false;
+  if (singleStream && singleStream.length === 1 && singleStream[0]?.code !== undefined) {
+    rawPayload = singleStream[0].code;
+    if (singleStream[0].overwrite) {
+      headerOverwrite = true;
+    }
+  }
+
+  const overwrite = Boolean(options.overwrite || options.force || headerOverwrite);
+  if (!overwrite && fs.existsSync(fullPath)) {
     const existingContent = fs.readFileSync(fullPath, "utf-8");
     const existingLineCount = existingContent.split(/\r?\n/).length;
     if (existingLineCount > 25) {
@@ -882,26 +987,6 @@ export async function createFile(
         `Target file '${cleanPath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${cleanPath} -s ${targetSymbol} --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${cleanPath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${cleanPath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite or -f/--force to force full-file replacement.)`,
       );
     }
-  }
-
-  let rawPayload = options.code;
-  if ((rawPayload === undefined || rawPayload === "") && options.from) {
-    const fromPath = path.isAbsolute(options.from)
-      ? options.from
-      : path.resolve(baseDir, options.from);
-    if (!fs.existsSync(fromPath)) {
-      throw new Error(`Input file --from not found: ${options.from}`);
-    }
-    rawPayload = fs.readFileSync(fromPath, "utf-8");
-  }
-
-  if (rawPayload === undefined) {
-    throw new Error(`Must provide --code, --from, or stdin payload to create ${filePath}`);
-  }
-
-  const singleStream = parseMultiFileCreateStream(rawPayload);
-  if (singleStream && singleStream.length === 1 && singleStream[0]?.code !== undefined) {
-    rawPayload = singleStream[0].code;
   }
 
   const idiomsToggleOverride = typeof options.idioms === "boolean" ? options.idioms : undefined;
@@ -1006,7 +1091,7 @@ export async function createFile(
   const language = detectLanguageName(fullPath.replace(/\.aice$/, ""));
 
   const nativeCode = isPassthroughManifest
-    ? `${cleanedCode.trim()}\n`
+    ? `${cleanedCode.replace(/^(?:\r?\n)+|\s+$/g, "")}\n`
     : withSuppressedTelemetry(() =>
         compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms),
       );
@@ -1023,12 +1108,23 @@ export async function createFile(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
-    await fs.promises.writeFile(
-      tmpFile,
-      nativeCode,
-      existingMode !== undefined ? { encoding: "utf-8", mode: existingMode } : "utf-8",
-    );
-    await fs.promises.rename(tmpFile, fullPath);
+    try {
+      await fs.promises.writeFile(
+        tmpFile,
+        nativeCode,
+        existingMode !== undefined ? { encoding: "utf-8", mode: existingMode } : "utf-8",
+      );
+      await fs.promises.rename(tmpFile, fullPath);
+    } catch (err) {
+      try {
+        if (fs.existsSync(tmpFile)) {
+          fs.unlinkSync(tmpFile);
+        }
+      } catch {
+        // ignore cleanup error
+      }
+      throw err;
+    }
 
     if (!isPassthroughManifest && idiomsEnabled && Object.keys(declaredIdioms).length > 0) {
       persistDeclaredIdioms(root, declaredIdioms, fullPath, nativeCode, cleanedCode);
@@ -1113,9 +1209,7 @@ export async function createFile(
 export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[] | null {
   if (!rawStream || !rawStream.trim()) return null;
   const lines = rawStream.split(/\r?\n/);
-  const headerRe =
-    /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}|-{3,}\s*([^\s-][^-\r\n]*?)\s*-{3,}|(?:\/\/|#|<!--)\s*FILE:\s*([^\s>][^\r\n>]*?)(?:\s*-->)?)\s*$/i;
-  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
+  const headerRe = /^={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}\s*$/;
 
   const passthroughFilenames = new Set([
     "Cargo.toml",
@@ -1160,22 +1254,20 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     ".lock",
   ]);
   const isTargetFilePath = (cand: string): boolean => {
-    const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
+    const clean = cand
+      .trim()
+      .replace(/^['"`]|['"`]$/g, "")
+      .replace(/\\/g, "/");
     if (!clean || /\s/.test(clean)) return false;
-    const base = path.basename(clean);
+    const base = path.posix.basename(clean);
     if (passthroughFilenames.has(base)) return true;
-    const ext = path.extname(clean).toLowerCase();
+    const ext = path.posix.extname(clean).toLowerCase();
     if (!ext) return false;
-    return (
-      KNOWN_TARGET_EXTENSIONS.has(ext) ||
-      passthroughExtensions.has(ext) ||
-      ext === ".aice" ||
-      /^\.[a-z0-9]{1,8}$/i.test(ext)
-    );
+    return KNOWN_TARGET_EXTENSIONS.has(ext) || passthroughExtensions.has(ext) || ext === ".aice";
   };
 
   const preHeaderLines: string[] = [];
-  const sections: Array<{ filePath: string; lines: string[] }> = [];
+  const sections: Array<{ filePath: string; overwrite?: boolean; lines: string[] }> = [];
   let inMdFence = false;
   let mdFenceChar = "";
   let mdFenceLen = 0;
@@ -1204,11 +1296,15 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         continue;
       }
     }
-    const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
+    const m = /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
-      let cand = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
-      if (/:(?:create|overwrite)$/i.test(cand)) {
-        cand = cand.replace(/:(?:create|overwrite)$/i, "").trim();
+      let cand = (m[1] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      let isOverwrite = false;
+      if (/:overwrite$/i.test(cand)) {
+        isOverwrite = true;
+        cand = cand.replace(/:overwrite$/i, "").trim();
+      } else if (/:create$/i.test(cand)) {
+        cand = cand.replace(/:create$/i, "").trim();
       } else {
         const searchStart = /^[a-zA-Z]:[\\/]/.test(cand) ? 2 : 0;
         const colonIdx = cand.indexOf(":", searchStart);
@@ -1220,7 +1316,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         inMdFence = false;
         mdFenceChar = "";
         mdFenceLen = 0;
-        sections.push({ filePath: cand, lines: [] });
+        sections.push({ filePath: cand, ...(isOverwrite ? { overwrite: true } : {}), lines: [] });
         continue;
       }
     }
@@ -1259,6 +1355,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     const fullCode = preIdiomPrefix && canHaveIdioms ? `${preIdiomPrefix}\n${body}` : body;
     return {
       filePath: sec.filePath,
+      ...(sec.overwrite ? { overwrite: true } : {}),
       code: fullCode,
     };
   });
@@ -1323,6 +1420,10 @@ export async function createBatch(
     idiomsUsed: boolean;
     nativeText: string;
     aiceText: string;
+    nativeCl100k: number;
+    aiceCl100k: number;
+    nativeO200k: number;
+    aiceO200k: number;
   }> = [];
   let totalNativeTokens = 0;
   let totalAiceTokens = 0;
@@ -1348,6 +1449,8 @@ export async function createBatch(
         ...options,
         ...item,
         code: resolvedCode,
+        overwrite: item.overwrite ?? options.overwrite,
+        force: item.force ?? options.force,
         projectRoot: itemProjectRoot,
         dryRun: item.dryRun ?? options.dryRun,
         idioms: item.idioms ?? options.idioms,
@@ -1368,6 +1471,10 @@ export async function createBatch(
           idiomsUsed: res.idiomsUsed,
           nativeText: res.nativeCode,
           aiceText: res.aiceInput,
+          nativeCl100k: res.nativeCl100k,
+          aiceCl100k: res.aiceCl100k,
+          nativeO200k: res.nativeO200k,
+          aiceO200k: res.aiceO200k,
         });
       }
 
@@ -1435,6 +1542,10 @@ export async function createBatch(
       nativeText: ev.nativeText,
       realisticNativeText: realisticWriteFilePayload,
       aiceText: ev.aiceText,
+      nativeCl100k: ev.nativeCl100k,
+      aiceCl100k: ev.aiceCl100k,
+      nativeO200k: ev.nativeO200k,
+      aiceO200k: ev.aiceO200k,
     });
   }
   return {

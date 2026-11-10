@@ -13,7 +13,7 @@ import {
   resolveImportPath,
   splitContextTargets,
 } from "../../src/tools/context.js";
-import { createFile, parseMultiFileCreateStream } from "../../src/tools/create.js";
+import { createBatch, createFile, parseMultiFileCreateStream } from "../../src/tools/create.js";
 import { parseMultiBlockSpliceStream, spliceBatch } from "../../src/tools/splice.js";
 import { AICE_VERSION } from "../../src/version.js";
 
@@ -428,7 +428,9 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
       // CLI multi-target verification
       const cliOut = runCli(["context", "src/a.ts:fnA", "src/b.ts:L1-L2"], tmpDir);
       expect(cliOut.status).toBe(0);
-      expect(cliOut.stdout).toContain("# AICE Multi-File Context Stream (2 targets: src/a.ts, src/b.ts)");
+      expect(cliOut.stdout).toContain(
+        "# AICE Multi-File Context Stream (2 targets: src/a.ts, src/b.ts)",
+      );
 
       // MCP `aice_context` with `paths: string[]` and space-separated `path`
       const server = new AiceMcpServer({ workspaceRoot: tmpDir });
@@ -525,7 +527,11 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
     });
 
     it("handles splitContextTargets on markdown headings with Makefile, paths with spaces, and MCP single-file surgical create", async () => {
-      fs.writeFileSync(path.join(tmpDir, "README.md"), "# Doc\n## Update Makefile\nRun make.\n", "utf-8");
+      fs.writeFileSync(
+        path.join(tmpDir, "README.md"),
+        "# Doc\n## Update Makefile\nRun make.\n",
+        "utf-8",
+      );
       fs.writeFileSync(path.join(tmpDir, "Makefile"), "all:\n\techo ok\n", "utf-8");
 
       // Should NOT split `README.md:Update Makefile` into two targets even when `Makefile` exists in cwd
@@ -606,6 +612,83 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
       expect(fs.existsSync(subFile)).toBe(true);
       expect(fs.readFileSync(subFile, "utf-8")).toContain("export const SUB_OK = 77;");
       expect(fs.readFileSync(subFile, "utf-8")).not.toContain("===");
+
+      // Windows drive-letter headers and dotfile passthrough selectors (.dockerignore:eof, .editorconfig:L1-L2)
+      const winStream = parseMultiBlockSpliceStream(
+        [
+          "=== C:\\repo\\src\\engine.ts:Engine.tick ===",
+          "public tick(): void {}",
+          "=== C:/repo/src/created.ts ===",
+          "export const WIN_CREATED = true;",
+          "=== .dockerignore:eof ===",
+          "dist/",
+          "=== .editorconfig:L1-L2 ===",
+          "root = true",
+        ].join("\n"),
+      );
+      expect(winStream?.batchItems).toHaveLength(4);
+      expect(winStream?.batchItems?.[0]).toMatchObject({
+        filePath: "C:\\repo\\src\\engine.ts",
+        symbol: "Engine.tick",
+      });
+      expect(winStream?.batchItems?.[1]).toMatchObject({
+        create: true,
+        filePath: "C:/repo/src/created.ts",
+      });
+      expect(winStream?.batchItems?.[2]).toMatchObject({
+        filePath: ".dockerignore",
+        symbol: "eof",
+      });
+      expect(winStream?.batchItems?.[3]).toMatchObject({
+        filePath: ".editorconfig",
+        symbol: "L1-L2",
+      });
+
+      // dryRun mixed create + subsequent surgical splice composes in virtualFs without touching disk
+      const dryTarget = path.join(tmpDir, "src", "virtual_dry.ts");
+      const dryParsed = parseMultiBlockSpliceStream(
+        [
+          "=== src/virtual_dry.ts ===",
+          "export class DryBox {",
+          "  public value(): number {",
+          "    return 1;",
+          "  }",
+          "}",
+          "=== src/virtual_dry.ts:DryBox.value ===",
+          "public value(): number {",
+          "  return 42;",
+          "}",
+        ].join("\n"),
+      );
+      const dryRes = await spliceBatch(dryParsed?.batchItems ?? [], {
+        projectRoot: tmpDir,
+        dryRun: true,
+      });
+      expect(fs.existsSync(dryTarget)).toBe(false);
+      expect(dryRes.results[1]?.modifiedCode).toContain("return 42;");
+
+      // :overwrite stream modifier in parseMultiFileCreateStream & >25-line guard in dryRun
+      const longExisting = path.join(tmpDir, "src", "long_existing.ts");
+      const thirtyLines = Array.from(
+        { length: 30 },
+        (_, idx) => `export const L_${idx} = ${idx};`,
+      ).join("\n");
+      fs.writeFileSync(longExisting, `${thirtyLines}\n`, "utf-8");
+
+      await expect(
+        createFile(longExisting, {
+          code: "export const REPLACED = 1;\n",
+          projectRoot: tmpDir,
+          dryRun: true,
+        }),
+      ).rejects.toThrow(/already exists/i);
+
+      const owItems = parseMultiFileCreateStream(
+        ["=== src/long_existing.ts:overwrite ===", "export const OVERWRITTEN_OK = 1;"].join("\n"),
+      );
+      expect(owItems?.[0]?.overwrite).toBe(true);
+      await createBatch(owItems ?? [], { projectRoot: tmpDir });
+      expect(fs.readFileSync(longExisting, "utf-8")).toContain("export const OVERWRITTEN_OK = 1;");
     });
   });
 });

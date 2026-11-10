@@ -37,6 +37,7 @@ import type {
 } from "../core/ast.js";
 import { astToValue } from "../core/data-converter.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
+import { applyTriviaLensToReplacement, extractDeclarationTriviaLens } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
@@ -47,14 +48,11 @@ import { resolveFirstActionableSymbol } from "./context.js";
 import { createFile, extractInlineIdiomsFromSource } from "./create.js";
 import {
   isHybridOrNativeSource,
+  maskSourceLexically,
   preprocessBareCssLossless,
   preprocessHybridAndIdiomsLossless,
 } from "./preprocessor.js";
 import { validateNativeSyntax } from "./syntax-validator.js";
-import {
-  applyTriviaLensToReplacement,
-  extractDeclarationTriviaLens,
-} from "../core/trivia.js";
 
 export interface SymbolSpliceEdit {
   /** Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', '.btn-primary') */
@@ -101,6 +99,8 @@ export interface SpliceOptions {
   diff?: boolean;
   compile?: boolean;
   projectRoot?: string;
+  sourceOverride?: string;
+  suppressTelemetry?: boolean;
 }
 
 export interface BatchSpliceItem extends SpliceOptions {
@@ -263,37 +263,48 @@ export function findSpliceTargetSymbol(ast: Module, symbol: string): TargetSymbo
   }
 
   // Fallback: search unique class method / property or type field / variant
+  const fallbackMatches: TargetSymbolInfo[] = [];
+  const distinctParents = new Set<string>();
   for (const item of ast.items) {
     if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
         if (m.name === symbol) {
-          return { name: symbol, parent: item, node: m, kind: "method" };
+          fallbackMatches.push({ name: symbol, parent: item, node: m, kind: "method" });
+          distinctParents.add(item.name);
         }
       }
       for (const p of item.properties) {
         if (p.name === symbol) {
-          return { name: symbol, parent: item, node: p, kind: "property" };
+          fallbackMatches.push({ name: symbol, parent: item, node: p, kind: "property" });
+          distinctParents.add(item.name);
         }
       }
     } else if (item.kind === "TypeDecl") {
       if (item.fields) {
         for (const f of item.fields) {
           if (f.name === symbol) {
-            return { name: symbol, parent: item, node: f, kind: "field" };
+            fallbackMatches.push({ name: symbol, parent: item, node: f, kind: "field" });
+            distinctParents.add(item.name);
           }
         }
       }
       if (item.variants) {
         for (const v of item.variants) {
           if (v.name === symbol) {
-            return { name: symbol, parent: item, node: v, kind: "variant" };
+            fallbackMatches.push({ name: symbol, parent: item, node: v, kind: "variant" });
+            distinctParents.add(item.name);
           }
         }
       }
     }
   }
 
-  return undefined;
+  if (distinctParents.size > 1) {
+    throw new Error(
+      `Ambiguous symbol '${symbol}' found in multiple containers (${Array.from(distinctParents).join(", ")}). Qualify as '<Class>.${symbol}'.`,
+    );
+  }
+  return fallbackMatches[0];
 }
 
 /**
@@ -1110,17 +1121,39 @@ function getTestRunnerRootKind(expr: ts.Expression): "describe" | "test" | "it" 
   return undefined;
 }
 
+const TS_SOURCE_FILE_CACHE = new Map<string, ts.SourceFile>();
+
+function getCachedTsSourceFile(nativeSource: string): ts.SourceFile {
+  const cached = TS_SOURCE_FILE_CACHE.get(nativeSource);
+  if (cached) {
+    TS_SOURCE_FILE_CACHE.delete(nativeSource);
+    TS_SOURCE_FILE_CACHE.set(nativeSource, cached);
+    return cached;
+  }
+  const sf = ts.createSourceFile(
+    "file.tsx",
+    nativeSource,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  if (nativeSource.length <= 2_000_000) {
+    if (TS_SOURCE_FILE_CACHE.size >= 8) {
+      const oldestKey = TS_SOURCE_FILE_CACHE.keys().next().value;
+      if (oldestKey !== undefined) {
+        TS_SOURCE_FILE_CACHE.delete(oldestKey);
+      }
+    }
+    TS_SOURCE_FILE_CACHE.set(nativeSource, sf);
+  }
+  return sf;
+}
+
 export function extractNativeTestBlocks(nativeSource: string): NativeTestBlockInfo[] {
   const results: NativeTestBlockInfo[] = [];
   let sf: ts.SourceFile;
   try {
-    sf = ts.createSourceFile(
-      "file.tsx",
-      nativeSource,
-      ts.ScriptTarget.Latest,
-      true,
-      ts.ScriptKind.TSX,
-    );
+    sf = getCachedTsSourceFile(nativeSource);
   } catch {
     return results;
   }
@@ -1167,24 +1200,34 @@ export function extractNativeTestBlocks(nativeSource: string): NativeTestBlockIn
 export function matchNativeTestBlockSpan(
   nativeSource: string,
   rawSelector: string,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
-  let q = rawSelector.trim();
-  if (!q) return undefined;
-  const hasExplicitRunnerPrefix = /^(?:describe|test|it)\s+/i.test(q);
-  q = q.replace(/^(?:describe|test|it)\s+/i, "").trim();
-  q = q.replace(/^["'`]|["'`]$/g, "").trim();
-  if (!q || /^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
-    return undefined;
-  }
+  const rawTrimmed = rawSelector.trim();
+  if (!rawTrimmed) return undefined;
+  const rawUnquoted = rawTrimmed.replace(/^["'`]|["'`]$/g, "").trim();
+  if (!rawUnquoted) return undefined;
 
   const blocks = extractNativeTestBlocks(nativeSource);
   if (blocks.length === 0) return undefined;
 
+  const directExact =
+    blocks.find((b) => b.title === rawUnquoted) ??
+    blocks.find((b) => `${b.outlineKind} "${b.title}"` === rawTrimmed) ??
+    blocks.find((b) => `${b.runnerKind} "${b.title}"` === rawTrimmed) ??
+    blocks.find((b) => b.title.toLowerCase() === rawUnquoted.toLowerCase());
+  if (directExact) return directExact.spanInfo;
+
+  const hasExplicitRunnerPrefix = /^(?:describe|test|it)\s+/i.test(rawTrimmed);
+  const q = rawTrimmed
+    .replace(/^(?:describe|test|it)\s+/i, "")
+    .trim()
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
+  if (!q) return undefined;
+
   const lowerQ = q.toLowerCase();
   const exact =
-    blocks.find((b) => b.title === q) ??
-    blocks.find((b) => `${b.outlineKind} "${b.title}"` === rawSelector.trim()) ??
-    blocks.find((b) => b.title.toLowerCase() === lowerQ);
+    blocks.find((b) => b.title === q) ?? blocks.find((b) => b.title.toLowerCase() === lowerQ);
   if (exact) return exact.spanInfo;
 
   const delimitedPrefixMatches = blocks.filter((b) => {
@@ -1193,21 +1236,44 @@ export function matchNativeTestBlockSpan(
     return nextChar === ":" || nextChar === " " || nextChar === "-" || nextChar === ".";
   });
   if (delimitedPrefixMatches.length > 0) {
-    return (
-      delimitedPrefixMatches.find((b) => b.title.startsWith(q)) ?? delimitedPrefixMatches[0]
-    )?.spanInfo;
+    const exactCaseMatches = delimitedPrefixMatches.filter((b) => b.title.startsWith(q));
+    const chosenPool = exactCaseMatches.length > 0 ? exactCaseMatches : delimitedPrefixMatches;
+    if (chosenPool.length > 1 && strictForSplice) {
+      throw new Error(
+        `Ambiguous test selector '${rawSelector}' matches ${chosenPool.length} test blocks (${chosenPool
+          .slice(0, 3)
+          .map((b) => `"${b.title}"`)
+          .join(", ")}). Provide a more specific test title.`,
+      );
+    }
+    return chosenPool[0]?.spanInfo;
   }
 
   const startsWithMatches = blocks.filter((b) => b.title.toLowerCase().startsWith(lowerQ));
-  if (
-    startsWithMatches.length === 1 &&
-    (q.length >= 4 || hasExplicitRunnerPrefix || /\s/.test(q))
-  ) {
-    return startsWithMatches[0].spanInfo;
+  if (q.length >= 4 || hasExplicitRunnerPrefix || /\s/.test(q)) {
+    if (startsWithMatches.length > 1 && strictForSplice) {
+      throw new Error(
+        `Ambiguous test selector '${rawSelector}' matches ${startsWithMatches.length} test blocks (${startsWithMatches
+          .slice(0, 3)
+          .map((b) => `"${b.title}"`)
+          .join(", ")}). Provide a more specific test title.`,
+      );
+    }
+    if (startsWithMatches.length === 1) {
+      return startsWithMatches[0].spanInfo;
+    }
   }
 
   if (hasExplicitRunnerPrefix || /\s/.test(q) || /[-_:]/.test(q)) {
     const substrMatches = blocks.filter((b) => b.title.toLowerCase().includes(lowerQ));
+    if (substrMatches.length > 1 && strictForSplice) {
+      throw new Error(
+        `Ambiguous test selector '${rawSelector}' matches ${substrMatches.length} test blocks (${substrMatches
+          .slice(0, 3)
+          .map((b) => `"${b.title}"`)
+          .join(", ")}). Provide a more specific test title.`,
+      );
+    }
     if (substrMatches.length === 1) {
       return substrMatches[0].spanInfo;
     }
@@ -1272,11 +1338,7 @@ export function extractScriptOrMarkdownSymbols(
         }
       } else {
         const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-        if (
-          closeMatch &&
-          closeMatch[1][0] === fenceChar &&
-          closeMatch[1].length >= fenceLen
-        ) {
+        if (closeMatch && closeMatch[1][0] === fenceChar && closeMatch[1].length >= fenceLen) {
           inFence = false;
           fenceChar = "";
           fenceLen = 0;
@@ -1551,14 +1613,14 @@ export function locateScriptOrMarkdownSpan(
 ): NativeSpanInfo | undefined {
   let q = rawSelector.trim();
   if (!q) return undefined;
-  if (/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
-    return undefined;
-  }
 
   const symbols = extractScriptOrMarkdownSymbols(source, targetLang);
   if (symbols.length === 0) return undefined;
 
-  const qClean = q.replace(/^#{1,6}\s+/, "").replace(/^["'`]|["'`]$/g, "").trim();
+  const qClean = q
+    .replace(/^#{1,6}\s+/, "")
+    .replace(/^["'`]|["'`]$/g, "")
+    .trim();
   const directMatch =
     symbols.find((s) => s.name === qClean || s.displaySignature === q) ??
     symbols.find((s) => s.name.toLowerCase() === qClean.toLowerCase());
@@ -1587,7 +1649,7 @@ export function locateScriptOrMarkdownSpan(
     .replace(/\s*[─━═=-]+\s*$/, "")
     .replace(/^["'`]|["'`]$/g, "")
     .trim();
-  if (!q || /^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
+  if (!q) {
     return undefined;
   }
   const lowerQ = q.toLowerCase();
@@ -1617,8 +1679,17 @@ export function locateScriptOrMarkdownSpan(
       );
     });
     if (prefixCandidates.length > 0) {
-      matched =
-        prefixCandidates.find((s) => s.name.startsWith(q)) ?? prefixCandidates[0];
+      const exactCase = prefixCandidates.filter((s) => s.name.startsWith(q));
+      const candidatePool = exactCase.length > 0 ? exactCase : prefixCandidates;
+      if (candidatePool.length > 1 && strictForSplice) {
+        throw new Error(
+          `Ambiguous section/symbol selector '${rawSelector}' matches ${candidatePool.length} targets (${candidatePool
+            .slice(0, 3)
+            .map((s) => `'${s.name}'`)
+            .join(", ")}). Provide the full heading or symbol name.`,
+        );
+      }
+      matched = candidatePool[0];
     }
   }
 
@@ -1652,14 +1723,9 @@ function locateTsDeclarationSpan(
   explicitClassName?: string,
   preferAccessor?: "get" | "set",
   preferredArity?: number,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
-  const sf = ts.createSourceFile(
-    "file.tsx",
-    nativeSource,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TSX,
-  );
+  const sf = getCachedTsSourceFile(nativeSource);
   const qualMatch = symbolSelector.trim().match(/^([^(]+)\((.*)\)$/);
   const baseSelector = qualMatch ? qualMatch[1].trim() : symbolSelector.trim();
   const explicitArity = qualMatch
@@ -1759,7 +1825,9 @@ function locateTsDeclarationSpan(
   }
 
   const matchingTopStmts = allStmts.filter(
-    (stmt): stmt is
+    (
+      stmt,
+    ): stmt is
       | ts.FunctionDeclaration
       | ts.ClassDeclaration
       | ts.InterfaceDeclaration
@@ -1811,18 +1879,33 @@ function locateTsDeclarationSpan(
     }
   }
 
-  for (const stmt of allStmts) {
-    if (ts.isClassDeclaration(stmt)) {
-      const parentName = stmt.name?.text;
-      const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
-      if (matchingMembers.length > 0) {
-        const implMember = selectBestTsMember(matchingMembers, inferredAccessor, explicitArity);
-        return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, parentName);
+  if (!className) {
+    const classMatches: Array<{ span: NativeSpanInfo; parentName: string }> = [];
+    for (const stmt of allStmts) {
+      if (ts.isClassDeclaration(stmt)) {
+        const parentName = stmt.name?.text;
+        const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
+        if (matchingMembers.length > 0) {
+          const implMember = selectBestTsMember(matchingMembers, inferredAccessor, explicitArity);
+          classMatches.push({
+            span: buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, parentName),
+            parentName: parentName ?? "<anonymous>",
+          });
+        }
       }
+    }
+    if (classMatches.length > 0) {
+      const distinctClasses = new Set(classMatches.map((m) => m.parentName));
+      if (distinctClasses.size > 1 && strictForSplice) {
+        throw new Error(
+          `Ambiguous symbol '${memberName}' found in multiple classes (${Array.from(distinctClasses).join(", ")}). Qualify as '<Class>.${memberName}'.`,
+        );
+      }
+      return classMatches[0].span;
     }
   }
 
-  return matchNativeTestBlockSpan(nativeSource, symbolSelector);
+  return matchNativeTestBlockSpan(nativeSource, symbolSelector, strictForSplice);
 }
 
 function scanPythonLineState(
@@ -1879,6 +1962,7 @@ function locatePythonDeclarationSpan(
   nativeSource: string,
   symbolSelector: string,
   explicitClassName?: string,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
   const parts = symbolSelector.split(/\.|::/);
   const className = explicitClassName ?? (parts.length >= 2 ? parts[0] : undefined);
@@ -1942,22 +2026,70 @@ function locatePythonDeclarationSpan(
   let isClassContainer = false;
   let isVarAssign = false;
 
-  for (let i = searchStartLine; i < searchEndLine; i++) {
-    const m = lines[i].match(defRegex);
-    if (m) {
-      if (!className && m[1].length > 0) {
+  if (className) {
+    for (let i = searchStartLine; i < searchEndLine; i++) {
+      const m = lines[i].match(defRegex);
+      if (m) {
+        targetLine = i;
+        targetIndent = m[1];
+        isAsync = Boolean(m[2]);
+        break;
+      }
+    }
+  } else {
+    const indentedDefMatches: Array<{
+      line: number;
+      indent: string;
+      isAsync: boolean;
+      cls?: string;
+    }> = [];
+    for (let i = searchStartLine; i < searchEndLine; i++) {
+      const m = lines[i].match(defRegex);
+      if (m) {
+        if (m[1].length === 0) {
+          targetLine = i;
+          targetIndent = "";
+          isAsync = Boolean(m[2]);
+          activeClassName = undefined;
+          break;
+        }
+        let enclosingCls: string | undefined;
+        let nestedInsideDef = false;
         for (let k = i - 1; k >= 0; k--) {
+          const prevDef = lines[k].match(/^([ \t]*)(?:async\s+)?def\s+[A-Za-z0-9_]+\s*\(/);
+          if (prevDef && prevDef[1].length < m[1].length) {
+            nestedInsideDef = true;
+            break;
+          }
           const cm = lines[k].match(/^([ \t]*)class\s+([A-Za-z0-9_]+)\b/);
           if (cm && cm[1].length < m[1].length) {
-            activeClassName = cm[2];
+            enclosingCls = cm[2];
             break;
           }
         }
+        if (!nestedInsideDef && enclosingCls) {
+          indentedDefMatches.push({
+            line: i,
+            indent: m[1],
+            isAsync: Boolean(m[2]),
+            cls: enclosingCls,
+          });
+        }
       }
-      targetLine = i;
-      targetIndent = m[1];
-      isAsync = Boolean(m[2]);
-      break;
+    }
+    if (targetLine < 0 && indentedDefMatches.length > 0) {
+      const distinctPyClasses = new Set(
+        indentedDefMatches.map((m) => m.cls).filter((c): c is string => Boolean(c)),
+      );
+      if (distinctPyClasses.size > 1 && strictForSplice) {
+        throw new Error(
+          `Ambiguous symbol '${memberName}' found in multiple classes (${Array.from(distinctPyClasses).join(", ")}). Qualify as '<Class>.${memberName}'.`,
+        );
+      }
+      targetLine = indentedDefMatches[0].line;
+      targetIndent = indentedDefMatches[0].indent;
+      isAsync = indentedDefMatches[0].isAsync;
+      activeClassName = indentedDefMatches[0].cls;
     }
   }
 
@@ -2122,9 +2254,7 @@ function locateAiplDeclarationSpan(
     if (foundClassLine < 0) return undefined;
 
     const cleanClassHeader = stripAiplComment(lines[foundClassLine]);
-    const singleTupleFieldRe = new RegExp(
-      `[(,]\\s*(?:pub\\s+)?(${escMember}\\s*:\\s*[^,)]+)`,
-    );
+    const singleTupleFieldRe = new RegExp(`[(,]\\s*(?:pub\\s+)?(${escMember}\\s*:\\s*[^,)]+)`);
     if (singleTupleFieldRe.test(cleanClassHeader)) {
       const fldIndent = lines[foundClassLine].match(/^[ \t]*/)?.[0] ?? "";
       const fldStart = lineOffsets[foundClassLine];
@@ -2223,7 +2353,9 @@ function locateAiplDeclarationSpan(
   }
 
   if (targetLine < 0) {
-    const fieldRegex = new RegExp(`^([ \\t]*)(?:pub\\s+|val\\s+|var\\s+|let\\s+)?${escMember}\\s*:[^\\n]*`);
+    const fieldRegex = new RegExp(
+      `^([ \\t]*)(?:pub\\s+|val\\s+|var\\s+|let\\s+)?${escMember}\\s*:[^\\n]*`,
+    );
     const inlineFieldRegex = new RegExp(
       `(?:^|[,(\\s{])(?:pub\\s+|val\\s+|var\\s+|let\\s+)?${escMember}\\s*:[^\\n]*`,
     );
@@ -2525,6 +2657,7 @@ function locateBraceLanguageDeclarationSpan(
   targetLang: TargetLanguage,
   explicitClassName?: string,
   preferredArity?: number,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
   const qualMatch = symbolSelector.trim().match(/^([^(]+)\((.*)\)$/);
   const baseSelector = qualMatch ? qualMatch[1].trim() : symbolSelector.trim();
@@ -2546,6 +2679,91 @@ function locateBraceLanguageDeclarationSpan(
   for (const line of lines) {
     lineOffsets.push(offset);
     offset += line.length + 1;
+  }
+
+  const lineBraceDepths = new Array<number>(lines.length).fill(0);
+  const openBraceDepthByOffset = new Map<number, number>();
+  {
+    let curLine = 0;
+    let depth = 0;
+    let p = 0;
+    const nLen = nativeSource.length;
+    while (p < nLen) {
+      const c = nativeSource[p];
+      const nx = nativeSource[p + 1];
+      if (c === "\n") {
+        curLine++;
+        if (curLine < lineBraceDepths.length) {
+          lineBraceDepths[curLine] = depth;
+        }
+        p++;
+        continue;
+      }
+      if (c === "/" && nx === "/") {
+        p += 2;
+        while (p < nLen && nativeSource[p] !== "\n") p++;
+        continue;
+      }
+      if (c === "/" && nx === "*") {
+        p += 2;
+        while (p < nLen && !(nativeSource[p] === "*" && nativeSource[p + 1] === "/")) {
+          if (nativeSource[p] === "\n") {
+            curLine++;
+            if (curLine < lineBraceDepths.length) {
+              lineBraceDepths[curLine] = depth;
+            }
+          }
+          p++;
+        }
+        if (p < nLen) p += 2;
+        continue;
+      }
+      if (c === "#" && (targetLang === "php" || targetLang === "python")) {
+        p++;
+        while (p < nLen && nativeSource[p] !== "\n") p++;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") {
+        if (
+          c === "'" &&
+          targetLang === "rust" &&
+          /^'[A-Za-z_][A-Za-z0-9_]*(?!')/.test(nativeSource.slice(p))
+        ) {
+          p += 2;
+          continue;
+        }
+        const quote = c;
+        p++;
+        while (p < nLen && nativeSource[p] !== quote) {
+          if (nativeSource[p] === "\\") {
+            if (nativeSource[p + 1] === "\n") {
+              curLine++;
+              if (curLine < lineBraceDepths.length) {
+                lineBraceDepths[curLine] = depth;
+              }
+            }
+            p += 2;
+          } else {
+            if (nativeSource[p] === "\n") {
+              curLine++;
+              if (curLine < lineBraceDepths.length) {
+                lineBraceDepths[curLine] = depth;
+              }
+            }
+            p++;
+          }
+        }
+        if (p < nLen) p++;
+        continue;
+      }
+      if (c === "{") {
+        openBraceDepthByOffset.set(p, depth);
+        depth++;
+      } else if (c === "}") {
+        depth = Math.max(0, depth - 1);
+      }
+      p++;
+    }
   }
 
   const buildBraceSpanFromLine = (
@@ -2626,7 +2844,10 @@ function locateBraceLanguageDeclarationSpan(
             (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
           ) {
             const candidateEnd = findMatchingBraceEnd(nativeSource, pos, targetLang);
-            const afterTypeBrace = nativeSource.slice(candidateEnd, Math.min(len, candidateEnd + 160));
+            const afterTypeBrace = nativeSource.slice(
+              candidateEnd,
+              Math.min(len, candidateEnd + 160),
+            );
             if (/^[ \t\r\n]*(?:[|&][^{;]+|\[\])*[ \t\r\n]*[;{]/.test(afterTypeBrace)) {
               pos = candidateEnd;
               continue;
@@ -2748,6 +2969,7 @@ function locateBraceLanguageDeclarationSpan(
 
   // 2. C++ out-of-line method `RetType ClassName::methodName(...)`
   if (targetLang === "cpp") {
+    const oolMatches: Array<{ cls: string; span: NativeSpanInfo }> = [];
     for (let i = 0; i < lines.length; i++) {
       const oolMatch = lines[i].match(
         /^([ \t]*)(?:[A-Za-z0-9_:<>*&]+\s+)+([A-Za-z0-9_]+)\s*::\s*([A-Za-z0-9_~]+)\s*\(/,
@@ -2757,38 +2979,70 @@ function locateBraceLanguageDeclarationSpan(
         const classMatches = !normClass || normIdForSpan(cls) === normClass;
         const nameMatches = fnName === memberName || normIdForSpan(fnName) === normMember;
         if (classMatches && nameMatches && lines[i].includes("{")) {
-          return buildBraceSpanFromLine(i, indent, fnName, cls, { cppOutOfLine: true });
+          const built = buildBraceSpanFromLine(i, indent, fnName, cls, { cppOutOfLine: true });
+          if (built) {
+            oolMatches.push({ cls, span: built });
+          }
         }
       }
+    }
+    if (oolMatches.length > 0) {
+      const distinctOol = new Set(oolMatches.map((m) => m.cls));
+      if (!normClass && distinctOol.size > 1 && strictForSplice) {
+        throw new Error(
+          `Ambiguous symbol '${memberName}' found in multiple containers (${Array.from(distinctOol).join(", ")}). Qualify as '<Class>::${memberName}'.`,
+        );
+      }
+      return oolMatches[0].span;
     }
   }
 
   // 3. Determine class/impl search windows for Rust, C++, C#, Kotlin, PHP
-  const containerWindows: Array<{ start: number; end: number; resolvedName: string }> = [];
+  const containerWindows: Array<{
+    start: number;
+    end: number;
+    resolvedName: string;
+    memberDepth: number;
+  }> = [];
   let resolvedClassName = className;
 
-  if (className) {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const isRustImpl =
-        targetLang === "rust" &&
-        /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:<>,\s]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
-      const isClassLine =
-        /^\s*(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|trait|object|record|enum)\s+([A-Za-z0-9_$]+)\b/.exec(
-          line,
-        );
+  const allContainerWindows: Array<{
+    start: number;
+    end: number;
+    resolvedName: string;
+    memberDepth: number;
+  }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const isRustImpl =
+      targetLang === "rust" &&
+      /^\s*impl(?:\s*<[^>]*>)?\s+(?:[A-Za-z0-9_:<>,\s]+\s+for\s+)?([A-Za-z0-9_]+)\b/.exec(line);
+    const isClassLine =
+      /^\s*(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|readonly\s+)*(?:class|struct|interface|trait|object|record|enum)\s+([A-Za-z0-9_$]+)\b/.exec(
+        line,
+      );
 
-      const m = isRustImpl || isClassLine;
-      if (m && (m[1] === className || normIdForSpan(m[1]) === normClass)) {
-        const openBrace = nativeSource.indexOf("{", lineOffsets[i]);
-        if (openBrace >= 0) {
-          resolvedClassName = m[1];
-          containerWindows.push({
-            start: openBrace + 1,
-            end: findMatchingBraceEnd(nativeSource, openBrace, targetLang),
-            resolvedName: m[1],
-          });
-        }
+    const m = isRustImpl || isClassLine;
+    if (m) {
+      const openBrace = nativeSource.indexOf("{", lineOffsets[i]);
+      const semiBeforeBrace = nativeSource.indexOf(";", lineOffsets[i]);
+      if (openBrace >= 0 && (semiBeforeBrace < 0 || openBrace < semiBeforeBrace)) {
+        const outerDepth = openBraceDepthByOffset.get(openBrace) ?? lineBraceDepths[i] ?? 0;
+        allContainerWindows.push({
+          start: openBrace + 1,
+          end: findMatchingBraceEnd(nativeSource, openBrace, targetLang),
+          resolvedName: m[1],
+          memberDepth: outerDepth + 1,
+        });
+      }
+    }
+  }
+
+  if (className) {
+    for (const w of allContainerWindows) {
+      if (w.resolvedName === className || normIdForSpan(w.resolvedName) === normClass) {
+        resolvedClassName = w.resolvedName;
+        containerWindows.push(w);
       }
     }
     if (containerWindows.length === 0) return undefined;
@@ -2805,15 +3059,24 @@ function locateBraceLanguageDeclarationSpan(
 
   for (let i = 0; i < lines.length; i++) {
     const lineOff = lineOffsets[i];
-    if (className && !containerWindows.some((w) => lineOff >= w.start && lineOff < w.end)) {
+    if (
+      className &&
+      !containerWindows.some(
+        (w) => lineOff >= w.start && lineOff < w.end && lineBraceDepths[i] === w.memberDepth,
+      )
+    ) {
       continue;
     }
+    const isInsideAnyContainer =
+      !className && allContainerWindows.some((w) => lineOff >= w.start && lineOff < w.end);
     const line = lines[i];
 
     if (targetLang === "rust") {
-      const fnMatch = line.match(
-        /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)\b/,
-      );
+      const fnMatch = !isInsideAnyContainer
+        ? line.match(
+            /^([ \t]*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:const\s+)?(?:unsafe\s+)?fn\s+([A-Za-z0-9_]+)\b/,
+          )
+        : null;
       if (fnMatch && (fnMatch[2] === memberName || normIdForSpan(fnMatch[2]) === normMember)) {
         const res = collectOrReturn(
           buildBraceSpanFromLine(i, fnMatch[1], fnMatch[2], resolvedClassName),
@@ -2852,9 +3115,11 @@ function locateBraceLanguageDeclarationSpan(
         }
       }
     } else if (targetLang === "kotlin") {
-      const funMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?(?:[A-Za-z0-9_<>?.*]+\.)?([A-Za-z0-9_]+)\s*\(/,
-      );
+      const funMatch = !isInsideAnyContainer
+        ? line.match(
+            /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|override\s+|open\s+|suspend\s+|inline\s+|operator\s+)*fun\s+(?:<[^>]+>\s+)?(?:[A-Za-z0-9_<>?.*]+\.)?([A-Za-z0-9_]+)\s*\(/,
+          )
+        : null;
       if (funMatch && (funMatch[2] === memberName || normIdForSpan(funMatch[2]) === normMember)) {
         const res = collectOrReturn(
           buildBraceSpanFromLine(i, funMatch[1], funMatch[2], resolvedClassName),
@@ -2886,9 +3151,11 @@ function locateBraceLanguageDeclarationSpan(
         }
       }
     } else if (targetLang === "php") {
-      const phpMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|static\s+|final\s+|abstract\s+)*function\s+&?([A-Za-z0-9_]+)\s*\(/,
-      );
+      const phpMatch = !isInsideAnyContainer
+        ? line.match(
+            /^([ \t]*)(?:public\s+|private\s+|protected\s+|static\s+|final\s+|abstract\s+)*function\s+&?([A-Za-z0-9_]+)\s*\(/,
+          )
+        : null;
       if (phpMatch && (phpMatch[2] === memberName || normIdForSpan(phpMatch[2]) === normMember)) {
         const res = collectOrReturn(
           buildBraceSpanFromLine(i, phpMatch[1], phpMatch[2], resolvedClassName),
@@ -2919,11 +3186,7 @@ function locateBraceLanguageDeclarationSpan(
           });
         }
       }
-    } else if (
-      targetLang === "typescript" ||
-      targetLang === "javascript" ||
-      targetLang === "tsx"
-    ) {
+    } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
       const trimmed = line.trim();
       if (
         trimmed.startsWith("//") ||
@@ -2937,11 +3200,13 @@ function locateBraceLanguageDeclarationSpan(
         const tsFnMatch = line.match(
           /^([ \t]*)(?:export\s+)?(?:default\s+)?(?:declare\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)\b/,
         );
-        if (tsFnMatch && (tsFnMatch[2] === memberName || normIdForSpan(tsFnMatch[2]) === normMember)) {
+        if (
+          tsFnMatch &&
+          (tsFnMatch[2] === memberName || normIdForSpan(tsFnMatch[2]) === normMember)
+        ) {
           const span = buildBraceSpanFromLine(i, tsFnMatch[1], tsFnMatch[2], undefined);
           if (span) {
-            const hasBraceBody =
-              span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
+            const hasBraceBody = span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
             const isOverloadHeader = !hasBraceBody && !/\bdeclare\s+/.test(line);
             if (isOverloadHeader) {
               candidates.push(span);
@@ -2982,8 +3247,7 @@ function locateBraceLanguageDeclarationSpan(
             tsMethodMatch[2] ? { accessor: tsMethodMatch[2] as "get" | "set" } : undefined,
           );
           if (span) {
-            const hasBraceBody =
-              span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
+            const hasBraceBody = span.tokenStart + (span.origHeader?.length ?? 0) < span.declEnd;
             const isOverloadHeader = !hasBraceBody && !/\babstract\s+/.test(line);
             if (isOverloadHeader) {
               candidates.push(span);
@@ -3021,9 +3285,11 @@ function locateBraceLanguageDeclarationSpan(
       ) {
         continue;
       }
-      const cMethodMatch = line.match(
-        /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+|friend\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_~]+)\s*(?:<[^>]+>)?\s*\(/,
-      );
+      const cMethodMatch = !isInsideAnyContainer
+        ? line.match(
+            /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+|friend\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_~]+)\s*(?:<[^>]+>)?\s*\(/,
+          )
+        : null;
       if (
         cMethodMatch &&
         (cMethodMatch[2] === memberName || normIdForSpan(cMethodMatch[2]) === normMember)
@@ -3064,9 +3330,7 @@ function locateBraceLanguageDeclarationSpan(
     );
     const pool = withBody.length > 0 ? withBody : candidates;
     if (explicitArity !== undefined) {
-      const arityMatch = pool.find(
-        (c) => countHeaderParams(c.origHeader ?? "") === explicitArity,
-      );
+      const arityMatch = pool.find((c) => countHeaderParams(c.origHeader ?? "") === explicitArity);
       if (arityMatch) return arityMatch;
     }
     return pool[0];
@@ -3074,21 +3338,33 @@ function locateBraceLanguageDeclarationSpan(
 
   // 5. Fallback: if !className, try finding enclosing class name for a unique method match
   if (!className) {
-    for (let i = 0; i < lines.length; i++) {
-      const clsMatch = lines[i].match(
-        /^\s*(?:export\s+|default\s+|declare\s+|pub\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|partial\s+|final\s+|abstract\s+|open\s+|data\s+|sealed\s+|impl\s+)*(?:class|struct|impl)\s+([A-Za-z0-9_$]+)\b/,
-      );
-      if (clsMatch) {
-        const candidateCls = clsMatch[1];
+    const matchedSpans: Array<{ cls: string; span: NativeSpanInfo }> = [];
+    const checkedClasses = new Set<string>();
+    for (const w of allContainerWindows) {
+      {
+        const candidateCls = w.resolvedName;
+        if (checkedClasses.has(candidateCls)) continue;
+        checkedClasses.add(candidateCls);
         const found = locateBraceLanguageDeclarationSpan(
           nativeSource,
           `${candidateCls}.${memberName}`,
           targetLang,
           candidateCls,
           explicitArity,
+          false,
         );
-        if (found) return found;
+        if (found) {
+          matchedSpans.push({ cls: candidateCls, span: found });
+        }
       }
+    }
+    if (matchedSpans.length > 1 && strictForSplice) {
+      throw new Error(
+        `Ambiguous symbol '${memberName}' found in multiple containers (${matchedSpans.map((m) => m.cls).join(", ")}). Qualify as '<Class>.${memberName}'.`,
+      );
+    }
+    if (matchedSpans.length > 0) {
+      return matchedSpans[0].span;
     }
   }
 
@@ -3138,6 +3414,77 @@ export function locateImportBlockSpan(
   nativeSource: string,
   targetLang: TargetLanguage,
 ): NativeSpanInfo | undefined {
+  if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
+    const sf = getCachedTsSourceFile(nativeSource);
+    let lastDirectiveEnd = -1;
+    const importStmts: Array<ts.ImportDeclaration | ts.ImportEqualsDeclaration> = [];
+
+    for (const stmt of sf.statements) {
+      if (
+        importStmts.length === 0 &&
+        ts.isExpressionStatement(stmt) &&
+        ts.isStringLiteral(stmt.expression)
+      ) {
+        lastDirectiveEnd = stmt.getEnd();
+        continue;
+      }
+      if (ts.isImportDeclaration(stmt) || ts.isImportEqualsDeclaration(stmt)) {
+        importStmts.push(stmt);
+        continue;
+      }
+      break;
+    }
+
+    if (importStmts.length > 0) {
+      const firstStmt = importStmts[0];
+      const lastStmt = importStmts[importStmts.length - 1];
+      const tokStart = firstStmt.getStart(sf, false);
+      const lineStart = nativeSource.lastIndexOf("\n", tokStart - 1) + 1;
+      const declStart = /^[ \t]*$/.test(nativeSource.slice(lineStart, tokStart))
+        ? lineStart
+        : tokStart;
+      let declEnd = lastStmt.getEnd();
+      while (declEnd < nativeSource.length && nativeSource[declEnd] !== "\n") {
+        declEnd++;
+      }
+      if (declEnd < nativeSource.length && nativeSource[declEnd] === "\n") {
+        declEnd++;
+      }
+      return {
+        declStart,
+        fullDeclStart: declStart,
+        declEnd,
+        tokenStart: declStart,
+        declIndent: "",
+        memberName: "imports",
+      };
+    }
+
+    if (!/^\s*from\s+['"]/m.test(nativeSource)) {
+      let insertPos = 0;
+      if (lastDirectiveEnd >= 0) {
+        insertPos = lastDirectiveEnd;
+        while (insertPos < nativeSource.length && nativeSource[insertPos] !== "\n") {
+          insertPos++;
+        }
+        if (insertPos < nativeSource.length && nativeSource[insertPos] === "\n") {
+          insertPos++;
+        }
+      } else if (nativeSource.startsWith("#!")) {
+        const nlIdx = nativeSource.indexOf("\n");
+        insertPos = nlIdx >= 0 ? nlIdx + 1 : nativeSource.length;
+      }
+      return {
+        declStart: insertPos,
+        fullDeclStart: insertPos,
+        declEnd: insertPos,
+        tokenStart: insertPos,
+        declIndent: "",
+        memberName: "imports",
+      };
+    }
+  }
+
   const lines = nativeSource.split("\n");
   const lineOffsets: number[] = [];
   let offset = 0;
@@ -3145,6 +3492,40 @@ export function locateImportBlockSpan(
     lineOffsets.push(offset);
     offset += line.length + 1;
   }
+
+  const stripLineCommentForImport = (line: string): string => {
+    let cleaned = line.replace(/\/\*[\s\S]*?\*\//g, "");
+    if (targetLang === "python") {
+      cleaned = cleaned.replace(/#.*$/, "");
+    } else {
+      cleaned = cleaned.replace(/\/\/.*$/, "");
+    }
+    return cleaned;
+  };
+
+  const countGroupDelta = (line: string): number => {
+    const codeOnly = stripLineCommentForImport(line);
+    let delta = 0;
+    let inStr: string | null = null;
+    for (let k = 0; k < codeOnly.length; k++) {
+      const ch = codeOnly[k];
+      if (inStr) {
+        if (ch === "\\") {
+          k++;
+          continue;
+        }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === "`") {
+        inStr = ch;
+        continue;
+      }
+      if (ch === "(" || ch === "{") delta++;
+      else if (ch === ")" || ch === "}") delta--;
+    }
+    return delta;
+  };
 
   const isImportLine = (line: string): boolean => {
     const trimmed = line.trim();
@@ -3175,17 +3556,15 @@ export function locateImportBlockSpan(
 
   let firstImportLine = -1;
   let lastImportLine = -1;
-  let inParenGroup = false;
+  let groupDepth = 0;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
 
-    if (inParenGroup) {
+    if (groupDepth > 0) {
       lastImportLine = i;
-      if (trimmed.includes(")") || trimmed.includes("}")) {
-        inParenGroup = false;
-      }
+      groupDepth = Math.max(0, groupDepth + countGroupDelta(line));
       continue;
     }
 
@@ -3194,14 +3573,7 @@ export function locateImportBlockSpan(
         firstImportLine = i;
       }
       lastImportLine = i;
-      if (
-        trimmed.startsWith("import (") ||
-        trimmed === "import (" ||
-        (trimmed.includes("{") && !trimmed.includes("}")) ||
-        (trimmed.includes("(") && !trimmed.includes(")"))
-      ) {
-        inParenGroup = true;
-      }
+      groupDepth = Math.max(0, countGroupDelta(line));
     } else if (firstImportLine !== -1) {
       if (
         trimmed === "" ||
@@ -3283,6 +3655,7 @@ export function locateNativeDeclarationSpan(
   explicitClassName?: string,
   preferAccessor?: "get" | "set",
   preferredArity?: number,
+  strictForSplice = false,
 ): NativeSpanInfo | undefined {
   let symbolSelector: string;
   let targetLang: TargetLanguage;
@@ -3319,37 +3692,22 @@ export function locateNativeDeclarationSpan(
     targetLang === "batch" ||
     targetLang === "markdown"
   ) {
-    rawSpan = locateScriptOrMarkdownSpan(nativeSource, symbolSelector, targetLang);
+    rawSpan = locateScriptOrMarkdownSpan(nativeSource, symbolSelector, targetLang, strictForSplice);
   } else if (targetLang === "python") {
     const cleanPySel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
-    rawSpan = locatePythonDeclarationSpan(nativeSource, cleanPySel, classFilter);
+    rawSpan = locatePythonDeclarationSpan(nativeSource, cleanPySel, classFilter, strictForSplice);
   } else if (targetLang === "aipl") {
     const cleanAiplSel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
     rawSpan = locateAiplDeclarationSpan(nativeSource, cleanAiplSel, classFilter);
   } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    if (
-      nativeSource.length > 50_000 &&
-      !preferAccessor &&
-      preferredArity === undefined &&
-      symbolSelector !== "@first" &&
-      symbolSelector !== "@1"
-    ) {
-      rawSpan = locateBraceLanguageDeclarationSpan(
-        nativeSource,
-        symbolSelector,
-        targetLang,
-        classFilter,
-      );
-    }
-    if (!rawSpan) {
-      rawSpan = locateTsDeclarationSpan(
-        nativeSource,
-        symbolSelector,
-        classFilter,
-        preferAccessor,
-        preferredArity,
-      );
-    }
+    rawSpan = locateTsDeclarationSpan(
+      nativeSource,
+      symbolSelector,
+      classFilter,
+      preferAccessor,
+      preferredArity,
+      strictForSplice,
+    );
   } else {
     rawSpan =
       locateBraceLanguageDeclarationSpan(
@@ -3358,6 +3716,7 @@ export function locateNativeDeclarationSpan(
         targetLang,
         classFilter,
         preferredArity,
+        strictForSplice,
       ) ??
       locateTsDeclarationSpan(
         nativeSource,
@@ -3365,6 +3724,7 @@ export function locateNativeDeclarationSpan(
         classFilter,
         preferAccessor,
         preferredArity,
+        strictForSplice,
       );
   }
 
@@ -4687,21 +5047,16 @@ function emitNativeSnippetForContext(
   }
 
   try {
-    const {
-      decl,
-      explicitVisibility,
-      isExported,
-      explicitAccessor,
-      leadingDecorators,
-    } = parseSnippetToExpandedDecl(
-      dedented,
-      filePath,
-      targetLang,
-      effectiveClassName,
-      mergedIdioms,
-      originalSnippet,
-      isBodyOnly,
-    );
+    const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
+      parseSnippetToExpandedDecl(
+        dedented,
+        filePath,
+        targetLang,
+        effectiveClassName,
+        mergedIdioms,
+        originalSnippet,
+        isBodyOnly,
+      );
     const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
       visibility: spanInfo?.visibility ?? explicitVisibility,
       isExported: spanInfo?.isExported ?? isExported,
@@ -4826,6 +5181,13 @@ function spliceDialectNativeSource(
       );
       if (singleRes) {
         let prefixLen = 0;
+        const minLen = Math.min(nativeSource.length, singleRes.modifiedCode.length);
+        while (
+          prefixLen < minLen &&
+          nativeSource.charCodeAt(prefixLen) === singleRes.modifiedCode.charCodeAt(prefixLen)
+        ) {
+          prefixLen++;
+        }
         let origSuffixIdx = nativeSource.length;
         let modSuffixIdx = singleRes.modifiedCode.length;
         while (
@@ -4846,17 +5208,55 @@ function spliceDialectNativeSource(
       }
     }
 
-    resolvedDialectEdits.sort((a, b) => b.startOffset - a.startOffset || b.endOffset - a.endOffset);
-    for (let i = 0; i < resolvedDialectEdits.length - 1; i++) {
-      const lowerInFile = resolvedDialectEdits[i];
-      const higherInFile = resolvedDialectEdits[i + 1];
-      if (lowerInFile.startOffset < higherInFile.endOffset) {
-        higherInFile.endOffset = Math.max(higherInFile.startOffset, lowerInFile.startOffset);
-      }
-    }
+    const indexedDialectEdits = resolvedDialectEdits.map((edit, idx) => ({ edit, idx }));
+    const sortedDialect = indexedDialectEdits
+      .sort(
+        (a, b) =>
+          b.edit.startOffset - a.edit.startOffset ||
+          b.edit.endOffset - a.edit.endOffset ||
+          b.idx - a.idx,
+      )
+      .map((entry) => entry.edit);
+    const hasDialectOverlap = sortedDialect.some(
+      (e, idx) =>
+        idx < sortedDialect.length - 1 && e.startOffset < sortedDialect[idx + 1].endOffset,
+    );
+
     let modifiedCode = nativeSource;
-    for (const item of resolvedDialectEdits) {
-      modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+    if (hasDialectOverlap) {
+      for (const edit of options.edits) {
+        const editCode =
+          edit.code ??
+          edit.aice ??
+          edit.template ??
+          edit.snippet ??
+          edit.content ??
+          edit.replacement;
+        const stepRes = spliceDialectNativeSource(
+          modifiedCode,
+          {
+            ...options,
+            edits: undefined,
+            diff: false,
+            symbol: edit.symbol,
+            code: editCode,
+            body: edit.body,
+            delete: edit.delete,
+            insertAfter: edit.insertAfter ?? edit.insert_after,
+            insertBefore: edit.insertBefore ?? edit.insert_before,
+          },
+          filePath,
+          targetLang,
+          idioms,
+        );
+        if (stepRes) {
+          modifiedCode = stepRes.modifiedCode;
+        }
+      }
+    } else {
+      for (const item of sortedDialect) {
+        modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+      }
     }
     const editedSymbols = options.edits.map((e) => e.symbol);
     return {
@@ -4961,7 +5361,12 @@ function spliceDialectNativeSource(
     }
 
     const startOffset = matchedRule.source.start.offset;
-    const endOffset = matchedRule.source.end.offset;
+    const rawEnd = matchedRule.source.end.offset;
+    const endOffset =
+      !nativeSource.slice(startOffset, rawEnd).trimEnd().endsWith("}") &&
+      nativeSource[rawEnd] === "}"
+        ? rawEnd + 1
+        : rawEnd;
     const originalSnippet = nativeSource.slice(startOffset, endOffset);
     let newSnippet = "";
     let modifiedCode = nativeSource;
@@ -5427,7 +5832,7 @@ function spliceDialectNativeSource(
         }
       }
     }
-    const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block:)/, "");
+    const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block(?::|\s+))/i, "");
     const escSel = cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     // 1. Check Twig {% block <name> %}...{% endblock %} with balanced nesting support
@@ -5618,11 +6023,12 @@ export function extractHunkBlocks(rawSnippet: string): HunkBlock[] {
   const hunks: HunkBlock[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (/^[ \t]*<{3,}[ \t]*$/.test(lines[i]!)) {
+    const curLine = lines[i] ?? "";
+    if (/^[ \t]*<{3,}[ \t]*$/.test(curLine)) {
       i++;
       const searchLines: string[] = [];
-      while (i < lines.length && !/^[ \t]*={3,}[ \t]*$/.test(lines[i]!)) {
-        searchLines.push(lines[i]!);
+      while (i < lines.length && !/^[ \t]*={3,}[ \t]*$/.test(lines[i] ?? "")) {
+        searchLines.push(lines[i] ?? "");
         i++;
       }
       if (i >= lines.length) {
@@ -5632,8 +6038,8 @@ export function extractHunkBlocks(rawSnippet: string): HunkBlock[] {
       }
       i++; // skip '==='
       const replaceLines: string[] = [];
-      while (i < lines.length && !/^[ \t]*>{3,}[ \t]*$/.test(lines[i]!)) {
-        replaceLines.push(lines[i]!);
+      while (i < lines.length && !/^[ \t]*>{3,}[ \t]*$/.test(lines[i] ?? "")) {
+        replaceLines.push(lines[i] ?? "");
         i++;
       }
       if (i >= lines.length) {
@@ -5647,6 +6053,24 @@ export function extractHunkBlocks(rawSnippet: string): HunkBlock[] {
         replace: stripNumberedGutterPrefixes(replaceLines.join("\n")),
       });
     } else {
+      const stray = curLine.trim();
+      if (
+        stray.length > 0 &&
+        !stray.startsWith("//") &&
+        !stray.startsWith("#") &&
+        !stray.startsWith("/*") &&
+        !stray.startsWith("*") &&
+        !stray.startsWith("<!--")
+      ) {
+        if (/^={3,}$/.test(stray) || /^>{3,}$/.test(stray)) {
+          throw new Error(
+            `Malformed hunk splice: unexpected '${stray}' outside '<<< ... >>>' hunk block. Valid syntax:\n<<<\n<lines to find>\n===\n<replacement lines>\n>>>`,
+          );
+        }
+        throw new Error(
+          `Malformed hunk splice: unexpected non-hunk content outside '<<< ... >>>' blocks: ${stray}`,
+        );
+      }
       i++;
     }
   }
@@ -5661,6 +6085,7 @@ export function applyHunksToScope(
   targetLang?: TargetLanguage,
   idioms?: Record<string, ProjectIdiomDefinition>,
   idiomsEnabled = true,
+  insideClass: boolean | "container" | "member" = false,
 ): string {
   const isCrLf = scopeText.includes("\r\n");
   const nl = isCrLf ? "\r\n" : "\n";
@@ -5675,25 +6100,31 @@ export function applyHunksToScope(
     }
     let replaceNorm = hunk.replace.replace(/\r\n/g, "\n");
     if (idiomsEnabled && targetLang && replaceNorm.trim()) {
-      replaceNorm = preprocessHybridAndIdiomsLossless(replaceNorm, targetLang, idioms).replace(
-        /\r\n/g,
-        "\n",
-      );
+      const effectiveInsideClass =
+        insideClass === "container" ||
+        insideClass === true ||
+        (insideClass === "member" &&
+          /^\s*(?:#\[[^\]]+\]\s*)*(?:pub\s+|@fn\b|\^fn\b|async\s+|static\s+)*fn\b/.test(
+            replaceNorm,
+          ));
+      replaceNorm = preprocessHybridAndIdiomsLossless(replaceNorm, targetLang, idioms, {
+        insideClass: effectiveInsideClass,
+      }).replace(/\r\n/g, "\n");
     }
 
-    // 1. Line-aligned exact match first (prevents matching a less-indented search string at offset +2 inside a more-indented line)
     const scopeLines = current.split("\n");
-    let searchLines = searchNorm.split("\n");
-    while (searchLines.length > 0 && searchLines[0]!.trim() === "") {
+    const searchLines = searchNorm.split("\n");
+    while (searchLines.length > 0 && (searchLines[0] ?? "").trim() === "") {
       searchLines.shift();
     }
-    while (searchLines.length > 0 && searchLines[searchLines.length - 1]!.trim() === "") {
+    while (searchLines.length > 0 && (searchLines[searchLines.length - 1] ?? "").trim() === "") {
       searchLines.pop();
     }
 
     let matchStart = -1;
     let matchEnd = -1;
     if (searchLines.length > 0 && searchLines.length <= scopeLines.length) {
+      const exactLineMatches: number[] = [];
       for (let s = 0; s <= scopeLines.length - searchLines.length; s++) {
         let exactLineMatch = true;
         for (let k = 0; k < searchLines.length; k++) {
@@ -5703,61 +6134,88 @@ export function applyHunksToScope(
           }
         }
         if (exactLineMatch) {
-          matchStart = s;
-          matchEnd = s + searchLines.length;
-          break;
+          exactLineMatches.push(s);
         }
+      }
+      if (exactLineMatches.length > 1) {
+        throw new Error(
+          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${exactLineMatches.length} identical locations. Include surrounding context lines in <<< ... === to disambiguate.`,
+        );
+      }
+      if (exactLineMatches.length === 1) {
+        matchStart = exactLineMatches[0] ?? -1;
+        matchEnd = matchStart + searchLines.length;
       }
     }
 
-    // 1b. Exact substring match if not line-aligned (e.g. inline partial-line hunk)
     if (matchStart < 0) {
-      const exactIdx = current.indexOf(searchNorm);
-      if (exactIdx >= 0) {
-        const beforeChar = exactIdx > 0 ? current[exactIdx - 1] : "\n";
-        const afterIdx = exactIdx + searchNorm.length;
+      const validInlineIdxs: number[] = [];
+      let searchFrom = 0;
+      while (searchFrom <= current.length) {
+        const idx = current.indexOf(searchNorm, searchFrom);
+        if (idx < 0) break;
+        const beforeChar = idx > 0 ? current[idx - 1] : "\n";
+        const afterIdx = idx + searchNorm.length;
         const afterChar = afterIdx < current.length ? current[afterIdx] : "\n";
         const isPartialIndentMatch =
           (beforeChar === " " || beforeChar === "\t") && /^[ \t]/.test(searchNorm);
         if (!isPartialIndentMatch && (beforeChar === "\n" || afterChar !== "\n")) {
-          current = `${current.slice(0, exactIdx)}${replaceNorm}${current.slice(afterIdx)}`;
-          continue;
+          validInlineIdxs.push(idx);
         }
+        searchFrom = idx + Math.max(1, searchNorm.length);
+      }
+      if (validInlineIdxs.length > 1) {
+        throw new Error(
+          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${validInlineIdxs.length} inline locations. Include surrounding context to disambiguate.`,
+        );
+      }
+      if (validInlineIdxs.length === 1) {
+        const exactIdx = validInlineIdxs[0] ?? 0;
+        const afterIdx = exactIdx + searchNorm.length;
+        current = `${current.slice(0, exactIdx)}${replaceNorm}${current.slice(afterIdx)}`;
+        continue;
       }
     }
 
-    // 2. Indentation-normalized line matching fallback
     if (matchStart < 0 && searchLines.length > 0 && searchLines.length <= scopeLines.length) {
+      const trimmedMatches: number[] = [];
       for (let s = 0; s <= scopeLines.length - searchLines.length; s++) {
         let allMatch = true;
         for (let k = 0; k < searchLines.length; k++) {
-          if (scopeLines[s + k]!.trim() !== searchLines[k]!.trim()) {
+          if ((scopeLines[s + k] ?? "").trim() !== (searchLines[k] ?? "").trim()) {
             allMatch = false;
             break;
           }
         }
         if (allMatch) {
-          matchStart = s;
-          matchEnd = s + searchLines.length;
-          break;
+          trimmedMatches.push(s);
         }
+      }
+      if (trimmedMatches.length > 1) {
+        throw new Error(
+          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${trimmedMatches.length} locations (ignoring indentation). Include surrounding context lines or exact indentation to disambiguate.`,
+        );
+      }
+      if (trimmedMatches.length === 1) {
+        matchStart = trimmedMatches[0] ?? -1;
+        matchEnd = matchStart + searchLines.length;
       }
     }
 
-    // Also try skipping blank lines in scope if multi-line search has no blank lines
     if (matchStart < 0 && searchLines.length > 1) {
       const nonBlankSearch = searchLines.map((l) => l.trim()).filter(Boolean);
+      const nonBlankMatches: Array<{ start: number; end: number }> = [];
       for (let s = 0; s < scopeLines.length; s++) {
-        if (scopeLines[s]!.trim() !== nonBlankSearch[0]) continue;
+        if ((scopeLines[s] ?? "").trim() !== nonBlankSearch[0]) continue;
         let curScopeIdx = s;
         let matchedAll = true;
         for (let k = 0; k < nonBlankSearch.length; k++) {
-          while (curScopeIdx < scopeLines.length && scopeLines[curScopeIdx]!.trim() === "") {
+          while (curScopeIdx < scopeLines.length && (scopeLines[curScopeIdx] ?? "").trim() === "") {
             curScopeIdx++;
           }
           if (
             curScopeIdx >= scopeLines.length ||
-            scopeLines[curScopeIdx]!.trim() !== nonBlankSearch[k]
+            (scopeLines[curScopeIdx] ?? "").trim() !== nonBlankSearch[k]
           ) {
             matchedAll = false;
             break;
@@ -5765,10 +6223,17 @@ export function applyHunksToScope(
           curScopeIdx++;
         }
         if (matchedAll) {
-          matchStart = s;
-          matchEnd = curScopeIdx;
-          break;
+          nonBlankMatches.push({ start: s, end: curScopeIdx });
         }
+      }
+      if (nonBlankMatches.length > 1) {
+        throw new Error(
+          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${nonBlankMatches.length} locations. Include surrounding context lines to disambiguate.`,
+        );
+      }
+      if (nonBlankMatches.length === 1) {
+        matchStart = nonBlankMatches[0]?.start ?? -1;
+        matchEnd = nonBlankMatches[0]?.end ?? -1;
       }
     }
 
@@ -5842,7 +6307,10 @@ function resolveSingleNativeEditAgainstSource(
   let rawSnippet = stripNumberedGutterPrefixes(options.code ?? options.body ?? "");
 
   if (
-    (!anchorSymbol || anchorSymbol === ":hunk" || isCreateOrOverwriteSymbol(anchorSymbol)) &&
+    (!anchorSymbol ||
+      anchorSymbol === ":hunk" ||
+      anchorSymbol === "hunk" ||
+      isCreateOrOverwriteSymbol(anchorSymbol)) &&
     containsHunkMarkers(rawSnippet)
   ) {
     const hunks = extractHunkBlocks(rawSnippet);
@@ -5873,16 +6341,14 @@ function resolveSingleNativeEditAgainstSource(
 
   if (options.cloneFrom) {
     const cloneSym = options.cloneFrom.trim();
-    let cloneSpan = locateNativeDeclarationSpan(nativeSource, cloneSym, targetLang);
+    const cloneSpan = locateNativeDeclarationSpan(nativeSource, cloneSym, targetLang);
     let clonedSlice = "";
     let insertPos = -1;
     let isTest = false;
 
     if (!cloneSpan) {
       const testBlocks = extractNativeTestBlocks(nativeSource);
-      const tb = testBlocks.find(
-        (t) => t.title === cloneSym || t.title.startsWith(cloneSym),
-      );
+      const tb = testBlocks.find((t) => t.title === cloneSym || t.title.startsWith(cloneSym));
       if (tb) {
         clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
         insertPos = tb.endOffset;
@@ -5891,20 +6357,22 @@ function resolveSingleNativeEditAgainstSource(
         throw new Error(`Symbol to clone '${cloneSym}' not found in ${filePath}`);
       }
     } else {
+      const resolvedCloneSpan = cloneSpan;
       const testBlocks = extractNativeTestBlocks(nativeSource);
       const tb = testBlocks.find(
         (t) =>
           t.title === cloneSym ||
           t.title.startsWith(cloneSym) ||
-          (t.startOffset === cloneSpan!.declStart && t.endOffset === cloneSpan!.declEnd),
+          (t.startOffset === resolvedCloneSpan.declStart &&
+            t.endOffset === resolvedCloneSpan.declEnd),
       );
       if (tb) {
         clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
         insertPos = tb.endOffset;
         isTest = true;
       } else {
-        clonedSlice = nativeSource.slice(cloneSpan.declStart, cloneSpan.declEnd);
-        insertPos = cloneSpan.declEnd;
+        clonedSlice = nativeSource.slice(resolvedCloneSpan.declStart, resolvedCloneSpan.declEnd);
+        insertPos = resolvedCloneSpan.declEnd;
       }
     }
 
@@ -5944,15 +6412,19 @@ function resolveSingleNativeEditAgainstSource(
       clonedSlice = clonedSlice.replace(new RegExp(pattern, "g"), (m) => ruleMap.get(m) ?? m);
     }
 
+    const cloneNl = nativeSource.includes("\r\n") ? "\r\n" : "\n";
+    const computeCloneSep = (pos: number): string => {
+      const tail = nativeSource.slice(pos);
+      if (/^(?:\r?\n){2}/.test(tail)) return "";
+      if (/^\r?\n/.test(tail)) return cloneNl;
+      return `${cloneNl}${cloneNl}`;
+    };
+
     if (isTest) {
       if (!rules.some((r) => r.from === cloneSym) && clonedSlice.includes(cloneSym)) {
         clonedSlice = clonedSlice.replace(cloneSym, () => anchorSymbol);
       }
-      const sep = nativeSource.slice(insertPos).startsWith("\n\n")
-        ? ""
-        : nativeSource.slice(insertPos).startsWith("\n")
-          ? "\n"
-          : "\n\n";
+      const sep = computeCloneSep(insertPos);
       return {
         symbol: anchorSymbol,
         startOffset: insertPos,
@@ -5975,11 +6447,7 @@ function resolveSingleNativeEditAgainstSource(
 
     const targetSpan = locateNativeDeclarationSpan(nativeSource, anchorSymbol, targetLang);
     if (!targetSpan) {
-      const sep = nativeSource.slice(insertPos).startsWith("\n\n")
-        ? ""
-        : nativeSource.slice(insertPos).startsWith("\n")
-          ? "\n"
-          : "\n\n";
+      const sep = computeCloneSep(insertPos);
       return {
         symbol: anchorSymbol,
         startOffset: insertPos,
@@ -6186,16 +6654,29 @@ function resolveSingleNativeEditAgainstSource(
     const introducesUnbalancedDelims =
       (origDelims.braces === 0 && procDelims.braces !== 0) ||
       (origDelims.parens === 0 && procDelims.parens !== 0);
+    const isExplicitNamedDeclHeader =
+      /^(?:export\s+|default\s+|public\s+|private\s+|protected\s+|internal\s+|static\s+|async\s+|pub\s+|fn\s+|function\s+|def\s+|class\s+|struct\s+|interface\s+|type\s+|enum\s+|const\s+|let\s+|var\s+|impl\s+|func\s+)+[A-Za-z_$][A-Za-z0-9_$]*\b/.test(
+        procFirstTrim,
+      );
+    const windowLines = rawLines.slice(
+      Math.max(0, startLine - 41),
+      Math.min(rawLines.length, startLine + 40),
+    );
+    const windowExactHeaderCount = isExplicitNamedDeclHeader
+      ? windowLines.filter((l) => l.trim() === procFirstTrim).length
+      : 0;
     const hasShiftedHeaderMatch =
       !alreadyAnchoredAtStart &&
       !introducesUnbalancedDelims &&
+      isExplicitNamedDeclHeader &&
       procLineList.length >= 2 &&
-      procFirstTrim.length >= 6 &&
       rawLines[startLine - 1]?.trim() !== procFirstTrim &&
-      rawLines
-        .slice(Math.max(0, startLine - 41), Math.min(rawLines.length, startLine + 40))
-        .some((l) => l.trim() === procFirstTrim);
-    if ((!literalCheck.valid || hasShiftedHeaderMatch) && !alreadyAnchoredAtStart && !introducesUnbalancedDelims) {
+      windowExactHeaderCount === 1;
+    if (
+      (!literalCheck.valid || hasShiftedHeaderMatch) &&
+      !alreadyAnchoredAtStart &&
+      !introducesUnbalancedDelims
+    ) {
       const origSpanCount = Math.max(1, endLine - startLine + 1);
       const procLastTrim = procLineList[procLineList.length - 1]?.trim() ?? "";
       const procTokens = new Set(
@@ -6211,6 +6692,8 @@ function resolveSingleNativeEditAgainstSource(
       const spanLen = origSpanCount;
 
       for (let candStartLine = minStart; candStartLine <= maxStart; candStartLine++) {
+        if (!isExplicitNamedDeclHeader) continue;
+        if (rawLines[candStartLine - 1]?.trim() !== procFirstTrim) continue;
         {
           const candEndLine = Math.min(rawLines.length, candStartLine + spanLen - 1);
           if (candStartLine === startLine && candEndLine === endLine) continue;
@@ -6237,8 +6720,7 @@ function resolveSingleNativeEditAgainstSource(
           }
           if (overlap <= 0) continue;
           const distPenalty =
-            Math.abs(candStartLine - startLine) * 0.5 +
-            Math.abs(spanLen - origSpanCount) * 0.5;
+            Math.abs(candStartLine - startLine) * 0.5 + Math.abs(spanLen - origSpanCount) * 0.5;
           const score = overlap - distPenalty;
           if (score > bestScore) {
             const testModified = `${nativeSource.slice(0, cStartOff)}${processedCode}${nativeSource.slice(cEndOff)}`;
@@ -6302,16 +6784,13 @@ function resolveSingleNativeEditAgainstSource(
           undefined,
           preferAccessor,
           preferredArity,
+          true,
         );
   let autoAppendToClass = false;
 
   if (!spanInfo && !options.delete && !options.insertBefore && !options.insertAfter) {
     const trimmedAnchor = anchorSymbol.trim();
-    if (
-      targetLang === "markdown" &&
-      rawSnippet.trim() &&
-      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
-    ) {
+    if (targetLang === "markdown" && rawSnippet.trim()) {
       const headingPrefix = trimmedAnchor.startsWith("#") ? trimmedAnchor : `## ${trimmedAnchor}`;
       const bodyTrimmed = rawSnippet.trim();
       const emitted = /^#{1,6}\s+/.test(bodyTrimmed)
@@ -6330,7 +6809,7 @@ function resolveSingleNativeEditAgainstSource(
     if (
       (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") &&
       rawSnippet.trim() &&
-      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
+      extractScriptOrMarkdownSymbols(rawSnippet, targetLang).length > 0
     ) {
       const emitted = rawSnippet.trim();
       const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
@@ -6358,11 +6837,10 @@ function resolveSingleNativeEditAgainstSource(
       if (classSpan && classSpan.isClassContainer) {
         spanInfo = classSpan;
         autoAppendToClass = true;
-      } else if (
-        targetLang === "cpp" &&
-        rawSnippet.trim() &&
-        !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor)
-      ) {
+      } else if (targetLang === "cpp" && rawSnippet.trim()) {
+        const escCls = candidateClassName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const hasCppRefInFile =
+          new RegExp(`\\b${escCls}\\b`).test(nativeSource) || /#\s*include\b/.test(nativeSource);
         const emitted = emitNativeSnippetForContext(
           rawSnippet,
           filePath,
@@ -6374,44 +6852,18 @@ function resolveSingleNativeEditAgainstSource(
           undefined,
           forceLosslessPreprocess,
         );
-        const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
-        return {
-          symbol: anchorSymbol,
-          startOffset: nativeSource.length,
-          endOffset: nativeSource.length,
-          replacement: `${sep}${emitted}\n`,
-          originalSnippet: "",
-          newSnippet: emitted,
-        };
+        if (hasCppRefInFile && new RegExp(`\\b${escCls}\\s*::`).test(emitted)) {
+          const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+          return {
+            symbol: anchorSymbol,
+            startOffset: nativeSource.length,
+            endOffset: nativeSource.length,
+            replacement: `${sep}${emitted}\n`,
+            originalSnippet: "",
+            newSnippet: emitted,
+          };
+        }
       }
-    } else if (
-      !/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(trimmedAnchor) &&
-      rawSnippet.trim() &&
-      (rawSnippet.includes(trimmedAnchor) ||
-        new RegExp(`\\b${trimmedAnchor.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(
-          rawSnippet,
-        ))
-    ) {
-      const emitted = emitNativeSnippetForContext(
-        rawSnippet,
-        filePath,
-        targetLang,
-        undefined,
-        idioms,
-        undefined,
-        false,
-        undefined,
-        forceLosslessPreprocess,
-      );
-      const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
-      return {
-        symbol: anchorSymbol,
-        startOffset: nativeSource.length,
-        endOffset: nativeSource.length,
-        replacement: `${sep}${emitted}\n`,
-        originalSnippet: "",
-        newSnippet: emitted,
-      };
     }
   }
 
@@ -6422,7 +6874,7 @@ function resolveSingleNativeEditAgainstSource(
 
   if (options.delete) {
     const delStart = spanInfo.fullDeclStart ?? spanInfo.declStart;
-    let delEnd = spanInfo.declEnd;
+    const delEnd = spanInfo.declEnd;
     return {
       symbol: anchorSymbol,
       startOffset: delStart,
@@ -6474,10 +6926,7 @@ function resolveSingleNativeEditAgainstSource(
     if (!rawSnippet.trim()) {
       throw buildEmptySpliceBlockError(filePath, anchorSymbol, "appending to class in native file");
     }
-    if (
-      targetLang === "go" &&
-      /^\s*(?:func|pub\s+fn|fn|@fn|\^fn)\b/m.test(rawSnippet)
-    ) {
+    if (targetLang === "go" && /^\s*(?:func|pub\s+fn|fn|@fn|\^fn)\b/m.test(rawSnippet)) {
       const clsName = spanInfo.memberName;
       const recvRe = new RegExp(
         `^\\s*func\\s*\\(\\s*([A-Za-z0-9_]+\\s+\\*?${clsName})\\s*\\)`,
@@ -6623,7 +7072,10 @@ function resolveSingleNativeEditAgainstSource(
           const openParenPos = nativeSource.indexOf("(", spanInfo.declStart);
           const inner =
             openParenPos >= 0 ? nativeSource.slice(openParenPos + 1, closeParenPos).trim() : "";
-          const inlineField = emittedUnindented.trim().replace(/^val\s+/, "").replace(/,\s*$/, "");
+          const inlineField = emittedUnindented
+            .trim()
+            .replace(/^val\s+/, "")
+            .replace(/,\s*$/, "");
           const sep = inner.length > 0 && !inner.endsWith(",") ? ", " : "";
           return {
             symbol: anchorSymbol,
@@ -6720,6 +7172,7 @@ function resolveSingleNativeEditAgainstSource(
         targetLang,
         idioms,
         options.idioms !== false,
+        spanInfo.isClassContainer ? "container" : spanInfo.className ? "member" : false,
       );
       return {
         symbol: anchorSymbol,
@@ -6760,42 +7213,105 @@ function resolveSingleNativeEditAgainstSource(
   );
 
   let newSnippet = indentCode(emittedUnindented, spanInfo.declIndent);
-  if (
-    spanInfo.memberName === "imports" &&
-    (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
-  ) {
-    const splitTsImports = (src: string): string[] => {
-      const matches = src.match(/import\s+(?:[\s\S]*?\s+from\s+)?['"][^'"]+['"]\s*;?/g);
-      return matches ? matches.map((m) => m.trim()) : [];
-    };
-    const origStmts = splitTsImports(originalSnippet);
-    const newStmts = splitTsImports(newSnippet);
-    const extractModSpec = (stmt: string): string | undefined => {
-      const m = stmt.match(/\bfrom\s+['"]([^'"]+)['"]|^import\s+['"]([^'"]+)['"]/);
-      return m ? (m[1] ?? m[2]) : undefined;
-    };
-    if (
-      origStmts.length >= 2 &&
-      newStmts.length >= 1 &&
-      newStmts.length < origStmts.length &&
-      newStmts.every((s) => Boolean(extractModSpec(s)))
+  if (spanInfo.memberName === "imports") {
+    const fileNl = nativeSource.includes("\r\n") ? "\r\n" : "\n";
+    const replaceAllImports = /@(?:replace|overwrite)-imports\b/.test(rawSnippet);
+    if (spanInfo.declStart === spanInfo.declEnd) {
+      const afterInsert = nativeSource.slice(spanInfo.declEnd);
+      const sepAfter =
+        afterInsert.length === 0
+          ? fileNl
+          : /^\r?\n/.test(afterInsert)
+            ? fileNl
+            : `${fileNl}${fileNl}`;
+      newSnippet = `${newSnippet.trimEnd()}${sepAfter}`;
+    } else if (
+      !replaceAllImports &&
+      (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx")
     ) {
-      const merged = [...origStmts];
-      for (const ns of newStmts) {
-        const spec = extractModSpec(ns);
-        const existingIdx = merged.findIndex((os) => extractModSpec(os) === spec);
-        if (existingIdx >= 0) {
-          merged[existingIdx] = ns;
-        } else {
-          merged.push(ns);
+      const parseTsImportEntries = (
+        src: string,
+      ): Array<{ text: string; spec?: string; isTypeOnly: boolean }> => {
+        const parsedSf = getCachedTsSourceFile(src);
+        const entries: Array<{ text: string; spec?: string; isTypeOnly: boolean }> = [];
+        for (const st of parsedSf.statements) {
+          if (ts.isImportDeclaration(st)) {
+            const spec = ts.isStringLiteral(st.moduleSpecifier)
+              ? st.moduleSpecifier.text
+              : undefined;
+            const isTypeOnly = Boolean(st.importClause?.isTypeOnly);
+            entries.push({ text: st.getText(parsedSf).trim(), spec, isTypeOnly });
+          } else if (ts.isImportEqualsDeclaration(st)) {
+            entries.push({
+              text: st.getText(parsedSf).trim(),
+              spec: st.name.text,
+              isTypeOnly: st.isTypeOnly,
+            });
+          }
         }
+        return entries;
+      };
+      const origEntries = parseTsImportEntries(originalSnippet);
+      const newEntries = parseTsImportEntries(newSnippet);
+      if (
+        origEntries.length >= 1 &&
+        newEntries.length >= 1 &&
+        newEntries.every((e) => Boolean(e.spec))
+      ) {
+        const merged = [...origEntries];
+        for (const ne of newEntries) {
+          let existingIdx = merged.findIndex(
+            (oe) => oe.spec === ne.spec && oe.isTypeOnly === ne.isTypeOnly,
+          );
+          if (existingIdx < 0) {
+            const sameSpecIdxs = merged
+              .map((oe, i) => (oe.spec === ne.spec ? i : -1))
+              .filter((i) => i >= 0);
+            if (
+              sameSpecIdxs.length === 1 &&
+              newEntries.filter((x) => x.spec === ne.spec).length === 1 &&
+              !ne.isTypeOnly &&
+              !merged[sameSpecIdxs[0]]?.isTypeOnly
+            ) {
+              existingIdx = sameSpecIdxs[0] ?? -1;
+            }
+          }
+          if (existingIdx >= 0) {
+            merged[existingIdx] = ne;
+          } else {
+            merged.push(ne);
+          }
+        }
+        const trailingNl = originalSnippet.endsWith("\r\n")
+          ? "\r\n"
+          : originalSnippet.endsWith("\n")
+            ? "\n"
+            : "";
+        newSnippet = `${merged.map((m) => m.text).join(fileNl)}${trailingNl}`;
       }
-      const trailingNl = originalSnippet.endsWith("\r\n")
-        ? "\r\n"
-        : originalSnippet.endsWith("\n")
-          ? "\n"
-          : "";
-      newSnippet = `${merged.join("\n")}${trailingNl}`;
+    } else if (!replaceAllImports && originalSnippet.trim().length > 0) {
+      const origImportLines = originalSnippet
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter((l) => l.trim().length > 0);
+      const newImportLines = newSnippet
+        .split(/\r?\n/)
+        .map((l) => l.trimEnd())
+        .filter((l) => l.trim().length > 0);
+      if (origImportLines.length >= 1 && newImportLines.length >= 1) {
+        const mergedLines = [...origImportLines];
+        for (const nl of newImportLines) {
+          if (!mergedLines.some((ol) => ol.trim() === nl.trim())) {
+            mergedLines.push(nl);
+          }
+        }
+        const trailingNl = originalSnippet.endsWith("\r\n")
+          ? "\r\n"
+          : originalSnippet.endsWith("\n")
+            ? "\n"
+            : "";
+        newSnippet = `${mergedLines.join(fileNl)}${trailingNl}`;
+      }
     }
   }
 
@@ -6814,9 +7330,7 @@ function resolveSingleNativeEditAgainstSource(
 
   const trimmedNew = newSnippet.trimStart();
   const hasNewDoc =
-    trimmedNew.startsWith("/**") ||
-    trimmedNew.startsWith("///") ||
-    trimmedNew.startsWith("//!");
+    trimmedNew.startsWith("/**") || trimmedNew.startsWith("///") || trimmedNew.startsWith("//!");
   const hasReplaceDocsDirective =
     options.preserveDocs === false ||
     /(?:^|\n)\s*(?:(?:\/\/|#)\s*)?@(?:replace|strip|drop)-docs\b/.test(rawSnippet) ||
@@ -6825,7 +7339,7 @@ function resolveSingleNativeEditAgainstSource(
   if (targetLang !== "python") {
     if (!hasNewDoc && !hasReplaceDocsDirective) {
       preservedTriviaText = trivia.leadingDocComment ?? "";
-    } else if (hasNewDoc || Boolean(trivia.leadingDocComment) || hasReplaceDocsDirective) {
+    } else if (hasNewDoc || trivia.leadingDocComment || hasReplaceDocsDirective) {
       let docStartPos: number | undefined;
       if (trivia.leadingDocComment) {
         const beforeDecl = nativeSource.slice(0, spanInfo.declStart);
@@ -6862,8 +7376,9 @@ function resolveSingleNativeEditAgainstSource(
           if (oldDocIdx >= 0) {
             const docEnd = oldDocIdx + trivia.leadingDocComment.length;
             const between = nativeSource.slice(docEnd, spanInfo.declStart);
-            const hasDecoratorsBetween =
-              /^[ \t\r\n]*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/.test(between);
+            const hasDecoratorsBetween = /^[ \t\r\n]*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/.test(
+              between,
+            );
             if (hasDecoratorsBetween && !hasLeadingNativeAttr && !trimmedNew.startsWith("@")) {
               const decoratorsSlice = between.replace(/^\r?\n/, "");
               const newDocMatch = newSnippet.match(
@@ -7018,18 +7533,49 @@ export function spliceNativeSource(
       )
       .map((entry) => entry.edit);
 
-    // Auto-sort and de-overlap multi-block splice edits when child symbols fall within the same file span
-    for (let i = 0; i < sortedReverse.length - 1; i++) {
-      const lowerInFile = sortedReverse[i];
-      const higherInFile = sortedReverse[i + 1];
-      if (lowerInFile.startOffset < higherInFile.endOffset) {
-        higherInFile.endOffset = Math.max(higherInFile.startOffset, lowerInFile.startOffset);
-      }
-    }
+    const hasOverlap = sortedReverse.some(
+      (e, i) => i < sortedReverse.length - 1 && e.startOffset < sortedReverse[i + 1].endOffset,
+    );
 
     let modifiedCode = nativeSource;
-    for (const item of sortedReverse) {
-      modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+    if (hasOverlap) {
+      const sequentialResolved: ResolvedNativeEdit[] = [];
+      for (const edit of options.edits) {
+        const editCode =
+          edit.code ??
+          edit.aice ??
+          edit.template ??
+          edit.snippet ??
+          edit.content ??
+          edit.replacement;
+        const singleOpt: SpliceOptions = {
+          ...options,
+          edits: undefined,
+          symbol: edit.symbol,
+          code: editCode,
+          body: edit.body,
+          delete: edit.delete,
+          cloneFrom: edit.cloneFrom,
+          preserveDocs: edit.preserveDocs ?? options.preserveDocs,
+          insertAfter: edit.insertAfter ?? edit.insert_after,
+          insertBefore: edit.insertBefore ?? edit.insert_before,
+        };
+        const stepEdit = resolveSingleNativeEditAgainstSource(
+          modifiedCode,
+          singleOpt,
+          filePath,
+          targetLang,
+          idioms,
+          forceLosslessPreprocess,
+        );
+        sequentialResolved.push(stepEdit);
+        modifiedCode = `${modifiedCode.slice(0, stepEdit.startOffset)}${stepEdit.replacement}${modifiedCode.slice(stepEdit.endOffset)}`;
+      }
+      resolvedEdits.splice(0, resolvedEdits.length, ...sequentialResolved);
+    } else {
+      for (const item of sortedReverse) {
+        modifiedCode = `${modifiedCode.slice(0, item.startOffset)}${item.replacement}${modifiedCode.slice(item.endOffset)}`;
+      }
     }
 
     if (!forceLosslessPreprocess) {
@@ -7114,7 +7660,10 @@ export function spliceNativeSource(
       old_string: "",
       new_string: emitted,
     });
-    const realisticTokensSaved = Math.max(0, estimateTokens(realisticNativePayload) - snippetTokens);
+    const realisticTokensSaved = Math.max(
+      0,
+      estimateTokens(realisticNativePayload) - snippetTokens,
+    );
     return {
       success: true,
       filePath,
@@ -7137,14 +7686,7 @@ export function spliceNativeSource(
   );
   const modifiedCode = `${nativeSource.slice(0, resolved.startOffset)}${resolved.replacement}${nativeSource.slice(resolved.endOffset)}`;
 
-  const isLargeFileHunkOrLineSplice =
-    modifiedCode.length > 50_000 &&
-    (containsHunkMarkers(rawSnippet) ||
-      Boolean(
-        options.symbol &&
-          /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test(options.symbol.trim()),
-      ));
-  if (!forceLosslessPreprocess && !isLargeFileHunkOrLineSplice) {
+  if (!forceLosslessPreprocess) {
     const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
     if (!checkRes.valid) {
       return spliceNativeSource(nativeSource, options, filePath, idioms, true);
@@ -7167,9 +7709,13 @@ export function spliceNativeSource(
     : 0;
   const realisticNativePayload = options.delete
     ? JSON.stringify({ path: filePath, old_string: resolved.originalSnippet ?? "", new_string: "" })
-    : (resolved.originalSnippet
-        ? JSON.stringify({ path: filePath, old_string: resolved.originalSnippet, new_string: resolved.newSnippet ?? rawSnippet })
-        : JSON.stringify({ path: filePath, old_string: "", new_string: rawSnippet }));
+    : resolved.originalSnippet
+      ? JSON.stringify({
+          path: filePath,
+          old_string: resolved.originalSnippet,
+          new_string: resolved.newSnippet ?? rawSnippet,
+        })
+      : JSON.stringify({ path: filePath, old_string: "", new_string: rawSnippet });
   const realisticTokensSaved = Math.max(0, estimateTokens(realisticNativePayload) - snippetTokens);
 
   const startLine = modifiedCode.slice(0, resolved.startOffset).split("\n").length;
@@ -7215,7 +7761,8 @@ export async function splice(
     throw new Error(AICE_DISABLED_MESSAGE);
   }
 
-  const fileExists = fs.existsSync(fullPath);
+  const diskFileExists = fs.existsSync(fullPath);
+  const fileExists = options.sourceOverride !== undefined || diskFileExists;
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
   const hasHunkPayload = fileExists && containsHunkMarkers(options.code ?? options.body ?? "");
   if (
@@ -7229,13 +7776,15 @@ export async function splice(
       options.create ||
       (Boolean(options.symbol) && isCreateOrOverwriteSymbol(options.symbol)))
   ) {
-    const prevSource = fileExists ? fs.readFileSync(fullPath, "utf-8") : "";
+    const prevSource =
+      options.sourceOverride ?? (diskFileExists ? fs.readFileSync(fullPath, "utf-8") : "");
     const created = await createFile(fullPath, {
       code: options.code ?? options.body ?? "",
       overwrite: true,
       idioms: options.idioms,
       dryRun: options.dryRun,
       projectRoot: root,
+      suppressTelemetry: options.suppressTelemetry,
     });
     return {
       success: true,
@@ -7273,7 +7822,8 @@ export async function splice(
   );
 
   if (!fullPath.endsWith(".aice")) {
-    const originalNative = await fs.promises.readFile(fullPath, "utf-8");
+    const originalNative =
+      options.sourceOverride ?? (await fs.promises.readFile(fullPath, "utf-8"));
     const targetLang = detectTargetFromPath(fullPath);
 
     const result = withSuppressedTelemetry(() =>
@@ -7283,97 +7833,175 @@ export async function splice(
       containsHunkMarkers(snippetInput) ||
       Boolean(
         options.symbol &&
-          /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test(options.symbol.trim()),
+          /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:?hunk)$/i.test(options.symbol.trim()),
       ) ||
       Boolean(
         hasBatchEdits &&
-          options.edits!.every(
+          (options.edits ?? []).every(
             (e) =>
               containsHunkMarkers(e.code ?? e.body ?? "") ||
-              /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test((e.symbol ?? "").trim()),
+              /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:?hunk)$/i.test((e.symbol ?? "").trim()),
           ),
       );
 
     if (targetLang === "typescript" || targetLang === "tsx" || targetLang === "javascript") {
+      const maskedSnippet = maskSourceLexically(
+        result.newSnippet ?? snippetInput,
+        targetLang,
+      ).maskedCode;
       const snippetIdents = new Set(
-        (result.newSnippet ?? snippetInput).match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? [],
+        maskedSnippet.match(/(?<![A-Za-z0-9_$])[A-Za-z_$][A-Za-z0-9_$]*(?![A-Za-z0-9_$])/g) ?? [],
       );
       const candidateIdents = Array.from(snippetIdents).filter((id) =>
         isLineRangeOrHunkSplice
           ? /^[A-Z][A-Za-z0-9]*$/.test(id)
-          : /^[A-Z]/.test(id) || id.includes("_"),
+          : /^[A-Z$]/.test(id) || id.includes("_"),
       );
-      const missingIdents = candidateIdents.filter(
-        (id) => !new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(originalNative),
-      );
-      if (missingIdents.length > 0) {
-        const importRe = /^(import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]\s*;?)/gm;
-        let updatedCode = result.modifiedCode;
-        let match: RegExpExecArray | null;
-        while ((match = importRe.exec(result.modifiedCode)) !== null) {
-          const fullImp = match[1];
-          const specList = match[2]
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-          const relMod = match[3];
-          const baseModPath = path.resolve(path.dirname(fullPath), relMod);
-          const candidates = [
-            baseModPath,
-            `${baseModPath}.ts`,
-            `${baseModPath}.tsx`,
-            `${baseModPath}.js`,
-            `${baseModPath.replace(/\.[cm]?js$/, "")}.ts`,
-            `${baseModPath.replace(/\.[cm]?js$/, "")}.tsx`,
-          ];
-          const resolvedSibling = candidates.find(
-            (c) => fs.existsSync(c) && fs.statSync(c).isFile(),
-          );
-          if (!resolvedSibling) continue;
-          let sibContent = "";
-          try {
-            sibContent = fs.readFileSync(resolvedSibling, "utf-8");
-          } catch {
-            continue;
-          }
-          const addedSpecs: string[] = [];
-          for (const id of missingIdents) {
-            if (specList.some((s) => s.replace(/^type\s+/, "").trim() === id)) continue;
-            const exportRe = new RegExp(
-              `\\bexport\\s+(?:type|interface|const|let|var|class|enum|function)\\s+${id}\\b`,
-            );
-            if (exportRe.test(sibContent)) {
-              addedSpecs.push(id);
+      if (candidateIdents.length > 0) {
+        const maskedOriginal = maskSourceLexically(originalNative, targetLang).maskedCode;
+        const modSf = getCachedTsSourceFile(result.modifiedCode);
+        const existingLocalOrImported = new Set<string>();
+        const recordBindingNames = (nameNode: ts.BindingName): void => {
+          if (ts.isIdentifier(nameNode)) {
+            existingLocalOrImported.add(nameNode.text);
+          } else {
+            for (const elem of nameNode.elements) {
+              if (ts.isBindingElement(elem)) {
+                recordBindingNames(elem.name);
+              }
             }
           }
-          if (addedSpecs.length > 0) {
-            const newImp = fullImp.replace(
-              /\{[^}]+\}/,
-              `{ ${[...specList, ...addedSpecs].join(", ")} }`,
-            );
-            updatedCode = updatedCode.replace(fullImp, newImp);
+        };
+        for (const st of modSf.statements) {
+          if (ts.isImportDeclaration(st) && st.importClause) {
+            if (st.importClause.name) {
+              existingLocalOrImported.add(st.importClause.name.text);
+            }
+            const nb = st.importClause.namedBindings;
+            if (nb) {
+              if (ts.isNamespaceImport(nb)) {
+                existingLocalOrImported.add(nb.name.text);
+              } else if (ts.isNamedImports(nb)) {
+                for (const el of nb.elements) {
+                  existingLocalOrImported.add(el.name.text);
+                }
+              }
+            }
+          } else if (
+            (ts.isFunctionDeclaration(st) ||
+              ts.isClassDeclaration(st) ||
+              ts.isInterfaceDeclaration(st) ||
+              ts.isTypeAliasDeclaration(st) ||
+              ts.isEnumDeclaration(st)) &&
+            st.name
+          ) {
+            existingLocalOrImported.add(st.name.text);
+          } else if (ts.isVariableStatement(st)) {
+            for (const decl of st.declarationList.declarations) {
+              recordBindingNames(decl.name);
+            }
           }
         }
-        result.modifiedCode = updatedCode;
-        result.newAiceSource = updatedCode;
+
+        const missingIdents = candidateIdents.filter(
+          (id) =>
+            !existingLocalOrImported.has(id) &&
+            !new RegExp(
+              `(?<![A-Za-z0-9_$])${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`,
+            ).test(maskedOriginal),
+        );
+        if (missingIdents.length > 0) {
+          const importRe = /^(import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]\s*;?)/gm;
+          const siblingImports: Array<{
+            fullImp: string;
+            specList: string[];
+            maskedSibContent: string;
+          }> = [];
+          let match: RegExpExecArray | null = importRe.exec(result.modifiedCode);
+          while (match !== null) {
+            const fullImp = match[1];
+            const specList = match[2]
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const relMod = match[3];
+            const baseModPath = path.resolve(path.dirname(fullPath), relMod);
+            const candidates = [
+              baseModPath,
+              `${baseModPath}.ts`,
+              `${baseModPath}.tsx`,
+              `${baseModPath}.js`,
+              `${baseModPath.replace(/\.[cm]?js$/, "")}.ts`,
+              `${baseModPath.replace(/\.[cm]?js$/, "")}.tsx`,
+            ];
+            const resolvedSibling = candidates.find(
+              (c) => fs.existsSync(c) && fs.statSync(c).isFile(),
+            );
+            if (resolvedSibling) {
+              try {
+                const sibContent = fs.readFileSync(resolvedSibling, "utf-8");
+                const maskedSibContent = maskSourceLexically(sibContent, targetLang).maskedCode;
+                siblingImports.push({ fullImp, specList, maskedSibContent });
+              } catch {
+                // ignore unreadable sibling
+              }
+            }
+            match = importRe.exec(result.modifiedCode);
+          }
+
+          if (siblingImports.length > 0) {
+            const exportOwners = new Map<string, number[]>();
+            for (const id of missingIdents) {
+              const escId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+              const exportRe = new RegExp(
+                `\\bexport\\s+(?:type|interface|const|let|var|class|enum|function)\\s+${escId}(?![A-Za-z0-9_$])`,
+              );
+              const owners: number[] = [];
+              for (let sIdx = 0; sIdx < siblingImports.length; sIdx++) {
+                if (exportRe.test(siblingImports[sIdx].maskedSibContent)) {
+                  owners.push(sIdx);
+                }
+              }
+              exportOwners.set(id, owners);
+            }
+
+            let updatedCode = result.modifiedCode;
+            for (let sIdx = 0; sIdx < siblingImports.length; sIdx++) {
+              const { fullImp, specList } = siblingImports[sIdx];
+              const addedSpecs: string[] = [];
+              for (const id of missingIdents) {
+                if (specList.some((s) => s.replace(/^type\s+/, "").trim() === id)) continue;
+                const owners = exportOwners.get(id) ?? [];
+                if (owners.length === 1 && owners[0] === sIdx) {
+                  addedSpecs.push(id);
+                }
+              }
+              if (addedSpecs.length > 0) {
+                const mergedSpecText = `{ ${[...specList, ...addedSpecs].join(", ")} }`;
+                const newImp = fullImp.replace(/\{[^}]+\}/, () => mergedSpecText);
+                updatedCode = updatedCode.replace(fullImp, () => newImp);
+              }
+            }
+            result.modifiedCode = updatedCode;
+            result.newAiceSource = updatedCode;
+          }
+        }
       }
     }
 
-    if (!(isLineRangeOrHunkSplice && result.modifiedCode.length > 50_000)) {
-      const postValidation = validateNativeSyntax(
-        result.modifiedCode,
-        targetLang,
-        fullPath,
-        activeIdioms,
-      );
-      if (!postValidation.valid) {
-        const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
-        if (origValidation.valid) {
-          const diagSummary = postValidation.diagnostics.join("; ");
-          throw new Error(
-            `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
-          );
-        }
+    const postValidation = validateNativeSyntax(
+      result.modifiedCode,
+      targetLang,
+      fullPath,
+      activeIdioms,
+    );
+    if (!postValidation.valid) {
+      const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
+      if (origValidation.valid) {
+        const diagSummary = postValidation.diagnostics.join("; ");
+        throw new Error(
+          `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
+        );
       }
     }
 
@@ -7384,34 +8012,55 @@ export async function splice(
         dir,
         `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
       );
-      await fs.promises.writeFile(tmpFile, result.modifiedCode, {
-        encoding: "utf-8",
-        mode: origMode,
-      });
-      await fs.promises.rename(tmpFile, fullPath);
+      try {
+        await fs.promises.writeFile(tmpFile, result.modifiedCode, {
+          encoding: "utf-8",
+          mode: origMode,
+        });
+        await fs.promises.rename(tmpFile, fullPath);
+      } catch (err) {
+        try {
+          if (fs.existsSync(tmpFile)) {
+            fs.unlinkSync(tmpFile);
+          }
+        } catch {
+          // ignore cleanup error
+        }
+        throw err;
+      }
     }
 
-    const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
-    const realisticNativePayload = options.delete
-      ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet ?? "", new_string: "" })
-      : (result.originalSnippet
-          ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet, new_string: result.newSnippet ?? snippetInput })
-          : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput }));
-    recordTelemetryEvent({
-      targetPath: fullPath,
-      projectRoot: root,
-      operation: "splice",
-      surface: "cli",
-      idiomsUsed: idiomsUsedInSnippet,
-      nativeText: result.modifiedCode,
-      realisticNativeText: realisticNativePayload,
-      preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
-      aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
-    });
+    if (!options.suppressTelemetry && !options.dryRun) {
+      const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+      const realisticNativePayload = options.delete
+        ? JSON.stringify({
+            path: fullPath,
+            old_string: result.originalSnippet ?? "",
+            new_string: "",
+          })
+        : result.originalSnippet
+          ? JSON.stringify({
+              path: fullPath,
+              old_string: result.originalSnippet,
+              new_string: result.newSnippet ?? snippetInput,
+            })
+          : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput });
+      recordTelemetryEvent({
+        targetPath: fullPath,
+        projectRoot: root,
+        operation: "splice",
+        surface: "cli",
+        idiomsUsed: idiomsUsedInSnippet,
+        nativeText: result.modifiedCode,
+        realisticNativeText: realisticNativePayload,
+        preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
+        aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+      });
+    }
     return result;
   }
 
-  const originalSource = await fs.promises.readFile(fullPath, "utf-8");
+  const originalSource = options.sourceOverride ?? (await fs.promises.readFile(fullPath, "utf-8"));
   const result = withSuppressedTelemetry(() => spliceSource(originalSource, options, fullPath));
 
   // Write atomically to disk unless dryRun
@@ -7422,11 +8071,22 @@ export async function splice(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
-    await fs.promises.writeFile(tmpFile, result.modifiedCode, {
-      encoding: "utf-8",
-      mode: origMode,
-    });
-    await fs.promises.rename(tmpFile, fullPath);
+    try {
+      await fs.promises.writeFile(tmpFile, result.modifiedCode, {
+        encoding: "utf-8",
+        mode: origMode,
+      });
+      await fs.promises.rename(tmpFile, fullPath);
+    } catch (err) {
+      try {
+        if (fs.existsSync(tmpFile)) {
+          fs.unlinkSync(tmpFile);
+        }
+      } catch {
+        // ignore cleanup error
+      }
+      throw err;
+    }
   }
 
   if (options.compile) {
@@ -7453,27 +8113,61 @@ export async function splice(
       idioms: shouldExpand ? config.idioms : undefined,
     });
 
-    const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
-    await fs.promises.writeFile(outPath, emitted, "utf-8");
+    if (!options.dryRun) {
+      const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
+      const outDir = path.dirname(outPath);
+      await fs.promises.mkdir(outDir, { recursive: true });
+      const outMode = fs.existsSync(outPath) ? (await fs.promises.stat(outPath)).mode : undefined;
+      const outTmp = path.join(
+        outDir,
+        `.${path.basename(outPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      );
+      try {
+        await fs.promises.writeFile(outTmp, emitted, {
+          encoding: "utf-8",
+          ...(outMode !== undefined ? { mode: outMode } : {}),
+        });
+        await fs.promises.rename(outTmp, outPath);
+      } catch (err) {
+        try {
+          if (fs.existsSync(outTmp)) {
+            fs.unlinkSync(outTmp);
+          }
+        } catch {
+          // ignore cleanup error
+        }
+        throw err;
+      }
+    }
   }
 
-  const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
-  const realisticNativePayload = options.delete
-    ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet ?? "", new_string: "" })
-    : (result.originalSnippet
-        ? JSON.stringify({ path: fullPath, old_string: result.originalSnippet, new_string: result.newSnippet ?? snippetInput })
-        : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput }));
-  recordTelemetryEvent({
-    targetPath: fullPath,
-    projectRoot: root,
-    operation: "splice",
-    surface: "cli",
-    idiomsUsed: idiomsUsedInSnippet,
-    nativeText: result.modifiedCode,
-    realisticNativeText: realisticNativePayload,
-    preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
-    aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
-  });
+  if (!options.suppressTelemetry && !options.dryRun) {
+    const responseMsg = `✔ Spliced symbol '${result.symbol ?? options.symbol ?? ""}' in ${filePath} (${result.tokensSaved ?? 0} tokens saved)`;
+    const realisticNativePayload = options.delete
+      ? JSON.stringify({
+          path: fullPath,
+          old_string: result.originalSnippet ?? "",
+          new_string: "",
+        })
+      : result.originalSnippet
+        ? JSON.stringify({
+            path: fullPath,
+            old_string: result.originalSnippet,
+            new_string: result.newSnippet ?? snippetInput,
+          })
+        : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput });
+    recordTelemetryEvent({
+      targetPath: fullPath,
+      projectRoot: root,
+      operation: "splice",
+      surface: "cli",
+      idiomsUsed: idiomsUsedInSnippet,
+      nativeText: result.modifiedCode,
+      realisticNativeText: realisticNativePayload,
+      preservedTriviaTokens: result.preservedTriviaTokens ?? 0,
+      aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+    });
+  }
 
   return result;
 }
@@ -7494,9 +8188,9 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
     norm === "overwrite" ||
     norm === ":overwrite"
   );
-  }
+}
 
-  const SPLICE_PASSTHROUGH_FILENAMES = new Set([
+const SPLICE_PASSTHROUGH_FILENAMES = new Set([
   "Cargo.toml",
   "Cargo.lock",
   "go.mod",
@@ -7508,9 +8202,9 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
   ".dockerignore",
   ".editorconfig",
   ".env",
-  ]);
+]);
 
-  const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
+const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
   ".toml",
   ".mod",
   ".sum",
@@ -7530,246 +8224,221 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
   ".sql",
   ".txt",
   ".lock",
-  ]);
+]);
 
-  function isSpliceTargetFileCandidate(cand: string): boolean {
-  const clean = cand.trim().replace(/^['"`]|['"`]$/g, "");
+function isSpliceTargetFileCandidate(cand: string): boolean {
+  const clean = cand
+    .trim()
+    .replace(/^['"`]|['"`]$/g, "")
+    .replace(/\\/g, "/");
   if (!clean || /\s/.test(clean)) return false;
-  const base = path.basename(clean);
+  const base = path.posix.basename(clean);
   if (SPLICE_PASSTHROUGH_FILENAMES.has(base)) return true;
-  const ext = path.extname(clean).toLowerCase();
+  const ext = path.posix.extname(clean).toLowerCase();
   if (!ext) return false;
   return (
-    KNOWN_TARGET_EXTENSIONS.has(ext) ||
-    SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) ||
-    ext === ".aice"
+    KNOWN_TARGET_EXTENSIONS.has(ext) || SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) || ext === ".aice"
   );
-  }
+}
 
-  function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): boolean {
-    if (!isSpliceTargetFileCandidate(spec)) return false;
-    if (!defaultFilePath) return true;
-    if (spec.includes("/") || spec.includes("\\")) return true;
-    if (
-      path.resolve(spec) === path.resolve(defaultFilePath) ||
-      path.basename(spec) === path.basename(defaultFilePath)
-    ) {
-      return true;
-    }
-    return !/^[A-Z][A-Za-z0-9_]*\.[a-zA-Z0-9_]+$/i.test(spec);
+function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): boolean {
+  if (!isSpliceTargetFileCandidate(spec)) return false;
+  if (!defaultFilePath) return true;
+  if (spec.includes("/") || spec.includes("\\")) return true;
+  const normSpec = spec.replace(/\\/g, "/");
+  const normDefault = defaultFilePath.replace(/\\/g, "/");
+  if (
+    path.resolve(spec) === path.resolve(defaultFilePath) ||
+    path.posix.basename(normSpec) === path.posix.basename(normDefault)
+  ) {
+    return true;
   }
+  return !/^[A-Z][A-Za-z0-9_]*\.[a-zA-Z0-9_]+$/i.test(spec);
+}
 
-  /**
+/**
  * Parses a multi-block splice heredoc/stream delimited by `=== <symbol> ===`,
  * `=== <filePath> ===`, `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
  */
-  export function parseMultiBlockSpliceStream(
-    rawStream: string,
-    defaultFilePath?: string,
-  ): ParsedMultiBlockSpliceStream | null {
-    if (!rawStream || !rawStream.trim()) return null;
-    const lines = rawStream.split(/\r?\n/);
-    const headerRe =
-      /^\s*(?:(?:\/\/|#)\s*)?(?:={3,}\s*([^=\r\n]+?)\s*={3,}|-{3,}\s*([^-\r\n]+?)\s*-{3,}|(?:\/\/|#)\s*(?:FILE|SYMBOL|EDIT):\s*([^\r\n]+?))\s*$/i;
-    const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
+export function parseMultiBlockSpliceStream(
+  rawStream: string,
+  defaultFilePath?: string,
+): ParsedMultiBlockSpliceStream | null {
+  if (!rawStream || !rawStream.trim()) return null;
+  const lines = rawStream.split(/\r?\n/);
+  const headerRe = /^\s*={3,}\s*([^=\r\n]+?)\s*={3,}\s*$/;
+  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
 
-    const preHeaderLines: string[] = [];
-    const sections: Array<{
-      filePath?: string;
-      symbol: string;
-      cloneFrom?: string;
-      isDelete: boolean;
-      lines: string[];
-    }> = [];
+  const preHeaderLines: string[] = [];
+  const sections: Array<{
+    filePath?: string;
+    symbol: string;
+    cloneFrom?: string;
+    isDelete: boolean;
+    lines: string[];
+  }> = [];
 
-    let inMdFence = false;
-    let mdFenceChar = "";
-    let mdFenceLen = 0;
-    let inHunkBlock = false;
+  let inMdFence = false;
+  let mdFenceChar = "";
+  let mdFenceLen = 0;
+  let inHunkBlock = false;
 
-    for (const line of lines) {
-      const activeFp =
-        sections.length > 0
-          ? (sections[sections.length - 1].filePath ?? defaultFilePath)
-          : defaultFilePath;
-      const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
-      if (isMdSection && sections.length > 0) {
-        if (!inMdFence) {
-          const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
-          if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
-            inMdFence = true;
-            mdFenceChar = openMatch[1][0];
-            mdFenceLen = openMatch[1].length;
-            sections[sections.length - 1].lines.push(line);
-            continue;
-          }
-        } else {
-          const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-          if (
-            closeMatch &&
-            closeMatch[1][0] === mdFenceChar &&
-            closeMatch[1].length >= mdFenceLen
-          ) {
-            inMdFence = false;
-            mdFenceChar = "";
-            mdFenceLen = 0;
-          }
+  for (const line of lines) {
+    const activeFp =
+      sections.length > 0
+        ? (sections[sections.length - 1].filePath ?? defaultFilePath)
+        : defaultFilePath;
+    const isMdSection = Boolean(activeFp && /\.(?:md|markdown)$/i.test(activeFp));
+    if (isMdSection && sections.length > 0) {
+      if (!inMdFence) {
+        const openMatch = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+        if (openMatch && !(openMatch[1][0] === "`" && openMatch[2].includes("`"))) {
+          inMdFence = true;
+          mdFenceChar = openMatch[1][0];
+          mdFenceLen = openMatch[1].length;
           sections[sections.length - 1].lines.push(line);
           continue;
         }
+      } else {
+        const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+        if (closeMatch && closeMatch[1][0] === mdFenceChar && closeMatch[1].length >= mdFenceLen) {
+          inMdFence = false;
+          mdFenceChar = "";
+          mdFenceLen = 0;
+        }
+        sections[sections.length - 1].lines.push(line);
+        continue;
       }
+    }
 
-      if (sections.length > 0 && !inMdFence) {
-        if (!inHunkBlock && /^\s*<{3,}\s*$/.test(line)) {
-          inHunkBlock = true;
-          sections[sections.length - 1].lines.push(line);
-          continue;
-        }
-        if (inHunkBlock) {
-          if (/^\s*>{3,}\s*$/.test(line)) {
-            inHunkBlock = false;
-          }
-          sections[sections.length - 1].lines.push(line);
-          continue;
-        }
+    if (sections.length > 0 && !inMdFence) {
+      if (!inHunkBlock && /^\s*<{3,}\s*$/.test(line)) {
+        inHunkBlock = true;
+        sections[sections.length - 1].lines.push(line);
+        continue;
       }
+      if (inHunkBlock) {
+        if (/^\s*>{3,}\s*$/.test(line)) {
+          inHunkBlock = false;
+        }
+        sections[sections.length - 1].lines.push(line);
+        continue;
+      }
+    }
 
-      const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
-      if (m) {
-        let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
-        if (/^[^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile)\s*:+$/i.test(spec)) {
-          const emptySymFile = spec.replace(/\s*:+$/, "").trim();
+    const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
+    if (m) {
+      let spec = (m[1] || "").trim().replace(/^['"`]|['"`]$/g, "");
+      if (/:+$/.test(spec)) {
+        const emptySymFile = spec.replace(/\s*:+$/, "").trim();
+        if (emptySymFile && isSpliceTargetFileCandidate(emptySymFile)) {
           throw buildEmptySpliceBlockError(
             emptySymFile,
             undefined,
             `parsing malformed stream header '=== ${spec} ===' (missing <symbol>, L<start>-L<end>, or :eof after colon)`,
           );
         }
-        let isDelete = false;
-        if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
-          isDelete = true;
-          spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
-        }
-        let cloneFrom: string | undefined;
-        const cloneMatch = spec.match(
-          /\s*(?:@clone|\(clone)\s*\(\s*([^()]+)\s*\)|\s*\(clone\s+([^()]+)\)|\s+@clone\s+([^\s()]+)/i,
-        );
-        if (cloneMatch) {
-          cloneFrom = (cloneMatch[1] || cloneMatch[2] || cloneMatch[3]).trim();
-          spec = spec.replace(cloneMatch[0], "").trim();
-        }
-        let blockFilePath: string | undefined;
-        let blockSymbol = spec;
-        const fileSymMatch = spec.match(
-          /^([^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile))(?:\s*(?::+|#)\s*|\s+)(.+)$/,
-        );
-        if (fileSymMatch) {
-          const candFile = fileSymMatch[1].trim();
-          if (isSpliceTargetFileCandidate(candFile)) {
-            blockFilePath = candFile;
-            blockSymbol = fileSymMatch[2].trim();
-          }
-        } else if (!isDelete && isBareSpliceStreamFileHeader(spec, defaultFilePath)) {
-          blockFilePath = spec;
-          blockSymbol = ":create";
-        }
-        const isValidSymbol =
-          Boolean(blockSymbol) &&
-          (Boolean(blockFilePath) ||
-            !/\s/.test(blockSymbol) ||
-            /^[.#@]/.test(blockSymbol) ||
-            (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
-        if (isValidSymbol) {
-          inMdFence = false;
-          mdFenceChar = "";
-          mdFenceLen = 0;
-          inHunkBlock = false;
-          sections.push({
-            filePath: blockFilePath,
-            symbol: blockSymbol,
-            cloneFrom,
-            isDelete,
-            lines: [],
-          });
-          continue;
-        }
       }
-      if (sections.length === 0) {
-        preHeaderLines.push(line);
-      } else {
-        sections[sections.length - 1].lines.push(line);
+      let isDelete = false;
+      if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
+        isDelete = true;
+        spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
       }
-    }
-
-    if (sections.length === 0) return null;
-
-    const meaningfulPre = preHeaderLines.filter(
-      (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
-    );
-    if (meaningfulPre.length > 0) return null;
-
-    let lastExplicitFilePath: string | undefined;
-    const resolvedBlocks = sections.map((sec) => {
-      const body = sec.lines
-        .join("\n")
-        .replace(/^\n+|\n+$/g, "")
-        .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
-      const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
-      if (sec.filePath) {
-        lastExplicitFilePath = sec.filePath;
-      }
-      const effectiveSymbol =
-        sec.symbol === ":create" && containsHunkMarkers(body) ? ":hunk" : sec.symbol;
-      if (
-        !del &&
-        !sec.cloneFrom &&
-        !isCreateOrOverwriteSymbol(effectiveSymbol) &&
-        !body.trim()
-      ) {
-        throw buildEmptySpliceBlockError(
-          sec.filePath ?? defaultFilePath ?? lastExplicitFilePath ?? "<file>",
-          effectiveSymbol,
-          "parsing --stdin heredoc block",
-        );
-      }
-      return {
-        filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
-        explicitFilePath: sec.filePath ?? lastExplicitFilePath,
-        symbol: effectiveSymbol,
-        cloneFrom: sec.cloneFrom,
-        code: del ? undefined : body,
-        delete: del || undefined,
-      };
-    });
-
-    if (resolvedBlocks.some((b) => !b.filePath)) {
-      if (defaultFilePath === "") {
-        return {
-          singleFileEdits: resolvedBlocks.map((b) => ({
-            symbol: b.symbol,
-            cloneFrom: b.cloneFrom,
-            code: b.code,
-            delete: b.delete,
-          })),
-        };
-      }
-      return null;
-    }
-
-    const hasCreateOrOverwriteBlock = resolvedBlocks.some((b) =>
-      isCreateOrOverwriteSymbol(b.symbol),
-    );
-
-    const allSameDefault =
-      !hasCreateOrOverwriteBlock &&
-      Boolean(defaultFilePath) &&
-      resolvedBlocks.every(
-        (b) =>
-          !b.explicitFilePath ||
-          path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
+      let cloneFrom: string | undefined;
+      const cloneMatch = spec.match(
+        /\s*(?:@clone|\(clone)\s*\(\s*([^()]+)\s*\)|\s*\(clone\s+([^()]+)\)|\s+@clone\s+([^\s()]+)/i,
       );
+      if (cloneMatch) {
+        cloneFrom = (cloneMatch[1] || cloneMatch[2] || cloneMatch[3]).trim();
+        spec = spec.replace(cloneMatch[0], "").trim();
+      }
+      let blockFilePath: string | undefined;
+      let blockSymbol = spec;
+      const driveOffset = /^[A-Za-z]:[\\/]/.test(spec) ? 2 : 0;
+      const restAfterDrive = spec.slice(driveOffset);
+      const sepRe = /\s*(?::+|#)\s*|\s+/g;
+      let sepMatch: RegExpExecArray | null = sepRe.exec(restAfterDrive);
+      while (sepMatch !== null) {
+        const splitIdx = driveOffset + sepMatch.index;
+        const candFile = spec.slice(0, splitIdx).trim();
+        const candSym = spec.slice(splitIdx + sepMatch[0].length).trim();
+        if (candFile && candSym && isSpliceTargetFileCandidate(candFile)) {
+          blockFilePath = candFile;
+          blockSymbol = candSym;
+          break;
+        }
+        sepMatch = sepRe.exec(restAfterDrive);
+      }
+      if (!blockFilePath && !isDelete && isBareSpliceStreamFileHeader(spec, defaultFilePath)) {
+        blockFilePath = spec;
+        blockSymbol = ":create";
+      }
+      const isValidSymbol =
+        Boolean(blockSymbol) &&
+        (Boolean(blockFilePath) ||
+          !/\s/.test(blockSymbol) ||
+          /^[.#@]/.test(blockSymbol) ||
+          (Boolean(defaultFilePath) && !/[{};=]/.test(blockSymbol)));
+      if (isValidSymbol) {
+        inMdFence = false;
+        mdFenceChar = "";
+        mdFenceLen = 0;
+        inHunkBlock = false;
+        sections.push({
+          filePath: blockFilePath,
+          symbol: blockSymbol,
+          cloneFrom,
+          isDelete,
+          lines: [],
+        });
+        continue;
+      }
+    }
+    if (sections.length === 0) {
+      preHeaderLines.push(line);
+    } else {
+      sections[sections.length - 1].lines.push(line);
+    }
+  }
 
-    if (allSameDefault) {
+  if (sections.length === 0) return null;
+
+  const meaningfulPre = preHeaderLines.filter(
+    (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
+  );
+  if (meaningfulPre.length > 0) return null;
+
+  let lastExplicitFilePath: string | undefined;
+  const resolvedBlocks = sections.map((sec) => {
+    const body = sec.lines
+      .join("\n")
+      .replace(/^\n+|\n+$/g, "")
+      .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
+    const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
+    if (sec.filePath) {
+      lastExplicitFilePath = sec.filePath;
+    }
+    const effectiveSymbol =
+      sec.symbol === ":create" && containsHunkMarkers(body) ? ":hunk" : sec.symbol;
+    if (!del && !sec.cloneFrom && !isCreateOrOverwriteSymbol(effectiveSymbol) && !body.trim()) {
+      throw buildEmptySpliceBlockError(
+        sec.filePath ?? defaultFilePath ?? lastExplicitFilePath ?? "<file>",
+        effectiveSymbol,
+        "parsing --stdin heredoc block",
+      );
+    }
+    return {
+      filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
+      explicitFilePath: sec.filePath ?? lastExplicitFilePath,
+      symbol: effectiveSymbol,
+      cloneFrom: sec.cloneFrom,
+      code: del ? undefined : body,
+      delete: del || undefined,
+    };
+  });
+
+  if (resolvedBlocks.some((b) => !b.filePath)) {
+    if (defaultFilePath === "") {
       return {
         singleFileEdits: resolvedBlocks.map((b) => ({
           symbol: b.symbol,
@@ -7779,226 +8448,350 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
         })),
       };
     }
-
-    const batchItems: BatchSpliceItem[] = [];
-    if (!hasCreateOrOverwriteBlock) {
-      const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
-      for (const b of resolvedBlocks) {
-        const fp = b.filePath!;
-        const list = groupedByFile.get(fp) ?? [];
-        list.push({
-          symbol: b.symbol,
-          cloneFrom: b.cloneFrom,
-          code: b.code,
-          delete: b.delete,
-        });
-        groupedByFile.set(fp, list);
-      }
-
-      for (const [fp, edits] of groupedByFile.entries()) {
-        if (edits.length === 1) {
-          batchItems.push({
-            filePath: fp,
-            symbol: edits[0].symbol,
-            cloneFrom: edits[0].cloneFrom,
-            code: edits[0].code,
-            delete: edits[0].delete,
-          });
-        } else {
-          batchItems.push({
-            filePath: fp,
-            edits,
-          });
-        }
-      }
-    } else {
-      let idx = 0;
-      while (idx < resolvedBlocks.length) {
-        const b = resolvedBlocks[idx]!;
-        const fp = b.filePath!;
-        if (isCreateOrOverwriteSymbol(b.symbol)) {
-          batchItems.push({
-            filePath: fp,
-            symbol: b.symbol,
-            code: b.code,
-            create: true,
-          });
-          idx++;
-          continue;
-        }
-        const edits: SymbolSpliceEdit[] = [];
-        while (
-          idx < resolvedBlocks.length &&
-          resolvedBlocks[idx]!.filePath === fp &&
-          !isCreateOrOverwriteSymbol(resolvedBlocks[idx]!.symbol)
-        ) {
-          const cur = resolvedBlocks[idx]!;
-          edits.push({
-            symbol: cur.symbol,
-            cloneFrom: cur.cloneFrom,
-            code: cur.code,
-            delete: cur.delete,
-          });
-          idx++;
-        }
-        if (edits.length === 1) {
-          batchItems.push({
-            filePath: fp,
-            symbol: edits[0].symbol,
-            cloneFrom: edits[0].cloneFrom,
-            code: edits[0].code,
-            delete: edits[0].delete,
-          });
-        } else {
-          batchItems.push({
-            filePath: fp,
-            edits,
-          });
-        }
-      }
-    }
-
-    return { batchItems };
+    return null;
   }
 
-  /**
+  const hasCreateOrOverwriteBlock = resolvedBlocks.some((b) => isCreateOrOverwriteSymbol(b.symbol));
+
+  const allSameDefault =
+    !hasCreateOrOverwriteBlock &&
+    Boolean(defaultFilePath) &&
+    resolvedBlocks.every(
+      (b) =>
+        !b.explicitFilePath || path.resolve(b.explicitFilePath) === path.resolve(defaultFilePath!),
+    );
+
+  if (allSameDefault) {
+    return {
+      singleFileEdits: resolvedBlocks.map((b) => ({
+        symbol: b.symbol,
+        cloneFrom: b.cloneFrom,
+        code: b.code,
+        delete: b.delete,
+      })),
+    };
+  }
+
+  const batchItems: BatchSpliceItem[] = [];
+  if (!hasCreateOrOverwriteBlock) {
+    const groupedByFile = new Map<string, SymbolSpliceEdit[]>();
+    for (const b of resolvedBlocks) {
+      const fp = b.filePath!;
+      const list = groupedByFile.get(fp) ?? [];
+      list.push({
+        symbol: b.symbol,
+        cloneFrom: b.cloneFrom,
+        code: b.code,
+        delete: b.delete,
+      });
+      groupedByFile.set(fp, list);
+    }
+
+    for (const [fp, edits] of groupedByFile.entries()) {
+      if (edits.length === 1) {
+        batchItems.push({
+          filePath: fp,
+          symbol: edits[0].symbol,
+          cloneFrom: edits[0].cloneFrom,
+          code: edits[0].code,
+          delete: edits[0].delete,
+        });
+      } else {
+        batchItems.push({
+          filePath: fp,
+          edits,
+        });
+      }
+    }
+  } else {
+    let idx = 0;
+    while (idx < resolvedBlocks.length) {
+      const b = resolvedBlocks[idx]!;
+      const fp = b.filePath!;
+      if (isCreateOrOverwriteSymbol(b.symbol)) {
+        batchItems.push({
+          filePath: fp,
+          symbol: b.symbol,
+          code: b.code,
+          create: true,
+        });
+        idx++;
+        continue;
+      }
+      const edits: SymbolSpliceEdit[] = [];
+      while (
+        idx < resolvedBlocks.length &&
+        resolvedBlocks[idx]!.filePath === fp &&
+        !isCreateOrOverwriteSymbol(resolvedBlocks[idx]!.symbol)
+      ) {
+        const cur = resolvedBlocks[idx]!;
+        edits.push({
+          symbol: cur.symbol,
+          cloneFrom: cur.cloneFrom,
+          code: cur.code,
+          delete: cur.delete,
+        });
+        idx++;
+      }
+      if (edits.length === 1) {
+        batchItems.push({
+          filePath: fp,
+          symbol: edits[0].symbol,
+          cloneFrom: edits[0].cloneFrom,
+          code: edits[0].code,
+          delete: edits[0].delete,
+        });
+      } else {
+        batchItems.push({
+          filePath: fp,
+          edits,
+        });
+      }
+    }
+  }
+
+  return { batchItems };
+}
+
+/**
  * Executes a batch of splices and/or file creations across one or more files atomically.
  * If any item in the batch fails, all created and modified files are rolled back to their exact original state.
  */
-  export async function spliceBatch(
-    itemsOrStream: BatchSpliceItem[] | string,
-    optionsOrProjectRoot: BatchSpliceOptions | string = {},
-  ): Promise<BatchSpliceResult> {
-    const options: BatchSpliceOptions =
-      typeof optionsOrProjectRoot === "string"
-        ? { projectRoot: optionsOrProjectRoot }
-        : optionsOrProjectRoot;
-    const items: BatchSpliceItem[] =
-      typeof itemsOrStream === "string"
-        ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
-        : itemsOrStream;
-    const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-    const backups = new Map<string, string>();
+export async function spliceBatch(
+  itemsOrStream: BatchSpliceItem[] | string,
+  optionsOrProjectRoot: BatchSpliceOptions | string = {},
+): Promise<BatchSpliceResult> {
+  const options: BatchSpliceOptions =
+    typeof optionsOrProjectRoot === "string"
+      ? { projectRoot: optionsOrProjectRoot }
+      : optionsOrProjectRoot;
+  const items: BatchSpliceItem[] =
+    typeof itemsOrStream === "string"
+      ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
+      : itemsOrStream;
+  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const effectiveRoot = options.projectRoot
+    ? path.resolve(options.projectRoot)
+    : findProjectRoot(baseDir, baseDir);
+  const backups = new Map<string, string>();
+  const virtualFs = new Map<string, string>();
+  const configSnapshots = new Map<string, string | null>();
 
-    // Snapshot original contents of all existing target files before applying any changes
+  for (const cfgFile of [
+    path.join(effectiveRoot, "aice.config.json"),
+    path.join(effectiveRoot, ".aice-idioms.json"),
+    path.join(effectiveRoot, ".aice-cache", "idioms.json"),
+  ]) {
+    configSnapshots.set(cfgFile, fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8") : null);
+  }
+
+  for (const item of items) {
+    const rawFp = item.filePath || item.file || item.path || "";
+    const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
+    if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
+      backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
+    }
+  }
+
+  const results: SpliceResult[] = [];
+  const modifiedSet = new Set<string>();
+  const newlyCreatedFiles: string[] = [];
+  const pendingTelemetry: Array<Parameters<typeof recordTelemetryEvent>[0]> = [];
+
+  try {
     for (const item of items) {
       const rawFp = item.filePath || item.file || item.path || "";
       const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
-      if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
-        backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
+      const itemDryRun = Boolean(item.dryRun ?? options.dryRun);
+      const itemProjectRoot = item.projectRoot ?? options.projectRoot;
+      const rootForItem = itemProjectRoot
+        ? path.resolve(itemProjectRoot)
+        : findProjectRoot(path.dirname(fullPath), effectiveRoot);
+      for (const cfgFile of [
+        path.join(rootForItem, "aice.config.json"),
+        path.join(rootForItem, ".aice-idioms.json"),
+        path.join(rootForItem, ".aice-cache", "idioms.json"),
+      ]) {
+        if (!configSnapshots.has(cfgFile)) {
+          configSnapshots.set(
+            cfgFile,
+            fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8") : null,
+          );
+        }
       }
-    }
 
-    const results: SpliceResult[] = [];
-    const modifiedSet = new Set<string>();
-    const newlyCreatedFiles: string[] = [];
+      const existedBeforeBatch = backups.has(fullPath);
+      const fileExistsNow = virtualFs.has(fullPath) || fs.existsSync(fullPath);
+      const resolvedCode =
+        item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
 
-    try {
-      for (const item of items) {
-        const rawFp = item.filePath || item.file || item.path || "";
-        const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
-        const existedBeforeBatch = backups.has(fullPath);
-        const fileExistsNow = fs.existsSync(fullPath);
-        const resolvedCode =
-          item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
+      const isCreateRoute =
+        !item.delete &&
+        !(fileExistsNow && containsHunkMarkers(resolvedCode ?? "")) &&
+        (!fileExistsNow ||
+          (!item.append &&
+            !item.insertAfter &&
+            !item.insert_after &&
+            !item.insertBefore &&
+            !item.insert_before &&
+            (!item.edits || item.edits.length === 0) &&
+            isCreateOrOverwriteSymbol(item.symbol)));
 
-        const isCreateRoute =
-          !item.delete &&
-          !(fileExistsNow && containsHunkMarkers(resolvedCode ?? "")) &&
-          (!fileExistsNow ||
-            (!item.append &&
-              !item.insertAfter &&
-              !item.insert_after &&
-              !item.insertBefore &&
-              !item.insert_before &&
-              (!item.edits || item.edits.length === 0) &&
-              isCreateOrOverwriteSymbol(item.symbol)));
-
-        if (isCreateRoute) {
-          const createPayload =
-            resolvedCode ??
-            (item.edits
-              ? item.edits
-                  .filter((e) => !e.delete)
-                  .map((e) => e.code ?? e.body ?? "")
-                  .filter(Boolean)
-                  .join("\n\n")
-              : "");
-          const createRes = await createFile(fullPath, {
-            code: createPayload,
-            overwrite: true,
-            dryRun: item.dryRun ?? options.dryRun,
-            idioms: item.idioms ?? options.idioms,
-            projectRoot: item.projectRoot ?? options.projectRoot,
-          });
-          if (
-            !existedBeforeBatch &&
-            !(item.dryRun ?? options.dryRun) &&
-            !newlyCreatedFiles.includes(fullPath)
-          ) {
+      if (isCreateRoute) {
+        const createPayload =
+          resolvedCode ??
+          (item.edits
+            ? item.edits
+                .filter((e) => !e.delete)
+                .map((e) => e.code ?? e.body ?? "")
+                .filter(Boolean)
+                .join("\n\n")
+            : "");
+        const createRes = await createFile(fullPath, {
+          code: createPayload,
+          overwrite: true,
+          dryRun: itemDryRun,
+          idioms: item.idioms ?? options.idioms,
+          projectRoot: itemProjectRoot,
+          suppressTelemetry: true,
+        });
+        if (itemDryRun) {
+          virtualFs.set(fullPath, createRes.nativeCode);
+        } else {
+          if (!existedBeforeBatch && !newlyCreatedFiles.includes(fullPath)) {
             newlyCreatedFiles.push(fullPath);
           }
-          results.push({
-            success: true,
-            filePath: createRes.filePath,
-            symbol: item.symbol || ":create",
-            modifiedCode: createRes.nativeCode,
-            newFileContent: createRes.nativeCode,
-            newAiceSource: createRes.aiceInput,
-            tokensSaved: createRes.tokensSaved,
+          pendingTelemetry.push({
+            targetPath: fullPath,
+            projectRoot: rootForItem,
+            operation: "create",
+            surface: "cli",
+            idiomsUsed: createRes.idiomsUsed,
+            nativeText: createRes.nativeCode,
+            realisticNativeText: JSON.stringify({
+              path: fullPath,
+              content: createRes.nativeCode,
+            }),
+            aiceText: createPayload,
           });
-          modifiedSet.add(createRes.filePath);
-          continue;
         }
-
-        const res = await splice(fullPath, {
-          ...item,
-          code: resolvedCode,
-          insertAfter: item.insertAfter ?? item.insert_after,
-          insertBefore: item.insertBefore ?? item.insert_before,
-          projectRoot: item.projectRoot ?? options.projectRoot,
-          dryRun: item.dryRun ?? options.dryRun,
-          compile: item.compile ?? options.compile,
-          idioms: item.idioms ?? options.idioms,
-          preserveDocs: item.preserveDocs ?? options.preserveDocs,
+        results.push({
+          success: true,
+          filePath: createRes.filePath,
+          symbol: item.symbol || ":create",
+          modifiedCode: createRes.nativeCode,
+          newFileContent: createRes.nativeCode,
+          newAiceSource: createRes.aiceInput,
+          tokensSaved: createRes.tokensSaved,
         });
-        if (
-          !existedBeforeBatch &&
-          !(item.dryRun ?? options.dryRun) &&
-          !newlyCreatedFiles.includes(fullPath)
-        ) {
+        modifiedSet.add(createRes.filePath);
+        continue;
+      }
+
+      const res = await splice(fullPath, {
+        ...item,
+        code: resolvedCode,
+        insertAfter: item.insertAfter ?? item.insert_after,
+        insertBefore: item.insertBefore ?? item.insert_before,
+        projectRoot: itemProjectRoot,
+        dryRun: itemDryRun,
+        compile: item.compile ?? options.compile,
+        idioms: item.idioms ?? options.idioms,
+        preserveDocs: item.preserveDocs ?? options.preserveDocs,
+        sourceOverride: itemDryRun ? virtualFs.get(fullPath) : undefined,
+        suppressTelemetry: true,
+      });
+      if (itemDryRun) {
+        virtualFs.set(fullPath, res.modifiedCode);
+      } else {
+        if (!existedBeforeBatch && !newlyCreatedFiles.includes(fullPath)) {
           newlyCreatedFiles.push(fullPath);
         }
-        results.push(res);
-        modifiedSet.add(res.filePath);
+        const snippetInput =
+          resolvedCode ??
+          item.body ??
+          (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+        const responseMsg = `✔ Spliced symbol '${res.symbol ?? item.symbol ?? ""}' in ${rawFp} (${res.tokensSaved ?? 0} tokens saved)`;
+        const realisticNativePayload = item.delete
+          ? JSON.stringify({
+              path: fullPath,
+              old_string: res.originalSnippet ?? "",
+              new_string: "",
+            })
+          : res.originalSnippet
+            ? JSON.stringify({
+                path: fullPath,
+                old_string: res.originalSnippet,
+                new_string: res.newSnippet ?? snippetInput,
+              })
+            : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput });
+        pendingTelemetry.push({
+          targetPath: fullPath,
+          projectRoot: rootForItem,
+          operation: "splice",
+          surface: "cli",
+          idiomsUsed: false,
+          nativeText: res.modifiedCode,
+          realisticNativeText: realisticNativePayload,
+          preservedTriviaTokens: res.preservedTriviaTokens ?? 0,
+          aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+        });
       }
-    } catch (err) {
-      // Atomic rollback of all touched files!
-      if (!options.dryRun) {
-        for (const createdFp of newlyCreatedFiles) {
-          try {
-            if (fs.existsSync(createdFp)) {
-              fs.unlinkSync(createdFp);
-            }
-          } catch {
-            // ignore
-          }
-        }
-        for (const [fp, origContent] of backups.entries()) {
-          try {
-            fs.writeFileSync(fp, origContent, "utf-8");
-          } catch {
-            // ignore
-          }
-        }
-      }
-      throw err;
+      results.push(res);
+      modifiedSet.add(res.filePath);
     }
-
-    return {
-      success: true,
-      results,
-      modifiedFiles: Array.from(modifiedSet),
-      totalEdits: results.length,
-    };
+  } catch (err) {
+    for (const createdFp of newlyCreatedFiles) {
+      try {
+        if (fs.existsSync(createdFp)) {
+          fs.unlinkSync(createdFp);
+        }
+      } catch {
+        // ignore
+      }
+    }
+    for (const [fp, origContent] of backups.entries()) {
+      try {
+        fs.writeFileSync(fp, origContent, "utf-8");
+      } catch {
+        // ignore
+      }
+    }
+    for (const [cfgFp, prevContent] of configSnapshots.entries()) {
+      try {
+        if (prevContent === null) {
+          if (fs.existsSync(cfgFp)) {
+            fs.unlinkSync(cfgFp);
+            const parentDir = path.dirname(cfgFp);
+            if (
+              path.basename(parentDir) === ".aice-cache" &&
+              fs.existsSync(parentDir) &&
+              fs.readdirSync(parentDir).length === 0
+            ) {
+              fs.rmdirSync(parentDir);
+            }
+          }
+        } else {
+          fs.mkdirSync(path.dirname(cfgFp), { recursive: true });
+          fs.writeFileSync(cfgFp, prevContent, "utf-8");
+        }
+      } catch {
+        // ignore
+      }
+    }
+    throw err;
   }
+
+  if (!options.dryRun) {
+    for (const ev of pendingTelemetry) {
+      recordTelemetryEvent(ev);
+    }
+  }
+
+  return {
+    success: true,
+    results,
+    modifiedFiles: Array.from(modifiedSet),
+    totalEdits: results.length,
+  };
+}

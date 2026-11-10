@@ -21,9 +21,10 @@ import {
 import type { Block, Module } from "../core/ast.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import type { Span } from "../core/span.js";
+import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
-import { recordTelemetryEvent } from "../telemetry/index.js";
+import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import {
   findSpliceTargetSymbol,
@@ -31,8 +32,11 @@ import {
   getLineEnd,
   getNodeEndOffset,
   getStatementEndOffset,
+  locateNativeDeclarationSpan,
+  spliceNativeSource,
   spliceSource,
 } from "./splice.js";
+import { validateNativeSyntax } from "./syntax-validator.js";
 
 export type SymbolChangeType = "added" | "removed" | "modified" | "unchanged";
 
@@ -298,24 +302,53 @@ export function computeSemanticDiff(
 
   let oldAst: Module | undefined;
   let newAst: Module | undefined;
+  let oldSymSource = oldSource;
+  let newSymSource = newSource;
 
-  try {
-    oldAst = parse(oldSource);
-  } catch {
-    // oldSource syntax not parseable
-  }
+  const parseOrDecompile = (src: string, fp: string): { ast?: Module; symSource: string } => {
+    if (fp.endsWith(".aice")) {
+      try {
+        return { ast: parse(src), symSource: src };
+      } catch {
+        return { symSource: src };
+      }
+    }
+    const ext = path.extname(fp).toLowerCase();
+    if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) {
+      try {
+        const target = detectTargetFromPath(fp);
+        const decomp = withSuppressedTelemetry(() => decompile(src, target, { filePath: fp }));
+        return { ast: parse(decomp.aice), symSource: decomp.aice };
+      } catch {
+        // fallback to direct parse below
+      }
+    }
+    try {
+      return { ast: parse(src), symSource: src };
+    } catch {
+      try {
+        const target = detectTargetFromPath(ext ? fp : `${fp}.ts`);
+        const decomp = withSuppressedTelemetry(() => decompile(src, target, { filePath: fp }));
+        return { ast: parse(decomp.aice), symSource: decomp.aice };
+      } catch {
+        return { symSource: src };
+      }
+    }
+  };
 
-  try {
-    newAst = parse(newSource);
-  } catch {
-    // newSource syntax not parseable
-  }
+  const oldParsed = parseOrDecompile(oldSource, options.oldPath || filePath);
+  oldAst = oldParsed.ast;
+  oldSymSource = oldParsed.symSource;
+
+  const newParsed = parseOrDecompile(newSource, options.newPath || filePath);
+  newAst = newParsed.ast;
+  newSymSource = newParsed.symSource;
 
   const changes: SymbolDiffEntry[] = [];
 
   if (oldAst && newAst) {
-    const oldSymbols = extractModuleSymbols(oldAst, oldSource);
-    const newSymbols = extractModuleSymbols(newAst, newSource);
+    const oldSymbols = extractModuleSymbols(oldAst, oldSymSource);
+    const newSymbols = extractModuleSymbols(newAst, newSymSource);
 
     const oldSymbolsMap = new Map<string, ExtractedSymbol>();
     for (const s of oldSymbols) {
@@ -486,6 +519,19 @@ function applySemanticPatch(
   let currentSource = targetSource;
   let appliedHunks = 0;
   const totalHunks = blocks.length;
+  const ext = filePath !== "<memory>" ? path.extname(filePath).toLowerCase() : "";
+  const isNativeTarget = (() => {
+    if (filePath.endsWith(".aice")) return false;
+    if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) return true;
+    try {
+      parse(targetSource);
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+  const effectiveNativePath = filePath !== "<memory>" && ext ? filePath : "patch-target.ts";
+  const targetLang = isNativeTarget ? detectTargetFromPath(effectiveNativePath) : undefined;
 
   for (const block of blocks) {
     const headerMatch = block.match(/^---\s+Symbol:\s*([^\r\n]+)/i);
@@ -538,70 +584,61 @@ function applySemanticPatch(
     }
 
     try {
-      const ast = parse(currentSource);
-      const symInfo = findSpliceTargetSymbol(ast, symbolName);
-
-      if (action === "delete") {
-        if (symInfo) {
-          const res = spliceSource(currentSource, { symbol: symbolName, delete: true }, filePath);
-          currentSource = res.modifiedCode;
-        }
-        appliedHunks++;
-      } else if (action === "add") {
-        if (symInfo) {
-          const res = spliceSource(
-            currentSource,
-            { symbol: symbolName, code: replacementCode },
-            filePath,
+      if (isNativeTarget && targetLang) {
+        const existingSpan = locateNativeDeclarationSpan(currentSource, symbolName, targetLang);
+        if (action === "delete") {
+          if (existingSpan) {
+            const res = withSuppressedTelemetry(() =>
+              spliceNativeSource(
+                currentSource,
+                { symbol: symbolName, delete: true },
+                effectiveNativePath,
+              ),
+            );
+            currentSource = res.modifiedCode;
+          }
+          appliedHunks++;
+        } else if (existingSpan || symbolName.includes(".") || symbolName.includes("::")) {
+          const res = withSuppressedTelemetry(() =>
+            spliceNativeSource(
+              currentSource,
+              { symbol: symbolName, code: replacementCode },
+              effectiveNativePath,
+            ),
           );
           currentSource = res.modifiedCode;
           appliedHunks++;
         } else {
-          if (symbolName.includes(".") || symbolName.includes("::")) {
-            const parentName = symbolName.split(/\.|::/)[0];
-            const parentSym = findSpliceTargetSymbol(ast, parentName);
-            if (
-              parentSym &&
-              (parentSym.kind === "class" || parentSym.kind === "type" || parentSym.kind === "enum")
-            ) {
-              const res = spliceSource(
-                currentSource,
-                { symbol: parentName, append: true, code: replacementCode },
-                filePath,
-              );
-              currentSource = res.modifiedCode;
-              appliedHunks++;
-            } else {
-              const res = spliceSource(
-                currentSource,
-                { append: true, code: replacementCode },
-                filePath,
-              );
-              currentSource = res.modifiedCode;
-              appliedHunks++;
-            }
-          } else {
-            const res = spliceSource(
+          const res = withSuppressedTelemetry(() =>
+            spliceNativeSource(
               currentSource,
               { append: true, code: replacementCode },
-              filePath,
-            );
-            currentSource = res.modifiedCode;
-            appliedHunks++;
-          }
+              effectiveNativePath,
+            ),
+          );
+          currentSource = res.modifiedCode;
+          appliedHunks++;
         }
       } else {
-        // modify
-        if (symInfo) {
-          const res = spliceSource(
-            currentSource,
-            { symbol: symbolName, code: replacementCode },
-            filePath,
-          );
-          currentSource = res.modifiedCode;
+        const ast = parse(currentSource);
+        const symInfo = findSpliceTargetSymbol(ast, symbolName);
+
+        if (action === "delete") {
+          if (symInfo) {
+            const res = spliceSource(currentSource, { symbol: symbolName, delete: true }, filePath);
+            currentSource = res.modifiedCode;
+          }
           appliedHunks++;
-        } else {
-          if (symbolName.includes(".") || symbolName.includes("::")) {
+        } else if (action === "add") {
+          if (symInfo) {
+            const res = spliceSource(
+              currentSource,
+              { symbol: symbolName, code: replacementCode },
+              filePath,
+            );
+            currentSource = res.modifiedCode;
+            appliedHunks++;
+          } else if (symbolName.includes(".") || symbolName.includes("::")) {
             const parentName = symbolName.split(/\.|::/)[0];
             const parentSym = findSpliceTargetSymbol(ast, parentName);
             if (
@@ -633,6 +670,45 @@ function applySemanticPatch(
             currentSource = res.modifiedCode;
             appliedHunks++;
           }
+        } else if (symInfo) {
+          const res = spliceSource(
+            currentSource,
+            { symbol: symbolName, code: replacementCode },
+            filePath,
+          );
+          currentSource = res.modifiedCode;
+          appliedHunks++;
+        } else if (symbolName.includes(".") || symbolName.includes("::")) {
+          const parentName = symbolName.split(/\.|::/)[0];
+          const parentSym = findSpliceTargetSymbol(ast, parentName);
+          if (
+            parentSym &&
+            (parentSym.kind === "class" || parentSym.kind === "type" || parentSym.kind === "enum")
+          ) {
+            const res = spliceSource(
+              currentSource,
+              { symbol: parentName, append: true, code: replacementCode },
+              filePath,
+            );
+            currentSource = res.modifiedCode;
+            appliedHunks++;
+          } else {
+            const res = spliceSource(
+              currentSource,
+              { append: true, code: replacementCode },
+              filePath,
+            );
+            currentSource = res.modifiedCode;
+            appliedHunks++;
+          }
+        } else {
+          const res = spliceSource(
+            currentSource,
+            { append: true, code: replacementCode },
+            filePath,
+          );
+          currentSource = res.modifiedCode;
+          appliedHunks++;
         }
       }
     } catch {
@@ -642,7 +718,17 @@ function applySemanticPatch(
 
   // Zero-corruption guarantee: validate syntax of resulting code
   try {
-    parse(currentSource);
+    if (isNativeTarget && targetLang) {
+      const postVal = validateNativeSyntax(currentSource, targetLang, effectiveNativePath);
+      if (!postVal.valid) {
+        const origVal = validateNativeSyntax(targetSource, targetLang, effectiveNativePath);
+        if (origVal.valid) {
+          throw new Error(postVal.diagnostics.join("; "));
+        }
+      }
+    } else {
+      parse(currentSource);
+    }
     const success = appliedHunks === totalHunks && appliedHunks > 0;
     return {
       success,
@@ -688,9 +774,22 @@ function applyUnifiedDiff(
   }
 
   const hunks: Hunk[] = [];
-  let currentHunk: Hunk | null = null;
+  let currentHunk: (Hunk & { seenOld: number; seenNew: number }) | null = null;
+  let headerFileHint = "";
 
   for (const line of patchLines) {
+    if (!currentHunk && (line.startsWith("--- ") || line.startsWith("+++ "))) {
+      const candidateHdr = line
+        .slice(4)
+        .trim()
+        .replace(/^[ab]\//, "")
+        .split(/\t/)[0]
+        .trim();
+      if (candidateHdr && candidateHdr !== "/dev/null") {
+        headerFileHint = candidateHdr;
+      }
+      continue;
+    }
     const match = line.match(hunkRegex);
     if (match) {
       if (currentHunk) hunks.push(currentHunk);
@@ -700,12 +799,31 @@ function applyUnifiedDiff(
         newStart: Number.parseInt(match[3], 10),
         newCount: match[4] !== undefined ? Number.parseInt(match[4], 10) : 1,
         lines: [],
+        seenOld: 0,
+        seenNew: 0,
       };
-    } else if (
-      currentHunk &&
-      (line.startsWith("-") || line.startsWith("+") || line.startsWith(" ") || line === "")
-    ) {
-      currentHunk.lines.push(line === "" ? " " : line);
+    } else if (currentHunk) {
+      if (line.startsWith("\\")) {
+        continue;
+      }
+      if (line.startsWith("-") && !line.startsWith("--- ")) {
+        currentHunk.lines.push(line);
+        currentHunk.seenOld++;
+      } else if (line.startsWith("+") && !line.startsWith("+++ ")) {
+        currentHunk.lines.push(line);
+        currentHunk.seenNew++;
+      } else if (line.startsWith(" ")) {
+        currentHunk.lines.push(line);
+        currentHunk.seenOld++;
+        currentHunk.seenNew++;
+      } else if (
+        line === "" &&
+        (currentHunk.seenOld < currentHunk.oldCount || currentHunk.seenNew < currentHunk.newCount)
+      ) {
+        currentHunk.lines.push(" ");
+        currentHunk.seenOld++;
+        currentHunk.seenNew++;
+      }
     }
   }
   if (currentHunk) hunks.push(currentHunk);
@@ -817,9 +935,34 @@ function applyUnifiedDiff(
 
   const modified = sourceLines.join(lineEnding);
 
-  // Validate AST
+  // Validate resulting syntax (AICE DSL for .aice, native syntax validator for all 33+ native extensions)
+  const effectivePath = filePath !== "<memory>" ? filePath : headerFileHint || "<memory>";
+  const ext = effectivePath !== "<memory>" ? path.extname(effectivePath).toLowerCase() : "";
+  const isNativeTarget = (() => {
+    if (effectivePath.endsWith(".aice")) return false;
+    if (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) return true;
+    try {
+      parse(targetSource);
+      return false;
+    } catch {
+      return true;
+    }
+  })();
+
   try {
-    parse(modified);
+    if (isNativeTarget) {
+      const checkPath = ext ? effectivePath : "patch-target.ts";
+      const targetLang = detectTargetFromPath(checkPath);
+      const postVal = validateNativeSyntax(modified, targetLang, checkPath);
+      if (!postVal.valid) {
+        const origVal = validateNativeSyntax(targetSource, targetLang, checkPath);
+        if (origVal.valid) {
+          throw new Error(postVal.diagnostics.join("; "));
+        }
+      }
+    } else {
+      parse(modified);
+    }
     return {
       success: true,
       filePath,
@@ -964,13 +1107,28 @@ export async function patchFile(
   result.filePath = fullPath;
 
   if (result.success && !options.dryRun) {
+    const origMode = (await fs.promises.stat(fullPath)).mode;
     const dir = path.dirname(fullPath);
     const tmpFile = path.join(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
     );
-    await fs.promises.writeFile(tmpFile, result.modifiedSource, "utf-8");
-    await fs.promises.rename(tmpFile, fullPath);
+    try {
+      await fs.promises.writeFile(tmpFile, result.modifiedSource, {
+        encoding: "utf-8",
+        mode: origMode,
+      });
+      await fs.promises.rename(tmpFile, fullPath);
+    } catch (err) {
+      try {
+        if (fs.existsSync(tmpFile)) {
+          fs.unlinkSync(tmpFile);
+        }
+      } catch {
+        // ignore cleanup error
+      }
+      throw err;
+    }
 
     if (options.compile && fullPath.endsWith(".aice")) {
       const { ast: mod, trivia } = parseWithTrivia(result.modifiedSource, fullPath);
@@ -997,7 +1155,23 @@ export async function patchFile(
       });
 
       const outPath = fullPath.replace(/\.aice$/, innerExt ? "" : ".ts");
-      await fs.promises.writeFile(outPath, emitted, "utf-8");
+      const outTmp = path.join(
+        path.dirname(outPath),
+        `.${path.basename(outPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
+      );
+      try {
+        await fs.promises.writeFile(outTmp, emitted, "utf-8");
+        await fs.promises.rename(outTmp, outPath);
+      } catch (err) {
+        try {
+          if (fs.existsSync(outTmp)) {
+            fs.unlinkSync(outTmp);
+          }
+        } catch {
+          // ignore cleanup error
+        }
+        throw err;
+      }
     }
   }
 
