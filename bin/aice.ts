@@ -9,89 +9,32 @@ import * as readline from "node:readline";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import {
-  formatAgentsStatusTable,
-  getAgentsStatus,
-  removeAgents,
-  setupAgents,
-} from "../src/agents/index.js";
-import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
   findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
+  isSameOrDescendant,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
+  scanDirectoryFiles,
   setProjectAiceEnabled,
   setProjectIdiomsEnabled,
 } from "../src/config/index.js";
-import { parse, parseWithTrivia } from "../src/core/parser.js";
-import { decompile, executeRoundtrip } from "../src/decompiler/index.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../src/emitters/index.js";
-import {
-  applyProjectIdiomsToDirectory,
-  expandModuleIdioms,
-  expandProjectIdiomsInDirectory,
-  readProjectIdiom,
-  scanProjectIdioms,
-  updateProjectIdiom,
-} from "../src/idioms/index.js";
-import { AICE_VERSION, AiceMcpServer } from "../src/mcp/index.js";
-import {
-  analyzeProject,
-  buildGainReport,
-  formatAnalyzeReport,
-  formatGlobalGainDashboard,
-  formatProjectGainDetail,
-  recordTelemetryError,
-  resetTelemetryHistory,
-} from "../src/telemetry/index.js";
-import {
-  auditTokenomics,
-  formatProjectsMarkdownTable,
-  formatProjectsTerminalTable,
-  formatSingleFileSummary,
-  formatTokenomicsMarkdownTable,
-  formatTokenomicsTerminalTable,
-} from "../src/tokenomics/index.js";
-import {
-  type BatchCreateItem,
-  type BatchSpliceItem,
-  type ContextOptions,
-  createBatch,
-  createFile,
-  type DiffOptions,
-  diffFiles,
-  type FmtOptions,
-  formatAicePath,
-  formatAiceSource,
-  formatParitySummaryJson,
-  formatParitySummaryTerminal,
-  generateContext,
-  generateUnifiedDiff,
-  mergeMultiContextResults,
-  type OutlineOptions,
-  outlinePath,
-  type PatchOptions,
-  parseMultiBlockSpliceStream,
-  parseMultiFileCreateStream,
-  parseTargetWithInlineSymbol,
-  patchFile,
-  runParityGate,
-  type SpliceOptions,
-  splitContextTargets,
-  splice,
-  spliceBatch,
+import type { TargetLanguage } from "../src/emitters/index.js";
+import type {
+  BatchCreateItem,
+  BatchSpliceItem,
+  ContextOptions,
+  DiffOptions,
+  FmtOptions,
+  OutlineOptions,
+  PatchOptions,
+  SpliceOptions,
 } from "../src/tools/index.js";
-import { TypeChecker } from "../src/typechecker/checker.js";
-import {
-  attemptSelfRepair,
-  buildReportFromError,
-  formatDiagnosticJson,
-  formatDiagnosticText,
-} from "../src/typechecker/diagnostics.js";
+import { AICE_VERSION } from "../src/version.js";
 
 const program = new Command();
 
@@ -110,10 +53,44 @@ function writeTargetFile(outPath: string, content: string): void {
   fs.writeFileSync(outPath, content, "utf-8");
 }
 
+function resolveExplicitOrPolymorphicTarget(targetPath: string | undefined): {
+  resolvedPath: string;
+  projectRoot: string;
+  config: AiceProjectConfig;
+} {
+  if (targetPath !== undefined && targetPath.trim().length > 0) {
+    const cwd = path.resolve(process.cwd());
+    const resolvedPath = path.resolve(cwd, targetPath.trim());
+    let startDir = resolvedPath;
+    if (fs.existsSync(resolvedPath)) {
+      try {
+        if (!fs.statSync(resolvedPath).isDirectory()) {
+          startDir = path.dirname(resolvedPath);
+        }
+      } catch {
+        startDir = path.dirname(resolvedPath);
+      }
+    } else {
+      startDir = path.dirname(resolvedPath);
+    }
+    const rawRoot = findProjectRoot(startDir, cwd);
+    const projectRoot =
+      isSameOrDescendant(cwd, resolvedPath) && !isSameOrDescendant(cwd, rawRoot) ? cwd : rawRoot;
+    const config = loadProjectConfig(projectRoot);
+    return { resolvedPath, projectRoot, config };
+  }
+  const resolved = resolvePathTargets(undefined, { includeTargets: true });
+  return {
+    resolvedPath: resolved.resolvedPath,
+    projectRoot: resolved.projectRoot,
+    config: resolved.config,
+  };
+}
+
 /**
  * Executes polymorphic compilation across single file, directory, or omitted target.
  */
-export function executeCompile(
+export async function executeCompile(
   targetArg: string | undefined,
   options: {
     out?: string;
@@ -125,7 +102,20 @@ export function executeCompile(
     check?: boolean;
     idioms?: boolean;
   },
-): void {
+): Promise<void> {
+  const [
+    { parseWithTrivia },
+    { detectTargetFromPath, emitTarget },
+    { expandModuleIdioms },
+    { TypeChecker },
+    { attemptSelfRepair, buildReportFromError, formatDiagnosticText },
+  ] = await Promise.all([
+    import("../src/core/parser.js"),
+    import("../src/emitters/index.js"),
+    import("../src/idioms/index.js"),
+    import("../src/typechecker/checker.js"),
+    import("../src/typechecker/diagnostics.js"),
+  ]);
   try {
     const resolved = resolvePathTargets(targetArg);
 
@@ -371,7 +361,7 @@ program
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .action(
-    (
+    async (
       target: string | undefined,
       options: {
         out?: string;
@@ -384,7 +374,7 @@ program
         idioms?: boolean;
       },
     ) => {
-      executeCompile(target, options);
+      await executeCompile(target, options);
     },
   );
 
@@ -407,7 +397,7 @@ program
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .action(
-    (
+    async (
       dir: string,
       options: {
         outDir?: string;
@@ -419,7 +409,7 @@ program
         idioms?: boolean;
       },
     ) => {
-      executeCompile(dir, options);
+      await executeCompile(dir, options);
     },
   );
 
@@ -449,6 +439,8 @@ program
           fs.statSync(path.resolve(process.cwd(), target)).isDirectory());
       if (options.parity || isDirTarget) {
         try {
+          const { formatParitySummaryJson, formatParitySummaryTerminal, runParityGate } =
+            await import("../src/tools/parity-gate.js");
           const summary = await runParityGate(target, {
             strict: options.strict,
             json: options.json,
@@ -459,7 +451,6 @@ program
           } else {
             console.log(formatParitySummaryTerminal(summary));
           }
-
           const isStrictFailure =
             options.strict && (summary.failed > 0 || summary.parityRate < 100);
           const isStandardFailure = summary.failed > 0;
@@ -482,6 +473,17 @@ program
       }
 
       const file = target;
+      const [
+        { parse },
+        { expandModuleIdioms },
+        { TypeChecker },
+        { attemptSelfRepair, buildReportFromError, formatDiagnosticJson, formatDiagnosticText },
+      ] = await Promise.all([
+        import("../src/core/parser.js"),
+        import("../src/idioms/index.js"),
+        import("../src/typechecker/checker.js"),
+        import("../src/typechecker/diagnostics.js"),
+      ]);
       try {
         const fullPath = path.resolve(process.cwd(), file);
         if (!fs.existsSync(fullPath)) {
@@ -576,7 +578,7 @@ program
   .argument("<file>", "Path to the .aice source file to repair")
   .option("--dry-run", "Display candidate repairs and unified diffs without modifying disk")
   .option("--json", "Output machine-readable JSON repair telemetry")
-  .action((file: string, options: { dryRun?: boolean; json?: boolean }) => {
+  .action(async (file: string, options: { dryRun?: boolean; json?: boolean }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -584,6 +586,9 @@ program
         process.exit(1);
       }
 
+      const { attemptSelfRepair, formatDiagnosticText } = await import(
+        "../src/typechecker/diagnostics.js"
+      );
       const source = fs.readFileSync(fullPath, "utf-8");
       const res = attemptSelfRepair(source, file);
 
@@ -637,12 +642,12 @@ program
 program
   .command("decompile")
   .description(
-    "Decompile a target language file (.ts, .tsx, .js, .jsx, .py, .rs, .go, .cpp, .cs, .kt, .php, .html, .twig, .css, .json, .yaml, .sh, .ps1, .cmd, .md) into an .aice representation",
+    "Decompile a target language file across 33 supported extensions into an .aice representation",
   )
   .argument("<file>", "Path to target source file")
   .option("-o, --out <path>", "Output .aice file path")
   .option("--no-idioms", "Temporarily disable project idioms")
-  .action((file: string, options: { out?: string; target?: string; idioms?: boolean }) => {
+  .action(async (file: string, options: { out?: string; target?: string; idioms?: boolean }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -657,6 +662,10 @@ program
         process.exit(1);
       }
 
+      const [{ decompile }, { detectTargetFromPath }] = await Promise.all([
+        import("../src/decompiler/index.js"),
+        import("../src/emitters/index.js"),
+      ]);
       const source = fs.readFileSync(fullPath, "utf-8");
       const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
       const effectiveIdioms = isProjectIdiomsEnabled(projectConfig, options.idioms);
@@ -691,7 +700,7 @@ program
     "-t, --target <target>",
     "Target language (typescript, tsx, css, html, cpp, csharp, python, php, kotlin, go, rust)",
   )
-  .action((file: string, options: { target?: string }) => {
+  .action(async (file: string, options: { target?: string }) => {
     try {
       const fullPath = path.resolve(process.cwd(), file);
       if (!fs.existsSync(fullPath)) {
@@ -706,6 +715,10 @@ program
         process.exit(1);
       }
 
+      const [{ executeRoundtrip }, { detectTargetFromPath }] = await Promise.all([
+        import("../src/decompiler/index.js"),
+        import("../src/emitters/index.js"),
+      ]);
       const source = fs.readFileSync(fullPath, "utf-8");
       const targetLang = (options.target as TargetLanguage) ?? detectTargetFromPath(file);
       const res = executeRoundtrip(source, targetLang, file);
@@ -733,10 +746,10 @@ program
 program
   .command("mcp")
   .description("Launch the AICE Model Context Protocol (MCP) server over stdio")
-  .action(() => {
+  .action(async () => {
+    const { AiceMcpServer } = await import("../src/mcp/server.js");
     new AiceMcpServer(process.stdin, process.stdout);
   });
-
 // Command: tokens [path]
 // Aliases: tokenomics, efficiency, verify-tokenomics
 program
@@ -808,6 +821,15 @@ program
         }
         const isTTY = Boolean(process.stdout.isTTY && !process.env.NO_COLOR);
         const terminalWidth = process.stdout.columns || 80;
+
+        const {
+          auditTokenomics,
+          formatProjectsMarkdownTable,
+          formatProjectsTerminalTable,
+          formatSingleFileSummary,
+          formatTokenomicsMarkdownTable,
+          formatTokenomicsTerminalTable,
+        } = await import("../src/tokenomics/index.js");
 
         const report = auditTokenomics(targetPath, {
           minSavings: options.minSavings,
@@ -924,7 +946,7 @@ program
 program
   .command("outline")
   .description(
-    "Semantic skeletonization: generate token-dense AST skeleton outline across 32 extensions (85-90% token reduction)",
+    "Semantic skeletonization: generate token-dense AST skeleton outline across 33 extensions (85-90% token reduction)",
   )
   .argument(
     "[targets...]",
@@ -966,9 +988,10 @@ Examples:
     ) => {
       const rawTargets = targetPaths && targetPaths.length > 0 ? targetPaths : [undefined];
       try {
+        const { outlinePath } = await import("../src/tools/outline.js");
         if (rawTargets.length === 1) {
           const targetPath = rawTargets[0];
-          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const resolved = resolveExplicitOrPolymorphicTarget(targetPath);
           const outlineTarget = resolved.resolvedPath;
 
           if (!fs.existsSync(outlineTarget)) {
@@ -992,7 +1015,6 @@ Examples:
           };
 
           const result = await outlinePath(outlineTarget, outlineOpts);
-
           if (result instanceof Map) {
             if (options.json) {
               const arr = Array.from(result.values()).map(
@@ -1073,7 +1095,7 @@ Examples:
 
         const resolvedTargets: Array<{ raw: string | undefined; abs: string; root: string }> = [];
         for (const targetPath of rawTargets) {
-          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const resolved = resolveExplicitOrPolymorphicTarget(targetPath);
           const outlineTarget = resolved.resolvedPath;
           if (!fs.existsSync(outlineTarget)) {
             console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
@@ -1124,6 +1146,11 @@ Examples:
               } else {
                 console.log(`\n// === ${relPath} ===\n`);
                 console.log(res.text);
+                if (options.stats && res.stats) {
+                  console.log(
+                    `\n[Tokens: ${res.stats.originalTokens} -> ${res.stats.outlineTokens} (-${res.stats.savingsPct}%)]`,
+                  );
+                }
               }
             }
           }
@@ -1157,6 +1184,11 @@ Examples:
                 } else {
                   console.log(`\n// === ${relPath} ===\n`);
                   console.log(res.text);
+                  if (options.stats && res.stats) {
+                    console.log(
+                      `\n[Tokens: ${res.stats.originalTokens} -> ${res.stats.outlineTokens} (-${res.stats.savingsPct}%)]`,
+                    );
+                  }
                 }
               }
             } else {
@@ -1176,12 +1208,29 @@ Examples:
               } else {
                 console.log(`\n// === ${item.raw ?? result.file} ===\n`);
                 console.log(result.text);
+                if (options.stats && result.stats) {
+                  console.log(
+                    `\n[Tokens: ${result.stats.originalTokens} -> ${result.stats.outlineTokens} (-${result.stats.savingsPct}%)]`,
+                  );
+                }
               }
             }
           }
         }
+
+        if (options.json) {
+          console.log(JSON.stringify(allJsonItems, null, 2));
+        } else if (options.stats) {
+          const savings = Math.max(0, totalOrig - totalOutline);
+          const savingsPct = totalOrig > 0 ? ((savings / totalOrig) * 100).toFixed(1) : "0.0";
+          console.log(`\n📊 Aggregate Token Reduction Metrics (${totalFilesCount} files):`);
+          console.log(`  Original tokens: ${totalOrig.toLocaleString()}`);
+          console.log(`  Outline tokens:  ${totalOutline.toLocaleString()}`);
+          console.log(`  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+        const { recordTelemetryError } = await import("../src/telemetry/index.js");
         recordTelemetryError({
           targetPath: rawTargets[0],
           operation: "outline",
@@ -1194,23 +1243,59 @@ Examples:
     },
   );
 
-async function readStdin(): Promise<string> {
+async function readStdin(explicit = false): Promise<string> {
   if (process.stdin.isTTY) return "";
+  try {
+    const stat = fs.fstatSync(0);
+    if (stat.isFile()) {
+      return fs.readFileSync(0, "utf-8");
+    }
+    if (!explicit && !stat.isFIFO() && !stat.isSocket()) {
+      return "";
+    }
+  } catch {
+    if (!explicit) return "";
+  }
   return new Promise((resolve) => {
     let data = "";
+    let settled = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (result: string) => {
+      if (settled) return;
+      settled = true;
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+      }
+      process.stdin.removeListener("data", onData);
+      process.stdin.removeListener("end", onEnd);
+      process.stdin.removeListener("error", onError);
+      process.stdin.pause();
+      resolve(result);
+    };
+
+    const onData = (chunk: string | Buffer) => {
+      if (idleTimer !== undefined) {
+        clearTimeout(idleTimer);
+        idleTimer = undefined;
+      }
+      data += typeof chunk === "string" ? chunk : chunk.toString("utf-8");
+    };
+    const onEnd = () => finish(data);
+    const onError = () => finish("");
+
+    if (!explicit) {
+      idleTimer = setTimeout(() => finish(data), 50);
+      idleTimer.unref?.();
+    }
+
     process.stdin.setEncoding("utf-8");
-    process.stdin.on("data", (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on("end", () => {
-      resolve(data);
-    });
-    process.stdin.on("error", () => {
-      resolve("");
-    });
+    process.stdin.on("data", onData);
+    process.stdin.on("end", onEnd);
+    process.stdin.on("error", onError);
+    process.stdin.resume();
   });
 }
-
 // Command: splice [path]
 program
   .command("splice")
@@ -1255,7 +1340,7 @@ program
     "after",
     `
 Examples:
-  • Multi-block heredoc stream across 32 extensions (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
+  • Multi-block heredoc stream across 33 extensions (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
       aice splice --stdin << 'EOF'
       === src/app.ts:GameApp.init ===
       public init(): void { this.ready = true; }
@@ -1299,6 +1384,9 @@ Examples:
       },
     ) => {
       try {
+        const { parseMultiBlockSpliceStream, splice, spliceBatch } = await import(
+          "../src/tools/splice.js"
+        );
         if (options.batch) {
           const batchProjectRoot = findProjectRoot(process.cwd());
           const batchProjectConfig = loadProjectConfig(batchProjectRoot);
@@ -1341,12 +1429,15 @@ Examples:
             );
           }
           if (idiomItems.length > 0) {
+            const { updateProjectIdiom } = await import("../src/idioms/index.js");
             let totalOcc = 0;
             const modFilesSet = new Set<string>();
             for (const entry of idiomItems) {
               const idName = String(entry.name || entry.idiom || "");
               const idCode = String(
                 entry.code ??
+                  entry.newTemplate ??
+                  entry.newTemplateAice ??
                   entry.template ??
                   entry.templateAice ??
                   entry.aice ??
@@ -1386,7 +1477,7 @@ Examples:
           const rawCrossStream =
             options.code ??
             options.template ??
-            (options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin());
+            (await readStdin(Boolean(options.stdin || targetPath === "-")));
           if (rawCrossStream && rawCrossStream.trim().length > 0) {
             const batchProjectRoot = findProjectRoot(process.cwd());
             const batchProjectConfig = loadProjectConfig(batchProjectRoot);
@@ -1423,7 +1514,9 @@ Examples:
             }
           }
           const badHeader = rawCrossStream?.match(/^\s*={3,}\s*([^=\r\n]*?)\s*={3,}/m)?.[1]?.trim();
-          const headerDiag = badHeader ? ` Malformed or incomplete header '=== ${badHeader} ==='.` : "";
+          const headerDiag = badHeader
+            ? ` Malformed or incomplete header '=== ${badHeader} ==='.`
+            : "";
           console.error(
             `❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}\n` +
               "Valid --stdin heredoc block examples:\n" +
@@ -1491,7 +1584,7 @@ Examples:
           options.edits === "-" ||
           (options.stdin && !options.symbol && code === undefined && options.body === undefined)
         ) {
-          const stdinRaw = fs.readFileSync(0, "utf-8");
+          const stdinRaw = await readStdin(true);
           try {
             const parsed = JSON.parse(stdinRaw.trim());
             if (Array.isArray(parsed)) {
@@ -1517,7 +1610,7 @@ Examples:
         }
 
         if (options.stdin && code === undefined && !parsedEdits) {
-          code = fs.readFileSync(0, "utf-8");
+          code = await readStdin(true);
         }
 
         if (
@@ -1526,7 +1619,7 @@ Examples:
           !isPrimaryDelete &&
           (!parsedEdits || parsedEdits.length === 0)
         ) {
-          const stdinContent = await readStdin();
+          const stdinContent = await readStdin(false);
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
           } else {
@@ -1564,6 +1657,34 @@ Examples:
           }
         }
 
+        const primarySymForMsg = options.symbol;
+        if (extraDeleteSymbol) {
+          if (parsedEdits && parsedEdits.length > 0) {
+            parsedEdits = [...parsedEdits, { symbol: extraDeleteSymbol, delete: true }];
+          } else {
+            parsedEdits = [
+              ...(options.symbol
+                ? [
+                    {
+                      symbol: options.symbol,
+                      code,
+                      body: options.body,
+                      insertAfter: options.insertAfter,
+                      insertBefore: options.insertBefore,
+                    },
+                  ]
+                : []),
+              {
+                symbol: extraDeleteSymbol,
+                delete: true,
+              },
+            ];
+            options.symbol = undefined;
+            code = undefined;
+            options.body = undefined;
+          }
+        }
+
         const spliceOpts: SpliceOptions = {
           symbol: options.symbol,
           code,
@@ -1582,16 +1703,6 @@ Examples:
         };
 
         const result = await splice(fullSpliceTarget, spliceOpts);
-        if (extraDeleteSymbol) {
-          await splice(fullSpliceTarget, {
-            symbol: extraDeleteSymbol,
-            delete: true,
-            idioms: effectiveSpliceIdioms,
-            dryRun: options.dryRun,
-            compile: options.compile,
-            projectRoot: spliceProjectRoot,
-          });
-        }
 
         if (options.diff) {
           if (result.diff) {
@@ -1605,15 +1716,18 @@ Examples:
           console.log(`[Dry Run] Successfully spliced ${targetPath}`);
           console.log(result.modifiedCode);
         } else {
+          const displaySymbol = extraDeleteSymbol
+            ? (primarySymForMsg ?? result.symbol)
+            : result.symbol;
           const actionDesc = isPrimaryDelete
-            ? `Deleted symbol '${result.symbol}'`
-            : options.insertAfter
+            ? `Deleted symbol '${displaySymbol}'`
+            : options.insertAfter && !extraDeleteSymbol
               ? `Inserted after '${options.insertAfter}'`
-              : options.insertBefore
+              : options.insertBefore && !extraDeleteSymbol
                 ? `Inserted before '${options.insertBefore}'`
-                : options.body
-                  ? `Spliced body of '${result.symbol}'`
-                  : `Spliced symbol '${result.symbol}'${extraDeleteSymbol ? ` and deleted '${extraDeleteSymbol}'` : ""}`;
+                : options.body && !extraDeleteSymbol
+                  ? `Spliced body of '${displaySymbol}'`
+                  : `Spliced symbol '${displaySymbol}'${extraDeleteSymbol ? ` and deleted '${extraDeleteSymbol}'` : ""}`;
           console.log(`✔ ${actionDesc} in ${targetPath} (${result.tokensSaved ?? 0} tokens saved)`);
           if (options.compile) {
             console.log(`✔ Recompiled target for ${targetPath}`);
@@ -1622,6 +1736,7 @@ Examples:
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         const errTarget = rawTargetPath ?? options.file ?? options.batch;
+        const { recordTelemetryError } = await import("../src/telemetry/index.js");
         recordTelemetryError({
           targetPath: errTarget,
           operation: "splice",
@@ -1675,6 +1790,9 @@ program
       },
     ) => {
       try {
+        const { createBatch, createFile, parseMultiFileCreateStream } = await import(
+          "../src/tools/create.js"
+        );
         const runCreateBatchItems = async (rawItems: BatchCreateItem[]) => {
           const items: BatchCreateItem[] = rawItems.map((it) => {
             const rawFp = it.filePath || it.file || it.path || "";
@@ -1749,7 +1867,9 @@ program
           if (options.code && !batchArg) {
             rawInput = options.code;
           } else if (batchArg === "-" || batchArg === true || options.stdin || !batchArg) {
-            rawInput = options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin();
+            rawInput = await readStdin(
+              Boolean(options.stdin || batchArg === "-" || batchArg === true),
+            );
           } else {
             const batchCandidatePath = path.resolve(process.cwd(), String(batchArg));
             rawInput =
@@ -1770,6 +1890,9 @@ program
           if (streamItems && streamItems.length > 0) {
             rawItems = streamItems;
           } else {
+            const { parseMultiBlockSpliceStream, spliceBatch } = await import(
+              "../src/tools/splice.js"
+            );
             const spliceStream = parseMultiBlockSpliceStream(rawInput);
             if (spliceStream?.batchItems && spliceStream.batchItems.length > 0) {
               const firstFp = spliceStream.batchItems[0]?.filePath;
@@ -1795,10 +1918,7 @@ program
                 console.log(JSON.stringify(batchRes, null, 2));
                 return;
               }
-              const totalSaved = batchRes.results.reduce(
-                (acc, r) => acc + (r.tokensSaved ?? 0),
-                0,
-              );
+              const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
               console.log(
                 `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
               );
@@ -1842,57 +1962,12 @@ program
 
         let code = options.code;
         if (code === undefined && !options.from) {
-          const stdinContent = options.stdin ? fs.readFileSync(0, "utf-8") : await readStdin();
+          const stdinContent = await readStdin(Boolean(options.stdin));
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
           } else {
             console.error("❌ Error: Must provide -c/--code, --from <file>, or input via stdin.");
             process.exit(1);
-          }
-        }
-
-        if (code) {
-          const streamItems = parseMultiFileCreateStream(code);
-          if (streamItems && streamItems.length >= 1) {
-            if (streamItems.length === 1 && filePathArg) {
-              const firstItem = streamItems[0]!;
-              const itemFp = String(firstItem.filePath ?? firstItem.file ?? firstItem.path ?? "");
-              if (
-                !itemFp ||
-                (!itemFp.includes("/") && !itemFp.includes("\\")) ||
-                path.basename(itemFp) === path.basename(filePathArg)
-              ) {
-                firstItem.filePath = filePathArg;
-              }
-            }
-            await runCreateBatchItems(streamItems);
-            return;
-          }
-          const spliceStream = parseMultiBlockSpliceStream(code, filePathArg);
-          const batchSpliceItems =
-            spliceStream?.batchItems && spliceStream.batchItems.length > 0
-              ? spliceStream.batchItems
-              : spliceStream?.singleFileEdits && spliceStream.singleFileEdits.length > 0
-                ? [{ filePath: fullTarget, edits: spliceStream.singleFileEdits }]
-                : undefined;
-          if (batchSpliceItems && batchSpliceItems.length > 0) {
-            const batchRes = await spliceBatch(batchSpliceItems, {
-              dryRun: options.dryRun,
-              idioms: effectiveCreateIdioms,
-              projectRoot: createProjectRoot,
-            });
-            if (options.json) {
-              console.log(JSON.stringify(batchRes, null, 2));
-              return;
-            }
-            const totalSaved = batchRes.results.reduce(
-              (acc, r) => acc + (r.tokensSaved ?? 0),
-              0,
-            );
-            console.log(
-              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
-            );
-            return;
           }
         }
 
@@ -1950,6 +2025,7 @@ program
         const msg = err instanceof Error ? err.message : String(err);
         const errTarget =
           filePathArg ?? (typeof options.batch === "string" ? options.batch : undefined);
+        const { recordTelemetryError } = await import("../src/telemetry/index.js");
         recordTelemetryError({
           targetPath: errTarget,
           operation: "create",
@@ -1966,7 +2042,7 @@ program
 program
   .command("context")
   .description(
-    "Dependency contract packager, symbol/test/heading extractor & /pattern/ search in 1 turn across 32 extensions",
+    "Dependency contract packager, symbol/test/heading extractor & /pattern/ search in 1 turn across 33 extensions",
   )
   .argument(
     "[targets...]",
@@ -2020,6 +2096,12 @@ Examples:
         stats?: boolean;
       },
     ) => {
+      const {
+        generateContext,
+        mergeMultiContextResults,
+        parseTargetWithInlineSymbol,
+        splitContextTargets,
+      } = await import("../src/tools/context.js");
       const expandedTargets: Array<string | undefined> = [];
       if (targetPaths && targetPaths.length > 0) {
         for (const rawT of targetPaths) {
@@ -2046,7 +2128,7 @@ Examples:
             targetPath = parsed.targetPath;
             inlineSymbol = parsed.inlineSymbol;
           }
-          const resolved = resolvePathTargets(targetPath, { includeTargets: true });
+          const resolved = resolveExplicitOrPolymorphicTarget(targetPath);
           if (!isProjectAiceEnabled(resolved.config)) {
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
@@ -2098,6 +2180,7 @@ Examples:
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
+        const { recordTelemetryError } = await import("../src/telemetry/index.js");
         recordTelemetryError({
           targetPath: rawTargets[0],
           operation: "context",
@@ -2141,19 +2224,20 @@ program
       },
     ) => {
       try {
+        const { formatAicePath, formatAiceSource } = await import("../src/tools/fmt.js");
         if (options.stdin) {
-          const stdinSource = fs.readFileSync(0, "utf-8");
+          const stdinSource = await readStdin(true);
           const formatted = formatAiceSource(stdinSource, {
             indent: options.indent,
           });
 
           if (options.diff) {
+            const { generateUnifiedDiff } = await import("../src/tools/fmt.js");
             const diff = generateUnifiedDiff("<stdin>", stdinSource, formatted);
             if (diff) {
-              process.stdout.write(diff + "\n");
+              process.stdout.write(`${diff}\n`);
             }
           }
-
           if (options.check) {
             if (stdinSource !== formatted) {
               process.exit(1);
@@ -2241,12 +2325,12 @@ program
       },
     ) => {
       try {
+        const { diffFiles } = await import("../src/tools/diff-patch.js");
         const resolved = resolvePathTargets(oldPath);
         if (!isProjectAiceEnabled(resolved.config)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
         }
-
         if (resolved.isSingleFile) {
           const fileToDiff = resolved.resolvedPath;
           const diffOpts: DiffOptions = {
@@ -2396,7 +2480,7 @@ program
           }
           patchText = fs.readFileSync(resolvedPatchPath, "utf-8");
         } else {
-          patchText = await readStdin();
+          patchText = await readStdin(patchFileArg === "-");
           if (!patchText || patchText.trim().length === 0) {
             console.error("❌ Error: Patch file or stdin input required.");
             process.exit(1);
@@ -2409,8 +2493,8 @@ program
           compile: options.compile,
         };
 
+        const { patchFile } = await import("../src/tools/diff-patch.js");
         const result = await patchFile(targetPath, patchText, patchOpts);
-
         if (!result.success) {
           console.error(
             `❌ Error applying patch to ${targetPath}: syntax corrupted or hunks rejected (${result.appliedHunks}/${result.totalHunks} hunks applied)`,
@@ -2443,9 +2527,9 @@ program
     },
   );
 
-// Command: idioms [action] [target] [extra]
+// Command: idioms [action] [target] [extra] [dir]
 program
-  .command("idioms [action] [target] [extra]")
+  .command("idioms [action] [target] [extra] [dir]")
   .alias("idiom")
   .description(
     "Mine, apply, expand, list, toggle (on/off), read, or update project-specific token-saving idioms",
@@ -2470,12 +2554,13 @@ program
   .option("--params <spec>", "Optional parameter spec with defaults (e.g. '$0,$1,$2=6.283185')")
   .option("--json", "Output results in JSON format")
   .option("--save", "Save discovered idioms to aice.config.json and .aice-cache/idioms.json")
-  .option("--dry-run", "Preview idiom synthesis or update without modifying files")
+  .option("--dry-run", "Preview idiom synthesis, expansion, or update without modifying files")
   .action(
     async (
       actionArg: string | undefined,
       targetArg: string | undefined,
       extraArg: string | undefined,
+      dirArg: string | undefined,
       options: {
         minOccurrences?: number;
         minSavings?: number;
@@ -2506,7 +2591,7 @@ program
           action = actionArg.toLowerCase();
           if (action === "read" || action === "update") {
             idiomNameArg = targetArg ?? "";
-            targetDir = path.resolve(process.cwd(), extraArg ?? ".");
+            targetDir = path.resolve(process.cwd(), dirArg ?? extraArg ?? ".");
           } else {
             targetDir = path.resolve(process.cwd(), targetArg ?? ".");
           }
@@ -2542,6 +2627,49 @@ program
           process.exit(1);
         }
 
+        if (action === "list") {
+          const idioms = idiomsProjectConfig.idioms ?? {};
+
+          if (isJson) {
+            console.log(JSON.stringify(idioms, null, 2));
+            return;
+          }
+
+          console.log(
+            `\n=== Active Project Idioms: ${path.relative(process.cwd(), targetDir) || "."} ===`,
+          );
+          console.log(
+            `Idioms Status: ${isProjectIdiomsEnabled(idiomsProjectConfig) ? "ON (enabled)" : "OFF (disabled)"}`,
+          );
+          const count = Object.keys(idioms).length;
+          console.log(`Total Idioms: ${count}`);
+          if (count === 0) {
+            console.log(
+              "No idioms configured. Run `aice idioms scan --save` or `aice idioms apply` to discover idioms.",
+            );
+          } else {
+            for (const [name, def] of Object.entries(idioms)) {
+              console.log(`\n- $${name.replace(/^\$/, "")} (${def.kind}):`);
+              if (def.description) {
+                console.log(`  Description: ${def.description}`);
+              }
+              console.log(`  Occurrences: ${def.occurrences}`);
+              console.log(`  Net Savings: ${def.netTokenSavings} tokens`);
+              console.log(`  Template:    ${def.templateAice.trim()}`);
+            }
+          }
+          return;
+        }
+
+        const {
+          applyProjectIdiomsToDirectory,
+          expandAiceSourceIdioms,
+          expandProjectIdiomsInDirectory,
+          readProjectIdiom,
+          scanProjectIdioms,
+          updateProjectIdiom,
+        } = await import("../src/idioms/index.js");
+
         if (action === "read") {
           if (!idiomNameArg) {
             console.error("❌ Error: Must specify idiom name: `aice idioms read <$name> [dir]`");
@@ -2558,9 +2686,10 @@ program
 
         if (action === "update") {
           if (options.batch) {
+            const candidateBatchDir = dirArg ?? extraArg ?? idiomNameArg;
             const batchDir =
-              idiomNameArg && fs.existsSync(path.resolve(process.cwd(), idiomNameArg))
-                ? path.resolve(process.cwd(), idiomNameArg)
+              candidateBatchDir && fs.existsSync(path.resolve(process.cwd(), candidateBatchDir))
+                ? path.resolve(process.cwd(), candidateBatchDir)
                 : process.cwd();
             const batchPath = path.resolve(process.cwd(), options.batch);
             const rawJson =
@@ -2572,6 +2701,8 @@ program
               name?: string;
               idiom?: string;
               code?: string;
+              newTemplate?: string;
+              newTemplateAice?: string;
               template?: string;
               templateAice?: string;
               aice?: string;
@@ -2581,7 +2712,11 @@ program
               params?: string;
             }> = Array.isArray(parsedBatch)
               ? parsedBatch
-              : Object.entries(parsedBatch).map(([k, v]) => ({ name: k, code: String(v) }));
+              : Object.entries(parsedBatch).map(([k, v]) =>
+                  typeof v === "object" && v !== null
+                    ? { name: k, ...(v as Record<string, unknown>) }
+                    : { name: k, code: String(v) },
+                );
             const batchResults = [];
             let totalOcc = 0;
             const modFilesSet = new Set<string>();
@@ -2589,6 +2724,8 @@ program
               const idName = entry.name || entry.idiom || "";
               const idCode =
                 entry.code ??
+                entry.newTemplate ??
+                entry.newTemplateAice ??
                 entry.template ??
                 entry.templateAice ??
                 entry.aice ??
@@ -2622,7 +2759,12 @@ program
           }
           let templateCode = options.code;
           let resolvedTargetDir = targetDir;
-          if ((!templateCode || !templateCode.trim()) && extraArg) {
+          if (dirArg !== undefined) {
+            resolvedTargetDir = path.resolve(process.cwd(), dirArg);
+            if ((!templateCode || !templateCode.trim()) && extraArg) {
+              templateCode = extraArg;
+            }
+          } else if ((!templateCode || !templateCode.trim()) && extraArg) {
             const candidateDir = path.resolve(process.cwd(), extraArg);
             if (!fs.existsSync(candidateDir) || !fs.statSync(candidateDir).isDirectory()) {
               templateCode = extraArg;
@@ -2648,8 +2790,9 @@ program
         }
 
         if (action === "scan") {
+          const shouldPersist = Boolean(options.save) && !dryRun;
           const res = scanProjectIdioms(targetDir, {
-            dryRun,
+            dryRun: !shouldPersist,
             minOccurrences,
             minNetTokenSavings,
           });
@@ -2659,12 +2802,14 @@ program
             return;
           }
 
-          const idiomsMap = res.idioms ?? (res as any).discoveredIdioms ?? {};
-          const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
+          const idiomsMap =
+            res.idioms ?? (res as unknown as Record<string, unknown>).discoveredIdioms ?? {};
+          const idiomCount =
+            res.synthesizedIdioms ?? Object.keys(idiomsMap as Record<string, unknown>).length;
           const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
-          const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
+          const filesCount = res.modifiedFiles?.length ?? 0;
 
-          if (options.save) {
+          if (shouldPersist) {
             console.log(
               `✔ Saved ${idiomCount} discovered project idiom(s) to aice.config.json (+${tokenSavings} net tokens)`,
             );
@@ -2677,9 +2822,11 @@ program
           console.log(`Discovered Idioms:   ${idiomCount}`);
           console.log(`Net Token Savings:   ${tokenSavings} tokens`);
           console.log(`Files Analyzed:      ${filesCount}`);
-          if (Object.keys(idiomsMap).length > 0) {
+          if (Object.keys(idiomsMap as Record<string, unknown>).length > 0) {
             console.log("\nDiscovered Idioms:");
-            for (const [name, def] of Object.entries(idiomsMap)) {
+            for (const [name, def] of Object.entries(
+              idiomsMap as Record<string, { occurrences: number; netTokenSavings: number }>,
+            )) {
               console.log(
                 `  - $${name.replace(/^\$/, "")} (${def.occurrences} occurrences, +${def.netTokenSavings} tokens)`,
               );
@@ -2697,10 +2844,10 @@ program
             return;
           }
 
-          const idiomsMap = res.idioms ?? (res as any).discoveredIdioms ?? {};
+          const idiomsMap = res.idioms ?? {};
           const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
           const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
-          const filesCount = res.modifiedFiles?.length ?? (res as any).filesModified?.length ?? 0;
+          const filesCount = res.modifiedFiles?.length ?? 0;
 
           console.log(
             `\n=== AICE Project Idioms Apply${dryRun ? " (Dry Run)" : ""}: ${path.relative(process.cwd(), targetDir) || "."} ===`,
@@ -2709,41 +2856,86 @@ program
           console.log(`Net Token Savings:   ${tokenSavings} tokens`);
           console.log(`Files Modified:      ${filesCount}`);
           if (!dryRun) {
-            console.log(`✔ Updated aice.config.json.`);
+            console.log("✔ Updated aice.config.json.");
           }
         } else if (action === "expand") {
-          const res = expandProjectIdiomsInDirectory(targetDir);
           const rootDir = findProjectRoot(targetDir);
+          if (dryRun) {
+            const activeIdioms = idiomsProjectConfig.idioms ?? {};
+            let expandedFiles = 0;
+            let expandedCalls = 0;
+            if (Object.keys(activeIdioms).length > 0 && fs.existsSync(targetDir)) {
+              const aiceFiles = fs.statSync(targetDir).isDirectory()
+                ? scanDirectoryFiles(
+                    targetDir,
+                    { extensions: [".aice"] },
+                    idiomsProjectConfig,
+                    rootDir,
+                  )
+                : targetDir.endsWith(".aice")
+                  ? [targetDir]
+                  : [];
+              for (const fp of aiceFiles) {
+                try {
+                  const src = fs.readFileSync(fp, "utf-8");
+                  const preview = expandAiceSourceIdioms(src, activeIdioms, fp);
+                  if (preview.expandedCount > 0) {
+                    expandedFiles++;
+                    expandedCalls += preview.expandedCount;
+                  }
+                } catch {
+                  // ignore individual preview read error
+                }
+              }
+            }
+            const previewRes = { expandedFiles, expandedCalls, dryRun: true };
+            if (isJson) {
+              console.log(JSON.stringify(previewRes, null, 2));
+              return;
+            }
+            console.log(
+              `\n=== AICE Project Idioms Expand (Dry Run): ${path.relative(process.cwd(), targetDir) || "."} ===`,
+            );
+            console.log(`Files Expanded:      ${expandedFiles}`);
+            console.log("✔ [Dry Run] No files or configuration modified.");
+            return;
+          }
+
+          const res = expandProjectIdiomsInDirectory(targetDir);
           const configPath = path.join(rootDir, "aice.config.json");
           if (fs.existsSync(configPath)) {
-            try {
-              const raw = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-              delete raw.idioms;
-              for (const legacyKey of [
-                "mode",
-                "sourceDir",
-                "outDir",
-                "targetLanguage",
-                "isolated",
-                "watermark",
-              ]) {
-                delete raw[legacyKey];
-              }
-              fs.writeFileSync(configPath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
-            } catch {
-              // ignore
+            const raw = JSON.parse(fs.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+            delete raw.idioms;
+            for (const legacyKey of [
+              "mode",
+              "sourceDir",
+              "outDir",
+              "targetLanguage",
+              "isolated",
+              "watermark",
+            ]) {
+              delete raw[legacyKey];
             }
+            const tmpCfgPath = `${configPath}.tmp.${process.pid}.${Date.now()}`;
+            fs.writeFileSync(tmpCfgPath, `${JSON.stringify(raw, null, 2)}\n`, "utf-8");
+            fs.renameSync(tmpCfgPath, configPath);
           }
           const idiomsJsonPath = path.join(rootDir, ".aice-idioms.json");
           if (fs.existsSync(idiomsJsonPath)) {
+            const tmpIdiomsPath = `${idiomsJsonPath}.tmp.${process.pid}.${Date.now()}`;
+            fs.writeFileSync(
+              tmpIdiomsPath,
+              `${JSON.stringify({ idioms: {} }, null, 2)}\n`,
+              "utf-8",
+            );
+            fs.renameSync(tmpIdiomsPath, idiomsJsonPath);
+          }
+          const cacheIdiomsPath = path.join(rootDir, ".aice-cache", "idioms.json");
+          if (fs.existsSync(cacheIdiomsPath)) {
             try {
-              fs.writeFileSync(
-                idiomsJsonPath,
-                `${JSON.stringify({ idioms: {} }, null, 2)}\n`,
-                "utf-8",
-              );
+              fs.unlinkSync(cacheIdiomsPath);
             } catch {
-              // ignore
+              // ignore cache cleanup error
             }
           }
 
@@ -2752,47 +2944,14 @@ program
             return;
           }
 
-          const count = res.expandedFiles ?? (res as any)?.filesModified?.length ?? 0;
+          const count = res.expandedFiles ?? 0;
           console.log(
             `\n=== AICE Project Idioms Expand: ${path.relative(process.cwd(), targetDir) || "."} ===`,
           );
           console.log(`Files Expanded:      ${count}`);
           console.log(
-            `✔ All project idioms inlined back into standard code and idioms cleared from config.`,
+            "✔ All project idioms inlined back into standard code and idioms cleared from config.",
           );
-        } else if (action === "list") {
-          const rootDir = findProjectRoot(targetDir);
-          const config = loadProjectConfig(rootDir);
-          const idioms = config.idioms ?? {};
-
-          if (isJson) {
-            console.log(JSON.stringify(idioms, null, 2));
-            return;
-          }
-
-          console.log(
-            `\n=== Active Project Idioms: ${path.relative(process.cwd(), targetDir) || "."} ===`,
-          );
-          console.log(
-            `Idioms Status: ${isProjectIdiomsEnabled(config) ? "ON (enabled)" : "OFF (disabled)"}`,
-          );
-          const count = Object.keys(idioms).length;
-          console.log(`Total Idioms: ${count}`);
-          if (count === 0) {
-            console.log(
-              "No idioms configured. Run `aice idioms scan` or `aice idioms apply` to discover idioms.",
-            );
-          } else {
-            for (const [name, def] of Object.entries(idioms)) {
-              console.log(`\n- $${name.replace(/^\$/, "")} (${def.kind}):`);
-              if (def.description) {
-                console.log(`  Description: ${def.description}`);
-              }
-              console.log(`  Occurrences: ${def.occurrences}`);
-              console.log(`  Net Savings: ${def.netTokenSavings} tokens`);
-              console.log(`  Template:    ${def.templateAice.trim()}`);
-            }
-          }
         } else {
           console.error(
             `❌ Unknown idioms action: '${action}'. Supported actions: scan | apply | expand | list | on | off | read | update`,
@@ -2807,7 +2966,6 @@ program
       }
     },
   );
-
 // Command: enable [dir]
 program
   .command("enable [dir]")
@@ -2956,8 +3114,13 @@ program
   .option("-a, --agent <name>", "Target a specific CLI agent (e.g. claude, gemini, codex)")
   .option("--json", "Output agent integration status in JSON format")
   .action(
-    (actionArg: string | undefined, options: { all?: boolean; agent?: string; json?: boolean }) => {
+    async (
+      actionArg: string | undefined,
+      options: { all?: boolean; agent?: string; json?: boolean },
+    ) => {
       try {
+        const { formatAgentsStatusTable, getAgentsStatus, removeAgents, setupAgents } =
+          await import("../src/agents/index.js");
         const action = (actionArg ?? "status").toLowerCase();
         if (action === "setup" || action === "install") {
           const statuses = setupAgents({
@@ -3060,6 +3223,12 @@ program
       },
     ) => {
       try {
+        const {
+          buildGainReport,
+          formatGlobalGainDashboard,
+          formatProjectGainDetail,
+          resetTelemetryHistory,
+        } = await import("../src/telemetry/index.js");
         if (options.reset) {
           if (!options.yes && process.stdin.isTTY) {
             const ans = await promptLine("Clear all AICE telemetry history? [y/N]: ");
@@ -3173,7 +3342,7 @@ program
   .option("--transcripts-dir <dir>", "Optional custom agent transcripts directory")
   .option("--json", "Emit structured JSON analysis report")
   .action(
-    (
+    async (
       projectArg: string | undefined,
       options: {
         project?: string;
@@ -3182,6 +3351,7 @@ program
       },
     ) => {
       try {
+        const { analyzeProject, formatAnalyzeReport } = await import("../src/telemetry/index.js");
         const report = analyzeProject({
           project: options.project ?? projectArg,
           transcriptsDir: options.transcriptsDir,
@@ -3258,18 +3428,19 @@ const isDirectCliRun = () => {
   } catch {
     // fallback
   }
+  const normalizedArgv1 = process.argv[1].replace(/\\/g, "/");
   return Boolean(
-    (process.argv[1].endsWith("/bin/aice.ts") ||
-      process.argv[1].endsWith("/bin/aice.mjs") ||
-      process.argv[1].endsWith("/bin/aice.js") ||
-      process.argv[1].endsWith("/bin/aice") ||
-      process.argv[1].endsWith("/aice") ||
-      process.argv[1] === "aice") &&
-      !process.argv[1].includes("test") &&
-      !process.argv[1].includes("vitest"),
+    (normalizedArgv1.endsWith("/bin/aice.ts") ||
+      normalizedArgv1.endsWith("/bin/aice.mjs") ||
+      normalizedArgv1.endsWith("/bin/aice.js") ||
+      normalizedArgv1.endsWith("/bin/aice") ||
+      normalizedArgv1.endsWith("/aice") ||
+      normalizedArgv1 === "aice") &&
+      !normalizedArgv1.includes("test") &&
+      !normalizedArgv1.includes("vitest"),
   );
 };
 
 if (isDirectCliRun()) {
-  program.parse(process.argv);
+  void program.parseAsync(process.argv);
 }

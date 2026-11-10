@@ -5,6 +5,7 @@
  * Comprehensive Unit Tests for Step 23: Polymorphic Path Resolver across all CLI commands.
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -12,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
   isSameOrDescendant,
+  PASSTHROUGH_FILENAMES,
   resolvePathTargets,
   scanDirectoryFiles,
 } from "../../src/config/path-resolver.js";
@@ -425,6 +427,7 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has("dist")).toBe(true);
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has("build")).toBe(true);
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has(".aice-build")).toBe(true);
+      expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has(".aice-cache")).toBe(true);
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has(".agents")).toBe(true);
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has(".next")).toBe(true);
       expect(DEFAULT_IGNORED_SCAN_DIRECTORIES.has(".turbo")).toBe(true);
@@ -434,16 +437,16 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
 
   describe("6. End-to-End CLI Execution Testing with Polymorphic Arguments", () => {
     const cliPath = path.resolve(process.cwd(), "bin/aice.ts");
+    const tsxBin = path.resolve(process.cwd(), "node_modules/.bin/tsx");
 
     function runCli(args: string[], cwd: string) {
-      const { spawnSync } = require("node:child_process");
-      return spawnSync("bun", ["run", cliPath, ...args], {
+      return spawnSync(tsxBin, [cliPath, ...args], {
         cwd,
         encoding: "utf-8",
+        timeout: 60000,
         stdio: ["ignore", "pipe", "pipe"],
       });
     }
-
     it("compile: compiles all files when target is omitted", () => {
       const srcDir = path.join(tmpDir, "src");
       fs.mkdirSync(srcDir, { recursive: true });
@@ -565,6 +568,57 @@ describe("Step 23: Polymorphic Path Resolver Engine", () => {
       const files = scanDirectoryFiles(srcDir, { includeTargets: true }, config, tmpDir);
 
       expect(files).toEqual([path.join(srcDir, "valid.ts")]);
+    });
+
+    it("coexists .aice and unpaired native target files when includeTargets is true while deduplicating .aice twins", () => {
+      const srcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(path.join(srcDir, "paired.aice"), "pub fn p(): ret 1");
+      fs.writeFileSync(path.join(srcDir, "paired.ts"), "export const p = () => 1;");
+      fs.writeFileSync(path.join(srcDir, "unpaired.py"), "def u(): return 2\n");
+
+      const res = resolvePathTargets(srcDir, { includeTargets: true, projectRoot: tmpDir });
+      expect(res.files).toEqual([
+        path.join(srcDir, "paired.aice"),
+        path.join(srcDir, "unpaired.py"),
+      ]);
+    });
+
+    it("includes nested metadata files unless excludeMetadata is true while skipping root metadata by default", () => {
+      const pkgDir = path.join(tmpDir, "packages", "web");
+      fs.mkdirSync(pkgDir, { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "package.json"), '{"name":"root"}');
+      fs.writeFileSync(path.join(pkgDir, "package.json"), '{"name":"web"}');
+      fs.writeFileSync(path.join(pkgDir, "tsconfig.json"), '{"compilerOptions":{}}');
+      fs.writeFileSync(path.join(pkgDir, "AGENTS.md"), "# Nested Agents\n");
+      fs.writeFileSync(path.join(pkgDir, "index.ts"), "export const web = true;\n");
+
+      const defaultScan = resolvePathTargets(tmpDir, { includeTargets: true, projectRoot: tmpDir });
+      expect(defaultScan.files).not.toContain(path.join(tmpDir, "package.json"));
+      expect(defaultScan.files).toContain(path.join(pkgDir, "package.json"));
+      expect(defaultScan.files).toContain(path.join(pkgDir, "tsconfig.json"));
+      expect(defaultScan.files).toContain(path.join(pkgDir, "AGENTS.md"));
+
+      const excludedScan = resolvePathTargets(tmpDir, {
+        includeTargets: true,
+        excludeMetadata: true,
+        projectRoot: tmpDir,
+      });
+      expect(excludedScan.files).not.toContain(path.join(pkgDir, "package.json"));
+      expect(excludedScan.files).not.toContain(path.join(pkgDir, "tsconfig.json"));
+      expect(excludedScan.files).not.toContain(path.join(pkgDir, "AGENTS.md"));
+      expect(excludedScan.files).toContain(path.join(pkgDir, "index.ts"));
+    });
+
+    it("recognizes non-existent extensionless PASSTHROUGH_FILENAMES as single-file targets", () => {
+      for (const name of ["Makefile", "Dockerfile", ".gitignore"]) {
+        expect(PASSTHROUGH_FILENAMES.has(name)).toBe(true);
+        const target = path.join(tmpDir, name);
+        const res = resolvePathTargets(target, { projectRoot: tmpDir });
+        expect(res.isSingleFile).toBe(true);
+        expect(res.isDirectory).toBe(false);
+        expect(res.files).toEqual([target]);
+      }
     });
   });
 });

@@ -20,6 +20,7 @@ import {
   AICE_SYSTEM_DIRECTIVE,
   ALWAYS_ON_AICE_RULE_FILE,
   CANONICAL_AICE_AGENT_DIRECTIVE,
+  findDirectiveSpanOutsideFences,
   hasMarkdownDirective,
   removeAlwaysOnRuleFile,
   removeMarkdownDirective,
@@ -28,6 +29,7 @@ import {
   syncProjectWorkspaceRules,
   upsertAlwaysOnRuleFile,
   upsertMarkdownDirective,
+  writeFileAtomic,
 } from "../config/index.js";
 
 export {
@@ -44,6 +46,7 @@ export {
   upsertAlwaysOnRuleFile,
   upsertMarkdownDirective,
 };
+
 import { AICE_VERSION, VERSION } from "../version.js";
 
 export { VERSION };
@@ -52,11 +55,14 @@ export function extractMarkdownDirectiveVersion(filePath: string): string | unde
   if (!fs.existsSync(filePath)) return undefined;
   try {
     const text = fs.readFileSync(filePath, "utf-8");
-    const verMatch = text.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/);
+    const span = findDirectiveSpanOutsideFences(text);
+    const activeSlice = span ? text.slice(span.startIdx, span.endOffset) : "";
+    if (!activeSlice) return undefined;
+    const verMatch = activeSlice.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/);
     if (verMatch?.[1]) return verMatch[1];
-    const headingMatch = text.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
+    const headingMatch = activeSlice.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
     if (headingMatch?.[1]) return headingMatch[1];
-    if (text.includes(AICE_DIRECTIVE_START)) return "legacy";
+    if (activeSlice.includes(AICE_DIRECTIVE_START)) return "legacy";
     return undefined;
   } catch {
     return undefined;
@@ -108,11 +114,12 @@ function resolveHomeDir(homeDir?: string): string {
 }
 
 function detectBinary(binNames: string[]): { found: boolean; path?: string } {
+  const lookupCmd = process.platform === "win32" ? "where" : "which";
   for (const name of binNames) {
     try {
-      const res = spawnSync("which", [name], { encoding: "utf-8", timeout: 1500 });
+      const res = spawnSync(lookupCmd, [name], { encoding: "utf-8", timeout: 1500 });
       if (res.status === 0 && res.stdout && res.stdout.trim()) {
-        return { found: true, path: res.stdout.trim().split("\n")[0] };
+        return { found: true, path: res.stdout.trim().split(/\r?\n/)[0]?.trim() };
       }
     } catch {
       // ignore
@@ -167,7 +174,7 @@ export function upsertJsonMcpServer(filePath: string, alsoSetMcpKey = false): vo
     data.mcp = mcp;
   }
 
-  fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  writeFileAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 export function removeJsonMcpServer(filePath: string): boolean {
@@ -194,7 +201,7 @@ export function removeJsonMcpServer(filePath: string): boolean {
     }
 
     if (modified) {
-      fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+      writeFileAtomic(filePath, `${JSON.stringify(data, null, 2)}\n`);
     }
     return modified;
   } catch {
@@ -268,14 +275,14 @@ export function upsertCodexToml(filePath: string): void {
   }
 
   if (replaced) {
-    fs.writeFileSync(filePath, `${out.join("\n").trimEnd()}\n`, "utf-8");
+    writeFileAtomic(filePath, `${out.join("\n").trimEnd()}\n`);
     return;
   }
 
   const trimmed = existing.trimEnd();
   const sectionBlock = sectionLines.join("\n");
   const updated = trimmed ? `${trimmed}\n\n${sectionBlock}\n` : `${sectionBlock}\n`;
-  fs.writeFileSync(filePath, updated, "utf-8");
+  writeFileAtomic(filePath, updated);
 }
 
 export function removeCodexToml(filePath: string): boolean {
@@ -307,7 +314,7 @@ export function removeCodexToml(filePath: string): boolean {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  fs.writeFileSync(filePath, updated ? `${updated}\n` : "", "utf-8");
+  writeFileAtomic(filePath, updated ? `${updated}\n` : "");
   return true;
 }
 
@@ -328,14 +335,24 @@ export function upsertAiderConfigYaml(confPath: string, conventionsPath: string)
   fs.mkdirSync(path.dirname(confPath), { recursive: true });
   let parsed: Record<string, unknown> = {};
   if (fs.existsSync(confPath)) {
-    try {
-      const raw = fs.readFileSync(confPath, "utf-8");
-      const doc = YAML.parse(raw);
-      if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+    const raw = fs.readFileSync(confPath, "utf-8");
+    if (raw.trim().length > 0) {
+      let doc: unknown;
+      try {
+        doc = YAML.parse(raw);
+      } catch (err) {
+        throw new Error(
+          `Cannot merge AICE conventions into malformed YAML file ${confPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (doc !== null && doc !== undefined) {
+        if (typeof doc !== "object" || Array.isArray(doc)) {
+          throw new Error(
+            `Cannot merge AICE conventions into malformed YAML file ${confPath}: root YAML value must be a mapping`,
+          );
+        }
         parsed = doc as Record<string, unknown>;
       }
-    } catch {
-      parsed = {};
     }
   }
 
@@ -352,7 +369,7 @@ export function upsertAiderConfigYaml(confPath: string, conventionsPath: string)
     parsed.read = [conventionsPath];
   }
 
-  fs.writeFileSync(confPath, YAML.stringify(parsed), "utf-8");
+  writeFileAtomic(confPath, YAML.stringify(parsed));
 }
 
 export function removeAiderConfigYaml(confPath: string, conventionsPath: string): boolean {
@@ -380,7 +397,7 @@ export function removeAiderConfigYaml(confPath: string, conventionsPath: string)
 
     if (modified) {
       const keys = Object.keys(parsed);
-      fs.writeFileSync(confPath, keys.length > 0 ? YAML.stringify(parsed) : "", "utf-8");
+      writeFileAtomic(confPath, keys.length > 0 ? YAML.stringify(parsed) : "");
     }
     return modified;
   } catch {
@@ -409,13 +426,24 @@ export function upsertGooseConfigYaml(configPath: string): void {
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   let parsed: Record<string, unknown> = {};
   if (fs.existsSync(configPath)) {
-    try {
-      const doc = YAML.parse(fs.readFileSync(configPath, "utf-8"));
-      if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+    const raw = fs.readFileSync(configPath, "utf-8");
+    if (raw.trim().length > 0) {
+      let doc: unknown;
+      try {
+        doc = YAML.parse(raw);
+      } catch (err) {
+        throw new Error(
+          `Cannot merge AICE MCP extension into malformed YAML file ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (doc !== null && doc !== undefined) {
+        if (typeof doc !== "object" || Array.isArray(doc)) {
+          throw new Error(
+            `Cannot merge AICE MCP extension into malformed YAML file ${configPath}: root YAML value must be a mapping`,
+          );
+        }
         parsed = doc as Record<string, unknown>;
       }
-    } catch {
-      parsed = {};
     }
   }
 
@@ -432,7 +460,7 @@ export function upsertGooseConfigYaml(configPath: string): void {
   };
   parsed.extensions = extensions;
 
-  fs.writeFileSync(configPath, YAML.stringify(parsed), "utf-8");
+  writeFileAtomic(configPath, YAML.stringify(parsed));
 }
 
 export function removeGooseConfigYaml(configPath: string): boolean {
@@ -446,7 +474,7 @@ export function removeGooseConfigYaml(configPath: string): boolean {
     const extensions = parsed.extensions as Record<string, unknown> | undefined;
     if (extensions && typeof extensions === "object" && "aice" in extensions) {
       delete extensions.aice;
-      fs.writeFileSync(configPath, YAML.stringify(parsed), "utf-8");
+      writeFileAtomic(configPath, YAML.stringify(parsed));
       return true;
     }
     return false;

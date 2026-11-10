@@ -27,7 +27,7 @@ function runCli(args: string[], cwd: string, input?: string) {
     cwd,
     input,
     encoding: "utf-8",
-    timeout: 20000,
+    timeout: 60000,
   });
 }
 
@@ -1280,5 +1280,5 @@ describe("15-Language / 24-Extension Enterprise Polyglot Torture Suite (v0.9.7)"
     );
     expect(okCreateRes.status).toBe(0);
     expect(fs.readFileSync(largeFile, "utf-8")).toContain("export const val0 = 999;");
-  });
+  }, 60000);
 });

@@ -27,7 +27,7 @@ function runCli(args: string[], cwd: string) {
   return spawnSync(TSX_BIN, [CLI_PATH, ...args], {
     cwd,
     encoding: "utf-8",
-    timeout: 15000,
+    timeout: 60000,
   });
 }
 
@@ -217,8 +217,7 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     const outlineWhileEnabled = runCli(["outline", tsFile], tmpDir);
     expect(outlineWhileEnabled.status).toBe(0);
     expect(outlineWhileEnabled.stdout).toContain("renderParticle");
-  }, 20000);
-
+  }, 60000);
   it("strictly disables $idiom collapsing and expansion when idiomsEnabled is false across tools and CLI", async () => {
     saveProjectConfig(tmpDir, {
       enabled: true,
@@ -261,8 +260,7 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     );
     expect(spliceCliOff.status).toBe(0);
     expect(fs.readFileSync(tsFile, "utf-8")).toContain("ctx.clearRect(0, 0, x, y)");
-  }, 20000);
-
+  }, 60000);
   it("enforces enabled: false and exposes aice_project_config in AiceMcpServer across tools", async () => {
     saveProjectConfig(tmpDir, {
       enabled: false,

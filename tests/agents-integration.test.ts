@@ -308,9 +308,10 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     expect(agyMcpConfig.mcpServers.aice).toEqual({ command: "aice", args: ["mcp"] });
   });
 
-  it("allows multi-project paths under $HOME, os.tmpdir(), and declared MCP workspaceFolders while blocking sensitive system paths and traversal", async () => {
+  it("confines MCP file access strictly to workspaceRoot and declared MCP workspaceFolders while supporting scope='global' in aice_project_config", async () => {
     const initialWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "aice-mcp-ws1-"));
     const secondWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "aice-mcp-ws2-"));
+    const undeclaredWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), "aice-mcp-undeclared-"));
 
     try {
       const externalFile = path.join(secondWorkspace, "service.ts");
@@ -319,8 +320,18 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
         "export function computeTotal(price: number, tax: number): number {\n  return price + tax;\n}\n",
         "utf-8",
       );
+      const undeclaredFile = path.join(undeclaredWorkspace, "secret.ts");
+      fs.writeFileSync(undeclaredFile, "export const SECRET = 42;\n", "utf-8");
 
       const server = new AiceMcpServer(undefined, undefined, { workspaceRoot: initialWorkspace });
+
+      // Undeclared sibling directory in os.tmpdir() is strictly rejected before/after initialize
+      await expect(
+        server.handleRequest(10, "tools/call", {
+          name: "aice_outline",
+          arguments: { path: undeclaredFile },
+        }),
+      ).rejects.toThrow("escapes workspace root");
 
       // Initialize with workspaceFolders pointing to secondWorkspace
       const pkg = JSON.parse(
@@ -338,12 +349,42 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       })) as { serverInfo?: { version?: string } };
       expect(initRes.serverInfo?.version).toBe(AICE_VERSION);
 
-      // Outline file in secondWorkspace (outside initialWorkspace) succeeds
+      // Outline file in secondWorkspace (declared via workspaceFolders) succeeds
       const outRes = (await server.handleRequest(2, "tools/call", {
         name: "aice_outline",
         arguments: { path: externalFile },
       })) as McpToolCallResult;
       expect(outRes.content[0].text).toContain("computeTotal");
+
+      // Undeclared sibling directory remains rejected
+      await expect(
+        server.handleRequest(11, "tools/call", {
+          name: "aice_outline",
+          arguments: { path: undeclaredFile },
+        }),
+      ).rejects.toThrow("escapes workspace root");
+
+      // Global scope in aice_project_config manages global agent integration cleanly
+      const prevAgentHome = process.env.AICE_AGENT_HOME;
+      process.env.AICE_AGENT_HOME = tmpHome;
+      try {
+        const globalStatusRes = (await server.handleRequest(12, "tools/call", {
+          name: "aice_project_config",
+          arguments: { scope: "global", action: "status", json: true },
+        })) as McpToolCallResult;
+        const parsedGlobal = JSON.parse(globalStatusRes.content[0].text) as {
+          scope: string;
+          version: string;
+        };
+        expect(parsedGlobal.scope).toBe("global");
+        expect(parsedGlobal.version).toBe(AICE_VERSION);
+      } finally {
+        if (prevAgentHome === undefined) {
+          delete process.env.AICE_AGENT_HOME;
+        } else {
+          process.env.AICE_AGENT_HOME = prevAgentHome;
+        }
+      }
 
       // Relative traversal `../../../etc/passwd` is rejected
       await expect(
@@ -393,6 +434,23 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     } finally {
       fs.rmSync(initialWorkspace, { recursive: true, force: true });
       fs.rmSync(secondWorkspace, { recursive: true, force: true });
+      fs.rmSync(undeclaredWorkspace, { recursive: true, force: true });
     }
+  });
+
+  it("surfaces descriptive errors on malformed existing Aider/Goose YAML configs instead of overwriting user settings", () => {
+    const aiderYaml = path.join(tmpHome, ".aider.conf.yml");
+    fs.writeFileSync(aiderYaml, "read: [unterminated_list\n", "utf-8");
+    const aiderRes = setupAgents({ homeDir: tmpHome, agent: "aider", all: true });
+    expect(aiderRes.agents[0]?.error).toMatch(/malformed YAML file/i);
+    expect(fs.readFileSync(aiderYaml, "utf-8")).toBe("read: [unterminated_list\n");
+
+    const gooseDir = path.join(tmpHome, ".config", "goose");
+    fs.mkdirSync(gooseDir, { recursive: true });
+    const gooseYaml = path.join(gooseDir, "config.yaml");
+    fs.writeFileSync(gooseYaml, "extensions: { broken: [1, 2\n", "utf-8");
+    const gooseRes = setupAgents({ homeDir: tmpHome, agent: "goose", all: true });
+    expect(gooseRes.agents[0]?.error).toMatch(/malformed YAML file/i);
+    expect(fs.readFileSync(gooseYaml, "utf-8")).toBe("extensions: { broken: [1, 2\n");
   });
 });

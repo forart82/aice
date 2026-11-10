@@ -9,23 +9,23 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-  import {
+import {
   type AiceProjectConfig,
   findProjectRoot,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   type TargetLanguage,
-  } from "./project-config.js";
+} from "./project-config.js";
 
-  export { KNOWN_TARGET_EXTENSIONS };
-  export type { TargetLanguage };
+export type { TargetLanguage };
+export { KNOWN_TARGET_EXTENSIONS };
 export interface PathResolverOptions {
   /**
    * Extensions to filter when scanning directories (default: [".aice"]).
    */
   extensions?: string[];
   /**
-   * Include target files if no .aice files exist in the scanned directory.
+   * Include target files even when .aice files exist in the scanned directory (deduplicating .aice twins).
    */
   includeTargets?: boolean;
   /**
@@ -36,6 +36,15 @@ export interface PathResolverOptions {
    * Pre-loaded project config (auto-loaded if omitted).
    */
   config?: AiceProjectConfig;
+  /**
+   * When true, skips nested package/editor metadata files (`package.json`, `tsconfig.json`, `AGENTS.md`, etc.).
+   * When false, includes even root metadata files. Defaults to skipping root metadata files only.
+   */
+  excludeMetadata?: boolean;
+  /**
+   * Optional shared canonical realpath set for symlink cycle protection across directory walks.
+   */
+  visitedRealpaths?: Set<string>;
 }
 
 export interface ResolvedPathTargets {
@@ -54,12 +63,51 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   "dist",
   "build",
   ".aice-build",
+  ".aice-cache",
   ".agents",
   ".next",
   ".turbo",
   "coverage",
 ]);
 
+export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = new Set([
+  "Makefile",
+  "GNUmakefile",
+  "makefile",
+  "Dockerfile",
+  "Containerfile",
+  "CMakeLists.txt",
+  "Jenkinsfile",
+  "Vagrantfile",
+  "Procfile",
+  "Rakefile",
+  "Justfile",
+  "justfile",
+  ".gitignore",
+  ".gitattributes",
+  ".dockerignore",
+  ".npmignore",
+  ".eslintignore",
+  ".prettierignore",
+  ".editorconfig",
+  ".env",
+  ".env.example",
+  ".env.local",
+  "LICENSE",
+  "NOTICE",
+]);
+
+const OPTIONAL_METADATA_FILENAMES: ReadonlySet<string> = new Set([
+  "package.json",
+  "tsconfig.json",
+  "jsconfig.json",
+  "biome.json",
+  "rome.json",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "GEMINI.md",
+  ".GEMINI.md",
+]);
 /**
  * Checks whether `candidate` is equal to `parent` or is a descendant subdirectory/file of `parent`.
  */
@@ -114,6 +162,7 @@ export function scanDirectoryFiles(
   );
 
   const absScanDir = path.resolve(dir);
+  const absProjectRoot = path.resolve(projectRoot);
   const outDirName = config.outDir ? path.basename(config.outDir) : ".aice-build";
 
   const absOutDir = config.outDir
@@ -131,7 +180,7 @@ export function scanDirectoryFiles(
     }
   }
 
-  const visitedDirs = new Set<string>();
+  const visitedDirs = options.visitedRealpaths ?? new Set<string>();
 
   function shouldIgnoreDirectory(
     entryName: string,
@@ -163,7 +212,7 @@ export function scanDirectoryFiles(
     try {
       realCurrentDir = fs.realpathSync(currentDir);
     } catch {
-      realCurrentDir = currentDir;
+      return;
     }
 
     if (visitedDirs.has(realCurrentDir)) {
@@ -178,57 +227,55 @@ export function scanDirectoryFiles(
       return;
     }
 
+    const isRootDir = path.resolve(currentDir) === absProjectRoot;
+
     for (const entry of entries) {
       const fullPath = path.join(currentDir, entry.name);
 
       let isDirectory = entry.isDirectory();
+      let isFile = entry.isFile();
       let realFullPath = fullPath;
-      try {
-        const stat = fs.statSync(fullPath);
-        if (stat.isDirectory()) {
-          isDirectory = true;
+      if (entry.isSymbolicLink() || (!isDirectory && !isFile)) {
+        try {
+          const stat = fs.statSync(fullPath);
+          isDirectory = stat.isDirectory();
+          isFile = stat.isFile();
+          realFullPath = fs.realpathSync(fullPath);
+        } catch {
+          continue;
         }
-        realFullPath = fs.realpathSync(fullPath);
-      } catch {
-        if (!isDirectory) {
+      } else if (isDirectory) {
+        try {
+          realFullPath = fs.realpathSync(fullPath);
+        } catch {
           continue;
         }
       }
 
       if (isDirectory) {
+        if (visitedDirs.has(realFullPath)) {
+          continue;
+        }
         if (shouldIgnoreDirectory(entry.name, fullPath, realFullPath)) {
           continue;
         }
         walk(fullPath);
-      } else {
-        let isFile = entry.isFile();
-        if (!isFile) {
-          try {
-            const stat = fs.statSync(fullPath);
-            isFile = stat.isFile();
-          } catch {
-            isFile = false;
-          }
-        }
-
-        if (!isFile) {
-          continue;
-        }
-
+      } else if (isFile) {
         if (
           entry.name.endsWith(".trivia.json") ||
           entry.name === "aice.config.json" ||
-          entry.name === "package.json" ||
-          entry.name === "tsconfig.json" ||
-          entry.name === "jsconfig.json" ||
-          entry.name === "biome.json" ||
-          entry.name === "rome.json" ||
-          entry.name === "AGENTS.md" ||
-          entry.name === "CLAUDE.md" ||
-          entry.name === "GEMINI.md" ||
-          entry.name === ".GEMINI.md"
+          entry.name === ".aice-idioms.json"
         ) {
           continue;
+        }
+
+        if (OPTIONAL_METADATA_FILENAMES.has(entry.name)) {
+          const shouldSkipMetadata =
+            options.excludeMetadata === true ||
+            (options.excludeMetadata === undefined && isRootDir);
+          if (shouldSkipMetadata) {
+            continue;
+          }
         }
 
         const lowerName = entry.name.toLowerCase();
@@ -263,7 +310,30 @@ export function scanDirectoryFiles(
   }
 
   if (aiceFiles.length > 0) {
-    return aiceFiles.sort();
+    if (!options.includeTargets || targetFiles.length === 0) {
+      return aiceFiles.sort();
+    }
+    const aiceFullSet = new Set(aiceFiles.map((f) => path.resolve(f)));
+    const aiceDirStemSet = new Set(
+      aiceFiles.map((f) => {
+        const abs = path.resolve(f);
+        const baseWithoutAice = path.basename(abs).slice(0, -".aice".length);
+        return `${path.dirname(abs)}::${baseWithoutAice}`;
+      }),
+    );
+    const unpairedTargets = targetFiles.filter((tf) => {
+      const abs = path.resolve(tf);
+      if (aiceFullSet.has(`${abs}.aice`)) {
+        return false;
+      }
+      const ext = path.extname(abs);
+      const stem = ext ? path.basename(abs).slice(0, -ext.length) : path.basename(abs);
+      if (aiceDirStemSet.has(`${path.dirname(abs)}::${stem}`)) {
+        return false;
+      }
+      return true;
+    });
+    return [...aiceFiles, ...unpairedTargets].sort();
   }
 
   if (options.includeTargets) {
@@ -347,10 +417,13 @@ export function resolvePathTargets(
       isDir = false;
     }
   } else {
+    const baseName = path.basename(absPath);
+    const isKnownExtensionlessFile =
+      PASSTHROUGH_FILENAMES.has(baseName) || baseName.startsWith(".env.");
     isDir =
       trimmed.endsWith("/") ||
       trimmed.endsWith("\\") ||
-      (path.extname(absPath) === "" && !trimmed.endsWith(".aice"));
+      (!isKnownExtensionlessFile && path.extname(absPath) === "" && !trimmed.endsWith(".aice"));
   }
 
   if (isDir) {

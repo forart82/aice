@@ -26,6 +26,8 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   - Replace \`grep -n -C 10 "sym" file.aipl\` -> \`aice context file.aipl -s "sym"\`
   - Replace \`grep -rn "pattern" dir\` -> \`aice context <fileOrDir> -s "/<searchPattern>/"\` (returns exact call-site line numbers and context)
   - Replace \`grep -rn "sym" src/\` -> \`aice context src -s "/sym/"\`
+
+### 1. Opt-In Activation Gate & Non-AICE Bypass (\`aice.config.json\`)
 - **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an \`aice.config.json\` file with \`"enabled": true\` (pre-provisioned in all AICE project folders such as \`aice_*\` / \`aice\`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count \`aice.config.json\` against project file limits).
 - **Non-AICE Bypass**: If \`aice.config.json\` with \`"enabled": true\` is **not** present in the project folder (e.g. \`*_nonaice\` folders or when \`"enabled": false\`), bypass AICE completely and use standard native file tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`view_file\`).
 - **Idioms Toggle**: If \`"idiomsEnabled": false\` (or \`"idioms": false\`), disable \`$idiom\` macros (\`--no-idioms\`).
@@ -96,6 +98,8 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   - \`<Heading Title>\` / \`<function_or_label>\`: Replaces or auto-appends Markdown \`## Heading\` sections (\`.md\`), shell/PowerShell functions (\`.sh\`, \`.ps1\`), or Batch \`:label\` blocks (\`.cmd\`, \`.bat\`).
   - \`eof\` (or \`append\`): Appends code to the end of the file.
   - \`imports\`: Updates/merges imports in the file's top import block (pass only the updated/added import line(s) or full block).
+  - \`@clone(SourceSym)\`: Clones an existing function/method/symbol body as the starting template when splicing a new or target symbol (e.g. \`=== src/service.ts:Service.retryFetch @clone(Service.fetch) ===\`).
+  - \`@replace-docs\` (or CLI \`--no-preserve-docs\` / MCP \`preserveDocs: false\`): Replaces existing leading JSDoc/docstring comments instead of preserving them when splicing a symbol.
   - Single-edit shorthand: \`aice splice <file> -s <symbol> -c "<replacement>"\` (or \`--delete\`).
 
 ### 5. Subagent Propagation (\`invoke_subagent\` / \`test-runner\` / \`fast-scout\` / \`code-surgeon\` / \`deep-auditor\`)

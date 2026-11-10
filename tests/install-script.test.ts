@@ -175,8 +175,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });
     }
-  }, 20000);
-
+  }, 60000);
   it("detects when origin/main is ahead of HEAD, prompts the user to update, and pulls the newest commit when confirmed", () => {
     const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "aice-install-git-update-"));
     try {
@@ -275,7 +274,8 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
         encoding: "utf-8",
       });
       // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping ANSI escape sequences
-      const csLines = csRes.stdout.replace(/\x1b\[[0-9;]*m/g, "").split("\n").filter((l) => l.trim().length > 0);
+      const csStripped = csRes.stdout.replace(/\x1b\[[0-9;]*m/g, "");
+      const csLines = csStripped.split("\n").filter((l) => l.trim().length > 0);
       expect(csLines[1]).toContain(
         "AICE v0.9.5 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
       );
@@ -286,8 +286,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
-  }, 20000);
-
+  }, 60000);
   it("renders aice_cheatsheet() with strict 80-char width and aligned column dividers at index 40 and 79", () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),

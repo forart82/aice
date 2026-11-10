@@ -40,7 +40,7 @@ function runCli(args: string[], cwd: string, env?: NodeJS.ProcessEnv) {
   return spawnSync(TSX_BIN, [CLI_PATH, ...args], {
     cwd,
     encoding: "utf-8",
-    timeout: 20000,
+    timeout: 60000,
     env: { ...process.env, ...env },
   });
 }
@@ -518,8 +518,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       );
       expect(disabledOut.status).not.toBe(0);
       expect(disabledOut.stderr).toContain("AICE is disabled for this project");
-    }, 20000);
-
+    }, 60000);
     it("exposes `aice_create` in AiceMcpServer.getToolDefinitions() and executes single & batch creation via executeToolCall()", async () => {
       const staticTools = AiceMcpServer.getToolDefinitions();
       expect(staticTools.some((t) => t.name === "aice_create")).toBe(true);

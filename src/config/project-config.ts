@@ -11,6 +11,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
+
 export type { TargetLanguage };
 
 export type ProjectMode = "side-by-side" | "isolated" | "twinless";
@@ -841,6 +842,40 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
 }
 
 /**
+ * Atomically writes text content to `filePath` via a sibling temporary file + `renameSync`.
+ * Resolves existing symlinks first so symlinked dotfile configs remain intact.
+ */
+export function writeFileAtomic(filePath: string, content: string): void {
+  let targetPath = path.resolve(filePath);
+  try {
+    if (fs.existsSync(targetPath) && fs.lstatSync(targetPath).isSymbolicLink()) {
+      targetPath = fs.realpathSync(targetPath);
+    }
+  } catch {
+    targetPath = path.resolve(filePath);
+  }
+  const dir = path.dirname(targetPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = path.join(
+    dir,
+    `.${path.basename(targetPath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  );
+  try {
+    fs.writeFileSync(tmpPath, content, "utf-8");
+    fs.renameSync(tmpPath, targetPath);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpPath)) {
+        fs.unlinkSync(tmpPath);
+      }
+    } catch {
+      // ignore cleanup failure
+    }
+    throw err;
+  }
+}
+
+/**
  * Saves or updates project configuration in `aice.config.json` (or `.aice-idioms.json` when used).
  */
 export function saveProjectConfig(
@@ -861,16 +896,42 @@ export function saveProjectConfig(
   let existing: Record<string, unknown> = {};
 
   if (hasAiceConfig) {
-    try {
-      const content = fs.readFileSync(configPath, "utf-8");
-      existing = JSON.parse(stripJsonComments(content));
-    } catch {
-      existing = {};
+    const content = fs.readFileSync(configPath, "utf-8");
+    const stripped = stripJsonComments(content).trim();
+    if (stripped.length > 0) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(stripped);
+      } catch (err) {
+        throw new Error(
+          `Cannot update malformed AICE config file ${configPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error(
+          `Cannot update malformed AICE config file ${configPath}: root JSON value must be an object`,
+        );
+      }
+      existing = parsed as Record<string, unknown>;
     }
   } else if (hasIdiomsJson) {
-    try {
-      const content = fs.readFileSync(idiomsJsonPath, "utf-8");
-      const parsed = JSON.parse(stripJsonComments(content)) as Record<string, unknown>;
+    const content = fs.readFileSync(idiomsJsonPath, "utf-8");
+    const stripped = stripJsonComments(content).trim();
+    if (stripped.length > 0) {
+      let parsedRaw: unknown;
+      try {
+        parsedRaw = JSON.parse(stripped);
+      } catch (err) {
+        throw new Error(
+          `Cannot update malformed AICE idioms file ${idiomsJsonPath}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      if (!parsedRaw || typeof parsedRaw !== "object" || Array.isArray(parsedRaw)) {
+        throw new Error(
+          `Cannot update malformed AICE idioms file ${idiomsJsonPath}: root JSON value must be an object`,
+        );
+      }
+      const parsed = parsedRaw as Record<string, unknown>;
       const sourceIdioms =
         typeof parsed.idioms === "object" && parsed.idioms !== null && !Array.isArray(parsed.idioms)
           ? (parsed.idioms as Record<string, unknown>)
@@ -887,14 +948,11 @@ export function saveProjectConfig(
           : { idiomsEnabled: true }),
         idioms: normIdioms,
       };
-    } catch {
-      existing = {};
     }
   }
 
   let mode: ProjectMode;
   let isolated: boolean;
-
   if (config.mode !== undefined) {
     mode = config.mode;
     isolated = config.isolated ?? mode === "isolated";
@@ -1003,7 +1061,7 @@ export function saveProjectConfig(
       idiomsEnabled: mergedConfig.idiomsEnabled ?? true,
       idioms: mergedConfig.idioms ?? {},
     };
-    fs.writeFileSync(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`, "utf-8");
+    writeFileAtomic(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`);
     return mergedConfig;
   }
 
@@ -1074,7 +1132,7 @@ export function saveProjectConfig(
     toWrite.idioms = mergedConfig.idioms;
   }
 
-  fs.writeFileSync(configPath, `${JSON.stringify(toWrite, null, 2)}\n`, "utf-8");
+  writeFileAtomic(configPath, `${JSON.stringify(toWrite, null, 2)}\n`);
 
   if (hasIdiomsJson && (config.idioms !== undefined || config.idiomsEnabled !== undefined)) {
     try {
@@ -1082,7 +1140,7 @@ export function saveProjectConfig(
         idiomsEnabled: mergedConfig.idiomsEnabled ?? true,
         idioms: mergedConfig.idioms ?? {},
       };
-      fs.writeFileSync(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`, "utf-8");
+      writeFileAtomic(idiomsJsonPath, `${JSON.stringify(idiomsPayload, null, 2)}\n`);
     } catch {
       // ignore sync error
     }
@@ -1115,11 +1173,7 @@ export function isProjectAiceEnabled(
 export const SUPPORTED_EXTENSIONS_LIST = Array.from(KNOWN_TARGET_EXTENSIONS).join(", ");
 
 import {
-  AICE_DIRECTIVE_END,
-  AICE_DIRECTIVE_START,
-  AICE_SYSTEM_DIRECTIVE,
   ALWAYS_ON_AICE_RULE_FILE,
-  CANONICAL_AICE_AGENT_DIRECTIVE,
   MANDATORY_AGENT_RULES_MARKDOWN,
 } from "../rules/mandatory-rules.js";
 
@@ -1130,76 +1184,122 @@ export {
   ALWAYS_ON_AICE_RULE_FILE,
   CANONICAL_AICE_AGENT_DIRECTIVE,
   MANDATORY_AGENT_RULES_MARKDOWN,
-};
- export function upsertMarkdownDirective(mdPath: string, blockText?: string): void {
+} from "../rules/mandatory-rules.js";
+/**
+ * Locates the active line-anchored `<!-- AICE:START -->...<!-- AICE:END -->` directive span
+ * outside Markdown fenced code blocks (``` or ~~~).
+ */
+export function findDirectiveSpanOutsideFences(
+  markdown: string,
+): { startIdx: number; endOffset: number } | null {
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLen = 0;
+  let firstStartIdx = -1;
+  let lastEndOffset = -1;
+
+  let pos = 0;
+  const totalLen = markdown.length;
+  while (pos <= totalLen) {
+    const nlIdx = markdown.indexOf("\n", pos);
+    const lineEnd = nlIdx === -1 ? totalLen : nlIdx;
+    const rawLine = markdown.slice(pos, lineEnd);
+    const cleanLine = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+
+    const fenceMatch = cleanLine.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+    if (fenceMatch?.[1]) {
+      const marker = fenceMatch[1];
+      const ch = marker[0] as "`" | "~";
+      const rest = fenceMatch[2] ?? "";
+      if (!fenceChar) {
+        if (ch === "~" || !rest.includes("`")) {
+          fenceChar = ch;
+          fenceLen = marker.length;
+        }
+      } else if (ch === fenceChar && marker.length >= fenceLen && /^[ \t]*$/.test(rest)) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
+    } else if (!fenceChar) {
+      if (
+        firstStartIdx === -1 &&
+        /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine)
+      ) {
+        firstStartIdx = pos;
+      } else if (firstStartIdx !== -1 && /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(cleanLine)) {
+        lastEndOffset = pos + cleanLine.length;
+      }
+    }
+
+    if (nlIdx === -1) break;
+    pos = nlIdx + 1;
+  }
+
+  if (firstStartIdx !== -1 && lastEndOffset !== -1 && lastEndOffset > firstStartIdx) {
+    return { startIdx: firstStartIdx, endOffset: lastEndOffset };
+  }
+  return null;
+}
+
+export function upsertMarkdownDirective(mdPath: string, blockText?: string): void {
   const directiveBlock = blockText ?? MANDATORY_AGENT_RULES_MARKDOWN;
   fs.mkdirSync(path.dirname(mdPath), { recursive: true });
   let existing = "";
   if (fs.existsSync(mdPath)) {
     existing = fs.readFileSync(mdPath, "utf-8");
   }
-  const versionedStartMatch = existing.match(/<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/);
-  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
-  const effectiveStartIdx =
-    startIdx !== -1
-      ? startIdx
-      : versionedStartMatch?.index !== undefined
-        ? versionedStartMatch.index
-        : -1;
-  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-  if (effectiveStartIdx !== -1 && endIdx !== -1 && endIdx > effectiveStartIdx) {
-    const before = existing.slice(0, effectiveStartIdx).replace(/\s*$/, "");
-    const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\s*/, "");
+  const span = findDirectiveSpanOutsideFences(existing);
+  if (span) {
+    const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
+    const after = existing.slice(span.endOffset).replace(/^\s*/, "");
     const parts: string[] = [];
     if (before.length > 0) parts.push(before);
     parts.push(directiveBlock);
     if (after.length > 0) parts.push(after);
-    fs.writeFileSync(mdPath, `${parts.join("\n\n")}\n`, "utf-8");
+    writeFileAtomic(mdPath, `${parts.join("\n\n")}\n`);
     return;
   }
 
   const trimmed = existing.trimEnd();
   const nextContent =
     trimmed.length > 0 ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
-  fs.writeFileSync(mdPath, nextContent, "utf-8");
- }
+  writeFileAtomic(mdPath, nextContent);
+}
 
- /**
+/**
  * Cleanly removes the `<!-- AICE:START -->...<!-- AICE:END -->` block from a Markdown file.
  */
- export function removeMarkdownDirective(mdPath: string, _removeIfEmpty: boolean = false): void {
+export function removeMarkdownDirective(
+  mdPath: string,
+  optionsOrRemoveIfEmpty: boolean | { removeIfEmpty?: boolean } = false,
+): void {
+  const removeIfEmpty =
+    typeof optionsOrRemoveIfEmpty === "boolean"
+      ? optionsOrRemoveIfEmpty
+      : Boolean(optionsOrRemoveIfEmpty?.removeIfEmpty);
   if (!fs.existsSync(mdPath)) return;
   const existing = fs.readFileSync(mdPath, "utf-8");
-  const versionedStartMatch = existing.match(/<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/);
-  const startIdx = existing.indexOf(AICE_DIRECTIVE_START);
-  const effectiveStartIdx =
-    startIdx !== -1
-      ? startIdx
-      : versionedStartMatch?.index !== undefined
-        ? versionedStartMatch.index
-        : -1;
-  const endIdx = existing.indexOf(AICE_DIRECTIVE_END);
-  if (effectiveStartIdx === -1 || endIdx === -1 || endIdx < effectiveStartIdx) return;
+  const span = findDirectiveSpanOutsideFences(existing);
+  if (!span) return;
 
-  const before = existing.slice(0, effectiveStartIdx).replace(/\s*$/, "");
-  const after = existing.slice(endIdx + AICE_DIRECTIVE_END.length).replace(/^\s*/, "");
+  const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
+  const after = existing.slice(span.endOffset).replace(/^\s*/, "");
   const combined = [before, after].filter((s) => s.length > 0).join("\n\n");
   if (combined.trim().length === 0) {
-    fs.unlinkSync(mdPath);
+    if (removeIfEmpty) {
+      fs.unlinkSync(mdPath);
+    } else {
+      writeFileAtomic(mdPath, "");
+    }
   } else {
-    fs.writeFileSync(mdPath, `${combined}\n`, "utf-8");
+    writeFileAtomic(mdPath, `${combined}\n`);
   }
- }
+}
 
 export function hasMarkdownDirective(mdPath: string): boolean {
   if (!fs.existsSync(mdPath)) return false;
   try {
     const text = fs.readFileSync(mdPath, "utf-8");
-    return (
-      (text.includes(AICE_DIRECTIVE_START) ||
-        /<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->/.test(text)) &&
-      text.includes(AICE_DIRECTIVE_END)
-    );
+    return findDirectiveSpanOutsideFences(text) !== null;
   } catch {
     return false;
   }
@@ -1209,10 +1309,8 @@ export function hasMarkdownDirective(mdPath: string): boolean {
  * Writes an always-on agent rule file (`trigger: always_on` frontmatter + `<!-- AICE:START -->...<!-- AICE:END -->`).
  */
 export function upsertAlwaysOnRuleFile(filePath: string): void {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, ALWAYS_ON_AICE_RULE_FILE, "utf-8");
+  writeFileAtomic(filePath, ALWAYS_ON_AICE_RULE_FILE);
 }
-
 /**
  * Removes an always-on agent rule file and cleans up empty parent rule directories if empty.
  */

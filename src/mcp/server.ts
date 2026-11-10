@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * AICE 2.0 First-Class Model Context Protocol (MCP) Server.
- * Exposes token-optimized AI productivity tools (aice_context, aice_outline,
- * aice_splice, aice_idioms, aice_test) over JSON-RPC 2.0 stdio streams.
+ * Exposes all 7 token-optimized AI productivity tools (aice_context, aice_outline,
+ * aice_splice, aice_create, aice_idioms, aice_gain, aice_project_config) across
+ * all 20 languages / 33 file extensions over JSON-RPC 2.0 stdio streams.
  */
 
 import * as fs from "node:fs";
@@ -13,17 +14,24 @@ import * as path from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
+  extractMarkdownDirectiveVersion,
+  getAgentsStatus,
+  removeAgents,
+  setupAgents,
+} from "../agents/index.js";
+import {
   AICE_DISABLED_MESSAGE,
-
   findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   loadProjectConfig,
+  saveProjectConfig,
   setProjectAiceEnabled,
   setProjectIdiomsEnabled,
 } from "../config/index.js";
 import {
   applyProjectIdiomsToDirectory,
+  expandAiceSourceIdioms,
   expandProjectIdiomsInDirectory,
   formatIdiomsMarkdownSection,
   readProjectIdiom,
@@ -128,53 +136,67 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description: "Optional override to enable or disable project $idioms",
         },
       },
-      required: ["path"],
+      required: [],
     },
   },
   {
     name: "aice_outline",
     description:
-      "Generate structural skeleton outline of one or more .aice or native files or project directories achieving 85-90%+ token reduction.",
+      "Generate structural skeleton outline of one or more .aice or native files or project directories across all 20 languages / 33 file extensions achieving 85-90%+ token reduction.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
-          description: "Path (or comma-separated paths) to .aice or native file or project directory",
+          description:
+            "Optional path (or comma/whitespace-separated paths) to .aice or native file(s) or project directory (default: '.')",
         },
         paths: {
           type: "array",
           items: { type: "string" },
           description: "Optional array of file or directory paths (e.g., ['src', 'tests'])",
         },
+        depth: {
+          type: "number",
+          description: "Optional maximum symbol nesting depth (e.g. 1 for top-level skeleton only)",
+        },
+        types: {
+          type: "boolean",
+          description:
+            "Optional flag to include or omit type/interface field details (default: true)",
+        },
         compact: {
           type: "boolean",
-          description: "Optional compact directory mode override (auto-enabled for 60+ files)",
+          description: "Optional compact directory mode override (auto-enabled for 100+ files)",
         },
         idioms: {
           type: "boolean",
           description: "Optional override to enable or disable project $idioms",
         },
       },
-      required: ["path"],
+      required: [],
     },
   },
   {
     name: "aice_splice",
     description:
-      "Surgically replace, delete, hunk-patch, or batch-edit one or more named symbols, line ranges, or files. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Surgically replace, delete, hunk-patch, or batch-edit one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
           description:
-            "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'edits' includes filePath)",
+            "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)",
         },
         symbolSelector: {
           type: "string",
           description:
-            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', ':eof', or line range 'L10-L25')",
+            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', 'eof', or line range 'L10-L25')",
+        },
+        symbol: {
+          type: "string",
+          description: "Alias for 'symbolSelector'",
         },
         code: {
           type: "string",
@@ -186,9 +208,34 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description:
             "Alias for 'code': replacement snippet, '<<< / === / >>>' hunk, or multi-file '=== <filePath>:<symbol> ===' stream",
         },
+        body: {
+          type: "string",
+          description: "Optional body-only replacement statements keeping the existing signature",
+        },
         delete: {
           type: "boolean",
           description: "If true, removes the symbol entirely",
+        },
+        insertAfter: {
+          type: "string",
+          description: "Inserts the new code directly after the named symbol",
+        },
+        insertBefore: {
+          type: "string",
+          description: "Inserts the new code directly before the named symbol",
+        },
+        preserveDocs: {
+          type: "boolean",
+          description:
+            "Whether to preserve existing leading JSDoc/docstrings on replaced symbols (default: true)",
+        },
+        dryRun: {
+          type: "boolean",
+          description: "If true, preview the spliced output/diff without writing to disk",
+        },
+        idioms: {
+          type: "boolean",
+          description: "Optional override to enable or disable project/inline $idioms",
         },
         edits: {
           type: "array",
@@ -202,11 +249,34 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
               code: { type: "string" },
               body: { type: "string" },
               delete: { type: "boolean" },
+              insertAfter: { type: "string" },
+              insertBefore: { type: "string" },
+              preserveDocs: { type: "boolean" },
             },
             required: ["symbol"],
           },
         },
+        files: {
+          type: "array",
+          description:
+            "Optional array of per-file splice items ({ filePath, symbol?, code?, body?, delete?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file splicing",
+          items: {
+            type: "object",
+            properties: {
+              filePath: { type: "string" },
+              symbol: { type: "string" },
+              code: { type: "string" },
+              body: { type: "string" },
+              delete: { type: "boolean" },
+              insertAfter: { type: "string" },
+              insertBefore: { type: "string" },
+              preserveDocs: { type: "boolean" },
+            },
+            required: ["filePath"],
+          },
+        },
       },
+      required: [],
     },
   },
   {
@@ -216,14 +286,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
     inputSchema: {
       type: "object",
       properties: {
-        dir: {
-          type: "string",
-          description: "Project or source directory",
-        },
         action: {
           type: "string",
           enum: ["scan", "apply", "expand", "list", "on", "off", "read", "update"],
-          description: "Idiom action to perform (default: 'list')",
+          description: "Idiom action to perform",
+        },
+        dir: {
+          type: "string",
+          description: "Optional project or source directory (default: '.')",
         },
         name: {
           type: "string",
@@ -233,9 +303,18 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           type: "string",
           description: "New AICE template for 'update' action",
         },
+        params: {
+          type: "string",
+          description:
+            "Optional comma-separated parameter names (e.g. '$0,$1') for 'update' action",
+        },
+        idioms: {
+          type: "boolean",
+          description: "Optional override to enable or disable project $idioms for this call",
+        },
         dryRun: {
           type: "boolean",
-          description: "If true, preview update without modifying files",
+          description: "If true, preview scan/update/expand without modifying files",
         },
         minOccurrences: {
           type: "number",
@@ -246,13 +325,13 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description: "Minimum net token savings threshold",
         },
       },
-      required: ["dir"],
+      required: ["action"],
     },
   },
   {
     name: "aice_create",
     description:
-      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 15 languages (40-75% output token savings). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 20 languages / 33 file extensions (40-75% output token savings). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
@@ -291,6 +370,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description: "If true, allows full-file overwrite of existing files with > 25 lines",
         },
       },
+      required: [],
     },
   },
   {
@@ -313,23 +393,41 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description: "If true, return structured JSON telemetry report",
         },
       },
+      required: [],
     },
   },
   {
     name: "aice_project_config",
-    description:
-      `Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled'), rule sync status, and AICE version (v${AICE_VERSION}) in aice.config.json.`,
+    description: `Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled'), rule sync status, global agent config (when scope='global'), and AICE version (v${AICE_VERSION}) in aice.config.json.`,
     inputSchema: {
       type: "object",
       properties: {
         dir: {
           type: "string",
-          description: "Project directory (default: workspaceRoot)",
+          description: "Project directory within workspaceRoot (default: workspaceRoot)",
+        },
+        scope: {
+          type: "string",
+          enum: ["project", "global"],
+          description:
+            "Configuration scope: 'project' (confined to workspaceRoot) or 'global' (manages global CLI coding agent integrations)",
         },
         action: {
           type: "string",
-          enum: ["enable", "disable", "status"],
-          description: "Optional action ('enable' | 'disable' | 'status')",
+          enum: ["enable", "disable", "status", "setup", "remove"],
+          description: "Optional action ('enable' | 'disable' | 'status' | 'setup' | 'remove')",
+        },
+        agent: {
+          type: "string",
+          description: "Optional agent ID when scope='global' (e.g. 'claude', 'agy', 'codex')",
+        },
+        all: {
+          type: "boolean",
+          description: "When scope='global' and action='setup', configure all supported agents",
+        },
+        homeDir: {
+          type: "string",
+          description: "Optional home directory override when scope='global'",
         },
         enabled: {
           type: "boolean",
@@ -340,6 +438,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description: "Optional boolean to enable or disable $idioms for this project",
         },
       },
+      required: [],
     },
   },
 ];
@@ -359,9 +458,7 @@ export class AiceMcpServer {
   private isFramed = false;
   private readonly workspaceRoot: string;
   private readonly declaredRoots: Set<string> = new Set();
-  private readonly constructedWithZeroArgs: boolean;
-  private initializedWithParams = false;
-
+  private messageQueue: Promise<void> = Promise.resolve();
   public static getToolDefinitions(): McpToolDefinition[] {
     return AICE_MCP_TOOLS;
   }
@@ -375,8 +472,6 @@ export class AiceMcpServer {
     outStream?: Writable,
     options?: { workspaceRoot?: string },
   ) {
-    this.constructedWithZeroArgs =
-      inStreamOrOptions === undefined && outStream === undefined && options === undefined;
     if (
       inStreamOrOptions &&
       typeof (inStreamOrOptions as Readable).on !== "function" &&
@@ -513,9 +608,7 @@ export class AiceMcpServer {
       }
     }
 
-    const home = path.resolve(os.homedir());
-    const tmp = path.resolve(os.tmpdir());
-    const baseAllowedRoots = [this.workspaceRoot, ...this.declaredRoots, home, tmp];
+    const baseAllowedRoots = [this.workspaceRoot, ...this.declaredRoots];
     const allowedRoots = new Set<string>(baseAllowedRoots);
     for (const r of baseAllowedRoots) {
       try {
@@ -549,6 +642,15 @@ export class AiceMcpServer {
     }
 
     return resolved;
+  }
+
+  private enqueueSerial<T>(fn: () => Promise<T> | T): Promise<T> {
+    const next = this.messageQueue.then(fn, fn);
+    this.messageQueue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
   }
 
   private handleData(chunk: Buffer): void {
@@ -589,7 +691,12 @@ export class AiceMcpServer {
           const msg = JSON.parse(payload);
           void this.handleMessage(msg).catch(() => {});
         } catch {
-          // Ignore parse errors on malformed frames
+          void this.enqueueSerial(() => {
+            this.sendResponse(null, undefined, {
+              code: -32700,
+              message: "Parse error",
+            });
+          });
         }
       } else {
         const newlineIndex = this.buffer.indexOf("\n");
@@ -605,7 +712,12 @@ export class AiceMcpServer {
             const msg = JSON.parse(line);
             void this.handleMessage(msg).catch(() => {});
           } catch {
-            // Ignore malformed JSON lines
+            void this.enqueueSerial(() => {
+              this.sendResponse(null, undefined, {
+                code: -32700,
+                message: "Parse error",
+              });
+            });
           }
         }
       }
@@ -637,29 +749,51 @@ export class AiceMcpServer {
     }
   }
 
-  public async handleMessage(msg: unknown): Promise<unknown> {
-    if (msg && typeof msg === "object" && "method" in msg) {
-      const request = msg as { id?: number | string; method: string; params?: unknown };
-      if ("id" in request && request.id !== undefined && request.id !== null) {
-        try {
-          const result = await this.handleRequest(request.id, request.method, request.params);
-          this.sendResponse(request.id, result);
-          return result;
-        } catch (err: unknown) {
-          const error = {
-            code: -32603,
-            message: err instanceof Error ? err.message : String(err),
-          };
-          this.sendResponse(request.id, undefined, error);
-          throw err;
-        }
-      } else {
-        await this.handleNotification(request.method, request.params);
-      }
-    }
-    return undefined;
+  public handleMessage(msg: unknown): Promise<unknown> {
+    return this.enqueueSerial(() => this.processSingleMessage(msg));
   }
 
+  private async processSingleMessage(msg: unknown): Promise<unknown> {
+    if (
+      !msg ||
+      typeof msg !== "object" ||
+      Array.isArray(msg) ||
+      typeof (msg as { method?: unknown }).method !== "string"
+    ) {
+      const reqId =
+        msg && typeof msg === "object" && !Array.isArray(msg) && "id" in msg
+          ? ((msg as { id?: number | string | null }).id ?? null)
+          : null;
+      this.sendResponse(reqId, undefined, {
+        code: -32600,
+        message: "Invalid Request",
+      });
+      return undefined;
+    }
+
+    const request = msg as { id?: number | string | null; method: string; params?: unknown };
+    if ("id" in request && request.id !== undefined && request.id !== null) {
+      try {
+        const result = await this.handleRequest(request.id, request.method, request.params);
+        this.sendResponse(request.id, result);
+        return result;
+      } catch (err: unknown) {
+        const errCode =
+          err && typeof err === "object" && typeof (err as { code?: unknown }).code === "number"
+            ? (err as { code: number }).code
+            : -32603;
+        const error = {
+          code: errCode,
+          message: err instanceof Error ? err.message : String(err),
+        };
+        this.sendResponse(request.id, undefined, error);
+        throw err;
+      }
+    }
+
+    await this.handleNotification(request.method, request.params);
+    return undefined;
+  }
   public async handleRequest(
     idOrReq:
       | number
@@ -677,9 +811,6 @@ export class AiceMcpServer {
 
     switch (method) {
       case "initialize": {
-        if (params && typeof params === "object" && Object.keys(params as object).length > 0) {
-          this.initializedWithParams = true;
-        }
         this.captureInitializeRoots(params);
         return wrapOut({
           protocolVersion: "2024-11-05",
@@ -693,15 +824,6 @@ export class AiceMcpServer {
       }
 
       case "tools/list": {
-        const listParams = (params ?? {}) as Record<string, unknown>;
-        if (
-          this.constructedWithZeroArgs &&
-          !this.initializedWithParams &&
-          !listParams.includeManagementTools &&
-          !listParams.all
-        ) {
-          return wrapOut({ tools: AICE_MCP_TOOLS.slice(0, 4) });
-        }
         return wrapOut({ tools: AICE_MCP_TOOLS });
       }
 
@@ -724,7 +846,11 @@ export class AiceMcpServer {
           const op = toolToOp[callParams?.name ?? ""];
           if (op) {
             const rawTarget = String(
-              toolArgs.filePath ?? toolArgs.path ?? toolArgs.file ?? toolArgs.dir ?? this.workspaceRoot,
+              toolArgs.filePath ??
+                toolArgs.path ??
+                toolArgs.file ??
+                toolArgs.dir ??
+                this.workspaceRoot,
             );
             recordTelemetryError({
               targetPath: path.resolve(this.workspaceRoot, rawTarget),
@@ -739,7 +865,7 @@ export class AiceMcpServer {
       }
 
       default: {
-        throw new Error(`Method not found: ${method}`);
+        throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
       }
     }
   }
@@ -768,36 +894,95 @@ export class AiceMcpServer {
   ): Promise<McpToolCallResult> {
     switch (name) {
       case "aice_context": {
-        const symbolFilter =
-          typeof args.symbol === "string" && args.symbol.trim().length > 0
-            ? args.symbol.trim()
-            : undefined;
+        {
+          const symbolFilter =
+            typeof args.symbol === "string" && args.symbol.trim().length > 0
+              ? args.symbol.trim()
+              : undefined;
 
-        let rawTargets: string[] = [];
-        if (Array.isArray(args.paths) && args.paths.length > 0) {
-          rawTargets = (args.paths as unknown[])
-            .map((p) => String(p).trim())
-            .filter(Boolean);
-        } else {
-          const rawPathStr = String(args.path ?? "").trim();
-          rawTargets = splitContextTargets(rawPathStr, this.workspaceRoot);
-          if (rawTargets.length === 0) {
-            rawTargets = [rawPathStr];
+          let rawTargets: string[] = [];
+          if (Array.isArray(args.paths) && args.paths.length > 0) {
+            rawTargets = (args.paths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
+          } else {
+            const rawPathStr = String(args.path ?? ".").trim() || ".";
+            rawTargets = splitContextTargets(rawPathStr, this.workspaceRoot);
+            if (rawTargets.length === 0) {
+              rawTargets = [rawPathStr];
+            }
           }
-        }
-        if (rawTargets.length > 1) {
-          const safeTargets: Array<{ path: string; symbol?: string }> = [];
-          let firstSafePath = this.workspaceRoot;
-          for (const rawT of rawTargets) {
-            const parsed = parseTargetWithInlineSymbol(rawT, this.workspaceRoot);
-            const safeFp = this.resolveSafePath(parsed.targetPath);
-            if (safeTargets.length === 0) firstSafePath = safeFp;
-            safeTargets.push({
-              path: safeFp,
-              symbol: parsed.inlineSymbol ?? symbolFilter,
+          if (rawTargets.length > 1) {
+            const safeTargets: Array<{ path: string; symbol?: string }> = [];
+            let firstSafePath = this.workspaceRoot;
+            for (const rawT of rawTargets) {
+              const parsed = parseTargetWithInlineSymbol(rawT, this.workspaceRoot);
+              const safeFp = this.resolveSafePath(parsed.targetPath);
+              if (safeTargets.length === 0) firstSafePath = safeFp;
+              safeTargets.push({
+                path: safeFp,
+                symbol: parsed.inlineSymbol ?? symbolFilter,
+              });
+            }
+            const projectRoot = this.resolveProjectRoot(firstSafePath);
+            const config = loadProjectConfig(projectRoot);
+            if (!isProjectAiceEnabled(config)) {
+              return {
+                content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+                isError: true,
+              };
+            }
+            const effectiveIdioms = isProjectIdiomsEnabled(
+              config,
+              typeof args.idioms === "boolean" ? args.idioms : undefined,
+            );
+            const multiRes = await withSuppressedTelemetryAsync(() =>
+              generateMultiContext(safeTargets, {
+                depth: typeof args.depth === "number" ? args.depth : undefined,
+                maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+                idioms: effectiveIdioms,
+                projectRoot,
+              }),
+            );
+            const nativeTexts = safeTargets
+              .map((t) => {
+                try {
+                  if (fs.existsSync(t.path) && fs.statSync(t.path).isFile()) {
+                    return fs.readFileSync(t.path, "utf-8");
+                  }
+                  if (fs.existsSync(t.path) && fs.statSync(t.path).isDirectory()) {
+                    return scanDirectoryForTargets(t.path)
+                      .slice(0, 60)
+                      .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
+                      .join("\n");
+                  }
+                  return "";
+                } catch {
+                  return "";
+                }
+              })
+              .filter(Boolean)
+              .join("\n");
+            recordTelemetryEvent({
+              targetPath: firstSafePath,
+              projectRoot,
+              operation: "context",
+              surface: "mcp",
+              idiomsUsed: Boolean(
+                effectiveIdioms && multiRes.idioms && Object.keys(multiRes.idioms).length > 0,
+              ),
+              nativeText: nativeTexts || multiRes.targetContent,
+              aiceText: multiRes.formattedBundle,
             });
+            return {
+              content: [{ type: "text", text: multiRes.formattedBundle }],
+            };
           }
-          const projectRoot = this.resolveProjectRoot(firstSafePath);
+
+          const singleRaw = rawTargets[0] ?? (String(args.path ?? ".").trim() || ".");
+          const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
+          const targetPath = parsedSingle.targetPath || ".";
+          const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
+          const fullPath = this.resolveSafePath(targetPath);
+          const projectRoot = this.resolveProjectRoot(fullPath);
           const config = loadProjectConfig(projectRoot);
           if (!isProjectAiceEnabled(config)) {
             return {
@@ -809,190 +994,144 @@ export class AiceMcpServer {
             config,
             typeof args.idioms === "boolean" ? args.idioms : undefined,
           );
-          const multiRes = await withSuppressedTelemetryAsync(() =>
-            generateMultiContext(safeTargets, {
+          const result = await withSuppressedTelemetryAsync(() =>
+            generateContext(fullPath, {
               depth: typeof args.depth === "number" ? args.depth : undefined,
               maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+              symbol: effectiveSymbol,
               idioms: effectiveIdioms,
               projectRoot,
             }),
           );
-          const nativeTexts = safeTargets
-            .map((t) => {
-              try {
-                if (fs.existsSync(t.path) && fs.statSync(t.path).isFile()) {
-                  return fs.readFileSync(t.path, "utf-8");
-                }
-                if (fs.existsSync(t.path) && fs.statSync(t.path).isDirectory()) {
-                  return scanDirectoryForTargets(t.path)
-                    .slice(0, 60)
-                    .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
-                    .join("\n");
-                }
-                return "";
-              } catch {
-                return "";
+
+          let nativeText = "";
+          let isDirTarget = false;
+          try {
+            if (fs.existsSync(fullPath)) {
+              const stat = fs.statSync(fullPath);
+              if (stat.isFile()) {
+                nativeText = fs.readFileSync(fullPath, "utf-8");
+              } else if (stat.isDirectory()) {
+                isDirTarget = true;
+                nativeText = scanDirectoryForTargets(fullPath)
+                  .slice(0, 60)
+                  .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
+                  .join("\n");
               }
-            })
-            .filter(Boolean)
-            .join("\n");
+            }
+          } catch {
+            // ignore
+          }
+
+          let text = result.targetContent;
+          let callers = result.callers;
+          if (isDirTarget && !effectiveSymbol) {
+            text = result.formattedBundle;
+          } else {
+            if (effectiveSymbol) {
+              text = `## Focused Symbol: ${effectiveSymbol}\n\n${text}`;
+              if (callers) {
+                const rootSym = effectiveSymbol.split(/\.|::/)[0]?.trim() ?? effectiveSymbol;
+                callers = callers.filter(
+                  (c) =>
+                    c.importedSymbols.includes(effectiveSymbol) ||
+                    c.importedSymbols.includes(rootSym) ||
+                    c.importedSymbols.includes("*") ||
+                    (c.callSiteLines && c.callSiteLines.length > 0),
+                );
+              }
+            }
+            if (result.targetOutline && !effectiveSymbol) {
+              text += `\n\n## Target Outline\n${result.targetOutline}`;
+            }
+            if (result.dependencies && result.dependencies.length > 0) {
+              text +=
+                `\n\n## Dependencies\n` +
+                result.dependencies
+                  .map((d) => `### ${d.specifier}\n\`\`\`aice\n${d.contract}\n\`\`\``)
+                  .join("\n\n");
+            }
+            if (callers && callers.length > 0) {
+              text +=
+                `\n\n## Downstream Callers\n` +
+                callers
+                  .map((c) => {
+                    const callSitesSuffix =
+                      c.usedSymbol && c.callSiteLines && c.callSiteLines.length > 0
+                        ? ` (uses ${c.usedSymbol} at [${c.callSiteLines.map((l) => `L${l}`).join(", ")}])`
+                        : "";
+                    return `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})${callSitesSuffix}`;
+                  })
+                  .join("\n");
+            }
+            const hasZeroExtras =
+              (!result.dependencies || result.dependencies.length === 0) &&
+              (!callers || callers.length === 0) &&
+              (!result.idioms || Object.keys(result.idioms).length === 0);
+            const isSmallNoExtras =
+              !isDirTarget &&
+              nativeText.length > 0 &&
+              Math.ceil(nativeText.length / 4) < 120 &&
+              hasZeroExtras;
+            if (
+              !isDirTarget &&
+              !isSmallNoExtras &&
+              effectiveIdioms &&
+              result.idioms &&
+              Object.keys(result.idioms).length > 0
+            ) {
+              text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
+            }
+            if (result.nativeDiagnostics) {
+              text += `\n\n${result.nativeDiagnostics}`;
+            }
+            if ((isSmallNoExtras || Boolean(effectiveSymbol)) && hasZeroExtras) {
+              text = result.formattedBundle;
+            }
+          }
+
           recordTelemetryEvent({
-            targetPath: firstSafePath,
+            targetPath: fullPath,
             projectRoot,
             operation: "context",
             surface: "mcp",
             idiomsUsed: Boolean(
-              effectiveIdioms && multiRes.idioms && Object.keys(multiRes.idioms).length > 0,
+              effectiveIdioms && result.idioms && Object.keys(result.idioms).length > 0,
             ),
-            nativeText: nativeTexts || multiRes.targetContent,
-            aiceText: multiRes.formattedBundle,
+            nativeText: nativeText || result.targetContent,
+            aiceText: text,
           });
+
           return {
-            content: [{ type: "text", text: multiRes.formattedBundle }],
+            content: [{ type: "text", text }],
           };
         }
-
-        const singleRaw = rawTargets[0] ?? String(args.path ?? "");
-        const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
-        const targetPath = parsedSingle.targetPath;
-        const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
-        const fullPath = this.resolveSafePath(targetPath);
-        const projectRoot = this.resolveProjectRoot(fullPath);
-        const config = loadProjectConfig(projectRoot);
-        if (!isProjectAiceEnabled(config)) {
-          return {
-            content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
-            isError: true,
-          };
-        }
-        const effectiveIdioms = isProjectIdiomsEnabled(
-          config,
-          typeof args.idioms === "boolean" ? args.idioms : undefined,
-        );
-        const result = await withSuppressedTelemetryAsync(() =>
-          generateContext(fullPath, {
-            depth: typeof args.depth === "number" ? args.depth : undefined,
-            maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
-            symbol: effectiveSymbol,
-            idioms: effectiveIdioms,
-            projectRoot,
-          }),
-        );
-
-        let nativeText = "";
-        let isDirTarget = false;
-        try {
-          if (fs.existsSync(fullPath)) {
-            const stat = fs.statSync(fullPath);
-            if (stat.isFile()) {
-              nativeText = fs.readFileSync(fullPath, "utf-8");
-            } else if (stat.isDirectory()) {
-              isDirTarget = true;
-              nativeText = scanDirectoryForTargets(fullPath)
-                .slice(0, 60)
-                .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
-                .join("\n");
-            }
-          }
-        } catch {
-          // ignore
-        }
-
-        let text = result.targetContent;
-        let callers = result.callers;
-        if (isDirTarget && !effectiveSymbol) {
-          text = result.formattedBundle;
-        } else {
-          if (effectiveSymbol) {
-            text = `## Focused Symbol: ${effectiveSymbol}\n\n${text}`;
-            if (callers) {
-              const rootSym = effectiveSymbol.split(/\.|::/)[0]?.trim() ?? effectiveSymbol;
-              callers = callers.filter(
-                (c) =>
-                  c.importedSymbols.includes(effectiveSymbol) ||
-                  c.importedSymbols.includes(rootSym) ||
-                  c.importedSymbols.includes("*") ||
-                  (c.callSiteLines && c.callSiteLines.length > 0),
-              );
-            }
-          }
-          if (result.targetOutline && !effectiveSymbol) {
-            text += `\n\n## Target Outline\n${result.targetOutline}`;
-          }
-          if (result.dependencies && result.dependencies.length > 0) {
-            text +=
-              `\n\n## Dependencies\n` +
-              result.dependencies
-                .map((d) => `### ${d.specifier}\n\`\`\`aice\n${d.contract}\n\`\`\``)
-                .join("\n\n");
-          }
-          if (callers && callers.length > 0) {
-            text +=
-              `\n\n## Downstream Callers\n` +
-              callers
-                .map((c) => {
-                  const callSitesSuffix =
-                    c.usedSymbol && c.callSiteLines && c.callSiteLines.length > 0
-                      ? ` (uses ${c.usedSymbol} at [${c.callSiteLines.map((l) => `L${l}`).join(", ")}])`
-                      : "";
-                  return `- ${c.filePath}:${c.line} (${c.importedSymbols.join(", ")})${callSitesSuffix}`;
-                })
-                .join("\n");
-          }
-          const hasZeroExtras =
-            (!result.dependencies || result.dependencies.length === 0) &&
-            (!callers || callers.length === 0) &&
-            (!result.idioms || Object.keys(result.idioms).length === 0);
-          const isSmallNoExtras =
-            !isDirTarget &&
-            nativeText.length > 0 &&
-            Math.ceil(nativeText.length / 4) < 120 &&
-            hasZeroExtras;
-          if (
-            !isDirTarget &&
-            !isSmallNoExtras &&
-            effectiveIdioms &&
-            result.idioms &&
-            Object.keys(result.idioms).length > 0
-          ) {
-            text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
-          }
-          if (result.nativeDiagnostics) {
-            text += `\n\n${result.nativeDiagnostics}`;
-          }
-          if ((isSmallNoExtras || Boolean(effectiveSymbol)) && hasZeroExtras) {
-            text = result.formattedBundle;
-          }
-        }
-
-        recordTelemetryEvent({
-          targetPath: fullPath,
-          projectRoot,
-          operation: "context",
-          surface: "mcp",
-          idiomsUsed: Boolean(
-            effectiveIdioms && result.idioms && Object.keys(result.idioms).length > 0,
-          ),
-          nativeText: nativeText || result.targetContent,
-          aiceText: text,
-        });
-
-        return {
-          content: [{ type: "text", text }],
-        };
       }
-
       case "aice_outline": {
-        const rawPaths: string[] = Array.isArray(args.paths)
-          ? (args.paths as unknown[]).map((p) => String(p))
-          : String(args.path ?? "")
-              .split(",")
-              .map((s) => s.trim())
-              .filter(Boolean);
+        let rawPaths: string[] = [];
+        if (Array.isArray(args.paths)) {
+          rawPaths = (args.paths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
+        } else {
+          const rawPathStr = String(args.path ?? "").trim();
+          if (rawPathStr) {
+            if (
+              !rawPathStr.includes(",") &&
+              fs.existsSync(path.resolve(this.workspaceRoot, rawPathStr))
+            ) {
+              rawPaths = [rawPathStr];
+            } else {
+              rawPaths = rawPathStr
+                .split(/[\s,]+/)
+                .map((s) => s.trim())
+                .filter(Boolean);
+            }
+          }
+        }
         if (rawPaths.length === 0) {
           rawPaths.push(".");
         }
-        const firstFullPath = this.resolveSafePath(rawPaths[0]!);
+        const safePaths = rawPaths.map((p) => this.resolveSafePath(p));
+        const firstFullPath = safePaths[0]!;
         const projectRoot = this.resolveProjectRoot(firstFullPath);
         const config = loadProjectConfig(projectRoot);
         if (!isProjectAiceEnabled(config)) {
@@ -1005,53 +1144,53 @@ export class AiceMcpServer {
           config,
           typeof args.idioms === "boolean" ? args.idioms : undefined,
         );
-        const outlineSections: string[] = [];
+        const depthOpt = typeof args.depth === "number" ? args.depth : undefined;
+        const includeTypesOpt = typeof args.types === "boolean" ? args.types : undefined;
+        const compactOpt = typeof args.compact === "boolean" ? args.compact : undefined;
+
+        const result = await withSuppressedTelemetryAsync(() =>
+          outlinePath(safePaths.length === 1 ? firstFullPath : safePaths, {
+            json: false,
+            stats: true,
+            compact: compactOpt,
+            depth: depthOpt,
+            includeTypes: includeTypesOpt,
+            idioms: effectiveIdioms,
+            projectRoot,
+          }),
+        );
+
+        const outlineText =
+          result instanceof Map
+            ? Array.from(result.entries())
+                .map(([key, r]) =>
+                  result.size > 1 || safePaths.length > 1 ? `// === ${key} ===\n${r.text}` : r.text,
+                )
+                .join("\n\n")
+            : result.text || JSON.stringify(result);
+
+        const anyIdiomsUsed =
+          result instanceof Map
+            ? Array.from(result.values()).some((r) => (r.referencedIdioms?.length ?? 0) > 0)
+            : (result.referencedIdioms?.length ?? 0) > 0;
+
         const nativeParts: string[] = [];
-        let anyIdiomsUsed = false;
-        for (const rawTarget of rawPaths) {
-          const fullPath = this.resolveSafePath(rawTarget);
-          const result = await withSuppressedTelemetryAsync(() =>
-            outlinePath(fullPath, {
-              json: false,
-              stats: true,
-              compact: typeof args.compact === "boolean" ? args.compact : undefined,
-              idioms: effectiveIdioms,
-              projectRoot,
-            }),
-          );
-          const singleText =
-            result instanceof Map
-              ? Array.from(result.values())
-                  .map((r) => r.text)
-                  .join("\n\n")
-              : result.text || JSON.stringify(result);
-          outlineSections.push(
-            rawPaths.length > 1 && !(result instanceof Map)
-              ? `// === ${rawTarget} ===\n\n${singleText}`
-              : singleText,
-          );
-          if (
-            result instanceof Map
-              ? Array.from(result.values()).some((r) => (r.referencedIdioms?.length ?? 0) > 0)
-              : (result.referencedIdioms?.length ?? 0) > 0
-          ) {
-            anyIdiomsUsed = true;
-          }
-          try {
-            if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-              nativeParts.push(fs.readFileSync(fullPath, "utf-8"));
-            } else if (result instanceof Map) {
-              for (const r of result.values()) {
-                if (fs.existsSync(r.file)) {
-                  nativeParts.push(fs.readFileSync(r.file, "utf-8"));
-                }
+        try {
+          if (!(result instanceof Map)) {
+            if (fs.existsSync(firstFullPath) && fs.statSync(firstFullPath).isFile()) {
+              nativeParts.push(fs.readFileSync(firstFullPath, "utf-8"));
+            }
+          } else {
+            for (const r of result.values()) {
+              if (fs.existsSync(r.file)) {
+                nativeParts.push(fs.readFileSync(r.file, "utf-8"));
               }
             }
-          } catch {
-            // ignore
           }
+        } catch {
+          // ignore
         }
-        const outlineText = outlineSections.join("\n\n");
+
         const nativeText = nativeParts.join("\n");
         recordTelemetryEvent({
           targetPath: firstFullPath,
@@ -1079,10 +1218,92 @@ export class AiceMcpServer {
               : undefined;
         const bodyCode = typeof args.body === "string" ? args.body : undefined;
         const deleteFlag = Boolean(args.delete);
+        const dryRun = Boolean(args.dryRun);
+        const preserveDocs = typeof args.preserveDocs === "boolean" ? args.preserveDocs : undefined;
+        const insertAfter =
+          typeof args.insertAfter === "string"
+            ? args.insertAfter
+            : typeof args.insert_after === "string"
+              ? args.insert_after
+              : undefined;
+        const insertBefore =
+          typeof args.insertBefore === "string"
+            ? args.insertBefore
+            : typeof args.insert_before === "string"
+              ? args.insert_before
+              : undefined;
+
         const parsedStream =
           newAiceCode && !symbolSelector
             ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || undefined)
             : null;
+
+        const filesBatchFromArgs: BatchSpliceItem[] | undefined =
+          Array.isArray(args.files) && args.files.length > 0
+            ? (args.files as Array<Record<string, unknown>>).map((entry) => {
+                const entryFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
+                if (!entryFp) {
+                  throw new Error("Each item in aice_splice 'files' array must specify 'filePath'");
+                }
+                const entryEdits = Array.isArray(entry.edits)
+                  ? (entry.edits as Array<Record<string, unknown>>).map((ed) => ({
+                      symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
+                      code: typeof ed.code === "string" ? ed.code : undefined,
+                      body: typeof ed.body === "string" ? ed.body : undefined,
+                      delete: typeof ed.delete === "boolean" ? ed.delete : undefined,
+                      insertAfter:
+                        typeof ed.insertAfter === "string"
+                          ? ed.insertAfter
+                          : typeof ed.insert_after === "string"
+                            ? ed.insert_after
+                            : undefined,
+                      insertBefore:
+                        typeof ed.insertBefore === "string"
+                          ? ed.insertBefore
+                          : typeof ed.insert_before === "string"
+                            ? ed.insert_before
+                            : undefined,
+                      preserveDocs:
+                        typeof ed.preserveDocs === "boolean" ? ed.preserveDocs : undefined,
+                    }))
+                  : undefined;
+                const itemSymbol =
+                  typeof entry.symbol === "string"
+                    ? entry.symbol
+                    : typeof entry.symbolSelector === "string"
+                      ? entry.symbolSelector
+                      : undefined;
+                const itemCode =
+                  typeof entry.code === "string"
+                    ? entry.code
+                    : typeof entry.newAiceCode === "string"
+                      ? entry.newAiceCode
+                      : undefined;
+                return {
+                  filePath: entryFp,
+                  ...(itemSymbol !== undefined ? { symbol: itemSymbol } : {}),
+                  ...(itemCode !== undefined ? { code: itemCode } : {}),
+                  ...(typeof entry.body === "string" ? { body: entry.body } : {}),
+                  ...(typeof entry.delete === "boolean" ? { delete: entry.delete } : {}),
+                  ...(typeof entry.insertAfter === "string"
+                    ? { insertAfter: entry.insertAfter }
+                    : {}),
+                  ...(typeof entry.insertBefore === "string"
+                    ? { insertBefore: entry.insertBefore }
+                    : {}),
+                  ...(typeof entry.preserveDocs === "boolean"
+                    ? { preserveDocs: entry.preserveDocs }
+                    : {}),
+                  ...(entryEdits ? { edits: entryEdits } : {}),
+                  ...(typeof entry.create === "boolean"
+                    ? { create: entry.create }
+                    : !itemSymbol && !entryEdits && itemCode !== undefined
+                      ? { create: true }
+                      : {}),
+                };
+              })
+            : undefined;
+
         const multiFileEditsFromArgs: BatchSpliceItem[] | undefined =
           !rawTargetFile &&
           Array.isArray(args.edits) &&
@@ -1099,16 +1320,22 @@ export class AiceMcpServer {
           )
             ? (args.edits as Array<Record<string, unknown>>).map((e) => ({
                 filePath: String(e.filePath ?? e.file ?? e.path ?? ""),
-                symbol: String(e.symbol ?? ""),
+                symbol: String(e.symbol ?? e.symbolSelector ?? ""),
                 code: typeof e.code === "string" ? e.code : undefined,
                 body: typeof e.body === "string" ? e.body : undefined,
                 delete: Boolean(e.delete),
+                ...(typeof e.insertAfter === "string" ? { insertAfter: e.insertAfter } : {}),
+                ...(typeof e.insertBefore === "string" ? { insertBefore: e.insertBefore } : {}),
+                ...(typeof e.preserveDocs === "boolean" ? { preserveDocs: e.preserveDocs } : {}),
               }))
             : undefined;
+
         const effectiveBatchItems =
-          parsedStream?.batchItems && parsedStream.batchItems.length > 0
-            ? parsedStream.batchItems
-            : multiFileEditsFromArgs;
+          filesBatchFromArgs && filesBatchFromArgs.length > 0
+            ? filesBatchFromArgs
+            : parsedStream?.batchItems && parsedStream.batchItems.length > 0
+              ? parsedStream.batchItems
+              : multiFileEditsFromArgs;
 
         if (effectiveBatchItems && effectiveBatchItems.length > 0) {
           const firstRawFp = String(effectiveBatchItems[0]!.filePath ?? "");
@@ -1127,12 +1354,17 @@ export class AiceMcpServer {
           );
           const safeBatchItems = effectiveBatchItems.map((item) => ({
             ...item,
+            ...(preserveDocs !== undefined && item.preserveDocs === undefined
+              ? { preserveDocs }
+              : {}),
             filePath: this.resolveSafePath(String(item.filePath ?? "")),
             rawFilePath: String(item.filePath ?? ""),
           }));
           const batchRes = await withSuppressedTelemetryAsync(() =>
             spliceBatch(safeBatchItems, {
-              compile: true,
+              dryRun,
+              ...(preserveDocs !== undefined ? { preserveDocs } : {}),
+              compile: !dryRun,
               idioms: effectiveIdioms,
               projectRoot,
             }),
@@ -1142,20 +1374,24 @@ export class AiceMcpServer {
             const res = batchRes.results[idx]!;
             const item = safeBatchItems[idx]!;
             const count = item.edits ? item.edits.length : 1;
-            const respLine = `Successfully spliced ${count} symbol(s) in ${item.rawFilePath} (${res.tokensSaved ?? 0} tokens saved).`;
+            const respLine = dryRun
+              ? `[Dry Run] Previewed splice of ${count} symbol(s) in ${item.rawFilePath} (${res.tokensSaved ?? 0} tokens saved).`
+              : `Successfully spliced ${count} symbol(s) in ${item.rawFilePath} (${res.tokensSaved ?? 0} tokens saved).`;
             summaries.push(respLine);
-            const itemSnippet =
-              item.code ??
-              (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
-            recordTelemetryEvent({
-              targetPath: item.filePath,
-              projectRoot,
-              operation: "splice",
-              surface: "mcp",
-              idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
-              nativeText: res.modifiedCode,
-              aiceText: itemSnippet ? `${itemSnippet}\n${respLine}` : respLine,
-            });
+            if (!dryRun) {
+              const itemSnippet =
+                item.code ??
+                (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+              recordTelemetryEvent({
+                targetPath: item.filePath,
+                projectRoot,
+                operation: "splice",
+                surface: "mcp",
+                idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
+                nativeText: res.modifiedCode,
+                aiceText: itemSnippet ? `${itemSnippet}\n${respLine}` : respLine,
+              });
+            }
           }
           return {
             content: [{ type: "text", text: summaries.join("\n") }],
@@ -1164,7 +1400,7 @@ export class AiceMcpServer {
 
         if (!rawTargetFile) {
           throw new Error(
-            "Must provide 'filePath' or pass '=== <filePath>:<symbol> ===' / '=== <filePath> ===' stream blocks inside 'code' (or 'newAiceCode').",
+            "Must provide 'filePath' or pass '=== <filePath>:<symbol> ===' / '=== <filePath> ===' stream blocks inside 'code' (or 'newAiceCode'), or pass 'files'.",
           );
         }
 
@@ -1185,12 +1421,25 @@ export class AiceMcpServer {
           parsedStream?.singleFileEdits && parsedStream.singleFileEdits.length > 0
             ? parsedStream.singleFileEdits
             : Array.isArray(args.edits)
-              ? (args.edits as Array<{
-                  symbol: string;
-                  code?: string;
-                  body?: string;
-                  delete?: boolean;
-                }>)
+              ? (args.edits as Array<Record<string, unknown>>).map((ed) => ({
+                  symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
+                  code: typeof ed.code === "string" ? ed.code : undefined,
+                  body: typeof ed.body === "string" ? ed.body : undefined,
+                  delete: typeof ed.delete === "boolean" ? ed.delete : undefined,
+                  insertAfter:
+                    typeof ed.insertAfter === "string"
+                      ? ed.insertAfter
+                      : typeof ed.insert_after === "string"
+                        ? ed.insert_after
+                        : undefined,
+                  insertBefore:
+                    typeof ed.insertBefore === "string"
+                      ? ed.insertBefore
+                      : typeof ed.insert_before === "string"
+                        ? ed.insert_before
+                        : undefined,
+                  preserveDocs: typeof ed.preserveDocs === "boolean" ? ed.preserveDocs : undefined,
+                }))
               : undefined;
 
         const result = await withSuppressedTelemetryAsync(() =>
@@ -1199,14 +1448,21 @@ export class AiceMcpServer {
             code: batchEdits ? undefined : newAiceCode,
             body: bodyCode,
             delete: deleteFlag,
+            ...(insertAfter !== undefined ? { insertAfter } : {}),
+            ...(insertBefore !== undefined ? { insertBefore } : {}),
+            ...(preserveDocs !== undefined ? { preserveDocs } : {}),
+            ...(typeof args.create === "boolean" ? { create: args.create } : {}),
             edits: batchEdits,
-            compile: true,
+            dryRun,
+            inPlace: !dryRun,
+            diff: dryRun ? true : undefined,
+            compile: !dryRun,
             idioms: effectiveIdioms,
             projectRoot,
           }),
         );
 
-        const displaySym = result.symbol || symbolSelector;
+        const displaySym = result.symbol || symbolSelector || insertAfter || insertBefore || "*";
         if (!result.success) {
           return {
             content: [
@@ -1219,20 +1475,24 @@ export class AiceMcpServer {
           };
         }
 
-        const respText = `Successfully spliced symbol '${displaySym}' in ${rawTargetFile}.${result.diff ? `\n\nDiff:\n${result.diff}` : ""}`;
-        const snippetUsed =
-          newAiceCode ??
-          bodyCode ??
-          (batchEdits ? batchEdits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
-        recordTelemetryEvent({
-          targetPath: filePath,
-          projectRoot,
-          operation: "splice",
-          surface: "mcp",
-          idiomsUsed: Boolean(effectiveIdioms && snippetUsed.includes("$")),
-          nativeText: result.modifiedCode,
-          aiceText: `${snippetUsed}\n${respText}`,
-        });
+        const respText = dryRun
+          ? `[Dry Run] Previewed splice of symbol '${displaySym}' in ${rawTargetFile}.${result.diff ? `\n\nDiff:\n${result.diff}` : `\n\n${result.modifiedCode}`}`
+          : `Successfully spliced symbol '${displaySym}' in ${rawTargetFile}.${result.diff ? `\n\nDiff:\n${result.diff}` : ""}`;
+        if (!dryRun) {
+          const snippetUsed =
+            newAiceCode ??
+            bodyCode ??
+            (batchEdits ? batchEdits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+          recordTelemetryEvent({
+            targetPath: filePath,
+            projectRoot,
+            operation: "splice",
+            surface: "mcp",
+            idiomsUsed: Boolean(effectiveIdioms && snippetUsed.includes("$")),
+            nativeText: result.modifiedCode,
+            aiceText: `${snippetUsed}\n${respText}`,
+          });
+        }
 
         return {
           content: [
@@ -1243,7 +1503,6 @@ export class AiceMcpServer {
           ],
         };
       }
-
       case "aice_idioms": {
         const dir = this.resolveSafePath(String(args.dir ?? args.path ?? "."));
         const action = typeof args.action === "string" ? args.action : "list";
@@ -1396,7 +1655,61 @@ export class AiceMcpServer {
         }
 
         if (action === "expand") {
+          const isDryRun = Boolean(args.dryRun);
+          if (isDryRun) {
+            const idiomsMap = config.idioms ?? {};
+            let previewFiles = 0;
+            let previewCalls = 0;
+            const walkAice = (scanDir: string) => {
+              if (!fs.existsSync(scanDir)) return;
+              const st = fs.statSync(scanDir);
+              if (st.isFile()) {
+                if (scanDir.endsWith(".aice")) {
+                  const src = fs.readFileSync(scanDir, "utf-8");
+                  const res = expandAiceSourceIdioms(src, idiomsMap);
+                  if (res.expandedCount > 0) {
+                    previewFiles++;
+                    previewCalls += res.expandedCount;
+                  }
+                }
+                return;
+              }
+              for (const ent of fs.readdirSync(scanDir, { withFileTypes: true })) {
+                if (
+                  ent.name === "node_modules" ||
+                  ent.name === ".git" ||
+                  ent.name.startsWith(".")
+                ) {
+                  continue;
+                }
+                const full = path.join(scanDir, ent.name);
+                if (ent.isDirectory()) walkAice(full);
+                else if (ent.isFile() && ent.name.endsWith(".aice")) walkAice(full);
+              }
+            };
+            walkAice(dir);
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `[Dry Run] Previewed idiom expansion: ${previewCalls} calls across ${previewFiles} files.`,
+                },
+              ],
+            };
+          }
+
           const expanded = expandProjectIdiomsInDirectory(dir);
+          if (config.idioms && Object.keys(config.idioms).length > 0) {
+            saveProjectConfig(projectRoot, { idioms: {} });
+          }
+          const cacheFile = path.join(projectRoot, ".aice-cache", "idioms.json");
+          if (fs.existsSync(cacheFile)) {
+            try {
+              fs.unlinkSync(cacheFile);
+            } catch {
+              // ignore
+            }
+          }
           return {
             content: [
               {
@@ -1460,10 +1773,7 @@ export class AiceMcpServer {
                 projectRoot,
               }),
             );
-            const totalSaved = batchRes.results.reduce(
-              (acc, r) => acc + (r.tokensSaved ?? 0),
-              0,
-            );
+            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
             const msg = `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`;
             for (let idx = 0; idx < batchRes.results.length; idx++) {
               const res = batchRes.results[idx]!;
@@ -1622,6 +1932,47 @@ export class AiceMcpServer {
       }
 
       case "aice_project_config": {
+        const scope = typeof args.scope === "string" ? args.scope.toLowerCase().trim() : "project";
+        const action = typeof args.action === "string" ? args.action.toLowerCase() : undefined;
+
+        if (scope === "global") {
+          let safeHomeDir: string | undefined;
+          if (typeof args.homeDir === "string" && args.homeDir.trim().length > 0) {
+            const candidateHome = path.resolve(args.homeDir);
+            if (this.isBlockedSystemPath(candidateHome)) {
+              throw new Error(
+                `Access denied: homeDir '${args.homeDir}' points to a blocked system directory`,
+              );
+            }
+            safeHomeDir = candidateHome;
+          }
+          const agentFilter = typeof args.agent === "string" ? args.agent : undefined;
+          const agentResult =
+            action === "setup" || action === "enable"
+              ? setupAgents({
+                  homeDir: safeHomeDir,
+                  agent: agentFilter,
+                  all: Boolean(args.all),
+                })
+              : action === "remove" || action === "disable"
+                ? removeAgents({
+                    homeDir: safeHomeDir,
+                    agent: agentFilter,
+                  })
+                : getAgentsStatus({
+                    homeDir: safeHomeDir,
+                    agent: agentFilter,
+                  });
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify({ scope: "global", ...agentResult }, null, 2),
+              },
+            ],
+          };
+        }
+
         const rawDir =
           typeof args.dir === "string"
             ? args.dir
@@ -1630,7 +1981,6 @@ export class AiceMcpServer {
               : this.workspaceRoot;
         const dir = this.resolveSafePath(rawDir);
         const projectRoot = this.resolveProjectRoot(dir);
-        const action = typeof args.action === "string" ? args.action.toLowerCase() : undefined;
         if (action === "enable") {
           setProjectAiceEnabled(projectRoot, true);
         } else if (action === "disable") {
@@ -1642,27 +1992,14 @@ export class AiceMcpServer {
           setProjectIdiomsEnabled(projectRoot, args.idiomsEnabled);
         }
         const updated = loadProjectConfig(projectRoot);
+        const configFileExists = fs.existsSync(path.join(projectRoot, "aice.config.json"));
         const agentsMdPath = path.join(projectRoot, "AGENTS.md");
-        let rulesVersion: string | undefined;
-        if (fs.existsSync(agentsMdPath)) {
-          try {
-            const mdText = fs.readFileSync(agentsMdPath, "utf-8");
-            const verMatch =
-              mdText.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/) ??
-              mdText.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
-            if (verMatch?.[1]) {
-              rulesVersion = verMatch[1];
-            } else if (mdText.includes("<!-- AICE:START")) {
-              rulesVersion = "legacy";
-            }
-          } catch {
-            // ignore
-          }
-        }
+        const rulesVersion = extractMarkdownDirectiveVersion(agentsMdPath);
         const rulesUpToDate = !rulesVersion || rulesVersion === AICE_VERSION;
         const payload = {
           projectRoot,
           version: AICE_VERSION,
+          configFileExists,
           enabled: isProjectAiceEnabled(updated),
           idiomsEnabled: isProjectIdiomsEnabled(updated),
           activeIdiomsCount: updated.idioms ? Object.keys(updated.idioms).length : 0,
@@ -1678,13 +2015,11 @@ export class AiceMcpServer {
           content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
         };
       }
-
-      default: {
+      default:
         return {
           content: [{ type: "text", text: `Unknown tool: ${name}` }],
           isError: true,
         };
-      }
     }
   }
 }
