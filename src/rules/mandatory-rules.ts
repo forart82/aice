@@ -3,7 +3,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Mandatory Agent Rules Specification (v0.9.21).
+ * AICE 2.0 Mandatory Agent Rules Specification (v0.9.22).
  * Defines the zero-discovery, token-dense rules injected into AGENTS.md,
  * CLAUDE.md, and ~/.gemini/config/rules/aice.md.
  */
@@ -19,16 +19,14 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 ## AICE 2.0 (v${AICE_VERSION}) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (\`sed\` / \`ls\` / \`grep\` Ban)
-- **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run \`sed -n\`, \`awk\`, \`head\`, \`tail\`, \`cat\`, \`grep -n\`, \`grep -rn\`, \`grep -C\`, \`ls\`, \`ls -la\`, \`ls src\`, \`find\`, \`aice --help\`, \`aice --version\`, \`which aice\`, or \`git status\` on supported files and directories:
+- **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run \`sed -n\`, \`awk\`, \`head\`, \`tail\`, \`cat\`, \`grep -n\`, \`grep -rn\`, \`grep -C\`, \`ls\`, \`ls -la\`, \`ls src\`, \`find\`, \`aice --help\`, \`aice --version\`, \`which aice\`, or \`git status\` on supported files and directories (\`aice context\` works seamlessly across all 33 file extensions including \`.aipl\`):
   - Replace \`ls src tests\` -> \`aice outline src tests\`
   - Replace \`sed -n '180,240p' file\` -> \`aice context <file> -s "L180-L240"\`
+  - Replace \`sed -n '50,90p' file.aipl\` -> \`aice context file.aipl -s "L50-L90"\`
   - Replace \`grep -n "pattern" file\` -> \`aice outline <file>\` (includes \`test "..." # [Lstart-Lend]\`, functions, labels, and Markdown headings) or \`aice context <file> -s "<symbolOrTestId>"\`
+  - Replace \`grep -n -C 10 "sym" file.aipl\` -> \`aice context file.aipl -s "sym"\`
   - Replace \`grep -rn "pattern" dir\` -> \`aice context <fileOrDir> -s "/<searchPattern>/"\` (returns exact call-site line numbers and context)
-- **Keep CoT Minimal**: Do not draft full file implementations in thinking tokens before calling \`aice\`. Stream code directly into \`aice create --stdin << 'EOF'\` and \`aice splice --stdin << 'EOF'\`.
-- **Combine Install & Build in 1 Turn**: Always run \`npm install && npm run build\` in a **single** \`run_command\` call instead of splitting \`npm install\` and \`npm run build\` across 2 turns.
-- **Stop Immediately After Final Build**: Once your final verification build (\`npm run build\` / \`pytest\` / \`cargo test\`) exits \`0\`, respond to the user immediately — NEVER run trailing \`git status\` or \`ls\` checks.
-
-### 1. Project Activation Rule (\`aice.config.json\`)
+  - Replace \`grep -rn "sym" src/\` -> \`aice context src -s "/sym/"\`
 - **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an \`aice.config.json\` file with \`"enabled": true\` (pre-provisioned in all AICE project folders such as \`aice_*\` / \`aice\`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count \`aice.config.json\` against project file limits).
 - **Non-AICE Bypass**: If \`aice.config.json\` with \`"enabled": true\` is **not** present in the project folder (e.g. \`*_nonaice\` folders or when \`"enabled": false\`), bypass AICE completely and use standard native file tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`view_file\`).
 - **Idioms Toggle**: If \`"idiomsEnabled": false\` (or \`"idioms": false\`), disable \`$idiom\` macros (\`--no-idioms\`).

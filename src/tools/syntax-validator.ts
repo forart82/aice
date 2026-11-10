@@ -693,11 +693,14 @@ export function validateNativeSyntax(
     let prevTrimmed = "";
     let prevLineNum = 0;
     let openDelims = 0;
+    let inMultilineFnHeader = false;
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("//")) continue;
+      const rawTrimmed = line.trim();
+      if (!rawTrimmed || rawTrimmed.startsWith("//")) continue;
+      const trimmed = rawTrimmed.replace(/\s*\/\/.*$/, "").trim();
+      if (!trimmed) continue;
 
       const indentMatch = line.match(/^[ \t]*/);
       const leadingWs = indentMatch ? indentMatch[0] : "";
@@ -741,13 +744,37 @@ export function validateNativeSyntax(
         }
       }
 
-      for (let c = 0; c < line.length; c++) {
-        const ch = line[c];
+      const openDelimsBefore = openDelims;
+      let inStrQuote: string | null = null;
+      for (let c = 0; c < trimmed.length; c++) {
+        const ch = trimmed[c];
+        const prevCh = c > 0 ? trimmed[c - 1] : "";
+        if (inStrQuote) {
+          if (ch === inStrQuote && prevCh !== "\\") {
+            inStrQuote = null;
+          }
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          inStrQuote = ch;
+          continue;
+        }
         if (ch === "(" || ch === "[" || ch === "{") openDelims++;
         else if (ch === ")" || ch === "]" || ch === "}") openDelims = Math.max(0, openDelims - 1);
       }
 
-      if (/^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
+      if (openDelimsBefore === 0 && /^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
+        if (openDelims > 0) {
+          inMultilineFnHeader = true;
+        } else if (!trimmed.endsWith(":")) {
+          items.push({
+            line: i + 1,
+            column: line.length,
+            message: `AIPL function signature must end with ':' before indented body`,
+          });
+        }
+      } else if (inMultilineFnHeader && openDelims === 0) {
+        inMultilineFnHeader = false;
         if (!trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
@@ -757,8 +784,13 @@ export function validateNativeSyntax(
         }
       }
 
-      if (/^(?:pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed)) {
-        if (!trimmed.endsWith(":")) {
+      if (openDelimsBefore === 0 && /^(?:pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed)) {
+        const isSingleLineTupleStruct = /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\([^)]*\)\s*$/.test(
+          trimmed,
+        );
+        const isMultiLineTupleStruct =
+          /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\(/.test(trimmed) && openDelims > 0;
+        if (!isSingleLineTupleStruct && !isMultiLineTupleStruct && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
             column: line.length,
@@ -770,6 +802,8 @@ export function validateNativeSyntax(
       prevTrimmed = trimmed;
       prevLineNum = i + 1;
     }
+
+    return finish();
 
     return finish();
   }

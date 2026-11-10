@@ -842,8 +842,22 @@ function extractFileSymbolList(aiceSource: string, filePath: string): string[] {
         }
       }
     }
+    if (out.length === 0 && filePath.endsWith(".aipl")) {
+      return withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols.map(
+        (s) => s.name,
+      );
+    }
     return out;
   } catch {
+    if (filePath.endsWith(".aipl")) {
+      try {
+        return withSuppressedTelemetry(() => generateOutline(aiceSource, filePath)).symbols.map(
+          (s) => s.name,
+        );
+      } catch {
+        return [];
+      }
+    }
     return [];
   }
 }
@@ -885,6 +899,101 @@ function compactPureAiceSlice(src: string): string {
 }
 
 /**
+ * Recursively traverses `dir` up to `maxDepth` (default: 5) and returns all discovered
+ * target files matching the 33 extensions in `KNOWN_TARGET_EXTENSIONS` (or `.aice`).
+ */
+export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
+  const discovered: string[] = [];
+  const absRoot = path.resolve(dir);
+  const visitedDirs = new Set<string>();
+  const ignoredDirs = new Set([
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".aice-build",
+    ".agents",
+    ".next",
+    ".turbo",
+    "coverage",
+    "target",
+    "vendor",
+  ]);
+  const ignoredFiles = new Set([
+    "aice.config.json",
+    "package.json",
+    "tsconfig.json",
+    "jsconfig.json",
+    "biome.json",
+    "rome.json",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    ".GEMINI.md",
+  ]);
+  const allTargetExts = Array.from(KNOWN_TARGET_EXTENSIONS);
+
+  const walk = (currentDir: string, depth: number): void => {
+    if (depth > maxDepth) return;
+    let realCurrentDir = currentDir;
+    try {
+      realCurrentDir = fs.realpathSync(currentDir);
+    } catch {
+      // fallback to path
+    }
+    if (visitedDirs.has(realCurrentDir)) return;
+    visitedDirs.add(realCurrentDir);
+
+    let entries: fs.Dirent[] = [];
+    try {
+      entries = fs.readdirSync(currentDir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.name !== "." && entry.name !== "..") {
+        continue;
+      }
+      const fullPath = path.join(currentDir, entry.name);
+      let isDir = entry.isDirectory();
+      let isFile = entry.isFile();
+      if (!isDir && !isFile) {
+        try {
+          const st = fs.statSync(fullPath);
+          isDir = st.isDirectory();
+          isFile = st.isFile();
+        } catch {
+          continue;
+        }
+      }
+      if (isDir) {
+        if (ignoredDirs.has(entry.name)) continue;
+        walk(fullPath, depth + 1);
+      } else if (isFile) {
+        if (entry.name.endsWith(".trivia.json") || ignoredFiles.has(entry.name)) {
+          continue;
+        }
+        const lowerName = entry.name.toLowerCase();
+        const ext = path.extname(lowerName);
+        if (
+          lowerName.endsWith(".aice") ||
+          (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) ||
+          allTargetExts.some((knownExt) => lowerName.endsWith(knownExt))
+        ) {
+          discovered.push(fullPath);
+        }
+      }
+    }
+  };
+
+  if (fs.existsSync(absRoot)) {
+    walk(absRoot, 0);
+  }
+  return discovered.sort();
+}
+
+/**
  * Packages a workspace overview context pack covering project configuration,
  * discovered files, module outlines, and dependencies.
  */
@@ -923,19 +1032,88 @@ export async function generateWorkspaceContext(
     }
   }
   const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
+  const isPureRegexSearch =
+    requestedSelectors.length > 0 &&
+    requestedSelectors.every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
 
-  for (const f of resolved.files) {
+  const isPureAiceDirectory =
+    resolved.files.length > 0 && resolved.files.every((f) => f.endsWith(".aice"));
+  const workspaceFiles = isPureAiceDirectory
+    ? resolved.files
+    : Array.from(
+        new Set([
+          ...resolved.files,
+          ...(resolved.isDirectory && fs.existsSync(resolved.resolvedPath)
+            ? scanDirectoryForTargets(resolved.resolvedPath, 5)
+            : []),
+        ]),
+      ).sort();
+
+  for (const f of workspaceFiles) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
       const rawFileContent = fs.readFileSync(f, "utf-8");
       rawWorkspaceTexts.push(rawFileContent);
+
+      if (isPureRegexSearch) {
+        const matchedSlices: string[] = [];
+        for (const rawSel of requestedSelectors) {
+          const matched = extractPatternMatchesFromSource(rawFileContent, rawSel.trim());
+          if (matched) {
+            matchedSlices.push(matched.trim());
+          }
+        }
+        if (matchedSlices.length === 0) {
+          continue;
+        }
+        const hitTags = Array.from(
+          new Set(
+            matchedSlices
+              .flatMap((sl) => Array.from(sl.matchAll(/^\/\/ match at \[([^\]]+)\]/gm)))
+              .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+              .filter(Boolean),
+          ),
+        );
+        const firstLineNum = hitTags[0]?.replace(/^L/i, "");
+        const annotatedSlices = matchedSlices.map((sl) =>
+          firstLineNum
+            ? sl.replace(
+                /^\/\/ match at \[([^\]]+)\]/,
+                `// match at [$1] (${relFile}:${firstLineNum})`,
+              )
+            : sl,
+        );
+        let fileAice = rawFileContent;
+        if (!f.endsWith(".aice")) {
+          try {
+            const targetLang = detectTargetFromPath(f);
+            const decomp = withSuppressedTelemetry(() =>
+              decompile(rawFileContent, targetLang, { filePath: f }),
+            );
+            fileAice = decomp.aice;
+          } catch {
+            fileAice = rawFileContent;
+          }
+        }
+        const allSyms = extractFileSymbolList(fileAice, f);
+        const symHeader = allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}` : "";
+        const sliceBody = [symHeader, ...annotatedSlices].filter(Boolean).join("\n\n");
+        const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
+        symbolSlices.push(`### ${relFile}${headerTag}\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+        continue;
+      }
+
       let fileAice = rawFileContent;
       if (!f.endsWith(".aice")) {
-        const targetLang = detectTargetFromPath(f);
-        const decomp = withSuppressedTelemetry(() =>
-          decompile(rawFileContent, targetLang, { filePath: f }),
-        );
-        fileAice = decomp.aice;
+        try {
+          const targetLang = detectTargetFromPath(f);
+          const decomp = withSuppressedTelemetry(() =>
+            decompile(rawFileContent, targetLang, { filePath: f }),
+          );
+          fileAice = decomp.aice;
+        } catch {
+          fileAice = rawFileContent;
+        }
       }
       if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
         try {
@@ -1006,7 +1184,7 @@ export async function generateWorkspaceContext(
               !rawSel.includes("::")
             ) {
               const candidateFilter = rawSel.slice(0, colonIdx).trim();
-              const matchesKnownFile = resolved.files.some(
+              const matchesKnownFile = workspaceFiles.some(
                 (cand) =>
                   path.basename(cand) === candidateFilter ||
                   formatDisplayPath(cand, projectRoot) === candidateFilter,
@@ -1034,7 +1212,8 @@ export async function generateWorkspaceContext(
                 f.endsWith(".zsh") ||
                 f.endsWith(".ps1") ||
                 f.endsWith(".cmd") ||
-                f.endsWith(".bat");
+                f.endsWith(".bat") ||
+                f.endsWith(".aipl");
               let sliced = isRawOrMatch
                 ? rawExtracted.trim()
                 : unwrapSyntheticContainer(
@@ -1053,9 +1232,23 @@ export async function generateWorkspaceContext(
           }
         }
         if (fileSlices.length > 0) {
+          const hitTags = Array.from(
+            new Set(
+              fileSlices
+                .flatMap((sl) => Array.from(sl.matchAll(/^\/\/ match at \[([^\]]+)\]/gm)))
+                .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+                .filter(Boolean),
+            ),
+          );
           const sliceBody = [symHeader, ...fileSlices].filter(Boolean).join("\n\n");
           if (sliceBody) {
-            symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+            if (hitTags.length > 0) {
+              symbolSlices.push(
+                `### ${relFile} [${hitTags.join(", ")}]\n\`\`\`aice\n${sliceBody}\n\`\`\``,
+              );
+            } else {
+              symbolSlices.push(`### \`${relFile}\`\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+            }
           }
         }
       }
@@ -1144,10 +1337,10 @@ export async function generateWorkspaceContext(
       `- Source Directory: ${config.sourceDir}`,
       `- Output Directory: ${config.outDir}`,
       `- Target Language: ${config.targetLanguage}`,
-      `- Files Count: ${resolved.files.length}`,
+      `- Files Count: ${workspaceFiles.length}`,
       "",
-      `## Workspace Files (${resolved.files.length}):`,
-      ...resolved.files.map((f) => `- \`${formatDisplayPath(f, projectRoot)}\``),
+      `## Workspace Files (${workspaceFiles.length}):`,
+      ...workspaceFiles.map((f) => `- \`${formatDisplayPath(f, projectRoot)}\``),
       "",
     );
 
@@ -1194,7 +1387,7 @@ export async function generateWorkspaceContext(
     tokenCount = estimateTokens(formattedBundle);
   }
 
-  const targetContent = resolved.files.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
+  const targetContent = workspaceFiles.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
 
   const resObj: ContextResult = {
     targetPath: displayTargetPath,

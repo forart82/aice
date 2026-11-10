@@ -949,6 +949,41 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       const name = structMatch[2];
       let endLine = i + 1;
       const children: OutlineSymbol[] = [];
+      const singleTupleMatch = line.match(
+        /^(\s*)(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*$/,
+      );
+      if (singleTupleMatch) {
+        const rawFields = singleTupleMatch[3]
+          .split(",")
+          .map((f) => f.trim())
+          .filter(Boolean);
+        for (const rf of rawFields) {
+          const fm = rf.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.+)$/);
+          if (fm) {
+            children.push({
+              name: fm[1],
+              kind: "field",
+              line: i + 1,
+              endLine: i + 1,
+              lineRange: `[L${i + 1}-L${i + 1}]`,
+              signature: `val ${fm[1]}: ${fm[2].trim()}`,
+              children: [],
+            });
+          }
+        }
+        symbols.push({
+          name,
+          kind: "class",
+          line: i + 1,
+          endLine: i + 1,
+          lineRange: `[L${i + 1}-L${i + 1}]`,
+          signature: `struct ${name}: ...`,
+          children,
+        });
+        i++;
+        continue;
+      }
+
       let j = i + 1;
       while (j < lines.length) {
         const subTrimmed = lines[j].trim();
@@ -958,18 +993,23 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
         if (subIndent <= indentLen) {
+          if (subIndent === indentLen && subTrimmed.startsWith(")")) {
+            endLine = j + 1;
+            j++;
+          }
           break;
         }
         endLine = j + 1;
         const fieldMatch = lines[j].match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
         if (fieldMatch) {
+          const cleanFieldType = fieldMatch[3].trim().replace(/,\s*$/, "").trim();
           children.push({
             name: fieldMatch[2],
             kind: "field",
             line: j + 1,
             endLine: j + 1,
             lineRange: `[L${j + 1}-L${j + 1}]`,
-            signature: `val ${fieldMatch[2]}: ${fieldMatch[3].trim()}`,
+            signature: `val ${fieldMatch[2]}: ${cleanFieldType}`,
             children: [],
           });
         }
@@ -1033,17 +1073,35 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       continue;
     }
 
-    const fnMatch = line.match(
-      /^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
-    );
-    if (fnMatch) {
-      const indentLen = fnMatch[1].length;
-      const name = fnMatch[2];
-      const params = fnMatch[3] ?? "";
-      const rawRet = fnMatch[4]?.trim().replace(/:$/, "").trim();
+    const fnOpenMatch = line.match(/^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/);
+    if (fnOpenMatch) {
+      const indentLen = fnOpenMatch[1].length;
+      const name = fnOpenMatch[2];
+      let headerEndIdx = i;
+      let openParens = 0;
+      const headerPieces: string[] = [];
+      while (headerEndIdx < lines.length) {
+        const hLine = lines[headerEndIdx].replace(/\s*\/\/.*$/, "").trim();
+        if (hLine) headerPieces.push(hLine);
+        for (let c = 0; c < hLine.length; c++) {
+          if (hLine[c] === "(") openParens++;
+          else if (hLine[c] === ")") openParens = Math.max(0, openParens - 1);
+        }
+        if (openParens === 0) break;
+        headerEndIdx++;
+      }
+      const joinedHeader = headerPieces.join(" ");
+      const parsedHeader = joinedHeader.match(
+        /^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(([^)]*)\)(?:\s*(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
+      );
+      const params = (parsedHeader?.[1] ?? "")
+        .replace(/\s+/g, " ")
+        .replace(/\s*,\s*/g, ", ")
+        .trim();
+      const rawRet = parsedHeader?.[2]?.trim().replace(/:$/, "").trim();
       const retType = rawRet || "void";
-      let endLine = i + 1;
-      let j = i + 1;
+      let endLine = Math.min(lines.length, headerEndIdx + 1);
+      let j = headerEndIdx + 1;
       while (j < lines.length) {
         const subTrimmed = lines[j].trim();
         if (!subTrimmed || subTrimmed.startsWith("//")) {

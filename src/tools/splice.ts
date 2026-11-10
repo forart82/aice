@@ -2119,7 +2119,19 @@ function locateAiplDeclarationSpan(
   if (isField) {
     endLine = targetLine;
   } else {
-    for (let i = targetLine + 1; i < searchEndLine; i++) {
+    let headerEndLine = targetLine;
+    let openParens = 0;
+    while (headerEndLine < searchEndLine) {
+      const hLine = lines[headerEndLine].replace(/\s*\/\/.*$/, "");
+      for (let c = 0; c < hLine.length; c++) {
+        if (hLine[c] === "(") openParens++;
+        else if (hLine[c] === ")") openParens = Math.max(0, openParens - 1);
+      }
+      endLine = headerEndLine;
+      if (openParens === 0) break;
+      headerEndLine++;
+    }
+    for (let i = headerEndLine + 1; i < searchEndLine; i++) {
       const trimmed = lines[i].trim();
       if (!trimmed) continue;
       const ind = lines[i].match(/^[ \t]*/)?.[0].length ?? 0;
@@ -2131,7 +2143,6 @@ function locateAiplDeclarationSpan(
       }
     }
   }
-
   const declStart = lineOffsets[targetLine];
   const fullDeclStart = declStart;
   const tokenStart = declStart + targetIndent.length;

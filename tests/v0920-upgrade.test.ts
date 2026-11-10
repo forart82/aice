@@ -376,41 +376,39 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       }
     });
 
-    it("enforces sed/ls/grep ban and documents 33 extensions and v0.9.21 header in MANDATORY_AGENT_RULES_MARKDOWN", () => {
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.21 -->");
+    it("enforces sed/ls/grep ban and documents 33 extensions and v0.9.22 header in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.22 -->");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("33 supported file extensions");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(".sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("sed -n");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("grep -rn");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("NEVER run `sed -n`");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain('aice context <fileOrDir> -s "/<searchPattern>/"');
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice outline src tests");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain('aice context <file> -s "L180-L240"');
     });
   });
 
   describe("Step 5: Version Detection, Agent Rule Sync Status & install.sh Workspace Refresh", () => {
     it("embeds current version in VERSION/AICE_VERSION, detects outdated agent rules, and refreshes workspaces in install.sh", () => {
-      expect(AICE_VERSION).toBe("0.9.21");
-      expect(VERSION).toBe("0.9.21");
+      expect(AICE_VERSION).toBe("0.9.22");
+      expect(VERSION).toBe("0.9.22");
 
       const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "aice-v0920-step5-"));
       try {
-        // 1. Setup agents and verify rulesVersion === 0.9.21 and allRulesUpToDate === true
+        // 1. Setup agents and verify rulesVersion === 0.9.22 and allRulesUpToDate === true
         const setupRes = setupAgents({ homeDir: tmpHome, all: true });
-        expect(setupRes.version).toBe("0.9.21");
+        expect(setupRes.version).toBe("0.9.22");
         expect(setupRes.allRulesUpToDate).toBe(true);
         // 2. Simulate an older v0.9.10 rule block in ~/.claude/CLAUDE.md and verify mismatch detection
         const claudeMdPath = path.join(tmpHome, ".claude", "CLAUDE.md");
-        fs.writeFileSync(
-          claudeMdPath,
-          "<!-- AICE:START -->\n<!-- AICE:START v0.9.10 -->\nOld rules\n<!-- AICE:END -->\n",
-          "utf-8",
-        );
+        const outdatedContent = fs
+          .readFileSync(claudeMdPath, "utf-8")
+          .replace(`<!-- AICE:START v${AICE_VERSION} -->`, "<!-- AICE:START v0.9.10 -->");
+        fs.writeFileSync(claudeMdPath, outdatedContent, "utf-8");
         const statusRes = getAgentsStatus({ homeDir: tmpHome });
-        expect(statusRes.allRulesUpToDate).toBe(false);
-        expect(statusRes.updateRecommendation).toContain("./install.sh -y");
+        const claudeStatus = statusRes.agents.find((s) => s.id === "claude");
+        expect(claudeStatus?.rulesVersion).toBe("0.9.10");
+        expect(claudeStatus?.rulesUpToDate).toBe(false);
         const table = formatAgentsStatusTable(statusRes);
-
-        expect(table).toContain("v0.9.10 -> v0.9.21");
+        expect(table).toContain("v0.9.10 -> v0.9.22");
         const sampleProj = path.join(tmpHome, "dev", "sample_game");
         fs.mkdirSync(sampleProj, { recursive: true });
         fs.writeFileSync(
@@ -452,11 +450,11 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
         );
         expect(fs.existsSync(toolsSchemaPath)).toBe(true);
         const toolsSchema = JSON.parse(fs.readFileSync(toolsSchemaPath, "utf-8"));
-        expect(toolsSchema.version).toBe("0.9.21");
+        expect(toolsSchema.version).toBe("0.9.22");
         const refreshedDotGemini = fs.readFileSync(path.join(sampleProj, ".GEMINI.md"), "utf-8");
-        expect(refreshedDotGemini).toContain("<!-- AICE:START v0.9.21 -->");
+        expect(refreshedDotGemini).toContain("<!-- AICE:START v0.9.22 -->");
         const refreshedAgentsMd = fs.readFileSync(path.join(sampleProj, "AGENTS.md"), "utf-8");
-        expect(refreshedAgentsMd).toContain("<!-- AICE:START v0.9.21 -->");
+        expect(refreshedAgentsMd).toContain("<!-- AICE:START v0.9.22 -->");
       } finally {
         fs.rmSync(tmpHome, { recursive: true, force: true });
       }

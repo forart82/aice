@@ -170,11 +170,11 @@ export function decompile(
     target === "shell" ||
     target === "powershell" ||
     target === "batch" ||
-    target === "markdown"
+    target === "markdown" ||
+    target === "aipl"
   ) {
     trivia = new CstTriviaTable();
     trivia.setOriginalSource(source);
-    trivia.setSourceSlice("module", source);
     const lineCount = source.split(/\r?\n/).length;
     const span = {
       file: filePath,
