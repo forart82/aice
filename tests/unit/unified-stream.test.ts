@@ -487,14 +487,13 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
     });
   });
 
-  describe("Step 4: Stream-First Mandatory Rules, Edge Cases & Version 0.9.23", () => {
-    it("exports AICE_VERSION 0.9.23 and documents stream-first context and mixed splice in MANDATORY_AGENT_RULES_MARKDOWN", () => {
-      expect(AICE_VERSION).toBe("0.9.23");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.23 -->");
+  describe("Step 4: Stream-First Mandatory Rules, Edge Cases & Version 0.9.24", () => {
+    it("exports AICE_VERSION 0.9.24 and documents stream-first context and mixed splice in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+      expect(AICE_VERSION).toBe("0.9.24");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.24 -->");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice context f1:s1 f2:s2");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
     });
-
     it("handles AIPL block comments /* ... */, # line comments, and trailing semicolons in extractImportsFromFile", () => {
       const aiplPath = path.join(tmpDir, "src", "commented.aipl");
       fs.mkdirSync(path.dirname(aiplPath), { recursive: true });

@@ -1422,8 +1422,24 @@ Examples:
               return;
             }
           }
+          const badHeader = rawCrossStream?.match(/^\s*={3,}\s*([^=\r\n]*?)\s*={3,}/m)?.[1]?.trim();
+          const headerDiag = badHeader ? ` Malformed or incomplete header '=== ${badHeader} ==='.` : "";
           console.error(
-            "❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe '=== <filePath>:<symbol> ===' blocks via --stdin.",
+            `❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}\n` +
+              "Valid --stdin heredoc block examples:\n" +
+              "  1. Symbol replacement:\n" +
+              "     === src/file.ts:ClassName.method ===\n" +
+              "     public method(): void { ... }\n" +
+              "  2. Line-range replacement:\n" +
+              "     === src/file.ts:L10-L12 ===\n" +
+              "     const updated = true;\n" +
+              "  3. AST-scoped hunk splice (<<< / === / >>>):\n" +
+              "     === src/file.ts:ClassName.method ===\n" +
+              "     <<<\n" +
+              "     const oldVal = 1;\n" +
+              "     ===\n" +
+              "     const newVal = 2;\n" +
+              "     >>>",
           );
           process.exit(1);
         }
@@ -1514,8 +1530,13 @@ Examples:
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
           } else {
+            const symHint = options.symbol ? `:${options.symbol}` : ":<symbol>";
             console.error(
-              "❌ Error: Must provide --code, --from, --stdin, --body, --delete, or --edits.",
+              `❌ Error: Empty or missing splice body for '=== ${targetPath}${symHint} ==='. Must provide --code, --from, --stdin, --body, --delete, or --edits.\n` +
+                `Valid heredoc syntax:\n` +
+                `  • Symbol: === ${targetPath}:ClassName.method ===\n` +
+                `  • Line range: === ${targetPath}:L10-L12 ===\n` +
+                `  • Hunk: === ${targetPath}${symHint} === followed by <<< / === / >>>`,
             );
             process.exit(1);
           }
@@ -1953,9 +1974,8 @@ program
   )
   .option(
     "-d, --depth <number>",
-    "Dependency traversal depth (default: 1)",
+    "Dependency traversal depth (default: 1, or 0 for line-range/regex fast path)",
     (val) => Number.parseInt(val, 10),
-    1,
   )
   .option(
     "-s, --symbol <symbol>",
@@ -1963,6 +1983,7 @@ program
   )
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
+  .option("--callers", "Force reverse caller lookup")
   .option("--no-callers", "Skip reverse caller lookup")
   .option("--outline-target", "Outline target instead of full source")
   .option("--max-tokens <number>", "Maximum token limit", (val) => Number.parseInt(val, 10))
@@ -2030,11 +2051,16 @@ Examples:
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
           }
+          const explicitCallers = process.argv.includes("--callers")
+            ? true
+            : process.argv.includes("--no-callers") || options.callers === false
+              ? false
+              : undefined;
           const contextOpts: ContextOptions = {
-            depth: options.depth !== undefined ? Number(options.depth) : 1,
+            depth: options.depth !== undefined ? Number(options.depth) : undefined,
             symbol: inlineSymbol ?? options.symbol,
             idioms: options.idioms,
-            includeCallers: options.callers !== false,
+            includeCallers: explicitCallers,
             outlineTarget: !!options.outlineTarget,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             json: !!options.json,

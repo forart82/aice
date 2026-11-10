@@ -446,6 +446,12 @@ function checkHtmlScriptAndStyleTags(code: string): SyntaxDiagnosticItem[] {
 
   return items;
 }
+const syntaxValidationCache: Array<{
+  key: string;
+  code: string;
+  result: SyntaxValidationResult;
+}> = [];
+
 export function validateNativeSyntax(
   code: string,
   targetLang: TargetLanguage,
@@ -456,12 +462,30 @@ export function validateNativeSyntax(
     return { valid: true, diagnostics: [], items: [] };
   }
 
+  const idiomKey =
+    activeIdioms && Object.keys(activeIdioms).length > 0
+      ? Object.keys(activeIdioms).sort().join(",")
+      : "";
+  const cacheKey = `${targetLang}:${path.extname(filePath).toLowerCase()}:${idiomKey}:${code.length}`;
+  for (const entry of syntaxValidationCache) {
+    if (entry.key === cacheKey && entry.code === code) {
+      return entry.result;
+    }
+  }
+
   const items: SyntaxDiagnosticItem[] = [];
-  const finish = (): SyntaxValidationResult => ({
-    valid: items.length === 0,
-    diagnostics: items.map((d) => `Line ${d.line}:${d.column} - ${d.message}`),
-    items,
-  });
+  const finish = (): SyntaxValidationResult => {
+    const res: SyntaxValidationResult = {
+      valid: items.length === 0,
+      diagnostics: items.map((d) => `Line ${d.line}:${d.column} - ${d.message}`),
+      items,
+    };
+    syntaxValidationCache.unshift({ key: cacheKey, code, result: res });
+    if (syntaxValidationCache.length > 6) {
+      syntaxValidationCache.pop();
+    }
+    return res;
+  };
 
   // 1. JSON & YAML
   if (targetLang === "json") {

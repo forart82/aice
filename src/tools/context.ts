@@ -953,7 +953,41 @@ function formatBundle(
   callers: CallerSummary[],
   idioms?: Record<string, ProjectIdiomDefinition>,
   nativeDiagnostics?: string,
+  options?: { minimalEnvelope?: boolean; symbolSelector?: string },
 ): string {
+  if (
+    options?.minimalEnvelope &&
+    dependencies.length === 0 &&
+    callers.length === 0
+  ) {
+    const headerLabel = options.symbolSelector
+      ? `${displayTargetPath}:${options.symbolSelector}`
+      : displayTargetPath;
+    const minLines: string[] = [`// === ${headerLabel} ===`];
+    if (idioms && Object.keys(idioms).length > 0 && !targetBody.includes("# @idioms available:")) {
+      const idiomNames = Object.entries(idioms)
+        .map(([name, def]) => {
+          const normName = name.startsWith("$") ? name : `$${name}`;
+          const params = (def.params ?? []).map((p) => p.name).join(", ");
+          return `${normName}(${params})`;
+        })
+        .join(", ");
+      if (idiomNames) {
+        minLines.push(`# @idioms available: ${idiomNames}`);
+      }
+    }
+    minLines.push(targetBody);
+    if (idioms && Object.keys(idioms).length > 0) {
+      minLines.push("");
+      minLines.push(formatIdiomsMarkdownSection(idioms));
+    }
+    if (nativeDiagnostics) {
+      minLines.push("");
+      minLines.push(nativeDiagnostics);
+    }
+    return minLines.join("\n");
+  }
+
   const lines: string[] = [];
 
   lines.push(`# AICE Context Pack: ${displayTargetPath}`);
@@ -1419,23 +1453,25 @@ export async function generateWorkspaceContext(
               )
             : sl,
         );
-        let fileAice = rawFileContent;
-        if (!f.endsWith(".aice")) {
-          try {
-            const targetLang = detectTargetFromPath(f);
-            const decomp = withSuppressedTelemetry(() =>
-              decompile(rawFileContent, targetLang, { filePath: f }),
-            );
-            fileAice = decomp.aice;
-          } catch {
-            fileAice = rawFileContent;
-          }
-        }
-        const allSyms = extractFileSymbolList(fileAice, f);
-        const symHeader = allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}` : "";
-        const sliceBody = [symHeader, ...annotatedSlices].filter(Boolean).join("\n\n");
+        const sliceBody = annotatedSlices.filter(Boolean).join("\n\n");
         const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
         symbolSlices.push(`### ${relFile}${headerTag}\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+        continue;
+      }
+
+      if (!isPureAiceDirectory && requestedSelectors.length === 0) {
+        const oRes = withSuppressedTelemetry(() =>
+          generateOutline(f, {
+            includeTypes: false,
+            compact: true,
+            depth: options.depth ?? 1,
+            idioms: options.idioms,
+            projectRoot,
+          }),
+        );
+        const fileDiags = collectNativeSyntaxDiagnostics(f, rawFileContent);
+        const outlineBody = (fileDiags ? `${oRes.text}\n${fileDiags}` : oRes.text).trim();
+        outlines.push(`// === ${relFile} ===\n${outlineBody || "// (empty)"}`);
         continue;
       }
 
@@ -1538,7 +1574,10 @@ export async function generateWorkspaceContext(
               symSel = firstSym;
             }
             try {
-              const rawExtracted = extractSymbolFromAiceSource(fileAice, symSel, f);
+              const rawExtracted = extractSymbolFromAiceSource(fileAice, symSel, f, undefined, {
+                numberLines: true,
+                clampOutOfBounds: true,
+              });
               const isRawOrMatch =
                 rawExtracted.startsWith("// match at [") ||
                 f.endsWith(".md") ||
@@ -1664,6 +1703,14 @@ export async function generateWorkspaceContext(
         parts.push(formatIdiomsMarkdownSection(usedIdioms), "");
       }
     }
+  } else if (!isPureAiceDirectory) {
+    parts.push(
+      `# AICE Directory Outline: ${displayTargetPath} (${workspaceFiles.length} files)`,
+      ...outlines,
+    );
+    if (activeIdioms && Object.keys(activeIdioms).length > 0) {
+      parts.push("", formatIdiomsMarkdownSection(activeIdioms));
+    }
   } else {
     parts.push(
       `# AICE Workspace Overview Context Pack: ${displayTargetPath}`,
@@ -1728,7 +1775,9 @@ export async function generateWorkspaceContext(
       ? symbolSlices.length > 0
         ? symbolSlices.join("\n\n")
         : outlines.join("\n\n")
-      : workspaceFiles.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
+      : !isPureAiceDirectory
+        ? outlines.join("\n\n")
+        : workspaceFiles.map((f) => formatDisplayPath(f, projectRoot)).join("\n");
 
   const resObj: ContextResult = {
     targetPath: displayTargetPath,
@@ -1740,6 +1789,21 @@ export async function generateWorkspaceContext(
     tokenCount,
     idioms: activeIdioms,
   };
+
+  if (rawWorkspaceTexts.length > 0) {
+    const joinedNative = rawWorkspaceTexts.join("\n\n");
+    recordTelemetryEvent({
+      targetPath: resolved.resolvedPath,
+      projectRoot,
+      operation: "context",
+      surface: "cli",
+      idiomsUsed: Boolean(activeIdioms && Object.keys(activeIdioms).length > 0),
+      nativeText: joinedNative.length >= formattedBundle.length ? joinedNative : formattedBundle,
+      realisticNativeText:
+        joinedNative.length >= formattedBundle.length ? joinedNative : formattedBundle,
+      aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
+    });
+  }
 
   return resObj;
 }
@@ -1901,17 +1965,162 @@ function extractPatternMatchesFromSource(
     .join("\n\n");
 }
 
+function formatWithLineNumbers(text: string, startLine = 1): string {
+  const lines = text.split("\n");
+  return lines
+    .map((line, idx) => {
+      if (
+        /^\s*\d+│\s/.test(line) ||
+        /^L\d+:\s/.test(line) ||
+        /^\/\/ match at \[/.test(line) ||
+        /^\[Clamped /.test(line)
+      ) {
+        return line;
+      }
+      return `${startLine + idx}│ ${line}`;
+    })
+    .join("\n");
+}
+
+function resolveParentMemberFallback(
+  rawFileSource: string,
+  _aiceSource: string,
+  className: string,
+  memberName: string,
+  filePath: string,
+  mod?: Module,
+): { text: string; startLine: number } | undefined {
+  const normClass = normalizeIdentForMatch(className);
+  const normMember = normalizeIdentForMatch(memberName);
+
+  if (!filePath.endsWith(".aice")) {
+    const targetLang = detectTargetFromPath(filePath);
+    const directSpan = locateNativeDeclarationSpan(
+      rawFileSource,
+      `${className}.${memberName}`,
+      targetLang,
+      className,
+    );
+    if (directSpan) {
+      const startOff = directSpan.fullDeclStart ?? directSpan.declStart;
+      const startLine =
+        directSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+      return {
+        text: rawFileSource.slice(startOff, directSpan.declEnd),
+        startLine,
+      };
+    }
+
+    const parentSpan = locateNativeDeclarationSpan(rawFileSource, className, targetLang);
+    if (parentSpan) {
+      const parentStartOff = parentSpan.fullDeclStart ?? parentSpan.declStart;
+      const parentStartLine =
+        parentSpan.startLine ?? rawFileSource.slice(0, parentStartOff).split(/\r?\n/).length;
+      const parentSlice = rawFileSource.slice(parentStartOff, parentSpan.declEnd);
+      const parentLines = parentSlice.split(/\r?\n/);
+
+      if (parentLines.length <= 35) {
+        return { text: parentSlice, startLine: parentStartLine };
+      }
+
+      const escMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const memberWordRe = new RegExp(`\\b${escMember}\\b`, "i");
+      const hitIndices: number[] = [];
+      for (let i = 0; i < parentLines.length; i++) {
+        const ln = parentLines[i]!;
+        if (memberWordRe.test(ln) || normalizeIdentForMatch(ln).includes(normMember)) {
+          hitIndices.push(i);
+        }
+      }
+
+      if (hitIndices.length > 0) {
+        const firstIdx = hitIndices[0]!;
+        let endIdx = firstIdx;
+        let braceDepth = 0;
+        let parenDepth = 0;
+        let sawOpen = false;
+        for (let k = firstIdx; k < parentLines.length; k++) {
+          const ln = parentLines[k]!;
+          for (let c = 0; c < ln.length; c++) {
+            const ch = ln[c];
+            if (ch === "{") {
+              braceDepth++;
+              sawOpen = true;
+            } else if (ch === "}") {
+              braceDepth = Math.max(0, braceDepth - 1);
+            } else if (ch === "(") {
+              parenDepth++;
+              sawOpen = true;
+            } else if (ch === ")") {
+              parenDepth = Math.max(0, parenDepth - 1);
+            }
+          }
+          endIdx = k;
+          if (sawOpen && braceDepth === 0 && parenDepth === 0) {
+            break;
+          }
+          if (!sawOpen && k >= firstIdx + 6) {
+            break;
+          }
+        }
+        const sliceStartIdx = sawOpen ? firstIdx : Math.max(0, firstIdx - 2);
+        const sliceEndIdx = sawOpen
+          ? Math.min(parentLines.length - 1, endIdx)
+          : Math.min(parentLines.length - 1, firstIdx + 6);
+        return {
+          text: parentLines.slice(sliceStartIdx, sliceEndIdx + 1).join("\n"),
+          startLine: parentStartLine + sliceStartIdx,
+        };
+      }
+
+      return { text: parentSlice, startLine: parentStartLine };
+    }
+  }
+
+  if (mod) {
+    const parentItem = mod.items.find(
+      (it) =>
+        "name" in it &&
+        typeof it.name === "string" &&
+        (it.name === className || normalizeIdentForMatch(it.name) === normClass),
+    );
+    if (parentItem) {
+      const startLine = parentItem.span?.start?.line ?? 1;
+      return {
+        text: AiceGenerator.generate({
+          kind: "Module",
+          path: mod.path,
+          items: [parentItem],
+          span: mod.span,
+        }),
+        startLine,
+      };
+    }
+  }
+
+  return undefined;
+}
+
 export function extractSymbolFromAiceSource(
   aiceSource: string,
   symbolSelector: string,
   filePath: string,
   preParsedMod?: Module,
+  options?: { numberLines?: boolean; clampOutOfBounds?: boolean },
 ): string {
   let trimmedSel = symbolSelector.trim();
   const rawFileSource =
     !filePath.endsWith(".aice") && fs.existsSync(filePath)
       ? fs.readFileSync(filePath, "utf-8")
       : aiceSource;
+
+  const finalizeExtracted = (text: string, startLine = 1): string => {
+    const lineCount = text.split("\n").length;
+    if (lineCount > 25) {
+      return formatWithLineNumbers(text, startLine);
+    }
+    return text;
+  };
 
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
@@ -1923,8 +2132,17 @@ export function extractSymbolFromAiceSource(
       throw new Error(`Invalid line range L${startLine}-L${endLine}: start line must be >= 1`);
     }
     if (startLine > totalLines) {
+      if (options?.clampOutOfBounds || totalLines > 10) {
+        const clampedStart = Math.max(1, totalLines - 29);
+        const clampedEnd = totalLines;
+        const clampedLines = rawLines
+          .slice(clampedStart - 1, clampedEnd)
+          .map((ln, idx) => `${clampedStart + idx}│ ${ln}`)
+          .join("\n");
+        return `[Clamped L${startLine}-L${endLine} -> L${clampedStart}-L${clampedEnd} (EOF)]\n${clampedLines}`;
+      }
       throw new Error(
-        `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive). Start line ${startLine} exceeds file length. Use ':eof\ or ':append\ to add content at end of file.`,
+        `Invalid line range L${startLine}-L${endLine}: file has ${totalLines} line(s) (1-based inclusive). Start line ${startLine} exceeds file length. Use ':eof' or ':append' to add content at end of file.`,
       );
     }
     if (startLine > endLine) {
@@ -1933,7 +2151,11 @@ export function extractSymbolFromAiceSource(
       );
     }
     const clampedEnd = Math.min(endLine, totalLines);
-    return rawLines.slice(startLine - 1, clampedEnd).join("\n");
+    const sliceLines = rawLines.slice(startLine - 1, clampedEnd);
+    if (options?.numberLines || sliceLines.length > 25) {
+      return sliceLines.map((ln, idx) => `${startLine + idx}│ ${ln}`).join("\n");
+    }
+    return sliceLines.join("\n");
   }
 
   if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
@@ -1942,9 +2164,17 @@ export function extractSymbolFromAiceSource(
     throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}`);
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
-    const first = resolveFirstActionableSymbol(rawFileSource, filePath, preParsedMod);
+    const first =
+      resolveFirstActionableSymbol(aiceSource, filePath, preParsedMod) ??
+      resolveFirstActionableSymbol(rawFileSource, filePath, preParsedMod);
     if (first) trimmedSel = first;
   }
+
+  const isLeadingDotOrHash = trimmedSel.startsWith(".") || trimmedSel.startsWith("#");
+  const parts = isLeadingDotOrHash ? [trimmedSel] : trimmedSel.split(/\.|::/);
+  const className = parts.length >= 2 ? parts[0].trim() : undefined;
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : trimmedSel;
+  const normMember = normalizeIdentForMatch(memberName);
 
   if (!filePath.endsWith(".aice")) {
     const targetLang = detectTargetFromPath(filePath);
@@ -1957,7 +2187,23 @@ export function extractSymbolFromAiceSource(
     ) {
       const spanInfo = locateNativeDeclarationSpan(rawFileSource, trimmedSel, targetLang);
       if (spanInfo) {
-        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+        const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+        const sLine =
+          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
+      }
+      if (className) {
+        const parentFallback = resolveParentMemberFallback(
+          rawFileSource,
+          aiceSource,
+          className,
+          memberName,
+          filePath,
+          preParsedMod,
+        );
+        if (parentFallback) {
+          return finalizeExtracted(parentFallback.text, parentFallback.startLine);
+        }
       }
       const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
       if (patternFallback) return patternFallback;
@@ -1981,7 +2227,23 @@ export function extractSymbolFromAiceSource(
         detectTargetFromPath(filePath),
       );
       if (spanInfo) {
-        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+        const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+        const sLine =
+          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
+      }
+      if (className) {
+        const parentFallback = resolveParentMemberFallback(
+          rawFileSource,
+          aiceSource,
+          className,
+          memberName,
+          filePath,
+          undefined,
+        );
+        if (parentFallback) {
+          return finalizeExtracted(parentFallback.text, parentFallback.startLine);
+        }
       }
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
@@ -2023,12 +2285,6 @@ export function extractSymbolFromAiceSource(
     }
   }
 
-  const isLeadingDotOrHash = trimmedSel.startsWith(".") || trimmedSel.startsWith("#");
-  const parts = isLeadingDotOrHash ? [trimmedSel] : trimmedSel.split(/\.|::/);
-  const className = parts.length >= 2 ? parts[0].trim() : undefined;
-  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : trimmedSel;
-  const normMember = normalizeIdentForMatch(memberName);
-
   const matchedItems: ModuleItem[] = [];
 
   for (const item of mod.items) {
@@ -2049,6 +2305,24 @@ export function extractSymbolFromAiceSource(
           matchedProps = item.properties.filter(
             (p) => normalizeIdentForMatch(p.name) === normMember,
           );
+        }
+        if (matchedMethods.length === 0 && matchedProps.length > 0 && !filePath.endsWith(".aice")) {
+          const nativePropSpan = locateNativeDeclarationSpan(
+            rawFileSource,
+            trimmedSel,
+            detectTargetFromPath(filePath),
+            className,
+          );
+          if (nativePropSpan) {
+            const startOff = nativePropSpan.fullDeclStart ?? nativePropSpan.declStart;
+            const propSlice = rawFileSource.slice(startOff, nativePropSpan.declEnd);
+            if (propSlice.includes("=>") || propSlice.split(/\r?\n/).length > 1) {
+              const sLine =
+                nativePropSpan.startLine ??
+                rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+              return finalizeExtracted(propSlice, sLine);
+            }
+          }
         }
         if (matchedMethods.length > 0 || matchedProps.length > 0) {
           const scopedClass: ClassDecl = {
@@ -2166,7 +2440,23 @@ export function extractSymbolFromAiceSource(
         detectTargetFromPath(filePath),
       );
       if (spanInfo) {
-        return rawFileSource.slice(spanInfo.fullDeclStart ?? spanInfo.declStart, spanInfo.declEnd);
+        const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+        const sLine =
+          spanInfo.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        return finalizeExtracted(rawFileSource.slice(startOff, spanInfo.declEnd), sLine);
+      }
+    }
+    if (className) {
+      const parentFallback = resolveParentMemberFallback(
+        rawFileSource,
+        aiceSource,
+        className,
+        memberName,
+        filePath,
+        mod,
+      );
+      if (parentFallback) {
+        return finalizeExtracted(parentFallback.text, parentFallback.startLine);
       }
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
@@ -2179,7 +2469,27 @@ export function extractSymbolFromAiceSource(
     items: matchedItems,
     span: mod.span,
   };
-  return AiceGenerator.generate(scopedMod);
+  let startLineForSym = matchedItems[0]?.span?.start?.line ?? 1;
+  if (!filePath.endsWith(".aice")) {
+    const natSpan = locateNativeDeclarationSpan(
+      rawFileSource,
+      trimmedSel,
+      detectTargetFromPath(filePath),
+    );
+    if (natSpan?.startLine) {
+      startLineForSym = natSpan.startLine;
+    }
+    if (options?.numberLines && natSpan) {
+      const startOff = natSpan.fullDeclStart ?? natSpan.declStart;
+      const rawSlice = rawFileSource.slice(startOff, natSpan.declEnd);
+      if (rawSlice.split(/\r?\n/).length > 25) {
+        const sLine =
+          natSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        return finalizeExtracted(rawSlice, sLine);
+      }
+    }
+  }
+  return finalizeExtracted(AiceGenerator.generate(scopedMod), startLineForSym);
 }
 
 /**
@@ -2421,13 +2731,20 @@ export async function generateContext(
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
-  const nativeDiagnostics = collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
   const isPureLineRangeSymbol =
     Boolean(options.symbol) && /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i.test(options.symbol!.trim());
+  const isPureRegexSymbol =
+    Boolean(options.symbol) &&
+    splitSymbolSelectors(options.symbol!).length > 0 &&
+    splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
+  const isFastPathSelector = isPureLineRangeSymbol || isPureRegexSymbol;
+  const nativeDiagnostics = isFastPathSelector
+    ? undefined
+    : collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
   let targetContent = rawFileContent;
-  if (!fullTargetPath.endsWith(".aice") && !isPureLineRangeSymbol) {
+  if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
       const isRawTemplate = targetLang === "twig";
@@ -2478,12 +2795,15 @@ export async function generateContext(
       }
     } else {
       const requestedSymbols = splitSymbolSelectors(options.symbol);
+      const extractOpts = { numberLines: true, clampOutOfBounds: true };
       if (requestedSymbols.length === 1) {
         try {
           targetContent = extractSymbolFromAiceSource(
             targetContent,
             requestedSymbols[0],
             fullTargetPath,
+            undefined,
+            extractOpts,
           );
         } catch (err) {
           if (!nativeDiagnostics) throw err;
@@ -2493,7 +2813,15 @@ export async function generateContext(
         let anyFailed = false;
         for (const sym of requestedSymbols) {
           try {
-            slicedBlocks.push(extractSymbolFromAiceSource(targetContent, sym, fullTargetPath));
+            slicedBlocks.push(
+              extractSymbolFromAiceSource(
+                targetContent,
+                sym,
+                fullTargetPath,
+                undefined,
+                extractOpts,
+              ),
+            );
           } catch {
             anyFailed = true;
           }
@@ -2504,6 +2832,8 @@ export async function generateContext(
               targetContent,
               options.symbol.trim(),
               fullTargetPath,
+              undefined,
+              extractOpts,
             );
           } catch {
             if (slicedBlocks.length > 0) {
@@ -2543,7 +2873,7 @@ export async function generateContext(
   if (
     options.symbol &&
     !idiomsActive &&
-    !isPureLineRangeSymbol &&
+    !isFastPathSelector &&
     detectedLangForSlice !== "markdown" &&
     detectedLangForSlice !== "shell" &&
     detectedLangForSlice !== "powershell" &&
@@ -2553,19 +2883,39 @@ export async function generateContext(
     targetContent = compactPureAiceSlice(targetContent);
   }
 
-  // Generate target outline
-  const outlineRes = withSuppressedTelemetry(() =>
-    generateOutline(fullTargetPath, {
-      includeTypes: true,
-      idioms: options.idioms,
-      projectRoot,
-      lineRanges: options.maxTokens === undefined,
-    }),
-  );
+  // Generate target outline (skip on line-range/regex fast-path unless outlineTarget is explicitly requested)
+  const outlineRes =
+    isFastPathSelector && !options.outlineTarget
+      ? {
+          file: fullTargetPath,
+          text: "",
+          symbols: [] as OutlineSymbol[],
+          referencedIdioms: [] as string[],
+          json: { file: fullTargetPath, symbols: [] as OutlineSymbol[] },
+          stats: {
+            originalTokens: 0,
+            outlineTokens: 0,
+            savingsTokens: 0,
+            savingsPct: 0,
+            originalChars: 0,
+            outlineChars: 0,
+            charSavingsPct: 0,
+          },
+        }
+      : withSuppressedTelemetry(() =>
+          generateOutline(fullTargetPath, {
+            includeTypes: true,
+            idioms: options.idioms,
+            projectRoot,
+            lineRanges: options.maxTokens === undefined,
+          }),
+        );
   const targetOutline = outlineRes.text;
 
-  // Dependency discovery BFS
-  const maxDepth = options.depth !== undefined ? Math.max(1, options.depth) : 1;
+  // Dependency discovery BFS (default depth = 0 on line-range/regex fast-path)
+  const effectiveDepth =
+    options.depth !== undefined ? options.depth : isFastPathSelector ? 0 : 1;
+  const maxDepth = Math.max(0, effectiveDepth);
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
   const visitedFiles = new Set<string>([fullTargetPath]);
@@ -2671,15 +3021,25 @@ export async function generateContext(
     }
   }
 
-  // Caller lookup
-  const callers: CallerSummary[] =
-    options.includeCallers !== false
-      ? scanWorkspaceCallers(fullTargetPath, projectRoot, config, options.symbol)
-      : [];
+  // Caller lookup (skip by default on line-range/regex fast-path)
+  const effectiveIncludeCallers =
+    options.includeCallers !== undefined ? options.includeCallers : !isFastPathSelector;
+  const callers: CallerSummary[] = effectiveIncludeCallers
+    ? scanWorkspaceCallers(fullTargetPath, projectRoot, config, options.symbol)
+    : [];
+
+  const isSmallFile =
+    !displayTargetPath.endsWith(".aice") &&
+    rawFileContent.length < 600 &&
+    estimateTokens(rawFileContent) < 120;
 
   // Target body selection
   let targetBody = options.outlineTarget ? targetOutline : targetContent;
-  if (!options.outlineTarget && !options.symbol && options.maxTokens === undefined) {
+  if (
+    !options.outlineTarget &&
+    !options.symbol &&
+    options.maxTokens === undefined
+  ) {
     const actionableSyms = outlineRes.symbols.filter((s) => s.kind !== "import" && s.lineRange);
     if (actionableSyms.length > 0 && !/\[L\d+-L\d+\]/.test(targetBody)) {
       const rangeSummary = actionableSyms
@@ -2703,6 +3063,20 @@ export async function generateContext(
     bundleIdioms = Object.keys(filteredIdioms).length > 0 ? filteredIdioms : undefined;
   }
 
+  const isMinimalSmallTarget =
+    isSmallFile &&
+    (/\.(?:sh|bash|zsh|ps1|cmd|bat|aipl|md|markdown)$/i.test(displayTargetPath) ||
+      path.basename(displayTargetPath) === "aice.config.json");
+  const useMinimalEnvelope =
+    dependencies.length === 0 &&
+    callers.length === 0 &&
+    (!bundleIdioms || Object.keys(bundleIdioms).length === 0) &&
+    (isMinimalSmallTarget || Boolean(options.symbol));
+  const bundleFormatOpts = {
+    minimalEnvelope: useMinimalEnvelope,
+    symbolSelector: options.symbol,
+  };
+
   // Build formatted bundle
   let formattedBundle = formatBundle(
     displayTargetPath,
@@ -2711,6 +3085,7 @@ export async function generateContext(
     callers,
     bundleIdioms,
     nativeDiagnostics,
+    bundleFormatOpts,
   );
   let tokenCount = estimateTokens(formattedBundle);
 
@@ -2725,6 +3100,7 @@ export async function generateContext(
         callers,
         bundleIdioms,
         nativeDiagnostics,
+        bundleFormatOpts,
       );
       tokenCount = estimateTokens(formattedBundle);
     }
@@ -2743,6 +3119,7 @@ export async function generateContext(
           callers,
           activeIdioms,
           nativeDiagnostics,
+          bundleFormatOpts,
         );
         tokenCount = estimateTokens(formattedBundle);
       }
@@ -2793,6 +3170,7 @@ export async function generateContext(
     surface: "cli",
     idiomsUsed: Boolean(bundleIdioms && Object.keys(bundleIdioms).length > 0),
     nativeText: rawFileContent,
+    realisticNativeText: rawFileContent,
     aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
   });
 

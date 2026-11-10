@@ -14,6 +14,7 @@ import type { Readable, Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   AICE_DISABLED_MESSAGE,
+
   findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
@@ -43,6 +44,7 @@ import {
   generateContext,
   generateMultiContext,
   parseTargetWithInlineSymbol,
+  scanDirectoryForTargets,
   splitContextTargets,
 } from "../tools/context.js";
 import {
@@ -52,7 +54,12 @@ import {
   parseMultiFileCreateStream,
 } from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
-import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../tools/splice.js";
+import {
+  type BatchSpliceItem,
+  parseMultiBlockSpliceStream,
+  splice,
+  spliceBatch,
+} from "../tools/splice.js";
 import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
 
 function loadPackageVersion(): string {
@@ -87,28 +94,30 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_context",
     description:
-      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers (supports single or multi-file targets with inline ':symbol' selectors).",
+      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers (supports single or multi-file targets with inline ':symbol' selectors). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When reading 2+ files or symbols, batch ALL targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50') or 'paths' array.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
           description:
-            "Target .aice or target language file path (supports inline 'file:sym1,sym2' or space-separated multi-target paths)",
+            "Target .aice or target language file/directory path (supports inline 'file:sym1,sym2', 'file:L10-L30', or space-separated multi-target paths in 1 call)",
         },
         paths: {
           type: "array",
           items: { type: "string" },
           description:
-            "Optional array of target file paths with optional inline ':symbol' selectors (e.g. ['src/a.aipl:fnA,fnB', 'src/b.aipl:L10-L50'])",
+            "Optional array of target file paths with optional inline ':symbol' selectors (e.g. ['src/a.aipl:fnA,fnB', 'src/b.aipl:L10-L50']) to read multiple files in 1 call",
         },
         symbol: {
           type: "string",
-          description: "Optional symbol identifier to focus context on",
+          description:
+            "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30' — fast path with 0 dependency bloat), or regex ('/pattern/')",
         },
         depth: {
           type: "number",
-          description: "Dependency traversal depth (default: 1)",
+          description:
+            "Dependency traversal depth (default: 1 for symbols, 0 for Lstart-Lend and /pattern/ fast path)",
         },
         maxTokens: {
           type: "number",
@@ -153,22 +162,29 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Surgically replace, delete, or batch-edit one or more named symbols (fn, type, class, method, CSS rule) in a native or .aice file.",
+      "Surgically replace, delete, hunk-patch, or batch-edit one or more named symbols, line ranges, or files. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
-          description: "Path to target native or .aice file",
+          description:
+            "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'edits' includes filePath)",
         },
         symbolSelector: {
           type: "string",
           description:
-            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'InputHandler.isListening', 'imports', or line range 'L1-L1', '[L5-L10]')",
+            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', ':eof', or line range 'L10-L25')",
+        },
+        code: {
+          type: "string",
+          description:
+            "Replacement code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
         },
         newAiceCode: {
           type: "string",
-          description: "Replacement AICE or native code snippet",
+          description:
+            "Alias for 'code': replacement snippet, '<<< / === / >>>' hunk, or multi-file '=== <filePath>:<symbol> ===' stream",
         },
         delete: {
           type: "boolean",
@@ -177,10 +193,11 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         edits: {
           type: "array",
           description:
-            "Optional multi-symbol batch edits applied atomically in reverse offset order (bottom-to-top)",
+            "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top)",
           items: {
             type: "object",
             properties: {
+              filePath: { type: "string" },
               symbol: { type: "string" },
               code: { type: "string" },
               body: { type: "string" },
@@ -190,7 +207,6 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-      required: ["filePath"],
     },
   },
   {
@@ -236,17 +252,19 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_create",
     description:
-      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 15 languages (40-75% output token savings).",
+      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 15 languages (40-75% output token savings). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
-          description: "Target native file path for single-file creation",
+          description:
+            "Target native file path for single-file creation (omit when batching multiple files via '=== <filePath> ===' headers in 'code' or via 'files')",
         },
         code: {
           type: "string",
-          description: "Compact AICE, $idiom, or hybrid code string for single-file creation",
+          description:
+            "Compact AICE, $idiom, or native code string, OR multi-file stream delimited by '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
         },
         files: {
           type: "array",
@@ -793,7 +811,7 @@ export class AiceMcpServer {
           );
           const multiRes = await withSuppressedTelemetryAsync(() =>
             generateMultiContext(safeTargets, {
-              depth: typeof args.depth === "number" ? args.depth : 1,
+              depth: typeof args.depth === "number" ? args.depth : undefined,
               maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
               idioms: effectiveIdioms,
               projectRoot,
@@ -802,9 +820,16 @@ export class AiceMcpServer {
           const nativeTexts = safeTargets
             .map((t) => {
               try {
-                return fs.existsSync(t.path) && fs.statSync(t.path).isFile()
-                  ? fs.readFileSync(t.path, "utf-8")
-                  : "";
+                if (fs.existsSync(t.path) && fs.statSync(t.path).isFile()) {
+                  return fs.readFileSync(t.path, "utf-8");
+                }
+                if (fs.existsSync(t.path) && fs.statSync(t.path).isDirectory()) {
+                  return scanDirectoryForTargets(t.path)
+                    .slice(0, 60)
+                    .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
+                    .join("\n");
+                }
+                return "";
               } catch {
                 return "";
               }
@@ -846,13 +871,32 @@ export class AiceMcpServer {
         );
         const result = await withSuppressedTelemetryAsync(() =>
           generateContext(fullPath, {
-            depth: typeof args.depth === "number" ? args.depth : 1,
+            depth: typeof args.depth === "number" ? args.depth : undefined,
             maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
             symbol: effectiveSymbol,
             idioms: effectiveIdioms,
             projectRoot,
           }),
         );
+
+        let nativeText = "";
+        let isDirTarget = false;
+        try {
+          if (fs.existsSync(fullPath)) {
+            const stat = fs.statSync(fullPath);
+            if (stat.isFile()) {
+              nativeText = fs.readFileSync(fullPath, "utf-8");
+            } else if (stat.isDirectory()) {
+              isDirTarget = true;
+              nativeText = scanDirectoryForTargets(fullPath)
+                .slice(0, 60)
+                .map((fp) => (fs.existsSync(fp) ? fs.readFileSync(fp, "utf-8") : ""))
+                .join("\n");
+            }
+          }
+        } catch {
+          // ignore
+        }
 
         let text = result.targetContent;
         let callers = result.callers;
@@ -892,21 +936,28 @@ export class AiceMcpServer {
               })
               .join("\n");
         }
-        if (effectiveIdioms && result.idioms && Object.keys(result.idioms).length > 0) {
+        const isSmallNoExtras =
+          !isDirTarget &&
+          nativeText.length > 0 &&
+          Math.ceil(nativeText.length / 4) < 120 &&
+          (!result.dependencies || result.dependencies.length === 0) &&
+          (!callers || callers.length === 0);
+        if (
+          !isDirTarget &&
+          !isSmallNoExtras &&
+          effectiveIdioms &&
+          result.idioms &&
+          Object.keys(result.idioms).length > 0
+        ) {
           text += `\n\n${formatIdiomsMarkdownSection(result.idioms)}`;
         }
         if (result.nativeDiagnostics) {
           text += `\n\n${result.nativeDiagnostics}`;
         }
-
-        let nativeText = "";
-        try {
-          if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) {
-            nativeText = fs.readFileSync(fullPath, "utf-8");
-          }
-        } catch {
-          // ignore
+        if (isSmallNoExtras && !effectiveSymbol) {
+          text = result.formattedBundle;
         }
+
         recordTelemetryEvent({
           targetPath: fullPath,
           projectRoot,
@@ -1025,9 +1076,35 @@ export class AiceMcpServer {
           newAiceCode && !symbolSelector
             ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || undefined)
             : null;
+        const multiFileEditsFromArgs: BatchSpliceItem[] | undefined =
+          !rawTargetFile &&
+          Array.isArray(args.edits) &&
+          args.edits.length > 0 &&
+          args.edits.every(
+            (e) =>
+              e &&
+              typeof e === "object" &&
+              Boolean(
+                (e as Record<string, unknown>).filePath ||
+                  (e as Record<string, unknown>).file ||
+                  (e as Record<string, unknown>).path,
+              ),
+          )
+            ? (args.edits as Array<Record<string, unknown>>).map((e) => ({
+                filePath: String(e.filePath ?? e.file ?? e.path ?? ""),
+                symbol: String(e.symbol ?? ""),
+                code: typeof e.code === "string" ? e.code : undefined,
+                body: typeof e.body === "string" ? e.body : undefined,
+                delete: Boolean(e.delete),
+              }))
+            : undefined;
+        const effectiveBatchItems =
+          parsedStream?.batchItems && parsedStream.batchItems.length > 0
+            ? parsedStream.batchItems
+            : multiFileEditsFromArgs;
 
-        if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
-          const firstRawFp = String(parsedStream.batchItems[0]!.filePath ?? "");
+        if (effectiveBatchItems && effectiveBatchItems.length > 0) {
+          const firstRawFp = String(effectiveBatchItems[0]!.filePath ?? "");
           const firstSafeFp = this.resolveSafePath(firstRawFp);
           const projectRoot = this.resolveProjectRoot(firstSafeFp);
           const config = loadProjectConfig(projectRoot);
@@ -1041,7 +1118,7 @@ export class AiceMcpServer {
             config,
             typeof args.idioms === "boolean" ? args.idioms : undefined,
           );
-          const safeBatchItems = parsedStream.batchItems.map((item) => ({
+          const safeBatchItems = effectiveBatchItems.map((item) => ({
             ...item,
             filePath: this.resolveSafePath(String(item.filePath ?? "")),
             rawFilePath: String(item.filePath ?? ""),
@@ -1076,6 +1153,12 @@ export class AiceMcpServer {
           return {
             content: [{ type: "text", text: summaries.join("\n") }],
           };
+        }
+
+        if (!rawTargetFile) {
+          throw new Error(
+            "Must provide 'filePath' or pass '=== <filePath>:<symbol> ===' / '=== <filePath> ===' stream blocks inside 'code' (or 'newAiceCode').",
+          );
         }
 
         const filePath = this.resolveSafePath(rawTargetFile);

@@ -1018,7 +1018,7 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
         }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
         if (subIndent <= indentLen) {
-          if (subIndent === indentLen && subTrimmed.startsWith(")")) {
+          if (subIndent === indentLen && (subTrimmed.startsWith(")") || subTrimmed.startsWith("}"))) {
             endLine = j + 1;
             j++;
           }
@@ -1026,22 +1026,26 @@ function extractAiplSymbols(source: string, _totalLines: number): OutlineSymbol[
         }
         endLine = j + 1;
         const cleanSubLine = stripComment(lines[j]);
-        const fieldMatch = cleanSubLine.match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
-        if (fieldMatch) {
-          const cleanFieldType = fieldMatch[3]
+        const fieldMatches = Array.from(
+          cleanSubLine.matchAll(/(?:^|[,(\s{])(?:pub\s+|val\s+|var\s+|let\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^,)\n}]+)/g),
+        );
+        for (const fm of fieldMatches) {
+          const cleanFieldType = fm[2]
             .trim()
-            .replace(/\)\s*$/, "")
+            .replace(/[)}]\s*$/, "")
             .replace(/,\s*$/, "")
             .trim();
-          children.push({
-            name: fieldMatch[2],
-            kind: "field",
-            line: j + 1,
-            endLine: j + 1,
-            lineRange: `[L${j + 1}-L${j + 1}]`,
-            signature: `val ${fieldMatch[2]}: ${cleanFieldType}`,
-            children: [],
-          });
+          if (cleanFieldType) {
+            children.push({
+              name: fm[1],
+              kind: "field",
+              line: j + 1,
+              endLine: j + 1,
+              lineRange: `[L${j + 1}-L${j + 1}]`,
+              signature: `val ${fm[1]}: ${cleanFieldType}`,
+              children: [],
+            });
+          }
         }
         j++;
       }
@@ -1545,7 +1549,7 @@ function resolveChildSymbolSpanInNative(
   targetLang: TargetLanguage,
   _filePath: string,
 ): { startLine: number; endLine: number } | undefined {
-  if (childSym.kind === "method" || childSym.kind === "property") {
+  if (childSym.kind === "method" || childSym.kind === "property" || childSym.kind === "field") {
     const dotted = `${parentSym.name}.${childSym.name}`;
     const span = locateNativeDeclarationSpan(originalSource, dotted, targetLang, parentSym.name);
     if (span) {
@@ -1560,7 +1564,24 @@ function resolveChildSymbolSpanInNative(
   const wordRe = new RegExp(`(?:\\b|["'])${escaped}(?:\\b|["'])`);
   for (let i = minLine - 1; i < maxLine; i++) {
     if (wordRe.test(rawLines[i]!)) {
-      return { startLine: i + 1, endLine: i + 1 };
+      let endIdx = i;
+      let braceDepth = 0;
+      let parenDepth = 0;
+      for (let k = i; k < maxLine; k++) {
+        const ln = rawLines[k]!;
+        for (let c = 0; c < ln.length; c++) {
+          const ch = ln[c];
+          if (ch === "{") braceDepth++;
+          else if (ch === "}") braceDepth = Math.max(0, braceDepth - 1);
+          else if (ch === "(") parenDepth++;
+          else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
+        }
+        endIdx = k;
+        if (braceDepth === 0 && parenDepth === 0) {
+          break;
+        }
+      }
+      return { startLine: i + 1, endLine: Math.max(i + 1, endIdx + 1) };
     }
   }
   return undefined;

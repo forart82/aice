@@ -1698,12 +1698,58 @@ function locateTsDeclarationSpan(
   collectStmts(sf.statements);
 
   if (className) {
+    const normClassName = normIdForSpan(className);
+    const normMemberName = normIdForSpan(memberName);
     for (const stmt of allStmts) {
-      if (ts.isClassDeclaration(stmt) && stmt.name?.text === className) {
-        const matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
+      if (
+        ts.isClassDeclaration(stmt) &&
+        stmt.name?.text &&
+        (stmt.name.text === className || normIdForSpan(stmt.name.text) === normClassName)
+      ) {
+        let matchingMembers = stmt.members.filter((m) => getTsMemberName(m, sf) === memberName);
+        if (matchingMembers.length === 0) {
+          matchingMembers = stmt.members.filter(
+            (m) => normIdForSpan(getTsMemberName(m, sf) ?? "") === normMemberName,
+          );
+        }
         if (matchingMembers.length > 0) {
           const implMember = selectBestTsMember(matchingMembers, inferredAccessor, explicitArity);
-          return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, className);
+          return buildSpanInfoFromTsNode(implMember, sf, nativeSource, memberName, stmt.name.text);
+        }
+      } else if (
+        ts.isInterfaceDeclaration(stmt) &&
+        (stmt.name.text === className || normIdForSpan(stmt.name.text) === normClassName)
+      ) {
+        const matchingProp =
+          stmt.members.find((m) => getTsMemberName(m, sf) === memberName) ??
+          stmt.members.find((m) => normIdForSpan(getTsMemberName(m, sf) ?? "") === normMemberName);
+        if (matchingProp) {
+          return buildSpanInfoFromTsNode(
+            matchingProp,
+            sf,
+            nativeSource,
+            memberName,
+            stmt.name.text,
+          );
+        }
+      } else if (
+        ts.isTypeAliasDeclaration(stmt) &&
+        (stmt.name.text === className || normIdForSpan(stmt.name.text) === normClassName) &&
+        ts.isTypeLiteralNode(stmt.type)
+      ) {
+        const matchingProp =
+          stmt.type.members.find((m) => getTsMemberName(m, sf) === memberName) ??
+          stmt.type.members.find(
+            (m) => normIdForSpan(getTsMemberName(m, sf) ?? "") === normMemberName,
+          );
+        if (matchingProp) {
+          return buildSpanInfoFromTsNode(
+            matchingProp,
+            sf,
+            nativeSource,
+            memberName,
+            stmt.name.text,
+          );
         }
       }
     }
@@ -2177,12 +2223,21 @@ function locateAiplDeclarationSpan(
   }
 
   if (targetLine < 0) {
-    const fieldRegex = new RegExp(`^([ \\t]*)(?:pub\\s+)?${escMember}\\s*:[^\\n]*`);
+    const fieldRegex = new RegExp(`^([ \\t]*)(?:pub\\s+|val\\s+|var\\s+|let\\s+)?${escMember}\\s*:[^\\n]*`);
+    const inlineFieldRegex = new RegExp(
+      `(?:^|[,(\\s{])(?:pub\\s+|val\\s+|var\\s+|let\\s+)?${escMember}\\s*:[^\\n]*`,
+    );
     for (let i = searchStartLine; i < searchEndLine; i++) {
       const m = lines[i].match(fieldRegex);
       if (m && (className || m[1].length === 0)) {
         targetLine = i;
         targetIndent = m[1];
+        isField = true;
+        break;
+      }
+      if (className && inlineFieldRegex.test(stripAiplComment(lines[i]))) {
+        targetLine = i;
+        targetIndent = lines[i].match(/^[ \t]*/)?.[0] ?? "";
         isField = true;
         break;
       }
@@ -3170,13 +3225,29 @@ export function locateNativeDeclarationSpan(
     const cleanAiplSel = symbolSelector.trim().replace(/\([^)]*\)$/, "");
     rawSpan = locateAiplDeclarationSpan(nativeSource, cleanAiplSel, classFilter);
   } else if (targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx") {
-    rawSpan = locateTsDeclarationSpan(
-      nativeSource,
-      symbolSelector,
-      classFilter,
-      preferAccessor,
-      preferredArity,
-    );
+    if (
+      nativeSource.length > 50_000 &&
+      !preferAccessor &&
+      preferredArity === undefined &&
+      symbolSelector !== "@first" &&
+      symbolSelector !== "@1"
+    ) {
+      rawSpan = locateBraceLanguageDeclarationSpan(
+        nativeSource,
+        symbolSelector,
+        targetLang,
+        classFilter,
+      );
+    }
+    if (!rawSpan) {
+      rawSpan = locateTsDeclarationSpan(
+        nativeSource,
+        symbolSelector,
+        classFilter,
+        preferAccessor,
+        preferredArity,
+      );
+    }
   } else {
     rawSpan =
       locateBraceLanguageDeclarationSpan(
@@ -5395,6 +5466,241 @@ interface ResolvedNativeEdit {
   preservedTriviaText?: string;
 }
 
+export interface HunkBlock {
+  search: string;
+  replace: string;
+}
+
+export function stripNumberedGutterPrefixes(raw: string): string {
+  if (!raw) return raw;
+  const rawLines = raw.split(/\r?\n/);
+  const lines = rawLines.filter(
+    (l) => !/^\[Clamped L\d+-L\d+\s*->\s*L\d+-L\d+\s*\(EOF\)\]$/.test(l.trim()),
+  );
+  const nonEmpty = lines.filter((l) => l.trim().length > 0);
+  if (nonEmpty.length === 0) return raw;
+
+  const hasBoxGutter = nonEmpty.some((l) => /^\s*\d+│/.test(l));
+  const hasColonGutter =
+    nonEmpty.length >= 1 &&
+    nonEmpty.every(
+      (l) =>
+        /^\s*(?:L?\d+:\s|\d+│)/.test(l) &&
+        !/^\s*\d+:\s*(?:['"[{]|true\b|false\b|null\b|\d+\s*[,}])/.test(l),
+    );
+
+  if (!hasBoxGutter && !hasColonGutter) {
+    return lines.length !== rawLines.length ? lines.join("\n") : raw;
+  }
+
+  return lines
+    .map((line) => {
+      if (/^\s*\d+│/.test(line)) {
+        return line.replace(/^\s*\d+│ ?/, "");
+      }
+      if (hasColonGutter && /^\s*L?\d+:\s/.test(line)) {
+        return line.replace(/^\s*L?\d+:\s?/, "");
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+export function containsHunkMarkers(code: string | undefined): boolean {
+  if (!code) return false;
+  return /(?:^|\r?\n)[ \t]*<{3,}[ \t]*(?:\r?\n|$)/.test(code);
+}
+
+export function extractHunkBlocks(rawSnippet: string): HunkBlock[] {
+  const lines = rawSnippet.split(/\r?\n/);
+  const hunks: HunkBlock[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (/^[ \t]*<{3,}[ \t]*$/.test(lines[i]!)) {
+      i++;
+      const searchLines: string[] = [];
+      while (i < lines.length && !/^[ \t]*={3,}[ \t]*$/.test(lines[i]!)) {
+        searchLines.push(lines[i]!);
+        i++;
+      }
+      if (i >= lines.length) {
+        throw new Error(
+          "Malformed hunk splice: found '<<<' without matching '===' separator and '>>>' terminator. Valid syntax:\n<<<\n<lines to find>\n===\n<replacement lines>\n>>>",
+        );
+      }
+      i++; // skip '==='
+      const replaceLines: string[] = [];
+      while (i < lines.length && !/^[ \t]*>{3,}[ \t]*$/.test(lines[i]!)) {
+        replaceLines.push(lines[i]!);
+        i++;
+      }
+      if (i >= lines.length) {
+        throw new Error(
+          "Malformed hunk splice: found '<<<' and '===' without matching '>>>' terminator. Valid syntax:\n<<<\n<lines to find>\n===\n<replacement lines>\n>>>",
+        );
+      }
+      i++; // skip '>>>'
+      hunks.push({
+        search: stripNumberedGutterPrefixes(searchLines.join("\n")),
+        replace: stripNumberedGutterPrefixes(replaceLines.join("\n")),
+      });
+    } else {
+      i++;
+    }
+  }
+  return hunks;
+}
+
+export function applyHunksToScope(
+  scopeText: string,
+  hunks: HunkBlock[],
+  symbolLabel: string,
+  filePath: string,
+  targetLang?: TargetLanguage,
+  idioms?: Record<string, ProjectIdiomDefinition>,
+  idiomsEnabled = true,
+): string {
+  const isCrLf = scopeText.includes("\r\n");
+  const nl = isCrLf ? "\r\n" : "\n";
+  let current = scopeText.replace(/\r\n/g, "\n");
+
+  for (const hunk of hunks) {
+    const searchNorm = hunk.search.replace(/\r\n/g, "\n");
+    if (!searchNorm.trim()) {
+      throw new Error(
+        `Empty search block in <<< / === / >>> hunk for '${symbolLabel}' in ${filePath}. Provide at least 1 search line between '<<<' and '==='.`,
+      );
+    }
+    let replaceNorm = hunk.replace.replace(/\r\n/g, "\n");
+    if (idiomsEnabled && targetLang && replaceNorm.trim()) {
+      replaceNorm = preprocessHybridAndIdiomsLossless(replaceNorm, targetLang, idioms).replace(
+        /\r\n/g,
+        "\n",
+      );
+    }
+
+    // 1. Exact substring match first
+    const exactIdx = current.indexOf(searchNorm);
+    if (exactIdx >= 0) {
+      current = `${current.slice(0, exactIdx)}${replaceNorm}${current.slice(exactIdx + searchNorm.length)}`;
+      continue;
+    }
+
+    // 2. Indentation-normalized line matching fallback
+    const scopeLines = current.split("\n");
+    let searchLines = searchNorm.split("\n");
+    while (searchLines.length > 0 && searchLines[0]!.trim() === "") {
+      searchLines.shift();
+    }
+    while (searchLines.length > 0 && searchLines[searchLines.length - 1]!.trim() === "") {
+      searchLines.pop();
+    }
+
+    let matchStart = -1;
+    let matchEnd = -1;
+    if (searchLines.length > 0 && searchLines.length <= scopeLines.length) {
+      for (let s = 0; s <= scopeLines.length - searchLines.length; s++) {
+        let allMatch = true;
+        for (let k = 0; k < searchLines.length; k++) {
+          if (scopeLines[s + k]!.trim() !== searchLines[k]!.trim()) {
+            allMatch = false;
+            break;
+          }
+        }
+        if (allMatch) {
+          matchStart = s;
+          matchEnd = s + searchLines.length;
+          break;
+        }
+      }
+    }
+
+    // Also try skipping blank lines in scope if multi-line search has no blank lines
+    if (matchStart < 0 && searchLines.length > 1) {
+      const nonBlankSearch = searchLines.map((l) => l.trim()).filter(Boolean);
+      for (let s = 0; s < scopeLines.length; s++) {
+        if (scopeLines[s]!.trim() !== nonBlankSearch[0]) continue;
+        let curScopeIdx = s;
+        let matchedAll = true;
+        for (let k = 0; k < nonBlankSearch.length; k++) {
+          while (curScopeIdx < scopeLines.length && scopeLines[curScopeIdx]!.trim() === "") {
+            curScopeIdx++;
+          }
+          if (
+            curScopeIdx >= scopeLines.length ||
+            scopeLines[curScopeIdx]!.trim() !== nonBlankSearch[k]
+          ) {
+            matchedAll = false;
+            break;
+          }
+          curScopeIdx++;
+        }
+        if (matchedAll) {
+          matchStart = s;
+          matchEnd = curScopeIdx;
+          break;
+        }
+      }
+    }
+
+    if (matchStart < 0) {
+      throw new Error(
+        `Hunk search block not found within '${symbolLabel}' in ${filePath}:\n${hunk.search}`,
+      );
+    }
+
+    const firstMatchedScopeLine = scopeLines[matchStart] ?? "";
+    const scopeBaseIndent = firstMatchedScopeLine.match(/^[ \t]*/)?.[0] ?? "";
+    const searchBaseIndent = searchLines[0]?.match(/^[ \t]*/)?.[0] ?? "";
+
+    if (replaceNorm === "") {
+      scopeLines.splice(matchStart, matchEnd - matchStart);
+    } else {
+      const rawRepLines = replaceNorm.split("\n");
+      const adjustedRepLines = rawRepLines.map((rl) => {
+        if (!rl.trim()) return "";
+        if (searchBaseIndent.length > 0 && rl.startsWith(searchBaseIndent)) {
+          return `${scopeBaseIndent}${rl.slice(searchBaseIndent.length)}`;
+        }
+        if (searchBaseIndent.length === 0 && !/^[ \t]/.test(rl)) {
+          return `${scopeBaseIndent}${rl}`;
+        }
+        return rl;
+      });
+      scopeLines.splice(matchStart, matchEnd - matchStart, ...adjustedRepLines);
+    }
+    current = scopeLines.join("\n");
+  }
+
+  return isCrLf ? current.replace(/\n/g, nl) : current;
+}
+
+export function buildEmptySpliceBlockError(
+  filePath: string,
+  symbol?: string,
+  action = "splicing native file",
+): Error {
+  const cleanSym = symbol && symbol !== ":create" ? symbol : "MyClass.myMethod";
+  const headerDesc = symbol && symbol !== ":create" ? `${filePath}:${symbol}` : filePath;
+  return new Error(
+    `Empty or malformed splice block for '=== ${headerDesc} ===' — Must provide non-empty --code or --body when ${action}.\n` +
+      `Valid heredoc / stream syntax:\n` +
+      `  1) Full symbol replacement:\n` +
+      `     === ${filePath}:${cleanSym} ===\n` +
+      `     <replacement code>\n` +
+      `  2) AST-scoped hunk splice (for 1-15 line edits inside a symbol):\n` +
+      `     === ${filePath}:${cleanSym} ===\n` +
+      `     <<<\n` +
+      `     <lines to find>\n` +
+      `     ===\n` +
+      `     <replacement lines>\n` +
+      `     >>>\n` +
+      `  3) Line-range replacement:\n` +
+      `     === ${filePath}:L10-L12 ===\n` +
+      `     <replacement lines>`,
+  );
+}
+
 function resolveSingleNativeEditAgainstSource(
   nativeSource: string,
   options: SpliceOptions,
@@ -5404,7 +5710,34 @@ function resolveSingleNativeEditAgainstSource(
   forceLosslessPreprocess: boolean,
 ): ResolvedNativeEdit {
   const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
-  let rawSnippet = options.code ?? options.body ?? "";
+  let rawSnippet = stripNumberedGutterPrefixes(options.code ?? options.body ?? "");
+
+  if (
+    (!anchorSymbol || anchorSymbol === ":hunk" || isCreateOrOverwriteSymbol(anchorSymbol)) &&
+    containsHunkMarkers(rawSnippet)
+  ) {
+    const hunks = extractHunkBlocks(rawSnippet);
+    if (hunks.length > 0) {
+      const updated = applyHunksToScope(
+        nativeSource,
+        hunks,
+        filePath,
+        filePath,
+        targetLang,
+        idioms,
+        options.idioms !== false,
+      );
+      return {
+        symbol: anchorSymbol || ":hunk",
+        startOffset: 0,
+        endOffset: nativeSource.length,
+        replacement: updated,
+        originalSnippet: nativeSource,
+        newSnippet: updated,
+      };
+    }
+  }
+
   if (!anchorSymbol) {
     throw new Error("Must specify target symbol with --symbol when splicing native file");
   }
@@ -5536,7 +5869,7 @@ function resolveSingleNativeEditAgainstSource(
       throw new Error(`Cannot delete '${anchorSymbol}'`);
     }
     if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when appending to native file");
+      throw buildEmptySpliceBlockError(filePath, anchorSymbol, "appending to native file");
     }
     const emitted = emitNativeSnippetForContext(
       rawSnippet,
@@ -5613,6 +5946,59 @@ function resolveSingleNativeEditAgainstSource(
       };
     }
 
+    if (containsHunkMarkers(rawSnippet)) {
+      const hunks = extractHunkBlocks(rawSnippet);
+      if (hunks.length > 0) {
+        try {
+          const updatedRange = applyHunksToScope(
+            originalSnippet,
+            hunks,
+            anchorSymbol,
+            filePath,
+            targetLang,
+            idioms,
+            options.idioms !== false,
+          );
+          return {
+            symbol: anchorSymbol,
+            startOffset,
+            endOffset,
+            replacement: updatedRange,
+            originalSnippet,
+            newSnippet: updatedRange,
+          };
+        } catch {
+          const winStartLine = Math.max(1, startLine - 40);
+          const winEndLine = Math.min(totalLines, endLine + 40);
+          const winStartOff = lineStarts[winStartLine - 1];
+          const winEndOff =
+            winEndLine < lineStarts.length ? lineStarts[winEndLine] : nativeSource.length;
+          const winSlice = nativeSource.slice(winStartOff, winEndOff);
+          const updatedWin = applyHunksToScope(
+            winSlice,
+            hunks,
+            anchorSymbol,
+            filePath,
+            targetLang,
+            idioms,
+            options.idioms !== false,
+          );
+          return {
+            symbol: anchorSymbol,
+            startOffset: winStartOff,
+            endOffset: winEndOff,
+            replacement: updatedWin,
+            originalSnippet: winSlice,
+            newSnippet: updatedWin,
+          };
+        }
+      }
+    }
+
+    if (!rawSnippet.trim()) {
+      throw buildEmptySpliceBlockError(filePath, anchorSymbol, "splicing line range");
+    }
+
     let processedCode =
       options.idioms === false
         ? rawSnippet
@@ -5649,10 +6035,39 @@ function resolveSingleNativeEditAgainstSource(
     let finalOriginalSnippet = originalSnippet;
 
     const literalCandidate = `${nativeSource.slice(0, startOffset)}${processedCode}${nativeSource.slice(endOffset)}`;
-    if (!validateNativeSyntax(literalCandidate, targetLang, filePath, idioms).valid) {
-      const procLineList = processedCode.trim().split(/\r?\n/);
+    const literalCheck = validateNativeSyntax(literalCandidate, targetLang, filePath, idioms);
+    const countNetDelims = (s: string): { braces: number; parens: number } => {
+      let braces = 0;
+      let parens = 0;
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === "{") braces++;
+        else if (ch === "}") braces--;
+        else if (ch === "(") parens++;
+        else if (ch === ")") parens--;
+      }
+      return { braces, parens };
+    };
+    const origDelims = countNetDelims(originalSnippet);
+    const procDelims = countNetDelims(processedCode);
+    const procLineList = processedCode.trim().split(/\r?\n/);
+    const procFirstTrim = procLineList[0]?.trim() ?? "";
+    const alreadyAnchoredAtStart =
+      procFirstTrim.length >= 6 && rawLines[startLine - 1]?.trim() === procFirstTrim;
+    const introducesUnbalancedDelims =
+      (origDelims.braces === 0 && procDelims.braces !== 0) ||
+      (origDelims.parens === 0 && procDelims.parens !== 0);
+    const hasShiftedHeaderMatch =
+      !alreadyAnchoredAtStart &&
+      !introducesUnbalancedDelims &&
+      procLineList.length >= 2 &&
+      procFirstTrim.length >= 6 &&
+      rawLines[startLine - 1]?.trim() !== procFirstTrim &&
+      rawLines
+        .slice(Math.max(0, startLine - 41), Math.min(rawLines.length, startLine + 40))
+        .some((l) => l.trim() === procFirstTrim);
+    if ((!literalCheck.valid || hasShiftedHeaderMatch) && !alreadyAnchoredAtStart && !introducesUnbalancedDelims) {
       const origSpanCount = Math.max(1, endLine - startLine + 1);
-      const procFirstTrim = procLineList[0]?.trim() ?? "";
       const procLastTrim = procLineList[procLineList.length - 1]?.trim() ?? "";
       const procTokens = new Set(
         (processedCode.match(/[A-Za-z_$][A-Za-z0-9_$-]{2,}/g) ?? []).map((t) => t.toLowerCase()),
@@ -5662,19 +6077,22 @@ function resolveSingleNativeEditAgainstSource(
       let bestStart = -1;
       let bestEnd = -1;
 
-      const minStart = Math.max(1, startLine - 10);
-      const maxStart = Math.min(rawLines.length, startLine + 10);
-      const minSpanLen = Math.max(1, origSpanCount - 3);
-      const maxSpanLen = origSpanCount + 3;
+      const minStart = Math.max(1, startLine - 40);
+      const maxStart = Math.min(rawLines.length, startLine + 40);
+      const spanLen = origSpanCount;
 
       for (let candStartLine = minStart; candStartLine <= maxStart; candStartLine++) {
-        for (let spanLen = minSpanLen; spanLen <= maxSpanLen; spanLen++) {
+        {
           const candEndLine = Math.min(rawLines.length, candStartLine + spanLen - 1);
           if (candStartLine === startLine && candEndLine === endLine) continue;
           const cStartOff = lineStarts[candStartLine - 1];
           const cEndOff =
             candEndLine < lineStarts.length ? lineStarts[candEndLine] : nativeSource.length;
           const candSlice = nativeSource.slice(cStartOff, cEndOff);
+          const candDelims = countNetDelims(candSlice);
+          if (candDelims.braces !== procDelims.braces || candDelims.parens !== procDelims.parens) {
+            continue;
+          }
           const candTokens = (candSlice.match(/[A-Za-z_$][A-Za-z0-9_$-]{2,}/g) ?? []).map((t) =>
             t.toLowerCase(),
           );
@@ -5708,6 +6126,11 @@ function resolveSingleNativeEditAgainstSource(
         finalStartOffset = bestStart;
         finalEndOffset = bestEnd;
         finalOriginalSnippet = nativeSource.slice(bestStart, bestEnd);
+      } else if (validateNativeSyntax(nativeSource, targetLang, filePath, idioms).valid) {
+        const diagMsg = literalCheck.diagnostics.slice(0, 3).join("; ");
+        throw new Error(
+          `Line-range splice (${anchorSymbol}) rejected in ${filePath}: replacement leaves unbalanced braces/parentheses or syntax errors (${diagMsg}). Use AST-scoped hunk splicing: === ${filePath}:<symbol> === with <<< / === / >>>.`,
+        );
       }
     }
 
@@ -5883,7 +6306,7 @@ function resolveSingleNativeEditAgainstSource(
 
   if (options.insertBefore || options.insertAfter) {
     if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when inserting into native file");
+      throw buildEmptySpliceBlockError(filePath, anchorSymbol, "inserting into native file");
     }
     const emittedUnindented = emitNativeSnippetForContext(
       rawSnippet,
@@ -5920,7 +6343,7 @@ function resolveSingleNativeEditAgainstSource(
 
   if ((options.append || autoAppendToClass) && spanInfo.isClassContainer) {
     if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when appending to class in native file");
+      throw buildEmptySpliceBlockError(filePath, anchorSymbol, "appending to class in native file");
     }
     if (
       targetLang === "go" &&
@@ -6154,7 +6577,30 @@ function resolveSingleNativeEditAgainstSource(
   }
 
   if (!rawSnippet.trim()) {
-    throw new Error("Must provide non-empty --code or --body when splicing native file");
+    throw buildEmptySpliceBlockError(filePath, anchorSymbol, "splicing native file");
+  }
+
+  if (containsHunkMarkers(rawSnippet)) {
+    const hunks = extractHunkBlocks(rawSnippet);
+    if (hunks.length > 0) {
+      const updatedSymbolScope = applyHunksToScope(
+        originalSnippet,
+        hunks,
+        anchorSymbol,
+        filePath,
+        targetLang,
+        idioms,
+        options.idioms !== false,
+      );
+      return {
+        symbol: anchorSymbol,
+        startOffset: spanInfo.declStart,
+        endOffset: spanInfo.declEnd,
+        replacement: updatedSymbolScope,
+        originalSnippet,
+        newSnippet: updatedSymbolScope,
+      };
+    }
   }
 
   const { cleanedCode } = extractInlineIdiomsFromSource(rawSnippet);
@@ -6242,64 +6688,85 @@ function resolveSingleNativeEditAgainstSource(
     trimmedNew.startsWith("/**") ||
     trimmedNew.startsWith("///") ||
     trimmedNew.startsWith("//!");
+  const hasReplaceDocsDirective =
+    options.preserveDocs === false ||
+    /(?:^|\n)\s*(?:(?:\/\/|#)\s*)?@(?:replace|strip|drop)-docs\b/.test(rawSnippet) ||
+    /(?:^|\n)\s*(?:(?:\/\/|#)\s*)?@(?:replace|strip|drop)-docs\b/.test(newSnippet);
 
-  if (targetLang !== "python" && (hasNewDoc || Boolean(trivia.leadingDocComment))) {
-    let docStartPos: number | undefined;
-    if (trivia.leadingDocComment) {
-      const beforeDecl = nativeSource.slice(0, spanInfo.declStart);
-      const oldDocIdx = beforeDecl.lastIndexOf(trivia.leadingDocComment);
-      if (oldDocIdx >= 0) {
-        const docLineStart = nativeSource.lastIndexOf("\n", oldDocIdx - 1) + 1;
-        const leadingWs = nativeSource.slice(docLineStart, oldDocIdx);
-        docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : oldDocIdx;
-      }
-    }
-    if (docStartPos === undefined && spanInfo.fullDeclStart !== undefined && spanInfo.fullDeclStart < spanInfo.declStart) {
-      docStartPos = spanInfo.fullDeclStart;
-    }
-    if (docStartPos === undefined) {
-      const prefixBefore = nativeSource.slice(0, spanInfo.declStart);
-      const matchPrevDoc = prefixBefore.match(/(?:\/\*\*[\s\S]*?\*\/|(?:[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+)[ \t]*$/);
-      if (matchPrevDoc && matchPrevDoc.index !== undefined) {
-        const docStart = matchPrevDoc.index;
-        const docLineStart = nativeSource.lastIndexOf("\n", docStart - 1) + 1;
-        const leadingWs = nativeSource.slice(docLineStart, docStart);
-        docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : docStart;
-      }
-    }
-
-    if (docStartPos !== undefined && docStartPos < finalReplaceStart) {
+  if (targetLang !== "python") {
+    if (!hasNewDoc && !hasReplaceDocsDirective) {
+      preservedTriviaText = trivia.leadingDocComment ?? "";
+    } else if (hasNewDoc || Boolean(trivia.leadingDocComment) || hasReplaceDocsDirective) {
+      let docStartPos: number | undefined;
       if (trivia.leadingDocComment) {
-        const oldDocIdx = nativeSource.indexOf(trivia.leadingDocComment, docStartPos);
+        const beforeDecl = nativeSource.slice(0, spanInfo.declStart);
+        const oldDocIdx = beforeDecl.lastIndexOf(trivia.leadingDocComment);
         if (oldDocIdx >= 0) {
-          const docEnd = oldDocIdx + trivia.leadingDocComment.length;
-          const between = nativeSource.slice(docEnd, spanInfo.declStart);
-          const hasDecoratorsBetween = /^[ \t\r\n]*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/.test(between);
-          if (hasDecoratorsBetween && !hasLeadingNativeAttr && !trimmedNew.startsWith("@")) {
-            const decoratorsSlice = between.replace(/^[ \t\r\n]+/, "");
-            const newDocMatch = newSnippet.match(/^(?:[ \t]*\/\*\*[\s\S]*?\*\/\r?\n|[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+/);
-            if (newDocMatch) {
-              const afterDoc = newSnippet.slice(newDocMatch[0].length);
-              newSnippet = `${newDocMatch[0]}${decoratorsSlice}${afterDoc}`;
-            } else {
-              newSnippet = `${decoratorsSlice}${newSnippet}`;
+          const docLineStart = nativeSource.lastIndexOf("\n", oldDocIdx - 1) + 1;
+          const leadingWs = nativeSource.slice(docLineStart, oldDocIdx);
+          docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : oldDocIdx;
+        }
+      }
+      if (
+        docStartPos === undefined &&
+        spanInfo.fullDeclStart !== undefined &&
+        spanInfo.fullDeclStart < spanInfo.declStart
+      ) {
+        docStartPos = spanInfo.fullDeclStart;
+      }
+      if (docStartPos === undefined) {
+        const prefixBefore = nativeSource.slice(0, spanInfo.declStart);
+        const matchPrevDoc = prefixBefore.match(
+          /(?:\/\*\*[\s\S]*?\*\/|(?:[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+)[ \t]*$/,
+        );
+        if (matchPrevDoc && matchPrevDoc.index !== undefined) {
+          const docStart = matchPrevDoc.index;
+          const docLineStart = nativeSource.lastIndexOf("\n", docStart - 1) + 1;
+          const leadingWs = nativeSource.slice(docLineStart, docStart);
+          docStartPos = /^[ \t]*$/.test(leadingWs) ? docLineStart : docStart;
+        }
+      }
+
+      if (docStartPos !== undefined && docStartPos < finalReplaceStart) {
+        if (trivia.leadingDocComment) {
+          const oldDocIdx = nativeSource.indexOf(trivia.leadingDocComment, docStartPos);
+          if (oldDocIdx >= 0) {
+            const docEnd = oldDocIdx + trivia.leadingDocComment.length;
+            const between = nativeSource.slice(docEnd, spanInfo.declStart);
+            const hasDecoratorsBetween =
+              /^[ \t\r\n]*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/.test(between);
+            if (hasDecoratorsBetween && !hasLeadingNativeAttr && !trimmedNew.startsWith("@")) {
+              const decoratorsSlice = between.replace(/^\r?\n/, "");
+              const newDocMatch = newSnippet.match(
+                /^(?:[ \t]*\/\*\*[\s\S]*?\*\/\r?\n|[ \t]*(?:\/\/\/|\/\/!)[^\n]*\r?\n)+/,
+              );
+              if (newDocMatch) {
+                const afterDoc = newSnippet.slice(newDocMatch[0].length);
+                newSnippet = `${newDocMatch[0]}${decoratorsSlice}${afterDoc}`;
+              } else {
+                newSnippet = `${decoratorsSlice}${newSnippet}`;
+              }
             }
           }
         }
+        finalReplaceStart = docStartPos;
       }
-      finalReplaceStart = docStartPos;
-    }
-  }
 
-  if (trivia.leadingDocComment) {
+      const applied = applyTriviaLensToReplacement(trivia, newSnippet, {
+        preserveDocs: false,
+        lang: targetLang,
+      });
+      newSnippet = applied.mergedSnippet;
+      preservedTriviaText = "";
+    }
+  } else if (trivia.leadingDocComment || hasReplaceDocsDirective) {
     const applied = applyTriviaLensToReplacement(trivia, newSnippet, {
-      preserveDocs: options.preserveDocs,
+      preserveDocs: hasReplaceDocsDirective ? false : options.preserveDocs,
       lang: targetLang,
     });
     newSnippet = applied.mergedSnippet;
     preservedTriviaText = applied.preservedTriviaText;
   }
-
   return {
     symbol: anchorSymbol,
     startOffset: finalReplaceStart,
@@ -6487,7 +6954,7 @@ export function spliceNativeSource(
   // Module-level append without --symbol
   if (options.append && !anchorSymbol) {
     if (!rawSnippet.trim()) {
-      throw new Error("Must provide non-empty --code when appending to native file");
+      throw buildEmptySpliceBlockError(filePath, anchorSymbol, "appending to native file");
     }
     const emitted = emitNativeSnippetForContext(
       rawSnippet,
@@ -6541,7 +7008,14 @@ export function spliceNativeSource(
   );
   const modifiedCode = `${nativeSource.slice(0, resolved.startOffset)}${resolved.replacement}${nativeSource.slice(resolved.endOffset)}`;
 
-  if (!forceLosslessPreprocess) {
+  const isLargeFileHunkOrLineSplice =
+    modifiedCode.length > 50_000 &&
+    (containsHunkMarkers(rawSnippet) ||
+      Boolean(
+        options.symbol &&
+          /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test(options.symbol.trim()),
+      ));
+  if (!forceLosslessPreprocess && !isLargeFileHunkOrLineSplice) {
     const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
     if (!checkRes.valid) {
       return spliceNativeSource(nativeSource, options, filePath, idioms, true);
@@ -6554,12 +7028,14 @@ export function spliceNativeSource(
   }
 
   const snippetTokens = estimateTokens(resolved.newSnippet || options.code || options.body || "");
-  const modifiedTokens = estimateTokens(modifiedCode);
+  const modifiedTokens =
+    modifiedCode.length > 50_000
+      ? Math.ceil(modifiedCode.length / 3.8)
+      : estimateTokens(modifiedCode);
   const tokensSaved = Math.max(0, modifiedTokens - snippetTokens);
   const preservedTriviaTokens = resolved.preservedTriviaText
     ? estimateTokens(resolved.preservedTriviaText)
     : 0;
-
   const realisticNativePayload = options.delete
     ? JSON.stringify({ path: filePath, old_string: resolved.originalSnippet ?? "", new_string: "" })
     : (resolved.originalSnippet
@@ -6612,8 +7088,10 @@ export async function splice(
 
   const fileExists = fs.existsSync(fullPath);
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
+  const hasHunkPayload = fileExists && containsHunkMarkers(options.code ?? options.body ?? "");
   if (
     !hasBatchEdits &&
+    !hasHunkPayload &&
     !options.append &&
     !options.insertAfter &&
     !options.insertBefore &&
@@ -6668,19 +7146,36 @@ export async function splice(
   if (!fullPath.endsWith(".aice")) {
     const originalNative = await fs.promises.readFile(fullPath, "utf-8");
     const targetLang = detectTargetFromPath(fullPath);
-    const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
 
     const result = withSuppressedTelemetry(() =>
       spliceNativeSource(originalNative, options, fullPath, activeIdioms),
     );
+    const isLineRangeOrHunkSplice =
+      containsHunkMarkers(snippetInput) ||
+      Boolean(
+        options.symbol &&
+          /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test(options.symbol.trim()),
+      ) ||
+      Boolean(
+        hasBatchEdits &&
+          options.edits!.every(
+            (e) =>
+              containsHunkMarkers(e.code ?? e.body ?? "") ||
+              /^(?::?L?\d+\s*(?:-|\.\.|:)\s*L?\d+|:hunk)$/i.test((e.symbol ?? "").trim()),
+          ),
+      );
 
     if (targetLang === "typescript" || targetLang === "tsx" || targetLang === "javascript") {
       const snippetIdents = new Set(
         (result.newSnippet ?? snippetInput).match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? [],
       );
-      const origIdents = new Set(originalNative.match(/\b[A-Za-z_$][A-Za-z0-9_$]*\b/g) ?? []);
-      const missingIdents = Array.from(snippetIdents).filter(
-        (id) => !origIdents.has(id) && (/^[A-Z]/.test(id) || id.includes("_")),
+      const candidateIdents = Array.from(snippetIdents).filter((id) =>
+        isLineRangeOrHunkSplice
+          ? /^[A-Z][A-Za-z0-9]*$/.test(id)
+          : /^[A-Z]/.test(id) || id.includes("_"),
+      );
+      const missingIdents = candidateIdents.filter(
+        (id) => !new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(originalNative),
       );
       if (missingIdents.length > 0) {
         const importRe = /^(import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]\s*;?)/gm;
@@ -6714,7 +7209,7 @@ export async function splice(
           }
           const addedSpecs: string[] = [];
           for (const id of missingIdents) {
-            if (specList.includes(id)) continue;
+            if (specList.some((s) => s.replace(/^type\s+/, "").trim() === id)) continue;
             const exportRe = new RegExp(
               `\\bexport\\s+(?:type|interface|const|let|var|class|enum|function)\\s+${id}\\b`,
             );
@@ -6735,17 +7230,22 @@ export async function splice(
       }
     }
 
-    const postValidation = validateNativeSyntax(
-      result.modifiedCode,
-      targetLang,
-      fullPath,
-      activeIdioms,
-    );
-    if (!postValidation.valid && origValidation.valid) {
-      const diagSummary = postValidation.diagnostics.join("; ");
-      throw new Error(
-        `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
+    if (!(isLineRangeOrHunkSplice && result.modifiedCode.length > 50_000)) {
+      const postValidation = validateNativeSyntax(
+        result.modifiedCode,
+        targetLang,
+        fullPath,
+        activeIdioms,
       );
+      if (!postValidation.valid) {
+        const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
+        if (origValidation.valid) {
+          const diagSummary = postValidation.diagnostics.join("; ");
+          throw new Error(
+            `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
+          );
+        }
+      }
     }
 
     if (!options.dryRun) {
@@ -6956,6 +7456,7 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
     let inMdFence = false;
     let mdFenceChar = "";
     let mdFenceLen = 0;
+    let inHunkBlock = false;
 
     for (const line of lines) {
       const activeFp =
@@ -6989,9 +7490,32 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
         }
       }
 
+      if (sections.length > 0 && !inMdFence) {
+        if (!inHunkBlock && /^\s*<{3,}\s*$/.test(line)) {
+          inHunkBlock = true;
+          sections[sections.length - 1].lines.push(line);
+          continue;
+        }
+        if (inHunkBlock) {
+          if (/^\s*>{3,}\s*$/.test(line)) {
+            inHunkBlock = false;
+          }
+          sections[sections.length - 1].lines.push(line);
+          continue;
+        }
+      }
+
       const m = hasUnindentedHeader && /^\s/.test(line) ? null : line.match(headerRe);
       if (m) {
         let spec = (m[1] || m[2] || m[3] || "").trim().replace(/^['"`]|['"`]$/g, "");
+        if (/^[^\s:#]+(?:\.[a-zA-Z0-9]{1,10}|Makefile|Dockerfile)\s*:+$/i.test(spec)) {
+          const emptySymFile = spec.replace(/\s*:+$/, "").trim();
+          throw buildEmptySpliceBlockError(
+            emptySymFile,
+            undefined,
+            `parsing malformed stream header '=== ${spec} ===' (missing <symbol>, L<start>-L<end>, or :eof after colon)`,
+          );
+        }
         let isDelete = false;
         if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
           isDelete = true;
@@ -7030,6 +7554,7 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
           inMdFence = false;
           mdFenceChar = "";
           mdFenceLen = 0;
+          inHunkBlock = false;
           sections.push({
             filePath: blockFilePath,
             symbol: blockSymbol,
@@ -7064,10 +7589,24 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
       if (sec.filePath) {
         lastExplicitFilePath = sec.filePath;
       }
+      const effectiveSymbol =
+        sec.symbol === ":create" && containsHunkMarkers(body) ? ":hunk" : sec.symbol;
+      if (
+        !del &&
+        !sec.cloneFrom &&
+        !isCreateOrOverwriteSymbol(effectiveSymbol) &&
+        !body.trim()
+      ) {
+        throw buildEmptySpliceBlockError(
+          sec.filePath ?? defaultFilePath ?? lastExplicitFilePath ?? "<file>",
+          effectiveSymbol,
+          "parsing --stdin heredoc block",
+        );
+      }
       return {
         filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
         explicitFilePath: sec.filePath ?? lastExplicitFilePath,
-        symbol: sec.symbol,
+        symbol: effectiveSymbol,
         cloneFrom: sec.cloneFrom,
         code: del ? undefined : body,
         delete: del || undefined,
@@ -7236,6 +7775,7 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
 
         const isCreateRoute =
           !item.delete &&
+          !(fileExistsNow && containsHunkMarkers(resolvedCode ?? "")) &&
           (!fileExistsNow ||
             (!item.append &&
               !item.insertAfter &&

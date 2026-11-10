@@ -1,6 +1,6 @@
 <!-- AICE:START -->
-<!-- AICE:START v0.9.23 -->
-## AICE 2.0 (v0.9.23) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+<!-- AICE:START v0.9.24 -->
+## AICE 2.0 (v0.9.24) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (`sed` / `ls` / `grep` Ban)
 - **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run `sed -n`, `awk`, `head`, `tail`, `cat`, `grep -n`, `grep -rn`, `grep -C`, `ls`, `ls -la`, `ls src`, `find`, `aice --help`, `aice --version`, `which aice`, or `git status` on supported files and directories (`aice context` works seamlessly across all 33 file extensions including `.aipl`):
@@ -16,6 +16,7 @@
 - **Idioms Toggle**: If `"idiomsEnabled": false` (or `"idioms": false`), disable `$idiom` macros (`--no-idioms`).
 
 ### 2. Multi-File Creation & Unified Mixed Stream in 1–2 Turns (`from 0` — 40-75% Output Token Savings)
+- **STRICT ANTI-LOOP MANDATE**: NEVER call `aice/aice_create`, `aice/aice_splice`, or `aice/aice_context` N times in a file-by-file loop! Always batch 2+ files into **1 single stream call** (either 1 Bash `aice splice --stdin << 'EOF'` heredoc with zero JSON escaping, or 1 MCP `aice_create`/`aice_splice` call with `=== <filePath> ===` headers in `code`).
 - **Preferred Multi-File Heredoc Stream (Zero JSON Escaping)**: Write clean, native language syntax inside 1–2 `aice create --stdin << 'EOF'` or `aice splice --stdin << 'EOF'` calls using `=== <filePath> ===` headers (e.g. Batch 1: config/HTML/CSS/constants/models; Batch 2: core engine/UI/main/scripts/docs), then immediately run `npm install && npm run build` without running `ls`:
   ```bash
   aice create --stdin << 'EOF'
@@ -44,8 +45,8 @@
 - **Unknown File or Directory Structure -> Multi-Target `aice outline`**: Run `aice outline src tests` or `aice outline <file1> <file2> ...` when exploring unfamiliar files or directories.
 - **Skip Redundant Reads**: You do NOT need to run `outline` or `context` just to append to a file (`:eof`) or add a new field/method/section (`:ClassName.newMember` or `:New Heading`).
 
-### 4. 1-Turn Unified Mixed Create + Surgical Splice Stream (90%+ Edit Token Savings)
-- **Default Multi-Block Heredoc Stream (Mixing New `=== file ===` & Edited `=== file:sym ===` Blocks in 1 Turn)**: Apply both new file creations (`=== <filePath> ===` or `=== <filePath>:create ===`) and surgical edits (`=== <filePath>:<symbol> ===`) across multiple files in **1 single turn**:
+### 4. 1-Turn Unified Mixed Create + Hybrid Surgical Splice Stream (90%+ Edit Token Savings)
+- **STRICT ANTI-LOOP MANDATE**: NEVER call `aice/aice_splice` or `aice/aice_create` multiple times in a file-by-file loop! Combine all new files (`=== <filePath> ===`), symbol edits (`=== <filePath>:<symbol> ===`), AST-scoped hunks (`<<< / === / >>>`), and line-range edits (`=== <filePath>:L<start>-L<end> ===`) into **1 single stream call**:
   ```bash
   aice splice --stdin << 'EOF'
   === src/new_helper.ts ===
@@ -56,6 +57,12 @@
   public isBoardEmpty(): boolean {
     return this.grid.every((row) => row.every((cell) => cell === null));
   }
+  === src/engine.ts:GameEngine.step ===
+  <<<
+    this.tickCount += 1;
+  ===
+    this.tickCount += BONUS_MULTIPLIER;
+  >>>
   === tests/board.test.ts:TC-BOARD-001 ===
   test("TC-BOARD-001: board starts empty", () => {
     expect(new Board().isBoardEmpty()).toBe(true);
@@ -65,14 +72,15 @@
   Modular deterministic board engine.
   EOF
   ```
-- **Supported `<symbol>` Selectors**:
+- **Hybrid Splicing Modes & Supported `<symbol>` Selectors**:
+  - **AST-Scoped Hunk Splicing (`<<< / === / >>>` inside `:symbol`)**: For 1–15 line edits inside a large function/method, target `=== <filePath>:<symbol> ===` (or `=== <filePath> ===`) and pass `<<<\n<search>\n===\n<replace>\n>>>` hunks — strictly scoped to that symbol's AST span and immune to line shifts!
+  - **Numbered Line-Range Splicing (`:L<start>-L<end>`)**: Right after reading numbered `aice context` output (`35│ `), splice `=== <filePath>:L35-L42 ===` (gutter prefixes like `35│ ` are auto-stripped).
   - `=== <filePath> ===` (or `:create` / `:overwrite`): Creates or overwrites the target file atomically within the same `aice splice --stdin` batch.
   - `<FuncOrClass.method>` or `<Class.field>`: Replaces existing member OR **auto-inserts a new field/method into `<Class>`** if not yet present!
   - `<testIdOrTitle>`: Replaces matching `test(...)` / `it(...)` / `describe(...)` block by exact title or unique prefix/ID (e.g. `TC-MENU-001`).
   - `<Heading Title>` / `<function_or_label>`: Replaces or auto-appends Markdown `## Heading` sections (`.md`), shell/PowerShell functions (`.sh`, `.ps1`), or Batch `:label` blocks (`.cmd`, `.bat`).
   - `eof` (or `append`): Appends code to the end of the file.
   - `imports`: Updates/merges imports in the file's top import block (pass only the updated/added import line(s) or full block).
-  - `L<start>-L<end>`: Replaces exact 1-based inclusive line range.
   - Single-edit shorthand: `aice splice <file> -s <symbol> -c "<replacement>"` (or `--delete`).
 
 ### 5. Subagent Propagation (`invoke_subagent` / `test-runner` / `fast-scout` / `code-surgeon` / `deep-auditor`)
