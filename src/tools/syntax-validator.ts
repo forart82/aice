@@ -689,10 +689,63 @@ export function validateNativeSyntax(
     items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
 
     const lines = code.split(/\r?\n/);
+    const indentStack = [0];
+    let prevTrimmed = "";
+    let prevLineNum = 0;
+    let openDelims = 0;
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("//")) continue;
+
+      const indentMatch = line.match(/^[ \t]*/);
+      const leadingWs = indentMatch ? indentMatch[0] : "";
+      if (leadingWs.includes("\t") && leadingWs.includes(" ")) {
+        items.push({
+          line: i + 1,
+          column: 1,
+          message: "AIPL indentation error: inconsistent indentation (mixed tabs and spaces)",
+        });
+      }
+
+      const curIndent = leadingWs.length;
+      const topIndent = indentStack[indentStack.length - 1];
+
+      if (openDelims === 0) {
+        if (curIndent > topIndent) {
+          if (
+            !prevTrimmed.endsWith(":") &&
+            !prevTrimmed.endsWith("{") &&
+            !prevTrimmed.endsWith("[") &&
+            !prevTrimmed.endsWith("(")
+          ) {
+            items.push({
+              line: i + 1,
+              column: curIndent + 1,
+              message: `AIPL indentation error: unexpected indent increase without preceding colon on line ${prevLineNum}`,
+            });
+          }
+          indentStack.push(curIndent);
+        } else if (curIndent < topIndent) {
+          while (indentStack.length > 1 && indentStack[indentStack.length - 1] > curIndent) {
+            indentStack.pop();
+          }
+          if (indentStack[indentStack.length - 1] !== curIndent) {
+            items.push({
+              line: i + 1,
+              column: curIndent + 1,
+              message: "AIPL indentation error: unindent does not match any outer indentation level",
+            });
+          }
+        }
+      }
+
+      for (let c = 0; c < line.length; c++) {
+        const ch = line[c];
+        if (ch === "(" || ch === "[" || ch === "{") openDelims++;
+        else if (ch === ")" || ch === "]" || ch === "}") openDelims = Math.max(0, openDelims - 1);
+      }
 
       if (/^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
         if (!trimmed.endsWith(":")) {
@@ -713,10 +766,14 @@ export function validateNativeSyntax(
           });
         }
       }
+
+      prevTrimmed = trimmed;
+      prevLineNum = i + 1;
     }
 
     return finish();
   }
+
   // 5. Python, Rust, Go, C++, C#, Kotlin, PHP
   const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
   items.push(...maskRes.unterminatedDiagnostics);
@@ -733,7 +790,6 @@ export function validateNativeSyntax(
 
   return finish();
 }
-
 /**
  * Formats syntax diagnostics as a Markdown section for `aice outline` and `aice context`.
  */

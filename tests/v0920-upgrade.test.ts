@@ -376,10 +376,11 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       }
     });
 
-    it("enforces sed/ls/grep ban and documents supported extensions in MANDATORY_AGENT_RULES_MARKDOWN", () => {
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toMatch(/<!-- AICE:START v0\.9\.2[01] -->/);
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toMatch(/3[23] supported file extensions/);
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(".sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown");
+    it("enforces sed/ls/grep ban and documents 33 extensions and v0.9.21 header in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.21 -->");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("33 supported file extensions");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(".sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("sed -n");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("grep -rn");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice outline src tests");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain('aice context <file> -s "L180-L240"');

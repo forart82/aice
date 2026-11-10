@@ -1281,8 +1281,6 @@ export function extractScriptOrMarkdownSymbols(
         });
       }
     }
-
-    for (let k = 0; k < rawHeadings.length; k++) {
     for (let k = 0; k < rawHeadings.length; k++) {
       const cur = rawHeadings[k];
       let nextEqualOrHigher: (typeof rawHeadings)[number] | undefined;
@@ -1316,8 +1314,6 @@ export function extractScriptOrMarkdownSymbols(
         headingLevel: cur.level,
         rawHeadingLine: cur.rawLine,
       });
-    }
-    return results;
     }
     return results;
   }
@@ -1541,6 +1537,31 @@ export function locateScriptOrMarkdownSpan(
 ): NativeSpanInfo | undefined {
   let q = rawSelector.trim();
   if (!q) return undefined;
+  if (/^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
+    return undefined;
+  }
+
+  const symbols = extractScriptOrMarkdownSymbols(source, targetLang);
+  if (symbols.length === 0) return undefined;
+
+  const qClean = q.replace(/^#{1,6}\s+/, "").replace(/^["'`]|["'`]$/g, "").trim();
+  const directMatch =
+    symbols.find((s) => s.name === qClean || s.displaySignature === q) ??
+    symbols.find((s) => s.name.toLowerCase() === qClean.toLowerCase());
+  if (directMatch) {
+    return {
+      declStart: directMatch.startOffset,
+      fullDeclStart: directMatch.startOffset,
+      declEnd: directMatch.endOffset,
+      tokenStart: directMatch.startOffset,
+      declIndent: directMatch.indent,
+      memberName: directMatch.name,
+      origHeader: directMatch.rawHeadingLine,
+      startLine: directMatch.startLine,
+      endLine: directMatch.endLine,
+    };
+  }
+
   const levelMatch = q.match(/^(#{1,6})\s+/);
   const explicitLevel = levelMatch ? levelMatch[1].length : undefined;
   q = q
@@ -1555,10 +1576,6 @@ export function locateScriptOrMarkdownSpan(
   if (!q || /^(?:nonExistent|doesNotExist|missing|unknown|invalid)/i.test(q)) {
     return undefined;
   }
-
-  const symbols = extractScriptOrMarkdownSymbols(source, targetLang);
-  if (symbols.length === 0) return undefined;
-
   const lowerQ = q.toLowerCase();
   const levelFiltered = explicitLevel
     ? symbols.filter((s) => s.headingLevel === explicitLevel)

@@ -38,4 +38,11 @@ line 5`;
       spliceSource(shortSource, "L10-L20", "new line", false, "short.md");
     }).toThrow(/:eof|:append/);
   });
+
+  it("splices markdown sections whose titles contain 'Section' prefix without accidental stripping", () => {
+    const md = "## Section 1\nContent 1\n\n## Section 2\nContent 2\n";
+    const res = spliceSource(md, "Section 1", "## Section 1\nReplaced Content 1", false, "test.md");
+    expect(res.success).toBe(true);
+    expect(res.modifiedCode).toBe("## Section 1\nReplaced Content 1\n\n## Section 2\nContent 2\n");
+  });
 });

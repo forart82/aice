@@ -375,6 +375,7 @@ aice_cheatsheet() {
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}-s sym/TC/L/pat${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}:m/:TC/:L/:eof${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.21${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}33 exts (.ts..aipl)${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
 }

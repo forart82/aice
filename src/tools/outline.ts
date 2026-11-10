@@ -917,11 +917,15 @@ function enrichAndResolveSymbolLineRanges(
 function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[] {
   const lines = source.split(/\r?\n/);
   const symbols: OutlineSymbol[] = [];
+  let i = 0;
 
-  for (let i = 0; i < lines.length; i++) {
+  while (i < lines.length) {
     const line = lines[i];
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("//")) continue;
+    if (!trimmed || trimmed.startsWith("//")) {
+      i++;
+      continue;
+    }
 
     const modMatch = line.match(/^(\s*)module\s+([A-Za-z_][A-Za-z0-9_]*)/);
     if (modMatch) {
@@ -935,6 +939,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         signature: `module ${name}`,
         children: [],
       });
+      i++;
       continue;
     }
 
@@ -944,11 +949,17 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       const name = structMatch[2];
       let endLine = i + 1;
       const children: OutlineSymbol[] = [];
-      for (let j = i + 1; j < lines.length; j++) {
+      let j = i + 1;
+      while (j < lines.length) {
         const subTrimmed = lines[j].trim();
-        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        if (!subTrimmed || subTrimmed.startsWith("//")) {
+          j++;
+          continue;
+        }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
-        if (subIndent <= indentLen) break;
+        if (subIndent <= indentLen) {
+          break;
+        }
         endLine = j + 1;
         const fieldMatch = lines[j].match(/^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^:\n]+)/);
         if (fieldMatch) {
@@ -962,6 +973,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
             children: [],
           });
         }
+        j++;
       }
       symbols.push({
         name,
@@ -972,6 +984,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         signature: `struct ${name}: ...`,
         children,
       });
+      i = endLine;
       continue;
     }
 
@@ -981,11 +994,17 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       const name = enumMatch[2];
       let endLine = i + 1;
       const children: OutlineSymbol[] = [];
-      for (let j = i + 1; j < lines.length; j++) {
+      let j = i + 1;
+      while (j < lines.length) {
         const subTrimmed = lines[j].trim();
-        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        if (!subTrimmed || subTrimmed.startsWith("//")) {
+          j++;
+          continue;
+        }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
-        if (subIndent <= indentLen) break;
+        if (subIndent <= indentLen) {
+          break;
+        }
         endLine = j + 1;
         const variantMatch = subTrimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)/);
         if (variantMatch) {
@@ -999,6 +1018,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
             children: [],
           });
         }
+        j++;
       }
       symbols.push({
         name,
@@ -1009,24 +1029,33 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         signature: `enum ${name}: ...`,
         children,
       });
+      i = endLine;
       continue;
     }
 
     const fnMatch = line.match(
-      /^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*:\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
+      /^(\s*)(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)(?:\s*(?::|->)\s*([A-Za-z0-9_<>?.*[\]\s]+))?/,
     );
     if (fnMatch) {
       const indentLen = fnMatch[1].length;
       const name = fnMatch[2];
       const params = fnMatch[3] ?? "";
-      const retType = fnMatch[4]?.trim() ?? "void";
+      const rawRet = fnMatch[4]?.trim().replace(/:$/, "").trim();
+      const retType = rawRet || "void";
       let endLine = i + 1;
-      for (let j = i + 1; j < lines.length; j++) {
+      let j = i + 1;
+      while (j < lines.length) {
         const subTrimmed = lines[j].trim();
-        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        if (!subTrimmed || subTrimmed.startsWith("//")) {
+          j++;
+          continue;
+        }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
-        if (subIndent <= indentLen) break;
+        if (subIndent <= indentLen) {
+          break;
+        }
         endLine = j + 1;
+        j++;
       }
       symbols.push({
         name,
@@ -1037,6 +1066,7 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         signature: `fn ${name}(${params}): ${retType}`,
         children: [],
       });
+      i = endLine;
       continue;
     }
 
@@ -1045,12 +1075,19 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
       const indentLen = typeMatch[1].length;
       const name = typeMatch[2];
       let endLine = i + 1;
-      for (let j = i + 1; j < lines.length; j++) {
+      let j = i + 1;
+      while (j < lines.length) {
         const subTrimmed = lines[j].trim();
-        if (!subTrimmed || subTrimmed.startsWith("//")) continue;
+        if (!subTrimmed || subTrimmed.startsWith("//")) {
+          j++;
+          continue;
+        }
         const subIndent = lines[j].match(/^[ \t]*/)?.[0].length ?? 0;
-        if (subIndent <= indentLen) break;
+        if (subIndent <= indentLen) {
+          break;
+        }
         endLine = j + 1;
+        j++;
       }
       symbols.push({
         name,
@@ -1061,8 +1098,11 @@ function extractAiplSymbols(source: string, totalLines: number): OutlineSymbol[]
         signature: `type ${name}: ...`,
         children: [],
       });
+      i = endLine;
       continue;
     }
+
+    i++;
   }
 
   return symbols;
