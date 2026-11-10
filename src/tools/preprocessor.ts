@@ -1882,196 +1882,197 @@ export const PREPROCESSORS_BY_LANG: Readonly<
   aipl: (line) => line,
 };
 
-  export function preprocessHybridAndIdiomsLossless(
-    rawCode: string,
-    targetLang: TargetLanguage,
-    activeIdioms: Record<string, ProjectIdiomDefinition> = {},
-    options?: LosslessPreprocessOptions,
-  ): string {
-    if (!rawCode.trim()) {
-      return "";
-    }
+export function preprocessHybridAndIdiomsLossless(
+  rawCode: string,
+  targetLang: TargetLanguage,
+  activeIdioms: Record<string, ProjectIdiomDefinition> = {},
+  options?: LosslessPreprocessOptions,
+): string {
+  if (!rawCode.trim()) {
+    return "";
+  }
 
-    if (
-      targetLang === "markdown" ||
-      targetLang === "shell" ||
-      targetLang === "powershell" ||
-      targetLang === "batch"
-    ) {
-      return rawCode;
-    }
+  if (
+    targetLang === "markdown" ||
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "aipl"
+  ) {
+    return rawCode;
+  }
 
-    if (targetLang === "css") {
-      return preprocessBareCssLossless(rawCode, activeIdioms);
-    }
+  if (targetLang === "css") {
+    return preprocessBareCssLossless(rawCode, activeIdioms);
+  }
 
-    const maskRes = maskSourceLexically(rawCode, targetLang, activeIdioms);
-    const idiomExpanded = expandMaskedIdioms(
-      maskRes.maskedCode,
-      activeIdioms,
-      targetLang,
-      maskRes.maskTable,
-      maskRes.maskLengths,
-    );
+  const maskRes = maskSourceLexically(rawCode, targetLang, activeIdioms);
+  const idiomExpanded = expandMaskedIdioms(
+    maskRes.maskedCode,
+    activeIdioms,
+    targetLang,
+    maskRes.maskTable,
+    maskRes.maskLengths,
+  );
 
-    if (
-      targetLang === "html" ||
-      targetLang === "twig" ||
-      targetLang === "json" ||
-      targetLang === "yaml"
-    ) {
-      return unmaskLexicalTokens(idiomExpanded, maskRes.maskTable);
-    }
+  if (
+    targetLang === "html" ||
+    targetLang === "twig" ||
+    targetLang === "json" ||
+    targetLang === "yaml"
+  ) {
+    return unmaskLexicalTokens(idiomExpanded, maskRes.maskTable);
+  }
 
-    const linePreprocessor = PREPROCESSORS_BY_LANG[targetLang];
-    const lines = idiomExpanded.split(/\r?\n/);
-    const loweredLines: string[] = [];
-    let braceDepth = options?.insideClass ? 1 : 0;
-    const classBraceDepths: number[] = options?.insideClass ? [1] : [];
+  const linePreprocessor = PREPROCESSORS_BY_LANG[targetLang];
+  const lines = idiomExpanded.split(/\r?\n/);
+  const loweredLines: string[] = [];
+  let braceDepth = options?.insideClass ? 1 : 0;
+  const classBraceDepths: number[] = options?.insideClass ? [1] : [];
 
-    for (const line of lines) {
-      const atClassMemberLevel =
-        classBraceDepths.length > 0 && braceDepth === classBraceDepths[classBraceDepths.length - 1];
+  for (const line of lines) {
+    const atClassMemberLevel =
+      classBraceDepths.length > 0 && braceDepth === classBraceDepths[classBraceDepths.length - 1];
 
-      const lowered = linePreprocessor(line, atClassMemberLevel, options);
-      loweredLines.push(lowered);
+    const lowered = linePreprocessor(line, atClassMemberLevel, options);
+    loweredLines.push(lowered);
 
-      const opensClass = /(?:^|\b)class\s+[A-Za-z_$]/.test(lowered) && lowered.includes("{");
+    const opensClass = /(?:^|\b)class\s+[A-Za-z_$]/.test(lowered) && lowered.includes("{");
 
-      for (let i = 0; i < lowered.length; i++) {
-        if (lowered[i] === "{") {
-          braceDepth++;
-          if (opensClass && !classBraceDepths.includes(braceDepth)) {
-            classBraceDepths.push(braceDepth);
-          }
-        } else if (lowered[i] === "}") {
-          braceDepth = Math.max(0, braceDepth - 1);
-          while (
-            classBraceDepths.length > 0 &&
-            braceDepth < classBraceDepths[classBraceDepths.length - 1]
-          ) {
-            classBraceDepths.pop();
-          }
+    for (let i = 0; i < lowered.length; i++) {
+      if (lowered[i] === "{") {
+        braceDepth++;
+        if (opensClass && !classBraceDepths.includes(braceDepth)) {
+          classBraceDepths.push(braceDepth);
+        }
+      } else if (lowered[i] === "}") {
+        braceDepth = Math.max(0, braceDepth - 1);
+        while (
+          classBraceDepths.length > 0 &&
+          braceDepth < classBraceDepths[classBraceDepths.length - 1]
+        ) {
+          classBraceDepths.pop();
         }
       }
     }
-
-    return unmaskLexicalTokens(loweredLines.join("\n"), maskRes.maskTable);
   }
-        export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLanguage): boolean {
-          const trimmed = cleanedCode.trim();
-          if (!trimmed) return false;
 
-          if (
-            targetLang === "shell" ||
-            targetLang === "powershell" ||
-            targetLang === "batch" ||
-            targetLang === "markdown"
-          ) {
-            return true;
-          }
+  return unmaskLexicalTokens(loweredLines.join("\n"), maskRes.maskTable);
+}
+export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLanguage): boolean {
+  const trimmed = cleanedCode.trim();
+  if (!trimmed) return false;
 
-          if (targetLang === "css") {
-            return (
-              trimmed.includes("{") &&
-              !/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:style|tokens)\s+/m.test(trimmed)
-            );
-          }
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "markdown" ||
+    targetLang === "aipl"
+  ) {
+    return true;
+  }
+  if (targetLang === "css") {
+    return (
+      trimmed.includes("{") &&
+      !/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*(?:style|tokens)\s+/m.test(trimmed)
+    );
+  }
 
-          if (targetLang === "html" || targetLang === "twig") {
-            return (
-              (trimmed.startsWith("<") || trimmed.startsWith("{%") || trimmed.startsWith("{{")) &&
-              !/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(trimmed)
-            );
-          }
+  if (targetLang === "html" || targetLang === "twig") {
+    return (
+      (trimmed.startsWith("<") || trimmed.startsWith("{%") || trimmed.startsWith("{{")) &&
+      !/^(?:(?:#[^\n]*|module\s+[^\n]+)\n+|\s)*component\s+/m.test(trimmed)
+    );
+  }
 
-          if (targetLang === "json" || targetLang === "yaml") {
-            return false;
-          }
+  if (targetLang === "json" || targetLang === "yaml") {
+    return false;
+  }
 
-          const maskRes = maskSourceLexically(cleanedCode, targetLang);
-          const masked = maskRes.maskedCode;
+  const maskRes = maskSourceLexically(cleanedCode, targetLang);
+  const masked = maskRes.maskedCode;
 
-          // If the code has pure indentation-based AICE declaration headers ending with `:` at line end
-          const hasPureAiceColonDecl =
-            /^\s*(?:pub\s+|@fn\s+|\^fn\s+|@cls\s+|\^class\s+|@type\s+|\^type\s+)?(?:async\s+|static\s+)?(?:fn|class|type|enum|component|style)\s+\^?[A-Za-z_][^\n{=]*:\s*$/m.test(
-              masked,
-            );
+  // If the code has pure indentation-based AICE declaration headers ending with `:` at line end
+  const hasPureAiceColonDecl =
+    /^\s*(?:pub\s+|@fn\s+|\^fn\s+|@cls\s+|\^class\s+|@type\s+|\^type\s+)?(?:async\s+|static\s+)?(?:fn|class|type|enum|component|style)\s+\^?[A-Za-z_][^\n{=]*:\s*$/m.test(
+      masked,
+    );
 
-          if (targetLang === "python") {
-            if (
-              /^\s*(?:pub\s+)?(?:@type\s+|\^type\s+|type\s+\^?|enum\s+)[A-Za-z_][A-Za-z0-9_]*\s*:/m.test(
-                masked,
-              ) ||
-              /^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?fn\s+\^?[A-Za-z_][^\n:]*=\s*[^=]/m.test(
-                masked,
-              )
-            ) {
-              return false;
-            }
-            return (
-              /^\s*(?:async\s+)?def\s+[A-Za-z_]/m.test(masked) ||
-              /^\s*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/m.test(masked) ||
-              /^\s*match\s+[^:\n]+:\s*$/m.test(masked) ||
-              /^\s*(?:from\s+\S+\s+import\s+|import\s+[A-Za-z_])/m.test(masked) ||
-              cleanedCode.includes('"""') ||
-              cleanedCode.includes("'''") ||
-              (cleanedCode.includes("class ") &&
-                (/^\s*(?:async\s+)?def\s+/m.test(masked) ||
-                  /\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked) ||
-                  /(?:^|\s)(?:ret|<-)\b/m.test(masked)))
-            );
-          }
+  if (targetLang === "python") {
+    if (
+      /^\s*(?:pub\s+)?(?:@type\s+|\^type\s+|type\s+\^?|enum\s+)[A-Za-z_][A-Za-z0-9_]*\s*:/m.test(
+        masked,
+      ) ||
+      /^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?fn\s+\^?[A-Za-z_][^\n:]*=\s*[^=]/m.test(
+        masked,
+      )
+    ) {
+      return false;
+    }
+    return (
+      /^\s*(?:async\s+)?def\s+[A-Za-z_]/m.test(masked) ||
+      /^\s*@(?!fn\b|cls\b|type\b|idiom\b)[A-Za-z_]/m.test(masked) ||
+      /^\s*match\s+[^:\n]+:\s*$/m.test(masked) ||
+      /^\s*(?:from\s+\S+\s+import\s+|import\s+[A-Za-z_])/m.test(masked) ||
+      cleanedCode.includes('"""') ||
+      cleanedCode.includes("'''") ||
+      (cleanedCode.includes("class ") &&
+        (/^\s*(?:async\s+)?def\s+/m.test(masked) ||
+          /\$[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(masked) ||
+          /(?:^|\s)(?:ret|<-)\b/m.test(masked)))
+    );
+  }
 
-          if (hasPureAiceColonDecl) {
-            return false;
-          }
+  if (hasPureAiceColonDecl) {
+    return false;
+  }
 
-          // Expression-bodied AICE function `fn foo(a: int) -> int = a + b` without `{`
-          if (
-            /^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?fn\s+\^?[A-Za-z_][^\n{]*=/m.test(
-              masked,
-            ) &&
-            !masked.includes("{")
-          ) {
-            return false;
-          }
+  // Expression-bodied AICE function `fn foo(a: int) -> int = a + b` without `{`
+  if (
+    /^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?fn\s+\^?[A-Za-z_][^\n{]*=/m.test(
+      masked,
+    ) &&
+    !masked.includes("{")
+  ) {
+    return false;
+  }
 
-          // Any brace-delimited declaration or control flow block, or test runner call
-          if (
-            /^\s*(?:describe|test|it)\s*(?:\.[A-Za-z0-9_]+)*\s*\(/m.test(masked) ||
-            /(?:^|\s)(?:pub\s+|export\s+|async\s+|static\s+|suspend\s+|public\s+|private\s+|protected\s+|@fn\s+|\^fn\s+|@cls\s+|\^class\s+)*(?:fn|function|func|fun|class|struct|interface|enum|impl|trait|namespace|mod|if|for|while|switch|match|try)\b[^{;\n]*\{/m.test(
-              masked,
-            ) ||
-            /\)\s*(?:->\s*[^{;\n]+|:\s*[^{;\n]+)?\s*\{/m.test(masked) ||
-            /=>\s*\{/m.test(masked)
-          ) {
-            return true;
-          }
+  // Any brace-delimited declaration or control flow block, or test runner call
+  if (
+    /^\s*(?:describe|test|it)\s*(?:\.[A-Za-z0-9_]+)*\s*\(/m.test(masked) ||
+    /(?:^|\s)(?:pub\s+|export\s+|async\s+|static\s+|suspend\s+|public\s+|private\s+|protected\s+|@fn\s+|\^fn\s+|@cls\s+|\^class\s+)*(?:fn|function|func|fun|class|struct|interface|enum|impl|trait|namespace|mod|if|for|while|switch|match|try)\b[^{;\n]*\{/m.test(
+      masked,
+    ) ||
+    /\)\s*(?:->\s*[^{;\n]+|:\s*[^{;\n]+)?\s*\{/m.test(masked) ||
+    /=>\s*\{/m.test(masked)
+  ) {
+    return true;
+  }
 
-          // Native language constructs or hybrid shorthands without indentation-based AICE headers
-          if (
-            /^\s*(?:import\s+|export\s+|package\s+|using\s+|namespace\s+|#include\b|#pragma\b|from\s+|<\?php\b|#\[)/m.test(
-              cleanedCode,
-            ) ||
-            /^\s*(?:pub\s+(?:const|let|val|mut|var|type|interface|enum|ro)\b|priv\s+|ro\s+|public\s+|private\s+|protected\s+|readonly\s+|const\s+|let\s+|var\s+|interface\s+|type\s+[A-Za-z_$][^\n]*=)/m.test(
-              masked,
-            ) ||
-            /^\s*pub\s+(?!(?:fn|function|func|fun|class|struct|component|style|async|static)\b)[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\??\s*:|=)/m.test(
-              masked,
-            ) ||
-            (targetLang === "kotlin" &&
-              /^\s*(?:(?:public|private|protected|internal|override|open|abstract|final|suspend|inline|tailrec|operator|infix|external|data|sealed|enum|value|annotation)\s+)*(?:fun|val|var|class|interface|object)\b/m.test(
-                masked,
-              )) ||
-            (targetLang === "cpp" &&
-              /;\s*$/.test(masked) &&
-              !/^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?(?:fn|type|component|style)\b/m.test(
-                masked,
-              ))
-          ) {
-            return true;
-          }
+  // Native language constructs or hybrid shorthands without indentation-based AICE headers
+  if (
+    /^\s*(?:import\s+|export\s+|package\s+|using\s+|namespace\s+|#include\b|#pragma\b|from\s+|<\?php\b|#\[)/m.test(
+      cleanedCode,
+    ) ||
+    /^\s*(?:pub\s+(?:const|let|val|mut|var|type|interface|enum|ro)\b|priv\s+|ro\s+|public\s+|private\s+|protected\s+|readonly\s+|const\s+|let\s+|var\s+|interface\s+|type\s+[A-Za-z_$][^\n]*=)/m.test(
+      masked,
+    ) ||
+    /^\s*pub\s+(?!(?:fn|function|func|fun|class|struct|component|style|async|static)\b)[A-Za-z_$][A-Za-z0-9_$]*\s*(?:\??\s*:|=)/m.test(
+      masked,
+    ) ||
+    (targetLang === "kotlin" &&
+      /^\s*(?:(?:public|private|protected|internal|override|open|abstract|final|suspend|inline|tailrec|operator|infix|external|data|sealed|enum|value|annotation)\s+)*(?:fun|val|var|class|interface|object)\b/m.test(
+        masked,
+      )) ||
+    (targetLang === "cpp" &&
+      /;\s*$/.test(masked) &&
+      !/^\s*(?:pub\s+|@fn\s+|\^fn\s+)?(?:async\s+|static\s+)?(?:fn|type|component|style)\b/m.test(
+        masked,
+      ))
+  ) {
+    return true;
+  }
 
-          return false;
-        }
+  return false;
+}

@@ -628,7 +628,12 @@ function compileAiceOrHybridToNative(
     return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
   }
 
-  if (targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") {
+  if (
+    targetLang === "shell" ||
+    targetLang === "powershell" ||
+    targetLang === "batch" ||
+    targetLang === "aipl"
+  ) {
     const out = cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     const check = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
     if (!check.valid) {
@@ -835,13 +840,13 @@ function persistDeclaredIdioms(
   });
 }
 
-  /**
+/**
  * Creates a native source file from compact AICE syntax, `$idiom` macros, or hybrid AICE/native code.
  */
-  export async function createFile(
+export async function createFile(
   filePath: string,
   options: CreateFileOptions = {},
-  ): Promise<CreateFileResult> {
+): Promise<CreateFileResult> {
   if (!filePath?.trim()) {
     throw new Error("Must provide target filePath for aice create");
   }
@@ -1027,7 +1032,7 @@ function persistDeclaredIdioms(
         return rawPayload.includes(norm);
       }));
 
-  const normalizedAiceInput = rawPayload.replace(/:\s*:?\s*(?=[#$?_*\[])/g, ":");
+  const normalizedAiceInput = rawPayload.replace(/:\s*:?\s*(?=[#$?_*[])/g, ":");
   const nativeTokens = estimateTokens(nativeCode, "cl100k_base");
   const rawAiceTokens = estimateTokens(normalizedAiceInput, "cl100k_base");
   const charEquivSaved =
@@ -1176,11 +1181,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         }
       } else {
         const closeMatch = line.match(/^\s*(`{3,}|~{3,})\s*$/);
-        if (
-          closeMatch &&
-          closeMatch[1][0] === mdFenceChar &&
-          closeMatch[1].length >= mdFenceLen
-        ) {
+        if (closeMatch && closeMatch[1][0] === mdFenceChar && closeMatch[1].length >= mdFenceLen) {
           inMdFence = false;
           mdFenceChar = "";
           mdFenceLen = 0;

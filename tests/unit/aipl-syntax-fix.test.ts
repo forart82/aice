@@ -10,10 +10,15 @@ import {
   generateWorkspaceContext,
   scanDirectoryForTargets,
 } from "../../src/tools/context.js";
+import { createBatch, createFile } from "../../src/tools/create.js";
 import { generateOutline } from "../../src/tools/outline.js";
+import {
+  isHybridOrNativeSource,
+  preprocessHybridAndIdiomsLossless,
+} from "../../src/tools/preprocessor.js";
+import { spliceSource } from "../../src/tools/splice.js";
 import { validateNativeSyntax } from "../../src/tools/syntax-validator.js";
 import { AICE_VERSION } from "../../src/version.js";
-import { spliceSource } from "../../src/tools/splice.js";
 
 describe("AICE v0.9.22 AIPL Multi-Line & Tuple-Struct Parser, Recursive Directory Regex Search & Zero-Grep Hardening", () => {
   describe("Step 1: Multi-line AIPL fn signatures & single/multi-line tuple structs", () => {
@@ -105,93 +110,97 @@ pub fn getRadius(light: PointLight25D): float:
     });
 
     it("produces 0 false-positive syntax diagnostics on real light25d.aipl and d2_renderer.aipl files if present", () => {
-          const candidateFiles = [
-            "/home/forart/dev/aipl/std/gfx25d/light25d.aipl",
-            "/home/forart/dev/aipl_dog/src/world/d2_renderer.aipl",
-          ];
-          for (const filePath of candidateFiles) {
-            if (fs.existsSync(filePath)) {
-              const content = fs.readFileSync(filePath, "utf-8");
-              const res = validateNativeSyntax(content, "aipl", filePath);
-              expect(res.diagnostics).toEqual([]);
-              expect(res.valid).toBe(true);
-            }
-          }
-        });
+      const candidateFiles = [
+        "/home/forart/dev/aipl/std/gfx25d/light25d.aipl",
+        "/home/forart/dev/aipl_dog/src/world/d2_renderer.aipl",
+      ];
+      for (const filePath of candidateFiles) {
+        if (fs.existsSync(filePath)) {
+          const content = fs.readFileSync(filePath, "utf-8");
+          const res = validateNativeSyntax(content, "aipl", filePath);
+          expect(res.diagnostics).toEqual([]);
+          expect(res.valid).toBe(true);
+        }
+      }
+    });
 
-        it("handles default string arguments with parentheses, colons, and // URLs, single-line tuple field lookups, module/struct name collisions, and tuple-struct field splicing", () => {
-          const trickyAipl = [
-            "module D2Tilemap",
-            "",
-            "pub struct PointLight25D(wx: float, wy: float, wz: float) // 2.5D point light",
-            "",
-            "pub struct D2Tilemap(",
-            "  tileWidth: float, // width in pixels",
-            "  tileHeight: float",
-            ")",
-            "",
-            "pub fn logWithUrl(",
-            '  prefix: str = "(info):",',
-            '  endpoint: str = "http://localhost:8080/api"',
-            "): int:",
-            "  ret 0",
-            "",
-            "pub fn afterLog(): int:",
-            "  ret 1",
-            "",
-          ].join("\n");
-          const valRes = validateNativeSyntax(trickyAipl, "aipl", "d2_tilemap.aipl");
-          expect(valRes.diagnostics).toEqual([]);
-          expect(valRes.valid).toBe(true);
+    it("handles default string arguments with parentheses, colons, and // URLs, single-line tuple field lookups, module/struct name collisions, and tuple-struct field splicing", () => {
+      const trickyAipl = [
+        "module D2Tilemap",
+        "",
+        "pub struct PointLight25D(wx: float, wy: float, wz: float) // 2.5D point light",
+        "",
+        "pub struct D2Tilemap(",
+        "  tileWidth: float, // width in pixels",
+        "  tileHeight: float",
+        ")",
+        "",
+        "pub fn logWithUrl(",
+        '  prefix: str = "(info):",',
+        '  endpoint: str = "http://localhost:8080/api"',
+        "): int:",
+        "  ret 0",
+        "",
+        "pub fn afterLog(): int:",
+        "  ret 1",
+        "",
+      ].join("\n");
+      const valRes = validateNativeSyntax(trickyAipl, "aipl", "d2_tilemap.aipl");
+      expect(valRes.diagnostics).toEqual([]);
+      expect(valRes.valid).toBe(true);
 
-          const outline = generateOutline(trickyAipl, "d2_tilemap.aipl");
-          const modSym = outline.symbols.find((s) => s.kind === "module" && s.name === "D2Tilemap");
-          const structSym = outline.symbols.find((s) => s.kind === "class" && s.name === "D2Tilemap");
-          expect(modSym?.line).toBe(1);
-          expect(modSym?.endLine).toBe(1);
-          expect(structSym?.line).toBe(5);
-          expect(structSym?.endLine).toBe(8);
-          expect(structSym?.children?.[0]?.signature).toBe("val tileWidth: float");
+      const outline = generateOutline(trickyAipl, "d2_tilemap.aipl");
+      const modSym = outline.symbols.find((s) => s.kind === "module" && s.name === "D2Tilemap");
+      const structSym = outline.symbols.find((s) => s.kind === "class" && s.name === "D2Tilemap");
+      expect(modSym?.line).toBe(1);
+      expect(modSym?.endLine).toBe(1);
+      expect(structSym?.line).toBe(5);
+      expect(structSym?.endLine).toBe(8);
+      expect(structSym?.children?.[0]?.signature).toBe("val tileWidth: float");
 
-          const logFn = outline.symbols.find((s) => s.name === "logWithUrl");
-          expect(logFn).toBeDefined();
-          expect(logFn?.signature).toContain('prefix: str = "(info):"');
-          expect(logFn?.signature).toContain('endpoint: str = "http://localhost:8080/api"');
-          expect(logFn?.signature).toContain("): int");
-          const afterFn = outline.symbols.find((s) => s.name === "afterLog");
-          expect(afterFn).toBeDefined();
+      const logFn = outline.symbols.find((s) => s.name === "logWithUrl");
+      expect(logFn).toBeDefined();
+      expect(logFn?.signature).toContain('prefix: str = "(info):"');
+      expect(logFn?.signature).toContain('endpoint: str = "http://localhost:8080/api"');
+      expect(logFn?.signature).toContain("): int");
+      const afterFn = outline.symbols.find((s) => s.name === "afterLog");
+      expect(afterFn).toBeDefined();
 
-          // Single-line tuple struct field lookup
-          const wxField = extractSymbolFromAiceSource(trickyAipl, "PointLight25D.wx", "d2_tilemap.aipl");
-          expect(wxField).toContain("wx: float");
+      // Single-line tuple struct field lookup
+      const wxField = extractSymbolFromAiceSource(
+        trickyAipl,
+        "PointLight25D.wx",
+        "d2_tilemap.aipl",
+      );
+      expect(wxField).toContain("wx: float");
 
-          // Multi-line tuple struct field auto-append
-          const appendedMulti = spliceSource(
-            trickyAipl,
-            "D2Tilemap.gridTilesX",
-            "gridTilesX: int",
-            false,
-            "d2_tilemap.aipl",
-          );
-          expect(appendedMulti.success).toBe(true);
-          expect(appendedMulti.modifiedCode).toContain("tileHeight: float,\n  gridTilesX: int\n)");
-          expect(validateNativeSyntax(appendedMulti.modifiedCode, "aipl", "d2_tilemap.aipl").valid).toBe(
-            true,
-          );
+      // Multi-line tuple struct field auto-append
+      const appendedMulti = spliceSource(
+        trickyAipl,
+        "D2Tilemap.gridTilesX",
+        "gridTilesX: int",
+        false,
+        "d2_tilemap.aipl",
+      );
+      expect(appendedMulti.success).toBe(true);
+      expect(appendedMulti.modifiedCode).toContain("tileHeight: float,\n  gridTilesX: int\n)");
+      expect(
+        validateNativeSyntax(appendedMulti.modifiedCode, "aipl", "d2_tilemap.aipl").valid,
+      ).toBe(true);
 
-          // Single-line tuple struct field auto-append
-          const appendedSingle = spliceSource(
-            trickyAipl,
-            "PointLight25D.radius",
-            "radius: float",
-            false,
-            "d2_tilemap.aipl",
-          );
-          expect(appendedSingle.success).toBe(true);
-          expect(appendedSingle.modifiedCode).toContain(
-            "pub struct PointLight25D(wx: float, wy: float, wz: float, radius: float)",
-          );
-        });
+      // Single-line tuple struct field auto-append
+      const appendedSingle = spliceSource(
+        trickyAipl,
+        "PointLight25D.radius",
+        "radius: float",
+        false,
+        "d2_tilemap.aipl",
+      );
+      expect(appendedSingle.success).toBe(true);
+      expect(appendedSingle.modifiedCode).toContain(
+        "pub struct PointLight25D(wx: float, wy: float, wz: float, radius: float)",
+      );
+    });
   });
 
   describe("Step 2: Recursive Directory Regex Search in aice context <dir> -s '/pattern/'", () => {
@@ -223,7 +232,11 @@ pub fn getRadius(light: PointLight25D): float:
         fs.writeFileSync(rendererPath, rendererContent, "utf-8");
 
         const deepScript = path.join(deepDir, "helper.sh");
-        fs.writeFileSync(deepScript, "#!/usr/bin/env bash\nrenderD2Hud_hook() {\n  echo ok\n}\n", "utf-8");
+        fs.writeFileSync(
+          deepScript,
+          "#!/usr/bin/env bash\nrenderD2Hud_hook() {\n  echo ok\n}\n",
+          "utf-8",
+        );
 
         const targets = scanDirectoryForTargets(path.join(tmpDir, "src"), 5);
         expect(targets).toContain(rendererPath);
@@ -267,6 +280,63 @@ pub fn getRadius(light: PointLight25D): float:
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
         "works seamlessly across all 33 file extensions including `.aipl`",
       );
+    });
+  });
+
+  describe("Step 4: Native .aipl aice create & createBatch fast-path", () => {
+    it("creates .aipl files cleanly via createFile and createBatch without invoking the AICE EBNF parser", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-aipl-create-"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true, version: "0.9.22" }, null, 2),
+          "utf-8",
+        );
+
+        const aiplCode = [
+          "import world/d2_world",
+          "import entities/d2_hero",
+          "",
+          "pub struct FidelityCheck(passed: bool, label: str)",
+          "",
+          "fn main(): int:",
+          "  let world = initD2World()",
+          "  mut hero = spawnHero(world.campFireX, world.campFireY)",
+          '  assert(world.campFireX > 0.0 and hero.hp > 0.0, "World and hero initialized")',
+          '  println("D2 Resurrected fidelity verified")',
+          "  ret 0",
+        ].join("\n");
+
+        expect(isHybridOrNativeSource(aiplCode, "aipl")).toBe(true);
+        expect(preprocessHybridAndIdiomsLossless(aiplCode, "aipl")).toBe(aiplCode);
+
+        const targetFile = path.join(tmpDir, "src", "test_d2_resurrected_fidelity.aipl");
+        const res = await createFile(targetFile, {
+          code: aiplCode,
+          projectRoot: tmpDir,
+        });
+        expect(res.success).toBe(true);
+        expect(res.targetLanguage).toBe("aipl");
+        expect(fs.readFileSync(targetFile, "utf-8")).toBe(`${aiplCode}\n`);
+
+        const batchStream = ["=== src/batch_check.aipl ===", aiplCode].join("\n");
+        const batchRes = await createBatch(batchStream, { projectRoot: tmpDir });
+        expect(batchRes.success).toBe(true);
+        expect(batchRes.totalFiles).toBe(1);
+        expect(fs.readFileSync(path.join(tmpDir, "src", "batch_check.aipl"), "utf-8")).toBe(
+          `${aiplCode}\n`,
+        );
+
+        // Also verify pre-write syntax validation catches broken .aipl syntax
+        await expect(
+          createFile(path.join(tmpDir, "src", "broken.aipl"), {
+            code: "fn main(): int\n  ret 0\n",
+            projectRoot: tmpDir,
+          }),
+        ).rejects.toThrow(/Failed pre-write syntax validation/);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
   });
 });
