@@ -31,6 +31,22 @@ const __dirname = path.dirname(__filename);
 
 export type RealAgentMode = "without_aice" | "aice_no_idioms" | "aice_with_idioms";
 
+export interface BenchmarkLayerMetrics {
+  layerIndex: 1 | 2 | 3;
+  layerTitle: string;
+  turns: number;
+  toolCalls: number;
+  workingTokens: number;
+  outputTokens: number;
+  inputTokens: number;
+  cacheReadTokens: number;
+  billableTokens: number;
+  apiTotalTokens: number;
+  apiCostUsd: number;
+  durationSeconds: number;
+  verified: boolean;
+}
+
 export interface RealAgentRunMetrics {
   benchmarkId: string;
   mode: RealAgentMode;
@@ -54,6 +70,8 @@ export interface RealAgentRunMetrics {
   blindPrompt?: boolean;
   decoysInjected?: number;
   decoysIntact?: boolean;
+  layers?: BenchmarkLayerMetrics[];
+  regressionFree?: boolean;
 }
 
 export interface RealAgentScenarioComparison {

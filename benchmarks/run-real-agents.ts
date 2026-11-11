@@ -32,14 +32,55 @@ import {
 } from "./offline-suite.js";
 import {
   computeRealApiCostUsd,
+  type BenchmarkLayerMetrics,
   type RealAgentMode,
   type RealAgentRunMetrics,
 } from "./real-agent-suite.js";
+import { BenchmarkDashboard } from "./ui/progress-bar.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const execFileAsync = promisify(execFile);
 
+export const OAUTH_OR_RATE_LIMIT_RE =
+  /oauth|token|401|429|not logged into|ETIMEDOUT|ECONNRESET/i;
+
+export async function execAgyWithRetry(
+  agyArgs: string[],
+  maxRetries = 3,
+): Promise<{ stdout: string; stderr: string }> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await execFileAsync("agy", agyArgs, { maxBuffer: 25 * 1024 * 1024 });
+    } catch (err: any) {
+      lastError = err;
+      const stdout = String(err?.stdout || "");
+      const stderr = String(err?.stderr || "");
+      const errMsg = String(err?.message || "");
+      const fullDiagnostic = `${errMsg}\n${stderr}\n${stdout}`;
+
+      if (stderr.trim()) {
+        console.error(`[agy stderr (attempt ${attempt + 1}/${maxRetries + 1})]:\n${stderr.trim()}`);
+      } else if (errMsg.trim()) {
+        console.error(`[agy error (attempt ${attempt + 1}/${maxRetries + 1})]:\n${errMsg.trim()}`);
+      }
+
+      const isRetryable = OAUTH_OR_RATE_LIMIT_RE.test(fullDiagnostic);
+      if (isRetryable && attempt < maxRetries) {
+        const delayMs = 3000 * Math.pow(2, attempt);
+        console.warn(
+          `[agy retry] Auth/rate-limit/network error detected. Retrying in ${delayMs / 1000}s (attempt ${attempt + 1}/${maxRetries})...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+
+      throw err;
+    }
+  }
+  throw lastError;
+}
 export const DEFAULT_ADVERSARIAL_SEED = 20261108;
 
 export function generateFreshBenchmarkSeed(): number {
@@ -184,6 +225,196 @@ export const ALL_REAL_AGENT_BENCHMARKS: readonly RealWorldBenchmarkSpec[] = [
   ...OFFLINE_BENCHMARKS,
   HOSTILE_LONE_NEEDLE_SPEC,
 ];
+
+export interface ScenarioLayerDefinition {
+  layerIndex: 2 | 3;
+  title: string;
+  taskPrompt: string;
+  targetFiles: string[];
+  expectedKeywords: string[];
+}
+
+export const SCENARIO_LAYER_DEFINITIONS: Record<
+  string,
+  { layer2: ScenarioLayerDefinition; layer3: ScenarioLayerDefinition }
+> = {
+  "RW-01": {
+    layer2: {
+      layerIndex: 2,
+      title: "Speed Tiers & Food Multipliers",
+      taskPrompt: "Layer 2: Add speed tiers (adjusting snake interval dynamically per score band with keyword `speedTier` or `interval`) and spawn bonus food multiplier items with active CSS visual glow in styles.css (or theme.css) and level configuration tiers in game_config.json (or levels.json).",
+      targetFiles: ["engine.ts", "styles.css", "game_config.json", "game.ts", "theme.css", "levels.json"],
+      expectedKeywords: ["speedTier|interval", "multiplier", "glow|powerUpGlow"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "LocalStorage High-Score & Pause Overlay",
+      taskPrompt: "Layer 3: Add localStorage high-score persistence and keyboard pause/resume overlay modal with backdrop styling in styles.css (or theme.css) and index.html.",
+      targetFiles: ["engine.ts", "index.html", "styles.css", "game.ts", "theme.css"],
+      expectedKeywords: ["highScore|highscore", "saveHighScore|storage|localStorage", "pauseModal|pause|overlay"],
+    },
+  },
+  "RW-02": {
+    layer2: {
+      layerIndex: 2,
+      title: "Rate-Limiting Token Bucket",
+      taskPrompt: "Layer 2: Add a token bucket rate limiter to throttle worker job dispatch, controlled by rate and burst settings in pipeline.yaml (or service.yaml).",
+      targetFiles: ["worker.py", "pipeline.yaml", "service.yaml"],
+      expectedKeywords: ["TokenBucket|token_bucket|rate_limit", "refill_rate|rate", "capacity|burst"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Prometheus Metrics & Graceful SIGTERM",
+      taskPrompt: "Layer 3: Add a Prometheus /metrics endpoint exposing worker telemetry and install a graceful SIGTERM signal handler to drain in-flight batches in worker.py and schema.json (or config.json).",
+      targetFiles: ["worker.py", "schema.json", "config.json"],
+      expectedKeywords: ["metrics|prometheus", "sigterm|SIGTERM", "drain|graceful"],
+    },
+  },
+  "RW-03": {
+    layer2: {
+      layerIndex: 2,
+      title: "Promotional Coupon Validation",
+      taskPrompt: "Layer 2: Add tiered promotional coupon code validation in CheckoutController.php, a coupon input row in cart.twig, and client-side code verification in cart.js.",
+      targetFiles: ["CheckoutController.php", "cart.twig", "cart.js"],
+      expectedKeywords: ["applyCouponCode|coupon", "couponRow|coupon|discount", "discountTier|tier|discount"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Multi-Currency VAT Auto-Calculation",
+      taskPrompt: "Layer 3: Add multi-currency VAT auto-calculation in CheckoutController.php with active currency selector in cart.twig and exchange rates in pricing_tiers.json (or shipping.json).",
+      targetFiles: ["CheckoutController.php", "cart.twig", "pricing_tiers.json", "shipping.json"],
+      expectedKeywords: ["calculateVat|vat|tax", "currencySelector|currency", "vatRate|rate|tax"],
+    },
+  },
+  "RW-04": {
+    layer2: {
+      layerIndex: 2,
+      title: "Live Sparkline Charts & Date Filter",
+      taskPrompt: "Layer 2: Add live sparkline trend charts in DashboardPanel.tsx (or Dashboard.tsx) with historical series in metrics-store.ts (or metricsStore.ts) and date-range filter picker in dashboard.css (or theme.css).",
+      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "dashboard.css", "Dashboard.tsx", "metricsStore.ts", "theme.css"],
+      expectedKeywords: ["SparklineChart|sparkline", "dateRangePicker|dateRange|filter", "sparklineData|series|data"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "CSV Export Stream & Theme Persistence",
+      taskPrompt: "Layer 3: Add a streaming CSV export helper for cohort retention data in DashboardPanel.tsx (or Dashboard.tsx) and persist dark/light theme preferences in metrics-store.ts (or metricsStore.ts) with display in index.html.",
+      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "index.html", "Dashboard.tsx", "metricsStore.ts"],
+      expectedKeywords: ["exportCsvStream|csv|export", "themePersistence|theme|colorScheme", "colorScheme|theme|storage"],
+    },
+  },
+  "RW-05": {
+    layer2: {
+      layerIndex: 2,
+      title: "Trace Span Propagation & LZ4 Buffer",
+      taskPrompt: "Layer 2: Add distributed trace span header propagation in gateway.go (or mesh_proxy.go) and ring buffer compression staging in wal_engine.rs (or trace_ring.rs).",
+      targetFiles: ["gateway.go", "wal_engine.rs", "mesh_proxy.go", "trace_ring.rs"],
+      expectedKeywords: ["PropagateTraceSpan|trace|span", "compress_lz4_buffer|lz4|ring", "trace_id|traceId|trace"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Monotonic Audit & Heartbeat Probe",
+      taskPrompt: "Layer 3: Add monotonic sequence validation in gateway.go (or mesh_proxy.go) and cluster heartbeat liveness probe in cluster.yaml.",
+      targetFiles: ["gateway.go", "cluster.yaml", "mesh_proxy.go"],
+      expectedKeywords: ["AuditSequenceMonotonic|monotonic|seq", "heartbeatProbeInterval|heartbeat|probe", "seq_num|sequence|seq"],
+    },
+  },
+  "RW-06": {
+    layer2: {
+      layerIndex: 2,
+      title: "Restitution Velocity Damping",
+      taskPrompt: "Layer 2: Add restitution velocity damping and angular spin impulse to collision resolver in viewport_sim.cpp (or framebuffer.cpp), exposed to inspector.ts.",
+      targetFiles: ["viewport_sim.cpp", "inspector.ts", "framebuffer.cpp"],
+      expectedKeywords: ["applyRestitutionDamping|restitution|damping", "angularSpin|spin|angular", "dampingFactor|damping|impulse"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Particle Collision Burst Emitter",
+      taskPrompt: "Layer 3: Add particle burst emitter on high-energy impacts in viewport_sim.cpp (or framebuffer.cpp) with canvas HUD overlay in overlay.html (or index.html) and overlay.css (or theme.css).",
+      targetFiles: ["viewport_sim.cpp", "overlay.html", "overlay.css", "framebuffer.cpp", "index.html", "theme.css"],
+      expectedKeywords: ["emitParticleBurst|particle|burst", "particleCanvasOverlay|canvas|overlay", "burstCount|count|burst"],
+    },
+  },
+  "RW-07": {
+    layer2: {
+      layerIndex: 2,
+      title: "Tiered Risk Weighting & Audit Events",
+      taskPrompt: "Layer 2: Add tiered velocity risk score weighting in FraudScorer.kt (or AlertDispatcher.kt) and emit compliance audit events in SettlementEngine.cs (or AuditLedger.cs).",
+      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs", "AlertDispatcher.kt", "AuditLedger.cs"],
+      expectedKeywords: ["calculateRiskWeight|risk|weight", "EmitAuditEvent|audit|event", "riskScore|score|risk"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Replay Fraud Window & KMS Key Rotation",
+      taskPrompt: "Layer 3: Add replay attack deduplication window in FraudScorer.kt (or AlertDispatcher.kt) and automated KMS envelope key rotation check in SettlementEngine.cs (or AuditLedger.cs) with thresholds in risk_rules.json.",
+      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs", "risk_rules.json", "AlertDispatcher.kt", "AuditLedger.cs"],
+      expectedKeywords: ["detectReplayWindow|replay|dedup", "RotateKmsEnvelopeKey|kms|rotation", "replayWindowSec|window|replay"],
+    },
+  },
+  "RW-08": {
+    layer2: {
+      layerIndex: 2,
+      title: "Invoice PDF Webhook & Rules Table",
+      taskPrompt: "Layer 2: Add an asynchronous invoice PDF generation webhook in billing_service.py (or billing.py) and a discount rule management table in UsageChart.tsx (or InvoiceStudio.tsx).",
+      targetFiles: ["billing_service.py", "UsageChart.tsx", "billing.py", "InvoiceStudio.tsx"],
+      expectedKeywords: ["export_pdf_webhook|pdf|webhook", "DiscountRulesTable|discount|rules", "invoice_pdf|invoice|pdf"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Dunning Escalation & Quota Gauges",
+      taskPrompt: "Layer 3: Add dunning email retry escalation scheduler in worker_cron.yaml (or cron.yaml) and real-time usage quota warning gauges in billing_service.py (or billing.py) and plans.json.",
+      targetFiles: ["billing_service.py", "worker_cron.yaml", "plans.json", "billing.py", "cron.yaml"],
+      expectedKeywords: ["escalate_dunning_schedule|dunning|escalat", "tenantQuotaGauge|quota|gauge", "dunning_retry|retry|dunning"],
+    },
+  },
+  "RW-09": {
+    layer2: {
+      layerIndex: 2,
+      title: "Iceberg Order Slicing & Feed Normalizer",
+      taskPrompt: "Layer 2: Add iceberg order hidden-quantity slicing in matcher.rs (or matching_engine.rs) and normalize multi-venue tick collar bands in margin_calc.cpp.",
+      targetFiles: ["matcher.rs", "margin_calc.cpp", "matching_engine.rs"],
+      expectedKeywords: ["slice_iceberg_order|iceberg|slice", "normalizeVenueCollar|venue|collar", "display_qty|qty|quantity"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Margin Guard RPC & Latency Histogram",
+      taskPrompt: "Layer 3: Add a circuit breaker RPC fallback in matcher.rs (or matching_engine.rs) and an intraday execution latency histogram in collar_bands.json (or collars.json).",
+      targetFiles: ["matcher.rs", "collar_bands.json", "matching_engine.rs", "collars.json"],
+      expectedKeywords: ["circuitBreakerRpc|circuit_breaker|fallback", "latencyHistogram|histogram|latency", "trip_threshold|threshold|latency"],
+    },
+  },
+  "RW-10": {
+    layer2: {
+      layerIndex: 2,
+      title: "Multi-Tenant Auth & SLO Burn Alerts",
+      taskPrompt: "Layer 2: Add multi-tenant JWT authorization middleware in telemetry_router.ts (or auth_gate.ts) and multi-window SLO burn rate alerting in AlertDispatcher.kt and mesh_topology.yaml (or slo_rules.yaml).",
+      targetFiles: ["telemetry_router.ts", "AlertDispatcher.kt", "mesh_topology.yaml", "auth_gate.ts", "slo_rules.yaml"],
+      expectedKeywords: ["multiTenantAuthGuard|authGuard|jwt", "evaluateSloBurnRate|slo|burn", "tenant_id|tenantId|tenant"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "Distributed Audit Log & Auto-Remediation",
+      taskPrompt: "Layer 3: Add append-only distributed audit event bus in trace_ring.rs (or audit_bus.rs) and automated flapping alert remediation triggers in anomaly_worker.py (or incident_engine.py) with display in status_digest.twig (or status.twig).",
+      targetFiles: ["trace_ring.rs", "anomaly_worker.py", "status_digest.twig", "audit_bus.rs", "incident_engine.py", "status.twig"],
+      expectedKeywords: ["append_distributed_audit|audit|event", "trigger_auto_remediation|remediat|flapping", "auditLog|audit_log|audit"],
+    },
+  },
+  "RW-11": {
+    layer2: {
+      layerIndex: 2,
+      title: "Monotonic Batch Sequence Validation",
+      taskPrompt: "Layer 2: Add a monotonic batch sequence epoch validator method in ledger_reconciler.ts (ensuring sequence numbers are strictly ascending without gaps).",
+      targetFiles: ["ledger_reconciler.ts"],
+      expectedKeywords: ["validateBatchSequenceMonotonic|monotonic|seq", "seqEpoch|sequence|epoch"],
+    },
+    layer3: {
+      layerIndex: 3,
+      title: "HMAC Payload Checksum Guard",
+      taskPrompt: "Layer 3: Add an HMAC-SHA256 payload integrity verification method in ledger_reconciler.ts to validate batch digests prior to reconciliation. IMPORTANT: Do NOT touch or modify verifyDecoySentinel_* or DECOY_SENTINEL_*.",
+      targetFiles: ["ledger_reconciler.ts"],
+      expectedKeywords: ["verifyPayloadHmacChecksum|hmac|checksum", "hmacDigest|digest|hmac"],
+    },
+  },
+};
 
 export function computeFileDecoySpec(
   seed: number,
@@ -594,6 +825,64 @@ function buildPrompt(
   ].join("\n\n");
 }
 
+export function buildLayerPrompt(
+  spec: RealWorldBenchmarkSpec,
+  mode: RealAgentMode,
+  dir: string,
+  layerIndex: 2 | 3,
+): string {
+  const layerDefs = SCENARIO_LAYER_DEFINITIONS[spec.id];
+  const layerDef = layerIndex === 2 ? layerDefs?.layer2 : layerDefs?.layer3;
+  const title = layerDef?.title || `Layer ${layerIndex}`;
+  const promptText = layerDef?.taskPrompt || `Implement Layer ${layerIndex} features`;
+
+  if (mode === "without_aice") {
+    return [
+      `Workspace: ${dir}`,
+      `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
+      `Environment: WITHOUT AICE (Native IDE Tools).`,
+      `Allowed tools: grep_search, find_by_name, view_file, replace_file_content, multi_replace_file_content. Do NOT use run_command or aice.`,
+      `Requirements:`,
+      `1. ${promptText}`,
+      `2. Non-Regression: Do NOT break or revert previous layer functionality or compiler checks.`,
+      `3. Decoys: Do NOT modify or delete any verifyDecoySentinel_* function or DECOY_SENTINEL_* comment.`,
+      `Reply DONE when all changes are saved to disk.`,
+    ].join("\n\n");
+  }
+
+  if (mode === "aice_no_idioms") {
+    return [
+      `Workspace: ${dir}`,
+      `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (Pure AICE CLI with \`--no-idioms\`).`,
+      `Allowed tools: run_command running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, --help, or $idiom macros.`,
+      `AICE CLI Reference:`,
+      `- \`cd ${dir} && aice context . -s "*" --no-idioms\`: Inspect current workspace AST symbols in 1 turn.`,
+      `- \`cd ${dir} && aice splice --no-idioms --batch '[...]'\`: Apply new layer AST additions in 1 turn.`,
+      `Requirements:`,
+      `1. ${promptText}`,
+      `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
+      `3. Decoys: Omit verifyDecoySentinel_* so it remains untouched.`,
+      `Reply DONE when all changes are saved to disk.`,
+    ].join("\n\n");
+  }
+
+  return [
+    `Workspace: ${dir}`,
+    `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
+    `Environment: AICE On-the-Fly WITH Project Idioms (\`--idioms\`).`,
+    `Allowed tools: run_command running \`aice\` CLI commands. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, or --help.`,
+    `AICE CLI Reference:`,
+    `- \`cd ${dir} && aice context . -s "*" --idioms\`: Inspect current symbols with active project idioms in 1 turn.`,
+    `- \`cd ${dir} && aice splice --idioms --batch '[...]'\`: Apply new layer features using active project idioms.`,
+    `Requirements:`,
+    `1. ${promptText}`,
+    `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
+    `3. Decoys: Omit verifyDecoySentinel_* so it remains untouched.`,
+    `Reply DONE when all changes are saved to disk.`,
+  ].join("\n\n");
+}
+
 function checkBalancedDelimiters(code: string): string | null {
   const stack: string[] = [];
   let inStr: string | null = null;
@@ -696,7 +985,7 @@ export function verifyCompilerAndSyntaxOnFile(
         compilerOptions: {
           target: ts.ScriptTarget.ESNext,
           module: ts.ModuleKind.ESNext,
-          jsx: languageId === "tsx" ? ts.JsxEmit.ReactJSX : ts.JsxEmit.None,
+          ...(languageId === "tsx" ? { jsx: ts.JsxEmit.ReactJSX } : {}),
         },
       });
       if (transpiled.diagnostics && transpiled.diagnostics.length > 0) {
@@ -792,6 +1081,7 @@ export function verifyWorkspaceOnDisk(
   spec: RealWorldBenchmarkSpec,
   dir: string,
   seed: number = DEFAULT_ADVERSARIAL_SEED,
+  layerIndex: 1 | 2 | 3 = 1,
 ): {
   verified: boolean;
   zeroAice: boolean;
@@ -808,6 +1098,10 @@ export function verifyWorkspaceOnDisk(
 
   for (const f of spec.files) {
     const filePath = path.join(dir, f.fileName);
+    if (!fs.existsSync(filePath)) {
+      details.push(`${f.fileName}: missing file on disk`);
+      continue;
+    }
     const content = fs.readFileSync(filePath, "utf-8");
     const seededMut = computeSeededFileMutation(seed, spec.id, f, isNewFeature);
     const targetSym = seededMut.targetSymbol;
@@ -900,37 +1194,100 @@ export function verifyWorkspaceOnDisk(
         details.push(`${f.fileName}: missing new CSS rule ${targetSym}-active`);
       }
       const c = (content.match(/12px/g) || []).length;
-      if (c < minSymCount)
-        details.push(`${f.fileName}: missing 12px border-radius (${c}/${minSymCount})`);
+      if (c < minSymCount) details.push(`${f.fileName}: missing 12px border-radius (${c}/${minSymCount})`);
     } else if (f.languageId === "html") {
-      const cleanId = targetSym.replace(/^#/, "");
-      if (isNewFeature && !content.includes(`${cleanId}_extra`)) {
-        details.push(`${f.fileName}: missing new HTML section ${cleanId}_extra`);
+      const cleanSec = targetSym.replace(/^[.#]/, "");
+      if (
+        isNewFeature &&
+        !content.includes(`id="${cleanSec}_extra"`) &&
+        !content.includes(`id="${targetSym}_extra"`)
+      ) {
+        details.push(`${f.fileName}: missing new section ${cleanSec}_extra`);
       }
       const c = (content.match(/metric-row-v2/g) || []).length;
-      if (c < minSymCount)
-        details.push(`${f.fileName}: missing metric-row-v2 (${c}/${minSymCount})`);
+      if (c < minSymCount) details.push(`${f.fileName}: missing metric-row-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "twig") {
-      if (isNewFeature && !content.includes(`${targetSym}_summary`)) {
-        details.push(`${f.fileName}: missing new Twig block ${targetSym}_summary`);
+      if (isNewFeature && !content.includes(`block(name="${targetSym}_summary")`)) {
+        details.push(`${f.fileName}: missing new block ${targetSym}_summary`);
       }
       const c = (content.match(/summary-row-v2/g) || []).length;
-      if (c < minSymCount)
-        details.push(`${f.fileName}: missing summary-row-v2 (${c}/${minSymCount})`);
+      if (c < minSymCount) details.push(`${f.fileName}: missing summary-row-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "json") {
       const cleanKey = targetSym.replace(/^config\./, "");
-      if (isNewFeature && !content.includes(`${cleanKey}_realtime`)) {
+      if (
+        isNewFeature &&
+        !content.includes(`"${cleanKey}_extra"`) &&
+        !content.includes(`"${cleanKey}_realtime"`)
+      ) {
         details.push(`${f.fileName}: missing new JSON key ${cleanKey}_realtime`);
       }
-      const c = (content.match(/"retries":\s*5/g) || []).length;
+      const c = (content.match(/retries":\s*5/g) || []).length;
       if (c < minSymCount) details.push(`${f.fileName}: missing retries: 5 (${c}/${minSymCount})`);
     } else if (f.languageId === "yaml") {
       const cleanKey = targetSym.replace(/^config\./, "");
-      if (isNewFeature && !content.includes(`${cleanKey}_realtime`)) {
+      if (
+        isNewFeature &&
+        !content.includes(`${cleanKey}_realtime`) &&
+        !content.includes(`${cleanKey}_extra`)
+      ) {
         details.push(`${f.fileName}: missing new YAML key ${cleanKey}_realtime`);
       }
       const c = (content.match(/replicas:\s*4/g) || []).length;
       if (c < minSymCount) details.push(`${f.fileName}: missing replicas: 4 (${c}/${minSymCount})`);
+    }
+  }
+
+  if (layerIndex >= 2) {
+    const l2Def = SCENARIO_LAYER_DEFINITIONS[spec.id]?.layer2;
+    if (l2Def) {
+      const allFiles = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+      for (const kw of l2Def.expectedKeywords) {
+        let found = false;
+        const kwParts = kw.split("|");
+        const targets = Array.from(new Set([...l2Def.targetFiles, ...allFiles]));
+        for (const tf of targets) {
+          const p = path.join(dir, tf);
+          if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            const content = fs.readFileSync(p, "utf-8");
+            if (kwParts.some((part) => new RegExp(part.trim(), "i").test(content))) {
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          details.push(
+            `Layer 2: expected feature keyword '${kw}' not found in workspace files (${l2Def.targetFiles.join(", ")})`,
+          );
+        }
+      }
+    }
+  }
+
+  if (layerIndex >= 3) {
+    const l3Def = SCENARIO_LAYER_DEFINITIONS[spec.id]?.layer3;
+    if (l3Def) {
+      const allFiles = fs.existsSync(dir) ? fs.readdirSync(dir) : [];
+      for (const kw of l3Def.expectedKeywords) {
+        let found = false;
+        const kwParts = kw.split("|");
+        const targets = Array.from(new Set([...l3Def.targetFiles, ...allFiles]));
+        for (const tf of targets) {
+          const p = path.join(dir, tf);
+          if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+            const content = fs.readFileSync(p, "utf-8");
+            if (kwParts.some((part) => new RegExp(part.trim(), "i").test(content))) {
+              found = true;
+              break;
+            }
+          }
+        }
+        if (!found) {
+          details.push(
+            `Layer 3: expected feature keyword '${kw}' not found in workspace files (${l3Def.targetFiles.join(", ")})`,
+          );
+        }
+      }
     }
   }
 
@@ -952,6 +1309,7 @@ export async function runAgentBenchmarkMode(
   spec: RealWorldBenchmarkSpec,
   mode: RealAgentMode,
   seed: number = DEFAULT_ADVERSARIAL_SEED,
+  dashboard?: BenchmarkDashboard,
 ): Promise<RealAgentRunMetrics> {
   const dir = setupWorkspace(spec, mode, seed);
   const coldStartRepo =
@@ -971,97 +1329,393 @@ export async function runAgentBenchmarkMode(
       (!f.obsoleteSymbol || !taskSpecText.includes(f.obsoleteSymbol))
     );
   });
-  const prompt = buildPrompt(spec, mode, dir, seed);
-  const t0 = Date.now();
-  const { stdout } = await execFileAsync(
-    "agy",
-    [
-      "-p",
-      prompt,
-      "--add-dir",
-      dir,
-      "--model",
-      "gemini-3.8-flash-low",
-      "--dangerously-skip-permissions",
-      "--output-format",
-      "json",
-    ],
-    { maxBuffer: 25 * 1024 * 1024 },
-  );
-  const durationSeconds = Number(((Date.now() - t0) / 1000).toFixed(2));
-  const parsed = JSON.parse(stdout);
-  const convId: string = parsed.conversation_id;
-  const transcriptPath = path.join(
-    os.homedir(),
-    ".gemini/antigravity-cli/brain",
-    convId,
-    ".system_generated/logs/transcript.jsonl",
-  );
-  const lines = fs
-    .readFileSync(transcriptPath, "utf-8")
-    .trim()
-    .split("\n")
-    .map((l) => JSON.parse(l));
-  let llmTurns = 0;
-  let toolCalls = 0;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cacheReadTokens = 0;
-  let toolCallTokens = 0;
-  let toolResultTokens = 0;
-  for (const entry of lines) {
-    if (entry.type === "PLANNER_RESPONSE") {
-      llmTurns++;
-      inputTokens += entry.input_tokens || 0;
-      outputTokens += entry.output_tokens || 0;
-      cacheReadTokens += entry.cache_read_tokens || 0;
-      if (Array.isArray(entry.tool_calls)) {
-        toolCalls += entry.tool_calls.length;
-        for (const tc of entry.tool_calls) {
-          toolCallTokens += estimateTokens(JSON.stringify(tc.args || {}));
+
+  const workerKey = `${spec.id}:${mode}`;
+  const layerDefs = SCENARIO_LAYER_DEFINITIONS[spec.id];
+  const layerTitles = [
+    "Layer 1: Baseline",
+    layerDefs?.layer2?.title || "Layer 2: Feature #1",
+    layerDefs?.layer3?.title || "Layer 3: Feature #2",
+  ];
+
+  dashboard?.registerWorker(workerKey, {
+    id: spec.id,
+    mode,
+    title: spec.title,
+    layer: 1,
+    layerTitle: layerTitles[0],
+    status: "RUNNING",
+  });
+
+  const layerMetrics: BenchmarkLayerMetrics[] = [];
+  let convId: string = "";
+  let totalLlmTurns = 0;
+  let totalToolCalls = 0;
+  let totalWorkingTokens = 0;
+  let totalToolCallTokens = 0;
+  let totalToolResultTokens = 0;
+  let totalOutputTokens = 0;
+  let totalInputTokens = 0;
+  let totalCacheReadTokens = 0;
+  let totalDurationSeconds = 0;
+  let lastCheck = {
+    verified: false,
+    zeroAice: true,
+    decoysInjected: 0,
+    decoysIntact: true,
+    compilerVerified: true,
+    details: [] as string[],
+  };
+
+  for (let lIdx = 1; lIdx <= 3; lIdx++) {
+    if (lIdx > 1) {
+      // Pacing cooldown delay (1500ms) between scenario layers to prevent bursting the keyring and Google APIs
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    const currentLayer = lIdx as 1 | 2 | 3;
+    dashboard?.updateWorker(workerKey, {
+      layer: currentLayer,
+      layerTitle: layerTitles[lIdx - 1],
+      status: "RUNNING",
+    });
+
+    const prompt =
+      currentLayer === 1
+        ? buildPrompt(spec, mode, dir, seed)
+        : buildLayerPrompt(spec, mode, dir, currentLayer);
+
+    const t0 = Date.now();
+    const agyArgs = convId
+      ? [
+          "--conversation",
+          convId,
+          "-p",
+          prompt,
+          "--add-dir",
+          dir,
+          "--model",
+          "gemini-3.8-flash-low",
+          "--dangerously-skip-permissions",
+          "--output-format",
+          "json",
+        ]
+      : [
+          "-p",
+          prompt,
+          "--add-dir",
+          dir,
+          "--model",
+          "gemini-3.8-flash-low",
+          "--dangerously-skip-permissions",
+          "--output-format",
+          "json",
+        ];
+
+    let stdout = "";
+    try {
+      const res = await execAgyWithRetry(agyArgs);
+      stdout = res.stdout;
+    } catch (e: any) {
+      if (e?.stderr) {
+        console.error(`[agy final failure stderr]:\n${e.stderr}`);
+      }
+      stdout = e.stdout || "{}";
+    }
+
+    const durationSeconds = Number(((Date.now() - t0) / 1000).toFixed(2));
+    totalDurationSeconds += durationSeconds;
+
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(stdout);
+    } catch {}
+    if (parsed.conversation_id) {
+      convId = parsed.conversation_id;
+    }
+
+    let lTurns = 0;
+    let lToolCalls = 0;
+    let lInputTokens = 0;
+    let lOutputTokens = 0;
+    let lCacheReadTokens = 0;
+    let lToolCallTokens = 0;
+    let lToolResultTokens = 0;
+
+    if (convId) {
+      const transcriptPath = path.join(
+        os.homedir(),
+        ".gemini/antigravity-cli/brain",
+        convId,
+        ".system_generated/logs/transcript.jsonl",
+      );
+      if (fs.existsSync(transcriptPath)) {
+        const lines = fs
+          .readFileSync(transcriptPath, "utf-8")
+          .trim()
+          .split("\n")
+          .map((l) => {
+            try {
+              return JSON.parse(l);
+            } catch {
+              return null;
+            }
+          })
+          .filter(Boolean);
+
+        for (const entry of lines) {
+          if (entry.type === "PLANNER_RESPONSE") {
+            lTurns++;
+            lInputTokens += entry.input_tokens || 0;
+            lOutputTokens += entry.output_tokens || 0;
+            lCacheReadTokens += entry.cache_read_tokens || 0;
+            if (Array.isArray(entry.tool_calls)) {
+              lToolCalls += entry.tool_calls.length;
+              for (const tc of entry.tool_calls) {
+                lToolCallTokens += estimateTokens(JSON.stringify(tc.args || {}));
+              }
+            }
+          } else if (entry.type === "GENERIC" && typeof entry.content === "string") {
+            lToolResultTokens += estimateTokens(entry.content);
+          }
         }
       }
-    } else if (entry.type === "GENERIC" && typeof entry.content === "string") {
-      toolResultTokens += estimateTokens(entry.content);
+    }
+
+    const layerTurnDelta = Math.max(1, lTurns - totalLlmTurns);
+    const layerToolDelta = Math.max(0, lToolCalls - totalToolCalls);
+    const layerInputDelta = Math.max(0, lInputTokens - totalInputTokens);
+    const layerOutputDelta = Math.max(0, lOutputTokens - totalOutputTokens);
+    const layerCacheDelta = Math.max(0, lCacheReadTokens - totalCacheReadTokens);
+    const layerCallTokDelta = Math.max(0, lToolCallTokens - totalToolCallTokens);
+    const layerResTokDelta = Math.max(0, lToolResultTokens - totalToolResultTokens);
+    const layerWorkingDelta = layerCallTokDelta + layerResTokDelta + layerOutputDelta;
+
+    totalLlmTurns = Math.max(totalLlmTurns + 1, lTurns);
+    totalToolCalls = Math.max(totalToolCalls, lToolCalls);
+    totalInputTokens = Math.max(totalInputTokens, lInputTokens);
+    totalOutputTokens = Math.max(totalOutputTokens, lOutputTokens);
+    totalCacheReadTokens = Math.max(totalCacheReadTokens, lCacheReadTokens);
+    totalToolCallTokens = Math.max(totalToolCallTokens, lToolCallTokens);
+    totalToolResultTokens = Math.max(totalToolResultTokens, lToolResultTokens);
+    totalWorkingTokens = totalToolCallTokens + totalToolResultTokens + totalOutputTokens;
+
+    dashboard?.updateWorker(workerKey, {
+      status: "VERIFYING",
+      turns: totalLlmTurns,
+      toolCalls: totalToolCalls,
+    });
+
+    lastCheck = verifyWorkspaceOnDisk(spec, dir, seed, currentLayer);
+    if (
+      mode === "aice_with_idioms" &&
+      spec.id !== "RW-11" &&
+      !fs.existsSync(path.join(dir, "aice.config.json"))
+    ) {
+      lastCheck.verified = false;
+      lastCheck.details.push("aice_with_idioms did not discover/save aice.config.json during live run");
+    }
+
+    layerMetrics.push({
+      layerIndex: currentLayer,
+      layerTitle: layerTitles[lIdx - 1],
+      turns: layerTurnDelta,
+      toolCalls: layerToolDelta,
+      workingTokens: layerWorkingDelta,
+      outputTokens: layerOutputDelta,
+      inputTokens: layerInputDelta,
+      cacheReadTokens: layerCacheDelta,
+      billableTokens: layerInputDelta + layerOutputDelta,
+      apiTotalTokens: layerInputDelta + layerCacheDelta + layerOutputDelta,
+      apiCostUsd: computeRealApiCostUsd(layerInputDelta, layerCacheDelta, layerOutputDelta),
+      durationSeconds,
+      verified: lastCheck.verified,
+    });
+
+    if (!lastCheck.verified) {
+      dashboard?.updateWorker(workerKey, {
+        status: "FAILED",
+        error: lastCheck.details.join("; "),
+      });
+      break;
+    } else {
+      dashboard?.stepCompleted();
     }
   }
-  const check = verifyWorkspaceOnDisk(spec, dir, seed);
-  if (
-    mode === "aice_with_idioms" &&
-    spec.id !== "RW-11" &&
-    !fs.existsSync(path.join(dir, "aice.config.json"))
-  ) {
-    check.verified = false;
-    check.details.push("aice_with_idioms did not discover/save aice.config.json during live run");
-  }
-  if (!check.verified) {
-    console.error(`[WARN] ${spec.id} ${mode} (${convId}) verification issues:`, check.details);
-  }
+
+  dashboard?.updateWorker(workerKey, {
+    status: lastCheck.verified ? "DONE" : "FAILED",
+    turns: totalLlmTurns,
+    toolCalls: totalToolCalls,
+  });
+
   fs.rmSync(dir, { recursive: true, force: true });
   return {
     benchmarkId: spec.id,
     mode,
     conversationId: convId,
-    llmTurns,
-    toolCalls,
-    workingTokens: toolCallTokens + toolResultTokens + outputTokens,
-    toolCallTokens,
-    toolResultTokens,
-    outputTokens,
-    inputTokens,
-    cacheReadTokens,
-    billableTokens: inputTokens + outputTokens,
-    apiTotalTokens: inputTokens + cacheReadTokens + outputTokens,
-    apiCostUsd: computeRealApiCostUsd(inputTokens, cacheReadTokens, outputTokens),
-    durationSeconds,
-    verifiedOnDisk: check.verified,
-    zeroAiceFilesLeftOnDisk: check.zeroAice,
+    llmTurns: totalLlmTurns,
+    toolCalls: totalToolCalls,
+    workingTokens: totalWorkingTokens,
+    toolCallTokens: totalToolCallTokens,
+    toolResultTokens: totalToolResultTokens,
+    outputTokens: totalOutputTokens,
+    inputTokens: totalInputTokens,
+    cacheReadTokens: totalCacheReadTokens,
+    billableTokens: totalInputTokens + totalOutputTokens,
+    apiTotalTokens: totalInputTokens + totalCacheReadTokens + totalOutputTokens,
+    apiCostUsd: computeRealApiCostUsd(totalInputTokens, totalCacheReadTokens, totalOutputTokens),
+    durationSeconds: totalDurationSeconds,
+    verifiedOnDisk: lastCheck.verified,
+    zeroAiceFilesLeftOnDisk: lastCheck.zeroAice,
     seed,
     coldStartRepo,
     blindPrompt,
-    decoysInjected: check.decoysInjected,
-    decoysIntact: check.decoysIntact,
+    decoysInjected: lastCheck.decoysInjected,
+    decoysIntact: lastCheck.decoysIntact,
+    layers: layerMetrics,
+    regressionFree: lastCheck.verified,
   };
+}
+
+async function runWithConcurrencyPool<T, R>(
+  items: T[],
+  concurrency: number,
+  workerFn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  let index = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (index < items.length) {
+      const currentIdx = index++;
+      results[currentIdx] = await workerFn(items[currentIdx]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export function syncBenchmarkDocsMarkdown(
+  existing: Record<string, Record<RealAgentMode, RealAgentRunMetrics>>,
+): void {
+  try {
+    const docsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
+    const lines: string[] = [];
+
+    lines.push("# AICE 2.0 — Real AI Agent Benchmark Suite Report (3-Layer Progressive Lifecycle)");
+    lines.push("");
+    lines.push(
+      "> **Ground-Truth Adversarial Real AI Agent Proof**: Every metric in this report comes from **real autonomous AI agent (`agy -p`) executions** running against **cold-start, procedurally seeded, decoy-minefielded workspaces** on disk under **blind issue prompts** across **3 sequential progressive layers** (Layer 1 Baseline, Layer 2 Feature Addition, Layer 3 Cross-Cutting Persistence/Telemetry) and measured directly from each agent's ground-truth `.system_generated/logs/transcript.jsonl` telemetry log.",
+    );
+    lines.push("");
+    lines.push("> For the deterministic offline benchmark suite, see [`BENCHMARKS_OFFLINE.md`](BENCHMARKS_OFFLINE.md).");
+    lines.push("");
+    lines.push("## 1. 3-Layer Progressive Lifecycle Breakdown (Live Telemetry)");
+    lines.push("");
+    lines.push(
+      "| Scenario | Mode | L1 Baseline | L2 Feature Add | L3 Cross-Cutting | Total Turns | Working Tokens | LLM Output Tokens | Real Cost (USD) | Status |",
+    );
+    lines.push(
+      "| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+    );
+
+    const scenarioIds = Object.keys(existing);
+    for (const id of scenarioIds) {
+      const modes = existing[id];
+      for (const mode of ["without_aice", "aice_no_idioms", "aice_with_idioms"] as RealAgentMode[]) {
+        const run = modes?.[mode];
+        if (!run) continue;
+        const l1 = run.layers?.find((l) => l.layerIndex === 1);
+        const l2 = run.layers?.find((l) => l.layerIndex === 2);
+        const l3 = run.layers?.find((l) => l.layerIndex === 3);
+
+        const fmtL = (l?: BenchmarkLayerMetrics) =>
+          l ? `${l.turns}t / $${l.apiCostUsd.toFixed(4)} / ${l.verified ? "✅" : "❌"}` : "—";
+
+        const modeBadge =
+          mode === "without_aice"
+            ? "`without_aice`"
+            : mode === "aice_no_idioms"
+              ? "**`aice_no_idioms`**"
+              : "**`aice_with_idioms`**";
+
+        const statusBadge =
+          run.verifiedOnDisk && run.regressionFree
+            ? "✅ 100%"
+            : run.verifiedOnDisk
+              ? "✅ Verified"
+              : "⚠️ Partial";
+
+        lines.push(
+          `| **${id}** | ${modeBadge} | ${fmtL(l1)} | ${fmtL(l2)} | ${fmtL(l3)} | **${run.llmTurns}** | **${run.workingTokens.toLocaleString("en-US")}** | **${run.outputTokens.toLocaleString("en-US")}** | **$${run.apiCostUsd.toFixed(4)}** | ${statusBadge} |`,
+        );
+      }
+    }
+
+    lines.push("");
+    lines.push("## 2. Overall Aggregate Comparison Across Completed Scenarios");
+    lines.push("");
+    lines.push(
+      "| Mode | Scenarios Tracked | Total Turns | Total Working Tokens | Total Output Tokens | Total Real API Cost | Compiler & Decoys Verified |",
+    );
+    lines.push("| :--- | :---: | :---: | :---: | :---: | :---: | :---: |");
+
+    for (const mode of ["without_aice", "aice_no_idioms", "aice_with_idioms"] as RealAgentMode[]) {
+      let count = 0;
+      let turns = 0;
+      let workTok = 0;
+      let outTok = 0;
+      let cost = 0;
+      let ok = 0;
+
+      for (const id of scenarioIds) {
+        const run = existing[id]?.[mode];
+        if (run) {
+          count++;
+          turns += run.llmTurns;
+          workTok += run.workingTokens;
+          outTok += run.outputTokens;
+          cost += run.apiCostUsd;
+          if (run.verifiedOnDisk) ok++;
+        }
+      }
+
+      const label =
+        mode === "without_aice"
+          ? "Without AICE (Native Tools)"
+          : mode === "aice_no_idioms"
+            ? "AICE Without Idioms (Pure AICE)"
+            : "AICE With Idioms (Dynamic Mining)";
+
+      lines.push(
+        `| **${label}** | ${count} | ${turns.toLocaleString("en-US")} | ${workTok.toLocaleString("en-US")} | ${outTok.toLocaleString("en-US")} | $${cost.toFixed(4)} | ${ok}/${count} |`,
+      );
+    }
+
+    lines.push("");
+    lines.push("## 3. Ground-Truth Conversation ID Audit Trail (Real Agent Sessions)");
+    lines.push("");
+    lines.push(
+      "| Scenario | Mode | Conversation ID (`brain/<id>`) | Seed | Turns | Working Tokens | Output Tokens | API Cost (USD) | Duration | Status |",
+    );
+    lines.push(
+      "| :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+    );
+    for (const id of scenarioIds) {
+      for (const mode of ["without_aice", "aice_no_idioms", "aice_with_idioms"] as RealAgentMode[]) {
+        const run = existing[id]?.[mode];
+        if (!run) continue;
+        lines.push(
+          `| **${id}** | \`${mode}\` | \`${run.conversationId}\` | \`${run.seed ?? 20261108}\` | ${run.llmTurns} | ${run.workingTokens.toLocaleString("en-US")} | ${run.outputTokens.toLocaleString("en-US")} | $${run.apiCostUsd.toFixed(4)} | ${run.durationSeconds.toFixed(1)}s | ${run.verifiedOnDisk ? "✅" : "❌"} |`,
+        );
+      }
+    }
+    lines.push("");
+
+    fs.mkdirSync(path.dirname(docsPath), { recursive: true });
+    fs.writeFileSync(docsPath, lines.join("\n"), "utf-8");
+  } catch (err) {
+    console.error("Failed to sync benchmark docs markdown:", err);
+  }
 }
 
 async function main() {
@@ -1070,12 +1724,20 @@ async function main() {
     ? Number(process.env.AICE_BENCH_SEED)
     : generateFreshBenchmarkSeed();
   let noSave = false;
+  let concurrency = 1;
+  if (process.env.AICE_BENCH_CONCURRENCY) {
+    concurrency = Math.max(1, Number(process.env.AICE_BENCH_CONCURRENCY));
+  }
   const targetIds: string[] = [];
   for (let i = 0; i < rawArgs.length; i++) {
     if (rawArgs[i] === "--seed" && rawArgs[i + 1]) {
       seed = Number(rawArgs[++i]);
     } else if (rawArgs[i].startsWith("--seed=")) {
       seed = Number(rawArgs[i].slice("--seed=".length));
+    } else if (rawArgs[i] === "--concurrency" && rawArgs[i + 1]) {
+      concurrency = Math.max(1, Number(rawArgs[++i]));
+    } else if (rawArgs[i].startsWith("--concurrency=")) {
+      concurrency = Math.max(1, Number(rawArgs[i].slice("--concurrency=".length)));
     } else if (rawArgs[i] === "--only" && rawArgs[i + 1]) {
       targetIds.push(rawArgs[++i]);
     } else if (rawArgs[i].startsWith("--only=")) {
@@ -1092,54 +1754,58 @@ async function main() {
     existing = JSON.parse(fs.readFileSync(outPath, "utf-8"));
   }
 
+  interface BenchmarkTask {
+    spec: RealWorldBenchmarkSpec;
+    mode: RealAgentMode;
+  }
+  const tasks: BenchmarkTask[] = [];
+
   if (targetIds.some((t) => t.includes(":"))) {
-    await Promise.all(
-      targetIds.map(async (t) => {
-        const [id, mode] = t.split(":") as [string, RealAgentMode];
-        const spec = ALL_REAL_AGENT_BENCHMARKS.find((s) => s.id === id);
-        if (!spec) throw new Error(`Unknown spec ${id}`);
-        console.log(`Running ${id}:${mode} (seed=${seed})...`);
-        const res = await runAgentBenchmarkMode(spec, mode, seed);
-        existing[id] = existing[id] || ({} as Record<RealAgentMode, RealAgentRunMetrics>);
-        existing[id][mode] = res;
-        console.log(
-          `${id}:${mode} DONE -> turns=${res.llmTurns} tools=${res.toolCalls} outTok=${res.outputTokens} workTok=${res.workingTokens} cost=$${res.apiCostUsd.toFixed(4)} decoys=${res.decoysIntact} ok=${res.verifiedOnDisk}`,
-        );
-      }),
-    );
-    if (!noSave) {
-      fs.writeFileSync(outPath, `${JSON.stringify(existing, null, 2)}\n`);
+    for (const t of targetIds) {
+      const [id, mode] = t.split(":") as [string, RealAgentMode];
+      const spec = ALL_REAL_AGENT_BENCHMARKS.find((s) => s.id === id);
+      if (!spec) throw new Error(`Unknown spec ${id}`);
+      tasks.push({ spec, mode });
     }
-    return;
+  } else {
+    const specs = ALL_REAL_AGENT_BENCHMARKS.filter((s) =>
+      targetIds.length === 0 ? true : targetIds.includes(s.id),
+    );
+    for (const spec of specs) {
+      tasks.push({ spec, mode: "without_aice" });
+      tasks.push({ spec, mode: "aice_no_idioms" });
+      tasks.push({ spec, mode: "aice_with_idioms" });
+    }
   }
 
-  const specs = ALL_REAL_AGENT_BENCHMARKS.filter((s) =>
-    targetIds.length === 0 ? true : targetIds.includes(s.id),
-  );
-  for (const spec of specs) {
-    console.log(`Running ${spec.id} (${spec.title}) [seed=${seed}]...`);
-    const [w, n, i] = await Promise.all([
-      runAgentBenchmarkMode(spec, "without_aice", seed),
-      runAgentBenchmarkMode(spec, "aice_no_idioms", seed),
-      runAgentBenchmarkMode(spec, "aice_with_idioms", seed),
-    ]);
-    existing[spec.id] = { without_aice: w, aice_no_idioms: n, aice_with_idioms: i };
-    if (!noSave) {
-      fs.writeFileSync(outPath, `${JSON.stringify(existing, null, 2)}\n`);
-    }
-    console.log(`${spec.id} DONE:`);
+  const dashboard = new BenchmarkDashboard(tasks.length * 3, concurrency);
+  dashboard.start();
+
+  try {
+    await runWithConcurrencyPool(tasks, concurrency, async ({ spec, mode }) => {
+      const res = await runAgentBenchmarkMode(spec, mode, seed, dashboard);
+      existing[spec.id] = existing[spec.id] || ({} as Record<RealAgentMode, RealAgentRunMetrics>);
+      existing[spec.id][mode] = res;
+      if (!noSave) {
+        fs.writeFileSync(outPath, `${JSON.stringify(existing, null, 2)}\n`);
+        syncBenchmarkDocsMarkdown(existing);
+      }
+      return res;
+    });
+  } finally {
+    dashboard.stop();
+  }
+
+  console.log(`\n\x1b[1;32m✔ Completed ${tasks.length} scenarios across 3 progressive layers!\x1b[0m`);
+  for (const { spec, mode } of tasks) {
+    const res = existing[spec.id]?.[mode];
+    if (!res) continue;
+    const lInfo = res.layers?.map((l) => `L${l.layerIndex}: ${l.turns}t/${l.durationSeconds}s`).join(", ") || "";
     console.log(
-      `  without_aice:     turns=${w.llmTurns} tools=${w.toolCalls} outTok=${w.outputTokens} workTok=${w.workingTokens} cost=$${w.apiCostUsd.toFixed(4)} decoys=${w.decoysIntact} ok=${w.verifiedOnDisk}`,
-    );
-    console.log(
-      `  aice_no_idioms:   turns=${n.llmTurns} tools=${n.toolCalls} outTok=${n.outputTokens} workTok=${n.workingTokens} cost=$${n.apiCostUsd.toFixed(4)} decoys=${n.decoysIntact} ok=${n.verifiedOnDisk}`,
-    );
-    console.log(
-      `  aice_with_idioms: turns=${i.llmTurns} tools=${i.toolCalls} outTok=${i.outputTokens} workTok=${i.workingTokens} cost=$${i.apiCostUsd.toFixed(4)} decoys=${i.decoysIntact} ok=${i.verifiedOnDisk}`,
+      `  [${spec.id}:${mode.padEnd(16)}] totalTurns=${res.llmTurns} cost=$${res.apiCostUsd.toFixed(4)} regFree=${res.regressionFree} (${lInfo})`,
     );
   }
 }
-
 if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
   main().catch((err) => {
     console.error(err);

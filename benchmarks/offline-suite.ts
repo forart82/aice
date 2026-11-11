@@ -444,6 +444,15 @@ export interface RealWorldFileSpec {
   obsoleteSymbol?: string;
 }
 
+export interface BenchmarkLayerSpec {
+  layerIndex: 2 | 3;
+  title: string;
+  taskPrompt: string;
+  targetFiles: string[];
+  expectedTokens?: string[];
+  verifyLayer?: (workspaceDir: string) => { passed: boolean; details?: string };
+}
+
 export interface RealWorldBenchmarkSpec {
   id: string;
   title: string;
@@ -451,6 +460,8 @@ export interface RealWorldBenchmarkSpec {
   scenario: EngineeringScenarioKind;
   appSurface: ApplicationSurfaceKind;
   files: RealWorldFileSpec[];
+  layer2?: BenchmarkLayerSpec;
+  layer3?: BenchmarkLayerSpec;
 }
 
 export interface DomainFunctionSeed {
