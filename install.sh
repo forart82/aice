@@ -300,17 +300,37 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
   fi
 fi
 
-# ── Substep 2.3: Build & Global Symlink Registration (Always Executed) ────────
-log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
-run_cmd npm install --no-fund --no-audit
+# ── Substep 2.3: Build & Global Standalone Binary Registration ────────
+if [[ -f "${SCRIPT_DIR}/package.json" ]]; then
+  log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
+  run_cmd npm install --no-fund --no-audit
 
-log_info "Setting executable permissions on bin/aice.mjs..."
-run_cmd chmod +x "$(pwd)/bin/aice.mjs"
+  log_info "Building standalone AICE executable bundle (npm run build)..."
+  run_cmd npm run build
 
-run_cmd mkdir -p "$LOCAL_BIN"
-run_cmd ln -sf "$(pwd)/bin/aice.mjs" "${LOCAL_BIN}/aice"
-log_ok "Linked global binary: ${LOCAL_BIN}/aice -> $(pwd)/bin/aice.mjs (v${LOCAL_VER})"
-
+  run_cmd mkdir -p "$LOCAL_BIN"
+  run_cmd rm -f "${LOCAL_BIN}/aice"
+  run_cmd cp -f "${SCRIPT_DIR}/dist/aice.mjs" "${LOCAL_BIN}/aice"
+  run_cmd chmod +x "${LOCAL_BIN}/aice"
+  log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
+else
+  # Running in standalone mode (e.g. curl https://.../install.sh | bash)
+  run_cmd mkdir -p "$LOCAL_BIN"
+  run_cmd rm -f "${LOCAL_BIN}/aice"
+  STANDALONE_URL="https://raw.githubusercontent.com/forart82/aice/main/dist/aice.mjs"
+  log_info "Downloading standalone AICE binary from ${STANDALONE_URL}..."
+  if command -v curl >/dev/null 2>&1; then
+    run_cmd curl -fsSL "$STANDALONE_URL" -o "${LOCAL_BIN}/aice"
+  elif command -v wget >/dev/null 2>&1; then
+    run_cmd wget -qO "${LOCAL_BIN}/aice" "$STANDALONE_URL"
+  else
+    log_err "Neither curl nor wget found. Please install curl or wget."
+    exit 1
+  fi
+  run_cmd chmod +x "${LOCAL_BIN}/aice"
+  LOCAL_VER="$("${LOCAL_BIN}/aice" --version 2>/dev/null || echo "latest")"
+  log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
+fi
 # Ensure $HOME/.local/bin is in PATH
 if [[ ":${PATH}:" != *":${LOCAL_BIN}:"* ]]; then
   export PATH="${LOCAL_BIN}:${PATH}"
@@ -367,13 +387,13 @@ aice_cheatsheet() {
   local C_BOLD="\033[1m"
   local C_GRAY="\033[0;90m"
   printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.25 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.26 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file/--stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}src tests / 85%%${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}f1:s1 f2:s2 / L${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}<<< === >>>/:sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.25${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}<<< === >>>/:sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.26${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}33 exts + .aipl${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
@@ -449,30 +469,15 @@ else
     log_info "Configuring global CLI coding agents (aice agents setup)..."
     "$AICE_BIN" agents setup
 
-    log_info "Regenerating MCP tool schemas and refreshing AICE-enabled workspaces in ~/dev/*..."
-    npx tsx -e '
-      import * as fs from "node:fs";
-      import * as os from "node:os";
-      import * as path from "node:path";
-      import { AICE_MCP_TOOLS, AICE_VERSION } from "./src/mcp/server.ts";
-      import { loadProjectConfig, isProjectAiceEnabled, syncProjectWorkspaceRules } from "./src/config/project-config.ts";
+    log_info "Regenerating MCP tool schemas (aice mcp --generate-schemas)..."
+    "$AICE_BIN" mcp --generate-schemas
 
+    log_info "Refreshing AICE-enabled workspaces in ~/dev/*..."
+    node -e '
+      const fs = require("node:fs");
+      const os = require("node:os");
+      const path = require("node:path");
       const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
-      const mcpSchemaDir = path.join(homeDir, ".gemini", "antigravity-cli", "mcp", "aice");
-      fs.mkdirSync(mcpSchemaDir, { recursive: true });
-      for (const tool of AICE_MCP_TOOLS) {
-        fs.writeFileSync(
-          path.join(mcpSchemaDir, `${tool.name}.json`),
-          JSON.stringify({ ...tool, version: AICE_VERSION }, null, 2) + "\n",
-          "utf-8",
-        );
-      }
-      fs.writeFileSync(
-        path.join(mcpSchemaDir, "tools.json"),
-        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) + "\n",
-        "utf-8",
-      );
-
       const devDir = process.env.AICE_PROJECTS_DIR
         ? path.resolve(process.env.AICE_PROJECTS_DIR)
         : path.join(homeDir, "dev");
@@ -483,16 +488,19 @@ else
           const projPath = path.join(devDir, entry.name);
           const cfgPath = path.join(projPath, "aice.config.json");
           if (fs.existsSync(cfgPath)) {
-            const cfg = loadProjectConfig(projPath);
-            if (isProjectAiceEnabled(cfg)) {
-              syncProjectWorkspaceRules(projPath, true);
-              refreshedCount++;
-            }
+            try {
+              const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
+              if (cfg.enabled !== false) {
+                const { spawnSync } = require("node:child_process");
+                spawnSync(process.argv[1], ["enable"], { cwd: projPath, stdio: "ignore" });
+                refreshedCount++;
+              }
+            } catch {}
           }
         }
       }
-      console.log(`[✔] Regenerated ${AICE_MCP_TOOLS.length} MCP schema(s) (v${AICE_VERSION}) in ${mcpSchemaDir} and refreshed ${refreshedCount} workspace(s) in ${devDir}`);
-    '
+      console.log(`[✔] Refreshed AICE agent rules in ${refreshedCount} project(s) across ${devDir}`);
+    ' "$AICE_BIN"
   fi
   log_info "Running post-install smoke checks..."
   VER="$("$AICE_BIN" --version)"

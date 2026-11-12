@@ -749,7 +749,32 @@ program
 program
   .command("mcp")
   .description("Launch the AICE Model Context Protocol (MCP) server over stdio")
-  .action(async () => {
+  .option("--generate-schemas [dir]", "Generate Antigravity MCP tool JSON schema files")
+  .action(async (options: { generateSchemas?: string | boolean }) => {
+    if (options.generateSchemas) {
+      const { AICE_MCP_TOOLS, AICE_VERSION } = await import("../src/mcp/server.js");
+      const os = await import("node:os");
+      const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
+      const targetDir =
+        typeof options.generateSchemas === "string"
+          ? path.resolve(options.generateSchemas)
+          : path.join(homeDir, ".gemini", "antigravity-cli", "mcp", "aice");
+      fs.mkdirSync(targetDir, { recursive: true });
+      for (const tool of AICE_MCP_TOOLS) {
+        fs.writeFileSync(
+          path.join(targetDir, `${tool.name}.json`),
+          JSON.stringify({ ...tool, version: AICE_VERSION }, null, 2) + "\n",
+          "utf-8",
+        );
+      }
+      fs.writeFileSync(
+        path.join(targetDir, "tools.json"),
+        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) + "\n",
+        "utf-8",
+      );
+      console.log(`✔ Generated ${AICE_MCP_TOOLS.length} MCP tool schema files in ${targetDir}`);
+      return;
+    }
     const { AiceMcpServer } = await import("../src/mcp/server.js");
     new AiceMcpServer(process.stdin, process.stdout);
   });

@@ -1,6 +1,6 @@
 {
   "name": "aice-compiler",
-  "version": "0.9.25",
+  "version": "0.9.26",
   "description": "AI-Compact Expression (AICE 2.0) — High-Efficiency Agent-Native Language, Decompiler, and Tokenomics Engine",
   "license": "Apache-2.0",
   "author": {
@@ -54,7 +54,8 @@
     "benchmark": "tsx benchmarks/run.ts",
     "benchmark:offline": "tsx benchmarks/run-offline.ts",
     "benchmark:agents": "tsx benchmarks/run-real-agents.ts",
-    "bump": "tsx tools/bump-version.ts"
+    "bump": "tsx tools/bump-version.ts",
+    "build": "tsx tools/build.ts"
   },
   "dependencies": {
     "commander": "^15.0.0",
@@ -70,6 +71,7 @@
     "@types/node": "^22.14.0",
     "@types/parse5": "^7.0.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.3"
+    "vitest": "^5.0.3",
+    "esbuild": "^0.28.2"
   }
 }

@@ -1,5 +1,6 @@
 node_modules/
-dist/
+dist/*
+!dist/aice.mjs
 coverage/
 .aice-cache/
 *.log

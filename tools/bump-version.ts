@@ -89,4 +89,8 @@ if (fs.existsSync(installShPath)) {
 const { syncProjectWorkspaceRules } = await import("../src/config/project-config.js");
 syncProjectWorkspaceRules(rootDir, true);
 
+// 7. Rebuild standalone bundle so dist/aice.mjs matches nextVersion
+const { spawnSync } = await import("node:child_process");
+spawnSync(process.execPath, [path.join(rootDir, "tools", "build.ts")], { stdio: "inherit" });
+
 console.log(`✔ Successfully bumped AICE to v${nextVersion}!`);
