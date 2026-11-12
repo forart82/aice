@@ -221,23 +221,24 @@ aice gain
 
 ## 🤖 Automatic CLI Coding Agent Integration (`aice agents`)
 
-`aice agents` automatically registers the global `aice mcp` stdio server and injects the canonical versioned `<!-- AICE:START v0.9.24 --> ... <!-- AICE:END -->` system directive across major Linux CLI coding agents so they automatically use AICE across all 33 supported file extensions (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.hpp`, `.cc`, `.cxx`, `.h`, `.cs`, `.html`, `.css`, `.json`, `.yaml`, `.yml`, `.twig`, `.php`, `.kt`, `.kts`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`):
+`aice agents` automatically registers the global `aice mcp` stdio server across major Linux CLI coding agents. By default, prompt rules are **project-scoped** (only active in workspaces containing `aice.config.json` via local `AGENTS.md` and `.agents/rules/aice.md`), preventing token pollution in non-AICE projects. Optional global prompt rules can be injected with `--global-rules`.
 
-| CLI Coding Agent | MCP Server Config | System Prompt / Rules |
-| :--- | :--- | :--- |
-| **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `~/.claude/CLAUDE.md` |
-| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `~/.gemini/GEMINI.md` & `~/.gemini/config/rules/aice.md` |
-| **OpenAI Codex CLI (`codex`)** | `~/.codex/config.toml` (`[mcp_servers.aice]`) | `~/.codex/AGENTS.md` |
-| **OpenCode (`opencode`)** | `~/.config/opencode/opencode.json` (`mcp.aice` & `mcpServers.aice`) | `~/.config/opencode/AGENTS.md` |
-| **Aider (`aider`)** | `~/.aider.conf.yml` (`read:` conventions list) | `~/.aider/CONVENTIONS.md` |
-| **Goose CLI (`goose`)** | `~/.config/goose/config.yaml` (`extensions.aice`) | MCP tool descriptions |
-| **Cursor Agent (`cursor`)** | `~/.cursor/mcp.json` (`mcpServers.aice`) | MCP tool descriptions |
+| CLI Coding Agent | MCP Server Config | Project Rules (Default) | Global Rules (`--global-rules`) |
+| :--- | :--- | :--- | :--- |
+| **Claude Code (`claude`)** | `~/.claude.json` & `~/.claude/settings.json` (`mcpServers.aice`) | `AGENTS.md` / `CLAUDE.md` | `~/.claude/CLAUDE.md` |
+| **Antigravity / Gemini CLI (`agy` / `gemini`)** | `~/.gemini/config/mcp_config.json` & `~/.gemini/settings.json` (`mcpServers.aice`) | `.agents/rules/aice.md` & `AGENTS.md` | `~/.gemini/GEMINI.md` & `~/.gemini/config/rules/aice.md` |
+| **OpenAI Codex CLI (`codex`)** | `~/.codex/config.toml` (`[mcp_servers.aice]`) | `AGENTS.md` | `~/.codex/AGENTS.md` |
+| **OpenCode (`opencode`)** | `~/.config/opencode/opencode.json` (`mcp.aice` & `mcpServers.aice`) | `AGENTS.md` | `~/.config/opencode/AGENTS.md` |
+| **Aider (`aider`)** | `~/.aider.conf.yml` (`read:` conventions list) | `CONVENTIONS.md` | `~/.aider/CONVENTIONS.md` |
+| **Goose CLI (`goose`)** | `~/.config/goose/config.yaml` (`extensions.aice`) | MCP tool descriptions | MCP tool descriptions |
+| **Cursor Agent (`cursor`)** | `~/.cursor/mcp.json` (`mcpServers.aice`) | MCP tool descriptions | MCP tool descriptions |
 
 ```bash
-aice agents setup               # Configure installed CLI coding agents idempotently
-aice agents setup --all         # Pre-configure all 8 agent targets
-aice agents status [--json]     # Inspect binary detection, MCP config, and rule version sync status (v0.9.24)
-aice agents remove              # Cleanly strip AICE entries without losing user settings
+aice agents setup                 # Configure MCP for installed CLI agents (project-scoped rules)
+aice agents setup --all           # Pre-configure all agent targets
+aice agents setup --global-rules  # Also inject global prompt rules into home configs
+aice agents status [--json]       # Inspect binary detection, MCP config, and rule sync status
+aice agents remove                # Cleanly strip AICE entries without losing user settings
 ```
 
 ---

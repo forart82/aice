@@ -398,7 +398,7 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "aice-v0920-step5-"));
       try {
         // 1. Setup agents and verify rulesVersion === 0.9.24 and allRulesUpToDate === true
-        const setupRes = setupAgents({ homeDir: tmpHome, all: true });
+        const setupRes = setupAgents({ homeDir: tmpHome, all: true, globalRules: true });
         expect(setupRes.version).toBe("0.9.24");
         expect(setupRes.allRulesUpToDate).toBe(true);
         // 2. Simulate an older v0.9.10 rule block in ~/.claude/CLAUDE.md and verify mismatch detection

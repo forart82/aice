@@ -617,11 +617,18 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(AICE_SYSTEM_DIRECTIVE).toContain("Subagent Propagation");
       expect(ALWAYS_ON_AICE_RULE_FILE).toContain("trigger: always_on");
 
-      const setupRes = setupAgents({ homeDir: fakeHome, agent: "agy" });
+      const globalRulePath = path.join(fakeHome, ".gemini", "config", "rules", "aice.md");
+
+      // By default: MCP is configured globally, but prompt rules are project-scoped (not injected globally)
+      const defaultSetup = setupAgents({ homeDir: fakeHome, agent: "agy" });
+      expect(defaultSetup.agents[0].mcpConfigured).toBe(true);
+      expect(defaultSetup.agents[0].promptConfigured).toBe(false);
+      expect(fs.existsSync(globalRulePath)).toBe(false);
+
+      // With globalRules: true, writes global rules file (~/.gemini/config/rules/aice.md)
+      const setupRes = setupAgents({ homeDir: fakeHome, agent: "agy", globalRules: true });
       expect(setupRes.agents[0].mcpConfigured).toBe(true);
       expect(setupRes.agents[0].promptConfigured).toBe(true);
-
-      const globalRulePath = path.join(fakeHome, ".gemini", "config", "rules", "aice.md");
       expect(fs.existsSync(globalRulePath)).toBe(true);
       const globalRuleContent = fs.readFileSync(globalRulePath, "utf-8");
       expect(globalRuleContent).toContain("trigger: always_on");

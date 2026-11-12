@@ -124,9 +124,9 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       "utf-8",
     );
 
-    // Run setupAgents (--all) twice to verify idempotency
-    const firstSetup = setupAgents({ homeDir: tmpHome, all: true });
-    const secondSetup = setupAgents({ homeDir: tmpHome, all: true });
+    // Run setupAgents (--all, globalRules: true) twice to verify idempotency
+    const firstSetup = setupAgents({ homeDir: tmpHome, all: true, globalRules: true });
+    const secondSetup = setupAgents({ homeDir: tmpHome, all: true, globalRules: true });
 
     expect(secondSetup.agents).toHaveLength(7);
     for (const agent of secondSetup.agents) {
@@ -271,7 +271,7 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
   it("isolates per-agent failures so a malformed or read-only config in one agent does not abort setup of remaining agents", () => {
     fs.writeFileSync(path.join(tmpHome, ".claude.json"), "{ invalid json ", "utf-8");
 
-    const status = setupAgents({ homeDir: tmpHome, all: true });
+    const status = setupAgents({ homeDir: tmpHome, all: true, globalRules: true });
     expect(status.agents).toHaveLength(7);
 
     const claudeEntry = status.agents.find((a) => a.id === "claude");
@@ -295,7 +295,7 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       "utf-8",
     );
 
-    const status = setupAgents({ homeDir: tmpHome, agent: "agy" });
+    const status = setupAgents({ homeDir: tmpHome, agent: "agy", globalRules: true });
     expect(status.agents).toHaveLength(1);
     const agyEntry = status.agents[0];
     expect(agyEntry?.error).toContain("settings.json");

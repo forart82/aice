@@ -3115,11 +3115,15 @@ program
   )
   .option("--all", "Configure all supported CLI agent paths even if binary is not yet installed")
   .option("-a, --agent <name>", "Target a specific CLI agent (e.g. claude, gemini, codex)")
+  .option(
+    "--global-rules",
+    "Also inject global system prompt rules into ~/.gemini, ~/.claude, etc. (default: false, rules are scoped to projects with aice.config.json)",
+  )
   .option("--json", "Output agent integration status in JSON format")
   .action(
     async (
       actionArg: string | undefined,
-      options: { all?: boolean; agent?: string; json?: boolean },
+      options: { all?: boolean; agent?: string; json?: boolean; globalRules?: boolean },
     ) => {
       try {
         const { formatAgentsStatusTable, getAgentsStatus, removeAgents, setupAgents } =
@@ -3129,6 +3133,7 @@ program
           const statuses = setupAgents({
             all: Boolean(options.all),
             agent: options.agent,
+            globalRules: Boolean(options.globalRules),
           });
           if (options.json) {
             console.log(JSON.stringify(statuses, null, 2));

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  *
  * AICE 2.0 Mandatory Agent Rules Specification (v0.9.24).
- * Defines the zero-discovery, token-dense rules injected into AGENTS.md,
- * CLAUDE.md, and ~/.gemini/config/rules/aice.md.
+ * Defines the zero-discovery, token-dense rules injected into workspace AGENTS.md,
+ * .agents/rules/aice.md, and optional global agent configurations.
  */
 
 import { AICE_VERSION } from "../version.js";

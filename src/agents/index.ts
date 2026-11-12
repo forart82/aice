@@ -97,6 +97,7 @@ export interface AgentSetupOptions {
   homeDir?: string;
   all?: boolean;
   agent?: string;
+  globalRules?: boolean;
 }
 
 export interface AgentActionResult {
@@ -630,8 +631,8 @@ export function getAgentsStatus(
     : agents;
 
   const configuredPrompts = filtered.filter((a) => a.promptPath && a.promptConfigured);
-  const allRulesUpToDate =
-    configuredPrompts.length > 0 && configuredPrompts.every((a) => a.rulesUpToDate === true);
+  const anyPromptOutdated = configuredPrompts.some((a) => a.rulesUpToDate === false);
+  const allRulesUpToDate = !anyPromptOutdated;
 
   return {
     homeDir: home,
@@ -653,6 +654,7 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
   const home = resolveHomeDir(options.homeDir);
   const requested = options.agent?.toLowerCase().trim();
   const configureAll = Boolean(options.all);
+  const writeGlobalRules = Boolean(options.globalRules);
 
   const shouldSetup = (id: SupportedAgentId, checkPaths: string[], binNames: string[]): boolean => {
     if (requested) {
@@ -691,7 +693,9 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     if (fs.existsSync(claudeSettings)) {
       runSafe("claude", () => upsertJsonMcpServer(claudeSettings));
     }
-    runSafe("claude", () => upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md")));
+    if (writeGlobalRules) {
+      runSafe("claude", () => upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md")));
+    }
   }
 
   // 2. Google Antigravity / Gemini CLI
@@ -706,19 +710,23 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     runSafe("agy", () =>
       upsertJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json")),
     );
-    runSafe("agy", () => upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md")));
-    runSafe("agy", () =>
-      upsertAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md")),
-    );
+    if (writeGlobalRules) {
+      runSafe("agy", () => upsertMarkdownDirective(path.join(home, ".gemini", "GEMINI.md")));
+      runSafe("agy", () =>
+        upsertAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md")),
+      );
+    }
   }
 
   // 3. OpenAI Codex CLI
   if (shouldSetup("codex", [path.join(home, ".codex")], ["codex"])) {
     runSafe("codex", () => upsertCodexToml(path.join(home, ".codex", "config.toml")));
-    runSafe("codex", () => upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md")));
-    const codexInstr = path.join(home, ".codex", "instructions.md");
-    if (fs.existsSync(codexInstr)) {
-      runSafe("codex", () => upsertMarkdownDirective(codexInstr));
+    if (writeGlobalRules) {
+      runSafe("codex", () => upsertMarkdownDirective(path.join(home, ".codex", "AGENTS.md")));
+      const codexInstr = path.join(home, ".codex", "instructions.md");
+      if (fs.existsSync(codexInstr)) {
+        runSafe("codex", () => upsertMarkdownDirective(codexInstr));
+      }
     }
   }
 
@@ -727,9 +735,11 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     runSafe("opencode", () =>
       upsertJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"), true),
     );
-    runSafe("opencode", () =>
-      upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md")),
-    );
+    if (writeGlobalRules) {
+      runSafe("opencode", () =>
+        upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md")),
+      );
+    }
   }
 
   // 5. Aider
@@ -737,7 +747,9 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     shouldSetup("aider", [path.join(home, ".aider"), path.join(home, ".aider.conf.yml")], ["aider"])
   ) {
     const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
-    runSafe("aider", () => upsertMarkdownDirective(conventionsPath));
+    if (writeGlobalRules) {
+      runSafe("aider", () => upsertMarkdownDirective(conventionsPath));
+    }
     runSafe("aider", () =>
       upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath),
     );
@@ -874,7 +886,7 @@ export function formatAgentsStatusTable(result: AgentActionResult): string {
         ? a.rulesUpToDate === false
           ? `OUTDATED (v${a.rulesVersion ?? "old"} -> v${ver})`
           : `CONFIGURED (v${a.rulesVersion ?? ver})`
-        : "not set"
+        : "not set (project-scoped)"
       : "N/A (MCP)";
     lines.push(
       `  ${a.displayName.padEnd(36)} ${binStr.padEnd(10)} ${mcpStr.padEnd(14)} ${promptStr}`,
@@ -885,12 +897,16 @@ export function formatAgentsStatusTable(result: AgentActionResult): string {
   }
   lines.push("--------------------------------------------------------------------------------");
   if (result.allRulesUpToDate) {
-    lines.push(`Rules Status: UP TO DATE (v${ver})`);
+    if (result.agents.some((a) => a.promptConfigured)) {
+      lines.push(`Rules Status: UP TO DATE (v${ver})`);
+    } else {
+      lines.push(`Rules Status: PROJECT-SCOPED (active in workspaces with aice.config.json)`);
+    }
   } else if (result.updateRecommendation) {
     lines.push(`Rules Status: UPDATE AVAILABLE -> ${result.updateRecommendation}`);
   }
   lines.push(
-    "Commands: `aice agents setup [--all]` | `aice agents status` | `aice agents remove` | `./install.sh -y`",
+    "Commands: `aice agents setup [--all] [--global-rules]` | `aice agents status` | `aice agents remove` | `./install.sh -y`",
   );
   return lines.join("\n");
 }
