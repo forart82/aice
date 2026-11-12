@@ -30,8 +30,11 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 ### 1. Opt-In Activation Gate & Non-AICE Bypass (\`aice.config.json\`)
 - **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an \`aice.config.json\` file with \`"enabled": true\` (pre-provisioned in all AICE project folders such as \`aice_*\` / \`aice\`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count \`aice.config.json\` against project file limits).
 - **Non-AICE Bypass**: If \`aice.config.json\` with \`"enabled": true\` is **not** present in the project folder (e.g. \`*_nonaice\` folders or when \`"enabled": false\`), bypass AICE completely and use standard native file tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`view_file\`).
+- **Emergency Self-Disabling Trigger & Crash Fallback**: If \`aice\` CLI or MCP fails, crashes, times out, or produces unresolvable syntax/AST errors that prevent editing or bootstrapping:
+  1. You are explicitly authorized to disable AICE by running \`aice disable\` (or setting \`"enabled": false\` in \`aice.config.json\`).
+  2. Fall back immediately to native file tools (\`edit_file\`, \`write_file\`, \`read_file\`, \`view_file\`) to repair the code, syntax, or compiler without hesitation.
+  3. Once repairs are complete and tests pass, run \`aice enable\` to restore AST-accelerated mode.
 - **Idioms Toggle**: If \`"idiomsEnabled": false\` (or \`"idioms": false\`), disable \`$idiom\` macros (\`--no-idioms\`).
-
 ### 2. Multi-File Creation & Unified Mixed Stream in 1–2 Turns (\`from 0\` — 40-75% Output Token Savings)
 - **STRICT ANTI-LOOP MANDATE**: NEVER call \`aice/aice_create\`, \`aice/aice_splice\`, or \`aice/aice_context\` N times in a file-by-file loop! Always batch 2+ files into **1 single stream call** (either 1 Bash \`aice splice --stdin << 'EOF'\` heredoc with zero JSON escaping, or 1 MCP \`aice_create\`/\`aice_splice\` call with \`=== <filePath> ===\` headers in \`code\`).
 - **Preferred Multi-File Heredoc Stream (Zero JSON Escaping)**: Write clean, native language syntax inside 1–2 \`aice create --stdin << 'EOF'\` or \`aice splice --stdin << 'EOF'\` calls using \`=== <filePath> ===\` headers (e.g. Batch 1: config/HTML/CSS/constants/models; Batch 2: core engine/UI/main/scripts/docs), then immediately run \`npm install && npm run build\` without running \`ls\`:
