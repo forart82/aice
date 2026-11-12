@@ -6,6 +6,7 @@
  * Enables surgical AST modifications achieving 90%+ output token reduction for AI contexts.
  */
 
+import { didYouMeanSymbol } from "./suggest.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import postcss from "postcss";
@@ -797,7 +798,7 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}`);
+      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
     }
 
     // Determine declaration lineStart
@@ -844,7 +845,7 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}`);
+      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
     }
     if (symInfo.kind !== "function" && symInfo.kind !== "method") {
       throw new Error(
@@ -886,7 +887,7 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}`);
+      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
     }
 
     // Determine declaration lineStart
@@ -4453,7 +4454,7 @@ export function spliceNativeSymbolFromExpandedAst(
   );
 
   if (!spanInfo) {
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(nativeSource, symbolSelector)}`);
   }
 
   const emittedUnindented = emitExpandedDeclForTarget(

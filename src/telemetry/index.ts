@@ -275,6 +275,29 @@ export function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolea
 }
 
 /**
+ * Detects whether the current workspace / cwd is an ephemeral sandbox
+ * (/tmp, /var/tmp, or swarm-* worktrees) where global telemetry recording should be suppressed,
+ * unless an explicit telemetry path or AICE_HOME is set.
+ */
+export function isEphemeralWorkspace(cwd = process.cwd(), explicitPath?: string): boolean {
+  if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_HOME) {
+    return false;
+  }
+  const resolved = path.resolve(cwd);
+  if (
+    resolved === "/tmp" ||
+    resolved.startsWith("/tmp/") ||
+    resolved === "/var/tmp" ||
+    resolved.startsWith("/var/tmp/") ||
+    path.basename(resolved).startsWith("swarm-") ||
+    resolved.includes("/swarm-")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Detects the active CLI agent or caller from environment heuristics.
  */
 export function detectCallerAgent(surface: TelemetrySurface = "cli"): string {
@@ -430,6 +453,9 @@ export function recordTelemetryEvent(
     return null;
   }
   if (isTestEnvWithoutExplicitTelemetry(input.telemetryPath)) {
+    return null;
+  }
+  if (!forceEvenIfSuppressed && isEphemeralWorkspace(process.cwd(), input.telemetryPath)) {
     return null;
   }
   try {

@@ -299,6 +299,21 @@ aice analyze <project> --json             # Emit structured JSON post-session & 
 aice analyze . --transcripts-dir <dir>    # Scan a custom agent conversation transcripts directory
 ```
 
+### Ephemeral Sandbox & Worktree Telemetry Isolation
+To preserve clean production statistics, AICE telemetry recording automatically suppresses operations executed within ephemeral sandboxes:
+- Paths in `/tmp` or `/var/tmp` (e.g. temporary benchmark sandboxes)
+- Agent swarm worktree checkouts matching `swarm-*`
+- Ephemeral suppression can be overridden by specifying an explicit `--telemetry-path` or setting the `AICE_HOME` environment variable.
+
+---
+
+## 🛡️ Resilience & Smart Error Diagnostics ("Did You Mean?")
+
+AICE provides intelligent feedback to coding agents when requested targets cannot be found:
+- **Missing Symbols**: When requesting an unknown symbol in `aice context` or `aice splice`, AICE calculates Levenshtein distances against all declarations in the file and suggests the closest matching names (e.g. `Did you mean: getUserById`).
+- **Missing Regex Patterns**: When a `/pattern/` selector finds no matches, AICE lists the top available symbols within the file to guide the agent without full-file re-reads.
+- **Missing Files**: When a target file path does not exist, AICE inspects the nearest parent directory and provides fuzzy suggestions (e.g. `Did you mean: database_connection.ts`).
+
 ---
 
 ## 💻 CLI Command Reference

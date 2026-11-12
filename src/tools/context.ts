@@ -7,6 +7,7 @@
  * imported dependency contracts, and downstream callers.
  */
 
+import { didYouMeanFile, didYouMeanSymbol } from "./suggest.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractFastTsImports, isTsLikeFilePath } from "../compat/typescript.js";
@@ -2310,7 +2311,7 @@ export function extractSymbolFromAiceSource(
   if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
     const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (matched) return matched;
-    throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}`);
+    throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first =
@@ -2355,7 +2356,7 @@ export function extractSymbolFromAiceSource(
       }
       const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
       if (patternFallback) return patternFallback;
-      throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+      throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
     }
   }
 
@@ -2426,7 +2427,7 @@ export function extractSymbolFromAiceSource(
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first = resolveFirstActionableSymbol(aiceSource, filePath, mod);
@@ -2637,7 +2638,7 @@ export function extractSymbolFromAiceSource(
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}`);
+    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
   }
   const scopedMod: Module = {
     kind: "Module",
@@ -2881,7 +2882,7 @@ export async function generateContext(
 
   const fullTargetPath = resolved.resolvedPath;
   if (!fs.existsSync(fullTargetPath)) {
-    throw new Error(`Target file not found: ${targetPath}`);
+    throw new Error(`Target file not found: ${targetPath}${didYouMeanFile(fullTargetPath)}`);
   }
 
   const projectRoot = resolved.projectRoot;

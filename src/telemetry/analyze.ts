@@ -16,6 +16,7 @@ import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
 import {
   buildGainReport,
   detectCallerAgent,
+  isEphemeralWorkspace,
   isTelemetrySuppressed,
   isTestEnvWithoutExplicitTelemetry,
   resolveTelemetryPath,
@@ -175,6 +176,9 @@ export function recordTelemetryError(
     return null;
   }
   if (isTestEnvWithoutExplicitTelemetry(input.telemetryPath)) {
+    return null;
+  }
+  if (!forceEvenIfSuppressed && isEphemeralWorkspace(process.cwd(), input.telemetryPath)) {
     return null;
   }
   try {
