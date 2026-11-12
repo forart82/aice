@@ -463,8 +463,8 @@ describe("AICE v0.9.24 Hybrid Hunk + Line Splicing Engine, MCP Multi-File Stream
 
   describe("Step 3: Mandatory Rules v0.9.24 Anti-Loop Mandate & Hybrid Splicing Documentation", () => {
     it("includes v0.9.24 header, STRICT ANTI-LOOP MANDATE, and <<< / === / >>> hybrid splicing docs", () => {
-      expect(AICE_VERSION).toBe("0.9.24");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.24 -->");
+      expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("STRICT ANTI-LOOP MANDATE");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
         "AST-Scoped Hunk Splicing (`<<< / === / >>>` inside `:symbol`)",

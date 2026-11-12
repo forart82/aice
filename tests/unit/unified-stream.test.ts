@@ -491,8 +491,8 @@ describe("AICE v0.9.23 Unified Multi-File Stream Engine & AIPL Dependency Bundle
 
   describe("Step 4: Stream-First Mandatory Rules, Edge Cases & Version 0.9.24", () => {
     it("exports AICE_VERSION 0.9.24 and documents stream-first context and mixed splice in MANDATORY_AGENT_RULES_MARKDOWN", () => {
-      expect(AICE_VERSION).toBe("0.9.24");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.24 -->");
+      expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice context f1:s1 f2:s2");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
     });

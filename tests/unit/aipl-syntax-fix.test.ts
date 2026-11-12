@@ -266,8 +266,8 @@ pub fn getRadius(light: PointLight25D): float:
 
   describe("Step 3: Zero-Grep & Zero-Sed Directives in MANDATORY_AGENT_RULES_MARKDOWN (v0.9.24)", () => {
     it("bumps version to 0.9.24 and includes explicit .aipl grep/sed replacement directives", () => {
-      expect(AICE_VERSION).toBe("0.9.24");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<!-- AICE:START v0.9.24 -->");
+      expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
         'Replace `grep -n -C 10 "sym" file.aipl` -> `aice context file.aipl -s "sym"`',
       );
