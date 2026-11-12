@@ -809,7 +809,7 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
 function splitSymbolSelectors(rawSymbol: string): string[] {
   const trimmed = rawSymbol.trim();
   if (!trimmed) return [];
-  if (/^\/.+\/[gimsuy]*$/.test(trimmed)) {
+  if (/^\/[^/\n]+\/[gimsuy]*$/.test(trimmed)) {
     return [trimmed];
   }
   const out: string[] = [];
@@ -2308,7 +2308,17 @@ export function extractSymbolFromAiceSource(
     return sliceLines.join("\n");
   }
 
-  if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
+  if (/^\/.+\/[gimsuy]*(?:\s*,\s*\/[^\n]+\/[gimsuy]*)*$/.test(trimmedSel)) {
+    const pieces = splitSymbolSelectors(trimmedSel);
+    if (pieces.length > 1) {
+      const results: string[] = [];
+      for (const piece of pieces) {
+        const m = extractPatternMatchesFromSource(rawFileSource, piece);
+        if (m) results.push(m.trim());
+      }
+      if (results.length > 0) return results.join("\n\n");
+      return `// Patterns '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
+    }
     const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (matched) return matched;
     return `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;

@@ -53,7 +53,7 @@ fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
 const versionTs = fs.readFileSync(versionTsPath, "utf-8");
 fs.writeFileSync(
   versionTsPath,
-  versionTs.replace(/(?:export|pub)\s+const\s+AICE_VERSION\s*=\s*"[^"]+"/, `export const AICE_VERSION = "${nextVersion}";`),
+  versionTs.replace(/(?:export|pub)\s+const\s+AICE_VERSION\s*=\s*"[^"]+";?/, `export const AICE_VERSION = "${nextVersion}";`),
   "utf-8"
 );
 
