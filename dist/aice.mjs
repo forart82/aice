@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.28";
+    AICE_VERSION = "0.9.29";
     VERSION = AICE_VERSION;
   }
 });
@@ -165,8 +165,9 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   - \`@replace-docs\` (or CLI \`--no-preserve-docs\` / MCP \`preserveDocs: false\`): Replaces existing leading JSDoc/docstring comments instead of preserving them when splicing a symbol.
   - Single-edit shorthand: \`aice splice <file> -s <symbol> -c "<replacement>"\` (or \`--delete\`).
 
-### 5. Subagent Propagation (\`invoke_subagent\` / \`test-runner\` / \`fast-scout\` / \`code-surgeon\` / \`deep-auditor\`)
-- ALL subagents (\`test-runner\`, \`fast-scout\`, \`code-surgeon\`, \`deep-auditor\`) **MUST** use \`aice outline\` and \`aice context\` instead of \`read_file\` / \`view_file\` / \`grep\` / \`sed\` / \`ls\`, and \`aice create\` / \`aice splice\` instead of \`write_file\` / \`edit_file\`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+### 5. Subagent Propagation & Swarm Worker Rules (\`invoke_subagent\` / \`swarm add\` / all subagents)
+- ALL subagents and swarm workers (\`test-runner\`, \`fast-scout\`, \`code-surgeon\`, \`deep-auditor\`, \`@worker\`) **MUST** use \`aice outline\` and \`aice context\` instead of \`read_file\` / \`view_file\` / \`grep\` / \`sed\` / \`ls\`, and \`aice create\` / \`aice splice\` instead of \`write_file\` / \`edit_file\`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+- **MANDATORY SWARM BRIEF RULE**: Whenever adding or briefing any swarm worker (\`swarm add\`), the coordinator **MUST** explicitly state in the brief: \`"Use AICE (aice context / aice splice) for all file exploration and edits."\` Coordinators must NEVER execute file-writing shell scripts (\`python3 with open()\`, \`cat << 'EOF' > file\`) directly.
 ${AICE_DIRECTIVE_END}`;
     ALWAYS_ON_AICE_RULE_FILE = `---
 trigger: always_on
@@ -911,7 +912,7 @@ function findDirectiveSpanOutsideFences(markdown) {
         fenceLen = 0;
       }
     } else if (!fenceChar) {
-      if (firstStartIdx === -1 && /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine)) {
+      if (firstStartIdx === -1 && (/^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine) || /^[ \t]*##\s+AICE(?:\s+[0-9A-Za-z._-]+)?\s*[-—]\s*MANDATORY/i.test(cleanLine))) {
         firstStartIdx = pos;
       } else if (firstStartIdx !== -1 && /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(cleanLine)) {
         lastEndOffset = pos + cleanLine.length;
@@ -933,27 +934,16 @@ function upsertMarkdownDirective(mdPath, blockText) {
     existing = fs2.readFileSync(mdPath, "utf-8");
   }
   const span = findDirectiveSpanOutsideFences(existing);
-  if (span) {
-    const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
-    const after = existing.slice(span.endOffset).trim();
-    const parts = [];
-    if (before.length > 0) parts.push(before);
-    parts.push(directiveBlock);
-    if (after.length > 0) parts.push(after);
-    writeFileAtomic(mdPath, `${parts.join("\n\n")}
-`);
-    return;
-  }
-  const trimmed = existing.trim();
-  if (trimmed.length === 0) {
+  const stripped = span ? [existing.slice(0, span.startIdx).trim(), existing.slice(span.endOffset).trim()].filter(Boolean).join("\n\n") : existing.trim();
+  if (stripped.length === 0) {
     writeFileAtomic(mdPath, `${directiveBlock}
 `);
     return;
   }
-  const headingMatch = existing.match(/^(\s*#[ \t]+[^\r\n]+)/);
+  const headingMatch = stripped.match(/^(\s*#[ \t]+[^\r\n]+)/);
   if (headingMatch) {
     const heading = headingMatch[0].trim();
-    const rest = existing.slice(headingMatch[0].length).trim();
+    const rest = stripped.slice(headingMatch[0].length).trim();
     const nextContent = rest.length > 0 ? `${heading}
 
 ${directiveBlock}
@@ -968,7 +958,7 @@ ${directiveBlock}
   }
   writeFileAtomic(mdPath, `${directiveBlock}
 
-${trimmed}
+${stripped}
 `);
 }
 function removeMarkdownDirective(mdPath, optionsOrRemoveIfEmpty = false) {
@@ -273529,6 +273519,17 @@ async function generateWorkspaceContext(targetPath, options = {}) {
     }
   }
   const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
+  const isBareLineRangeOnly = resolved.isDirectory && requestedSelectors.length > 0 && requestedSelectors.every((s) => /^\[?L?\d+\s*[-–]\s*L?\d+\]?$/i.test(s.trim()));
+  if (isBareLineRangeOnly) {
+    const hintMsg = `// Bare line-range selector '${options.symbol}' requires a file target (e.g. 'aice context <file> -s "${options.symbol}"' or 'aice context <file>:${options.symbol}')`;
+    return {
+      targetPath: displayTargetPath,
+      targetContent: hintMsg,
+      dependencies: [],
+      callers: [],
+      formattedBundle: hintMsg
+    };
+  }
   const isPureRegexSearch = requestedSelectors.length > 0 && requestedSelectors.every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
   const isPureAiceDirectory = resolved.files.length > 0 && resolved.files.every((f) => f.endsWith(".aice"));
   const workspaceFiles = isPureAiceDirectory ? resolved.files : Array.from(
@@ -282670,7 +282671,7 @@ async function splice(filePath, rawOptions = {}) {
     );
     if (!postValidation.valid) {
       const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
-      if (origValidation.valid) {
+      if (origValidation.valid && !options.force && !options.overwrite) {
         const diagSummary = postValidation.diagnostics.join("; ");
         throw new Error(
           `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`
@@ -282678,17 +282679,19 @@ async function splice(filePath, rawOptions = {}) {
       }
     }
     if (!options.dryRun) {
-      const origMode = (await fs14.promises.stat(fullPath)).mode;
       const dir = path15.dirname(fullPath);
+      await fs14.promises.mkdir(dir, { recursive: true });
+      const origMode = fs14.existsSync(fullPath) ? (await fs14.promises.stat(fullPath)).mode : void 0;
       const tmpFile = path15.join(
         dir,
         `.${path15.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
       );
       try {
-        await fs14.promises.writeFile(tmpFile, result2.modifiedCode, {
-          encoding: "utf-8",
-          mode: origMode
-        });
+        await fs14.promises.writeFile(
+          tmpFile,
+          result2.modifiedCode,
+          origMode !== void 0 ? { encoding: "utf-8", mode: origMode } : "utf-8"
+        );
         await fs14.promises.rename(tmpFile, fullPath);
       } catch (err) {
         try {
@@ -282729,17 +282732,19 @@ ${responseMsg}` : responseMsg
   const originalSource = options.sourceOverride ?? await fs14.promises.readFile(fullPath, "utf-8");
   const result = withSuppressedTelemetry(() => spliceSource(originalSource, options, fullPath));
   if (!options.dryRun) {
-    const origMode = (await fs14.promises.stat(fullPath)).mode;
     const dir = path15.dirname(fullPath);
+    await fs14.promises.mkdir(dir, { recursive: true });
+    const origMode = fs14.existsSync(fullPath) ? (await fs14.promises.stat(fullPath)).mode : void 0;
     const tmpFile = path15.join(
       dir,
       `.${path15.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
     );
     try {
-      await fs14.promises.writeFile(tmpFile, result.modifiedCode, {
-        encoding: "utf-8",
-        mode: origMode
-      });
+      await fs14.promises.writeFile(
+        tmpFile,
+        result.modifiedCode,
+        origMode !== void 0 ? { encoding: "utf-8", mode: origMode } : "utf-8"
+      );
       await fs14.promises.rename(tmpFile, fullPath);
     } catch (err) {
       try {
@@ -296276,6 +296281,14 @@ var init_server = __esm({
               type: "string",
               description: "Target .aice or target language file/directory path (supports inline 'file:sym1,sym2', 'file:L10-L30', or space-separated multi-target paths in 1 call)"
             },
+            fileOrDir: {
+              type: "string",
+              description: "Alias for path: target file or directory path"
+            },
+            filePath: {
+              type: "string",
+              description: "Alias for path: target file path"
+            },
             paths: {
               type: "array",
               items: { type: "string" },
@@ -296315,6 +296328,14 @@ var init_server = __esm({
               type: "string",
               description: "Optional path (or comma/whitespace-separated paths) to .aice or native file(s) or project directory (default: '.')"
             },
+            fileOrDir: {
+              type: "string",
+              description: "Alias for path: file or directory path"
+            },
+            filePath: {
+              type: "string",
+              description: "Alias for path: file path"
+            },
             paths: {
               type: "array",
               items: { type: "string" },
@@ -296349,6 +296370,14 @@ var init_server = __esm({
             filePath: {
               type: "string",
               description: "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)"
+            },
+            path: {
+              type: "string",
+              description: "Alias for filePath: target file path"
+            },
+            fileOrDir: {
+              type: "string",
+              description: "Alias for filePath: target file path"
             },
             symbolSelector: {
               type: "string",
@@ -296946,10 +296975,12 @@ ${json}`;
               const rawSelector = (typeof args.symbol === "string" && args.symbol.trim().length > 0 ? args.symbol : void 0) ?? (typeof args.selector === "string" && args.selector.trim().length > 0 ? args.selector : void 0) ?? (typeof args.sym === "string" && args.sym.trim().length > 0 ? args.sym : void 0) ?? (typeof args.range === "string" && args.range.trim().length > 0 ? args.range : void 0) ?? (args.symbol ?? args.selector ?? args.sym ?? args.range);
               const symbolFilter = typeof rawSelector === "string" && rawSelector.trim().length > 0 ? rawSelector.trim() : void 0;
               let rawTargets = [];
-              if (Array.isArray(args.paths) && args.paths.length > 0) {
-                rawTargets = args.paths.map((p) => String(p).trim()).filter(Boolean);
+              const candidateArray = args.paths ?? args.files ?? args.targets ?? args.filesOrDirs;
+              const rawPathCandidate = args.path ?? args.fileOrDir ?? args.filePath ?? args.file ?? args.dir ?? args.target ?? args.inputPath ?? args.source;
+              if (Array.isArray(candidateArray) && candidateArray.length > 0) {
+                rawTargets = candidateArray.map((p) => String(p).trim()).filter(Boolean);
               } else {
-                const rawPathStr = String(args.path ?? ".").trim() || ".";
+                const rawPathStr = String(rawPathCandidate ?? ".").trim() || ".";
                 rawTargets = splitContextTargets(rawPathStr, this.workspaceRoot);
                 if (rawTargets.length === 0) {
                   rawTargets = [rawPathStr];
@@ -297015,7 +297046,7 @@ ${json}`;
                   content: [{ type: "text", text: multiRes.formattedBundle }]
                 };
               }
-              const singleRaw = rawTargets[0] ?? (String(args.path ?? ".").trim() || ".");
+              const singleRaw = rawTargets[0] ?? (String(rawPathCandidate ?? ".").trim() || ".");
               const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
               const targetPath = parsedSingle.targetPath || ".";
               const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
@@ -297122,17 +297153,28 @@ ${result.nativeDiagnostics}`;
                 nativeText: nativeText || result.targetContent,
                 aiceText: text
               });
+              let safeContextText = text;
+              const contextLines = text.split("\n");
+              if (isDirTarget && contextLines.length > 95) {
+                const capped = contextLines.slice(0, 88).join("\n");
+                const omittedCount = contextLines.length - 88;
+                safeContextText = `${capped}
+
+// ... [${omittedCount} lines omitted to prevent MCP context spill; scope search with 'path' to a specific file or symbol]`;
+              }
               return {
-                content: [{ type: "text", text }]
+                content: [{ type: "text", text: safeContextText }]
               };
             }
           }
           case "aice_outline": {
             let rawPaths = [];
-            if (Array.isArray(args.paths)) {
-              rawPaths = args.paths.map((p) => String(p).trim()).filter(Boolean);
+            const candidatePaths = args.paths ?? args.files ?? args.targets ?? args.filesOrDirs;
+            const rawPathCandidate = args.path ?? args.fileOrDir ?? args.filePath ?? args.file ?? args.dir ?? args.target;
+            if (Array.isArray(candidatePaths)) {
+              rawPaths = candidatePaths.map((p) => String(p).trim()).filter(Boolean);
             } else {
-              const rawPathStr = String(args.path ?? "").trim();
+              const rawPathStr = String(rawPathCandidate ?? "").trim();
               if (rawPathStr) {
                 if (!rawPathStr.includes(",") && fs20.existsSync(path21.resolve(this.workspaceRoot, rawPathStr))) {
                   rawPaths = [rawPathStr];
@@ -297202,12 +297244,23 @@ ${r.text}` : r.text
               nativeText: nativeText || outlineText,
               aiceText: outlineText
             });
+            let safeOutlineText = outlineText;
+            const outlineLines = outlineText.split("\n");
+            if (outlineLines.length > 95) {
+              const capped = outlineLines.slice(0, 88).join("\n");
+              const omittedCount = outlineLines.length - 88;
+              safeOutlineText = `${capped}
+
+// ... [${omittedCount} lines omitted to prevent MCP context spill; scope outline with 'path' to a specific directory or file]`;
+            }
             return {
-              content: [{ type: "text", text: outlineText }]
+              content: [{ type: "text", text: safeOutlineText }]
             };
           }
           case "aice_splice": {
-            const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+            const rawTargetFile = String(
+              args.filePath ?? args.path ?? args.file ?? args.fileOrDir ?? args.target ?? ""
+            );
             const rawSelector = (typeof args.symbolSelector === "string" && args.symbolSelector.trim().length > 0 ? args.symbolSelector : void 0) ?? (typeof args.symbol === "string" && args.symbol.trim().length > 0 ? args.symbol : void 0) ?? (typeof args.selector === "string" && args.selector.trim().length > 0 ? args.selector : void 0) ?? (typeof args.range === "string" && args.range.trim().length > 0 ? args.range : void 0) ?? (args.symbolSelector ?? args.symbol ?? args.selector ?? args.range ?? "");
             const symbolSelector = String(rawSelector);
             const newAiceCode = typeof args.newAiceCode === "string" ? args.newAiceCode : typeof args.code === "string" ? args.code : void 0;
@@ -297610,7 +297663,9 @@ ${msg}`
             const rawCodeCandidate = String(
               args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? ""
             );
-            const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+            const rawTargetFile = String(
+              args.filePath ?? args.path ?? args.file ?? args.fileOrDir ?? args.target ?? ""
+            );
             const streamItems = !Array.isArray(args.files) && rawCodeCandidate ? parseMultiFileCreateStream(rawCodeCandidate) : null;
             if (!Array.isArray(args.files) && !streamItems && rawCodeCandidate) {
               const spliceStream = parseMultiBlockSpliceStream(
@@ -297805,7 +297860,7 @@ ${res.nativeCode}` : `\u2714 Created ${rawTargetFile} (${res.aiceTokens} cl100k 
                 ]
               };
             }
-            const rawDir = typeof args.dir === "string" ? args.dir : typeof args.path === "string" ? args.path : this.workspaceRoot;
+            const rawDir = typeof args.dir === "string" && args.dir || typeof args.path === "string" && args.path || typeof args.fileOrDir === "string" && args.fileOrDir || typeof args.filePath === "string" && args.filePath || typeof args.projectRoot === "string" && args.projectRoot || typeof args.root === "string" && args.root || this.workspaceRoot;
             const dir = this.resolveSafePath(rawDir);
             const projectRoot = this.resolveProjectRoot(dir);
             if (action === "enable") {

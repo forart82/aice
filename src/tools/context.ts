@@ -1525,6 +1525,20 @@ export async function generateWorkspaceContext(
     }
   }
   const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
+  const isBareLineRangeOnly =
+    resolved.isDirectory &&
+    requestedSelectors.length > 0 &&
+    requestedSelectors.every((s) => /^\[?L?\d+\s*[-–]\s*L?\d+\]?$/i.test(s.trim()));
+  if (isBareLineRangeOnly) {
+    const hintMsg = `// Bare line-range selector '${options.symbol}' requires a file target (e.g. 'aice context <file> -s "${options.symbol}"' or 'aice context <file>:${options.symbol}')`;
+    return {
+      targetPath: displayTargetPath,
+      targetContent: hintMsg,
+      dependencies: [],
+      callers: [],
+      formattedBundle: hintMsg,
+    };
+  }
   const isPureRegexSearch =
     requestedSelectors.length > 0 &&
     requestedSelectors.every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));

@@ -1222,7 +1222,8 @@ export function findDirectiveSpanOutsideFences(
     } else if (!fenceChar) {
       if (
         firstStartIdx === -1 &&
-        /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine)
+        (/^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine) ||
+          /^[ \t]*##\s+AICE(?:\s+[0-9A-Za-z._-]+)?\s*[-—]\s*MANDATORY/i.test(cleanLine))
       ) {
         firstStartIdx = pos;
       } else if (firstStartIdx !== -1 && /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(cleanLine)) {
@@ -1248,27 +1249,21 @@ export function upsertMarkdownDirective(mdPath: string, blockText?: string): voi
     existing = fs.readFileSync(mdPath, "utf-8");
   }
   const span = findDirectiveSpanOutsideFences(existing);
-  if (span) {
-    const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
-    const after = existing.slice(span.endOffset).trim();
-    const parts: string[] = [];
-    if (before.length > 0) parts.push(before);
-    parts.push(directiveBlock);
-    if (after.length > 0) parts.push(after);
-    writeFileAtomic(mdPath, `${parts.join("\n\n")}\n`);
-    return;
-  }
+  const stripped = span
+    ? [existing.slice(0, span.startIdx).trim(), existing.slice(span.endOffset).trim()]
+        .filter(Boolean)
+        .join("\n\n")
+    : existing.trim();
 
-  const trimmed = existing.trim();
-  if (trimmed.length === 0) {
+  if (stripped.length === 0) {
     writeFileAtomic(mdPath, `${directiveBlock}\n`);
     return;
   }
 
-  const headingMatch = existing.match(/^(\s*#[ \t]+[^\r\n]+)/);
+  const headingMatch = stripped.match(/^(\s*#[ \t]+[^\r\n]+)/);
   if (headingMatch) {
     const heading = headingMatch[0].trim();
-    const rest = existing.slice(headingMatch[0].length).trim();
+    const rest = stripped.slice(headingMatch[0].length).trim();
     const nextContent =
       rest.length > 0
         ? `${heading}\n\n${directiveBlock}\n\n${rest}\n`
@@ -1277,7 +1272,7 @@ export function upsertMarkdownDirective(mdPath: string, blockText?: string): voi
     return;
   }
 
-  writeFileAtomic(mdPath, `${directiveBlock}\n\n${trimmed}\n`);
+  writeFileAtomic(mdPath, `${directiveBlock}\n\n${stripped}\n`);
 }
 
 /**

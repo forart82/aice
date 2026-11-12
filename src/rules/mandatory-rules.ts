@@ -106,8 +106,9 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   - \`@replace-docs\` (or CLI \`--no-preserve-docs\` / MCP \`preserveDocs: false\`): Replaces existing leading JSDoc/docstring comments instead of preserving them when splicing a symbol.
   - Single-edit shorthand: \`aice splice <file> -s <symbol> -c "<replacement>"\` (or \`--delete\`).
 
-### 5. Subagent Propagation (\`invoke_subagent\` / \`test-runner\` / \`fast-scout\` / \`code-surgeon\` / \`deep-auditor\`)
-- ALL subagents (\`test-runner\`, \`fast-scout\`, \`code-surgeon\`, \`deep-auditor\`) **MUST** use \`aice outline\` and \`aice context\` instead of \`read_file\` / \`view_file\` / \`grep\` / \`sed\` / \`ls\`, and \`aice create\` / \`aice splice\` instead of \`write_file\` / \`edit_file\`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+### 5. Subagent Propagation & Swarm Worker Rules (\`invoke_subagent\` / \`swarm add\` / all subagents)
+- ALL subagents and swarm workers (\`test-runner\`, \`fast-scout\`, \`code-surgeon\`, \`deep-auditor\`, \`@worker\`) **MUST** use \`aice outline\` and \`aice context\` instead of \`read_file\` / \`view_file\` / \`grep\` / \`sed\` / \`ls\`, and \`aice create\` / \`aice splice\` instead of \`write_file\` / \`edit_file\`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+- **MANDATORY SWARM BRIEF RULE**: Whenever adding or briefing any swarm worker (\`swarm add\`), the coordinator **MUST** explicitly state in the brief: \`"Use AICE (aice context / aice splice) for all file exploration and edits."\` Coordinators must NEVER execute file-writing shell scripts (\`python3 with open()\`, \`cat << 'EOF' > file\`) directly.
 ${AICE_DIRECTIVE_END}`;
 
 export const ALWAYS_ON_AICE_RULE_FILE = `---

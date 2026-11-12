@@ -1,6 +1,6 @@
 <!-- AICE:START -->
-<!-- AICE:START v0.9.28 -->
-## AICE 2.0 (v0.9.28) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+<!-- AICE:START v0.9.29 -->
+## AICE 2.0 (v0.9.29) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (`sed` / `ls` / `grep` Ban)
 - **FORBIDDEN SHELL FILE-WRITING WORKAROUNDS**: NEVER execute shell scripts or commands to write or overwrite files (e.g. `python3 with open()`, `node fs.writeFileSync()`, `echo "..." > file`, `cat << 'EOF' > file`). Use `aice splice` for surgical updates, `aice create --force` for full rewrites, or standard native file tools when in emergency fallback mode.
@@ -91,6 +91,7 @@
   - `@replace-docs` (or CLI `--no-preserve-docs` / MCP `preserveDocs: false`): Replaces existing leading JSDoc/docstring comments instead of preserving them when splicing a symbol.
   - Single-edit shorthand: `aice splice <file> -s <symbol> -c "<replacement>"` (or `--delete`).
 
-### 5. Subagent Propagation (`invoke_subagent` / `test-runner` / `fast-scout` / `code-surgeon` / `deep-auditor`)
-- ALL subagents (`test-runner`, `fast-scout`, `code-surgeon`, `deep-auditor`) **MUST** use `aice outline` and `aice context` instead of `read_file` / `view_file` / `grep` / `sed` / `ls`, and `aice create` / `aice splice` instead of `write_file` / `edit_file`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+### 5. Subagent Propagation & Swarm Worker Rules (`invoke_subagent` / `swarm add` / all subagents)
+- ALL subagents and swarm workers (`test-runner`, `fast-scout`, `code-surgeon`, `deep-auditor`, `@worker`) **MUST** use `aice outline` and `aice context` instead of `read_file` / `view_file` / `grep` / `sed` / `ls`, and `aice create` / `aice splice` instead of `write_file` / `edit_file`. Whenever spawning any subagent, explicitly include this requirement in its prompt.
+- **MANDATORY SWARM BRIEF RULE**: Whenever adding or briefing any swarm worker (`swarm add`), the coordinator **MUST** explicitly state in the brief: `"Use AICE (aice context / aice splice) for all file exploration and edits."` Coordinators must NEVER execute file-writing shell scripts (`python3 with open()`, `cat << 'EOF' > file`) directly.
 <!-- AICE:END -->

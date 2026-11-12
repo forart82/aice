@@ -111,6 +111,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description:
             "Target .aice or target language file/directory path (supports inline 'file:sym1,sym2', 'file:L10-L30', or space-separated multi-target paths in 1 call)",
         },
+        fileOrDir: {
+          type: "string",
+          description: "Alias for path: target file or directory path",
+        },
+        filePath: {
+          type: "string",
+          description: "Alias for path: target file path",
+        },
         paths: {
           type: "array",
           items: { type: "string" },
@@ -156,6 +164,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description:
             "Optional path (or comma/whitespace-separated paths) to .aice or native file(s) or project directory (default: '.')",
         },
+        fileOrDir: {
+          type: "string",
+          description: "Alias for path: file or directory path",
+        },
+        filePath: {
+          type: "string",
+          description: "Alias for path: file path",
+        },
         paths: {
           type: "array",
           items: { type: "string" },
@@ -193,6 +209,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           type: "string",
           description:
             "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)",
+        },
+        path: {
+          type: "string",
+          description: "Alias for filePath: target file path",
+        },
+        fileOrDir: {
+          type: "string",
+          description: "Alias for filePath: target file path",
         },
         symbolSelector: {
           type: "string",
@@ -919,10 +943,20 @@ export class AiceMcpServer {
               : undefined;
 
           let rawTargets: string[] = [];
-          if (Array.isArray(args.paths) && args.paths.length > 0) {
-            rawTargets = (args.paths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
+          const candidateArray = args.paths ?? args.files ?? args.targets ?? args.filesOrDirs;
+          const rawPathCandidate =
+            args.path ??
+            args.fileOrDir ??
+            args.filePath ??
+            args.file ??
+            args.dir ??
+            args.target ??
+            args.inputPath ??
+            args.source;
+          if (Array.isArray(candidateArray) && candidateArray.length > 0) {
+            rawTargets = (candidateArray as unknown[]).map((p) => String(p).trim()).filter(Boolean);
           } else {
-            const rawPathStr = String(args.path ?? ".").trim() || ".";
+            const rawPathStr = String(rawPathCandidate ?? ".").trim() || ".";
             rawTargets = splitContextTargets(rawPathStr, this.workspaceRoot);
             if (rawTargets.length === 0) {
               rawTargets = [rawPathStr];
@@ -995,7 +1029,7 @@ export class AiceMcpServer {
             };
           }
 
-          const singleRaw = rawTargets[0] ?? (String(args.path ?? ".").trim() || ".");
+          const singleRaw = rawTargets[0] ?? (String(rawPathCandidate ?? ".").trim() || ".");
           const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
           const targetPath = parsedSingle.targetPath || ".";
           const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
@@ -1120,17 +1154,33 @@ export class AiceMcpServer {
             aiceText: text,
           });
 
+          let safeContextText = text;
+          const contextLines = text.split("\n");
+          if (isDirTarget && contextLines.length > 95) {
+            const capped = contextLines.slice(0, 88).join("\n");
+            const omittedCount = contextLines.length - 88;
+            safeContextText = `${capped}\n\n// ... [${omittedCount} lines omitted to prevent MCP context spill; scope search with 'path' to a specific file or symbol]`;
+          }
+
           return {
-            content: [{ type: "text", text }],
+            content: [{ type: "text", text: safeContextText }],
           };
         }
       }
       case "aice_outline": {
         let rawPaths: string[] = [];
-        if (Array.isArray(args.paths)) {
-          rawPaths = (args.paths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
+        const candidatePaths = args.paths ?? args.files ?? args.targets ?? args.filesOrDirs;
+        const rawPathCandidate =
+          args.path ??
+          args.fileOrDir ??
+          args.filePath ??
+          args.file ??
+          args.dir ??
+          args.target;
+        if (Array.isArray(candidatePaths)) {
+          rawPaths = (candidatePaths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
         } else {
-          const rawPathStr = String(args.path ?? "").trim();
+          const rawPathStr = String(rawPathCandidate ?? "").trim();
           if (rawPathStr) {
             if (
               !rawPathStr.includes(",") &&
@@ -1220,13 +1270,28 @@ export class AiceMcpServer {
           aiceText: outlineText,
         });
 
+        let safeOutlineText = outlineText;
+        const outlineLines = outlineText.split("\n");
+        if (outlineLines.length > 95) {
+          const capped = outlineLines.slice(0, 88).join("\n");
+          const omittedCount = outlineLines.length - 88;
+          safeOutlineText = `${capped}\n\n// ... [${omittedCount} lines omitted to prevent MCP context spill; scope outline with 'path' to a specific directory or file]`;
+        }
+
         return {
-          content: [{ type: "text", text: outlineText }],
+          content: [{ type: "text", text: safeOutlineText }],
         };
       }
 
       case "aice_splice": {
-        const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+        const rawTargetFile = String(
+          args.filePath ??
+            args.path ??
+            args.file ??
+            args.fileOrDir ??
+            args.target ??
+            "",
+        );
         const rawSelector =
           (typeof args.symbolSelector === "string" && args.symbolSelector.trim().length > 0
             ? args.symbolSelector
@@ -1761,7 +1826,14 @@ export class AiceMcpServer {
         const rawCodeCandidate = String(
           args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
         );
-        const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
+        const rawTargetFile = String(
+          args.filePath ??
+            args.path ??
+            args.file ??
+            args.fileOrDir ??
+            args.target ??
+            "",
+        );
         const streamItems =
           !Array.isArray(args.files) && rawCodeCandidate
             ? parseMultiFileCreateStream(rawCodeCandidate)
@@ -2006,11 +2078,13 @@ export class AiceMcpServer {
         }
 
         const rawDir =
-          typeof args.dir === "string"
-            ? args.dir
-            : typeof args.path === "string"
-              ? args.path
-              : this.workspaceRoot;
+          (typeof args.dir === "string" && args.dir) ||
+          (typeof args.path === "string" && args.path) ||
+          (typeof args.fileOrDir === "string" && args.fileOrDir) ||
+          (typeof args.filePath === "string" && args.filePath) ||
+          (typeof args.projectRoot === "string" && args.projectRoot) ||
+          (typeof args.root === "string" && args.root) ||
+          this.workspaceRoot;
         const dir = this.resolveSafePath(rawDir);
         const projectRoot = this.resolveProjectRoot(dir);
         if (action === "enable") {
