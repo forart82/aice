@@ -1250,7 +1250,7 @@ export function upsertMarkdownDirective(mdPath: string, blockText?: string): voi
   const span = findDirectiveSpanOutsideFences(existing);
   if (span) {
     const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
-    const after = existing.slice(span.endOffset).replace(/^\s*/, "");
+    const after = existing.slice(span.endOffset).trim();
     const parts: string[] = [];
     if (before.length > 0) parts.push(before);
     parts.push(directiveBlock);
@@ -1259,10 +1259,25 @@ export function upsertMarkdownDirective(mdPath: string, blockText?: string): voi
     return;
   }
 
-  const trimmed = existing.trimEnd();
-  const nextContent =
-    trimmed.length > 0 ? `${trimmed}\n\n${directiveBlock}\n` : `${directiveBlock}\n`;
-  writeFileAtomic(mdPath, nextContent);
+  const trimmed = existing.trim();
+  if (trimmed.length === 0) {
+    writeFileAtomic(mdPath, `${directiveBlock}\n`);
+    return;
+  }
+
+  const headingMatch = existing.match(/^(\s*#[ \t]+[^\r\n]+)/);
+  if (headingMatch) {
+    const heading = headingMatch[0].trim();
+    const rest = existing.slice(headingMatch[0].length).trim();
+    const nextContent =
+      rest.length > 0
+        ? `${heading}\n\n${directiveBlock}\n\n${rest}\n`
+        : `${heading}\n\n${directiveBlock}\n`;
+    writeFileAtomic(mdPath, nextContent);
+    return;
+  }
+
+  writeFileAtomic(mdPath, `${directiveBlock}\n\n${trimmed}\n`);
 }
 
 /**

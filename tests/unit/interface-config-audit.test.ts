@@ -344,6 +344,35 @@ describe("CLI, Config, Rules & Stdin Interface Audit Regressions", () => {
     expect(fs.existsSync(onlyDirectiveMd)).toBe(false);
   });
 
+  it("inserts directive at the top or right after the first heading block when creating new", () => {
+    const withHeadingMd = path.join(tmpDir, "WITH_HEADING.md");
+    fs.writeFileSync(
+      withHeadingMd,
+      "# Project Guidelines\n\nLegacy Rule 1: Do things.\nLegacy Rule 2: Other things.\n",
+      "utf-8",
+    );
+    upsertMarkdownDirective(withHeadingMd, "<!-- AICE:START -->\nRules\n<!-- AICE:END -->");
+    const contentWithHeading = fs.readFileSync(withHeadingMd, "utf-8");
+    expect(contentWithHeading).toBe(
+      "# Project Guidelines\n\n<!-- AICE:START -->\nRules\n<!-- AICE:END -->\n\nLegacy Rule 1: Do things.\nLegacy Rule 2: Other things.\n",
+    );
+
+    const noHeadingMd = path.join(tmpDir, "NO_HEADING.md");
+    fs.writeFileSync(noHeadingMd, "Legacy intro.\nLegacy Rule 1: Do things.\n", "utf-8");
+    upsertMarkdownDirective(noHeadingMd, "<!-- AICE:START -->\nRules\n<!-- AICE:END -->");
+    const contentNoHeading = fs.readFileSync(noHeadingMd, "utf-8");
+    expect(contentNoHeading).toBe(
+      "<!-- AICE:START -->\nRules\n<!-- AICE:END -->\n\nLegacy intro.\nLegacy Rule 1: Do things.\n",
+    );
+
+    // Updating existing directive keeps its location
+    upsertMarkdownDirective(withHeadingMd, "<!-- AICE:START -->\nUpdated Rules\n<!-- AICE:END -->");
+    const updatedContent = fs.readFileSync(withHeadingMd, "utf-8");
+    expect(updatedContent).toBe(
+      "# Project Guidelines\n\n<!-- AICE:START -->\nUpdated Rules\n<!-- AICE:END -->\n\nLegacy Rule 1: Do things.\nLegacy Rule 2: Other things.\n",
+    );
+  });
+
   it("includes Section 1 heading, @clone(SourceSym), and @replace-docs in MANDATORY_AGENT_RULES_MARKDOWN", () => {
     expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
       "### 1. Opt-In Activation Gate & Non-AICE Bypass",

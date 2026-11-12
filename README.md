@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.27](https://img.shields.io/badge/Version-0.9.27-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.28](https://img.shields.io/badge/Version-0.9.28-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -255,7 +255,7 @@ Every CLI command and all **7 First-Class MCP tools** (`aice_context`, `aice_out
 | `aice_create` | Greenfield single-file or multi-file `=== <filePath> ===` / `files` batch creation across all 20 languages & 33 extensions with inline `@idiom` expansion (`dryRun`, `overwrite`) |
 | `aice_idioms` | Project `$idiom` lifecycle: `scan`, `list`, `read`, `update`, `apply`, `expand`, `on`, and `off` |
 | `aice_gain` | Honest signed `cl100k_base` & `o200k_base` BPE token-savings telemetry (`project` drill-down, `unique` SHA-256 deduplication, `json` export) |
-| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.27`) |
+| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.28`) |
 
 - **Disable AICE completely for a project (`"enabled": false`)**:
   ```json
@@ -429,7 +429,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.27)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.28)
 ├── AGENTS.md                   # Canonical workspace AICE 2.0 mandatory agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet

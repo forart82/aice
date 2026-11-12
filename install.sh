@@ -305,12 +305,19 @@ if [[ -f "${SCRIPT_DIR}/package.json" ]]; then
   log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
   run_cmd npm install --no-fund --no-audit
 
-  log_info "Building standalone AICE executable bundle (npm run build)..."
-  run_cmd npm run build
+  if grep -q '"build"' "${SCRIPT_DIR}/package.json"; then
+    log_info "Building standalone AICE executable bundle (npm run build)..."
+    run_cmd npm run build
+  fi
+
+  aice_src="${SCRIPT_DIR}/dist/aice.mjs"
+  if [[ ! -f "$aice_src" && -f "${SCRIPT_DIR}/bin/aice.mjs" ]]; then
+    aice_src="${SCRIPT_DIR}/bin/aice.mjs"
+  fi
 
   run_cmd mkdir -p "$LOCAL_BIN"
   run_cmd rm -f "${LOCAL_BIN}/aice"
-  run_cmd cp -f "${SCRIPT_DIR}/dist/aice.mjs" "${LOCAL_BIN}/aice"
+  run_cmd cp -f "$aice_src" "${LOCAL_BIN}/aice"
   run_cmd chmod +x "${LOCAL_BIN}/aice"
   log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
 else
@@ -387,13 +394,13 @@ aice_cheatsheet() {
   local C_BOLD="\033[1m"
   local C_GRAY="\033[0;90m"
   printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.27 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.28 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] AI CONTEXT & SURGICAL AST TOOLS${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice create <file>${C_RESET}   ${C_GRAY}New file/--stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice outline <path>${C_RESET}  ${C_GRAY}src tests / 85%%${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice context <file>${C_RESET}  ${C_GRAY}f1:s1 f2:s2 / L${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}<<< === >>>/:sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.27${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}   ${C_GRAY}<<< === >>>/:sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.28${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice idioms <cmd>${C_RESET}    ${C_GRAY}33 exts + .aipl${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"

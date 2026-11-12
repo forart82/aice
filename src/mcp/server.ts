@@ -122,6 +122,11 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           description:
             "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30' — fast path with 0 dependency bloat), or regex ('/pattern/')",
         },
+        selector: {
+          type: "string",
+          description:
+            "Alias for symbol: symbol name, line range (e.g. L1-L150), or regex (/pattern/)",
+        },
         depth: {
           type: "number",
           description:
@@ -894,9 +899,23 @@ export class AiceMcpServer {
     switch (name) {
       case "aice_context": {
         {
+          const rawSelector =
+            (typeof args.symbol === "string" && args.symbol.trim().length > 0
+              ? args.symbol
+              : undefined) ??
+            (typeof args.selector === "string" && args.selector.trim().length > 0
+              ? args.selector
+              : undefined) ??
+            (typeof args.sym === "string" && args.sym.trim().length > 0
+              ? args.sym
+              : undefined) ??
+            (typeof args.range === "string" && args.range.trim().length > 0
+              ? args.range
+              : undefined) ??
+            (args.symbol ?? args.selector ?? args.sym ?? args.range);
           const symbolFilter =
-            typeof args.symbol === "string" && args.symbol.trim().length > 0
-              ? args.symbol.trim()
+            typeof rawSelector === "string" && rawSelector.trim().length > 0
+              ? rawSelector.trim()
               : undefined;
 
           let rawTargets: string[] = [];
@@ -1208,7 +1227,21 @@ export class AiceMcpServer {
 
       case "aice_splice": {
         const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
-        const symbolSelector = String(args.symbolSelector ?? args.symbol ?? "");
+        const rawSelector =
+          (typeof args.symbolSelector === "string" && args.symbolSelector.trim().length > 0
+            ? args.symbolSelector
+            : undefined) ??
+          (typeof args.symbol === "string" && args.symbol.trim().length > 0
+            ? args.symbol
+            : undefined) ??
+          (typeof args.selector === "string" && args.selector.trim().length > 0
+            ? args.selector
+            : undefined) ??
+          (typeof args.range === "string" && args.range.trim().length > 0
+            ? args.range
+            : undefined) ??
+          (args.symbolSelector ?? args.symbol ?? args.selector ?? args.range ?? "");
+        const symbolSelector = String(rawSelector);
         const newAiceCode =
           typeof args.newAiceCode === "string"
             ? args.newAiceCode

@@ -2311,7 +2311,7 @@ export function extractSymbolFromAiceSource(
   if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
     const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (matched) return matched;
-    throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    return `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first =

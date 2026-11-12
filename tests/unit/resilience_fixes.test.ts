@@ -73,9 +73,9 @@ export function calculateTotal(price: number, tax: number): number {
     });
 
     it("provides available-symbols hint when extractSymbolFromAiceSource regex misses", () => {
-      expect(() => {
-        extractSymbolFromAiceSource(tsCode, "/nonExistent/", "src/calc.ts");
-      }).toThrowError(/Pattern '\/nonExistent\/' not found[\s\S]*Available symbols: calculateTotal/);
+      const result = extractSymbolFromAiceSource(tsCode, "/nonExistent/", "src/calc.ts");
+      expect(result).toContain("// Pattern '/nonExistent/' had 0 matches in src/calc.ts");
+      expect(result).toContain("Available symbols: calculateTotal");
     });
 
     it("provides did-you-mean hint when spliceSource misses symbol", () => {

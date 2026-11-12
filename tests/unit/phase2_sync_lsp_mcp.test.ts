@@ -50,6 +50,7 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
 
       const byName = new Map<string, any>(listResult.tools.map((t: any) => [t.name, t]));
       expect(byName.get("aice_context")?.inputSchema.required).toEqual([]);
+      expect(byName.get("aice_context")?.inputSchema.properties.selector).toBeDefined();
       expect(byName.get("aice_outline")?.inputSchema.required).toEqual([]);
       expect(byName.get("aice_outline")?.inputSchema.properties.depth).toBeDefined();
       expect(byName.get("aice_outline")?.inputSchema.properties.types).toBeDefined();
@@ -116,6 +117,47 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       expect(res.content[0].text).toContain("greet");
     });
 
+    it("executes aice_context supporting selector, sym, and range aliases and pattern 0-matches resilience", async () => {
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+      const testTs = path.join(tmpDir, "ctx_alias_test.ts");
+      fs.writeFileSync(
+        testTs,
+        `export function foo(): number { return 1; }\nexport function bar(): number { return 2; }\n`,
+      );
+
+      // 1. args.selector alias
+      const resSelector = (await server.handleRequest(21, "tools/call", {
+        name: "aice_context",
+        arguments: { path: testTs, selector: "foo" },
+      })) as any;
+      expect(resSelector.isError).toBeFalsy();
+      expect(resSelector.content[0].text).toContain("foo");
+
+      // 2. args.sym alias
+      const resSym = (await server.handleRequest(22, "tools/call", {
+        name: "aice_context",
+        arguments: { path: testTs, sym: "bar" },
+      })) as any;
+      expect(resSym.isError).toBeFalsy();
+      expect(resSym.content[0].text).toContain("bar");
+
+      // 3. args.range alias
+      const resRange = (await server.handleRequest(23, "tools/call", {
+        name: "aice_context",
+        arguments: { path: testTs, range: "L1-L1" },
+      })) as any;
+      expect(resRange.isError).toBeFalsy();
+      expect(resRange.content[0].text).toContain("foo");
+
+      // 4. /pattern/ with 0 matches returns clean format instead of throwing
+      const resPatternZero = (await server.handleRequest(24, "tools/call", {
+        name: "aice_context",
+        arguments: { path: testTs, selector: "/nonExistentMethod/" },
+      })) as any;
+      expect(resPatternZero.isError).toBeFalsy();
+      expect(resPatternZero.content[0].text).toContain("// Pattern '/nonExistentMethod/' had 0 matches in");
+    });
+
     it("executes aice_splice via tools/call to replace symbol in native TypeScript file", async () => {
       const server = new AiceMcpServer({ workspaceRoot: tmpDir });
       const testTs = path.join(tmpDir, "splice_test.ts");
@@ -141,6 +183,39 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
 
       const modified = fs.readFileSync(testTs, "utf-8");
       expect(modified).toContain("x * 2");
+    });
+
+    it("executes aice_splice supporting selector and range aliases", async () => {
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+      const testTs = path.join(tmpDir, "splice_alias_test.ts");
+      fs.writeFileSync(
+        testTs,
+        `export function alpha(): number { return 10; }\nexport function beta(): number { return 20; }\n`,
+      );
+
+      // 1. args.selector alias
+      const resSel = (await server.handleRequest(31, "tools/call", {
+        name: "aice_splice",
+        arguments: {
+          filePath: testTs,
+          selector: "alpha",
+          newAiceCode: "pub fn alpha() -> int:\n  ret 100\n",
+        },
+      })) as any;
+      expect(resSel.isError).toBeFalsy();
+      expect(resSel.content[0].text).toContain("Successfully spliced symbol 'alpha'");
+
+      // 2. args.range alias
+      const resRange = (await server.handleRequest(32, "tools/call", {
+        name: "aice_splice",
+        arguments: {
+          filePath: testTs,
+          range: "L2-L2",
+          newAiceCode: "export function beta(): number { return 200; }",
+        },
+      })) as any;
+      expect(resRange.isError).toBeFalsy();
+      expect(fs.readFileSync(testTs, "utf-8")).toContain("200");
     });
 
     it("executes aice_idioms list and scan via tools/call", async () => {

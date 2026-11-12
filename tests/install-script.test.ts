@@ -6,6 +6,9 @@ import { describe, expect, it } from "vitest";
 
 const INSTALL_SCRIPT = path.resolve(process.cwd(), "install.sh");
 const UNINSTALL_SCRIPT = path.resolve(process.cwd(), "uninstall.sh");
+const pkg = JSON.parse(
+  fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
+) as { version: string };
 
 describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninstall.sh)", () => {
   it("exists, is executable, and passes bash -n syntax validation", () => {
@@ -165,9 +168,9 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       const updatedZshrc = fs.readFileSync(zshrcPath, "utf-8");
       expect(updatedZshrc).toContain("export FOO=1");
       expect(updatedZshrc).toContain(
-        "AICE v0.9.24 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
+        `AICE v${pkg.version} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`,
       );
-      expect(updatedZshrc).toContain("Inspect v0.9.24");
+      expect(updatedZshrc).toContain(`Inspect v${pkg.version}`);
       expect(updatedZshrc).toContain("(@forart82)");
       expect(updatedZshrc).toContain("https://github.com/forart82/aice");
       expect(updatedZshrc).toContain("aice create <file>");
@@ -211,7 +214,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       });
       fs.writeFileSync(
         path.join(seedDir, "package.json"),
-        JSON.stringify({ name: "aice", version: "0.9.4" }, null, 2),
+        JSON.stringify({ name: "aice", version: "0.9.4", scripts: { build: "node -e 'process.exit(0)'" } }, null, 2),
         "utf-8",
       );
 
@@ -236,7 +239,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       // Advance origin/main from seedDir to v0.9.5
       fs.writeFileSync(
         path.join(seedDir, "package.json"),
-        JSON.stringify({ name: "aice", version: "0.9.5" }, null, 2),
+        JSON.stringify({ name: "aice", version: "0.9.5", scripts: { build: "node -e 'process.exit(0)'" } }, null, 2),
         "utf-8",
       );
       spawnSync("git", ["-C", seedDir, "add", "package.json"], { env: gitEnv });
@@ -309,15 +312,11 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
     const lines = stripped.split("\n").filter((line) => line.trim().length > 0);
     expect(lines.length).toBe(12);
 
-    // Top title row must prominently include the AICE version number matching package.json (v0.9.24)
+    // Top title row must prominently include the AICE version number matching package.json
     expect(lines[1]).toContain(
       `AICE v${pkg.version} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`,
     );
-    expect(lines[1]).toContain(
-      "AICE v0.9.24 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)",
-    );
     expect(lines[7]).toContain(`Inspect v${pkg.version}`);
-    expect(lines[7]).toContain("Inspect v0.9.24");
     for (const [idx, line] of lines.entries()) {
       expect([...line].length, `Line ${idx + 1} visible width: ${line}`).toBe(80);
       expect(line[0]).toMatch(/[╭│├╰]/);

@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.27";
+    AICE_VERSION = "0.9.28";
     VERSION = AICE_VERSION;
   }
 });
@@ -935,7 +935,7 @@ function upsertMarkdownDirective(mdPath, blockText) {
   const span = findDirectiveSpanOutsideFences(existing);
   if (span) {
     const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
-    const after = existing.slice(span.endOffset).replace(/^\s*/, "");
+    const after = existing.slice(span.endOffset).trim();
     const parts = [];
     if (before.length > 0) parts.push(before);
     parts.push(directiveBlock);
@@ -944,13 +944,32 @@ function upsertMarkdownDirective(mdPath, blockText) {
 `);
     return;
   }
-  const trimmed = existing.trimEnd();
-  const nextContent = trimmed.length > 0 ? `${trimmed}
+  const trimmed = existing.trim();
+  if (trimmed.length === 0) {
+    writeFileAtomic(mdPath, `${directiveBlock}
+`);
+    return;
+  }
+  const headingMatch = existing.match(/^(\s*#[ \t]+[^\r\n]+)/);
+  if (headingMatch) {
+    const heading = headingMatch[0].trim();
+    const rest = existing.slice(headingMatch[0].length).trim();
+    const nextContent = rest.length > 0 ? `${heading}
 
 ${directiveBlock}
-` : `${directiveBlock}
+
+${rest}
+` : `${heading}
+
+${directiveBlock}
 `;
-  writeFileAtomic(mdPath, nextContent);
+    writeFileAtomic(mdPath, nextContent);
+    return;
+  }
+  writeFileAtomic(mdPath, `${directiveBlock}
+
+${trimmed}
+`);
 }
 function removeMarkdownDirective(mdPath, optionsOrRemoveIfEmpty = false) {
   const removeIfEmpty = typeof optionsOrRemoveIfEmpty === "boolean" ? optionsOrRemoveIfEmpty : Boolean(optionsOrRemoveIfEmpty?.removeIfEmpty);
@@ -274137,7 +274156,8 @@ ${clampedLines}`;
   if (/^\/.+\/[gimsuy]*$/.test(trimmedSel)) {
     const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (matched) return matched;
-    throw new Error(`Pattern '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    return `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}
+`;
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first = resolveFirstActionableSymbol(aiceSource, filePath, preParsedMod) ?? resolveFirstActionableSymbol(rawFileSource, filePath, preParsedMod);
@@ -296254,6 +296274,10 @@ var init_server = __esm({
               type: "string",
               description: "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30' \u2014 fast path with 0 dependency bloat), or regex ('/pattern/')"
             },
+            selector: {
+              type: "string",
+              description: "Alias for symbol: symbol name, line range (e.g. L1-L150), or regex (/pattern/)"
+            },
             depth: {
               type: "number",
               description: "Dependency traversal depth (default: 1 for symbols, 0 for Lstart-Lend and /pattern/ fast path)"
@@ -296908,7 +296932,8 @@ ${json}`;
         switch (name) {
           case "aice_context": {
             {
-              const symbolFilter = typeof args.symbol === "string" && args.symbol.trim().length > 0 ? args.symbol.trim() : void 0;
+              const rawSelector = (typeof args.symbol === "string" && args.symbol.trim().length > 0 ? args.symbol : void 0) ?? (typeof args.selector === "string" && args.selector.trim().length > 0 ? args.selector : void 0) ?? (typeof args.sym === "string" && args.sym.trim().length > 0 ? args.sym : void 0) ?? (typeof args.range === "string" && args.range.trim().length > 0 ? args.range : void 0) ?? (args.symbol ?? args.selector ?? args.sym ?? args.range);
+              const symbolFilter = typeof rawSelector === "string" && rawSelector.trim().length > 0 ? rawSelector.trim() : void 0;
               let rawTargets = [];
               if (Array.isArray(args.paths) && args.paths.length > 0) {
                 rawTargets = args.paths.map((p) => String(p).trim()).filter(Boolean);
@@ -297172,7 +297197,8 @@ ${r.text}` : r.text
           }
           case "aice_splice": {
             const rawTargetFile = String(args.filePath ?? args.path ?? args.file ?? "");
-            const symbolSelector = String(args.symbolSelector ?? args.symbol ?? "");
+            const rawSelector = (typeof args.symbolSelector === "string" && args.symbolSelector.trim().length > 0 ? args.symbolSelector : void 0) ?? (typeof args.symbol === "string" && args.symbol.trim().length > 0 ? args.symbol : void 0) ?? (typeof args.selector === "string" && args.selector.trim().length > 0 ? args.selector : void 0) ?? (typeof args.range === "string" && args.range.trim().length > 0 ? args.range : void 0) ?? (args.symbolSelector ?? args.symbol ?? args.selector ?? args.range ?? "");
+            const symbolSelector = String(rawSelector);
             const newAiceCode = typeof args.newAiceCode === "string" ? args.newAiceCode : typeof args.code === "string" ? args.code : void 0;
             const bodyCode = typeof args.body === "string" ? args.body : void 0;
             const deleteFlag = Boolean(args.delete);

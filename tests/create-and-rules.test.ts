@@ -674,8 +674,8 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(fs.existsSync(path.join(projDir, ".agents"))).toBe(false);
       // CLAUDE.md had pre-existing content so it remains without the AICE block
       expect(fs.existsSync(claudeMd)).toBe(true);
-      expect(fs.readFileSync(claudeMd, "utf-8")).toBe(
-        "# Existing Claude Instructions\nKeep this header.\n",
+      expect(fs.readFileSync(claudeMd, "utf-8").trim()).toBe(
+        "# Existing Claude Instructions\n\nKeep this header.",
       );
     });
 
