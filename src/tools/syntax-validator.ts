@@ -824,10 +824,26 @@ export function validateNativeSyntax(
         else if (ch === ")" || ch === "]" || ch === "}") openDelims = Math.max(0, openDelims - 1);
       }
 
+      const isAiplInlineFn = (text: string) => {
+        const lastParen = text.lastIndexOf(")");
+        if (lastParen < 0) return false;
+        const afterParen = text.slice(lastParen + 1).trim();
+        const colons = (afterParen.match(/:/g) || []).length;
+        if (colons >= 2) return true;
+        if (colons === 1 && afterParen.includes("=")) return true;
+        if (
+          colons === 1 &&
+          /^\s*:\s*(?:ret\b|return\b|pass\b|assert\b|print|if\b|\{)/.test(afterParen)
+        )
+          return true;
+        if (/^\s*=\s*\S+/.test(afterParen)) return true;
+        return false;
+      };
+
       if (openDelimsBefore === 0 && /^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
         if (openDelims > 0) {
           inMultilineFnHeader = true;
-        } else if (!trimmed.endsWith(":")) {
+        } else if (!isAiplInlineFn(trimmed) && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
             column: line.length,
@@ -836,7 +852,7 @@ export function validateNativeSyntax(
         }
       } else if (inMultilineFnHeader && openDelims === 0) {
         inMultilineFnHeader = false;
-        if (!trimmed.endsWith(":")) {
+        if (!isAiplInlineFn(trimmed) && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
             column: line.length,
@@ -844,7 +860,6 @@ export function validateNativeSyntax(
           });
         }
       }
-
       if (openDelimsBefore === 0 && /^(?:pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*/.test(trimmed)) {
         const hasTupleOpen = /^(?:pub\s+)?struct\s+[A-Za-z0-9_]+\s*\(/.test(trimmed);
         const isSingleLineTupleStruct =

@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.26";
+    AICE_VERSION = "0.9.27";
     VERSION = AICE_VERSION;
   }
 });
@@ -77,6 +77,7 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 ## AICE 2.0 (v${AICE_VERSION}) \u2014 MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (\`aice\`) or MCP tools instead of generic \`view_file\` / \`read_file\` / \`write_file\` / \`edit_file\` / \`replace_file_content\`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (\`sed\` / \`ls\` / \`grep\` Ban)
+- **FORBIDDEN SHELL FILE-WRITING WORKAROUNDS**: NEVER execute shell scripts or commands to write or overwrite files (e.g. \`python3 with open()\`, \`node fs.writeFileSync()\`, \`echo "..." > file\`, \`cat << 'EOF' > file\`). Use \`aice splice\` for surgical updates, \`aice create --force\` for full rewrites, or standard native file tools when in emergency fallback mode.
 - **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run \`sed -n\`, \`awk\`, \`head\`, \`tail\`, \`cat\`, \`grep -n\`, \`grep -rn\`, \`grep -C\`, \`ls\`, \`ls -la\`, \`ls src\`, \`find\`, \`aice --help\`, \`aice --version\`, \`which aice\`, or \`git status\` on supported files and directories (\`aice context\` works seamlessly across all 33 file extensions including \`.aipl\`):
   - Replace \`ls src tests\` -> \`aice outline src tests\`
   - Replace \`sed -n '180,240p' file\` -> \`aice context <file> -s "L180-L240"\`
@@ -85,7 +86,6 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   - Replace \`grep -n -C 10 "sym" file.aipl\` -> \`aice context file.aipl -s "sym"\`
   - Replace \`grep -rn "pattern" dir\` -> \`aice context <fileOrDir> -s "/<searchPattern>/"\` (returns exact call-site line numbers and context)
   - Replace \`grep -rn "sym" src/\` -> \`aice context src -s "/sym/"\`
-
 ### 1. Opt-In Activation Gate & Non-AICE Bypass (\`aice.config.json\`)
 - **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an \`aice.config.json\` file with \`"enabled": true\` (pre-provisioned in all AICE project folders such as \`aice_*\` / \`aice\`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count \`aice.config.json\` against project file limits).
 - **Non-AICE Bypass**: If \`aice.config.json\` with \`"enabled": true\` is **not** present in the project folder (e.g. \`*_nonaice\` folders or when \`"enabled": false\`), bypass AICE completely and use standard native file tools (\`write_file\`, \`edit_file\`, \`read_file\`, \`view_file\`).
@@ -111,8 +111,9 @@ ${AICE_VERSIONED_DIRECTIVE_START}
   .card { display: flex; flex-direction: column; gap: 20px; padding: 16px; background: #070810; color: #f0f4fc; border-radius: 8px; }
   EOF
   \`\`\`
-- **NEVER overwrite existing files (>25 lines) with \`aice create\`**: Use \`aice splice\` for updates. For modular files (>150 lines), create clean methods or splice additions via \`aice splice\`.
-
+- **Surgical Updates vs Full-File Rewrites**:
+  - **Surgical Updates (< 50% changed)**: Use \`aice splice\` (symbol edits, hunks \`<<< === >>>\`, or line ranges) \u2014 90%+ edit token savings. For modular files (>150 lines), create clean methods or splice additions via \`aice splice\`.
+  - **Full-File Replacement (> 50% changed or complete overhaul)**: Use \`aice create <file> --force\` (or inside \`aice splice\`: \`=== <filePath>:overwrite ===\` / \`=== <filePath> ===\`), or standard \`write_file\`. Pass \`--force\` / \`--overwrite\` if using \`aice create\` on existing files (>25 lines).
 ### 3. 1-Turn Multi-File Stream Exploration (85-90% Read Token Savings)
 - **Default Multi-File \`aice context\` Stream**: Read multiple files, symbols, or line ranges in **1 single turn** with deduplicated dependency contracts and downstream callers via inline \`file:sym1,sym2\` or \`file:Lstart-Lend\` selectors:
   \`\`\`bash
@@ -270544,10 +270545,22 @@ function validateNativeSyntax(code, targetLang, filePath, activeIdioms) {
         if (ch === "(" || ch === "[" || ch === "{") openDelims++;
         else if (ch === ")" || ch === "]" || ch === "}") openDelims = Math.max(0, openDelims - 1);
       }
+      const isAiplInlineFn = (text) => {
+        const lastParen = text.lastIndexOf(")");
+        if (lastParen < 0) return false;
+        const afterParen = text.slice(lastParen + 1).trim();
+        const colons = (afterParen.match(/:/g) || []).length;
+        if (colons >= 2) return true;
+        if (colons === 1 && afterParen.includes("=")) return true;
+        if (colons === 1 && /^\s*:\s*(?:ret\b|return\b|pass\b|assert\b|print|if\b|\{)/.test(afterParen))
+          return true;
+        if (/^\s*=\s*\S+/.test(afterParen)) return true;
+        return false;
+      };
       if (openDelimsBefore === 0 && /^(?:pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(trimmed)) {
         if (openDelims > 0) {
           inMultilineFnHeader = true;
-        } else if (!trimmed.endsWith(":")) {
+        } else if (!isAiplInlineFn(trimmed) && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
             column: line.length,
@@ -270556,7 +270569,7 @@ function validateNativeSyntax(code, targetLang, filePath, activeIdioms) {
         }
       } else if (inMultilineFnHeader && openDelims === 0) {
         inMultilineFnHeader = false;
-        if (!trimmed.endsWith(":")) {
+        if (!isAiplInlineFn(trimmed) && !trimmed.endsWith(":")) {
           items.push({
             line: i + 1,
             column: line.length,
@@ -275714,7 +275727,7 @@ ${indented}
   const lines = rawCode.split(/\r?\n/);
   return lines.map((line) => normalizeCompactAiceLine(line)).join("\n");
 }
-function compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms) {
+function compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms, overwrite) {
   if (fullPath.endsWith(".aice")) {
     return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}
 `;
@@ -275732,6 +275745,9 @@ function compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeId
 `;
     const check2 = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
     if (!check2.valid) {
+      if (overwrite) {
+        return out;
+      }
       throw new Error(
         `Failed pre-write syntax validation for ${fullPath}: ${check2.diagnostics.join("; ")}`
       );
@@ -275838,6 +275854,10 @@ function compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeId
     return repaired.endsWith("\n") ? repaired : `${repaired}
 `;
   }
+  if (overwrite && (isHybridOrNativeSource(cleanedCode, targetLang) || cleanedCode.trim())) {
+    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}
+`;
+  }
   const diagSummary = repairedCheck.diagnostics.length > 0 ? ` (${repairedCheck.diagnostics.join("; ")})` : "";
   throw new Error(
     `Failed to compile AICE source for ${fullPath}: ${parseErr instanceof Error ? parseErr.message : String(parseErr ?? "Invalid syntax")}${diagSummary}`
@@ -275931,6 +275951,7 @@ async function createFile(filePath, options = {}) {
     }
   }
   const overwrite = Boolean(options.overwrite || options.force || headerOverwrite);
+  const dryRun = Boolean(options.dryRun);
   if (!overwrite && fs13.existsSync(fullPath)) {
     const existingContent = fs13.readFileSync(fullPath, "utf-8");
     const existingLineCount = existingContent.split(/\r?\n/).length;
@@ -275951,7 +275972,7 @@ async function createFile(filePath, options = {}) {
   \u2022 Edit function/method/field: aice splice ${cleanPath} -s ${targetSymbol} --stdin << 'EOF'
   \u2022 Edit specific line(s):      aice splice ${cleanPath} -s L1-L1 -c "<replacement>"
   \u2022 Delete unused line/member:  aice splice ${cleanPath} -s <Class.field|L20-L20> --delete
-(Pass --overwrite or -f/--force to force full-file replacement.)`
+(Pass --overwrite or -f/--force to force full-file replacement, or use '=== ${cleanPath}:overwrite ===' in 'aice splice'.)`
       );
     }
   }
@@ -276026,9 +276047,8 @@ async function createFile(filePath, options = {}) {
   const language = detectLanguageName(fullPath.replace(/\.aice$/, ""));
   const nativeCode = isPassthroughManifest ? `${cleanedCode.replace(/^(?:\r?\n)+|\s+$/g, "")}
 ` : withSuppressedTelemetry(
-    () => compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms)
+    () => compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms, overwrite)
   );
-  const dryRun = Boolean(options.dryRun);
   const persistedIdioms = [];
   if (!dryRun) {
     const dir = path14.dirname(fullPath);

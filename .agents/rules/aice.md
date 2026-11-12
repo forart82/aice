@@ -1,13 +1,14 @@
 ---
 trigger: always_on
-description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.26)
+description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.27)
 ---
 
 <!-- AICE:START -->
-<!-- AICE:START v0.9.26 -->
-## AICE 2.0 (v0.9.26) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+<!-- AICE:START v0.9.27 -->
+## AICE 2.0 (v0.9.27) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (`sed` / `ls` / `grep` Ban)
+- **FORBIDDEN SHELL FILE-WRITING WORKAROUNDS**: NEVER execute shell scripts or commands to write or overwrite files (e.g. `python3 with open()`, `node fs.writeFileSync()`, `echo "..." > file`, `cat << 'EOF' > file`). Use `aice splice` for surgical updates, `aice create --force` for full rewrites, or standard native file tools when in emergency fallback mode.
 - **FORBIDDEN SHELL FILE-READING / SEARCHING WORKAROUNDS**: NEVER run `sed -n`, `awk`, `head`, `tail`, `cat`, `grep -n`, `grep -rn`, `grep -C`, `ls`, `ls -la`, `ls src`, `find`, `aice --help`, `aice --version`, `which aice`, or `git status` on supported files and directories (`aice context` works seamlessly across all 33 file extensions including `.aipl`):
   - Replace `ls src tests` -> `aice outline src tests`
   - Replace `sed -n '180,240p' file` -> `aice context <file> -s "L180-L240"`
@@ -16,7 +17,6 @@ description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Ru
   - Replace `grep -n -C 10 "sym" file.aipl` -> `aice context file.aipl -s "sym"`
   - Replace `grep -rn "pattern" dir` -> `aice context <fileOrDir> -s "/<searchPattern>/"` (returns exact call-site line numbers and context)
   - Replace `grep -rn "sym" src/` -> `aice context src -s "/sym/"`
-
 ### 1. Opt-In Activation Gate & Non-AICE Bypass (`aice.config.json`)
 - **Opt-In Activation Gate**: AICE is **ONLY active** when the project folder (the same folder in which the agent is running) contains an `aice.config.json` file with `"enabled": true` (pre-provisioned in all AICE project folders such as `aice_*` / `aice`; do NOT waste a turn probing for it, and NEVER delete, overwrite, or count `aice.config.json` against project file limits).
 - **Non-AICE Bypass**: If `aice.config.json` with `"enabled": true` is **not** present in the project folder (e.g. `*_nonaice` folders or when `"enabled": false`), bypass AICE completely and use standard native file tools (`write_file`, `edit_file`, `read_file`, `view_file`).
@@ -42,8 +42,9 @@ description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Ru
   .card { display: flex; flex-direction: column; gap: 20px; padding: 16px; background: #070810; color: #f0f4fc; border-radius: 8px; }
   EOF
   ```
-- **NEVER overwrite existing files (>25 lines) with `aice create`**: Use `aice splice` for updates. For modular files (>150 lines), create clean methods or splice additions via `aice splice`.
-
+- **Surgical Updates vs Full-File Rewrites**:
+  - **Surgical Updates (< 50% changed)**: Use `aice splice` (symbol edits, hunks `<<< === >>>`, or line ranges) — 90%+ edit token savings. For modular files (>150 lines), create clean methods or splice additions via `aice splice`.
+  - **Full-File Replacement (> 50% changed or complete overhaul)**: Use `aice create <file> --force` (or inside `aice splice`: `=== <filePath>:overwrite ===` / `=== <filePath> ===`), or standard `write_file`. Pass `--force` / `--overwrite` if using `aice create` on existing files (>25 lines).
 ### 3. 1-Turn Multi-File Stream Exploration (85-90% Read Token Savings)
 - **Default Multi-File `aice context` Stream**: Read multiple files, symbols, or line ranges in **1 single turn** with deduplicated dependency contracts and downstream callers via inline `file:sym1,sym2` or `file:Lstart-Lend` selectors:
   ```bash

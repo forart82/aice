@@ -695,6 +695,7 @@ function compileAiceOrHybridToNative(
   fullPath: string,
   targetLang: TargetLanguage,
   activeIdioms: Record<string, ProjectIdiomDefinition>,
+  overwrite?: boolean,
 ): string {
   if (fullPath.endsWith(".aice")) {
     return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
@@ -718,6 +719,9 @@ function compileAiceOrHybridToNative(
     const out = cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     const check = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
     if (!check.valid) {
+      if (overwrite) {
+        return out;
+      }
       throw new Error(
         `Failed pre-write syntax validation for ${fullPath}: ${check.diagnostics.join("; ")}`,
       );
@@ -837,6 +841,10 @@ function compileAiceOrHybridToNative(
     );
   if (repairedCheck.valid && !hasUncompiledAiceIndentBlock) {
     return repaired.endsWith("\n") ? repaired : `${repaired}\n`;
+  }
+
+  if (overwrite && (isHybridOrNativeSource(cleanedCode, targetLang) || cleanedCode.trim())) {
+    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
   }
 
   const diagSummary =
@@ -968,6 +976,7 @@ export async function createFile(
   }
 
   const overwrite = Boolean(options.overwrite || options.force || headerOverwrite);
+  const dryRun = Boolean(options.dryRun);
   if (!overwrite && fs.existsSync(fullPath)) {
     const existingContent = fs.readFileSync(fullPath, "utf-8");
     const existingLineCount = existingContent.split(/\r?\n/).length;
@@ -984,7 +993,7 @@ export async function createFile(
       }
       const cleanPath = filePath.split(":")[0];
       throw new Error(
-        `Target file '${cleanPath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${cleanPath} -s ${targetSymbol} --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${cleanPath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${cleanPath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite or -f/--force to force full-file replacement.)`,
+        `Target file '${cleanPath}' already exists (${existingLineCount} lines). Do NOT rewrite existing files with 'aice create' — use 'aice splice' for surgical edits (90%+ fewer tokens):\n  • Edit function/method/field: aice splice ${cleanPath} -s ${targetSymbol} --stdin << 'EOF'\n  • Edit specific line(s):      aice splice ${cleanPath} -s L1-L1 -c "<replacement>"\n  • Delete unused line/member:  aice splice ${cleanPath} -s <Class.field|L20-L20> --delete\n(Pass --overwrite or -f/--force to force full-file replacement, or use '=== ${cleanPath}:overwrite ===' in 'aice splice'.)`,
       );
     }
   }
@@ -1093,10 +1102,8 @@ export async function createFile(
   const nativeCode = isPassthroughManifest
     ? `${cleanedCode.replace(/^(?:\r?\n)+|\s+$/g, "")}\n`
     : withSuppressedTelemetry(() =>
-        compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms),
+        compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms, overwrite),
       );
-
-  const dryRun = Boolean(options.dryRun);
   const persistedIdioms: string[] = [];
   if (!dryRun) {
     const dir = path.dirname(fullPath);
@@ -1202,7 +1209,6 @@ export async function createFile(
 }
 
 /**
- /**
  * Parses a multi-file heredoc/stream payload delimited by `=== <filePath> ===`,
  * `--- <filePath> ---`, or `// FILE: <filePath>` / `# FILE: <filePath>` headers.
  */
