@@ -1572,6 +1572,19 @@ export async function generateWorkspaceContext(
         ]),
       ).sort();
 
+  const isExplicitTestSearch =
+    Boolean(resolved.resolvedPath) &&
+    /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/i.test(
+      resolved.resolvedPath,
+    );
+
+  const scoredFileSlices: Array<{
+    relFile: string;
+    headerTag: string;
+    sliceBody: string;
+    score: number;
+  }> = [];
+
   for (const f of workspaceFiles) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
@@ -1580,14 +1593,43 @@ export async function generateWorkspaceContext(
 
       if (isPureRegexSearch) {
         const matchedSlices: string[] = [];
+        const isMockOrTest = !isExplicitTestSearch && isTestOrMockPath(f);
+        let fileMaxScore = 0;
+        const queryKw = requestedSelectors[0]
+          ?.replace(/[^A-Za-z0-9_$-]/g, " ")
+          .trim()
+          .split(/\s+/)[0];
+        const fileNameMatches =
+          Boolean(queryKw) &&
+          queryKw.length >= 2 &&
+          path.basename(f).toLowerCase().includes(queryKw.toLowerCase());
+
         for (const rawSel of requestedSelectors) {
-          const matched = extractPatternMatchesFromSource(rawFileContent, rawSel.trim());
-          if (matched) {
-            matchedSlices.push(matched.trim());
+          const detailed = extractPatternMatchesDetailed(rawFileContent, rawSel.trim(), 2, {
+            filePath: f,
+            isExplicitTestSearch,
+          });
+          if (detailed) {
+            matchedSlices.push(detailed.formattedText.trim());
+            if (detailed.maxScore > fileMaxScore) {
+              fileMaxScore = detailed.maxScore;
+            }
           }
         }
         if (matchedSlices.length === 0) {
-          continue;
+          if (fileNameMatches) {
+            const previewLines = rawFileContent
+              .split(/\r?\n/)
+              .slice(0, 5)
+              .map((l, idx) => `L${idx + 1}: ${l}`)
+              .join("\n");
+            matchedSlices.push(
+              `// file name match: ${path.basename(f)} # [L1-L${Math.min(5, rawFileContent.split(/\r?\n/).length)}]\n${previewLines}`,
+            );
+            fileMaxScore = isMockOrTest ? 25 : 1000;
+          } else {
+            continue;
+          }
         }
         const hitTags = Array.from(
           new Set(
@@ -1608,7 +1650,13 @@ export async function generateWorkspaceContext(
         );
         const sliceBody = annotatedSlices.filter(Boolean).join("\n\n");
         const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
-        symbolSlices.push(`### ${relFile}${headerTag}\n\`\`\`aice\n${sliceBody}\n\`\`\``);
+
+        scoredFileSlices.push({
+          relFile,
+          headerTag,
+          sliceBody,
+          score: fileMaxScore,
+        });
         continue;
       }
 
@@ -1845,6 +1893,13 @@ export async function generateWorkspaceContext(
     }
   }
 
+  if (isPureRegexSearch && scoredFileSlices.length > 0) {
+    scoredFileSlices.sort((a, b) => b.score - a.score);
+    for (const item of scoredFileSlices) {
+      symbolSlices.push(`### ${item.relFile}${item.headerTag}\n\`\`\`aice\n${item.sliceBody}\n\`\`\``);
+    }
+  }
+
   // Format bundle
   const parts: string[] = [];
   if (requestedSelectors.length > 0) {
@@ -2074,15 +2129,104 @@ function hasCatastrophicNestedQuantifiers(pattern: string): boolean {
   return /\([^()]*[+*][^()]*\)\s*[+*?{]/.test(pattern);
 }
 
-function extractPatternMatchesFromSource(
+export interface PatternMatchRankingOptions {
+  filePath?: string;
+  isExplicitTestSearch?: boolean;
+}
+
+export function isTestOrMockPath(filePath: string): boolean {
+  const norm = filePath.replace(/\\/g, "/").toLowerCase();
+  return (
+    /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/.test(norm) ||
+    /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
+    /(?:_test|_spec)\.[a-z0-9]+$/i.test(norm)
+  );
+}
+
+export function isCommentLine(line: string): boolean {
+  const t = line.trim();
+  return (
+    t.startsWith("//") ||
+    t.startsWith("#") ||
+    t.startsWith("*") ||
+    t.startsWith("/*") ||
+    t.startsWith('"""') ||
+    t.startsWith("'''") ||
+    t.startsWith("<!--") ||
+    t.startsWith("--")
+  );
+}
+
+export function isDeclarationLine(line: string): boolean {
+  return /\b(function|class|interface|type|enum|struct|fn|def|pub|export|const|let|var|val|sub|record)\b/.test(line);
+}
+
+function scorePatternWindow(
+  lines: string[],
+  w: { start: number; end: number; hits: number[] },
+  filePath?: string,
+  queryKeyword?: string,
+  isExplicitTestSearch = false,
+): number {
+  const isMockOrTest = filePath && !isExplicitTestSearch && isTestOrMockPath(filePath);
+
+  let fileNameBonus = 0;
+  if (filePath && queryKeyword && queryKeyword.length >= 2) {
+    const base = path.basename(filePath).toLowerCase();
+    if (base.includes(queryKeyword.toLowerCase())) {
+      fileNameBonus = isMockOrTest ? 20 : 1000;
+    }
+  }
+
+  let hasDeclaration = false;
+  let hasCode = false;
+  let allComments = true;
+
+  for (const h of w.hits) {
+    const lineText = lines[h - 1] ?? "";
+    if (isCommentLine(lineText)) {
+      // comment hit
+    } else {
+      allComments = false;
+      hasCode = true;
+      if (isDeclarationLine(lineText)) {
+        hasDeclaration = true;
+      }
+    }
+  }
+
+  let lineScore = 0;
+  if (!isMockOrTest) {
+    if (hasDeclaration) lineScore = 500;
+    else if (hasCode) lineScore = 300;
+    else if (allComments) lineScore = 100;
+  } else {
+    if (hasDeclaration) lineScore = 50;
+    else if (hasCode) lineScore = 30;
+    else if (allComments) lineScore = 10;
+  }
+
+  const lineTieBreaker = Math.max(0, 10 - w.start / 100);
+  return fileNameBonus + lineScore + lineTieBreaker;
+}
+
+export interface PatternMatchResult {
+  formattedText: string;
+  maxScore: number;
+}
+
+export function extractPatternMatchesDetailed(
   rawSource: string,
   rawQuery: string,
   contextRadius = 2,
-): string | undefined {
+  rankingOpts?: PatternMatchRankingOptions,
+): PatternMatchResult | undefined {
   const trimmed = rawQuery.trim();
   if (!trimmed) return undefined;
   const regexMatch = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
   let matcher: (line: string) => boolean;
+  let queryKeyword: string | undefined;
+
   if (regexMatch) {
     const rawBody = regexMatch[1];
     if (hasCatastrophicNestedQuantifiers(rawBody)) {
@@ -2098,7 +2242,10 @@ function extractPatternMatchesFromSource(
       );
     }
     matcher = (line: string) => re.test(line);
+    const cleaned = rawBody.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
+    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
   } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+    queryKeyword = trimmed;
     const esc = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const identRe = new RegExp(`\\b${esc}\\b`);
     matcher = (line: string) => {
@@ -2109,6 +2256,8 @@ function extractPatternMatchesFromSource(
   } else {
     const lower = trimmed.toLowerCase();
     matcher = (line: string) => line.includes(trimmed) || line.toLowerCase().includes(lower);
+    const cleaned = trimmed.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
+    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
   }
 
   const lines = rawSource.split(/\r?\n/);
@@ -2133,8 +2282,25 @@ function extractPatternMatchesFromSource(
     }
   }
 
-  return windows
+  const scoredWindows = windows.map((w) => ({
+    ...w,
+    score: scorePatternWindow(
+      lines,
+      w,
+      rankingOpts?.filePath,
+      queryKeyword,
+      rankingOpts?.isExplicitTestSearch ?? false,
+    ),
+  }));
+
+  const maxScore = scoredWindows.reduce((max, w) => Math.max(max, w.score), 0);
+
+  const topWindows = scoredWindows
+    .sort((a, b) => b.score - a.score)
     .slice(0, 25)
+    .sort((a, b) => a.start - b.start);
+
+  const formattedText = topWindows
     .map((w) => {
       const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
       const body = lines
@@ -2144,6 +2310,17 @@ function extractPatternMatchesFromSource(
       return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]\n${body}`;
     })
     .join("\n\n");
+
+  return { formattedText, maxScore };
+}
+
+function extractPatternMatchesFromSource(
+  rawSource: string,
+  rawQuery: string,
+  contextRadius = 2,
+  rankingOpts?: PatternMatchRankingOptions,
+): string | undefined {
+  return extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius, rankingOpts)?.formattedText;
 }
 
 function formatWithLineNumbers(text: string, startLine = 1): string {

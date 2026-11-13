@@ -522,5 +522,55 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       expect(output).toContain("📊 Context Pack Token Telemetry:");
       expect(output).toContain("Total pack tokens:");
     });
+
+    it("ranks file name match > production code > comments > mock/test files", async () => {
+      const srcDir = path.join(tmpDir, "src");
+      const testDir = path.join(tmpDir, "tests");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.mkdirSync(testDir, { recursive: true });
+
+      const tier1Path = path.join(srcDir, "order_gateway.ts");
+      fs.writeFileSync(tier1Path, "export const ROUTE = '/orders';\n", "utf-8");
+
+      const tier2Path = path.join(srcDir, "processor.ts");
+      fs.writeFileSync(
+        tier2Path,
+        "export function order_gateway(req: any) {\n  return req.id;\n}\n",
+        "utf-8",
+      );
+
+      const tier3Path = path.join(srcDir, "helper.ts");
+      fs.writeFileSync(
+        tier3Path,
+        "// TODO: route through order_gateway when ready\nexport const V = 1;\n",
+        "utf-8",
+      );
+
+      const tier4Path = path.join(testDir, "order_gateway.test.ts");
+      fs.writeFileSync(
+        tier4Path,
+        "describe('order_gateway mock test', () => {\n  it('checks mock', () => {});\n});\n",
+        "utf-8",
+      );
+
+      const res = await generateContext(tmpDir, {
+        symbol: "/order_gateway/",
+      });
+
+      const body = res.formattedBundle;
+      const posTier1 = body.indexOf("order_gateway.ts");
+      const posTier2 = body.indexOf("processor.ts");
+      const posTier3 = body.indexOf("helper.ts");
+      const posTier4 = body.indexOf("order_gateway.test.ts");
+
+      expect(posTier1).toBeGreaterThanOrEqual(0);
+      expect(posTier2).toBeGreaterThanOrEqual(0);
+      expect(posTier3).toBeGreaterThanOrEqual(0);
+      expect(posTier4).toBeGreaterThanOrEqual(0);
+
+      expect(posTier1).toBeLessThan(posTier2);
+      expect(posTier2).toBeLessThan(posTier3);
+      expect(posTier3).toBeLessThan(posTier4);
+    });
   });
 });

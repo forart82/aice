@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.30";
+    AICE_VERSION = "0.9.31";
     VERSION = AICE_VERSION;
   }
 });
@@ -272453,10 +272453,14 @@ var init_outline = __esm({
 var context_exports = {};
 __export(context_exports, {
   extractImportsFromFile: () => extractImportsFromFile,
+  extractPatternMatchesDetailed: () => extractPatternMatchesDetailed,
   extractSymbolFromAiceSource: () => extractSymbolFromAiceSource,
   generateContext: () => generateContext,
   generateMultiContext: () => generateMultiContext,
   generateWorkspaceContext: () => generateWorkspaceContext,
+  isCommentLine: () => isCommentLine,
+  isDeclarationLine: () => isDeclarationLine,
+  isTestOrMockPath: () => isTestOrMockPath,
   mergeMultiContextResults: () => mergeMultiContextResults,
   packContext: () => packContext,
   packageContext: () => packageContext,
@@ -273591,6 +273595,10 @@ async function generateWorkspaceContext(targetPath, options = {}) {
       ...resolved.isDirectory && fs12.existsSync(resolved.resolvedPath) ? scanDirectoryForTargets(resolved.resolvedPath, 5) : []
     ])
   ).sort();
+  const isExplicitTestSearch = Boolean(resolved.resolvedPath) && /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/i.test(
+    resolved.resolvedPath
+  );
+  const scoredFileSlices = [];
   for (const f of workspaceFiles) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
@@ -273598,14 +273606,33 @@ async function generateWorkspaceContext(targetPath, options = {}) {
       rawWorkspaceTexts.push(rawFileContent);
       if (isPureRegexSearch) {
         const matchedSlices = [];
+        const isMockOrTest = !isExplicitTestSearch && isTestOrMockPath(f);
+        let fileMaxScore = 0;
+        const queryKw = requestedSelectors[0]?.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
+        const fileNameMatches = Boolean(queryKw) && queryKw.length >= 2 && path13.basename(f).toLowerCase().includes(queryKw.toLowerCase());
         for (const rawSel of requestedSelectors) {
-          const matched = extractPatternMatchesFromSource(rawFileContent, rawSel.trim());
-          if (matched) {
-            matchedSlices.push(matched.trim());
+          const detailed = extractPatternMatchesDetailed(rawFileContent, rawSel.trim(), 2, {
+            filePath: f,
+            isExplicitTestSearch
+          });
+          if (detailed) {
+            matchedSlices.push(detailed.formattedText.trim());
+            if (detailed.maxScore > fileMaxScore) {
+              fileMaxScore = detailed.maxScore;
+            }
           }
         }
         if (matchedSlices.length === 0) {
-          continue;
+          if (fileNameMatches) {
+            const previewLines = rawFileContent.split(/\r?\n/).slice(0, 5).map((l, idx) => `L${idx + 1}: ${l}`).join("\n");
+            matchedSlices.push(
+              `// file name match: ${path13.basename(f)} # [L1-L${Math.min(5, rawFileContent.split(/\r?\n/).length)}]
+${previewLines}`
+            );
+            fileMaxScore = isMockOrTest ? 25 : 1e3;
+          } else {
+            continue;
+          }
         }
         const hitTags = Array.from(
           new Set(
@@ -273621,10 +273648,12 @@ async function generateWorkspaceContext(targetPath, options = {}) {
         );
         const sliceBody = annotatedSlices.filter(Boolean).join("\n\n");
         const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
-        symbolSlices.push(`### ${relFile}${headerTag}
-\`\`\`aice
-${sliceBody}
-\`\`\``);
+        scoredFileSlices.push({
+          relFile,
+          headerTag,
+          sliceBody,
+          score: fileMaxScore
+        });
         continue;
       }
       if (!isPureAiceDirectory && requestedSelectors.length === 0) {
@@ -273823,6 +273852,15 @@ ${sliceBody}
     } catch {
     }
   }
+  if (isPureRegexSearch && scoredFileSlices.length > 0) {
+    scoredFileSlices.sort((a, b) => b.score - a.score);
+    for (const item of scoredFileSlices) {
+      symbolSlices.push(`### ${item.relFile}${item.headerTag}
+\`\`\`aice
+${item.sliceBody}
+\`\`\``);
+    }
+  }
   const parts = [];
   if (requestedSelectors.length > 0) {
     if (symbolSlices.length > 0) {
@@ -274001,11 +274039,59 @@ function hasCatastrophicNestedQuantifiers(pattern) {
   if (/(\.\*){4,}/.test(pattern)) return true;
   return /\([^()]*[+*][^()]*\)\s*[+*?{]/.test(pattern);
 }
-function extractPatternMatchesFromSource(rawSource, rawQuery, contextRadius = 2) {
+function isTestOrMockPath(filePath) {
+  const norm = filePath.replace(/\\/g, "/").toLowerCase();
+  return /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/.test(norm) || /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) || /(?:_test|_spec)\.[a-z0-9]+$/i.test(norm);
+}
+function isCommentLine(line) {
+  const t = line.trim();
+  return t.startsWith("//") || t.startsWith("#") || t.startsWith("*") || t.startsWith("/*") || t.startsWith('"""') || t.startsWith("'''") || t.startsWith("<!--") || t.startsWith("--");
+}
+function isDeclarationLine(line) {
+  return /\b(function|class|interface|type|enum|struct|fn|def|pub|export|const|let|var|val|sub|record)\b/.test(line);
+}
+function scorePatternWindow(lines, w, filePath, queryKeyword, isExplicitTestSearch = false) {
+  const isMockOrTest = filePath && !isExplicitTestSearch && isTestOrMockPath(filePath);
+  let fileNameBonus = 0;
+  if (filePath && queryKeyword && queryKeyword.length >= 2) {
+    const base = path13.basename(filePath).toLowerCase();
+    if (base.includes(queryKeyword.toLowerCase())) {
+      fileNameBonus = isMockOrTest ? 20 : 1e3;
+    }
+  }
+  let hasDeclaration = false;
+  let hasCode = false;
+  let allComments = true;
+  for (const h of w.hits) {
+    const lineText = lines[h - 1] ?? "";
+    if (isCommentLine(lineText)) {
+    } else {
+      allComments = false;
+      hasCode = true;
+      if (isDeclarationLine(lineText)) {
+        hasDeclaration = true;
+      }
+    }
+  }
+  let lineScore = 0;
+  if (!isMockOrTest) {
+    if (hasDeclaration) lineScore = 500;
+    else if (hasCode) lineScore = 300;
+    else if (allComments) lineScore = 100;
+  } else {
+    if (hasDeclaration) lineScore = 50;
+    else if (hasCode) lineScore = 30;
+    else if (allComments) lineScore = 10;
+  }
+  const lineTieBreaker = Math.max(0, 10 - w.start / 100);
+  return fileNameBonus + lineScore + lineTieBreaker;
+}
+function extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius = 2, rankingOpts) {
   const trimmed = rawQuery.trim();
   if (!trimmed) return void 0;
   const regexMatch = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
   let matcher;
+  let queryKeyword;
   if (regexMatch) {
     const rawBody = regexMatch[1];
     if (hasCatastrophicNestedQuantifiers(rawBody)) {
@@ -274021,7 +274107,10 @@ function extractPatternMatchesFromSource(rawSource, rawQuery, contextRadius = 2)
       );
     }
     matcher = (line) => re.test(line);
+    const cleaned = rawBody.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
+    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
   } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
+    queryKeyword = trimmed;
     const esc = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const identRe = new RegExp(`\\b${esc}\\b`);
     matcher = (line) => {
@@ -274032,6 +274121,8 @@ function extractPatternMatchesFromSource(rawSource, rawQuery, contextRadius = 2)
   } else {
     const lower = trimmed.toLowerCase();
     matcher = (line) => line.includes(trimmed) || line.toLowerCase().includes(lower);
+    const cleaned = trimmed.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
+    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
   }
   const lines = rawSource.split(/\r?\n/);
   const hitLines = [];
@@ -274053,12 +274144,28 @@ function extractPatternMatchesFromSource(rawSource, rawQuery, contextRadius = 2)
       windows.push({ start: s, end: e, hits: [lineNum] });
     }
   }
-  return windows.slice(0, 25).map((w) => {
+  const scoredWindows = windows.map((w) => ({
+    ...w,
+    score: scorePatternWindow(
+      lines,
+      w,
+      rankingOpts?.filePath,
+      queryKeyword,
+      rankingOpts?.isExplicitTestSearch ?? false
+    )
+  }));
+  const maxScore = scoredWindows.reduce((max, w) => Math.max(max, w.score), 0);
+  const topWindows = scoredWindows.sort((a, b) => b.score - a.score).slice(0, 25).sort((a, b) => a.start - b.start);
+  const formattedText = topWindows.map((w) => {
     const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
     const body = lines.slice(w.start - 1, w.end).map((text, idx) => `L${w.start + idx}: ${text}`).join("\n");
     return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]
 ${body}`;
   }).join("\n\n");
+  return { formattedText, maxScore };
+}
+function extractPatternMatchesFromSource(rawSource, rawQuery, contextRadius = 2, rankingOpts) {
+  return extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius, rankingOpts)?.formattedText;
 }
 function formatWithLineNumbers(text, startLine = 1) {
   const lines = text.split("\n");

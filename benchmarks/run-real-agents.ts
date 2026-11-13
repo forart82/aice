@@ -52,7 +52,7 @@ export async function execAgyWithRetry(
   let lastError: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await execFileAsync("agy", agyArgs, { maxBuffer: 25 * 1024 * 1024 });
+      return await execFileAsync("agy", agyArgs, { maxBuffer: 25 * 1024 * 1024, timeout: 240_000 });
     } catch (err: any) {
       lastError = err;
       const stdout = String(err?.stdout || "");
