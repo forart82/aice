@@ -11,6 +11,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
+import { program as cliProgram } from "../../src/cli.js";
+import { AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
 import type { FunctionDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
 import { splice, spliceSource } from "../../src/tools/splice.js";
@@ -403,6 +405,11 @@ fn funcF(): return 6
     it("respects dryRun: true and does not modify disk", async () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_dry_"));
       try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
         const filePath = path.join(tmpDir, "test.aice");
         const originalContent = 'fn hello(): return "world"\n';
         fs.writeFileSync(filePath, originalContent, "utf-8");
@@ -605,6 +612,213 @@ fn funcF(): return 6
         const content = fs.readFileSync(file, "utf-8");
         expect(content).not.toContain("fn b");
         expect(content).toContain("fn a");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Unified Mutation Engine & Write Alias", () => {
+    it("creates target file and parent directories automatically when file does not exist", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_autocreate_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        const deepFilePath = path.join(tmpDir, "nested", "sub", "created.ts");
+        const code = "export const answer: number = 42;\n";
+
+        const res = await splice(deepFilePath, {
+          code,
+          projectRoot: tmpDir,
+        });
+
+        expect(res.success).toBe(true);
+        expect(fs.existsSync(deepFilePath)).toBe(true);
+        expect(fs.readFileSync(deepFilePath, "utf-8")).toBe(code);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("performs full file overwrite when target file exists and no selector or hunk is provided", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice_splice_overwrite_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        const filePath = path.join(tmpDir, "target.ts");
+        fs.writeFileSync(
+          filePath,
+          "export const legacy1 = 1;\nexport const legacy2 = 2;\n",
+          "utf-8",
+        );
+
+        const newContent = "export const rewritten = 999;\n";
+        const res = await splice(filePath, {
+          code: newContent,
+          projectRoot: tmpDir,
+        });
+
+        expect(res.success).toBe(true);
+        const onDisk = fs.readFileSync(filePath, "utf-8");
+        expect(onDisk).toBe(newContent);
+        expect(onDisk).not.toContain("legacy1");
+        expect(onDisk).not.toContain("legacy2");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("registers 'write' command as an alias to 'splice' in Commander and exports via src/cli.ts", () => {
+      const cmd = program.commands.find((c) => c.name() === "splice");
+      expect(cmd).toBeDefined();
+      expect(cmd?.aliases()).toContain("write");
+
+      const cliCmd = cliProgram.commands.find((c) => c.name() === "splice");
+      expect(cliCmd).toBeDefined();
+      expect(cliCmd?.aliases()).toContain("write");
+    });
+
+    it("executes CLI 'write' command to create non-existent file with parent directories", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_write_create_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        const deepFile = path.join(tmpDir, "nested", "folder", "created_by_cli.ts");
+        const code = "export const cliGenerated = true;\n";
+
+        const res = spawnSync("bun", ["./bin/aice.ts", "write", deepFile, "-c", code], {
+          encoding: "utf-8",
+        });
+
+        expect(res.status).toBe(0);
+        expect(fs.existsSync(deepFile)).toBe(true);
+        expect(fs.readFileSync(deepFile, "utf-8")).toBe(code);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("executes CLI 'write' command to perform full file overwrite when no selector is given", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_write_overwrite_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        const file = path.join(tmpDir, "full_overwrite.ts");
+        fs.writeFileSync(file, "export const oldA = 1;\nexport const oldB = 2;\n", "utf-8");
+
+        const newCode = "export const brandNew = 100;\n";
+        const res = spawnSync("bun", ["./bin/aice.ts", "write", file, "-c", newCode], {
+          encoding: "utf-8",
+        });
+
+        expect(res.status).toBe(0);
+        const onDisk = fs.readFileSync(file, "utf-8");
+        expect(onDisk).toBe(newCode);
+        expect(onDisk).not.toContain("oldA");
+        expect(onDisk).not.toContain("oldB");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("executes CLI 'write' command with symbol selector for surgical splice", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_write_surgical_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        const file = path.join(tmpDir, "math.aice");
+        fs.writeFileSync(file, "fn calc(a: int) -> int:\n  return a * 2\n", "utf-8");
+
+        const res = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "write", file, "-s", "calc", "-b", "return a * 50"],
+          { encoding: "utf-8" },
+        );
+
+        expect(res.status).toBe(0);
+        expect(res.stdout).toContain("✔ Spliced body of 'calc'");
+        const content = fs.readFileSync(file, "utf-8");
+        expect(content).toContain("return a * 50");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("MCP server exposes AICE_WRITE_TOOL and executes 'aice_write' identically to 'aice_splice'", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp_write_test_"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true }),
+          "utf-8",
+        );
+        expect(AICE_WRITE_TOOL.name).toBe("aice_write");
+        expect(AICE_WRITE_TOOL.inputSchema).toBeDefined();
+
+        const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+
+        // 1. Create file with parent dirs via MCP aice_write
+        const newFile = path.join(tmpDir, "dir1", "dir2", "created_by_mcp.ts");
+        const createRes = (await server.handleRequest(101, "tools/call", {
+          name: "aice_write",
+          arguments: {
+            filePath: newFile,
+            code: "export const mcpCreated = 1;\n",
+          },
+        })) as any;
+
+        expect(createRes.isError).toBeFalsy();
+        expect(fs.existsSync(newFile)).toBe(true);
+        expect(fs.readFileSync(newFile, "utf-8")).toBe("export const mcpCreated = 1;\n");
+
+        // 2. Full overwrite via MCP aice_write
+        const overwriteRes = (await server.handleRequest(102, "tools/call", {
+          name: "aice_write",
+          arguments: {
+            filePath: newFile,
+            code: "export const mcpOverwritten = 2;\n",
+          },
+        })) as any;
+
+        expect(overwriteRes.isError).toBeFalsy();
+        expect(fs.readFileSync(newFile, "utf-8")).toBe("export const mcpOverwritten = 2;\n");
+
+        // 3. Surgical update via MCP aice_write
+        const surgicalFile = path.join(tmpDir, "surgical_mcp.ts");
+        fs.writeFileSync(
+          surgicalFile,
+          "export function f1(): number { return 1; }\nexport function f2(): number { return 2; }\n",
+          "utf-8",
+        );
+
+        const surgicalRes = (await server.handleRequest(103, "tools/call", {
+          name: "aice_write",
+          arguments: {
+            filePath: surgicalFile,
+            symbol: "f1",
+            code: "export function f1(): number { return 100; }",
+          },
+        })) as any;
+
+        expect(surgicalRes.isError).toBeFalsy();
+        const content = fs.readFileSync(surgicalFile, "utf-8");
+        expect(content).toContain("return 100");
+        expect(content).toContain("f2(): number { return 2; }");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

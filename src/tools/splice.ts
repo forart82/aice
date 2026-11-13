@@ -94,6 +94,8 @@ export interface SpliceOptions {
   append?: boolean;
   edits?: SymbolSpliceEdit[];
   create?: boolean;
+  overwrite?: boolean;
+  force?: boolean;
   idioms?: boolean;
   inPlace?: boolean;
   dryRun?: boolean;
@@ -7823,21 +7825,36 @@ export async function splice(
   const fileExists = options.sourceOverride !== undefined || diskFileExists;
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
   const hasHunkPayload = fileExists && containsHunkMarkers(options.code ?? options.body ?? "");
-  if (
+
+  const isFullOverwrite =
+    fileExists &&
     !hasBatchEdits &&
     !hasHunkPayload &&
     !options.append &&
     !options.insertAfter &&
     !options.insertBefore &&
     !options.delete &&
-    (!fileExists ||
-      options.create ||
-      (Boolean(options.symbol) && isCreateOrOverwriteSymbol(options.symbol)))
-  ) {
+    (!options.symbol || isCreateOrOverwriteSymbol(options.symbol));
+
+  const isCreateRoute =
+    !options.delete &&
+    (!fileExists || options.create || isFullOverwrite);
+
+  if (isCreateRoute) {
     const prevSource =
       options.sourceOverride ?? (diskFileExists ? fs.readFileSync(fullPath, "utf-8") : "");
+    const codePayload =
+      options.code ??
+      options.body ??
+      (hasBatchEdits
+        ? options.edits!
+            .filter((e) => !e.delete)
+            .map((e) => e.code ?? e.body ?? "")
+            .filter(Boolean)
+            .join("\n\n")
+        : "");
     const created = await createFile(fullPath, {
-      code: options.code ?? options.body ?? "",
+      code: codePayload,
       overwrite: true,
       idioms: options.idioms,
       dryRun: options.dryRun,
