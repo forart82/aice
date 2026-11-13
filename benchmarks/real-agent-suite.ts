@@ -72,6 +72,7 @@ export interface RealAgentRunMetrics {
   decoysIntact?: boolean;
   layers?: BenchmarkLayerMetrics[];
   regressionFree?: boolean;
+  workspaceDir?: string;
 }
 
 export interface RealAgentScenarioComparison {

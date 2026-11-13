@@ -47,7 +47,12 @@ import {
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
-import { collectNativeSyntaxDiagnostics, generateOutline, type OutlineSymbol } from "./outline.js";
+import {
+  collectNativeSyntaxDiagnostics,
+  generateOutline,
+  type OutlineSymbol,
+  OutlineResult,
+} from "./outline.js";
 import { locateNativeDeclarationSpan } from "./splice.js";
 
 export interface WorkspaceCallerScanCache {
@@ -134,6 +139,7 @@ export interface ContextResult {
   tokenCount?: number;
   idioms?: Record<string, ProjectIdiomDefinition>;
   nativeDiagnostics?: string;
+  zeroIdiomsReason?: "insufficient_repetition" | string;
 }
 
 function isExternalSpecifier(specifier: string): boolean {
@@ -1512,13 +1518,23 @@ export async function generateWorkspaceContext(
   const depMap = new Map<string, DependencyContract>();
   const rawWorkspaceTexts: string[] = [];
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms = idiomsActive ? config.idioms : undefined;
+  let activeIdioms =
+    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
+      ? config.idioms
+      : undefined;
+  let zeroIdiomsReason: string | undefined;
   if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
       const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
+      } else {
+        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+        activeIdioms = undefined;
+        console.error(
+          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
+        );
       }
     } catch {
       // ignore scan errors
@@ -1935,6 +1951,7 @@ export async function generateWorkspaceContext(
     formattedBundle,
     tokenCount,
     idioms: activeIdioms,
+    ...(zeroIdiomsReason ? { zeroIdiomsReason } : {}),
   };
 
   if (rawWorkspaceTexts.length > 0) {
@@ -2380,7 +2397,9 @@ export function extractSymbolFromAiceSource(
       }
       const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
       if (patternFallback) return patternFallback;
-      throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+      throw new Error(
+        `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
+      );
     }
   }
 
@@ -2451,7 +2470,9 @@ export function extractSymbolFromAiceSource(
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    throw new Error(
+      `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
+    );
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first = resolveFirstActionableSymbol(aiceSource, filePath, mod);
@@ -2662,7 +2683,9 @@ export function extractSymbolFromAiceSource(
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    throw new Error(
+      `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
+    );
   }
   const scopedMod: Module = {
     kind: "Module",
@@ -2915,13 +2938,23 @@ export async function generateContext(
     throw new Error(AICE_DISABLED_MESSAGE);
   }
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms = idiomsActive ? config.idioms : undefined;
+  let activeIdioms =
+    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
+      ? config.idioms
+      : undefined;
+  let zeroIdiomsReason: string | undefined;
   if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
       const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
+      } else {
+        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+        activeIdioms = undefined;
+        console.error(
+          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
+        );
       }
     } catch {
       // ignore scan errors
@@ -2945,8 +2978,57 @@ export async function generateContext(
       ? undefined
       : collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
 
+  const buildFallbackNativeSlice = (symSelector?: string): string => {
+    const rawLines = rawFileContent.split(/\r?\n/);
+    const totalLines = rawLines.length;
+    if (!symSelector || symSelector.trim() === "" || symSelector.trim() === "*") {
+      return formatWithLineNumbers(rawFileContent, 1);
+    }
+    const sel = symSelector.trim();
+    const rangeMatch = sel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
+    if (rangeMatch) {
+      const sLine = Math.max(1, Math.min(totalLines, Number.parseInt(rangeMatch[1], 10)));
+      const eLine = Math.max(
+        sLine,
+        Math.min(totalLines, rangeMatch[2] ? Number.parseInt(rangeMatch[2], 10) : sLine),
+      );
+      return rawLines
+        .slice(sLine - 1, eLine)
+        .map((ln, idx) => `${sLine + idx}│ ${ln}`)
+        .join("\n");
+    }
+    try {
+      const targetLang = detectTargetFromPath(fullTargetPath);
+      const spanInfo = locateNativeDeclarationSpan(rawFileContent, sel, targetLang);
+      if (spanInfo) {
+        const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+        const sLine = spanInfo.startLine ?? rawFileContent.slice(0, startOff).split(/\r?\n/).length;
+        const snippet = rawFileContent.slice(startOff, spanInfo.declEnd);
+        return formatWithLineNumbers(snippet, sLine);
+      }
+    } catch {
+      // fall through to line search
+    }
+    const shortName = sel.split(/\.|::/).pop()?.trim() || sel;
+    const hitIdx = rawLines.findIndex((l) => l.includes(shortName));
+    if (hitIdx >= 0) {
+      const sLine = Math.max(1, hitIdx);
+      const eLine = Math.min(totalLines, hitIdx + 25);
+      return rawLines
+        .slice(sLine - 1, eLine)
+        .map((ln, idx) => `${sLine + idx}│ ${ln}`)
+        .join("\n");
+    }
+    const cap = Math.min(totalLines, 50);
+    return rawLines
+      .slice(0, cap)
+      .map((ln, idx) => `${1 + idx}│ ${ln}`)
+      .join("\n");
+  };
+
   let targetContent = rawFileContent;
   let preParsedMod: Module | undefined;
+  let decompileFailed = false;
   if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector && !isLargeFileSymbolQuery) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
@@ -2958,12 +3040,17 @@ export async function generateContext(
         targetContent = decomp.aice;
         preParsedMod = decomp.ast;
       }
-    } catch {
-      targetContent = rawFileContent;
+    } catch (err) {
+      decompileFailed = true;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[AICE AST Fallback] Decompiler failed for ${displayTargetPath}: ${errMsg}. Falling back to line-numbered native slice.`,
+      );
+      targetContent = buildFallbackNativeSlice(options.symbol);
     }
   }
 
-  if (options.symbol) {
+  if (options.symbol && !decompileFailed) {
     if (options.symbol.trim() === "*") {
       const allSyms = extractFileSymbolList(targetContent, fullTargetPath);
       if (
@@ -3014,7 +3101,21 @@ export async function generateContext(
             extractOpts,
           );
         } catch (err) {
-          if (!nativeDiagnostics) throw err;
+          const sym0 = requestedSymbols[0].trim();
+          const shortSym0 = sym0.split(/\.|::/).pop()?.trim() || sym0;
+          const isForeignLang = ["go", "rust", "cpp", "twig"].includes(
+            detectTargetFromPath(fullTargetPath),
+          );
+          if (isForeignLang && rawFileContent.includes(shortSym0)) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[AICE AST Fallback] Symbol slice fallback for ${displayTargetPath} (${sym0}): ${errMsg}. Falling back to line-numbered native slice.`,
+            );
+            targetContent = buildFallbackNativeSlice(sym0);
+            decompileFailed = true;
+          } else if (!nativeDiagnostics) {
+            throw err;
+          }
         }
       } else {
         const slicedBlocks: string[] = [];
@@ -3114,8 +3215,37 @@ export async function generateContext(
       rawFileContent.length > 50_000) &&
     !options.outlineTarget &&
     options.maxTokens === undefined;
-  const outlineRes = shouldSkipFullOutline
-    ? {
+  let outlineRes: OutlineResult;
+  if (shouldSkipFullOutline || decompileFailed) {
+    outlineRes = {
+      file: fullTargetPath,
+      text: "",
+      symbols: [] as OutlineSymbol[],
+      referencedIdioms: [] as string[],
+      json: { file: fullTargetPath, symbols: [] as OutlineSymbol[] },
+      stats: {
+        originalTokens: 0,
+        outlineTokens: 0,
+        savingsTokens: 0,
+        savingsPct: 0,
+        originalChars: 0,
+        outlineChars: 0,
+        charSavingsPct: 0,
+      },
+    };
+  } else {
+    try {
+      outlineRes = withSuppressedTelemetry(() =>
+        generateOutline(fullTargetPath, {
+          includeTypes: true,
+          idioms: options.idioms,
+          projectRoot,
+          preReadSource: rawFileContent,
+          lineRanges: options.maxTokens === undefined,
+        }),
+      );
+    } catch {
+      outlineRes = {
         file: fullTargetPath,
         text: "",
         symbols: [] as OutlineSymbol[],
@@ -3130,16 +3260,9 @@ export async function generateContext(
           outlineChars: 0,
           charSavingsPct: 0,
         },
-      }
-    : withSuppressedTelemetry(() =>
-        generateOutline(fullTargetPath, {
-          includeTypes: true,
-          idioms: options.idioms,
-          projectRoot,
-          preReadSource: rawFileContent,
-          lineRanges: options.maxTokens === undefined,
-        }),
-      );
+      };
+    }
+  }
   const targetOutline = outlineRes.text;
 
   // Dependency discovery BFS (default depth = 0 on line-range/regex fast-path)
@@ -3403,6 +3526,7 @@ export async function generateContext(
     tokenCount,
     idioms: bundleIdioms,
     nativeDiagnostics,
+    ...(zeroIdiomsReason ? { zeroIdiomsReason } : {}),
   };
 
   recordTelemetryEvent({

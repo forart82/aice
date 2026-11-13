@@ -97,6 +97,7 @@ export interface ApplyProjectIdiomsResult {
   synthesizedIdioms?: number;
   netTokenSavings?: number;
   occurrences?: Record<string, IdiomOccurrence[]>;
+  zeroIdiomsReason?: "insufficient_repetition" | string;
 }
 
 export interface IdiomCacheData {
@@ -3100,6 +3101,11 @@ export function scanProjectIdioms(
     });
   }
 
+  const zeroIdiomsReason =
+    Object.keys(allIdioms).length === 0
+      ? (mineResult.zeroIdiomsReason ?? "insufficient_repetition")
+      : undefined;
+
   return {
     idioms: mineResult.idioms,
     modifiedFiles: Array.from(affectedFilesSet),
@@ -3109,6 +3115,7 @@ export function scanProjectIdioms(
     synthesizedIdioms: Object.keys(mineResult.idioms).length,
     netTokenSavings: mineResult.totalNetTokenSavings,
     occurrences,
+    ...(zeroIdiomsReason ? { zeroIdiomsReason } : {}),
   };
 }
 

@@ -1077,11 +1077,94 @@ export function verifyCompilerAndSyntaxOnFile(
   }
 }
 
+export interface TranscriptComplianceAudit {
+  compliant: boolean;
+  violations: string[];
+}
+
+/**
+ * Scans every tool call in transcript.jsonl for forbidden shell file writers
+ * (`cat >`, `echo >`, `tee`, `fs.writeFileSync`), discovery bypasses (`grep -rn`, `cat`, `sed -n`),
+ * and native file tools (`write_file`, `edit_file`, `replace_file_content`) during AICE benchmark modes.
+ */
+export function auditTranscriptCompliance(
+  transcriptPath?: string,
+  mode: string = "aice_no_idioms",
+): TranscriptComplianceAudit {
+  if (mode === "without_aice" || !transcriptPath || !fs.existsSync(transcriptPath)) {
+    return { compliant: true, violations: [] };
+  }
+
+  const violations: string[] = [];
+  const raw = fs.readFileSync(transcriptPath, "utf-8");
+  const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+
+  const NATIVE_MUTATION_TOOLS = new Set(["write_file", "edit_file", "replace_file_content"]);
+
+  for (const line of lines) {
+    let entry: Record<string, unknown>;
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const toolCalls = Array.isArray(entry.tool_calls)
+      ? (entry.tool_calls as Array<Record<string, unknown>>)
+      : [];
+
+    for (const tc of toolCalls) {
+      const toolName = String(tc.name ?? tc.tool ?? "");
+      if (NATIVE_MUTATION_TOOLS.has(toolName)) {
+        violations.push(`Forbidden native file tool '${toolName}' used in ${mode}`);
+        continue;
+      }
+
+      const args = (tc.args ?? tc.arguments ?? tc.input ?? {}) as Record<string, unknown>;
+      const cmd = String(args.CommandLine ?? args.command ?? args.cmd ?? "");
+      if (!cmd) continue;
+
+      // Strip safe `aice ... << 'EOF' ... EOF` heredoc bodies before checking shell commands
+      const strippedCmd = cmd.replace(
+        /\baice\s+(?:splice|create|new)\b[\s\S]*?<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g,
+        "aice_heredoc",
+      );
+
+      // 1. Forbidden shell file writers: cat >, cat << ... >, echo >, tee, fs.writeFileSync
+      if (
+        /\bcat\s+<<[\s\S]*?>/.test(strippedCmd) ||
+        /\bcat\s+[^>|\n]*?>/.test(strippedCmd) ||
+        /\becho\b[^|\n]*?>/.test(strippedCmd) ||
+        /(?:^|[|;&]\s*)\btee\b/.test(strippedCmd) ||
+        /\bfs\.writeFileSync\b/.test(strippedCmd)
+      ) {
+        violations.push(`Forbidden shell file writer detected: ${cmd.slice(0, 120)}`);
+      }
+
+      // 2. Forbidden discovery bypasses: grep -rn, cat <file>, sed -n
+      if (
+        /\bgrep\s+-[a-zA-Z]*r[a-zA-Z]*n\b|\bgrep\s+-[a-zA-Z]*n[a-zA-Z]*r\b/.test(strippedCmd) ||
+        /(?:^|[;&|]\s*)cat\s+(?!<<)[^\s>|]+/.test(strippedCmd) ||
+        /\bsed\s+-n\b/.test(strippedCmd)
+      ) {
+        violations.push(`Forbidden shell discovery bypass detected: ${cmd.slice(0, 120)}`);
+      }
+    }
+  }
+
+  return {
+    compliant: violations.length === 0,
+    violations,
+  };
+}
+
 export function verifyWorkspaceOnDisk(
   spec: RealWorldBenchmarkSpec,
   dir: string,
   seed: number = DEFAULT_ADVERSARIAL_SEED,
   layerIndex: 1 | 2 | 3 = 1,
+  transcriptPath?: string,
+  mode: string = "aice_no_idioms",
 ): {
   verified: boolean;
   zeroAice: boolean;
@@ -1295,8 +1378,25 @@ export function verifyWorkspaceOnDisk(
   const zeroAice = aiceFiles.length === 0;
   if (!zeroAice) details.push(`Found .aice files: ${aiceFiles.join(",")}`);
 
+  const candidateTranscript =
+    transcriptPath ??
+    (fs.existsSync(path.join(dir, "transcript.jsonl"))
+      ? path.join(dir, "transcript.jsonl")
+      : fs.existsSync(path.join(dir, ".system_generated/logs/transcript.jsonl"))
+        ? path.join(dir, ".system_generated/logs/transcript.jsonl")
+        : undefined);
+  const compliance = auditTranscriptCompliance(candidateTranscript, mode);
+  if (!compliance.compliant) {
+    details.push(`DISQUALIFIED: Forbidden workaround detected (${compliance.violations.join("; ")})`);
+  }
+
   return {
-    verified: details.length === 0 && zeroAice && decoysIntact && compilerVerified,
+    verified:
+      details.length === 0 &&
+      zeroAice &&
+      decoysIntact &&
+      compilerVerified &&
+      compliance.compliant,
     zeroAice,
     decoysInjected,
     decoysIntact,
@@ -1304,14 +1404,29 @@ export function verifyWorkspaceOnDisk(
     details,
   };
 }
+export interface RunAgentBenchmarkOptions {
+  seed?: number;
+  dashboard?: BenchmarkDashboard;
+  targetLayer?: 1 | 2 | 3;
+  existingConvId?: string;
+  existingDir?: string;
+  keepWorkspace?: boolean;
+}
 
 export async function runAgentBenchmarkMode(
   spec: RealWorldBenchmarkSpec,
   mode: RealAgentMode,
-  seed: number = DEFAULT_ADVERSARIAL_SEED,
-  dashboard?: BenchmarkDashboard,
+  seedOrOpts: number | RunAgentBenchmarkOptions = DEFAULT_ADVERSARIAL_SEED,
+  dashboardArg?: BenchmarkDashboard,
 ): Promise<RealAgentRunMetrics> {
-  const dir = setupWorkspace(spec, mode, seed);
+  const opts: RunAgentBenchmarkOptions =
+    typeof seedOrOpts === "object"
+      ? seedOrOpts
+      : { seed: seedOrOpts, dashboard: dashboardArg };
+  const seed = opts.seed ?? DEFAULT_ADVERSARIAL_SEED;
+  const dashboard = opts.dashboard ?? dashboardArg;
+  const targetLayer = opts.targetLayer;
+  const dir = opts.existingDir || setupWorkspace(spec, mode, seed);
   const coldStartRepo =
     !fs.existsSync(path.join(dir, "aice.config.json")) &&
     !fs.existsSync(path.join(dir, ".aice-idioms.json"));
@@ -1348,7 +1463,7 @@ export async function runAgentBenchmarkMode(
   });
 
   const layerMetrics: BenchmarkLayerMetrics[] = [];
-  let convId: string = "";
+  let convId: string = opts.existingConvId || "";
   let totalLlmTurns = 0;
   let totalToolCalls = 0;
   let totalWorkingTokens = 0;
@@ -1367,7 +1482,9 @@ export async function runAgentBenchmarkMode(
     details: [] as string[],
   };
 
-  for (let lIdx = 1; lIdx <= 3; lIdx++) {
+  const startLayer = targetLayer ?? 1;
+  const endLayer = targetLayer ?? 3;
+  for (let lIdx = startLayer; lIdx <= endLayer; lIdx++) {
     if (lIdx > 1) {
       // Pacing cooldown delay (1500ms) between scenario layers to prevent bursting the keyring and Google APIs
       await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -1432,6 +1549,9 @@ export async function runAgentBenchmarkMode(
     if (parsed.conversation_id) {
       convId = parsed.conversation_id;
     }
+    console.log(
+      `[RUNNER_STARTED] conversation_id=${convId} workspace=${dir} scenario=${spec.id} mode=${mode}`,
+    );
 
     let lTurns = 0;
     let lToolCalls = 0;
@@ -1505,7 +1625,22 @@ export async function runAgentBenchmarkMode(
       toolCalls: totalToolCalls,
     });
 
-    lastCheck = verifyWorkspaceOnDisk(spec, dir, seed, currentLayer);
+    const liveTranscriptPath = convId
+      ? path.join(
+          os.homedir(),
+          ".gemini/antigravity-cli/brain",
+          convId,
+          ".system_generated/logs/transcript.jsonl",
+        )
+      : undefined;
+    lastCheck = verifyWorkspaceOnDisk(
+      spec,
+      dir,
+      seed,
+      currentLayer,
+      liveTranscriptPath,
+      mode,
+    );
     if (
       mode === "aice_with_idioms" &&
       spec.id !== "RW-11" &&
@@ -1531,6 +1666,10 @@ export async function runAgentBenchmarkMode(
       verified: lastCheck.verified,
     });
 
+    console.log(
+      `[RUNNER_MILESTONE] conversation_id=${convId} workspace=${dir} scenario=${spec.id} mode=${mode} layer=${currentLayer} turns=${layerTurnDelta} inTok=${layerInputDelta} outTok=${layerOutputDelta} workTok=${layerWorkingDelta} verified=${lastCheck.verified}`,
+    );
+
     if (!lastCheck.verified) {
       dashboard?.updateWorker(workerKey, {
         status: "FAILED",
@@ -1548,11 +1687,14 @@ export async function runAgentBenchmarkMode(
     toolCalls: totalToolCalls,
   });
 
-  fs.rmSync(dir, { recursive: true, force: true });
+  if (!opts.keepWorkspace && !opts.existingDir && !targetLayer) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
   return {
     benchmarkId: spec.id,
     mode,
     conversationId: convId,
+    workspaceDir: dir,
     llmTurns: totalLlmTurns,
     toolCalls: totalToolCalls,
     workingTokens: totalWorkingTokens,
@@ -1725,6 +1867,11 @@ async function main() {
     : generateFreshBenchmarkSeed();
   let noSave = false;
   let concurrency = 1;
+  let targetLayer: (1 | 2 | 3) | undefined;
+  let cliDir: string | undefined;
+  let cliConvId: string | undefined;
+  let keepDir = false;
+
   if (process.env.AICE_BENCH_CONCURRENCY) {
     concurrency = Math.max(1, Number(process.env.AICE_BENCH_CONCURRENCY));
   }
@@ -1742,6 +1889,20 @@ async function main() {
       targetIds.push(rawArgs[++i]);
     } else if (rawArgs[i].startsWith("--only=")) {
       targetIds.push(rawArgs[i].slice("--only=".length));
+    } else if (rawArgs[i] === "--layer" && rawArgs[i + 1]) {
+      targetLayer = Number(rawArgs[++i]) as 1 | 2 | 3;
+    } else if (rawArgs[i].startsWith("--layer=")) {
+      targetLayer = Number(rawArgs[i].slice("--layer=".length)) as 1 | 2 | 3;
+    } else if (rawArgs[i] === "--dir" && rawArgs[i + 1]) {
+      cliDir = rawArgs[++i];
+    } else if (rawArgs[i].startsWith("--dir=")) {
+      cliDir = rawArgs[i].slice("--dir=".length);
+    } else if (rawArgs[i] === "--conv" && rawArgs[i + 1]) {
+      cliConvId = rawArgs[++i];
+    } else if (rawArgs[i].startsWith("--conv=")) {
+      cliConvId = rawArgs[i].slice("--conv=".length);
+    } else if (rawArgs[i] === "--keep-dir") {
+      keepDir = true;
     } else if (rawArgs[i] === "--no-save" || rawArgs[i] === "--dry-run") {
       noSave = true;
     } else {
@@ -1776,6 +1937,20 @@ async function main() {
       tasks.push({ spec, mode: "aice_no_idioms" });
       tasks.push({ spec, mode: "aice_with_idioms" });
     }
+  }
+
+  if (targetLayer) {
+    const task = tasks[0];
+    if (!task) throw new Error("No benchmark task specified for --layer");
+    const res = await runAgentBenchmarkMode(task.spec, task.mode, {
+      seed,
+      targetLayer,
+      existingConvId: cliConvId,
+      existingDir: cliDir,
+      keepWorkspace: keepDir || targetLayer < 3,
+    });
+    console.log(`\n[BENCHMARK_RESULT] ${JSON.stringify(res)}\n`);
+    return;
   }
 
   const dashboard = new BenchmarkDashboard(tasks.length * 3, concurrency);

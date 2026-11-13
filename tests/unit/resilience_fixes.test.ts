@@ -3,10 +3,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { didYouMeanSymbol, didYouMeanFile } from "../../src/tools/suggest.js";
-import { extractSymbolFromAiceSource } from "../../src/tools/context.js";
+import { extractSymbolFromAiceSource, generateContext } from "../../src/tools/context.js";
 import { spliceSource } from "../../src/tools/splice.js";
 import { isEphemeralWorkspace, recordTelemetryEvent } from "../../src/telemetry/index.js";
 import { recordTelemetryError } from "../../src/telemetry/analyze.js";
+import { mineProjectIdioms } from "../../src/idioms/idiom-miner.js";
+import { resolveWorktreeRoot } from "../../src/config/path-resolver.js";
+import {
+  auditTranscriptCompliance,
+  verifyWorkspaceOnDisk,
+  ALL_REAL_AGENT_BENCHMARKS,
+} from "../../benchmarks/run-real-agents.js";
 
 describe("Resilience & Suggestion Engine", () => {
   describe("didYouMeanSymbol", () => {
@@ -179,6 +186,191 @@ export class OrderProcessor {
       } catch (err: any) {
         expect(err.name).not.toBe("ReferenceError");
       }
+    });
+  });
+
+  describe("AICE 2.0 Hardening & Resilience Regressions", () => {
+    let tmpDir: string = "";
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-resilience-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    describe("Idiom fast-path bailout", () => {
+      it("triggers on non-repeating code and sets zeroIdiomsReason", () => {
+        const files = [
+          {
+            path: "math.ts",
+            content: "export function add(a: number, b: number): number { return a + b; }",
+          },
+          {
+            path: "util.ts",
+            content: "export const version = '1.0.0';",
+          },
+        ];
+        const res = mineProjectIdioms(files);
+        expect(Object.keys(res.idioms).length).toBe(0);
+        expect(res.zeroIdiomsReason).toBe("insufficient_repetition");
+      });
+
+      it("omits empty idiom headers in generated context on non-repeating projects", async () => {
+        const configPath = path.join(tmpDir, "aice.config.json");
+        fs.writeFileSync(configPath, JSON.stringify({ enabled: true, idioms: true }, null, 2));
+
+        const targetFile = path.join(tmpDir, "lone.ts");
+        fs.writeFileSync(targetFile, "export function uniqueWorker(): string { return 'lone'; }");
+
+        const result = await generateContext(targetFile, { idioms: true, projectRoot: tmpDir });
+        expect(result.zeroIdiomsReason).toBe("insufficient_repetition");
+        expect(result.formattedBundle).not.toContain("# @idioms available:");
+      });
+    });
+
+    describe("Fault-tolerant AST decompilation fallback", () => {
+      it("degrades gracefully to line slices without throwing or exiting code 1 on broken syntax", async () => {
+        const brokenCss = path.join(tmpDir, "broken.css");
+        fs.writeFileSync(
+          brokenCss,
+          "body {\n  color: red;\n  invalid { css syntax error here }}}\n",
+        );
+
+        const result = await generateContext(brokenCss, { projectRoot: tmpDir });
+        expect(result).toBeDefined();
+        expect(result.targetContent).toContain("1│ body {");
+        expect(result.targetContent).toContain("2│   color: red;");
+      });
+
+      it("gracefully slices line-range on broken syntax without throwing", async () => {
+        const brokenFile = path.join(tmpDir, "broken.rs");
+        fs.writeFileSync(
+          brokenFile,
+          'fn main() {\n    let x = ;;; invalid rust\n    println!("hello");\n}\n',
+        );
+
+        const result = await generateContext(brokenFile, { symbol: "L1-L3", projectRoot: tmpDir });
+        expect(result).toBeDefined();
+        expect(result.targetContent).toContain("1│ fn main() {");
+        expect(result.targetContent).toContain("2│     let x = ;;; invalid rust");
+      });
+    });
+
+    describe("Silent Git worktree boundary resolution", () => {
+      it("resolves non-git workspace directories without throwing Git exit code 128", () => {
+        const nonGitDir = path.join(tmpDir, "sandbox");
+        fs.mkdirSync(nonGitDir, { recursive: true });
+        fs.writeFileSync(path.join(nonGitDir, "package.json"), JSON.stringify({ name: "sandbox" }));
+
+        // Ensure this directory has no .git
+        expect(fs.existsSync(path.join(nonGitDir, ".git"))).toBe(false);
+
+        let resolved: string | undefined;
+        expect(() => {
+          resolved = resolveWorktreeRoot(nonGitDir);
+        }).not.toThrow();
+
+        expect(resolved).toBe(nonGitDir);
+      });
+
+      it("resolves nested non-git subdirectory to parent package.json cleanly", () => {
+        const projectDir = path.join(tmpDir, "isolated-pkg");
+        const subDir = path.join(projectDir, "src", "nested", "deep");
+        fs.mkdirSync(subDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(projectDir, "package.json"),
+          JSON.stringify({ name: "isolated-pkg" }),
+        );
+
+        let resolved: string | undefined;
+        expect(() => {
+          resolved = resolveWorktreeRoot(subDir);
+        }).not.toThrow();
+
+        expect(resolved).toBe(projectDir);
+      });
+    });
+
+    describe("Anti-cheat & workaround enforcement gate", () => {
+      it("correctly catches forbidden cat << 'EOF' > ... and fails compliance audit", () => {
+        const transcriptPath = path.join(tmpDir, "transcript.jsonl");
+        const cheatEntry = {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          tool_calls: [
+            {
+              name: "run_command",
+              args: {
+                CommandLine: "cat << 'EOF' > src/index.ts\nconsole.log('cheat');\nEOF",
+              },
+            },
+          ],
+        };
+        fs.writeFileSync(transcriptPath, JSON.stringify(cheatEntry) + "\n");
+
+        const compliance = auditTranscriptCompliance(transcriptPath, "aice_no_idioms");
+        expect(compliance.compliant).toBe(false);
+        expect(compliance.violations.some((v) => v.includes("Forbidden shell file writer"))).toBe(
+          true,
+        );
+      });
+
+      it("permits canonical AICE heredoc streaming without violation", () => {
+        const transcriptPath = path.join(tmpDir, "transcript_valid.jsonl");
+        const validEntry = {
+          step_index: 1,
+          type: "PLANNER_RESPONSE",
+          tool_calls: [
+            {
+              name: "run_command",
+              args: {
+                CommandLine:
+                  "aice splice --stdin << 'EOF'\n=== src/index.ts ===\nexport const ok = 1;\nEOF",
+              },
+            },
+          ],
+        };
+        fs.writeFileSync(transcriptPath, JSON.stringify(validEntry) + "\n");
+
+        const compliance = auditTranscriptCompliance(transcriptPath, "aice_no_idioms");
+        expect(compliance.compliant).toBe(true);
+        expect(compliance.violations.length).toBe(0);
+      });
+
+      it("disqualifies workspace verification on disk when cheating transcript is detected", () => {
+        const workspaceDir = path.join(tmpDir, "mock-run");
+        fs.mkdirSync(workspaceDir, { recursive: true });
+        const cheatTranscript = path.join(workspaceDir, "transcript.jsonl");
+        const cheatEntry = {
+          step_index: 2,
+          type: "PLANNER_RESPONSE",
+          tool_calls: [
+            {
+              name: "run_command",
+              args: {
+                CommandLine: "echo 'cheat' > index.js",
+              },
+            },
+          ],
+        };
+        fs.writeFileSync(cheatTranscript, JSON.stringify(cheatEntry) + "\n");
+
+        const spec = ALL_REAL_AGENT_BENCHMARKS[0];
+        const res = verifyWorkspaceOnDisk(
+          spec,
+          workspaceDir,
+          42,
+          1,
+          cheatTranscript,
+          "aice_no_idioms",
+        );
+        expect(res.verified).toBe(false);
+        expect(
+          res.details.some((d) => d.includes("DISQUALIFIED: Forbidden workaround detected")),
+        ).toBe(true);
+      });
     });
   });
 });

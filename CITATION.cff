@@ -1,4 +1,4 @@
-cff-version: 0.9.29
+cff-version: 0.9.30
 title: "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer"
 message: "If you use AICE in your research, benchmarks, or AI coding agent workflows, please cite it using the metadata from this file."
 type: software

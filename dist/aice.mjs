@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.29";
+    AICE_VERSION = "0.9.30";
     VERSION = AICE_VERSION;
   }
 });
@@ -1315,7 +1315,9 @@ var init_project_config = __esm({
 });
 
 // src/config/path-resolver.ts
+import { execSync } from "node:child_process";
 import * as fs3 from "node:fs";
+import * as os from "node:os";
 import * as path3 from "node:path";
 function isSameOrDescendant(parent, candidate) {
   if (!parent) {
@@ -1479,6 +1481,48 @@ function scanDirectoryFiles(dir, options, config, projectRoot) {
   }
   return [];
 }
+function resolveWorktreeRoot(startDir = process.cwd(), fallbackDir) {
+  let cur = path3.resolve(startDir);
+  try {
+    if (fs3.existsSync(cur) && !fs3.statSync(cur).isDirectory()) {
+      cur = path3.dirname(cur);
+    }
+  } catch {
+    cur = path3.dirname(cur);
+  }
+  const initialDir = cur;
+  const tmpRoot = path3.resolve(os.tmpdir());
+  let probe = initialDir;
+  while (true) {
+    if (fs3.existsSync(path3.join(probe, "aice.config.json")) || fs3.existsSync(path3.join(probe, "package.json"))) {
+      return probe;
+    }
+    const parent = path3.dirname(probe);
+    if (parent === probe || parent === "/tmp" || parent === "/var/tmp" || parent === tmpRoot) {
+      break;
+    }
+    probe = parent;
+  }
+  try {
+    if (fs3.existsSync(initialDir)) {
+      const gitTop = execSync("git rev-parse --show-toplevel", {
+        cwd: initialDir,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"]
+      }).trim();
+      if (gitTop && fs3.existsSync(gitTop)) {
+        const resolvedGitTop = path3.resolve(gitTop);
+        const inTmp = initialDir.startsWith("/tmp/") || initialDir.startsWith("/var/tmp/") || initialDir.startsWith(`${tmpRoot}${path3.sep}`);
+        const gitInTmp = resolvedGitTop.startsWith("/tmp/") || resolvedGitTop.startsWith("/var/tmp/") || resolvedGitTop.startsWith(`${tmpRoot}${path3.sep}`);
+        if (!inTmp || gitInTmp) {
+          return resolvedGitTop;
+        }
+      }
+    }
+  } catch {
+  }
+  return findProjectRoot(initialDir, fallbackDir ?? process.cwd());
+}
 function resolvePathTargets(inputPath, options = {}) {
   const cwd = path3.resolve(process.cwd());
   const clampRootToCwd = (candidateRoot, targetPath) => {
@@ -1490,7 +1534,7 @@ function resolvePathTargets(inputPath, options = {}) {
   };
   const isOmitted = inputPath === void 0 || inputPath === null || inputPath.trim() === "";
   if (isOmitted) {
-    const rawRoot2 = options.projectRoot ? path3.resolve(options.projectRoot) : findProjectRoot(cwd, cwd);
+    const rawRoot2 = options.projectRoot ? path3.resolve(options.projectRoot) : resolveWorktreeRoot(cwd, cwd);
     const projectRoot2 = options.projectRoot ? rawRoot2 : clampRootToCwd(rawRoot2, cwd);
     const config2 = options.config ?? loadProjectConfig(projectRoot2);
     const candidateSourceDir = config2.sourceDir ? path3.resolve(projectRoot2, config2.sourceDir) : projectRoot2;
@@ -1535,7 +1579,7 @@ function resolvePathTargets(inputPath, options = {}) {
   }
   if (isDir) {
     const fallbackDir = isSameOrDescendant(cwd, absPath) ? cwd : absPath;
-    const rawRoot2 = options.projectRoot ? path3.resolve(options.projectRoot) : findProjectRoot(absPath, fallbackDir);
+    const rawRoot2 = options.projectRoot ? path3.resolve(options.projectRoot) : resolveWorktreeRoot(absPath, fallbackDir);
     const projectRoot2 = options.projectRoot ? rawRoot2 : clampRootToCwd(rawRoot2, absPath);
     const config2 = options.config ?? loadProjectConfig(projectRoot2);
     const files = fs3.existsSync(absPath) ? scanDirectoryFiles(absPath, options, config2, projectRoot2) : [];
@@ -1550,7 +1594,7 @@ function resolvePathTargets(inputPath, options = {}) {
     };
   }
   const fallbackFileDir = isSameOrDescendant(cwd, absPath) ? cwd : path3.dirname(absPath);
-  const rawRoot = options.projectRoot ? path3.resolve(options.projectRoot) : findProjectRoot(path3.dirname(absPath), fallbackFileDir);
+  const rawRoot = options.projectRoot ? path3.resolve(options.projectRoot) : resolveWorktreeRoot(path3.dirname(absPath), fallbackFileDir);
   const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, absPath);
   const config = options.config ?? loadProjectConfig(projectRoot);
   return {
@@ -8809,11 +8853,13 @@ function mineProjectIdioms(files, options) {
     finalIdioms[idiomName] = cand.definition;
     totalNetTokenSavings += cand.definition.netTokenSavings;
   }
+  const zeroIdiomsReason = Object.keys(finalIdioms).length === 0 ? "insufficient_repetition" : void 0;
   return {
     idioms: finalIdioms,
     candidatesEvaluated,
     rejectedByTokenGate,
-    totalNetTokenSavings
+    totalNetTokenSavings,
+    ...zeroIdiomsReason ? { zeroIdiomsReason } : {}
   };
 }
 function collectModuleCandidates(mod, filePath, maxBlockStatements, existingIdioms, stmtGroups, exprGroups, layoutGroups, styleGroups, generator) {
@@ -11104,7 +11150,7 @@ var init_tokenomics = __esm({
 
 // src/telemetry/analyze.ts
 import * as fs5 from "node:fs";
-import * as os from "node:os";
+import * as os2 from "node:os";
 import * as path5 from "node:path";
 function resolveTelemetryErrorsPath(explicitTelemetryPath) {
   if (process.env.AICE_TELEMETRY_ERRORS_PATH) {
@@ -11309,7 +11355,7 @@ function extractAntigravityWorkspaceFromDb(transcriptPath, conversationId) {
       "conversations",
       `${conversationId}.db`
     ),
-    path5.join(os.homedir(), ".gemini", "antigravity-cli", "conversations", `${conversationId}.db`)
+    path5.join(os2.homedir(), ".gemini", "antigravity-cli", "conversations", `${conversationId}.db`)
   ];
   for (const dbPath of candidates) {
     try {
@@ -11605,7 +11651,7 @@ function discoverProjectTranscripts(projectRoot, explicitTranscriptsDir) {
     };
     walkCustom(resolvedCustom);
   } else {
-    const brainRoot = path5.join(os.homedir(), ".gemini", "antigravity-cli", "brain");
+    const brainRoot = path5.join(os2.homedir(), ".gemini", "antigravity-cli", "brain");
     if (fs5.existsSync(brainRoot)) {
       try {
         for (const entry of fs5.readdirSync(brainRoot, { withFileTypes: true })) {
@@ -11624,7 +11670,7 @@ function discoverProjectTranscripts(projectRoot, explicitTranscriptsDir) {
       } catch {
       }
     }
-    const claudeRoot = path5.join(os.homedir(), ".claude", "projects");
+    const claudeRoot = path5.join(os2.homedir(), ".claude", "projects");
     if (fs5.existsSync(claudeRoot)) {
       const walkClaude = (dir) => {
         let entries = [];
@@ -11667,7 +11713,7 @@ function analyzeProject(options = {}) {
         projectRoot = dirCandidate;
       } else {
         const discovered = findProjectRoot(dirCandidate, dirCandidate);
-        const discoveredInsideRepo = discovered === process.cwd() && dirCandidate.startsWith(`${os.tmpdir()}${path5.sep}`);
+        const discoveredInsideRepo = discovered === process.cwd() && dirCandidate.startsWith(`${os2.tmpdir()}${path5.sep}`);
         projectRoot = discoveredInsideRepo ? dirCandidate : discovered;
       }
     } else {
@@ -11830,11 +11876,11 @@ function formatDuration(seconds) {
 }
 function formatAnalyzeReport(report) {
   const lines = [];
-  const sep6 = "================================================================================";
+  const sep7 = "================================================================================";
   const subSep = "--------------------------------------------------------------------------------";
-  lines.push(sep6);
+  lines.push(sep7);
   lines.push(`AICE POST-SESSION PROJECT ANALYZER \u2014 ${report.projectName} (${report.projectRoot})`);
-  lines.push(sep6);
+  lines.push(sep7);
   lines.push(
     `  Config Status   : AICE=${report.configStatus.enabled ? "ENABLED" : "DISABLED"} | Idioms=${report.configStatus.idiomsEnabled ? "ON" : "OFF"} (${report.configStatus.activeIdiomsCount} active)`
   );
@@ -11891,7 +11937,7 @@ function formatAnalyzeReport(report) {
       );
     }
   }
-  lines.push(sep6);
+  lines.push(sep7);
   return lines.join("\n");
 }
 var init_analyze = __esm({
@@ -11930,7 +11976,7 @@ __export(telemetry_exports, {
 });
 import * as crypto from "node:crypto";
 import * as fs6 from "node:fs";
-import * as os2 from "node:os";
+import * as os3 from "node:os";
 import * as path6 from "node:path";
 function withSuppressedTelemetry(fn) {
   telemetrySuppressionDepth++;
@@ -11958,7 +12004,7 @@ function resolveTelemetryPath(explicitPath) {
   if (process.env.AICE_TELEMETRY_PATH) {
     return path6.resolve(process.env.AICE_TELEMETRY_PATH);
   }
-  const baseHome = process.env.AICE_HOME ? path6.resolve(process.env.AICE_HOME) : path6.join(os2.homedir(), ".aice");
+  const baseHome = process.env.AICE_HOME ? path6.resolve(process.env.AICE_HOME) : path6.join(os3.homedir(), ".aice");
   return path6.join(baseHome, "telemetry", "gains.jsonl");
 }
 function isTestEnvWithoutExplicitTelemetry(explicitPath) {
@@ -20610,7 +20656,7 @@ var require_previous_map = __commonJS({
   "node_modules/postcss/lib/previous-map.js"(exports, module) {
     "use strict";
     var { existsSync: existsSync24, readFileSync: readFileSync20, realpathSync: realpathSync8 } = __require("fs");
-    var { dirname: dirname23, isAbsolute: isAbsolute8, join: join19, relative: relative14, sep: sep6 } = __require("path");
+    var { dirname: dirname23, isAbsolute: isAbsolute8, join: join19, relative: relative14, sep: sep7 } = __require("path");
     var { SourceMapConsumer, SourceMapGenerator } = require_source_map();
     function realPath(path27) {
       try {
@@ -20684,7 +20730,7 @@ var require_previous_map = __commonJS({
           if (!/\.map$/i.test(path27)) return void 0;
           if (!cssFile) return void 0;
           let rel = relative14(realPath(dirname23(cssFile)), realPath(path27));
-          if (rel === ".." || rel.startsWith(".." + sep6) || isAbsolute8(rel)) {
+          if (rel === ".." || rel.startsWith(".." + sep7) || isAbsolute8(rel)) {
             return void 0;
           }
         }
@@ -21133,8 +21179,8 @@ var require_rule = __commonJS({
       }
       set selectors(values) {
         let match = this.selector ? this.selector.match(/,\s*/) : null;
-        let sep6 = match ? match[0] : "," + this.raw("between", "beforeOpen");
-        this.selector = values.join(sep6);
+        let sep7 = match ? match[0] : "," + this.raw("between", "beforeOpen");
+        this.selector = values.join(sep7);
       }
       constructor(defaults) {
         super(defaults);
@@ -21246,12 +21292,12 @@ var require_fromJSON = __commonJS({
 var require_map_generator = __commonJS({
   "node_modules/postcss/lib/map-generator.js"(exports, module) {
     "use strict";
-    var { dirname: dirname23, relative: relative14, resolve: resolve24, sep: sep6 } = __require("path");
+    var { dirname: dirname23, relative: relative14, resolve: resolve24, sep: sep7 } = __require("path");
     var { SourceMapConsumer, SourceMapGenerator } = require_source_map();
     var { pathToFileURL } = __require("url");
     var Input2 = require_input();
     var sourceMapAvailable = Boolean(SourceMapConsumer && SourceMapGenerator);
-    var pathAvailable = Boolean(dirname23 && resolve24 && relative14 && sep6);
+    var pathAvailable = Boolean(dirname23 && resolve24 && relative14 && sep7);
     var MapGenerator = class {
       constructor(stringify2, root2, opts, cssString) {
         this.stringify = stringify2;
@@ -21560,7 +21606,7 @@ var require_map_generator = __commonJS({
       toUrl(path27) {
         let cached = this.memoizedURLs.get(path27);
         if (cached) return cached;
-        if (sep6 === "\\") {
+        if (sep7 === "\\") {
           path27 = path27.replace(/\\/g, "/");
         }
         let url = encodeURI(path27).replace(/[#?]/g, encodeURIComponent);
@@ -88791,11 +88837,11 @@ ${lanes.join("\n")}
             if (i < rootLength) {
               return void 0;
             }
-            const sep6 = directory.lastIndexOf(directorySeparator, i - 1);
-            if (sep6 === -1) {
+            const sep7 = directory.lastIndexOf(directorySeparator, i - 1);
+            if (sep7 === -1) {
               return void 0;
             }
-            return directory.substr(0, Math.max(sep6, rootLength));
+            return directory.substr(0, Math.max(sep7, rootLength));
           }
         }
       }
@@ -259114,10 +259160,10 @@ var require_resolve_block_map = __commonJS({
       let offset = bm.offset;
       let commentEnd = null;
       for (const collItem of bm.items) {
-        const { start, key, sep: sep6, value } = collItem;
+        const { start, key, sep: sep7, value } = collItem;
         const keyProps = resolveProps.resolveProps(start, {
           indicator: "explicit-key-ind",
-          next: key ?? sep6?.[0],
+          next: key ?? sep7?.[0],
           offset,
           onError,
           parentIndent: bm.indent,
@@ -259131,7 +259177,7 @@ var require_resolve_block_map = __commonJS({
             else if ("indent" in key && key.indent !== bm.indent)
               onError(offset, "BAD_INDENT", startColMsg);
           }
-          if (!keyProps.anchor && !keyProps.tag && !sep6) {
+          if (!keyProps.anchor && !keyProps.tag && !sep7) {
             commentEnd = keyProps.end;
             if (keyProps.comment) {
               if (map.comment)
@@ -259155,7 +259201,7 @@ var require_resolve_block_map = __commonJS({
         ctx.atKey = false;
         if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
           onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-        const valueProps = resolveProps.resolveProps(sep6 ?? [], {
+        const valueProps = resolveProps.resolveProps(sep7 ?? [], {
           indicator: "map-value-ind",
           next: value,
           offset: keyNode.range[2],
@@ -259171,7 +259217,7 @@ var require_resolve_block_map = __commonJS({
             if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
               onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep6, null, valueProps, onError);
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep7, null, valueProps, onError);
           if (ctx.schema.compat)
             utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
           offset = valueNode.range[2];
@@ -259262,7 +259308,7 @@ var require_resolve_end = __commonJS({
       let comment2 = "";
       if (end) {
         let hasSpace = false;
-        let sep6 = "";
+        let sep7 = "";
         for (const token of end) {
           const { source, type } = token;
           switch (type) {
@@ -259276,13 +259322,13 @@ var require_resolve_end = __commonJS({
               if (!comment2)
                 comment2 = cb;
               else
-                comment2 += sep6 + cb;
-              sep6 = "";
+                comment2 += sep7 + cb;
+              sep7 = "";
               break;
             }
             case "newline":
               if (comment2)
-                sep6 += source;
+                sep7 += source;
               hasSpace = true;
               break;
             default:
@@ -259325,18 +259371,18 @@ var require_resolve_flow_collection = __commonJS({
       let offset = fc.offset + fc.start.source.length;
       for (let i = 0; i < fc.items.length; ++i) {
         const collItem = fc.items[i];
-        const { start, key, sep: sep6, value } = collItem;
+        const { start, key, sep: sep7, value } = collItem;
         const props = resolveProps.resolveProps(start, {
           flow: fcName,
           indicator: "explicit-key-ind",
-          next: key ?? sep6?.[0],
+          next: key ?? sep7?.[0],
           offset,
           onError,
           parentIndent: fc.indent,
           startOnNewline: false
         });
         if (!props.found) {
-          if (!props.anchor && !props.tag && !sep6 && !value) {
+          if (!props.anchor && !props.tag && !sep7 && !value) {
             if (i === 0 && props.comma)
               onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
             else if (i < fc.items.length - 1)
@@ -259390,8 +259436,8 @@ var require_resolve_flow_collection = __commonJS({
             }
           }
         }
-        if (!isMap && !sep6 && !props.found) {
-          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep6, null, props, onError);
+        if (!isMap && !sep7 && !props.found) {
+          const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep7, null, props, onError);
           coll.items.push(valueNode);
           offset = valueNode.range[2];
           if (isBlock(value))
@@ -259403,7 +259449,7 @@ var require_resolve_flow_collection = __commonJS({
           if (isBlock(key))
             onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
           ctx.atKey = false;
-          const valueProps = resolveProps.resolveProps(sep6 ?? [], {
+          const valueProps = resolveProps.resolveProps(sep7 ?? [], {
             flow: fcName,
             indicator: "map-value-ind",
             next: value,
@@ -259414,8 +259460,8 @@ var require_resolve_flow_collection = __commonJS({
           });
           if (valueProps.found) {
             if (!isMap && !props.found && ctx.options.strict) {
-              if (sep6)
-                for (const st of sep6) {
+              if (sep7)
+                for (const st of sep7) {
                   if (st === valueProps.found)
                     break;
                   if (st.type === "newline") {
@@ -259432,7 +259478,7 @@ var require_resolve_flow_collection = __commonJS({
             else
               onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
           }
-          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep6, null, valueProps, onError) : null;
+          const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep7, null, valueProps, onError) : null;
           if (valueNode) {
             if (isBlock(value))
               onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -259612,7 +259658,7 @@ var require_resolve_block_scalar = __commonJS({
           chompStart = i + 1;
       }
       let value = "";
-      let sep6 = "";
+      let sep7 = "";
       let prevMoreIndented = false;
       for (let i = 0; i < contentStart; ++i)
         value += lines[i][0].slice(trimIndent) + "\n";
@@ -259629,24 +259675,24 @@ var require_resolve_block_scalar = __commonJS({
           indent = "";
         }
         if (type === Scalar.Scalar.BLOCK_LITERAL) {
-          value += sep6 + indent.slice(trimIndent) + content;
-          sep6 = "\n";
+          value += sep7 + indent.slice(trimIndent) + content;
+          sep7 = "\n";
         } else if (indent.length > trimIndent || content[0] === "	") {
-          if (sep6 === " ")
-            sep6 = "\n";
-          else if (!prevMoreIndented && sep6 === "\n")
-            sep6 = "\n\n";
-          value += sep6 + indent.slice(trimIndent) + content;
-          sep6 = "\n";
+          if (sep7 === " ")
+            sep7 = "\n";
+          else if (!prevMoreIndented && sep7 === "\n")
+            sep7 = "\n\n";
+          value += sep7 + indent.slice(trimIndent) + content;
+          sep7 = "\n";
           prevMoreIndented = true;
         } else if (content === "") {
-          if (sep6 === "\n")
+          if (sep7 === "\n")
             value += "\n";
           else
-            sep6 = "\n";
+            sep7 = "\n";
         } else {
-          value += sep6 + content;
-          sep6 = " ";
+          value += sep7 + content;
+          sep7 = " ";
           prevMoreIndented = false;
         }
       }
@@ -259829,25 +259875,25 @@ var require_resolve_flow_scalar = __commonJS({
         trimBoth = /^[ \t]+|[ \t]+$/g;
       }
       let res = match[1].replace(trimEnd, "");
-      let sep6 = " ";
+      let sep7 = " ";
       let pos = line.lastIndex;
       while (match = line.exec(source)) {
         const lm = match[1].replace(trimBoth, "");
         if (lm === "") {
-          if (sep6 === "\n")
-            res += sep6;
+          if (sep7 === "\n")
+            res += sep7;
           else
-            sep6 = "\n";
+            sep7 = "\n";
         } else {
-          res += sep6 + lm;
-          sep6 = " ";
+          res += sep7 + lm;
+          sep7 = " ";
         }
         pos = line.lastIndex;
       }
       const last = /[ \t]*(.*)/sy;
       last.lastIndex = pos;
       match = last.exec(source);
-      return res + sep6 + (match?.[1] ?? "");
+      return res + sep7 + (match?.[1] ?? "");
     }
     function doubleQuotedValue(source, onError) {
       let res = "";
@@ -260657,14 +260703,14 @@ var require_cst_stringify = __commonJS({
         }
       }
     }
-    function stringifyItem({ start, key, sep: sep6, value }) {
+    function stringifyItem({ start, key, sep: sep7, value }) {
       let res = "";
       for (const st of start)
         res += st.source;
       if (key)
         res += stringifyToken(key);
-      if (sep6)
-        for (const st of sep6)
+      if (sep7)
+        for (const st of sep7)
           res += st.source;
       if (value)
         res += stringifyToken(value);
@@ -261831,18 +261877,18 @@ var require_parser2 = __commonJS({
         if (this.type === "map-value-ind") {
           const prev = getPrevProps(this.peek(2));
           const start = getFirstKeyStartProps(prev);
-          let sep6;
+          let sep7;
           if (scalar.end) {
-            sep6 = scalar.end;
-            sep6.push(this.sourceToken);
+            sep7 = scalar.end;
+            sep7.push(this.sourceToken);
             delete scalar.end;
           } else
-            sep6 = [this.sourceToken];
+            sep7 = [this.sourceToken];
           const map = {
             type: "block-map",
             offset: scalar.offset,
             indent: scalar.indent,
-            items: [{ start, key: scalar, sep: sep6 }]
+            items: [{ start, key: scalar, sep: sep7 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -261995,15 +262041,15 @@ var require_parser2 = __commonJS({
                 } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                   const start2 = getFirstKeyStartProps(it.start);
                   const key = it.key;
-                  const sep6 = it.sep;
-                  sep6.push(this.sourceToken);
+                  const sep7 = it.sep;
+                  sep7.push(this.sourceToken);
                   delete it.key;
                   delete it.sep;
                   this.stack.push({
                     type: "block-map",
                     offset: this.offset,
                     indent: this.indent,
-                    items: [{ start: start2, key, sep: sep6 }]
+                    items: [{ start: start2, key, sep: sep7 }]
                   });
                 } else if (start.length > 0) {
                   it.sep = it.sep.concat(start, this.sourceToken);
@@ -262197,13 +262243,13 @@ var require_parser2 = __commonJS({
             const prev = getPrevProps(parent);
             const start = getFirstKeyStartProps(prev);
             fixFlowSeqItems(fc);
-            const sep6 = fc.end.splice(1, fc.end.length);
-            sep6.push(this.sourceToken);
+            const sep7 = fc.end.splice(1, fc.end.length);
+            sep7.push(this.sourceToken);
             const map = {
               type: "block-map",
               offset: fc.offset,
               indent: fc.indent,
-              items: [{ start, key: fc, sep: sep6 }]
+              items: [{ start, key: fc, sep: sep7 }]
             };
             this.onKeyLine = true;
             this.stack[this.stack.length - 1] = map;
@@ -269671,7 +269717,7 @@ function preprocessBareCssLossless(rawCss, activeIdioms = {}) {
   } catch {
     const out = idiomExpanded.replace(
       /(^|[{;]\s*)([a-zA-Z_-]+)(\s*:\s*)([^;}]+)/gm,
-      (_full, prefix, prop, sep6, val) => {
+      (_full, prefix, prop, sep7, val) => {
         const lower = prop.toLowerCase();
         const valTrim = val.trim();
         let mapped = COMPACT_CSS_SHORTHANDS[lower] ?? prop;
@@ -269682,7 +269728,7 @@ function preprocessBareCssLossless(rawCss, activeIdioms = {}) {
         } else if (lower === "fs") {
           mapped = /^(?:italic|oblique)$/i.test(valTrim) ? "font-style" : "font-size";
         }
-        return `${prefix}${mapped}${sep6}${expandCssTokenValue(expandCssCompactValue(mapped, val))}`;
+        return `${prefix}${mapped}${sep7}${expandCssTokenValue(expandCssCompactValue(mapped, val))}`;
       }
     );
     return out.endsWith("\n") ? out : `${out}
@@ -273507,13 +273553,20 @@ async function generateWorkspaceContext(targetPath, options = {}) {
   const depMap = /* @__PURE__ */ new Map();
   const rawWorkspaceTexts = [];
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms = idiomsActive ? config.idioms : void 0;
+  let activeIdioms = idiomsActive && config.idioms && Object.keys(config.idioms).length > 0 ? config.idioms : void 0;
+  let zeroIdiomsReason;
   if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
       const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
+      } else {
+        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+        activeIdioms = void 0;
+        console.error(
+          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros)."
+        );
       }
     } catch {
     }
@@ -273856,7 +273909,8 @@ ${sliceBody}
     callers: [],
     formattedBundle,
     tokenCount,
-    idioms: activeIdioms
+    idioms: activeIdioms,
+    ...zeroIdiomsReason ? { zeroIdiomsReason } : {}
   };
   if (rawWorkspaceTexts.length > 0) {
     const joinedNative = rawWorkspaceTexts.join("\n\n");
@@ -274204,7 +274258,9 @@ ${clampedLines}`;
       }
       const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
       if (patternFallback) return patternFallback;
-      throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+      throw new Error(
+        `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`
+      );
     }
   }
   if (!filePath.endsWith(".aice") && rawFileSource.length > 5e4 && !preParsedMod) {
@@ -274270,7 +274326,9 @@ ${rawSlice}
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    throw new Error(
+      `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`
+    );
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first = resolveFirstActionableSymbol(aiceSource, filePath, mod);
@@ -274450,7 +274508,9 @@ ${rawSlice}
     }
     const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
     if (patternFallback) return patternFallback;
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`);
+    throw new Error(
+      `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`
+    );
   }
   const scopedMod = {
     kind: "Module",
@@ -274655,13 +274715,20 @@ async function generateContext(rawTargetPath, rawOptions = {}) {
     throw new Error(AICE_DISABLED_MESSAGE);
   }
   const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms = idiomsActive ? config.idioms : void 0;
+  let activeIdioms = idiomsActive && config.idioms && Object.keys(config.idioms).length > 0 ? config.idioms : void 0;
+  let zeroIdiomsReason;
   if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
     try {
       const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
       if (Object.keys(scanRes.idioms).length > 0) {
         activeIdioms = scanRes.idioms;
         config.idioms = scanRes.idioms;
+      } else {
+        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+        activeIdioms = void 0;
+        console.error(
+          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros)."
+        );
       }
     } catch {
     }
@@ -274673,8 +274740,46 @@ async function generateContext(rawTargetPath, rawOptions = {}) {
   const isFastPathSelector = isPureLineRangeSymbol || isPureRegexSymbol;
   const isLargeFileSymbolQuery = Boolean(options.symbol) && options.symbol.trim() !== "*" && rawFileContent.length > 5e4;
   const nativeDiagnostics = isFastPathSelector || isLargeFileSymbolQuery ? void 0 : collectNativeSyntaxDiagnostics(fullTargetPath, rawFileContent);
+  const buildFallbackNativeSlice = (symSelector) => {
+    const rawLines = rawFileContent.split(/\r?\n/);
+    const totalLines = rawLines.length;
+    if (!symSelector || symSelector.trim() === "" || symSelector.trim() === "*") {
+      return formatWithLineNumbers(rawFileContent, 1);
+    }
+    const sel = symSelector.trim();
+    const rangeMatch = sel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
+    if (rangeMatch) {
+      const sLine = Math.max(1, Math.min(totalLines, Number.parseInt(rangeMatch[1], 10)));
+      const eLine = Math.max(
+        sLine,
+        Math.min(totalLines, rangeMatch[2] ? Number.parseInt(rangeMatch[2], 10) : sLine)
+      );
+      return rawLines.slice(sLine - 1, eLine).map((ln, idx) => `${sLine + idx}\u2502 ${ln}`).join("\n");
+    }
+    try {
+      const targetLang = detectTargetFromPath(fullTargetPath);
+      const spanInfo = locateNativeDeclarationSpan(rawFileContent, sel, targetLang);
+      if (spanInfo) {
+        const startOff = spanInfo.fullDeclStart ?? spanInfo.declStart;
+        const sLine = spanInfo.startLine ?? rawFileContent.slice(0, startOff).split(/\r?\n/).length;
+        const snippet = rawFileContent.slice(startOff, spanInfo.declEnd);
+        return formatWithLineNumbers(snippet, sLine);
+      }
+    } catch {
+    }
+    const shortName = sel.split(/\.|::/).pop()?.trim() || sel;
+    const hitIdx = rawLines.findIndex((l) => l.includes(shortName));
+    if (hitIdx >= 0) {
+      const sLine = Math.max(1, hitIdx);
+      const eLine = Math.min(totalLines, hitIdx + 25);
+      return rawLines.slice(sLine - 1, eLine).map((ln, idx) => `${sLine + idx}\u2502 ${ln}`).join("\n");
+    }
+    const cap = Math.min(totalLines, 50);
+    return rawLines.slice(0, cap).map((ln, idx) => `${1 + idx}\u2502 ${ln}`).join("\n");
+  };
   let targetContent = rawFileContent;
   let preParsedMod;
+  let decompileFailed = false;
   if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector && !isLargeFileSymbolQuery) {
     try {
       const targetLang = detectTargetFromPath(fullTargetPath);
@@ -274686,11 +274791,16 @@ async function generateContext(rawTargetPath, rawOptions = {}) {
         targetContent = decomp.aice;
         preParsedMod = decomp.ast;
       }
-    } catch {
-      targetContent = rawFileContent;
+    } catch (err) {
+      decompileFailed = true;
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(
+        `[AICE AST Fallback] Decompiler failed for ${displayTargetPath}: ${errMsg}. Falling back to line-numbered native slice.`
+      );
+      targetContent = buildFallbackNativeSlice(options.symbol);
     }
   }
-  if (options.symbol) {
+  if (options.symbol && !decompileFailed) {
     if (options.symbol.trim() === "*") {
       const allSyms = extractFileSymbolList(targetContent, fullTargetPath);
       if ((fullTargetPath.endsWith(".html") || fullTargetPath.endsWith(".json") || fullTargetPath.endsWith(".yaml")) && allSyms.length > 0) {
@@ -274734,7 +274844,21 @@ ${unwrapped}` : unwrapped;
             extractOpts
           );
         } catch (err) {
-          if (!nativeDiagnostics) throw err;
+          const sym0 = requestedSymbols[0].trim();
+          const shortSym0 = sym0.split(/\.|::/).pop()?.trim() || sym0;
+          const isForeignLang = ["go", "rust", "cpp", "twig"].includes(
+            detectTargetFromPath(fullTargetPath)
+          );
+          if (isForeignLang && rawFileContent.includes(shortSym0)) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.error(
+              `[AICE AST Fallback] Symbol slice fallback for ${displayTargetPath} (${sym0}): ${errMsg}. Falling back to line-numbered native slice.`
+            );
+            targetContent = buildFallbackNativeSlice(sym0);
+            decompileFailed = true;
+          } else if (!nativeDiagnostics) {
+            throw err;
+          }
         }
       } else {
         const slicedBlocks = [];
@@ -274802,30 +274926,54 @@ ${unwrapped}` : unwrapped;
   const targetExtLower = path13.extname(fullTargetPath).toLowerCase();
   const isDataOrDocExt = targetExtLower === ".json" || targetExtLower === ".yaml" || targetExtLower === ".yml" || targetExtLower === ".md" || targetExtLower === ".markdown";
   const shouldSkipFullOutline = (isFastPathSelector || Boolean(options.symbol) || isDataOrDocExt || rawFileContent.length > 5e4) && !options.outlineTarget && options.maxTokens === void 0;
-  const outlineRes = shouldSkipFullOutline ? {
-    file: fullTargetPath,
-    text: "",
-    symbols: [],
-    referencedIdioms: [],
-    json: { file: fullTargetPath, symbols: [] },
-    stats: {
-      originalTokens: 0,
-      outlineTokens: 0,
-      savingsTokens: 0,
-      savingsPct: 0,
-      originalChars: 0,
-      outlineChars: 0,
-      charSavingsPct: 0
+  let outlineRes;
+  if (shouldSkipFullOutline || decompileFailed) {
+    outlineRes = {
+      file: fullTargetPath,
+      text: "",
+      symbols: [],
+      referencedIdioms: [],
+      json: { file: fullTargetPath, symbols: [] },
+      stats: {
+        originalTokens: 0,
+        outlineTokens: 0,
+        savingsTokens: 0,
+        savingsPct: 0,
+        originalChars: 0,
+        outlineChars: 0,
+        charSavingsPct: 0
+      }
+    };
+  } else {
+    try {
+      outlineRes = withSuppressedTelemetry(
+        () => generateOutline(fullTargetPath, {
+          includeTypes: true,
+          idioms: options.idioms,
+          projectRoot,
+          preReadSource: rawFileContent,
+          lineRanges: options.maxTokens === void 0
+        })
+      );
+    } catch {
+      outlineRes = {
+        file: fullTargetPath,
+        text: "",
+        symbols: [],
+        referencedIdioms: [],
+        json: { file: fullTargetPath, symbols: [] },
+        stats: {
+          originalTokens: 0,
+          outlineTokens: 0,
+          savingsTokens: 0,
+          savingsPct: 0,
+          originalChars: 0,
+          outlineChars: 0,
+          charSavingsPct: 0
+        }
+      };
     }
-  } : withSuppressedTelemetry(
-    () => generateOutline(fullTargetPath, {
-      includeTypes: true,
-      idioms: options.idioms,
-      projectRoot,
-      preReadSource: rawFileContent,
-      lineRanges: options.maxTokens === void 0
-    })
-  );
+  }
   const targetOutline = outlineRes.text;
   const effectiveDepth = options.depth !== void 0 ? options.depth : isFastPathSelector ? 0 : 1;
   const maxDepth = Math.max(0, effectiveDepth);
@@ -275015,7 +275163,8 @@ ${targetBody}`;
     formattedBundle,
     tokenCount,
     idioms: bundleIdioms,
-    nativeDiagnostics
+    nativeDiagnostics,
+    ...zeroIdiomsReason ? { zeroIdiomsReason } : {}
   };
   recordTelemetryEvent({
     targetPath: fullTargetPath,
@@ -280477,8 +280626,8 @@ ${indentCode(trimmed, "  ")}`;
     };
     if (options.append && !anchorSymbol || anchorSymbol && /^(?:eof|end|append)$/i.test(anchorSymbol.trim())) {
       const emitted = emitCssSnippet(".rule");
-      const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
-      const modifiedCode2 = `${nativeSource}${sep6}${emitted}
+      const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      const modifiedCode2 = `${nativeSource}${sep7}${emitted}
 `;
       return {
         success: true,
@@ -280509,8 +280658,8 @@ ${indentCode(trimmed, "  ")}`;
     if (!matchedRule || !matchedRule.source?.start || !matchedRule.source?.end) {
       if (!options.delete && !options.insertBefore && !options.insertAfter) {
         const emitted = emitCssSnippet(anchorSymbol.trim());
-        const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
-        const modifiedCode2 = `${nativeSource}${sep6}${emitted}
+        const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+        const modifiedCode2 = `${nativeSource}${sep7}${emitted}
 `;
         return {
           success: true,
@@ -281368,12 +281517,12 @@ function resolveSingleNativeEditAgainstSource(nativeSource, options, filePath, t
       if (!rules.some((r) => r.from === cloneSym) && clonedSlice.includes(cloneSym)) {
         clonedSlice = clonedSlice.replace(cloneSym, () => anchorSymbol);
       }
-      const sep6 = computeCloneSep(insertPos);
+      const sep7 = computeCloneSep(insertPos);
       return {
         symbol: anchorSymbol,
         startOffset: insertPos,
         endOffset: insertPos,
-        replacement: `${sep6}${clonedSlice}`,
+        replacement: `${sep7}${clonedSlice}`,
         originalSnippet: "",
         newSnippet: clonedSlice,
         isInsertion: true
@@ -281389,12 +281538,12 @@ function resolveSingleNativeEditAgainstSource(nativeSource, options, filePath, t
     }
     const targetSpan = locateNativeDeclarationSpan(nativeSource, anchorSymbol, targetLang);
     if (!targetSpan) {
-      const sep6 = computeCloneSep(insertPos);
+      const sep7 = computeCloneSep(insertPos);
       return {
         symbol: anchorSymbol,
         startOffset: insertPos,
         endOffset: insertPos,
-        replacement: `${sep6}${clonedSlice}`,
+        replacement: `${sep7}${clonedSlice}`,
         originalSnippet: "",
         newSnippet: clonedSlice,
         isInsertion: true
@@ -281672,12 +281821,12 @@ function resolveSingleNativeEditAgainstSource(nativeSource, options, filePath, t
       const bodyTrimmed = rawSnippet.trim();
       const emitted = /^#{1,6}\s+/.test(bodyTrimmed) ? bodyTrimmed : `${headingPrefix}
 ${bodyTrimmed}`;
-      const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
       return {
         symbol: anchorSymbol,
         startOffset: nativeSource.length,
         endOffset: nativeSource.length,
-        replacement: `${sep6}${emitted}
+        replacement: `${sep7}${emitted}
 `,
         originalSnippet: "",
         newSnippet: emitted
@@ -281685,12 +281834,12 @@ ${bodyTrimmed}`;
     }
     if ((targetLang === "shell" || targetLang === "powershell" || targetLang === "batch") && rawSnippet.trim() && extractScriptOrMarkdownSymbols(rawSnippet, targetLang).length > 0) {
       const emitted = rawSnippet.trim();
-      const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
       return {
         symbol: anchorSymbol,
         startOffset: nativeSource.length,
         endOffset: nativeSource.length,
-        replacement: `${sep6}${emitted}
+        replacement: `${sep7}${emitted}
 `,
         originalSnippet: "",
         newSnippet: emitted
@@ -281720,12 +281869,12 @@ ${bodyTrimmed}`;
           forceLosslessPreprocess
         );
         if (hasCppRefInFile && new RegExp(`\\b${escCls}\\s*::`).test(emitted)) {
-          const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+          const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
           return {
             symbol: anchorSymbol,
             startOffset: nativeSource.length,
             endOffset: nativeSource.length,
-            replacement: `${sep6}${emitted}
+            replacement: `${sep7}${emitted}
 `,
             originalSnippet: "",
             newSnippet: emitted
@@ -281816,12 +281965,12 @@ ${newSnippet2}`,
       if (/^\s*func\s+[A-Za-z0-9_]+\s*\(/.test(emittedGo)) {
         emittedGo = emittedGo.replace(/^(\s*func\s+)([A-Za-z0-9_]+\s*\()/, `$1${inferredRecv} $2`);
       }
-      const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+      const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
       return {
         symbol: anchorSymbol,
         startOffset: nativeSource.length,
         endOffset: nativeSource.length,
-        replacement: `${sep6}${emittedGo}
+        replacement: `${sep7}${emittedGo}
 `,
         originalSnippet,
         newSnippet: emittedGo
@@ -281933,12 +282082,12 @@ ${newSnippet2}`,
           const openParenPos = nativeSource.indexOf("(", spanInfo.declStart);
           const inner = openParenPos >= 0 ? nativeSource.slice(openParenPos + 1, closeParenPos).trim() : "";
           const inlineField = emittedUnindented2.trim().replace(/^val\s+/, "").replace(/,\s*$/, "");
-          const sep6 = inner.length > 0 && !inner.endsWith(",") ? ", " : "";
+          const sep7 = inner.length > 0 && !inner.endsWith(",") ? ", " : "";
           return {
             symbol: anchorSymbol,
             startOffset: closeParenPos,
             endOffset: closeParenPos,
-            replacement: `${sep6}${inlineField}`,
+            replacement: `${sep7}${inlineField}`,
             originalSnippet,
             newSnippet: inlineField
           };
@@ -282389,8 +282538,8 @@ function spliceNativeSource(nativeSource, options, filePath, idioms, forceLossle
       void 0,
       forceLosslessPreprocess
     );
-    const sep6 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
-    const modifiedCode2 = `${nativeSource}${sep6}${emitted}
+    const sep7 = nativeSource.endsWith("\n") ? "\n" : "\n\n";
+    const modifiedCode2 = `${nativeSource}${sep7}${emitted}
 `;
     if (!forceLosslessPreprocess) {
       const checkRes = validateNativeSyntax(modifiedCode2, targetLang, filePath, idioms);
@@ -285821,6 +285970,7 @@ function scanProjectIdioms(dir, options) {
       occurrences
     });
   }
+  const zeroIdiomsReason = Object.keys(allIdioms).length === 0 ? mineResult.zeroIdiomsReason ?? "insufficient_repetition" : void 0;
   return {
     idioms: mineResult.idioms,
     modifiedFiles: Array.from(affectedFilesSet),
@@ -285829,7 +285979,8 @@ function scanProjectIdioms(dir, options) {
     rejectedByTokenGate: mineResult.rejectedByTokenGate,
     synthesizedIdioms: Object.keys(mineResult.idioms).length,
     netTokenSavings: mineResult.totalNetTokenSavings,
-    occurrences
+    occurrences,
+    ...zeroIdiomsReason ? { zeroIdiomsReason } : {}
   };
 }
 function applyProjectIdiomsToDirectory(dir, options) {
@@ -295530,7 +295681,7 @@ __export(agents_exports, {
 });
 import { spawnSync as spawnSync2 } from "node:child_process";
 import * as fs19 from "node:fs";
-import * as os3 from "node:os";
+import * as os4 from "node:os";
 import * as path20 from "node:path";
 function extractMarkdownDirectiveVersion(filePath) {
   if (!fs19.existsSync(filePath)) return void 0;
@@ -295552,7 +295703,7 @@ function extractMarkdownDirectiveVersion(filePath) {
 function resolveHomeDir(homeDir) {
   if (homeDir) return path20.resolve(homeDir);
   if (process.env.AICE_AGENT_HOME) return path20.resolve(process.env.AICE_AGENT_HOME);
-  return os3.homedir();
+  return os4.homedir();
 }
 function detectBinary(binNames) {
   const lookupCmd = process.platform === "win32" ? "where" : "which";
@@ -296239,7 +296390,7 @@ __export(server_exports, {
   AiceMcpServer: () => AiceMcpServer
 });
 import * as fs20 from "node:fs";
-import * as os4 from "node:os";
+import * as os5 from "node:os";
 import * as path21 from "node:path";
 import { fileURLToPath } from "node:url";
 function loadPackageVersion() {
@@ -296649,7 +296800,7 @@ var init_server = __esm({
       }
       getBlockedSystemPrefixes() {
         const blockedPrefixes = ["/etc", "/proc", "/sys", "/dev"];
-        const home = path21.resolve(os4.homedir());
+        const home = path21.resolve(os5.homedir());
         if (home !== "/root") {
           blockedPrefixes.push("/root");
         }
@@ -297908,7 +298059,7 @@ ${res.nativeCode}` : `\u2714 Created ${rawTargetFile} (${res.aiceTokens} cl100k 
 
 // benchmarks/offline-suite.ts
 import * as fs21 from "node:fs";
-import * as os5 from "node:os";
+import * as os6 from "node:os";
 import * as path22 from "node:path";
 function countTokens(text) {
   return estimateTokens(text, "cl100k_base");
@@ -298807,7 +298958,7 @@ ${indented}`;
   return new AiceGenerator().generate(expanded).split("\n").filter((l) => !l.trim().startsWith("#") && !l.trim().startsWith("module ")).join("\n").trim();
 }
 function runRealWorldBenchmarkSuite() {
-  const tmpRoot = fs21.mkdtempSync(path22.join(os5.tmpdir(), "aice-real-world-bench-"));
+  const tmpRoot = fs21.mkdtempSync(path22.join(os6.tmpdir(), "aice-real-world-bench-"));
   try {
     const benchmarks = [];
     const coveredLanguages = /* @__PURE__ */ new Set();
@@ -305482,8 +305633,8 @@ ${res.diff.slice(0, 1e3)}`);
 program2.command("mcp").description("Launch the AICE Model Context Protocol (MCP) server over stdio").option("--generate-schemas [dir]", "Generate Antigravity MCP tool JSON schema files").action(async (options) => {
   if (options.generateSchemas) {
     const { AICE_MCP_TOOLS: AICE_MCP_TOOLS2, AICE_VERSION: AICE_VERSION3 } = await Promise.resolve().then(() => (init_server(), server_exports));
-    const os6 = await import("node:os");
-    const homeDir = process.env.AICE_AGENT_HOME ? path26.resolve(process.env.AICE_AGENT_HOME) : os6.homedir();
+    const os7 = await import("node:os");
+    const homeDir = process.env.AICE_AGENT_HOME ? path26.resolve(process.env.AICE_AGENT_HOME) : os7.homedir();
     const targetDir = typeof options.generateSchemas === "string" ? path26.resolve(options.generateSchemas) : path26.join(homeDir, ".gemini", "antigravity-cli", "mcp", "aice");
     fs25.mkdirSync(targetDir, { recursive: true });
     for (const tool of AICE_MCP_TOOLS2) {
@@ -307128,6 +307279,11 @@ program2.command("idioms [action] [target] [extra] [dir]").alias("idiom").descri
         const idiomCount = res.synthesizedIdioms ?? Object.keys(idiomsMap).length;
         const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
         const filesCount = res.modifiedFiles?.length ?? 0;
+        if (idiomCount === 0) {
+          console.log(
+            "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros)."
+          );
+        }
         if (shouldPersist) {
           console.log(
             `\u2714 Saved ${idiomCount} discovered project idiom(s) to aice.config.json (+${tokenSavings} net tokens)`

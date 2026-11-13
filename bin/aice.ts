@@ -754,7 +754,9 @@ program
     if (options.generateSchemas) {
       const { AICE_MCP_TOOLS, AICE_VERSION } = await import("../src/mcp/server.js");
       const os = await import("node:os");
-      const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
+      const homeDir = process.env.AICE_AGENT_HOME
+        ? path.resolve(process.env.AICE_AGENT_HOME)
+        : os.homedir();
       const targetDir =
         typeof options.generateSchemas === "string"
           ? path.resolve(options.generateSchemas)
@@ -769,7 +771,8 @@ program
       }
       fs.writeFileSync(
         path.join(targetDir, "tools.json"),
-        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) + "\n",
+        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) +
+          "\n",
         "utf-8",
       );
       console.log(`✔ Generated ${AICE_MCP_TOOLS.length} MCP tool schema files in ${targetDir}`);
@@ -2836,6 +2839,12 @@ program
             res.synthesizedIdioms ?? Object.keys(idiomsMap as Record<string, unknown>).length;
           const tokenSavings = res.netTokenSavings ?? res.totalNetTokenSavings ?? 0;
           const filesCount = res.modifiedFiles?.length ?? 0;
+
+          if (idiomCount === 0) {
+            console.log(
+              "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
+            );
+          }
 
           if (shouldPersist) {
             console.log(

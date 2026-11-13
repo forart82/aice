@@ -7,7 +7,9 @@
  * across all CLI commands and tooling APIs, with first-class companion mode support.
  */
 
+import { execSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   type AiceProjectConfig,
@@ -347,6 +349,77 @@ export function scanDirectoryFiles(
  * Resolves polymorphic path inputs (omitted, directory, or single file)
  * to a standardized ResolvedPathTargets result with discovered files and config.
  */
+export const ZERO_IDIOM_FAST_PATH_NOTICE =
+  "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).";
+
+/**
+ * Resolves Git worktree or project root boundary safely.
+ * Wraps `git rev-parse --show-toplevel` and worktree boundary discovery in a try/catch.
+ * If Git returns exit code 128 (e.g. running in `/tmp/aice-*` or a detached temporary worktree),
+ * silently falls back to the nearest directory containing `package.json` / `aice.config.json` or `process.cwd()`.
+ */
+export function resolveWorktreeRoot(
+  startDir: string = process.cwd(),
+  fallbackDir?: string,
+): string {
+  let cur = path.resolve(startDir);
+  try {
+    if (fs.existsSync(cur) && !fs.statSync(cur).isDirectory()) {
+      cur = path.dirname(cur);
+    }
+  } catch {
+    cur = path.dirname(cur);
+  }
+  const initialDir = cur;
+  const tmpRoot = path.resolve(os.tmpdir());
+
+  // 1. Check nearest ancestor containing aice.config.json or package.json before crossing /tmp boundary
+  let probe = initialDir;
+  while (true) {
+    if (
+      fs.existsSync(path.join(probe, "aice.config.json")) ||
+      fs.existsSync(path.join(probe, "package.json"))
+    ) {
+      return probe;
+    }
+    const parent = path.dirname(probe);
+    if (parent === probe || parent === "/tmp" || parent === "/var/tmp" || parent === tmpRoot) {
+      break;
+    }
+    probe = parent;
+  }
+
+  // 2. Try git rev-parse --show-toplevel wrapped in try/catch to suppress fatal exit code 128
+  try {
+    if (fs.existsSync(initialDir)) {
+      const gitTop = execSync("git rev-parse --show-toplevel", {
+        cwd: initialDir,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+      if (gitTop && fs.existsSync(gitTop)) {
+        const resolvedGitTop = path.resolve(gitTop);
+        const inTmp =
+          initialDir.startsWith("/tmp/") ||
+          initialDir.startsWith("/var/tmp/") ||
+          initialDir.startsWith(`${tmpRoot}${path.sep}`);
+        const gitInTmp =
+          resolvedGitTop.startsWith("/tmp/") ||
+          resolvedGitTop.startsWith("/var/tmp/") ||
+          resolvedGitTop.startsWith(`${tmpRoot}${path.sep}`);
+        if (!inTmp || gitInTmp) {
+          return resolvedGitTop;
+        }
+      }
+    }
+  } catch {
+    // Git returned exit code 128 (not a git repo or detached worktree) — silently fall back
+  }
+
+  // 3. Fall back to findProjectRoot or fallbackDir / process.cwd()
+  return findProjectRoot(initialDir, fallbackDir ?? process.cwd());
+}
+
 export function resolvePathTargets(
   inputPath?: string,
   options: PathResolverOptions = {},
@@ -365,7 +438,7 @@ export function resolvePathTargets(
   if (isOmitted) {
     const rawRoot = options.projectRoot
       ? path.resolve(options.projectRoot)
-      : findProjectRoot(cwd, cwd);
+      : resolveWorktreeRoot(cwd, cwd);
     const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, cwd);
     const config = options.config ?? loadProjectConfig(projectRoot);
 
@@ -430,7 +503,7 @@ export function resolvePathTargets(
     const fallbackDir = isSameOrDescendant(cwd, absPath) ? cwd : absPath;
     const rawRoot = options.projectRoot
       ? path.resolve(options.projectRoot)
-      : findProjectRoot(absPath, fallbackDir);
+      : resolveWorktreeRoot(absPath, fallbackDir);
     const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, absPath);
     const config = options.config ?? loadProjectConfig(projectRoot);
 
@@ -452,7 +525,7 @@ export function resolvePathTargets(
   const fallbackFileDir = isSameOrDescendant(cwd, absPath) ? cwd : path.dirname(absPath);
   const rawRoot = options.projectRoot
     ? path.resolve(options.projectRoot)
-    : findProjectRoot(path.dirname(absPath), fallbackFileDir);
+    : resolveWorktreeRoot(path.dirname(absPath), fallbackFileDir);
   const projectRoot = options.projectRoot ? rawRoot : clampRootToCwd(rawRoot, absPath);
   const config = options.config ?? loadProjectConfig(projectRoot);
 

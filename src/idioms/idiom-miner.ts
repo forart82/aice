@@ -55,6 +55,7 @@ export interface MineIdiomsResult {
   candidatesEvaluated: number;
   rejectedByTokenGate: number;
   totalNetTokenSavings: number;
+  zeroIdiomsReason?: "insufficient_repetition" | string;
 }
 
 // BPE Tokenizer singleton
@@ -499,11 +500,15 @@ export function mineProjectIdioms(
     totalNetTokenSavings += cand.definition.netTokenSavings;
   }
 
+  const zeroIdiomsReason =
+    Object.keys(finalIdioms).length === 0 ? "insufficient_repetition" : undefined;
+
   return {
     idioms: finalIdioms,
     candidatesEvaluated,
     rejectedByTokenGate,
     totalNetTokenSavings,
+    ...(zeroIdiomsReason ? { zeroIdiomsReason } : {}),
   };
 }
 
