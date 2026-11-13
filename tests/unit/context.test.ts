@@ -10,7 +10,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
-import { generateContext, packageContext, packContext } from "../../src/tools/context.js";
+import { buildSiblingOutline, generateContext, packageContext, packContext } from "../../src/tools/context.js";
 
 describe("AICE 2.0 AI Context Packager Engine (Step 20)", () => {
   let tmpDir: string;
@@ -572,5 +572,53 @@ pub fn calculateMetrics(x: int, y: int) -> int:
       expect(posTier2).toBeLessThan(posTier3);
       expect(posTier3).toBeLessThan(posTier4);
     });
+  });
+});
+
+describe("Adaptive Sibling Outlining", () => {
+  const mk = (names: string[]) => ({
+    name: "Svc",
+    kind: "class",
+    line: 1,
+    signature: "class Svc",
+    children: names.map((n, i) => ({
+      name: n,
+      kind: "method",
+      line: i + 2,
+      signature: `${n}(): void`,
+    })),
+  });
+
+  it("lists siblings excluding the target", () => {
+    const out = buildSiblingOutline([mk(["a", "b", "c"])], "Svc.b");
+    expect(out).toContain("a(): void");
+    expect(out).toContain("c(): void");
+    expect(out).not.toContain("b(): void");
+  });
+
+  it("returns empty for top-level selectors", () => {
+    expect(buildSiblingOutline([mk(["a"])], "Svc")).toBe("");
+  });
+
+  it("caps at 20 symbols and reports remainder", () => {
+    const names = Array.from({ length: 40 }, (_, i) => `m${i}`);
+    const out = buildSiblingOutline([mk(names)], "Svc.m0");
+    expect(out.split("\n").filter((l) => l.includes("(): void")).length).toBeLessThanOrEqual(20);
+    expect(out).toMatch(/\(\+ \d+ other methods\)/);
+  });
+
+  it("appends siblings in generateContext for Class.method", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-sib-"));
+    try {
+      const f = path.join(tmp, "svc.ts");
+      fs.writeFileSync(
+        f,
+        "export class Svc {\n  alpha(): number { return 1; }\n  beta(): number { return 2; }\n}\n",
+      );
+      const res = await generateContext(f, { projectRoot: tmp, symbol: "Svc.alpha" });
+      expect(JSON.stringify(res)).toContain("beta");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

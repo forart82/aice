@@ -374,6 +374,47 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
   return outlineLines.join("\n").trim();
 }
 
+const SIBLING_MAX_SYMBOLS = 20;
+const SIBLING_MAX_TOKENS = 150;
+
+/**
+ * Adaptive Sibling Outlining: for `Parent.member` selectors, render a compact
+ * outline of the other members of `Parent`, capped at 20 symbols / ~150 tokens.
+ */
+export function buildSiblingOutline(symbols: OutlineSymbol[], selector: string): string {
+  const parts = selector
+    .trim()
+    .split(/\.|::/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return "";
+  let level = symbols;
+  let parent: OutlineSymbol | undefined;
+  for (let i = 0; i < parts.length - 1; i++) {
+    parent = level.find((s) => s.name === parts[i]);
+    if (!parent?.children) return "";
+    level = parent.children;
+  }
+  const target = parts[parts.length - 1];
+  const siblings = level.filter((s) => s.name !== target);
+  if (!parent || siblings.length === 0) return "";
+  const header = `// siblings in ${parent.name}:`;
+  const lines: string[] = [];
+  let tokens = estimateTokens(header);
+  let shown = 0;
+  for (const s of siblings) {
+    const line = `//   ${s.signature.split("\n")[0].trim()}`;
+    const cost = estimateTokens(line);
+    if (shown >= SIBLING_MAX_SYMBOLS || (shown > 0 && tokens + cost > SIBLING_MAX_TOKENS)) break;
+    lines.push(line);
+    tokens += cost;
+    shown++;
+  }
+  const rest = siblings.length - shown;
+  if (rest > 0) lines.push(`//   (+ ${rest} other methods)`);
+  return [header, ...lines].join("\n");
+}
+
 function extractExportedContract(resolvedPath: string, importedSymbols: string[]): string {
   if (
     importedSymbols.length > 0 &&
@@ -3376,6 +3417,26 @@ export async function generateContext(
     !targetContent.startsWith("// match at [")
   ) {
     targetContent = compactPureAiceSlice(targetContent);
+  }
+
+  if (options.symbol && !decompileFailed && !targetContent.startsWith("// match at [")) {
+    const sel = splitSymbolSelectors(options.symbol);
+    if (sel.length === 1 && !/^\/.*\/$/.test(sel[0]) && sel[0].trim() !== "*") {
+      try {
+        const sibRes = withSuppressedTelemetry(() =>
+          generateOutline(fullTargetPath, {
+            includeTypes: true,
+            idioms: options.idioms,
+            projectRoot,
+            preReadSource: rawFileContent,
+          }),
+        );
+        const sib = buildSiblingOutline(sibRes.symbols, sel[0]);
+        if (sib) targetContent = `${targetContent}\n\n${sib}`;
+      } catch {
+        // sibling outline is best-effort
+      }
+    }
   }
 
   const targetExtLower = path.extname(fullTargetPath).toLowerCase();
