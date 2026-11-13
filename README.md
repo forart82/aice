@@ -31,13 +31,85 @@ Modern Large Language Models (LLMs) spend **40% to 85% of their context windows,
 
 ### Core Capability Matrix
 
-| Tool & Phase | Key Capabilities | Eliminates / Replaces | Token Savings |
+| Pillar & Tool | Key Capabilities | Eliminates / Replaces | Token Savings |
 | :--- | :--- | :--- | :---: |
-| **`aice create`**<br>_Greenfield Creation_ | Compiles compact AICE, inline `@idiom` macros, hybrid brace syntax, or unified multi-file `--stdin` streams (`=== <filePath> ===`) directly into clean native files. | Monolithic multi-turn file creation loops | **40–75%**<br>write tokens |
-| **`aice outline`**<br>_In-RAM AST Decompilation_ | Summarizes files or workspaces (`aice outline src tests`) into structural skeletons with `[Lstart-Lend]` line ranges, named `test "..."` / `describe "..."` blocks, Markdown ATX headings, shell functions/labels, and syntax diagnostics. | Blind `ls`, `ls -la`, and full-file inspection | **85–90%**<br>read tokens |
-| **`aice context`**<br>_1-Turn Context Stream_ | Extracts targets (`f1:s1 f2:s2`), `Class.method`, test IDs (`-s "TC-MENU-001"`), Markdown sections (`-s "Quick Start"`), exact line ranges (`-s "L180-L240"`), or regex searches (`-s "/pattern/"`) with deduplicated dependency contracts and **caller call-sites** (`[L14]`). | `grep -n`, `grep -rn`, `sed -n`, and `cat` | **70–85%**<br>context tokens |
-| **`aice splice`**<br>_Lossless AST Splicing_ | Surgical in-place edits in RAM by symbol (`:Class.method`), AST hunks (`<<< / === / >>>`), clones (`@clone`), test IDs, Markdown headings, scripts, ranges (`:Lstart-Lend`), `:imports`, or `:eof`. Preserves leading JSDoc/docstrings via CST Trivia Lenses. | Fragile whole-file overwrites & search-replace | **90%+**<br>write tokens |
-| **`aice idioms`**<br>_Smart Multi-File Macros_ | Automatically discovers or defines parameterized project-wide AST macros (e.g. `$clamp($0, $1, $2)`). Collapses occurrences into 1-line calls during inspection and mutates entire codebases in **1 turn** via `aice idioms update`. | Repetitive multi-file boilerplate edits | **60%+**<br>extra output savings |
+| **Pillar 1: Unified Read**<br>**`aice context`** / **`aice outline`** | Precision context extraction with **Adaptive Sibling Outlining** (capped at 20 symbols / ~150 tokens), **4-Tier Search Ranking** (defs $\to$ code $\to$ comments $\to$ mocks), deduplicated dependency contracts, and downstream caller sites (`[L14]`). | `grep -n`, `grep -rn`, `sed -n`, `ls`, and `cat` | **70–90%**<br>read / context tokens |
+| **Pillar 2: Unified Write**<br>**`aice splice`** / **`aice write`** | Deterministic mutation engine with **Greenfield Auto-Creation** (auto parent dirs), **Lossless Surgical AST Splicing** (symbols, `<<<` hunks, ranges), **Full-File Overwrite**, and unified multi-file batch streams. Universal alias: `aice write` $\equiv$ `aice splice`. | Fragile whole-file overwrites, blind shell writes, and search-replace | **90%+**<br>write tokens |
+| **Multi-File Creation**<br>**`aice create`** | Greenfield single/multi-file `--stdin` batch creation (`=== <filePath> ===`) with inline `@idiom` expansion across all 33 extensions. | Monolithic multi-turn file creation loops | **40–75%**<br>write tokens |
+| **Smart Multi-File Macros**<br>**`aice idioms`** | Automatically discovers, collapses, and mutates parameterized project-wide AST macros (e.g. `$clamp($0, $1, $2)`) across entire codebases in **1 turn**. | Repetitive multi-file boilerplate edits | **60%+**<br>extra output savings |
+
+---
+
+## 🏛️ 2-Pillar Unified Architecture
+
+AICE consolidates all autonomous coding agent file operations into a streamlined **2-Pillar Unified Architecture**:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 AICE 2-PILLAR UNIFIED ARCHITECTURE                              │
+├────────────────────────────────────────────────┬────────────────────────────────────────────────┤
+│            PILLAR 1: UNIFIED READ              │            PILLAR 2: UNIFIED WRITE             │
+│        (aice context / aice outline)           │          (aice splice / aice write)            │
+├────────────────────────────────────────────────┼────────────────────────────────────────────────┤
+│  Incoming Inspection Request                   │  Incoming Mutation Request                     │
+│  ├─ Target: symbol, range, testId, or regex    │  ├─ Payload: new file, AST splice, or overwrite│
+│  ▼                                             │  ▼                                             │
+│  ┌──────────────────────────────────────────┐  │  ┌──────────────────────────────────────────┐  │
+│  │   File & Workspace Scanner (In-RAM AST)  │  │  │         Target Existence Check           │  │
+│  └────────────────────┬─────────────────────┘  │  └────────────────────┬─────────────────────┘  │
+│                       │                        │                       │                        │
+│          ┌────────────┴────────────┐           │         ┌─────────────┴─────────────┐          │
+│          ▼                         ▼           │         ▼                           ▼          │
+│  ┌───────────────┐       ┌──────────────────┐  │  ┌───────────────┐         ┌────────────────┐  │
+│  │ Exact Symbol  │       │ Regex/Pattern    │  │  │ File Exists?  │         │ File Missing?  │  │
+│  │ Resolution    │       │ Search (4 Tiers) │  │  └───────┬───────┘         └───────┬────────┘  │
+│  └───────┬───────┘       └─────────┬────────┘  │          │                         │           │
+│          │                         │           │          ▼                         ▼           │
+│          │               ┌─────────┴────────┐  │  ┌───────────────┐         ┌────────────────┐  │
+│          │               │ 4-TIER RANKING   │  │  │ Selector or   │         │ Auto-Create    │  │
+│          │               │ Tier 1: Defs     │  │  │ Hunk Present? │         │ Parent Dirs &  │  │
+│          │               │ Tier 2: Code     │  │  └───────┬───────┘         │ Greenfield     │  │
+│          │               │ Tier 3: Comments │  │          │                 │ File on Disk   │  │
+│          │               │ Tier 4: Mocks    │  │     ┌────┴─────┐           └────────────────┘  │
+│          │               └─────────┬────────┘  │     ▼          ▼                               │
+│          ▼                         ▼           │  ┌──────┐  ┌──────────────┐                    │
+│  ┌──────────────────────────────────────────┐  │  │ Yes  │  │ No           │                    │
+│  │       Adaptive Sibling Outlining         │  │  └──┬───┘  └──────┬───────┘                    │
+│  │  - Enclosing Class / Interface context   │  │     │             │                            │
+│  │  - Guarded: max 20 symbols / ~150 tokens │  │     ▼             ▼                            │
+│  │  - "(+ N other methods)" truncation      │  │  ┌──────────────┐ ┌────────────────┐           │
+│  └────────────────────┬─────────────────────┘  │  │ Surgical AST │ │ Full-File      │           │
+│                       │                        │  │ Splice       │ │ Overwrite      │           │
+│                       ▼                        │  │ (CST Trivia) │ │ (Atomic Write) │           │
+│  ┌──────────────────────────────────────────┐  │  └──────┬───────┘ └───────┬────────┘           │
+│  │      Deduplicated Dependency Pack        │  │         │                 │                    │
+│  │  - Inline contracts + caller call-sites  │  │         ▼                 ▼                    │
+│  └────────────────────┬─────────────────────┘  │  ┌──────────────────────────────────────────┐  │
+│                       │                        │  │      Atomic In-Place Disk Mutation       │  │
+│                       ▼                        │  │   Zero .aice artifacts / RAM -> Disk     │  │
+│  ┌──────────────────────────────────────────┐  │  └──────────────────────────────────────────┘  │
+│  │ 70–90% Token-Savings Context Stream      │  │                                                │
+│  └──────────────────────────────────────────┘  │                                                │
+└────────────────────────────────────────────────┴────────────────────────────────────────────────┘
+```
+
+### Pillar 1: Unified Read (`aice context` & `aice outline`)
+- **Adaptive Sibling Outlining**: When inspecting a specific symbol (e.g. `GameApp.step`), AICE extracts the target and attaches a compact sibling outline of the enclosing class or interface. It strictly caps siblings to **20 symbols / ~150 tokens max**, appending `(+ N other methods)` to prevent context explosion on large entities.
+- **4-Tier Search Ranking**: Regex/substring queries (`-s "/pattern/"`) rank candidate matches to eliminate test decoy noise:
+  - **Tier 1 (Top Priority ~1,500+ pts)**: Production declarations (`class`, `function`, `interface`, `fn`, `def`, `pub`, `export`) + 1,000 pt filename bonus.
+  - **Tier 2 (High Priority 300–1,300 pts)**: Production executable code (call sites, logic).
+  - **Tier 3 (Medium Priority 100 pts)**: Comments, docstrings, and markdown docs in production code.
+  - **Tier 4 (De-Prioritized 10–50 pts)**: Test, mock, and fixture files (`tests/`, `mocks/`, `*.test.*`), isolated unless explicit test search is requested.
+- **Dependency Contracts & Downstream Callers**: Surfaces exact caller locations (`[L14]`) and deduplicated contracts in 1 turn.
+
+### Pillar 2: Unified Write (`aice splice` / `aice write`)
+- **Greenfield Auto-Creation**: If the target file does not exist, `aice splice` / `aice write` automatically creates it along with all recursive parent directories.
+- **Surgical AST Splicing (<50% mutations)**: Slices directly into target subtrees (`:Class.method`, AST hunks `<<< / === / >>>`, line ranges `:Lstart-Lend`, `@clone`, `:Heading`, `:imports`, `:eof`) while preserving docstrings and CST trivia.
+- **Full-File Overwrite Fallback (>50% mutations)**: Overwrites the file cleanly when no selector or hunk is provided.
+- **Universal Alias**: `aice write` is a first-class, bidirectional alias to `aice splice` across CLI and MCP (`aice_write` $\equiv$ `aice_splice`).
+- **Unified Multi-File Batch Streaming**: Combines creates (`=== file ===`), overwrites (`=== file:overwrite ===`), and AST splices (`=== file:symbol ===`) into 1 atomic turn via `--stdin`.
+
+> For complete formal architecture specifications, data flow, and benchmark analyses, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ---
 
@@ -245,17 +317,17 @@ aice agents remove                # Cleanly strip AICE entries without losing us
 
 ## ⚙️ Project-Level Controls (`aice.config.json`) & First-Class MCP Server (`aice mcp`)
 
-Every CLI command and all **7 First-Class MCP tools** (`aice_context`, `aice_outline`, `aice_splice`, `aice_create`, `aice_idioms`, `aice_gain`, `aice_project_config`) enforce strict workspace path sandboxing and respect project-level configuration in `aice.config.json` (or `.aicerc` / `package.json#aice`):
+Every CLI command and all **7 First-Class MCP tools** (`aice_context`, `aice_outline`, `aice_splice` / `aice_write`, `aice_create`, `aice_idioms`, `aice_gain`, `aice_project_config`) enforce strict workspace path sandboxing and respect project-level configuration in `aice.config.json` (or `.aicerc` / `package.json#aice`):
 
 | MCP Tool | Capabilities |
 | :--- | :--- |
-| `aice_context` | Single or multi-file context stream (`paths` array or space-separated `path` with inline `:symbol` / `:Lstart-Lend` / `:/pattern/` selectors), deduplicated dependency contracts, and `[Lline]` downstream callers |
+| `aice_context` | 1-Turn context stream with **Adaptive Sibling Outlining** (capped at 20 symbols / ~150 tokens), **4-Tier Search Ranking** (`-s "/pattern/"`), deduplicated dependency contracts, and `[Lline]` downstream callers |
 | `aice_outline` | Structural skeleton outlines across one or more files or directories (`path` / `paths`) with `[Lstart-Lend]` spans, `compact` mode, `depth`, and syntax diagnostics |
-| `aice_splice` | Surgical in-place AST replacement, deletion, `<<< / === / >>>` hunk patching, `@clone(SourceSym)` cloning, or unified multi-file `=== <filePath>:<symbol> ===` / `edits` / `files` batch streams (`dryRun`, `preserveDocs`, `insertBefore`/`insertAfter`) |
+| `aice_splice` / `aice_write` | Unified mutation engine: **Greenfield auto-creation** (with parent directories), **full-file overwrite**, surgical in-place AST replacement, `<<< / === / >>>` hunk patching, `@clone(SourceSym)`, or unified multi-file batch streams (`=== <filePath>:<symbol> ===` / `edits` / `files`) |
 | `aice_create` | Greenfield single-file or multi-file `=== <filePath> ===` / `files` batch creation across all 20 languages & 33 extensions with inline `@idiom` expansion (`dryRun`, `overwrite`) |
 | `aice_idioms` | Project `$idiom` lifecycle: `scan`, `list`, `read`, `update`, `apply`, `expand`, `on`, and `off` |
 | `aice_gain` | Honest signed `cl100k_base` & `o200k_base` BPE token-savings telemetry (`project` drill-down, `unique` SHA-256 deduplication, `json` export) |
-| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.31`) |
+| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync |
 
 - **Disable AICE completely for a project (`"enabled": false`)**:
   ```json
@@ -319,29 +391,40 @@ AICE provides intelligent feedback to coding agents when requested targets canno
 
 ## 💻 CLI Command Reference
 
-### 1. Greenfield File Creation, On-the-Fly Context, Skeleton Outlines & Surgical Splicing
+### 1. 2-Pillar Unified Context & Mutation Engine (`read` $\to$ `aice context`, `write` $\to$ `aice write` / `aice splice`)
 ```bash
-# Create brand-new native files from compact AICE, hybrid braces, or multi-file --stdin across 33 extensions:
-aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
-aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
-aice create src/config.ts -c 'export const MAX_RETRIES = 5;' --overwrite
+# --- PILLAR 1: UNIFIED READ (aice context / aice outline) ---
 
-# Generate structural skeleton outline across files or multiple directories (replaces 'ls src tests' & 'grep -n'):
+# Generate 1-turn token-bounded context stream with Adaptive Sibling Outlining & Downstream Callers:
+aice context src/app.ts -s "GameApp.step"                 # Includes Adaptive Sibling Outline (guarded at 20 symbols / ~150 tokens) & Callers [L14]
+aice context src/a.ts:fnA,fnB src/b.ts:L10-L50          # 1-turn multi-file stream with deduplicated dependency contracts
+aice context tests/app.test.ts -s "TC-MENU-001"         # Extract test block by test ID or title prefix
+aice context src/app.ts -s "L180-L240"                  # Zero-bloat fast-path 1-based numbered line range (180│ ...)
+aice context src -s "/OracleIncoherenceAuditor/"        # 4-Tier ranked search (defs -> code -> comments -> test/mock decoys)
+aice context README.md -s "Quick Start"                 # Extract Markdown section by heading
+
+# Generate structural skeleton outline across files or directories (replaces 'ls src tests' & 'grep -n'):
 aice outline src tests
 aice outline src tests --compact
 aice outline tests/app.test.ts                          # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
 aice outline install.sh README.md                       # Emits shell functions, batch :labels, and Markdown ATX headings
 
-# Generate 1-turn token-bounded context stream (replaces 'sed -n', 'grep -n', and 'grep -rn'):
-aice context src/a.ts:fnA,fnB src/b.ts:L10-L50          # 1-turn multi-file stream with deduplicated dependency contracts
-aice context src/app.ts -s "GameApp.getCoreConstants"   # Includes Downstream Callers with exact call-site [L14]
-aice context tests/app.test.ts -s "TC-MENU-001"         # Extract test block by test ID or title prefix
-aice context src/app.ts -s "L180-L240"                  # Zero-bloat fast-path 1-based numbered line range (180│ ...)
-aice context src -s "/OracleIncoherenceAuditor/"        # 1-turn regex/substring search across file or directory
-aice context README.md -s "Quick Start"                 # Extract Markdown section by heading
+# --- PILLAR 2: UNIFIED WRITE (aice write / aice splice) ---
 
-# 1-turn unified mixed create + surgical splice stream (:Class.method, @clone, :testId, :Heading, :Lstart-Lend, :eof, :imports, :overwrite):
-aice splice --stdin << 'EOF'
+# Greenfield Auto-Creation (automatically generates missing file and recursive parent directories):
+aice write src/services/auth/TokenValidator.ts -c 'export class TokenValidator { isValid(t: string): boolean { return !!t; } }'
+
+# Full-File Overwrite (when no selector or hunk is provided):
+aice write src/config/defaults.ts -c 'export const DEFAULT_TIMEOUT = 5000;'
+
+# Surgical AST Splicing (<50% mutation — by symbol, hunk, line-range, or clone):
+aice write src/engine.ts -s GameEngine.step -c $'<<<\n  this.tickCount += 1;\n===\n  this.tickCount += BONUS_MULTIPLIER;\n>>>'
+aice splice src/tax.ts -s calculateTax -c "export function calculateTax(n: number): number { return n * 1.2; }"
+aice splice README.md -s "Quick Start" -c "## Quick Start\nRun ./install.sh -y"
+aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
+
+# 1-turn unified mixed stream (creates, overwrites, and AST splices batched in 1 turn via --stdin):
+aice write --stdin << 'EOF'
 === src/new_helper.ts ===
 export const BONUS_MULTIPLIER = 2;
 === src/constants.ts:eof ===
@@ -361,15 +444,9 @@ const scaledScore = baseScore * BONUS_MULTIPLIER;
 export const SCHEMA_VERSION = 2;
 EOF
 
-# AST-scoped hunk splicing (<<< / === / >>> inside :symbol — strictly scoped to AST span & immune to line shifts):
-aice splice src/engine.ts -s GameEngine.step -c $'<<<\n  this.tickCount += 1;\n===\n  this.tickCount += BONUS_MULTIPLIER;\n>>>'
-
-# Single-target splice, JSDoc/docstring replacement (@replace-docs / --no-preserve-docs), Markdown heading & symbol deletion:
-aice splice src/telemetry_report.cpp -s buildNodeReport -c "pub fn buildNodeReport(m: TelemetryMetrics) -> str: ..." --idioms --in-place
-aice splice src/tax.ts -s calculateTax -c "// @replace-docs\nexport function calculateTax(n: number): number { return n * 1.2; }"
-aice splice src/tax.ts -s calculateTax -c "export function calculateTax(n: number): number { return n * 1.2; }" --no-preserve-docs
-aice splice README.md -s "Quick Start" -c "## Quick Start\nRun ./install.sh -y"
-aice splice src/sim/Hazard.ts -s HazardManager.obsoleteHelper --delete
+# Greenfield file creation with @idiom macros or JSON batch:
+aice create src/renderer.ts -c '@idiom $clamp($0,$1,$2) = Math.min(Math.max($0,$1),$2)\npub fn bound(x:num) -> num => $clamp(x, 0, 100)'
+aice create --batch '[{"filePath":"src/a.ts","code":"pub fn fnA() -> int => 1"},{"filePath":"src/b.py","code":"fn fnB() -> int => 2"}]'
 ```
 
 ### 2. Smart Multi-File Idioms (`$idioms`) & Project Toggles
@@ -451,6 +528,7 @@ aice/
 │   ├── aice.ts                 # AICE CLI entrypoint
 │   └── aice.mjs                # Node/Bun executable wrapper (symlink-safe)
 ├── docs/
+│   ├── ARCHITECTURE.md         # 2-Pillar Unified Architecture specification & box-drawing flowchart
 │   ├── AICE_SPEC.md            # Normative language & AST specification (EBNF)
 │   ├── AI_SYSTEM_PROMPT.md     # System prompt for LLM code generation & CLI usage
 │   ├── BENCHMARKS.md           # Real AI agent benchmark report (33 live sessions)
