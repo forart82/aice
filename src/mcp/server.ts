@@ -471,6 +471,13 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   },
 ];
 
+export const AICE_WRITE_TOOL: McpToolDefinition = {
+  ...AICE_MCP_TOOLS.find((t) => t.name === "aice_splice")!,
+  name: "aice_write",
+  description:
+    "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+};
+
 export interface McpToolCallResult {
   content: Array<{
     type: "text";
@@ -866,6 +873,9 @@ export class AiceMcpServer {
             aice_outline: "outline",
             aice_context: "context",
             aice_splice: "splice",
+            aice_write: "splice",
+            write: "splice",
+            splice: "splice",
             aice_create: "create",
             aice_decompile: "decompile",
             aice_patch: "patch",
@@ -1283,7 +1293,10 @@ export class AiceMcpServer {
         };
       }
 
-      case "aice_splice": {
+      case "aice_splice":
+      case "aice_write":
+      case "write":
+      case "splice": {
         const rawTargetFile = String(
           args.filePath ??
             args.path ??

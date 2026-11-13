@@ -204,12 +204,12 @@ export class OrderProcessor {
       it("triggers on non-repeating code and sets zeroIdiomsReason", () => {
         const files = [
           {
-            path: "math.ts",
-            content: "export function add(a: number, b: number): number { return a + b; }",
+            filePath: "math.ts",
+            source: "export function add(a: number, b: number): number { return a + b; }",
           },
           {
-            path: "util.ts",
-            content: "export const version = '1.0.0';",
+            filePath: "util.ts",
+            source: "export const version = '1.0.0';",
           },
         ];
         const res = mineProjectIdioms(files);

@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.31";
+    AICE_VERSION = "0.9.33";
     VERSION = AICE_VERSION;
   }
 });
@@ -272452,6 +272452,7 @@ var init_outline = __esm({
 // src/tools/context.ts
 var context_exports = {};
 __export(context_exports, {
+  buildSiblingOutline: () => buildSiblingOutline,
   extractImportsFromFile: () => extractImportsFromFile,
   extractPatternMatchesDetailed: () => extractPatternMatchesDetailed,
   extractSymbolFromAiceSource: () => extractSymbolFromAiceSource,
@@ -272647,6 +272648,35 @@ function renderSymbolsOutline(symbols) {
     }
   }
   return outlineLines.join("\n").trim();
+}
+function buildSiblingOutline(symbols, selector) {
+  const parts = selector.trim().split(/\.|::/).map((p) => p.trim()).filter(Boolean);
+  if (parts.length < 2) return "";
+  let level = symbols;
+  let parent;
+  for (let i = 0; i < parts.length - 1; i++) {
+    parent = level.find((s) => s.name === parts[i]);
+    if (!parent?.children) return "";
+    level = parent.children;
+  }
+  const target = parts[parts.length - 1];
+  const siblings = level.filter((s) => s.name !== target);
+  if (!parent || siblings.length === 0) return "";
+  const header = `// siblings in ${parent.name}:`;
+  const lines = [];
+  let tokens = estimateTokens(header);
+  let shown = 0;
+  for (const s of siblings) {
+    const line = `//   ${s.signature.split("\n")[0].trim()}`;
+    const cost = estimateTokens(line);
+    if (shown >= SIBLING_MAX_SYMBOLS || shown > 0 && tokens + cost > SIBLING_MAX_TOKENS) break;
+    lines.push(line);
+    tokens += cost;
+    shown++;
+  }
+  const rest = siblings.length - shown;
+  if (rest > 0) lines.push(`//   (+ ${rest} other methods)`);
+  return [header, ...lines].join("\n");
 }
 function extractExportedContract(resolvedPath, importedSymbols) {
   if (importedSymbols.length > 0 && !importedSymbols.includes("*") && !resolvedPath.endsWith(".aice")) {
@@ -275030,6 +275060,26 @@ ${unwrapped}` : unwrapped;
   if (options.symbol && !idiomsActive && !isFastPathSelector && detectedLangForSlice !== "markdown" && detectedLangForSlice !== "shell" && detectedLangForSlice !== "powershell" && detectedLangForSlice !== "batch" && !targetContent.startsWith("// match at [")) {
     targetContent = compactPureAiceSlice(targetContent);
   }
+  if (options.symbol && !decompileFailed && !targetContent.startsWith("// match at [")) {
+    const sel = splitSymbolSelectors(options.symbol);
+    if (sel.length === 1 && !/^\/.*\/$/.test(sel[0]) && sel[0].trim() !== "*") {
+      try {
+        const sibRes = withSuppressedTelemetry(
+          () => generateOutline(fullTargetPath, {
+            includeTypes: true,
+            idioms: options.idioms,
+            projectRoot,
+            preReadSource: rawFileContent
+          })
+        );
+        const sib = buildSiblingOutline(sibRes.symbols, sel[0]);
+        if (sib) targetContent = `${targetContent}
+
+${sib}`;
+      } catch {
+      }
+    }
+  }
   const targetExtLower = path13.extname(fullTargetPath).toLowerCase();
   const isDataOrDocExt = targetExtLower === ".json" || targetExtLower === ".yaml" || targetExtLower === ".yml" || targetExtLower === ".md" || targetExtLower === ".markdown";
   const shouldSkipFullOutline = (isFastPathSelector || Boolean(options.symbol) || isDataOrDocExt || rawFileContent.length > 5e4) && !options.outlineTarget && options.maxTokens === void 0;
@@ -275554,7 +275604,7 @@ async function generateMultiContext(targets, options = {}) {
   }
   return merged;
 }
-var NON_IMPORTING_EXTENSIONS, CALLER_IGNORED_DIRS, packContext, packageContext;
+var SIBLING_MAX_SYMBOLS, SIBLING_MAX_TOKENS, NON_IMPORTING_EXTENSIONS, CALLER_IGNORED_DIRS, packContext, packageContext;
 var init_context2 = __esm({
   "src/tools/context.ts"() {
     "use strict";
@@ -275570,6 +275620,8 @@ var init_context2 = __esm({
     init_tokenomics();
     init_outline();
     init_splice();
+    SIBLING_MAX_SYMBOLS = 20;
+    SIBLING_MAX_TOKENS = 150;
     NON_IMPORTING_EXTENSIONS = /* @__PURE__ */ new Set([
       ".json",
       ".yaml",
@@ -282748,10 +282800,13 @@ async function splice(filePath, rawOptions = {}) {
   const fileExists = options.sourceOverride !== void 0 || diskFileExists;
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
   const hasHunkPayload = fileExists && containsHunkMarkers(options.code ?? options.body ?? "");
-  if (!hasBatchEdits && !hasHunkPayload && !options.append && !options.insertAfter && !options.insertBefore && !options.delete && (!fileExists || options.create || Boolean(options.symbol) && isCreateOrOverwriteSymbol(options.symbol))) {
+  const isFullOverwrite = fileExists && !hasBatchEdits && !hasHunkPayload && !options.append && !options.insertAfter && !options.insertBefore && !options.delete && (!options.symbol || isCreateOrOverwriteSymbol(options.symbol));
+  const isCreateRoute = !options.delete && (!fileExists || options.create || isFullOverwrite);
+  if (isCreateRoute) {
     const prevSource = options.sourceOverride ?? (diskFileExists ? fs14.readFileSync(fullPath, "utf-8") : "");
+    const codePayload = options.code ?? options.body ?? (hasBatchEdits ? options.edits.filter((e) => !e.delete).map((e) => e.code ?? e.body ?? "").filter(Boolean).join("\n\n") : "");
     const created = await createFile(fullPath, {
-      code: options.code ?? options.body ?? "",
+      code: codePayload,
       overwrite: true,
       idioms: options.idioms,
       dryRun: options.dryRun,
@@ -296494,6 +296549,7 @@ var server_exports = {};
 __export(server_exports, {
   AICE_MCP_TOOLS: () => AICE_MCP_TOOLS,
   AICE_VERSION: () => AICE_VERSION2,
+  AICE_WRITE_TOOL: () => AICE_WRITE_TOOL,
   AiceMcpServer: () => AiceMcpServer
 });
 import * as fs20 from "node:fs";
@@ -296514,7 +296570,7 @@ function loadPackageVersion() {
   }
   return AICE_VERSION;
 }
-var AICE_VERSION2, AICE_MCP_TOOLS, AiceMcpServer;
+var AICE_VERSION2, AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer;
 var init_server = __esm({
   "src/mcp/server.ts"() {
     "use strict";
@@ -296876,6 +296932,11 @@ var init_server = __esm({
         }
       }
     ];
+    AICE_WRITE_TOOL = {
+      ...AICE_MCP_TOOLS.find((t) => t.name === "aice_splice"),
+      name: "aice_write",
+      description: "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc."
+    };
     AiceMcpServer = class {
       inStream;
       outStream;
@@ -297187,6 +297248,9 @@ ${json}`;
                 aice_outline: "outline",
                 aice_context: "context",
                 aice_splice: "splice",
+                aice_write: "splice",
+                write: "splice",
+                splice: "splice",
                 aice_create: "create",
                 aice_decompile: "decompile",
                 aice_patch: "patch",
@@ -297515,7 +297579,10 @@ ${r.text}` : r.text
               content: [{ type: "text", text: safeOutlineText }]
             };
           }
-          case "aice_splice": {
+          case "aice_splice":
+          case "aice_write":
+          case "write":
+          case "splice": {
             const rawTargetFile = String(
               args.filePath ?? args.path ?? args.file ?? args.fileOrDir ?? args.target ?? ""
             );
@@ -306237,7 +306304,7 @@ async function readStdin(explicit = false) {
     process.stdin.resume();
   });
 }
-program2.command("splice").description(
+program2.command("splice").alias("write").description(
   "AST surgical updates: replace, insert, or delete declarations with 90% token reduction"
 ).argument("[path]", "Path to source file (optional when --batch or -f is provided)").argument("[symbol]", "Target symbol identifier (optional shorthand for -s/--symbol)").option("-f, --file <path>", "Path to source file").option(
   "-s, --symbol <symbol>",

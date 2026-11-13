@@ -169,7 +169,6 @@ export async function runRankingBenchmarks(): Promise<BenchmarkTrial[]> {
     const s3Body = s3Res.formattedBundle;
     // Check if the declaration was captured in the top 25 windows
     const hasDeclInResults = s3Body.includes("export function liquidation_guard");
-    const firstMatchLine = s3Body.match(/\/\/ match at \[([^\]]+)\]/)?.[1] || "";
 
     trials.push({
       name: "Scenario 3: Code vs Comment Disambiguation",

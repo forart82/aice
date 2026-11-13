@@ -1327,9 +1327,10 @@ async function readStdin(explicit = false): Promise<string> {
     process.stdin.resume();
   });
 }
-// Command: splice [path]
+// Command: splice [path] (alias: write)
 program
   .command("splice")
+  .alias("write")
   .description(
     "AST surgical updates: replace, insert, or delete declarations with 90% token reduction",
   )
