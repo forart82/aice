@@ -3764,10 +3764,16 @@ function normalizeSelfAndThisInDecl(
     targetLang === "cpp" ||
     targetLang === "kotlin" ||
     targetLang === "php";
+  const hadExplicitSelfParam = decl.params[0]?.name === "self";
+  const nonReceiverParamNames = new Set(
+    decl.params
+      .filter((p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this")))
+      .map((p) => p.name),
+  );
   if (!useThis) {
-    rewriteReceiverIdentifierInNode(decl.body, "self");
-  } else if (decl.params[0]?.name === "self") {
-    rewriteReceiverIdentifierInNode(decl.body, "this");
+    rewriteReceiverIdentifierInNode(decl.body, "self", nonReceiverParamNames);
+  } else if (targetLang !== "php" || hadExplicitSelfParam) {
+    rewriteReceiverIdentifierInNode(decl.body, "this", nonReceiverParamNames);
   }
 }
 
