@@ -1246,6 +1246,8 @@ export class RustDecompiler {
     items.push(decl);
   }
 
+  private tupleDestructCounter = 0;
+
   private parseBlock(): Block {
     this.consume("LBRACE", "Expected '{' to start block");
     const statements: Statement[] = [];
@@ -1254,7 +1256,9 @@ export class RustDecompiler {
       this.collectLeadingTrivia();
       if (this.check("RBRACE")) break;
       const stmt = this.parseStatement();
-      if (stmt) {
+      if (Array.isArray(stmt)) {
+        statements.push(...stmt);
+      } else if (stmt) {
         statements.push(stmt);
       }
       this.match("SEMICOLON");
@@ -1264,7 +1268,7 @@ export class RustDecompiler {
     return { kind: "Block", statements, span: emptySpan() };
   }
 
-  private parseStatement(): Statement | null {
+  private parseStatement(): Statement | Statement[] | null {
     // Return statement: return expr;
     if (this.check("RETURN")) {
       this.advance();
@@ -1277,10 +1281,81 @@ export class RustDecompiler {
       return { kind: "ReturnStmt", value: val, span: emptySpan() };
     }
 
-    // Let binding: let mut x: Type = expr; OR let x = expr;
+    // Let binding: let mut x: Type = expr; OR let (a, b) = expr;
     if (this.check("LET")) {
       this.advance();
-      const isMut = this.match("MUT");
+      const outerMut = this.match("MUT");
+
+      if (this.match("LPAREN")) {
+        const bindings: Array<{ name: string; isMut: boolean } | null> = [];
+        while (!this.check("RPAREN") && !this.isAtEnd()) {
+          const elemMut = this.match("MUT") || outerMut;
+          if (this.match("UNDERSCORE")) {
+            bindings.push(null);
+          } else {
+            const elemName = this.consume("IDENTIFIER", "Expected tuple binding identifier").value;
+            bindings.push({ name: this.toAiceFieldName(elemName), isMut: elemMut });
+          }
+          if (!this.match("COMMA")) break;
+        }
+        this.consume("RPAREN", "Expected ')' closing tuple let pattern");
+
+        let tupleTypeAnn: TypeExpr | undefined;
+        if (this.match("COLON")) {
+          tupleTypeAnn = this.parseTypeExpr();
+        }
+
+        let initVal: Expr = {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "None",
+          span: emptySpan(),
+        };
+        if (this.match("ASSIGN")) {
+          initVal = this.parseExpr();
+        }
+        this.match("SEMICOLON");
+
+        const tmpName = `__tup_${++this.tupleDestructCounter}`;
+        const lowered: Statement[] = [
+          {
+            kind: "LetBinding",
+            name: tmpName,
+            isMut: false,
+            typeAnnotation: tupleTypeAnn ?? null,
+            init: initVal,
+            span: emptySpan(),
+          },
+        ];
+        bindings.forEach((b, idx) => {
+          if (!b) return;
+          const elemType =
+            tupleTypeAnn?.kind === "TupleType" ? (tupleTypeAnn.elementTypes[idx] ?? null) : null;
+          lowered.push({
+            kind: "LetBinding",
+            name: b.name,
+            isMut: b.isMut,
+            typeAnnotation: elemType,
+            init: {
+              kind: "IndexExpr",
+              object: { kind: "IdentifierExpr", name: tmpName, span: emptySpan() },
+              index: {
+                kind: "LiteralExpr",
+                literalKind: "number",
+                value: idx,
+                rawValue: String(idx),
+                span: emptySpan(),
+              },
+              span: emptySpan(),
+            },
+            span: emptySpan(),
+          });
+        });
+        return lowered;
+      }
+
+      const isMut = outerMut;
       const name = this.consume("IDENTIFIER", "Expected variable name").value;
 
       let typeAnnotation: TypeExpr | undefined;
@@ -1485,6 +1560,25 @@ export class RustDecompiler {
       return { kind: "WildcardPattern", span: emptySpan() };
     }
 
+    if (this.match("LPAREN")) {
+      if (this.match("RPAREN")) {
+        return { kind: "WildcardPattern", span: emptySpan() };
+      }
+      const subPatterns: Pattern[] = [];
+      while (!this.check("RPAREN") && !this.isAtEnd()) {
+        subPatterns.push(this.parsePattern());
+        if (!this.match("COMMA")) break;
+      }
+      this.consume("RPAREN", "Expected ')' closing tuple pattern");
+      if (subPatterns.length === 1) return subPatterns[0];
+      return {
+        kind: "ConstructorPattern",
+        name: "Tuple",
+        subPatterns,
+        span: emptySpan(),
+      };
+    }
+
     if (this.check("NUMBER") || this.check("STRING")) {
       const expr = this.parseExpr() as LiteralExpr;
       return { kind: "LiteralPattern", value: expr, span: emptySpan() };
@@ -1554,9 +1648,79 @@ export class RustDecompiler {
       return this.parseExpr(7);
     }
 
-    // Grouping
+    // Rust if-expression: if cond { a } else if c2 { b } else { c }
+    if (this.match("IF")) {
+      const extractBlockValueExpr = (blk: Block): Expr => {
+        const last = blk.statements[blk.statements.length - 1];
+        if (last?.kind === "ReturnStmt" && last.value) return last.value;
+        if (last?.kind === "ExprStmt") return last.expr;
+        return {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "()",
+          span: emptySpan(),
+        };
+      };
+
+      const parseIfExprRest = (): Expr => {
+        let cond: Expr;
+        const prevCtrl = this.inControlHeader;
+        this.inControlHeader = true;
+        try {
+          cond = this.parseExpr();
+        } finally {
+          this.inControlHeader = prevCtrl;
+        }
+        const thenBlk = this.parseBlock();
+        const whenTrue = extractBlockValueExpr(thenBlk);
+        let whenFalse: Expr = {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "()",
+          span: emptySpan(),
+        };
+        if (this.match("ELSE")) {
+          if (this.match("IF")) {
+            whenFalse = parseIfExprRest();
+          } else {
+            whenFalse = extractBlockValueExpr(this.parseBlock());
+          }
+        }
+        return {
+          kind: "ConditionalExpr",
+          condition: cond,
+          whenTrue,
+          whenFalse,
+          span: emptySpan(),
+        };
+      };
+
+      return parseIfExprRest();
+    }
+
+    // Grouping or Tuple literal (a, b, ...) or Unit ()
     if (this.match("LPAREN")) {
+      if (this.match("RPAREN")) {
+        return {
+          kind: "LiteralExpr",
+          literalKind: "nil",
+          value: null,
+          rawValue: "()",
+          span: emptySpan(),
+        };
+      }
       const expr = this.parseExpr();
+      if (this.match("COMMA")) {
+        const elements: Expr[] = [expr];
+        while (!this.check("RPAREN") && !this.isAtEnd()) {
+          elements.push(this.parseExpr());
+          if (!this.match("COMMA")) break;
+        }
+        this.consume("RPAREN", "Expected ')' closing tuple expression");
+        return { kind: "ArrayLiteralExpr", elements, span: emptySpan() };
+      }
       this.consume("RPAREN", "Expected ')' closing expression");
       // Check for cast: (expr as Type)
       if (this.match("AS")) {
@@ -1869,8 +2033,23 @@ export class RustDecompiler {
       return { kind: "CallExpr", callee: left, args, span: emptySpan() };
     }
 
-    // Member access: left.property
+    // Member access: left.property or tuple index left.0
     if (tok.kind === "DOT") {
+      if (this.check("NUMBER")) {
+        const idxTok = this.advance();
+        return {
+          kind: "IndexExpr",
+          object: left,
+          index: {
+            kind: "LiteralExpr",
+            literalKind: "number",
+            value: Number(idxTok.value),
+            rawValue: idxTok.value,
+            span: emptySpan(),
+          },
+          span: emptySpan(),
+        };
+      }
       const propTok = this.consume("IDENTIFIER", "Expected member property name");
       const prop = propTok.value;
 
@@ -1964,7 +2143,7 @@ export class RustDecompiler {
       return this.parseTypeExpr();
     }
 
-    // Unit type ()
+    // Unit type (), grouped type (T), or tuple type (T1, T2, ...)
     if (this.check("LPAREN")) {
       this.advance();
       if (this.check("RPAREN")) {
@@ -1972,6 +2151,15 @@ export class RustDecompiler {
         return { kind: "PrimitiveType", primitive: "void", span: emptySpan() };
       }
       const inner = this.parseTypeExpr();
+      if (this.match("COMMA")) {
+        const elementTypes: TypeExpr[] = [inner];
+        while (!this.check("RPAREN") && !this.isAtEnd()) {
+          elementTypes.push(this.parseTypeExpr());
+          if (!this.match("COMMA")) break;
+        }
+        this.consume("RPAREN", "Expected ')' closing tuple type");
+        return { kind: "TupleType", elementTypes, span: emptySpan() };
+      }
       this.consume("RPAREN", "Expected ')' closing type");
       return inner;
     }

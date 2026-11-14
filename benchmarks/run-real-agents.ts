@@ -43,18 +43,50 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const OAUTH_OR_RATE_LIMIT_RE =
-  /oauth|token|401|429|\b50[234]\b|not logged into|ETIMEDOUT|ECONNRESET|EAI_AGAIN|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded/i;
+  /\b(?:oauth|reauth|invalid_grant|unauthenticated|expired[_\s-]?token|refresh[_\s-]?token|not logged into|rate[_\s-]?limit(?:ed)?|quota[_\s-]?exceeded|too many requests|RESOURCE_EXHAUSTED|overloaded|UNAVAILABLE|ECONNRESET|EAI_AGAIN)\b|(?:status|code|HTTP\/[0-9.]+\s+)(?:401|429|502|503|504)\b/i;
+
+export function buildIsolatedBenchmarkEnv(
+  baseEnv: NodeJS.ProcessEnv = process.env,
+  cwd?: string,
+): NodeJS.ProcessEnv {
+  const cleanEnv: NodeJS.ProcessEnv = { ...baseEnv };
+  const leakRe = /\/dev\/aice(?:\/|$)|antigravity-cli\/worktrees(?:\/|$)/;
+
+  for (const pathKey of ["PATH", "Path"]) {
+    const rawPath = cleanEnv[pathKey];
+    if (typeof rawPath === "string" && rawPath.length > 0) {
+      cleanEnv[pathKey] = rawPath
+        .split(path.delimiter)
+        .filter((entry) => entry.length > 0 && !leakRe.test(entry.replace(/\\/g, "/")))
+        .join(path.delimiter);
+    }
+  }
+
+  for (const [k, v] of Object.entries(cleanEnv)) {
+    if (k === "PATH" || k === "Path") continue;
+    if (typeof v === "string" && leakRe.test(v.replace(/\\/g, "/"))) {
+      delete cleanEnv[k];
+    }
+  }
+
+  if (cwd) {
+    cleanEnv.PWD = cwd;
+    cleanEnv.INIT_CWD = cwd;
+  }
+  return cleanEnv;
+}
 
 function spawnAgyOnce(
   agyArgs: string[],
   cwd?: string,
-  timeoutMs = 240_000,
+  timeoutMs = 660_000,
   maxBuffer = 25 * 1024 * 1024,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const useProcessGroup = process.platform !== "win32";
     const child = spawn("agy", agyArgs, {
       cwd,
+      env: buildIsolatedBenchmarkEnv(process.env, cwd),
       detached: useProcessGroup,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -169,13 +201,16 @@ export async function execAgyWithRetry(
   let lastError: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await spawnAgyOnce(agyArgs, cwd, 240_000, 25 * 1024 * 1024);
+      return await spawnAgyOnce(agyArgs, cwd, 660_000, 25 * 1024 * 1024);
     } catch (err: any) {
       lastError = err;
       const stdout = String(err?.stdout || "");
       const stderr = String(err?.stderr || "");
       const errMsg = String(err?.message || "");
       const fullDiagnostic = `${errMsg}\n${stderr}\n${stdout}`;
+      const isTimeout =
+        err?.code === "ETIMEDOUT" ||
+        /print_timeout|DEADLINE_EXCEEDED|timed out after/i.test(fullDiagnostic);
 
       if (stderr.trim()) {
         console.error(`[agy stderr (attempt ${attempt + 1}/${maxRetries + 1})]:\n${stderr.trim()}`);
@@ -183,7 +218,8 @@ export async function execAgyWithRetry(
         console.error(`[agy error (attempt ${attempt + 1}/${maxRetries + 1})]:\n${errMsg.trim()}`);
       }
 
-      const isRetryable = OAUTH_OR_RATE_LIMIT_RE.test(fullDiagnostic);
+      const authAndNetDiagnostic = `${errMsg}\n${stderr}`;
+      const isRetryable = !isTimeout && OAUTH_OR_RATE_LIMIT_RE.test(authAndNetDiagnostic);
       if (isRetryable && attempt < maxRetries) {
         const delayMs = 3000 * Math.pow(2, attempt);
         console.warn(
@@ -946,7 +982,7 @@ export function buildPrompt(
       `2. Mutate (\`aice splice\` / \`aice write\` — pre-validates AST & native compiler syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
       `   - Zero-escaping unified heredoc stream (preferred for multi-line edits, updates, deletions, or appends):`,
       `     \`aice splice --no-idioms --stdin << 'EOF'\``,
-      `     \`=== <file>:<symbol> ===\` (replace symbol, or use \`<<< / === / >>>\` hunk inside symbol)`,
+      `     \`=== <file>:<symbol> ===\` (prefer compact \`<<< / === / >>>\` hunks inside \`:symbol\` for localized statement/step/constant edits instead of rewriting full function bodies, or pass pure AICE to replace the whole symbol)`,
       `     \`=== <file>:<symbol> --delete ===\` (delete obsolete symbol)`,
       `     \`=== <file>:eof ===\` (append new symbol/rule)`,
       `     \`EOF\``,
@@ -966,12 +1002,9 @@ export function buildPrompt(
     `1. Read & Mine Idioms (\`aice context\`):`,
     `   - \`aice context . -s "*" --idioms\`: Auto-discover & save repeating project idioms into \`aice.config.json\` AND extract \`// symbols:\` headers, \`$idiom(...)\`-collapsed symbol slices, and \`### Active Project Idioms\` templates in 1 command (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
     `2. Mutate & Refactor Idioms (\`aice splice\` / \`aice write\` — pre-validates AST & native syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
-    `   - Atomic JSON batch for symbol updates/insertions, deletions, AND workspace-wide \`$idiom\` template refactors in 1 call (in JSON/YAML idiom templates preserve \`{ key: $0, ... }\` object syntax; separate multi-line templates with \`\\n\`):`,
-    `     - Update: \`{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"}\``,
-    `     - Insert: \`{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<AICE with $idiom>"}\``,
-    `     - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
-    `     - Idiom template refactor: \`{"name":"$<discovered_idiom>","template":"<updated template>"}\``,
-    `   - Or zero-escaping heredoc stream for multi-file symbol updates/deletions/appends: \`aice splice --idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\`, \`=== <file>:<symbol> --delete ===\`, \`=== <file>:eof ===\`).`,
+    `   - Atomic JSON batch for symbol updates/insertions, deletions, AND workspace-wide \`$idiom\` template refactors in 1 call (write idiom \`"template"\` in the exact AICE DSL syntax shown under \`### Active Project Idioms\`, e.g. \`div(class: "...", ...)\` / \`fl-center\`, never raw \`<div ...>\` HTML/JSX; in JSON/YAML idioms preserve \`{ key: $0, ... }\`; pass via \`--batch '[...]'\`, \`--batch -\`, or \`--stdin << 'EOF'\`):`,
+    `     \`aice splice --idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true},{"name":"$<discovered_idiom>","template":"<updated AICE DSL template>"}]'\``,
+    `   - Or zero-escaping heredoc stream for multi-file symbol updates/deletions/appends: \`aice splice --idioms --stdin << 'EOF'\` (\`=== <file>:<existingSymbol> ===\`, \`=== <file>:<Class.newMethod> ===\`, \`=== <file>:<obsoleteSymbol> --delete ===\`, \`=== <file>:eof ===\`).`,
     taskText,
     `Once \`aice splice\` reports \`✔\` for all required edits, reply DONE immediately without redundant full-workspace re-reads.`,
   ].join("\n\n");
@@ -1014,8 +1047,8 @@ export function buildLayerPrompt(
       `Environment: AICE On-the-Fly WITHOUT Idioms (2-Pillar AICE CLI with \`--no-idioms\`).`,
       `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, --help, or $idiom macros.`,
       `AICE CLI Reference:`,
-      `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} --no-idioms\`.`,
-      `- Apply all new layer AST additions in 1 stream call via \`aice splice --no-idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\` or \`=== <file>:eof ===\`) or \`aice splice --no-idioms --batch '[...]'\`.`,
+      `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} -s "*" --no-idioms\`.`,
+      `- Apply all new layer AST additions in 1 stream call via \`aice splice --no-idioms --stdin << 'EOF'\` (use \`=== <file>:eof ===\` to append new top-level functions/types/rules/keys, \`=== <file>:<Class.newMethod> ===\` to add class methods, or \`=== <file>:<existingSymbol> ===\` to replace existing symbols) or \`aice splice --no-idioms --batch '[...]'\`.`,
       `Requirements:`,
       `1. ${promptText}`,
       `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
@@ -1031,8 +1064,8 @@ export function buildLayerPrompt(
     `Environment: AICE On-the-Fly WITH Project Idioms (\`--idioms\`).`,
     `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, or --help.`,
     `AICE CLI Reference:`,
-    `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} --idioms\`.`,
-    `- Apply all new layer AST additions in 1 stream call via \`aice splice --idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\` or \`=== <file>:eof ===\`) or \`aice splice --idioms --batch '[...]'\`.`,
+    `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} -s "*" --idioms\`.`,
+    `- Apply all new layer AST additions in 1 stream call via \`aice splice --idioms --stdin << 'EOF'\` (use \`=== <file>:eof ===\` to append new top-level functions/types/rules/keys, \`=== <file>:<Class.newMethod> ===\` to add class methods, or \`=== <file>:<existingSymbol> ===\` to replace existing symbols) or \`aice splice --idioms --batch '[...]'\`.`,
     `Requirements:`,
     `1. ${promptText}`,
     `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
@@ -1827,7 +1860,7 @@ export async function runAgentBenchmarkMode(
       "--model",
       "gemini-3.8-flash-low",
       "--print-timeout",
-      "210s",
+      "600s",
       "--dangerously-skip-permissions",
       "--output-format",
       "json",

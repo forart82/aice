@@ -40627,6 +40627,7 @@ var init_rust_decompiler = __esm({
         for (const t of trivia) this.trivia.addLeadingTrivia(nodeId, t);
         items.push(decl2);
       }
+      tupleDestructCounter = 0;
       parseBlock() {
         this.consume("LBRACE", "Expected '{' to start block");
         const statements = [];
@@ -40634,7 +40635,9 @@ var init_rust_decompiler = __esm({
           this.collectLeadingTrivia();
           if (this.check("RBRACE")) break;
           const stmt = this.parseStatement();
-          if (stmt) {
+          if (Array.isArray(stmt)) {
+            statements.push(...stmt);
+          } else if (stmt) {
             statements.push(stmt);
           }
           this.match("SEMICOLON");
@@ -40655,7 +40658,72 @@ var init_rust_decompiler = __esm({
         }
         if (this.check("LET")) {
           this.advance();
-          const isMut = this.match("MUT");
+          const outerMut = this.match("MUT");
+          if (this.match("LPAREN")) {
+            const bindings = [];
+            while (!this.check("RPAREN") && !this.isAtEnd()) {
+              const elemMut = this.match("MUT") || outerMut;
+              if (this.match("UNDERSCORE")) {
+                bindings.push(null);
+              } else {
+                const elemName = this.consume("IDENTIFIER", "Expected tuple binding identifier").value;
+                bindings.push({ name: this.toAiceFieldName(elemName), isMut: elemMut });
+              }
+              if (!this.match("COMMA")) break;
+            }
+            this.consume("RPAREN", "Expected ')' closing tuple let pattern");
+            let tupleTypeAnn;
+            if (this.match("COLON")) {
+              tupleTypeAnn = this.parseTypeExpr();
+            }
+            let initVal = {
+              kind: "LiteralExpr",
+              literalKind: "nil",
+              value: null,
+              rawValue: "None",
+              span: emptySpan()
+            };
+            if (this.match("ASSIGN")) {
+              initVal = this.parseExpr();
+            }
+            this.match("SEMICOLON");
+            const tmpName = `__tup_${++this.tupleDestructCounter}`;
+            const lowered = [
+              {
+                kind: "LetBinding",
+                name: tmpName,
+                isMut: false,
+                typeAnnotation: tupleTypeAnn ?? null,
+                init: initVal,
+                span: emptySpan()
+              }
+            ];
+            bindings.forEach((b, idx) => {
+              if (!b) return;
+              const elemType = tupleTypeAnn?.kind === "TupleType" ? tupleTypeAnn.elementTypes[idx] ?? null : null;
+              lowered.push({
+                kind: "LetBinding",
+                name: b.name,
+                isMut: b.isMut,
+                typeAnnotation: elemType,
+                init: {
+                  kind: "IndexExpr",
+                  object: { kind: "IdentifierExpr", name: tmpName, span: emptySpan() },
+                  index: {
+                    kind: "LiteralExpr",
+                    literalKind: "number",
+                    value: idx,
+                    rawValue: String(idx),
+                    span: emptySpan()
+                  },
+                  span: emptySpan()
+                },
+                span: emptySpan()
+              });
+            });
+            return lowered;
+          }
+          const isMut = outerMut;
           const name = this.consume("IDENTIFIER", "Expected variable name").value;
           let typeAnnotation;
           if (this.match("COLON")) {
@@ -40824,6 +40892,24 @@ var init_rust_decompiler = __esm({
         if (this.match("UNDERSCORE")) {
           return { kind: "WildcardPattern", span: emptySpan() };
         }
+        if (this.match("LPAREN")) {
+          if (this.match("RPAREN")) {
+            return { kind: "WildcardPattern", span: emptySpan() };
+          }
+          const subPatterns = [];
+          while (!this.check("RPAREN") && !this.isAtEnd()) {
+            subPatterns.push(this.parsePattern());
+            if (!this.match("COMMA")) break;
+          }
+          this.consume("RPAREN", "Expected ')' closing tuple pattern");
+          if (subPatterns.length === 1) return subPatterns[0];
+          return {
+            kind: "ConstructorPattern",
+            name: "Tuple",
+            subPatterns,
+            span: emptySpan()
+          };
+        }
         if (this.check("NUMBER") || this.check("STRING")) {
           const expr = this.parseExpr();
           return { kind: "LiteralPattern", value: expr, span: emptySpan() };
@@ -40878,8 +40964,74 @@ var init_rust_decompiler = __esm({
         if (this.match("STAR")) {
           return this.parseExpr(7);
         }
+        if (this.match("IF")) {
+          const extractBlockValueExpr = (blk) => {
+            const last = blk.statements[blk.statements.length - 1];
+            if (last?.kind === "ReturnStmt" && last.value) return last.value;
+            if (last?.kind === "ExprStmt") return last.expr;
+            return {
+              kind: "LiteralExpr",
+              literalKind: "nil",
+              value: null,
+              rawValue: "()",
+              span: emptySpan()
+            };
+          };
+          const parseIfExprRest = () => {
+            let cond;
+            const prevCtrl = this.inControlHeader;
+            this.inControlHeader = true;
+            try {
+              cond = this.parseExpr();
+            } finally {
+              this.inControlHeader = prevCtrl;
+            }
+            const thenBlk = this.parseBlock();
+            const whenTrue = extractBlockValueExpr(thenBlk);
+            let whenFalse = {
+              kind: "LiteralExpr",
+              literalKind: "nil",
+              value: null,
+              rawValue: "()",
+              span: emptySpan()
+            };
+            if (this.match("ELSE")) {
+              if (this.match("IF")) {
+                whenFalse = parseIfExprRest();
+              } else {
+                whenFalse = extractBlockValueExpr(this.parseBlock());
+              }
+            }
+            return {
+              kind: "ConditionalExpr",
+              condition: cond,
+              whenTrue,
+              whenFalse,
+              span: emptySpan()
+            };
+          };
+          return parseIfExprRest();
+        }
         if (this.match("LPAREN")) {
+          if (this.match("RPAREN")) {
+            return {
+              kind: "LiteralExpr",
+              literalKind: "nil",
+              value: null,
+              rawValue: "()",
+              span: emptySpan()
+            };
+          }
           const expr = this.parseExpr();
+          if (this.match("COMMA")) {
+            const elements = [expr];
+            while (!this.check("RPAREN") && !this.isAtEnd()) {
+              elements.push(this.parseExpr());
+              if (!this.match("COMMA")) break;
+            }
+            this.consume("RPAREN", "Expected ')' closing tuple expression");
+            return { kind: "ArrayLiteralExpr", elements, span: emptySpan() };
+          }
           this.consume("RPAREN", "Expected ')' closing expression");
           if (this.match("AS")) {
             this.parseTypeExpr();
@@ -41154,6 +41306,21 @@ var init_rust_decompiler = __esm({
           return { kind: "CallExpr", callee: left, args, span: emptySpan() };
         }
         if (tok.kind === "DOT") {
+          if (this.check("NUMBER")) {
+            const idxTok = this.advance();
+            return {
+              kind: "IndexExpr",
+              object: left,
+              index: {
+                kind: "LiteralExpr",
+                literalKind: "number",
+                value: Number(idxTok.value),
+                rawValue: idxTok.value,
+                span: emptySpan()
+              },
+              span: emptySpan()
+            };
+          }
           const propTok = this.consume("IDENTIFIER", "Expected member property name");
           const prop = propTok.value;
           if (prop === "len" && this.check("LPAREN")) {
@@ -41241,6 +41408,15 @@ var init_rust_decompiler = __esm({
             return { kind: "PrimitiveType", primitive: "void", span: emptySpan() };
           }
           const inner = this.parseTypeExpr();
+          if (this.match("COMMA")) {
+            const elementTypes = [inner];
+            while (!this.check("RPAREN") && !this.isAtEnd()) {
+              elementTypes.push(this.parseTypeExpr());
+              if (!this.match("COMMA")) break;
+            }
+            this.consume("RPAREN", "Expected ')' closing tuple type");
+            return { kind: "TupleType", elementTypes, span: emptySpan() };
+          }
           this.consume("RPAREN", "Expected ')' closing type");
           return inner;
         }
@@ -281357,26 +281533,28 @@ ${fieldLines.join("\n")}`;
   try {
     const mod = parse3(normalizedNonCallable, filePath);
     const expanded = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
-    for (const item of expanded.items) {
-      if (item.kind === "TypeDecl" || item.kind === "ConstDecl" || item.kind === "VarDecl" || item.kind === "ComponentDecl" || item.kind === "StyleDecl" || item.kind === "ClassDecl" && (!className || isClassContainerTarget)) {
-        const singleMod = normalizeModuleForTarget(
-          {
-            kind: "Module",
-            path: path15.basename(filePath),
-            items: [item],
-            span: mod.span
-          },
-          targetLang
-        );
-        const emitted = emitTarget(singleMod, targetLang, { watermark: false }).trim();
-        return stripTopLevelLanguagePreamble(emitted, targetLang);
-      }
+    const meaningfulItems = expanded.items.filter(
+      (item) => !(item.kind === "FunctionDecl" && item.name === "__top_level__")
+    );
+    const isNonCallableItem = (item) => item.kind === "TypeDecl" || item.kind === "ConstDecl" || item.kind === "VarDecl" || item.kind === "ComponentDecl" || item.kind === "StyleDecl" || item.kind === "ClassDecl" && (!className || Boolean(isClassContainerTarget));
+    if (meaningfulItems.length > 0 && meaningfulItems.every(isNonCallableItem)) {
+      const multiMod = normalizeModuleForTarget(
+        {
+          kind: "Module",
+          path: path15.basename(filePath),
+          items: meaningfulItems,
+          span: mod.span
+        },
+        targetLang
+      );
+      const emitted = emitTarget(multiMod, targetLang, { watermark: false }).trim();
+      return stripTopLevelLanguagePreamble(emitted, targetLang);
     }
   } catch {
   }
   return void 0;
 }
-function parseSnippetToExpandedDecl(rawSnippet, filePath, targetLang, className, idioms, originalSnippet, isBodyOnly) {
+function parseSnippetToExpandedDecl(rawSnippet, filePath, targetLang, className, idioms, originalSnippet, isBodyOnly, targetMemberName) {
   const { normalizedAice, explicitVisibility, isExported, explicitAccessor, leadingDecorators } = normalizeFrankensteinSnippetToAice(rawSnippet);
   let parsedMod;
   let lastErr;
@@ -281516,19 +281694,42 @@ ${preparedNative}
     throw new Error(`Failed to parse splice snippet for ${filePath}`);
   }
   const expandedMod = idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(parsedMod, idioms) : parsedMod;
+  const rawCallableCandidates = [];
   for (const item of expandedMod.items) {
     if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
-      return { decl: item, explicitVisibility, isExported, explicitAccessor, leadingDecorators };
+      rawCallableCandidates.push(item);
+    } else if (item.kind === "ClassDecl" && item.methods.length > 0) {
+      rawCallableCandidates.push(...item.methods);
     }
-    if (item.kind === "ClassDecl" && item.methods.length > 0) {
-      return {
-        decl: item.methods[0],
-        explicitVisibility,
-        isExported,
-        explicitAccessor,
-        leadingDecorators
-      };
+  }
+  if (rawCallableCandidates.length > 0) {
+    const primaryDecl = (targetMemberName ? rawCallableCandidates.find((c) => c.name === targetMemberName) : void 0) ?? rawCallableCandidates[0];
+    const orderedItems = [];
+    let markedPrimary = false;
+    for (const item of expandedMod.items) {
+      if (item.kind === "FunctionDecl") {
+        if (item.name === "__top_level__") continue;
+        const isPrimary = !markedPrimary && item === primaryDecl;
+        if (isPrimary) markedPrimary = true;
+        orderedItems.push({ kind: "callable", decl: item, isPrimary });
+      } else if (item.kind === "ClassDecl" && className && item.methods.length > 0) {
+        for (const m of item.methods) {
+          const isPrimary = !markedPrimary && m === primaryDecl;
+          if (isPrimary) markedPrimary = true;
+          orderedItems.push({ kind: "callable", decl: m, isPrimary });
+        }
+      } else if (item.kind !== "ImportDecl") {
+        orderedItems.push({ kind: "moduleItem", item });
+      }
     }
+    return {
+      decl: primaryDecl,
+      orderedItems: orderedItems.length > 1 ? orderedItems : void 0,
+      explicitVisibility,
+      isExported,
+      explicitAccessor,
+      leadingDecorators
+    };
   }
   throw new Error(
     `No valid function or method declaration found in splice snippet for ${filePath}`
@@ -281652,34 +281853,79 @@ ${dedentedMd}`;
     }
   }
   try {
-    const { decl: decl2, explicitVisibility, isExported, explicitAccessor, leadingDecorators } = parseSnippetToExpandedDecl(
+    const {
+      decl: decl2,
+      orderedItems,
+      explicitVisibility,
+      isExported,
+      explicitAccessor,
+      leadingDecorators
+    } = parseSnippetToExpandedDecl(
       dedented,
       filePath,
       targetLang,
       effectiveClassName,
       mergedIdioms,
       originalSnippet,
-      isBodyOnly
+      isBodyOnly,
+      spanInfo?.memberName
     );
-    const emitted = emitExpandedDeclForTarget(decl2, targetLang, filePath, effectiveClassName, {
-      visibility: spanInfo?.visibility ?? explicitVisibility,
-      isExported: spanInfo?.isExported ?? isExported,
-      isStatic: spanInfo?.isStatic,
-      isAsync: spanInfo?.isAsync,
-      accessor: explicitAccessor ?? spanInfo?.accessor,
-      memberName: originalSnippet ? spanInfo?.memberName ?? decl2.name : decl2.name,
-      goReceiver: spanInfo?.goReceiver,
-      cppOutOfLine: spanInfo?.cppOutOfLine,
-      origHeader: spanInfo?.origHeader,
-      origSource: originalSnippet,
-      rawSnippet: dedented,
-      idioms: mergedIdioms
-    });
-    if (leadingDecorators.length > 0) {
-      return `${leadingDecorators.join("\n")}
+    const emitPrimary = () => {
+      const emitted = emitExpandedDeclForTarget(decl2, targetLang, filePath, effectiveClassName, {
+        visibility: spanInfo?.visibility ?? explicitVisibility,
+        isExported: spanInfo?.isExported ?? isExported,
+        isStatic: spanInfo?.isStatic,
+        isAsync: spanInfo?.isAsync,
+        accessor: explicitAccessor ?? spanInfo?.accessor,
+        memberName: originalSnippet && (!orderedItems || orderedItems.length <= 1) ? spanInfo?.memberName ?? decl2.name : decl2.name,
+        goReceiver: spanInfo?.goReceiver,
+        cppOutOfLine: spanInfo?.cppOutOfLine,
+        origHeader: spanInfo?.origHeader,
+        origSource: originalSnippet,
+        rawSnippet: !orderedItems || orderedItems.length <= 1 ? dedented : void 0,
+        idioms: mergedIdioms
+      });
+      if (leadingDecorators.length > 0) {
+        return `${leadingDecorators.join("\n")}
 ${emitted}`;
+      }
+      return emitted;
+    };
+    if (orderedItems && orderedItems.length > 1) {
+      const chunks = [];
+      for (const entry of orderedItems) {
+        if (entry.kind === "callable") {
+          if (entry.isPrimary) {
+            chunks.push(emitPrimary());
+          } else {
+            chunks.push(
+              emitExpandedDeclForTarget(entry.decl, targetLang, filePath, effectiveClassName, {
+                visibility: spanInfo?.visibility ?? explicitVisibility,
+                isExported: spanInfo?.isExported ?? isExported,
+                isStatic: spanInfo?.isStatic,
+                goReceiver: spanInfo?.goReceiver,
+                cppOutOfLine: spanInfo?.cppOutOfLine,
+                idioms: mergedIdioms
+              })
+            );
+          }
+        } else {
+          const singleMod = normalizeModuleForTarget(
+            {
+              kind: "Module",
+              path: path15.basename(filePath),
+              items: [entry.item],
+              span: entry.item.span
+            },
+            targetLang
+          );
+          const emittedItem = emitTarget(singleMod, targetLang, { watermark: false }).trim();
+          chunks.push(stripTopLevelLanguagePreamble(emittedItem, targetLang));
+        }
+      }
+      return chunks.filter((c) => c.trim().length > 0).join("\n\n");
     }
-    return emitted;
+    return emitPrimary();
   } catch (err) {
     if (isBodyOnly && originalSnippet) {
       return losslessSpliceBodyIntoOriginal(
@@ -282270,7 +282516,8 @@ ${emitted}
         }
       }
     }
-    const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block(?::|\s+))/i, "");
+    const strippedSel = sel.replace(/^[A-Z][A-Za-z0-9_]*\./, "").replace(/^block(?::|\s+)/i, "").trim();
+    const cleanSel = strippedSel.replace(/^(?:#|\.)/, "");
     const escSel = cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (spanStart < 0 && targetLang === "twig") {
       const openBlockRe = new RegExp(`\\{%[-~]?\\s*block\\s+${escSel}\\b([^%]*)%\\}`);
@@ -282305,16 +282552,46 @@ ${emitted}
       }
     }
     if (spanStart < 0) {
+      const compoundMatch = /^(?:([a-zA-Z][a-zA-Z0-9-]*))?((?:(?:#[A-Za-z0-9_-]+)|(?:\.[A-Za-z0-9_-]+))+)$/.exec(
+        strippedSel
+      );
+      const reqTag = compoundMatch?.[1]?.toLowerCase();
+      let reqId;
+      const reqClasses = [];
+      if (compoundMatch?.[2]) {
+        const modTokens = compoundMatch[2].match(/[#.][A-Za-z0-9_-]+/g) ?? [];
+        for (const tok of modTokens) {
+          if (tok.startsWith("#")) {
+            reqId = tok.slice(1);
+          } else if (tok.startsWith(".")) {
+            reqClasses.push(tok.slice(1));
+          }
+        }
+      }
+      const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const openTagRe = /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?)\s*(\/?)>/g;
       let match = openTagRe.exec(nativeSource);
       while (match !== null) {
         const tag = match[1];
         const attrs = match[2] ?? "";
         const selfCloseSlash = match[3] ?? "";
-        const isIdMatch = new RegExp(`\\bid=["']${escSel}["']`).test(attrs);
-        const isClassMatch = new RegExp(`\\bclass=["'][^"']*\\b${escSel}\\b[^"']*["']`).test(attrs);
-        const isTagMatch = tag.toLowerCase() === cleanSel.toLowerCase();
-        if (sel.startsWith("#") && isIdMatch || sel.startsWith(".") && isClassMatch || !sel.startsWith("#") && !sel.startsWith(".") && (isTagMatch || isIdMatch || isClassMatch)) {
+        let isElementMatch = false;
+        if (compoundMatch) {
+          const tagOk = !reqTag || tag.toLowerCase() === reqTag;
+          const idOk = !reqId || new RegExp(`\\bid=["']${escRe(reqId)}["']`).test(attrs);
+          const classesOk = reqClasses.every(
+            (cls) => new RegExp(`\\bclass=["'][^"']*\\b${escRe(cls)}\\b[^"']*["']`).test(attrs)
+          );
+          isElementMatch = tagOk && idOk && classesOk;
+        } else {
+          const isIdMatch = new RegExp(`\\bid=["']${escSel}["']`).test(attrs);
+          const isClassMatch = new RegExp(`\\bclass=["'][^"']*\\b${escSel}\\b[^"']*["']`).test(
+            attrs
+          );
+          const isTagMatch = tag.toLowerCase() === cleanSel.toLowerCase();
+          isElementMatch = isTagMatch || isIdMatch || isClassMatch;
+        }
+        if (isElementMatch) {
           spanStart = match.index;
           const lowerTag = tag.toLowerCase();
           if (selfCloseSlash === "/" || HTML_VOID_ELEMENTS.has(lowerTag)) {
@@ -283136,7 +283413,10 @@ ${bodyTrimmed}`;
     }
   }
   if (!spanInfo) {
-    throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
+    const appendHint = !options.delete ? ` (to append a new top-level declaration, use '=== ${path15.basename(filePath)}:eof ===' or '--insert-after <existingSymbol>')` : "";
+    throw new Error(
+      `Symbol '${anchorSymbol}' not found in ${filePath}${didYouMeanSymbol(nativeSource, anchorSymbol)}${appendHint}`
+    );
   }
   const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
   if (options.delete) {
@@ -301475,8 +301755,25 @@ function buildScenarioComparison(id, title, scenario, specLanguages, filesCount,
   const turnsSavingsWithIdiomsPct = pctSavings(w.llmTurns, i.llmTurns);
   const toolCallsSavingsWithoutIdiomsPct = pctSavings(w.toolCalls, n.toolCalls);
   const toolCallsSavingsWithIdiomsPct = pctSavings(w.toolCalls, i.toolCalls);
-  const aiceWithoutIdiomsWins = n.verifiedOnDisk && n.zeroAiceFilesLeftOnDisk && n.workingTokens < w.workingTokens && n.outputTokens < w.outputTokens && n.billableTokens < w.billableTokens && n.apiTotalTokens < w.apiTotalTokens && n.apiCostUsd < w.apiCostUsd && n.llmTurns < w.llmTurns && n.toolCalls < w.toolCalls;
-  const aiceWithIdiomsWins = i.verifiedOnDisk && i.zeroAiceFilesLeftOnDisk && i.workingTokens < w.workingTokens && i.outputTokens < w.outputTokens && i.billableTokens < w.billableTokens && i.apiTotalTokens < w.apiTotalTokens && i.apiCostUsd < w.apiCostUsd && i.llmTurns < w.llmTurns && i.toolCalls < w.toolCalls;
+  const comparableSlice = (cand, base) => {
+    if (!base.verifiedOnDisk && base.layers && cand.layers && base.layers.length > 0 && base.layers.length < cand.layers.length) {
+      const matched = cand.layers.slice(0, base.layers.length);
+      return {
+        workingTokens: matched.reduce((a, l) => a + l.workingTokens, 0),
+        outputTokens: matched.reduce((a, l) => a + l.outputTokens, 0),
+        billableTokens: matched.reduce((a, l) => a + l.billableTokens, 0),
+        apiTotalTokens: matched.reduce((a, l) => a + l.apiTotalTokens, 0),
+        apiCostUsd: Number(matched.reduce((a, l) => a + l.apiCostUsd, 0).toFixed(6)),
+        llmTurns: matched.reduce((a, l) => a + l.turns, 0),
+        toolCalls: matched.reduce((a, l) => a + l.toolCalls, 0)
+      };
+    }
+    return cand;
+  };
+  const nComp = comparableSlice(n, w);
+  const iComp = comparableSlice(i, w);
+  const aiceWithoutIdiomsWins = n.verifiedOnDisk && n.zeroAiceFilesLeftOnDisk && nComp.workingTokens < w.workingTokens && nComp.outputTokens < w.outputTokens && nComp.billableTokens < w.billableTokens && nComp.apiTotalTokens < w.apiTotalTokens && nComp.apiCostUsd < w.apiCostUsd && nComp.llmTurns < w.llmTurns && nComp.toolCalls < w.toolCalls;
+  const aiceWithIdiomsWins = i.verifiedOnDisk && i.zeroAiceFilesLeftOnDisk && iComp.workingTokens < w.workingTokens && iComp.outputTokens < w.outputTokens && iComp.billableTokens < w.billableTokens && iComp.apiTotalTokens < w.apiTotalTokens && iComp.apiCostUsd < w.apiCostUsd && iComp.llmTurns < w.llmTurns && iComp.toolCalls < w.toolCalls;
   const idiomsBeatNoIdioms = i.workingTokens < n.workingTokens && i.outputTokens < n.outputTokens && i.billableTokens < n.billableTokens && i.apiTotalTokens < n.apiTotalTokens && i.apiCostUsd < n.apiCostUsd && i.llmTurns <= n.llmTurns && i.toolCalls <= n.toolCalls;
   return {
     id,
@@ -307786,23 +308083,85 @@ ${r.modifiedCode}`);
           );
         }
       };
-      if (options.batch) {
-        const batchCandidatePath = path26.resolve(process.cwd(), options.batch);
-        const rawJson = fs25.existsSync(batchCandidatePath) && fs25.statSync(batchCandidatePath).isFile() ? fs25.readFileSync(batchCandidatePath, "utf-8") : options.batch;
+      const sanitizeHeredocJson = (src) => {
+        let out = "";
+        let inStr = false;
+        let esc = false;
+        for (let i = 0; i < src.length; i++) {
+          const ch = src[i];
+          if (inStr) {
+            if (esc) {
+              out += ch;
+              esc = false;
+            } else if (ch === "\\") {
+              out += ch;
+              esc = true;
+            } else if (ch === '"') {
+              out += ch;
+              inStr = false;
+            } else if (ch === "\n") {
+              out += "\\n";
+            } else if (ch === "\r") {
+              if (src[i + 1] !== "\n") out += "\\r";
+            } else if (ch === "	") {
+              out += "\\t";
+            } else {
+              out += ch;
+            }
+          } else {
+            if (ch === '"') {
+              inStr = true;
+            }
+            out += ch;
+          }
+        }
+        return out.replace(/,(\s*[}\]])/g, "$1");
+      };
+      const parseJsonBatchEntries = (rawJson) => {
         const rawParts = rawJson.split(/['"]?\s*&&\s*aice\s+idioms?\s+update\s+--batch\s*['"]?/);
         const allEntries = [];
         for (const part of rawParts) {
-          const parsed = JSON.parse(part.trim());
+          const trimmedPart = part.trim();
+          if (!trimmedPart) continue;
+          let parsed;
+          try {
+            parsed = JSON.parse(trimmedPart);
+          } catch (firstErr) {
+            try {
+              parsed = JSON.parse(sanitizeHeredocJson(trimmedPart));
+            } catch {
+              throw firstErr;
+            }
+          }
           if (Array.isArray(parsed)) {
             allEntries.push(...parsed);
           }
         }
+        return allEntries;
+      };
+      const partitionBatchEntries = (allEntries) => {
         const spliceItems = allEntries.filter(
           (e) => typeof e.file === "string" || typeof e.filePath === "string" || typeof e.path === "string"
         );
         const idiomItems = allEntries.filter(
           (e) => !e.file && !e.filePath && !e.path && (typeof e.name === "string" || typeof e.idiom === "string")
         );
+        return { spliceItems, idiomItems };
+      };
+      if (!options.batch && rawTargetPath && rawTargetPath.trimStart().startsWith("[")) {
+        options.batch = rawTargetPath;
+        rawTargetPath = void 0;
+      }
+      if (options.batch) {
+        let rawJson;
+        if (options.batch.trim() === "-") {
+          rawJson = await readStdin(true);
+        } else {
+          const batchCandidatePath = path26.resolve(process.cwd(), options.batch);
+          rawJson = fs25.existsSync(batchCandidatePath) && fs25.statSync(batchCandidatePath).isFile() ? fs25.readFileSync(batchCandidatePath, "utf-8") : options.batch;
+        }
+        const allEntries = parseJsonBatchEntries(rawJson);
+        const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
         await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
         return;
       }
@@ -307863,27 +308222,18 @@ ${r.modifiedCode}`);
       if (!targetPath || targetPath === "-") {
         const rawCrossStream = options.code ?? options.template ?? await readStdin(Boolean(options.stdin || targetPath === "-"));
         if (rawCrossStream && rawCrossStream.trim().length > 0) {
+          if (rawCrossStream.trimStart().startsWith("[")) {
+            const allEntries = parseJsonBatchEntries(rawCrossStream);
+            const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
+            if (spliceItems.length > 0 || idiomItems.length > 0) {
+              await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
+              return;
+            }
+          }
           const parsedStream = parseMultiBlockSpliceStream2(rawCrossStream);
           if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
             await executeBatchSpliceAndIdioms(parsedStream.batchItems);
             return;
-          }
-          try {
-            const parsedJson = JSON.parse(rawCrossStream.trim());
-            if (Array.isArray(parsedJson)) {
-              const allEntries = parsedJson;
-              const spliceItems = allEntries.filter(
-                (e) => typeof e.file === "string" || typeof e.filePath === "string" || typeof e.path === "string"
-              );
-              const idiomItems = allEntries.filter(
-                (e) => !e.file && !e.filePath && !e.path && (typeof e.name === "string" || typeof e.idiom === "string")
-              );
-              if (spliceItems.length > 0 || idiomItems.length > 0) {
-                await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
-                return;
-              }
-            }
-          } catch {
           }
         }
         const badHeader = rawCrossStream?.match(/^\s*={3,}\s*([^=\r\n]*?)\s*={3,}/m)?.[1]?.trim();
@@ -308866,11 +309216,19 @@ program2.command("idioms [action] [target] [extra] [dir]").alias("idiom").descri
         return;
       }
       if (action === "update") {
+        if (!options.batch && idiomNameArg && idiomNameArg.trimStart().startsWith("[")) {
+          options.batch = idiomNameArg;
+        }
         if (options.batch) {
-          const candidateBatchDir = dirArg ?? extraArg ?? idiomNameArg;
+          const candidateBatchDir = dirArg ?? extraArg ?? (idiomNameArg && !idiomNameArg.trimStart().startsWith("[") ? idiomNameArg : void 0);
           const batchDir = candidateBatchDir && fs25.existsSync(path26.resolve(process.cwd(), candidateBatchDir)) ? path26.resolve(process.cwd(), candidateBatchDir) : process.cwd();
-          const batchPath = path26.resolve(process.cwd(), options.batch);
-          const rawJson = fs25.existsSync(batchPath) && fs25.statSync(batchPath).isFile() ? fs25.readFileSync(batchPath, "utf-8") : options.batch;
+          let rawJson;
+          if (options.batch.trim() === "-") {
+            rawJson = await readStdin(true);
+          } else {
+            const batchPath = path26.resolve(process.cwd(), options.batch);
+            rawJson = fs25.existsSync(batchPath) && fs25.statSync(batchPath).isFile() ? fs25.readFileSync(batchPath, "utf-8") : options.batch;
+          }
           const parsedBatch = JSON.parse(rawJson);
           const entries = Array.isArray(parsedBatch) ? parsedBatch : Object.entries(parsedBatch).map(
             ([k, v]) => typeof v === "object" && v !== null ? { name: k, ...v } : { name: k, code: String(v) }

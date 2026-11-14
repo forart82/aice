@@ -4604,33 +4604,38 @@ function tryEmitNonCallableAiceSnippet(
     const mod = parse(normalizedNonCallable, filePath);
     const expanded =
       idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(mod, idioms) : mod;
-    for (const item of expanded.items) {
-      if (
-        item.kind === "TypeDecl" ||
-        item.kind === "ConstDecl" ||
-        item.kind === "VarDecl" ||
-        item.kind === "ComponentDecl" ||
-        item.kind === "StyleDecl" ||
-        (item.kind === "ClassDecl" && (!className || isClassContainerTarget))
-      ) {
-        const singleMod: Module = normalizeModuleForTarget(
-          {
-            kind: "Module",
-            path: path.basename(filePath),
-            items: [item],
-            span: mod.span,
-          },
-          targetLang,
-        );
-        const emitted = emitTarget(singleMod, targetLang, { watermark: false }).trim();
-        return stripTopLevelLanguagePreamble(emitted, targetLang);
-      }
+    const meaningfulItems = expanded.items.filter(
+      (item) => !(item.kind === "FunctionDecl" && item.name === "__top_level__"),
+    );
+    const isNonCallableItem = (item: ModuleItem): boolean =>
+      item.kind === "TypeDecl" ||
+      item.kind === "ConstDecl" ||
+      item.kind === "VarDecl" ||
+      item.kind === "ComponentDecl" ||
+      item.kind === "StyleDecl" ||
+      (item.kind === "ClassDecl" && (!className || Boolean(isClassContainerTarget)));
+    if (meaningfulItems.length > 0 && meaningfulItems.every(isNonCallableItem)) {
+      const multiMod: Module = normalizeModuleForTarget(
+        {
+          kind: "Module",
+          path: path.basename(filePath),
+          items: meaningfulItems,
+          span: mod.span,
+        },
+        targetLang,
+      );
+      const emitted = emitTarget(multiMod, targetLang, { watermark: false }).trim();
+      return stripTopLevelLanguagePreamble(emitted, targetLang);
     }
   } catch {
     // fall through
   }
   return undefined;
 }
+
+type ParsedSnippetItemEntry =
+  | { kind: "callable"; decl: FunctionDecl | MethodDecl; isPrimary: boolean }
+  | { kind: "moduleItem"; item: ModuleItem };
 
 function parseSnippetToExpandedDecl(
   rawSnippet: string,
@@ -4640,8 +4645,10 @@ function parseSnippetToExpandedDecl(
   idioms?: Record<string, ProjectIdiomDefinition>,
   originalSnippet?: string,
   isBodyOnly?: boolean,
+  targetMemberName?: string,
 ): {
   decl: FunctionDecl | MethodDecl;
+  orderedItems?: ParsedSnippetItemEntry[];
   explicitVisibility?: "public" | "private" | "protected";
   isExported?: boolean;
   explicitAccessor?: "get" | "set";
@@ -4796,19 +4803,46 @@ function parseSnippetToExpandedDecl(
   const expandedMod =
     idioms && Object.keys(idioms).length > 0 ? expandModuleIdioms(parsedMod, idioms) : parsedMod;
 
+  const rawCallableCandidates: Array<FunctionDecl | MethodDecl> = [];
   for (const item of expandedMod.items) {
     if (item.kind === "FunctionDecl" && item.name !== "__top_level__") {
-      return { decl: item, explicitVisibility, isExported, explicitAccessor, leadingDecorators };
+      rawCallableCandidates.push(item);
+    } else if (item.kind === "ClassDecl" && item.methods.length > 0) {
+      rawCallableCandidates.push(...item.methods);
     }
-    if (item.kind === "ClassDecl" && item.methods.length > 0) {
-      return {
-        decl: item.methods[0],
-        explicitVisibility,
-        isExported,
-        explicitAccessor,
-        leadingDecorators,
-      };
+  }
+
+  if (rawCallableCandidates.length > 0) {
+    const primaryDecl =
+      (targetMemberName
+        ? rawCallableCandidates.find((c) => c.name === targetMemberName)
+        : undefined) ?? rawCallableCandidates[0];
+    const orderedItems: ParsedSnippetItemEntry[] = [];
+    let markedPrimary = false;
+    for (const item of expandedMod.items) {
+      if (item.kind === "FunctionDecl") {
+        if (item.name === "__top_level__") continue;
+        const isPrimary = !markedPrimary && item === primaryDecl;
+        if (isPrimary) markedPrimary = true;
+        orderedItems.push({ kind: "callable", decl: item, isPrimary });
+      } else if (item.kind === "ClassDecl" && className && item.methods.length > 0) {
+        for (const m of item.methods) {
+          const isPrimary = !markedPrimary && m === primaryDecl;
+          if (isPrimary) markedPrimary = true;
+          orderedItems.push({ kind: "callable", decl: m, isPrimary });
+        }
+      } else if (item.kind !== "ImportDecl") {
+        orderedItems.push({ kind: "moduleItem", item });
+      }
     }
+    return {
+      decl: primaryDecl,
+      orderedItems: orderedItems.length > 1 ? orderedItems : undefined,
+      explicitVisibility,
+      isExported,
+      explicitAccessor,
+      leadingDecorators,
+    };
   }
 
   throw new Error(
@@ -4993,34 +5027,83 @@ function emitNativeSnippetForContext(
   }
 
   try {
-    const { decl, explicitVisibility, isExported, explicitAccessor, leadingDecorators } =
-      parseSnippetToExpandedDecl(
-        dedented,
-        filePath,
-        targetLang,
-        effectiveClassName,
-        mergedIdioms,
-        originalSnippet,
-        isBodyOnly,
-      );
-    const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
-      visibility: spanInfo?.visibility ?? explicitVisibility,
-      isExported: spanInfo?.isExported ?? isExported,
-      isStatic: spanInfo?.isStatic,
-      isAsync: spanInfo?.isAsync,
-      accessor: explicitAccessor ?? spanInfo?.accessor,
-      memberName: originalSnippet ? (spanInfo?.memberName ?? decl.name) : decl.name,
-      goReceiver: spanInfo?.goReceiver,
-      cppOutOfLine: spanInfo?.cppOutOfLine,
-      origHeader: spanInfo?.origHeader,
-      origSource: originalSnippet,
-      rawSnippet: dedented,
-      idioms: mergedIdioms,
-    });
-    if (leadingDecorators.length > 0) {
-      return `${leadingDecorators.join("\n")}\n${emitted}`;
+    const {
+      decl,
+      orderedItems,
+      explicitVisibility,
+      isExported,
+      explicitAccessor,
+      leadingDecorators,
+    } = parseSnippetToExpandedDecl(
+      dedented,
+      filePath,
+      targetLang,
+      effectiveClassName,
+      mergedIdioms,
+      originalSnippet,
+      isBodyOnly,
+      spanInfo?.memberName,
+    );
+    const emitPrimary = (): string => {
+      const emitted = emitExpandedDeclForTarget(decl, targetLang, filePath, effectiveClassName, {
+        visibility: spanInfo?.visibility ?? explicitVisibility,
+        isExported: spanInfo?.isExported ?? isExported,
+        isStatic: spanInfo?.isStatic,
+        isAsync: spanInfo?.isAsync,
+        accessor: explicitAccessor ?? spanInfo?.accessor,
+        memberName:
+          originalSnippet && (!orderedItems || orderedItems.length <= 1)
+            ? (spanInfo?.memberName ?? decl.name)
+            : decl.name,
+        goReceiver: spanInfo?.goReceiver,
+        cppOutOfLine: spanInfo?.cppOutOfLine,
+        origHeader: spanInfo?.origHeader,
+        origSource: originalSnippet,
+        rawSnippet: !orderedItems || orderedItems.length <= 1 ? dedented : undefined,
+        idioms: mergedIdioms,
+      });
+      if (leadingDecorators.length > 0) {
+        return `${leadingDecorators.join("\n")}\n${emitted}`;
+      }
+      return emitted;
+    };
+
+    if (orderedItems && orderedItems.length > 1) {
+      const chunks: string[] = [];
+      for (const entry of orderedItems) {
+        if (entry.kind === "callable") {
+          if (entry.isPrimary) {
+            chunks.push(emitPrimary());
+          } else {
+            chunks.push(
+              emitExpandedDeclForTarget(entry.decl, targetLang, filePath, effectiveClassName, {
+                visibility: spanInfo?.visibility ?? explicitVisibility,
+                isExported: spanInfo?.isExported ?? isExported,
+                isStatic: spanInfo?.isStatic,
+                goReceiver: spanInfo?.goReceiver,
+                cppOutOfLine: spanInfo?.cppOutOfLine,
+                idioms: mergedIdioms,
+              }),
+            );
+          }
+        } else {
+          const singleMod: Module = normalizeModuleForTarget(
+            {
+              kind: "Module",
+              path: path.basename(filePath),
+              items: [entry.item],
+              span: entry.item.span,
+            },
+            targetLang,
+          );
+          const emittedItem = emitTarget(singleMod, targetLang, { watermark: false }).trim();
+          chunks.push(stripTopLevelLanguagePreamble(emittedItem, targetLang));
+        }
+      }
+      return chunks.filter((c) => c.trim().length > 0).join("\n\n");
     }
-    return emitted;
+
+    return emitPrimary();
   } catch (err) {
     if (isBodyOnly && originalSnippet) {
       return losslessSpliceBodyIntoOriginal(
@@ -5778,7 +5861,11 @@ function spliceDialectNativeSource(
         }
       }
     }
-    const cleanSel = sel.replace(/^(?:[A-Za-z0-9_]+\.|#|\.|block(?::|\s+))/i, "");
+    const strippedSel = sel
+      .replace(/^[A-Z][A-Za-z0-9_]*\./, "")
+      .replace(/^block(?::|\s+)/i, "")
+      .trim();
+    const cleanSel = strippedSel.replace(/^(?:#|\.)/, "");
     const escSel = cleanSel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
     // 1. Check Twig {% block <name> %}...{% endblock %} with balanced nesting support
@@ -5817,25 +5904,52 @@ function spliceDialectNativeSource(
       }
     }
 
-    // 2. Check HTML/Twig element by id, class, or tag name (ignoring '>' inside quoted attributes)
+    // 2. Check HTML/Twig element by compound selector (`section#id`, `div.cls`, `section.cls#id`, `#id`, `.cls`) or bare id/class/tag
     if (spanStart < 0) {
+      const compoundMatch =
+        /^(?:([a-zA-Z][a-zA-Z0-9-]*))?((?:(?:#[A-Za-z0-9_-]+)|(?:\.[A-Za-z0-9_-]+))+)$/.exec(
+          strippedSel,
+        );
+      const reqTag = compoundMatch?.[1]?.toLowerCase();
+      let reqId: string | undefined;
+      const reqClasses: string[] = [];
+      if (compoundMatch?.[2]) {
+        const modTokens = compoundMatch[2].match(/[#.][A-Za-z0-9_-]+/g) ?? [];
+        for (const tok of modTokens) {
+          if (tok.startsWith("#")) {
+            reqId = tok.slice(1);
+          } else if (tok.startsWith(".")) {
+            reqClasses.push(tok.slice(1));
+          }
+        }
+      }
+
+      const escRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const openTagRe = /<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+(?:[^>"']|"[^"]*"|'[^']*')*)?)\s*(\/?)>/g;
       let match: RegExpExecArray | null = openTagRe.exec(nativeSource);
       while (match !== null) {
         const tag = match[1];
         const attrs = match[2] ?? "";
         const selfCloseSlash = match[3] ?? "";
-        const isIdMatch = new RegExp(`\\bid=["']${escSel}["']`).test(attrs);
-        const isClassMatch = new RegExp(`\\bclass=["'][^"']*\\b${escSel}\\b[^"']*["']`).test(attrs);
-        const isTagMatch = tag.toLowerCase() === cleanSel.toLowerCase();
 
-        if (
-          (sel.startsWith("#") && isIdMatch) ||
-          (sel.startsWith(".") && isClassMatch) ||
-          (!sel.startsWith("#") &&
-            !sel.startsWith(".") &&
-            (isTagMatch || isIdMatch || isClassMatch))
-        ) {
+        let isElementMatch = false;
+        if (compoundMatch) {
+          const tagOk = !reqTag || tag.toLowerCase() === reqTag;
+          const idOk = !reqId || new RegExp(`\\bid=["']${escRe(reqId)}["']`).test(attrs);
+          const classesOk = reqClasses.every((cls) =>
+            new RegExp(`\\bclass=["'][^"']*\\b${escRe(cls)}\\b[^"']*["']`).test(attrs),
+          );
+          isElementMatch = tagOk && idOk && classesOk;
+        } else {
+          const isIdMatch = new RegExp(`\\bid=["']${escSel}["']`).test(attrs);
+          const isClassMatch = new RegExp(`\\bclass=["'][^"']*\\b${escSel}\\b[^"']*["']`).test(
+            attrs,
+          );
+          const isTagMatch = tag.toLowerCase() === cleanSel.toLowerCase();
+          isElementMatch = isTagMatch || isIdMatch || isClassMatch;
+        }
+
+        if (isElementMatch) {
           spanStart = match.index;
           const lowerTag = tag.toLowerCase();
           if (selfCloseSlash === "/" || HTML_VOID_ELEMENTS.has(lowerTag)) {
@@ -6837,7 +6951,12 @@ function resolveSingleNativeEditAgainstSource(
   }
 
   if (!spanInfo) {
-    throw new Error(`Symbol '${anchorSymbol}' not found in ${filePath}`);
+    const appendHint = !options.delete
+      ? ` (to append a new top-level declaration, use '=== ${path.basename(filePath)}:eof ===' or '--insert-after <existingSymbol>')`
+      : "";
+    throw new Error(
+      `Symbol '${anchorSymbol}' not found in ${filePath}${didYouMeanSymbol(nativeSource, anchorSymbol)}${appendHint}`,
+    );
   }
   const originalSnippet = nativeSource.slice(spanInfo.declStart, spanInfo.declEnd);
 

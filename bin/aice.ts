@@ -1617,20 +1617,70 @@ Examples:
           }
         };
 
-        if (options.batch) {
-          const batchCandidatePath = path.resolve(process.cwd(), options.batch);
-          const rawJson =
-            fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
-              ? fs.readFileSync(batchCandidatePath, "utf-8")
-              : options.batch;
+        const sanitizeHeredocJson = (src: string): string => {
+          let out = "";
+          let inStr = false;
+          let esc = false;
+          for (let i = 0; i < src.length; i++) {
+            const ch = src[i];
+            if (inStr) {
+              if (esc) {
+                out += ch;
+                esc = false;
+              } else if (ch === "\\") {
+                out += ch;
+                esc = true;
+              } else if (ch === '"') {
+                out += ch;
+                inStr = false;
+              } else if (ch === "\n") {
+                out += "\\n";
+              } else if (ch === "\r") {
+                if (src[i + 1] !== "\n") out += "\\r";
+              } else if (ch === "\t") {
+                out += "\\t";
+              } else {
+                out += ch;
+              }
+            } else {
+              if (ch === '"') {
+                inStr = true;
+              }
+              out += ch;
+            }
+          }
+          return out.replace(/,(\s*[}\]])/g, "$1");
+        };
+
+        const parseJsonBatchEntries = (rawJson: string): Array<Record<string, unknown>> => {
           const rawParts = rawJson.split(/['"]?\s*&&\s*aice\s+idioms?\s+update\s+--batch\s*['"]?/);
           const allEntries: Array<Record<string, unknown>> = [];
           for (const part of rawParts) {
-            const parsed = JSON.parse(part.trim());
+            const trimmedPart = part.trim();
+            if (!trimmedPart) continue;
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(trimmedPart);
+            } catch (firstErr) {
+              try {
+                parsed = JSON.parse(sanitizeHeredocJson(trimmedPart));
+              } catch {
+                throw firstErr;
+              }
+            }
             if (Array.isArray(parsed)) {
-              allEntries.push(...parsed);
+              allEntries.push(...(parsed as Array<Record<string, unknown>>));
             }
           }
+          return allEntries;
+        };
+
+        const partitionBatchEntries = (
+          allEntries: Array<Record<string, unknown>>,
+        ): {
+          spliceItems: BatchSpliceItem[];
+          idiomItems: Array<Record<string, unknown>>;
+        } => {
           const spliceItems = allEntries.filter(
             (e) =>
               typeof e.file === "string" ||
@@ -1644,6 +1694,29 @@ Examples:
               !e.path &&
               (typeof e.name === "string" || typeof e.idiom === "string"),
           );
+          return { spliceItems, idiomItems };
+        };
+
+        // Recover when a JSON batch array is passed positionally without `--batch`
+        // (e.g. `aice splice --idioms --json '[{"file":"a.ts",...}]'` or `aice splice '[...]'`):
+        if (!options.batch && rawTargetPath && rawTargetPath.trimStart().startsWith("[")) {
+          options.batch = rawTargetPath;
+          rawTargetPath = undefined;
+        }
+
+        if (options.batch) {
+          let rawJson: string;
+          if (options.batch.trim() === "-") {
+            rawJson = await readStdin(true);
+          } else {
+            const batchCandidatePath = path.resolve(process.cwd(), options.batch);
+            rawJson =
+              fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
+                ? fs.readFileSync(batchCandidatePath, "utf-8")
+                : options.batch;
+          }
+          const allEntries = parseJsonBatchEntries(rawJson);
+          const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
           await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
           return;
         }
@@ -1735,35 +1808,18 @@ Examples:
             options.template ??
             (await readStdin(Boolean(options.stdin || targetPath === "-")));
           if (rawCrossStream && rawCrossStream.trim().length > 0) {
+            if (rawCrossStream.trimStart().startsWith("[")) {
+              const allEntries = parseJsonBatchEntries(rawCrossStream);
+              const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
+              if (spliceItems.length > 0 || idiomItems.length > 0) {
+                await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
+                return;
+              }
+            }
             const parsedStream = parseMultiBlockSpliceStream(rawCrossStream);
             if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
               await executeBatchSpliceAndIdioms(parsedStream.batchItems);
               return;
-            }
-            try {
-              const parsedJson = JSON.parse(rawCrossStream.trim());
-              if (Array.isArray(parsedJson)) {
-                const allEntries = parsedJson as Array<Record<string, unknown>>;
-                const spliceItems = allEntries.filter(
-                  (e) =>
-                    typeof e.file === "string" ||
-                    typeof e.filePath === "string" ||
-                    typeof e.path === "string",
-                ) as unknown as BatchSpliceItem[];
-                const idiomItems = allEntries.filter(
-                  (e) =>
-                    !e.file &&
-                    !e.filePath &&
-                    !e.path &&
-                    (typeof e.name === "string" || typeof e.idiom === "string"),
-                );
-                if (spliceItems.length > 0 || idiomItems.length > 0) {
-                  await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
-                  return;
-                }
-              }
-            } catch {
-              // ignore
             }
           }
           const badHeader = rawCrossStream?.match(/^\s*={3,}\s*([^=\r\n]*?)\s*={3,}/m)?.[1]?.trim();
@@ -3022,17 +3078,31 @@ program
         }
 
         if (action === "update") {
+          if (!options.batch && idiomNameArg && idiomNameArg.trimStart().startsWith("[")) {
+            options.batch = idiomNameArg;
+          }
+
           if (options.batch) {
-            const candidateBatchDir = dirArg ?? extraArg ?? idiomNameArg;
+            const candidateBatchDir =
+              dirArg ??
+              extraArg ??
+              (idiomNameArg && !idiomNameArg.trimStart().startsWith("[")
+                ? idiomNameArg
+                : undefined);
             const batchDir =
               candidateBatchDir && fs.existsSync(path.resolve(process.cwd(), candidateBatchDir))
                 ? path.resolve(process.cwd(), candidateBatchDir)
                 : process.cwd();
-            const batchPath = path.resolve(process.cwd(), options.batch);
-            const rawJson =
-              fs.existsSync(batchPath) && fs.statSync(batchPath).isFile()
-                ? fs.readFileSync(batchPath, "utf-8")
-                : options.batch;
+            let rawJson: string;
+            if (options.batch.trim() === "-") {
+              rawJson = await readStdin(true);
+            } else {
+              const batchPath = path.resolve(process.cwd(), options.batch);
+              rawJson =
+                fs.existsSync(batchPath) && fs.statSync(batchPath).isFile()
+                  ? fs.readFileSync(batchPath, "utf-8")
+                  : options.batch;
+            }
             const parsedBatch = JSON.parse(rawJson);
             const entries: Array<{
               name?: string;

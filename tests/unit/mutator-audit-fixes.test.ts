@@ -717,4 +717,120 @@ describe("Mutator Audit Fixes (#7 §1 items 1–17)", () => {
       "  nested_first_line: true\n  second_line: false\n",
     );
   });
+
+  it("supports compound HTML selectors, multi-declaration symbol splices, Rust tuple decompilation, and positional/--stdin/--batch - JSON arrays", async () => {
+    const { decompile } = await import("../../src/decompiler/index.js");
+    const { execFileSync } = await import("node:child_process");
+
+    // 1. Compound HTML tag+id/class selector (`section#trace_explorer_pane`, `section.kpi-section#slo_burn`)
+    const htmlSrc = [
+      "<!DOCTYPE html>",
+      '<div id="header">Header</div>',
+      '<section id="trace_explorer_pane" class="panel">',
+      '  <div class="metric-row">Old</div>',
+      "</section>",
+      '<section class="kpi-section" id="slo_burn"><span>KPI</span></section>',
+      "",
+    ].join("\n");
+    const htmlRes1 = spliceNativeSource(
+      htmlSrc,
+      {
+        symbol: "section#trace_explorer_pane",
+        code: '<section id="trace_explorer_pane" class="panel"><div>Updated</div></section>',
+      },
+      "console.html",
+    );
+    expect(htmlRes1.modifiedCode).toContain("<div>Updated</div>");
+    expect(htmlRes1.modifiedCode).toContain('<div id="header">Header</div>');
+
+    const htmlRes2 = spliceNativeSource(
+      htmlRes1.modifiedCode,
+      {
+        symbol: "section.kpi-section#slo_burn",
+        code: '<section class="kpi-section" id="slo_burn"><strong>BurnOK</strong></section>',
+      },
+      "console.html",
+    );
+    expect(htmlRes2.modifiedCode).toContain("<strong>BurnOK</strong>");
+
+    // 2. Multi-declaration symbol splice preserves sibling declarations (`items[1..]`) instead of dropping them
+    const tsSrc = [
+      "export function compactMetricSeries(points: number): number {",
+      "  return points * 2;",
+      "}",
+      "",
+    ].join("\n");
+    const multiDeclRes = spliceNativeSource(
+      tsSrc,
+      {
+        symbol: "compactMetricSeries",
+        code: [
+          "pub fn compactMetricSeries(points: int) -> int:",
+          "  return points * 3",
+          "",
+          "pub fn authorizeJwtTenant(tokenLen: int) -> int:",
+          "  return tokenLen + 1",
+        ].join("\n"),
+      },
+      "telemetry_router.ts",
+    );
+    expect(multiDeclRes.modifiedCode).toContain("compactMetricSeries");
+    expect(multiDeclRes.modifiedCode).toContain("points * 3");
+    expect(multiDeclRes.modifiedCode).toContain("authorizeJwtTenant");
+
+    // 3. RustDecompiler parses tuple return types `(i64, i64)`, tuple literals `(a, b)`, tuple let destructuring, and `.0`/`.1`
+    const rustTupleSrc = [
+      "pub fn slice_iceberg_order(total_qty: i64, display_qty: i64) -> (i64, i64) {",
+      "    let visible = if total_qty > display_qty { display_qty } else { total_qty };",
+      "    let hidden = total_qty - visible;",
+      "    (visible, hidden)",
+      "}",
+      "pub fn total_from_slice(total_qty: i64, display_qty: i64) -> i64 {",
+      "    let (vis, hid) = slice_iceberg_order(total_qty, display_qty);",
+      "    let pair = slice_iceberg_order(vis, hid);",
+      "    vis + hid + pair.0",
+      "}",
+    ].join("\n");
+    const rustDecomp = decompile(rustTupleSrc, "rust", { filePath: "matcher.rs" });
+    expect(rustDecomp.aice).toContain("sliceIcebergOrder");
+    expect(rustDecomp.aice).toContain("-> [int, int]");
+
+    // 4. CLI positional JSON array, `--stdin` JSON array, and `--batch -` routing
+    const cliFile = path.join(tmpDir, "cli_batch.ts");
+    fs.writeFileSync(cliFile, "export function calc(x: number): number {\n  return x + 1;\n}\n");
+    const tsxBin = path.resolve(process.cwd(), "node_modules/.bin/tsx");
+    const aiceBin = path.resolve(process.cwd(), "bin/aice.ts");
+
+    execFileSync(
+      tsxBin,
+      [
+        aiceBin,
+        "splice",
+        "--no-idioms",
+        JSON.stringify([
+          { file: cliFile, symbol: "calc", code: "pub fn calc(x: int) -> int:\n  return x + 10" },
+        ]),
+      ],
+      { cwd: tmpDir, encoding: "utf-8" },
+    );
+    expect(fs.readFileSync(cliFile, "utf-8")).toContain("x + 10");
+
+    execFileSync(tsxBin, [aiceBin, "splice", "--no-idioms", "--stdin"], {
+      cwd: tmpDir,
+      input: JSON.stringify([
+        { file: cliFile, symbol: "calc", code: "pub fn calc(x: int) -> int:\n  return x + 20" },
+      ]),
+      encoding: "utf-8",
+    });
+    expect(fs.readFileSync(cliFile, "utf-8")).toContain("x + 20");
+
+    execFileSync(tsxBin, [aiceBin, "splice", "--no-idioms", "--batch", "-"], {
+      cwd: tmpDir,
+      input: JSON.stringify([
+        { file: cliFile, symbol: "calc", code: "pub fn calc(x: int) -> int:\n  return x + 30" },
+      ]),
+      encoding: "utf-8",
+    });
+    expect(fs.readFileSync(cliFile, "utf-8")).toContain("x + 30");
+  });
 });

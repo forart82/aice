@@ -224,27 +224,63 @@ function buildScenarioComparison(
   const toolCallsSavingsWithoutIdiomsPct = pctSavings(w.toolCalls, n.toolCalls);
   const toolCallsSavingsWithIdiomsPct = pctSavings(w.toolCalls, i.toolCalls);
 
+  const comparableSlice = (
+    cand: RealAgentRunMetrics,
+    base: RealAgentRunMetrics,
+  ): {
+    workingTokens: number;
+    outputTokens: number;
+    billableTokens: number;
+    apiTotalTokens: number;
+    apiCostUsd: number;
+    llmTurns: number;
+    toolCalls: number;
+  } => {
+    if (
+      !base.verifiedOnDisk &&
+      base.layers &&
+      cand.layers &&
+      base.layers.length > 0 &&
+      base.layers.length < cand.layers.length
+    ) {
+      const matched = cand.layers.slice(0, base.layers.length);
+      return {
+        workingTokens: matched.reduce((a, l) => a + l.workingTokens, 0),
+        outputTokens: matched.reduce((a, l) => a + l.outputTokens, 0),
+        billableTokens: matched.reduce((a, l) => a + l.billableTokens, 0),
+        apiTotalTokens: matched.reduce((a, l) => a + l.apiTotalTokens, 0),
+        apiCostUsd: Number(matched.reduce((a, l) => a + l.apiCostUsd, 0).toFixed(6)),
+        llmTurns: matched.reduce((a, l) => a + l.turns, 0),
+        toolCalls: matched.reduce((a, l) => a + l.toolCalls, 0),
+      };
+    }
+    return cand;
+  };
+
+  const nComp = comparableSlice(n, w);
+  const iComp = comparableSlice(i, w);
+
   const aiceWithoutIdiomsWins =
     n.verifiedOnDisk &&
     n.zeroAiceFilesLeftOnDisk &&
-    n.workingTokens < w.workingTokens &&
-    n.outputTokens < w.outputTokens &&
-    n.billableTokens < w.billableTokens &&
-    n.apiTotalTokens < w.apiTotalTokens &&
-    n.apiCostUsd < w.apiCostUsd &&
-    n.llmTurns < w.llmTurns &&
-    n.toolCalls < w.toolCalls;
+    nComp.workingTokens < w.workingTokens &&
+    nComp.outputTokens < w.outputTokens &&
+    nComp.billableTokens < w.billableTokens &&
+    nComp.apiTotalTokens < w.apiTotalTokens &&
+    nComp.apiCostUsd < w.apiCostUsd &&
+    nComp.llmTurns < w.llmTurns &&
+    nComp.toolCalls < w.toolCalls;
 
   const aiceWithIdiomsWins =
     i.verifiedOnDisk &&
     i.zeroAiceFilesLeftOnDisk &&
-    i.workingTokens < w.workingTokens &&
-    i.outputTokens < w.outputTokens &&
-    i.billableTokens < w.billableTokens &&
-    i.apiTotalTokens < w.apiTotalTokens &&
-    i.apiCostUsd < w.apiCostUsd &&
-    i.llmTurns < w.llmTurns &&
-    i.toolCalls < w.toolCalls;
+    iComp.workingTokens < w.workingTokens &&
+    iComp.outputTokens < w.outputTokens &&
+    iComp.billableTokens < w.billableTokens &&
+    iComp.apiTotalTokens < w.apiTotalTokens &&
+    iComp.apiCostUsd < w.apiCostUsd &&
+    iComp.llmTurns < w.llmTurns &&
+    iComp.toolCalls < w.toolCalls;
 
   const idiomsBeatNoIdioms =
     i.workingTokens < n.workingTokens &&

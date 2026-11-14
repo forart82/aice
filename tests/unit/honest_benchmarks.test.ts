@@ -889,4 +889,48 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       `Wins ${realReport.winsWithIdioms}/${realReport.totalBenchmarks} Multi-File Scenarios`,
     );
   });
+
+  it("isolates child PATH/env from /dev/aice worktrees and keeps OAUTH_OR_RATE_LIMIT_RE immune to telemetry 'tokens' / print_timeout", async () => {
+    const { buildIsolatedBenchmarkEnv, OAUTH_OR_RATE_LIMIT_RE } = await import(
+      "../../benchmarks/run-real-agents.js"
+    );
+
+    const isolated = buildIsolatedBenchmarkEnv(
+      {
+        PATH: [
+          "/home/user/.gemini/antigravity-cli/worktrees/swarm-bench-1/node_modules/.bin",
+          "/home/user/dev/aice/node_modules/.bin",
+          "/home/user/.local/bin",
+          "/usr/bin",
+        ].join(path.delimiter),
+        npm_package_json: "/home/user/dev/aice/package.json",
+        INIT_CWD: "/home/user/dev/aice",
+        PWD: "/home/user/.gemini/antigravity-cli/worktrees/swarm-bench-1",
+        HOME: "/home/user",
+      },
+      "/tmp/aice-rw-06-without_aice-xyz",
+    );
+
+    expect(isolated.PATH).toBe(["/home/user/.local/bin", "/usr/bin"].join(path.delimiter));
+    expect(isolated.npm_package_json).toBeUndefined();
+    expect(isolated.PWD).toBe("/tmp/aice-rw-06-without_aice-xyz");
+    expect(isolated.INIT_CWD).toBe("/tmp/aice-rw-06-without_aice-xyz");
+    expect(isolated.HOME).toBe("/home/user");
+
+    // Must NOT match partial telemetry words like "tokens", "token", or print_timeout
+    expect(
+      OAUTH_OR_RATE_LIMIT_RE.test(
+        '{"reason":"print_timeout","output_tokens":4521,"tokens":12000,"error":"DEADLINE_EXCEEDED"}',
+      ),
+    ).toBe(false);
+    expect(OAUTH_OR_RATE_LIMIT_RE.test("ETIMEDOUT: agy process timed out after 660000ms")).toBe(
+      false,
+    );
+
+    // Must still match genuine OAuth / rate-limit / quota / transient network errors
+    expect(OAUTH_OR_RATE_LIMIT_RE.test("Error: invalid_grant: refresh_token expired")).toBe(true);
+    expect(OAUTH_OR_RATE_LIMIT_RE.test("RESOURCE_EXHAUSTED: quota exceeded (status 429)")).toBe(
+      true,
+    );
+  });
 });
