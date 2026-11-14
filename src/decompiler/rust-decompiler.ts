@@ -729,6 +729,25 @@ export class RustDecompiler {
       }
     }
 
+    // Emit ClassDecl for impl blocks attached to enums or cross-file structs
+    const orphanImplNames = new Set<string>([...implMethods.keys(), ...implCtors.keys()]);
+    for (const name of orphanImplNames) {
+      if (structs.has(name)) continue;
+      const methods = implMethods.get(name) ?? [];
+      const ctorParams = implCtors.get(name) ?? [];
+      if (methods.length === 0 && ctorParams.length === 0) continue;
+      items.push({
+        kind: "ClassDecl",
+        name,
+        isExported: true,
+        typeParams: [],
+        primaryConstructor: ctorParams,
+        properties: [],
+        methods,
+        span: emptySpan(),
+      });
+    }
+
     const baseName =
       this.filePath
         .split(/[/\\]/)
@@ -839,6 +858,9 @@ export class RustDecompiler {
     this.advance(); // consume 'enum'
 
     const name = this.consume("IDENTIFIER", "Expected enum name").value;
+    if (this.check("LT")) {
+      this.skipGenericParams();
+    }
     this.consume("LBRACE", "Expected '{' to start enum variants");
     const variants: { name: string; payloadTypes?: TypeExpr[]; span: Span }[] = [];
 
@@ -896,6 +918,32 @@ export class RustDecompiler {
     this.advance(); // consume 'struct'
 
     const name = this.consume("IDENTIFIER", "Expected struct name").value;
+    if (this.check("LT")) {
+      this.skipGenericParams();
+    }
+    if (this.match("SEMICOLON")) {
+      structs.set(name, { name, fields: [], isExported, trivia });
+      return;
+    }
+    if (this.check("LPAREN")) {
+      this.advance();
+      const fields: FieldDecl[] = [];
+      let idx = 0;
+      while (!this.check("RPAREN") && !this.isAtEnd()) {
+        this.match("PUB");
+        const fieldType = this.parseTypeExpr();
+        fields.push({
+          name: `_${idx++}`,
+          typeAnnotation: fieldType,
+          span: emptySpan(),
+        });
+        if (!this.match("COMMA")) break;
+      }
+      this.match("RPAREN");
+      this.match("SEMICOLON");
+      structs.set(name, { name, fields, isExported, trivia });
+      return;
+    }
     this.consume("LBRACE", "Expected '{' after struct name");
     const fields: FieldDecl[] = [];
 
@@ -923,25 +971,102 @@ export class RustDecompiler {
     structs.set(name, { name, fields, isExported, trivia });
   }
 
+  private skipGenericParams(): void {
+    if (!this.check("LT")) return;
+    this.advance();
+    let depth = 1;
+    while (depth > 0 && !this.isAtEnd()) {
+      if (this.check("LT")) depth++;
+      else if (this.check("GT")) depth--;
+      this.advance();
+    }
+  }
+
   private parseImpl(
     implMethods: Map<string, MethodDecl[]>,
     implCtors: Map<string, ParamDecl[]>,
   ): void {
     this.advance(); // consume 'impl'
-    const structName = this.consume("IDENTIFIER", "Expected struct name for impl").value;
+    if (this.check("LT")) {
+      this.skipGenericParams();
+    }
+
+    let structName = "";
+    let angleDepth = 0;
+    let parenDepth = 0;
+    let inWhereClause = false;
+    while (!this.isAtEnd()) {
+      if (angleDepth === 0 && parenDepth === 0 && this.check("LBRACE")) {
+        break;
+      }
+      if (this.check("LT")) {
+        angleDepth++;
+        this.advance();
+        continue;
+      }
+      if (this.check("GT") && angleDepth > 0) {
+        angleDepth--;
+        this.advance();
+        continue;
+      }
+      if (this.check("LPAREN") || this.check("LBRACKET")) {
+        parenDepth++;
+        this.advance();
+        continue;
+      }
+      if ((this.check("RPAREN") || this.check("RBRACKET")) && parenDepth > 0) {
+        parenDepth--;
+        this.advance();
+        continue;
+      }
+      if (angleDepth === 0 && parenDepth === 0) {
+        if (this.check("FOR")) {
+          structName = "";
+          this.advance();
+          continue;
+        }
+        if (this.check("IDENTIFIER") && this.peek().value === "where") {
+          inWhereClause = true;
+          this.advance();
+          continue;
+        }
+        if (!inWhereClause && this.check("IDENTIFIER")) {
+          structName = this.advance().value;
+          continue;
+        }
+      }
+      this.advance();
+    }
+
+    if (!structName) {
+      structName = "AnonymousImpl";
+    }
     this.consume("LBRACE", "Expected '{' to start impl block");
 
     while (!this.check("RBRACE") && !this.isAtEnd()) {
       this.collectLeadingTrivia();
       if (this.check("RBRACE")) break;
 
-      if (this.match("PUB")) {
-        // method visibility
+      if (this.check("HASH")) {
+        this.skipAttribute();
+        continue;
       }
+
+      if (this.match("PUB")) {
+        if (this.check("LPAREN")) {
+          while (!this.check("RPAREN") && !this.isAtEnd()) this.advance();
+          this.match("RPAREN");
+        }
+      }
+
+      const isAsync = this.match("ASYNC");
 
       if (this.check("FN")) {
         this.advance(); // consume 'fn'
         const fnName = this.consume("IDENTIFIER", "Expected function name").value;
+        if (this.check("LT")) {
+          this.skipGenericParams();
+        }
 
         this.consume("LPAREN", "Expected '(' for method parameters");
         let isStatic = true;
@@ -987,6 +1112,14 @@ export class RustDecompiler {
         if (this.match("ARROW")) {
           returnType = this.parseTypeExpr();
         }
+        if (this.check("IDENTIFIER") && this.peek().value === "where") {
+          while (!this.check("LBRACE") && !this.check("SEMICOLON") && !this.isAtEnd()) {
+            this.advance();
+          }
+        }
+        if (this.match("SEMICOLON")) {
+          continue;
+        }
 
         const body = this.parseBlock();
 
@@ -1002,7 +1135,7 @@ export class RustDecompiler {
             kind: "MethodDecl",
             name: this.toAiceMethodName(fnName),
             isStatic,
-            isAsync: false,
+            isAsync,
             params,
             returnType,
             body,
@@ -1067,6 +1200,9 @@ export class RustDecompiler {
     this.consume("FN", "Expected 'fn'");
 
     const fnName = this.consume("IDENTIFIER", "Expected function name").value;
+    if (this.check("LT")) {
+      this.skipGenericParams();
+    }
 
     this.consume("LPAREN", "Expected '(' for parameters");
     const params: ParamDecl[] = [];

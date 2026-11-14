@@ -666,6 +666,21 @@ export class GoDecompiler {
       }
     }
 
+    for (const [recvName, methods] of receiverMethods) {
+      if (!structs.has(recvName) && methods.length > 0) {
+        items.push({
+          kind: "ClassDecl",
+          name: recvName,
+          isExported: /^[A-Z]/.test(recvName),
+          typeParams: [],
+          primaryConstructor: [],
+          properties: [],
+          methods,
+          span: emptySpan(),
+        });
+      }
+    }
+
     const baseName =
       this.filePath
         .split(/[/\\]/)

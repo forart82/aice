@@ -2805,7 +2805,7 @@ function loadAndDecompileWorkspaceFiles(
       } else {
         const targetLang = detectTargetFromPath(fp);
         const decomp = withSuppressedTelemetry(() =>
-          decompile(rawSource, targetLang, { filePath: fp }),
+          decompile(rawSource, targetLang, { filePath: fp, projectRoot }),
         );
         aiceSource = decomp.aice;
         setCachedMemoryDecompile(memKey, aiceSource);
@@ -3018,7 +3018,12 @@ function resolveIdiomWorkspace(dir: string): {
   searchDir: string;
 } {
   const resolvedInput = path.resolve(dir);
-  let projectRoot = findProjectRoot(resolvedInput);
+  const cwdResolved = path.resolve(process.cwd());
+  const fallbackDir =
+    resolvedInput === cwdResolved || resolvedInput.startsWith(`${cwdResolved}${path.sep}`)
+      ? cwdResolved
+      : resolvedInput;
+  let projectRoot = findProjectRoot(resolvedInput, fallbackDir);
   if (
     projectRoot === resolvedInput &&
     path.basename(resolvedInput) === "src" &&

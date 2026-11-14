@@ -176,17 +176,37 @@ export function generateOutline(
     ? (options.preloadedIdiomsActive ?? false)
     : true;
 
-  const ensureIdiomsResolved = (targetPath: string) => {
+  let resolvedProjectRoot: string | undefined = options.projectRoot
+    ? path.resolve(options.projectRoot)
+    : undefined;
+
+  const ensureIdiomsResolved = (targetPath: string, isRealDiskFile = false) => {
     if (idiomsResolved) return;
     idiomsResolved = true;
     try {
-      const hasScopedTarget =
-        Boolean(options.projectRoot) || (targetPath !== "<anonymous>" && fs.existsSync(targetPath));
-      const root =
-        options.projectRoot ??
-        (targetPath !== "<anonymous>" && fs.existsSync(targetPath)
-          ? findProjectRoot(path.dirname(path.resolve(targetPath)))
-          : findProjectRoot(process.cwd()));
+      const diskTargetExists =
+        targetPath !== "<anonymous>" &&
+        (isRealDiskFile || path.isAbsolute(targetPath)) &&
+        fs.existsSync(targetPath);
+      const hasScopedTarget = Boolean(resolvedProjectRoot) || diskTargetExists;
+      const root = (() => {
+        if (resolvedProjectRoot) return resolvedProjectRoot;
+        if (diskTargetExists) {
+          const resolvedTarget = path.resolve(targetPath);
+          const st = fs.statSync(resolvedTarget);
+          const targetDir = st.isDirectory() ? resolvedTarget : path.dirname(resolvedTarget);
+          const cwdResolved = path.resolve(process.cwd());
+          const fallbackDir =
+            targetDir === cwdResolved || targetDir.startsWith(`${cwdResolved}${path.sep}`)
+              ? cwdResolved
+              : targetDir;
+          return findProjectRoot(targetDir, fallbackDir);
+        }
+        return findProjectRoot(process.cwd());
+      })();
+      if (hasScopedTarget) {
+        resolvedProjectRoot = root;
+      }
       const cfg = loadProjectConfig(root);
       if (hasScopedTarget && !isProjectAiceEnabled(cfg)) {
         throw new Error(AICE_DISABLED_MESSAGE);
@@ -207,11 +227,13 @@ export function generateOutline(
 
   if (typeof sourceOrMod === "object" && sourceOrMod !== null && sourceOrMod.kind === "Module") {
     ast = sourceOrMod;
-    filePath = ast.path || explicitFilePath || "<anonymous>";
-    ensureIdiomsResolved(filePath);
+    filePath = explicitFilePath || ast.path || "<anonymous>";
+    const isRealDisk =
+      filePath !== "<anonymous>" && fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+    ensureIdiomsResolved(filePath, isRealDisk);
     if (options.preReadSource !== undefined) {
       originalSource = options.preReadSource;
-    } else if (filePath !== "<anonymous>" && fs.existsSync(filePath)) {
+    } else if (isRealDisk) {
       try {
         originalSource = fs.readFileSync(filePath, "utf-8");
       } catch {
@@ -219,13 +241,20 @@ export function generateOutline(
       }
     }
   } else if (typeof sourceOrMod === "string") {
+    const candidateFilePath =
+      !sourceOrMod.includes("\n") &&
+      resolvedProjectRoot &&
+      !path.isAbsolute(sourceOrMod) &&
+      fs.existsSync(path.resolve(resolvedProjectRoot, sourceOrMod))
+        ? path.resolve(resolvedProjectRoot, sourceOrMod)
+        : sourceOrMod;
     const isFile =
       !sourceOrMod.includes("\n") &&
-      fs.existsSync(sourceOrMod) &&
-      fs.statSync(sourceOrMod).isFile();
+      fs.existsSync(candidateFilePath) &&
+      fs.statSync(candidateFilePath).isFile();
     if (isFile) {
-      filePath = sourceOrMod;
-      ensureIdiomsResolved(filePath);
+      filePath = candidateFilePath;
+      ensureIdiomsResolved(filePath, true);
       originalSource = options.preReadSource ?? fs.readFileSync(filePath, "utf-8");
       if (filePath.endsWith(".aice")) {
         const parsed = parseWithTrivia(originalSource, filePath);
@@ -237,6 +266,7 @@ export function generateOutline(
           const decompResult = withSuppressedTelemetry(() =>
             decompile(originalSource, targetLang, {
               filePath,
+              projectRoot: resolvedProjectRoot,
               skipCodeGen: true,
               skeletonOnly: !hasActiveIdiomsForOutline(),
             }),
@@ -262,7 +292,7 @@ export function generateOutline(
       }
     } else {
       filePath = explicitFilePath || "<anonymous>";
-      ensureIdiomsResolved(filePath);
+      ensureIdiomsResolved(filePath, false);
       originalSource = sourceOrMod;
       const hasKnownTargetExt =
         explicitFilePath !== undefined &&
@@ -275,6 +305,7 @@ export function generateOutline(
           const decompResult = withSuppressedTelemetry(() =>
             decompile(originalSource, targetLang, {
               filePath: explicitFilePath,
+              projectRoot: resolvedProjectRoot,
               skipCodeGen: true,
               skeletonOnly: !hasActiveIdiomsForOutline(),
             }),
@@ -311,6 +342,7 @@ export function generateOutline(
             const decompResult = withSuppressedTelemetry(() =>
               decompile(originalSource, targetLang, {
                 filePath,
+                projectRoot: resolvedProjectRoot,
                 skipCodeGen: true,
                 skeletonOnly: !hasActiveIdiomsForOutline(),
               }),
@@ -1859,15 +1891,35 @@ export async function outlinePath(
   if (inputPaths.length === 0) {
     throw new Error("No target path provided to outlinePath");
   }
-  const firstFullPath = path.resolve(process.cwd(), inputPaths[0]);
-  if (!fs.existsSync(firstFullPath)) {
+  const baseResolveDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const resolveInputPath = (rawP: string): string => {
+    if (path.isAbsolute(rawP)) return path.resolve(rawP);
+    const fromBase = path.resolve(baseResolveDir, rawP);
+    if (fs.existsSync(fromBase) || !options.projectRoot) return fromBase;
+    const fromCwd = path.resolve(process.cwd(), rawP);
+    return fs.existsSync(fromCwd) ? fromCwd : fromBase;
+  };
+
+  const resolvedEntries = inputPaths.map((rawP) => {
+    const fullP = resolveInputPath(rawP);
+    return { rawP, fullP, exists: fs.existsSync(fullP) };
+  });
+  const existingEntries = resolvedEntries.filter((e) => e.exists);
+  if (existingEntries.length === 0) {
     throw new Error(`File or directory not found: ${inputPaths[0]}`);
   }
 
+  const firstFullPath = existingEntries[0]!.fullP;
   const firstStat = fs.statSync(firstFullPath);
+  const firstDir = firstStat.isDirectory() ? firstFullPath : path.dirname(firstFullPath);
+  const cwdResolved = path.resolve(process.cwd());
+  const fallbackDir =
+    firstDir === cwdResolved || firstDir.startsWith(`${cwdResolved}${path.sep}`)
+      ? cwdResolved
+      : firstDir;
   const projectRoot = options.projectRoot
     ? path.resolve(options.projectRoot)
-    : findProjectRoot(firstStat.isDirectory() ? firstFullPath : path.dirname(firstFullPath));
+    : findProjectRoot(firstDir, fallbackDir);
   const cfg = loadProjectConfig(projectRoot);
   if (!isProjectAiceEnabled(cfg)) {
     throw new Error(AICE_DISABLED_MESSAGE);
@@ -1955,16 +2007,17 @@ export async function outlinePath(
     }
   };
 
-  for (const rawP of inputPaths) {
-    const fullP = path.resolve(process.cwd(), rawP);
-    if (!fs.existsSync(fullP)) {
-      throw new Error(`File or directory not found: ${rawP}`);
+  const missingEntries: string[] = [];
+  for (const entry of resolvedEntries) {
+    if (!entry.exists) {
+      missingEntries.push(entry.rawP);
+      continue;
     }
-    const st = fs.statSync(fullP);
+    const st = fs.statSync(entry.fullP);
     if (st.isDirectory()) {
-      walk(fullP);
+      walk(entry.fullP);
     } else if (st.isFile()) {
-      targetCandidatesSet.add(fullP);
+      targetCandidatesSet.add(entry.fullP);
     }
   }
 
@@ -2055,6 +2108,18 @@ export async function outlinePath(
     if ((r.referencedIdioms?.length ?? 0) > 0) {
       anyIdioms = true;
     }
+  }
+
+  for (const missingRaw of missingEntries) {
+    const cleanMissing = missingRaw.replace(/\\/g, "/");
+    const msg = `// not found: ${cleanMissing}`;
+    resultMap.set(cleanMissing, {
+      file: cleanMissing,
+      symbols: [],
+      text: msg,
+      ...(options.json ? { json: { file: cleanMissing, symbols: [] } } : {}),
+    });
+    aiceParts.push(`// === ${cleanMissing} ===\n${msg}`);
   }
 
   if (targetCandidates.length > 0) {

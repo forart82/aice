@@ -59,6 +59,10 @@ export interface WorkspaceCallerScanCache {
   filesByRoot: Map<string, string[]>;
   fileContentByPath: Map<string, string>;
   importsByPath: Map<string, ImportDecl[]>;
+  idiomScanByRoot?: Map<
+    string,
+    { idioms: Record<string, ProjectIdiomDefinition>; zeroIdiomsReason?: string }
+  >;
 }
 
 export interface ContextOptions {
@@ -376,43 +380,258 @@ function renderSymbolsOutline(symbols: OutlineSymbol[]): string {
 
 const SIBLING_MAX_SYMBOLS = 20;
 const SIBLING_MAX_TOKENS = 150;
+const SIBLING_MAX_SIG_CHARS = 120;
+
+function matchesSiblingIdent(symName: string, rawPart: string): boolean {
+  const cleanPart = rawPart.replace(/\(.*\)$/, "").trim();
+  if (!cleanPart) return false;
+  if (symName === cleanPart) return true;
+  if (cleanPart.length >= 2) {
+    const normSym = symName.toLowerCase().replace(/[^a-z0-9]/g, "");
+    const normPart = cleanPart.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (normSym.length > 0 && normSym === normPart) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function mergeContainerChildren(containers: OutlineSymbol[]): OutlineSymbol[] {
+  if (containers.length === 1) {
+    return containers[0]!.children ?? [];
+  }
+  const merged: OutlineSymbol[] = [];
+  const seen = new Set<string>();
+  for (const c of containers) {
+    for (const child of c.children ?? []) {
+      const key = `${child.kind}:${child.name}:${child.signature}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        merged.push(child);
+      }
+    }
+  }
+  return merged;
+}
+
+function findEnclosingContainerForBareMember(
+  symbols: OutlineSymbol[],
+  targetName: string,
+  prefix: string[] = [],
+): { parentKey: string; parentLabel: string; children: OutlineSymbol[] } | undefined {
+  const byName = new Map<string, OutlineSymbol[]>();
+  for (const sym of symbols) {
+    if (sym.kind === "import") continue;
+    const list = byName.get(sym.name);
+    if (list) list.push(sym);
+    else byName.set(sym.name, [sym]);
+  }
+  for (const [containerName, group] of byName) {
+    const children = mergeContainerChildren(group);
+    if (children.length === 0) continue;
+    const pathParts = [...prefix, containerName];
+    if (children.some((c) => matchesSiblingIdent(c.name, targetName))) {
+      return {
+        parentKey: pathParts.join("."),
+        parentLabel: pathParts.join("."),
+        children,
+      };
+    }
+    const nested = findEnclosingContainerForBareMember(children, targetName, pathParts);
+    if (nested) return nested;
+  }
+  return undefined;
+}
 
 /**
- * Adaptive Sibling Outlining: for `Parent.member` selectors, render a compact
- * outline of the other members of `Parent`, capped at 20 symbols / ~150 tokens.
+ * Adaptive Sibling Outlining: for `Parent.member` (or bare member / multi-selector)
+ * queries, render a deduplicated, token-bounded outline of sibling members per parent,
+ * strictly capped at <= 20 symbols and <= 150 tokens total.
  */
-export function buildSiblingOutline(symbols: OutlineSymbol[], selector: string): string {
-  const parts = selector
-    .trim()
-    .split(/\.|::/)
-    .map((p) => p.trim())
-    .filter(Boolean);
-  if (parts.length < 2) return "";
-  let level = symbols;
-  let parent: OutlineSymbol | undefined;
-  for (let i = 0; i < parts.length - 1; i++) {
-    parent = level.find((s) => s.name === parts[i]);
-    if (!parent?.children) return "";
-    level = parent.children;
+export function buildSiblingOutline(
+  symbols: OutlineSymbol[],
+  selector: string | string[],
+): string {
+  if (!symbols || symbols.length === 0) return "";
+  const rawSelectors = Array.isArray(selector) ? selector : splitSymbolSelectors(selector);
+  if (rawSelectors.length === 0) return "";
+
+  const parentGroups = new Map<
+    string,
+    { parentLabel: string; children: OutlineSymbol[]; excludedTargets: string[] }
+  >();
+
+  for (const rawSel of rawSelectors) {
+    const trimmed = rawSel.trim();
+    if (
+      !trimmed ||
+      trimmed === "*" ||
+      trimmed.toLowerCase() === "imports" ||
+      trimmed === "@first" ||
+      trimmed === "@1" ||
+      trimmed.startsWith(".") ||
+      trimmed.startsWith("#") ||
+      /^\[?L\d+(?:-L?\d+)?\]?$/i.test(trimmed) ||
+      /^\/.+\/[gimsuy]*$/.test(trimmed)
+    ) {
+      continue;
+    }
+
+    const withoutFilePrefix =
+      trimmed.includes(":") && !trimmed.includes("::")
+        ? trimmed.slice(trimmed.indexOf(":") + 1).trim()
+        : trimmed;
+
+    const parts = withoutFilePrefix
+      .split(/\.|::/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length === 0) continue;
+
+    if (parts.length === 1) {
+      const bare = parts[0]!;
+      const isTopLevel = symbols.some(
+        (s) => s.kind !== "import" && matchesSiblingIdent(s.name, bare),
+      );
+      if (isTopLevel) {
+        continue;
+      }
+      const enclosing = findEnclosingContainerForBareMember(symbols, bare);
+      if (!enclosing) continue;
+      const existing = parentGroups.get(enclosing.parentKey);
+      if (existing) {
+        existing.excludedTargets.push(bare);
+      } else {
+        parentGroups.set(enclosing.parentKey, {
+          parentLabel: enclosing.parentLabel,
+          children: enclosing.children,
+          excludedTargets: [bare],
+        });
+      }
+      continue;
+    }
+
+    let level = symbols;
+    const resolvedPath: string[] = [];
+    let matchedContainers: OutlineSymbol[] = [];
+    let validPath = true;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i]!;
+      const matches = level.filter((s) => matchesSiblingIdent(s.name, part));
+      if (matches.length === 0) {
+        validPath = false;
+        break;
+      }
+      resolvedPath.push(matches[0]!.name);
+      if (i === parts.length - 2) {
+        matchedContainers = matches;
+      } else {
+        level = mergeContainerChildren(matches);
+        if (level.length === 0) {
+          validPath = false;
+          break;
+        }
+      }
+    }
+    if (!validPath || matchedContainers.length === 0) continue;
+    const mergedChildren = mergeContainerChildren(matchedContainers);
+    if (mergedChildren.length === 0) continue;
+
+    const parentKey = resolvedPath.join(".");
+    const parentLabel =
+      resolvedPath.length === 1 ? resolvedPath[0]! : resolvedPath.join(".");
+    const target = parts[parts.length - 1]!;
+    const existing = parentGroups.get(parentKey);
+    if (existing) {
+      existing.excludedTargets.push(target);
+    } else {
+      parentGroups.set(parentKey, {
+        parentLabel,
+        children: mergedChildren,
+        excludedTargets: [target],
+      });
+    }
   }
-  const target = parts[parts.length - 1];
-  const siblings = level.filter((s) => s.name !== target);
-  if (!parent || siblings.length === 0) return "";
-  const header = `// siblings in ${parent.name}:`;
-  const lines: string[] = [];
-  let tokens = estimateTokens(header);
-  let shown = 0;
-  for (const s of siblings) {
-    const line = `//   ${s.signature.split("\n")[0].trim()}`;
-    const cost = estimateTokens(line);
-    if (shown >= SIBLING_MAX_SYMBOLS || (shown > 0 && tokens + cost > SIBLING_MAX_TOKENS)) break;
-    lines.push(line);
-    tokens += cost;
-    shown++;
+
+  if (parentGroups.size === 0) return "";
+
+  const blocks: string[] = [];
+  let totalTokensUsed = 0;
+  let totalSymbolsShown = 0;
+
+  for (const group of parentGroups.values()) {
+    const siblings = group.children.filter(
+      (s) => !group.excludedTargets.some((t) => matchesSiblingIdent(s.name, t)),
+    );
+    if (siblings.length === 0) continue;
+
+    const hasMethods = siblings.some((s) => s.kind === "method" || s.kind === "function");
+    const allVariants = !hasMethods && siblings.every((s) => s.kind === "variant");
+    const allFields =
+      !hasMethods && siblings.every((s) => s.kind === "field" || s.kind === "property");
+    const unitLabel = hasMethods
+      ? "methods"
+      : allVariants
+        ? "variants"
+        : allFields
+          ? "fields"
+          : "members";
+
+    const header = `// siblings in ${group.parentLabel}:`;
+    const headerCost = estimateTokens(header);
+    if (totalTokensUsed + headerCost + 6 > SIBLING_MAX_TOKENS) {
+      break;
+    }
+
+    const groupLines: string[] = [];
+    let groupShown = 0;
+    let runningTokens = totalTokensUsed + headerCost;
+
+    for (let idx = 0; idx < siblings.length; idx++) {
+      if (totalSymbolsShown >= SIBLING_MAX_SYMBOLS) break;
+      const s = siblings[idx]!;
+      let sig = s.signature.split(/\r?\n/)[0]!.trim();
+      if (sig.length > SIBLING_MAX_SIG_CHARS) {
+        sig = `${sig.slice(0, SIBLING_MAX_SIG_CHARS - 3).trimEnd()}...`;
+      }
+      const line = `//   ${sig}`;
+      const cost = estimateTokens(line);
+      const hasRemainingAfter = idx < siblings.length - 1;
+      const footerReserve = hasRemainingAfter ? 9 : 0;
+      if (runningTokens + cost + footerReserve > SIBLING_MAX_TOKENS) {
+        break;
+      }
+      groupLines.push(line);
+      runningTokens += cost;
+      groupShown++;
+      totalSymbolsShown++;
+    }
+
+    const rest = siblings.length - groupShown;
+    if (groupShown === 0 && rest > 0) {
+      const summaryOnly = `${header}\n//   (+ ${rest} other ${unitLabel})`;
+      if (totalTokensUsed + estimateTokens(summaryOnly) <= SIBLING_MAX_TOKENS) {
+        blocks.push(summaryOnly);
+        totalTokensUsed += estimateTokens(summaryOnly);
+      }
+      break;
+    }
+
+    while (groupLines.length > 0) {
+      const currentRest = siblings.length - groupLines.length;
+      const footerLine = currentRest > 0 ? [`//   (+ ${currentRest} other ${unitLabel})`] : [];
+      const candidateBlock = [header, ...groupLines, ...footerLine].join("\n");
+      const candidateAll = [...blocks, candidateBlock].join("\n\n");
+      if (estimateTokens(candidateAll) <= SIBLING_MAX_TOKENS) {
+        blocks.push(candidateBlock);
+        totalTokensUsed = estimateTokens(candidateAll);
+        break;
+      }
+      groupLines.pop();
+    }
   }
-  const rest = siblings.length - shown;
-  if (rest > 0) lines.push(`//   (+ ${rest} other methods)`);
-  return [header, ...lines].join("\n");
+
+  return blocks.join("\n\n");
 }
 
 function extractExportedContract(resolvedPath: string, importedSymbols: string[]): string {
@@ -856,26 +1075,40 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
 function splitSymbolSelectors(rawSymbol: string): string[] {
   const trimmed = rawSymbol.trim();
   if (!trimmed) return [];
-  if (/^\/[^/\n]+\/[gimsuy]*$/.test(trimmed)) {
+  if (/^\/[^/\\\n]+\/[gimsuy]*$/.test(trimmed)) {
     return [trimmed];
   }
   const out: string[] = [];
   let current = "";
   let inRegex = false;
+  let regexCharClass = false;
   let inQuote: string | null = null;
+  let escaped = false;
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i]!;
-    const prev = i > 0 ? trimmed[i - 1] : "";
+    if (escaped) {
+      current += ch;
+      escaped = false;
+      continue;
+    }
     if (inQuote) {
       current += ch;
-      if (ch === inQuote && prev !== "\\") {
+      if (ch === "\\") {
+        escaped = true;
+      } else if (ch === inQuote) {
         inQuote = null;
       }
       continue;
     }
     if (inRegex) {
       current += ch;
-      if (ch === "/" && prev !== "\\") {
+      if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "[") {
+        regexCharClass = true;
+      } else if (ch === "]" && regexCharClass) {
+        regexCharClass = false;
+      } else if (ch === "/" && !regexCharClass) {
         inRegex = false;
       }
       continue;
@@ -887,6 +1120,7 @@ function splitSymbolSelectors(rawSymbol: string): string[] {
     }
     if (ch === "/" && current.trim() === "") {
       inRegex = true;
+      regexCharClass = false;
       current += ch;
       continue;
     }
@@ -1533,6 +1767,35 @@ export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
   return discovered.sort();
 }
 
+function resolveEffectiveTargetAndRoot(
+  rawTargetPath?: string,
+  explicitProjectRoot?: string,
+): { targetPath?: string; projectRoot?: string } {
+  if (explicitProjectRoot) {
+    const root = path.resolve(explicitProjectRoot);
+    if (rawTargetPath && !path.isAbsolute(rawTargetPath)) {
+      const candidate = path.resolve(root, rawTargetPath);
+      if (fs.existsSync(candidate)) {
+        return { targetPath: candidate, projectRoot: root };
+      }
+    }
+    return { targetPath: rawTargetPath, projectRoot: root };
+  }
+  if (rawTargetPath && rawTargetPath.trim() !== "") {
+    const absCandidate = path.resolve(process.cwd(), rawTargetPath.trim());
+    if (fs.existsSync(absCandidate)) {
+      const st = fs.statSync(absCandidate);
+      const targetDir = st.isDirectory() ? absCandidate : path.dirname(absCandidate);
+      const cwdResolved = path.resolve(process.cwd());
+      if (targetDir !== cwdResolved && !targetDir.startsWith(`${cwdResolved}${path.sep}`)) {
+        const root = findProjectRoot(targetDir, targetDir);
+        return { targetPath: absCandidate, projectRoot: root };
+      }
+    }
+  }
+  return { targetPath: rawTargetPath, projectRoot: undefined };
+}
+
 /**
  * Packages a workspace overview context pack covering project configuration,
  * discovered files, module outlines, and dependencies.
@@ -1541,9 +1804,10 @@ export async function generateWorkspaceContext(
   targetPath?: string,
   options: ContextOptions = {},
 ): Promise<ContextResult> {
-  const resolved = resolvePathTargets(targetPath, {
+  const preResolved = resolveEffectiveTargetAndRoot(targetPath, options.projectRoot);
+  const resolved = resolvePathTargets(preResolved.targetPath, {
     includeTargets: true,
-    projectRoot: options.projectRoot,
+    projectRoot: preResolved.projectRoot,
   });
 
   const projectRoot = resolved.projectRoot;
@@ -1558,29 +1822,6 @@ export async function generateWorkspaceContext(
   const dependencies: DependencyContract[] = [];
   const depMap = new Map<string, DependencyContract>();
   const rawWorkspaceTexts: string[] = [];
-  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms =
-    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
-      ? config.idioms
-      : undefined;
-  let zeroIdiomsReason: string | undefined;
-  if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
-    try {
-      const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
-      if (Object.keys(scanRes.idioms).length > 0) {
-        activeIdioms = scanRes.idioms;
-        config.idioms = scanRes.idioms;
-      } else {
-        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
-        activeIdioms = undefined;
-        console.error(
-          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
-        );
-      }
-    } catch {
-      // ignore scan errors
-    }
-  }
   const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
   const isBareLineRangeOnly =
     resolved.isDirectory &&
@@ -1599,6 +1840,54 @@ export async function generateWorkspaceContext(
   const isPureRegexSearch =
     requestedSelectors.length > 0 &&
     requestedSelectors.every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
+  const regexMentionsIdiom =
+    isPureRegexSearch && requestedSelectors.some((s) => /\$[A-Za-z_]/.test(s));
+
+  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  let activeIdioms =
+    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
+      ? config.idioms
+      : undefined;
+  let zeroIdiomsReason: string | undefined;
+  if (
+    options.idioms === true &&
+    (!activeIdioms || Object.keys(activeIdioms).length === 0) &&
+    (!isPureRegexSearch || regexMentionsIdiom)
+  ) {
+    const cachedScan = options.workspaceScanCache?.idiomScanByRoot?.get(projectRoot);
+    if (cachedScan) {
+      if (Object.keys(cachedScan.idioms).length > 0) {
+        activeIdioms = cachedScan.idioms;
+        config.idioms = cachedScan.idioms;
+      } else {
+        zeroIdiomsReason = cachedScan.zeroIdiomsReason;
+        activeIdioms = undefined;
+      }
+    } else {
+      try {
+        const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
+        if (Object.keys(scanRes.idioms).length > 0) {
+          activeIdioms = scanRes.idioms;
+          config.idioms = scanRes.idioms;
+          options.workspaceScanCache?.idiomScanByRoot?.set(projectRoot, {
+            idioms: scanRes.idioms,
+          });
+        } else {
+          zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+          activeIdioms = undefined;
+          options.workspaceScanCache?.idiomScanByRoot?.set(projectRoot, {
+            idioms: {},
+            zeroIdiomsReason,
+          });
+          console.error(
+            "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
+          );
+        }
+      } catch {
+        // ignore scan errors
+      }
+    }
+  }
 
   const isPureAiceDirectory =
     resolved.files.length > 0 && resolved.files.every((f) => f.endsWith(".aice"));
@@ -1613,11 +1902,17 @@ export async function generateWorkspaceContext(
         ]),
       ).sort();
 
+  const workspaceRootForRank = resolved.isDirectory ? resolved.resolvedPath : projectRoot;
+  const relSearchDir = path.relative(projectRoot, resolved.resolvedPath).replace(/\\/g, "/");
+  const baseSearchName = path.basename(resolved.resolvedPath);
   const isExplicitTestSearch =
     Boolean(resolved.resolvedPath) &&
-    /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/i.test(
-      resolved.resolvedPath,
-    );
+    ((Boolean(relSearchDir) &&
+      !relSearchDir.startsWith("..") &&
+      /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/i.test(
+        relSearchDir,
+      )) ||
+      /^(?:tests?|__tests__|mocks?|__mocks__|fixtures?|specs?)$/i.test(baseSearchName));
 
   const scoredFileSlices: Array<{
     relFile: string;
@@ -1626,28 +1921,29 @@ export async function generateWorkspaceContext(
     score: number;
   }> = [];
 
+  const useCompactWildcardOverview =
+    requestedSelectors.includes("*") &&
+    requestedSelectors.length === 1 &&
+    workspaceFiles.length >= 8 &&
+    options.maxTokens === undefined;
+
   for (const f of workspaceFiles) {
     const relFile = formatDisplayPath(f, projectRoot);
     try {
       const rawFileContent = fs.readFileSync(f, "utf-8");
       rawWorkspaceTexts.push(rawFileContent);
 
-      if (isPureRegexSearch) {
+      if (isPureRegexSearch && !regexMentionsIdiom) {
         const matchedSlices: string[] = [];
-        const isMockOrTest = !isExplicitTestSearch && isTestOrMockPath(f);
+        const isMockOrTest = !isExplicitTestSearch && isTestOrMockPath(f, workspaceRootForRank);
         let fileMaxScore = 0;
-        const queryKw = requestedSelectors[0]
-          ?.replace(/[^A-Za-z0-9_$-]/g, " ")
-          .trim()
-          .split(/\s+/)[0];
-        const fileNameMatches =
-          Boolean(queryKw) &&
-          queryKw.length >= 2 &&
-          path.basename(f).toLowerCase().includes(queryKw.toLowerCase());
+        const queryKw = extractPrimaryQueryKeyword(requestedSelectors[0] ?? "");
+        const fileNameMatches = doesFileStemMatchQuery(f, queryKw);
 
         for (const rawSel of requestedSelectors) {
           const detailed = extractPatternMatchesDetailed(rawFileContent, rawSel.trim(), 2, {
             filePath: f,
+            projectRoot: workspaceRootForRank,
             isExplicitTestSearch,
           });
           if (detailed) {
@@ -1659,13 +1955,13 @@ export async function generateWorkspaceContext(
         }
         if (matchedSlices.length === 0) {
           if (fileNameMatches) {
-            const previewLines = rawFileContent
-              .split(/\r?\n/)
+            const rawLines = rawFileContent.split(/\r?\n/);
+            const previewLines = rawLines
               .slice(0, 5)
               .map((l, idx) => `L${idx + 1}: ${l}`)
               .join("\n");
             matchedSlices.push(
-              `// file name match: ${path.basename(f)} # [L1-L${Math.min(5, rawFileContent.split(/\r?\n/).length)}]\n${previewLines}`,
+              `// file name match: ${path.basename(f)} # [L1-L${Math.min(5, rawLines.length)}]\n${previewLines}`,
             );
             fileMaxScore = isMockOrTest ? 25 : 1000;
           } else {
@@ -1676,18 +1972,20 @@ export async function generateWorkspaceContext(
           new Set(
             matchedSlices
               .flatMap((sl) => Array.from(sl.matchAll(/^\/\/ match at \[([^\]]+)\]/gm)))
-              .flatMap((m) => m[1].split(",").map((s) => s.trim()))
+              .flatMap((m) => m[1]!.split(",").map((s) => s.trim()))
               .filter(Boolean),
           ),
         );
-        const firstLineNum = hitTags[0]?.replace(/^L/i, "");
         const annotatedSlices = matchedSlices.map((sl) =>
-          firstLineNum
-            ? sl.replace(
-                /^\/\/ match at \[([^\]]+)\]/,
-                `// match at [$1] (${relFile}:${firstLineNum})`,
-              )
-            : sl,
+          sl.replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
+            const firstHit = bracketBody
+              .split(",")[0]
+              ?.trim()
+              .replace(/^L/i, "");
+            return firstHit
+              ? `// match at [${bracketBody}] (${relFile}:${firstHit})`
+              : `// match at [${bracketBody}]`;
+          }),
         );
         const sliceBody = annotatedSlices.filter(Boolean).join("\n\n");
         const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
@@ -1709,6 +2007,7 @@ export async function generateWorkspaceContext(
             depth: options.depth ?? 1,
             idioms: options.idioms,
             projectRoot,
+            preReadSource: rawFileContent,
           }),
         );
         const fileDiags = collectNativeSyntaxDiagnostics(f, rawFileContent);
@@ -1717,12 +2016,28 @@ export async function generateWorkspaceContext(
         continue;
       }
 
+      if (useCompactWildcardOverview) {
+        const oRes = withSuppressedTelemetry(() =>
+          generateOutline(f, {
+            includeTypes: true,
+            compact: true,
+            depth: options.depth ?? 2,
+            idioms: options.idioms,
+            projectRoot,
+            preReadSource: rawFileContent,
+          }),
+        );
+        const compactBody = oRes.text.trim() || "// (empty)";
+        symbolSlices.push(`// === ${relFile} ===\n${compactBody}`);
+        continue;
+      }
+
       let fileAice = rawFileContent;
       if (!f.endsWith(".aice")) {
         try {
           const targetLang = detectTargetFromPath(f);
           const decomp = withSuppressedTelemetry(() =>
-            decompile(rawFileContent, targetLang, { filePath: f }),
+            decompile(rawFileContent, targetLang, { filePath: f, projectRoot }),
           );
           fileAice = decomp.aice;
         } catch {
@@ -1739,22 +2054,25 @@ export async function generateWorkspaceContext(
       const allSyms = extractFileSymbolList(fileAice, f);
       const symHeader = allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}` : "";
 
-      const oRes = withSuppressedTelemetry(() =>
-        generateOutline(f, {
-          includeTypes: true,
-          depth: options.depth,
-          idioms: options.idioms,
-          projectRoot,
-        }),
-      );
-      const fileDiags = collectNativeSyntaxDiagnostics(f, rawFileContent);
-      const baseOutlineBody =
-        symHeader &&
-        (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
-          ? `${symHeader}\n${oRes.text}`
-          : oRes.text;
-      const outlineBody = fileDiags ? `${baseOutlineBody}\n\n${fileDiags}` : baseOutlineBody;
-      outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${outlineBody}\n\`\`\``);
+      if (requestedSelectors.length === 0) {
+        const oRes = withSuppressedTelemetry(() =>
+          generateOutline(f, {
+            includeTypes: true,
+            depth: options.depth,
+            idioms: options.idioms,
+            projectRoot,
+            preReadSource: rawFileContent,
+          }),
+        );
+        const fileDiags = collectNativeSyntaxDiagnostics(f, rawFileContent);
+        const baseOutlineBody =
+          symHeader &&
+          (f.endsWith(".html") || f.endsWith(".twig") || f.endsWith(".json") || f.endsWith(".yaml"))
+            ? `${symHeader}\n${oRes.text}`
+            : oRes.text;
+        const outlineBody = fileDiags ? `${baseOutlineBody}\n\n${fileDiags}` : baseOutlineBody;
+        outlines.push(`### \`${relFile}\`\n\`\`\`aice\n${outlineBody}\n\`\`\``);
+      }
 
       if (requestedSelectors.length > 0) {
         const fileSlices: string[] = [];
@@ -1855,7 +2173,10 @@ export async function generateWorkspaceContext(
                 .filter(Boolean),
             ),
           );
-          const sliceBody = [symHeader, ...fileSlices].filter(Boolean).join("\n\n");
+          const alreadyHasSymHeader = fileSlices.some((sl) => sl.startsWith("// symbols:"));
+          const sliceBody = [alreadyHasSymHeader ? "" : symHeader, ...fileSlices]
+            .filter(Boolean)
+            .join("\n\n");
           if (sliceBody) {
             if (hitTags.length > 0) {
               symbolSlices.push(
@@ -1866,6 +2187,11 @@ export async function generateWorkspaceContext(
             }
           }
         }
+        continue;
+      }
+
+      if (!isPureAiceDirectory) {
+        continue;
       }
 
       const imports = extractImportsFromFile(f);
@@ -1935,9 +2261,29 @@ export async function generateWorkspaceContext(
   }
 
   if (isPureRegexSearch && scoredFileSlices.length > 0) {
-    scoredFileSlices.sort((a, b) => b.score - a.score);
+    scoredFileSlices.sort((a, b) => b.score - a.score || a.relFile.localeCompare(b.relFile));
     for (const item of scoredFileSlices) {
       symbolSlices.push(`### ${item.relFile}${item.headerTag}\n\`\`\`aice\n${item.sliceBody}\n\`\`\``);
+    }
+  }
+
+  if (requestedSelectors.length > 0 && symbolSlices.length === 0 && !isPureRegexSearch) {
+    for (const f of workspaceFiles) {
+      const relFile = formatDisplayPath(f, projectRoot);
+      try {
+        const oRes = withSuppressedTelemetry(() =>
+          generateOutline(f, {
+            includeTypes: false,
+            compact: true,
+            depth: options.depth ?? 1,
+            idioms: options.idioms,
+            projectRoot,
+          }),
+        );
+        outlines.push(`// === ${relFile} ===\n${oRes.text.trim() || "// (empty)"}`);
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -2013,20 +2359,56 @@ export async function generateWorkspaceContext(
 
   // Apply maxTokens bounding if requested
   if (options.maxTokens !== undefined && tokenCount > options.maxTokens) {
-    let chars = formattedBundle.length;
-    const truncatedFooter = "\n\n// ... [truncated to fit maxTokens]";
-    while (
-      chars > 0 &&
-      estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) > options.maxTokens
-    ) {
-      chars = Math.floor(chars * 0.7);
+    if (requestedSelectors.length > 0 && symbolSlices.length > 1) {
+      const keptSlices = [...symbolSlices];
+      let droppedCount = 0;
+      while (keptSlices.length > 1) {
+        keptSlices.pop();
+        droppedCount++;
+        const omitNote = `// ... (+${droppedCount} lower-ranked file matches omitted to fit maxTokens)`;
+        const candidate = ["## Target Symbol Slices:", ...keptSlices, omitNote].join("\n");
+        if (estimateTokens(candidate) <= options.maxTokens) {
+          formattedBundle = candidate;
+          tokenCount = estimateTokens(formattedBundle);
+          break;
+        }
+      }
+      if (tokenCount > options.maxTokens && keptSlices.length === 1) {
+        const omitNote = `// ... (+${droppedCount} lower-ranked file matches omitted to fit maxTokens)`;
+        formattedBundle = ["## Target Symbol Slices:", keptSlices[0]!, omitNote].join("\n");
+        tokenCount = estimateTokens(formattedBundle);
+      }
     }
-    if (estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens) {
-      formattedBundle = (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter;
-    } else {
-      formattedBundle = truncatedFooter;
+
+    if (tokenCount > options.maxTokens) {
+      const truncatedFooter = "\n// ... [truncated to fit maxTokens]";
+      const bundleLines = formattedBundle.split("\n");
+      while (bundleLines.length > 1) {
+        bundleLines.pop();
+        const openFenceCount = bundleLines.filter((l) => l.startsWith("```")).length;
+        const closeFence = openFenceCount % 2 === 1 ? "\n```" : "";
+        const candidate = `${bundleLines.join("\n")}${closeFence}${truncatedFooter}`;
+        if (estimateTokens(candidate) <= options.maxTokens) {
+          formattedBundle = candidate;
+          tokenCount = estimateTokens(formattedBundle);
+          break;
+        }
+      }
+      if (tokenCount > options.maxTokens) {
+        let chars = formattedBundle.length;
+        while (
+          chars > 0 &&
+          estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) > options.maxTokens
+        ) {
+          chars = Math.floor(chars * 0.7);
+        }
+        formattedBundle =
+          estimateTokens(formattedBundle.slice(0, chars) + truncatedFooter) <= options.maxTokens
+            ? (chars > 0 ? formattedBundle.slice(0, chars) : "") + truncatedFooter
+            : truncatedFooter.slice(0, Math.max(0, options.maxTokens * 3));
+        tokenCount = estimateTokens(formattedBundle);
+      }
     }
-    tokenCount = estimateTokens(formattedBundle);
   }
 
   const targetContent =
@@ -2172,34 +2554,143 @@ function hasCatastrophicNestedQuantifiers(pattern: string): boolean {
 
 export interface PatternMatchRankingOptions {
   filePath?: string;
+  projectRoot?: string;
   isExplicitTestSearch?: boolean;
 }
 
-export function isTestOrMockPath(filePath: string): boolean {
-  const norm = filePath.replace(/\\/g, "/").toLowerCase();
+const QUERY_KEYWORD_STOPWORDS = new Set([
+  "const",
+  "let",
+  "var",
+  "val",
+  "mut",
+  "function",
+  "fn",
+  "def",
+  "fun",
+  "func",
+  "class",
+  "struct",
+  "enum",
+  "interface",
+  "type",
+  "trait",
+  "impl",
+  "pub",
+  "public",
+  "private",
+  "protected",
+  "export",
+  "import",
+  "from",
+  "async",
+  "await",
+  "return",
+  "static",
+  "readonly",
+]);
+
+export function extractPrimaryQueryKeyword(rawQuery: string): string | undefined {
+  const trimmed = rawQuery.trim();
+  if (!trimmed) return undefined;
+  const regexMatch = trimmed.match(/^\/(.+)\/([gimsuy]*)$/);
+  let body = regexMatch ? regexMatch[1]! : trimmed;
+  if (regexMatch) {
+    body = body
+      .replace(/\\\$/g, "$")
+      .replace(/\[(?:\\.|[^\]\\])*\]/g, " ")
+      .replace(
+        /\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|c[A-Za-z]|[pP]\{[^}]*\}|[bBwdDsSnrtfv0]|[1-9]\d*|[^A-Za-z0-9_$])/g,
+        " ",
+      );
+  }
+  const tokens = body
+    .split(/[^A-Za-z0-9_$-]+/)
+    .map((t) => t.replace(/^-+|-+$/g, "").trim())
+    .filter((t) => t.length >= 2 && !/^\d+$/.test(t));
+  if (tokens.length === 0) return undefined;
+  const nonStop = tokens.filter((t) => !QUERY_KEYWORD_STOPWORDS.has(t.toLowerCase()));
+  return nonStop[0] ?? tokens[0];
+}
+
+export function doesFileStemMatchQuery(filePath: string, queryKeyword?: string): boolean {
+  if (!filePath || !queryKeyword) return false;
+  const kw = queryKeyword.replace(/^\$/, "").toLowerCase();
+  if (kw.length < 2) return false;
+  const base = path.basename(filePath);
+  const ext = path.extname(base);
+  const rawStem = ext ? base.slice(0, -ext.length) : base;
+  const stem = rawStem
+    .replace(/\.(?:d|test|spec|mock)s?$/i, "")
+    .replace(/[_-](?:test|spec|mock)s?$/i, "")
+    .toLowerCase();
+  if (!stem) return false;
+  if (kw.length <= 2) {
+    return stem === kw || stem.split(/[^a-z0-9]+/).includes(kw);
+  }
+  if (stem.includes(kw)) return true;
+  if (kw.length >= 4) {
+    const normStem = stem.replace(/[^a-z0-9]/g, "");
+    const normKw = kw.replace(/[^a-z0-9]/g, "");
+    if (normKw.length >= 4 && normStem.includes(normKw)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isTestOrMockPath(filePath: string, projectRoot?: string): boolean {
+  let target = filePath;
+  if (projectRoot) {
+    const rel = path.relative(projectRoot, filePath);
+    if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+      target = rel;
+    }
+  }
+  const norm = target.replace(/\\/g, "/").toLowerCase();
   return (
     /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/.test(norm) ||
-    /\.(?:test|spec)\.[a-z0-9]+$/i.test(norm) ||
-    /(?:_test|_spec)\.[a-z0-9]+$/i.test(norm)
+    /\.(?:test|spec|mock)s?\.[a-z0-9]+$/i.test(norm) ||
+    /(?:^|\/)(?:test|spec|mock)[_-][^/]+\.[a-z0-9]+$/i.test(norm) ||
+    /[_-](?:test|spec|mock)s?\.[a-z0-9]+$/i.test(norm)
   );
 }
 
-export function isCommentLine(line: string): boolean {
+export function isCommentLine(line: string, filePath?: string): boolean {
   const t = line.trim();
-  return (
-    t.startsWith("//") ||
-    t.startsWith("#") ||
-    t.startsWith("*") ||
-    t.startsWith("/*") ||
-    t.startsWith('"""') ||
-    t.startsWith("'''") ||
-    t.startsWith("<!--") ||
-    t.startsWith("--")
-  );
+  if (!t) return false;
+  if (t.startsWith("//") || t.startsWith("/*") || t.startsWith("<!--")) {
+    return true;
+  }
+  if (t === "*" || t.startsWith("* ") || t.startsWith("*\t") || t.startsWith("*/")) {
+    return true;
+  }
+  const ext = filePath ? path.extname(filePath).toLowerCase() : "";
+  if (t.startsWith("#")) {
+    if (ext === ".md" || ext === ".markdown" || ext === ".css" || ext === ".html" || ext === ".cs") {
+      return false;
+    }
+    if (t.startsWith("#[") || t.startsWith("#![")) {
+      return false;
+    }
+    if (/^#\s*(?:include|define|ifdef|ifndef|endif|pragma|if|elif|else|undef|error)\b/.test(t)) {
+      return false;
+    }
+    return true;
+  }
+  if (t.startsWith('"""') || t.startsWith("'''")) {
+    return ext === ".py" || ext === ".pyi" || ext === "";
+  }
+  if (t.startsWith("--")) {
+    return ext === ".sql" || ext === ".lua" || ext === ".hs" || ext === ".ada";
+  }
+  return false;
 }
 
 export function isDeclarationLine(line: string): boolean {
-  return /\b(function|class|interface|type|enum|struct|fn|def|pub|export|const|let|var|val|sub|record)\b/.test(line);
+  return /\b(function|class|interface|type|enum|struct|fn|def|fun|func|pub|export|const|let|var|val|sub|record|impl|trait)\b/.test(
+    line,
+  );
 }
 
 function scorePatternWindow(
@@ -2208,15 +2699,14 @@ function scorePatternWindow(
   filePath?: string,
   queryKeyword?: string,
   isExplicitTestSearch = false,
+  projectRoot?: string,
 ): number {
-  const isMockOrTest = filePath && !isExplicitTestSearch && isTestOrMockPath(filePath);
+  const isMockOrTest =
+    Boolean(filePath) && !isExplicitTestSearch && isTestOrMockPath(filePath!, projectRoot);
 
   let fileNameBonus = 0;
-  if (filePath && queryKeyword && queryKeyword.length >= 2) {
-    const base = path.basename(filePath).toLowerCase();
-    if (base.includes(queryKeyword.toLowerCase())) {
-      fileNameBonus = isMockOrTest ? 20 : 1000;
-    }
+  if (filePath && doesFileStemMatchQuery(filePath, queryKeyword)) {
+    fileNameBonus = isMockOrTest ? 20 : 1000;
   }
 
   let hasDeclaration = false;
@@ -2225,7 +2715,7 @@ function scorePatternWindow(
 
   for (const h of w.hits) {
     const lineText = lines[h - 1] ?? "";
-    if (isCommentLine(lineText)) {
+    if (isCommentLine(lineText, filePath)) {
       // comment hit
     } else {
       allComments = false;
@@ -2269,42 +2759,38 @@ export function extractPatternMatchesDetailed(
   let queryKeyword: string | undefined;
 
   if (regexMatch) {
-    const rawBody = regexMatch[1];
+    const rawBody = regexMatch[1]!;
     if (hasCatastrophicNestedQuantifiers(rawBody)) {
       throw new Error(`Unsafe or overly complex regex selector '${trimmed}'`);
     }
-    const flags = regexMatch[2].replace(/[gy]/g, "");
+    const safeFlags = regexMatch[2]!.replace(/[^imsu]/g, "");
     let re: RegExp;
     try {
-      re = new RegExp(rawBody, flags);
-    } catch (err) {
-      throw new Error(
-        `Invalid regex selector '${trimmed}': ${err instanceof Error ? err.message : String(err)}`,
-      );
+      re = new RegExp(rawBody, safeFlags);
+    } catch {
+      const escapedLiteral = rawBody.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      re = new RegExp(escapedLiteral, safeFlags || "i");
     }
     matcher = (line: string) => re.test(line);
-    const cleaned = rawBody.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
-    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
+    queryKeyword = extractPrimaryQueryKeyword(trimmed);
   } else if (/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(trimmed)) {
     queryKeyword = trimmed;
     const esc = trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const identRe = new RegExp(`\\b${esc}\\b`);
     matcher = (line: string) => {
-      const t = line.trim();
-      if (t.startsWith("//") || t.startsWith("#") || t.startsWith("*")) return false;
+      if (isCommentLine(line, rankingOpts?.filePath)) return false;
       return identRe.test(line);
     };
   } else {
     const lower = trimmed.toLowerCase();
     matcher = (line: string) => line.includes(trimmed) || line.toLowerCase().includes(lower);
-    const cleaned = trimmed.replace(/[^A-Za-z0-9_$-]/g, " ").trim().split(/\s+/)[0];
-    if (cleaned && cleaned.length >= 2) queryKeyword = cleaned;
+    queryKeyword = extractPrimaryQueryKeyword(trimmed);
   }
 
   const lines = rawSource.split(/\r?\n/);
   const hitLines: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (matcher(lines[i])) {
+    if (matcher(lines[i]!)) {
       hitLines.push(i + 1);
     }
   }
@@ -2331,13 +2817,14 @@ export function extractPatternMatchesDetailed(
       rankingOpts?.filePath,
       queryKeyword,
       rankingOpts?.isExplicitTestSearch ?? false,
+      rankingOpts?.projectRoot,
     ),
   }));
 
   const maxScore = scoredWindows.reduce((max, w) => Math.max(max, w.score), 0);
 
   const topWindows = scoredWindows
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => b.score - a.score || a.start - b.start)
     .slice(0, 25)
     .sort((a, b) => a.start - b.start);
 
@@ -2559,16 +3046,31 @@ export function extractSymbolFromAiceSource(
 
   if (/^\/.+\/[gimsuy]*(?:\s*,\s*\/[^\n]+\/[gimsuy]*)*$/.test(trimmedSel)) {
     const pieces = splitSymbolSelectors(trimmedSel);
+    const rankOpts: PatternMatchRankingOptions = {
+      filePath,
+      isExplicitTestSearch: true,
+    };
+    const matchOneRegex = (piece: string): string | undefined => {
+      const nativeHit = extractPatternMatchesFromSource(rawFileSource, piece, 2, rankOpts);
+      const aiceHit =
+        aiceSource !== rawFileSource && /\$[A-Za-z_]/.test(piece)
+          ? extractPatternMatchesFromSource(aiceSource, piece, 2, rankOpts)
+          : undefined;
+      if (nativeHit && aiceHit) {
+        return `${nativeHit.trim()}\n\n${aiceHit.trim()}`;
+      }
+      return nativeHit ?? aiceHit;
+    };
     if (pieces.length > 1) {
       const results: string[] = [];
       for (const piece of pieces) {
-        const m = extractPatternMatchesFromSource(rawFileSource, piece);
+        const m = matchOneRegex(piece);
         if (m) results.push(m.trim());
       }
       if (results.length > 0) return results.join("\n\n");
       return `// Patterns '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
     }
-    const matched = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    const matched = matchOneRegex(trimmedSel);
     if (matched) return matched;
     return `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
   }
@@ -3136,9 +3638,10 @@ export async function generateContext(
     ? { ...rawOptions, symbol: parsedTarget.inlineSymbol }
     : rawOptions;
 
-  const resolved = resolvePathTargets(targetPath, {
+  const preResolved = resolveEffectiveTargetAndRoot(targetPath, options.projectRoot);
+  const resolved = resolvePathTargets(preResolved.targetPath, {
     includeTargets: true,
-    projectRoot: options.projectRoot,
+    projectRoot: preResolved.projectRoot,
   });
 
   if (resolved.isDirectory || resolved.isOmitted) {
@@ -3155,32 +3658,6 @@ export async function generateContext(
   if (!isProjectAiceEnabled(config)) {
     throw new Error(AICE_DISABLED_MESSAGE);
   }
-  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
-  let activeIdioms =
-    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
-      ? config.idioms
-      : undefined;
-  let zeroIdiomsReason: string | undefined;
-  if (options.idioms === true && (!activeIdioms || Object.keys(activeIdioms).length === 0)) {
-    try {
-      const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
-      if (Object.keys(scanRes.idioms).length > 0) {
-        activeIdioms = scanRes.idioms;
-        config.idioms = scanRes.idioms;
-      } else {
-        zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
-        activeIdioms = undefined;
-        console.error(
-          "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
-        );
-      }
-    } catch {
-      // ignore scan errors
-    }
-  }
-
-  const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
-  const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
 
   const isPureLineRangeSymbol =
     Boolean(options.symbol) && /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i.test(options.symbol!.trim());
@@ -3188,7 +3665,60 @@ export async function generateContext(
     Boolean(options.symbol) &&
     splitSymbolSelectors(options.symbol!).length > 0 &&
     splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
-  const isFastPathSelector = isPureLineRangeSymbol || isPureRegexSymbol;
+
+  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const regexMentionsIdiom = isPureRegexSymbol && /\$[A-Za-z_]/.test(options.symbol!);
+  const isFastPathSelector =
+    isPureLineRangeSymbol || (isPureRegexSymbol && !(idiomsActive && regexMentionsIdiom));
+
+  let activeIdioms =
+    idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
+      ? config.idioms
+      : undefined;
+  let zeroIdiomsReason: string | undefined;
+  if (
+    options.idioms === true &&
+    (!activeIdioms || Object.keys(activeIdioms).length === 0) &&
+    !isFastPathSelector
+  ) {
+    const cachedScan = options.workspaceScanCache?.idiomScanByRoot?.get(projectRoot);
+    if (cachedScan) {
+      if (Object.keys(cachedScan.idioms).length > 0) {
+        activeIdioms = cachedScan.idioms;
+        config.idioms = cachedScan.idioms;
+      } else {
+        zeroIdiomsReason = cachedScan.zeroIdiomsReason;
+        activeIdioms = undefined;
+      }
+    } else {
+      try {
+        const scanRes = withSuppressedTelemetry(() => scanProjectIdioms(projectRoot));
+        if (Object.keys(scanRes.idioms).length > 0) {
+          activeIdioms = scanRes.idioms;
+          config.idioms = scanRes.idioms;
+          options.workspaceScanCache?.idiomScanByRoot?.set(projectRoot, {
+            idioms: scanRes.idioms,
+          });
+        } else {
+          zeroIdiomsReason = scanRes.zeroIdiomsReason ?? "insufficient_repetition";
+          activeIdioms = undefined;
+          options.workspaceScanCache?.idiomScanByRoot?.set(projectRoot, {
+            idioms: {},
+            zeroIdiomsReason,
+          });
+          console.error(
+            "[AICE Idioms] 0 beneficial idioms discovered. FAST-PATH: Bypassing idiom layer. Use canonical AICE syntax (do not invent $idiom macros).",
+          );
+        }
+      } catch {
+        // ignore scan errors
+      }
+    }
+  }
+
+  const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
+  const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
+
   const isLargeFileSymbolQuery =
     Boolean(options.symbol) && options.symbol!.trim() !== "*" && rawFileContent.length > 50_000;
   const nativeDiagnostics =
@@ -3253,7 +3783,7 @@ export async function generateContext(
       const isRawTemplate = targetLang === "twig";
       if (!isRawTemplate || options.symbol || options.idioms) {
         const decomp = withSuppressedTelemetry(() =>
-          decompile(rawFileContent, targetLang, { filePath: fullTargetPath }),
+          decompile(rawFileContent, targetLang, { filePath: fullTargetPath, projectRoot }),
         );
         targetContent = decomp.aice;
         preParsedMod = decomp.ast;
@@ -3265,6 +3795,20 @@ export async function generateContext(
         `[AICE AST Fallback] Decompiler failed for ${displayTargetPath}: ${errMsg}. Falling back to line-numbered native slice.`,
       );
       targetContent = buildFallbackNativeSlice(options.symbol);
+    }
+  }
+
+  if (
+    !decompileFailed &&
+    regexMentionsIdiom &&
+    idiomsActive &&
+    activeIdioms &&
+    Object.keys(activeIdioms).length > 0
+  ) {
+    try {
+      targetContent = collapseAiceSourceIdioms(targetContent, activeIdioms, fullTargetPath).aice;
+    } catch {
+      // ignore pre-regex collapse errors
     }
   }
 
@@ -3337,26 +3881,37 @@ export async function generateContext(
         }
       } else {
         const slicedBlocks: string[] = [];
+        const missingSymbols: string[] = [];
         let firstMissingErr: unknown;
         for (const sym of requestedSymbols) {
           try {
-            slicedBlocks.push(
-              extractSymbolFromAiceSource(
-                targetContent,
-                sym,
-                fullTargetPath,
-                preParsedMod,
-                extractOpts,
-              ),
+            const rawBlock = extractSymbolFromAiceSource(
+              targetContent,
+              sym,
+              fullTargetPath,
+              preParsedMod,
+              extractOpts,
             );
+            slicedBlocks.push(rawBlock);
           } catch (err) {
+            missingSymbols.push(sym.trim());
             if (firstMissingErr === undefined) {
               firstMissingErr = err;
             }
           }
         }
+        const joinDeduplicatedBlocks = (blocks: string[]): string => {
+          if (blocks.length <= 1) return blocks[0] ?? "";
+          const firstHasModule = /^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+/m.test(blocks[0]!);
+          return blocks
+            .map((blk, idx) => {
+              if (idx === 0 || !firstHasModule) return blk;
+              return blk.replace(/^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+\n+/, "");
+            })
+            .join("\n\n");
+        };
         if (firstMissingErr !== undefined) {
-          if (requestedSymbols.some((s) => /\s/.test(s))) {
+          if (slicedBlocks.length === 0 && requestedSymbols.some((s) => /\s/.test(s))) {
             try {
               targetContent = extractSymbolFromAiceSource(
                 targetContent,
@@ -3366,24 +3921,33 @@ export async function generateContext(
                 extractOpts,
               );
               firstMissingErr = undefined;
+              missingSymbols.length = 0;
             } catch {
               // keep firstMissingErr
             }
           }
-          if (firstMissingErr !== undefined && !nativeDiagnostics) {
+          if (slicedBlocks.length > 0) {
+            const joined = joinDeduplicatedBlocks(slicedBlocks);
+            targetContent =
+              missingSymbols.length > 0
+                ? `${joined}\n\n// missing: ${missingSymbols.join(", ")}`
+                : joined;
+          } else if (firstMissingErr !== undefined && !nativeDiagnostics) {
             throw firstMissingErr;
           }
-          if (firstMissingErr !== undefined && slicedBlocks.length > 0) {
-            targetContent = slicedBlocks.join("\n\n");
-          }
         } else if (slicedBlocks.length > 0) {
-          targetContent = slicedBlocks.join("\n\n");
+          targetContent = joinDeduplicatedBlocks(slicedBlocks);
         }
       }
     }
   }
 
-  if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0) {
+  if (
+    idiomsActive &&
+    activeIdioms &&
+    Object.keys(activeIdioms).length > 0 &&
+    !regexMentionsIdiom
+  ) {
     try {
       const collapsed = collapseAiceSourceIdioms(targetContent, activeIdioms, fullTargetPath);
       targetContent = collapsed.aice;
@@ -3419,19 +3983,47 @@ export async function generateContext(
     targetContent = compactPureAiceSlice(targetContent);
   }
 
-  if (options.symbol && !decompileFailed && !targetContent.startsWith("// match at [")) {
-    const sel = splitSymbolSelectors(options.symbol);
-    if (sel.length === 1 && !/^\/.*\/$/.test(sel[0]) && sel[0].trim() !== "*") {
+  if (
+    options.symbol &&
+    !decompileFailed &&
+    !isFastPathSelector &&
+    !targetContent.startsWith("// match at [") &&
+    !targetContent.startsWith("[Clamped ")
+  ) {
+    const sel = splitSymbolSelectors(options.symbol).filter((s) => {
+      const t = s.trim();
+      return (
+        Boolean(t) &&
+        t !== "*" &&
+        t.toLowerCase() !== "imports" &&
+        t !== "@first" &&
+        t !== "@1" &&
+        !/^\[?L\d+(?:-L?\d+)?\]?$/i.test(t) &&
+        !/^\/.+\/[gimsuy]*$/.test(t)
+      );
+    });
+    if (sel.length > 0) {
       try {
         const sibRes = withSuppressedTelemetry(() =>
-          generateOutline(fullTargetPath, {
-            includeTypes: true,
-            idioms: options.idioms,
-            projectRoot,
-            preReadSource: rawFileContent,
-          }),
+          preParsedMod
+            ? generateOutline(preParsedMod, fullTargetPath, {
+                includeTypes: true,
+                idioms: options.idioms,
+                projectRoot,
+                preReadSource: rawFileContent,
+                skipTokenStats: true,
+                lineRanges: false,
+              })
+            : generateOutline(fullTargetPath, {
+                includeTypes: true,
+                idioms: options.idioms,
+                projectRoot,
+                preReadSource: rawFileContent,
+                skipTokenStats: true,
+                lineRanges: false,
+              }),
         );
-        const sib = buildSiblingOutline(sibRes.symbols, sel[0]);
+        const sib = buildSiblingOutline(sibRes.symbols, sel);
         if (sib) targetContent = `${targetContent}\n\n${sib}`;
       } catch {
         // sibling outline is best-effort
@@ -3649,7 +4241,9 @@ export async function generateContext(
         .slice(0, 12)
         .map((s) => `${s.name} ${s.lineRange}`)
         .join(", ");
-      targetBody = `// line-ranges: ${rangeSummary}\n${targetBody}`;
+      const moreSuffix =
+        actionableSyms.length > 12 ? `, (+${actionableSyms.length - 12} more)` : "";
+      targetBody = `// line-ranges: ${rangeSummary}${moreSuffix}\n${targetBody}`;
     }
   }
 
@@ -3918,10 +4512,25 @@ export function mergeMultiContextResults(
     }
   }
   lines.push("");
-  lines.push(`## Target File Content (${results.length} files):`);
+  const isZeroMatchRegexResult = (r: ContextResult): boolean => {
+    const t = r.targetContent.trim();
+    return t.startsWith("// Pattern '") || t.startsWith("// Patterns '");
+  };
+  const hasPositiveRegexMatch =
+    results.length > 1 &&
+    results.some((r) => !isZeroMatchRegexResult(r)) &&
+    results.some((r) => isZeroMatchRegexResult(r));
+  const zeroMatchPaths = hasPositiveRegexMatch
+    ? results.filter((r) => isZeroMatchRegexResult(r)).map((r) => r.targetPath)
+    : [];
+  const activeResults = hasPositiveRegexMatch
+    ? results.filter((r) => !isZeroMatchRegexResult(r))
+    : results;
+
+  lines.push(`## Target File Content (${activeResults.length} files):`);
   const combinedTargetContents: string[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i]!;
+  for (let i = 0; i < activeResults.length; i++) {
+    const r = activeResults[i]!;
     const body = options.outlineTarget && r.targetOutline ? r.targetOutline : r.targetContent;
     combinedTargetContents.push(`// === ${r.targetPath} ===\n${body}`);
     lines.push(`### Target: \`${r.targetPath}\``);
@@ -3944,9 +4553,15 @@ export function mergeMultiContextResults(
     }
     lines.push(body);
     lines.push("```");
-    if (i < results.length - 1) {
+    if (i < activeResults.length - 1) {
       lines.push("");
     }
+  }
+  if (zeroMatchPaths.length > 0) {
+    const zeroSummary = `// 0 matches in: ${zeroMatchPaths.join(", ")}`;
+    combinedTargetContents.push(zeroSummary);
+    lines.push("");
+    lines.push(zeroSummary);
   }
   lines.push("");
   lines.push(`## Downstream Callers (${mergedCallers.length}):`);
@@ -4021,7 +4636,11 @@ export async function generateMultiContext(
     filesByRoot: new Map(),
     fileContentByPath: new Map(),
     importsByPath: new Map(),
+    idiomScanByRoot: new Map(),
   };
+  if (!sharedScanCache.idiomScanByRoot) {
+    sharedScanCache.idiomScanByRoot = new Map();
+  }
 
   let firstResolvedPath = "";
   let firstProjectRoot = baseDir;
@@ -4029,15 +4648,17 @@ export async function generateMultiContext(
   let totalNativeCl100k = 0;
   let totalNativeO200k = 0;
   const suppressIndividualTelemetry = targets.length > 1;
+  const skippedSymbolErrors: unknown[] = [];
 
   for (let idx = 0; idx < targets.length; idx++) {
     const item = targets[idx]!;
     const rawStr = typeof item === "string" ? item : item.path;
     const explicitSym = typeof item === "string" ? undefined : item.symbol;
     const parsed = parseTargetWithInlineSymbol(rawStr, baseDir);
-    const resolved = resolvePathTargets(parsed.targetPath, {
+    const preResolved = resolveEffectiveTargetAndRoot(parsed.targetPath, options.projectRoot);
+    const resolved = resolvePathTargets(preResolved.targetPath, {
       includeTargets: true,
-      projectRoot: options.projectRoot,
+      projectRoot: preResolved.projectRoot,
     });
     if (!isProjectAiceEnabled(resolved.config)) {
       throw new Error(AICE_DISABLED_MESSAGE);
@@ -4046,16 +4667,30 @@ export async function generateMultiContext(
       firstResolvedPath = resolved.resolvedPath;
       firstProjectRoot = resolved.projectRoot;
     }
+    const usesSharedSymbol = !explicitSym && !parsed.inlineSymbol && Boolean(options.symbol);
     const itemOpts: ContextOptions = {
       ...options,
       symbol: explicitSym ?? parsed.inlineSymbol ?? options.symbol,
       projectRoot: resolved.projectRoot,
       workspaceScanCache: sharedScanCache,
     };
-    const res = suppressIndividualTelemetry
-      ? await withSuppressedTelemetryAsync(() => generateContext(resolved.resolvedPath, itemOpts))
-      : await generateContext(resolved.resolvedPath, itemOpts);
-    individualResults.push(res);
+    try {
+      const res = suppressIndividualTelemetry
+        ? await withSuppressedTelemetryAsync(() => generateContext(resolved.resolvedPath, itemOpts))
+        : await generateContext(resolved.resolvedPath, itemOpts);
+      individualResults.push(res);
+    } catch (err) {
+      if (
+        targets.length > 1 &&
+        usesSharedSymbol &&
+        err instanceof Error &&
+        /Symbol .+ not found in /i.test(err.message)
+      ) {
+        skippedSymbolErrors.push(err);
+        continue;
+      }
+      throw err;
+    }
 
     if (suppressIndividualTelemetry) {
       try {
@@ -4067,6 +4702,56 @@ export async function generateMultiContext(
         }
       } catch {
         // ignore unreadable target
+      }
+    }
+  }
+
+  if (individualResults.length === 0 && skippedSymbolErrors.length > 0) {
+    throw skippedSymbolErrors[0];
+  }
+
+  // Reconcile shared multi-symbol `-s "symA,symB"` across multiple files:
+  // strip per-file `// missing: X` for any X that was resolved in another target in the batch.
+  if (options.symbol && individualResults.length > 0 && targets.length > 1) {
+    const sharedRequested = splitSymbolSelectors(options.symbol)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (sharedRequested.length > 1) {
+      const missingCountBySym = new Map<string, number>();
+      for (const res of individualResults) {
+        const m = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
+        if (m?.[1]) {
+          for (const part of m[1].split(",").map((s) => s.trim())) {
+            if (part) {
+              missingCountBySym.set(part, (missingCountBySym.get(part) ?? 0) + 1);
+            }
+          }
+        }
+      }
+      const globallyMissing = new Set<string>();
+      for (const [sym, count] of missingCountBySym) {
+        if (count >= individualResults.length) {
+          globallyMissing.add(sym);
+        }
+      }
+      let emittedGlobalMissing = false;
+      for (let i = 0; i < individualResults.length; i++) {
+        const res = individualResults[i]!;
+        if (!/^\/\/ missing:\s*(.+)$/m.test(res.targetContent)) continue;
+        const updateMissingLine = (text: string, isLastResult: boolean): string =>
+          text.replace(/\n*\/\/ missing:\s*(.+)$/m, (_full, rawList: string) => {
+            if (!isLastResult || emittedGlobalMissing) return "";
+            const kept = rawList
+              .split(",")
+              .map((s) => s.trim())
+              .filter((s) => globallyMissing.has(s));
+            if (kept.length === 0) return "";
+            emittedGlobalMissing = true;
+            return `\n\n// missing: ${kept.join(", ")}`;
+          });
+        const isLast = i === individualResults.length - 1;
+        res.targetContent = updateMissingLine(res.targetContent, isLast);
+        res.formattedBundle = updateMissingLine(res.formattedBundle, isLast);
       }
     }
   }
