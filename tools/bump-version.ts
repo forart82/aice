@@ -71,12 +71,12 @@ fs.writeFileSync(
   "utf-8"
 );
 
-// 3. CITATION.cff
+// 3. CITATION.cff (anchor to ^version: so cff-version: 1.2.0 is never overwritten)
 if (fs.existsSync(citationPath)) {
   const cff = fs.readFileSync(citationPath, "utf-8");
   fs.writeFileSync(
     citationPath,
-    cff.replace(/version: \d+\.\d+\.\d+/, `version: ${nextVersion}`),
+    cff.replace(/^version:\s*"?[\d.]+"?/m, `version: "${nextVersion}"`),
     "utf-8"
   );
 }

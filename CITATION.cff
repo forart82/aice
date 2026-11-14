@@ -1,4 +1,4 @@
-cff-version: 0.9.34
+cff-version: 1.2.0
 title: "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer"
 message: "If you use AICE in your research, benchmarks, or AI coding agent workflows, please cite it using the metadata from this file."
 type: software
@@ -9,7 +9,7 @@ authors:
 repository-code: "https://github.com/forart82/aice"
 url: "https://github.com/forart82/aice"
 license: Apache-2.0
-version: "0.9.24"
+version: "0.9.35"
 date-released: "2026-11-10"
 keywords:
   - aice

@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.34";
+    AICE_VERSION = "0.9.35";
     VERSION = AICE_VERSION;
   }
 });
