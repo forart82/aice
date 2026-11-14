@@ -24,7 +24,7 @@ import {
   saveProjectConfig,
   stripJsonComments,
 } from "../config/index.js";
-import type { Block, MethodDecl, Module, TypeExpr } from "../core/ast.js";
+import type { Block, Expr, MethodDecl, Module, Pattern, Statement, TypeExpr } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import {
@@ -952,27 +952,194 @@ export function normalizePythonMethodReturn(m: MethodDecl): void {
   }
 }
 
-export function rewriteReceiverIdentifierInNode(
-  node: unknown,
+function collectPatternBindings(pattern: Pattern, into: Set<string>): void {
+  if (pattern.kind === "IdentifierPattern") {
+    into.add(pattern.name);
+  } else if (pattern.kind === "ConstructorPattern") {
+    for (const sub of pattern.subPatterns) {
+      collectPatternBindings(sub, into);
+    }
+  }
+}
+
+function rewriteReceiverInExpr(
+  expr: Expr,
+  sourceIdent: "self" | "this",
   targetReceiver: "self" | "this",
+  shadowed: ReadonlySet<string>,
 ): void {
-  if (!node || typeof node !== "object") return;
-  if (Array.isArray(node)) {
-    for (const item of node) {
-      rewriteReceiverIdentifierInNode(item, targetReceiver);
+  switch (expr.kind) {
+    case "IdentifierExpr":
+      if (expr.name === sourceIdent && !shadowed.has(sourceIdent)) {
+        expr.name = targetReceiver;
+      }
+      break;
+    case "BinaryExpr":
+      rewriteReceiverInExpr(expr.left, sourceIdent, targetReceiver, shadowed);
+      rewriteReceiverInExpr(expr.right, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "ConditionalExpr":
+      rewriteReceiverInExpr(expr.condition, sourceIdent, targetReceiver, shadowed);
+      rewriteReceiverInExpr(expr.whenTrue, sourceIdent, targetReceiver, shadowed);
+      rewriteReceiverInExpr(expr.whenFalse, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "UnaryExpr":
+    case "AwaitExpr":
+    case "PostfixTryExpr":
+      rewriteReceiverInExpr(expr.operand, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "AssignExpr":
+      rewriteReceiverInExpr(expr.target, sourceIdent, targetReceiver, shadowed);
+      rewriteReceiverInExpr(expr.value, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "CallExpr":
+      rewriteReceiverInExpr(expr.callee, sourceIdent, targetReceiver, shadowed);
+      for (const a of expr.args) {
+        rewriteReceiverInExpr(a, sourceIdent, targetReceiver, shadowed);
+      }
+      break;
+    case "MemberAccessExpr":
+      rewriteReceiverInExpr(expr.object, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "IndexExpr":
+      rewriteReceiverInExpr(expr.object, sourceIdent, targetReceiver, shadowed);
+      rewriteReceiverInExpr(expr.index, sourceIdent, targetReceiver, shadowed);
+      break;
+    case "ArrayLiteralExpr":
+      for (const el of expr.elements) {
+        rewriteReceiverInExpr(el, sourceIdent, targetReceiver, shadowed);
+      }
+      break;
+    case "RecordLiteralExpr":
+      for (const p of expr.properties) {
+        rewriteReceiverInExpr(p.value, sourceIdent, targetReceiver, shadowed);
+      }
+      break;
+    case "TemplateLiteralExpr":
+      for (const e of expr.expressions) {
+        rewriteReceiverInExpr(e, sourceIdent, targetReceiver, shadowed);
+      }
+      break;
+    case "ClosureExpr": {
+      const innerShadowed = new Set(shadowed);
+      for (const p of expr.params) {
+        innerShadowed.add(p.name);
+      }
+      if (expr.body.kind === "Block") {
+        rewriteReceiverInBlock(expr.body, sourceIdent, targetReceiver, innerShadowed);
+      } else {
+        rewriteReceiverInExpr(expr.body, sourceIdent, targetReceiver, innerShadowed);
+      }
+      break;
     }
-    return;
   }
-  const obj = node as Record<string, unknown>;
-  if (obj.kind === "IdentifierExpr" && (obj.name === "self" || obj.name === "this")) {
-    obj.name = targetReceiver;
-  }
-  for (const key of Object.keys(obj)) {
-    if (key === "span") continue;
-    const val = obj[key];
-    if (val && typeof val === "object") {
-      rewriteReceiverIdentifierInNode(val, targetReceiver);
+}
+
+function rewriteReceiverInStmt(
+  stmt: Statement,
+  sourceIdent: "self" | "this",
+  targetReceiver: "self" | "this",
+  blockShadowed: Set<string>,
+): void {
+  switch (stmt.kind) {
+    case "LetBinding":
+      rewriteReceiverInExpr(stmt.init, sourceIdent, targetReceiver, blockShadowed);
+      blockShadowed.add(stmt.name);
+      break;
+    case "DestructureBinding":
+      rewriteReceiverInExpr(stmt.init, sourceIdent, targetReceiver, blockShadowed);
+      for (const n of stmt.names) {
+        blockShadowed.add(n);
+      }
+      break;
+    case "AssignStmt":
+      rewriteReceiverInExpr(stmt.target, sourceIdent, targetReceiver, blockShadowed);
+      rewriteReceiverInExpr(stmt.value, sourceIdent, targetReceiver, blockShadowed);
+      break;
+    case "ExprStmt":
+    case "ThrowStmt":
+      rewriteReceiverInExpr(stmt.expr, sourceIdent, targetReceiver, blockShadowed);
+      break;
+    case "ReturnStmt":
+      if (stmt.value) {
+        rewriteReceiverInExpr(stmt.value, sourceIdent, targetReceiver, blockShadowed);
+      }
+      break;
+    case "IfStmt":
+      rewriteReceiverInExpr(stmt.condition, sourceIdent, targetReceiver, blockShadowed);
+      rewriteReceiverInBlock(stmt.thenBranch, sourceIdent, targetReceiver, blockShadowed);
+      for (const el of stmt.elifBranches) {
+        rewriteReceiverInExpr(el.condition, sourceIdent, targetReceiver, blockShadowed);
+        rewriteReceiverInBlock(el.body, sourceIdent, targetReceiver, blockShadowed);
+      }
+      if (stmt.elseBranch) {
+        rewriteReceiverInBlock(stmt.elseBranch, sourceIdent, targetReceiver, blockShadowed);
+      }
+      break;
+    case "WhileStmt":
+      rewriteReceiverInExpr(stmt.condition, sourceIdent, targetReceiver, blockShadowed);
+      rewriteReceiverInBlock(stmt.body, sourceIdent, targetReceiver, blockShadowed);
+      break;
+    case "ForStmt": {
+      rewriteReceiverInExpr(stmt.iterable, sourceIdent, targetReceiver, blockShadowed);
+      const loopShadowed = new Set(blockShadowed);
+      loopShadowed.add(stmt.variable);
+      rewriteReceiverInBlock(stmt.body, sourceIdent, targetReceiver, loopShadowed);
+      break;
     }
+    case "MatchStmt":
+      rewriteReceiverInExpr(stmt.target, sourceIdent, targetReceiver, blockShadowed);
+      for (const c of stmt.cases) {
+        const armShadowed = new Set(blockShadowed);
+        collectPatternBindings(c.pattern, armShadowed);
+        if (c.guard) {
+          rewriteReceiverInExpr(c.guard, sourceIdent, targetReceiver, armShadowed);
+        }
+        if (c.body.kind === "Block") {
+          rewriteReceiverInBlock(c.body, sourceIdent, targetReceiver, armShadowed);
+        } else {
+          rewriteReceiverInExpr(c.body, sourceIdent, targetReceiver, armShadowed);
+        }
+      }
+      break;
+    case "TryStmt":
+      rewriteReceiverInBlock(stmt.tryBlock, sourceIdent, targetReceiver, blockShadowed);
+      if (stmt.catchBlock) {
+        const catchShadowed = new Set(blockShadowed);
+        if (stmt.catchParam) {
+          catchShadowed.add(stmt.catchParam);
+        }
+        rewriteReceiverInBlock(stmt.catchBlock, sourceIdent, targetReceiver, catchShadowed);
+      }
+      if (stmt.finallyBlock) {
+        rewriteReceiverInBlock(stmt.finallyBlock, sourceIdent, targetReceiver, blockShadowed);
+      }
+      break;
+  }
+}
+
+function rewriteReceiverInBlock(
+  block: Block,
+  sourceIdent: "self" | "this",
+  targetReceiver: "self" | "this",
+  parentShadowed: ReadonlySet<string>,
+): void {
+  const blockShadowed = new Set(parentShadowed);
+  for (const s of block.statements) {
+    rewriteReceiverInStmt(s, sourceIdent, targetReceiver, blockShadowed);
+  }
+}
+
+export function rewriteReceiverIdentifierInNode(
+  body: Block | Expr,
+  targetReceiver: "self" | "this",
+  initialShadowed: ReadonlySet<string> = new Set(),
+): void {
+  const sourceIdent: "self" | "this" = targetReceiver === "this" ? "self" : "this";
+  if (body.kind === "Block") {
+    rewriteReceiverInBlock(body, sourceIdent, targetReceiver, initialShadowed);
+  } else {
+    rewriteReceiverInExpr(body, sourceIdent, targetReceiver, initialShadowed);
   }
 }
 
@@ -989,10 +1156,11 @@ export function normalizeModuleForTarget(mod: Module, targetLang: TargetLanguage
           m.params = m.params.filter(
             (p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this")),
           );
+          const paramShadowed = new Set(m.params.map((p) => p.name));
           if (receiver === "self") {
-            rewriteReceiverIdentifierInNode(m.body, "self");
-          } else if (hadExplicitSelfParam) {
-            rewriteReceiverIdentifierInNode(m.body, "this");
+            rewriteReceiverIdentifierInNode(m.body, "self", paramShadowed);
+          } else if (targetLang !== "php" || hadExplicitSelfParam) {
+            rewriteReceiverIdentifierInNode(m.body, "this", paramShadowed);
           }
         }
         if (m.name === "__init__" && targetLang !== "python") {

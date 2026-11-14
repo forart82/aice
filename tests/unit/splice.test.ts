@@ -1221,6 +1221,13 @@ fn funcF(): return 6
         const tsLocalSelf = fs.readFileSync(tsFile, "utf-8");
         expect(tsLocalSelf).toContain("const self = delta + 1;");
         expect(tsLocalSelf).toContain("return this.total + self;");
+
+        // Unshadowed canonical AICE `self.total` without `self` in params also rewrites to `this.total`
+        await splice(tsFile, {
+          symbol: "ScoreBoard.addScore",
+          code: "pub fn addScore(delta: int) -> int = self.total + delta",
+        });
+        expect(fs.readFileSync(tsFile, "utf-8")).toContain("this.total + delta");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
