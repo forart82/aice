@@ -79,7 +79,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+if [[ -n "$SCRIPT_SOURCE" ]] && [[ -e "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+else
+  SCRIPT_DIR="/nonexistent-aice-script-dir"
+fi
 
 log_info()  { printf '\033[1;36m[AICE]\033[0m %s\n' "$*"; }
 log_ok()    { printf '\033[1;32m[✔]\033[0m %s\n' "$*"; }
@@ -284,13 +289,13 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
           -name ".gemini" -o \
           -name ".codex" \
         \) -prune -o \
-        -type f \( -name "AGENTS.md" -o -name "CLAUDE.md" -o -name "GEMINI.md" \) \
+        -type f \( -name "AGENTS.md" -o -name "CLAUDE.md" -o -name "GEMINI.md" -o -name ".GEMINI.md" \) \
         -print 2>/dev/null || true
     )
     if [[ ${#PROJECT_MD_FILES[@]} -gt 0 ]]; then
       for mdfile in "${PROJECT_MD_FILES[@]}"; do
         [[ -z "$mdfile" ]] && continue
-        if grep -Fq "<!-- AICE:START -->" "$mdfile" 2>/dev/null; then
+        if grep -Eq "<!-- AICE:START( v[^>]*)? -->" "$mdfile" 2>/dev/null; then
           if [[ "$DRY_RUN" -eq 1 ]]; then
             printf '  [dry-run] strip <!-- AICE:START --> block from %s\n' "$mdfile"
           elif command -v node >/dev/null 2>&1; then
@@ -299,7 +304,8 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
               const path = require("path");
               const file = process.argv[1];
               let content = fs.readFileSync(file, "utf8");
-              const startIdx = content.indexOf("<!-- AICE:START -->");
+              const startMatch = content.match(/<!-- AICE:START(?: v[^>]*)? -->/);
+              const startIdx = startMatch ? startMatch.index : -1;
               const endIdx = content.indexOf("<!-- AICE:END -->");
               if (startIdx !== -1 && endIdx !== -1) {
                 const before = content.slice(0, startIdx).trimEnd();
@@ -313,7 +319,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
               }
             ' "$mdfile"
           else
-            sed -i '/<!-- AICE:START -->/,/<!-- AICE:END -->/d' "$mdfile"
+            sed -i -E '/<!-- AICE:START( v[^>]*)? -->/,/<!-- AICE:END -->/d' "$mdfile"
             if [[ "$(basename "$mdfile")" == "AGENTS.md" ]] && [[ -z "$(tr -d '[:space:]' < "$mdfile")" ]]; then
               rm -f "$mdfile"
             fi

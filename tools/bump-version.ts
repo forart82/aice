@@ -45,9 +45,23 @@ if (/^\d+\.\d+\.\d+$/.test(bumpType)) {
 
 console.log(`Bumping AICE: v${currentVersion} -> v${nextVersion}...`);
 
-// 1. package.json
+// 1. package.json & package-lock.json
 pkg.version = nextVersion;
 fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n", "utf-8");
+
+const pkgLockPath = path.join(rootDir, "package-lock.json");
+if (fs.existsSync(pkgLockPath)) {
+  try {
+    const pkgLock = JSON.parse(fs.readFileSync(pkgLockPath, "utf-8"));
+    pkgLock.version = nextVersion;
+    if (pkgLock.packages && pkgLock.packages[""]) {
+      pkgLock.packages[""].version = nextVersion;
+    }
+    fs.writeFileSync(pkgLockPath, JSON.stringify(pkgLock, null, 2) + "\n", "utf-8");
+  } catch (err) {
+    console.warn(`⚠️ Could not sync package-lock.json: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
 
 // 2. src/version.ts
 const versionTs = fs.readFileSync(versionTsPath, "utf-8");
@@ -78,10 +92,25 @@ if (fs.existsSync(readmePath)) {
   fs.writeFileSync(readmePath, readme, "utf-8");
 }
 
-// 5. install.sh
+// 5. install.sh (preserve exact 80-column Zsh cheatsheet box padding across version-length changes)
 if (fs.existsSync(installShPath)) {
   let installSh = fs.readFileSync(installShPath, "utf-8");
-  installSh = installSh.replace(new RegExp(`v${currentVersion.replace(/\./g, "\\.")}`, "g"), `v${nextVersion}`);
+  const title = `AICE v${nextVersion} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`;
+  const titlePad = " ".repeat(Math.max(1, 77 - [...title].length));
+  installSh = installSh.replace(
+    /AICE v[^ ]+ — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET \(@forart82\)\$\{C_RESET\}\s+/,
+    `${title}\${C_RESET}${titlePad}`,
+  );
+  const inspect = `Inspect v${nextVersion}`;
+  const inspectPad = " ".repeat(Math.max(0, 16 - [...inspect].length));
+  installSh = installSh.replace(
+    /Inspect v[^$]+\$\{C_RESET\}\s*/,
+    `${inspect}\${C_RESET}${inspectPad}`,
+  );
+  installSh = installSh.replace(
+    new RegExp(`v${currentVersion.replace(/\./g, "\\.")}`, "g"),
+    `v${nextVersion}`,
+  );
   fs.writeFileSync(installShPath, installSh, "utf-8");
 }
 
@@ -91,6 +120,20 @@ syncProjectWorkspaceRules(rootDir, true);
 
 // 7. Rebuild standalone bundle so dist/aice.mjs matches nextVersion
 const { spawnSync } = await import("node:child_process");
-spawnSync(process.execPath, [path.join(rootDir, "tools", "build.ts")], { stdio: "inherit" });
+const localTsx = path.join(
+  rootDir,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "tsx.cmd" : "tsx",
+);
+const buildRunner = fs.existsSync(localTsx) ? localTsx : process.execPath;
+const buildRes = spawnSync(buildRunner, [path.join(rootDir, "tools", "build.ts")], {
+  cwd: rootDir,
+  stdio: "inherit",
+});
+if (buildRes.status !== 0) {
+  console.error(`❌ Standalone bundle build failed during version bump (exit code ${buildRes.status}).`);
+  process.exit(buildRes.status ?? 1);
+}
 
 console.log(`✔ Successfully bumped AICE to v${nextVersion}!`);

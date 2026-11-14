@@ -65,7 +65,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+STANDALONE_TMP_DIR=""
+if [[ -n "$SCRIPT_SOURCE" ]] && [[ -e "$SCRIPT_SOURCE" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+else
+  STANDALONE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aice-install.XXXXXX")"
+  trap '[[ -n "${STANDALONE_TMP_DIR:-}" ]] && rm -rf "$STANDALONE_TMP_DIR"' EXIT
+  SCRIPT_DIR="$STANDALONE_TMP_DIR"
+fi
 cd "$SCRIPT_DIR"
 
 log_info()  { printf '\033[1;36m[AICE]\033[0m %s\n' "$*"; }
@@ -301,7 +309,7 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
 fi
 
 # ── Substep 2.3: Build & Global Standalone Binary Registration ────────
-if [[ -f "${SCRIPT_DIR}/package.json" ]]; then
+if [[ -f "${SCRIPT_DIR}/package.json" ]] && { [[ -f "${SCRIPT_DIR}/bin/aice.ts" ]] || [[ -f "${SCRIPT_DIR}/dist/aice.mjs" ]] || [[ -f "${SCRIPT_DIR}/bin/aice.mjs" ]]; }; then
   log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
   run_cmd npm install --no-fund --no-audit
 
@@ -335,7 +343,9 @@ else
     exit 1
   fi
   run_cmd chmod +x "${LOCAL_BIN}/aice"
-  LOCAL_VER="$("${LOCAL_BIN}/aice" --version 2>/dev/null || echo "latest")"
+  LOCAL_VER="$("${LOCAL_BIN}/aice" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+  LOCAL_VER="${LOCAL_VER#v}"
+  [[ -z "$LOCAL_VER" ]] && LOCAL_VER="latest"
   log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
 fi
 # Ensure $HOME/.local/bin is in PATH
