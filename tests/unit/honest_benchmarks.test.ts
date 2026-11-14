@@ -146,7 +146,18 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       // Both AICE modes achieve 100% verification on disk across all 3 progressive layers
       expect(b.aiceWithoutIdioms.verifiedOnDisk).toBe(true);
       expect(b.aiceWithIdioms.verifiedOnDisk).toBe(true);
+      expect(b.aiceWithoutIdiomsWins).toBe(true);
+      expect(b.aiceWithIdiomsWins).toBe(true);
     }
+
+    expect(realReport.winsWithoutIdioms).toBe(10);
+    expect(realReport.winsWithIdioms).toBe(10);
+    expect(realReport.allVerifiedOnDisk).toBe(true);
+    expect(realReport.loneNeedleBenchmark).toBeDefined();
+    expect(realReport.loneNeedleBenchmark?.aiceWithoutIdiomsWins).toBe(true);
+    expect(realReport.loneNeedleBenchmark?.aiceWithIdiomsWins).toBe(true);
+    expect(realReport.loneNeedleBenchmark?.aiceWithoutIdioms.verifiedOnDisk).toBe(true);
+    expect(realReport.loneNeedleBenchmark?.aiceWithIdioms.verifiedOnDisk).toBe(true);
 
     // Strict aggregate ordering: AICE achieves lower turns, working tokens, output tokens, and API cost
     expect(realReport.totals.aiceWithoutIdiomsTurns).toBeLessThan(

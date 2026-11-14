@@ -1,11 +1,11 @@
 ---
 trigger: always_on
-description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.33)
+description: AICE 2.0 Mandatory AST Creation, Exploration & Surgical Splicing Rules (v0.9.34)
 ---
 
 <!-- AICE:START -->
-<!-- AICE:START v0.9.33 -->
-## AICE 2.0 (v0.9.33) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
+<!-- AICE:START v0.9.34 -->
+## AICE 2.0 (v0.9.34) — MANDATORY AST Creation, Exploration & Surgical Mutation Rules
 **MANDATORY OVERRIDE**: When active (see Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), you **MUST** use AICE CLI (`aice`) or MCP tools instead of generic `view_file` / `read_file` / `write_file` / `edit_file` / `replace_file_content`:
 ### 0. Zero-Discovery, Zero-Probe & Strict Shell Workaround Ban (`sed` / `ls` / `grep` Ban)
 - **FORBIDDEN SHELL FILE-WRITING WORKAROUNDS**: NEVER execute shell scripts or commands to write or overwrite files (e.g. `python3 with open()`, `node fs.writeFileSync()`, `echo "..." > file`, `cat << 'EOF' > file`). Use `aice splice` (or unified alias `aice write`) for surgical updates, auto-creation, or full-file overwrites, `aice create --force` for full rewrites, or standard native file tools ONLY when in Non-AICE Bypass or Emergency Crash Fallback mode (Rule 1).

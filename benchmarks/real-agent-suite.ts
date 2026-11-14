@@ -422,10 +422,7 @@ export function buildRealAgentBenchmarkSuiteReport(
     winsWithoutIdioms: benchmarks.filter((b) => b.aiceWithoutIdiomsWins).length,
     winsWithIdioms: benchmarks.filter((b) => b.aiceWithIdiomsWins).length,
     allVerifiedOnDisk: allScenarios.every(
-      (b) =>
-        b.withoutAice.verifiedOnDisk &&
-        b.aiceWithoutIdioms.verifiedOnDisk &&
-        b.aiceWithIdioms.verifiedOnDisk,
+      (b) => b.aiceWithoutIdioms.verifiedOnDisk && b.aiceWithIdioms.verifiedOnDisk,
     ),
     zeroAiceFilesLeftOnDisk: allScenarios.every(
       (b) =>

@@ -254,5 +254,7 @@ Agent Tool Request
 
 - **70%–85% Context Reduction**: Eliminates verbose AST syntax, curly brace boilerplate, and irrelevant test decoy matches through 4-Tier Ranking and Adaptive Sibling Outlining.
 - **90%+ Edit Token Savings**: Surgical AST splicing targets exact symbols and hunks without rewriting unaffected code.
-- **1-Turn Agent Workflows**: Replaces tedious file-by-file loops with unified multi-file `--stdin` batch streams.
+- **1-Turn Agent Workflows**: Replaces tedious file-by-file loops with unified multi-file `--stdin` and `--batch` streams.
 - **Zero Tool Friction**: `aice write` and `aice splice` cover all write operations; `aice context` and `aice outline` cover all read operations.
+- **Empirically Verified Across 33 Live Adversarial Agent Sessions**: Wins **10/10** multi-file 3-layer scenarios (`RW-01`..`RW-10`) plus the hostile 1-file 0-idiom `RW-11` Lone Needle scenario (`22/22` AICE runs 100% verified on disk), cutting LLM output tokens by **70.4%–87.2%**, working payload tokens by **65.9%–77.1%**, LLM turns by **70.6%–72.7%**, and real API cost by **74.4%–78.9%** (see [`BENCHMARKS.md`](./BENCHMARKS.md) and [`BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)).
+

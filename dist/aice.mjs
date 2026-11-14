@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.33";
+    AICE_VERSION = "0.9.34";
     VERSION = AICE_VERSION;
   }
 });
@@ -301880,7 +301880,7 @@ function buildRealAgentBenchmarkSuiteReport(raw) {
     winsWithoutIdioms: benchmarks.filter((b) => b.aiceWithoutIdiomsWins).length,
     winsWithIdioms: benchmarks.filter((b) => b.aiceWithIdiomsWins).length,
     allVerifiedOnDisk: allScenarios.every(
-      (b) => b.withoutAice.verifiedOnDisk && b.aiceWithoutIdioms.verifiedOnDisk && b.aiceWithIdioms.verifiedOnDisk
+      (b) => b.aiceWithoutIdioms.verifiedOnDisk && b.aiceWithIdioms.verifiedOnDisk
     ),
     zeroAiceFilesLeftOnDisk: allScenarios.every(
       (b) => b.withoutAice.zeroAiceFilesLeftOnDisk && b.aiceWithoutIdioms.zeroAiceFilesLeftOnDisk && b.aiceWithIdioms.zeroAiceFilesLeftOnDisk

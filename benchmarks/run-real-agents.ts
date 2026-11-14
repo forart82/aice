@@ -43,7 +43,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const OAUTH_OR_RATE_LIMIT_RE =
-  /\b(?:oauth|reauth|invalid_grant|unauthenticated|expired[_\s-]?token|refresh[_\s-]?token|not logged into|rate[_\s-]?limit(?:ed)?|quota[_\s-]?exceeded|too many requests|RESOURCE_EXHAUSTED|overloaded|UNAVAILABLE|ECONNRESET|EAI_AGAIN)\b|(?:status|code|HTTP\/[0-9.]+\s+)(?:401|429|502|503|504)\b/i;
+  /\b(?:oauth|reauth|invalid_grant|unauthenticated|expired[_\s-]?token|refresh[_\s-]?token|not logged into|rate[_\s-]?limit(?:ed)?|quota[_\s-]?exceeded|too many requests|RESOURCE_EXHAUSTED|overloaded|UNAVAILABLE|connect\s+ETIMEDOUT|ECONNRESET|EAI_AGAIN)\b|(?:(?:status(?:\s+code)?|code|HTTP\/[0-9.]+)\s*[:=]?\s*)(?:401|429|502|503|504)\b/i;
 
 export function buildIsolatedBenchmarkEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
@@ -1186,8 +1186,17 @@ export function verifyCompilerAndSyntaxOnFile(
       if (languageId === "ts" || languageId === "js") {
         execFileSync("node", ["--check", filePath], { stdio: "pipe" });
       } else {
-        const tagErr = checkBalancedMarkupTags(content);
-        if (tagErr) return tagErr;
+        const sf = ts.createSourceFile(
+          filePath,
+          content,
+          ts.ScriptTarget.ESNext,
+          true,
+          ts.ScriptKind.TSX,
+        ) as ts.SourceFile & { parseDiagnostics?: ts.Diagnostic[] };
+        if (sf.parseDiagnostics && sf.parseDiagnostics.length > 0) {
+          const msg = ts.flattenDiagnosticMessageText(sf.parseDiagnostics[0].messageText, "\n");
+          return `TSX JSX parse diagnostic: ${msg}`;
+        }
       }
     } else if (languageId === "py") {
       execFileSync("python3", ["-m", "py_compile", filePath], { stdio: "pipe" });

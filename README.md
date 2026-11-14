@@ -2,15 +2,15 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.33](https://img.shields.io/badge/Version-0.9.33-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.34](https://img.shields.io/badge/Version-0.9.34-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C415%20passing-brightgreen)](tests/)
-[![Token Savings](https://img.shields.io/badge/Token%20Savings-43%25%20--%2088%25-orange)](docs/BENCHMARKS.md)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C485%20passing-brightgreen)](tests/)
+[![Token Savings](https://img.shields.io/badge/Token%20Savings-42%25%20--%2087%25-orange)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
 
@@ -235,8 +235,8 @@ std::string buildNodeReport(int cpu, int mem, int jit) {
 
 AICE is rigorously benchmarked across both live adversarial AI coding agent sessions and deterministic offline suites:
 
-- **Live Autonomous AI Agents ([`docs/BENCHMARKS.md`](docs/BENCHMARKS.md))**: In 33 live adversarial sessions across 15 languages, AICE reduced LLM turns by **68.5% to 78.5%**, working payload tokens by **59.3% to 77.5%**, LLM output tokens by **40.4% to 82.6%**, and real API cost by **66.0% to 81.2%**. Full audit trail: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-- **Deterministic Offline Suite ([`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md))**: Evaluated across 10 production scenarios covering all 15 languages, achieving **-43.4% to -73.2%** token reductions and **-59.0% to -69.3%** turn reductions. Full breakdown: [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md).
+- **Live Autonomous AI Agents ([`docs/BENCHMARKS.md`](docs/BENCHMARKS.md))**: Across 33 live adversarial cold-start sessions (10 multi-file scenarios `RW-01`..`RW-10` + `RW-11` hostile 1-file 0-idiom Lone Needle across 15 languages and 3 progressive layers), AICE won **11/11 scenarios** in both Pure AICE and `+Idioms` modes with **100% 3-layer disk & compiler verification (22/22 AICE runs)** vs 45.5% (5/11) for native tools — cutting LLM output tokens by **70.4% to 87.2%**, working payload tokens by **65.9% to 77.1%**, LLM turns by **70.6% to 72.7%**, tool calls by **77.2% to 79.3%**, total API context tokens by **78.1% to 81.6%**, and real API cost by **74.4% to 78.9%**. Full audit trail: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+- **Deterministic Offline Suite ([`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md))**: Evaluated across all 10 production scenarios covering 15 languages (`o200k_base` BPE), winning **10/10 scenarios** with **-41.7% to -71.5%** token reductions and **-59.0% to -69.3%** turn reductions. Full breakdown: [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md).
 
 ---
 
@@ -327,7 +327,7 @@ Every CLI command and all **7 First-Class MCP tools** (`aice_context`, `aice_out
 | `aice_create` | Greenfield single-file or multi-file `=== <filePath> ===` / `files` batch creation across all 20 languages & 33 extensions with inline `@idiom` expansion (`dryRun`, `overwrite`) |
 | `aice_idioms` | Project `$idiom` lifecycle: `scan`, `list`, `read`, `update`, `apply`, `expand`, `on`, and `off` |
 | `aice_gain` | Honest signed `cl100k_base` & `o200k_base` BPE token-savings telemetry (`project` drill-down, `unique` SHA-256 deduplication, `json` export) |
-| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.33`) |
+| `aice_project_config` | Inspect or toggle `enabled` & `idiomsEnabled` (`enable`, `disable`, `status`), `configFileExists`, and workspace `AGENTS.md` rule version sync (`v0.9.34`) |
 
 - **Disable AICE completely for a project (`"enabled": false`)**:
   ```json
@@ -506,7 +506,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.33)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.34)
 ├── AGENTS.md                   # Canonical workspace AICE 2.0 mandatory agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
@@ -585,9 +585,3 @@ aice/
 Licensed under the [Apache License 2.0](LICENSE) (see also [NOTICE](NOTICE) and [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt)).
 Copyright (c) 2026 [forart82](https://github.com/forart82).
 
-## 📊 Empirical Benchmarks
-
-AICE is rigorously benchmarked across both live adversarial AI coding agent sessions and deterministic offline suites:
-
-- **Live Autonomous AI Agents ([`docs/BENCHMARKS.md`](docs/BENCHMARKS.md))**: Evaluated across 33 live adversarial sessions in a 3-layer progressive lifecycle (Baseline, Feature Add, Cross-Cutting Telemetry/Persistence) across 15 languages. AICE achieved a **100% verification rate (11/11 scenarios)** vs 72.7% for native tools, reducing agent turns by up to **71.4%**, LLM output tokens by up to **78.4%**, and real API costs by up to **76.0%**. Full audit trail: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
-- **Deterministic Offline Suite ([`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md))**: Evaluated across 10 production scenarios covering all 15 languages, achieving **-43.4% to -73.2%** token reductions and **-59.0% to -69.3%** turn reductions. Full breakdown: [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md).
