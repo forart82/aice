@@ -6,9 +6,9 @@ import { describe, expect, it } from "vitest";
 
 const INSTALL_SCRIPT = path.resolve(process.cwd(), "install.sh");
 const UNINSTALL_SCRIPT = path.resolve(process.cwd(), "uninstall.sh");
-const pkg = JSON.parse(
-  fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8"),
-) as { version: string };
+const pkg = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), "package.json"), "utf-8")) as {
+  version: string;
+};
 
 describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninstall.sh)", () => {
   it("exists, is executable, and passes bash -n syntax validation", () => {
@@ -214,7 +214,11 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       });
       fs.writeFileSync(
         path.join(seedDir, "package.json"),
-        JSON.stringify({ name: "aice", version: "0.9.4", scripts: { build: "node -e 'process.exit(0)'" } }, null, 2),
+        JSON.stringify(
+          { name: "aice", version: "0.9.4", scripts: { build: "node -e 'process.exit(0)'" } },
+          null,
+          2,
+        ),
         "utf-8",
       );
 
@@ -239,7 +243,11 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       // Advance origin/main from seedDir to v0.9.5
       fs.writeFileSync(
         path.join(seedDir, "package.json"),
-        JSON.stringify({ name: "aice", version: "0.9.5", scripts: { build: "node -e 'process.exit(0)'" } }, null, 2),
+        JSON.stringify(
+          { name: "aice", version: "0.9.5", scripts: { build: "node -e 'process.exit(0)'" } },
+          null,
+          2,
+        ),
         "utf-8",
       );
       spawnSync("git", ["-C", seedDir, "add", "package.json"], { env: gitEnv });

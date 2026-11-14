@@ -846,9 +846,9 @@ describe("4-Tier Search Ranking, Multi-Target Resilience & External Root Isolati
     expect(isTestOrMockPath("src/inspector.ts")).toBe(false);
     expect(isTestOrMockPath("src/latest.ts")).toBe(false);
     expect(isTestOrMockPath("src/specifier.ts")).toBe(false);
-    expect(
-      isTestOrMockPath("/tmp/benchmarks/run-1/src/engine.ts", "/tmp/benchmarks/run-1"),
-    ).toBe(false);
+    expect(isTestOrMockPath("/tmp/benchmarks/run-1/src/engine.ts", "/tmp/benchmarks/run-1")).toBe(
+      false,
+    );
     expect(isTestOrMockPath("tests/engine.ts")).toBe(true);
     expect(isTestOrMockPath("src/engine.spec.ts")).toBe(true);
     expect(isTestOrMockPath("src/mock_engine.ts")).toBe(true);

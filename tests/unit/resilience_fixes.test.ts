@@ -1,19 +1,19 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "node:fs";
-import * as path from "node:path";
 import * as os from "node:os";
-import { didYouMeanSymbol, didYouMeanFile } from "../../src/tools/suggest.js";
-import { extractSymbolFromAiceSource, generateContext } from "../../src/tools/context.js";
-import { spliceSource } from "../../src/tools/splice.js";
-import { isEphemeralWorkspace, recordTelemetryEvent } from "../../src/telemetry/index.js";
-import { recordTelemetryError } from "../../src/telemetry/analyze.js";
-import { mineProjectIdioms } from "../../src/idioms/idiom-miner.js";
-import { resolveWorktreeRoot } from "../../src/config/path-resolver.js";
+import * as path from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  ALL_REAL_AGENT_BENCHMARKS,
   auditTranscriptCompliance,
   verifyWorkspaceOnDisk,
-  ALL_REAL_AGENT_BENCHMARKS,
 } from "../../benchmarks/run-real-agents.js";
+import { resolveWorktreeRoot } from "../../src/config/path-resolver.js";
+import { mineProjectIdioms } from "../../src/idioms/idiom-miner.js";
+import { recordTelemetryError } from "../../src/telemetry/analyze.js";
+import { isEphemeralWorkspace, recordTelemetryEvent } from "../../src/telemetry/index.js";
+import { extractSymbolFromAiceSource, generateContext } from "../../src/tools/context.js";
+import { spliceSource } from "../../src/tools/splice.js";
+import { didYouMeanFile, didYouMeanSymbol } from "../../src/tools/suggest.js";
 
 describe("Resilience & Suggestion Engine", () => {
   describe("didYouMeanSymbol", () => {

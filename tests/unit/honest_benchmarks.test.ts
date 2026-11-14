@@ -778,7 +778,11 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       description: "Twig summary block verification",
       scenario: "new_feature" as const,
       appSurface: "window" as const,
-      files: [OFFLINE_BENCHMARKS.find((s) => s.id === "RW-03")!.files.find((f) => f.languageId === "twig")!],
+      files: [
+        OFFLINE_BENCHMARKS.find((s) => s.id === "RW-03")!.files.find(
+          (f) => f.languageId === "twig",
+        )!,
+      ],
     };
     const twigDir = setupWorkspace(customTwigNewFeature, "without_aice", 20261108);
     try {
@@ -789,10 +793,20 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       let twigSrc = fs.readFileSync(twigPath, "utf-8").replace(/summary-row/g, "summary-row-v2");
       // Remove obsolete block and append native Twig summary block
       const obs = twigFile.obsoleteSymbol!;
-      twigSrc = twigSrc.replace(new RegExp(`\\{%\\s*block\\s+${obs}\\s*%\\}[\\s\\S]*?\\{%\\s*endblock\\s*%\\}`, "g"), "");
+      twigSrc = twigSrc.replace(
+        new RegExp(`\\{%\\s*block\\s+${obs}\\s*%\\}[\\s\\S]*?\\{%\\s*endblock\\s*%\\}`, "g"),
+        "",
+      );
       twigSrc += `\n{% block ${mut.targetSymbol}_summary %}<div class="summary-row-v2"><span>${mut.expectedTokens[0]}</span></div>{% endblock %}\n`;
       fs.writeFileSync(twigPath, twigSrc, "utf-8");
-      const twigCheck = verifyWorkspaceOnDisk(customTwigNewFeature, twigDir, 20261108, 1, undefined, "without_aice");
+      const twigCheck = verifyWorkspaceOnDisk(
+        customTwigNewFeature,
+        twigDir,
+        20261108,
+        1,
+        undefined,
+        "without_aice",
+      );
       expect(twigCheck.details).toEqual([]);
       expect(twigCheck.verified).toBe(true);
     } finally {
@@ -817,24 +831,28 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
           },
         ],
       });
-      expect(auditTranscriptCompliance(escapeLog, "without_aice", tmpAuditDir).compliant).toBe(false);
-      expect(auditTranscriptCompliance(escapeLog, "aice_with_idioms", tmpAuditDir).compliant).toBe(false);
+      expect(auditTranscriptCompliance(escapeLog, "without_aice", tmpAuditDir).compliant).toBe(
+        false,
+      );
+      expect(auditTranscriptCompliance(escapeLog, "aice_with_idioms", tmpAuditDir).compliant).toBe(
+        false,
+      );
 
       const aiceInBaselineLog = writeLog("aice_in_baseline.jsonl", {
         type: "PLANNER_RESPONSE",
         tool_calls: [{ name: "run_command", args: { CommandLine: 'aice context . -s "*"' } }],
       });
-      expect(auditTranscriptCompliance(aiceInBaselineLog, "without_aice", tmpAuditDir).compliant).toBe(
-        false,
-      );
+      expect(
+        auditTranscriptCompliance(aiceInBaselineLog, "without_aice", tmpAuditDir).compliant,
+      ).toBe(false);
 
       const readFileInAiceLog = writeLog("read_in_aice.jsonl", {
         type: "PLANNER_RESPONSE",
         tool_calls: [{ name: "read_file", args: { Path: path.join(tmpAuditDir, "engine.ts") } }],
       });
-      expect(auditTranscriptCompliance(readFileInAiceLog, "aice_no_idioms", tmpAuditDir).compliant).toBe(
-        false,
-      );
+      expect(
+        auditTranscriptCompliance(readFileInAiceLog, "aice_no_idioms", tmpAuditDir).compliant,
+      ).toBe(false);
 
       const validWriteHeredoc = writeLog("valid_write.jsonl", {
         type: "PLANNER_RESPONSE",
@@ -848,9 +866,9 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
           },
         ],
       });
-      expect(auditTranscriptCompliance(validWriteHeredoc, "aice_no_idioms", tmpAuditDir).compliant).toBe(
-        true,
-      );
+      expect(
+        auditTranscriptCompliance(validWriteHeredoc, "aice_no_idioms", tmpAuditDir).compliant,
+      ).toBe(true);
     } finally {
       fs.rmSync(tmpAuditDir, { recursive: true, force: true });
     }

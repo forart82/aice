@@ -7,7 +7,6 @@
  * imported dependency contracts, and downstream callers.
  */
 
-import { didYouMeanFile, didYouMeanSymbol } from "./suggest.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { extractFastTsImports, isTsLikeFilePath } from "../compat/typescript.js";
@@ -50,10 +49,11 @@ import { estimateTokens } from "../tokenomics/index.js";
 import {
   collectNativeSyntaxDiagnostics,
   generateOutline,
+  type OutlineResult,
   type OutlineSymbol,
-  OutlineResult,
 } from "./outline.js";
 import { locateNativeDeclarationSpan } from "./splice.js";
+import { didYouMeanFile, didYouMeanSymbol } from "./suggest.js";
 
 export interface WorkspaceCallerScanCache {
   filesByRoot: Map<string, string[]>;
@@ -454,10 +454,7 @@ function findEnclosingContainerForBareMember(
  * queries, render a deduplicated, token-bounded outline of sibling members per parent,
  * strictly capped at <= 20 symbols and <= 150 tokens total.
  */
-export function buildSiblingOutline(
-  symbols: OutlineSymbol[],
-  selector: string | string[],
-): string {
+export function buildSiblingOutline(symbols: OutlineSymbol[], selector: string | string[]): string {
   if (!symbols || symbols.length === 0) return "";
   const rawSelectors = Array.isArray(selector) ? selector : splitSymbolSelectors(selector);
   if (rawSelectors.length === 0) return "";
@@ -544,8 +541,7 @@ export function buildSiblingOutline(
     if (mergedChildren.length === 0) continue;
 
     const parentKey = resolvedPath.join(".");
-    const parentLabel =
-      resolvedPath.length === 1 ? resolvedPath[0]! : resolvedPath.join(".");
+    const parentLabel = resolvedPath.length === 1 ? resolvedPath[0]! : resolvedPath.join(".");
     const target = parts[parts.length - 1]!;
     const existing = parentGroups.get(parentKey);
     if (existing) {
@@ -1984,10 +1980,7 @@ export async function generateWorkspaceContext(
         );
         const annotatedSlices = matchedSlices.map((sl) =>
           sl.replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
-            const firstHit = bracketBody
-              .split(",")[0]
-              ?.trim()
-              .replace(/^L/i, "");
+            const firstHit = bracketBody.split(",")[0]?.trim().replace(/^L/i, "");
             return firstHit
               ? `// match at [${bracketBody}] (${relFile}:${firstHit})`
               : `// match at [${bracketBody}]`;
@@ -2269,7 +2262,9 @@ export async function generateWorkspaceContext(
   if (isPureRegexSearch && scoredFileSlices.length > 0) {
     scoredFileSlices.sort((a, b) => b.score - a.score || a.relFile.localeCompare(b.relFile));
     for (const item of scoredFileSlices) {
-      symbolSlices.push(`### ${item.relFile}${item.headerTag}\n\`\`\`aice\n${item.sliceBody}\n\`\`\``);
+      symbolSlices.push(
+        `### ${item.relFile}${item.headerTag}\n\`\`\`aice\n${item.sliceBody}\n\`\`\``,
+      );
     }
   }
 
@@ -2655,7 +2650,9 @@ export function isTestOrMockPath(filePath: string, projectRoot?: string): boolea
   }
   const norm = target.replace(/\\/g, "/").toLowerCase();
   return (
-    /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/.test(norm) ||
+    /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/.test(
+      norm,
+    ) ||
     /\.(?:test|spec|mock)s?\.[a-z0-9]+$/i.test(norm) ||
     /(?:^|\/)(?:test|spec|mock)[_-][^/]+\.[a-z0-9]+$/i.test(norm) ||
     /[_-](?:test|spec|mock)s?\.[a-z0-9]+$/i.test(norm)
@@ -2673,7 +2670,13 @@ export function isCommentLine(line: string, filePath?: string): boolean {
   }
   const ext = filePath ? path.extname(filePath).toLowerCase() : "";
   if (t.startsWith("#")) {
-    if (ext === ".md" || ext === ".markdown" || ext === ".css" || ext === ".html" || ext === ".cs") {
+    if (
+      ext === ".md" ||
+      ext === ".markdown" ||
+      ext === ".css" ||
+      ext === ".html" ||
+      ext === ".cs"
+    ) {
       return false;
     }
     if (t.startsWith("#[") || t.startsWith("#![")) {
@@ -2855,7 +2858,8 @@ function extractPatternMatchesFromSource(
   contextRadius = 2,
   rankingOpts?: PatternMatchRankingOptions,
 ): string | undefined {
-  return extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius, rankingOpts)?.formattedText;
+  return extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius, rankingOpts)
+    ?.formattedText;
 }
 
 function formatWithLineNumbers(text: string, startLine = 1): string {
@@ -3953,12 +3957,7 @@ export async function generateContext(
     }
   }
 
-  if (
-    idiomsActive &&
-    activeIdioms &&
-    Object.keys(activeIdioms).length > 0 &&
-    !regexMentionsIdiom
-  ) {
+  if (idiomsActive && activeIdioms && Object.keys(activeIdioms).length > 0 && !regexMentionsIdiom) {
     try {
       const collapsed = collapseAiceSourceIdioms(targetContent, activeIdioms, fullTargetPath);
       targetContent = collapsed.aice;

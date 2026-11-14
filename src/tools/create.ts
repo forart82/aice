@@ -784,7 +784,12 @@ function compileAiceOrHybridToNative(
   // Substep 1.2: Route native/hybrid code (any code using `{ ... }` blocks, native constructs,
   if (isHybridOrNativeSource(cleanedCode, targetLang)) {
     const lossless = preprocessHybridAndIdiomsLossless(cleanedCode, targetLang, activeIdioms);
-    const syntaxCheck = validateNativeSyntax(lossless, targetLang, activeIdioms ? fullPath : fullPath, activeIdioms);
+    const syntaxCheck = validateNativeSyntax(
+      lossless,
+      targetLang,
+      activeIdioms ? fullPath : fullPath,
+      activeIdioms,
+    );
     const pyDupLossless = targetLang === "python" ? checkPythonDuplicateParams(lossless) : null;
     if (syntaxCheck.valid && !pyDupLossless) {
       return lossless.endsWith("\n") ? lossless : `${lossless}\n`;
@@ -827,7 +832,9 @@ function compileAiceOrHybridToNative(
       if (check.valid && !pyDupEmitted) {
         return emitted;
       }
-      parseErr = new Error([...check.diagnostics, ...(pyDupEmitted ? [pyDupEmitted] : [])].join("; "));
+      parseErr = new Error(
+        [...check.diagnostics, ...(pyDupEmitted ? [pyDupEmitted] : [])].join("; "),
+      );
     } catch (emitErr) {
       parseErr = parseErr ?? emitErr;
     }
@@ -846,10 +853,7 @@ function compileAiceOrHybridToNative(
     return repaired.endsWith("\n") ? repaired : `${repaired}\n`;
   }
 
-  const allRepairDiags = [
-    ...repairedCheck.diagnostics,
-    ...(pyDupRepaired ? [pyDupRepaired] : []),
-  ];
+  const allRepairDiags = [...repairedCheck.diagnostics, ...(pyDupRepaired ? [pyDupRepaired] : [])];
   const diagSummary = allRepairDiags.length > 0 ? ` (${allRepairDiags.join("; ")})` : "";
   throw new Error(
     `Failed to compile AICE source for ${fullPath}: ${
@@ -884,10 +888,7 @@ function isExplicitlyNonVoidReturnType(ret: TypeExpr | null): boolean {
   }
   if (ret.kind === "NamedType") {
     return (
-      ret.name !== "None" &&
-      ret.name !== "void" &&
-      ret.name !== "NoReturn" &&
-      ret.name !== "Never"
+      ret.name !== "None" && ret.name !== "void" && ret.name !== "NoReturn" && ret.name !== "Never"
     );
   }
   return true;

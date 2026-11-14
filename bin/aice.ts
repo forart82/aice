@@ -1578,7 +1578,9 @@ Examples:
           if (options.json) {
             console.log(
               JSON.stringify(
-                idiomSummary ? { ...(batchRes ?? { success: true }), idioms: idiomSummary } : batchRes,
+                idiomSummary
+                  ? { ...(batchRes ?? { success: true }), idioms: idiomSummary }
+                  : batchRes,
                 null,
                 2,
               ),

@@ -12,9 +12,9 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
 import { program as cliProgram } from "../../src/cli.js";
-import { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
 import type { FunctionDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
+import { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
 import { createFile } from "../../src/tools/create.js";
 import { splice, spliceBatch, spliceSource } from "../../src/tools/splice.js";
 
@@ -875,11 +875,9 @@ fn funcF(): return 6
 
         // 2. Multi-target `outline` tolerates a missing path alongside valid paths
         const missingFile = path.join(tmpDir, "ghost.ts");
-        const outlineRes = spawnSync(
-          "bun",
-          ["./bin/aice.ts", "outline", fileA, missingFile],
-          { encoding: "utf-8" },
-        );
+        const outlineRes = spawnSync("bun", ["./bin/aice.ts", "outline", fileA, missingFile], {
+          encoding: "utf-8",
+        });
         expect(outlineRes.status).toBe(0);
         expect(outlineRes.stdout).toContain("alphaFn");
         expect(outlineRes.stdout).toContain("// not found:");
@@ -915,7 +913,15 @@ fn funcF(): return 6
         // 1. RW-10 regression: `--delete` placed right before `<file>` (`-s sym --delete file.ts`)
         const delRes1 = spawnSync(
           "bun",
-          ["./bin/aice.ts", "splice", "--no-idioms", "-s", "legacySpanFlush", "--delete", routerFile],
+          [
+            "./bin/aice.ts",
+            "splice",
+            "--no-idioms",
+            "-s",
+            "legacySpanFlush",
+            "--delete",
+            routerFile,
+          ],
           { encoding: "utf-8" },
         );
         expect(delRes1.status).toBe(0);
@@ -968,19 +974,15 @@ fn funcF(): return 6
           { encoding: "utf-8" },
         );
         expect(impRes.status).toBe(0);
-        expect(fs.readFileSync(routerFile, "utf-8")).toContain("import * as path from 'node:path';");
+        expect(fs.readFileSync(routerFile, "utf-8")).toContain(
+          "import * as path from 'node:path';",
+        );
 
         // 4. Positional code trap recovery: `aice write <file> "export const X = 5;"` (without -c)
         const posFile = path.join(tmpDir, "positional.ts");
         const posRes = spawnSync(
           "bun",
-          [
-            "./bin/aice.ts",
-            "write",
-            posFile,
-            "export const POSITIONAL_OK = 55;",
-            "--json",
-          ],
+          ["./bin/aice.ts", "write", posFile, "export const POSITIONAL_OK = 55;", "--json"],
           { encoding: "utf-8" },
         );
         expect(posRes.status).toBe(0);

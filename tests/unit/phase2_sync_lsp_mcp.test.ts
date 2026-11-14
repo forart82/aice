@@ -155,7 +155,9 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
         arguments: { path: testTs, selector: "/nonExistentMethod/" },
       })) as any;
       expect(resPatternZero.isError).toBeFalsy();
-      expect(resPatternZero.content[0].text).toContain("// Pattern '/nonExistentMethod/' had 0 matches in");
+      expect(resPatternZero.content[0].text).toContain(
+        "// Pattern '/nonExistentMethod/' had 0 matches in",
+      );
     });
 
     it("executes aice_splice via tools/call to replace symbol in native TypeScript file", async () => {

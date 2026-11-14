@@ -7,9 +7,9 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_REAL_AGENT_BENCHMARKS,
   buildLayerPrompt,
-  SCENARIO_LAYER_DEFINITIONS,
-  OAUTH_OR_RATE_LIMIT_RE,
   execAgyWithRetry,
+  OAUTH_OR_RATE_LIMIT_RE,
+  SCENARIO_LAYER_DEFINITIONS,
 } from "../../benchmarks/run-real-agents.js";
 import { BenchmarkDashboard } from "../../benchmarks/ui/progress-bar.js";
 

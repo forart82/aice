@@ -265,7 +265,8 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         },
         overwrite: {
           type: "boolean",
-          description: "If true, explicitly authorizes full-file replacement (including empty truncation)",
+          description:
+            "If true, explicitly authorizes full-file replacement (including empty truncation)",
         },
         insertAfter: {
           type: "string",
@@ -975,13 +976,14 @@ export class AiceMcpServer {
             (typeof args.selector === "string" && args.selector.trim().length > 0
               ? args.selector
               : undefined) ??
-            (typeof args.sym === "string" && args.sym.trim().length > 0
-              ? args.sym
-              : undefined) ??
+            (typeof args.sym === "string" && args.sym.trim().length > 0 ? args.sym : undefined) ??
             (typeof args.range === "string" && args.range.trim().length > 0
               ? args.range
               : undefined) ??
-            (args.symbol ?? args.selector ?? args.sym ?? args.range);
+            args.symbol ??
+            args.selector ??
+            args.sym ??
+            args.range;
           const symbolFilter =
             typeof rawSelector === "string" && rawSelector.trim().length > 0
               ? rawSelector.trim()
@@ -1216,12 +1218,7 @@ export class AiceMcpServer {
         let rawPaths: string[] = [];
         const candidatePaths = args.paths ?? args.files ?? args.targets ?? args.filesOrDirs;
         const rawPathCandidate =
-          args.path ??
-          args.fileOrDir ??
-          args.filePath ??
-          args.file ??
-          args.dir ??
-          args.target;
+          args.path ?? args.fileOrDir ?? args.filePath ?? args.file ?? args.dir ?? args.target;
         if (Array.isArray(candidatePaths)) {
           rawPaths = (candidatePaths as unknown[]).map((p) => String(p).trim()).filter(Boolean);
         } else {
@@ -1333,12 +1330,7 @@ export class AiceMcpServer {
       case "write":
       case "splice": {
         const unsplitTargetFile = String(
-          args.filePath ??
-            args.path ??
-            args.file ??
-            args.fileOrDir ??
-            args.target ??
-            "",
+          args.filePath ?? args.path ?? args.file ?? args.fileOrDir ?? args.target ?? "",
         );
         const splitMainTarget = unsplitTargetFile
           ? splitInlineFileSelector(unsplitTargetFile, this.workspaceRoot)
@@ -1358,7 +1350,11 @@ export class AiceMcpServer {
             ? args.range
             : undefined) ??
           splitMainTarget.inlineSelector ??
-          (args.symbolSelector ?? args.symbol ?? args.selector ?? args.range ?? "");
+          args.symbolSelector ??
+          args.symbol ??
+          args.selector ??
+          args.range ??
+          "";
         const symbolSelector = String(rawSelector);
         const newAiceCode =
           typeof args.newAiceCode === "string"
@@ -1382,10 +1378,7 @@ export class AiceMcpServer {
             ? Boolean(args.overwrite || args.force)
             : undefined;
         const forceFlag = typeof args.force === "boolean" ? args.force : undefined;
-        const inlineIdiomsArg = (args.inlineIdioms ?? args.idiom) as
-          | string
-          | string[]
-          | undefined;
+        const inlineIdiomsArg = (args.inlineIdioms ?? args.idiom) as string | string[] | undefined;
         const preserveDocs = typeof args.preserveDocs === "boolean" ? args.preserveDocs : undefined;
         const insertAfter =
           typeof args.insertAfter === "string"
@@ -1914,12 +1907,7 @@ export class AiceMcpServer {
           args.code ?? args.newAiceCode ?? args.aice ?? args.template ?? args.content ?? "",
         );
         const rawTargetFile = String(
-          args.filePath ??
-            args.path ??
-            args.file ??
-            args.fileOrDir ??
-            args.target ??
-            "",
+          args.filePath ?? args.path ?? args.file ?? args.fileOrDir ?? args.target ?? "",
         );
         const streamItems =
           !Array.isArray(args.files) && rawCodeCandidate

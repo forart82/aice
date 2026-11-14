@@ -6,7 +6,6 @@
  * Enables surgical AST modifications achieving 90%+ output token reduction for AI contexts.
  */
 
-import { didYouMeanSymbol } from "./suggest.js";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import postcss from "postcss";
@@ -60,6 +59,7 @@ import {
   preprocessBareCssLossless,
   preprocessHybridAndIdiomsLossless,
 } from "./preprocessor.js";
+import { didYouMeanSymbol } from "./suggest.js";
 import { validateNativeSyntax } from "./syntax-validator.js";
 
 export interface SymbolSpliceEdit {
@@ -813,7 +813,9 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
+      throw new Error(
+        `Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`,
+      );
     }
 
     // Determine declaration lineStart
@@ -860,7 +862,9 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
+      throw new Error(
+        `Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`,
+      );
     }
     if (symInfo.kind !== "function" && symInfo.kind !== "method") {
       throw new Error(
@@ -902,7 +906,9 @@ export function spliceSource(
     }
     const symInfo = findSpliceTargetSymbol(ast, targetSymbol);
     if (!symInfo) {
-      throw new Error(`Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`);
+      throw new Error(
+        `Symbol '${targetSymbol}' not found in ${filePath}${didYouMeanSymbol(source, targetSymbol)}`,
+      );
     }
 
     // Determine declaration lineStart
@@ -4122,7 +4128,9 @@ function emitExpandedDeclForTarget(
       typeParams: cloned.typeParams ?? [],
       params: resolvedIsStatic
         ? cloned.params
-        : cloned.params.filter((p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this"))),
+        : cloned.params.filter(
+            (p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this")),
+          ),
       returnType: cloned.returnType,
       isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
       isStatic: resolvedIsStatic,
@@ -4386,7 +4394,9 @@ export function spliceNativeSymbolFromExpandedAst(
   );
 
   if (!spanInfo) {
-    throw new Error(`Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(nativeSource, symbolSelector)}`);
+    throw new Error(
+      `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(nativeSource, symbolSelector)}`,
+    );
   }
 
   const emittedUnindented = emitExpandedDeclForTarget(
@@ -7817,9 +7827,7 @@ export async function splice(
     !options.delete &&
     (!options.symbol || isCreateOrOverwriteSymbol(options.symbol));
 
-  const isCreateRoute =
-    !options.delete &&
-    (!fileExists || options.create || isFullOverwrite);
+  const isCreateRoute = !options.delete && (!fileExists || options.create || isFullOverwrite);
 
   if (isCreateRoute) {
     const prevSource =
@@ -7828,8 +7836,8 @@ export async function splice(
       options.code ??
       options.body ??
       (hasBatchEdits
-        ? options.edits!
-            .filter((e) => !e.delete)
+        ? options
+            .edits!.filter((e) => !e.delete)
             .map((e) => e.code ?? e.body ?? "")
             .filter(Boolean)
             .join("\n\n")
@@ -7883,9 +7891,7 @@ export async function splice(
 
   const cliOptionIdioms = parseOptionIdioms(options.inlineIdioms ?? options.idiom);
   const activeIdioms =
-    options.idioms === false
-      ? {}
-      : { ...(config.idioms ?? {}), ...cliOptionIdioms };
+    options.idioms === false ? {} : { ...(config.idioms ?? {}), ...cliOptionIdioms };
   const snippetInput =
     options.code ??
     options.body ??
@@ -8076,13 +8082,11 @@ export async function splice(
       targetLang === "python" ? checkPythonDuplicateParams(result.modifiedCode) : null;
     if (!postValidation.valid || pyDupDiag) {
       const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
-      const origPyDup =
-        targetLang === "python" ? checkPythonDuplicateParams(originalNative) : null;
+      const origPyDup = targetLang === "python" ? checkPythonDuplicateParams(originalNative) : null;
       if (origValidation.valid && !origPyDup && !options.force) {
-        const diagSummary = [
-          ...postValidation.diagnostics,
-          ...(pyDupDiag ? [pyDupDiag] : []),
-        ].join("; ");
+        const diagSummary = [...postValidation.diagnostics, ...(pyDupDiag ? [pyDupDiag] : [])].join(
+          "; ",
+        );
         throw new Error(
           `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
         );
@@ -8155,9 +8159,7 @@ export async function splice(
   if (!options.dryRun) {
     const dir = path.dirname(fullPath);
     await fs.promises.mkdir(dir, { recursive: true });
-    const origMode = fs.existsSync(fullPath)
-      ? (await fs.promises.stat(fullPath)).mode
-      : undefined;
+    const origMode = fs.existsSync(fullPath) ? (await fs.promises.stat(fullPath)).mode : undefined;
     const tmpFile = path.join(
       dir,
       `.${path.basename(fullPath)}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`,
