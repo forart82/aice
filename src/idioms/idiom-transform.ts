@@ -3018,12 +3018,7 @@ function resolveIdiomWorkspace(dir: string): {
   searchDir: string;
 } {
   const resolvedInput = path.resolve(dir);
-  const cwdResolved = path.resolve(process.cwd());
-  const fallbackDir =
-    resolvedInput === cwdResolved || resolvedInput.startsWith(`${cwdResolved}${path.sep}`)
-      ? cwdResolved
-      : resolvedInput;
-  let projectRoot = findProjectRoot(resolvedInput, fallbackDir);
+  let projectRoot = findProjectRoot(resolvedInput);
   if (
     projectRoot === resolvedInput &&
     path.basename(resolvedInput) === "src" &&

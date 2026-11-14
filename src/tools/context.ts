@@ -107,6 +107,12 @@ export interface ContextOptions {
   symbol?: string;
 
   /**
+   * When true, multi-symbol queries where >=1 symbol matches return found slices plus a
+   * `// missing: ...` note instead of throwing (default: false; enabled on multi-target context).
+   */
+  allowPartialSymbolMatch?: boolean;
+
+  /**
    * Optional override for enabling/disabling project idioms (--idioms / --no-idioms).
    */
   idioms?: boolean;
@@ -2763,13 +2769,14 @@ export function extractPatternMatchesDetailed(
     if (hasCatastrophicNestedQuantifiers(rawBody)) {
       throw new Error(`Unsafe or overly complex regex selector '${trimmed}'`);
     }
-    const safeFlags = regexMatch[2]!.replace(/[^imsu]/g, "");
+    const safeFlags = regexMatch[2]!.replace(/[gy]/g, "");
     let re: RegExp;
     try {
       re = new RegExp(rawBody, safeFlags);
-    } catch {
-      const escapedLiteral = rawBody.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      re = new RegExp(escapedLiteral, safeFlags || "i");
+    } catch (err) {
+      throw new Error(
+        `Invalid regex selector '${trimmed}': ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
     matcher = (line: string) => re.test(line);
     queryKeyword = extractPrimaryQueryKeyword(trimmed);
@@ -3911,7 +3918,7 @@ export async function generateContext(
             .join("\n\n");
         };
         if (firstMissingErr !== undefined) {
-          if (slicedBlocks.length === 0 && requestedSymbols.some((s) => /\s/.test(s))) {
+          if (requestedSymbols.some((s) => /\s/.test(s))) {
             try {
               targetContent = extractSymbolFromAiceSource(
                 targetContent,
@@ -3926,14 +3933,18 @@ export async function generateContext(
               // keep firstMissingErr
             }
           }
-          if (slicedBlocks.length > 0) {
-            const joined = joinDeduplicatedBlocks(slicedBlocks);
-            targetContent =
-              missingSymbols.length > 0
-                ? `${joined}\n\n// missing: ${missingSymbols.join(", ")}`
-                : joined;
-          } else if (firstMissingErr !== undefined && !nativeDiagnostics) {
-            throw firstMissingErr;
+          if (firstMissingErr !== undefined) {
+            if (options.allowPartialSymbolMatch === true && slicedBlocks.length > 0) {
+              const joined = joinDeduplicatedBlocks(slicedBlocks);
+              targetContent =
+                missingSymbols.length > 0
+                  ? `${joined}\n\n// missing: ${missingSymbols.join(", ")}`
+                  : joined;
+            } else if (!nativeDiagnostics) {
+              throw firstMissingErr;
+            } else if (slicedBlocks.length > 0) {
+              targetContent = joinDeduplicatedBlocks(slicedBlocks);
+            }
           }
         } else if (slicedBlocks.length > 0) {
           targetContent = joinDeduplicatedBlocks(slicedBlocks);
@@ -4671,6 +4682,7 @@ export async function generateMultiContext(
     const itemOpts: ContextOptions = {
       ...options,
       symbol: explicitSym ?? parsed.inlineSymbol ?? options.symbol,
+      allowPartialSymbolMatch: options.allowPartialSymbolMatch ?? targets.length > 1,
       projectRoot: resolved.projectRoot,
       workspaceScanCache: sharedScanCache,
     };

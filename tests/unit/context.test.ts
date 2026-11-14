@@ -862,10 +862,13 @@ describe("4-Tier Search Ranking, Multi-Target Resilience & External Root Isolati
     expect(isCommentLine("-- SQL comment", "schema.sql")).toBe(true);
   });
 
-  it("falls back gracefully to literal matching on invalid regex while rejecting catastrophic ReDoS", () => {
-    const hit = extractPatternMatchesDetailed("const val = foo(bar + 1);\n", "/foo(bar/");
-    expect(hit).toBeDefined();
-    expect(hit?.formattedText).toContain("foo(bar + 1)");
+  it("rejects invalid /.../ regex and catastrophic ReDoS while matching unslashed special chars literally", () => {
+    const literalHit = extractPatternMatchesDetailed("const val = foo(bar + 1);\n", "foo(bar");
+    expect(literalHit).toBeDefined();
+    expect(literalHit?.formattedText).toContain("foo(bar + 1)");
+    expect(() => extractPatternMatchesDetailed("const val = 1;\n", "/[unclosed/")).toThrow(
+      /Invalid regex selector/,
+    );
     expect(() => extractPatternMatchesDetailed("aaaa", "/(a+)+$/")).toThrow(
       /Unsafe or overly complex regex/,
     );
@@ -930,10 +933,18 @@ describe("4-Tier Search Ranking, Multi-Target Resilience & External Root Isolati
       );
       fs.writeFileSync(f2, "export function onlyInBeta(): string { return 'ok'; }\n", "utf-8");
 
-      // 1. Single-file partial match returns found slices + // missing:
+      // 1. Single-file missing symbol throws by default, and returns found slices + // missing: when allowPartialSymbolMatch: true
+      await expect(
+        generateContext(f1, {
+          projectRoot: tmp,
+          symbol: "keepOne,deletedLegacyFn,keepTwo",
+        }),
+      ).rejects.toThrow(/deletedLegacyFn/);
+
       const partial = await generateContext(f1, {
         projectRoot: tmp,
         symbol: "keepOne,deletedLegacyFn,keepTwo",
+        allowPartialSymbolMatch: true,
       });
       expect(partial.targetContent).toContain("keepOne");
       expect(partial.targetContent).toContain("keepTwo");
