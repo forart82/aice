@@ -14,7 +14,6 @@ import YAML from "yaml";
 import ts from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
-  findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
@@ -46,7 +45,15 @@ import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/inde
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
 import { resolveFirstActionableSymbol } from "./context.js";
-import { createFile, extractInlineIdiomsFromSource } from "./create.js";
+import {
+  checkPythonDuplicateParams,
+  createFile,
+  extractInlineIdiomsFromSource,
+  normalizeModuleForTarget,
+  normalizePythonMethodReturn,
+  parseOptionIdioms,
+  resolveTargetProjectRoot,
+} from "./create.js";
 import {
   isHybridOrNativeSource,
   maskSourceLexically,
@@ -97,6 +104,8 @@ export interface SpliceOptions {
   overwrite?: boolean;
   force?: boolean;
   idioms?: boolean;
+  inlineIdioms?: string | string[] | Record<string, string | ProjectIdiomDefinition>;
+  idiom?: string | string[] | Record<string, string | ProjectIdiomDefinition>;
   inPlace?: boolean;
   dryRun?: boolean;
   diff?: boolean;
@@ -124,6 +133,10 @@ export interface BatchSpliceOptions {
   dryRun?: boolean;
   compile?: boolean;
   idioms?: boolean;
+  inlineIdioms?: string | string[] | Record<string, string | ProjectIdiomDefinition>;
+  idiom?: string | string[] | Record<string, string | ProjectIdiomDefinition>;
+  overwrite?: boolean;
+  force?: boolean;
   preserveDocs?: boolean;
 }
 
@@ -3681,7 +3694,8 @@ export function locateNativeDeclarationSpan(
     targetLang = targetLangOrSymbol as TargetLanguage;
   }
 
-  if (symbolSelector.toLowerCase() === "imports" || symbolSelector.toLowerCase() === "import") {
+  const normSelectorLower = symbolSelector.trim().replace(/^:/, "").toLowerCase();
+  if (normSelectorLower === "imports" || normSelectorLower === "import") {
     const importSpan = locateImportBlockSpan(nativeSource, targetLang);
     if (importSpan) {
       return enrichSpanWithOffsetsAndLines(nativeSource, importSpan);
@@ -4191,9 +4205,13 @@ function emitExpandedDeclForTarget(
   const dummySpan = cloned.span;
 
   if (className || cloned.kind === "MethodDecl") {
+    let resolvedMethodName = origMeta?.memberName ?? cloned.name;
+    if (resolvedMethodName === "__init__" && targetLang !== "python") {
+      resolvedMethodName = "constructor";
+    }
     const methodNode: MethodDecl = {
       kind: "MethodDecl",
-      name: origMeta?.memberName ?? cloned.name,
+      name: resolvedMethodName,
       typeParams: cloned.typeParams ?? [],
       params: cloned.params.filter((p) => p.name !== "self" && p.name !== "this"),
       returnType: cloned.returnType,
@@ -4204,6 +4222,9 @@ function emitExpandedDeclForTarget(
       body: cloned.body,
       span: dummySpan,
     };
+    if (targetLang === "python") {
+      normalizePythonMethodReturn(methodNode);
+    }
 
     const tempClass: ClassDecl = {
       kind: "ClassDecl",
@@ -4673,12 +4694,15 @@ function tryEmitNonCallableAiceSnippet(
         item.kind === "StyleDecl" ||
         (item.kind === "ClassDecl" && (!className || isClassContainerTarget))
       ) {
-        const singleMod: Module = {
-          kind: "Module",
-          path: path.basename(filePath),
-          items: [item],
-          span: mod.span,
-        };
+        const singleMod: Module = normalizeModuleForTarget(
+          {
+            kind: "Module",
+            path: path.basename(filePath),
+            items: [item],
+            span: mod.span,
+          },
+          targetLang,
+        );
         const emitted = emitTarget(singleMod, targetLang, { watermark: false }).trim();
         return stripTopLevelLanguagePreamble(emitted, targetLang);
       }
@@ -6300,13 +6324,36 @@ export function buildEmptySpliceBlockError(
 
 function resolveSingleNativeEditAgainstSource(
   nativeSource: string,
-  options: SpliceOptions,
+  rawEditOptions: SpliceOptions,
   filePath: string,
   targetLang: TargetLanguage,
   idioms: Record<string, ProjectIdiomDefinition> | undefined,
   forceLosslessPreprocess: boolean,
 ): ResolvedNativeEdit {
-  const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
+  let options = rawEditOptions;
+  let anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
+  if (anchorSymbol) {
+    if (/(?:\s+|^)@(?:replace|strip|drop)-docs\b/i.test(anchorSymbol)) {
+      anchorSymbol = anchorSymbol.replace(/(?:\s+|^)@(?:replace|strip|drop)-docs\b/gi, "").trim();
+      if (options.preserveDocs === undefined) {
+        options = { ...options, preserveDocs: false };
+      }
+    }
+    const inlineClone = anchorSymbol.match(
+      /\s*(?:@clone|\(clone)\s*\(\s*([^()]+)\s*\)|\s*\(clone\s+([^()]+)\)|\s+@clone\s+([^\s()]+)/i,
+    );
+    if (inlineClone) {
+      const extractedClone = (inlineClone[1] || inlineClone[2] || inlineClone[3] || "").trim();
+      anchorSymbol = anchorSymbol.replace(inlineClone[0], "").trim();
+      if (!options.cloneFrom && extractedClone) {
+        options = { ...options, cloneFrom: extractedClone };
+      }
+    }
+    anchorSymbol = anchorSymbol.replace(
+      /^:(?=(?:eof|end|append|imports?|\s*\[?L?\d+(?:\s*(?:-|\.\.|:)\s*L?\d+)?\]?)$)/i,
+      "",
+    );
+  }
   let rawSnippet = stripNumberedGutterPrefixes(options.code ?? options.body ?? "");
 
   if (
@@ -7798,10 +7845,27 @@ export function spliceNativeSource(
   };
 }
 export async function splice(
-  filePath: string,
+  rawFilePath: string,
   rawOptions: SpliceOptions = {},
 ): Promise<SpliceResult> {
   let options = rawOptions;
+  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
+  const trimmedRawPath = rawFilePath.trim();
+  if (
+    !options.symbol &&
+    /:+$/.test(trimmedRawPath) &&
+    isSpliceTargetFileCandidate(trimmedRawPath.replace(/\s*:+$/, "").trim())
+  ) {
+    throw new Error(
+      `Malformed target '${trimmedRawPath}': missing <symbol>, L<start>-L<end>, :overwrite, or :eof after ':'`,
+    );
+  }
+  const splitTarget = splitInlineFileSelector(rawFilePath, baseDir);
+  const filePath = splitTarget.filePath;
+  if (splitTarget.inlineSelector && !options.symbol) {
+    options = { ...options, symbol: splitTarget.inlineSelector };
+  }
+
   if (!options.symbol && (!options.edits || options.edits.length === 0) && options.code) {
     const parsedMulti = parseMultiBlockSpliceStream(options.code, filePath);
     if (parsedMulti?.singleFileEdits && parsedMulti.singleFileEdits.length > 0) {
@@ -7812,10 +7876,9 @@ export async function splice(
       };
     }
   }
-  const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
 
-  const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
+  const root = resolveTargetProjectRoot(fullPath, options.projectRoot);
   const config = loadProjectConfig(root);
   if (!isProjectAiceEnabled(config)) {
     throw new Error(AICE_DISABLED_MESSAGE);
@@ -7824,6 +7887,15 @@ export async function splice(
   const diskFileExists = fs.existsSync(fullPath);
   const fileExists = options.sourceOverride !== undefined || diskFileExists;
   const hasBatchEdits = Boolean(options.edits && options.edits.length > 0);
+  const hasExplicitPayload =
+    options.code !== undefined || options.body !== undefined || hasBatchEdits;
+
+  if (!options.delete && !options.cloneFrom && !hasExplicitPayload) {
+    throw new Error(
+      "Must provide replacement code (--code, --body, or --stdin), --edits, or --delete.",
+    );
+  }
+
   const hasHunkPayload = fileExists && containsHunkMarkers(options.code ?? options.body ?? "");
 
   const isFullOverwrite =
@@ -7853,10 +7925,27 @@ export async function splice(
             .filter(Boolean)
             .join("\n\n")
         : "");
+    const explicitOverwriteSym = Boolean(
+      options.symbol && /^:?(?:overwrite|create)$/i.test(options.symbol.trim()),
+    );
+    if (
+      fileExists &&
+      codePayload === "" &&
+      !options.overwrite &&
+      !options.force &&
+      !options.create &&
+      !explicitOverwriteSym
+    ) {
+      throw new Error(
+        `Refusing to overwrite existing file '${filePath}' with empty content without --overwrite or ':overwrite'.`,
+      );
+    }
     const created = await createFile(fullPath, {
       code: codePayload,
-      overwrite: true,
+      overwrite: Boolean(fileExists || options.overwrite || options.force || explicitOverwriteSym),
       idioms: options.idioms,
+      inlineIdioms: options.inlineIdioms,
+      idiom: options.idiom,
       dryRun: options.dryRun,
       projectRoot: root,
       suppressTelemetry: options.suppressTelemetry,
@@ -7883,7 +7972,11 @@ export async function splice(
     throw new Error(`Source file not found: ${filePath}`);
   }
 
-  const activeIdioms = options.idioms === false ? {} : config.idioms;
+  const cliOptionIdioms = parseOptionIdioms(options.inlineIdioms ?? options.idiom);
+  const activeIdioms =
+    options.idioms === false
+      ? {}
+      : { ...(config.idioms ?? {}), ...cliOptionIdioms };
   const snippetInput =
     options.code ??
     options.body ??
@@ -8070,10 +8163,17 @@ export async function splice(
       fullPath,
       activeIdioms,
     );
-    if (!postValidation.valid) {
+    const pyDupDiag =
+      targetLang === "python" ? checkPythonDuplicateParams(result.modifiedCode) : null;
+    if (!postValidation.valid || pyDupDiag) {
       const origValidation = validateNativeSyntax(originalNative, targetLang, fullPath);
-      if (origValidation.valid && !options.force && !options.overwrite) {
-        const diagSummary = postValidation.diagnostics.join("; ");
+      const origPyDup =
+        targetLang === "python" ? checkPythonDuplicateParams(originalNative) : null;
+      if (origValidation.valid && !origPyDup && !options.force) {
+        const diagSummary = [
+          ...postValidation.diagnostics,
+          ...(pyDupDiag ? [pyDupDiag] : []),
+        ].join("; ");
         throw new Error(
           `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${diagSummary}`,
         );
@@ -8339,6 +8439,38 @@ function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): b
   return !/^[A-Z][A-Za-z0-9_]*\.[a-zA-Z0-9_]+$/i.test(spec);
 }
 
+export function splitInlineFileSelector(
+  rawFilePath: string,
+  baseDir = process.cwd(),
+): { filePath: string; inlineSelector?: string } {
+  const trimmed = rawFilePath.trim();
+  if (!trimmed) return { filePath: rawFilePath };
+  const fullRaw = path.isAbsolute(trimmed) ? trimmed : path.resolve(baseDir, trimmed);
+  if (fs.existsSync(fullRaw)) {
+    return { filePath: trimmed };
+  }
+  const driveOffset = /^[A-Za-z]:[\\/]/.test(trimmed) ? 2 : 0;
+  const restAfterDrive = trimmed.slice(driveOffset);
+  const sepRe = /:+|#/g;
+  let sepMatch: RegExpExecArray | null = sepRe.exec(restAfterDrive);
+  while (sepMatch !== null) {
+    const splitIdx = driveOffset + sepMatch.index;
+    const candFile = trimmed.slice(0, splitIdx).trim();
+    const candSym = trimmed.slice(splitIdx + sepMatch[0].length).trim();
+    if (
+      candFile &&
+      candSym &&
+      !candSym.startsWith("/") &&
+      !candSym.startsWith("\\") &&
+      isSpliceTargetFileCandidate(candFile)
+    ) {
+      return { filePath: candFile, inlineSelector: candSym };
+    }
+    sepMatch = sepRe.exec(restAfterDrive);
+  }
+  return { filePath: trimmed };
+}
+
 /**
  * Parses a multi-block splice heredoc/stream delimited by `=== <symbol> ===`,
  * `=== <filePath> ===`, `=== <filePath>:<symbol> ===`, `--- <symbol> ---`, or `// SYMBOL: <symbol>`.
@@ -8357,6 +8489,7 @@ export function parseMultiBlockSpliceStream(
     filePath?: string;
     symbol: string;
     cloneFrom?: string;
+    preserveDocs?: boolean;
     isDelete: boolean;
     lines: string[];
   }> = [];
@@ -8427,6 +8560,11 @@ export function parseMultiBlockSpliceStream(
         isDelete = true;
         spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
       }
+      let preserveDocs: boolean | undefined;
+      if (/(?:\s+|^)@(?:replace|strip|drop)-docs\b/i.test(spec)) {
+        preserveDocs = false;
+        spec = spec.replace(/(?:\s+|^)@(?:replace|strip|drop)-docs\b/gi, "").trim();
+      }
       let cloneFrom: string | undefined;
       const cloneMatch = spec.match(
         /\s*(?:@clone|\(clone)\s*\(\s*([^()]+)\s*\)|\s*\(clone\s+([^()]+)\)|\s+@clone\s+([^\s()]+)/i,
@@ -8471,6 +8609,7 @@ export function parseMultiBlockSpliceStream(
           filePath: blockFilePath,
           symbol: blockSymbol,
           cloneFrom,
+          preserveDocs,
           isDelete,
           lines: [],
         });
@@ -8489,32 +8628,53 @@ export function parseMultiBlockSpliceStream(
   const meaningfulPre = preHeaderLines.filter(
     (l) => l.trim().length > 0 && !/^\s*(?:\/\/|#)/.test(l),
   );
-  if (meaningfulPre.length > 0) return null;
+  const preIdiomPrefix = meaningfulPre.every((l) => /^\s*@idiom\b/.test(l) || /^\s+/.test(l))
+    ? preHeaderLines.join("\n").trim()
+    : null;
+  if (preIdiomPrefix === null && meaningfulPre.length > 0) {
+    return null;
+  }
 
   let lastExplicitFilePath: string | undefined;
   const resolvedBlocks = sections.map((sec) => {
-    const body = sec.lines
+    const rawBody = sec.lines
       .join("\n")
       .replace(/^\n+|\n+$/g, "")
       .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
-    const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(body.trim());
+    const del = sec.isDelete || /^(?:--delete|DELETE)$/i.test(rawBody.trim());
     if (sec.filePath) {
       lastExplicitFilePath = sec.filePath;
     }
+    const targetFp = sec.filePath ?? defaultFilePath ?? lastExplicitFilePath;
+    const ext = targetFp ? path.extname(targetFp).toLowerCase() : "";
+    const base = targetFp ? path.basename(targetFp) : "";
+    const canHaveIdioms =
+      ext !== ".json" &&
+      ext !== ".yaml" &&
+      ext !== ".yml" &&
+      ext !== ".md" &&
+      ext !== ".markdown" &&
+      !SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) &&
+      !SPLICE_PASSTHROUGH_FILENAMES.has(base);
     const effectiveSymbol =
-      sec.symbol === ":create" && containsHunkMarkers(body) ? ":hunk" : sec.symbol;
-    if (!del && !sec.cloneFrom && !isCreateOrOverwriteSymbol(effectiveSymbol) && !body.trim()) {
+      sec.symbol === ":create" && containsHunkMarkers(rawBody) ? ":hunk" : sec.symbol;
+    if (!del && !sec.cloneFrom && !isCreateOrOverwriteSymbol(effectiveSymbol) && !rawBody.trim()) {
       throw buildEmptySpliceBlockError(
-        sec.filePath ?? defaultFilePath ?? lastExplicitFilePath ?? "<file>",
+        targetFp ?? "<file>",
         effectiveSymbol,
         "parsing --stdin heredoc block",
       );
     }
+    const body =
+      !del && preIdiomPrefix && canHaveIdioms && !containsHunkMarkers(rawBody)
+        ? `${preIdiomPrefix}\n${rawBody}`
+        : rawBody;
     return {
-      filePath: sec.filePath ?? defaultFilePath ?? lastExplicitFilePath,
+      filePath: targetFp,
       explicitFilePath: sec.filePath ?? lastExplicitFilePath,
       symbol: effectiveSymbol,
       cloneFrom: sec.cloneFrom,
+      preserveDocs: sec.preserveDocs,
       code: del ? undefined : body,
       delete: del || undefined,
     };
@@ -8526,6 +8686,7 @@ export function parseMultiBlockSpliceStream(
         singleFileEdits: resolvedBlocks.map((b) => ({
           symbol: b.symbol,
           cloneFrom: b.cloneFrom,
+          preserveDocs: b.preserveDocs,
           code: b.code,
           delete: b.delete,
         })),
@@ -8549,6 +8710,7 @@ export function parseMultiBlockSpliceStream(
       singleFileEdits: resolvedBlocks.map((b) => ({
         symbol: b.symbol,
         cloneFrom: b.cloneFrom,
+        preserveDocs: b.preserveDocs,
         code: b.code,
         delete: b.delete,
       })),
@@ -8564,6 +8726,7 @@ export function parseMultiBlockSpliceStream(
       list.push({
         symbol: b.symbol,
         cloneFrom: b.cloneFrom,
+        preserveDocs: b.preserveDocs,
         code: b.code,
         delete: b.delete,
       });
@@ -8576,6 +8739,7 @@ export function parseMultiBlockSpliceStream(
           filePath: fp,
           symbol: edits[0].symbol,
           cloneFrom: edits[0].cloneFrom,
+          preserveDocs: edits[0].preserveDocs,
           code: edits[0].code,
           delete: edits[0].delete,
         });
@@ -8611,6 +8775,7 @@ export function parseMultiBlockSpliceStream(
         edits.push({
           symbol: cur.symbol,
           cloneFrom: cur.cloneFrom,
+          preserveDocs: cur.preserveDocs,
           code: cur.code,
           delete: cur.delete,
         });
@@ -8621,6 +8786,7 @@ export function parseMultiBlockSpliceStream(
           filePath: fp,
           symbol: edits[0].symbol,
           cloneFrom: edits[0].cloneFrom,
+          preserveDocs: edits[0].preserveDocs,
           code: edits[0].code,
           delete: edits[0].delete,
         });
@@ -8653,24 +8819,28 @@ export async function spliceBatch(
       ? (parseMultiBlockSpliceStream(itemsOrStream)?.batchItems ?? [])
       : itemsOrStream;
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-  const effectiveRoot = options.projectRoot
-    ? path.resolve(options.projectRoot)
-    : findProjectRoot(baseDir, baseDir);
   const backups = new Map<string, string>();
   const virtualFs = new Map<string, string>();
   const configSnapshots = new Map<string, string | null>();
 
-  for (const cfgFile of [
-    path.join(effectiveRoot, "aice.config.json"),
-    path.join(effectiveRoot, ".aice-idioms.json"),
-    path.join(effectiveRoot, ".aice-cache", "idioms.json"),
-  ]) {
-    configSnapshots.set(cfgFile, fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8") : null);
+  if (options.projectRoot) {
+    const explicitRoot = path.resolve(options.projectRoot);
+    for (const cfgFile of [
+      path.join(explicitRoot, "aice.config.json"),
+      path.join(explicitRoot, ".aice-idioms.json"),
+      path.join(explicitRoot, ".aice-cache", "idioms.json"),
+    ]) {
+      configSnapshots.set(
+        cfgFile,
+        fs.existsSync(cfgFile) ? fs.readFileSync(cfgFile, "utf-8") : null,
+      );
+    }
   }
 
   for (const item of items) {
     const rawFp = item.filePath || item.file || item.path || "";
-    const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
+    const splitFp = splitInlineFileSelector(rawFp, baseDir).filePath;
+    const fullPath = path.isAbsolute(splitFp) ? splitFp : path.resolve(baseDir, splitFp);
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
       backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
@@ -8684,12 +8854,14 @@ export async function spliceBatch(
   try {
     for (const item of items) {
       const rawFp = item.filePath || item.file || item.path || "";
-      const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
+      const splitTarget = splitInlineFileSelector(rawFp, baseDir);
+      const effectiveSymbol = item.symbol ?? splitTarget.inlineSelector;
+      const fullPath = path.isAbsolute(splitTarget.filePath)
+        ? splitTarget.filePath
+        : path.resolve(baseDir, splitTarget.filePath);
       const itemDryRun = Boolean(item.dryRun ?? options.dryRun);
       const itemProjectRoot = item.projectRoot ?? options.projectRoot;
-      const rootForItem = itemProjectRoot
-        ? path.resolve(itemProjectRoot)
-        : findProjectRoot(path.dirname(fullPath), effectiveRoot);
+      const rootForItem = resolveTargetProjectRoot(fullPath, itemProjectRoot);
       for (const cfgFile of [
         path.join(rootForItem, "aice.config.json"),
         path.join(rootForItem, ".aice-idioms.json"),
@@ -8707,6 +8879,16 @@ export async function spliceBatch(
       const fileExistsNow = virtualFs.has(fullPath) || fs.existsSync(fullPath);
       const resolvedCode =
         item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? item.replacement;
+      const hasItemPayload =
+        resolvedCode !== undefined ||
+        item.body !== undefined ||
+        Boolean(item.edits && item.edits.length > 0);
+
+      if (!item.delete && !item.cloneFrom && !hasItemPayload) {
+        throw new Error(
+          `Must provide replacement code, edits, or delete for batch target '${rawFp}'.`,
+        );
+      }
 
       const isCreateRoute =
         !item.delete &&
@@ -8718,11 +8900,12 @@ export async function spliceBatch(
             !item.insertBefore &&
             !item.insert_before &&
             (!item.edits || item.edits.length === 0) &&
-            isCreateOrOverwriteSymbol(item.symbol)));
+            isCreateOrOverwriteSymbol(effectiveSymbol)));
 
       if (isCreateRoute) {
         const createPayload =
           resolvedCode ??
+          item.body ??
           (item.edits
             ? item.edits
                 .filter((e) => !e.delete)
@@ -8730,12 +8913,38 @@ export async function spliceBatch(
                 .filter(Boolean)
                 .join("\n\n")
             : "");
+        const explicitOverwriteSym = Boolean(
+          effectiveSymbol && /^:?(?:overwrite|create)$/i.test(effectiveSymbol.trim()),
+        );
+        if (
+          fileExistsNow &&
+          createPayload === "" &&
+          !item.overwrite &&
+          !options.overwrite &&
+          !item.force &&
+          !options.force &&
+          !item.create &&
+          !explicitOverwriteSym
+        ) {
+          throw new Error(
+            `Refusing to overwrite existing file '${splitTarget.filePath}' with empty content without --overwrite or ':overwrite'.`,
+          );
+        }
         const createRes = await createFile(fullPath, {
           code: createPayload,
-          overwrite: true,
+          overwrite: Boolean(
+            fileExistsNow ||
+              item.overwrite ||
+              options.overwrite ||
+              item.force ||
+              options.force ||
+              explicitOverwriteSym,
+          ),
           dryRun: itemDryRun,
           idioms: item.idioms ?? options.idioms,
-          projectRoot: itemProjectRoot,
+          inlineIdioms: item.inlineIdioms ?? options.inlineIdioms,
+          idiom: item.idiom ?? options.idiom,
+          projectRoot: rootForItem,
           suppressTelemetry: true,
         });
         if (itemDryRun) {
@@ -8761,7 +8970,7 @@ export async function spliceBatch(
         results.push({
           success: true,
           filePath: createRes.filePath,
-          symbol: item.symbol || ":create",
+          symbol: effectiveSymbol || ":create",
           modifiedCode: createRes.nativeCode,
           newFileContent: createRes.nativeCode,
           newAiceSource: createRes.aiceInput,
@@ -8773,13 +8982,18 @@ export async function spliceBatch(
 
       const res = await splice(fullPath, {
         ...item,
+        symbol: effectiveSymbol,
         code: resolvedCode,
         insertAfter: item.insertAfter ?? item.insert_after,
         insertBefore: item.insertBefore ?? item.insert_before,
-        projectRoot: itemProjectRoot,
+        projectRoot: rootForItem,
         dryRun: itemDryRun,
         compile: item.compile ?? options.compile,
         idioms: item.idioms ?? options.idioms,
+        inlineIdioms: item.inlineIdioms ?? options.inlineIdioms,
+        idiom: item.idiom ?? options.idiom,
+        overwrite: item.overwrite ?? options.overwrite,
+        force: item.force ?? options.force,
         preserveDocs: item.preserveDocs ?? options.preserveDocs,
         sourceOverride: itemDryRun ? virtualFs.get(fullPath) : undefined,
         suppressTelemetry: true,

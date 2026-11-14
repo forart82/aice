@@ -1042,8 +1042,7 @@ export async function diffFiles(
     newSource = await fs.promises.readFile(resolvedOldPath, "utf-8");
 
     try {
-      const gitRoot =
-        options.projectRoot || findProjectRoot(path.dirname(resolvedOldPath), process.cwd());
+      const gitRoot = resolveDiffPatchProjectRoot(resolvedOldPath, options.projectRoot);
       const relPath = path.relative(gitRoot, resolvedOldPath).replace(/\\/g, "/");
       const gitRes = spawnSync("git", ["show", `HEAD:${relPath}`], {
         cwd: gitRoot,
@@ -1078,6 +1077,21 @@ export async function diffFiles(
   });
 }
 
+function isSameOrDescendantPath(parentDir: string, targetPath: string): boolean {
+  const rel = path.relative(path.resolve(parentDir), path.resolve(targetPath));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+function resolveDiffPatchProjectRoot(filePath: string, explicitProjectRoot?: string): string {
+  if (explicitProjectRoot) {
+    return path.resolve(explicitProjectRoot);
+  }
+  const targetDir = path.dirname(path.resolve(filePath));
+  const cwd = process.cwd();
+  const fallback = isSameOrDescendantPath(cwd, filePath) ? cwd : targetDir;
+  return findProjectRoot(targetDir, fallback);
+}
+
 /**
  * Applies a unified diff or semantic AST symbol patch to a file on disk.
  * Atomically writes to disk unless dryRun is set, and re-compiles target if compile is requested.
@@ -1092,7 +1106,7 @@ export async function patchFile(
     throw new Error(`Target file not found: ${targetPath}`);
   }
 
-  const root = options.projectRoot || findProjectRoot(path.dirname(fullPath), process.cwd());
+  const root = resolveDiffPatchProjectRoot(fullPath, options.projectRoot);
   const config = loadProjectConfig(root);
   if (!isProjectAiceEnabled(config)) {
     throw new Error(AICE_DISABLED_MESSAGE);

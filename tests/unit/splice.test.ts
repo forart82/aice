@@ -12,10 +12,11 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
 import { program as cliProgram } from "../../src/cli.js";
-import { AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
+import { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
 import type { FunctionDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
-import { splice, spliceSource } from "../../src/tools/splice.js";
+import { createFile } from "../../src/tools/create.js";
+import { splice, spliceBatch, spliceSource } from "../../src/tools/splice.js";
 
 describe("AICE 2.0 AST Surgical Splice Engine (Step 19)", () => {
   describe("Splicing Top-Level Functions", () => {
@@ -819,6 +820,333 @@ fn funcF(): return 6
         const content = fs.readFileSync(surgicalFile, "utf-8");
         expect(content).toContain("return 100");
         expect(content).toContain("f2(): number { return 2; }");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("Unified Write / Splice Hardening & Benchmark Regression Suite", () => {
+    it("prevents data loss when splice/write is called on an existing file without payload or accidental empty payload", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "splice_dataloss_guard_"));
+      try {
+        const existing = path.join(tmpDir, "important.ts");
+        const origContent = "export const SECRET_KEY = 42;\n";
+        fs.writeFileSync(existing, origContent, "utf-8");
+
+        // 1. Missing code/body/edits/delete must reject and keep file intact
+        await expect(splice(existing, {})).rejects.toThrow(/Must provide replacement code/);
+        expect(fs.readFileSync(existing, "utf-8")).toBe(origContent);
+
+        // 2. Empty string on existing file without --overwrite / :overwrite must reject
+        await expect(splice(existing, { code: "" })).rejects.toThrow(/Refusing to overwrite/);
+        expect(fs.readFileSync(existing, "utf-8")).toBe(origContent);
+
+        // 3. Explicit overwrite: true or ':overwrite' allows intentional truncation
+        await splice(existing, { code: "", overwrite: true });
+        expect(fs.readFileSync(existing, "utf-8")).toBe("");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("resolves config relative to external target paths even without local aice.config.json while cwd is disabled", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_external_nocfg_"));
+      try {
+        // Note: NO aice.config.json inside tmpDir!
+        const fileA = path.join(tmpDir, "alpha.ts");
+        const fileB = path.join(tmpDir, "beta.ts");
+
+        // 1. Multi-file --stdin stream mixing creation + surgical splice
+        const stream = [
+          `=== ${fileA} ===`,
+          "export function alphaFn(): number { return 10; }",
+          "export function keepFn(): number { return 99; }",
+          `=== ${fileB} ===`,
+          "export function betaFn(): number { return 20; }",
+        ].join("\n");
+        const createStreamRes = spawnSync("bun", ["./bin/aice.ts", "write", "--stdin"], {
+          input: stream,
+          encoding: "utf-8",
+        });
+        expect(createStreamRes.status).toBe(0);
+        expect(fs.existsSync(fileA)).toBe(true);
+        expect(fs.existsSync(fileB)).toBe(true);
+
+        // 2. Multi-target `outline` tolerates a missing path alongside valid paths
+        const missingFile = path.join(tmpDir, "ghost.ts");
+        const outlineRes = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "outline", fileA, missingFile],
+          { encoding: "utf-8" },
+        );
+        expect(outlineRes.status).toBe(0);
+        expect(outlineRes.stdout).toContain("alphaFn");
+        expect(outlineRes.stdout).toContain("// not found:");
+
+        // 3. Multi-target `context` resolves cross-file `-s "alphaFn,betaFn"` without aborting on file 1
+        const ctxRes = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "context", fileA, fileB, "-s", "alphaFn,betaFn"],
+          { encoding: "utf-8" },
+        );
+        expect(ctxRes.status).toBe(0);
+        expect(ctxRes.stdout).toContain("alphaFn");
+        expect(ctxRes.stdout).toContain("betaFn");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("supports CLI --delete flag before <file>, inline file:symbol, leading-colon selectors, and positional code recovery", () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cli_ergonomics_"));
+      try {
+        const routerFile = path.join(tmpDir, "telemetry_router.ts");
+        fs.writeFileSync(
+          routerFile,
+          [
+            "export function activeFlush(): number { return 1; }",
+            "export function legacySpanFlush(): number { return 0; }",
+            "export function extraLegacy(): number { return -1; }",
+          ].join("\n") + "\n",
+          "utf-8",
+        );
+
+        // 1. RW-10 regression: `--delete` placed right before `<file>` (`-s sym --delete file.ts`)
+        const delRes1 = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "splice", "--no-idioms", "-s", "legacySpanFlush", "--delete", routerFile],
+          { encoding: "utf-8" },
+        );
+        expect(delRes1.status).toBe(0);
+        expect(fs.readFileSync(routerFile, "utf-8")).not.toContain("legacySpanFlush");
+        expect(fs.readFileSync(routerFile, "utf-8")).toContain("activeFlush");
+
+        // 2. `--delete file.ts:extraLegacy` inline selector form
+        const delRes2 = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "splice", "--delete", `${routerFile}:extraLegacy`],
+          { encoding: "utf-8" },
+        );
+        expect(delRes2.status).toBe(0);
+        expect(fs.readFileSync(routerFile, "utf-8")).not.toContain("extraLegacy");
+
+        // 3. RW-06 regression: inline `file:symbol` positional target + leading `:eof`, `:imports`, `:L1-L1`
+        const inlineSymRes = spawnSync(
+          "bun",
+          [
+            "./bin/aice.ts",
+            "splice",
+            `${routerFile}:activeFlush`,
+            "-c",
+            "export function activeFlush(): number { return 777; }",
+          ],
+          { encoding: "utf-8" },
+        );
+        expect(inlineSymRes.status).toBe(0);
+        expect(fs.readFileSync(routerFile, "utf-8")).toContain("777");
+
+        const eofRes = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "write", routerFile, "-s", ":eof", "-c", "export const TAIL = true;"],
+          { encoding: "utf-8" },
+        );
+        expect(eofRes.status).toBe(0);
+        expect(fs.readFileSync(routerFile, "utf-8")).toContain("export const TAIL = true;");
+
+        const impRes = spawnSync(
+          "bun",
+          [
+            "./bin/aice.ts",
+            "write",
+            routerFile,
+            "-s",
+            ":imports",
+            "-c",
+            "import * as path from 'node:path';",
+          ],
+          { encoding: "utf-8" },
+        );
+        expect(impRes.status).toBe(0);
+        expect(fs.readFileSync(routerFile, "utf-8")).toContain("import * as path from 'node:path';");
+
+        // 4. Positional code trap recovery: `aice write <file> "export const X = 5;"` (without -c)
+        const posFile = path.join(tmpDir, "positional.ts");
+        const posRes = spawnSync(
+          "bun",
+          [
+            "./bin/aice.ts",
+            "write",
+            posFile,
+            "export const POSITIONAL_OK = 55;",
+            "--json",
+          ],
+          { encoding: "utf-8" },
+        );
+        expect(posRes.status).toBe(0);
+        const parsedJson = JSON.parse(posRes.stdout);
+        expect(parsedJson.success).toBe(true);
+        expect(fs.readFileSync(posFile, "utf-8")).toContain("export const POSITIONAL_OK = 55;");
+
+        // 5. `--stdin` JSON array mixing idiom registration + splice items (#23)
+        const jsonBatchFile = path.join(tmpDir, "json_batch.ts");
+        const stdinJsonRes = spawnSync(
+          "bun",
+          ["./bin/aice.ts", "write", "--stdin", "--idioms", "--json"],
+          {
+            input: JSON.stringify([
+              { action: "idiom", name: "$addTen", params: ["$0"], body: "($0 + 10)" },
+              {
+                file: jsonBatchFile,
+                content: "export function plusTen(v: number): number { return $addTen(v); }\n",
+              },
+            ]),
+            encoding: "utf-8",
+          },
+        );
+        expect(stdinJsonRes.status).toBe(0);
+        expect(fs.readFileSync(jsonBatchFile, "utf-8")).toContain("(v + 10)");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("compiles Python classes without duplicate 'self' and promotes terminal return expressions (RW-02 regression)", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "py_class_parity_"));
+      try {
+        const pyFile = path.join(tmpDir, "limiter.py");
+        const aicePyClass = [
+          "pub class SlidingWindowLimiter:",
+          "  fn __init__(self, limit: int):",
+          "    self.limit = limit",
+          "    self._buckets = {}",
+          "",
+          "  pub fn allow(self, tenant_id: str, cost: int = 1) -> bool:",
+          "    used = self._buckets.get(tenant_id, 0)",
+          "    if used + cost <= self.limit:",
+          "      self._buckets[tenant_id] = used + cost",
+          "      return True",
+          "    False",
+        ].join("\n");
+
+        // 1. Greenfield via splice/write (create parity)
+        const res = await splice(pyFile, { code: aicePyClass });
+        expect(res.success).toBe(true);
+        const pyOut = fs.readFileSync(pyFile, "utf-8");
+        expect(pyOut).toContain("def __init__(self, limit: int):");
+        expect(pyOut).not.toContain("self, self");
+        expect(pyOut).toContain("def allow(self, tenant_id: str, cost: int = 1) -> bool:");
+        expect(pyOut).toContain("return False");
+
+        // 2. Surgical method splice with implicit return expression on existing Python class
+        await splice(pyFile, {
+          symbol: "SlidingWindowLimiter.allow",
+          code: [
+            "pub fn allow(self, tenant_id: str, cost: int = 1) -> bool:",
+            "  if cost <= 0:",
+            "    True",
+            "  else:",
+            "    cost <= self.limit",
+          ].join("\n"),
+        });
+        const updatedPy = fs.readFileSync(pyFile, "utf-8");
+        expect(updatedPy).not.toContain("self, self");
+        expect(updatedPy).toContain("return True");
+        expect(updatedPy).toContain("return cost <= self.limit");
+
+        // 3. Native Python with duplicate `self` is caught by pre-write syntax validation
+        await expect(
+          createFile(path.join(tmpDir, "bad.py"), {
+            code: "class Bad:\n    def broken(self, self, x: int) -> int:\n        return x\n",
+          }),
+        ).rejects.toThrow(/Duplicate parameter 'self'/);
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("enforces pre-write syntax validation on overwrite and supports @idiom pre-headers & @replace-docs in spliceBatch streams", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "stream_parity_"));
+      try {
+        const existingTs = path.join(tmpDir, "service.ts");
+        fs.writeFileSync(
+          existingTs,
+          "/** Old JSDoc that should be dropped */\nexport function calc(x: number): number {\n  return x;\n}\n",
+          "utf-8",
+        );
+
+        const newCss = path.join(tmpDir, "theme.css");
+        const stream = [
+          "@idiom $clampPos($0) = Math.max(0, $0)",
+          "",
+          `=== ${newCss} ===`,
+          ".panel { d: flex; fd: column; g: 12px; bg: #070810; }",
+          `=== ${existingTs}:calc @replace-docs ===`,
+          "export function calc(x: number): number {",
+          "  return $clampPos(x) * 2;",
+          "}",
+        ].join("\n");
+
+        const batchRes = await spliceBatch(stream, { idioms: true });
+        expect(batchRes.success).toBe(true);
+        const cssOut = fs.readFileSync(newCss, "utf-8");
+        expect(cssOut).toContain("display: flex;");
+        expect(cssOut).toContain("flex-direction: column;");
+
+        const tsOut = fs.readFileSync(existingTs, "utf-8");
+        expect(tsOut).toContain("Math.max(0, x) * 2");
+        expect(tsOut).not.toContain("Old JSDoc that should be dropped");
+
+        // Pre-write validation still rejects broken syntax on overwrite!
+        await expect(
+          splice(existingTs, {
+            code: "export function broken(((: number { return ;;;",
+            overwrite: true,
+          }),
+        ).rejects.toThrow(/syntax|compile/i);
+        // Existing valid file remains untouched after rejected overwrite
+        expect(fs.readFileSync(existingTs, "utf-8")).toContain("Math.max(0, x) * 2");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps AICE_MCP_TOOLS at 7 tools while supporting content alias, inline filePath:symbol, and inlineIdioms in aice_write", async () => {
+      expect(AICE_MCP_TOOLS).toHaveLength(7);
+      const spliceSchema = AICE_MCP_TOOLS.find((t) => t.name === "aice_splice");
+      expect(spliceSchema?.description).toContain("aice_write");
+      expect(spliceSchema?.inputSchema.properties).toHaveProperty("content");
+      expect(spliceSchema?.inputSchema.properties).toHaveProperty("overwrite");
+      expect(spliceSchema?.inputSchema.properties).toHaveProperty("inlineIdioms");
+
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "mcp_parity_"));
+      try {
+        // No aice.config.json in tmpDir!
+        const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+
+        const createRes = (await server.handleRequest(201, "tools/call", {
+          name: "aice_write",
+          arguments: {
+            path: "sub/math.ts",
+            content:
+              "export function doubleIt(n: number): number { return n * 2; }\nexport function keepMe(): number { return 1; }\n",
+          },
+        })) as any;
+        expect(createRes.isError).toBeFalsy();
+
+        const inlineRes = (await server.handleRequest(202, "tools/call", {
+          name: "aice_write",
+          arguments: {
+            filePath: "sub/math.ts:doubleIt",
+            inlineIdioms: ["$triple($0)=($0 * 3)"],
+            idioms: true,
+            content: "export function doubleIt(n: number): number { return $triple(n); }",
+          },
+        })) as any;
+        expect(inlineRes.isError).toBeFalsy();
+        const finalCode = fs.readFileSync(path.join(tmpDir, "sub", "math.ts"), "utf-8");
+        expect(finalCode).toContain("n * 3");
+        expect(finalCode).toContain("keepMe(): number { return 1; }");
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

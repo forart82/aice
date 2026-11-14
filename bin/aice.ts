@@ -56,6 +56,26 @@ function writeTargetFile(outPath: string, content: string): void {
   fs.writeFileSync(outPath, content, "utf-8");
 }
 
+function resolveCliProjectRoot(targetPath: string): string {
+  const cwd = path.resolve(process.cwd());
+  const resolvedPath = path.resolve(cwd, targetPath);
+  let startDir = resolvedPath;
+  if (fs.existsSync(resolvedPath)) {
+    try {
+      if (!fs.statSync(resolvedPath).isDirectory()) {
+        startDir = path.dirname(resolvedPath);
+      }
+    } catch {
+      startDir = path.dirname(resolvedPath);
+    }
+  } else {
+    startDir = path.dirname(resolvedPath);
+  }
+  const fallback = isSameOrDescendant(cwd, resolvedPath) ? cwd : startDir;
+  const rawRoot = findProjectRoot(startDir, fallback);
+  return isSameOrDescendant(cwd, resolvedPath) && !isSameOrDescendant(cwd, rawRoot) ? cwd : rawRoot;
+}
+
 function resolveExplicitOrPolymorphicTarget(targetPath: string | undefined): {
   resolvedPath: string;
   projectRoot: string;
@@ -64,21 +84,7 @@ function resolveExplicitOrPolymorphicTarget(targetPath: string | undefined): {
   if (targetPath !== undefined && targetPath.trim().length > 0) {
     const cwd = path.resolve(process.cwd());
     const resolvedPath = path.resolve(cwd, targetPath.trim());
-    let startDir = resolvedPath;
-    if (fs.existsSync(resolvedPath)) {
-      try {
-        if (!fs.statSync(resolvedPath).isDirectory()) {
-          startDir = path.dirname(resolvedPath);
-        }
-      } catch {
-        startDir = path.dirname(resolvedPath);
-      }
-    } else {
-      startDir = path.dirname(resolvedPath);
-    }
-    const rawRoot = findProjectRoot(startDir, cwd);
-    const projectRoot =
-      isSameOrDescendant(cwd, resolvedPath) && !isSameOrDescendant(cwd, rawRoot) ? cwd : rawRoot;
+    const projectRoot = resolveCliProjectRoot(resolvedPath);
     const config = loadProjectConfig(projectRoot);
     return { resolvedPath, projectRoot, config };
   }
@@ -129,10 +135,10 @@ export async function executeCompile(
         process.exit(1);
       }
 
-      const projectRoot = resolved.projectRoot;
-      const config = resolved.config;
-      const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(path.resolve(file))));
-      if (!isProjectAiceEnabled(projectConfig) || !isProjectAiceEnabled(config)) {
+      const projectRoot = resolveCliProjectRoot(file);
+      const config = loadProjectConfig(projectRoot);
+      const projectConfig = config;
+      if (!isProjectAiceEnabled(projectConfig)) {
         console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
         process.exit(1);
       }
@@ -535,7 +541,7 @@ program
         }
 
         const mod = parse(source, file);
-        const projectConfig = loadProjectConfig(findProjectRoot(path.dirname(fullPath)));
+        const projectConfig = loadProjectConfig(resolveCliProjectRoot(fullPath));
         if (!isProjectAiceEnabled(projectConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
@@ -658,7 +664,7 @@ program
         process.exit(1);
       }
 
-      const projectRoot = findProjectRoot(path.dirname(fullPath));
+      const projectRoot = resolveCliProjectRoot(fullPath);
       const projectConfig = loadProjectConfig(projectRoot);
       if (!isProjectAiceEnabled(projectConfig)) {
         console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -711,7 +717,7 @@ program
         process.exit(1);
       }
 
-      const projectRoot = findProjectRoot(path.dirname(fullPath));
+      const projectRoot = resolveCliProjectRoot(fullPath);
       const projectConfig = loadProjectConfig(projectRoot);
       if (!isProjectAiceEnabled(projectConfig)) {
         console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -752,7 +758,9 @@ program
   .option("--generate-schemas [dir]", "Generate Antigravity MCP tool JSON schema files")
   .action(async (options: { generateSchemas?: string | boolean }) => {
     if (options.generateSchemas) {
-      const { AICE_MCP_TOOLS, AICE_VERSION } = await import("../src/mcp/server.js");
+      const { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AICE_VERSION } = await import(
+        "../src/mcp/server.js"
+      );
       const os = await import("node:os");
       const homeDir = process.env.AICE_AGENT_HOME
         ? path.resolve(process.env.AICE_AGENT_HOME)
@@ -766,6 +774,13 @@ program
         fs.writeFileSync(
           path.join(targetDir, `${tool.name}.json`),
           JSON.stringify({ ...tool, version: AICE_VERSION }, null, 2) + "\n",
+          "utf-8",
+        );
+      }
+      if (AICE_WRITE_TOOL) {
+        fs.writeFileSync(
+          path.join(targetDir, `${AICE_WRITE_TOOL.name}.json`),
+          JSON.stringify({ ...AICE_WRITE_TOOL, version: AICE_VERSION }, null, 2) + "\n",
           "utf-8",
         );
       }
@@ -844,7 +859,7 @@ program
           }
         }
         const isFile = fs.statSync(fullTarget).isFile();
-        const projectRoot = findProjectRoot(isFile ? path.dirname(fullTarget) : fullTarget);
+        const projectRoot = resolveCliProjectRoot(fullTarget);
         const projectConfig = loadProjectConfig(projectRoot);
         if (!isProjectAiceEnabled(projectConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1125,12 +1140,13 @@ Examples:
         let totalFilesCount = 0;
 
         const resolvedTargets: Array<{ raw: string | undefined; abs: string; root: string }> = [];
+        const missingOutlineTargets: string[] = [];
         for (const targetPath of rawTargets) {
           const resolved = resolveExplicitOrPolymorphicTarget(targetPath);
           const outlineTarget = resolved.resolvedPath;
           if (!fs.existsSync(outlineTarget)) {
-            console.error(`❌ Error: Path not found: ${targetPath ?? outlineTarget}`);
-            process.exit(1);
+            missingOutlineTargets.push(targetPath ?? outlineTarget);
+            continue;
           }
           if (!isProjectAiceEnabled(resolved.config)) {
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1141,6 +1157,10 @@ Examples:
             abs: outlineTarget,
             root: resolved.projectRoot,
           });
+        }
+        if (resolvedTargets.length === 0) {
+          console.error(`❌ Error: Path not found: ${missingOutlineTargets.join(", ")}`);
+          process.exit(1);
         }
 
         const hasDirectoryTarget = resolvedTargets.some((t) => fs.statSync(t.abs).isDirectory());
@@ -1249,6 +1269,16 @@ Examples:
           }
         }
 
+        if (missingOutlineTargets.length > 0) {
+          for (const missingPath of missingOutlineTargets) {
+            if (options.json) {
+              allJsonItems.push({ file: missingPath, error: "not found", symbols: [] });
+            } else {
+              console.log(`\n// not found: ${missingPath}`);
+            }
+          }
+        }
+
         if (options.json) {
           console.log(JSON.stringify(allJsonItems, null, 2));
         } else if (options.stats) {
@@ -1332,16 +1362,22 @@ program
   .command("splice")
   .alias("write")
   .description(
-    "AST surgical updates: replace, insert, or delete declarations with 90% token reduction",
+    "Unified write, auto-create, full-overwrite, and AST surgical updates with 90% token reduction",
   )
-  .argument("[path]", "Path to source file (optional when --batch or -f is provided)")
-  .argument("[symbol]", "Target symbol identifier (optional shorthand for -s/--symbol)")
+  .argument(
+    "[path]",
+    "Path to target file or inline file:selector (optional when --batch, --stdin stream, or -f is provided)",
+  )
+  .argument(
+    "[symbol]",
+    "Target symbol selector (optional shorthand for -s/--symbol; omit to create or overwrite file)",
+  )
   .option("-f, --file <path>", "Path to source file")
   .option(
     "-s, --symbol <symbol>",
-    "Target selector: Class.method, test title/ID (TC-MENU-001), Markdown Heading, Lstart-Lend, eof, or imports",
+    "Target selector: Class.method, test title/ID (TC-MENU-001), Markdown Heading, Lstart-Lend, eof, imports, or :overwrite",
   )
-  .option("-c, --code <code>", "Replacement AICE or native declaration snippet")
+  .option("-c, --code <code>", "Replacement or full-file AICE/native payload")
   .option("-t, --template <code>", "Alias for --code")
   .option("-b, --body <code>", "Replacement body snippet (for functions/methods)")
   .option("--from <file>", "Read replacement payload from a file")
@@ -1358,11 +1394,20 @@ program
     "Execute atomic multi-file batch splice from JSON file or JSON string",
   )
   .option("--create", "Create target native file from scratch if it does not exist or overwrite")
+  .option("--overwrite", "Allow full-file replacement (including empty truncation)")
+  .option("--force", "Force write/splice even when overwriting existing files")
+  .option(
+    "--idiom <spec>",
+    "Define an inline idiom (e.g. '$clamp($0,$1,$2)=Math.min(Math.max($0,$1),$2)'), repeatable",
+    (val: string, prev: string[]) => [...prev, val],
+    [] as string[],
+  )
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
   .option("--in-place", "Apply splice mutation directly to the file on disk (default)")
   .option("--dry-run", "Output result without modifying file")
   .option("--diff", "Display unified diff")
+  .option("--json", "Output machine-readable JSON result")
   .option("--compile", "Automatically recompile target after splice")
   .option(
     "--no-preserve-docs",
@@ -1372,8 +1417,10 @@ program
     "after",
     `
 Examples:
-  • Multi-block heredoc stream across 33 extensions (:Class.method, :testId, :Heading, :Lstart-Lend, :eof, :imports):
+  • Multi-block heredoc stream across 33 extensions (auto-creates new files + surgical splices in 1 call):
       aice splice --stdin << 'EOF'
+      === src/new_helper.ts ===
+      export const BONUS_MULTIPLIER = 2;
       === src/app.ts:GameApp.init ===
       public init(): void { this.ready = true; }
       === tests/app.test.ts:TC-MENU-001 ===
@@ -1408,25 +1455,167 @@ Examples:
         edits?: string;
         batch?: string;
         create?: boolean;
+        overwrite?: boolean;
+        force?: boolean;
+        idiom?: string[];
         idioms?: boolean;
         dryRun?: boolean;
         diff?: boolean;
+        json?: boolean;
         compile?: boolean;
         preserveDocs?: boolean;
       },
     ) => {
       try {
-        const { parseMultiBlockSpliceStream, splice, spliceBatch } = await import(
-          "../src/tools/splice.js"
-        );
-        if (options.batch) {
-          const batchProjectRoot = findProjectRoot(process.cwd());
+        const { parseMultiBlockSpliceStream, splice, spliceBatch, splitInlineFileSelector } =
+          await import("../src/tools/splice.js");
+
+        const inlineIdiomList =
+          options.idiom && options.idiom.length > 0 ? options.idiom : undefined;
+
+        const executeBatchSpliceAndIdioms = async (
+          spliceItems: BatchSpliceItem[],
+          idiomItems: Array<Record<string, unknown>> = [],
+        ): Promise<void> => {
+          const firstRawFp =
+            spliceItems[0]?.filePath || spliceItems[0]?.file || spliceItems[0]?.path || "";
+          const firstCleanFp = firstRawFp
+            ? splitInlineFileSelector(firstRawFp, process.cwd()).filePath
+            : "";
+          const batchProjectRoot = firstCleanFp
+            ? resolveCliProjectRoot(firstCleanFp)
+            : findProjectRoot(process.cwd());
           const batchProjectConfig = loadProjectConfig(batchProjectRoot);
           if (!isProjectAiceEnabled(batchProjectConfig)) {
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
           }
           const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
+
+          const combinedInlineIdioms = [...(inlineIdiomList ?? [])];
+          let idiomSummary:
+            | { updatedIdioms: number; totalOcc: number; modifiedFiles: number }
+            | undefined;
+          if (idiomItems.length > 0) {
+            const { updateProjectIdiom } = await import("../src/idioms/index.js");
+            let totalOcc = 0;
+            const modFilesSet = new Set<string>();
+            for (const entry of idiomItems) {
+              const rawIdName = String(entry.name || entry.idiom || "").trim();
+              const idCode = String(
+                entry.code ??
+                  entry.newTemplate ??
+                  entry.newTemplateAice ??
+                  entry.template ??
+                  entry.templateAice ??
+                  entry.aice ??
+                  entry.body ??
+                  entry.content ??
+                  entry.replacement ??
+                  "",
+              );
+              const paramsStr = Array.isArray(entry.params)
+                ? entry.params
+                    .map((p) =>
+                      typeof p === "string"
+                        ? p.trim()
+                        : String((p as Record<string, unknown>)?.name ?? "").trim(),
+                    )
+                    .filter(Boolean)
+                    .join(",")
+                : typeof entry.params === "string"
+                  ? entry.params.trim()
+                  : undefined;
+
+              if (rawIdName && idCode) {
+                const inlineSpec = rawIdName.includes("(")
+                  ? `${rawIdName}=${idCode}`
+                  : paramsStr
+                    ? `${rawIdName}(${paramsStr})=${idCode}`
+                    : `${rawIdName}=${idCode}`;
+                combinedInlineIdioms.push(inlineSpec);
+
+                const cleanBaseName = rawIdName.replace(/\([^)]*\)$/, "").trim();
+                const normName = cleanBaseName.startsWith("$")
+                  ? cleanBaseName
+                  : `$${cleanBaseName}`;
+                const bareName = normName.slice(1);
+                const existsInProject =
+                  Boolean(batchProjectConfig.idioms) &&
+                  (Object.hasOwn(batchProjectConfig.idioms!, normName) ||
+                    Object.hasOwn(batchProjectConfig.idioms!, bareName));
+
+                if (existsInProject) {
+                  const r = await updateProjectIdiom(batchProjectRoot, normName, idCode, {
+                    dryRun: Boolean(options.dryRun),
+                    params: paramsStr,
+                  });
+                  totalOcc += r.updatedOccurrences;
+                  for (const mf of r.modifiedFiles) modFilesSet.add(mf);
+                }
+              }
+            }
+            idiomSummary = {
+              updatedIdioms: idiomItems.length,
+              totalOcc,
+              modifiedFiles: modFilesSet.size,
+            };
+          }
+
+          let batchRes: Awaited<ReturnType<typeof spliceBatch>> | undefined;
+          if (spliceItems.length > 0) {
+            batchRes = await spliceBatch(spliceItems, {
+              dryRun: options.dryRun,
+              compile: options.compile,
+              idioms: batchEffectiveIdioms,
+              inlineIdioms: combinedInlineIdioms.length > 0 ? combinedInlineIdioms : undefined,
+              overwrite: Boolean(options.overwrite || options.force),
+              force: options.force,
+              preserveDocs: options.preserveDocs,
+            });
+          }
+
+          if (options.json) {
+            console.log(
+              JSON.stringify(
+                idiomSummary ? { ...(batchRes ?? { success: true }), idioms: idiomSummary } : batchRes,
+                null,
+                2,
+              ),
+            );
+            return;
+          }
+
+          if (batchRes) {
+            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
+            const prefix = options.dryRun ? "[Dry Run] ✔" : "✔";
+            const itemLabels = batchRes.results
+              .slice(0, 6)
+              .map((r) => `${path.basename(r.filePath)}${r.symbol ? `:${r.symbol}` : ""}`)
+              .join(", ");
+            const suffix =
+              batchRes.results.length > 6
+                ? ` [${itemLabels}, +${batchRes.results.length - 6} more]`
+                : itemLabels
+                  ? ` [${itemLabels}]`
+                  : "";
+            console.log(
+              `${prefix} Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)${suffix}`,
+            );
+            if (options.dryRun) {
+              for (const r of batchRes.results) {
+                console.log(`\n// === ${r.filePath} ===\n${r.modifiedCode}`);
+              }
+            }
+          }
+          if (idiomSummary) {
+            console.log(
+              `✔ Batch updated ${idiomSummary.updatedIdioms} idiom(s): ${idiomSummary.totalOcc} occurrence(s) across ${idiomSummary.modifiedFiles} file(s)`,
+            );
+          }
+        };
+
+        if (options.batch) {
           const batchCandidatePath = path.resolve(process.cwd(), options.batch);
           const rawJson =
             fs.existsSync(batchCandidatePath) && fs.statSync(batchCandidatePath).isFile()
@@ -1441,108 +1630,138 @@ Examples:
             }
           }
           const spliceItems = allEntries.filter(
-            (e) => typeof e.file === "string" || typeof e.filePath === "string",
+            (e) =>
+              typeof e.file === "string" ||
+              typeof e.filePath === "string" ||
+              typeof e.path === "string",
           ) as unknown as BatchSpliceItem[];
           const idiomItems = allEntries.filter(
             (e) =>
-              !e.file && !e.filePath && (typeof e.name === "string" || typeof e.idiom === "string"),
+              !e.file &&
+              !e.filePath &&
+              !e.path &&
+              (typeof e.name === "string" || typeof e.idiom === "string"),
           );
-          if (spliceItems.length > 0) {
-            const batchRes = await spliceBatch(spliceItems, {
-              dryRun: options.dryRun,
-              compile: options.compile,
-              idioms: batchEffectiveIdioms,
-              preserveDocs: options.preserveDocs,
-              projectRoot: batchProjectRoot,
-            });
-            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
-            console.log(
-              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
-            );
-          }
-          if (idiomItems.length > 0) {
-            const { updateProjectIdiom } = await import("../src/idioms/index.js");
-            let totalOcc = 0;
-            const modFilesSet = new Set<string>();
-            for (const entry of idiomItems) {
-              const idName = String(entry.name || entry.idiom || "");
-              const idCode = String(
-                entry.code ??
-                  entry.newTemplate ??
-                  entry.newTemplateAice ??
-                  entry.template ??
-                  entry.templateAice ??
-                  entry.aice ??
-                  entry.body ??
-                  entry.content ??
-                  entry.replacement ??
-                  "",
-              );
-              const r = await updateProjectIdiom(process.cwd(), idName, idCode, {
-                dryRun: Boolean(options.dryRun),
-                params: typeof entry.params === "string" ? entry.params : undefined,
-              });
-              totalOcc += r.updatedOccurrences;
-              for (const mf of r.modifiedFiles) modFilesSet.add(mf);
-            }
-            console.log(
-              `✔ Batch updated ${idiomItems.length} idiom(s): ${totalOcc} occurrence(s) across ${modFilesSet.size} file(s)`,
-            );
-          }
+          await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
           return;
         }
 
-        let targetPath = rawTargetPath ?? options.file;
-        if (positionalSymbol && !options.symbol) {
+        // Recover when `-d/--delete` (optional arg) swallowed `<file>` or `<file>:<symbol>`:
+        // e.g. `aice splice -s sym --delete file.ts` or `aice splice --delete file.ts:sym` or `aice splice --delete file.ts sym`
+        if (typeof options.delete === "string") {
+          const delSplit = splitInlineFileSelector(options.delete, process.cwd());
+          const delCandFull = path.resolve(process.cwd(), delSplit.filePath);
           if (
-            targetPath &&
-            !fs.existsSync(path.resolve(process.cwd(), targetPath)) &&
-            fs.existsSync(path.resolve(process.cwd(), positionalSymbol))
+            !rawTargetPath &&
+            !options.file &&
+            (fs.existsSync(delCandFull) || Boolean(delSplit.inlineSelector))
           ) {
-            options.symbol = targetPath;
-            targetPath = positionalSymbol;
-          } else {
-            options.symbol = positionalSymbol;
+            rawTargetPath = delSplit.filePath;
+            if (delSplit.inlineSelector && !options.symbol) {
+              options.symbol = delSplit.inlineSelector;
+            }
+            options.delete = true;
+          } else if (
+            rawTargetPath &&
+            !options.file &&
+            !fs.existsSync(
+              path.resolve(
+                process.cwd(),
+                splitInlineFileSelector(rawTargetPath, process.cwd()).filePath,
+              ),
+            ) &&
+            fs.existsSync(delCandFull)
+          ) {
+            if (!options.symbol) {
+              options.symbol = rawTargetPath;
+            }
+            rawTargetPath = delSplit.filePath;
+            if (delSplit.inlineSelector && !options.symbol) {
+              options.symbol = delSplit.inlineSelector;
+            }
+            options.delete = true;
           }
         }
+
+        let targetPath = rawTargetPath ?? options.file;
+        if (targetPath && targetPath !== "-") {
+          const trimmedTarget = targetPath.trim();
+          if (!options.symbol && /:+$/.test(trimmedTarget)) {
+            console.error(
+              `❌ Error: Malformed target '${trimmedTarget}': missing <symbol>, L<start>-L<end>, :overwrite, or :eof after ':'.`,
+            );
+            process.exit(1);
+          }
+          const splitTarget = splitInlineFileSelector(targetPath, process.cwd());
+          targetPath = splitTarget.filePath;
+          if (splitTarget.inlineSelector && !options.symbol) {
+            options.symbol = splitTarget.inlineSelector;
+          }
+        }
+
+        let symbolCameFromPositional = false;
+        if (positionalSymbol) {
+          if (
+            options.symbol &&
+            options.code === undefined &&
+            options.template === undefined &&
+            options.body === undefined &&
+            !options.from &&
+            !options.stdin &&
+            !options.delete &&
+            !options.edits
+          ) {
+            options.code = positionalSymbol;
+          } else if (!options.symbol) {
+            if (
+              targetPath &&
+              !fs.existsSync(path.resolve(process.cwd(), targetPath)) &&
+              fs.existsSync(path.resolve(process.cwd(), positionalSymbol))
+            ) {
+              options.symbol = targetPath;
+              targetPath = positionalSymbol;
+            } else {
+              options.symbol = positionalSymbol;
+              symbolCameFromPositional = true;
+            }
+          }
+        }
+
         if (!targetPath || targetPath === "-") {
           const rawCrossStream =
             options.code ??
             options.template ??
             (await readStdin(Boolean(options.stdin || targetPath === "-")));
           if (rawCrossStream && rawCrossStream.trim().length > 0) {
-            const batchProjectRoot = findProjectRoot(process.cwd());
-            const batchProjectConfig = loadProjectConfig(batchProjectRoot);
-            if (!isProjectAiceEnabled(batchProjectConfig)) {
-              console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
-              process.exit(1);
-            }
-            const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
             const parsedStream = parseMultiBlockSpliceStream(rawCrossStream);
-            let spliceItems: BatchSpliceItem[] | undefined = parsedStream?.batchItems;
-            if (!spliceItems || spliceItems.length === 0) {
-              try {
-                const parsedJson = JSON.parse(rawCrossStream.trim());
-                if (Array.isArray(parsedJson)) {
-                  spliceItems = parsedJson as BatchSpliceItem[];
-                }
-              } catch {
-                // ignore
-              }
-            }
-            if (spliceItems && spliceItems.length > 0) {
-              const batchRes = await spliceBatch(spliceItems, {
-                dryRun: options.dryRun,
-                compile: options.compile,
-                idioms: batchEffectiveIdioms,
-                preserveDocs: options.preserveDocs,
-                projectRoot: batchProjectRoot,
-              });
-              const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
-              console.log(
-                `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
-              );
+            if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
+              await executeBatchSpliceAndIdioms(parsedStream.batchItems);
               return;
+            }
+            try {
+              const parsedJson = JSON.parse(rawCrossStream.trim());
+              if (Array.isArray(parsedJson)) {
+                const allEntries = parsedJson as Array<Record<string, unknown>>;
+                const spliceItems = allEntries.filter(
+                  (e) =>
+                    typeof e.file === "string" ||
+                    typeof e.filePath === "string" ||
+                    typeof e.path === "string",
+                ) as unknown as BatchSpliceItem[];
+                const idiomItems = allEntries.filter(
+                  (e) =>
+                    !e.file &&
+                    !e.filePath &&
+                    !e.path &&
+                    (typeof e.name === "string" || typeof e.idiom === "string"),
+                );
+                if (spliceItems.length > 0 || idiomItems.length > 0) {
+                  await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
+                  return;
+                }
+              }
+            } catch {
+              // ignore
             }
           }
           const badHeader = rawCrossStream?.match(/^\s*={3,}\s*([^=\r\n]*?)\s*={3,}/m)?.[1]?.trim();
@@ -1550,15 +1769,15 @@ Examples:
             ? ` Malformed or incomplete header '=== ${badHeader} ==='.`
             : "";
           console.error(
-            `❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}\n` +
+            `❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath> ===' / '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}\n` +
               "Valid --stdin heredoc block examples:\n" +
-              "  1. Symbol replacement:\n" +
+              "  1. Full-file creation / overwrite:\n" +
+              "     === src/new_file.ts ===\n" +
+              "     export const READY = true;\n" +
+              "  2. Symbol replacement:\n" +
               "     === src/file.ts:ClassName.method ===\n" +
               "     public method(): void { ... }\n" +
-              "  2. Line-range replacement:\n" +
-              "     === src/file.ts:L10-L12 ===\n" +
-              "     const updated = true;\n" +
-              "  3. AST-scoped hunk splice (<<< / === / >>>):\n" +
+              "  3. Line-range or AST-scoped hunk splice:\n" +
               "     === src/file.ts:ClassName.method ===\n" +
               "     <<<\n" +
               "     const oldVal = 1;\n" +
@@ -1570,11 +1789,7 @@ Examples:
         }
 
         const fullSpliceTarget = path.resolve(process.cwd(), targetPath);
-        const spliceProjectRoot = findProjectRoot(
-          fs.existsSync(fullSpliceTarget) && fs.statSync(fullSpliceTarget).isDirectory()
-            ? fullSpliceTarget
-            : path.dirname(fullSpliceTarget),
-        );
+        const spliceProjectRoot = resolveCliProjectRoot(fullSpliceTarget);
         const spliceProjectConfig = loadProjectConfig(spliceProjectRoot);
         if (!isProjectAiceEnabled(spliceProjectConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1654,11 +1869,33 @@ Examples:
           const stdinContent = await readStdin(false);
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
-          } else {
+          } else if (symbolCameFromPositional && options.symbol) {
+            const trimmedPos = options.symbol.trim();
+            const withoutClone = trimmedPos.replace(/@clone\s*\([^)]*\)/gi, "");
+            const isPositionalCodePayload =
+              trimmedPos.includes("\n") ||
+              /[;{}]/.test(withoutClone) ||
+              /^={3,}\s*[^=]+={3,}/.test(trimmedPos) ||
+              /^(?:export\s+|import\s+|from\s+\S+\s+import\s+|pub\s+|fn\s+|async\s+|function\s+|def\s+|class\s+|struct\s+|interface\s+|enum\s+|const\s+|let\s+|var\s+|val\s+|mut\s+|package\s+|using\s+|namespace\s+|#include\b|#pragma\b|<!DOCTYPE\b|<html\b|<div\b|@idiom\b|@fn\b|\^fn\b|@cls\b|\^class\b)/.test(
+                trimmedPos,
+              );
+            if (isPositionalCodePayload) {
+              code = options.symbol;
+              options.symbol = undefined;
+            }
+          }
+          if (
+            code === undefined &&
+            options.body === undefined &&
+            !isPrimaryDelete &&
+            (!parsedEdits || parsedEdits.length === 0) &&
+            !(options.symbol && /@clone\b|\(clone\b/i.test(options.symbol))
+          ) {
             const symHint = options.symbol ? `:${options.symbol}` : ":<symbol>";
             console.error(
               `❌ Error: Empty or missing splice body for '=== ${targetPath}${symHint} ==='. Must provide --code, --from, --stdin, --body, --delete, or --edits.\n` +
                 `Valid heredoc syntax:\n` +
+                `  • Full file: aice write ${targetPath} --stdin << 'EOF'\n` +
                 `  • Symbol: === ${targetPath}:ClassName.method ===\n` +
                 `  • Line range: === ${targetPath}:L10-L12 ===\n` +
                 `  • Hunk: === ${targetPath}${symHint} === followed by <<< / === / >>>`,
@@ -1670,17 +1907,7 @@ Examples:
         if (!options.symbol && (!parsedEdits || parsedEdits.length === 0) && code) {
           const multiStream = parseMultiBlockSpliceStream(code, targetPath);
           if (multiStream?.batchItems && multiStream.batchItems.length > 0) {
-            const batchRes = await spliceBatch(multiStream.batchItems, {
-              dryRun: options.dryRun,
-              compile: options.compile,
-              idioms: effectiveSpliceIdioms,
-              preserveDocs: options.preserveDocs,
-              projectRoot: spliceProjectRoot,
-            });
-            const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
-            console.log(
-              `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`,
-            );
+            await executeBatchSpliceAndIdioms(multiStream.batchItems);
             return;
           }
           if (multiStream?.singleFileEdits && multiStream.singleFileEdits.length > 0) {
@@ -1726,6 +1953,9 @@ Examples:
           insertBefore: options.insertBefore,
           edits: parsedEdits,
           create: options.create,
+          overwrite: Boolean(options.overwrite || options.force),
+          force: options.force,
+          inlineIdioms: inlineIdiomList,
           idioms: effectiveSpliceIdioms,
           dryRun: options.dryRun,
           diff: options.diff,
@@ -1735,6 +1965,11 @@ Examples:
         };
 
         const result = await splice(fullSpliceTarget, spliceOpts);
+
+        if (options.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
 
         if (options.diff) {
           if (result.diff) {
@@ -1836,10 +2071,9 @@ program
           });
 
           const firstFp = items[0]?.filePath;
-          const batchProjectRoot = findProjectRoot(
-            firstFp ? path.dirname(firstFp) : process.cwd(),
-            process.cwd(),
-          );
+          const batchProjectRoot = firstFp
+            ? resolveCliProjectRoot(firstFp)
+            : findProjectRoot(process.cwd());
           const batchProjectConfig = loadProjectConfig(batchProjectRoot);
           if (!isProjectAiceEnabled(batchProjectConfig)) {
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1852,7 +2086,6 @@ program
             overwrite: Boolean(options.overwrite || options.force),
             idioms: batchEffectiveIdioms,
             inlineIdioms: options.idiom,
-            projectRoot: batchProjectRoot,
             surface: "cli",
           });
 
@@ -1928,10 +2161,9 @@ program
             const spliceStream = parseMultiBlockSpliceStream(rawInput);
             if (spliceStream?.batchItems && spliceStream.batchItems.length > 0) {
               const firstFp = spliceStream.batchItems[0]?.filePath;
-              const batchProjectRoot = findProjectRoot(
-                firstFp ? path.dirname(path.resolve(process.cwd(), firstFp)) : process.cwd(),
-                process.cwd(),
-              );
+              const batchProjectRoot = firstFp
+                ? resolveCliProjectRoot(firstFp)
+                : findProjectRoot(process.cwd());
               const batchProjectConfig = loadProjectConfig(batchProjectRoot);
               if (!isProjectAiceEnabled(batchProjectConfig)) {
                 console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -1944,7 +2176,8 @@ program
               const batchRes = await spliceBatch(spliceStream.batchItems, {
                 dryRun: options.dryRun,
                 idioms: batchEffectiveIdioms,
-                projectRoot: batchProjectRoot,
+                inlineIdioms: options.idiom,
+                overwrite: Boolean(options.overwrite || options.force),
               });
               if (options.json) {
                 console.log(JSON.stringify(batchRes, null, 2));
@@ -1984,7 +2217,7 @@ program
         }
 
         const fullTarget = path.resolve(process.cwd(), filePathArg);
-        const createProjectRoot = findProjectRoot(path.dirname(fullTarget), process.cwd());
+        const createProjectRoot = resolveCliProjectRoot(fullTarget);
         const createProjectConfig = loadProjectConfig(createProjectRoot);
         if (!isProjectAiceEnabled(createProjectConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
@@ -2152,6 +2385,9 @@ Examples:
       const rawTargets = expandedTargets;
       try {
         const results = [];
+        const missingContextTargets: string[] = [];
+        const multiTargetErrors: unknown[] = [];
+        const isMultiTarget = rawTargets.length > 1;
         for (const rawTarget of rawTargets) {
           let targetPath = rawTarget;
           let inlineSymbol: string | undefined;
@@ -2165,14 +2401,19 @@ Examples:
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
           }
+          if (isMultiTarget && !fs.existsSync(resolved.resolvedPath)) {
+            missingContextTargets.push(String(targetPath ?? resolved.resolvedPath));
+            continue;
+          }
           const explicitCallers = process.argv.includes("--callers")
             ? true
             : process.argv.includes("--no-callers") || options.callers === false
               ? false
               : undefined;
+          const effectiveSelector = inlineSymbol ?? options.symbol;
           const contextOpts: ContextOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
-            symbol: inlineSymbol ?? options.symbol,
+            symbol: effectiveSelector,
             idioms: options.idioms,
             includeCallers: explicitCallers,
             outlineTarget: !!options.outlineTarget,
@@ -2181,7 +2422,59 @@ Examples:
             stats: !!options.stats,
             projectRoot: resolved.projectRoot,
           };
-          results.push(await generateContext(resolved.resolvedPath, contextOpts));
+          try {
+            results.push(await generateContext(resolved.resolvedPath, contextOpts));
+          } catch (targetErr) {
+            if (!isMultiTarget) {
+              throw targetErr;
+            }
+            // When multiple files share `-s "SymA,SymB"`, try matching individual selectors present in this target
+            const commaSelectors =
+              !inlineSymbol && options.symbol && options.symbol.includes(",")
+                ? options.symbol
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)
+                : [];
+            let matchedSubset = false;
+            if (commaSelectors.length > 1) {
+              const subsetResults = [];
+              for (const subSel of commaSelectors) {
+                try {
+                  subsetResults.push(
+                    await generateContext(resolved.resolvedPath, {
+                      ...contextOpts,
+                      symbol: subSel,
+                    }),
+                  );
+                } catch {
+                  // selector lives in another target file
+                }
+              }
+              if (subsetResults.length > 0) {
+                results.push(
+                  subsetResults.length === 1
+                    ? subsetResults[0]!
+                    : mergeMultiContextResults(subsetResults, {
+                        outlineTarget: !!options.outlineTarget,
+                      }),
+                );
+                matchedSubset = true;
+              }
+            }
+            if (!matchedSubset) {
+              multiTargetErrors.push(targetErr);
+            }
+          }
+        }
+
+        if (results.length === 0) {
+          if (multiTargetErrors.length > 0) {
+            throw multiTargetErrors[0];
+          }
+          if (missingContextTargets.length > 0) {
+            throw new Error(`Path not found: ${missingContextTargets.join(", ")}`);
+          }
         }
 
         if (options.json) {
@@ -2191,6 +2484,9 @@ Examples:
             outlineTarget: !!options.outlineTarget,
           });
           console.log(merged.formattedBundle);
+          for (const mp of missingContextTargets) {
+            console.log(`// not found: ${mp}`);
+          }
           if (options.stats) {
             console.log("\n📊 Context Pack Token Telemetry:");
             console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
@@ -2201,6 +2497,9 @@ Examples:
         } else {
           for (const result of results) {
             console.log(result.formattedBundle);
+            for (const mp of missingContextTargets) {
+              console.log(`// not found: ${mp}`);
+            }
             if (options.stats) {
               console.log("\n📊 Context Pack Token Telemetry:");
               console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
@@ -2281,7 +2580,10 @@ program
         }
 
         const resolved = resolvePathTargets(targetPath);
-        if (!isProjectAiceEnabled(resolved.config)) {
+        const fmtCheckConfig = targetPath
+          ? resolveExplicitOrPolymorphicTarget(targetPath).config
+          : resolved.config;
+        if (!isProjectAiceEnabled(fmtCheckConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
         }
@@ -2359,7 +2661,8 @@ program
       try {
         const { diffFiles } = await import("../src/tools/diff-patch.js");
         const resolved = resolvePathTargets(oldPath);
-        if (!isProjectAiceEnabled(resolved.config)) {
+        const diffTargetInfo = oldPath ? resolveExplicitOrPolymorphicTarget(oldPath) : undefined;
+        if (!isProjectAiceEnabled(diffTargetInfo ? diffTargetInfo.config : resolved.config)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
         }
@@ -2652,7 +2955,7 @@ program
           return;
         }
 
-        const idiomsProjectRoot = findProjectRoot(targetDir);
+        const idiomsProjectRoot = resolveCliProjectRoot(targetDir);
         const idiomsProjectConfig = loadProjectConfig(idiomsProjectRoot);
         if (!isProjectAiceEnabled(idiomsProjectConfig)) {
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
