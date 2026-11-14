@@ -2425,6 +2425,75 @@ Examples:
         parseTargetWithInlineSymbol,
         splitContextTargets,
       } = await import("../src/tools/context.js");
+      const { recordTelemetryEvent, withSuppressedTelemetryAsync } = await import(
+        "../src/telemetry/index.js"
+      );
+      const { estimateTokens } = await import("../src/tokenomics/index.js");
+
+      const splitCommaSymbolSelectors = (rawSymbol: string): string[] => {
+        const trimmed = rawSymbol.trim();
+        if (!trimmed) return [];
+        if (/^\/[^/\\\n]+\/[gimsuy]*$/.test(trimmed)) {
+          return [trimmed];
+        }
+        const out: string[] = [];
+        let current = "";
+        let inRegex = false;
+        let regexCharClass = false;
+        let inQuote: string | null = null;
+        let escaped = false;
+        for (const ch of trimmed) {
+          if (escaped) {
+            current += ch;
+            escaped = false;
+            continue;
+          }
+          if (inQuote) {
+            current += ch;
+            if (ch === "\\") {
+              escaped = true;
+            } else if (ch === inQuote) {
+              inQuote = null;
+            }
+            continue;
+          }
+          if (inRegex) {
+            current += ch;
+            if (ch === "\\") {
+              escaped = true;
+            } else if (ch === "[") {
+              regexCharClass = true;
+            } else if (ch === "]" && regexCharClass) {
+              regexCharClass = false;
+            } else if (ch === "/" && !regexCharClass) {
+              inRegex = false;
+            }
+            continue;
+          }
+          if (ch === '"' || ch === "'") {
+            inQuote = ch;
+            current += ch;
+            continue;
+          }
+          if (ch === "/" && current.trim() === "") {
+            inRegex = true;
+            regexCharClass = false;
+            current += ch;
+            continue;
+          }
+          if (ch === ",") {
+            const piece = current.trim();
+            if (piece) out.push(piece);
+            current = "";
+            continue;
+          }
+          current += ch;
+        }
+        const last = current.trim();
+        if (last) out.push(last);
+        return out;
+      };
+
       const expandedTargets: Array<string | undefined> = [];
       if (targetPaths && targetPaths.length > 0) {
         for (const rawT of targetPaths) {
@@ -2443,9 +2512,23 @@ Examples:
       const rawTargets = expandedTargets;
       try {
         const results = [];
+        const sharedSymbolResultIndices: number[] = [];
         const missingContextTargets: string[] = [];
         const multiTargetErrors: unknown[] = [];
         const isMultiTarget = rawTargets.length > 1;
+        const sharedScanCache: NonNullable<ContextOptions["workspaceScanCache"]> = {
+          filesByRoot: new Map(),
+          fileContentByPath: new Map(),
+          importsByPath: new Map(),
+          idiomScanByRoot: new Map(),
+        };
+        let firstResolvedPath = "";
+        let firstProjectRoot = process.cwd();
+        let totalNativeChars = 0;
+        let totalNativeCl100k = 0;
+        let totalNativeO200k = 0;
+        let resolvedNativeTargetCount = 0;
+
         for (const rawTarget of rawTargets) {
           let targetPath = rawTarget;
           let inlineSymbol: string | undefined;
@@ -2468,10 +2551,12 @@ Examples:
             : process.argv.includes("--no-callers") || options.callers === false
               ? false
               : undefined;
+          const usesSharedSymbol = !inlineSymbol && Boolean(options.symbol);
           const effectiveSelector = inlineSymbol ?? options.symbol;
           const contextOpts: ContextOptions = {
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
             symbol: effectiveSelector,
+            allowPartialSymbolMatch: isMultiTarget ? true : undefined,
             idioms: options.idioms,
             includeCallers: explicitCallers,
             outlineTarget: !!options.outlineTarget,
@@ -2479,9 +2564,17 @@ Examples:
             json: !!options.json,
             stats: !!options.stats,
             projectRoot: resolved.projectRoot,
+            workspaceScanCache: sharedScanCache,
           };
+          let targetMatched = false;
           try {
-            results.push(await generateContext(resolved.resolvedPath, contextOpts));
+            const res = isMultiTarget
+              ? await withSuppressedTelemetryAsync(() =>
+                  generateContext(resolved.resolvedPath, contextOpts),
+                )
+              : await generateContext(resolved.resolvedPath, contextOpts);
+            results.push(res);
+            targetMatched = true;
           } catch (targetErr) {
             if (!isMultiTarget) {
               throw targetErr;
@@ -2489,39 +2582,80 @@ Examples:
             // When multiple files share `-s "SymA,SymB"`, try matching individual selectors present in this target
             const commaSelectors =
               !inlineSymbol && options.symbol && options.symbol.includes(",")
-                ? options.symbol
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)
+                ? splitCommaSymbolSelectors(options.symbol)
                 : [];
             let matchedSubset = false;
             if (commaSelectors.length > 1) {
               const subsetResults = [];
               for (const subSel of commaSelectors) {
                 try {
+                  const subOpts: ContextOptions = {
+                    ...contextOpts,
+                    symbol: subSel,
+                    allowPartialSymbolMatch: false,
+                  };
                   subsetResults.push(
-                    await generateContext(resolved.resolvedPath, {
-                      ...contextOpts,
-                      symbol: subSel,
-                    }),
+                    await withSuppressedTelemetryAsync(() =>
+                      generateContext(resolved.resolvedPath, subOpts),
+                    ),
                   );
                 } catch {
                   // selector lives in another target file
                 }
               }
-              if (subsetResults.length > 0) {
+              const firstSubset = subsetResults[0];
+              if (firstSubset !== undefined) {
                 results.push(
                   subsetResults.length === 1
-                    ? subsetResults[0]!
+                    ? firstSubset
                     : mergeMultiContextResults(subsetResults, {
                         outlineTarget: !!options.outlineTarget,
                       }),
                 );
                 matchedSubset = true;
+                targetMatched = true;
               }
             }
             if (!matchedSubset) {
               multiTargetErrors.push(targetErr);
+            }
+          }
+
+          if (targetMatched) {
+            if (usesSharedSymbol) {
+              sharedSymbolResultIndices.push(results.length - 1);
+            }
+            if (!firstResolvedPath) {
+              firstResolvedPath = resolved.resolvedPath;
+              firstProjectRoot = resolved.projectRoot;
+            }
+            if (isMultiTarget) {
+              try {
+                if (
+                  fs.existsSync(resolved.resolvedPath) &&
+                  fs.statSync(resolved.resolvedPath).isFile()
+                ) {
+                  const rawText =
+                    sharedScanCache.fileContentByPath.get(resolved.resolvedPath) ??
+                    fs.readFileSync(resolved.resolvedPath, "utf-8");
+                  totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
+                  totalNativeCl100k += estimateTokens(rawText, "cl100k_base");
+                  totalNativeO200k += estimateTokens(rawText, "o200k_base");
+                  resolvedNativeTargetCount++;
+                } else if (fs.existsSync(resolved.resolvedPath)) {
+                  const dirFiles = sharedScanCache.filesByRoot.get(resolved.resolvedPath) ?? [];
+                  for (const df of dirFiles) {
+                    const rawText =
+                      sharedScanCache.fileContentByPath.get(df) ?? fs.readFileSync(df, "utf-8");
+                    totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
+                    totalNativeCl100k += estimateTokens(rawText, "cl100k_base");
+                    totalNativeO200k += estimateTokens(rawText, "o200k_base");
+                    resolvedNativeTargetCount++;
+                  }
+                }
+              } catch {
+                // ignore unreadable target
+              }
             }
           }
         }
@@ -2535,35 +2669,138 @@ Examples:
           }
         }
 
-        if (options.json) {
-          console.log(JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
-        } else if (results.length > 1) {
+        // Reconcile shared multi-symbol `-s "SymA,SymB"` across multiple files:
+        // strip stale per-file `// missing: X` annotations if `X` was resolved in another target in `results`.
+        if (isMultiTarget && options.symbol && sharedSymbolResultIndices.length > 0) {
+          const sharedRequested = splitCommaSymbolSelectors(options.symbol);
+          if (sharedRequested.length > 1) {
+            const missingCountBySym = new Map<string, number>();
+            for (const idx of sharedSymbolResultIndices) {
+              const res = results[idx];
+              if (!res) continue;
+              const m = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
+              if (m?.[1]) {
+                for (const part of m[1].split(",").map((s) => s.trim())) {
+                  if (part) {
+                    missingCountBySym.set(part, (missingCountBySym.get(part) ?? 0) + 1);
+                  }
+                }
+              }
+            }
+            const globallyMissing = new Set<string>();
+            for (const [sym, count] of missingCountBySym) {
+              if (count >= sharedSymbolResultIndices.length) {
+                globallyMissing.add(sym);
+              }
+            }
+            let emittedGlobalMissing = false;
+            const lastSharedIdx = sharedSymbolResultIndices[sharedSymbolResultIndices.length - 1];
+            for (const idx of sharedSymbolResultIndices) {
+              const res = results[idx];
+              if (!res) continue;
+              const matchMissing = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
+              if (!matchMissing) continue;
+              const isLastShared = idx === lastSharedIdx;
+              let replacement = "";
+              if (isLastShared && !emittedGlobalMissing && matchMissing[1]) {
+                const kept = matchMissing[1]
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter((s) => globallyMissing.has(s));
+                if (kept.length > 0) {
+                  emittedGlobalMissing = true;
+                  replacement = `\n\n// missing: ${kept.join(", ")}`;
+                }
+              }
+              res.targetContent = res.targetContent.replace(
+                /\n*\/\/ missing:\s*(.+)$/m,
+                replacement,
+              );
+              res.formattedBundle = res.formattedBundle.replace(
+                /\n*\/\/ missing:\s*(.+)$/m,
+                replacement,
+              );
+              res.tokenCount = estimateTokens(res.formattedBundle);
+            }
+          }
+        }
+
+        if (results.length > 1) {
           const merged = mergeMultiContextResults(results, {
             outlineTarget: !!options.outlineTarget,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
           });
-          console.log(merged.formattedBundle);
-          for (const mp of missingContextTargets) {
-            console.log(`// not found: ${mp}`);
+          const jsonPayload = options.json ? JSON.stringify(results, null, 2) : undefined;
+          if (isMultiTarget && firstResolvedPath) {
+            const aicePayload = jsonPayload ?? merged.formattedBundle;
+            recordTelemetryEvent({
+              targetPath: firstResolvedPath,
+              projectRoot: firstProjectRoot,
+              filePath: "<multi-context>",
+              operation: "context",
+              surface: "cli",
+              idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
+              nativeText: "",
+              nativeChars: totalNativeChars,
+              nativeCl100k: totalNativeCl100k,
+              nativeO200k: totalNativeO200k,
+              realisticNativeCl100k: totalNativeCl100k,
+              aiceText: aicePayload,
+              aiceCl100k: jsonPayload !== undefined ? undefined : merged.tokenCount,
+            });
           }
-          if (options.stats) {
-            console.log("\n📊 Context Pack Token Telemetry:");
-            console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
-            console.log(`  Dependencies:      ${merged.dependencies.length}`);
-            console.log(`  Downstream callers:${merged.callers.length}`);
-            console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
-          }
-        } else {
-          for (const result of results) {
-            console.log(result.formattedBundle);
+          if (jsonPayload !== undefined) {
+            console.log(jsonPayload);
+          } else {
+            console.log(merged.formattedBundle);
             for (const mp of missingContextTargets) {
               console.log(`// not found: ${mp}`);
             }
             if (options.stats) {
               console.log("\n📊 Context Pack Token Telemetry:");
-              console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
-              console.log(`  Dependencies:      ${result.dependencies.length}`);
-              console.log(`  Downstream callers:${result.callers.length}`);
-              console.log(`  Target characters: ${result.targetContent.length.toLocaleString()}`);
+              console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
+              console.log(`  Dependencies:      ${merged.dependencies.length}`);
+              console.log(`  Downstream callers:${merged.callers.length}`);
+              console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
+            }
+          }
+        } else if (results[0] !== undefined) {
+          const singleResult = results[0];
+          const jsonPayload = options.json ? JSON.stringify(singleResult, null, 2) : undefined;
+          if (isMultiTarget && firstResolvedPath) {
+            const aicePayload = jsonPayload ?? singleResult.formattedBundle;
+            recordTelemetryEvent({
+              targetPath: firstResolvedPath,
+              projectRoot: firstProjectRoot,
+              operation: "context",
+              surface: "cli",
+              idiomsUsed: Boolean(
+                singleResult.idioms && Object.keys(singleResult.idioms).length > 0,
+              ),
+              nativeText: "",
+              nativeChars: totalNativeChars,
+              nativeCl100k: totalNativeCl100k,
+              nativeO200k: totalNativeO200k,
+              realisticNativeCl100k: totalNativeCl100k,
+              aiceText: aicePayload,
+              aiceCl100k: jsonPayload !== undefined ? undefined : singleResult.tokenCount,
+            });
+          }
+          if (jsonPayload !== undefined) {
+            console.log(jsonPayload);
+          } else {
+            console.log(singleResult.formattedBundle);
+            for (const mp of missingContextTargets) {
+              console.log(`// not found: ${mp}`);
+            }
+            if (options.stats) {
+              console.log("\n📊 Context Pack Token Telemetry:");
+              console.log(`  Total pack tokens: ${singleResult.tokenCount?.toLocaleString() ?? 0}`);
+              console.log(`  Dependencies:      ${singleResult.dependencies.length}`);
+              console.log(`  Downstream callers:${singleResult.callers.length}`);
+              console.log(
+                `  Target characters: ${singleResult.targetContent.length.toLocaleString()}`,
+              );
             }
           }
         }
