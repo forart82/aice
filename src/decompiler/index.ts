@@ -5,8 +5,8 @@
  * Universal Decompiler & Bidirectional Transpiler Hub for AICE 2.0.
  */
 
-import { existsSync, promises as fs } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, promises as fs, readFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -79,9 +79,28 @@ export function decompile(
   let projectRoot: string | undefined = options.projectRoot;
   let idiomsToCollapse: Record<string, ProjectIdiomDefinition> | undefined;
 
-  if (options.projectRoot || (filePath !== "source" && existsSync(filePath))) {
+  const isRealDiskTarget = (() => {
+    if (options.projectRoot) return true;
+    if (filePath === "source" || !existsSync(filePath)) return false;
+    if (isAbsolute(filePath)) return true;
     try {
-      const root = options.projectRoot ?? findProjectRoot(dirname(resolve(filePath)));
+      return readFileSync(filePath, "utf-8") === source;
+    } catch {
+      return false;
+    }
+  })();
+
+  if (isRealDiskTarget) {
+    try {
+      const targetDir = dirname(resolve(filePath));
+      const cwdResolved = resolve(process.cwd());
+      const fallbackDir =
+        targetDir === cwdResolved || targetDir.startsWith(`${cwdResolved}${sep}`)
+          ? cwdResolved
+          : targetDir;
+      const root = options.projectRoot
+        ? resolve(options.projectRoot)
+        : findProjectRoot(targetDir, fallbackDir);
       projectRoot = root;
       const cfg = loadProjectConfig(root);
       if (!isProjectAiceEnabled(cfg)) {
@@ -237,5 +256,12 @@ export async function decompileFile(
   const resolved = resolve(filePath);
   const content = await fs.readFile(resolved, "utf-8");
   const target = options.target ?? detectTargetFromPath(filePath);
-  return decompile(content, target, { ...options, filePath });
+  const targetDir = dirname(resolved);
+  const cwdResolved = resolve(process.cwd());
+  const fallbackDir =
+    targetDir === cwdResolved || targetDir.startsWith(`${cwdResolved}${sep}`)
+      ? cwdResolved
+      : targetDir;
+  const projectRoot = options.projectRoot ?? findProjectRoot(targetDir, fallbackDir);
+  return decompile(content, target, { ...options, filePath, projectRoot });
 }

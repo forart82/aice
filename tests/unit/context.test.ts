@@ -10,7 +10,21 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { program } from "../../bin/aice.js";
-import { buildSiblingOutline, generateContext, packageContext, packContext } from "../../src/tools/context.js";
+import { estimateTokens } from "../../src/tokenomics/index.js";
+import {
+  buildSiblingOutline,
+  doesFileStemMatchQuery,
+  extractPatternMatchesDetailed,
+  extractPrimaryQueryKeyword,
+  generateContext,
+  generateMultiContext,
+  generateWorkspaceContext,
+  isCommentLine,
+  isTestOrMockPath,
+  packageContext,
+  packContext,
+} from "../../src/tools/context.js";
+import { outlinePath } from "../../src/tools/outline.js";
 
 describe("AICE 2.0 AI Context Packager Engine (Step 20)", () => {
   let tmpDir: string;
@@ -617,6 +631,397 @@ describe("Adaptive Sibling Outlining", () => {
       );
       const res = await generateContext(f, { projectRoot: tmp, symbol: "Svc.alpha" });
       expect(JSON.stringify(res)).toContain("beta");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates sibling outline per parent on multi-selector Class.m1,Class.m2 and excludes all queried targets", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-sib-multi-"));
+    try {
+      const f = path.join(tmp, "ledger.ts");
+      fs.writeFileSync(
+        f,
+        [
+          "export class Ledger {",
+          "  credit(amount: number): number { return amount; }",
+          "  debit(amount: number): number { return -amount; }",
+          "  balance(): number { return 0; }",
+          "  auditTrail(): string[] { return []; }",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+      const res = await generateContext(f, {
+        projectRoot: tmp,
+        symbol: "Ledger.credit,Ledger.debit",
+      });
+      const headerMatches = res.targetContent.match(/\/\/ siblings in Ledger:/g) ?? [];
+      expect(headerMatches).toHaveLength(1);
+      const sibSection = res.targetContent.split("// siblings in Ledger:")[1] ?? "";
+      expect(sibSection).toContain("balance");
+      expect(sibSection).toContain("auditTrail");
+      expect(sibSection).not.toContain("credit(");
+      expect(sibSection).not.toContain("debit(");
+      // Also verify module header is not duplicated across multi-symbol slices
+      const moduleMatches = res.targetContent.match(/^module\s+/gm) ?? [];
+      expect(moduleMatches.length).toBeLessThanOrEqual(1);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves enclosing parent siblings for bare member queries while keeping top-level queries clean", () => {
+    const symbols = [
+      mk(["alpha", "beta", "gamma"]),
+      {
+        name: "topHelper",
+        kind: "function",
+        line: 20,
+        signature: "pub fn topHelper(): void",
+        children: [],
+      },
+    ];
+    expect(buildSiblingOutline(symbols, "topHelper")).toBe("");
+    expect(buildSiblingOutline(symbols, "Svc")).toBe("");
+    const bareMemberOut = buildSiblingOutline(symbols, "alpha");
+    expect(bareMemberOut).toContain("// siblings in Svc:");
+    expect(bareMemberOut).toContain("beta(): void");
+    expect(bareMemberOut).toContain("gamma(): void");
+    expect(bareMemberOut).not.toContain("alpha(): void");
+  });
+
+  it("strictly enforces <= 150 tokens even when sibling signatures are extremely long", () => {
+    const hugeChildren = Array.from({ length: 30 }, (_, i) => ({
+      name: `veryLongMethodName_${i}`,
+      kind: "method",
+      line: i + 2,
+      signature: `pub async fn veryLongMethodName_${i}(firstConfigParam: Record<string, Array<Map<string, number>>>, secondCallbackHandler: (ctx: ExecutionContext, payload: Uint8Array) => Promise<ResultEnvelope<number>>) -> Promise<ResultEnvelope<boolean>>: ...`,
+      children: [],
+    }));
+    const out = buildSiblingOutline(
+      [
+        {
+          name: "MegaService",
+          kind: "class",
+          line: 1,
+          signature: "pub class MegaService",
+          children: hugeChildren,
+        },
+      ],
+      "MegaService.veryLongMethodName_0",
+    );
+    expect(out).toContain("// siblings in MegaService:");
+    expect(out).toMatch(/\(\+ \d+ other methods\)/);
+    expect(estimateTokens(out)).toBeLessThanOrEqual(150);
+  });
+
+  it("supports Rust generic/enum/orphan impl blocks + snake_case sibling exclusion and Go cross-file receiver methods", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-sib-polyglot-"));
+    try {
+      const rsFile = path.join(tmp, "engine.rs");
+      fs.writeFileSync(
+        rsFile,
+        [
+          "pub struct Engine<T> {",
+          "    pub factor: i32,",
+          "}",
+          "",
+          "impl<T> Engine<T> {",
+          "    pub fn compute_velocity(&self, dt: i32) -> i32 {",
+          "        return self.factor * dt;",
+          "    }",
+          "    pub fn reset_state(&mut self) -> i32 {",
+          "        return 0;",
+          "    }",
+          "}",
+          "",
+          "pub enum Mode {",
+          "    Fast,",
+          "    Safe,",
+          "}",
+          "",
+          "impl Mode {",
+          "    pub fn is_fast(&self) -> bool {",
+          "        return true;",
+          "    }",
+          "    pub fn label(&self) -> i32 {",
+          "        return 1;",
+          "    }",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const rsRes = await generateContext(rsFile, {
+        projectRoot: tmp,
+        symbol: "Engine.compute_velocity",
+      });
+      expect(rsRes.targetContent).toContain("// siblings in Engine:");
+      const rsSib = rsRes.targetContent.split("// siblings in Engine:")[1] ?? "";
+      expect(rsSib).toContain("resetState");
+      expect(rsSib).not.toContain("computeVelocity");
+
+      const enumImplRes = await generateContext(rsFile, {
+        projectRoot: tmp,
+        symbol: "Mode.is_fast",
+      });
+      expect(enumImplRes.targetContent).toContain("// siblings in Mode:");
+      expect(enumImplRes.targetContent).toContain("label");
+
+      const goFile = path.join(tmp, "handlers.go");
+      fs.writeFileSync(
+        goFile,
+        [
+          "package server",
+          "",
+          "func (s *Gateway) HandlePing() int {",
+          "    return 200",
+          "}",
+          "",
+          "func (s *Gateway) Shutdown() int {",
+          "    return 0",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const goRes = await generateContext(goFile, {
+        projectRoot: tmp,
+        symbol: "Gateway.HandlePing",
+      });
+      expect(goRes.targetContent).toContain("// siblings in Gateway:");
+      expect(goRes.targetContent).toContain("shutdown");
+      expect(goRes.targetContent).not.toMatch(/\/\/\s+.*handlePing/i);
+
+      const pyFile = path.join(tmp, "worker.py");
+      fs.writeFileSync(
+        pyFile,
+        [
+          "class Pipeline:",
+          "    def ingest(self, x: int) -> int:",
+          "        return x + 1",
+          "    def flush(self) -> int:",
+          "        return 0",
+        ].join("\n"),
+        "utf-8",
+      );
+      const pyRes = await generateContext(pyFile, {
+        projectRoot: tmp,
+        symbol: "Pipeline.ingest",
+      });
+      expect(pyRes.targetContent).toContain("// siblings in Pipeline:");
+      expect(pyRes.targetContent).toContain("flush");
+      expect(pyRes.targetContent).not.toMatch(/\/\/\s+.*ingest/);
+
+      const mdFile = path.join(tmp, "SPEC.md");
+      fs.writeFileSync(
+        mdFile,
+        "# Spec\n\n## Overview\nIntro text.\n\n## Architecture\nLayered design.\n",
+        "utf-8",
+      );
+      const mdRes = await generateContext(mdFile, {
+        projectRoot: tmp,
+        symbol: "Architecture",
+      });
+      expect(mdRes.targetContent).toContain("## Architecture");
+      expect(mdRes.targetContent).toContain("Layered design.");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("4-Tier Search Ranking, Multi-Target Resilience & External Root Isolation", () => {
+  it("extracts clean keywords from escaped regexes and prevents extension false-positive matches", () => {
+    expect(extractPrimaryQueryKeyword("/\\border_gateway\\b/")).toBe("order_gateway");
+    expect(extractPrimaryQueryKeyword("/export\\s+class\\s+RiskEngine/")).toBe("RiskEngine");
+    expect(doesFileStemMatchQuery("src/foo.ts", "ts")).toBe(false);
+    expect(doesFileStemMatchQuery("src/core/risk_engine.ts", "RiskEngine")).toBe(true);
+    expect(doesFileStemMatchQuery("src/order_gateway.ts", "order_gateway")).toBe(true);
+  });
+
+  it("avoids false positives in isTestOrMockPath and isCommentLine across languages", () => {
+    expect(isTestOrMockPath("src/contest.ts")).toBe(false);
+    expect(isTestOrMockPath("src/inspector.ts")).toBe(false);
+    expect(isTestOrMockPath("src/latest.ts")).toBe(false);
+    expect(isTestOrMockPath("src/specifier.ts")).toBe(false);
+    expect(
+      isTestOrMockPath("/tmp/benchmarks/run-1/src/engine.ts", "/tmp/benchmarks/run-1"),
+    ).toBe(false);
+    expect(isTestOrMockPath("tests/engine.ts")).toBe(true);
+    expect(isTestOrMockPath("src/engine.spec.ts")).toBe(true);
+    expect(isTestOrMockPath("src/mock_engine.ts")).toBe(true);
+    expect(isTestOrMockPath("src/test_engine.py")).toBe(true);
+
+    expect(isCommentLine("# Architecture Overview", "README.md")).toBe(false);
+    expect(isCommentLine("#[derive(Debug, Clone)]", "src/lib.rs")).toBe(false);
+    expect(isCommentLine("#include <vector>", "src/main.cpp")).toBe(false);
+    expect(isCommentLine("--remaining;", "src/loop.ts")).toBe(false);
+    expect(isCommentLine("# Python comment", "src/app.py")).toBe(true);
+    expect(isCommentLine("-- SQL comment", "schema.sql")).toBe(true);
+  });
+
+  it("falls back gracefully to literal matching on invalid regex while rejecting catastrophic ReDoS", () => {
+    const hit = extractPatternMatchesDetailed("const val = foo(bar + 1);\n", "/foo(bar/");
+    expect(hit).toBeDefined();
+    expect(hit?.formattedText).toContain("foo(bar + 1)");
+    expect(() => extractPatternMatchesDetailed("aaaa", "/(a+)+$/")).toThrow(
+      /Unsafe or overly complex regex/,
+    );
+  });
+
+  it("annotates per-window call-site line numbers, sorts ties deterministically, and bounds maxTokens cleanly", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-rank-edges-"));
+    try {
+      const srcDir = path.join(tmp, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(srcDir, "b_worker.ts"),
+        [
+          "export function runJob() {",
+          "  const targetToken = 1;",
+          "  const pad1 = 1;",
+          "  const pad2 = 2;",
+          "  const pad3 = 3;",
+          "  const pad4 = 4;",
+          "  const pad5 = 5;",
+          "  const pad6 = 6;",
+          "  const targetToken2 = targetToken + 1;",
+          "  return targetToken2;",
+          "}",
+        ].join("\n"),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(srcDir, "a_worker.ts"),
+        "export function initJob() {\n  const targetToken = 2;\n  return targetToken;\n}\n",
+        "utf-8",
+      );
+
+      const res = await generateWorkspaceContext(tmp, { symbol: "/\\btargetToken\\b/" });
+      expect(res.formattedBundle).toContain("(src/b_worker.ts:2)");
+      expect(res.formattedBundle).toContain("(src/b_worker.ts:9)");
+      expect(res.formattedBundle.indexOf("src/a_worker.ts")).toBeLessThan(
+        res.formattedBundle.indexOf("src/b_worker.ts"),
+      );
+
+      const bounded = await generateWorkspaceContext(tmp, {
+        symbol: "/\\btargetToken\\b/",
+        maxTokens: 90,
+      });
+      expect(bounded.tokenCount).toBeLessThanOrEqual(90);
+      const fenceCount = (bounded.formattedBundle.match(/^```/gm) ?? []).length;
+      expect(fenceCount % 2).toBe(0);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("handles partial multi-symbol matches, cross-file symbol unions, 0-match regex summaries, and partial multi-path outlines", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-multi-resilience-"));
+    try {
+      const f1 = path.join(tmp, "alpha.ts");
+      const f2 = path.join(tmp, "beta.ts");
+      fs.writeFileSync(
+        f1,
+        "export function keepOne(): number { return 1; }\nexport function keepTwo(): number { return 2; }\n",
+        "utf-8",
+      );
+      fs.writeFileSync(f2, "export function onlyInBeta(): string { return 'ok'; }\n", "utf-8");
+
+      // 1. Single-file partial match returns found slices + // missing:
+      const partial = await generateContext(f1, {
+        projectRoot: tmp,
+        symbol: "keepOne,deletedLegacyFn,keepTwo",
+      });
+      expect(partial.targetContent).toContain("keepOne");
+      expect(partial.targetContent).toContain("keepTwo");
+      expect(partial.targetContent).toContain("// missing: deletedLegacyFn");
+
+      // 2. Cross-file multi-context union resolves symbols split across f1 and f2 without false // missing:
+      const cross = await generateMultiContext([f1, f2], {
+        projectRoot: tmp,
+        symbol: "keepOne,onlyInBeta",
+      });
+      expect(cross.formattedBundle).toContain("keepOne");
+      expect(cross.formattedBundle).toContain("onlyInBeta");
+      expect(cross.formattedBundle).not.toContain("// missing:");
+
+      // 3. Multi-file regex search compacts 0-match files into a 1-line summary
+      const regexMulti = await generateMultiContext([f1, f2], {
+        projectRoot: tmp,
+        symbol: "/onlyInBeta/",
+      });
+      expect(regexMulti.formattedBundle).toContain("onlyInBeta");
+      expect(regexMulti.formattedBundle).toContain("// 0 matches in: alpha.ts");
+
+      // 4. Multi-path outlinePath tolerates missing paths when >=1 path exists
+      const outMap = await outlinePath([f1, path.join(tmp, "missing_file.ts")], {
+        projectRoot: tmp,
+      });
+      expect(outMap instanceof Map).toBe(true);
+      if (outMap instanceof Map) {
+        expect(outMap.size).toBe(2);
+        const vals = Array.from(outMap.values()).map((v) => v.text);
+        expect(vals.some((t) => t.includes("keepOne"))).toBe(true);
+        expect(vals.some((t) => t.includes("// not found:"))).toBe(true);
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("matches collapsed $idiom regexes with --idioms and keeps >=8-file wildcard directory context compact", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-idiom-wildcard-"));
+    try {
+      fs.writeFileSync(
+        path.join(tmp, "aice.config.json"),
+        JSON.stringify(
+          {
+            enabled: true,
+            idiomsEnabled: true,
+            idioms: {
+              $guardPositive: {
+                name: "$guardPositive",
+                params: [{ name: "$0" }],
+                kind: "stmt",
+                templateAice: "if $0 <= 0:\n  ret 0",
+                occurrences: 3,
+                tokensPerOccurrenceSaved: 6,
+              },
+            },
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
+      const ledgerFile = path.join(tmp, "ledger.ts");
+      fs.writeFileSync(
+        ledgerFile,
+        "export function settle(amount: number): number {\n  if (amount <= 0) {\n    return 0;\n  }\n  return amount;\n}\n",
+        "utf-8",
+      );
+
+      const idiomRegexRes = await generateContext(ledgerFile, {
+        projectRoot: tmp,
+        idioms: true,
+        symbol: "/\\$guardPositive/",
+      });
+      expect(idiomRegexRes.targetContent).toContain("$guardPositive");
+
+      for (let i = 0; i < 10; i++) {
+        fs.writeFileSync(
+          path.join(tmp, `mod_${i}.ts`),
+          `export class Service${i} {\n  run(x: number): number { return x + ${i}; }\n  stop(): void {}\n}\n`,
+          "utf-8",
+        );
+      }
+      const wildcardDir = await generateWorkspaceContext(tmp, { symbol: "*" });
+      expect(wildcardDir.formattedBundle.length).toBeLessThan(4096);
+      expect(wildcardDir.formattedBundle).toContain("Service0");
+      expect(wildcardDir.formattedBundle).toContain("Service9");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
