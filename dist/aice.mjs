@@ -308687,6 +308687,71 @@ Examples:
       parseTargetWithInlineSymbol: parseTargetWithInlineSymbol2,
       splitContextTargets: splitContextTargets2
     } = await Promise.resolve().then(() => (init_context2(), context_exports));
+    const { recordTelemetryEvent: recordTelemetryEvent2, withSuppressedTelemetryAsync: withSuppressedTelemetryAsync2 } = await Promise.resolve().then(() => (init_telemetry(), telemetry_exports));
+    const { estimateTokens: estimateTokens2 } = await Promise.resolve().then(() => (init_tokenomics(), tokenomics_exports));
+    const splitCommaSymbolSelectors = (rawSymbol) => {
+      const trimmed = rawSymbol.trim();
+      if (!trimmed) return [];
+      if (/^\/[^/\\\n]+\/[gimsuy]*$/.test(trimmed)) {
+        return [trimmed];
+      }
+      const out = [];
+      let current = "";
+      let inRegex = false;
+      let regexCharClass = false;
+      let inQuote = null;
+      let escaped = false;
+      for (const ch of trimmed) {
+        if (escaped) {
+          current += ch;
+          escaped = false;
+          continue;
+        }
+        if (inQuote) {
+          current += ch;
+          if (ch === "\\") {
+            escaped = true;
+          } else if (ch === inQuote) {
+            inQuote = null;
+          }
+          continue;
+        }
+        if (inRegex) {
+          current += ch;
+          if (ch === "\\") {
+            escaped = true;
+          } else if (ch === "[") {
+            regexCharClass = true;
+          } else if (ch === "]" && regexCharClass) {
+            regexCharClass = false;
+          } else if (ch === "/" && !regexCharClass) {
+            inRegex = false;
+          }
+          continue;
+        }
+        if (ch === '"' || ch === "'") {
+          inQuote = ch;
+          current += ch;
+          continue;
+        }
+        if (ch === "/" && current.trim() === "") {
+          inRegex = true;
+          regexCharClass = false;
+          current += ch;
+          continue;
+        }
+        if (ch === ",") {
+          const piece = current.trim();
+          if (piece) out.push(piece);
+          current = "";
+          continue;
+        }
+        current += ch;
+      }
+      const last = current.trim();
+      if (last) out.push(last);
+      return out;
+    };
     const expandedTargets = [];
     if (targetPaths && targetPaths.length > 0) {
       for (const rawT of targetPaths) {
@@ -308705,9 +308770,22 @@ Examples:
     const rawTargets = expandedTargets;
     try {
       const results = [];
+      const sharedSymbolResultIndices = [];
       const missingContextTargets = [];
       const multiTargetErrors = [];
       const isMultiTarget = rawTargets.length > 1;
+      const sharedScanCache = {
+        filesByRoot: /* @__PURE__ */ new Map(),
+        fileContentByPath: /* @__PURE__ */ new Map(),
+        importsByPath: /* @__PURE__ */ new Map(),
+        idiomScanByRoot: /* @__PURE__ */ new Map()
+      };
+      let firstResolvedPath = "";
+      let firstProjectRoot = process.cwd();
+      let totalNativeChars = 0;
+      let totalNativeCl100k = 0;
+      let totalNativeO200k = 0;
+      let resolvedNativeTargetCount = 0;
       for (const rawTarget of rawTargets) {
         let targetPath = rawTarget;
         let inlineSymbol;
@@ -308726,50 +308804,94 @@ Examples:
           continue;
         }
         const explicitCallers = process.argv.includes("--callers") ? true : process.argv.includes("--no-callers") || options.callers === false ? false : void 0;
+        const usesSharedSymbol = !inlineSymbol && Boolean(options.symbol);
         const effectiveSelector = inlineSymbol ?? options.symbol;
         const contextOpts = {
           depth: options.depth !== void 0 ? Number(options.depth) : void 0,
           symbol: effectiveSelector,
+          allowPartialSymbolMatch: isMultiTarget ? true : void 0,
           idioms: options.idioms,
           includeCallers: explicitCallers,
           outlineTarget: !!options.outlineTarget,
           maxTokens: options.maxTokens !== void 0 ? Number(options.maxTokens) : void 0,
           json: !!options.json,
           stats: !!options.stats,
-          projectRoot: resolved.projectRoot
+          projectRoot: resolved.projectRoot,
+          workspaceScanCache: sharedScanCache
         };
+        let targetMatched = false;
         try {
-          results.push(await generateContext2(resolved.resolvedPath, contextOpts));
+          const res = isMultiTarget ? await withSuppressedTelemetryAsync2(
+            () => generateContext2(resolved.resolvedPath, contextOpts)
+          ) : await generateContext2(resolved.resolvedPath, contextOpts);
+          results.push(res);
+          targetMatched = true;
         } catch (targetErr) {
           if (!isMultiTarget) {
             throw targetErr;
           }
-          const commaSelectors = !inlineSymbol && options.symbol && options.symbol.includes(",") ? options.symbol.split(",").map((s) => s.trim()).filter(Boolean) : [];
+          const commaSelectors = !inlineSymbol && options.symbol && options.symbol.includes(",") ? splitCommaSymbolSelectors(options.symbol) : [];
           let matchedSubset = false;
           if (commaSelectors.length > 1) {
             const subsetResults = [];
             for (const subSel of commaSelectors) {
               try {
+                const subOpts = {
+                  ...contextOpts,
+                  symbol: subSel,
+                  allowPartialSymbolMatch: false
+                };
                 subsetResults.push(
-                  await generateContext2(resolved.resolvedPath, {
-                    ...contextOpts,
-                    symbol: subSel
-                  })
+                  await withSuppressedTelemetryAsync2(
+                    () => generateContext2(resolved.resolvedPath, subOpts)
+                  )
                 );
               } catch {
               }
             }
-            if (subsetResults.length > 0) {
+            const firstSubset = subsetResults[0];
+            if (firstSubset !== void 0) {
               results.push(
-                subsetResults.length === 1 ? subsetResults[0] : mergeMultiContextResults2(subsetResults, {
+                subsetResults.length === 1 ? firstSubset : mergeMultiContextResults2(subsetResults, {
                   outlineTarget: !!options.outlineTarget
                 })
               );
               matchedSubset = true;
+              targetMatched = true;
             }
           }
           if (!matchedSubset) {
             multiTargetErrors.push(targetErr);
+          }
+        }
+        if (targetMatched) {
+          if (usesSharedSymbol) {
+            sharedSymbolResultIndices.push(results.length - 1);
+          }
+          if (!firstResolvedPath) {
+            firstResolvedPath = resolved.resolvedPath;
+            firstProjectRoot = resolved.projectRoot;
+          }
+          if (isMultiTarget) {
+            try {
+              if (fs25.existsSync(resolved.resolvedPath) && fs25.statSync(resolved.resolvedPath).isFile()) {
+                const rawText = sharedScanCache.fileContentByPath.get(resolved.resolvedPath) ?? fs25.readFileSync(resolved.resolvedPath, "utf-8");
+                totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
+                totalNativeCl100k += estimateTokens2(rawText, "cl100k_base");
+                totalNativeO200k += estimateTokens2(rawText, "o200k_base");
+                resolvedNativeTargetCount++;
+              } else if (fs25.existsSync(resolved.resolvedPath)) {
+                const dirFiles = sharedScanCache.filesByRoot.get(resolved.resolvedPath) ?? [];
+                for (const df of dirFiles) {
+                  const rawText = sharedScanCache.fileContentByPath.get(df) ?? fs25.readFileSync(df, "utf-8");
+                  totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
+                  totalNativeCl100k += estimateTokens2(rawText, "cl100k_base");
+                  totalNativeO200k += estimateTokens2(rawText, "o200k_base");
+                  resolvedNativeTargetCount++;
+                }
+              }
+            } catch {
+            }
           }
         }
       }
@@ -308781,35 +308903,134 @@ Examples:
           throw new Error(`Path not found: ${missingContextTargets.join(", ")}`);
         }
       }
-      if (options.json) {
-        console.log(JSON.stringify(results.length === 1 ? results[0] : results, null, 2));
-      } else if (results.length > 1) {
+      if (isMultiTarget && options.symbol && sharedSymbolResultIndices.length > 0) {
+        const sharedRequested = splitCommaSymbolSelectors(options.symbol);
+        if (sharedRequested.length > 1) {
+          const missingCountBySym = /* @__PURE__ */ new Map();
+          for (const idx of sharedSymbolResultIndices) {
+            const res = results[idx];
+            if (!res) continue;
+            const m = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
+            if (m?.[1]) {
+              for (const part of m[1].split(",").map((s) => s.trim())) {
+                if (part) {
+                  missingCountBySym.set(part, (missingCountBySym.get(part) ?? 0) + 1);
+                }
+              }
+            }
+          }
+          const globallyMissing = /* @__PURE__ */ new Set();
+          for (const [sym, count] of missingCountBySym) {
+            if (count >= sharedSymbolResultIndices.length) {
+              globallyMissing.add(sym);
+            }
+          }
+          let emittedGlobalMissing = false;
+          const lastSharedIdx = sharedSymbolResultIndices[sharedSymbolResultIndices.length - 1];
+          for (const idx of sharedSymbolResultIndices) {
+            const res = results[idx];
+            if (!res) continue;
+            const matchMissing = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
+            if (!matchMissing) continue;
+            const isLastShared = idx === lastSharedIdx;
+            let replacement = "";
+            if (isLastShared && !emittedGlobalMissing && matchMissing[1]) {
+              const kept = matchMissing[1].split(",").map((s) => s.trim()).filter((s) => globallyMissing.has(s));
+              if (kept.length > 0) {
+                emittedGlobalMissing = true;
+                replacement = `
+
+// missing: ${kept.join(", ")}`;
+              }
+            }
+            res.targetContent = res.targetContent.replace(
+              /\n*\/\/ missing:\s*(.+)$/m,
+              replacement
+            );
+            res.formattedBundle = res.formattedBundle.replace(
+              /\n*\/\/ missing:\s*(.+)$/m,
+              replacement
+            );
+            res.tokenCount = estimateTokens2(res.formattedBundle);
+          }
+        }
+      }
+      if (results.length > 1) {
         const merged = mergeMultiContextResults2(results, {
-          outlineTarget: !!options.outlineTarget
+          outlineTarget: !!options.outlineTarget,
+          maxTokens: options.maxTokens !== void 0 ? Number(options.maxTokens) : void 0
         });
-        console.log(merged.formattedBundle);
-        for (const mp of missingContextTargets) {
-          console.log(`// not found: ${mp}`);
+        const jsonPayload = options.json ? JSON.stringify(results, null, 2) : void 0;
+        if (isMultiTarget && firstResolvedPath) {
+          const aicePayload = jsonPayload ?? merged.formattedBundle;
+          recordTelemetryEvent2({
+            targetPath: firstResolvedPath,
+            projectRoot: firstProjectRoot,
+            filePath: "<multi-context>",
+            operation: "context",
+            surface: "cli",
+            idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
+            nativeText: "",
+            nativeChars: totalNativeChars,
+            nativeCl100k: totalNativeCl100k,
+            nativeO200k: totalNativeO200k,
+            realisticNativeCl100k: totalNativeCl100k,
+            aiceText: aicePayload,
+            aiceCl100k: jsonPayload !== void 0 ? void 0 : merged.tokenCount
+          });
         }
-        if (options.stats) {
-          console.log("\n\u{1F4CA} Context Pack Token Telemetry:");
-          console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
-          console.log(`  Dependencies:      ${merged.dependencies.length}`);
-          console.log(`  Downstream callers:${merged.callers.length}`);
-          console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
-        }
-      } else {
-        for (const result of results) {
-          console.log(result.formattedBundle);
+        if (jsonPayload !== void 0) {
+          console.log(jsonPayload);
+        } else {
+          console.log(merged.formattedBundle);
           for (const mp of missingContextTargets) {
             console.log(`// not found: ${mp}`);
           }
           if (options.stats) {
             console.log("\n\u{1F4CA} Context Pack Token Telemetry:");
-            console.log(`  Total pack tokens: ${result.tokenCount?.toLocaleString() ?? 0}`);
-            console.log(`  Dependencies:      ${result.dependencies.length}`);
-            console.log(`  Downstream callers:${result.callers.length}`);
-            console.log(`  Target characters: ${result.targetContent.length.toLocaleString()}`);
+            console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
+            console.log(`  Dependencies:      ${merged.dependencies.length}`);
+            console.log(`  Downstream callers:${merged.callers.length}`);
+            console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
+          }
+        }
+      } else if (results[0] !== void 0) {
+        const singleResult = results[0];
+        const jsonPayload = options.json ? JSON.stringify(singleResult, null, 2) : void 0;
+        if (isMultiTarget && firstResolvedPath) {
+          const aicePayload = jsonPayload ?? singleResult.formattedBundle;
+          recordTelemetryEvent2({
+            targetPath: firstResolvedPath,
+            projectRoot: firstProjectRoot,
+            operation: "context",
+            surface: "cli",
+            idiomsUsed: Boolean(
+              singleResult.idioms && Object.keys(singleResult.idioms).length > 0
+            ),
+            nativeText: "",
+            nativeChars: totalNativeChars,
+            nativeCl100k: totalNativeCl100k,
+            nativeO200k: totalNativeO200k,
+            realisticNativeCl100k: totalNativeCl100k,
+            aiceText: aicePayload,
+            aiceCl100k: jsonPayload !== void 0 ? void 0 : singleResult.tokenCount
+          });
+        }
+        if (jsonPayload !== void 0) {
+          console.log(jsonPayload);
+        } else {
+          console.log(singleResult.formattedBundle);
+          for (const mp of missingContextTargets) {
+            console.log(`// not found: ${mp}`);
+          }
+          if (options.stats) {
+            console.log("\n\u{1F4CA} Context Pack Token Telemetry:");
+            console.log(`  Total pack tokens: ${singleResult.tokenCount?.toLocaleString() ?? 0}`);
+            console.log(`  Dependencies:      ${singleResult.dependencies.length}`);
+            console.log(`  Downstream callers:${singleResult.callers.length}`);
+            console.log(
+              `  Target characters: ${singleResult.targetContent.length.toLocaleString()}`
+            );
           }
         }
       }
