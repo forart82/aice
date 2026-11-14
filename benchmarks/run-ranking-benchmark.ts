@@ -13,10 +13,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { generateContext } from "../src/tools/context.js";
 import { estimateTokens } from "../src/tokenomics/index.js";
 
-interface BenchmarkTrial {
+const __filename = fileURLToPath(import.meta.url);
+
+export interface BenchmarkTrial {
   name: string;
   query: string;
   expectedTopTarget: string;
@@ -141,22 +144,25 @@ export async function runRankingBenchmarks(): Promise<BenchmarkTrial[]> {
 
     // -------------------------------------------------------------
     // SCENARIO 3: Code vs Comment Disambiguation in Deep Source
-    // 1 File with 40 comment occurrences and 2 genuine declarations
+    // 1 File with 35 non-overlapping comment windows followed by 2 genuine declarations
+    // past the 25-window cap (verifying Tier 1 declarations preempt Tier 3 comment noise)
     // -------------------------------------------------------------
     const s3Dir = path.join(tmpRoot, "scenario3");
     fs.mkdirSync(s3Dir, { recursive: true });
 
     let s3Source = "";
-    // Add 40 comment noise lines at the top of the file
-    for (let i = 1; i <= 40; i++) {
+    const commentCount = 35;
+    for (let i = 1; i <= commentCount; i++) {
       s3Source += `// Architecture note ${i}: liquidation_guard is important for margin limits\n`;
+      for (let p = 1; p <= 6; p++) {
+        s3Source += `const marginPad_${i}_${p} = ${i * p};\n`;
+      }
     }
-    // Add genuine declaration at line 41
+    // Add genuine declarations after all 35 comment windows (beyond the 25-window cap)
     s3Source += `export function liquidation_guard(marginEquity: number): boolean {\n  return marginEquity > 0;\n}\n`;
-    for (let i = 42; i <= 60; i++) {
-      s3Source += `// Historical note ${i}: liquidation_guard threshold evolution\n`;
+    for (let p = 1; p <= 6; p++) {
+      s3Source += `const tailPad_${p} = ${p};\n`;
     }
-    // Add secondary declaration at line 61
     s3Source += `export const liquidation_guard_buffer = 1500;\n`;
 
     fs.writeFileSync(path.join(s3Dir, "margin.ts"), s3Source, "utf-8");
@@ -167,18 +173,24 @@ export async function runRankingBenchmarks(): Promise<BenchmarkTrial[]> {
     });
 
     const s3Body = s3Res.formattedBundle;
-    // Check if the declaration was captured in the top 25 windows
-    const hasDeclInResults = s3Body.includes("export function liquidation_guard");
+    const s3Windows = s3Body
+      .split(/(?=\/\/\s*match at \[)/)
+      .filter((w) => w.trimStart().startsWith("// match at ["));
+    const totalRawCandidates = commentCount + 2;
+    const hasPrimaryDecl = s3Body.includes("export function liquidation_guard");
+    const hasSecondaryDecl = s3Body.includes("export const liquidation_guard_buffer");
+    const prunedOverflowComments = !s3Body.includes(`Architecture note ${commentCount}:`);
+    const s3NoiseTokensSaved = Math.max(0, estimateTokens(s3Source) - estimateTokens(s3Body));
 
     trials.push({
       name: "Scenario 3: Code vs Comment Disambiguation",
       query: "/liquidation_guard/",
       expectedTopTarget: "export function liquidation_guard",
-      rankPosition: 1,
-      totalMatches: 25,
+      rankPosition: hasPrimaryDecl && hasSecondaryDecl ? 1 : totalRawCandidates,
+      totalMatches: s3Windows.length || totalRawCandidates,
       topRankScore: 500,
-      noiseTokensSaved: 1250,
-      verified: hasDeclInResults && s3Body.includes("export const liquidation_guard_buffer"),
+      noiseTokensSaved: s3NoiseTokensSaved,
+      verified: hasPrimaryDecl && hasSecondaryDecl && prunedOverflowComments && s3Windows.length <= 25,
     });
   } finally {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
@@ -214,7 +226,9 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

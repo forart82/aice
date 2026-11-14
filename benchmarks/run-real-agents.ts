@@ -10,12 +10,11 @@
  *   npx tsx benchmarks/run-real-agents.ts RW-05:aice_with_idioms
  */
 
-import { execFile, execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 import YAML from "yaml";
 import ts from "../src/compat/typescript.js";
 import { parse } from "../src/core/parser.js";
@@ -31,7 +30,9 @@ import {
   SUPPORTED_BENCHMARK_LANGUAGES,
 } from "./offline-suite.js";
 import {
+  buildRealAgentBenchmarkSuiteReport,
   computeRealApiCostUsd,
+  formatRealAgentBenchmarkMarkdown,
   type BenchmarkLayerMetrics,
   type RealAgentMode,
   type RealAgentRunMetrics,
@@ -40,19 +41,135 @@ import { BenchmarkDashboard } from "./ui/progress-bar.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const execFileAsync = promisify(execFile);
 
 export const OAUTH_OR_RATE_LIMIT_RE =
-  /oauth|token|401|429|not logged into|ETIMEDOUT|ECONNRESET/i;
+  /oauth|token|401|429|\b50[234]\b|not logged into|ETIMEDOUT|ECONNRESET|EAI_AGAIN|UNAVAILABLE|RESOURCE_EXHAUSTED|overloaded/i;
+
+function spawnAgyOnce(
+  agyArgs: string[],
+  cwd?: string,
+  timeoutMs = 240_000,
+  maxBuffer = 25 * 1024 * 1024,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const useProcessGroup = process.platform !== "win32";
+    const child = spawn("agy", agyArgs, {
+      cwd,
+      detached: useProcessGroup,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    let stdoutLen = 0;
+    let stderrLen = 0;
+    let settled = false;
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const killChildTree = (sig: NodeJS.Signals) => {
+      if (useProcessGroup && child.pid) {
+        try {
+          process.kill(-child.pid, sig);
+        } catch {
+          // Process group may already have exited
+        }
+      }
+      try {
+        child.kill(sig);
+      } catch {
+        // Child may already have exited
+      }
+    };
+
+    const timeoutTimer = setTimeout(() => {
+      timedOut = true;
+      killChildTree("SIGTERM");
+      killTimer = setTimeout(() => {
+        killChildTree("SIGKILL");
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        if (!settled) {
+          settled = true;
+          const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+          const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+          const err: any = new Error(`ETIMEDOUT: agy process timed out after ${timeoutMs}ms`);
+          err.code = "ETIMEDOUT";
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+        }
+      }, 2000);
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      if (stdoutLen < maxBuffer) {
+        const slice =
+          stdoutLen + chunk.length > maxBuffer ? chunk.subarray(0, maxBuffer - stdoutLen) : chunk;
+        stdoutChunks.push(slice);
+        stdoutLen += slice.length;
+      }
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      if (stderrLen < maxBuffer) {
+        const slice =
+          stderrLen + chunk.length > maxBuffer ? chunk.subarray(0, maxBuffer - stderrLen) : chunk;
+        stderrChunks.push(slice);
+        stderrLen += slice.length;
+      }
+    });
+
+    child.on("error", (err: any) => {
+      clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (settled) return;
+      settled = true;
+      err.stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+      err.stderr = Buffer.concat(stderrChunks).toString("utf-8");
+      reject(err);
+    });
+
+    child.on("close", (code, signal) => {
+      clearTimeout(timeoutTimer);
+      if (killTimer) clearTimeout(killTimer);
+      if (settled) return;
+      settled = true;
+      const stdout = Buffer.concat(stdoutChunks).toString("utf-8");
+      const stderr = Buffer.concat(stderrChunks).toString("utf-8");
+      if (timedOut) {
+        const err: any = new Error(`ETIMEDOUT: agy process timed out after ${timeoutMs}ms`);
+        err.code = "ETIMEDOUT";
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      if (code !== 0) {
+        const err: any = new Error(
+          `Command failed: agy (exit code ${code ?? "null"}, signal ${signal ?? "none"})`,
+        );
+        err.code = code;
+        err.signal = signal;
+        err.stdout = stdout;
+        err.stderr = stderr;
+        reject(err);
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
 
 export async function execAgyWithRetry(
   agyArgs: string[],
   maxRetries = 3,
+  cwd?: string,
 ): Promise<{ stdout: string; stderr: string }> {
   let lastError: any;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await execFileAsync("agy", agyArgs, { maxBuffer: 25 * 1024 * 1024, timeout: 240_000 });
+      return await spawnAgyOnce(agyArgs, cwd, 240_000, 25 * 1024 * 1024);
     } catch (err: any) {
       lastError = err;
       const stdout = String(err?.stdout || "");
@@ -242,15 +359,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Speed Tiers & Food Multipliers",
-      taskPrompt: "Layer 2: Add speed tiers (adjusting snake interval dynamically per score band with keyword `speedTier` or `interval`) and spawn bonus food multiplier items with active CSS visual glow in styles.css (or theme.css) and level configuration tiers in game_config.json (or levels.json).",
-      targetFiles: ["engine.ts", "styles.css", "game_config.json", "game.ts", "theme.css", "levels.json"],
+      taskPrompt:
+        "Layer 2: Add speed tiers (adjusting snake interval dynamically per score band with keyword `speedTier` or `interval`) in engine.ts, bonus food multiplier glow styling in styles.css, and level configuration tiers in game_config.json.",
+      targetFiles: ["engine.ts", "styles.css", "game_config.json"],
       expectedKeywords: ["speedTier|interval", "multiplier", "glow|powerUpGlow"],
     },
     layer3: {
       layerIndex: 3,
       title: "LocalStorage High-Score & Pause Overlay",
-      taskPrompt: "Layer 3: Add localStorage high-score persistence and keyboard pause/resume overlay modal with backdrop styling in styles.css (or theme.css) and index.html.",
-      targetFiles: ["engine.ts", "index.html", "styles.css", "game.ts", "theme.css"],
+      taskPrompt:
+        "Layer 3: Add localStorage high-score persistence in engine.ts and keyboard pause/resume overlay modal with backdrop styling in styles.css and index.html.",
+      targetFiles: ["engine.ts", "index.html", "styles.css"],
       expectedKeywords: ["highScore|highscore", "saveHighScore|storage|localStorage", "pauseModal|pause|overlay"],
     },
   },
@@ -258,15 +377,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Rate-Limiting Token Bucket",
-      taskPrompt: "Layer 2: Add a token bucket rate limiter to throttle worker job dispatch, controlled by rate and burst settings in pipeline.yaml (or service.yaml).",
-      targetFiles: ["worker.py", "pipeline.yaml", "service.yaml"],
+      taskPrompt:
+        "Layer 2: Add a token bucket rate limiter in worker.py to throttle worker job dispatch, controlled by rate and burst settings in pipeline.yaml.",
+      targetFiles: ["worker.py", "pipeline.yaml"],
       expectedKeywords: ["TokenBucket|token_bucket|rate_limit", "refill_rate|rate", "capacity|burst"],
     },
     layer3: {
       layerIndex: 3,
       title: "Prometheus Metrics & Graceful SIGTERM",
-      taskPrompt: "Layer 3: Add a Prometheus /metrics endpoint exposing worker telemetry and install a graceful SIGTERM signal handler to drain in-flight batches in worker.py and schema.json (or config.json).",
-      targetFiles: ["worker.py", "schema.json", "config.json"],
+      taskPrompt:
+        "Layer 3: Add a Prometheus /metrics endpoint exposing worker telemetry and install a graceful SIGTERM signal handler to drain in-flight batches in worker.py and schema.json.",
+      targetFiles: ["worker.py", "schema.json"],
       expectedKeywords: ["metrics|prometheus", "sigterm|SIGTERM", "drain|graceful"],
     },
   },
@@ -274,15 +395,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Promotional Coupon Validation",
-      taskPrompt: "Layer 2: Add tiered promotional coupon code validation in CheckoutController.php, a coupon input row in cart.twig, and client-side code verification in cart.js.",
-      targetFiles: ["CheckoutController.php", "cart.twig", "cart.js"],
+      taskPrompt:
+        "Layer 2: Add tiered promotional coupon code validation in CheckoutController.php, a coupon input row in checkout.twig, and client-side code verification in cart-client.js.",
+      targetFiles: ["CheckoutController.php", "checkout.twig", "cart-client.js"],
       expectedKeywords: ["applyCouponCode|coupon", "couponRow|coupon|discount", "discountTier|tier|discount"],
     },
     layer3: {
       layerIndex: 3,
       title: "Multi-Currency VAT Auto-Calculation",
-      taskPrompt: "Layer 3: Add multi-currency VAT auto-calculation in CheckoutController.php with active currency selector in cart.twig and exchange rates in pricing_tiers.json (or shipping.json).",
-      targetFiles: ["CheckoutController.php", "cart.twig", "pricing_tiers.json", "shipping.json"],
+      taskPrompt:
+        "Layer 3: Add multi-currency VAT auto-calculation in CheckoutController.php with active currency selector in checkout.twig and exchange rates in shipping_rates.json.",
+      targetFiles: ["CheckoutController.php", "checkout.twig", "shipping_rates.json"],
       expectedKeywords: ["calculateVat|vat|tax", "currencySelector|currency", "vatRate|rate|tax"],
     },
   },
@@ -290,15 +413,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Live Sparkline Charts & Date Filter",
-      taskPrompt: "Layer 2: Add live sparkline trend charts in DashboardPanel.tsx (or Dashboard.tsx) with historical series in metrics-store.ts (or metricsStore.ts) and date-range filter picker in dashboard.css (or theme.css).",
-      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "dashboard.css", "Dashboard.tsx", "metricsStore.ts", "theme.css"],
+      taskPrompt:
+        "Layer 2: Add live sparkline trend charts in DashboardPanel.tsx with historical series in metrics-store.ts and date-range filter picker styling in dashboard.css.",
+      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "dashboard.css"],
       expectedKeywords: ["SparklineChart|sparkline", "dateRangePicker|dateRange|filter", "sparklineData|series|data"],
     },
     layer3: {
       layerIndex: 3,
       title: "CSV Export Stream & Theme Persistence",
-      taskPrompt: "Layer 3: Add a streaming CSV export helper for cohort retention data in DashboardPanel.tsx (or Dashboard.tsx) and persist dark/light theme preferences in metrics-store.ts (or metricsStore.ts) with display in index.html.",
-      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "index.html", "Dashboard.tsx", "metricsStore.ts"],
+      taskPrompt:
+        "Layer 3: Add a streaming CSV export helper for cohort retention data in DashboardPanel.tsx and persist dark/light theme preferences in metrics-store.ts with display in index.html.",
+      targetFiles: ["DashboardPanel.tsx", "metrics-store.ts", "index.html"],
       expectedKeywords: ["exportCsvStream|csv|export", "themePersistence|theme|colorScheme", "colorScheme|theme|storage"],
     },
   },
@@ -306,15 +431,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Trace Span Propagation & LZ4 Buffer",
-      taskPrompt: "Layer 2: Add distributed trace span header propagation in gateway.go (or mesh_proxy.go) and ring buffer compression staging in wal_engine.rs (or trace_ring.rs).",
-      targetFiles: ["gateway.go", "wal_engine.rs", "mesh_proxy.go", "trace_ring.rs"],
+      taskPrompt:
+        "Layer 2: Add distributed trace span header propagation in gateway.go and ring buffer LZ4 compression staging in wal_engine.rs.",
+      targetFiles: ["gateway.go", "wal_engine.rs"],
       expectedKeywords: ["PropagateTraceSpan|trace|span", "compress_lz4_buffer|lz4|ring", "trace_id|traceId|trace"],
     },
     layer3: {
       layerIndex: 3,
       title: "Monotonic Audit & Heartbeat Probe",
-      taskPrompt: "Layer 3: Add monotonic sequence validation in gateway.go (or mesh_proxy.go) and cluster heartbeat liveness probe in cluster.yaml.",
-      targetFiles: ["gateway.go", "cluster.yaml", "mesh_proxy.go"],
+      taskPrompt:
+        "Layer 3: Add monotonic sequence validation in gateway.go and cluster heartbeat liveness probe configuration in cluster.yaml.",
+      targetFiles: ["gateway.go", "cluster.yaml"],
       expectedKeywords: ["AuditSequenceMonotonic|monotonic|seq", "heartbeatProbeInterval|heartbeat|probe", "seq_num|sequence|seq"],
     },
   },
@@ -322,15 +449,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Restitution Velocity Damping",
-      taskPrompt: "Layer 2: Add restitution velocity damping and angular spin impulse to collision resolver in viewport_sim.cpp (or framebuffer.cpp), exposed to inspector.ts.",
-      targetFiles: ["viewport_sim.cpp", "inspector.ts", "framebuffer.cpp"],
+      taskPrompt:
+        "Layer 2: Add restitution velocity damping and angular spin impulse to the collision resolver in viewport_sim.cpp, exposed to inspector.ts.",
+      targetFiles: ["viewport_sim.cpp", "inspector.ts"],
       expectedKeywords: ["applyRestitutionDamping|restitution|damping", "angularSpin|spin|angular", "dampingFactor|damping|impulse"],
     },
     layer3: {
       layerIndex: 3,
       title: "Particle Collision Burst Emitter",
-      taskPrompt: "Layer 3: Add particle burst emitter on high-energy impacts in viewport_sim.cpp (or framebuffer.cpp) with canvas HUD overlay in overlay.html (or index.html) and overlay.css (or theme.css).",
-      targetFiles: ["viewport_sim.cpp", "overlay.html", "overlay.css", "framebuffer.cpp", "index.html", "theme.css"],
+      taskPrompt:
+        "Layer 3: Add particle burst emitter on high-energy impacts in viewport_sim.cpp with canvas HUD overlay in overlay.html and overlay.css.",
+      targetFiles: ["viewport_sim.cpp", "overlay.html", "overlay.css"],
       expectedKeywords: ["emitParticleBurst|particle|burst", "particleCanvasOverlay|canvas|overlay", "burstCount|count|burst"],
     },
   },
@@ -338,15 +467,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Tiered Risk Weighting & Audit Events",
-      taskPrompt: "Layer 2: Add tiered velocity risk score weighting in FraudScorer.kt (or AlertDispatcher.kt) and emit compliance audit events in SettlementEngine.cs (or AuditLedger.cs).",
-      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs", "AlertDispatcher.kt", "AuditLedger.cs"],
+      taskPrompt:
+        "Layer 2: Add tiered velocity risk score weighting in FraudScorer.kt and emit compliance audit events in SettlementEngine.cs.",
+      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs"],
       expectedKeywords: ["calculateRiskWeight|risk|weight", "EmitAuditEvent|audit|event", "riskScore|score|risk"],
     },
     layer3: {
       layerIndex: 3,
       title: "Replay Fraud Window & KMS Key Rotation",
-      taskPrompt: "Layer 3: Add replay attack deduplication window in FraudScorer.kt (or AlertDispatcher.kt) and automated KMS envelope key rotation check in SettlementEngine.cs (or AuditLedger.cs) with thresholds in risk_rules.json.",
-      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs", "risk_rules.json", "AlertDispatcher.kt", "AuditLedger.cs"],
+      taskPrompt:
+        "Layer 3: Add replay attack deduplication window in FraudScorer.kt and automated KMS envelope key rotation check in SettlementEngine.cs with thresholds in risk_rules.json.",
+      targetFiles: ["FraudScorer.kt", "SettlementEngine.cs", "risk_rules.json"],
       expectedKeywords: ["detectReplayWindow|replay|dedup", "RotateKmsEnvelopeKey|kms|rotation", "replayWindowSec|window|replay"],
     },
   },
@@ -354,15 +485,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Invoice PDF Webhook & Rules Table",
-      taskPrompt: "Layer 2: Add an asynchronous invoice PDF generation webhook in billing_service.py (or billing.py) and a discount rule management table in UsageChart.tsx (or InvoiceStudio.tsx).",
-      targetFiles: ["billing_service.py", "UsageChart.tsx", "billing.py", "InvoiceStudio.tsx"],
+      taskPrompt:
+        "Layer 2: Add an asynchronous invoice PDF generation webhook in billing_service.py and a discount rule management table in UsageChart.tsx.",
+      targetFiles: ["billing_service.py", "UsageChart.tsx"],
       expectedKeywords: ["export_pdf_webhook|pdf|webhook", "DiscountRulesTable|discount|rules", "invoice_pdf|invoice|pdf"],
     },
     layer3: {
       layerIndex: 3,
       title: "Dunning Escalation & Quota Gauges",
-      taskPrompt: "Layer 3: Add dunning email retry escalation scheduler in worker_cron.yaml (or cron.yaml) and real-time usage quota warning gauges in billing_service.py (or billing.py) and plans.json.",
-      targetFiles: ["billing_service.py", "worker_cron.yaml", "plans.json", "billing.py", "cron.yaml"],
+      taskPrompt:
+        "Layer 3: Add dunning email retry escalation scheduler in worker_cron.yaml and real-time usage quota warning gauges in billing_service.py and plans.json.",
+      targetFiles: ["billing_service.py", "worker_cron.yaml", "plans.json"],
       expectedKeywords: ["escalate_dunning_schedule|dunning|escalat", "tenantQuotaGauge|quota|gauge", "dunning_retry|retry|dunning"],
     },
   },
@@ -370,15 +503,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Iceberg Order Slicing & Feed Normalizer",
-      taskPrompt: "Layer 2: Add iceberg order hidden-quantity slicing in matcher.rs (or matching_engine.rs) and normalize multi-venue tick collar bands in margin_calc.cpp.",
-      targetFiles: ["matcher.rs", "margin_calc.cpp", "matching_engine.rs"],
+      taskPrompt:
+        "Layer 2: Add iceberg order hidden-quantity slicing in matcher.rs and normalize multi-venue tick collar bands in margin_calc.cpp.",
+      targetFiles: ["matcher.rs", "margin_calc.cpp"],
       expectedKeywords: ["slice_iceberg_order|iceberg|slice", "normalizeVenueCollar|venue|collar", "display_qty|qty|quantity"],
     },
     layer3: {
       layerIndex: 3,
       title: "Margin Guard RPC & Latency Histogram",
-      taskPrompt: "Layer 3: Add a circuit breaker RPC fallback in matcher.rs (or matching_engine.rs) and an intraday execution latency histogram in collar_bands.json (or collars.json).",
-      targetFiles: ["matcher.rs", "collar_bands.json", "matching_engine.rs", "collars.json"],
+      taskPrompt:
+        "Layer 3: Add a circuit breaker RPC fallback in matcher.rs and an intraday execution latency histogram in collar_bands.json.",
+      targetFiles: ["matcher.rs", "collar_bands.json"],
       expectedKeywords: ["circuitBreakerRpc|circuit_breaker|fallback", "latencyHistogram|histogram|latency", "trip_threshold|threshold|latency"],
     },
   },
@@ -386,15 +521,17 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Multi-Tenant Auth & SLO Burn Alerts",
-      taskPrompt: "Layer 2: Add multi-tenant JWT authorization middleware in telemetry_router.ts (or auth_gate.ts) and multi-window SLO burn rate alerting in AlertDispatcher.kt and mesh_topology.yaml (or slo_rules.yaml).",
-      targetFiles: ["telemetry_router.ts", "AlertDispatcher.kt", "mesh_topology.yaml", "auth_gate.ts", "slo_rules.yaml"],
+      taskPrompt:
+        "Layer 2: Add multi-tenant JWT authorization middleware in telemetry_router.ts and multi-window SLO burn rate alerting in AlertDispatcher.kt and mesh_topology.yaml.",
+      targetFiles: ["telemetry_router.ts", "AlertDispatcher.kt", "mesh_topology.yaml"],
       expectedKeywords: ["multiTenantAuthGuard|authGuard|jwt", "evaluateSloBurnRate|slo|burn", "tenant_id|tenantId|tenant"],
     },
     layer3: {
       layerIndex: 3,
       title: "Distributed Audit Log & Auto-Remediation",
-      taskPrompt: "Layer 3: Add append-only distributed audit event bus in trace_ring.rs (or audit_bus.rs) and automated flapping alert remediation triggers in anomaly_worker.py (or incident_engine.py) with display in status_digest.twig (or status.twig).",
-      targetFiles: ["trace_ring.rs", "anomaly_worker.py", "status_digest.twig", "audit_bus.rs", "incident_engine.py", "status.twig"],
+      taskPrompt:
+        "Layer 3: Add append-only distributed audit event bus in trace_ring.rs and automated flapping alert remediation triggers in anomaly_worker.py with display in status_digest.twig.",
+      targetFiles: ["trace_ring.rs", "anomaly_worker.py", "status_digest.twig"],
       expectedKeywords: ["append_distributed_audit|audit|event", "trigger_auto_remediation|remediat|flapping", "auditLog|audit_log|audit"],
     },
   },
@@ -402,14 +539,16 @@ export const SCENARIO_LAYER_DEFINITIONS: Record<
     layer2: {
       layerIndex: 2,
       title: "Monotonic Batch Sequence Validation",
-      taskPrompt: "Layer 2: Add a monotonic batch sequence epoch validator method in ledger_reconciler.ts (ensuring sequence numbers are strictly ascending without gaps).",
+      taskPrompt:
+        "Layer 2: Add a monotonic batch sequence epoch validator method in ledger_reconciler.ts (ensuring sequence numbers are strictly ascending without gaps).",
       targetFiles: ["ledger_reconciler.ts"],
       expectedKeywords: ["validateBatchSequenceMonotonic|monotonic|seq", "seqEpoch|sequence|epoch"],
     },
     layer3: {
       layerIndex: 3,
       title: "HMAC Payload Checksum Guard",
-      taskPrompt: "Layer 3: Add an HMAC-SHA256 payload integrity verification method in ledger_reconciler.ts to validate batch digests prior to reconciliation. IMPORTANT: Do NOT touch or modify verifyDecoySentinel_* or DECOY_SENTINEL_*.",
+      taskPrompt:
+        "Layer 3: Add an HMAC-SHA256 payload integrity verification method in ledger_reconciler.ts to validate batch digests prior to reconciliation. IMPORTANT: Do NOT touch or modify verifyDecoySentinel_* or DECOY_SENTINEL_*.",
       targetFiles: ["ledger_reconciler.ts"],
       expectedKeywords: ["verifyPayloadHmacChecksum|hmac|checksum", "hmacDigest|digest|hmac"],
     },
@@ -716,7 +855,7 @@ export function buildTaskSpecText(
 
   if (spec.id === "RW-11") {
     return [
-      `Engineering Task (${spec.id}: ${spec.title}):`,
+      `Engineering Task (${spec.title}):`,
       `1. Target Symbol Update (Blind Discovery — inspect the file to identify the matching domain function by its parameter & formula; do NOT touch verifyDecoySentinel_* or DECOY_SENTINEL_* comments):`,
       ...updateLines,
       `2. Delete Obsolete Symbol:`,
@@ -765,7 +904,7 @@ export function buildTaskSpecText(
   }
 
   return [
-    `Engineering Task (${spec.id}: ${spec.title}):`,
+    `Engineering Task (${spec.title}):`,
     `1. Target Symbol Updates (Blind Discovery — inspect the workspace to locate each target declaration by its domain signature/attributes):`,
     ...updateLines,
     `2. Delete Obsolete Symbols:`,
@@ -775,19 +914,21 @@ export function buildTaskSpecText(
   ].join("\n");
 }
 
-function buildPrompt(
+export function buildPrompt(
   spec: RealWorldBenchmarkSpec,
   mode: RealAgentMode,
   dir: string,
   seed: number = DEFAULT_ADVERSARIAL_SEED,
 ): string {
   const taskText = buildTaskSpecText(spec, seed);
+  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir}. Never inspect, search, or access parent directories (..) or external repositories.`;
 
   if (mode === "without_aice") {
     return [
       `Workspace: ${dir}`,
-      `Environment: WITHOUT AICE (Native IDE Tools — Cold-Start Repository).`,
-      `Allowed tools: grep_search, find_by_name, view_file, replace_file_content, multi_replace_file_content. Do NOT use run_command or aice.`,
+      boundaryRule,
+      `Environment: WITHOUT AICE (Native File & Search Tools — Cold-Start Repository).`,
+      `Allowed tools: Native file and search tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name, or ls/rg discovery via run_command). Do NOT run \`aice\` or write files via shell scripts/redirection.`,
       taskText,
       `Reply DONE when all changes are saved to disk.`,
     ].join("\n\n");
@@ -796,32 +937,43 @@ function buildPrompt(
   if (mode === "aice_no_idioms") {
     return [
       `Workspace: ${dir}`,
-      `Environment: AICE On-the-Fly WITHOUT Idioms (Pure AICE CLI — Cold-Start Repository).`,
-      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, --dry-run, or $idiom macros.`,
-      `AICE CLI Reference (\`--no-idioms\`):`,
-      `- \`cd ${dir} && aice context . -s "*" --no-idioms\`: Extract \`// symbols:\` headers and compact pure-AICE slices for all files in 1 command (or \`aice outline . --no-idioms\` for signatures only; pass file subsets if a 15-file workspace output is truncated).`,
-      `- \`cd ${dir} && aice splice --no-idioms --batch '[...]'\`: Apply atomic AST updates, insertions, and deletions in 1 inline JSON array (keep compact 1-line \`if v < min: v = min; if v > max: v = max; v = v + step + 1\` and \`div(...) { span(...): ...; strong(...): ... }\` AICE syntax from context; omit \`verifyDecoySentinel_*\` from the batch array so it remains untouched):`,
-      `  - Update: \`{"file":"<file>","symbol":"<sym>","code":"<pure AICE>"}\``,
-      `  - Insert: \`{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<pure AICE>"}\``,
-      `  - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
+      boundaryRule,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (2-Pillar Unified AICE CLI — Cold-Start Repository).`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, --dry-run, or $idiom macros.`,
+      `AICE 2-Pillar CLI Reference (\`--no-idioms\`):`,
+      `1. Read (\`aice context\`):`,
+      `   - \`aice context . -s "*" --no-idioms\`: Extract \`// symbols:\` headers and compact pure-AICE slices across the workspace (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
+      `2. Mutate (\`aice splice\` / \`aice write\` — pre-validates AST & native compiler syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
+      `   - Zero-escaping unified heredoc stream (preferred for multi-line edits, updates, deletions, or appends):`,
+      `     \`aice splice --no-idioms --stdin << 'EOF'\``,
+      `     \`=== <file>:<symbol> ===\` (replace symbol, or use \`<<< / === / >>>\` hunk inside symbol)`,
+      `     \`=== <file>:<symbol> --delete ===\` (delete obsolete symbol)`,
+      `     \`=== <file>:eof ===\` (append new symbol/rule)`,
+      `     \`EOF\``,
+      `   - Or JSON batch array (supports \`insertAfter\` anchor placement):`,
+      `     \`aice splice --no-idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<pure AICE>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true}]'\``,
       taskText,
-      `Reply DONE when all changes are saved to disk.`,
+      `Once \`aice splice\` reports \`✔\` for all required edits, reply DONE immediately without redundant full-workspace re-reads.`,
     ].join("\n\n");
   }
 
   return [
     `Workspace: ${dir}`,
+    boundaryRule,
     `Environment: AICE On-the-Fly WITH Cold-Start Project Idiom Discovery (\`--idioms\`).`,
-    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, or --dry-run.`,
-    `AICE CLI Reference (\`--idioms\`):`,
-    `- \`cd ${dir} && aice context . -s "*" --idioms\`: Auto-discover & save repeating project idioms into \`aice.config.json\` AND extract \`// symbols:\` headers, \`$idiom(...)\`-collapsed symbol slices, and \`### Active Project Idioms\` templates across the workspace in 1 command (no separate \`outline\` or \`idioms scan\` command needed).`,
-    `- \`cd ${dir} && aice splice --idioms --batch '[...]'\`: Apply atomic symbol updates/insertions, deletions, and workspace-wide \`$idiom\` template refactors in 1 inline JSON array (in JSON/YAML idiom templates, preserve \`{ key: $0, ... }\` object syntax; in multi-line code/CSS templates, separate lines with \`\\n\`; omit \`verifyDecoySentinel_*\` from the batch array):`,
-    `  - Update: \`{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"}\``,
-    `  - Insert: \`{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<AICE with $idiom>"}\``,
-    `  - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
-    `  - Idiom template refactor: \`{"name":"$<discovered_idiom>","template":"<updated template>"}\``,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, or --dry-run.`,
+    `AICE 2-Pillar CLI Reference (\`--idioms\`):`,
+    `1. Read & Mine Idioms (\`aice context\`):`,
+    `   - \`aice context . -s "*" --idioms\`: Auto-discover & save repeating project idioms into \`aice.config.json\` AND extract \`// symbols:\` headers, \`$idiom(...)\`-collapsed symbol slices, and \`### Active Project Idioms\` templates in 1 command (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
+    `2. Mutate & Refactor Idioms (\`aice splice\` / \`aice write\` — pre-validates AST & native syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
+    `   - Atomic JSON batch for symbol updates/insertions, deletions, AND workspace-wide \`$idiom\` template refactors in 1 call (in JSON/YAML idiom templates preserve \`{ key: $0, ... }\` object syntax; separate multi-line templates with \`\\n\`):`,
+    `     - Update: \`{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"}\``,
+    `     - Insert: \`{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<AICE with $idiom>"}\``,
+    `     - Delete: \`{"file":"<file>","symbol":"<obsoleteSym>","delete":true}\``,
+    `     - Idiom template refactor: \`{"name":"$<discovered_idiom>","template":"<updated template>"}\``,
+    `   - Or zero-escaping heredoc stream for multi-file symbol updates/deletions/appends: \`aice splice --idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\`, \`=== <file>:<symbol> --delete ===\`, \`=== <file>:eof ===\`).`,
     taskText,
-    `Reply DONE when all changes are saved to disk.`,
+    `Once \`aice splice\` reports \`✔\` for all required edits, reply DONE immediately without redundant full-workspace re-reads.`,
   ].join("\n\n");
 }
 
@@ -835,13 +987,17 @@ export function buildLayerPrompt(
   const layerDef = layerIndex === 2 ? layerDefs?.layer2 : layerDefs?.layer3;
   const title = layerDef?.title || `Layer ${layerIndex}`;
   const promptText = layerDef?.taskPrompt || `Implement Layer ${layerIndex} features`;
+  const targetFilesHint =
+    layerDef && layerDef.targetFiles.length > 0 ? layerDef.targetFiles.join(" ") : ".";
+  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir}. Never inspect, search, or access parent directories (..) or external repositories.`;
 
   if (mode === "without_aice") {
     return [
       `Workspace: ${dir}`,
-      `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
-      `Environment: WITHOUT AICE (Native IDE Tools).`,
-      `Allowed tools: grep_search, find_by_name, view_file, replace_file_content, multi_replace_file_content. Do NOT use run_command or aice.`,
+      boundaryRule,
+      `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
+      `Environment: WITHOUT AICE (Native File & Search Tools).`,
+      `Allowed tools: Native file and search tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name, or ls/rg discovery via run_command). Do NOT run \`aice\` or write files via shell scripts/redirection.`,
       `Requirements:`,
       `1. ${promptText}`,
       `2. Non-Regression: Do NOT break or revert previous layer functionality or compiler checks.`,
@@ -853,33 +1009,35 @@ export function buildLayerPrompt(
   if (mode === "aice_no_idioms") {
     return [
       `Workspace: ${dir}`,
-      `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
-      `Environment: AICE On-the-Fly WITHOUT Idioms (Pure AICE CLI with \`--no-idioms\`).`,
-      `Allowed tools: run_command running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, --help, or $idiom macros.`,
+      boundaryRule,
+      `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (2-Pillar AICE CLI with \`--no-idioms\`).`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, --help, or $idiom macros.`,
       `AICE CLI Reference:`,
-      `- \`cd ${dir} && aice context . -s "*" --no-idioms\`: Inspect current workspace AST symbols in 1 turn.`,
-      `- \`cd ${dir} && aice splice --no-idioms --batch '[...]'\`: Apply new layer AST additions in 1 turn.`,
+      `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} --no-idioms\`.`,
+      `- Apply all new layer AST additions in 1 stream call via \`aice splice --no-idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\` or \`=== <file>:eof ===\`) or \`aice splice --no-idioms --batch '[...]'\`.`,
       `Requirements:`,
       `1. ${promptText}`,
       `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
-      `3. Decoys: Omit verifyDecoySentinel_* so it remains untouched.`,
-      `Reply DONE when all changes are saved to disk.`,
+      `3. Decoys: Omit verifyDecoySentinel_* and DECOY_SENTINEL_* so they remain untouched.`,
+      `Once \`aice splice\` reports \`✔\`, reply DONE immediately.`,
     ].join("\n\n");
   }
 
   return [
     `Workspace: ${dir}`,
-    `Task: ${spec.id} - ${title} (Progressive Layer ${layerIndex}/3).`,
+    boundaryRule,
+    `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
     `Environment: AICE On-the-Fly WITH Project Idioms (\`--idioms\`).`,
-    `Allowed tools: run_command running \`aice\` CLI commands. Do NOT use view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, or --help.`,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, or --help.`,
     `AICE CLI Reference:`,
-    `- \`cd ${dir} && aice context . -s "*" --idioms\`: Inspect current symbols with active project idioms in 1 turn.`,
-    `- \`cd ${dir} && aice splice --idioms --batch '[...]'\`: Apply new layer features using active project idioms.`,
+    `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} --idioms\`.`,
+    `- Apply all new layer AST additions in 1 stream call via \`aice splice --idioms --stdin << 'EOF'\` (\`=== <file>:<symbol> ===\` or \`=== <file>:eof ===\`) or \`aice splice --idioms --batch '[...]'\`.`,
     `Requirements:`,
     `1. ${promptText}`,
     `2. Non-Regression: Preserve all existing layer features and compiler integrity.`,
-    `3. Decoys: Omit verifyDecoySentinel_* so it remains untouched.`,
-    `Reply DONE when all changes are saved to disk.`,
+    `3. Decoys: Omit verifyDecoySentinel_* and DECOY_SENTINEL_* so they remain untouched.`,
+    `Once \`aice splice\` reports \`✔\`, reply DONE immediately.`,
   ].join("\n\n");
 }
 
@@ -1083,23 +1241,44 @@ export interface TranscriptComplianceAudit {
 }
 
 /**
- * Scans every tool call in transcript.jsonl for forbidden shell file writers
- * (`cat >`, `echo >`, `tee`, `fs.writeFileSync`), discovery bypasses (`grep -rn`, `cat`, `sed -n`),
- * and native file tools (`write_file`, `edit_file`, `replace_file_content`) during AICE benchmark modes.
+ * Scans every tool call in transcript_full.jsonl / transcript.jsonl for:
+ * - Sandbox escapes outside `workspaceDir` or benchmark harness inspection (across ALL modes)
+ * - `aice` CLI usage or shell/Python file writers during `without_aice`
+ * - Forbidden shell file writers (`cat >`, `echo >`, `tee`, `fs.writeFileSync`, Python `open(..., 'w')`),
+ *   shell discovery bypasses (`grep -rn`, `cat <file>`, `sed -n`), and native file/search tools
+ *   (`read_file`, `write_file`, `edit_file`, `view_file`, `replace_file_content`, `multi_replace_file_content`,
+ *   `grep_search`, `find_by_name`) during AICE benchmark modes.
  */
 export function auditTranscriptCompliance(
   transcriptPath?: string,
   mode: string = "aice_no_idioms",
+  workspaceDir?: string,
 ): TranscriptComplianceAudit {
-  if (mode === "without_aice" || !transcriptPath || !fs.existsSync(transcriptPath)) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
     return { compliant: true, violations: [] };
   }
 
   const violations: string[] = [];
   const raw = fs.readFileSync(transcriptPath, "utf-8");
   const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const resolvedWorkspace = workspaceDir ? path.resolve(workspaceDir) : undefined;
 
-  const NATIVE_MUTATION_TOOLS = new Set(["write_file", "edit_file", "replace_file_content"]);
+  const FORBIDDEN_AICE_MODE_NATIVE_TOOLS = new Set([
+    "write_file",
+    "edit_file",
+    "replace_file_content",
+    "multi_replace_file_content",
+    "read_file",
+    "view_file",
+    "grep_search",
+    "find_by_name",
+  ]);
+
+  const BENCHMARK_HARNESS_ESCAPE_RE =
+    /(?:benchmarks\/(?:run-real-agents|offline-suite|real-agent-suite|real-agent-results)|computeSeededFileMutation|computeFileDecoySpec|verifyWorkspaceOnDisk|SCENARIO_LAYER_DEFINITIONS|HOSTILE_LONE_NEEDLE_SPEC|\/dev\/aice\b|antigravity-cli\/worktrees\b)/;
+
+  const SHELL_FILE_WRITER_RE =
+    /\bcat\s+<<[\s\S]*?>|\bcat\s+[^>|\n]*?>|\becho\b[^|\n]*?>|(?:^|[|;&]\s*)\btee\b|\bfs\.writeFileSync\b|\bpython3?\b[\s\S]*?\b(?:open\s*\([^)]*['"][wa]['"]|write_text\s*\()/;
 
   for (const line of lines) {
     let entry: Record<string, unknown>;
@@ -1115,29 +1294,90 @@ export function auditTranscriptCompliance(
 
     for (const tc of toolCalls) {
       const toolName = String(tc.name ?? tc.tool ?? "");
-      if (NATIVE_MUTATION_TOOLS.has(toolName)) {
-        violations.push(`Forbidden native file tool '${toolName}' used in ${mode}`);
+      const args = (tc.args ?? tc.arguments ?? tc.input ?? {}) as Record<string, unknown>;
+      const serializedArgs = JSON.stringify(args);
+
+      if (BENCHMARK_HARNESS_ESCAPE_RE.test(serializedArgs)) {
+        violations.push(
+          `Forbidden benchmark harness or external repo escape in '${toolName}': ${serializedArgs.slice(0, 120)}`,
+        );
+      }
+
+      if (resolvedWorkspace) {
+        for (const key of [
+          "Path",
+          "TargetFile",
+          "DirectoryPath",
+          "SearchPath",
+          "file_path",
+          "path",
+        ]) {
+          const rawTarget = args[key];
+          if (
+            typeof rawTarget === "string" &&
+            rawTarget.trim().length > 0 &&
+            rawTarget !== "/dev/null"
+          ) {
+            const resolvedTarget = path.resolve(resolvedWorkspace, rawTarget);
+            if (
+              resolvedTarget !== resolvedWorkspace &&
+              !resolvedTarget.startsWith(`${resolvedWorkspace}${path.sep}`)
+            ) {
+              violations.push(
+                `Sandbox boundary escape via '${toolName}' outside workspace: ${rawTarget.slice(0, 120)}`,
+              );
+            }
+          }
+        }
+      }
+
+      if (mode !== "without_aice" && FORBIDDEN_AICE_MODE_NATIVE_TOOLS.has(toolName)) {
+        violations.push(`Forbidden native tool '${toolName}' used in ${mode}`);
         continue;
       }
 
-      const args = (tc.args ?? tc.arguments ?? tc.input ?? {}) as Record<string, unknown>;
       const cmd = String(args.CommandLine ?? args.command ?? args.cmd ?? "");
       if (!cmd) continue;
 
-      // Strip safe `aice ... << 'EOF' ... EOF` heredoc bodies before checking shell commands
+      if (mode === "without_aice") {
+        if (/\baice\s+(?:context|outline|splice|write|create|new|idioms|compile)\b/.test(cmd)) {
+          violations.push(`Forbidden aice CLI usage in without_aice mode: ${cmd.slice(0, 120)}`);
+        }
+        if (SHELL_FILE_WRITER_RE.test(cmd)) {
+          violations.push(
+            `Forbidden shell file writer detected in without_aice mode: ${cmd.slice(0, 120)}`,
+          );
+        }
+        if (
+          resolvedWorkspace &&
+          /(?:^|[\s;&|])(?:cd|ls|rg|grep|find)\s+\.\.(?:\/|\s|$)|(?:\s|^)\.\.\//.test(cmd)
+        ) {
+          violations.push(`Sandbox parent-directory escape detected: ${cmd.slice(0, 120)}`);
+        }
+        continue;
+      }
+
+      // Strip safe `aice (splice|write|create|new) ... << 'EOF' ... EOF` heredoc bodies before checking shell commands
       const strippedCmd = cmd.replace(
-        /\baice\s+(?:splice|create|new)\b[\s\S]*?<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g,
+        /\baice\s+(?:splice|write|create|new)\b[\s\S]*?<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g,
         "aice_heredoc",
       );
 
-      // 1. Forbidden shell file writers: cat >, cat << ... >, echo >, tee, fs.writeFileSync
+      if (mode === "aice_no_idioms" && /(?:^|\s)--idioms(?:\s|$)/.test(strippedCmd)) {
+        violations.push(`Forbidden --idioms flag used in aice_no_idioms mode: ${cmd.slice(0, 120)}`);
+      }
+
       if (
-        /\bcat\s+<<[\s\S]*?>/.test(strippedCmd) ||
-        /\bcat\s+[^>|\n]*?>/.test(strippedCmd) ||
-        /\becho\b[^|\n]*?>/.test(strippedCmd) ||
-        /(?:^|[|;&]\s*)\btee\b/.test(strippedCmd) ||
-        /\bfs\.writeFileSync\b/.test(strippedCmd)
+        resolvedWorkspace &&
+        /(?:^|[\s;&|])(?:cd|ls|rg|grep|find|aice\s+\w+)\s+\.\.(?:\/|\s|$)|(?:\s|^)\.\.\//.test(
+          strippedCmd,
+        )
       ) {
+        violations.push(`Sandbox parent-directory escape detected: ${cmd.slice(0, 120)}`);
+      }
+
+      // 1. Forbidden shell file writers: cat >, cat << ... >, echo >, tee, fs.writeFileSync, python open(...,'w')
+      if (SHELL_FILE_WRITER_RE.test(strippedCmd)) {
         violations.push(`Forbidden shell file writer detected: ${cmd.slice(0, 120)}`);
       }
 
@@ -1225,13 +1465,17 @@ export function verifyWorkspaceOnDisk(
       const hasDecoyFn = new RegExp(`verify_?decoy_?sentinel_?${decoy.hexSeed}`, "i").test(
         content,
       );
-      const hasIntactDecoyExpr = new RegExp(`\\$?probe\\s*\\+\\s*${decoy.decoyStep}\\b`).test(
-        content,
-      );
-      const hasCorruptedDecoyExpr = new RegExp(
-        `\\$?probe\\s*\\+\\s*\\(?${decoy.decoyStep}\\)?\\s*\\+\\s*1\\b`,
+      const hasIntactDecoyExpr = new RegExp(
+        `(?:^|[^A-Za-z0-9_])\\$?probe\\s*\\+\\s*\\(?${decoy.decoyStep}\\)?\\b(?!\\s*\\+\\s*1\\b)`,
       ).test(content);
-      const hasIntactCommentTag = content.includes(`DECOY_SENTINEL_${decoy.hexSeed}`);
+      const hasCorruptedDecoyExpr =
+        new RegExp(
+          `(?:^|[^A-Za-z0-9_])\\$?probe\\s*\\+\\s*\\(?${decoy.decoyStep}\\)?\\s*\\+\\s*1\\b`,
+        ).test(content) ||
+        new RegExp(
+          `(?:^|[^A-Za-z0-9_])\\$?probe\\s*\\+\\s*\\(?${decoy.decoyStep + 1}\\)?\\b`,
+        ).test(content);
+      const hasIntactCommentTag = content.includes(decoy.commentTag);
       if (!hasDecoyFn || !hasIntactDecoyExpr || hasCorruptedDecoyExpr || !hasIntactCommentTag) {
         decoysIntact = false;
         details.push(`${f.fileName}: decoy sentinel ${decoy.fnName} was deleted or corrupted`);
@@ -1290,7 +1534,10 @@ export function verifyWorkspaceOnDisk(
       const c = (content.match(/metric-row-v2/g) || []).length;
       if (c < minSymCount) details.push(`${f.fileName}: missing metric-row-v2 (${c}/${minSymCount})`);
     } else if (f.languageId === "twig") {
-      if (isNewFeature && !content.includes(`block(name="${targetSym}_summary")`)) {
+      const hasTwigSummaryBlock =
+        new RegExp(`\\{%\\s*block\\s+${targetSym}_summary\\b`).test(content) ||
+        content.includes(`block(name="${targetSym}_summary")`);
+      if (isNewFeature && !hasTwigSummaryBlock) {
         details.push(`${f.fileName}: missing new block ${targetSym}_summary`);
       }
       const c = (content.match(/summary-row-v2/g) || []).length;
@@ -1380,12 +1627,16 @@ export function verifyWorkspaceOnDisk(
 
   const candidateTranscript =
     transcriptPath ??
-    (fs.existsSync(path.join(dir, "transcript.jsonl"))
-      ? path.join(dir, "transcript.jsonl")
-      : fs.existsSync(path.join(dir, ".system_generated/logs/transcript.jsonl"))
-        ? path.join(dir, ".system_generated/logs/transcript.jsonl")
-        : undefined);
-  const compliance = auditTranscriptCompliance(candidateTranscript, mode);
+    (fs.existsSync(path.join(dir, "transcript_full.jsonl"))
+      ? path.join(dir, "transcript_full.jsonl")
+      : fs.existsSync(path.join(dir, "transcript.jsonl"))
+        ? path.join(dir, "transcript.jsonl")
+        : fs.existsSync(path.join(dir, ".system_generated/logs/transcript_full.jsonl"))
+          ? path.join(dir, ".system_generated/logs/transcript_full.jsonl")
+          : fs.existsSync(path.join(dir, ".system_generated/logs/transcript.jsonl"))
+            ? path.join(dir, ".system_generated/logs/transcript.jsonl")
+            : undefined);
+  const compliance = auditTranscriptCompliance(candidateTranscript, mode, dir);
   if (!compliance.compliant) {
     details.push(`DISQUALIFIED: Forbidden workaround detected (${compliance.violations.join("; ")})`);
   }
@@ -1482,6 +1733,70 @@ export async function runAgentBenchmarkMode(
     details: [] as string[],
   };
 
+  const resolveLiveTranscriptPath = (cid: string): string | undefined => {
+    if (!cid) return undefined;
+    const logsDir = path.join(
+      os.homedir(),
+      ".gemini/antigravity-cli/brain",
+      cid,
+      ".system_generated/logs",
+    );
+    const fullPath = path.join(logsDir, "transcript_full.jsonl");
+    if (fs.existsSync(fullPath)) return fullPath;
+    const compactPath = path.join(logsDir, "transcript.jsonl");
+    if (fs.existsSync(compactPath)) return compactPath;
+    return undefined;
+  };
+
+  const readTranscriptCounters = (tPath?: string) => {
+    let turns = 0;
+    let toolCalls = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let cacheReadTokens = 0;
+    let toolCallTokens = 0;
+    let toolResultTokens = 0;
+    if (tPath && fs.existsSync(tPath)) {
+      const lines = fs
+        .readFileSync(tPath, "utf-8")
+        .trim()
+        .split("\n")
+        .map((l) => {
+          try {
+            return JSON.parse(l);
+          } catch {
+            return null;
+          }
+        })
+        .filter(Boolean);
+      for (const entry of lines) {
+        if (entry.type === "PLANNER_RESPONSE") {
+          turns++;
+          inputTokens += entry.input_tokens || 0;
+          outputTokens += entry.output_tokens || 0;
+          cacheReadTokens += entry.cache_read_tokens || 0;
+          if (Array.isArray(entry.tool_calls)) {
+            toolCalls += entry.tool_calls.length;
+            for (const tc of entry.tool_calls) {
+              toolCallTokens += estimateTokens(JSON.stringify(tc.args || {}));
+            }
+          }
+        } else if (entry.type === "GENERIC" && typeof entry.content === "string") {
+          toolResultTokens += estimateTokens(entry.content);
+        }
+      }
+    }
+    return {
+      turns,
+      toolCalls,
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+      toolCallTokens,
+      toolResultTokens,
+    };
+  };
+
   const startLayer = targetLayer ?? 1;
   const endLayer = targetLayer ?? 3;
   for (let lIdx = startLayer; lIdx <= endLayer; lIdx++) {
@@ -1496,41 +1811,32 @@ export async function runAgentBenchmarkMode(
       status: "RUNNING",
     });
 
+    const prevCounters = readTranscriptCounters(resolveLiveTranscriptPath(convId));
+
     const prompt =
       currentLayer === 1
         ? buildPrompt(spec, mode, dir, seed)
         : buildLayerPrompt(spec, mode, dir, currentLayer);
 
     const t0 = Date.now();
-    const agyArgs = convId
-      ? [
-          "--conversation",
-          convId,
-          "-p",
-          prompt,
-          "--add-dir",
-          dir,
-          "--model",
-          "gemini-3.8-flash-low",
-          "--dangerously-skip-permissions",
-          "--output-format",
-          "json",
-        ]
-      : [
-          "-p",
-          prompt,
-          "--add-dir",
-          dir,
-          "--model",
-          "gemini-3.8-flash-low",
-          "--dangerously-skip-permissions",
-          "--output-format",
-          "json",
-        ];
+    const baseAgyArgs = [
+      "-p",
+      prompt,
+      "--add-dir",
+      dir,
+      "--model",
+      "gemini-3.8-flash-low",
+      "--print-timeout",
+      "210s",
+      "--dangerously-skip-permissions",
+      "--output-format",
+      "json",
+    ];
+    const agyArgs = convId ? ["--conversation", convId, ...baseAgyArgs] : baseAgyArgs;
 
     let stdout = "";
     try {
-      const res = await execAgyWithRetry(agyArgs);
+      const res = await execAgyWithRetry(agyArgs, 3, dir);
       stdout = res.stdout;
     } catch (e: any) {
       if (e?.stderr) {
@@ -1553,70 +1859,34 @@ export async function runAgentBenchmarkMode(
       `[RUNNER_STARTED] conversation_id=${convId} workspace=${dir} scenario=${spec.id} mode=${mode}`,
     );
 
-    let lTurns = 0;
-    let lToolCalls = 0;
-    let lInputTokens = 0;
-    let lOutputTokens = 0;
-    let lCacheReadTokens = 0;
-    let lToolCallTokens = 0;
-    let lToolResultTokens = 0;
+    const liveTranscriptPath = resolveLiveTranscriptPath(convId);
+    const postCounters = readTranscriptCounters(liveTranscriptPath);
 
-    if (convId) {
-      const transcriptPath = path.join(
-        os.homedir(),
-        ".gemini/antigravity-cli/brain",
-        convId,
-        ".system_generated/logs/transcript.jsonl",
-      );
-      if (fs.existsSync(transcriptPath)) {
-        const lines = fs
-          .readFileSync(transcriptPath, "utf-8")
-          .trim()
-          .split("\n")
-          .map((l) => {
-            try {
-              return JSON.parse(l);
-            } catch {
-              return null;
-            }
-          })
-          .filter(Boolean);
-
-        for (const entry of lines) {
-          if (entry.type === "PLANNER_RESPONSE") {
-            lTurns++;
-            lInputTokens += entry.input_tokens || 0;
-            lOutputTokens += entry.output_tokens || 0;
-            lCacheReadTokens += entry.cache_read_tokens || 0;
-            if (Array.isArray(entry.tool_calls)) {
-              lToolCalls += entry.tool_calls.length;
-              for (const tc of entry.tool_calls) {
-                lToolCallTokens += estimateTokens(JSON.stringify(tc.args || {}));
-              }
-            }
-          } else if (entry.type === "GENERIC" && typeof entry.content === "string") {
-            lToolResultTokens += estimateTokens(entry.content);
-          }
-        }
-      }
-    }
-
-    const layerTurnDelta = Math.max(1, lTurns - totalLlmTurns);
-    const layerToolDelta = Math.max(0, lToolCalls - totalToolCalls);
-    const layerInputDelta = Math.max(0, lInputTokens - totalInputTokens);
-    const layerOutputDelta = Math.max(0, lOutputTokens - totalOutputTokens);
-    const layerCacheDelta = Math.max(0, lCacheReadTokens - totalCacheReadTokens);
-    const layerCallTokDelta = Math.max(0, lToolCallTokens - totalToolCallTokens);
-    const layerResTokDelta = Math.max(0, lToolResultTokens - totalToolResultTokens);
+    const layerTurnDelta = Math.max(1, postCounters.turns - prevCounters.turns);
+    const layerToolDelta = Math.max(0, postCounters.toolCalls - prevCounters.toolCalls);
+    const layerInputDelta = Math.max(0, postCounters.inputTokens - prevCounters.inputTokens);
+    const layerOutputDelta = Math.max(0, postCounters.outputTokens - prevCounters.outputTokens);
+    const layerCacheDelta = Math.max(
+      0,
+      postCounters.cacheReadTokens - prevCounters.cacheReadTokens,
+    );
+    const layerCallTokDelta = Math.max(
+      0,
+      postCounters.toolCallTokens - prevCounters.toolCallTokens,
+    );
+    const layerResTokDelta = Math.max(
+      0,
+      postCounters.toolResultTokens - prevCounters.toolResultTokens,
+    );
     const layerWorkingDelta = layerCallTokDelta + layerResTokDelta + layerOutputDelta;
 
-    totalLlmTurns = Math.max(totalLlmTurns + 1, lTurns);
-    totalToolCalls = Math.max(totalToolCalls, lToolCalls);
-    totalInputTokens = Math.max(totalInputTokens, lInputTokens);
-    totalOutputTokens = Math.max(totalOutputTokens, lOutputTokens);
-    totalCacheReadTokens = Math.max(totalCacheReadTokens, lCacheReadTokens);
-    totalToolCallTokens = Math.max(totalToolCallTokens, lToolCallTokens);
-    totalToolResultTokens = Math.max(totalToolResultTokens, lToolResultTokens);
+    totalLlmTurns += layerTurnDelta;
+    totalToolCalls += layerToolDelta;
+    totalInputTokens += layerInputDelta;
+    totalOutputTokens += layerOutputDelta;
+    totalCacheReadTokens += layerCacheDelta;
+    totalToolCallTokens += layerCallTokDelta;
+    totalToolResultTokens += layerResTokDelta;
     totalWorkingTokens = totalToolCallTokens + totalToolResultTokens + totalOutputTokens;
 
     dashboard?.updateWorker(workerKey, {
@@ -1625,14 +1895,6 @@ export async function runAgentBenchmarkMode(
       toolCalls: totalToolCalls,
     });
 
-    const liveTranscriptPath = convId
-      ? path.join(
-          os.homedir(),
-          ".gemini/antigravity-cli/brain",
-          convId,
-          ".system_generated/logs/transcript.jsonl",
-        )
-      : undefined;
     lastCheck = verifyWorkspaceOnDisk(
       spec,
       dir,
@@ -1741,6 +2003,20 @@ export function syncBenchmarkDocsMarkdown(
 ): void {
   try {
     const docsPath = path.resolve(process.cwd(), "docs/BENCHMARKS.md");
+    const hasAllBaselineScenarios = OFFLINE_BENCHMARKS.every(
+      (spec) =>
+        existing[spec.id]?.without_aice &&
+        existing[spec.id]?.aice_no_idioms &&
+        existing[spec.id]?.aice_with_idioms,
+    );
+    if (hasAllBaselineScenarios) {
+      const report = buildRealAgentBenchmarkSuiteReport(existing);
+      const markdown = formatRealAgentBenchmarkMarkdown(report);
+      fs.mkdirSync(path.dirname(docsPath), { recursive: true });
+      fs.writeFileSync(docsPath, markdown, "utf-8");
+      return;
+    }
+
     const lines: string[] = [];
 
     lines.push("# AICE 2.0 — Real AI Agent Benchmark Suite Report (3-Layer Progressive Lifecycle)");
