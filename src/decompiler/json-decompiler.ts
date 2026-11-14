@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * JSON Decompiler (Reverse Transpiler) for AICE 2.0 (Step 24).
+ * JSON Decompiler (Reverse Transpiler) for AICE (Step 24).
  * Parses JSON documents/fragments into canonical, token-dense AICE code:
  * e.g. `pub const config = { ... }` with full nested object/array/primitive lowering.
  */

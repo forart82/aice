@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Declarative Term Rewriting & Canonical API Lowering Engine for AICE 2.0.
+ * Declarative Term Rewriting & Canonical API Lowering Engine for AICE.
  * Conforms to Pillar 2 of docs/RESEARCH_SYNTHESIS.md and Section 2 of docs/AICE_SPEC.md.
  */
 
@@ -23,11 +23,14 @@ export function lowerPropertyAccess(
   target: TargetLanguage,
 ): LoweredOperation {
   if (property === "len" || property === "length") {
-    if (target === "python" || target === "go") {
+    if (target === "python") {
       return { isLowered: true, code: `len(${objectCode})` };
     }
+    if (target === "go") {
+      return { isLowered: true, code: `int64(len(${objectCode}))` };
+    }
     if (target === "rust") {
-      return { isLowered: true, code: `${objectCode}.len()` };
+      return { isLowered: true, code: `(${objectCode}.len() as i64)` };
     }
     if (target === "cpp") {
       return { isLowered: true, code: `${objectCode}.size()` };
@@ -47,6 +50,10 @@ export function lowerMethodCall(
   argCodes: string[],
   target: TargetLanguage,
 ): LoweredOperation {
+  if ((method === "len" || method === "length") && argCodes.length === 0) {
+    return lowerPropertyAccess(objectCode, method, target);
+  }
+
   if (target === "python") {
     switch (method) {
       case "slice": {

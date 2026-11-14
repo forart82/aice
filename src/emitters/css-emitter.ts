@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CSS3 Stylesheet Emitter for AICE 2.0.
+ * CSS3 Stylesheet Emitter for AICE.
  * Conforms to Pillar 1 & 2 of docs/RESEARCH_SYNTHESIS.md.
  */
 

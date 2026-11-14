@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Global CLI Agent Integration Engine (`aice agents`).
+ * AICE Global CLI Agent Integration Engine (`aice agents`).
  * Manages idempotent registration, status inspection, and clean removal of
  * AICE MCP server entries and `<!-- AICE:START -->...<!-- AICE:END -->` system
  * directives across Claude Code, Antigravity/Gemini CLI, OpenAI Codex CLI,
@@ -21,6 +21,7 @@ import {
   ALWAYS_ON_AICE_RULE_FILE,
   CANONICAL_AICE_AGENT_DIRECTIVE,
   findDirectiveSpanOutsideFences,
+  hasAgentsMdInclude,
   hasMarkdownDirective,
   removeAlwaysOnRuleFile,
   removeMarkdownDirective,
@@ -38,6 +39,7 @@ export {
   AICE_SYSTEM_DIRECTIVE,
   ALWAYS_ON_AICE_RULE_FILE,
   CANONICAL_AICE_AGENT_DIRECTIVE,
+  hasAgentsMdInclude,
   hasMarkdownDirective,
   removeAlwaysOnRuleFile,
   removeMarkdownDirective,
@@ -60,7 +62,7 @@ export function extractMarkdownDirectiveVersion(filePath: string): string | unde
     if (!activeSlice) return undefined;
     const verMatch = activeSlice.match(/<!--\s*AICE:START\s+v([0-9A-Za-z._-]+)\s*-->/);
     if (verMatch?.[1]) return verMatch[1];
-    const headingMatch = activeSlice.match(/##\s+AICE\s+2\.0\s+\(v([0-9A-Za-z._-]+)\)/);
+    const headingMatch = activeSlice.match(/##\s+AICE(?:\s+2\.0)?\s+\(v([0-9A-Za-z._-]+)\)/);
     if (headingMatch?.[1]) return headingMatch[1];
     if (activeSlice.includes(AICE_DIRECTIVE_START)) return "legacy";
     return undefined;

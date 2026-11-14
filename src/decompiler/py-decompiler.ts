@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern Python 3.10+ Decompiler (Reverse Transpiler) for AICE 2.0.
+ * Modern Python 3.10+ Decompiler (Reverse Transpiler) for AICE.
  * Dedicated zero-dependency streaming indentation-aware lexer (PythonLexer)
  * and recursive-descent / Pratt parser (PythonDecompiler):
  *   - Tracks indentation stack to emit INDENT and DEDENT tokens.
@@ -2784,17 +2784,33 @@ export class PythonDecompiler {
     }
 
     const tok = this.consume("IDENTIFIER");
-    const name = tok.value;
+    const parts = [tok.value];
+    while (this.check("DOT") && this.peek(1).kind === "IDENTIFIER") {
+      this.advance();
+      parts.push(this.advance().value);
+    }
+    const name = parts.join(".");
+    const baseName = parts[parts.length - 1]!;
+    const isStdPrefix =
+      parts.length === 1 ||
+      parts[0] === "typing" ||
+      parts[0] === "typing_extensions" ||
+      parts[0] === "collections" ||
+      parts[0] === "builtins";
 
-    if (name === "int") return { kind: "PrimitiveType", primitive: "int", span: tok.span };
-    if (name === "float") return { kind: "PrimitiveType", primitive: "float", span: tok.span };
-    if (name === "str") return { kind: "PrimitiveType", primitive: "str", span: tok.span };
-    if (name === "bool") return { kind: "PrimitiveType", primitive: "bool", span: tok.span };
-    if (name === "None") return { kind: "PrimitiveType", primitive: "void", span: tok.span };
-    if (name === "Any" || name === "object")
+    if (parts.length === 1 || parts[0] === "builtins") {
+      if (baseName === "int") return { kind: "PrimitiveType", primitive: "int", span: tok.span };
+      if (baseName === "float")
+        return { kind: "PrimitiveType", primitive: "float", span: tok.span };
+      if (baseName === "str") return { kind: "PrimitiveType", primitive: "str", span: tok.span };
+      if (baseName === "bool") return { kind: "PrimitiveType", primitive: "bool", span: tok.span };
+      if (baseName === "None") return { kind: "PrimitiveType", primitive: "void", span: tok.span };
+    }
+    if ((baseName === "Any" && isStdPrefix) || (baseName === "object" && parts.length === 1)) {
       return { kind: "NamedType", name: "any", span: tok.span };
+    }
 
-    if (name === "list" || name === "List") {
+    if ((baseName === "list" || baseName === "List") && isStdPrefix) {
       if (this.check("LBRACKET")) {
         this.advance();
         const elem = this.parseTypeExpr();
@@ -2808,7 +2824,7 @@ export class PythonDecompiler {
       };
     }
 
-    if (name === "dict" || name === "Dict") {
+    if ((baseName === "dict" || baseName === "Dict") && isStdPrefix) {
       if (this.check("LBRACKET")) {
         this.advance();
         const kType = this.parseTypeExpr();
@@ -2820,12 +2836,19 @@ export class PythonDecompiler {
       return { kind: "NamedType", name: "dict", span: tok.span };
     }
 
-    if (name === "tuple" || name === "Tuple") {
+    if ((baseName === "tuple" || baseName === "Tuple") && isStdPrefix) {
       if (this.check("LBRACKET")) {
         this.advance();
         const elementTypes: TypeExpr[] = [];
         while (!this.check("RBRACKET") && !this.check("EOF")) {
-          elementTypes.push(this.parseTypeExpr());
+          if (this.check("DOT") && this.peek(1).kind === "DOT" && this.peek(2).kind === "DOT") {
+            const dotSpan = this.advance().span;
+            this.advance();
+            this.advance();
+            elementTypes.push({ kind: "NamedType", name: "...", span: dotSpan });
+          } else {
+            elementTypes.push(this.parseTypeExpr());
+          }
           if (this.check("COMMA")) this.advance();
           else break;
         }
@@ -2835,11 +2858,57 @@ export class PythonDecompiler {
       return { kind: "TupleType", elementTypes: [], span: tok.span };
     }
 
-    if (name === "Optional") {
-      this.consume("LBRACKET");
-      const inner = this.parseTypeExpr();
-      this.consume("RBRACKET");
-      return { kind: "OptionType", innerType: inner, span: tok.span };
+    if (baseName === "Optional" && isStdPrefix) {
+      if (this.check("LBRACKET")) {
+        this.advance();
+        const inner = this.parseTypeExpr();
+        this.consume("RBRACKET");
+        return { kind: "OptionType", innerType: inner, span: tok.span };
+      }
+      return {
+        kind: "OptionType",
+        innerType: { kind: "NamedType", name: "any", span: tok.span },
+        span: tok.span,
+      };
+    }
+
+    if (baseName === "Callable" && isStdPrefix) {
+      if (this.check("LBRACKET")) {
+        this.advance();
+        let paramsArg: TypeExpr;
+        if (this.check("LBRACKET")) {
+          const lbSpan = this.advance().span;
+          const paramTypes: TypeExpr[] = [];
+          while (!this.check("RBRACKET") && !this.check("EOF")) {
+            paramTypes.push(this.parseTypeExpr());
+            if (this.check("COMMA")) this.advance();
+            else break;
+          }
+          this.consume("RBRACKET");
+          paramsArg = { kind: "TupleType", elementTypes: paramTypes, span: lbSpan };
+        } else if (
+          this.check("DOT") &&
+          this.peek(1).kind === "DOT" &&
+          this.peek(2).kind === "DOT"
+        ) {
+          const dotSpan = this.advance().span;
+          this.advance();
+          this.advance();
+          paramsArg = { kind: "NamedType", name: "...", span: dotSpan };
+        } else {
+          paramsArg = this.parseTypeExpr();
+        }
+        const callableArgs: TypeExpr[] = [paramsArg];
+        if (this.check("COMMA")) {
+          this.advance();
+          if (!this.check("RBRACKET") && !this.check("EOF")) {
+            callableArgs.push(this.parseTypeExpr());
+          }
+        }
+        this.consume("RBRACKET");
+        return { kind: "NamedType", name, typeArgs: callableArgs, span: tok.span };
+      }
+      return { kind: "NamedType", name, span: tok.span };
     }
 
     let typeArgs: TypeExpr[] | undefined;
@@ -2847,7 +2916,14 @@ export class PythonDecompiler {
       this.advance();
       typeArgs = [];
       while (!this.check("RBRACKET") && !this.check("EOF")) {
-        typeArgs.push(this.parseTypeExpr());
+        if (this.check("DOT") && this.peek(1).kind === "DOT" && this.peek(2).kind === "DOT") {
+          const dotSpan = this.advance().span;
+          this.advance();
+          this.advance();
+          typeArgs.push({ kind: "NamedType", name: "...", span: dotSpan });
+        } else {
+          typeArgs.push(this.parseTypeExpr());
+        }
         if (this.check("COMMA")) this.advance();
         else break;
       }

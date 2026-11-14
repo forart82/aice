@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
+ * Unit tests for AICE Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
  */
 
 import { spawnSync } from "node:child_process";
@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatAiceFile, formatAicePath, formatAiceSource } from "../../src/tools/fmt.js";
 
-describe("AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21)", () => {
+describe("AICE Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21)", () => {
   describe("Indentation Normalization", () => {
     it("normalizes inconsistent 4-space indentation to 2 spaces", () => {
       const src = `

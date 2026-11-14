@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Unified Project Configuration Engine (Step 14).
+ * AICE Unified Project Configuration Engine (Step 14).
  * Manages `aice.config.json`, `.aicerc`, and `package.json` config discovery,
  * mode auto-detection ("side-by-side" vs "isolated"), robust default options,
  * and target output path resolution.
@@ -98,6 +98,12 @@ Object.defineProperty(_defaultProjectConfig, "enabled", {
   writable: false,
   configurable: false,
 });
+Object.defineProperty(_defaultProjectConfig, "idiomsEnabled", {
+  value: false,
+  enumerable: false,
+  writable: false,
+  configurable: false,
+});
 export const DEFAULT_PROJECT_CONFIG: Readonly<AiceProjectConfig> =
   Object.freeze(_defaultProjectConfig);
 
@@ -124,6 +130,7 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".json",
   ".yaml",
   ".yml",
+  ".cff",
   ".twig",
   ".php",
   ".kt",
@@ -161,6 +168,7 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".json": "json",
   ".yaml": "yaml",
   ".yml": "yaml",
+  ".cff": "yaml",
   ".twig": "twig",
   ".php": "php",
   ".kt": "kotlin",
@@ -890,6 +898,15 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
       : {}),
   };
 
+  if (typeof configToProcess.idiomsEnabled !== "boolean") {
+    Object.defineProperty(finalConfig, "idiomsEnabled", {
+      value: Boolean(DEFAULT_PROJECT_CONFIG.idiomsEnabled),
+      enumerable: false,
+      writable: true,
+      configurable: true,
+    });
+  }
+
   validateConfig(finalConfig);
   return finalConfig;
 }
@@ -1399,7 +1416,40 @@ export function removeAlwaysOnRuleFile(filePath: string, cleanEmptyParents = fal
 }
 
 /**
- * Synchronizes project-level AI agent rules (`AGENTS.md`, `.agents/rules/aice.md`, and existing `CLAUDE.md` / `GEMINI.md`).
+ * Detects whether a Markdown file (e.g. `CLAUDE.md`) already includes `@AGENTS.md`
+ * (or `@./AGENTS.md`) outside fenced code blocks, avoiding duplicate rule injection.
+ */
+export function hasAgentsMdInclude(markdown: string): boolean {
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLen = 0;
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const trimmedStart = rawLine.replace(/^[ \t]{0,3}/, "");
+    const fenceMatch = trimmedStart.match(/^(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      const ch = marker[0] as "`" | "~";
+      if (fenceChar === null) {
+        fenceChar = ch;
+        fenceLen = marker.length;
+        continue;
+      }
+      if (ch === fenceChar && marker.length >= fenceLen && /^[`~]*[ \t]*$/.test(trimmedStart)) {
+        fenceChar = null;
+        fenceLen = 0;
+        continue;
+      }
+    }
+    if (fenceChar !== null) continue;
+    if (/(?:^|[\s(])@(?:\.\/)?AGENTS\.md(?=$|[\s).,;:])/.test(rawLine)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Synchronizes project-level AI agent rules (`AGENTS.md`, plus existing `CLAUDE.md` without `@AGENTS.md`)
+ * while purging legacy duplicate rule blocks from `GEMINI.md`, `.GEMINI.md`, and `.agents/rules/aice.md`.
  */
 export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean): void {
   const resolvedDir = path.resolve(projectDir);
@@ -1408,24 +1458,25 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
   const geminiMdPath = path.join(resolvedDir, "GEMINI.md");
   const dotGeminiMdPath = path.join(resolvedDir, ".GEMINI.md");
   const ruleFilePath = path.join(resolvedDir, ".agents", "rules", "aice.md");
+
+  // Always strip legacy duplicate Antigravity/Gemini rule surfaces on BOTH enable and disable
+  removeMarkdownDirective(geminiMdPath, true);
+  removeMarkdownDirective(dotGeminiMdPath, true);
+  removeAlwaysOnRuleFile(ruleFilePath, true);
+
   if (enabled) {
     upsertMarkdownDirective(agentsMdPath);
-    upsertAlwaysOnRuleFile(ruleFilePath);
     if (fs.existsSync(claudeMdPath)) {
-      upsertMarkdownDirective(claudeMdPath);
-    }
-    if (fs.existsSync(geminiMdPath)) {
-      upsertMarkdownDirective(geminiMdPath);
-    }
-    if (fs.existsSync(dotGeminiMdPath)) {
-      upsertMarkdownDirective(dotGeminiMdPath);
+      const claudeContent = fs.readFileSync(claudeMdPath, "utf-8");
+      if (hasAgentsMdInclude(claudeContent)) {
+        removeMarkdownDirective(claudeMdPath, false);
+      } else {
+        upsertMarkdownDirective(claudeMdPath);
+      }
     }
   } else {
     removeMarkdownDirective(agentsMdPath, true);
     removeMarkdownDirective(claudeMdPath, false);
-    removeMarkdownDirective(geminiMdPath, false);
-    removeMarkdownDirective(dotGeminiMdPath, false);
-    removeAlwaysOnRuleFile(ruleFilePath, true);
   }
 }
 
@@ -1447,7 +1498,10 @@ export function setProjectAiceEnabled(projectDir: string, enabled: boolean): Aic
     resolvedDir,
     {
       enabled,
-      idiomsEnabled: current.idiomsEnabled ?? true,
+      idiomsEnabled:
+        typeof current.idiomsEnabled === "boolean"
+          ? current.idiomsEnabled
+          : Boolean(DEFAULT_PROJECT_CONFIG.idiomsEnabled),
     },
     { stripLegacyKeys: true },
   );
@@ -1466,12 +1520,15 @@ export function isProjectIdiomsEnabled(
     return overrideFlag;
   }
   if (!config) {
-    return true;
+    return Boolean(DEFAULT_PROJECT_CONFIG.idiomsEnabled);
   }
   if (config.enabled === false) {
     return false;
   }
-  return config.idiomsEnabled !== false;
+  if (typeof config.idiomsEnabled === "boolean") {
+    return config.idiomsEnabled;
+  }
+  return Boolean(DEFAULT_PROJECT_CONFIG.idiomsEnabled);
 }
 
 /**

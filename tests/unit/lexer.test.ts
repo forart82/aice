@@ -6,7 +6,7 @@ function kinds(source: string): TokenKind[] {
   return tokenize(source).map((t) => t.kind);
 }
 
-describe("AICE 2.0 Lexer & Tokenizer Engine", () => {
+describe("AICE Lexer & Tokenizer Engine", () => {
   describe("Literals & Primitives", () => {
     it("scans numbers including ints, floats, hex, binary, and underscores", () => {
       const src = "42 3.14 0x1A 0b1010 1_000_000 1e-4";

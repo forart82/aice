@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Project Idiom Transformation Engine.
+ * AICE Project Idiom Transformation Engine.
  * Expands and collapses idioms in ASTs, source strings, and project workspaces.
  */
 
@@ -84,6 +84,8 @@ export interface ApplyProjectIdiomsOptions {
   dryRun?: boolean;
   minOccurrences?: number;
   minNetTokenSavings?: number;
+  minTokensSavedPerUse?: number;
+  maxIdioms?: number;
   maxParams?: number;
   maxBlockStatements?: number;
 }
@@ -3058,6 +3060,8 @@ export function scanProjectIdioms(
   const mineResult = mineProjectIdioms(files, {
     minOccurrences: options?.minOccurrences,
     minNetTokenSavings: options?.minNetTokenSavings,
+    minTokensSavedPerUse: options?.minTokensSavedPerUse ?? 4,
+    maxIdioms: options?.maxIdioms ?? 25,
     maxParams: options?.maxParams,
     maxBlockStatements: options?.maxBlockStatements,
     existingIdioms: config.idioms,
@@ -3167,6 +3171,8 @@ export function applyProjectIdiomsToDirectory(
   const mineResult = mineProjectIdioms(files, {
     minOccurrences: options?.minOccurrences,
     minNetTokenSavings: options?.minNetTokenSavings,
+    minTokensSavedPerUse: options?.minTokensSavedPerUse ?? 4,
+    maxIdioms: options?.maxIdioms ?? 25,
     maxParams: options?.maxParams,
     maxBlockStatements: options?.maxBlockStatements,
     existingIdioms: config.idioms,

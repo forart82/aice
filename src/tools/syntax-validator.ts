@@ -10,7 +10,7 @@ import postcss from "postcss";
 import YAML from "yaml";
 import ts from "../compat/typescript.js";
 import { type ProjectIdiomDefinition, stripJsonComments } from "../config/index.js";
-import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import { detectTargetFromPathOrContent, type TargetLanguage } from "../emitters/index.js";
 import { maskSourceLexically } from "./preprocessor.js";
 export const HTML_VOID_TAGS: ReadonlySet<string> = new Set([
   "area",
@@ -908,7 +908,9 @@ export function formatNativeSyntaxDiagnosticsMarkdown(
   if (filePath.endsWith(".aice")) return undefined;
   let targetLang: TargetLanguage;
   try {
-    targetLang = detectTargetFromPath(filePath);
+    const detected = detectTargetFromPathOrContent(filePath, source);
+    if (detected === "passthrough") return undefined;
+    targetLang = detected;
   } catch {
     return undefined;
   }

@@ -2,10 +2,10 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 First-Class Model Context Protocol (MCP) Server.
- * Exposes all 7 token-optimized AI productivity tools (aice_context, aice_outline,
- * aice_splice, aice_create, aice_idioms, aice_gain, aice_project_config) across
- * all 20 languages / 33 file extensions over JSON-RPC 2.0 stdio streams.
+ * AICE First-Class Model Context Protocol (MCP) Server.
+ * Exposes the Strict 2-Tool AI Surface (aice_read and aice_splice) across all
+ * 20 languages / 33 file extensions over JSON-RPC 2.0 stdio streams, while
+ * preserving backward-compatible alias dispatch in executeToolCall.
  */
 
 import * as fs from "node:fs";
@@ -63,6 +63,12 @@ import {
 } from "../tools/create.js";
 import { outlinePath } from "../tools/outline.js";
 import {
+  aiceRead,
+  parseReadTarget,
+  type ReadTargetObject,
+  splitReadTargetString,
+} from "../tools/read.js";
+import {
   type BatchSpliceItem,
   parseMultiBlockSpliceStream,
   splice,
@@ -101,99 +107,98 @@ export interface McpToolDefinition {
 
 export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
-    name: "aice_context",
+    name: "aice_read",
     description:
-      "Generate token-optimized AICE context bundle with target source/outline, dependency contracts, and downstream callers (supports single or multi-file targets with inline ':symbol' selectors). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When reading 2+ files or symbols, batch ALL targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50') or 'paths' array.",
+      "Unified Read Engine: zero-envelope fast path on line slices (:Lstart-Lend), regex searches (:/pattern/), config/doc/passthrough files, and <=150-line bare files; automatic directory & >250-line file structural outlining; AST symbol/test/heading slicing with Adaptive Sibling Outlining, dependency contracts, and downstream callers; quoted glob expansion; opt-in $idioms (default OFF); and a default 28 KB (~7,000-token) stdout budget with :outline auto-downgrade & pagination hints across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
           description:
-            "Target .aice or target language file/directory path (supports inline 'file:sym1,sym2', 'file:L10-L30', or space-separated multi-target paths in 1 call)",
-        },
-        fileOrDir: {
-          type: "string",
-          description: "Alias for path: target file or directory path",
-        },
-        filePath: {
-          type: "string",
-          description: "Alias for path: target file path",
+            "Target file, directory, or glob path (supports inline 'file:sym1,sym2', 'file:L10-L30', 'file:outline', 'dir:/pattern/', or space-separated multi-target paths in 1 call)",
         },
         paths: {
           type: "array",
           items: { type: "string" },
           description:
-            "Optional array of target file paths with optional inline ':symbol' selectors (e.g. ['src/a.aipl:fnA,fnB', 'src/b.aipl:L10-L50']) to read multiple files in 1 call",
+            "Optional array of target file, directory, or glob paths with optional inline ':symbol', ':Lstart-Lend', or ':outline' selectors",
+        },
+        targets: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Alias for 'paths': array of target file or directory paths/selectors to read in 1 call",
+        },
+        filePath: {
+          type: "string",
+          description: "Alias for 'path': target file path",
+        },
+        fileOrDir: {
+          type: "string",
+          description: "Alias for 'path': target file or directory path",
         },
         symbol: {
           type: "string",
           description:
-            "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30' — fast path with 0 dependency bloat), or regex ('/pattern/')",
+            "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30'), regex ('/pattern/'), or 'outline'",
         },
         selector: {
           type: "string",
+          description: "Alias for 'symbol'",
+        },
+        outline: {
+          type: "boolean",
           description:
-            "Alias for symbol: symbol name, line range (e.g. L1-L150), or regex (/pattern/)",
+            "Force structural skeleton outline (85-90% token reduction) regardless of file size",
+        },
+        full: {
+          type: "boolean",
+          description:
+            "Bypass >250-line bare-file auto-outline and default 28 KB stdout ceiling to return full context",
         },
         depth: {
           type: "number",
           description:
-            "Dependency traversal depth (default: 1 for symbols, 0 for Lstart-Lend and /pattern/ fast path)",
+            "Dependency traversal depth (for context) or maximum symbol nesting depth (for outline)",
         },
         maxTokens: {
           type: "number",
-          description: "Maximum token budget to bound the context pack",
-        },
-        idioms: {
-          type: "boolean",
-          description: "Optional override to enable or disable project $idioms",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "aice_outline",
-    description:
-      "Generate structural skeleton outline of one or more .aice or native files or project directories across all 20 languages / 33 file extensions achieving 85-90%+ token reduction.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        path: {
-          type: "string",
           description:
-            "Optional path (or comma/whitespace-separated paths) to .aice or native file(s) or project directory (default: '.')",
+            "Maximum token budget override (bypasses default 28 KB ceiling when explicitly set)",
         },
-        fileOrDir: {
-          type: "string",
-          description: "Alias for path: file or directory path",
+        includeDeps: {
+          type: "boolean",
+          description:
+            "Explicitly force or skip Imported Dependency Contracts (opt-in on <=150-line bare files, line slices, and regex searches)",
         },
-        filePath: {
-          type: "string",
-          description: "Alias for path: file path",
+        includeCallers: {
+          type: "boolean",
+          description:
+            "Include reverse downstream callers and 1-based call-site line numbers (opt-in on <=150-line bare files, line slices, and regex searches)",
         },
-        paths: {
-          type: "array",
-          items: { type: "string" },
-          description: "Optional array of file or directory paths (e.g., ['src', 'tests'])",
-        },
-        depth: {
-          type: "number",
-          description: "Optional maximum symbol nesting depth (e.g. 1 for top-level skeleton only)",
+        compact: {
+          type: "boolean",
+          description:
+            "Optional compact directory outline mode override (auto-enabled for 60+ files)",
         },
         types: {
           type: "boolean",
           description:
-            "Optional flag to include or omit type/interface field details (default: true)",
-        },
-        compact: {
-          type: "boolean",
-          description: "Optional compact directory mode override (auto-enabled for 100+ files)",
+            "Optional flag to include or omit type/interface field details when outlining (default: true)",
         },
         idioms: {
           type: "boolean",
-          description: "Optional override to enable or disable project $idioms",
+          description:
+            "Optional override to enable or disable project $idioms (default: false unless idiomsEnabled: true in aice.config.json)",
+        },
+        stats: {
+          type: "boolean",
+          description: "Include token reduction and context telemetry statistics",
+        },
+        json: {
+          type: "boolean",
+          description: "Return structured machine-readable JSON output",
         },
       },
       required: [],
@@ -202,14 +207,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): auto-creates missing files & parent directories, performs full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgically replaces, deletes, hunk-patches (`<<< / === / >>>`), or line-range edits (`L10-L25`, `imports`, `eof`) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
           description:
-            "Optional path to target native or .aice file, or inline 'file:symbol' / 'file:L10-L20' (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)",
+            "Optional path to target native or .aice file, or inline 'file:symbol' / 'file:L10-L20' (omit when 'code' contains '=== <filePath> ===' / '=== <filePath>:<symbol> ===' multi-file stream headers, or when 'batch' / 'files' / 'edits' includes filePath)",
         },
         path: {
           type: "string",
@@ -239,7 +244,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         code: {
           type: "string",
           description:
-            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
         },
         content: {
           type: "string",
@@ -262,6 +267,11 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           type: "boolean",
           description:
             "If true, explicitly routes through full-file creation/compilation (auto-detected when file does not exist or symbol is omitted)",
+        },
+        force: {
+          type: "boolean",
+          description:
+            "Alias for 'overwrite': force full-file write/replacement even when target file already exists",
         },
         overwrite: {
           type: "boolean",
@@ -314,10 +324,33 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
             required: ["symbol"],
           },
         },
+        batch: {
+          type: "array",
+          description:
+            "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+          items: {
+            type: "object",
+            properties: {
+              filePath: { type: "string" },
+              path: { type: "string" },
+              symbol: { type: "string" },
+              code: { type: "string" },
+              content: { type: "string" },
+              body: { type: "string" },
+              delete: { type: "boolean" },
+              create: { type: "boolean" },
+              force: { type: "boolean" },
+              overwrite: { type: "boolean" },
+              insertAfter: { type: "string" },
+              insertBefore: { type: "string" },
+              preserveDocs: { type: "boolean" },
+            },
+          },
+        },
         files: {
           type: "array",
           description:
-            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
           items: {
             type: "object",
             properties: {
@@ -328,6 +361,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
               body: { type: "string" },
               delete: { type: "boolean" },
               create: { type: "boolean" },
+              force: { type: "boolean" },
               overwrite: { type: "boolean" },
               insertAfter: { type: "string" },
               insertBefore: { type: "string" },
@@ -337,168 +371,6 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           },
         },
       },
-    },
-  },
-  {
-    name: "aice_idioms",
-    description:
-      "Scan, list, apply, expand, toggle (on/off), read, or update token-saving $idioms in a project workspace.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: ["scan", "apply", "expand", "list", "on", "off", "read", "update"],
-          description: "Idiom action to perform",
-        },
-        dir: {
-          type: "string",
-          description: "Optional project or source directory (default: '.')",
-        },
-        name: {
-          type: "string",
-          description: "Idiom name (e.g. '$arc') for 'read' or 'update' actions",
-        },
-        code: {
-          type: "string",
-          description: "New AICE template for 'update' action",
-        },
-        params: {
-          type: "string",
-          description:
-            "Optional comma-separated parameter names (e.g. '$0,$1') for 'update' action",
-        },
-        idioms: {
-          type: "boolean",
-          description: "Optional override to enable or disable project $idioms for this call",
-        },
-        dryRun: {
-          type: "boolean",
-          description: "If true, preview scan/update/expand without modifying files",
-        },
-        minOccurrences: {
-          type: "number",
-          description: "Minimum occurrences threshold for mining or applying",
-        },
-        minSavings: {
-          type: "number",
-          description: "Minimum net token savings threshold",
-        },
-      },
-      required: ["action"],
-    },
-  },
-  {
-    name: "aice_create",
-    description:
-      "Create greenfield/startup native files from compact AICE syntax, inline @idiom macros, or hybrid code across all 20 languages / 33 file extensions (40-75% output token savings). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        filePath: {
-          type: "string",
-          description:
-            "Target native file path for single-file creation (omit when batching multiple files via '=== <filePath> ===' headers in 'code' or via 'files')",
-        },
-        code: {
-          type: "string",
-          description:
-            "Compact AICE, $idiom, or native code string, OR multi-file stream delimited by '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
-        },
-        files: {
-          type: "array",
-          description: "Optional array of { filePath, code } items for multi-file batch creation",
-          items: {
-            type: "object",
-            properties: {
-              filePath: { type: "string" },
-              code: { type: "string" },
-            },
-            required: ["filePath", "code"],
-          },
-        },
-        idioms: {
-          type: "boolean",
-          description: "Optional override to enable or disable project/inline $idioms",
-        },
-        dryRun: {
-          type: "boolean",
-          description: "If true, preview compiled native code without writing to disk",
-        },
-        overwrite: {
-          type: "boolean",
-          description: "If true, allows full-file overwrite of existing files with > 25 lines",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "aice_gain",
-    description:
-      "Inspect honest global or per-project BPE token-reduction telemetry (cl100k_base & o200k_base).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        project: {
-          type: "string",
-          description: "Optional project path or name to drill down into",
-        },
-        unique: {
-          type: "boolean",
-          description: "If true, deduplicate repeated identical operations by contentHash",
-        },
-        json: {
-          type: "boolean",
-          description: "If true, return structured JSON telemetry report",
-        },
-      },
-      required: [],
-    },
-  },
-  {
-    name: "aice_project_config",
-    description: `Inspect or toggle project-level AICE controls ('enabled' and 'idiomsEnabled'), rule sync status, global agent config (when scope='global'), and AICE version (v${AICE_VERSION}) in aice.config.json.`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        dir: {
-          type: "string",
-          description: "Project directory within workspaceRoot (default: workspaceRoot)",
-        },
-        scope: {
-          type: "string",
-          enum: ["project", "global"],
-          description:
-            "Configuration scope: 'project' (confined to workspaceRoot) or 'global' (manages global CLI coding agent integrations)",
-        },
-        action: {
-          type: "string",
-          enum: ["enable", "disable", "status", "setup", "remove"],
-          description: "Optional action ('enable' | 'disable' | 'status' | 'setup' | 'remove')",
-        },
-        agent: {
-          type: "string",
-          description: "Optional agent ID when scope='global' (e.g. 'claude', 'agy', 'codex')",
-        },
-        all: {
-          type: "boolean",
-          description: "When scope='global' and action='setup', configure all supported agents",
-        },
-        homeDir: {
-          type: "string",
-          description: "Optional home directory override when scope='global'",
-        },
-        enabled: {
-          type: "boolean",
-          description: "Optional boolean to enable or disable AICE for this project",
-        },
-        idiomsEnabled: {
-          type: "boolean",
-          description: "Optional boolean to enable or disable $idioms for this project",
-        },
-      },
-      required: [],
     },
   },
 ];
@@ -902,6 +774,8 @@ export class AiceMcpServer {
           return wrapOut(res);
         } catch (err: unknown) {
           const toolToOp: Record<string, TelemetryOperation> = {
+            aice_read: "context",
+            read: "context",
             aice_outline: "outline",
             aice_context: "context",
             aice_splice: "splice",
@@ -967,6 +841,148 @@ export class AiceMcpServer {
     args: Record<string, unknown>,
   ): Promise<McpToolCallResult> {
     switch (name) {
+      case "aice_read":
+      case "read": {
+        const rawSelector =
+          (typeof args.symbol === "string" && args.symbol.trim().length > 0
+            ? args.symbol
+            : undefined) ??
+          (typeof args.selector === "string" && args.selector.trim().length > 0
+            ? args.selector
+            : undefined) ??
+          (typeof args.sym === "string" && args.sym.trim().length > 0 ? args.sym : undefined) ??
+          (typeof args.range === "string" && args.range.trim().length > 0 ? args.range : undefined);
+        const symbolFilter =
+          typeof rawSelector === "string" && rawSelector.trim().length > 0
+            ? rawSelector.trim()
+            : undefined;
+
+        const candidateArray = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
+        const rawPathCandidate =
+          args.path ??
+          args.filePath ??
+          args.fileOrDir ??
+          args.file ??
+          args.dir ??
+          args.target ??
+          args.inputPath ??
+          args.source;
+
+        const safeTargets: ReadTargetObject[] = [];
+        const checkedProjectRoots = new Set<string>();
+
+        if (Array.isArray(candidateArray) && candidateArray.length > 0) {
+          for (const entry of candidateArray) {
+            if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+              const obj = entry as Record<string, unknown>;
+              const rawEntryStr =
+                String(obj.path ?? obj.filePath ?? obj.target ?? ".").trim() || ".";
+              const parsed = parseReadTarget(rawEntryStr, this.workspaceRoot);
+              const safeFp = this.resolveSafePath(parsed.targetPath);
+              checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
+              safeTargets.push({
+                path: safeFp,
+                symbol:
+                  typeof obj.symbol === "string" && obj.symbol.trim().length > 0
+                    ? obj.symbol.trim()
+                    : parsed.inlineSelector,
+                outline: typeof obj.outline === "boolean" ? obj.outline : parsed.explicitOutline,
+                ...(typeof obj.full === "boolean" ? { full: obj.full } : {}),
+              });
+            } else {
+              const rawStr = String(entry ?? "").trim();
+              if (!rawStr) continue;
+              const subTokens = splitReadTargetString(rawStr, this.workspaceRoot);
+              for (const tok of subTokens.length > 0 ? subTokens : [rawStr]) {
+                const parsed = parseReadTarget(tok, this.workspaceRoot);
+                const safeFp = this.resolveSafePath(parsed.targetPath);
+                checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
+                safeTargets.push({
+                  path: safeFp,
+                  ...(parsed.inlineSelector ? { symbol: parsed.inlineSelector } : {}),
+                  ...(parsed.explicitOutline ? { outline: true } : {}),
+                });
+              }
+            }
+          }
+        } else if (rawPathCandidate !== undefined && String(rawPathCandidate).trim().length > 0) {
+          const rawPathStr = String(rawPathCandidate).trim();
+          const tokens = splitReadTargetString(rawPathStr, this.workspaceRoot);
+          for (const tok of tokens.length > 0 ? tokens : [rawPathStr]) {
+            const parsed = parseReadTarget(tok, this.workspaceRoot);
+            const safeFp = this.resolveSafePath(parsed.targetPath);
+            checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
+            safeTargets.push({
+              path: safeFp,
+              ...(parsed.inlineSelector ? { symbol: parsed.inlineSelector } : {}),
+              ...(parsed.explicitOutline ? { outline: true } : {}),
+            });
+          }
+        } else {
+          const safeWorkspace = this.resolveSafePath(".");
+          checkedProjectRoots.add(this.resolveProjectRoot(safeWorkspace));
+        }
+
+        for (const pr of checkedProjectRoots) {
+          if (!isProjectAiceEnabled(loadProjectConfig(pr))) {
+            return {
+              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+              isError: true,
+            };
+          }
+        }
+
+        const primaryProjectRoot =
+          safeTargets.length > 0
+            ? this.resolveProjectRoot(safeTargets[0]!.path)
+            : this.resolveProjectRoot(this.workspaceRoot);
+
+        try {
+          const readRes = await aiceRead(safeTargets.length > 0 ? safeTargets : undefined, {
+            symbol: symbolFilter,
+            outline: typeof args.outline === "boolean" ? args.outline : undefined,
+            outlineTarget: typeof args.outlineTarget === "boolean" ? args.outlineTarget : undefined,
+            full: typeof args.full === "boolean" ? args.full : undefined,
+            depth: typeof args.depth === "number" ? args.depth : undefined,
+            maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+            includeDeps:
+              typeof args.includeDeps === "boolean"
+                ? args.includeDeps
+                : typeof args.deps === "boolean"
+                  ? args.deps
+                  : undefined,
+            includeCallers:
+              typeof args.includeCallers === "boolean"
+                ? args.includeCallers
+                : typeof args.callers === "boolean"
+                  ? args.callers
+                  : undefined,
+            includeTypes:
+              typeof args.types === "boolean"
+                ? args.types
+                : typeof args.includeTypes === "boolean"
+                  ? args.includeTypes
+                  : undefined,
+            idioms: typeof args.idioms === "boolean" ? args.idioms : undefined,
+            stats: typeof args.stats === "boolean" ? args.stats : undefined,
+            json: typeof args.json === "boolean" ? args.json : undefined,
+            projectRoot: primaryProjectRoot,
+            surface: "mcp",
+          });
+
+          return {
+            content: [{ type: "text", text: readRes.output }],
+          };
+        } catch (err: unknown) {
+          if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+            return {
+              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+              isError: true,
+            };
+          }
+          throw err;
+        }
+      }
       case "aice_context": {
         {
           const rawSelector =
@@ -1398,9 +1414,16 @@ export class AiceMcpServer {
             ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || undefined)
             : null;
 
+        const rawBatchCollection = Array.isArray(args.files)
+          ? args.files
+          : Array.isArray(args.batch)
+            ? args.batch
+            : typeof args.batch === "string" && args.batch.trim().startsWith("[")
+              ? (JSON.parse(args.batch) as unknown[])
+              : undefined;
         const filesBatchFromArgs: BatchSpliceItem[] | undefined =
-          Array.isArray(args.files) && args.files.length > 0
-            ? (args.files as Array<Record<string, unknown>>).map((entry) => {
+          Array.isArray(rawBatchCollection) && rawBatchCollection.length > 0
+            ? (rawBatchCollection as Array<Record<string, unknown>>).map((entry) => {
                 const rawEntryFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
                 if (!rawEntryFp) {
                   throw new Error("Each item in aice_splice 'files' array must specify 'filePath'");
@@ -1509,20 +1532,6 @@ export class AiceMcpServer {
               : multiFileEditsFromArgs;
 
         if (effectiveBatchItems && effectiveBatchItems.length > 0) {
-          const firstRawFp = String(effectiveBatchItems[0]!.filePath ?? "");
-          const firstSafeFp = this.resolveSafePath(firstRawFp);
-          const projectRoot = this.resolveProjectRoot(firstSafeFp);
-          const config = loadProjectConfig(projectRoot);
-          if (!isProjectAiceEnabled(config)) {
-            return {
-              content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
-              isError: true,
-            };
-          }
-          const effectiveIdioms = isProjectIdiomsEnabled(
-            config,
-            typeof args.idioms === "boolean" ? args.idioms : undefined,
-          );
           const safeBatchItems = effectiveBatchItems.map((item) => ({
             ...item,
             ...(preserveDocs !== undefined && item.preserveDocs === undefined
@@ -1531,6 +1540,23 @@ export class AiceMcpServer {
             filePath: this.resolveSafePath(String(item.filePath ?? "")),
             rawFilePath: String(item.filePath ?? ""),
           }));
+          const batchProjectRoots = new Set(
+            safeBatchItems.map((it) => this.resolveProjectRoot(it.filePath)),
+          );
+          for (const pr of batchProjectRoots) {
+            if (!isProjectAiceEnabled(loadProjectConfig(pr))) {
+              return {
+                content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+                isError: true,
+              };
+            }
+          }
+          const projectRoot = this.resolveProjectRoot(safeBatchItems[0]!.filePath);
+          const config = loadProjectConfig(projectRoot);
+          const effectiveIdioms = isProjectIdiomsEnabled(
+            config,
+            typeof args.idioms === "boolean" ? args.idioms : undefined,
+          );
           const batchRes = await withSuppressedTelemetryAsync(() =>
             spliceBatch(safeBatchItems, {
               dryRun,

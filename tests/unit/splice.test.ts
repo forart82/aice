@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 AST Surgical Splice Engine (Step 19).
+ * Unit tests for AICE AST Surgical Splice Engine (Step 19).
  */
 
 import { spawnSync } from "node:child_process";
@@ -16,9 +16,14 @@ import type { FunctionDecl } from "../../src/core/ast.js";
 import { parse } from "../../src/core/parser.js";
 import { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer } from "../../src/mcp/server.js";
 import { createFile } from "../../src/tools/create.js";
-import { splice, spliceBatch, spliceSource } from "../../src/tools/splice.js";
+import {
+  parseMultiBlockSpliceStream,
+  splice,
+  spliceBatch,
+  spliceSource,
+} from "../../src/tools/splice.js";
 
-describe("AICE 2.0 AST Surgical Splice Engine (Step 19)", () => {
+describe("AICE AST Surgical Splice Engine (Step 19)", () => {
   describe("Splicing Top-Level Functions", () => {
     it("splices entire function declaration (signature + body)", () => {
       const src = `
@@ -1113,8 +1118,9 @@ fn funcF(): return 6
       }
     });
 
-    it("keeps AICE_MCP_TOOLS at 7 tools while supporting content alias, inline filePath:symbol, and inlineIdioms in aice_write", async () => {
-      expect(AICE_MCP_TOOLS).toHaveLength(7);
+    it("keeps AICE_MCP_TOOLS strictly at 2 tools (aice_read, aice_splice) while supporting content alias, inline filePath:symbol, and inlineIdioms in aice_write", async () => {
+      expect(AICE_MCP_TOOLS).toHaveLength(2);
+      expect(AICE_MCP_TOOLS.map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
       const spliceSchema = AICE_MCP_TOOLS.find((t) => t.name === "aice_splice");
       expect(spliceSchema?.description).toContain("aice_write");
       expect(spliceSchema?.inputSchema.properties).toHaveProperty("content");
@@ -1230,6 +1236,133 @@ fn funcF(): return 6
           code: "pub fn addScore(delta: int) -> int = self.total + delta",
         });
         expect(fs.readFileSync(tsFile, "utf-8")).toContain("this.total + delta");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("splices C# :eof member declarations inside the enclosing public class Main before its closing brace", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cs-eof-"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true, idiomsEnabled: false }),
+          "utf-8",
+        );
+        const csFile = path.join(tmpDir, "SettlementEngine.cs");
+        fs.writeFileSync(
+          csFile,
+          [
+            "using System;",
+            "",
+            "public class Main",
+            "{",
+            "    public static int SettleBatch(int amount)",
+            "    {",
+            "        return amount + 10;",
+            "    }",
+            "}",
+            "// DECOY_SENTINEL_CSHARP",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+
+        await splice(csFile, {
+          symbol: "eof",
+          idioms: false,
+          code: "pub fn AuditReserve( reserve: int ) -> int:\n  ret reserve * 2\n",
+        });
+
+        const updated = fs.readFileSync(csFile, "utf-8");
+        const closeClassIdx = updated.lastIndexOf("\n}");
+        const newMethodIdx = updated.indexOf("public static int AuditReserve");
+        const sentinelIdx = updated.indexOf("// DECOY_SENTINEL_CSHARP");
+        expect(newMethodIdx).toBeGreaterThan(0);
+        expect(closeClassIdx).toBeGreaterThan(newMethodIdx);
+        expect(sentinelIdx).toBeGreaterThan(closeClassIdx);
+        expect(updated).toContain("    public static int AuditReserve(int reserve)");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("supports --insert-after and --insert-before in --stdin multi-block stream headers", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-stream-insert-"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true, idiomsEnabled: false }),
+          "utf-8",
+        );
+        const tsFile = path.join(tmpDir, "service.ts");
+        fs.writeFileSync(
+          tsFile,
+          [
+            "export function alpha(x: number): number {",
+            "  return x + 1;",
+            "}",
+            "",
+            "export function omega(x: number): number {",
+            "  return x + 9;",
+            "}",
+            "",
+          ].join("\n"),
+          "utf-8",
+        );
+
+        const relTs = path.basename(tsFile);
+        const parsed = parseMultiBlockSpliceStream(
+          [
+            `=== ${relTs}:alpha --insert-after ===`,
+            "pub fn beta(x: int) -> int:",
+            "  ret x + 2",
+            `=== ${relTs}:gamma --insert-after beta ===`,
+            "pub fn gamma(x: int) -> int:",
+            "  ret x + 3",
+            `=== ${relTs} --insert-before omega ===`,
+            "pub fn delta(x: int) -> int:",
+            "  ret x + 4",
+          ].join("\n"),
+        );
+        expect(parsed?.batchItems).toBeDefined();
+
+        await splice("", {
+          projectRoot: tmpDir,
+          idioms: false,
+          code: [
+            `=== ${tsFile}:alpha --insert-after ===`,
+            "pub fn beta(x: int) -> int:",
+            "  ret x + 2",
+          ].join("\n"),
+        });
+        await spliceBatch(
+          [
+            `=== ${tsFile}:gamma --insert-after beta ===`,
+            "pub fn gamma(x: int) -> int:",
+            "  ret x + 3",
+            `=== ${tsFile} --insert-before omega ===`,
+            "pub fn delta(x: int) -> int:",
+            "  ret x + 4",
+          ].join("\n"),
+          { projectRoot: tmpDir, idioms: false },
+        );
+
+        const finalCode = fs.readFileSync(tsFile, "utf-8");
+        const iAlpha = finalCode.indexOf("function alpha");
+        const iBeta = finalCode.indexOf("function beta");
+        const iGamma = finalCode.indexOf("function gamma");
+        const iDelta = finalCode.indexOf("function delta");
+        const iOmega = finalCode.indexOf("function omega");
+        expect(iAlpha).toBeGreaterThanOrEqual(0);
+        expect(iBeta).toBeGreaterThan(iAlpha);
+        expect(iGamma).toBeGreaterThan(iBeta);
+        expect(iDelta).toBeGreaterThan(iGamma);
+        expect(iOmega).toBeGreaterThan(iDelta);
+
+        await expect(
+          splice(tsFile, { symbol: "missingSym", code: "pub fn missingSym() -> int = 1" }),
+        ).rejects.toThrow(`'=== service.ts:<existingSymbol> --insert-after ==='`);
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }

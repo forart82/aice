@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * TypeScript & TSX Decompiler (Reverse Transpiler) for AICE 2.0.
+ * TypeScript & TSX Decompiler (Reverse Transpiler) for AICE.
  * Parses TypeScript/TSX code using the TypeScript Compiler API,
  * extracts CST trivia (comments, JSDoc) into CstTriviaTable,
  * and lowers the AST into an AICE Module AST.

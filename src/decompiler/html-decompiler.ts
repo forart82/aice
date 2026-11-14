@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * HTML5 Decompiler (Reverse Transpiler) for AICE 2.0.
+ * HTML5 Decompiler (Reverse Transpiler) for AICE.
  * Parses HTML documents/fragments using parse5, extracts comments into CstTriviaTable,
  * and lowers the DOM into an AICE ComponentDecl with LayoutNodes.
  */

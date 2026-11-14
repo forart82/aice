@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C++20 Forward Transpiler & Native Systems Emitter for AICE 2.0.
+ * Modern C++20 Forward Transpiler & Native Systems Emitter for AICE.
  * Emits clean, idiomatic modern C++20 code from AICE Module AST.
  */
 

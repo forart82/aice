@@ -27,10 +27,14 @@ import {
   setProjectIdiomsEnabled,
 } from "../src/config/index.js";
 import type { TargetLanguage } from "../src/emitters/index.js";
+import {
+  recordTelemetryError,
+  recordTelemetryEvent,
+  type TelemetryOperation,
+} from "../src/telemetry/index.js";
 import type {
   BatchCreateItem,
   BatchSpliceItem,
-  ContextOptions,
   DiffOptions,
   FmtOptions,
   OutlineOptions,
@@ -39,6 +43,63 @@ import type {
 } from "../src/tools/index.js";
 import { AICE_VERSION } from "../src/version.js";
 
+let activeCliArgs: string[] = process.argv.slice(2);
+let cliFailureRecordedForInvocation = false;
+
+function inferCliTelemetryOperation(rawArgs: ReadonlyArray<string>): TelemetryOperation {
+  for (const token of rawArgs) {
+    if (!token || token.startsWith("-")) continue;
+    const sub = token.toLowerCase();
+    if (sub === "splice" || sub === "write") return "splice";
+    if (sub === "create") return "create";
+    if (sub === "patch") return "patch";
+    if (sub === "outline") return "outline";
+    if (sub === "decompile") return "decompile";
+    if (sub === "idioms") return "idioms_apply";
+    if (sub === "read" || sub === "context" || sub === "ctx") return "context";
+    break;
+  }
+  return "context";
+}
+
+function recordCliFailureTelemetry(
+  errorMessage: string,
+  explicitOperation?: TelemetryOperation,
+  explicitTargetPath?: string,
+): void {
+  if (cliFailureRecordedForInvocation) return;
+  cliFailureRecordedForInvocation = true;
+  const invokedCmd = `aice ${activeCliArgs.join(" ")}`.trim();
+  const cleanError = errorMessage.trim();
+  const op = explicitOperation ?? inferCliTelemetryOperation(activeCliArgs);
+  const trimmedTarget = explicitTargetPath?.trim();
+  const colonIdx =
+    trimmedTarget && trimmedTarget !== "-"
+      ? trimmedTarget.indexOf(":", /^[A-Za-z]:[\\/]/.test(trimmedTarget) ? 2 : 0)
+      : -1;
+  const cleanedTarget =
+    trimmedTarget && trimmedTarget !== "-"
+      ? colonIdx > 0
+        ? trimmedTarget.slice(0, colonIdx)
+        : trimmedTarget
+      : undefined;
+  const resolvedTarget = cleanedTarget ? path.resolve(process.cwd(), cleanedTarget) : process.cwd();
+  recordTelemetryEvent({
+    targetPath: resolvedTarget,
+    filePath: "<cli-error>",
+    operation: op,
+    surface: "cli",
+    nativeText: "",
+    aiceText: cleanError ? `${invokedCmd}\n${cleanError}` : invokedCmd,
+  });
+  recordTelemetryError({
+    targetPath: cleanedTarget ? resolvedTarget : undefined,
+    operation: op,
+    surface: "cli",
+    errorMessage: cleanError || invokedCmd,
+  });
+}
+
 const program = new Command();
 
 program
@@ -46,7 +107,56 @@ program
   .description(
     "AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI (by @forart82 — https://github.com/forart82/aice)",
   )
-  .version(AICE_VERSION);
+  .version(AICE_VERSION)
+  .configureOutput({
+    outputError: (str, write) => {
+      recordCliFailureTelemetry(str);
+      write(str);
+    },
+  });
+
+const origParseAsync = program.parseAsync.bind(program);
+program.parseAsync = async (
+  argv?: readonly string[],
+  parseOpts?: { from: "node" | "electron" | "user" },
+) => {
+  const effectiveArgv = argv ? Array.from(argv) : process.argv;
+  activeCliArgs = parseOpts?.from === "user" ? effectiveArgv.slice() : effectiveArgv.slice(2);
+  cliFailureRecordedForInvocation = false;
+  for (const sub of program.commands) {
+    (
+      sub as unknown as {
+        _optionValues?: Record<string, unknown>;
+        _optionValueSources?: Record<string, unknown>;
+      }
+    )._optionValues = {};
+    (
+      sub as unknown as {
+        _optionValueSources?: Record<string, unknown>;
+      }
+    )._optionValueSources = {};
+    for (const opt of sub.options) {
+      if (opt.defaultValue !== undefined) {
+        sub.setOptionValueWithSource(opt.attributeName(), opt.defaultValue, "default");
+      }
+    }
+  }
+  try {
+    return await origParseAsync(argv, parseOpts);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    recordCliFailureTelemetry(msg);
+    throw err;
+  }
+};
+
+program.hook("preAction", (_thisCommand, actionCommand) => {
+  for (const optKey of ["idioms", "callers", "deps", "compact"]) {
+    if (actionCommand.getOptionValueSource(optKey) === "default") {
+      actionCommand.setOptionValueWithSource(optKey, undefined, "default");
+    }
+  }
+});
 
 function writeTargetFile(outPath: string, content: string): void {
   const dir = path.dirname(outPath);
@@ -351,7 +461,7 @@ export async function executeCompile(
 
 // Command: compile [target]
 program
-  .command("compile")
+  .command("compile", { hidden: true })
   .description("Compile .aice source file(s) or directory to target language")
   .argument("[target]", "Path to .aice source file or directory (omitted for workspace scan)")
   .option("-o, --out <out>", "Output file path (single file mode)")
@@ -389,7 +499,7 @@ program
 
 // Command: compile-all [dir] (Deprecated alias to compile [dir])
 program
-  .command("compile-all")
+  .command("compile-all", { hidden: true })
   .description(
     "Recursively compile all .aice source files in a directory (alias for 'compile [dir]')",
   )
@@ -424,7 +534,7 @@ program
 
 // Command: verify [target]
 program
-  .command("verify")
+  .command("verify", { hidden: true })
   .aliases(["check"])
   .description(
     "Verify syntactic and type soundness of an .aice file, or run automated multi-file roundtrip parity gate",
@@ -582,7 +692,7 @@ program
 
 // Command: fix <file>
 program
-  .command("fix")
+  .command("fix", { hidden: true })
   .description("Autonomously repair syntax, immutability, and type violations in an .aice file")
   .argument("<file>", "Path to the .aice source file to repair")
   .option("--dry-run", "Display candidate repairs and unified diffs without modifying disk")
@@ -649,7 +759,7 @@ program
 
 // Command: decompile <file>
 program
-  .command("decompile")
+  .command("decompile", { hidden: true })
   .description(
     "Decompile a target language file across 33 supported extensions into an .aice representation",
   )
@@ -702,7 +812,7 @@ program
 
 // Command: roundtrip <file>
 program
-  .command("roundtrip")
+  .command("roundtrip", { hidden: true })
   .description("Verify Put/Get stability by decompiling to .aice and recompiling to target")
   .argument("<file>", "Path to target source file")
   .option(
@@ -758,9 +868,7 @@ program
   .option("--generate-schemas [dir]", "Generate Antigravity MCP tool JSON schema files")
   .action(async (options: { generateSchemas?: string | boolean }) => {
     if (options.generateSchemas) {
-      const { AICE_MCP_TOOLS, AICE_WRITE_TOOL, AICE_VERSION } = await import(
-        "../src/mcp/server.js"
-      );
+      const { AICE_MCP_TOOLS, AICE_VERSION } = await import("../src/mcp/server.js");
       const os = await import("node:os");
       const homeDir = process.env.AICE_AGENT_HOME
         ? path.resolve(process.env.AICE_AGENT_HOME)
@@ -770,24 +878,39 @@ program
           ? path.resolve(options.generateSchemas)
           : path.join(homeDir, ".gemini", "antigravity-cli", "mcp", "aice");
       fs.mkdirSync(targetDir, { recursive: true });
+      const activeSchemaFiles = new Set(AICE_MCP_TOOLS.map((t) => `${t.name}.json`));
+      activeSchemaFiles.add("tools.json");
+      for (const existing of fs.readdirSync(targetDir)) {
+        if (
+          existing.startsWith("aice_") &&
+          existing.endsWith(".json") &&
+          !activeSchemaFiles.has(existing)
+        ) {
+          fs.rmSync(path.join(targetDir, existing), { force: true });
+        }
+      }
       for (const tool of AICE_MCP_TOOLS) {
         fs.writeFileSync(
           path.join(targetDir, `${tool.name}.json`),
-          JSON.stringify({ ...tool, version: AICE_VERSION }, null, 2) + "\n",
-          "utf-8",
-        );
-      }
-      if (AICE_WRITE_TOOL) {
-        fs.writeFileSync(
-          path.join(targetDir, `${AICE_WRITE_TOOL.name}.json`),
-          JSON.stringify({ ...AICE_WRITE_TOOL, version: AICE_VERSION }, null, 2) + "\n",
+          JSON.stringify(
+            { ...tool, parameters: tool.inputSchema, version: AICE_VERSION },
+            null,
+            2,
+          ) + "\n",
           "utf-8",
         );
       }
       fs.writeFileSync(
         path.join(targetDir, "tools.json"),
-        JSON.stringify({ server: "aice", version: AICE_VERSION, tools: AICE_MCP_TOOLS }, null, 2) +
-          "\n",
+        JSON.stringify(
+          {
+            server: "aice",
+            version: AICE_VERSION,
+            tools: AICE_MCP_TOOLS.map((tool) => ({ ...tool, parameters: tool.inputSchema })),
+          },
+          null,
+          2,
+        ) + "\n",
         "utf-8",
       );
       console.log(`✔ Generated ${AICE_MCP_TOOLS.length} MCP tool schema files in ${targetDir}`);
@@ -799,7 +922,7 @@ program
 // Command: tokens [path]
 // Aliases: tokenomics, efficiency, verify-tokenomics
 program
-  .command("tokens")
+  .command("tokens", { hidden: true })
   .aliases(["tokenomics", "efficiency", "verify-tokenomics"])
   .description("Audit token and character savings for a specific file or folder (with subfolders)")
   .argument("[path]", "Path to file or directory to audit", ".")
@@ -898,7 +1021,7 @@ program
           } else {
             if (options.markdown || !process.stdout.isTTY) {
               console.log(
-                `\n=== AICE 2.0 Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`,
+                `\n=== AICE Tokenomics & Zero-Drift Benchmark Audit: ${targetPath} ===\n`,
               );
               if (options.projects) {
                 console.log(formatProjectsMarkdownTable(report));
@@ -965,7 +1088,7 @@ program
   .command("benchmark")
   .aliases(["bench"])
   .description(
-    "Run the 10 Real-World AICE 2.0 Benchmarks Suite (evaluating Without AICE vs AICE Without Idioms vs AICE With Idioms)",
+    "Run the 10 Real-World AICE Benchmarks Suite (evaluating Without AICE vs AICE Without Idioms vs AICE With Idioms)",
   )
   .option("--json", "Output structured JSON report")
   .option("--markdown", "Output formatted GitHub Flavored Markdown report")
@@ -990,7 +1113,7 @@ program
 
 // Command: outline [target]
 program
-  .command("outline")
+  .command("outline", { hidden: true })
   .description(
     "Semantic skeletonization: generate token-dense AST skeleton outline across 33 extensions (85-90% token reduction)",
   )
@@ -1291,13 +1414,7 @@ Examples:
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        const { recordTelemetryError } = await import("../src/telemetry/index.js");
-        recordTelemetryError({
-          targetPath: rawTargets[0],
-          operation: "outline",
-          surface: "cli",
-          errorMessage: msg,
-        });
+        recordCliFailureTelemetry(msg, "outline", rawTargets[0]);
         console.error(`❌ Error outlining ${rawTargets.join(", ")}: ${msg}`);
         process.exit(1);
       }
@@ -2061,13 +2178,11 @@ Examples:
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         const errTarget = rawTargetPath ?? options.file ?? options.batch;
-        const { recordTelemetryError } = await import("../src/telemetry/index.js");
-        recordTelemetryError({
-          targetPath: errTarget,
-          operation: "splice",
-          surface: "cli",
-          errorMessage: msg,
-        });
+        recordCliFailureTelemetry(
+          msg,
+          "splice",
+          typeof errTarget === "string" ? errTarget : undefined,
+        );
         console.error(`❌ Error splicing ${errTarget ?? "<stdin>"}: ${msg}`);
         process.exit(1);
       }
@@ -2076,7 +2191,7 @@ Examples:
 
 // Command: create [filePath]
 program
-  .command("create [filePath]")
+  .command("create [filePath]", { hidden: true })
   .alias("new")
   .description(
     "Create greenfield/startup native files from compact AICE syntax, $idiom macros, or hybrid code (40-75% token reduction)",
@@ -2348,472 +2463,112 @@ program
         const msg = err instanceof Error ? err.message : String(err);
         const errTarget =
           filePathArg ?? (typeof options.batch === "string" ? options.batch : undefined);
-        const { recordTelemetryError } = await import("../src/telemetry/index.js");
-        recordTelemetryError({
-          targetPath: errTarget,
-          operation: "create",
-          surface: "cli",
-          errorMessage: msg,
-        });
+        recordCliFailureTelemetry(msg, "create", errTarget);
         console.error(`❌ Error creating ${errTarget ?? "<file>"}: ${msg}`);
         process.exit(1);
       }
     },
   );
 
-// Command: context [target]
+// Command: read [targets...] (aliases: context, ctx)
 program
-  .command("context")
+  .command("read")
+  .aliases(["context", "ctx"])
   .description(
-    "Dependency contract packager, symbol/test/heading extractor & /pattern/ search in 1 turn across 33 extensions",
+    "Unified Read Engine: Dependency contract packager, auto-outlining, symbol/test/heading extractor & /pattern/ search in 1 turn across 33 extensions",
   )
   .argument(
     "[targets...]",
-    "Path(s) to target source file(s) or directory (omitted for workspace overview context)",
+    "Path(s) to target file(s) or directories with optional inline :symbol, :Lstart-Lend, or :outline selectors",
   )
+  .option("--outline", "Force structural skeleton outline (85-90% token reduction)")
+  .option("--outline-target", "Outline target instead of full source inside context bundle")
+  .option("--full", "Bypass >250-line bare-file auto-outline and emit full source context")
   .option(
     "-d, --depth <number>",
-    "Dependency traversal depth (default: 1, or 0 for line-range/regex fast path)",
+    "Dependency traversal depth or maximum symbol nesting depth",
     (val) => Number.parseInt(val, 10),
   )
   .option(
     "-s, --symbol <symbol>",
-    "Selector: Class.method, test ID (TC-MENU-001), Markdown heading, line range (L180-L240), or regex (/pattern/)",
+    "Selector: Class.method, test ID (TC-MENU-001), Markdown heading, line range (L180-L240), regex (/pattern/), or outline",
   )
+  .option("--compact", "Compact token-bounded directory outline mode (auto-enabled for 60+ files)")
+  .option("--no-compact", "Disable compact directory outline mode")
+  .option("--no-types", "Exclude type annotations when outlining")
   .option("--idioms", "Force-enable project idioms")
   .option("--no-idioms", "Temporarily disable project idioms")
+  .option("--deps", "Force dependency contract resolution even on fast-path slices/files")
+  .option("--no-deps", "Skip dependency contract resolution")
   .option("--callers", "Force reverse caller lookup")
   .option("--no-callers", "Skip reverse caller lookup")
-  .option("--outline-target", "Outline target instead of full source")
-  .option("--max-tokens <number>", "Maximum token limit", (val) => Number.parseInt(val, 10))
-  .option("--json", "Output as JSON bundle")
-  .option("--stats", "Output token count statistics")
+  .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
+  .option("--json", "Output structured JSON bundle")
+  .option("--stats", "Output token reduction and context statistics")
   .addHelpText(
     "after",
     `
 Examples:
-  • Extract method with downstream caller call-site line numbers ([L14]):
-      aice context src/app.ts -s "GameApp.getCoreConstants"
+  • Auto-outline directories or >250-line files (replaces 'ls src tests'):
+      aice read src tests
+      aice read bin/aice.ts
+  • Multi-target symbol & line-range stream in 1 call:
+      aice read src/app.ts:GameApp.init src/utils.ts:L20-L60
   • Extract test block by test ID or title prefix (replaces grep -n):
-      aice context tests/app.test.ts -s "TC-MENU-001"
-  • Extract exact line range (replaces sed -n '180,240p'):
-      aice context src/app.ts -s "L180-L240"
-  • Search file or directory by regex/substring in 1 turn (replaces grep -rn):
-      aice context src -s "/OracleIncoherenceAuditor/"
+      aice read tests/app.test.ts -s "TC-MENU-001"
+  • Search file or directory by 4-tier ranked regex/substring (replaces grep -rn):
+      aice read src -s "/OracleIncoherenceAuditor/"
   • Extract Markdown section or shell/PowerShell/batch function:
-      aice context README.md -s "Quick Start"
-      aice context install.sh -s "install_sys_packages"
+      aice read README.md -s "Quick Start"
 `,
   )
   .action(
     async (
       targetPaths: string[] | undefined,
       options: {
+        outline?: boolean;
+        outlineTarget?: boolean;
+        full?: boolean;
         depth?: number;
         symbol?: string;
+        compact?: boolean;
+        types?: boolean;
         idioms?: boolean;
+        deps?: boolean;
         callers?: boolean;
-        outlineTarget?: boolean;
         maxTokens?: number;
         json?: boolean;
         stats?: boolean;
       },
     ) => {
-      const {
-        generateContext,
-        mergeMultiContextResults,
-        parseTargetWithInlineSymbol,
-        splitContextTargets,
-      } = await import("../src/tools/context.js");
-      const { recordTelemetryEvent, withSuppressedTelemetryAsync } = await import(
-        "../src/telemetry/index.js"
-      );
-      const { estimateTokens } = await import("../src/tokenomics/index.js");
-
-      const splitCommaSymbolSelectors = (rawSymbol: string): string[] => {
-        const trimmed = rawSymbol.trim();
-        if (!trimmed) return [];
-        if (/^\/[^/\\\n]+\/[gimsuy]*$/.test(trimmed)) {
-          return [trimmed];
-        }
-        const out: string[] = [];
-        let current = "";
-        let inRegex = false;
-        let regexCharClass = false;
-        let inQuote: string | null = null;
-        let escaped = false;
-        for (const ch of trimmed) {
-          if (escaped) {
-            current += ch;
-            escaped = false;
-            continue;
-          }
-          if (inQuote) {
-            current += ch;
-            if (ch === "\\") {
-              escaped = true;
-            } else if (ch === inQuote) {
-              inQuote = null;
-            }
-            continue;
-          }
-          if (inRegex) {
-            current += ch;
-            if (ch === "\\") {
-              escaped = true;
-            } else if (ch === "[") {
-              regexCharClass = true;
-            } else if (ch === "]" && regexCharClass) {
-              regexCharClass = false;
-            } else if (ch === "/" && !regexCharClass) {
-              inRegex = false;
-            }
-            continue;
-          }
-          if (ch === '"' || ch === "'") {
-            inQuote = ch;
-            current += ch;
-            continue;
-          }
-          if (ch === "/" && current.trim() === "") {
-            inRegex = true;
-            regexCharClass = false;
-            current += ch;
-            continue;
-          }
-          if (ch === ",") {
-            const piece = current.trim();
-            if (piece) out.push(piece);
-            current = "";
-            continue;
-          }
-          current += ch;
-        }
-        const last = current.trim();
-        if (last) out.push(last);
-        return out;
-      };
-
-      const expandedTargets: Array<string | undefined> = [];
-      if (targetPaths && targetPaths.length > 0) {
-        for (const rawT of targetPaths) {
-          if (typeof rawT === "string" && /\s+/.test(rawT.trim())) {
-            const splitTokens = splitContextTargets(rawT, process.cwd());
-            if (splitTokens.length > 1) {
-              expandedTargets.push(...splitTokens);
-              continue;
-            }
-          }
-          expandedTargets.push(rawT);
-        }
-      } else {
-        expandedTargets.push(undefined);
-      }
-      const rawTargets = expandedTargets;
       try {
-        const results = [];
-        const sharedSymbolResultIndices: number[] = [];
-        const missingContextTargets: string[] = [];
-        const multiTargetErrors: unknown[] = [];
-        const isMultiTarget = rawTargets.length > 1;
-        const sharedScanCache: NonNullable<ContextOptions["workspaceScanCache"]> = {
-          filesByRoot: new Map(),
-          fileContentByPath: new Map(),
-          importsByPath: new Map(),
-          idiomScanByRoot: new Map(),
-        };
-        let firstResolvedPath = "";
-        let firstProjectRoot = process.cwd();
-        let totalNativeChars = 0;
-        let totalNativeCl100k = 0;
-        let totalNativeO200k = 0;
-        let resolvedNativeTargetCount = 0;
-
-        for (const rawTarget of rawTargets) {
-          let targetPath = rawTarget;
-          let inlineSymbol: string | undefined;
-          if (typeof rawTarget === "string") {
-            const parsed = parseTargetWithInlineSymbol(rawTarget, process.cwd());
-            targetPath = parsed.targetPath;
-            inlineSymbol = parsed.inlineSymbol;
-          }
-          const resolved = resolveExplicitOrPolymorphicTarget(targetPath);
-          if (!isProjectAiceEnabled(resolved.config)) {
-            console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
-            process.exit(1);
-          }
-          if (isMultiTarget && !fs.existsSync(resolved.resolvedPath)) {
-            missingContextTargets.push(String(targetPath ?? resolved.resolvedPath));
-            continue;
-          }
-          const explicitCallers = process.argv.includes("--callers")
-            ? true
-            : process.argv.includes("--no-callers") || options.callers === false
-              ? false
-              : undefined;
-          const usesSharedSymbol = !inlineSymbol && Boolean(options.symbol);
-          const effectiveSelector = inlineSymbol ?? options.symbol;
-          const contextOpts: ContextOptions = {
+        const { aiceRead } = await import("../src/tools/read.js");
+        const res = await aiceRead(
+          targetPaths && targetPaths.length > 0 ? targetPaths : undefined,
+          {
+            outline: options.outline,
+            outlineTarget: options.outlineTarget,
+            full: options.full,
             depth: options.depth !== undefined ? Number(options.depth) : undefined,
-            symbol: effectiveSelector,
-            allowPartialSymbolMatch: isMultiTarget ? true : undefined,
+            symbol: options.symbol,
+            compact: options.compact,
+            includeTypes: options.types !== false,
             idioms: options.idioms,
-            includeCallers: explicitCallers,
-            outlineTarget: !!options.outlineTarget,
+            includeDeps: options.deps,
+            includeCallers: options.callers,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             json: !!options.json,
             stats: !!options.stats,
-            projectRoot: resolved.projectRoot,
-            workspaceScanCache: sharedScanCache,
-          };
-          let targetMatched = false;
-          try {
-            const res = isMultiTarget
-              ? await withSuppressedTelemetryAsync(() =>
-                  generateContext(resolved.resolvedPath, contextOpts),
-                )
-              : await generateContext(resolved.resolvedPath, contextOpts);
-            results.push(res);
-            targetMatched = true;
-          } catch (targetErr) {
-            if (!isMultiTarget) {
-              throw targetErr;
-            }
-            // When multiple files share `-s "SymA,SymB"`, try matching individual selectors present in this target
-            const commaSelectors =
-              !inlineSymbol && options.symbol && options.symbol.includes(",")
-                ? splitCommaSymbolSelectors(options.symbol)
-                : [];
-            let matchedSubset = false;
-            if (commaSelectors.length > 1) {
-              const subsetResults = [];
-              for (const subSel of commaSelectors) {
-                try {
-                  const subOpts: ContextOptions = {
-                    ...contextOpts,
-                    symbol: subSel,
-                    allowPartialSymbolMatch: false,
-                  };
-                  subsetResults.push(
-                    await withSuppressedTelemetryAsync(() =>
-                      generateContext(resolved.resolvedPath, subOpts),
-                    ),
-                  );
-                } catch {
-                  // selector lives in another target file
-                }
-              }
-              const firstSubset = subsetResults[0];
-              if (firstSubset !== undefined) {
-                results.push(
-                  subsetResults.length === 1
-                    ? firstSubset
-                    : mergeMultiContextResults(subsetResults, {
-                        outlineTarget: !!options.outlineTarget,
-                      }),
-                );
-                matchedSubset = true;
-                targetMatched = true;
-              }
-            }
-            if (!matchedSubset) {
-              multiTargetErrors.push(targetErr);
-            }
-          }
-
-          if (targetMatched) {
-            if (usesSharedSymbol) {
-              sharedSymbolResultIndices.push(results.length - 1);
-            }
-            if (!firstResolvedPath) {
-              firstResolvedPath = resolved.resolvedPath;
-              firstProjectRoot = resolved.projectRoot;
-            }
-            if (isMultiTarget) {
-              try {
-                if (
-                  fs.existsSync(resolved.resolvedPath) &&
-                  fs.statSync(resolved.resolvedPath).isFile()
-                ) {
-                  const rawText =
-                    sharedScanCache.fileContentByPath.get(resolved.resolvedPath) ??
-                    fs.readFileSync(resolved.resolvedPath, "utf-8");
-                  totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
-                  totalNativeCl100k += estimateTokens(rawText, "cl100k_base");
-                  totalNativeO200k += estimateTokens(rawText, "o200k_base");
-                  resolvedNativeTargetCount++;
-                } else if (fs.existsSync(resolved.resolvedPath)) {
-                  const dirFiles = sharedScanCache.filesByRoot.get(resolved.resolvedPath) ?? [];
-                  for (const df of dirFiles) {
-                    const rawText =
-                      sharedScanCache.fileContentByPath.get(df) ?? fs.readFileSync(df, "utf-8");
-                    totalNativeChars += rawText.length + (resolvedNativeTargetCount > 0 ? 2 : 0);
-                    totalNativeCl100k += estimateTokens(rawText, "cl100k_base");
-                    totalNativeO200k += estimateTokens(rawText, "o200k_base");
-                    resolvedNativeTargetCount++;
-                  }
-                }
-              } catch {
-                // ignore unreadable target
-              }
-            }
-          }
-        }
-
-        if (results.length === 0) {
-          if (multiTargetErrors.length > 0) {
-            throw multiTargetErrors[0];
-          }
-          if (missingContextTargets.length > 0) {
-            throw new Error(`Path not found: ${missingContextTargets.join(", ")}`);
-          }
-        }
-
-        // Reconcile shared multi-symbol `-s "SymA,SymB"` across multiple files:
-        // strip stale per-file `// missing: X` annotations if `X` was resolved in another target in `results`.
-        if (isMultiTarget && options.symbol && sharedSymbolResultIndices.length > 0) {
-          const sharedRequested = splitCommaSymbolSelectors(options.symbol);
-          if (sharedRequested.length > 1) {
-            const missingCountBySym = new Map<string, number>();
-            for (const idx of sharedSymbolResultIndices) {
-              const res = results[idx];
-              if (!res) continue;
-              const m = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
-              if (m?.[1]) {
-                for (const part of m[1].split(",").map((s) => s.trim())) {
-                  if (part) {
-                    missingCountBySym.set(part, (missingCountBySym.get(part) ?? 0) + 1);
-                  }
-                }
-              }
-            }
-            const globallyMissing = new Set<string>();
-            for (const [sym, count] of missingCountBySym) {
-              if (count >= sharedSymbolResultIndices.length) {
-                globallyMissing.add(sym);
-              }
-            }
-            let emittedGlobalMissing = false;
-            const lastSharedIdx = sharedSymbolResultIndices[sharedSymbolResultIndices.length - 1];
-            for (const idx of sharedSymbolResultIndices) {
-              const res = results[idx];
-              if (!res) continue;
-              const matchMissing = res.targetContent.match(/^\/\/ missing:\s*(.+)$/m);
-              if (!matchMissing) continue;
-              const isLastShared = idx === lastSharedIdx;
-              let replacement = "";
-              if (isLastShared && !emittedGlobalMissing && matchMissing[1]) {
-                const kept = matchMissing[1]
-                  .split(",")
-                  .map((s) => s.trim())
-                  .filter((s) => globallyMissing.has(s));
-                if (kept.length > 0) {
-                  emittedGlobalMissing = true;
-                  replacement = `\n\n// missing: ${kept.join(", ")}`;
-                }
-              }
-              res.targetContent = res.targetContent.replace(
-                /\n*\/\/ missing:\s*(.+)$/m,
-                replacement,
-              );
-              res.formattedBundle = res.formattedBundle.replace(
-                /\n*\/\/ missing:\s*(.+)$/m,
-                replacement,
-              );
-              res.tokenCount = estimateTokens(res.formattedBundle);
-            }
-          }
-        }
-
-        if (results.length > 1) {
-          const merged = mergeMultiContextResults(results, {
-            outlineTarget: !!options.outlineTarget,
-            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-          });
-          const jsonPayload = options.json ? JSON.stringify(results, null, 2) : undefined;
-          if (isMultiTarget && firstResolvedPath) {
-            const aicePayload = jsonPayload ?? merged.formattedBundle;
-            recordTelemetryEvent({
-              targetPath: firstResolvedPath,
-              projectRoot: firstProjectRoot,
-              filePath: "<multi-context>",
-              operation: "context",
-              surface: "cli",
-              idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
-              nativeText: "",
-              nativeChars: totalNativeChars,
-              nativeCl100k: totalNativeCl100k,
-              nativeO200k: totalNativeO200k,
-              realisticNativeCl100k: totalNativeCl100k,
-              aiceText: aicePayload,
-              aiceCl100k: jsonPayload !== undefined ? undefined : merged.tokenCount,
-            });
-          }
-          if (jsonPayload !== undefined) {
-            console.log(jsonPayload);
-          } else {
-            console.log(merged.formattedBundle);
-            for (const mp of missingContextTargets) {
-              console.log(`// not found: ${mp}`);
-            }
-            if (options.stats) {
-              console.log("\n📊 Context Pack Token Telemetry:");
-              console.log(`  Total pack tokens: ${merged.tokenCount?.toLocaleString() ?? 0}`);
-              console.log(`  Dependencies:      ${merged.dependencies.length}`);
-              console.log(`  Downstream callers:${merged.callers.length}`);
-              console.log(`  Target characters: ${merged.targetContent.length.toLocaleString()}`);
-            }
-          }
-        } else if (results[0] !== undefined) {
-          const singleResult = results[0];
-          const jsonPayload = options.json ? JSON.stringify(singleResult, null, 2) : undefined;
-          if (isMultiTarget && firstResolvedPath) {
-            const aicePayload = jsonPayload ?? singleResult.formattedBundle;
-            recordTelemetryEvent({
-              targetPath: firstResolvedPath,
-              projectRoot: firstProjectRoot,
-              operation: "context",
-              surface: "cli",
-              idiomsUsed: Boolean(
-                singleResult.idioms && Object.keys(singleResult.idioms).length > 0,
-              ),
-              nativeText: "",
-              nativeChars: totalNativeChars,
-              nativeCl100k: totalNativeCl100k,
-              nativeO200k: totalNativeO200k,
-              realisticNativeCl100k: totalNativeCl100k,
-              aiceText: aicePayload,
-              aiceCl100k: jsonPayload !== undefined ? undefined : singleResult.tokenCount,
-            });
-          }
-          if (jsonPayload !== undefined) {
-            console.log(jsonPayload);
-          } else {
-            console.log(singleResult.formattedBundle);
-            for (const mp of missingContextTargets) {
-              console.log(`// not found: ${mp}`);
-            }
-            if (options.stats) {
-              console.log("\n📊 Context Pack Token Telemetry:");
-              console.log(`  Total pack tokens: ${singleResult.tokenCount?.toLocaleString() ?? 0}`);
-              console.log(`  Dependencies:      ${singleResult.dependencies.length}`);
-              console.log(`  Downstream callers:${singleResult.callers.length}`);
-              console.log(
-                `  Target characters: ${singleResult.targetContent.length.toLocaleString()}`,
-              );
-            }
-          }
-        }
+            surface: "cli",
+          },
+        );
+        console.log(res.output);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        const { recordTelemetryError } = await import("../src/telemetry/index.js");
-        recordTelemetryError({
-          targetPath: rawTargets[0],
-          operation: "context",
-          surface: "cli",
-          errorMessage: msg,
-        });
-        console.error(`❌ Error packaging context for ${rawTargets.join(", ")}: ${msg}`);
+        recordCliFailureTelemetry(msg, "context", targetPaths?.[0]);
+        console.error(
+          `❌ Error packaging context for ${targetPaths && targetPaths.length > 0 ? targetPaths.join(", ") : "."}: ${msg}`,
+        );
         process.exit(1);
       }
     },
@@ -2821,7 +2576,7 @@ Examples:
 
 // Command: fmt [target]
 program
-  .command("fmt")
+  .command("fmt", { hidden: true })
   .description("Deterministic zero-token canonical formatting pre-pass for AICE source code")
   .argument(
     "[target]",
@@ -2930,7 +2685,7 @@ program
 
 // Command: diff [oldPath] [newPath]
 program
-  .command("diff")
+  .command("diff", { hidden: true })
   .description("Semantic AST structural diff and unified diff between files or git HEAD")
   .argument(
     "[oldPath]",
@@ -3081,7 +2836,7 @@ program
 
 // Command: patch <path> [patchFile]
 program
-  .command("patch")
+  .command("patch", { hidden: true })
   .description(
     "Apply standard unified diffs or semantic AST symbol patches with zero corruption guarantee",
   )
@@ -3159,7 +2914,7 @@ program
 
 // Command: idioms [action] [target] [extra] [dir]
 program
-  .command("idioms [action] [target] [extra] [dir]")
+  .command("idioms [action] [target] [extra] [dir]", { hidden: true })
   .alias("idiom")
   .description(
     "Mine, apply, expand, list, toggle (on/off), read, or update project-specific token-saving idioms",
@@ -4029,44 +3784,29 @@ program.addHelpText(
   "after",
   `
 ================================================================================
-AICE ON-THE-FLY AI CONTEXT ENGINE & MULTI-FILE IDIOM CLI WORKFLOW
+AICE STRICT 2-TOOL AI ENGINE WORKFLOW (aice read + aice splice)
 ================================================================================
 
-Step 1: On-the-Fly AST Discovery & Context Compression (Zero .aice Files on Disk)
-  • Outline AST skeleton (85-90% token reduction for rapid discovery):
-      aice outline src/
-  • 1-turn bounded context pack (auto-decompiles native files & collapses $idioms):
-      aice context src/app.ts -s myFunction
-  • Model Context Protocol stdio server & global CLI agent setup:
-      aice mcp
-      aice agents setup
-      aice agents status
+Pillar 1 — Unified Read (aice read | alias: context, MCP: aice_read)
+  • Auto-outline directories & >250-line files (85-90% token reduction):
+      aice read src tests
+      aice read bin/aice.ts
+  • Multi-file AST symbol slicing, line ranges & 4-tier /pattern/ search in 1 turn:
+      aice read src/app.ts:GameApp.init src/utils.ts:L20-L60
+      aice read src -s "/GameApp/"
 
-Step 2: Greenfield Creation & Surgical In-Place AST Mutation
-  • Create greenfield native files from compact AICE + $idioms (40-75% token reduction):
-      aice create src/app.ts -c "pub fn add(a: int, b: int) -> int = a + b"
-      aice create --batch files.json
-  • Forgiving surgical in-place AST mutation (accepts AICE, $idioms, or native syntax):
+Pillar 2 — Unified Write (aice splice | alias: write, MCP: aice_splice)
+  • Greenfield file creation, multi-file streams & surgical AST/hunk updates:
+      aice splice src/app.ts -c "pub fn add(a: int, b: int) -> int = a + b"
       aice splice src/app.ts -s oldFunc -c "fn oldFunc() = 42"
-      aice splice --batch edits.json
-  • Semantic AST diff & unified diff patching:
-      aice diff src/old.ts src/new.ts --ast
-      aice patch src/app.ts changes.patch
+      aice splice --stdin << 'EOF'
 
-Step 3: Smart Multi-File Idiom Engine ($idiom), Config & Honest Telemetry
-  • Mine recurring AST idioms across native files (cached in .aice-cache/idioms.json):
-      aice idioms scan src/
-  • Toggle AICE or $idioms on/off per project in aice.config.json:
-      aice enable / aice disable
-      aice idioms on / aice idioms off
-  • Multi-file idiom read & smart atomic refactor:
-      aice idioms read '$guard'
-      aice idioms update '$guard' -c "if not this.canPlay() or this.isMuted: ret"
-  • View 100% honest BPE token-savings telemetry, post-session analysis & benchmarks:
-      aice gain [project]
-      aice analyze [project]
-      aice tokens .
-      aice benchmark
+Administration, Agent Integration & Honest BPE Telemetry
+  • Global MCP stdio server & CLI coding agent setup:
+      aice mcp / aice agents setup / aice agents status
+  • Project configuration & token-savings telemetry:
+      aice enable / aice disable / aice config
+      aice gain [project] / aice analyze [project] / aice benchmark
 
 Author: @forart82 (https://github.com/forart82/aice) | License: Apache-2.0
 `,
@@ -4096,6 +3836,50 @@ const isDirectCliRun = () => {
   );
 };
 
+for (const subCmd of program.commands) {
+  subCmd.configureOutput({
+    outputError: (str, write) => {
+      recordCliFailureTelemetry(str);
+      write(str);
+    },
+  });
+}
+
 if (isDirectCliRun()) {
-  void program.parseAsync(process.argv);
+  let lastStderrLine = "";
+  const origConsoleError = console.error.bind(console);
+  console.error = (...errArgs: unknown[]) => {
+    const joined = errArgs.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
+    if (joined.trim()) {
+      lastStderrLine = joined.trim();
+    }
+    origConsoleError(...errArgs);
+  };
+
+  process.on("unhandledRejection", (reason: unknown) => {
+    const msg = reason instanceof Error ? reason.stack || reason.message : String(reason);
+    recordCliFailureTelemetry(msg);
+    origConsoleError(`❌ Unhandled CLI rejection: ${msg}`);
+    process.exit(1);
+  });
+
+  process.on("uncaughtException", (err: Error) => {
+    const msg = err.stack || err.message || String(err);
+    recordCliFailureTelemetry(msg);
+    origConsoleError(`❌ Uncaught CLI exception: ${msg}`);
+    process.exit(1);
+  });
+
+  process.on("exit", (code) => {
+    if (code !== 0 && !cliFailureRecordedForInvocation) {
+      recordCliFailureTelemetry(lastStderrLine || `CLI exited with code ${code}`);
+    }
+  });
+
+  program.parseAsync(process.argv).catch((err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    recordCliFailureTelemetry(msg);
+    origConsoleError(`❌ CLI error: ${msg}`);
+    process.exit(1);
+  });
 }

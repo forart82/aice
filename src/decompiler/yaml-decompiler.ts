@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * YAML Decompiler (Reverse Transpiler) for AICE 2.0 (Step 24).
+ * YAML Decompiler (Reverse Transpiler) for AICE (Step 24).
  * Parses YAML documents into canonical, token-dense AICE code:
  * e.g. `pub const config = { ... }` with comment extraction and data lowering.
  */

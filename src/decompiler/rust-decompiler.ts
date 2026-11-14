@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Rust 2021 Decompiler (Reverse Transpiler) for AICE 2.0.
- * Conforms to Pillar 2 & 4 of AICE 2.0 Universal Bidirectional Parity.
+ * Idiomatic Rust 2021 Decompiler (Reverse Transpiler) for AICE.
+ * Conforms to Pillar 2 & 4 of AICE Universal Bidirectional Parity.
  */
 
 import type {
@@ -175,19 +175,32 @@ export class RustLexer {
         continue;
       }
 
-      // Strings (standard or raw r#"..."#)
+      // Strings (standard "...", byte/c b"..." / c"...", or raw r#"..."# / br#"..."# / cr#"..."#)
+      let isByteOrCStr = false;
       let isRawString = false;
-      if (ch === "r") {
+      if ((ch === "b" || ch === "c") && this.peek(1) === '"') {
+        isByteOrCStr = true;
+      } else if ((ch === "b" || ch === "c") && this.peek(1) === "r") {
+        let k = 2;
+        while (this.peek(k) === "#") k++;
+        if (this.peek(k) === '"') {
+          isByteOrCStr = true;
+          isRawString = true;
+        }
+      } else if (ch === "r") {
         let k = 1;
         while (this.peek(k) === "#") k++;
         if (this.peek(k) === '"') isRawString = true;
       }
-      if (ch === '"' || isRawString) {
+      if (ch === '"' || isByteOrCStr || isRawString) {
         const startLine = this.line;
         const startCol = this.col;
         let isRaw = false;
         let hashes = 0;
-        if (ch === "r") {
+        if (isByteOrCStr) {
+          this.advance(); // consume b or c
+        }
+        if (this.src[this.pos] === "r") {
           this.advance(); // consume r
           isRaw = true;
           while (this.pos < this.src.length && this.src[this.pos] === "#") {
@@ -232,13 +245,29 @@ export class RustLexer {
         continue;
       }
 
-      // Char literal
-      if (ch === "'" && this.peek(2) === "'") {
+      // Char or byte-char literal ('x', '\n', '\x00', b'x', b'\n')
+      if (
+        (ch === "'" &&
+          (this.peek(2) === "'" ||
+            (this.peek(1) === "\\" && this.src.indexOf("'", this.pos + 2) <= this.pos + 6))) ||
+        (ch === "b" && this.peek(1) === "'")
+      ) {
         const startLine = this.line;
         const startCol = this.col;
-        this.advance();
-        const c = this.advance();
-        this.advance();
+        if (ch === "b") this.advance();
+        this.advance(); // consume opening '
+        let c = "";
+        while (this.pos < this.src.length && this.src[this.pos] !== "'") {
+          if (this.src[this.pos] === "\\" && this.pos + 1 < this.src.length) {
+            this.advance();
+            c += this.advance();
+          } else {
+            c += this.advance();
+          }
+        }
+        if (this.pos < this.src.length && this.src[this.pos] === "'") {
+          this.advance();
+        }
         tokens.push({ kind: "STRING", value: c, line: startLine, col: startCol });
         continue;
       }
@@ -1385,12 +1414,16 @@ export class RustDecompiler {
       };
     }
 
-    // If statement: if cond { ... } else if ... else { ... }
+    // If statement: if cond { ... } or if let Pat = expr { ... }
     if (this.check("IF")) {
       this.advance();
       let cond: Expr;
       this.inControlHeader = true;
       try {
+        if (this.match("LET")) {
+          this.parsePattern();
+          this.consume("ASSIGN", "Expected '=' in if let");
+        }
         cond = this.parseExpr();
       } finally {
         this.inControlHeader = false;
@@ -1405,6 +1438,10 @@ export class RustDecompiler {
           let elifCond: Expr;
           this.inControlHeader = true;
           try {
+            if (this.match("LET")) {
+              this.parsePattern();
+              this.consume("ASSIGN", "Expected '=' in else if let");
+            }
             elifCond = this.parseExpr();
           } finally {
             this.inControlHeader = false;
@@ -1465,10 +1502,27 @@ export class RustDecompiler {
       return { kind: "MatchStmt", target, cases, span: emptySpan() };
     }
 
-    // For statement: for item in iter { ... }
+    // For statement: for item in iter { ... } / for _ in 0..n / for (k, v) in iter
     if (this.check("FOR")) {
       this.advance();
-      const item = this.consume("IDENTIFIER", "Expected loop variable name").value;
+      this.match("AMP");
+      this.match("MUT");
+      let item = "_";
+      if (this.match("UNDERSCORE")) {
+        item = "_";
+      } else if (this.match("LPAREN")) {
+        let firstIdent = "_";
+        let depth = 1;
+        while (depth > 0 && !this.isAtEnd()) {
+          const t = this.advance();
+          if (t.kind === "LPAREN") depth++;
+          else if (t.kind === "RPAREN") depth--;
+          else if (firstIdent === "_" && t.kind === "IDENTIFIER") firstIdent = t.value;
+        }
+        item = firstIdent;
+      } else {
+        item = this.consume("IDENTIFIER", "Expected loop variable name").value;
+      }
       this.consume("IN", "Expected 'in' after loop variable");
       let iter: Expr;
       this.inControlHeader = true;
@@ -1480,19 +1534,23 @@ export class RustDecompiler {
       const body = this.parseBlock();
       return {
         kind: "ForStmt",
-        variable: this.toAiceFieldName(item),
+        variable: item === "_" ? "_" : this.toAiceFieldName(item),
         iterable: iter,
         body,
         span: emptySpan(),
       };
     }
 
-    // While statement: while cond { ... }
+    // While statement: while cond { ... } or while let Pat = expr { ... }
     if (this.check("WHILE")) {
       this.advance();
       let cond: Expr;
       this.inControlHeader = true;
       try {
+        if (this.match("LET")) {
+          this.parsePattern();
+          this.consume("ASSIGN", "Expected '=' in while let");
+        }
         cond = this.parseExpr();
       } finally {
         this.inControlHeader = false;
@@ -1729,6 +1787,36 @@ export class RustDecompiler {
       return expr;
     }
 
+    // Prefix range: ..end / ..=end / ..
+    if (this.match("DOT_DOT")) {
+      const inclusive = this.match("ASSIGN");
+      const zeroExpr: Expr = {
+        kind: "LiteralExpr",
+        literalKind: "number",
+        value: 0,
+        rawValue: "0",
+        span: emptySpan(),
+      };
+      const endExpr: Expr =
+        this.check("RBRACKET") ||
+        this.check("RPAREN") ||
+        this.check("LBRACE") ||
+        this.check("COMMA") ||
+        this.check("SEMICOLON")
+          ? zeroExpr
+          : this.parseExpr(3);
+      return {
+        kind: "CallExpr",
+        callee: {
+          kind: "IdentifierExpr",
+          name: inclusive ? "rustRangeInclusive" : "rustRange",
+          span: emptySpan(),
+        },
+        args: [zeroExpr, endExpr],
+        span: emptySpan(),
+      };
+    }
+
     // Literals
     if (this.check("NUMBER")) {
       const tok = this.advance();
@@ -1925,6 +2013,8 @@ export class RustDecompiler {
         return 1;
       case "AND":
         return 2;
+      case "DOT_DOT":
+        return 2;
       case "EQ":
       case "NEQ":
       case "LT":
@@ -2071,6 +2161,29 @@ export class RustDecompiler {
         object: left,
         property: this.toAiceFieldName(prop),
         isSafeNav: false,
+        span: emptySpan(),
+      };
+    }
+
+    // Range expression: left..right / left..=right / left..
+    if (tok.kind === "DOT_DOT") {
+      const inclusive = this.match("ASSIGN");
+      const right: Expr =
+        this.check("LBRACE") ||
+        this.check("RPAREN") ||
+        this.check("RBRACKET") ||
+        this.check("COMMA") ||
+        this.check("SEMICOLON")
+          ? left
+          : this.parseExpr(prec + 1);
+      return {
+        kind: "CallExpr",
+        callee: {
+          kind: "IdentifierExpr",
+          name: inclusive ? "rustRangeInclusive" : "rustRange",
+          span: emptySpan(),
+        },
+        args: [left, right],
         span: emptySpan(),
       };
     }

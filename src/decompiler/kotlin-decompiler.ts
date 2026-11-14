@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Kotlin 1.9 / 2.x Decompiler & Parser for AICE 2.0.
+ * Idiomatic Kotlin 1.9 / 2.x Decompiler & Parser for AICE.
  * Dedicated zero-dependency streaming lexer (KotlinLexer) and recursive-descent/Pratt
  * parser (KotlinDecompiler):
  *   - Parses `package` and `import` declarations

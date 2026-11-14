@@ -1271,6 +1271,25 @@ export class PythonEmitter {
         if (baseName === "Set" || baseName === "set") baseName = "set";
         if (baseName === "Tuple" || baseName === "tuple") baseName = "tuple";
         if (baseName === "any") return "Any";
+        if (
+          (baseName === "Callable" || baseName.endsWith(".Callable")) &&
+          t.typeArgs &&
+          t.typeArgs.length === 2
+        ) {
+          const first = t.typeArgs[0]!;
+          const ret = this.emitTypeExpr(t.typeArgs[1]!);
+          if (first.kind === "TupleType") {
+            const pList = first.elementTypes.map((e) => this.emitTypeExpr(e)).join(", ");
+            return `${baseName}[[${pList}], ${ret}]`;
+          }
+          if (first.kind === "ArrayType") {
+            return `${baseName}[[${this.emitTypeExpr(first.elementType)}], ${ret}]`;
+          }
+          if (first.kind === "NamedType" && first.name === "...") {
+            return `${baseName}[..., ${ret}]`;
+          }
+          return `${baseName}[${this.emitTypeExpr(first)}, ${ret}]`;
+        }
         if (t.typeArgs && t.typeArgs.length > 0) {
           const args = t.typeArgs.map((a) => this.emitTypeExpr(a)).join(", ");
           return `${baseName}[${args}]`;

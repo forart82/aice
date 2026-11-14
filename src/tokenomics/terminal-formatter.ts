@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Responsive Terminal Formatting Engine for AICE 2.0 Tokenomics CLI.
+ * Responsive Terminal Formatting Engine for AICE Tokenomics CLI.
  * Dynamically adapts output to terminal width, provides ANSI color themes,
  * visual progress bars, and flicker-free character-exact Unicode box borders.
  */
@@ -293,8 +293,8 @@ export function formatTokenomicsTerminalTable(
 
   // Title line
   const rawTitle = options.title
-    ? ` AICE 2.0 Token Efficiency Audit — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
-    : " AICE 2.0 Token Efficiency Audit ";
+    ? ` AICE Token Efficiency Audit — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
+    : " AICE Token Efficiency Audit ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
   lines.push(
     t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),
@@ -519,8 +519,8 @@ export function formatProjectsTerminalTable(
   const lines: string[] = [];
 
   const rawTitle = options.title
-    ? ` AICE 2.0 Project Tokenomics Summary — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
-    : " AICE 2.0 Project Tokenomics Summary ";
+    ? ` AICE Project Tokenomics Summary — ${truncateMiddle(options.title, tableTotalWidth - 10)} `
+    : " AICE Project Tokenomics Summary ";
   const fillTitle = Math.max(2, tableTotalWidth - 2 - visibleLength(rawTitle));
   lines.push(
     t.cyan("┌─") + t.brightCyan(t.bold(rawTitle)) + t.cyan("─".repeat(fillTitle - 1)) + t.cyan("┐"),

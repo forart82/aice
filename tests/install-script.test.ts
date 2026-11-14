@@ -173,7 +173,7 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       expect(updatedZshrc).toContain(`Inspect v${pkg.version}`);
       expect(updatedZshrc).toContain("(@forart82)");
       expect(updatedZshrc).toContain("https://github.com/forart82/aice");
-      expect(updatedZshrc).toContain("aice create <file>");
+      expect(updatedZshrc).toContain("aice splice <file>");
       expect(updatedZshrc).not.toContain("old_banner");
     } finally {
       fs.rmSync(tmpHome, { recursive: true, force: true });

@@ -39,7 +39,7 @@ import type {
 } from "../../src/core/ast.js";
 import { ParserError, parse, parseWithTrivia } from "../../src/core/parser.js";
 
-describe("AICE 2.0 Pratt Parser & Universal AST Generator", () => {
+describe("AICE Pratt Parser & Universal AST Generator", () => {
   describe("Modules & Imports", () => {
     it("parses module header and imports", () => {
       const src = `module app/calculator

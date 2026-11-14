@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C# Forward Transpiler & .NET Emitter for AICE 2.0.
+ * Modern C# Forward Transpiler & .NET Emitter for AICE.
  * Emits clean, idiomatic modern C# (C# 10+) code from AICE Module AST.
  */
 

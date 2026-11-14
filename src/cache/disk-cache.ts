@@ -78,9 +78,9 @@ export class AiceAstCache {
     const normalizedPath = this.normalizeFilePath(filePath);
     const key = this.makeKey(normalizedPath, hash);
 
-    if (!options?.bypassCache && this.entries.has(key)) {
+    const cached = !options?.bypassCache ? this.entries.get(key) : undefined;
+    if (cached) {
       this.hits++;
-      const cached = this.entries.get(key)!;
       this.entries.delete(key);
       this.entries.set(key, cached);
       return options?.clone === false ? cached.ast : structuredClone(cached.ast);
@@ -245,7 +245,7 @@ export class AiceAstCache {
 
       let count = 0;
       for (const [key, entry] of Object.entries(data.entries)) {
-        if (entry && entry.hash && entry.ast) {
+        if (entry?.hash && entry.ast) {
           this.entries.set(key, entry);
           const normalizedPath = this.normalizeFilePath(entry.filePath);
           let keySet = this.fileToKeys.get(normalizedPath);

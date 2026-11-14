@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Code Generator
+ * AICE Code Generator
  * Serializes an AICE Module AST and optional CstTriviaTable into clean, token-dense .aice code.
  */
 

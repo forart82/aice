@@ -246,11 +246,13 @@ pub fn getRadius(light: PointLight25D): float:
           symbol: "/renderD2Hud/",
           projectRoot: tmpDir,
         });
-        expect(ctxRes.formattedBundle).toContain("### src/world/d2_renderer.aipl [L466]");
-        expect(ctxRes.formattedBundle).toContain("src/world/d2_renderer.aipl:466");
+        expect(ctxRes.formattedBundle).toContain("// === src/world/d2_renderer.aipl ===");
+        expect(ctxRes.formattedBundle).toContain(
+          "// match at [L466] (src/world/d2_renderer.aipl:466)",
+        );
         expect(ctxRes.formattedBundle).toContain("pub fn renderD2Hud(");
-        expect(ctxRes.formattedBundle).toContain("### src/a/b/c/d/helper.sh [L2]");
-
+        expect(ctxRes.formattedBundle).toContain("// === src/a/b/c/d/helper.sh ===");
+        expect(ctxRes.formattedBundle).toContain("// match at [L2] (src/a/b/c/d/helper.sh:2)");
         const singleSymCtx = await generateContext(rendererPath, {
           symbol: "renderD2Hud",
           projectRoot: tmpDir,
@@ -265,21 +267,18 @@ pub fn getRadius(light: PointLight25D): float:
   });
 
   describe("Step 3: Zero-Grep & Zero-Sed Directives in MANDATORY_AGENT_RULES_MARKDOWN (v0.9.24)", () => {
-    it("bumps version to 0.9.24 and includes explicit .aipl grep/sed replacement directives", () => {
+    it("embeds current version and enforces .aipl + zero-grep/sed directives in compact MANDATORY_AGENT_RULES_MARKDOWN", () => {
       expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("33 supported file extensions");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(".aipl");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        'Replace `grep -n -C 10 "sym" file.aipl` -> `aice context file.aipl -s "sym"`',
+        "NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find",
       );
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        'Replace `grep -rn "sym" src/` -> `aice context src -s "/sym/"`',
+        'aice read <fileOrDir> -s "/<searchPattern>/"',
       );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        "Replace `sed -n '50,90p' file.aipl` -> `aice context file.aipl -s \"L50-L90\"`",
-      );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        "works seamlessly across all 33 file extensions including `.aipl`",
-      );
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read f1:sym f2:L1-L50");
     });
   });
 

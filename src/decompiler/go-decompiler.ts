@@ -2,8 +2,8 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Go 1.22+ Decompiler (Reverse Transpiler) for AICE 2.0.
- * Conforms to Pillar 2 & 4 of AICE 2.0 Universal Bidirectional Parity.
+ * Idiomatic Go 1.22+ Decompiler (Reverse Transpiler) for AICE.
+ * Conforms to Pillar 2 & 4 of AICE Universal Bidirectional Parity.
  */
 
 import type {
@@ -1351,7 +1351,10 @@ export class GoDecompiler {
       let condExpr: Expr;
       this.inControlHeader = true;
       try {
-        const initialExpr = this.parseExpr();
+        const initialExpr = this.parseExpr(0);
+        if (this.match("DEFINE") || this.match("ASSIGN")) {
+          this.parseExpr(0);
+        }
         if (this.match("SEMICOLON")) {
           condExpr = this.parseExpr();
         } else {
@@ -1371,7 +1374,10 @@ export class GoDecompiler {
           let elifCond: Expr;
           this.inControlHeader = true;
           try {
-            const initialElif = this.parseExpr();
+            const initialElif = this.parseExpr(0);
+            if (this.match("DEFINE") || this.match("ASSIGN")) {
+              this.parseExpr(0);
+            }
             if (this.match("SEMICOLON")) {
               elifCond = this.parseExpr();
             } else {
@@ -1495,16 +1501,19 @@ export class GoDecompiler {
       const checkpoint = this.cur;
       let isRange = false;
       let rangeVar = "";
-      if (this.check("IDENTIFIER")) {
+      if (this.match("RANGE")) {
+        rangeVar = "_";
+        isRange = true;
+      } else if (this.check("IDENTIFIER")) {
         const firstTok = this.advance();
         if (this.match("COMMA")) {
           if (this.check("IDENTIFIER")) {
             rangeVar = this.advance().value;
-            if (this.match("DEFINE") && this.match("RANGE")) {
+            if ((this.match("DEFINE") || this.match("ASSIGN")) && this.match("RANGE")) {
               isRange = true;
             }
           }
-        } else if (this.match("DEFINE") && this.match("RANGE")) {
+        } else if ((this.match("DEFINE") || this.match("ASSIGN")) && this.match("RANGE")) {
           rangeVar = firstTok.value;
           isRange = true;
         }
@@ -1827,6 +1836,44 @@ export class GoDecompiler {
         };
       }
 
+      // Map composite literal: map[K]V{ k: v, ... }
+      if (!this.inControlHeader && tok.value === "map" && this.match("LBRACKET")) {
+        const keyTypeRaw = this.parseGoTypeRaw();
+        this.consume("RBRACKET", "Expected ']' closing map key type");
+        const valTypeRaw = this.parseGoTypeRaw();
+        const mapTypeStr = `map[${keyTypeRaw}]${valTypeRaw}`;
+        this.consume("LBRACE", "Expected '{' in map composite literal");
+        const kvArgs: Expr[] = [
+          {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: mapTypeStr,
+            rawValue: JSON.stringify(mapTypeStr),
+            span: emptySpan(),
+          },
+        ];
+        while (!this.check("RBRACE") && !this.isAtEnd()) {
+          this.collectLeadingTrivia();
+          if (this.check("RBRACE")) break;
+          const kExpr = this.parseExpr(1);
+          this.consume("COLON", "Expected ':' after map literal key");
+          const vExpr = this.parseExpr(1);
+          kvArgs.push(kExpr, vExpr);
+          if (this.match("COMMA")) {
+            if (this.check("RBRACE")) break;
+            continue;
+          }
+          break;
+        }
+        this.consume("RBRACE", "Expected '}' closing map composite literal");
+        return {
+          kind: "CallExpr",
+          callee: { kind: "IdentifierExpr", name: "goMap", span: emptySpan() },
+          args: kvArgs,
+          span: emptySpan(),
+        };
+      }
+
       // Check if struct literal: TypeName{ Field: Val, ... }
       if (!this.inControlHeader && this.check("LBRACE") && /^[A-Z]/.test(tok.value)) {
         this.advance(); // consume '{'
@@ -1852,10 +1899,32 @@ export class GoDecompiler {
       return { kind: "IdentifierExpr", name: tok.value, span: emptySpan() };
     }
 
-    // Array / Slice literal: []Type{ ... }
+    // Array / Slice literal `[]Type{ ... }` or conversion `[]Type(expr)`
     if (this.match("LBRACKET")) {
-      this.consume("RBRACKET", "Expected ']' in slice literal");
-      this.parseTypeExpr(); // consume element type
+      this.consume("RBRACKET", "Expected ']' in slice literal or conversion");
+      const elemTypeRaw = this.parseGoTypeRaw();
+      if (this.match("LPAREN")) {
+        const convArgs: Expr[] = [
+          {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: `[]${elemTypeRaw}`,
+            rawValue: JSON.stringify(`[]${elemTypeRaw}`),
+            span: emptySpan(),
+          },
+        ];
+        while (!this.check("RPAREN") && !this.isAtEnd()) {
+          convArgs.push(this.parseExpr(1));
+          if (!this.match("COMMA")) break;
+        }
+        this.consume("RPAREN", "Expected ')' closing slice conversion");
+        return {
+          kind: "CallExpr",
+          callee: { kind: "IdentifierExpr", name: "goCast", span: emptySpan() },
+          args: convArgs,
+          span: emptySpan(),
+        };
+      }
       this.consume("LBRACE", "Expected '{' to start slice elements");
       const elements: Expr[] = [];
       while (!this.check("RBRACE") && !this.isAtEnd()) {
@@ -1916,6 +1985,38 @@ export class GoDecompiler {
 
     // Call expression
     if (tok.kind === "LPAREN") {
+      if (
+        left.kind === "IdentifierExpr" &&
+        (left.name === "make" || left.name === "new") &&
+        !this.check("RPAREN")
+      ) {
+        const goTypeRaw = this.parseGoTypeRaw();
+        const builtinArgs: Expr[] = [
+          {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: goTypeRaw,
+            rawValue: JSON.stringify(goTypeRaw),
+            span: emptySpan(),
+          },
+        ];
+        while (this.match("COMMA")) {
+          if (this.check("RPAREN")) break;
+          builtinArgs.push(this.parseExpr(1));
+        }
+        this.consume("RPAREN", "Expected ')' closing call");
+        return {
+          kind: "CallExpr",
+          callee: {
+            kind: "IdentifierExpr",
+            name: left.name === "make" ? "goMake" : "goNew",
+            span: emptySpan(),
+          },
+          args: builtinArgs,
+          span: emptySpan(),
+        };
+      }
+
       const args: Expr[] = [];
       while (!this.check("RPAREN") && !this.isAtEnd()) {
         args.push(this.parseExpr(1));
@@ -2026,11 +2127,50 @@ export class GoDecompiler {
       };
     }
 
-    // Index or slice access: left[index]
+    // Index or slice access: left[index], left[:high], left[low:], left[:]
     if (tok.kind === "LBRACKET") {
+      if (this.match("COLON")) {
+        const zeroExpr: Expr = {
+          kind: "LiteralExpr",
+          literalKind: "number",
+          value: 0,
+          rawValue: "0",
+          span: emptySpan(),
+        };
+        const high: Expr = this.check("RBRACKET")
+          ? {
+              kind: "MemberAccessExpr",
+              object: left,
+              property: "len",
+              isSafeNav: false,
+              span: emptySpan(),
+            }
+          : this.parseExpr();
+        this.consume("RBRACKET", "Expected ']' closing slice");
+        return {
+          kind: "CallExpr",
+          callee: {
+            kind: "MemberAccessExpr",
+            object: left,
+            property: "slice",
+            isSafeNav: false,
+            span: emptySpan(),
+          },
+          args: [zeroExpr, high],
+          span: emptySpan(),
+        };
+      }
       const idx = this.parseExpr();
       if (this.match("COLON")) {
-        const high = this.parseExpr();
+        const high: Expr = this.check("RBRACKET")
+          ? {
+              kind: "MemberAccessExpr",
+              object: left,
+              property: "len",
+              isSafeNav: false,
+              span: emptySpan(),
+            }
+          : this.parseExpr();
         this.consume("RBRACKET", "Expected ']' closing slice");
         return {
           kind: "CallExpr",
@@ -2125,7 +2265,28 @@ export class GoDecompiler {
       };
     }
 
-    const id = this.consume("IDENTIFIER", "Expected type name").value;
+    if (this.match("ARROW")) {
+      this.consume("IDENTIFIER", "Expected 'chan' after '<-'");
+      const elem = this.parseTypeExpr();
+      return { kind: "NamedType", name: "Chan", typeArgs: [elem], span: emptySpan() };
+    }
+
+    let id = this.consume("IDENTIFIER", "Expected type name").value;
+    if (id === "chan") {
+      this.match("ARROW");
+      const elem = this.parseTypeExpr();
+      return { kind: "NamedType", name: "Chan", typeArgs: [elem], span: emptySpan() };
+    }
+    if (id === "interface" && this.match("LBRACE")) {
+      while (!this.check("RBRACE") && !this.isAtEnd()) {
+        this.advance();
+      }
+      this.consume("RBRACE", "Expected '}' closing interface type");
+      return { kind: "NamedType", name: "any", span: emptySpan() };
+    }
+    while (this.match("DOT")) {
+      id += `.${this.consume("IDENTIFIER", "Expected qualified type name").value}`;
+    }
     switch (id) {
       case "int":
       case "int64":
@@ -2152,6 +2313,72 @@ export class GoDecompiler {
       default:
         return { kind: "NamedType", name: id, span: emptySpan() };
     }
+  }
+
+  private parseGoTypeRaw(): string {
+    if (this.match("STAR")) {
+      return `*${this.parseGoTypeRaw()}`;
+    }
+    if (this.match("LBRACKET")) {
+      let lenPart = "";
+      if (this.check("NUMBER")) {
+        lenPart = this.advance().value;
+      }
+      this.consume("RBRACKET", "Expected ']' in Go array/slice type");
+      return `[${lenPart}]${this.parseGoTypeRaw()}`;
+    }
+    if (this.match("ARROW")) {
+      this.consume("IDENTIFIER", "Expected 'chan' after '<-'");
+      return `<-chan ${this.parseGoTypeRaw()}`;
+    }
+    if (this.check("STRUCT") && this.tokens[this.cur + 1]?.kind === "LBRACE") {
+      this.advance();
+      this.consume("LBRACE", "Expected '{' in struct{}");
+      let depth = 1;
+      while (depth > 0 && !this.isAtEnd()) {
+        const k = this.advance().kind;
+        if (k === "LBRACE") depth++;
+        else if (k === "RBRACE") depth--;
+      }
+      return "struct{}";
+    }
+    const id = this.consume("IDENTIFIER", "Expected Go type name").value;
+    if (id === "map") {
+      this.consume("LBRACKET", "Expected '[' after map");
+      const kType = this.parseGoTypeRaw();
+      this.consume("RBRACKET", "Expected ']' closing map key type");
+      const vType = this.parseGoTypeRaw();
+      return `map[${kType}]${vType}`;
+    }
+    if (id === "chan") {
+      if (this.match("ARROW")) {
+        return `chan<- ${this.parseGoTypeRaw()}`;
+      }
+      return `chan ${this.parseGoTypeRaw()}`;
+    }
+    if (id === "interface" && this.match("LBRACE")) {
+      let depth = 1;
+      while (depth > 0 && !this.isAtEnd()) {
+        const k = this.advance().kind;
+        if (k === "LBRACE") depth++;
+        else if (k === "RBRACE") depth--;
+      }
+      return "any";
+    }
+    let full = id;
+    while (this.match("DOT")) {
+      full += `.${this.consume("IDENTIFIER", "Expected qualified Go type name").value}`;
+    }
+    if (this.match("LBRACKET")) {
+      const targs: string[] = [];
+      while (!this.check("RBRACKET") && !this.isAtEnd()) {
+        targs.push(this.parseGoTypeRaw());
+        if (!this.match("COMMA")) break;
+      }
+      this.consume("RBRACKET", "Expected ']' closing Go generic type args");
+      full += `[${targs.join(", ")}]`;
+    }
+    return full;
   }
 
   private toAiceFieldName(str: string): string {

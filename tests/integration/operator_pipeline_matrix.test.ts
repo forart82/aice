@@ -4,7 +4,7 @@
  *
  * STEP 7: Comprehensive Operator Pipeline Integration Matrix Test Suite.
  *
- * Exercises the complete end-to-end AICE 2.0 transpilation lifecycle:
+ * Exercises the complete end-to-end AICE transpilation lifecycle:
  *   TypeScript Source
  *     -> TsDecompiler.decompile() -> AICE AST
  *     -> AiceGenerator.generate() -> AICE source code

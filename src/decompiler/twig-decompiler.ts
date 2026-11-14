@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Twig Template Dialect Decompiler (Reverse Transpiler) for AICE 2.0 (Step 25).
+ * Twig Template Dialect Decompiler (Reverse Transpiler) for AICE (Step 25).
  * Parses Twig templates (.twig), recognizing:
  * - Interpolation expressions: {{ user.name }}, {{ count + 1 }}
  * - Control tags: {% if condition %} ... {% else %} ... {% endif %}, {% for item in items %} ... {% endfor %}
@@ -692,7 +692,7 @@ export class TwigDecompiler {
         const tagContent = tok.content.trim();
         const tagFirstWord = tagContent.split(/\s+/)[0];
 
-        if (stopTags && stopTags.includes(tagFirstWord)) {
+        if (stopTags?.includes(tagFirstWord)) {
           break;
         }
 

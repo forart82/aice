@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C++20 Decompiler (Reverse Transpiler) for AICE 2.0.
+ * Modern C++20 Decompiler (Reverse Transpiler) for AICE.
  * Parses C++ headers and source files (.cpp, .hpp, .cc, .cxx, .h),
  * extracts comments into CstTriviaTable, and produces an AICE Module AST.
  */

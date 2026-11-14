@@ -36,10 +36,36 @@ describe("Phase 2.4: Native Systems Emitters (Rust & Go)", () => {
 
   describe("Canonical Standard Library (CSL) Rewriter for Rust & Go", () => {
     it("lowers property access (.len / .length) for Rust and Go", () => {
-      expect(lowerPropertyAccess("items", "len", "rust").code).toBe("items.len()");
-      expect(lowerPropertyAccess("items", "length", "rust").code).toBe("items.len()");
-      expect(lowerPropertyAccess("items", "len", "go").code).toBe("len(items)");
-      expect(lowerPropertyAccess("items", "length", "go").code).toBe("len(items)");
+      expect(lowerPropertyAccess("items", "len", "rust").code).toBe("(items.len() as i64)");
+      expect(lowerPropertyAccess("items", "length", "rust").code).toBe("(items.len() as i64)");
+      expect(lowerPropertyAccess("items", "len", "go").code).toBe("int64(len(items))");
+      expect(lowerPropertyAccess("items", "length", "go").code).toBe("int64(len(items))");
+    });
+
+    it("lowers 0-arg .len() / .length() across TS, Rust, Go, and Python and 1-arg len(x) in Rust", () => {
+      expect(lowerMethodCall("payload", "len", [], "typescript").code).toBe("payload.length");
+      expect(lowerMethodCall("payload", "length", [], "typescript").code).toBe("payload.length");
+      expect(lowerMethodCall("payload", "len", [], "rust").code).toBe("(payload.len() as i64)");
+      expect(lowerMethodCall("payload", "len", [], "go").code).toBe("int64(len(payload))");
+      expect(lowerMethodCall("payload", "len", [], "python").code).toBe("len(payload)");
+
+      const aiceSrc = `pub fn totalWeight(eventId: str, payloadSize: int) -> int:\n  ret eventId.len() + payloadSize\n`;
+      const tsOut = emitTarget(parse(aiceSrc, "w.ts.aice"), "typescript", { watermark: false });
+      const rsOut = emitTarget(parse(aiceSrc, "w.rs.aice"), "rust", { watermark: false });
+      const goOut = emitTarget(parse(aiceSrc, "w.go.aice"), "go", { watermark: false });
+      const pyOut = emitTarget(parse(aiceSrc, "w.py.aice"), "python", { watermark: false });
+
+      expect(tsOut).toContain("eventId.length + payloadSize");
+      expect(rsOut).toContain("(event_id.len() as i64) + payload_size");
+      expect(goOut).toContain("int64(len(eventId)) + payloadSize");
+      expect(pyOut).toContain("len(eventId) + payloadSize");
+
+      const rsFnLen = emitTarget(
+        parse(`pub fn measure(tag: str) -> int:\n  ret len(tag)\n`, "m.rs.aice"),
+        "rust",
+        { watermark: false },
+      );
+      expect(rsFnLen).toContain("((tag).len() as i64)");
     });
 
     it("lowers string and collection methods for Rust", () => {

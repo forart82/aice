@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18).
+ * AICE Semantic AST Skeleton Outline Engine (Step 18).
  * Provides semantic skeletonization achieving 85–90%+ token reduction for AI contexts.
  */
 
@@ -23,7 +23,7 @@ import type { Module, ParamDecl, TypeExpr } from "../core/ast.js";
 import { parseWithTrivia } from "../core/parser.js";
 import { CstTriviaTable } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
-import { detectTargetFromPath, type TargetLanguage } from "../emitters/index.js";
+import { detectTargetFromPathOrContent, type TargetLanguage } from "../emitters/index.js";
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
@@ -261,22 +261,8 @@ export function generateOutline(
         ast = parsed.ast;
         trivia = parsed.trivia;
       } else {
-        const targetLang = detectTargetFromPath(filePath);
-        try {
-          const decompResult = withSuppressedTelemetry(() =>
-            decompile(originalSource, targetLang, {
-              filePath,
-              projectRoot: resolvedProjectRoot,
-              skipCodeGen: true,
-              skeletonOnly: !hasActiveIdiomsForOutline(),
-            }),
-          );
-          ast = decompResult.ast;
-          trivia = decompResult.trivia;
-        } catch (err) {
-          if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
-            throw err;
-          }
+        const detected = detectTargetFromPathOrContent(filePath, originalSource);
+        if (detected === "passthrough") {
           ast = {
             kind: "Module",
             path: filePath,
@@ -284,23 +270,54 @@ export function generateOutline(
             span: {
               file: filePath,
               start: { line: 1, column: 1, offset: 0 },
-              end: { line: 1, column: 1, offset: 0 },
+              end: {
+                line: originalSource.split(/\r?\n/).length,
+                column: 1,
+                offset: originalSource.length,
+              },
             },
           };
           trivia = new CstTriviaTable();
+        } else {
+          const targetLang = detected;
+          try {
+            const decompResult = withSuppressedTelemetry(() =>
+              decompile(originalSource, targetLang, {
+                filePath,
+                projectRoot: resolvedProjectRoot,
+                skipCodeGen: true,
+                skeletonOnly: !hasActiveIdiomsForOutline(),
+              }),
+            );
+            ast = decompResult.ast;
+            trivia = decompResult.trivia;
+          } catch (err) {
+            if (err instanceof Error && err.message === AICE_DISABLED_MESSAGE) {
+              throw err;
+            }
+            ast = {
+              kind: "Module",
+              path: filePath,
+              items: [],
+              span: {
+                file: filePath,
+                start: { line: 1, column: 1, offset: 0 },
+                end: { line: 1, column: 1, offset: 0 },
+              },
+            };
+            trivia = new CstTriviaTable();
+          }
         }
       }
     } else {
       filePath = explicitFilePath || "<anonymous>";
       ensureIdiomsResolved(filePath, false);
       originalSource = sourceOrMod;
-      const hasKnownTargetExt =
-        explicitFilePath !== undefined &&
-        !explicitFilePath.endsWith(".aice") &&
-        KNOWN_TARGET_EXTENSIONS.has(path.extname(explicitFilePath).toLowerCase());
-
-      if (hasKnownTargetExt && explicitFilePath) {
-        const targetLang = detectTargetFromPath(explicitFilePath);
+      const detected = explicitFilePath
+        ? detectTargetFromPathOrContent(explicitFilePath, originalSource)
+        : "passthrough";
+      if (detected !== "passthrough" && explicitFilePath && !explicitFilePath.endsWith(".aice")) {
+        const targetLang = detected;
         try {
           const decompResult = withSuppressedTelemetry(() =>
             decompile(originalSource, targetLang, {
@@ -334,23 +351,34 @@ export function generateOutline(
           ast = parsed.ast;
           trivia = parsed.trivia;
         } catch (err) {
-          try {
-            const targetLang =
-              explicitFilePath && !explicitFilePath.endsWith(".aice")
-                ? detectTargetFromPath(explicitFilePath)
-                : "typescript";
-            const decompResult = withSuppressedTelemetry(() =>
-              decompile(originalSource, targetLang, {
-                filePath,
-                projectRoot: resolvedProjectRoot,
-                skipCodeGen: true,
-                skeletonOnly: !hasActiveIdiomsForOutline(),
-              }),
-            );
-            ast = decompResult.ast;
-            trivia = decompResult.trivia;
-          } catch {
-            throw err;
+          if (detected !== "passthrough") {
+            try {
+              const targetLang = detected;
+              const decompResult = withSuppressedTelemetry(() =>
+                decompile(originalSource, targetLang, {
+                  filePath,
+                  projectRoot: resolvedProjectRoot,
+                  skipCodeGen: true,
+                  skeletonOnly: !hasActiveIdiomsForOutline(),
+                }),
+              );
+              ast = decompResult.ast;
+              trivia = decompResult.trivia;
+            } catch {
+              throw err;
+            }
+          } else {
+            ast = {
+              kind: "Module",
+              path: filePath,
+              items: [],
+              span: {
+                file: filePath,
+                start: { line: 1, column: 1, offset: 0 },
+                end: { line: 1, column: 1, offset: 0 },
+              },
+            };
+            trivia = new CstTriviaTable();
           }
         }
       }
@@ -886,6 +914,24 @@ export function generateOutline(
     annotatedOutlineLines.unshift(idiomHeader);
   }
 
+  if (baseOutlineLines.length === 0 && originalSource) {
+    const isPassthroughOutline =
+      filePath !== "<anonymous>" && !filePath.endsWith(".aice")
+        ? detectTargetFromPathOrContent(filePath, originalSource) === "passthrough"
+        : false;
+    if (isPassthroughOutline) {
+      const rawLines = originalSource.split(/\r?\n/);
+      const previewCount = Math.min(rawLines.length, 25);
+      const previewLines = rawLines.slice(0, previewCount).map((l, idx) => `${idx + 1}│ ${l}`);
+      if (rawLines.length > previewCount) {
+        previewLines.push(`// ... (+${rawLines.length - previewCount} more lines)`);
+      }
+      const previewText = previewLines.join("\n");
+      baseOutlineLines.push(previewText);
+      annotatedOutlineLines.push(previewText);
+    }
+  }
+
   const baseOutlineText = baseOutlineLines.join("\n");
   const outlineText = (includeLineRanges ? annotatedOutlineLines : baseOutlineLines).join("\n");
 
@@ -967,12 +1013,14 @@ function enrichAndResolveSymbolLineRanges(
     }
   }
 
-  const ext = filePath !== "<anonymous>" ? path.extname(filePath).toLowerCase() : "";
-  const isNativeFile =
-    filePath !== "<anonymous>" && !filePath.endsWith(".aice") && KNOWN_TARGET_EXTENSIONS.has(ext);
-  const targetLang: TargetLanguage | undefined = isNativeFile
-    ? detectTargetFromPath(filePath)
-    : undefined;
+  const detectedTarget =
+    filePath !== "<anonymous>" && !filePath.endsWith(".aice")
+      ? detectTargetFromPathOrContent(filePath, originalSource)
+      : undefined;
+  const isPassthrough = detectedTarget === "passthrough";
+  const targetLang: TargetLanguage | undefined =
+    detectedTarget && detectedTarget !== "passthrough" ? detectedTarget : undefined;
+  const isNativeFile = Boolean(targetLang);
   const rawLines = originalSource !== "" ? originalSource.split(/\r?\n/) : [];
   const totalLines = Math.max(1, rawLines.length);
 
@@ -1001,6 +1049,43 @@ function enrichAndResolveSymbolLineRanges(
       tsIndex,
       cssRoot,
     );
+  } else if (isPassthrough && originalSource !== "") {
+    const lines = originalSource.split(/\r?\n/);
+    const existingSectionNames = new Set<string>();
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const tomlMatch = line.match(/^\s*\[([A-Za-z0-9_.-]+)\]\s*$/);
+      const mdMatch = line.match(/^\s*(#{1,6})\s+(.+)$/);
+      if (tomlMatch) {
+        const secName = tomlMatch[1];
+        if (!existingSectionNames.has(secName)) {
+          symbols.push({
+            name: secName,
+            kind: "section",
+            line: i + 1,
+            endLine: i + 1,
+            lineRange: `[L${i + 1}-L${i + 1}]`,
+            signature: `[${secName}]`,
+            children: [],
+          });
+          existingSectionNames.add(secName);
+        }
+      } else if (mdMatch) {
+        const title = mdMatch[2].trim();
+        if (!existingSectionNames.has(title)) {
+          symbols.push({
+            name: title,
+            kind: "section",
+            line: i + 1,
+            endLine: i + 1,
+            lineRange: `[L${i + 1}-L${i + 1}]`,
+            signature: `${mdMatch[1]} ${title}`,
+            children: [],
+          });
+          existingSectionNames.add(title);
+        }
+      }
+    }
   } else if (
     !isNativeFile &&
     originalSource !== "" &&
@@ -1059,6 +1144,7 @@ function enrichAndResolveSymbolLineRanges(
   }
 
   if (symbols.length === 0 && isNativeFile && originalSource.trim().length > 0) {
+    const ext = filePath !== "<anonymous>" ? path.extname(filePath).toLowerCase() : "";
     const baseName = path.basename(filePath, ext) || "module";
     symbols.push({
       name: baseName,
@@ -1857,8 +1943,8 @@ export function collectNativeSyntaxDiagnostics(
   if (filePath.endsWith(".aice")) {
     return undefined;
   }
-  const ext = path.extname(filePath).toLowerCase();
-  if (!KNOWN_TARGET_EXTENSIONS.has(ext)) {
+  const detected = detectTargetFromPathOrContent(filePath, source);
+  if (detected === "passthrough") {
     return undefined;
   }
   return formatNativeSyntaxDiagnosticsMarkdown(filePath, source);

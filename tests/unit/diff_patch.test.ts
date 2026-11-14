@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 Semantic AST Diff & Patch Engine (Step 22).
+ * Unit tests for AICE Semantic AST Diff & Patch Engine (Step 22).
  */
 
 import { spawnSync } from "node:child_process";
@@ -20,7 +20,7 @@ import {
   patchFile,
 } from "../../src/tools/diff-patch.js";
 
-describe("AICE 2.0 Semantic AST Diff & Patch Engine (Step 22)", () => {
+describe("AICE Semantic AST Diff & Patch Engine (Step 22)", () => {
   describe("computeSemanticDiff: AST Structural Difference Detection", () => {
     it("detects added, removed, and modified functions and class methods", () => {
       const oldSource = `

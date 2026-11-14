@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Machine-Readable Diagnostic Engine & Autonomous Self-Repair Telemetry for AICE 2.0.
+ * Machine-Readable Diagnostic Engine & Autonomous Self-Repair Telemetry for AICE.
  *
  * Implements the single-root diagnostic payload, visual caret slices, and unified diff
  * candidate repair generator designed to maximize LLM 1-shot self-healing (SWE-bench / Reflexion).

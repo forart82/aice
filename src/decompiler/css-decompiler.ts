@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CSS Decompiler (Reverse Transpiler) for AICE 2.0.
+ * CSS Decompiler (Reverse Transpiler) for AICE.
  * Parses CSS styles using PostCSS, extracts comments into CstTriviaTable,
  * and generates an AICE Module AST containing StyleDecl rules.
  */

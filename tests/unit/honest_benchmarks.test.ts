@@ -18,7 +18,7 @@ import {
   SUPPORTED_BENCHMARK_LANGUAGES,
 } from "../../benchmarks/index.js";
 
-describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI Agents)", () => {
+describe("AICE Real-World Benchmark Suites (Offline Deterministic + Real AI Agents)", () => {
   it("evaluates the Deterministic Offline Benchmark Suite across all 10 scenarios, 15 file types, and CRUD+Refactor operations (docs/BENCHMARKS_OFFLINE.md)", () => {
     expect(SUPPORTED_BENCHMARK_LANGUAGES).toHaveLength(15);
     expect(OFFLINE_BENCHMARKS).toHaveLength(10);

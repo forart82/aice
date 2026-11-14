@@ -211,7 +211,7 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     );
     expect(persistedAfterEnable).toEqual({
       enabled: true,
-      idiomsEnabled: true,
+      idiomsEnabled: false,
     });
 
     const outlineWhileEnabled = runCli(["outline", tsFile], tmpDir);

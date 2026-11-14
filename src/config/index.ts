@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Configuration Module Hub.
+ * AICE Configuration Module Hub.
  */
 
 export * from "./path-resolver.js";

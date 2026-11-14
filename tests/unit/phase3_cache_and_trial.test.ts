@@ -277,9 +277,10 @@ describe("Phase 3: Content-Addressed AST Cache & On-the-Fly Idioms Trial", () =>
       const idiomNames = Object.keys(config.idioms ?? {});
       expect(idiomNames.length).toBeGreaterThan(0);
 
-      // Step B: On-the-fly context generation collapses idioms automatically
+      // Step B: On-the-fly context generation collapses idioms automatically when opted in
       const ctx = await generateContext(path.join(targetSrc, "billing.ts"), {
         symbol: "validateBilling",
+        idioms: true,
         projectRoot: targetProjectDir,
       });
       expect(ctx.formattedBundle).toContain("$");
@@ -289,10 +290,10 @@ describe("Phase 3: Content-Addressed AST Cache & On-the-Fly Idioms Trial", () =>
       const spliceRes = await splice(path.join(targetSrc, "billing.ts"), {
         symbol: "validateBilling",
         code: `pub fn validateBilling(amount: float) -> float?:\n  ${firstIdiom}(amount)\n  ret amount * 5\n`,
+        idioms: true,
         projectRoot: targetProjectDir,
       });
       expect(spliceRes.modifiedCode).toContain("amount * 5");
-
       // Step D: Audit Tokenomics directly on native files + idioms
       const audit = auditTokenomics(targetProjectDir);
       expect(audit.files.length).toBeGreaterThan(0);

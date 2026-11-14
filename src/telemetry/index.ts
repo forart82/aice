@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Honest BPE Token-Savings Telemetry Engine (`aice gain`).
+ * AICE Honest BPE Token-Savings Telemetry Engine (`aice gain`).
  * Records append-only JSONL telemetry events across CLI and MCP surfaces,
  * preserving signed (positive, zero, and negative) token deltas without manipulation.
  */
@@ -17,6 +17,7 @@ import {
   isProjectIdiomsEnabled,
   loadProjectConfig,
 } from "../config/index.js";
+import { MANDATORY_AGENT_RULES_MARKDOWN } from "../rules/mandatory-rules.js";
 import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
 
 export type TelemetryOperation =
@@ -178,6 +179,10 @@ export interface ProjectDetailReport {
     readSavedO200k: number;
     writeSavedO200k: number;
     idiomSavedO200k: number;
+    ruleBudgetCl100k: number;
+    netAfterRuleBudgetCl100k: number;
+    ruleBreakEvenMultiple: number;
+    ruleBreakEvenReached: boolean;
   };
   byOperation: OperationBucket[];
   topFiles: FileGainBucket[];
@@ -191,6 +196,7 @@ export interface GainReport {
   readOperations: number;
   writeOperations: number;
   overheadOperations: number;
+  overheadCalls: number;
   nativeChars: number;
   aiceChars: number;
   savedChars: number;
@@ -203,6 +209,10 @@ export interface GainReport {
   aiceO200k: number;
   savedO200k: number;
   o200kSavingsPct: number;
+  ruleBudgetCl100k: number;
+  netAfterRuleBudgetCl100k: number;
+  ruleBreakEvenMultiple: number;
+  ruleBreakEvenReached: boolean;
   byOperation: OperationBucket[];
   byLanguage: LanguageBucket[];
   projects: ProjectGainSummary[];
@@ -211,6 +221,36 @@ export interface GainReport {
   totalRealisticSavedCl100k?: number;
   realisticSavedCl100kPct?: number;
   totalPreservedTriviaTokens?: number;
+}
+
+export interface CompactTelemetryResult {
+  beforeBytes: number;
+  afterBytes: number;
+  keptEvents: number;
+  droppedEphemeral: number;
+}
+
+interface CompactTelemetryRecord {
+  t: number | string;
+  r: string;
+  p?: string;
+  f: string;
+  l?: string;
+  o: TelemetryOperation;
+  s?: TelemetrySurface;
+  a?: string;
+  i?: 1;
+  nc: number;
+  ac: number;
+  n1: number;
+  a1: number;
+  n2: number;
+  a2: number;
+  h?: string;
+  rn?: number;
+  rs?: number;
+  pt?: number;
+  sc?: number;
 }
 
 let telemetrySuppressionDepth = 0;
@@ -275,24 +315,67 @@ export function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolea
 }
 
 /**
- * Detects whether the current workspace / cwd is an ephemeral sandbox
- * (/tmp, /var/tmp, or swarm-* worktrees) where global telemetry recording should be suppressed,
- * unless an explicit telemetry path or AICE_HOME is set.
+ * Pure path predicate checking whether a path lies inside an ephemeral sandbox
+ * (`/tmp`, `/var/tmp`, `os.tmpdir()`, `/tmp/aice-rw-*`, `/tmp/sbx-*`, or `swarm-*` worktrees).
  */
-export function isEphemeralWorkspace(cwd = process.cwd(), explicitPath?: string): boolean {
+export function isEphemeralPath(candidatePath: string, resolveRelative = true): boolean {
+  if (!candidatePath?.trim()) {
+    return false;
+  }
+  const rawNorm = candidatePath.trim().replace(/\\/g, "/");
+  const isAbs = path.isAbsolute(candidatePath) || rawNorm.startsWith("/");
+  if (!isAbs && !resolveRelative) {
+    return (
+      rawNorm === "tmp" ||
+      rawNorm.startsWith("tmp/") ||
+      rawNorm.startsWith("swarm-") ||
+      rawNorm.includes("/swarm-")
+    );
+  }
+  const resolved = (
+    rawNorm.startsWith("/") ? path.posix.normalize(rawNorm) : path.resolve(candidatePath)
+  ).replace(/\\/g, "/");
+  const clean = resolved.length > 1 && resolved.endsWith("/") ? resolved.slice(0, -1) : resolved;
+  const sysTmpRaw = os.tmpdir().replace(/\\/g, "/");
+  const sysTmp =
+    sysTmpRaw.length > 1 && sysTmpRaw.endsWith("/") ? sysTmpRaw.slice(0, -1) : sysTmpRaw;
+
+  if (
+    clean === "/tmp" ||
+    clean.startsWith("/tmp/") ||
+    clean === "/private/tmp" ||
+    clean.startsWith("/private/tmp/") ||
+    clean === "/var/tmp" ||
+    clean.startsWith("/var/tmp/") ||
+    clean === "/private/var/tmp" ||
+    clean.startsWith("/private/var/tmp/") ||
+    (sysTmp && sysTmp !== "/" && (clean === sysTmp || clean.startsWith(`${sysTmp}/`))) ||
+    path.posix.basename(clean).startsWith("swarm-") ||
+    clean.includes("/swarm-")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Detects whether the workspace (`cwd`, `projectRoot`, or `targetPath`) is an ephemeral sandbox
+ * (`/tmp`, `/var/tmp`, `os.tmpdir()`, or `swarm-*` worktrees) where global telemetry recording
+ * should be suppressed unless an explicit telemetry path or `AICE_HOME` is set.
+ */
+export function isEphemeralWorkspace(
+  cwd: string | Array<string | undefined> = process.cwd(),
+  explicitPath?: string,
+  ...extraPaths: Array<string | undefined>
+): boolean {
   if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_HOME) {
     return false;
   }
-  const resolved = path.resolve(cwd);
-  if (
-    resolved === "/tmp" ||
-    resolved.startsWith("/tmp/") ||
-    resolved === "/var/tmp" ||
-    resolved.startsWith("/var/tmp/") ||
-    path.basename(resolved).startsWith("swarm-") ||
-    resolved.includes("/swarm-")
-  ) {
-    return true;
+  const candidates = Array.isArray(cwd) ? [...cwd, ...extraPaths] : [cwd, ...extraPaths];
+  for (const candidate of candidates) {
+    if (candidate && isEphemeralPath(candidate, true)) {
+      return true;
+    }
   }
   return false;
 }
@@ -347,11 +430,245 @@ function getCategoryForOperation(op: TelemetryOperation): TelemetryCategory {
     case "idioms_apply":
     case "idioms_update":
       return "write";
+    default:
+      return "read";
   }
+}
+
+function computeContentHash(
+  projectRoot: string,
+  filePath: string,
+  operation: TelemetryOperation,
+  nativeChars: number,
+  aiceChars: number,
+): string {
+  return crypto
+    .createHash("sha256")
+    .update(`${projectRoot}|${filePath}|${operation}|${nativeChars}|${aiceChars}`)
+    .digest("hex");
+}
+
+function inferDefaultLanguage(filePath: string): string {
+  if (filePath === "<cli-error>") {
+    return "CLI";
+  }
+  if (
+    filePath.endsWith("<directory>") ||
+    filePath === "<multi-context>" ||
+    filePath === "<multi-read>"
+  ) {
+    return "Multi-File";
+  }
+  return detectLanguageName(filePath.replace(/\.aice$/, ""));
+}
+
+let cachedRulesRef: string | null = null;
+let cachedRuleBudgetCl100k = 0;
+
+/**
+ * Returns the active BPE (`cl100k_base`) token budget of `MANDATORY_AGENT_RULES_MARKDOWN`
+ * injected into a single `AGENTS.md` rule block.
+ */
+export function getRuleOverheadBudgetCl100k(): number {
+  if (cachedRulesRef !== MANDATORY_AGENT_RULES_MARKDOWN) {
+    cachedRulesRef = MANDATORY_AGENT_RULES_MARKDOWN;
+    cachedRuleBudgetCl100k = estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base");
+  }
+  return cachedRuleBudgetCl100k;
+}
+
+/**
+ * Serializes a `TelemetryEvent` into a compact numeric JSONL line (< 250 B/event)
+ * with zero raw source strings.
+ */
+export function serializeCompactTelemetryEvent(event: TelemetryEvent): string {
+  const parsedMs = Date.parse(event.timestamp);
+  const t: number | string =
+    Number.isFinite(parsedMs) && new Date(parsedMs).toISOString() === event.timestamp
+      ? parsedMs
+      : event.timestamp;
+  const compactFilePath =
+    event.filePath.length > 120 ? event.filePath.slice(0, 120) : event.filePath;
+  const defaultProjectName = path.basename(event.projectRoot) || "root";
+  const defaultLang = inferDefaultLanguage(compactFilePath);
+  const defaultAgent = event.surface === "mcp" ? "mcp-agent" : "user-cli";
+  const expectedHash = computeContentHash(
+    event.projectRoot,
+    compactFilePath,
+    event.operation,
+    event.nativeChars,
+    event.aiceChars,
+  );
+
+  const rec: CompactTelemetryRecord = {
+    t,
+    r: event.projectRoot,
+    ...(event.projectName !== defaultProjectName ? { p: event.projectName } : {}),
+    f: compactFilePath,
+    ...(event.language !== defaultLang ? { l: event.language } : {}),
+    o: event.operation,
+    ...(event.surface !== "cli" ? { s: event.surface } : {}),
+    ...(event.agent && event.agent !== defaultAgent ? { a: event.agent } : {}),
+    ...(event.idiomsUsed ? { i: 1 } : {}),
+    nc: event.nativeChars,
+    ac: event.aiceChars,
+    n1: event.nativeCl100k,
+    a1: event.aiceCl100k,
+    n2: event.nativeO200k,
+    a2: event.aiceO200k,
+    ...(event.contentHash && event.contentHash !== expectedHash ? { h: event.contentHash } : {}),
+    ...(event.realisticNativeCl100k !== undefined ? { rn: event.realisticNativeCl100k } : {}),
+    ...(event.realisticSavedCl100k !== undefined &&
+    event.realisticNativeCl100k !== undefined &&
+    event.realisticSavedCl100k !== event.realisticNativeCl100k - event.aiceCl100k
+      ? { rs: event.realisticSavedCl100k }
+      : {}),
+    ...(event.preservedTriviaTokens && event.preservedTriviaTokens !== 0
+      ? { pt: event.preservedTriviaTokens }
+      : {}),
+    ...(event.structuralCompressionPct !== undefined ? { sc: event.structuralCompressionPct } : {}),
+  };
+
+  return JSON.stringify(rec);
+}
+
+/**
+ * Hydrates a full `TelemetryEvent` from either a compact numeric JSONL object
+ * or a legacy verbose JSONL object, stripping any legacy raw source strings.
+ */
+export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const obj = raw as Record<string, unknown>;
+  const operationRaw =
+    typeof obj.o === "string" ? obj.o : typeof obj.operation === "string" ? obj.operation : "";
+  const projectRoot =
+    typeof obj.r === "string" ? obj.r : typeof obj.projectRoot === "string" ? obj.projectRoot : "";
+  if (!operationRaw || !projectRoot) {
+    return null;
+  }
+
+  const operation = operationRaw as TelemetryOperation;
+  const timestamp =
+    typeof obj.t === "number"
+      ? new Date(obj.t).toISOString()
+      : typeof obj.t === "string"
+        ? obj.t
+        : typeof obj.timestamp === "string"
+          ? obj.timestamp
+          : new Date(0).toISOString();
+  const projectName =
+    typeof obj.p === "string"
+      ? obj.p
+      : typeof obj.projectName === "string"
+        ? obj.projectName
+        : path.basename(projectRoot) || "root";
+  const filePath =
+    typeof obj.f === "string"
+      ? obj.f
+      : typeof obj.filePath === "string"
+        ? obj.filePath
+        : "<unknown>";
+  const language =
+    typeof obj.l === "string"
+      ? obj.l
+      : typeof obj.language === "string"
+        ? obj.language
+        : inferDefaultLanguage(filePath);
+  const surface: TelemetrySurface = obj.s === "mcp" || obj.surface === "mcp" ? "mcp" : "cli";
+  const agent =
+    typeof obj.a === "string"
+      ? obj.a
+      : typeof obj.agent === "string"
+        ? obj.agent
+        : surface === "mcp"
+          ? "mcp-agent"
+          : "user-cli";
+  const category: TelemetryCategory =
+    obj.category === "read" || obj.category === "write"
+      ? obj.category
+      : getCategoryForOperation(operation);
+  const idiomsUsed = Boolean(obj.i ?? obj.idiomsUsed);
+
+  const nativeChars = Number(obj.nc ?? obj.nativeChars ?? 0);
+  const aiceChars = Number(obj.ac ?? obj.aiceChars ?? 0);
+  const savedChars = nativeChars - aiceChars;
+
+  const nativeCl100k = Number(obj.n1 ?? obj.nativeCl100k ?? 0);
+  const aiceCl100k = Number(obj.a1 ?? obj.aiceCl100k ?? 0);
+  const savedCl100k = nativeCl100k - aiceCl100k;
+
+  const nativeO200k = Number(obj.n2 ?? obj.nativeO200k ?? 0);
+  const aiceO200k = Number(obj.a2 ?? obj.aiceO200k ?? 0);
+  const savedO200k = nativeO200k - aiceO200k;
+
+  const contentHash =
+    typeof obj.h === "string"
+      ? obj.h
+      : typeof obj.contentHash === "string"
+        ? obj.contentHash
+        : computeContentHash(projectRoot, filePath, operation, nativeChars, aiceChars);
+
+  const realisticNativeCl100k =
+    typeof obj.rn === "number"
+      ? obj.rn
+      : typeof obj.realisticNativeCl100k === "number"
+        ? obj.realisticNativeCl100k
+        : typeof obj.realisticNativeText === "string"
+          ? estimateTokens(obj.realisticNativeText, "cl100k_base")
+          : undefined;
+  const realisticSavedCl100k =
+    typeof obj.rs === "number"
+      ? obj.rs
+      : realisticNativeCl100k !== undefined
+        ? realisticNativeCl100k - aiceCl100k
+        : undefined;
+
+  const preservedTriviaTokens =
+    typeof obj.pt === "number"
+      ? obj.pt
+      : typeof obj.preservedTriviaTokens === "number"
+        ? obj.preservedTriviaTokens
+        : 0;
+  const structuralCompressionPct =
+    typeof obj.sc === "number"
+      ? obj.sc
+      : typeof obj.structuralCompressionPct === "number"
+        ? obj.structuralCompressionPct
+        : undefined;
+
+  return {
+    timestamp,
+    projectRoot,
+    projectName,
+    filePath,
+    language,
+    operation,
+    surface,
+    agent,
+    category,
+    idiomsUsed,
+    nativeChars,
+    aiceChars,
+    savedChars,
+    nativeCl100k,
+    aiceCl100k,
+    savedCl100k,
+    nativeO200k,
+    aiceO200k,
+    savedO200k,
+    contentHash,
+    ...(realisticNativeCl100k !== undefined ? { realisticNativeCl100k } : {}),
+    ...(realisticSavedCl100k !== undefined ? { realisticSavedCl100k } : {}),
+    preservedTriviaTokens,
+    ...(structuralCompressionPct !== undefined ? { structuralCompressionPct } : {}),
+  };
 }
 
 /**
  * Computes a complete `TelemetryEvent` using 100% honest signed BPE token delta math.
+ * Never attaches raw source text payloads (`realisticNativeText`) to returned or persisted records.
  */
 export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEvent {
   const resolvedTarget = path.resolve(input.targetPath);
@@ -382,9 +699,11 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
 
   const language =
     input.language ??
-    (isDir || filePath.endsWith("<directory>")
-      ? "Multi-File"
-      : detectLanguageName(resolvedTarget.replace(/\.aice$/, "")));
+    (filePath === "<cli-error>"
+      ? "CLI"
+      : isDir || filePath.endsWith("<directory>")
+        ? "Multi-File"
+        : detectLanguageName(resolvedTarget.replace(/\.aice$/, "")));
 
   const surface: TelemetrySurface = input.surface ?? "cli";
   const agent = input.agent ?? detectCallerAgent(surface);
@@ -403,10 +722,13 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
   const aiceO200k = input.aiceO200k ?? estimateTokens(input.aiceText, "o200k_base");
   const savedO200k = nativeO200k - aiceO200k;
 
-  const contentHash = crypto
-    .createHash("sha256")
-    .update(`${projectRoot}|${filePath}|${input.operation}|${nativeChars}|${aiceChars}`)
-    .digest("hex");
+  const contentHash = computeContentHash(
+    projectRoot,
+    filePath,
+    input.operation,
+    nativeChars,
+    aiceChars,
+  );
 
   const realisticNativeCl100k =
     input.realisticNativeCl100k ??
@@ -438,13 +760,15 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
     aiceO200k,
     savedO200k,
     contentHash,
-    realisticNativeText: input.realisticNativeText,
-    realisticNativeCl100k,
-    realisticSavedCl100k,
+    ...(realisticNativeCl100k !== undefined ? { realisticNativeCl100k } : {}),
+    ...(realisticSavedCl100k !== undefined ? { realisticSavedCl100k } : {}),
     preservedTriviaTokens: input.preservedTriviaTokens ?? 0,
-    structuralCompressionPct: input.structuralCompressionPct,
+    ...(input.structuralCompressionPct !== undefined
+      ? { structuralCompressionPct: input.structuralCompressionPct }
+      : {}),
   };
 }
+
 export function recordTelemetryEvent(
   input: RecordTelemetryInput,
   forceEvenIfSuppressed = false,
@@ -455,14 +779,20 @@ export function recordTelemetryEvent(
   if (isTestEnvWithoutExplicitTelemetry(input.telemetryPath)) {
     return null;
   }
-  if (!forceEvenIfSuppressed && isEphemeralWorkspace(process.cwd(), input.telemetryPath)) {
+  if (
+    !forceEvenIfSuppressed &&
+    isEphemeralWorkspace(process.cwd(), input.telemetryPath, input.projectRoot, input.targetPath)
+  ) {
     return null;
   }
   try {
     const event = computeTelemetryEvent(input);
+    if (!forceEvenIfSuppressed && isEphemeralWorkspace(event.projectRoot, input.telemetryPath)) {
+      return null;
+    }
     const ledgerPath = resolveTelemetryPath(input.telemetryPath);
     fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
-    fs.appendFileSync(ledgerPath, `${JSON.stringify(event)}\n`, "utf-8");
+    fs.appendFileSync(ledgerPath, `${serializeCompactTelemetryEvent(event)}\n`, "utf-8");
     return event;
   } catch {
     return null;
@@ -470,7 +800,8 @@ export function recordTelemetryEvent(
 }
 
 /**
- * Loads all valid `TelemetryEvent` records from the JSONL ledger.
+ * Loads all valid `TelemetryEvent` records from the JSONL ledger (hydrating both
+ * compact numeric records and legacy verbose records).
  */
 const MAX_TELEMETRY_LEDGER_READ_BYTES = 20 * 1024 * 1024;
 
@@ -507,13 +838,9 @@ export function loadTelemetryEvents(explicitPath?: string): TelemetryEvent[] {
       const trimmed = line.trim();
       if (!trimmed) continue;
       try {
-        const parsed = JSON.parse(trimmed) as TelemetryEvent;
-        if (
-          parsed &&
-          typeof parsed.operation === "string" &&
-          typeof parsed.projectRoot === "string"
-        ) {
-          events.push(parsed);
+        const hydrated = hydrateTelemetryEvent(JSON.parse(trimmed));
+        if (hydrated) {
+          events.push(hydrated);
         }
       } catch {
         // skip malformed JSONL line
@@ -526,6 +853,166 @@ export function loadTelemetryEvents(explicitPath?: string): TelemetryEvent[] {
 }
 
 export const readTelemetryEvents = loadTelemetryEvents;
+
+/**
+ * Streams an existing `gains.jsonl` ledger in fixed 4 MB chunks (safe on 1.27+ GB files
+ * without V8 string-length overflow), drops ephemeral `/tmp` / `/var/tmp` / `swarm-*`
+ * workspace records, strips raw `realisticNativeText` source payloads, and atomically
+ * rewrites the compact numeric ledger (< 250 B/event).
+ */
+export function compactTelemetryLedger(explicitPath?: string): CompactTelemetryResult {
+  const ledgerPath = resolveTelemetryPath(explicitPath);
+  if (!fs.existsSync(ledgerPath)) {
+    return { beforeBytes: 0, afterBytes: 0, keptEvents: 0, droppedEphemeral: 0 };
+  }
+  const beforeBytes = fs.statSync(ledgerPath).size;
+  if (beforeBytes === 0) {
+    return { beforeBytes: 0, afterBytes: 0, keptEvents: 0, droppedEphemeral: 0 };
+  }
+
+  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+  const tmpPath = `${ledgerPath}.compact-${process.pid}-${Date.now()}.tmp`;
+  const CHUNK_SIZE = 4 * 1024 * 1024;
+  const FLUSH_THRESHOLD = 512 * 1024;
+
+  let readFd: number | null = null;
+  let writeFd: number | null = null;
+  let keptEvents = 0;
+  let droppedEphemeral = 0;
+
+  try {
+    readFd = fs.openSync(ledgerPath, "r");
+    writeFd = fs.openSync(tmpPath, "w");
+    const outFd = writeFd;
+
+    const readBuf = Buffer.allocUnsafe(CHUNK_SIZE);
+    let carry: Buffer = Buffer.alloc(0);
+    let outChunks: string[] = [];
+    let outBufferedChars = 0;
+
+    const flushOut = (): void => {
+      if (outChunks.length === 0) return;
+      fs.writeSync(outFd, outChunks.join(""), undefined, "utf-8");
+      outChunks = [];
+      outBufferedChars = 0;
+    };
+
+    const processLineBuffer = (lineBuf: Buffer): void => {
+      if (lineBuf.length === 0) return;
+      let lineStr = "";
+      try {
+        lineStr = lineBuf.toString("utf-8").trim();
+      } catch {
+        return;
+      }
+      if (!lineStr) return;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(lineStr);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== "object") return;
+      const obj = parsed as Record<string, unknown>;
+      const rawRoot =
+        typeof obj.r === "string"
+          ? obj.r
+          : typeof obj.projectRoot === "string"
+            ? obj.projectRoot
+            : "";
+      const rawFile =
+        typeof obj.f === "string" ? obj.f : typeof obj.filePath === "string" ? obj.filePath : "";
+      if (!rawRoot) return;
+      const resolvedFile =
+        rawFile && (path.isAbsolute(rawRoot) || rawRoot.startsWith("/"))
+          ? path.resolve(rawRoot, rawFile)
+          : "";
+      if (
+        isEphemeralPath(rawRoot, false) ||
+        isEphemeralPath(rawFile, false) ||
+        (resolvedFile !== "" && isEphemeralPath(resolvedFile, false))
+      ) {
+        droppedEphemeral++;
+        return;
+      }
+      const hydrated = hydrateTelemetryEvent(obj);
+      if (!hydrated) return;
+      if (isEphemeralPath(hydrated.projectRoot, false)) {
+        droppedEphemeral++;
+        return;
+      }
+
+      hydrated.contentHash = computeContentHash(
+        hydrated.projectRoot,
+        hydrated.filePath,
+        hydrated.operation,
+        hydrated.nativeChars,
+        hydrated.aiceChars,
+      );
+      const compactLine = `${serializeCompactTelemetryEvent(hydrated)}\n`;
+      outChunks.push(compactLine);
+      outBufferedChars += compactLine.length;
+      keptEvents++;
+      if (outBufferedChars >= FLUSH_THRESHOLD) {
+        flushOut();
+      }
+    };
+
+    let position = 0;
+    while (true) {
+      const bytesRead = fs.readSync(readFd, readBuf, 0, CHUNK_SIZE, position);
+      if (bytesRead <= 0) break;
+      position += bytesRead;
+
+      const chunk = readBuf.subarray(0, bytesRead);
+      let sliceStart = 0;
+      while (sliceStart < chunk.length) {
+        const nlIdx = chunk.indexOf(0x0a, sliceStart);
+        if (nlIdx === -1) {
+          const tail = chunk.subarray(sliceStart);
+          carry = carry.length === 0 ? Buffer.from(tail) : Buffer.concat([carry, tail]);
+          break;
+        }
+        const segment = chunk.subarray(sliceStart, nlIdx);
+        const fullLine = carry.length === 0 ? segment : Buffer.concat([carry, segment]);
+        carry = Buffer.alloc(0);
+        processLineBuffer(fullLine);
+        sliceStart = nlIdx + 1;
+      }
+    }
+    if (carry.length > 0) {
+      processLineBuffer(carry);
+    }
+    flushOut();
+
+    fs.closeSync(readFd);
+    readFd = null;
+    fs.closeSync(writeFd);
+    writeFd = null;
+
+    fs.renameSync(tmpPath, ledgerPath);
+    const afterBytes = fs.statSync(ledgerPath).size;
+    return { beforeBytes, afterBytes, keptEvents, droppedEphemeral };
+  } catch (err) {
+    if (readFd !== null) {
+      try {
+        fs.closeSync(readFd);
+      } catch {
+        // ignore
+      }
+    }
+    if (writeFd !== null) {
+      try {
+        fs.closeSync(writeFd);
+      } catch {
+        // ignore
+      }
+    }
+    fs.rmSync(tmpPath, { force: true });
+    throw err;
+  }
+}
 
 /**
  * Resets/clears the telemetry history ledger file.
@@ -546,7 +1033,9 @@ export function resetTelemetryHistory(explicitPath?: string): {
 }
 
 function calcPct(saved: number, nativeTotal: number): number {
-  if (nativeTotal <= 0) return 0;
+  if (nativeTotal <= 0) {
+    return saved < 0 ? -100 : 0;
+  }
   return Number(((saved / nativeTotal) * 100).toFixed(1));
 }
 
@@ -586,7 +1075,7 @@ function buildProjectDetail(
 ): ProjectDetailReport {
   const projectName = path.basename(projectRoot) || "root";
   let enabled = true;
-  let idiomsEnabled = true;
+  let idiomsEnabled = false;
   let activeIdiomsCount = 0;
 
   try {
@@ -746,10 +1235,30 @@ function buildProjectDetail(
       readSavedO200k,
       writeSavedO200k,
       idiomSavedO200k,
+      ...computeRuleBreakEvenMetrics(savedCl100k),
     },
     byOperation,
     topFiles,
     recentOperations,
+  };
+}
+
+function computeRuleBreakEvenMetrics(savedCl100k: number): {
+  ruleBudgetCl100k: number;
+  netAfterRuleBudgetCl100k: number;
+  ruleBreakEvenMultiple: number;
+  ruleBreakEvenReached: boolean;
+} {
+  const ruleBudgetCl100k = getRuleOverheadBudgetCl100k();
+  const netAfterRuleBudgetCl100k = savedCl100k - ruleBudgetCl100k;
+  const ruleBreakEvenMultiple =
+    ruleBudgetCl100k > 0 ? Number((savedCl100k / ruleBudgetCl100k).toFixed(2)) : 0;
+  const ruleBreakEvenReached = savedCl100k >= ruleBudgetCl100k;
+  return {
+    ruleBudgetCl100k,
+    netAfterRuleBudgetCl100k,
+    ruleBreakEvenMultiple,
+    ruleBreakEvenReached,
   };
 }
 
@@ -947,6 +1456,7 @@ export function buildGainReport(
     readOperations,
     writeOperations,
     overheadOperations,
+    overheadCalls: overheadOperations,
     nativeChars,
     aiceChars,
     savedChars,
@@ -959,6 +1469,7 @@ export function buildGainReport(
     aiceO200k,
     savedO200k,
     o200kSavingsPct: calcPct(savedO200k, nativeO200k),
+    ...computeRuleBreakEvenMetrics(savedCl100k),
     totalRealisticNativeCl100k,
     totalRealisticSavedCl100k,
     realisticSavedCl100kPct: calcPct(totalRealisticSavedCl100k, totalRealisticNativeCl100k),
@@ -978,6 +1489,17 @@ function fmtPct(pct: number): string {
   return pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
 }
 
+function formatRuleOverheadBreakEvenLine(savedCl100k: number, indent = "  "): string {
+  const budget = getRuleOverheadBudgetCl100k();
+  const multiple = budget > 0 ? (savedCl100k / budget).toFixed(2) : "0.00";
+  if (savedCl100k >= budget && budget > 0) {
+    const netAfter = savedCl100k - budget;
+    return `${indent}Rule Overhead Break-Even: 1x AGENTS.md Budget ${budget.toLocaleString()} cl100k | Net Saved: ${fmtSigned(savedCl100k)} | AMORTIZED (${multiple}x budget, net ${fmtSigned(netAfter)} tokens)`;
+  }
+  const remaining = budget > savedCl100k ? budget - savedCl100k : 0;
+  return `${indent}Rule Overhead Break-Even: 1x AGENTS.md Budget ${budget.toLocaleString()} cl100k | Net Saved: ${fmtSigned(savedCl100k)} | ${remaining.toLocaleString()} tokens needed to break even (${multiple}x)`;
+}
+
 export function formatGlobalGainDashboard(report: GainReport): string {
   const lines: string[] = [];
   const modeLabel = report.unique ? "Deduplicated (--unique)" : "Cumulative (--all)";
@@ -989,8 +1511,9 @@ export function formatGlobalGainDashboard(report: GainReport): string {
   if (report.totalOperations === 0) {
     lines.push("No telemetry operations recorded yet.");
     lines.push(`Ledger path: ${report.telemetryPath}`);
+    lines.push(formatRuleOverheadBreakEvenLine(0, ""));
     lines.push(
-      "Run `aice outline`, `aice context`, `aice splice`, or MCP tools to begin tracking.",
+      "Run `aice read` or `aice splice` (or MCP `aice_read` / `aice_splice`) to begin tracking.",
     );
     return lines.join("\n");
   }
@@ -1018,6 +1541,7 @@ export function formatGlobalGainDashboard(report: GainReport): string {
   lines.push(
     `  Character Delta:        Native ${report.nativeChars.toLocaleString()} -> AICE ${report.aiceChars.toLocaleString()} | Net Saved: ${fmtSigned(report.savedChars)} (${fmtPct(report.charSavingsPct)})`,
   );
+  lines.push(formatRuleOverheadBreakEvenLine(report.savedCl100k));
 
   lines.push("");
   lines.push("2. BREAKDOWN BY OPERATION & SURFACE (CLI vs MCP)");
@@ -1088,6 +1612,7 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
   lines.push(
     `  Category Savings: Read=${fmtSigned(s.readSavedCl100k)} cl100k (${fmtSigned(s.readSavedO200k)} o200k) | Write=${fmtSigned(s.writeSavedCl100k)} cl100k (${fmtSigned(s.writeSavedO200k)} o200k) | Idioms=${fmtSigned(s.idiomSavedCl100k)} cl100k`,
   );
+  lines.push(formatRuleOverheadBreakEvenLine(s.savedCl100k));
 
   lines.push("");
   lines.push("PER-OPERATION BREAKDOWN");
@@ -1130,3 +1655,4 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
 }
 export * from "./analyze.js";
 export const formatGainReport = formatGlobalGainDashboard;
+export const formatProjectDetailReport = formatProjectGainDetail;

@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 AI Context Packager Engine (Step 20).
+ * Unit tests for AICE AI Context Packager Engine (Step 20).
  */
 
 import * as fs from "node:fs";
@@ -26,7 +26,7 @@ import {
 } from "../../src/tools/context.js";
 import { outlinePath } from "../../src/tools/outline.js";
 
-describe("AICE 2.0 AI Context Packager Engine (Step 20)", () => {
+describe("AICE AI Context Packager Engine (Step 20)", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -442,18 +442,42 @@ pub fn calculateMetrics(x: int, y: int) -> int:
   });
 
   describe("CLI Command Registration and Execution", () => {
-    it("registers context command in commander program", () => {
-      const contextCmd = program.commands.find((c) => c.name() === "context");
-      expect(contextCmd).toBeDefined();
-      expect(contextCmd?.description()).toContain("Dependency contract packager");
+    it("registers read command (with context and ctx aliases) in commander program", () => {
+      const readCmd = program.commands.find((c) => c.name() === "read");
+      expect(readCmd).toBeDefined();
+      expect(readCmd?.aliases()).toEqual(["context", "ctx"]);
+      expect(readCmd?.description()).toContain("Dependency contract packager");
 
-      const options = contextCmd?.options.map((o) => o.name());
+      const options = readCmd?.options.map((o) => o.name());
+      expect(options).toContain("outline");
+      expect(options).toContain("full");
       expect(options).toContain("depth");
       expect(options).toContain("no-callers");
       expect(options).toContain("outline-target");
       expect(options).toContain("max-tokens");
       expect(options).toContain("json");
       expect(options).toContain("stats");
+
+      const helpText = program.helpInformation();
+      expect(helpText).toContain("read|context");
+      expect(helpText).toContain("splice|write");
+      for (const hiddenCmd of [
+        "outline",
+        "create",
+        "compile",
+        "compile-all",
+        "decompile",
+        "roundtrip",
+        "fmt",
+        "diff",
+        "patch",
+        "idioms",
+        "tokens",
+        "verify",
+        "fix",
+      ]) {
+        expect(helpText).not.toMatch(new RegExp(`^\\s+${hiddenCmd}(?:\\||\\s)`, "m"));
+      }
     });
 
     it("executes CLI context packaging command with stdout capture", async () => {

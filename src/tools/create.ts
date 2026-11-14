@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Greenfield & Startup File Creation Engine (`aice create` & `aice_create`).
+ * AICE Greenfield & Startup File Creation Engine (`aice create` & `aice_create`).
  * Compiles compact AICE syntax, inline `@idiom` definitions, project `$idioms`,
  * or hybrid AICE/native code in RAM into clean, idiomatic native files across all
  * 15 target languages (24 file extensions) with 100% honest BPE telemetry.
@@ -1386,14 +1386,11 @@ export async function createFile(
     ...cliInlineIdioms,
   };
 
-  // Merge project idioms + inline idioms when idioms are enabled for this project/call
-  const activeIdioms: Record<string, ProjectIdiomDefinition> = !idiomsEnabled
-    ? {}
-    : {
-        ...(config.idioms ?? {}),
-        ...declaredIdioms,
-      };
-
+  // Merge project idioms (when enabled) + explicit inline/option idioms (unless --no-idioms)
+  const activeIdioms: Record<string, ProjectIdiomDefinition> = {
+    ...(idiomsEnabled ? (config.idioms ?? {}) : {}),
+    ...(options.idioms === false ? {} : declaredIdioms),
+  };
   if (Object.keys(declaredIdioms).length > 0) {
     validateIdiomDefinitions({
       ...(config.idioms ?? {}),
@@ -1497,13 +1494,13 @@ export async function createFile(
   }
 
   const idiomsUsed =
-    idiomsEnabled &&
+    options.idioms !== false &&
     (Object.keys(declaredIdioms).length > 0 ||
-      Object.keys(activeIdioms).some((k) => {
-        const norm = k.startsWith("$") ? k : `$${k}`;
-        return rawPayload.includes(norm);
-      }));
-
+      (idiomsEnabled &&
+        Object.keys(activeIdioms).some((k) => {
+          const norm = k.startsWith("$") ? k : `$${k}`;
+          return rawPayload.includes(norm);
+        })));
   const normalizedAiceInput = rawPayload.replace(/:\s*:?\s*(?=[#$?_*[])/g, ":");
   const nativeTokens = estimateTokens(nativeCode, "cl100k_base");
   const rawAiceTokens = estimateTokens(normalizedAiceInput, "cl100k_base");

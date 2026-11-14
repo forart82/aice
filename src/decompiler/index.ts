@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Universal Decompiler & Bidirectional Transpiler Hub for AICE 2.0.
+ * Universal Decompiler & Bidirectional Transpiler Hub for AICE.
  */
 
 import { existsSync, promises as fs, readFileSync } from "node:fs";

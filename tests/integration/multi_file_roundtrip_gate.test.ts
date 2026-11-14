@@ -155,7 +155,7 @@ button {
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>AICE 2.0 Web Application</title>
+    <title>AICE Web Application</title>
     <link rel="stylesheet" href="style.css">
   </head>
   <body>

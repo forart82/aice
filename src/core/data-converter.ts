@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Data & Config AST Bi-directional Converter Engine for AICE 2.0 (Step 24).
+ * Data & Config AST Bi-directional Converter Engine for AICE (Step 24).
  * Handles bi-directional lossless lowering between JavaScript data values
  * and AICE AST Expressions / Module items for JSON & YAML dialects.
  */
@@ -168,10 +168,9 @@ export function astToValue(expr: Expr): any {
  * Extracts data representation from an AICE Module AST containing data/config declarations.
  */
 export function extractValueFromModule(mod: Module): any {
-  if (!mod || !mod.items || mod.items.length === 0) {
+  if (!mod?.items || mod.items.length === 0) {
     return {};
   }
-
   // Prefer standard data/config declaration names
   const configItem = mod.items.find(
     (i) =>

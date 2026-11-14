@@ -104,7 +104,7 @@ fn startService() -> void:
 
 ## 4. Pure On-the-Fly Inlined Comments & Zero Disk Clutter
 
-In AICE 2.0, all comments (JSDoc, block comments, license headers) are translated and inlined directly into the in-memory AICE representation as `#` comments and preserved bit-for-bit during `aice splice`:
+In AICE, all comments (JSDoc, block comments, license headers) are translated and inlined directly into the in-memory AICE representation as `#` comments and preserved bit-for-bit during `aice splice`:
 
 ### Key Principles:
 1. **Zero Disk Clutter**: No `.aice` companion files or external `.json` sidecars are written to disk.

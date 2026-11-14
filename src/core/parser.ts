@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Pratt Parser & Universal AST Generator for AICE 2.0.
+ * Pratt Parser & Universal AST Generator for AICE.
  *
  * Implements Top-Down Operator Precedence (Pratt) parsing for expressions
  * and Recursive Descent for module declarations, types, functions, and control flow.
@@ -1210,11 +1210,19 @@ export class Parser {
   private parseBaseTypeExpr(): TypeExpr {
     const tok = this.current();
 
+    if (tok.kind === "ELLIPSIS") {
+      this.advance();
+      return {
+        kind: "NamedType",
+        name: "...",
+        span: tok.span,
+      };
+    }
+
     if (tok.kind === "READONLY") {
       this.advance();
       return this.parseBaseTypeExpr();
     }
-
     if (tok.kind === "BOOLEAN") {
       this.advance();
       return {

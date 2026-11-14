@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 Project Idiom Subsystem.
+ * Unit tests for AICE Project Idiom Subsystem.
  */
 
 import * as fs from "node:fs";
@@ -30,7 +30,7 @@ import {
 } from "../../src/idioms/index.js";
 import { check } from "../../src/typechecker/checker.js";
 
-describe("AICE 2.0 Project Idioms Subsystem", () => {
+describe("AICE Project Idioms Subsystem", () => {
   describe("1. Core Lexer & Parser: $ Identifier Support", () => {
     it("scans $idiomName and $0 holes as IDENT tokens", () => {
       const code = "$guardOk($0, $1)";

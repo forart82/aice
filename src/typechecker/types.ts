@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Semantic Type System & Subtyping Lattice for AICE 2.0.
+ * Semantic Type System & Subtyping Lattice for AICE.
  * Conforms to Section 3 of docs/AICE_SPEC.md.
  */
 
@@ -270,7 +270,7 @@ export function isOpaqueNamedType(name: string): boolean {
     trimmed.includes("=>") ||
     trimmed.includes("[") ||
     trimmed.includes("{") ||
-    !isNaN(Number(trimmed))
+    !Number.isNaN(Number(trimmed))
   ) {
     return false;
   }
@@ -514,7 +514,7 @@ export function isAssignable(
           p === "float" ||
           p === "num" ||
           p === "number" ||
-          (!isNaN(Number(p)) && p.trim() !== ""))
+          (!Number.isNaN(Number(p)) && p.trim() !== ""))
       ) {
         return true;
       }
@@ -534,7 +534,7 @@ export function isAssignable(
           p === "float" ||
           p === "num" ||
           p === "number" ||
-          (!isNaN(Number(p)) && p.trim() !== ""))
+          (!Number.isNaN(Number(p)) && p.trim() !== ""))
       ) {
         return true;
       }
@@ -634,8 +634,8 @@ export function isAssignable(
       if (
         target.name.trim() !== "" &&
         source.name.trim() !== "" &&
-        !isNaN(Number(target.name)) &&
-        !isNaN(Number(source.name))
+        !Number.isNaN(Number(target.name)) &&
+        !Number.isNaN(Number(source.name))
       ) {
         return Number(target.name) === Number(source.name);
       }
@@ -655,8 +655,8 @@ export function isAssignable(
             if (
               s.trim() !== "" &&
               t.trim() !== "" &&
-              !isNaN(Number(s)) &&
-              !isNaN(Number(t)) &&
+              !Number.isNaN(Number(s)) &&
+              !Number.isNaN(Number(t)) &&
               Number(s) === Number(t)
             ) {
               return true;
@@ -687,7 +687,7 @@ export function isAssignable(
   if (
     target.kind === "named" &&
     target.name.trim() !== "" &&
-    !isNaN(Number(target.name)) &&
+    !Number.isNaN(Number(target.name)) &&
     (source.kind === "int" || source.kind === "float" || source.kind === "num")
   ) {
     return true;
@@ -696,7 +696,7 @@ export function isAssignable(
   if (
     source.kind === "named" &&
     source.name.trim() !== "" &&
-    !isNaN(Number(source.name)) &&
+    !Number.isNaN(Number(source.name)) &&
     (target.kind === "int" || target.kind === "float" || target.kind === "num")
   ) {
     return true;

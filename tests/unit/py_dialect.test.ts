@@ -540,5 +540,42 @@ class Wallet:
       const checker = new TypeChecker();
       expect(() => checker.checkModule(ast)).not.toThrow();
     });
+
+    it("decompiles Callable[[...], Ret], Optional[Callable[[], None]], and dotted typing annotations cleanly", () => {
+      const source = `import collections.abc
+import typing
+from typing import Any, Callable, Optional
+
+def run_hooks(
+    on_done: Optional[Callable[[], None]],
+    predicate: Callable[[int, str], bool],
+    fallback: typing.Callable[..., Any],
+    mapper: collections.abc.Callable[[str], int],
+    items: typing.List[int],
+    meta: typing.Dict[str, typing.Any],
+    pair: typing.Tuple[int, str],
+    tag: typing.Optional[str] = None,
+) -> bool:
+    return predicate(1, "ok")
+`;
+      const decomp = decompilePython(source, "hooks.py");
+      expect(decomp.aice).toContain("Option[Callable[[], void]]");
+      expect(decomp.aice).toContain("Callable[[int, str], bool]");
+      expect(decomp.aice).toContain("typing.Callable[..., any]");
+      expect(decomp.aice).toContain("collections.abc.Callable");
+
+      const { ast } = parseWithTrivia(decomp.aice, "hooks.py.aice");
+      const fn = ast.items.find((i) => i.kind === "FunctionDecl") as FunctionDecl;
+      expect(fn).toBeDefined();
+      expect(fn.params[0]?.typeAnnotation?.kind).toBe("OptionType");
+      expect(fn.params[1]?.typeAnnotation?.kind).toBe("NamedType");
+      expect(fn.params[4]?.typeAnnotation?.kind).toBe("ArrayType");
+      expect(fn.params[6]?.typeAnnotation?.kind).toBe("TupleType");
+
+      const reEmitted = emitTarget(ast, "python", { watermark: false });
+      expect(reEmitted).toContain("Optional[Callable[[], None]]");
+      expect(reEmitted).toContain("Callable[[int, str], bool]");
+      expect(reEmitted).toContain("typing.Callable[..., Any]");
+    });
   });
 });

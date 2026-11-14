@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Idiomatic Kotlin 1.9 / 2.x Forward Transpiler & Mobile/Android Emitter for AICE 2.0.
+ * Idiomatic Kotlin 1.9 / 2.x Forward Transpiler & Mobile/Android Emitter for AICE.
  * Emits clean, modern Kotlin code from AICE Module AST:
  *   - Package declaration & imports
  *   - Data classes for records and primary constructors
@@ -492,7 +492,7 @@ export class KotlinEmitter {
     this.ctx.writeLine(`${asyncKw}fun ${typeParamsStr}${m.name}(${params})${retStr} {`);
     this.ctx.indent();
     if (m.body.kind === "Block") {
-      this.emitBlock(m.body);
+      this.emitBlock(m.body, Boolean(retStr));
     } else {
       this.ctx.writeLine(`return ${this.emitExpr(m.body as Expr)}`);
     }
@@ -557,7 +557,7 @@ export class KotlinEmitter {
     this.ctx.writeLine(`${asyncKw}fun ${typeParamsStr}${fn.name}(${params})${retStr} {`);
     this.ctx.indent();
     if (fn.body.kind === "Block") {
-      this.emitBlock(fn.body);
+      this.emitBlock(fn.body, Boolean(retStr));
     } else {
       this.ctx.writeLine(`return ${this.emitExpr(fn.body as Expr)}`);
     }
@@ -583,13 +583,14 @@ export class KotlinEmitter {
     this.ctx.emitTrailingTrivia(nodeId);
   }
 
-  private emitBlock(block: Block): void {
-    for (const stmt of block.statements) {
-      this.emitStatement(stmt);
+  private emitBlock(block: Block, isReturning = false): void {
+    for (let i = 0; i < block.statements.length; i++) {
+      const isLast = i === block.statements.length - 1;
+      this.emitStatement(block.statements[i], isReturning && isLast);
     }
   }
 
-  private emitStatement(stmt: Statement): void {
+  private emitStatement(stmt: Statement, isImplicitReturn = false): void {
     switch (stmt.kind) {
       case "LetBinding": {
         const kw = stmt.isMut ? "var" : "val";
@@ -616,17 +617,17 @@ export class KotlinEmitter {
         break;
       }
       case "IfStmt": {
-        this.emitIfStmt(stmt);
+        this.emitIfStmt(stmt, isImplicitReturn);
         break;
       }
       case "MatchStmt": {
-        this.emitMatchStmt(stmt);
+        this.emitMatchStmt(stmt, isImplicitReturn);
         break;
       }
       case "ForStmt": {
         this.ctx.writeLine(`for (${stmt.variable} in ${this.emitExpr(stmt.iterable)}) {`);
         this.ctx.indent();
-        this.emitBlock(stmt.body);
+        this.emitBlock(stmt.body, false);
         this.ctx.dedent();
         this.ctx.writeLine("}");
         break;
@@ -634,7 +635,7 @@ export class KotlinEmitter {
       case "WhileStmt": {
         this.ctx.writeLine(`while (${this.emitExpr(stmt.condition)}) {`);
         this.ctx.indent();
-        this.emitBlock(stmt.body);
+        this.emitBlock(stmt.body, false);
         this.ctx.dedent();
         this.ctx.writeLine("}");
         break;
@@ -642,19 +643,19 @@ export class KotlinEmitter {
       case "TryStmt": {
         this.ctx.writeLine("try {");
         this.ctx.indent();
-        this.emitBlock(stmt.tryBlock);
+        this.emitBlock(stmt.tryBlock, isImplicitReturn);
         this.ctx.dedent();
         if (stmt.catchBlock) {
           const param = stmt.catchParam ? `${stmt.catchParam}: Exception` : "e: Exception";
           this.ctx.writeLine(`} catch (${param}) {`);
           this.ctx.indent();
-          this.emitBlock(stmt.catchBlock);
+          this.emitBlock(stmt.catchBlock, isImplicitReturn);
           this.ctx.dedent();
         }
         if (stmt.finallyBlock) {
           this.ctx.writeLine("} finally {");
           this.ctx.indent();
-          this.emitBlock(stmt.finallyBlock);
+          this.emitBlock(stmt.finallyBlock, false);
           this.ctx.dedent();
         }
         this.ctx.writeLine("}");
@@ -673,23 +674,28 @@ export class KotlinEmitter {
         break;
       }
       case "ExprStmt": {
-        this.ctx.writeLine(this.emitExpr(stmt.expr));
+        if (isImplicitReturn) {
+          this.ctx.writeLine(`return ${this.emitExpr(stmt.expr)}`);
+        } else {
+          this.ctx.writeLine(this.emitExpr(stmt.expr));
+        }
         break;
       }
     }
   }
 
-  private emitIfStmt(stmt: IfStmt): void {
+  private emitIfStmt(stmt: IfStmt, isImplicitReturn = false): void {
+    const canImplicitReturn = isImplicitReturn && Boolean(stmt.elseBranch);
     this.ctx.writeLine(`if (${this.emitExpr(stmt.condition)}) {`);
     this.ctx.indent();
-    this.emitBlock(stmt.thenBranch);
+    this.emitBlock(stmt.thenBranch, canImplicitReturn);
     this.ctx.dedent();
 
     if (stmt.elifBranches && stmt.elifBranches.length > 0) {
       for (const elif of stmt.elifBranches) {
         this.ctx.writeLine(`} else if (${this.emitExpr(elif.condition)}) {`);
         this.ctx.indent();
-        this.emitBlock(elif.body);
+        this.emitBlock(elif.body, canImplicitReturn);
         this.ctx.dedent();
       }
     }
@@ -697,14 +703,14 @@ export class KotlinEmitter {
     if (stmt.elseBranch) {
       this.ctx.writeLine("} else {");
       this.ctx.indent();
-      this.emitBlock(stmt.elseBranch);
+      this.emitBlock(stmt.elseBranch, canImplicitReturn);
       this.ctx.dedent();
     }
 
     this.ctx.writeLine("}");
   }
 
-  private emitMatchStmt(stmt: MatchStmt): void {
+  private emitMatchStmt(stmt: MatchStmt, isImplicitReturn = false): void {
     const isArgumentless =
       stmt.target.kind === "LiteralExpr" &&
       stmt.target.literalKind === "boolean" &&
@@ -718,13 +724,13 @@ export class KotlinEmitter {
 
     this.ctx.indent();
     for (const c of stmt.cases) {
-      this.emitMatchCase(c);
+      this.emitMatchCase(c, isImplicitReturn);
     }
     this.ctx.dedent();
     this.ctx.writeLine("}");
   }
 
-  private emitMatchCase(c: MatchCase): void {
+  private emitMatchCase(c: MatchCase, isImplicitReturn = false): void {
     const patternStr = this.emitPattern(c.pattern);
     const guardStr = c.guard ? ` if (${this.emitExpr(c.guard)})` : "";
 
@@ -735,7 +741,10 @@ export class KotlinEmitter {
       return;
     }
     if (bodyAny && bodyAny.kind === "ExprStmt") {
-      this.ctx.writeLine(`${patternStr}${guardStr} -> ${this.emitExpr(bodyAny.expr)}`);
+      const exprCode = this.emitExpr(bodyAny.expr);
+      this.ctx.writeLine(
+        `${patternStr}${guardStr} -> ${isImplicitReturn ? `return ${exprCode}` : exprCode}`,
+      );
       return;
     }
 
@@ -747,17 +756,23 @@ export class KotlinEmitter {
           return;
         }
         if (single.kind === "ExprStmt") {
-          this.ctx.writeLine(`${patternStr}${guardStr} -> ${this.emitExpr(single.expr)}`);
+          const exprCode = this.emitExpr(single.expr);
+          this.ctx.writeLine(
+            `${patternStr}${guardStr} -> ${isImplicitReturn ? `return ${exprCode}` : exprCode}`,
+          );
           return;
         }
       }
       this.ctx.writeLine(`${patternStr}${guardStr} -> {`);
       this.ctx.indent();
-      this.emitBlock(c.body);
+      this.emitBlock(c.body, isImplicitReturn);
       this.ctx.dedent();
       this.ctx.writeLine("}");
     } else {
-      this.ctx.writeLine(`${patternStr}${guardStr} -> ${this.emitExpr(c.body as Expr)}`);
+      const exprCode = this.emitExpr(c.body as Expr);
+      this.ctx.writeLine(
+        `${patternStr}${guardStr} -> ${isImplicitReturn ? `return ${exprCode}` : exprCode}`,
+      );
     }
   }
 

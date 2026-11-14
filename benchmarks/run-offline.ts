@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CLI Runner for AICE 2.0 Deterministic Offline Benchmark Suite (10 Scenarios — Without & With Idioms).
+ * CLI Runner for AICE Deterministic Offline Benchmark Suite (10 Scenarios — Without & With Idioms).
  * Usage:
  *   npx tsx benchmarks/run-offline.ts
  */

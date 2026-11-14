@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern PHP 8.x Forward Transpiler & Emitter for AICE 2.0.
+ * Modern PHP 8.x Forward Transpiler & Emitter for AICE.
  * Emits canonical modern PHP 8.x code with:
  *   - strict_types declaration (declare(strict_types=1);)
  *   - PSR-12 formatting (4-space indentation)

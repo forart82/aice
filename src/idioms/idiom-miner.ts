@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Project Idiom Miner.
+ * AICE Project Idiom Miner.
  * Discovers repetitive statement blocks and compound expressions across workspace .aice files,
  * parameterizes holes via structural anti-unification, and enforces strict BPE token gates.
  */
@@ -45,6 +45,8 @@ export interface IdiomFileInput {
 export interface MineIdiomsOptions {
   minOccurrences?: number; // default 3
   minNetTokenSavings?: number; // default 10
+  minTokensSavedPerUse?: number; // minimum tokens saved per call site (default 1)
+  maxIdioms?: number; // maximum top-ROI idioms to keep (default undefined)
   maxParams?: number; // default 4
   maxBlockStatements?: number; // default 4
   existingIdioms?: Record<string, ProjectIdiomDefinition>;
@@ -115,6 +117,8 @@ export function mineProjectIdioms(
 ): MineIdiomsResult {
   const minOccurrences = options?.minOccurrences ?? 3;
   const minNetTokenSavings = options?.minNetTokenSavings ?? 10;
+  const minTokensSavedPerUse = options?.minTokensSavedPerUse ?? 1;
+  const maxIdioms = options?.maxIdioms;
   const maxParams = options?.maxParams ?? 4;
   const maxBlockStatements = options?.maxBlockStatements ?? 4;
   const existingIdioms = options?.existingIdioms ?? {};
@@ -216,7 +220,7 @@ export function mineProjectIdioms(
 
     const netTokenSavings = totalSaved - defOverheadTokens;
     const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
-    const minPerOcc = minNetTokenSavings >= 10 && k === 1 ? 4 : 1;
+    const minPerOcc = Math.max(minTokensSavedPerUse, minNetTokenSavings >= 10 && k === 1 ? 4 : 1);
 
     if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < minPerOcc) {
       rejectedByTokenGate++;
@@ -287,7 +291,7 @@ export function mineProjectIdioms(
     const netTokenSavings = totalSaved - defOverheadTokens;
     const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
 
-    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < minTokensSavedPerUse) {
       rejectedByTokenGate++;
       continue;
     }
@@ -340,7 +344,7 @@ export function mineProjectIdioms(
     }
     const netTokenSavings = totalSaved - defOverheadTokens;
     const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
-    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < minTokensSavedPerUse) {
       rejectedByTokenGate++;
       continue;
     }
@@ -391,7 +395,7 @@ export function mineProjectIdioms(
     }
     const netTokenSavings = totalSaved - defOverheadTokens;
     const tokensPerOccurrenceSaved = Math.round(totalSaved / occurrences.length);
-    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < 1) {
+    if (netTokenSavings < minNetTokenSavings || tokensPerOccurrenceSaved < minTokensSavedPerUse) {
       rejectedByTokenGate++;
       continue;
     }
@@ -417,8 +421,12 @@ export function mineProjectIdioms(
     candidateIndex++;
   }
 
-  // 5. Sort candidates by netTokenSavings descending and greedily select non-overlapping idioms
-  acceptedCandidates.sort((a, b) => b.definition.netTokenSavings - a.definition.netTokenSavings);
+  // 5. Sort candidates by total token ROI (occurrences * tokensPerOccurrenceSaved) descending, then netTokenSavings
+  acceptedCandidates.sort((a, b) => {
+    const roiA = a.definition.occurrences * a.definition.tokensPerOccurrenceSaved;
+    const roiB = b.definition.occurrences * b.definition.tokensPerOccurrenceSaved;
+    return roiB - roiA || b.definition.netTokenSavings - a.definition.netTokenSavings;
+  });
 
   const finalIdioms: Record<string, ProjectIdiomDefinition> = {};
   const claimedSpans = new Map<string, Array<{ start: number; end: number }>>();
@@ -427,6 +435,9 @@ export function mineProjectIdioms(
   let totalNetTokenSavings = 0;
 
   for (const cand of acceptedCandidates) {
+    if (maxIdioms !== undefined && Object.keys(finalIdioms).length >= maxIdioms) {
+      break;
+    }
     // Check if enough occurrences remain non-overlapping
     const nonOverlappingOccs: number[] = [];
     for (let i = 0; i < cand.spans.length; i++) {

@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Sound Type Checker & Refinement Solver for AICE 2.0.
+ * Sound Type Checker & Refinement Solver for AICE.
  * Conforms to Section 3 of docs/AICE_SPEC.md and Pillar 4 of docs/RESEARCH_SYNTHESIS.md.
  */
 

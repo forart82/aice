@@ -741,5 +741,38 @@ data class Sample(val id: String)
       const tc = new TypeChecker();
       expect(() => tc.checkModule(decomp.ast)).not.toThrow();
     });
+
+    it("emits implicit tail return statements on block-bodied Kotlin functions and methods", () => {
+      const aiceCode = `
+pub fn scoreTier(raw: int) -> int:
+  scaled ::= raw * 3
+  if scaled > 100:
+    100
+  elif scaled < 0:
+    0
+  else:
+    scaled + 5
+
+pub class AlertScorer:
+  pub fn classify(code: int) -> str:
+    match code:
+      200 => "OK"
+      _ => "WARN"
+
+  pub fn safeCompute(x: int) -> int:
+    try:
+      x * 2
+    catch err:
+      0
+`;
+      const mod = parse(aiceCode, "FraudScorer.kt.aice");
+      const kt = KotlinEmitter.emit(mod);
+      expect(kt).toContain("return 100");
+      expect(kt).toContain("return 0");
+      expect(kt).toContain("return scaled + 5");
+      expect(kt).toContain('200 -> return "OK"');
+      expect(kt).toContain('else -> return "WARN"');
+      expect(kt).toContain("return x * 2");
+    });
   });
 });

@@ -19,12 +19,16 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  DEFAULT_PROJECT_CONFIG,
+  hasAgentsMdInclude,
   hasMarkdownDirective,
   removeMarkdownDirective,
   saveProjectConfig,
+  syncProjectWorkspaceRules,
   upsertMarkdownDirective,
 } from "../../src/config/project-config.js";
 import { MANDATORY_AGENT_RULES_MARKDOWN } from "../../src/rules/mandatory-rules.js";
+import { TiktokenTokenizer } from "../../src/tokenomics/index.js";
 
 const CLI_TS = path.resolve(process.cwd(), "bin/aice.ts");
 const CLI_MJS = path.resolve(process.cwd(), "bin/aice.mjs");
@@ -373,11 +377,28 @@ describe("CLI, Config, Rules & Stdin Interface Audit Regressions", () => {
     );
   });
 
-  it("includes Section 1 heading, @clone(SourceSym), and @replace-docs in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+  it("includes Section 1 heading, @clone(SourceSym), @replace-docs, <= 650 BPE token ceiling, and opt-in idioms default", () => {
     expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
       "### 1. Opt-In Activation Gate & Non-AICE Bypass",
     );
     expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("@clone(SourceSym)");
     expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("@replace-docs");
+    expect(
+      TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base"),
+    ).toBeLessThanOrEqual(650);
+    expect(
+      TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base"),
+    ).toBeLessThanOrEqual(650);
+    expect(DEFAULT_PROJECT_CONFIG.idiomsEnabled).toBe(false);
+    expect(hasAgentsMdInclude("@AGENTS.md")).toBe(true);
+
+    const ruleAuditDir = path.join(tmpDir, "rule-audit");
+    fs.mkdirSync(path.join(ruleAuditDir, ".agents", "rules"), { recursive: true });
+    fs.writeFileSync(path.join(ruleAuditDir, ".agents", "rules", "aice.md"), "stale", "utf-8");
+    fs.writeFileSync(path.join(ruleAuditDir, "CLAUDE.md"), "# Claude\n@AGENTS.md\n", "utf-8");
+    syncProjectWorkspaceRules(ruleAuditDir, true);
+    expect(hasMarkdownDirective(path.join(ruleAuditDir, "AGENTS.md"))).toBe(true);
+    expect(hasMarkdownDirective(path.join(ruleAuditDir, "CLAUDE.md"))).toBe(false);
+    expect(fs.existsSync(path.join(ruleAuditDir, ".agents"))).toBe(false);
   });
 });

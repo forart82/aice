@@ -14,7 +14,9 @@ import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+const rootDir = process.env.AICE_BUMP_ROOT_DIR
+  ? path.resolve(process.env.AICE_BUMP_ROOT_DIR)
+  : path.resolve(__dirname, "..");
 const pkgPath = path.join(rootDir, "package.json");
 const versionTsPath = path.join(rootDir, "src", "version.ts");
 const citationPath = path.join(rootDir, "CITATION.cff");
@@ -114,26 +116,31 @@ if (fs.existsSync(installShPath)) {
   fs.writeFileSync(installShPath, installSh, "utf-8");
 }
 
-// 6. Dynamic import for syncProjectWorkspaceRules to ensure it loads new version
-const { syncProjectWorkspaceRules } = await import("../src/config/project-config.js");
-syncProjectWorkspaceRules(rootDir, true);
+// 6. Dynamic import for syncProjectWorkspaceRules & isProjectAiceEnabled to respect project opt-out
+const { isProjectAiceEnabled, syncProjectWorkspaceRules } = await import(
+  "../src/config/project-config.js"
+);
+syncProjectWorkspaceRules(rootDir, isProjectAiceEnabled(rootDir));
 
 // 7. Rebuild standalone bundle so dist/aice.mjs matches nextVersion
-const { spawnSync } = await import("node:child_process");
-const localTsx = path.join(
-  rootDir,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "tsx.cmd" : "tsx",
-);
-const buildRunner = fs.existsSync(localTsx) ? localTsx : process.execPath;
-const buildRes = spawnSync(buildRunner, [path.join(rootDir, "tools", "build.ts")], {
-  cwd: rootDir,
-  stdio: "inherit",
-});
-if (buildRes.status !== 0) {
-  console.error(`❌ Standalone bundle build failed during version bump (exit code ${buildRes.status}).`);
-  process.exit(buildRes.status ?? 1);
+if (process.env.AICE_BUMP_SKIP_BUILD !== "1") {
+  const { spawnSync } = await import("node:child_process");
+  const localTsx = path.join(
+    rootDir,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "tsx.cmd" : "tsx",
+  );
+  const buildRunner = fs.existsSync(localTsx) ? localTsx : process.execPath;
+  const buildRes = spawnSync(buildRunner, [path.join(rootDir, "tools", "build.ts")], {
+    cwd: rootDir,
+    stdio: "inherit",
+  });
+  if (buildRes.status !== 0) {
+    console.error(
+      `❌ Standalone bundle build failed during version bump (exit code ${buildRes.status}).`,
+    );
+    process.exit(buildRes.status ?? 1);
+  }
 }
-
 console.log(`✔ Successfully bumped AICE to v${nextVersion}!`);

@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
+ * AICE Deterministic Zero-Token Formatting Pre-Pass Engine (Step 21).
  * Formats AICE source code deterministically with canonical spacing, indentation,
  * punctuation normalization, blank line normalization, and CST token preservation.
  */

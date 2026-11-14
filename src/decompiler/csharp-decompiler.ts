@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern C# Decompiler (Reverse Transpiler) for AICE 2.0.
+ * Modern C# Decompiler (Reverse Transpiler) for AICE.
  * Parses C# source files (.cs), extracts comments and XML documentation into
  * CstTriviaTable, and produces an AICE Module AST.
  */

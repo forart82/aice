@@ -11,7 +11,7 @@ import {
   generateCaretSlice,
 } from "../../src/typechecker/diagnostics.js";
 
-describe("AICE 2.0 Machine-Readable Diagnostics & Autonomous Self-Repair Engine", () => {
+describe("AICE Machine-Readable Diagnostics & Autonomous Self-Repair Engine", () => {
   describe("Visual Caret Slice Generation", () => {
     it("generates contextual line numbers and caret underlines aligned with columns", () => {
       const src = `fn compute():

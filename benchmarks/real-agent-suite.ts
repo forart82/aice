@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 — Real AI Agent Benchmark Suite (10 Multi-File Real-World Scenarios + RW-11 1-File 0-Idiom Lone Needle)
+ * AICE — Real AI Agent Benchmark Suite (10 Multi-File Real-World Scenarios + RW-11 1-File 0-Idiom Lone Needle)
  *
  * Evaluates real autonomous AI agent (`agy -p`) runs across `RW-01` .. `RW-10` and `RW-11` (Lone Needle)
  * in isolated temporary workspaces on disk, measuring ground-truth telemetry from each agent's
@@ -552,7 +552,7 @@ export function formatRealAgentBenchmarkMarkdown(
   const ln = realReport.loneNeedleBenchmark;
 
   lines.push(
-    "# AICE 2.0 — Real AI Agent Benchmark Suite Report (Adversarial Cold-Start Scenarios — Without & With Idioms)",
+    "# AICE — Real AI Agent Benchmark Suite Report (Adversarial Cold-Start Scenarios — Without & With Idioms)",
   );
   lines.push("");
   lines.push(

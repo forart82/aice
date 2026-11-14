@@ -7,7 +7,7 @@ function checkSource(source: string): void {
   check(mod);
 }
 
-describe("AICE 2.0 Sound Type Calculus & Refinement Solver", () => {
+describe("AICE Sound Type Calculus & Refinement Solver", () => {
   describe("Valid Programs", () => {
     it("passes typechecking for valid arithmetic, functions, and let bindings", () => {
       const src = `fn add(a:int, b:int) -> int:

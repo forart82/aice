@@ -189,7 +189,7 @@ export class OrderProcessor {
     });
   });
 
-  describe("AICE 2.0 Hardening & Resilience Regressions", () => {
+  describe("AICE Hardening & Resilience Regressions", () => {
     let tmpDir: string = "";
 
     beforeEach(() => {

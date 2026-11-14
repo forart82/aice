@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Automated Tokenomics CI Quality Gate & Regression Engine for AICE 2.0.
+ * Automated Tokenomics CI Quality Gate & Regression Engine for AICE.
  * Computes exact BPE token counts (cl100k_base, o200k_base) and character savings,
  * and enforces zero target drift.
  */

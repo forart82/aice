@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Real-World Benchmark Suite (10 End-to-End Real-World Benchmarks):
+ * AICE Real-World Benchmark Suite (10 End-to-End Real-World Benchmarks):
  *   RW-01: HTML5 Canvas Arcade Snake Window Application from 0 (.ts, .html, .css, .json)
  *   RW-02: Headless Python CLI Task Queue & Telemetry Worker Daemon from 0 (.py, .yaml, .json)
  *   RW-03: Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout Bug Fix
@@ -2278,7 +2278,7 @@ export function formatRealWorldBenchmarkMarkdown(
   report: RealWorldBenchmarkSuiteReport,
 ): string {
   const lines: string[] = [
-    "# AICE 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)",
+    "# AICE Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)",
     "",
     "- **Evaluation Engine**: Deterministic Offline AST & Tooling Harness (Exact API Calls & Character/Token Accounting — No Live LLM Agent Calls)",
     "- **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AICE` vs `AICE Without Idioms` vs `AICE With Idioms`)",

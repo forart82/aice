@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * End-to-end integration test suite for AICE 2.0 Project Idioms engine.
+ * End-to-end integration test suite for AICE Project Idioms engine.
  * Verifies integration across:
  * 1. On-the-fly `scanProjectIdioms` across native files (zero `.aice` files on disk)
  * 2. `generateContext` & `generateWorkspaceContext`
@@ -44,7 +44,7 @@ function runCli(args: string[], cwd?: string): { status: number; stdout: string;
   };
 }
 
-describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
+describe("AICE Project Idioms End-to-End Integration", () => {
   let tmpDir: string;
 
   beforeEach(() => {
@@ -118,6 +118,7 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
       };
 
       saveProjectConfig(tmpDir, {
+        idiomsEnabled: true,
         targetLanguage: "typescript",
         idioms: {
           $notify: idiomDef,
@@ -155,6 +156,7 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
       };
 
       saveProjectConfig(tmpDir, {
+        idiomsEnabled: true,
         idioms: {
           $safeAdd: idiomDef,
         },
@@ -184,6 +186,7 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
       };
 
       saveProjectConfig(tmpDir, {
+        idiomsEnabled: true,
         targetLanguage: "typescript",
         idioms: {
           $earlyExit: idiomDef,
@@ -228,6 +231,7 @@ describe("AICE 2.0 Project Idioms End-to-End Integration", () => {
       };
 
       saveProjectConfig(tmpDir, {
+        idiomsEnabled: true,
         idioms: {
           $guardVal: idiomDef,
         },

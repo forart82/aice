@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Twig Template Emitter for AICE 2.0 (Step 25).
+ * Twig Template Emitter for AICE (Step 25).
  * Emits clean, canonical .twig from canonical AICE AST (Module -> ComponentDecl -> LayoutNode).
  */
 

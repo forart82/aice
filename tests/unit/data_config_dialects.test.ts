@@ -503,7 +503,7 @@ server:
       const res = runCli(["context", samplePath, "--no-callers"]);
 
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain("# AICE Context Pack:");
+      expect(res.stdout).toContain("// ===");
       expect(res.stdout).toContain("aice-data-service");
     });
 

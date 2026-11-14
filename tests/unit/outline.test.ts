@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Unit tests for AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18).
+ * Unit tests for AICE Semantic AST Skeleton Outline Engine (Step 18).
  */
 
 import * as fs from "node:fs";
@@ -13,7 +13,7 @@ import { program } from "../../bin/aice.js";
 import { parse } from "../../src/core/parser.js";
 import { generateOutline, type OutlineResult, outlinePath } from "../../src/tools/outline.js";
 
-describe("AICE 2.0 Semantic AST Skeleton Outline Engine (Step 18)", () => {
+describe("AICE Semantic AST Skeleton Outline Engine (Step 18)", () => {
   describe("Outlining Functions", () => {
     it("strips function implementation body and replaces with ': ...'", () => {
       const src = `

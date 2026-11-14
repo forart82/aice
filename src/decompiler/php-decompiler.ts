@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Modern PHP 8.x Decompiler (Reverse Transpiler) for AICE 2.0.
+ * Modern PHP 8.x Decompiler (Reverse Transpiler) for AICE.
  * Dedicated zero-dependency lexer and recursive-descent/Pratt parser for PHP 8.x:
  *   - Strips `<?php` and `declare(strict_types=1);`
  *   - Parses namespaces and use statements into Module metadata and ImportDecl

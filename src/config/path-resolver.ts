@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Polymorphic Path Resolver Engine (Step 23).
+ * AICE Polymorphic Path Resolver Engine (Step 23).
  * Provides unified polymorphic resolution for files, directories, or omitted arguments
  * across all CLI commands and tooling APIs, with first-class companion mode support.
  */

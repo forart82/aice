@@ -110,7 +110,7 @@ export class EmitterContext {
       for (const line of lines) {
         const trimmed = line.trimStart();
         if (trimmed.startsWith("*")) {
-          this.writeLine(" " + trimmed);
+          this.writeLine(` ${trimmed}`);
         } else {
           this.writeLine(trimmed);
         }
@@ -126,7 +126,7 @@ export class EmitterContext {
     for (const item of entry.trailing) {
       if (this.buffer.length > 0 && this.buffer[this.buffer.length - 1].endsWith("\n")) {
         const last = this.buffer[this.buffer.length - 1];
-        this.buffer[this.buffer.length - 1] = last.slice(0, -1) + ` ${item.content}\n`;
+        this.buffer[this.buffer.length - 1] = `${last.slice(0, -1)} ${item.content}\n`;
       } else {
         this.write(` ${item.content}`);
       }
@@ -171,14 +171,74 @@ export function detectTargetFromPath(filePath: string): TargetLanguage {
   if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "twig";
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
   if (lower.endsWith(".css")) return "css";
-  if (lower.endsWith(".json")) return "json";
-  if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "yaml";
+  if (lower.endsWith(".json") || lower.endsWith(".jsonc")) return "json";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".cff")) return "yaml";
   if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
   if (lower.endsWith(".ps1")) return "powershell";
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";
   if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
   if (lower.endsWith(".aipl")) return "aipl";
   return "typescript";
+}
+
+/**
+ * Detects target language from a file path or its leading content (e.g. shebang).
+ * Returns exact TargetLanguage when recognized, or "passthrough" when unrecognized.
+ */
+export function detectTargetFromPathOrContent(
+  filePath: string,
+  source?: string,
+): TargetLanguage | "passthrough" {
+  const lower = filePath.toLowerCase().replace(/\.aice$/, "");
+  if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "tsx";
+  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs"))
+    return "javascript";
+  if (
+    lower.endsWith(".ts") ||
+    lower.endsWith(".mts") ||
+    lower.endsWith(".cts") ||
+    lower.endsWith(".d.ts")
+  )
+    return "typescript";
+  if (lower.endsWith(".py") || lower.endsWith(".pyi")) return "python";
+  if (lower.endsWith(".rs")) return "rust";
+  if (lower.endsWith(".go")) return "go";
+  if (
+    lower.endsWith(".cpp") ||
+    lower.endsWith(".cc") ||
+    lower.endsWith(".cxx") ||
+    lower.endsWith(".hpp") ||
+    lower.endsWith(".h")
+  )
+    return "cpp";
+  if (lower.endsWith(".cs")) return "csharp";
+  if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
+  if (lower.endsWith(".php")) return "php";
+  if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "twig";
+  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (lower.endsWith(".css")) return "css";
+  if (lower.endsWith(".json") || lower.endsWith(".jsonc")) return "json";
+  if (lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".cff")) return "yaml";
+  if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
+  if (lower.endsWith(".ps1")) return "powershell";
+  if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";
+  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
+  if (lower.endsWith(".aipl")) return "aipl";
+  if (filePath.toLowerCase().endsWith(".aice")) return "typescript";
+
+  if (source) {
+    const firstLine = source.split(/\r?\n/, 1)[0] ?? "";
+    if (firstLine.startsWith("#!")) {
+      if (/\b(?:sh|bash|zsh|dash|ksh|ash)\b/.test(firstLine)) return "shell";
+      if (/\bpython[0-9.]*\b/.test(firstLine)) return "python";
+      if (/\b(?:tsx|ts-node)\b/.test(firstLine)) return "typescript";
+      if (/\b(?:node|deno|bun)\b/.test(firstLine)) return "javascript";
+      if (/\b(?:pwsh|powershell)\b/.test(firstLine)) return "powershell";
+      if (/\bphp[0-9.]*\b/.test(firstLine)) return "php";
+    }
+  }
+
+  return "passthrough";
 }
 
 /**

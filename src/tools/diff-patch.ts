@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Semantic AST Diff & Patch Engine (Step 22).
+ * AICE Semantic AST Diff & Patch Engine (Step 22).
  * Provides structural AST diffs, concise semantic summaries, unified diffs,
  * and deterministic, reversible patch application with zero corruption guarantee.
  */

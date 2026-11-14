@@ -217,7 +217,7 @@ export function extractDeclarationTriviaLens(
     const docMatch = declBody.match(
       /^[ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?(?:\r?\n[ \t]*)*(?:("""[\s\S]*?"""|'''[\s\S]*?'''))/,
     );
-    if (docMatch && docMatch[1]) {
+    if (docMatch?.[1]) {
       return {
         leadingDocComment: docMatch[1],
         indentation,
@@ -309,7 +309,7 @@ export function applyTriviaLensToReplacement(
       /^([ \t]*(?:async\s+)?(?:def|class)\s+[^\n]+?:\s*(?:#[^\n]*)?)([ \t]*(?:\r?\n|$))/,
     );
     if (headerMatch) {
-      const bodyIndent = trivia.indentation + "    ";
+      const bodyIndent = `${trivia.indentation}    `;
       const docLines = trivia.leadingDocComment.split(/\r?\n/);
       let minIndent: number | undefined;
       for (let i = 1; i < docLines.length; i++) {

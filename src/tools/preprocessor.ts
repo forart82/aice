@@ -152,6 +152,8 @@ function encodeMaskToken(index: number, kind: "str" | "cmt"): string {
 }
 
 export function unmaskLexicalTokens(masked: string, maskTable: string[]): string {
+  if (typeof masked !== "string" || !masked) return "";
+  const safeTable = Array.isArray(maskTable) ? maskTable : [];
   let current = masked;
   for (let pass = 0; pass < 8; pass++) {
     if (!current.includes(MASK_PREFIX)) break;
@@ -163,14 +165,15 @@ export function unmaskLexicalTokens(masked: string, maskTable: string[]): string
           .map((ch) => String(ch.charCodeAt(0) - 0xe010))
           .join("");
         const idx = Number.parseInt(idxStr, 10);
-        return maskTable[idx] ?? full;
+        return safeTable[idx] ?? full;
       },
     );
   }
   return current;
 }
 
-function getLineAndCol(source: string, offset: number): { line: number; column: number } {
+function getLineAndCol(rawSource: string, offset: number): { line: number; column: number } {
+  const source = typeof rawSource === "string" ? rawSource : String(rawSource ?? "");
   let line = 1;
   let lastNewline = -1;
   for (let i = 0; i < offset && i < source.length; i++) {
@@ -205,6 +208,7 @@ function canStartRegexInJsTs(
   targetLang: TargetLanguage,
   maskedPrefix?: string,
 ): boolean {
+  source = typeof source === "string" ? source : String(source ?? "");
   if (targetLang === "tsx" && slashIdx > 0 && source[slashIdx - 1] === "<") {
     return false;
   }
@@ -265,10 +269,11 @@ function canStartRegexInJsTs(
 }
 
 function scanJsTsTemplateExprClose(
-  source: string,
+  rawSource: string,
   exprStart: number,
   targetLang: TargetLanguage,
 ): number {
+  const source = typeof rawSource === "string" ? rawSource : String(rawSource ?? "");
   const len = source.length;
   let j = exprStart;
   let braceDepth = 1;
@@ -390,12 +395,14 @@ function scanJsTsTemplateExprClose(
  * hybrid shorthand lowering and syntax checks only inspect real code tokens.
  */
 export function maskSourceLexically(
-  source: string,
+  rawSource: string,
   targetLang: TargetLanguage,
-  activeIdioms: Record<string, ProjectIdiomDefinition> = {},
+  rawActiveIdioms: Record<string, ProjectIdiomDefinition> = {},
   existingMaskTable?: string[],
   existingMaskLengths?: number[],
 ): LexicalMaskResult {
+  const source = typeof rawSource === "string" ? rawSource : String(rawSource ?? "");
+  const activeIdioms = rawActiveIdioms ?? {};
   const maskTable = existingMaskTable ?? [];
   const maskLengths = existingMaskLengths ?? [];
   const unterminatedDiagnostics: LexicalScanDiagnostic[] = [];
@@ -939,7 +946,10 @@ function expandMaskedIdioms(
   maskTable: string[],
   maskLengths?: number[],
 ): string {
-  if (!maskedCode.includes("$") || Object.keys(activeIdioms).length === 0) {
+  if (typeof maskedCode !== "string" || !maskedCode) {
+    return "";
+  }
+  if (!maskedCode.includes("$") || !activeIdioms || Object.keys(activeIdioms).length === 0) {
     return maskedCode;
   }
 
@@ -1739,9 +1749,12 @@ function lowerHybridLineForTarget(
   return out;
 }
 export function preprocessBareCssLossless(
-  rawCss: string,
-  activeIdioms: Record<string, ProjectIdiomDefinition> = {},
+  rawCssInput: string,
+  rawActiveIdioms: Record<string, ProjectIdiomDefinition> = {},
 ): string {
+  const rawCss = typeof rawCssInput === "string" ? rawCssInput : String(rawCssInput ?? "");
+  if (!rawCss.trim()) return "";
+  const activeIdioms = rawActiveIdioms ?? {};
   const maskRes = maskSourceLexically(rawCss, "css", activeIdioms);
   const expandedMasked = expandMaskedIdioms(
     maskRes.maskedCode,
@@ -1884,11 +1897,13 @@ export const PREPROCESSORS_BY_LANG: Readonly<
 };
 
 export function preprocessHybridAndIdiomsLossless(
-  rawCode: string,
+  rawCodeInput: string,
   targetLang: TargetLanguage,
-  activeIdioms: Record<string, ProjectIdiomDefinition> = {},
+  rawActiveIdioms: Record<string, ProjectIdiomDefinition> = {},
   options?: LosslessPreprocessOptions,
 ): string {
+  const rawCode = typeof rawCodeInput === "string" ? rawCodeInput : String(rawCodeInput ?? "");
+  const activeIdioms = rawActiveIdioms ?? {};
   if (!rawCode.trim()) {
     return "";
   }
@@ -1925,7 +1940,7 @@ export function preprocessHybridAndIdiomsLossless(
     return unmaskLexicalTokens(idiomExpanded, maskRes.maskTable);
   }
 
-  const linePreprocessor = PREPROCESSORS_BY_LANG[targetLang];
+  const linePreprocessor = PREPROCESSORS_BY_LANG[targetLang] ?? ((line: string) => line);
   const lines = idiomExpanded.split(/\r?\n/);
   const loweredLines: string[] = [];
   let braceDepth = options?.insideClass ? 1 : 0;
@@ -1960,7 +1975,12 @@ export function preprocessHybridAndIdiomsLossless(
 
   return unmaskLexicalTokens(loweredLines.join("\n"), maskRes.maskTable);
 }
-export function isHybridOrNativeSource(cleanedCode: string, targetLang: TargetLanguage): boolean {
+export function isHybridOrNativeSource(
+  rawCleanedCode: string,
+  targetLang: TargetLanguage,
+): boolean {
+  const cleanedCode =
+    typeof rawCleanedCode === "string" ? rawCleanedCode : String(rawCleanedCode ?? "");
   const trimmed = cleanedCode.trim();
   if (!trimmed) return false;
 

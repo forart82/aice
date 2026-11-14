@@ -29,7 +29,7 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
   });
 
   describe("1. First-Class MCP Server (`AiceMcpServer`)", () => {
-    it("advertises all 7 AICE productivity tools with accurate schemas in tools/list", async () => {
+    it("advertises strictly the 2 unified AICE AI tools (aice_read and aice_splice) in tools/list", async () => {
       const server = new AiceMcpServer();
 
       const initResult = (await server.handleRequest(1, "initialize", {})) as any;
@@ -37,31 +37,186 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       expect(initResult.serverInfo.name).toBe("aice-mcp");
 
       const listResult = (await server.handleRequest(2, "tools/list", {})) as any;
-      expect(listResult.tools).toHaveLength(7);
+      expect(listResult.tools).toHaveLength(2);
+      expect(AiceMcpServer.getToolDefinitions()).toHaveLength(2);
 
       const toolNames = listResult.tools.map((t: any) => t.name);
-      expect(toolNames).toContain("aice_context");
-      expect(toolNames).toContain("aice_outline");
-      expect(toolNames).toContain("aice_splice");
-      expect(toolNames).toContain("aice_create");
-      expect(toolNames).toContain("aice_idioms");
-      expect(toolNames).toContain("aice_gain");
-      expect(toolNames).toContain("aice_project_config");
+      expect(toolNames).toEqual(["aice_read", "aice_splice"]);
+      expect(toolNames).not.toContain("aice_outline");
+      expect(toolNames).not.toContain("aice_create");
+      expect(toolNames).not.toContain("aice_context");
+      expect(toolNames).not.toContain("aice_idioms");
+      expect(toolNames).not.toContain("aice_gain");
+      expect(toolNames).not.toContain("aice_project_config");
 
       const byName = new Map<string, any>(listResult.tools.map((t: any) => [t.name, t]));
-      expect(byName.get("aice_context")?.inputSchema.required).toEqual([]);
-      expect(byName.get("aice_context")?.inputSchema.properties.selector).toBeDefined();
-      expect(byName.get("aice_outline")?.inputSchema.required).toEqual([]);
-      expect(byName.get("aice_outline")?.inputSchema.properties.depth).toBeDefined();
-      expect(byName.get("aice_outline")?.inputSchema.properties.types).toBeDefined();
-      expect(byName.get("aice_idioms")?.inputSchema.required).toEqual(["action"]);
-      expect(byName.get("aice_idioms")?.inputSchema.properties.idioms).toBeDefined();
-      expect(byName.get("aice_idioms")?.inputSchema.properties.params).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.required).toEqual([]);
+      expect(byName.get("aice_read")?.inputSchema.properties.path).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.paths).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.targets).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.symbol).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.outline).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.full).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.depth).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.maxTokens).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.includeCallers).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.idioms).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.stats).toBeDefined();
+      expect(byName.get("aice_read")?.inputSchema.properties.json).toBeDefined();
+
+      expect(byName.get("aice_splice")?.inputSchema.properties.filePath).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.path).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.symbol).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.code).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.batch).toBeDefined();
       expect(byName.get("aice_splice")?.inputSchema.properties.files).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.force).toBeDefined();
+      expect(byName.get("aice_splice")?.inputSchema.properties.overwrite).toBeDefined();
       expect(byName.get("aice_splice")?.inputSchema.properties.dryRun).toBeDefined();
       expect(byName.get("aice_splice")?.inputSchema.properties.preserveDocs).toBeDefined();
       expect(byName.get("aice_splice")?.inputSchema.properties.insertAfter).toBeDefined();
       expect(byName.get("aice_splice")?.inputSchema.properties.insertBefore).toBeDefined();
+    });
+
+    it("executes MCP aice_read (auto-outline on dir & >250-line file, full override, symbol slicing) and MCP aice_splice (greenfield create + surgical splice)", async () => {
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+
+      // 1. Greenfield create via MCP aice_splice (nested missing parent dir + AICE DSL compilation)
+      const createRes = (await server.handleRequest(10, "tools/call", {
+        name: "aice_splice",
+        arguments: {
+          filePath: "nested/engine/service.ts",
+          code: [
+            "export class ScoreService {",
+            "  public addBonus(base: number): number {",
+            "    return base + 10;",
+            "  }",
+            "  public reset(): number {",
+            "    return 0;",
+            "  }",
+            "}",
+          ].join("\n"),
+        },
+      })) as any;
+      expect(createRes.isError).toBeFalsy();
+      const createdPath = path.join(tmpDir, "nested/engine/service.ts");
+      expect(fs.existsSync(createdPath)).toBe(true);
+
+      // 2. Surgical splice via MCP aice_splice on existing file
+      const surgicalRes = (await server.handleRequest(11, "tools/call", {
+        name: "aice_splice",
+        arguments: {
+          path: "nested/engine/service.ts:ScoreService.addBonus",
+          code: "public addBonus(base: number): number {\n  return base + 50;\n}",
+        },
+      })) as any;
+      expect(surgicalRes.isError).toBeFalsy();
+      expect(fs.readFileSync(createdPath, "utf-8")).toContain("base + 50");
+      expect(fs.readFileSync(createdPath, "utf-8")).toContain("reset(): number");
+
+      // 3. MCP aice_read symbol slicing + sibling outline
+      const symReadRes = (await server.handleRequest(12, "tools/call", {
+        name: "aice_read",
+        arguments: {
+          path: "nested/engine/service.ts:ScoreService.addBonus",
+        },
+      })) as any;
+      expect(symReadRes.isError).toBeFalsy();
+      expect(symReadRes.content[0].text).toContain("addBonus");
+      expect(symReadRes.content[0].text).toContain("reset");
+
+      // 4. MCP aice_read directory auto-outline
+      const dirReadRes = (await server.handleRequest(13, "tools/call", {
+        name: "aice_read",
+        arguments: { path: "nested" },
+      })) as any;
+      expect(dirReadRes.isError).toBeFalsy();
+      expect(dirReadRes.content[0].text).toContain("ScoreService");
+
+      // 5. MCP aice_read >250-line bare file auto-outline + full: true override
+      const bigLines = Array.from(
+        { length: 265 },
+        (_, i) => `export function fn_${i}(): number { return ${i}; }`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "big_module.ts"), bigLines, "utf-8");
+
+      const bigAutoRes = (await server.handleRequest(14, "tools/call", {
+        name: "aice_read",
+        arguments: { path: "big_module.ts" },
+      })) as any;
+      expect(bigAutoRes.isError).toBeFalsy();
+      expect(bigAutoRes.content[0].text).toContain("Auto-outlined");
+      expect(bigAutoRes.content[0].text).not.toContain("= 260");
+
+      const bigFullRes = (await server.handleRequest(15, "tools/call", {
+        name: "aice_read",
+        arguments: { path: "big_module.ts", full: true },
+      })) as any;
+      expect(bigFullRes.isError).toBeFalsy();
+      expect(bigFullRes.content[0].text).not.toContain("Auto-outlined");
+      expect(bigFullRes.content[0].text).toContain("fn_260() -> int = 260");
+
+      // 6. MCP aice_splice 'batch' array greenfield create + surgical splice
+      const batchRes = (await server.handleRequest(16, "tools/call", {
+        name: "aice_splice",
+        arguments: {
+          batch: [
+            {
+              filePath: "nested/batch_new.ts",
+              code: "export const BATCH_VAL = 7;\n",
+            },
+            {
+              filePath: "nested/engine/service.ts",
+              symbol: "ScoreService.reset",
+              code: "public reset(): number {\n  return -1;\n}",
+            },
+          ],
+        },
+      })) as any;
+      expect(batchRes.isError).toBeFalsy();
+      expect(fs.readFileSync(path.join(tmpDir, "nested/batch_new.ts"), "utf-8")).toContain(
+        "BATCH_VAL = 7",
+      );
+      expect(fs.readFileSync(createdPath, "utf-8")).toContain("return -1");
+
+      // 7. Security confinement check on MCP aice_read and MCP aice_splice
+      await expect(
+        server.handleRequest(17, "tools/call", {
+          name: "aice_read",
+          arguments: { path: "../../etc/passwd" },
+        }),
+      ).rejects.toThrow(/Access denied/);
+
+      await expect(
+        server.handleRequest(18, "tools/call", {
+          name: "aice_splice",
+          arguments: { filePath: "../../etc/passwd", code: "x" },
+        }),
+      ).rejects.toThrow(/Access denied/);
+
+      // 8. Project activation gate ("enabled": false) on MCP aice_read and aice_splice
+      const disabledSub = path.join(tmpDir, "disabled_proj");
+      fs.mkdirSync(disabledSub, { recursive: true });
+      fs.writeFileSync(
+        path.join(disabledSub, "aice.config.json"),
+        JSON.stringify({ enabled: false }),
+        "utf-8",
+      );
+      fs.writeFileSync(path.join(disabledSub, "mod.ts"), "export const X = 1;\n", "utf-8");
+
+      const disabledRead = (await server.handleRequest(19, "tools/call", {
+        name: "aice_read",
+        arguments: { path: "disabled_proj/mod.ts" },
+      })) as any;
+      expect(disabledRead.isError).toBe(true);
+      expect(disabledRead.content[0].text).toContain("AICE is disabled for this project");
+
+      const disabledSplice = (await server.handleRequest(20, "tools/call", {
+        name: "aice_splice",
+        arguments: { filePath: "disabled_proj/new.ts", code: "export const Y = 2;\n" },
+      })) as any;
+      expect(disabledSplice.isError).toBe(true);
+      expect(disabledSplice.content[0].text).toContain("AICE is disabled for this project");
     });
 
     it("executes aice_outline via tools/call on native TypeScript file with high token reduction", async () => {
@@ -227,6 +382,7 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
         configPath,
         JSON.stringify(
           {
+            idiomsEnabled: true,
             idioms: {
               square: {
                 name: "square",

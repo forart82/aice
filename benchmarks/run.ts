@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * CLI Runner for AICE 2.0 Real AI Agent Benchmarks (`docs/BENCHMARKS.md`)
+ * CLI Runner for AICE Real AI Agent Benchmarks (`docs/BENCHMARKS.md`)
  * and Deterministic Offline Benchmarks (`docs/BENCHMARKS_OFFLINE.md`).
  * Usage:
  *   npx tsx benchmarks/run.ts

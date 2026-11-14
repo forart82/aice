@@ -201,7 +201,7 @@ export async function runRankingBenchmarks(): Promise<BenchmarkTrial[]> {
 
 async function main() {
   console.log("\n=======================================================");
-  console.log("  AICE 2.0 Search Ranking & Target Prioritization Benchmark");
+  console.log("  AICE Search Ranking & Target Prioritization Benchmark");
   console.log("=======================================================\n");
 
   const results = await runRankingBenchmarks();

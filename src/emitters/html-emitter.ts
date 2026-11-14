@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * HTML5 Document & Fragment Emitter for AICE 2.0.
+ * HTML5 Document & Fragment Emitter for AICE.
  * Conforms to Pillar 1 & 2 of docs/RESEARCH_SYNTHESIS.md.
  */
 

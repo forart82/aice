@@ -857,8 +857,16 @@ export function setupWorkspace(
   spec: RealWorldBenchmarkSpec,
   mode: RealAgentMode,
   seed: number = DEFAULT_ADVERSARIAL_SEED,
+  nested: boolean = false,
 ): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), `aice-${spec.id.toLowerCase()}-${mode}-`));
+  const dir = nested
+    ? (() => {
+        const outer = fs.mkdtempSync(path.join(os.tmpdir(), "sbx-"));
+        const inner = path.join(outer, "project");
+        fs.mkdirSync(inner, { recursive: true });
+        return inner;
+      })()
+    : fs.mkdtempSync(path.join(os.tmpdir(), `aice-${spec.id.toLowerCase()}-${mode}-`));
   for (const f of spec.files) {
     const langSpec = SUPPORTED_BENCHMARK_LANGUAGES.find((l) => l.id === f.languageId);
     if (!langSpec) throw new Error(`Unknown languageId ${f.languageId}`);
@@ -957,14 +965,18 @@ export function buildPrompt(
   seed: number = DEFAULT_ADVERSARIAL_SEED,
 ): string {
   const taskText = buildTaskSpecText(spec, seed);
-  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir}. Never inspect, search, or access parent directories (..) or external repositories.`;
+  const targetFilesHint =
+    spec.files.length > 0 ? spec.files.map((f) => f.fileName).join(" ") : ".";
+  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir} using relative filenames only; this prompt is the complete self-contained specification.`;
 
   if (mode === "without_aice") {
     return [
       `Workspace: ${dir}`,
       boundaryRule,
       `Environment: WITHOUT AICE (Native File & Search Tools — Cold-Start Repository).`,
-      `Allowed tools: Native file and search tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name, or ls/rg discovery via run_command). Do NOT run \`aice\` or write files via shell scripts/redirection.`,
+      `Target files: ${targetFilesHint}`,
+      `Allowed tools: ONLY native file tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name) on the listed target files inside ${dir}. Do NOT call \`run_command\` (do NOT run shell commands, \`aice\`, \`git\`, \`find\`, \`ls\`, or CLI compilers like \`rustc\`/\`kotlinc\`/\`tsc\`/\`dotnet\`/\`go\`/\`g++\` — standalone source files reference external crates/types without build manifests, so manual CLI compilation is unsupported).`,
+      `Autonomous Execution: Non-interactive session — this prompt is the complete specification (no package.json, tsconfig.json, .csproj, Cargo.toml, go.mod, or external test/spec files exist anywhere). Do NOT call \`ask_question\` or \`run_command\`; read the listed target files (${targetFilesHint}) with \`read_file\`, write clean idiomatic code (avoiding Node-only globals like \`Buffer\`/\`process\` in .ts files), save directly via \`edit_file\`/\`write_file\`, and reply DONE.`,
       taskText,
       `Reply DONE when all changes are saved to disk.`,
     ].join("\n\n");
@@ -974,11 +986,11 @@ export function buildPrompt(
     return [
       `Workspace: ${dir}`,
       boundaryRule,
-      `Environment: AICE On-the-Fly WITHOUT Idioms (2-Pillar Unified AICE CLI — Cold-Start Repository).`,
-      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, --dry-run, or $idiom macros.`,
-      `AICE 2-Pillar CLI Reference (\`--no-idioms\`):`,
-      `1. Read (\`aice context\`):`,
-      `   - \`aice context . -s "*" --no-idioms\`: Extract \`// symbols:\` headers and compact pure-AICE slices across the workspace (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (Strict 2-Tool AICE CLI — Cold-Start Repository).`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running ONLY \`aice read\` and \`aice splice\` (alias \`aice write\`) with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, find_by_name, replace_file_content, multi_replace_file_content, ls/find/grep/rg/sed/awk/cat/head/tail/echo/tee/python/python3/node, --help, --dry-run, or $idiom macros.`,
+      `AICE 2-Tool CLI Reference (\`--no-idioms\`):`,
+      `1. Read (\`aice read\`):`,
+      `   - \`aice read . -s "*" --no-idioms\`: Extract \`// symbols:\` headers and compact pure-AICE slices across the workspace (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
       `2. Mutate (\`aice splice\` / \`aice write\` — pre-validates AST & native compiler syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
       `   - Zero-escaping unified heredoc stream (preferred for multi-line edits, updates, deletions, or appends):`,
       `     \`aice splice --no-idioms --stdin << 'EOF'\``,
@@ -996,11 +1008,11 @@ export function buildPrompt(
   return [
     `Workspace: ${dir}`,
     boundaryRule,
-    `Environment: AICE On-the-Fly WITH Cold-Start Project Idiom Discovery (\`--idioms\`).`,
-    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/python3/node/sed/awk/cat, --help, or --dry-run.`,
-    `AICE 2-Pillar CLI Reference (\`--idioms\`):`,
-    `1. Read & Mine Idioms (\`aice context\`):`,
-    `   - \`aice context . -s "*" --idioms\`: Auto-discover & save repeating project idioms into \`aice.config.json\` AND extract \`// symbols:\` headers, \`$idiom(...)\`-collapsed symbol slices, and \`### Active Project Idioms\` templates in 1 command (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
+    `Environment: AICE On-the-Fly WITH Cold-Start Project Idiom Discovery (\`--idioms\` — Strict 2-Tool AICE CLI).`,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running ONLY \`aice read\` and \`aice splice\` (alias \`aice write\`). Do NOT use read_file, write_file, edit_file, view_file, grep_search, find_by_name, replace_file_content, multi_replace_file_content, ls/find/grep/rg/sed/awk/cat/head/tail/echo/tee/python/python3/node, --help, or --dry-run.`,
+    `AICE 2-Tool CLI Reference (\`--idioms\`):`,
+    `1. Read & Mine Idioms (\`aice read\`):`,
+    `   - \`aice read . -s "*" --idioms\`: Auto-discover & save repeating project idioms into \`aice.config.json\` AND extract \`// symbols:\` headers, \`$idiom(...)\`-collapsed symbol slices, and \`### Active Project Idioms\` templates in 1 command (for >8 files, pass 2 file-list subsets so 4KB tool output is never truncated).`,
     `2. Mutate & Refactor Idioms (\`aice splice\` / \`aice write\` — pre-validates AST & native syntax before writing; omit \`verifyDecoySentinel_*\` so it stays untouched):`,
     `   - Atomic JSON batch for symbol updates/insertions, deletions, AND workspace-wide \`$idiom\` template refactors in 1 call (write idiom \`"template"\` in the exact AICE DSL syntax shown under \`### Active Project Idioms\`, e.g. \`div(class: "...", ...)\` / \`fl-center\`, never raw \`<div ...>\` HTML/JSX; in JSON/YAML idioms preserve \`{ key: $0, ... }\`; pass via \`--batch '[...]'\`, \`--batch -\`, or \`--stdin << 'EOF'\`):`,
     `     \`aice splice --idioms --batch '[{"file":"<file>","symbol":"<sym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<newSym>","insertAfter":"<anchorSym>","code":"<AICE with $idiom>"},{"file":"<file>","symbol":"<obsoleteSym>","delete":true},{"name":"$<discovered_idiom>","template":"<updated AICE DSL template>"}]'\``,
@@ -1022,7 +1034,7 @@ export function buildLayerPrompt(
   const promptText = layerDef?.taskPrompt || `Implement Layer ${layerIndex} features`;
   const targetFilesHint =
     layerDef && layerDef.targetFiles.length > 0 ? layerDef.targetFiles.join(" ") : ".";
-  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir}. Never inspect, search, or access parent directories (..) or external repositories.`;
+  const boundaryRule = `Workspace Boundary: Work strictly inside ${dir} using relative filenames only; this prompt is the complete self-contained specification.`;
 
   if (mode === "without_aice") {
     return [
@@ -1030,7 +1042,9 @@ export function buildLayerPrompt(
       boundaryRule,
       `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
       `Environment: WITHOUT AICE (Native File & Search Tools).`,
-      `Allowed tools: Native file and search tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name, or ls/rg discovery via run_command). Do NOT run \`aice\` or write files via shell scripts/redirection.`,
+      `Target files: ${targetFilesHint}`,
+      `Allowed tools: ONLY native file tools (read_file, edit_file, write_file, view_file, replace_file_content, multi_replace_file_content, grep_search, find_by_name) on the listed target files inside ${dir}. Do NOT call \`run_command\` (do NOT run shell commands, \`aice\`, \`git\`, \`find\`, \`ls\`, or CLI compilers like \`rustc\`/\`kotlinc\`/\`tsc\`/\`dotnet\`/\`go\`/\`g++\` — standalone source files reference external crates/types without build manifests, so manual CLI compilation is unsupported).`,
+      `Autonomous Execution: Non-interactive session — this prompt is the complete specification (no package.json, tsconfig.json, .csproj, Cargo.toml, go.mod, or external test/spec files exist anywhere). Do NOT call \`ask_question\` or \`run_command\` or reply DONE without editing; read the target files (${targetFilesHint}) with \`read_file\`, design clean, self-contained, compilable functions/methods/fields directly in each target file (${targetFilesHint}) using names matching the domain terms in Requirement 1 (avoiding Node-only globals like \`Buffer\`/\`process\` in .ts files), save directly via \`edit_file\`/\`write_file\`, and reply DONE.`,
       `Requirements:`,
       `1. ${promptText}`,
       `2. Non-Regression: Do NOT break or revert previous layer functionality or compiler checks.`,
@@ -1044,10 +1058,10 @@ export function buildLayerPrompt(
       `Workspace: ${dir}`,
       boundaryRule,
       `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
-      `Environment: AICE On-the-Fly WITHOUT Idioms (2-Pillar AICE CLI with \`--no-idioms\`).`,
-      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, --help, or $idiom macros.`,
-      `AICE CLI Reference:`,
-      `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} -s "*" --no-idioms\`.`,
+      `Environment: AICE On-the-Fly WITHOUT Idioms (Strict 2-Tool AICE CLI with \`--no-idioms\`).`,
+      `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running ONLY \`aice read\` and \`aice splice\` (alias \`aice write\`) with \`--no-idioms\`. Do NOT use read_file, write_file, edit_file, view_file, grep_search, find_by_name, replace_file_content, multi_replace_file_content, ls/find/grep/rg/sed/awk/cat/head/tail/echo/tee/python/python3/node, --help, --dry-run, or $idiom macros.`,
+      `AICE 2-Tool CLI Reference:`,
+      `- Inspect only needed target files (skip if already known from previous layer): \`aice read ${targetFilesHint} -s "*" --no-idioms\`.`,
       `- Apply all new layer AST additions in 1 stream call via \`aice splice --no-idioms --stdin << 'EOF'\` (use \`=== <file>:eof ===\` to append new top-level functions/types/rules/keys, \`=== <file>:<Class.newMethod> ===\` to add class methods, or \`=== <file>:<existingSymbol> ===\` to replace existing symbols) or \`aice splice --no-idioms --batch '[...]'\`.`,
       `Requirements:`,
       `1. ${promptText}`,
@@ -1061,10 +1075,10 @@ export function buildLayerPrompt(
     `Workspace: ${dir}`,
     boundaryRule,
     `Task: ${title} (Progressive Layer ${layerIndex}/3).`,
-    `Environment: AICE On-the-Fly WITH Project Idioms (\`--idioms\`).`,
-    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running \`aice\` CLI commands. Do NOT use read_file, write_file, edit_file, view_file, grep_search, replace_file_content, multi_replace_file_content, python/node/sed/awk/cat, or --help.`,
-    `AICE CLI Reference:`,
-    `- Inspect only needed target files (skip if already known from previous layer): \`aice context ${targetFilesHint} -s "*" --idioms\`.`,
+    `Environment: AICE On-the-Fly WITH Project Idioms (\`--idioms\` — Strict 2-Tool AICE CLI).`,
+    `Allowed tools: run_command (WaitMsBeforeAsync: 10000) running ONLY \`aice read\` and \`aice splice\` (alias \`aice write\`). Do NOT use read_file, write_file, edit_file, view_file, grep_search, find_by_name, replace_file_content, multi_replace_file_content, ls/find/grep/rg/sed/awk/cat/head/tail/echo/tee/python/python3/node, --help, or --dry-run.`,
+    `AICE 2-Tool CLI Reference:`,
+    `- Inspect only needed target files (skip if already known from previous layer): \`aice read ${targetFilesHint} -s "*" --idioms\`.`,
     `- Apply all new layer AST additions in 1 stream call via \`aice splice --idioms --stdin << 'EOF'\` (use \`=== <file>:eof ===\` to append new top-level functions/types/rules/keys, \`=== <file>:<Class.newMethod> ===\` to add class methods, or \`=== <file>:<existingSymbol> ===\` to replace existing symbols) or \`aice splice --idioms --batch '[...]'\`.`,
     `Requirements:`,
     `1. ${promptText}`,
@@ -1155,6 +1169,104 @@ function checkBalancedMarkupTags(content: string): string | null {
   return null;
 }
 
+function checkCSharpMembersInsideTypeScope(content: string): string | null {
+  let stripped = "";
+  let i = 0;
+  const len = content.length;
+  while (i < len) {
+    const ch = content[i];
+    const next = content[i + 1];
+    if (ch === "/" && next === "/") {
+      i += 2;
+      while (i < len && content[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      i += 2;
+      while (i < len && !(content[i] === "*" && content[i + 1] === "/")) {
+        if (content[i] === "\n") stripped += "\n";
+        i++;
+      }
+      i += 2;
+      continue;
+    }
+    if (ch === "@" && next === '"') {
+      i += 2;
+      while (i < len) {
+        if (content[i] === "\n") stripped += "\n";
+        if (content[i] === '"') {
+          if (content[i + 1] === '"') {
+            i += 2;
+            continue;
+          }
+          i++;
+          break;
+        }
+        i++;
+      }
+      stripped += '""';
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      const q = ch;
+      i++;
+      while (i < len && content[i] !== q) {
+        if (content[i] === "\n") stripped += "\n";
+        if (content[i] === "\\") i += 2;
+        else i++;
+      }
+      if (i < len && content[i] === q) i++;
+      stripped += '""';
+      continue;
+    }
+    stripped += ch;
+    i++;
+  }
+
+  const scopeStack: Array<"namespace" | "type"> = [];
+  let stmtBuf = "";
+  for (let idx = 0; idx < stripped.length; idx++) {
+    const c = stripped[idx]!;
+    if (c === "{") {
+      const cleanHeader = stmtBuf.replace(/\[[^\]]*\]/g, " ").trim();
+      const insideType = scopeStack.includes("type");
+      if (!insideType) {
+        if (/\b(?:class|struct|interface|record|enum)\b/.test(cleanHeader)) {
+          scopeStack.push("type");
+        } else if (/\bnamespace\b/.test(cleanHeader)) {
+          scopeStack.push("namespace");
+        } else if (/\b(?:public|private|protected|internal|static)\b/.test(cleanHeader)) {
+          return `C# member declaration outside class/struct/interface/record scope: ${cleanHeader.slice(0, 80)}`;
+        } else {
+          scopeStack.push("namespace");
+        }
+      } else {
+        scopeStack.push("type");
+      }
+      stmtBuf = "";
+    } else if (c === "}") {
+      scopeStack.pop();
+      stmtBuf = "";
+    } else if (c === ";") {
+      const cleanStmt = stmtBuf.replace(/\[[^\]]*\]/g, " ").trim();
+      const insideType = scopeStack.includes("type");
+      if (
+        !insideType &&
+        cleanStmt.length > 0 &&
+        !/^using\b/.test(cleanStmt) &&
+        !/\b(?:namespace|delegate|record|class|struct|interface|enum)\b/.test(cleanStmt) &&
+        /\b(?:public|private|protected|internal|static)\b/.test(cleanStmt)
+      ) {
+        return `C# member declaration outside class/struct/interface/record scope: ${cleanStmt.slice(0, 80)}`;
+      }
+      stmtBuf = "";
+    } else {
+      stmtBuf += c;
+    }
+  }
+  return null;
+}
+
 export function verifyCompilerAndSyntaxOnFile(
   filePath: string,
   languageId: BenchmarkLanguageId,
@@ -1185,6 +1297,25 @@ export function verifyCompilerAndSyntaxOnFile(
       }
       if (languageId === "ts" || languageId === "js") {
         execFileSync("node", ["--check", filePath], { stdio: "pipe" });
+        if (languageId === "ts") {
+          const prog = ts.createProgram([filePath], {
+            target: ts.ScriptTarget.ESNext,
+            module: ts.ModuleKind.ESNext,
+            moduleResolution: ts.ModuleResolutionKind.Bundler,
+            lib: ["lib.esnext.full.d.ts"],
+            noEmit: true,
+            skipLibCheck: true,
+            strict: false,
+          });
+          const sf = prog.getSourceFile(filePath);
+          const semDiags = prog
+            .getSemanticDiagnostics(sf)
+            .filter((d) => d.code !== 2307);
+          if (semDiags.length > 0) {
+            const msg = ts.flattenDiagnosticMessageText(semDiags[0].messageText, "\n");
+            return `TypeScript semantic diagnostic (TS${semDiags[0].code}): ${msg}`;
+          }
+        }
       } else {
         const sf = ts.createSourceFile(
           filePath,
@@ -1240,15 +1371,44 @@ export function verifyCompilerAndSyntaxOnFile(
         if (fs.existsSync(rmetaPath)) fs.rmSync(rmetaPath, { force: true });
         if (fs.existsSync(tmpRsPath)) fs.rmSync(tmpRsPath, { force: true });
       }
-    } else if (languageId === "cs" || languageId === "kt" || languageId === "go") {
+    } else if (languageId === "kt") {
       const delimErr = checkBalancedDelimiters(content);
       if (delimErr) return delimErr;
-      if (
-        /(?:^|[^+\-*/%&|^=<>!])[+\-*/%]\s*(?:;|\}|\r?\n)/m.test(content) ||
-        /\breturn\s*(?:;|\}|\r?\n)/m.test(content)
-      ) {
+      if (/(?:^|[^+\-*/%&|^=<>!])[+\-*/%]\s*(?:;|\}|\r?\n)/m.test(content)) {
         return `Dangling operator or incomplete expression in ${languageId}`;
       }
+      const tmpJarPath = path.join(
+        dir,
+        `.aice_check_${path.basename(filePath, path.extname(filePath))}_${process.pid}.jar`,
+      );
+      try {
+        execFileSync("kotlinc", [filePath, "-d", tmpJarPath], { stdio: "pipe" });
+      } finally {
+        if (fs.existsSync(tmpJarPath)) fs.rmSync(tmpJarPath, { recursive: true, force: true });
+      }
+    } else if (languageId === "go") {
+      const delimErr = checkBalancedDelimiters(content);
+      if (delimErr) return delimErr;
+      if (/(?:^|[^+\-*/%&|^=<>!])[+\-*/%]\s*(?:;|\}|\r?\n)/m.test(content)) {
+        return `Dangling operator or incomplete expression in ${languageId}`;
+      }
+      execFileSync("gofmt", ["-e", filePath], { stdio: "pipe" });
+      const tmpGoDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-govet-"));
+      try {
+        fs.writeFileSync(path.join(tmpGoDir, "go.mod"), "module aicecheck\n\ngo 1.22\n", "utf-8");
+        fs.writeFileSync(path.join(tmpGoDir, path.basename(filePath)), content, "utf-8");
+        execFileSync("go", ["vet", "./..."], { cwd: tmpGoDir, stdio: "pipe" });
+      } finally {
+        fs.rmSync(tmpGoDir, { recursive: true, force: true });
+      }
+    } else if (languageId === "cs") {
+      const delimErr = checkBalancedDelimiters(content);
+      if (delimErr) return delimErr;
+      if (/(?:^|[^+\-*/%&|^=<>!])[+\-*/%]\s*(?:;|\}|\r?\n)/m.test(content)) {
+        return `Dangling operator or incomplete expression in ${languageId}`;
+      }
+      const csOutsideErr = checkCSharpMembersInsideTypeScope(content);
+      if (csOutsideErr) return csOutsideErr;
     } else if (languageId === "html") {
       const tagErr = checkBalancedMarkupTags(content);
       if (tagErr) return tagErr;
@@ -1303,7 +1463,19 @@ export function auditTranscriptCompliance(
   const violations: string[] = [];
   const raw = fs.readFileSync(transcriptPath, "utf-8");
   const lines = raw.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  const resolvedWorkspace = workspaceDir ? path.resolve(workspaceDir) : undefined;
+  let resolvedWorkspace = workspaceDir ? path.resolve(workspaceDir) : undefined;
+  if (!resolvedWorkspace) {
+    const wsMatch = raw.match(/Workspace:\s*(\/[^\s"\\]+)/);
+    if (wsMatch?.[1]) {
+      resolvedWorkspace = path.resolve(wsMatch[1]);
+    }
+  }
+  const escapedWorkspaceRe = resolvedWorkspace
+    ? new RegExp(
+        `${resolvedWorkspace.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[/\\s'";|&)]|$)`,
+        "g",
+      )
+    : null;
 
   const FORBIDDEN_AICE_MODE_NATIVE_TOOLS = new Set([
     "write_file",
@@ -1317,10 +1489,12 @@ export function auditTranscriptCompliance(
   ]);
 
   const BENCHMARK_HARNESS_ESCAPE_RE =
-    /(?:benchmarks\/(?:run-real-agents|offline-suite|real-agent-suite|real-agent-results)|computeSeededFileMutation|computeFileDecoySpec|verifyWorkspaceOnDisk|SCENARIO_LAYER_DEFINITIONS|HOSTILE_LONE_NEEDLE_SPEC|\/dev\/aice\b|antigravity-cli\/worktrees\b)/;
+    /(?:benchmarks\/(?:run-real-agents|offline-suite|real-agent-suite|real-agent-results)|computeSeededFileMutation|computeFileDecoySpec|verifyWorkspaceOnDisk|SCENARIO_LAYER_DEFINITIONS|HOSTILE_LONE_NEEDLE_SPEC|aice-rw-audit-manifest|antigravity-cli|transcript_full\.jsonl|transcript\.jsonl|\/dev\/aice\b)/;
 
   const SHELL_FILE_WRITER_RE =
-    /\bcat\s+<<[\s\S]*?>|\bcat\s+[^>|\n]*?>|\becho\b[^|\n]*?>|(?:^|[|;&]\s*)\btee\b|\bfs\.writeFileSync\b|\bpython3?\b[\s\S]*?\b(?:open\s*\([^)]*['"][wa]['"]|write_text\s*\()/;
+    /\bcat\s+<<[\s\S]*?>|\bcat\s+[^>|\n]*?>|\b(?:echo|printf)\b[^|\n]*?>|(?:^|[|;&]\s*)\btee\b|(?:^|[|;&\s])sed\s+(?:-[a-zA-Z]*i[a-zA-Z]*\b|--in-place\b)|\b(?:fs\.)?(?:writeFileSync|appendFileSync)\b|\bpython3?\b[\s\S]*?\b(?:open\s*\([^)]*(?:['"][wa+]['"]|mode\s*=\s*['"][wa])|write_text\s*\(|write_bytes\s*\()/;
+
+  const PARENT_TRAVERSAL_RE = /(?:^|[\s'"=/;|&()])(?<!\.)\.\.(?!\.)(?:[/\s'";|&)]|$)/;
 
   for (const line of lines) {
     let entry: Record<string, unknown>;
@@ -1338,6 +1512,11 @@ export function auditTranscriptCompliance(
       const toolName = String(tc.name ?? tc.tool ?? "");
       const args = (tc.args ?? tc.arguments ?? tc.input ?? {}) as Record<string, unknown>;
       const serializedArgs = JSON.stringify(args);
+
+      if (toolName === "ask_question") {
+        violations.push(`Forbidden interactive tool 'ask_question' used in ${mode}`);
+        continue;
+      }
 
       if (BENCHMARK_HARNESS_ESCAPE_RE.test(serializedArgs)) {
         violations.push(
@@ -1381,53 +1560,141 @@ export function auditTranscriptCompliance(
       const cmd = String(args.CommandLine ?? args.command ?? args.cmd ?? "");
       if (!cmd) continue;
 
+      const sanitizedRedirCmd = cmd.replace(/\b\d*>&\d+\b|\b\d*>\s*\/dev\/null\b/g, "");
+
       if (mode === "without_aice") {
-        if (/\baice\s+(?:context|outline|splice|write|create|new|idioms|compile)\b/.test(cmd)) {
+        if (
+          /(?:^|[;&|()\s])(?:npx\s+(?:tsx\s+)?\S*aice|node\s+\S*aice\.mjs)(?:\s|$)/.test(cmd) ||
+          /(?:^|[;&|]\s*)aice(?:\s|$)/.test(cmd) ||
+          /\baice\s+(?:read|context|ctx|outline|splice|write|create|new|idioms|compile|patch|diff|fmt|enable|disable|--help|--version|-h|-V)\b/.test(
+            cmd,
+          )
+        ) {
           violations.push(`Forbidden aice CLI usage in without_aice mode: ${cmd.slice(0, 120)}`);
         }
-        if (SHELL_FILE_WRITER_RE.test(cmd)) {
+        if (SHELL_FILE_WRITER_RE.test(sanitizedRedirCmd)) {
           violations.push(
             `Forbidden shell file writer detected in without_aice mode: ${cmd.slice(0, 120)}`,
           );
         }
-        if (
-          resolvedWorkspace &&
-          /(?:^|[\s;&|])(?:cd|ls|rg|grep|find)\s+\.\.(?:\/|\s|$)|(?:\s|^)\.\.\//.test(cmd)
-        ) {
+        const isNestedSandbox = Boolean(
+          resolvedWorkspace && /\/sbx-[A-Za-z0-9_-]+\/project$/.test(resolvedWorkspace),
+        );
+        const outerSandbox = isNestedSandbox && resolvedWorkspace
+          ? path.dirname(resolvedWorkspace)
+          : undefined;
+        const escapedOuterRe = outerSandbox
+          ? new RegExp(
+              `${outerSandbox.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=[/\\s'";|&)]|$)`,
+              "g",
+            )
+          : null;
+        let wsClearedWithoutAice = (
+          escapedWorkspaceRe
+            ? sanitizedRedirCmd.replace(escapedWorkspaceRe, "__WORKSPACE__")
+            : sanitizedRedirCmd
+        ).replace(/\/dev\/null\b/g, "");
+        if (escapedOuterRe) {
+          wsClearedWithoutAice = wsClearedWithoutAice.replace(
+            escapedOuterRe,
+            "__OUTER_SANDBOX__",
+          );
+        }
+        // Exempt benign compiler binary output targets (`-o /tmp/foo.rlib`, `-d /tmp/foo.jar`), `bunx`/`npx` cached tool binaries, and matching `rm` cleanup
+        wsClearedWithoutAice = wsClearedWithoutAice
+          .replace(
+            /\/tmp\/(?:bunx|npx|npm|yarn|pnpm)-[\w@.-]+\/node_modules\/[\w./-]+/g,
+            "__PKG_RUNNER_BIN__",
+          )
+          .replace(
+            /(?:-o|-d|--out-dir)\s+['"]?\/tmp\/[\w.-]+\.(?:jar|rlib|rmeta|o|a|out|exe|bin|so|dylib|class)['"]?/g,
+            "-o __COMPILER_TMP_OUT__",
+          )
+          .replace(
+            /\brm\s+(?:-[rfv]+\s+)*(?:['"]?\/tmp\/[\w.-]+\.(?:jar|rlib|rmeta|o|a|out|exe|bin|so|dylib|class)['"]?\s*)+/g,
+            "rm __COMPILER_TMP_OUT__",
+          );
+        if (/(?:^|[\s'"=;|&(:><])\/tmp\b/.test(wsClearedWithoutAice)) {
+          violations.push(`Sandbox escape into /tmp outside workspace: ${cmd.slice(0, 120)}`);
+        }
+        if (isNestedSandbox) {
+          if (
+            /\.\.\s*\/\s*\.\./.test(wsClearedWithoutAice) ||
+            /\bcd\s+['"]?\.\.(?:[/\s'";|&)]|$)/.test(wsClearedWithoutAice)
+          ) {
+            violations.push(`Sandbox parent-directory escape detected: ${cmd.slice(0, 120)}`);
+          }
+        } else if (PARENT_TRAVERSAL_RE.test(wsClearedWithoutAice)) {
           violations.push(`Sandbox parent-directory escape detected: ${cmd.slice(0, 120)}`);
         }
         continue;
       }
 
-      // Strip safe `aice (splice|write|create|new) ... << 'EOF' ... EOF` heredoc bodies before checking shell commands
-      const strippedCmd = cmd.replace(
-        /\baice\s+(?:splice|write|create|new)\b[\s\S]*?<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g,
-        "aice_heredoc",
+      // Strip safe `cat << 'EOF' | aice splice ...` and `aice (splice|write|create|new) ... << 'EOF' ... EOF` heredoc bodies while preserving CLI flags on the header line
+      const withoutHeredocs = sanitizedRedirCmd
+        .replace(
+          /\bcat\s*<<-?\s*['"]?(\w+)['"]?\s*\|\s*((?:[^\n|]*?\b)?aice\s+(?:splice|write|create|new)\b[^\n;&|]*)\r?\n[\s\S]*?\r?\n\1\b/g,
+          (_match, _delim, aiceCmd: string) => `${aiceCmd.trim()} __AICE_HEREDOC__`,
+        )
+        .replace(
+          /\baice\s+(?:splice|write|create|new)\b[^\n;&|]*?<<-?\s*['"]?(\w+)['"]?[\s\S]*?\n\1\b/g,
+          (match) => {
+            const firstLine = match.split(/\r?\n/, 1)[0] ?? "";
+            const beforeHeredoc = firstLine.replace(/<<-?\s*['"]?\w+['"]?.*$/, "");
+            return `${beforeHeredoc} __AICE_HEREDOC__`;
+          },
+        );
+
+      // Neutralize quoted selector/code/batch payloads passed to `aice` flags (quote-aware across embedded `;`, `&`, `|`)
+      const strippedCmd = withoutHeredocs.replace(
+        /\baice\s+(?:read|context|ctx|splice|write)\b(?:[^;&|'"\n]|'[^']*'|"[^"\\]*(?:\\.[^"\\]*)*")*/g,
+        (seg) =>
+          seg.replace(
+            /((?:-s|--symbol|-c|--code|--batch)(?:\s+|=))(?:'[^']*'|"[^"\\]*(?:\\.[^"\\]*)*")/g,
+            '$1"__AICE_PAYLOAD__"',
+          ),
       );
 
       if (mode === "aice_no_idioms" && /(?:^|\s)--idioms(?:\s|$)/.test(strippedCmd)) {
         violations.push(`Forbidden --idioms flag used in aice_no_idioms mode: ${cmd.slice(0, 120)}`);
       }
 
-      if (
-        resolvedWorkspace &&
-        /(?:^|[\s;&|])(?:cd|ls|rg|grep|find|aice\s+\w+)\s+\.\.(?:\/|\s|$)|(?:\s|^)\.\.\//.test(
-          strippedCmd,
-        )
-      ) {
+      const wsClearedAice = (
+        escapedWorkspaceRe
+          ? strippedCmd.replace(escapedWorkspaceRe, "__WORKSPACE__")
+          : strippedCmd
+      ).replace(/\/dev\/null\b/g, "");
+
+      if (/(?:^|[\s'"=;|&(:><])\/tmp\b/.test(wsClearedAice)) {
+        violations.push(`Sandbox escape into /tmp outside workspace: ${cmd.slice(0, 120)}`);
+      }
+
+      if (PARENT_TRAVERSAL_RE.test(wsClearedAice)) {
         violations.push(`Sandbox parent-directory escape detected: ${cmd.slice(0, 120)}`);
       }
 
-      // 1. Forbidden shell file writers: cat >, cat << ... >, echo >, tee, fs.writeFileSync, python open(...,'w')
+      if (
+        /(?:^|\s)(?:--help|--dry-run)(?:\s|$)|\baice(?:\s+\w+)?\s+-h(?:\s|$)/.test(strippedCmd)
+      ) {
+        violations.push(`Forbidden --help or --dry-run flag detected: ${cmd.slice(0, 120)}`);
+      }
+
+      if (/\baice\s+disable\b/.test(strippedCmd)) {
+        violations.push(`Forbidden 'aice disable' detected in ${mode}: ${cmd.slice(0, 120)}`);
+      }
+
+      // 1. Forbidden shell file writers: cat >, cat << ... >, echo >, tee, sed -i, fs.writeFileSync, python open(...,'w')
       if (SHELL_FILE_WRITER_RE.test(strippedCmd)) {
         violations.push(`Forbidden shell file writer detected: ${cmd.slice(0, 120)}`);
       }
 
-      // 2. Forbidden discovery bypasses: grep -rn, cat <file>, sed -n
+      // 2. Forbidden discovery bypasses: ls, find, grep, rg, sed -n, awk, cat <file>, head, tail, python/node scripts
       if (
-        /\bgrep\s+-[a-zA-Z]*r[a-zA-Z]*n\b|\bgrep\s+-[a-zA-Z]*n[a-zA-Z]*r\b/.test(strippedCmd) ||
+        /(?:^|[;&|]\s*|\$\(\s*)(?:ls|find|grep|rg|awk|head|tail)\b/.test(strippedCmd) ||
+        /(?:^|[;&|]\s*)sed\s+-n\b/.test(strippedCmd) ||
         /(?:^|[;&|]\s*)cat\s+(?!<<)[^\s>|]+/.test(strippedCmd) ||
-        /\bsed\s+-n\b/.test(strippedCmd)
+        /(?:^|[;&|]\s*)python3?\b/.test(strippedCmd) ||
+        /(?:^|[;&|]\s*)node\s+(?:-e|--eval|-p|--print)\b/.test(strippedCmd)
       ) {
         violations.push(`Forbidden shell discovery bypass detected: ${cmd.slice(0, 120)}`);
       }
@@ -1697,6 +1964,99 @@ export function verifyWorkspaceOnDisk(
     details,
   };
 }
+export const AUDIT_MANIFEST_PATH = "/tmp/aice-rw-audit-manifest.json";
+
+export interface ForensicAuditManifestEntry {
+  id: string;
+  mode: RealAgentMode;
+  seed: number;
+  conversationId: string;
+  workspaceDir: string;
+  transcriptPath: string;
+  verified: boolean;
+  regressionFree: boolean;
+  decoysIntact: boolean;
+  compilerVerified: boolean;
+  zeroAice: boolean;
+  llmTurns: number;
+  toolCalls: number;
+  workingTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  apiCostUsd: number;
+  durationSeconds: number;
+  layers: BenchmarkLayerMetrics[];
+  details: string[];
+  updatedAt: string;
+}
+
+export interface ForensicAuditManifest {
+  updatedAt: string;
+  runs: Record<string, Partial<Record<RealAgentMode, ForensicAuditManifestEntry>>>;
+}
+
+function writeJsonFileAtomic(filePath: string, data: unknown): void {
+  const dirName = path.dirname(filePath);
+  fs.mkdirSync(dirName, { recursive: true });
+  const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
+  fs.writeFileSync(tmpPath, `${JSON.stringify(data, null, 2)}\n`, "utf-8");
+  fs.renameSync(tmpPath, filePath);
+}
+
+export function recordForensicManifestEntry(
+  manifestPath: string,
+  entry: ForensicAuditManifestEntry,
+): void {
+  let manifest: ForensicAuditManifest = {
+    updatedAt: entry.updatedAt,
+    runs: {},
+  };
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as Partial<ForensicAuditManifest>;
+      if (parsed && typeof parsed === "object" && parsed.runs && typeof parsed.runs === "object") {
+        manifest = {
+          updatedAt: entry.updatedAt,
+          runs: parsed.runs,
+        };
+      }
+    } catch {
+      // recover cleanly if a stale corrupted manifest existed
+    }
+  }
+  manifest.updatedAt = entry.updatedAt;
+  manifest.runs[entry.id] = manifest.runs[entry.id] || {};
+  manifest.runs[entry.id]![entry.mode] = entry;
+  writeJsonFileAtomic(manifestPath, manifest);
+}
+
+function syncIsolatedAiceBinary(): void {
+  const builtBundle = path.resolve(__dirname, "..", "dist", "aice.mjs");
+  const localBinAice = path.join(os.homedir(), ".local", "bin", "aice");
+  if (!fs.existsSync(builtBundle) || !fs.existsSync(path.dirname(localBinAice))) {
+    return;
+  }
+  try {
+    const srcStat = fs.statSync(builtBundle);
+    const dstExists = fs.existsSync(localBinAice);
+    const dstStat = dstExists ? fs.lstatSync(localBinAice) : undefined;
+    if (
+      !dstStat ||
+      dstStat.isSymbolicLink() ||
+      dstStat.size !== srcStat.size ||
+      dstStat.mtimeMs < srcStat.mtimeMs
+    ) {
+      const tmpBin = `${localBinAice}.tmp.${process.pid}.${Date.now()}`;
+      fs.copyFileSync(builtBundle, tmpBin);
+      fs.chmodSync(tmpBin, 0o755);
+      fs.renameSync(tmpBin, localBinAice);
+    }
+  } catch {
+    // ignore if ~/.local/bin is not writable
+  }
+}
+
 export interface RunAgentBenchmarkOptions {
   seed?: number;
   dashboard?: BenchmarkDashboard;
@@ -1704,8 +2064,8 @@ export interface RunAgentBenchmarkOptions {
   existingConvId?: string;
   existingDir?: string;
   keepWorkspace?: boolean;
+  manifestPath?: string;
 }
-
 export async function runAgentBenchmarkMode(
   spec: RealWorldBenchmarkSpec,
   mode: RealAgentMode,
@@ -1719,7 +2079,7 @@ export async function runAgentBenchmarkMode(
   const seed = opts.seed ?? DEFAULT_ADVERSARIAL_SEED;
   const dashboard = opts.dashboard ?? dashboardArg;
   const targetLayer = opts.targetLayer;
-  const dir = opts.existingDir || setupWorkspace(spec, mode, seed);
+  const dir = opts.existingDir || setupWorkspace(spec, mode, seed, true);
   const coldStartRepo =
     !fs.existsSync(path.join(dir, "aice.config.json")) &&
     !fs.existsSync(path.join(dir, ".aice-idioms.json"));
@@ -1991,8 +2351,43 @@ export async function runAgentBenchmarkMode(
     toolCalls: totalToolCalls,
   });
 
+  const finalApiCostUsd = computeRealApiCostUsd(
+    totalInputTokens,
+    totalCacheReadTokens,
+    totalOutputTokens,
+  );
+  const finalTranscriptPath = resolveLiveTranscriptPath(convId) ?? "";
+
+  if (opts.manifestPath) {
+    recordForensicManifestEntry(opts.manifestPath, {
+      id: spec.id,
+      mode,
+      seed,
+      conversationId: convId,
+      workspaceDir: dir,
+      transcriptPath: finalTranscriptPath,
+      verified: lastCheck.verified,
+      regressionFree: lastCheck.verified,
+      decoysIntact: lastCheck.decoysIntact,
+      compilerVerified: lastCheck.compilerVerified,
+      zeroAice: lastCheck.zeroAice,
+      llmTurns: totalLlmTurns,
+      toolCalls: totalToolCalls,
+      workingTokens: totalWorkingTokens,
+      inputTokens: totalInputTokens,
+      outputTokens: totalOutputTokens,
+      cacheReadTokens: totalCacheReadTokens,
+      apiCostUsd: finalApiCostUsd,
+      durationSeconds: totalDurationSeconds,
+      layers: layerMetrics,
+      details: lastCheck.details,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+
   if (!opts.keepWorkspace && !opts.existingDir && !targetLayer) {
-    fs.rmSync(dir, { recursive: true, force: true });
+    const cleanTarget = path.basename(dir) === "project" ? path.dirname(dir) : dir;
+    fs.rmSync(cleanTarget, { recursive: true, force: true });
   }
   return {
     benchmarkId: spec.id,
@@ -2061,7 +2456,7 @@ export function syncBenchmarkDocsMarkdown(
 
     const lines: string[] = [];
 
-    lines.push("# AICE 2.0 — Real AI Agent Benchmark Suite Report (3-Layer Progressive Lifecycle)");
+    lines.push("# AICE — Real AI Agent Benchmark Suite Report (3-Layer Progressive Lifecycle)");
     lines.push("");
     lines.push(
       "> **Ground-Truth Adversarial Real AI Agent Proof**: Every metric in this report comes from **real autonomous AI agent (`agy -p`) executions** running against **cold-start, procedurally seeded, decoy-minefielded workspaces** on disk under **blind issue prompts** across **3 sequential progressive layers** (Layer 1 Baseline, Layer 2 Feature Addition, Layer 3 Cross-Cutting Persistence/Telemetry) and measured directly from each agent's ground-truth `.system_generated/logs/transcript.jsonl` telemetry log.",
@@ -2227,7 +2622,9 @@ async function main() {
       targetIds.push(rawArgs[i]);
     }
   }
+  syncIsolatedAiceBinary();
   const outPath = path.resolve(__dirname, "real-agent-results.json");
+  const manifestPath = noSave ? undefined : AUDIT_MANIFEST_PATH;
   let existing: Record<string, Record<RealAgentMode, RealAgentRunMetrics>> = {};
   if (fs.existsSync(outPath)) {
     existing = JSON.parse(fs.readFileSync(outPath, "utf-8"));
@@ -2266,6 +2663,7 @@ async function main() {
       existingConvId: cliConvId,
       existingDir: cliDir,
       keepWorkspace: keepDir || targetLayer < 3,
+      manifestPath,
     });
     console.log(`\n[BENCHMARK_RESULT] ${JSON.stringify(res)}\n`);
     return;
@@ -2276,11 +2674,16 @@ async function main() {
 
   try {
     await runWithConcurrencyPool(tasks, concurrency, async ({ spec, mode }) => {
-      const res = await runAgentBenchmarkMode(spec, mode, seed, dashboard);
+      const res = await runAgentBenchmarkMode(spec, mode, {
+        seed,
+        keepWorkspace: keepDir,
+        dashboard,
+        manifestPath,
+      });
       existing[spec.id] = existing[spec.id] || ({} as Record<RealAgentMode, RealAgentRunMetrics>);
       existing[spec.id][mode] = res;
       if (!noSave) {
-        fs.writeFileSync(outPath, `${JSON.stringify(existing, null, 2)}\n`);
+        writeJsonFileAtomic(outPath, existing);
         syncBenchmarkDocsMarkdown(existing);
       }
       return res;

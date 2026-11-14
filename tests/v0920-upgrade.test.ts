@@ -384,9 +384,9 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       );
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("NEVER run `sed -n`");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        'aice context <fileOrDir> -s "/<searchPattern>/"',
+        'aice read <fileOrDir> -s "/<searchPattern>/"',
       );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice outline src tests");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read src tests");
     });
   });
 
@@ -451,8 +451,7 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
         expect(fs.existsSync(toolsSchemaPath)).toBe(true);
         const toolsSchema = JSON.parse(fs.readFileSync(toolsSchemaPath, "utf-8"));
         expect(toolsSchema.version).toBe(AICE_VERSION);
-        const refreshedDotGemini = fs.readFileSync(path.join(sampleProj, ".GEMINI.md"), "utf-8");
-        expect(refreshedDotGemini).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
+        expect(fs.existsSync(path.join(sampleProj, ".GEMINI.md"))).toBe(false);
         const refreshedAgentsMd = fs.readFileSync(path.join(sampleProj, "AGENTS.md"), "utf-8");
         expect(refreshedAgentsMd).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
       } finally {

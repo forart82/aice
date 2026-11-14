@@ -1,4 +1,4 @@
-# AICE 2.0 Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)
+# AICE Deterministic Offline Benchmark Report (10 Scenarios — Without & With Idioms)
 
 - **Evaluation Engine**: Deterministic Offline AST & Tooling Harness (Exact API Calls & Character/Token Accounting — No Live LLM Agent Calls)
 - **Evaluation Mode**: 3-Way Apples-to-Apples (`Without AICE` vs `AICE Without Idioms` vs `AICE With Idioms`)
@@ -19,12 +19,12 @@
 
 | Operation | Without AICE (Tokens) | AICE Without Idioms (Tokens) | Savings Without Idioms | AICE With Idioms (Tokens) | Savings With Idioms | Extra Idiom Boost |
 | :--- | ---: | ---: | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** *(incl. idiom defs)* | 33,034 | 26,816 | **-18.8%** | 19,545 | **-40.8%** | **+22.0%** |
-| **Read (Discovery + Context)** | 14,867 | 12,079 | **-18.8%** | 8,980 | **-39.6%** | **+20.9%** |
-| **Update (Bug Fix / Feature)** | 16,989 | 8,174 | **-51.9%** | 4,911 | **-71.1%** | **+19.2%** |
-| **Delete (Obsolete Symbol)** | 2,233 | 162 | **-92.8%** | 162 | **-92.8%** | **+0.0%** |
-| **Refactor (Multi-Site / Multi-File)** | 59,898 | 26,784 | **-55.3%** | 2,582 | **-95.7%** | **+40.4%** |
-| **TOTAL LIFECYCLE** | **127,021** | **74,015** | **-41.7%** | **36,180** | **-71.5%** | **+29.8%** |
+| **Write (Create from 0)** *(incl. idiom defs)* | 33,018 | 26,816 | **-18.8%** | 19,545 | **-40.8%** | **+22.0%** |
+| **Read (Discovery + Context)** | 14,853 | 12,079 | **-18.7%** | 8,980 | **-39.5%** | **+20.9%** |
+| **Update (Bug Fix / Feature)** | 16,994 | 8,174 | **-51.9%** | 4,911 | **-71.1%** | **+19.2%** |
+| **Delete (Obsolete Symbol)** | 2,234 | 162 | **-92.8%** | 162 | **-92.8%** | **+0.0%** |
+| **Refactor (Multi-Site / Multi-File)** | 59,912 | 26,784 | **-55.3%** | 2,582 | **-95.7%** | **+40.4%** |
+| **TOTAL LIFECYCLE** | **127,011** | **74,015** | **-41.7%** | **36,180** | **-71.5%** | **+29.8%** |
 
 ### Agent Turns Breakdown Across All 10 Real-World Benchmarks
 
@@ -47,13 +47,13 @@
 | `RW-02` | **Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0)** | `non_window` | `from_zero_non_window_app` | `.py .yaml .json` | -13.0% / **-37.9%** | -8.1% / **-27.3%** | -47.0% / **-67.5%** | **-90.1%** | -51.3% / **-96.3%** | 7,852 | 4,949 (**-37.0%**) | 2,435 (**-69.0%**) | 37 | 14 (**-62.2%**) | 11 (**-70.3%**) |
 | `RW-03` | **Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix)** | `window` | `bug_fix` | `.php .js .twig .css .html .yaml .json` | -19.0% / **-39.8%** | -19.7% / **-43.9%** | -55.7% / **-74.2%** | **-92.8%** | -56.4% / **-95.0%** | 12,097 | 6,854 (**-43.3%**) | 3,366 (**-72.2%**) | 55 | 23 (**-58.2%**) | 17 (**-69.1%**) |
 | `RW-04` | **Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature)** | `window` | `new_feature` | `.ts .tsx .css .html .json .yaml` | -19.1% / **-40.7%** | -29.3% / **-48.9%** | -27.5% / **-57.2%** | **-93.7%** | -55.0% / **-95.0%** | 10,303 | 6,173 (**-40.1%**) | 3,051 (**-70.4%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
-| `RW-05` | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)** | `non_window` | `update_feature` | `.go .rs .yaml .json` | -25.4% / **-45.0%** | -9.5% / **-27.4%** | -52.4% / **-72.0%** | **-93.5%** | -55.3% / **-95.9%** | 9,697 | 5,597 (**-42.3%**) | 2,827 (**-70.8%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
+| `RW-05` | **Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature)** | `non_window` | `update_feature` | `.go .rs .yaml .json` | -25.2% / **-44.9%** | -9.5% / **-27.4%** | -52.4% / **-72.0%** | **-93.5%** | -55.3% / **-95.9%** | 9,689 | 5,597 (**-42.2%**) | 2,827 (**-70.8%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
 | `RW-06` | **C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix)** | `window` | `bug_fix` | `.cpp .ts .html .css .json` | -18.9% / **-40.5%** | -26.4% / **-46.5%** | -55.5% / **-73.3%** | **-93.3%** | -56.1% / **-95.7%** | 10,119 | 5,715 (**-43.5%**) | 2,762 (**-72.7%**) | 39 | 17 (**-56.4%**) | 13 (**-66.7%**) |
-| `RW-07` | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)** | `non_window` | `new_feature` | `.cs .kt .yaml .json` | -18.4% / **-40.2%** | -11.2% / **-31.9%** | -27.9% / **-54.3%** | **-94.3%** | -54.3% / **-95.8%** | 8,688 | 5,327 (**-38.7%**) | 2,600 (**-70.1%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
+| `RW-07` | **C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature)** | `non_window` | `new_feature` | `.cs .kt .yaml .json` | -18.6% / **-40.4%** | -11.3% / **-32.0%** | -28.1% / **-54.5%** | **-94.3%** | -54.4% / **-95.8%** | 8,706 | 5,327 (**-38.8%**) | 2,600 (**-70.1%**) | 36 | 14 (**-61.1%**) | 11 (**-69.4%**) |
 | `RW-08` | **Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature)** | `window` | `update_feature` | `.py .tsx .twig .css .json .yaml` | -14.6% / **-38.3%** | -16.7% / **-39.6%** | -52.7% / **-72.6%** | **-92.5%** | -53.4% / **-95.1%** | 10,787 | 6,523 (**-39.5%**) | 3,189 (**-70.4%**) | 49 | 20 (**-59.2%**) | 15 (**-69.4%**) |
-| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -18.3% / **-40.8%** | -17.4% / **-35.9%** | -54.1% / **-71.6%** | **-94.4%** | -55.1% / **-95.9%** | 14,194 | 8,294 (**-41.6%**) | 4,055 (**-71.4%**) | 47 | 20 (**-57.5%**) | 15 (**-68.1%**) |
-| `RW-10` | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)** | `window` | `update_feature` | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | -18.9% / **-39.9%** | -18.5% / **-40.4%** | -56.0% / **-73.3%** | **-94.3%** | -56.1% / **-95.6%** | 32,246 | 18,490 (**-42.7%**) | 9,033 (**-72.0%**) | 108 | 47 (**-56.5%**) | 33 (**-69.4%**) |
-| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | -18.8% / **-40.8%** | -18.8% / **-39.6%** | -51.9% / **-71.1%** | **-92.8%** | -55.3% / **-95.7%** | **127,021** | **74,015 (-41.7%)** | **36,180 (-71.5%)** | **502** | **206 (-59.0%)** | **154 (-69.3%)** |
+| `RW-09` | **High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix)** | `non_window` | `bug_fix` | `.rs .cpp .py .go .yaml .json` | -18.1% / **-40.6%** | -17.0% / **-35.6%** | -54.1% / **-71.6%** | **-94.4%** | -55.1% / **-95.9%** | 14,178 | 8,294 (**-41.5%**) | 4,055 (**-71.4%**) | 47 | 20 (**-57.5%**) | 15 (**-68.1%**) |
+| `RW-10` | **Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature)** | `window` | `update_feature` | `.ts .tsx .js .py .go .rs .cpp .cs .kt .php .css .html .json .yaml .twig` | -18.9% / **-39.8%** | -18.4% / **-40.3%** | -56.0% / **-73.3%** | **-94.3%** | -56.1% / **-95.6%** | 32,242 | 18,490 (**-42.6%**) | 9,033 (**-72.0%**) | 108 | 47 (**-56.5%**) | 33 (**-69.4%**) |
+| **TOTAL** | **All 10 Real-World Scenarios (`10/10` Wins)** | **Both** | **All 5** | **All 15** | -18.8% / **-40.8%** | -18.7% / **-39.5%** | -51.9% / **-71.1%** | **-92.8%** | -55.3% / **-95.7%** | **127,011** | **74,015 (-41.7%)** | **36,180 (-71.5%)** | **502** | **206 (-59.0%)** | **154 (-69.3%)** |
 
 ---
 
@@ -182,26 +182,26 @@
 - **Description**: Cloud-native backend updating quorum consensus timeout and adaptive rate limiting across a Go API gateway, Rust write-ahead log compaction engine, YAML Raft cluster config, and JSON tenant burst quotas.
 - **Scenario**: `update_feature` | **Surface**: `non_window` | **Files**: 4 (`.go`, `.rs`, `.yaml`, `.json`)
 - **Idioms Used**: `$bounded_quorum_step`, `$advance_wal_cursor`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **251 tokens**)
-- **Lifecycle Tokens**: Without AICE = **9,697** | AICE Without Idioms = **5,597 (-42.3%)** | AICE With Idioms = **2,827 (-70.8%)**
+- **Lifecycle Tokens**: Without AICE = **9,689** | AICE Without Idioms = **5,597 (-42.2%)** | AICE With Idioms = **2,827 (-70.8%)**
 - **Lifecycle Turns**: Without AICE = **36 turns** | AICE Without Idioms = **14 turns (-61.1%)** | AICE With Idioms = **11 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
 | Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2,699 tok / 4 turns | 2,012 tok / 4 turns | 1,483 tok / 4 turns | 0.0% / 0.0% |
+| **Write (Create from 0)** | 2,691 tok / 4 turns | 2,012 tok / 4 turns | 1,483 tok / 4 turns | 0.0% / 0.0% |
 | **Read (Context)** | 1,126 tok / 8 turns | 1,019 tok / 4 turns | 817 tok / 4 turns | -50.0% / **-50.0%** |
 | **Update (Surgical)** | 1,177 tok / 4 turns | 560 tok / 1 turns | 330 tok / 1 turns | -75.0% / **-75.0%** |
 | **Delete (Surgical)** | 247 tok / 4 turns | 16 tok / 1 turns | 16 tok / 1 turns | -75.0% / **-75.0%** |
 | **Refactor (Pattern)** | 4,448 tok / 16 turns | 1,990 tok / 4 turns | 181 tok / 1 turns | -75.0% / **-93.8%** |
-| **TOTAL** | **9,697 tok / 36 turns** | **5,597 tok / 14 turns** | **2,827 tok / 11 turns** | **-61.1% / -69.4%** |
+| **TOTAL** | **9,689 tok / 36 turns** | **5,597 tok / 14 turns** | **2,827 tok / 11 turns** | **-61.1% / -69.4%** |
 
 #### Module File Breakdown
 
 | File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `gateway.go` | `.go` | 1117 | 823 | -26.3% | 503 | **-55.0%** |
-| `wal_engine.rs` | `.rs` | 1156 | 846 | -26.8% | 506 | **-56.2%** |
+| `gateway.go` | `.go` | 1113 | 823 | -26.1% | 503 | **-54.8%** |
+| `wal_engine.rs` | `.rs` | 1152 | 846 | -26.6% | 506 | **-56.1%** |
 | `cluster.yaml` | `.yaml` | 181 | 173 | -4.4% | 111 | **-38.7%** |
 | `limits.json` | `.json` | 245 | 170 | -30.6% | 112 | **-54.3%** |
 
@@ -239,26 +239,26 @@
 - **Description**: Enterprise fintech backend adding instant payout fee calculation and real-time velocity risk scoring across C# .NET settlement services, Kotlin Ktor fraud evaluators, YAML clearing routing, and JSON risk rule weights.
 - **Scenario**: `new_feature` | **Surface**: `non_window` | **Files**: 4 (`.cs`, `.kt`, `.yaml`, `.json`)
 - **Idioms Used**: `$settle_ledger_window`, `$score_risk_signal`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **252 tokens**)
-- **Lifecycle Tokens**: Without AICE = **8,688** | AICE Without Idioms = **5,327 (-38.7%)** | AICE With Idioms = **2,600 (-70.1%)**
+- **Lifecycle Tokens**: Without AICE = **8,706** | AICE Without Idioms = **5,327 (-38.8%)** | AICE With Idioms = **2,600 (-70.1%)**
 - **Lifecycle Turns**: Without AICE = **36 turns** | AICE Without Idioms = **14 turns (-61.1%)** | AICE With Idioms = **11 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
 | Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 2,460 tok / 4 turns | 2,007 tok / 4 turns | 1,470 tok / 4 turns | 0.0% / 0.0% |
-| **Read (Context)** | 856 tok / 8 turns | 760 tok / 4 turns | 583 tok / 4 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 768 tok / 4 turns | 554 tok / 1 turns | 351 tok / 1 turns | -75.0% / **-75.0%** |
-| **Delete (Surgical)** | 246 tok / 4 turns | 14 tok / 1 turns | 14 tok / 1 turns | -75.0% / **-75.0%** |
-| **Refactor (Pattern)** | 4,358 tok / 16 turns | 1,992 tok / 4 turns | 182 tok / 1 turns | -75.0% / **-93.8%** |
-| **TOTAL** | **8,688 tok / 36 turns** | **5,327 tok / 14 turns** | **2,600 tok / 11 turns** | **-61.1% / -69.4%** |
+| **Write (Create from 0)** | 2,465 tok / 4 turns | 2,007 tok / 4 turns | 1,470 tok / 4 turns | 0.0% / 0.0% |
+| **Read (Context)** | 857 tok / 8 turns | 760 tok / 4 turns | 583 tok / 4 turns | -50.0% / **-50.0%** |
+| **Update (Surgical)** | 771 tok / 4 turns | 554 tok / 1 turns | 351 tok / 1 turns | -75.0% / **-75.0%** |
+| **Delete (Surgical)** | 247 tok / 4 turns | 14 tok / 1 turns | 14 tok / 1 turns | -75.0% / **-75.0%** |
+| **Refactor (Pattern)** | 4,366 tok / 16 turns | 1,992 tok / 4 turns | 182 tok / 1 turns | -75.0% / **-93.8%** |
+| **TOTAL** | **8,706 tok / 36 turns** | **5,327 tok / 14 turns** | **2,600 tok / 11 turns** | **-61.1% / -69.4%** |
 
 #### Module File Breakdown
 
 | File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
 | `SettlementEngine.cs` | `.cs` | 1082 | 854 | -21.1% | 515 | **-52.4%** |
-| `FraudScorer.kt` | `.kt` | 952 | 810 | -14.9% | 480 | **-49.6%** |
+| `FraudScorer.kt` | `.kt` | 957 | 810 | -15.4% | 480 | **-49.8%** |
 | `settlement_policy.yaml` | `.yaml` | 187 | 179 | -4.3% | 117 | **-37.4%** |
 | `risk_rules.json` | `.json` | 239 | 164 | -31.4% | 106 | **-55.6%** |
 
@@ -297,28 +297,28 @@
 - **Description**: Ultra-low-latency non-window trading & risk pipeline fixing a self-trade price collar boundary bug across a Rust matching engine, C++20 intraday margin calculator, Python compliance daemon, Go market feed normalizer, YAML venue feeds, and JSON collar bands.
 - **Scenario**: `bug_fix` | **Surface**: `non_window` | **Files**: 6 (`.rs`, `.cpp`, `.py`, `.go`, `.yaml`, `.json`)
 - **Idioms Used**: `$advance_wal_cursor`, `$solve_axis_impulse`, `$enforce_quota_band`, `$bounded_quorum_step`, `$yaml_service_tier`, `$json_policy_rule` (Definition Cost Charged on Write from 0: **389 tokens**)
-- **Lifecycle Tokens**: Without AICE = **14,194** | AICE Without Idioms = **8,294 (-41.6%)** | AICE With Idioms = **4,055 (-71.4%)**
+- **Lifecycle Tokens**: Without AICE = **14,178** | AICE Without Idioms = **8,294 (-41.5%)** | AICE With Idioms = **4,055 (-71.4%)**
 - **Lifecycle Turns**: Without AICE = **47 turns** | AICE Without Idioms = **20 turns (-57.5%)** | AICE With Idioms = **15 turns (-68.1%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
 | Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 3,568 tok / 6 turns | 2,914 tok / 6 turns | 2,114 tok / 6 turns | 0.0% / 0.0% |
-| **Read (Context)** | 1,695 tok / 12 turns | 1,400 tok / 6 turns | 1,086 tok / 6 turns | -50.0% / **-50.0%** |
+| **Write (Create from 0)** | 3,560 tok / 6 turns | 2,914 tok / 6 turns | 2,114 tok / 6 turns | 0.0% / 0.0% |
+| **Read (Context)** | 1,687 tok / 12 turns | 1,400 tok / 6 turns | 1,086 tok / 6 turns | -50.0% / **-50.0%** |
 | **Update (Surgical)** | 2,002 tok / 6 turns | 918 tok / 1 turns | 569 tok / 1 turns | -83.3% / **-83.3%** |
 | **Delete (Surgical)** | 125 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
 | **Refactor (Pattern)** | 6,804 tok / 21 turns | 3,055 tok / 6 turns | 279 tok / 1 turns | -71.4% / **-95.2%** |
-| **TOTAL** | **14,194 tok / 47 turns** | **8,294 tok / 20 turns** | **4,055 tok / 15 turns** | **-57.5% / -68.1%** |
+| **TOTAL** | **14,178 tok / 47 turns** | **8,294 tok / 20 turns** | **4,055 tok / 15 turns** | **-57.5% / -68.1%** |
 
 #### Module File Breakdown
 
 | File | Type | Native Tokens | AICE (No Idioms) | Savings (No Idioms) | AICE (With Idioms) | Savings (With Idioms) |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: |
-| `matcher.rs` | `.rs` | 1100 | 887 | -19.4% | 499 | **-54.6%** |
+| `matcher.rs` | `.rs` | 1096 | 887 | -19.1% | 499 | **-54.5%** |
 | `margin_calc.cpp` | `.cpp` | 700 | 555 | -20.7% | 333 | **-52.4%** |
 | `risk_daemon.py` | `.py` | 654 | 588 | -10.1% | 357 | **-45.4%** |
-| `feed_ingest.go` | `.go` | 693 | 545 | -21.4% | 317 | **-54.3%** |
+| `feed_ingest.go` | `.go` | 689 | 545 | -20.9% | 317 | **-54.0%** |
 | `exchange_feeds.yaml` | `.yaml` | 182 | 174 | -4.4% | 112 | **-38.5%** |
 | `collar_bands.json` | `.json` | 239 | 165 | -31.0% | 107 | **-55.2%** |
 
@@ -327,19 +327,19 @@
 - **Description**: Polyglot enterprise control plane integrating all 15 supported languages and file types (.ts, .tsx, .js, .py, .go, .rs, .cpp, .cs, .kt, .php, .css, .html, .json, .yaml, .twig) in a single cohesive multi-service architecture.
 - **Scenario**: `update_feature` | **Surface**: `window` | **Files**: 15 (`.ts`, `.tsx`, `.js`, `.py`, `.go`, `.rs`, `.cpp`, `.cs`, `.kt`, `.php`, `.css`, `.html`, `.json`, `.yaml`, `.twig`)
 - **Idioms Used**: `$guard_band_step`, `$tsx_kpi_tile`, `$clamp_cart_line`, `$enforce_quota_band`, `$bounded_quorum_step`, `$advance_wal_cursor`, `$solve_axis_impulse`, `$settle_ledger_window`, `$score_risk_signal`, `$round_money_band`, `$css_card`, `$html_metric_row`, `$json_policy_rule`, `$yaml_service_tier`, `$twig_summary_line` (Definition Cost Charged on Write from 0: **932 tokens**)
-- **Lifecycle Tokens**: Without AICE = **32,246** | AICE Without Idioms = **18,490 (-42.7%)** | AICE With Idioms = **9,033 (-72.0%)**
+- **Lifecycle Tokens**: Without AICE = **32,242** | AICE Without Idioms = **18,490 (-42.6%)** | AICE With Idioms = **9,033 (-72.0%)**
 - **Lifecycle Turns**: Without AICE = **108 turns** | AICE Without Idioms = **47 turns (-56.5%)** | AICE With Idioms = **33 turns (-69.4%)**
 
 #### Operation Breakdown (Tokens & Turns)
 
 | Operation | Without AICE | AICE Without Idioms | AICE With Idioms | Turn Savings (No Id / Id) |
 | :--- | ---: | ---: | ---: | ---: |
-| **Write (Create from 0)** | 7,842 tok / 15 turns | 6,359 tok / 15 turns | 4,715 tok / 15 turns | 0.0% / 0.0% |
-| **Read (Context)** | 3,864 tok / 30 turns | 3,149 tok / 15 turns | 2,302 tok / 15 turns | -50.0% / **-50.0%** |
-| **Update (Surgical)** | 4,995 tok / 15 turns | 2,200 tok / 1 turns | 1,335 tok / 1 turns | -93.3% / **-93.3%** |
+| **Write (Create from 0)** | 7,837 tok / 15 turns | 6,359 tok / 15 turns | 4,715 tok / 15 turns | 0.0% / 0.0% |
+| **Read (Context)** | 3,857 tok / 30 turns | 3,149 tok / 15 turns | 2,302 tok / 15 turns | -50.0% / **-50.0%** |
+| **Update (Surgical)** | 4,997 tok / 15 turns | 2,200 tok / 1 turns | 1,335 tok / 1 turns | -93.3% / **-93.3%** |
 | **Delete (Surgical)** | 122 tok / 2 turns | 7 tok / 1 turns | 7 tok / 1 turns | -50.0% / **-50.0%** |
-| **Refactor (Pattern)** | 15,423 tok / 46 turns | 6,775 tok / 15 turns | 674 tok / 1 turns | -67.4% / **-97.8%** |
-| **TOTAL** | **32,246 tok / 108 turns** | **18,490 tok / 47 turns** | **9,033 tok / 33 turns** | **-56.5% / -69.4%** |
+| **Refactor (Pattern)** | 15,429 tok / 46 turns | 6,775 tok / 15 turns | 674 tok / 1 turns | -67.4% / **-97.8%** |
+| **TOTAL** | **32,242 tok / 108 turns** | **18,490 tok / 47 turns** | **9,033 tok / 33 turns** | **-56.5% / -69.4%** |
 
 #### Module File Breakdown
 
@@ -349,11 +349,11 @@
 | `ClusterHud.tsx` | `.tsx` | 567 | 492 | -13.2% | 258 | **-54.5%** |
 | `widget_embed.js` | `.js` | 601 | 495 | -17.6% | 293 | **-51.3%** |
 | `anomaly_worker.py` | `.py` | 644 | 569 | -11.7% | 343 | **-46.7%** |
-| `mesh_proxy.go` | `.go` | 653 | 495 | -24.2% | 302 | **-53.8%** |
-| `trace_ring.rs` | `.rs` | 682 | 534 | -21.7% | 312 | **-54.3%** |
+| `mesh_proxy.go` | `.go` | 649 | 495 | -23.7% | 302 | **-53.5%** |
+| `trace_ring.rs` | `.rs` | 678 | 534 | -21.2% | 312 | **-54.0%** |
 | `packet_filter.cpp` | `.cpp` | 684 | 538 | -21.4% | 328 | **-52.0%** |
 | `AuditLedger.cs` | `.cs` | 669 | 522 | -22.0% | 318 | **-52.5%** |
-| `AlertDispatcher.kt` | `.kt` | 594 | 500 | -15.8% | 307 | **-48.3%** |
+| `AlertDispatcher.kt` | `.kt` | 597 | 500 | -16.3% | 307 | **-48.6%** |
 | `TenantPortal.php` | `.php` | 699 | 532 | -23.9% | 309 | **-55.8%** |
 | `console.css` | `.css` | 413 | 302 | -26.9% | 206 | **-50.1%** |
 | `console.html` | `.html` | 241 | 222 | -7.9% | 135 | **-44.0%** |

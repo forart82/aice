@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * JSON Emitter for AICE 2.0 (Step 24).
+ * JSON Emitter for AICE (Step 24).
  * Emits valid, beautifully formatted `.json` from an AICE Module AST.
  */
 

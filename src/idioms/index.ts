@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * AICE 2.0 Project Idiom Subsystem.
+ * AICE Project Idiom Subsystem.
  */
 
 export type {

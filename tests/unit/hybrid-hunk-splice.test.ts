@@ -310,22 +310,18 @@ describe("AICE v0.9.24 Hybrid Hunk + Line Splicing Engine, MCP Multi-File Stream
 
   describe("Step 1.4: MCP Multi-File Stream Parity (aice_splice without filePath + code alias + anti-loop descriptions)", () => {
     it("allows MCP aice_splice without filePath using multi-file 'code' stream and exposes anti-loop descriptions", async () => {
+      expect(AICE_MCP_TOOLS).toHaveLength(2);
+      const readTool = AICE_MCP_TOOLS.find((t) => t.name === "aice_read");
       const spliceTool = AICE_MCP_TOOLS.find((t) => t.name === "aice_splice");
-      const createTool = AICE_MCP_TOOLS.find((t) => t.name === "aice_create");
-      const contextTool = AICE_MCP_TOOLS.find((t) => t.name === "aice_context");
 
       expect(spliceTool?.inputSchema.required).toBeUndefined();
       expect(spliceTool?.inputSchema.properties).toHaveProperty("code");
       expect(spliceTool?.description).toContain(
         "MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop!",
       );
-      expect(createTool?.description).toContain(
+      expect(readTool?.description).toContain(
         "MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop!",
       );
-      expect(contextTool?.description).toContain(
-        "MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop!",
-      );
-
       const fileA = path.join(tmpDir, "a.ts");
       fs.writeFileSync(fileA, "export function getAlpha(): number {\n  return 1;\n}\n", "utf-8");
 
@@ -381,7 +377,7 @@ describe("AICE v0.9.24 Hybrid Hunk + Line Splicing Engine, MCP Multi-File Stream
 
       const ctx = await generateContext(smallFile, { projectRoot: tmpDir });
       expect(ctx.formattedBundle.startsWith("// === ")).toBe(true);
-      expect(ctx.formattedBundle).not.toContain("AICE 2.0 Context Pack");
+      expect(ctx.formattedBundle).not.toContain("AICE Context Pack");
       expect(ctx.formattedBundle).not.toContain("Imported Dependency Contracts");
     });
 
@@ -462,13 +458,14 @@ describe("AICE v0.9.24 Hybrid Hunk + Line Splicing Engine, MCP Multi-File Stream
   });
 
   describe("Step 3: Mandatory Rules v0.9.24 Anti-Loop Mandate & Hybrid Splicing Documentation", () => {
-    it("includes v0.9.24 header, STRICT ANTI-LOOP MANDATE, and <<< / === / >>> hybrid splicing docs", () => {
+    it("includes versioned header, 1-call batch splice mandate, and <<< === >>> hunk splicing docs", () => {
       expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("STRICT ANTI-LOOP MANDATE");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        "AST-Scoped Hunk Splicing (`<<< / === / >>>` inside `:symbol`)",
+        "### 2. Batch Read & Splice (No Shell Workarounds)",
       );
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<<< === >>>");
     });
 
     it("selects the implementation body (skipping overload signatures and object return-type braces) and runs symbol context + hunk splice in <100ms on >50KB TypeScript files", async () => {

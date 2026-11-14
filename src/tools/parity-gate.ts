@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
- * Automated Multi-File Roundtrip Parity Gate for AICE 2.0 (Step 29).
+ * Automated Multi-File Roundtrip Parity Gate for AICE (Step 29).
  * Verifies Bancilhon & Spyratos Bidirectional Lens Invariant:
  *   Put(Get(c), Omega) == c
  * Validates Multi-Round Stability, Idempotence & Convergence:

@@ -643,5 +643,85 @@ fn get_status(code: int) -> Status:
       expect(emitted).toContain("return Status.Active;");
       expect(emitted).toContain("return Status.Complete;");
     });
+
+    it("round-trips Go make(map/slice/chan), new(T), map composite literals, []byte casts, and delete()", () => {
+      const goCode = `package gateway
+
+type TraceSpanHeader struct {
+	TraceId string
+}
+
+func PropagateTrace(headers map[string]string, traceId string) map[string]string {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	buf := make([]int64, 0, 16)
+	ptr := new(TraceSpanHeader)
+	extra := map[string]string{"x-trace": traceId}
+	rawBytes := []byte(traceId)
+	delete(headers, "stale")
+	_ = buf
+	_ = ptr
+	_ = extra
+	_ = rawBytes
+	return headers
+}
+`;
+      const decomp = decompile(goCode, "go", { filePath: "gateway.go" });
+      expect(decomp.ast.items.length).toBeGreaterThanOrEqual(2);
+      const parsedBack = parse(decomp.aice, "gateway.go.aice");
+      const reEmitted = emitTarget(parsedBack, "go");
+      expect(reEmitted).toContain("make(map[string]string)");
+      expect(reEmitted).toContain("make([]int64, 0, 16)");
+      expect(reEmitted).toContain("new(TraceSpanHeader)");
+      expect(reEmitted).toContain('map[string]string{"x-trace": traceId}');
+      expect(reEmitted).toContain("[]byte(traceId)");
+      expect(reEmitted).toContain('delete(headers, "stale")');
+    });
+
+    it("decompiles Go short-init if, open-ended slices, and Rust wildcard for-range & if-let", () => {
+      const goCode = `package gateway
+
+func ExtractPrefix(headers map[string]string, prefix string) string {
+	if tid, ok := headers["x-trace-id"]; ok {
+		if len(tid) > len(prefix) && tid[:len(prefix)] == prefix {
+			return tid[len(prefix):]
+		}
+	}
+	return ""
+}
+`;
+      const goDecomp = decompile(goCode, "go", { filePath: "gateway.go" });
+      expect(goDecomp.ast.items.length).toBe(1);
+
+      const rsCode = `pub fn fill_ring(cap: usize, opt: Option<usize>) -> usize {
+    let mut count = 0;
+    for _ in 0..cap {
+        count += 1;
+    }
+    if let Some(v) = opt {
+        count += v;
+    }
+    count
+}
+`;
+      const rsDecomp = decompile(rsCode, "rust", { filePath: "wal_engine.rs" });
+      expect(rsDecomp.ast.items.length).toBe(1);
+      const rsParsed = parse(rsDecomp.aice, "wal_engine.rs.aice");
+      const rsEmitted = emitTarget(rsParsed, "rust");
+      expect(rsEmitted).toContain("for _ in 0..cap");
+    });
+
+    it('decompiles Rust byte strings b"...", raw byte strings br#"..."#, and byte/escaped chars', () => {
+      const rsCode = `pub fn stage_magic(buf: &mut Vec<u8>) -> u8 {
+    buf.extend_from_slice(b"LZ4F");
+    buf.extend_from_slice(br#"RAW"#);
+    let _sep = b'\\n';
+    0
+}
+`;
+      const rsDecomp = decompile(rsCode, "rust", { filePath: "wal_engine.rs" });
+      expect(rsDecomp.ast.items.length).toBe(1);
+    });
   });
 });

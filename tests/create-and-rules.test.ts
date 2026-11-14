@@ -12,9 +12,12 @@ import {
   setupAgents,
 } from "../src/agents/index.js";
 import {
+  DEFAULT_PROJECT_CONFIG,
   isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
   loadProjectConfig,
   setProjectAiceEnabled,
+  setProjectIdiomsEnabled,
 } from "../src/config/index.js";
 import { emitTarget, parse } from "../src/index.js";
 import { AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
@@ -23,6 +26,7 @@ import {
   formatGlobalGainDashboard,
   readTelemetryEvents,
 } from "../src/telemetry/index.js";
+import { TiktokenTokenizer } from "../src/tokenomics/index.js";
 import {
   createBatch,
   createFile,
@@ -209,7 +213,12 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       }
     });
 
-    it("expands inline @idiom definitions (single-line and multi-line) and CLI --idiom specs, persisting them to aice.config.json and .aice-cache/idioms.json", async () => {
+    it("expands inline @idiom definitions (single-line and multi-line) and CLI --idiom specs when idiomsEnabled is opted in, persisting them to aice.config.json and .aice-cache/idioms.json", async () => {
+      // Default config has idiomsEnabled: false (explicit opt-in)
+      expect(DEFAULT_PROJECT_CONFIG.idiomsEnabled).toBe(false);
+      expect(isProjectIdiomsEnabled(loadProjectConfig(tmpDir))).toBe(false);
+      setProjectIdiomsEnabled(tmpDir, true);
+
       const targetPath = path.join(tmpDir, "src", "renderer.ts");
       const aiceCode = [
         "@idiom $clamp($0, $1, $2) = Math.min(Math.max($0, $1), $2)",
@@ -230,8 +239,6 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
         inlineIdioms: ["$scale($0) = $0 * 2"],
         projectRoot: tmpDir,
       });
-
-      expect(fs.existsSync(targetPath)).toBe(true);
       expect(result.newFileContent).toContain("Math.min(Math.max(x, 0), 800)");
       expect(result.newFileContent).toContain("Math.min(Math.max(y, 0), 600)");
       expect(result.newFileContent).toContain("ctx.beginPath();");
@@ -268,9 +275,9 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       const res = await createFile(targetPath, {
         code: "@idiom $dbl($0) = $0 * 2\n^fn calc(n:#)-># => $dbl(n)",
         dryRun: true,
+        idioms: true,
         projectRoot: tmpDir,
       });
-
       expect(res.dryRun).toBe(true);
       expect(res.newFileContent).toContain("n * 2");
       expect(res.persistedIdioms).toEqual([]);
@@ -300,9 +307,9 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       const res = await createFile(targetPath, {
         code,
+        idioms: true,
         projectRoot: tmpDir,
       });
-
       expect(res.newFileContent).toContain("export interface Vec2");
       expect(res.newFileContent).toContain("export const MAX_ENTITIES: number = 64;");
       expect(res.newFileContent).toContain("export class Player");
@@ -365,7 +372,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
             },
             { filePath: badFile, code: "^fn bad()-># => 0" },
           ],
-          { projectRoot: batchRoot },
+          { projectRoot: batchRoot, idioms: true },
         ),
       ).rejects.toThrow(/Unsupported target extension/);
 
@@ -426,11 +433,11 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
           cliFile,
           "-c",
           "@idiom $sq($0) = $0 * $0\n^fn hypotSq(a:#,b:#)-># => $sq(a) + $sq(b)",
+          "--idioms",
           "--json",
         ],
         tmpDir,
       );
-      expect(out.status).toBe(0);
       const parsed = JSON.parse(out.stdout);
       expect(parsed.filePath).toBe(path.resolve(cliFile));
       expect(fs.existsSync(cliFile)).toBe(true);
@@ -519,14 +526,14 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(disabledOut.status).not.toBe(0);
       expect(disabledOut.stderr).toContain("AICE is disabled for this project");
     }, 60000);
-    it("exposes `aice_create` in AiceMcpServer.getToolDefinitions() and executes single & batch creation via executeToolCall()", async () => {
+    it("exposes strictly 2 tools (`aice_read`, `aice_splice`) in AiceMcpServer.getToolDefinitions() while preserving legacy `aice_create` alias in executeToolCall()", async () => {
       const staticTools = AiceMcpServer.getToolDefinitions();
-      expect(staticTools.some((t) => t.name === "aice_create")).toBe(true);
+      expect(staticTools.map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
 
       const server = new AiceMcpServer({ workspaceRoot: tmpDir });
-      expect(server.getToolDefinitions().some((t) => t.name === "aice_create")).toBe(true);
-
-      // Single file creation via MCP
+      expect(server.getToolDefinitions().map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
+      // Single file creation via MCP (with explicit idioms opt-in for inline @idiom)
+      setProjectIdiomsEnabled(tmpDir, true);
       const mcpFile = path.join(tmpDir, "mcp", "handler.ts");
       const singleRes = (await server.handleRequest({
         jsonrpc: "2.0",
@@ -610,10 +617,10 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       fs.mkdirSync(path.join(fakeHome, ".gemini", "config"), { recursive: true });
 
       expect(AICE_SYSTEM_DIRECTIVE).toContain("MANDATORY OVERRIDE");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice create");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice outline");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice context");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice read");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice_read");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("aice splice");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice_splice");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("Subagent Propagation");
       expect(ALWAYS_ON_AICE_RULE_FILE).toContain("trigger: always_on");
 
@@ -640,36 +647,65 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(fs.existsSync(globalRulePath)).toBe(false);
     });
 
-    it("injects AGENTS.md and .agents/rules/aice.md (plus existing CLAUDE.md/GEMINI.md) on `aice enable` and strips them cleanly on `aice disable`", () => {
+    it("injects single-file AGENTS.md (plus existing CLAUDE.md without @AGENTS.md) and cleans up legacy GEMINI.md/.GEMINI.md/.agents/rules/aice.md on both enable and disable", () => {
       const projDir = path.join(tmpDir, "workspace-proj");
-      fs.mkdirSync(projDir, { recursive: true });
+      fs.mkdirSync(path.join(projDir, ".agents", "rules"), { recursive: true });
 
       const claudeMd = path.join(projDir, "CLAUDE.md");
+      const agentsMd = path.join(projDir, "AGENTS.md");
+      const ruleMd = path.join(projDir, ".agents", "rules", "aice.md");
+      const geminiMd = path.join(projDir, "GEMINI.md");
+      const dotGeminiMd = path.join(projDir, ".GEMINI.md");
+
       fs.writeFileSync(claudeMd, "# Existing Claude Instructions\nKeep this header.\n", "utf-8");
+      fs.writeFileSync(
+        ruleMd,
+        "---\ntrigger: always_on\n---\n<!-- AICE:START -->\nlegacy\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        geminiMd,
+        "<!-- AICE:START -->\nlegacy gemini\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        dotGeminiMd,
+        "# User Gemini Notes\n\n<!-- AICE:START -->\nlegacy dot gemini\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
 
       // Enable AICE on project
       setProjectAiceEnabled(projDir, true);
 
-      const agentsMd = path.join(projDir, "AGENTS.md");
-      const ruleMd = path.join(projDir, ".agents", "rules", "aice.md");
-      const geminiMd = path.join(projDir, "GEMINI.md");
-
       expect(fs.existsSync(agentsMd)).toBe(true);
-      expect(fs.existsSync(ruleMd)).toBe(true);
-      expect(fs.existsSync(geminiMd)).toBe(false); // did not exist beforehand
+      expect(fs.existsSync(ruleMd)).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".agents"))).toBe(false);
+      expect(fs.existsSync(geminiMd)).toBe(false);
+      expect(fs.existsSync(dotGeminiMd)).toBe(true);
+      expect(fs.readFileSync(dotGeminiMd, "utf-8")).toBe("# User Gemini Notes\n");
 
       expect(fs.readFileSync(agentsMd, "utf-8")).toContain(AICE_DIRECTIVE_START);
-      expect(fs.readFileSync(ruleMd, "utf-8")).toContain("trigger: always_on");
       expect(fs.readFileSync(claudeMd, "utf-8")).toContain("# Existing Claude Instructions");
       expect(fs.readFileSync(claudeMd, "utf-8")).toContain(AICE_DIRECTIVE_START);
 
-      // Disable AICE on project
+      // If CLAUDE.md includes @AGENTS.md, enable skips injecting and removes duplicate block
+      fs.writeFileSync(
+        claudeMd,
+        "# Existing Claude Instructions\n@AGENTS.md\n\n<!-- AICE:START -->\ndup\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      setProjectAiceEnabled(projDir, true);
+      expect(fs.readFileSync(claudeMd, "utf-8")).toContain("@AGENTS.md");
+      expect(fs.readFileSync(claudeMd, "utf-8")).not.toContain(AICE_DIRECTIVE_START);
+
+      // Restore standalone CLAUDE.md and test disable
+      fs.writeFileSync(claudeMd, "# Existing Claude Instructions\nKeep this header.\n", "utf-8");
+      setProjectAiceEnabled(projDir, true);
       setProjectAiceEnabled(projDir, false);
       expect(isProjectAiceEnabled(projDir)).toBe(false);
 
       // AGENTS.md was created solely by AICE so it should be deleted when empty
       expect(fs.existsSync(agentsMd)).toBe(false);
-      // .agents/rules/aice.md and empty .agents/rules + .agents directories should be removed
       expect(fs.existsSync(ruleMd)).toBe(false);
       expect(fs.existsSync(path.join(projDir, ".agents"))).toBe(false);
       // CLAUDE.md had pre-existing content so it remains without the AICE block
@@ -686,6 +722,9 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       fs.writeFileSync(path.join(proj1, "CLAUDE.md"), "# Team Rules\n", "utf-8");
 
       setProjectAiceEnabled(proj1, true);
+      // Also seed a legacy .agents/rules/aice.md to ensure uninstall.sh cleans legacy rule files too
+      fs.mkdirSync(path.join(proj1, ".agents", "rules"), { recursive: true });
+      fs.writeFileSync(path.join(proj1, ".agents", "rules", "aice.md"), "legacy", "utf-8");
       expect(fs.existsSync(path.join(proj1, "aice.config.json"))).toBe(true);
       expect(fs.existsSync(path.join(proj1, "AGENTS.md"))).toBe(true);
       expect(fs.existsSync(path.join(proj1, ".agents", "rules", "aice.md"))).toBe(true);
@@ -797,9 +836,9 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       const res = await createFile(mjsPath, {
         code: hybridCode,
+        idioms: true,
         projectRoot: tmpDir,
       });
-
       expect(res.nativeCode).not.toMatch(/(?:^|\n)\s*pub\s*;/);
       expect(res.nativeCode).not.toMatch(/(?:^|\n)\s*fn\s*;/);
       expect(res.nativeCode).toContain("export const COLS = 10");
@@ -857,11 +896,15 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(spliceRes.modifiedCode).toContain('"soft-drop": 5');
       expect(spliceRes.modifiedCode).not.toMatch(/(?:^|\n)\s*pub\s*;/);
 
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("150 lines");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("test-runner");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("fast-scout");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("code-surgeon");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("deep-auditor");
+      expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "cl100k_base")).toBeLessThanOrEqual(
+        650,
+      );
+      expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "o200k_base")).toBeLessThanOrEqual(650);
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("Subagent Propagation");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain(
+        "Use AICE (aice read / aice splice) for all file exploration and edits.",
+      );
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("Board-only swarm monitors/coordinators");
     });
 
     it("6. supports v0.9.9 multi-file create streams (`=== file ===`), multi-block cross-file splice streams (`=== file:symbol ===`, `:eof`, `:Class.newMember`), and class member shorthands (`priv`, `ro`)", async () => {

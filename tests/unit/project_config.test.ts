@@ -7,29 +7,39 @@
  * and `resolveTargetOutputPathForConfig` across side-by-side and isolated workspaces.
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  AICE_DIRECTIVE_START,
   type AiceProjectConfig,
   autoDetectProjectMode,
   DEFAULT_PROJECT_CONFIG,
   deriveTargetFilename,
   findProjectRoot,
   getExtensionForTarget,
+  hasAgentsMdInclude,
   isProjectAiceEnabled,
+  isProjectIdiomsEnabled,
   loadProjectConfig,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
   resolveWorktreeRoot,
   saveProjectConfig,
+  setProjectAiceEnabled,
   setProjectIdiomsEnabled,
   stripJsonComments,
+  syncProjectWorkspaceRules,
   validateConfig,
 } from "../../src/config/index.js";
 import { MANDATORY_AGENT_RULES_MARKDOWN } from "../../src/rules/mandatory-rules.js";
-import { detectLanguageName } from "../../src/tokenomics/index.js";
+import {
+  detectLanguageName,
+  estimateTokens,
+  TiktokenTokenizer,
+} from "../../src/tokenomics/index.js";
 
 describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
   let tmpDir: string;
@@ -837,6 +847,186 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
 
     it("detects .aipl language name in tokenomics", () => {
       expect(detectLanguageName("src/workflow.aipl")).toBe("AIPL");
+    });
+
+    it("enforces <= 650 BPE token budget (cl100k_base & o200k_base) and all core invariants in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+      const cl100k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base");
+      const o200k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base");
+      expect(cl100k).toBeLessThanOrEqual(650);
+      expect(o200k).toBeLessThanOrEqual(650);
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base")).toBeLessThanOrEqual(
+        650,
+      );
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(650);
+
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_read");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_splice");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("python3 with open");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("cat << 'EOF' >");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("echo >");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("NEVER run `sed -n`");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":symbol");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":Lstart-Lend");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<<< === >>>");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":eof");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":imports");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice.config.json");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain('"enabled": true');
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice disable");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice enable");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
+        "Use AICE (aice read / aice splice) for all file exploration and edits.",
+      );
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("Board-only swarm monitors/coordinators");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("zero overhead");
+    });
+
+    it("defaults idiomsEnabled to false while honoring explicit idiomsEnabled: true and --idioms overrides", () => {
+      expect(DEFAULT_PROJECT_CONFIG.idiomsEnabled).toBe(false);
+      expect(isProjectIdiomsEnabled(DEFAULT_PROJECT_CONFIG)).toBe(false);
+      expect(isProjectIdiomsEnabled(undefined)).toBe(false);
+
+      const loadedDefault = loadProjectConfig(tmpDir);
+      expect(loadedDefault.idiomsEnabled).toBe(false);
+      expect(isProjectIdiomsEnabled(loadedDefault)).toBe(false);
+      expect(isProjectIdiomsEnabled(loadedDefault, true)).toBe(true);
+
+      const enabledCfg = setProjectAiceEnabled(tmpDir, true);
+      expect(enabledCfg.idiomsEnabled).toBe(false);
+      expect(isProjectIdiomsEnabled(loadProjectConfig(tmpDir))).toBe(false);
+
+      setProjectIdiomsEnabled(tmpDir, true);
+      expect(loadProjectConfig(tmpDir).idiomsEnabled).toBe(true);
+      expect(isProjectIdiomsEnabled(loadProjectConfig(tmpDir))).toBe(true);
+      expect(isProjectIdiomsEnabled(loadProjectConfig(tmpDir), false)).toBe(false);
+
+      const reEnabled = setProjectAiceEnabled(tmpDir, true);
+      expect(reEnabled.idiomsEnabled).toBe(true);
+    });
+
+    it("injects single-file AGENTS.md (plus conditional CLAUDE.md without @AGENTS.md) and purges legacy GEMINI.md / .GEMINI.md / .agents/rules/aice.md on both enable and disable", () => {
+      const legacyRulePath = path.join(tmpDir, ".agents", "rules", "aice.md");
+      fs.mkdirSync(path.dirname(legacyRulePath), { recursive: true });
+      fs.writeFileSync(
+        legacyRulePath,
+        "---\ntrigger: always_on\n---\n<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "GEMINI.md"),
+        "<!-- AICE:START -->\nlegacy gemini block only\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, ".GEMINI.md"),
+        "# Custom Gemini Notes\n\n<!-- AICE:START -->\nlegacy dot-gemini\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "CLAUDE.md"),
+        "# Claude Config\n\n@AGENTS.md\n\n<!-- AICE:START -->\nduplicate block\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+
+      expect(hasAgentsMdInclude("# Claude\n@AGENTS.md\n")).toBe(true);
+      expect(hasAgentsMdInclude("# Claude\nSee @./AGENTS.md for rules.\n")).toBe(true);
+      expect(hasAgentsMdInclude("```md\n@AGENTS.md\n```\n")).toBe(false);
+      expect(hasAgentsMdInclude("# Claude\ncontact dev@AGENTS.md\n")).toBe(false);
+
+      syncProjectWorkspaceRules(tmpDir, true);
+
+      expect(fs.existsSync(path.join(tmpDir, "AGENTS.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(tmpDir, "AGENTS.md"), "utf-8")).toContain(
+        AICE_DIRECTIVE_START,
+      );
+      expect(fs.existsSync(path.join(tmpDir, "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".GEMINI.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(tmpDir, ".GEMINI.md"), "utf-8")).toBe(
+        "# Custom Gemini Notes\n",
+      );
+      expect(fs.existsSync(legacyRulePath)).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".agents"))).toBe(false);
+
+      const claudeWithInclude = fs.readFileSync(path.join(tmpDir, "CLAUDE.md"), "utf-8");
+      expect(claudeWithInclude).toContain("@AGENTS.md");
+      expect(claudeWithInclude).not.toContain(AICE_DIRECTIVE_START);
+
+      fs.writeFileSync(path.join(tmpDir, "CLAUDE.md"), "# Standalone Claude Rules\n", "utf-8");
+      syncProjectWorkspaceRules(tmpDir, true);
+      expect(fs.readFileSync(path.join(tmpDir, "CLAUDE.md"), "utf-8")).toContain(
+        AICE_DIRECTIVE_START,
+      );
+
+      fs.mkdirSync(path.dirname(legacyRulePath), { recursive: true });
+      fs.writeFileSync(legacyRulePath, "legacy", "utf-8");
+      fs.writeFileSync(
+        path.join(tmpDir, "GEMINI.md"),
+        "<!-- AICE:START -->\nlegacy\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      syncProjectWorkspaceRules(tmpDir, false);
+      expect(fs.existsSync(path.join(tmpDir, "AGENTS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(legacyRulePath)).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, ".agents"))).toBe(false);
+      expect(fs.readFileSync(path.join(tmpDir, "CLAUDE.md"), "utf-8")).toBe(
+        "# Standalone Claude Rules\n",
+      );
+    });
+
+    it("respects enabled: false in tools/bump-version.ts without injecting AGENTS.md", () => {
+      const bumpSandbox = fs.mkdtempSync(path.join(os.tmpdir(), "aice-bump-disabled-"));
+      try {
+        fs.mkdirSync(path.join(bumpSandbox, "src"), { recursive: true });
+        fs.writeFileSync(
+          path.join(bumpSandbox, "package.json"),
+          `${JSON.stringify({ name: "sandbox", version: "0.9.35" }, null, 2)}\n`,
+          "utf-8",
+        );
+        fs.writeFileSync(
+          path.join(bumpSandbox, "src", "version.ts"),
+          'export const AICE_VERSION = "0.9.35";\n',
+          "utf-8",
+        );
+        fs.writeFileSync(
+          path.join(bumpSandbox, "aice.config.json"),
+          `${JSON.stringify({ enabled: false, idiomsEnabled: false }, null, 2)}\n`,
+          "utf-8",
+        );
+        fs.writeFileSync(
+          path.join(bumpSandbox, "GEMINI.md"),
+          "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+          "utf-8",
+        );
+
+        const tsxBin = path.resolve(
+          process.cwd(),
+          "node_modules",
+          ".bin",
+          process.platform === "win32" ? "tsx.cmd" : "tsx",
+        );
+        const bumpScript = path.resolve(process.cwd(), "tools", "bump-version.ts");
+        const res = spawnSync(tsxBin, [bumpScript, "patch"], {
+          cwd: process.cwd(),
+          encoding: "utf-8",
+          env: {
+            ...process.env,
+            AICE_BUMP_ROOT_DIR: bumpSandbox,
+            AICE_BUMP_SKIP_BUILD: "1",
+          },
+        });
+        expect(res.status).toBe(0);
+        expect(
+          JSON.parse(fs.readFileSync(path.join(bumpSandbox, "package.json"), "utf-8")).version,
+        ).toBe("0.9.36");
+        expect(fs.existsSync(path.join(bumpSandbox, "AGENTS.md"))).toBe(false);
+        expect(fs.existsSync(path.join(bumpSandbox, "GEMINI.md"))).toBe(false);
+      } finally {
+        fs.rmSync(bumpSandbox, { recursive: true, force: true });
+      }
     });
   });
 });
