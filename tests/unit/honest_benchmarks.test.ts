@@ -690,4 +690,185 @@ describe("AICE 2.0 Real-World Benchmark Suites (Offline Deterministic + Real AI 
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("validates 3-layer target filenames, 2-pillar blind isolated prompts, constant-folded decoy detection, Twig block checks, and anti-cheat sandbox bounds", async () => {
+    const os = await import("node:os");
+    const {
+      ALL_REAL_AGENT_BENCHMARKS,
+      auditTranscriptCompliance,
+      buildLayerPrompt,
+      buildPrompt,
+      computeFileDecoySpec,
+      SCENARIO_LAYER_DEFINITIONS,
+      setupWorkspace,
+      verifyWorkspaceOnDisk,
+    } = await import("../../benchmarks/run-real-agents.js");
+    const { runRankingBenchmarks } = await import("../../benchmarks/run-ranking-benchmark.js");
+
+    // 1. Every Layer 2 & Layer 3 targetFile and filename mentioned in taskPrompt must exist in spec.files
+    const fileMentionRe =
+      /\b[A-Za-z0-9_-]+\.(?:ts|tsx|js|py|php|go|rs|cpp|cs|kt|html|twig|css|json|yaml)\b/g;
+    for (const spec of ALL_REAL_AGENT_BENCHMARKS) {
+      const validFiles = new Set(spec.files.map((f) => f.fileName));
+      const layerDefs = SCENARIO_LAYER_DEFINITIONS[spec.id];
+      expect(layerDefs).toBeDefined();
+      for (const layer of [layerDefs.layer2, layerDefs.layer3]) {
+        for (const tf of layer.targetFiles) {
+          expect(
+            validFiles.has(tf),
+            `${spec.id} Layer ${layer.layerIndex} targetFile '${tf}' does not exist in workspace`,
+          ).toBe(true);
+        }
+        const mentioned = layer.taskPrompt.match(fileMentionRe) || [];
+        for (const mf of mentioned) {
+          expect(
+            validFiles.has(mf),
+            `${spec.id} Layer ${layer.layerIndex} taskPrompt mentions nonexistent file '${mf}'`,
+          ).toBe(true);
+        }
+      }
+
+      // 2. Prompts never leak scenario IDs (RW-XX) and always enforce workspace boundaries
+      for (const mode of ["without_aice", "aice_no_idioms", "aice_with_idioms"] as const) {
+        const p1 = buildPrompt(spec, mode, "/tmp/bench-ws", 20261108);
+        const p2 = buildLayerPrompt(spec, mode, "/tmp/bench-ws", 2);
+        const p3 = buildLayerPrompt(spec, mode, "/tmp/bench-ws", 3);
+        for (const p of [p1, p2, p3]) {
+          expect(p).not.toContain(spec.id);
+          expect(p).toContain("Workspace Boundary: Work strictly inside /tmp/bench-ws");
+        }
+        if (mode === "without_aice") {
+          expect(p1).toContain("read_file");
+          expect(p1).toContain("edit_file");
+        } else {
+          expect(p1).toContain("--stdin << 'EOF'");
+          expect(p2).toContain("WaitMsBeforeAsync: 10000");
+        }
+      }
+    }
+
+    // 3. Constant-folded decoy corruption (`probe + (decoyStep + 1)`) is caught even when DECOY_SENTINEL comment stays intact
+    const rw11Dir = setupWorkspace(
+      ALL_REAL_AGENT_BENCHMARKS.find((s) => s.id === "RW-11")!,
+      "aice_no_idioms",
+      20261108,
+    );
+    try {
+      const rw11Spec = ALL_REAL_AGENT_BENCHMARKS.find((s) => s.id === "RW-11")!;
+      const decoy = computeFileDecoySpec(20261108, "RW-11", "ledger_reconciler.ts");
+      const lrPath = path.join(rw11Dir, "ledger_reconciler.ts");
+      const orig = fs.readFileSync(lrPath, "utf-8");
+      // Replace ONLY the function return `probe + <step>` with constant-folded `probe + <step + 1>`, leaving comment untouched
+      const folded = orig.replace(
+        new RegExp(`(\\bprobe\\s*\\+\\s*)${decoy.decoyStep}\\b`),
+        `$1${decoy.decoyStep + 1}`,
+      );
+      expect(folded).toContain(decoy.commentTag);
+      fs.writeFileSync(lrPath, folded, "utf-8");
+      const checkFolded = verifyWorkspaceOnDisk(rw11Spec, rw11Dir, 20261108);
+      expect(checkFolded.decoysIntact).toBe(false);
+    } finally {
+      fs.rmSync(rw11Dir, { recursive: true, force: true });
+    }
+
+    // 4. Native Twig `{% block <sym>_summary %}` passes verifyWorkspaceOnDisk for new_feature scenario
+    const customTwigNewFeature = {
+      id: "RW-03",
+      title: "Twig New Feature Check",
+      description: "Twig summary block verification",
+      scenario: "new_feature" as const,
+      appSurface: "window" as const,
+      files: [OFFLINE_BENCHMARKS.find((s) => s.id === "RW-03")!.files.find((f) => f.languageId === "twig")!],
+    };
+    const twigDir = setupWorkspace(customTwigNewFeature, "without_aice", 20261108);
+    try {
+      const twigFile = customTwigNewFeature.files[0];
+      const twigPath = path.join(twigDir, twigFile.fileName);
+      const { computeSeededFileMutation } = await import("../../benchmarks/run-real-agents.js");
+      const mut = computeSeededFileMutation(20261108, "RW-03", twigFile, true);
+      let twigSrc = fs.readFileSync(twigPath, "utf-8").replace(/summary-row/g, "summary-row-v2");
+      // Remove obsolete block and append native Twig summary block
+      const obs = twigFile.obsoleteSymbol!;
+      twigSrc = twigSrc.replace(new RegExp(`\\{%\\s*block\\s+${obs}\\s*%\\}[\\s\\S]*?\\{%\\s*endblock\\s*%\\}`, "g"), "");
+      twigSrc += `\n{% block ${mut.targetSymbol}_summary %}<div class="summary-row-v2"><span>${mut.expectedTokens[0]}</span></div>{% endblock %}\n`;
+      fs.writeFileSync(twigPath, twigSrc, "utf-8");
+      const twigCheck = verifyWorkspaceOnDisk(customTwigNewFeature, twigDir, 20261108, 1, undefined, "without_aice");
+      expect(twigCheck.details).toEqual([]);
+      expect(twigCheck.verified).toBe(true);
+    } finally {
+      fs.rmSync(twigDir, { recursive: true, force: true });
+    }
+
+    // 5. Anti-cheat audit catches sandbox escapes across ALL modes, `aice` in without_aice, `read_file` in AICE modes, and allows `aice write --stdin`
+    const tmpAuditDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-audit-gate-"));
+    try {
+      const writeLog = (name: string, obj: unknown) => {
+        const p = path.join(tmpAuditDir, name);
+        fs.writeFileSync(p, `${JSON.stringify(obj)}\n`, "utf-8");
+        return p;
+      };
+
+      const escapeLog = writeLog("escape.jsonl", {
+        type: "PLANNER_RESPONSE",
+        tool_calls: [
+          {
+            name: "read_file",
+            args: { Path: "/home/forart/dev/aice/benchmarks/run-real-agents.ts" },
+          },
+        ],
+      });
+      expect(auditTranscriptCompliance(escapeLog, "without_aice", tmpAuditDir).compliant).toBe(false);
+      expect(auditTranscriptCompliance(escapeLog, "aice_with_idioms", tmpAuditDir).compliant).toBe(false);
+
+      const aiceInBaselineLog = writeLog("aice_in_baseline.jsonl", {
+        type: "PLANNER_RESPONSE",
+        tool_calls: [{ name: "run_command", args: { CommandLine: 'aice context . -s "*"' } }],
+      });
+      expect(auditTranscriptCompliance(aiceInBaselineLog, "without_aice", tmpAuditDir).compliant).toBe(
+        false,
+      );
+
+      const readFileInAiceLog = writeLog("read_in_aice.jsonl", {
+        type: "PLANNER_RESPONSE",
+        tool_calls: [{ name: "read_file", args: { Path: path.join(tmpAuditDir, "engine.ts") } }],
+      });
+      expect(auditTranscriptCompliance(readFileInAiceLog, "aice_no_idioms", tmpAuditDir).compliant).toBe(
+        false,
+      );
+
+      const validWriteHeredoc = writeLog("valid_write.jsonl", {
+        type: "PLANNER_RESPONSE",
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine:
+                "aice write --no-idioms --stdin << 'EOF'\n=== engine.ts ===\nexport const x = 1;\nEOF",
+            },
+          },
+        ],
+      });
+      expect(auditTranscriptCompliance(validWriteHeredoc, "aice_no_idioms", tmpAuditDir).compliant).toBe(
+        true,
+      );
+    } finally {
+      fs.rmSync(tmpAuditDir, { recursive: true, force: true });
+    }
+
+    // 6. Ranking benchmark runs deterministically without side effects and achieves 100% Rank #1 precision
+    const rankingTrials = await runRankingBenchmarks();
+    expect(rankingTrials).toHaveLength(3);
+    expect(rankingTrials.every((t) => t.verified && t.rankPosition === 1)).toBe(true);
+    expect(rankingTrials[2].totalMatches).toBe(25);
+    expect(rankingTrials[2].noiseTokensSaved).toBeGreaterThan(0);
+
+    // 7. Honest markdown report formatting (no hardcoded 100% win rates, no --/+-, includes Section 3b)
+    const realReport = loadRealAgentBenchmarkSuiteReport();
+    const md = formatRealAgentBenchmarkMarkdown(realReport);
+    expect(md).not.toMatch(/(?:--|\+-|-\+)\d/);
+    expect(md).toContain("3b. 3-Layer Progressive Lifecycle Breakdown");
+    expect(md).toContain(
+      `Wins ${realReport.winsWithIdioms}/${realReport.totalBenchmarks} Multi-File Scenarios`,
+    );
+  });
 });
