@@ -18,13 +18,18 @@ import {
   deriveTargetFilename,
   findProjectRoot,
   getExtensionForTarget,
+  isProjectAiceEnabled,
   loadProjectConfig,
+  resolvePathTargets,
   resolveTargetOutputPathForConfig,
+  resolveWorktreeRoot,
   saveProjectConfig,
   setProjectIdiomsEnabled,
   stripJsonComments,
   validateConfig,
 } from "../../src/config/index.js";
+import { MANDATORY_AGENT_RULES_MARKDOWN } from "../../src/rules/mandatory-rules.js";
+import { detectLanguageName } from "../../src/tokenomics/index.js";
 
 describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
   let tmpDir: string;
@@ -733,6 +738,105 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(loadProjectConfig(tmpDir).idiomsEnabled).toBe(false);
       setProjectIdiomsEnabled(tmpDir, true);
       expect(loadProjectConfig(tmpDir).idiomsEnabled).toBe(true);
+    });
+  });
+
+  describe("External Directory Isolation, Path Resolution & 2-Pillar Rule Regressions", () => {
+    it("does not leak disabled fallbackDir/cwd config into external temp directories without markers", () => {
+      const disabledRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-disabled-repo-"));
+      const externalSandboxDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-ext-sandbox-"));
+      try {
+        fs.writeFileSync(
+          path.join(disabledRepoDir, "aice.config.json"),
+          JSON.stringify({ enabled: false }),
+          "utf-8",
+        );
+        fs.mkdirSync(path.join(disabledRepoDir, "src"), { recursive: true });
+
+        // Inside disabledRepoDir -> resolves to disabledRepoDir (enabled: false)
+        const internalRoot = findProjectRoot(
+          path.join(disabledRepoDir, "src", "index.ts"),
+          disabledRepoDir,
+        );
+        expect(internalRoot).toBe(disabledRepoDir);
+        expect(isProjectAiceEnabled(internalRoot)).toBe(false);
+
+        // External directory outside disabledRepoDir -> must NOT fall back to disabledRepoDir!
+        const externalRoot = findProjectRoot(externalSandboxDir, disabledRepoDir);
+        expect(externalRoot).toBe(externalSandboxDir);
+        expect(isProjectAiceEnabled(externalRoot)).toBe(true);
+
+        // Non-existent target file inside externalSandboxDir -> normalizes to parent dir
+        const missingFileRoot = findProjectRoot(
+          path.join(externalSandboxDir, "new_worker.ts"),
+          disabledRepoDir,
+        );
+        expect(missingFileRoot).toBe(externalSandboxDir);
+        expect(isProjectAiceEnabled(missingFileRoot)).toBe(true);
+
+        // resolveWorktreeRoot also isolates externalSandboxDir from disabledRepoDir
+        expect(resolveWorktreeRoot(externalSandboxDir, disabledRepoDir)).toBe(externalSandboxDir);
+        expect(
+          resolveWorktreeRoot(path.join(externalSandboxDir, "draft.aipl"), disabledRepoDir),
+        ).toBe(externalSandboxDir);
+      } finally {
+        fs.rmSync(disabledRepoDir, { recursive: true, force: true });
+        fs.rmSync(externalSandboxDir, { recursive: true, force: true });
+      }
+    });
+
+    it("preserves fallbackDir when startDir is a nested subdirectory inside fallbackDir without markers", () => {
+      const nestedDir = path.join(tmpDir, "packages", "sub", "deep");
+      fs.mkdirSync(nestedDir, { recursive: true });
+
+      expect(findProjectRoot(nestedDir, tmpDir)).toBe(tmpDir);
+      expect(resolveWorktreeRoot(nestedDir, tmpDir)).toBe(tmpDir);
+    });
+
+    it("resolves relative paths against explicit external options.projectRoot even when cwd has matching names", () => {
+      const extSrcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(extSrcDir, { recursive: true });
+      const extFile = path.join(extSrcDir, "external.ts");
+      fs.writeFileSync(extFile, "export const external = 1;\n", "utf-8");
+
+      // Note: process.cwd() (the AICE repo) also has a "src" directory!
+      const dirResolved = resolvePathTargets("src", {
+        projectRoot: tmpDir,
+        includeTargets: true,
+      });
+      expect(dirResolved.isDirectory).toBe(true);
+      expect(dirResolved.resolvedPath).toBe(extSrcDir);
+      expect(dirResolved.projectRoot).toBe(tmpDir);
+      expect(dirResolved.files).toEqual([extFile]);
+
+      const missingRelFile = resolvePathTargets("src/brand_new.ts", {
+        projectRoot: tmpDir,
+      });
+      expect(missingRelFile.isSingleFile).toBe(true);
+      expect(missingRelFile.resolvedPath).toBe(path.join(extSrcDir, "brand_new.ts"));
+      expect(missingRelFile.projectRoot).toBe(tmpDir);
+    });
+
+    it("rejects non-object root JSON values in aice.config.json and .aicerc while allowing comment-only files", () => {
+      fs.writeFileSync(path.join(tmpDir, "aice.config.json"), '["not", "an", "object"]', "utf-8");
+      expect(() => loadProjectConfig(tmpDir)).toThrow(/Failed to parse/);
+
+      fs.writeFileSync(path.join(tmpDir, "aice.config.json"), '"primitive"', "utf-8");
+      expect(() => loadProjectConfig(tmpDir)).toThrow(/Failed to parse/);
+
+      fs.writeFileSync(path.join(tmpDir, "aice.config.json"), "// empty with comments\n", "utf-8");
+      expect(isProjectAiceEnabled(loadProjectConfig(tmpDir))).toBe(true);
+    });
+
+    it("aligns MANDATORY_AGENT_RULES_MARKDOWN with 2-Pillar architecture without active-mode write_file contradiction", () => {
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).not.toContain(", or standard `write_file`");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("Adaptive Sibling Outlining");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("4-tier ranked");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice write");
+    });
+
+    it("detects .aipl language name in tokenomics", () => {
+      expect(detectLanguageName("src/workflow.aipl")).toBe("AIPL");
     });
   });
 });

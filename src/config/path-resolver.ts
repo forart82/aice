@@ -364,21 +364,48 @@ export function resolveWorktreeRoot(
 ): string {
   let cur = path.resolve(startDir);
   try {
-    if (fs.existsSync(cur) && !fs.statSync(cur).isDirectory()) {
-      cur = path.dirname(cur);
+    if (fs.existsSync(cur)) {
+      if (!fs.statSync(cur).isDirectory()) {
+        cur = path.dirname(cur);
+      }
+    } else if (!startDir.endsWith("/") && !startDir.endsWith("\\")) {
+      const lower = cur.toLowerCase();
+      const ext = path.extname(lower);
+      if (
+        lower.endsWith(".aice") ||
+        lower.endsWith(".d.ts") ||
+        lower.endsWith(".html.twig") ||
+        (ext && KNOWN_TARGET_EXTENSIONS.has(ext))
+      ) {
+        cur = path.dirname(cur);
+      }
     }
   } catch {
     cur = path.dirname(cur);
   }
   const initialDir = cur;
   const tmpRoot = path.resolve(os.tmpdir());
+  const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
 
-  // 1. Check nearest ancestor containing aice.config.json or package.json before crossing /tmp boundary
+  // 1. Check nearest ancestor containing project config/manifest markers before crossing /tmp or $HOME boundary
   let probe = initialDir;
   while (true) {
+    if (homeDir && probe === homeDir && initialDir !== homeDir) {
+      break;
+    }
+    if ((probe === "/tmp" || probe === "/var/tmp" || probe === tmpRoot) && initialDir !== probe) {
+      break;
+    }
     if (
       fs.existsSync(path.join(probe, "aice.config.json")) ||
-      fs.existsSync(path.join(probe, "package.json"))
+      fs.existsSync(path.join(probe, ".aice-idioms.json")) ||
+      fs.existsSync(path.join(probe, ".aicerc")) ||
+      fs.existsSync(path.join(probe, ".aice-build")) ||
+      fs.existsSync(path.join(probe, "package.json")) ||
+      fs.existsSync(path.join(probe, "composer.json")) ||
+      fs.existsSync(path.join(probe, "Cargo.toml")) ||
+      fs.existsSync(path.join(probe, "go.mod")) ||
+      fs.existsSync(path.join(probe, "pyproject.toml"))
     ) {
       return probe;
     }
@@ -416,8 +443,12 @@ export function resolveWorktreeRoot(
     // Git returned exit code 128 (not a git repo or detached worktree) — silently fall back
   }
 
-  // 3. Fall back to findProjectRoot or fallbackDir / process.cwd()
-  return findProjectRoot(initialDir, fallbackDir ?? process.cwd());
+  // 3. Fall back to findProjectRoot (using fallbackDir/cwd only when initialDir is within it)
+  const candidateFallback = fallbackDir ?? process.cwd();
+  const effectiveFallback = isSameOrDescendant(candidateFallback, initialDir)
+    ? candidateFallback
+    : initialDir;
+  return findProjectRoot(initialDir, effectiveFallback);
 }
 
 export function resolvePathTargets(
@@ -470,15 +501,13 @@ export function resolvePathTargets(
 
   const trimmed = inputPath.trim();
   let absPath = path.resolve(cwd, trimmed);
-  if (
-    options.projectRoot &&
-    !path.isAbsolute(trimmed) &&
-    !fs.existsSync(absPath) &&
-    fs.existsSync(path.resolve(options.projectRoot, trimmed))
-  ) {
-    absPath = path.resolve(options.projectRoot, trimmed);
-  } else if (options.projectRoot && !path.isAbsolute(trimmed) && trimmed.startsWith("..")) {
-    absPath = path.resolve(options.projectRoot, trimmed);
+  if (options.projectRoot && !path.isAbsolute(trimmed)) {
+    const resolvedOptRoot = path.resolve(options.projectRoot);
+    if (trimmed.startsWith("..") || !isSameOrDescendant(resolvedOptRoot, cwd)) {
+      absPath = path.resolve(resolvedOptRoot, trimmed);
+    } else if (!fs.existsSync(absPath) && fs.existsSync(path.resolve(resolvedOptRoot, trimmed))) {
+      absPath = path.resolve(resolvedOptRoot, trimmed);
+    }
   }
 
   let isDir = false;

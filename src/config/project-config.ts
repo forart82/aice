@@ -9,6 +9,7 @@
  */
 
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
 
@@ -185,7 +186,6 @@ const IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   ".turbo",
 ]);
 
-/**
 /**
  * Returns the default file extension for a given TargetLanguage.
  */
@@ -567,15 +567,32 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
   return "side-by-side";
 }
 
+function isLikelyTargetFilePath(rawInput: string, resolvedPath: string): boolean {
+  if (rawInput.endsWith("/") || rawInput.endsWith("\\")) {
+    return false;
+  }
+  const lower = resolvedPath.toLowerCase();
+  if (lower.endsWith(".aice") || lower.endsWith(".d.ts") || lower.endsWith(".html.twig")) {
+    return true;
+  }
+  const ext = path.extname(lower);
+  return Boolean(ext && KNOWN_TARGET_EXTENSIONS.has(ext));
+}
+
 /**
  * Searches upward from `startDir` to locate a project root containing
  * `aice.config.json`, `.aice-idioms.json`, `.aicerc`, `.aice-build`, or `package.json`.
- * If none is found, falls back to `fallbackDir` (or `startDir`).
+ * If none is found, falls back to `fallbackDir` only when `startDir` resides within `fallbackDir`,
+ * otherwise returns `startDir` (or its parent directory if `startDir` is a file path).
  */
 export function findProjectRoot(startDir: string, fallbackDir?: string): string {
   let cur = path.resolve(startDir);
   try {
-    if (fs.existsSync(cur) && !fs.statSync(cur).isDirectory()) {
+    if (fs.existsSync(cur)) {
+      if (!fs.statSync(cur).isDirectory()) {
+        cur = path.dirname(cur);
+      }
+    } else if (isLikelyTargetFilePath(startDir, cur)) {
       cur = path.dirname(cur);
     }
   } catch {
@@ -584,10 +601,14 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
   const initialDir = cur;
   const cwd = path.resolve(process.cwd());
   const homeDir = process.env.HOME ? path.resolve(process.env.HOME) : "";
+  const tmpRoot = path.resolve(os.tmpdir());
   const startedInCwd = initialDir === cwd || initialDir.startsWith(`${cwd}${path.sep}`);
 
   while (true) {
     if (homeDir && cur === homeDir && initialDir !== homeDir) {
+      break;
+    }
+    if ((cur === "/tmp" || cur === "/var/tmp" || cur === tmpRoot) && initialDir !== cur) {
       break;
     }
     if (
@@ -622,7 +643,16 @@ export function findProjectRoot(startDir: string, fallbackDir?: string): string 
     return path.dirname(initialDir);
   }
   if (fallbackDir) {
-    return path.resolve(fallbackDir);
+    const resolvedFallback = path.resolve(fallbackDir);
+    const fallbackRoot = path.parse(resolvedFallback).root;
+    if (resolvedFallback !== fallbackRoot) {
+      const rel = path.relative(resolvedFallback, initialDir);
+      if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+        return resolvedFallback;
+      }
+    } else if (initialDir === resolvedFallback) {
+      return resolvedFallback;
+    }
   }
   return initialDir;
 }
@@ -641,7 +671,16 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
   if (fs.existsSync(aiceConfigPath)) {
     try {
       const content = fs.readFileSync(aiceConfigPath, "utf-8");
-      rawConfig = JSON.parse(stripJsonComments(content));
+      const stripped = stripJsonComments(content).trim();
+      if (stripped.length === 0) {
+        rawConfig = {};
+      } else {
+        const parsed: unknown = JSON.parse(stripped);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("Root configuration value must be a JSON object");
+        }
+        rawConfig = parsed as Record<string, unknown>;
+      }
     } catch (err) {
       throw new Error(
         `Failed to parse ${aiceConfigPath}: ${err instanceof Error ? err.message : String(err)}`,
@@ -655,7 +694,16 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     if (fs.existsSync(aicercPath)) {
       try {
         const content = fs.readFileSync(aicercPath, "utf-8");
-        rawConfig = JSON.parse(stripJsonComments(content));
+        const stripped = stripJsonComments(content).trim();
+        if (stripped.length === 0) {
+          rawConfig = {};
+        } else {
+          const parsed: unknown = JSON.parse(stripped);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            throw new Error("Root configuration value must be a JSON object");
+          }
+          rawConfig = parsed as Record<string, unknown>;
+        }
       } catch (err) {
         throw new Error(
           `Failed to parse ${aicercPath}: ${err instanceof Error ? err.message : String(err)}`,
@@ -671,7 +719,12 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
       try {
         const content = fs.readFileSync(pkgPath, "utf-8");
         const parsed = JSON.parse(content);
-        if (parsed && typeof parsed.aice === "object" && parsed.aice !== null) {
+        if (
+          parsed &&
+          typeof parsed.aice === "object" &&
+          parsed.aice !== null &&
+          !Array.isArray(parsed.aice)
+        ) {
           rawConfig = parsed.aice as Record<string, unknown>;
         }
       } catch (err) {

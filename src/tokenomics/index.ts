@@ -154,6 +154,7 @@ export function detectLanguageName(filePath: string): string {
   if (lower.endsWith(".ps1")) return "PowerShell";
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "Batch";
   if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "Markdown";
+  if (lower.endsWith(".aipl")) return "AIPL";
   if (lower.endsWith(".aice")) return "AICE";
   return "TypeScript";
 }
@@ -330,7 +331,7 @@ export function auditTokenomics(
           if (entry.name.endsWith(".aice")) {
             aices.push(full);
           } else {
-            const ext = path.extname(entry.name);
+            const ext = path.extname(entry.name).toLowerCase();
             if (
               ext === ".ts" ||
               ext === ".tsx" ||
@@ -344,7 +345,8 @@ export function auditTokenomics(
               ext === ".cxx" ||
               ext === ".cs" ||
               ext === ".go" ||
-              ext === ".rs"
+              ext === ".rs" ||
+              ext === ".aipl"
             ) {
               targets.push(full);
             }

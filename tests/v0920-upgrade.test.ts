@@ -464,25 +464,26 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       "handles install.sh $" +
         "{#arr[@]} brace spans, heredoc masking, 4-backtick nested markdown fences, test.each blocks, non-destructive auto-append, and multi-line import exclusion in Downstream Callers",
       async () => {
-        // 1. Real install.sh outline & context span for install_sys_packages (contains ${#SUDO_CMD[@]}) and Substep 2.2b
-        const installShPath = path.resolve(process.cwd(), "install.sh");
-        const installOutline = generateOutline(installShPath);
-        expect(installOutline.text).toContain("fn install_sys_packages()");
-        expect(installOutline.text).not.toContain("fn install_sys_packages() # [L118-L118]");
-        expect(installOutline.text).toContain(
-          "Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update",
-        );
-        expect(installOutline.text).not.toContain("fn aice_cheatsheet()");
-
-        const sysPkgCtx = await generateContext(installShPath, {
-          symbol: "install_sys_packages",
-          includeCallers: false,
-        });
-        expect(sysPkgCtx.targetContent.split("\n").length).toBeGreaterThan(25);
-        expect(sysPkgCtx.targetContent).toContain("SUDO_CMD");
-
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-v0920-edge-"));
         try {
+          // 1. Real install.sh outline & context span for install_sys_packages (contains ${#SUDO_CMD[@]}) and Substep 2.2b
+          const installShPath = path.join(tmpDir, "install.sh");
+          fs.copyFileSync(path.resolve(process.cwd(), "install.sh"), installShPath);
+          const installOutline = generateOutline(installShPath);
+          expect(installOutline.text).toContain("fn install_sys_packages()");
+          expect(installOutline.text).not.toContain("fn install_sys_packages() # [L118-L118]");
+          expect(installOutline.text).toContain(
+            "Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update",
+          );
+          expect(installOutline.text).not.toContain("fn aice_cheatsheet()");
+
+          const sysPkgCtx = await generateContext(installShPath, {
+            symbol: "install_sys_packages",
+            includeCallers: false,
+          });
+          expect(sysPkgCtx.targetContent.split("\n").length).toBeGreaterThan(25);
+          expect(sysPkgCtx.targetContent).toContain("SUDO_CMD");
+
           // 2. test.each / describe.each / tagged template test.each`...` blocks
           const paramTestFile = path.join(tmpDir, "param.test.ts");
           fs.writeFileSync(
