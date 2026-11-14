@@ -67,6 +67,7 @@ import {
   parseMultiBlockSpliceStream,
   splice,
   spliceBatch,
+  splitInlineFileSelector,
 } from "../tools/splice.js";
 import { AICE_VERSION as DEFAULT_AICE_VERSION } from "../version.js";
 
@@ -201,14 +202,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Surgically replace, delete, hunk-patch, or batch-edit one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): auto-creates missing files & parent directories, performs full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgically replaces, deletes, hunk-patches (`<<< / === / >>>`), or line-range edits (`L10-L25`, `imports`, `eof`) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
         filePath: {
           type: "string",
           description:
-            "Optional path to target native or .aice file (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)",
+            "Optional path to target native or .aice file, or inline 'file:symbol' / 'file:L10-L20' (omit when 'code' / 'newAiceCode' contains '=== <filePath>:<symbol> ===' or '=== <filePath> ===' multi-file stream headers, or when 'files' / 'edits' includes filePath)",
         },
         path: {
           type: "string",
@@ -221,16 +222,28 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         symbolSelector: {
           type: "string",
           description:
-            "Identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', 'eof', or line range 'L10-L25')",
+            "Optional identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', 'eof', ':overwrite', or line range 'L10-L25'). Omit to create a new file or overwrite the entire file.",
         },
         symbol: {
           type: "string",
           description: "Alias for 'symbolSelector'",
         },
+        selector: {
+          type: "string",
+          description: "Alias for 'symbolSelector'",
+        },
+        range: {
+          type: "string",
+          description: "Alias for 'symbolSelector' when targeting a line range (e.g., 'L10-L25')",
+        },
         code: {
           type: "string",
           description:
-            "Replacement code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+        },
+        content: {
+          type: "string",
+          description: "Alias for 'code'",
         },
         newAiceCode: {
           type: "string",
@@ -244,6 +257,15 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         delete: {
           type: "boolean",
           description: "If true, removes the symbol entirely",
+        },
+        create: {
+          type: "boolean",
+          description:
+            "If true, explicitly routes through full-file creation/compilation (auto-detected when file does not exist or symbol is omitted)",
+        },
+        overwrite: {
+          type: "boolean",
+          description: "If true, explicitly authorizes full-file replacement (including empty truncation)",
         },
         insertAfter: {
           type: "string",
@@ -265,6 +287,12 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         idioms: {
           type: "boolean",
           description: "Optional override to enable or disable project/inline $idioms",
+        },
+        inlineIdioms: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Optional inline idiom specifications (e.g. ['$clamp($0,$1,$2)=Math.min(Math.max($0,$1),$2)'])",
         },
         edits: {
           type: "array",
@@ -288,15 +316,18 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         files: {
           type: "array",
           description:
-            "Optional array of per-file splice items ({ filePath, symbol?, code?, body?, delete?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file splicing",
+            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
           items: {
             type: "object",
             properties: {
               filePath: { type: "string" },
               symbol: { type: "string" },
               code: { type: "string" },
+              content: { type: "string" },
               body: { type: "string" },
               delete: { type: "boolean" },
+              create: { type: "boolean" },
+              overwrite: { type: "boolean" },
               insertAfter: { type: "string" },
               insertBefore: { type: "string" },
               preserveDocs: { type: "boolean" },
@@ -918,12 +949,16 @@ export class AiceMcpServer {
 
   private resolveProjectRoot(fullPath: string): string {
     const resolvedFull = path.resolve(fullPath);
+    const startDir =
+      fs.existsSync(resolvedFull) && fs.statSync(resolvedFull).isDirectory()
+        ? resolvedFull
+        : path.dirname(resolvedFull);
     const resolvedWs = path.resolve(this.workspaceRoot);
     const fallback =
       resolvedFull === resolvedWs || resolvedFull.startsWith(`${resolvedWs}${path.sep}`)
         ? resolvedWs
-        : undefined;
-    return findProjectRoot(resolvedFull, fallback);
+        : startDir;
+    return findProjectRoot(startDir, fallback);
   }
 
   public async executeToolCall(
@@ -1297,7 +1332,7 @@ export class AiceMcpServer {
       case "aice_write":
       case "write":
       case "splice": {
-        const rawTargetFile = String(
+        const unsplitTargetFile = String(
           args.filePath ??
             args.path ??
             args.file ??
@@ -1305,6 +1340,10 @@ export class AiceMcpServer {
             args.target ??
             "",
         );
+        const splitMainTarget = unsplitTargetFile
+          ? splitInlineFileSelector(unsplitTargetFile, this.workspaceRoot)
+          : { filePath: "" };
+        const rawTargetFile = splitMainTarget.filePath;
         const rawSelector =
           (typeof args.symbolSelector === "string" && args.symbolSelector.trim().length > 0
             ? args.symbolSelector
@@ -1318,6 +1357,7 @@ export class AiceMcpServer {
           (typeof args.range === "string" && args.range.trim().length > 0
             ? args.range
             : undefined) ??
+          splitMainTarget.inlineSelector ??
           (args.symbolSelector ?? args.symbol ?? args.selector ?? args.range ?? "");
         const symbolSelector = String(rawSelector);
         const newAiceCode =
@@ -1325,10 +1365,27 @@ export class AiceMcpServer {
             ? args.newAiceCode
             : typeof args.code === "string"
               ? args.code
-              : undefined;
+              : typeof args.content === "string"
+                ? args.content
+                : typeof args.aice === "string"
+                  ? args.aice
+                  : typeof args.snippet === "string"
+                    ? args.snippet
+                    : typeof args.replacement === "string"
+                      ? args.replacement
+                      : undefined;
         const bodyCode = typeof args.body === "string" ? args.body : undefined;
         const deleteFlag = Boolean(args.delete);
         const dryRun = Boolean(args.dryRun);
+        const overwriteFlag =
+          typeof args.overwrite === "boolean" || typeof args.force === "boolean"
+            ? Boolean(args.overwrite || args.force)
+            : undefined;
+        const forceFlag = typeof args.force === "boolean" ? args.force : undefined;
+        const inlineIdiomsArg = (args.inlineIdioms ?? args.idiom) as
+          | string
+          | string[]
+          | undefined;
         const preserveDocs = typeof args.preserveDocs === "boolean" ? args.preserveDocs : undefined;
         const insertAfter =
           typeof args.insertAfter === "string"
@@ -1351,14 +1408,21 @@ export class AiceMcpServer {
         const filesBatchFromArgs: BatchSpliceItem[] | undefined =
           Array.isArray(args.files) && args.files.length > 0
             ? (args.files as Array<Record<string, unknown>>).map((entry) => {
-                const entryFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
-                if (!entryFp) {
+                const rawEntryFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
+                if (!rawEntryFp) {
                   throw new Error("Each item in aice_splice 'files' array must specify 'filePath'");
                 }
+                const splitEntry = splitInlineFileSelector(rawEntryFp, this.workspaceRoot);
+                const entryFp = splitEntry.filePath;
                 const entryEdits = Array.isArray(entry.edits)
                   ? (entry.edits as Array<Record<string, unknown>>).map((ed) => ({
                       symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
-                      code: typeof ed.code === "string" ? ed.code : undefined,
+                      code:
+                        typeof ed.code === "string"
+                          ? ed.code
+                          : typeof ed.content === "string"
+                            ? ed.content
+                            : undefined,
                       body: typeof ed.body === "string" ? ed.body : undefined,
                       delete: typeof ed.delete === "boolean" ? ed.delete : undefined,
                       insertAfter:
@@ -1382,19 +1446,23 @@ export class AiceMcpServer {
                     ? entry.symbol
                     : typeof entry.symbolSelector === "string"
                       ? entry.symbolSelector
-                      : undefined;
+                      : splitEntry.inlineSelector;
                 const itemCode =
                   typeof entry.code === "string"
                     ? entry.code
-                    : typeof entry.newAiceCode === "string"
-                      ? entry.newAiceCode
-                      : undefined;
+                    : typeof entry.content === "string"
+                      ? entry.content
+                      : typeof entry.newAiceCode === "string"
+                        ? entry.newAiceCode
+                        : undefined;
                 return {
                   filePath: entryFp,
                   ...(itemSymbol !== undefined ? { symbol: itemSymbol } : {}),
                   ...(itemCode !== undefined ? { code: itemCode } : {}),
                   ...(typeof entry.body === "string" ? { body: entry.body } : {}),
                   ...(typeof entry.delete === "boolean" ? { delete: entry.delete } : {}),
+                  ...(typeof entry.overwrite === "boolean" ? { overwrite: entry.overwrite } : {}),
+                  ...(typeof entry.force === "boolean" ? { force: entry.force } : {}),
                   ...(typeof entry.insertAfter === "string"
                     ? { insertAfter: entry.insertAfter }
                     : {}),
@@ -1474,6 +1542,9 @@ export class AiceMcpServer {
             spliceBatch(safeBatchItems, {
               dryRun,
               ...(preserveDocs !== undefined ? { preserveDocs } : {}),
+              ...(overwriteFlag !== undefined ? { overwrite: overwriteFlag } : {}),
+              ...(forceFlag !== undefined ? { force: forceFlag } : {}),
+              ...(inlineIdiomsArg !== undefined ? { inlineIdioms: inlineIdiomsArg } : {}),
               compile: !dryRun,
               idioms: effectiveIdioms,
               projectRoot,
@@ -1562,6 +1633,9 @@ export class AiceMcpServer {
             ...(insertBefore !== undefined ? { insertBefore } : {}),
             ...(preserveDocs !== undefined ? { preserveDocs } : {}),
             ...(typeof args.create === "boolean" ? { create: args.create } : {}),
+            ...(overwriteFlag !== undefined ? { overwrite: overwriteFlag } : {}),
+            ...(forceFlag !== undefined ? { force: forceFlag } : {}),
+            ...(inlineIdiomsArg !== undefined ? { inlineIdioms: inlineIdiomsArg } : {}),
             edits: batchEdits,
             dryRun,
             inPlace: !dryRun,

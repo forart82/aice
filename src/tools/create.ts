@@ -24,7 +24,7 @@ import {
   saveProjectConfig,
   stripJsonComments,
 } from "../config/index.js";
-import type { Module } from "../core/ast.js";
+import type { Block, MethodDecl, Module, TypeExpr } from "../core/ast.js";
 import { parse } from "../core/parser.js";
 import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
 import {
@@ -695,7 +695,7 @@ function compileAiceOrHybridToNative(
   fullPath: string,
   targetLang: TargetLanguage,
   activeIdioms: Record<string, ProjectIdiomDefinition>,
-  overwrite?: boolean,
+  _overwrite?: boolean,
 ): string {
   if (fullPath.endsWith(".aice")) {
     return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
@@ -719,9 +719,6 @@ function compileAiceOrHybridToNative(
     const out = cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     const check = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
     if (!check.valid) {
-      if (overwrite) {
-        return out;
-      }
       throw new Error(
         `Failed pre-write syntax validation for ${fullPath}: ${check.diagnostics.join("; ")}`,
       );
@@ -787,16 +784,19 @@ function compileAiceOrHybridToNative(
   // Substep 1.2: Route native/hybrid code (any code using `{ ... }` blocks, native constructs,
   if (isHybridOrNativeSource(cleanedCode, targetLang)) {
     const lossless = preprocessHybridAndIdiomsLossless(cleanedCode, targetLang, activeIdioms);
-    const syntaxCheck = validateNativeSyntax(lossless, targetLang, fullPath, activeIdioms);
-    if (syntaxCheck.valid) {
+    const syntaxCheck = validateNativeSyntax(lossless, targetLang, activeIdioms ? fullPath : fullPath, activeIdioms);
+    const pyDupLossless = targetLang === "python" ? checkPythonDuplicateParams(lossless) : null;
+    if (syntaxCheck.valid && !pyDupLossless) {
       return lossless.endsWith("\n") ? lossless : `${lossless}\n`;
     }
     const rawCheck = validateNativeSyntax(cleanedCode, targetLang, fullPath, activeIdioms);
-    if (rawCheck.valid) {
+    const pyDupRaw = targetLang === "python" ? checkPythonDuplicateParams(cleanedCode) : null;
+    if (rawCheck.valid && !pyDupRaw) {
       return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     }
+    const diagnostics = [...syntaxCheck.diagnostics, ...(pyDupLossless ? [pyDupLossless] : [])];
     throw new Error(
-      `Failed pre-write syntax validation for ${fullPath}: ${syntaxCheck.diagnostics.join("; ")}`,
+      `Failed pre-write syntax validation for ${fullPath}: ${diagnostics.join("; ")}`,
     );
   }
 
@@ -817,15 +817,17 @@ function compileAiceOrHybridToNative(
         Object.keys(activeIdioms).length > 0
           ? expandModuleIdioms(parsedMod, activeIdioms)
           : parsedMod;
-      const emitted = emitTarget(expanded, targetLang, {
+      const normalizedMod = normalizeModuleForTarget(expanded, targetLang);
+      const emitted = emitTarget(normalizedMod, targetLang, {
         watermark: false,
         idioms: activeIdioms,
       });
       const check = validateNativeSyntax(emitted, targetLang, fullPath, activeIdioms);
-      if (check.valid) {
+      const pyDupEmitted = targetLang === "python" ? checkPythonDuplicateParams(emitted) : null;
+      if (check.valid && !pyDupEmitted) {
         return emitted;
       }
-      parseErr = new Error(check.diagnostics.join("; "));
+      parseErr = new Error([...check.diagnostics, ...(pyDupEmitted ? [pyDupEmitted] : [])].join("; "));
     } catch (emitErr) {
       parseErr = parseErr ?? emitErr;
     }
@@ -834,26 +836,214 @@ function compileAiceOrHybridToNative(
   // Substep 2.2 Automatic Self-Healing Retry with Lossless Preprocessor
   const repaired = preprocessHybridAndIdiomsLossless(cleanedCode, targetLang, activeIdioms);
   const repairedCheck = validateNativeSyntax(repaired, targetLang, fullPath, activeIdioms);
+  const pyDupRepaired = targetLang === "python" ? checkPythonDuplicateParams(repaired) : null;
   const hasUncompiledAiceIndentBlock =
     targetLang !== "python" &&
     /^\s*(?:pub\s+)?(?:async\s+|static\s+)?(?:fn|function|func|fun|class|struct|type|component|style)\s+[A-Za-z_][^\n{=]*:\s*$/m.test(
       repaired,
     );
-  if (repairedCheck.valid && !hasUncompiledAiceIndentBlock) {
+  if (repairedCheck.valid && !pyDupRepaired && !hasUncompiledAiceIndentBlock) {
     return repaired.endsWith("\n") ? repaired : `${repaired}\n`;
   }
 
-  if (overwrite && (isHybridOrNativeSource(cleanedCode, targetLang) || cleanedCode.trim())) {
-    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
-  }
-
-  const diagSummary =
-    repairedCheck.diagnostics.length > 0 ? ` (${repairedCheck.diagnostics.join("; ")})` : "";
+  const allRepairDiags = [
+    ...repairedCheck.diagnostics,
+    ...(pyDupRepaired ? [pyDupRepaired] : []),
+  ];
+  const diagSummary = allRepairDiags.length > 0 ? ` (${allRepairDiags.join("; ")})` : "";
   throw new Error(
     `Failed to compile AICE source for ${fullPath}: ${
       parseErr instanceof Error ? parseErr.message : String(parseErr ?? "Invalid syntax")
     }${diagSummary}`,
   );
+}
+
+function isSameOrDescendantPath(parentDir: string, targetPath: string): boolean {
+  const rel = path.relative(path.resolve(parentDir), path.resolve(targetPath));
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+export function resolveTargetProjectRoot(fullPath: string, explicitProjectRoot?: string): string {
+  if (explicitProjectRoot) {
+    return path.resolve(explicitProjectRoot);
+  }
+  const resolvedFull = path.resolve(fullPath);
+  const targetDir =
+    fs.existsSync(resolvedFull) && fs.statSync(resolvedFull).isDirectory()
+      ? resolvedFull
+      : path.dirname(resolvedFull);
+  const cwd = process.cwd();
+  const fallback = isSameOrDescendantPath(cwd, resolvedFull) ? cwd : targetDir;
+  return findProjectRoot(targetDir, fallback);
+}
+
+function isExplicitlyNonVoidReturnType(ret: TypeExpr | null): boolean {
+  if (!ret) return false;
+  if (ret.kind === "PrimitiveType") {
+    return ret.primitive !== "void" && ret.primitive !== "nil";
+  }
+  if (ret.kind === "NamedType") {
+    return (
+      ret.name !== "None" &&
+      ret.name !== "void" &&
+      ret.name !== "NoReturn" &&
+      ret.name !== "Never"
+    );
+  }
+  return true;
+}
+
+function promoteTerminalBlockExprToReturn(block: Block): void {
+  if (block.statements.length === 0) return;
+  const lastIdx = block.statements.length - 1;
+  const last = block.statements[lastIdx];
+  if (!last) return;
+
+  if (last.kind === "ExprStmt") {
+    const expr = last.expr;
+    if (expr.kind === "AssignExpr") {
+      return;
+    }
+    if (
+      expr.kind === "CallExpr" &&
+      expr.callee.kind === "IdentifierExpr" &&
+      (expr.callee.name === "print" || expr.callee.name === "super")
+    ) {
+      return;
+    }
+    if (expr.kind === "IdentifierExpr" && expr.name === "pass") {
+      return;
+    }
+    block.statements[lastIdx] = {
+      kind: "ReturnStmt",
+      value: expr,
+      span: last.span,
+    };
+    return;
+  }
+
+  if (last.kind === "IfStmt" && last.elseBranch) {
+    promoteTerminalBlockExprToReturn(last.thenBranch);
+    for (const elifBranch of last.elifBranches) {
+      promoteTerminalBlockExprToReturn(elifBranch.body);
+    }
+    promoteTerminalBlockExprToReturn(last.elseBranch);
+    return;
+  }
+
+  if (last.kind === "MatchStmt") {
+    for (const matchCase of last.cases) {
+      if (matchCase.body.kind === "Block") {
+        promoteTerminalBlockExprToReturn(matchCase.body);
+      }
+    }
+  }
+}
+
+export function normalizePythonMethodReturn(m: MethodDecl): void {
+  if (
+    m.name !== "__init__" &&
+    m.name !== "constructor" &&
+    m.accessor !== "set" &&
+    m.body.kind === "Block" &&
+    isExplicitlyNonVoidReturnType(m.returnType)
+  ) {
+    promoteTerminalBlockExprToReturn(m.body);
+  }
+}
+
+export function rewriteReceiverIdentifierInNode(
+  node: unknown,
+  targetReceiver: "self" | "this",
+): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      rewriteReceiverIdentifierInNode(item, targetReceiver);
+    }
+    return;
+  }
+  const obj = node as Record<string, unknown>;
+  if (obj.kind === "IdentifierExpr" && (obj.name === "self" || obj.name === "this")) {
+    obj.name = targetReceiver;
+  }
+  for (const key of Object.keys(obj)) {
+    if (key === "span") continue;
+    const val = obj[key];
+    if (val && typeof val === "object") {
+      rewriteReceiverIdentifierInNode(val, targetReceiver);
+    }
+  }
+}
+
+export function normalizeModuleForTarget(mod: Module, targetLang: TargetLanguage): Module {
+  const cloned = structuredClone(mod);
+  const receiver: "self" | "this" =
+    targetLang === "python" || targetLang === "rust" || targetLang === "go" ? "self" : "this";
+
+  for (const item of cloned.items) {
+    if (item.kind === "ClassDecl") {
+      for (const m of item.methods) {
+        if (!m.isStatic) {
+          const hadExplicitSelfParam = m.params[0]?.name === "self";
+          m.params = m.params.filter(
+            (p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this")),
+          );
+          if (receiver === "self") {
+            rewriteReceiverIdentifierInNode(m.body, "self");
+          } else if (hadExplicitSelfParam) {
+            rewriteReceiverIdentifierInNode(m.body, "this");
+          }
+        }
+        if (m.name === "__init__" && targetLang !== "python") {
+          m.name = "constructor";
+        }
+        if (targetLang === "python") {
+          normalizePythonMethodReturn(m);
+        }
+      }
+    }
+  }
+  return cloned;
+}
+
+export function checkPythonDuplicateParams(code: string): string | null {
+  const defRegex = /^\s*(?:async\s+)?def\s+([A-Za-z_]\w*)\s*\(([^()]*)\)\s*(?:->[^:\n]+)?:/gm;
+  for (const match of code.matchAll(defRegex)) {
+    const fnName = match[1] ?? "<def>";
+    const rawParams = match[2] ?? "";
+    const seen = new Set<string>();
+    let bracketDepth = 0;
+    let current = "";
+    const parts: string[] = [];
+    for (let i = 0; i < rawParams.length; i++) {
+      const ch = rawParams[i];
+      if (ch === "[" || ch === "{") bracketDepth++;
+      else if (ch === "]" || ch === "}") bracketDepth = Math.max(0, bracketDepth - 1);
+      if (ch === "," && bracketDepth === 0) {
+        parts.push(current);
+        current = "";
+      } else {
+        current += ch;
+      }
+    }
+    if (current.trim()) parts.push(current);
+
+    for (const part of parts) {
+      const trimmed = part.trim();
+      if (!trimmed || trimmed === "/" || trimmed === "*") continue;
+      const beforeDefault = trimmed.split("=")[0]?.trim() ?? "";
+      const beforeType = beforeDefault.split(":")[0]?.trim() ?? "";
+      const paramName = beforeType.replace(/^\*{1,2}/, "").trim();
+      if (/^[A-Za-z_]\w*$/.test(paramName)) {
+        if (seen.has(paramName)) {
+          return `Duplicate parameter '${paramName}' in Python function '${fnName}'`;
+        }
+        seen.add(paramName);
+      }
+    }
+  }
+  return null;
 }
 
 function persistDeclaredIdioms(
@@ -942,9 +1132,7 @@ export async function createFile(
 
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const fullPath = path.isAbsolute(filePath) ? filePath : path.resolve(baseDir, filePath);
-  const root = options.projectRoot
-    ? path.resolve(options.projectRoot)
-    : findProjectRoot(path.dirname(fullPath), process.cwd());
+  const root = resolveTargetProjectRoot(fullPath, options.projectRoot);
 
   const config = loadProjectConfig(root);
   if (!isProjectAiceEnabled(config)) {
@@ -1407,10 +1595,7 @@ export async function createBatch(
     if (fs.existsSync(fullPath) && !existingBackups.has(fullPath)) {
       existingBackups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
     }
-    const itemRoot =
-      item.projectRoot ??
-      options.projectRoot ??
-      findProjectRoot(path.dirname(fullPath), process.cwd());
+    const itemRoot = resolveTargetProjectRoot(fullPath, item.projectRoot ?? options.projectRoot);
     const resolvedRoot = path.resolve(itemRoot);
     snapshotConfigFile(path.join(resolvedRoot, "aice.config.json"));
     snapshotConfigFile(path.join(resolvedRoot, ".aice-idioms.json"));
@@ -1446,10 +1631,10 @@ export async function createBatch(
 
       const resolvedCode =
         item.code ?? item.aice ?? item.template ?? item.snippet ?? item.content ?? options.code;
-      const itemProjectRoot =
-        item.projectRoot ??
-        options.projectRoot ??
-        findProjectRoot(path.dirname(fullPath), process.cwd());
+      const itemProjectRoot = resolveTargetProjectRoot(
+        fullPath,
+        item.projectRoot ?? options.projectRoot,
+      );
 
       const res = await createFile(fullPath, {
         ...options,
