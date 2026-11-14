@@ -45,69 +45,65 @@ Modern Large Language Models (LLMs) spend **40% to 85% of their context windows,
 AICE consolidates all autonomous coding agent file operations into a streamlined **2-Pillar Unified Architecture**:
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 AICE 2-PILLAR UNIFIED ARCHITECTURE                              │
-├────────────────────────────────────────────────┬────────────────────────────────────────────────┤
-│            PILLAR 1: UNIFIED READ              │            PILLAR 2: UNIFIED WRITE             │
-│        (aice context / aice outline)           │          (aice splice / aice write)            │
-├────────────────────────────────────────────────┼────────────────────────────────────────────────┤
-│  Incoming Inspection Request                   │  Incoming Mutation Request                     │
-│  ├─ Target: symbol, range, testId, or regex    │  ├─ Payload: new file, AST splice, or overwrite│
-│  ▼                                             │  ▼                                             │
-│  ┌──────────────────────────────────────────┐  │  ┌──────────────────────────────────────────┐  │
-│  │   File & Workspace Scanner (In-RAM AST)  │  │  │         Target Existence Check           │  │
-│  └────────────────────┬─────────────────────┘  │  └────────────────────┬─────────────────────┘  │
-│                       │                        │                       │                        │
-│          ┌────────────┴────────────┐           │         ┌─────────────┴─────────────┐          │
-│          ▼                         ▼           │         ▼                           ▼          │
-│  ┌───────────────┐       ┌──────────────────┐  │  ┌───────────────┐         ┌────────────────┐  │
-│  │ Exact Symbol  │       │ Regex/Pattern    │  │  │ File Exists?  │         │ File Missing?  │  │
-│  │ Resolution    │       │ Search (4 Tiers) │  │  └───────┬───────┘         └───────┬────────┘  │
-│  └───────┬───────┘       └─────────┬────────┘  │          │                         │           │
-│          │                         │           │          ▼                         ▼           │
-│          │               ┌─────────┴────────┐  │  ┌───────────────┐         ┌────────────────┐  │
-│          │               │ 4-TIER RANKING   │  │  │ Selector or   │         │ Auto-Create    │  │
-│          │               │ Tier 1: Defs     │  │  │ Hunk Present? │         │ Parent Dirs &  │  │
-│          │               │ Tier 2: Code     │  │  └───────┬───────┘         │ Greenfield     │  │
-│          │               │ Tier 3: Comments │  │          │                 │ File on Disk   │  │
-│          │               │ Tier 4: Mocks    │  │     ┌────┴─────┐           └────────────────┘  │
-│          │               └─────────┬────────┘  │     ▼          ▼                               │
-│          ▼                         ▼           │  ┌──────┐  ┌──────────────┐                    │
-│  ┌──────────────────────────────────────────┐  │  │ Yes  │  │ No           │                    │
-│  │       Adaptive Sibling Outlining         │  │  └──┬───┘  └──────┬───────┘                    │
-│  │  - Enclosing Class / Interface context   │  │     │             │                            │
-│  │  - Guarded: max 20 symbols / ~150 tokens │  │     ▼             ▼                            │
-│  │  - "(+ N other methods)" truncation      │  │  ┌──────────────┐ ┌────────────────┐           │
-│  └────────────────────┬─────────────────────┘  │  │ Surgical AST │ │ Full-File      │           │
-│                       │                        │  │ Splice       │ │ Overwrite      │           │
-│                       ▼                        │  │ (CST Trivia) │ │ (Atomic Write) │           │
-│  ┌──────────────────────────────────────────┐  │  └──────┬───────┘ └───────┬────────┘           │
-│  │      Deduplicated Dependency Pack        │  │         │                 │                    │
-│  │  - Inline contracts + caller call-sites  │  │         ▼                 ▼                    │
-│  └────────────────────┬─────────────────────┘  │  ┌──────────────────────────────────────────┐  │
-│                       │                        │  │      Atomic In-Place Disk Mutation       │  │
-│                       ▼                        │  │   Zero .aice artifacts / RAM -> Disk     │  │
-│  ┌──────────────────────────────────────────┐  │  └──────────────────────────────────────────┘  │
-│  │ 70–90% Token-Savings Context Stream      │  │                                                │
-│  └──────────────────────────────────────────┘  │                                                │
-└────────────────────────────────────────────────┴────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                         AICE 2-PILLAR UNIFIED ARCHITECTURE                                          │
+├──────────────────────────────────────────────────────────┬──────────────────────────────────────────────────────────┤
+│                  PILLAR 1: UNIFIED READ                  │                 PILLAR 2: UNIFIED WRITE                  │
+│              (aice context / aice outline)               │                (aice splice / aice write)                │
+├──────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────┤
+│ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
+│ │             Incoming Inspection Request              │ │ │              Incoming Mutation Request               │ │
+│ │ (Class.method, @first, TC-id, Lstart-Lend, /regex/)  │ │ │ (new file, CST/AST/hunk/range splice, or overwrite)  │ │
+│ └──────────────────────────┬───────────────────────────┘ │ └──────────────────────────┬───────────────────────────┘ │
+│                            ▼                             │                            ▼                             │
+│ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
+│ │             Selector & Fast-Path Router              │ │ │                Target Existence Check                │ │
+│ └──────────────────────────┬───────────────────────────┘ │ └──────────────────────────┬───────────────────────────┘ │
+│              ┌─────────────┴──────────────┐              │                   ┌────────┴───────────────────┐         │
+│              ▼                            ▼              │                   ▼                            ▼         │
+│ ┌─────────────────────────┐  ┌─────────────────────────┐ │ ┌──────────────────────────────────┐  ┌────────────────┐ │
+│ │ Exact Symbol Path       │  │ Fast-Path Search/Ranges │ │ │           File Exists?           │  │ File Missing?  │ │
+│ │ Class.method, @1, TC-id │  │ /pattern/, Lstart-Lend  │ │ └─────────────────┬────────────────┘  └────────┬───────┘ │
+│ │ In-RAM AST Decompiler   │  │ Bypasses AST & Sibling  │ │                   ▼                            ▼         │
+│ │ (+ numbered fallback)   │  │ Outlining (depth=0)     │ │ ┌──────────────────────────────────┐  ┌────────────────┐ │
+│ └────────────┬────────────┘  └────────────┬────────────┘ │ │    Selector or Hunk Present?     │  │ Auto-Create    │ │
+│              ▼                            ▼              │ └─────────────────┬────────────────┘  │ Parent Dirs &  │ │
+│ ┌─────────────────────────┐  ┌─────────────────────────┐ │         ┌─────────┴────────┐          │ Greenfield     │ │
+│ │ Adaptive Sibling        │  │ 4-TIER RANKING          │ │         ▼                  ▼          │ File           │ │
+│ │ Outlining               │  │ Tier 1: Defs            │ │ ┌───────────────┐  ┌───────────────┐  └────────┬───────┘ │
+│ │ max 20 syms / ~150 tok  │  │  +1000 file / +500 decl │ │ │ Yes: Surgical │  │ No: Guarded   │           │         │
+│ │ "(+ N other methods)"   │  │ Tier 2: Code +300       │ │ │ CST/AST/Hunk/ │  │ Full-File     │           │         │
+│ └────────────┬────────────┘  │ Tier 3: Comments +100   │ │ │ Range Splice  │  │ Overwrite     │           │         │
+│              ▼               │ Tier 4: Test/Mock 10–50 │ │ └───────┬───────┘  └───────┬───────┘           │         │
+│ ┌─────────────────────────┐  └────────────┬────────────┘ │         └──────────────────┼───────────────────┘         │
+│ │ Pruned Dependency Pack  │               │ (direct)     │                            ▼                             │
+│ │ Contracts & Callers     │               │ depth=0      │ ┌──────────────────────────────────────────────────────┐ │
+│ │ [L14] (unused pruned)   │               │              │ │        Pre-Write Syntax Gate & Batch Rollback        │ │
+│ └────────────┬────────────┘               │              │ │    (validateNativeSyntax + spliceBatch rollback)     │ │
+│              └─────────────┬──────────────┘              │ └──────────────────────────┬───────────────────────────┘ │
+│                            ▼                             │                            ▼                             │
+│ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
+│ │         70–90% Token-Savings Context Stream          │ │ │   Atomic .tmp -> rename Commit (Zero .aice files)    │ │
+│ └──────────────────────────────────────────────────────┘ │ └──────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┘
 ```
 
 ### Pillar 1: Unified Read (`aice context` & `aice outline`)
-- **Adaptive Sibling Outlining**: When inspecting a specific symbol (e.g. `GameApp.step`), AICE extracts the target and attaches a compact sibling outline of the enclosing class or interface. It strictly caps siblings to **20 symbols / ~150 tokens max**, appending `(+ N other methods)` to prevent context explosion on large entities.
-- **4-Tier Search Ranking**: Regex/substring queries (`-s "/pattern/"`) rank candidate matches to eliminate test decoy noise:
-  - **Tier 1 (Top Priority ~1,500+ pts)**: Production declarations (`class`, `function`, `interface`, `fn`, `def`, `pub`, `export`) + 1,000 pt filename bonus.
-  - **Tier 2 (High Priority 300–1,300 pts)**: Production executable code (call sites, logic).
+- **Exact Symbol Resolution & Numbered Fallback**: Extracts targeted symbols (`Class.method`, `@first` / `@1`, `TC-id`) via the In-RAM AST decompiler, gracefully falling back to line-numbered native source slices on parser errors or large files (`>50 KB`).
+- **Adaptive Sibling Outlining**: When inspecting a specific symbol (e.g. `GameApp.step`), AICE attaches a compact sibling outline of the enclosing class or interface, strictly capped at **20 symbols / ~150 tokens max** with `(+ N other methods)` truncation to prevent context explosion.
+- **Fast-Path Search & Ranges (`depth=0` AST Bypass)**: Pure line-range selectors (`Lstart-Lend`) and regex/substring queries (`-s "/pattern/"`) bypass full-file AST decompilation and sibling outlining, routing straight into the context stream. Regex matches apply **4-Tier Search Ranking** to eliminate test decoy noise:
+  - **Tier 1 (Top Priority ~1,500+ pts)**: Production declarations (`class`, `function`, `interface`, `fn`, `def`, `pub`, `export`: `+500 pts`) + `+1,000 pt` filename bonus.
+  - **Tier 2 (High Priority 300–1,300 pts)**: Production executable code (`+300 pts` base + filename bonus).
   - **Tier 3 (Medium Priority 100 pts)**: Comments, docstrings, and markdown docs in production code.
   - **Tier 4 (De-Prioritized 10–50 pts)**: Test, mock, and fixture files (`tests/`, `mocks/`, `*.test.*`), isolated unless explicit test search is requested.
-- **Dependency Contracts & Downstream Callers**: Surfaces exact caller locations (`[L14]`) and deduplicated contracts in 1 turn.
+- **Pruned Dependency Contracts & Downstream Callers**: Surfaces exact caller locations (`[L14]`) and deduplicated contracts in 1 turn while pruning unreferenced hop-0 imports on symbol-scoped reads.
 
 ### Pillar 2: Unified Write (`aice splice` / `aice write`)
-- **Greenfield Auto-Creation**: If the target file does not exist, `aice splice` / `aice write` automatically creates it along with all recursive parent directories.
-- **Surgical AST Splicing (<50% mutations)**: Slices directly into target subtrees (`:Class.method`, AST hunks `<<< / === / >>>`, line ranges `:Lstart-Lend`, `@clone`, `:Heading`, `:imports`, `:eof`) while preserving docstrings and CST trivia.
-- **Full-File Overwrite Fallback (>50% mutations)**: Overwrites the file cleanly when no selector or hunk is provided.
+- **Greenfield Auto-Creation**: If the target file does not exist, `aice splice` / `aice write` automatically creates it along with all recursive parent directories (`mkdir -p`).
+- **Surgical CST/AST Splicing (<50% mutations)**: Slices directly into target subtrees (`:Class.method`, AST hunks `<<< / === / >>>`, line ranges `:Lstart-Lend` with a `±40`-line shifted-header self-healer, `@clone`, `:Heading`, `:imports`, `:eof`) while preserving docstrings, CST trivia, and wiring missing TS/JS sibling imports.
+- **Guarded Full-File Overwrite (>50% mutations)**: Overwrites existing files cleanly when no selector or hunk is provided, while guarding against accidental empty-payload overwrites unless `--overwrite` or `:overwrite` is passed.
+- **Pre-Write Syntax Gate & Transactional Batch Rollback**: Validates mutated native syntax (`validateNativeSyntax` with two-pass lossless retry) before touching disk, rolls back all created/modified files and config snapshots if any item in a `--stdin` / `--batch` stream fails, and commits via atomic `.tmp` $\to$ `rename` writes.
 - **Universal Alias**: `aice write` is a first-class, bidirectional alias to `aice splice` across CLI and MCP (`aice_write` $\equiv$ `aice_splice`).
-- **Unified Multi-File Batch Streaming**: Combines creates (`=== file ===`), overwrites (`=== file:overwrite ===`), and AST splices (`=== file:symbol ===`) into 1 atomic turn via `--stdin`.
 
 > For complete formal architecture specifications, data flow, and benchmark analyses, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
