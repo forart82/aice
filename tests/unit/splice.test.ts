@@ -1151,5 +1151,79 @@ fn funcF(): return 6
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
+
+    it("preserves PHP self::CONST static scope while rewriting explicit fn(self, ...) -> this.prop on TS class splices", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "receiver_parity_"));
+      try {
+        // 1. PHP class: `self.TAX_RATE` & `self.roundCents(...)` (no `self` param) must emit `self::`, NOT `$this->`
+        const phpFile = path.join(tmpDir, "OrderCalculator.php");
+        await createFile(phpFile, {
+          code: [
+            "pub class OrderCalculator:",
+            "  subtotal: float = 0.0",
+            "",
+            "  static fn roundCents(v: float) -> float:",
+            "    return v",
+            "",
+            "  pub fn totalWithTax() -> float:",
+            "    return self.roundCents(this.subtotal * (1.0 + self.TAX_RATE))",
+          ].join("\n"),
+        });
+        const phpCreated = fs.readFileSync(phpFile, "utf-8");
+        expect(phpCreated).toContain("self::TAX_RATE");
+        expect(phpCreated).toContain("self::roundCents(");
+        expect(phpCreated).toContain("$this->subtotal");
+        expect(phpCreated).not.toContain("$this->TAX_RATE");
+
+        // Surgical splice on PHP method also preserves `self::`
+        await splice(phpFile, {
+          symbol: "OrderCalculator.totalWithTax",
+          code: [
+            "pub fn totalWithTax() -> float:",
+            "  return self.roundCents(this.subtotal * self.TAX_RATE)",
+          ].join("\n"),
+        });
+        const phpSpliced = fs.readFileSync(phpFile, "utf-8");
+        expect(phpSpliced).toContain("self::TAX_RATE");
+        expect(phpSpliced).toContain("self::roundCents(");
+        expect(phpSpliced).not.toContain("$this->TAX_RATE");
+
+        // 2. TS single-method splice: `fn addScore(self, delta: int)` strips `self` param and rewrites `self.total` -> `this.total`
+        const tsFile = path.join(tmpDir, "ScoreBoard.ts");
+        fs.writeFileSync(
+          tsFile,
+          "export class ScoreBoard {\n  public total = 0;\n  public addScore(delta: number): number {\n    return this.total;\n  }\n}\n",
+          "utf-8",
+        );
+        await splice(tsFile, {
+          symbol: "ScoreBoard.addScore",
+          code: [
+            "pub fn addScore(self, delta: int) -> int:",
+            "  self.total = delta > 0 ? self.total + delta : self.total",
+            "  return self.total",
+          ].join("\n"),
+        });
+        const tsSpliced = fs.readFileSync(tsFile, "utf-8");
+        expect(tsSpliced).toContain("addScore(delta: number): number");
+        expect(tsSpliced).not.toContain("(self");
+        expect(tsSpliced).toContain("this.total + delta");
+        expect(tsSpliced).toContain("return this.total;");
+
+        // When `self` is NOT params[0], local `self` identifier is untouched
+        await splice(tsFile, {
+          symbol: "ScoreBoard.addScore",
+          code: [
+            "pub fn addScore(delta: int) -> int:",
+            "  let self = delta + 1",
+            "  return this.total + self",
+          ].join("\n"),
+        });
+        const tsLocalSelf = fs.readFileSync(tsFile, "utf-8");
+        expect(tsLocalSelf).toContain("const self = delta + 1;");
+        expect(tsLocalSelf).toContain("return this.total + self;");
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
   });
 });

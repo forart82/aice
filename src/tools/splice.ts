@@ -25,7 +25,6 @@ import type {
   Block,
   ClassDecl,
   EnumVariantDecl,
-  Expr,
   FieldDecl,
   FunctionDecl,
   MethodDecl,
@@ -53,6 +52,7 @@ import {
   normalizePythonMethodReturn,
   parseOptionIdioms,
   resolveTargetProjectRoot,
+  rewriteReceiverIdentifierInNode,
 } from "./create.js";
 import {
   isHybridOrNativeSource,
@@ -3748,118 +3748,15 @@ export function locateNativeDeclarationSpan(
   return enrichSpanWithOffsetsAndLines(nativeSource, rawSpan);
 }
 
-function normalizeSelfAndThisInExpr(expr: Expr, useThis: boolean): void {
-  switch (expr.kind) {
-    case "IdentifierExpr":
-      if (useThis && expr.name === "self") {
-        expr.name = "this";
-      } else if (!useThis && expr.name === "this") {
-        expr.name = "self";
-      }
-      break;
-    case "BinaryExpr":
-      normalizeSelfAndThisInExpr(expr.left, useThis);
-      normalizeSelfAndThisInExpr(expr.right, useThis);
-      break;
-    case "UnaryExpr":
-    case "AwaitExpr":
-    case "PostfixTryExpr":
-      normalizeSelfAndThisInExpr(expr.operand, useThis);
-      break;
-    case "AssignExpr":
-      normalizeSelfAndThisInExpr(expr.target, useThis);
-      normalizeSelfAndThisInExpr(expr.value, useThis);
-      break;
-    case "CallExpr":
-      normalizeSelfAndThisInExpr(expr.callee, useThis);
-      for (const a of expr.args) normalizeSelfAndThisInExpr(a, useThis);
-      break;
-    case "MemberAccessExpr":
-      normalizeSelfAndThisInExpr(expr.object, useThis);
-      break;
-    case "IndexExpr":
-      normalizeSelfAndThisInExpr(expr.object, useThis);
-      normalizeSelfAndThisInExpr(expr.index, useThis);
-      break;
-    case "ArrayLiteralExpr":
-      for (const el of expr.elements) normalizeSelfAndThisInExpr(el, useThis);
-      break;
-    case "RecordLiteralExpr":
-      for (const p of expr.properties) normalizeSelfAndThisInExpr(p.value, useThis);
-      break;
-    case "TemplateLiteralExpr":
-      for (const e of expr.expressions) normalizeSelfAndThisInExpr(e, useThis);
-      break;
-    case "ClosureExpr":
-      if (expr.body.kind === "Block") {
-        normalizeSelfAndThisInBlock(expr.body, useThis);
-      } else {
-        normalizeSelfAndThisInExpr(expr.body, useThis);
-      }
-      break;
-  }
-}
-
-function normalizeSelfAndThisInStmt(stmt: Statement, useThis: boolean): void {
-  switch (stmt.kind) {
-    case "LetBinding":
-    case "DestructureBinding":
-      normalizeSelfAndThisInExpr(stmt.init, useThis);
-      break;
-    case "AssignStmt":
-      normalizeSelfAndThisInExpr(stmt.target, useThis);
-      normalizeSelfAndThisInExpr(stmt.value, useThis);
-      break;
-    case "ExprStmt":
-    case "ThrowStmt":
-      normalizeSelfAndThisInExpr(stmt.expr, useThis);
-      break;
-    case "ReturnStmt":
-      if (stmt.value) normalizeSelfAndThisInExpr(stmt.value, useThis);
-      break;
-    case "IfStmt":
-      normalizeSelfAndThisInExpr(stmt.condition, useThis);
-      normalizeSelfAndThisInBlock(stmt.thenBranch, useThis);
-      for (const el of stmt.elifBranches) {
-        normalizeSelfAndThisInExpr(el.condition, useThis);
-        normalizeSelfAndThisInBlock(el.body, useThis);
-      }
-      if (stmt.elseBranch) normalizeSelfAndThisInBlock(stmt.elseBranch, useThis);
-      break;
-    case "WhileStmt":
-      normalizeSelfAndThisInExpr(stmt.condition, useThis);
-      normalizeSelfAndThisInBlock(stmt.body, useThis);
-      break;
-    case "ForStmt":
-      normalizeSelfAndThisInExpr(stmt.iterable, useThis);
-      normalizeSelfAndThisInBlock(stmt.body, useThis);
-      break;
-    case "MatchStmt":
-      normalizeSelfAndThisInExpr(stmt.target, useThis);
-      for (const c of stmt.cases) {
-        if (c.guard) normalizeSelfAndThisInExpr(c.guard, useThis);
-        if (c.body.kind === "Block") normalizeSelfAndThisInBlock(c.body, useThis);
-        else normalizeSelfAndThisInExpr(c.body, useThis);
-      }
-      break;
-    case "TryStmt":
-      normalizeSelfAndThisInBlock(stmt.tryBlock, useThis);
-      if (stmt.catchBlock) normalizeSelfAndThisInBlock(stmt.catchBlock, useThis);
-      if (stmt.finallyBlock) normalizeSelfAndThisInBlock(stmt.finallyBlock, useThis);
-      break;
-  }
-}
-
-function normalizeSelfAndThisInBlock(block: Block, useThis: boolean): void {
-  for (const s of block.statements) {
-    normalizeSelfAndThisInStmt(s, useThis);
-  }
-}
-
 function normalizeSelfAndThisInDecl(
   decl: FunctionDecl | MethodDecl,
   targetLang: TargetLanguage,
+  isClassMethod = false,
+  isStaticMethod = false,
 ): void {
+  if (!isClassMethod || isStaticMethod) {
+    return;
+  }
   const useThis =
     targetLang === "typescript" ||
     targetLang === "javascript" ||
@@ -3867,10 +3764,10 @@ function normalizeSelfAndThisInDecl(
     targetLang === "cpp" ||
     targetLang === "kotlin" ||
     targetLang === "php";
-  if ("statements" in decl.body) {
-    normalizeSelfAndThisInBlock(decl.body, useThis);
-  } else {
-    normalizeSelfAndThisInExpr(decl.body, useThis);
+  if (!useThis) {
+    rewriteReceiverIdentifierInNode(decl.body, "self");
+  } else if (decl.params[0]?.name === "self") {
+    rewriteReceiverIdentifierInNode(decl.body, "this");
   }
 }
 
@@ -4200,11 +4097,15 @@ function emitExpandedDeclForTarget(
   },
 ): string {
   const cloned = structuredClone(expandedDecl);
-  normalizeSelfAndThisInDecl(cloned, targetLang);
+  const isClassMethod = Boolean(className || cloned.kind === "MethodDecl");
+  const resolvedIsStatic = Boolean(
+    origMeta?.isStatic ?? ("isStatic" in cloned ? cloned.isStatic : false),
+  );
+  normalizeSelfAndThisInDecl(cloned, targetLang, isClassMethod, resolvedIsStatic);
 
   const dummySpan = cloned.span;
 
-  if (className || cloned.kind === "MethodDecl") {
+  if (isClassMethod) {
     let resolvedMethodName = origMeta?.memberName ?? cloned.name;
     if (resolvedMethodName === "__init__" && targetLang !== "python") {
       resolvedMethodName = "constructor";
@@ -4213,10 +4114,12 @@ function emitExpandedDeclForTarget(
       kind: "MethodDecl",
       name: resolvedMethodName,
       typeParams: cloned.typeParams ?? [],
-      params: cloned.params.filter((p) => p.name !== "self" && p.name !== "this"),
+      params: resolvedIsStatic
+        ? cloned.params
+        : cloned.params.filter((p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this"))),
       returnType: cloned.returnType,
       isAsync: Boolean(origMeta?.isAsync ?? cloned.isAsync),
-      isStatic: Boolean(origMeta?.isStatic ?? ("isStatic" in cloned ? cloned.isStatic : false)),
+      isStatic: resolvedIsStatic,
       accessor: origMeta?.accessor ?? ("accessor" in cloned ? cloned.accessor : undefined),
       isExpressionBodied: cloned.isExpressionBodied,
       body: cloned.body,

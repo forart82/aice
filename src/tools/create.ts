@@ -901,6 +901,9 @@ function promoteTerminalBlockExprToReturn(block: Block): void {
 
   if (last.kind === "ExprStmt") {
     const expr = last.expr;
+    if (expr.kind === "AssignExpr") {
+      return;
+    }
     if (
       expr.kind === "CallExpr" &&
       expr.callee.kind === "IdentifierExpr" &&
@@ -949,7 +952,10 @@ export function normalizePythonMethodReturn(m: MethodDecl): void {
   }
 }
 
-function rewriteReceiverIdentifierInNode(node: unknown, targetReceiver: "self" | "this"): void {
+export function rewriteReceiverIdentifierInNode(
+  node: unknown,
+  targetReceiver: "self" | "this",
+): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) {
     for (const item of node) {
@@ -979,10 +985,15 @@ export function normalizeModuleForTarget(mod: Module, targetLang: TargetLanguage
     if (item.kind === "ClassDecl") {
       for (const m of item.methods) {
         if (!m.isStatic) {
+          const hadExplicitSelfParam = m.params[0]?.name === "self";
           m.params = m.params.filter(
             (p, idx) => !(idx === 0 && (p.name === "self" || p.name === "this")),
           );
-          rewriteReceiverIdentifierInNode(m.body, receiver);
+          if (receiver === "self") {
+            rewriteReceiverIdentifierInNode(m.body, "self");
+          } else if (hadExplicitSelfParam) {
+            rewriteReceiverIdentifierInNode(m.body, "this");
+          }
         }
         if (m.name === "__init__" && targetLang !== "python") {
           m.name = "constructor";
