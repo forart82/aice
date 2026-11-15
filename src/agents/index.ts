@@ -317,7 +317,13 @@ export function removeCodexToml(filePath: string): boolean {
     .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  writeFileAtomic(filePath, updated ? `${updated}\n` : "");
+  if (updated.length === 0) {
+    try {
+      fs.unlinkSync(filePath);
+    } catch {}
+  } else {
+    writeFileAtomic(filePath, `${updated}\n`);
+  }
   return true;
 }
 
@@ -400,7 +406,14 @@ export function removeAiderConfigYaml(confPath: string, conventionsPath: string)
 
     if (modified) {
       const keys = Object.keys(parsed);
-      writeFileAtomic(confPath, keys.length > 0 ? YAML.stringify(parsed) : "");
+      const rendered = keys.length > 0 ? YAML.stringify(parsed).trim() : "";
+      if (rendered.length === 0) {
+        try {
+          fs.unlinkSync(confPath);
+        } catch {}
+      } else {
+        writeFileAtomic(confPath, `${rendered}\n`);
+      }
     }
     return modified;
   } catch {
@@ -697,6 +710,10 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     }
     if (writeGlobalRules) {
       runSafe("claude", () => upsertMarkdownDirective(path.join(home, ".claude", "CLAUDE.md")));
+    } else {
+      runSafe("claude", () =>
+        removeMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"), true),
+      );
     }
   }
 
@@ -717,6 +734,28 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
       runSafe("agy", () =>
         upsertAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md")),
       );
+      runSafe("agy", () =>
+        removeMarkdownDirective(path.join(home, ".gemini", "config", "GEMINI.md"), true),
+      );
+      runSafe("agy", () =>
+        removeMarkdownDirective(path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"), true),
+      );
+    } else {
+      runSafe("agy", () =>
+        removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"), true),
+      );
+      runSafe("agy", () =>
+        removeMarkdownDirective(path.join(home, ".gemini", "config", "GEMINI.md"), true),
+      );
+      runSafe("agy", () =>
+        removeMarkdownDirective(path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"), true),
+      );
+      runSafe("agy", () =>
+        removeAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md"), true),
+      );
+      runSafe("agy", () =>
+        removeAlwaysOnRuleFile(path.join(home, ".gemini", "rules", "aice.md"), true),
+      );
     }
   }
 
@@ -729,6 +768,19 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
       if (fs.existsSync(codexInstr)) {
         runSafe("codex", () => upsertMarkdownDirective(codexInstr));
       }
+      runSafe("codex", () =>
+        removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true),
+      );
+    } else {
+      runSafe("codex", () =>
+        removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"), true),
+      );
+      runSafe("codex", () =>
+        removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true),
+      );
+      runSafe("codex", () =>
+        removeMarkdownDirective(path.join(home, ".codex", "instructions.md"), true),
+      );
     }
   }
 
@@ -741,6 +793,10 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
       runSafe("opencode", () =>
         upsertMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md")),
       );
+    } else {
+      runSafe("opencode", () =>
+        removeMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"), true),
+      );
     }
   }
 
@@ -751,6 +807,8 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
     const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
     if (writeGlobalRules) {
       runSafe("aider", () => upsertMarkdownDirective(conventionsPath));
+    } else {
+      runSafe("aider", () => removeMarkdownDirective(conventionsPath, true));
     }
     runSafe("aider", () =>
       upsertAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath),
@@ -809,7 +867,7 @@ export function removeAgents(
     runSafe("claude", () => {
       removeJsonMcpServer(path.join(home, ".claude.json"));
       removeJsonMcpServer(path.join(home, ".claude", "settings.json"));
-      removeMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"));
+      removeMarkdownDirective(path.join(home, ".claude", "CLAUDE.md"), true);
     });
   }
 
@@ -817,30 +875,34 @@ export function removeAgents(
     runSafe("agy", () => {
       removeJsonMcpServer(path.join(home, ".gemini", "settings.json"));
       removeJsonMcpServer(path.join(home, ".gemini", "config", "mcp_config.json"));
-      removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"));
-      removeAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md"));
+      removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"), true);
+      removeMarkdownDirective(path.join(home, ".gemini", "config", "GEMINI.md"), true);
+      removeMarkdownDirective(path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"), true);
+      removeAlwaysOnRuleFile(path.join(home, ".gemini", "config", "rules", "aice.md"), true);
+      removeAlwaysOnRuleFile(path.join(home, ".gemini", "rules", "aice.md"), true);
     });
   }
 
   if (matches("codex")) {
     runSafe("codex", () => {
       removeCodexToml(path.join(home, ".codex", "config.toml"));
-      removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"));
-      removeMarkdownDirective(path.join(home, ".codex", "instructions.md"));
+      removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"), true);
+      removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true);
+      removeMarkdownDirective(path.join(home, ".codex", "instructions.md"), true);
     });
   }
 
   if (matches("opencode")) {
     runSafe("opencode", () => {
       removeJsonMcpServer(path.join(home, ".config", "opencode", "opencode.json"));
-      removeMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"));
+      removeMarkdownDirective(path.join(home, ".config", "opencode", "AGENTS.md"), true);
     });
   }
 
   if (matches("aider")) {
     runSafe("aider", () => {
       const conventionsPath = path.join(home, ".aider", "CONVENTIONS.md");
-      removeMarkdownDirective(conventionsPath);
+      removeMarkdownDirective(conventionsPath, true);
       removeAiderConfigYaml(path.join(home, ".aider.conf.yml"), conventionsPath);
     });
   }

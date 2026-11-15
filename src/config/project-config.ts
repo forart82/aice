@@ -1256,16 +1256,17 @@ export {
   MANDATORY_AGENT_RULES_MARKDOWN,
 } from "../rules/mandatory-rules.js";
 /**
- * Locates the active line-anchored `<!-- AICE:START -->...<!-- AICE:END -->` directive span
- * outside Markdown fenced code blocks (``` or ~~~).
+ * Locates all active line-anchored `<!-- AICE:START -->...<!-- AICE:END -->` directive spans
+ * (and legacy `## AICE ... - MANDATORY` blocks, including unclosed blocks) outside Markdown
+ * fenced code blocks (``` or ~~~).
  */
-export function findDirectiveSpanOutsideFences(
+export function findAllDirectiveSpansOutsideFences(
   markdown: string,
-): { startIdx: number; endOffset: number } | null {
+): Array<{ startIdx: number; endOffset: number }> {
+  const spans: Array<{ startIdx: number; endOffset: number }> = [];
   let fenceChar: "`" | "~" | null = null;
   let fenceLen = 0;
-  let firstStartIdx = -1;
-  let lastEndOffset = -1;
+  let activeStartIdx = -1;
 
   let pos = 0;
   const totalLen = markdown.length;
@@ -1290,14 +1291,28 @@ export function findDirectiveSpanOutsideFences(
         fenceLen = 0;
       }
     } else if (!fenceChar) {
-      if (
-        firstStartIdx === -1 &&
-        (/^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine) ||
-          /^[ \t]*##\s+AICE(?:\s+[0-9A-Za-z._-]+)?\s*[-—]\s*MANDATORY/i.test(cleanLine))
-      ) {
-        firstStartIdx = pos;
-      } else if (firstStartIdx !== -1 && /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(cleanLine)) {
-        lastEndOffset = pos + cleanLine.length;
+      const isStartLine =
+        /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(cleanLine) ||
+        /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(
+          cleanLine,
+        );
+      const isEndLine = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(cleanLine);
+      const isNonAiceTopHeading =
+        /^[ \t]*#{1,2}[ \t]+/.test(cleanLine) && !/^[ \t]*##\s+AICE\b/i.test(cleanLine);
+
+      if (activeStartIdx === -1) {
+        if (isStartLine) {
+          activeStartIdx = pos;
+        }
+      } else {
+        if (isEndLine) {
+          spans.push({ startIdx: activeStartIdx, endOffset: pos + cleanLine.length });
+          activeStartIdx = -1;
+        } else if (isNonAiceTopHeading) {
+          spans.push({ startIdx: activeStartIdx, endOffset: pos });
+          activeStartIdx = -1;
+        }
+        // Consecutive `<!-- AICE:START ... -->` lines stay part of the SAME active block
       }
     }
 
@@ -1305,10 +1320,55 @@ export function findDirectiveSpanOutsideFences(
     pos = nlIdx + 1;
   }
 
-  if (firstStartIdx !== -1 && lastEndOffset !== -1 && lastEndOffset > firstStartIdx) {
-    return { startIdx: firstStartIdx, endOffset: lastEndOffset };
+  if (activeStartIdx !== -1) {
+    spans.push({ startIdx: activeStartIdx, endOffset: totalLen });
   }
-  return null;
+
+  return spans;
+}
+
+/**
+ * Locates the active line-anchored `<!-- AICE:START -->...<!-- AICE:END -->` directive span
+ * outside Markdown fenced code blocks (``` or ~~~).
+ */
+export function findDirectiveSpanOutsideFences(
+  markdown: string,
+): { startIdx: number; endOffset: number } | null {
+  return findAllDirectiveSpansOutsideFences(markdown)[0] ?? null;
+}
+
+/**
+ * Strips all `<!-- AICE:START -->...<!-- AICE:END -->` directive spans (and legacy blocks)
+ * outside fences while preserving all user text before, between, and after blocks with clean
+ * `\n\n` paragraph spacing.
+ */
+export function stripAllMarkdownDirectives(markdown: string): {
+  stripped: string;
+  hadDirective: boolean;
+} {
+  const spans = findAllDirectiveSpansOutsideFences(markdown);
+  if (spans.length === 0) {
+    return { stripped: markdown.trim(), hadDirective: false };
+  }
+
+  const segments: string[] = [];
+  let lastOffset = 0;
+  for (const span of spans) {
+    const segment = markdown.slice(lastOffset, span.startIdx).trim();
+    if (segment.length > 0) {
+      segments.push(segment);
+    }
+    lastOffset = span.endOffset;
+  }
+  const trailing = markdown.slice(lastOffset).trim();
+  if (trailing.length > 0) {
+    segments.push(trailing);
+  }
+
+  return {
+    stripped: segments.join("\n\n"),
+    hadDirective: true,
+  };
 }
 
 export function upsertMarkdownDirective(mdPath: string, blockText?: string): void {
@@ -1318,12 +1378,7 @@ export function upsertMarkdownDirective(mdPath: string, blockText?: string): voi
   if (fs.existsSync(mdPath)) {
     existing = fs.readFileSync(mdPath, "utf-8");
   }
-  const span = findDirectiveSpanOutsideFences(existing);
-  const stripped = span
-    ? [existing.slice(0, span.startIdx).trim(), existing.slice(span.endOffset).trim()]
-        .filter(Boolean)
-        .join("\n\n")
-    : existing.trim();
+  const { stripped } = stripAllMarkdownDirectives(existing);
 
   if (stripped.length === 0) {
     writeFileAtomic(mdPath, `${directiveBlock}\n`);
@@ -1358,20 +1413,27 @@ export function removeMarkdownDirective(
       : Boolean(optionsOrRemoveIfEmpty?.removeIfEmpty);
   if (!fs.existsSync(mdPath)) return;
   const existing = fs.readFileSync(mdPath, "utf-8");
-  const span = findDirectiveSpanOutsideFences(existing);
-  if (!span) return;
+  const { stripped, hadDirective } = stripAllMarkdownDirectives(existing);
 
-  const before = existing.slice(0, span.startIdx).replace(/\s*$/, "");
-  const after = existing.slice(span.endOffset).replace(/^\s*/, "");
-  const combined = [before, after].filter((s) => s.length > 0).join("\n\n");
-  if (combined.trim().length === 0) {
+  if (!hadDirective) {
+    if (removeIfEmpty && existing.trim().length === 0) {
+      try {
+        fs.unlinkSync(mdPath);
+      } catch {}
+    }
+    return;
+  }
+
+  if (stripped.length === 0) {
     if (removeIfEmpty) {
-      fs.unlinkSync(mdPath);
+      try {
+        fs.unlinkSync(mdPath);
+      } catch {}
     } else {
       writeFileAtomic(mdPath, "");
     }
   } else {
-    writeFileAtomic(mdPath, `${combined}\n`);
+    writeFileAtomic(mdPath, `${stripped}\n`);
   }
 }
 
@@ -1447,36 +1509,70 @@ export function hasAgentsMdInclude(markdown: string): boolean {
   return false;
 }
 
+function cleanEmptySubdir(dirPath: string): void {
+  try {
+    if (fs.existsSync(dirPath) && fs.readdirSync(dirPath).length === 0) {
+      fs.rmdirSync(dirPath);
+    }
+  } catch {}
+}
+
 /**
  * Synchronizes project-level AI agent rules (`AGENTS.md`, plus existing `CLAUDE.md` without `@AGENTS.md`)
- * while purging legacy duplicate rule blocks from `GEMINI.md`, `.GEMINI.md`, and `.agents/rules/aice.md`.
+ * while purging legacy duplicate rule blocks from `GEMINI.md`, `.GEMINI.md`, `CODEX.md`, `.CODEX.md`,
+ * `.codex/*`, and rule files under `.agents/rules/aice.md`, `.gemini/rules/aice.md`, `.claude/rules/aice.md`.
  */
 export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean): void {
   const resolvedDir = path.resolve(projectDir);
   const agentsMdPath = path.join(resolvedDir, "AGENTS.md");
   const claudeMdPath = path.join(resolvedDir, "CLAUDE.md");
+  const dotClaudeMdPath = path.join(resolvedDir, ".claude", "CLAUDE.md");
   const geminiMdPath = path.join(resolvedDir, "GEMINI.md");
   const dotGeminiMdPath = path.join(resolvedDir, ".GEMINI.md");
-  const ruleFilePath = path.join(resolvedDir, ".agents", "rules", "aice.md");
+  const codexMdPath = path.join(resolvedDir, "CODEX.md");
+  const dotCodexMdPath = path.join(resolvedDir, ".CODEX.md");
+  const dotCodexAgentsMdPath = path.join(resolvedDir, ".codex", "AGENTS.md");
+  const dotCodexCodexMdPath = path.join(resolvedDir, ".codex", "CODEX.md");
+  const dotCodexInstructionsMdPath = path.join(resolvedDir, ".codex", "instructions.md");
 
-  // Always strip legacy duplicate Antigravity/Gemini rule surfaces on BOTH enable and disable
+  // Always clean duplicate/legacy secondary surfaces on BOTH enable and disable
   removeMarkdownDirective(geminiMdPath, true);
   removeMarkdownDirective(dotGeminiMdPath, true);
-  removeAlwaysOnRuleFile(ruleFilePath, true);
+  removeMarkdownDirective(codexMdPath, true);
+  removeMarkdownDirective(dotCodexMdPath, true);
+  removeMarkdownDirective(dotCodexAgentsMdPath, true);
+  removeMarkdownDirective(dotCodexCodexMdPath, true);
+  removeMarkdownDirective(dotCodexInstructionsMdPath, true);
+  cleanEmptySubdir(path.join(resolvedDir, ".codex"));
+
+  removeAlwaysOnRuleFile(path.join(resolvedDir, ".agents", "rules", "aice.md"), true);
+  removeAlwaysOnRuleFile(path.join(resolvedDir, ".gemini", "rules", "aice.md"), true);
+  removeAlwaysOnRuleFile(path.join(resolvedDir, ".claude", "rules", "aice.md"), true);
 
   if (enabled) {
     upsertMarkdownDirective(agentsMdPath);
     if (fs.existsSync(claudeMdPath)) {
       const claudeContent = fs.readFileSync(claudeMdPath, "utf-8");
       if (hasAgentsMdInclude(claudeContent)) {
-        removeMarkdownDirective(claudeMdPath, false);
+        removeMarkdownDirective(claudeMdPath, true);
       } else {
         upsertMarkdownDirective(claudeMdPath);
+      }
+      removeMarkdownDirective(dotClaudeMdPath, true);
+      cleanEmptySubdir(path.join(resolvedDir, ".claude"));
+    } else if (fs.existsSync(dotClaudeMdPath)) {
+      const dotClaudeContent = fs.readFileSync(dotClaudeMdPath, "utf-8");
+      if (hasAgentsMdInclude(dotClaudeContent)) {
+        removeMarkdownDirective(dotClaudeMdPath, true);
+      } else {
+        upsertMarkdownDirective(dotClaudeMdPath);
       }
     }
   } else {
     removeMarkdownDirective(agentsMdPath, true);
-    removeMarkdownDirective(claudeMdPath, false);
+    removeMarkdownDirective(claudeMdPath, true);
+    removeMarkdownDirective(dotClaudeMdPath, true);
+    cleanEmptySubdir(path.join(resolvedDir, ".claude"));
   }
 }
 

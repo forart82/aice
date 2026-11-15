@@ -2575,10 +2575,11 @@ export async function generateWorkspaceContext(
         .slice(0, 3)
         .map((rf) => `aice read ${rf}:${primarySel}`)
         .join(" | ");
-      const searchBudgetLabel =
-        searchByteBudget !== undefined && searchByteBudget <= 10_240 ? "9 KB CLI" : "28 KB";
+      const isCliSearchBudget = searchByteBudget !== undefined && searchByteBudget <= 10_240;
+      const searchBudgetLabel = isCliSearchBudget ? "9 KB CLI" : "28 KB";
+      const fullHint = isCliSearchBudget ? "" : " (or pass --full)";
       symbolSlices.push(
-        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit ${searchBudgetLabel} stdout budget)\n// Next slices: ${nextHints} (or pass --full)`,
+        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit ${searchBudgetLabel} stdout budget)\n// Next slices: ${nextHints}${fullHint}`,
       );
     }
   }

@@ -404,13 +404,13 @@ aice_cheatsheet() {
   local C_BOLD="\033[1m"
   local C_GRAY="\033[0;90m"
   printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.39 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.40 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] STRICT 2-TOOL AI SURFACE${C_RESET}          ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read <target>${C_RESET}  ${C_GRAY}dirs, files, :sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read <target>${C_RESET}  ${C_GRAY}:L10-50, :/pat/  ${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}  ${C_GRAY}auto-create, :sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice write <file>${C_RESET}   ${C_GRAY}<<< === >>>/stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.39${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
+  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice write <file>${C_RESET}   ${C_GRAY}<<< === >>>/stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.40${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read src tests${C_RESET}  ${C_GRAY}Auto-outline dir${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
   printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
@@ -494,11 +494,154 @@ else
       const fs = require("node:fs");
       const os = require("node:os");
       const path = require("node:path");
+      const { spawnSync } = require("node:child_process");
+      const aiceBin = process.argv[1];
       const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
       const devDir = process.env.AICE_PROJECTS_DIR
         ? path.resolve(process.env.AICE_PROJECTS_DIR)
         : path.join(homeDir, "dev");
+
+      const TARGET_MDS = [
+        "AGENTS.md",
+        "CLAUDE.md",
+        path.join(".claude", "CLAUDE.md"),
+        "GEMINI.md",
+        ".GEMINI.md",
+        "CODEX.md",
+        ".CODEX.md",
+        path.join(".codex", "AGENTS.md"),
+        path.join(".codex", "CODEX.md"),
+        path.join(".codex", "instructions.md"),
+      ];
+      const TARGET_RULES = [
+        path.join(".agents", "rules", "aice.md"),
+        path.join(".gemini", "rules", "aice.md"),
+        path.join(".claude", "rules", "aice.md"),
+      ];
+
+      function stripDirectivesFenceAware(markdown) {
+        let fenceChar = null;
+        let fenceLen = 0;
+        let activeStart = -1;
+        const spans = [];
+        let pos = 0;
+        const total = markdown.length;
+        while (pos <= total) {
+          const nl = markdown.indexOf("\n", pos);
+          const lineEnd = nl === -1 ? total : nl;
+          const raw = markdown.slice(pos, lineEnd);
+          const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+          const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+          if (fence) {
+            const m = fence[1];
+            const ch = m[0];
+            const rest = fence[2] || "";
+            if (!fenceChar) {
+              if (ch === "~" || !rest.includes("`")) {
+                fenceChar = ch;
+                fenceLen = m.length;
+              }
+            } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
+              fenceChar = null;
+              fenceLen = 0;
+            }
+          } else if (!fenceChar) {
+            const isStart =
+              /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
+              /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
+            const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
+            const isNonAiceHeading =
+              /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
+            if (activeStart === -1) {
+              if (isStart) activeStart = pos;
+            } else {
+              if (isEnd) {
+                spans.push({ start: activeStart, end: pos + line.length });
+                activeStart = -1;
+              } else if (isNonAiceHeading) {
+                spans.push({ start: activeStart, end: pos });
+                activeStart = -1;
+              }
+            }
+          }
+          if (nl === -1) break;
+          pos = nl + 1;
+        }
+        if (activeStart !== -1) spans.push({ start: activeStart, end: total });
+        if (spans.length === 0) return { stripped: markdown.trim(), hadDirective: false };
+        const segs = [];
+        let last = 0;
+        for (const s of spans) {
+          const seg = markdown.slice(last, s.start).trim();
+          if (seg) segs.push(seg);
+          last = s.end;
+        }
+        const trail = markdown.slice(last).trim();
+        if (trail) segs.push(trail);
+        return { stripped: segs.join("\n\n"), hadDirective: true };
+      }
+
+      const ALLOWED = new Set([".claude", ".codex", ".agents", ".gemini", "rules"]);
+      function cleanEmptyDir(projPath, dirPath) {
+        try {
+          const rel = path.relative(projPath, dirPath);
+          if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || !ALLOWED.has(path.basename(dirPath))) return;
+          if (fs.existsSync(dirPath) && fs.readdirSync(dirPath).length === 0) {
+            fs.rmdirSync(dirPath);
+            cleanEmptyDir(projPath, path.dirname(dirPath));
+          }
+        } catch {}
+      }
+
+      function hasAiceTrace(projPath) {
+        for (const r of TARGET_RULES) {
+          if (fs.existsSync(path.join(projPath, r))) return true;
+        }
+        for (const m of TARGET_MDS) {
+          const full = path.join(projPath, m);
+          if (!fs.existsSync(full)) continue;
+          try {
+            const content = fs.readFileSync(full, "utf-8");
+            if (/<!--\s*AICE:START|##\s+AICE/i.test(content)) return true;
+          } catch {}
+        }
+        return false;
+      }
+
+      function cleanProjectTrace(projPath) {
+        let changed = false;
+        for (const r of TARGET_RULES) {
+          const full = path.join(projPath, r);
+          if (fs.existsSync(full)) {
+            try {
+              fs.unlinkSync(full);
+              cleanEmptyDir(projPath, path.dirname(full));
+              changed = true;
+            } catch {}
+          }
+        }
+        for (const m of TARGET_MDS) {
+          const full = path.join(projPath, m);
+          if (!fs.existsSync(full)) continue;
+          try {
+            const raw = fs.readFileSync(full, "utf-8");
+            const { stripped, hadDirective } = stripDirectivesFenceAware(raw);
+            if (hadDirective || raw.trim().length === 0) {
+              changed = true;
+              if (stripped.length === 0) {
+                fs.unlinkSync(full);
+              } else {
+                fs.writeFileSync(full, stripped + "\n", "utf-8");
+              }
+              cleanEmptyDir(projPath, path.dirname(full));
+            }
+          } catch {}
+        }
+        return changed;
+      }
+
       let refreshedCount = 0;
+      let cleanedCount = 0;
       if (fs.existsSync(devDir) && fs.statSync(devDir).isDirectory()) {
         for (const entry of fs.readdirSync(devDir, { withFileTypes: true })) {
           if (!entry.isDirectory()) continue;
@@ -508,15 +651,25 @@ else
             try {
               const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
               if (cfg.enabled !== false) {
-                const { spawnSync } = require("node:child_process");
-                spawnSync(process.argv[1], ["enable"], { cwd: projPath, stdio: "ignore" });
+                spawnSync(aiceBin, ["enable"], { cwd: projPath, stdio: "ignore" });
                 refreshedCount++;
+              } else {
+                if (hasAiceTrace(projPath)) {
+                  spawnSync(aiceBin, ["disable"], { cwd: projPath, stdio: "ignore" });
+                  cleanedCount++;
+                }
               }
             } catch {}
+          } else {
+            if (hasAiceTrace(projPath)) {
+              if (cleanProjectTrace(projPath)) {
+                cleanedCount++;
+              }
+            }
           }
         }
       }
-      console.log(`[✔] Refreshed AICE agent rules in ${refreshedCount} project(s) across ${devDir}`);
+      console.log(`[✔] Synchronized AICE agent rules across ${devDir} (${refreshedCount} enabled refreshed, ${cleanedCount} disabled/unmanaged cleaned)`);
     ' "$AICE_BIN"
   fi
   log_info "Running post-install smoke checks..."

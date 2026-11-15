@@ -41,6 +41,12 @@ import type {
   PatchOptions,
   SpliceOptions,
 } from "../src/tools/index.js";
+import { DEFAULT_CLI_READ_MAX_BYTES } from "../src/tools/read.js";
+import {
+  acquireSharedCliReadBudget,
+  commitSharedCliReadBytes,
+  detectCliShellInvocation,
+} from "../src/utils/cli-pipe-budget.js";
 import { AICE_VERSION } from "../src/version.js";
 
 let activeCliArgs: string[] = process.argv.slice(2);
@@ -2576,33 +2582,77 @@ Examples:
             ? ["."]
             : undefined;
       try {
+        const shellInv = detectCliShellInvocation();
+        const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
         const { aiceRead } = await import("../src/tools/read.js");
         const parsedContextLines =
           options.context !== undefined && Number.isFinite(Number(options.context))
             ? Math.max(0, Number(options.context))
             : undefined;
-        const res = await aiceRead(effectiveTargets, {
-          outline: options.outline,
-          outlineTarget: options.outlineTarget,
-          full: options.full,
-          depth: options.depth !== undefined ? Number(options.depth) : undefined,
-          symbol: options.symbol,
-          search: options.search,
-          contextLines: parsedContextLines,
-          filesOnly: options.files ? true : undefined,
-          dsl: options.dsl ? true : undefined,
-          rawNative: !options.dsl,
-          compact: options.compact,
-          includeTypes: options.types !== false,
-          idioms: options.idioms,
-          includeDeps: options.deps,
-          includeCallers: options.callers,
-          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-          json: !!options.json,
-          stats: !!options.stats,
-          surface: "cli",
-        });
-        console.log(res.output);
+
+        if (!options.json && options.maxTokens === undefined && !unboundedCli) {
+          const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
+          if (budgetLease.exhausted) {
+            if (budgetLease.emitDeferralNotice) {
+              const rerunRaw = `aice read ${effectiveTargets && effectiveTargets.length > 0 ? effectiveTargets.join(" ") : "."}`;
+              const rerunCmd =
+                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
+              console.log(line);
+              commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);
+            }
+            return;
+          }
+          const res = await aiceRead(effectiveTargets, {
+            outline: options.outline,
+            outlineTarget: options.outlineTarget,
+            full: options.full,
+            depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            symbol: options.symbol,
+            search: options.search,
+            contextLines: parsedContextLines,
+            filesOnly: options.files ? true : undefined,
+            dsl: options.dsl ? true : undefined,
+            rawNative: !options.dsl,
+            compact: options.compact,
+            includeTypes: options.types !== false,
+            idioms: options.idioms,
+            includeDeps: options.deps,
+            includeCallers: options.callers,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            maxBytes: budgetLease.maxBytes,
+            unboundedCli,
+            json: !!options.json,
+            stats: !!options.stats,
+            surface: "cli",
+          });
+          console.log(res.output);
+          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
+        } else {
+          const res = await aiceRead(effectiveTargets, {
+            outline: options.outline,
+            outlineTarget: options.outlineTarget,
+            full: options.full,
+            depth: options.depth !== undefined ? Number(options.depth) : undefined,
+            symbol: options.symbol,
+            search: options.search,
+            contextLines: parsedContextLines,
+            filesOnly: options.files ? true : undefined,
+            dsl: options.dsl ? true : undefined,
+            rawNative: !options.dsl,
+            compact: options.compact,
+            includeTypes: options.types !== false,
+            idioms: options.idioms,
+            includeDeps: options.deps,
+            includeCallers: options.callers,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            unboundedCli,
+            json: !!options.json,
+            stats: !!options.stats,
+            surface: "cli",
+          });
+          console.log(res.output);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         recordCliFailureTelemetry(msg, "context", effectiveTargets?.[0]);
@@ -2644,22 +2694,55 @@ program
     ) => {
       const effectiveTargets = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
       try {
+        const shellInv = detectCliShellInvocation();
+        const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
         const { aiceRead } = await import("../src/tools/read.js");
         const parsedContextLines =
           options.context !== undefined && Number.isFinite(Number(options.context))
             ? Math.max(0, Number(options.context))
             : undefined;
-        const res = await aiceRead(effectiveTargets, {
-          search: pattern,
-          contextLines: parsedContextLines,
-          filesWithMatches: options.filesWithMatches ? true : undefined,
-          full: options.full,
-          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-          json: !!options.json,
-          rawNative: true,
-          surface: "cli",
-        });
-        console.log(res.output);
+
+        if (!options.json && options.maxTokens === undefined && !unboundedCli) {
+          const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
+          if (budgetLease.exhausted) {
+            if (budgetLease.emitDeferralNotice) {
+              const rerunRaw = `aice search "${pattern}" ${effectiveTargets.join(" ")}`.trim();
+              const rerunCmd =
+                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
+              console.log(line);
+              commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);
+            }
+            return;
+          }
+          const res = await aiceRead(effectiveTargets, {
+            search: pattern,
+            contextLines: parsedContextLines,
+            filesWithMatches: options.filesWithMatches ? true : undefined,
+            full: options.full,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            maxBytes: budgetLease.maxBytes,
+            unboundedCli,
+            json: !!options.json,
+            rawNative: true,
+            surface: "cli",
+          });
+          console.log(res.output);
+          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
+        } else {
+          const res = await aiceRead(effectiveTargets, {
+            search: pattern,
+            contextLines: parsedContextLines,
+            filesWithMatches: options.filesWithMatches ? true : undefined,
+            full: options.full,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            unboundedCli,
+            json: !!options.json,
+            rawNative: true,
+            surface: "cli",
+          });
+          console.log(res.output);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         recordCliFailureTelemetry(msg, "context", effectiveTargets[0]);
@@ -2678,6 +2761,7 @@ program
   )
   .argument("[pattern]", "Optional glob/substring file filter or target directory/file path")
   .argument("[targets...]", "Optional directory or file path(s) to scan (default: '.')")
+  .option("--full", "Bypass default stdout ceiling and emit full file tree")
   .option("--json", "Output structured JSON bundle")
   .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
   .action(
@@ -2685,6 +2769,7 @@ program
       pattern: string | undefined,
       targetPaths: string[] | undefined,
       options: {
+        full?: boolean;
         json?: boolean;
         maxTokens?: number;
       },
@@ -2705,15 +2790,47 @@ program
         }
       }
       try {
+        const shellInv = detectCliShellInvocation();
+        const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
         const { aiceRead } = await import("../src/tools/read.js");
-        const res = await aiceRead(effectiveTargets, {
-          filesOnly: true,
-          ...(filePattern !== undefined ? { filePattern } : {}),
-          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-          json: !!options.json,
-          surface: "cli",
-        });
-        console.log(res.output);
+
+        if (!options.json && options.maxTokens === undefined && !unboundedCli) {
+          const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
+          if (budgetLease.exhausted) {
+            if (budgetLease.emitDeferralNotice) {
+              const rerunRaw = `aice find${filePattern ? ` "${filePattern}"` : ""} ${effectiveTargets.join(" ")}`.trim();
+              const rerunCmd =
+                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
+              console.log(line);
+              commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);
+            }
+            return;
+          }
+          const res = await aiceRead(effectiveTargets, {
+            filesOnly: true,
+            ...(filePattern !== undefined ? { filePattern } : {}),
+            full: options.full,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            maxBytes: budgetLease.maxBytes,
+            unboundedCli,
+            json: !!options.json,
+            surface: "cli",
+          });
+          console.log(res.output);
+          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
+        } else {
+          const res = await aiceRead(effectiveTargets, {
+            filesOnly: true,
+            ...(filePattern !== undefined ? { filePattern } : {}),
+            full: options.full,
+            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+            unboundedCli,
+            json: !!options.json,
+            surface: "cli",
+          });
+          console.log(res.output);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
         recordCliFailureTelemetry(msg, "context", effectiveTargets[0]);

@@ -18,20 +18,24 @@ import {
   autoDetectProjectMode,
   DEFAULT_PROJECT_CONFIG,
   deriveTargetFilename,
+  findAllDirectiveSpansOutsideFences,
   findProjectRoot,
   getExtensionForTarget,
   hasAgentsMdInclude,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   loadProjectConfig,
+  removeMarkdownDirective,
   resolvePathTargets,
   resolveTargetOutputPathForConfig,
   resolveWorktreeRoot,
   saveProjectConfig,
   setProjectAiceEnabled,
   setProjectIdiomsEnabled,
+  stripAllMarkdownDirectives,
   stripJsonComments,
   syncProjectWorkspaceRules,
+  upsertMarkdownDirective,
   validateConfig,
 } from "../../src/config/index.js";
 import { MANDATORY_AGENT_RULES_MARKDOWN } from "../../src/rules/mandatory-rules.js";
@@ -1027,6 +1031,204 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       } finally {
         fs.rmSync(bumpSandbox, { recursive: true, force: true });
       }
+    });
+
+    it("parses and cleanly removes multiple separate AICE blocks while preserving user markdown between them", () => {
+      const doc = [
+        "# Top Level Heading",
+        "",
+        "<!-- AICE:START -->",
+        "Directive block 1",
+        "<!-- AICE:END -->",
+        "",
+        "## User Section 1",
+        "Important user notes here.",
+        "",
+        "<!-- AICE:START v0.9.40 -->",
+        "Directive block 2",
+        "<!-- AICE:END -->",
+        "",
+        "## User Section 2",
+        "End of user notes.",
+      ].join("\n");
+
+      const spans = findAllDirectiveSpansOutsideFences(doc);
+      expect(spans).toHaveLength(2);
+      expect(spans[0]?.startIdx).toBe(doc.indexOf("<!-- AICE:START -->"));
+      expect(spans[1]?.startIdx).toBe(doc.indexOf("<!-- AICE:START v0.9.40 -->"));
+
+      const { stripped, hadDirective } = stripAllMarkdownDirectives(doc);
+      expect(hadDirective).toBe(true);
+      expect(stripped).toContain("# Top Level Heading");
+      expect(stripped).toContain("## User Section 1\nImportant user notes here.");
+      expect(stripped).toContain("## User Section 2\nEnd of user notes.");
+      expect(stripped).not.toContain("Directive block 1");
+      expect(stripped).not.toContain("Directive block 2");
+
+      const testMd = path.join(tmpDir, "multi-block.md");
+      fs.writeFileSync(testMd, doc, "utf-8");
+
+      removeMarkdownDirective(testMd, true);
+      const remaining = fs.readFileSync(testMd, "utf-8");
+      expect(remaining).toContain("## User Section 1\nImportant user notes here.");
+      expect(remaining).toContain("## User Section 2\nEnd of user notes.");
+      expect(remaining).not.toContain("AICE:START");
+
+      // Now test upsert: should replace all legacy blocks with a single clean directive
+      upsertMarkdownDirective(testMd, "<!-- AICE:START -->\nNew Consolidated Rules\n<!-- AICE:END -->");
+      const upserted = fs.readFileSync(testMd, "utf-8");
+      expect(upserted).toContain("New Consolidated Rules");
+      expect(upserted).toContain("## User Section 1\nImportant user notes here.");
+      expect(upserted).toContain("## User Section 2\nEnd of user notes.");
+      const updatedSpans = findAllDirectiveSpansOutsideFences(upserted);
+      expect(updatedSpans).toHaveLength(1);
+    });
+
+    it("heals unclosed AICE:START block before a non-AICE heading without eating the heading", () => {
+      const doc = [
+        "# Project Title",
+        "",
+        "<!-- AICE:START -->",
+        "Corrupted unclosed rules content...",
+        "",
+        "## Custom Section",
+        "Do not eat this section!",
+      ].join("\n");
+
+      const spans = findAllDirectiveSpansOutsideFences(doc);
+      expect(spans).toHaveLength(1);
+      const span = spans[0]!;
+      expect(span.startIdx).toBe(doc.indexOf("<!-- AICE:START -->"));
+      expect(span.endOffset).toBe(doc.indexOf("## Custom Section"));
+
+      const { stripped, hadDirective } = stripAllMarkdownDirectives(doc);
+      expect(hadDirective).toBe(true);
+      expect(stripped).toContain("# Project Title");
+      expect(stripped).toContain("## Custom Section\nDo not eat this section!");
+      expect(stripped).not.toContain("Corrupted unclosed rules content");
+
+      const testMd = path.join(tmpDir, "unclosed.md");
+      fs.writeFileSync(testMd, doc, "utf-8");
+      removeMarkdownDirective(testMd, true);
+      expect(fs.readFileSync(testMd, "utf-8")).toBe(
+        "# Project Title\n\n## Custom Section\nDo not eat this section!\n",
+      );
+    });
+
+    it("heals unclosed AICE:START block that runs until EOF cleanly", () => {
+      const doc = [
+        "# Project Title",
+        "",
+        "<!-- AICE:START -->",
+        "Corrupted unclosed rules content at end of file",
+      ].join("\n");
+
+      const spans = findAllDirectiveSpansOutsideFences(doc);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.endOffset).toBe(doc.length);
+
+      const { stripped, hadDirective } = stripAllMarkdownDirectives(doc);
+      expect(hadDirective).toBe(true);
+      expect(stripped).toBe("# Project Title");
+    });
+
+    it("treats consecutive AICE:START lines as part of the same active block", () => {
+      const doc = [
+        "<!-- AICE:START -->",
+        "<!-- AICE:START v0.9.40 -->",
+        "Rule line",
+        "<!-- AICE:END -->",
+      ].join("\n");
+
+      const spans = findAllDirectiveSpansOutsideFences(doc);
+      expect(spans).toHaveLength(1);
+      expect(spans[0]?.startIdx).toBe(0);
+      expect(spans[0]?.endOffset).toBe(doc.length);
+
+      const { stripped, hadDirective } = stripAllMarkdownDirectives(doc);
+      expect(hadDirective).toBe(true);
+      expect(stripped).toBe("");
+    });
+
+    it("ignores AICE:START and AICE:END inside markdown code fences", () => {
+      const doc = [
+        "# Code Example",
+        "",
+        "```markdown",
+        "<!-- AICE:START -->",
+        "Fenced directive example",
+        "<!-- AICE:END -->",
+        "```",
+        "",
+        "~~~",
+        "## AICE - MANDATORY",
+        "Fenced tilde example",
+        "~~~",
+      ].join("\n");
+
+      const spans = findAllDirectiveSpansOutsideFences(doc);
+      expect(spans).toHaveLength(0);
+
+      const { stripped, hadDirective } = stripAllMarkdownDirectives(doc);
+      expect(hadDirective).toBe(false);
+      expect(stripped).toBe(doc.trim());
+    });
+
+    it("synchronizes workspace rules, unlinks empty surfaces, and cleans secondary directories", () => {
+      const projDir = path.join(tmpDir, "full-sync-test");
+      fs.mkdirSync(projDir, { recursive: true });
+
+      // Seed all secondary and duplicate surfaces
+      fs.writeFileSync(path.join(projDir, "GEMINI.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(projDir, ".GEMINI.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(projDir, "CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(projDir, ".CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+
+      fs.mkdirSync(path.join(projDir, ".codex"), { recursive: true });
+      fs.writeFileSync(path.join(projDir, ".codex", "AGENTS.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(projDir, ".codex", "CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(projDir, ".codex", "instructions.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+
+      fs.mkdirSync(path.join(projDir, ".agents", "rules"), { recursive: true });
+      fs.writeFileSync(path.join(projDir, ".agents", "rules", "aice.md"), "legacy", "utf-8");
+      fs.mkdirSync(path.join(projDir, ".gemini", "rules"), { recursive: true });
+      fs.writeFileSync(path.join(projDir, ".gemini", "rules", "aice.md"), "legacy", "utf-8");
+      fs.mkdirSync(path.join(projDir, ".claude", "rules"), { recursive: true });
+      fs.writeFileSync(path.join(projDir, ".claude", "rules", "aice.md"), "legacy", "utf-8");
+
+      fs.writeFileSync(path.join(projDir, "CLAUDE.md"), "# Standalone Claude Rules\n", "utf-8");
+
+      // Enable workspace rules
+      syncProjectWorkspaceRules(projDir, true);
+
+      // AGENTS.md created
+      expect(fs.existsSync(path.join(projDir, "AGENTS.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(projDir, "AGENTS.md"), "utf-8")).toContain("AICE:START");
+
+      // Secondary duplicate surfaces purged
+      expect(fs.existsSync(path.join(projDir, "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, "CODEX.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".CODEX.md"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".codex"))).toBe(false);
+
+      expect(fs.existsSync(path.join(projDir, ".agents"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".gemini"))).toBe(false);
+      expect(fs.existsSync(path.join(projDir, ".claude", "rules"))).toBe(false);
+
+      // CLAUDE.md has directive injected after heading
+      const claudeContent = fs.readFileSync(path.join(projDir, "CLAUDE.md"), "utf-8");
+      expect(claudeContent).toContain("# Standalone Claude Rules");
+      expect(claudeContent).toContain("AICE:START");
+
+      // Disable workspace rules
+      syncProjectWorkspaceRules(projDir, false);
+
+      // AGENTS.md was AICE-only so it must be unlinked (no 0-byte orphan file)
+      expect(fs.existsSync(path.join(projDir, "AGENTS.md"))).toBe(false);
+      // CLAUDE.md has user content so it must remain intact without AICE directive
+      expect(fs.existsSync(path.join(projDir, "CLAUDE.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(projDir, "CLAUDE.md"), "utf-8")).toBe("# Standalone Claude Rules\n");
     });
   });
 });

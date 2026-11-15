@@ -78,14 +78,33 @@ export interface EffectiveReadBudgets {
 }
 
 export function resolveEffectiveReadBudgets(options?: ReadOptions): EffectiveReadBudgets {
-  if (options?.surface === "cli" && options.maxTokens === undefined && !options.full) {
+  if (options?.surface === "cli" && options.maxTokens === undefined && !options.unboundedCli) {
+    const maxBytes =
+      options.maxBytes !== undefined
+        ? Math.max(512, Math.min(DEFAULT_CLI_READ_MAX_BYTES, options.maxBytes))
+        : DEFAULT_CLI_READ_MAX_BYTES;
+    const softByteCap = Math.min(DEFAULT_CLI_READ_SOFT_BYTE_CAP, Math.max(400, maxBytes - 512));
+    const sliceByteBudget = Math.min(DEFAULT_CLI_SLICE_BYTE_BUDGET, Math.max(400, maxBytes - 1_280));
     return {
-      maxBytes: DEFAULT_CLI_READ_MAX_BYTES,
-      softByteCap: DEFAULT_CLI_READ_SOFT_BYTE_CAP,
-      sliceByteBudget: DEFAULT_CLI_SLICE_BYTE_BUDGET,
+      maxBytes,
+      softByteCap,
+      sliceByteBudget,
       maxTokens: DEFAULT_CLI_READ_MAX_TOKENS,
       softTokenCap: DEFAULT_CLI_READ_SOFT_TOKEN_CAP,
       budgetLabel: "9 KB CLI",
+    };
+  }
+  if (options?.maxBytes !== undefined) {
+    const maxBytes = Math.max(512, options.maxBytes);
+    const softByteCap = Math.min(DEFAULT_READ_SOFT_BYTE_CAP, Math.max(400, maxBytes - 1_024));
+    const sliceByteBudget = Math.min(DEFAULT_SLICE_BYTE_BUDGET, Math.max(400, maxBytes - 2_048));
+    return {
+      maxBytes,
+      softByteCap,
+      sliceByteBudget,
+      maxTokens: DEFAULT_READ_MAX_TOKENS,
+      softTokenCap: DEFAULT_READ_SOFT_TOKEN_CAP,
+      budgetLabel: "28 KB",
     };
   }
   return {
@@ -245,6 +264,18 @@ export interface ReadOptions {
    * Emit matching relative file paths concisely (`-l` / `--files-with-matches`).
    */
   filesWithMatches?: boolean;
+  /**
+   * Optional ceiling override in raw bytes (clamped to surface defaults).
+   */
+  maxBytes?: number;
+  /**
+   * Internal/interactive CLI flag: bypass 9 KB CLI stdout ceiling when run interactively by a human with --full.
+   */
+  unboundedCli?: boolean;
+  /**
+   * Internal flag: bypass intermediate budget capping during multi-stage stream composition.
+   */
+  _bypassInternalCap?: boolean;
 }
 
 export interface ReadStats {
@@ -1210,7 +1241,9 @@ function buildAutoOutlineHeader(
   lineCount: number,
   opts?: { nextSliceCmd?: string; budgetDowngraded?: boolean; budgetLabel?: string },
 ): string {
-  const base = `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
+  const base = opts?.budgetLabel?.includes("CLI")
+    ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.`
+    : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
   if (opts?.budgetDowngraded && opts.nextSliceCmd) {
     return `${base} (auto-downgraded to :outline — ${opts.budgetLabel ?? "28 KB"} budget; next slice: ${opts.nextSliceCmd})`;
   }
@@ -1253,9 +1286,11 @@ function shouldEnforceDefaultReadBudget(
   options: ReadOptions,
   normalizedItems?: NormalizedReadTarget[],
 ): boolean {
-  if (options.full === true) return false;
+  if (options._bypassInternalCap === true) return false;
   if (options.maxTokens !== undefined) return false;
   if (options.json === true) return false;
+  if (options.surface === "cli" && !options.unboundedCli) return true;
+  if (options.full === true) return false;
   if (
     normalizedItems &&
     normalizedItems.length > 0 &&
@@ -1467,7 +1502,7 @@ function enforceReadBudgetCeiling(params: {
   const budgetLabel = params.budgetLabel ?? "28 KB";
 
   const statsAllowanceBytes = statsText ? Buffer.byteLength(`\n\n${statsText}`, "utf-8") : 0;
-  const maxBundleBytes = Math.max(1024, maxBytes - statsAllowanceBytes);
+  const maxBundleBytes = Math.max(256, maxBytes - statsAllowanceBytes);
   const initialBytes = Buffer.byteLength(bundle, "utf-8");
   const initialTokens = estimateTokens(bundle);
 
@@ -1515,13 +1550,15 @@ function enforceReadBudgetCeiling(params: {
     keptText = keptLines.join("\n");
   }
 
+  const isCliBudget = budgetLabel.includes("CLI");
   const buildFooterForKept = (candidateKept: string): string => {
     if (
       (!extraHints || extraHints.length === 0) &&
       !nextOmittedFile &&
       isTargetContentCompleteInContextPack(bundle, candidateKept)
     ) {
-      return `\n\n// [${budgetLabel} stdout budget reached — target content complete; trailing dependency/caller contracts trimmed (pass --full for all contracts)]`;
+      const fullHint = isCliBudget ? "" : " (pass --full for all contracts)";
+      return `\n\n// [${budgetLabel} stdout budget reached — target content complete; trailing dependency/caller contracts trimmed${fullHint}]`;
     }
     const hint =
       extraHints && extraHints.length > 0
@@ -1537,7 +1574,8 @@ function enforceReadBudgetCeiling(params: {
               projectRoot,
               sliceByteBudget,
             });
-    return `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint} (or pass --full)]`;
+    const fullHint = isCliBudget ? "" : " (or pass --full)";
+    return `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${fullHint}]`;
   };
 
   let closedKept = closeUnclosedMarkdownFence(keptText);
@@ -1927,8 +1965,9 @@ function executeFilesOnlyRead(
       const addBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
       if (kept.length > 0 && bytesUsed + addBytes > maxListBytes) {
         const omittedCount = formattedLines.length - i;
+        const fullHint = options.surface === "cli" ? "" : " or pass --full";
         kept.push(
-          `// ... (+${omittedCount} more files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget — narrow path/filter or pass --full)`,
+          `// ... (+${omittedCount} more files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget — narrow path/filter${fullHint})`,
         );
         break;
       }
@@ -2676,6 +2715,7 @@ export async function aiceRead(
         maxTokens: undefined,
         json: false,
         stats: false,
+        _bypassInternalCap: true,
       },
       surface,
     }),
@@ -2708,7 +2748,12 @@ export async function aiceRead(
       classified: outlineItems,
       missingTargets: [],
       projectRoot: primaryProjectRoot,
-      options: { ...options, full: bypassInternalCap, maxTokens: undefined },
+      options: {
+        ...options,
+        full: bypassInternalCap,
+        maxTokens: undefined,
+        _bypassInternalCap: true,
+      },
       surface,
       skipTelemetry: true,
     }),
@@ -2971,8 +3016,9 @@ function buildPureOutlineResult(params: {
             }),
           )
           .join(" | ");
+        const fullHint = options.surface === "cli" ? "" : " (or pass --full)";
         keptOutlineBlocks.push(
-          `// ... (+${omittedDisplayPaths.length} more target files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget)\n// Next slices: ${hintCmds} (or pass --full)`,
+          `// ... (+${omittedDisplayPaths.length} more target files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget)\n// Next slices: ${hintCmds}${fullHint}`,
         );
       }
       rawBundle = keptOutlineBlocks.join("\n\n");
@@ -3556,8 +3602,12 @@ async function executeContextStream(params: {
         partsAfterDowngrade.push(downgradedBlocks.join("\n\n"));
       }
       if (paginationHints.length > 0) {
+        const hintPrefix =
+          options.surface === "cli"
+            ? `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling — run in next call):`
+            : `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):`;
         partsAfterDowngrade.push(
-          `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):\n${paginationHints.map((cmd) => `//   ${cmd}`).join("\n")}`,
+          `${hintPrefix}\n${paginationHints.map((cmd) => `//   ${cmd}`).join("\n")}`,
         );
       }
       formattedBundle = partsAfterDowngrade.join("\n\n");

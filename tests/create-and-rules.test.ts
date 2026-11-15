@@ -748,6 +748,166 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(fs.existsSync(path.join(proj1, ".agents", "rules", "aice.md"))).toBe(false);
       expect(fs.readFileSync(path.join(proj1, "CLAUDE.md"), "utf-8")).toBe("# Team Rules\n");
     });
+
+    it("cleans 0-byte orphan global .md files and strips directives in setupAgents() & removeAgents() while preserving user content", () => {
+      const fakeHome = path.join(tmpDir, "agents-cleanup-home");
+      fs.mkdirSync(path.join(fakeHome, ".claude"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".gemini", "config", "rules"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".gemini", "antigravity-cli"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".gemini", "rules"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".config", "opencode"), { recursive: true });
+      fs.mkdirSync(path.join(fakeHome, ".aider"), { recursive: true });
+
+      // Non-empty user files with stale AICE blocks
+      fs.writeFileSync(
+        path.join(fakeHome, ".claude", "CLAUDE.md"),
+        "# User Claude Rules\n\n<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".aider", "CONVENTIONS.md"),
+        "@RTK.md\n\n<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+
+      // AICE-only files that should be unlinked without leaving 0-byte orphan files
+      fs.writeFileSync(
+        path.join(fakeHome, ".gemini", "GEMINI.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".gemini", "config", "GEMINI.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".gemini", "antigravity-cli", "GEMINI.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".gemini", "config", "rules", "aice.md"),
+        "legacy",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".gemini", "rules", "aice.md"),
+        "legacy",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".codex", "AGENTS.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".codex", "CODEX.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".codex", "instructions.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(fakeHome, ".config", "opencode", "AGENTS.md"),
+        "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+
+      // Default project-scoped setupAgents()
+      setupAgents({ homeDir: fakeHome, all: true });
+
+      // User content preserved
+      expect(fs.existsSync(path.join(fakeHome, ".claude", "CLAUDE.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(fakeHome, ".claude", "CLAUDE.md"), "utf-8")).toBe(
+        "# User Claude Rules\n",
+      );
+      expect(fs.existsSync(path.join(fakeHome, ".aider", "CONVENTIONS.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(fakeHome, ".aider", "CONVENTIONS.md"), "utf-8")).toBe(
+        "@RTK.md\n",
+      );
+
+      // AICE-only files unlinked cleanly (not 0-byte orphan files)
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "config", "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "antigravity-cli", "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "config", "rules", "aice.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "rules", "aice.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".codex", "AGENTS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".codex", "CODEX.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".codex", "instructions.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".config", "opencode", "AGENTS.md"))).toBe(false);
+
+      // Now test removeAgents()
+      removeAgents({ homeDir: fakeHome });
+      expect(fs.existsSync(path.join(fakeHome, ".claude", "CLAUDE.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(fakeHome, ".claude", "CLAUDE.md"), "utf-8")).toBe(
+        "# User Claude Rules\n",
+      );
+      expect(fs.existsSync(path.join(fakeHome, ".aider", "CONVENTIONS.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(fakeHome, ".aider", "CONVENTIONS.md"), "utf-8")).toBe(
+        "@RTK.md\n",
+      );
+    });
+
+    it("cleans AGENTS.md, GEMINI.md, CLAUDE.md, and CODEX.md during uninstall.sh unlinking empty ones and preserving non-empty user headers", () => {
+      const fakeProjects = path.join(tmpDir, "uninstall-multi-projects");
+      const app1 = path.join(fakeProjects, "app1");
+      const app2 = path.join(fakeProjects, "app2");
+      fs.mkdirSync(app1, { recursive: true });
+      fs.mkdirSync(path.join(app2, ".codex"), { recursive: true });
+      fs.mkdirSync(path.join(app2, ".claude"), { recursive: true });
+      fs.mkdirSync(path.join(app2, ".gemini", "rules"), { recursive: true });
+      fs.mkdirSync(path.join(app2, ".claude", "rules"), { recursive: true });
+
+      // app1: AICE-only AGENTS.md, GEMINI.md, CODEX.md + user CLAUDE.md
+      fs.writeFileSync(path.join(app1, "AGENTS.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app1, "GEMINI.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app1, "CODEX.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app1, "CLAUDE.md"), "# Team Rules\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+
+      // app2: User CODEX.md, AICE-only .codex/instructions.md, user .claude/CLAUDE.md, and rule files
+      fs.writeFileSync(path.join(app2, "CODEX.md"), "# Custom Codex Instructions\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app2, ".codex", "instructions.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app2, ".claude", "CLAUDE.md"), "# Standalone Claude\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(path.join(app2, ".gemini", "rules", "aice.md"), "legacy", "utf-8");
+      fs.writeFileSync(path.join(app2, ".claude", "rules", "aice.md"), "legacy", "utf-8");
+
+      const fakeHome = path.join(tmpDir, "uninstall-multi-home");
+      fs.mkdirSync(fakeHome, { recursive: true });
+
+      const uninst = spawnSync(
+        "bash",
+        [UNINSTALL_SH, "--yes", "--keep-agents", `--projects-dir=${fakeProjects}`],
+        {
+          cwd: tmpDir,
+          encoding: "utf-8",
+          env: { ...process.env, HOME: fakeHome },
+        },
+      );
+      expect(uninst.status).toBe(0);
+
+      // app1 assertions: empty ones unlinked, user header preserved
+      expect(fs.existsSync(path.join(app1, "AGENTS.md"))).toBe(false);
+      expect(fs.existsSync(path.join(app1, "GEMINI.md"))).toBe(false);
+      expect(fs.existsSync(path.join(app1, "CODEX.md"))).toBe(false);
+      expect(fs.existsSync(path.join(app1, "CLAUDE.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(app1, "CLAUDE.md"), "utf-8")).toBe("# Team Rules\n");
+
+      // app2 assertions: user files preserved, empty ones unlinked, rule files cleaned
+      expect(fs.existsSync(path.join(app2, "CODEX.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(app2, "CODEX.md"), "utf-8")).toBe("# Custom Codex Instructions\n");
+      expect(fs.existsSync(path.join(app2, ".codex", "instructions.md"))).toBe(false);
+      expect(fs.existsSync(path.join(app2, ".codex"))).toBe(false);
+      expect(fs.existsSync(path.join(app2, ".claude", "CLAUDE.md"))).toBe(true);
+      expect(fs.readFileSync(path.join(app2, ".claude", "CLAUDE.md"), "utf-8")).toBe("# Standalone Claude\n");
+      expect(fs.existsSync(path.join(app2, ".gemini"))).toBe(false);
+      expect(fs.existsSync(path.join(app2, ".claude", "rules"))).toBe(false);
+    });
   });
 
   describe("AICE v0.9.6 Real-World Regression Suite (aice_tetris Findings)", () => {

@@ -127,9 +127,120 @@ if [[ "$KEEP_AGENTS" -eq 0 ]]; then
   else
     log_info "No aice runner found for 'aice agents remove'; skipping agent unwiring."
   fi
+
+  # Run fence-aware Node fallback cleaner across global agent markdown surfaces
+  if command -v node >/dev/null 2>&1; then
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      printf '  [dry-run] strip global agent AICE directives and orphan markdown files\n'
+    else
+      node -e '
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const home = process.env.HOME || process.env.USERPROFILE || "";
+        if (!home) process.exit(0);
+
+        const TARGETS = [
+          path.join(home, ".claude", "CLAUDE.md"),
+          path.join(home, ".gemini", "GEMINI.md"),
+          path.join(home, ".gemini", "config", "GEMINI.md"),
+          path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"),
+          path.join(home, ".codex", "AGENTS.md"),
+          path.join(home, ".codex", "CODEX.md"),
+          path.join(home, ".codex", "instructions.md"),
+          path.join(home, ".config", "opencode", "AGENTS.md"),
+          path.join(home, ".aider", "CONVENTIONS.md"),
+        ];
+
+        function stripDirectives(text) {
+          let fenceChar = null;
+          let fenceLen = 0;
+          let activeStart = -1;
+          const spans = [];
+          let pos = 0;
+          const total = text.length;
+          while (pos <= total) {
+            const nl = text.indexOf("\n", pos);
+            const lineEnd = nl === -1 ? total : nl;
+            const raw = text.slice(pos, lineEnd);
+            const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+            const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+            if (fence) {
+              const m = fence[1];
+              const ch = m[0];
+              const rest = fence[2] || "";
+              if (!fenceChar) {
+                if (ch === "~" || !rest.includes("`")) {
+                  fenceChar = ch;
+                  fenceLen = m.length;
+                }
+              } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
+                fenceChar = null;
+                fenceLen = 0;
+              }
+            } else if (!fenceChar) {
+              const isStart =
+                /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
+                /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
+              const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
+              const isNonAiceHeading =
+                /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
+              if (activeStart === -1) {
+                if (isStart) activeStart = pos;
+              } else {
+                if (isEnd) {
+                  spans.push({ start: activeStart, end: pos + line.length });
+                  activeStart = -1;
+                } else if (isNonAiceHeading) {
+                  spans.push({ start: activeStart, end: pos });
+                  activeStart = -1;
+                }
+              }
+            }
+            if (nl === -1) break;
+            pos = nl + 1;
+          }
+          if (activeStart !== -1) spans.push({ start: activeStart, end: total });
+          if (spans.length === 0) return { stripped: text.trim(), hadDirective: false };
+          const segs = [];
+          let last = 0;
+          for (const s of spans) {
+            const seg = text.slice(last, s.start).trim();
+            if (seg) segs.push(seg);
+            last = s.end;
+          }
+          const trail = text.slice(last).trim();
+          if (trail) segs.push(trail);
+          return { stripped: segs.join("\n\n"), hadDirective: true };
+        }
+
+        for (const file of TARGETS) {
+          if (!fs.existsSync(file)) continue;
+          try {
+            const raw = fs.readFileSync(file, "utf-8");
+            const { stripped, hadDirective } = stripDirectives(raw);
+            if (hadDirective || raw.trim().length === 0) {
+              if (stripped.length === 0) {
+                fs.unlinkSync(file);
+              } else {
+                fs.writeFileSync(file, stripped + "\n", "utf-8");
+              }
+            }
+          } catch {}
+        }
+      '
+    fi
+  fi
   if [[ -f "${HOME}/.gemini/config/rules/aice.md" ]]; then
     run_cmd rm -f "${HOME}/.gemini/config/rules/aice.md"
     log_ok "Removed global Antigravity rule: ${HOME}/.gemini/config/rules/aice.md"
+  fi
+  if [[ -f "${HOME}/.gemini/rules/aice.md" ]]; then
+    run_cmd rm -f "${HOME}/.gemini/rules/aice.md"
+    log_ok "Removed global Gemini rule: ${HOME}/.gemini/rules/aice.md"
+  fi
+  if [[ -d "${HOME}/.gemini/antigravity-cli/mcp/aice" ]]; then
+    run_cmd rm -rf "${HOME}/.gemini/antigravity-cli/mcp/aice"
+    log_ok "Removed stale Antigravity MCP directory: ${HOME}/.gemini/antigravity-cli/mcp/aice"
   fi
 else
   log_info "Skipping CLI coding agent unwiring (--keep-agents)."
@@ -182,9 +293,10 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
           -name "venv" -o \
           -name ".vscode" -o \
           -name ".cursor" -o \
-          -name ".claude" -o \
-          -name ".gemini" -o \
-          -name ".codex" -o \
+          -path "${HOME}/.claude" -o \
+          -path "${HOME}/.gemini" -o \
+          -path "${HOME}/.codex" -o \
+          -path "${HOME}/.config" -o \
           -name ".mozilla" -o \
           -name ".steam" -o \
           -name "Trash" \
@@ -236,11 +348,15 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
       done
     fi
 
-    # Also remove project-level .agents/rules/aice.md files (and empty .agents/rules & .agents dirs)
+    # Also remove project-level .agents/rules/aice.md, .gemini/rules/aice.md, and .claude/rules/aice.md files
     mapfile -t PROJECT_RULE_FILES < <(
       find "$PROJECTS_DIR" \
         \( \
           -path "$SCRIPT_DIR" -o \
+          -path "${HOME}/.claude" -o \
+          -path "${HOME}/.gemini" -o \
+          -path "${HOME}/.codex" -o \
+          -path "${HOME}/.config" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
@@ -253,7 +369,7 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
           -name ".venv" -o \
           -name "venv" \
         \) -prune -o \
-        -type f -path "*/.agents/rules/aice.md" \
+        -type f \( -path "*/.agents/rules/aice.md" -o -path "*/.gemini/rules/aice.md" -o -path "*/.claude/rules/aice.md" \) \
         -print 2>/dev/null || true
     )
     if [[ ${#PROJECT_RULE_FILES[@]} -gt 0 ]]; then
@@ -269,11 +385,15 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
       done
     fi
 
-    # Strip <!-- AICE:START --> ... <!-- AICE:END --> from project AGENTS.md, CLAUDE.md, and GEMINI.md
+    # Strip <!-- AICE:START --> ... <!-- AICE:END --> from project AGENTS.md, CLAUDE.md, GEMINI.md, CODEX.md, etc.
     mapfile -t PROJECT_MD_FILES < <(
       find "$PROJECTS_DIR" \
         \( \
           -path "$SCRIPT_DIR" -o \
+          -path "${HOME}/.claude" -o \
+          -path "${HOME}/.gemini" -o \
+          -path "${HOME}/.codex" -o \
+          -path "${HOME}/.config" -o \
           -name "node_modules" -o \
           -name ".git" -o \
           -name ".cache" -o \
@@ -284,44 +404,117 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
           -name ".nvm" -o \
           -name ".bun" -o \
           -name ".venv" -o \
-          -name "venv" -o \
-          -name ".claude" -o \
-          -name ".gemini" -o \
-          -name ".codex" \
+          -name "venv" \
         \) -prune -o \
-        -type f \( -name "AGENTS.md" -o -name "CLAUDE.md" -o -name "GEMINI.md" -o -name ".GEMINI.md" \) \
+        -type f \( \
+          -name "AGENTS.md" -o \
+          -name "CLAUDE.md" -o \
+          -name "GEMINI.md" -o \
+          -name ".GEMINI.md" -o \
+          -name "CODEX.md" -o \
+          -name ".CODEX.md" -o \
+          -path "*/.codex/instructions.md" \
+        \) \
         -print 2>/dev/null || true
     )
     if [[ ${#PROJECT_MD_FILES[@]} -gt 0 ]]; then
       for mdfile in "${PROJECT_MD_FILES[@]}"; do
         [[ -z "$mdfile" ]] && continue
-        if grep -Eq "<!-- AICE:START( v[^>]*)? -->" "$mdfile" 2>/dev/null; then
+        if grep -Eq "<!--\s*AICE:START|##\s+AICE" "$mdfile" 2>/dev/null; then
           if [[ "$DRY_RUN" -eq 1 ]]; then
-            printf '  [dry-run] strip <!-- AICE:START --> block from %s\n' "$mdfile"
+            printf '  [dry-run] strip AICE directive / clean orphan markdown from %s\n' "$mdfile"
           elif command -v node >/dev/null 2>&1; then
             node -e '
-              const fs = require("fs");
-              const path = require("path");
+              const fs = require("node:fs");
+              const path = require("node:path");
               const file = process.argv[1];
               let content = fs.readFileSync(file, "utf8");
-              const startMatch = content.match(/<!-- AICE:START(?: v[^>]*)? -->/);
-              const startIdx = startMatch ? startMatch.index : -1;
-              const endIdx = content.indexOf("<!-- AICE:END -->");
-              if (startIdx !== -1 && endIdx !== -1) {
-                const before = content.slice(0, startIdx).trimEnd();
-                const after = content.slice(endIdx + "<!-- AICE:END -->".length).trimStart();
-                const next = [before, after].filter(Boolean).join("\n\n");
-                if (!next.trim() && path.basename(file) === "AGENTS.md") {
-                  fs.unlinkSync(file);
-                } else {
-                  fs.writeFileSync(file, next ? next + "\n" : "", "utf8");
+
+              let fenceChar = null;
+              let fenceLen = 0;
+              let activeStart = -1;
+              const spans = [];
+              let pos = 0;
+              const total = content.length;
+              while (pos <= total) {
+                const nl = content.indexOf("\n", pos);
+                const lineEnd = nl === -1 ? total : nl;
+                const raw = content.slice(pos, lineEnd);
+                const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+                const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+                if (fence) {
+                  const m = fence[1];
+                  const ch = m[0];
+                  const rest = fence[2] || "";
+                  if (!fenceChar) {
+                    if (ch === "~" || !rest.includes("`")) {
+                      fenceChar = ch;
+                      fenceLen = m.length;
+                    }
+                  } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
+                    fenceChar = null;
+                    fenceLen = 0;
+                  }
+                } else if (!fenceChar) {
+                  const isStart =
+                    /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
+                    /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
+                  const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
+                  const isNonAiceHeading =
+                    /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
+                  if (activeStart === -1) {
+                    if (isStart) activeStart = pos;
+                  } else {
+                    if (isEnd) {
+                      spans.push({ start: activeStart, end: pos + line.length });
+                      activeStart = -1;
+                    } else if (isNonAiceHeading) {
+                      spans.push({ start: activeStart, end: pos });
+                      activeStart = -1;
+                    }
+                  }
                 }
+                if (nl === -1) break;
+                pos = nl + 1;
+              }
+              if (activeStart !== -1) spans.push({ start: activeStart, end: total });
+              if (spans.length === 0) process.exit(0);
+
+              const segs = [];
+              let last = 0;
+              for (const s of spans) {
+                const seg = content.slice(last, s.start).trim();
+                if (seg) segs.push(seg);
+                last = s.end;
+              }
+              const trail = content.slice(last).trim();
+              if (trail) segs.push(trail);
+              const next = segs.join("\n\n");
+
+              if (!next.trim()) {
+                fs.unlinkSync(file);
+                const dir = path.dirname(file);
+                const ALLOWED = new Set([".claude", ".codex", ".agents", ".gemini", "rules"]);
+                if (ALLOWED.has(path.basename(dir))) {
+                  try {
+                    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
+                  } catch {}
+                }
+              } else {
+                fs.writeFileSync(file, next + "\n", "utf8");
               }
             ' "$mdfile"
           else
-            sed -i -E '/<!-- AICE:START( v[^>]*)? -->/,/<!-- AICE:END -->/d' "$mdfile"
-            if [[ "$(basename "$mdfile")" == "AGENTS.md" ]] && [[ -z "$(tr -d '[:space:]' < "$mdfile")" ]]; then
+            sed -i -E '/<!--\s*AICE:START( v[^>]*)?\s*-->/,/<!--\s*AICE:END\s*-->/d' "$mdfile"
+            if [[ -z "$(tr -d '[:space:]' < "$mdfile")" ]]; then
               rm -f "$mdfile"
+              rdir="$(dirname "$mdfile")"
+              rbase="$(basename "$rdir")"
+              case "$rbase" in
+                .claude|.codex|.agents|.gemini|rules)
+                  rmdir "$rdir" 2>/dev/null || true
+                  ;;
+              esac
             fi
           fi
           log_ok "Cleaned AICE directive from project file: ${mdfile}"

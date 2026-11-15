@@ -15,7 +15,7 @@
  * - Mixed multi-target streams, workspace overview, `--json`, `--stats`, `maxTokens`, `includeCallers`, `idioms`, and disabled config enforcement
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -1026,7 +1026,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(lineRes.output).toContain(
         "// [9 KB CLI stdout budget reached — next slice: aice read src/cli_oversized.ts:L",
       );
-      expect(lineRes.output).toContain("(or pass --full)]");
+      expect(lineRes.output).not.toContain("--full");
       expect(lineRes.output).toMatch(/\n\n\/\/ \[9 KB CLI stdout budget reached/);
 
       // 2. Symbol query on a large function with surface: "cli"
@@ -1571,6 +1571,18 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(Buffer.byteLength(broadSearchRes.output, "utf-8")).toBeLessThanOrEqual(
         DEFAULT_READ_MAX_BYTES,
       );
+      expect(broadSearchRes.output).toContain("(or pass --full)");
+
+      const cliBroadSearchRes = await read("src/broad_search", {
+        projectRoot: tmpDir,
+        search: "BROAD_COMMON_TOKEN_10",
+        surface: "cli",
+      });
+      expect(Buffer.byteLength(cliBroadSearchRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES + 1024,
+      );
+      expect(cliBroadSearchRes.output).toContain("9 KB CLI");
+      expect(cliBroadSearchRes.output).not.toContain("--full");
     });
   });
 
@@ -1698,6 +1710,107 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         "src/rules/alpha-rule.ts",
         "src/rules/beta-rule.ts",
       ]);
+    });
+
+    it("enforces 9 KB CLI ceiling on multi-slice payload with full: true without --full hints unless unboundedCli: true", async () => {
+      const lines = Array.from(
+        { length: 250 },
+        (_, i) => `export const payloadKey_${i + 1} = "long_padding_bytes_value_${i + 1}";`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "multi_slice_heavy.ts"), `${lines}\n`, "utf-8");
+
+      const targets = [
+        "src/multi_slice_heavy.ts:L1-L95",
+        "src/multi_slice_heavy.ts:L100-L205",
+      ];
+
+      // 1. With full: true on surface: "cli", strictly capped <= 9,216 B without --full hints
+      const cappedRes = await read(targets, {
+        projectRoot: tmpDir,
+        surface: "cli",
+        full: true,
+      });
+      const cappedBytes = Buffer.byteLength(cappedRes.output, "utf-8");
+      expect(cappedBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(cappedRes.output).not.toContain("--full");
+      expect(cappedRes.output).toContain("9 KB CLI");
+
+      // 2. With full: true and unboundedCli: true, emits both slices > 9,216 B
+      const unboundedRes = await read(targets, {
+        projectRoot: tmpDir,
+        surface: "cli",
+        full: true,
+        unboundedCli: true,
+      });
+      const unboundedBytes = Buffer.byteLength(unboundedRes.output, "utf-8");
+      expect(unboundedBytes).toBeGreaterThan(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(unboundedRes.output).not.toContain("[9 KB CLI stdout budget reached");
+      expect(unboundedRes.output).toContain("payloadKey_1");
+      expect(unboundedRes.output).toContain("payloadKey_205");
+    });
+
+    it("enforces cross-process CLI chaining budget <= 9,216 B (< 9,892 B) while separate invocations get full budgets independently", () => {
+      const repoRoot = process.cwd();
+      const distCli = path.join(repoRoot, "dist", "aice.mjs");
+      const cliWs = fs.mkdtempSync(path.join(os.tmpdir(), "aice-cli-chaining-"));
+      fs.mkdirSync(path.join(cliWs, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(cliWs, "aice.config.json"),
+        JSON.stringify({ enabled: true }),
+        "utf-8",
+      );
+
+      const makeContent = (prefix: string) =>
+        Array.from(
+          { length: 140 },
+          (_, i) => `export const ${prefix}_val_${i + 1} = "pad_string_bytes_marker_${i + 1}";`,
+        ).join("\n") + "\n";
+
+      fs.writeFileSync(path.join(cliWs, "src", "file1.ts"), makeContent("f1"), "utf-8");
+      fs.writeFileSync(path.join(cliWs, "src", "file2.ts"), makeContent("f2"), "utf-8");
+      fs.writeFileSync(path.join(cliWs, "src", "file3.ts"), makeContent("f3"), "utf-8");
+
+      const stateFile = path.join(cliWs, "budget-state.json");
+      const env = {
+        ...process.env,
+        AICE_CLI_BUDGET_STATE_FILE: stateFile,
+        AICE_CLI_INTERACTIVE: "0",
+      };
+
+      // 1. Chained execution in single shell pipeline: total stdout strictly <= 9,216 B (< 9,892 B)
+      const chainedCmd = `node "${distCli}" read src/file1.ts && node "${distCli}" read src/file2.ts && node "${distCli}" read src/file3.ts`;
+      const chainedOutput = execSync(chainedCmd, {
+        cwd: cliWs,
+        env,
+        encoding: "utf-8",
+        stdio: "pipe",
+      });
+      const chainedBytes = Buffer.byteLength(chainedOutput, "utf-8");
+      expect(chainedBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(chainedBytes).toBeLessThan(9_892);
+      expect(chainedOutput).toContain("f1_val_1");
+      expect(chainedOutput).toMatch(/\/\/ \[9 KB CLI stdout budget already filled by prior chained command/);
+
+      // 2. Two separate invocations each get full 9,216 B budgets independently
+      const sep1 = execFileSync("node", [distCli, "read", "src/file1.ts"], {
+        cwd: cliWs,
+        env,
+        encoding: "utf-8",
+      });
+      const sep2 = execFileSync("node", [distCli, "read", "src/file2.ts"], {
+        cwd: cliWs,
+        env,
+        encoding: "utf-8",
+      });
+
+      expect(Buffer.byteLength(sep1, "utf-8")).toBeGreaterThan(5_000);
+      expect(Buffer.byteLength(sep1, "utf-8")).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(Buffer.byteLength(sep2, "utf-8")).toBeGreaterThan(5_000);
+      expect(Buffer.byteLength(sep2, "utf-8")).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(sep1).toContain("f1_val_1");
+      expect(sep2).toContain("f2_val_1");
+      expect(sep1).not.toContain("budget already filled");
+      expect(sep2).not.toContain("budget already filled");
     });
   });
 });
