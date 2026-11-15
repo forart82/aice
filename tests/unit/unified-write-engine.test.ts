@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,6 +11,18 @@ import {
   unmaskLexicalTokens,
 } from "../../src/tools/preprocessor.js";
 import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../../src/tools/splice.js";
+
+const CLI_TS = path.resolve(process.cwd(), "bin/aice.ts");
+const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
+
+function runCli(args: string[], cwd: string, input?: string) {
+  return spawnSync(TSX_BIN, [CLI_TS, ...args], {
+    cwd,
+    input,
+    encoding: "utf-8",
+    timeout: 60000,
+  });
+}
 
 describe("Unified Write Engine (splice & spliceBatch subsuming createFile & createBatch)", () => {
   let tmpDir: string;
@@ -1040,6 +1053,77 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
           process.env.AICE_TELEMETRY_PATH = prevTelemetryEnv;
         }
       }
+    });
+
+    it("CLI aice splice --no-idioms --stdin multi-target stream succeeds on >25-line existing full-rewrite without --overwrite, while empty truncation fails and aice create still guards >25-line files", () => {
+      const srcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+
+      // 1. Create a 50-line existing file
+      const radarLines = Array.from({ length: 50 }, (_, i) => `export const radarParam${i + 1} = ${i + 1};`);
+      const existingRadarPath = path.join(srcDir, "existing_radar.ts");
+      fs.writeFileSync(existingRadarPath, `${radarLines.join("\n")}\n`, "utf-8");
+
+      // 2. Create a surgical edit target
+      const editTargetPath = path.join(srcDir, "edit_target.ts");
+      fs.writeFileSync(editTargetPath, "export const targetVal = 10;\nexport const secondLine = 20;\n", "utf-8");
+
+      // Multi-target stream: new file, surgical edit, full rewrite of >25-line existing file
+      const multiStream = [
+        "=== src/new_adapter.ts ===",
+        "export class NewAdapter {",
+        "  execute(): string {",
+        '    return "success";',
+        "  }",
+        "}",
+        "",
+        "=== src/edit_target.ts:L1-L1 ===",
+        "export const targetVal = 999;",
+        "",
+        "=== src/existing_radar.ts ===",
+        "export const radarRewritten = true;",
+        "export function readRadar(): string {",
+        '  return "active";',
+        "}",
+      ].join("\n");
+
+      const spliceRes = runCli(["splice", "--no-idioms", "--stdin"], tmpDir, multiStream);
+      expect(spliceRes.status).toBe(0);
+
+      // Verify files were correctly created/edited/rewritten
+      const newAdapterContent = fs.readFileSync(path.join(srcDir, "new_adapter.ts"), "utf-8");
+      expect(newAdapterContent).toContain("export class NewAdapter");
+
+      const editContent = fs.readFileSync(editTargetPath, "utf-8");
+      expect(editContent).toContain("export const targetVal = 999;");
+      expect(editContent).toContain("export const secondLine = 20;");
+
+      const radarContent = fs.readFileSync(existingRadarPath, "utf-8");
+      expect(radarContent).toContain("export const radarRewritten = true;");
+      expect(radarContent).not.toContain("radarParam1");
+
+      // Empty truncation without :overwrite / --overwrite MUST fail
+      const emptyTruncationStream = "=== src/existing_radar.ts ===\n";
+      const truncateRes = runCli(["splice", "--no-idioms", "--stdin"], tmpDir, emptyTruncationStream);
+      expect(truncateRes.status).not.toBe(0);
+      expect(truncateRes.stderr + truncateRes.stdout).toMatch(/(?:Empty or malformed splice block|Refusing to overwrite.*empty content)/i);
+
+      // Truncation WITH :overwrite succeeds
+      const overwriteTruncateStream = "=== src/existing_radar.ts:overwrite ===\n";
+      const overwriteTruncateRes = runCli(["splice", "--no-idioms", "--stdin"], tmpDir, overwriteTruncateStream);
+      expect(overwriteTruncateRes.status).toBe(0);
+      expect(fs.readFileSync(existingRadarPath, "utf-8")).toBe("");
+
+      // aice create on >25-line file MUST fail without --overwrite
+      fs.writeFileSync(existingRadarPath, `${radarLines.join("\n")}\n`, "utf-8");
+      const createRes = runCli(["create", "src/existing_radar.ts", "--stdin"], tmpDir, "export const blocked = true;\n");
+      expect(createRes.status).not.toBe(0);
+      expect(createRes.stderr + createRes.stdout).toMatch(/already exists.*Do NOT rewrite existing files with 'aice create'/i);
+
+      // aice create with --overwrite succeeds
+      const createOverwriteRes = runCli(["create", "src/existing_radar.ts", "--overwrite", "--stdin"], tmpDir, "export const allowed = true;\n");
+      expect(createOverwriteRes.status).toBe(0);
+      expect(fs.readFileSync(existingRadarPath, "utf-8")).toContain("export const allowed = true;");
     });
   });
 });

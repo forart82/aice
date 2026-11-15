@@ -13,13 +13,16 @@ import {
   formatProjectDetailReport,
   formatProjectGainDetail,
   getRuleOverheadBudgetCl100k,
+  hydrateTelemetryEvent,
   isEphemeralWorkspace,
   readTelemetryEvents,
   recordTelemetryEvent,
   resetTelemetryHistory,
+  serializeCompactTelemetryEvent,
 } from "../src/telemetry/index.js";
 import { detectLanguageName, estimateTokens } from "../src/tokenomics/index.js";
 import { generateContext, outlinePath, splice } from "../src/tools/index.js";
+import { aiceRead } from "../src/tools/read.js";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin/aice.ts");
 const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
@@ -756,5 +759,122 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     });
     expect(cliText.status).toBe(0);
     expect(cliText.stdout).toContain("Repeat-Read Turn Warnings: 2 ⚠");
+  });
+
+  it("detects <90s repeatReadCalls across <multi-context> calls overlapping on the same file and serializes multiFiles", async () => {
+    const fileA = path.join(projectADir, "src", "a.ts");
+    const fileB = path.join(projectADir, "src", "b.ts");
+    const fileC = path.join(projectADir, "src", "c.ts");
+    fs.mkdirSync(path.join(projectADir, "src"), { recursive: true });
+    fs.writeFileSync(fileA, "export const a = 1;\n".repeat(30), "utf-8");
+    fs.writeFileSync(fileB, "export const b = 2;\n".repeat(30), "utf-8");
+    fs.writeFileSync(fileC, "export const c = 3;\n".repeat(30), "utf-8");
+
+    // Clear ledger before test
+    resetTelemetryHistory(telemetryFile);
+
+    // 1. Initial read on (projectADir) with [src/a.ts, src/b.ts] at t=0s -> NOT a repeat read
+    recordTelemetryEvent({
+      targetPath: fileA,
+      projectRoot: projectADir,
+      filePath: "<multi-context>",
+      multiFiles: ["src/a.ts", "src/b.ts"],
+      operation: "context",
+      timestamp: "2026-11-15T14:00:00.000Z",
+      nativeText: "export const a = 1;\nexport const b = 2;\n",
+      aiceText: "1│ export const a = 1;\n1│ export const b = 2;\n",
+      telemetryPath: telemetryFile,
+    });
+
+    // 2. Second read: <multi-context> with [src/b.ts, src/c.ts] at t=30s (<90s) -> overlaps on src/b.ts -> repeatReadCalls #1
+    recordTelemetryEvent({
+      targetPath: fileB,
+      projectRoot: projectADir,
+      filePath: "<multi-context>",
+      multiFiles: ["src/b.ts", "src/c.ts"],
+      operation: "context",
+      timestamp: "2026-11-15T14:00:30.000Z",
+      nativeText: "export const b = 2;\nexport const c = 3;\n",
+      aiceText: "1│ export const b = 2;\n1│ export const c = 3;\n",
+      telemetryPath: telemetryFile,
+    });
+
+    // 3. Third read: single file read on src/b.ts at t=60s (<90s from t=30s) -> overlaps on src/b.ts -> repeatReadCalls #2
+    recordTelemetryEvent({
+      targetPath: fileB,
+      projectRoot: projectADir,
+      filePath: "src/b.ts",
+      operation: "context",
+      timestamp: "2026-11-15T14:01:00.000Z",
+      nativeText: "export const b = 2;\n",
+      aiceText: "1│ export const b = 2;\n",
+      telemetryPath: telemetryFile,
+    });
+
+    // 4. Fourth read: <multi-context> with [src/a.ts, src/c.ts] at t=75s (<90s from t=60s where prev read was src/b.ts) -> no overlap! -> NOT repeat read
+    recordTelemetryEvent({
+      targetPath: fileA,
+      projectRoot: projectADir,
+      filePath: "<multi-context>",
+      multiFiles: ["src/a.ts", "src/c.ts"],
+      operation: "context",
+      timestamp: "2026-11-15T14:01:15.000Z",
+      nativeText: "export const a = 1;\nexport const c = 3;\n",
+      aiceText: "1│ export const a = 1;\n1│ export const c = 3;\n",
+      telemetryPath: telemetryFile,
+    });
+
+    // 5. Fifth read: single file read on src/a.ts at t=80s (<90s from t=75s where prev was [src/a.ts, src/c.ts]) -> overlaps on src/a.ts -> repeatReadCalls #3
+    recordTelemetryEvent({
+      targetPath: fileA,
+      projectRoot: projectADir,
+      filePath: "src/a.ts",
+      operation: "context",
+      timestamp: "2026-11-15T14:01:20.000Z",
+      nativeText: "export const a = 1;\n",
+      aiceText: "1│ export const a = 1;\n",
+      telemetryPath: telemetryFile,
+    });
+
+    const report = buildGainReport({ telemetryPath: telemetryFile });
+    expect(report.repeatReadCalls).toBe(3);
+    const projDetailReport = buildGainReport({
+      telemetryPath: telemetryFile,
+      project: path.basename(projectADir),
+    });
+    expect(projDetailReport.projectDetail?.summary.repeatReadCalls).toBe(3);
+
+    // Verify serialization round-tripping preserves mf / multiFiles
+    const recEvent = computeTelemetryEvent({
+      targetPath: fileA,
+      projectRoot: projectADir,
+      filePath: "<multi-context>",
+      multiFiles: ["src/a.ts", "src/b.ts"],
+      operation: "context",
+      nativeText: "export const a = 1;\n",
+      aiceText: "export const a = 1;\n",
+      telemetryPath: telemetryFile,
+    });
+    const serialized = serializeCompactTelemetryEvent(recEvent);
+    expect(serialized).toContain('"mf":["src/a.ts","src/b.ts"]');
+    const parsed = JSON.parse(serialized);
+    const hydrated = hydrateTelemetryEvent(parsed);
+    expect(hydrated?.multiFiles).toEqual(["src/a.ts", "src/b.ts"]);
+
+    const hydratedEvents = readTelemetryEvents(telemetryFile);
+    const multiEv = hydratedEvents.find((e) => e.filePath === "<multi-context>");
+    expect(multiEv).toBeDefined();
+    expect(multiEv?.multiFiles).toBeDefined();
+    expect(Array.isArray(multiEv?.multiFiles)).toBe(true);
+
+    // Live aiceRead multi-target populates multiFiles in telemetry
+    process.env.AICE_TELEMETRY_PATH = telemetryFile;
+    await aiceRead([fileA, fileB], { projectRoot: projectADir });
+    const liveEvs = readTelemetryEvents(telemetryFile);
+    const lastEv = liveEvs[liveEvs.length - 1];
+    expect(lastEv?.filePath).toBe("<multi-context>");
+    expect(lastEv?.multiFiles).toBeDefined();
+    expect(lastEv?.multiFiles).toContain("src/a.ts");
+    expect(lastEv?.multiFiles).toContain("src/b.ts");
   });
 });

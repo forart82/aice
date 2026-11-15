@@ -5490,6 +5490,7 @@ export async function generateMultiContext(
   let totalNativeO200k = 0;
   const suppressIndividualTelemetry = targets.length > 1;
   const skippedSymbolErrors: unknown[] = [];
+  const resolvedMultiFiles: string[] = [];
 
   for (let idx = 0; idx < targets.length; idx++) {
     const item = targets[idx]!;
@@ -5521,6 +5522,9 @@ export async function generateMultiContext(
         ? await withSuppressedTelemetryAsync(() => generateContext(resolved.resolvedPath, itemOpts))
         : await generateContext(resolved.resolvedPath, itemOpts);
       individualResults.push(res);
+      if (!resolved.isDirectory) {
+        resolvedMultiFiles.push(resolved.resolvedPath);
+      }
     } catch (err) {
       if (
         targets.length > 1 &&
@@ -5607,10 +5611,21 @@ export async function generateMultiContext(
   const merged = mergeMultiContextResults(individualResults, options);
   if (suppressIndividualTelemetry && individualResults.length > 1 && firstResolvedPath) {
     const aicePayload = options.json ? JSON.stringify(merged, null, 2) : merged.formattedBundle;
+    const multiFiles = Array.from(
+      new Set(
+        resolvedMultiFiles
+          .map((f) => {
+            const rel = path.relative(firstProjectRoot, f).replace(/\\/g, "/");
+            return rel && !rel.startsWith("..") ? rel : f;
+          })
+          .filter(Boolean),
+      ),
+    );
     recordTelemetryEvent({
       targetPath: firstResolvedPath,
       projectRoot: firstProjectRoot,
       filePath: "<multi-context>",
+      multiFiles: multiFiles.length > 0 ? multiFiles : undefined,
       operation: "context",
       surface: "cli",
       idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),

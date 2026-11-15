@@ -59,6 +59,7 @@ export interface TelemetryEvent {
   realisticSavedCl100k?: number;
   preservedTriviaTokens?: number;
   structuralCompressionPct?: number;
+  multiFiles?: string[];
 }
 
 export const REPEAT_READ_WINDOW_MS = 90_000;
@@ -68,6 +69,7 @@ export interface RecordTelemetryInput {
   timestamp?: string;
   projectRoot?: string;
   filePath?: string;
+  multiFiles?: string[];
   language?: string;
   operation: TelemetryOperation;
   surface?: TelemetrySurface;
@@ -242,6 +244,7 @@ interface CompactTelemetryRecord {
   r: string;
   p?: string;
   f: string;
+  mf?: string[];
   l?: string;
   o: TelemetryOperation;
   s?: TelemetrySurface;
@@ -507,11 +510,32 @@ export function serializeCompactTelemetryEvent(event: TelemetryEvent): string {
     event.aiceChars,
   );
 
+  let compactMf: string[] | undefined;
+  if (event.multiFiles && event.multiFiles.length > 0) {
+    const deduped = Array.from(
+      new Set(
+        event.multiFiles
+          .map((item) => {
+            const rel = path.isAbsolute(item)
+              ? path.relative(event.projectRoot, item).replace(/\\/g, "/")
+              : item.replace(/\\/g, "/");
+            const normalized = rel && !rel.startsWith("..") ? rel : path.basename(item);
+            return normalized.slice(0, 120);
+          })
+          .filter(Boolean),
+      ),
+    ).slice(0, 16);
+    if (deduped.length > 0) {
+      compactMf = deduped;
+    }
+  }
+
   const rec: CompactTelemetryRecord = {
     t,
     r: event.projectRoot,
     ...(event.projectName !== defaultProjectName ? { p: event.projectName } : {}),
     f: compactFilePath,
+    ...(compactMf ? { mf: compactMf } : {}),
     ...(event.language !== defaultLang ? { l: event.language } : {}),
     o: event.operation,
     ...(event.surface !== "cli" ? { s: event.surface } : {}),
@@ -645,6 +669,15 @@ export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
         ? obj.structuralCompressionPct
         : undefined;
 
+  const rawMf = Array.isArray(obj.mf)
+    ? obj.mf
+    : Array.isArray(obj.multiFiles)
+      ? obj.multiFiles
+      : undefined;
+  const multiFiles = rawMf
+    ? rawMf.filter((item): item is string => typeof item === "string")
+    : undefined;
+
   return {
     timestamp,
     projectRoot,
@@ -670,6 +703,7 @@ export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
     ...(realisticSavedCl100k !== undefined ? { realisticSavedCl100k } : {}),
     preservedTriviaTokens,
     ...(structuralCompressionPct !== undefined ? { structuralCompressionPct } : {}),
+    ...(multiFiles && multiFiles.length > 0 ? { multiFiles } : {}),
   };
 }
 
@@ -773,6 +807,7 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
     ...(input.structuralCompressionPct !== undefined
       ? { structuralCompressionPct: input.structuralCompressionPct }
       : {}),
+    ...(input.multiFiles && input.multiFiles.length > 0 ? { multiFiles: input.multiFiles } : {}),
   };
 }
 
@@ -1079,6 +1114,7 @@ function matchesProjectFilter(event: TelemetryEvent, filterStr: string): boolean
 interface LastProjectTelemetryState {
   category: TelemetryCategory;
   filePath: string;
+  files?: string[];
   timestampMs: number;
 }
 
@@ -1095,24 +1131,41 @@ function checkAndAdvanceRepeatReadState(
   const prev = stateMap.get(projKey);
   let isRepeatRead = false;
 
+  let currFiles: string[] = [];
+  if (isTrackableRepeatReadFile(ev.filePath)) {
+    currFiles = [ev.filePath];
+  } else if (ev.filePath === "<multi-context>" && Array.isArray(ev.multiFiles)) {
+    currFiles = ev.multiFiles.filter(isTrackableRepeatReadFile);
+  }
+
+  const prevFiles =
+    prev?.files && prev.files.length > 0
+      ? prev.files
+      : prev && isTrackableRepeatReadFile(prev.filePath)
+        ? [prev.filePath]
+        : [];
+
   if (
     ev.category === "read" &&
-    isTrackableRepeatReadFile(ev.filePath) &&
-    prev !== undefined &&
-    prev.category === "read" &&
-    prev.filePath === ev.filePath &&
+    currFiles.length > 0 &&
+    prev?.category === "read" &&
+    prevFiles.length > 0 &&
     Number.isFinite(tsMs) &&
     Number.isFinite(prev.timestampMs)
   ) {
     const deltaMs = tsMs - prev.timestampMs;
     if (deltaMs >= 0 && deltaMs < REPEAT_READ_WINDOW_MS) {
-      isRepeatRead = true;
+      const prevFileSet = new Set(prevFiles);
+      if (currFiles.some((f) => prevFileSet.has(f))) {
+        isRepeatRead = true;
+      }
     }
   }
 
   stateMap.set(projKey, {
     category: ev.category,
     filePath: ev.filePath,
+    files: currFiles,
     timestampMs: tsMs,
   });
 

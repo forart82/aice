@@ -2817,10 +2817,22 @@ export async function aiceRead(
 
   const firstClassified = classified[0];
   if (firstClassified) {
+    const multiFiles = Array.from(
+      new Set(
+        classified
+          .filter((c) => !c.isDir)
+          .map((c) => {
+            const rel = path.relative(primaryProjectRoot, c.diskPath).replace(/\\/g, "/");
+            return rel && !rel.startsWith("..") ? rel : c.displayPath;
+          })
+          .filter(Boolean),
+      ),
+    );
     recordTelemetryEvent({
       targetPath: firstClassified.diskPath,
       projectRoot: primaryProjectRoot,
       filePath: "<multi-context>",
+      multiFiles: multiFiles.length > 0 ? multiFiles : undefined,
       operation: "context",
       surface,
       idiomsUsed: Boolean(
@@ -3652,10 +3664,23 @@ async function executeContextStream(params: {
 
     if (firstResolvedPath) {
       const aicePayload = jsonOutput ?? formattedBundle;
+      const contextTargets = matchedTargets.length > 0 ? matchedTargets : contextItems;
+      const multiFiles = Array.from(
+        new Set(
+          contextTargets
+            .filter((c) => !c.isDir)
+            .map((c) => {
+              const rel = path.relative(firstProjectRoot, c.diskPath).replace(/\\/g, "/");
+              return rel && !rel.startsWith("..") ? rel : c.displayPath;
+            })
+            .filter(Boolean),
+        ),
+      );
       recordTelemetryEvent({
         targetPath: firstResolvedPath,
         projectRoot: firstProjectRoot,
         filePath: "<multi-context>",
+        multiFiles: multiFiles.length > 0 ? multiFiles : undefined,
         operation: "context",
         surface,
         idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),

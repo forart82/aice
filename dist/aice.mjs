@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.40";
+    AICE_VERSION = "0.9.41";
     VERSION = AICE_VERSION;
   }
 });
@@ -75,15 +75,15 @@ var init_mandatory_rules = __esm({
     MANDATORY_AGENT_RULES_MARKDOWN = `${AICE_DIRECTIVE_START}
 ${AICE_VERSIONED_DIRECTIVE_START}
 ## AICE (v${AICE_VERSION}) \u2014 2-Tool AST Cheat-Card
-**MANDATORY OVERRIDE**: Active across all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY \`aice read\`/\`search\`/\`find\` (MCP \`aice_read\`) & \`aice splice\`/\`aice write\` (MCP \`aice_splice\`), never native file tools.
+**MANDATORY OVERRIDE**: Active across all 33 supported file extensions (code, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY \`aice read\`/\`search\`/\`find\` (MCP \`aice_read\`) & \`aice splice\`/\`aice write\` (MCP \`aice_splice\`), never native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when \`aice.config.json\` has \`"enabled": true\`; skip if missing/false. \`$idioms\` OFF (\`--idioms\` opt-in).
 - Bypass: Board-only swarm monitors/coordinators & non-file Q&A have zero overhead.
 - Fallback: Crash/blocker -> \`aice disable\` -> native tools -> \`aice enable\`.
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - Ban: No shell writes (\`python3 with open\`, \`cat << 'EOF' >\`, \`echo >\`); NEVER run \`sed -n\` or grep/awk/head/tail/cat/ls/find on supported files.
-- Read: 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (1 call/turn on CLI <=9KB \u2014 never chain 'aice read && aice read' or pass '--full'; \`--dsl\`, Adaptive Sibling Outlining; MCP <=28KB), \`aice search <pat> [dir]\` (\`grep\`, \`-C\`, \`-l\`, or 4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\` (\`tree\`); MCP \`aice_read\` (\`search\`, \`contextLines\`, \`filesOnly\`, \`dsl\`).
-- Splice: 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\`, \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend\`, \`<<< === >>>\` hunks, \`:eof\`, \`:imports\`.
+- Read: Prefer MCP \`aice_read\` (\`<=28KB\` / \`~550L\`, 3x CLI \u2014 load MCP schema once if lazy; \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`) to avoid multi-turn CLI pagination. On CLI (\`<=9KB\` / \`~145L\` total/turn), batch only small \`:sym\`/\`:L\` slices and read \`>120L\` files solo (so water-filling won't outline-downgrade them). 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\`.
+- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend\`, \`<<< === >>>\`, \`:eof\`, \`:imports\`.
 ### 3. Subagent Propagation
 - Coding subagents/\`swarm add\` briefs MUST state: \`"Use AICE (aice read / aice splice) for all file exploration and edits."\`
 ${AICE_DIRECTIVE_END}`;
@@ -247756,6 +247756,7 @@ async function generateMultiContext(targets, options = {}) {
   let totalNativeO200k = 0;
   const suppressIndividualTelemetry = targets.length > 1;
   const skippedSymbolErrors = [];
+  const resolvedMultiFiles = [];
   for (let idx = 0; idx < targets.length; idx++) {
     const item = targets[idx];
     const rawStr = typeof item === "string" ? item : item.path;
@@ -247784,6 +247785,9 @@ async function generateMultiContext(targets, options = {}) {
     try {
       const res = suppressIndividualTelemetry ? await withSuppressedTelemetryAsync(() => generateContext(resolved.resolvedPath, itemOpts)) : await generateContext(resolved.resolvedPath, itemOpts);
       individualResults.push(res);
+      if (!resolved.isDirectory) {
+        resolvedMultiFiles.push(resolved.resolvedPath);
+      }
     } catch (err) {
       if (targets.length > 1 && usesSharedSymbol && err instanceof Error && /Symbol .+ not found in /i.test(err.message)) {
         skippedSymbolErrors.push(err);
@@ -247854,10 +247858,19 @@ async function generateMultiContext(targets, options = {}) {
   const merged = mergeMultiContextResults(individualResults, options);
   if (suppressIndividualTelemetry && individualResults.length > 1 && firstResolvedPath) {
     const aicePayload = options.json ? JSON.stringify(merged, null, 2) : merged.formattedBundle;
+    const multiFiles = Array.from(
+      new Set(
+        resolvedMultiFiles.map((f) => {
+          const rel = path10.relative(firstProjectRoot, f).replace(/\\/g, "/");
+          return rel && !rel.startsWith("..") ? rel : f;
+        }).filter(Boolean)
+      )
+    );
     recordTelemetryEvent({
       targetPath: firstResolvedPath,
       projectRoot: firstProjectRoot,
       filePath: "<multi-context>",
+      multiFiles: multiFiles.length > 0 ? multiFiles : void 0,
       operation: "context",
       surface: "cli",
       idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
@@ -298297,11 +298310,27 @@ function serializeCompactTelemetryEvent(event) {
     event.nativeChars,
     event.aiceChars
   );
+  let compactMf;
+  if (event.multiFiles && event.multiFiles.length > 0) {
+    const deduped = Array.from(
+      new Set(
+        event.multiFiles.map((item) => {
+          const rel = path18.isAbsolute(item) ? path18.relative(event.projectRoot, item).replace(/\\/g, "/") : item.replace(/\\/g, "/");
+          const normalized = rel && !rel.startsWith("..") ? rel : path18.basename(item);
+          return normalized.slice(0, 120);
+        }).filter(Boolean)
+      )
+    ).slice(0, 16);
+    if (deduped.length > 0) {
+      compactMf = deduped;
+    }
+  }
   const rec = {
     t,
     r: event.projectRoot,
     ...event.projectName !== defaultProjectName ? { p: event.projectName } : {},
     f: compactFilePath,
+    ...compactMf ? { mf: compactMf } : {},
     ...event.language !== defaultLang ? { l: event.language } : {},
     o: event.operation,
     ...event.surface !== "cli" ? { s: event.surface } : {},
@@ -298354,6 +298383,8 @@ function hydrateTelemetryEvent(raw) {
   const realisticSavedCl100k = typeof obj.rs === "number" ? obj.rs : realisticNativeCl100k !== void 0 ? realisticNativeCl100k - aiceCl100k : void 0;
   const preservedTriviaTokens = typeof obj.pt === "number" ? obj.pt : typeof obj.preservedTriviaTokens === "number" ? obj.preservedTriviaTokens : 0;
   const structuralCompressionPct = typeof obj.sc === "number" ? obj.sc : typeof obj.structuralCompressionPct === "number" ? obj.structuralCompressionPct : void 0;
+  const rawMf = Array.isArray(obj.mf) ? obj.mf : Array.isArray(obj.multiFiles) ? obj.multiFiles : void 0;
+  const multiFiles = rawMf ? rawMf.filter((item) => typeof item === "string") : void 0;
   return {
     timestamp,
     projectRoot,
@@ -298378,7 +298409,8 @@ function hydrateTelemetryEvent(raw) {
     ...realisticNativeCl100k !== void 0 ? { realisticNativeCl100k } : {},
     ...realisticSavedCl100k !== void 0 ? { realisticSavedCl100k } : {},
     preservedTriviaTokens,
-    ...structuralCompressionPct !== void 0 ? { structuralCompressionPct } : {}
+    ...structuralCompressionPct !== void 0 ? { structuralCompressionPct } : {},
+    ...multiFiles && multiFiles.length > 0 ? { multiFiles } : {}
   };
 }
 function computeTelemetryEvent(input) {
@@ -298451,7 +298483,8 @@ function computeTelemetryEvent(input) {
     ...realisticNativeCl100k !== void 0 ? { realisticNativeCl100k } : {},
     ...realisticSavedCl100k !== void 0 ? { realisticSavedCl100k } : {},
     preservedTriviaTokens: input.preservedTriviaTokens ?? 0,
-    ...input.structuralCompressionPct !== void 0 ? { structuralCompressionPct: input.structuralCompressionPct } : {}
+    ...input.structuralCompressionPct !== void 0 ? { structuralCompressionPct: input.structuralCompressionPct } : {},
+    ...input.multiFiles && input.multiFiles.length > 0 ? { multiFiles: input.multiFiles } : {}
   };
 }
 function recordTelemetryEvent(input, forceEvenIfSuppressed = false) {
@@ -298698,15 +298731,26 @@ function checkAndAdvanceRepeatReadState(ev, stateMap) {
   const tsMs = Date.parse(ev.timestamp);
   const prev = stateMap.get(projKey);
   let isRepeatRead = false;
-  if (ev.category === "read" && isTrackableRepeatReadFile(ev.filePath) && prev !== void 0 && prev.category === "read" && prev.filePath === ev.filePath && Number.isFinite(tsMs) && Number.isFinite(prev.timestampMs)) {
+  let currFiles = [];
+  if (isTrackableRepeatReadFile(ev.filePath)) {
+    currFiles = [ev.filePath];
+  } else if (ev.filePath === "<multi-context>" && Array.isArray(ev.multiFiles)) {
+    currFiles = ev.multiFiles.filter(isTrackableRepeatReadFile);
+  }
+  const prevFiles = prev?.files && prev.files.length > 0 ? prev.files : prev && isTrackableRepeatReadFile(prev.filePath) ? [prev.filePath] : [];
+  if (ev.category === "read" && currFiles.length > 0 && prev?.category === "read" && prevFiles.length > 0 && Number.isFinite(tsMs) && Number.isFinite(prev.timestampMs)) {
     const deltaMs = tsMs - prev.timestampMs;
     if (deltaMs >= 0 && deltaMs < REPEAT_READ_WINDOW_MS) {
-      isRepeatRead = true;
+      const prevFileSet = new Set(prevFiles);
+      if (currFiles.some((f) => prevFileSet.has(f))) {
+        isRepeatRead = true;
+      }
     }
   }
   stateMap.set(projKey, {
     category: ev.category,
     filePath: ev.filePath,
+    files: currFiles,
     timestampMs: tsMs
   });
   return isRepeatRead;
@@ -301268,10 +301312,19 @@ ${statsText}` : formattedBundle);
   const combinedNativeChars = (ctxPart.stats.originalChars ?? 0) + (outlinePart.stats.originalChars ?? 0);
   const firstClassified = classified[0];
   if (firstClassified) {
+    const multiFiles = Array.from(
+      new Set(
+        classified.filter((c) => !c.isDir).map((c) => {
+          const rel = path19.relative(primaryProjectRoot, c.diskPath).replace(/\\/g, "/");
+          return rel && !rel.startsWith("..") ? rel : c.displayPath;
+        }).filter(Boolean)
+      )
+    );
     recordTelemetryEvent({
       targetPath: firstClassified.diskPath,
       projectRoot: primaryProjectRoot,
       filePath: "<multi-context>",
+      multiFiles: multiFiles.length > 0 ? multiFiles : void 0,
       operation: "context",
       surface,
       idiomsUsed: Boolean(
@@ -301966,10 +302019,20 @@ ${statsText2}` : formattedBundle2);
     }
     if (firstResolvedPath) {
       const aicePayload = jsonOutput2 ?? formattedBundle2;
+      const contextTargets = matchedTargets.length > 0 ? matchedTargets : contextItems;
+      const multiFiles = Array.from(
+        new Set(
+          contextTargets.filter((c) => !c.isDir).map((c) => {
+            const rel = path19.relative(firstProjectRoot, c.diskPath).replace(/\\/g, "/");
+            return rel && !rel.startsWith("..") ? rel : c.displayPath;
+          }).filter(Boolean)
+        )
+      );
       recordTelemetryEvent({
         targetPath: firstResolvedPath,
         projectRoot: firstProjectRoot,
         filePath: "<multi-context>",
+        multiFiles: multiFiles.length > 0 ? multiFiles : void 0,
         operation: "context",
         surface,
         idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
@@ -314065,7 +314128,7 @@ Examples:
             compile: options.compile,
             idioms: batchEffectiveIdioms,
             inlineIdioms: combinedInlineIdioms.length > 0 ? combinedInlineIdioms : void 0,
-            overwrite: Boolean(options.overwrite || options.force),
+            ...options.overwrite !== void 0 ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {},
             force: options.force,
             preserveDocs: options.preserveDocs
           });
@@ -314405,7 +314468,7 @@ Valid heredoc syntax:
         insertBefore: options.insertBefore,
         edits: parsedEdits,
         create: options.create,
-        overwrite: Boolean(options.overwrite || options.force),
+        ...options.overwrite !== void 0 ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {},
         force: options.force,
         inlineIdioms: inlineIdiomList,
         idioms: effectiveSpliceIdioms,

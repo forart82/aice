@@ -1702,7 +1702,7 @@ Examples:
               compile: options.compile,
               idioms: batchEffectiveIdioms,
               inlineIdioms: combinedInlineIdioms.length > 0 ? combinedInlineIdioms : undefined,
-              overwrite: Boolean(options.overwrite || options.force),
+              ...(options.overwrite !== undefined ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {}),
               force: options.force,
               preserveDocs: options.preserveDocs,
             });
@@ -2144,7 +2144,7 @@ Examples:
           insertBefore: options.insertBefore,
           edits: parsedEdits,
           create: options.create,
-          overwrite: Boolean(options.overwrite || options.force),
+          ...(options.overwrite !== undefined ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {}),
           force: options.force,
           inlineIdioms: inlineIdiomList,
           idioms: effectiveSpliceIdioms,
