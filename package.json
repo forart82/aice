@@ -1,6 +1,6 @@
 {
   "name": "aice-compiler",
-  "version": "0.9.41",
+  "version": "0.9.42",
   "description": "AI-Compact Expression (AICE) — High-Efficiency Agent-Native Language, Decompiler, and Tokenomics Engine",
   "license": "Apache-2.0",
   "author": {

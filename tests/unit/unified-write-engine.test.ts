@@ -1126,4 +1126,136 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
       expect(fs.readFileSync(existingRadarPath, "utf-8")).toContain("export const allowed = true;");
     });
   });
+
+  describe("7. AICE v0.9.42: Python-Style Half-Open [startLine, endLine) (endLine - 1) Auto-Aligner & No-Op Guard", () => {
+    it("auto-aligns half-open line ranges in multi-block .aipl spliceBatch across TypeScript and Python while honoring No-Op Guard", async () => {
+      const srcDir = path.join(tmpDir, "src");
+      fs.mkdirSync(srcDir, { recursive: true });
+
+      // Case 1: L[end] is `import {` (opening brace delimiter imbalance without half-open auto-alignment)
+      const case1Path = path.join(srcDir, "case1_import.ts");
+      fs.writeFileSync(
+        case1Path,
+        [
+          'export const header = "my-app";',
+          "export const config = { port: 3000 };",
+          "export const debug = true;",
+          "import {",
+          "  helper,",
+          '} from "./helper.js";',
+          "export function run(): string {",
+          "  return helper();",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // Case 2: L[end] is a valid statement `if sym == "#": ...` in Python (previously silently deleted L[end])
+      const case2Path = path.join(srcDir, "case2_python.py");
+      fs.writeFileSync(
+        case2Path,
+        [
+          "def parse_token(sym: str) -> bool:",
+          "    val = sym.strip()",
+          "    return len(val) > 0",
+          'if sym == "#":',
+          '    print("comment")',
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // Case 3: Inside indented function where L[end-1] is blank and L[end] is column-0 `/// Step ...` doc comment
+      const case3Path = path.join(srcDir, "case3_doc.ts");
+      fs.writeFileSync(
+        case3Path,
+        [
+          "export class Worker {",
+          "  public execute(task: string): boolean {",
+          '    const mode = "standard";',
+          "    return mode.length > 0;",
+          "  }",
+          "}",
+          "",
+          "/// Step 2 worker execution pipeline",
+          "export function step2(): string {",
+          '  return "step2";',
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // Case 4: Replacing L1-L3 with verbatim L1-L2 (candRep.trim() === candSlice.trim()) must delete L3 via No-Op Guard
+      const case4Path = path.join(srcDir, "case4_delete.ts");
+      fs.writeFileSync(
+        case4Path,
+        [
+          "let a = 1;",
+          "let b = 2;",
+          "let c = 3;",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // Multi-block .aipl splice stream using Python-style half-open [startLine, endLine) boundaries
+      const multiBlockAipl = [
+        "=== src/case1_import.ts:L1-L4 ===",
+        'export const header = "my-app";',
+        "export const config = { port: 8080 };",
+        "export const debug = true;",
+        "",
+        "=== src/case2_python.py:L1-L4 ===",
+        "def parse_token(sym: str) -> bool:",
+        "    val = sym.strip().lower()",
+        "    return len(val) > 0",
+        "",
+        "=== src/case3_doc.ts:L2-L8 ===",
+        "  public execute(task: string): boolean {",
+        '    const mode = "accelerated";',
+        "    return mode.length > 0;",
+        "  }",
+        "}",
+        "",
+        "=== src/case4_delete.ts:L1-L3 ===",
+        "let a = 1;",
+        "let b = 2;",
+      ].join("\n");
+
+      // Save multi-block .aipl file and run spliceBatch
+      const patchAiplPath = path.join(tmpDir, "patch.aipl");
+      fs.writeFileSync(patchAiplPath, `${multiBlockAipl}\n`, "utf-8");
+
+      const batchRes = await spliceBatch(multiBlockAipl, { projectRoot: tmpDir, idioms: false });
+      expect(batchRes.success).toBe(true);
+      expect(batchRes.totalEdits).toBe(4);
+
+      // Verify Case 1: config updated, import { preserved intact
+      const case1Content = fs.readFileSync(case1Path, "utf-8");
+      expect(case1Content).toContain("port: 8080");
+      expect(case1Content).toContain("import {");
+      expect(case1Content).toContain('} from "./helper.js";');
+      expect(case1Content).toContain("export function run(): string");
+
+      // Verify Case 2: parse_token updated with .lower(), if sym == "#": preserved intact
+      const case2Content = fs.readFileSync(case2Path, "utf-8");
+      expect(case2Content).toContain("val = sym.strip().lower()");
+      expect(case2Content).toContain('if sym == "#":');
+      expect(case2Content).toContain('print("comment")');
+
+      // Verify Case 3: Worker.execute updated, column-0 /// Step 2 doc comment preserved intact
+      const case3Content = fs.readFileSync(case3Path, "utf-8");
+      expect(case3Content).toContain('"accelerated"');
+      expect(case3Content).toContain("/// Step 2 worker execution pipeline");
+      expect(case3Content).toContain("export function step2(): string");
+
+      // Verify Case 4: No-Op Guard ensured L1-L3 replacement deleted L3 (let c = 3)
+      const case4Content = fs.readFileSync(case4Path, "utf-8");
+      expect(case4Content).toContain("let a = 1;");
+      expect(case4Content).toContain("let b = 2;");
+      expect(case4Content).not.toContain("let c = 3;");
+    });
+  });
 });

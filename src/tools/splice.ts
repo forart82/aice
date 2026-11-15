@@ -7123,12 +7123,58 @@ function resolveSingleNativeEditAgainstSource(
 
     let ambiguousAlignmentNote = "";
     let autoAligned = false;
+
+    if (endLine > startLine && procLineList.length >= 2) {
+      const halfOpenEndLine = endLine - 1;
+      const firstOrigTrim = (rawLines[startLine - 1] ?? "").trim();
+      const endOrigTrim = (rawLines[endLine - 1] ?? "").trim();
+      const prevEndOrigTrim = (rawLines[halfOpenEndLine - 1] ?? "").trim();
+      const startMatchesVerbatim = firstOrigTrim.length >= 3 && firstOrigTrim === procFirstTrim;
+      const prevEndMatchesVerbatim =
+        prevEndOrigTrim.length >= 3 &&
+        prevEndOrigTrim === procLastTrim &&
+        endOrigTrim !== procLastTrim;
+      const trailingDocCommentBleed =
+        startMatchesVerbatim &&
+        /^[ \t]+/.test(rawLines[startLine - 1] ?? "") &&
+        prevEndOrigTrim === "" &&
+        /^(?:\/\/\/|\/\*\*)/.test(endOrigTrim) &&
+        !/^(?:\/\/\/|\/\*\*)/m.test(processedCode);
+
+      if (startMatchesVerbatim && (prevEndMatchesVerbatim || trailingDocCommentBleed)) {
+        const candEndOff =
+          halfOpenEndLine < lineStarts.length
+            ? (lineStarts[halfOpenEndLine] ?? nativeSource.length)
+            : nativeSource.length;
+        const candSlice = nativeSource.slice(startOffset, candEndOff);
+        const candRep = buildRangeReplacement(startLine, halfOpenEndLine);
+        const candDelims = countNetDelims(candSlice);
+        const candRepDelims = countNetDelims(candRep);
+        if (
+          candRep.trim() !== candSlice.trim() &&
+          candDelims.braces === candRepDelims.braces &&
+          candDelims.parens === candRepDelims.parens &&
+          validateNativeSyntax(
+            `${nativeSource.slice(0, startOffset)}${candRep}${nativeSource.slice(candEndOff)}`,
+            targetLang,
+            filePath,
+            idioms,
+          ).valid
+        ) {
+          finalEndOffset = candEndOff;
+          finalOriginalSnippet = candSlice;
+          processedCode = candRep;
+          autoAligned = true;
+        }
+      }
+    }
+
     const isUnbalancedReplacementOnBalancedSpan =
       origDelims.braces === 0 &&
       origDelims.parens === 0 &&
       (procDelims.braces !== 0 || procDelims.parens !== 0);
 
-    if ((!literalCheck.valid || hasExactDelimImbalance) && !isUnbalancedReplacementOnBalancedSpan) {
+    if (!autoAligned && (!literalCheck.valid || hasExactDelimImbalance) && !isUnbalancedReplacementOnBalancedSpan) {
       const lineDelimsCache = new Map<number, { braces: number; parens: number }>();
       const getLineDelims = (lineNo: number): { braces: number; parens: number } => {
         const cached = lineDelimsCache.get(lineNo);

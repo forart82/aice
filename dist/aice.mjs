@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.41";
+    AICE_VERSION = "0.9.42";
     VERSION = AICE_VERSION;
   }
 });
@@ -83,7 +83,7 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - Ban: No shell writes (\`python3 with open\`, \`cat << 'EOF' >\`, \`echo >\`); NEVER run \`sed -n\` or grep/awk/head/tail/cat/ls/find on supported files.
 - Read: Prefer MCP \`aice_read\` (\`<=28KB\` / \`~550L\`, 3x CLI \u2014 load MCP schema once if lazy; \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`) to avoid multi-turn CLI pagination. On CLI (\`<=9KB\` / \`~145L\` total/turn), batch only small \`:sym\`/\`:L\` slices and read \`>120L\` files solo (so water-filling won't outline-downgrade them). 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\`.
-- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend\`, \`<<< === >>>\`, \`:eof\`, \`:imports\`.
+- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend (inclusive)\`, \`<<< === >>>\`, \`:eof\`, \`:imports\`.
 ### 3. Subagent Propagation
 - Coding subagents/\`swarm add\` briefs MUST state: \`"Use AICE (aice read / aice splice) for all file exploration and edits."\`
 ${AICE_DIRECTIVE_END}`;
@@ -254844,8 +254844,35 @@ ${lastTopClass.classIndent}`,
     const alreadyAnchoredAtEnd = procLastTrim.length >= 6 && rawLines[endLine - 1]?.trim() === procLastTrim;
     let ambiguousAlignmentNote = "";
     let autoAligned = false;
+    if (endLine > startLine && procLineList.length >= 2) {
+      const halfOpenEndLine = endLine - 1;
+      const firstOrigTrim = (rawLines[startLine - 1] ?? "").trim();
+      const endOrigTrim = (rawLines[endLine - 1] ?? "").trim();
+      const prevEndOrigTrim = (rawLines[halfOpenEndLine - 1] ?? "").trim();
+      const startMatchesVerbatim = firstOrigTrim.length >= 3 && firstOrigTrim === procFirstTrim;
+      const prevEndMatchesVerbatim = prevEndOrigTrim.length >= 3 && prevEndOrigTrim === procLastTrim && endOrigTrim !== procLastTrim;
+      const trailingDocCommentBleed = startMatchesVerbatim && /^[ \t]+/.test(rawLines[startLine - 1] ?? "") && prevEndOrigTrim === "" && /^(?:\/\/\/|\/\*\*)/.test(endOrigTrim) && !/^(?:\/\/\/|\/\*\*)/m.test(processedCode);
+      if (startMatchesVerbatim && (prevEndMatchesVerbatim || trailingDocCommentBleed)) {
+        const candEndOff = halfOpenEndLine < lineStarts.length ? lineStarts[halfOpenEndLine] ?? nativeSource.length : nativeSource.length;
+        const candSlice = nativeSource.slice(startOffset, candEndOff);
+        const candRep = buildRangeReplacement(startLine, halfOpenEndLine);
+        const candDelims = countNetDelims(candSlice);
+        const candRepDelims = countNetDelims(candRep);
+        if (candRep.trim() !== candSlice.trim() && candDelims.braces === candRepDelims.braces && candDelims.parens === candRepDelims.parens && validateNativeSyntax(
+          `${nativeSource.slice(0, startOffset)}${candRep}${nativeSource.slice(candEndOff)}`,
+          targetLang,
+          filePath,
+          idioms
+        ).valid) {
+          finalEndOffset = candEndOff;
+          finalOriginalSnippet = candSlice;
+          processedCode = candRep;
+          autoAligned = true;
+        }
+      }
+    }
     const isUnbalancedReplacementOnBalancedSpan = origDelims.braces === 0 && origDelims.parens === 0 && (procDelims.braces !== 0 || procDelims.parens !== 0);
-    if ((!literalCheck.valid || hasExactDelimImbalance) && !isUnbalancedReplacementOnBalancedSpan) {
+    if (!autoAligned && (!literalCheck.valid || hasExactDelimImbalance) && !isUnbalancedReplacementOnBalancedSpan) {
       const lineDelimsCache = /* @__PURE__ */ new Map();
       const getLineDelims = (lineNo) => {
         const cached = lineDelimsCache.get(lineNo);
