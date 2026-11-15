@@ -371,8 +371,8 @@ The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `w
 
 ````markdown
 <!-- AICE:START -->
-<!-- AICE:START v0.9.42 -->
-## AICE (v0.9.42) — 2-Tool AST Cheat-Card
+<!-- AICE:START v0.9.43 -->
+## AICE (v0.9.43) — 2-Tool AST Cheat-Card
 **MANDATORY OVERRIDE**: Active across all 33 supported file extensions (code, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY `aice read`/`search`/`find` (MCP `aice_read`) & `aice splice`/`aice write` (MCP `aice_splice`), never native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when `aice.config.json` has `"enabled": true`; skip if missing/false. `$idioms` OFF (`--idioms` opt-in).
@@ -380,8 +380,8 @@ The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `w
 - Fallback: Crash/blocker -> `aice disable` -> native tools -> `aice enable`.
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - Ban: No shell writes (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find on supported files.
-- Read: Prefer MCP `aice_read` (`<=28KB` / `~550L`, 3x CLI — load MCP schema once if lazy; `search`, `contextLines`, `filesOnly`, `--dsl`) to avoid multi-turn CLI pagination. On CLI (`<=9KB` / `~145L` total/turn), batch only small `:sym`/`:L` slices and read `>120L` files solo (so water-filling won't outline-downgrade them). 1-turn numbered native `aice read src tests`, `aice read f1:sym f2:L1-L50` (Adaptive Sibling Outlining), `aice search <pat> [dir]` (4-tier ranked `aice read <fileOrDir> -s "/<searchPattern>/"`), `aice find [glob] [dir]`.
-- Splice: Prefer MCP `aice_splice` (`<=28KB` / `~550L`). On CLI, 1-call `aice splice --stdin << 'EOF'` with `=== <file> ===` (creates or overwrites full files; `:overwrite` for empty truncation), `:symbol` (`@clone(SourceSym)`, `@replace-docs`), `:Lstart-Lend (inclusive)`, `<<< === >>>`, `:eof`, `:imports`.
+- Read: Prefer MCP `aice_read` (`<=28KB` / `~550L`; `search`, `contextLines`, `filesOnly`, `--dsl`). On CLI (`<=9KB` / `~145L` total/turn), batch small `:sym`/`:L` slices and read `>120L` files solo. 1-turn numbered native `aice read src tests`, `aice read f1:sym f2:L1-L50` (Adaptive Sibling Outlining), `aice search <pat> [dir]` (4-tier ranked `aice read <fileOrDir> -s "/<searchPattern>/"`), `aice find [glob] [dir]`.
+- Splice: Prefer MCP `aice_splice` (`<=28KB` / `~550L`; pass flat `code` `=== <file>:<sym> ===` blocks, NOT `edits` object arrays). On CLI, 1-call `aice splice --stdin << 'EOF'` with `=== <file> ===` (creates or overwrites full files; `:overwrite` for empty truncation), `:symbol` (`@clone(SourceSym)`, `@replace-docs`), `:Lstart-Lend (inclusive)` (`--delete` to remove), `<<< === >>>`, `:eof`, `:imports`.
 ### 3. Subagent Propagation
 - Coding subagents/`swarm add` briefs MUST state: `"Use AICE (aice read / aice splice) for all file exploration and edits."`
 <!-- AICE:END -->

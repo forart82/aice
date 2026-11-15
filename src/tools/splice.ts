@@ -6530,7 +6530,9 @@ export function buildEmptySpliceBlockError(
       `     >>>\n` +
       `  3) Line-range replacement:\n` +
       `     === ${filePath}:L10-L12 ===\n` +
-      `     <replacement lines>`,
+      `     <replacement lines>\n` +
+      `  4) Delete symbol or line range:\n` +
+      `     === ${headerDesc} --delete ===`,
   );
 }
 

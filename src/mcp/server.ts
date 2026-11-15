@@ -227,7 +227,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
     inputSchema: {
       type: "object",
       properties: {
@@ -264,7 +264,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         code: {
           type: "string",
           description:
-            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbolOrRange> ===' / '=== <filePath> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions). RECOMMENDED: For multi-symbol or multi-file batches, pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead of nested object arrays (avoiding host array serialization glitches). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
         },
         content: {
           type: "string",
@@ -328,7 +328,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         edits: {
           type: "array",
           description:
-            "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top)",
+            "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top). RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
           items: {
             type: "object",
             properties: {
@@ -347,7 +347,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         batch: {
           type: "array",
           description:
-            "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+            "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
           items: {
             type: "object",
             properties: {
@@ -370,7 +370,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         files: {
           type: "array",
           description:
-            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
           items: {
             type: "object",
             properties: {
@@ -399,7 +399,7 @@ export const AICE_WRITE_TOOL: McpToolDefinition = {
   ...AICE_MCP_TOOLS.find((t) => t.name === "aice_splice")!,
   name: "aice_write",
   description:
-    "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+    "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
 };
 
 export interface McpToolCallResult {
@@ -408,6 +408,25 @@ export interface McpToolCallResult {
     text: string;
   }>;
   isError?: boolean;
+}
+
+export function buildNullSpliceArrayItemError(targetFileHint?: string): Error {
+  const exampleFile = targetFileHint?.trim() || "src/app.ts";
+  return new Error(
+    `Invalid null or non-object item in aice_splice 'edits'/'files' array (host call_mcp_tool nested-object serialization glitch). Do NOT retry nested 'edits: [...]' or 'files: [...]' object arrays — pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead (e.g. { "filePath": "${exampleFile}", "code": "=== ${exampleFile}:L15-L21 ===\\n...\\n=== ${exampleFile}:MySymbol ===\\n..." }).`,
+  );
+}
+
+export function parseJsonArrayIfString(val: unknown, argName: string): unknown {
+  if (typeof val === "string" && val.trim().startsWith("[")) {
+    try {
+      return JSON.parse(val);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Invalid JSON in aice_splice '${argName}' argument: ${msg}`);
+    }
+  }
+  return val;
 }
 
 export class AiceMcpServer {
@@ -888,7 +907,8 @@ export class AiceMcpServer {
               : undefined;
         const dslFlag = typeof args.dsl === "boolean" ? args.dsl : undefined;
 
-        const candidateArray = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
+        const rawCandidate = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
+        const candidateArray = parseJsonArrayIfString(rawCandidate, "targets");
         const rawPathCandidate =
           args.path ??
           args.filePath ??
@@ -904,7 +924,8 @@ export class AiceMcpServer {
 
         if (Array.isArray(candidateArray) && candidateArray.length > 0) {
           for (const entry of candidateArray) {
-            if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+            if (!entry) continue;
+            if (typeof entry === "object" && !Array.isArray(entry)) {
               const obj = entry as Record<string, unknown>;
               const rawEntryStr =
                 String(obj.path ?? obj.filePath ?? obj.target ?? ".").trim() || ".";
@@ -1460,13 +1481,18 @@ export class AiceMcpServer {
             ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || undefined)
             : null;
 
-        const rawBatchCollection = Array.isArray(args.files)
-          ? args.files
-          : Array.isArray(args.batch)
-            ? args.batch
-            : typeof args.batch === "string" && args.batch.trim().startsWith("[")
-              ? (JSON.parse(args.batch) as unknown[])
-              : undefined;
+        const rawBatchInput =
+          parseJsonArrayIfString(args.files, "files") ??
+          parseJsonArrayIfString(args.batch, "batch");
+        const rawBatchCollection = Array.isArray(rawBatchInput) ? rawBatchInput : undefined;
+        if (
+          Array.isArray(rawBatchCollection) &&
+          rawBatchCollection.some(
+            (entry) => !entry || typeof entry !== "object" || Array.isArray(entry),
+          )
+        ) {
+          throw buildNullSpliceArrayItemError(rawTargetFile);
+        }
         const filesBatchFromArgs: BatchSpliceItem[] | undefined =
           Array.isArray(rawBatchCollection) && rawBatchCollection.length > 0
             ? (rawBatchCollection as Array<Record<string, unknown>>).map((entry) => {
@@ -1476,8 +1502,15 @@ export class AiceMcpServer {
                 }
                 const splitEntry = splitInlineFileSelector(rawEntryFp, this.workspaceRoot);
                 const entryFp = splitEntry.filePath;
-                const entryEdits = Array.isArray(entry.edits)
-                  ? (entry.edits as Array<Record<string, unknown>>).map((ed) => ({
+                const rawEntryEdits = parseJsonArrayIfString(entry.edits, "edits");
+                if (
+                  Array.isArray(rawEntryEdits) &&
+                  rawEntryEdits.some((ed) => !ed || typeof ed !== "object" || Array.isArray(ed))
+                ) {
+                  throw buildNullSpliceArrayItemError(entryFp || rawTargetFile);
+                }
+                const entryEdits = Array.isArray(rawEntryEdits)
+                  ? (rawEntryEdits as Array<Record<string, unknown>>).map((ed) => ({
                       symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
                       code:
                         typeof ed.code === "string"
@@ -1544,11 +1577,21 @@ export class AiceMcpServer {
               })
             : undefined;
 
+        const rawEditsCollection = parseJsonArrayIfString(args.edits, "edits");
+        if (
+          Array.isArray(rawEditsCollection) &&
+          rawEditsCollection.some(
+            (ed) => !ed || typeof ed !== "object" || Array.isArray(ed),
+          )
+        ) {
+          throw buildNullSpliceArrayItemError(rawTargetFile);
+        }
+
         const multiFileEditsFromArgs: BatchSpliceItem[] | undefined =
           !rawTargetFile &&
-          Array.isArray(args.edits) &&
-          args.edits.length > 0 &&
-          args.edits.every(
+          Array.isArray(rawEditsCollection) &&
+          rawEditsCollection.length > 0 &&
+          rawEditsCollection.every(
             (e) =>
               e &&
               typeof e === "object" &&
@@ -1558,7 +1601,7 @@ export class AiceMcpServer {
                   (e as Record<string, unknown>).path,
               ),
           )
-            ? (args.edits as Array<Record<string, unknown>>).map((e) => ({
+            ? (rawEditsCollection as Array<Record<string, unknown>>).map((e) => ({
                 filePath: String(e.filePath ?? e.file ?? e.path ?? ""),
                 symbol: String(e.symbol ?? e.symbolSelector ?? ""),
                 code: typeof e.code === "string" ? e.code : undefined,
@@ -1666,8 +1709,8 @@ export class AiceMcpServer {
         const batchEdits =
           parsedStream?.singleFileEdits && parsedStream.singleFileEdits.length > 0
             ? parsedStream.singleFileEdits
-            : Array.isArray(args.edits)
-              ? (args.edits as Array<Record<string, unknown>>).map((ed) => ({
+            : Array.isArray(rawEditsCollection)
+              ? (rawEditsCollection as Array<Record<string, unknown>>).map((ed) => ({
                   symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
                   code: typeof ed.code === "string" ? ed.code : undefined,
                   body: typeof ed.body === "string" ? ed.body : undefined,

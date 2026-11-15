@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.42](https://img.shields.io/badge/Version-0.9.42-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.43](https://img.shields.io/badge/Version-0.9.43-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -466,7 +466,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.42)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.43)
 ├── AGENTS.md                   # Single-file <= 650-token workspace AICE agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
@@ -508,7 +508,7 @@ aice/
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
 │   ├── tools/                  # Unified read (numbered native, dynamic water-filling & AST search) & resilient splice
 │   ├── typechecker/            # Static typechecker & autonomous self-repair engine
-│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.42)
+│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.43)
 └── tests/
     ├── unit/                   # Unit test suites
     └── integration/            # Multi-file roundtrip & operator pipeline integration suites
@@ -529,7 +529,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.42},
+  version = {0.9.43},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}

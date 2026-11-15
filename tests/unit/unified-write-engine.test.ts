@@ -11,6 +11,7 @@ import {
   unmaskLexicalTokens,
 } from "../../src/tools/preprocessor.js";
 import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../../src/tools/splice.js";
+import { AiceMcpServer } from "../../src/mcp/server.js";
 
 const CLI_TS = path.resolve(process.cwd(), "bin/aice.ts");
 const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
@@ -1256,6 +1257,101 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
       expect(case4Content).toContain("let a = 1;");
       expect(case4Content).toContain("let b = 2;");
       expect(case4Content).not.toContain("let c = 3;");
+    });
+  });
+
+  describe("8. AICE v0.9.43: Null-Guard, JSON-Stringified Array Support & Self-Healing MCP aice_splice", () => {
+    it("throws actionable self-healing flat code guidance when called with [null] array glitch (and does not crash with TypeError)", async () => {
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+
+      // a1) filePath with edits: [null, null, null, null, null]
+      await expect(
+        server.handleRequest(1, "tools/call", {
+          name: "aice_splice",
+          arguments: {
+            filePath: "src/game.aipl",
+            edits: [null, null, null, null, null],
+          },
+        }),
+      ).rejects.toThrow(
+        /Invalid null or non-object item in aice_splice 'edits'\/'files' array[\s\S]*=== src\/game\.aipl:L15-L21 ===[\s\S]*=== src\/game\.aipl:MySymbol ===/,
+      );
+
+      // a2) edits: [null] without filePath
+      await expect(
+        server.handleRequest(2, "tools/call", {
+          name: "aice_splice",
+          arguments: {
+            edits: [null],
+          },
+        }),
+      ).rejects.toThrow(
+        /Invalid null or non-object item in aice_splice 'edits'\/'files' array[\s\S]*=== src\/app\.ts:L15-L21 ===/,
+      );
+
+      // a3) files: [null]
+      await expect(
+        server.handleRequest(3, "tools/call", {
+          name: "aice_splice",
+          arguments: {
+            files: [null],
+          },
+        }),
+      ).rejects.toThrow(/Invalid null or non-object item in aice_splice 'edits'\/'files' array/);
+
+      // a4) files with entry.edits: [null]
+      await expect(
+        server.handleRequest(4, "tools/call", {
+          name: "aice_splice",
+          arguments: {
+            files: [{ filePath: "src/game.aipl", edits: [null] }],
+          },
+        }),
+      ).rejects.toThrow(
+        /Invalid null or non-object item in aice_splice 'edits'\/'files' array[\s\S]*=== src\/game\.aipl:L15-L21 ===/,
+      );
+    });
+
+    it("applies edits cleanly when edits argument is passed as a JSON-stringified array", async () => {
+      const server = new AiceMcpServer({ workspaceRoot: tmpDir });
+      const testFile = path.join(tmpDir, "src", "json_edits.ts");
+      fs.mkdirSync(path.dirname(testFile), { recursive: true });
+      fs.writeFileSync(
+        testFile,
+        "export function greet(): string {\n  return 'hello';\n}\n",
+        "utf-8",
+      );
+
+      const jsonEdits = JSON.stringify([
+        {
+          symbol: "greet",
+          code: "export function greet(): string {\n  return 'world';\n}",
+        },
+      ]);
+
+      const res = await server.executeToolCall("aice_splice", {
+        filePath: "src/json_edits.ts",
+        edits: jsonEdits,
+      });
+
+      expect(res.isError).toBeFalsy();
+      expect(fs.readFileSync(testFile, "utf-8")).toContain("return 'world';");
+    });
+
+    it("produces an actionable error containing both 'Empty or malformed splice block' and '--delete' on empty splice block", async () => {
+      expect(() =>
+        parseMultiBlockSpliceStream("=== src/world/spatial_math.aipl:L48-L51 ===\n"),
+      ).toThrowError(/Empty or malformed splice block/);
+
+      try {
+        parseMultiBlockSpliceStream("=== src/world/spatial_math.aipl:L48-L51 ===\n");
+      } catch (err: unknown) {
+        expect(err instanceof Error).toBe(true);
+        const msg = (err as Error).message;
+        expect(msg).toContain("Empty or malformed splice block");
+        expect(msg).toContain("--delete");
+        expect(msg).toContain("=== src/world/spatial_math.aipl:L48-L51 --delete ===");
+      }
     });
   });
 });

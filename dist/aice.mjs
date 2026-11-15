@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.42";
+    AICE_VERSION = "0.9.43";
     VERSION = AICE_VERSION;
   }
 });
@@ -82,8 +82,8 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 - Fallback: Crash/blocker -> \`aice disable\` -> native tools -> \`aice enable\`.
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - Ban: No shell writes (\`python3 with open\`, \`cat << 'EOF' >\`, \`echo >\`); NEVER run \`sed -n\` or grep/awk/head/tail/cat/ls/find on supported files.
-- Read: Prefer MCP \`aice_read\` (\`<=28KB\` / \`~550L\`, 3x CLI \u2014 load MCP schema once if lazy; \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`) to avoid multi-turn CLI pagination. On CLI (\`<=9KB\` / \`~145L\` total/turn), batch only small \`:sym\`/\`:L\` slices and read \`>120L\` files solo (so water-filling won't outline-downgrade them). 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\`.
-- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend (inclusive)\`, \`<<< === >>>\`, \`:eof\`, \`:imports\`.
+- Read: Prefer MCP \`aice_read\` (\`<=28KB\` / \`~550L\`; \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`). On CLI (\`<=9KB\` / \`~145L\` total/turn), batch small \`:sym\`/\`:L\` slices and read \`>120L\` files solo. 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\`.
+- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`; pass flat \`code\` \`=== <file>:<sym> ===\` blocks, NOT \`edits\` object arrays). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend (inclusive)\` (\`--delete\` to remove), \`<<< === >>>\`, \`:eof\`, \`:imports\`.
 ### 3. Subagent Propagation
 - Coding subagents/\`swarm add\` briefs MUST state: \`"Use AICE (aice read / aice splice) for all file exploration and edits."\`
 ${AICE_DIRECTIVE_END}`;
@@ -254353,7 +254353,9 @@ Valid heredoc / stream syntax:
      >>>
   3) Line-range replacement:
      === ${filePath}:L10-L12 ===
-     <replacement lines>`
+     <replacement lines>
+  4) Delete symbol or line range:
+     === ${headerDesc} --delete ===`
   );
 }
 function resolveSingleNativeEditAgainstSource(nativeSource, rawEditOptions, filePath, targetLang, idioms, forceLosslessPreprocess) {
@@ -303874,7 +303876,9 @@ __export(server_exports, {
   AICE_MCP_TOOLS: () => AICE_MCP_TOOLS,
   AICE_VERSION: () => AICE_VERSION2,
   AICE_WRITE_TOOL: () => AICE_WRITE_TOOL,
-  AiceMcpServer: () => AiceMcpServer
+  AiceMcpServer: () => AiceMcpServer,
+  buildNullSpliceArrayItemError: () => buildNullSpliceArrayItemError,
+  parseJsonArrayIfString: () => parseJsonArrayIfString
 });
 import * as fs22 from "node:fs";
 import * as os7 from "node:os";
@@ -303893,6 +303897,23 @@ function loadPackageVersion() {
   } catch {
   }
   return AICE_VERSION;
+}
+function buildNullSpliceArrayItemError(targetFileHint) {
+  const exampleFile = targetFileHint?.trim() || "src/app.ts";
+  return new Error(
+    `Invalid null or non-object item in aice_splice 'edits'/'files' array (host call_mcp_tool nested-object serialization glitch). Do NOT retry nested 'edits: [...]' or 'files: [...]' object arrays \u2014 pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead (e.g. { "filePath": "${exampleFile}", "code": "=== ${exampleFile}:L15-L21 ===\\n...\\n=== ${exampleFile}:MySymbol ===\\n..." }).`
+  );
+}
+function parseJsonArrayIfString(val, argName) {
+  if (typeof val === "string" && val.trim().startsWith("[")) {
+    try {
+      return JSON.parse(val);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Invalid JSON in aice_splice '${argName}' argument: ${msg}`);
+    }
+  }
+  return val;
 }
 var AICE_VERSION2, AICE_MCP_TOOLS, AICE_WRITE_TOOL, AiceMcpServer;
 var init_server = __esm({
@@ -304012,7 +304033,7 @@ var init_server = __esm({
       },
       {
         name: "aice_splice",
-        description: "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+        description: "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
         inputSchema: {
           type: "object",
           properties: {
@@ -304046,7 +304067,7 @@ var init_server = __esm({
             },
             code: {
               type: "string",
-              description: "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbol> ===' / '=== <filePath> ===' headers. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc."
+              description: "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbolOrRange> ===' / '=== <filePath> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions). RECOMMENDED: For multi-symbol or multi-file batches, pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead of nested object arrays (avoiding host array serialization glitches). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc."
             },
             content: {
               type: "string",
@@ -304103,7 +304124,7 @@ var init_server = __esm({
             },
             edits: {
               type: "array",
-              description: "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top)",
+              description: "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top). RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead \u2014 flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
               items: {
                 type: "object",
                 properties: {
@@ -304121,7 +304142,7 @@ var init_server = __esm({
             },
             batch: {
               type: "array",
-              description: "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+              description: "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead \u2014 flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
               items: {
                 type: "object",
                 properties: {
@@ -304143,7 +304164,7 @@ var init_server = __esm({
             },
             files: {
               type: "array",
-              description: "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations",
+              description: "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead \u2014 flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
               items: {
                 type: "object",
                 properties: {
@@ -304170,7 +304191,7 @@ var init_server = __esm({
     AICE_WRITE_TOOL = {
       ...AICE_MCP_TOOLS.find((t) => t.name === "aice_splice"),
       name: "aice_write",
-      description: "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc."
+      description: "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc."
     };
     AiceMcpServer = class {
       inStream;
@@ -304538,13 +304559,15 @@ ${json}`;
             const filesOnlyFlag = typeof args.filesOnly === "boolean" ? args.filesOnly : void 0;
             const contextLinesVal = typeof args.contextLines === "number" && Number.isFinite(args.contextLines) ? Math.max(0, Math.floor(args.contextLines)) : typeof args.context === "number" && Number.isFinite(args.context) ? Math.max(0, Math.floor(args.context)) : void 0;
             const dslFlag = typeof args.dsl === "boolean" ? args.dsl : void 0;
-            const candidateArray = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
+            const rawCandidate = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
+            const candidateArray = parseJsonArrayIfString(rawCandidate, "targets");
             const rawPathCandidate = args.path ?? args.filePath ?? args.fileOrDir ?? args.file ?? args.dir ?? args.target ?? args.inputPath ?? args.source;
             const safeTargets = [];
             const checkedProjectRoots = /* @__PURE__ */ new Set();
             if (Array.isArray(candidateArray) && candidateArray.length > 0) {
               for (const entry of candidateArray) {
-                if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+                if (!entry) continue;
+                if (typeof entry === "object" && !Array.isArray(entry)) {
                   const obj = entry;
                   const rawEntryStr = String(obj.path ?? obj.filePath ?? obj.target ?? ".").trim() || ".";
                   const parsed = parseReadTarget(rawEntryStr, this.workspaceRoot);
@@ -304948,7 +304971,13 @@ ${r.text}` : r.text
             const insertAfter = typeof args.insertAfter === "string" ? args.insertAfter : typeof args.insert_after === "string" ? args.insert_after : void 0;
             const insertBefore = typeof args.insertBefore === "string" ? args.insertBefore : typeof args.insert_before === "string" ? args.insert_before : void 0;
             const parsedStream = newAiceCode && !symbolSelector ? parseMultiBlockSpliceStream(newAiceCode, rawTargetFile || void 0) : null;
-            const rawBatchCollection = Array.isArray(args.files) ? args.files : Array.isArray(args.batch) ? args.batch : typeof args.batch === "string" && args.batch.trim().startsWith("[") ? JSON.parse(args.batch) : void 0;
+            const rawBatchInput = parseJsonArrayIfString(args.files, "files") ?? parseJsonArrayIfString(args.batch, "batch");
+            const rawBatchCollection = Array.isArray(rawBatchInput) ? rawBatchInput : void 0;
+            if (Array.isArray(rawBatchCollection) && rawBatchCollection.some(
+              (entry) => !entry || typeof entry !== "object" || Array.isArray(entry)
+            )) {
+              throw buildNullSpliceArrayItemError(rawTargetFile);
+            }
             const filesBatchFromArgs = Array.isArray(rawBatchCollection) && rawBatchCollection.length > 0 ? rawBatchCollection.map((entry) => {
               const rawEntryFp = String(entry.filePath ?? entry.file ?? entry.path ?? "");
               if (!rawEntryFp) {
@@ -304956,7 +304985,11 @@ ${r.text}` : r.text
               }
               const splitEntry = splitInlineFileSelector(rawEntryFp, this.workspaceRoot);
               const entryFp = splitEntry.filePath;
-              const entryEdits = Array.isArray(entry.edits) ? entry.edits.map((ed) => ({
+              const rawEntryEdits = parseJsonArrayIfString(entry.edits, "edits");
+              if (Array.isArray(rawEntryEdits) && rawEntryEdits.some((ed) => !ed || typeof ed !== "object" || Array.isArray(ed))) {
+                throw buildNullSpliceArrayItemError(entryFp || rawTargetFile);
+              }
+              const entryEdits = Array.isArray(rawEntryEdits) ? rawEntryEdits.map((ed) => ({
                 symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
                 code: typeof ed.code === "string" ? ed.code : typeof ed.content === "string" ? ed.content : void 0,
                 body: typeof ed.body === "string" ? ed.body : void 0,
@@ -304982,11 +305015,17 @@ ${r.text}` : r.text
                 ...typeof entry.create === "boolean" ? { create: entry.create } : !itemSymbol && !entryEdits && itemCode !== void 0 ? { create: true } : {}
               };
             }) : void 0;
-            const multiFileEditsFromArgs = !rawTargetFile && Array.isArray(args.edits) && args.edits.length > 0 && args.edits.every(
+            const rawEditsCollection = parseJsonArrayIfString(args.edits, "edits");
+            if (Array.isArray(rawEditsCollection) && rawEditsCollection.some(
+              (ed) => !ed || typeof ed !== "object" || Array.isArray(ed)
+            )) {
+              throw buildNullSpliceArrayItemError(rawTargetFile);
+            }
+            const multiFileEditsFromArgs = !rawTargetFile && Array.isArray(rawEditsCollection) && rawEditsCollection.length > 0 && rawEditsCollection.every(
               (e) => e && typeof e === "object" && Boolean(
                 e.filePath || e.file || e.path
               )
-            ) ? args.edits.map((e) => ({
+            ) ? rawEditsCollection.map((e) => ({
               filePath: String(e.filePath ?? e.file ?? e.path ?? ""),
               symbol: String(e.symbol ?? e.symbolSelector ?? ""),
               code: typeof e.code === "string" ? e.code : void 0,
@@ -305076,7 +305115,7 @@ ${respLine}` : respLine
               config,
               typeof args.idioms === "boolean" ? args.idioms : void 0
             );
-            const batchEdits = parsedStream?.singleFileEdits && parsedStream.singleFileEdits.length > 0 ? parsedStream.singleFileEdits : Array.isArray(args.edits) ? args.edits.map((ed) => ({
+            const batchEdits = parsedStream?.singleFileEdits && parsedStream.singleFileEdits.length > 0 ? parsedStream.singleFileEdits : Array.isArray(rawEditsCollection) ? rawEditsCollection.map((ed) => ({
               symbol: String(ed.symbol ?? ed.symbolSelector ?? ""),
               code: typeof ed.code === "string" ? ed.code : void 0,
               body: typeof ed.body === "string" ? ed.body : void 0,
