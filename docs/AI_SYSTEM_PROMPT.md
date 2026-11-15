@@ -248,8 +248,8 @@ When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` w
 
 ````markdown
 <!-- AICE:START -->
-<!-- AICE:START v0.9.36 -->
-## AICE (v0.9.36) — 2-Tool AST Cheat-Card
+<!-- AICE:START v0.9.37 -->
+## AICE (v0.9.37) — 2-Tool AST Cheat-Card
 **MANDATORY OVERRIDE**: When active (Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), use ONLY `aice read` / `aice search` / `aice find` (MCP `aice_read`) and `aice splice` / `aice write` (MCP `aice_splice`) instead of native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when `aice.config.json` has `"enabled": true`; bypass AICE completely when missing or `"enabled": false`. `$idioms` default OFF (`"idiomsEnabled": false`; opt in via `--idioms`).
