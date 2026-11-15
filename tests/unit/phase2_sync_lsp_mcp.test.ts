@@ -133,28 +133,45 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       expect(dirReadRes.isError).toBeFalsy();
       expect(dirReadRes.content[0].text).toContain("ScoreService");
 
-      // 5. MCP aice_read >250-line bare file auto-outline + full: true override
+      // 5. MCP aice_read dynamic 28 KB budget (1-turn inline <=28 KB + >28 KB auto-outline + full: true override)
       const bigLines = Array.from(
         { length: 265 },
         (_, i) => `export function fn_${i}(): number { return ${i}; }`,
       ).join("\n");
       fs.writeFileSync(path.join(tmpDir, "big_module.ts"), bigLines, "utf-8");
 
-      const bigAutoRes = (await server.handleRequest(14, "tools/call", {
+      const bigInlineRes = (await server.handleRequest(14, "tools/call", {
         name: "aice_read",
         arguments: { path: "big_module.ts" },
       })) as any;
-      expect(bigAutoRes.isError).toBeFalsy();
-      expect(bigAutoRes.content[0].text).toContain("Auto-outlined");
-      expect(bigAutoRes.content[0].text).not.toContain("= 260");
+      expect(bigInlineRes.isError).toBeFalsy();
+      expect(bigInlineRes.content[0].text).not.toContain("Auto-outlined");
+      expect(bigInlineRes.content[0].text).toContain(
+        "261│ export function fn_260(): number { return 260; }",
+      );
 
-      const bigFullRes = (await server.handleRequest(15, "tools/call", {
+      const hugeLines = Array.from(
+        { length: 420 },
+        (_, i) =>
+          `export function hugeFn_${i}(payloadLabel: string): string { return payloadLabel + "_${i}"; }`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "huge_module.ts"), hugeLines, "utf-8");
+
+      const hugeAutoRes = (await server.handleRequest(141, "tools/call", {
         name: "aice_read",
-        arguments: { path: "big_module.ts", full: true },
+        arguments: { path: "huge_module.ts" },
       })) as any;
-      expect(bigFullRes.isError).toBeFalsy();
-      expect(bigFullRes.content[0].text).not.toContain("Auto-outlined");
-      expect(bigFullRes.content[0].text).toContain("fn_260() -> int = 260");
+      expect(hugeAutoRes.isError).toBeFalsy();
+      expect(hugeAutoRes.content[0].text).toContain("Auto-outlined");
+      expect(hugeAutoRes.content[0].text).not.toContain('"_415"');
+
+      const hugeFullRes = (await server.handleRequest(15, "tools/call", {
+        name: "aice_read",
+        arguments: { path: "huge_module.ts", full: true },
+      })) as any;
+      expect(hugeFullRes.isError).toBeFalsy();
+      expect(hugeFullRes.content[0].text).not.toContain("Auto-outlined");
+      expect(hugeFullRes.content[0].text).toContain("416│ export function hugeFn_415");
 
       // 6. MCP aice_splice 'batch' array greenfield create + surgical splice
       const batchRes = (await server.handleRequest(16, "tools/call", {

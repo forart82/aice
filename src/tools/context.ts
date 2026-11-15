@@ -9,7 +9,11 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { extractFastTsImports, isTsLikeFilePath } from "../compat/typescript.js";
+import {
+  extractFastTsImports,
+  getCachedTsSymbolIndex,
+  isTsLikeFilePath,
+} from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
@@ -131,6 +135,27 @@ export interface ContextOptions {
    * Optional shared workspace scan cache for multi-file context calls.
    */
   workspaceScanCache?: WorkspaceCallerScanCache;
+
+  /**
+   * Emit exact 1-based disk-numbered native source lines (`<lineNo>│ <rawDiskLine>`) on both
+   * `file:symbol` (all lengths) and inline bare files (default: false on direct `generateContext()`).
+   */
+  rawNative?: boolean;
+
+  /**
+   * Opt-in AICE shorthand decompilation (`--dsl`); when true, sets `rawNative = false`.
+   */
+  dsl?: boolean;
+
+  /**
+   * Explicit context radius override (`-C` / `--context <lines>`) for pattern searches.
+   */
+  contextLines?: number;
+
+  /**
+   * Optional global stdout byte budget for broad workspace/directory pattern searches.
+   */
+  maxByteBudget?: number;
 }
 
 export interface DependencyContract {
@@ -2032,7 +2057,11 @@ export async function generateWorkspaceContext(
   const regexMentionsIdiom =
     isPureRegexSearch && requestedSelectors.some((s) => /\$[A-Za-z_]/.test(s));
 
-  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const effectiveWsRawNative = options.dsl === true ? false : Boolean(options.rawNative);
+  const idiomsActive =
+    effectiveWsRawNative && options.idioms !== true
+      ? false
+      : isProjectIdiomsEnabled(config, options.idioms);
   let activeIdioms =
     idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
       ? config.idioms
@@ -2106,6 +2135,8 @@ export async function generateWorkspaceContext(
 
   const scoredFileSlices: Array<{
     relFile: string;
+    absFile: string;
+    rawFileContent: string;
     headerTag: string;
     sliceBody: string;
     score: number;
@@ -2132,11 +2163,16 @@ export async function generateWorkspaceContext(
         const fileNameMatches = doesFileStemMatchQuery(f, queryKw);
 
         for (const rawSel of requestedSelectors) {
-          const detailed = extractPatternMatchesDetailed(rawFileContent, rawSel.trim(), 2, {
-            filePath: f,
-            projectRoot: workspaceRootForRank,
-            isExplicitTestSearch,
-          });
+          const detailed = extractPatternMatchesDetailed(
+            rawFileContent,
+            rawSel.trim(),
+            options.contextLines,
+            {
+              filePath: f,
+              projectRoot: workspaceRootForRank,
+              isExplicitTestSearch,
+            },
+          );
           if (detailed) {
             matchedSlices.push(detailed.formattedText.trim());
             if (detailed.maxScore > fileMaxScore) {
@@ -2146,19 +2182,33 @@ export async function generateWorkspaceContext(
         }
         if (matchedSlices.length === 0) {
           if (fileNameMatches) {
-            const rawLines = rawFileContent.split(/\r?\n/);
-            const previewLines = rawLines
-              .slice(0, 5)
-              .map((l, idx) => `L${idx + 1}: ${l}`)
+            const cleanLines = (
+              rawFileContent.length > 0 ? rawFileContent.replace(/\r?\n$/, "") : ""
+            ).split(/\r?\n/);
+            const previewCount = Math.min(5, cleanLines.length);
+            const previewLines = cleanLines
+              .slice(0, previewCount)
+              .map((l, idx) => `${idx + 1}│ ${l}`)
               .join("\n");
             matchedSlices.push(
-              `// file name match: ${path.basename(f)} # [L1-L${Math.min(5, rawLines.length)}]\n${previewLines}`,
+              `// file name match: ${path.basename(f)} # [L1-L${Math.max(1, previewCount)}]\n${previewLines}`,
             );
             fileMaxScore = isMockOrTest ? 25 : 1000;
           } else {
             continue;
           }
         }
+        const annotateMatchHeader = (sl: string): string =>
+          sl.replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
+            const hitRefs = bracketBody
+              .split(",")
+              .map((s) => s.trim().replace(/^L/i, ""))
+              .filter(Boolean)
+              .map((lineNum) => `(${relFile}:${lineNum})`);
+            return hitRefs.length > 0
+              ? `// match at [${bracketBody}] ${hitRefs.join(" ")}`
+              : `// match at [${bracketBody}]`;
+          });
         const hitTags = Array.from(
           new Set(
             matchedSlices
@@ -2167,19 +2217,14 @@ export async function generateWorkspaceContext(
               .filter(Boolean),
           ),
         );
-        const annotatedSlices = matchedSlices.map((sl) =>
-          sl.replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
-            const firstHit = bracketBody.split(",")[0]?.trim().replace(/^L/i, "");
-            return firstHit
-              ? `// match at [${bracketBody}] (${relFile}:${firstHit})`
-              : `// match at [${bracketBody}]`;
-          }),
-        );
+        const annotatedSlices = matchedSlices.map(annotateMatchHeader);
         const sliceBody = annotatedSlices.filter(Boolean).join("\n\n");
         const headerTag = hitTags.length > 0 ? ` [${hitTags.join(", ")}]` : "";
 
         scoredFileSlices.push({
           relFile,
+          absFile: f,
+          rawFileContent,
           headerTag,
           sliceBody,
           score: fileMaxScore,
@@ -2221,7 +2266,10 @@ export async function generateWorkspaceContext(
       }
 
       let fileAice = rawFileContent;
-      if (!f.endsWith(".aice")) {
+      if (
+        !f.endsWith(".aice") &&
+        !(effectiveWsRawNative && !idiomsActive && !requestedSelectors.includes("*"))
+      ) {
         const detected = detectTargetFromPathOrContent(f, rawFileContent);
         if (detected !== "passthrough") {
           try {
@@ -2328,8 +2376,11 @@ export async function generateWorkspaceContext(
               const rawExtracted = extractSymbolFromAiceSource(fileAice, symSel, f, undefined, {
                 numberLines: true,
                 clampOutOfBounds: true,
+                rawNative: effectiveWsRawNative,
+                contextLines: options.contextLines,
               });
               const isRawOrMatch =
+                effectiveWsRawNative ||
                 rawExtracted.startsWith("// match at [") ||
                 f.endsWith(".md") ||
                 f.endsWith(".markdown") ||
@@ -2453,14 +2504,80 @@ export async function generateWorkspaceContext(
 
   if (isPureRegexSearch && scoredFileSlices.length > 0) {
     scoredFileSlices.sort((a, b) => b.score - a.score || a.relFile.localeCompare(b.relFile));
-    for (const item of scoredFileSlices) {
-      if (!hasExplicitWsEnvelopeOptIn) {
-        symbolSlices.push(`// === ${item.relFile} ===\n${item.sliceBody}`);
-      } else {
-        symbolSlices.push(
-          `### ${item.relFile}${item.headerTag}\n\`\`\`aice\n${item.sliceBody}\n\`\`\``,
-        );
+    const searchByteBudget = options.maxByteBudget;
+    const softNarrowThreshold =
+      searchByteBudget !== undefined ? Math.floor(searchByteBudget * 0.65) : undefined;
+    const hardSliceCap =
+      searchByteBudget !== undefined ? Math.max(1024, searchByteBudget - 512) : undefined;
+    let runningSearchBytes = 0;
+    const omittedSearchFiles: string[] = [];
+
+    const buildFormattedEntry = (relFile: string, headerTag: string, body: string): string =>
+      !hasExplicitWsEnvelopeOptIn
+        ? `// === ${relFile} ===\n${body}`
+        : `### ${relFile}${headerTag}\n\`\`\`aice\n${body}\n\`\`\``;
+
+    for (let idx = 0; idx < scoredFileSlices.length; idx++) {
+      const item = scoredFileSlices[idx]!;
+      let chosenBody = item.sliceBody;
+      if (
+        softNarrowThreshold !== undefined &&
+        options.contextLines === undefined &&
+        idx > 0 &&
+        (runningSearchBytes >= softNarrowThreshold || item.score < 200)
+      ) {
+        const narrowedParts: string[] = [];
+        for (const rawSel of requestedSelectors) {
+          const narrowDet = extractPatternMatchesDetailed(item.rawFileContent, rawSel.trim(), 2, {
+            filePath: item.absFile,
+            projectRoot: workspaceRootForRank,
+            isExplicitTestSearch,
+          });
+          if (narrowDet) {
+            const annotated = narrowDet.formattedText
+              .trim()
+              .replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
+                const hitRefs = bracketBody
+                  .split(",")
+                  .map((s) => s.trim().replace(/^L/i, ""))
+                  .filter(Boolean)
+                  .map((lineNum) => `${item.relFile}:${lineNum}`);
+                return hitRefs.length > 0
+                  ? `// match at [${bracketBody}] (${hitRefs.join(", ")})`
+                  : `// match at [${bracketBody}]`;
+              });
+            if (annotated) narrowedParts.push(annotated);
+          }
+        }
+        if (narrowedParts.length > 0) {
+          chosenBody = narrowedParts.join("\n\n");
+        }
       }
+
+      const formattedEntry = buildFormattedEntry(item.relFile, item.headerTag, chosenBody);
+      const entryBytes =
+        Buffer.byteLength(formattedEntry, "utf-8") + (symbolSlices.length > 0 ? 2 : 0);
+      if (
+        hardSliceCap !== undefined &&
+        symbolSlices.length > 0 &&
+        runningSearchBytes + entryBytes > hardSliceCap
+      ) {
+        omittedSearchFiles.push(...scoredFileSlices.slice(idx).map((s) => s.relFile));
+        break;
+      }
+      symbolSlices.push(formattedEntry);
+      runningSearchBytes += entryBytes;
+    }
+
+    if (omittedSearchFiles.length > 0) {
+      const primarySel = requestedSelectors[0]?.trim() ?? "/pattern/";
+      const nextHints = omittedSearchFiles
+        .slice(0, 3)
+        .map((rf) => `aice read ${rf}:${primarySel}`)
+        .join(" | ");
+      symbolSlices.push(
+        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit 28 KB stdout budget)\n// Next slices: ${nextHints} (or pass --full)`,
+      );
     }
   }
 
@@ -3026,10 +3143,108 @@ export interface PatternMatchResult {
   maxScore: number;
 }
 
+function collectAstDeclarationSpansForSearch(
+  rawSource: string,
+  filePath?: string,
+): Array<{ startLine: number; endLine: number }> {
+  const spans: Array<{ startLine: number; endLine: number }> = [];
+  if (!rawSource.trim()) return spans;
+
+  if (!filePath || isTsLikeFilePath(filePath)) {
+    try {
+      const idx = getCachedTsSymbolIndex(rawSource, filePath ?? "search.ts");
+      for (const top of idx.orderedTopLevel) {
+        spans.push({ startLine: top.startLine, endLine: top.endLine });
+      }
+      for (const memberList of idx.membersByQualifiedName.values()) {
+        for (const m of memberList) {
+          spans.push({ startLine: m.startLine, endLine: m.endLine });
+        }
+      }
+      for (const tb of idx.testBlocks) {
+        spans.push({ startLine: tb.startLine, endLine: tb.endLine });
+      }
+      return spans;
+    } catch {
+      // fall through
+    }
+  }
+
+  if (filePath && !/\.(?:jsonc?|ya?ml|cff|toml|txt)$/i.test(filePath)) {
+    try {
+      const oRes = withSuppressedTelemetry(() =>
+        generateOutline(rawSource, filePath, {
+          includeTypes: false,
+          skipTokenStats: true,
+          lineRanges: false,
+          depth: 2,
+          idioms: false,
+        }),
+      );
+      const visitSym = (syms: OutlineSymbol[]): void => {
+        for (const sym of syms) {
+          if (sym.kind !== "import") {
+            spans.push({
+              startLine: sym.line,
+              endLine: sym.endLine !== undefined ? Math.max(sym.line, sym.endLine) : sym.line,
+            });
+          }
+          if (sym.children && sym.children.length > 0) {
+            visitSym(sym.children);
+          }
+        }
+      };
+      visitSym(oRes.symbols);
+    } catch {
+      // ignore outline fallback errors
+    }
+  }
+
+  return spans;
+}
+
+function findEnclosingShortDeclarationSpan(
+  spans: Array<{ startLine: number; endLine: number }>,
+  lineNum: number,
+  maxDeclLines = 40,
+): { startLine: number; endLine: number } | undefined {
+  let bestMultiLine: { startLine: number; endLine: number } | undefined;
+  let smallestLen = Number.POSITIVE_INFINITY;
+  for (const sp of spans) {
+    if (sp.startLine <= lineNum && lineNum <= sp.endLine) {
+      const len = sp.endLine - sp.startLine + 1;
+      if (len < smallestLen) {
+        smallestLen = len;
+      }
+      if (len >= 2 && len <= maxDeclLines) {
+        if (!bestMultiLine || len < bestMultiLine.endLine - bestMultiLine.startLine + 1) {
+          bestMultiLine = sp;
+        }
+      }
+    }
+  }
+  if (bestMultiLine) {
+    // Only use bestMultiLine if no multi-line inner declaration > maxDeclLines strictly sits inside it
+    const hasInnerOversizedDecl = spans.some((sp) => {
+      const len = sp.endLine - sp.startLine + 1;
+      return (
+        len > maxDeclLines &&
+        sp.startLine <= lineNum &&
+        lineNum <= sp.endLine &&
+        len < bestMultiLine.endLine - bestMultiLine.startLine + 1
+      );
+    });
+    if (!hasInnerOversizedDecl) {
+      return bestMultiLine;
+    }
+  }
+  return undefined;
+}
+
 export function extractPatternMatchesDetailed(
   rawSource: string,
   rawQuery: string,
-  contextRadius = 2,
+  contextRadius?: number,
   rankingOpts?: PatternMatchRankingOptions,
 ): PatternMatchResult | undefined {
   const trimmed = rawQuery.trim();
@@ -3068,7 +3283,8 @@ export function extractPatternMatchesDetailed(
     queryKeyword = extractPrimaryQueryKeyword(trimmed);
   }
 
-  const lines = rawSource.split(/\r?\n/);
+  const normalizedSource = rawSource.length > 0 ? rawSource.replace(/\r?\n$/, "") : "";
+  const lines = normalizedSource.length > 0 ? normalizedSource.split(/\r?\n/) : [];
   const hitLines: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (matcher(lines[i]!)) {
@@ -3077,16 +3293,63 @@ export function extractPatternMatchesDetailed(
   }
   if (hitLines.length === 0) return undefined;
 
-  const windows: Array<{ start: number; end: number; hits: number[] }> = [];
+  const isMockOrTest =
+    Boolean(rankingOpts?.filePath) &&
+    !(rankingOpts?.isExplicitTestSearch ?? false) &&
+    isTestOrMockPath(rankingOpts!.filePath!, rankingOpts?.projectRoot);
+
+  let cachedAstSpans: Array<{ startLine: number; endLine: number }> | undefined;
+  const rawWindows: Array<{ start: number; end: number; hits: number[] }> = [];
+
   for (const lineNum of hitLines) {
-    const s = Math.max(1, lineNum - contextRadius);
-    const e = Math.min(lines.length, lineNum + contextRadius);
-    const last = windows[windows.length - 1];
-    if (last && s <= last.end + 1) {
-      last.end = Math.max(last.end, e);
-      last.hits.push(lineNum);
+    let s: number;
+    let e: number;
+    if (contextRadius !== undefined) {
+      const r = Math.max(0, Math.floor(contextRadius));
+      s = Math.max(1, lineNum - r);
+      e = Math.min(lines.length, lineNum + r);
     } else {
-      windows.push({ start: s, end: e, hits: [lineNum] });
+      const lineText = lines[lineNum - 1] ?? "";
+      const isCodeOrDeclHit =
+        (!isMockOrTest || Boolean(rankingOpts?.isExplicitTestSearch)) &&
+        !isCommentLine(lineText, rankingOpts?.filePath);
+      if (isCodeOrDeclHit) {
+        if (cachedAstSpans === undefined) {
+          cachedAstSpans = collectAstDeclarationSpansForSearch(
+            normalizedSource,
+            rankingOpts?.filePath,
+          );
+        }
+        const enclosing = findEnclosingShortDeclarationSpan(cachedAstSpans, lineNum, 40);
+        if (enclosing) {
+          s = Math.max(1, enclosing.startLine);
+          e = Math.min(lines.length, enclosing.endLine);
+        } else {
+          s = Math.max(1, lineNum - 10);
+          e = Math.min(lines.length, lineNum + 10);
+        }
+      } else {
+        s = Math.max(1, lineNum - 2);
+        e = Math.min(lines.length, lineNum + 2);
+      }
+    }
+    rawWindows.push({ start: s, end: e, hits: [lineNum] });
+  }
+
+  rawWindows.sort((a, b) => a.start - b.start || a.end - b.end);
+  const windows: Array<{ start: number; end: number; hits: number[] }> = [];
+  for (const rw of rawWindows) {
+    const last = windows[windows.length - 1];
+    if (last && rw.start <= last.end + 1) {
+      last.end = Math.max(last.end, rw.end);
+      for (const h of rw.hits) {
+        if (!last.hits.includes(h)) {
+          last.hits.push(h);
+        }
+      }
+      last.hits.sort((a, b) => a - b);
+    } else {
+      windows.push({ start: rw.start, end: rw.end, hits: [...rw.hits] });
     }
   }
 
@@ -3114,7 +3377,7 @@ export function extractPatternMatchesDetailed(
       const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
       const body = lines
         .slice(w.start - 1, w.end)
-        .map((text, idx) => `L${w.start + idx}: ${text}`)
+        .map((text, idx) => `${w.start + idx}│ ${text}`)
         .join("\n");
       return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]\n${body}`;
     })
@@ -3126,11 +3389,18 @@ export function extractPatternMatchesDetailed(
 function extractPatternMatchesFromSource(
   rawSource: string,
   rawQuery: string,
-  contextRadius = 2,
+  contextRadius?: number,
   rankingOpts?: PatternMatchRankingOptions,
 ): string | undefined {
   return extractPatternMatchesDetailed(rawSource, rawQuery, contextRadius, rankingOpts)
     ?.formattedText;
+}
+
+function formatDiskSourceWithLineNumbers(rawText: string, startLine = 1): string {
+  if (rawText.length === 0) return "";
+  const clean = rawText.replace(/\r?\n$/, "");
+  const lines = clean.split(/\r?\n/);
+  return lines.map((ln, idx) => `${startLine + idx}│ ${ln}`).join("\n");
 }
 
 function formatWithLineNumbers(text: string, startLine = 1): string {
@@ -3274,7 +3544,12 @@ export function extractSymbolFromAiceSource(
   symbolSelector: string,
   filePath: string,
   preParsedMod?: Module,
-  options?: { numberLines?: boolean; clampOutOfBounds?: boolean },
+  options?: {
+    numberLines?: boolean;
+    clampOutOfBounds?: boolean;
+    rawNative?: boolean;
+    contextLines?: number;
+  },
 ): string {
   let trimmedSel = symbolSelector.trim();
   const rawFileSource =
@@ -3284,10 +3559,21 @@ export function extractSymbolFromAiceSource(
 
   const finalizeExtracted = (text: string, startLine = 1): string => {
     const lineCount = text.split("\n").length;
-    if (lineCount > 25) {
+    if (options?.rawNative || lineCount > 25) {
       return formatWithLineNumbers(text, startLine);
     }
     return text;
+  };
+
+  const sliceExactDiskLines = (startLine: number, endLine: number): string => {
+    const cleanRaw = rawFileSource.length > 0 ? rawFileSource.replace(/\r?\n$/, "") : "";
+    const diskLines = cleanRaw.length > 0 ? cleanRaw.split(/\r?\n/) : [""];
+    const s = Math.max(1, Math.min(diskLines.length, startLine));
+    const e = Math.max(s, Math.min(diskLines.length, endLine));
+    return diskLines
+      .slice(s - 1, e)
+      .map((ln, idx) => `${s + idx}│ ${ln}`)
+      .join("\n");
   };
 
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
@@ -3333,10 +3619,15 @@ export function extractSymbolFromAiceSource(
       isExplicitTestSearch: true,
     };
     const matchOneRegex = (piece: string): string | undefined => {
-      const nativeHit = extractPatternMatchesFromSource(rawFileSource, piece, 2, rankOpts);
+      const nativeHit = extractPatternMatchesFromSource(
+        rawFileSource,
+        piece,
+        options?.contextLines,
+        rankOpts,
+      );
       const aiceHit =
         aiceSource !== rawFileSource && /\$[A-Za-z_]/.test(piece)
-          ? extractPatternMatchesFromSource(aiceSource, piece, 2, rankOpts)
+          ? extractPatternMatchesFromSource(aiceSource, piece, options?.contextLines, rankOpts)
           : undefined;
       if (nativeHit && aiceHit) {
         return `${nativeHit.trim()}\n\n${aiceHit.trim()}`;
@@ -3368,6 +3659,24 @@ export function extractSymbolFromAiceSource(
   const className = parts.length >= 2 ? parts[0].trim() : undefined;
   const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : trimmedSel;
   const normMember = normalizeIdentForMatch(memberName);
+
+  if (options?.rawNative && !filePath.endsWith(".aice")) {
+    const detected = detectTargetFromPathOrContent(filePath, rawFileSource);
+    if (detected !== "passthrough") {
+      const natSpan =
+        locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected, className) ??
+        (className ? locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected) : undefined);
+      if (natSpan && natSpan.declEnd > (natSpan.fullDeclStart ?? natSpan.declStart)) {
+        const fullStartOff = natSpan.fullDeclStart ?? natSpan.declStart;
+        const sLine = rawFileSource.slice(0, fullStartOff).split(/\r?\n/).length;
+        const endSlice = rawFileSource
+          .slice(0, Math.max(fullStartOff, natSpan.declEnd))
+          .replace(/\r?\n$/, "");
+        const eLine = Math.max(sLine, endSlice.split(/\r?\n/).length);
+        return sliceExactDiskLines(sLine, eLine);
+      }
+    }
+  }
 
   if (!filePath.endsWith(".aice")) {
     const targetLang = detectTargetFromPath(filePath);
@@ -3437,6 +3746,20 @@ export function extractSymbolFromAiceSource(
   }
 
   let mod: Module | undefined = preParsedMod;
+  if (!mod && !filePath.endsWith(".aice") && aiceSource === rawFileSource) {
+    const detected = detectTargetFromPathOrContent(filePath, rawFileSource);
+    if (detected !== "passthrough") {
+      try {
+        const decomp = withSuppressedTelemetry(() =>
+          decompile(rawFileSource, detected, { filePath }),
+        );
+        aiceSource = decomp.aice;
+        mod = decomp.ast;
+      } catch {
+        // fall through to parse / fallback
+      }
+    }
+  }
   if (!mod) {
     try {
       mod = parse(aiceSource, filePath);
@@ -3705,14 +4028,31 @@ export function extractSymbolFromAiceSource(
     if (natSpan?.startLine) {
       startLineForSym = natSpan.startLine;
     }
-    if (options?.numberLines && natSpan) {
+    if ((options?.rawNative || options?.numberLines) && natSpan) {
       const startOff = natSpan.fullDeclStart ?? natSpan.declStart;
       const rawSlice = rawFileSource.slice(startOff, natSpan.declEnd);
+      if (options?.rawNative && natSpan.declEnd > startOff) {
+        const sLine = rawFileSource.slice(0, startOff).split(/\r?\n/).length;
+        const endSlice = rawFileSource
+          .slice(0, Math.max(startOff, natSpan.declEnd))
+          .replace(/\r?\n$/, "");
+        const eLine = Math.max(sLine, endSlice.split(/\r?\n/).length);
+        return sliceExactDiskLines(sLine, eLine);
+      }
       if (rawSlice.split(/\r?\n/).length > 25) {
         const sLine = natSpan.startLine ?? rawFileSource.slice(0, startOff).split(/\r?\n/).length;
         return finalizeExtracted(rawSlice, sLine);
       }
     }
+  }
+  if (
+    options?.rawNative &&
+    matchedItems.length === 1 &&
+    matchedItems[0]?.span?.start?.line &&
+    matchedItems[0]?.span?.end?.line &&
+    matchedItems[0].span.end.line >= matchedItems[0].span.start.line
+  ) {
+    return sliceExactDiskLines(matchedItems[0].span.start.line, matchedItems[0].span.end.line);
   }
   return finalizeExtracted(AiceGenerator.generate(scopedMod), startLineForSym);
 }
@@ -3948,7 +4288,11 @@ export async function generateContext(
     splitSymbolSelectors(options.symbol!).length > 0 &&
     splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
 
-  const idiomsActive = isProjectIdiomsEnabled(config, options.idioms);
+  const effectiveRawNative = options.dsl === true ? false : Boolean(options.rawNative);
+  const idiomsActive =
+    effectiveRawNative && options.idioms !== true
+      ? false
+      : isProjectIdiomsEnabled(config, options.idioms);
   const regexMentionsIdiom = isPureRegexSymbol && /\$[A-Za-z_]/.test(options.symbol!);
   const isFastPathSelector =
     isPureLineRangeSymbol || (isPureRegexSymbol && !(idiomsActive && regexMentionsIdiom));
@@ -4082,7 +4426,18 @@ export async function generateContext(
   let targetContent = rawFileContent;
   let preParsedMod: Module | undefined;
   let decompileFailed = false;
-  if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector && !isLargeFileSymbolQuery) {
+  if (effectiveRawNative && !idiomsActive) {
+    if (!hasNonWildcardSymbol && !options.outlineTarget) {
+      if (!isPassthrough && nativeDiagnostics && !fullTargetPath.endsWith(".aice")) {
+        decompileFailed = true;
+        targetContent = buildFallbackNativeSlice(options.symbol);
+      } else {
+        targetContent = formatDiskSourceWithLineNumbers(rawFileContent, 1);
+      }
+    } else {
+      targetContent = rawFileContent;
+    }
+  } else if (!fullTargetPath.endsWith(".aice") && !isFastPathSelector && !isLargeFileSymbolQuery) {
     if (isPassthrough || (isZeroEnvelopeExt && !hasNonWildcardSymbol && !idiomsActive)) {
       if (!isPassthrough && nativeDiagnostics) {
         decompileFailed = true;
@@ -4135,41 +4490,67 @@ export async function generateContext(
 
   if (options.symbol && !decompileFailed) {
     if (options.symbol.trim() === "*") {
-      const allSyms = extractFileSymbolList(targetContent, fullTargetPath);
-      if (
-        (fullTargetPath.endsWith(".html") ||
-          fullTargetPath.endsWith(".json") ||
-          fullTargetPath.endsWith(".yaml")) &&
-        allSyms.length > 0
-      ) {
-        const slicedAll: string[] = [];
-        for (const sym of allSyms) {
-          try {
-            const s = unwrapSyntheticContainer(
-              extractSymbolFromAiceSource(targetContent, sym, fullTargetPath, preParsedMod)
-                .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
-                .trim(),
-              fullTargetPath,
-            );
-            if (s) slicedAll.push(s);
-          } catch {
-            // ignore
-          }
+      if (effectiveRawNative && !idiomsActive) {
+        let allSyms: string[] = [];
+        try {
+          const outRes = withSuppressedTelemetry(() =>
+            generateOutline(rawFileContent, fullTargetPath, {
+              includeTypes: true,
+              skipTokenStats: true,
+              lineRanges: false,
+              depth: 1,
+              idioms: false,
+            }),
+          );
+          allSyms = outRes.symbols.filter((s) => s.kind !== "import").map((s) => s.name);
+        } catch {
+          allSyms = [];
         }
-        if (slicedAll.length > 0) {
-          targetContent = [`// symbols: ${allSyms.join(", ")}`, ...slicedAll].join("\n\n");
-        }
-      } else {
-        const unwrapped = unwrapSyntheticContainer(
-          targetContent.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
-          fullTargetPath,
-        );
+        const numberedAll = formatDiskSourceWithLineNumbers(rawFileContent, 1);
         targetContent =
-          allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}\n\n${unwrapped}` : unwrapped;
+          allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}\n\n${numberedAll}` : numberedAll;
+      } else {
+        const allSyms = extractFileSymbolList(targetContent, fullTargetPath);
+        if (
+          (fullTargetPath.endsWith(".html") ||
+            fullTargetPath.endsWith(".json") ||
+            fullTargetPath.endsWith(".yaml")) &&
+          allSyms.length > 0
+        ) {
+          const slicedAll: string[] = [];
+          for (const sym of allSyms) {
+            try {
+              const s = unwrapSyntheticContainer(
+                extractSymbolFromAiceSource(targetContent, sym, fullTargetPath, preParsedMod)
+                  .replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "")
+                  .trim(),
+                fullTargetPath,
+              );
+              if (s) slicedAll.push(s);
+            } catch {
+              // ignore
+            }
+          }
+          if (slicedAll.length > 0) {
+            targetContent = [`// symbols: ${allSyms.join(", ")}`, ...slicedAll].join("\n\n");
+          }
+        } else {
+          const unwrapped = unwrapSyntheticContainer(
+            targetContent.replace(/^(?:(?:#|\/\/)[^\n]*|module\s+[^\n]+|\s+)+/g, "").trim(),
+            fullTargetPath,
+          );
+          targetContent =
+            allSyms.length > 0 ? `// symbols: ${allSyms.join(", ")}\n\n${unwrapped}` : unwrapped;
+        }
       }
     } else {
       const requestedSymbols = splitSymbolSelectors(options.symbol);
-      const extractOpts = { numberLines: true, clampOutOfBounds: true };
+      const extractOpts = {
+        numberLines: true,
+        clampOutOfBounds: true,
+        rawNative: effectiveRawNative,
+        contextLines: options.contextLines,
+      };
       if (requestedSymbols.length === 0) {
         if (!nativeDiagnostics) {
           throw new Error(`Symbol '${options.symbol}' not found in ${fullTargetPath}`);
@@ -4274,6 +4655,7 @@ export async function generateContext(
       // ignore collapse failures
     }
   } else if (
+    !effectiveRawNative &&
     !idiomsActive &&
     config.idioms &&
     Object.keys(config.idioms).length > 0 &&
@@ -4293,6 +4675,7 @@ export async function generateContext(
     : undefined;
   if (
     options.symbol &&
+    !effectiveRawNative &&
     !idiomsActive &&
     !isFastPathSelector &&
     !isPassthrough &&
@@ -4565,6 +4948,7 @@ export async function generateContext(
   // Target body selection
   let targetBody = options.outlineTarget ? targetOutline : targetContent;
   if (
+    !effectiveRawNative &&
     !isZeroEnvelopeTarget &&
     !options.outlineTarget &&
     !options.symbol &&

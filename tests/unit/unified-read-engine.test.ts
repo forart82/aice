@@ -26,12 +26,17 @@ import { readTelemetryEvents, type TelemetryEvent } from "../../src/telemetry/in
 import { estimateTokens } from "../../src/tokenomics/index.js";
 import {
   aiceRead,
+  computeDynamicReadBudget,
+  computeDynamicSliceSpan,
   computeLineRangeBaselineText,
   computeRegexBaselineText,
   countSourceLines,
   DEFAULT_READ_MAX_BYTES,
+  generateContext,
   normalizeReadTargets,
   parseReadTarget,
+  read,
+  splice,
   splitReadTargetString,
 } from "../../src/tools/index.js";
 
@@ -289,23 +294,61 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(resStr.stats.fileCount).toBe(3);
     });
 
-    it("auto-outlines bare files exceeding 250 lines with guidance header", async () => {
-      const res = await aiceRead("src/large.ts", { projectRoot: tmpDir });
+    it("renders <=28 KB bare files inline in 1 turn and auto-outlines bare files exceeding the 28 KB budget (or explicit autoOutlineLineThreshold)", async () => {
+      // 280-line (~8.5 KB) bare file fits comfortably in the 28 KB budget -> inline numbered native in 1 turn
+      const inlineLarge = await aiceRead("src/large.ts", { projectRoot: tmpDir });
+      expect(inlineLarge.mode).toBe("context");
+      expect(inlineLarge.text).not.toContain("// Auto-outlined");
+      expect(inlineLarge.text).toContain("1│ import { type MetricConfig }");
+      expect(inlineLarge.text).toContain("987654321");
 
-      expect(res.mode).toBe("auto-outline-file");
-      expect(res.targets[0]?.autoOutlined).toBe(true);
-      expect(res.targets[0]?.lineCount).toBe(280);
-      expect(res.text).toContain(
+      // Explicit autoOutlineLineThreshold override is still honored when passed
+      const explicitThresholdRes = await aiceRead("src/large.ts", {
+        projectRoot: tmpDir,
+        autoOutlineLineThreshold: 250,
+      });
+      expect(explicitThresholdRes.mode).toBe("auto-outline-file");
+      expect(explicitThresholdRes.targets[0]?.autoOutlined).toBe(true);
+      expect(explicitThresholdRes.targets[0]?.lineCount).toBe(280);
+      expect(explicitThresholdRes.text).toContain(
         "// Auto-outlined (280 lines). Pass src/large.ts:<symbol>, src/large.ts:L<start>-L<end>, or --full for full source.",
       );
-      expect(res.text).toContain("LargeService");
-      expect(res.text).toContain("computeMetric");
-      // Local implementation secret inside computeMetric is omitted in skeleton outline
+
+      // >28 KB bare file auto-outlines automatically with symbol-snapped next-slice hint
+      const over28kbLines = [
+        'import { type MetricConfig } from "./contracts.js";',
+        ...Array.from(
+          { length: 340 },
+          (_, i) =>
+            `export function computeOverBudget_${i}(cfg: MetricConfig): number { const secretOverBudget = 987654321; return cfg.weight + ${i} + (secretOverBudget - 987654321); }`,
+        ),
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "over28kb.ts"), `${over28kbLines}\n`, "utf-8");
+
+      const res = await aiceRead("src/over28kb.ts", { projectRoot: tmpDir });
+      expect(res.mode).toBe("auto-outline-file");
+      expect(res.targets[0]?.autoOutlined).toBe(true);
+      expect(res.targets[0]?.lineCount).toBe(341);
+      expect(res.text).toContain(
+        "// Auto-outlined (341 lines). Pass src/over28kb.ts:<symbol>, src/over28kb.ts:L<start>-L<end>, or --full for full source.",
+      );
+      expect(res.text).toMatch(/next slice: aice read src\/over28kb\.ts:L1-L\d+/);
+      expect(res.text).toContain("computeOverBudget_0");
       expect(res.text).not.toContain("987654321");
     });
 
-    it("bypasses >250-line auto-outline when options.full is true", async () => {
-      const res = await aiceRead("src/large.ts", { projectRoot: tmpDir, full: true });
+    it("bypasses >28 KB auto-outline when options.full is true", async () => {
+      const over28kbLines = [
+        'import { type MetricConfig } from "./contracts.js";',
+        ...Array.from(
+          { length: 340 },
+          (_, i) =>
+            `export function computeOverBudgetFull_${i}(cfg: MetricConfig): number { const secretMarker = 987654321; return cfg.weight + ${i} + (secretMarker - 987654321); }`,
+        ),
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "over28kb_full.ts"), `${over28kbLines}\n`, "utf-8");
+
+      const res = await aiceRead("src/over28kb_full.ts", { projectRoot: tmpDir, full: true });
 
       expect(res.mode).toBe("context");
       expect(res.text).not.toContain("// Auto-outlined");
@@ -314,11 +357,12 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(res.text).toContain("MetricConfig");
     });
 
-    it("returns zero-envelope fast path for <=150-line bare files and full context pack for 151..250-line bare files", async () => {
+    it("returns zero-envelope fast path for <=150-line bare files and 1-turn numbered context pack for >150-line files within 28 KB", async () => {
       const smallRes = await aiceRead("src/small.ts", { projectRoot: tmpDir });
       expect(smallRes.mode).toBe("context");
       expect(smallRes.text).not.toContain("// Auto-outlined");
       expect(smallRes.text).toContain("// === src/small.ts ===");
+      expect(smallRes.text).toContain("1│ import { DEFAULT_WEIGHT, type MetricConfig }");
       expect(smallRes.text).not.toContain("# AICE Context Pack");
       expect(smallRes.text).not.toContain("Downstream Callers");
       expect(smallRes.dependencies).toHaveLength(0);
@@ -334,7 +378,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(smallOptInRes.text).toContain("MetricConfig");
       expect(smallOptInRes.text).toContain("Downstream Callers");
 
-      // Exact 250-line boundary file (>150 and <=250 lines) ending with \n gets full context pack
+      // 250-line bare file within 28 KB gets full context pack with numbered native lines in 1 turn
       const boundaryPath = path.join(tmpDir, "src", "boundary250.ts");
       const lines250 = `${Array.from({ length: 250 }, (_, i) => `export const b${i} = ${i};`).join("\n")}\n`;
       fs.writeFileSync(boundaryPath, lines250, "utf-8");
@@ -343,7 +387,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(boundaryRes.mode).toBe("context");
       expect(boundaryRes.text).not.toContain("// Auto-outlined");
       expect(boundaryRes.text).toContain("# AICE Context Pack: src/boundary250.ts");
-      expect(boundaryRes.text).toContain("b249");
+      expect(boundaryRes.text).toContain("250│ export const b249 = 249;");
     });
 
     it("applies explicit outlinePath for :outline selector and options.outline: true without auto-outline banner", async () => {
@@ -495,7 +539,18 @@ describe("Unified Read Engine (`aiceRead`)", () => {
     });
 
     it("supports options.json and options.stats on both context and outline routes", async () => {
-      const outlineJson = await aiceRead("src/large.ts", {
+      const over28JsonLines = Array.from(
+        { length: 340 },
+        (_, i) =>
+          `export function jsonHeavyFn_${i}(label: string): string { return label + "_json_${i}"; }`,
+      ).join("\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "over28kb_json.ts"),
+        `${over28JsonLines}\n`,
+        "utf-8",
+      );
+
+      const outlineJson = await aiceRead("src/over28kb_json.ts", {
         projectRoot: tmpDir,
         json: true,
         stats: true,
@@ -507,7 +562,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         symbols: unknown[];
       };
       expect(parsedOutline.autoOutlined).toBe(true);
-      expect(parsedOutline.lineCount).toBe(280);
+      expect(parsedOutline.lineCount).toBe(340);
       expect(Array.isArray(parsedOutline.symbols)).toBe(true);
       expect(outlineJson.stats.originalTokens).toBeGreaterThan(0);
 
@@ -910,7 +965,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         DEFAULT_READ_MAX_BYTES,
       );
       expect(budgetedRes.output).toContain("auto-downgraded to :outline");
-      expect(budgetedRes.output).toMatch(/aice read src\/heavy\d\.ts:L1-L150/);
+      expect(budgetedRes.output).toMatch(/aice read src\/heavy\d\.ts:L1-L\d+/);
 
       // --full overrides the default 28 KB ceiling
       const fullRes = await aiceRead(heavyTargets, { projectRoot: tmpDir, full: true });
@@ -943,7 +998,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       const dirRes = await aiceRead("src/massive", { projectRoot: tmpDir });
       expect(dirRes.mode).toBe("auto-outline-dir");
       expect(Buffer.byteLength(dirRes.output, "utf-8")).toBeLessThanOrEqual(DEFAULT_READ_MAX_BYTES);
-      expect(dirRes.output).toMatch(/aice read src\/massive\/module_\d+\.ts:L1-L150/);
+      expect(dirRes.output).toMatch(/aice read src\/massive\/module_\d+\.ts:L1-L20/);
     });
   });
 
@@ -1043,6 +1098,402 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         expect(ev.aiceCl100k).toBeGreaterThan(0);
         expect(ev.savedCl100k).toBeLessThan(0);
       }
+    });
+  });
+
+  describe("v0.9.37 Step 1: Default 1-Based Disk-Numbered Native Output & --dsl Opt-In", () => {
+    it("emits exact 1-based disk-numbered native source lines on <=25L and >25L :symbol reads, inline bare files, and supports 1-turn splice", async () => {
+      // <=25-line :Class.method read emits exact disk line numbers + contracts + callers + siblings
+      const shortSymRes = await read("src/small.ts:SmallCalculator.compute", {
+        projectRoot: tmpDir,
+      });
+      expect(shortSymRes.mode).toBe("context");
+      expect(shortSymRes.text).toContain(
+        "4│   public compute(cfg: MetricConfig, raw: number): string {",
+      );
+      expect(shortSymRes.text).toContain('7│     return cfg.label + ":" + String(scaled);');
+      expect(shortSymRes.text).toContain("8│   }");
+      expect(shortSymRes.text).toContain("MetricConfig");
+      expect(shortSymRes.text).toContain("Downstream Callers");
+      expect(shortSymRes.text).toContain("// siblings in SmallCalculator:");
+
+      // >25-line :symbol read also emits exact 1-based disk-numbered native lines
+      const thirtyFiveBody = Array.from(
+        { length: 30 },
+        (_, idx) => `  const acc_${idx} = seed + ${idx};`,
+      );
+      const longSymFile = [
+        'import { type MetricConfig } from "./contracts.js";',
+        "",
+        "export function runThirtyFiveLinePipeline(cfg: MetricConfig, seed: number): number {",
+        ...thirtyFiveBody,
+        "  return cfg.weight + acc_29;",
+        "}",
+        "",
+      ].join("\n");
+      const longSymAbs = path.join(tmpDir, "src", "pipeline35.ts");
+      fs.writeFileSync(longSymAbs, longSymFile, "utf-8");
+
+      const longSymRes = await read("src/pipeline35.ts:runThirtyFiveLinePipeline", {
+        projectRoot: tmpDir,
+      });
+      expect(longSymRes.text).toContain(
+        "3│ export function runThirtyFiveLinePipeline(cfg: MetricConfig, seed: number): number {",
+      );
+      expect(longSymRes.text).toContain("34│   return cfg.weight + acc_29;");
+      expect(longSymRes.text).toContain("35│ }");
+
+      // Returned numbered native lines work directly in 1-turn aice splice (<<< === >>> and :Lstart-Lend) without a second read
+      await splice(`${longSymAbs}:runThirtyFiveLinePipeline`, {
+        code: [
+          "<<<",
+          "  return cfg.weight + acc_29;",
+          "===",
+          "  return cfg.weight * 2 + acc_29;",
+          ">>>",
+        ].join("\n"),
+        projectRoot: tmpDir,
+      });
+      expect(fs.readFileSync(longSymAbs, "utf-8")).toContain("return cfg.weight * 2 + acc_29;");
+
+      await splice(`${longSymAbs}:L34-L34`, {
+        code: "  return cfg.weight * 3 + acc_29;",
+        projectRoot: tmpDir,
+      });
+      expect(fs.readFileSync(longSymAbs, "utf-8")).toContain("return cfg.weight * 3 + acc_29;");
+
+      // Opt-in dsl: true (--dsl) emits AICE shorthand decompilation, and direct generateContext() keeps legacy default
+      const dslSymRes = await read("src/small.ts:SmallCalculator.compute", {
+        projectRoot: tmpDir,
+        dsl: true,
+      });
+      expect(dslSymRes.text).not.toContain("4│   public compute");
+      expect(dslSymRes.text).toContain("compute(");
+
+      const legacyDirectCtx = await generateContext(path.join(tmpDir, "src", "small.ts"), {
+        symbol: "SmallCalculator.compute",
+        projectRoot: tmpDir,
+      });
+      expect(legacyDirectCtx.targetContent).not.toContain("4│   public compute");
+      expect(legacyDirectCtx.targetContent).toContain("compute(");
+    });
+  });
+
+  describe("v0.9.37 Step 2: Coherent Dynamic Byte/Density & AST-Boundary Budgeting", () => {
+    it("settles a 450-line (~16 KB) bare file inline in 1 turn and water-fills multi-file targets smallest-first", async () => {
+      // 1. 450-line (~16 KB) bare file settles inline in 1 turn with numbered native lines
+      const lines450 = [
+        'import { type MetricConfig } from "./contracts.js";',
+        ...Array.from(
+          { length: 449 },
+          (_, i) => `export const m450_${i} = ${i}; // compact line ${i}`,
+        ),
+      ].join("\n");
+      const file450Abs = path.join(tmpDir, "src", "medium450.ts");
+      fs.writeFileSync(file450Abs, `${lines450}\n`, "utf-8");
+      const rawBytes450 = Buffer.byteLength(fs.readFileSync(file450Abs, "utf-8"), "utf-8");
+      expect(rawBytes450).toBeGreaterThan(14_000);
+      expect(rawBytes450).toBeLessThan(22_000);
+
+      const res450 = await read("src/medium450.ts", { projectRoot: tmpDir });
+      expect(res450.mode).toBe("context");
+      expect(res450.text).not.toContain("// Auto-outlined");
+      expect(res450.text).toContain("1│ import { type MetricConfig }");
+      expect(res450.text).toContain("450│ export const m450_448 = 448;");
+
+      // 2. Multi-file smallest-first water-filling: even when >28 KB target is listed FIRST,
+      // smaller bare targets still get full inline numbered native source!
+      const huge32kb = Array.from(
+        { length: 340 },
+        (_, i) =>
+          `export function hugeWaterfillFn_${i}(inputText: string): string { return inputText + "_segment_${i}"; }`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "huge_first.ts"), `${huge32kb}\n`, "utf-8");
+
+      const budgetCheck = computeDynamicReadBudget([
+        { id: "huge", rawSource: huge32kb },
+        { id: "small", rawSource: "export const s = 1;\n" },
+        { id: "contracts", rawSource: "export const c = 2;\n" },
+      ]);
+      expect(budgetCheck.inlineIds.has("small")).toBe(true);
+      expect(budgetCheck.inlineIds.has("contracts")).toBe(true);
+      expect(budgetCheck.autoOutlineIds.has("huge")).toBe(true);
+
+      const multiWaterfill = await read(["src/huge_first.ts", "src/small.ts", "src/contracts.ts"], {
+        projectRoot: tmpDir,
+      });
+      expect(multiWaterfill.mode).toBe("mixed");
+      expect(multiWaterfill.text).toContain("4│   public compute(cfg: MetricConfig");
+      expect(multiWaterfill.text).toContain("1│ export interface MetricConfig {");
+      expect(multiWaterfill.targets.find((t) => t.targetPath === "src/huge_first.ts")?.mode).toBe(
+        "auto-outline-file",
+      );
+      expect(multiWaterfill.targets.find((t) => t.targetPath === "src/small.ts")?.mode).toBe(
+        "context",
+      );
+    });
+
+    it("snaps computeDynamicSliceSpan and pagination hints to complete top-level AST symbol boundaries", async () => {
+      // Build 10 top-level functions of exactly 30 lines each (300 lines total)
+      const fnBlocks: string[] = [];
+      for (let f = 0; f < 10; f++) {
+        fnBlocks.push(
+          `export function blockFn_${f}(seedValue: number): number { // header padding for density budget calculation`,
+        );
+        for (let step = 1; step <= 28; step++) {
+          fnBlocks.push(
+            `  const localVal_${f}_${step} = seedValue + ${step} * ${f + 1}; // padded body statement line`,
+          );
+        }
+        fnBlocks.push("}");
+      }
+      const snappedSrc = `${fnBlocks.join("\n")}\n`;
+      const snappedAbs = path.join(tmpDir, "src", "snapped_blocks.ts");
+      fs.writeFileSync(snappedAbs, snappedSrc, "utf-8");
+
+      // Choose a sliceByteBudget whose rawMaxLines lands mid-function (e.g. around line 135 inside blockFn_4 [L121-L150])
+      const avgLineBytes = Buffer.byteLength(snappedSrc, "utf-8") / 300;
+      const midFunctionBudget = Math.floor(avgLineBytes * 135);
+      const span1 = computeDynamicSliceSpan(snappedAbs, snappedSrc, 1, midFunctionBudget);
+      expect(span1.snappedToSymbol).toBe(true);
+      expect(span1.endLine).toBe(120); // Snaps cleanly to closing `}` of blockFn_3 at L120!
+
+      const span2 = computeDynamicSliceSpan(
+        snappedAbs,
+        snappedSrc,
+        span1.endLine + 1,
+        midFunctionBudget,
+      );
+      expect(span2.startLine).toBe(121);
+      expect(span2.snappedToSymbol).toBe(true);
+      expect(span2.endLine).toBe(240); // Snaps cleanly to closing `}` of blockFn_7 at L240!
+
+      // Giant monolithic class with no intermediate top-level boundary falls back to rawMaxLines cleanly
+      const monolithLines = [
+        "export class MonolithBlock {",
+        ...Array.from(
+          { length: 298 },
+          (_, i) => `  public prop_${i} = ${i}; // padded field declaration inside monolith class`,
+        ),
+        "}",
+      ].join("\n");
+      const monolithSpan = computeDynamicSliceSpan(
+        path.join(tmpDir, "src", "monolith.ts"),
+        monolithLines,
+        1,
+        Math.floor((Buffer.byteLength(monolithLines, "utf-8") / 300) * 110),
+      );
+      expect(monolithSpan.snappedToSymbol).toBe(false);
+      expect(monolithSpan.endLine).toBe(monolithSpan.rawMaxLines);
+    });
+  });
+
+  describe("v0.9.37 Step 3: AST-Aware Search Context Windows, Merging & -C Override", () => {
+    it("expands <=40-line enclosing declarations in full, falls back to ±10 lines on >40-line functions, merges overlaps, and honors contextLines", async () => {
+      const searchTargetLines = [
+        "// Header line 1",
+        "export function shortTargetDecl(x: number): number {",
+        "  const stepA = x + 1;",
+        "  const HIT_SHORT_DECL = stepA * 2;",
+        "  const stepB = HIT_SHORT_DECL + 3;",
+        "  return stepB;",
+        "}",
+        "",
+        "export function longTargetDecl(y: number): number {",
+        ...Array.from({ length: 22 }, (_, i) => `  const pre_${i} = y + ${i};`),
+        "  const HIT_LONG_DECL_A = pre_0 + 100;",
+        "  const midGap = 1;",
+        "  const HIT_LONG_DECL_B = HIT_LONG_DECL_A + midGap;",
+        ...Array.from({ length: 24 }, (_, i) => `  const post_${i} = y - ${i};`),
+        "  return post_23;",
+        "}",
+        "",
+      ];
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "ast_search.ts"),
+        searchTargetLines.join("\n"),
+        "utf-8",
+      );
+
+      // 1. <=40-line enclosing function expands to complete [L2-L7] declaration with numbered native lines
+      const shortHit = await read("src/ast_search.ts:/HIT_SHORT_DECL/", { projectRoot: tmpDir });
+      expect(shortHit.mode).toBe("search");
+      expect(shortHit.text).toContain("# [L2-L7]");
+      expect(shortHit.text).toContain("2│ export function shortTargetDecl(x: number): number {");
+      expect(shortHit.text).toContain("4│   const HIT_SHORT_DECL = stepA * 2;");
+      expect(shortHit.text).toContain("7│ }");
+      expect(shortHit.text).not.toContain("longTargetDecl");
+
+      // 2. >40-line function (50 lines) falls back to ±10 lines AND merges overlapping windows for HIT_LONG_DECL_A & HIT_LONG_DECL_B
+      const longHit = await read("src/ast_search.ts:/HIT_LONG_DECL_/", { projectRoot: tmpDir });
+      expect(longHit.mode).toBe("search");
+      // Merged into a single window (only one `// match at` header) covering ±10 around L32..L34 -> [L22-L44]
+      expect(longHit.text.match(/\/\/ match at \[/g)).toHaveLength(1);
+      expect(longHit.text).toContain("# [L22-L44]");
+      expect(longHit.text).toContain("32│   const HIT_LONG_DECL_A = pre_0 + 100;");
+      expect(longHit.text).toContain("34│   const HIT_LONG_DECL_B = HIT_LONG_DECL_A + midGap;");
+      expect(longHit.text).not.toContain("9│ export function longTargetDecl");
+
+      // 3. Explicit contextLines (-C 2) overrides AST expansion to exact ±2 radius
+      const explicitRadius = await read("src/ast_search.ts", {
+        projectRoot: tmpDir,
+        search: "HIT_SHORT_DECL",
+        contextLines: 1,
+      });
+      // Hits at L4 and L5 with ±1 radius merge to [L3-L6] (omitting L2 signature & L7 closing brace)
+      expect(explicitRadius.text).toContain("# [L3-L6]");
+      expect(explicitRadius.text).not.toContain("2│ export function shortTargetDecl");
+
+      // 4. Broad multi-file search respects global 28 KB budget
+      const manySearchDir = path.join(tmpDir, "src", "broad_search");
+      fs.mkdirSync(manySearchDir, { recursive: true });
+      for (let f = 1; f <= 35; f++) {
+        const body = [
+          `export function broadHandler_${f}(payload: string): string {`,
+          ...Array.from(
+            { length: 28 },
+            (_, i) =>
+              `  const line_${f}_${i} = payload + "_BROAD_COMMON_TOKEN_${i}_padding_text_value";`,
+          ),
+          `  return line_${f}_0;`,
+          "}",
+        ].join("\n");
+        fs.writeFileSync(path.join(manySearchDir, `handler_${f}.ts`), `${body}\n`, "utf-8");
+      }
+      const broadSearchRes = await read("src/broad_search", {
+        projectRoot: tmpDir,
+        search: "BROAD_COMMON_TOKEN_10",
+      });
+      expect(Buffer.byteLength(broadSearchRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_READ_MAX_BYTES,
+      );
+    });
+  });
+
+  describe("v0.9.37 Step 4: Plain/Auto-Escaped search, filesWithMatches (-l), and <20ms Zero-AST filesOnly", () => {
+    it("supports plain regex search, auto-escapes invalid regex to literal fallback, defaults empty targets to '.', and supports filesWithMatches", async () => {
+      // Plain regex without /.../ wrappers + omitted targets defaults to "."
+      const plainRegexRes = await read(undefined, {
+        projectRoot: tmpDir,
+        search: "evaluateAlphaRule\\(",
+      });
+      expect(plainRegexRes.mode).toBe("search");
+      expect(plainRegexRes.text).toContain("src/rules/alpha-rule.ts");
+      expect(plainRegexRes.text).toContain("6│ export function evaluateAlphaRule");
+
+      // Invalid regex ("foo(bar" and "[unclosed") auto-escapes to literal match instead of throwing
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "literal_weird.ts"),
+        'export const weirdExpr = "foo(bar and [unclosed literal";\n',
+        "utf-8",
+      );
+      const invalidParenSearch = await read(undefined, {
+        projectRoot: tmpDir,
+        search: "foo(bar",
+      });
+      expect(invalidParenSearch.mode).toBe("search");
+      expect(invalidParenSearch.text).toContain("src/literal_weird.ts");
+      expect(invalidParenSearch.text).toContain("foo(bar and [unclosed literal");
+
+      const invalidBracketSearch = await read("src/literal_weird.ts", {
+        projectRoot: tmpDir,
+        search: "[unclosed",
+      });
+      expect(invalidBracketSearch.text).toContain("foo(bar and [unclosed literal");
+
+      // filesWithMatches: true (-l) emits ranked relative file paths concisely
+      const filesMatching = await read(undefined, {
+        projectRoot: tmpDir,
+        search: "UNIQUE_SEARCH_BEACON",
+        filesWithMatches: true,
+      });
+      expect(filesMatching.mode).toBe("search");
+      const matchedLines = filesMatching.output.trim().split("\n");
+      expect(matchedLines).toEqual(["src/rules/alpha-rule.ts", "tests/service.test.ts"]);
+
+      const filesMatchingJson = await read(undefined, {
+        projectRoot: tmpDir,
+        search: "UNIQUE_SEARCH_BEACON",
+        filesWithMatches: true,
+        json: true,
+      });
+      const parsedMatchJson = JSON.parse(filesMatchingJson.output) as {
+        filesWithMatches: boolean;
+        count: number;
+        files: string[];
+      };
+      expect(parsedMatchJson.filesWithMatches).toBe(true);
+      expect(parsedMatchJson.count).toBe(2);
+      expect(parsedMatchJson.files[0]).toBe("src/rules/alpha-rule.ts");
+    });
+
+    it("discovers workspace files via filesOnly in <20ms without AST parsing, respects ignore rules, filters by filePattern/search, and avoids 15-file truncation", async () => {
+      // Populate >20 workspace files + ignored node_modules / dist files
+      fs.mkdirSync(path.join(tmpDir, "node_modules", "ignored_pkg"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "node_modules", "ignored_pkg", "index.js"),
+        "module.exports = 1;\n",
+        "utf-8",
+      );
+      fs.mkdirSync(path.join(tmpDir, "dist"), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, "dist", "out.js"), "export const x = 1;\n", "utf-8");
+      fs.mkdirSync(path.join(tmpDir, "src", "extra"), { recursive: true });
+      for (let i = 1; i <= 20; i++) {
+        fs.writeFileSync(
+          path.join(tmpDir, "src", "extra", `mod_${String(i).padStart(2, "0")}.ts`),
+          `export const v${i} = ${i};\n`,
+          "utf-8",
+        );
+      }
+
+      const t0 = performance.now();
+      const allFiles = await read(undefined, { projectRoot: tmpDir, filesOnly: true });
+      const elapsedMs = performance.now() - t0;
+
+      expect(allFiles.mode).toBe("files");
+      expect(elapsedMs).toBeLessThan(50);
+      // Lists all >20 files without 15-file truncation and skips node_modules & dist
+      expect(allFiles.stats.fileCount).toBeGreaterThanOrEqual(25);
+      expect(allFiles.output).not.toContain("node_modules");
+      expect(allFiles.output).not.toContain("dist/out.js");
+      expect(allFiles.output).toMatch(/src\/small\.ts \(\d+L, \d+\.\d+KB\)/);
+      expect(allFiles.output).toContain("src/extra/mod_20.ts (1L, 0.1KB)");
+
+      // Filter via filePattern glob
+      const testOnly = await read(undefined, {
+        projectRoot: tmpDir,
+        filesOnly: true,
+        filePattern: "*.test.ts",
+      });
+      expect(testOnly.output.trim().split("\n")).toHaveLength(1);
+      expect(testOnly.output).toContain("tests/service.test.ts");
+
+      // Filter via search fallback when filePattern is omitted
+      const ruleSubstr = await read(undefined, {
+        projectRoot: tmpDir,
+        filesOnly: true,
+        search: "alpha-rule",
+      });
+      expect(ruleSubstr.output.trim().split("\n")).toHaveLength(1);
+      expect(ruleSubstr.output).toContain("src/rules/alpha-rule.ts");
+
+      // Structured --json output on filesOnly
+      const filesJson = await read("src/rules", {
+        projectRoot: tmpDir,
+        filesOnly: true,
+        json: true,
+      });
+      const parsedFiles = JSON.parse(filesJson.output) as {
+        mode: string;
+        count: number;
+        files: Array<{ path: string; lines: number; sizeKB: number }>;
+      };
+      expect(parsedFiles.mode).toBe("files");
+      expect(parsedFiles.count).toBe(2);
+      expect(parsedFiles.files.map((f) => f.path)).toEqual([
+        "src/rules/alpha-rule.ts",
+        "src/rules/beta-rule.ts",
+      ]);
     });
   });
 });

@@ -16,6 +16,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { getCachedTsSymbolIndex } from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
@@ -28,7 +29,11 @@ import {
   type ResolvedPathTargets,
   resolvePathTargets,
 } from "../config/index.js";
-import { recordTelemetryEvent, withSuppressedTelemetryAsync } from "../telemetry/index.js";
+import {
+  recordTelemetryEvent,
+  withSuppressedTelemetry,
+  withSuppressedTelemetryAsync,
+} from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import {
   type CallerSummary,
@@ -37,15 +42,25 @@ import {
   computeHonestReadBaselineText,
   type DependencyContract,
   generateContext,
+  isCommentLine,
+  isTestOrMockPath,
   mergeMultiContextResults,
   type WorkspaceCallerScanCache,
 } from "./context.js";
-import { type OutlineOptions, type OutlineResult, outlinePath } from "./outline.js";
+import {
+  generateOutline,
+  type OutlineOptions,
+  type OutlineResult,
+  outlinePath,
+} from "./outline.js";
 import { didYouMeanFile } from "./suggest.js";
 
 export const DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD = 250;
 export const DEFAULT_READ_MAX_BYTES = 28 * 1024; // 28,672 bytes (~7,000 BPE tokens)
 export const DEFAULT_READ_MAX_TOKENS = 7_000;
+export const DEFAULT_READ_SOFT_BYTE_CAP = 26_624;
+export const DEFAULT_READ_SOFT_TOKEN_CAP = 6_500;
+export const DEFAULT_SLICE_BYTE_BUDGET = 18_432;
 
 const SINGLE_REGEX_LITERAL_RE = /^\/(?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n])+\/[gimsuy]*$/;
 const LINE_RANGE_SELECTOR_RE = /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i;
@@ -56,6 +71,7 @@ export type ReadRouteMode =
   | "auto-outline-file"
   | "context"
   | "search"
+  | "files"
   | "workspace"
   | "mixed";
 
@@ -164,6 +180,35 @@ export interface ReadOptions {
    * Optional shared workspace caller/import scan cache across context targets.
    */
   workspaceScanCache?: WorkspaceCallerScanCache;
+  /**
+   * Emit exact 1-based disk-numbered native source lines by default (`true` in `read()`, `false` in direct `generateContext()`).
+   */
+  rawNative?: boolean;
+  /**
+   * Opt-in AICE shorthand decompilation (`--dsl`); when `true`, sets `rawNative = false`.
+   */
+  dsl?: boolean;
+  /**
+   * Explicit context radius override (`-C` / `--context <lines>`) for pattern searches.
+   */
+  contextLines?: number;
+  /**
+   * Plain regex OR literal search pattern (auto-escapes invalid regex fallback to literal match).
+   * When `filesOnly: true` and `filePattern` is omitted, also acts as the optional path filter.
+   */
+  search?: string;
+  /**
+   * Fast zero-AST workspace file discovery (`--files` / `aice find` / MCP `filesOnly`).
+   */
+  filesOnly?: boolean;
+  /**
+   * Optional glob or substring path filter for `filesOnly`.
+   */
+  filePattern?: string;
+  /**
+   * Emit matching relative file paths concisely (`-l` / `--files-with-matches`).
+   */
+  filesWithMatches?: boolean;
 }
 
 export interface ReadStats {
@@ -860,8 +905,257 @@ function truncateBundleToMaxTokens(
   return { text: fallback, tokenCount: estimateTokens(fallback) };
 }
 
-function buildAutoOutlineHeader(displayPath: string, lineCount: number): string {
-  return `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
+function resolveEffectiveReadRawNative(options: ReadOptions): boolean {
+  if (options.dsl === true) return false;
+  if (options.rawNative !== undefined) return options.rawNative;
+  if (options.idioms === true) return false;
+  return true;
+}
+
+export interface DynamicReadBudgetCandidate {
+  id: string;
+  rawSource?: string;
+  rawBytes?: number;
+  lineCount?: number;
+}
+
+export interface DynamicReadBudgetAllocation {
+  id: string;
+  estimatedBytes: number;
+  estimatedTokens: number;
+  fitsInline: boolean;
+}
+
+export interface DynamicReadBudgetResult {
+  maxBytes: number;
+  maxTokens: number;
+  softByteCap: number;
+  softTokenCap: number;
+  reservedBytes: number;
+  reservedTokens: number;
+  remainingBytes: number;
+  remainingTokens: number;
+  inlineIds: Set<string>;
+  autoOutlineIds: Set<string>;
+  allocations: DynamicReadBudgetAllocation[];
+}
+
+/**
+ * Smallest-first water-filling allocator governed by `DEFAULT_READ_MAX_BYTES` (`28,672 B`,
+ * `softByteCap = 26,624 B`) and `DEFAULT_READ_MAX_TOKENS` (`7,000`, `softTokenCap = 6,500`).
+ * Estimates each bare file's numbered output bytes (`rawBytes + lineCount * 6`) so small/medium
+ * files (`<= ~25 KB`, ~600-750 lines) settle inline in 1 turn while overflowing targets downgrade
+ * cleanly to `:outline`.
+ */
+export function computeDynamicReadBudget(
+  candidates: DynamicReadBudgetCandidate[],
+  opts?: {
+    maxBytes?: number;
+    maxTokens?: number;
+    softByteCap?: number;
+    softTokenCap?: number;
+    reservedBytes?: number;
+    reservedTokens?: number;
+  },
+): DynamicReadBudgetResult {
+  const maxBytes = opts?.maxBytes ?? DEFAULT_READ_MAX_BYTES;
+  const maxTokens = opts?.maxTokens ?? DEFAULT_READ_MAX_TOKENS;
+  const softByteCap = opts?.softByteCap ?? DEFAULT_READ_SOFT_BYTE_CAP;
+  const softTokenCap = opts?.softTokenCap ?? DEFAULT_READ_SOFT_TOKEN_CAP;
+  const reservedBytes = Math.max(0, opts?.reservedBytes ?? 0);
+  const reservedTokens = Math.max(0, opts?.reservedTokens ?? 0);
+
+  let remainingBytes = Math.max(0, softByteCap - reservedBytes);
+  let remainingTokens = Math.max(0, softTokenCap - reservedTokens);
+
+  const enriched = candidates.map((c, index) => {
+    const rawBytes =
+      c.rawBytes ?? (c.rawSource !== undefined ? Buffer.byteLength(c.rawSource, "utf-8") : 0);
+    const lineCount =
+      c.lineCount ?? (c.rawSource !== undefined ? countSourceLines(c.rawSource) : 0);
+    const estimatedBytes = rawBytes + lineCount * 6;
+    const estimatedTokens = Math.ceil(estimatedBytes / 4.1);
+    return {
+      id: c.id,
+      index,
+      estimatedBytes,
+      estimatedTokens,
+      fitsInline: false,
+    };
+  });
+
+  // Smallest-first water-filling so small files leave unused budget for larger targets
+  const sortedBySize = [...enriched].sort(
+    (a, b) => a.estimatedBytes - b.estimatedBytes || a.index - b.index,
+  );
+
+  const inlineIds = new Set<string>();
+  const autoOutlineIds = new Set<string>();
+
+  for (const entry of sortedBySize) {
+    if (entry.estimatedBytes <= remainingBytes && entry.estimatedTokens <= remainingTokens) {
+      entry.fitsInline = true;
+      inlineIds.add(entry.id);
+      remainingBytes -= entry.estimatedBytes;
+      remainingTokens -= entry.estimatedTokens;
+    } else {
+      entry.fitsInline = false;
+      autoOutlineIds.add(entry.id);
+    }
+  }
+
+  return {
+    maxBytes,
+    maxTokens,
+    softByteCap,
+    softTokenCap,
+    reservedBytes,
+    reservedTokens,
+    remainingBytes,
+    remainingTokens,
+    inlineIds,
+    autoOutlineIds,
+    allocations: enriched.map(({ id, estimatedBytes, estimatedTokens, fitsInline }) => ({
+      id,
+      estimatedBytes,
+      estimatedTokens,
+      fitsInline,
+    })),
+  };
+}
+
+export interface DynamicSliceSpanResult {
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  rawMaxLines: number;
+  avgBytesPerLine: number;
+  snappedToSymbol: boolean;
+}
+
+/**
+ * Computes a density-proportional, AST symbol-boundary-snapped slice span `[startLine, endLine]`
+ * so pagination hints (`Next slice: aice read <file>:L<start>-L<end>`) never cut functions in half.
+ */
+export function computeDynamicSliceSpan(
+  diskPath: string,
+  rawSource: string,
+  startLine = 1,
+  sliceByteBudget = DEFAULT_SLICE_BYTE_BUDGET,
+): DynamicSliceSpanResult {
+  const totalLines = Math.max(1, countSourceLines(rawSource));
+  const sLine = Math.max(1, Math.min(totalLines, Math.floor(startLine) || 1));
+  const avgBytesPerLine = Math.max(
+    16,
+    Buffer.byteLength(rawSource, "utf-8") / Math.max(1, totalLines),
+  );
+  const rawMaxLines = Math.max(80, Math.min(650, Math.floor(sliceByteBudget / avgBytesPerLine)));
+
+  if (sLine + rawMaxLines - 1 >= totalLines) {
+    return {
+      startLine: sLine,
+      endLine: totalLines,
+      totalLines,
+      rawMaxLines,
+      avgBytesPerLine,
+      snappedToSymbol: true,
+    };
+  }
+
+  const symbolEndLines: number[] = [];
+  if (/\.(?:[cm]?ts|tsx|[cm]?js|jsx)$/i.test(diskPath)) {
+    try {
+      const tsIdx = getCachedTsSymbolIndex(rawSource, diskPath);
+      for (const top of tsIdx.orderedTopLevel) {
+        if (top.endLine >= sLine) {
+          symbolEndLines.push(top.endLine);
+        }
+      }
+      if (symbolEndLines.length === 0) {
+        for (const tb of tsIdx.testBlocks) {
+          if (tb.endLine >= sLine) {
+            symbolEndLines.push(tb.endLine);
+          }
+        }
+      }
+    } catch {
+      // fall back to rawMaxLines
+    }
+  } else {
+    const ext = path.extname(diskPath).toLowerCase();
+    if (KNOWN_TARGET_EXTENSIONS.has(ext) || diskPath.endsWith(".aice")) {
+      try {
+        const outRes = withSuppressedTelemetry(() =>
+          generateOutline(rawSource, diskPath, {
+            includeTypes: true,
+            skipTokenStats: true,
+            lineRanges: true,
+            depth: 1,
+            idioms: false,
+          }),
+        );
+        for (const sym of outRes.symbols) {
+          if (sym.endLine !== undefined && sym.endLine >= sLine) {
+            symbolEndLines.push(sym.endLine);
+          } else if (sym.lineRange) {
+            const m = sym.lineRange.match(/\[L\d+-L(\d+)\]/i);
+            if (m?.[1]) {
+              const parsedEnd = Number.parseInt(m[1], 10);
+              if (parsedEnd >= sLine) symbolEndLines.push(parsedEnd);
+            }
+          }
+        }
+      } catch {
+        // fall back to rawMaxLines
+      }
+    }
+  }
+
+  const maxCandidateEnd = Math.min(totalLines, sLine + rawMaxLines);
+  const minAdvance = Math.floor(rawMaxLines * 0.5);
+  let bestSnapEnd: number | undefined;
+  for (const symEnd of symbolEndLines) {
+    if (symEnd <= maxCandidateEnd && symEnd - sLine + 1 >= minAdvance) {
+      if (bestSnapEnd === undefined || symEnd > bestSnapEnd) {
+        bestSnapEnd = symEnd;
+      }
+    }
+  }
+
+  if (bestSnapEnd !== undefined) {
+    return {
+      startLine: sLine,
+      endLine: bestSnapEnd,
+      totalLines,
+      rawMaxLines,
+      avgBytesPerLine,
+      snappedToSymbol: true,
+    };
+  }
+
+  return {
+    startLine: sLine,
+    endLine: Math.min(totalLines, sLine + rawMaxLines - 1),
+    totalLines,
+    rawMaxLines,
+    avgBytesPerLine,
+    snappedToSymbol: false,
+  };
+}
+
+function buildAutoOutlineHeader(
+  displayPath: string,
+  lineCount: number,
+  opts?: { nextSliceCmd?: string; budgetDowngraded?: boolean },
+): string {
+  const base = `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
+  if (opts?.budgetDowngraded && opts.nextSliceCmd) {
+    return `${base} (auto-downgraded to :outline — 28 KB budget; next slice: ${opts.nextSliceCmd})`;
+  }
+  if (opts?.nextSliceCmd) {
+    return `${base} Next slice: ${opts.nextSliceCmd}`;
+  }
+  return base;
 }
 
 function formatContextStatsFooter(
@@ -914,11 +1208,50 @@ function buildNextSliceHintCommand(
   displayPath: string,
   startLine = 1,
   totalLines?: number,
-  windowLines = 150,
+  opts?: {
+    diskPath?: string;
+    rawSource?: string;
+    projectRoot?: string;
+    sliceByteBudget?: number;
+  },
 ): string {
   const safePath = displayPath.trim() || ".";
   const sLine = Math.max(1, startLine);
-  const rawEnd = sLine + windowLines - 1;
+
+  let resolvedDiskPath = opts?.diskPath;
+  let resolvedRawSource = opts?.rawSource;
+  if (resolvedRawSource === undefined) {
+    const candidateAbs =
+      resolvedDiskPath ??
+      (opts?.projectRoot
+        ? path.resolve(opts.projectRoot, safePath)
+        : path.isAbsolute(safePath)
+          ? safePath
+          : undefined);
+    if (candidateAbs) {
+      try {
+        if (fs.existsSync(candidateAbs) && fs.statSync(candidateAbs).isFile()) {
+          resolvedDiskPath = candidateAbs;
+          resolvedRawSource = fs.readFileSync(candidateAbs, "utf-8");
+        }
+      } catch {
+        // fall through to conservative window
+      }
+    }
+  }
+
+  if (resolvedRawSource !== undefined) {
+    const span = computeDynamicSliceSpan(
+      resolvedDiskPath ?? safePath,
+      resolvedRawSource,
+      sLine,
+      opts?.sliceByteBudget ?? DEFAULT_SLICE_BYTE_BUDGET,
+    );
+    return `aice read ${safePath}:L${span.startLine}-L${span.endLine}`;
+  }
+
+  const fallbackWindow = 160;
+  const rawEnd = sLine + fallbackWindow - 1;
   const eLine =
     totalLines !== undefined && totalLines >= sLine ? Math.min(totalLines, rawEnd) : rawEnd;
   return `aice read ${safePath}:L${sLine}-L${eLine}`;
@@ -928,6 +1261,11 @@ function inferNextWindowFromTruncatedSlice(
   emittedSlice: string,
   fallbackTargetPath: string,
   totalLines?: number,
+  opts?: {
+    diskPath?: string;
+    rawSource?: string;
+    projectRoot?: string;
+  },
 ): string {
   const lines = emittedSlice.split("\n");
   let lastFileHeader = fallbackTargetPath.split(",")[0]?.trim() || ".";
@@ -954,13 +1292,19 @@ function inferNextWindowFromTruncatedSlice(
     }
   }
   const nextStart = lastLineNum > 0 ? lastLineNum + 1 : 1;
-  return buildNextSliceHintCommand(lastFileHeader, nextStart, totalLines, 150);
+  const useProvidedSource =
+    opts?.rawSource !== undefined && lastFileHeader === fallbackTargetPath.split(",")[0]?.trim();
+  return buildNextSliceHintCommand(lastFileHeader, nextStart, totalLines, {
+    diskPath: useProvidedSource ? opts?.diskPath : undefined,
+    rawSource: useProvidedSource ? opts?.rawSource : undefined,
+    projectRoot: opts?.projectRoot,
+  });
 }
 
 /**
  * Guarantees rendered `formattedBundle` (plus optional `statsText`) stays strictly within
  * `DEFAULT_READ_MAX_BYTES` (28,672 bytes) and `DEFAULT_READ_MAX_TOKENS` (~7,000 BPE tokens),
- * appending an exact `aice read <file>:L<start>-L<end>` pagination hint whenever capped.
+ * appending an exact AST-snapped `aice read <file>:L<start>-L<end>` pagination hint whenever capped.
  */
 function enforceReadBudgetCeiling(params: {
   bundle: string;
@@ -968,14 +1312,27 @@ function enforceReadBudgetCeiling(params: {
   statsText?: string;
   totalLines?: number;
   extraHints?: string[];
+  diskPath?: string;
+  rawSource?: string;
+  projectRoot?: string;
 }): { formattedBundle: string; output: string; tokenCount: number; wasCapped: boolean } {
-  const { bundle, fallbackTargetPath, statsText, totalLines, extraHints } = params;
+  const {
+    bundle,
+    fallbackTargetPath,
+    statsText,
+    totalLines,
+    extraHints,
+    diskPath,
+    rawSource,
+    projectRoot,
+  } = params;
   const statsAllowanceBytes = statsText ? Buffer.byteLength(`\n\n${statsText}`, "utf-8") : 0;
   const maxBundleBytes = Math.max(1024, DEFAULT_READ_MAX_BYTES - statsAllowanceBytes);
   const initialBytes = Buffer.byteLength(bundle, "utf-8");
   const initialTokens = estimateTokens(bundle);
 
-  if (initialBytes <= maxBundleBytes && initialTokens <= DEFAULT_READ_MAX_TOKENS) {
+  const effectiveTokenCeiling = Math.max(DEFAULT_READ_MAX_TOKENS, Math.ceil(maxBundleBytes / 3));
+  if (initialBytes <= maxBundleBytes && initialTokens <= effectiveTokenCeiling) {
     const out = statsText ? `${bundle}\n\n${statsText}` : bundle;
     if (Buffer.byteLength(out, "utf-8") <= DEFAULT_READ_MAX_BYTES) {
       return {
@@ -1022,8 +1379,12 @@ function enforceReadBudgetCeiling(params: {
     extraHints && extraHints.length > 0
       ? extraHints.slice(0, 3).join(" | ")
       : nextOmittedFile
-        ? buildNextSliceHintCommand(nextOmittedFile, 1, undefined, 150)
-        : inferNextWindowFromTruncatedSlice(keptText, fallbackTargetPath, totalLines);
+        ? buildNextSliceHintCommand(nextOmittedFile, 1, undefined, { projectRoot })
+        : inferNextWindowFromTruncatedSlice(keptText, fallbackTargetPath, totalLines, {
+            diskPath,
+            rawSource,
+            projectRoot,
+          });
 
   const footer = `\n\n// [28 KB stdout budget reached — next slice: ${primaryHint} (or pass --full)]`;
   while (
@@ -1044,6 +1405,606 @@ function enforceReadBudgetCeiling(params: {
     output: finalOut,
     tokenCount: cappedTokens,
     wasCapped: true,
+  };
+}
+
+function hasUnsafeSearchQuantifiers(pattern: string): boolean {
+  if (pattern.length > 512) return true;
+  if (/(\.\*){4,}/.test(pattern)) return true;
+  return /\([^()]*[+*][^()]*\)\s*[+*?{]/.test(pattern);
+}
+
+function escapeUnescapedForwardSlashes(pattern: string): string {
+  let out = "";
+  let inCharClass = false;
+  let escaped = false;
+  for (const ch of pattern) {
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === "[" && !inCharClass) {
+      inCharClass = true;
+      out += ch;
+      continue;
+    }
+    if (ch === "]" && inCharClass) {
+      inCharClass = false;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && !inCharClass) {
+      out += "\\/";
+      continue;
+    }
+    if (ch === "\n") {
+      out += "\\n";
+      continue;
+    }
+    if (ch === "\r") {
+      out += "\\r";
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+function escapeLiteralForRegexSelector(literal: string): string {
+  return literal
+    .replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")
+    .replace(/\r/g, "\\r")
+    .replace(/\n/g, "\\n");
+}
+
+function buildSafeSearchRegexSelector(rawSearch: string): { selector: string; regex: RegExp } {
+  const trimmed = rawSearch.trim();
+  const slashedMatch = trimmed.match(/^\/((?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n])+)\/([gimsuy]*)$/);
+  if (slashedMatch?.[1]) {
+    const rawBody = slashedMatch[1];
+    const cleanFlags = (slashedMatch[2] ?? "").replace(/[gy]/g, "");
+    if (!hasUnsafeSearchQuantifiers(rawBody)) {
+      try {
+        const regex = new RegExp(rawBody, cleanFlags);
+        return { selector: `/${rawBody}/${cleanFlags}`, regex };
+      } catch {
+        // fall through to literal fallback
+      }
+    }
+  }
+
+  if (rawSearch.length > 0 && !hasUnsafeSearchQuantifiers(rawSearch)) {
+    try {
+      const escapedSlashBody = escapeUnescapedForwardSlashes(rawSearch);
+      const regex = new RegExp(escapedSlashBody);
+      const candidateSelector = `/${escapedSlashBody}/`;
+      if (SINGLE_REGEX_LITERAL_RE.test(candidateSelector)) {
+        return { selector: candidateSelector, regex };
+      }
+    } catch {
+      // Invalid regex (e.g. "foo(bar" or "[unclosed") -> auto-escape literal fallback
+    }
+  }
+
+  const literalBody = escapeLiteralForRegexSelector(rawSearch || "^$");
+  return {
+    selector: `/${literalBody}/`,
+    regex: new RegExp(literalBody),
+  };
+}
+
+const BINARY_DISCOVERY_EXTENSIONS = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".bmp",
+  ".tiff",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".otf",
+  ".pdf",
+  ".zip",
+  ".tar",
+  ".gz",
+  ".tgz",
+  ".bz2",
+  ".xz",
+  ".7z",
+  ".wasm",
+  ".pyc",
+  ".class",
+  ".jar",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".o",
+  ".a",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".ogg",
+  ".webm",
+  ".sqlite",
+  ".db",
+]);
+
+function countBufferLinesFast(buf: Buffer): number {
+  const len = buf.length;
+  if (len === 0) return 0;
+  const end =
+    len >= 2 && buf[len - 2] === 13 && buf[len - 1] === 10
+      ? len - 2
+      : buf[len - 1] === 10
+        ? len - 1
+        : len;
+  if (end <= 0) return 1;
+  let lines = 1;
+  for (let i = 0; i < end; i++) {
+    if (buf[i] === 10) lines++;
+  }
+  return lines;
+}
+
+function isLikelyBinaryBuffer(buf: Buffer): boolean {
+  const checkLen = Math.min(buf.length, 512);
+  for (let i = 0; i < checkLen; i++) {
+    if (buf[i] === 0) return true;
+  }
+  return false;
+}
+
+function buildFilesOnlyFilterMatcher(rawFilter?: string): ((relPath: string) => boolean) | null {
+  const trimmed = rawFilter?.trim();
+  if (!trimmed) return null;
+  const norm = trimmed.replace(/\\/g, "/");
+  const clean = norm.startsWith("./") ? norm.slice(2) : norm;
+
+  const slashed = clean.match(/^\/((?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n])+)\/([gimsuy]*)$/);
+  if (slashed?.[1]) {
+    try {
+      const rx = new RegExp(slashed[1], (slashed[2] ?? "").replace(/[gy]/g, "") || "i");
+      return (relPath: string) => rx.test(relPath);
+    } catch {
+      // fall through
+    }
+  }
+
+  if (hasGlobMagicChars(clean)) {
+    const expanded = expandBracePatterns(clean);
+    const hasSlash = clean.includes("/");
+    const rxList = expanded.map((pat) => globPatternToRegExp(pat));
+    return (relPath: string) => {
+      if (rxList.some((rx) => rx.test(relPath))) return true;
+      if (!hasSlash) {
+        const base = path.posix.basename(relPath);
+        return rxList.some((rx) => rx.test(base));
+      }
+      return false;
+    };
+  }
+
+  const needle = clean.toLowerCase();
+  return (relPath: string) => relPath.toLowerCase().includes(needle);
+}
+
+export interface DiscoveredWorkspaceFile {
+  path: string;
+  lines: number;
+  bytes: number;
+  sizeKB: number;
+}
+
+function executeFilesOnlyRead(
+  targets: ReadTargetInput | ReadTargetInput[] | undefined,
+  options: ReadOptions,
+  baseDir: string,
+  surface: "cli" | "mcp",
+): ReadResult {
+  const resolvedRootInfo = resolvePathTargets(undefined, {
+    includeTargets: false,
+    projectRoot: options.projectRoot ?? baseDir,
+  });
+  if (!isProjectAiceEnabled(resolvedRootInfo.config)) {
+    throw new Error(AICE_DISABLED_MESSAGE);
+  }
+  const projectRoot = resolvedRootInfo.projectRoot;
+
+  const configuredOutDir = resolvedRootInfo.config.outDir
+    ? path.resolve(projectRoot, resolvedRootInfo.config.outDir)
+    : undefined;
+
+  const rawTokens: string[] = [];
+  if (targets !== undefined) {
+    const inputList = Array.isArray(targets) ? targets : [targets];
+    for (const item of inputList) {
+      if (typeof item === "string") {
+        for (const tok of splitReadTargetString(item, baseDir)) {
+          const parsed = parseReadTarget(tok, baseDir);
+          if (parsed.targetPath.trim()) rawTokens.push(parsed.targetPath.trim());
+        }
+      } else if (item && typeof item === "object" && item.path.trim()) {
+        rawTokens.push(item.path.trim());
+      }
+    }
+  }
+
+  const scanRoots: string[] = [];
+  const inferredFilters: string[] = [];
+  const explicitHiddenAllowed = new Set<string>();
+
+  for (const tok of rawTokens) {
+    const candidateBase = path.resolve(baseDir, tok);
+    const candidateRoot = path.resolve(projectRoot, tok);
+    if (fs.existsSync(candidateBase)) {
+      scanRoots.push(candidateBase);
+      for (const seg of tok.replace(/\\/g, "/").split("/")) {
+        if (seg.startsWith(".") && seg !== "." && seg !== "..") explicitHiddenAllowed.add(seg);
+      }
+    } else if (fs.existsSync(candidateRoot)) {
+      scanRoots.push(candidateRoot);
+      for (const seg of tok.replace(/\\/g, "/").split("/")) {
+        if (seg.startsWith(".") && seg !== "." && seg !== "..") explicitHiddenAllowed.add(seg);
+      }
+    } else {
+      inferredFilters.push(tok);
+    }
+  }
+
+  if (scanRoots.length === 0) {
+    scanRoots.push(projectRoot);
+  }
+
+  const primaryFilter = options.filePattern ?? options.search;
+  const activeMatchers: Array<(relPath: string) => boolean> = [];
+  const mPrimary = buildFilesOnlyFilterMatcher(primaryFilter);
+  if (mPrimary) activeMatchers.push(mPrimary);
+  for (const inf of inferredFilters) {
+    const mInf = buildFilesOnlyFilterMatcher(inf);
+    if (mInf) activeMatchers.push(mInf);
+  }
+
+  const candidateFiles = new Map<string, string>(); // relPosix -> absPath
+  const collectFromDir = (dirAbs: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const childAbs = path.join(dirAbs, ent.name);
+      if (ent.isDirectory()) {
+        if (
+          DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) &&
+          !explicitHiddenAllowed.has(ent.name)
+        ) {
+          continue;
+        }
+        if (ent.name.startsWith(".") && !explicitHiddenAllowed.has(ent.name)) {
+          continue;
+        }
+        if (configuredOutDir && path.resolve(childAbs) === configuredOutDir) {
+          continue;
+        }
+        collectFromDir(childAbs);
+      } else if (ent.isFile()) {
+        if (ent.name.endsWith(".trivia.json")) continue;
+        const ext = path.extname(ent.name).toLowerCase();
+        if (BINARY_DISCOVERY_EXTENSIONS.has(ext)) continue;
+        const relPosix = formatReadDisplayPath(childAbs, projectRoot);
+        if (activeMatchers.length === 0 || activeMatchers.every((fn) => fn(relPosix))) {
+          candidateFiles.set(relPosix, childAbs);
+        }
+      }
+    }
+  };
+
+  for (const rootAbs of scanRoots) {
+    try {
+      const st = fs.statSync(rootAbs);
+      if (st.isDirectory()) {
+        collectFromDir(rootAbs);
+      } else if (st.isFile()) {
+        const relPosix = formatReadDisplayPath(rootAbs, projectRoot);
+        if (activeMatchers.length === 0 || activeMatchers.every((fn) => fn(relPosix))) {
+          candidateFiles.set(relPosix, rootAbs);
+        }
+      }
+    } catch {
+      // ignore unreadable path
+    }
+  }
+
+  const sortedRelPaths = Array.from(candidateFiles.keys()).sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  const discovered: DiscoveredWorkspaceFile[] = [];
+  const formattedLines: string[] = [];
+  let totalSourceChars = 0;
+
+  for (const relPath of sortedRelPaths) {
+    const absPath = candidateFiles.get(relPath)!;
+    let buf: Buffer;
+    try {
+      buf = fs.readFileSync(absPath);
+    } catch {
+      continue;
+    }
+    if (isLikelyBinaryBuffer(buf)) continue;
+    const lines = countBufferLinesFast(buf);
+    const bytes = buf.length;
+    totalSourceChars += bytes;
+    const sizeKBNum = bytes === 0 ? 0 : Number(Math.max(0.1, bytes / 1024).toFixed(1));
+    const sizeKBText = bytes === 0 ? "0.0" : Math.max(0.1, bytes / 1024).toFixed(1);
+    discovered.push({
+      path: relPath,
+      lines,
+      bytes,
+      sizeKB: sizeKBNum,
+    });
+    formattedLines.push(`${relPath} (${lines}L, ${sizeKBText}KB)`);
+  }
+
+  const enforceCeiling = shouldEnforceDefaultReadBudget(options);
+  let formattedBundle = formattedLines.join("\n");
+  if (enforceCeiling && Buffer.byteLength(formattedBundle, "utf-8") > DEFAULT_READ_MAX_BYTES) {
+    const kept: string[] = [];
+    let bytesUsed = 0;
+    const maxListBytes = DEFAULT_READ_MAX_BYTES - 256;
+    for (let i = 0; i < formattedLines.length; i++) {
+      const ln = formattedLines[i]!;
+      const addBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
+      if (kept.length > 0 && bytesUsed + addBytes > maxListBytes) {
+        const omittedCount = formattedLines.length - i;
+        kept.push(
+          `// ... (+${omittedCount} more files omitted to fit 28 KB stdout budget — narrow path/filter or pass --full)`,
+        );
+        break;
+      }
+      kept.push(ln);
+      bytesUsed += addBytes;
+    }
+    formattedBundle = kept.join("\n");
+  }
+
+  const approxTokenCount = Math.max(0, Math.ceil(Buffer.byteLength(formattedBundle, "utf-8") / 4));
+  const approxOrigTokens = Math.max(0, Math.ceil(totalSourceChars / 4));
+
+  const jsonData = {
+    mode: "files" as const,
+    projectRoot,
+    count: discovered.length,
+    files: discovered,
+  };
+  const jsonOutput = options.json ? JSON.stringify(jsonData, null, 2) : undefined;
+  const output = jsonOutput ?? formattedBundle;
+
+  const aicePayload = jsonOutput ?? formattedBundle;
+  const aiceApproxTok = Math.max(0, Math.ceil(Buffer.byteLength(aicePayload, "utf-8") / 4));
+  recordTelemetryEvent({
+    targetPath: scanRoots[0] ?? projectRoot,
+    projectRoot,
+    filePath: "<workspace-files>",
+    operation: "outline",
+    surface,
+    idiomsUsed: false,
+    nativeText: "",
+    nativeChars: totalSourceChars,
+    nativeCl100k: approxOrigTokens,
+    nativeO200k: approxOrigTokens,
+    realisticNativeCl100k: approxOrigTokens,
+    aiceText: aicePayload,
+    aiceChars: aicePayload.length,
+    aiceCl100k: aiceApproxTok,
+    aiceO200k: aiceApproxTok,
+  });
+
+  const targetLabel =
+    scanRoots.length === 1
+      ? formatReadDisplayPath(scanRoots[0]!, projectRoot)
+      : scanRoots.map((r) => formatReadDisplayPath(r, projectRoot)).join(", ");
+
+  const stats: ReadStats = {
+    tokenCount: approxTokenCount,
+    originalTokens: approxOrigTokens,
+    savedTokens: approxOrigTokens - approxTokenCount,
+    savingsPct:
+      approxOrigTokens > 0
+        ? Math.round(((approxOrigTokens - approxTokenCount) / approxOrigTokens) * 100)
+        : 0,
+    originalChars: totalSourceChars,
+    outputChars: formattedBundle.length,
+    dependenciesCount: 0,
+    callersCount: 0,
+    fileCount: discovered.length,
+  };
+
+  return {
+    mode: "files",
+    targetPath: targetLabel,
+    text: formattedBundle,
+    formattedBundle,
+    targetContent: formattedBundle,
+    output,
+    tokenCount: approxTokenCount,
+    targets: scanRoots.map((r) => ({
+      targetPath: formatReadDisplayPath(r, projectRoot),
+      resolvedPath: r,
+      mode: "files" as const,
+    })),
+    missingTargets: [],
+    dependencies: [],
+    callers: [],
+    jsonData,
+    jsonOutput,
+    stats,
+  };
+}
+
+function executeFilesWithMatchesSearch(params: {
+  classified: ClassifiedReadTarget[];
+  missingTargets: string[];
+  regex: RegExp;
+  selector: string;
+  rawPattern: string;
+  options: ReadOptions;
+  surface: "cli" | "mcp";
+}): ReadResult {
+  const { classified, missingTargets, regex, selector, rawPattern, options, surface } = params;
+  const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
+  const seenAbs = new Set<string>();
+  const candidateFiles: Array<{ absPath: string; relPath: string; projectRoot: string }> = [];
+
+  for (const item of classified) {
+    if (item.isDir) {
+      for (const fp of item.resolved.files) {
+        const abs = path.resolve(fp);
+        if (!seenAbs.has(abs)) {
+          seenAbs.add(abs);
+          candidateFiles.push({
+            absPath: abs,
+            relPath: formatReadDisplayPath(abs, item.resolved.projectRoot),
+            projectRoot: item.resolved.projectRoot,
+          });
+        }
+      }
+    } else {
+      const abs = path.resolve(item.diskPath);
+      if (!seenAbs.has(abs)) {
+        seenAbs.add(abs);
+        candidateFiles.push({
+          absPath: abs,
+          relPath: item.displayPath,
+          projectRoot: item.resolved.projectRoot,
+        });
+      }
+    }
+  }
+
+  const matchedScored: Array<{ relPath: string; score: number }> = [];
+  let totalNativeChars = 0;
+
+  for (const file of candidateFiles) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file.absPath, "utf-8");
+    } catch {
+      continue;
+    }
+    totalNativeChars += raw.length;
+    regex.lastIndex = 0;
+    if (!regex.test(raw)) continue;
+
+    const isTest = isTestOrMockPath(file.absPath, file.projectRoot);
+    const lines = raw.split(/\r?\n/);
+    let bestLineScore = 10;
+    for (const ln of lines) {
+      regex.lastIndex = 0;
+      if (!regex.test(ln)) continue;
+      const comment = isCommentLine(ln, file.absPath);
+      if (!comment) {
+        bestLineScore = isTest ? 50 : 500;
+        break;
+      }
+      bestLineScore = Math.max(bestLineScore, isTest ? 10 : 100);
+    }
+    matchedScored.push({ relPath: file.relPath, score: bestLineScore });
+  }
+
+  matchedScored.sort(
+    (a, b) => b.score - a.score || (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0),
+  );
+  const matchedPaths = matchedScored.map((m) => m.relPath);
+  let formattedBundle = matchedPaths.join("\n");
+  if (missingTargets.length > 0) {
+    const missingFooter = missingTargets.map((m) => `// not found: ${m}`).join("\n");
+    formattedBundle = formattedBundle ? `${formattedBundle}\n${missingFooter}` : missingFooter;
+  }
+
+  let tokenCount = estimateTokens(formattedBundle);
+  const jsonData = {
+    mode: "search" as const,
+    filesWithMatches: true,
+    pattern: rawPattern,
+    selector,
+    count: matchedPaths.length,
+    files: matchedPaths,
+  };
+  const jsonOutput = options.json ? JSON.stringify(jsonData, null, 2) : undefined;
+  let output = jsonOutput ?? formattedBundle;
+
+  if (shouldEnforceDefaultReadBudget(options)) {
+    const capped = enforceReadBudgetCeiling({
+      bundle: formattedBundle,
+      fallbackTargetPath: matchedPaths[0] ?? ".",
+      projectRoot: primaryRoot,
+    });
+    formattedBundle = capped.formattedBundle;
+    output = capped.output;
+    tokenCount = capped.tokenCount;
+  }
+
+  const approxOrigTokens = Math.ceil(totalNativeChars / 4);
+  if (classified[0]) {
+    const aicePayload = jsonOutput ?? formattedBundle;
+    recordTelemetryEvent({
+      targetPath: classified[0].diskPath,
+      projectRoot: primaryRoot,
+      operation: "context",
+      surface,
+      idiomsUsed: false,
+      nativeText: "",
+      nativeChars: totalNativeChars,
+      nativeCl100k: approxOrigTokens,
+      nativeO200k: approxOrigTokens,
+      realisticNativeCl100k: approxOrigTokens,
+      aiceText: aicePayload,
+      aiceCl100k: jsonOutput !== undefined ? undefined : tokenCount,
+    });
+  }
+
+  return {
+    mode: "search",
+    targetPath: classified.map((c) => c.displayPath).join(", "),
+    text: formattedBundle,
+    formattedBundle,
+    targetContent: formattedBundle,
+    output,
+    tokenCount,
+    targets: classified.map((c) => ({
+      targetPath: c.displayPath,
+      resolvedPath: c.diskPath,
+      mode: "search" as const,
+      selector,
+    })),
+    missingTargets,
+    dependencies: [],
+    callers: [],
+    jsonData,
+    jsonOutput,
+    stats: {
+      tokenCount,
+      originalTokens: approxOrigTokens,
+      savedTokens: approxOrigTokens - tokenCount,
+      originalChars: totalNativeChars,
+      outputChars: formattedBundle.length,
+      dependenciesCount: 0,
+      callersCount: 0,
+      fileCount: matchedPaths.length,
+    },
   };
 }
 
@@ -1068,11 +2029,13 @@ interface ClassifiedReadTarget {
   diskPath: string;
   displayPath: string;
   isDir: boolean;
-  route: Exclude<ReadRouteMode, "mixed" | "workspace">;
+  route: Exclude<ReadRouteMode, "mixed" | "workspace" | "files">;
   effectiveSelector?: string;
   usesSharedSymbol: boolean;
   preReadSource?: string;
   lineCount?: number;
+  needsDynamicBudget?: boolean;
+  budgetDowngraded?: boolean;
 }
 
 /**
@@ -1088,7 +2051,21 @@ export async function aiceRead(
 ): Promise<ReadResult> {
   const surface = options.surface ?? "cli";
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-  const normalizedItems = normalizeReadTargets(targets, baseDir);
+
+  if (options.filesOnly === true) {
+    return executeFilesOnlyRead(targets, options, baseDir, surface);
+  }
+
+  const effectiveRawNative = resolveEffectiveReadRawNative(options);
+  const safeSearch =
+    options.search !== undefined && options.search.length > 0
+      ? buildSafeSearchRegexSelector(options.search)
+      : undefined;
+
+  let normalizedItems = normalizeReadTargets(targets, baseDir);
+  if (normalizedItems.length === 0 && (safeSearch !== undefined || options.filesWithMatches)) {
+    normalizedItems = normalizeReadTargets(["."], baseDir);
+  }
 
   // 1. Omitted / Empty Targets -> Workspace Overview (or Workspace Outline / Search)
   if (normalizedItems.length === 0) {
@@ -1100,7 +2077,10 @@ export async function aiceRead(
       throw new Error(AICE_DISABLED_MESSAGE);
     }
     const projectRoot = resolvedWs.projectRoot;
-    const effectiveIdioms = isProjectIdiomsEnabled(resolvedWs.config, options.idioms);
+    const effectiveIdioms =
+      effectiveRawNative && options.idioms !== true
+        ? false
+        : isProjectIdiomsEnabled(resolvedWs.config, options.idioms);
     const sharedSymTrimmed = options.symbol?.trim() || undefined;
     const explicitWsOutline =
       Boolean(options.outline) || sharedSymTrimmed?.toLowerCase() === "outline";
@@ -1147,6 +2127,7 @@ export async function aiceRead(
         ? "search"
         : "context"
       : "workspace";
+    const enforceWsBudget = shouldEnforceDefaultReadBudget(options);
     const ctxRes = await withSuppressedTelemetryAsync(() =>
       generateContext(undefined, {
         depth: options.depth,
@@ -1156,6 +2137,10 @@ export async function aiceRead(
         includeCallers: options.includeCallers,
         outlineTarget: Boolean(options.outlineTarget),
         maxTokens: options.maxTokens,
+        maxByteBudget: enforceWsBudget ? DEFAULT_READ_MAX_BYTES : undefined,
+        rawNative: effectiveRawNative,
+        dsl: options.dsl,
+        contextLines: options.contextLines,
         json: Boolean(options.json),
         stats: Boolean(options.stats),
         projectRoot,
@@ -1197,13 +2182,14 @@ export async function aiceRead(
     let output =
       jsonOutput ?? (statsText ? `${wsFormattedBundle}\n\n${statsText}` : wsFormattedBundle);
 
-    if (shouldEnforceDefaultReadBudget(options)) {
+    if (enforceWsBudget) {
       const firstNextFile =
         nativeFiles.length > 0 ? formatReadDisplayPath(nativeFiles[0]!, projectRoot) : ".";
       const capped = enforceReadBudgetCeiling({
         bundle: wsFormattedBundle,
         fallbackTargetPath: firstNextFile,
         statsText,
+        projectRoot,
       });
       wsFormattedBundle = capped.formattedBundle;
       output = capped.output;
@@ -1272,9 +2258,9 @@ export async function aiceRead(
 
   const classified: ClassifiedReadTarget[] = [];
   const missingTargets: string[] = [];
-  const threshold = options.autoOutlineLineThreshold ?? DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD;
-  const sharedSymbolRaw = options.symbol?.trim() || undefined;
-  const sharedSymIsOutline = sharedSymbolRaw?.toLowerCase() === "outline";
+  const explicitLineThreshold = options.autoOutlineLineThreshold;
+  const sharedSymbolRaw = safeSearch?.selector ?? (options.symbol?.trim() || undefined);
+  const sharedSymIsOutline = !safeSearch && sharedSymbolRaw?.toLowerCase() === "outline";
 
   for (const norm of normalizedItems) {
     const preResolved = resolveEffectiveTargetAndRoot(norm.targetPath, options.projectRoot);
@@ -1310,13 +2296,17 @@ export async function aiceRead(
       (!norm.selector && Boolean(sharedSymIsOutline));
     const effectiveSelector = isExplicitOutline
       ? undefined
-      : (norm.selector ?? (sharedSymIsOutline ? undefined : sharedSymbolRaw));
-    const usesSharedSymbol = !isExplicitOutline && !norm.selector && Boolean(effectiveSelector);
+      : (safeSearch?.selector ??
+        norm.selector ??
+        (sharedSymIsOutline ? undefined : sharedSymbolRaw));
+    const usesSharedSymbol =
+      !isExplicitOutline && !safeSearch && !norm.selector && Boolean(effectiveSelector);
     const effectiveFull = Boolean(options.full) || norm.explicitFull;
 
     let route: ClassifiedReadTarget["route"];
     let preReadSource: string | undefined;
     let lineCount: number | undefined;
+    let needsDynamicBudget = false;
 
     if (isExplicitOutline) {
       route = "outline";
@@ -1339,11 +2329,19 @@ export async function aiceRead(
       ) {
         preReadSource = fs.readFileSync(diskPath, "utf-8");
         lineCount = countSourceLines(preReadSource);
-        if (lineCount > threshold) {
-          route = "auto-outline-file";
-        } else {
+        if (explicitLineThreshold !== undefined) {
+          if (lineCount > explicitLineThreshold) {
+            route = "auto-outline-file";
+          } else {
+            route = "context";
+            sharedScanCache.fileContentByPath.set(diskPath, preReadSource);
+          }
+        } else if (options.maxTokens !== undefined) {
           route = "context";
           sharedScanCache.fileContentByPath.set(diskPath, preReadSource);
+        } else {
+          route = "context";
+          needsDynamicBudget = true;
         }
       } else {
         route = "context";
@@ -1361,11 +2359,53 @@ export async function aiceRead(
       usesSharedSymbol,
       preReadSource,
       lineCount,
+      needsDynamicBudget,
     });
   }
 
   if (classified.length === 0) {
     throw new Error(`Path not found: ${missingTargets.join(", ")}`);
+  }
+
+  if (options.filesWithMatches === true) {
+    const rawPat = options.search ?? classified[0]?.effectiveSelector ?? options.symbol ?? "";
+    const resolvedSearch = safeSearch ?? buildSafeSearchRegexSelector(rawPat);
+    return executeFilesWithMatchesSearch({
+      classified,
+      missingTargets,
+      regex: resolvedSearch.regex,
+      selector: resolvedSearch.selector,
+      rawPattern: rawPat,
+      options,
+      surface,
+    });
+  }
+
+  const dynamicBudgetTargets = classified.filter((c) => c.needsDynamicBudget);
+  if (dynamicBudgetTargets.length > 0) {
+    const nonBareCount = classified.length - dynamicBudgetTargets.length;
+    const reservedBytes = Math.min(12_288, nonBareCount * 1_536);
+    const reservedTokens = Math.min(3_000, nonBareCount * 380);
+    const budgetAllocation = computeDynamicReadBudget(
+      dynamicBudgetTargets.map((c, idx) => ({
+        id: String(idx),
+        rawSource: c.preReadSource,
+        lineCount: c.lineCount,
+      })),
+      { reservedBytes, reservedTokens },
+    );
+    for (let i = 0; i < dynamicBudgetTargets.length; i++) {
+      const item = dynamicBudgetTargets[i]!;
+      if (budgetAllocation.autoOutlineIds.has(String(i))) {
+        item.route = "auto-outline-file";
+        item.budgetDowngraded = true;
+      } else {
+        item.route = "context";
+        if (item.preReadSource !== undefined) {
+          sharedScanCache.fileContentByPath.set(item.diskPath, item.preReadSource);
+        }
+      }
+    }
   }
 
   const outlineItems = classified.filter(
@@ -1526,6 +2566,7 @@ export async function aiceRead(
       bundle: formattedBundle,
       fallbackTargetPath: classified[0]?.displayPath ?? ".",
       statsText,
+      projectRoot: primaryProjectRoot,
     });
     formattedBundle = cappedMixed.formattedBundle;
     output = cappedMixed.output;
@@ -1613,12 +2654,24 @@ function buildPureOutlineResult(params: {
   const { outlineRes, classified, missingTargets, projectRoot, options, surface, skipTelemetry } =
     params;
 
-  const autoOutlineByAbsPath = new Map<string, { lineCount: number; displayPath: string }>();
+  const autoOutlineByAbsPath = new Map<
+    string,
+    {
+      lineCount: number;
+      displayPath: string;
+      diskPath: string;
+      preReadSource?: string;
+      budgetDowngraded?: boolean;
+    }
+  >();
   for (const c of classified) {
     if (c.route === "auto-outline-file" && c.lineCount !== undefined) {
       autoOutlineByAbsPath.set(path.resolve(c.diskPath), {
         lineCount: c.lineCount,
         displayPath: c.displayPath,
+        diskPath: c.diskPath,
+        preReadSource: c.preReadSource,
+        budgetDowngraded: c.budgetDowngraded,
       });
     }
   }
@@ -1650,7 +2703,14 @@ function buildPureOutlineResult(params: {
         : rawKey;
       const autoMeta = autoOutlineByAbsPath.get(path.resolve(itemRes.file));
       const headerLine = autoMeta
-        ? `${buildAutoOutlineHeader(displayKey, autoMeta.lineCount)}\n`
+        ? `${buildAutoOutlineHeader(displayKey, autoMeta.lineCount, {
+            budgetDowngraded: autoMeta.budgetDowngraded,
+            nextSliceCmd: buildNextSliceHintCommand(displayKey, 1, autoMeta.lineCount, {
+              diskPath: autoMeta.diskPath,
+              rawSource: autoMeta.preReadSource,
+              projectRoot,
+            }),
+          })}\n`
         : "";
       outlineDisplayKeys.push(displayKey);
       textBlocks.push(`// === ${displayKey} ===\n${headerLine}${itemRes.text}`);
@@ -1709,7 +2769,7 @@ function buildPureOutlineResult(params: {
       if (omittedDisplayPaths.length > 0) {
         const hintCmds = omittedDisplayPaths
           .slice(0, 3)
-          .map((p) => buildNextSliceHintCommand(p, 1, undefined, 150))
+          .map((p) => buildNextSliceHintCommand(p, 1, undefined, { projectRoot }))
           .join(" | ");
         keptOutlineBlocks.push(
           `// ... (+${omittedDisplayPaths.length} more target files omitted to fit 28 KB stdout budget)\n// Next slices: ${hintCmds} (or pass --full)`,
@@ -1731,11 +2791,24 @@ function buildPureOutlineResult(params: {
       singleTarget?.displayPath ?? formatReadDisplayPath(outlineRes.file, projectRoot);
     const autoMeta =
       singleTarget?.route === "auto-outline-file" && singleTarget.lineCount !== undefined
-        ? { lineCount: singleTarget.lineCount, displayPath }
+        ? {
+            lineCount: singleTarget.lineCount,
+            displayPath,
+            diskPath: singleTarget.diskPath,
+            preReadSource: singleTarget.preReadSource,
+            budgetDowngraded: singleTarget.budgetDowngraded,
+          }
         : undefined;
 
     if (autoMeta) {
-      const autoHeader = buildAutoOutlineHeader(autoMeta.displayPath, autoMeta.lineCount);
+      const autoHeader = buildAutoOutlineHeader(autoMeta.displayPath, autoMeta.lineCount, {
+        budgetDowngraded: autoMeta.budgetDowngraded,
+        nextSliceCmd: buildNextSliceHintCommand(autoMeta.displayPath, 1, autoMeta.lineCount, {
+          diskPath: autoMeta.diskPath,
+          rawSource: autoMeta.preReadSource,
+          projectRoot,
+        }),
+      });
       rawBundle = outlineRes.text ? `${autoHeader}\n${outlineRes.text}` : autoHeader;
     } else {
       rawBundle = outlineRes.text;
@@ -1798,6 +2871,9 @@ function buildPureOutlineResult(params: {
       fallbackTargetPath: firstFallback,
       statsText,
       totalLines: classified.length === 1 ? classified[0]?.lineCount : undefined,
+      diskPath: classified.length === 1 ? classified[0]?.diskPath : undefined,
+      rawSource: classified.length === 1 ? classified[0]?.preReadSource : undefined,
+      projectRoot,
     });
     formattedBundle = cappedOutline.formattedBundle;
     output = cappedOutline.output;
@@ -1908,6 +2984,12 @@ async function executeContextStream(params: {
   let totalNativeO200k = 0;
   let resolvedNativeTargetCount = 0;
 
+  const effectiveRawNative = resolveEffectiveReadRawNative(options);
+  const enforceContextBudget = shouldEnforceDefaultReadBudget(
+    options,
+    contextItems.map((c) => c.norm),
+  );
+
   for (const item of contextItems) {
     const contextOpts: ContextOptions = {
       depth: options.depth,
@@ -1919,6 +3001,10 @@ async function executeContextStream(params: {
       zeroEnvelopeBareSmallFiles: true,
       outlineTarget: Boolean(options.outlineTarget),
       maxTokens: isMultiInput ? undefined : options.maxTokens,
+      maxByteBudget: !isMultiInput && enforceContextBudget ? DEFAULT_READ_MAX_BYTES : undefined,
+      rawNative: effectiveRawNative,
+      dsl: options.dsl,
+      contextLines: options.contextLines,
       json: Boolean(options.json),
       stats: Boolean(options.stats),
       projectRoot: item.resolved.projectRoot,
@@ -2124,25 +3210,39 @@ async function executeContextStream(params: {
     ) {
       const keptContextResults: ContextResult[] = [];
       const downgradedBlocks: string[] = [];
+      const softByteCap = DEFAULT_READ_SOFT_BYTE_CAP;
+      const softTokenCap = DEFAULT_READ_SOFT_TOKEN_CAP;
+
+      // Smallest-first water-filling across multi-context targets
+      const indexedCosts = results.map((resItem, idx) => ({
+        idx,
+        itemBytes: Buffer.byteLength(resItem.formattedBundle, "utf-8"),
+        itemToks: resItem.tokenCount ?? estimateTokens(resItem.formattedBundle),
+      }));
+      const sortedCosts = [...indexedCosts].sort(
+        (a, b) => a.itemBytes - b.itemBytes || a.idx - b.idx,
+      );
+      const fitInlineIndices = new Set<number>();
       let cumulativeBytes = 0;
       let cumulativeTokens = 0;
-      const softByteCap = DEFAULT_READ_MAX_BYTES - 2048;
-      const softTokenCap = DEFAULT_READ_MAX_TOKENS - 500;
+      for (const entry of sortedCosts) {
+        const sep = fitInlineIndices.size > 0 ? 2 : 0;
+        if (
+          cumulativeBytes + sep + entry.itemBytes <= softByteCap &&
+          cumulativeTokens + entry.itemToks <= softTokenCap
+        ) {
+          fitInlineIndices.add(entry.idx);
+          cumulativeBytes += sep + entry.itemBytes;
+          cumulativeTokens += entry.itemToks;
+        }
+      }
 
       for (let i = 0; i < results.length; i++) {
         const resItem = results[i]!;
         const targetMeta = matchedTargets[i]!;
-        const itemBytes = Buffer.byteLength(resItem.formattedBundle, "utf-8");
-        const itemToks = resItem.tokenCount ?? estimateTokens(resItem.formattedBundle);
-        const fitsInFull =
-          downgradedBlocks.length === 0 &&
-          cumulativeBytes + itemBytes <= softByteCap &&
-          cumulativeTokens + itemToks <= softTokenCap;
 
-        if (fitsInFull) {
+        if (fitInlineIndices.has(i)) {
           keptContextResults.push(resItem);
-          cumulativeBytes += itemBytes + 2;
-          cumulativeTokens += itemToks;
           continue;
         }
 
@@ -2156,14 +3256,19 @@ async function executeContextStream(params: {
             startHintLine = Math.max(1, Number.parseInt(rm[1], 10));
           }
         }
+        const cachedRaw =
+          targetMeta.preReadSource ?? sharedScanCache.fileContentByPath.get(targetMeta.diskPath);
         const totalTargetLines =
-          targetMeta.lineCount ??
-          (targetMeta.preReadSource ? countSourceLines(targetMeta.preReadSource) : undefined);
+          targetMeta.lineCount ?? (cachedRaw ? countSourceLines(cachedRaw) : undefined);
         const nextCmd = buildNextSliceHintCommand(
           targetMeta.displayPath,
           startHintLine,
           totalTargetLines,
-          150,
+          {
+            diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
+            rawSource: cachedRaw,
+            projectRoot: targetMeta.resolved.projectRoot,
+          },
         );
         paginationHints.push(nextCmd);
         if (targetSummaries[i]) {
@@ -2246,6 +3351,7 @@ async function executeContextStream(params: {
         fallbackTargetPath: matchedTargets[0]?.displayPath ?? ".",
         statsText,
         extraHints: paginationHints,
+        projectRoot: firstProjectRoot,
       });
       formattedBundle = cappedMulti.formattedBundle;
       output = cappedMulti.output;
@@ -2350,14 +3456,19 @@ async function executeContextStream(params: {
 
   if (enforceStreamBudget) {
     const singleMatched = matchedTargets[0];
+    const singleRaw =
+      singleMatched?.preReadSource ??
+      (singleMatched ? sharedScanCache.fileContentByPath.get(singleMatched.diskPath) : undefined);
     const singleTotalLines =
-      singleMatched?.lineCount ??
-      (singleMatched?.preReadSource ? countSourceLines(singleMatched.preReadSource) : undefined);
+      singleMatched?.lineCount ?? (singleRaw ? countSourceLines(singleRaw) : undefined);
     const cappedSingle = enforceReadBudgetCeiling({
       bundle: formattedBundle,
       fallbackTargetPath: singleMatched?.displayPath ?? singleResult.targetPath,
       statsText,
       totalLines: singleTotalLines,
+      diskPath: singleMatched?.isDir ? undefined : singleMatched?.diskPath,
+      rawSource: singleRaw,
+      projectRoot: firstProjectRoot,
     });
     formattedBundle = cappedSingle.formattedBundle;
     output = cappedSingle.output;
@@ -2423,3 +3534,5 @@ async function executeContextStream(params: {
     statsText,
   };
 }
+
+export const read = aiceRead;
