@@ -371,8 +371,8 @@ The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `w
 
 ````markdown
 <!-- AICE:START -->
-<!-- AICE:START v0.9.38 -->
-## AICE (v0.9.38) — 2-Tool AST Cheat-Card
+<!-- AICE:START v0.9.39 -->
+## AICE (v0.9.39) — 2-Tool AST Cheat-Card
 **MANDATORY OVERRIDE**: Active (Rule 1) across all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY `aice read`/`search`/`find` (MCP `aice_read`) & `aice splice`/`aice write` (MCP `aice_splice`), never native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when `aice.config.json` has `"enabled": true`; skip if missing/`false`. `$idioms` OFF (`--idioms` opt-in).

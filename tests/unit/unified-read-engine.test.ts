@@ -1158,6 +1158,52 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       );
       expect(targetFirstRes.output).not.toContain("next slice:");
     });
+
+    it("emits numeric-dense 145-line slice (> 3,200 tokens, <= 9 KB) in 1 turn without truncation on surface: 'cli'", async () => {
+      const line = "emitBoxLocal(ctx, inst, -15.0, 15.0, -6.8, 0.25, true);";
+      const denseContent = Array.from({ length: 145 }, () => line).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "dense_mesh.ts"), `${denseContent}\n`, "utf-8");
+
+      const res = await read("src/dense_mesh.ts:L1-L145", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+
+      const bytes = Buffer.byteLength(res.output, "utf-8");
+      const tokens = estimateTokens(res.output);
+      expect(bytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(tokens).toBeGreaterThan(3_200);
+      expect(res.output).not.toContain("budget reached");
+      expect(res.output).toContain("1│");
+      expect(res.output).toContain("145│");
+      expect(res.output).not.toContain("146│");
+    });
+
+    it("handles multi-target explicit :Lstart-Lend overflow on surface: 'cli' by emitting compact omitted header without full outline", async () => {
+      const line = "emitBoxLocal(ctx, -15.0, 15.0, -6.8, 0.25, true);";
+      const multiContent = Array.from({ length: 300 }, () => line).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "multi_slice.ts"), `${multiContent}\n`, "utf-8");
+
+      const res = await aiceRead(["src/multi_slice.ts:L1-L140", "src/multi_slice.ts:L141-L280"], {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+
+      const bytes = Buffer.byteLength(res.output, "utf-8");
+      expect(bytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      // First slice emits lines 1-140 inline
+      expect(res.output).toContain("1│");
+      expect(res.output).toContain("140│");
+      expect(res.output).not.toContain("141│");
+      // Second slice is compactly omitted with next slice hint
+      expect(res.output).toContain(
+        "// === src/multi_slice.ts:L141-L280 (omitted — 9 KB CLI budget; next slice: aice read src/multi_slice.ts:L141-L280) ===",
+      );
+      // Verifies full-file outline is NOT dumped
+      expect(res.output).not.toContain("auto-downgraded to :outline");
+      expect(res.output).not.toContain("module multi_slice:");
+      expect(res.output).toContain("aice read src/multi_slice.ts:L141-L280");
+    });
   });
 
   describe("Honest Signed Read/Context Baselines & Failed CLI Telemetry (Steps 6.3-6.4)", () => {

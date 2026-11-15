@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.38";
+    AICE_VERSION = "0.9.39";
     VERSION = AICE_VERSION;
   }
 });
@@ -301619,7 +301619,7 @@ ${statsText}`, "utf-8") : 0;
   const maxBundleBytes = Math.max(1024, maxBytes - statsAllowanceBytes);
   const initialBytes = Buffer.byteLength(bundle, "utf-8");
   const initialTokens = estimateTokens(bundle);
-  const effectiveTokenCeiling = Math.max(maxTokens, Math.ceil(maxBundleBytes / 3));
+  const effectiveTokenCeiling = Math.max(maxTokens, Math.ceil(maxBundleBytes / 1.75));
   if (initialBytes <= maxBundleBytes && initialTokens <= effectiveTokenCeiling) {
     const out = statsText ? `${bundle}
 
@@ -303248,6 +303248,10 @@ async function executeContextStream(params) {
           keptContextResults.push(resItem);
           continue;
         }
+        const isExplicitLineRange = Boolean(
+          targetMeta.effectiveSelector && LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector)
+        );
+        const parsedOverflowRange = parseSelectorLineRange(targetMeta.effectiveSelector);
         let startHintLine = 1;
         if (targetMeta.effectiveSelector && LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector)) {
           const rm = targetMeta.effectiveSelector.match(/L(\d+)/i);
@@ -303257,6 +303261,7 @@ async function executeContextStream(params) {
         }
         const cachedRaw = targetMeta.preReadSource ?? sharedScanCache.fileContentByPath.get(targetMeta.diskPath);
         const totalTargetLines = targetMeta.lineCount ?? (cachedRaw ? countSourceLines(cachedRaw) : void 0);
+        const requestedEndLine = parsedOverflowRange ? parsedOverflowRange.endLine ?? parsedOverflowRange.startLine : void 0;
         const nextCmd = buildNextSliceHintCommand(
           targetMeta.displayPath,
           startHintLine,
@@ -303265,7 +303270,8 @@ async function executeContextStream(params) {
             diskPath: targetMeta.isDir ? void 0 : targetMeta.diskPath,
             rawSource: cachedRaw,
             projectRoot: targetMeta.resolved.projectRoot,
-            sliceByteBudget: effectiveBudgets.sliceByteBudget
+            sliceByteBudget: effectiveBudgets.sliceByteBudget,
+            maxEndLine: requestedEndLine !== void 0 && requestedEndLine >= startHintLine ? requestedEndLine : void 0
           }
         );
         paginationHints.push(nextCmd);
@@ -303276,30 +303282,36 @@ async function executeContextStream(params) {
             ...totalTargetLines !== void 0 ? { lineCount: totalTargetLines } : {}
           };
         }
-        try {
-          if (!targetMeta.isDir && fs20.existsSync(targetMeta.diskPath)) {
-            const oRes = await withSuppressedTelemetryAsync(
-              () => outlinePath(targetMeta.diskPath, {
-                includeTypes: options.includeTypes !== false,
-                compact: true,
-                idioms: isProjectIdiomsEnabled(targetMeta.resolved.config, options.idioms),
-                projectRoot: targetMeta.resolved.projectRoot
-              })
-            );
-            const singleOutline = oRes instanceof Map ? Array.from(oRes.values())[0]?.text ?? "" : oRes.text;
-            downgradedBlocks.push(
-              `// === ${targetMeta.displayPath} (auto-downgraded to :outline \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===
+        if (isExplicitLineRange) {
+          downgradedBlocks.push(
+            `// === ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`
+          );
+        } else {
+          try {
+            if (!targetMeta.isDir && fs20.existsSync(targetMeta.diskPath)) {
+              const oRes = await withSuppressedTelemetryAsync(
+                () => outlinePath(targetMeta.diskPath, {
+                  includeTypes: options.includeTypes !== false,
+                  compact: true,
+                  idioms: isProjectIdiomsEnabled(targetMeta.resolved.config, options.idioms),
+                  projectRoot: targetMeta.resolved.projectRoot
+                })
+              );
+              const singleOutline = oRes instanceof Map ? Array.from(oRes.values())[0]?.text ?? "" : oRes.text;
+              downgradedBlocks.push(
+                `// === ${targetMeta.displayPath} (auto-downgraded to :outline \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===
 ${singleOutline}`
-            );
-          } else {
+              );
+            } else {
+              downgradedBlocks.push(
+                `// === ${targetMeta.displayPath} (omitted \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`
+              );
+            }
+          } catch {
             downgradedBlocks.push(
               `// === ${targetMeta.displayPath} (omitted \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`
             );
           }
-        } catch {
-          downgradedBlocks.push(
-            `// === ${targetMeta.displayPath} (omitted \u2014 ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`
-          );
         }
       }
       const partsAfterDowngrade = [];
@@ -303529,8 +303541,8 @@ var init_read = __esm({
     DEFAULT_CLI_READ_MAX_BYTES = 9216;
     DEFAULT_CLI_READ_SOFT_BYTE_CAP = 8704;
     DEFAULT_CLI_SLICE_BYTE_BUDGET = 7936;
-    DEFAULT_CLI_READ_MAX_TOKENS = 2400;
-    DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 2200;
+    DEFAULT_CLI_READ_MAX_TOKENS = 5e3;
+    DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 4600;
     SINGLE_REGEX_LITERAL_RE = /^\/(?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n])+\/[gimsuy]*$/;
     LINE_RANGE_SELECTOR_RE = /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i;
     BINARY_DISCOVERY_EXTENSIONS = /* @__PURE__ */ new Set([

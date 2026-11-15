@@ -65,8 +65,8 @@ export const DEFAULT_SLICE_BYTE_BUDGET = 18_432;
 export const DEFAULT_CLI_READ_MAX_BYTES = 9_216; // 9.0 KB (strictly below host 9,892-byte middle-truncation ceiling)
 export const DEFAULT_CLI_READ_SOFT_BYTE_CAP = 8_704; // 8.5 KB
 export const DEFAULT_CLI_SLICE_BYTE_BUDGET = 7_936; // 7.75 KB (~135-185 AST-snapped lines)
-export const DEFAULT_CLI_READ_MAX_TOKENS = 2_400;
-export const DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 2_200;
+export const DEFAULT_CLI_READ_MAX_TOKENS = 5_000;
+export const DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 4_600;
 
 export interface EffectiveReadBudgets {
   maxBytes: number;
@@ -1471,7 +1471,7 @@ function enforceReadBudgetCeiling(params: {
   const initialBytes = Buffer.byteLength(bundle, "utf-8");
   const initialTokens = estimateTokens(bundle);
 
-  const effectiveTokenCeiling = Math.max(maxTokens, Math.ceil(maxBundleBytes / 3));
+  const effectiveTokenCeiling = Math.max(maxTokens, Math.ceil(maxBundleBytes / 1.75));
   if (initialBytes <= maxBundleBytes && initialTokens <= effectiveTokenCeiling) {
     const out = statsText ? `${bundle}\n\n${statsText}` : bundle;
     if (Buffer.byteLength(out, "utf-8") <= maxBytes) {
@@ -3462,6 +3462,12 @@ async function executeContextStream(params: {
           continue;
         }
 
+        const isExplicitLineRange = Boolean(
+          targetMeta.effectiveSelector &&
+            LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector),
+        );
+        const parsedOverflowRange = parseSelectorLineRange(targetMeta.effectiveSelector);
+
         let startHintLine = 1;
         if (
           targetMeta.effectiveSelector &&
@@ -3476,6 +3482,9 @@ async function executeContextStream(params: {
           targetMeta.preReadSource ?? sharedScanCache.fileContentByPath.get(targetMeta.diskPath);
         const totalTargetLines =
           targetMeta.lineCount ?? (cachedRaw ? countSourceLines(cachedRaw) : undefined);
+        const requestedEndLine = parsedOverflowRange
+          ? (parsedOverflowRange.endLine ?? parsedOverflowRange.startLine)
+          : undefined;
         const nextCmd = buildNextSliceHintCommand(
           targetMeta.displayPath,
           startHintLine,
@@ -3485,6 +3494,10 @@ async function executeContextStream(params: {
             rawSource: cachedRaw,
             projectRoot: targetMeta.resolved.projectRoot,
             sliceByteBudget: effectiveBudgets.sliceByteBudget,
+            maxEndLine:
+              requestedEndLine !== undefined && requestedEndLine >= startHintLine
+                ? requestedEndLine
+                : undefined,
           },
         );
         paginationHints.push(nextCmd);
@@ -3496,30 +3509,36 @@ async function executeContextStream(params: {
           };
         }
 
-        try {
-          if (!targetMeta.isDir && fs.existsSync(targetMeta.diskPath)) {
-            const oRes = await withSuppressedTelemetryAsync(() =>
-              outlinePath(targetMeta.diskPath, {
-                includeTypes: options.includeTypes !== false,
-                compact: true,
-                idioms: isProjectIdiomsEnabled(targetMeta.resolved.config, options.idioms),
-                projectRoot: targetMeta.resolved.projectRoot,
-              }),
-            );
-            const singleOutline =
-              oRes instanceof Map ? (Array.from(oRes.values())[0]?.text ?? "") : oRes.text;
-            downgradedBlocks.push(
-              `// === ${targetMeta.displayPath} (auto-downgraded to :outline — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===\n${singleOutline}`,
-            );
-          } else {
+        if (isExplicitLineRange) {
+          downgradedBlocks.push(
+            `// === ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
+          );
+        } else {
+          try {
+            if (!targetMeta.isDir && fs.existsSync(targetMeta.diskPath)) {
+              const oRes = await withSuppressedTelemetryAsync(() =>
+                outlinePath(targetMeta.diskPath, {
+                  includeTypes: options.includeTypes !== false,
+                  compact: true,
+                  idioms: isProjectIdiomsEnabled(targetMeta.resolved.config, options.idioms),
+                  projectRoot: targetMeta.resolved.projectRoot,
+                }),
+              );
+              const singleOutline =
+                oRes instanceof Map ? (Array.from(oRes.values())[0]?.text ?? "") : oRes.text;
+              downgradedBlocks.push(
+                `// === ${targetMeta.displayPath} (auto-downgraded to :outline — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===\n${singleOutline}`,
+              );
+            } else {
+              downgradedBlocks.push(
+                `// === ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
+              );
+            }
+          } catch {
             downgradedBlocks.push(
               `// === ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
             );
           }
-        } catch {
-          downgradedBlocks.push(
-            `// === ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
-          );
         }
       }
 
