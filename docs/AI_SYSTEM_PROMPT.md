@@ -248,18 +248,18 @@ When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` w
 
 ````markdown
 <!-- AICE:START -->
-<!-- AICE:START v0.9.37 -->
-## AICE (v0.9.37) — 2-Tool AST Cheat-Card
-**MANDATORY OVERRIDE**: When active (Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), use ONLY `aice read` / `aice search` / `aice find` (MCP `aice_read`) and `aice splice` / `aice write` (MCP `aice_splice`) instead of native file tools.
+<!-- AICE:START v0.9.38 -->
+## AICE (v0.9.38) — 2-Tool AST Cheat-Card
+**MANDATORY OVERRIDE**: Active (Rule 1) across all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY `aice read`/`search`/`find` (MCP `aice_read`) & `aice splice`/`aice write` (MCP `aice_splice`), never native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
-- Gate: Active ONLY when `aice.config.json` has `"enabled": true`; bypass AICE completely when missing or `"enabled": false`. `$idioms` default OFF (`"idiomsEnabled": false`; opt in via `--idioms`).
-- Non-Coding Bypass: Board-only swarm monitors/coordinators and pure Q&A / non-file sessions bypass AICE ceremony with zero overhead.
-- Fallback: On `aice` crash/timeout/blocker, run `aice disable` -> native tools -> `aice enable`.
-### 2. 1-Turn Read, Search, Find & Batch Splice (No Shell Workarounds)
-- Ban: NEVER write files via shell (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/rg/awk/head/tail/cat/ls/find on supported targets.
-- Read / Search / Find: `aice read` emits 1-based numbered native lines (`N│`) by default on `:symbol` & inline bare files (`<=28KB` water-fill; `--dsl` for shorthand) so you splice in 1 turn without re-reading. Use `aice search <pat> [dir]` (`grep`, `-C`, `-l`; MCP `aice_read` `search`/`contextLines`) and `aice find [glob] [dir]` (`tree`; MCP `filesOnly: true`).
+- Gate: Active ONLY when `aice.config.json` has `"enabled": true`; skip if missing/`false`. `$idioms` OFF (`--idioms` opt-in).
+- Bypass: Board-only swarm monitors/coordinators & non-file Q&A have zero overhead.
+- Fallback: Crash/blocker -> `aice disable` -> native tools -> `aice enable`.
+### 2. Batch Read & Splice (No Shell Workarounds)
+- Ban: No shell writes (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find on supported files.
+- Read: 1-turn numbered native `aice read src tests`, `aice read f1:sym f2:L1-L50` (`--dsl`, Adaptive Sibling Outlining; CLI <=9KB/<=150L slice, MCP <=28KB), `aice search <pat> [dir]` (`grep`, `-C`, `-l`, or 4-tier ranked `aice read <fileOrDir> -s "/<searchPattern>/"`), `aice find [glob] [dir]` (`tree`); MCP `aice_read` (`search`, `contextLines`, `filesOnly`, `dsl`).
 - Splice: 1-call `aice splice --stdin << 'EOF'` with `=== <file> ===`, `:symbol` (`@clone(SourceSym)`, `@replace-docs`), `:Lstart-Lend`, `<<< === >>>` hunks, `:eof`, `:imports`.
 ### 3. Subagent Propagation
-- Coding subagents and `swarm add` briefs MUST state: `"Use AICE (aice read / aice search / aice find / aice splice) for all file exploration and edits."`
+- Coding subagents/`swarm add` briefs MUST state: `"Use AICE (aice read / aice splice) for all file exploration and edits."`
 <!-- AICE:END -->
 ````

@@ -31,6 +31,7 @@ import {
   computeLineRangeBaselineText,
   computeRegexBaselineText,
   countSourceLines,
+  DEFAULT_CLI_READ_MAX_BYTES,
   DEFAULT_READ_MAX_BYTES,
   generateContext,
   normalizeReadTargets,
@@ -999,6 +1000,163 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(dirRes.mode).toBe("auto-outline-dir");
       expect(Buffer.byteLength(dirRes.output, "utf-8")).toBeLessThanOrEqual(DEFAULT_READ_MAX_BYTES);
       expect(dirRes.output).toMatch(/aice read src\/massive\/module_\d+\.ts:L1-L20/);
+    });
+
+    it("enforces Surface-Aware 9 KB CLI Anti-Middle-Truncation Cap (surface: 'cli') across bare, line, and symbol reads", async () => {
+      const cliFileLines = [
+        'import { type MetricConfig } from "./contracts.js";',
+        "export function myLongFunc(cfg: MetricConfig): number {",
+        ...Array.from(
+          { length: 450 },
+          (_, i) =>
+            `  const computedStepValue_${i} = ${i} * 2 + cfg.weight; // payload line padding to exceed 9kb`,
+        ),
+        "  return cfg.weight;",
+        "}",
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "cli_oversized.ts"), `${cliFileLines}\n`, "utf-8");
+
+      // 1. Line range query with surface: "cli"
+      const lineRes = await read("src/cli_oversized.ts:L1-L400", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      const lineBytes = Buffer.byteLength(lineRes.output, "utf-8");
+      expect(lineBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(lineRes.output).toContain(
+        "// [9 KB CLI stdout budget reached — next slice: aice read src/cli_oversized.ts:L",
+      );
+      expect(lineRes.output).toContain("(or pass --full)]");
+      expect(lineRes.output).toMatch(/\n\n\/\/ \[9 KB CLI stdout budget reached/);
+
+      // 2. Symbol query on a large function with surface: "cli"
+      const symRes = await read("src/cli_oversized.ts:myLongFunc", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      const symBytes = Buffer.byteLength(symRes.output, "utf-8");
+      expect(symBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(symRes.output).toContain(
+        "// [9 KB CLI stdout budget reached — next slice: aice read src/cli_oversized.ts:L",
+      );
+      expect(symRes.output).not.toContain("myLongFunc:L");
+      expect(symRes.output).not.toContain("Dependency::L");
+
+      // 3. Bare file auto-outlines with 7.75 KB CLI sliceByteBudget hint footer
+      const bareRes = await read("src/cli_oversized.ts", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(bareRes.mode).toBe("auto-outline-file");
+      expect(bareRes.output).toContain("// Next slice: aice read src/cli_oversized.ts:L1-L");
+      const nextSliceMatch = bareRes.output.match(
+        /Next slice: aice read src\/cli_oversized\.ts:L1-L(\d+)/,
+      );
+      expect(nextSliceMatch).toBeTruthy();
+      const endLineHint = Number(nextSliceMatch?.[1]);
+      expect(endLineHint).toBeLessThanOrEqual(200);
+    });
+
+    it("correctly infers next window without bogus Dependency: headers, strips :selector suffix, and clamps explicit :Lstart-Lend", async () => {
+      // 1. Explicit range selector file:L251-L500 truncated within 9 KB CLI budget
+      const rangedLines = Array.from(
+        { length: 600 },
+        (_, i) => `export const val_${i + 1} = "payload_${i + 1}";`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "cli_ranged.ts"), `${rangedLines}\n`, "utf-8");
+
+      const rangedRes = await read("src/cli_ranged.ts:L251-L500", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(Buffer.byteLength(rangedRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
+      expect(rangedRes.output).toContain(
+        "// [9 KB CLI stdout budget reached — next slice: aice read src/cli_ranged.ts:L",
+      );
+      // Verify endLine is clamped to L500
+      expect(rangedRes.output).toMatch(/next slice: aice read src\/cli_ranged\.ts:L\d+-L500\b/);
+      expect(rangedRes.output).not.toContain("src/cli_ranged.ts:L251-L500:L");
+      expect(rangedRes.output).not.toContain("Dependency::L");
+
+      // 2. Truncating file:myLongFunc with dependency in output never produces Dependency::L...
+      const depContent = Array.from({ length: 40 }, (_, i) => `export const dep_${i} = ${i};`).join(
+        "\n",
+      );
+      fs.writeFileSync(path.join(tmpDir, "src", "dep_helper.ts"), `${depContent}\n`, "utf-8");
+
+      const callerContent = [
+        'import { dep_0 } from "./dep_helper.js";',
+        "export function myFuncWithDeps(): void {",
+        ...Array.from(
+          { length: 350 },
+          (_, i) => `  console.log("data_${i}_padding_long_string_bytes_" + dep_0);`,
+        ),
+        "}",
+      ].join("\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "caller_with_deps.ts"),
+        `${callerContent}\n`,
+        "utf-8",
+      );
+
+      const depRes = await read("src/caller_with_deps.ts:myFuncWithDeps", {
+        projectRoot: tmpDir,
+        surface: "cli",
+        includeDeps: true,
+      });
+      expect(Buffer.byteLength(depRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
+      expect(depRes.output).not.toContain("Dependency::L");
+      expect(depRes.output).not.toContain("myFuncWithDeps:L");
+      expect(depRes.output).toContain("## Target File Content:");
+      expect(depRes.output).toContain("aice read src/caller_with_deps.ts:L");
+
+      // 3. Target-first ordering: concise symbol in a file with > 10 KB of imported contracts emits 100% of target lines first
+      const heavyDepExports = Array.from(
+        { length: 45 },
+        (_, i) =>
+          `export function heavyHelper_${i}(paramAlpha_${i}: number, paramBeta_${i}: string, paramGamma_${i}: boolean, paramDelta_${i}: Record<string, number>, paramEpsilon_${i}: Array<string>): Promise<{ status_${i}: boolean; payload_${i}: string }> { return Promise.resolve({ status_${i}: paramGamma_${i}, payload_${i}: paramBeta_${i} + paramAlpha_${i} + paramDelta_${i} + paramEpsilon_${i}.length }); }`,
+      ).join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "heavy_deps.ts"), `${heavyDepExports}\n`, "utf-8");
+      const usedImports = Array.from({ length: 45 }, (_, i) => `heavyHelper_${i}`).join(", ");
+      const callLines = Array.from({ length: 15 }, (_, row) => {
+        const trio = [row * 3, row * 3 + 1, row * 3 + 2]
+          .map((idx) => `heavyHelper_${idx}`)
+          .join(", ");
+        return `  void [${trio}];`;
+      });
+      const shortSymSource = [
+        `import { ${usedImports} } from "./heavy_deps.js";`,
+        "export function wireAllHelpers(): void {",
+        ...callLines,
+        '  console.log("FINAL_TARGET_LINE_MARKER");',
+        "}",
+      ].join("\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "short_sym_heavy_deps.ts"),
+        `${shortSymSource}\n`,
+        "utf-8",
+      );
+
+      const targetFirstRes = await read("src/short_sym_heavy_deps.ts:wireAllHelpers", {
+        projectRoot: tmpDir,
+        surface: "cli",
+        includeDeps: true,
+      });
+      expect(Buffer.byteLength(targetFirstRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
+      expect(targetFirstRes.output).toContain("FINAL_TARGET_LINE_MARKER");
+      expect(targetFirstRes.output.indexOf("## Target File Content:")).toBeLessThan(
+        targetFirstRes.output.indexOf("## Imported Dependency Contracts"),
+      );
+      expect(targetFirstRes.output).toContain(
+        "target content complete; trailing dependency/caller contracts trimmed",
+      );
+      expect(targetFirstRes.output).not.toContain("next slice:");
     });
   });
 

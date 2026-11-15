@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.37](https://img.shields.io/badge/Version-0.9.37-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.38](https://img.shields.io/badge/Version-0.9.38-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -78,7 +78,7 @@ Autonomous AI agents see **ONLY two MCP tools** — **`aice read`** (MCP `aice_r
 
 ### Pillar 1: Unified Read (`aice read` / MCP `aice_read` + CLI `search`/`grep` & `find`/`tree`)
 - **Default 1-Turn Numbered Native Output (`--dsl` Opt-In)**: By default, `aice read` (and MCP `aice_read`) emits **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) on **both** `:symbol` queries (all symbol lengths, including `<= 25` lines and `> 25` lines) **and** inline bare files — preserving dependency contracts, `[L14]` callers, and **Adaptive Sibling Outlining** (`<= 20` symbols / `~150` tokens) on `:Class.method` reads so agents can immediately run `aice splice` (`<<< === >>>` or `:Lstart-Lend`) in **1 turn** without a second `:Lstart-Lend` line-hunting read. Pass `--dsl` (`dsl: true` in MCP) to opt into AICE shorthand decompilation.
-- **Dynamic Water-Filling Byte/Token Budget & AST-Snapped Slice Hints**: Replaces static `250`/`150`-line cutoffs with **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling, `26,624 B` / `6,500`-token soft cap, smallest-first water-filling across requested targets so a single `~600–750` line / `<= 25 KB` bare file renders inline in 1 turn, auto-outlining only overflow targets unless `--full`, `--max-tokens`, or an explicit `autoOutlineLineThreshold` is passed) and **`computeDynamicSliceSpan()`** (`18,432 B` slice budget clamped to `80..650` lines and snapped to complete top-level AST symbol boundaries so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function in half).
+- **Dynamic Water-Filling Byte/Token Budget & AST-Snapped Slice Hints**: Replaces static `250`/`150`-line cutoffs with **surface-aware budgeting** via **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling for MCP/programmatic `aice_read`; `9,216 B` (`9 KB`) / `2,400`-token ceiling for CLI `aice read` to prevent host `run_command` middle-truncation; smallest-first water-filling across requested targets so small files render inline in 1 turn, auto-outlining only overflow targets unless `--full`, `--max-tokens`, or an explicit `autoOutlineLineThreshold` is passed) and **`computeDynamicSliceSpan()`** (`18,432 B` MCP / `7,936 B` (`7.75 KB`, ~135–185 lines) CLI slice budget clamped and snapped to complete top-level AST symbol boundaries so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function in half).
 - **AST-Aware Search Context Windows & `aice search` (`grep`)**: Tier 1 & 2 search hits expand automatically to **complete enclosing AST declarations (`<= 40` lines)** or **`±10` numbered native lines** (`~21`-line window, configurable via `-C, --context <lines>` / MCP `contextLines`), merging overlapping windows within the `28 KB` budget instead of tiny 5-line (`±2`) peepholes. `aice search <pattern> [targets...]` (alias `grep`, plus `aice read --search`) accepts plain regex or auto-escaped literal patterns without `/.../` wrappers (supporting `-C`, `-l`, `--full`, `--json`, `--max-tokens`), ranked across **4 Tiers** (production declarations $\to$ code $\to$ comments $\to$ test/mock decoys).
 - **Zero-AST `< 20ms` Workspace Discovery (`aice find` / `tree` / `--files`) & Fast Path**: `aice find [pattern] [targets...]` (alias `tree`, `aice read --files`, MCP `filesOnly: true`) scans workspaces in `< 20ms` without AST parsing or 15-file truncation, emitting `<relPath> (<lines>L, <sizeKB>KB)` within the `28 KB` ceiling. Line slices (`:Lstart-Lend`), config/doc/passthrough files, and small bare files emit a minimal `// === <file> ===` zero-envelope slice (`--deps` / `--callers` opt-in).
 
@@ -370,10 +370,10 @@ AICE provides intelligent feedback and automatic boundary alignment to prevent w
 ```bash
 # --- PILLAR 1: UNIFIED READ (aice read | MCP: aice_read | CLI aliases: context, ctx, search/grep, find/tree) ---
 
-# 1-turn numbered native reads, dynamic water-filling budget (<= 28 KB) & AST-snapped slice hints:
-aice read src/app.ts                                     # <= ~600-750L (<=25 KB) bare file renders inline in 1 turn with 1│ numbered native lines!
-aice read bin/aice.ts                                    # Overflow >28 KB bare files auto-outline with AST-snapped 80..650L Next slice hints
-aice read src tests                                      # Auto-outlines dirs; smallest-first water-filling budget <= 28 KB
+# 1-turn numbered native reads, dynamic water-filling budget (<= 9 KB CLI / <= 28 KB MCP) & AST-snapped slice hints:
+aice read src/app.ts                                     # Bare file fitting budget renders inline in 1 turn with 1│ numbered native lines!
+aice read bin/aice.ts                                    # Overflow bare files auto-outline with AST-snapped Next slice hints (7.75 KB CLI / 18 KB MCP)
+aice read src tests                                      # Auto-outlines dirs; surface-aware water-filling budget (<= 9 KB CLI / <= 28 KB MCP)
 aice read "src/**/*.ts"                                  # Expands quoted globs deterministically (skips node_modules/.git/dist)
 aice read tests/app.test.ts:outline                      # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
 
@@ -466,7 +466,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.37)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.38)
 ├── AGENTS.md                   # Single-file <= 650-token workspace AICE agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
@@ -508,7 +508,7 @@ aice/
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
 │   ├── tools/                  # Unified read (numbered native, dynamic water-filling & AST search) & resilient splice
 │   ├── typechecker/            # Static typechecker & autonomous self-repair engine
-│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.37)
+│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.38)
 └── tests/
     ├── unit/                   # Unit test suites
     └── integration/            # Multi-file roundtrip & operator pipeline integration suites
@@ -529,7 +529,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.37},
+  version = {0.9.38},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}

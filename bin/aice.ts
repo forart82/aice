@@ -2627,7 +2627,7 @@ program
     Number.parseInt(val, 10),
   )
   .option("-l, --files-with-matches", "Emit only matching relative file paths concisely")
-  .option("--full", "Bypass default 28 KB stdout ceiling and emit full search context")
+  .option("--full", "Bypass default stdout ceiling and emit full search context")
   .option("--json", "Output structured JSON bundle")
   .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
   .action(

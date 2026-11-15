@@ -1606,24 +1606,6 @@ function formatBundle(
   lines.push(`# AICE Context Pack: ${displayTargetPath}`);
   lines.push("");
 
-  lines.push(`## Imported Dependency Contracts (${dependencies.length}):`);
-  if (dependencies.length === 0) {
-    lines.push("None");
-  } else {
-    for (let i = 0; i < dependencies.length; i++) {
-      const dep = dependencies[i];
-      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
-      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
-      lines.push("```aice");
-      lines.push(dep.contract);
-      lines.push("```");
-      if (i < dependencies.length - 1) {
-        lines.push("");
-      }
-    }
-  }
-  lines.push("");
-
   lines.push("## Target File Content:");
   lines.push("```aice");
   if (shouldEmitIdioms && idioms && !targetBody.includes("# @idioms available:")) {
@@ -1640,6 +1622,24 @@ function formatBundle(
   }
   lines.push(targetBody);
   lines.push("```");
+  lines.push("");
+
+  lines.push(`## Imported Dependency Contracts (${dependencies.length}):`);
+  if (dependencies.length === 0) {
+    lines.push("None");
+  } else {
+    for (let i = 0; i < dependencies.length; i++) {
+      const dep = dependencies[i];
+      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
+      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
+      lines.push("```aice");
+      lines.push(dep.contract);
+      lines.push("```");
+      if (i < dependencies.length - 1) {
+        lines.push("");
+      }
+    }
+  }
   lines.push("");
 
   lines.push(`## Downstream Callers (${callers.length}):`);
@@ -2575,8 +2575,10 @@ export async function generateWorkspaceContext(
         .slice(0, 3)
         .map((rf) => `aice read ${rf}:${primarySel}`)
         .join(" | ");
+      const searchBudgetLabel =
+        searchByteBudget !== undefined && searchByteBudget <= 10_240 ? "9 KB CLI" : "28 KB";
       symbolSlices.push(
-        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit 28 KB stdout budget)\n// Next slices: ${nextHints} (or pass --full)`,
+        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit ${searchBudgetLabel} stdout budget)\n// Next slices: ${nextHints} (or pass --full)`,
       );
     }
   }
@@ -5242,23 +5244,6 @@ export function mergeMultiContextResults(
     `# AICE Multi-File Context Stream (${results.length} targets: ${targetPathsList.join(", ")})`,
   );
   lines.push("");
-  lines.push(`## Imported Dependency Contracts (${mergedDeps.length}):`);
-  if (mergedDeps.length === 0) {
-    lines.push("None");
-  } else {
-    for (let i = 0; i < mergedDeps.length; i++) {
-      const dep = mergedDeps[i]!;
-      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
-      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
-      lines.push("```aice");
-      lines.push(dep.contract);
-      lines.push("```");
-      if (i < mergedDeps.length - 1) {
-        lines.push("");
-      }
-    }
-  }
-  lines.push("");
   const isZeroMatchRegexResult = (r: ContextResult): boolean => {
     const t = r.targetContent.trim();
     return t.startsWith("// Pattern '") || t.startsWith("// Patterns '");
@@ -5400,6 +5385,23 @@ export function mergeMultiContextResults(
     combinedTargetContents.push(zeroSummary);
     lines.push("");
     lines.push(zeroSummary);
+  }
+  lines.push("");
+  lines.push(`## Imported Dependency Contracts (${mergedDeps.length}):`);
+  if (mergedDeps.length === 0) {
+    lines.push("None");
+  } else {
+    for (let i = 0; i < mergedDeps.length; i++) {
+      const dep = mergedDeps[i]!;
+      const resPath = dep.resolvedPath ? `\`${dep.resolvedPath}\`` : "external";
+      lines.push(`### Dependency: \`${dep.specifier}\` (${resPath})`);
+      lines.push("```aice");
+      lines.push(dep.contract);
+      lines.push("```");
+      if (i < mergedDeps.length - 1) {
+        lines.push("");
+      }
+    }
   }
   lines.push("");
   lines.push(`## Downstream Callers (${mergedCallers.length}):`);
