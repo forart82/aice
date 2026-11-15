@@ -24,6 +24,7 @@ import {
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
+  loadProjectConfig,
   PASSTHROUGH_FILENAMES,
   type ProjectIdiomDefinition,
   type ResolvedPathTargets,
@@ -78,7 +79,11 @@ export interface EffectiveReadBudgets {
 }
 
 export function resolveEffectiveReadBudgets(options?: ReadOptions): EffectiveReadBudgets {
-  if (options?.surface === "cli" && options.maxTokens === undefined && !options.unboundedCli) {
+  if (
+    (options?.surface === "cli" || options?.surface === "mcp") &&
+    options.maxTokens === undefined &&
+    !options.unboundedCli
+  ) {
     const maxBytes =
       options.maxBytes !== undefined
         ? Math.max(512, Math.min(DEFAULT_CLI_READ_MAX_BYTES, options.maxBytes))
@@ -91,7 +96,7 @@ export function resolveEffectiveReadBudgets(options?: ReadOptions): EffectiveRea
       sliceByteBudget,
       maxTokens: DEFAULT_CLI_READ_MAX_TOKENS,
       softTokenCap: DEFAULT_CLI_READ_SOFT_TOKEN_CAP,
-      budgetLabel: "9 KB CLI",
+      budgetLabel: options.surface === "mcp" ? "9 KB MCP" : "9 KB CLI",
     };
   }
   if (options?.maxBytes !== undefined) {
@@ -911,8 +916,15 @@ function resolveEffectiveTargetAndRoot(
     const targetDir = st.isDirectory() ? existingCandidate : path.dirname(existingCandidate);
     const cwdResolved = path.resolve(process.cwd());
     if (targetDir !== cwdResolved && !targetDir.startsWith(`${cwdResolved}${path.sep}`)) {
-      const root = findProjectRoot(targetDir, targetDir);
-      return { targetPath: absCandidate, projectRoot: root };
+      const extRoot = findProjectRoot(targetDir, targetDir);
+      const cwdRoot = findProjectRoot(cwdResolved, cwdResolved);
+      if (
+        isProjectAiceEnabled(loadProjectConfig(cwdRoot)) &&
+        !fs.existsSync(path.join(extRoot, "aice.config.json"))
+      ) {
+        return { targetPath: absCandidate, projectRoot: cwdRoot };
+      }
+      return { targetPath: absCandidate, projectRoot: extRoot };
     }
   }
   return { targetPath: rawTargetPath, projectRoot: undefined };
@@ -1241,9 +1253,10 @@ function buildAutoOutlineHeader(
   lineCount: number,
   opts?: { nextSliceCmd?: string; budgetDowngraded?: boolean; budgetLabel?: string },
 ): string {
-  const base = opts?.budgetLabel?.includes("CLI")
-    ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.`
-    : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
+  const base =
+    opts?.budgetLabel?.includes("CLI") || opts?.budgetLabel?.includes("MCP")
+      ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.`
+      : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
   if (opts?.budgetDowngraded && opts.nextSliceCmd) {
     return `${base} (auto-downgraded to :outline — ${opts.budgetLabel ?? "28 KB"} budget; next slice: ${opts.nextSliceCmd})`;
   }
@@ -1289,7 +1302,7 @@ function shouldEnforceDefaultReadBudget(
   if (options._bypassInternalCap === true) return false;
   if (options.maxTokens !== undefined) return false;
   if (options.json === true) return false;
-  if (options.surface === "cli" && !options.unboundedCli) return true;
+  if ((options.surface === "cli" || options.surface === "mcp") && !options.unboundedCli) return true;
   if (options.full === true) return false;
   if (
     normalizedItems &&
@@ -1550,7 +1563,7 @@ function enforceReadBudgetCeiling(params: {
     keptText = keptLines.join("\n");
   }
 
-  const isCliBudget = budgetLabel.includes("CLI");
+  const isCliBudget = budgetLabel.includes("CLI") || budgetLabel.includes("MCP");
   const buildFooterForKept = (candidateKept: string): string => {
     if (
       (!extraHints || extraHints.length === 0) &&
@@ -1965,7 +1978,8 @@ function executeFilesOnlyRead(
       const addBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
       if (kept.length > 0 && bytesUsed + addBytes > maxListBytes) {
         const omittedCount = formattedLines.length - i;
-        const fullHint = options.surface === "cli" ? "" : " or pass --full";
+        const fullHint =
+          options.surface === "cli" || options.surface === "mcp" ? "" : " or pass --full";
         kept.push(
           `// ... (+${omittedCount} more files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget — narrow path/filter${fullHint})`,
         );
@@ -3028,7 +3042,8 @@ function buildPureOutlineResult(params: {
             }),
           )
           .join(" | ");
-        const fullHint = options.surface === "cli" ? "" : " (or pass --full)";
+        const fullHint =
+          options.surface === "cli" || options.surface === "mcp" ? "" : " (or pass --full)";
         keptOutlineBlocks.push(
           `// ... (+${omittedDisplayPaths.length} more target files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget)\n// Next slices: ${hintCmds}${fullHint}`,
         );
@@ -3615,7 +3630,7 @@ async function executeContextStream(params: {
       }
       if (paginationHints.length > 0) {
         const hintPrefix =
-          options.surface === "cli"
+          options.surface === "cli" || options.surface === "mcp"
             ? `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling — run in next call):`
             : `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):`;
         partsAfterDowngrade.push(

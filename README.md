@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.43](https://img.shields.io/badge/Version-0.9.43-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.44](https://img.shields.io/badge/Version-0.9.44-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -370,10 +370,10 @@ AICE provides intelligent feedback and automatic boundary alignment to prevent w
 ```bash
 # --- PILLAR 1: UNIFIED READ (aice read | MCP: aice_read | CLI aliases: context, ctx, search/grep, find/tree) ---
 
-# 1-turn numbered native reads, dynamic water-filling budget (<= 9 KB CLI / <= 28 KB MCP) & AST-snapped slice hints:
+# 1-turn numbered native reads, dynamic anti-spill water-filling budget (<= 9 KB CLI & MCP) & AST-snapped slice hints:
 aice read src/app.ts                                     # Bare file fitting budget renders inline in 1 turn with 1│ numbered native lines!
-aice read bin/aice.ts                                    # Overflow bare files auto-outline with AST-snapped Next slice hints (7.75 KB CLI / 18 KB MCP)
-aice read src tests                                      # Auto-outlines dirs; surface-aware water-filling budget (<= 9 KB CLI / <= 28 KB MCP)
+aice read bin/aice.ts                                    # Overflow bare files auto-outline with AST-snapped Next slice hints (7.75 KB CLI & MCP)
+aice read src tests                                      # Auto-outlines dirs; surface-aware water-filling budget (<= 9 KB CLI & MCP; --max-tokens override)
 aice read "src/**/*.ts"                                  # Expands quoted globs deterministically (skips node_modules/.git/dist)
 aice read tests/app.test.ts:outline                      # Emits named test "..." # [Lstart-Lend] & describe "..." # [Lstart-Lend]
 
@@ -466,7 +466,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.43)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.44)
 ├── AGENTS.md                   # Single-file <= 650-token workspace AICE agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
@@ -508,7 +508,7 @@ aice/
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
 │   ├── tools/                  # Unified read (numbered native, dynamic water-filling & AST search) & resilient splice
 │   ├── typechecker/            # Static typechecker & autonomous self-repair engine
-│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.43)
+│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.44)
 └── tests/
     ├── unit/                   # Unit test suites
     └── integration/            # Multi-file roundtrip & operator pipeline integration suites
@@ -529,7 +529,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.43},
+  version = {0.9.44},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}

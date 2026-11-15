@@ -133,9 +133,9 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       expect(dirReadRes.isError).toBeFalsy();
       expect(dirReadRes.content[0].text).toContain("ScoreService");
 
-      // 5. MCP aice_read dynamic 28 KB budget (1-turn inline <=28 KB + >28 KB auto-outline + full: true override)
+      // 5. MCP aice_read dynamic 9 KB budget (1-turn inline <=9 KB + >9 KB auto-outline + full: true override)
       const bigLines = Array.from(
-        { length: 265 },
+        { length: 120 },
         (_, i) => `export function fn_${i}(): number { return ${i}; }`,
       ).join("\n");
       fs.writeFileSync(path.join(tmpDir, "big_module.ts"), bigLines, "utf-8");
@@ -147,7 +147,7 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       expect(bigInlineRes.isError).toBeFalsy();
       expect(bigInlineRes.content[0].text).not.toContain("Auto-outlined");
       expect(bigInlineRes.content[0].text).toContain(
-        "261│ export function fn_260(): number { return 260; }",
+        "120│ export function fn_119(): number { return 119; }",
       );
 
       const hugeLines = Array.from(
@@ -171,7 +171,8 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       })) as any;
       expect(hugeFullRes.isError).toBeFalsy();
       expect(hugeFullRes.content[0].text).not.toContain("Auto-outlined");
-      expect(hugeFullRes.content[0].text).toContain("416│ export function hugeFn_415");
+      expect(hugeFullRes.content[0].text).toContain("1│ export function hugeFn_0");
+      expect(hugeFullRes.content[0].text).toContain("9 KB MCP stdout budget reached");
 
       // 6. MCP aice_splice 'batch' array greenfield create + surgical splice
       const batchRes = (await server.handleRequest(16, "tools/call", {

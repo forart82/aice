@@ -58,7 +58,7 @@ var AICE_VERSION, VERSION;
 var init_version = __esm({
   "src/version.ts"() {
     "use strict";
-    AICE_VERSION = "0.9.43";
+    AICE_VERSION = "0.9.44";
     VERSION = AICE_VERSION;
   }
 });
@@ -82,8 +82,8 @@ ${AICE_VERSIONED_DIRECTIVE_START}
 - Fallback: Crash/blocker -> \`aice disable\` -> native tools -> \`aice enable\`.
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - Ban: No shell writes (\`python3 with open\`, \`cat << 'EOF' >\`, \`echo >\`); NEVER run \`sed -n\` or grep/awk/head/tail/cat/ls/find on supported files.
-- Read: Prefer MCP \`aice_read\` (\`<=28KB\` / \`~550L\`; \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`). On CLI (\`<=9KB\` / \`~145L\` total/turn), batch small \`:sym\`/\`:L\` slices and read \`>120L\` files solo. 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\`.
-- Splice: Prefer MCP \`aice_splice\` (\`<=28KB\` / \`~550L\`; pass flat \`code\` \`=== <file>:<sym> ===\` blocks, NOT \`edits\` object arrays). On CLI, 1-call \`aice splice --stdin << 'EOF'\` with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend (inclusive)\` (\`--delete\` to remove), \`<<< === >>>\`, \`:eof\`, \`:imports\`.
+- Read (\`<=9KB\` / \`~145L\`/call on CLI & MCP): Prefer 1-turn numbered native \`aice read src tests\`, \`aice read f1:sym f2:L1-L50\` (Adaptive Sibling Outlining), \`aice search <pat> [dir]\` (4-tier ranked \`aice read <fileOrDir> -s "/<searchPattern>/"\`), \`aice find [glob] [dir]\` (or aligned MCP \`aice_read\` with \`search\`, \`contextLines\`, \`filesOnly\`, \`--dsl\`); batch small \`:sym\`/\`:L\` slices and read \`>120L\` files solo.
+- Splice: Prefer 1-call \`aice splice --stdin << 'EOF'\` (or aligned MCP \`aice_splice\` passing flat \`code\` \`=== <file>:<sym> ===\` blocks, NOT \`edits\` object arrays) with \`=== <file> ===\` (creates or overwrites full files; \`:overwrite\` for empty truncation), \`:symbol\` (\`@clone(SourceSym)\`, \`@replace-docs\`), \`:Lstart-Lend\` (inclusive; \`--delete\` to remove), \`<<< === >>>\`, \`:eof\`, \`:imports\`.
 ### 3. Subagent Propagation
 - Coding subagents/\`swarm add\` briefs MUST state: \`"Use AICE (aice read / aice splice) for all file exploration and edits."\`
 ${AICE_DIRECTIVE_END}`;
@@ -338,6 +338,21 @@ function validateConfig(config) {
     throw new Error(
       `Inconsistent project config: mode is "${config.mode}" but isolated is ${config.isolated}.`
     );
+  }
+  if (config.allowedReadRoots !== void 0) {
+    if (!Array.isArray(config.allowedReadRoots)) {
+      throw new Error(
+        `Invalid allowedReadRoots: expected array of string paths, received ${typeof config.allowedReadRoots}`
+      );
+    }
+    for (let i = 0; i < config.allowedReadRoots.length; i++) {
+      const r = config.allowedReadRoots[i];
+      if (typeof r !== "string") {
+        throw new Error(
+          `Invalid allowedReadRoots[${i}]: expected string path, received ${typeof r}`
+        );
+      }
+    }
   }
 }
 function scanAiceFiles(dir, maxDepth = 6, currentDepth = 0) {
@@ -614,7 +629,10 @@ function loadProjectConfig(projectDir) {
     isolated,
     watermark: typeof configToProcess.watermark === "boolean" ? configToProcess.watermark : DEFAULT_PROJECT_CONFIG.watermark,
     ...typeof configToProcess.idiomsEnabled === "boolean" ? { idiomsEnabled: configToProcess.idiomsEnabled } : {},
-    ...typeof configToProcess.idioms === "object" && configToProcess.idioms !== null && !Array.isArray(configToProcess.idioms) ? { idioms: configToProcess.idioms } : {}
+    ...typeof configToProcess.idioms === "object" && configToProcess.idioms !== null && !Array.isArray(configToProcess.idioms) ? { idioms: configToProcess.idioms } : {},
+    ...Array.isArray(configToProcess.allowedReadRoots) ? {
+      allowedReadRoots: configToProcess.allowedReadRoots.filter((r) => typeof r === "string" && r.trim().length > 0).map((r) => r.trim())
+    } : {}
   };
   if (typeof configToProcess.idiomsEnabled !== "boolean") {
     Object.defineProperty(finalConfig, "idiomsEnabled", {
@@ -771,7 +789,8 @@ function saveProjectConfig(projectDir, config, options) {
     isolated,
     watermark: config.watermark ?? (typeof existing.watermark === "boolean" ? existing.watermark : DEFAULT_PROJECT_CONFIG.watermark),
     ...config.idiomsEnabled !== void 0 ? { idiomsEnabled: config.idiomsEnabled } : existingIdiomsEnabled !== void 0 ? { idiomsEnabled: existingIdiomsEnabled } : {},
-    ...config.idioms !== void 0 ? { idioms: config.idioms } : normalizedExistingIdioms !== void 0 ? { idioms: normalizedExistingIdioms } : {}
+    ...config.idioms !== void 0 ? { idioms: config.idioms } : normalizedExistingIdioms !== void 0 ? { idioms: normalizedExistingIdioms } : {},
+    ...config.allowedReadRoots !== void 0 ? { allowedReadRoots: config.allowedReadRoots } : Array.isArray(existing.allowedReadRoots) ? { allowedReadRoots: existing.allowedReadRoots } : {}
   };
   validateConfig(mergedConfig);
   const isPureIdiomsSave = hasIdiomsJson && !hasAiceConfig && config.enabled === void 0 && (config.mode === void 0 || config.mode === DEFAULT_PROJECT_CONFIG.mode) && (config.sourceDir === void 0 || config.sourceDir === DEFAULT_PROJECT_CONFIG.sourceDir) && (config.outDir === void 0 || config.outDir === DEFAULT_PROJECT_CONFIG.outDir) && (config.targetLanguage === void 0 || config.targetLanguage === DEFAULT_PROJECT_CONFIG.targetLanguage) && (config.isolated === void 0 || config.isolated === DEFAULT_PROJECT_CONFIG.isolated) && (config.watermark === void 0 || config.watermark === DEFAULT_PROJECT_CONFIG.watermark);
@@ -827,6 +846,9 @@ function saveProjectConfig(projectDir, config, options) {
   }
   if (mergedConfig.idioms !== void 0) {
     toWrite.idioms = mergedConfig.idioms;
+  }
+  if (mergedConfig.allowedReadRoots !== void 0) {
+    toWrite.allowedReadRoots = mergedConfig.allowedReadRoots;
   }
   writeFileAtomic(configPath, `${JSON.stringify(toWrite, null, 2)}
 `);
@@ -299374,7 +299396,7 @@ __export(read_exports, {
 import * as fs18 from "node:fs";
 import * as path19 from "node:path";
 function resolveEffectiveReadBudgets(options) {
-  if (options?.surface === "cli" && options.maxTokens === void 0 && !options.unboundedCli) {
+  if ((options?.surface === "cli" || options?.surface === "mcp") && options.maxTokens === void 0 && !options.unboundedCli) {
     const maxBytes = options.maxBytes !== void 0 ? Math.max(512, Math.min(DEFAULT_CLI_READ_MAX_BYTES, options.maxBytes)) : DEFAULT_CLI_READ_MAX_BYTES;
     const softByteCap = Math.min(DEFAULT_CLI_READ_SOFT_BYTE_CAP, Math.max(400, maxBytes - 512));
     const sliceByteBudget = Math.min(DEFAULT_CLI_SLICE_BYTE_BUDGET, Math.max(400, maxBytes - 1280));
@@ -299384,7 +299406,7 @@ function resolveEffectiveReadBudgets(options) {
       sliceByteBudget,
       maxTokens: DEFAULT_CLI_READ_MAX_TOKENS,
       softTokenCap: DEFAULT_CLI_READ_SOFT_TOKEN_CAP,
-      budgetLabel: "9 KB CLI"
+      budgetLabel: options.surface === "mcp" ? "9 KB MCP" : "9 KB CLI"
     };
   }
   if (options?.maxBytes !== void 0) {
@@ -299888,8 +299910,12 @@ function resolveEffectiveTargetAndRoot2(rawTargetPath, explicitProjectRoot) {
     const targetDir = st.isDirectory() ? existingCandidate : path19.dirname(existingCandidate);
     const cwdResolved = path19.resolve(process.cwd());
     if (targetDir !== cwdResolved && !targetDir.startsWith(`${cwdResolved}${path19.sep}`)) {
-      const root2 = findProjectRoot(targetDir, targetDir);
-      return { targetPath: absCandidate, projectRoot: root2 };
+      const extRoot = findProjectRoot(targetDir, targetDir);
+      const cwdRoot = findProjectRoot(cwdResolved, cwdResolved);
+      if (isProjectAiceEnabled(loadProjectConfig(cwdRoot)) && !fs18.existsSync(path19.join(extRoot, "aice.config.json"))) {
+        return { targetPath: absCandidate, projectRoot: cwdRoot };
+      }
+      return { targetPath: absCandidate, projectRoot: extRoot };
     }
   }
   return { targetPath: rawTargetPath, projectRoot: void 0 };
@@ -300113,7 +300139,7 @@ function parseSelectorLineRange(selector) {
   return { startLine, endLine };
 }
 function buildAutoOutlineHeader(displayPath, lineCount, opts) {
-  const base = opts?.budgetLabel?.includes("CLI") ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.` : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
+  const base = opts?.budgetLabel?.includes("CLI") || opts?.budgetLabel?.includes("MCP") ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.` : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
   if (opts?.budgetDowngraded && opts.nextSliceCmd) {
     return `${base} (auto-downgraded to :outline \u2014 ${opts.budgetLabel ?? "28 KB"} budget; next slice: ${opts.nextSliceCmd})`;
   }
@@ -300145,7 +300171,7 @@ function shouldEnforceDefaultReadBudget(options, normalizedItems) {
   if (options._bypassInternalCap === true) return false;
   if (options.maxTokens !== void 0) return false;
   if (options.json === true) return false;
-  if (options.surface === "cli" && !options.unboundedCli) return true;
+  if ((options.surface === "cli" || options.surface === "mcp") && !options.unboundedCli) return true;
   if (options.full === true) return false;
   if (normalizedItems && normalizedItems.length > 0 && normalizedItems.every((it) => it.explicitFull)) {
     return false;
@@ -300318,7 +300344,7 @@ ${statsText}` : bundle;
     keptLines.splice(keptLines.length - dropCount, dropCount);
     keptText = keptLines.join("\n");
   }
-  const isCliBudget = budgetLabel.includes("CLI");
+  const isCliBudget = budgetLabel.includes("CLI") || budgetLabel.includes("MCP");
   const buildFooterForKept = (candidateKept) => {
     if ((!extraHints || extraHints.length === 0) && !nextOmittedFile && isTargetContentCompleteInContextPack(bundle, candidateKept)) {
       const fullHint2 = isCliBudget ? "" : " (pass --full for all contracts)";
@@ -300628,7 +300654,7 @@ function executeFilesOnlyRead(targets, options, baseDir, surface) {
       const addBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
       if (kept.length > 0 && bytesUsed + addBytes > maxListBytes) {
         const omittedCount = formattedLines.length - i;
-        const fullHint = options.surface === "cli" ? "" : " or pass --full";
+        const fullHint = options.surface === "cli" || options.surface === "mcp" ? "" : " or pass --full";
         kept.push(
           `// ... (+${omittedCount} more files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget \u2014 narrow path/filter${fullHint})`
         );
@@ -301513,7 +301539,7 @@ ${headerLine}${itemRes.text}`);
             sliceByteBudget: effectiveBudgets.sliceByteBudget
           })
         ).join(" | ");
-        const fullHint = options.surface === "cli" ? "" : " (or pass --full)";
+        const fullHint = options.surface === "cli" || options.surface === "mcp" ? "" : " (or pass --full)";
         keptOutlineBlocks.push(
           `// ... (+${omittedDisplayPaths.length} more target files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget)
 // Next slices: ${hintCmds}${fullHint}`
@@ -302005,7 +302031,7 @@ ${singleOutline}`
         partsAfterDowngrade.push(downgradedBlocks.join("\n\n"));
       }
       if (paginationHints.length > 0) {
-        const hintPrefix = options.surface === "cli" ? `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling \u2014 run in next call):` : `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):`;
+        const hintPrefix = options.surface === "cli" || options.surface === "mcp" ? `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling \u2014 run in next call):` : `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):`;
         partsAfterDowngrade.push(
           `${hintPrefix}
 ${paginationHints.map((cmd) => `//   ${cmd}`).join("\n")}`
@@ -303904,13 +303930,13 @@ function buildNullSpliceArrayItemError(targetFileHint) {
     `Invalid null or non-object item in aice_splice 'edits'/'files' array (host call_mcp_tool nested-object serialization glitch). Do NOT retry nested 'edits: [...]' or 'files: [...]' object arrays \u2014 pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead (e.g. { "filePath": "${exampleFile}", "code": "=== ${exampleFile}:L15-L21 ===\\n...\\n=== ${exampleFile}:MySymbol ===\\n..." }).`
   );
 }
-function parseJsonArrayIfString(val, argName) {
+function parseJsonArrayIfString(val, argName, toolName = "aice_splice") {
   if (typeof val === "string" && val.trim().startsWith("[")) {
     try {
       return JSON.parse(val);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Invalid JSON in aice_splice '${argName}' argument: ${msg}`);
+      throw new Error(`Invalid JSON in ${toolName} '${argName}' argument: ${msg}`);
     }
   }
   return val;
@@ -303933,7 +303959,7 @@ var init_server = __esm({
     AICE_MCP_TOOLS = [
       {
         name: "aice_read",
-        description: "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 28 KB / ~7,000-token water-filling budget), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
+        description: "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 9 KB / ~145-line anti-spill slice budget + next slice: pagination), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
         inputSchema: {
           type: "object",
           properties: {
@@ -303989,7 +304015,7 @@ var init_server = __esm({
             },
             full: {
               type: "boolean",
-              description: "Bypass dynamic auto-outline and default 28 KB stdout ceiling to return full context"
+              description: "Bypass dynamic auto-outline (>250 lines) to emit numbered code slices within the default 9 KB anti-spill ceiling (set maxTokens to raise budget)"
             },
             depth: {
               type: "number",
@@ -303997,7 +304023,7 @@ var init_server = __esm({
             },
             maxTokens: {
               type: "number",
-              description: "Maximum token budget override (bypasses default 28 KB ceiling when explicitly set)"
+              description: "Maximum token budget override (bypasses default 9 KB ceiling when explicitly set)"
             },
             includeDeps: {
               type: "boolean",
@@ -304345,6 +304371,103 @@ var init_server = __esm({
         }
         return resolved;
       }
+      resolveSafeReadPath(rawPath) {
+        if (rawPath.includes("\0")) {
+          throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+        }
+        const resolved = path23.resolve(this.workspaceRoot, rawPath);
+        if (this.isBlockedSystemPath(resolved)) {
+          throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+        }
+        if (!path23.isAbsolute(rawPath)) {
+          const normRel = path23.normalize(rawPath);
+          if ((normRel.startsWith("..") || rawPath.includes("..")) && resolved !== this.workspaceRoot && !resolved.startsWith(this.workspaceRoot + path23.sep)) {
+            throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+          }
+        }
+        let realCandidate = resolved;
+        try {
+          realCandidate = this.resolveCanonicalTarget(resolved);
+          if (this.isBlockedSystemPath(realCandidate)) {
+            throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+          }
+        } catch (err) {
+          if (err instanceof Error && err.message.startsWith("Access denied:")) {
+            throw err;
+          }
+        }
+        const baseAllowedRoots = [this.workspaceRoot, ...this.declaredRoots];
+        const allowedReadSet = new Set(baseAllowedRoots);
+        for (const r of baseAllowedRoots) {
+          try {
+            if (fs22.existsSync(r)) {
+              allowedReadSet.add(fs22.realpathSync(r));
+            }
+          } catch {
+          }
+        }
+        try {
+          const rootConfig = loadProjectConfig(this.resolveProjectRoot(this.workspaceRoot));
+          if (Array.isArray(rootConfig.allowedReadRoots)) {
+            for (const extRoot of rootConfig.allowedReadRoots) {
+              if (typeof extRoot === "string" && extRoot.trim()) {
+                const resolvedExt = path23.resolve(this.workspaceRoot, extRoot.trim());
+                if (!this.isBlockedSystemPath(resolvedExt)) {
+                  try {
+                    if (fs22.existsSync(resolvedExt)) {
+                      const realExt = fs22.realpathSync(resolvedExt);
+                      if (!this.isBlockedSystemPath(realExt)) {
+                        allowedReadSet.add(resolvedExt);
+                        allowedReadSet.add(realExt);
+                      }
+                    } else {
+                      allowedReadSet.add(resolvedExt);
+                    }
+                  } catch {
+                  }
+                }
+              }
+            }
+          }
+        } catch {
+        }
+        if (path23.isAbsolute(rawPath) && !rawPath.includes("..")) {
+          try {
+            const resolvedWs = path23.resolve(this.workspaceRoot);
+            const realWs = fs22.existsSync(resolvedWs) ? fs22.realpathSync(resolvedWs) : resolvedWs;
+            const candidateStart = fs22.existsSync(realCandidate) && fs22.statSync(realCandidate).isDirectory() ? realCandidate : path23.dirname(realCandidate);
+            const lexicalStart = fs22.existsSync(resolved) && fs22.statSync(resolved).isDirectory() ? resolved : path23.dirname(resolved);
+            const candidateProjectRoot = findProjectRoot(candidateStart, candidateStart);
+            const lexicalProjectRoot = findProjectRoot(lexicalStart, lexicalStart);
+            if (candidateProjectRoot && candidateProjectRoot !== resolvedWs && candidateProjectRoot !== realWs && (path23.dirname(candidateProjectRoot) === path23.dirname(resolvedWs) || path23.dirname(candidateProjectRoot) === path23.dirname(realWs)) && fs22.existsSync(path23.join(candidateProjectRoot, "aice.config.json"))) {
+              const candConfig = loadProjectConfig(candidateProjectRoot);
+              if (isProjectAiceEnabled(candConfig) === true && !this.isBlockedSystemPath(candidateProjectRoot)) {
+                allowedReadSet.add(candidateProjectRoot);
+                if (lexicalProjectRoot && !this.isBlockedSystemPath(lexicalProjectRoot)) {
+                  allowedReadSet.add(lexicalProjectRoot);
+                }
+                try {
+                  if (fs22.existsSync(candidateProjectRoot)) {
+                    const realCandRoot = fs22.realpathSync(candidateProjectRoot);
+                    if (!this.isBlockedSystemPath(realCandRoot)) {
+                      allowedReadSet.add(realCandRoot);
+                    }
+                  }
+                } catch {
+                }
+              }
+            }
+          } catch {
+          }
+        }
+        const isWithinAllowed = (target) => Array.from(allowedReadSet).some(
+          (root2) => target === root2 || target.startsWith(root2 + path23.sep)
+        );
+        if (!isWithinAllowed(resolved) || !isWithinAllowed(realCandidate)) {
+          throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+        }
+        return resolved;
+      }
       enqueueSerial(fn) {
         const next = this.messageQueue.then(fn, fn);
         this.messageQueue = next.then(
@@ -304560,7 +304683,7 @@ ${json}`;
             const contextLinesVal = typeof args.contextLines === "number" && Number.isFinite(args.contextLines) ? Math.max(0, Math.floor(args.contextLines)) : typeof args.context === "number" && Number.isFinite(args.context) ? Math.max(0, Math.floor(args.context)) : void 0;
             const dslFlag = typeof args.dsl === "boolean" ? args.dsl : void 0;
             const rawCandidate = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
-            const candidateArray = parseJsonArrayIfString(rawCandidate, "targets");
+            const candidateArray = parseJsonArrayIfString(rawCandidate, "targets", "aice_read");
             const rawPathCandidate = args.path ?? args.filePath ?? args.fileOrDir ?? args.file ?? args.dir ?? args.target ?? args.inputPath ?? args.source;
             const safeTargets = [];
             const checkedProjectRoots = /* @__PURE__ */ new Set();
@@ -304571,7 +304694,7 @@ ${json}`;
                   const obj = entry;
                   const rawEntryStr = String(obj.path ?? obj.filePath ?? obj.target ?? ".").trim() || ".";
                   const parsed = parseReadTarget(rawEntryStr, this.workspaceRoot);
-                  const safeFp = this.resolveSafePath(parsed.targetPath);
+                  const safeFp = this.resolveSafeReadPath(parsed.targetPath);
                   checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
                   safeTargets.push({
                     path: safeFp,
@@ -304585,7 +304708,7 @@ ${json}`;
                   const subTokens = splitReadTargetString(rawStr, this.workspaceRoot);
                   for (const tok of subTokens.length > 0 ? subTokens : [rawStr]) {
                     const parsed = parseReadTarget(tok, this.workspaceRoot);
-                    const safeFp = this.resolveSafePath(parsed.targetPath);
+                    const safeFp = this.resolveSafeReadPath(parsed.targetPath);
                     checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
                     safeTargets.push({
                       path: safeFp,
@@ -304600,7 +304723,7 @@ ${json}`;
               const tokens = splitReadTargetString(rawPathStr, this.workspaceRoot);
               for (const tok of tokens.length > 0 ? tokens : [rawPathStr]) {
                 const parsed = parseReadTarget(tok, this.workspaceRoot);
-                const safeFp = this.resolveSafePath(parsed.targetPath);
+                const safeFp = this.resolveSafeReadPath(parsed.targetPath);
                 checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
                 safeTargets.push({
                   path: safeFp,
@@ -304609,21 +304732,52 @@ ${json}`;
                 });
               }
             } else {
-              const safeWorkspace = this.resolveSafePath(".");
+              const safeWorkspace = this.resolveSafeReadPath(".");
               checkedProjectRoots.add(this.resolveProjectRoot(safeWorkspace));
               if (searchFilter !== void 0 || filesOnlyFlag) {
                 safeTargets.push({ path: safeWorkspace });
               }
             }
+            const wsProjectRoot = this.resolveProjectRoot(this.workspaceRoot);
+            const wsConfig = loadProjectConfig(wsProjectRoot);
+            const wsEnabled = isProjectAiceEnabled(wsConfig);
             for (const pr of checkedProjectRoots) {
-              if (!isProjectAiceEnabled(loadProjectConfig(pr))) {
+              if (pr === wsProjectRoot) {
+                if (!wsEnabled) {
+                  return {
+                    content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+                    isError: true
+                  };
+                }
+                continue;
+              }
+              const hasExplicitConfig = fs22.existsSync(path23.join(pr, "aice.config.json"));
+              const prConfig = loadProjectConfig(pr);
+              const isAllowedReadRoot = wsEnabled && !hasExplicitConfig && prConfig.enabled !== false && Array.isArray(wsConfig.allowedReadRoots) && wsConfig.allowedReadRoots.some((arr) => {
+                const resArr = path23.resolve(this.workspaceRoot, arr);
+                let realArr = resArr;
+                try {
+                  if (fs22.existsSync(resArr)) {
+                    realArr = fs22.realpathSync(resArr);
+                  }
+                } catch {
+                }
+                return pr === resArr || pr.startsWith(`${resArr}${path23.sep}`) || resArr.startsWith(`${pr}${path23.sep}`) || pr === realArr || pr.startsWith(`${realArr}${path23.sep}`) || realArr.startsWith(`${pr}${path23.sep}`);
+              });
+              if (isAllowedReadRoot) {
+                continue;
+              }
+              if (!isProjectAiceEnabled(prConfig)) {
                 return {
                   content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
                   isError: true
                 };
               }
             }
-            const primaryProjectRoot = safeTargets.length > 0 ? this.resolveProjectRoot(safeTargets[0].path) : this.resolveProjectRoot(this.workspaceRoot);
+            let primaryProjectRoot = safeTargets.length > 0 ? this.resolveProjectRoot(safeTargets[0].path) : this.resolveProjectRoot(this.workspaceRoot);
+            if (wsEnabled && primaryProjectRoot !== wsProjectRoot && !fs22.existsSync(path23.join(primaryProjectRoot, "aice.config.json"))) {
+              primaryProjectRoot = wsProjectRoot;
+            }
             try {
               const readRes = await aiceRead(safeTargets.length > 0 ? safeTargets : void 0, {
                 symbol: symbolFilter,
@@ -304683,7 +304837,7 @@ ${json}`;
                 let firstSafePath = this.workspaceRoot;
                 for (const rawT of rawTargets) {
                   const parsed = parseTargetWithInlineSymbol(rawT, this.workspaceRoot);
-                  const safeFp = this.resolveSafePath(parsed.targetPath);
+                  const safeFp = this.resolveSafeReadPath(parsed.targetPath);
                   if (safeTargets.length === 0) firstSafePath = safeFp;
                   safeTargets.push({
                     path: safeFp,
@@ -304742,7 +304896,7 @@ ${json}`;
               const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
               const targetPath = parsedSingle.targetPath || ".";
               const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
-              const fullPath = this.resolveSafePath(targetPath);
+              const fullPath = this.resolveSafeReadPath(targetPath);
               const projectRoot = this.resolveProjectRoot(fullPath);
               const config = loadProjectConfig(projectRoot);
               if (!isProjectAiceEnabled(config)) {
@@ -304878,7 +305032,7 @@ ${result.nativeDiagnostics}`;
             if (rawPaths.length === 0) {
               rawPaths.push(".");
             }
-            const safePaths = rawPaths.map((p) => this.resolveSafePath(p));
+            const safePaths = rawPaths.map((p) => this.resolveSafeReadPath(p));
             const firstFullPath = safePaths[0];
             const projectRoot = this.resolveProjectRoot(firstFullPath);
             const config = loadProjectConfig(projectRoot);

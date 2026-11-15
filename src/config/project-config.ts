@@ -52,7 +52,10 @@ export interface AiceProjectConfig {
   watermark: boolean;
   idiomsEnabled?: boolean;
   idioms?: Record<string, ProjectIdiomDefinition>;
+  allowedReadRoots?: string[];
 }
+
+export type ProjectConfig = AiceProjectConfig;
 
 export const AICE_DISABLED_MESSAGE =
   "AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.";
@@ -499,6 +502,22 @@ export function validateConfig(config: Partial<AiceProjectConfig>): void {
       `Inconsistent project config: mode is "${config.mode}" but isolated is ${config.isolated}.`,
     );
   }
+
+  if (config.allowedReadRoots !== undefined) {
+    if (!Array.isArray(config.allowedReadRoots)) {
+      throw new Error(
+        `Invalid allowedReadRoots: expected array of string paths, received ${typeof config.allowedReadRoots}`,
+      );
+    }
+    for (let i = 0; i < config.allowedReadRoots.length; i++) {
+      const r = config.allowedReadRoots[i];
+      if (typeof r !== "string") {
+        throw new Error(
+          `Invalid allowedReadRoots[${i}]: expected string path, received ${typeof r}`,
+        );
+      }
+    }
+  }
 }
 
 export const validateProjectConfig = validateConfig;
@@ -896,6 +915,13 @@ export function loadProjectConfig(projectDir: string): AiceProjectConfig {
     !Array.isArray(configToProcess.idioms)
       ? { idioms: configToProcess.idioms as Record<string, ProjectIdiomDefinition> }
       : {}),
+    ...(Array.isArray(configToProcess.allowedReadRoots)
+      ? {
+          allowedReadRoots: configToProcess.allowedReadRoots
+            .filter((r): r is string => typeof r === "string" && r.trim().length > 0)
+            .map((r) => r.trim()),
+        }
+      : {}),
   };
 
   if (typeof configToProcess.idiomsEnabled !== "boolean") {
@@ -1110,6 +1136,11 @@ export function saveProjectConfig(
       : normalizedExistingIdioms !== undefined
         ? { idioms: normalizedExistingIdioms }
         : {}),
+    ...(config.allowedReadRoots !== undefined
+      ? { allowedReadRoots: config.allowedReadRoots }
+      : Array.isArray(existing.allowedReadRoots)
+        ? { allowedReadRoots: existing.allowedReadRoots as string[] }
+        : {}),
   };
 
   validateConfig(mergedConfig);
@@ -1200,6 +1231,9 @@ export function saveProjectConfig(
   }
   if (mergedConfig.idioms !== undefined) {
     toWrite.idioms = mergedConfig.idioms;
+  }
+  if (mergedConfig.allowedReadRoots !== undefined) {
+    toWrite.allowedReadRoots = mergedConfig.allowedReadRoots;
   }
 
   writeFileAtomic(configPath, `${JSON.stringify(toWrite, null, 2)}\n`);

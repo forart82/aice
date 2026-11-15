@@ -12,6 +12,7 @@ import {
   setupAgents,
 } from "../src/agents/index.js";
 import { AICE_VERSION, AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
+import { DEFAULT_CLI_READ_MAX_BYTES } from "../src/tools/read.js";
 
 describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration", () => {
   let tmpHome: string;
@@ -452,5 +453,97 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
     const gooseRes = setupAgents({ homeDir: tmpHome, agent: "goose", all: true });
     expect(gooseRes.agents[0]?.error).toMatch(/malformed YAML file/i);
     expect(fs.readFileSync(gooseYaml, "utf-8")).toBe("extensions: { broken: [1, 2\n");
+  });
+
+  it("enforces v0.9.44 MCP-to-Bash CLI alignment: 9 KB MCP read cap, allowedReadRoots, sibling AICE workspaces & write confinement", async () => {
+    const parentTmp = fs.mkdtempSync(path.join(os.tmpdir(), "aice-alignment-"));
+    const primaryWs = path.join(parentTmp, "primary");
+    const siblingEnabledWs = path.join(parentTmp, "sibling-enabled");
+    const siblingUndeclaredWs = path.join(parentTmp, "sibling-undeclared");
+    const externalAllowedWs = path.join(os.tmpdir(), `aice-ext-allowed-${Date.now()}`);
+
+    fs.mkdirSync(primaryWs, { recursive: true });
+    fs.mkdirSync(siblingEnabledWs, { recursive: true });
+    fs.mkdirSync(siblingUndeclaredWs, { recursive: true });
+    fs.mkdirSync(externalAllowedWs, { recursive: true });
+
+    try {
+      // Primary workspace has aice.config.json with allowedReadRoots pointing to externalAllowedWs
+      fs.writeFileSync(
+        path.join(primaryWs, "aice.config.json"),
+        JSON.stringify({ enabled: true, allowedReadRoots: [externalAllowedWs] }, null, 2),
+        "utf-8",
+      );
+
+      // Sibling enabled workspace has aice.config.json with enabled: true
+      fs.writeFileSync(
+        path.join(siblingEnabledWs, "aice.config.json"),
+        JSON.stringify({ enabled: true }, null, 2),
+        "utf-8",
+      );
+
+      // Sibling undeclared workspace has NO aice.config.json
+      const undeclaredFile = path.join(siblingUndeclaredWs, "target.ts");
+      fs.writeFileSync(undeclaredFile, "export const secret = 123;\n", "utf-8");
+
+      // Oversized >15KB file in primary workspace
+      const bigFile = path.join(primaryWs, "oversized.ts");
+      const bigContent = Array.from(
+        { length: 400 },
+        (_, i) => `export function item_${i}(): number { return ${i} * 2; }`,
+      ).join("\n");
+      fs.writeFileSync(bigFile, bigContent, "utf-8");
+      expect(Buffer.byteLength(bigContent, "utf-8")).toBeGreaterThan(15_000);
+
+      const siblingFile = path.join(siblingEnabledWs, "shared.ts");
+      fs.writeFileSync(siblingFile, "export const SHARED_CONFIG = { active: true };\n", "utf-8");
+
+      const externalAllowedFile = path.join(externalAllowedWs, "sdk.ts");
+      fs.writeFileSync(externalAllowedFile, "export const SDK_VERSION = '1.0.0';\n", "utf-8");
+
+      const server = new AiceMcpServer(undefined, undefined, { workspaceRoot: primaryWs });
+
+      // a) Verify MCP aice_read on oversized file caps output <= 9,216 bytes with "9 KB MCP" and no "--full"
+      const bigReadRes = await server.executeToolCall("aice_read", { path: "oversized.ts" });
+      expect(bigReadRes.isError).toBeFalsy();
+      const bigReadText = bigReadRes.content[0].text;
+      expect(Buffer.byteLength(bigReadText, "utf-8")).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(bigReadText).toContain("9 KB MCP");
+      expect(bigReadText).not.toContain("--full");
+
+      // b) Verify MCP aice_read succeeds on sibling workspace with aice.config.json enabled: true
+      const siblingReadRes = await server.executeToolCall("aice_read", { path: siblingFile });
+      expect(siblingReadRes.isError).toBeFalsy();
+      expect(siblingReadRes.content[0].text).toContain("SHARED_CONFIG");
+
+      // Verify MCP aice_read succeeds on external directory listed in allowedReadRoots
+      const extReadRes = await server.executeToolCall("aice_read", { path: externalAllowedFile });
+      expect(extReadRes.isError).toBeFalsy();
+      expect(extReadRes.content[0].text).toContain("SDK_VERSION");
+
+      // Verify MCP aice_read STILL rejects undeclared sibling directory without aice.config.json
+      await expect(
+        server.executeToolCall("aice_read", { path: undeclaredFile }),
+      ).rejects.toThrow("escapes workspace root");
+
+      // Verify MCP aice_splice STILL rejects writing to sibling directory (escapes workspace root)
+      await expect(
+        server.executeToolCall("aice_splice", {
+          filePath: siblingFile,
+          code: "export const MODIFIED = true;\n",
+        }),
+      ).rejects.toThrow("escapes workspace root");
+
+      // Verify MCP aice_splice STILL rejects writing to external directory listed in allowedReadRoots
+      await expect(
+        server.executeToolCall("aice_splice", {
+          filePath: externalAllowedFile,
+          code: "export const MODIFIED = true;\n",
+        }),
+      ).rejects.toThrow("escapes workspace root");
+    } finally {
+      fs.rmSync(parentTmp, { recursive: true, force: true });
+      fs.rmSync(externalAllowedWs, { recursive: true, force: true });
+    }
   });
 });

@@ -109,7 +109,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_read",
     description:
-      "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 28 KB / ~7,000-token water-filling budget), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
+      "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 9 KB / ~145-line anti-spill slice budget + next slice: pagination), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
     inputSchema: {
       type: "object",
       properties: {
@@ -175,7 +175,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         full: {
           type: "boolean",
           description:
-            "Bypass dynamic auto-outline and default 28 KB stdout ceiling to return full context",
+            "Bypass dynamic auto-outline (>250 lines) to emit numbered code slices within the default 9 KB anti-spill ceiling (set maxTokens to raise budget)",
         },
         depth: {
           type: "number",
@@ -185,7 +185,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         maxTokens: {
           type: "number",
           description:
-            "Maximum token budget override (bypasses default 28 KB ceiling when explicitly set)",
+            "Maximum token budget override (bypasses default 9 KB ceiling when explicitly set)",
         },
         includeDeps: {
           type: "boolean",
@@ -417,13 +417,13 @@ export function buildNullSpliceArrayItemError(targetFileHint?: string): Error {
   );
 }
 
-export function parseJsonArrayIfString(val: unknown, argName: string): unknown {
+export function parseJsonArrayIfString(val: unknown, argName: string, toolName = "aice_splice"): unknown {
   if (typeof val === "string" && val.trim().startsWith("[")) {
     try {
       return JSON.parse(val);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Invalid JSON in aice_splice '${argName}' argument: ${msg}`);
+      throw new Error(`Invalid JSON in ${toolName} '${argName}' argument: ${msg}`);
     }
   }
   return val;
@@ -617,6 +617,143 @@ export class AiceMcpServer {
       if (err instanceof Error && err.message.startsWith("Access denied:")) {
         throw err;
       }
+    }
+
+    return resolved;
+  }
+
+  public resolveSafeReadPath(rawPath: string): string {
+    if (rawPath.includes("\0")) {
+      throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+    }
+
+    const resolved = path.resolve(this.workspaceRoot, rawPath);
+
+    // Block sensitive system directories lexically
+    if (this.isBlockedSystemPath(resolved)) {
+      throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+    }
+
+    // Reject relative path-traversal that escapes workspaceRoot
+    if (!path.isAbsolute(rawPath)) {
+      const normRel = path.normalize(rawPath);
+      if (
+        (normRel.startsWith("..") || rawPath.includes("..")) &&
+        resolved !== this.workspaceRoot &&
+        !resolved.startsWith(this.workspaceRoot + path.sep)
+      ) {
+        throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+      }
+    }
+
+    // Defeat symlink escape attacks (including dangling symlinks and deeply nested missing dirs)
+    let realCandidate = resolved;
+    try {
+      realCandidate = this.resolveCanonicalTarget(resolved);
+      if (this.isBlockedSystemPath(realCandidate)) {
+        throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("Access denied:")) {
+        throw err;
+      }
+    }
+
+    const baseAllowedRoots = [this.workspaceRoot, ...this.declaredRoots];
+    const allowedReadSet = new Set<string>(baseAllowedRoots);
+    for (const r of baseAllowedRoots) {
+      try {
+        if (fs.existsSync(r)) {
+          allowedReadSet.add(fs.realpathSync(r));
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    // a) Any paths configured in loadProjectConfig(this.resolveProjectRoot(this.workspaceRoot)).allowedReadRoots
+    //    (resolved relative to this.workspaceRoot, skipping any isBlockedSystemPath)
+    try {
+      const rootConfig = loadProjectConfig(this.resolveProjectRoot(this.workspaceRoot));
+      if (Array.isArray(rootConfig.allowedReadRoots)) {
+        for (const extRoot of rootConfig.allowedReadRoots) {
+          if (typeof extRoot === "string" && extRoot.trim()) {
+            const resolvedExt = path.resolve(this.workspaceRoot, extRoot.trim());
+            if (!this.isBlockedSystemPath(resolvedExt)) {
+              try {
+                if (fs.existsSync(resolvedExt)) {
+                  const realExt = fs.realpathSync(resolvedExt);
+                  if (!this.isBlockedSystemPath(realExt)) {
+                    allowedReadSet.add(resolvedExt);
+                    allowedReadSet.add(realExt);
+                  }
+                } else {
+                  allowedReadSet.add(resolvedExt);
+                }
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    // b) Sibling AICE-enabled workspace check ONLY when path.isAbsolute(rawPath) and !rawPath.includes("..")
+    if (path.isAbsolute(rawPath) && !rawPath.includes("..")) {
+      try {
+        const resolvedWs = path.resolve(this.workspaceRoot);
+        const realWs = fs.existsSync(resolvedWs) ? fs.realpathSync(resolvedWs) : resolvedWs;
+        const candidateStart =
+          fs.existsSync(realCandidate) && fs.statSync(realCandidate).isDirectory()
+            ? realCandidate
+            : path.dirname(realCandidate);
+        const lexicalStart =
+          fs.existsSync(resolved) && fs.statSync(resolved).isDirectory()
+            ? resolved
+            : path.dirname(resolved);
+        const candidateProjectRoot = findProjectRoot(candidateStart, candidateStart);
+        const lexicalProjectRoot = findProjectRoot(lexicalStart, lexicalStart);
+        if (
+          candidateProjectRoot &&
+          candidateProjectRoot !== resolvedWs &&
+          candidateProjectRoot !== realWs &&
+          (path.dirname(candidateProjectRoot) === path.dirname(resolvedWs) ||
+            path.dirname(candidateProjectRoot) === path.dirname(realWs)) &&
+          fs.existsSync(path.join(candidateProjectRoot, "aice.config.json"))
+        ) {
+          const candConfig = loadProjectConfig(candidateProjectRoot);
+          if (isProjectAiceEnabled(candConfig) === true && !this.isBlockedSystemPath(candidateProjectRoot)) {
+            allowedReadSet.add(candidateProjectRoot);
+            if (lexicalProjectRoot && !this.isBlockedSystemPath(lexicalProjectRoot)) {
+              allowedReadSet.add(lexicalProjectRoot);
+            }
+            try {
+              if (fs.existsSync(candidateProjectRoot)) {
+                const realCandRoot = fs.realpathSync(candidateProjectRoot);
+                if (!this.isBlockedSystemPath(realCandRoot)) {
+                  allowedReadSet.add(realCandRoot);
+                }
+              }
+            } catch {
+              // ignore
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    const isWithinAllowed = (target: string): boolean =>
+      Array.from(allowedReadSet).some(
+        (root) => target === root || target.startsWith(root + path.sep),
+      );
+
+    if (!isWithinAllowed(resolved) || !isWithinAllowed(realCandidate)) {
+      throw new Error(`Access denied: path '${rawPath}' escapes workspace root`);
     }
 
     return resolved;
@@ -908,7 +1045,7 @@ export class AiceMcpServer {
         const dslFlag = typeof args.dsl === "boolean" ? args.dsl : undefined;
 
         const rawCandidate = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
-        const candidateArray = parseJsonArrayIfString(rawCandidate, "targets");
+        const candidateArray = parseJsonArrayIfString(rawCandidate, "targets", "aice_read");
         const rawPathCandidate =
           args.path ??
           args.filePath ??
@@ -930,7 +1067,7 @@ export class AiceMcpServer {
               const rawEntryStr =
                 String(obj.path ?? obj.filePath ?? obj.target ?? ".").trim() || ".";
               const parsed = parseReadTarget(rawEntryStr, this.workspaceRoot);
-              const safeFp = this.resolveSafePath(parsed.targetPath);
+              const safeFp = this.resolveSafeReadPath(parsed.targetPath);
               checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
               safeTargets.push({
                 path: safeFp,
@@ -947,7 +1084,7 @@ export class AiceMcpServer {
               const subTokens = splitReadTargetString(rawStr, this.workspaceRoot);
               for (const tok of subTokens.length > 0 ? subTokens : [rawStr]) {
                 const parsed = parseReadTarget(tok, this.workspaceRoot);
-                const safeFp = this.resolveSafePath(parsed.targetPath);
+                const safeFp = this.resolveSafeReadPath(parsed.targetPath);
                 checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
                 safeTargets.push({
                   path: safeFp,
@@ -962,7 +1099,7 @@ export class AiceMcpServer {
           const tokens = splitReadTargetString(rawPathStr, this.workspaceRoot);
           for (const tok of tokens.length > 0 ? tokens : [rawPathStr]) {
             const parsed = parseReadTarget(tok, this.workspaceRoot);
-            const safeFp = this.resolveSafePath(parsed.targetPath);
+            const safeFp = this.resolveSafeReadPath(parsed.targetPath);
             checkedProjectRoots.add(this.resolveProjectRoot(safeFp));
             safeTargets.push({
               path: safeFp,
@@ -971,15 +1108,57 @@ export class AiceMcpServer {
             });
           }
         } else {
-          const safeWorkspace = this.resolveSafePath(".");
+          const safeWorkspace = this.resolveSafeReadPath(".");
           checkedProjectRoots.add(this.resolveProjectRoot(safeWorkspace));
           if (searchFilter !== undefined || filesOnlyFlag) {
             safeTargets.push({ path: safeWorkspace });
           }
         }
 
+        const wsProjectRoot = this.resolveProjectRoot(this.workspaceRoot);
+        const wsConfig = loadProjectConfig(wsProjectRoot);
+        const wsEnabled = isProjectAiceEnabled(wsConfig);
+
         for (const pr of checkedProjectRoots) {
-          if (!isProjectAiceEnabled(loadProjectConfig(pr))) {
+          if (pr === wsProjectRoot) {
+            if (!wsEnabled) {
+              return {
+                content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
+                isError: true,
+              };
+            }
+            continue;
+          }
+          const hasExplicitConfig = fs.existsSync(path.join(pr, "aice.config.json"));
+          const prConfig = loadProjectConfig(pr);
+          const isAllowedReadRoot =
+            wsEnabled &&
+            !hasExplicitConfig &&
+            prConfig.enabled !== false &&
+            Array.isArray(wsConfig.allowedReadRoots) &&
+            wsConfig.allowedReadRoots.some((arr) => {
+              const resArr = path.resolve(this.workspaceRoot, arr);
+              let realArr = resArr;
+              try {
+                if (fs.existsSync(resArr)) {
+                  realArr = fs.realpathSync(resArr);
+                }
+              } catch {
+                // ignore
+              }
+              return (
+                pr === resArr ||
+                pr.startsWith(`${resArr}${path.sep}`) ||
+                resArr.startsWith(`${pr}${path.sep}`) ||
+                pr === realArr ||
+                pr.startsWith(`${realArr}${path.sep}`) ||
+                realArr.startsWith(`${pr}${path.sep}`)
+              );
+            });
+          if (isAllowedReadRoot) {
+            continue;
+          }
+          if (!isProjectAiceEnabled(prConfig)) {
             return {
               content: [{ type: "text", text: AICE_DISABLED_MESSAGE }],
               isError: true,
@@ -987,10 +1166,17 @@ export class AiceMcpServer {
           }
         }
 
-        const primaryProjectRoot =
+        let primaryProjectRoot =
           safeTargets.length > 0
             ? this.resolveProjectRoot(safeTargets[0]!.path)
             : this.resolveProjectRoot(this.workspaceRoot);
+        if (
+          wsEnabled &&
+          primaryProjectRoot !== wsProjectRoot &&
+          !fs.existsSync(path.join(primaryProjectRoot, "aice.config.json"))
+        ) {
+          primaryProjectRoot = wsProjectRoot;
+        }
 
         try {
           const readRes = await aiceRead(safeTargets.length > 0 ? safeTargets : undefined, {
@@ -1097,7 +1283,7 @@ export class AiceMcpServer {
             let firstSafePath = this.workspaceRoot;
             for (const rawT of rawTargets) {
               const parsed = parseTargetWithInlineSymbol(rawT, this.workspaceRoot);
-              const safeFp = this.resolveSafePath(parsed.targetPath);
+              const safeFp = this.resolveSafeReadPath(parsed.targetPath);
               if (safeTargets.length === 0) firstSafePath = safeFp;
               safeTargets.push({
                 path: safeFp,
@@ -1163,7 +1349,7 @@ export class AiceMcpServer {
           const parsedSingle = parseTargetWithInlineSymbol(singleRaw, this.workspaceRoot);
           const targetPath = parsedSingle.targetPath || ".";
           const effectiveSymbol = parsedSingle.inlineSymbol ?? symbolFilter;
-          const fullPath = this.resolveSafePath(targetPath);
+          const fullPath = this.resolveSafeReadPath(targetPath);
           const projectRoot = this.resolveProjectRoot(fullPath);
           const config = loadProjectConfig(projectRoot);
           if (!isProjectAiceEnabled(config)) {
@@ -1323,7 +1509,7 @@ export class AiceMcpServer {
         if (rawPaths.length === 0) {
           rawPaths.push(".");
         }
-        const safePaths = rawPaths.map((p) => this.resolveSafePath(p));
+        const safePaths = rawPaths.map((p) => this.resolveSafeReadPath(p));
         const firstFullPath = safePaths[0]!;
         const projectRoot = this.resolveProjectRoot(firstFullPath);
         const config = loadProjectConfig(projectRoot);
