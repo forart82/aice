@@ -61,8 +61,11 @@ export interface TelemetryEvent {
   structuralCompressionPct?: number;
 }
 
+export const REPEAT_READ_WINDOW_MS = 90_000;
+
 export interface RecordTelemetryInput {
   targetPath: string;
+  timestamp?: string;
   projectRoot?: string;
   filePath?: string;
   language?: string;
@@ -121,6 +124,7 @@ export interface ProjectGainSummary {
   readCalls: number;
   writeCalls: number;
   overheadCalls: number;
+  repeatReadCalls: number;
   nativeChars: number;
   aiceChars: number;
   savedChars: number;
@@ -138,6 +142,7 @@ export interface FileGainBucket {
   filePath: string;
   language: string;
   calls: number;
+  repeatReadCalls: number;
   nativeCl100k: number;
   aiceCl100k: number;
   savedCl100k: number;
@@ -161,6 +166,7 @@ export interface ProjectDetailReport {
     writeCalls: number;
     idiomCalls: number;
     overheadCalls: number;
+    repeatReadCalls: number;
     nativeChars: number;
     aiceChars: number;
     savedChars: number;
@@ -197,6 +203,7 @@ export interface GainReport {
   writeOperations: number;
   overheadOperations: number;
   overheadCalls: number;
+  repeatReadCalls: number;
   nativeChars: number;
   aiceChars: number;
   savedChars: number;
@@ -740,7 +747,7 @@ export function computeTelemetryEvent(input: RecordTelemetryInput): TelemetryEve
     (realisticNativeCl100k !== undefined ? realisticNativeCl100k - aiceCl100k : undefined);
 
   return {
-    timestamp: new Date().toISOString(),
+    timestamp: input.timestamp ?? new Date().toISOString(),
     projectRoot,
     projectName,
     filePath,
@@ -1069,6 +1076,49 @@ function matchesProjectFilter(event: TelemetryEvent, filterStr: string): boolean
   return false;
 }
 
+interface LastProjectTelemetryState {
+  category: TelemetryCategory;
+  filePath: string;
+  timestampMs: number;
+}
+
+function isTrackableRepeatReadFile(filePath: string): boolean {
+  return Boolean(filePath && !filePath.startsWith("<") && !filePath.endsWith("<directory>"));
+}
+
+function checkAndAdvanceRepeatReadState(
+  ev: TelemetryEvent,
+  stateMap: Map<string, LastProjectTelemetryState>,
+): boolean {
+  const projKey = path.resolve(ev.projectRoot);
+  const tsMs = Date.parse(ev.timestamp);
+  const prev = stateMap.get(projKey);
+  let isRepeatRead = false;
+
+  if (
+    ev.category === "read" &&
+    isTrackableRepeatReadFile(ev.filePath) &&
+    prev !== undefined &&
+    prev.category === "read" &&
+    prev.filePath === ev.filePath &&
+    Number.isFinite(tsMs) &&
+    Number.isFinite(prev.timestampMs)
+  ) {
+    const deltaMs = tsMs - prev.timestampMs;
+    if (deltaMs >= 0 && deltaMs < REPEAT_READ_WINDOW_MS) {
+      isRepeatRead = true;
+    }
+  }
+
+  stateMap.set(projKey, {
+    category: ev.category,
+    filePath: ev.filePath,
+    timestampMs: tsMs,
+  });
+
+  return isRepeatRead;
+}
+
 function buildProjectDetail(
   projectRoot: string,
   projectEvents: TelemetryEvent[],
@@ -1093,6 +1143,7 @@ function buildProjectDetail(
   let writeCalls = 0;
   let idiomCalls = 0;
   let overheadCalls = 0;
+  let repeatReadCalls = 0;
   let nativeChars = 0;
   let aiceChars = 0;
   let savedChars = 0;
@@ -1111,8 +1162,13 @@ function buildProjectDetail(
 
   const opMap = new Map<string, OperationBucket>();
   const fileMap = new Map<string, FileGainBucket>();
+  const repeatReadState = new Map<string, LastProjectTelemetryState>();
 
   for (const ev of projectEvents) {
+    const isRepeatRead = checkAndAdvanceRepeatReadState(ev, repeatReadState);
+    if (isRepeatRead) {
+      repeatReadCalls++;
+    }
     if (ev.category === "read") {
       readCalls++;
       readSavedCl100k += ev.savedCl100k;
@@ -1176,6 +1232,7 @@ function buildProjectDetail(
       filePath: ev.filePath,
       language: ev.language,
       calls: 0,
+      repeatReadCalls: 0,
       nativeCl100k: 0,
       aiceCl100k: 0,
       savedCl100k: 0,
@@ -1185,6 +1242,9 @@ function buildProjectDetail(
       savedO200k: 0,
     };
     existingFile.calls++;
+    if (isRepeatRead) {
+      existingFile.repeatReadCalls++;
+    }
     existingFile.nativeCl100k += ev.nativeCl100k;
     existingFile.aiceCl100k += ev.aiceCl100k;
     existingFile.savedCl100k += ev.savedCl100k;
@@ -1217,6 +1277,7 @@ function buildProjectDetail(
       writeCalls,
       idiomCalls,
       overheadCalls,
+      repeatReadCalls,
       nativeChars,
       aiceChars,
       savedChars,
@@ -1292,6 +1353,7 @@ export function buildGainReport(
   let readOperations = 0;
   let writeOperations = 0;
   let overheadOperations = 0;
+  let repeatReadCalls = 0;
   let nativeChars = 0;
   let aiceChars = 0;
   let savedChars = 0;
@@ -1309,8 +1371,13 @@ export function buildGainReport(
   const langMap = new Map<string, LanguageBucket>();
   const projMap = new Map<string, ProjectGainSummary>();
   const projEventsMap = new Map<string, TelemetryEvent[]>();
+  const repeatReadState = new Map<string, LastProjectTelemetryState>();
 
   for (const ev of filteredEvents) {
+    const isRepeatRead = checkAndAdvanceRepeatReadState(ev, repeatReadState);
+    if (isRepeatRead) {
+      repeatReadCalls++;
+    }
     if (ev.category === "read") readOperations++;
     else writeOperations++;
 
@@ -1393,6 +1460,7 @@ export function buildGainReport(
       readCalls: 0,
       writeCalls: 0,
       overheadCalls: 0,
+      repeatReadCalls: 0,
       nativeChars: 0,
       aiceChars: 0,
       savedChars: 0,
@@ -1409,6 +1477,7 @@ export function buildGainReport(
     if (ev.category === "read") projSummary.readCalls++;
     else projSummary.writeCalls++;
     if (ev.savedCl100k <= 0) projSummary.overheadCalls++;
+    if (isRepeatRead) projSummary.repeatReadCalls++;
     projSummary.nativeChars += ev.nativeChars;
     projSummary.aiceChars += ev.aiceChars;
     projSummary.savedChars += ev.savedChars;
@@ -1457,6 +1526,7 @@ export function buildGainReport(
     writeOperations,
     overheadOperations,
     overheadCalls: overheadOperations,
+    repeatReadCalls,
     nativeChars,
     aiceChars,
     savedChars,
@@ -1526,6 +1596,13 @@ export function formatGlobalGainDashboard(report: GainReport): string {
   );
   lines.push(
     `  Honest Overhead Calls:  ${report.overheadOperations.toLocaleString()} (operations where net savings <= 0)`,
+  );
+  lines.push(
+    `  Repeat-Read Turn Warnings: ${report.repeatReadCalls.toLocaleString()}${
+      report.repeatReadCalls > 0
+        ? " ⚠ (<90s back-to-back same-file reads — multi-turn line hunting)"
+        : " (0 <90s back-to-back same-file reads)"
+    }`,
   );
   lines.push(
     `  cl100k_base Tokens:     Native ${report.nativeCl100k.toLocaleString()} -> AICE ${report.aiceCl100k.toLocaleString()} | Net Saved: ${fmtSigned(report.savedCl100k)} (${fmtPct(report.cl100kSavingsPct)})`,
@@ -1602,6 +1679,13 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
   );
   lines.push(
     `  Total Calls:      ${s.totalCalls} (read: ${s.readCalls}, write: ${s.writeCalls}, idiom-assisted: ${s.idiomCalls}, overhead<=0: ${s.overheadCalls})`,
+  );
+  lines.push(
+    `  Repeat-Read Turn Warnings: ${s.repeatReadCalls.toLocaleString()}${
+      s.repeatReadCalls > 0
+        ? " ⚠ (<90s back-to-back same-file reads — multi-turn line hunting)"
+        : " (0 <90s back-to-back same-file reads)"
+    }`,
   );
   lines.push(
     `  cl100k_base:      Native ${s.nativeCl100k.toLocaleString()} -> AICE ${s.aiceCl100k.toLocaleString()} | Net Saved: ${fmtSigned(s.savedCl100k)} (${fmtPct(s.cl100kSavingsPct)})`,

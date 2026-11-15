@@ -379,4 +379,274 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
       else process.env.AICE_TELEMETRY_PATH = prevEnv;
     }
   });
+
+  it("5. captures aice read/write/search/grep/find/tree transcript calls and accurately computes readLoopAudit + Context Replay Token Tax", () => {
+    const projRoot = path.join(tmpDir, "loop_audit_proj");
+    fs.mkdirSync(path.join(projRoot, "src"), { recursive: true });
+    saveProjectConfig(projRoot, { enabled: true });
+    fs.writeFileSync(
+      path.join(projRoot, "src/engine.ts"),
+      "export class Engine {\n  public step(): number { return 1; }\n}\n",
+      "utf-8",
+    );
+    fs.writeFileSync(
+      path.join(projRoot, "src/ui.ts"),
+      "export class UI {\n  public render(): string { return 'ok'; }\n}\n",
+      "utf-8",
+    );
+
+    const cidLoop = "dddddddd-1111-2222-3333-444444444444";
+    const convLogDir = path.join(transcriptsDir, cidLoop, ".system_generated", "logs");
+    fs.mkdirSync(convLogDir, { recursive: true });
+
+    const steps = [
+      {
+        step_index: 0,
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:00Z",
+        content: `Command Working Directory: ${projRoot}\nRefactor Engine and UI`,
+      },
+      {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:05Z",
+        input_tokens: 4000,
+        cache_read_tokens: 16000,
+        output_tokens: 300,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: 'aice find "*.ts" src && aice tree src' },
+          },
+        ],
+      },
+      {
+        step_index: 2,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:12Z",
+        input_tokens: 5000,
+        cache_read_tokens: 25000,
+        output_tokens: 350,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine: 'aice search "Engine" src/engine.ts && aice grep "render" src/ui.ts',
+            },
+          },
+        ],
+      },
+      {
+        step_index: 3,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:20Z",
+        input_tokens: 4000,
+        cache_read_tokens: 26000,
+        output_tokens: 250,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: "aice read src/engine.ts:outline" },
+          },
+        ],
+      },
+      {
+        step_index: 4,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:28Z",
+        input_tokens: 4000,
+        cache_read_tokens: 36000,
+        output_tokens: 280,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: "aice read src/engine.ts:L1-L50" },
+          },
+        ],
+      },
+      {
+        step_index: 5,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:38Z",
+        input_tokens: 3000,
+        cache_read_tokens: 27000,
+        output_tokens: 400,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine:
+                'aice write src/engine.ts -s Engine.step -c "public step(): number { return 42; }"',
+            },
+          },
+        ],
+      },
+      {
+        step_index: 6,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:45Z",
+        input_tokens: 3000,
+        cache_read_tokens: 27000,
+        output_tokens: 220,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: "aice read src/ui.ts" },
+          },
+        ],
+      },
+      {
+        step_index: 7,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:52Z",
+        input_tokens: 2000,
+        cache_read_tokens: 28000,
+        output_tokens: 310,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: {
+              CommandLine:
+                "aice splice src/ui.ts -s UI.render -c \"public render(): string { return 'done'; }\"",
+            },
+          },
+        ],
+      },
+      {
+        step_index: 8,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T04:00:58Z",
+        input_tokens: 2000,
+        cache_read_tokens: 28000,
+        output_tokens: 120,
+        content: "All refactored cleanly.",
+        tool_calls: [],
+      },
+    ];
+
+    fs.writeFileSync(
+      path.join(convLogDir, "transcript.jsonl"),
+      `${steps.map((s) => JSON.stringify(s)).join("\n")}\n`,
+      "utf-8",
+    );
+
+    const report = analyzeProject({
+      project: projRoot,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+
+    expect(report.sessionSummary.aiceSubcommands).toEqual({
+      find: 1,
+      tree: 1,
+      search: 1,
+      grep: 1,
+      read: 3,
+      write: 1,
+      splice: 1,
+    });
+    expect(report.sessionSummary.aiceCompliancePct).toBe(100);
+
+    expect(report.readLoopAudit.readTurns).toBe(5);
+    expect(report.readLoopAudit.totalTurns).toBe(8);
+    expect(report.readLoopAudit.readTurnRatioPct).toBe(62.5);
+    expect(report.readLoopAudit.maxConsecutiveReadStreak).toBe(4);
+    expect(report.readLoopAudit.extraReadTurns).toBe(3);
+    expect(report.readLoopAudit.sameFileRepeatReadChainCount).toBe(1);
+    expect(report.readLoopAudit.sameFileRepeatReadChains).toEqual([
+      {
+        conversationId: cidLoop,
+        filePath: "src/engine.ts",
+        turns: 3,
+      },
+    ]);
+    // Total (input + cache_read) = 240,000 across 8 turns -> 30,000 avgSessionContextTokens
+    expect(report.readLoopAudit.avgSessionContextTokens).toBe(30000);
+    expect(report.readLoopAudit.contextReplayTokenTax).toBe(90000);
+
+    const formatted = formatAnalyzeReport(report);
+    expect(formatted).toContain("3. READ-LOOP & TURN-AMPLIFICATION AUDIT");
+    expect(formatted).toContain("Read Turns / Ratio     : 5 / 8 LLM turns (62.5%)");
+    expect(formatted).toContain("Max Consecutive Reads  : 4 turn(s) (3 extra read turn(s))");
+    expect(formatted).toContain("src/engine.ts (3x)");
+    expect(formatted).toContain(
+      "Context Replay Tax Est : 90,000 tokens (3 extra read turn(s) × 30,000 avg context tokens)",
+    );
+  });
+
+  it("6. reports zero extraReadTurns and zero Context Replay Token Tax on 1-turn read-then-splice workflows", () => {
+    const projRoot = path.join(tmpDir, "clean_one_turn_proj");
+    fs.mkdirSync(path.join(projRoot, "src"), { recursive: true });
+    saveProjectConfig(projRoot, { enabled: true });
+    fs.writeFileSync(path.join(projRoot, "src/app.ts"), "export const v = 1;\n", "utf-8");
+
+    const cidClean = "eeeeeeee-1111-2222-3333-444444444444";
+    const convLogDir = path.join(transcriptsDir, cidClean, ".system_generated", "logs");
+    fs.mkdirSync(convLogDir, { recursive: true });
+
+    const steps = [
+      {
+        step_index: 0,
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-15T05:00:00Z",
+        content: `Command Working Directory: ${projRoot}\nUpdate v`,
+      },
+      {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T05:00:04Z",
+        input_tokens: 3000,
+        cache_read_tokens: 17000,
+        output_tokens: 200,
+        tool_calls: [{ name: "run_command", args: { CommandLine: "aice read src/app.ts" } }],
+      },
+      {
+        step_index: 2,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-15T05:00:09Z",
+        input_tokens: 2000,
+        cache_read_tokens: 18000,
+        output_tokens: 250,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: 'aice write src/app.ts -s L1-L1 -c "export const v = 2;"' },
+          },
+        ],
+      },
+    ];
+    fs.writeFileSync(
+      path.join(convLogDir, "transcript.jsonl"),
+      `${steps.map((s) => JSON.stringify(s)).join("\n")}\n`,
+      "utf-8",
+    );
+
+    const report = analyzeProject({
+      project: projRoot,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+    expect(report.readLoopAudit.readTurns).toBe(1);
+    expect(report.readLoopAudit.totalTurns).toBe(2);
+    expect(report.readLoopAudit.readTurnRatioPct).toBe(50);
+    expect(report.readLoopAudit.maxConsecutiveReadStreak).toBe(1);
+    expect(report.readLoopAudit.extraReadTurns).toBe(0);
+    expect(report.readLoopAudit.sameFileRepeatReadChains).toEqual([]);
+    expect(report.readLoopAudit.contextReplayTokenTax).toBe(0);
+
+    const formatted = formatAnalyzeReport(report);
+    expect(formatted).toContain("0 (no multi-turn line-hunting loops)");
+  });
 });

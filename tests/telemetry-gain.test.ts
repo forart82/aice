@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
 import { MANDATORY_AGENT_RULES_MARKDOWN } from "../src/rules/mandatory-rules.js";
 import {
@@ -340,8 +340,10 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
 
   it("filters ephemeral input.projectRoot and input.targetPath (/tmp/aice-rw-*, /tmp/sbx-*, /var/tmp/*, swarm-*) even when process.cwd() is a real repo", () => {
     const savedEnv = { ...process.env };
+    const permanentRepoCwd = "/workspace/permanent-repo";
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(permanentRepoCwd);
     const permanentHome = path.join(
-      process.cwd(),
+      os.homedir(),
       ".aice-cache",
       `tmp-home-ephemeral-test-${process.pid}-${Date.now()}`,
     );
@@ -371,8 +373,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
 
       // 1. Permanent repo call while cwd is a real repo -> MUST record
       const realEv = recordTelemetryEvent({
-        targetPath: path.join(process.cwd(), "src/telemetry/index.ts"),
-        projectRoot: process.cwd(),
+        targetPath: path.join(permanentRepoCwd, "src/telemetry/index.ts"),
+        projectRoot: permanentRepoCwd,
         filePath: "src/telemetry/index.ts",
         operation: "outline",
         nativeText: "export const ok = 1;\n".repeat(10),
@@ -422,8 +424,9 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
       const defaultLedger = path.join(permanentHome, ".aice", "telemetry", "gains.jsonl");
       const persisted = readTelemetryEvents(defaultLedger);
       expect(persisted).toHaveLength(1);
-      expect(persisted[0]?.projectRoot).toBe(path.resolve(process.cwd()));
+      expect(persisted[0]?.projectRoot).toBe(path.resolve(permanentRepoCwd));
     } finally {
+      cwdSpy.mockRestore();
       process.env = savedEnv;
       fs.rmSync(permanentHome, { recursive: true, force: true });
     }
@@ -595,5 +598,163 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(hydrated[0]?.realisticSavedCl100k).toBe(5700);
     expect(hydrated[1]?.projectRoot).toBe("/workspace/ui-repo");
     expect(hydrated[1]?.savedCl100k).toBe(-25);
+  });
+
+  it("detects < 90s back-to-back reads on the same (projectRoot, filePath) (repeatReadCalls) without firing on >= 90s or different file/project, and surfaces Repeat-Read Turn Warnings", () => {
+    const bigSource =
+      "export function computeRow(x: number): number { return x * 2 + 1; }\n".repeat(30);
+
+    // 1. Initial read on (projectADir, src/loop.ts) at t=0s -> NOT a repeat read
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "loop.ts"),
+      projectRoot: projectADir,
+      filePath: "src/loop.ts",
+      operation: "outline",
+      timestamp: "2026-11-15T10:00:00.000Z",
+      nativeText: bigSource,
+      aiceText: "pub fn computeRow(x: num): num",
+      telemetryPath: telemetryFile,
+    });
+
+    // 2. Second read on same (projectADir, src/loop.ts) at t=35s (< 90s) -> repeatReadCalls #1
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "loop.ts"),
+      projectRoot: projectADir,
+      filePath: "src/loop.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:00:35.000Z",
+      nativeText: bigSource,
+      aiceText: "1│ export function computeRow(x: number): number { return x * 2 + 1; }",
+      telemetryPath: telemetryFile,
+    });
+
+    // 3. Third read on same (projectADir, src/loop.ts) at +89.999s (< 90s) -> repeatReadCalls #2
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "loop.ts"),
+      projectRoot: projectADir,
+      filePath: "src/loop.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:02:04.999Z",
+      nativeText: bigSource,
+      aiceText: "15│ export function computeRow(x: number): number { return x * 2 + 1; }",
+      telemetryPath: telemetryFile,
+    });
+
+    // 4. Fourth read on same (projectADir, src/loop.ts) at exact +90.000s (>= 90s) -> must NOT fire
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "loop.ts"),
+      projectRoot: projectADir,
+      filePath: "src/loop.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:03:34.999Z",
+      nativeText: bigSource,
+      aiceText: "25│ export function computeRow(x: number): number { return x * 2 + 1; }",
+      telemetryPath: telemetryFile,
+    });
+
+    // 5. Read on DIFFERENT file in same project within 10s (< 90s) -> must NOT fire
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "other.ts"),
+      projectRoot: projectADir,
+      filePath: "src/other.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:03:44.999Z",
+      nativeText: bigSource,
+      aiceText: "1│ export const other = true;",
+      telemetryPath: telemetryFile,
+    });
+
+    // 6. Read on SAME filePath ("src/other.ts") in DIFFERENT projectRoot within 5s -> must NOT fire
+    recordTelemetryEvent({
+      targetPath: path.join(projectBDir, "src", "other.ts"),
+      projectRoot: projectBDir,
+      filePath: "src/other.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:03:49.999Z",
+      nativeText: bigSource,
+      aiceText: "1│ export const betaOther = true;",
+      telemetryPath: telemetryFile,
+    });
+
+    // 7. Intervening splice on (projectADir, src/other.ts) followed by read 10s later -> must NOT fire
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "other.ts"),
+      projectRoot: projectADir,
+      filePath: "src/other.ts",
+      operation: "splice",
+      timestamp: "2026-11-15T10:03:54.999Z",
+      nativeText: bigSource,
+      aiceText: "export const other = false;",
+      telemetryPath: telemetryFile,
+    });
+    recordTelemetryEvent({
+      targetPath: path.join(projectADir, "src", "other.ts"),
+      projectRoot: projectADir,
+      filePath: "src/other.ts",
+      operation: "context",
+      timestamp: "2026-11-15T10:04:04.999Z",
+      nativeText: bigSource,
+      aiceText: "1│ export const other = false;",
+      telemetryPath: telemetryFile,
+    });
+
+    const globalReport = buildGainReport({ telemetryPath: telemetryFile });
+    expect(globalReport.savedCl100k).toBeGreaterThan(0);
+    expect(globalReport.repeatReadCalls).toBe(2);
+
+    const alphaProj = globalReport.projects.find((p) => p.projectName === "alpha-engine");
+    const betaProj = globalReport.projects.find((p) => p.projectName === "beta-tiny");
+    expect(alphaProj?.repeatReadCalls).toBe(2);
+    expect(betaProj?.repeatReadCalls).toBe(0);
+
+    const globalText = formatGlobalGainDashboard(globalReport);
+    expect(globalText).toContain("Repeat-Read Turn Warnings: 2 ⚠");
+
+    const alphaDetail = buildGainReport({
+      telemetryPath: telemetryFile,
+      project: "alpha-engine",
+    });
+    expect(alphaDetail.projectDetail?.summary.repeatReadCalls).toBe(2);
+    expect(
+      alphaDetail.projectDetail?.topFiles.find((f) => f.filePath === "src/loop.ts")
+        ?.repeatReadCalls,
+    ).toBe(2);
+    expect(
+      alphaDetail.projectDetail?.topFiles.find((f) => f.filePath === "src/other.ts")
+        ?.repeatReadCalls,
+    ).toBe(0);
+
+    if (alphaDetail.projectDetail) {
+      const alphaDetailText = formatProjectGainDetail(alphaDetail.projectDetail);
+      expect(alphaDetailText).toContain("Repeat-Read Turn Warnings: 2 ⚠");
+    }
+
+    const betaDetail = buildGainReport({
+      telemetryPath: telemetryFile,
+      project: "beta-tiny",
+    });
+    expect(betaDetail.projectDetail?.summary.repeatReadCalls).toBe(0);
+    if (betaDetail.projectDetail) {
+      const betaDetailText = formatProjectGainDetail(betaDetail.projectDetail);
+      expect(betaDetailText).toContain(
+        "Repeat-Read Turn Warnings: 0 (0 <90s back-to-back same-file reads)",
+      );
+    }
+
+    const cliJson = spawnSync(TSX_BIN, [CLI_PATH, "gain", "--json"], {
+      cwd: projectADir,
+      encoding: "utf-8",
+      env: { ...process.env, AICE_TELEMETRY_PATH: telemetryFile },
+    });
+    expect(cliJson.status).toBe(0);
+    expect(JSON.parse(cliJson.stdout).repeatReadCalls).toBe(2);
+
+    const cliText = spawnSync(TSX_BIN, [CLI_PATH, "gain"], {
+      cwd: projectADir,
+      encoding: "utf-8",
+      env: { ...process.env, AICE_TELEMETRY_PATH: telemetryFile },
+    });
+    expect(cliText.status).toBe(0);
+    expect(cliText.stdout).toContain("Repeat-Read Turn Warnings: 2 ⚠");
   });
 });

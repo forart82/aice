@@ -78,6 +78,18 @@ export interface AnalyzedSessionSummary {
     aiceCl100k: number;
     savedCl100k: number;
   };
+  readLoop?: {
+    readTurns: number;
+    maxConsecutiveReadStreak: number;
+    extraReadTurns: number;
+    sameFileRepeatReadChains: SameFileRepeatReadChain[];
+  };
+}
+
+export interface SameFileRepeatReadChain {
+  conversationId: string;
+  filePath: string;
+  turns: number;
 }
 
 export interface AnalyzeProjectOptions {
@@ -133,6 +145,17 @@ export interface ProjectAnalyzeReport {
     aiceO200k: number;
     savedO200k: number;
     o200kSavingsPct: number;
+  };
+  readLoopAudit: {
+    readTurns: number;
+    totalTurns: number;
+    readTurnRatioPct: number;
+    maxConsecutiveReadStreak: number;
+    sameFileRepeatReadChainCount: number;
+    sameFileRepeatReadChains: SameFileRepeatReadChain[];
+    extraReadTurns: number;
+    avgSessionContextTokens: number;
+    contextReplayTokenTax: number;
   };
   frictionAudit: {
     totalErrors: number;
@@ -406,6 +429,252 @@ function extractAntigravityWorkspaceFromDb(
   return null;
 }
 
+const AICE_READ_SUBCOMMANDS = new Set([
+  "read",
+  "search",
+  "grep",
+  "find",
+  "tree",
+  "outline",
+  "context",
+  "ctx",
+  "decompile",
+]);
+
+const AICE_WRITE_SUBCOMMANDS = new Set(["write", "splice", "create", "patch"]);
+
+const NATIVE_READ_TOOLS = new Set(["read_file", "view_file"]);
+const NATIVE_WRITE_TOOLS = new Set([
+  "write_file",
+  "write_to_file",
+  "edit_file",
+  "replace_file_content",
+  "multi_replace_file_content",
+]);
+
+const EXTENSIONLESS_KNOWN_FILES =
+  /^(?:Makefile|Dockerfile|Containerfile|Vagrantfile|Jenkinsfile|Procfile|LICENSE|NOTICE|README)$/i;
+
+function splitHeredocCommand(cmd: string): {
+  commandText: string;
+  heredocTargetPaths: string[];
+} {
+  const rawLines = cmd.split("\n");
+  const cmdLines: string[] = [];
+  const heredocTargetPaths: string[] = [];
+  let activeDelim: string | null = null;
+
+  for (const line of rawLines) {
+    if (activeDelim !== null) {
+      if (line.trim() === activeDelim) {
+        activeDelim = null;
+        continue;
+      }
+      const headerMatch = line.match(/^===\s*(.+?)\s*===$/);
+      if (headerMatch) {
+        heredocTargetPaths.push(headerMatch[1]);
+      }
+      continue;
+    }
+
+    cmdLines.push(line);
+    const heredocOpen = line.match(/<<-?\s*['"]?([A-Za-z0-9_]+)['"]?/);
+    if (heredocOpen) {
+      activeDelim = heredocOpen[1];
+    }
+  }
+
+  return {
+    commandText: cmdLines.join("\n"),
+    heredocTargetPaths,
+  };
+}
+
+function tokenizeShellWords(segment: string): string[] {
+  const tokens: string[] = [];
+  const re = /'([^']*)'|"((?:\\.|[^"\\])*)"|`([^`]*)`|([^\s'"`]+)/g;
+  for (const m of segment.matchAll(re)) {
+    const tok = m[1] ?? m[2] ?? m[3] ?? m[4] ?? "";
+    if (tok) {
+      tokens.push(tok);
+    }
+  }
+  return tokens;
+}
+
+function extractAiceCliTargets(
+  commandText: string,
+  heredocTargetPaths: string[],
+): {
+  readTargetCandidates: string[];
+  writeTargetCandidates: string[];
+} {
+  const readTargetCandidates: string[] = [];
+  const writeTargetCandidates: string[] = [...heredocTargetPaths];
+
+  const segments = commandText.split(/(?:&&|\|\||;|\||\n)+/);
+  const readFlagsWithValue = new Set([
+    "-s",
+    "--symbol",
+    "--search",
+    "-C",
+    "--context",
+    "-d",
+    "--depth",
+    "--max-tokens",
+  ]);
+  const writeFlagsWithValue = new Set([
+    "-s",
+    "--symbol",
+    "-c",
+    "--code",
+    "-t",
+    "--template",
+    "-b",
+    "--body",
+    "--from",
+    "--insert-after",
+    "--insert-before",
+    "--edits",
+    "--batch",
+    "--idiom",
+  ]);
+
+  for (const seg of segments) {
+    const words = tokenizeShellWords(seg);
+    let aiceIdx = -1;
+    for (let i = 0; i < words.length - 1; i++) {
+      if (/(?:^|\/)aice(?:\.mjs|\.ts)?$/.test(words[i])) {
+        aiceIdx = i;
+        break;
+      }
+    }
+    if (aiceIdx < 0) continue;
+
+    const sub = words[aiceIdx + 1];
+    const rest = words.slice(aiceIdx + 2);
+
+    if (
+      sub === "read" ||
+      sub === "outline" ||
+      sub === "context" ||
+      sub === "ctx" ||
+      sub === "decompile"
+    ) {
+      for (let i = 0; i < rest.length; i++) {
+        const tok = rest[i];
+        if (tok === ">" || tok === ">>" || tok === "<" || tok.startsWith("<<")) break;
+        if (tok === "-f" || tok === "--file") {
+          if (i + 1 < rest.length) readTargetCandidates.push(rest[++i]);
+          continue;
+        }
+        if (readFlagsWithValue.has(tok)) {
+          i++;
+          continue;
+        }
+        if (tok.startsWith("-")) continue;
+        readTargetCandidates.push(tok);
+      }
+    } else if (sub === "search" || sub === "grep") {
+      const positionals: string[] = [];
+      for (let i = 0; i < rest.length; i++) {
+        const tok = rest[i];
+        if (tok === ">" || tok === ">>" || tok === "<" || tok.startsWith("<<")) break;
+        if (tok === "-C" || tok === "--context" || tok === "--max-tokens") {
+          i++;
+          continue;
+        }
+        if (tok.startsWith("-")) continue;
+        positionals.push(tok);
+      }
+      for (const target of positionals.slice(1)) {
+        readTargetCandidates.push(target);
+      }
+    } else if (sub === "find" || sub === "tree") {
+      for (let i = 0; i < rest.length; i++) {
+        const tok = rest[i];
+        if (tok === ">" || tok === ">>" || tok === "<" || tok.startsWith("<<")) break;
+        if (tok === "--max-tokens") {
+          i++;
+          continue;
+        }
+        if (tok.startsWith("-")) continue;
+        readTargetCandidates.push(tok);
+      }
+    } else if (AICE_WRITE_SUBCOMMANDS.has(sub)) {
+      let capturedPositionalPath = false;
+      for (let i = 0; i < rest.length; i++) {
+        const tok = rest[i];
+        if (tok === ">" || tok === ">>" || tok === "<" || tok.startsWith("<<")) break;
+        if (tok === "-f" || tok === "--file") {
+          if (i + 1 < rest.length) writeTargetCandidates.push(rest[++i]);
+          continue;
+        }
+        if (writeFlagsWithValue.has(tok)) {
+          i++;
+          continue;
+        }
+        if (tok.startsWith("-")) continue;
+        if (!capturedPositionalPath) {
+          writeTargetCandidates.push(tok);
+          capturedPositionalPath = true;
+        }
+      }
+    }
+  }
+
+  return { readTargetCandidates, writeTargetCandidates };
+}
+
+function normalizeTranscriptTargetFile(
+  rawTarget: string,
+  baseDir: string,
+  projectRoot: string,
+): string | null {
+  const unquoted = rawTarget.replace(/^['"`]|['"`]$/g, "").trim();
+  if (!unquoted || unquoted.startsWith("-")) return null;
+  if (/^\/[^/]+\/[gimsuy]*$/.test(unquoted)) return null;
+
+  const colonIdx = /^[A-Za-z]:[\\/]/.test(unquoted)
+    ? unquoted.indexOf(":", 2)
+    : unquoted.indexOf(":");
+  const withoutSelector = (colonIdx >= 0 ? unquoted.slice(0, colonIdx) : unquoted).trim();
+  if (
+    !withoutSelector ||
+    withoutSelector === "." ||
+    withoutSelector === ".." ||
+    withoutSelector.endsWith("/") ||
+    /[*?[\]{}]/.test(withoutSelector)
+  ) {
+    return null;
+  }
+
+  const resolved = path.isAbsolute(withoutSelector)
+    ? path.resolve(withoutSelector)
+    : path.resolve(baseDir, withoutSelector);
+
+  try {
+    if (fs.existsSync(resolved)) {
+      if (fs.statSync(resolved).isDirectory()) {
+        return null;
+      }
+    } else {
+      const base = path.basename(resolved);
+      if (path.extname(base) === "" && !EXTENSIONLESS_KNOWN_FILES.test(base)) {
+        return null;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  const rel = path.relative(projectRoot, resolved).replace(/\\/g, "/");
+  if (!rel || rel === "." || rel === ".." || rel.startsWith("../")) {
+    return null;
+  }
+  return rel;
+}
+
 function parseTranscriptFile(
   transcriptPath: string,
   conversationId: string,
@@ -452,6 +721,13 @@ function parseTranscriptFile(
   let transcriptAiceCl100k = 0;
   let transcriptSavedCl100k = 0;
   let pendingSpliceAiceTokens = 0;
+
+  let readTurns = 0;
+  let currentReadStreak = 0;
+  let maxConsecutiveReadStreak = 0;
+  let extraReadTurns = 0;
+  const activeFileReadStreaks = new Map<string, number>();
+  const sameFileRepeatReadChains: SameFileRepeatReadChain[] = [];
 
   const nativeBypassTools = new Set([
     "read_file",
@@ -522,6 +798,11 @@ function parseTranscriptFile(
       cacheReadTokens += ct;
       outputTokens += ot;
 
+      let turnHasRead = false;
+      let turnHasWrite = false;
+      const turnReadFiles = new Set<string>();
+      const effectiveBaseDir = workspace ?? targetProjectRoot;
+
       const tcs = Array.isArray(step.tool_calls) ? step.tool_calls : [];
       for (const tcRaw of tcs) {
         const tc = (tcRaw ?? {}) as Record<string, unknown>;
@@ -533,8 +814,13 @@ function parseTranscriptFile(
         if (nativeBypassTools.has(name)) {
           nativeFileBypasses[name] = (nativeFileBypasses[name] ?? 0) + 1;
         }
+        if (NATIVE_READ_TOOLS.has(name)) {
+          turnHasRead = true;
+        } else if (NATIVE_WRITE_TOOLS.has(name)) {
+          turnHasWrite = true;
+        }
 
-        const pVal = args.Path ?? args.file_path ?? args.target_file;
+        const pVal = args.Path ?? args.file_path ?? args.target_file ?? args.path;
         if (typeof pVal === "string") {
           const cleanP = pVal.replace(/^['"`]|['"`]$/g, "");
           if (cleanP.startsWith(`${targetProjectRoot}/`) || cleanP === targetProjectRoot) {
@@ -546,6 +832,14 @@ function parseTranscriptFile(
               workspace = parts.slice(0, 5).join("/");
             }
           }
+          if (NATIVE_READ_TOOLS.has(name)) {
+            const normFile = normalizeTranscriptTargetFile(
+              cleanP,
+              workspace ?? effectiveBaseDir,
+              targetProjectRoot,
+            );
+            if (normFile) turnReadFiles.add(normFile);
+          }
         }
 
         const cmdVal = args.CommandLine ?? args.command;
@@ -554,21 +848,163 @@ function parseTranscriptFile(
           if (cleanCmd.includes("watch_campaign.py") || cleanCmd.includes("agy -p")) {
             isOrchestratorRunner = true;
           }
-          for (const mSub of cleanCmd.matchAll(
-            /\baice(?:\.mjs|\.ts)?\s+(create|splice|outline|context|decompile|patch|idioms|gain|analyze)\b/g,
+          const { commandText, heredocTargetPaths } = splitHeredocCommand(cleanCmd);
+          for (const mSub of commandText.matchAll(
+            /\baice(?:\.mjs|\.ts)?\s+(read|write|search|grep|find|tree|create|splice|outline|context|ctx|decompile|patch|idioms|gain|analyze)\b/g,
           )) {
             const sub = mSub[1];
             aiceSubcommands[sub] = (aiceSubcommands[sub] ?? 0) + 1;
-            if (sub === "splice") {
+            if (AICE_READ_SUBCOMMANDS.has(sub)) {
+              turnHasRead = true;
+            } else if (AICE_WRITE_SUBCOMMANDS.has(sub)) {
+              turnHasWrite = true;
+            }
+            if (sub === "splice" || sub === "write") {
               pendingSpliceAiceTokens = estimateTokens(cleanCmd, "cl100k_base");
+            }
+          }
+
+          const { readTargetCandidates, writeTargetCandidates } = extractAiceCliTargets(
+            commandText,
+            heredocTargetPaths,
+          );
+          for (const rawCand of [...readTargetCandidates, ...writeTargetCandidates]) {
+            const cleanCand = rawCand.replace(/^['"`]|['"`]$/g, "");
+            if (
+              cleanCand.startsWith(`${targetProjectRoot}/`) ||
+              cleanCand === targetProjectRoot ||
+              cleanCand.startsWith(`${targetProjectRoot}:`)
+            ) {
+              mentionsProjectRoot = true;
+              if (!workspace) workspace = targetProjectRoot;
+            }
+          }
+          for (const rawReadCand of readTargetCandidates) {
+            const normFile = normalizeTranscriptTargetFile(
+              rawReadCand,
+              workspace ?? effectiveBaseDir,
+              targetProjectRoot,
+            );
+            if (normFile) {
+              turnReadFiles.add(normFile);
             }
           }
         }
 
         const toolNameVal = args.ToolName;
+        let mcpToolClean: string | null = null;
         if (typeof toolNameVal === "string") {
-          const cleanTn = toolNameVal.replace(/^['"`]|['"`]$/g, "");
-          aiceSubcommands[`mcp:${cleanTn}`] = (aiceSubcommands[`mcp:${cleanTn}`] ?? 0) + 1;
+          mcpToolClean = toolNameVal.replace(/^['"`]|['"`]$/g, "");
+          aiceSubcommands[`mcp:${mcpToolClean}`] =
+            (aiceSubcommands[`mcp:${mcpToolClean}`] ?? 0) + 1;
+        } else if (
+          /^(?:mcp[_a-z0-9]*?_)?aice_(read|splice|outline|context|decompile|create|patch)$/i.test(
+            name,
+          )
+        ) {
+          mcpToolClean = name.replace(/^mcp[_a-z0-9]*?_(?=aice_)/i, "").toLowerCase();
+          aiceSubcommands[`mcp:${mcpToolClean}`] =
+            (aiceSubcommands[`mcp:${mcpToolClean}`] ?? 0) + 1;
+        }
+
+        if (mcpToolClean) {
+          const lowerMcp = mcpToolClean.toLowerCase();
+          if (
+            lowerMcp.includes("read") ||
+            lowerMcp.includes("outline") ||
+            lowerMcp.includes("context") ||
+            lowerMcp.includes("decompile")
+          ) {
+            turnHasRead = true;
+            const mcpTargets: string[] = [];
+            if (Array.isArray(args.targets)) {
+              for (const t of args.targets) {
+                if (typeof t === "string") mcpTargets.push(t);
+              }
+            }
+            if (Array.isArray(args.paths)) {
+              for (const t of args.paths) {
+                if (typeof t === "string") mcpTargets.push(t);
+              }
+            }
+            if (typeof args.path === "string") mcpTargets.push(args.path);
+            if (typeof args.target === "string") mcpTargets.push(args.target);
+            for (const mt of mcpTargets) {
+              if (
+                mt.startsWith(`${targetProjectRoot}/`) ||
+                mt.startsWith(`${targetProjectRoot}:`)
+              ) {
+                mentionsProjectRoot = true;
+                if (!workspace) workspace = targetProjectRoot;
+              }
+              const normFile = normalizeTranscriptTargetFile(
+                mt,
+                workspace ?? effectiveBaseDir,
+                targetProjectRoot,
+              );
+              if (normFile) turnReadFiles.add(normFile);
+            }
+          } else if (
+            lowerMcp.includes("splice") ||
+            lowerMcp.includes("write") ||
+            lowerMcp.includes("create") ||
+            lowerMcp.includes("patch")
+          ) {
+            turnHasWrite = true;
+          }
+        }
+      }
+
+      if (turnHasRead) {
+        readTurns++;
+        if (turnHasWrite) {
+          const settledStreak = currentReadStreak + 1;
+          if (settledStreak > maxConsecutiveReadStreak) {
+            maxConsecutiveReadStreak = settledStreak;
+          }
+          if (settledStreak >= 2) {
+            extraReadTurns++;
+          }
+          currentReadStreak = 0;
+        } else {
+          currentReadStreak++;
+          if (currentReadStreak > maxConsecutiveReadStreak) {
+            maxConsecutiveReadStreak = currentReadStreak;
+          }
+          if (currentReadStreak >= 2) {
+            extraReadTurns++;
+          }
+        }
+      } else {
+        currentReadStreak = 0;
+      }
+
+      if (turnHasWrite) {
+        for (const [trackedFile, streak] of activeFileReadStreaks.entries()) {
+          if (streak >= 2) {
+            sameFileRepeatReadChains.push({
+              conversationId,
+              filePath: trackedFile,
+              turns: streak,
+            });
+          }
+        }
+        activeFileReadStreaks.clear();
+      } else {
+        for (const [trackedFile, streak] of activeFileReadStreaks.entries()) {
+          if (!turnReadFiles.has(trackedFile)) {
+            if (streak >= 2) {
+              sameFileRepeatReadChains.push({
+                conversationId,
+                filePath: trackedFile,
+                turns: streak,
+              });
+            }
+            activeFileReadStreaks.delete(trackedFile);
+          }
+        }
+        for (const rf of turnReadFiles) {
+          activeFileReadStreaks.set(rf, (activeFileReadStreaks.get(rf) ?? 0) + 1);
         }
       }
     } else if (content) {
@@ -635,6 +1071,17 @@ function parseTranscriptFile(
     }
   }
 
+  for (const [trackedFile, streak] of activeFileReadStreaks.entries()) {
+    if (streak >= 2) {
+      sameFileRepeatReadChains.push({
+        conversationId,
+        filePath: trackedFile,
+        turns: streak,
+      });
+    }
+  }
+  activeFileReadStreaks.clear();
+
   let matchesTarget = false;
   if (workspace !== null) {
     if (workspace === targetProjectRoot) {
@@ -697,6 +1144,12 @@ function parseTranscriptFile(
       nativeCl100k: transcriptNativeCl100k,
       aiceCl100k: transcriptAiceCl100k,
       savedCl100k: transcriptSavedCl100k,
+    },
+    readLoop: {
+      readTurns,
+      maxConsecutiveReadStreak,
+      extraReadTurns,
+      sameFileRepeatReadChains,
     },
   };
 }
@@ -885,6 +1338,11 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
   let fallbackAiceCl100k = 0;
   let fallbackSavedCl100k = 0;
 
+  let readTurns = 0;
+  let maxConsecutiveReadStreak = 0;
+  let extraReadTurns = 0;
+  const sameFileRepeatReadChains: SameFileRepeatReadChain[] = [];
+
   for (const s of sessions) {
     totalSteps += s.totalSteps;
     totalTurns += s.llmTurns;
@@ -904,6 +1362,16 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       fallbackNativeCl100k += s.transcriptBpe.nativeCl100k;
       fallbackAiceCl100k += s.transcriptBpe.aiceCl100k;
       fallbackSavedCl100k += s.transcriptBpe.savedCl100k;
+    }
+    if (s.readLoop) {
+      readTurns += s.readLoop.readTurns;
+      if (s.readLoop.maxConsecutiveReadStreak > maxConsecutiveReadStreak) {
+        maxConsecutiveReadStreak = s.readLoop.maxConsecutiveReadStreak;
+      }
+      extraReadTurns += s.readLoop.extraReadTurns;
+      for (const chain of s.readLoop.sameFileRepeatReadChains) {
+        sameFileRepeatReadChains.push(chain);
+      }
     }
     for (const [k, v] of Object.entries(s.aiceSubcommands)) {
       aiceSubcommands[k] = (aiceSubcommands[k] ?? 0) + v;
@@ -938,6 +1406,11 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
   const hasLedgerCalls = (detail?.summary.totalCalls ?? 0) > 0;
   const fallbackPct =
     fallbackNativeCl100k > 0 ? Math.round((fallbackSavedCl100k / fallbackNativeCl100k) * 100) : 0;
+
+  const readTurnRatioPct = totalTurns > 0 ? Number(((readTurns / totalTurns) * 100).toFixed(1)) : 0;
+  const avgSessionContextTokens =
+    totalTurns > 0 ? Math.round((inputTokensUncached + cacheReadTokens) / totalTurns) : 0;
+  const contextReplayTokenTax = extraReadTurns * avgSessionContextTokens;
 
   return {
     capturedAt: new Date().toISOString(),
@@ -991,6 +1464,17 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
           savedO200k: fallbackSavedCl100k,
           o200kSavingsPct: fallbackPct,
         },
+    readLoopAudit: {
+      readTurns,
+      totalTurns,
+      readTurnRatioPct,
+      maxConsecutiveReadStreak,
+      sameFileRepeatReadChainCount: sameFileRepeatReadChains.length,
+      sameFileRepeatReadChains,
+      extraReadTurns,
+      avgSessionContextTokens,
+      contextReplayTokenTax,
+    },
     frictionAudit: {
       totalErrors: telemetryErrors.length + transcriptErrors.length,
       telemetryErrors,
@@ -1068,7 +1552,29 @@ export function formatAnalyzeReport(report: ProjectAnalyzeReport): string {
   );
 
   lines.push("");
-  lines.push("3. FRICTION & ERROR AUDIT");
+  lines.push("3. READ-LOOP & TURN-AMPLIFICATION AUDIT");
+  lines.push(subSep);
+  const rla = report.readLoopAudit;
+  lines.push(
+    `  Read Turns / Ratio     : ${rla.readTurns} / ${rla.totalTurns} LLM turns (${rla.readTurnRatioPct}%)`,
+  );
+  lines.push(
+    `  Max Consecutive Reads  : ${rla.maxConsecutiveReadStreak} turn(s) (${rla.extraReadTurns} extra read turn(s))`,
+  );
+  const chainStr =
+    rla.sameFileRepeatReadChains.length > 0
+      ? `${rla.sameFileRepeatReadChains.length} chain(s) — ${rla.sameFileRepeatReadChains
+          .slice(0, 8)
+          .map((c) => `${c.filePath} (${c.turns}x)`)
+          .join(", ")}`
+      : "0 (no multi-turn line-hunting loops)";
+  lines.push(`  Repeat-Read Chains     : ${chainStr}`);
+  lines.push(
+    `  Context Replay Tax Est : ${rla.contextReplayTokenTax.toLocaleString("en-US")} tokens (${rla.extraReadTurns} extra read turn(s) × ${rla.avgSessionContextTokens.toLocaleString("en-US")} avg context tokens)`,
+  );
+
+  lines.push("");
+  lines.push("4. FRICTION & ERROR AUDIT");
   lines.push(subSep);
   if (report.frictionAudit.totalErrors === 0) {
     lines.push("  ✔ 0 errors detected across AICE telemetry and agent transcripts (100% clean).");
