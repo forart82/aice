@@ -228,8 +228,8 @@ Updating the AICE AST and emitting target code preserves all semantic edits when
 
 ## 5. Pure On-the-Fly In-Memory Architecture (Strict 2-Tool Surface)
 
-To guarantee zero friction with existing build pipelines (Vite, Cargo, CMake, TypeScript, pytest, Go, etc.), relative imports, and git history, AICE operates **100% On-the-Fly in RAM** with **zero `.aice` files on disk** behind **strictly two AI tools** and a single compact **`<= 650`-token `AGENTS.md`** workspace directive:
-- **`aice read <target> [-s <selector>] [--full] [--max-tokens <n>] [--deps] [--callers] [--idioms]`** (MCP `aice_read`): Unified Read Engine — enforces a default **28 KB (`~7,000`-token)** stdout budget (`:outline` auto-downgrade + `Lstart-Lend` pagination hints), emits a zero-envelope fast path on `:Lstart-Lend`, `:/pattern/`, config/doc files & `<=150`-line bare files, expands quoted globs, and slices code symbols in RAM with Adaptive Sibling Outlines, pruned contracts, `[Lline]` callers, and opt-in `$idioms` (`"idiomsEnabled": false` by default).
+To guarantee zero friction with existing build pipelines (Vite, Cargo, CMake, TypeScript, pytest, Go, etc.), relative imports, and git history, AICE operates **100% On-the-Fly in RAM** with **zero `.aice` files on disk** behind **strictly two MCP tools** (`aice_read`, `aice_splice`), ergonomic CLI entry points (`aice read`, `aice search`/`grep`, `aice find`/`tree`, `aice splice`/`write`), and a single compact **`<= 650`-token `AGENTS.md`** workspace directive:
+- **`aice read [targets...] [-s <selector>] [--search <pat>] [-C <lines>] [--files] [--dsl] [--full] [--max-tokens <n>] [--deps] [--callers] [--idioms]`** (MCP `aice_read`; CLI discovery shortcuts `aice search` / `grep` and `aice find` / `tree`): Unified Read Engine — emits **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) by default on **both** `:symbol` queries (all lengths `<= 25` & `> 25` lines) and inline bare files (`--dsl` / `dsl: true` opts into AICE shorthand decompilation); enforces **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling, `26,624 B` / `6,500`-token soft cap, smallest-first water-filling so `~600–750` line / `<= 25 KB` bare files settle inline in 1 turn) and **`computeDynamicSliceSpan()`** (`18,432 B` slice budget clamped to `80..650` lines and snapped to complete top-level AST symbol boundaries); expands Tier 1 & 2 search hits to `<= 40`-line enclosing AST declarations or `±10` numbered native lines (`-C` / `contextLines` override); and scans workspaces in `< 20ms` (`filesOnly` / `--files` / `aice find`).
 - **`aice splice <file> [-s <symbol>] [-c <code>] [--stdin] [--idioms]`** (MCP `aice_splice`, CLI alias `aice write`): Unified Write Engine — automatically creates greenfield files (missing parent directories, inline `@idiom` / opt-in `--idioms`, AICE DSL compilation), applies surgical AST/CST, whitespace-resilient `<<< === >>>` hunk, and `±2`-line brace-safe `:Lstart-Lend` mutations (`±5` numbered lines on syntax error) while preserving 100% of surrounding comments and formatting, or performs guarded atomic full-file overwrites.
 
 ---
@@ -297,14 +297,14 @@ Evaluated across **500 progressive benchmarks for each of the 15 supported progr
 
 ## 7. Twinless On-the-Fly Mode & Opt-In Multi-File Idioms Specification
 
-In addition to Side-by-Side mode, AICE operates natively in **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `aice.config.json`) via a **Strict 2-Tool AI Surface**:
+In addition to Side-by-Side mode, AICE operates natively in **Twinless On-the-Fly Mode** (`"mode": "twinless"` in `aice.config.json`) via a **Strict 2-Tool MCP Surface** (`aice_read` + `aice_splice`) and ergonomic CLI entry points:
 1. **Zero `.aice` Files on Disk across All 20 Languages & 33 Extensions**: All source files remain in their native target formats (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `.cs`, `.kt`, `.kts`, `.php`, `.html`, `.twig`, `.css`, `.json`, `.yaml`, `.yml`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`).
-2. **Unified Read with 28 KB Budget, Zero-Envelope Fast Path & Symbol Slicing (`aice read` / MCP `aice_read`)**:
-   - Enforces a default **`28,672`-byte (28 KB / `~7,000`-token)** stdout ceiling whenever `--full` and `--max-tokens` are omitted, auto-downgrading overflow targets to `:outline` summaries with exact `aice read <file>:L<start>-L<end>` pagination hints, and expands quoted globs deterministically.
-   - Emits a **Zero-Envelope Fast Path** (minimal `// === <file> ===` header + lines, `depth=0`, `includeCallers=false`) on `:Lstart-Lend` slices, `:/pattern/` regex searches, config/doc/passthrough files, and bare files `<= 150` lines unless `--deps` or `--callers` is explicitly passed.
-   - On code symbol reads (`file:Class.method`) and `> 150`-line code files (`> 250`-line bare files auto-outline unless `--full`), decompiles in RAM, attaches **Adaptive Sibling Outlining** (`<= 20` symbols / `~150` tokens), prunes unused hop-0 imports, and surfaces `[Lline]` downstream callers.
+2. **Unified Read: 1-Turn Numbered Native Output, Dynamic Water-Filling Budget, AST Search & Zero-AST Discovery (`aice read` / MCP `aice_read`)**:
+   - **Default 1-Turn Numbered Native Output (`rawNative: true`, `--dsl` Opt-In)**: Emits exact 1-based disk-numbered native source lines (`<lineNo>│ <rawDiskLine>`) by default on **both** `:symbol` queries (across all symbol lengths, including `<= 25` lines and `> 25` lines, while preserving **Adaptive Sibling Outlining** `<= 20` symbols, pruned hop-0 dependency contracts, and `[Lline]` callers) **and** inline bare files so agents run `aice splice` (`<<< === >>>` or `:Lstart-Lend`) in 1 turn without a second `:Lstart-Lend` read. `--dsl` (`dsl: true` in MCP) opts into AICE shorthand decompilation (while direct internal `generateContext()` calls default `rawNative` to `false` when omitted for backward compatibility).
+   - **Dynamic Water-Filling Budget & AST-Snapped Slices**: `computeDynamicReadBudget()` enforces a **`28,672 B` (`7,000`-token) ceiling** (`26,624 B` / `6,500`-token soft cap) with smallest-first water-filling across targets so single `~600–750` line / `<= 25 KB` bare files settle inline in 1 turn, auto-outlining only overflow targets (unless `--full`, `--max-tokens`, or an explicit `autoOutlineLineThreshold` is passed); `computeDynamicSliceSpan()` uses an **`18,432 B` slice budget** clamped to `80..650` lines and snapped to complete top-level AST symbol boundaries.
+   - **AST-Aware Search Windows & `< 20ms` Zero-AST Discovery**: Plain regex or auto-escaped literal searches (`aice search` / `grep`, `aice read --search`, MCP `search`) expand Tier 1 & 2 hits to complete enclosing AST declarations (`<= 40` lines) or `±10` numbered native lines (`-C, --context <lines>` / MCP `contextLines` override) and merge overlapping windows within `28 KB`. Zero-AST workspace discovery (`aice find` / `tree`, `aice read --files`, MCP `filesOnly: true`) emits `<relPath> (<lines>L, <sizeKB>KB)` in `< 20ms` without 15-file truncation.
 3. **Opt-In Smart Multi-File Idioms (`"idiomsEnabled": false` Default)**:
-   - Project `$idiom` collapsing/expansion defaults to **`false`** (`DEFAULT_PROJECT_CONFIG.idiomsEnabled = false`) so 0-idiom and slice reads pay zero `$idiom` legend overhead. When opted in via `--idioms` or `"idiomsEnabled": true` (`aice idioms on`), `$idioms` in `aice.config.json` / `.aice-idioms.json` are collapsed during `aice read` and expanded during `aice splice`.
+   - Project `$idiom` collapsing/expansion defaults to **`false`** (`DEFAULT_PROJECT_CONFIG.idiomsEnabled = false`) so 0-idiom and slice reads pay zero `$idiom` legend overhead. When opted in via `--idioms` (with `--dsl` on reads) or `"idiomsEnabled": true` (`aice idioms on`), `$idioms` in `aice.config.json` / `.aice-idioms.json` are collapsed during decompilation and expanded during `aice splice`.
    - Maintainers can mine or refactor project-wide idioms via structural anti-unification (`aice idioms scan | read | update | on | off`), storing SHA-256 provenance in `.aice-cache/idioms.json` with capture-avoiding alpha-renaming, `IdiomCycleError` detection, and atomic rollback.
 4. **Unified Write: Greenfield Auto-Creation & Resilient Direct-to-Native Splice (`aice splice` / MCP `aice_splice`, Alias `aice write`)**:
    - Routes missing files, `:create`, and selector-free overwrites (`:overwrite`) through greenfield `create` (parent directories, inline `@idiom` / opt-in `--idioms`, and AICE DSL or lossless native code).
@@ -314,20 +314,22 @@ In addition to Side-by-Side mode, AICE operates natively in **Twinless On-the-Fl
 
 ## 8. CLI Toolchain & Workflow Specification
 
-AICE exposes a **Strict 2-Tool AI Surface** (`aice read` and `aice splice`) in `aice --help` while preserving administrative controls and hidden internal engine subcommands for backward-compatible scripting:
+AICE keeps MCP strictly at **2 tools** (`aice_read`, `aice_splice`) while pairing `aice read` and `aice splice` (`write`) on the CLI with ergonomic `aice search` (`grep`) and `aice find` (`tree`) discovery commands routing into `read()` (keeping low-level internal engine subcommands hidden from default `--help`):
 
 ```bash
-# Strict 2-Tool AI Surface (Primary Read & Write Pillars)
-aice read [targets...] [-s <sym|/pat/|Lstart-Lend>] [--outline] [--full] [--max-tokens <n>] [--deps] [--callers] [--idioms]
-aice splice [path] [-s <sym>] [-c <code>] [--stdin] [--idioms] [--force|--overwrite]
+# Primary Read, Discovery & Write CLI Surface
+aice read [targets...] [-s <sym|/pat/|Lstart-Lend>] [--search <pat>] [-C <lines>] [--files] [--dsl] [--outline] [--full] [--max-tokens <n>] [--deps] [--callers] [--idioms]
+aice search <pattern> [targets...] [-C <lines>] [-l] [--full] [--json] [--max-tokens <n>]   # Alias: aice grep (plain regex or auto-escaped literal)
+aice find [pattern] [targets...] [--json] [--max-tokens <n>]                                # Alias: aice tree (<20ms zero-AST <relPath> (<lines>L, <sizeKB>KB))
+aice splice [path] [-s <sym>] [-c <code>] [--stdin] [--idioms] [--force|--overwrite]        # Alias: aice write
 
 # Project Controls, Single-File Rule Sync, Telemetry & MCP Server
 aice enable [dir] / aice disable [dir]                      # Toggle project AICE & sync single-file <=650-tok AGENTS.md (purges legacy duplicates)
 aice config [dir] [--json]                                  # Inspect or toggle project-level enabled & opt-in idiomsEnabled settings
 aice agents <setup|status|remove> [--all] [--global-rules]  # Auto-integrate MCP & directive across Linux CLI coding agents
-aice gain [project] [--unique] [--json] [--reset]           # Honest signed <250B BPE telemetry & Rule Overhead Break-Even dashboard
-aice analyze [project] [--json]                             # Post-session agent transcript & error/friction analyzer
-aice mcp                                                    # Starts Model Context Protocol server over stdio (aice_read & aice_splice)
+aice gain [project] [--unique] [--json] [--reset]           # Honest signed <250B BPE ledger, Repeat-Read Turn Warnings & Break-Even dashboard
+aice analyze [project] [--json]                             # Post-session transcript, readLoopAudit & Context Replay Token Tax analyzer
+aice mcp                                                    # Starts Model Context Protocol server over stdio (strictly aice_read & aice_splice)
 
 # Internal Engine & Maintainer Subcommands (hidden from default --help for zero AI tool clutter)
 aice idioms <scan|read|update|on|off|list|apply|expand>     # Opt-in multi-file AST idiom mining & atomic cross-file refactoring
@@ -353,33 +355,34 @@ Projects customize or opt out of AICE via `aice.config.json`, `.aicerc`, or `pac
 - `idiomsEnabled?: boolean` (**default `false`**, boolean alias `"idioms": true|false`): Project `$idiom` collapsing and expansion are **opt-in by default** (`false`) across `aice read` (`aice_read`), `aice splice` (`aice_splice`), and internal compiler utilities unless explicitly enabled via `"idiomsEnabled": true` (`aice idioms on`) or CLI `--idioms`.
 
 ### 9.2 Model Context Protocol (`aice mcp`) Tools — Strict 2-Tool Surface
-The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `workspaceRoot`, MCP `initialize` roots (`rootUri`, `rootPath`, `workspaceFolders`), `$HOME`, and `os.tmpdir()` (while blocking `/etc`, `/proc`, `/sys`, `/dev`, `/root`, and symlink/relative path traversal), and exposes **strictly 2 AI tools** in `tools/list`:
-1. **`aice_read`**: Unified Read Engine — default 28 KB (`~7,000`-token) stdout ceiling with `:outline` auto-downgrade and `aice read <file>:L<start>-L<end>` pagination hints (`full` / `maxTokens` override), zero-envelope fast path on `:Lstart-Lend` / `:/pattern/` / config-doc / `<=150`-line bare files (`includeDeps` / `includeCallers` opt-in), quoted glob expansion, and 1-turn AST symbol slicing + Adaptive Sibling Outlining + pruned contracts + `[Lline]` callers.
+The multi-project `AiceMcpServer` (`src/mcp/server.ts`) resolves paths across `workspaceRoot`, MCP `initialize` roots (`rootUri`, `rootPath`, `workspaceFolders`), `$HOME`, and `os.tmpdir()` (while blocking `/etc`, `/proc`, `/sys`, `/dev`, `/root`, and symlink/relative path traversal), and exposes **strictly 2 AI tools** in `tools/list` (`["aice_read", "aice_splice"]`):
+1. **`aice_read`**: Unified Read Engine — emits 1-based disk-numbered native lines (`<lineNo>│ <rawDiskLine>`) by default on `:symbol` (all lengths `<=25L` & `>25L`) and inline bare files unless optional **`dsl: true`** is set; supports optional **`search`** (`string`, plain regex or auto-escaped literal, defaulting `targets` to `["."]`), **`filesOnly`** (`boolean`, `< 20ms` zero-AST `<relPath> (<lines>L, <sizeKB>KB)` listing), and **`contextLines`** (`number`, explicit override for default `<= 40`-line AST declaration / `±10`-line search windows), alongside **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling, `26,624 B` / `6,500`-token soft cap; `full` / `maxTokens` override), **`computeDynamicSliceSpan()`** (`18,432 B`, `80..650` lines AST symbol-snapped pagination hints), quoted glob expansion, Adaptive Sibling Outlining, pruned contracts, and `[Lline]` callers.
 2. **`aice_splice`**: Unified Write Engine — greenfield single/multi-file creation (auto parent directories, inline `@idiom` / opt-in `$idioms`, AICE DSL compilation), lossless surgical AST/CST replacement, whitespace-resilient `<<< / === / >>>` hunks, `±2`-line brace-safe `:Lstart-Lend` ranges (`±5` numbered lines on syntax error), `@clone(SourceSym)`, deletion (`delete: true`), and guarded atomic overwrites (`force` / `overwrite`).
 
 *(Legacy MCP tool names remain dispatched internally in `executeToolCall` for backward compatibility, while `tools/list` exposes strictly `["aice_read", "aice_splice"]`.)*
 
-### 9.3 Honest Signed `< 250 B` Telemetry Ledger (`src/telemetry/index.ts` & `aice gain`)
+### 9.3 Honest Signed `< 250 B` Telemetry Ledger & Turn-Amplification Forensics (`aice gain` & `aice analyze`)
 - **Compact Numeric JSONL (`< 250 B/event`, Zero Raw Source Text)**: Appends compact numeric records to `~/.aice/telemetry/gains.jsonl` without persisting `realisticNativeText` or raw source strings; exports 4 MB streaming `compactTelemetryLedger()` to shrink legacy ledgers and strip `/tmp` records (`cwd`, `projectRoot`, and `targetPath` sandbox filtering).
-- **Zero Clamping, Realistic Baselines & Break-Even**: Records signed `cl100k_base` / `o200k_base` deltas with zero `Math.max(0, ...)` clamping, baselines `:Lstart-Lend` against `±10` slice lines and `:/pattern/` against `rg -n` match lines, logs failed CLI runs as negative `<cli-error>` overhead, suppresses MCP-to-CLI double-counting via `withSuppressedTelemetryAsync`, and renders `Rule Overhead Break-Even` against `MANDATORY_AGENT_RULES_MARKDOWN`.
+- **Zero Clamping, Realistic Baselines, Break-Even & `< 90s` Repeat-Read Detection (`aice gain`)**: Records signed `cl100k_base` / `o200k_base` deltas with zero `Math.max(0, ...)` clamping, baselines `:Lstart-Lend` against `±10` slice lines and `:/pattern/` / `search` against `rg -n` match lines, logs failed CLI runs as negative `<cli-error>` overhead, suppresses MCP-to-CLI double-counting via `withSuppressedTelemetryAsync`, renders `Rule Overhead Break-Even` against `MANDATORY_AGENT_RULES_MARKDOWN`, and detects `< 90s` back-to-back reads on the same `(projectRoot, filePath)` (`repeatReadCalls`), surfacing **`Repeat-Read Turn Warnings`**.
+- **Session `readLoopAudit` & Context Replay Token Tax (`aice analyze`)**: Captures all `aice` transcript calls (`read`, `write`, `search`, `grep`, `find`, `tree`, `splice`, etc.) in `src/telemetry/analyze.ts` and surfaces `readLoopAudit` (`readTurns`, `totalTurns`, `readTurnRatioPct`, `maxConsecutiveReadStreak`, `sameFileRepeatReadChains`, and estimated **Context Replay Token Tax** = `extraReadTurns * avgSessionContextTokens`).
 
 ### 9.4 Canonical Single-File Workspace Rule Template (`MANDATORY_AGENT_RULES_MARKDOWN` <= 650 Tokens)
-`syncProjectWorkspaceRules` injects the canonical compact 2-tool cheat-card (`586 cl100k_base / 589 o200k_base` BPE tokens) **only** into `AGENTS.md` (and existing `CLAUDE.md` lacking `@AGENTS.md`), while purging legacy `GEMINI.md` / `.GEMINI.md` blocks and `.agents/rules/aice.md`:
+`syncProjectWorkspaceRules` injects the canonical compact 2-tool cheat-card (`<= 650` BPE tokens across both `cl100k_base` and `o200k_base`) **only** into `AGENTS.md` (and existing `CLAUDE.md` lacking `@AGENTS.md`), while purging legacy `GEMINI.md` / `.GEMINI.md` blocks and `.agents/rules/aice.md`:
 
 ````markdown
 <!-- AICE:START -->
 <!-- AICE:START v0.9.36 -->
 ## AICE (v0.9.36) — 2-Tool AST Cheat-Card
-**MANDATORY OVERRIDE**: When active (Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), use ONLY `aice read` (MCP `aice_read`) and `aice splice` / `aice write` (MCP `aice_splice`) instead of native file tools.
+**MANDATORY OVERRIDE**: When active (Rule 1), for all 33 supported file extensions (.ts, .tsx, .d.ts, .js, .jsx, .mjs, .cjs, .py, .pyi, .rs, .go, .cpp, .cc, .cxx, .hpp, .h, .cs, .kt, .kts, .php, .html, .twig, .css, .json, .yaml, .yml, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl), use ONLY `aice read` / `aice search` / `aice find` (MCP `aice_read`) and `aice splice` / `aice write` (MCP `aice_splice`) instead of native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when `aice.config.json` has `"enabled": true`; bypass AICE completely when missing or `"enabled": false`. `$idioms` default OFF (`"idiomsEnabled": false`; opt in via `--idioms`).
 - Non-Coding Bypass: Board-only swarm monitors/coordinators and pure Q&A / non-file sessions bypass AICE ceremony with zero overhead.
 - Fallback: On `aice` crash/timeout/blocker, run `aice disable` -> native tools -> `aice enable`.
-### 2. Batch Read & Splice (No Shell Workarounds)
-- Ban: NEVER write files via shell (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find on supported targets.
-- Read: 1-call multi-target `aice read src tests`, `aice read f1:sym f2:L1-L50`, or 4-tier ranked `aice read <fileOrDir> -s "/<searchPattern>/"` (Adaptive Sibling Outlining).
+### 2. 1-Turn Read, Search, Find & Batch Splice (No Shell Workarounds)
+- Ban: NEVER write files via shell (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/rg/awk/head/tail/cat/ls/find on supported targets.
+- Read / Search / Find: `aice read` emits 1-based numbered native lines (`N│`) by default on `:symbol` & inline bare files (`<=28KB` water-fill; `--dsl` for shorthand) so you splice in 1 turn without re-reading. Use `aice search <pat> [dir]` (`grep`, `-C`, `-l`; MCP `aice_read` `search`/`contextLines`) and `aice find [glob] [dir]` (`tree`; MCP `filesOnly: true`).
 - Splice: 1-call `aice splice --stdin << 'EOF'` with `=== <file> ===`, `:symbol` (`@clone(SourceSym)`, `@replace-docs`), `:Lstart-Lend`, `<<< === >>>` hunks, `:eof`, `:imports`.
 ### 3. Subagent Propagation
-- Coding subagents and `swarm add` briefs MUST state: `"Use AICE (aice read / aice splice) for all file exploration and edits."`
+- Coding subagents and `swarm add` briefs MUST state: `"Use AICE (aice read / aice search / aice find / aice splice) for all file exploration and edits."`
 <!-- AICE:END -->
 ````
