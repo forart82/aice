@@ -56,7 +56,17 @@ function inferCliTelemetryOperation(rawArgs: ReadonlyArray<string>): TelemetryOp
     if (sub === "outline") return "outline";
     if (sub === "decompile") return "decompile";
     if (sub === "idioms") return "idioms_apply";
-    if (sub === "read" || sub === "context" || sub === "ctx") return "context";
+    if (
+      sub === "read" ||
+      sub === "context" ||
+      sub === "ctx" ||
+      sub === "search" ||
+      sub === "grep" ||
+      sub === "find" ||
+      sub === "tree"
+    ) {
+      return "context";
+    }
     break;
   }
   return "context";
@@ -2475,15 +2485,15 @@ program
   .command("read")
   .aliases(["context", "ctx"])
   .description(
-    "Unified Read Engine: Dependency contract packager, auto-outlining, symbol/test/heading extractor & /pattern/ search in 1 turn across 33 extensions",
+    "Unified Read Engine: Dependency contract packager, 1-turn numbered native source, dynamic byte/AST-snapped slices, symbol/test/heading extraction, search & zero-AST file discovery across 33 extensions",
   )
   .argument(
     "[targets...]",
-    "Path(s) to target file(s) or directories with optional inline :symbol, :Lstart-Lend, or :outline selectors",
+    "Path(s) to target file(s) or directories with optional inline :symbol, :Lstart-Lend, or :outline selectors (defaults to '.' when --search or --files is passed)",
   )
   .option("--outline", "Force structural skeleton outline (85-90% token reduction)")
   .option("--outline-target", "Outline target instead of full source inside context bundle")
-  .option("--full", "Bypass >250-line bare-file auto-outline and emit full source context")
+  .option("--full", "Bypass dynamic auto-outline ceiling and emit full source context")
   .option(
     "-d, --depth <number>",
     "Dependency traversal depth or maximum symbol nesting depth",
@@ -2492,6 +2502,20 @@ program
   .option(
     "-s, --symbol <symbol>",
     "Selector: Class.method, test ID (TC-MENU-001), Markdown heading, line range (L180-L240), regex (/pattern/), or outline",
+  )
+  .option(
+    "--search <pattern>",
+    "Search file(s) or directory by plain regex or literal pattern (without /.../ wrappers)",
+  )
+  .option(
+    "-C, --context <lines>",
+    "Context radius (lines before and after each search match)",
+    (val) => Number.parseInt(val, 10),
+  )
+  .option("--files", "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB))")
+  .option(
+    "--dsl",
+    "Opt into AICE shorthand decompilation (default emits 1-based disk-numbered native source)",
   )
   .option("--compact", "Compact token-bounded directory outline mode (auto-enabled for 60+ files)")
   .option("--no-compact", "Disable compact directory outline mode")
@@ -2509,17 +2533,17 @@ program
     "after",
     `
 Examples:
-  • Auto-outline directories or >250-line files (replaces 'ls src tests'):
+  • 1-turn numbered native bare files or directory outlines:
       aice read src tests
-      aice read bin/aice.ts
+      aice read src/app.ts
   • Multi-target symbol & line-range stream in 1 call:
       aice read src/app.ts:GameApp.init src/utils.ts:L20-L60
-  • Extract test block by test ID or title prefix (replaces grep -n):
-      aice read tests/app.test.ts -s "TC-MENU-001"
-  • Search file or directory by 4-tier ranked regex/substring (replaces grep -rn):
-      aice read src -s "/OracleIncoherenceAuditor/"
-  • Extract Markdown section or shell/PowerShell/batch function:
-      aice read README.md -s "Quick Start"
+  • Opt-in AICE shorthand decompilation:
+      aice read src/app.ts --dsl
+  • Search workspace or directory with AST/context windows (or use 'aice search'):
+      aice read src --search "OracleIncoherenceAuditor" -C 8
+  • Fast zero-AST file discovery (or use 'aice find'):
+      aice read --files
 `,
   )
   .action(
@@ -2531,6 +2555,10 @@ Examples:
         full?: boolean;
         depth?: number;
         symbol?: string;
+        search?: string;
+        context?: number;
+        files?: boolean;
+        dsl?: boolean;
         compact?: boolean;
         types?: boolean;
         idioms?: boolean;
@@ -2541,34 +2569,155 @@ Examples:
         stats?: boolean;
       },
     ) => {
+      const effectiveTargets =
+        targetPaths && targetPaths.length > 0
+          ? targetPaths
+          : options.search !== undefined || options.files
+            ? ["."]
+            : undefined;
       try {
         const { aiceRead } = await import("../src/tools/read.js");
-        const res = await aiceRead(
-          targetPaths && targetPaths.length > 0 ? targetPaths : undefined,
-          {
-            outline: options.outline,
-            outlineTarget: options.outlineTarget,
-            full: options.full,
-            depth: options.depth !== undefined ? Number(options.depth) : undefined,
-            symbol: options.symbol,
-            compact: options.compact,
-            includeTypes: options.types !== false,
-            idioms: options.idioms,
-            includeDeps: options.deps,
-            includeCallers: options.callers,
-            maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
-            json: !!options.json,
-            stats: !!options.stats,
-            surface: "cli",
-          },
-        );
+        const parsedContextLines =
+          options.context !== undefined && Number.isFinite(Number(options.context))
+            ? Math.max(0, Number(options.context))
+            : undefined;
+        const res = await aiceRead(effectiveTargets, {
+          outline: options.outline,
+          outlineTarget: options.outlineTarget,
+          full: options.full,
+          depth: options.depth !== undefined ? Number(options.depth) : undefined,
+          symbol: options.symbol,
+          search: options.search,
+          contextLines: parsedContextLines,
+          filesOnly: options.files ? true : undefined,
+          dsl: options.dsl ? true : undefined,
+          rawNative: !options.dsl,
+          compact: options.compact,
+          includeTypes: options.types !== false,
+          idioms: options.idioms,
+          includeDeps: options.deps,
+          includeCallers: options.callers,
+          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+          json: !!options.json,
+          stats: !!options.stats,
+          surface: "cli",
+        });
         console.log(res.output);
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
-        recordCliFailureTelemetry(msg, "context", targetPaths?.[0]);
+        recordCliFailureTelemetry(msg, "context", effectiveTargets?.[0]);
         console.error(
-          `❌ Error packaging context for ${targetPaths && targetPaths.length > 0 ? targetPaths.join(", ") : "."}: ${msg}`,
+          `❌ Error packaging context for ${effectiveTargets && effectiveTargets.length > 0 ? effectiveTargets.join(", ") : "."}: ${msg}`,
         );
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: search <pattern> [targets...] (alias: grep)
+program
+  .command("search")
+  .alias("grep")
+  .description(
+    "AST-aware workspace/file search (rg-style pattern-first alias routing into Unified Read Engine)",
+  )
+  .argument("<pattern>", "Plain regex or literal search pattern (without /.../ wrappers)")
+  .argument("[targets...]", "Optional file(s) or directory path(s) to search (default: '.')")
+  .option("-C, --context <lines>", "Context radius (lines before and after each match)", (val) =>
+    Number.parseInt(val, 10),
+  )
+  .option("-l, --files-with-matches", "Emit only matching relative file paths concisely")
+  .option("--full", "Bypass default 28 KB stdout ceiling and emit full search context")
+  .option("--json", "Output structured JSON bundle")
+  .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
+  .action(
+    async (
+      pattern: string,
+      targetPaths: string[] | undefined,
+      options: {
+        context?: number;
+        filesWithMatches?: boolean;
+        full?: boolean;
+        json?: boolean;
+        maxTokens?: number;
+      },
+    ) => {
+      const effectiveTargets = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
+      try {
+        const { aiceRead } = await import("../src/tools/read.js");
+        const parsedContextLines =
+          options.context !== undefined && Number.isFinite(Number(options.context))
+            ? Math.max(0, Number(options.context))
+            : undefined;
+        const res = await aiceRead(effectiveTargets, {
+          search: pattern,
+          contextLines: parsedContextLines,
+          filesWithMatches: options.filesWithMatches ? true : undefined,
+          full: options.full,
+          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+          json: !!options.json,
+          rawNative: true,
+          surface: "cli",
+        });
+        console.log(res.output);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        recordCliFailureTelemetry(msg, "context", effectiveTargets[0]);
+        console.error(`❌ Error searching ${effectiveTargets.join(", ")}: ${msg}`);
+        process.exit(1);
+      }
+    },
+  );
+
+// Command: find [pattern] [targets...] (alias: tree)
+program
+  .command("find")
+  .alias("tree")
+  .description(
+    "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB)) routing into Unified Read Engine",
+  )
+  .argument("[pattern]", "Optional glob/substring file filter or target directory/file path")
+  .argument("[targets...]", "Optional directory or file path(s) to scan (default: '.')")
+  .option("--json", "Output structured JSON bundle")
+  .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
+  .action(
+    async (
+      pattern: string | undefined,
+      targetPaths: string[] | undefined,
+      options: {
+        json?: boolean;
+        maxTokens?: number;
+      },
+    ) => {
+      const restTargets = targetPaths ?? [];
+      let effectiveTargets: string[];
+      let filePattern: string | undefined;
+      if (pattern === undefined || pattern.length === 0) {
+        effectiveTargets = restTargets.length > 0 ? restTargets : ["."];
+      } else {
+        const hasGlobChars = /[*?[{]/.test(pattern);
+        const candidateDiskPath = path.resolve(process.cwd(), pattern);
+        if (!hasGlobChars && fs.existsSync(candidateDiskPath)) {
+          effectiveTargets = [pattern, ...restTargets];
+        } else {
+          filePattern = pattern;
+          effectiveTargets = restTargets.length > 0 ? restTargets : ["."];
+        }
+      }
+      try {
+        const { aiceRead } = await import("../src/tools/read.js");
+        const res = await aiceRead(effectiveTargets, {
+          filesOnly: true,
+          ...(filePattern !== undefined ? { filePattern } : {}),
+          maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
+          json: !!options.json,
+          surface: "cli",
+        });
+        console.log(res.output);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        recordCliFailureTelemetry(msg, "context", effectiveTargets[0]);
+        console.error(`❌ Error finding files in ${effectiveTargets.join(", ")}: ${msg}`);
         process.exit(1);
       }
     },

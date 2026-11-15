@@ -20,13 +20,14 @@ import {
   setProjectIdiomsEnabled,
 } from "../src/config/index.js";
 import { emitTarget, parse } from "../src/index.js";
-import { AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
+import { AICE_MCP_TOOLS, AiceMcpServer, type McpToolCallResult } from "../src/mcp/server.js";
+import { MANDATORY_AGENT_RULES_MARKDOWN } from "../src/rules/mandatory-rules.js";
 import {
   buildGainReport,
   formatGlobalGainDashboard,
   readTelemetryEvents,
 } from "../src/telemetry/index.js";
-import { TiktokenTokenizer } from "../src/tokenomics/index.js";
+import { estimateTokens, TiktokenTokenizer } from "../src/tokenomics/index.js";
 import {
   createBatch,
   createFile,
@@ -1152,6 +1153,228 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(ktRes.modifiedCode).toContain(
         "fun isDeepWork(): Boolean = completed && durationMinutes >= 25",
       );
+    });
+  });
+
+  describe("AICE v0.9.37: CLI search/find (grep/tree), Read Flags (--search/-C/--files/--dsl), Strict 2-Tool MCP Schema & <=650 BPE Mandatory Rules", () => {
+    it("enforces MANDATORY_AGENT_RULES_MARKDOWN <= 650 BPE tokens across both cl100k_base and o200k_base and documents search/find & 1-turn numbered native read", () => {
+      const cl100k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base");
+      const o200k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base");
+      expect(cl100k).toBeLessThanOrEqual(650);
+      expect(o200k).toBeLessThanOrEqual(650);
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base")).toBeLessThanOrEqual(
+        650,
+      );
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(650);
+
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice search <pat> [dir]");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice find [glob] [dir]");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("1-turn numbered native");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("--dsl");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_read");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("search");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("contextLines");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("filesOnly");
+    });
+
+    it("supports CLI `aice search` (`grep`), `aice find` (`tree`), and `aice read --search / -C / --files / --dsl`", () => {
+      const wsDir = path.join(tmpDir, "v0937-cli-ws");
+      fs.mkdirSync(path.join(wsDir, "src"), { recursive: true });
+      fs.mkdirSync(path.join(wsDir, "docs"), { recursive: true });
+      setProjectAiceEnabled(wsDir, true);
+
+      fs.writeFileSync(
+        path.join(wsDir, "src", "math.ts"),
+        [
+          "export function computeInvoiceTotal(unitPrice: number, qty: number): number {",
+          "  const subtotal = unitPrice * qty;",
+          "  return subtotal;",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(wsDir, "src", "validator.ts"),
+        [
+          "// literal bracket pattern check: unclosed([token",
+          "export function isPositive(val: number): boolean {",
+          "  const lineA = val > 0;",
+          "  const targetMarker = lineA && Number.isFinite(val);",
+          "  const lineC = targetMarker;",
+          "  return lineC;",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(wsDir, "docs", "overview.md"),
+        "# Overview\n\nDocumentation guide.\n",
+        "utf-8",
+      );
+
+      // 1. `aice find` & `aice tree` disambiguation
+      const findAll = runCli(["find"], wsDir);
+      expect(findAll.status).toBe(0);
+      expect(findAll.stdout).toContain("src/math.ts");
+      expect(findAll.stdout).toContain("src/validator.ts");
+      expect(findAll.stdout).toContain("docs/overview.md");
+      expect(findAll.stdout).toMatch(/\(\d+L,\s*[\d.]+KB\)/);
+
+      const treeSrc = runCli(["tree", "src"], wsDir);
+      expect(treeSrc.status).toBe(0);
+      expect(treeSrc.stdout).toContain("src/math.ts");
+      expect(treeSrc.stdout).toContain("src/validator.ts");
+      expect(treeSrc.stdout).not.toContain("docs/overview.md");
+
+      const findGlob = runCli(["find", "*.md"], wsDir);
+      expect(findGlob.status).toBe(0);
+      expect(findGlob.stdout).toContain("docs/overview.md");
+      expect(findGlob.stdout).not.toContain("src/math.ts");
+
+      const findSubstrInDir = runCli(["find", "validator", "src"], wsDir);
+      expect(findSubstrInDir.status).toBe(0);
+      expect(findSubstrInDir.stdout).toContain("src/validator.ts");
+      expect(findSubstrInDir.stdout).not.toContain("src/math.ts");
+
+      // 2. `aice search` & `aice grep` (plain regex/literal, -C, -l, --json)
+      const searchDefault = runCli(["search", "computeInvoiceTotal"], wsDir);
+      expect(searchDefault.status).toBe(0);
+      expect(searchDefault.stdout).toContain("computeInvoiceTotal");
+      expect(searchDefault.stdout).toContain("│");
+
+      const grepInvalidRegexLiteral = runCli(["grep", "unclosed([token", "src"], wsDir);
+      expect(grepInvalidRegexLiteral.status).toBe(0);
+      expect(grepInvalidRegexLiteral.stdout).toContain("unclosed([token");
+
+      const searchFilesOnlyList = runCli(["search", "computeInvoiceTotal", "-l"], wsDir);
+      expect(searchFilesOnlyList.status).toBe(0);
+      expect(searchFilesOnlyList.stdout).toContain("src/math.ts");
+      expect(searchFilesOnlyList.stdout).not.toContain("const subtotal = unitPrice * qty;");
+
+      const searchWithRadius = runCli(
+        ["search", "targetMarker", "src/validator.ts", "-C", "1"],
+        wsDir,
+      );
+      expect(searchWithRadius.status).toBe(0);
+      expect(searchWithRadius.stdout).toContain("targetMarker");
+
+      // 3. `aice read` with `--files`, `--search`, `-C`, default numbered native, and `--dsl`
+      const readFiles = runCli(["read", "--files"], wsDir);
+      expect(readFiles.status).toBe(0);
+      expect(readFiles.stdout).toContain("src/math.ts");
+      expect(readFiles.stdout).toContain("docs/overview.md");
+
+      const readSearch = runCli(["read", "--search", "computeInvoiceTotal", "-C", "2"], wsDir);
+      expect(readSearch.status).toBe(0);
+      expect(readSearch.stdout).toContain("computeInvoiceTotal");
+
+      const readNative = runCli(["read", "src/math.ts"], wsDir);
+      expect(readNative.status).toBe(0);
+      expect(readNative.stdout).toContain("1│ export function computeInvoiceTotal");
+
+      const readDsl = runCli(["read", "src/math.ts", "--dsl"], wsDir);
+      expect(readDsl.status).toBe(0);
+      expect(readDsl.stdout).not.toContain("1│ export function computeInvoiceTotal");
+      expect(readDsl.stdout).toContain("computeInvoiceTotal");
+    }, 60000);
+
+    it("keeps MCP strictly 2 tools (`aice_read`, `aice_splice`) and forwards `filesOnly`, `search` + `contextLines`, and `dsl` in `aice_read`", async () => {
+      const wsDir = path.join(tmpDir, "v0937-mcp-ws");
+      fs.mkdirSync(path.join(wsDir, "src"), { recursive: true });
+      setProjectAiceEnabled(wsDir, true);
+
+      fs.writeFileSync(
+        path.join(wsDir, "src", "billing.ts"),
+        [
+          "export function applyDiscount(amount: number, rate: number): number {",
+          "  const discounted = amount * (1 - rate);",
+          "  return Math.round(discounted * 100) / 100;",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      fs.writeFileSync(path.join(wsDir, "README.md"), "# Billing\n", "utf-8");
+
+      expect(AICE_MCP_TOOLS.map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
+      const server = new AiceMcpServer({ workspaceRoot: wsDir });
+      const defs = server.getToolDefinitions();
+      expect(defs.map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
+
+      const readDef = defs.find((t) => t.name === "aice_read");
+      expect(readDef).toBeDefined();
+      expect(readDef?.inputSchema.properties).toHaveProperty("search");
+      expect(readDef?.inputSchema.properties).toHaveProperty("filesOnly");
+      expect(readDef?.inputSchema.properties).toHaveProperty("contextLines");
+      expect(readDef?.inputSchema.properties).toHaveProperty("dsl");
+
+      const listRpc = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 10,
+        method: "tools/list",
+        params: {},
+      })) as { result: { tools: Array<{ name: string }> } };
+      expect(listRpc.result.tools.map((t) => t.name)).toEqual(["aice_read", "aice_splice"]);
+
+      // 1. `{ filesOnly: true }` without targets defaults to workspace "."
+      const filesOnlyRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 11,
+        method: "tools/call",
+        params: {
+          name: "aice_read",
+          arguments: { filesOnly: true },
+        },
+      })) as { result: McpToolCallResult };
+      expect(filesOnlyRes.result.isError).toBeFalsy();
+      const filesText = filesOnlyRes.result.content[0]?.text ?? "";
+      expect(filesText).toContain("src/billing.ts");
+      expect(filesText).toContain("README.md");
+
+      // 2. `{ search, contextLines }` without targets defaults to workspace "."
+      const searchRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 12,
+        method: "tools/call",
+        params: {
+          name: "aice_read",
+          arguments: { search: "applyDiscount", contextLines: 1 },
+        },
+      })) as { result: McpToolCallResult };
+      expect(searchRes.result.isError).toBeFalsy();
+      const searchText = searchRes.result.content[0]?.text ?? "";
+      expect(searchText).toContain("applyDiscount");
+      expect(searchText).toContain("│");
+
+      // 3. Default numbered native vs `{ dsl: true }`
+      const nativeReadRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 13,
+        method: "tools/call",
+        params: {
+          name: "aice_read",
+          arguments: { path: "src/billing.ts" },
+        },
+      })) as { result: McpToolCallResult };
+      expect(nativeReadRes.result.isError).toBeFalsy();
+      const nativeText = nativeReadRes.result.content[0]?.text ?? "";
+      expect(nativeText).toContain("1│ export function applyDiscount");
+
+      const dslReadRes = (await server.handleRequest({
+        jsonrpc: "2.0",
+        id: 14,
+        method: "tools/call",
+        params: {
+          name: "aice_read",
+          arguments: { path: "src/billing.ts", dsl: true },
+        },
+      })) as { result: McpToolCallResult };
+      expect(dslReadRes.result.isError).toBeFalsy();
+      const dslText = dslReadRes.result.content[0]?.text ?? "";
+      expect(dslText).not.toContain("1│ export function applyDiscount");
+      expect(dslText).toContain("applyDiscount");
     });
   });
 });

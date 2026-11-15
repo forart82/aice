@@ -109,14 +109,14 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_read",
     description:
-      "Unified Read Engine: zero-envelope fast path on line slices (:Lstart-Lend), regex searches (:/pattern/), config/doc/passthrough files, and <=150-line bare files; automatic directory & >250-line file structural outlining; AST symbol/test/heading slicing with Adaptive Sibling Outlining, dependency contracts, and downstream callers; quoted glob expansion; opt-in $idioms (default OFF); and a default 28 KB (~7,000-token) stdout budget with :outline auto-downgrade & pagination hints across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
+      "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 28 KB / ~7,000-token water-filling budget), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
     inputSchema: {
       type: "object",
       properties: {
         path: {
           type: "string",
           description:
-            "Target file, directory, or glob path (supports inline 'file:sym1,sym2', 'file:L10-L30', 'file:outline', 'dir:/pattern/', or space-separated multi-target paths in 1 call)",
+            "Target file, directory, or glob path (supports inline 'file:sym1,sym2', 'file:L10-L30', 'file:outline', 'dir:/pattern/', or space-separated multi-target paths in 1 call; defaults to '.' when 'search' or 'filesOnly' is set)",
         },
         paths: {
           type: "array",
@@ -147,6 +147,26 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
           type: "string",
           description: "Alias for 'symbol'",
         },
+        search: {
+          type: "string",
+          description:
+            "Optional plain regex or literal search pattern (without requiring /.../ wrappers; when filesOnly: true, filters file paths by glob or substring)",
+        },
+        filesOnly: {
+          type: "boolean",
+          description:
+            "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB)); combine with 'search' or 'path' to filter",
+        },
+        contextLines: {
+          type: "number",
+          description:
+            "Optional context radius override (number of lines before and after each search match)",
+        },
+        dsl: {
+          type: "boolean",
+          description:
+            "Opt into AICE shorthand decompilation (default: false; emits 1-based disk-numbered native source lines)",
+        },
         outline: {
           type: "boolean",
           description:
@@ -155,7 +175,7 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
         full: {
           type: "boolean",
           description:
-            "Bypass >250-line bare-file auto-outline and default 28 KB stdout ceiling to return full context",
+            "Bypass dynamic auto-outline and default 28 KB stdout ceiling to return full context",
         },
         depth: {
           type: "number",
@@ -857,6 +877,17 @@ export class AiceMcpServer {
             ? rawSelector.trim()
             : undefined;
 
+        const searchFilter =
+          typeof args.search === "string" && args.search.length > 0 ? args.search : undefined;
+        const filesOnlyFlag = typeof args.filesOnly === "boolean" ? args.filesOnly : undefined;
+        const contextLinesVal =
+          typeof args.contextLines === "number" && Number.isFinite(args.contextLines)
+            ? Math.max(0, Math.floor(args.contextLines))
+            : typeof args.context === "number" && Number.isFinite(args.context)
+              ? Math.max(0, Math.floor(args.context))
+              : undefined;
+        const dslFlag = typeof args.dsl === "boolean" ? args.dsl : undefined;
+
         const candidateArray = args.targets ?? args.paths ?? args.files ?? args.filesOrDirs;
         const rawPathCandidate =
           args.path ??
@@ -921,6 +952,9 @@ export class AiceMcpServer {
         } else {
           const safeWorkspace = this.resolveSafePath(".");
           checkedProjectRoots.add(this.resolveProjectRoot(safeWorkspace));
+          if (searchFilter !== undefined || filesOnlyFlag) {
+            safeTargets.push({ path: safeWorkspace });
+          }
         }
 
         for (const pr of checkedProjectRoots) {
@@ -940,11 +974,23 @@ export class AiceMcpServer {
         try {
           const readRes = await aiceRead(safeTargets.length > 0 ? safeTargets : undefined, {
             symbol: symbolFilter,
+            search: searchFilter,
+            filesOnly: filesOnlyFlag,
+            filePattern:
+              typeof args.filePattern === "string" && args.filePattern.trim().length > 0
+                ? args.filePattern.trim()
+                : undefined,
+            filesWithMatches:
+              typeof args.filesWithMatches === "boolean" ? args.filesWithMatches : undefined,
+            contextLines: contextLinesVal,
+            dsl: dslFlag,
+            rawNative: !dslFlag,
             outline: typeof args.outline === "boolean" ? args.outline : undefined,
             outlineTarget: typeof args.outlineTarget === "boolean" ? args.outlineTarget : undefined,
             full: typeof args.full === "boolean" ? args.full : undefined,
             depth: typeof args.depth === "number" ? args.depth : undefined,
             maxTokens: typeof args.maxTokens === "number" ? args.maxTokens : undefined,
+            compact: typeof args.compact === "boolean" ? args.compact : undefined,
             includeDeps:
               typeof args.includeDeps === "boolean"
                 ? args.includeDeps
