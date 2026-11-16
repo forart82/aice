@@ -1256,6 +1256,8 @@ export interface ProjectSystemicEconomics {
   realisticSavedCl100k: number;
 }
 
+export const PARALLEL_SLICE_GAP_MS = 12_000;
+
 export function computeProjectSystemicEconomics(
   projectEvents: TelemetryEvent[],
   nonBenignErrorCount = 0,
@@ -1318,9 +1320,9 @@ export function computeProjectSystemicEconomics(
         const priorReadTs = lastReadTsByFile.get(f);
         if (priorReadTs !== undefined) {
           const deltaMs = currentTs - priorReadTs;
-          if (deltaMs >= 0 && deltaMs < 3_000) {
+          if (deltaMs >= 0 && deltaMs < PARALLEL_SLICE_GAP_MS) {
             callMatchedParallel = true;
-          } else if (deltaMs >= 3_000 && deltaMs <= 180_000) {
+          } else if (deltaMs >= PARALLEL_SLICE_GAP_MS && deltaMs <= 180_000) {
             if (lastWriteTs < priorReadTs) {
               callMatchedPagination = true;
             }
@@ -1340,7 +1342,7 @@ export function computeProjectSystemicEconomics(
     for (let i = 1; i < sorted.length; i++) {
       const prevTs = Date.parse(sorted[i - 1].timestamp) || 0;
       const currTs = Date.parse(sorted[i].timestamp) || 0;
-      if (currTs - prevTs >= 3_000) {
+      if (currTs - prevTs >= PARALLEL_SLICE_GAP_MS) {
         estimatedTurns++;
       }
     }

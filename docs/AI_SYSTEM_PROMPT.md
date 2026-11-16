@@ -248,8 +248,8 @@ When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` w
 
 ````markdown
 <!-- AICE:START -->
-<!-- AICE:START v0.9.45 -->
-## AICE (v0.9.45) — 2-Tool AST Cheat-Card
+<!-- AICE:START v0.9.46 -->
+## AICE (v0.9.46) — 2-Tool AST Cheat-Card
 **MANDATORY OVERRIDE**: Active across all 33 supported file extensions (code, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY `aice read`/`search`/`find` (MCP `aice_read`) & `aice splice`/`aice write` (MCP `aice_splice`), never native file tools.
 ### 1. Opt-In Activation Gate & Non-AICE Bypass
 - Gate: Active ONLY when `aice.config.json` has `"enabled": true`; skip if missing/false. `$idioms` OFF (`--idioms` opt-in).

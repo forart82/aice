@@ -699,6 +699,57 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
       );
     });
 
+    it("Step 5.1b: includes numbered candidate match previews with disk line numbers on ambiguous hunks", async () => {
+      const dupTs = path.join(tmpDir, "src", "dup_pricing.ts");
+      fs.mkdirSync(path.dirname(dupTs), { recursive: true });
+      fs.writeFileSync(
+        dupTs,
+        [
+          "export class PricingService {",
+          "  public standardRate(v: number): number {",
+          "    const base = v * 1.1;",
+          "    return base;",
+          "  }",
+          "  public premiumRate(v: number): number {",
+          "    const base = v * 1.1;",
+          "    return base;",
+          "  }",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      const ambiguousHunk = [
+        HK_OPEN,
+        "    const base = v * 1.1;",
+        "    return base;",
+        EQ,
+        "    const base = v * 1.2;",
+        "    return base;",
+        HK_CLOSE,
+      ].join("\n");
+
+      let caughtErr: Error | undefined;
+      try {
+        await splice(dupTs, { code: ambiguousHunk, projectRoot: tmpDir });
+      } catch (err: any) {
+        caughtErr = err;
+      }
+
+      expect(caughtErr).toBeDefined();
+      expect(caughtErr?.message).toContain("Ambiguous hunk in");
+      expect(caughtErr?.message).toContain(
+        "Matching locations (use exact :Lstart-Lend or include surrounding lines — no re-read needed):",
+      );
+      expect(caughtErr?.message).toContain("Match #1 [L3-L4]:");
+      expect(caughtErr?.message).toContain("3│     const base = v * 1.1;");
+      expect(caughtErr?.message).toContain("4│     return base;");
+      expect(caughtErr?.message).toContain("Match #2 [L7-L8]:");
+      expect(caughtErr?.message).toContain("7│     const base = v * 1.1;");
+      expect(caughtErr?.message).toContain("8│     return base;");
+    });
+
     it("Step 5.2: auto-aligns unambiguous ±1/±2 brace-imbalanced :Lstart-Lend boundaries and rejects ambiguous boundaries", async () => {
       const rangeTs = path.join(tmpDir, "src", "range_align.ts");
       fs.mkdirSync(path.dirname(rangeTs), { recursive: true });

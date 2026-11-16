@@ -6239,6 +6239,30 @@ function computeOriginalEditLineSpan(
   return { startLine, endLine };
 }
 
+function formatAmbiguousMatchPreviews(
+  matches: Array<{ startIdx: number; endIdx: number }>,
+  scopeLines: string[],
+  origLineMap: number[],
+  scopeStartLine: number,
+): string {
+  if (matches.length === 0) return "";
+  const previews = matches.slice(0, 4).map((m, idx) => {
+    const startLine = origLineMap[m.startIdx] ?? scopeStartLine + m.startIdx;
+    const endLine =
+      origLineMap[Math.max(m.startIdx, m.endIdx - 1)] ??
+      scopeStartLine + Math.max(m.startIdx, m.endIdx - 1);
+    const pStart = Math.max(0, m.startIdx - 2);
+    const pEnd = Math.min(scopeLines.length - 1, Math.min(m.endIdx - 1 + 2, m.startIdx + 7));
+    const lines: string[] = [];
+    for (let i = pStart; i <= pEnd; i++) {
+      const diskLine = origLineMap[i] ?? scopeStartLine + i;
+      lines.push(`${diskLine}│ ${scopeLines[i]}`);
+    }
+    return `Match #${idx + 1} [L${startLine}-L${endLine}]:\n${lines.join("\n")}`;
+  });
+  return `\n\nMatching locations (use exact :Lstart-Lend or include surrounding lines — no re-read needed):\n${previews.join("\n\n")}`;
+}
+
 export function applyHunksToScope(
   scopeText: string,
   hunks: HunkBlock[],
@@ -6311,8 +6335,14 @@ export function applyHunksToScope(
         }
       }
       if (exactLineMatches.length > 1) {
+        const previews = formatAmbiguousMatchPreviews(
+          exactLineMatches.map((s) => ({ startIdx: s, endIdx: s + searchLines.length })),
+          scopeLines,
+          origLineMap,
+          scopeStartLine,
+        );
         throw new Error(
-          `Ambiguous hunk ${locPhrase}: search block matches ${exactLineMatches.length} identical locations. Include surrounding context lines in <<< ... === to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${exactLineMatches.length} identical locations. Include surrounding context lines in <<< ... === to disambiguate.${previews}`,
         );
       }
       if (exactLineMatches.length === 1) {
@@ -6339,8 +6369,17 @@ export function applyHunksToScope(
         searchFrom = idx + Math.max(1, searchNorm.length);
       }
       if (validInlineIdxs.length > 1) {
+        const previews = formatAmbiguousMatchPreviews(
+          validInlineIdxs.map((idx) => {
+            const lineNoAtIdx = current.slice(0, idx).split("\n").length - 1;
+            return { startIdx: lineNoAtIdx, endIdx: lineNoAtIdx + 1 };
+          }),
+          scopeLines,
+          origLineMap,
+          scopeStartLine,
+        );
         throw new Error(
-          `Ambiguous hunk ${locPhrase}: search block matches ${validInlineIdxs.length} inline locations. Include surrounding context to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${validInlineIdxs.length} inline locations. Include surrounding context to disambiguate.${previews}`,
         );
       }
       if (validInlineIdxs.length === 1) {
@@ -6389,8 +6428,14 @@ export function applyHunksToScope(
         }
       }
       if (dedentMatches.length > 1) {
+        const previews = formatAmbiguousMatchPreviews(
+          dedentMatches.map((s) => ({ startIdx: s, endIdx: s + searchLines.length })),
+          scopeLines,
+          origLineMap,
+          scopeStartLine,
+        );
         throw new Error(
-          `Ambiguous hunk ${locPhrase}: search block matches ${dedentMatches.length} locations (ignoring base indentation). Include surrounding context lines or exact indentation to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${dedentMatches.length} locations (ignoring base indentation). Include surrounding context lines or exact indentation to disambiguate.${previews}`,
         );
       }
       if (dedentMatches.length === 1) {
@@ -6415,8 +6460,14 @@ export function applyHunksToScope(
         }
       }
       if (trimmedMatches.length > 1) {
+        const previews = formatAmbiguousMatchPreviews(
+          trimmedMatches.map((s) => ({ startIdx: s, endIdx: s + searchLines.length })),
+          scopeLines,
+          origLineMap,
+          scopeStartLine,
+        );
         throw new Error(
-          `Ambiguous hunk ${locPhrase}: search block matches ${trimmedMatches.length} locations (ignoring indentation). Include surrounding context lines or exact indentation to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${trimmedMatches.length} locations (ignoring indentation). Include surrounding context lines or exact indentation to disambiguate.${previews}`,
         );
       }
       if (trimmedMatches.length === 1) {
@@ -6451,8 +6502,14 @@ export function applyHunksToScope(
         }
       }
       if (nonBlankMatches.length > 1) {
+        const previews = formatAmbiguousMatchPreviews(
+          nonBlankMatches.map((m) => ({ startIdx: m.start, endIdx: m.end })),
+          scopeLines,
+          origLineMap,
+          scopeStartLine,
+        );
         throw new Error(
-          `Ambiguous hunk ${locPhrase}: search block matches ${nonBlankMatches.length} locations. Include surrounding context lines to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${nonBlankMatches.length} locations. Include surrounding context lines to disambiguate.${previews}`,
         );
       }
       if (nonBlankMatches.length === 1) {

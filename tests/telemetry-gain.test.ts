@@ -951,7 +951,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(dirEv!.realisticNativeCl100k!).toBeLessThanOrEqual(Math.max(dirEv!.aiceCl100k, 4 * 45));
   });
 
-  it("distinguishes < 3s parallel slices from >= 3s sequential pagination turns and respects intervening writes", () => {
+  it("distinguishes < 12s parallel slices from >= 12s sequential pagination turns and respects intervening writes", () => {
     const file = "src/controller.ts";
     const baseTs = 1_700_000_000_000;
 
@@ -967,55 +967,55 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
         aiceText: "const a = 1;\n",
         telemetryPath: telemetryFile,
       }),
-      // Parallel slice: same-file read at t = 1,000 ms (< 3_000 ms after prior read)
+      // Parallel slice: same-file read at t = 2,000 ms (< 12_000 ms after prior read)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, file),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 1_000).toISOString(),
+        timestamp: new Date(baseTs + 2_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "const a = 1;\n",
         aiceText: "const a = 1;\n",
         telemetryPath: telemetryFile,
       }),
-      // Sequential pagination turn: same-file read at t = 5,000 ms (4,000 ms >= 3_000 ms after prior read)
+      // Sequential pagination turn: same-file read at t = 17,000 ms (15,000 ms >= 12_000 ms after prior read)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, file),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 5_000).toISOString(),
+        timestamp: new Date(baseTs + 17_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "const a = 1;\n",
         aiceText: "const a = 1;\n",
         telemetryPath: telemetryFile,
       }),
-      // Intervening write: splice at t = 8_000 ms
+      // Intervening write: splice at t = 22_000 ms
       computeTelemetryEvent({
         targetPath: path.join(projectADir, file),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 8_000).toISOString(),
+        timestamp: new Date(baseTs + 22_000).toISOString(),
         operation: "splice",
         surface: "cli",
         nativeText: "const a = 1;\n",
         aiceText: "const a = 2;\n",
         telemetryPath: telemetryFile,
       }),
-      // Read after intervening write at t = 13_000 ms (intervening write occurred since last read at 5,000 ms)
+      // Read after intervening write at t = 37_000 ms (intervening write occurred since last read at 17,000 ms)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, file),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 13_000).toISOString(),
+        timestamp: new Date(baseTs + 37_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "const a = 2;\n",
         aiceText: "const a = 2;\n",
         telemetryPath: telemetryFile,
       }),
-      // Subsequent read without intervening write at t = 18_000 ms (5,000 ms >= 3_000 ms after read at 13,000 ms)
+      // Subsequent read without intervening write at t = 52_000 ms (15,000 ms >= 12_000 ms after read at 37,000 ms)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, file),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 18_000).toISOString(),
+        timestamp: new Date(baseTs + 52_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "const a = 2;\n",
@@ -1094,22 +1094,22 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
         aiceText: "export const a = 1;\n",
         telemetryPath: loopTeleFile,
       }),
-      // Turn 2 at t = 4,000 ms (CLI wrapper tax = 70, sequential pagination turn = 1)
+      // Turn 2 at t = 15,000 ms (CLI wrapper tax = 70, sequential pagination turn = 1)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, "src/paginate.ts"),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 4_000).toISOString(),
+        timestamp: new Date(baseTs + 15_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "export const a = 1;\n",
         aiceText: "export const a = 1;\n",
         telemetryPath: loopTeleFile,
       }),
-      // Turn 3 at t = 8,000 ms (CLI wrapper tax = 70, sequential pagination turn = 2)
+      // Turn 3 at t = 30,000 ms (CLI wrapper tax = 70, sequential pagination turn = 2)
       computeTelemetryEvent({
         targetPath: path.join(projectADir, "src/paginate.ts"),
         projectRoot: projectADir,
-        timestamp: new Date(baseTs + 8_000).toISOString(),
+        timestamp: new Date(baseTs + 30_000).toISOString(),
         operation: "context",
         surface: "cli",
         nativeText: "export const a = 1;\n",
@@ -1121,7 +1121,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
         targetPath: path.join(projectADir, "src/paginate.ts"),
         projectRoot: projectADir,
         filePath: "<cli-error>",
-        timestamp: new Date(baseTs + 12_000).toISOString(),
+        timestamp: new Date(baseTs + 45_000).toISOString(),
         operation: "splice",
         surface: "cli",
         nativeText: "",
@@ -1139,7 +1139,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     fs.writeFileSync(
       loopErrorsFile,
       JSON.stringify({
-        timestamp: new Date(baseTs + 13_000).toISOString(),
+        timestamp: new Date(baseTs + 46_000).toISOString(),
         projectRoot: projectADir,
         projectName: "alpha-engine",
         filePath: "src/paginate.ts",

@@ -65,7 +65,7 @@ export const DEFAULT_SLICE_BYTE_BUDGET = 18_432;
 
 export const DEFAULT_CLI_READ_MAX_BYTES = 9_216; // 9.0 KB (strictly below host 9,892-byte middle-truncation ceiling)
 export const DEFAULT_CLI_READ_SOFT_BYTE_CAP = 8_704; // 8.5 KB
-export const DEFAULT_CLI_SLICE_BYTE_BUDGET = 7_936; // 7.75 KB (~135-185 AST-snapped lines)
+export const DEFAULT_CLI_SLICE_BYTE_BUDGET = 6_912; // 6.75 KB (~100-135 AST-snapped lines)
 export const DEFAULT_CLI_READ_MAX_TOKENS = 5_000;
 export const DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 4_600;
 
@@ -91,7 +91,7 @@ export function resolveEffectiveReadBudgets(options?: ReadOptions): EffectiveRea
     const softByteCap = Math.min(DEFAULT_CLI_READ_SOFT_BYTE_CAP, Math.max(400, maxBytes - 512));
     const sliceByteBudget = Math.min(
       DEFAULT_CLI_SLICE_BYTE_BUDGET,
-      Math.max(400, maxBytes - 1_280),
+      Math.max(400, maxBytes - 2_304),
     );
     return {
       maxBytes,
@@ -1131,7 +1131,11 @@ export function computeDynamicSliceSpan(
     16,
     Buffer.byteLength(rawSource, "utf-8") / Math.max(1, totalLines),
   );
-  const rawMaxLines = Math.max(80, Math.min(650, Math.floor(sliceByteBudget / avgBytesPerLine)));
+  const maxLinesCap = sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 135 : 650;
+  const rawMaxLines = Math.max(
+    80,
+    Math.min(maxLinesCap, Math.floor(sliceByteBudget / avgBytesPerLine)),
+  );
 
   if (sLine + rawMaxLines - 1 >= totalLines) {
     return {
@@ -1641,7 +1645,8 @@ function enforceReadBudgetCeiling(params: {
             );
             curEnd = Math.min(span.endLine, effectiveLimit);
           } else {
-            curEnd = Math.min(curStart + 159, effectiveLimit);
+            const fallbackSpan = sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 134 : 159;
+            curEnd = Math.min(curStart + fallbackSpan, effectiveLimit);
           }
           if (curEnd < curStart) curEnd = curStart;
           extraRanges.push({ startLine: curStart, endLine: curEnd });
@@ -3197,7 +3202,9 @@ function buildPureOutlineResult(params: {
               );
               curEnd = Math.min(span.endLine, autoMeta.lineCount);
             } else {
-              curEnd = Math.min(curStart + 159, autoMeta.lineCount);
+              const fallbackSpan =
+                effectiveBudgets.sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 134 : 159;
+              curEnd = Math.min(curStart + fallbackSpan, autoMeta.lineCount);
             }
             if (curEnd < curStart) curEnd = curStart;
             allSlices.push({ startLine: curStart, endLine: curEnd });
@@ -3696,21 +3703,19 @@ async function executeContextStream(params: {
         const requestedEndLine = parsedOverflowRange
           ? (parsedOverflowRange.endLine ?? parsedOverflowRange.startLine)
           : undefined;
-        const nextCmd = buildNextSliceHintCommand(
-          targetMeta.displayPath,
-          startHintLine,
-          totalTargetLines,
-          {
-            diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
-            rawSource: cachedRaw,
-            projectRoot: targetMeta.resolved.projectRoot,
-            sliceByteBudget: effectiveBudgets.sliceByteBudget,
-            maxEndLine:
-              requestedEndLine !== undefined && requestedEndLine >= startHintLine
-                ? requestedEndLine
-                : undefined,
-          },
-        );
+        const nextCmd =
+          isExplicitLineRange && requestedEndLine !== undefined
+            ? `aice read ${targetMeta.displayPath}:L${startHintLine}-L${requestedEndLine}`
+            : buildNextSliceHintCommand(targetMeta.displayPath, startHintLine, totalTargetLines, {
+                diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
+                rawSource: cachedRaw,
+                projectRoot: targetMeta.resolved.projectRoot,
+                sliceByteBudget: effectiveBudgets.sliceByteBudget,
+                maxEndLine:
+                  requestedEndLine !== undefined && requestedEndLine >= startHintLine
+                    ? requestedEndLine
+                    : undefined,
+              });
         paginationHints.push(nextCmd);
         if (targetSummaries[i]) {
           targetSummaries[i] = {
