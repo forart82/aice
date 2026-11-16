@@ -60,13 +60,15 @@ export function detectCliShellInvocation(): CliShellInvocation {
     st = null;
   }
 
-  const isFdNonInteractive =
-    !process.stdout.isTTY || (st !== null && (st.isFIFO() || st.isFile()));
+  const isFdNonInteractive = !process.stdout.isTTY || (st !== null && (st.isFIFO() || st.isFile()));
 
   if (process.platform === "linux") {
     try {
       const raw = fs.readFileSync("/proc/self/stat", "utf-8");
-      const afterParen = raw.slice(raw.lastIndexOf(")") + 2).trim().split(/\s+/);
+      const afterParen = raw
+        .slice(raw.lastIndexOf(")") + 2)
+        .trim()
+        .split(/\s+/);
       const sid = afterParen[3];
       if (sid !== undefined && st !== null) {
         let isNonInteractive = forcedNonInteractive || isFdNonInteractive || hasAgentEnv;
@@ -106,9 +108,7 @@ export function detectCliShellInvocation(): CliShellInvocation {
   }
 
   const ppid = process.ppid;
-  const key = st.isFIFO()
-    ? `pipe:${st.dev}:${st.ino}:${ppid}`
-    : `${st.dev}:${st.ino}:${ppid}`;
+  const key = st.isFIFO() ? `pipe:${st.dev}:${st.ino}:${ppid}` : `${st.dev}:${st.ino}:${ppid}`;
   return { key, isInteractiveHuman: false };
 }
 
@@ -225,7 +225,7 @@ export function commitSharedCliReadBytes(key: string | null, emittedBytes: numbe
   if (!key) return;
   try {
     const state = readStateFile();
-    const prev = Object.hasOwn(state, key) ? state[key]?.usedBytes ?? 0 : 0;
+    const prev = Object.hasOwn(state, key) ? (state[key]?.usedBytes ?? 0) : 0;
     state[key] = {
       usedBytes: prev + Math.max(0, emittedBytes),
       ts: Date.now(),

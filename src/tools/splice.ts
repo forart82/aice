@@ -6248,18 +6248,25 @@ export function applyHunksToScope(
   idioms?: Record<string, ProjectIdiomDefinition>,
   idiomsEnabled = false,
   insideClass: boolean | "container" | "member" = false,
+  scopeStartLine = 1,
 ): string {
   const safeScope = typeof scopeText === "string" ? scopeText : String(scopeText ?? "");
   const isCrLf = safeScope.includes("\r\n");
   const nl = isCrLf ? "\r\n" : "\n";
   let current = safeScope.replace(/\r\n/g, "\n");
   const effectiveIdioms = idiomsEnabled && idioms ? idioms : {};
+  const initialLines = current.split("\n");
+  const origLineMap: number[] = initialLines.map((_, i) => scopeStartLine + i);
+  const locPhrase =
+    symbolLabel === filePath ? `in ${filePath}` : `within '${symbolLabel}' in ${filePath}`;
 
   for (const hunk of hunks) {
     const searchNorm = (hunk.search ?? "").replace(/\r\n/g, "\n");
     if (!searchNorm.trim()) {
+      const emptyLocPhrase =
+        symbolLabel === filePath ? `in ${filePath}` : `for '${symbolLabel}' in ${filePath}`;
       throw new Error(
-        `Empty search block in <<< / === / >>> hunk for '${symbolLabel}' in ${filePath}. Provide at least 1 search line between '<<<' and '==='.`,
+        `Empty search block in <<< / === / >>> hunk ${emptyLocPhrase}. Provide at least 1 search line between '<<<' and '==='.`,
       );
     }
     let replaceNorm = (hunk.replace ?? "").replace(/\r\n/g, "\n");
@@ -6305,7 +6312,7 @@ export function applyHunksToScope(
       }
       if (exactLineMatches.length > 1) {
         throw new Error(
-          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${exactLineMatches.length} identical locations. Include surrounding context lines in <<< ... === to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${exactLineMatches.length} identical locations. Include surrounding context lines in <<< ... === to disambiguate.`,
         );
       }
       if (exactLineMatches.length === 1) {
@@ -6333,7 +6340,7 @@ export function applyHunksToScope(
       }
       if (validInlineIdxs.length > 1) {
         throw new Error(
-          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${validInlineIdxs.length} inline locations. Include surrounding context to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${validInlineIdxs.length} inline locations. Include surrounding context to disambiguate.`,
         );
       }
       if (validInlineIdxs.length === 1) {
@@ -6349,6 +6356,12 @@ export function applyHunksToScope(
               .map((rl, idx) => (idx === 0 || !rl.trim() ? rl : `${linePrefix}${rl}`))
               .join("\n");
           }
+        }
+        const addedLines = inlineRep.split("\n").length - 1;
+        if (addedLines > 0) {
+          const lineNoAtIdx = current.slice(0, exactIdx).split("\n").length - 1;
+          const origNo = origLineMap[lineNoAtIdx] ?? scopeStartLine + lineNoAtIdx;
+          origLineMap.splice(lineNoAtIdx + 1, 0, ...Array(addedLines).fill(origNo));
         }
         current = `${current.slice(0, exactIdx)}${inlineRep}${current.slice(afterIdx)}`;
         continue;
@@ -6377,7 +6390,7 @@ export function applyHunksToScope(
       }
       if (dedentMatches.length > 1) {
         throw new Error(
-          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${dedentMatches.length} locations (ignoring base indentation). Include surrounding context lines or exact indentation to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${dedentMatches.length} locations (ignoring base indentation). Include surrounding context lines or exact indentation to disambiguate.`,
         );
       }
       if (dedentMatches.length === 1) {
@@ -6403,7 +6416,7 @@ export function applyHunksToScope(
       }
       if (trimmedMatches.length > 1) {
         throw new Error(
-          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${trimmedMatches.length} locations (ignoring indentation). Include surrounding context lines or exact indentation to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${trimmedMatches.length} locations (ignoring indentation). Include surrounding context lines or exact indentation to disambiguate.`,
         );
       }
       if (trimmedMatches.length === 1) {
@@ -6439,7 +6452,7 @@ export function applyHunksToScope(
       }
       if (nonBlankMatches.length > 1) {
         throw new Error(
-          `Ambiguous hunk within '${symbolLabel}' in ${filePath}: search block matches ${nonBlankMatches.length} locations. Include surrounding context lines to disambiguate.`,
+          `Ambiguous hunk ${locPhrase}: search block matches ${nonBlankMatches.length} locations. Include surrounding context lines to disambiguate.`,
         );
       }
       if (nonBlankMatches.length === 1) {
@@ -6450,13 +6463,136 @@ export function applyHunksToScope(
     }
 
     if (matchStart < 0) {
+      let diskContextSnippet = "";
+
+      const extractTokens = (text: string): string[] => {
+        const matches = text.match(/[A-Za-z_$][A-Za-z0-9_$]*/g);
+        if (!matches) return [];
+        return Array.from(new Set(matches.filter((t) => t.length >= 2)));
+      };
+
+      const rawSearchLines = searchNorm.split("\n");
+      const trimmedSearchLines = rawSearchLines.map((l) => l.trim()).filter((l) => l.length > 0);
+      const nonTrivialSearchLines = trimmedSearchLines.filter(
+        (l) => l.length > 1 && /[A-Za-z0-9_$]/.test(l),
+      );
+
+      const searchTokens = extractTokens(searchNorm);
+      const searchTokenSet = new Set(searchTokens);
+
+      let hasNonTrivialLineMatch = false;
+      for (const line of scopeLines) {
+        const tr = line.trim();
+        if (tr && nonTrivialSearchLines.includes(tr)) {
+          hasNonTrivialLineMatch = true;
+          break;
+        }
+      }
+
+      const matchedTokens = new Set<string>();
+      for (const line of scopeLines) {
+        const lineTokens = extractTokens(line);
+        for (const tok of lineTokens) {
+          if (searchTokenSet.has(tok)) {
+            matchedTokens.add(tok);
+          }
+        }
+      }
+      const hasTokenMatch = matchedTokens.size >= 2;
+
+      if ((hasNonTrivialLineMatch || hasTokenMatch) && scopeLines.length > 0) {
+        let bestScore = -1;
+        let bestAnchorStart = 0;
+        let bestAnchorEnd = 0;
+
+        const K = Math.max(1, Math.min(scopeLines.length, searchLines.length || 1));
+        for (let s = 0; s <= scopeLines.length - K; s++) {
+          let score = 0;
+          for (let k = 0; k < K; k++) {
+            const scopeLine = scopeLines[s + k] ?? "";
+            const searchLine = searchLines[k] ?? "";
+            const trScope = scopeLine.trim();
+            const trSearch = searchLine.trim();
+
+            if (trScope && trSearch && trScope === trSearch) {
+              score += 20;
+            } else if (
+              trScope &&
+              trSearch &&
+              (scopeLine.includes(searchLine) || searchLine.includes(scopeLine))
+            ) {
+              score += 8;
+            }
+            const lineTokens = extractTokens(scopeLine);
+            for (const tok of lineTokens) {
+              if (searchTokenSet.has(tok)) {
+                score += 2;
+              }
+            }
+          }
+          if (score > bestScore) {
+            bestScore = score;
+            bestAnchorStart = s;
+            bestAnchorEnd = s + K - 1;
+          }
+        }
+
+        for (let s = 0; s < scopeLines.length; s++) {
+          const scopeLine = scopeLines[s] ?? "";
+          const trScope = scopeLine.trim();
+          if (!trScope) continue;
+
+          let singleScore = 0;
+          if (nonTrivialSearchLines.includes(trScope)) {
+            singleScore += 25;
+          }
+          const lineTokens = extractTokens(scopeLine);
+          for (const tok of lineTokens) {
+            if (searchTokenSet.has(tok)) {
+              singleScore += 3;
+            }
+          }
+          if (singleScore > bestScore) {
+            bestScore = singleScore;
+            bestAnchorStart = s;
+            bestAnchorEnd = s;
+          }
+        }
+
+        if (bestScore > 0) {
+          let winStartIdx = Math.max(0, bestAnchorStart - 5);
+          let winEndIdx = Math.min(scopeLines.length - 1, bestAnchorEnd + 5);
+
+          if (winEndIdx - winStartIdx + 1 > 16) {
+            const mid = Math.floor((bestAnchorStart + bestAnchorEnd) / 2);
+            winStartIdx = Math.max(0, mid - 7);
+            winEndIdx = Math.min(scopeLines.length - 1, winStartIdx + 15);
+            if (winEndIdx - winStartIdx + 1 < 16 && winStartIdx > 0) {
+              winStartIdx = Math.max(0, winEndIdx - 15);
+            }
+          }
+
+          const winStart = origLineMap[winStartIdx] ?? scopeStartLine + winStartIdx;
+          const winEnd = origLineMap[winEndIdx] ?? scopeStartLine + winEndIdx;
+
+          const snippetLines: string[] = [];
+          for (let i = winStartIdx; i <= winEndIdx; i++) {
+            const diskLine = origLineMap[i] ?? scopeStartLine + i;
+            snippetLines.push(`${diskLine}│ ${scopeLines[i]}`);
+          }
+          const numberedLines = snippetLines.join("\n");
+          diskContextSnippet = `\n\nClosest disk context [L${winStart}-L${winEnd}] (retry splice directly without re-reading):\n${numberedLines}`;
+        }
+      }
+
       throw new Error(
-        `Hunk search block not found within '${symbolLabel}' in ${filePath}:\n${hunk.search}`,
+        `Hunk search block not found ${locPhrase}:\n${hunk.search}${diskContextSnippet}`,
       );
     }
 
     if (replaceNorm === "") {
       scopeLines.splice(matchStart, matchEnd - matchStart);
+      origLineMap.splice(matchStart, matchEnd - matchStart);
     } else {
       const matchedScopeLines = scopeLines.slice(matchStart, matchEnd);
       const scopeBaseIndent = computeCommonLeadingIndent(matchedScopeLines);
@@ -6501,6 +6637,9 @@ export function applyHunksToScope(
         });
       }
       scopeLines.splice(matchStart, matchEnd - matchStart, ...adjustedRepLines);
+      const baseLine = origLineMap[matchStart] ?? scopeStartLine + matchStart;
+      const repLines = adjustedRepLines.map((_, idx) => baseLine + idx);
+      origLineMap.splice(matchStart, matchEnd - matchStart, ...repLines);
     }
     current = scopeLines.join("\n");
   }
@@ -6590,6 +6729,8 @@ function resolveSingleNativeEditAgainstSource(
         targetLang,
         idioms,
         hunkIdiomsOn,
+        false,
+        1,
       );
       return {
         symbol: anchorSymbol || ":hunk",
@@ -6612,6 +6753,7 @@ function resolveSingleNativeEditAgainstSource(
     let clonedSlice = "";
     let insertPos = -1;
     let isTest = false;
+    let cloneStartOffset = 0;
 
     if (!cloneSpan) {
       const testBlocks = extractNativeTestBlocks(nativeSource);
@@ -6620,6 +6762,7 @@ function resolveSingleNativeEditAgainstSource(
         clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
         insertPos = tb.endOffset;
         isTest = true;
+        cloneStartOffset = tb.startOffset;
       } else {
         throw new Error(`Symbol to clone '${cloneSym}' not found in ${filePath}`);
       }
@@ -6637,9 +6780,11 @@ function resolveSingleNativeEditAgainstSource(
         clonedSlice = nativeSource.slice(tb.startOffset, tb.endOffset);
         insertPos = tb.endOffset;
         isTest = true;
+        cloneStartOffset = tb.startOffset;
       } else {
         clonedSlice = nativeSource.slice(resolvedCloneSpan.declStart, resolvedCloneSpan.declEnd);
         insertPos = resolvedCloneSpan.declEnd;
+        cloneStartOffset = resolvedCloneSpan.declStart;
       }
     }
 
@@ -6648,6 +6793,7 @@ function resolveSingleNativeEditAgainstSource(
       const cloneIdiomsOn =
         options.idioms !== false &&
         (options.idioms === true || Boolean(idioms && Object.keys(idioms).length > 0));
+      const cloneStartLine = nativeSource.slice(0, cloneStartOffset).split("\n").length;
       clonedSlice = applyHunksToScope(
         clonedSlice,
         cloneHunks,
@@ -6656,6 +6802,8 @@ function resolveSingleNativeEditAgainstSource(
         targetLang,
         idioms,
         cloneIdiomsOn,
+        false,
+        cloneStartLine,
       );
     }
     const ruleLines = containsHunkMarkers(rawSnippet) ? [] : rawSnippet.split(/\r?\n/);
@@ -7003,6 +7151,8 @@ function resolveSingleNativeEditAgainstSource(
             targetLang,
             idioms,
             hunkIdiomsActive,
+            false,
+            startLine,
           );
           return {
             symbol: anchorSymbol,
@@ -7027,6 +7177,8 @@ function resolveSingleNativeEditAgainstSource(
             targetLang,
             idioms,
             hunkIdiomsActive,
+            false,
+            winStartLine,
           );
           return {
             symbol: anchorSymbol,
@@ -7176,7 +7328,11 @@ function resolveSingleNativeEditAgainstSource(
       origDelims.parens === 0 &&
       (procDelims.braces !== 0 || procDelims.parens !== 0);
 
-    if (!autoAligned && (!literalCheck.valid || hasExactDelimImbalance) && !isUnbalancedReplacementOnBalancedSpan) {
+    if (
+      !autoAligned &&
+      (!literalCheck.valid || hasExactDelimImbalance) &&
+      !isUnbalancedReplacementOnBalancedSpan
+    ) {
       const lineDelimsCache = new Map<number, { braces: number; parens: number }>();
       const getLineDelims = (lineNo: number): { braces: number; parens: number } => {
         const cached = lineDelimsCache.get(lineNo);
@@ -7908,6 +8064,7 @@ function resolveSingleNativeEditAgainstSource(
       const symIdiomsOn =
         options.idioms !== false &&
         (options.idioms === true || Boolean(idioms && Object.keys(idioms).length > 0));
+      const symStartLine = nativeSource.slice(0, hunkScopeStart).split("\n").length;
       const updatedSymbolScope = applyHunksToScope(
         lineAlignedScope,
         hunks,
@@ -7917,6 +8074,7 @@ function resolveSingleNativeEditAgainstSource(
         idioms,
         symIdiomsOn,
         spanInfo.isClassContainer ? "container" : spanInfo.className ? "member" : false,
+        symStartLine,
       );
       return {
         symbol: anchorSymbol,

@@ -1204,6 +1204,126 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(res.output).not.toContain("module multi_slice:");
       expect(res.output).toContain("aice read src/multi_slice.ts:L141-L280");
     });
+
+    it("eliminates unsolicited envelope bloat on CLI reads defaulting to zero-envelope without # AICE Context Pack", async () => {
+      const boundaryPath = path.join(tmpDir, "src", "boundary250.ts");
+      const lines250 = `${Array.from({ length: 250 }, (_, i) => `export const b${i} = ${i};`).join("\n")}\n`;
+      fs.writeFileSync(boundaryPath, lines250, "utf-8");
+
+      // 1. Bare code read on CLI: zero envelope
+      const bareCliRes = await aiceRead("src/boundary250.ts", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(bareCliRes.text).toContain("// === src/boundary250.ts ===");
+      expect(bareCliRes.text).not.toContain("# AICE Context Pack");
+      expect(bareCliRes.text).not.toContain("## Imported Dependency Contracts");
+      expect(bareCliRes.text).not.toContain("## Downstream Callers");
+      expect(bareCliRes.dependencies).toHaveLength(0);
+      expect(bareCliRes.callers).toHaveLength(0);
+
+      // 2. Symbol read on CLI: zero envelope, keeping compact sibling outline
+      const symCliRes = await aiceRead("src/small.ts:SmallCalculator.compute", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(symCliRes.text).toContain("// === src/small.ts:SmallCalculator.compute ===");
+      expect(symCliRes.text).not.toContain("# AICE Context Pack");
+      expect(symCliRes.text).not.toContain("## Imported Dependency Contracts");
+      expect(symCliRes.text).not.toContain("## Downstream Callers");
+      expect(symCliRes.text).toContain("// siblings in SmallCalculator:");
+      expect(symCliRes.dependencies).toHaveLength(0);
+      expect(symCliRes.callers).toHaveLength(0);
+
+      // 3. surface: undefined keeps full context pack on boundary250.ts
+      const bareProgRes = await aiceRead("src/boundary250.ts", {
+        projectRoot: tmpDir,
+      });
+      expect(bareProgRes.text).toContain("# AICE Context Pack: src/boundary250.ts");
+
+      // 4. surface: "cli" WITH includeDeps: true emits context pack
+      const depsCliRes = await aiceRead("src/small.ts", {
+        projectRoot: tmpDir,
+        surface: "cli",
+        includeDeps: true,
+      });
+      expect(depsCliRes.text).toContain("## Target File Content:");
+      expect(depsCliRes.text).toContain("## Imported Dependency Contracts");
+    });
+
+    it("emits parallel 1-turn slices hint in budget-capped reads and bare auto-outlines", async () => {
+      const oversizedLines = [
+        "export function myLongFunc(): string {",
+        ...Array.from(
+          { length: 400 },
+          (_, idx) => `  const step_${idx} = "padding_value_for_budget_${idx}";`,
+        ),
+        '  return "done";',
+        "}",
+      ].join("\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "cli_oversized.ts"),
+        `${oversizedLines}\n`,
+        "utf-8",
+      );
+
+      // 1. In bare auto-outline with 2+ slices
+      const bareRes = await aiceRead("src/cli_oversized.ts", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(bareRes.output).toContain("// Next slice: aice read src/cli_oversized.ts:L1-L");
+      expect(bareRes.output).toContain(
+        "// Parallel 1-turn slices (separate calls in 1 turn, never sequential):",
+      );
+      expect(bareRes.output).toMatch(
+        /src\/cli_oversized\.ts:L1-L\d+, src\/cli_oversized\.ts:L\d+-L\d+/,
+      );
+
+      // 2. In budget ceiling footer with remaining slices
+      const symRes = await aiceRead("src/cli_oversized.ts:myLongFunc", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(symRes.output).toContain(
+        "// [9 KB CLI stdout budget reached — next slice: aice read src/cli_oversized.ts:L",
+      );
+      expect(symRes.output).toContain(
+        "| parallel 1-turn slices (separate calls in 1 turn, never sequential):",
+      );
+    });
+
+    it("supports comma-separated multi-range and multi-symbol selectors on a single file in 1 turn", async () => {
+      const targetAipl = path.join(tmpDir, "src", "multi_range.aipl");
+      const aiplLines = Array.from(
+        { length: 60 },
+        (_, i) => `pub fn fn_${i + 1}(): int = ${i + 1}`,
+      );
+      fs.writeFileSync(targetAipl, `${aiplLines.join("\n")}\n`, "utf-8");
+
+      // 1. Line range: file:L1-L10,L20-L30
+      const rangeRes = await aiceRead("src/multi_range.aipl:L1-L10,L20-L30", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(rangeRes.text).toContain("// === src/multi_range.aipl ===");
+      expect(rangeRes.text).toContain("1│ pub fn fn_1(): int = 1");
+      expect(rangeRes.text).toContain("10│ pub fn fn_10(): int = 10");
+      expect(rangeRes.text).not.toContain("15│");
+      expect(rangeRes.text).toContain("20│ pub fn fn_20(): int = 20");
+      expect(rangeRes.text).toContain("30│ pub fn fn_30(): int = 30");
+      expect(rangeRes.text).not.toContain("# AICE Context Pack");
+
+      // 2. Symbol selectors: file:fn_2,fn_5
+      const symRes = await aiceRead("src/multi_range.aipl:fn_2,fn_5", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(symRes.text).toContain("fn_2");
+      expect(symRes.text).toContain("fn_5");
+      expect(symRes.text).not.toContain("fn_20");
+      expect(symRes.text).not.toContain("# AICE Context Pack");
+    });
   });
 
   describe("Honest Signed Read/Context Baselines & Failed CLI Telemetry (Steps 6.3-6.4)", () => {
@@ -1719,10 +1839,7 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       ).join("\n");
       fs.writeFileSync(path.join(tmpDir, "src", "multi_slice_heavy.ts"), `${lines}\n`, "utf-8");
 
-      const targets = [
-        "src/multi_slice_heavy.ts:L1-L95",
-        "src/multi_slice_heavy.ts:L100-L205",
-      ];
+      const targets = ["src/multi_slice_heavy.ts:L1-L95", "src/multi_slice_heavy.ts:L100-L205"];
 
       // 1. With full: true on surface: "cli", strictly capped <= 9,216 B without --full hints
       const cappedRes = await read(targets, {
@@ -1789,7 +1906,9 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(chainedBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
       expect(chainedBytes).toBeLessThan(9_892);
       expect(chainedOutput).toContain("f1_val_1");
-      expect(chainedOutput).toMatch(/\/\/ \[9 KB CLI stdout budget already filled by prior chained command/);
+      expect(chainedOutput).toMatch(
+        /\/\/ \[9 KB CLI stdout budget already filled by prior chained command/,
+      );
 
       // 2. Two separate invocations each get full 9,216 B budgets independently
       const sep1 = execFileSync("node", [distCli, "read", "src/file1.ts"], {

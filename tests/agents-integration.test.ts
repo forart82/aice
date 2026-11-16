@@ -507,7 +507,9 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       const bigReadRes = await server.executeToolCall("aice_read", { path: "oversized.ts" });
       expect(bigReadRes.isError).toBeFalsy();
       const bigReadText = bigReadRes.content[0].text;
-      expect(Buffer.byteLength(bigReadText, "utf-8")).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+      expect(Buffer.byteLength(bigReadText, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
       expect(bigReadText).toContain("9 KB MCP");
       expect(bigReadText).not.toContain("--full");
 
@@ -522,9 +524,9 @@ describe("Phase 4: Global MCP Server Upgrade & Major CLI Agent Auto-Integration"
       expect(extReadRes.content[0].text).toContain("SDK_VERSION");
 
       // Verify MCP aice_read STILL rejects undeclared sibling directory without aice.config.json
-      await expect(
-        server.executeToolCall("aice_read", { path: undeclaredFile }),
-      ).rejects.toThrow("escapes workspace root");
+      await expect(server.executeToolCall("aice_read", { path: undeclaredFile })).rejects.toThrow(
+        "escapes workspace root",
+      );
 
       // Verify MCP aice_splice STILL rejects writing to sibling directory (escapes workspace root)
       await expect(

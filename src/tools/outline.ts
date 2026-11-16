@@ -2233,6 +2233,11 @@ export async function outlinePath(
       totalNativeCl100k > 0
         ? Math.round(((totalNativeCl100k - aiceCl100k) / totalNativeCl100k) * 100)
         : 0;
+    const outlinedFileCount = targetCandidates.length;
+    const realisticNativeCl100k = Math.min(
+      totalNativeCl100k,
+      Math.max(aiceCl100k, outlinedFileCount * 45),
+    );
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -2244,7 +2249,7 @@ export async function outlinePath(
       nativeChars: totalNativeChars,
       nativeCl100k: totalNativeCl100k,
       nativeO200k: totalNativeO200k,
-      realisticNativeCl100k: totalNativeCl100k,
+      realisticNativeCl100k,
       structuralCompressionPct,
       aiceText: aiceTextPayload,
       aiceCl100k,

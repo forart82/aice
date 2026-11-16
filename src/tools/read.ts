@@ -89,7 +89,10 @@ export function resolveEffectiveReadBudgets(options?: ReadOptions): EffectiveRea
         ? Math.max(512, Math.min(DEFAULT_CLI_READ_MAX_BYTES, options.maxBytes))
         : DEFAULT_CLI_READ_MAX_BYTES;
     const softByteCap = Math.min(DEFAULT_CLI_READ_SOFT_BYTE_CAP, Math.max(400, maxBytes - 512));
-    const sliceByteBudget = Math.min(DEFAULT_CLI_SLICE_BYTE_BUDGET, Math.max(400, maxBytes - 1_280));
+    const sliceByteBudget = Math.min(
+      DEFAULT_CLI_SLICE_BYTE_BUDGET,
+      Math.max(400, maxBytes - 1_280),
+    );
     return {
       maxBytes,
       softByteCap,
@@ -1302,7 +1305,8 @@ function shouldEnforceDefaultReadBudget(
   if (options._bypassInternalCap === true) return false;
   if (options.maxTokens !== undefined) return false;
   if (options.json === true) return false;
-  if ((options.surface === "cli" || options.surface === "mcp") && !options.unboundedCli) return true;
+  if ((options.surface === "cli" || options.surface === "mcp") && !options.unboundedCli)
+    return true;
   if (options.full === true) return false;
   if (
     normalizedItems &&
@@ -1564,6 +1568,25 @@ function enforceReadBudgetCeiling(params: {
   }
 
   const isCliBudget = budgetLabel.includes("CLI") || budgetLabel.includes("MCP");
+  const parsedFallback = splitPathAndSelector(fallbackTargetPath);
+  const fallbackSafePath = parsedFallback.filePath;
+  const resolvedDiskPath =
+    diskPath && fs.existsSync(diskPath)
+      ? diskPath
+      : projectRoot
+        ? path.resolve(projectRoot, fallbackSafePath)
+        : path.resolve(process.cwd(), fallbackSafePath);
+  let effectiveRawSource = rawSource;
+  if (!effectiveRawSource) {
+    try {
+      if (fs.existsSync(resolvedDiskPath) && fs.statSync(resolvedDiskPath).isFile()) {
+        effectiveRawSource = fs.readFileSync(resolvedDiskPath, "utf-8");
+      }
+    } catch {
+      // ignore unreadable file
+    }
+  }
+
   const buildFooterForKept = (candidateKept: string): string => {
     if (
       (!extraHints || extraHints.length === 0) &&
@@ -1587,8 +1610,59 @@ function enforceReadBudgetCeiling(params: {
               projectRoot,
               sliceByteBudget,
             });
+    let parallelPart = "";
+    const hintMatch = hint.match(/^aice read (.+?):L(\d+)-L(\d+)$/);
+    if (hintMatch) {
+      const safePath = hintMatch[1]!;
+      const hintEndLine = Number.parseInt(hintMatch[3]!, 10);
+      const parsedRange = parseSelectorLineRange(parsedFallback.selector);
+      const reqEnd = parsedRange?.endLine;
+      const effectiveLimit =
+        reqEnd ??
+        totalLines ??
+        (effectiveRawSource ? countSourceLines(effectiveRawSource) : undefined);
+      if (effectiveLimit !== undefined && hintEndLine < effectiveLimit) {
+        const extraRanges: Array<{ startLine: number; endLine: number }> = [];
+        let curStart = hintEndLine + 1;
+        let more = false;
+
+        while (curStart <= effectiveLimit) {
+          if (extraRanges.length >= 5) {
+            more = true;
+            break;
+          }
+          let curEnd: number;
+          if (effectiveRawSource) {
+            const span = computeDynamicSliceSpan(
+              diskPath ?? safePath,
+              effectiveRawSource,
+              curStart,
+              sliceByteBudget,
+            );
+            curEnd = Math.min(span.endLine, effectiveLimit);
+          } else {
+            curEnd = Math.min(curStart + 159, effectiveLimit);
+          }
+          if (curEnd < curStart) curEnd = curStart;
+          extraRanges.push({ startLine: curStart, endLine: curEnd });
+          curStart = curEnd + 1;
+        }
+        if (extraRanges.length > 0) {
+          parallelPart = ` | parallel 1-turn slices (separate calls in 1 turn, never sequential): ${extraRanges
+            .map((r) => `${safePath}:L${r.startLine}-L${r.endLine}`)
+            .join(", ")}${more ? ", ..." : ""}`;
+        }
+      }
+    }
     const fullHint = isCliBudget ? "" : " (or pass --full)";
-    return `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${fullHint}]`;
+    let candidateFooter = `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${parallelPart}${fullHint}]`;
+    if (
+      parallelPart &&
+      Buffer.byteLength(candidateFooter, "utf-8") > Math.max(200, maxBundleBytes - 64)
+    ) {
+      candidateFooter = `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${fullHint}]`;
+    }
+    return candidateFooter;
   };
 
   let closedKept = closeUnclosedMarkdownFence(keptText);
@@ -2016,7 +2090,10 @@ function executeFilesOnlyRead(
     nativeChars: totalSourceChars,
     nativeCl100k: approxOrigTokens,
     nativeO200k: approxOrigTokens,
-    realisticNativeCl100k: approxOrigTokens,
+    realisticNativeCl100k: Math.min(
+      approxOrigTokens,
+      Math.max(aiceApproxTok, discovered.length * 10),
+    ),
     aiceText: aicePayload,
     aiceChars: aicePayload.length,
     aiceCl100k: aiceApproxTok,
@@ -2266,6 +2343,13 @@ export async function aiceRead(
   options: ReadOptions = {},
 ): Promise<ReadResult> {
   const surface = options.surface ?? "cli";
+  const isCliOrMcpSurface = options.surface === "cli" || options.surface === "mcp";
+  const effectiveIncludeDeps = isCliOrMcpSurface
+    ? (options.includeDeps ?? (options.depth !== undefined && options.depth > 0 ? true : false))
+    : options.includeDeps;
+  const effectiveIncludeCallers = isCliOrMcpSurface
+    ? (options.includeCallers ?? false)
+    : options.includeCallers;
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
   const effectiveBudgets = resolveEffectiveReadBudgets(options);
 
@@ -2350,8 +2434,8 @@ export async function aiceRead(
         depth: options.depth,
         symbol: sharedSymTrimmed,
         idioms: effectiveIdioms,
-        includeDeps: options.includeDeps,
-        includeCallers: options.includeCallers,
+        includeDeps: effectiveIncludeDeps,
+        includeCallers: effectiveIncludeCallers,
         outlineTarget: Boolean(options.outlineTarget),
         maxTokens: options.maxTokens,
         maxByteBudget: enforceWsBudget ? effectiveBudgets.maxBytes : undefined,
@@ -2362,6 +2446,7 @@ export async function aiceRead(
         stats: Boolean(options.stats),
         projectRoot,
         workspaceScanCache: options.workspaceScanCache,
+        surface: options.surface,
       }),
     );
 
@@ -2954,11 +3039,11 @@ function buildPureOutlineResult(params: {
   let fileCount = 0;
   let anyIdiomsUsed = false;
   const nativeParts: string[] = [];
+  const outlineDisplayKeys: string[] = [];
 
   if (outlineRes instanceof Map) {
     fileCount = outlineRes.size;
     const textBlocks: string[] = [];
-    const outlineDisplayKeys: string[] = [];
     const jsonItems: unknown[] = [];
 
     for (const [rawKey, itemRes] of outlineRes.entries()) {
@@ -3086,8 +3171,49 @@ function buildPureOutlineResult(params: {
         nextSliceCmd,
       });
       const body = outlineRes.text ? `${autoHeader}\n${outlineRes.text}` : autoHeader;
-      const sliceHintFooter = `// Next slice: ${nextSliceCmd}`;
-      if (!body.includes(sliceHintFooter)) {
+      let parallelSlicesLine = "";
+      const sliceMatch = nextSliceCmd.match(/^aice read (.+?):L1-L(\d+)$/);
+      if (sliceMatch) {
+        const safePath = sliceMatch[1]!;
+        const firstEnd = Number.parseInt(sliceMatch[2]!, 10);
+        if (autoMeta.lineCount > firstEnd) {
+          const allSlices: Array<{ startLine: number; endLine: number }> = [
+            { startLine: 1, endLine: firstEnd },
+          ];
+          let curStart = firstEnd + 1;
+          let hasMore = false;
+          while (curStart <= autoMeta.lineCount) {
+            if (allSlices.length >= 6) {
+              hasMore = true;
+              break;
+            }
+            let curEnd: number;
+            if (autoMeta.preReadSource) {
+              const span = computeDynamicSliceSpan(
+                autoMeta.diskPath ?? safePath,
+                autoMeta.preReadSource,
+                curStart,
+                effectiveBudgets.sliceByteBudget,
+              );
+              curEnd = Math.min(span.endLine, autoMeta.lineCount);
+            } else {
+              curEnd = Math.min(curStart + 159, autoMeta.lineCount);
+            }
+            if (curEnd < curStart) curEnd = curStart;
+            allSlices.push({ startLine: curStart, endLine: curEnd });
+            curStart = curEnd + 1;
+          }
+          if (allSlices.length >= 2) {
+            parallelSlicesLine = `// Parallel 1-turn slices (separate calls in 1 turn, never sequential): ${allSlices
+              .map((r) => `${safePath}:L${r.startLine}-L${r.endLine}`)
+              .join(", ")}${hasMore ? ", ..." : ""}`;
+          }
+        }
+      }
+      const sliceHintFooter = parallelSlicesLine
+        ? `// Next slice: ${nextSliceCmd}\n${parallelSlicesLine}`
+        : `// Next slice: ${nextSliceCmd}`;
+      if (!body.includes(`// Next slice: ${nextSliceCmd}`)) {
         rawBundle = `${body}\n\n${sliceHintFooter}`;
       } else {
         rawBundle = body;
@@ -3180,6 +3306,10 @@ function buildPureOutlineResult(params: {
     const aiceCl100k = jsonOutput !== undefined ? estimateTokens(jsonOutput) : tokenCount;
     const structuralCompressionPct =
       nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
+    const isDirOrMultiOutline = outlineRes instanceof Map || Boolean(classified[0]?.isDir);
+    const realisticNativeCl100k = isDirOrMultiOutline
+      ? Math.min(nativeCl100k, Math.max(aiceCl100k, fileCount * 45))
+      : nativeCl100k;
     recordTelemetryEvent({
       targetPath: classified[0].diskPath,
       projectRoot,
@@ -3190,7 +3320,8 @@ function buildPureOutlineResult(params: {
       nativeCl100k,
       aiceCl100k,
       realisticNativeText: nativeJoined,
-      realisticNativeCl100k: nativeCl100k,
+      realisticNativeCl100k,
+      ...(outlineDisplayKeys.length > 1 ? { multiFiles: outlineDisplayKeys } : {}),
       structuralCompressionPct,
       aiceText: aicePayload,
     });
@@ -3260,6 +3391,13 @@ async function executeContextStream(params: {
 }): Promise<ReadResult> {
   const { contextItems, missingTargets, isMultiInput, sharedScanCache, options, surface } = params;
   const effectiveBudgets = resolveEffectiveReadBudgets(options);
+  const isCliOrMcpSurface = options.surface === "cli" || options.surface === "mcp";
+  const effectiveIncludeDeps = isCliOrMcpSurface
+    ? (options.includeDeps ?? (options.depth !== undefined && options.depth > 0 ? true : false))
+    : options.includeDeps;
+  const effectiveIncludeCallers = isCliOrMcpSurface
+    ? (options.includeCallers ?? false)
+    : options.includeCallers;
 
   const results: ContextResult[] = [];
   const matchedTargets: ClassifiedReadTarget[] = [];
@@ -3285,8 +3423,8 @@ async function executeContextStream(params: {
       symbol: item.effectiveSelector,
       allowPartialSymbolMatch: options.allowPartialSymbolMatch ?? (isMultiInput ? true : undefined),
       idioms: options.idioms,
-      includeDeps: options.includeDeps,
-      includeCallers: options.includeCallers,
+      includeDeps: effectiveIncludeDeps,
+      includeCallers: effectiveIncludeCallers,
       zeroEnvelopeBareSmallFiles: true,
       outlineTarget: Boolean(options.outlineTarget),
       maxTokens: isMultiInput ? undefined : options.maxTokens,
@@ -3298,6 +3436,7 @@ async function executeContextStream(params: {
       stats: Boolean(options.stats),
       projectRoot: item.resolved.projectRoot,
       workspaceScanCache: sharedScanCache,
+      surface: options.surface,
     };
 
     let targetMatched = false;
@@ -3484,8 +3623,8 @@ async function executeContextStream(params: {
     let merged = mergeMultiContextResults(results, {
       outlineTarget: Boolean(options.outlineTarget),
       maxTokens: options.maxTokens,
-      includeDeps: options.includeDeps,
-      includeCallers: options.includeCallers,
+      includeDeps: effectiveIncludeDeps,
+      includeCallers: effectiveIncludeCallers,
       depth: options.depth,
     });
     let formattedBundle = merged.formattedBundle;
@@ -3536,8 +3675,7 @@ async function executeContextStream(params: {
         }
 
         const isExplicitLineRange = Boolean(
-          targetMeta.effectiveSelector &&
-            LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector),
+          targetMeta.effectiveSelector && LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector),
         );
         const parsedOverflowRange = parseSelectorLineRange(targetMeta.effectiveSelector);
 
@@ -3619,8 +3757,8 @@ async function executeContextStream(params: {
       if (keptContextResults.length > 0) {
         merged = mergeMultiContextResults(keptContextResults, {
           outlineTarget: Boolean(options.outlineTarget),
-          includeDeps: options.includeDeps,
-          includeCallers: options.includeCallers,
+          includeDeps: effectiveIncludeDeps,
+          includeCallers: effectiveIncludeCallers,
           depth: options.depth,
         });
         partsAfterDowngrade.push(merged.formattedBundle);

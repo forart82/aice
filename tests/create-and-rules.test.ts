@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { normalizeCliContextFlag } from "../bin/aice.js";
 import {
   AICE_DIRECTIVE_END,
   AICE_DIRECTIVE_START,
@@ -792,11 +793,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
         "legacy",
         "utf-8",
       );
-      fs.writeFileSync(
-        path.join(fakeHome, ".gemini", "rules", "aice.md"),
-        "legacy",
-        "utf-8",
-      );
+      fs.writeFileSync(path.join(fakeHome, ".gemini", "rules", "aice.md"), "legacy", "utf-8");
       fs.writeFileSync(
         path.join(fakeHome, ".codex", "AGENTS.md"),
         "<!-- AICE:START -->\nstale\n<!-- AICE:END -->\n",
@@ -834,8 +831,12 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       // AICE-only files unlinked cleanly (not 0-byte orphan files)
       expect(fs.existsSync(path.join(fakeHome, ".gemini", "GEMINI.md"))).toBe(false);
       expect(fs.existsSync(path.join(fakeHome, ".gemini", "config", "GEMINI.md"))).toBe(false);
-      expect(fs.existsSync(path.join(fakeHome, ".gemini", "antigravity-cli", "GEMINI.md"))).toBe(false);
-      expect(fs.existsSync(path.join(fakeHome, ".gemini", "config", "rules", "aice.md"))).toBe(false);
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "antigravity-cli", "GEMINI.md"))).toBe(
+        false,
+      );
+      expect(fs.existsSync(path.join(fakeHome, ".gemini", "config", "rules", "aice.md"))).toBe(
+        false,
+      );
       expect(fs.existsSync(path.join(fakeHome, ".gemini", "rules", "aice.md"))).toBe(false);
       expect(fs.existsSync(path.join(fakeHome, ".codex", "AGENTS.md"))).toBe(false);
       expect(fs.existsSync(path.join(fakeHome, ".codex", "CODEX.md"))).toBe(false);
@@ -865,15 +866,43 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       fs.mkdirSync(path.join(app2, ".claude", "rules"), { recursive: true });
 
       // app1: AICE-only AGENTS.md, GEMINI.md, CODEX.md + user CLAUDE.md
-      fs.writeFileSync(path.join(app1, "AGENTS.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(app1, "GEMINI.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(app1, "CODEX.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(app1, "CLAUDE.md"), "# Team Rules\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(
+        path.join(app1, "AGENTS.md"),
+        "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(app1, "GEMINI.md"),
+        "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(app1, "CODEX.md"),
+        "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(app1, "CLAUDE.md"),
+        "# Team Rules\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
 
       // app2: User CODEX.md, AICE-only .codex/instructions.md, user .claude/CLAUDE.md, and rule files
-      fs.writeFileSync(path.join(app2, "CODEX.md"), "# Custom Codex Instructions\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(app2, ".codex", "instructions.md"), "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(app2, ".claude", "CLAUDE.md"), "# Standalone Claude\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(
+        path.join(app2, "CODEX.md"),
+        "# Custom Codex Instructions\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(app2, ".codex", "instructions.md"),
+        "<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(app2, ".claude", "CLAUDE.md"),
+        "# Standalone Claude\n\n<!-- AICE:START -->\nrules\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
       fs.writeFileSync(path.join(app2, ".gemini", "rules", "aice.md"), "legacy", "utf-8");
       fs.writeFileSync(path.join(app2, ".claude", "rules", "aice.md"), "legacy", "utf-8");
 
@@ -900,11 +929,15 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       // app2 assertions: user files preserved, empty ones unlinked, rule files cleaned
       expect(fs.existsSync(path.join(app2, "CODEX.md"))).toBe(true);
-      expect(fs.readFileSync(path.join(app2, "CODEX.md"), "utf-8")).toBe("# Custom Codex Instructions\n");
+      expect(fs.readFileSync(path.join(app2, "CODEX.md"), "utf-8")).toBe(
+        "# Custom Codex Instructions\n",
+      );
       expect(fs.existsSync(path.join(app2, ".codex", "instructions.md"))).toBe(false);
       expect(fs.existsSync(path.join(app2, ".codex"))).toBe(false);
       expect(fs.existsSync(path.join(app2, ".claude", "CLAUDE.md"))).toBe(true);
-      expect(fs.readFileSync(path.join(app2, ".claude", "CLAUDE.md"), "utf-8")).toBe("# Standalone Claude\n");
+      expect(fs.readFileSync(path.join(app2, ".claude", "CLAUDE.md"), "utf-8")).toBe(
+        "# Standalone Claude\n",
+      );
       expect(fs.existsSync(path.join(app2, ".gemini"))).toBe(false);
       expect(fs.existsSync(path.join(app2, ".claude", "rules"))).toBe(false);
     });
@@ -1419,6 +1452,49 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       );
       expect(searchWithRadius.status).toBe(0);
       expect(searchWithRadius.stdout).toContain("targetMarker");
+
+      // Verify `aice search <pattern> <target> -c 2` succeeds (normalizing -c <digits> to -C)
+      const searchWithLowercaseC = runCli(
+        ["search", "targetMarker", "src/validator.ts", "-c", "2"],
+        wsDir,
+      );
+      expect(searchWithLowercaseC.status).toBe(0);
+      expect(searchWithLowercaseC.stdout).toContain("targetMarker");
+
+      // Verify normalizeCliContextFlag logic directly
+      expect(normalizeCliContextFlag(["node", "aice", "search", "pat", "src", "-c", "2"])).toEqual([
+        "node",
+        "aice",
+        "search",
+        "pat",
+        "src",
+        "-C",
+        "2",
+      ]);
+      expect(normalizeCliContextFlag(["node", "aice", "search", "pat", "src", "-c3"])).toEqual([
+        "node",
+        "aice",
+        "search",
+        "pat",
+        "src",
+        "-C",
+        "3",
+      ]);
+      expect(normalizeCliContextFlag(["node", "aice", "splice", "-c", "2"])).toEqual([
+        "node",
+        "aice",
+        "splice",
+        "-c",
+        "2",
+      ]);
+      expect(normalizeCliContextFlag(["node", "aice", "search", "--", "-c", "2"])).toEqual([
+        "node",
+        "aice",
+        "search",
+        "--",
+        "-c",
+        "2",
+      ]);
 
       // 3. `aice read` with `--files`, `--search`, `-C`, default numbered native, and `--dsl`
       const readFiles = runCli(["read", "--files"], wsDir);

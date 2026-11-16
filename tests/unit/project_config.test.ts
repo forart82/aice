@@ -1075,7 +1075,10 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(remaining).not.toContain("AICE:START");
 
       // Now test upsert: should replace all legacy blocks with a single clean directive
-      upsertMarkdownDirective(testMd, "<!-- AICE:START -->\nNew Consolidated Rules\n<!-- AICE:END -->");
+      upsertMarkdownDirective(
+        testMd,
+        "<!-- AICE:START -->\nNew Consolidated Rules\n<!-- AICE:END -->",
+      );
       const upserted = fs.readFileSync(testMd, "utf-8");
       expect(upserted).toContain("New Consolidated Rules");
       expect(upserted).toContain("## User Section 1\nImportant user notes here.");
@@ -1179,15 +1182,43 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       fs.mkdirSync(projDir, { recursive: true });
 
       // Seed all secondary and duplicate surfaces
-      fs.writeFileSync(path.join(projDir, "GEMINI.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(projDir, ".GEMINI.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(projDir, "CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(projDir, ".CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(
+        path.join(projDir, "GEMINI.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(projDir, ".GEMINI.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(projDir, "CODEX.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(projDir, ".CODEX.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
 
       fs.mkdirSync(path.join(projDir, ".codex"), { recursive: true });
-      fs.writeFileSync(path.join(projDir, ".codex", "AGENTS.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(projDir, ".codex", "CODEX.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
-      fs.writeFileSync(path.join(projDir, ".codex", "instructions.md"), "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n", "utf-8");
+      fs.writeFileSync(
+        path.join(projDir, ".codex", "AGENTS.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(projDir, ".codex", "CODEX.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(projDir, ".codex", "instructions.md"),
+        "<!-- AICE:START -->\nold\n<!-- AICE:END -->\n",
+        "utf-8",
+      );
 
       fs.mkdirSync(path.join(projDir, ".agents", "rules"), { recursive: true });
       fs.writeFileSync(path.join(projDir, ".agents", "rules", "aice.md"), "legacy", "utf-8");
@@ -1228,7 +1259,9 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(fs.existsSync(path.join(projDir, "AGENTS.md"))).toBe(false);
       // CLAUDE.md has user content so it must remain intact without AICE directive
       expect(fs.existsSync(path.join(projDir, "CLAUDE.md"))).toBe(true);
-      expect(fs.readFileSync(path.join(projDir, "CLAUDE.md"), "utf-8")).toBe("# Standalone Claude Rules\n");
+      expect(fs.readFileSync(path.join(projDir, "CLAUDE.md"), "utf-8")).toBe(
+        "# Standalone Claude Rules\n",
+      );
     });
   });
 });

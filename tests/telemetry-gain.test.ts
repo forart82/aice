@@ -877,4 +877,294 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(lastEv?.multiFiles).toContain("src/a.ts");
     expect(lastEv?.multiFiles).toContain("src/b.ts");
   });
+
+  it("de-inflates legacy <workspace-files> and directory outline baselines in hydrateTelemetryEvent and outlinePath", async () => {
+    // 1. <workspace-files> de-inflation:
+    // Legacy record with realisticNativeCl100k = 50,000, nativeCl100k = 50,000, aiceCl100k = 100
+    // Clamped to Math.min(50000, Math.round(100 * 1.35)) = 135
+    const legacyWorkspaceEv = hydrateTelemetryEvent({
+      timestamp: new Date().toISOString(),
+      projectRoot: projectADir,
+      projectName: "alpha-engine",
+      filePath: "<workspace-files>",
+      language: "Multi-File",
+      operation: "context",
+      surface: "cli",
+      agent: "user-cli",
+      nativeCl100k: 50_000,
+      aiceCl100k: 100,
+      realisticNativeCl100k: 50_000,
+      realisticSavedCl100k: 49_900,
+    });
+    expect(legacyWorkspaceEv?.realisticNativeCl100k).toBe(135);
+    expect(legacyWorkspaceEv?.realisticSavedCl100k).toBe(35);
+
+    // 2. <directory> outline de-inflation:
+    // Legacy record with realisticNativeCl100k = 80,000, nativeCl100k = 80,000, aiceCl100k = 200, multiFiles: 10
+    // Clamped to Math.min(80000, Math.max(200, 10 * 45)) = 450
+    const legacyOutlineEv = hydrateTelemetryEvent({
+      timestamp: new Date().toISOString(),
+      projectRoot: projectADir,
+      projectName: "alpha-engine",
+      filePath: "<directory>",
+      language: "Multi-File",
+      operation: "outline",
+      surface: "cli",
+      agent: "user-cli",
+      nativeCl100k: 80_000,
+      aiceCl100k: 200,
+      realisticNativeCl100k: 80_000,
+      realisticSavedCl100k: 79_800,
+      multiFiles: [
+        "f1.ts",
+        "f2.ts",
+        "f3.ts",
+        "f4.ts",
+        "f5.ts",
+        "f6.ts",
+        "f7.ts",
+        "f8.ts",
+        "f9.ts",
+        "f10.ts",
+      ],
+    });
+    expect(legacyOutlineEv?.realisticNativeCl100k).toBe(450);
+    expect(legacyOutlineEv?.realisticSavedCl100k).toBe(250);
+
+    // 3. Live directory outlinePath sets realisticNativeCl100k <= outlinedFileCount * 45
+    const dirForOutline = path.join(projectADir, "outlines-test");
+    fs.mkdirSync(dirForOutline, { recursive: true });
+    for (let i = 1; i <= 4; i++) {
+      fs.writeFileSync(
+        path.join(dirForOutline, `mod${i}.ts`),
+        `export function fn${i}(): number { return ${i}; }\n`,
+        "utf-8",
+      );
+    }
+    process.env.AICE_TELEMETRY_PATH = telemetryFile;
+    await outlinePath(dirForOutline, { projectRoot: projectADir });
+    const evs = readTelemetryEvents(telemetryFile);
+    const dirEv = evs.find((e) => e.filePath === "<directory>");
+    expect(dirEv).toBeDefined();
+    expect(dirEv?.realisticNativeCl100k).toBeDefined();
+    // 4 files * 45 = 180 max baseline
+    expect(dirEv!.realisticNativeCl100k!).toBeLessThanOrEqual(Math.max(dirEv!.aiceCl100k, 4 * 45));
+  });
+
+  it("distinguishes < 3s parallel slices from >= 3s sequential pagination turns and respects intervening writes", () => {
+    const file = "src/controller.ts";
+    const baseTs = 1_700_000_000_000;
+
+    const events = [
+      // Turn 1: Initial read at t = 0
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "const a = 1;\n",
+        aiceText: "const a = 1;\n",
+        telemetryPath: telemetryFile,
+      }),
+      // Parallel slice: same-file read at t = 1,000 ms (< 3_000 ms after prior read)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 1_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "const a = 1;\n",
+        aiceText: "const a = 1;\n",
+        telemetryPath: telemetryFile,
+      }),
+      // Sequential pagination turn: same-file read at t = 5,000 ms (4,000 ms >= 3_000 ms after prior read)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 5_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "const a = 1;\n",
+        aiceText: "const a = 1;\n",
+        telemetryPath: telemetryFile,
+      }),
+      // Intervening write: splice at t = 8_000 ms
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 8_000).toISOString(),
+        operation: "splice",
+        surface: "cli",
+        nativeText: "const a = 1;\n",
+        aiceText: "const a = 2;\n",
+        telemetryPath: telemetryFile,
+      }),
+      // Read after intervening write at t = 13_000 ms (intervening write occurred since last read at 5,000 ms)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 13_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "const a = 2;\n",
+        aiceText: "const a = 2;\n",
+        telemetryPath: telemetryFile,
+      }),
+      // Subsequent read without intervening write at t = 18_000 ms (5,000 ms >= 3_000 ms after read at 13,000 ms)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, file),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 18_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "const a = 2;\n",
+        aiceText: "const a = 2;\n",
+        telemetryPath: telemetryFile,
+      }),
+    ];
+
+    fs.writeFileSync(
+      telemetryFile,
+      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf-8",
+    );
+
+    const report = buildGainReport({ telemetryPath: telemetryFile, project: "alpha-engine" });
+    expect(report.parallelSliceCalls).toBe(1);
+    expect(report.sequentialPaginationTurns).toBe(2);
+    expect(report.paginationReplayTaxCl100k).toBe(2 * 8_500);
+  });
+
+  it("computes systemic wrapper taxes, rule replay taxes, retry replay taxes, and reports endToEndVerdict", () => {
+    const baseTs = 1_700_000_100_000;
+
+    // Subtest A: Clean 1-turn edit -> TOKEN-REDUCING
+    const cleanTeleFile = path.join(tmpDir, "clean-gains.jsonl");
+    const cleanEvents = [
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, "src/large.ts"),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs).toISOString(),
+        operation: "splice",
+        surface: "mcp", // MCP wrapper tax = 45
+        nativeText: "export const big = 1;\n",
+        aiceText: "export const big = 1;\n",
+        nativeCl100k: 20_000,
+        nativeO200k: 20_000,
+        aiceCl100k: 100,
+        aiceO200k: 100,
+        realisticNativeCl100k: 20_000,
+        realisticSavedCl100k: 19_900,
+        telemetryPath: cleanTeleFile,
+      }),
+    ];
+    fs.writeFileSync(
+      cleanTeleFile,
+      cleanEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf-8",
+    );
+    const cleanReport = buildGainReport({ telemetryPath: cleanTeleFile, project: "alpha-engine" });
+    expect(cleanReport.wrapperTaxCl100k).toBe(45);
+    expect(cleanReport.estimatedTurns).toBe(1);
+    expect(cleanReport.sequentialPaginationTurns).toBe(0);
+    expect(cleanReport.failedRetryTurns).toBe(0);
+    expect(cleanReport.netEndToEndSavedCl100k).toBeGreaterThan(0);
+    expect(cleanReport.endToEndVerdict).toBe("TOKEN-REDUCING");
+
+    const cleanDashboard = formatGlobalGainDashboard(cleanReport);
+    expect(cleanDashboard).toContain("End-to-End Verdict:               TOKEN-REDUCING");
+    if (cleanReport.projectDetail) {
+      const cleanDetail = formatProjectGainDetail(cleanReport.projectDetail);
+      expect(cleanDetail).toContain("End-to-End Verdict:               TOKEN-REDUCING");
+    }
+
+    // Subtest B: Sequential slice loops & failed retry turns -> TOKEN-CONSUMING
+    const loopTeleFile = path.join(tmpDir, "loop-gains.jsonl");
+    const loopErrorsFile = `${loopTeleFile}.errors.jsonl`;
+    const loopEvents = [
+      // Turn 1 at t = 0 (CLI wrapper tax = 70)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, "src/paginate.ts"),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "export const a = 1;\n",
+        aiceText: "export const a = 1;\n",
+        telemetryPath: loopTeleFile,
+      }),
+      // Turn 2 at t = 4,000 ms (CLI wrapper tax = 70, sequential pagination turn = 1)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, "src/paginate.ts"),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 4_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "export const a = 1;\n",
+        aiceText: "export const a = 1;\n",
+        telemetryPath: loopTeleFile,
+      }),
+      // Turn 3 at t = 8,000 ms (CLI wrapper tax = 70, sequential pagination turn = 2)
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, "src/paginate.ts"),
+        projectRoot: projectADir,
+        timestamp: new Date(baseTs + 8_000).toISOString(),
+        operation: "context",
+        surface: "cli",
+        nativeText: "export const a = 1;\n",
+        aiceText: "export const a = 1;\n",
+        telemetryPath: loopTeleFile,
+      }),
+      // Failed retry CLI event
+      computeTelemetryEvent({
+        targetPath: path.join(projectADir, "src/paginate.ts"),
+        projectRoot: projectADir,
+        filePath: "<cli-error>",
+        timestamp: new Date(baseTs + 12_000).toISOString(),
+        operation: "splice",
+        surface: "cli",
+        nativeText: "",
+        aiceText: "CLI error",
+        telemetryPath: loopTeleFile,
+      }),
+    ];
+    fs.writeFileSync(
+      loopTeleFile,
+      loopEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      "utf-8",
+    );
+
+    // Non-benign error in errors.jsonl
+    fs.writeFileSync(
+      loopErrorsFile,
+      JSON.stringify({
+        timestamp: new Date(baseTs + 13_000).toISOString(),
+        projectRoot: projectADir,
+        projectName: "alpha-engine",
+        filePath: "src/paginate.ts",
+        operation: "splice",
+        surface: "cli",
+        agent: "user-cli",
+        errorMessage: "Syntax error: Unexpected token",
+      }) + "\n",
+      "utf-8",
+    );
+
+    const loopReport = buildGainReport({ telemetryPath: loopTeleFile, project: "alpha-engine" });
+    expect(loopReport.wrapperTaxCl100k).toBe(4 * 70);
+    expect(loopReport.sequentialPaginationTurns).toBe(2);
+    expect(loopReport.paginationReplayTaxCl100k).toBe(2 * 8_500);
+    expect(loopReport.failedRetryTurns).toBe(2); // 1 <cli-error> + 1 errors.jsonl
+    expect(loopReport.retryReplayTaxCl100k).toBe(2 * 8_500);
+    expect(loopReport.netEndToEndSavedCl100k).toBeLessThan(0);
+    expect(loopReport.endToEndVerdict).toBe("TOKEN-CONSUMING");
+
+    const loopDashboard = formatGlobalGainDashboard(loopReport);
+    expect(loopDashboard).toContain("End-to-End Verdict:               TOKEN-CONSUMING");
+    if (loopReport.projectDetail) {
+      const loopDetail = formatProjectGainDetail(loopReport.projectDetail);
+      expect(loopDetail).toContain("End-to-End Verdict:               TOKEN-CONSUMING");
+    }
+  });
 });

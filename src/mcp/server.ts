@@ -417,7 +417,11 @@ export function buildNullSpliceArrayItemError(targetFileHint?: string): Error {
   );
 }
 
-export function parseJsonArrayIfString(val: unknown, argName: string, toolName = "aice_splice"): unknown {
+export function parseJsonArrayIfString(
+  val: unknown,
+  argName: string,
+  toolName = "aice_splice",
+): unknown {
   if (typeof val === "string" && val.trim().startsWith("[")) {
     try {
       return JSON.parse(val);
@@ -725,7 +729,10 @@ export class AiceMcpServer {
           fs.existsSync(path.join(candidateProjectRoot, "aice.config.json"))
         ) {
           const candConfig = loadProjectConfig(candidateProjectRoot);
-          if (isProjectAiceEnabled(candConfig) === true && !this.isBlockedSystemPath(candidateProjectRoot)) {
+          if (
+            isProjectAiceEnabled(candConfig) === true &&
+            !this.isBlockedSystemPath(candidateProjectRoot)
+          ) {
             allowedReadSet.add(candidateProjectRoot);
             if (lexicalProjectRoot && !this.isBlockedSystemPath(lexicalProjectRoot)) {
               allowedReadSet.add(lexicalProjectRoot);
@@ -1766,9 +1773,7 @@ export class AiceMcpServer {
         const rawEditsCollection = parseJsonArrayIfString(args.edits, "edits");
         if (
           Array.isArray(rawEditsCollection) &&
-          rawEditsCollection.some(
-            (ed) => !ed || typeof ed !== "object" || Array.isArray(ed),
-          )
+          rawEditsCollection.some((ed) => !ed || typeof ed !== "object" || Array.isArray(ed))
         ) {
           throw buildNullSpliceArrayItemError(rawTargetFile);
         }

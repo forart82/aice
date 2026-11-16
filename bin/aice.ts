@@ -6,6 +6,12 @@
  * AICE CLI: On-the-Fly AI Context Engine & Multi-File Idiom Tool.
  */
 
+import * as nodeModule from "node:module";
+
+try {
+  (nodeModule as { enableCompileCache?: () => void }).enableCompileCache?.();
+} catch {}
+
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as readline from "node:readline";
@@ -131,12 +137,65 @@ program
     },
   });
 
+export function normalizeCliContextFlag(
+  rawArgv: readonly string[],
+  parseOpts?: { from: "node" | "electron" | "user" },
+): string[] {
+  const prefixCount = parseOpts?.from === "user" ? 0 : 2;
+  const prefix = rawArgv.slice(0, prefixCount);
+  const args = rawArgv.slice(prefixCount);
+
+  let subcmd: string | undefined;
+  for (const arg of args) {
+    if (arg === "--") break;
+    if (!arg.startsWith("-")) {
+      subcmd = arg.toLowerCase();
+      break;
+    }
+  }
+
+  const normalizable = new Set(["search", "grep", "read", "context", "ctx"]);
+  if (!subcmd || !normalizable.has(subcmd)) {
+    return Array.from(rawArgv);
+  }
+
+  const normalized: string[] = [];
+  let i = 0;
+  let pastDoubleDash = false;
+  while (i < args.length) {
+    const token = args[i];
+    if (token === "--") {
+      pastDoubleDash = true;
+      normalized.push(token);
+      i++;
+      continue;
+    }
+    if (!pastDoubleDash) {
+      if (token === "-c" && i + 1 < args.length && /^\d+$/.test(args[i + 1])) {
+        normalized.push("-C");
+        i++;
+        continue;
+      }
+      const match = token.match(/^-c(\d+)$/);
+      if (match) {
+        normalized.push("-C", match[1]);
+        i++;
+        continue;
+      }
+    }
+    normalized.push(token);
+    i++;
+  }
+
+  return [...prefix, ...normalized];
+}
+
 const origParseAsync = program.parseAsync.bind(program);
 program.parseAsync = async (
   argv?: readonly string[],
   parseOpts?: { from: "node" | "electron" | "user" },
 ) => {
-  const effectiveArgv = argv ? Array.from(argv) : process.argv;
+  const effectiveArgv = normalizeCliContextFlag(argv ? Array.from(argv) : process.argv, parseOpts);
   activeCliArgs = parseOpts?.from === "user" ? effectiveArgv.slice() : effectiveArgv.slice(2);
   cliFailureRecordedForInvocation = false;
   for (const sub of program.commands) {
@@ -158,7 +217,7 @@ program.parseAsync = async (
     }
   }
   try {
-    return await origParseAsync(argv, parseOpts);
+    return await origParseAsync(effectiveArgv, parseOpts);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     recordCliFailureTelemetry(msg);
@@ -1702,7 +1761,11 @@ Examples:
               compile: options.compile,
               idioms: batchEffectiveIdioms,
               inlineIdioms: combinedInlineIdioms.length > 0 ? combinedInlineIdioms : undefined,
-              ...(options.overwrite !== undefined ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {}),
+              ...(options.overwrite !== undefined
+                ? { overwrite: options.overwrite }
+                : options.force
+                  ? { overwrite: true }
+                  : {}),
               force: options.force,
               preserveDocs: options.preserveDocs,
             });
@@ -2144,7 +2207,11 @@ Examples:
           insertBefore: options.insertBefore,
           edits: parsedEdits,
           create: options.create,
-          ...(options.overwrite !== undefined ? { overwrite: options.overwrite } : options.force ? { overwrite: true } : {}),
+          ...(options.overwrite !== undefined
+            ? { overwrite: options.overwrite }
+            : options.force
+              ? { overwrite: true }
+              : {}),
           force: options.force,
           inlineIdioms: inlineIdiomList,
           idioms: effectiveSpliceIdioms,
@@ -2589,14 +2656,22 @@ Examples:
           options.context !== undefined && Number.isFinite(Number(options.context))
             ? Math.max(0, Number(options.context))
             : undefined;
+        const invokedSubcmd =
+          activeCliArgs.find((arg) => !arg.startsWith("-"))?.toLowerCase() ?? "read";
+        const isMultiTargetContextAlias =
+          (invokedSubcmd === "context" || invokedSubcmd === "ctx") &&
+          (effectiveTargets?.length ?? 0) > 1;
+        const effectiveCliIncludeDeps =
+          options.deps ?? (isMultiTargetContextAlias ? true : undefined);
+        const effectiveCliIncludeCallers =
+          options.callers ?? (isMultiTargetContextAlias ? true : undefined);
 
         if (!options.json && options.maxTokens === undefined && !unboundedCli) {
           const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
           if (budgetLease.exhausted) {
             if (budgetLease.emitDeferralNotice) {
               const rerunRaw = `aice read ${effectiveTargets && effectiveTargets.length > 0 ? effectiveTargets.join(" ") : "."}`;
-              const rerunCmd =
-                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const rerunCmd = rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
               const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
               console.log(line);
               commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);
@@ -2617,8 +2692,8 @@ Examples:
             compact: options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
-            includeDeps: options.deps,
-            includeCallers: options.callers,
+            includeDeps: effectiveCliIncludeDeps,
+            includeCallers: effectiveCliIncludeCallers,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             maxBytes: budgetLease.maxBytes,
             unboundedCli,
@@ -2643,8 +2718,8 @@ Examples:
             compact: options.compact,
             includeTypes: options.types !== false,
             idioms: options.idioms,
-            includeDeps: options.deps,
-            includeCallers: options.callers,
+            includeDeps: effectiveCliIncludeDeps,
+            includeCallers: effectiveCliIncludeCallers,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             unboundedCli,
             json: !!options.json,
@@ -2707,8 +2782,7 @@ program
           if (budgetLease.exhausted) {
             if (budgetLease.emitDeferralNotice) {
               const rerunRaw = `aice search "${pattern}" ${effectiveTargets.join(" ")}`.trim();
-              const rerunCmd =
-                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const rerunCmd = rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
               const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
               console.log(line);
               commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);
@@ -2798,9 +2872,9 @@ program
           const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
           if (budgetLease.exhausted) {
             if (budgetLease.emitDeferralNotice) {
-              const rerunRaw = `aice find${filePattern ? ` "${filePattern}"` : ""} ${effectiveTargets.join(" ")}`.trim();
-              const rerunCmd =
-                rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
+              const rerunRaw =
+                `aice find${filePattern ? ` "${filePattern}"` : ""} ${effectiveTargets.join(" ")}`.trim();
+              const rerunCmd = rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
               const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
               console.log(line);
               commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(line, "utf-8") + 1);

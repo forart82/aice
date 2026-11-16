@@ -649,4 +649,84 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     const formatted = formatAnalyzeReport(report);
     expect(formatted).toContain("0 (no multi-turn line-hunting loops)");
   });
+
+  it("7. tracks endToEndEconomics and renders the verdict in formatAnalyzeReport", () => {
+    const projRoot = path.join(tmpDir, "e2e_game");
+    fs.mkdirSync(path.join(projRoot, "src"), { recursive: true });
+    saveProjectConfig(projRoot, { enabled: true });
+    fs.writeFileSync(
+      path.join(projRoot, "src/player.ts"),
+      "export class Player { score: number = 0; }\n",
+      "utf-8",
+    );
+
+    recordTelemetryEvent({
+      targetPath: path.join(projRoot, "src/player.ts"),
+      projectRoot: projRoot,
+      operation: "create",
+      surface: "cli",
+      agent: "agy",
+      nativeText: "export class Player { score: number = 0; }\n".repeat(200),
+      aiceText: "pub class Player: score: int = 0\n",
+      telemetryPath: ledgerPath,
+    });
+
+    const convLogDir = path.join(
+      transcriptsDir,
+      "77777777-8888-9999-aaaa-bbbbbbbbbbbb",
+      ".system_generated",
+      "logs",
+    );
+    fs.mkdirSync(convLogDir, { recursive: true });
+    const steps = [
+      {
+        step_index: 0,
+        type: "USER_INPUT",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:00Z",
+        content: `Command Working Directory: ${projRoot}\nBuild Player`,
+      },
+      {
+        step_index: 1,
+        type: "PLANNER_RESPONSE",
+        status: "DONE",
+        created_at: "2026-11-09T10:00:10Z",
+        input_tokens: 3000,
+        cache_read_tokens: 15000,
+        output_tokens: 500,
+        tool_calls: [
+          {
+            name: "run_command",
+            args: { CommandLine: "aice create src/player.ts" },
+          },
+        ],
+      },
+    ];
+    fs.writeFileSync(
+      path.join(convLogDir, "transcript.jsonl"),
+      `${steps.map((s) => JSON.stringify(s)).join("\n")}\n`,
+      "utf-8",
+    );
+
+    const report = analyzeProject({
+      project: projRoot,
+      telemetryPath: ledgerPath,
+      transcriptsDir,
+    });
+
+    expect(report.endToEndEconomics).toBeDefined();
+    expect(report.endToEndEconomics.realisticPayloadSavedTokens).toBeGreaterThan(0);
+    expect(report.endToEndEconomics.wrapperTaxTokens).toBe(70);
+    expect(report.endToEndEconomics.ruleReplayTaxTokens).toBeGreaterThan(0);
+    expect(report.endToEndEconomics.sequentialPaginationTurns).toBe(0);
+    expect(report.endToEndEconomics.paginationReplayTaxTokens).toBe(0);
+    expect(report.endToEndEconomics.failedRetryTurns).toBe(0);
+    expect(report.endToEndEconomics.retryReplayTaxTokens).toBe(0);
+    expect(report.endToEndEconomics.netEndToEndTokens).toBeGreaterThan(0);
+    expect(report.endToEndEconomics.verdict).toBe("TOKEN-REDUCING");
+
+    const text = formatAnalyzeReport(report);
+    expect(text).toContain("5. END-TO-END TOKEN ECONOMICS & VERDICT");
+    expect(text).toContain("End-to-End Verdict      : TOKEN-REDUCING");
+  });
 });

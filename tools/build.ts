@@ -32,14 +32,18 @@ await esbuild.build({
   target: "node18",
   outfile: outFile,
   banner: {
-    js: `import { createRequire as __createRequire } from "node:module";
+    js: `import * as __nodeModule from "node:module";
 import { fileURLToPath as __fileURLToPath } from "node:url";
 import { dirname as __pathDirname } from "node:path";
-const require = __createRequire(import.meta.url);
+try { __nodeModule.enableCompileCache?.(); } catch {}
+const require = __nodeModule.createRequire(import.meta.url);
 const __filename = __fileURLToPath(import.meta.url);
 const __dirname = __pathDirname(__filename);`,
   },
-  minify: false,
+  minifyWhitespace: true,
+  minifySyntax: true,
+  minifyIdentifiers: false,
+  legalComments: "none",
   sourcemap: false,
 });
 

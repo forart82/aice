@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AiceMcpServer } from "../../src/mcp/server.js";
 import { readTelemetryEvents } from "../../src/telemetry/index.js";
 import {
   isHybridOrNativeSource,
@@ -11,7 +12,6 @@ import {
   unmaskLexicalTokens,
 } from "../../src/tools/preprocessor.js";
 import { parseMultiBlockSpliceStream, splice, spliceBatch } from "../../src/tools/splice.js";
-import { AiceMcpServer } from "../../src/mcp/server.js";
 
 const CLI_TS = path.resolve(process.cwd(), "bin/aice.ts");
 const TSX_BIN = path.resolve(process.cwd(), "node_modules/.bin/tsx");
@@ -1061,13 +1061,20 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
       fs.mkdirSync(srcDir, { recursive: true });
 
       // 1. Create a 50-line existing file
-      const radarLines = Array.from({ length: 50 }, (_, i) => `export const radarParam${i + 1} = ${i + 1};`);
+      const radarLines = Array.from(
+        { length: 50 },
+        (_, i) => `export const radarParam${i + 1} = ${i + 1};`,
+      );
       const existingRadarPath = path.join(srcDir, "existing_radar.ts");
       fs.writeFileSync(existingRadarPath, `${radarLines.join("\n")}\n`, "utf-8");
 
       // 2. Create a surgical edit target
       const editTargetPath = path.join(srcDir, "edit_target.ts");
-      fs.writeFileSync(editTargetPath, "export const targetVal = 10;\nexport const secondLine = 20;\n", "utf-8");
+      fs.writeFileSync(
+        editTargetPath,
+        "export const targetVal = 10;\nexport const secondLine = 20;\n",
+        "utf-8",
+      );
 
       // Multi-target stream: new file, surgical edit, full rewrite of >25-line existing file
       const multiStream = [
@@ -1105,24 +1112,44 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
 
       // Empty truncation without :overwrite / --overwrite MUST fail
       const emptyTruncationStream = "=== src/existing_radar.ts ===\n";
-      const truncateRes = runCli(["splice", "--no-idioms", "--stdin"], tmpDir, emptyTruncationStream);
+      const truncateRes = runCli(
+        ["splice", "--no-idioms", "--stdin"],
+        tmpDir,
+        emptyTruncationStream,
+      );
       expect(truncateRes.status).not.toBe(0);
-      expect(truncateRes.stderr + truncateRes.stdout).toMatch(/(?:Empty or malformed splice block|Refusing to overwrite.*empty content)/i);
+      expect(truncateRes.stderr + truncateRes.stdout).toMatch(
+        /(?:Empty or malformed splice block|Refusing to overwrite.*empty content)/i,
+      );
 
       // Truncation WITH :overwrite succeeds
       const overwriteTruncateStream = "=== src/existing_radar.ts:overwrite ===\n";
-      const overwriteTruncateRes = runCli(["splice", "--no-idioms", "--stdin"], tmpDir, overwriteTruncateStream);
+      const overwriteTruncateRes = runCli(
+        ["splice", "--no-idioms", "--stdin"],
+        tmpDir,
+        overwriteTruncateStream,
+      );
       expect(overwriteTruncateRes.status).toBe(0);
       expect(fs.readFileSync(existingRadarPath, "utf-8")).toBe("");
 
       // aice create on >25-line file MUST fail without --overwrite
       fs.writeFileSync(existingRadarPath, `${radarLines.join("\n")}\n`, "utf-8");
-      const createRes = runCli(["create", "src/existing_radar.ts", "--stdin"], tmpDir, "export const blocked = true;\n");
+      const createRes = runCli(
+        ["create", "src/existing_radar.ts", "--stdin"],
+        tmpDir,
+        "export const blocked = true;\n",
+      );
       expect(createRes.status).not.toBe(0);
-      expect(createRes.stderr + createRes.stdout).toMatch(/already exists.*Do NOT rewrite existing files with 'aice create'/i);
+      expect(createRes.stderr + createRes.stdout).toMatch(
+        /already exists.*Do NOT rewrite existing files with 'aice create'/i,
+      );
 
       // aice create with --overwrite succeeds
-      const createOverwriteRes = runCli(["create", "src/existing_radar.ts", "--overwrite", "--stdin"], tmpDir, "export const allowed = true;\n");
+      const createOverwriteRes = runCli(
+        ["create", "src/existing_radar.ts", "--overwrite", "--stdin"],
+        tmpDir,
+        "export const allowed = true;\n",
+      );
       expect(createOverwriteRes.status).toBe(0);
       expect(fs.readFileSync(existingRadarPath, "utf-8")).toContain("export const allowed = true;");
     });
@@ -1192,12 +1219,7 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
       const case4Path = path.join(srcDir, "case4_delete.ts");
       fs.writeFileSync(
         case4Path,
-        [
-          "let a = 1;",
-          "let b = 2;",
-          "let c = 3;",
-          "",
-        ].join("\n"),
+        ["let a = 1;", "let b = 2;", "let c = 3;", ""].join("\n"),
         "utf-8",
       );
 
@@ -1352,6 +1374,67 @@ describe("Unified Write Engine (splice & spliceBatch subsuming createFile & crea
         expect(msg).toContain("--delete");
         expect(msg).toContain("=== src/world/spatial_math.aipl:L48-L51 --delete ===");
       }
+    });
+
+    it("attaches 'Closest disk context [L...] (±5 numbered lines)' on Hunk search block not found without breaking symbol-hunk error assertions", async () => {
+      const targetTs = path.join(tmpDir, "src", "closest_disk_ctx.ts");
+      fs.mkdirSync(path.dirname(targetTs), { recursive: true });
+      const fileLines = [
+        "export function calculateInvoice(qty: number, unitPrice: number): number {",
+        "  const subtotal = qty * unitPrice;",
+        "  if (subtotal <= 0) {",
+        "    return 0;",
+        "  }",
+        "  const taxRate = 0.08;",
+        "  const taxAmount = subtotal * taxRate;",
+        "  const grandTotal = subtotal + taxAmount;",
+        "  return grandTotal;",
+        "}",
+      ];
+      fs.writeFileSync(targetTs, fileLines.join("\n") + "\n", "utf-8");
+
+      // 1. File-level hunk with slight mismatch
+      const fileHunkSnippet = [
+        "<<<",
+        "  const taxRate = 0.09;",
+        "  const taxAmount = subtotal * taxRate;",
+        "===",
+        "  const taxRate = 0.10;",
+        "  const taxAmount = subtotal * taxRate;",
+        ">>>",
+      ].join("\n");
+
+      await expect(
+        splice(targetTs, { code: fileHunkSnippet, projectRoot: tmpDir }),
+      ).rejects.toThrowError(/Hunk search block not found in/);
+
+      try {
+        await splice(targetTs, { code: fileHunkSnippet, projectRoot: tmpDir });
+      } catch (err: unknown) {
+        expect(err instanceof Error).toBe(true);
+        const msg = (err as Error).message;
+        expect(msg).toContain("Hunk search block not found in");
+        expect(msg).toContain("Closest disk context [L");
+        expect(msg).toContain("(retry splice directly without re-reading)");
+        expect(msg).toMatch(/\d+│\s+const taxAmount = subtotal \* taxRate;/);
+      }
+
+      // 2. Symbol-level hunk with slight mismatch preserves symbol label in error message
+      const symHunkSnippet = [
+        "<<<",
+        "  const subtotal = qty * unitPrice * 2;",
+        "===",
+        "  const subtotal = qty * unitPrice * 3;",
+        ">>>",
+      ].join("\n");
+
+      await expect(
+        splice(targetTs, {
+          symbol: "calculateInvoice",
+          code: symHunkSnippet,
+          projectRoot: tmpDir,
+        }),
+      ).rejects.toThrowError(/within 'calculateInvoice'/);
     });
   });
 });

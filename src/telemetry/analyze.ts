@@ -16,6 +16,8 @@ import { detectLanguageName, estimateTokens } from "../tokenomics/index.js";
 import {
   buildGainReport,
   detectCallerAgent,
+  type EndToEndVerdict,
+  getRuleOverheadBudgetCl100k,
   isEphemeralWorkspace,
   isTelemetrySuppressed,
   isTestEnvWithoutExplicitTelemetry,
@@ -168,7 +170,23 @@ export interface ProjectAnalyzeReport {
     }>;
   };
   sessions: AnalyzedSessionSummary[];
+  endToEndEconomics: EndToEndEconomicsReport;
 }
+
+export interface EndToEndEconomicsReport {
+  realisticPayloadSavedTokens: number;
+  wrapperTaxTokens: number;
+  ruleReplayTaxTokens: number;
+  sequentialPaginationTurns: number;
+  paginationReplayTaxTokens: number;
+  failedRetryTurns: number;
+  retryReplayTaxTokens: number;
+  totalSystemicTaxTokens: number;
+  netEndToEndTokens: number;
+  verdict: EndToEndVerdict;
+}
+
+export type ProjectAnalysisReport = ProjectAnalyzeReport;
 
 export function resolveTelemetryErrorsPath(explicitTelemetryPath?: string): string {
   if (process.env.AICE_TELEMETRY_ERRORS_PATH) {
@@ -1412,6 +1430,64 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
     totalTurns > 0 ? Math.round((inputTokensUncached + cacheReadTokens) / totalTurns) : 0;
   const contextReplayTokenTax = extraReadTurns * avgSessionContextTokens;
 
+  const turnContextSize = avgSessionContextTokens > 0 ? avgSessionContextTokens : 8_500;
+  const realisticPayloadSavedTokens = hasLedgerCalls
+    ? (detail?.summary.realisticSavedCl100k ??
+      gainReport.totalRealisticSavedCl100k ??
+      detail?.summary.savedCl100k ??
+      0)
+    : fallbackSavedCl100k;
+
+  let wrapperTaxTokens = detail?.summary.wrapperTaxCl100k ?? gainReport.wrapperTaxCl100k ?? 0;
+  if (wrapperTaxTokens === 0 && (aiceOpsCount > 0 || totalToolCalls > 0)) {
+    wrapperTaxTokens = aiceOpsCount * 70;
+  }
+
+  const effectiveTurnCount =
+    totalTurns > 0
+      ? totalTurns
+      : (detail?.summary.estimatedTurns ?? gainReport.estimatedTurns ?? 0);
+  const ruleBudget = getRuleOverheadBudgetCl100k();
+  const ruleReplayTaxTokens =
+    effectiveTurnCount === 0
+      ? 0
+      : ruleBudget + Math.round(ruleBudget * Math.max(0, effectiveTurnCount - 1) * 0.15);
+
+  const sequentialPaginationTurns =
+    extraReadTurns > 0
+      ? extraReadTurns
+      : (detail?.summary.sequentialPaginationTurns ?? gainReport.sequentialPaginationTurns ?? 0);
+  const paginationReplayTaxTokens = sequentialPaginationTurns * turnContextSize;
+
+  const failedRetryTurns = Math.max(
+    detail?.summary.failedRetryTurns ?? gainReport.failedRetryTurns ?? 0,
+    telemetryErrors.length + transcriptErrors.length,
+  );
+  const retryReplayTaxTokens = failedRetryTurns * turnContextSize;
+
+  const totalSystemicTaxTokens =
+    wrapperTaxTokens + ruleReplayTaxTokens + paginationReplayTaxTokens + retryReplayTaxTokens;
+  const netEndToEndTokens = realisticPayloadSavedTokens - totalSystemicTaxTokens;
+  const verdict: EndToEndVerdict =
+    netEndToEndTokens > 0
+      ? "TOKEN-REDUCING"
+      : netEndToEndTokens < 0
+        ? "TOKEN-CONSUMING"
+        : "NEUTRAL";
+
+  const endToEndEconomics: EndToEndEconomicsReport = {
+    realisticPayloadSavedTokens,
+    wrapperTaxTokens,
+    ruleReplayTaxTokens,
+    sequentialPaginationTurns,
+    paginationReplayTaxTokens,
+    failedRetryTurns,
+    retryReplayTaxTokens,
+    totalSystemicTaxTokens,
+    netEndToEndTokens,
+    verdict,
+  };
+
   return {
     capturedAt: new Date().toISOString(),
     projectRoot,
@@ -1481,6 +1557,7 @@ export function analyzeProject(options: AnalyzeProjectOptions = {}): ProjectAnal
       transcriptErrors,
     },
     sessions,
+    endToEndEconomics,
   };
 }
 
@@ -1593,6 +1670,31 @@ export function formatAnalyzeReport(report: ProjectAnalyzeReport): string {
       );
     }
   }
+
+  lines.push("");
+  lines.push("5. END-TO-END TOKEN ECONOMICS & VERDICT");
+  lines.push(subSep);
+  const e2e = report.endToEndEconomics;
+  lines.push(
+    `  Realistic Payload Saved : ${e2e.realisticPayloadSavedTokens >= 0 ? `+${e2e.realisticPayloadSavedTokens.toLocaleString("en-US")}` : e2e.realisticPayloadSavedTokens.toLocaleString("en-US")} tokens`,
+  );
+  lines.push(`  Systemic Wrapper Tax    : -${e2e.wrapperTaxTokens.toLocaleString("en-US")} tokens`);
+  lines.push(
+    `  Rule Replay Tax         : -${e2e.ruleReplayTaxTokens.toLocaleString("en-US")} tokens`,
+  );
+  lines.push(
+    `  Pagination Replay Tax   : -${e2e.paginationReplayTaxTokens.toLocaleString("en-US")} tokens (${e2e.sequentialPaginationTurns} turn(s))`,
+  );
+  lines.push(
+    `  Retry Replay Tax        : -${e2e.retryReplayTaxTokens.toLocaleString("en-US")} tokens (${e2e.failedRetryTurns} turn(s))`,
+  );
+  lines.push(
+    `  Total Systemic Taxes    : -${e2e.totalSystemicTaxTokens.toLocaleString("en-US")} tokens`,
+  );
+  lines.push(
+    `  Net End-to-End Tokens   : ${e2e.netEndToEndTokens >= 0 ? `+${e2e.netEndToEndTokens.toLocaleString("en-US")}` : e2e.netEndToEndTokens.toLocaleString("en-US")} tokens`,
+  );
+  lines.push(`  End-to-End Verdict      : ${e2e.verdict}`);
   lines.push(sep);
   return lines.join("\n");
 }

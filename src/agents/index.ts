@@ -741,9 +741,7 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
         removeMarkdownDirective(path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"), true),
       );
     } else {
-      runSafe("agy", () =>
-        removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"), true),
-      );
+      runSafe("agy", () => removeMarkdownDirective(path.join(home, ".gemini", "GEMINI.md"), true));
       runSafe("agy", () =>
         removeMarkdownDirective(path.join(home, ".gemini", "config", "GEMINI.md"), true),
       );
@@ -768,16 +766,10 @@ export function setupAgents(options: AgentSetupOptions = {}): AgentActionResult 
       if (fs.existsSync(codexInstr)) {
         runSafe("codex", () => upsertMarkdownDirective(codexInstr));
       }
-      runSafe("codex", () =>
-        removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true),
-      );
+      runSafe("codex", () => removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true));
     } else {
-      runSafe("codex", () =>
-        removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"), true),
-      );
-      runSafe("codex", () =>
-        removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true),
-      );
+      runSafe("codex", () => removeMarkdownDirective(path.join(home, ".codex", "AGENTS.md"), true));
+      runSafe("codex", () => removeMarkdownDirective(path.join(home, ".codex", "CODEX.md"), true));
       runSafe("codex", () =>
         removeMarkdownDirective(path.join(home, ".codex", "instructions.md"), true),
       );

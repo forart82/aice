@@ -119,6 +119,8 @@ export interface LanguageBucket {
   savedO200k: number;
 }
 
+export type EndToEndVerdict = "TOKEN-REDUCING" | "TOKEN-CONSUMING" | "NEUTRAL";
+
 export interface ProjectGainSummary {
   projectRoot: string;
   projectName: string;
@@ -138,6 +140,20 @@ export interface ProjectGainSummary {
   aiceO200k: number;
   savedO200k: number;
   o200kSavingsPct: number;
+  realisticNativeCl100k?: number;
+  realisticSavedCl100k?: number;
+  wrapperTaxCl100k: number;
+  parallelSliceCalls: number;
+  sequentialPaginationTurns: number;
+  failedRetryTurns: number;
+  estimatedTurns: number;
+  grossRuleReplayCl100k: number;
+  ruleReplayTaxCl100k: number;
+  paginationReplayTaxCl100k: number;
+  retryReplayTaxCl100k: number;
+  totalSystemicTaxCl100k: number;
+  netEndToEndSavedCl100k: number;
+  endToEndVerdict: EndToEndVerdict;
 }
 
 export interface FileGainBucket {
@@ -191,6 +207,20 @@ export interface ProjectDetailReport {
     netAfterRuleBudgetCl100k: number;
     ruleBreakEvenMultiple: number;
     ruleBreakEvenReached: boolean;
+    realisticNativeCl100k?: number;
+    realisticSavedCl100k?: number;
+    wrapperTaxCl100k?: number;
+    parallelSliceCalls?: number;
+    sequentialPaginationTurns?: number;
+    failedRetryTurns?: number;
+    estimatedTurns?: number;
+    grossRuleReplayCl100k?: number;
+    ruleReplayTaxCl100k?: number;
+    paginationReplayTaxCl100k?: number;
+    retryReplayTaxCl100k?: number;
+    totalSystemicTaxCl100k?: number;
+    netEndToEndSavedCl100k?: number;
+    endToEndVerdict?: EndToEndVerdict;
   };
   byOperation: OperationBucket[];
   topFiles: FileGainBucket[];
@@ -230,6 +260,18 @@ export interface GainReport {
   totalRealisticSavedCl100k?: number;
   realisticSavedCl100kPct?: number;
   totalPreservedTriviaTokens?: number;
+  wrapperTaxCl100k: number;
+  parallelSliceCalls: number;
+  sequentialPaginationTurns: number;
+  failedRetryTurns: number;
+  estimatedTurns: number;
+  grossRuleReplayCl100k: number;
+  ruleReplayTaxCl100k: number;
+  paginationReplayTaxCl100k: number;
+  retryReplayTaxCl100k: number;
+  totalSystemicTaxCl100k: number;
+  netEndToEndSavedCl100k: number;
+  endToEndVerdict: EndToEndVerdict;
 }
 
 export interface CompactTelemetryResult {
@@ -641,7 +683,7 @@ export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
         ? obj.contentHash
         : computeContentHash(projectRoot, filePath, operation, nativeChars, aiceChars);
 
-  const realisticNativeCl100k =
+  let realisticNativeCl100k =
     typeof obj.rn === "number"
       ? obj.rn
       : typeof obj.realisticNativeCl100k === "number"
@@ -649,7 +691,7 @@ export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
         : typeof obj.realisticNativeText === "string"
           ? estimateTokens(obj.realisticNativeText, "cl100k_base")
           : undefined;
-  const realisticSavedCl100k =
+  let realisticSavedCl100k =
     typeof obj.rs === "number"
       ? obj.rs
       : realisticNativeCl100k !== undefined
@@ -677,6 +719,31 @@ export function hydrateTelemetryEvent(raw: unknown): TelemetryEvent | null {
   const multiFiles = rawMf
     ? rawMf.filter((item): item is string => typeof item === "string")
     : undefined;
+
+  const multiFilesCount = multiFiles
+    ? multiFiles.length
+    : typeof obj.multiFiles === "number"
+      ? obj.multiFiles
+      : typeof obj.mf === "number"
+        ? obj.mf
+        : 0;
+
+  if (
+    realisticNativeCl100k !== undefined &&
+    (filePath === "<workspace-files>" ||
+      (operation === "outline" &&
+        (filePath === "<directory>" ||
+          filePath.endsWith("/<directory>") ||
+          multiFilesCount > 1))) &&
+    realisticNativeCl100k > aiceCl100k * 15 &&
+    realisticNativeCl100k === nativeCl100k
+  ) {
+    realisticNativeCl100k =
+      filePath === "<workspace-files>"
+        ? Math.min(nativeCl100k, Math.round(aiceCl100k * 1.35))
+        : Math.min(nativeCl100k, Math.max(aiceCl100k, (multiFilesCount || 20) * 45));
+    realisticSavedCl100k = realisticNativeCl100k - aiceCl100k;
+  }
 
   return {
     timestamp,
@@ -1172,9 +1239,209 @@ function checkAndAdvanceRepeatReadState(
   return isRepeatRead;
 }
 
+export interface ProjectSystemicEconomics {
+  wrapperTaxCl100k: number;
+  parallelSliceCalls: number;
+  sequentialPaginationTurns: number;
+  failedRetryTurns: number;
+  estimatedTurns: number;
+  grossRuleReplayCl100k: number;
+  ruleReplayTaxCl100k: number;
+  paginationReplayTaxCl100k: number;
+  retryReplayTaxCl100k: number;
+  totalSystemicTaxCl100k: number;
+  netEndToEndSavedCl100k: number;
+  endToEndVerdict: EndToEndVerdict;
+  realisticNativeCl100k: number;
+  realisticSavedCl100k: number;
+}
+
+export function computeProjectSystemicEconomics(
+  projectEvents: TelemetryEvent[],
+  nonBenignErrorCount = 0,
+): ProjectSystemicEconomics {
+  const sorted = [...projectEvents].sort((a, b) => {
+    const tA = Date.parse(a.timestamp) || 0;
+    const tB = Date.parse(b.timestamp) || 0;
+    return tA - tB;
+  });
+
+  let wrapperTaxCl100k = 0;
+  let parallelSliceCalls = 0;
+  let sequentialPaginationTurns = 0;
+  let cliErrorCount = 0;
+  let realisticNativeCl100k = 0;
+  let realisticSavedCl100k = 0;
+
+  const lastReadTsByFile = new Map<string, number>();
+  let lastWriteTs = -Infinity;
+
+  for (const ev of sorted) {
+    wrapperTaxCl100k += ev.surface === "mcp" ? 45 : 70;
+
+    const realNat = ev.realisticNativeCl100k ?? ev.nativeCl100k;
+    const realSaved = ev.realisticSavedCl100k ?? realNat - ev.aiceCl100k;
+    realisticNativeCl100k += realNat;
+    realisticSavedCl100k += realSaved;
+
+    if (ev.filePath === "<cli-error>") {
+      cliErrorCount++;
+    }
+
+    const currentTs = Date.parse(ev.timestamp) || 0;
+    const isWrite =
+      ev.operation === "splice" ||
+      ev.operation === "create" ||
+      ev.operation === "patch" ||
+      ev.category === "write";
+
+    if (isWrite) {
+      lastWriteTs = currentTs;
+    }
+
+    const isRead =
+      ev.operation === "context" ||
+      (ev.operation as string) === "read" ||
+      (ev.category === "read" && ev.operation !== "outline");
+
+    if (isRead) {
+      const targetFiles =
+        ev.filePath === "<multi-context>" && Array.isArray(ev.multiFiles)
+          ? ev.multiFiles
+          : [ev.filePath];
+
+      let callMatchedParallel = false;
+      let callMatchedPagination = false;
+
+      for (const f of targetFiles) {
+        if (!f || (f.startsWith("<") && f !== "<stdin>")) continue;
+        const priorReadTs = lastReadTsByFile.get(f);
+        if (priorReadTs !== undefined) {
+          const deltaMs = currentTs - priorReadTs;
+          if (deltaMs >= 0 && deltaMs < 3_000) {
+            callMatchedParallel = true;
+          } else if (deltaMs >= 3_000 && deltaMs <= 180_000) {
+            if (lastWriteTs < priorReadTs) {
+              callMatchedPagination = true;
+            }
+          }
+        }
+        lastReadTsByFile.set(f, currentTs);
+      }
+
+      if (callMatchedParallel) parallelSliceCalls++;
+      if (callMatchedPagination) sequentialPaginationTurns++;
+    }
+  }
+
+  let estimatedTurns = 0;
+  if (sorted.length > 0) {
+    estimatedTurns = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      const prevTs = Date.parse(sorted[i - 1].timestamp) || 0;
+      const currTs = Date.parse(sorted[i].timestamp) || 0;
+      if (currTs - prevTs >= 3_000) {
+        estimatedTurns++;
+      }
+    }
+  }
+
+  const failedRetryTurns = cliErrorCount + nonBenignErrorCount;
+  const ruleBudgetCl100k = getRuleOverheadBudgetCl100k();
+  const grossRuleReplayCl100k = ruleBudgetCl100k * estimatedTurns;
+  const ruleReplayTaxCl100k =
+    estimatedTurns === 0
+      ? 0
+      : ruleBudgetCl100k + Math.round(ruleBudgetCl100k * Math.max(0, estimatedTurns - 1) * 0.15);
+  const paginationReplayTaxCl100k = sequentialPaginationTurns * 8_500;
+  const retryReplayTaxCl100k = failedRetryTurns * 8_500;
+  const totalSystemicTaxCl100k =
+    wrapperTaxCl100k + ruleReplayTaxCl100k + paginationReplayTaxCl100k + retryReplayTaxCl100k;
+  const netEndToEndSavedCl100k = realisticSavedCl100k - totalSystemicTaxCl100k;
+  const endToEndVerdict: EndToEndVerdict =
+    netEndToEndSavedCl100k > 0
+      ? "TOKEN-REDUCING"
+      : netEndToEndSavedCl100k < 0
+        ? "TOKEN-CONSUMING"
+        : "NEUTRAL";
+
+  return {
+    wrapperTaxCl100k,
+    parallelSliceCalls,
+    sequentialPaginationTurns,
+    failedRetryTurns,
+    estimatedTurns,
+    grossRuleReplayCl100k,
+    ruleReplayTaxCl100k,
+    paginationReplayTaxCl100k,
+    retryReplayTaxCl100k,
+    totalSystemicTaxCl100k,
+    netEndToEndSavedCl100k,
+    endToEndVerdict,
+    realisticNativeCl100k,
+    realisticSavedCl100k,
+  };
+}
+
+function loadNonBenignErrorsMap(ledgerPath: string): Map<string, number> {
+  const counts = new Map<string, number>();
+  const candidates: string[] = [
+    path.join(path.dirname(ledgerPath), "errors.jsonl"),
+    `${ledgerPath}.errors.jsonl`,
+  ];
+  if (process.env.AICE_TELEMETRY_ERRORS_PATH) {
+    candidates.unshift(path.resolve(process.env.AICE_TELEMETRY_ERRORS_PATH));
+  }
+  const seenFiles = new Set<string>();
+  for (const cand of candidates) {
+    if (seenFiles.has(cand)) continue;
+    seenFiles.add(cand);
+    if (!fs.existsSync(cand)) continue;
+    try {
+      const raw = fs.readFileSync(cand, "utf-8");
+      for (const line of raw.split("\n")) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed.errorMessage === "string") {
+            const isBenign = /benign|warning|notice/i.test(parsed.errorMessage);
+            if (!isBenign) {
+              const rootKey = parsed.projectRoot ? path.resolve(parsed.projectRoot) : "<unknown>";
+              counts.set(rootKey, (counts.get(rootKey) ?? 0) + 1);
+              if (parsed.projectName) {
+                counts.set(parsed.projectName, (counts.get(parsed.projectName) ?? 0) + 1);
+              }
+            }
+          }
+        } catch {
+          // ignore malformed line
+        }
+      }
+    } catch {
+      // ignore read error
+    }
+  }
+  return counts;
+}
+
+function getNonBenignErrorsForProject(
+  errorCounts: Map<string, number>,
+  projectRoot: string,
+  projectName: string,
+): number {
+  const normRoot = path.resolve(projectRoot);
+  let count = errorCounts.get(normRoot) ?? 0;
+  if (count === 0 && errorCounts.has(projectName)) {
+    count = errorCounts.get(projectName) ?? 0;
+  }
+  return count;
+}
+
 function buildProjectDetail(
   projectRoot: string,
   projectEvents: TelemetryEvent[],
+  nonBenignErrorCount = 0,
 ): ProjectDetailReport {
   const projectName = path.basename(projectRoot) || "root";
   let enabled = true;
@@ -1350,6 +1617,7 @@ function buildProjectDetail(
       writeSavedO200k,
       idiomSavedO200k,
       ...computeRuleBreakEvenMetrics(savedCl100k),
+      ...computeProjectSystemicEconomics(projectEvents, nonBenignErrorCount),
     },
     byOperation,
     topFiles,
@@ -1525,6 +1793,18 @@ export function buildGainReport(
       aiceO200k: 0,
       savedO200k: 0,
       o200kSavingsPct: 0,
+      wrapperTaxCl100k: 0,
+      parallelSliceCalls: 0,
+      sequentialPaginationTurns: 0,
+      failedRetryTurns: 0,
+      estimatedTurns: 0,
+      grossRuleReplayCl100k: 0,
+      ruleReplayTaxCl100k: 0,
+      paginationReplayTaxCl100k: 0,
+      retryReplayTaxCl100k: 0,
+      totalSystemicTaxCl100k: 0,
+      netEndToEndSavedCl100k: 0,
+      endToEndVerdict: "NEUTRAL" as EndToEndVerdict,
     };
     projSummary.calls++;
     if (ev.category === "read") projSummary.readCalls++;
@@ -1555,6 +1835,28 @@ export function buildGainReport(
   const byLanguage = Array.from(langMap.values()).sort(
     (a, b) => b.savedCl100k - a.savedCl100k || b.calls - a.calls,
   );
+
+  const errorCounts = loadNonBenignErrorsMap(ledgerPath);
+  for (const [pRoot, pSummary] of projMap.entries()) {
+    const pEvents = projEventsMap.get(pRoot) ?? [];
+    const nonBenignErrors = getNonBenignErrorsForProject(errorCounts, pRoot, pSummary.projectName);
+    const econ = computeProjectSystemicEconomics(pEvents, nonBenignErrors);
+    pSummary.realisticNativeCl100k = econ.realisticNativeCl100k;
+    pSummary.realisticSavedCl100k = econ.realisticSavedCl100k;
+    pSummary.wrapperTaxCl100k = econ.wrapperTaxCl100k;
+    pSummary.parallelSliceCalls = econ.parallelSliceCalls;
+    pSummary.sequentialPaginationTurns = econ.sequentialPaginationTurns;
+    pSummary.failedRetryTurns = econ.failedRetryTurns;
+    pSummary.estimatedTurns = econ.estimatedTurns;
+    pSummary.grossRuleReplayCl100k = econ.grossRuleReplayCl100k;
+    pSummary.ruleReplayTaxCl100k = econ.ruleReplayTaxCl100k;
+    pSummary.paginationReplayTaxCl100k = econ.paginationReplayTaxCl100k;
+    pSummary.retryReplayTaxCl100k = econ.retryReplayTaxCl100k;
+    pSummary.totalSystemicTaxCl100k = econ.totalSystemicTaxCl100k;
+    pSummary.netEndToEndSavedCl100k = econ.netEndToEndSavedCl100k;
+    pSummary.endToEndVerdict = econ.endToEndVerdict;
+  }
+
   const projects = Array.from(projMap.values()).sort(
     (a, b) => b.savedCl100k - a.savedCl100k || b.calls - a.calls,
   );
@@ -1568,8 +1870,39 @@ export function buildGainReport(
           ? findProjectRoot(process.cwd())
           : path.resolve(options.project);
     const pEvents = projEventsMap.get(targetRoot) ?? filteredEvents;
-    projectDetail = buildProjectDetail(targetRoot, pEvents);
+    const targetSummary = projects.find((p) => p.projectRoot === targetRoot);
+    const nonBenignErrors = getNonBenignErrorsForProject(
+      errorCounts,
+      targetRoot,
+      targetSummary?.projectName ?? path.basename(targetRoot),
+    );
+    projectDetail = buildProjectDetail(targetRoot, pEvents, nonBenignErrors);
   }
+
+  const globalWrapperTaxCl100k = projects.reduce((s, p) => s + p.wrapperTaxCl100k, 0);
+  const globalParallelSliceCalls = projects.reduce((s, p) => s + p.parallelSliceCalls, 0);
+  const globalSequentialPaginationTurns = projects.reduce(
+    (s, p) => s + p.sequentialPaginationTurns,
+    0,
+  );
+  const globalFailedRetryTurns = projects.reduce((s, p) => s + p.failedRetryTurns, 0);
+  const globalEstimatedTurns = projects.reduce((s, p) => s + p.estimatedTurns, 0);
+  const globalGrossRuleReplayCl100k = projects.reduce((s, p) => s + p.grossRuleReplayCl100k, 0);
+  const globalRuleReplayTaxCl100k = projects.reduce((s, p) => s + p.ruleReplayTaxCl100k, 0);
+  const globalPaginationReplayTaxCl100k = globalSequentialPaginationTurns * 8_500;
+  const globalRetryReplayTaxCl100k = globalFailedRetryTurns * 8_500;
+  const globalTotalSystemicTaxCl100k =
+    globalWrapperTaxCl100k +
+    globalRuleReplayTaxCl100k +
+    globalPaginationReplayTaxCl100k +
+    globalRetryReplayTaxCl100k;
+  const globalNetEndToEndSavedCl100k = totalRealisticSavedCl100k - globalTotalSystemicTaxCl100k;
+  const globalEndToEndVerdict: EndToEndVerdict =
+    globalNetEndToEndSavedCl100k > 0
+      ? "TOKEN-REDUCING"
+      : globalNetEndToEndSavedCl100k < 0
+        ? "TOKEN-CONSUMING"
+        : "NEUTRAL";
 
   return {
     telemetryPath: ledgerPath,
@@ -1597,6 +1930,18 @@ export function buildGainReport(
     totalRealisticSavedCl100k,
     realisticSavedCl100kPct: calcPct(totalRealisticSavedCl100k, totalRealisticNativeCl100k),
     totalPreservedTriviaTokens,
+    wrapperTaxCl100k: globalWrapperTaxCl100k,
+    parallelSliceCalls: globalParallelSliceCalls,
+    sequentialPaginationTurns: globalSequentialPaginationTurns,
+    failedRetryTurns: globalFailedRetryTurns,
+    estimatedTurns: globalEstimatedTurns,
+    grossRuleReplayCl100k: globalGrossRuleReplayCl100k,
+    ruleReplayTaxCl100k: globalRuleReplayTaxCl100k,
+    paginationReplayTaxCl100k: globalPaginationReplayTaxCl100k,
+    retryReplayTaxCl100k: globalRetryReplayTaxCl100k,
+    totalSystemicTaxCl100k: globalTotalSystemicTaxCl100k,
+    netEndToEndSavedCl100k: globalNetEndToEndSavedCl100k,
+    endToEndVerdict: globalEndToEndVerdict,
     byOperation,
     byLanguage,
     projects,
@@ -1672,6 +2017,27 @@ export function formatGlobalGainDashboard(report: GainReport): string {
     `  Character Delta:        Native ${report.nativeChars.toLocaleString()} -> AICE ${report.aiceChars.toLocaleString()} | Net Saved: ${fmtSigned(report.savedChars)} (${fmtPct(report.charSavingsPct)})`,
   );
   lines.push(formatRuleOverheadBreakEvenLine(report.savedCl100k));
+  lines.push("");
+  lines.push("  End-to-End Token Economics (Untracked Costs Included):");
+  lines.push(
+    `    Realistic Payload Saved:          ${fmtSigned(report.totalRealisticSavedCl100k ?? report.savedCl100k)} cl100k`,
+  );
+  lines.push(
+    `    Wrapper Tax:                      -${report.wrapperTaxCl100k.toLocaleString()} cl100k`,
+  );
+  lines.push(
+    `    Rule Replay Tax:                  -${report.ruleReplayTaxCl100k.toLocaleString()} cl100k (${report.estimatedTurns} turns)`,
+  );
+  lines.push(
+    `    Sequential Pagination Replay Tax: -${report.paginationReplayTaxCl100k.toLocaleString()} cl100k (${report.sequentialPaginationTurns} turn${report.sequentialPaginationTurns === 1 ? "" : "s"})`,
+  );
+  lines.push(
+    `    Retry Replay Tax:                 -${report.retryReplayTaxCl100k.toLocaleString()} cl100k (${report.failedRetryTurns} turn${report.failedRetryTurns === 1 ? "" : "s"})`,
+  );
+  lines.push(
+    `    Net End-to-End Delta:             ${fmtSigned(report.netEndToEndSavedCl100k)} cl100k`,
+  );
+  lines.push(`    End-to-End Verdict:               ${report.endToEndVerdict}`);
 
   lines.push("");
   lines.push("2. BREAKDOWN BY OPERATION & SURFACE (CLI vs MCP)");
@@ -1750,6 +2116,27 @@ export function formatProjectGainDetail(detail: ProjectDetailReport): string {
     `  Category Savings: Read=${fmtSigned(s.readSavedCl100k)} cl100k (${fmtSigned(s.readSavedO200k)} o200k) | Write=${fmtSigned(s.writeSavedCl100k)} cl100k (${fmtSigned(s.writeSavedO200k)} o200k) | Idioms=${fmtSigned(s.idiomSavedCl100k)} cl100k`,
   );
   lines.push(formatRuleOverheadBreakEvenLine(s.savedCl100k));
+  lines.push("");
+  lines.push("  End-to-End Token Economics (Untracked Costs Included):");
+  lines.push(
+    `    Realistic Payload Saved:          ${fmtSigned(s.realisticSavedCl100k ?? s.savedCl100k)} cl100k`,
+  );
+  lines.push(
+    `    Wrapper Tax:                      -${(s.wrapperTaxCl100k ?? 0).toLocaleString()} cl100k`,
+  );
+  lines.push(
+    `    Rule Replay Tax:                  -${(s.ruleReplayTaxCl100k ?? 0).toLocaleString()} cl100k (${s.estimatedTurns ?? 0} turns)`,
+  );
+  lines.push(
+    `    Sequential Pagination Replay Tax: -${(s.paginationReplayTaxCl100k ?? 0).toLocaleString()} cl100k (${s.sequentialPaginationTurns ?? 0} turn${(s.sequentialPaginationTurns ?? 0) === 1 ? "" : "s"})`,
+  );
+  lines.push(
+    `    Retry Replay Tax:                 -${(s.retryReplayTaxCl100k ?? 0).toLocaleString()} cl100k (${s.failedRetryTurns ?? 0} turn${(s.failedRetryTurns ?? 0) === 1 ? "" : "s"})`,
+  );
+  lines.push(
+    `    Net End-to-End Delta:             ${fmtSigned(s.netEndToEndSavedCl100k ?? 0)} cl100k`,
+  );
+  lines.push(`    End-to-End Verdict:               ${s.endToEndVerdict ?? "NEUTRAL"}`);
 
   lines.push("");
   lines.push("PER-OPERATION BREAKDOWN");

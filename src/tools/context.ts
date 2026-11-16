@@ -156,6 +156,11 @@ export interface ContextOptions {
    * Optional global stdout byte budget for broad workspace/directory pattern searches.
    */
   maxByteBudget?: number;
+
+  /**
+   * Invocation surface (e.g. "cli" | "mcp").
+   */
+  surface?: "cli" | "mcp";
 }
 
 export interface DependencyContract {
@@ -2032,9 +2037,16 @@ export async function generateWorkspaceContext(
   const depMap = new Map<string, DependencyContract>();
   const rawWorkspaceTexts: string[] = [];
   const workspaceBaselineEntries: Array<{ relPath: string; rawSource: string }> = [];
+  const isCliOrMcpWs = options.surface === "cli" || options.surface === "mcp";
+  const effectiveWsIncludeDeps = isCliOrMcpWs
+    ? (options.includeDeps ?? (options.depth !== undefined && options.depth > 0 ? true : false))
+    : options.includeDeps;
+  const effectiveWsIncludeCallers = isCliOrMcpWs
+    ? (options.includeCallers ?? false)
+    : options.includeCallers;
   const hasExplicitWsDeps =
-    options.includeDeps === true || (options.depth !== undefined && options.depth > 0);
-  const hasExplicitWsCallers = options.includeCallers === true;
+    effectiveWsIncludeDeps === true || (options.depth !== undefined && options.depth > 0);
+  const hasExplicitWsCallers = effectiveWsIncludeCallers === true;
   const hasExplicitWsEnvelopeOptIn = hasExplicitWsDeps || hasExplicitWsCallers;
   const requestedSelectors = options.symbol ? splitSymbolSelectors(options.symbol) : [];
   const isBareLineRangeOnly =
@@ -3087,10 +3099,76 @@ export function isCommentLine(line: string, filePath?: string): boolean {
   return false;
 }
 
-export function isDeclarationLine(line: string): boolean {
-  return /\b(function|class|interface|type|enum|struct|fn|def|fun|func|pub|export|const|let|var|val|sub|record|impl|trait)\b/.test(
-    line,
+export function isDeclarationLine(line: string, filePath?: string): boolean {
+  if (
+    /\b(function|class|interface|type|enum|struct|fn|def|fun|func|pub|export|const|let|var|val|sub|record|impl|trait)\b/.test(
+      line,
+    )
+  ) {
+    return true;
+  }
+  const ext = filePath ? path.extname(filePath).toLowerCase() : "";
+  if (
+    ext === ".c" ||
+    ext === ".h" ||
+    ext === ".cpp" ||
+    ext === ".hpp" ||
+    ext === ".cc" ||
+    ext === ".cxx"
+  ) {
+    if (
+      /\b(?:void|int|char|bool|double|float|long|short|unsigned|signed|size_t|uint\d+_t|int\d+_t)\b/.test(
+        line,
+      ) &&
+      /\b[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)
+    ) {
+      return true;
+    }
+  }
+  if (ext === ".aipl") {
+    if (/^\s*(?:pub\s+)?(?:fn|struct|enum|class)\b/.test(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function isExactDefinitionLine(
+  line: string,
+  queryKeyword: string,
+  filePath?: string,
+): boolean {
+  const esc = queryKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ext = filePath ? path.extname(filePath).toLowerCase() : "";
+  if (ext === ".aipl") {
+    return new RegExp(`^\\s*(?:pub\\s+)?(?:fn|struct|enum|class)\\s+${esc}\\b`).test(line);
+  }
+  if (
+    ext === ".c" ||
+    ext === ".h" ||
+    ext === ".cpp" ||
+    ext === ".hpp" ||
+    ext === ".cc" ||
+    ext === ".cxx"
+  ) {
+    if (new RegExp(`(?:^|[\\s*&])${esc}\\s*\\([^;]*\\)(?:\\s*\\{)?`).test(line)) {
+      if (
+        /^[A-Za-z_][A-Za-z0-9_*&\s]+\s+\b/.test(line.trim()) ||
+        /\b(?:void|int|char|bool|double|float|long|short|unsigned|signed|static|inline|extern|size_t|uint\d+_t|int\d+_t|struct|enum|class)\b/.test(
+          line,
+        )
+      ) {
+        return true;
+      }
+    }
+    if (new RegExp(`\\b(?:struct|enum|class|union|typedef\\s+struct)\\s+${esc}\\b`).test(line)) {
+      return true;
+    }
+  }
+  const generalDefRe = new RegExp(
+    `\\b(?:(?:pub\\s+)?(?:fn|function|def|func|fun|class|interface|struct|enum|type)\\s+${esc}\\b|(?:const|let|var|val)\\s+${esc}\\b(?:\\s*:[^=]+)?\\s*=)`,
   );
+  return generalDefRe.test(line);
 }
 
 function scorePatternWindow(
@@ -3109,6 +3187,7 @@ function scorePatternWindow(
     fileNameBonus = isMockOrTest ? 20 : 1000;
   }
 
+  let hasExactDefinition = false;
   let hasDeclaration = false;
   let hasCode = false;
   let allComments = true;
@@ -3120,7 +3199,10 @@ function scorePatternWindow(
     } else {
       allComments = false;
       hasCode = true;
-      if (isDeclarationLine(lineText)) {
+      if (queryKeyword && isExactDefinitionLine(lineText, queryKeyword, filePath)) {
+        hasExactDefinition = true;
+        hasDeclaration = true;
+      } else if (isDeclarationLine(lineText, filePath)) {
         hasDeclaration = true;
       }
     }
@@ -3128,11 +3210,13 @@ function scorePatternWindow(
 
   let lineScore = 0;
   if (!isMockOrTest) {
-    if (hasDeclaration) lineScore = 500;
+    if (hasExactDefinition) lineScore = 650;
+    else if (hasDeclaration) lineScore = 500;
     else if (hasCode) lineScore = 300;
     else if (allComments) lineScore = 100;
   } else {
-    if (hasDeclaration) lineScore = 50;
+    if (hasExactDefinition) lineScore = 80;
+    else if (hasDeclaration) lineScore = 50;
     else if (hasCode) lineScore = 30;
     else if (allComments) lineScore = 10;
   }
@@ -4352,9 +4436,16 @@ export async function generateContext(
   const hasNonWildcardSymbol = Boolean(
     options.symbol && options.symbol.trim() !== "" && options.symbol.trim() !== "*",
   );
+  const isCliOrMcp = options.surface === "cli" || options.surface === "mcp";
+  const effectiveIncludeDeps = isCliOrMcp
+    ? (options.includeDeps ?? (options.depth !== undefined && options.depth > 0 ? true : false))
+    : options.includeDeps;
+  const effectiveIncludeCallers = isCliOrMcp
+    ? (options.includeCallers ?? false)
+    : options.includeCallers;
   const hasExplicitDeps =
-    options.includeDeps === true || (options.depth !== undefined && options.depth > 0);
-  const hasExplicitCallers = options.includeCallers === true;
+    effectiveIncludeDeps === true || (options.depth !== undefined && options.depth > 0);
+  const hasExplicitCallers = effectiveIncludeCallers === true;
   const hasExplicitEnvelopeOptIn = hasExplicitDeps || hasExplicitCallers;
 
   const isLargeFileSymbolQuery = hasNonWildcardSymbol && rawFileContent.length > 50_000;
@@ -4369,7 +4460,11 @@ export async function generateContext(
     rawLineCount <= 150;
   const isZeroEnvelopeTarget =
     !hasExplicitEnvelopeOptIn &&
-    (isPureLineRangeSymbol || isPureRegexSymbol || isZeroEnvelopeExt || isBareSmallFile);
+    (isPureLineRangeSymbol ||
+      isPureRegexSymbol ||
+      isZeroEnvelopeExt ||
+      isBareSmallFile ||
+      isCliOrMcp);
   const nativeDiagnostics =
     isFastPathSelector || isLargeFileSymbolQuery || isPassthrough
       ? undefined
@@ -4693,7 +4788,7 @@ export async function generateContext(
 
   if (
     options.symbol &&
-    !isZeroEnvelopeTarget &&
+    !(isPureLineRangeSymbol || isPureRegexSymbol || isZeroEnvelopeExt) &&
     !decompileFailed &&
     !isFastPathSelector &&
     !targetContent.startsWith("// match at [") &&
@@ -4809,11 +4904,11 @@ export async function generateContext(
 
   // Dependency discovery BFS (depth = 0 on zero-envelope fast-path unless --deps / depth > 0)
   const effectiveDepth =
-    options.includeDeps === false
+    effectiveIncludeDeps === false
       ? 0
       : options.depth !== undefined
         ? options.depth
-        : options.includeDeps === true
+        : effectiveIncludeDeps === true
           ? 1
           : isZeroEnvelopeTarget || isFastPathSelector || isPassthrough
             ? 0
@@ -4934,11 +5029,11 @@ export async function generateContext(
   }
 
   // Caller lookup (skip by default on zero-envelope fast-path unless --callers is passed)
-  const effectiveIncludeCallers =
-    options.includeCallers !== undefined
-      ? options.includeCallers
+  const shouldScanCallers =
+    effectiveIncludeCallers !== undefined
+      ? effectiveIncludeCallers
       : !isZeroEnvelopeTarget && !isFastPathSelector && !isDataOrDocExt && !isPassthrough;
-  const callers: CallerSummary[] = effectiveIncludeCallers
+  const callers: CallerSummary[] = shouldScanCallers
     ? scanWorkspaceCallers(
         fullTargetPath,
         projectRoot,
