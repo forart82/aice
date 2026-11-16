@@ -46,6 +46,7 @@ import {
   isCommentLine,
   isTestOrMockPath,
   mergeMultiContextResults,
+  parseSymbolPatternSelector,
   type WorkspaceCallerScanCache,
 } from "./context.js";
 import {
@@ -353,7 +354,7 @@ export function countSourceLines(source: string): number {
   return lines;
 }
 
-function splitCommaSelectors(rawSymbol: string): string[] {
+export function splitCommaSelectors(rawSymbol: string): string[] {
   const trimmed = rawSymbol.trim();
   if (!trimmed) return [];
   if (SINGLE_REGEX_LITERAL_RE.test(trimmed)) {
@@ -362,33 +363,36 @@ function splitCommaSelectors(rawSymbol: string): string[] {
   const out: string[] = [];
   let current = "";
   let inRegex = false;
-  let regexCharClass = false;
+  let inCharClass = false;
   let inQuote: string | null = null;
   let escaped = false;
-  for (const ch of trimmed) {
+  let curlyDepth = 0;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i]!;
     if (escaped) {
       current += ch;
       escaped = false;
       continue;
     }
+    if (ch === "\\") {
+      escaped = true;
+      current += ch;
+      continue;
+    }
     if (inQuote) {
       current += ch;
-      if (ch === "\\") {
-        escaped = true;
-      } else if (ch === inQuote) {
+      if (ch === inQuote) {
         inQuote = null;
       }
       continue;
     }
     if (inRegex) {
       current += ch;
-      if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "[") {
-        regexCharClass = true;
-      } else if (ch === "]" && regexCharClass) {
-        regexCharClass = false;
-      } else if (ch === "/" && !regexCharClass) {
+      if (ch === "[") {
+        inCharClass = true;
+      } else if (ch === "]" && inCharClass) {
+        inCharClass = false;
+      } else if (ch === "/" && !inCharClass) {
         inRegex = false;
       }
       continue;
@@ -400,11 +404,28 @@ function splitCommaSelectors(rawSymbol: string): string[] {
     }
     if (ch === "/" && current.trim() === "") {
       inRegex = true;
-      regexCharClass = false;
+      inCharClass = false;
       current += ch;
       continue;
     }
-    if (ch === ",") {
+    if (ch === "[" && !inCharClass && trimmed.indexOf("]", i + 1) !== -1) {
+      inCharClass = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "]" && inCharClass) {
+      inCharClass = false;
+      current += ch;
+      continue;
+    }
+    if (!inCharClass) {
+      if (ch === "{" && trimmed.indexOf("}", i + 1) !== -1) {
+        curlyDepth++;
+      } else if (ch === "}" && curlyDepth > 0) {
+        curlyDepth--;
+      }
+    }
+    if (ch === "," && curlyDepth === 0 && !inCharClass) {
       const piece = current.trim();
       if (piece) out.push(piece);
       current = "";
@@ -462,11 +483,13 @@ export function parseReadTarget(rawTarget: string, baseDir = process.cwd()): Par
         ext === ".aice" ||
         PASSTHROUGH_FILENAMES.has(baseName) ||
         baseName.startsWith(".env.");
+      const isSymbolPattern = Boolean(parseSymbolPatternSelector(candidateSym));
       const isUnambiguousSelector =
         !/\s/.test(candidatePath) &&
         (candidateSym.toLowerCase() === "outline" ||
           LINE_RANGE_SELECTOR_RE.test(candidateSym) ||
-          SINGLE_REGEX_LITERAL_RE.test(candidateSym));
+          SINGLE_REGEX_LITERAL_RE.test(candidateSym) ||
+          isSymbolPattern);
       const hasGlobPattern = /[*?[\]{}]/.test(candidatePath);
       if (
         isKnownFileShape ||
@@ -2452,6 +2475,8 @@ export async function aiceRead(
         projectRoot,
         workspaceScanCache: options.workspaceScanCache,
         surface: options.surface,
+        full: options.full,
+        unboundedCli: options.unboundedCli,
       }),
     );
 
@@ -3444,6 +3469,8 @@ async function executeContextStream(params: {
       projectRoot: item.resolved.projectRoot,
       workspaceScanCache: sharedScanCache,
       surface: options.surface,
+      full: options.full,
+      unboundedCli: options.unboundedCli,
     };
 
     let targetMatched = false;

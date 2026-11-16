@@ -831,6 +831,17 @@ export function generateOutline(
           }
           baseOutlineLines.push(`  ${child.signature}`);
           annotatedOutlineLines.push(`  ${child.signature}${childSuffix}`);
+          if (shouldExtractInternalLandmarks(child, originalSource, maxDepth)) {
+            const childLandmarks = extractInternalLandmarks(
+              child,
+              originalSource,
+              filePath,
+              "    ",
+            );
+            for (const lm of childLandmarks) {
+              annotatedOutlineLines.push(lm);
+            }
+          }
         }
       } else {
         baseOutlineLines.push(sym.signature);
@@ -882,6 +893,30 @@ export function generateOutline(
     } else {
       baseOutlineLines.push(sym.signature);
       annotatedOutlineLines.push(`${sym.signature}${symRangeSuffix}`);
+      if (shouldExtractInternalLandmarks(sym, originalSource, maxDepth)) {
+        const fnLandmarks = extractInternalLandmarks(sym, originalSource, filePath, "  ");
+        for (const lm of fnLandmarks) {
+          annotatedOutlineLines.push(lm);
+        }
+      }
+    }
+  }
+
+  if (originalSource) {
+    const importLandmark = detectTopOfFileImports(originalSource, symbols);
+    if (importLandmark) {
+      const landmarkAnnotated = `imports (${importLandmark.spanLines} lines) # [L${importLandmark.startLine}-L${importLandmark.endLine}]`;
+      const landmarkBase = `imports (${importLandmark.spanLines} lines)`;
+
+      let insertIdx = 0;
+      if (annotatedOutlineLines.length > 0 && annotatedOutlineLines[0].startsWith("module ")) {
+        insertIdx = 1;
+        if (annotatedOutlineLines.length > 1 && annotatedOutlineLines[1] === "") {
+          insertIdx = 1;
+        }
+      }
+      annotatedOutlineLines.splice(insertIdx, 0, landmarkAnnotated);
+      baseOutlineLines.splice(insertIdx, 0, landmarkBase);
     }
   }
 
@@ -982,6 +1017,662 @@ export function generateOutline(
 
 function escapeRegexForOutline(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface ImportLandmark {
+  startLine: number;
+  endLine: number;
+  spanLines: number;
+}
+
+function detectTopOfFileImports(
+  source: string,
+  symbols: OutlineSymbol[],
+): ImportLandmark | undefined {
+  if (!source) return undefined;
+  const lines = source.split(/\r?\n/);
+  let importStartLine = -1;
+  let importEndLine = -1;
+  let inMultiLineImport = false;
+  let braceDepth = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const lineNum = i + 1;
+    const rawLine = lines[i];
+    const trimmed = rawLine.trim();
+
+    // Skip empty lines, pure comments, or top-level module/package headers before imports
+    if (!inMultiLineImport && importStartLine === -1) {
+      if (
+        !trimmed ||
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("/*") ||
+        trimmed.startsWith("*")
+      ) {
+        continue;
+      }
+      if (/^\s*(?:module|package)\b/.test(trimmed)) {
+        continue;
+      }
+    }
+
+    // Check if currently inside a multi-line import
+    if (inMultiLineImport) {
+      importEndLine = lineNum;
+      for (const ch of trimmed) {
+        if (ch === "{" || ch === "(") braceDepth++;
+        else if (ch === "}" || ch === ")") braceDepth--;
+      }
+      if (braceDepth <= 0) {
+        inMultiLineImport = false;
+        braceDepth = 0;
+      }
+      continue;
+    }
+
+    // Check if this line starts an import statement
+    const isImportLine =
+      /^\s*import\b/.test(trimmed) ||
+      /^\s*from\b\s+.*\bimport\b/.test(trimmed) ||
+      /^\s*#\s*include\b/.test(trimmed) ||
+      /^\s*use\b\s+[A-Za-z0-9_:]+/.test(trimmed) ||
+      /^\s*(?:(?:const|let|var)\s+.*=\s*)?require\s*\(/.test(trimmed);
+
+    if (isImportLine) {
+      if (importStartLine === -1) {
+        importStartLine = lineNum;
+      }
+      importEndLine = lineNum;
+
+      let openBraces = 0;
+      for (const ch of trimmed) {
+        if (ch === "{" || ch === "(") openBraces++;
+        else if (ch === "}" || ch === ")") openBraces--;
+      }
+      if (openBraces > 0) {
+        inMultiLineImport = true;
+        braceDepth = openBraces;
+      }
+    } else {
+      if (importStartLine !== -1) {
+        if (
+          !trimmed ||
+          trimmed.startsWith("//") ||
+          trimmed.startsWith("#") ||
+          trimmed.startsWith("/*") ||
+          trimmed.startsWith("*")
+        ) {
+          // Lookahead: does another import follow within 5 lines?
+          let hasSubsequentImport = false;
+          for (let k = i + 1; k < Math.min(lines.length, i + 6); k++) {
+            const nextTrim = lines[k].trim();
+            if (
+              !nextTrim ||
+              nextTrim.startsWith("//") ||
+              nextTrim.startsWith("#") ||
+              nextTrim.startsWith("/*") ||
+              nextTrim.startsWith("*")
+            ) {
+              continue;
+            }
+            if (
+              /^\s*import\b/.test(nextTrim) ||
+              /^\s*from\b\s+.*\bimport\b/.test(nextTrim) ||
+              /^\s*#\s*include\b/.test(nextTrim) ||
+              /^\s*use\b\s+[A-Za-z0-9_:]+/.test(nextTrim) ||
+              /^\s*(?:(?:const|let|var)\s+.*=\s*)?require\s*\(/.test(nextTrim)
+            ) {
+              hasSubsequentImport = true;
+            }
+            break;
+          }
+          if (hasSubsequentImport) {
+            continue;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  if (importStartLine !== -1 && importEndLine >= importStartLine) {
+    const spanLines = importEndLine - importStartLine + 1;
+    if (spanLines >= 10) {
+      const alreadyCovered = symbols.some(
+        (s) =>
+          s.line <= importStartLine &&
+          (s.endLine ?? s.line) >= importEndLine &&
+          (s.kind === "import" || s.name === "imports" || s.name === "import"),
+      );
+      if (!alreadyCovered) {
+        return { startLine: importStartLine, endLine: importEndLine, spanLines };
+      }
+    }
+  }
+  return undefined;
+}
+
+function isFunctionOrMethodSymbol(sym: OutlineSymbol): boolean {
+  if (
+    sym.kind === "class" ||
+    sym.kind === "struct" ||
+    sym.kind === "enum" ||
+    sym.kind === "interface" ||
+    sym.kind === "record" ||
+    sym.kind === "module" ||
+    sym.kind === "import"
+  ) {
+    return false;
+  }
+  if (sym.kind === "function" || sym.kind === "method") {
+    return true;
+  }
+  return /^(?:(?:pub|async|static|export|default)\s+)*(?:fn|def|func|function)\b/.test(
+    sym.signature,
+  );
+}
+
+function shouldExtractInternalLandmarks(
+  sym: OutlineSymbol,
+  originalSource: string,
+  maxDepth: number,
+): boolean {
+  if (maxDepth === 0 || !originalSource) return false;
+  if (!isFunctionOrMethodSymbol(sym)) return false;
+  if (sym.line === undefined || sym.endLine === undefined) return false;
+  const span = sym.endLine - sym.line + 1;
+  return span > 120;
+}
+
+interface FunctionLandmarkItem {
+  type: "setup" | "section" | "block" | "call";
+  startLine: number;
+  endLine: number;
+  text: string;
+  depth: number;
+  span: number;
+  priority: number;
+}
+
+function extractInternalLandmarks(
+  sym: OutlineSymbol,
+  originalSource: string,
+  filePath: string,
+  indentPrefix = "  ",
+): string[] {
+  if (!originalSource || sym.line === undefined || sym.endLine === undefined) {
+    return [];
+  }
+  const rawLines = originalSource.split(/\r?\n/);
+  const startLine = sym.line;
+  const endLine = sym.endLine;
+  if (endLine <= startLine) return [];
+
+  const fnLines = rawLines.slice(startLine - 1, endLine);
+  if (fnLines.length <= 1) return [];
+
+  const isIndentBased =
+    /\.(?:aipl|py|pyi|yaml|yml)$/i.test(filePath) ||
+    (!filePath.includes(".") && originalSource.includes("fn main():"));
+
+  const landmarks: FunctionLandmarkItem[] = [];
+
+  // 1. Initial Local Setup Cluster (within first ~40 lines, before main loop/branch/section)
+  let setupStartLine = -1;
+  let setupEndLine = -1;
+  const setupVarNames: string[] = [];
+  let consecutiveNonVar = 0;
+
+  for (let k = 1; k < Math.min(fnLines.length, 40); k++) {
+    const diskLine = startLine + k;
+    const trimmed = fnLines[k].trim();
+    if (!trimmed) continue;
+
+    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("/*")) {
+      if (
+        /^(\/\/|#|\/\*)\s*[-=_~*#]{2,}/.test(trimmed) ||
+        /^(\/\/|#)\s*(?:---|===)/.test(trimmed)
+      ) {
+        break;
+      }
+      continue;
+    }
+    if (/^(?:while|for|loop|switch|match|if)\b/.test(trimmed)) {
+      break;
+    }
+
+    const varMatch =
+      trimmed.match(/^(?:let|mut|val|var|const)\s+(?:mut\s+)?([A-Za-z0-9_$]+)/) ||
+      trimmed.match(/^([A-Za-z0-9_$]+)\s*:=/) ||
+      trimmed.match(
+        /^(?:int|float|double|bool|auto|char|size_t|uint\w*|int\w*)\s+([A-Za-z0-9_$]+)\s*=/,
+      ) ||
+      (isIndentBased && trimmed.match(/^([A-Za-z0-9_]+)\s*=[^=]/));
+
+    if (varMatch) {
+      const vName = varMatch[1];
+      if (!setupVarNames.includes(vName)) {
+        setupVarNames.push(vName);
+      }
+      if (setupStartLine === -1) setupStartLine = diskLine;
+      setupEndLine = diskLine;
+      consecutiveNonVar = 0;
+    } else {
+      consecutiveNonVar++;
+      if (consecutiveNonVar > 2) break;
+    }
+  }
+
+  if (setupVarNames.length >= 2 && setupEndLine >= setupStartLine) {
+    const varListStr = setupVarNames.slice(0, 5).join(", ");
+    const dots = setupVarNames.length > 5 ? ", ..." : "";
+    landmarks.push({
+      type: "setup",
+      startLine: setupStartLine,
+      endLine: setupEndLine,
+      text: `setup: ${varListStr}${dots}`,
+      depth: 1,
+      span: setupEndLine - setupStartLine + 1,
+      priority: 3,
+    });
+  }
+
+  // 2. Section Banner Comments
+  for (let k = 1; k < fnLines.length; k++) {
+    const diskLine = startLine + k;
+    const trimmed = fnLines[k].trim();
+    if (!trimmed.startsWith("//") && !trimmed.startsWith("#") && !trimmed.startsWith("/*")) {
+      continue;
+    }
+
+    const isPureDivider = /^(\/\/|#|\/\*)\s*[-=_~*#]{3,}\s*(\*\/)?$/.test(trimmed);
+    if (isPureDivider) {
+      if (k + 1 < fnLines.length) {
+        const nextTrim = fnLines[k + 1].trim();
+        if (
+          (nextTrim.startsWith("//") || nextTrim.startsWith("#") || nextTrim.startsWith("/*")) &&
+          /[a-zA-Z0-9]/.test(nextTrim)
+        ) {
+          const cleanTitle = nextTrim.replace(/^(\/\/|#|\/\*)\s*|\s*\*\/$/g, "").trim();
+          landmarks.push({
+            type: "section",
+            startLine: startLine + k + 1,
+            endLine: startLine + k + 1,
+            text:
+              cleanTitle.startsWith("//") || cleanTitle.startsWith("#")
+                ? cleanTitle
+                : `// ${cleanTitle}`,
+            depth: 1,
+            span: 1,
+            priority: 1,
+          });
+          k++;
+          continue;
+        }
+      }
+      continue;
+    }
+
+    const bannerMatch = trimmed.match(
+      /^(\/\/|#|\/\*)\s*([-=_~*]{2,})\s*([a-zA-Z0-9].*?)\s*\2?\s*(\*\/)?$/,
+    );
+    if (bannerMatch && /[a-zA-Z0-9]/.test(bannerMatch[3])) {
+      landmarks.push({
+        type: "section",
+        startLine: diskLine,
+        endLine: diskLine,
+        text: trimmed.replace(/\s*\*\/$/, ""),
+        depth: 1,
+        span: 1,
+        priority: 1,
+      });
+      continue;
+    }
+
+    const bannerMatch2 = trimmed.match(/^(\/\/|#)\s*([-=_~*]{2,})\s*([a-zA-Z0-9].*)$/);
+    if (bannerMatch2) {
+      landmarks.push({
+        type: "section",
+        startLine: diskLine,
+        endLine: diskLine,
+        text: trimmed,
+        depth: 1,
+        span: 1,
+        priority: 1,
+      });
+      continue;
+    }
+  }
+
+  // 3. Major Control-Flow & Stage Blocks (spanning >= 8 lines)
+  const openBraceLineToCloseLine = new Map<number, number>();
+  const caseEndLineMap = new Map<number, number>();
+
+  if (!isIndentBased) {
+    const braceStack: Array<{ openLine: number; caseLines: number[] }> = [];
+    let inBlockComment = false;
+    let inTemplateString = false;
+
+    for (let i = 0; i < fnLines.length; i++) {
+      const curLine = fnLines[i];
+      const diskLine = startLine + i;
+      let inStr: string | null = null;
+      let escaped = false;
+      let hasRecordedCase = false;
+      const trimmed = curLine.trim();
+      const isCaseOrDefault = /^(?:case\b|default\s*:)/.test(trimmed);
+
+      for (let c = 0; c < curLine.length; c++) {
+        const ch = curLine[c];
+        const nextCh = c + 1 < curLine.length ? curLine[c + 1] : "";
+
+        if (inBlockComment) {
+          if (ch === "*" && nextCh === "/") {
+            inBlockComment = false;
+            c++;
+          }
+          continue;
+        }
+
+        if (inTemplateString) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (ch === "\\") {
+            escaped = true;
+            continue;
+          }
+          if (ch === "`") {
+            inTemplateString = false;
+          }
+          continue;
+        }
+
+        if (inStr) {
+          if (escaped) {
+            escaped = false;
+            continue;
+          }
+          if (ch === "\\") {
+            escaped = true;
+            continue;
+          }
+          if (ch === inStr) {
+            inStr = null;
+          }
+          continue;
+        }
+
+        if (ch === "/" && nextCh === "*") {
+          inBlockComment = true;
+          c++;
+          continue;
+        }
+        if (ch === "/" && nextCh === "/") {
+          break;
+        }
+
+        if (ch === '"' || ch === "'") {
+          inStr = ch;
+          continue;
+        }
+        if (ch === "`") {
+          inTemplateString = true;
+          continue;
+        }
+
+        if (isCaseOrDefault && !hasRecordedCase && braceStack.length > 0) {
+          braceStack[braceStack.length - 1].caseLines.push(diskLine);
+          hasRecordedCase = true;
+        }
+
+        if (ch === "{") {
+          braceStack.push({ openLine: diskLine, caseLines: [] });
+        } else if (ch === "}") {
+          if (braceStack.length > 0) {
+            const top = braceStack.pop()!;
+            openBraceLineToCloseLine.set(top.openLine, diskLine);
+            for (let idx = 0; idx < top.caseLines.length; idx++) {
+              const cLine = top.caseLines[idx];
+              const nextCaseLine =
+                idx + 1 < top.caseLines.length ? top.caseLines[idx + 1] : undefined;
+              const caseEnd =
+                nextCaseLine !== undefined ? nextCaseLine - 1 : Math.max(cLine, diskLine - 1);
+              caseEndLineMap.set(cLine, caseEnd);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (let k = 1; k < fnLines.length; k++) {
+    const diskLine = startLine + k;
+    const line = fnLines[k];
+    const trimmed = line.trim();
+    if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("/*")) {
+      continue;
+    }
+
+    const ctrlMatch = trimmed.match(
+      /^(while|for|loop|switch|match|if|elif|else\s+if|case|default)\b/,
+    );
+    if (!ctrlMatch) continue;
+
+    let blockEndLine = diskLine;
+    if (isIndentBased) {
+      const baseIndent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+      let lastIdx = k;
+      for (let j = k + 1; j < fnLines.length; j++) {
+        const nextTrim = fnLines[j].trim();
+        if (!nextTrim || nextTrim.startsWith("//") || nextTrim.startsWith("#")) {
+          continue;
+        }
+        const nextIndent = fnLines[j].match(/^[ \t]*/)?.[0].length ?? 0;
+        if (nextIndent <= baseIndent) break;
+        lastIdx = j;
+      }
+      blockEndLine = startLine + lastIdx;
+    } else {
+      const isCaseArm = ctrlMatch[1] === "case" || ctrlMatch[1] === "default";
+      if (isCaseArm) {
+        const lineKHasBrace = openBraceLineToCloseLine.has(diskLine);
+        const nextKLine = k + 1 < fnLines.length ? startLine + k + 1 : undefined;
+        const lineKPlus1HasBrace =
+          nextKLine !== undefined &&
+          fnLines[k + 1].trim().startsWith("{") &&
+          openBraceLineToCloseLine.has(nextKLine);
+
+        if (lineKHasBrace) {
+          blockEndLine = openBraceLineToCloseLine.get(diskLine)!;
+        } else if (lineKPlus1HasBrace && nextKLine !== undefined) {
+          blockEndLine = openBraceLineToCloseLine.get(nextKLine)!;
+        } else {
+          blockEndLine = caseEndLineMap.get(diskLine) ?? diskLine;
+        }
+      } else {
+        let parenDepth = 0;
+        let foundBrace = false;
+        let terminatedBySemicolon = false;
+        const maxHeaderLines = Math.min(fnLines.length, k + 8);
+
+        for (let h = k; h < maxHeaderLines; h++) {
+          const hLine = startLine + h;
+          const curLine = fnLines[h];
+          let inStr: string | null = null;
+          let escaped = false;
+
+          for (let c = 0; c < curLine.length; c++) {
+            const ch = curLine[c];
+            if (escaped) {
+              escaped = false;
+              continue;
+            }
+            if (ch === "\\") {
+              escaped = true;
+              continue;
+            }
+            if (inStr) {
+              if (ch === inStr) inStr = null;
+              continue;
+            }
+            if (ch === '"' || ch === "'" || ch === "`") {
+              inStr = ch;
+              continue;
+            }
+            if (ch === "/" && curLine[c + 1] === "/") break;
+
+            if (ch === "(") {
+              parenDepth++;
+            } else if (ch === ")") {
+              if (parenDepth > 0) parenDepth--;
+            } else if (ch === "{") {
+              foundBrace = true;
+              blockEndLine = openBraceLineToCloseLine.get(hLine) ?? diskLine;
+              break;
+            } else if (ch === ";" && parenDepth <= 0 && !foundBrace) {
+              terminatedBySemicolon = true;
+              break;
+            }
+          }
+
+          if (terminatedBySemicolon || foundBrace) {
+            break;
+          }
+        }
+
+        if (terminatedBySemicolon) {
+          blockEndLine = diskLine;
+        } else if (!foundBrace) {
+          blockEndLine = diskLine;
+        }
+      }
+    }
+
+    const span = blockEndLine - diskLine + 1;
+    if (span >= 8) {
+      let cleanSig = trimmed
+        .replace(/\s*\{?\s*$/, "")
+        .replace(/\s*:?\s*$/, "")
+        .replace(/\s*;\s*$/, "")
+        .trim();
+      if (cleanSig.length > 50) {
+        cleanSig = `${cleanSig.slice(0, 47)}...`;
+      }
+      landmarks.push({
+        type: "block",
+        startLine: diskLine,
+        endLine: blockEndLine,
+        text: cleanSig,
+        depth: 1,
+        span,
+        priority: span > 30 ? 2 : 4,
+      });
+    }
+  }
+
+  // Deduplicate landmarks that share the same startLine
+  const uniqueLandmarks: FunctionLandmarkItem[] = [];
+  const seenStartLines = new Set<number>();
+  landmarks.sort((a, b) => a.startLine - b.startLine);
+  for (const lm of landmarks) {
+    if (!seenStartLines.has(lm.startLine)) {
+      uniqueLandmarks.push(lm);
+      seenStartLines.add(lm.startLine);
+    }
+  }
+
+  // Assign nesting depth (depth 2 if strictly inside an outer block)
+  const blockLandmarks = uniqueLandmarks.filter((l) => l.type === "block");
+  for (const lm of uniqueLandmarks) {
+    const parentBlock = blockLandmarks.find(
+      (b) => b !== lm && b.startLine < lm.startLine && lm.endLine <= b.endLine,
+    );
+    if (parentBlock) {
+      lm.depth = 2;
+    }
+  }
+
+  // 4. Major Subsystem Call Clusters (> 60 lines gap without section or block)
+  const sortedStarts = [...uniqueLandmarks].sort((a, b) => a.startLine - b.startLine);
+  let prevCoveredEnd = startLine;
+  for (let s = 0; s <= sortedStarts.length; s++) {
+    const gapStart = prevCoveredEnd + 1;
+    const gapEnd = s < sortedStarts.length ? sortedStarts[s].startLine - 1 : endLine;
+    if (gapEnd - gapStart + 1 > 60) {
+      const calls: string[] = [];
+      let firstCallLine = -1;
+      let lastCallLine = -1;
+      for (let j = gapStart - startLine; j <= gapEnd - startLine && j < fnLines.length; j++) {
+        const diskL = startLine + j;
+        const line = fnLines[j];
+        const callMatches = Array.from(line.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/g));
+        for (const cm of callMatches) {
+          const fnName = cm[1];
+          if (
+            !/^(?:if|while|for|switch|match|return|catch|require|expect|console|typeof|sizeof|assert|print|push|pop|shift|slice|map|filter)$/.test(
+              fnName,
+            ) &&
+            !calls.includes(fnName)
+          ) {
+            calls.push(fnName);
+            if (firstCallLine === -1) firstCallLine = diskL;
+            lastCallLine = diskL;
+            if (calls.length >= 2) break;
+          }
+        }
+        if (calls.length >= 2) break;
+      }
+      if (calls.length > 0 && firstCallLine !== -1 && lastCallLine !== -1) {
+        uniqueLandmarks.push({
+          type: "call",
+          startLine: firstCallLine,
+          endLine: Math.max(firstCallLine, lastCallLine),
+          text: calls.join(" / "),
+          depth: 1,
+          span: lastCallLine - firstCallLine + 1,
+          priority: 5,
+        });
+      }
+    }
+    if (s < sortedStarts.length) {
+      prevCoveredEnd = Math.max(prevCoveredEnd, sortedStarts[s].endLine);
+    }
+  }
+
+  // 5. Cap to <= 25 lines
+  let finalLandmarks = uniqueLandmarks;
+  if (finalLandmarks.length > 25) {
+    finalLandmarks.sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      return b.span - a.span;
+    });
+    finalLandmarks = finalLandmarks.slice(0, 25);
+  }
+  finalLandmarks.sort((a, b) => a.startLine - b.startLine);
+
+  // Tree formatting
+  const resultLines: string[] = [];
+  for (let idx = 0; idx < finalLandmarks.length; idx++) {
+    const lm = finalLandmarks[idx];
+    const isDepth1 = lm.depth === 1;
+    const lineSuffix =
+      lm.startLine === lm.endLine ? `# [L${lm.startLine}]` : `# [L${lm.startLine}-L${lm.endLine}]`;
+
+    if (isDepth1) {
+      const hasNextDepth1 = finalLandmarks.slice(idx + 1).some((m) => m.depth === 1);
+      const marker = hasNextDepth1 ? "├─" : "└─";
+      resultLines.push(`${indentPrefix}${marker} ${lm.text} ${lineSuffix}`);
+    } else {
+      const hasNextChild = idx + 1 < finalLandmarks.length && finalLandmarks[idx + 1]!.depth === 2;
+      const marker = hasNextChild ? "├─" : "└─";
+      resultLines.push(`${indentPrefix}  ${marker} ${lm.text} ${lineSuffix}`);
+    }
+  }
+
+  return resultLines;
 }
 
 function enrichAndResolveSymbolLineRanges(

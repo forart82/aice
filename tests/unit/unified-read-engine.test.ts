@@ -26,6 +26,7 @@ import { readTelemetryEvents, type TelemetryEvent } from "../../src/telemetry/in
 import { estimateTokens } from "../../src/tokenomics/index.js";
 import {
   aiceRead,
+  compileFocusPattern,
   computeDynamicReadBudget,
   computeDynamicSliceSpan,
   computeLineRangeBaselineText,
@@ -36,9 +37,12 @@ import {
   generateContext,
   normalizeReadTargets,
   parseReadTarget,
+  parseSymbolPatternSelector,
   read,
   splice,
+  splitCommaSelectors,
   splitReadTargetString,
+  splitSymbolSelectors,
 } from "../../src/tools/index.js";
 
 describe("Unified Read Engine (`aiceRead`)", () => {
@@ -1930,6 +1934,264 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(sep2).toContain("f2_val_1");
       expect(sep1).not.toContain("budget already filled");
       expect(sep2).not.toContain("budget already filled");
+    });
+  });
+
+  describe("v0.9.47 Upgrades 2 & 3: Symbol Focus Slicing (@pattern) and Lossless Large Line Range Elision", () => {
+    it("performs symbol focus slicing on .ts files with function header, setup vars, ±6-line match windows, and skipped markers", async () => {
+      const tsCode = [
+        "// Focus slicing test file", // Line 1
+        "export function executeServicePipeline(reqId: string, payload: Record<string, unknown>): boolean {", // Line 2
+        "  const setupLimit = 500;", // Line 3
+        "  let setupActive = true;", // Line 4
+        ...Array.from({ length: 25 }, (_, i) => `  performStepWork(${i + 5});`), // Lines 5-29
+        '  const kw1_result = "matched alpha keyword marker";', // Line 30
+        ...Array.from({ length: 29 }, (_, i) => `  performIntermediateWork(${i + 31});`), // Lines 31-59
+        '  const kw2_result = "matched beta keyword marker";', // Line 60
+        ...Array.from({ length: 15 }, (_, i) => `  performFinalWork(${i + 61});`), // Lines 61-75
+        "  return setupActive;", // Line 76
+        "}", // Line 77
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "focus_service.ts"), `${tsCode}\n`, "utf-8");
+
+      // 1. Inline selector syntax: file:Symbol@kw1|kw2
+      const res = await aiceRead("src/focus_service.ts:executeServicePipeline@kw1|kw2", {
+        projectRoot: tmpDir,
+      });
+
+      expect(res.output).toContain(
+        "// === src/focus_service.ts:executeServicePipeline@kw1|kw2 ===",
+      );
+      expect(res.output).toContain("2│ export function executeServicePipeline");
+      expect(res.output).toContain("3│   const setupLimit = 500;");
+      expect(res.output).toContain("4│   let setupActive = true;");
+      expect(res.output).toContain("// ... [L5-L23 skipped — 19 unrelated lines] ...");
+      expect(res.output).toContain('30│   const kw1_result = "matched alpha keyword marker";');
+      expect(res.output).toContain("// ... [L37-L53 skipped — 17 unrelated lines] ...");
+      expect(res.output).toContain('60│   const kw2_result = "matched beta keyword marker";');
+      expect(res.output).toContain("// ... [L67-L77 skipped — 11 unrelated lines] ...");
+
+      // Verify ±6 lines around kw1 (line 30) -> lines 24 to 36
+      expect(res.output).toContain("24│   performStepWork(24);");
+      expect(res.output).toContain("36│   performIntermediateWork(36);");
+      expect(res.output).not.toContain("23│   performStepWork(23);");
+      expect(res.output).not.toContain("37│   performIntermediateWork(37);");
+
+      // 2. Option symbol syntax: symbol: "executeServicePipeline@kw1|kw2"
+      const resOption = await aiceRead("src/focus_service.ts", {
+        symbol: "executeServicePipeline@kw1|kw2",
+        projectRoot: tmpDir,
+      });
+      expect(resOption.output).toBe(res.output);
+    });
+
+    it("performs symbol focus slicing on .aipl files resolving AST outline range and emitting focus windows", async () => {
+      const aiplCode = [
+        "module FocusPipelineTest", // Line 1
+        "", // Line 2
+        "fn runPipelineTask(data: string): string:", // Line 3
+        "  val maxLimit = 100", // Line 4
+        "  val counter = 0", // Line 5
+        ...Array.from({ length: 20 }, (_, i) => `  processData(${i + 6})`), // Lines 6-25
+        '  val kw1_trigger = "alpha kw1 signal"', // Line 26
+        ...Array.from({ length: 24 }, (_, i) => `  processIntermediate(${i + 27})`), // Lines 27-50
+        '  val kw2_trigger = "beta kw2 signal"', // Line 51
+        ...Array.from({ length: 15 }, (_, i) => `  processFinal(${i + 52})`), // Lines 52-66
+        "  return data", // Line 67
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "focus_pipeline.aipl"), `${aiplCode}\n`, "utf-8");
+
+      const res = await aiceRead("src/focus_pipeline.aipl:runPipelineTask@kw1|kw2", {
+        projectRoot: tmpDir,
+      });
+
+      expect(res.output).toContain("// === src/focus_pipeline.aipl:runPipelineTask@kw1|kw2 ===");
+      expect(res.output).toContain("3│ fn runPipelineTask(data: string): string:");
+      expect(res.output).toContain("4│   val maxLimit = 100");
+      expect(res.output).toContain("5│   val counter = 0");
+      expect(res.output).toContain('26│   val kw1_trigger = "alpha kw1 signal"');
+      expect(res.output).toContain('51│   val kw2_trigger = "beta kw2 signal"');
+      expect(res.output).toMatch(/\/\/ \.\.\. \[L6-L19 skipped — 14 unrelated lines\] \.\.\./);
+      expect(res.output).toMatch(/\/\/ \.\.\. \[L33-L44 skipped — 12 unrelated lines\] \.\.\./);
+      expect(res.output).toMatch(/\/\/ \.\.\. \[L58-L67 skipped — 10 unrelated lines\] \.\.\./);
+    });
+
+    it("preserves sym@first and sym@<digits> ordinal disambiguation without treating them as pattern focus selectors", async () => {
+      const tsCode = [
+        "// Focus slicing test file",
+        "export function executeServicePipeline(reqId: string): boolean {",
+        "  const setupLimit = 500;",
+        "  return setupLimit > 0;",
+        "}",
+      ].join("\n");
+      fs.writeFileSync(path.join(tmpDir, "src", "focus_service.ts"), `${tsCode}\n`, "utf-8");
+
+      expect(parseSymbolPatternSelector("executeServicePipeline@first")).toBeNull();
+      expect(parseSymbolPatternSelector("executeServicePipeline@1")).toBeNull();
+      expect(parseSymbolPatternSelector("executeServicePipeline@2")).toBeNull();
+      expect(parseSymbolPatternSelector("executeServicePipeline@kw1|kw2")).toEqual({
+        symbol: "executeServicePipeline",
+        pattern: "kw1|kw2",
+      });
+
+      const res = await aiceRead("src/focus_service.ts:executeServicePipeline@first", {
+        projectRoot: tmpDir,
+      });
+      expect(res.output).toContain("export function executeServicePipeline");
+      expect(res.output).not.toContain("unrelated lines");
+      expect(res.output).not.toContain("@first@");
+    });
+
+    it("safely compiles focus patterns with ReDoS guards, preserves {m,n} quantifiers, and rejects whitespace in symbols", async () => {
+      // 1. ReDoS Guard: compileFocusPattern("(a+)+$") completes in < 20ms
+      const t0 = performance.now();
+      const compiled = compileFocusPattern("(a+)+$");
+      const elapsed = performance.now() - t0;
+      expect(elapsed).toBeLessThan(20);
+      expect(compiled).toBeInstanceOf(RegExp);
+      expect(compiled.source).toBe("\\(a\\+\\)\\+\\$");
+
+      // 2. Reject whitespace in symbol: test titles / Markdown headings are not hijacked
+      expect(parseSymbolPatternSelector("rejects invalid user@example.com email")).toBeNull();
+      expect(
+        parseSymbolPatternSelector('it("rejects invalid user@example.com email", () => {})'),
+      ).toBeNull();
+      expect(
+        parseSymbolPatternSelector("auth.test.ts:rejects invalid user@example.com email"),
+      ).toBeNull();
+
+      // 3. Preserve {m,n} regex quantifiers in symbol pattern selectors and comma splitters
+      expect(parseSymbolPatternSelector("executeServicePipeline@err\\d{1,2}")).toEqual({
+        symbol: "executeServicePipeline",
+        pattern: "err\\d{1,2}",
+      });
+
+      expect(splitCommaSelectors("executeServicePipeline@err\\d{1,2},helperFn")).toEqual([
+        "executeServicePipeline@err\\d{1,2}",
+        "helperFn",
+      ]);
+      expect(splitSymbolSelectors("executeServicePipeline@err\\d{1,2},helperFn")).toEqual([
+        "executeServicePipeline@err\\d{1,2}",
+        "helperFn",
+      ]);
+
+      const tsServiceCode = [
+        "// Service with regex-targeted error handling",
+        "export function executeServicePipeline(reqId: string): boolean {",
+        "  const setupLimit = 500;",
+        "  try {",
+        "    if (reqId === '') throw new Error('err01: empty');",
+        "    if (reqId === 'bad') throw new Error('err99: bad payload');",
+        "  } catch (e) {",
+        "    console.error(e);",
+        "  }",
+        "  return setupLimit > 0;",
+        "}",
+        "export function helperFn(): void {}",
+      ].join("\n");
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "focus_service_quantifier.ts"),
+        `${tsServiceCode}\n`,
+        "utf-8",
+      );
+
+      const readRes = await aiceRead(
+        "src/focus_service_quantifier.ts:executeServicePipeline@err\\d{1,2}",
+        {
+          projectRoot: tmpDir,
+        },
+      );
+      expect(readRes.output).toContain("export function executeServicePipeline");
+      expect(readRes.output).toContain("err01: empty");
+    });
+
+    it("losslessly elides contiguous imports, blank lines, and decorative dividers on large line range slices (>140L) under CLI budget", async () => {
+      // 400-line file with 45 imports, blank lines, divider banners, and 250 real code lines
+      const fileLines: string[] = [];
+      // Lines 1-45: 45 imports
+      for (let i = 1; i <= 45; i++) {
+        fileLines.push(`import { depModule_${i} } from "./depModule_${i}.js";`);
+      }
+      // Lines 46-50: divider banners & blank lines
+      fileLines.push("// ==================================================");
+      fileLines.push("// ==================================================");
+      fileLines.push("");
+      fileLines.push("");
+      fileLines.push("// Real architectural documentation describing the entity registry");
+
+      // Lines 51-150: 100 code lines
+      for (let i = 51; i <= 150; i++) {
+        fileLines.push(`export const k_${i} = ${i};`);
+      }
+      // Lines 151-200: 50 divider walls & blank lines
+      for (let i = 151; i <= 200; i++) {
+        if (i % 2 === 0) fileLines.push("");
+        else fileLines.push("// ==================================================");
+      }
+      // Lines 201-330: 130 code lines
+      for (let i = 201; i <= 330; i++) {
+        fileLines.push(`export const k_${i} = ${i};`);
+      }
+      // Lines 331-380: 50 divider walls & blank lines
+      for (let i = 331; i <= 380; i++) {
+        if (i % 2 === 0) fileLines.push("");
+        else fileLines.push("// --------------------------------------------------");
+      }
+      // Lines 381-400: 20 code lines
+      for (let i = 381; i <= 400; i++) {
+        fileLines.push(`export const k_${i} = ${i};`);
+      }
+      expect(fileLines.length).toBe(400);
+
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "large_elision.ts"),
+        `${fileLines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // 1. CLI surface without --full: elides imports, skips blanks and divider walls, preserves disk line numbers
+      const res = await aiceRead("src/large_elision.ts:L1-L400", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+
+      // Verifies 45 import lines folded
+      expect(res.output).toContain("// [L1-L45: 45 import lines folded — use :imports to expand]");
+      expect(res.output).not.toContain("depModule_1");
+      expect(res.output).not.toContain("depModule_45");
+
+      // Verifies blank lines and divider walls are skipped
+      expect(res.output).not.toContain("==================================================");
+      expect(res.output).not.toContain("--------------------------------------------------");
+
+      // Verifies real architectural prose comment is preserved with exact disk line number
+      expect(res.output).toContain(
+        "50│ // Real architectural documentation describing the entity registry",
+      );
+
+      // Verifies exact 1-based N│ disk line numbers
+      expect(res.output).toContain("51│ export const k_51 = 51;");
+      expect(res.output).toContain("400│ export const k_400 = 400;");
+
+      // Verifies 200+ real code lines emitted
+      const emittedLines = res.output.split("\n");
+      const codeLinesEmitted = emittedLines.filter((l) => /^\d+│\s*export const k_/.test(l));
+      expect(codeLinesEmitted.length).toBeGreaterThanOrEqual(200);
+
+      // Verifies output fits inside <= 9,216 bytes (DEFAULT_CLI_READ_MAX_BYTES) in 1 call!
+      const byteLen = Buffer.byteLength(res.output, "utf-8");
+      expect(byteLen).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
+
+      // 2. When full: true and unboundedCli: true, elision is bypassed
+      const fullRes = await aiceRead("src/large_elision.ts:L1-L400", {
+        projectRoot: tmpDir,
+        surface: "cli",
+        full: true,
+        unboundedCli: true,
+      });
+      expect(fullRes.output).toContain("import { depModule_1 }");
+      expect(fullRes.output).toContain("==================================================");
+      expect(fullRes.output).not.toContain("import lines folded");
     });
   });
 });

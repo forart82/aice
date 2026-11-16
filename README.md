@@ -2,15 +2,15 @@
 
 # AICE: On-the-Fly AI Context Engine & Multi-Language `$idioms` Splicer
 
-[![Version: 0.9.46](https://img.shields.io/badge/Version-0.9.46-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.47](https://img.shields.io/badge/Version-0.9.47-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
 [![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
 [![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C485%20passing-brightgreen)](tests/)
-[![Token Savings](https://img.shields.io/badge/Token%20Savings-42%25%20--%2087%25-orange)](docs/BENCHMARKS.md)
+[![Tests Passing](https://img.shields.io/badge/Tests-1%2C600%2B%20passing-brightgreen)](tests/)
+[![End-to-End Quota Savings](https://img.shields.io/badge/Real%20Quota%20Savings-15%25%20--%2025%25-00a86b)](docs/BENCHMARKS.md)
 
 > **A pure on-the-fly AST context packager, opt-in BPE-gated `$idiom` compressor, and surgical multi-language code splicer engineered for autonomous AI coding agents — with zero `.aice` files on disk.**
 
@@ -29,12 +29,25 @@ Modern Large Language Models (LLMs) spend **40% to 85% of their context windows,
 - **Data & Configuration**: JSON (`.json`), YAML (`.yaml`, `.yml`)
 - **Shell & Scripting**: Shell (`.sh`, `.bash`, `.zsh`), PowerShell (`.ps1`), Batch (`.cmd`, `.bat`), AIPL (`.aipl`)
 
+## 📊 What You Actually Win in Production (Empirically Measured)
+
+| Real Production Win | Metric | How AICE Delivers It |
+| :--- | :---: | :--- |
+| **Real Quota Savings** | **15% – 25%** | Eliminates 2-turn line-hunting reads, full-file re-reads, and syntax ceremony across multi-turn sessions. |
+| **More Work Before Memory Compaction** | **~35%** | Compact native slices, AST outlines, and smaller context payloads delay context window saturation. |
+| **Faster, Cheaper Edits (`aice splice`)** | **35% – 50%** | Emits only modified symbols or hunks (`<<< === >>>`) instead of generating entire 500-line files. |
+| **Monolith X-Ray & `@focus` Slicing** | **1,000+-Line** | X-Ray outlines giant functions with internal landmarks (`<=25L`) and focuses slices on targeted symbols/keywords (`:sym@pattern`). |
+| **Deterministic Code Safety** | **Zero Broken Disk Writes** | Pre-write syntax validation, transactional batch rollbacks, and atomic `.tmp` $\to$ `rename` commits prevent disk corruption. |
+
+- **Direct Payload vs. Session Quota**: Direct payload reduction measures **25%–40%** on reads and **35%–50%** on splice output tokens. When compounded with conversational history, system prompts, and multi-turn replay across an entire agent session, this translates to **15%–25%** net end-to-end quota savings on your LLM API bill.
+- **Compounding Leverage**: Smaller turns mean fewer tokens re-ingested on subsequent turns, keeping agents well below model context limits and preventing premature context compaction or memory degradation.
+
 ### Core Capability Matrix (Strict 2-Tool AI Surface)
 
 | Pillar & AI Tool | Key Capabilities & Internal Auto-Routing | Eliminates / Replaces | Token Savings |
 | :--- | :--- | :--- | :---: |
-| **Pillar 1: Unified Read**<br>**`aice read`** (MCP: **`aice_read`**)<br>*(CLI aliases: `context`, `ctx` + ergonomic `search`/`grep` & `find`/`tree`)* | **1-turn numbered native output by default** (`<lineNo>│ <rawDiskLine>` on `:symbol` of all lengths `<=25L`/`>25L` & inline bare files; `--dsl` opt-in), **`computeDynamicReadBudget()` water-filling** (`28,672 B` / `7,000`-tok ceiling, `26,624 B` / `6,500`-tok soft cap so `~600–750L` / `<=25 KB` bare files settle inline in 1 turn) + **`computeDynamicSliceSpan()`** (`18,432 B`, `80..650L` AST-snapped `Next slice` hints), **AST-Aware Search Windows** (`<=40L` enclosing decl or `±10L`, `-C`), **`< 20ms` zero-AST `find`/`--files`**, **Adaptive Sibling Outlining** (`<=20` syms), and symbol contracts/callers (`[L14]`). | 2-turn `:symbol` $\to$ `:Lstart-Lend` line hunting, 5-line search peepholes, `rg`/`grep`/`find`/`cat`, and 46 KB spillover files | **70–90%**<br>read & replay tokens |
-| **Pillar 2: Unified Write**<br>**`aice splice`** (MCP: **`aice_splice`**)<br>*(CLI alias: `aice write`)* | Single mutation & creation engine routing new files through greenfield **`create`** (recursive parent dirs, opt-in `$idioms`, AICE DSL) and existing targets through **Lossless Surgical AST/CST Splicing** (symbols, whitespace-resilient `<<<` hunks, `±2`-line brace-safe `:Lstart-Lend` + `±5`-line error context, `@clone`), **Guarded Overwrites**, and `--stdin` batch streams. | Monolithic file-creation loops, indentation-fragile hunks, and blind search-replace | **40–90%+**<br>write tokens |
+| **Pillar 1: Unified Read**<br>**`aice read`** (MCP: **`aice_read`**)<br>*(CLI aliases: `context`, `ctx` + ergonomic `search`/`grep` & `find`/`tree`)* | **1-turn numbered native output by default** (`<lineNo>│ <rawDiskLine>` on `:symbol` of all lengths `<=25L`/`>25L` & inline bare files; `--dsl` opt-in), **aligned `9 KB` CLI & MCP anti-spill slice budgets** (`6.75 KB` / `<=135L` slice hints), **`:sym@pattern` focus slicing**, **`>120L` Monolith X-Ray outlines** with internal landmark maps, **`>140L` blank/banner/import elision**, **`computeDynamicReadBudget()` water-filling**, **AST-Aware Search Windows** (`<=40L` enclosing decl or `±10L`, `-C`), **`< 20ms` zero-AST `find`/`--files`**, **Adaptive Sibling Outlining** (`<=20` syms), and symbol contracts/callers (`[L14]`). | 2-turn `:symbol` $\to$ `:Lstart-Lend` line hunting, 5-line search peepholes, `rg`/`grep`/`find`/`cat`, and 46 KB spillover files | **25–40%** direct read<br>(**15–25%** session quota) |
+| **Pillar 2: Unified Write**<br>**`aice splice`** (MCP: **`aice_splice`**)<br>*(CLI alias: `aice write`)* | Single mutation & creation engine routing new files through greenfield **`create`** (recursive parent dirs, opt-in `$idioms`, AICE DSL) and existing targets through **Lossless Surgical AST/CST Splicing** (symbols, whitespace-resilient `<<<` hunks, `±2`-line brace-safe `:Lstart-Lend` + `±5`-line error context, `@clone`), **Guarded Overwrites**, and `--stdin` batch streams. | Monolithic file-creation loops, indentation-fragile hunks, and blind search-replace | **35–50%**<br>write output tokens |
 | **Opt-In `$idioms`**<br>*(Internal Engine Layer)* | Parameterized project-wide AST macros (`"idiomsEnabled": false` by default; opt in via `--idioms` or `"idiomsEnabled": true`) collapsed and expanded in RAM with zero `.aice` files on disk. | Repetitive multi-file boilerplate without taxing 0-idiom reads | **60%+**<br>extra output savings |
 
 ---
@@ -77,14 +90,15 @@ Autonomous AI agents see **ONLY two MCP tools** — **`aice read`** (MCP `aice_r
 ```
 
 ### Pillar 1: Unified Read (`aice read` / MCP `aice_read` + CLI `search`/`grep` & `find`/`tree`)
-- **Default 1-Turn Numbered Native Output (`--dsl` Opt-In)**: By default, `aice read` (and MCP `aice_read`) emits **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) on **both** `:symbol` queries (all symbol lengths, including `<= 25` lines and `> 25` lines) **and** inline bare files — preserving dependency contracts, `[L14]` callers, and **Adaptive Sibling Outlining** (`<= 20` symbols / `~150` tokens) on `:Class.method` reads so agents can immediately run `aice splice` (`<<< === >>>` or `:Lstart-Lend`) in **1 turn** without a second `:Lstart-Lend` line-hunting read. Pass `--dsl` (`dsl: true` in MCP) to opt into AICE shorthand decompilation.
-- **Dynamic Water-Filling Byte/Token Budget & AST-Snapped Slice Hints**: Replaces static `250`/`150`-line cutoffs with **surface-aware budgeting** via **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling for MCP/programmatic `aice_read`; `9,216 B` (`9 KB`) / `2,400`-token ceiling for CLI `aice read` to prevent host `run_command` middle-truncation; smallest-first water-filling across requested targets so small files render inline in 1 turn, auto-outlining only overflow targets unless `--full`, `--max-tokens`, or an explicit `autoOutlineLineThreshold` is passed) and **`computeDynamicSliceSpan()`** (`18,432 B` MCP / `7,936 B` (`7.75 KB`, ~135–185 lines) CLI slice budget clamped and snapped to complete top-level AST symbol boundaries so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function in half).
+- **Default 1-Turn Numbered Native Output & Realistic Token Savings (`25–40%` Direct / `15–25%` Session Quota)**: By default, `aice read` (and MCP `aice_read`) emits **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) on **both** `:symbol` queries (all symbol lengths, including `<= 25` lines and `> 25` lines) **and** inline bare files — preserving dependency contracts, `[L14]` callers, and **Adaptive Sibling Outlining** (`<= 20` symbols / `~150` tokens) on `:Class.method` reads so agents can immediately run `aice splice` (`<<< === >>>` or `:Lstart-Lend`) in **1 turn** without a second `:Lstart-Lend` line-hunting read. Pass `--dsl` (`dsl: true` in MCP) to opt into AICE shorthand decompilation.
+- **Aligned 9 KB Anti-Spill Slice Budgets & AST-Snapped Slice Hints**: Prevents tool call truncation via aligned **`9 KB` CLI & MCP anti-spill slice budgets** (`6.75 KB` / `<= 135L` slice hints) via **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling for MCP/programmatic `aice_read`; `9,216 B` (`9 KB`) / `2,400`-token ceiling for CLI `aice read` to prevent host `run_command` middle-truncation; smallest-first water-filling across requested targets so small files render inline in 1 turn, auto-outlining only overflow targets unless `--full`, `--max-tokens`, or an explicit `autoOutlineLineThreshold` is passed) and **`computeDynamicSliceSpan()`** (`18,432 B` MCP / `7,936 B` (`7.75 KB`, ~135–185 lines) CLI slice budget clamped and snapped to complete top-level AST symbol boundaries so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function in half).
+- **`:sym@pattern` Focus Slicing, `>120L` Monolith X-Ray Outlines & `>140L` Elision**: Target dense blocks directly via focus slicing (`<file>:<symbol>@<keyword>`), navigate giant files with **`> 120L` Monolith X-Ray outlines** featuring indented internal landmark maps (`<= 25` lines: setup clusters, section comments, and control blocks), and compress large files via **`> 140L` blank/banner/import elision** while keeping outline token overhead negligible.
 - **AST-Aware Search Context Windows & `aice search` (`grep`)**: Tier 1 & 2 search hits expand automatically to **complete enclosing AST declarations (`<= 40` lines)** or **`±10` numbered native lines** (`~21`-line window, configurable via `-C, --context <lines>` / MCP `contextLines`), merging overlapping windows within the `28 KB` budget instead of tiny 5-line (`±2`) peepholes. `aice search <pattern> [targets...]` (alias `grep`, plus `aice read --search`) accepts plain regex or auto-escaped literal patterns without `/.../` wrappers (supporting `-C`, `-l`, `--full`, `--json`, `--max-tokens`), ranked across **4 Tiers** (production declarations $\to$ code $\to$ comments $\to$ test/mock decoys).
 - **Zero-AST `< 20ms` Workspace Discovery (`aice find` / `tree` / `--files`) & Fast Path**: `aice find [pattern] [targets...]` (alias `tree`, `aice read --files`, MCP `filesOnly: true`) scans workspaces in `< 20ms` without AST parsing or 15-file truncation, emitting `<relPath> (<lines>L, <sizeKB>KB)` within the `28 KB` ceiling. Line slices (`:Lstart-Lend`), config/doc/passthrough files, and small bare files emit a minimal `// === <file> ===` zero-envelope slice (`--deps` / `--callers` opt-in).
 
 ### Pillar 2: Unified Write (`aice splice` / MCP `aice_splice`, CLI Alias `aice write`)
 - **Greenfield Auto-Creation (Internal `create` Routing)**: Missing files and `:create` targets automatically synthesize parent directories (`mkdir -p`), expand inline `@idiom` or opt-in `--idioms` macros (`"idiomsEnabled": false` by default), and compile AICE DSL or native source to disk.
-- **Resilient Surgical CST/AST Splicing (<50% mutations)**: Supports `:Class.method`, **whitespace-resilient `<<< / === / >>>` hunks** (unambiguous dedent fallback with automatic indentation preservation), **brace-safe `±2`-line `:Lstart-Lend` auto-alignment** (plus `±40`-line shifted-header healing and exact `±5` numbered file lines on syntax error), `@clone`, `:Heading`, `:imports`, and `:eof` while guarding lexer inputs (`maskSourceLexically(source ?? "")`).
+- **Resilient Surgical CST/AST Splicing (35–50% Write Output Token Savings)**: Supports `:Class.method`, **whitespace-resilient `<<< / === / >>>` hunks** (unambiguous dedent fallback with automatic indentation preservation), **brace-safe `±2`-line `:Lstart-Lend` auto-alignment** (plus `±40`-line shifted-header healing and exact `±5` numbered file lines on syntax error), `@clone`, `:Heading`, `:imports`, and `:eof` while guarding lexer inputs (`maskSourceLexically(source ?? "")`).
 - **Guarded Full-File Overwrite (>50% mutations)**: Selector-free calls overwrite atomically via greenfield `create` while rejecting accidental empty-string overwrites unless `--overwrite`, `--force`, or `:overwrite` is passed.
 - **Pre-Write Syntax Gate & Transactional Batch Rollback**: Validates native syntax before touching disk, rejects malformed `=== ... ===` batch headers cleanly, rolls back multi-file `--stdin` streams on any error, and commits via atomic `.tmp` $\to$ `rename` writes.
 
@@ -466,7 +480,7 @@ npm run benchmark
 aice/
 ├── LICENSE                     # Apache-2.0 license
 ├── NOTICE                      # Apache-2.0 attribution notice (@forart82)
-├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.46)
+├── CITATION.cff                # GitHub academic / software citation metadata (v0.9.47)
 ├── AGENTS.md                   # Single-file <= 650-token workspace AICE agent rules
 ├── vitest.config.ts            # Vitest test runner configuration
 ├── install.sh                  # Universal Linux installer & optional Zsh startup cheatsheet
@@ -508,7 +522,7 @@ aice/
 │   ├── tokenomics/             # TikToken BPE (`cl100k_base` / `o200k_base`) tokenomics engine
 │   ├── tools/                  # Unified read (numbered native, dynamic water-filling & AST search) & resilient splice
 │   ├── typechecker/            # Static typechecker & autonomous self-repair engine
-│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.46)
+│   └── version.ts              # Single source of truth for AICE_VERSION (v0.9.47)
 └── tests/
     ├── unit/                   # Unit test suites
     └── integration/            # Multi-file roundtrip & operator pipeline integration suites
@@ -529,7 +543,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.46},
+  version = {0.9.47},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}

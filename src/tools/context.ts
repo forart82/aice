@@ -161,6 +161,16 @@ export interface ContextOptions {
    * Invocation surface (e.g. "cli" | "mcp").
    */
   surface?: "cli" | "mcp";
+
+  /**
+   * Explicit full output override (--full).
+   */
+  full?: boolean;
+
+  /**
+   * Human interactive terminal mode where stdout is not constrained to budget ceiling.
+   */
+  unboundedCli?: boolean;
 }
 
 export interface DependencyContract {
@@ -1268,7 +1278,7 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
     return [];
   }
 }
-function splitSymbolSelectors(rawSymbol: string): string[] {
+export function splitSymbolSelectors(rawSymbol: string): string[] {
   const trimmed = rawSymbol.trim();
   if (!trimmed) return [];
   if (/^\/[^/\\\n]+\/[gimsuy]*$/.test(trimmed)) {
@@ -1277,9 +1287,10 @@ function splitSymbolSelectors(rawSymbol: string): string[] {
   const out: string[] = [];
   let current = "";
   let inRegex = false;
-  let regexCharClass = false;
+  let inCharClass = false;
   let inQuote: string | null = null;
   let escaped = false;
+  let curlyDepth = 0;
   for (let i = 0; i < trimmed.length; i++) {
     const ch = trimmed[i]!;
     if (escaped) {
@@ -1287,24 +1298,25 @@ function splitSymbolSelectors(rawSymbol: string): string[] {
       escaped = false;
       continue;
     }
+    if (ch === "\\") {
+      escaped = true;
+      current += ch;
+      continue;
+    }
     if (inQuote) {
       current += ch;
-      if (ch === "\\") {
-        escaped = true;
-      } else if (ch === inQuote) {
+      if (ch === inQuote) {
         inQuote = null;
       }
       continue;
     }
     if (inRegex) {
       current += ch;
-      if (ch === "\\") {
-        escaped = true;
-      } else if (ch === "[") {
-        regexCharClass = true;
-      } else if (ch === "]" && regexCharClass) {
-        regexCharClass = false;
-      } else if (ch === "/" && !regexCharClass) {
+      if (ch === "[") {
+        inCharClass = true;
+      } else if (ch === "]" && inCharClass) {
+        inCharClass = false;
+      } else if (ch === "/" && !inCharClass) {
         inRegex = false;
       }
       continue;
@@ -1316,11 +1328,28 @@ function splitSymbolSelectors(rawSymbol: string): string[] {
     }
     if (ch === "/" && current.trim() === "") {
       inRegex = true;
-      regexCharClass = false;
+      inCharClass = false;
       current += ch;
       continue;
     }
-    if (ch === ",") {
+    if (ch === "[" && !inCharClass && trimmed.indexOf("]", i + 1) !== -1) {
+      inCharClass = true;
+      current += ch;
+      continue;
+    }
+    if (ch === "]" && inCharClass) {
+      inCharClass = false;
+      current += ch;
+      continue;
+    }
+    if (!inCharClass) {
+      if (ch === "{" && trimmed.indexOf("}", i + 1) !== -1) {
+        curlyDepth++;
+      } else if (ch === "}" && curlyDepth > 0) {
+        curlyDepth--;
+      }
+    }
+    if (ch === "," && curlyDepth === 0 && !inCharClass) {
       const piece = current.trim();
       if (piece) out.push(piece);
       current = "";
@@ -1581,7 +1610,11 @@ function formatBundle(
         !isPureRegexSymbolString(rawSym),
     );
     const headerTarget = includeSymSuffix ? `${displayTargetPath}:${rawSym}` : displayTargetPath;
-    const minLines: string[] = [`// === ${headerTarget} ===`];
+    const requestedSymbols = rawSym ? splitSymbolSelectors(rawSym) : [];
+    const minLines: string[] =
+      targetBody.startsWith("// === ") && requestedSymbols.length <= 1
+        ? []
+        : [`// === ${headerTarget} ===`];
     if (shouldEmitIdioms && idioms && !targetBody.includes("# @idioms available:")) {
       const idiomNames = Object.entries(idioms)
         .map(([name, def]) => {
@@ -3626,6 +3659,487 @@ function resolveParentMemberFallback(
   return undefined;
 }
 
+function parseSelectorLineRange(
+  selector?: string,
+): { startLine: number; endLine?: number } | undefined {
+  if (!selector) return undefined;
+  const m = selector.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
+  if (!m?.[1]) return undefined;
+  const startLine = Number.parseInt(m[1], 10);
+  const endLine = m[2] ? Number.parseInt(m[2], 10) : undefined;
+  return { startLine, endLine };
+}
+
+/**
+ * Splits <Symbol>@<pattern> ONLY when:
+ * 1. The selector does NOT start with / (not a regex literal :/foo@bar/), NOT outline, and NOT a pure :Lstart-Lend line range.
+ * 2. @ is after at least 1 symbol char (atIdx > 0), and the part after @ is non-empty,
+ *    NOT "first" (case-insensitive), NOT pure digits (/^\d+$/ — preserve existing sym@first / sym@1 ordinal disambiguation!),
+ *    and NOT clone( / replace-docs.
+ */
+export function parseSymbolPatternSelector(
+  rawSelector: string,
+): { symbol: string; pattern: string } | null {
+  const trimmed = rawSelector.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("/")) return null;
+  if (trimmed.toLowerCase() === "outline") return null;
+  if (/^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i.test(trimmed)) return null;
+
+  const atIdx = trimmed.indexOf("@");
+  if (atIdx <= 0) return null;
+
+  const symbol = trimmed.slice(0, atIdx).trim();
+  const pattern = trimmed.slice(atIdx + 1).trim();
+
+  if (!symbol || !pattern || /\s/.test(symbol)) return null;
+  if (pattern.toLowerCase() === "first") return null;
+  if (/^\d+$/.test(pattern)) return null;
+  if (pattern.startsWith("clone(") || pattern === "replace-docs") return null;
+
+  return { symbol, pattern };
+}
+
+export function compileFocusPattern(rawPattern: string): RegExp {
+  const hasUppercase = /[A-Z]/.test(rawPattern);
+  const flags = hasUppercase ? "" : "i";
+  if (rawPattern.length <= 512 && !hasCatastrophicNestedQuantifiers(rawPattern)) {
+    try {
+      return new RegExp(rawPattern, flags);
+    } catch {
+      // invalid regex syntax falls through to escaped literal
+    }
+  }
+  const escaped = rawPattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped, flags);
+}
+
+export function isDecorativeDividerComment(trimmed: string): boolean {
+  if (trimmed.length < 4 || /[a-zA-Z0-9]/.test(trimmed)) return false;
+  return /^(?:\/\/|#|--|\/\*|\*)[-=_~/#\s*]*$/.test(trimmed);
+}
+
+export function detectContiguousImportBlock(
+  rawLines: string[],
+  startLine: number,
+  clampedEnd: number,
+): { impStart: number; impEnd: number } | undefined {
+  let firstImp: number | undefined;
+  let lastImp: number | undefined;
+  let inMultiline = false;
+
+  for (let l = startLine; l <= clampedEnd; l++) {
+    const ln = rawLines[l - 1] ?? "";
+    const trimmed = ln.trim();
+
+    if (inMultiline) {
+      lastImp = l;
+      if (/\bfrom\s+['"]|;|\)/.test(trimmed) || (trimmed.includes("}") && !trimmed.includes("{"))) {
+        inMultiline = false;
+      }
+      continue;
+    }
+
+    const isSingleImport =
+      /^\s*import\b/.test(trimmed) ||
+      /^\s*export\s+(?:\*|\{[^}]*\})\s+from\b/.test(trimmed) ||
+      /^\s*from\s+[\w.]+\s+import\b/.test(trimmed) ||
+      /^\s*#\s*include\b/.test(trimmed) ||
+      /^\s*use\s+[\w:]+;?/.test(trimmed);
+
+    const isMultilineStart =
+      (/^\s*(?:import\b|export\s+\{|use\s+[\w:]+\s*\{)/.test(trimmed) &&
+        !/\bfrom\s+['"]|;/.test(trimmed) &&
+        (trimmed.includes("{") || trimmed.endsWith("("))) ||
+      (/^\s*from\s+[\w.]+\s+import\s*\(/m.test(trimmed) && !trimmed.includes(")"));
+
+    if (isSingleImport || isMultilineStart) {
+      if (firstImp === undefined) {
+        firstImp = l;
+      }
+      lastImp = l;
+      if (isMultilineStart && !trimmed.includes("}")) {
+        inMultiline = true;
+      }
+      continue;
+    }
+
+    if (firstImp !== undefined) {
+      const isBlankOrComment = trimmed === "" || /^(?:\/\/|\/\*|\*|#|--)/.test(trimmed);
+      if (isBlankOrComment) {
+        continue;
+      }
+      break;
+    }
+  }
+
+  if (firstImp !== undefined && lastImp !== undefined) {
+    const span = lastImp - firstImp + 1;
+    if (span >= 30) {
+      return { impStart: firstImp, impEnd: lastImp };
+    }
+  }
+  return undefined;
+}
+
+export function formatLargeLineRangeWithElision(
+  rawLines: string[],
+  startLine: number,
+  clampedEnd: number,
+): string {
+  const importBlock = detectContiguousImportBlock(rawLines, startLine, clampedEnd);
+  const outLines: string[] = [];
+
+  let l = startLine;
+  while (l <= clampedEnd) {
+    if (importBlock && l >= importBlock.impStart && l <= importBlock.impEnd) {
+      const foldedCount = importBlock.impEnd - importBlock.impStart + 1;
+      outLines.push(
+        `// [L${importBlock.impStart}-L${importBlock.impEnd}: ${foldedCount} import lines folded — use :imports to expand]`,
+      );
+      l = importBlock.impEnd + 1;
+      continue;
+    }
+
+    const rawLine = rawLines[l - 1] ?? "";
+    const trimmed = rawLine.trim();
+
+    // Skip pure blank / whitespace-only lines
+    if (trimmed.length === 0) {
+      l++;
+      continue;
+    }
+
+    // Skip pure decorative divider comment lines that contain no alphanumeric words
+    if (isDecorativeDividerComment(trimmed)) {
+      l++;
+      continue;
+    }
+
+    // Keep real prose comments & code with true 1-based disk line number
+    outLines.push(`${l}│ ${rawLine}`);
+    l++;
+  }
+
+  return outLines.join("\n");
+}
+
+function computeHeaderSetupRange(
+  diskLines: string[],
+  symStartLine: number,
+  symEndLine: number,
+): [number, number] {
+  const maxEnd = Math.min(symEndLine, symStartLine + 15);
+  let curEnd = symStartLine;
+
+  let parenDepth = 0;
+  let inSignature = true;
+
+  for (let l = symStartLine; l <= maxEnd; l++) {
+    const raw = diskLines[l - 1] ?? "";
+    const trimmed = raw.trim();
+
+    if (l === symStartLine) {
+      curEnd = l;
+      for (const ch of raw) {
+        if (ch === "(") parenDepth++;
+        else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
+      }
+      if (
+        parenDepth === 0 &&
+        (raw.includes("{") || raw.includes(":") || raw.includes("=>") || !raw.includes("("))
+      ) {
+        inSignature = false;
+      }
+      continue;
+    }
+
+    if (inSignature) {
+      curEnd = l;
+      for (const ch of raw) {
+        if (ch === "(") parenDepth++;
+        else if (ch === ")") parenDepth = Math.max(0, parenDepth - 1);
+      }
+      if (parenDepth === 0 && (raw.includes("{") || raw.includes(":") || raw.includes("=>"))) {
+        inSignature = false;
+      }
+      continue;
+    }
+
+    if (/^(?:while|for|if|switch|match|loop)\b/.test(trimmed)) {
+      break;
+    }
+
+    const isSetupVar = /^(?:(?:export\s+)?(?:let|mut|const|var|val|auto)\s)/.test(trimmed);
+    const isCommentOrBlank = trimmed === "" || /^(?:\/\/|\/\*|\*|#|--)/.test(trimmed);
+
+    if (isSetupVar || isCommentOrBlank) {
+      curEnd = l;
+    } else {
+      break;
+    }
+  }
+
+  return [symStartLine, curEnd];
+}
+
+function findMatchingOutlineSymbol(
+  symbols: OutlineSymbol[],
+  targetName: string,
+  className?: string,
+  memberName?: string,
+  parentName?: string,
+): OutlineSymbol | undefined {
+  for (const sym of symbols) {
+    const fullName = parentName ? `${parentName}.${sym.name}` : sym.name;
+    const colonName = parentName ? `${parentName}::${sym.name}` : sym.name;
+    if (
+      sym.name === targetName ||
+      fullName === targetName ||
+      colonName === targetName ||
+      normalizeIdentForMatch(sym.name) === normalizeIdentForMatch(targetName) ||
+      normalizeIdentForMatch(fullName) === normalizeIdentForMatch(targetName)
+    ) {
+      return sym;
+    }
+    if (
+      className &&
+      (sym.name === className ||
+        normalizeIdentForMatch(sym.name) === normalizeIdentForMatch(className))
+    ) {
+      if (sym.children) {
+        for (const child of sym.children) {
+          if (
+            child.name === memberName ||
+            normalizeIdentForMatch(child.name) === normalizeIdentForMatch(memberName ?? "")
+          ) {
+            return child;
+          }
+        }
+      }
+    }
+    if (sym.children && sym.children.length > 0) {
+      const childHit = findMatchingOutlineSymbol(
+        sym.children,
+        targetName,
+        className,
+        memberName,
+        sym.name,
+      );
+      if (childHit) return childHit;
+    }
+  }
+  return undefined;
+}
+
+function resolveSymbolDiskLineRange(
+  rawSource: string,
+  diskLines: string[],
+  filePath: string,
+  symbolName: string,
+  projectRoot: string,
+): { symStartLine: number; symEndLine: number } {
+  const parts = symbolName.split(/\.|::/);
+  const className = parts.length >= 2 ? parts[0]!.trim() : undefined;
+  const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : symbolName;
+  const detectedLang = detectTargetFromPathOrContent(filePath, rawSource);
+
+  let symStartLine: number | undefined;
+  let symEndLine: number | undefined;
+
+  // 1. Try locateNativeDeclarationSpan
+  if (detectedLang !== "passthrough") {
+    try {
+      let span = locateNativeDeclarationSpan(rawSource, symbolName, detectedLang, className);
+      if (!span && className) {
+        span = locateNativeDeclarationSpan(rawSource, memberName, detectedLang, className);
+      }
+      if (span && span.declEnd > (span.fullDeclStart ?? span.declStart)) {
+        const fullStartOff = span.fullDeclStart ?? span.declStart;
+        symStartLine = span.startLine ?? rawSource.slice(0, fullStartOff).split(/\r?\n/).length;
+        symEndLine = span.endLine ?? rawSource.slice(0, span.declEnd).split(/\r?\n/).length;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 2. Try generateOutline (supporting AIPL, TS, etc.)
+  if (symStartLine === undefined || symEndLine === undefined || symEndLine <= symStartLine) {
+    try {
+      const outlineRes = generateOutline(rawSource, {
+        filePath,
+        lineRanges: true,
+        skipTokenStats: true,
+        includeTypes: true,
+      });
+      const found = findMatchingOutlineSymbol(
+        outlineRes.symbols,
+        symbolName,
+        className,
+        memberName,
+      );
+      if (found) {
+        if (symStartLine === undefined) {
+          symStartLine = found.line;
+        }
+        if (found.endLine && found.endLine >= found.line) {
+          symEndLine = found.endLine;
+        } else if (found.lineRange) {
+          const parsedRange = parseSelectorLineRange(found.lineRange);
+          if (parsedRange?.endLine && parsedRange.endLine >= found.line) {
+            symEndLine = parsedRange.endLine;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Fallback scan for declaration line if not yet resolved
+  if (symStartLine === undefined) {
+    const escapedShort = memberName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const declRe = new RegExp(
+      `(?:^|\\b)(?:function|fn|def|func|class|interface|type)\\s+${escapedShort}\\b`,
+    );
+    for (let l = 1; l <= diskLines.length; l++) {
+      if (declRe.test(diskLines[l - 1] ?? "")) {
+        symStartLine = l;
+        break;
+      }
+    }
+  }
+
+  // 4. Fallback brace / indentation scan for endLine
+  if (symStartLine !== undefined && (symEndLine === undefined || symEndLine <= symStartLine)) {
+    let openBraces = 0;
+    let seenOpen = false;
+    for (let l = symStartLine; l <= diskLines.length; l++) {
+      const ln = diskLines[l - 1] ?? "";
+      for (const ch of ln) {
+        if (ch === "{") {
+          openBraces++;
+          seenOpen = true;
+        } else if (ch === "}") {
+          openBraces--;
+        }
+      }
+      if (seenOpen && openBraces <= 0) {
+        symEndLine = l;
+        break;
+      }
+    }
+    if (symEndLine === undefined || symEndLine <= symStartLine) {
+      symEndLine = diskLines.length;
+    }
+  }
+
+  if (symStartLine === undefined) {
+    const displayPath = formatDisplayPath(filePath, projectRoot);
+    throw new Error(
+      `Symbol '${symbolName}' not found in ${displayPath}${didYouMeanSymbol(rawSource, symbolName)}`,
+    );
+  }
+
+  symStartLine = Math.max(1, Math.min(diskLines.length, symStartLine));
+  symEndLine = Math.max(symStartLine, Math.min(diskLines.length, symEndLine ?? symStartLine));
+
+  return { symStartLine, symEndLine };
+}
+
+export function extractSymbolFocusSlice(
+  rawSource: string,
+  filePath: string,
+  symbolName: string,
+  rawPattern: string,
+  options?: { projectRoot?: string },
+): string {
+  const cleanRaw = rawSource.length > 0 ? rawSource.replace(/\r?\n$/, "") : "";
+  const diskLines = cleanRaw.length > 0 ? cleanRaw.split(/\r?\n/) : [""];
+  const projectRoot = options?.projectRoot ?? findProjectRoot(filePath, process.cwd());
+  const relPath = formatDisplayPath(filePath, projectRoot);
+
+  const { symStartLine, symEndLine } = resolveSymbolDiskLineRange(
+    rawSource,
+    diskLines,
+    filePath,
+    symbolName,
+    projectRoot,
+  );
+
+  const patternRegex = compileFocusPattern(rawPattern);
+  const [setupStart, setupEnd] = computeHeaderSetupRange(diskLines, symStartLine, symEndLine);
+
+  let matchCount = 0;
+  const rawWindows: Array<{ start: number; end: number }> = [{ start: setupStart, end: setupEnd }];
+
+  for (let l = symStartLine; l <= symEndLine; l++) {
+    const lineText = diskLines[l - 1] ?? "";
+    if (patternRegex.test(lineText)) {
+      matchCount++;
+      rawWindows.push({
+        start: Math.max(symStartLine, l - 6),
+        end: Math.min(symEndLine, l + 6),
+      });
+    }
+  }
+
+  const header = `// === ${relPath}:${symbolName}@${rawPattern} ===`;
+
+  if (matchCount === 0) {
+    const out: string[] = [header];
+    for (let l = setupStart; l <= setupEnd; l++) {
+      out.push(`${l}│ ${diskLines[l - 1]}`);
+    }
+    out.push(
+      `// [0 lines matched '${rawPattern}' inside ${symbolName} L${symStartLine}-L${symEndLine}]`,
+    );
+    return out.join("\n");
+  }
+
+  rawWindows.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged: Array<{ start: number; end: number }> = [];
+  for (const w of rawWindows) {
+    if (merged.length === 0) {
+      merged.push({ ...w });
+    } else {
+      const prev = merged[merged.length - 1]!;
+      const gap = w.start - prev.end - 1;
+      if (gap <= 2) {
+        prev.end = Math.max(prev.end, w.end);
+      } else {
+        merged.push({ ...w });
+      }
+    }
+  }
+
+  const out: string[] = [header];
+
+  for (let i = 0; i < merged.length; i++) {
+    const cur = merged[i]!;
+    if (i > 0) {
+      const gapStart = merged[i - 1]!.end + 1;
+      const gapEnd = cur.start - 1;
+      const gapCount = gapEnd - gapStart + 1;
+      out.push(`// ... [L${gapStart}-L${gapEnd} skipped — ${gapCount} unrelated lines] ...`);
+    }
+    for (let l = cur.start; l <= cur.end; l++) {
+      out.push(`${l}│ ${diskLines[l - 1]}`);
+    }
+  }
+
+  const lastEnd = merged[merged.length - 1]!.end;
+  if (lastEnd < symEndLine && symEndLine - lastEnd > 2) {
+    const gapStart = lastEnd + 1;
+    const gapEnd = symEndLine;
+    const gapCount = gapEnd - gapStart + 1;
+    out.push(`// ... [L${gapStart}-L${gapEnd} skipped — ${gapCount} unrelated lines] ...`);
+  }
+
+  return out.join("\n");
+}
+
 export function extractSymbolFromAiceSource(
   aiceSource: string,
   symbolSelector: string,
@@ -3636,6 +4150,9 @@ export function extractSymbolFromAiceSource(
     clampOutOfBounds?: boolean;
     rawNative?: boolean;
     contextLines?: number;
+    surface?: "cli" | "mcp";
+    elideLargeLineRange?: boolean;
+    projectRoot?: string;
   },
 ): string {
   let trimmedSel = symbolSelector.trim();
@@ -3643,6 +4160,16 @@ export function extractSymbolFromAiceSource(
     !filePath.endsWith(".aice") && fs.existsSync(filePath)
       ? fs.readFileSync(filePath, "utf-8")
       : aiceSource;
+
+  const symPat = parseSymbolPatternSelector(trimmedSel);
+  if (symPat) {
+    return extractSymbolFocusSlice(rawFileSource, filePath, symPat.symbol, symPat.pattern, options);
+  }
+
+  const symOrdinalMatch = trimmedSel.match(/^([^@]+)@(first|\d+)$/i);
+  if (symOrdinalMatch) {
+    trimmedSel = symOrdinalMatch[1]!.trim();
+  }
 
   const finalizeExtracted = (text: string, startLine = 1): string => {
     const lineCount = text.split("\n").length;
@@ -3692,6 +4219,10 @@ export function extractSymbolFromAiceSource(
       );
     }
     const clampedEnd = Math.min(endLine, totalLines);
+    const lineSpan = endLine - startLine + 1;
+    if (lineSpan > 140 && options?.elideLargeLineRange) {
+      return formatLargeLineRangeWithElision(rawLines, startLine, clampedEnd);
+    }
     const sliceLines = rawLines.slice(startLine - 1, clampedEnd);
     if (options?.numberLines || sliceLines.length > 25) {
       return sliceLines.map((ln, idx) => `${startLine + idx}│ ${ln}`).join("\n");
@@ -4374,6 +4905,8 @@ export async function generateContext(
     Boolean(options.symbol) &&
     splitSymbolSelectors(options.symbol!).length > 0 &&
     splitSymbolSelectors(options.symbol!).every((s) => /^\/.+\/[gimsuy]*$/.test(s.trim()));
+  const isSymbolPattern =
+    Boolean(options.symbol) && Boolean(parseSymbolPatternSelector(options.symbol!.trim()));
 
   const effectiveRawNative = options.dsl === true ? false : Boolean(options.rawNative);
   const idiomsActive =
@@ -4382,7 +4915,9 @@ export async function generateContext(
       : isProjectIdiomsEnabled(config, options.idioms);
   const regexMentionsIdiom = isPureRegexSymbol && /\$[A-Za-z_]/.test(options.symbol!);
   const isFastPathSelector =
-    isPureLineRangeSymbol || (isPureRegexSymbol && !(idiomsActive && regexMentionsIdiom));
+    isPureLineRangeSymbol ||
+    isSymbolPattern ||
+    (isPureRegexSymbol && !(idiomsActive && regexMentionsIdiom));
 
   let activeIdioms =
     idiomsActive && config.idioms && Object.keys(config.idioms).length > 0
@@ -4462,6 +4997,7 @@ export async function generateContext(
     !hasExplicitEnvelopeOptIn &&
     (isPureLineRangeSymbol ||
       isPureRegexSymbol ||
+      isSymbolPattern ||
       isZeroEnvelopeExt ||
       isBareSmallFile ||
       isCliOrMcp);
@@ -4643,11 +5179,21 @@ export async function generateContext(
       }
     } else {
       const requestedSymbols = splitSymbolSelectors(options.symbol);
+      const shouldEnforceBudget =
+        options.maxTokens === undefined &&
+        !options.json &&
+        !options.full &&
+        !options.unboundedCli &&
+        (options.surface === "cli" || options.surface === "mcp") &&
+        !options.dsl;
       const extractOpts = {
         numberLines: true,
         clampOutOfBounds: true,
         rawNative: effectiveRawNative,
         contextLines: options.contextLines,
+        surface: options.surface,
+        elideLargeLineRange: shouldEnforceBudget,
+        projectRoot,
       };
       if (requestedSymbols.length === 0) {
         if (!nativeDiagnostics) {

@@ -569,5 +569,168 @@ class DataPipeline:
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });
+
+    it("emits top-of-file imports landmark (>=10 lines) and indented monolith X-Ray landmarks for >120-line .aipl functions", () => {
+      const importLines = [
+        "module game",
+        "import {",
+        "  Window,",
+        "  Renderer,",
+        "  Texture,",
+        "  Sprite,",
+        "  Keyboard,",
+        "  Mouse,",
+        "  Audio,",
+        "  Sound,",
+        "  Music,",
+        "  Vector2,",
+        "  Rect,",
+        "  Color,",
+        "  Font,",
+        '} from "raylib"',
+        "",
+      ];
+      const mainFnLines = [
+        "fn main(): int:",
+        "  // Local variable setup cluster",
+        "  let cliW: int = 800",
+        "  let cliH: int = 600",
+        "  let wantMaximized: bool = false",
+        "  let vp: int = 1",
+        "",
+        "  // --- Window & HUD ---",
+        "  initWindow(cliW, cliH)",
+        "  setWindowMaximized(wantMaximized)",
+        "",
+        "  while not windowShouldClose():",
+        '    if keyPressed("R"):',
+        "      resetGameState()",
+        "      reloadAssets()",
+        "      updateHighScores()",
+        "      syncInputState()",
+        '      logAction("reset")',
+        "      rebuildCache()",
+        "      notifySubsystems()",
+        "      flagDirty()",
+        "",
+        "    // === Stage 2: Render Loop ===",
+        "    beginDrawing()",
+        "    clearBackground(0, 0, 0)",
+        "    drawFPS(10, 10)",
+        "    endDrawing()",
+      ];
+      while (mainFnLines.length < 185) {
+        mainFnLines.push("  tickSimulationStep()");
+      }
+      mainFnLines.push("  ret 0");
+
+      const fullSource = [...importLines, ...mainFnLines].join("\n");
+      const res = generateOutline(fullSource, "src/game.aipl", { lineRanges: true });
+
+      expect(res.text).toContain("imports (15 lines) # [L2-L16]");
+      expect(res.text).toContain("fn main(): int");
+      expect(res.text).toContain("setup: cliW, cliH, wantMaximized, vp # [L");
+      expect(res.text).toContain("// --- Window & HUD --- # [L");
+      expect(res.text).toContain("while not windowShouldClose()");
+      expect(res.text).toContain('if keyPressed("R")');
+      expect(res.text).toContain("// === Stage 2: Render Loop === # [L");
+    });
+
+    it("emits accurate brace-delimited control-flow and setup landmarks for >120-line TypeScript functions", () => {
+      const tsLines = [
+        'import { EventQueue } from "./events.js";',
+        "",
+        "export function processEvents(events: Array<{ type: string; payload: any }>): void {",
+        "  const processedCount = 0;",
+        "  const errorsEncountered = 0;",
+        "  let activeSessionId = 1;",
+        "  let retryAttempts = 3;",
+        "",
+        "  // --- Dispatch Phase ---",
+        "  for (const ev of events) {",
+        "    switch (ev.type) {",
+        '      case "DATA":',
+        "        handleDataPayload(ev.payload);",
+        "        validateSchema(ev.payload);",
+        "        updateState(ev.payload);",
+        "        persistRecord(ev.payload);",
+        "        broadcastEvent(ev.payload);",
+        "        logEvent(ev.payload);",
+        "        break;",
+        '      case "ALERT":',
+        "        triggerNotification(ev.payload);",
+        "        break;",
+        "    }",
+        "    if (ev.payload?.urgent) {",
+        '      console.log("urgent event encountered");',
+        "      prioritizeEvent(ev);",
+        "      flushBuffers();",
+        "      syncStorage();",
+        "      notifyLeader();",
+        "      emitHeartbeat();",
+        "      refreshIndex();",
+        "    }",
+        "  }",
+      ];
+      while (tsLines.length < 160) {
+        tsLines.push('  auditTrailRecord("event-step");');
+      }
+      tsLines.push("}");
+
+      const fullSource = tsLines.join("\n");
+      const res = generateOutline(fullSource, "src/processor.ts", { lineRanges: true });
+
+      expect(res.text).toContain("fn processEvents");
+      expect(res.text).toContain(
+        "setup: processedCount, errorsEncountered, activeSessionId, retryAttempts # [L",
+      );
+      expect(res.text).toContain("// --- Dispatch Phase --- # [L");
+      expect(res.text).toContain("for (const ev of events) # [L");
+      expect(res.text).toContain("switch (ev.type) # [L");
+      expect(res.text).toContain("if (ev.payload?.urgent) # [L");
+    });
+
+    it("ensures 1-line guard statements before major loop blocks do not steal span or falsely nest subsequent blocks", () => {
+      const tsLines = [
+        "export function executeWorkerTask(req?: { payload: string; count: number }): number {",
+        "  let totalProcessed = 0;",
+        "  let failureCount = 0;",
+        "  const baseMultiplier = 2;",
+        "",
+        "  if (!req) return -1;",
+        "",
+        "  for (let i = 0; i < req.count; i++) {",
+        "    const item = req.payload + i;",
+        "    processWorkerBatch(item);",
+        "    validateBatchItem(item);",
+        "    updateBatchMetrics(item);",
+        "    commitBatchStep(item);",
+        "    logBatchProgress(item);",
+        "    flushBatchBuffer();",
+        "    totalProcessed += baseMultiplier;",
+        "  }",
+        "  return totalProcessed;",
+      ];
+      while (tsLines.length < 135) {
+        tsLines.push('  recordAuditPulse("heartbeat");');
+      }
+      tsLines.push("}");
+
+      const fullSource = tsLines.join("\n");
+      const res = generateOutline(fullSource, "src/worker.ts", { lineRanges: true });
+
+      // The 1-line guard `if (!req) return -1;` must NOT appear as a multi-line block landmark
+      expect(res.text).not.toContain("if (!req) return -1");
+      expect(res.text).not.toContain("if (!req)");
+
+      // The subsequent `for` loop must be at depth 1 (e.g. `├─ for` or `└─ for`), NOT nested at depth 2 (`  ├─` or `  └─`)
+      expect(res.text).toContain("for (let i = 0; i < req.count; i++) # [L8-L17]");
+      const outlineLines = res.text.split("\n");
+      const forLine = outlineLines.find((l) => l.includes("for (let i = 0; i < req.count; i++)"));
+      expect(forLine).toBeDefined();
+      // Depth 1 line in function landmark starts with "  ├─ " or "  └─ ", NOT "    ├─ " (depth 2)
+      expect(forLine).toMatch(/^\s{2}[├└]─ for/);
+      expect(forLine).not.toMatch(/^\s{4}[├└]─ for/);
+    });
   });
 });
