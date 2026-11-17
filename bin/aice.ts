@@ -154,10 +154,14 @@ export function normalizeCliContextFlag(
     }
   }
 
-  const normalizable = new Set(["search", "grep", "read", "context", "ctx"]);
+  const normalizable = new Set(["search", "grep", "read", "context", "ctx", "find", "tree"]);
   if (!subcmd || !normalizable.has(subcmd)) {
     return Array.from(rawArgv);
   }
+
+  const isReadFamily = subcmd === "read" || subcmd === "context" || subcmd === "ctx";
+  const isSearchFamily = subcmd === "search" || subcmd === "grep";
+  const isFindFamily = subcmd === "find" || subcmd === "tree";
 
   const normalized: string[] = [];
   let i = 0;
@@ -171,14 +175,194 @@ export function normalizeCliContextFlag(
       continue;
     }
     if (!pastDoubleDash) {
-      if (token === "-c" && i + 1 < args.length && /^\d+$/.test(args[i + 1])) {
-        normalized.push("-C");
+      // 1. Omit false/no-files tokens completely
+      if (
+        token === "--files-only=false" ||
+        token === "--filesOnly=false" ||
+        token === "--files=false" ||
+        token === "--no-files" ||
+        token === "--no-files-only"
+      ) {
         i++;
         continue;
       }
+
+      // 2. --files-only / --filesOnly / --files-only=true / --filesOnly=true / --files=true / --filesWithMatches
+      if (
+        token === "--files-only" ||
+        token === "--filesOnly" ||
+        token === "--files-only=true" ||
+        token === "--filesOnly=true" ||
+        token === "--files=true" ||
+        token === "--filesWithMatches"
+      ) {
+        if (isReadFamily) {
+          normalized.push("--files");
+        } else if (isSearchFamily) {
+          normalized.push("--files-with-matches");
+        }
+        // Omit on find/tree (already implicit)
+        i++;
+        continue;
+      }
+
+      if (token === "--outlineTarget") {
+        if (isReadFamily) {
+          normalized.push("--outline-target");
+        }
+        i++;
+        continue;
+      }
+
+      // 3. Context lines
+      const ctxDigitsMatch = token.match(/^--(?:context-lines|contextLines)=(\d+)$/);
+      if (ctxDigitsMatch) {
+        if (isReadFamily || isSearchFamily) {
+          normalized.push("-C", ctxDigitsMatch[1]);
+        }
+        i++;
+        continue;
+      }
+
+      if (token === "--context-lines" || token === "--contextLines") {
+        if (isReadFamily || isSearchFamily) {
+          normalized.push("--context");
+        } else if (i + 1 < args.length && /^\d+$/.test(args[i + 1])) {
+          i++;
+        }
+        i++;
+        continue;
+      }
+
+      if (token === "-c" && i + 1 < args.length && /^\d+$/.test(args[i + 1])) {
+        if (isReadFamily || isSearchFamily) {
+          normalized.push("-C");
+        } else {
+          normalized.push(token);
+        }
+        i++;
+        continue;
+      }
+
       const match = token.match(/^-c(\d+)$/);
       if (match) {
-        normalized.push("-C", match[1]);
+        if (isReadFamily || isSearchFamily) {
+          normalized.push("-C", match[1]);
+        } else {
+          normalized.push(token);
+        }
+        i++;
+        continue;
+      }
+
+      // 4. Include deps
+      if (
+        token === "--include-deps=false" ||
+        token === "--includeDeps=false" ||
+        token === "--deps=false"
+      ) {
+        if (isReadFamily) {
+          normalized.push("--no-deps");
+        }
+        i++;
+        continue;
+      }
+
+      if (
+        token === "--include-deps" ||
+        token === "--includeDeps" ||
+        token === "--include-deps=true" ||
+        token === "--includeDeps=true" ||
+        token === "--deps=true"
+      ) {
+        if (isReadFamily) {
+          normalized.push("--deps");
+        }
+        i++;
+        continue;
+      }
+
+      // 5. Include callers
+      if (
+        token === "--include-callers=false" ||
+        token === "--includeCallers=false" ||
+        token === "--callers=false"
+      ) {
+        if (isReadFamily) {
+          normalized.push("--no-callers");
+        }
+        i++;
+        continue;
+      }
+
+      if (
+        token === "--include-callers" ||
+        token === "--includeCallers" ||
+        token === "--include-callers=true" ||
+        token === "--includeCallers=true" ||
+        token === "--callers=true"
+      ) {
+        if (isReadFamily) {
+          normalized.push("--callers");
+        }
+        i++;
+        continue;
+      }
+
+      // 6. Boolean flags: --(outline|outline-target|full|dsl|json|stats|files-with-matches)=(true|false)
+      const boolFlagMatch = token.match(
+        /^--(outline|outline-target|outlineTarget|full|dsl|json|stats|files-with-matches|filesWithMatches)=(true|false)$/,
+      );
+      if (boolFlagMatch) {
+        const [, rawFlag, boolVal] = boolFlagMatch;
+        if (boolVal === "true") {
+          let flag = rawFlag;
+          if (flag === "outlineTarget") flag = "outline-target";
+          if (flag === "filesWithMatches") flag = "files-with-matches";
+
+          if (
+            ((isFindFamily || isSearchFamily || isReadFamily) &&
+              (flag === "full" || flag === "json")) ||
+            (isReadFamily &&
+              (flag === "outline" ||
+                flag === "outline-target" ||
+                flag === "dsl" ||
+                flag === "stats")) ||
+            (isSearchFamily && flag === "files-with-matches")
+          ) {
+            normalized.push(`--${flag}`);
+          }
+        }
+        i++;
+        continue;
+      }
+
+      // 7. Compact and idioms boolean options
+      const compactIdiomsMatch = token.match(/^--(compact|idioms)=(true|false)$/);
+      if (compactIdiomsMatch) {
+        const [, flag, boolVal] = compactIdiomsMatch;
+        if (isReadFamily) {
+          if (boolVal === "true") {
+            normalized.push(`--${flag}`);
+          } else {
+            normalized.push(`--no-${flag}`);
+          }
+        }
+        i++;
+        continue;
+      }
+
+      // 8. Types boolean options
+      const typesMatch = token.match(/^--(?:types|include-types|includeTypes)=(true|false)$/);
+      if (typesMatch) {
+        const [, boolVal] = typesMatch;
+        if (isReadFamily && boolVal === "false") {
+          normalized.push("--no-types");
+        }
+        i++;
+        continue;
+      }
+      if (token === "--types" || token === "--include-types" || token === "--includeTypes") {
         i++;
         continue;
       }

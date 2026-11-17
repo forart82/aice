@@ -1613,4 +1613,258 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(dslText).toContain("applyDiscount");
     });
   });
+
+  describe("AICE v0.9.48: MCP-to-CLI Flag & =true/=false Boolean Option Normalization", () => {
+    it("normalizes MCP-style flags and boolean suffixes in normalizeCliContextFlag directly", () => {
+      // 1. Files-only false / omission
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src/math.ts",
+          "--files-only=false",
+          "--outline=false",
+          "--include-deps=false",
+        ]),
+      ).toEqual(["node", "aice", "read", "src/math.ts", "--no-deps"]);
+
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src/math.ts",
+          "--filesOnly=false",
+          "--files=false",
+          "--no-files",
+          "--no-files-only",
+        ]),
+      ).toEqual(["node", "aice", "read", "src/math.ts"]);
+
+      // 2. Files-only true -> --files on read/context/ctx; omitted on find/tree
+      expect(normalizeCliContextFlag(["node", "aice", "read", ".", "--files-only=true"])).toEqual([
+        "node",
+        "aice",
+        "read",
+        ".",
+        "--files",
+      ]);
+
+      expect(normalizeCliContextFlag(["node", "aice", "context", ".", "--filesOnly"])).toEqual([
+        "node",
+        "aice",
+        "context",
+        ".",
+        "--files",
+      ]);
+
+      expect(normalizeCliContextFlag(["node", "aice", "find", "src", "--files-only=true"])).toEqual(
+        ["node", "aice", "find", "src"],
+      );
+
+      expect(normalizeCliContextFlag(["node", "aice", "tree", "src", "--filesOnly=true"])).toEqual([
+        "node",
+        "aice",
+        "tree",
+        "src",
+      ]);
+
+      expect(
+        normalizeCliContextFlag(["node", "aice", "search", "pat", "src", "--files-only"]),
+      ).toEqual(["node", "aice", "search", "pat", "src", "--files-with-matches"]);
+
+      expect(normalizeCliContextFlag(["node", "aice", "read", "src", "--outlineTarget"])).toEqual([
+        "node",
+        "aice",
+        "read",
+        "src",
+        "--outline-target",
+      ]);
+
+      // 3. Context lines: MCP style and short flag
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "search",
+          "pat",
+          "src/math.ts",
+          "--context-lines=2",
+        ]),
+      ).toEqual(["node", "aice", "search", "pat", "src/math.ts", "-C", "2"]);
+
+      expect(
+        normalizeCliContextFlag(["node", "aice", "read", "src/math.ts", "--contextLines=4"]),
+      ).toEqual(["node", "aice", "read", "src/math.ts", "-C", "4"]);
+
+      expect(
+        normalizeCliContextFlag(["node", "aice", "read", "src/math.ts", "--context-lines", "3"]),
+      ).toEqual(["node", "aice", "read", "src/math.ts", "--context", "3"]);
+
+      // 4. Dependencies & Callers
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--include-deps=true",
+          "--include-callers=true",
+        ]),
+      ).toEqual(["node", "aice", "read", "src", "--deps", "--callers"]);
+
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--includeDeps=false",
+          "--includeCallers=false",
+        ]),
+      ).toEqual(["node", "aice", "read", "src", "--no-deps", "--no-callers"]);
+
+      // 5. Boolean flags (=true -> --flag, =false -> omit)
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--outline=true",
+          "--outline-target=true",
+          "--full=true",
+          "--dsl=true",
+          "--json=true",
+          "--stats=true",
+        ]),
+      ).toEqual([
+        "node",
+        "aice",
+        "read",
+        "src",
+        "--outline",
+        "--outline-target",
+        "--full",
+        "--dsl",
+        "--json",
+        "--stats",
+      ]);
+
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--outline=false",
+          "--outlineTarget=false",
+          "--full=false",
+          "--dsl=false",
+          "--json=false",
+          "--stats=false",
+        ]),
+      ).toEqual(["node", "aice", "read", "src"]);
+
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "search",
+          "pat",
+          ".",
+          "--files-with-matches=true",
+        ]),
+      ).toEqual(["node", "aice", "search", "pat", ".", "--files-with-matches"]);
+
+      expect(
+        normalizeCliContextFlag(["node", "aice", "search", "pat", ".", "--filesWithMatches=false"]),
+      ).toEqual(["node", "aice", "search", "pat", "."]);
+
+      // 6. Compact, idioms, types
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--compact=true",
+          "--idioms=true",
+          "--types=true",
+        ]),
+      ).toEqual(["node", "aice", "read", "src", "--compact", "--idioms"]);
+
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "read",
+          "src",
+          "--compact=false",
+          "--idioms=false",
+          "--types=false",
+        ]),
+      ).toEqual(["node", "aice", "read", "src", "--no-compact", "--no-idioms", "--no-types"]);
+
+      // 7. Non-normalizable commands (splice, write, create) remain untouched
+      expect(
+        normalizeCliContextFlag([
+          "node",
+          "aice",
+          "splice",
+          "file.ts",
+          "--files-only=false",
+          "--outline=false",
+        ]),
+      ).toEqual(["node", "aice", "splice", "file.ts", "--files-only=false", "--outline=false"]);
+
+      // 8. Double-dash stops normalization
+      expect(normalizeCliContextFlag(["node", "aice", "read", "--", "--files-only=false"])).toEqual(
+        ["node", "aice", "read", "--", "--files-only=false"],
+      );
+    });
+
+    it("executes CLI with normalized flags for `read` and `search` without unknown option errors", () => {
+      const wsDir = path.join(tmpDir, "v0948-cli-ws");
+      fs.mkdirSync(path.join(wsDir, "src"), { recursive: true });
+      setProjectAiceEnabled(wsDir, true);
+
+      fs.writeFileSync(
+        path.join(wsDir, "src", "math.ts"),
+        [
+          "export function computeInvoiceTotal(unitPrice: number, qty: number): number {",
+          "  const subtotal = unitPrice * qty;",
+          "  return subtotal;",
+          "}",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+
+      // 1. `aice read <file> --files-only=false --outline=false --include-deps=false`
+      const readRes = runCli(
+        ["read", "src/math.ts", "--files-only=false", "--outline=false", "--include-deps=false"],
+        wsDir,
+      );
+      expect(readRes.status).toBe(0);
+      expect(readRes.stdout).toContain("computeInvoiceTotal");
+      expect(readRes.stderr).not.toContain("unknown option");
+
+      // 2. `aice read . --files-only=true`
+      const readFilesRes = runCli(["read", ".", "--files-only=true"], wsDir);
+      expect(readFilesRes.status).toBe(0);
+      expect(readFilesRes.stdout).toContain("src/math.ts");
+      expect(readFilesRes.stderr).not.toContain("unknown option");
+
+      // 3. `aice search <pat> <file> --context-lines=2`
+      const searchRes = runCli(
+        ["search", "computeInvoiceTotal", "src/math.ts", "--context-lines=2"],
+        wsDir,
+      );
+      expect(searchRes.status).toBe(0);
+      expect(searchRes.stdout).toContain("computeInvoiceTotal");
+      expect(searchRes.stderr).not.toContain("unknown option");
+    });
+  });
 });
