@@ -949,6 +949,39 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(dirEv?.realisticNativeCl100k).toBeDefined();
     // 4 files * 45 = 180 max baseline
     expect(dirEv!.realisticNativeCl100k!).toBeLessThanOrEqual(Math.max(dirEv!.aiceCl100k, 4 * 45));
+
+    // 4. Single-file AST search realistic baseline hydration (lean win vs bloated penalty)
+    const leanSingleSearch = hydrateTelemetryEvent({
+      t: "2026-11-17T03:05:00.000Z",
+      r: "/workspace/alpha-engine",
+      f: "src/renderer.js",
+      o: "context",
+      nc: 180,
+      ac: 1900,
+      n1: 58,
+      a1: 500,
+      n2: 56,
+      a2: 490,
+      rn: 58,
+    });
+    expect(leanSingleSearch?.realisticNativeCl100k).toBe(708);
+    expect(leanSingleSearch?.realisticSavedCl100k).toBe(208);
+
+    const bloatedSingleSearch = hydrateTelemetryEvent({
+      t: "2026-11-17T03:06:00.000Z",
+      r: "/workspace/alpha-engine",
+      f: "src/renderer.js",
+      o: "context",
+      nc: 180,
+      ac: 8000,
+      n1: 58,
+      a1: 2000,
+      n2: 56,
+      a2: 1950,
+      rn: 58,
+    });
+    expect(bloatedSingleSearch?.realisticNativeCl100k).toBe(708);
+    expect(bloatedSingleSearch?.realisticSavedCl100k).toBe(-1292);
   });
 
   it("distinguishes < 12s parallel slices from >= 12s sequential pagination turns and respects intervening writes", () => {

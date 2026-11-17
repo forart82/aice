@@ -46,7 +46,7 @@ import {
 } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
 import { TypeChecker } from "../typechecker/checker.js";
-import { resolveFirstActionableSymbol } from "./context.js";
+import { isCommentLine, resolveFirstActionableSymbol } from "./context.js";
 import {
   checkPythonDuplicateParams,
   createFile,
@@ -6732,6 +6732,81 @@ export function buildEmptySpliceBlockError(
   );
 }
 
+const LINE_ASSIGNMENT_LHS_RE =
+  /^\s*(?:(?:let|mut|const|var)\s+)?([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*(?::[^=]+)?=(?!=)/;
+
+function extractAssignmentLhsTarget(line: string): string | null {
+  const match = LINE_ASSIGNMENT_LHS_RE.exec(line);
+  return match?.[1] ?? null;
+}
+
+function formatSpliceDisplayPath(filePath: string, projectRoot?: string): string {
+  if (!path.isAbsolute(filePath)) {
+    return filePath.replace(/\\/g, "/");
+  }
+  const baseRoot = projectRoot ? path.resolve(projectRoot) : process.cwd();
+  const rel = path.relative(baseRoot, filePath).replace(/\\/g, "/");
+  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) {
+    return rel;
+  }
+  const relCwd = path.relative(process.cwd(), filePath).replace(/\\/g, "/");
+  if (relCwd && !relCwd.startsWith("..") && !path.isAbsolute(relCwd)) {
+    return relCwd;
+  }
+  return filePath;
+}
+
+/**
+ * Guards raw inclusive `:L<start>-L<end>` replacements against Python-style `[start, end)`
+ * off-by-one payloads where `endLine - startLine` replacement lines match `L<start>..L<end-1>`
+ * assignment LHS targets 1-for-1 and would silently delete a distinct code line at `L<end>`.
+ */
+function guardHalfOpenInclusiveLineRangeSplice(params: {
+  rawLines: string[];
+  startLine: number;
+  endLine: number;
+  replContent: string;
+  filePath: string;
+  projectRoot?: string;
+}): void {
+  const { rawLines, startLine, endLine, replContent, filePath, projectRoot } = params;
+  const origSpan = endLine - startLine + 1;
+  if (origSpan < 4) return;
+
+  const trimmedTrailingRepl = replContent.replace(/\r?\n$/, "");
+  const replLines = trimmedTrailingRepl.split(/\r?\n/);
+  if (replLines.length !== origSpan - 1) return;
+
+  const origLines = rawLines.slice(startLine - 1, endLine);
+  if (origLines.length !== origSpan) return;
+
+  let lastMatchedReplLhs: string | null = null;
+  for (let k = 0; k < origSpan - 1; k++) {
+    const origLhs = extractAssignmentLhsTarget(origLines[k] ?? "");
+    const replLhs = extractAssignmentLhsTarget(replLines[k] ?? "");
+    if (origLhs === null || replLhs === null || origLhs !== replLhs) {
+      return;
+    }
+    lastMatchedReplLhs = replLhs;
+  }
+
+  const origLastLine = origLines[origSpan - 1] ?? "";
+  const origLastTrimmed = origLastLine.trim();
+  if (!origLastTrimmed || isCommentLine(origLastLine, filePath)) {
+    return;
+  }
+
+  const origLastLhs = extractAssignmentLhsTarget(origLastLine);
+  if (origLastLhs !== null && origLastLhs === lastMatchedReplLhs) {
+    return;
+  }
+
+  const displayPath = formatSpliceDisplayPath(filePath, projectRoot);
+  throw new Error(
+    `Off-by-one inclusive line-range guard on ${displayPath}:L${startLine}-L${endLine}: replacement has ${replLines.length} lines matching L${startLine}-L${endLine - 1} 1-for-1, which would silently delete L${endLine} ('${origLastTrimmed}'). AICE :L ranges are INCLUSIVE — use :L${startLine}-L${endLine - 1} to keep L${endLine}, or <<< search === replace >>> if deleting L${endLine} is intentional.`,
+  );
+}
+
 function resolveSingleNativeEditAgainstSource(
   nativeSource: string,
   rawEditOptions: SpliceOptions,
@@ -7298,6 +7373,16 @@ function resolveSingleNativeEditAgainstSource(
     };
 
     let processedCode = buildRangeReplacement(startLine, endLine);
+
+    guardHalfOpenInclusiveLineRangeSplice({
+      rawLines,
+      startLine,
+      endLine,
+      replContent: baseProcessed,
+      filePath,
+      projectRoot: options.projectRoot,
+    });
+
     let finalStartOffset = startOffset;
     let finalEndOffset = endOffset;
     let finalOriginalSnippet = originalSnippet;
@@ -9099,7 +9184,12 @@ export async function splice(
     const targetLang = options.targetLanguage ?? detectTargetFromPath(fullPath);
 
     const result = withSuppressedTelemetry(() =>
-      spliceNativeSource(originalNative, options, fullPath, activeIdioms),
+      spliceNativeSource(
+        originalNative,
+        options.projectRoot ? options : { ...options, projectRoot: root },
+        fullPath,
+        activeIdioms,
+      ),
     );
     const isLineRangeOrHunkSplice =
       containsHunkMarkers(snippetInput) ||

@@ -1867,4 +1867,122 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(searchRes.stderr).not.toContain("unknown option");
     });
   });
+
+  describe("AICE v0.9.49: Half-Open [start, end) Off-by-One :L Splice Guard & Read Upgrades Integration", () => {
+    it("catches half-open [start, end) :L splices on .aipl/.ts before touching disk while allowing inclusive retries and <<< === >>> hunks", async () => {
+      const wsDir = path.join(tmpDir, "v0949-guard-ws");
+      const aiplPath = path.join(wsDir, "src", "render", "water_3d.aipl");
+      fs.mkdirSync(path.dirname(aiplPath), { recursive: true });
+      setProjectAiceEnabled(wsDir, true);
+
+      const prefixLines = Array.from({ length: 237 }, (_, i) => `let pad_${i + 1} = ${i + 1}`);
+      const targetBlockLines = [
+        "  let caustic = wave * 0.5", // L238
+        "  let foam = crest * 0.25", // L239
+        "  let depth_f = depth * 0.1", // L240
+        "  let fresnel = pow(ndotv, 5.0)", // L241
+        "  let spec = fresnel * sun", // L242
+        "  let r = caustic + spec", // L243
+        "  let g = foam + depth_f", // L244
+        "  let b = depth_f * 1.2", // L245
+        "  rgba4.push(r)", // L246 (must NOT be silently deleted!)
+      ];
+      const suffixLines = Array.from({ length: 10 }, (_, i) => `let tail_${i + 1} = ${i + 1}`);
+      const origContent = `${[...prefixLines, ...targetBlockLines, ...suffixLines].join("\n")}\n`;
+      fs.writeFileSync(aiplPath, origContent, "utf-8");
+
+      // 1. Positive catch via spliceBatch heredoc stream: :L238-246 with 8 lines matching L238..L245
+      const badHalfOpenStream = [
+        "=== src/render/water_3d.aipl:L238-246 ===",
+        "  let caustic = wave * 0.75",
+        "  let foam = crest * 0.35",
+        "  let depth_f = depth * 0.2",
+        "  let fresnel = pow(ndotv, 4.0)",
+        "  let spec = fresnel * sun * 1.1",
+        "  let r = caustic + spec * 0.9",
+        "  let g = foam + depth_f * 0.8",
+        "  let b = depth_f * 1.4",
+      ].join("\n");
+
+      await expect(
+        spliceBatch(badHalfOpenStream, { projectRoot: wsDir, idioms: false }),
+      ).rejects.toThrowError(
+        "Off-by-one inclusive line-range guard on src/render/water_3d.aipl:L238-L246: replacement has 8 lines matching L238-L245 1-for-1, which would silently delete L246 ('rgba4.push(r)'). AICE :L ranges are INCLUSIVE — use :L238-L245 to keep L246, or <<< search === replace >>> if deleting L246 is intentional.",
+      );
+      // Disk file MUST remain untouched
+      expect(fs.readFileSync(aiplPath, "utf-8")).toBe(origContent);
+
+      // 2. Positive catch via MCP aice_splice with trailing newline
+      const mcpServer = new AiceMcpServer({ workspaceRoot: wsDir });
+      await expect(
+        mcpServer.executeToolCall("aice_splice", {
+          filePath: "src/render/water_3d.aipl",
+          symbol: "L238-L246",
+          code: [
+            "  let caustic = wave * 0.75",
+            "  let foam = crest * 0.35",
+            "  let depth_f = depth * 0.2",
+            "  let fresnel = pow(ndotv, 4.0)",
+            "  let spec = fresnel * sun * 1.1",
+            "  let r = caustic + spec * 0.9",
+            "  let g = foam + depth_f * 0.8",
+            "  let b = depth_f * 1.4",
+            "",
+          ].join("\n"),
+        }),
+      ).rejects.toThrowError(
+        /Off-by-one inclusive line-range guard on src\/render\/water_3d\.aipl:L238-L246/,
+      );
+      expect(fs.readFileSync(aiplPath, "utf-8")).toBe(origContent);
+
+      // 3. Retry with inclusive :L238-L245 succeeds and keeps L246 intact!
+      const fixedStream = badHalfOpenStream.replace(":L238-246 ===", ":L238-L245 ===");
+      const okRes = await spliceBatch(fixedStream, { projectRoot: wsDir, idioms: false });
+      expect(okRes.success).toBe(true);
+      const updated = fs.readFileSync(aiplPath, "utf-8");
+      expect(updated).toContain("let caustic = wave * 0.75");
+      expect(updated).toContain("let b = depth_f * 1.4");
+      expect(updated).toContain("rgba4.push(r)");
+
+      // 4. Zero false positives on valid <<< === >>> hunk inside :L238-L246 deleting L246 intentionally
+      const intentionalHunkRes = await splice("src/render/water_3d.aipl", {
+        projectRoot: wsDir,
+        symbol: "L238-L246",
+        idioms: false,
+        code: [
+          "<<<",
+          "  let b = depth_f * 1.4",
+          "  rgba4.push(r)",
+          "===",
+          "  let b = depth_f * 1.5",
+          ">>>",
+        ].join("\n"),
+      });
+      expect(intentionalHunkRes.success).toBe(true);
+      expect(fs.readFileSync(aiplPath, "utf-8")).not.toContain("rgba4.push(r)");
+    });
+
+    it("executes CLI `aice read` with same-file coalescing and >110L elision in 1 turn without multi-file stream bloat", () => {
+      const wsDir = path.join(tmpDir, "v0949-cli-read-ws");
+      fs.mkdirSync(path.join(wsDir, "src"), { recursive: true });
+      setProjectAiceEnabled(wsDir, true);
+
+      const fileLines: string[] = [];
+      for (let i = 1; i <= 150; i++) {
+        if (i % 6 === 0) fileLines.push("");
+        else if (i % 11 === 0)
+          fileLines.push("// ==================================================");
+        else fileLines.push(`export const entry_${i} = ${i};`);
+      }
+      fs.writeFileSync(path.join(wsDir, "src", "big.ts"), `${fileLines.join("\n")}\n`, "utf-8");
+
+      const res = runCli(["read", "src/big.ts:L1-L65", "src/big.ts:L85-L150"], wsDir);
+      expect(res.status).toBe(0);
+      expect(res.stdout).toContain("// === src/big.ts ===");
+      expect(res.stdout).not.toContain("# AICE Multi-File Context Stream");
+      expect(res.stdout).not.toContain("==================================================");
+      expect(res.stdout).toContain("1│ export const entry_1 = 1;");
+      expect(res.stdout).toContain("149│ export const entry_149 = 149;");
+    });
+  });
 });

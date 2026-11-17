@@ -2216,6 +2216,8 @@ export async function generateWorkspaceContext(
               filePath: f,
               projectRoot: workspaceRootForRank,
               isExplicitTestSearch,
+              full: options.full,
+              dsl: options.dsl,
             },
           );
           if (detailed) {
@@ -2423,6 +2425,9 @@ export async function generateWorkspaceContext(
                 clampOutOfBounds: true,
                 rawNative: effectiveWsRawNative,
                 contextLines: options.contextLines,
+                full: options.full,
+                dsl: options.dsl,
+                projectRoot,
               });
               const isRawOrMatch =
                 effectiveWsRawNative ||
@@ -2993,6 +2998,8 @@ export interface PatternMatchRankingOptions {
   filePath?: string;
   projectRoot?: string;
   isExplicitTestSearch?: boolean;
+  full?: boolean;
+  dsl?: boolean;
 }
 
 const QUERY_KEYWORD_STOPWORDS = new Set([
@@ -3361,6 +3368,77 @@ function findEnclosingShortDeclarationSpan(
   return undefined;
 }
 
+function findInnermostEnclosingDeclarationSpan(
+  spans: Array<{ startLine: number; endLine: number }>,
+  lineNum: number,
+): { startLine: number; endLine: number } | undefined {
+  let best: { startLine: number; endLine: number } | undefined;
+  let bestLen = Number.POSITIVE_INFINITY;
+  for (const sp of spans) {
+    if (sp.startLine <= lineNum && lineNum <= sp.endLine) {
+      const len = sp.endLine - sp.startLine + 1;
+      if (len >= 2 && len < bestLen) {
+        best = sp;
+        bestLen = len;
+      }
+    }
+  }
+  return best;
+}
+
+function computeMonolithFocusSubWindows(
+  symStart: number,
+  symEnd: number,
+  symbolHits: number[],
+): Array<{ start: number; end: number }> | null {
+  const symLen = symEnd - symStart + 1;
+  const covIntervals = symbolHits
+    .map((m) => ({
+      start: Math.max(symStart, m - 6),
+      end: Math.min(symEnd, m + 6),
+    }))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const mergedCov: Array<{ start: number; end: number }> = [];
+  for (const iv of covIntervals) {
+    const prev = mergedCov[mergedCov.length - 1];
+    if (prev && iv.start <= prev.end + 1) {
+      prev.end = Math.max(prev.end, iv.end);
+    } else {
+      mergedCov.push({ ...iv });
+    }
+  }
+  const coveredCount = mergedCov.reduce((acc, iv) => acc + (iv.end - iv.start + 1), 0);
+  if (coveredCount / symLen >= 0.65) {
+    return null;
+  }
+
+  const subWindows: Array<{ start: number; end: number }> = [
+    { start: symStart, end: Math.min(symEnd, symStart + 3) },
+  ];
+  for (const m of symbolHits) {
+    subWindows.push({
+      start: Math.max(symStart, m - 5),
+      end: Math.min(symEnd, m + 5),
+    });
+  }
+  subWindows.sort((a, b) => a.start - b.start || a.end - b.end);
+  const mergedSubs: Array<{ start: number; end: number }> = [];
+  for (const sw of subWindows) {
+    const prev = mergedSubs[mergedSubs.length - 1];
+    // Merge windows within <= 3 skipped lines of each other
+    if (prev && sw.start <= prev.end + 4) {
+      prev.end = Math.max(prev.end, sw.end);
+    } else {
+      mergedSubs.push({ ...sw });
+    }
+  }
+  const lastSub = mergedSubs[mergedSubs.length - 1];
+  if (lastSub && lastSub.end < symEnd && symEnd - lastSub.end <= 3) {
+    lastSub.end = symEnd;
+  }
+  return mergedSubs;
+}
+
 export function extractPatternMatchesDetailed(
   rawSource: string,
   rawQuery: string,
@@ -3419,11 +3497,14 @@ export function extractPatternMatchesDetailed(
     isTestOrMockPath(rankingOpts!.filePath!, rankingOpts?.projectRoot);
 
   let cachedAstSpans: Array<{ startLine: number; endLine: number }> | undefined;
-  const rawWindows: Array<{ start: number; end: number; hits: number[] }> = [];
+  const rawWindows: Array<{ start: number; end: number; hits: number[]; isCommentHit?: boolean }> =
+    [];
+  const monolithGroups = new Map<string, { symStart: number; symEnd: number; hits: number[] }>();
 
   for (const lineNum of hitLines) {
     let s: number;
     let e: number;
+    let isCommentHit = false;
     if (contextRadius !== undefined) {
       const r = Math.max(0, Math.floor(contextRadius));
       s = Math.max(1, lineNum - r);
@@ -3440,25 +3521,72 @@ export function extractPatternMatchesDetailed(
             rankingOpts?.filePath,
           );
         }
-        const enclosing = findEnclosingShortDeclarationSpan(cachedAstSpans, lineNum, 40);
-        if (enclosing) {
-          s = Math.max(1, enclosing.startLine);
-          e = Math.min(lines.length, enclosing.endLine);
+        const enclosingShort = findEnclosingShortDeclarationSpan(cachedAstSpans, lineNum, 40);
+        if (enclosingShort) {
+          s = Math.max(1, enclosingShort.startLine);
+          e = Math.min(lines.length, enclosingShort.endLine);
         } else {
+          const allowMonolithFocus = !rankingOpts?.full && !rankingOpts?.dsl;
+          const innermost = allowMonolithFocus
+            ? findInnermostEnclosingDeclarationSpan(cachedAstSpans, lineNum)
+            : undefined;
+          const symStart = innermost ? Math.max(1, innermost.startLine) : 0;
+          const symEnd = innermost ? Math.min(lines.length, innermost.endLine) : 0;
+          if (innermost && symEnd - symStart + 1 > 65) {
+            const key = `${symStart}:${symEnd}`;
+            let grp = monolithGroups.get(key);
+            if (!grp) {
+              grp = { symStart, symEnd, hits: [] };
+              monolithGroups.set(key, grp);
+            }
+            grp.hits.push(lineNum);
+            continue;
+          }
           s = Math.max(1, lineNum - 10);
           e = Math.min(lines.length, lineNum + 10);
         }
       } else {
+        isCommentHit = true;
         s = Math.max(1, lineNum - 2);
         e = Math.min(lines.length, lineNum + 2);
       }
     }
-    rawWindows.push({ start: s, end: e, hits: [lineNum] });
+    rawWindows.push({ start: s, end: e, hits: [lineNum], isCommentHit });
   }
 
-  rawWindows.sort((a, b) => a.start - b.start || a.end - b.end);
-  const windows: Array<{ start: number; end: number; hits: number[] }> = [];
+  const activeMonoliths = Array.from(monolithGroups.values());
+  const nonMonolithRawWindows: Array<{ start: number; end: number; hits: number[] }> = [];
   for (const rw of rawWindows) {
+    if (rw.isCommentHit && activeMonoliths.length > 0 && rw.hits.length === 1) {
+      const hitLine = rw.hits[0]!;
+      let bestMonolith: { symStart: number; symEnd: number; hits: number[] } | undefined;
+      for (const grp of activeMonoliths) {
+        if (grp.symStart <= hitLine && hitLine <= grp.symEnd) {
+          if (
+            !bestMonolith ||
+            grp.symEnd - grp.symStart < bestMonolith.symEnd - bestMonolith.symStart
+          ) {
+            bestMonolith = grp;
+          }
+        }
+      }
+      if (bestMonolith) {
+        bestMonolith.hits.push(hitLine);
+        continue;
+      }
+    }
+    nonMonolithRawWindows.push({ start: rw.start, end: rw.end, hits: rw.hits });
+  }
+
+  nonMonolithRawWindows.sort((a, b) => a.start - b.start || a.end - b.end);
+  type SearchRenderWindow = {
+    start: number;
+    end: number;
+    hits: number[];
+    focusSubWindows?: Array<{ start: number; end: number }>;
+  };
+  const windows: SearchRenderWindow[] = [];
+  for (const rw of nonMonolithRawWindows) {
     const last = windows[windows.length - 1];
     if (last && rw.start <= last.end + 1) {
       last.end = Math.max(last.end, rw.end);
@@ -3471,6 +3599,17 @@ export function extractPatternMatchesDetailed(
     } else {
       windows.push({ start: rw.start, end: rw.end, hits: [...rw.hits] });
     }
+  }
+
+  for (const grp of activeMonoliths) {
+    const uniqueHits = Array.from(new Set(grp.hits)).sort((a, b) => a - b);
+    const focusSubWindows = computeMonolithFocusSubWindows(grp.symStart, grp.symEnd, uniqueHits);
+    windows.push({
+      start: grp.symStart,
+      end: grp.symEnd,
+      hits: uniqueHits,
+      ...(focusSubWindows ? { focusSubWindows } : {}),
+    });
   }
 
   const scoredWindows = windows.map((w) => ({
@@ -3495,6 +3634,33 @@ export function extractPatternMatchesDetailed(
   const formattedText = topWindows
     .map((w) => {
       const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
+      if (w.focusSubWindows && w.focusSubWindows.length > 0) {
+        const bodyParts: string[] = [];
+        for (let i = 0; i < w.focusSubWindows.length; i++) {
+          const sub = w.focusSubWindows[i]!;
+          if (i > 0) {
+            const gapStart = w.focusSubWindows[i - 1]!.end + 1;
+            const gapEnd = sub.start - 1;
+            const gapLen = gapEnd - gapStart + 1;
+            bodyParts.push(
+              `// ... [L${gapStart}-L${gapEnd} skipped — ${gapLen} unrelated lines] ...`,
+            );
+          }
+          for (let l = sub.start; l <= sub.end; l++) {
+            bodyParts.push(`${l}│ ${lines[l - 1]}`);
+          }
+        }
+        const lastEnd = w.focusSubWindows[w.focusSubWindows.length - 1]!.end;
+        if (lastEnd < w.end) {
+          const gapStart = lastEnd + 1;
+          const gapEnd = w.end;
+          const gapLen = gapEnd - gapStart + 1;
+          bodyParts.push(
+            `// ... [L${gapStart}-L${gapEnd} skipped — ${gapLen} unrelated lines] ...`,
+          );
+        }
+        return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]\n${bodyParts.join("\n")}`;
+      }
       const body = lines
         .slice(w.start - 1, w.end)
         .map((text, idx) => `${w.start + idx}│ ${text}`)
@@ -3716,7 +3882,7 @@ export function compileFocusPattern(rawPattern: string): RegExp {
 
 export function isDecorativeDividerComment(trimmed: string): boolean {
   if (trimmed.length < 4 || /[a-zA-Z0-9]/.test(trimmed)) return false;
-  return /^(?:\/\/|#|--|\/\*|\*)[-=_~/#\s*]*$/.test(trimmed);
+  return /^(?:\/\/|#|--|\/\*|\*)[-=_~/#\s*─━═]*$/.test(trimmed);
 }
 
 export function detectContiguousImportBlock(
@@ -4152,6 +4318,9 @@ export function extractSymbolFromAiceSource(
     contextLines?: number;
     surface?: "cli" | "mcp";
     elideLargeLineRange?: boolean;
+    forceElideLargeLineRange?: boolean;
+    full?: boolean;
+    dsl?: boolean;
     projectRoot?: string;
   },
 ): string {
@@ -4190,6 +4359,29 @@ export function extractSymbolFromAiceSource(
       .join("\n");
   };
 
+  if (trimmedSel.includes(",") && /^(?:\[?L\d+(?:-L?\d+)?\]?\s*,?\s*)+$/i.test(trimmedSel)) {
+    const rangePieces = splitSymbolSelectors(trimmedSel);
+    if (rangePieces.length > 1) {
+      let combinedSpan = 0;
+      for (const piece of rangePieces) {
+        const rm = piece.trim().match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
+        if (!rm?.[1]) continue;
+        const s = Number.parseInt(rm[1], 10);
+        const e = rm[2] ? Number.parseInt(rm[2], 10) : s;
+        if (e >= s) combinedSpan += e - s + 1;
+      }
+      const subOpts =
+        options?.elideLargeLineRange && combinedSpan > 110
+          ? { ...options, forceElideLargeLineRange: true }
+          : options;
+      return rangePieces
+        .map((piece) =>
+          extractSymbolFromAiceSource(aiceSource, piece, filePath, preParsedMod, subOpts),
+        )
+        .join("\n\n");
+    }
+  }
+
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
     const startLine = Number.parseInt(lineRangeMatch[1], 10);
@@ -4220,7 +4412,7 @@ export function extractSymbolFromAiceSource(
     }
     const clampedEnd = Math.min(endLine, totalLines);
     const lineSpan = endLine - startLine + 1;
-    if (lineSpan > 140 && options?.elideLargeLineRange) {
+    if ((lineSpan > 110 || options?.forceElideLargeLineRange) && options?.elideLargeLineRange) {
       return formatLargeLineRangeWithElision(rawLines, startLine, clampedEnd);
     }
     const sliceLines = rawLines.slice(startLine - 1, clampedEnd);
@@ -4234,7 +4426,10 @@ export function extractSymbolFromAiceSource(
     const pieces = splitSymbolSelectors(trimmedSel);
     const rankOpts: PatternMatchRankingOptions = {
       filePath,
+      projectRoot: options?.projectRoot,
       isExplicitTestSearch: true,
+      full: options?.full,
+      dsl: options?.dsl,
     };
     const matchOneRegex = (piece: string): string | undefined => {
       const nativeHit = extractPatternMatchesFromSource(
@@ -4324,7 +4519,18 @@ export function extractSymbolFromAiceSource(
           return finalizeExtracted(parentFallback.text, parentFallback.startLine);
         }
       }
-      const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+      const patternFallback = extractPatternMatchesFromSource(
+        rawFileSource,
+        trimmedSel,
+        options?.contextLines,
+        {
+          filePath,
+          projectRoot: options?.projectRoot,
+          isExplicitTestSearch: true,
+          full: options?.full,
+          dsl: options?.dsl,
+        },
+      );
       if (patternFallback) return patternFallback;
       throw new Error(
         `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
@@ -4411,7 +4617,18 @@ export function extractSymbolFromAiceSource(
         }
       }
     }
-    const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    const patternFallback = extractPatternMatchesFromSource(
+      rawFileSource,
+      trimmedSel,
+      options?.contextLines,
+      {
+        filePath,
+        projectRoot: options?.projectRoot,
+        isExplicitTestSearch: true,
+        full: options?.full,
+        dsl: options?.dsl,
+      },
+    );
     if (patternFallback) return patternFallback;
     throw new Error(
       `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
@@ -4624,7 +4841,18 @@ export function extractSymbolFromAiceSource(
         return finalizeExtracted(parentFallback.text, parentFallback.startLine);
       }
     }
-    const patternFallback = extractPatternMatchesFromSource(rawFileSource, trimmedSel);
+    const patternFallback = extractPatternMatchesFromSource(
+      rawFileSource,
+      trimmedSel,
+      options?.contextLines,
+      {
+        filePath,
+        projectRoot: options?.projectRoot,
+        isExplicitTestSearch: true,
+        full: options?.full,
+        dsl: options?.dsl,
+      },
+    );
     if (patternFallback) return patternFallback;
     throw new Error(
       `Symbol '${symbolSelector}' not found in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}`,
@@ -5193,6 +5421,8 @@ export async function generateContext(
         contextLines: options.contextLines,
         surface: options.surface,
         elideLargeLineRange: shouldEnforceBudget,
+        full: options.full,
+        dsl: options.dsl,
         projectRoot,
       };
       if (requestedSymbols.length === 0) {
@@ -5228,6 +5458,18 @@ export async function generateContext(
         const slicedBlocks: string[] = [];
         const missingSymbols: string[] = [];
         let firstMissingErr: unknown;
+        let totalCombinedLineSpan = 0;
+        for (const sym of requestedSymbols) {
+          const rm = sym.trim().match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
+          if (!rm?.[1]) continue;
+          const s = Number.parseInt(rm[1], 10);
+          const e = rm[2] ? Number.parseInt(rm[2], 10) : s;
+          if (e >= s) totalCombinedLineSpan += e - s + 1;
+        }
+        const multiExtractOpts =
+          extractOpts.elideLargeLineRange && totalCombinedLineSpan > 110
+            ? { ...extractOpts, forceElideLargeLineRange: true }
+            : extractOpts;
         for (const sym of requestedSymbols) {
           try {
             const rawBlock = extractSymbolFromAiceSource(
@@ -5235,7 +5477,7 @@ export async function generateContext(
               sym,
               fullTargetPath,
               preParsedMod,
-              extractOpts,
+              multiExtractOpts,
             );
             slicedBlocks.push(rawBlock);
           } catch (err) {
@@ -5758,6 +6000,7 @@ export async function generateContext(
     operation: "context",
     surface: "cli",
     idiomsUsed: Boolean(bundleIdioms && Object.keys(bundleIdioms).length > 0),
+    isSearchMode: isPureRegexSymbol,
     nativeText: honestBaselineText,
     realisticNativeText: honestBaselineText,
     aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,

@@ -44,6 +44,7 @@ import {
   type DependencyContract,
   generateContext,
   isCommentLine,
+  isDecorativeDividerComment,
   isTestOrMockPath,
   mergeMultiContextResults,
   parseSymbolPatternSelector,
@@ -846,6 +847,7 @@ function expandGlobTargetPaths(rawGlobPath: string, baseDir: string): string[] {
 export function normalizeReadTargets(
   targets?: ReadTargetInput | ReadTargetInput[],
   baseDir = process.cwd(),
+  options?: { coalesceSameFile?: boolean },
 ): NormalizedReadTarget[] {
   if (targets === undefined) return [];
   const list = Array.isArray(targets) ? targets : [targets];
@@ -906,7 +908,91 @@ export function normalizeReadTargets(
       });
     }
   }
-  return out;
+
+  if (options?.coalesceSameFile === false || out.length <= 1) {
+    return out;
+  }
+
+  const isCoalescibleContextEntry = (entry: NormalizedReadTarget): boolean => {
+    if (entry.explicitOutline) return false;
+    const sel = entry.selector?.trim();
+    if (!sel) return false;
+    if (sel.startsWith("/") || isPureRegexSelector(sel)) return false;
+    const lower = sel.toLowerCase();
+    if (lower === "outline" || lower === "imports" || lower === "import" || sel === "*") {
+      return false;
+    }
+    return true;
+  };
+
+  const resolveKey = (targetPath: string): string => {
+    const pre = resolveEffectiveTargetAndRoot(targetPath, baseDir).targetPath;
+    const abs = path.isAbsolute(pre) ? path.resolve(pre) : path.resolve(baseDir, pre);
+    if (!fs.existsSync(abs) && fs.existsSync(`${abs}.aice`)) {
+      return `${abs}.aice`;
+    }
+    return abs;
+  };
+
+  const coalesced: NormalizedReadTarget[] = [];
+  const groupByKey = new Map<
+    string,
+    {
+      index: number;
+      selectors: string[];
+      seen: Set<string>;
+      explicitFull: boolean;
+      merged: boolean;
+    }
+  >();
+
+  for (const entry of out) {
+    if (!isCoalescibleContextEntry(entry)) {
+      coalesced.push(entry);
+      continue;
+    }
+    const key = resolveKey(entry.targetPath);
+    const existing = groupByKey.get(key);
+    const pieces = splitCommaSelectors(entry.selector!.trim());
+    if (!existing) {
+      const seen = new Set<string>();
+      const selectors: string[] = [];
+      for (const p of pieces) {
+        if (!seen.has(p)) {
+          seen.add(p);
+          selectors.push(p);
+        }
+      }
+      const idx = coalesced.length;
+      coalesced.push(entry);
+      groupByKey.set(key, {
+        index: idx,
+        selectors,
+        seen,
+        explicitFull: entry.explicitFull,
+        merged: false,
+      });
+    } else if (existing.explicitFull === entry.explicitFull) {
+      for (const p of pieces) {
+        if (!existing.seen.has(p)) {
+          existing.seen.add(p);
+          existing.selectors.push(p);
+        }
+      }
+      existing.merged = true;
+      const joinedSel = existing.selectors.join(",");
+      const firstEntry = coalesced[existing.index]!;
+      coalesced[existing.index] = {
+        ...firstEntry,
+        raw: `${firstEntry.targetPath}:${joinedSel}`,
+        selector: joinedSel,
+      };
+    } else {
+      coalesced.push(entry);
+    }
+  }
+
+  return coalesced;
 }
 
 function resolveEffectiveTargetAndRoot(
@@ -1150,14 +1236,34 @@ export function computeDynamicSliceSpan(
 ): DynamicSliceSpanResult {
   const totalLines = Math.max(1, countSourceLines(rawSource));
   const sLine = Math.max(1, Math.min(totalLines, Math.floor(startLine) || 1));
-  const avgBytesPerLine = Math.max(
-    16,
-    Buffer.byteLength(rawSource, "utf-8") / Math.max(1, totalLines),
-  );
-  const maxLinesCap = sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 135 : 650;
+  const isCliElisionMode = sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET;
+  let effectiveBytes = Buffer.byteLength(rawSource, "utf-8");
+  if (isCliElisionMode) {
+    const cleanRaw = rawSource.endsWith("\r\n")
+      ? rawSource.slice(0, -2)
+      : rawSource.endsWith("\n")
+        ? rawSource.slice(0, -1)
+        : rawSource;
+    const rawLines = cleanRaw.length > 0 ? cleanRaw.split(/\r?\n/) : [];
+    let keptBytes = 0;
+    for (let i = 0; i < rawLines.length; i++) {
+      const ln = rawLines[i]!;
+      const trimmed = ln.trim();
+      if (trimmed.length === 0 || isDecorativeDividerComment(trimmed)) {
+        continue;
+      }
+      keptBytes += Buffer.byteLength(ln, "utf-8") + 1;
+    }
+    effectiveBytes = keptBytes;
+  }
+  const avgBytesPerLine = Math.max(16, effectiveBytes / Math.max(1, totalLines));
+  const effectiveSliceBudget = isCliElisionMode
+    ? Math.min(8_000, sliceByteBudget + 1_088)
+    : sliceByteBudget;
+  const maxLinesCap = isCliElisionMode ? 180 : 650;
   const rawMaxLines = Math.max(
     80,
-    Math.min(maxLinesCap, Math.floor(sliceByteBudget / avgBytesPerLine)),
+    Math.min(maxLinesCap, Math.floor(effectiveSliceBudget / avgBytesPerLine)),
   );
 
   if (sLine + rawMaxLines - 1 >= totalLines) {
@@ -1271,11 +1377,30 @@ function parseSelectorLineRange(
   selector?: string,
 ): { startLine: number; endLine?: number } | undefined {
   if (!selector) return undefined;
-  const m = selector.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
-  if (!m?.[1]) return undefined;
-  const startLine = Number.parseInt(m[1], 10);
-  const endLine = m[2] ? Number.parseInt(m[2], 10) : undefined;
-  return { startLine, endLine };
+  const trimmed = selector.trim();
+  const single = trimmed.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
+  if (single?.[1]) {
+    const startLine = Number.parseInt(single[1], 10);
+    const endLine = single[2] ? Number.parseInt(single[2], 10) : undefined;
+    return { startLine, endLine };
+  }
+  if (LINE_RANGE_SELECTOR_RE.test(trimmed)) {
+    const parts = splitCommaSelectors(trimmed);
+    let minStart: number | undefined;
+    let maxEnd: number | undefined;
+    for (const part of parts) {
+      const m = part.trim().match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
+      if (!m?.[1]) continue;
+      const s = Number.parseInt(m[1], 10);
+      const e = m[2] ? Number.parseInt(m[2], 10) : s;
+      minStart = minStart === undefined ? s : Math.min(minStart, s);
+      maxEnd = maxEnd === undefined ? e : Math.max(maxEnd, e);
+    }
+    if (minStart !== undefined) {
+      return { startLine: minStart, endLine: maxEnd };
+    }
+  }
+  return undefined;
 }
 
 function buildAutoOutlineHeader(
@@ -1426,7 +1551,7 @@ function inferNextWindowFromTruncatedSlice(
   },
 ): string {
   const lines = emittedSlice.split("\n");
-  const initialTarget = fallbackTargetPath.split(",")[0]?.trim() || ".";
+  const initialTarget = fallbackTargetPath.split(/,\s+/)[0]?.trim() || ".";
   const parsedFallback = splitPathAndSelector(initialTarget);
   let lastFilePath = parsedFallback.filePath || ".";
   let activeSelector = parsedFallback.selector;
@@ -2391,9 +2516,13 @@ export async function aiceRead(
       ? buildSafeSearchRegexSelector(options.search)
       : undefined;
 
-  let normalizedItems = normalizeReadTargets(targets, baseDir);
+  let normalizedItems = normalizeReadTargets(targets, baseDir, {
+    coalesceSameFile: !options.json,
+  });
   if (normalizedItems.length === 0 && (safeSearch !== undefined || options.filesWithMatches)) {
-    normalizedItems = normalizeReadTargets(["."], baseDir);
+    normalizedItems = normalizeReadTargets(["."], baseDir, {
+      coalesceSameFile: !options.json,
+    });
   }
 
   // 1. Omitted / Empty Targets -> Workspace Overview (or Workspace Outline / Search)
@@ -3672,33 +3801,33 @@ async function executeContextStream(params: {
     ) {
       const keptContextResults: ContextResult[] = [];
       const downgradedBlocks: string[] = [];
-      const softByteCap = effectiveBudgets.softByteCap;
+      const statsAllowanceBytes = options.stats ? 180 : 0;
+      const maxBundleBytes = Math.max(400, effectiveBudgets.maxBytes - statsAllowanceBytes);
+      const softByteCap = Math.min(
+        effectiveBudgets.softByteCap,
+        Math.max(400, maxBundleBytes - 350),
+      );
       const softTokenCap = effectiveBudgets.softTokenCap;
 
-      // Smallest-first water-filling across multi-context targets
-      const indexedCosts = results.map((resItem, idx) => ({
-        idx,
-        itemBytes: Buffer.byteLength(resItem.formattedBundle, "utf-8"),
-        itemToks: resItem.tokenCount ?? estimateTokens(resItem.formattedBundle),
-      }));
-      const sortedCosts = [...indexedCosts].sort(
-        (a, b) => a.itemBytes - b.itemBytes || a.idx - b.idx,
-      );
+      // Pack targets strictly in original request order up to softByteCap / softTokenCap
       const fitInlineIndices = new Set<number>();
-      let cumulativeBytes = 0;
-      let cumulativeTokens = 0;
-      for (const entry of sortedCosts) {
+      let usedBytes = 0;
+      let usedTokens = 0;
+      for (let idx = 0; idx < results.length; idx++) {
+        const resItem = results[idx]!;
+        const itemBytes = Buffer.byteLength(resItem.formattedBundle, "utf-8");
+        const itemToks = resItem.tokenCount ?? estimateTokens(resItem.formattedBundle);
         const sep = fitInlineIndices.size > 0 ? 2 : 0;
-        if (
-          cumulativeBytes + sep + entry.itemBytes <= softByteCap &&
-          cumulativeTokens + entry.itemToks <= softTokenCap
-        ) {
-          fitInlineIndices.add(entry.idx);
-          cumulativeBytes += sep + entry.itemBytes;
-          cumulativeTokens += entry.itemToks;
+        if (usedBytes + sep + itemBytes <= softByteCap && usedTokens + itemToks <= softTokenCap) {
+          fitInlineIndices.add(idx);
+          usedBytes += sep + itemBytes;
+          usedTokens += itemToks;
+        } else {
+          break;
         }
       }
 
+      let partialFillHandled = false;
       for (let i = 0; i < results.length; i++) {
         const resItem = results[i]!;
         const targetMeta = matchedTargets[i]!;
@@ -3730,6 +3859,92 @@ async function executeContextStream(params: {
         const requestedEndLine = parsedOverflowRange
           ? (parsedOverflowRange.endLine ?? parsedOverflowRange.startLine)
           : undefined;
+
+        const sepBefore = keptContextResults.length > 0 || downgradedBlocks.length > 0 ? 2 : 0;
+        const remainingBytes = softByteCap - usedBytes - sepBefore;
+        const remainingTokens = softTokenCap - usedTokens;
+        if (
+          !partialFillHandled &&
+          targetMeta.route === "context" &&
+          remainingBytes >= 1_500 &&
+          remainingTokens >= 300
+        ) {
+          partialFillHandled = true;
+          const partialBudgetBytes = remainingBytes - 240;
+          const rawBundleLines = resItem.formattedBundle.split("\n");
+          const hasNumberedLines = rawBundleLines.some((ln) => /^\s*\d+│/.test(ln));
+          if (hasNumberedLines && partialBudgetBytes > 120) {
+            const keptPartialLines: string[] = [];
+            let partialBytes = 0;
+            let lastEmittedLine = 0;
+            for (const ln of rawBundleLines) {
+              const lnBytes =
+                Buffer.byteLength(ln, "utf-8") + (keptPartialLines.length > 0 ? 1 : 0);
+              if (partialBytes + lnBytes > partialBudgetBytes) {
+                break;
+              }
+              keptPartialLines.push(ln);
+              partialBytes += lnBytes;
+              const numMatch = ln.match(/^\s*(\d+)│/);
+              if (numMatch?.[1]) {
+                const parsedNum = Number.parseInt(numMatch[1], 10);
+                if (parsedNum > 0) {
+                  lastEmittedLine = parsedNum;
+                }
+              }
+            }
+
+            if (lastEmittedLine > 0) {
+              const closedPartial = closeUnclosedMarkdownFence(keptPartialLines.join("\n"));
+              let nextCmd: string | undefined;
+              let continuationFooter: string;
+              if (isExplicitLineRange && requestedEndLine !== undefined) {
+                const cappedEnd =
+                  totalTargetLines !== undefined
+                    ? Math.min(requestedEndLine, totalTargetLines)
+                    : requestedEndLine;
+                if (cappedEnd > lastEmittedLine) {
+                  nextCmd = `aice read ${targetMeta.displayPath}:L${lastEmittedLine + 1}-L${cappedEnd}`;
+                  continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — next slice: ${nextCmd}]`;
+                } else {
+                  continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — target range complete]`;
+                }
+              } else if (totalTargetLines !== undefined && lastEmittedLine >= totalTargetLines) {
+                continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — target content complete]`;
+              } else {
+                nextCmd = inferNextWindowFromTruncatedSlice(
+                  closedPartial,
+                  targetMeta.displayPath,
+                  totalTargetLines,
+                  {
+                    diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
+                    rawSource: cachedRaw,
+                    projectRoot: targetMeta.resolved.projectRoot,
+                    sliceByteBudget: effectiveBudgets.sliceByteBudget,
+                  },
+                );
+                continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — next slice: ${nextCmd}]`;
+              }
+              if (nextCmd) {
+                paginationHints.push(nextCmd);
+              }
+              if (targetSummaries[i]) {
+                targetSummaries[i] = {
+                  ...targetSummaries[i]!,
+                  ...(totalTargetLines !== undefined ? { lineCount: totalTargetLines } : {}),
+                };
+              }
+              const partialBlock = `${closedPartial}\n${continuationFooter}`;
+              downgradedBlocks.push(partialBlock);
+              usedBytes += sepBefore + Buffer.byteLength(partialBlock, "utf-8");
+              usedTokens += estimateTokens(partialBlock);
+              continue;
+            }
+          }
+        } else if (!partialFillHandled) {
+          partialFillHandled = true;
+        }
+
         const nextCmd =
           isExplicitLineRange && requestedEndLine !== undefined
             ? `aice read ${targetMeta.displayPath}:L${startHintLine}-L${requestedEndLine}`
@@ -3991,6 +4206,7 @@ async function executeContextStream(params: {
       operation: "context",
       surface,
       idiomsUsed: Boolean(singleResult.idioms && Object.keys(singleResult.idioms).length > 0),
+      isSearchMode: overallMode === "search",
       nativeText: "",
       nativeChars: totalNativeChars,
       nativeCl100k: totalNativeCl100k,

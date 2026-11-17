@@ -33,6 +33,7 @@ import {
   computeRegexBaselineText,
   countSourceLines,
   DEFAULT_CLI_READ_MAX_BYTES,
+  DEFAULT_CLI_SLICE_BYTE_BUDGET,
   DEFAULT_READ_MAX_BYTES,
   generateContext,
   normalizeReadTargets,
@@ -1186,12 +1187,16 @@ describe("Unified Read Engine (`aiceRead`)", () => {
     it("handles multi-target explicit :Lstart-Lend overflow on surface: 'cli' by emitting compact omitted header without full outline", async () => {
       const line = "emitBoxLocal(ctx, -15.0, 15.0, -6.8, 0.25, true);";
       const multiContent = Array.from({ length: 300 }, () => line).join("\n");
-      fs.writeFileSync(path.join(tmpDir, "src", "multi_slice.ts"), `${multiContent}\n`, "utf-8");
+      fs.writeFileSync(path.join(tmpDir, "src", "multi_slice_a.ts"), `${multiContent}\n`, "utf-8");
+      fs.writeFileSync(path.join(tmpDir, "src", "multi_slice_b.ts"), `${multiContent}\n`, "utf-8");
 
-      const res = await aiceRead(["src/multi_slice.ts:L1-L140", "src/multi_slice.ts:L141-L280"], {
-        projectRoot: tmpDir,
-        surface: "cli",
-      });
+      const res = await aiceRead(
+        ["src/multi_slice_a.ts:L1-L140", "src/multi_slice_b.ts:L141-L280"],
+        {
+          projectRoot: tmpDir,
+          surface: "cli",
+        },
+      );
 
       const bytes = Buffer.byteLength(res.output, "utf-8");
       expect(bytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
@@ -1201,12 +1206,12 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(res.output).not.toContain("141│");
       // Second slice is compactly omitted with next slice hint
       expect(res.output).toContain(
-        "// === src/multi_slice.ts:L141-L280 (omitted — 9 KB CLI budget; next slice: aice read src/multi_slice.ts:L141-L280) ===",
+        "// === src/multi_slice_b.ts:L141-L280 (omitted — 9 KB CLI budget; next slice: aice read src/multi_slice_b.ts:L141-L280) ===",
       );
       // Verifies full-file outline is NOT dumped
       expect(res.output).not.toContain("auto-downgraded to :outline");
-      expect(res.output).not.toContain("module multi_slice:");
-      expect(res.output).toContain("aice read src/multi_slice.ts:L141-L280");
+      expect(res.output).not.toContain("module multi_slice_b:");
+      expect(res.output).toContain("aice read src/multi_slice_b.ts:L141-L280");
     });
 
     it("eliminates unsolicited envelope bloat on CLI reads defaulting to zero-envelope without # AICE Context Pack", async () => {
@@ -2192,6 +2197,405 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(fullRes.output).toContain("import { depModule_1 }");
       expect(fullRes.output).toContain("==================================================");
       expect(fullRes.output).not.toContain("import lines folded");
+    });
+  });
+
+  describe("v0.9.49 Upgrades 1-3: Same-File Coalescing, >110L Elision, Original-Order Partial Fill & Elision-Aware Slice Span", () => {
+    it("Upgrade 1: coalesces same-file space-separated :L and :symbol targets in normalizeReadTargets & aiceRead while preserving non-coalescible and json modes", async () => {
+      const lines = [
+        "export function alphaStep(x: number): number {",
+        "  return x + 1;",
+        "}",
+        ...Array.from({ length: 140 }, (_, i) => `export const midVal_${i + 4} = ${i + 4};`),
+        "export function omegaStep(y: number): number {",
+        "  return y * 2;",
+        "}",
+      ];
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "coalesce_target.ts"),
+        `${lines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // 1. String space-separated :L coalescing + deduplication
+      const normRanges = normalizeReadTargets(
+        "src/coalesce_target.ts:L1-L3 src/coalesce_target.ts:L144-L146 src/coalesce_target.ts:L1-L3",
+        tmpDir,
+      );
+      expect(normRanges).toHaveLength(1);
+      expect(normRanges[0]?.targetPath).toBe("src/coalesce_target.ts");
+      expect(normRanges[0]?.selector).toBe("L1-L3,L144-L146");
+
+      // 2. Array :symbol coalescing (CLI variadic args path)
+      const normSyms = normalizeReadTargets(
+        ["src/coalesce_target.ts:alphaStep", "src/coalesce_target.ts:omegaStep"],
+        tmpDir,
+      );
+      expect(normSyms).toHaveLength(1);
+      expect(normSyms[0]?.selector).toBe("alphaStep,omegaStep");
+
+      // 3. Opt-out coalesceSameFile: false keeps separate entries
+      const uncoalesced = normalizeReadTargets(
+        "src/coalesce_target.ts:L1-L3 src/coalesce_target.ts:L144-L146",
+        tmpDir,
+        { coalesceSameFile: false },
+      );
+      expect(uncoalesced).toHaveLength(2);
+
+      // 4. Outline / regex / bare targets are NOT coalesced into :L/:symbol
+      const mixedNonCoalescible = normalizeReadTargets(
+        "src/coalesce_target.ts:outline src/coalesce_target.ts:alphaStep src/coalesce_target.ts:/omegaStep/",
+        tmpDir,
+      );
+      expect(mixedNonCoalescible).toHaveLength(3);
+
+      // 5. End-to-end aiceRead emits single minimal header without Multi-File Context Stream bloat
+      const readRes = await aiceRead(
+        "src/coalesce_target.ts:L1-L3 src/coalesce_target.ts:L144-L146",
+        {
+          projectRoot: tmpDir,
+          surface: "cli",
+        },
+      );
+      expect(readRes.output).toContain("// === src/coalesce_target.ts ===");
+      expect(readRes.output).not.toContain("# AICE Multi-File Context Stream");
+      expect(readRes.output).toContain("1│ export function alphaStep");
+      expect(readRes.output).toContain("144│ export function omegaStep");
+    });
+
+    it("Upgrade 1: applies lossless elision above >110 lines on both single :L and coalesced comma-separated :L selectors", async () => {
+      const elideLines: string[] = [];
+      for (let i = 1; i <= 140; i++) {
+        if (i % 5 === 0) {
+          elideLines.push("");
+        } else if (i % 7 === 0) {
+          elideLines.push("// ==================================================");
+        } else {
+          elideLines.push(`export const item_${i} = ${i};`);
+        }
+      }
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "elide_110.ts"),
+        `${elideLines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // 1. Single <= 110 lines (L1-L110): NOT elided (preserves divider banners)
+      const res110 = await aiceRead("src/elide_110.ts:L1-L110", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(res110.output).toContain("==================================================");
+
+      // 2. Single 112 lines (L1-L112 > 110): elided!
+      const res112 = await aiceRead("src/elide_110.ts:L1-L112", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(res112.output).not.toContain("==================================================");
+      expect(res112.output).toContain("111│ export const item_111 = 111;");
+
+      // 3. Space-separated / comma-separated ranges with combined span > 110 (60 + 60 = 120 > 110): elided!
+      const resMulti120 = await aiceRead("src/elide_110.ts:L1-L60 src/elide_110.ts:L71-L130", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(resMulti120.output).not.toContain(
+        "==================================================",
+      );
+      expect(resMulti120.output).toContain("1│ export const item_1 = 1;");
+      expect(resMulti120.output).toContain("129│ export const item_129 = 129;");
+    });
+
+    it("Upgrade 2: preserves original request order in multi-target budget packing and partially fills remaining >= 1,500 B budget with exact :L<resume>-L<end> footer", async () => {
+      // Target A: ~3.5 KB (fits inline)
+      const fileALines = Array.from(
+        { length: 48 },
+        (_, i) => `export const targetA_${i + 1} = "alpha_payload_chunk_padding_value_${i + 1}";`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "order_a.ts"),
+        `${fileALines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // Target B: ~7.5 KB (exceeds remaining ~5 KB, so triggers partial fill instead of dropping to 0 lines)
+      const fileBLines = Array.from(
+        { length: 120 },
+        (_, i) => `export const targetB_${i + 1} = "beta_payload_chunk_padding_value_${i + 1}";`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "order_b.ts"),
+        `${fileBLines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // Target C: ~1 KB (small file listed AFTER B — must NOT jump ahead of B under original-order packing)
+      const fileCLines = Array.from(
+        { length: 12 },
+        (_, i) => `export const targetC_${i + 1} = "gamma_small_value_${i + 1}";`,
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "order_c.ts"),
+        `${fileCLines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      const res = await aiceRead(
+        ["src/order_a.ts:L1-L48", "src/order_b.ts:L1-L120", "src/order_c.ts:L1-L12"],
+        {
+          projectRoot: tmpDir,
+          surface: "cli",
+        },
+      );
+
+      expect(Buffer.byteLength(res.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
+      // Target A is emitted in full
+      expect(res.output).toContain("targetA_1");
+      expect(res.output).toContain("targetA_48");
+      // Target B receives partial slice fill with exact resume line continuation footer
+      expect(res.output).toContain("targetB_1");
+      expect(res.output).toMatch(
+        /\/\/ \[9 KB CLI budget reached — next slice: aice read src\/order_b\.ts:L\d+-L120\]/,
+      );
+      // Target C stays omitted after Target B (original order strictly preserved)
+      expect(res.output).not.toContain("targetC_12");
+      expect(res.output).toContain(
+        "// === src/order_c.ts:L1-L12 (omitted — 9 KB CLI budget; next slice: aice read src/order_c.ts:L1-L12) ===",
+      );
+      expect(res.output.indexOf("src/order_a.ts")).toBeLessThan(
+        res.output.indexOf("src/order_b.ts"),
+      );
+      expect(res.output.indexOf("src/order_b.ts")).toBeLessThan(
+        res.output.indexOf("src/order_c.ts"),
+      );
+    });
+
+    it("Upgrade 3: computeDynamicSliceSpan excludes blanks & decorative divider comments in CLI mode and allows up to 180 lines", () => {
+      const mixedLines: string[] = [];
+      for (let i = 1; i <= 300; i++) {
+        if (i % 3 === 0) {
+          mixedLines.push("");
+        } else if (i % 3 === 1) {
+          mixedLines.push(
+            "// ──────────────────────────────────────────────────────────────────────────────",
+          );
+        } else {
+          mixedLines.push(`export const v_${i} = ${i}; // short line`);
+        }
+      }
+      const srcText = `${mixedLines.join("\n")}\n`;
+      const cliSpan = computeDynamicSliceSpan(
+        path.join(tmpDir, "src", "elision_span.ts"),
+        srcText,
+        1,
+        DEFAULT_CLI_SLICE_BYTE_BUDGET,
+      );
+      expect(cliSpan.rawMaxLines).toBe(180);
+      expect(cliSpan.snappedToSymbol).toBe(true);
+      expect(cliSpan.endLine).toBe(179);
+
+      // Compare against a dense file without blanks/dividers (~95 bytes/line -> ~84 lines in CLI mode)
+      const denseLines = Array.from(
+        { length: 300 },
+        (_, i) =>
+          `export const denseLine_${i + 1} = "dense_payload_with_sufficient_bytes_for_budget_${i + 1}";`,
+      );
+      const denseSpan = computeDynamicSliceSpan(
+        path.join(tmpDir, "src", "dense_span.ts"),
+        `${denseLines.join("\n")}\n`,
+        1,
+        DEFAULT_CLI_SLICE_BYTE_BUDGET,
+      );
+      expect(denseSpan.rawMaxLines).toBeGreaterThanOrEqual(80);
+      expect(denseSpan.rawMaxLines).toBeLessThan(120);
+    });
+  });
+
+  describe("v0.9.49 Upgrade 5: Monolith-Aware Pattern Search Focus Slicing (>65L) & Single-File Search Baseline", () => {
+    it("focus-slices >65L enclosing symbols with signature + merged ±5 windows + skipped markers, preserves <=65L symbols, and credits single-file search realistic baseline", async () => {
+      const compactAndMonolithLines = [
+        "export function compactSearchHelper(x: number): number {", // L1
+        "  const step1 = x + 10;", // L2
+        "  const COMPACT_SEARCH_NEEDLE = step1 * 2;", // L3
+        "  const step2 = COMPACT_SEARCH_NEEDLE - 5;", // L4
+        "  return step2;", // L5
+        "}", // L6
+        "", // L7
+        "export function renderObjects3D(ctx: { width: number; height: number }, count: number): number {", // L8
+        "  const viewportW = ctx.width;", // L9
+        "  const viewportH = ctx.height;", // L10
+        "  let accumulator = viewportW + viewportH;", // L11
+        ...Array.from(
+          { length: 28 },
+          (_, i) => `  accumulator += Math.sin(${i + 1} + count) * 0.125;`,
+        ), // L12..L39
+        "  const MONOLITH_NEEDLE_ALPHA = accumulator * 2.5;", // L40
+        ...Array.from(
+          { length: 49 },
+          (_, i) => `  accumulator += Math.cos(${i + 41} + count) * 0.25;`,
+        ), // L41..L89
+        "  const MONOLITH_NEEDLE_BETA = MONOLITH_NEEDLE_ALPHA + 42;", // L90
+        ...Array.from({ length: 36 }, (_, i) => `  accumulator += (${i + 91} * count) % 7;`), // L91..L126
+        "  return Math.round(accumulator);", // L127
+        "}", // L128 (121-line monolith function: L8..L128)
+        "", // L129
+        "export function denseMonolith(val: number): number {", // L130
+        ...Array.from({ length: 68 }, (_, i) => {
+          if (i % 10 === 4) {
+            return `  const DENSE_HIT_${i} = val + ${i};`;
+          }
+          return `  const pad_${i} = val + ${i};`;
+        }), // L131..L198
+        "  return val;", // L199
+        "}", // L200 (71-line monolith with >= 65% ±6 coverage on DENSE_HIT_)
+      ];
+
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "monolith_search.ts"),
+        `${compactAndMonolithLines.join("\n")}\n`,
+        "utf-8",
+      );
+
+      // 1. Compact <=65L function still expands in full
+      const compactRes = await aiceRead("src/monolith_search.ts", {
+        projectRoot: tmpDir,
+        search: "COMPACT_SEARCH_NEEDLE",
+        surface: "cli",
+      });
+      expect(compactRes.mode).toBe("search");
+      expect(compactRes.output).toContain("# [L1-L6]");
+      expect(compactRes.output).toContain("1│ export function compactSearchHelper");
+      expect(compactRes.output).toContain("6│ }");
+      expect(compactRes.output).not.toContain("unrelated lines");
+
+      // 2. >65L monolith (121 lines) focus-slices to signature (L8..L11) + ±5 windows around L40 & L90 + skipped markers
+      const monolithRes = await aiceRead("src/monolith_search.ts", {
+        projectRoot: tmpDir,
+        search: "MONOLITH_NEEDLE_",
+        surface: "cli",
+      });
+      expect(monolithRes.mode).toBe("search");
+      expect(monolithRes.output).toContain("// match at [L40, L90] # [L8-L128]");
+      // Signature/header window L8..L11
+      expect(monolithRes.output).toContain("8│ export function renderObjects3D");
+      expect(monolithRes.output).toContain("11│   let accumulator = viewportW + viewportH;");
+      expect(monolithRes.output).not.toContain("12│ ");
+      // Gap marker between header (L11) and first ±5 window (L35..L45)
+      expect(monolithRes.output).toContain("// ... [L12-L34 skipped — 23 unrelated lines] ...");
+      // First ±5 match window around L40 -> L35..L45
+      expect(monolithRes.output).toContain("35│ ");
+      expect(monolithRes.output).toContain(
+        "40│   const MONOLITH_NEEDLE_ALPHA = accumulator * 2.5;",
+      );
+      expect(monolithRes.output).toContain("45│ ");
+      expect(monolithRes.output).not.toContain("46│ ");
+      // Gap marker between L45 and L85
+      expect(monolithRes.output).toContain("// ... [L46-L84 skipped — 39 unrelated lines] ...");
+      // Second ±5 match window around L90 -> L85..L95
+      expect(monolithRes.output).toContain("85│ ");
+      expect(monolithRes.output).toContain(
+        "90│   const MONOLITH_NEEDLE_BETA = MONOLITH_NEEDLE_ALPHA + 42;",
+      );
+      expect(monolithRes.output).toContain("95│ ");
+      // Trailing gap marker L96..L128
+      expect(monolithRes.output).toContain("// ... [L96-L128 skipped — 33 unrelated lines] ...");
+
+      // Verify >50% byte & token savings vs full monolith function expansion
+      const fullMonolithText = compactAndMonolithLines
+        .slice(7, 128)
+        .map((ln, idx) => `${8 + idx}│ ${ln}`)
+        .join("\n");
+      expect(Buffer.byteLength(monolithRes.output, "utf-8")).toBeLessThan(
+        Buffer.byteLength(fullMonolithText, "utf-8") * 0.5,
+      );
+      expect(estimateTokens(monolithRes.output)).toBeLessThan(
+        estimateTokens(fullMonolithText) * 0.5,
+      );
+
+      // 3. Explicit -C (contextLines) bypasses monolith focus slicing
+      const explicitCtxRes = await aiceRead("src/monolith_search.ts", {
+        projectRoot: tmpDir,
+        search: "MONOLITH_NEEDLE_ALPHA",
+        contextLines: 2,
+        surface: "cli",
+      });
+      expect(explicitCtxRes.output).toContain("# [L38-L42]");
+      expect(explicitCtxRes.output).not.toContain("8│ export function renderObjects3D");
+      expect(explicitCtxRes.output).not.toContain("unrelated lines");
+
+      // 4. >=65% ±6 coverage emits full enclosing symbol without skipped markers
+      const denseRes = await aiceRead("src/monolith_search.ts:/DENSE_HIT_/", {
+        projectRoot: tmpDir,
+        surface: "cli",
+      });
+      expect(denseRes.output).toContain("130│ export function denseMonolith");
+      expect(denseRes.output).toContain("200│ }");
+      expect(denseRes.output).not.toContain("unrelated lines");
+
+      // 4b. Windows within <= 3 skipped lines merge seamlessly
+      const mergeLines = [
+        "export function mergeNearHits(v: number): number {", // L1
+        "  const initA = v + 1;", // L2
+        "  const initB = v + 2;", // L3
+        "  let acc = initA + initB;", // L4
+        ...Array.from({ length: 20 }, (_, i) => `  acc += ${i + 5};`), // L5..L24
+        "  const NEAR_GAP_HIT = acc + 1;", // L25 (window L20..L30)
+        ...Array.from({ length: 13 }, (_, i) => `  acc += ${i + 26};`), // L26..L38
+        "  const NEAR_GAP_HIT_2 = acc + 2;", // L39 (window L34..L44 -> gap L31..L33 = 3 lines <= 3 -> merges!)
+        ...Array.from({ length: 35 }, (_, i) => `  acc += ${i + 40};`), // L40..L74
+        "  return acc;", // L75
+        "}", // L76 (76-line monolith)
+      ];
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "merge_monolith.ts"),
+        `${mergeLines.join("\n")}\n`,
+        "utf-8",
+      );
+      const mergeRes = await aiceRead("src/merge_monolith.ts", {
+        projectRoot: tmpDir,
+        search: "NEAR_GAP_HIT",
+        surface: "cli",
+      });
+      expect(mergeRes.output).toContain("// match at [L25, L39] # [L1-L76]");
+      expect(mergeRes.output).toContain("1│ export function mergeNearHits");
+      expect(mergeRes.output).toContain("20│ ");
+      expect(mergeRes.output).toContain("32│ ");
+      expect(mergeRes.output).toContain("44│ ");
+      expect(mergeRes.output).not.toContain("L31-L33 skipped");
+      expect(mergeRes.output).toContain("// ... [L45-L76 skipped — 32 unrelated lines] ...");
+
+      // 5. Single-file AST search credits avoided follow-up read_file in realisticNativeCl100k while keeping raw savedCl100k exact
+      const telemetryFile = path.join(tmpDir, "upgrade5-search-telemetry.jsonl");
+      const prevEnv = process.env.AICE_TELEMETRY_PATH;
+      process.env.AICE_TELEMETRY_PATH = telemetryFile;
+      try {
+        await aiceRead("src/monolith_search.ts", {
+          projectRoot: tmpDir,
+          search: "MONOLITH_NEEDLE_",
+          surface: "cli",
+        });
+        const events = readTelemetryEvents(telemetryFile);
+        const searchEv = events[events.length - 1]!;
+        expect(searchEv.nativeCl100k).toBeGreaterThan(0);
+        expect(searchEv.nativeCl100k).toBeLessThan(searchEv.aiceCl100k);
+        expect(searchEv.savedCl100k).toBe(searchEv.nativeCl100k - searchEv.aiceCl100k);
+        const expectedRealistic = Math.max(
+          searchEv.nativeCl100k,
+          Math.min(searchEv.aiceCl100k + 350, searchEv.nativeCl100k + 650),
+        );
+        expect(searchEv.realisticNativeCl100k).toBe(expectedRealistic);
+        expect(searchEv.realisticSavedCl100k).toBe(expectedRealistic - searchEv.aiceCl100k);
+        expect(searchEv.realisticSavedCl100k).toBeGreaterThan(0);
+      } finally {
+        if (prevEnv === undefined) {
+          delete process.env.AICE_TELEMETRY_PATH;
+        } else {
+          process.env.AICE_TELEMETRY_PATH = prevEnv;
+        }
+      }
     });
   });
 });

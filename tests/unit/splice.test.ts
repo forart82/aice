@@ -1368,4 +1368,193 @@ fn funcF(): return 6
       }
     });
   });
+
+  describe("v0.9.49 Upgrade 4: Half-Open [start, end) Inclusive Line-Range Guard", () => {
+    it("rejects half-open [start, end) :L splices with 1-for-1 LHS match and protects trailing non-comment code line", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-halfopen-guard-"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true, idiomsEnabled: false }),
+          "utf-8",
+        );
+
+        // Case A: Exact L969-974 corners.push(cNW) case in .aipl
+        const aiplFile = path.join(tmpDir, "src", "render", "terrain.aipl");
+        fs.mkdirSync(path.dirname(aiplFile), { recursive: true });
+        const prefix = Array.from({ length: 968 }, (_, i) => `let p_${i + 1} = ${i + 1}`);
+        const block969 = [
+          "  let cNW = sampleCorner(nx, nz)", // L969
+          "  let cNE = sampleCorner(nx + 1, nz)", // L970
+          "  let cSW = sampleCorner(nx, nz + 1)", // L971
+          "  let cSE = sampleCorner(nx + 1, nz + 1)", // L972
+          "  mut avgH: f32 = (cNW + cNE + cSW + cSE) * 0.25", // L973
+          "  corners.push(cNW)", // L974
+        ];
+        const origAipl = `${[...prefix, ...block969].join("\n")}\n`;
+        fs.writeFileSync(aiplFile, origAipl, "utf-8");
+
+        await expect(
+          splice("src/render/terrain.aipl:L969-974", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: [
+              "  let cNW = sampleCorner(nx, nz) + 1.0",
+              "  let cNE = sampleCorner(nx + 1, nz) + 1.0",
+              "  let cSW = sampleCorner(nx, nz + 1) + 1.0",
+              "  let cSE = sampleCorner(nx + 1, nz + 1) + 1.0",
+              "  mut avgH: f32 = (cNW + cNE + cSW + cSE) * 0.25",
+            ].join("\n"),
+          }),
+        ).rejects.toThrowError(
+          "Off-by-one inclusive line-range guard on src/render/terrain.aipl:L969-L974: replacement has 5 lines matching L969-L973 1-for-1, which would silently delete L974 ('corners.push(cNW)'). AICE :L ranges are INCLUSIVE — use :L969-L973 to keep L974, or <<< search === replace >>> if deleting L974 is intentional.",
+        );
+        expect(fs.readFileSync(aiplFile, "utf-8")).toBe(origAipl);
+
+        // Case B: TypeScript file with typed const / self.prop / var assignments + trailing return
+        const tsFile = path.join(tmpDir, "src", "calc.ts");
+        const origTs = [
+          "export function compute(x: number): number {", // L1
+          "  const a: number = x + 1;", // L2
+          "  let b = a * 2;", // L3
+          "  var state.val = b + 3;", // L4
+          "  return state.val;", // L5
+          "}", // L6
+        ].join("\n");
+        fs.writeFileSync(tsFile, `${origTs}\n`, "utf-8");
+
+        await expect(
+          splice("src/calc.ts:L2-L5", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: [
+              "  const a: number = x + 10;",
+              "  let b = a * 3;",
+              "  var state.val = b + 5;",
+            ].join("\n"),
+          }),
+        ).rejects.toThrowError(
+          /Off-by-one inclusive line-range guard on src\/calc\.ts:L2-L5: replacement has 3 lines matching L2-L4 1-for-1, which would silently delete L5 \('return state\.val;'\)/,
+        );
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+
+    it("produces zero false positives on valid :L splices, <4-line spans, reordered LHS, same-LHS collapse, trailing comments/blanks, and full overwrites", async () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-halfopen-nofp-"));
+      try {
+        fs.writeFileSync(
+          path.join(tmpDir, "aice.config.json"),
+          JSON.stringify({ enabled: true, idiomsEnabled: false }),
+          "utf-8",
+        );
+
+        const tsFile = path.join(tmpDir, "src", "valid.ts");
+        fs.mkdirSync(path.dirname(tsFile), { recursive: true });
+        const baseLines = [
+          "export function runValid(x: number): number {", // L1
+          "  let a = x + 1;", // L2
+          "  let b = a + 2;", // L3
+          "  let c = b + 3;", // L4
+          "  // trailing comment", // L5
+          "  let d = c + 4;", // L6
+          "  d = d * 2;", // L7
+          "  let p = d + 1;", // L8
+          "  let q = p + 2;", // L9
+          "  let r = q + 3;", // L10
+          "  r = r * 2;", // L11
+          "  return r;", // L12
+          "}", // L13
+        ];
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 1. Trailing comment line at L5 -> allowed to delete comment
+        await expect(
+          splice("src/valid.ts:L2-L5", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: ["  let a = x + 10;", "  let b = a + 20;", "  let c = b + 30;"].join("\n"),
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // Reset file
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 2. All 0..origSpan-2 lines match LHS 1-for-1 AND trailing L11 has same LHS (`r`) as replLines[2] -> allowed!
+        await expect(
+          splice("src/valid.ts:L8-L11", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: ["  let p = d + 10;", "  let q = p + 20;", "  let r = (q + 30) * 2;"].join("\n"),
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // Reset file
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 3. Reordered / different LHS identifiers in replacement -> allowed!
+        await expect(
+          splice("src/valid.ts:L2-L5", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: ["  let b = x + 2;", "  let a = b + 1;", "  let c = a + 3;"].join("\n"),
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // Reset file
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 4. < 4 line span (L2-L4 -> 3 lines replaced with 2 lines) -> allowed!
+        await expect(
+          splice("src/valid.ts:L2-L4", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: ["  let a = x + 10;", "  let b = a + 20;"].join("\n"),
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // Reset file
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 5. Intentional trailing blank line (`code` ending in `\n\n`, yielding 4 lines on 4-line span) -> allowed!
+        await expect(
+          splice("src/valid.ts:L2-L5", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: "  let a = x + 10;\n  let b = a + 20;\n  let c = b + 30;\n\n",
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // Reset file
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+
+        // 6. Full-file overwrite (`=== src/valid.ts ===`) -> allowed!
+        await expect(
+          splice("src/valid.ts", {
+            projectRoot: tmpDir,
+            idioms: false,
+            code: [
+              "export function runValid(x: number): number {",
+              "  let a = x + 1;",
+              "  return a;",
+              "}",
+            ].join("\n"),
+          }),
+        ).resolves.toMatchObject({ success: true });
+
+        // 7. --delete on :L2-L5 -> allowed!
+        fs.writeFileSync(tsFile, `${baseLines.join("\n")}\n`, "utf-8");
+        await expect(
+          splice("src/valid.ts:L2-L5", {
+            projectRoot: tmpDir,
+            idioms: false,
+            delete: true,
+          }),
+        ).resolves.toMatchObject({ success: true });
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+      }
+    });
+  });
 });
