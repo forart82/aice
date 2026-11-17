@@ -116,6 +116,17 @@ if (fs.existsSync(installShPath)) {
   fs.writeFileSync(installShPath, installSh, "utf-8");
 }
 
+// 5b. Sync assets/aice-workflow.svg, docs/AICE_SPEC.md, and docs/AI_SYSTEM_PROMPT.md
+for (const relDoc of ["assets/aice-workflow.svg", "docs/AICE_SPEC.md", "docs/AI_SYSTEM_PROMPT.md"]) {
+  const docPath = path.join(rootDir, relDoc);
+  if (fs.existsSync(docPath)) {
+    const updatedDoc = fs
+      .readFileSync(docPath, "utf-8")
+      .replace(new RegExp(`v${currentVersion.replace(/\./g, "\\.")}`, "g"), `v${nextVersion}`);
+    fs.writeFileSync(docPath, updatedDoc, "utf-8");
+  }
+}
+
 // 6. Dynamic import for syncProjectWorkspaceRules & isProjectAiceEnabled to respect project opt-out
 const { isProjectAiceEnabled, syncProjectWorkspaceRules } = await import(
   "../src/config/project-config.js"

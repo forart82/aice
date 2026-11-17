@@ -11,10 +11,10 @@
 
 AICE (AI Context Engine) eliminates multi-tool cognitive load, prompt bloat, multi-turn read amplification, and stdout spillover by exposing a **Strict 2-Tool MCP Surface** (`tools/list`: strictly `["aice_read", "aice_splice"]`) paired with a **single-file `<= 650`-token `AGENTS.md` workspace rule footprint** and ergonomic CLI read/write entry points (`aice read` + `aice search`/`grep` + `aice find`/`tree` routing into `read()`, and `aice splice` / `aice write`). Every lower-level operation — 1-turn disk-numbered native reads (`--dsl` opt-in), dynamic water-filling byte/token budgeting, AST-snapped pagination, AST-aware search windows, `< 20ms` zero-AST workspace discovery, greenfield file creation, opt-in `$idiom` compression/expansion, whitespace- and brace-resilient surgical splicing, and syntax verification — is routed **automatically inside the engine**:
 
-1. **Pillar 1: Unified Read (`aice read` / MCP `aice_read`, CLI aliases `context`, `ctx` + `aice search`/`grep` & `aice find`/`tree`)** — Single inspection entry point governed by **`computeDynamicReadBudget()`** (`28,672 B` / `7,000`-token ceiling, `26,624 B` / `6,500`-token soft cap, smallest-first water-filling; `--full` / `--max-tokens` override) and **`computeDynamicSliceSpan()`** (`18,432 B` slice budget clamped to `80..650` lines and snapped to complete top-level AST symbol boundaries):
-   - **Default 1-Turn Numbered Native Output (`rawNative: true`, `--dsl` opt-in)**: Emits exact **1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) on **both** `:symbol` queries (all lengths, including `<= 25` lines and `> 25` lines, while preserving Adaptive Sibling Outlining, dependency contracts, and `[L14]` callers) **and** inline bare files (settling `~600–750` line / `<= 25 KB` bare files inline in 1 turn) so agents immediately run `aice splice` without a second `:Lstart-Lend` read (`--dsl` / MCP `dsl: true` opts into AICE shorthand decompilation).
-   - **AST-Aware Search & `< 20ms` Zero-AST Discovery**: Plain regex or auto-escaped literal searches (`aice search` / `grep`, `aice read --search`, MCP `search`) expand Tier 1 & 2 matches to complete enclosing AST declarations (`<= 40` lines) or `±10` numbered native lines (`-C` / `contextLines` override) and merge overlapping windows within `28 KB`; workspace file discovery (`aice find` / `tree`, `aice read --files`, MCP `filesOnly: true`) emits `<relPath> (<lines>L, <sizeKB>KB)` in `< 20ms` with zero AST parsing.
-2. **Pillar 2: Unified Write (`aice splice` / MCP `aice_splice`, CLI alias `aice write`)** — Single mutation & creation entry point with internal auto-routing: missing files or `:create` targets route to greenfield `create` (recursive parent directories, passthrough formats, opt-in `$idioms`, and AICE DSL compilation); existing files with selectors or `<<<` hunks route to **Resilient Surgical CST/AST/Hunk/Range Splicing** (whitespace-resilient `<<< === >>>` hunks, `±2`-line brace-safe `:Lstart-Lend` alignment, `±5` numbered error context lines, and `maskSourceLexically` null-guards); and existing files without selectors (or `:overwrite`) route to **Guarded Full-File Overwrite**, all gated by pre-write syntax validation, transactional `spliceBatch` rollback, and atomic `.tmp` $\to$ `rename` disk commits.
+1. **Pillar 1: Unified Read (`aice read` / MCP `aice_read`, CLI aliases `context`, `ctx` + `aice search`/`grep` & `aice find`/`tree`)** — Single inspection entry point governed by **`resolveEffectiveReadBudgets()`** & **`computeDynamicReadBudget()`** (**`9,216 B` (`9 KB`) aligned CLI & MCP ceiling**, `8,704 B` (`8.5 KB`) soft cap, `5,000`-token ceiling / `4,600`-token soft cap; `28,672 B` / `7,000`-token programmatic fallback; `--full` / `--max-tokens` override) and **`computeDynamicSliceSpan()`** (**`6,912 B` (`6.75 KB`) CLI/MCP slice budget**, elision-aware `80..180` line spans snapped to complete top-level AST symbol boundaries; `18,432 B` / `80..650L` programmatic fallback):
+   - **Default 1-Turn Numbered Native Output (`rawNative: true`, `--dsl` opt-in)**: Emits exact **1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) on **both** `:symbol` queries (all lengths, including `<= 25` lines and `> 25` lines, while preserving Adaptive Sibling Outlining, dependency contracts, and `[L14]` callers) **and** inline bare files (with **partial `9 KB` budget fill**, **same-file multi-range coalescing**, **`> 120L` Monolith X-Ray landmarks**, **`:sym@pattern` focus slicing**, and **`> 110L` blank/divider/import elision**) so agents immediately run `aice splice` without a second `:Lstart-Lend` read (`--dsl` / MCP `dsl: true` opts into AICE shorthand decompilation).
+   - **AST-Aware Search (`>65L` Monolith Focus) & `< 20ms` Zero-AST Discovery**: Plain regex or auto-escaped literal searches (`aice search` / `grep`, `aice read --search`, MCP `search`) expand Tier 1 & 2 matches to complete enclosing AST declarations (`<= 40` lines), **`> 65L` monolith focus sub-windows** (signature header + merged `±5L` hit regions), or `±10` numbered native lines (`-C` / `contextLines` override) within the `9 KB` ceiling; workspace file discovery (`aice find` / `tree`, `aice read --files`, MCP `filesOnly: true`) emits `<relPath> (<lines>L, <sizeKB>KB)` in `< 20ms` with zero AST parsing, aided by **MCP-to-CLI flag normalization** in `bin/aice.ts`.
+2. **Pillar 2: Unified Write (`aice splice` / MCP `aice_splice`, CLI alias `aice write`)** — Single mutation & creation entry point with internal auto-routing: missing files or `:create` targets route to greenfield `create` (recursive parent directories, passthrough formats, opt-in `$idioms`, and AICE DSL compilation); existing files with selectors or `<<<` hunks route to **Resilient Surgical CST/AST/Hunk/Range Splicing** (whitespace-resilient `<<< === >>>` hunks, **half-open `[start, end)` `:L` off-by-one guard**, `±2`-line brace-safe `:Lstart-Lend` alignment, `±5` numbered error context lines, and `maskSourceLexically` null-guards); and existing files without selectors (or `:overwrite`) route to **Guarded Full-File Overwrite**, all gated by pre-write syntax validation, transactional `spliceBatch` rollback, and atomic `.tmp` $\to$ `rename` disk commits.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
@@ -25,26 +25,26 @@ AICE (AI Context Engine) eliminates multi-tool cognitive load, prompt bloat, mul
 ├──────────────────────────────────────────────────────────┼──────────────────────────────────────────────────────────┤
 │ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
 │ │                Incoming Read Request                 │ │ │                Incoming Write Request                │ │
-│ │ (dir, find, search, :outline, :sym, :L-R, bare file) │ │ │ (new file, CST/AST/hunk/range splice, or overwrite)  │ │
+│ │ (dir, find, search, :outline, :sym@kw, :L-R, bare)   │ │ │ (new file, CST/AST/hunk/range splice, or overwrite)  │ │
 │ └──────────────────────────┬───────────────────────────┘ │ └──────────────────────────┬───────────────────────────┘ │
 │                            ▼                             │                            ▼                             │
 │ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
-│ │  Internal Read Auto-Router (native | dsl | find/rg)  │ │ │  Internal Write Auto-Router (create | splice | ovw)  │ │
+│ │  Internal Read Auto-Router + MCP->CLI Flag Norm      │ │ │  Internal Write Auto-Router (create | splice | ovw)  │ │
 │ └──────────────────────────┬───────────────────────────┘ │ └──────────────────────────┬───────────────────────────┘ │
 │              ┌─────────────┴──────────────┐              │              ┌─────────────┴──────────────┐              │
 │              ▼                            ▼              │              ▼                            ▼              │
 │ ┌─────────────────────────┐  ┌─────────────────────────┐ │ ┌─────────────────────────┐  ┌─────────────────────────┐ │
-│ │ 1-Turn Numbered Native  │  │ Search, Find & Fast Path│ │ │ Auto-Create / Overwrite │  │ Surgical AST/CST Splice │ │
-│ │ • N│ raw lines (:sym +  │  │ • <=40L AST / +-10L (-C)│ │ │ • Missing file / :create│  │ • :sym, indent-safe <<< │ │
-│ │   <=25KB ~750L bare)    │  │ • Plain regex/lit search│ │ │ • Or bare :overwrite    │  │ • +-2L brace-safe :L-R  │ │
-│ │ • <=20 Siblings + Deps  │  │ • <20ms 0-AST find/tree │ │ │ • mkdir -p, AICE DSL &  │  │ • +-5L err ctx, @clone  │ │
-│ │ • --dsl shorthand opt-in│  │ • :L-R, cfg/doc, globs  │ │ │   opt-in --idioms       │  │ • Trivia & null-guards  │ │
+│ │ 1-Turn Numbered Native  │  │ Search, X-Ray & Elision │ │ │ Auto-Create / Overwrite │  │ Surgical AST/CST Splice │ │
+│ │ • N│ lines (:sym + bare)│  │ • >120L X-Ray landmarks │ │ │ • Missing file / :create│  │ • :sym, indent-safe <<< │ │
+│ │ • Same-file coalescing  │  │ • :sym@kw & >65L focus  │ │ │ • Or bare :overwrite    │  │ • Half-open :L guard    │ │
+│ │ • Partial 9KB fill      │  │ • >110L blank/imp elide │ │ │ • mkdir -p, AICE DSL &  │  │ • +-2L brace, +-5L err  │ │
+│ │ • --dsl shorthand opt-in│  │ • <20ms 0-AST find/tree │ │ │   opt-in --idioms       │  │ • Trivia & null-guards  │ │
 │ └────────────┬────────────┘  └────────────┬────────────┘ │ └────────────┬────────────┘  └────────────┬────────────┘ │
 │              └─────────────┬──────────────┘              │              └─────────────┬──────────────┘              │
 │                            ▼                             │                            ▼                             │
 │ ┌──────────────────────────────────────────────────────┐ │ ┌──────────────────────────────────────────────────────┐ │
-│ │ <=28KB Water-Filling Budget + AST-Snapped 80..650L   │ │ │   Pre-Write Syntax Gate + Batch Rollback + Atomic    │ │
-│ │  (Overflow -> :outline | 18KB Symbol-Aligned Hints)  │ │ │     .tmp -> rename Commit (Zero .aice on Disk)       │ │
+│ │ <=9KB CLI/MCP Water-Fill + 6.75KB 80..180L Snapped   │ │ │   Pre-Write Syntax Gate + Batch Rollback + Atomic    │ │
+│ │ (28KB / 80..650L API Fallback | 0 Spill Truncation)  │ │ │     .tmp -> rename Commit (Zero .aice on Disk)       │ │
 │ └──────────────────────────────────────────────────────┘ │ └──────────────────────────────────────────────────────┘ │
 └──────────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┘
 ```
@@ -62,15 +62,23 @@ The AI agent invokes `aice read` (`aice_read`), `aice search` (`grep`), or `aice
 1. **Default 1-Turn Numbered Native Output (`rawNative: true` in `read()`, `--dsl` Opt-In)**:
    - When invoked via `read()` without `dsl: true` (`--dsl`), **both** `file:symbol` queries (across all symbol lengths, including `<= 25` lines and `> 25` lines) **and** inline bare files emit **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) directly usable in `aice splice` (`<<< === >>>` hunks or `:Lstart-Lend` ranges) in **1 turn**, while preserving dependency contracts, `[L14]` callers, and Adaptive Sibling Outlining on `:Class.method` symbol reads.
    - Passing `--dsl` (MCP `dsl: true`) sets `rawNative = false` to opt into AICE shorthand decompilation; direct legacy `generateContext()` calls default `rawNative` to `false` when omitted so decompiler/lens callers remain 100% compatible.
-2. **Dynamic Water-Filling Byte/Token Budget (`computeDynamicReadBudget()`)**:
-   - Enforces surface-aware budgeting governed by `DEFAULT_READ_MAX_BYTES` (**`28,672 B`** ceiling, `softByteCap = 26,624 B`, `DEFAULT_READ_MAX_TOKENS = 7,000`) for MCP/programmatic `aice_read`, and `DEFAULT_CLI_READ_MAX_BYTES` (**`9,216 B`** (`9 KB`) ceiling, `softByteCap = 8,704 B`, `DEFAULT_CLI_READ_MAX_TOKENS = 2,400`) for CLI `aice read` to prevent agent host `run_command` middle-truncation.
-   - Estimates each bare file's numbered output size (`rawBytes + lineCount * 6`), allocates budget smallest-first across requested targets so small files leave unused headroom for larger targets, renders any bare file fitting the remaining budget **inline in full with numbered native lines in 1 turn**, and auto-downgrades to `:outline` **only** overflow files exceeding the remaining budget (while honoring explicit `autoOutlineLineThreshold`, `--full`, or `--max-tokens` overrides when passed).
-3. **AST-Snapped Dynamic Pagination (`computeDynamicSliceSpan()`)**:
-   - Replaces static `150`-line chunks in `buildNextSliceHintCommand()` with `computeDynamicSliceSpan(diskPath, rawSource, startLine, sliceByteBudget)` using `DEFAULT_SLICE_BYTE_BUDGET = 18_432` for MCP and `DEFAULT_CLI_SLICE_BYTE_BUDGET = 7_936` (`7.75 KB`, ~135–185 lines) for CLI: computes `avgBytesPerLine = Math.max(16, byteLength / Math.max(1, totalLines))`, clamps `rawMaxLines` to **`80..650` lines**, and **snaps `endLine` to the last complete top-level AST symbol boundary** `<= startLine + rawMaxLines` (whenever advancing `>= Math.floor(rawMaxLines * 0.5)` lines) so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function or class in half.
-4. **Quoted Glob Expansion & `< 20ms` Zero-AST Workspace Discovery (`aice find` / `tree` / `--files` / MCP `filesOnly`)**:
+2. **Dynamic Water-Filling Byte/Token Budget, Partial Fill & Multi-Range Coalescing (`resolveEffectiveReadBudgets()` / `computeDynamicReadBudget()`)**:
+   - Enforces aligned surface-aware budgeting via `resolveEffectiveReadBudgets(options)`:
+     - **CLI & MCP (`surface: "cli" | "mcp"`, default)**: `DEFAULT_CLI_READ_MAX_BYTES = 9_216` (**`9 KB`** ceiling, strictly below host `9,892 B` middle-truncation threshold), `DEFAULT_CLI_READ_SOFT_BYTE_CAP = 8_704` (`8.5 KB`), `DEFAULT_CLI_READ_MAX_TOKENS = 5_000`, `DEFAULT_CLI_READ_SOFT_TOKEN_CAP = 4_600`.
+     - **Programmatic / Unbounded Fallback (`--max-tokens` / interactive `--full` / direct `aiceRead()` without CLI/MCP surface)**: `DEFAULT_READ_MAX_BYTES = 28_672` (`28 KB`), `DEFAULT_READ_SOFT_BYTE_CAP = 26_624`, `DEFAULT_READ_MAX_TOKENS = 7_000`, `DEFAULT_READ_SOFT_TOKEN_CAP = 6_500`.
+   - **Smallest-First Water-Filling + Partial `9 KB` Budget Fill**: Estimates each bare file's numbered output size (`rawBytes + lineCount * 6`), allocates budget smallest-first across targets, and when an overflow target meets `remainingBytes >= 1_500 && remainingTokens >= 300`, emits as many complete numbered lines as fit inside `remainingBytes - 240` (closing any unclosed Markdown fence) with an exact `// [9 KB ... budget reached — next slice: aice read <file>:L<last+1>-L<end>]` hint instead of wasting turn 1 on a bare outline.
+   - **Same-File Space-Separated Multi-Range Coalescing (`normalizeReadTargets()`)**: Automatically merges space-separated same-file selectors (e.g. `aice read src/app.ts:L10-L40 src/app.ts:L200-L230`) into one coalesced target (`src/app.ts:L10-L40,L200-L230`) so headers/contracts are emitted once and combined spans evaluate accurately.
+3. **Elision-Aware AST-Snapped Dynamic Pagination (`computeDynamicSliceSpan()`) & `> 110L` Elision**:
+   - Computes `computeDynamicSliceSpan(diskPath, rawSource, startLine, sliceByteBudget)` using **`DEFAULT_CLI_SLICE_BYTE_BUDGET = 6_912` (`6.75 KB`)** on CLI & MCP (with `effectiveSliceBudget = Math.min(8_000, sliceByteBudget + 1_088)` and `80..180` line cap in elision mode) vs **`DEFAULT_SLICE_BYTE_BUDGET = 18_432` (`80..650` lines)** for programmatic fallback. Snaps `endLine` to the last complete top-level AST symbol boundary so `Next slice: aice read <file>:L<start>-L<end>` never cuts a function in half.
+   - **`> 110L` Blank/Divider/Import Elision (`formatLargeLineRangeWithElision()`)**: When `:Lstart-Lend` (or coalesced multi-ranges) exceeds `110` lines under budget enforcement, strips blank lines and pure decorative divider comments (`===`, `---`), and folds contiguous import blocks (`// [Lstart-Lend: N import lines folded — use :imports to expand]`) while preserving true 1-based disk line numbers (`N│ ...`).
+4. **Monolith X-Ray (`> 120L`), `:sym@pattern` Focus Slicing & MCP-to-CLI Flag Normalization**:
+   - **`> 120L` Monolith X-Ray (`shouldExtractInternalLandmarks()` in `outline.ts`)**: Functions/methods spanning `> 120` lines emit indented internal landmarks in `:outline` (initial local setup cluster, section banner comments, major control blocks `for`/`while`/`if`/`match`/`switch`, and key calls) so agents jump straight to the right line range.
+   - **`:sym@pattern` Focus Slicing (`parseSymbolPatternSelector()` in `context.ts`)**: Extracts only the signature/setup header plus matching `±5L` sub-windows inside a giant symbol (`file.ts:bigFn@keyword`), preserving `@first`, `@1`, `@clone(...)`, and `@replace-docs`.
+   - **MCP-to-CLI Flag Normalization (`normalizeCliContextFlag()` in `bin/aice.ts`)**: Normalizes MCP-style camel/kebab/boolean flags on CLI `read`/`search`/`find` (`--files-only=true`, `--filesOnly`, `--context-lines=5`, `--contextLines=5`, `--include-deps=false`, `--outlineTarget`, `-c5`, `--dsl=true`) so mixed MCP/CLI invocations never burn retry turns on `unknown option` errors.
+5. **Quoted Glob Expansion & `< 20ms` Zero-AST Workspace Discovery (`aice find` / `tree` / `--files` / MCP `filesOnly`)**:
    - `normalizeReadTargets()` expands quoted globs (`"src/**/*.ts"`, `"tests/*.test.ts"`) deterministically while skipping `node_modules`, `.git`, and `dist`.
-   - `filesOnly: true` (`aice find [pattern] [targets...]`, alias `tree`, `aice read --files`, MCP `filesOnly`) runs a fast `< 20ms` zero-AST filesystem scan filtered by optional glob/substring (`filePattern ?? search`), emitting compact `<relPath> (<lines>L, <sizeKB>KB)` entries within the surface budget ceiling (plus `--json`) without AST parsing or 15-file truncation.
-5. **Zero-Envelope Fast Path (`:Lstart-Lend`, Searches, Config/Doc Files & Small Bare Files)**:
+   - `filesOnly: true` (`aice find [pattern] [targets...]`, alias `tree`, `aice read --files`, MCP `filesOnly`) runs a fast `< 20ms` zero-AST filesystem scan filtered by optional glob/substring (`filePattern ?? search`), emitting compact `<relPath> (<lines>L, <sizeKB>KB)` entries within the `9 KB` ceiling (plus `--json`) without AST parsing or 15-file truncation.
+6. **Zero-Envelope Fast Path (`:Lstart-Lend`, Searches, Config/Doc Files & Small Bare Files)**:
    - Line-range slices (`:Lstart-Lend`), pattern searches (`--search` / `:/pattern/`), config/doc/passthrough files (`.json`, `.yaml`, `.md`, `.css`, `.html`, `.twig`, `.sh`, etc.), and small bare files emit **only** a minimal `// === <file> ===` header + numbered native lines (`depth = 0`, `includeCallers = false`, no sibling/contract wrapper unless `--deps` or `--callers` is passed). Project `$idiom` collapsing defaults to **off** (`DEFAULT_PROJECT_CONFIG.idiomsEnabled = false`) unless `--idioms` or `"idiomsEnabled": true` is active.
 
 ### 2.2 Adaptive Sibling Outlining
@@ -103,7 +111,7 @@ When an AI coding agent requests a code symbol (e.g. `GameEngine.step`, `AuthSer
 
 When scanning directories or codebases via `aice search <pattern> [targets...]` (alias `grep`), `aice read --search <pattern>`, `aice read src -s "/RiskEngine/"`, or MCP `aice_read({ search })`:
 - **Plain Regex or Auto-Escaped Literal Ergonomics**: `search` accepts plain regex OR literal patterns without requiring `/.../` wrappers (automatically escaping invalid regex syntax to literal match instead of throwing, defaulting `[targets...]` to `["."]`, and supporting `-l, --files-with-matches` for concise matching path lists).
-- **AST-Aware Search Context Windows**: Instead of narrow 5-line (`±2`) peepholes that force follow-up reads, Tier 1 & Tier 2 code/declaration hits automatically inspect the enclosing AST function/method/declaration span: if **`<= 40` lines**, the match window expands to the **complete enclosing declaration (`[decl.startLine, decl.endLine]`)**; if larger or top-level, it expands to **`±10` numbered native lines (`~21`-line window)**. Explicit `-C, --context <lines>` (MCP `contextLines`) overrides the radius on demand. Overlapping windows within the same file merge cleanly and respect the global `28 KB` stdout budget (narrowing overflow/lower-tier windows + appending pagination hints when broad regexes match many files).
+- **AST-Aware Search Context Windows & `> 65L` Monolith Search Focus**: Instead of narrow 5-line (`±2`) peepholes that force follow-up reads, Tier 1 & Tier 2 code/declaration hits automatically inspect the enclosing AST function/method/declaration span: if **`<= 40` lines**, the match window expands to the **complete enclosing declaration (`[decl.startLine, decl.endLine]`)**; if **`> 65` lines** (and `!full && !dsl`), **`computeMonolithFocusSubWindows()`** groups hits per monolith and emits the signature header (`symStart..symStart+3`) + merged `±5L` sub-windows separated by `// ... [L...-L... skipped — N unrelated lines] ...` markers (falling back to full body when coverage `>= 65%`); otherwise it expands to **`±10` numbered native lines (`~21`-line window)**. Explicit `-C, --context <lines>` (MCP `contextLines`) overrides the radius on demand. Overlapping windows within the same file merge cleanly and respect the `9 KB` CLI/MCP stdout ceiling (`28 KB` programmatic fallback).
 
 AICE scores and sorts candidate match windows across **4 Tiers**:
 
@@ -209,6 +217,7 @@ To minimize LLM schema tokens while providing zero-friction CLI ergonomics:
 ### 3.6 Production Hardening, Self-Healing & Transactional Guarantees
 
 - **Whitespace-Resilient `<<< / === / >>>` Hunk Matching**: When an exact hunk search block misses inside the target file or `:symbol` span, `splice.ts` falls back to unambiguous dedent / leading-whitespace-normalized line matching within the scoped span and shifts the replacement block's base indentation by the matched target indentation delta (rejecting ambiguous multi-matches).
+- **Half-Open `[start, end)` `:L` Splice Guard (`guardHalfOpenInclusiveLineRangeSplice()`)**: Before touching disk, inspects raw `:Lstart-Lend` replacements (`origSpan >= 4`) where `replLines.length === origSpan - 1` and assignment LHS targets match `Lstart..L(end-1)` 1-for-1, catching accidental Python-style half-open `[start, end)` off-by-one payloads that would silently delete a live code line at `Lend` and emitting an exact inclusive `:Lstart-L(end-1)` / `<<< === >>>` remediation diagnostic.
 - **Brace-Safe `±2`-Line `:Lstart-Lend` Auto-Alignment & `±5`-Line Error Context**: Alongside the `±40`-line shifted-header self-healer, if an exact `:Lstart-Lend` splice causes off-by-one/two brace imbalance or syntax failure (`±1..±2` lines on `startLine`/`endLine`), AICE probes candidate boundary alignments and auto-aligns **only** when a single unambiguous candidate restores brace balance and passes native syntax validation. Whenever surgical validation fails, the thrown diagnostic includes the exact surrounding **`±5` numbered lines (`<lineNo>│ <lineContent>`)** from the original file so the agent repairs in 1 turn without an extra `aice read` round-trip.
 - **Lexer Null-Guard & Malformed Batch Header Diagnostics**: `maskSourceLexically(source ?? "")` in `src/tools/preprocessor.ts` guards against `null`/`undefined`/empty inputs without throwing `TypeError`, and empty or malformed `=== ... ===` headers in `--stdin` streams return descriptive validation diagnostics.
 - **Missing Sibling Auto-Imports & Two-Pass Lossless Syntax Gate**: Automatically wires missing local sibling TS/JS imports and validates every mutated file before disk write, rolling back the entire `spliceBatch` transaction on failure.
@@ -251,9 +260,9 @@ To prevent CLI coding agents (such as Antigravity and Gemini CLI) from concatena
 │  ├────────────────────────────────────────┤  ├──────────────────────────────────────────┤  ├──────────────────────┤ │
 │  │ 1. 1-Turn Numbered Native (:sym, bare) │  │ 1. Internal Write Auto-Router:           │  │ - Standard OS I/O    │ │
 │  │    + <=20 Siblings, Deps, Refs (--dsl) │  │   - Greenfield Create (mkdir -p, DSL)    │  │ - Zero AICE rule or  │ │
-│  │ 2. <=40L AST / +-10L Search & <20ms    │  │   - Guarded Full-File Overwrite          │  │   envelope overhead  │ │
-│  │    0-AST Find (<relPath> (<L>L, <KB>)) │  │   - Indent-Safe <<< & +-2L Brace :L-R    │  └──────────────────────┘ │
-│  │ 3. <=28KB Water-Fill + 80..650L Hints  │  │   - +-5L Err Context & Lexer Null-Guard  │                           │
+│  │ 2. >120L X-Ray, :sym@kw & >110L Elide  │  │   - Guarded Full-File Overwrite          │  │   envelope overhead  │ │
+│  │ 3. <=40L AST / >65L Focus / <20ms Find │  │   - Indent-Safe <<< & Half-Open :L Guard │  └──────────────────────┘ │
+│  │ 4. <=9KB Water-Fill + 80..180L Hints   │  │   - +-2L Brace & +-5L Error Diagnostics  │                           │
 │  └────────────────────┬───────────────────┘  └─────────────────────┬────────────────────┘                           │
 │                       │                                            ▼                                                │
 │                       │                      ┌──────────────────────────────────────────┐                           │
@@ -278,10 +287,110 @@ To prevent CLI coding agents (such as Antigravity and Gemini CLI) from concatena
 
 ---
 
-## 5. Summary of Key Architectural Advantages
+## 5. Deep-Dive Walkthrough: Opt-In `--dsl --idioms` C++20 Transformation (`$clampBand` / `$fmtMetric`)
 
-- **Strict 2-Tool MCP Surface + Ergonomic CLI Discovery + 1x `<= 650`-Token `AGENTS.md`**: MCP exposes strictly **`aice_read`** (with optional `search`, `filesOnly`, `contextLines`, `dsl`) and **`aice_splice`**, paired on the CLI with `aice read`, `aice search` (`grep`), `aice find` (`tree`), and `aice splice` (`write`) under a single `<= 650`-token `AGENTS.md` footprint (`-94%` rule overhead vs legacy 3-file injection).
-- **1-Turn Numbered Native Reads, Dynamic Water-Filling Budget & AST-Snapped Slices**: Default `<lineNo>│ <rawDiskLine>` output on `:symbol` (all lengths `<=25L` & `>25L`) and inline bare files (`--dsl` opt-in), `computeDynamicReadBudget()` (`28,672 B` / `7,000` tok ceiling, `26,624 B` / `6,500` tok soft cap — rendering `~600–750L` / `<=25 KB` bare files inline in 1 turn), `computeDynamicSliceSpan()` (`18,432 B`, `80..650L` AST symbol-snapped hints), and `<= 40L` AST / `±10L` merged search windows eliminate 2-turn line hunting.
-- **Self-Healing Surgical Splicing**: Combines whitespace-resilient `<<< / === / >>>` hunks, `±2`-line brace-safe `:Lstart-Lend` auto-alignment, `±5` numbered error context lines, and `maskSourceLexically` null-guards.
+While default `aice read` emits 1-based disk-numbered native code (`3│ ...`) for zero-translation 1-turn splicing, agents working on repetitive boilerplate can explicitly opt into AICE shorthand + project `$idioms` (`--dsl --idioms` or `"idiomsEnabled": true` in `aice.config.json`). AICE mines repeating patterns via `aice idioms scan --save`, collapses them in RAM during `--dsl --idioms` reads, and expands them cleanly during `aice splice --idioms` with zero `.aice` files on disk:
+
+```json
+{
+  "idiomsEnabled": true,
+  "idioms": {
+    "$clampBand": {
+      "name": "$clampBand",
+      "kind": "stmt",
+      "params": [{ "name": "$0" }, { "name": "$1" }, { "name": "$2" }],
+      "templateAice": "if $0 < $1:\n  $0 = $1\nif $0 > $2:\n  $0 = $2"
+    },
+    "$fmtMetric": {
+      "name": "$fmtMetric",
+      "kind": "expr",
+      "params": [{ "name": "$0" }, { "name": "$1" }],
+      "templateAice": "std.string($0 + \"=\") + std.to_string($1)"
+    }
+  }
+}
+```
+
+### Step 1: Native C++20 Source File on Disk (`src/telemetry_report.cpp`)
+
+```cpp
+#include <string>
+
+std::string buildNodeReport(int cpu, int mem, int jit) {
+    if (cpu < 0) { cpu = 0; }
+    if (cpu > 100) { cpu = 100; }
+    if (mem < 128) { mem = 128; }
+    if (mem > 65536) { mem = 65536; }
+
+    const auto header = std::string("[Hello World]");
+    const auto lineCpu = std::string("cpu=") + std::to_string(cpu);
+
+    return header + " " + lineCpu;
+}
+```
+
+### Step 2: Opt-In Decompiled Read (`aice read --symbol buildNodeReport --dsl --idioms`)
+
+```bash
+$ aice read src/telemetry_report.cpp --symbol buildNodeReport --dsl --idioms --no-callers
+```
+
+```aice
+// Decompiled & $idiom-collapsed in RAM
+pub fn buildNodeReport(cpu:int, mem:int, jit:int) -> str:
+  $clampBand(cpu, 0, 100)
+  $clampBand(mem, 128, 65536)
+
+  header := "[Hello World]"
+  lineCpu := $fmtMetric("cpu", cpu)
+  ret header + " " + lineCpu
+```
+
+### Step 3: Surgical AICE + `$idioms` Splice (`aice splice --symbol buildNodeReport --idioms`)
+
+```bash
+$ aice splice src/telemetry_report.cpp \
+    --symbol buildNodeReport \
+    --idioms \
+    --in-place \
+    --code 'pub fn buildNodeReport(cpu:int, mem:int, jit:int) -> str:
+  $clampBand(cpu, 0, 100)
+  $clampBand(mem, 128, 65536)
+  $clampBand(jit, 5, 250)
+
+  header := "[Hello Peter]"
+  lineCpu := $fmtMetric("cpu", cpu)
+  lineJit := $fmtMetric("jit", jit)
+  ret header + " " + lineCpu + " " + lineJit'
+```
+
+### Step 4: Verified Native C++20 on Disk (`g++ -std=c++20 -fsyntax-only` Passed)
+
+```cpp
+#include <string>
+
+std::string buildNodeReport(int cpu, int mem, int jit) {
+    if (cpu < 0) { cpu = 0; }
+    if (cpu > 100) { cpu = 100; }
+    if (mem < 128) { mem = 128; }
+    if (mem > 65536) { mem = 65536; }
+    if (jit < 5) { jit = 5; }
+    if (jit > 250) { jit = 250; }
+
+    const auto header = std::string("[Hello Peter]");
+    const auto lineCpu = std::string("cpu=") + std::to_string(cpu);
+    const auto lineJit = std::string("jit=") + std::to_string(jit);
+
+    return header + " " + lineCpu + " " + lineJit;
+}
+```
+
+---
+
+## 6. Summary of Key Architectural Advantages
+
+- **Strict 2-Tool MCP Surface + Ergonomic CLI Discovery + 1x `<= 650`-Token `AGENTS.md`**: MCP exposes strictly **`aice_read`** (with optional `search`, `filesOnly`, `contextLines`, `dsl`) and **`aice_splice`**, paired on the CLI with `aice read`, `aice search` (`grep`), `aice find` (`tree`), and `aice splice` (`write`) under a single `<= 650`-token `AGENTS.md` footprint (`-94%` rule overhead vs legacy 3-file injection), plus MCP-to-CLI flag normalization in `bin/aice.ts`.
+- **1-Turn Numbered Native Reads, `9 KB` Aligned CLI/MCP Budgets & Monolith Controls**: Default `<lineNo>│ <rawDiskLine>` output on `:symbol` (all lengths `<=25L` & `>25L`) and inline bare files (`--dsl` opt-in), `resolveEffectiveReadBudgets()` / `computeDynamicReadBudget()` (`9,216 B` (`9 KB`) aligned CLI & MCP ceiling, `8,704 B` soft cap, `5,000`-token cap; `28,672 B` programmatic fallback), `computeDynamicSliceSpan()` (`6,912 B` / `6.75 KB` slice budget, `80..180L` elision-aware spans; `18,432 B` / `80..650L` programmatic fallback), partial `9 KB` budget fill, same-file range coalescing, `> 120L` Monolith X-Ray landmarks, `:sym@pattern` focus slicing, `> 110L` blank/divider/import elision, and `> 65L` monolith search focus eliminate 2-turn line hunting and spillover truncation.
+- **Self-Healing Surgical Splicing & Pre-Write Safety**: Combines whitespace-resilient `<<< / === / >>>` hunks, half-open `[start, end)` `:L` off-by-one guard (`guardHalfOpenInclusiveLineRangeSplice`), `±2`-line brace-safe `:Lstart-Lend` auto-alignment, `±5` numbered error context lines, and `maskSourceLexically` null-guards.
 - **100% Honest Signed & Loop-Aware Telemetry**: `< 250 B` numeric ledger, realistic slice/search baselines, `< 90s` `repeatReadCalls` / `Repeat-Read Turn Warnings` in `aice gain`, and `readLoopAudit` + **Context Replay Token Tax** in `aice analyze`.
-- **Empirically Verified Across 33 Live Adversarial Agent Sessions**: Wins **11/11** scenarios (`RW-01`..`RW-10` multi-file + `RW-11` hostile 1-file 0-idiom Lone Needle; `22/22` AICE runs 100% verified on disk), cutting LLM output tokens by **62.9%–84.3%**, working payload tokens by **57.8%–72.6%**, LLM turns by **67.1%–68.9%**, and real API cost by **71.0%–73.5%** (see [`BENCHMARKS.md`](./BENCHMARKS.md) and [`BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)).
+- **Empirically Verified Across Live Production & Cold-Start Lab Benchmarks**: Measured `+17% to +25%` real net quota savings (`923` live calls / `633` turns on `aipl_dog`, `0` broken disk writes) alongside **11/11** cold-start adversarial wins (`RW-01`..`RW-11`, see [`BENCHMARKS.md`](./BENCHMARKS.md) and [`BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md)).

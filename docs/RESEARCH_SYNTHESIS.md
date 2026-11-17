@@ -130,4 +130,18 @@ $$C \cong A \times \Omega$$
 ### 5.3 Active Doc-Preserving CST Trivia Lenses in `splice` & Asymmetric Codec
 - **Asymmetric Codec**: Read via high-density token-compact AICE syntax; write/edit via native target syntax (`.ts`, `.py`, `.rs`, `.go`, etc.) or `$idiom` macros directly in `aice splice` without cognitive translation overhead.
 - **Active Trivia Lens**: When an AI agent splices a declaration (TypeScript/Rust/C# doc comment or Python docstring) and omits the documentation in the replacement snippet, `aice splice` automatically extracts and re-attaches the original leading JSDoc / docstring with proper indentation. If the replacement explicitly provides updated documentation, the old doc comment is replaced rather than duplicated.
-- **Broad Multi-Language Coverage**: Lossless CST trivia retention and surgical splicing supported across **33 file extensions in 18 languages** (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `.cs`, `.kt`, `.kts`, `.php`, `.html`, `.twig`, `.css`, `.json`, `.yaml`, `.yml`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`).
+- **Broad Multi-Language Coverage**: Lossless CST trivia retention and surgical splicing supported across **20 languages / 33 file extensions** (`.ts`, `.tsx`, `.d.ts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.py`, `.pyi`, `.rs`, `.go`, `.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `.cs`, `.kt`, `.kts`, `.php`, `.html`, `.twig`, `.css`, `.json`, `.yaml`, `.yml`, `.sh`, `.bash`, `.zsh`, `.ps1`, `.cmd`, `.bat`, `.md`, `.markdown`, `.aipl`).
+
+### 5.4 The Symmetric Billable Quota Equation (End-to-End Session Economics)
+Single-call stdout compression alone overestimates real agent savings unless weighed against multi-turn context caching, asymmetric generation pricing, and turn-amplification taxes. Across modern LLM APIs, end-to-end session quota cost $Q(\mathcal{S})$ follows the **Symmetric Billable Quota Equation**:
+
+$$Q(\mathcal{S}) = \underbrace{1.0 \cdot T_{\text{uncached\_in}}}_{\text{New Input (1x)}} + \underbrace{0.1 \cdot \sum_{t=1}^{N} C_t}_{\text{Cached Replay (0.1x)}} + \underbrace{4.0 \cdot T_{\text{out}}}_{\text{Generation Output (4x)}}$$
+
+Comparing an AICE session against a native-tool baseline yields exact net session quota savings:
+
+$$\Delta Q_{\text{net}} = \Delta Q_{\text{read}} + \Delta Q_{\text{splice\_out}} - \left(\text{Tax}_{\text{rule\_card}} + \text{Tax}_{\text{cli\_wrapper}} + \text{Tax}_{\text{pagination\_turns}} + \text{Tax}_{\text{retry\_turns}}\right)$$
+
+Where every extra pagination or flag/range retry turn imposes an **Extra-Turn Replay Tax** of $0.1 \cdot C_t$ (`~12K–20K` equivalent `1x` tokens per wasted turn at `119K–196K` context depth). Consequently:
+1. Cutting **`4x`-weighted `aice splice` output tokens** (`-44%` to `-47%`) without repeating `Target` blocks delivers immediate `4x` leverage on every mutation.
+2. Keeping initial reads **`-43%` to `-56%` leaner** (`>120L` Monolith X-Ray, `:sym@pattern` focus, `>110L` blank/import elision, `>65L` search focus, `9 KB` cap) compounds across `~23` subsequent turns at `0.1x` replay and trims average context windows by `39%` (`196K -> 119K`).
+3. Eliminating extra slice/retry turns via same-file coalescing, partial `9 KB` fill, MCP-to-CLI flag normalization, and the half-open `:L` guard drops $\text{Tax}_{\text{pagination\_turns}} + \text{Tax}_{\text{retry\_turns}} \to 0$, lifting real net end-to-end quota savings from `+5%–11%` to **`+17%–25%`**.
