@@ -1,5 +1,5 @@
-<!-- AICE:START v0.9.50 -->
-## AICE (v0.9.50)
+<!-- AICE:START v0.9.51 -->
+## AICE (v0.9.51)
 - Gate: ONLY if `aice.config.json` has `"enabled": true` (code/config/md + passthrough/extensionless). Blocker: `aice disable`/`aice enable`.
 ### 2. Batch Read & Splice (No Shell Workarounds)
 - ONLY `aice read`/`search`/`find` (`aice_read`) & `aice splice`/`aice write` (`aice_splice`); no shell writes or `sed`/`grep`/`cat`/`find`.
