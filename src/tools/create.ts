@@ -26,7 +26,12 @@ import {
 } from "../config/index.js";
 import type { Block, Expr, MethodDecl, Module, Pattern, Statement, TypeExpr } from "../core/ast.js";
 import { parse } from "../core/parser.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
+import {
+  detectTargetFromPath,
+  detectTargetFromPathOrContent,
+  emitTarget,
+  type TargetLanguage,
+} from "../emitters/index.js";
 import {
   expandModuleIdioms,
   readIdiomCache,
@@ -706,11 +711,8 @@ function compileAiceOrHybridToNative(
     return "";
   }
 
-  if (targetLang === "markdown") {
-    return cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
-  }
-
   if (
+    targetLang === "markdown" ||
     targetLang === "shell" ||
     targetLang === "powershell" ||
     targetLang === "batch" ||
@@ -1361,7 +1363,114 @@ export async function createFile(
   const checkPath = fullPath.replace(/\.aice$/, "");
   const ext = path.extname(checkPath).toLowerCase();
   const baseName = path.basename(checkPath);
-  const isScriptOrMarkdown =
+
+  const PASSTHROUGH_PROJECT_EXTENSIONS = new Set([
+    ".java",
+    ".pro",
+    ".example",
+    ".gradle",
+    ".properties",
+    ".xml",
+    ".toml",
+    ".mod",
+    ".sum",
+    ".csproj",
+    ".sln",
+    ".props",
+    ".targets",
+    ".cmake",
+    ".mk",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".env",
+    ".sql",
+    ".sh",
+    ".txt",
+    ".lock",
+    ".dockerfile",
+    ".gitattributes",
+    ".gitignore",
+    ".npmrc",
+    ".nvmrc",
+    ".editorconfig",
+    ".prettierrc",
+    ".eslintrc",
+    ".browserslistrc",
+    ".svg",
+    ".csv",
+    ".tsv",
+    ".graphql",
+    ".gql",
+    ".prisma",
+    ".proto",
+  ]);
+  const PASSTHROUGH_PROJECT_FILENAMES = new Set([
+    "verify",
+    "new-project",
+    "Cargo.toml",
+    "Cargo.lock",
+    "go.mod",
+    "go.sum",
+    "CMakeLists.txt",
+    "Makefile",
+    "Dockerfile",
+    "Procfile",
+    "Jenkinsfile",
+    "Vagrantfile",
+    "Gemfile",
+    "Rakefile",
+    "Justfile",
+    "Brewfile",
+    "LICENSE",
+    "README",
+    "CHANGELOG",
+    "NOTICE",
+    "AUTHORS",
+    "CODEOWNERS",
+    ".gitignore",
+    ".gitattributes",
+    ".dockerignore",
+    ".editorconfig",
+    ".env",
+    ".npmrc",
+    ".nvmrc",
+    ".prettierrc",
+    ".eslintrc",
+    ".browserslistrc",
+  ]);
+
+  const isExtensionlessTarget =
+    ext === "" && !baseName.startsWith(".") && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(baseName);
+  const isDotfileTarget =
+    baseName.startsWith(".") &&
+    (PASSTHROUGH_PROJECT_FILENAMES.has(baseName) || /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(baseName));
+  const isWebmanifest = ext === ".webmanifest";
+
+  const isPassthroughManifest =
+    !options.targetLanguage &&
+    !fullPath.endsWith(".aice") &&
+    !isWebmanifest &&
+    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
+    (PASSTHROUGH_PROJECT_EXTENSIONS.has(ext) ||
+      PASSTHROUGH_PROJECT_FILENAMES.has(baseName) ||
+      isExtensionlessTarget ||
+      isDotfileTarget);
+
+  if (
+    !options.targetLanguage &&
+    !fullPath.endsWith(".aice") &&
+    !isWebmanifest &&
+    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
+    !isPassthroughManifest
+  ) {
+    throw new Error(
+      `Unsupported target extension "${ext || path.basename(fullPath)}". Supported extensions: ${Array.from(KNOWN_TARGET_EXTENSIONS).join(", ")}`,
+    );
+  }
+
+  const isScriptOrMarkdownOrPassthrough =
+    isPassthroughManifest ||
     ext === ".md" ||
     ext === ".markdown" ||
     ext === ".sh" ||
@@ -1371,8 +1480,8 @@ export async function createFile(
     ext === ".cmd" ||
     ext === ".bat";
 
-  // Extract inline `@idiom` definitions from payload and `--idiom` option (skip for Markdown/scripts)
-  const { cleanedCode, inlineIdioms } = isScriptOrMarkdown
+  // Extract inline `@idiom` definitions from payload and `--idiom` option (skip for Markdown/scripts/passthrough)
+  const { cleanedCode, inlineIdioms } = isScriptOrMarkdownOrPassthrough
     ? { cleanedCode: rawPayload, inlineIdioms: {} as Record<string, ProjectIdiomDefinition> }
     : extractInlineIdiomsFromSource(rawPayload);
   const cliInlineIdioms = {
@@ -1398,66 +1507,34 @@ export async function createFile(
     });
   }
 
-  const PASSTHROUGH_PROJECT_EXTENSIONS = new Set([
-    ".toml",
-    ".mod",
-    ".sum",
-    ".csproj",
-    ".sln",
-    ".props",
-    ".targets",
-    ".xml",
-    ".gradle",
-    ".properties",
-    ".cmake",
-    ".mk",
-    ".ini",
-    ".cfg",
-    ".conf",
-    ".env",
-    ".sql",
-    ".sh",
-    ".txt",
-    ".lock",
-  ]);
-  const PASSTHROUGH_PROJECT_FILENAMES = new Set([
-    "Cargo.toml",
-    "Cargo.lock",
-    "go.mod",
-    "go.sum",
-    "CMakeLists.txt",
-    "Makefile",
-    "Dockerfile",
-    ".gitignore",
-    ".dockerignore",
-    ".editorconfig",
-    ".env",
-  ]);
-  const isPassthroughManifest =
-    !options.targetLanguage &&
-    !fullPath.endsWith(".aice") &&
-    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
-    (PASSTHROUGH_PROJECT_EXTENSIONS.has(ext) || PASSTHROUGH_PROJECT_FILENAMES.has(baseName));
-
-  if (
-    !options.targetLanguage &&
-    !fullPath.endsWith(".aice") &&
-    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
-    !isPassthroughManifest
-  ) {
-    throw new Error(
-      `Unsupported target extension "${ext || path.basename(fullPath)}". Supported extensions: ${Array.from(KNOWN_TARGET_EXTENSIONS).join(", ")}`,
-    );
-  }
-
-  const targetLang = options.targetLanguage ?? detectTargetFromPath(fullPath);
+  const detectedShebang = isPassthroughManifest
+    ? detectTargetFromPathOrContent(fullPath, cleanedCode)
+    : "passthrough";
+  const targetLang: TargetLanguage =
+    options.targetLanguage ??
+    (isWebmanifest
+      ? "json"
+      : detectedShebang !== "passthrough"
+        ? detectedShebang
+        : detectTargetFromPath(fullPath));
   const language = detectLanguageName(fullPath.replace(/\.aice$/, ""));
 
-  const nativeCode = isPassthroughManifest
-    ? `${cleanedCode.replace(/^(?:\r?\n)+|\s+$/g, "")}\n`
-    : withSuppressedTelemetry(() =>
-        compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms, overwrite),
-      );
+  let nativeCode: string;
+  if (isPassthroughManifest) {
+    nativeCode = cleanedCode.trim() ? `${cleanedCode.replace(/^(?:\r?\n)+|\s+$/g, "")}\n` : "";
+    if (nativeCode) {
+      const check = validateNativeSyntax(nativeCode, targetLang, fullPath, activeIdioms);
+      const pyDup = targetLang === "python" ? checkPythonDuplicateParams(nativeCode) : null;
+      if (!check.valid || pyDup) {
+        const diags = [...check.diagnostics, ...(pyDup ? [pyDup] : [])].join("; ");
+        throw new Error(`Failed pre-write syntax validation for ${fullPath}: ${diags}`);
+      }
+    }
+  } else {
+    nativeCode = withSuppressedTelemetry(() =>
+      compileAiceOrHybridToNative(cleanedCode, fullPath, targetLang, activeIdioms, overwrite),
+    );
+  }
   const persistedIdioms: string[] = [];
   if (!dryRun) {
     const dir = path.dirname(fullPath);
@@ -1572,6 +1649,8 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   const headerRe = /^={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}\s*$/;
 
   const passthroughFilenames = new Set([
+    "verify",
+    "new-project",
     "Cargo.toml",
     "Cargo.lock",
     "go.mod",
@@ -1579,12 +1658,44 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     "CMakeLists.txt",
     "Makefile",
     "Dockerfile",
+    "Procfile",
+    "Jenkinsfile",
+    "Vagrantfile",
+    "Gemfile",
+    "Rakefile",
+    "Justfile",
+    "Brewfile",
+    "LICENSE",
+    "README",
+    "CHANGELOG",
+    "NOTICE",
+    "AUTHORS",
+    "CODEOWNERS",
     ".gitignore",
+    ".gitattributes",
     ".dockerignore",
     ".editorconfig",
     ".env",
+    ".npmrc",
+    ".nvmrc",
+    ".prettierrc",
+    ".eslintrc",
+    ".browserslistrc",
   ]);
   const passthroughExtensions = new Set([
+    ".java",
+    ".pro",
+    ".webmanifest",
+    ".example",
+    ".gradle",
+    ".kts",
+    ".properties",
+    ".xml",
+    ".cjs",
+    ".mjs",
+    ".cts",
+    ".mts",
+    ".jsonc",
     ".toml",
     ".mod",
     ".sum",
@@ -1592,9 +1703,6 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     ".sln",
     ".props",
     ".targets",
-    ".xml",
-    ".gradle",
-    ".properties",
     ".cmake",
     ".mk",
     ".ini",
@@ -1612,6 +1720,22 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     ".markdown",
     ".txt",
     ".lock",
+    ".dockerfile",
+    ".gitattributes",
+    ".gitignore",
+    ".npmrc",
+    ".nvmrc",
+    ".editorconfig",
+    ".prettierrc",
+    ".eslintrc",
+    ".browserslistrc",
+    ".svg",
+    ".csv",
+    ".tsv",
+    ".graphql",
+    ".gql",
+    ".prisma",
+    ".proto",
   ]);
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand
@@ -1621,9 +1745,64 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     if (!clean || /\s/.test(clean)) return false;
     const base = path.posix.basename(clean);
     if (passthroughFilenames.has(base)) return true;
+    if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
     const ext = path.posix.extname(clean).toLowerCase();
-    if (!ext) return false;
+    if (!ext) {
+      if (clean.includes("/")) return /^[A-Za-z0-9._-]+$/.test(base);
+      if (fs.existsSync(path.resolve(clean))) return true;
+      return /^[a-z][a-z0-9_-]*$/.test(base);
+    }
     return KNOWN_TARGET_EXTENSIONS.has(ext) || passthroughExtensions.has(ext) || ext === ".aice";
+  };
+
+  const scanLineTripleQuoteState = (
+    textLine: string,
+    curQuote: '"""' | "'''" | null,
+    allowSingleTriple: boolean,
+  ): '"""' | "'''" | null => {
+    let state = curQuote;
+    let idx = 0;
+    while (idx < textLine.length) {
+      if (state === null) {
+        if (textLine[idx] === "#" || (textLine[idx] === "/" && textLine[idx + 1] === "/")) {
+          break;
+        }
+        if (textLine[idx] === '"' || textLine[idx] === "'") {
+          const q = textLine[idx]!;
+          if (
+            textLine[idx + 1] === q &&
+            textLine[idx + 2] === q &&
+            (q === '"' || allowSingleTriple)
+          ) {
+            state = q === '"' ? '"""' : "'''";
+            idx += 3;
+            continue;
+          }
+          idx++;
+          while (idx < textLine.length && textLine[idx] !== q) {
+            if (textLine[idx] === "\\") idx += 2;
+            else idx++;
+          }
+          idx++;
+          continue;
+        }
+        idx++;
+      } else {
+        if (textLine[idx] === "\\" && allowSingleTriple) {
+          idx += 2;
+          continue;
+        }
+        if (textLine.startsWith(state, idx)) {
+          const qChar = state[0]!;
+          idx += 3;
+          while (idx < textLine.length && textLine[idx] === qChar) idx++;
+          state = null;
+          continue;
+        }
+        idx++;
+      }
+    }
+    return state;
   };
 
   const preHeaderLines: string[] = [];
@@ -1631,6 +1810,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   let inMdFence = false;
   let mdFenceChar = "";
   let mdFenceLen = 0;
+  let inTripleQuote: '"""' | "'''" | null = null;
 
   for (const line of lines) {
     const activeFp = sections.length > 0 ? sections[sections.length - 1].filePath : undefined;
@@ -1656,6 +1836,18 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         continue;
       }
     }
+    const supportsTripleQuotes = Boolean(
+      activeFp &&
+        (/\.(?:py|pyi|kt|kts|java|cs|gradle)$/i.test(activeFp) || !path.extname(activeFp)),
+    );
+    const allowPySingleTriple = Boolean(
+      activeFp && (/\.(?:py|pyi)$/i.test(activeFp) || !path.extname(activeFp)),
+    );
+    if (sections.length > 0 && supportsTripleQuotes && inTripleQuote !== null) {
+      inTripleQuote = scanLineTripleQuoteState(line, inTripleQuote, allowPySingleTriple);
+      sections[sections.length - 1].lines.push(line);
+      continue;
+    }
     const m = /^\s/.test(line) ? null : line.match(headerRe);
     if (m) {
       let cand = (m[1] || "").trim().replace(/^['"`]|['"`]$/g, "");
@@ -1676,6 +1868,7 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
         inMdFence = false;
         mdFenceChar = "";
         mdFenceLen = 0;
+        inTripleQuote = null;
         sections.push({ filePath: cand, ...(isOverwrite ? { overwrite: true } : {}), lines: [] });
         continue;
       }
@@ -1683,6 +1876,9 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     if (sections.length === 0) {
       preHeaderLines.push(line);
     } else {
+      if (supportsTripleQuotes) {
+        inTripleQuote = scanLineTripleQuoteState(line, inTripleQuote, allowPySingleTriple);
+      }
       sections[sections.length - 1].lines.push(line);
     }
   }

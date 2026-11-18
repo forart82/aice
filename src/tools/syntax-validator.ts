@@ -462,21 +462,137 @@ const syntaxValidationCache: Array<{
   result: SyntaxValidationResult;
 }> = [];
 
+function stripInlineBacktickSpans(line: string): string {
+  let out = "";
+  let i = 0;
+  const len = line.length;
+  while (i < len) {
+    if (line[i] === "`") {
+      let ticks = 1;
+      while (i + ticks < len && line[i + ticks] === "`") ticks++;
+      const seq = "`".repeat(ticks);
+      const close = line.indexOf(seq, i + ticks);
+      if (close >= 0) {
+        out += " ".repeat(close + ticks - i);
+        i = close + ticks;
+        continue;
+      }
+      out += " ".repeat(ticks);
+      i += ticks;
+      continue;
+    }
+    out += line[i];
+    i++;
+  }
+  return out;
+}
+
+export function checkUnfencedHunkCorruption(
+  code: string,
+  isMarkdownOrText: boolean,
+): SyntaxDiagnosticItem[] {
+  const diags: SyntaxDiagnosticItem[] = [];
+  if (!code.includes("<<<")) return diags;
+
+  const lines = code.split(/\r?\n/);
+  let inFence = false;
+  let fenceChar = "";
+  let fenceLen = 0;
+  let strayOpenLine = -1;
+  let strayHasSep = false;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx] ?? "";
+    if (isMarkdownOrText) {
+      if (!inFence) {
+        const openMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+        if (openMatch && !(openMatch[1]![0] === "`" && openMatch[2]!.includes("`"))) {
+          inFence = true;
+          fenceChar = openMatch[1]![0]!;
+          fenceLen = openMatch[1]!.length;
+          continue;
+        }
+      } else {
+        const closeMatch = line.match(/^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/);
+        if (closeMatch && closeMatch[1]![0] === fenceChar && closeMatch[1]!.length >= fenceLen) {
+          inFence = false;
+          fenceChar = "";
+          fenceLen = 0;
+        }
+        continue;
+      }
+    }
+
+    const stripped = isMarkdownOrText ? stripInlineBacktickSpans(line) : line;
+    if (/(?:^|\s)<{3,6}(?:\s+.*?)?\s+={3,6}(?:\s+.*?)?\s+>{3,6}(?=\s|$)/.test(stripped)) {
+      diags.push({
+        line: idx + 1,
+        column: 1,
+        message:
+          "Unparsed single-line '<<< ... === ... >>>' hunk marker detected; put '<<<', '===', and '>>>' on separate lines",
+      });
+      continue;
+    }
+
+    if (isMarkdownOrText) {
+      if (/^[ \t]*<{3,6}[ \t]*$/.test(stripped)) {
+        strayOpenLine = idx + 1;
+        strayHasSep = false;
+      } else if (strayOpenLine > 0 && /^[ \t]*={3,6}[ \t]*$/.test(stripped)) {
+        strayHasSep = true;
+      } else if (strayOpenLine > 0 && strayHasSep && /^[ \t]*>{3,6}[ \t]*$/.test(stripped)) {
+        diags.push({
+          line: strayOpenLine,
+          column: 1,
+          message: "Unparsed '<<< / === / >>>' hunk markers leaked into file content",
+        });
+        strayOpenLine = -1;
+        strayHasSep = false;
+      }
+    }
+  }
+
+  return diags;
+}
+
 export function validateNativeSyntax(
   code: string,
-  targetLang: TargetLanguage,
-  filePath: string,
+  rawTargetLang: TargetLanguage,
+  filePath = "<memory>",
   activeIdioms?: Record<string, ProjectIdiomDefinition>,
 ): SyntaxValidationResult {
   if (filePath.endsWith(".aice")) {
     return { valid: true, diagnostics: [], items: [] };
   }
 
+  let targetLang: TargetLanguage = rawTargetLang;
+  let passthroughMode: false | "java" | "text" = false;
+  const lowerFp = filePath.toLowerCase();
+  if (filePath && filePath !== "<memory>") {
+    if (lowerFp.endsWith(".webmanifest")) {
+      targetLang = "json";
+    } else if (
+      targetLang === "typescript" &&
+      !lowerFp.endsWith(".ts") &&
+      !lowerFp.endsWith(".mts") &&
+      !lowerFp.endsWith(".cts")
+    ) {
+      const detected = detectTargetFromPathOrContent(filePath, code);
+      if (detected !== "passthrough") {
+        targetLang = detected;
+      } else if (lowerFp.endsWith(".java")) {
+        passthroughMode = "java";
+      } else {
+        passthroughMode = "text";
+      }
+    }
+  }
+
   const idiomKey =
     activeIdioms && Object.keys(activeIdioms).length > 0
       ? Object.keys(activeIdioms).sort().join(",")
       : "";
-  const cacheKey = `${targetLang}:${path.extname(filePath).toLowerCase()}:${idiomKey}:${code.length}`;
+  const cacheKey = `${passthroughMode || targetLang}:${lowerFp}:${idiomKey}:${code.length}`;
   for (const entry of syntaxValidationCache) {
     if (entry.key === cacheKey && entry.code === code) {
       return entry.result;
@@ -491,13 +607,24 @@ export function validateNativeSyntax(
       items,
     };
     syntaxValidationCache.unshift({ key: cacheKey, code, result: res });
-    if (syntaxValidationCache.length > 6) {
+    if (syntaxValidationCache.length > 32) {
       syntaxValidationCache.pop();
     }
     return res;
   };
 
-  // 1. JSON & YAML
+  if (passthroughMode === "text") {
+    items.push(...checkUnfencedHunkCorruption(code, true));
+    return finish();
+  }
+
+  if (passthroughMode === "java") {
+    const maskRes = maskSourceLexically(code, "kotlin", activeIdioms);
+    items.push(...maskRes.unterminatedDiagnostics);
+    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
+    items.push(...checkUnfencedHunkCorruption(code, false));
+    return finish();
+  }
   if (targetLang === "json") {
     const base = path.basename(filePath).toLowerCase();
     const allowComments =
@@ -693,6 +820,7 @@ export function validateNativeSyntax(
     targetLang === "batch" ||
     targetLang === "markdown"
   ) {
+    items.push(...checkUnfencedHunkCorruption(code, targetLang === "markdown"));
     if (targetLang === "shell" && !filePath.toLowerCase().endsWith(".zsh")) {
       try {
         const res = spawnSync("bash", ["-n"], {
@@ -715,7 +843,6 @@ export function validateNativeSyntax(
     }
     return finish();
   }
-
   // 4c. AIPL validation
   if (targetLang === "aipl") {
     const maskRes = maskSourceLexically(code, targetLang, activeIdioms);
@@ -895,6 +1022,39 @@ export function validateNativeSyntax(
       maskRes.maskLengths,
     ),
   );
+  items.push(...checkUnfencedHunkCorruption(code, false));
+
+  if (targetLang === "python" && items.length === 0 && code.trim().length > 0) {
+    try {
+      const pyScript =
+        'import ast, json, sys\nsrc = sys.stdin.read()\ntry:\n ast.parse(src)\nexcept SyntaxError as e:\n print(json.dumps({"line": e.lineno or 1, "col": e.offset or 1, "type": type(e).__name__, "msg": e.msg or str(e)}))\n sys.exit(1)';
+      const res = spawnSync("python3", ["-S", "-c", pyScript], {
+        input: code,
+        encoding: "utf-8",
+        timeout: 2500,
+      });
+      if (res.status !== null && res.status !== 0 && !res.error) {
+        try {
+          const parsedErr = JSON.parse((res.stdout ?? "").trim()) as {
+            line?: number;
+            col?: number;
+            type?: string;
+            msg?: string;
+          };
+          items.push({
+            line: parsedErr.line ?? 1,
+            column: parsedErr.col ?? 1,
+            message: `${parsedErr.type ?? "SyntaxError"}: ${parsedErr.msg ?? "invalid Python syntax"}`,
+          });
+        } catch {
+          const rawMsg = (res.stderr || res.stdout || "Python syntax error").trim();
+          items.push({ line: 1, column: 1, message: rawMsg });
+        }
+      }
+    } catch {
+      // python3 binary unavailable; fallback delimiter/lexical checks already ran
+    }
+  }
 
   return finish();
 }

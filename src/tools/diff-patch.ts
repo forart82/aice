@@ -951,7 +951,7 @@ function applyUnifiedDiff(
 
   try {
     if (isNativeTarget) {
-      const checkPath = ext ? effectivePath : "patch-target.ts";
+      const checkPath = effectivePath || "patch-target.ts";
       const targetLang = detectTargetFromPath(checkPath);
       const postVal = validateNativeSyntax(modified, targetLang, checkPath);
       if (!postVal.valid) {

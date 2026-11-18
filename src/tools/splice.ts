@@ -37,7 +37,12 @@ import { astToValue } from "../core/data-converter.js";
 import { parse, parseWithTrivia } from "../core/parser.js";
 import { applyTriviaLensToReplacement, extractDeclarationTriviaLens } from "../core/trivia.js";
 import { decompile } from "../decompiler/index.js";
-import { detectTargetFromPath, emitTarget, type TargetLanguage } from "../emitters/index.js";
+import {
+  detectTargetFromPath,
+  detectTargetFromPathOrContent,
+  emitTarget,
+  type TargetLanguage,
+} from "../emitters/index.js";
 import { expandModuleIdioms } from "../idioms/index.js";
 import {
   recordTelemetryEvent,
@@ -688,10 +693,12 @@ export function spliceSource(
   }
 
   const ext = path.extname(filePath).toLowerCase();
-  if (!filePath.endsWith(".aice") && KNOWN_TARGET_EXTENSIONS.has(ext)) {
+  if (
+    !filePath.endsWith(".aice") &&
+    (KNOWN_TARGET_EXTENSIONS.has(ext) || isSpliceTargetFileCandidate(filePath))
+  ) {
     return spliceNativeSource(source, options, filePath, idioms);
   }
-
   if (options.edits && options.edits.length > 0) {
     let currentCode = source;
     const editedSymbols: string[] = [];
@@ -4995,11 +5002,11 @@ function emitNativeSnippetForContext(
     targetLang === "shell" ||
     targetLang === "powershell" ||
     targetLang === "batch" ||
-    targetLang === "aipl"
+    targetLang === "aipl" ||
+    isPassthroughSpliceFile(filePath)
   ) {
     return dedentSnippet(rawSnippet).trim();
   }
-
   const { cleanedCode, inlineIdioms } = extractInlineIdiomsFromSource(rawSnippet);
   const mergedIdioms: Record<string, ProjectIdiomDefinition> = {
     ...(idioms ?? {}),
@@ -5331,7 +5338,90 @@ function spliceDialectNativeSource(
   }
 
   const anchorSymbol = options.insertAfter ?? options.insertBefore ?? options.symbol;
-  const rawSnippet = options.code ?? options.body ?? "";
+  const rawSnippet = stripNumberedGutterPrefixes(options.code ?? options.body ?? "");
+
+  if (containsHunkMarkers(rawSnippet)) {
+    const hunks = extractHunkBlocks(rawSnippet);
+    if (hunks.length > 0) {
+      const hunkIdiomsOn =
+        options.idioms !== false &&
+        (options.idioms === true || Boolean(idioms && Object.keys(idioms).length > 0));
+      let scopeStart = 0;
+      let scopeEnd = nativeSource.length;
+      if (
+        targetLang === "css" &&
+        anchorSymbol &&
+        anchorSymbol !== ":hunk" &&
+        anchorSymbol !== "hunk" &&
+        !isCreateOrOverwriteSymbol(anchorSymbol)
+      ) {
+        try {
+          const cssRoot = postcss.parse(nativeSource, { from: filePath });
+          const cleanAnchor = anchorSymbol.trim().replace(/^[.#]/, "");
+          let matchedRule: postcss.Rule | undefined;
+          cssRoot.walkRules((rule) => {
+            if (matchedRule) return;
+            const sel = rule.selector.trim();
+            const cleanSel = sel.replace(/^[.#]/, "");
+            if (
+              sel === anchorSymbol.trim() ||
+              cleanSel === cleanAnchor ||
+              cleanSel.replace(/[-_]/g, "").toLowerCase() ===
+                cleanAnchor.replace(/[-_]/g, "").toLowerCase()
+            ) {
+              matchedRule = rule;
+            }
+          });
+          if (matchedRule?.source?.start && matchedRule.source.end) {
+            scopeStart = matchedRule.source.start.offset;
+            const rawEnd = matchedRule.source.end.offset;
+            scopeEnd =
+              !nativeSource.slice(scopeStart, rawEnd).trimEnd().endsWith("}") &&
+              nativeSource[rawEnd] === "}"
+                ? rawEnd + 1
+                : rawEnd;
+          }
+        } catch {
+          // fall back to full-file hunk scope
+        }
+      }
+      const scopeSlice = nativeSource.slice(scopeStart, scopeEnd);
+      const scopeStartLine = nativeSource.slice(0, scopeStart).split("\n").length;
+      const updatedSlice = applyHunksToScope(
+        scopeSlice,
+        hunks,
+        anchorSymbol || ":hunk",
+        filePath,
+        targetLang,
+        idioms,
+        hunkIdiomsOn,
+        false,
+        scopeStartLine,
+      );
+      const modifiedCode = `${nativeSource.slice(0, scopeStart)}${updatedSlice}${nativeSource.slice(scopeEnd)}`;
+      const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
+      if (
+        !checkRes.valid &&
+        validateNativeSyntax(nativeSource, targetLang, filePath).valid &&
+        !options.force
+      ) {
+        throw new Error(
+          `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${checkRes.diagnostics.slice(0, 3).join("; ")}`,
+        );
+      }
+      return {
+        success: true,
+        filePath,
+        symbol: anchorSymbol || ":hunk",
+        originalSnippet: hunks.map((h) => h.search).join("\n\n"),
+        newSnippet: rawSnippet,
+        diff: options.diff ? generateUnifiedDiff(filePath, nativeSource, modifiedCode) : undefined,
+        modifiedCode,
+        newAiceSource: modifiedCode,
+        tokensSaved: estimateTokens(modifiedCode) - estimateTokens(rawSnippet),
+      };
+    }
+  }
 
   if (targetLang === "css") {
     const root = postcss.parse(nativeSource, { from: filePath });
@@ -6797,8 +6887,18 @@ function guardHalfOpenInclusiveLineRangeSplice(params: {
   }
 
   const origLastLhs = extractAssignmentLhsTarget(origLastLine);
-  if (origLastLhs !== null && origLastLhs === lastMatchedReplLhs) {
-    return;
+  if (origLastLhs !== null) {
+    if (origLastLhs === lastMatchedReplLhs) {
+      return;
+    }
+    const escLhs = origLastLhs.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const lhsUseRe = new RegExp(`(?<![A-Za-z0-9_.])${escLhs}(?![A-Za-z0-9_])`);
+    const lookaheadSlice = rawLines
+      .slice(endLine, Math.min(rawLines.length, endLine + 15))
+      .join("\n");
+    if (!lhsUseRe.test(lookaheadSlice)) {
+      return;
+    }
   }
 
   const displayPath = formatSpliceDisplayPath(filePath, projectRoot);
@@ -7328,22 +7428,27 @@ function resolveSingleNativeEditAgainstSource(
       throw buildEmptySpliceBlockError(filePath, anchorSymbol, "splicing line range");
     }
 
-    const extractedRangeIdioms =
-      options.idioms === false
-        ? { cleanedCode: rawSnippet, inlineIdioms: {} as Record<string, ProjectIdiomDefinition> }
-        : extractInlineIdiomsFromSource(rawSnippet);
+    const skipRangePreprocessor =
+      options.idioms === false ||
+      isPassthroughSpliceFile(filePath) ||
+      targetLang === "markdown" ||
+      targetLang === "shell" ||
+      targetLang === "powershell" ||
+      targetLang === "batch";
+    const extractedRangeIdioms = skipRangePreprocessor
+      ? { cleanedCode: rawSnippet, inlineIdioms: {} as Record<string, ProjectIdiomDefinition> }
+      : extractInlineIdiomsFromSource(rawSnippet);
     const mergedRangeIdioms =
       Object.keys(extractedRangeIdioms.inlineIdioms).length > 0
         ? { ...(idioms ?? {}), ...extractedRangeIdioms.inlineIdioms }
         : idioms;
-    const baseProcessed =
-      options.idioms === false
-        ? rawSnippet
-        : preprocessHybridAndIdiomsLossless(
-            extractedRangeIdioms.cleanedCode,
-            targetLang,
-            mergedRangeIdioms,
-          );
+    const baseProcessed = skipRangePreprocessor
+      ? rawSnippet
+      : preprocessHybridAndIdiomsLossless(
+          extractedRangeIdioms.cleanedCode,
+          targetLang,
+          mergedRangeIdioms,
+        );
     const isCrLf =
       (endOffset > 0 && nativeSource.slice(0, endOffset).endsWith("\r\n")) ||
       nativeSource.includes("\r\n");
@@ -7374,20 +7479,35 @@ function resolveSingleNativeEditAgainstSource(
 
     let processedCode = buildRangeReplacement(startLine, endLine);
 
-    guardHalfOpenInclusiveLineRangeSplice({
-      rawLines,
-      startLine,
-      endLine,
-      replContent: baseProcessed,
-      filePath,
-      projectRoot: options.projectRoot,
-    });
+    const isPassthroughRangeTarget = isPassthroughSpliceFile(filePath);
+    const isNonBraceRangeLang =
+      isPassthroughRangeTarget ||
+      targetLang === "markdown" ||
+      targetLang === "yaml" ||
+      targetLang === "html" ||
+      targetLang === "twig" ||
+      targetLang === "shell" ||
+      targetLang === "powershell" ||
+      targetLang === "batch";
+    const skipHalfOpenGuard = isNonBraceRangeLang || targetLang === "json" || targetLang === "css";
+
+    if (!skipHalfOpenGuard) {
+      guardHalfOpenInclusiveLineRangeSplice({
+        rawLines,
+        startLine,
+        endLine,
+        replContent: baseProcessed,
+        filePath,
+        projectRoot: options.projectRoot,
+      });
+    }
 
     let finalStartOffset = startOffset;
     let finalEndOffset = endOffset;
     let finalOriginalSnippet = originalSnippet;
 
     const countNetDelims = (s: string): { braces: number; parens: number } => {
+      if (isNonBraceRangeLang) return { braces: 0, parens: 0 };
       const masked = maskSourceLexically(s, targetLang).maskedCode;
       let braces = 0;
       let parens = 0;
@@ -7407,6 +7527,8 @@ function resolveSingleNativeEditAgainstSource(
     const origDelims = countNetDelims(originalSnippet);
     const procDelims = countNetDelims(processedCode);
     const hasExactDelimImbalance =
+      !isNonBraceRangeLang &&
+      !literalCheck.valid &&
       origSyntaxValid &&
       (origDelims.braces !== procDelims.braces || origDelims.parens !== procDelims.parens);
     const procLineList = processedCode.trim().split(/\r?\n/);
@@ -7466,6 +7588,7 @@ function resolveSingleNativeEditAgainstSource(
     }
 
     const isUnbalancedReplacementOnBalancedSpan =
+      !isNonBraceRangeLang &&
       origDelims.braces === 0 &&
       origDelims.parens === 0 &&
       (procDelims.braces !== 0 || procDelims.parens !== 0);
@@ -7756,7 +7879,7 @@ function resolveSingleNativeEditAgainstSource(
       }
     }
 
-    if (!autoAligned && (!literalCheck.valid || hasExactDelimImbalance) && origSyntaxValid) {
+    if (!autoAligned && !literalCheck.valid && origSyntaxValid) {
       const diagMsg =
         literalCheck.diagnostics.slice(0, 3).join("; ") || "brace/delimiter imbalance";
       const numberedContext = formatSurroundingNumberedContext(nativeSource, startLine, endLine, 5);
@@ -8540,7 +8663,11 @@ export function spliceNativeSource(
   const nativeSource =
     typeof rawNativeSource === "string" ? rawNativeSource : String(rawNativeSource ?? "");
   let options: SpliceOptions = rawOptions ?? {};
-  const targetLang = detectTargetFromPath(filePath);
+  const targetLang = resolveEffectiveSpliceTargetLang(
+    filePath,
+    nativeSource,
+    options.targetLanguage,
+  );
   if (
     options.symbol === "@first" ||
     options.symbol === "@1" ||
@@ -8685,10 +8812,31 @@ export function spliceNativeSource(
       }
     }
 
-    if (!forceLosslessPreprocess) {
+    {
       const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
       if (!checkRes.valid) {
-        return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+        if (!forceLosslessPreprocess) {
+          return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+        }
+        if (validateNativeSyntax(nativeSource, targetLang, filePath).valid && !options.force) {
+          const span = computeOriginalEditLineSpan(
+            nativeSource,
+            modifiedCode,
+            options.edits.map((e) => e.symbol).join(", "),
+          );
+          const ctx = formatSurroundingNumberedContext(
+            nativeSource,
+            span.startLine,
+            span.endLine,
+            5,
+          );
+          const ctxSuffix = ctx
+            ? `\nContext around L${span.startLine}-L${span.endLine} (±5 lines):\n${ctx}`
+            : "";
+          throw new Error(
+            `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${checkRes.diagnostics.slice(0, 3).join("; ")}${ctxSuffix}`,
+          );
+        }
       }
     }
 
@@ -8756,10 +8904,27 @@ export function spliceNativeSource(
     );
     const sep = nativeSource.endsWith("\n") ? "\n" : "\n\n";
     const modifiedCode = `${nativeSource}${sep}${emitted}\n`;
-    if (!forceLosslessPreprocess) {
+    {
       const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
       if (!checkRes.valid) {
-        return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+        if (!forceLosslessPreprocess) {
+          return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+        }
+        if (validateNativeSyntax(nativeSource, targetLang, filePath).valid && !options.force) {
+          const span = computeOriginalEditLineSpan(nativeSource, modifiedCode, anchorSymbol);
+          const ctx = formatSurroundingNumberedContext(
+            nativeSource,
+            span.startLine,
+            span.endLine,
+            5,
+          );
+          const ctxSuffix = ctx
+            ? `\nContext around L${span.startLine}-L${span.endLine} (±5 lines):\n${ctx}`
+            : "";
+          throw new Error(
+            `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${checkRes.diagnostics.slice(0, 3).join("; ")}${ctxSuffix}`,
+          );
+        }
       }
     }
     const diff = options.diff
@@ -8795,10 +8960,26 @@ export function spliceNativeSource(
   );
   const modifiedCode = `${nativeSource.slice(0, resolved.startOffset)}${resolved.replacement}${nativeSource.slice(resolved.endOffset)}`;
 
-  if (!forceLosslessPreprocess) {
+  {
     const checkRes = validateNativeSyntax(modifiedCode, targetLang, filePath, idioms);
     if (!checkRes.valid) {
-      return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+      if (!forceLosslessPreprocess) {
+        return spliceNativeSource(nativeSource, options, filePath, idioms, true);
+      }
+      if (validateNativeSyntax(nativeSource, targetLang, filePath).valid && !options.force) {
+        const span = computeOriginalEditLineSpan(
+          nativeSource,
+          modifiedCode,
+          resolved.symbol ?? options.symbol,
+        );
+        const ctx = formatSurroundingNumberedContext(nativeSource, span.startLine, span.endLine, 5);
+        const ctxSuffix = ctx
+          ? `\nContext around L${span.startLine}-L${span.endLine} (±5 lines):\n${ctx}`
+          : "";
+        throw new Error(
+          `Pre-write syntax validation failed for ${filePath} (${targetLang}): ${checkRes.diagnostics.slice(0, 3).join("; ")}${ctxSuffix}`,
+        );
+      }
     }
   }
 
@@ -9181,7 +9362,11 @@ export async function splice(
   if (!fullPath.endsWith(".aice")) {
     const originalNative =
       options.sourceOverride ?? (await fs.promises.readFile(fullPath, "utf-8"));
-    const targetLang = options.targetLanguage ?? detectTargetFromPath(fullPath);
+    const targetLang = resolveEffectiveSpliceTargetLang(
+      fullPath,
+      originalNative,
+      options.targetLanguage,
+    );
 
     const result = withSuppressedTelemetry(() =>
       spliceNativeSource(
@@ -9596,6 +9781,8 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
 }
 
 const SPLICE_PASSTHROUGH_FILENAMES = new Set([
+  "verify",
+  "new-project",
   "Cargo.toml",
   "Cargo.lock",
   "go.mod",
@@ -9603,13 +9790,45 @@ const SPLICE_PASSTHROUGH_FILENAMES = new Set([
   "CMakeLists.txt",
   "Makefile",
   "Dockerfile",
+  "Procfile",
+  "Jenkinsfile",
+  "Vagrantfile",
+  "Gemfile",
+  "Rakefile",
+  "Justfile",
+  "Brewfile",
+  "LICENSE",
+  "README",
+  "CHANGELOG",
+  "NOTICE",
+  "AUTHORS",
+  "CODEOWNERS",
   ".gitignore",
+  ".gitattributes",
   ".dockerignore",
   ".editorconfig",
   ".env",
+  ".npmrc",
+  ".nvmrc",
+  ".prettierrc",
+  ".eslintrc",
+  ".browserslistrc",
 ]);
 
 const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
+  ".java",
+  ".pro",
+  ".webmanifest",
+  ".example",
+  ".gradle",
+  ".kts",
+  ".properties",
+  ".xml",
+  ".cjs",
+  ".mjs",
+  ".cts",
+  ".mts",
+  ".jsonc",
   ".toml",
   ".mod",
   ".sum",
@@ -9617,9 +9836,6 @@ const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
   ".sln",
   ".props",
   ".targets",
-  ".xml",
-  ".gradle",
-  ".properties",
   ".cmake",
   ".mk",
   ".ini",
@@ -9629,25 +9845,156 @@ const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
   ".sql",
   ".txt",
   ".lock",
+  ".dockerfile",
+  ".gitattributes",
+  ".gitignore",
+  ".npmrc",
+  ".nvmrc",
+  ".editorconfig",
+  ".prettierrc",
+  ".eslintrc",
+  ".browserslistrc",
+  ".svg",
+  ".csv",
+  ".tsv",
+  ".graphql",
+  ".gql",
+  ".prisma",
+  ".proto",
+  ".wgsl",
+  ".glsl",
+  ".vert",
+  ".frag",
+  ".vue",
+  ".svelte",
+  ".astro",
 ]);
 
-function isSpliceTargetFileCandidate(cand: string): boolean {
+function isPassthroughSpliceFile(filePath: string): boolean {
+  const clean = filePath.replace(/\\/g, "/");
+  if (clean.endsWith(".aice")) return false;
+  const base = path.posix.basename(clean);
+  const ext = path.posix.extname(clean).toLowerCase();
+  if (
+    ext === ".webmanifest" ||
+    ext === ".kts" ||
+    ext === ".cjs" ||
+    ext === ".mjs" ||
+    ext === ".cts" ||
+    ext === ".mts" ||
+    ext === ".jsonc"
+  ) {
+    return false;
+  }
+  if (KNOWN_TARGET_EXTENSIONS.has(ext)) return false;
+  if (SPLICE_PASSTHROUGH_FILENAMES.has(base) || SPLICE_PASSTHROUGH_EXTENSIONS.has(ext)) return true;
+  if (!ext && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base)) return true;
+  if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return true;
+  } catch {
+    // ignore stat errors
+  }
+  return false;
+}
+
+function resolveEffectiveSpliceTargetLang(
+  filePath: string,
+  source?: string,
+  explicitTarget?: TargetLanguage,
+): TargetLanguage {
+  if (explicitTarget) return explicitTarget;
+  const lower = filePath.toLowerCase().replace(/\.aice$/, "");
+  if (lower.endsWith(".webmanifest")) return "json";
+  const detected = detectTargetFromPathOrContent(filePath, source);
+  if (detected !== "passthrough") return detected;
+  if (lower.endsWith(".java")) return "kotlin";
+  return "markdown";
+}
+
+function isSpliceTargetFileCandidate(cand: string, baseDir = process.cwd()): boolean {
   const clean = cand
     .trim()
     .replace(/^['"`]|['"`]$/g, "")
     .replace(/\\/g, "/");
   if (!clean || /\s/.test(clean)) return false;
+  if (clean.length > 1 && clean.startsWith("/") && clean.endsWith("/")) return false;
   const base = path.posix.basename(clean);
+  if (!base) return false;
   if (SPLICE_PASSTHROUGH_FILENAMES.has(base)) return true;
+  if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
   const ext = path.posix.extname(clean).toLowerCase();
-  if (!ext) return false;
-  return (
-    KNOWN_TARGET_EXTENSIONS.has(ext) || SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) || ext === ".aice"
+  if (!ext) {
+    if (clean.includes("/")) {
+      return !base.startsWith("-") && /^[A-Za-z0-9._-]+$/.test(base);
+    }
+    const fullCand = path.isAbsolute(clean) ? clean : path.resolve(baseDir, clean);
+    if (fs.existsSync(fullCand)) return true;
+    if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(base)) {
+      return true;
+    }
+    return false;
+  }
+  if (
+    KNOWN_TARGET_EXTENSIONS.has(ext) ||
+    SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) ||
+    ext === ".aice"
+  ) {
+    return true;
+  }
+  const fullCand = path.isAbsolute(clean) ? clean : path.resolve(baseDir, clean);
+  try {
+    return fs.existsSync(fullCand) && fs.statSync(fullCand).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function isUnambiguousExtensionlessFileWithSelector(
+  candFile: string,
+  candSym: string,
+  sep: string,
+): boolean {
+  if (sep !== ":") return false;
+  const clean = candFile
+    .trim()
+    .replace(/^['"`]|['"`]$/g, "")
+    .replace(/\\/g, "/");
+  if (!clean || /\s/.test(clean)) return false;
+  const base = path.posix.basename(clean);
+  if (!base || base.startsWith("-") || !/^[A-Za-z0-9._-]+$/.test(base)) return false;
+  if (path.posix.extname(clean)) return false;
+  return /^(?:L?\d+(?:\s*(?:-|\.\.|:)\s*L?\d+)?|create|overwrite|eof|end|append|hunk)$/i.test(
+    candSym.trim(),
   );
 }
 
+function looksLikeExplicitPathHeader(rawSpec: string): boolean {
+  const clean = rawSpec
+    .trim()
+    .replace(/^['"`]|['"`]$/g, "")
+    .replace(/\\/g, "/");
+  if (!clean || (clean.length > 1 && clean.startsWith("/") && clean.endsWith("/"))) return false;
+  const driveOffset = /^[A-Za-z]:\//.test(clean) ? 2 : 0;
+  const colonIdx = clean.indexOf(":", driveOffset);
+  const filePart = (colonIdx > 0 ? clean.slice(0, colonIdx) : clean).trim();
+  if (!filePart || /\s/.test(filePart)) return false;
+  if (filePart.includes("/")) return true;
+  if (isSpliceTargetFileCandidate(filePart)) return true;
+  if (colonIdx > 0) {
+    const symPart = clean.slice(colonIdx + 1).trim();
+    if (isUnambiguousExtensionlessFileWithSelector(filePart, symPart, ":")) return true;
+  }
+  return false;
+}
+
 function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): boolean {
-  if (!isSpliceTargetFileCandidate(spec)) return false;
+  if (
+    !isSpliceTargetFileCandidate(spec) &&
+    !(defaultFilePath === undefined && spec.includes("/") && !spec.endsWith("/"))
+  ) {
+    return false;
+  }
   if (!defaultFilePath) return true;
   if (spec.includes("/") || spec.includes("\\")) return true;
   const normSpec = spec.replace(/\\/g, "/");
@@ -9658,6 +10005,7 @@ function isBareSpliceStreamFileHeader(spec: string, defaultFilePath?: string): b
   ) {
     return true;
   }
+  if (!path.posix.extname(normSpec)) return false;
   return !/^[A-Z][A-Za-z0-9_]*\.[a-zA-Z0-9_]+$/i.test(spec);
 }
 
@@ -9684,13 +10032,64 @@ export function splitInlineFileSelector(
       candSym &&
       !candSym.startsWith("/") &&
       !candSym.startsWith("\\") &&
-      isSpliceTargetFileCandidate(candFile)
+      (isSpliceTargetFileCandidate(candFile, baseDir) ||
+        isUnambiguousExtensionlessFileWithSelector(candFile, candSym, sepMatch[0]))
     ) {
       return { filePath: candFile, inlineSelector: candSym };
     }
     sepMatch = sepRe.exec(restAfterDrive);
   }
   return { filePath: trimmed };
+}
+
+function advanceStreamTripleQuoteState(
+  textLine: string,
+  curQuote: '"""' | "'''" | null,
+  allowSingleTriple: boolean,
+): '"""' | "'''" | null {
+  let state = curQuote;
+  let idx = 0;
+  while (idx < textLine.length) {
+    if (state === null) {
+      if (textLine[idx] === "#" || (textLine[idx] === "/" && textLine[idx + 1] === "/")) {
+        break;
+      }
+      if (textLine[idx] === '"' || textLine[idx] === "'") {
+        const q = textLine[idx]!;
+        if (
+          textLine[idx + 1] === q &&
+          textLine[idx + 2] === q &&
+          (q === '"' || allowSingleTriple)
+        ) {
+          state = q === '"' ? '"""' : "'''";
+          idx += 3;
+          continue;
+        }
+        idx++;
+        while (idx < textLine.length && textLine[idx] !== q) {
+          if (textLine[idx] === "\\") idx += 2;
+          else idx++;
+        }
+        idx++;
+        continue;
+      }
+      idx++;
+    } else {
+      if (textLine[idx] === "\\" && allowSingleTriple) {
+        idx += 2;
+        continue;
+      }
+      if (textLine.startsWith(state, idx)) {
+        const qChar = state[0]!;
+        idx += 3;
+        while (idx < textLine.length && textLine[idx] === qChar) idx++;
+        state = null;
+        continue;
+      }
+      idx++;
+    }
+  }
+  return state;
 }
 
 /**
@@ -9703,8 +10102,10 @@ export function parseMultiBlockSpliceStream(
 ): ParsedMultiBlockSpliceStream | null {
   if (typeof rawStream !== "string" || !rawStream.trim()) return null;
   const lines = rawStream.split(/\r?\n/);
-  const headerRe = /^\s*={3,}\s*([^=\r\n]+?)\s*={3,}\s*$/;
-  const hasUnindentedHeader = lines.some((l) => !/^\s/.test(l) && headerRe.test(l));
+  const headerRe = /^\s*={3,}\s*([^=\r\n]+?)\s*={3,}(?:\s+(--delete|-d|\(delete\)))?\s*$/i;
+  const hasUnindentedHeader = lines.some(
+    (l) => !/^\s/.test(l) && !/^\s*={3,}\s*$/.test(l) && headerRe.test(l),
+  );
 
   const preHeaderLines: string[] = [];
   const sections: Array<{
@@ -9722,6 +10123,7 @@ export function parseMultiBlockSpliceStream(
   let mdFenceChar = "";
   let mdFenceLen = 0;
   let inHunkBlock = false;
+  let inTripleQuote: '"""' | "'''" | null = null;
 
   for (const line of lines) {
     const activeFp =
@@ -9751,7 +10153,7 @@ export function parseMultiBlockSpliceStream(
       }
     }
 
-    if (sections.length > 0 && !inMdFence) {
+    if (sections.length > 0 && !inMdFence && inTripleQuote === null) {
       if (!inHunkBlock && /^\s*<{3,}\s*$/.test(line)) {
         inHunkBlock = true;
         sections[sections.length - 1].lines.push(line);
@@ -9766,12 +10168,35 @@ export function parseMultiBlockSpliceStream(
       }
     }
 
+    const supportsTripleQuotes = Boolean(
+      activeFp &&
+        (/\.(?:py|pyi|kt|kts|java|cs|gradle)$/i.test(activeFp) || !path.extname(activeFp)),
+    );
+    const allowPySingleTriple = Boolean(
+      activeFp && (/\.(?:py|pyi)$/i.test(activeFp) || !path.extname(activeFp)),
+    );
+    if (sections.length > 0 && supportsTripleQuotes && inTripleQuote !== null) {
+      inTripleQuote = advanceStreamTripleQuoteState(line, inTripleQuote, allowPySingleTriple);
+      sections[sections.length - 1].lines.push(line);
+      continue;
+    }
+
+    // Pure `=`-only divider lines >= 7 chars (e.g. `=======`, `==========`, or 78-char `====...====` banners) are NEVER headers
+    if (/^\s*={7,}\s*$/.test(line)) {
+      if (sections.length === 0) {
+        preHeaderLines.push(line);
+      } else {
+        sections[sections.length - 1].lines.push(line);
+      }
+      continue;
+    }
+
     if (
       !isMdSection &&
       !inHunkBlock &&
       !(hasUnindentedHeader && /^\s/.test(line)) &&
-      /^\s*={3,}\s*(?:['"`]\s*['"`])?\s*={3,}\s*$/.test(line) &&
-      !/^\s*={7}\s*$/.test(line)
+      (/^\s*={3,}(?:\s+['"`]\s*['"`]\s*|\s+)={3,}\s*$/.test(line) ||
+        (sections.length === 0 && /^\s*={6}\s*$/.test(line)))
     ) {
       throw new Error(
         `Malformed splice stream header '${line.trim()}': empty target inside '=== ... ==='. Expected '=== <filePath> ===' or '=== <filePath>:<symbol> ==='.`,
@@ -9814,10 +10239,10 @@ export function parseMultiBlockSpliceStream(
           `parsing malformed stream header '=== ${spec} ===' (missing <symbol>, L<start>-L<end>, or :eof after colon)`,
         );
       }
-      let isDelete = false;
-      if (/\s+(?:--delete|-d|\(delete\))\s*$/i.test(spec)) {
+      let isDelete = Boolean(m[2]);
+      if (/(?:\s+(?:--delete|-d|\(delete\))|:delete)\s*$/i.test(spec)) {
         isDelete = true;
-        spec = spec.replace(/\s+(?:--delete|-d|\(delete\))\s*$/i, "").trim();
+        spec = spec.replace(/(?:\s+(?:--delete|-d|\(delete\))|:delete)\s*$/i, "").trim();
       }
       let preserveDocs: boolean | undefined;
       if (/(?:\s+|^)@(?:replace|strip|drop)-docs\b/i.test(spec)) {
@@ -9860,7 +10285,19 @@ export function parseMultiBlockSpliceStream(
         const splitIdx = driveOffset + sepMatch.index;
         const candFile = spec.slice(0, splitIdx).trim();
         const candSym = spec.slice(splitIdx + sepMatch[0].length).trim();
-        if (candFile && candSym && isSpliceTargetFileCandidate(candFile)) {
+        const rawSep = sepMatch[0].trim();
+        const isExplicitDirFileCandidate =
+          rawSep === ":" &&
+          (candFile.includes("/") || candFile.includes("\\")) &&
+          !(candFile.startsWith("/") && candFile.endsWith("/")) &&
+          !/\s/.test(candFile);
+        if (
+          candFile &&
+          candSym &&
+          (isSpliceTargetFileCandidate(candFile) ||
+            isUnambiguousExtensionlessFileWithSelector(candFile, candSym, rawSep) ||
+            isExplicitDirFileCandidate)
+        ) {
           blockFilePath = candFile;
           blockSymbol = candSym;
           break;
@@ -9877,6 +10314,7 @@ export function parseMultiBlockSpliceStream(
       } else if (
         !blockFilePath &&
         !isDelete &&
+        !cloneFrom &&
         isBareSpliceStreamFileHeader(spec, defaultFilePath)
       ) {
         blockFilePath = spec;
@@ -9897,6 +10335,7 @@ export function parseMultiBlockSpliceStream(
         mdFenceChar = "";
         mdFenceLen = 0;
         inHunkBlock = false;
+        inTripleQuote = null;
         sections.push({
           filePath: blockFilePath,
           symbol: blockSymbol,
@@ -9913,6 +10352,9 @@ export function parseMultiBlockSpliceStream(
     if (sections.length === 0) {
       preHeaderLines.push(line);
     } else {
+      if (supportsTripleQuotes) {
+        inTripleQuote = advanceStreamTripleQuoteState(line, inTripleQuote, allowPySingleTriple);
+      }
       sections[sections.length - 1].lines.push(line);
     }
   }
@@ -9939,7 +10381,9 @@ export function parseMultiBlockSpliceStream(
     if (sec.filePath) {
       lastExplicitFilePath = sec.filePath;
     }
-    const targetFp = sec.filePath ?? defaultFilePath ?? lastExplicitFilePath;
+    const headerLooksLikePath = !sec.filePath && looksLikeExplicitPathHeader(sec.symbol);
+    const targetFp =
+      sec.filePath ?? defaultFilePath ?? (headerLooksLikePath ? undefined : lastExplicitFilePath);
     const ext = targetFp ? path.extname(targetFp).toLowerCase() : "";
     const base = targetFp ? path.basename(targetFp) : "";
     const canHaveIdioms =
@@ -9954,6 +10398,7 @@ export function parseMultiBlockSpliceStream(
       ext !== ".ps1" &&
       ext !== ".cmd" &&
       ext !== ".bat" &&
+      Boolean(ext) &&
       !SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) &&
       !SPLICE_PASSTHROUGH_FILENAMES.has(base);
     const effectiveSymbol =
@@ -9973,7 +10418,7 @@ export function parseMultiBlockSpliceStream(
         : rawBody;
     return {
       filePath: targetFp,
-      explicitFilePath: sec.filePath ?? lastExplicitFilePath,
+      explicitFilePath: sec.filePath ?? (headerLooksLikePath ? undefined : lastExplicitFilePath),
       symbol: effectiveSymbol,
       insertAfter: sec.insertAfter,
       insertBefore: sec.insertBefore,

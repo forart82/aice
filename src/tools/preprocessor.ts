@@ -415,7 +415,14 @@ export function maskSourceLexically(
 
   const isJsTs = targetLang === "typescript" || targetLang === "javascript" || targetLang === "tsx";
   const supportsCStyleComments =
-    targetLang !== "python" && targetLang !== "yaml" && targetLang !== "html";
+    targetLang !== "python" &&
+    targetLang !== "yaml" &&
+    targetLang !== "html" &&
+    targetLang !== "markdown" &&
+    targetLang !== "shell" &&
+    targetLang !== "powershell" &&
+    targetLang !== "batch" &&
+    targetLang !== "twig";
 
   let out = "";
   let i = 0;
@@ -424,6 +431,69 @@ export function maskSourceLexically(
   while (i < len) {
     const ch = source[i];
     const next = source[i + 1];
+
+    // 0. Markdown prose: mask fenced code blocks, inline backtick spans, and closed HTML comments only
+    if (targetLang === "markdown") {
+      if (
+        (i === 0 || source[i - 1] === "\n") &&
+        (ch === "`" || ch === "~") &&
+        source[i + 1] === ch &&
+        source[i + 2] === ch
+      ) {
+        let fenceLen = 3;
+        while (i + fenceLen < len && source[i + fenceLen] === ch) fenceLen++;
+        const lineEnd = source.indexOf("\n", i + fenceLen);
+        if (lineEnd < 0) {
+          out += addMask(source.slice(i), "str");
+          break;
+        }
+        const infoStr = source.slice(i + fenceLen, lineEnd);
+        if (!(ch === "`" && infoStr.includes("`"))) {
+          let searchPos = lineEnd + 1;
+          let closeEnd = len;
+          while (searchPos < len) {
+            const nextNl = source.indexOf("\n", searchPos);
+            const curLineEnd = nextNl < 0 ? len : nextNl;
+            const curLine = source.slice(searchPos, curLineEnd).replace(/\r$/, "");
+            const closeMatch = curLine.match(/^[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/);
+            if (closeMatch && closeMatch[1]![0] === ch && closeMatch[1]!.length >= fenceLen) {
+              closeEnd = curLineEnd;
+              break;
+            }
+            if (nextNl < 0) break;
+            searchPos = nextNl + 1;
+          }
+          out += addMask(source.slice(i, closeEnd), "str");
+          i = closeEnd;
+          continue;
+        }
+      }
+      if (ch === "`") {
+        let tickLen = 1;
+        while (i + tickLen < len && source[i + tickLen] === "`") tickLen++;
+        const tickSeq = "`".repeat(tickLen);
+        const closeTick = source.indexOf(tickSeq, i + tickLen);
+        if (closeTick >= 0) {
+          out += addMask(source.slice(i, closeTick + tickLen), "str");
+          i = closeTick + tickLen;
+          continue;
+        }
+        out += tickSeq;
+        i += tickLen;
+        continue;
+      }
+      if (ch === "<" && source.slice(i, i + 4) === "<!--") {
+        const closeIdx = source.indexOf("-->", i + 4);
+        if (closeIdx >= 0) {
+          out += addMask(source.slice(i, closeIdx + 3), "cmt");
+          i = closeIdx + 3;
+          continue;
+        }
+      }
+      out += ch;
+      i++;
+      continue;
+    }
 
     // 1. HTML comment `<!-- ... -->`
     if (
@@ -445,7 +515,6 @@ export function maskSourceLexically(
       i = closeIdx + 3;
       continue;
     }
-
     // 2. Twig comment `{# ... #}`
     if (targetLang === "twig" && ch === "{" && next === "#") {
       const closeIdx = source.indexOf("#}", i + 2);
@@ -606,8 +675,80 @@ export function maskSourceLexically(
       (targetLang === "python" && ch === "'" && next === "'" && source[i + 2] === "'")
     ) {
       const delim = ch.repeat(3);
-      const closeIdx = source.indexOf(delim, i + 3);
-      if (closeIdx < 0) {
+      if (targetLang === "kotlin") {
+        const closeIdx = source.indexOf(delim, i + 3);
+        if (closeIdx < 0) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: `Unterminated triple-quoted string literal ${delim}`,
+          });
+          out += addMask(source.slice(i), "str");
+          break;
+        }
+        let endIdx = closeIdx + 3;
+        if (closeIdx > i + 3 || source[endIdx] === ch) {
+          const isExactEmptySix = closeIdx === i + 3 && source[endIdx] !== ch;
+          if (!isExactEmptySix) {
+            while (endIdx < len && source[endIdx] === ch && endIdx - closeIdx < 5) {
+              endIdx++;
+            }
+          }
+        }
+        out += addMask(source.slice(i, endIdx), "str");
+        i = endIdx;
+        continue;
+      }
+
+      if (targetLang === "csharp") {
+        let openQuotes = 3;
+        while (i + openQuotes < len && source[i + openQuotes] === '"') {
+          openQuotes++;
+        }
+        if (openQuotes === 6) {
+          out += addMask(source.slice(i, i + 6), "str");
+          i += 6;
+          continue;
+        }
+        const csDelim = '"'.repeat(openQuotes);
+        const closeIdx = source.indexOf(csDelim, i + openQuotes);
+        if (closeIdx < 0) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: `Unterminated triple-quoted string literal ${delim}`,
+          });
+          out += addMask(source.slice(i), "str");
+          break;
+        }
+        let endIdx = closeIdx + openQuotes;
+        while (endIdx < len && source[endIdx] === '"' && endIdx - closeIdx < openQuotes + 2) {
+          endIdx++;
+        }
+        out += addMask(source.slice(i, endIdx), "str");
+        i = endIdx;
+        continue;
+      }
+
+      let j = i + 3;
+      let closeEnd = -1;
+      while (j < len) {
+        if (source[j] === "\\" && j + 1 < len) {
+          j += 2;
+          continue;
+        }
+        if (source.startsWith(delim, j)) {
+          closeEnd = j + 3;
+          if (j > i + 3) {
+            while (closeEnd < len && source[closeEnd] === ch && closeEnd - j < 5) {
+              closeEnd++;
+            }
+          }
+          break;
+        }
+        j++;
+      }
+      if (closeEnd < 0) {
         const pos = getLineAndCol(source, i);
         unterminatedDiagnostics.push({
           ...pos,
@@ -616,8 +757,8 @@ export function maskSourceLexically(
         out += addMask(source.slice(i), "str");
         break;
       }
-      out += addMask(source.slice(i, closeIdx + 3), "str");
-      i = closeIdx + 3;
+      out += addMask(source.slice(i, closeEnd), "str");
+      i = closeEnd;
       continue;
     }
 
@@ -1260,7 +1401,10 @@ function lowerHybridLineForTarget(
       /^(\s*)(?:@type\s+\^|\^type\s+|pub\s+type\s+|@type\s+)([A-Za-z_][A-Za-z0-9_]*)/,
       "$1type $2",
     );
-    out = out.replace(/^(\s*)(?:pub\s+)?(?:\^?(?:const|val|mut|let)\s+(?:mut\s+)?)/, "$1");
+    out = out.replace(
+      /^(\s*)(?:pub\s+)?(?:\^?(?:const|val|mut|let)\s+(?:mut\s+)?)(?=[A-Za-z_])/,
+      "$1",
+    );
     out = out.replace(
       /^(\s*)::?=\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([^=]+)=\s*(.+)$/,
       "$1$2: $3 = $4",
