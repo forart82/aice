@@ -582,3 +582,72 @@ export function formatProjectsTerminalTable(
 
   return lines.join("\n");
 }
+export interface HonestCommandRow {
+  command: string;
+  calls: number;
+  winCalls: number;
+  winPct: number;
+  errorCalls: number;
+  errPct: number;
+  realisticNativeCl100k: number;
+  aiceCl100k: number;
+  netDeltaCl100k: number;
+  deltaPct: number;
+  rawNativeRefCl100k: number;
+}
+
+function fmtSignedInt(n: number): string {
+  return n > 0 ? `+${n.toLocaleString("en-US")}` : n.toLocaleString("en-US");
+}
+
+function fmtSignedPct(pct: number): string {
+  return pct > 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
+}
+
+/**
+ * Renders the un-gameable Per-Command Honest Breakdown table (`read`, `search`, `find`, `outline`, `splice/write`)
+ * comparing AICE Actual strictly against Realistic Native baselines (with Raw Whole-File n1 relegated to secondary note).
+ */
+export function formatHonestCommandTable(
+  rows: ReadonlyArray<HonestCommandRow>,
+  rawNativeRefTotal: number,
+  indent = "  ",
+): string[] {
+  const lines: string[] = [];
+  lines.push(
+    `${indent}${padRight("Command", 14)} ${padLeft("Calls", 7)} ${padLeft("Win% (<=Real)", 13)} ${padLeft("Err%", 7)} ${padLeft("Realistic Nat", 14)} ${padLeft("AICE Actual", 12)} ${padLeft("Net Delta", 12)} ${padLeft("Delta%", 8)}`,
+  );
+  lines.push(`${indent}${"-".repeat(94)}`);
+
+  let totCalls = 0;
+  let totWins = 0;
+  let totErrs = 0;
+  let totReal = 0;
+  let totAice = 0;
+
+  for (const r of rows) {
+    totCalls += r.calls;
+    totWins += r.winCalls;
+    totErrs += r.errorCalls;
+    totReal += r.realisticNativeCl100k;
+    totAice += r.aiceCl100k;
+    lines.push(
+      `${indent}${padRight(r.command, 14)} ${padLeft(r.calls.toLocaleString("en-US"), 7)} ${padLeft(`${r.winPct.toFixed(1)}%`, 13)} ${padLeft(`${r.errPct.toFixed(1)}%`, 7)} ${padLeft(r.realisticNativeCl100k.toLocaleString("en-US"), 14)} ${padLeft(r.aiceCl100k.toLocaleString("en-US"), 12)} ${padLeft(fmtSignedInt(r.netDeltaCl100k), 12)} ${padLeft(fmtSignedPct(r.deltaPct), 8)}`,
+    );
+  }
+
+  const totWinPct = totCalls > 0 ? Number(((totWins / totCalls) * 100).toFixed(1)) : 0;
+  const totErrPct = totCalls > 0 ? Number(((totErrs / totCalls) * 100).toFixed(1)) : 0;
+  const totNet = totReal - totAice;
+  const totDeltaPct =
+    totReal > 0 ? Number(((totNet / totReal) * 100).toFixed(1)) : totNet < 0 ? -100 : 0;
+
+  lines.push(`${indent}${"-".repeat(94)}`);
+  lines.push(
+    `${indent}${padRight("TOTAL", 14)} ${padLeft(totCalls.toLocaleString("en-US"), 7)} ${padLeft(`${totWinPct.toFixed(1)}%`, 13)} ${padLeft(`${totErrPct.toFixed(1)}%`, 7)} ${padLeft(totReal.toLocaleString("en-US"), 14)} ${padLeft(totAice.toLocaleString("en-US"), 12)} ${padLeft(fmtSignedInt(totNet), 12)} ${padLeft(fmtSignedPct(totDeltaPct), 8)}`,
+  );
+  lines.push(
+    `${indent}(Secondary Ref Only — Raw Whole-File Unscoped n1: ${rawNativeRefTotal.toLocaleString("en-US")} cl100k; never used for headline deltas or verdict)`,
+  );
+  return lines;
+}

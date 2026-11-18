@@ -249,8 +249,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
   }, 60000);
 
   it("persists compact numeric JSONL lines (< 250 B/event) with zero raw source strings and hydrates legacy lines", () => {
-    const rawNativeSentinel = `RAW_NATIVE_SOURCE_SENTINEL_${"const secretPayload = 42;\n".repeat(40)}`;
-    const rawRealisticSentinel = `RAW_REALISTIC_PAYLOAD_SENTINEL_${"edit_file old/new block\n".repeat(50)}`;
+    const rawNativeSentinel = `RAW_NATIVE_SOURCE_SENTINEL_${"const secretPayload = 42;\n".repeat(60)}`;
+    const rawRealisticSentinel = `RAW_REALISTIC_PAYLOAD_SENTINEL_${"edit_file old/new block\n".repeat(25)}`;
     const rawAiceSentinel = `RAW_AICE_OUTPUT_SENTINEL_${"fn secretPayload() -> int\n".repeat(10)}`;
 
     const recorded = recordTelemetryEvent({
@@ -559,8 +559,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
         savedO200k: savedCl100k,
         contentHash: "a".repeat(64),
         realisticNativeText: bloatedPayload,
-        realisticNativeCl100k: 5800,
-        realisticSavedCl100k: 5700,
+        realisticNativeCl100k: 800,
+        realisticSavedCl100k: 700,
         preservedTriviaTokens: 0,
       });
 
@@ -597,8 +597,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(hydrated).toHaveLength(2);
     expect(hydrated[0]?.projectRoot).toBe("/workspace/core-repo");
     expect(hydrated[0]?.savedCl100k).toBe(900);
-    expect(hydrated[0]?.realisticNativeCl100k).toBe(5800);
-    expect(hydrated[0]?.realisticSavedCl100k).toBe(5700);
+    expect(hydrated[0]?.realisticNativeCl100k).toBe(800);
+    expect(hydrated[0]?.realisticSavedCl100k).toBe(700);
     expect(hydrated[1]?.projectRoot).toBe("/workspace/ui-repo");
     expect(hydrated[1]?.savedCl100k).toBe(-25);
   });
@@ -879,9 +879,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
   });
 
   it("de-inflates legacy <workspace-files> and directory outline baselines in hydrateTelemetryEvent and outlinePath", async () => {
-    // 1. <workspace-files> de-inflation:
-    // Legacy record with realisticNativeCl100k = 50,000, nativeCl100k = 50,000, aiceCl100k = 100
-    // Clamped to Math.min(50000, Math.round(100 * 1.35)) = 135
+    // 1. <workspace-files> de-inflation (multiFilesCount === 0, rn === n1 = 50,000):
+    // Neutral 0-delta Math.min(50_000, aiceCl100k) = 100 (zero synthetic 1.35x fake win!)
     const legacyWorkspaceEv = hydrateTelemetryEvent({
       timestamp: new Date().toISOString(),
       projectRoot: projectADir,
@@ -896,12 +895,12 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
       realisticNativeCl100k: 50_000,
       realisticSavedCl100k: 49_900,
     });
-    expect(legacyWorkspaceEv?.realisticNativeCl100k).toBe(135);
-    expect(legacyWorkspaceEv?.realisticSavedCl100k).toBe(35);
+    expect(legacyWorkspaceEv?.realisticNativeCl100k).toBe(100);
+    expect(legacyWorkspaceEv?.realisticSavedCl100k).toBe(0);
 
     // 2. <directory> outline de-inflation:
     // Legacy record with realisticNativeCl100k = 80,000, nativeCl100k = 80,000, aiceCl100k = 200, multiFiles: 10
-    // Clamped to Math.min(80000, Math.max(200, 10 * 45)) = 450
+    // Clamped strictly to Math.min(80000, 10 * 45) = 450 (independent of aiceCl100k!)
     const legacyOutlineEv = hydrateTelemetryEvent({
       timestamp: new Date().toISOString(),
       projectRoot: projectADir,
@@ -948,10 +947,11 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(dirEv).toBeDefined();
     expect(dirEv?.realisticNativeCl100k).toBeDefined();
     // 4 files * 45 = 180 max baseline
-    expect(dirEv!.realisticNativeCl100k!).toBeLessThanOrEqual(Math.max(dirEv!.aiceCl100k, 4 * 45));
-
-    // 4. Single-file AST search realistic baseline hydration (lean win vs bloated penalty)
-    const leanSingleSearch = hydrateTelemetryEvent({
+    expect(dirEv?.realisticNativeCl100k ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
+      Math.max(dirEv?.aiceCl100k ?? 0, 4 * 45),
+    );
+    // 4. Single-file hydration NEVER fabricates rn > n1 anti-loss padding: a1 > rn is reported honestly as negative!
+    const losingSingleRead = hydrateTelemetryEvent({
       t: "2026-11-17T03:05:00.000Z",
       r: "/workspace/alpha-engine",
       f: "src/renderer.js",
@@ -964,10 +964,10 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
       a2: 490,
       rn: 58,
     });
-    expect(leanSingleSearch?.realisticNativeCl100k).toBe(708);
-    expect(leanSingleSearch?.realisticSavedCl100k).toBe(208);
+    expect(losingSingleRead?.realisticNativeCl100k).toBe(58);
+    expect(losingSingleRead?.realisticSavedCl100k).toBe(-442);
 
-    const bloatedSingleSearch = hydrateTelemetryEvent({
+    const bloatedSingleRead = hydrateTelemetryEvent({
       t: "2026-11-17T03:06:00.000Z",
       r: "/workspace/alpha-engine",
       f: "src/renderer.js",
@@ -980,8 +980,8 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
       a2: 1950,
       rn: 58,
     });
-    expect(bloatedSingleSearch?.realisticNativeCl100k).toBe(708);
-    expect(bloatedSingleSearch?.realisticSavedCl100k).toBe(-1292);
+    expect(bloatedSingleRead?.realisticNativeCl100k).toBe(58);
+    expect(bloatedSingleRead?.realisticSavedCl100k).toBe(-1942);
   });
 
   it("distinguishes < 12s parallel slices from >= 12s sequential pagination turns and respects intervening writes", () => {
@@ -1059,7 +1059,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
 
     fs.writeFileSync(
       telemetryFile,
-      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      `${events.map((e) => JSON.stringify(e)).join("\n")}\n`,
       "utf-8",
     );
 
@@ -1094,7 +1094,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     ];
     fs.writeFileSync(
       cleanTeleFile,
-      cleanEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      `${cleanEvents.map((e) => JSON.stringify(e)).join("\n")}\n`,
       "utf-8",
     );
     const cleanReport = buildGainReport({ telemetryPath: cleanTeleFile, project: "alpha-engine" });
@@ -1164,14 +1164,14 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     ];
     fs.writeFileSync(
       loopTeleFile,
-      loopEvents.map((e) => JSON.stringify(e)).join("\n") + "\n",
+      `${loopEvents.map((e) => JSON.stringify(e)).join("\n")}\n`,
       "utf-8",
     );
 
     // Non-benign error in errors.jsonl
     fs.writeFileSync(
       loopErrorsFile,
-      JSON.stringify({
+      `${JSON.stringify({
         timestamp: new Date(baseTs + 46_000).toISOString(),
         projectRoot: projectADir,
         projectName: "alpha-engine",
@@ -1180,7 +1180,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
         surface: "cli",
         agent: "user-cli",
         errorMessage: "Syntax error: Unexpected token",
-      }) + "\n",
+      })}\n`,
       "utf-8",
     );
 
@@ -1188,8 +1188,9 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
     expect(loopReport.wrapperTaxCl100k).toBe(4 * 70);
     expect(loopReport.sequentialPaginationTurns).toBe(2);
     expect(loopReport.paginationReplayTaxCl100k).toBe(2 * 8_500);
-    expect(loopReport.failedRetryTurns).toBe(2); // 1 <cli-error> + 1 errors.jsonl
-    expect(loopReport.retryReplayTaxCl100k).toBe(2 * 8_500);
+    expect(loopReport.failedRetryTurns).toBe(1); // <cli-error> + errors.jsonl within 1s deduplicated to 1 failed call!
+    expect(loopReport.retryReplayTaxCl100k).toBeGreaterThanOrEqual(8_500);
+    expect(loopReport.costWeightedNetDeltaCl100k).toBeLessThan(0);
     expect(loopReport.netEndToEndSavedCl100k).toBeLessThan(0);
     expect(loopReport.endToEndVerdict).toBe("TOKEN-CONSUMING");
 

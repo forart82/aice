@@ -126,7 +126,9 @@ export interface TokenomicsAuditReport {
 }
 
 export function detectLanguageName(filePath: string): string {
-  const lower = filePath.toLowerCase();
+  const normalized = filePath.replace(/\\/g, "/");
+  const lower = normalized.toLowerCase();
+  const base = lower.split("/").pop() ?? lower;
   if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "TSX / React";
   if (lower.endsWith(".ts") || lower.endsWith(".d.ts")) return "TypeScript";
   if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs"))
@@ -144,18 +146,39 @@ export function detectLanguageName(filePath: string): string {
     return "C++20";
   if (lower.endsWith(".cs")) return "C#";
   if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "Kotlin";
+  if (lower.endsWith(".java")) return "Java";
+  if (lower.endsWith(".pro")) return "ProGuard";
+  if (lower.endsWith(".gradle")) return "Gradle";
+  if (lower.endsWith(".xml")) return "XML";
   if (lower.endsWith(".php")) return "PHP";
   if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "Twig";
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "HTML";
   if (lower.endsWith(".css")) return "CSS";
-  if (lower.endsWith(".json")) return "JSON";
+  if (lower.endsWith(".json") || lower.endsWith(".webmanifest")) return "JSON";
   if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return "YAML";
+  if (
+    lower.endsWith(".properties") ||
+    lower.endsWith(".ini") ||
+    lower.endsWith(".example") ||
+    base === ".gitignore" ||
+    base === ".dockerignore"
+  ) {
+    return "Config";
+  }
   if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "Shell";
   if (lower.endsWith(".ps1")) return "PowerShell";
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "Batch";
   if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "Markdown";
   if (lower.endsWith(".aipl")) return "AIPL";
   if (lower.endsWith(".aice")) return "AICE";
+  if (
+    !base.includes(".") &&
+    /^(?:verify|new-project|makefile|dockerfile|containerfile|jenkinsfile|procfile|vagrantfile)$/.test(
+      base,
+    )
+  ) {
+    return "Shell / Script";
+  }
   return "TypeScript";
 }
 export function calculateFileTokenomics(
