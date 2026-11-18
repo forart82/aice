@@ -9875,19 +9875,11 @@ function isPassthroughSpliceFile(filePath: string): boolean {
   if (clean.endsWith(".aice")) return false;
   const base = path.posix.basename(clean);
   const ext = path.posix.extname(clean).toLowerCase();
-  if (
-    ext === ".webmanifest" ||
-    ext === ".kts" ||
-    ext === ".cjs" ||
-    ext === ".mjs" ||
-    ext === ".cts" ||
-    ext === ".mts" ||
-    ext === ".jsonc"
-  ) {
+  if (ext === ".webmanifest" || detectTargetFromPathOrContent(clean) !== "passthrough") {
     return false;
   }
-  if (KNOWN_TARGET_EXTENSIONS.has(ext)) return false;
   if (SPLICE_PASSTHROUGH_FILENAMES.has(base) || SPLICE_PASSTHROUGH_EXTENSIONS.has(ext)) return true;
+  if (KNOWN_TARGET_EXTENSIONS.has(ext)) return false;
   if (!ext && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base)) return true;
   if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
   try {

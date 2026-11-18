@@ -1447,11 +1447,13 @@ export async function createFile(
     (PASSTHROUGH_PROJECT_FILENAMES.has(baseName) || /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(baseName));
   const isWebmanifest = ext === ".webmanifest";
 
+  const isFirstClassEmitterTarget =
+    isWebmanifest || detectTargetFromPathOrContent(checkPath) !== "passthrough";
+
   const isPassthroughManifest =
     !options.targetLanguage &&
     !fullPath.endsWith(".aice") &&
-    !isWebmanifest &&
-    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
+    !isFirstClassEmitterTarget &&
     (PASSTHROUGH_PROJECT_EXTENSIONS.has(ext) ||
       PASSTHROUGH_PROJECT_FILENAMES.has(baseName) ||
       isExtensionlessTarget ||

@@ -569,5 +569,12 @@ let color = #0f172a # trailing comment`;
       ]);
       expect(toks[3].value).toBe("#0f172a");
     });
+
+    it("terminates regex lookahead cleanly at EOF without trailing newline", () => {
+      const toks = tokenize("let x = a + /b");
+      expect(toks[toks.length - 1]?.kind).toBe("EOF");
+      const xmlToks = tokenize('<?xml version="1.0" encoding="utf-8"?>\n<resources></resources>');
+      expect(xmlToks[xmlToks.length - 1]?.kind).toBe("EOF");
+    });
   });
 });

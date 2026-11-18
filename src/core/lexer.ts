@@ -614,15 +614,16 @@ export function scanRawTokens(
         peek(1) !== "\t" &&
         peek(1) !== "\n" &&
         peek(1) !== "\r" &&
+        peek(1) !== "\0" &&
         peek(1) !== ""
       ) {
         // Look ahead on the same line for closing unescaped `/`
         let scanOffset = 1;
         let inCharClass = false;
         let foundClosingSlash = false;
-        while (true) {
+        while (offset + scanOffset < source.length) {
           const c = peek(scanOffset);
-          if (!c || c === "\n" || c === "\r") break;
+          if (!c || c === "\0" || c === "\n" || c === "\r") break;
           if (c === "\\") {
             scanOffset += 2;
             continue;

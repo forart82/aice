@@ -1413,10 +1413,11 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       // 1. `aice find` & `aice tree` disambiguation
       const findAll = runCli(["find"], wsDir);
       expect(findAll.status).toBe(0);
-      expect(findAll.stdout).toContain("src/math.ts");
-      expect(findAll.stdout).toContain("src/validator.ts");
+      expect(findAll.stdout).toContain("src/:");
+      expect(findAll.stdout).toContain("math.ts");
+      expect(findAll.stdout).toContain("validator.ts");
       expect(findAll.stdout).toContain("docs/overview.md");
-      expect(findAll.stdout).toMatch(/\(\d+L,\s*[\d.]+KB\)/);
+      expect(findAll.stdout).toMatch(/\(\d+L\)/);
 
       const treeSrc = runCli(["tree", "src"], wsDir);
       expect(treeSrc.status).toBe(0);
@@ -1427,18 +1428,18 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       const findGlob = runCli(["find", "*.md"], wsDir);
       expect(findGlob.status).toBe(0);
       expect(findGlob.stdout).toContain("docs/overview.md");
-      expect(findGlob.stdout).not.toContain("src/math.ts");
+      expect(findGlob.stdout).not.toContain("math.ts");
 
       const findSubstrInDir = runCli(["find", "validator", "src"], wsDir);
       expect(findSubstrInDir.status).toBe(0);
       expect(findSubstrInDir.stdout).toContain("src/validator.ts");
-      expect(findSubstrInDir.stdout).not.toContain("src/math.ts");
+      expect(findSubstrInDir.stdout).not.toContain("math.ts");
 
       // 2. `aice search` & `aice grep` (plain regex/literal, -C, -l, --json)
       const searchDefault = runCli(["search", "computeInvoiceTotal"], wsDir);
       expect(searchDefault.status).toBe(0);
       expect(searchDefault.stdout).toContain("computeInvoiceTotal");
-      expect(searchDefault.stdout).toContain("│");
+      expect(searchDefault.stdout).toMatch(/\bL\d+:/);
 
       const grepInvalidRegexLiteral = runCli(["grep", "unclosed([token", "src"], wsDir);
       expect(grepInvalidRegexLiteral.status).toBe(0);
@@ -1499,10 +1500,11 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
         "2",
       ]);
 
-      // 3. `aice read` with `--files`, `--search`, `-C`, default numbered native, and `--dsl`
+      // 3. `aice read` with `--files`, `--search`, `-C`, default native, and `--dsl`
       const readFiles = runCli(["read", "--files"], wsDir);
       expect(readFiles.status).toBe(0);
-      expect(readFiles.stdout).toContain("src/math.ts");
+      expect(readFiles.stdout).toContain("src/:");
+      expect(readFiles.stdout).toContain("math.ts");
       expect(readFiles.stdout).toContain("docs/overview.md");
 
       const readSearch = runCli(["read", "--search", "computeInvoiceTotal", "-C", "2"], wsDir);
@@ -1511,12 +1513,13 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       const readNative = runCli(["read", "src/math.ts"], wsDir);
       expect(readNative.status).toBe(0);
-      expect(readNative.stdout).toContain("1│ export function computeInvoiceTotal");
+      expect(readNative.stdout).toContain("export function computeInvoiceTotal");
+      expect(readNative.stdout).not.toContain("1│ ");
 
       const readDsl = runCli(["read", "src/math.ts", "--dsl"], wsDir);
       expect(readDsl.status).toBe(0);
-      expect(readDsl.stdout).not.toContain("1│ export function computeInvoiceTotal");
-      expect(readDsl.stdout).toContain("computeInvoiceTotal");
+      expect(readDsl.stdout).not.toContain("export function computeInvoiceTotal");
+      expect(readDsl.stdout).toContain("fn computeInvoiceTotal");
     }, 60000);
 
     it("keeps MCP strictly 2 tools (`aice_read`, `aice_splice`) and forwards `filesOnly`, `search` + `contextLines`, and `dsl` in `aice_read`", async () => {
@@ -1981,11 +1984,13 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
 
       const res = runCli(["read", "src/big.ts:L1-L65", "src/big.ts:L85-L150"], wsDir);
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain("// === src/big.ts ===");
+      expect(res.stdout).toContain("// src/big.ts:1-65");
+      expect(res.stdout).toContain("// src/big.ts:85-150");
       expect(res.stdout).not.toContain("# AICE Multi-File Context Stream");
       expect(res.stdout).not.toContain("==================================================");
-      expect(res.stdout).toContain("1│ export const entry_1 = 1;");
-      expect(res.stdout).toContain("149│ export const entry_149 = 149;");
+      expect(res.stdout).toContain("1: export const entry_1 = 1;");
+      expect(res.stdout).toContain("145: export const entry_145 = 145;");
+      expect(res.stdout).toContain("export const entry_149 = 149;");
     });
   });
 });

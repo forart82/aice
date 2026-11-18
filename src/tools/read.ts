@@ -3227,7 +3227,8 @@ export async function aiceRead(
   const classified: ClassifiedReadTarget[] = [];
   const missingTargets: string[] = [];
   const explicitLineThreshold = options.autoOutlineLineThreshold;
-  const sharedSymbolRaw = safeSearch?.selector ?? (options.symbol?.trim() || undefined);
+  const explicitSymbolOption = options.symbol?.trim() || undefined;
+  const sharedSymbolRaw = safeSearch?.selector ?? explicitSymbolOption;
   const sharedSymIsOutline = !safeSearch && sharedSymbolRaw?.toLowerCase() === "outline";
 
   for (const norm of normalizedItems) {
@@ -3262,13 +3263,33 @@ export async function aiceRead(
       Boolean(options.outline) ||
       norm.explicitOutline ||
       (!norm.selector && Boolean(sharedSymIsOutline));
+    const baseSymCandidate =
+      norm.selector ??
+      (explicitSymbolOption && explicitSymbolOption.toLowerCase() !== "outline"
+        ? explicitSymbolOption
+        : undefined);
+    const combinedSymbolSearchSelector =
+      !isDir &&
+      !options.filesWithMatches &&
+      safeSearch &&
+      options.search &&
+      baseSymCandidate &&
+      !isPureRegexSelector(baseSymCandidate) &&
+      !baseSymCandidate.startsWith("/") &&
+      !baseSymCandidate.includes("@") &&
+      !/^L?\d+(?:\s*-\s*L?\d+)?$/i.test(baseSymCandidate)
+        ? `${baseSymCandidate}@${options.search}`
+        : undefined;
     const effectiveSelector = isExplicitOutline
       ? undefined
-      : (safeSearch?.selector ??
+      : (combinedSymbolSearchSelector ??
+        safeSearch?.selector ??
         norm.selector ??
         (sharedSymIsOutline ? undefined : sharedSymbolRaw));
     const usesSharedSymbol =
-      !isExplicitOutline && !safeSearch && !norm.selector && Boolean(effectiveSelector);
+      !isExplicitOutline &&
+      ((!safeSearch && !norm.selector && Boolean(effectiveSelector)) ||
+        Boolean(combinedSymbolSearchSelector && !norm.selector));
     const effectiveFull = Boolean(options.full) || norm.explicitFull;
 
     let route: ClassifiedReadTarget["route"];
