@@ -48,6 +48,7 @@ import {
   withSuppressedTelemetry,
   withSuppressedTelemetryAsync,
 } from "../telemetry/index.js";
+import { estimateTokens } from "../tokenomics/index.js";
 import {
   generateContext,
   generateMultiContext,
@@ -774,12 +775,18 @@ export class AiceMcpServer {
                 firstArrTarget ??
                 this.workspaceRoot,
             );
+            const serializedCall = JSON.stringify({
+              name: callParams?.name ?? "",
+              arguments: toolArgs,
+            });
+            const wastedInputTokens = Math.max(1, estimateTokens(serializedCall, "cl100k_base"));
             recordTelemetryError({
               targetPath: path.resolve(this.workspaceRoot, rawTarget),
               projectRoot: this.resolveProjectRoot(this.workspaceRoot),
               operation: op,
               surface: "mcp",
               errorMessage: errMsg,
+              wastedInputTokens,
             });
           }
           if (isObjCall) {
@@ -1650,6 +1657,7 @@ export class AiceMcpServer {
             }),
           );
           const summaries: string[] = [];
+          const batchTs = new Date().toISOString();
           for (let idx = 0; idx < batchRes.results.length; idx++) {
             const res = batchRes.results[idx]!;
             const item = safeBatchItems[idx]!;
@@ -1662,13 +1670,31 @@ export class AiceMcpServer {
               const itemSnippet =
                 item.code ??
                 (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+              const realisticNativePayload = item.delete
+                ? JSON.stringify({
+                    path: item.filePath,
+                    old_string: res.originalSnippet ?? "",
+                    new_string: "",
+                  })
+                : res.originalSnippet
+                  ? JSON.stringify({
+                      path: item.filePath,
+                      old_string: res.originalSnippet,
+                      new_string: res.newSnippet ?? itemSnippet,
+                    })
+                  : JSON.stringify({
+                      path: item.filePath,
+                      content: res.modifiedCode || itemSnippet,
+                    });
               recordTelemetryEvent({
                 targetPath: item.filePath,
                 projectRoot,
+                timestamp: batchTs,
                 operation: "splice",
                 surface: "mcp",
                 idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
                 nativeText: res.modifiedCode,
+                realisticNativeText: realisticNativePayload,
                 aiceText: itemSnippet ? `${itemSnippet}\n${respLine}` : respLine,
               });
             }
@@ -1747,11 +1773,20 @@ export class AiceMcpServer {
 
         const displaySym = result.symbol || symbolSelector || insertAfter || insertBefore || "*";
         if (!result.success) {
+          const failMsg = `Splice failed for symbol '${displaySym}' in ${rawTargetFile}`;
+          recordTelemetryError({
+            targetPath: filePath,
+            projectRoot,
+            operation: "splice",
+            surface: "mcp",
+            errorMessage: failMsg,
+            wastedInputTokens: Math.max(1, estimateTokens(JSON.stringify(args), "cl100k_base")),
+          });
           return {
             content: [
               {
                 type: "text",
-                text: `Splice failed for symbol '${displaySym}' in ${rawTargetFile}`,
+                text: failMsg,
               },
             ],
             isError: true,
@@ -1766,6 +1801,22 @@ export class AiceMcpServer {
             newAiceCode ??
             bodyCode ??
             (batchEdits ? batchEdits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+          const realisticNativePayload = deleteFlag
+            ? JSON.stringify({
+                path: filePath,
+                old_string: result.originalSnippet ?? "",
+                new_string: "",
+              })
+            : result.originalSnippet
+              ? JSON.stringify({
+                  path: filePath,
+                  old_string: result.originalSnippet,
+                  new_string: result.newSnippet ?? snippetUsed,
+                })
+              : JSON.stringify({
+                  path: filePath,
+                  content: result.modifiedCode || snippetUsed,
+                });
           recordTelemetryEvent({
             targetPath: filePath,
             projectRoot,
@@ -1773,6 +1824,7 @@ export class AiceMcpServer {
             surface: "mcp",
             idiomsUsed: Boolean(effectiveIdioms && snippetUsed.includes("$")),
             nativeText: result.modifiedCode,
+            realisticNativeText: realisticNativePayload,
             aiceText: `${snippetUsed}\n${respText}`,
           });
         }
@@ -2060,21 +2112,44 @@ export class AiceMcpServer {
             );
             const totalSaved = batchRes.results.reduce((acc, r) => acc + (r.tokensSaved ?? 0), 0);
             const msg = `✔ Batch spliced ${batchRes.results.length} item(s) across ${batchRes.modifiedFiles.length} file(s) (${totalSaved} tokens saved)`;
-            for (let idx = 0; idx < batchRes.results.length; idx++) {
-              const res = batchRes.results[idx]!;
-              const item = safeBatchItems[idx]!;
-              const itemSnippet =
-                item.code ??
-                (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
-              recordTelemetryEvent({
-                targetPath: item.filePath,
-                projectRoot,
-                operation: "splice",
-                surface: "mcp",
-                idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
-                nativeText: res.modifiedCode,
-                aiceText: itemSnippet ? `${itemSnippet}\n${msg}` : msg,
-              });
+            if (!dryRun) {
+              const batchTs = new Date().toISOString();
+              for (let idx = 0; idx < batchRes.results.length; idx++) {
+                const res = batchRes.results[idx]!;
+                const item = safeBatchItems[idx]!;
+                const itemSnippet =
+                  item.code ??
+                  (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
+                const realisticNativePayload = item.delete
+                  ? JSON.stringify({
+                      path: item.filePath,
+                      old_string: res.originalSnippet ?? "",
+                      new_string: "",
+                    })
+                  : res.originalSnippet
+                    ? JSON.stringify({
+                        path: item.filePath,
+                        old_string: res.originalSnippet,
+                        new_string: res.newSnippet ?? itemSnippet,
+                      })
+                    : JSON.stringify({
+                        path: item.filePath,
+                        content: res.modifiedCode || itemSnippet,
+                      });
+                const aiceTextForItem =
+                  idx === 0 ? (itemSnippet ? `${itemSnippet}\n${msg}` : msg) : itemSnippet;
+                recordTelemetryEvent({
+                  targetPath: item.filePath,
+                  projectRoot,
+                  timestamp: batchTs,
+                  operation: "splice",
+                  surface: "mcp",
+                  idiomsUsed: Boolean(effectiveIdioms && itemSnippet.includes("$")),
+                  nativeText: res.modifiedCode,
+                  realisticNativeText: realisticNativePayload,
+                  aiceText: aiceTextForItem,
+                });
+              }
             }
             return {
               content: [

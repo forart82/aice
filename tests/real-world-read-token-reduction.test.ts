@@ -895,4 +895,78 @@ describe("Real-World Read/Search/Find BPE Token Reduction & R1-R5 Regression Sui
       }
     }
   });
+
+  it("9. preserves compact-header pagination hints mid-slice without comment hijacking (#64.3) and surfaces non-empty depth-2 subdirs while skipping dotfiles (#65.1)", async () => {
+    // Dotfiles in root & .github should be skipped by default in both find -d 2 and fd baseline (#65.1)
+    fs.mkdirSync(path.join(tmpDir, ".github", "workflows"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, ".github", "workflows", "ci.yml"), "name: CI\n", "utf-8");
+    fs.writeFileSync(
+      path.join(tmpDir, ".dependency-cruiser.cjs"),
+      "module.exports = {};\n",
+      "utf-8",
+    );
+
+    const findD2 = await aiceRead(".", {
+      projectRoot: tmpDir,
+      filesOnly: true,
+      maxDepth: 2,
+      surface: "cli",
+    });
+    expect(findD2.output).not.toContain(".dependency-cruiser.cjs");
+    expect(findD2.output).not.toContain(".github");
+    // Non-empty deep subdirectories at depth 2 are surfaced instead of hiding src/ and android/
+    expect(findD2.output).toContain("src/:");
+    expect(findD2.output).toContain("config/");
+    expect(findD2.output).toContain("engine/");
+    expect(findD2.output).toContain("android/app/");
+    expect(findD2.output).not.toContain("empty_dir");
+
+    const fdBase = computeHonestReadBaselineText({
+      relPath: ".",
+      projectRoot: tmpDir,
+      mode: "files",
+      maxDepth: 2,
+      includeToolWrapper: false,
+    });
+    expect(fdBase).not.toContain(".github");
+    expect(fdBase).not.toContain(".dependency-cruiser.cjs");
+    expect(cl100k(findD2.output)).toBeLessThan(cl100k(fdBase));
+
+    // #64.3: Multi-slice read with column-0 comments (`// Exports`, `// TODO:`) truncated inside slice 1
+    const trickyLines: string[] = [];
+    for (let i = 1; i <= 360; i++) {
+      if (i % 15 === 0) {
+        trickyLines.push("// Exports");
+      } else {
+        trickyLines.push(
+          `export function processOrderBatchSegment_${i}(amount: number): number { return amount * ${i} + 42; }`,
+        );
+      }
+    }
+    fs.writeFileSync(
+      path.join(tmpDir, "src", "engine", "tricky_pagination.ts"),
+      `${trickyLines.join("\n")}\n`,
+      "utf-8",
+    );
+
+    const cappedMultiSlice = await aiceRead(
+      ["src/engine/tricky_pagination.ts:L50-L240", "src/engine/tricky_pagination.ts:L300-L350"],
+      {
+        projectRoot: tmpDir,
+        maxBytes: 3200,
+        surface: "cli",
+      },
+    );
+    expect(cappedMultiSlice.output).not.toContain("aice read //");
+    expect(cappedMultiSlice.output).not.toContain("aice read Exports");
+    const hintMatch = cappedMultiSlice.output.match(
+      /next:\s+aice read src\/engine\/tricky_pagination\.ts:L(\d+)-L(\d+)/,
+    );
+    expect(hintMatch).not.toBeNull();
+    const nextStart = Number.parseInt(hintMatch![1]!, 10);
+    const nextEnd = Number.parseInt(hintMatch![2]!, 10);
+    expect(nextStart).toBeGreaterThan(50);
+    expect(nextStart).toBeLessThanOrEqual(240);
+    expect(nextEnd).toBeLessThanOrEqual(240);
+  });
 });

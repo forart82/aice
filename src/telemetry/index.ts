@@ -1866,12 +1866,33 @@ export function computeProjectSystemicEconomics(
 
   const lastReadTsByFile = new Map<string, number>();
   let lastWriteTs = -Infinity;
+  let prevWrapperTs = -Infinity;
+  let prevWrapperSurface: TelemetrySurface | null = null;
+  let prevWrapperWasWrite = false;
   const mcpTimestamps: number[] = [];
 
   for (const ev of sorted) {
-    wrapperTaxCl100k += ev.surface === "mcp" ? 45 : 70;
+    const evTs = Date.parse(ev.timestamp) || 0;
+    const evIsWrite =
+      ev.filePath !== "<cli-error>" &&
+      (ev.operation === "splice" ||
+        ev.operation === "create" ||
+        ev.operation === "patch" ||
+        ev.category === "write");
+    const isSameBatchWriteTurn =
+      evIsWrite &&
+      prevWrapperWasWrite &&
+      prevWrapperSurface === ev.surface &&
+      evTs - prevWrapperTs >= 0 &&
+      evTs - prevWrapperTs < 50;
+    if (!isSameBatchWriteTurn) {
+      wrapperTaxCl100k += ev.surface === "mcp" ? 45 : 70;
+    }
+    prevWrapperTs = evTs;
+    prevWrapperSurface = ev.surface;
+    prevWrapperWasWrite = evIsWrite;
     if (ev.surface === "mcp") {
-      mcpTimestamps.push(Date.parse(ev.timestamp) || 0);
+      mcpTimestamps.push(evTs);
     }
 
     const isCliErr = ev.filePath === "<cli-error>";

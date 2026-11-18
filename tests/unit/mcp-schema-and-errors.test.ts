@@ -17,8 +17,14 @@ import {
 } from "../../src/config/index.js";
 import { AICE_MCP_TOOLS, AiceMcpServer, type McpToolCallResult } from "../../src/mcp/server.js";
 import { MANDATORY_AGENT_RULES_MARKDOWN } from "../../src/rules/mandatory-rules.js";
-import { loadTelemetryErrors, readTelemetryEvents } from "../../src/telemetry/index.js";
+import {
+  computeProjectSystemicEconomics,
+  loadTelemetryErrors,
+  readTelemetryEvents,
+} from "../../src/telemetry/index.js";
 import { TiktokenTokenizer } from "../../src/tokenomics/index.js";
+import { createFile } from "../../src/tools/create.js";
+import { spliceBatch } from "../../src/tools/splice.js";
 import { AICE_VERSION } from "../../src/version.js";
 
 const CLI_PATH = path.resolve(process.cwd(), "bin/aice.ts");
@@ -494,6 +500,152 @@ describe("v0.9.51 CLI, MCP, Mandatory Rules, Config & install.sh Fixes (C1–C7)
       // Wasted stdin tokens must be reflected in the failed --stdin telemetry event (#2)
       const wastedStdinEvent = events[1]!;
       expect(wastedStdinEvent.aiceCl100k).toBeGreaterThan(200);
+    });
+  });
+
+  describe("5. Post-Merge Audit & Real-Case Regressions (#64 & #65)", () => {
+    it("supports aice find -d 1 & -d 2 from subdirectories and compact aice outline headers (#64.1, #64.5)", () => {
+      setProjectAiceEnabled(tmpDir, true);
+      fs.mkdirSync(path.join(tmpDir, "src", "nested", "deep"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "mid.ts"),
+        "export function alpha(): number { return 1; }\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "nested", "sub.ts"),
+        "export const SUB = 2;\n",
+        "utf-8",
+      );
+      fs.writeFileSync(
+        path.join(tmpDir, "src", "nested", "deep", "leaf.ts"),
+        "export const LEAF = 3;\n",
+        "utf-8",
+      );
+
+      const srcCwd = path.join(tmpDir, "src");
+      const subFindD1 = runCli(["find", "-d", "1"], srcCwd);
+      expect(subFindD1.status).toBe(0);
+      expect(subFindD1.stdout).toContain("mid.ts");
+      expect(subFindD1.stdout).toContain("nested/");
+      expect(subFindD1.stdout).not.toContain("leaf.ts");
+
+      const subFindD2 = runCli(["find", "-d", "2"], srcCwd);
+      expect(subFindD2.status).toBe(0);
+      expect(subFindD2.stdout).toContain("mid.ts");
+      expect(subFindD2.stdout).toContain("nested/sub.ts");
+      expect(subFindD2.stdout).toContain("nested/deep/");
+      expect(subFindD2.stdout).not.toContain("leaf.ts");
+
+      const outlineRes = runCli(["outline", "src"], tmpDir);
+      expect(outlineRes.status).toBe(0);
+      expect(outlineRes.stdout).not.toContain("// ===");
+      expect(outlineRes.stdout).toContain("// ");
+    });
+
+    it("records surgical realisticNativeCl100k & error wastedInputTokens on MCP splice, un-clamped negative create, and 1x wrapper tax on spliceBatch (#64.2, #64.4, #65.2)", async () => {
+      const projDir = path.join(tmpDir, "honest-mcp-proj");
+      fs.mkdirSync(path.join(projDir, "src"), { recursive: true });
+      setProjectAiceEnabled(projDir, true);
+      const ledgerPath = path.join(tmpDir, "mcp-honest-gains.jsonl");
+      const prevLedger = process.env.AICE_TELEMETRY_PATH;
+      process.env.AICE_TELEMETRY_PATH = ledgerPath;
+
+      try {
+        // Large 120-line file so surgical edit_file baseline << full-file nativeCl100k
+        const bigLines = Array.from(
+          { length: 120 },
+          (_, i) => `export function fn_${i}(): number { return ${i}; }`,
+        );
+        const targetFp = path.join(projDir, "src", "service.ts");
+        fs.writeFileSync(targetFp, `${bigLines.join("\n")}\n`, "utf-8");
+        const secondFp = path.join(projDir, "src", "helper.ts");
+        fs.writeFileSync(secondFp, `${bigLines.join("\n")}\n`, "utf-8");
+
+        const server = new AiceMcpServer({ workspaceRoot: projDir });
+
+        // 1) Single-file MCP aice_splice surgical edit
+        const mcpEdit = (await server.handleRequest({
+          jsonrpc: "2.0",
+          id: "m1",
+          method: "tools/call",
+          params: {
+            name: "aice_splice",
+            arguments: {
+              filePath: "src/service.ts",
+              symbol: "fn_0",
+              code: "export function fn_0(): number { return 999; }",
+            },
+          },
+        })) as { result: McpToolCallResult };
+        expect(mcpEdit.result.isError).toBeFalsy();
+
+        // 2) MCP error records wastedInputTokens > 0
+        const mcpErr = (await server.handleRequest({
+          jsonrpc: "2.0",
+          id: "m2",
+          method: "tools/call",
+          params: {
+            name: "aice_splice",
+            arguments: {
+              filePath: "src/service.ts",
+              symbol: "nonExistentSymbol_xyz",
+              code: "export function nonExistentSymbol_xyz() { return 0; }",
+            },
+          },
+        })) as { result: McpToolCallResult };
+        expect(mcpErr.result.isError).toBe(true);
+
+        const mcpEvs = readTelemetryEvents(ledgerPath);
+        expect(mcpEvs.length).toBe(1);
+        expect(mcpEvs[0]?.realisticNativeCl100k).toBeDefined();
+        expect(mcpEvs[0]!.realisticNativeCl100k!).toBeLessThan(mcpEvs[0]!.nativeCl100k / 4);
+
+        const mcpErrors = loadTelemetryErrors(projDir, ledgerPath);
+        expect(mcpErrors.length).toBe(1);
+        expect(mcpErrors[0]?.wastedInputTokens).toBeGreaterThan(10);
+
+        // 3) Negative-delta createFile must NOT clamp savedCl100k to >= 0 (#64.4)
+        const negLedger = path.join(tmpDir, "neg-create-gains.jsonl");
+        process.env.AICE_TELEMETRY_PATH = negLedger;
+        const negTarget = path.join(projDir, "src", "tiny.ts");
+        const negRes = await createFile(negTarget, {
+          code: [
+            "@idiom $unusedHelperOne(a, b) => a + b + 12345",
+            "@idiom $unusedHelperTwo(c, d) => c * d * 67890",
+            "export const X = 1;",
+          ].join("\n"),
+          projectRoot: projDir,
+        });
+        expect(negRes.savedCl100k).toBeLessThan(0);
+        const negEvs = readTelemetryEvents(negLedger);
+        expect(negEvs.length).toBe(1);
+        expect(negEvs[0]!.aiceCl100k).toBeGreaterThan(negEvs[0]!.nativeCl100k);
+        expect(negEvs[0]!.savedCl100k).toBeLessThan(0);
+
+        // 4) Multi-file spliceBatch attaches batch summary once & charges 1x 70 wrapper tax (#65.2)
+        const batchLedger = path.join(tmpDir, "batch-splice-gains.jsonl");
+        process.env.AICE_TELEMETRY_PATH = batchLedger;
+        const batchStream = [
+          `=== ${targetFp}:fn_1 ===`,
+          "export function fn_1(): number { return 101; }",
+          `=== ${secondFp}:fn_2 ===`,
+          "export function fn_2(): number { return 202; }",
+        ].join("\n");
+        await spliceBatch(batchStream, { projectRoot: projDir, surface: "cli" });
+        const batchEvs = readTelemetryEvents(batchLedger);
+        expect(batchEvs.length).toBe(2);
+        // Item 2 does not carry duplicate 19-token batch summary bloat
+        expect(batchEvs[1]!.aiceCl100k).toBeLessThan(batchEvs[0]!.aiceCl100k);
+        const econ = computeProjectSystemicEconomics(batchEvs, []);
+        expect(econ.wrapperTaxCl100k).toBe(70);
+      } finally {
+        if (prevLedger === undefined) {
+          delete process.env.AICE_TELEMETRY_PATH;
+        } else {
+          process.env.AICE_TELEMETRY_PATH = prevLedger;
+        }
+      }
     });
   });
 });

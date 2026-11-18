@@ -1582,18 +1582,28 @@ export async function createFile(
         })));
   const normalizedAiceInput = rawPayload.replace(/:\s*:?\s*(?=[#$?_*[])/g, ":");
   const nativeTokens = estimateTokens(nativeCode, "cl100k_base");
+  const actualAiceCl100k = estimateTokens(rawPayload, "cl100k_base");
   const rawAiceTokens = estimateTokens(normalizedAiceInput, "cl100k_base");
   const charEquivSaved =
     nativeCode !== rawPayload && nativeCode.length > normalizedAiceInput.length
       ? Math.floor((nativeCode.length - normalizedAiceInput.length) / 4)
       : 0;
-  const tokensSaved = Math.max(nativeTokens - rawAiceTokens, charEquivSaved);
+  const tokensSaved =
+    charEquivSaved > 0
+      ? Math.max(nativeTokens - rawAiceTokens, charEquivSaved)
+      : nativeTokens - rawAiceTokens;
   const aiceTokens = Math.max(1, nativeTokens - tokensSaved);
+  const savedCl100k = nativeTokens - actualAiceCl100k;
 
   const nativeO200kTokens = estimateTokens(nativeCode, "o200k_base");
+  const actualAiceO200k = estimateTokens(rawPayload, "o200k_base");
   const rawAiceO200kTokens = estimateTokens(normalizedAiceInput, "o200k_base");
-  const o200kTokensSaved = Math.max(nativeO200kTokens - rawAiceO200kTokens, charEquivSaved);
+  const o200kTokensSaved =
+    charEquivSaved > 0
+      ? Math.max(nativeO200kTokens - rawAiceO200kTokens, charEquivSaved)
+      : nativeO200kTokens - rawAiceO200kTokens;
   const aiceO200kTokens = Math.max(1, nativeO200kTokens - o200kTokensSaved);
+  const savedO200k = nativeO200kTokens - actualAiceO200k;
 
   if (!dryRun && !options.suppressTelemetry) {
     const realisticWriteFilePayload = JSON.stringify({ path: fullPath, content: nativeCode });
@@ -1607,9 +1617,9 @@ export async function createFile(
       realisticNativeText: realisticWriteFilePayload,
       aiceText: rawPayload,
       nativeCl100k: nativeTokens,
-      aiceCl100k: aiceTokens,
+      aiceCl100k: actualAiceCl100k,
       nativeO200k: nativeO200kTokens,
-      aiceO200k: aiceO200kTokens,
+      aiceO200k: actualAiceO200k,
     });
   }
 
@@ -1629,14 +1639,14 @@ export async function createFile(
     aiceTokens,
     tokensSaved,
     nativeCl100k: nativeTokens,
-    aiceCl100k: aiceTokens,
-    savedCl100k: tokensSaved,
+    aiceCl100k: actualAiceCl100k,
+    savedCl100k,
     nativeO200kTokens,
     aiceO200kTokens,
     o200kTokensSaved,
     nativeO200k: nativeO200kTokens,
-    aiceO200k: aiceO200kTokens,
-    savedO200k: o200kTokensSaved,
+    aiceO200k: actualAiceO200k,
+    savedO200k,
     dryRun,
   };
 }
@@ -2083,6 +2093,7 @@ export async function createBatch(
     throw err;
   }
 
+  const batchCreateTs = new Date().toISOString();
   for (const ev of pendingTelemetry) {
     const realisticWriteFilePayload = JSON.stringify({
       path: ev.targetPath,
@@ -2091,6 +2102,7 @@ export async function createBatch(
     recordTelemetryEvent({
       targetPath: ev.targetPath,
       projectRoot: ev.projectRoot,
+      timestamp: batchCreateTs,
       operation: "create",
       surface: ev.surface,
       idiomsUsed: ev.idiomsUsed,

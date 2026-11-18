@@ -10930,7 +10930,6 @@ export async function spliceBatch(
           resolvedCode ??
           item.body ??
           (item.edits ? item.edits.map((e) => e.code ?? e.body ?? "").join("\n") : "");
-        const responseMsg = `✔ Spliced symbol '${res.symbol ?? item.symbol ?? ""}' in ${rawFp} (${res.tokensSaved ?? 0} tokens saved)`;
         const realisticNativePayload = item.delete
           ? JSON.stringify({
               path: fullPath,
@@ -10943,7 +10942,10 @@ export async function spliceBatch(
                 old_string: res.originalSnippet,
                 new_string: res.newSnippet ?? snippetInput,
               })
-            : JSON.stringify({ path: fullPath, old_string: "", new_string: snippetInput });
+            : JSON.stringify({
+                path: fullPath,
+                content: res.modifiedCode || snippetInput,
+              });
         pendingTelemetry.push({
           targetPath: fullPath,
           projectRoot: rootForItem,
@@ -10953,7 +10955,7 @@ export async function spliceBatch(
           nativeText: res.modifiedCode,
           realisticNativeText: realisticNativePayload,
           preservedTriviaTokens: res.preservedTriviaTokens ?? 0,
-          aiceText: snippetInput ? `${snippetInput}\n${responseMsg}` : responseMsg,
+          aiceText: snippetInput,
         });
       }
       const itemSaved = res.tokensSaved ?? 0;
@@ -11019,13 +11021,24 @@ export async function spliceBatch(
     throw err;
   }
 
-  if (!options.dryRun) {
-    for (const ev of pendingTelemetry) {
-      recordTelemetryEvent(ev);
+  const modifiedFiles = Array.from(modifiedSet);
+  if (!options.dryRun && pendingTelemetry.length > 0) {
+    const batchTs = new Date().toISOString();
+    const batchSummaryLine = `✔ Batch spliced ${results.length} item(s) across ${modifiedFiles.length} file(s) (${totalTokensSaved} tokens saved)`;
+    for (let idx = 0; idx < pendingTelemetry.length; idx++) {
+      const ev = pendingTelemetry[idx]!;
+      recordTelemetryEvent({
+        ...ev,
+        timestamp: batchTs,
+        aiceText:
+          idx === 0
+            ? ev.aiceText
+              ? `${ev.aiceText}\n${batchSummaryLine}`
+              : batchSummaryLine
+            : ev.aiceText,
+      });
     }
   }
-
-  const modifiedFiles = Array.from(modifiedSet);
   return {
     success: true,
     results,

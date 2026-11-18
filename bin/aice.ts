@@ -1543,7 +1543,7 @@ Examples:
               console.log(JSON.stringify(arr, null, 2));
             } else {
               for (const [relPath, res] of result.entries()) {
-                console.log(`\n// === ${relPath} ===\n`);
+                console.log(`// ${relPath}`);
                 console.log(res.text);
                 if (options.stats && res.stats) {
                   console.log(
@@ -1664,7 +1664,7 @@ Examples:
                   },
                 );
               } else {
-                console.log(`\n// === ${relPath} ===\n`);
+                console.log(`// ${relPath}`);
                 console.log(res.text);
                 if (options.stats && res.stats) {
                   console.log(
@@ -1702,7 +1702,7 @@ Examples:
                     },
                   );
                 } else {
-                  console.log(`\n// === ${relPath} ===\n`);
+                  console.log(`// ${relPath}`);
                   console.log(res.text);
                   if (options.stats && res.stats) {
                     console.log(
@@ -1726,7 +1726,7 @@ Examples:
                   },
                 );
               } else {
-                console.log(`\n// === ${item.raw ?? result.file} ===\n`);
+                console.log(`// ${item.raw ?? result.file}`);
                 console.log(result.text);
                 if (options.stats && result.stats) {
                   console.log(
@@ -2902,7 +2902,7 @@ program
     "Context radius (lines before and after each search match)",
     (val) => Number.parseInt(val, 10),
   )
-  .option("--files", "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB))")
+  .option("--files", "Fast zero-AST workspace file discovery (<relPath> (<lines>L))")
   .option(
     "--dsl",
     "Opt into AICE shorthand decompilation (default emits 1-based disk-numbered native source)",
@@ -3197,7 +3197,7 @@ program
   .command("find")
   .alias("tree")
   .description(
-    "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB)) routing into Unified Read Engine",
+    "Fast zero-AST workspace file discovery (<relPath> (<lines>L)) routing into Unified Read Engine",
   )
   .argument("[pattern]", "Optional glob/substring file filter or target directory/file path")
   .argument("[targets...]", "Optional directory or file path(s) to scan (default: '.')")
@@ -3258,37 +3258,6 @@ program
           effectiveSearch = branches[0];
         }
       }
-      const filterOutputByDepth = (rawOut: string): string => {
-        if (parsedDepth === undefined || options.json) return rawOut;
-        const projRoot = findProjectRoot(process.cwd());
-        const scanBases = effectiveTargets
-          .map((t) => path.resolve(process.cwd(), t))
-          .filter((abs) => {
-            try {
-              return fs.existsSync(abs) && fs.statSync(abs).isDirectory();
-            } catch {
-              return false;
-            }
-          });
-        const baseDirs = scanBases.length > 0 ? scanBases : [projRoot];
-        return rawOut
-          .split("\n")
-          .filter((line) => {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("#")) return true;
-            const relMatch = trimmed.match(/^([^\s(]+)(?:\s+\(|$)/);
-            if (!relMatch?.[1]) return true;
-            const itemAbs = path.resolve(projRoot, relMatch[1]);
-            return baseDirs.some((bd) => {
-              const rel = path.relative(bd, itemAbs).replace(/\\/g, "/");
-              if (!rel || rel.startsWith("..")) return false;
-              const segCount = rel.split("/").filter(Boolean).length;
-              return segCount <= parsedDepth;
-            });
-          })
-          .join("\n");
-      };
-
       try {
         const shellInv = detectCliShellInvocation();
         const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
@@ -3323,9 +3292,8 @@ program
             json: !!options.json,
             surface: "cli",
           });
-          const finalOut = filterOutputByDepth(res.output);
-          console.log(finalOut);
-          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(finalOut, "utf-8") + 1);
+          console.log(res.output);
+          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
         } else {
           const res = await aiceRead(effectiveTargets, {
             filesOnly: true,
@@ -3338,7 +3306,7 @@ program
             json: !!options.json,
             surface: "cli",
           });
-          console.log(filterOutputByDepth(res.output));
+          console.log(res.output);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -4569,7 +4537,7 @@ AICE STRICT 2-TOOL AI ENGINE WORKFLOW (aice read + aice splice)
 ================================================================================
 
 Pillar 1 — Unified Read (aice read | alias: context, MCP: aice_read)
-  • Auto-outline directories & >250-line files (85-90% token reduction):
+  • Auto-outline directories & >120-line files (85-90% token reduction):
       aice read src tests
       aice read bin/aice.ts
   • Multi-file AST symbol slicing, line ranges & 4-tier /pattern/ search in 1 turn:

@@ -485,6 +485,7 @@ function collectRealisticFdEntries(
 ): string[] {
   const results: string[] = [];
   const patLower = filePattern?.toLowerCase().replace(/^\*+/, "");
+  const allowDot = Boolean(filePattern && /(?:^|[/\\,{])\./.test(filePattern));
   const walk = (dirAbs: string, depth: number): void => {
     if (maxDepth !== undefined && depth > maxDepth) return;
     let ents: fs.Dirent[];
@@ -495,6 +496,7 @@ function collectRealisticFdEntries(
     }
     for (const ent of ents) {
       if (ent.name === ".git" || ent.name === "node_modules") continue;
+      if (!allowDot && ent.name.startsWith(".")) continue;
       const childAbs = path.join(dirAbs, ent.name);
       const rel = path.relative(rootDir, childAbs).replace(/\\/g, "/");
       if (ent.isDirectory()) {

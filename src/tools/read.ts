@@ -187,7 +187,7 @@ export interface ReadOptions {
    */
   outlineTarget?: boolean;
   /**
-   * Bypass >250-line bare-file auto-outline and emit full context pack.
+   * Bypass >120-line bare-file auto-outline and emit full context pack.
    */
   full?: boolean;
   /**
@@ -1633,6 +1633,68 @@ function buildNextSliceHintCommand(
   return `aice read ${safePath}:L${sLine}-L${eLine}`;
 }
 
+function isLikelyCompactHeaderPath(candPath: string, fallbackFilePath?: string): boolean {
+  if (!candPath) return false;
+  if (candPath.includes("/") || candPath.includes("\\") || candPath.includes(".")) {
+    return true;
+  }
+  const base = path.posix.basename(candPath);
+  if (EXTENDED_READ_FILENAMES.has(base) || PASSTHROUGH_FILENAMES.has(base)) {
+    return true;
+  }
+  return Boolean(fallbackFilePath && candPath === fallbackFilePath);
+}
+
+function matchValidSectionHeaderLine(
+  lines: string[],
+  idx: number,
+  fallbackFilePath?: string,
+): { filePath: string; selector?: string; rangeStart?: number; rangeEnd?: number } | null {
+  const ln = lines[idx];
+  if (!ln) return null;
+  const legacyHdr = ln.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/);
+  if (legacyHdr?.[1]) {
+    const parsedHdr = splitPathAndSelector(legacyHdr[1].trim());
+    const parsedRange = parseSelectorLineRange(parsedHdr.selector);
+    return {
+      filePath: parsedHdr.filePath || ".",
+      selector: parsedHdr.selector,
+      rangeStart: parsedRange?.startLine,
+      rangeEnd: parsedRange?.endLine,
+    };
+  }
+  if (idx > 0 && lines[idx - 1] !== "") {
+    return null;
+  }
+  const compactHdr = ln.match(
+    /^\/\/ (?!\[|\.\.\.|Auto-outlined|Pagination|Hint:|0 matches|not found:|missing:|siblings:)([^\s:]+)(?::([^\s]+))?$/,
+  );
+  if (!compactHdr?.[1]) {
+    return null;
+  }
+  const candPath = compactHdr[1].trim();
+  if (!isLikelyCompactHeaderPath(candPath, fallbackFilePath)) {
+    return null;
+  }
+  const rawSel = compactHdr[2]?.trim();
+  const rangeMatch = rawSel?.match(/^L?(\d+)(?:-L?(\d+))?$/i);
+  if (rangeMatch?.[1]) {
+    const rStart = Number.parseInt(rangeMatch[1], 10);
+    const rEnd = rangeMatch[2] ? Number.parseInt(rangeMatch[2], 10) : undefined;
+    const normRangeSel = rEnd !== undefined ? `L${rStart}-L${rEnd}` : `L${rStart}`;
+    return {
+      filePath: candPath,
+      selector: normRangeSel,
+      rangeStart: rStart,
+      rangeEnd: rEnd,
+    };
+  }
+  return {
+    filePath: candPath,
+    selector: rawSel,
+  };
+}
+
 function inferNextWindowFromTruncatedSlice(
   emittedSlice: string,
   fallbackTargetPath: string,
@@ -1651,28 +1713,16 @@ function inferNextWindowFromTruncatedSlice(
   let activeSelector = parsedFallback.selector;
   let lastLineNum = 0;
 
-  for (const ln of lines) {
-    const legacyHdr = ln.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/);
-    if (legacyHdr?.[1]) {
-      const parsedHdr = splitPathAndSelector(legacyHdr[1].trim());
-      lastFilePath = parsedHdr.filePath || ".";
+  for (let idx = 0; idx < lines.length; idx++) {
+    const ln = lines[idx]!;
+    const secHdr = matchValidSectionHeaderLine(lines, idx, parsedFallback.filePath);
+    if (secHdr) {
+      lastFilePath = secHdr.filePath || ".";
       activeSelector =
-        parsedHdr.selector ??
+        secHdr.selector ??
         (lastFilePath === parsedFallback.filePath ? parsedFallback.selector : undefined);
-      lastLineNum = 0;
-      continue;
-    }
-    const compactHdr = ln.match(
-      /^\/\/ (?!\[|\.\.\.|Auto-outlined|Pagination|Hint:|0 matches|not found:|missing:|siblings:)([^\s:]+)(?::L?(\d+)(?:-L?(\d+))?)?$/,
-    );
-    if (compactHdr?.[1]) {
-      lastFilePath = compactHdr[1].trim() || ".";
-      if (compactHdr[2]) {
-        const sNum = Number.parseInt(compactHdr[2], 10);
-        lastLineNum = sNum > 0 ? sNum - 1 : 0;
-      } else {
-        lastLineNum = 0;
-      }
+      lastLineNum =
+        secHdr.rangeStart !== undefined && secHdr.rangeStart > 0 ? secHdr.rangeStart - 1 : 0;
       continue;
     }
     const mdTargetMatch = ln.match(/^### Target:\s+`?([^`\s[]+)`?/);
@@ -1803,24 +1853,15 @@ function enforceReadBudgetCeiling(params: {
   const targetKeepBytes = Math.max(512, maxBundleBytes - 260);
   const targetKeepTokens = Math.max(128, effectiveTokenCeiling - 90);
 
+  const initialFallbackTarget = fallbackTargetPath.split(/,\s+/)[0]?.trim() || ".";
+  const parsedCeilingFallback = splitPathAndSelector(initialFallbackTarget);
+
   const keptLines: string[] = [];
   let runningBytes = 0;
-  let nextOmittedFile: string | undefined;
   for (let i = 0; i < lines.length; i++) {
     const ln = lines[i]!;
     const lnBytes = Buffer.byteLength(ln, "utf-8") + (keptLines.length > 0 ? 1 : 0);
     if (runningBytes + lnBytes > targetKeepBytes) {
-      for (let j = i; j < lines.length; j++) {
-        const hdr =
-          lines[j]?.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/) ??
-          lines[j]?.match(
-            /^\/\/ (?!\[|\.\.\.|Auto-outlined|Pagination|Hint:|0 matches|not found:|missing:|siblings:)([^\s:]+)(?::[^\s]+)?$/,
-          );
-        if (hdr?.[1]) {
-          nextOmittedFile = hdr[1].trim();
-          break;
-        }
-      }
       break;
     }
     keptLines.push(ln);
@@ -1837,28 +1878,70 @@ function enforceReadBudgetCeiling(params: {
   const isCliBudget = budgetLabel.includes("CLI") || budgetLabel.includes("MCP");
 
   const buildFooterForKept = (candidateKept: string): string => {
+    const keptLineCount = candidateKept.length === 0 ? 0 : candidateKept.split("\n").length;
+    let firstDroppedIdx = keptLineCount;
+    while (firstDroppedIdx < lines.length && lines[firstDroppedIdx] === "") {
+      firstDroppedIdx++;
+    }
+    const boundaryOmittedHdr =
+      firstDroppedIdx < lines.length
+        ? matchValidSectionHeaderLine(lines, firstDroppedIdx, parsedCeilingFallback.filePath)
+        : null;
+    let hasAnyLaterSectionHdr = Boolean(boundaryOmittedHdr);
+    if (!hasAnyLaterSectionHdr) {
+      for (let k = firstDroppedIdx + 1; k < lines.length; k++) {
+        if (matchValidSectionHeaderLine(lines, k, parsedCeilingFallback.filePath)) {
+          hasAnyLaterSectionHdr = true;
+          break;
+        }
+      }
+    }
+
     if (
       (!extraHints || extraHints.length === 0) &&
-      !nextOmittedFile &&
+      !hasAnyLaterSectionHdr &&
       isTargetContentCompleteInContextPack(bundle, candidateKept)
     ) {
       const fullHint = isCliBudget ? "" : " (pass --full for all contracts)";
       return `\n// [${budgetLabel} stdout budget reached — target complete; contracts trimmed${fullHint}]`;
     }
-    const primaryHint =
-      extraHints && extraHints.length > 0
-        ? extraHints[0]!
-        : nextOmittedFile
-          ? buildNextSliceHintCommand(nextOmittedFile, 1, undefined, {
-              projectRoot,
-              sliceByteBudget,
-            })
-          : inferNextWindowFromTruncatedSlice(candidateKept, fallbackTargetPath, totalLines, {
-              diskPath,
-              rawSource,
-              projectRoot,
-              sliceByteBudget,
-            });
+
+    let primaryHint: string;
+    if (extraHints && extraHints.length > 0) {
+      primaryHint = extraHints[0]!;
+    } else if (boundaryOmittedHdr) {
+      if (boundaryOmittedHdr.rangeStart !== undefined) {
+        primaryHint = buildNextSliceHintCommand(
+          boundaryOmittedHdr.filePath,
+          boundaryOmittedHdr.rangeStart,
+          undefined,
+          {
+            projectRoot,
+            sliceByteBudget,
+            maxEndLine: boundaryOmittedHdr.rangeEnd,
+          },
+        );
+      } else if (boundaryOmittedHdr.selector) {
+        primaryHint = `aice read ${boundaryOmittedHdr.filePath}:${boundaryOmittedHdr.selector}`;
+      } else {
+        primaryHint = buildNextSliceHintCommand(boundaryOmittedHdr.filePath, 1, undefined, {
+          projectRoot,
+          sliceByteBudget,
+        });
+      }
+    } else {
+      primaryHint = inferNextWindowFromTruncatedSlice(
+        candidateKept,
+        fallbackTargetPath,
+        totalLines,
+        {
+          diskPath,
+          rawSource,
+          projectRoot,
+          sliceByteBudget,
+        },
+      );
+    }
     const fullHint = isCliBudget ? "" : " (or --full)";
     return `\n// [${budgetLabel} stdout budget reached — next: ${primaryHint}${fullHint}]`;
   };
@@ -2165,8 +2248,71 @@ function executeFilesOnlyRead(
   const explicitLockfileRequested = Boolean(
     primaryFilter && Array.from(LOCKFILE_SKIP_NAMES).some((lf) => primaryFilter.includes(lf)),
   );
+  const includeDotEntries =
+    Boolean(options.full) ||
+    Boolean(primaryFilter && /(?:^|[/\\,{])\./.test(primaryFilter)) ||
+    inferredFilters.some((f) => /(?:^|[/\\,{])\./.test(f));
+
+  const shouldSkipDiscoverDir = (
+    dirName: string,
+    childAbs: string,
+    rootInNodeModules: boolean,
+  ): boolean => {
+    if (dirName === ".git") return true;
+    if (dirName === "node_modules" && !explicitAllowedDirs.has("node_modules")) return true;
+    if (
+      DEFAULT_IGNORED_SCAN_DIRECTORIES.has(dirName) &&
+      !explicitAllowedDirs.has(dirName) &&
+      !(rootInNodeModules && (dirName === "dist" || dirName === "build" || dirName === "out"))
+    ) {
+      return true;
+    }
+    if (dirName.startsWith(".") && !includeDotEntries && !explicitAllowedDirs.has(dirName)) {
+      return true;
+    }
+    if (
+      configuredOutDir &&
+      path.resolve(childAbs) === configuredOutDir &&
+      !explicitAllowedDirs.has(dirName)
+    ) {
+      return true;
+    }
+    return false;
+  };
+
+  const directoryHasVisibleFiles = (dirAbs: string, rootInNodeModules: boolean): boolean => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const ent of entries) {
+      const childAbs = path.join(dirAbs, ent.name);
+      if (ent.isFile()) {
+        if (
+          ent.name === ".git" ||
+          ent.name.endsWith(".trivia.json") ||
+          ent.name === "aice.config.json"
+        ) {
+          continue;
+        }
+        if (ent.name.startsWith(".") && !includeDotEntries) continue;
+        if (!explicitLockfileRequested && LOCKFILE_SKIP_NAMES.has(ent.name)) continue;
+        const ext = path.extname(ent.name).toLowerCase();
+        if (BINARY_DISCOVERY_EXTENSIONS.has(ext) || BINARY_SKIP_EXTENSIONS.has(ext)) continue;
+        return true;
+      }
+      if (ent.isDirectory()) {
+        if (shouldSkipDiscoverDir(ent.name, childAbs, rootInNodeModules)) continue;
+        if (directoryHasVisibleFiles(childAbs, rootInNodeModules)) return true;
+      }
+    }
+    return false;
+  };
 
   const candidateFiles = new Map<string, string>(); // relPosix -> absPath
+  const boundaryDirs = new Set<string>(); // non-empty dirs at effectiveMaxDepth
   const collectFromDir = (
     dirAbs: string,
     currentDepth: number,
@@ -2181,33 +2327,22 @@ function executeFilesOnlyRead(
     for (const ent of entries) {
       const childAbs = path.join(dirAbs, ent.name);
       if (ent.isDirectory()) {
+        if (shouldSkipDiscoverDir(ent.name, childAbs, rootInNodeModules)) {
+          continue;
+        }
         if (effectiveMaxDepth !== undefined && currentDepth >= effectiveMaxDepth) {
-          continue;
-        }
-        if (ent.name === ".git") continue;
-        if (ent.name === "node_modules" && !explicitAllowedDirs.has("node_modules")) continue;
-        if (
-          DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) &&
-          !explicitAllowedDirs.has(ent.name) &&
-          !(
-            rootInNodeModules &&
-            (ent.name === "dist" || ent.name === "build" || ent.name === "out")
-          )
-        ) {
-          continue;
-        }
-        if (
-          ent.name.startsWith(".") &&
-          ent.name !== ".github" &&
-          !explicitAllowedDirs.has(ent.name)
-        ) {
-          continue;
-        }
-        if (
-          configuredOutDir &&
-          path.resolve(childAbs) === configuredOutDir &&
-          !explicitAllowedDirs.has(ent.name)
-        ) {
+          const relDirPosix = formatReadDisplayPath(childAbs, projectRoot);
+          if (
+            relDirPosix &&
+            relDirPosix !== "." &&
+            (activeMatchers.length === 0 ||
+              activeMatchers.every(
+                (matchFn) => matchFn(relDirPosix) || matchFn(`${relDirPosix}/`),
+              )) &&
+            directoryHasVisibleFiles(childAbs, rootInNodeModules)
+          ) {
+            boundaryDirs.add(relDirPosix);
+          }
           continue;
         }
         collectFromDir(childAbs, currentDepth + 1, rootInNodeModules);
@@ -2219,6 +2354,7 @@ function executeFilesOnlyRead(
         ) {
           continue;
         }
+        if (ent.name.startsWith(".") && !includeDotEntries) continue;
         if (!explicitLockfileRequested && LOCKFILE_SKIP_NAMES.has(ent.name)) continue;
         const ext = path.extname(ent.name).toLowerCase();
         if (BINARY_DISCOVERY_EXTENSIONS.has(ext) || BINARY_SKIP_EXTENSIONS.has(ext)) continue;
@@ -2272,10 +2408,17 @@ function executeFilesOnlyRead(
     });
   }
 
+  const formatFileEntry = (label: string, lines: number): string =>
+    effectiveMaxDepth !== undefined && lines <= 120 ? label : `${label} (${lines}L)`;
+
+  const activeBoundaryDirs = Array.from(boundaryDirs)
+    .filter((bd) => !discovered.some((d) => d.path.startsWith(`${bd}/`)))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
   const formattedLines: string[] = [];
-  if (discovered.length <= 3) {
+  if (discovered.length <= 3 && activeBoundaryDirs.length === 0) {
     for (const d of discovered) {
-      formattedLines.push(`${d.path} (${d.lines}L)`);
+      formattedLines.push(formatFileEntry(d.path, d.lines));
     }
   } else {
     const byDir = new Map<string, DiscoveredWorkspaceFile[]>();
@@ -2289,25 +2432,49 @@ function executeFilesOnlyRead(
       }
       bucket.push(d);
     }
-    for (const [dirKey, items] of byDir) {
+    const subdirsByParent = new Map<string, string[]>();
+    for (const bd of activeBoundaryDirs) {
+      const slashIdx = bd.lastIndexOf("/");
+      const parentKey = slashIdx >= 0 ? bd.slice(0, slashIdx) : ".";
+      const childName = slashIdx >= 0 ? bd.slice(slashIdx + 1) : bd;
+      let list = subdirsByParent.get(parentKey);
+      if (!list) {
+        list = [];
+        subdirsByParent.set(parentKey, list);
+      }
+      list.push(`${childName}/`);
+    }
+    const allDirKeys = Array.from(new Set([...byDir.keys(), ...subdirsByParent.keys()])).sort(
+      (a, b) => {
+        if (a === "." && b !== ".") return -1;
+        if (b === "." && a !== ".") return 1;
+        return a < b ? -1 : a > b ? 1 : 0;
+      },
+    );
+    for (const dirKey of allDirKeys) {
+      const items = byDir.get(dirKey) ?? [];
+      const subdirs = subdirsByParent.get(dirKey) ?? [];
       if (dirKey === ".") {
-        if (items.length >= 2) {
-          formattedLines.push(items.map((it) => `${it.path} (${it.lines}L)`).join(", "));
-        } else {
-          for (const it of items) {
-            formattedLines.push(`${it.path} (${it.lines}L)`);
-          }
+        const rootEntries = [...items.map((it) => formatFileEntry(it.path, it.lines)), ...subdirs];
+        if (rootEntries.length >= 2) {
+          formattedLines.push(rootEntries.join(", "));
+        } else if (rootEntries.length === 1) {
+          formattedLines.push(rootEntries[0]!);
         }
-      } else if (items.length === 1) {
-        formattedLines.push(`${items[0]!.path} (${items[0]!.lines}L)`);
       } else {
-        const joined = items
-          .map((it) => {
-            const base = it.path.slice(dirKey.length + 1);
-            return `${base} (${it.lines}L)`;
-          })
-          .join(", ");
-        formattedLines.push(`${dirKey}/: ${joined}`);
+        if (items.length === 1) {
+          formattedLines.push(formatFileEntry(items[0]!.path, items[0]!.lines));
+        } else if (items.length > 1) {
+          const joined = items
+            .map((it) => formatFileEntry(it.path.slice(dirKey.length + 1), it.lines))
+            .join(", ");
+          formattedLines.push(`${dirKey}/: ${joined}`);
+        }
+        if (subdirs.length === 1) {
+          formattedLines.push(`${dirKey}/${subdirs[0]!}`);
+        } else if (subdirs.length > 1) {
+          formattedLines.push(`${dirKey}/: ${subdirs.join(", ")}`);
+        }
       }
     }
   }
@@ -3462,7 +3629,7 @@ export async function aiceRead(
   const contextItems = classified.filter((c) => c.route === "context" || c.route === "search");
   const primaryProjectRoot = classified[0]?.resolved.projectRoot ?? baseDir;
 
-  // 3A. Pure Outline Stream (single file, auto-outlined >250-line file, single dir, or multi-dir/multi-file)
+  // 3A. Pure Outline Stream (single file, auto-outlined >120-line file, single dir, or multi-dir/multi-file)
   if (contextItems.length === 0) {
     const firstItem = outlineItems[0];
     if (outlineItems.length === 1 && firstItem && !firstItem.isDir) {
